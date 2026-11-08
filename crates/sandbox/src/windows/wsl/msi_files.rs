@@ -14,7 +14,8 @@
 //! `CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_MICROSOFT_ROOT)` with the application-root
 //! flag ([`policy_para`]): it ends in one of Microsoft's own roots, Root 2011 included, which a
 //! root an administrator (or anyone) added can't stand in for; and its leaf certificate must
-//! list the code-signing EKU (`szOID_PKIX_KP_CODE_SIGNING`).
+//! list the code-signing EKU (`szOID_PKIX_KP_CODE_SIGNING`) and have the subject Organization
+//! `Microsoft Corporation` ([`leaf_org_ok`]).
 #![expect(
     unsafe_code,
     reason = "FFI to CreateFileW, NtCreateFile, GetSecurityInfo and WinVerifyTrust"
@@ -37,8 +38,10 @@ use windows::Win32::Security::Authorization::{
 };
 use windows::Win32::Security::Cryptography::{
     CERT_CHAIN_CONTEXT, CERT_CHAIN_POLICY_MICROSOFT_ROOT, CERT_CHAIN_POLICY_PARA,
-    CERT_CHAIN_POLICY_STATUS, CTL_USAGE, CertGetEnhancedKeyUsage, CertVerifyCertificateChainPolicy,
-    MICROSOFT_ROOT_CERT_CHAIN_POLICY_CHECK_APPLICATION_ROOT_FLAG, szOID_PKIX_KP_CODE_SIGNING,
+    CERT_CHAIN_POLICY_STATUS, CERT_CONTEXT, CERT_NAME_ATTR_TYPE, CTL_USAGE,
+    CertGetEnhancedKeyUsage, CertGetNameStringW, CertVerifyCertificateChainPolicy,
+    MICROSOFT_ROOT_CERT_CHAIN_POLICY_CHECK_APPLICATION_ROOT_FLAG, szOID_ORGANIZATION_NAME,
+    szOID_PKIX_KP_CODE_SIGNING,
 };
 use windows::Win32::Security::WinTrust::{
     WINTRUST_ACTION_GENERIC_VERIFY_V2, WINTRUST_DATA, WINTRUST_DATA_0, WINTRUST_FILE_INFO,
@@ -58,7 +61,7 @@ use windows::Win32::Storage::FileSystem::{
 use windows::Win32::System::IO::IO_STATUS_BLOCK;
 use windows::core::{HSTRING, PCWSTR, PWSTR};
 
-use super::msi_verify::{MsiFiles, Signature};
+use super::msi_verify::{MsiFiles, Signature, leaf_org_ok};
 use super::upgrade::PACKAGE_MSI;
 
 /// What a folder's open asks for, and shares: no delete, so it can't be renamed while held.
@@ -319,7 +322,8 @@ pub(super) fn policy_para() -> CERT_CHAIN_POLICY_PARA {
 }
 
 /// The first signer's chain in `state`: whether it passes `CERT_CHAIN_POLICY_MICROSOFT_ROOT`
-/// with [`policy_para`], and whether its leaf is for code signing.
+/// with [`policy_para`], whether its leaf is for code signing, and whether the leaf's subject
+/// Organization is `Microsoft Corporation` ([`leaf_org_ok`]).
 fn verdict(state: HANDLE) -> Result<Signature, String> {
     let none = || format!("{PACKAGE_MSI}'s signer couldn't be read");
     // SAFETY: `state` is WinVerifyTrust's live state, closed by the caller after this returns;
@@ -355,21 +359,25 @@ fn verdict(state: HANDLE) -> Result<Signature, String> {
     if !checked.as_bool() {
         return Err(format!("{PACKAGE_MSI}'s chain policy couldn't be checked"));
     }
-    // SAFETY: `chain` is live, as above.
-    let code_signing = unsafe { leaf_code_signing(chain) }?;
+    // SAFETY: `chain` is live, as above; the leaf is a certificate of it.
+    let leaf = unsafe { leaf_of(chain) }?;
+    // SAFETY: `leaf` is a live certificate, as above.
+    let code_signing = unsafe { leaf_code_signing(leaf) }?;
+    // SAFETY: as above.
+    let organization = unsafe { leaf_organization(leaf) };
     Ok(Signature {
         microsoft_root: status.dwError == 0,
         code_signing,
+        leaf_org: leaf_org_ok(organization.as_deref()),
     })
 }
 
-/// Whether the leaf certificate of `chain`'s first simple chain lists the code-signing EKU
-/// (`szOID_PKIX_KP_CODE_SIGNING`). One with no EKU extension (valid for every use) doesn't.
+/// The leaf certificate of `chain`'s first simple chain.
 ///
 /// # Safety
 ///
 /// `chain` must be a live chain context.
-unsafe fn leaf_code_signing(chain: *const CERT_CHAIN_CONTEXT) -> Result<bool, String> {
+unsafe fn leaf_of(chain: *const CERT_CHAIN_CONTEXT) -> Result<*const CERT_CONTEXT, String> {
     let none = || format!("{PACKAGE_MSI}'s signer couldn't be read");
     // SAFETY: the caller's chain is live; each count is checked before its array is read.
     let leaf = unsafe {
@@ -389,6 +397,17 @@ unsafe fn leaf_code_signing(chain: *const CERT_CHAIN_CONTEXT) -> Result<bool, St
     if leaf.is_null() {
         return Err(none());
     }
+    Ok(leaf)
+}
+
+/// Whether the leaf certificate `leaf` lists the code-signing EKU (`szOID_PKIX_KP_CODE_SIGNING`).
+/// One with no EKU extension (valid for every use) doesn't.
+///
+/// # Safety
+///
+/// `leaf` must be a live certificate context.
+unsafe fn leaf_code_signing(leaf: *const CERT_CONTEXT) -> Result<bool, String> {
+    let none = || format!("{PACKAGE_MSI}'s signer couldn't be read");
     let mut size = 0u32;
     // SAFETY: a live certificate; a size query first, with no buffer.
     unsafe { CertGetEnhancedKeyUsage(leaf, 0, None, &raw mut size) }.map_err(|_failed| none())?;
@@ -410,6 +429,37 @@ unsafe fn leaf_code_signing(chain: *const CERT_CHAIN_CONTEXT) -> Result<bool, St
         })
     };
     Ok(found)
+}
+
+/// The leaf certificate's subject Organization (`szOID_ORGANIZATION_NAME`), as the API decodes
+/// it: the first one in the subject. `None` when there is none, or the call fails, which
+/// [`leaf_org_ok`] refuses.
+///
+/// # Safety
+///
+/// `leaf` must be a live certificate context.
+unsafe fn leaf_organization(leaf: *const CERT_CONTEXT) -> Option<String> {
+    let oid = szOID_ORGANIZATION_NAME.as_ptr().cast::<c_void>();
+    // SAFETY: a live certificate and a NUL-terminated OID; a size query first, with no buffer,
+    // which counts the terminating NUL.
+    let size = unsafe { CertGetNameStringW(leaf, CERT_NAME_ATTR_TYPE, 0, Some(oid), None) };
+    let len = usize::try_from(size).ok().filter(|len| *len > 1)?;
+    let mut units = vec![0u16; len];
+    // SAFETY: as above, with `units` of the `len` units the size query gave.
+    let written = unsafe {
+        CertGetNameStringW(
+            leaf,
+            CERT_NAME_ATTR_TYPE,
+            0,
+            Some(oid),
+            Some(units.as_mut_slice()),
+        )
+    };
+    let written = usize::try_from(written)
+        .ok()
+        .filter(|written| (1..=len).contains(written))?;
+    units.truncate(written - 1);
+    String::from_utf16(&units).ok()
 }
 
 /// An error's Win32 code.

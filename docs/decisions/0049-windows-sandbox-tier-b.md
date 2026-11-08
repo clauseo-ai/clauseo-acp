@@ -2279,7 +2279,10 @@ check (`check_launch_in`) passes WSL's check through `wsl_heal::heal`:
   one. The flag admits Microsoft Root Certificate Authority 2011, where `wsl.msi` chains (through
   Microsoft Code Signing PCA 2024); with no flags the policy refused it on the VM (`0x800B0109`,
   `CERT_E_UNTRUSTEDROOT`), so no upgrade could install. And the leaf certificate must list the
-  code-signing EKU (`szOID_PKIX_KP_CODE_SIGNING`). The handle stays open, shared for reading only,
+  code-signing EKU (`szOID_PKIX_KP_CODE_SIGNING`), and the leaf's subject Organization (`O`)
+  must be exactly `Microsoft Corporation`, which narrows what the Root 2011 policy admits to
+  Microsoft's own signers (a rename of Microsoft's signer would need a code change, accepted).
+  The handle stays open, shared for reading only,
   and the two folders without delete sharing, until msiexec has ended, so nothing is swapped between
   the checks and the install; msiexec gets the path that was opened. A failed check is a failed
   upgrade (its reason names no path): the run still re-applies the deny, as after any other failed
@@ -2317,7 +2320,8 @@ SYSTEM, so it most likely fails again; and on the VM's WSL 3.0.3.0
 the class isn't registered at all (F1). Not verified on a VM: the upgrade itself (no Store package
 newer than its MSI was at hand), that a packaged service's `ImagePath` names its package's folder
 under `WindowsApps`, and that the owner may run the task from a non-elevated launch (the refresh's
-start was, CI run 42416074600).
+start was, CI run 42416074600). A normal-flow VM row: the current WSL
+MSI passes the leaf's `O` pin, which the VM should show before the upgrade is trusted.
 
 Another accepted residual: a WSL self-update not started by our task (Windows' own updater
 starts one within about a second of a pending Store update) rewrites the AppIDs, and the deny is

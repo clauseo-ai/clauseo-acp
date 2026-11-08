@@ -75,6 +75,7 @@ fn a_microsoft_file_chaining_to_root_2011_passes() {
     let expected = Signature {
         microsoft_root: true,
         code_signing: true,
+        leaf_org: true,
     };
     assert_eq!(signed, Ok(expected));
 }

@@ -8,8 +8,9 @@
 //!    link ([`MsiFiles::open`]).
 //! 3. **The owner**: `wsl.msi`'s, read on its handle, is `TrustedInstaller` or SYSTEM.
 //! 4. **The signature**: `WinVerifyTrust` trusts it, and its signer's chain passes
-//!    `CERT_CHAIN_POLICY_MICROSOFT_ROOT`: it ends in one of Microsoft's own roots; and its leaf
-//!    certificate lists the code-signing EKU.
+//!    `CERT_CHAIN_POLICY_MICROSOFT_ROOT`: it ends in one of Microsoft's own roots; its leaf
+//!    certificate lists the code-signing EKU; and its subject Organization is exactly
+//!    `Microsoft Corporation` ([`leaf_org_ok`]).
 //! 5. **The handle**: held, shared for reading only, until msiexec has ended, so the file can't
 //!    be renamed, replaced or written between the checks and the install.
 //!
@@ -78,6 +79,18 @@ pub(super) struct Signature {
     pub(super) microsoft_root: bool,
     /// Its leaf certificate lists the code-signing EKU (`szOID_PKIX_KP_CODE_SIGNING`).
     pub(super) code_signing: bool,
+    /// Its leaf certificate's subject Organization is `Microsoft Corporation` ([`leaf_org_ok`]).
+    pub(super) leaf_org: bool,
+}
+
+/// The subject Organization a WSL MSI's leaf certificate must have.
+const MICROSOFT_ORGANIZATION: &str = "Microsoft Corporation";
+
+/// Whether a leaf certificate's subject Organization is `Microsoft Corporation`. `org` is the
+/// value as the API returns it, or `None` when there is none or it can't be read; the match is
+/// exact and case-sensitive, with nothing trimmed.
+pub(super) fn leaf_org_ok(org: Option<&str>) -> bool {
+    org == Some(MICROSOFT_ORGANIZATION)
 }
 
 /// Installs WSL's pending MSI upgrade, as `msi.rs` says, from the `WslInstaller` service's
@@ -143,6 +156,11 @@ fn verified<F: MsiFiles>(
     if !signature.code_signing {
         return Err(format!(
             "{PACKAGE_MSI}'s signer isn't a code-signing certificate"
+        ));
+    }
+    if !signature.leaf_org {
+        return Err(format!(
+            "{PACKAGE_MSI}'s signer's subject isn't Microsoft Corporation"
         ));
     }
     Ok(held)
