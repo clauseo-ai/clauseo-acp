@@ -159,17 +159,19 @@ impl Fake {
     }
 }
 
-/// A process the list and the token both say runs as `user`, opened to be stopped; with no
-/// user, one no source could read that can't be opened to be stopped (a protected process).
+/// A process the list and the token both say runs as `user`, opened to be stopped, in session
+/// 1; with no user, one no source names that can't be opened to be stopped, in session 0 with
+/// no image file (a protected system process).
 fn seen(pid: u32, user: Option<Sid>) -> Process {
     let can_stop = user.is_some();
     Process {
         pid,
         listed: user.clone(),
         token: user,
-        owner: None,
         can_stop,
-        list_failed: false,
+        session: Some(u32::from(can_stop)),
+        image: Image::Missing,
+        ..Process::default()
     }
 }
 
@@ -212,6 +214,10 @@ impl Stopper for Fake {
 
     fn own_pid(&mut self) -> u32 {
         OWN_PID
+    }
+
+    fn system_folders(&mut self) -> Vec<String> {
+        users::folders()
     }
 
     fn suspend(&mut self, pid: u32) -> Result<(), Failed> {

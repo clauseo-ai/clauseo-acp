@@ -37,9 +37,16 @@
 //!    never stopped, with two exceptions. Its owner is a pool SID: it is stopped (the owner may
 //!    add a process, never clear one: an owner is its creator, not its user, and an elevated
 //!    administrator's processes are owned by Administrators). Or it can't be opened to be
-//!    terminated while the list was read (a protected process: one a pool user started would
-//!    still be named by the list). A list that couldn't be read at all leaves no such exemption,
-//!    so a run where it failed ends at 48 unless each process's token, or a pool owner, named it;
+//!    terminated, the list put it in session 0, and its image lies under the Windows or a
+//!    Program Files folder, or it has none (a protected system process; [`system_image`]).
+//!    A pool user's process runs in the lawyer's interactive session
+//!    (`CreateProcessWithLogonW` starts it in the caller's), and one it starts protected can't
+//!    be opened with `READ_CONTROL`, so neither the token nor the owner names it, nor the list
+//!    when the token's DACL shuts out SYSTEM: outside session 0 it is unknown. A pool user's
+//!    scheduled task (S4U, or "run whether logged on or not") reaches session 0, but its image
+//!    can't be put under those folders, which only administrators write. A list that couldn't
+//!    be read at all leaves no exemption, so a run where it failed ends at 48 unless each
+//!    process's token, or a pool owner, named it;
 //! 5. cancels every BITS job a pool user owns (`BG_JOB_ENUM_ALL_USERS`, each job's owner), even
 //!    when no process was found: a pool user's job doesn't run, but stays queued until it is
 //!    cancelled. One that can't be cancelled, or whose owner can't be read, is 48; so is a list
@@ -92,6 +99,9 @@ use std::time::Duration;
 use crate::windows::refresh::same_path;
 use crate::windows::sids::Sid;
 
+pub use pick::{Image, Picked, Process, pick, system_image};
+
+mod pick;
 mod sequence;
 #[cfg(test)]
 mod tests;
@@ -176,94 +186,6 @@ pub const LAST_WAITS: Duration = Duration::from_secs(15);
 /// been cut, so jobs of the pool's may be left past it: the run ends at 48.
 pub(crate) const JOBS_CAP: usize = 10_000;
 
-/// The idle process's pid.
-const IDLE_PID: u32 = 0;
-/// The System process's pid.
-const SYSTEM_PID: u32 = 4;
-
-/// One process as a snapshot saw it: its user as each source gave it.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Process {
-    /// Its process id.
-    pub pid: u32,
-    /// Its user as the kernel's process list (`WTSEnumerateProcessesExW`) gave it; `None` when
-    /// the list named no SID for it (as for a process whose token's DACL shuts out SYSTEM), or
-    /// didn't list it.
-    pub listed: Option<Sid>,
-    /// Its token's user, read through the handle; `None` when the token couldn't be read.
-    pub token: Option<Sid>,
-    /// Its process object's owner, read when the token couldn't be; `None` when not read.
-    /// A standard user can't make another account the owner of a process, but the owner is the
-    /// process's creator, which needn't be its user.
-    pub owner: Option<Sid>,
-    /// It was opened with `PROCESS_TERMINATE`.
-    pub can_stop: bool,
-    /// The kernel's process list couldn't be read for this snapshot, so `listed` is `None`
-    /// for want of a list, not because the list named no one.
-    pub list_failed: bool,
-}
-
-/// What [`pick`] made of a process's user.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum User {
-    /// Read: the list's SID, or the token's when the list gave none, or the owner's when
-    /// neither gave one and the owner is one of the pool's SIDs.
-    Known(Sid),
-    /// Neither the list nor the token gave one, and the owner isn't a pool SID (or wasn't
-    /// read); or the list and the token disagree.
-    Unknown,
-    /// Not looked at: this process, pid 0 or 4, or one with no user from any source that can't
-    /// be opened to be terminated, even with `SeDebugPrivilege`, while the list was read (a
-    /// protected process; one a pool user started would still be named by the list).
-    Exempt,
-}
-
-/// `process`'s user, as [`User`] says. The owner may add a process to the pool's, never clear
-/// one: it is the process's creator, and an elevated administrator's processes, whoever runs
-/// them, are owned by `Administrators`.
-fn user_of(process: &Process, pool: &[Sid], own_pid: u32) -> User {
-    if [own_pid, IDLE_PID, SYSTEM_PID].contains(&process.pid) {
-        return User::Exempt;
-    }
-    match (&process.listed, &process.token, &process.owner) {
-        (Some(listed), Some(token), _) if listed != token => User::Unknown,
-        (Some(user), _, _) | (None, Some(user), _) => User::Known(user.clone()),
-        (None, None, Some(owner)) if pool.contains(owner) => User::Known(owner.clone()),
-        (None, None, Some(_)) => User::Unknown,
-        (None, None, None) if process.can_stop || process.list_failed => User::Unknown,
-        (None, None, None) => User::Exempt,
-    }
-}
-
-/// What one snapshot holds for the stop.
-#[derive(Debug, Default, PartialEq, Eq)]
-pub struct Picked {
-    /// Each process whose user is one of the pool's SIDs, with that user, in the order seen,
-    /// each pid once.
-    pub stop: Vec<(u32, Sid)>,
-    /// The processes whose user couldn't be read ([`User::Unknown`]).
-    pub unknown: usize,
-}
-
-/// The processes of `seen` to stop, and those whose user is unknown, as [`user_of`] reads
-/// each; SIDs are compared exactly. `own_pid` is this process.
-pub fn pick(seen: &[Process], pool: &[Sid], own_pid: u32) -> Picked {
-    let mut picked = Picked::default();
-    let mut looked: Vec<u32> = Vec::new();
-    for process in seen {
-        if looked.contains(&process.pid) {
-            continue;
-        }
-        looked.push(process.pid);
-        match user_of(process, pool, own_pid) {
-            User::Known(user) if pool.contains(&user) => picked.stop.push((process.pid, user)),
-            User::Unknown => picked.unknown += 1,
-            User::Known(_) | User::Exempt => {}
-        }
-    }
-    picked
-}
-
 /// Every effect of the stop. The real one reads the record and the admin copy's path itself, so
 /// no method takes a SID or a path the caller chose, but the pool the record gave.
 pub trait Stopper {
@@ -283,6 +205,10 @@ pub trait Stopper {
     fn snapshot(&mut self) -> Result<Vec<Process>, Failed>;
     /// This process's id.
     fn own_pid(&mut self) -> u32;
+    /// The Windows folder and the Program Files folders, from `SHGetKnownFolderPath`, never
+    /// the environment: where a system process's image lies ([`system_image`]). One that
+    /// can't be found is left out, so a process whose image is there counts as unknown.
+    fn system_folders(&mut self) -> Vec<String>;
     /// Suspends `pid` through the handle the last snapshot read its user through. Nothing
     /// resumes it: it is terminated next.
     fn suspend(&mut self, pid: u32) -> Result<(), Failed>;
@@ -464,6 +390,7 @@ fn allowed(fs: &mut impl Stopper) -> Result<(), Refusal> {
 /// snapshot that can't be taken is the error.
 fn run_passes(fs: &mut impl Stopper, pool: &[Sid], passes: &mut Passes) -> Result<(), String> {
     let began = fs.elapsed();
+    let folders = fs.system_folders();
     loop {
         let at = fs.now();
         let seen = fs
@@ -472,7 +399,7 @@ fn run_passes(fs: &mut impl Stopper, pool: &[Sid], passes: &mut Passes) -> Resul
         passes.taken += 1;
         passes.list_failed |= seen.iter().any(|process| process.list_failed);
         let own = fs.own_pid();
-        let picked = pick(&seen, pool, own);
+        let picked = pick(&seen, pool, own, &folders);
         passes.unknown = picked.unknown;
         if picked.unknown > 0 {
             passes.suspects.extend(pool.iter().cloned());

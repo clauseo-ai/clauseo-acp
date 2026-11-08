@@ -9,10 +9,12 @@
 )]
 
 use std::collections::BTreeMap;
+use std::ffi::c_void;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use windows::Win32::Foundation::{HANDLE, NTSTATUS, WAIT_OBJECT_0};
+use windows::Wdk::System::Threading::{NtQueryInformationProcess, ProcessImageFileName};
+use windows::Win32::Foundation::{HANDLE, NTSTATUS, UNICODE_STRING, WAIT_OBJECT_0};
 use windows::Win32::Storage::FileSystem::READ_CONTROL;
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
@@ -23,16 +25,19 @@ use windows::Win32::System::RemoteDesktop::{
 };
 use windows::Win32::System::SystemInformation::{GetSystemTimeAsFileTime, GetTickCount64};
 use windows::Win32::System::Threading::{
-    GetCurrentProcessId, OpenProcess, PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_LIMITED_INFORMATION,
-    PROCESS_SUSPEND_RESUME, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, Sleep, TerminateProcess,
-    WaitForSingleObject,
+    GetCurrentProcessId, OpenProcess, PROCESS_ACCESS_RIGHTS, PROCESS_NAME_WIN32,
+    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SUSPEND_RESUME, PROCESS_SYNCHRONIZE,
+    PROCESS_TERMINATE, QueryFullProcessImageNameW, Sleep, TerminateProcess, WaitForSingleObject,
+};
+use windows::Win32::UI::Shell::{
+    FOLDERID_ProgramFiles, FOLDERID_ProgramFilesX86, FOLDERID_Windows,
 };
 use windows::core::PWSTR;
 
 use windows::Win32::Networking::BackgroundIntelligentTransferService::IBackgroundCopyJob;
 
 use super::windows_bits::{self, Com};
-use super::{Failed, Pool, Process, StopExit, Stopper, stop};
+use super::{Failed, Image, Pool, Process, StopExit, Stopper, stop};
 use crate::windows::acl::object::Handle;
 use crate::windows::admin_copy::{self, os};
 use crate::windows::refresh::event_log;
@@ -131,6 +136,23 @@ impl Stopper for WindowsStopper {
     fn own_pid(&mut self) -> u32 {
         // SAFETY: GetCurrentProcessId only reads this process's id.
         unsafe { GetCurrentProcessId() }
+    }
+
+    fn system_folders(&mut self) -> Vec<String> {
+        let ids = [
+            FOLDERID_Windows,
+            FOLDERID_ProgramFiles,
+            FOLDERID_ProgramFilesX86,
+        ];
+        ids.iter()
+            .filter_map(|id| match os::known_folder(id) {
+                Ok(folder) => Some(folder.to_string_lossy().into_owned()),
+                Err(error) => {
+                    tracing::warn!(%error, "a system folder couldn't be found");
+                    None
+                }
+            })
+            .collect()
     }
 
     fn suspend(&mut self, pid: u32) -> Result<(), Failed> {
@@ -232,13 +254,14 @@ pub(super) type Opened = Vec<(u32, Handle)>;
 /// Every running process, as [`Process`] says, with the handles that can terminate one, by pid.
 ///
 /// Each pid of a Toolhelp snapshot is opened, its token's user read through that handle, and
-/// its owner when the token can't be read. One that has already exited is dropped. Then the
-/// kernel's process list gives each process's user: it is read only once every handle is open,
-/// and a pid isn't reused while a handle to its process is open, so each entry for an opened pid
-/// is the process that handle is on. A process the list names but the snapshot didn't (started
-/// since) is added with no handle, so a pool user's keeps the passes going. A list that can't be
-/// read marks every process `list_failed`: the token then says whose each is, and one it can't
-/// read is unknown, unless its owner is a pool user (`stop::user_of`).
+/// its owner when the token can't be read, and its image when neither can. One that has already
+/// exited is dropped. Then the kernel's process list gives each process's user and session: it
+/// is read only once every handle is open, and a pid isn't reused while a handle to its process
+/// is open, so each entry for an opened pid is the process that handle is on. A process the
+/// list names but the snapshot didn't (started since) is added with no handle, so a pool
+/// user's keeps the passes going. A list that can't be read marks every process
+/// `list_failed`: the token then says whose each is, and one it can't read is unknown, unless
+/// its owner is a pool user (`pick::user_of`).
 pub(super) fn processes() -> Result<(Vec<Process>, Opened), Failed> {
     let mut seen = Vec::new();
     // Every handle stays open until the list is read, the query-only ones too.
@@ -257,14 +280,18 @@ pub(super) fn processes() -> Result<(Vec<Process>, Opened), Failed> {
     match listed_users() {
         Ok(listed) => {
             for process in &mut seen {
-                process.listed = listed.get(&process.pid).cloned().flatten();
+                if let Some((user, session)) = listed.get(&process.pid) {
+                    process.listed.clone_from(user);
+                    process.session = Some(*session);
+                }
             }
-            for (pid, listed) in listed {
+            for (pid, (listed, session)) in listed {
                 let known = exited.contains(&pid) || seen.iter().any(|p| p.pid == pid);
                 if !known {
                     seen.push(Process {
                         pid,
                         listed,
+                        session: Some(session),
                         ..Process::default()
                     });
                 }
@@ -316,23 +343,77 @@ pub(super) fn look_at(pid: u32) -> Option<(Process, Option<Handle>)> {
     } else {
         None
     };
+    let image = if token.is_none() && owner.is_none() {
+        image_of(&handle)
+    } else {
+        Image::Unread
+    };
     let process = Process {
         pid,
-        listed: None,
         token,
         owner,
         can_stop,
-        list_failed: false,
+        image,
+        ..Process::default()
     };
     Some((process, Some(handle)))
 }
 
+/// `handle`'s image, through query-limited access, which a protected process grants. The
+/// kernel's own name for it (`ProcessImageFileName`) first: empty for a minimal process, which
+/// has no image file. Then its Win32 path; one that can't be read is [`Image::Failed`].
+fn image_of(handle: &Handle) -> Image {
+    // A UNICODE_STRING, then its text: room for the longest NT path.
+    let mut buffer = vec![0u64; 8_200];
+    let size = u32::try_from(buffer.len() * 8).unwrap_or(u32::MAX);
+    let mut written = 0u32;
+    // SAFETY: the handle is live with PROCESS_QUERY_LIMITED_INFORMATION; `buffer` is live,
+    // writable and aligned for a UNICODE_STRING, `size` bytes long; `written` is a live
+    // out-pointer.
+    let status = unsafe {
+        NtQueryInformationProcess(
+            handle.0,
+            ProcessImageFileName,
+            buffer.as_mut_ptr().cast::<c_void>(),
+            size,
+            &raw mut written,
+        )
+    };
+    if status.is_err() {
+        return Image::Failed;
+    }
+    // SAFETY: on success the call wrote a UNICODE_STRING at the buffer's start.
+    let name = unsafe { &*buffer.as_ptr().cast::<UNICODE_STRING>() };
+    if name.Length == 0 {
+        return Image::Missing;
+    }
+    let mut path = vec![0u16; 32_768];
+    let mut length = u32::try_from(path.len()).unwrap_or(u32::MAX);
+    // SAFETY: the handle is live; `path` is a writable buffer of `length` units, and
+    // `length` a live in-out pointer.
+    let read = unsafe {
+        QueryFullProcessImageNameW(
+            handle.0,
+            PROCESS_NAME_WIN32,
+            PWSTR(path.as_mut_ptr()),
+            &raw mut length,
+        )
+    };
+    let units = usize::try_from(length)
+        .ok()
+        .and_then(|length| path.get(..length));
+    match (read, units) {
+        (Ok(()), Some(units)) if !units.is_empty() => Image::Path(String::from_utf16_lossy(units)),
+        _ => Image::Failed,
+    }
+}
+
 /// The kernel's process list (`WTSEnumerateProcessesExW`, level 1, every session): each pid
-/// with its user's SID, `None` where the list names none, leaving out a process with no thread
-/// (one that has exited, kept by a handle). The list reads each token as this process: a token
-/// whose DACL shuts out SYSTEM gets no SID (CI run 42416074600), and its process's owner names
-/// it instead (`stop::user_of`).
-fn listed_users() -> Result<BTreeMap<u32, Option<Sid>>, Failed> {
+/// with its user's SID (`None` where the list names none) and its session, leaving out a
+/// process with no thread (one that has exited, kept by a handle). The list reads each token as
+/// this process: a token whose DACL shuts out SYSTEM gets no SID (CI run 42416074600), and its
+/// process's owner names it instead (`pick::user_of`).
+fn listed_users() -> Result<BTreeMap<u32, (Option<Sid>, u32)>, Failed> {
     let mut level = INFO_LEVEL_1;
     let mut info = PWSTR::null();
     let mut count = 0u32;
@@ -369,7 +450,7 @@ fn listed_users() -> Result<BTreeMap<u32, Option<Sid>>, Failed> {
             // SAFETY: a non-null pUserSid is a valid SID inside the live list.
             unsafe { sid_text(entry.pUserSid) }.ok().flatten()
         };
-        users.insert(entry.ProcessId, user);
+        users.insert(entry.ProcessId, (user, entry.SessionId));
     }
     drop(list);
     Ok(users)
