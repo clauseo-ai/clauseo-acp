@@ -86,7 +86,7 @@ test("index.html's inline <style> is allowed by Tauri's nonce, which the config 
 });
 
 // The first paint's mark is the lockup's comma (ui/components lockup.tsx), its path as drawn there, and nothing else.
-test("index.html's first mark is the lockup's comma, no text, no animation", () => {
+test("index.html's first mark is the lockup's comma, no text, and breathes only in opacity", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const lockup = readFileSync(
     new URL("../../components/src/clauseo/lockup.tsx", import.meta.url),
@@ -96,7 +96,17 @@ test("index.html's first mark is the lockup's comma, no text, no animation", () 
   const paths = [...html.matchAll(/<path\s+d="([^"]+)"/g)].map((m) => m[1]);
   expect(comma).toBeDefined();
   expect(paths).toEqual([comma]);
-  expect(html).not.toMatch(/animation|@keyframes|<text/);
+  expect(html).not.toMatch(/<text/);
+  // one animation, the mark's: opacity 0.55 to 1 and back, none under reduced motion; the ground never moves
+  expect([...html.matchAll(/animation:\s*([^;]+);/g)].map((m) => m[1])).toEqual([
+    "first-breath 2.4s ease-in-out infinite alternate",
+    "none",
+  ]);
+  const breath = /@keyframes first-breath \{([\s\S]*?)\n {6}\}/.exec(html)?.[1] ?? "";
+  expect(breath.replace(/\s+/g, "")).toBe("from{opacity:0.55;}to{opacity:1;}");
+  expect(html).toMatch(
+    /@media \(prefers-reduced-motion: reduce\) \{\s*#first-mark svg \{\s*animation: none;/,
+  );
   const root = /<div id="root">([\s\S]*?)<\/div>\s*<script/.exec(html)?.[1] ?? "";
   expect(root).toContain('id="first-mark"');
 });
