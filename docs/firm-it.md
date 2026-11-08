@@ -37,8 +37,9 @@ Windows Server 2025 (build 26100) on 2026-11-03, with the 0.0.0 dry-run installe
   paths in quotes but the one after `_?=`, which takes the rest of the line), `QuietUninstallString`
   `"C:\Program Files\Clauseo\uninstall.exe" /S _?=C:\Program Files\Clauseo`, `DisplayIcon`,
   `MainBinaryName`, `NoModify` and `NoRepair` 1, and `EstimatedSize`. It also writes
-  `HKLM\SOFTWARE\Clauseo\Clauseo`, whose default value is the install folder; uninstalling leaves
-  that key. It makes two shortcuts for all users,
+  `HKLM\SOFTWARE\Clauseo\Clauseo`, whose default value is the install folder; the per-machine
+  uninstaller deletes that key, and `HKLM\SOFTWARE\Clauseo` when nothing else is left in it
+  (an update keeps both). It makes two shortcuts for all users,
   `C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Clauseo.lnk` and
   `C:\Users\Public\Desktop\Clauseo.lnk`, also with `/S`. It writes nothing under `HKCU`. The app it starts at the end runs un-elevated (medium integrity).
 - The per-user installer installs in `%LOCALAPPDATA%\Clauseo` and writes

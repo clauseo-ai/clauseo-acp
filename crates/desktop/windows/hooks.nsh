@@ -802,3 +802,28 @@
     !insertmacro CLAUSEO_ASK_FOR_THE_ADMIN_SECTION
   !endif
 !macroend
+
+; The per-machine uninstaller's install-folder key. The template's Section Install writes
+; HKLM\SOFTWARE\Clauseo\Clauseo (MANUPRODUCTKEY under SHCTX, whose default value is $INSTDIR, in
+; the 64-bit view SetContext picks on x64 and arm64). The uninstall deleted it only with the
+; "delete app data" box ticked (NSIS_HOOK_PREUNINSTALL, which takes over the template's block for
+; the box); unticked, and always under /S, the key outlived the uninstall, naming a deleted
+; folder. The template inserts this hook near the end of Section Uninstall, after its own
+; removals and before the self-delete (uninstall_in_place.nsh); an uninstall that refuses or
+; aborts before then (exit 26, Clauseo running) never gets here. Then HKLM\SOFTWARE\Clauseo, only
+; when empty: the sandbox's record (Sandbox) or anything else keeps it. Not under /UPDATE, which
+; keeps everything; the template's update mode doesn't run the old uninstaller at all, and a
+; reinstall that runs it (the reinstall page, without /UPDATE) writes the key again in its own
+; Section Install afterwards. Per user the HKCU key still stays unless the box is ticked, as
+; before. The test is inside the macro: INSTALLMODE isn't defined yet where this file is
+; included.
+!macro NSIS_HOOK_POSTUNINSTALL
+  !if "${INSTALLMODE}" == "perMachine"
+    ${If} $UpdateMode <> 1
+      SetRegView 64
+      DeleteRegKey HKLM "${MANUPRODUCTKEY}"
+      DeleteRegKey /ifempty HKLM "${MANUKEY}"
+      SetRegView lastused
+    ${EndIf}
+  !endif
+!macroend
