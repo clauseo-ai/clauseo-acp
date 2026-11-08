@@ -247,6 +247,25 @@ fn the_task_files_security_is_read_from_its_descriptor() {
 }
 
 #[test]
+fn an_owner_is_read_only_from_a_revision_1_self_relative_descriptor() {
+    use crate::windows::acl_bytes::owner_sid;
+
+    // The owner a cache key's `SD` gives a hidden task, and a task file's.
+    let good = descriptor(Some("S-1-5-18"), Dacl::Absent);
+    assert_eq!(owner_sid(&good), Some(Sid::parse("S-1-5-18").unwrap()));
+    let mut revision = good.clone();
+    revision[0] = 2;
+    let mut absolute = good;
+    absolute[3] &= !0x80; // SE_SELF_RELATIVE cleared, the owner's offset left.
+    for (bad, case) in [(revision, "revision 2"), (absolute, "not self-relative")] {
+        assert_eq!(owner_sid(&bad), None, "{case}");
+        assert!(file_security(&bad).is_err(), "{case}");
+    }
+    // An empty value names none either.
+    assert_eq!(owner_sid(&[]), None);
+}
+
+#[test]
 fn only_a_pool_users_possible_sids_count_as_open() {
     let pool = [sid(1010)];
     for (text, open) in [

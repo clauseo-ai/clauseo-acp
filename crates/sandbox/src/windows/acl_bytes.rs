@@ -124,17 +124,24 @@ pub(crate) fn sid_text(bytes: &[u8]) -> Option<Sid> {
     Sid::parse(&text).ok()
 }
 
-/// The owner of the self-relative descriptor `bytes`, when it holds one.
+/// The owner of the self-relative descriptor `bytes`, when it holds one, as [`owner_bytes`]
+/// reads it.
 pub(crate) fn owner_sid(bytes: &[u8]) -> Option<Sid> {
     sid_text(owner_bytes(bytes)?)
 }
 
-/// The owner of the self-relative descriptor `bytes`, as bytes, when it holds one.
+/// The owner of the self-relative descriptor `bytes`, as bytes, when it holds one: `None`
+/// unless it is revision 1 (`SECURITY_DESCRIPTOR_REVISION`) and marked self-relative
+/// (`SE_SELF_RELATIVE`), since an absolute descriptor's offsets are pointers.
 #[cfg_attr(
     not(any(windows, test)),
     expect(dead_code, reason = "the walk's repair is Windows only")
 )]
 pub(crate) fn owner_bytes(bytes: &[u8]) -> Option<&[u8]> {
+    let control = read_u16(bytes, 2)?;
+    if *bytes.first()? != 1 || control & SELF_RELATIVE == 0 {
+        return None;
+    }
     sid_at(bytes, 4)
 }
 
