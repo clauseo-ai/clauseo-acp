@@ -1733,6 +1733,8 @@ export type ErrorCode =
 "blocklist.revoke_not_saved" | 
 /** An earlier Safe workspace session's clean-up (its unclean-session marker's stop or sweep) wasn't finished after Clauseo waited for it, so no agent was started; trying again in a moment can succeed. */
 "sandbox.cleaning_up" | 
+/** The agent's files all downloaded and checked, but setting them up on this computer failed after three tries (unpacking, `npm ci`, the move into place or its receipt), often because security software held the fresh files. Trying again may work. */
+"agent.install_setup_failed" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 
@@ -2897,7 +2899,10 @@ export type InstallProgress =
 } }) & { downloading?: never; failed?: never; missing?: never; waiting?: never } | 
 /**  Stopped with a failure; [`crate::SetupCommand::RetryAgentInstall`] starts again. */
 ({ failed: {
-	/**  Why: `agent.install_blocked`, `agent.install_disk_full` or `agent.install_failed`. */
+	/**
+	 *  Why: `agent.install_blocked`, `agent.install_disk_full`, `agent.install_failed` or
+	 *  `agent.install_setup_failed`.
+	 */
 	code: ErrorCode,
 	/**  For `agent.install_disk_full`: the space needed, in MB (10^6 bytes). */
 	need_mb?: Count,

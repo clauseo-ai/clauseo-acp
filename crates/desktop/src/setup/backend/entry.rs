@@ -82,3 +82,16 @@ pub(crate) fn progress(state: &InstallState, hosts: &[String]) -> Option<Install
         _ => return None,
     })
 }
+
+/// The word for an install state's publish line; `None` for `Downloading`, which ticks every
+/// 250 ms.
+pub(super) fn published_word(state: &InstallState) -> Option<&'static str> {
+    match state {
+        InstallState::Downloading { .. } => None,
+        InstallState::Installing => Some("installing"),
+        InstallState::Ready { .. } => Some("ready"),
+        InstallState::Failed(failure) => Some(failure.kind.word()),
+        InstallState::Waiting { .. } => Some("waiting"),
+        _ => Some("other"),
+    }
+}

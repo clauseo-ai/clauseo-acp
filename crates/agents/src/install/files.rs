@@ -348,14 +348,22 @@ impl Progress {
 
 /// After `Ready`: removes this install's downloads (never the bundle's files) and the npm
 /// cache's contents. A file that will not go is left; the next install reuses or replaces it.
-/// The cache goes only when no link stands at `agents` or `npm-cache`.
 pub(super) fn clean_up(config: &AgentsConfig, fetched: &Fetched) {
     for path in &fetched.downloaded {
         drop(write::remove_file(path));
         drop(write::remove_file(&part_path(path)));
     }
-    let cache = npm_cache(&config.data_dir);
-    if write::real_dirs_under(&config.data_dir, &cache).unwrap_or(false) {
+    empty_npm_cache(&config.data_dir);
+}
+
+/// Removes the npm cache, ours alone: after `Ready`, at the start of each try and at the
+/// worker's start, always with `agents/.lock` held. npm adds every tarball to it on each
+/// `npm ci`, and a try cut short (a quit, a pause, a killed npm) never reaches the clean-up
+/// after `Ready`, so without this each interrupted try would leave another copy behind. It goes
+/// only when no link stands at `agents` or `npm-cache`; one that will not go now goes next time.
+pub(crate) fn empty_npm_cache(data_dir: &Path) {
+    let cache = npm_cache(data_dir);
+    if write::real_dirs_under(data_dir, &cache).unwrap_or(false) {
         drop(write::remove_dir_all(&cache));
     }
 }

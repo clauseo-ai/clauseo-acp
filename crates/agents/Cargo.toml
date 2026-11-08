@@ -78,6 +78,8 @@ clauseo-process = { path = "../process", features = ["test-support"] }
 clauseo-settings = { path = "../settings" }
 # The sign-in tests run its Claude and Codex CLI modes as the adapters.
 clauseo-fake_agent = { path = "../fake_agent" }
+# The in-place retry's log line, read back in its unit test.
+tracing-subscriber = { workspace = true, features = ["fmt"] }
 
 [lints]
 workspace = true

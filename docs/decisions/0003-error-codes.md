@@ -119,6 +119,7 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `blocklist.allow_not_saved` | The allow applies until Clauseo closes, but Clauseo couldn't save it (the OS secret store or the data folder failed), so the site is blocked again after a restart. | no | host (`AllowBlockedSite`, decision record 0053); not retryable because the run keeps changes in memory only from then on |
 | `blocklist.revoke_not_saved` | The site is blocked again until Clauseo closes, but Clauseo couldn't save that or void the saved allows, so the site may be allowed again after a restart. | no | host (`RevokeAllowedSite`, decision record 0053); not retryable because the run keeps changes in memory only from then on |
 | `sandbox.cleaning_up` | An earlier Safe workspace session's clean-up (its unclean-session marker's stop or sweep) wasn't finished after Clauseo waited for it, so no agent was started; trying again in a moment can succeed. | yes | sandbox (`Error::UncleanSession`: tier B's launch check found an earlier session's unclean-session marker whose stop or sweep didn't complete within 15 s, decision record 0049); retryable because a later launch checks again once the clean-up is done |
+| `agent.install_setup_failed` | The agent's files all downloaded and checked, but setting them up on this computer failed after three tries (unpacking, `npm ci`, the move into place or its receipt), often because security software held the fresh files. Trying again may work. | yes | agents (`FailureKind::SetupFailed` on `Failed`), desktop (0048) |
 | `unknown` | A code from a newer Clauseo that this version does not know. Never produced here. | no | decoding only |
 
 Judgement calls on retryable: `agent.launch_failed` and `agent.exited` are retryable because a new
@@ -139,6 +140,14 @@ matter (a relink that could not repair it included) came back as `matter.folder_
 meaning ("the matter's folder is gone") never covered it. Those cases now have their own code, not
 retryable: the lawyer has to locate the right folder. `matter.folder_missing` keeps its meaning and
 now comes only for a folder that is not there or does not answer.
+
+`agent.install_setup_failed` was added on 2026-11-07, at the orchestrator's request (the install
+resume PR, after the Windows VM pass of #683 on #664): a Claude install with Defender on downloaded
+every file, then failed all three tries at the rename into place with `Access is denied`, and said
+the agent "couldn't be downloaded". A failure after every file is fetched and checked now has its own
+code, so the words can say the download worked. It is retryable, as `agent.install_failed` is: the
+antivirus that holds the fresh files lets go, and the next try's set-up may work. `agent.install_failed`
+keeps its meaning, now only for failures before the files are all fetched.
 
 ## Consequences
 

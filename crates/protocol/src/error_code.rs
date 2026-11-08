@@ -265,6 +265,10 @@ error_codes! {
         workspace session's clean-up (its unclean-session marker's stop or sweep) wasn't finished \
         after Clauseo waited for it, so no agent was started; trying again in a moment can \
         succeed.";
+    AgentInstallSetupFailed = "agent.install_setup_failed", retryable: true, meaning: "The \
+        agent's files all downloaded and checked, but setting them up on this computer failed \
+        after three tries (unpacking, `npm ci`, the move into place or its receipt), often \
+        because security software held the fresh files. Trying again may work.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

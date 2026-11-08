@@ -141,7 +141,8 @@ fn a_tarball_changed_after_its_check_fails_npm_ci_with_eintegrity() {
     let InstallState::Failed(failure) = last else {
         panic!("the install succeeded with swapped tarballs: {last:?}");
     };
-    assert_eq!(failure.kind, FailureKind::Failed);
+    // npm's own check fails after every download was checked: the set-up's failure.
+    assert_eq!(failure.kind, FailureKind::SetupFailed);
     let log = failure.log.to_string();
     assert!(log.contains("npm error code EINTEGRITY"), "{log}");
     assert_eq!(

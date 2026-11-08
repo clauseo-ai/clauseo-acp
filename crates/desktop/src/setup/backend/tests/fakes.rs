@@ -12,12 +12,13 @@ use clauseo_agents::{
 };
 use clauseo_counts::schema::Event;
 use clauseo_host::{AgentsStopped, LoginSplits};
-use clauseo_protocol::{AgentId, AgentKind, ErrorCode, HostError};
+use clauseo_protocol::{AgentId, ErrorCode, HostError};
 use clauseo_settings::{AgentLaunch, EntryWrite};
 use futures::channel::mpsc::{UnboundedSender, unbounded};
 use futures::stream::BoxStream;
 
 use super::super::{AgentInfo, AgentsBackend, SetupAgents, SetupCounts};
+use super::install_busy::{LaunchGate, held_write};
 use super::timing::{FakeTimer, Stepping};
 use super::{claude, codex};
 use crate::bridge::lock;
@@ -29,14 +30,16 @@ use crate::setup::host_calls::SetupHost;
 use crate::setup::keys::{KeyCache, KeysLoaded};
 use crate::setup::leave::LeaveTimer;
 use crate::setup::login_check::ReusedLogins;
-use crate::setup::readers::{LeaveReaders, ReadHold};
+use crate::setup::readers::LeaveReaders;
 use crate::setup::refresh::SettingsRead;
 use crate::setup::wiring::Wiring;
 use crate::setup::{Setup, SetupBackend, SetupEvents};
 use crate::test_support::block_on;
 
+mod readers;
 mod ui;
 
+pub(super) use self::readers::FakeReaders;
 pub(super) use self::ui::{FakeConfirm, FakeOpener};
 pub(super) use super::wire::{command, setup_events};
 
@@ -194,38 +197,6 @@ impl SetupCounts for FakeCounts {
     }
 }
 
-/// The limits readers' hold and entries, journaled.
-pub(super) struct FakeReaders {
-    pub(super) journal: Journal,
-    pub(super) entries: Mutex<Vec<(AgentKind, Option<AgentLaunch>)>>,
-    /// The agents last told blocked, not journaled.
-    pub(super) blocked: Mutex<Option<BTreeSet<AgentId>>>,
-}
-
-/// A fake hold: journals its release.
-struct FakeHold(Journal);
-
-impl Drop for FakeHold {
-    fn drop(&mut self) {
-        lock(&self.0).push("readers.release".to_owned());
-    }
-}
-
-impl LeaveReaders for FakeReaders {
-    fn hold(&self, _agent: AgentKind) -> BoxFuture<'static, ReadHold> {
-        lock(&self.journal).push("readers.hold".to_owned());
-        let hold = ReadHold::new(FakeHold(Arc::clone(&self.journal)));
-        Box::pin(std::future::ready(hold))
-    }
-    fn set_entry(&self, agent: AgentKind, launch: Option<AgentLaunch>) {
-        lock(&self.journal).push("readers.set_entry".to_owned());
-        lock(&self.entries).push((agent, launch));
-    }
-    fn set_blocked(&self, blocked: BTreeSet<AgentId>) {
-        *lock(&self.blocked) = Some(blocked);
-    }
-}
-
 /// One host call as `RecordingHost` saw it.
 #[derive(Clone, PartialEq, Eq)]
 pub(super) enum HostCall {
@@ -276,6 +247,8 @@ pub(super) struct RecordingHost {
     pub(super) restarted: Mutex<Option<std::sync::mpsc::Sender<()>>>,
     /// What `sign_in_holds` answers, once a test sets it.
     pub(super) holds: Mutex<Option<BoxStream<'static, AgentId>>>,
+    /// The next `set_agent_launch` tells the sender, then answers once the receiver opens.
+    pub(super) launch_gate: Mutex<Option<LaunchGate>>,
 }
 
 impl RecordingHost {
@@ -290,6 +263,7 @@ impl RecordingHost {
             changes: Mutex::new(None),
             restarted: Mutex::new(None),
             holds: Mutex::new(None),
+            launch_gate: Mutex::new(None),
         }
     }
 
@@ -317,7 +291,7 @@ impl SetupHost for RecordingHost {
         launch: AgentLaunch,
     ) -> BoxFuture<'_, Result<EntryWrite, HostError>> {
         self.push(HostCall::SetAgentLaunch(agent, launch));
-        Box::pin(std::future::ready(Ok(EntryWrite::Written)))
+        Box::pin(held_write(lock(&self.launch_gate).take()))
     }
     fn set_endpoint(
         &self,

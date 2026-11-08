@@ -89,3 +89,22 @@ test("install lines: missing offers Sign in only where the caller gives the pres
   button.props.onClick();
   expect(pressed).toBe(1);
 });
+
+test("install lines: a failed set-up says the download worked and has its own code; a failed download keeps its words", async () => {
+  await loadHindi();
+  const log = ["result: setup_failed after 3 tries"];
+  const setup = installLine("en", { kind: "failed", log, setup: true }, "Claude", ACTS);
+  if (setup === null || setup.kind !== "wait") throw new Error("no wait line");
+  expect(setup.words).toBe(
+    "Claude was downloaded but couldn't be set up on this computer. Try again; if it keeps happening, your security software may be blocking it.",
+  );
+  expect(setup.code).toBe("agent.install_setup_failed");
+  expect(linesOf("hi", { kind: "failed", log, setup: true }).words).toContain("डाउनलोड हो गया");
+  const codex = installLine("en", { kind: "failed", log, setup: true }, "Codex", ACTS);
+  if (codex === null || codex.kind !== "wait") throw new Error("no wait line");
+  expect(codex.words).toMatch(/^Codex was downloaded but couldn't be set up/);
+  const download = installLine("en", { kind: "failed", log }, "Claude", ACTS);
+  if (download === null || download.kind !== "wait") throw new Error("no wait line");
+  expect(download.words).toBe("Claude couldn't be downloaded.");
+  expect(download.code).toBe("agent.install_failed");
+});

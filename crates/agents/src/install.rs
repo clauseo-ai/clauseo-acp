@@ -5,7 +5,11 @@
 //! - `Offline`: `Waiting`, then 30 s on the timer and again, with no try counted, until it
 //!   works or is paused.
 //! - `Blocked` and `DiskFull` stop at once: a retry would meet the same proxy or disk.
-//! - Anything else counts as a try; the third is `Failed`, after waits of 2 s and then 8 s.
+//! - Anything else counts as a try; the third is `Failed`, after waits of 2 s and then 8 s. A
+//!   sharing or lock error in `npm ci` or the rename is first retried in place (`npm`).
+//!
+//! Each try starts by emptying the npm cache ([`empty_npm_cache`]), so tries cut short never
+//! pile up its copies of the tarballs.
 //! - A pause ends the job quietly where it is: `pause` has already sent `Paused`.
 //!
 //! Every wait and every npm run is raced against the job's [`Cancel`], and every event goes
@@ -13,9 +17,13 @@
 
 mod files;
 mod npm;
+mod try_error;
+
+pub(crate) use files::empty_npm_cache;
+use try_error::Next;
+pub(crate) use try_error::TryError;
 
 use std::fs::File;
-use std::io;
 use std::path::PathBuf;
 use std::pin::pin;
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
@@ -28,14 +36,12 @@ use futures::future::{Either, select};
 use crate::cancel::Cancel;
 use crate::config::{AgentsConfig, Network};
 use crate::disk;
-use crate::download::{FetchError, FetchKind, write_kind};
-use crate::log::{InstallLog, redact};
+use crate::log::InstallLog;
 use crate::node::{self, FoundNode, NotUsed, UserSearch};
 use crate::platform::Libc;
 use crate::receipt::{install_folder, read_receipt, script_path, write_receipt};
 use crate::state::{Failure, FailureKind, InstallState, Installed};
 use crate::worker::{Shared, Ticket};
-use crate::write::ExtractError;
 
 /// The most tries one install makes.
 const TRIES: u32 = 3;
@@ -72,103 +78,6 @@ pub(crate) fn run<T: Timer + Send + Sync>(job: &Job<T>) {
     futures::executor::block_on(job.work());
     // Given up before the job lock, so the next job here never finds it held.
     job.release_lock();
-}
-
-/// How a try ended badly, and what the job does next.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Next {
-    /// Wait 30 s and try again, no try counted.
-    Offline,
-    /// Stop now as `Blocked`.
-    Blocked,
-    /// Stop now as `DiskFull`.
-    DiskFull,
-    /// Count a try; the third is `Failed`.
-    Retry,
-    /// Stop now as `Failed`: a retry cannot help.
-    Stop,
-    /// Paused: end quietly.
-    Cancelled,
-}
-
-/// A try that did not finish: what comes next, and the log's lines for it.
-#[derive(Debug)]
-pub(crate) struct TryError {
-    next: Next,
-    host: Option<String>,
-    status: Option<u16>,
-    /// Redacted.
-    detail: String,
-}
-
-impl TryError {
-    /// A failure no retry can help: the job stops now as `Failed`, with `detail` redacted.
-    pub(crate) fn stop(detail: &str, config: &AgentsConfig) -> TryError {
-        TryError::new(Next::Stop, detail, config)
-    }
-
-    /// A try to count, with `detail` redacted.
-    pub(crate) fn retry(detail: &str, config: &AgentsConfig) -> TryError {
-        TryError::new(Next::Retry, detail, config)
-    }
-
-    fn new(next: Next, detail: &str, config: &AgentsConfig) -> TryError {
-        TryError {
-            next,
-            host: None,
-            status: None,
-            detail: redact(detail, &config.data_dir),
-        }
-    }
-
-    pub(crate) fn cancelled() -> TryError {
-        TryError {
-            next: Next::Cancelled,
-            host: None,
-            status: None,
-            detail: String::new(),
-        }
-    }
-
-    /// A local file error: a full disk, else a try to count.
-    pub(crate) fn io(what: &str, err: &io::Error, config: &AgentsConfig) -> TryError {
-        let next = match write_kind(err) {
-            FetchKind::DiskFull => Next::DiskFull,
-            _ => Next::Retry,
-        };
-        TryError::new(next, &format!("{what}: {err}"), config)
-    }
-
-    pub(crate) fn extract(err: &ExtractError, config: &AgentsConfig) -> TryError {
-        match err {
-            ExtractError::Io(err) => TryError::io("unpacking Node failed", err, config),
-            other => TryError::retry(&other.to_string(), config),
-        }
-    }
-
-    /// npm's `ENOSPC` is a full disk; any other npm failure is a try to count.
-    pub(crate) fn npm(detail: &str, enospc: bool, config: &AgentsConfig) -> TryError {
-        let next = if enospc { Next::DiskFull } else { Next::Retry };
-        TryError::new(next, detail, config)
-    }
-}
-
-impl From<FetchError> for TryError {
-    fn from(err: FetchError) -> TryError {
-        let next = match err.kind {
-            FetchKind::Offline => Next::Offline,
-            FetchKind::Blocked => Next::Blocked,
-            FetchKind::DiskFull => Next::DiskFull,
-            FetchKind::Cancelled => Next::Cancelled,
-            FetchKind::Integrity | FetchKind::Failed => Next::Retry,
-        };
-        TryError {
-            next,
-            host: err.host,
-            status: err.status,
-            detail: err.detail,
-        }
-    }
 }
 
 /// The Node a try uses.
@@ -328,7 +237,7 @@ impl<T: Timer + Send + Sync> Job<T> {
                     let kind = match err.next {
                         Next::Blocked => FailureKind::Blocked,
                         Next::DiskFull => FailureKind::DiskFull,
-                        _ => FailureKind::Failed,
+                        _ => err.failed_kind(),
                     };
                     return self.fail(kind, &err, &run, user.as_ref());
                 }
@@ -339,7 +248,7 @@ impl<T: Timer + Send + Sync> Job<T> {
                         .and_then(|n| BACKOFF.get(n).copied())
                         .filter(|_| run.tries < TRIES);
                     let Some(backoff) = backoff else {
-                        return self.fail(FailureKind::Failed, &err, &run, user.as_ref());
+                        return self.fail(err.failed_kind(), &err, &run, user.as_ref());
                     };
                     push_error(&mut run.log, &err);
                     if !self.wait(backoff).await {
@@ -358,6 +267,9 @@ impl<T: Timer + Send + Sync> Job<T> {
     ) -> Result<Installed, TryError> {
         let config = &self.config;
         let platform = config.platform;
+        // A try cut short left its npm cache behind; this one starts with none, so a run of
+        // interrupted tries never holds more than one try's cache.
+        empty_npm_cache(&config.data_dir);
         let node = match user {
             Some(found) => NodeChoice::User(found.clone()),
             None if platform.libc == Some(Libc::Musl) => {
@@ -381,7 +293,9 @@ impl<T: Timer + Send + Sync> Job<T> {
         let node_needed = matches!(node, NodeChoice::Runtime { fetch: true, .. });
         self.check_disk(node_needed)?;
         let fetched = files::fetch_all(self, &node, run)?;
-        let installed = npm::install(self, &node, &fetched, run).await?;
+        let installed = npm::install(self, &node, &fetched, run)
+            .await
+            .map_err(TryError::in_setup)?;
         files::clean_up(config, &fetched);
         Ok(installed)
     }

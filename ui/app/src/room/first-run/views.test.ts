@@ -47,6 +47,20 @@ test("downloading's done never runs above its total", () => {
   expect(view).toMatchObject({ kind: "downloading", doneMb: 160, totalMb: 160 });
 });
 
+test("a failed set-up is a failed view marked setup; a failed download is not", () => {
+  const failed = (code: "agent.install_setup_failed" | "agent.install_failed") =>
+    installView(setup({ failed: { code, hosts: [], log: ["result: failed after 3 tries"] } }));
+  expect(failed("agent.install_setup_failed")).toEqual({
+    kind: "failed",
+    log: ["result: failed after 3 tries"],
+    setup: true,
+  });
+  expect(failed("agent.install_failed")).toEqual({
+    kind: "failed",
+    log: ["result: failed after 3 tries"],
+  });
+});
+
 test("installing has no bytes; paused says the size it had, about", () => {
   expect(installView(setup("installing"))).toEqual({ kind: "installing" });
   expect(installView(setup("paused", 182))).toEqual({ kind: "missing", mb: 180 });

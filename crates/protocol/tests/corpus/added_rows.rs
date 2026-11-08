@@ -492,4 +492,11 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (380, 0xbee7_b1d2_6c48_dac7),
         (282, 0xc743_732e_a21c_3a19),
     ),
+    (
+        "added/turn_failed-AgentInstallSetupFailed",
+        include_bytes!("added/turn_failed-AgentInstallSetupFailed.jsonl"),
+        include_bytes!("added/turn_failed-AgentInstallSetupFailed.msgpack"),
+        (354, 0xaa51_6b8d_d493_6995),
+        (255, 0xf275_489c_77b6_f6b2),
+    ),
 ];
