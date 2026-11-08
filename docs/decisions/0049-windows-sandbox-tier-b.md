@@ -505,6 +505,23 @@ started elevated, by the app or by the uninstall hook.
   lie inside that SID's `ProfileList` profile.
   Per machine, the install folder may be anywhere, but only SYSTEM, Administrators or
   TrustedInstaller may change it.
+- **Per user, the installer only places the copy (`--adopt --place-only`).** On the Windows
+  VM, Microsoft Defender quarantined the per-user installer when its own process tree made the
+  pool users, the SYSTEM tasks and the WFP filters, in `--adopt`'s set-up step. The controls
+  narrowed it to that: only the installer tree's creation of users, tasks and WFP filters was
+  flagged, not placing the copy. So that work leaves the installer's tree. `--place-only` does
+  `--adopt`'s checks, the lock-down, the take-back of `staging\` and the four record values,
+  and nothing else: no task and no set-up (no pool user, group, filters or WSL deny). Its exits
+  are plain `--adopt`'s before the set-up (0, 1, 2, 3, 5, 7, 8, 9), with no new code, and
+  `--data-dir` is still required, since an early failure's `setup-result.json` goes there. The
+  app's first run then starts the admin copy's `--set-up` elevated (`runas`), outside the
+  installer's tree, and that set-up makes the pool and registers `\Clauseo\SandboxRefresh`
+  and `\Clauseo\SandboxStop` for the lawyer (`late_steps::tasks`, when `AdminCopyOwner` is
+  the owner it records), again on every re-run, replacing what is there. Between the install
+  and that first run the copy is recorded with no task: the launcher's check passes, and the
+  copy isn't refreshed until the first set-up has registered the refresh task. Plain `--adopt`
+  (both tasks, then the set-up in-process) is unchanged, and per-machine installs keep it.
+  Switching the per-user installer (`admin_copy.nsh`) to `--place-only` is its own change.
 - **One owner, of one kind.** `AdminCopyOwner` records whose install placed the copy: the
   lawyer's SID, or `machine`. A per-user `--adopt` refuses a pool owned by another SID
   (`OwnerSid`) or a copy another install placed; a per-machine one refuses a copy a per-user
@@ -516,7 +533,7 @@ started elevated, by the app or by the uninstall hook.
   DACL" below), gives the folder and everything left owner Administrators and a protected DACL
   (SYSTEM and Administrators full, Users read and run), reads each back exactly, records
   `AdminCopySha256`, `UserInstallDir`, `AdminCopyVersion` and `AdminCopyOwner`, and, per
-  user, runs the normal set-up in-process. Exits: 0 done, 1 usage, 2 another account, 3 failed,
+  user (unless `--place-only`, above), runs the normal set-up in-process. Exits: 0 done, 1 usage, 2 another account, 3 failed,
   5 lock held, 6 data folder not the user's, 7 not elevated, 8 not the admin copy, 9 downgrade.
   Every exit 3 before the set-up writes one Event Log line (source `Clauseo Sandbox`):
   `--adopt failed (exit 3) at step <name>: <Win32 error N | HRESULT 0x... | no Windows error
@@ -1615,8 +1632,11 @@ The elevated exe runs only from its admin copy,
 elevation, so the copy goes stale. A SYSTEM scheduled task refreshes it without a prompt, and
 only from an exe the updater key signed.
 
-**The task.** `--adopt` registers `\Clauseo\SandboxRefresh` through `ITaskService` (`register_task`,
-`SystemTask::Refresh`). It runs as LOCAL SYSTEM. Its one action is the admin copy's path, resolved
+**The task.** Plain `--adopt` registers `\Clauseo\SandboxRefresh` through `ITaskService`
+(`register_task`, `SystemTask::Refresh`); per user, every set-up with the owner's admin copy
+registers it again, and after `--adopt --place-only` the first run's set-up is what registers it
+(`late_steps::tasks`, "Admin copy").
+It runs as LOCAL SYSTEM. Its one action is the admin copy's path, resolved
 from `FOLDERID_ProgramFiles` and quoted (it has a space), with `--refresh` and no other argument. It
 starts at the record owner's logon and on demand, needs no network, stops after 5 minutes, and never
 runs twice at once. The task and its folder carry
@@ -1760,8 +1780,10 @@ The runner's sweeps (#649) stop a matter's processes as its pool user. A process
 own DACL survives them and can stay alive into the next logon. SYSTEM, with `SeDebugPrivilege`,
 can stop it whatever its DACL says.
 
-**The task.** `--adopt` registers `\Clauseo\SandboxStop` right after `\Clauseo\SandboxRefresh`
-(`register_task`, `SystemTask::Stop`), the same way: LOCAL SYSTEM, the same descriptor (the
+**The task.** Plain `--adopt` registers `\Clauseo\SandboxStop` right after
+`\Clauseo\SandboxRefresh` (`register_task`, `SystemTask::Stop`), and so does every per-user
+set-up with the owner's admin copy (`late_steps::tasks`, after `--place-only` the first to), the
+same way: LOCAL SYSTEM, the same descriptor (the
 owner may read and execute it, which starts and ends it), one instance at a time. Its action is the admin copy with
 `--stop` and no other argument. It runs only on demand and stops after 2 minutes. A failed
 registration fails `--adopt` before the record's admin-copy values are written, as for the
@@ -1775,12 +1797,13 @@ Administrators, is deleted and made again, which loses nothing.
 **Per machine.** A per-machine `--adopt` has no owner to name in the descriptor, so it registers
 neither task. The refresh task stays per-user only: IT updates a per-machine install. The stop
 task is registered by the elevated set-up instead, once it has written the record with the
-owner as `OwnerSid`, when the record's `AdminCopyOwner` is `machine` (`late_steps::stop_task`).
+owner as `OwnerSid`, when the record's `AdminCopyOwner` is `machine` (`late_steps::tasks`).
 It is the same registration as `--adopt`'s: same principal, argument, limits and descriptor,
 with `OwnerSid` as the owner who may read and execute, and so start and end, it. Every set-up of the owner registers it
 again, replacing the one there. A new owner's set-up, after a removal, replaces the previous
 owner's task, so only the new owner can start it. A failed registration fails the set-up at
-the step "registering the sandbox's stop task", rolled back like any other step. `--remove`
+the step "registering the sandbox's stop task" (per user, a failed refresh registration at
+"registering the admin copy's refresh task"), rolled back like any other step. `--remove`
 deletes the task just before the record (`RemoveStep::StopTask`); a failed deletion is a partial
 removal, with the record kept for the next run. `--remove --uninstall` also deletes it with the
 admin copy.
