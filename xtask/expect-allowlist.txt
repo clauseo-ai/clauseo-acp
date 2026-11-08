@@ -171,6 +171,7 @@ crates/sandbox/src/windows/git_tree/os/files.rs read_capped clippy::disallowed_m
 crates/sandbox/src/windows/git_tree/os/level.rs - unsafe_code
 crates/sandbox/src/windows/git_tree/os/nt.rs - unsafe_code
 crates/sandbox/src/windows/git_tree/os/put.rs - unsafe_code
+crates/sandbox/src/windows/git_tree/os/stub.rs - unsafe_code
 
 # The setup exe's VERSIONINFO .rc, written into OUT_DIR by the build script.
 crates/sandbox/build.rs write_out clippy::disallowed_methods
