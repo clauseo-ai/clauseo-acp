@@ -2107,18 +2107,35 @@ global-object right can hold it and it outlives an install. It ends once the flo
 still ends on a verified pass. Its own budget, 330 s, ends it whatever it waits for, 30 s inside the
 task's 6 minutes (`PT6M`), and no pass starts that its 1 s gap and 10 s lock wait could carry past
 the budget; a stop there with the deny unverified is an error line, one with it verified a warning
-(an install still in progress may yet remove it). A failure that repeats is logged once while it
+(an install still in progress may yet remove it, or one that ended under 3 s before the budget left
+no time to settle and check again). A failure that repeats is logged once while it
 repeats. It does nothing else: no admin-copy step, no record read beyond the phase's own and
 `WslDenyAppIds`, and never WSL's upgrade. The event trigger is on this task alone because anyone who
 can log on can fire it: INTERACTIVE may write to the Application log, so the lawyer or a pool user
 can forge an `MsiInstaller` event, and on the refresh that started the admin copy's steps as SYSTEM.
 Here a forged event gains no more than a re-applied deny, and a forged burst gives one run at a
 time, each holding the set-up lock for a moment (a set-up that meets it then fails at once and can
-be run again). A start while it runs is queued (`TASK_INSTANCES_QUEUE`, `SystemTask::instances`; the
-other tasks drop it): a second install's start event during a held run still gives a run after it,
-and the launch check's request isn't lost. A forged flood only chains re-check runs, each bounded by
-the budget and, with no install, ending after the floor; pool users can write the Application log,
-so they can start such runs, but queued runs execute one at a time and only re-check the deny.
+be run again). A start while it runs starts beside it (`TASK_INSTANCES_PARALLEL`,
+`SystemTask::instances`; the other tasks drop it) and meets a run lock (`wsl_phase/run_lock.rs`).
+Queued starts (`TASK_INSTANCES_QUEUE`) had no bound but the Task Scheduler's own: a forged flood
+could have built hours of 20 s+ runs in a queue that may be the machine's, so the stop, the refresh
+or the heal request could be refused (Event 131). The lock is
+`%ProgramData%\Clauseo\Sandbox\wsl-deny.lock`, held as an open handle with no sharing, never a
+named mutex, which a pool user could make first in `Global\`. Its folders are made and checked as
+the sweep's admin-only log's (#750, ported, as that PR isn't in this one's base): each made with its
+descriptor at once (`Clauseo` as the installer makes it, `Sandbox` admin-only), reopened without
+following a reparse point, owner and DACL read through the handle; the file is made SYSTEM-only
+(`O:SYD:P(A;;FA;;;SY)`) and must be a plain file with one link kept so. A start that finds it held
+sets `WslDenyAgain` (`REG_DWORD`) in the SYSTEM-only record key and exits 0 at once. The holder
+clears the flag as each run starts and reads and clears it just before it would end: set, it runs
+once more within what is left of its 330 s budget; with the budget spent it ends, and the next
+trigger runs. So a second install's event during a held run still gives a run after it, the launch
+check's request isn't lost, and the backlog is at most one flag. Pool users can still start
+instances by forging events, but while one runs each sets the flag and exits at once; with none
+running, one takes the lock and runs a bounded re-check. A lock path that fails its checks (a
+junction, a file or folder another user owns or may change) is an error line, and the run goes on
+without the lock: availability wins for a task that only re-applies the deny, and unlocked runs are
+each bounded by the budget.
 It shares the other tasks' principal, descriptor (owned by Administrators, the
 owner `FRFX`) and folder, stops after 6 minutes (`PT6M`), and is registered and removed with
 them: `--adopt` registers it per user after `\Clauseo\SandboxStop` (`refresh::TASKS`), a
