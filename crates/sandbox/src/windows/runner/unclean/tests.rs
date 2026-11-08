@@ -1,11 +1,13 @@
 //! The markers' checks through a fake, on every OS: F4 refusing a logon until `StopSequence`
 //! reaches a stop-awaiting marker's number, a dead outer's marker made one awaiting a stop, the
-//! re-mark once that stop completed (its sweep read only then), a launch's bounded wait for a
-//! sweep, and the desktop's start-up requests.
+//! re-mark once that stop completed (its sweep read only then), the final stop read once that
+//! sweep completed, a launch's bounded wait for a sweep, and the desktop's start-up requests.
 
 use std::collections::BTreeMap;
 
 use super::*;
+
+mod final_stop;
 
 const POOL_A: &str = "S-1-5-21-1-2-3-1010";
 const POOL_B: &str = "S-1-5-21-1-2-3-1011";
@@ -146,7 +148,9 @@ impl Markers for Fake {
 
 const STOP: MarkerState = MarkerState::AwaitingStop { stop: 3 };
 /// What [`STOP`] becomes once its stop completed: the fake's `SweepNext`, read then.
-const REMARKED: MarkerState = MarkerState::AwaitingSweep { sweep: 9 };
+const REMARKED: MarkerState = MarkerState::AwaitingSweepBeforeStop { sweep: 9 };
+/// What [`REMARKED`] becomes once its sweep completed: the fake's `StopNext`, read then.
+const FINAL: MarkerState = MarkerState::AwaitingFinalStop { stop: 5 };
 
 #[test]
 fn f4_refuses_until_stop_sequence_reaches_the_markers_number() {
@@ -170,14 +174,21 @@ fn f4_refuses_until_stop_sequence_reaches_the_markers_number() {
         "no sweep number while the escapee lives"
     );
     // Once the stop that reserved 3 completed: the marker awaits a sweep whose number is read
-    // now, which is requested and waited for; once it completes, the logon goes.
+    // now, which is requested and waited for; once it completes, the final stop's number is
+    // read and that stop requested, and the logon refused until it completes.
     fake.done = Sequences { stop: 3, sweep: 2 };
     fake.sweeps = vec![2, 9];
-    assert_eq!(logon_check(&mut fake, &sid(POOL_A)), Ok(()));
-    assert!(!fake.has("a1"), "cleared by the sweep F4 waited for");
-    assert_eq!(fake.asked("stop"), 2);
+    let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
+    assert_eq!(refused.exit, RunExit::AwaitingStop);
+    assert!(refused.why.contains("final stop"), "{refused:?}");
+    assert_eq!(fake.state("a1"), Some(FINAL));
+    assert_eq!(fake.asked("stop"), 3);
     assert_eq!(fake.asked("sweep"), 1);
     assert_eq!(fake.asked("pause"), 2);
+    fake.done.stop = 5;
+    assert_eq!(logon_check(&mut fake, &sid(POOL_A)), Ok(()));
+    assert!(!fake.has("a1"), "cleared by the final stop");
+    assert_eq!(fake.asked("stop"), 3);
 }
 
 #[test]
@@ -233,10 +244,14 @@ fn f4_counts_this_pool_users_markers_and_those_naming_none() {
         Some(MarkerState::AwaitingSweep { sweep: 40 }),
     );
     assert_eq!(logon_check(&mut fake, &sid(POOL_A)), Ok(()));
-    // A stop met: the marker is re-marked, and the logon goes once its sweep completed.
+    // A stop met: the marker is re-marked, and the logon goes once its sweep, then its final
+    // stop, completed.
     fake.marker("a3", Some(POOL_A), Some(STOP));
     fake.done = Sequences { stop: 3, sweep: 1 };
     fake.sweeps = vec![9];
+    assert!(logon_check(&mut fake, &sid(POOL_A)).is_err());
+    assert_eq!(fake.state("a3"), Some(FINAL));
+    fake.done.stop = 5;
     assert_eq!(logon_check(&mut fake, &sid(POOL_A)), Ok(()));
     assert!(!fake.has("a3"));
     // Sequences that can't be read refuse a marker awaiting a stop.
@@ -258,12 +273,18 @@ fn f4_makes_a_dead_outers_marker_await_a_stop_read_now() {
     let read = MarkerState::AwaitingStop { stop: 5 };
     assert_eq!(fake.state("a1"), Some(read));
     assert_eq!(fake.log, ["read StopNext", "stop"]);
-    // The stop that reserved 5 completed: the next logon goes, the marker awaiting a sweep.
+    // The stop that reserved 5 completed: the marker awaits a sweep, then a final stop read once
+    // that sweep completed; the logon goes once that stop completed.
     fake.done = Sequences { stop: 4, sweep: 99 };
     assert!(logon_check(&mut fake, &sid(POOL_A)).is_err());
     fake.done.stop = 5;
+    fake.stop_next = 6;
     fake.sweep_next = 100;
     fake.sweeps = vec![100];
+    assert!(logon_check(&mut fake, &sid(POOL_A)).is_err());
+    let last = MarkerState::AwaitingFinalStop { stop: 6 };
+    assert_eq!(fake.state("a1"), Some(last));
+    fake.done.stop = 6;
     assert_eq!(logon_check(&mut fake, &sid(POOL_A)), Ok(()));
     assert!(!fake.has("a1"));
 }
@@ -356,12 +377,32 @@ fn a_sweep_before_the_stop_doesnt_clear_an_escapees_marker_and_one_after_it_does
     fake.done.stop = 5;
     fake.sweep_next = 51;
     fake.log.clear();
-    // The launch re-marks it, requests the sweep once, and waits for it.
+    // The launch re-marks it, requests the sweep once, and waits for it. The marker then owes
+    // its final stop, which is F4's.
     fake.sweeps = vec![50, 51];
     assert_eq!(await_sweeps(&mut fake), Ok(()));
-    assert!(!fake.has("a1"), "cleared by the sweep after the stop");
-    let first = ["read SweepNext", "sweep", "pause", "pause", "remove a1"];
+    let swept = MarkerState::AwaitingSweepBeforeStop { sweep: 51 };
+    assert_eq!(
+        fake.state("a1"),
+        Some(swept),
+        "not cleared by the sweep alone"
+    );
+    let first = ["read SweepNext", "sweep", "pause", "pause"];
     assert_eq!(fake.log, first);
+    // F4 reads the final stop's number only now and requests that stop, which clears it.
+    fake.stop_next = 6;
+    assert!(logon_check(&mut fake, &sid(POOL_A)).is_err());
+    let last = MarkerState::AwaitingFinalStop { stop: 6 };
+    assert_eq!(fake.state("a1"), Some(last));
+    assert_eq!(
+        await_sweeps(&mut fake),
+        Ok(()),
+        "a final stop doesn't hold a launch"
+    );
+    assert!(fake.has("a1"));
+    fake.done.stop = 6;
+    assert_eq!(await_sweeps(&mut fake), Ok(()));
+    assert!(!fake.has("a1"), "cleared by the final stop");
 }
 
 #[test]
@@ -473,7 +514,14 @@ fn f4_replaces_an_unreadable_marker_with_one_awaiting_a_stop_read_now() {
     );
     assert_eq!(fake.state("x1"), Some(REMARKED));
     assert_eq!(fake.state("x2"), Some(REMARKED));
+    // Then its final stop, read once that sweep completed.
     fake.sweeps = vec![9];
+    fake.stop_next = 6;
+    assert!(logon_check(&mut fake, &sid(POOL_A)).is_err());
+    let last = MarkerState::AwaitingFinalStop { stop: 6 };
+    assert_eq!(fake.state("x1"), Some(last));
+    assert_eq!(fake.state("x2"), Some(last));
+    fake.done.stop = 6;
     assert_eq!(logon_check(&mut fake, &sid(POOL_A)), Ok(()));
     assert!(fake.markers.is_empty(), "{:?}", fake.markers);
 }
