@@ -7,12 +7,14 @@
 //!   relative to the one above (`OBJ_DONT_REPARSE`, backup intent), each refused if a reparse
 //!   point or not a folder, and listed through that handle (`FileIdBothDirectoryInfo`). A name
 //!   the listing says is a reparse point, or that isn't UTF-16 text, fails the walk: what it
-//!   hides can't be checked. `SeBackupPrivilege` is enabled for the walk alone.
+//!   hides can't be checked. A folder gone before it is opened (deleted mid-walk) is left out
+//!   and counted. `SeBackupPrivilege` is enabled for the walk alone.
 //! - Every task under the Task Scheduler's cache,
 //!   `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tree` (a key holding
 //!   an `Id` value; a folder's key holds none), opened read-only in the 64-bit view. A task's
 //!   key also holds its security descriptor, the `SD` value, which gives a hidden task's owner
-//!   ([`Sweeper::task_cache_owner`]).
+//!   ([`Sweeper::task_cache_owner`]). A key gone while listed (`ERROR_FILE_NOT_FOUND` on its
+//!   open, `ERROR_KEY_DELETED` on a read: a task deleted mid-listing) is left out and counted.
 //!
 //! [`Sweeper::task_file_paths`]: super::Sweeper::task_file_paths
 //! [`Sweeper::task_cache_paths`]: super::Sweeper::task_cache_paths
@@ -22,9 +24,12 @@
     reason = "the registry calls that list and read the Task Scheduler's cache"
 )]
 
+use std::io;
 use std::path::Path;
 
-use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_NO_MORE_ITEMS, ERROR_SUCCESS};
+use windows::Win32::Foundation::{
+    ERROR_FILE_NOT_FOUND, ERROR_KEY_DELETED, ERROR_NO_MORE_ITEMS, ERROR_SUCCESS, WIN32_ERROR,
+};
 use windows::Win32::Storage::FileSystem::FILE_LIST_DIRECTORY;
 use windows::Win32::System::Registry::{
     HKEY, HKEY_LOCAL_MACHINE, KEY_ENUMERATE_SUB_KEYS, KEY_QUERY_VALUE, KEY_WOW64_64KEY, REG_BINARY,
@@ -32,7 +37,7 @@ use windows::Win32::System::Registry::{
 };
 use windows::core::{HSTRING, PWSTR, w};
 
-use super::{FOLDERS_CAP, Failed, LISTED_CAP};
+use super::{FOLDERS_CAP, Failed, LISTED_CAP, Listing};
 use crate::windows::acl::object::Object;
 use crate::windows::acl::privilege::Privileges;
 use crate::windows::acl_bytes::owner_sid;
@@ -49,15 +54,17 @@ const TREE: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskC
 
 /// Every task file below `Tasks` in the system folder `system`, as its task's path
 /// (`\A\B\name`), as the module says.
-pub(super) fn task_files(system: &Path) -> Result<Vec<String>, Failed> {
+pub(super) fn task_files(system: &Path) -> Result<Listing, Failed> {
     let _backup = Privileges::enable(&BACKUP).map_err(|error| error.to_string())?;
     let root = Object::open_for(system, 0)
         .map_err(|error| format!("the system folder couldn't be opened ({error})"))?;
     if root.reparse() || !root.folder {
         return Err("the system folder isn't a plain folder".to_owned());
     }
-    let tasks = listable(&root, &wide("Tasks"))?;
+    let tasks = listable(&root, &wide("Tasks"))?
+        .ok_or_else(|| "the system folder holds no Tasks folder".to_owned())?;
     let mut stack = vec![(String::new(), tasks)];
+    let mut vanished = 0_usize;
     // Counted, and capped, before a folder's handle is opened: the stack holds one open handle
     // per folder in it, so a wide folder can't open more than the cap.
     let mut folders = 1_usize;
@@ -78,7 +85,10 @@ pub(super) fn task_files(system: &Path) -> Result<Vec<String>, Failed> {
                 if folders > FOLDERS_CAP {
                     return Err(format!("more than {FOLDERS_CAP} folders below Tasks"));
                 }
-                stack.push((at, listable(&folder, &child.name)?));
+                match listable(&folder, &child.name)? {
+                    Some(next) => stack.push((at, next)),
+                    None => vanished += 1,
+                }
             } else {
                 paths.push(at);
                 if paths.len() > LISTED_CAP {
@@ -87,21 +97,30 @@ pub(super) fn task_files(system: &Path) -> Result<Vec<String>, Failed> {
             }
         }
     }
-    Ok(paths)
+    Ok(Listing { paths, vanished })
 }
 
-/// The folder `name` in `folder`, opened by handle to be listed; `Err` if it is a reparse
-/// point or not a folder.
-fn listable(folder: &Object, name: &[u16]) -> Result<Object, Failed> {
-    let next = folder
-        .open_child_for(name, FILE_LIST_DIRECTORY.0)
-        .map_err(|error| {
-            format!("a folder below the system folder couldn't be opened ({error})")
-        })?;
+/// The folder `name` in `folder`, opened by handle to be listed; `None` when it is gone,
+/// `Err` if it is a reparse point or not a folder.
+fn listable(folder: &Object, name: &[u16]) -> Result<Option<Object>, Failed> {
+    let next = match folder.open_child_for(name, FILE_LIST_DIRECTORY.0) {
+        Ok(next) => next,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "a folder below the system folder couldn't be opened ({error})"
+            ));
+        }
+    };
     if next.reparse() || !next.folder {
         return Err("a folder below the system folder isn't a plain folder".to_owned());
     }
-    Ok(next)
+    Ok(Some(next))
+}
+
+/// Whether `code` says a key is gone: deleted before its open, or while open.
+fn gone(code: WIN32_ERROR) -> bool {
+    code == ERROR_FILE_NOT_FOUND || code == ERROR_KEY_DELETED
 }
 
 /// `part` in UTF-16, with no NUL.
@@ -121,24 +140,27 @@ impl Drop for Key {
 }
 
 impl Key {
-    /// `subkey` below `root`, read-only, in the 64-bit view.
-    fn open(root: HKEY, subkey: &HSTRING) -> Result<Key, Failed> {
+    /// `subkey` below `root`, read-only, in the 64-bit view; `None` when it is gone.
+    fn open(root: HKEY, subkey: &HSTRING) -> Result<Option<Key>, Failed> {
         let access = KEY_QUERY_VALUE | KEY_ENUMERATE_SUB_KEYS | KEY_WOW64_64KEY;
         let mut key = HKEY::default();
         // SAFETY: `subkey` is NUL-terminated and lives for the call; `key` is a live
         // out-pointer, and the key it receives is owned by the `Key` returned.
         let opened = unsafe { RegOpenKeyExW(root, subkey, None, access, &raw mut key) };
+        if gone(opened) {
+            return Ok(None);
+        }
         if opened != ERROR_SUCCESS {
             return Err(format!(
                 "a key of the Task Scheduler's cache couldn't be opened ({})",
                 opened.0
             ));
         }
-        Ok(Key(key))
+        Ok(Some(Key(key)))
     }
 
-    /// The names of the keys directly below this one.
-    fn subkeys(&self) -> Result<Vec<String>, Failed> {
+    /// The names of the keys directly below this one; `None` when it is gone.
+    fn subkeys(&self) -> Result<Option<Vec<String>>, Failed> {
         let mut names = Vec::new();
         for at in 0_u32.. {
             // A key's name is at most 255 characters.
@@ -161,6 +183,9 @@ impl Key {
             if listed == ERROR_NO_MORE_ITEMS {
                 break;
             }
+            if listed == ERROR_KEY_DELETED {
+                return Ok(None);
+            }
             if listed != ERROR_SUCCESS {
                 return Err(format!(
                     "a key of the Task Scheduler's cache couldn't be listed ({})",
@@ -173,17 +198,19 @@ impl Key {
             })?;
             names.push(text);
         }
-        Ok(names)
+        Ok(Some(names))
     }
 
-    /// Whether this key holds an `Id` value: a task's key.
-    fn is_task(&self) -> Result<bool, Failed> {
+    /// Whether this key holds an `Id` value: a task's key; `None` when it is gone.
+    fn is_task(&self) -> Result<Option<bool>, Failed> {
         // SAFETY: the key is open and the name a NUL-terminated literal; nothing is read back.
         let found = unsafe { RegQueryValueExW(self.0, w!("Id"), None, None, None, None) };
         if found == ERROR_SUCCESS {
-            Ok(true)
+            Ok(Some(true))
         } else if found == ERROR_FILE_NOT_FOUND {
-            Ok(false)
+            Ok(Some(false))
+        } else if found == ERROR_KEY_DELETED {
+            Ok(None)
         } else {
             Err(format!(
                 "a value of the Task Scheduler's cache couldn't be read ({})",
@@ -229,7 +256,8 @@ impl Key {
 /// holds in its `SD` value, as the module says; `Err` when the key or value is missing, can't
 /// be read, or names no owner.
 pub(super) fn task_cache_owner(path: &str) -> Result<Sid, Failed> {
-    let key = Key::open(HKEY_LOCAL_MACHINE, &HSTRING::from(format!("{TREE}{path}")))?;
+    let key = Key::open(HKEY_LOCAL_MACHINE, &HSTRING::from(format!("{TREE}{path}")))?
+        .ok_or_else(|| "a task's key in the Task Scheduler's cache is gone".to_owned())?;
     owner_sid(&key.descriptor()?).ok_or_else(|| {
         "a task's descriptor in the Task Scheduler's cache names no owner".to_owned()
     })
@@ -237,16 +265,33 @@ pub(super) fn task_cache_owner(path: &str) -> Result<Sid, Failed> {
 
 /// Every task the Task Scheduler's cache lists, as its path (`\A\B\name`), as the module says.
 /// Each key is opened from `HKEY_LOCAL_MACHINE` by its whole path and closed before the next.
-pub(super) fn task_cache() -> Result<Vec<String>, Failed> {
+/// The cache's root gone fails it.
+pub(super) fn task_cache() -> Result<Listing, Failed> {
     let mut stack = vec![String::new()];
     let mut keys = 0_usize;
     let mut paths = Vec::new();
+    let mut vanished = 0_usize;
     while let Some(path) = stack.pop() {
-        let key = Key::open(HKEY_LOCAL_MACHINE, &HSTRING::from(format!("{TREE}{path}")))?;
-        if !path.is_empty() && key.is_task()? {
+        let opened = Key::open(HKEY_LOCAL_MACHINE, &HSTRING::from(format!("{TREE}{path}")))?;
+        let read = opened.map(|key| {
+            let task = if path.is_empty() {
+                Some(false)
+            } else {
+                key.is_task()?
+            };
+            Ok::<_, Failed>(task.zip(key.subkeys()?))
+        });
+        let Some((task, subkeys)) = read.transpose()?.flatten() else {
+            if path.is_empty() {
+                return Err("the Task Scheduler's cache is gone".to_owned());
+            }
+            vanished += 1;
+            continue;
+        };
+        if task {
             paths.push(path.clone());
         }
-        for name in key.subkeys()? {
+        for name in subkeys {
             keys += 1;
             if keys > LISTED_CAP {
                 return Err(format!(
@@ -256,5 +301,5 @@ pub(super) fn task_cache() -> Result<Vec<String>, Failed> {
             stack.push(format!("{path}\\{name}"));
         }
     }
-    Ok(paths)
+    Ok(Listing { paths, vanished })
 }

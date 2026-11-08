@@ -50,6 +50,26 @@ pub struct Swept {
     /// didn't give (one whose descriptor shuts this process out, say), and whose task file
     /// didn't show them not the pool's ([`unlisted`]).
     pub hidden: usize,
+    /// The three listings disagreed (a task one held that the walk didn't list), or one
+    /// couldn't be read or changed while read, so the cross-check read them all again and
+    /// judged that second read alone ([`unlisted`]).
+    pub relisted: bool,
+    /// In the read judged, the tasks the walk didn't list that a task file and the cache both
+    /// hold.
+    pub unlisted_in_both: usize,
+    /// In the read judged, the tasks the walk didn't list in a task file alone.
+    pub unlisted_files: usize,
+    /// In the read judged, the tasks the walk didn't list in the cache alone.
+    pub unlisted_keys: usize,
+    /// Of the task files alone, those ignored: the file's own owner isn't a pool SID.
+    pub stray_files: usize,
+    /// Of the cache keys alone, those ignored: the owner their `SD` names isn't a pool SID, or
+    /// can't be read.
+    pub stale_keys: usize,
+    /// Folders below `Tasks` or cache keys gone while they were listed, left out of it.
+    pub vanished: usize,
+    /// Each hidden task's path, where it was read: never logged, for the tests.
+    pub hidden_paths: Vec<String>,
 }
 
 impl Swept {
@@ -91,13 +111,29 @@ pub(super) fn log_line(users: usize, swept: &Swept, jobs: &Result<Jobs, Failed>)
         Ok(_) => String::new(),
         Err(why) => format!("; {why}"),
     };
+    let relisted = if swept.relisted {
+        format!(
+            "; the listings disagreed and were read again: {} tasks in a task file and the cache \
+             only, {} task files with no cache key ({} ignored, not a pool user's), {} cache keys \
+             with no task file ({} ignored, not a pool user's), {} folders or keys gone while \
+             listed",
+            swept.unlisted_in_both,
+            swept.unlisted_files,
+            swept.stray_files,
+            swept.unlisted_keys,
+            swept.stale_keys,
+            swept.vanished
+        )
+    } else {
+        String::new()
+    };
     format!(
         "the sandbox's task sweep: {users} pool users, {} folders and {} tasks read, {} of the \
          pool's tasks deleted, {} unreadable ({} more skipped, not the pool's by their task \
          file), {} with no user or group, {} unresolved (no SID, \
          not another domain's), {} skipped (another domain's, no SID), {} not deleted, {} \
          not listed (in a task file or the cache only), {} running instances stopped, {} not, \
-         {cancelled} BITS jobs cancelled, {failed} not{unlisted}{capped}{listed}",
+         {cancelled} BITS jobs cancelled, {failed} not{unlisted}{capped}{listed}{relisted}",
         swept.folders,
         swept.tasks,
         swept.deleted,

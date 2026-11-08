@@ -2043,17 +2043,40 @@ the pool-user check. No record, or an empty pool, is nothing to sweep. Then it:
    `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tree` (a key holding
    an `Id` value; a folder's holds none), opened read-only in the 64-bit view, each key from
    `HKLM` by its whole path. Each is capped at 100 000 entries (`LISTED_CAP`) and 10 000
-   folders. A task either holds that the walk didn't list, compared exactly and then as
-   Windows compares names (below), is hidden and 56, unless the owner of the security
-   descriptor its cache key holds (the task's `TaskCache\Tree\<path>` key, its `SD` value,
-   `REG_BINARY`, read-only in the 64-bit view) isn't a pool SID, as the fallback asks of a
-   task's own descriptor, and its task file, under the fallback's trust rules above, names a
-   principal that resolves to a SID that isn't the pool's or is another domain's name: then it
-   is skipped, counted with the tasks skipped by their file. A pool owner, or an `SD` that is
-   missing or can't be read, keeps it 56. A hidden task is never deleted: with no task object,
-   nothing is deleted through a file or the registry, and the run fails closed. A listing that
-   can't be read is 56 too. The log line counts hidden tasks ("not listed (in a task file or
-   the cache only)");
+   folders. A folder below `Tasks` or a cache key gone while it is listed (a task deleted
+   mid-listing) is left out of its listing and counted, never failing it. The three listings
+   are compared exactly and then as Windows compares names (below). When they disagree
+   (either listing holds a task the walk didn't list), or a listing can't be read or had a
+   folder or key vanish, all three are read again once, the Task Scheduler's by a walk that
+   only lists, and only that second read is judged, so a task made or deleted mid-run doesn't
+   end the run at 56. A walk that already couldn't list a folder is 56 and isn't repeated. In
+   the read judged, a task the walk didn't list is one of three kinds:
+   - **in a task file and the cache**: hidden and 56, unless the owner of the security
+     descriptor its cache key holds (the task's `TaskCache\Tree\<path>` key, its `SD` value,
+     `REG_BINARY`, read-only in the 64-bit view) isn't a pool SID, as the fallback asks of a
+     task's own descriptor, and its task file, under the fallback's trust rules above, names a
+     principal that resolves to a SID that isn't the pool's or is another domain's name: then it
+     is skipped, counted with the tasks skipped by their file. A pool owner, or an `SD` that is
+     missing or can't be read, keeps it 56;
+   - **in a task file alone** (no cache key, so the Task Scheduler holds no such task): the
+     file's own NTFS owner decides, read through a handle opened as the fallback opens (by
+     handle below `Tasks`, never through a link, refused if a reparse point or a folder) for
+     `READ_CONTROL` alone. A pool SID, or an owner that can't be read, is 56; Administrators,
+     SYSTEM or any other owner leaves a stray file, ignored and counted;
+   - **in the cache alone** (no task file): the owner its key's `SD` names decides. A pool SID
+     is 56: a pool user may hold delete on its own task's file, and deleting it leaves its own
+     task's key, whose `SD` still names it. Any other owner, or an `SD` that is missing or
+     can't be read, leaves a stale key, ignored and counted. Only the Task Scheduler service,
+     as SYSTEM, writes the `TaskCache\Tree` keys and their `SD` values, so a pool user can't
+     make one unreadable; a corrupt or missing `SD` on a leftover key is the system's residue,
+     and blocking every launch on it would lock the sandbox out for good.
+
+   A hidden task is never deleted: with no task object, nothing is deleted through a file or
+   the registry, and the run fails closed. A listing that can't be read on the read judged is
+   56 too. The log line counts hidden tasks ("not listed (in a task file or the cache only)")
+   and, when the listings were read again, each kind: tasks in both, task files alone and how
+   many were ignored, cache keys alone and how many were ignored, and folders or keys gone
+   while listed, never a path or SID;
 4. cancels every BITS job a pool user owns with the stop's BITS step
    (`pool_steps::cancel_pool_jobs`), whatever the walk found. Only then, with no pool task
    left to trigger and no job left to notify, it stops the running instances of the pool's
@@ -2096,7 +2119,7 @@ exit codes (`SweepExit`) start after the stop's 50 and the WSL deny task's 51 an
 | 53 | not LOCAL SYSTEM, or not run from the admin copy; nothing touched |
 | 54 | the record can't be read, or its `PoolSids` or `OwnerSid` is malformed; nothing touched |
 | 55 | a SID in `PoolSids` isn't a pool user; nothing touched |
-| 56 | a task was unreadable or not deleted (a hidden task whose owner can't be read, or whose task file a pool user could have changed, among them), a task file or the Task Scheduler's cache holds a task the listing didn't give and its file doesn't show it isn't the pool's, a pool task's running instance wasn't stopped (or the instances couldn't be read), a folder, the task files or the cache couldn't be listed, or there were more than 10 000 folders; the BITS step still ran |
+| 56 | a task was unreadable or not deleted (a hidden task whose owner can't be read, or whose task file a pool user could have changed, among them), on the listings' second read a task file and the Task Scheduler's cache hold a task the listing didn't give and its file doesn't show it isn't the pool's, a task file with no cache key is a pool user's or its owner can't be read, or a cache key with no task file names a pool owner, a pool task's running instance wasn't stopped (or the instances couldn't be read), a folder, the task files or the cache couldn't be listed, or there were more than 10 000 folders; the BITS step still ran |
 | 57 | every task was read and the pool's deleted, but a pool user's BITS job wasn't cancelled, a job's owner or the list couldn't be read, or the list reached its cap |
 | 58 | `SweepNext` couldn't be reserved: the record was gone or its pool changed, or the write failed (nothing touched), or the lock stayed held (swept, nothing recorded); 56 and 57 win |
 | 59 | the run would have ended 0, but `SweepCompleted` and `SweepSequence` couldn't be written |
@@ -2115,8 +2138,10 @@ A run deletes only the pool users' tasks and BITS jobs. An ended run never write
   task files or the cache show, the cross-check), a flood of tasks or Task Scheduler folders
   (more than 10 000 folders, or 100 000 task files or cache keys, or one folder whose
   descriptor shuts SYSTEM out), a task file it keeps a write handle open on, or, if it can
-  create them, a stray file or a junction it plants under `System32\Tasks` (a file the cache
-  holds no task for has no `SD` to read, and a reparse point fails the file walk). No
+  create them, a stray file it owns or a junction it plants under `System32\Tasks` (a file
+  the cache holds no task for is held to its own owner, and a reparse point fails the file
+  walk). A stray file someone else owns, or a stale cache key that doesn't name a pool owner,
+  no longer blocks. No
   `SweepSequence` is then written, so no marker awaiting a sweep clears: every launch waits
   15 s and is refused with `sandbox.cleaning_up`, and that pool user's logons are refused by
   F4. This fails closed: it stops the sandbox working, never lets a pool task through, and
