@@ -739,9 +739,17 @@ takes the user who asked from its recorded parent (D-B2), never from an argument
   ledger's allows and denies for a recorded pool SID or the group, and the Low label the ledger
   records on the matter's root. Removing that label only tightens. Nothing is added and no other
   entry is touched.
-- **VM rows.** With UAC off, and as the built-in Administrator: set-up, a launch, then the
-  uninstall exits 0 and leaves no record, no `ClauseoSandboxUsers` group, no pool account and no
-  `sandbox\` when the box is ticked.
+- **The data folder at set-up** (`exe::owners_data_dir`: `--set-up`, `--adopt`, `--reclaim`,
+  the set-up task) is stricter. The requesting user must own it, or Administrators may own it
+  when that user is a member of Administrators: enabled or deny-only in the token set-up acts
+  with (the verified parent's, the unelevated installer's, or the session's), read as
+  `TokenGroups`, a failed read refusing. Such a user can elevate anyway, and as the built-in
+  Administrator, or with UAC off, the app makes `data\` Administrators' from the start. SYSTEM
+  never, nor Administrators for a standard user, so no one aims an elevated set-up at a folder
+  such as `C:\ProgramData`: `DataDirNotOwned`.
+- **VM rows.** With UAC off, and as the built-in Administrator: set-up, a forced re-set-up
+  (`NeedsReSetUp`), a launch, then the uninstall exits 0 and leaves no record, no
+  `ClauseoSandboxUsers` group, no pool account and no `sandbox\` when the box is ticked.
 
 **Accepted residual.** A per-machine removal someone other than the owner runs deletes the record
 even when the ledger lists entries it may not touch, as ruled. Those entries name dead SIDs, which
