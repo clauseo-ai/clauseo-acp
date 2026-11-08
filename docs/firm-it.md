@@ -1027,8 +1027,8 @@ Before each Safe workspace launch, Clauseo checks the deny, and refuses the laun
 - **`wsl_deny_missing`**: WSL is on the computer and a WSL class's launch permission lacks the
   deny, or has it after an allow entry. Signing out and in again (or running the task:
   `schtasks /run /tn \Clauseo\SandboxRefresh` as an administrator) puts it back.
-- **`wsl_deny_unverifiable`**: `WSLService` (the WSL that runs VMs) is installed and Clauseo can't
-  check the deny: a launch permission can't be read or isn't a valid descriptor, a WSL class names
+- **`wsl_deny_unverifiable`**: WSL is on the computer (the Store or MSI WSL's `WSLService`, or
+  Windows' own `LxssManager`, which also runs WSL2 VMs) and Clauseo can't check the deny: a launch permission can't be read or isn't a valid descriptor, a WSL class names
   no AppID, or WSL's class is registered as packaged COM
   (`HKLM\SOFTWARE\Classes\PackagedCom\ClassIndex\{A9B7A1B9-0671-405C-95F1-E0612CB4CE7E}`, left by a
   WSL from before 2.0). Repairing or updating WSL (`wsl --update`) usually fixes it.

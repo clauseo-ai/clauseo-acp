@@ -117,7 +117,7 @@ fn a_missing_value_is_made_from_the_default_and_deleted_on_removal() {
 }
 
 #[test]
-fn a_malformed_value_is_never_written_and_is_unverifiable_with_wsl2() {
+fn a_malformed_value_is_never_written_and_is_unverifiable() {
     let mut fake = FakeWsl::lifted();
     fake.keys.get_mut(&app(WSLC_APP)).unwrap().value = Some(vec![1, 0, 4]);
     let applied = apply(&mut fake, &group()).unwrap();
@@ -130,10 +130,15 @@ fn a_malformed_value_is_never_written_and_is_unverifiable_with_wsl2() {
     assert!(!fake.writes.contains(&format!("write {WSLC_APP}")));
     assert_eq!(fake.keys[&app(WSLC_APP)].value, Some(vec![1, 0, 4]));
     assert_eq!(check(&fake), Err(Blocked::WslDenyUnverifiable));
-    // The inbox WSL alone runs no VM: logged, not refused.
+    // The inbox WSL alone runs WSL2's VMs too (Windows 10 2004 on): refused the same.
     let mut fake = inbox();
     fake.keys.get_mut(&app(INBOX_APP)).unwrap().value = Some(vec![9; 40]);
-    assert_eq!(check(&fake), Ok(Found::Unverified));
+    assert_eq!(check(&fake), Err(Blocked::WslDenyUnverifiable));
+    // So is an unreadable one, with only a class registered and no service.
+    let mut fake = inbox();
+    fake.services.clear();
+    fake.fail.push(format!("read {INBOX_APP}"));
+    assert_eq!(check(&fake), Err(Blocked::WslDenyUnverifiable));
     // Removal leaves it and lists it.
     let mut fake = FakeWsl::lifted();
     apply(&mut fake, &group()).unwrap();
@@ -184,7 +189,7 @@ fn with_no_wsl_nothing_is_refused() {
 type Change = Box<dyn Fn(&mut FakeWsl)>;
 
 #[test]
-fn what_cant_be_read_is_unverifiable_with_wsl2_and_missing_comes_first() {
+fn what_cant_be_read_is_unverifiable_and_missing_comes_first() {
     let applied = || {
         let mut fake = FakeWsl::lifted();
         apply(&mut fake, &group()).unwrap();

@@ -2438,12 +2438,13 @@ admin copy's check, before the clean-close record is read). WSL is present when 
 `LxssManager` is installed or any of the three classes is registered; a read that fails counts
 as present. With WSL present, a target whose value (or key) is missing, or whose deny for the
 record's `GroupSid` is missing or comes after an allow, refuses the launch with
-`Blocked::WslDenyMissing` (`wsl_deny_missing`). Otherwise, with `WSLService` present, a target
-that can't be read or parsed, a class with no `AppID`, targets that can't be listed, or
+`Blocked::WslDenyMissing` (`wsl_deny_missing`). Otherwise a target that can't be read or
+parsed, a class with no `AppID`, targets that can't be listed, or
 `HKLM\SOFTWARE\Classes\PackagedCom\ClassIndex\{A9B7A1B9-…CE7E}` (a pre-2.0 Store registration,
 whose launch permission is the package's and overrides the AppID's) refuses with
-`Blocked::WslDenyUnverifiable` (`wsl_deny_unverifiable`). The inbox WSL alone runs no VM, so an
-unreadable inbox value is logged, not refused. With no WSL nothing is refused. Both are
+`Blocked::WslDenyUnverifiable` (`wsl_deny_unverifiable`), whichever WSL is present: the inbox one
+(`LxssManager`) runs WSL2's VMs too from Windows 10 2004 on, so an unreadable inbox value refuses
+like a lifted one. With no WSL nothing is refused. Both are
 `sandbox.blocked`, a refused turn the app words generically ("Something on this computer stops
 the Safe workspace, …"); the check is the launch's, not the protection state's, so no reason
 line of `blocked.ts` is shown for it, and none is added here. `Blocked::WslPoolResidue`

@@ -109,9 +109,10 @@ pub enum Blocked {
     /// after an allow there: a WSL update or repair rewrote it, say. The SYSTEM task
     /// `\Clauseo\SandboxRefresh` puts it back, at the next logon or Windows Installer event.
     WslDenyMissing,
-    /// `WSLService` (the WSL that runs VMs) is on this computer and the deny can't be checked: a
-    /// launch permission can't be read or parsed, a WSL class names no `AppID`, or WSL's class is
-    /// registered as packaged COM, whose permission Clauseo can't change.
+    /// WSL (`WSLService` or the inbox `LxssManager`, both of which can run WSL2's VMs) is on
+    /// this computer and the deny can't be checked: a launch permission can't be read or parsed,
+    /// a WSL class names no `AppID`, or WSL's class is registered as packaged COM, whose
+    /// permission Clauseo can't change.
     WslDenyUnverifiable,
     /// Reserved for the stop's WSL clean-up (part B of the WSL deny): a WSL instance a sandbox
     /// user started that couldn't be ended. Nothing gives it yet.
