@@ -182,6 +182,11 @@ expression: text
 (deny nvram* (with message "clauseo-4242-7"))
 ; IORegistry properties (`ioreg`): the Mac's serial number, its hardware.
 (deny iokit-get-properties (with message "clauseo-4242-7"))
+; Processes outside the jail: no arguments (`kern.procargs2`), path or other info.
+; The base allows the jail's own (`same-sandbox`); this keeps it.
+(deny process-info*
+  (require-not (target same-sandbox))
+  (with message "clauseo-4242-7"))
 
 ; The matter and the state folder: read and write.
 (allow file-read* file-write*

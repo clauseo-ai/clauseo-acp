@@ -70,3 +70,8 @@ mod unicode;
 #[cfg(target_os = "macos")]
 #[path = "jail/deny.rs"]
 mod deny;
+
+#[cfg(test)]
+#[cfg(target_os = "macos")]
+#[path = "jail/outside.rs"]
+mod outside;

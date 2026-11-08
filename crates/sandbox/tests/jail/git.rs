@@ -8,7 +8,7 @@ use crate::support::{World, git, git_outside, launcher, run_outside, tree};
 /// git's runtime: what `xcode-select -p` names (the folder `/usr/bin/git` runs git from), or
 /// for Xcode the whole app, whose `Info.plist` and shared frameworks the shim reads. The
 /// Command Line Tools are in the base profile already.
-fn git_runtime(cwd: &std::path::Path) -> PathBuf {
+pub(crate) fn git_runtime(cwd: &std::path::Path) -> PathBuf {
     let out = run_outside("/usr/bin/xcode-select", &["-p"], cwd);
     out.assert_ok();
     let developer = PathBuf::from(out.stdout.trim());

@@ -197,8 +197,9 @@ impl Writer {
 
     /// The operations `(deny default)` leaves allowed, refused by name. No later rule allows
     /// them, so they hold for the whole profile. Measured on macOS 27.2 (26B123), 2026-11-09:
-    /// a jailed `nvram -p` printed every variable and `ioreg` the Mac's serial number until
-    /// these rules named them (`tests/jail/deny.rs`).
+    /// a jailed `nvram -p` printed every variable, `ioreg` the Mac's serial number, and a
+    /// `KERN_PROCARGS2` sysctl the arguments of a process outside the jail until these rules
+    /// named them (`tests/jail/deny.rs`, `tests/jail/outside.rs`).
     fn default_gaps(&mut self) {
         self.text.push_str(concat!(
             "\n; Operations `(deny default)` does not refuse (macOS 27.2, measured): refused by\n",
@@ -211,6 +212,15 @@ impl Writer {
         );
         let properties = format!("(deny iokit-get-properties {})", self.message);
         self.line(&properties);
+        self.note(
+            "; Processes outside the jail: no arguments (`kern.procargs2`), path or other info.",
+        );
+        self.note("; The base allows the jail's own (`same-sandbox`); this keeps it.");
+        self.rule(
+            "deny",
+            "process-info*",
+            &["(require-not (target same-sandbox))".to_owned()],
+        );
     }
 
     /// The policy's allows, before any of its denies.

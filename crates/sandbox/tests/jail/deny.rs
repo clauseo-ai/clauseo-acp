@@ -40,6 +40,7 @@ const PROBE: &str = r#"
 #include <mach/mach.h>
 #include <servers/bootstrap.h>
 #include <IOKit/IOKitLib.h>
+#include <libproc.h>
 
 #define FSIOC_SYNC_VOLUME _IOW('A', 1, uint32_t)
 int fsctl(const char *, unsigned long, void *, unsigned int);
@@ -120,6 +121,16 @@ int main(int argc, char **argv) {
         uint32_t flags = 0;
         return sys("fsctl", fsctl(a, FSIOC_SYNC_VOLUME, &flags, 0) == 0);
     }
+    if (!strcmp(op, "procargs")) {
+        int mib[3] = {CTL_KERN, KERN_PROCARGS2, atoi(a)};
+        char args[65536];
+        size_t size = sizeof args;
+        return sys("procargs", sysctl(mib, 3, args, &size, NULL, 0) == 0 && size > 0);
+    }
+    if (!strcmp(op, "pidpath")) {
+        char path[PROC_PIDPATHINFO_MAXSIZE];
+        return sys("pidpath", proc_pidpath(atoi(a), path, sizeof path) > 0);
+    }
     if (!strcmp(op, "link")) return sys("link", link(a, b) == 0);
     if (!strcmp(op, "clone")) return sys("clonefile", clonefile(a, b, 0) == 0);
     fprintf(stderr, "unknown action %s\n", op);
@@ -128,19 +139,19 @@ int main(int argc, char **argv) {
 "#;
 
 /// The world and its policy's launcher, with [`PROBE`] built at `tools/probe`.
-struct Jail {
-    w: World,
-    launcher: clauseo_sandbox::SeatbeltLauncher,
+pub(crate) struct Jail {
+    pub(crate) w: World,
+    pub(crate) launcher: clauseo_sandbox::SeatbeltLauncher,
     denials: mpsc::Receiver<Denial>,
     probe: PathBuf,
 }
 
 impl Jail {
-    fn new() -> Jail {
+    pub(crate) fn new() -> Jail {
         Jail::with(|b| b)
     }
 
-    fn with(
+    pub(crate) fn with(
         policy: impl FnOnce(clauseo_sandbox::PolicyBuilder) -> clauseo_sandbox::PolicyBuilder,
     ) -> Jail {
         let w = World::new();
@@ -157,17 +168,17 @@ impl Jail {
         }
     }
 
-    fn m1(&self) -> PathBuf {
+    pub(crate) fn m1(&self) -> PathBuf {
         self.w.at("m1")
     }
 
     /// `probe args` in the jail.
-    fn probe(&self, args: &[&str]) -> Output {
+    pub(crate) fn probe(&self, args: &[&str]) -> Output {
         run(&self.launcher, self.probe_path(), args, &self.m1(), &[])
     }
 
     /// `probe args` outside the jail.
-    fn probe_outside(&self, args: &[&str]) -> Output {
+    pub(crate) fn probe_outside(&self, args: &[&str]) -> Output {
         run_outside(self.probe_path(), args, &self.m1())
     }
 
@@ -175,14 +186,14 @@ impl Jail {
         self.probe.to_str().unwrap()
     }
 
-    fn sh(&self, script: &str, args: &[&str]) -> Output {
+    pub(crate) fn sh(&self, script: &str, args: &[&str]) -> Output {
         sh(&self.launcher, &self.m1(), script, args)
     }
 
     /// Waits for the watcher to report a refused access to `path`, until two seconds pass with
     /// no denial: the kernel Sandbox logged it, so the jail refused it and not the file's mode.
     #[track_caller]
-    fn assert_logged(&self, path: &Path) {
+    pub(crate) fn assert_logged(&self, path: &Path) {
         let mut seen = Vec::new();
         while let Ok(denial) = self.denials.recv_timeout(Duration::from_secs(2)) {
             match denial {
@@ -196,13 +207,13 @@ impl Jail {
 
 /// Exited non-zero, `why` on stderr.
 #[track_caller]
-fn assert_refused_with(out: &Output, why: &str) {
+pub(crate) fn assert_refused_with(out: &Output, why: &str) {
     assert_ne!(out.code, Some(0), "{out:#?}");
     assert!(out.stderr.contains(why), "expected {why:?}: {out:#?}");
 }
 
 /// A name no other run of the tests uses.
-fn unique(base: &str) -> String {
+pub(crate) fn unique(base: &str) -> String {
     format!(
         "{base}-{}-{:?}",
         std::process::id(),
@@ -447,15 +458,15 @@ fn posix_shared_memory_is_refused_and_semaphores_work() {
 #[test]
 fn nvram_variables_cannot_be_read() {
     let j = Jail::new();
+    // Outside the jail the same user sees variables, so an empty list inside is the jail's.
     let outside = run_outside("/usr/sbin/nvram", &["-p"], &j.m1());
+    let name = outside.assert_ok().stdout.split_whitespace().next();
+    let name = name.unwrap_or_else(|| panic!("nvram -p printed nothing outside: {outside:#?}"));
     let inside = run(&j.launcher, "/usr/sbin/nvram", &["-p"], &j.m1(), &[]);
     assert!(inside.stdout.trim().is_empty(), "{inside:#?}");
-    // One variable by name, when this Mac shows any outside the jail.
-    if let Some(name) = outside.stdout.split_whitespace().next() {
-        let one = run(&j.launcher, "/usr/sbin/nvram", &[name], &j.m1(), &[]);
-        assert_ne!(one.code, Some(0), "{one:#?}");
-        assert!(!one.stdout.contains(name), "{one:#?}");
-    }
+    let one = run(&j.launcher, "/usr/sbin/nvram", &[name], &j.m1(), &[]);
+    assert_ne!(one.code, Some(0), "{one:#?}");
+    assert!(!one.stdout.contains(name), "{one:#?}");
 }
 
 /// Class 12: `system-socket` (a routing socket, which any user may open outside; a raw socket,
@@ -479,9 +490,23 @@ fn system_sockets_and_fsctl_are_refused() {
 fn the_serial_number_cannot_be_read_from_the_registry() {
     let j = Jail::new();
     let args = ["-r", "-d", "1", "-c", "IOPlatformExpertDevice"];
-    let key = "IOPlatformSerialNumber";
+    let key = "\"IOPlatformSerialNumber\" = \"";
     let outside = run_outside("/usr/sbin/ioreg", &args, &j.m1());
-    assert!(outside.assert_ok().stdout.contains(key), "{outside:#?}");
+    let line = outside.assert_ok().stdout.lines().find(|l| l.contains(key));
+    let serial = line.and_then(|l| l.rsplit('"').nth(1));
+    let serial = serial.unwrap_or_else(|| panic!("no serial number outside: {outside:#?}"));
+    // The serial number itself, in neither stream, and not under any other name.
     let inside = run(&j.launcher, "/usr/sbin/ioreg", &args, &j.m1(), &[]);
-    assert!(!inside.stdout.contains(key), "{inside:#?}");
+    assert!(
+        !inside.stdout.contains(serial),
+        "the serial number is in stdout"
+    );
+    assert!(
+        !inside.stderr.contains(serial),
+        "the serial number is in stderr"
+    );
+    assert!(
+        !inside.stdout.contains("IOPlatformSerialNumber"),
+        "{inside:#?}"
+    );
 }
