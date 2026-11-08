@@ -72,6 +72,14 @@ impl Pipe for Seen<'_> {
         })
     }
 
+    fn spare(&mut self) -> Result<(), String> {
+        self.0.spare()
+    }
+
+    fn first(&mut self) -> Result<(), Unmade> {
+        self.0.first()
+    }
+
     fn reply(&mut self, client: Self::Client, line: &[u8]) {
         self.0.reply(client, line);
     }
