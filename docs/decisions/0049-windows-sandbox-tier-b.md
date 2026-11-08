@@ -2508,7 +2508,12 @@ administrator's `--remove` for an absent owner takes reads back by their IDs too
 
 Residual: a file moved out of an allowed folder during the run keeps the inherited copy of its
 folder's allow for files, as no entry names the file; the copy goes when something works out
-that file's entries again.
+that file's entries again. The same holds for a granted folder moved again between `located()`
+and the walk at take-back (`back.rs`, `tree_of`/`root_gone`): it is walked at the wrong path or
+counted as gone, its entry is dropped, and its files keep the inherited read. **Both block the
+launch until their follow-up lands:** every cross-matter read goes to a per-run `ClauseoRun-*`
+group SID that SYSTEM deletes at run end (local RIDs are never reused), so a read that escapes
+the ledger names a SID no later token can hold.
 
 - **At the session's end:** `end_reads(ledger, matter, sids, acl, around)`, after
   `repair_after_session`. `sids` are the session's pool user, and the matter's SID when it is a
