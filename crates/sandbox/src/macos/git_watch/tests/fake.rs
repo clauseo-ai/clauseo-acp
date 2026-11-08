@@ -148,11 +148,6 @@ impl FakeFs {
         self.0.lock().unwrap().panic_on = Some(PathBuf::from(dir));
     }
 
-    /// How many folders have been listed.
-    pub(super) fn lists(&self) -> u64 {
-        self.0.lock().unwrap().lists
-    }
-
     /// Makes a listing of `dir` wait until the flag returned is set.
     pub(super) fn block_listing(&self, dir: &str) -> Arc<AtomicBool> {
         let open = Arc::new(AtomicBool::new(false));

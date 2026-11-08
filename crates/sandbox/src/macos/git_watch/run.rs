@@ -69,10 +69,12 @@ pub(crate) trait Session: Send + Sync {
     fn end(&self);
 }
 
-/// How a session's folder is watched while the agent runs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// How a session's folder is watched while the agent runs; its session record keeps it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum Mode {
     /// The stream, its canary and the 30 s pass, with the scans before and after.
+    #[default]
     Live,
     /// No stream: only the launch's state check and walk before, and the final scan after.
     AfterOnly,

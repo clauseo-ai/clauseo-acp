@@ -11,7 +11,8 @@
 //! - every `HEAD` (a file or a link) in a folder that was not a repository at launch, whatever
 //!   surrounds it; a new repository-shaped folder (`HEAD` with `objects` and `refs`, folders
 //!   or links, or a `commondir` file) is taken whole;
-//! - every new link whose target resolves outside the matter, or doesn't resolve;
+//! - every new link that leads outside the matter or nowhere, judged without following any
+//!   link (`Fs::leads_out`): a link on its target's way counts as leading out;
 //! - anything new at a launch repository's `commondir` target that git would read there.
 //!
 //! Names compare as the volume does: without the code points HFS+ ignores
@@ -39,7 +40,7 @@
 //!   before any rescan or 30 s pass. Only once none is left does it scan the matter and set
 //!   aside, so nothing races the moves; when one outlives the kill's 10 s, nothing moves.
 //! - A watchdog thread (`run/watchdog.rs`) ends the session when one check runs past 2 s,
-//!   such as a link's target that makes autofs mount a slow server.
+//!   such as a listing on a disk that stopped answering.
 //! - Setting aside is one `rename(2)`, never replacing, into
 //!   `<set-aside>/<UTC time>-<session>-<random>/item` beside a `record.json` (`aside.rs`),
 //!   with the item's own `HEAD` and `config` renamed. The folder is the data dir's, or a
@@ -53,14 +54,20 @@
 //!   outlived the kill, gets that scan at the host's next start ([`start_up`]) or the
 //!   matter's next launch, once its surviving processes are killed by its probe (only those
 //!   started since its launch); while one is left nothing moves and the matter's launches are
-//!   refused. At the
-//!   host's quit, [`quit`] kills every running session by its probe and waits a little for
-//!   the final scans.
+//!   refused. At the host's quit, [`quit`] kills every running session by its probe and waits
+//!   a little for the final scans.
 //! - Each set-aside reaches the launch's sink as [`Denial::GitSetAside`](crate::Denial),
 //!   uncapped.
-//! - Scans never follow a link and never enter a network volume (`os::local`); a matter on
-//!   one is never scanned, which is logged. That is a known gap: an agent can leave a
-//!   repository in a matter on a network volume and nothing sets it aside.
+//! - Every file operation goes by descriptor (`os.rs`): no link is followed anywhere in a
+//!   path, a walk holds each folder open while it lists it, and nothing on a network volume,
+//!   an automount, or at or below `/net` or `/Network` is entered or looked up in, decided
+//!   without firing an automount trigger.
+//! - A matter on such a volume ([`Policy::matter_watch`]) launches only when no other path
+//!   the agent writes is on that volume, so nothing can be renamed in from elsewhere. Its
+//!   watch has no stream, canary or 30 s pass ([`Mode::AfterOnly`]): only the launch's walk
+//!   before and the final scan after, which enter the matter's own volume at and below the
+//!   matter (`os::Within`) and no other. The session record and the launch's log say which
+//!   case applied; the notes folder's watch is always live.
 //!
 //! The pieces: [`Watch`] decides (`check.rs`), `aside.rs` moves and records, `run.rs` drives
 //! the watch from the stream and the session, `state.rs` keeps the per-matter record, `host.rs`
@@ -90,7 +97,7 @@ mod tests_live;
 
 pub(crate) use check::Watch;
 pub use host::{quit, start_up};
-pub(crate) use run::{Mode, Session, start};
+pub(crate) use run::{Session, start};
 
 /// The `FSEvents` flags the watch reads.
 pub(crate) mod flags {

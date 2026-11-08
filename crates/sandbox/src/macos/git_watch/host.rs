@@ -165,7 +165,13 @@ pub fn start_up(git_set_aside: &Path, notices: &Arc<dyn DenialSink>) -> io::Resu
         if path.extension().is_none_or(|ext| ext != "json") {
             continue;
         }
-        match state::sweep_dead(&FileStore::at(&path), &os::Real, notices, &host()) {
+        let store = FileStore::at(&path);
+        // The matter's own volume, read from its folder now: an after-only matter's is let in.
+        let fs = store
+            .root()
+            .and_then(|root| os::Within::of(&root).ok())
+            .unwrap_or_default();
+        match state::sweep_dead(&store, &fs, notices, &host()) {
             Ok(n) => scanned += n,
             Err(error) => {
                 tracing::error!(file = %path.display(), %error, "a matter's git state can't be read");

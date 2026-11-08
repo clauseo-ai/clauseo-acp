@@ -12,7 +12,7 @@ use std::path::{Component, Path, PathBuf};
 
 use rustix::fs::{FileType, readlinkat};
 
-use super::fd::{self, Folder};
+use super::fd::{self, Allow, Folder};
 
 /// The most links in a row judged: past it, a chain leads out.
 const CHAIN_MAX: usize = 8;
@@ -20,8 +20,9 @@ const CHAIN_MAX: usize = 8;
 /// Whether the link at `link` leads outside folder `root`, leads nowhere, or can't be judged
 /// without following a link: a target that is absolute and not in `root`, that goes above
 /// `root`, passes through a link or a missing name, or ends at nothing.
-pub(super) fn leads_out(link: &Path, root: &Path) -> bool {
-    match inside(link, root, 0) {
+/// `allow` lets the walk into an after-only matter's own volume (`fd.rs`).
+pub(super) fn leads_out(link: &Path, root: &Path, allow: Option<&Allow>) -> bool {
+    match inside(link, root, 0, allow) {
         Ok(inside) => !inside,
         Err(error) => {
             let shown = link.display();
@@ -35,12 +36,12 @@ pub(super) fn leads_out(link: &Path, root: &Path) -> bool {
 type Held = Vec<(Folder, PathBuf)>;
 
 /// Goes into folder `name` of the last folder in `held`; false when it is no folder now.
-fn descend(held: &mut Held, name: &OsStr) -> io::Result<bool> {
+fn descend(held: &mut Held, name: &OsStr, allow: Option<&Allow>) -> io::Result<bool> {
     let Some((at, path)) = held.last() else {
         return Ok(false);
     };
     let path = path.join(name);
-    match fd::child(at, name, &path)? {
+    match fd::child(at, name, &path, allow)? {
         Some(folder) => {
             held.push((folder, path));
             Ok(true)
@@ -51,7 +52,7 @@ fn descend(held: &mut Held, name: &OsStr) -> io::Result<bool> {
 
 /// Whether the link at `link` leads to an entry inside `root` that is not a link, or to a link
 /// that does; `chain` links led here.
-fn inside(link: &Path, root: &Path, chain: usize) -> io::Result<bool> {
+fn inside(link: &Path, root: &Path, chain: usize, allow: Option<&Allow>) -> io::Result<bool> {
     let Ok(rel) = link.strip_prefix(root) else {
         return Ok(false);
     };
@@ -65,12 +66,12 @@ fn inside(link: &Path, root: &Path, chain: usize) -> io::Result<bool> {
     let Some((name, folders)) = names.split_last() else {
         return Ok(false);
     };
-    let Some((top, _)) = fd::open_dir(root)? else {
+    let Some((top, _)) = fd::open_dir(root, allow)? else {
         return Ok(false);
     };
     let mut held = vec![(top, root.to_owned())];
     for folder in folders {
-        if !descend(&mut held, folder)? {
+        if !descend(&mut held, folder, allow)? {
             return Ok(false);
         }
     }
@@ -116,14 +117,14 @@ fn inside(link: &Path, root: &Path, chain: usize) -> io::Result<bool> {
                     fd::lstat_at(&last.fd, name)?.map(|s| FileType::from_raw_mode(s.st_mode));
                 return match kind {
                     Some(FileType::Symlink) if chain < CHAIN_MAX => {
-                        inside(&path.join(name), root, chain + 1)
+                        inside(&path.join(name), root, chain + 1, allow)
                     }
                     None | Some(FileType::Symlink) => Ok(false),
                     Some(_) => Ok(true),
                 };
             }
             Component::Normal(name) => {
-                if !descend(&mut held, name)? {
+                if !descend(&mut held, name, allow)? {
                     return Ok(false);
                 }
             }

@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use super::super::aside::Stuck;
 use super::super::host;
+use super::super::run::Mode;
 use super::super::state::{self, Baseline, Bytes, Host, Known, MatterState, SessionRecord};
 use super::fake::{FakeFs, MemStore, Notices, SET_ASIDE};
 use crate::{Denial, DenialSink, GitItem};
@@ -24,6 +25,7 @@ fn record(session: &str, baseline: Baseline) -> SessionRecord {
         launched: Some(1_000),
         outlived: false,
         finds: Vec::new(),
+        mode: Mode::Live,
     }
 }
 
@@ -274,4 +276,18 @@ fn a_dead_session_of_a_missing_matter_waits_for_it() {
     let (scanned, _) = start_up(&store, &fs, &["dead"], false);
     assert_eq!(scanned, 0);
     assert_eq!(sessions(&store), ["dead"]);
+}
+
+#[test]
+fn a_session_record_keeps_how_its_folder_was_watched_and_reads_live_without_it() {
+    let mut record = record_of("clauseo-mode");
+    record.mode = Mode::AfterOnly;
+    let text = serde_json::to_string(&record).unwrap();
+    assert!(text.contains(r#""mode":"after_only""#), "{text}");
+    let back: SessionRecord = serde_json::from_str(&text).unwrap();
+    assert_eq!(back.mode, Mode::AfterOnly);
+    let mut old: serde_json::Value = serde_json::from_str(&text).unwrap();
+    old.as_object_mut().unwrap().remove("mode");
+    let old: SessionRecord = serde_json::from_value(old).unwrap();
+    assert_eq!(old.mode, Mode::Live, "a record from before reads as live");
 }

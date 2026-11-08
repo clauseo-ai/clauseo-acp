@@ -40,7 +40,9 @@ mod attr;
 mod fd;
 mod link;
 
-pub(crate) use fd::{Folder, off_limits};
+#[cfg(test)]
+pub(crate) use fd::fake_flags;
+pub(crate) use fd::{Allow, Folder, off_limits};
 
 /// The most bytes of a state file read.
 const STATE_MAX: u64 = 4 << 20;
@@ -51,9 +53,52 @@ const NEW: OFlags = OFlags::RDWR
     .union(OFlags::NOFOLLOW)
     .union(OFlags::CLOEXEC);
 
-/// The file system itself.
+/// The file system itself, which enters no network volume or automount.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Real;
+
+/// The file system itself, let into its matter's own volume ([`Allow`]) at and below the
+/// matter: the watches' and the final scans', so an after-only matter on a network or
+/// automounted volume is scanned. Without an allowance (a matter that can't be opened) it is
+/// [`Real`].
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Within(Option<Allow>);
+
+impl Within {
+    /// The file system of the watch of `matter`, its volume read from its folder now.
+    pub(crate) fn of(matter: &Path) -> io::Result<Within> {
+        Allow::of(matter).map(|allow| Within(Some(allow)))
+    }
+}
+
+impl Real {
+    /// The wall time, for records.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the records' wall time; the watch's logic takes it through Fs"
+    )]
+    fn now() -> SystemTime {
+        SystemTime::now()
+    }
+}
+
+/// What the file system may enter beyond local volumes that are not automounts.
+pub(crate) trait Scope: Send {
+    /// The volume it may enter inside its matter, if any.
+    fn allow(&self) -> Option<&Allow>;
+}
+
+impl Scope for Real {
+    fn allow(&self) -> Option<&Allow> {
+        None
+    }
+}
+
+impl Scope for Within {
+    fn allow(&self) -> Option<&Allow> {
+        self.0.as_ref()
+    }
+}
 
 /// The lawyer's own mode for what the watch makes.
 fn private(dir: bool) -> Mode {
@@ -80,7 +125,7 @@ pub(crate) fn resolve(path: &Path) -> Option<PathBuf> {
     dunce::canonicalize(path).ok()
 }
 
-impl Fs for Real {
+impl<Os: Scope> Fs for Os {
     type Dir = Folder;
 
     fn meta(&self, path: &Path) -> Option<Meta> {
@@ -88,8 +133,7 @@ impl Fs for Real {
     }
 
     fn dated(&self, path: &Path) -> Option<(Meta, Stamp)> {
-        let (dir, name) = fd::parent(path, true).ok()?;
-        let stat = fd::lstat_at(&dir, name).ok()??;
+        let stat = fd::entry(path, self.allow()).ok()??;
         let stamp = [
             stat.st_mtime,
             stat.st_mtime_nsec,
@@ -100,13 +144,13 @@ impl Fs for Real {
     }
 
     fn touch(&self, path: &Path) -> io::Result<()> {
-        let (dir, name) = fd::parent(path, false)?;
+        let (dir, name) = fd::parent(path, false, self.allow())?;
         let fd = openat(&dir, name, NEW | OFlags::TRUNC, private(false))?;
         fs::File::from(fd).write_all(b"canary\n")
     }
 
     fn list(&self, dir: &Path) -> io::Result<Vec<(OsString, Kind)>> {
-        match fd::open_dir(dir)? {
+        match fd::open_dir(dir, self.allow())? {
             Some((folder, _)) => self.entries(&folder),
             None => Err(io::Error::new(
                 io::ErrorKind::NotFound,
@@ -116,7 +160,7 @@ impl Fs for Real {
     }
 
     fn open_dir(&self, dir: &Path) -> io::Result<Option<(Folder, Meta)>> {
-        Ok(fd::open_dir(dir)?.map(|(folder, stat)| (folder, fd::meta(&stat))))
+        Ok(fd::open_dir(dir, self.allow())?.map(|(folder, stat)| (folder, fd::meta(&stat))))
     }
 
     fn open_child(
@@ -125,7 +169,7 @@ impl Fs for Real {
         name: &OsStr,
         path: &Path,
     ) -> io::Result<Option<(Folder, Meta)>> {
-        let Some(folder) = fd::child(dir, name, path)? else {
+        let Some(folder) = fd::child(dir, name, path, self.allow())? else {
             return Ok(None);
         };
         let stat = fstat(&folder.fd)?;
@@ -151,18 +195,19 @@ impl Fs for Real {
     }
 
     fn leads_out(&self, link: &Path, root: &Path) -> bool {
-        link::leads_out(link, root)
+        link::leads_out(link, root, self.allow())
     }
 
     fn local(&self, dir: &Path) -> bool {
-        match fd::open_dir(dir) {
+        match fd::open_dir(dir, self.allow()) {
             Err(error) => error.kind() != io::ErrorKind::Unsupported,
             Ok(_) => true,
         }
     }
 
     fn make_dirs(&self, dir: &Path) -> io::Result<()> {
-        if !dir.is_absolute() || off_limits(dir) {
+        let mounted = self.allow().is_some_and(|allow| allow.covers(dir));
+        if !dir.is_absolute() || (off_limits(dir) && !mounted) {
             return Err(io::Error::other(format!(
                 "{} can't be a set-aside folder",
                 dir.display()
@@ -197,13 +242,13 @@ impl Fs for Real {
     }
 
     fn make_dir(&self, dir: &Path) -> io::Result<()> {
-        let (above, name) = fd::parent(dir, false)?;
+        let (above, name) = fd::parent(dir, false, self.allow())?;
         make_at(&above, name)
     }
 
     fn rename_new(&self, from: &Path, to: &Path) -> io::Result<()> {
-        let (from_dir, from_name) = fd::parent(from, true)?;
-        let (to_dir, to_name) = fd::parent(to, false)?;
+        let (from_dir, from_name) = fd::parent(from, true, self.allow())?;
+        let (to_dir, to_name) = fd::parent(to, false, self.allow())?;
         // renameatx_np with RENAME_EXCL on macOS.
         renameat_with(
             &from_dir,
@@ -216,18 +261,18 @@ impl Fs for Real {
     }
 
     fn write_new(&self, path: &Path, bytes: &[u8]) -> io::Result<()> {
-        let (dir, name) = fd::parent(path, false)?;
+        let (dir, name) = fd::parent(path, false, self.allow())?;
         write_at(&dir, name, bytes)
     }
 
     fn read_link(&self, path: &Path) -> io::Result<PathBuf> {
-        let (dir, name) = fd::parent(path, true)?;
+        let (dir, name) = fd::parent(path, true, self.allow())?;
         let target = readlinkat(&dir, name, Vec::new())?;
         Ok(PathBuf::from(OsString::from_vec(target.into_bytes())))
     }
 
     fn remove_link(&self, path: &Path) -> io::Result<()> {
-        let (dir, name) = fd::parent(path, true)?;
+        let (dir, name) = fd::parent(path, true, self.allow())?;
         let is_link = fd::lstat_at(&dir, name)?
             .is_some_and(|stat| FileType::from_raw_mode(stat.st_mode) == FileType::Symlink);
         if !is_link {
@@ -249,12 +294,8 @@ impl Fs for Real {
         u64::from_ne_bytes(bytes)
     }
 
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "the records' wall time; the watch's logic takes it through Fs"
-    )]
     fn now(&self) -> SystemTime {
-        SystemTime::now()
+        Real::now()
     }
 }
 
@@ -272,7 +313,7 @@ pub(crate) fn lock(path: &Path) -> io::Result<Lock> {
             Err(error) => return Err(error),
         }
     }
-    let (dir, name) = fd::parent(path, false)?;
+    let (dir, name) = fd::parent(path, false, None)?;
     let flags = OFlags::RDWR | OFlags::CREATE | OFlags::NOFOLLOW | OFlags::CLOEXEC;
     let fd = openat(&dir, name, flags, private(false))?;
     flock(&fd, FlockOperation::LockExclusive)?;
@@ -281,7 +322,7 @@ pub(crate) fn lock(path: &Path) -> io::Result<Lock> {
 
 /// The bytes of the small regular file at `path`, never through a link.
 pub(crate) fn read_small(path: &Path) -> io::Result<Vec<u8>> {
-    let (dir, name) = fd::parent(path, false)?;
+    let (dir, name) = fd::parent(path, false, None)?;
     let not_small = || io::Error::other(format!("{} is not a small file", path.display()));
     let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
     let fd = match openat(&dir, name, flags, Mode::empty()) {
@@ -305,7 +346,7 @@ pub(crate) fn read_small(path: &Path) -> io::Result<Vec<u8>> {
 
 /// Replaces the file at `path` with `bytes`: a new file beside it, synced, renamed over it.
 pub(crate) fn replace(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let (dir, name) = fd::parent(path, false)?;
+    let (dir, name) = fd::parent(path, false, None)?;
     let mut temp = name.to_owned();
     temp.push(format!(".{:016x}.new", Real.random()));
     write_at(&dir, &temp, bytes)?;
@@ -323,7 +364,10 @@ pub(crate) fn volume_folder(dir: &Path) -> io::Result<PathBuf> {
             dir.display()
         ))
     };
-    let (root, name) = fd::parent(dir, false).map_err(|error| plain(error.to_string()))?;
+    // The volume is mounted: a volume under `/net` or `/Network` is looked up in.
+    let volume = dir.parent().and_then(|root| Allow::of(root).ok());
+    let (root, name) =
+        fd::parent(dir, false, volume.as_ref()).map_err(|error| plain(error.to_string()))?;
     match make_at(&root, name) {
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}

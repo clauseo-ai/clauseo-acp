@@ -3,7 +3,9 @@
 //! folder outside the matter after its parent's listing is neither followed nor listed; nothing
 //! at or below `/net` or `/Network`, nor the automounted `/System/Volumes/Data/home`, is
 //! entered; renames never replace and never go through a folder swapped for a link; and the
-//! state file is never read through a link.
+//! state file is never read through a link. An after-only matter's own volume, faked
+//! unwatchable (no network volume is at hand), is walked and scanned at and below the matter
+//! only; another automount inside stays refused; and the launch records which case applied.
 
 #![expect(
     clippy::disallowed_methods,
@@ -15,7 +17,7 @@ use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 
 use super::check::walk;
-use super::{Fs as _, Kind, os};
+use super::{Fs, Kind, os};
 
 /// A temp folder holding `matter` and `outside`, removed on drop.
 struct Scratch {
@@ -50,9 +52,14 @@ impl Drop for Scratch {
 }
 
 /// The folders a walk of `top` visits; `swap` runs at each visit.
-fn visited(top: &Path, mut swap: impl FnMut(&Path)) -> Vec<PathBuf> {
+fn visited(top: &Path, swap: impl FnMut(&Path)) -> Vec<PathBuf> {
+    visited_by(&os::Real, top, swap)
+}
+
+/// [`visited`] through `fs`.
+fn visited_by<F: Fs>(fs: &F, top: &Path, mut swap: impl FnMut(&Path)) -> Vec<PathBuf> {
     let mut seen = Vec::new();
-    walk(&os::Real, top, &|_, _| false, &mut |dir, _, _| {
+    walk(fs, top, &|_, _| false, &mut |dir, _, _| {
         seen.push(dir.to_owned());
         swap(dir);
         true
@@ -248,4 +255,141 @@ fn reads_and_writes_never_go_through_a_link() {
     drop(lock);
     symlink(s.outside.join("file"), m.join("matters/linked.json")).unwrap();
     assert!(os::read_small(&m.join("matters/linked.json")).is_err());
+}
+
+/// The volume of `path`, as the descriptor checks read it.
+fn dev(path: &Path) -> i32 {
+    rustix::fs::stat(path).unwrap().st_dev
+}
+
+#[derive(Default)]
+struct Sink(std::sync::Mutex<Vec<crate::Denial>>);
+
+impl crate::DenialSink for Sink {
+    fn denied(&self, d: crate::Denial) {
+        self.0.lock().unwrap().push(d);
+    }
+}
+
+/// A watch of `matter` through `fs`, setting aside into `set_aside`.
+fn watch_of<F: Fs>(fs: F, matter: &Path, set_aside: &Path) -> super::Watch<F> {
+    let aside = super::aside::Aside::new(
+        matter.to_owned(),
+        set_aside.to_owned(),
+        "clauseo-fd-after".to_owned(),
+        std::sync::Arc::new(Sink::default()) as std::sync::Arc<dyn crate::DenialSink>,
+    );
+    super::Watch::new(fs, matter.to_owned(), aside, &super::Launch::default())
+}
+
+#[test]
+fn an_after_only_matters_own_volume_is_entered_at_and_below_the_matter_only() {
+    let s = Scratch::new("after");
+    let m = &s.matter;
+    std::fs::create_dir_all(m.join("docs/deep")).unwrap();
+    std::fs::write(m.join("x"), "x").unwrap();
+    symlink("x", m.join("link")).unwrap();
+    // The scratch volume reads as a network volume on this thread: no MNT_LOCAL.
+    os::fake_flags(dev(m), 0);
+    assert_eq!(
+        visited(m, |_| {}),
+        Vec::<PathBuf>::new(),
+        "refused without the allowance"
+    );
+    assert!(os::Real.meta(&m.join("x")).is_none() && !os::Real.local(m));
+    let within = os::Within::of(m).unwrap();
+    let mut seen = visited_by(&within, m, |_| {});
+    seen.sort();
+    assert_eq!(seen, [m.clone(), m.join("docs"), m.join("docs/deep")]);
+    assert_eq!(within.meta(&m.join("x")).unwrap().kind, Kind::File);
+    assert!(within.local(m) && !within.leads_out(&m.join("link"), m));
+    // The same volume outside the matter stays refused.
+    let outside = within.open_dir(&s.outside).map(|found| found.is_some());
+    assert_eq!(outside.unwrap_err().kind(), io::ErrorKind::Unsupported);
+    assert!(within.meta(&s.outside.join("deep")).is_none());
+    assert!(within.list(&s.outside).is_err());
+    // The launch walk and the final scan see a repository left there and set it aside; without
+    // the allowance nothing there is seen.
+    let set_aside = s.root.join("set-aside");
+    let mut blind = watch_of(os::Real, m, &set_aside);
+    let mut watch = watch_of(within, m, &set_aside);
+    std::fs::create_dir_all(m.join("docs/r/.git")).unwrap();
+    assert!(!blind.full_scan(super::Phase::Ended).end);
+    assert!(
+        m.join("docs/r/.git").exists(),
+        "the network volume is never entered"
+    );
+    assert!(!watch.full_scan(super::Phase::Ended).end);
+    assert!(!m.join("docs/r/.git").exists(), "set aside");
+}
+
+#[test]
+fn an_allowance_lets_in_no_other_automount_and_no_other_net_path() {
+    let data = Path::new("/System/Volumes/Data");
+    let home = data.join("home");
+    let s = Scratch::new("allow-net");
+    let within = os::Within::of(&s.matter).unwrap();
+    let refused = within
+        .open_dir(Path::new("/net/x"))
+        .map(|found| found.is_some());
+    assert_eq!(refused.unwrap_err().kind(), io::ErrorKind::Unsupported);
+    if std::fs::symlink_metadata(&home).is_err() {
+        println!("no {} on this Mac", home.display());
+        return;
+    }
+    // The Data volume as an after-only matter's: entered, while the automount inside it
+    // (another volume) stays refused.
+    os::fake_flags(dev(data), 0);
+    let within = os::Within::of(data).unwrap();
+    let (folder, _) = within.open_dir(data).unwrap().unwrap();
+    let name = home.file_name().unwrap();
+    let refused = within
+        .open_child(&folder, name, &home)
+        .map(|found| found.is_some());
+    assert_eq!(refused.unwrap_err().kind(), io::ErrorKind::Unsupported);
+}
+
+#[test]
+fn the_launch_watches_an_after_only_matter_and_records_it() {
+    let s = Scratch::new("start");
+    let data = s.root.join("data/sandbox/git-set-aside");
+    std::fs::create_dir_all(s.root.join("state")).unwrap();
+    std::fs::create_dir_all(s.root.join("home")).unwrap();
+    crate::policy::git_aside::fake_volume(
+        &s.matter,
+        crate::policy::git_aside::Volume {
+            id: 7,
+            watchable: false,
+        },
+    );
+    let policy = crate::Policy::builder(&s.matter, s.root.join("state"))
+        .home(s.root.join("home"))
+        .hidden(s.root.join("data"))
+        .git_set_aside(&data)
+        .build()
+        .unwrap();
+    assert_eq!(policy.matter_watch(), crate::MatterWatch::AfterOnly);
+    let probe = crate::macos::jail_procs::Probe::new("clauseo-fd-start", 0);
+    let sink = std::sync::Arc::new(Sink::default()) as std::sync::Arc<dyn crate::DenialSink>;
+    let watching = super::start(&policy, "clauseo-fd-start-0", &probe, &sink).unwrap();
+    let store = super::state::FileStore::new(&data, &s.matter);
+    let modes = super::state::Store::update(&store, |state| {
+        state
+            .sessions
+            .iter()
+            .map(|record| record.mode)
+            .collect::<Vec<_>>()
+    })
+    .unwrap();
+    assert_eq!(modes, [super::run::Mode::AfterOnly]);
+    // Abandoned before an agent ran: its one scan runs and its record goes.
+    drop(watching);
+    let gone =
+        || super::state::Store::update(&store, |state| state.sessions.is_empty()).unwrap_or(false);
+    let mut waited = 0;
+    while !gone() && waited < 200 {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        waited += 1;
+    }
+    assert!(gone(), "the watch's one scan ran and it stopped");
 }

@@ -223,11 +223,11 @@ fn a_runner_never_scans_on_a_timer() {
     let session = FakeSession::default();
     let _ = runner.input(Some(Msg::Attach(Arc::new(session.clone()))), Duration::ZERO);
     fs.repo("/m/.git");
-    let lists = fs.lists();
+    let lists = fs.listings();
     for n in 1..=50 {
         assert_eq!(runner.input(None, Duration::from_millis(100 * n)), Flow::Go);
     }
-    assert_eq!(fs.lists(), lists, "nothing was listed");
+    assert_eq!(fs.listings(), lists, "nothing was listed");
     assert_eq!(session.ends.load(Ordering::SeqCst), 0);
 }
 

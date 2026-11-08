@@ -365,6 +365,7 @@ fn the_hosts_start_runs_a_dead_sessions_final_scan() {
         launched: None,
         outlived: false,
         finds: Vec::new(),
+        mode: super::run::Mode::Live,
     };
     state::record(&store, record).unwrap();
     git_init(&[], &matter.join("foo"));

@@ -12,7 +12,7 @@ use clauseo_process::{
     LaunchSpec, Launched, Launcher, SpawnOptions, TreeKill, TreeWatch, spawn_in_tree,
 };
 
-use super::git_watch::{self, Mode, Session};
+use super::git_watch::{self, Session};
 use super::jail_procs::Probe;
 use super::profile::{self, SeatbeltProfile};
 use super::watch::{self, Registration};
@@ -165,10 +165,12 @@ impl Launcher for SeatbeltLauncher {
         self.register();
         let notices = Arc::clone(self.sink.inner());
         let session = format!("{}-{n}", self.tag);
-        let watching = git_watch::start(&self.policy, &session, &probe, &notices, Mode::Live)
-            .map_err(|source| clauseo_process::Error::Os {
-                what: "the git watch could not start",
-                source,
+        let watching =
+            git_watch::start(&self.policy, &session, &probe, &notices).map_err(|source| {
+                clauseo_process::Error::Os {
+                    what: "the git watch could not start",
+                    source,
+                }
             })?;
         let launched = spawn_in_tree(&jailed, &self.opts)?;
         watching.attach(Tree {

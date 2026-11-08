@@ -108,7 +108,11 @@ on the matter, outside the jail, before the agent. It looks for:
 - a `HEAD` file or link in any folder that was not a repository at launch, whatever surrounds
   it; a new repository-shaped folder (`HEAD` with `objects` and `refs`, folders or links, as
   git follows links, or with a `commondir` file) is taken whole, otherwise only its `HEAD`;
-- a new symbolic link whose target resolves outside the matter, or doesn't resolve;
+- a new symbolic link that leads outside the matter or nowhere, judged without following any
+  link: its target is walked from the link's folder one name at a time with `fstatat` from held
+  descriptors, and a link on the way counts as leading out (`a -> b/../x` with `b -> .` goes
+  to the matter's parent, though `b/../x` reads as `x`); one that ends at another link is
+  judged as that one is, up to 8 in a row;
 - anything new at a launch repository's `commondir` target (below).
 
 Names compare with the HFS+ ignorables stripped, then by the policy's fold. What was there at
@@ -136,10 +140,19 @@ same: a watch of its own rooted there, with its own stream, canary, 30 s pass an
 (keyed by the notes path), an empty launch (nothing in notes is the lawyer's to keep), its items
 set aside into the data dir's folder, and the same session: a find there ends the session as
 one in the matter does, and the host's start and each launch finish its dead sessions as they
-do the matter's. `start` takes a mode, `Live` or `AfterOnly` (no stream, canary or 30 s pass:
-only the launch's check before and the final scan after), for a matter no stream can watch
-(below). Scans never follow a link, never enter a `.git`, and skip any folder whose `statfs`
-lacks `MNT_LOCAL`, apart from an `AfterOnly` matter's own volume.
+do the matter's. `start` takes the matter's mode from `Policy::matter_watch()`: `Live`, or
+`AfterOnly` (no stream, canary or 30 s pass: only the launch's check before and the final scan
+after) for a matter no stream can watch (below); the notes watch is always `Live`. The launch
+logs the mode and the session record keeps it. Every file operation goes by descriptor: a
+path's folder is opened with `O_NOFOLLOW_ANY` and its last name read or changed with the `*at`
+calls, a walk holds each folder open while it lists it and opens its subfolders from it, and
+renames are `renameatx_np(RENAME_EXCL)`. Scans never follow a link, never enter a `.git`, and
+never enter, list or look up in a folder on a volume without `MNT_LOCAL`, one the automounter
+mounted, or at or below `/net` or `/Network`, apart from an `AfterOnly` matter's own volume at
+and below the matter (a different mount inside it stays refused). A folder's entry is read with
+`fstatat` from its parent and, on another volume, that volume's flags with `getattrlistat`,
+before anything is opened: autofs fires no trigger for a lookup of attributes on the last name
+(its `trigger_resolve`), except on a "force a mount" node only its own maps make.
 
 Two backstops cover a stream that loses events without saying so (seen on a disk image mounted
 seconds before, under a full parallel test run: nothing for over 10 s). **The canary:** every
@@ -189,8 +202,8 @@ A dead session's kill (below) also skips every process that started before the s
 launch time, which its record holds. A process can't shed the probe from inside: a nested
 `sandbox-exec` can't apply a profile, and `launchctl submit` hands launchd no job (jail tests).
 A watch thread that panics ends the session; an attach to a thread already gone ends it too.
-**The watchdog:** a check reads what the agent made while it runs (a link's target is resolved,
-which for a link into `/net` makes autofs mount a server; a folder moved in is walked whole), and
+**The watchdog:** a check reads what the agent made while it runs (a folder moved in is walked
+whole; a disk can stop answering), and
 while one check holds the watch's thread nothing else is checked. So each runner publishes when
 its check began, and one watchdog thread per host looks every 0.1 s: a check (one batch of
 events, a rescan, a 30 s pass) past 2 s ends the session by its tree and probe, logged; the

@@ -12,7 +12,7 @@ use super::super::{Fs, Launch, Watch, fsevents, os};
 use super::watchdog::{self, Busy};
 use super::{CANARY, End, Flow, Mode, Msg, Runner, Session, TICK};
 use crate::macos::jail_procs::{self, Probe};
-use crate::{Clock, DenialSink, Policy, SystemClock};
+use crate::{Clock, DenialSink, MatterWatch, Policy, SystemClock};
 
 /// A session's watches, started before its agent. [`Watching::attach`] hands them the agent
 /// once it runs; dropped without that, they say the agent did not start, and each scans once
@@ -71,7 +71,8 @@ impl Drop for Watching {
 }
 
 /// Starts the watches of `policy`'s matter and notes folder for `session` (an id for the
-/// records) with `probe`, before the agent, in `mode`: the set-aside folders are made, each
+/// records) with `probe`, before the agent: the matter's live or after-only as
+/// [`Policy::matter_watch`] says, the notes folder's live. The set-aside folders are made, each
 /// folder's state is checked (refused while an item an earlier scan could not handle is
 /// there, or while a process of an earlier session outlives its kill; a dead session's final
 /// scan run), the launch's items noted and the session recorded, and each stream started.
@@ -82,7 +83,6 @@ pub(crate) fn start(
     session: &str,
     probe: &Probe,
     notices: &Arc<dyn DenialSink>,
-    mode: Mode,
 ) -> std::io::Result<Watching> {
     let data = policy
         .git_set_aside()
@@ -98,6 +98,14 @@ pub(crate) fn start(
         launch: Launch::of(policy),
         session: session.to_owned(),
     };
+    let mode = match policy.matter_watch() {
+        MatterWatch::Live => Mode::Live,
+        MatterWatch::AfterOnly => Mode::AfterOnly,
+    };
+    tracing::info!(
+        matter = %policy.matter().display(), ?mode,
+        "the git watch watches the matter (after_only: scans before and after, no stream)"
+    );
     let matter = start_root(root, data, probe, notices, mode)?;
     let Some(notes) = policy.notes() else {
         return Ok(matter);
@@ -109,7 +117,7 @@ pub(crate) fn start(
         launch: Launch::default(),
         session: format!("{session}-notes"),
     };
-    Ok(matter.and(start_root(root, data, probe, notices, mode)?))
+    Ok(matter.and(start_root(root, data, probe, notices, Mode::Live)?))
 }
 
 /// One folder a session's watch covers.
@@ -138,7 +146,9 @@ fn start_root(
     } = root;
     let store = FileStore::new(data, dir);
     let this = jail_procs::this_process();
-    state::begin(&store, &os::Real, dir, notices, &host::host())?;
+    // The folder's own volume, read from it now: an after-only matter's is let in.
+    let fs = os::Within::of(dir)?;
+    state::begin(&store, &fs, dir, notices, &host::host())?;
     let canary = os::resolve(&folder)
         .unwrap_or_else(|| folder.clone())
         .join(CANARY);
@@ -148,7 +158,7 @@ fn start_root(
         session.clone(),
         Arc::clone(notices),
     );
-    let watch = Watch::new(os::Real, dir.to_owned(), aside, &launch);
+    let watch = Watch::new(fs, dir.to_owned(), aside, &launch);
     let kill = probe.clone();
     LIVE.add(
         &session,
@@ -171,6 +181,7 @@ fn start_root(
         launched,
         outlived: false,
         finds: Vec::new(),
+        mode,
     };
     let started = state::record(&store, record).and_then(|()| {
         start_with(

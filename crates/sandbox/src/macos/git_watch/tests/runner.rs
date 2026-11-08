@@ -41,7 +41,10 @@ impl Session for Counting {
     }
 
     fn end(&self) {
-        self.at_kill.lock().unwrap().get_or_insert(self.fs.lists());
+        self.at_kill
+            .lock()
+            .unwrap()
+            .get_or_insert(self.fs.listings());
     }
 }
 
@@ -61,7 +64,7 @@ fn a_find_kills_before_the_batchs_rescan_lists_anything() {
     let _ = runner.input(Some(attach), Duration::ZERO);
     fs.dir("/m/foo");
     fs.repo("/m/foo/.git");
-    let before = fs.lists();
+    let before = fs.listings();
     // The rescan flag comes first in the batch; the find after it ends the input.
     let batch = vec![
         event("/m", flags::MUST_SCAN_SUB_DIRS),
@@ -76,7 +79,7 @@ fn a_find_kills_before_the_batchs_rescan_lists_anything() {
         at_kill - before
     );
     assert_eq!(
-        fs.lists(),
+        fs.listings(),
         at_kill,
         "and none after it, before the final scan"
     );
@@ -92,11 +95,11 @@ fn nothing_more_is_checked_while_the_session_is_ending() {
     fs.repo("/m/.git");
     let found = Msg::Events(vec![event("/m/.git", MOVED_IN)]);
     assert_eq!(runner.input(Some(found), ms(100)), Flow::Go);
-    let lists = fs.lists();
+    let lists = fs.listings();
     let rescan = Msg::Events(vec![event("/m", flags::MUST_SCAN_SUB_DIRS)]);
     assert_eq!(runner.input(Some(rescan), ms(200)), Flow::Go);
     assert_eq!(runner.input(None, Duration::from_secs(31)), Flow::Done);
-    assert_eq!(fs.lists(), lists, "no rescan or 30 s pass while it ends");
+    assert_eq!(fs.listings(), lists, "no rescan or 30 s pass while it ends");
     assert!(
         session.ends.load(Ordering::SeqCst) >= 2,
         "the kill went again"

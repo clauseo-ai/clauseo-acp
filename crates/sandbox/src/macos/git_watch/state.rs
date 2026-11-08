@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
 use super::aside::{Aside, Stuck};
+use super::run::Mode;
 use super::{Fs, Phase, Watch};
 use crate::DenialSink;
 use crate::policy::path_key;
@@ -104,6 +105,10 @@ pub(crate) struct SessionRecord {
     /// What that scan found, to be set aside once no process of the session is left.
     #[serde(default)]
     pub(crate) finds: Vec<Bytes>,
+    /// How the folder was watched: live, or only before and after (a matter on a network or
+    /// automounted volume, `Policy::matter_watch`).
+    #[serde(default)]
+    pub(crate) mode: Mode,
 }
 
 /// An item left in the matter that blocks its launches.
@@ -350,6 +355,14 @@ impl FileStore {
             file: file.to_owned(),
             lock: file.with_extension("lock"),
         }
+    }
+
+    /// The folder the state file is of, read without the lock or a write: `None` when the
+    /// file can't be read or names none.
+    pub(crate) fn root(&self) -> Option<PathBuf> {
+        let bytes = super::os::read_small(&self.file).ok()?;
+        let state: MatterState = serde_json::from_slice(&bytes).ok()?;
+        state.root.as_ref().map(Bytes::path)
     }
 }
 
