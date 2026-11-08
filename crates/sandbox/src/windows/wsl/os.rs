@@ -24,6 +24,7 @@ use windows::Win32::System::Registry::{
 };
 use windows::core::{HSTRING, PCWSTR, PWSTR};
 
+use super::CLASSES;
 use super::record::{AppId, WslRecord};
 use super::seam::{ClassEntry, Permission, WslError, WslRead, WslWrite};
 use crate::windows::acl::object::words;
@@ -37,9 +38,8 @@ const SERVICES_KEY: &str = r"SYSTEM\CurrentControlSet\Services";
 const CLSID_KEY: &str = r"SOFTWARE\Classes\CLSID";
 /// Where `AppID`s are.
 const APPID_KEY: &str = r"SOFTWARE\Classes\AppID";
-/// `LxssUserSession`'s packaged-COM index entry.
-const PACKAGED_KEY: &str =
-    r"SOFTWARE\Classes\PackagedCom\ClassIndex\{A9B7A1B9-0671-405C-95F1-E0612CB4CE7E}";
+/// Where packaged-COM classes are indexed, by CLSID.
+const PACKAGED_INDEX: &str = r"SOFTWARE\Classes\PackagedCom\ClassIndex";
 /// COM's machine-wide settings, which hold `DefaultLaunchPermission`.
 const OLE_KEY: &str = r"SOFTWARE\Microsoft\Ole";
 /// The value the deny goes in.
@@ -331,7 +331,12 @@ impl WslRead for WindowsWsl {
     }
 
     fn packaged_class(&self) -> Result<bool, WslError> {
-        exists(PACKAGED_KEY)
+        for clsid in CLASSES {
+            if exists(&format!(r"{PACKAGED_INDEX}\{clsid}"))? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     fn group(&self) -> Option<Sid> {

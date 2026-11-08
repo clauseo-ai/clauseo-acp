@@ -2458,8 +2458,9 @@ as present. With WSL present, a target whose value (or key) is missing, or whose
 record's `GroupSid` is missing or comes after an allow, refuses the launch with
 `Blocked::WslDenyMissing` (`wsl_deny_missing`). Otherwise a target that can't be read or
 parsed, a class with no `AppID`, targets that can't be listed, or
-`HKLM\SOFTWARE\Classes\PackagedCom\ClassIndex\{A9B7A1B9-…CE7E}` (a pre-2.0 Store registration,
-whose launch permission is the package's and overrides the AppID's) refuses with
+`HKLM\SOFTWARE\Classes\PackagedCom\ClassIndex\<CLSID>` for any of the three classes (a packaged
+registration, such as the pre-2.0 Store WSL's, whose launch permission is the package's and
+overrides the AppID's) refuses with
 `Blocked::WslDenyUnverifiable` (`wsl_deny_unverifiable`), whichever WSL is present: the inbox one
 (`LxssManager`) runs WSL2's VMs too from Windows 10 2004 on, so an unreadable inbox value refuses
 like a lifted one. With no WSL nothing is refused. Both are

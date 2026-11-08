@@ -44,9 +44,11 @@ pub trait WslRead {
     fn service_app_ids(&self, services: &[&str]) -> Result<Vec<AppId>, WslError>;
     /// `app_id`'s `LaunchPermission`.
     fn launch_permission(&self, app_id: &AppId) -> Result<Permission, WslError>;
-    /// Whether `HKLM\SOFTWARE\Classes\PackagedCom\ClassIndex` holds `LxssUserSession`'s
-    /// CLSID: a packaged registration, whose launch permission is the package's and overrides
-    /// the `AppID`'s (the pre-2.0 Store WSL).
+    /// Whether `HKLM\SOFTWARE\Classes\PackagedCom\ClassIndex` holds any of [`CLASSES`]'
+    /// CLSIDs: a packaged registration, whose launch permission is the package's and overrides
+    /// the `AppID`'s (the pre-2.0 Store WSL's `LxssUserSession`).
+    ///
+    /// [`CLASSES`]: super::CLASSES
     fn packaged_class(&self) -> Result<bool, WslError>;
     /// The pool group's SID, as the machine's record names it (`GroupSid`); `None` when it is
     /// missing or isn't a SID.
