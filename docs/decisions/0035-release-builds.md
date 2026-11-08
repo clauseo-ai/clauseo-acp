@@ -72,7 +72,8 @@ Developer ID.
   the `ui` job's build); `windows.conf.json` (`bundle.windows.nsis.installerHooks`, the uninstall hook
   in `crates/desktop/windows/hooks.nsh`); `machine.conf.json` (`installMode: "perMachine"`);
   `blocklist.conf.json` (`bundle.resources`, the block-list snapshot: see "The block-list snapshot"
-  below). `check` fails on any other key in them. Sidecars are in none of them: see "Sidecars" below.
+  below) and `browser-pins.conf.json` (`bundle.resources`, the browser-pins snapshot, likewise).
+  `check` fails on any other key in them. Sidecars are in none of them: see "Sidecars" below.
 - **The sidecar seam.** Each `build` leg has one step, "Sidecars for this target", after the installs
   and before the app is built (tauri-build checks that every `externalBin` file exists). It runs
   `.github/scripts/sidecars.mjs` for the leg's target ("Sidecars" below). A sidecar task adds a row to
@@ -348,6 +349,15 @@ S15's tools sat in `windows.conf.json` and S27's in `tauri.conf.json`.
 - **Stale is a warning.** The job writes `generated`, `entries` and both files' SHA-256 to its
   summary. A snapshot generated more than 24 hours before the run adds a warning there, and the run
   goes on: an older signed list is still better than none.
+- **Browser-pins.** The `browser-pins` job, in every mode, downloads clauseo-ai/browser-pins's `current`
+  (`browser-pins-v1.json` and its `.minisig`) and runs `minisign -V` with the key `minisign.pub` in the
+  browser-pins key folder of the host crate, or with `minisign-next.pub` if that one does not verify. It
+  fails unless the signed trusted comment is exactly `clauseo-browser-pins v1 published=<YYYY-MM-DDTHH:MM:SSZ>
+  version=<X.Y.Z.W> run=<n>` and its `published` and `version` equal the body's `.published` and
+  `.stable.version`. It uploads `browser-pins-snapshot`, which the same jobs download into a gitignored
+  `browser-pins` folder in the desktop crate and bundle at `browser-pins/` through `browser-pins.conf.json`,
+  passed after `blocklist.conf.json`. A manifest published more than 14 days before the run is a warning in
+  its summary, not a failure.
 
 ## Status
 
