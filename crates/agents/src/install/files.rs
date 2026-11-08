@@ -3,6 +3,7 @@
 //! set) into `agents/downloads/`, or from the offline bundle with no network call, and is
 //! checked against its digest. Progress covers them all.
 
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::PoisonError;
@@ -65,7 +66,8 @@ pub(crate) fn downloads_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("agents").join("downloads")
 }
 
-/// Fetches (or finds in the bundle) every file of the try, sending progress.
+/// Fetches (or finds in the bundle) every file of the try, sending progress. A try made while
+/// `Waiting` sends none until a server answers, or until every file is had with no request.
 pub(super) fn fetch_all<T: Timer + Send + Sync>(
     job: &Job<T>,
     node: &NodeChoice,
@@ -148,10 +150,22 @@ pub(super) fn fetch_all<T: Timer + Send + Sync>(
                 let Some(client) = fetcher.as_ref() else {
                     return Err(TryError::retry("no HTTP client", config));
                 };
-                let size = client.fetch(&fetch_job, job.cancel(), &mut |received, total| {
-                    progress.update(n, received, total);
-                    progress.tick(job, run, false);
-                })?;
+                let answered = Cell::new(false);
+                let size = client.fetch(
+                    &fetch_job,
+                    job.cancel(),
+                    &|| answered.set(true),
+                    &mut |received, total| {
+                        progress.update(n, received, total);
+                        // The first bytes from a server end `Waiting`; a file already there
+                        // (no request) does not.
+                        let first = answered.get() && run.is_waiting();
+                        if first {
+                            run.left_waiting();
+                        }
+                        progress.tick(job, run, first);
+                    },
+                )?;
                 progress.done(n, size);
                 fetched.downloaded.push(fetch_job.dest.clone());
                 fetch_job.dest
@@ -164,6 +178,7 @@ pub(super) fn fetch_all<T: Timer + Send + Sync>(
             None => fetched.node_archive = Some(path),
         }
     }
+    run.left_waiting();
     progress.tick(job, run, true);
     Ok(fetched)
 }
@@ -330,11 +345,15 @@ impl Progress {
         (received, total.max(received))
     }
 
-    /// Sends `Downloading` when `force`d (the first and the last) or 250 ms after the last.
+    /// Sends `Downloading` when `force`d (the first and the last) or 250 ms after the last; never
+    /// while the job is `Waiting` (`run.waiting`).
     fn tick<T: Timer + Send + Sync>(&mut self, job: &Job<T>, run: &mut Run, force: bool) {
         let (received, total) = self.sums();
         run.received = received;
         run.total = total;
+        if run.is_waiting() {
+            return;
+        }
         let now = job.config.clock.monotonic();
         let due = self
             .last

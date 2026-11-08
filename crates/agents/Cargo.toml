@@ -65,6 +65,11 @@ nix = { workspace = true, features = ["fs"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
+  # connectivity: NotifyNetworkConnectivityHintChange (looked up at run time) and
+  # CancelMibChangeNotify2, and the hint's type.
+  "Win32_NetworkManagement_IpHelper",
+  "Win32_Networking_WinSock",
+  "Win32_System_LibraryLoader",
   "Win32_Storage_FileSystem",
   # sysproxy: Internet Settings' ProxyEnable and ProxyServer.
   "Win32_System_Registry",

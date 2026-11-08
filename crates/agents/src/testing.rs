@@ -1,5 +1,6 @@
 //! Test support: a local registry on loopback that misbehaves on demand, an optional
-//! TLS-inspecting proxy in front of it, test resolvers, temp folders and tiny npm tarballs.
+//! TLS-inspecting proxy in front of it, test resolvers, temp folders, tiny npm tarballs and a
+//! connectivity watch the test drives.
 //!
 //! The registry speaks just enough HTTP/1.1 for ureq: `GET`, `Range: bytes=N-`,
 //! `Content-Length`, `Content-Range` and `Connection: close`, one thread per connection. Nothing
@@ -8,6 +9,7 @@
 mod pack;
 mod tls;
 mod trace;
+mod watch;
 
 use std::collections::{HashMap, VecDeque};
 use std::io::{self, Read, Write};
@@ -18,6 +20,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 
 pub use pack::{npm_tarball, sha512_integrity};
 pub use trace::{instant, millis_since, trace};
+pub use watch::FakeWatch;
 
 use crate::TestResolver;
 

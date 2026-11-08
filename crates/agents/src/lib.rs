@@ -107,8 +107,9 @@
 //! `flate2`, `tar`, `zip`, `thiserror`, `dunce`, `zeroize` (the pasted code and the API
 //! keys); `keyring` on macOS and Windows only (the keychain; none
 //! on Linux); `nix` on Unix and `windows` on Windows (free disk space, the Windows proxy setting,
-//! file ids); `rcgen` with `test-support` only. Never `sandbox`, `tauri` or `tokio`; `settings`
-//! only in tests and the example (the caller passes the data folder and the agent homes in).
+//! file ids, connectivity hints); `rcgen` with `test-support` only. Never `sandbox`, `tauri` or
+//! `tokio`; `settings` only in tests and the example (the caller passes the data folder and the
+//! agent homes in).
 //!
 //! # Start reading
 //!
@@ -118,6 +119,7 @@
 
 mod cancel;
 mod config;
+mod connectivity;
 mod disk;
 mod download;
 mod fileid;
@@ -146,6 +148,7 @@ pub use config::RenameFault;
 pub use config::{
     AgentsConfig, Clock, InstallConfig, Network, NodeSearch, RefreshFn, SigninConfig, SystemClock,
 };
+pub use connectivity::{ConnectivityWatch, Hint, NoWatch, Subscription};
 pub use fileid::same_file;
 pub use log::InstallLog;
 pub use pins::{AgentPins, PinsError};

@@ -165,10 +165,13 @@ impl Fetcher {
     /// deletes it and starts over once). Each chunk is hashed and written; `cancel` is checked
     /// between chunks, and a pause keeps the `.part`. `progress(received, total)` follows each
     /// chunk, both counting the resumed bytes; `total` is 0 when the size is not known.
+    /// `answered` is called once a server has answered a request (any status), before the
+    /// body's first progress; never for a file already there.
     pub(crate) fn fetch(
         &self,
         job: &FetchJob,
         cancel: &Cancel,
+        answered: &dyn Fn(),
         progress: &mut dyn FnMut(u64, u64),
     ) -> Result<u64, FetchError> {
         let host = host_of(&job.url);
@@ -199,6 +202,7 @@ impl Fetcher {
                 request = request.header("Range", format!("bytes={offset}-"));
             }
             let response = request.call().map_err(|err| at.ureq(&err))?;
+            answered();
             let status = response.status().as_u16();
             match status {
                 416 if offset > 0 && !restarted => {

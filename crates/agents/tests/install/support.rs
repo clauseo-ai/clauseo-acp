@@ -1,7 +1,8 @@
 //! The fixture every install test starts from: two agents made of tiny tarballs, served by the
 //! local test registry under the host name `registry.test`, the real Node and npm found on
 //! `PATH`, a shared `ManualTimer` that records every wait armed, and a clock whose monotonic
-//! reading moves 250 ms per call (so every progress tick is due).
+//! reading moves 250 ms per call (so every progress tick is due). It has no connectivity hints
+//! (`NoWatch`); a test that wants them sets a `FakeWatch`.
 //!
 //! Every phase writes a timestamped line to stderr ([`trace`]): the fixture's set-up, each
 //! launch (`node --version`, `npm ci`) and how long the start took, each wait armed, each new
@@ -13,6 +14,7 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime};
@@ -22,13 +24,15 @@ use clauseo_agents::testing::{
     Lookups, TempDir, TestRegistry, instant, millis_since, npm_tarball, resolve_all_to, trace,
 };
 use clauseo_agents::{
-    AgentEntry, AgentSizes, Agents, AgentsConfig, AgentsEvent, Clock, InstallState, NodeArchive,
-    NodeEntry, NodeSearch, Platform, Snapshot,
+    AgentEntry, AgentSizes, Agents, AgentsConfig, AgentsEvent, Clock, InstallState, NoWatch,
+    NodeArchive, NodeEntry, NodeSearch, Platform, Snapshot,
 };
 use clauseo_process::{
-    LaunchSpec, Launched, Launcher, ManualTimer, PassthroughLauncher, SpawnOptions, Timer,
+    AsyncIoTimer, LaunchSpec, Launched, Launcher, ManualTimer, PassthroughLauncher, SpawnOptions,
+    Timer,
 };
 use clauseo_protocol::AgentId;
+use futures::future::{Either, select};
 
 use crate::write;
 
@@ -266,6 +270,21 @@ impl SharedTimer {
         }
     }
 
+    /// [`Self::fire_next`], giving up after `bound` of real time: `false` when no such wait was
+    /// armed by then, so a missing wait fails the test at once instead of hanging it. The bound
+    /// is a ceiling, never a timing being asserted.
+    pub(crate) fn fire_next_within(&self, duration: Duration, bound: Duration) -> bool {
+        let find = pin!(async { while self.manual.next_armed().await != duration {} });
+        let gave_up = pin!(AsyncIoTimer.after(bound));
+        match futures::executor::block_on(select(find, gave_up)) {
+            Either::Left(((), _)) => {
+                assert!(self.manual.fire(), "the {duration:?} wait was dropped");
+                true
+            }
+            Either::Right(((), _)) => false,
+        }
+    }
+
     /// Blocks until a wait of `duration` is armed (passing over the others), then ends it.
     pub(crate) fn fire_next(&self, duration: Duration) {
         loop {
@@ -328,6 +347,8 @@ impl Fixture {
         config.install.allow_http_for_tests = true;
         config.node_search = user_node_search();
         config.clock = Arc::new(StepClock::default());
+        // No OS connectivity hints: a real network change must not start a try in a test.
+        config.connectivity = Arc::new(NoWatch);
         trace(format_args!("fixture {label}: set-up done"));
         Fixture {
             registry,

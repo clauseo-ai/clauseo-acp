@@ -46,3 +46,7 @@ mod node_env;
 #[cfg(test)]
 #[path = "install/resume.rs"]
 mod resume;
+
+#[cfg(test)]
+#[path = "install/offline.rs"]
+mod offline;

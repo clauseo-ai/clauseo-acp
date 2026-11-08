@@ -3,7 +3,11 @@
 //! tarballs through `file:` URLs, and the rename and receipt (`npm`).
 //!
 //! - `Offline`: `Waiting`, then 30 s on the timer and again, with no try counted, until it
-//!   works or is paused.
+//!   works or is paused. While `Waiting` the job listens for connectivity hints
+//!   ([`ConnectivityWatch`](crate::ConnectivityWatch)): one starts the next try
+//!   [`HINT_DEBOUNCE`] later, however many came meanwhile. A try from `Waiting` stays
+//!   `Waiting` until the network answers (`files`), so a try that fails again never flickers to
+//!   `Downloading`.
 //! - `Blocked` and `DiskFull` stop at once: a retry would meet the same proxy or disk.
 //! - Anything else counts as a try; the third is `Failed`, after waits of 2 s and then 8 s. A
 //!   sharing or lock error in `npm ci` or the rename is first retried in place (`npm`).
@@ -31,10 +35,12 @@ use std::time::Duration;
 
 use clauseo_process::{Launcher, Timer};
 use clauseo_protocol::AgentId;
-use futures::future::{Either, select};
+use futures::StreamExt as _;
+use futures::future::{Either, pending, select};
 
 use crate::cancel::Cancel;
 use crate::config::{AgentsConfig, Network};
+use crate::connectivity::Listening;
 use crate::disk;
 use crate::log::InstallLog;
 use crate::node::{self, FoundNode, NotUsed, UserSearch};
@@ -49,6 +55,9 @@ const TRIES: u32 = 3;
 const BACKOFF: [Duration; 2] = [Duration::from_secs(2), Duration::from_secs(8)];
 /// The wait between tries while offline.
 const OFFLINE_WAIT: Duration = Duration::from_secs(30);
+/// The wait from a connectivity hint to the try it starts: the hints a network change sends
+/// within it give one try.
+const HINT_DEBOUNCE: Duration = Duration::from_secs(2);
 /// Bytes in the log's and the failure's MB.
 const MB: u64 = 1_000_000;
 
@@ -100,6 +109,10 @@ pub(crate) struct Run {
     /// The last progress, for the log's `received:` line.
     pub(crate) received: u64,
     pub(crate) total: u64,
+    /// While the job is `Waiting`: its subscription to connectivity hints. A try made from
+    /// there sends no `Downloading` until the network answers, and the first one sent ends it
+    /// ([`Run::left_waiting`]); so does the job's end.
+    pub(crate) waiting: Option<Listening>,
 }
 
 impl Run {
@@ -110,7 +123,18 @@ impl Run {
             attempts: 0,
             received: 0,
             total: 0,
+            waiting: None,
         }
+    }
+
+    /// Whether the job is `Waiting`.
+    pub(crate) fn is_waiting(&self) -> bool {
+        self.waiting.is_some()
+    }
+
+    /// Leaves `Waiting` (a `Downloading` went out): unsubscribes from the hints.
+    pub(crate) fn left_waiting(&mut self) {
+        self.waiting = None;
     }
 }
 
@@ -228,7 +252,11 @@ impl<T: Timer + Send + Sync> Job<T> {
                         reason: FailureKind::Offline,
                         log,
                     };
-                    if !self.emit(state, false) || !self.wait(OFFLINE_WAIT).await {
+                    // Subscribed before `Waiting` goes out, so a hint from then on counts.
+                    if !run.is_waiting() {
+                        run.waiting = Some(Listening::start(&*config.connectivity));
+                    }
+                    if !self.emit(state, false) || !self.wait_offline(&mut run).await {
                         return;
                     }
                 }
@@ -372,6 +400,34 @@ impl<T: Timer + Send + Sync> Job<T> {
             select(after, pin!(self.ticket.cancel.cancelled())).await,
             Either::Left(_)
         )
+    }
+
+    /// Waits [`OFFLINE_WAIT`], or [`HINT_DEBOUNCE`] after the first connectivity hint when
+    /// that ends first; `false` when a pause came first. Hints queued by then are dropped: the
+    /// try about to start answers them all.
+    async fn wait_offline(&self, run: &mut Run) -> bool {
+        let Some(listening) = run.waiting.as_mut() else {
+            return self.wait(OFFLINE_WAIT).await;
+        };
+        let ended = {
+            // Armed first, so a hint already queued arms its debounce after it, in the first poll.
+            let after = pin!(self.timer.after(OFFLINE_WAIT));
+            let hinted = pin!(async {
+                if listening.hints.next().await.is_none() {
+                    // The watch dropped its end: the timer alone retries.
+                    pending::<()>().await;
+                }
+                self.timer.after(HINT_DEBOUNCE).await;
+            });
+            let paused = pin!(self.ticket.cancel.cancelled());
+            let timed = select(after, paused);
+            match select(hinted, timed).await {
+                Either::Left(((), _)) | Either::Right((Either::Left(_), _)) => true,
+                Either::Right((Either::Right(_), _)) => false,
+            }
+        };
+        listening.drain();
+        ended
     }
 
     pub(crate) fn cancel(&self) -> &Cancel {

@@ -56,7 +56,7 @@ fn fetcher(install: &InstallConfig, data: &Path) -> Fetcher {
 }
 
 fn fetch(fetcher: &Fetcher, job: &FetchJob) -> Result<u64, FetchError> {
-    fetcher.fetch(job, &Cancel::new(), &mut |_, _| {})
+    fetcher.fetch(job, &Cancel::new(), &|| {}, &mut |_, _| {})
 }
 
 /// A registry serving `fixture()` at [`PATH`], a temp data folder, and a default fetcher.
@@ -86,7 +86,7 @@ fn a_cut_download_resumes_by_range_to_the_full_verified_file() {
 
     let mut seen = Vec::new();
     let size = fetcher
-        .fetch(&job, &Cancel::new(), &mut |received, total| {
+        .fetch(&job, &Cancel::new(), &|| {}, &mut |received, total| {
             seen.push((received, total));
         })
         .unwrap();
@@ -145,7 +145,7 @@ fn a_body_running_past_the_cap_is_cut_off_and_the_part_deleted() {
     capped.max_bytes = 100_000;
     let mut most = 0;
     let err = fetcher
-        .fetch(&capped, &Cancel::new(), &mut |received, _| {
+        .fetch(&capped, &Cancel::new(), &|| {}, &mut |received, _| {
             most = most.max(received);
         })
         .unwrap_err();
@@ -374,7 +374,7 @@ fn a_complete_destination_makes_no_request_and_a_wrong_one_is_replaced() {
     write_file(&job.dest, &bytes).unwrap();
     let mut seen = Vec::new();
     let size = fetcher
-        .fetch(&job, &Cancel::new(), &mut |r, t| seen.push((r, t)))
+        .fetch(&job, &Cancel::new(), &|| {}, &mut |r, t| seen.push((r, t)))
         .unwrap();
     assert_eq!(size, bytes.len() as u64);
     assert_eq!(seen, [(size, size)]);
@@ -395,7 +395,7 @@ fn a_pause_during_a_stall_keeps_the_part_and_the_next_fetch_resumes_it() {
     let (got, progress) = mpsc::channel();
     let result = std::thread::scope(|scope| {
         let running = scope.spawn(|| {
-            fetcher.fetch(&job, &cancel, &mut |received, _| {
+            fetcher.fetch(&job, &cancel, &|| {}, &mut |received, _| {
                 got.send(received).unwrap_or_default();
             })
         });
