@@ -1274,6 +1274,22 @@ leaves that profile, both naming the part.
     - `Open` left standing: the outer died (the host's job end after `stdin_grace`, a crash) or
       couldn't read a number.
 
+    What these states leave open, besides the gap above:
+    - Without an escapee (`AwaitingSweep`, then clean) no stop follows the sweep, so a pool
+      process a trigger started before the sweep deleted its task can live until the next
+      session's first act kills it. That is by design: stop, sweep, stop narrows only the
+      escapee path.
+    - A BITS job a pool process creates after the sweep listed the jobs isn't cancelled by that
+      sweep.
+    - A running instance can register its own task again between the walk's delete and the
+      instance stop: the run ends 0 with that task left, until the next sweep.
+    - A time trigger can fire mid-session; the inner's periodic check catches what it starts.
+    - A pool process that locked down its own access list isn't killed by the first act, which
+      can't open it; the launch then fails closed.
+    - Upgrade: an escapee marker an older build already moved to `AwaitingSweep` reads as a
+      plain one, so its final stop is skipped. Only markers in flight during the upgrade are
+      affected.
+
     An absent `…Sequence` counts as 0, an absent `…Next` as 1. The numbers are read as the lawyer
     **without the set-up lock**, which only an administrator's token can open (a mutex in a
     private namespace whose boundary needs Administrators enabled). That is sound: `…Next` is one
