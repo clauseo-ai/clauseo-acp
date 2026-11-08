@@ -143,10 +143,11 @@ pub enum Error {
     /// already written stay in the ledger, so the next `prepare` continues from them.
     #[error("the sandbox's preparation of this matter was cancelled")]
     Cancelled,
-    /// Windows tier B runs one live agent per matter (`windows::launch`): another session of
-    /// the matter holds its account, from its reservation until its after-session pass has
-    /// finished, or `assign` found another session open. A refusal, not a cause for another
-    /// tier: the host stops the other agent or waits.
+    /// Windows tier B runs one live agent per matter (`windows::launch`'s `reserve`): another
+    /// session of the matter holds its account, from its reservation until its after-session
+    /// pass and its end sweeper have finished, or `assign` found another session open. A
+    /// refusal, not a cause for another tier: **the host retries** within its 180 s bound,
+    /// showing that it is preparing (it stops the other agent or waits). Only `reserve` gives it.
     #[error("Another agent is still working in this matter. Try again once it has finished.")]
     MatterBusy,
     /// Windows tier B's `launch` or `prepare` was given a reservation for another matter or
@@ -154,14 +155,14 @@ pub enum Error {
     /// cleared at start-up). A bug in the caller: nothing was run or granted.
     #[error("the sandbox's reservation is for another matter or session, or no longer held")]
     WrongReservation,
-    /// Windows tier B found processes of the matter's pool user running outside any run of
-    /// this launch (`windows::launch`, at `prepare` and again at `launch`): a leftover of an
-    /// earlier run, which could bind a port the new run's browser is given later. Nothing more
-    /// is done for the launch until they have ended (the outer's sweeps and the stop task end
-    /// them). Retryable.
+    /// Windows tier B found a process of the matter's pool user still running outside this
+    /// launch (`windows::launch`). **Final, never retried:** `prepare` gives it only after the
+    /// stop task, the pool user's sweep and a fresh look, again and again, until its 180 s
+    /// bound; `launch` gives it when one started after the preparation. A plain launch failure.
+    /// Never from `reserve`, and the end sweeper never counts.
     #[error(
-        "A program from an earlier agent run is still running in the Safe workspace. Try again \
-         once it has stopped."
+        "A program from an earlier agent run kept running in the Safe workspace, so the agent \
+         couldn't start."
     )]
     LeftoverProcess {
         /// How many there were.

@@ -2319,24 +2319,42 @@ The orchestrator's rulings change the interface above in these ways:
   bound. It returns a `clauseo_sandbox::Reservation`, a type on every OS with `matter()`,
   `session()`, `ports()` (the slot's host ports, which the host binds before it builds the
   policy), `slot()` and `pool_user()`. macOS makes one with `Reservation::unpooled`, and the
-  host's fakes with `Reservation::fixed` (`test-support`). A dropped reservation undoes what was
-  done for its session.
-- **`prepare(reservation, &policy)` is the walk.** Its `Preparing` hands the reservation back,
-  prepared. `launch` takes it by value and refuses one of another matter, session or set of
-  launchers with `Error::WrongReservation`, and one not prepared with `Error::NotPrepared`.
-  `running` goes to `reserve`, not `launch`. `is_prepared` is gone: a later launch's walk takes
-  20-70 ms inside `prepare`.
+  host's fakes with `Reservation::fixed` (`test-support`).
+- **The host keeps one owner of the reservation** from `reserve` through `launch`. Dropping it
+  is the release: it undoes what was done for its session and cancels a walk running for it.
+  The drop never blocks. It does no file call and no wait, and takes only the registry's lock,
+  which nothing holds across a step. The undo runs on a thread of its own, and the matter
+  stays busy until it is done.
+- **`prepare(&reservation, &policy)` is the walk.** It borrows the reservation and is keyed by
+  its claim and matter. `Preparing::result()` and `wait()` give `Option<Result<(), Error>>`.
+  A second `prepare` of the same reservation joins the running walk, or finishes at once once
+  it is prepared. A failed or cancelled walk undoes its work before it reports.
+- **`launch` takes the reservation by value.** It refuses one of another matter, session or
+  set of launchers with `Error::WrongReservation`. It refuses one that is not prepared, or whose
+  walk failed, with `Error::NotPrepared`. A refused reservation is released before the refusal
+  returns. `running` goes to `reserve`, not `launch`. `is_prepared` is gone: a later launch's
+  walk takes 20-70 ms inside `prepare`.
 - **The walk's order:** the gate and the plan, `check_launch`, `wfp::check_launch`, leftovers,
   the set-aside's launch pass, `PrepareRun{slot}`, then `apply`. Nothing runs as the pool user
-  and nothing is granted to it before `check_launch` passes, and a failed check drops the
-  reservation. A process left running as the pool user is stopped by the stop task and the pool
-  user's sweep, then looked for again. If one survives to the 180 s bound, the launch is refused
-  with `Error::LeftoverProcess`. `PrepareRun` answering that a set-up is running is retried
-  within the same bound.
+  and nothing is granted to it before `check_launch` passes. A failed check undoes the
+  reservation's work. A process left running as the pool user is stopped by the stop task and
+  the pool user's sweep, then looked for again. If one survives to the 180 s bound, the launch
+  is refused with `Error::LeftoverProcess`. `PrepareRun` answering that a set-up is running is
+  retried within the same bound.
 - **One live agent per matter.** The matter stays held from its reservation until
-  `after_session` has finished. Until then `reserve` refuses with `Error::MatterBusy`, a plain
-  refusal with no fallback, until the extra-user-per-matter PR. `Launchers::with_steps` clears
-  stale launch files and slot claims first, so a crash strands no slot.
+  `after_session` has finished. Its pool user isn't handed out again while the detached end
+  sweeper the outer started still runs as that user (`LaunchSteps::end_sweeper_running`). Until
+  then `reserve` refuses with `Error::MatterBusy`, and **the host retries** within its 180 s
+  bound, showing that it is preparing. This holds until the extra-user-per-matter PR.
+  `Launchers::with_steps` clears stale launch files and slot claims first, so a crash strands
+  no slot.
+- **`Error::LeftoverProcess` is final, never retried.** `prepare` gives it only after the stop
+  task, the sweep and a fresh look have run, again and again, until the bound. `launch` gives
+  it when a process started after the preparation. Either way it is a plain launch failure.
+  `reserve` never gives it. The end sweeper, identified exactly, never counts as a leftover.
+- **The launching session** is its session id together with its reservation's claim, never its
+  name or a pid alone. The registry checks both. C5's real steps must do the same wherever they
+  must not count it, such as the open-session mark and the launch check.
 - **Errors:** `Error` is `#[non_exhaustive]`, so callers outside the crate match with a
   wildcard. `Error::kind()` gives every variant a phrase with no path in it. The appended
   variants are `PoolFull { cause }` (counts for `NotProtectedCause::PoolFull`), `NotPrepared`,
