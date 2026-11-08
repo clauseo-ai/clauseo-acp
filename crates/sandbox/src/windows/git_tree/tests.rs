@@ -263,13 +263,18 @@ fn the_account_dacl_grants_that_account_read_and_execute_alone() {
     let sddl = account_sddl(&account(3).sid);
     assert_eq!(
         sddl,
-        "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;S-1-5-21-1-2-3-1003)"
+        "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;S-1-5-21-1-2-3-1003)\
+         (A;;0x120080;;;AU)"
     );
     assert!(!sddl.contains(account(4).sid.as_str()));
     assert!(!sddl.contains(group().as_str()));
     assert_eq!(
         git_dir_sddl(&group()),
-        "O:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a0;;;S-1-5-21-1-2-3-1000)"
+        "O:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a0;;;S-1-5-21-1-2-3-1000)(A;;0x120080;;;AU)"
+    );
+    assert!(
+        !source_sddl(&group()).contains(";AU)"),
+        "only the tree's own chain shows its security"
     );
 }
 

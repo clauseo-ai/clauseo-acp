@@ -75,6 +75,10 @@ pub const GIT_EXE: [&str; 2] = ["cmd", "git.exe"];
 const READ_EXECUTE: &str = "0x1200a9";
 /// `FILE_GENERIC_EXECUTE`: traverse and read attributes, no listing.
 const TRAVERSE: &str = "0x1200a0";
+/// The ACE that lets any signed-in user read a folder's owner and DACL, not inherited:
+/// `READ_CONTROL | FILE_READ_ATTRIBUTES | SYNCHRONIZE`, no listing and no file read. The outer
+/// runner, the unelevated desktop user, checks each level of a tree through it (part 2).
+const READ_SECURITY: &str = "(A;;0x120080;;;AU)";
 
 /// Why an account has no tree: the record's `Git Bash unavailable: <code>`. Appended only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -316,15 +320,19 @@ pub fn folder_name_ok(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
-/// The DACL of [`GIT_DIR`]: SYSTEM and Administrators full, the pool's group traverse only.
+/// The DACL of [`GIT_DIR`]: SYSTEM and Administrators full, the pool's group traverse only,
+/// and any signed-in user its security alone ([`READ_SECURITY`]).
 pub fn git_dir_sddl(group: &Sid) -> String {
-    format!("O:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;{TRAVERSE};;;{group})")
+    format!("O:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;{TRAVERSE};;;{group}){READ_SECURITY}")
 }
 
 /// The DACL of an account's folder and of each of its trees: SYSTEM and Administrators full,
-/// the account read and execute, inherited by all below; no one else.
+/// the account read and execute, inherited by all below; any signed-in user the folder's own
+/// security alone ([`READ_SECURITY`], not inherited); no one else.
 pub fn account_sddl(account: &Sid) -> String {
-    format!("O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;{READ_EXECUTE};;;{account})")
+    format!(
+        "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;{READ_EXECUTE};;;{account}){READ_SECURITY}"
+    )
 }
 
 /// The DACL of [`SOURCE_DIR`] and of each source copy: SYSTEM and Administrators full, the

@@ -2211,6 +2211,10 @@ read back:
 - `git\`: SYSTEM and Administrators full, the pool's group traverse only (`0x1200a0`, no listing);
 - `<account>\` and each tree: SYSTEM and Administrators full, that account read and execute
   (`0x1200a9`), inherited below; no one else, so one pool account can't list another's tree;
+- on `git\`, `<account>\` and each tree, Authenticated Users `0x120080` (`READ_CONTROL`, read
+  attributes, synchronize), not inherited: no listing and no file read, only the folder's owner
+  and DACL, which the outer runner (the unelevated desktop user) checks before a run uses the
+  tree. Each refresh re-secures every level, so an older tree gains it;
 - `_source\` and its copy: SYSTEM and Administrators full, the pool's group read and execute.
 
 A hard link shares its file's security, so a tree's files keep the DACL of Git's own files
