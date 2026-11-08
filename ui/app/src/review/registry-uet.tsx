@@ -188,7 +188,7 @@ export const UET: Entry[] = [
   entry(
     "UET-50",
     popWords(
-      "Clauseo couldn't check that its copy of Chrome is up to date, so it won't use a browser for now. It keeps trying on its own.",
+      "Clauseo couldn't confirm that its copy of Chrome is up to date, so it isn't using the browser for now. It keeps checking on its own.",
     ),
     [browser("browser_list_unavailable")],
   ),
@@ -231,7 +231,7 @@ export const UET: Entry[] = [
   entry("UET-35", popWords("Couldn't unpack"), NONE, failed("unpack")),
   // no verified list of Chrome versions yet: nothing was downloaded (a fingerprint that didn't match
   // says UET-29's File didn't match)
-  entry("UET-51", popWords("Not ready to download yet"), NONE, failed("list_unavailable")),
+  entry("UET-51", popWords("Can't download Chrome yet"), NONE, failed("list_unavailable")),
   // a code this version doesn't know reads as unknown
   entry("UET-30", popWords("Download failed"), NONE, failed("a_newer_code")),
   entry("UET-31", popWords("Try again"), NONE, failed("host_refused"), { tip: "tool-retry" }),

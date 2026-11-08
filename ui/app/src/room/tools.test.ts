@@ -185,8 +185,8 @@ const UNREADABLE =
   "Clauseo couldn't check this computer's browser settings, so it won't use a browser for now. " +
   "It checks again the next time it needs one.";
 const NO_LIST =
-  "Clauseo couldn't check that its copy of Chrome is up to date, so it won't use a browser for now. " +
-  "It keeps trying on its own.";
+  "Clauseo couldn't confirm that its copy of Chrome is up to date, so it isn't using the browser for " +
+  "now. It keeps checking on its own.";
 const LIST_OLD = "Clauseo hasn't checked for a newer Chrome in a while. The browser still works.";
 
 const ROOM: ToolRowRoom = { settings: true, install: null };
@@ -307,7 +307,7 @@ const FAILED: Record<InstallFailCode, string> = {
   size_mismatch: "File didn't match",
   signature: "File didn't match",
   hash_mismatch: "File didn't match",
-  list_unavailable: "Not ready to download yet",
+  list_unavailable: "Can't download Chrome yet",
   disk_space: `Needs 1${NB}GB free`,
   host_refused: "Network blocked it",
   unpack: "Couldn't unpack",
@@ -551,8 +551,8 @@ test("with no list of Chrome versions, no download in any download state, and th
   expect(toolRow("hi", noList, ROOM)).toMatchObject({
     reason: "Chrome के संस्करण की जाँच नहीं हो सकी",
     note:
-      "Clauseo यह जाँच नहीं कर सका कि उसका Chrome अप-टू-डेट है या नहीं, इसलिए वह अभी ब्राउज़र का उपयोग नहीं करेगा। " +
-      "वह अपने आप कोशिश करता रहेगा।",
+      "Clauseo यह पक्का नहीं कर सका कि उसका Chrome अप-टू-डेट है, इसलिए वह अभी ब्राउज़र का उपयोग नहीं कर रहा। " +
+      "वह अपने आप जाँच करता रहेगा।",
   });
 });
 

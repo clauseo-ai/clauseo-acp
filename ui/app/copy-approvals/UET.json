@@ -407,8 +407,8 @@
     "note": "No verified browser list, so the downloaded Chrome's version can't be checked (browser_list_unavailable): pending copy review; no download offered"
   },
   "UET-50": {
-    "en": "Clauseo couldn't check that its copy of Chrome is up to date, so it won't use a browser for now. It keeps trying on its own.",
-    "hi": "Clauseo यह जाँच नहीं कर सका कि उसका Chrome अप-टू-डेट है या नहीं, इसलिए वह अभी ब्राउज़र का उपयोग नहीं करेगा। वह अपने आप कोशिश करता रहेगा।",
+    "en": "Clauseo couldn't confirm that its copy of Chrome is up to date, so it isn't using the browser for now. It keeps checking on its own.",
+    "hi": "Clauseo यह पक्का नहीं कर सका कि उसका Chrome अप-टू-डेट है, इसलिए वह अभी ब्राउज़र का उपयोग नहीं कर रहा। वह अपने आप जाँच करता रहेगा।",
     "hi_status": "provisional",
     "hi_at": "2026-11-08",
     "hi_by": "app track (final provisional Hindi; Hindi-speaking lawyer to review)",
@@ -418,8 +418,8 @@
     "note": "No verified browser list (browser_list_unavailable), in full under the reason: pending copy review; Clauseo fetches the list in the background; no download offered"
   },
   "UET-51": {
-    "en": "Not ready to download yet",
-    "hi": "अभी डाउनलोड के लिए तैयार नहीं",
+    "en": "Can't download Chrome yet",
+    "hi": "Chrome अभी डाउनलोड नहीं हो सकता",
     "hi_status": "provisional",
     "hi_at": "2026-11-08",
     "hi_by": "app track (final provisional Hindi; Hindi-speaking lawyer to review)",

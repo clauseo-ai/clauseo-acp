@@ -28,7 +28,7 @@ export const HI = {
   "Download failed": "डाउनलोड विफल",
   // no verified list of Chrome versions yet, so nothing was downloaded; Clauseo fetches it on its own
   // (provisional Hindi, app track final)
-  "Not ready to download yet": "अभी डाउनलोड के लिए तैयार नहीं",
+  "Can't download Chrome yet": "Chrome अभी डाउनलोड नहीं हो सकता",
   "Try again": "फिर से प्रयास करें",
   // under the browser's reason when the firm's policy blocks it, in full: no download helps
   // (provisional Hindi, app track final)
@@ -40,8 +40,8 @@ export const HI = {
     "Clauseo इस कंप्यूटर की ब्राउज़र सेटिंग्स की जाँच नहीं कर सका, इसलिए वह अभी ब्राउज़र का उपयोग नहीं करेगा। अगली बार ब्राउज़र की ज़रूरत होने पर वह फिर से जाँच करेगा।",
   // under the browser's reason when Clauseo has no verified list of Chrome versions, in full: no download helps
   // (provisional Hindi, app track final)
-  "Clauseo couldn't check that its copy of Chrome is up to date, so it won't use a browser for now. It keeps trying on its own.":
-    "Clauseo यह जाँच नहीं कर सका कि उसका Chrome अप-टू-डेट है या नहीं, इसलिए वह अभी ब्राउज़र का उपयोग नहीं करेगा। वह अपने आप कोशिश करता रहेगा।",
+  "Clauseo couldn't confirm that its copy of Chrome is up to date, so it isn't using the browser for now. It keeps checking on its own.":
+    "Clauseo यह पक्का नहीं कर सका कि उसका Chrome अप-टू-डेट है, इसलिए वह अभी ब्राउज़र का उपयोग नहीं कर रहा। वह अपने आप जाँच करता रहेगा।",
   // under a browser that is on, when Clauseo's newest list of Chrome versions is old: a note, nothing is wrong
   // (provisional Hindi, app track final)
   "Clauseo hasn't checked for a newer Chrome in a while. The browser still works.":

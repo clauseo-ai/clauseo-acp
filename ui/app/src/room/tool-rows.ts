@@ -71,7 +71,7 @@ export const FAILED: Record<Exclude<InstallFailCode, "unsupported" | "cancelled"
   size_mismatch: "File didn't match",
   signature: "File didn't match",
   hash_mismatch: "File didn't match",
-  list_unavailable: "Not ready to download yet",
+  list_unavailable: "Can't download Chrome yet",
   disk_space: "Needs 1\u00a0GB free",
   host_refused: "Network blocked it",
   unpack: "Couldn't unpack",
@@ -117,7 +117,7 @@ const POLICY: ToolsKey =
 const UNREADABLE: ToolsKey =
   "Clauseo couldn't check this computer's browser settings, so it won't use a browser for now. It checks again the next time it needs one.";
 const NO_LIST: ToolsKey =
-  "Clauseo couldn't check that its copy of Chrome is up to date, so it won't use a browser for now. It keeps trying on its own.";
+  "Clauseo couldn't confirm that its copy of Chrome is up to date, so it isn't using the browser for now. It keeps checking on its own.";
 const LIST_OLD: ToolsKey =
   "Clauseo hasn't checked for a newer Chrome in a while. The browser still works.";
 
