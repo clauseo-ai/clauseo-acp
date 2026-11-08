@@ -114,7 +114,7 @@ pub enum Line {
         /// `read`, `write` or `unknown`.
         access: String,
         /// Not under a known local volume: `path` is for display only.
-        #[serde(default, skip_serializing_if = "is_false")]
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         net: bool,
     },
     /// Refusals dropped since the last such line.
@@ -178,15 +178,6 @@ pub fn denied_line(record: &Record, pool: &[Sid]) -> Option<String> {
         net: record.net,
     };
     serde_json::to_string(&line).ok().map(|text| text + "\n")
-}
-
-/// Whether `flag` is false: `net` is left out of a local refusal's line.
-#[expect(
-    clippy::trivially_copy_pass_by_ref,
-    reason = "serde's skip_serializing_if takes a reference"
-)]
-fn is_false(flag: &bool) -> bool {
-    !*flag
 }
 
 /// A `dropped` line with its `\n`.

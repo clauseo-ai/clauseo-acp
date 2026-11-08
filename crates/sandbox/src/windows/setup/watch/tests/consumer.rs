@@ -208,36 +208,39 @@ fn network_and_unknown_device_paths_are_flagged_and_local_ones_are_not() {
     let mut to = |path: &str| map.map_path(path, at, &mut devices);
     assert_eq!(
         to(r"\Device\Mup\server\share\f.txt"),
-        net(r"\\server\share\f.txt")
+        Some(net(r"\\server\share\f.txt"))
     );
     assert_eq!(
         to(r"\Device\LanmanRedirector\;Z:00000000000a1b2c\server\share\f.txt"),
-        net(r"\\server\share\f.txt")
+        Some(net(r"\\server\share\f.txt"))
     );
     assert_eq!(
         to(r"\Device\Mup\;LanmanRedirector\;Z:00000000000a1b2c\server\share\f"),
-        net(r"\\server\share\f")
+        Some(net(r"\\server\share\f"))
     );
     assert_eq!(
         to(r"\Device\WebDavRedirector\;Y:0000000000001234\host@SSL\DavWWWRoot\d"),
-        net(r"\\host@SSL\DavWWWRoot\d")
+        Some(net(r"\\host@SSL\DavWWWRoot\d"))
     );
     assert_eq!(
         to(r"\Device\Mup\;WebDavRedirector\host\DavWWWRoot\d"),
-        net(r"\\host\DavWWWRoot\d")
+        Some(net(r"\\host\DavWWWRoot\d"))
     );
     // Any \;X: form, whatever its provider.
     assert_eq!(
         to(r"\Device\SomeRedirector\;Q:0000000000000001\srv\shr\x"),
-        net(r"\\srv\shr\x")
+        Some(net(r"\\srv\shr\x"))
     );
     // A device not known as a local volume shows as its NT path, flagged.
     let unknown = r"\Device\SomethingElse\x\y";
-    assert_eq!(to(unknown), net(unknown));
+    assert_eq!(to(unknown), Some(net(unknown)));
     // A redirector path without both a server and a share shows as its NT path.
-    assert_eq!(to(r"\Device\Mup\server"), net(r"\Device\Mup\server"));
+    assert_eq!(to(r"\Device\Mup\server"), Some(net(r"\Device\Mup\server")));
     // A local volume stays unflagged.
-    assert_eq!(to(r"\Device\HarddiskVolume3\Users\a"), local(r"C:\Users\a"));
+    assert_eq!(
+        to(r"\Device\HarddiskVolume3\Users\a"),
+        Some(local(r"C:\Users\a"))
+    );
     // A drive letter on a share is never a local volume.
     let mut map = DeviceMap::default();
     let mut share = || {
@@ -252,7 +255,7 @@ fn network_and_unknown_device_paths_are_flagged_and_local_ones_are_not() {
             at,
             &mut share
         ),
-        net(r"\\s\h\f")
+        Some(net(r"\\s\h\f"))
     );
 }
 

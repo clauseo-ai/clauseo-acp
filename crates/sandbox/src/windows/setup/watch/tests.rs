@@ -73,16 +73,14 @@ struct Fed {
     stamp: i64,
 }
 
-/// `path` as a local refusal's, as `map_path` gives it.
-#[expect(clippy::unnecessary_wraps, reason = "compared with map_path's Option")]
-fn local(path: &str) -> Option<Mapped> {
-    Some(mapped(path, false))
+/// `path` as a local refusal's.
+fn local(path: &str) -> Mapped {
+    mapped(path, false)
 }
 
-/// `path` as a network refusal's, for display only, as `map_path` gives it.
-#[expect(clippy::unnecessary_wraps, reason = "compared with map_path's Option")]
-fn net(path: &str) -> Option<Mapped> {
-    Some(mapped(path, true))
+/// `path` as a network refusal's, for display only.
+fn net(path: &str) -> Mapped {
+    mapped(path, true)
 }
 
 fn mapped(path: &str, net: bool) -> Mapped {
@@ -296,19 +294,19 @@ fn device_paths_map_to_drive_letters_and_shares_and_nothing_else() {
     };
     assert_eq!(
         to(&mut map, r"\Device\HarddiskVolume3\Users\a.txt", &mut list),
-        local(r"C:\Users\a.txt")
+        Some(local(r"C:\Users\a.txt"))
     );
     assert_eq!(
         to(&mut map, r"\device\harddiskvolume5\x", &mut list),
-        local(r"D:\x")
+        Some(local(r"D:\x"))
     );
-    assert_eq!(to(&mut map, VOLUME, &mut list), local(r"C:\"));
+    assert_eq!(to(&mut map, VOLUME, &mut list), Some(local(r"C:\")));
     // Volume 30 isn't volume 3: no known local volume, so flagged.
     let thirty = r"\Device\HarddiskVolume30\x";
-    assert_eq!(to(&mut map, thirty, &mut list), net(thirty));
+    assert_eq!(to(&mut map, thirty, &mut list), Some(net(thirty)));
     assert_eq!(
         to(&mut map, r"\Device\NamedPipe\x", &mut list),
-        net(r"\Device\NamedPipe\x")
+        Some(net(r"\Device\NamedPipe\x"))
     );
     // Not a device path at all: dropped.
     assert_eq!(to(&mut map, r"C:\x", &mut list), None);
@@ -325,20 +323,26 @@ fn a_miss_lists_the_letters_again_once_a_second() {
     let path = r"\Device\HarddiskVolume9\new";
     let list = |d: &Vec<(char, String)>| d.clone();
     let t0 = Duration::from_secs(5);
-    assert_eq!(map.map_path(path, t0, &mut || list(&drives)), net(path));
+    assert_eq!(
+        map.map_path(path, t0, &mut || list(&drives)),
+        Some(net(path))
+    );
     // A drive mounted since: not seen until a second has passed.
     drives.push(('E', r"\Device\HarddiskVolume9".to_owned()));
     let soon = t0 + Duration::from_millis(500);
-    assert_eq!(map.map_path(path, soon, &mut || list(&drives)), net(path));
+    assert_eq!(
+        map.map_path(path, soon, &mut || list(&drives)),
+        Some(net(path))
+    );
     let later = t0 + REFRESH_EVERY;
     assert_eq!(
         map.map_path(path, later, &mut || list(&drives)),
-        local(r"E:\new")
+        Some(local(r"E:\new"))
     );
     // A letter with no device isn't a prefix of everything.
     let mut map = DeviceMap::default();
     let mut odd = || vec![('Z', String::new()), ('1', VOLUME.to_owned())];
-    assert_eq!(map.map_path(path, t0, &mut odd), net(path));
+    assert_eq!(map.map_path(path, t0, &mut odd), Some(net(path)));
 }
 
 #[test]
