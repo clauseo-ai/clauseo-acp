@@ -235,7 +235,9 @@ impl LaunchSd {
     }
 
     /// This descriptor without any deny entry for `group` (`(D;...;;;group)`, whatever its
-    /// flags and mask), and how many went.
+    /// flags and mask), and how many went. The removal drops every such deny, not only the one
+    /// [`LaunchSd::with_deny`] adds: `group` is `ClauseoSandboxUsers`, Clauseo's own group, so
+    /// any deny naming it is Clauseo's to take off.
     pub fn without_denies(&self, group: &Sid) -> (LaunchSd, usize) {
         let group = sid_bytes(group);
         let mut kept = self.clone();
