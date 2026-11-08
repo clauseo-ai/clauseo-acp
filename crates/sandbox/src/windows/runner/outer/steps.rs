@@ -1,12 +1,14 @@
 //! The outer runner's start of the inner runner, in `start.rs`'s order: the logon, the token
-//! user's check, the job, the shut, the resume. The inner gets no handle to the job.
+//! user's check, the job, the shut, the resume, none of it once the session's end has begun. The
+//! inner gets no handle to the job.
 
 use zeroize::Zeroizing;
 
 use super::super::RunExit;
+use super::super::end::ended_before_start;
 use super::super::spawn::{Process, assign, log_on, resume};
 use super::super::start::Steps;
-use super::{Failure, logon_failure, os};
+use super::{End, Failure, logon_failure, os};
 use crate::windows::acl::object::Handle;
 use crate::windows::sids::Sid;
 use crate::windows::token::os::shut_object;
@@ -24,6 +26,8 @@ pub(super) struct Start<'a> {
     pub(super) base: &'a str,
     pub(super) cwd: &'a str,
     pub(super) job: &'a Handle,
+    /// The session's end, which the start checks (`start.rs`).
+    pub(super) end: &'a End,
 }
 
 impl Steps for Start<'_> {
@@ -78,5 +82,18 @@ impl Steps for Start<'_> {
 
     fn kill(&mut self, inner: &Process, error: &Failure) {
         inner.kill(error.0.code());
+    }
+
+    /// A session the git watch ended before its agent ran exits as the job's end would have
+    /// ended a running one (`end::ended_before_start`).
+    fn not_ended(&mut self) -> Result<(), Failure> {
+        let Some(began) = self.end.began() else {
+            return Ok(());
+        };
+        let exit = RunExit::from_code(ended_before_start(began)).unwrap_or(RunExit::AgentReserved);
+        Err(Failure::new(
+            exit,
+            "the session ended before its agent started; the agent never ran",
+        ))
     }
 }

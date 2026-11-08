@@ -35,10 +35,15 @@
 //! job's end ([`exit_code`]). It also keeps whether any sweep of the session found an escapee (the
 //! inner's, reported on `ctl`), which makes the outer exit `RunExit::Escapee` whatever the agent's
 //! code ([`SessionEnd::outcome`]).
+//!
+//! The git watch ends a session with [`SessionEnd::kill_now`] instead: the job ended and empty
+//! is all it waits for before it moves anything, and the sweep task's request follows on a thread
+//! of its own, once as ever. The end is known as begun before the job's end, so an inner that the
+//! outer is still starting is never resumed past it ([`SessionEnd::began`], `start.rs`).
 
 use std::io::{self, Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Condvar, Mutex, OnceLock, mpsc};
+use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError, mpsc};
 use std::thread;
 use std::time::Duration;
 
@@ -176,28 +181,20 @@ pub(crate) enum EndSignal {
     Failed,
 }
 
-/// How the session's end began: the signal and the `SweepNext` read. Whether the job emptied
-/// is only logged: the marker awaits a sweep either way.
-struct Began {
-    /// The signal.
-    why: EndSignal,
-    /// `SweepNext` as read once the job ended; `None` when it couldn't be.
-    sweep: Option<u64>,
-}
-
 /// The guard that ends the session once.
 pub(crate) struct SessionEnd<S: EndSteps> {
     steps: S,
-    /// How the end began, once a path began it.
-    began: OnceLock<Began>,
+    /// The `SweepNext` read once a path's end of the job and request of the sweep task is over
+    /// (`None` when it couldn't be read).
+    started: OnceLock<Option<u64>>,
     /// Whether the marker was settled ([`SessionEnd::finish`]).
     finished: OnceLock<()>,
     /// When the host's stdin ended, on [`EndSteps::now`]'s clock.
     stdin_ended: OnceLock<Duration>,
     /// Whether a sweep of the session found a process of the pool user's it couldn't end.
     escaped: AtomicBool,
-    /// Whether a path began the end, for [`SessionEnd::wait_begun`].
-    begun: Mutex<bool>,
+    /// The end signal of the path that began the end, set before that path ends the job.
+    begun: Mutex<Option<EndSignal>>,
     begun_changed: Condvar,
 }
 
@@ -205,31 +202,69 @@ impl<S: EndSteps> SessionEnd<S> {
     pub(crate) fn new(steps: S) -> SessionEnd<S> {
         SessionEnd {
             steps,
-            began: OnceLock::new(),
+            started: OnceLock::new(),
             finished: OnceLock::new(),
             stdin_ended: OnceLock::new(),
             escaped: AtomicBool::new(false),
-            begun: Mutex::new(false),
+            begun: Mutex::new(None),
             begun_changed: Condvar::new(),
         }
     }
 
     /// Ends the job and requests the sweep task ([`end_session`]) unless a path did already;
-    /// whether this call did. A call while another path's end is still going returns once that
-    /// end is over, so no path goes on (the outer's exit among them) with the job still being
-    /// ended or the request still going.
+    /// whether this call began the end. A call while another path's end is still going returns
+    /// once that end is over, so no path goes on (the outer's exit among them) with the job still
+    /// being ended or the request still going.
     pub(crate) fn trigger(&self, why: EndSignal) -> bool {
-        let mut first = false;
-        self.began.get_or_init(|| {
-            first = true;
-            if let Ok(mut begun) = self.begun.lock() {
-                *begun = true;
-            }
-            self.begun_changed.notify_all();
-            let (_emptied, sweep) = end_session(&self.steps);
-            Began { why, sweep }
-        });
+        let first = self.begin(why);
+        self.start_once();
         first
+    }
+
+    /// The git watch's end: begins the end (`why`), ends the job and waits, up to
+    /// [`EMPTY_WAIT`], until no process is left in it ([`EndSteps::empty_job`]), whichever
+    /// path began the end. Whether it is empty: only then may the watch move anything. The
+    /// sweep task's request comes after, on a thread of its own ([`SessionEnd::trigger`]'s end,
+    /// once a session; this thread's when none starts), so it never holds up the moves; a path
+    /// that ends the session meanwhile waits for it as ever.
+    pub(crate) fn kill_now(self: &Arc<Self>, why: EndSignal) -> bool
+    where
+        S: Send + Sync + 'static,
+    {
+        self.begin(why);
+        let emptied = self.steps.empty_job();
+        if let Err(what) = &emptied {
+            self.steps.log(&format!(
+                "clauseo-sandbox-run: the session's job didn't empty: {what}"
+            ));
+        }
+        let end = Arc::clone(self);
+        let later = thread::Builder::new()
+            .name("session-end".to_owned())
+            .spawn(move || end.start_once());
+        if later.is_err() {
+            self.start_once();
+        }
+        emptied.is_ok()
+    }
+
+    /// Begins the end with `why` unless a path did already, before anything ends the job;
+    /// whether this call did.
+    fn begin(&self, why: EndSignal) -> bool {
+        let mut begun = self.begun.lock().unwrap_or_else(PoisonError::into_inner);
+        let first = begun.is_none();
+        if first {
+            *begun = Some(why);
+        }
+        drop(begun);
+        self.begun_changed.notify_all();
+        first
+    }
+
+    /// Ends the job and requests the sweep task, once a session ([`end_session`]); a call
+    /// while another's is going waits for it.
+    fn start_once(&self) {
+        self.started.get_or_init(|| end_session(&self.steps).1);
     }
 
     /// The host's stdin ended now: from here the host gives the outer its `stdin_grace`, and the
@@ -252,13 +287,16 @@ impl<S: EndSteps> SessionEnd<S> {
             return false;
         };
         self.begun_changed
-            .wait_timeout_while(begun, wait, |begun| !*begun)
-            .is_ok_and(|(begun, _)| *begun)
+            .wait_timeout_while(begun, wait, |begun| begun.is_none())
+            .is_ok_and(|(begun, _)| begun.is_some())
     }
 
-    /// The end signal that began the end, once one did.
+    /// The end signal of the path that began the end, once one did. It is set, under the lock,
+    /// before that path ends the job, so a step done before a read of `None` (the inner put in
+    /// the job) comes before the job's end, which then ends what the step left there. The outer
+    /// reads it after it put the inner in the job and before it resumes it (`start.rs`).
     pub(crate) fn began(&self) -> Option<EndSignal> {
-        self.began.get().map(|began| began.why)
+        *self.begun.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// The steps.
@@ -286,15 +324,13 @@ impl<S: EndSteps> SessionEnd<S> {
     /// (`outer/unclean.rs`).
     pub(crate) fn finish(&self) {
         self.finished.get_or_init(|| {
-            let Some(began) = self.began.get() else {
+            let Some(sweep) = self.started.get() else {
                 return;
             };
             let state = if self.escaped() {
                 self.awaiting_stop()
             } else {
-                began
-                    .sweep
-                    .map(|sweep| MarkerState::AwaitingSweep { sweep })
+                sweep.map(|sweep| MarkerState::AwaitingSweep { sweep })
             };
             let Some(state) = state else {
                 return;
@@ -351,6 +387,13 @@ pub(crate) fn exit_code(began: Option<EndSignal>, inner: u32, reported: Option<u
         };
     }
     agent_code(inner)
+}
+
+/// The outer's exit code for a session whose end began (`began`) before its inner ran: the code
+/// the job's end would have given a running agent ([`exit_code`] of [`SWEPT`], none reported).
+/// No agent runs.
+pub(crate) fn ended_before_start(began: EndSignal) -> u32 {
+    exit_code(Some(began), SWEPT, None)
 }
 
 /// Which end of a copy ended it.
@@ -459,6 +502,8 @@ pub(crate) fn inner_exited<S: EndSteps>(
     })
 }
 
+#[cfg(test)]
+mod kill_tests;
 #[cfg(test)]
 mod stdin_tests;
 #[cfg(test)]
