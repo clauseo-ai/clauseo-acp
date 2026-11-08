@@ -7,7 +7,7 @@ import { Button } from "@clauseo/components/ui/button.tsx";
 import type { WordsRef } from "./words.ts";
 
 /** The native confirm, mocked: title, message, and the two buttons in the platform's order (the Mac puts the default
- * button last, Windows first). */
+ * button last, Windows first). Without `ok`, only the closing button. */
 export function ConfirmMock({
   lang,
   title,
@@ -18,11 +18,11 @@ export function ConfirmMock({
   lang: Lang;
   title: WordsRef;
   message: string;
-  ok: WordsRef;
+  ok?: WordsRef;
   cancel: WordsRef;
 }) {
   const { platform } = useDisplay();
-  const open = (
+  const open = ok && (
     <Button key="ok" kind="primary">
       {ok.text(lang)}
     </Button>

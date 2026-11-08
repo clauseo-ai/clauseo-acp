@@ -319,3 +319,18 @@ fn the_seed_reads_the_registry_value() {
     assert_eq!(effective.settings().ui.language, Language::Hi);
     assert_eq!(deleted, Ok(()));
 }
+
+/// `current` is the language last followed, written or not, and none before the first.
+#[test]
+fn the_follower_knows_the_language_it_last_saw() {
+    let mut recorder = Recorder {
+        fail: Some(5),
+        ..Recorder::default()
+    };
+    let mut follower = Follower::new(&mut recorder);
+    assert_eq!(follower.current(), None);
+    follower.follow(Language::Hi);
+    assert_eq!(follower.current(), Some(Language::Hi));
+    follower.follow(Language::En);
+    assert_eq!(follower.current(), Some(Language::En));
+}
