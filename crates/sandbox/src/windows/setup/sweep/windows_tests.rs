@@ -263,11 +263,19 @@ fn elevated_a_task_whose_descriptor_shuts_system_out_is_deleted_or_56_never_left
         "schtasks /create /xml as the test user:\n{printed}"
     );
 
-    // 3. The walk and the cross-check, the test user the pool.
+    // 3. Whether the Task Scheduler's listing gives it to this process, then the walk and the
+    // cross-check, the test user the pool.
     let mut sweeper = WindowsSweeper::new();
+    let root = sweeper.root().unwrap();
+    let listed = sweeper
+        .tasks(&root)
+        .unwrap()
+        .iter()
+        .any(|task| task.name == name);
+    eprintln!("3. listed by GetTasks: {listed}");
     let swept = sweep_tasks(&mut sweeper, std::slice::from_ref(&sid));
     eprintln!(
-        "3. {} deleted, {} unreadable, {} not deleted, {} hidden, {} unlisted",
+        "   {} deleted, {} unreadable, {} not deleted, {} hidden, {} unlisted",
         swept.deleted, swept.unreadable, swept.not_deleted, swept.hidden, swept.unlisted
     );
     for (why, count) in &swept.why {
@@ -287,5 +295,10 @@ fn elevated_a_task_whose_descriptor_shuts_system_out_is_deleted_or_56_never_left
     assert!(
         !left || swept.left(),
         "the task was left and the sweep would have ended 0: {swept:?}"
+    );
+    // Missing from the listing, only the cross-check could have caught it.
+    assert!(
+        listed || swept.hidden > 0,
+        "the listing hid the task and the cross-check didn't find it: {swept:?}"
     );
 }
