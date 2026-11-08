@@ -27,6 +27,10 @@ pub const PROFILE_TEMP_ASSIGNED: u32 = 0x0800;
 /// whose refusal is error 1385.
 pub const DENY_INTERACTIVE_RIGHT: &str = "SeDenyInteractiveLogonRight";
 
+/// The right "Deny log on through Remote Desktop Services" stands for, which set-up grants the
+/// pool group so no pool user can sign in over Remote Desktop, and `--remove` takes off.
+pub const DENY_REMOTE_INTERACTIVE_RIGHT: &str = "SeDenyRemoteInteractiveLogonRight";
+
 /// The well-known SIDs whose entry in "Deny log on locally" ([`DENY_INTERACTIVE_RIGHT`])
 /// refuses every pool user, since each pool user's interactive token holds them all: Everyone,
 /// LOCAL, INTERACTIVE, Authenticated Users, Local account, and Users. The pool group's own SID
@@ -159,6 +163,14 @@ mod tests {
     fn the_preflight_reads_the_deny_right_not_the_allow_right() {
         assert_eq!(DENY_INTERACTIVE_RIGHT, "SeDenyInteractiveLogonRight");
         assert_ne!(DENY_INTERACTIVE_RIGHT, "SeInteractiveLogonRight");
+    }
+
+    #[test]
+    fn the_pool_group_is_denied_the_remote_desktop_logon_right() {
+        assert_eq!(
+            DENY_REMOTE_INTERACTIVE_RIGHT,
+            "SeDenyRemoteInteractiveLogonRight"
+        );
     }
 
     #[test]

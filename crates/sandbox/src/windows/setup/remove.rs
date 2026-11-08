@@ -45,7 +45,9 @@
 //! 5. `DeviceSync`'s deny;
 //! 6. the ledger's entries (`ledger_work.rs`), read from the record's `DataDir`, which the owner
 //!    can influence, so it is checked as `--data-dir` is and used only as `ledger_work.rs` says;
-//! 7. the group, when it is the record's and has no members left;
+//! 7. the group, when it is the record's and has no members left, its "Deny log on through
+//!    Remote Desktop Services" right taken off first (a right is keyed by SID and would be left
+//!    on a SID nothing has);
 //! 8. on a per-machine install, the stop and sweep tasks set-up registered for the owner, then
 //!    the record key;
 //! 9. for the uninstaller only, the admin copy's teardown (`admin_remove.rs`, run through
@@ -144,6 +146,8 @@ pub enum RemoveStep {
     Network,
     /// A per-machine install's stop and sweep tasks, deleted before the record.
     StopTask,
+    /// Taking the group's "Deny log on through Remote Desktop Services" off, before the group.
+    RemoteLogon,
 }
 
 impl std::fmt::Display for RemoveStep {
@@ -163,6 +167,7 @@ impl std::fmt::Display for RemoveStep {
             RemoveStep::Record => "deleting the machine's record",
             RemoveStep::Network => "removing the network filters",
             RemoveStep::StopTask => "deleting the sandbox's stop and sweep tasks",
+            RemoveStep::RemoteLogon => "taking the sandbox group's Remote Desktop deny off",
         })
     }
 }
@@ -478,7 +483,9 @@ fn remove_denies(acl: &mut impl AclWriter, group: &Sid, targets: &[PathBuf]) -> 
 }
 
 /// The group, when it is the record's and empty; whether it was deleted. Gone already is
-/// `false`; another group under the name, or one with members, stops the run.
+/// `false`; another group under the name, or one with members, stops the run. Its Remote
+/// Desktop deny comes off just before the delete ([`RemoveStep::RemoteLogon`] when it won't):
+/// a user right is keyed by SID, and would outlive the group.
 fn remove_group(machine: &mut impl Removal, record: &MachineRecord) -> Result<bool, Failed> {
     let failed = |e: MachineError| (RemoveStep::Group, cause_of(&e));
     let Some(group) = machine.group().map_err(failed)? else {
@@ -492,7 +499,12 @@ fn remove_group(machine: &mut impl Removal, record: &MachineRecord) -> Result<bo
         ));
     }
     match machine.group_members(&group).map_err(failed)? {
-        0 => machine.delete_group(&group).map_err(failed).map(|()| true),
+        0 => {
+            machine
+                .remove_remote_logon_deny(&group)
+                .map_err(|e| (RemoveStep::RemoteLogon, cause_of(&e)))?;
+            machine.delete_group(&group).map_err(failed).map(|()| true)
+        }
         members => Err((
             RemoveStep::Group,
             format!("the group ClauseoSandboxUsers still has {members} members"),

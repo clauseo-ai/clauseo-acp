@@ -338,7 +338,8 @@ fn change(
 }
 
 /// Step 3: the group, adopted only when its SID is the record's, made when missing. A group by
-/// that name that isn't the record's (or with no record) refuses: it is someone else's.
+/// that name that isn't the record's (or with no record) refuses: it is someone else's. Either
+/// way, every run then denies it Remote Desktop logon, which repairs a deny someone took off.
 fn group(machine: &mut impl Machine, run: &mut Run) -> Result<Sid, Failed> {
     let failed = |cause: String| (Step::Group, cause);
     let found = machine.group().map_err(|error| failed(cause_of(&error)))?;
@@ -359,6 +360,9 @@ fn group(machine: &mut impl Machine, run: &mut Run) -> Result<Sid, Failed> {
         }
     };
     run.group = Some(sid.clone());
+    machine
+        .deny_remote_logon(&sid)
+        .map_err(|error| (Step::RemoteLogon, cause_of(&error)))?;
     Ok(sid)
 }
 

@@ -12,6 +12,7 @@ fn step_of(call: &str) -> Step {
         "seclogon" => Step::SecondaryLogon,
         "logon_right" => Step::LogonRight,
         "group" | "create_group" => Step::Group,
+        "deny_remote_logon" => Step::RemoteLogon,
         "account_sid" | "create_user" => Step::CreateUser,
         "add_to_group" => Step::AddToGroup,
         "hide" => Step::Hide,
@@ -127,6 +128,7 @@ fn a_record_write_failure_deletes_exactly_that_user() {
         [
             "delete_user ClauseoSb01",
             "group_members 1000",
+            "remove_remote_logon_deny 1000",
             "delete_group 1000",
             "unlock"
         ]
@@ -148,6 +150,7 @@ fn a_record_write_failure_deletes_exactly_that_user() {
             "delete_profile 1001",
             "delete_user ClauseoSb01",
             "group_members 1000",
+            "remove_remote_logon_deny 1000",
             "delete_group 1000",
             "delete_record",
             "unlock",
@@ -173,6 +176,7 @@ fn a_failed_logon_takes_off_the_profiles_then_the_accounts() {
             "delete_profile 1001",
             "delete_user ClauseoSb01",
             "group_members 1000",
+            "remove_remote_logon_deny 1000",
             "delete_group 1000",
             "delete_record",
             "unlock",
