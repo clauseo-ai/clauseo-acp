@@ -64,6 +64,11 @@ fn each_detection_maps_to_its_protection() {
             not(NotProtectedCause::SetUpFailed),
         ),
         (c(NoSandbox::NeedsSetUp), not(NotProtectedCause::NeedsSetUp)),
+        // An older Clauseo's set-up: shown as a set-up still needed, never as unknown.
+        (
+            c(NoSandbox::NeedsReSetUp),
+            not(NotProtectedCause::NeedsSetUp),
+        ),
         (
             c(NoSandbox::SetUpRefused),
             not(NotProtectedCause::SetUpRefused),

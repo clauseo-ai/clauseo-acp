@@ -37,6 +37,21 @@ fn with_no_admin_copy_nothing_starts_and_the_block_is_named() {
     );
 }
 
+/// The set-up task's folder is the app's own on a real machine: this user's profile, as the task
+/// reads it, plus the suffix, is `%LOCALAPPDATA%\ai.clauseo.desktop`; a data folder anywhere
+/// else isn't served, and `run` takes the prompt's path for it (the test above, which ends at
+/// the missing admin copy).
+#[test]
+fn the_set_up_task_serves_the_apps_own_data_folder_and_no_other() {
+    let profile = own_profile_folder();
+    assert!(profile.is_some(), "a CI user has a profile of its own");
+    let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap();
+    let apps = local.join("ai.clauseo.desktop");
+    assert_eq!(task_serves(profile.as_deref(), &apps), Ok(()));
+    let dir = TempDir::new("user-setup-other-folder");
+    assert!(task_serves(profile.as_deref(), &dir.path().join("data")).is_err());
+}
+
 /// The class key is opened read-only from `HKEY_LOCAL_MACHINE`, never `HKEY_CURRENT_USER` or
 /// `HKEY_CLASSES_ROOT` (which merges the user's classes in), at `SOFTWARE\Classes\exefile`.
 #[test]

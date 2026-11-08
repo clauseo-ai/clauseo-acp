@@ -6,7 +6,7 @@ use std::io;
 use std::path::PathBuf;
 
 use super::late_steps::{
-    fence, journals, network, own_protected, refuse_pool_owner, registered, stop_task,
+    fence, journals, network, own_protected, refuse_pool_owner, registered, tasks,
 };
 use super::machine::{LogonRight, Machine, Password, ServiceStart, owned};
 use super::outcome::{
@@ -285,11 +285,11 @@ fn change(
         write_record(machine, &record).map_err(|cause| (Step::WriteRecord, cause))?;
         run.recorded = Some(record);
     }
-    // A failure after this leaves the task registered, naming this run's owner: the rollback has
+    // A failure after this leaves the tasks registered, naming this run's owner: the rollback has
     // no step for it. It still stops only what the record names: after a first set-up's rollback
     // there is no record (`--stop` then does nothing) or only the users the rollback couldn't
     // remove; after a re-run's, the pool as before.
-    stop_task(machine, &req.owner)?;
+    tasks(machine, &req.owner, &group)?;
     let local_lows: Vec<(PathBuf, PathBuf)> = users
         .profiles
         .iter()
@@ -337,14 +337,19 @@ fn change(
     })
 }
 
-/// Step 3: the group, adopted only when its SID is the record's, made when missing. A group by
-/// that name that isn't the record's (or with no record) refuses: it is someone else's.
+/// Step 3: the group, adopted when its SID is the record's or a killed first run's
+/// (`orphans::take_back_group`), made when missing; any other refuses: it is someone else's.
 fn group(machine: &mut impl Machine, run: &mut Run) -> Result<Sid, Failed> {
     let failed = |cause: String| (Step::Group, cause);
     let found = machine.group().map_err(|error| failed(cause_of(&error)))?;
     let recorded = run.before.as_ref().map(|record| &record.group);
+    let first_runs = match (&found, recorded) {
+        (Some(sid), None) => super::orphans::take_back_group(machine, sid),
+        _ => Ok(false),
+    }
+    .map_err(|error| failed(cause_of(&error)))?;
     let sid = match found {
-        Some(sid) if Some(&sid) == recorded => sid,
+        Some(sid) if Some(&sid) == recorded || first_runs => sid,
         Some(sid) => {
             return Err(failed(format!(
                 "a group named ClauseoSandboxUsers exists ({sid}) that set-up didn't record"
@@ -435,7 +440,8 @@ fn make_users(
     let taken: BTreeSet<&str> = plan.kept.iter().map(|user| user.name.as_str()).collect();
     let mut next = 1;
     for _ in 0..plan.make {
-        let name = free_name(machine, &taken, &mut next, &mut users.skipped)?;
+        let free = (&taken, plan.base.as_slice(), group);
+        let name = free_name(machine, free, &mut next, &mut users.skipped)?;
         let password = machine.new_password();
         let sid = machine
             .create_user(&name, &password)
@@ -469,11 +475,12 @@ fn make_users(
     Ok(())
 }
 
-/// The next pool name from `next` on that no kept user has and no account outside the record
-/// holds: such an account is never adopted, but skipped and listed (D-B5).
+/// The next pool name from `next` on that no kept user has (`taken`) and no account outside
+/// the record (`recorded`) holds: such an account is never adopted, but skipped and listed
+/// (D-B5), unless a killed run made it, which is deleted and its name used (`orphans.rs`).
 fn free_name(
     machine: &mut impl Machine,
-    taken: &BTreeSet<&str>,
+    (taken, recorded, group): (&BTreeSet<&str>, &[Sid], &Sid),
     next: &mut u8,
     skipped: &mut Vec<(String, Sid)>,
 ) -> Result<String, Failed> {
@@ -484,6 +491,9 @@ fn free_name(
         }
         match machine.account_sid(&name) {
             Ok(None) => return Ok(name),
+            Ok(Some(sid)) if super::orphans::reclaim(machine, &name, &sid, group, recorded) => {
+                return Ok(name);
+            }
             Ok(Some(sid)) => {
                 tracing::info!(%name, %sid, "an account outside the record has this name; skipped");
                 skipped.push((name, sid));

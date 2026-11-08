@@ -33,10 +33,18 @@ build 26100):
 
 - **D9: one pool user per matter.** Set-up makes a pool of local standard users (`ClauseoSbNN`,
   in `Users`) and the local group `ClauseoSandboxUsers`, which holds them all; growing the pool
-  needs another admin prompt. Each matter is assigned one pool user. The runner logs on as that
-  user with `CreateProcessWithLogonW`, which needs the Secondary Logon service: without it the
-  logon fails with error 1058, and set-up reports `SetUpFailed` with that cause. The agent runs
-  under a restricted token, not write-restricted, so reads are checked too:
+  needs another admin prompt. A name an account outside the record holds is skipped, never
+  adopted, except a killed run's orphan (made and put in the group, but not yet in `PoolSids`):
+  a pool name, in the group, no recorded SID, a local non-built-in account other than the owner
+  and the user running set-up. Set-up deletes it when it reaches that name and makes the name
+  again (`setup::orphans`), so ended runs can't use up the 32 names. A first set-up ended before
+  its record leaves the group with no record: set-up reuses it when its comment is the one set-up
+  writes and every member is such an orphan (or it has none), deleting them, and otherwise
+  refuses, as for an administrator's group of that name. Each matter is assigned one pool user.
+  The runner logs on as that user with `CreateProcessWithLogonW`, which needs the Secondary
+  Logon service: without it the logon fails with error 1058, and set-up reports `SetUpFailed`
+  with that cause. The agent runs under a restricted token, not write-restricted, so reads are
+  checked too:
   - restricting SIDs: the pool user, `RESTRICTED`, `Users` and `Everyone` (D11), and the
     matter's SID only when a launch asks for it (off by default; spike B found it adds nothing);
   - the logon SID deny-only, and not restricting;
@@ -505,6 +513,28 @@ started elevated, by the app or by the uninstall hook.
   lie inside that SID's `ProfileList` profile.
   Per machine, the install folder may be anywhere, but only SYSTEM, Administrators or
   TrustedInstaller may change it.
+- **Per user, the installer only places the copy (`--adopt --place-only`).** On the Windows
+  VM, Microsoft Defender quarantined the per-user installer when its own process tree made the
+  pool users, the SYSTEM tasks and the WFP filters, in `--adopt`'s set-up step. The controls
+  narrowed it to that: only the installer tree's creation of users, tasks and WFP filters was
+  flagged, not placing the copy. So that work leaves the installer's tree. `--place-only` does
+  `--adopt`'s checks, the lock-down, the take-back of `staging\`, the set-up task
+  `\Clauseo\SandboxSetUp` for the lawyer ("The set-up task" below) and the four record
+  values, and nothing else: no other task and no set-up (no pool user, group, filters or WSL
+  deny). A failed set-up task registration exits 3 at step `set_up_task`, before any value is
+  written. Whether Defender accepts this one registration in the installer's tree is a VM row;
+  if not, the set-up task moves out of the installer too. Its exits
+  are plain `--adopt`'s before the set-up (0, 1, 2, 3, 5, 7, 8, 9), with no new code, and
+  `--data-dir` is still required, since an early failure's `setup-result.json` goes there. The
+  app's first run then asks the set-up task, with no prompt (or, on an install with no set-up
+  task, starts the admin copy's `--set-up` elevated), outside the installer's tree, and that
+  set-up makes the pool and registers `\Clauseo\SandboxRefresh`
+  and `\Clauseo\SandboxStop` for the lawyer (`late_steps::tasks`, when `AdminCopyOwner` is
+  the owner it records), again on every re-run, replacing what is there. Between the install
+  and that first run the copy is recorded with no task: the launcher's check passes, and the
+  copy isn't refreshed until the first set-up has registered the refresh task. Plain `--adopt`
+  (both tasks, then the set-up in-process) is unchanged, and per-machine installs keep it.
+  Switching the per-user installer (`admin_copy.nsh`) to `--place-only` is its own change.
 - **One owner, of one kind.** `AdminCopyOwner` records whose install placed the copy: the
   lawyer's SID, or `machine`. A per-user `--adopt` refuses a pool owned by another SID
   (`OwnerSid`) or a copy another install placed; a per-machine one refuses a copy a per-user
@@ -516,7 +546,7 @@ started elevated, by the app or by the uninstall hook.
   DACL" below), gives the folder and everything left owner Administrators and a protected DACL
   (SYSTEM and Administrators full, Users read and run), reads each back exactly, records
   `AdminCopySha256`, `UserInstallDir`, `AdminCopyVersion` and `AdminCopyOwner`, and, per
-  user, runs the normal set-up in-process. Exits: 0 done, 1 usage, 2 another account, 3 failed,
+  user (unless `--place-only`, above), runs the normal set-up in-process. Exits: 0 done, 1 usage, 2 another account, 3 failed,
   5 lock held, 6 data folder not the user's, 7 not elevated, 8 not the admin copy, 9 downgrade.
   Every exit 3 before the set-up writes one Event Log line (source `Clauseo Sandbox`):
   `--adopt failed (exit 3) at step <name>: <Win32 error N | HRESULT 0x... | no Windows error
@@ -1615,8 +1645,11 @@ The elevated exe runs only from its admin copy,
 elevation, so the copy goes stale. A SYSTEM scheduled task refreshes it without a prompt, and
 only from an exe the updater key signed.
 
-**The task.** `--adopt` registers `\Clauseo\SandboxRefresh` through `ITaskService` (`register_task`,
-`SystemTask::Refresh`). It runs as LOCAL SYSTEM. Its one action is the admin copy's path, resolved
+**The task.** Plain `--adopt` registers `\Clauseo\SandboxRefresh` through `ITaskService`
+(`register_task`, `SystemTask::Refresh`); per user, every set-up with the owner's admin copy
+registers it again, and after `--adopt --place-only` the first run's set-up is what registers it
+(`late_steps::tasks`, "Admin copy").
+It runs as LOCAL SYSTEM. Its one action is the admin copy's path, resolved
 from `FOLDERID_ProgramFiles` and quoted (it has a space), with `--refresh` and no other argument. It
 starts at the record owner's logon and on demand, needs no network, stops after 5 minutes, and never
 runs twice at once. The task and its folder carry
@@ -1760,8 +1793,10 @@ The runner's sweeps (#649) stop a matter's processes as its pool user. A process
 own DACL survives them and can stay alive into the next logon. SYSTEM, with `SeDebugPrivilege`,
 can stop it whatever its DACL says.
 
-**The task.** `--adopt` registers `\Clauseo\SandboxStop` right after `\Clauseo\SandboxRefresh`
-(`register_task`, `SystemTask::Stop`), the same way: LOCAL SYSTEM, the same descriptor (the
+**The task.** Plain `--adopt` registers `\Clauseo\SandboxStop` right after
+`\Clauseo\SandboxRefresh` (`register_task`, `SystemTask::Stop`), and so does every per-user
+set-up with the owner's admin copy (`late_steps::tasks`, after `--place-only` the first to), the
+same way: LOCAL SYSTEM, the same descriptor (the
 owner may read and execute it, which starts and ends it), one instance at a time. Its action is the admin copy with
 `--stop` and no other argument. It runs only on demand and stops after 2 minutes. A failed
 registration fails `--adopt` before the record's admin-copy values are written, as for the
@@ -1775,12 +1810,13 @@ Administrators, is deleted and made again, which loses nothing.
 **Per machine.** A per-machine `--adopt` has no owner to name in the descriptor, so it registers
 neither task. The refresh task stays per-user only: IT updates a per-machine install. The stop
 task is registered by the elevated set-up instead, once it has written the record with the
-owner as `OwnerSid`, when the record's `AdminCopyOwner` is `machine` (`late_steps::stop_task`).
+owner as `OwnerSid`, when the record's `AdminCopyOwner` is `machine` (`late_steps::tasks`).
 It is the same registration as `--adopt`'s: same principal, argument, limits and descriptor,
 with `OwnerSid` as the owner who may read and execute, and so start and end, it. Every set-up of the owner registers it
 again, replacing the one there. A new owner's set-up, after a removal, replaces the previous
 owner's task, so only the new owner can start it. A failed registration fails the set-up at
-the step "registering the sandbox's stop task", rolled back like any other step. `--remove`
+the step "registering the sandbox's stop task" (per user, a failed refresh registration at
+"registering the admin copy's refresh task"), rolled back like any other step. `--remove`
 deletes the task just before the record (`RemoveStep::StopTask`); a failed deletion is a partial
 removal, with the record kept for the next run. `--remove --uninstall` also deletes it with the
 admin copy.
@@ -1920,6 +1956,229 @@ process it couldn't stop, or once at Clauseo's start after an unclean session
 
 **What the app shows.** After a run that stopped something: "Clauseo stopped an agent that
 tried to leave the Safe workspace". The app thread owns the final copy and its Hindi.
+
+### The set-up task
+
+A lawyer without admin rights can't answer a UAC prompt, and firms often lock admin rights down.
+The SYSTEM task `\Clauseo\SandboxSetUp` runs the set-up for the user who asks, with no
+prompt. The app asks over a named pipe; the task learns who asked from the pipe and the Windows
+session, never from an argument. This section is the pipe's contract: the app
+(`windows::setup_task::request_set_up`) and the server (`setup::serve`) both follow it.
+
+**The task.** `SystemTask::SetUp`: LOCAL SYSTEM runs the admin copy with `--serve-set-up` and
+nothing else. It has no trigger, runs on demand and stops after two hours, a backstop for a run
+that hangs; the server itself takes a client only while 30 minutes are left for its set-up
+(`serve::CLIENT_LIMIT`), so on Remote Desktop a stream of clients never cuts a slow set-up short,
+and past that it exits and the app's next start serves. A start made while it
+runs is dropped (`TASK_INSTANCES_IGNORE_NEW`), as for the other tasks: the Task Scheduler's queue
+has no limit, so with `TASK_INSTANCES_QUEUE` any interactive user could pile up runs. The running
+server serves every client that connects, and the app starts the task again itself when the pipe
+stays missing or the server goes before replying, so at most one start waits, the app's.
+`--adopt --place-only` registers it for the lawyer, with
+the refresh and stop tasks' descriptor (`task_sddl`, the owner read and execute). A per-machine
+`--adopt` registers it for every interactive user:
+`O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;IU)`. Pool users log on interactively, so they hold
+`IU` too. Execute also ends a running task, so per machine any interactive user can end another
+user's set-up while it runs (`schtasks /end`), and with it every client that server holds. That is
+accepted as denial of service only, and it
+binds the set-up to stay restartable: an ended run leaves no lock held (the set-up mutex is
+abandoned with the process) and nothing a later run can't redo, and the asking app reads the
+broken pipe as a failure, not a success. Each per-machine set-up then puts
+`(D;;FRFX;;;<GroupSid>)` first, through
+`IRegisteredTask::SetSecurityDescriptor` (`late_steps::tasks`, step "keeping the sandbox users
+from the set-up task"); a reinstall over a set-up pool registers it with the deny already.
+The deny names only the recorded group (`GroupSid`), not a `ClauseoSandboxUsers` group a failed
+first set-up left under another SID; that is accepted, as the pipe's descriptor and the gate
+refuse both (the pool rules read the token, whatever the task's descriptor says), so such a
+member can start the task but is served nothing. Plain
+per-user `--adopt` doesn't register it. Every elevated set-up (the prompt's `--set-up`,
+`--adopt`'s) registers it again when it is missing or its definition differs
+(`refresh::ensure_task`, `Machine::ensure_set_up_task`), so a lawyer whose task was deleted meets
+the prompt once; the task's own run doesn't register itself. `--remove --uninstall` takes it down
+first among the tasks (`refresh::TEARDOWN`). Every `\Clauseo` task goes the same way
+(`refresh::RETIRE`): disabled, then its running instance stopped, then deleted, so no start
+lands between the stop and the delete. The app's `--remove` keeps it, so the owner can set up
+again with no admin.
+
+**The folder.** `\Clauseo` has a fixed descriptor of its own,
+`O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FR;;;IU)` (`refresh::FOLDER_SDDL`). Before, each
+registration gave the folder that task's descriptor, so a per-machine set-up registering the
+stop task for one owner would have shut every other interactive user out of the folder. An
+elevated CI test starts the set-up task as a standard user beside another owner's stop task.
+
+**The server's run** (`--serve-set-up`; exits `ServeExit`, 63 to 66 and 69, after the other
+`\Clauseo` tasks' codes: the stop's to 50, the WSL deny's 51-52, the sweep's 53-59, the WSL
+upgrade's 60-62 and 67, and the denial watcher's 68, "provider full"):
+
+1. refuses unless it is LOCAL SYSTEM running from the admin copy's path, and the copy passes
+   `admin_copy::check`: the folder chain only administrators can change, the folder holding
+   nothing else, and the SHA-256 the installer recorded (63), so a copy someone changed serves
+   no one;
+2. reads the record; no admin copy recorded is 65;
+3. makes `\\.\pipe\ClauseoSetUp-<token>`, the token 128 random bits drawn for this run
+   (32 lowercase hex digits, `serve::pipe_name`): the first instance or nothing
+   (`FILE_FLAG_FIRST_PIPE_INSTANCE`), message mode, `PIPE_REJECT_REMOTE_CLIENTS`, owned by LOCAL
+   SYSTEM (`O:SY`, which no one but SYSTEM or an administrator can make, and the app's proof), and
+   a protected DACL built from the record: each pool group denied everything first, SYSTEM full
+   control, then per user the owner and per machine `IU` with read and write less
+   `FILE_CREATE_PIPE_INSTANCE` (`0x12019b`), and a Medium no-read-up, no-write-up label. A name
+   someone made first is logged and served to no one (64); a pipe that can't be made is 66;
+4. publishes the token, once the pipe is made: the value `Pipe` (`REG_SZ`) in
+   `HKLM\SOFTWARE\Clauseo\Sandbox\SetUpPipe`. The record's key lets Administrators write
+   (`RECORD_SDDL`), so the name has a subkey of its own, made and given its descriptor again
+   before each write: `O:SYD:P(A;;KA;;;SY)(A;;SD;;;BA)(A;;KR;;;BU)` (`serve::PUBLISHED_SDDL`),
+   owned by LOCAL SYSTEM, the only writer, Users reading, Administrators allowed only to delete
+   it, and protected, so the record key's entries aren't inherited. A token that can't be drawn
+   or published is 69, with no one served. On every exit after that the server deletes the
+   subkey while it still holds its token. A run that was ended (`schtasks /end`, the two-hour
+   limit) leaves it, naming a pipe that is gone: a stale name, which `--remove --uninstall`
+   deletes with the admin values, so the record's key can go;
+5. waits 30 s for the first client and 5 s for each after, then exits 0 (a failed wait is 66; a
+   name someone took while no instance was left is 64; a client that closed before the server
+   reached it is let go and the wait goes on).
+   A spare instance waits while one client is served, so the name is never free while the server
+   runs. A client has 2 s to send its request, so one that sends nothing holds no one up.
+
+**Each client**, in order:
+
+1. one request message, at most 256 bytes. The Event Log names the op by its tag alone
+   (`set_up`, `add`, `ensure_slots`, `unsupported`), never with text the client sent; a request
+   that can't be read is logged as that, its details in the reply only;
+2. who it is: the token read at identification level (`ImpersonateNamedPipeClient`,
+   `OpenThreadToken` as self, then `RevertToSelf`): user, groups, restricting SIDs
+   (`TokenRestrictedSids`; a list that can't be read refuses), integrity.
+   Its session comes from `GetNamedPipeClientSessionId`, and the session's user from
+   `WTSQueryUserToken`;
+3. the gate (`serve::identify`), checked once before any op. It refuses: no admin copy; a SID in
+   `PoolSids`; a token holding the pool's group (`GroupSid`, or the SID of a group named
+   `ClauseoSandboxUsers` that the record doesn't name); session 0; a user that isn't a person's
+   account; a restricted token; one below Medium; a client that isn't its session's user; per
+   user, anyone but `AdminCopyOwner`; a token holding `NETWORK` (`S-1-5-2`) or lacking
+   `INTERACTIVE` (`S-1-5-4`). The pool rules read only the record and the token, so they hold
+   before the task's deny exists and whatever the pipe's DACL says. The lawyer is known by token,
+   not by SID prefix: a person's account is an exact allow-list (`Sid::is_user_account`, shared
+   with the launch's token spec), `S-1-5-21-a-b-c-rid` (local, AD, Microsoft-account-linked) or
+   `S-1-12-1-a-b-c-d` (an Entra ID user, as on Entra-joined firm laptops), and nothing else;
+4. the op. `set_up` and `add` go on; anything else is answered `unsupported`;
+5. the data folder: the identified user's `ProfileImagePath` (the only profile read) plus
+   `AppData\Local\ai.clauseo.desktop`, inside the profile. It is resolved as the user with the
+   session's token, lowered when elevated (`Owner::of_session`, `owners_data_dir`), so a link
+   in the profile can't send a SYSTEM write elsewhere;
+6. the set-up lock, waited for up to 5 minutes (the set-up only tries it), then the gate again on
+   a fresh read of the record;
+7. `set_up` for a user whose set-up is current answers `Done` with nothing run (a re-run resets
+   every pool password); otherwise, and always for `add`, `exe::run_set_up_in` runs for that
+   user, writing every file in their data folder as them, `secrets.bin`'s DPAPI blobs included,
+   and `setup-result.json` too.
+
+**Messages.** JSON, one request and one reply per connection. Every message has the version
+`v` (1) and a tag; a reader ignores fields it doesn't know.
+
+| Request | Meaning |
+|---|---|
+| `{"v":1,"op":"set_up"}` | Set up, or re-run, the asking user's pool. |
+| `{"v":1,"op":"add","n":2}` | Extend it by `n` users, 1 to 32. |
+| `{"v":1,"op":"ensure_slots","want":2}` | Reserved for several owners on one machine; answered `unsupported` until that work lands. |
+| any other `op`, or another `v` | Answered `unsupported`, never treated as malformed. |
+
+| Reply (one line, newline-terminated) | Meaning |
+|---|---|
+| `{"v":1,"reply":"ran","result":{...}}` | The set-up's outcome, in `setup-result.json`'s shape; `exit` 0 when it was current. |
+| `{"v":1,"reply":"refused","why":"..."}` | Refused before anything ran; the words name no SID or path. |
+| `{"v":1,"reply":"unsupported","what":"..."}` | An op or version this server doesn't serve. |
+
+A request that isn't such an object, or a known op with wrong fields, is `refused`.
+
+**Set up before.** An older Clauseo's set-up (an older `setup.json` version,
+`SetupState::Outdated`) is `NoSandbox::NeedsReSetUp`, a first set-up `NoSandbox::NeedsSetUp`;
+for `NeedsReSetUp` the host runs the set-up again through the pipe, silently, once per app start.
+Holding it to once per start is the host's job (D3a's start-up checks), not the sandbox crate's:
+`request_set_up` asks whenever it is called.
+
+**The app** (`request_set_up`, which `UserSetup::run` and `UserSetup::extend` call):
+
+1. compares its data folder with the one the server would set up: this user's `ProfileImagePath`
+   plus `AppData\Local\ai.clauseo.desktop` (`serve::task_serves`). When they differ (a moved
+   `AppData`, no profile of its own), a reply would say done while the app's folder stayed unset,
+   so it logs why and runs the prompted `--set-up`, which takes the folder as it is;
+2. reads the published token, then starts the task (`IRegisteredTask::Run`). `NotRegistered`
+   (the task, or `\Clauseo`, missing: `ERROR_FILE_NOT_FOUND` or `ERROR_PATH_NOT_FOUND`) means the
+   install has no set-up task, and `UserSetup` falls back to the prompted `--set-up`
+   (`run_elevated`, `extend_elevated`). A token read before the start is a server already
+   running (the start was dropped) or a stale name; one that differs is this start's;
+3. reads the token again until it names a pipe (a value that isn't 32 lowercase hex digits is
+   read as none) and opens that pipe with `SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION` and
+   the client rights alone, overlapped, retrying for 30 s and starting the task once more after
+   5 s; a busy pipe is waited for. No token in time, or only the stale one, is
+   `SetUpError::Unpublished`; a token whose pipe stays missing is `NoServer`. A pipe that
+   refuses this user is someone else's;
+4. on that handle, before writing, checks the server. The proof is the pipe's owner, read first
+   (`GetSecurityInfo`, which the client rights' `READ_CONTROL` allows): LOCAL SYSTEM. A pool user
+   can make the name first (its token holds `IU`), but not a pipe SYSTEM owns, and the owner stays
+   with the pipe, so a squatter's pipe handed to a child, or its process id reused by a SYSTEM
+   process, proves nothing. The rest backs it up: `GetNamedPipeServerSessionId` is 0, the process
+   `GetNamedPipeServerProcessId` names is LOCAL SYSTEM in the kernel's process list, and its image
+   (`SystemProcessIdInformation`) is the admin copy. A fact that differs refuses; one Windows won't
+   give a standard user is logged and set aside on the owner's word. A process no longer listed
+   was ending as the app connected, and counts as gone;
+5. writes the request (5 s) and reads the reply line, waiting as long as the task may run, two
+   hours and one more minute. A server that closed before replying (one that was ending) is asked
+   again once, after another start. The reply maps to `SandboxSetup::run`'s result as the exe's
+   result file does, except `refused`: the gate shouldn't refuse a lawyer, so for one it didn't
+   foresee the app logs why and runs the prompted `--set-up` (`serve::via_task`), which needs an
+   administrator's credentials and so grants no one anything;
+6. a token read before the start whose pipe fails step 4, or refuses this user, is stale: its
+   server ended, and anyone may make a pipe under a name once it was published, so it is passed
+   over and the token read again (the client's order is `serve::ask_with`, tested with fakes).
+   A token this start published can't have been made first, as no one knew it; its pipe failing
+   step 4 is a squat. One whose owner is one of the record's pool users or its group
+   (`serve::pool_squat`) is a pool user's process holding the name: the app starts the stop task
+   (`request_pool_stop`), waits while it is queued or running (up to 60 s), and runs steps 2 to 5
+   once more. Any other
+   squat (another user's pipe, one that refuses this user, an owner that can't be read, a SYSTEM
+   pipe whose image doesn't match, as through a `subst` drive) stops nothing: per machine a stop
+   would end every lawyer's matters and free nothing. That, a pipe still someone else's, or a stop
+   that didn't start, is a failure naming a squatted pipe (`SetUpError::Squatted`), with nothing
+   sent and no prompt.
+
+**For the app's words.** A task that couldn't be reached (a squatted pipe, `NoServer`,
+`Unpublished`) is `SetupError::Unreachable` (appended), its details in the app's log only, so
+the host maps it to its own cause; `Request`, `Task` and `Pipe` stay `SetupError::Failed`.
+Another user owning the pool stays `SetupState::SetUpByOtherUser`, and a refusal the gate
+didn't foresee still falls back to the prompt. `UserSetup::asks_admin()` tells the first run
+whether its set-up would raise the prompt: `false` only when `\Clauseo\SandboxSetUp` is
+registered and enabled as the user reads it (`IRegisteredTask::Enabled`, nothing started) and
+`serve::task_serves` holds for the app's data folder; a task that can't be read counts as one
+that may not serve.
+
+**Accepted.** A non-admin user can now make local accounts, WFP filters and the D5 claim on a
+per-machine install; IT opts in by deploying it. The set-up's change journal step grows journals
+on volumes the user's registered matters name, now with no admin consent, bounded at 256 MiB
+each.
+
+**Squatting the name.** A fixed name let any local account that isn't in the pool (another user,
+a service) make the pipe between two runs, which the server only runs on demand, and block every
+set-up until a restart: on a shared PC or Remote Desktop, one user could deny the others. Each
+run's name is now random and published where only LOCAL SYSTEM writes, so a squatter can only
+take a name after it was published and its server ended (a stale one), and the app passes such
+a name over. The app still trusts the pipe only by its owner (LOCAL SYSTEM) and the checks after
+it, never by the name or the registry: an administrator could write the value, and an
+administrator could make a SYSTEM-owned pipe anyway. A squat of this start's name (not expected)
+denies the set-up, the Event Log names it, and the app's failure names a squatted pipe; a pool
+user's process is stopped first and the request made again.
+
+**Not yet verified** (VM rows): `WTSQueryUserToken` and DPAPI under the session token as
+SYSTEM; Defender with the registration in `--place-only`; Remote Desktop and fast user
+switching; a pool process denied both `Run` and the pipe; `setup_task_entra_owner`: an
+Entra-joined Windows 11 VM on Azure, signed in as an Entra ID user (`S-1-12-1-…`), sets up through
+the task and through the prompt, `secrets.bin` round-trips (DPAPI as that user under the session
+token), a launch runs, and the uninstall removes it all (assumed till then: its `ProfileList`
+entry and `ProfileImagePath` look like a local user's); `setup_task_end_by_other_user`: per
+machine, user B ends user A's running set-up (`schtasks /end /tn \Clauseo\SandboxSetUp`), A's
+app reports a failure, and A's next set-up runs to the end. Elevated CI, written but not yet
+run: the production descriptor with two standard users, a squat (exit 64, nothing sent), and a
+standard user running the app's check against a server LOCAL SYSTEM runs, which shows what a
+standard user can read of it (the owner; the process list's user and the image by id).
 
 ### The launcher (PR6 interface)
 

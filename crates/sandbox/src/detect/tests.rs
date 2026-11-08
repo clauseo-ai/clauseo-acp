@@ -135,7 +135,7 @@ fn each_setup_state_gives_its_tier_or_reason() {
                 found: 1,
                 current: 2,
             },
-            Detection::none(NoSandbox::NeedsSetUp),
+            Detection::none(NoSandbox::NeedsReSetUp),
         ),
         (
             SetupState::Refused,
@@ -194,6 +194,7 @@ fn the_setup_state_is_read_on_every_call() {
 fn the_new_reasons_keep_their_wire_names() {
     let names = [
         (NoSandbox::NeedsSetUp, "\"needs_set_up\""),
+        (NoSandbox::NeedsReSetUp, "\"needs_re_set_up\""),
         (NoSandbox::SetUpRefused, "\"set_up_refused\""),
         (
             NoSandbox::SetUpFailed("x".to_owned()),
@@ -258,4 +259,23 @@ fn macos_is_tier_a() {
 #[test]
 fn other_systems_are_unsupported() {
     assert_eq!(probe(None), Detection::none(NoSandbox::UnsupportedOs));
+}
+
+#[test]
+fn an_older_set_up_is_a_re_set_up_and_a_missing_one_a_first_set_up() {
+    // What the marker check gives (`marker::state_of`): an older marker is `Outdated`, a
+    // missing one `Needed`, a current one `Ready`; the host tells a re-run from a first run.
+    let older = SetupState::Outdated {
+        found: crate::windows::marker::SETUP_VERSION - 1,
+        current: crate::windows::marker::SETUP_VERSION,
+    };
+    for (state, reason) in [
+        (older, Some(NoSandbox::NeedsReSetUp)),
+        (SetupState::Needed, Some(NoSandbox::NeedsSetUp)),
+        (SetupState::Ready, None),
+    ] {
+        let setup = FakeSetup::new(state.clone());
+        let found = decide(&windows_11(), Some(&setup));
+        assert_eq!(found.reason, reason, "{state:?}");
+    }
 }

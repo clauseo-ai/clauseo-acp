@@ -1,6 +1,9 @@
 //! The folder `\Clauseo` the SYSTEM tasks live in, as `register_task` (`task.rs`) prepares it,
 //! on every OS through [`Folders`]: one there already is reused only when an administrator made
-//! it, else deleted with everything in it and made again with the tasks' descriptor.
+//! it, else deleted with everything in it and made again, always with its own fixed descriptor
+//! ([`FOLDER_SDDL`]), never a task's. Each task carries its own: the set-up task's lets every
+//! interactive user start it, the stop task's only its owner, and a folder that took the last
+//! registered task's descriptor would shut out whoever that task doesn't name.
 //!
 //! A standard user may be able to make `\Clauseo` before Clauseo does: the Task Scheduler checks
 //! the caller's right to make a folder under the root (MS-TSCH, `SchRpcCreateFolder`), and who
@@ -18,6 +21,8 @@
 //! error: a user who could make the folder can block the install, but can't take it over. A
 //! folder an administrator made whose owner is that administrator's own SID, not
 //! `Administrators`, is deleted and made again, which loses nothing.
+
+use super::FOLDER_SDDL;
 
 /// The Task Scheduler's folders, as the preparation uses them; `task.rs` implements it over
 /// `ITaskService` and the tests fake it. Every error is a line for the log.
@@ -54,10 +59,11 @@ pub(super) fn admin_owner(owner: &str) -> bool {
     matches!(owner, "BA" | "SY" | "S-1-5-32-544" | "S-1-5-18")
 }
 
-/// `\Clauseo`, ready for the tasks: one owned by `Administrators` or `SYSTEM` gets `sddl`
-/// again; any other, or one whose owner can't be read, is deleted with everything in it; a
-/// missing or deleted one is made with `sddl`.
-pub(super) fn prepare<F: Folders>(folders: &mut F, sddl: &str) -> Result<F::Folder, String> {
+/// `\Clauseo`, ready for the tasks: one owned by `Administrators` or `SYSTEM` gets
+/// [`FOLDER_SDDL`] again; any other, or one whose owner can't be read, is deleted with everything
+/// in it; a missing or deleted one is made with [`FOLDER_SDDL`].
+pub(super) fn prepare<F: Folders>(folders: &mut F) -> Result<F::Folder, String> {
+    let sddl = FOLDER_SDDL;
     if let Some(folder) = folders.find()? {
         let owner = folders.owner_sddl(&folder).ok();
         if owner
@@ -77,7 +83,7 @@ pub(super) fn prepare<F: Folders>(folders: &mut F, sddl: &str) -> Result<F::Fold
 mod tests {
     use super::*;
 
-    const SDDL: &str = "O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;S-1-5-21-1-2-3-1001)";
+    const SDDL: &str = FOLDER_SDDL;
 
     /// The folder `\Clauseo` as the fake has it: its owner, when it is there.
     #[derive(Default)]
@@ -130,14 +136,15 @@ mod tests {
             there: there.map(str::to_owned),
             ..Fake::default()
         };
-        prepare(&mut fake, SDDL).unwrap();
+        prepare(&mut fake).unwrap();
         fake
     }
 
     #[test]
-    fn a_missing_folder_is_made_with_the_tasks_descriptor() {
+    fn a_missing_folder_is_made_with_its_own_descriptor() {
         let fake = prepared(None);
         assert_eq!(fake.calls, ["find".to_owned(), format!("create {SDDL}")]);
+        assert_eq!(SDDL, "O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FR;;;IU)");
     }
 
     #[test]
@@ -172,7 +179,7 @@ mod tests {
             fail_owner: true,
             ..Fake::default()
         };
-        prepare(&mut fake, SDDL).unwrap();
+        prepare(&mut fake).unwrap();
         let expected = [
             "find".to_owned(),
             "owner".to_owned(),
@@ -189,7 +196,7 @@ mod tests {
             fail_delete: true,
             ..Fake::default()
         };
-        let error = prepare(&mut fake, SDDL).unwrap_err();
+        let error = prepare(&mut fake).unwrap_err();
         assert!(error.contains("DeleteTask"), "{error}");
         assert!(!fake.calls.iter().any(|call| call.starts_with("create")));
         assert!(!fake.calls.iter().any(|call| call.starts_with("set")));

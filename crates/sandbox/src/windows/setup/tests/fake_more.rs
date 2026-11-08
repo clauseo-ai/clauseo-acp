@@ -158,6 +158,8 @@ pub(super) struct Account {
 pub(super) struct State {
     pub(super) accounts: BTreeMap<String, Account>,
     pub(super) group: Option<Sid>,
+    /// The group's comment when it isn't set-up's (`GROUP_COMMENT`), as an admin's might be.
+    pub(super) group_comment: Option<String>,
     pub(super) record: Option<MachineRecord>,
     pub(super) profiles: BTreeMap<Sid, PathBuf>,
     pub(super) marker: Option<Marker>,
@@ -166,6 +168,13 @@ pub(super) struct State {
     pub(super) copy_owner: Option<CopyOwner>,
     /// The owner the task `\Clauseo\SandboxStop`'s descriptor names, while it is registered.
     pub(super) stop_task: Option<Sid>,
+    /// The owner the task `\Clauseo\SandboxRefresh`'s descriptor names, while registered.
+    pub(super) refresh_task: Option<Sid>,
+    /// The group the set-up task `\Clauseo\SandboxSetUp`'s descriptor refuses, once set.
+    pub(super) set_up_denied: Option<Sid>,
+    /// Who the set-up task was last registered for by a set-up's self-heal: the owner, and
+    /// per machine the group refused.
+    pub(super) set_up_task: Option<(Sid, Option<Sid>)>,
 }
 
 /// [`FakeMachine::new`]: a machine with only the owner's account, `DeviceSync`, an empty data
@@ -188,12 +197,16 @@ pub(super) fn new_machine(test: &str) -> FakeMachine {
         state: State {
             accounts: BTreeMap::from([(OWNER_NAME.to_owned(), owner)]),
             group: None,
+            group_comment: None,
             record: None,
             profiles: BTreeMap::new(),
             marker: None,
             secrets: BTreeMap::new(),
             copy_owner: None,
             stop_task: None,
+            refresh_task: None,
+            set_up_denied: None,
+            set_up_task: None,
         },
         written: Vec::new(),
         temporary: BTreeSet::new(),
@@ -207,6 +220,7 @@ pub(super) fn new_machine(test: &str) -> FakeMachine {
         acting: Rc::new(Cell::new(false)),
         outside_owner: Vec::new(),
         refuse_owner: false,
+        run: super::fake::Run::Elevated,
         matters: Vec::new(),
         owners: BTreeMap::new(),
         self_owned_local_low: BTreeSet::new(),
@@ -294,5 +308,42 @@ impl FakeMachine {
             call: "NetUserGetInfo",
             code: 2221,
         })
+    }
+
+    /// `protect_for_owner`: `secrets.bin` holds a blob for each of `pool`, the new ones from
+    /// `secrets`, the rest kept.
+    pub(super) fn protect(
+        &mut self,
+        secrets: &[(Sid, crate::windows::setup::Password)],
+        pool: &[Sid],
+    ) -> Result<(), MachineError> {
+        let sids: Vec<Sid> = secrets.iter().map(|(sid, _)| sid.clone()).collect();
+        self.owner_call(&format!("protect_for_owner {}", super::fake::rids(&sids)))?;
+        let mut file = BTreeMap::new();
+        for sid in pool {
+            let password = match secrets.iter().find(|(s, _)| s == sid) {
+                Some((_, password)) => password.to_string(),
+                None => self.state.secrets.get(sid).cloned().ok_or_else(|| {
+                    MachineError::Other(format!("secrets.bin has no blob for {sid}"))
+                })?,
+            };
+            file.insert(sid.clone(), password);
+        }
+        self.state.secrets = file;
+        Ok(())
+    }
+
+    /// `group_facts`: the group's comment, and the accounts in it.
+    pub(super) fn facts_of(&self, group: &Sid) -> crate::windows::setup::machine::GroupFacts {
+        let comment = self.state.group_comment.as_deref();
+        crate::windows::setup::machine::GroupFacts {
+            comment: comment
+                .unwrap_or(crate::windows::setup::machine::GROUP_COMMENT)
+                .to_owned(),
+            members: (self.state.accounts.values())
+                .filter(|account| account.groups.contains(group))
+                .map(|account| account.sid.clone())
+                .collect(),
+        }
     }
 }

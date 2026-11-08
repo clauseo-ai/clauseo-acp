@@ -20,6 +20,7 @@ use windows::Win32::Security::{
 use windows::Win32::Storage::FileSystem::{
     FILE_ALL_ACCESS, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
 };
+use windows::Win32::System::RemoteDesktop::WTSQueryUserToken;
 use windows::Win32::System::Threading::{GetCurrentThread, OpenProcessToken, OpenThreadToken};
 use windows::core::BOOL;
 
@@ -72,13 +73,30 @@ impl Token {
             )
         }
         .map_err(|error| os("OpenProcessToken", &error))?;
+        Token(primary).duplicate()
+    }
+
+    /// The token of the user signed in to `session` (`WTSQueryUserToken`, LOCAL SYSTEM only),
+    /// duplicated as an impersonation token at `SecurityImpersonation`.
+    pub(super) fn of_session(session: u32) -> Result<Token, MachineError> {
+        let mut primary = HANDLE::default();
+        // SAFETY: `primary` is a live out-pointer; the handle it receives is owned by a `Token`
+        // at once.
+        unsafe { WTSQueryUserToken(session, &raw mut primary) }
+            .map_err(|error| os("WTSQueryUserToken", &error))?;
         let primary = Token(primary);
+        primary.duplicate()
+    }
+
+    /// This token duplicated as an impersonation token at `SecurityImpersonation`, with the
+    /// access the owner's calls need.
+    fn duplicate(&self) -> Result<Token, MachineError> {
         let mut duplicate = HANDLE::default();
-        // SAFETY: `primary` is an open token with TOKEN_DUPLICATE; no security attributes are
-        // passed; `duplicate` is a live out-pointer, owned by a `Token` at once.
+        // SAFETY: the token is open with TOKEN_DUPLICATE; no security attributes are passed;
+        // `duplicate` is a live out-pointer, owned by a `Token` at once.
         unsafe {
             DuplicateTokenEx(
-                primary.0,
+                self.0,
                 TOKEN_QUERY | TOKEN_IMPERSONATE | TOKEN_DUPLICATE | TOKEN_ADJUST_DEFAULT,
                 None,
                 SecurityImpersonation,

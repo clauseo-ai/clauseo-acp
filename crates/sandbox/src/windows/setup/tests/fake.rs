@@ -20,7 +20,7 @@ use crate::windows::marker::{Marker, MarkerState};
 use crate::windows::pool::MachineRecord;
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::setup::{
-    LogonRight, Machine, MachineError, Password, ProfileDir, ServiceStart,
+    LogonRight, Machine, MachineError, Password, ProfileDir, ServiceStart, machine::GroupFacts,
 };
 use crate::windows::sids::Reserved;
 use crate::windows::wfp::{NetworkReport, NetworkSetup};
@@ -57,6 +57,15 @@ pub(super) fn rids(sids: &[Sid]) -> String {
     sids.iter().map(rid).collect::<Vec<_>>().join(",")
 }
 
+/// Whose set-up a fake machine runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Run {
+    /// An elevated set-up: the prompt's `--set-up`, or `--adopt`'s.
+    Elevated,
+    /// The set-up task's own run.
+    Task,
+}
+
 /// The machine, in memory.
 pub(super) struct FakeMachine {
     pub(super) dir: TempDir,
@@ -87,6 +96,9 @@ pub(super) struct FakeMachine {
     pub(super) outside_owner: Vec<String>,
     /// `as_owner` fails, as an impersonation Windows refuses would.
     pub(super) refuse_owner: bool,
+    /// Whose set-up this is: an elevated one registers the set-up task again; the set-up task's
+    /// own run doesn't.
+    pub(super) run: Run,
     /// The owner's registered matters, as `registered_matters` reads them.
     pub(super) matters: Vec<RegisteredMatter>,
     /// Each folder's owner; one not listed is `SYSTEM`'s.
@@ -195,6 +207,20 @@ impl Machine for FakeMachine {
             .values()
             .filter(|a| a.groups.contains(group))
             .count())
+    }
+
+    fn in_group(&mut self, member: &Sid, group: &Sid) -> Result<bool, MachineError> {
+        self.call(format!("in_group {} {}", rid(member), rid(group)))?;
+        Ok(self
+            .state
+            .accounts
+            .values()
+            .any(|a| a.sid == *member && a.groups.contains(group)))
+    }
+
+    fn group_facts(&mut self, group: &Sid) -> Result<GroupFacts, MachineError> {
+        self.call(format!("group_facts {}", rid(group)))?;
+        Ok(self.facts_of(group))
     }
 
     fn delete_group(&mut self, group: &Sid) -> Result<(), MachineError> {
@@ -455,11 +481,45 @@ impl Machine for FakeMachine {
         Ok(self.state.copy_owner.clone())
     }
 
+    fn register_refresh_task(&mut self, owner: &Sid) -> Result<(), MachineError> {
+        assert!(!self.acting.get(), "the task is registered as admin");
+        self.call(format!("register_refresh_task {}", rid(owner)))?;
+        self.state.refresh_task = Some(owner.clone());
+        Ok(())
+    }
+
     fn register_stop_task(&mut self, owner: &Sid) -> Result<(), MachineError> {
         assert!(!self.acting.get(), "the task is registered as admin");
         self.call(format!("register_stop_task {}", rid(owner)))?;
         self.state.stop_task = Some(owner.clone());
         Ok(())
+    }
+
+    fn ensure_set_up_task(
+        &mut self,
+        owner: &Sid,
+        group: Option<&Sid>,
+    ) -> Result<bool, MachineError> {
+        assert!(!self.acting.get(), "the task is registered as admin");
+        if self.run == Run::Task {
+            return Ok(false);
+        }
+        let starters = match group {
+            None => format!("owner {}", rid(owner)),
+            // The group is checked through `set_up_task`: its SID isn't known before the run.
+            Some(_) => "interactive".to_owned(),
+        };
+        self.call(format!("ensure_set_up_task {starters}"))?;
+        self.state.set_up_task = Some((owner.clone(), group.cloned()));
+        Ok(true)
+    }
+
+    fn deny_set_up_to(&mut self, group: &Sid) -> Result<bool, MachineError> {
+        assert!(!self.acting.get(), "the task's descriptor is set as admin");
+        // The group is checked through `set_up_denied`: its SID isn't known before the run.
+        self.call("deny_set_up_to")?;
+        self.state.set_up_denied = Some(group.clone());
+        Ok(true)
     }
 
     fn held_users(
@@ -509,20 +569,7 @@ impl Machine for FakeMachine {
         secrets: &[(Sid, Password)],
         pool: &[Sid],
     ) -> Result<(), MachineError> {
-        let sids: Vec<Sid> = secrets.iter().map(|(sid, _)| sid.clone()).collect();
-        self.owner_call(&format!("protect_for_owner {}", rids(&sids)))?;
-        let mut file = BTreeMap::new();
-        for sid in pool {
-            let password = match secrets.iter().find(|(s, _)| s == sid) {
-                Some((_, password)) => password.to_string(),
-                None => self.state.secrets.get(sid).cloned().ok_or_else(|| {
-                    MachineError::Other(format!("secrets.bin has no blob for {sid}"))
-                })?,
-            };
-            file.insert(sid.clone(), password);
-        }
-        self.state.secrets = file;
-        Ok(())
+        self.protect(secrets, pool)
     }
 
     fn now(&mut self) -> u64 {

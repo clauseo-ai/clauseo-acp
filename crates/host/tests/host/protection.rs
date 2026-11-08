@@ -320,6 +320,11 @@ fn a_removal_answers_by_its_outcome() {
             Err(SetupError::Failed("x".to_owned())),
             Some(ErrorCode::SandboxSetupFailed),
         ),
+        // Windows' set-up task unreachable: a failure until the host names its own cause.
+        (
+            Err(SetupError::Unreachable),
+            Some(ErrorCode::SandboxSetupFailed),
+        ),
     ];
     for (run, (outcome, code)) in (0u16..).zip(cases) {
         let mut plan = Plan::new(

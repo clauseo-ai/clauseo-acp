@@ -16,20 +16,34 @@ pub const EXECUTION_LIMIT: &str = "PT5M";
 pub const STOP_ARG: &str = "--stop";
 /// The stop task's execution limit: 2 minutes.
 pub const STOP_EXECUTION_LIMIT: &str = "PT2M";
+/// The set-up task's one argument (`setup::serve`): nothing else.
+pub const SET_UP_ARG: &str = "--serve-set-up";
+/// The set-up task's execution limit: two hours (`serve::RUN_LIMIT`), the backstop for a run
+/// that hangs. The server takes a client only while 30 minutes are left for its set-up
+/// (`serve::CLIENT_LIMIT`); the app waits a minute past the limit (`serve::REPLY_WAIT`).
+pub const SET_UP_EXECUTION_LIMIT: &str = "PT2H";
+/// `TASK_INSTANCES_QUEUE`: a start while it runs queues another run.
+pub const INSTANCES_QUEUE: i32 = 1;
+/// `TASK_INSTANCES_IGNORE_NEW`: a start while it runs is dropped.
+pub const INSTANCES_IGNORE_NEW: i32 = 2;
 
 /// The SYSTEM tasks `--adopt` registers in `\Clauseo`, each running the admin copy with one
-/// fixed argument. Both share the principal (LOCAL SYSTEM), the descriptor ([`task_sddl`]),
-/// one instance at a time and the settings `task.rs` gives every task; they differ only in
-/// what [`SystemTask`]'s methods say.
+/// fixed argument. They share the principal (LOCAL SYSTEM) and the settings `task.rs` gives
+/// every task; they differ only in what [`SystemTask`]'s methods say and in who may start them
+/// ([`Starters`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SystemTask {
     /// `\Clauseo\SandboxRefresh`: the admin copy's refresh (`--refresh`).
     Refresh,
     /// `\Clauseo\SandboxStop`: stops every process of the pool's users (`--stop`).
     Stop,
+    /// `\Clauseo\SandboxSetUp`: the set-up a standard user asks for over its pipe
+    /// (`--serve-set-up`, `setup::serve`), with no prompt.
+    SetUp,
 }
 
-/// Every task, in the order `--adopt` registers them.
+/// The tasks a per-user `--adopt` registers for the lawyer, in this order (`--place-only`
+/// registers [`SystemTask::SetUp`] alone; a per-machine `--adopt` too, for interactive users).
 pub const TASKS: [SystemTask; 2] = [SystemTask::Refresh, SystemTask::Stop];
 
 impl SystemTask {
@@ -38,6 +52,7 @@ impl SystemTask {
         match self {
             SystemTask::Refresh => "SandboxRefresh",
             SystemTask::Stop => "SandboxStop",
+            SystemTask::SetUp => "SandboxSetUp",
         }
     }
 
@@ -46,6 +61,7 @@ impl SystemTask {
         match self {
             SystemTask::Refresh => REFRESH_ARG,
             SystemTask::Stop => STOP_ARG,
+            SystemTask::SetUp => SET_UP_ARG,
         }
     }
 
@@ -54,6 +70,7 @@ impl SystemTask {
         match self {
             SystemTask::Refresh => EXECUTION_LIMIT,
             SystemTask::Stop => STOP_EXECUTION_LIMIT,
+            SystemTask::SetUp => SET_UP_EXECUTION_LIMIT,
         }
     }
 
@@ -61,8 +78,62 @@ impl SystemTask {
     pub fn at_logon(self) -> bool {
         match self {
             SystemTask::Refresh => true,
-            SystemTask::Stop => false,
+            SystemTask::Stop | SystemTask::SetUp => false,
         }
+    }
+
+    /// Whether a start while it runs queues another run, which starts when this one ends
+    /// (`TASK_INSTANCES_QUEUE`); otherwise it is ignored (`TASK_INSTANCES_IGNORE_NEW`). None
+    /// queues. The Task Scheduler has no limit on a queue, so any interactive user could pile
+    /// up set-up runs; a start during a set-up run is dropped instead, as the running server
+    /// serves every client that connects to it, and the app starts the task again itself when
+    /// the pipe stays missing or the server goes before replying (`windows::setup_task`): at
+    /// most one start waits, and it is the app's.
+    pub fn queues(self) -> bool {
+        match self {
+            SystemTask::Refresh | SystemTask::Stop | SystemTask::SetUp => false,
+        }
+    }
+
+    /// Its instances policy, as the Task Scheduler numbers it (`TASK_INSTANCES_POLICY`): queue or
+    /// ignore new, as [`SystemTask::queues`] says.
+    pub fn instances(self) -> i32 {
+        if self.queues() {
+            INSTANCES_QUEUE
+        } else {
+            INSTANCES_IGNORE_NEW
+        }
+    }
+
+    /// Whether `found` is this task as `register_task` would register it now for `starters`, its
+    /// action `path` (quoted, [`action_path`]) and its descriptor `sddl` as Windows writes it
+    /// back: the one action and argument with no working folder, LOCAL SYSTEM at the highest level,
+    /// the instances policy exactly (parallel or stop-existing is no ignore-new), the limit,
+    /// enabled and not hidden, a logon trigger only where one belongs, and the descriptor.
+    /// Anything else is a definition that differs, which an elevated set-up registers again.
+    pub fn registered_as(
+        self,
+        found: &Registered,
+        starters: &Starters,
+        path: &str,
+        sddl: &str,
+    ) -> bool {
+        let system = ["S-1-5-18", "SYSTEM", "NT AUTHORITY\\SYSTEM"]
+            .iter()
+            .any(|name| found.user.eq_ignore_ascii_case(name));
+        let triggers = i32::from(self.at_logon() && starters.owner().is_some());
+        found.actions == 1
+            && found.path.eq_ignore_ascii_case(path)
+            && found.arguments == self.argument()
+            && system
+            && found.service_highest
+            && found.working_dir.is_empty()
+            && found.instances == self.instances()
+            && found.limit == self.execution_limit()
+            && found.enabled
+            && !found.hidden
+            && found.triggers == triggers
+            && sddl_matches(&found.sddl, sddl)
     }
 
     /// Its description, as the Task Scheduler shows it.
@@ -72,6 +143,7 @@ impl SystemTask {
                 "Keeps the admin copy of Clauseo's sandbox set-up program current."
             }
             SystemTask::Stop => "Stops the processes of Clauseo's sandbox users.",
+            SystemTask::SetUp => "Sets up Clauseo's sandbox for the user who asks, with no prompt.",
         }
     }
 }
@@ -89,24 +161,137 @@ pub enum Teardown {
     AdminFolder,
 }
 
-/// The removal's steps, in order: every task in [`TASKS`] goes before the copy they run.
-pub const TEARDOWN: [Teardown; 5] = [
+/// `ERROR_FILE_NOT_FOUND` as an HRESULT.
+const HRESULT_FILE_NOT_FOUND: u32 = 0x8007_0002;
+/// `ERROR_PATH_NOT_FOUND` as an HRESULT.
+const HRESULT_PATH_NOT_FOUND: u32 = 0x8007_0003;
+
+/// Whether the Task Scheduler's `hresult` says the task, or its folder, isn't there: a missing
+/// task is `ERROR_FILE_NOT_FOUND`, and a missing folder may be that or `ERROR_PATH_NOT_FOUND`.
+/// Either is `TaskError::NotRegistered`, which leaves the app the prompted set-up.
+pub fn not_registered(hresult: u32) -> bool {
+    [HRESULT_FILE_NOT_FOUND, HRESULT_PATH_NOT_FOUND].contains(&hresult)
+}
+
+/// The removal's steps, in order: every task goes before the copy it runs, the set-up task
+/// first, so no set-up starts while the rest goes.
+pub const TEARDOWN: [Teardown; 6] = [
     Teardown::AdminValues,
+    Teardown::Task(SystemTask::SetUp),
     Teardown::Task(SystemTask::Refresh),
     Teardown::Task(SystemTask::Stop),
     Teardown::Staging,
     Teardown::AdminFolder,
 ];
 
-/// The descriptor of every task in [`TASKS`] and of their folder: owned by Administrators;
-/// protected; SYSTEM and Administrators full control; the record owner `owner` read and execute
-/// (`FRFX`). Starting a task needs execute access: as the owner, `schtasks /run` with `FR`
-/// alone was refused (CI run 42416074600). Execute also ends a running task, so the owner can
-/// end a stop or a refresh: denial of service only, which code running as the owner could do to
-/// its own sessions anyway. An ended stop never writes `StopCompleted` (`setup::stop`), and an
-/// ended refresh keeps the old copy. The owner can't change or delete a task.
+/// One step of taking a registered `\Clauseo` task down (`task::unregister_task`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Retire {
+    /// `IRegisteredTask::put_Enabled(false)`: no start lands from here on.
+    Disable,
+    /// `IRegisteredTask::Stop`: its running instance ended, as deleting a task leaves its run
+    /// going, which for the set-up task would set up a pool the removal is taking down.
+    Stop,
+    /// `ITaskFolder::DeleteTask`.
+    Delete,
+}
+
+/// The order every `\Clauseo` task is taken down in: disabled, then stopped, then deleted.
+/// Stopped first, a start could land between the stop and the delete and run on.
+pub const RETIRE: [Retire; 3] = [Retire::Disable, Retire::Stop, Retire::Delete];
+
+/// Takes a task down by `step`, each of [`RETIRE`] in order; the first failure ends it.
+pub fn retire<E>(mut step: impl FnMut(Retire) -> Result<(), E>) -> Result<(), E> {
+    RETIRE.into_iter().try_for_each(&mut step)
+}
+
+/// The descriptor of every task in [`TASKS`] (and of the set-up task, per user): owned by
+/// Administrators; protected; SYSTEM and Administrators full control; the record owner `owner`
+/// read and execute (`FRFX`). Starting a task needs execute access: as the owner,
+/// `schtasks /run` with `FR` alone was refused (CI run 42416074600). Execute also ends a running
+/// task, so the owner can end a stop or a refresh: denial of service only, which code running as
+/// the owner could do to its own sessions anyway. An ended stop never writes `StopCompleted`
+/// (`setup::stop`), and an ended refresh keeps the old copy. The owner can't change or delete a
+/// task.
 pub fn task_sddl(owner: &Sid) -> String {
     format!("O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;{owner})")
+}
+
+/// The folder `\Clauseo`'s own descriptor, whatever task is registered in it
+/// (`task_folder::prepare`): owned by Administrators; protected; SYSTEM and Administrators full
+/// control; interactive users (`IU`) read, so a user a task's descriptor names can reach it. No
+/// one else may add, change or delete anything in it.
+pub const FOLDER_SDDL: &str = "O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FR;;;IU)";
+
+/// Who may start a task: what its descriptor grants read and execute (`FRFX`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Starters {
+    /// The record owner alone ([`task_sddl`]): the refresh and stop tasks, and the set-up task
+    /// of a per-user install.
+    Owner(Sid),
+    /// Every interactive user (`IU`), but members of `denied`, the pool's group once it exists:
+    /// a per-machine install's set-up task. Pool users log on interactively, so they hold `IU`
+    /// too; the deny comes first and keeps them out.
+    Interactive {
+        /// `GroupSid`, when the record has one.
+        denied: Option<Sid>,
+    },
+}
+
+impl Starters {
+    /// The task's descriptor: [`task_sddl`] for an owner; for interactive users, owned by
+    /// Administrators, protected, `denied` refused read and execute first, SYSTEM and
+    /// Administrators full control, `IU` read and execute.
+    pub fn sddl(&self) -> String {
+        match self {
+            Starters::Owner(owner) => task_sddl(owner),
+            Starters::Interactive { denied } => {
+                let deny = denied
+                    .as_ref()
+                    .map(|group| format!("(D;;FRFX;;;{group})"))
+                    .unwrap_or_default();
+                format!("O:BAD:P{deny}(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;IU)")
+            }
+        }
+    }
+
+    /// The user whose logon starts a task with a logon trigger: the owner; `None` for
+    /// interactive users, whose task has no such trigger.
+    pub fn owner(&self) -> Option<&Sid> {
+        match self {
+            Starters::Owner(owner) => Some(owner),
+            Starters::Interactive { .. } => None,
+        }
+    }
+}
+
+/// A registered task as the Task Scheduler gives it back, for [`SystemTask::registered_as`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Registered {
+    /// The action's program (`IExecAction::Path`), as registered: quoted.
+    pub path: String,
+    /// The action's arguments.
+    pub arguments: String,
+    /// How many actions it has.
+    pub actions: i32,
+    /// The principal's user, as read back (`S-1-5-18`, or a name for it).
+    pub user: String,
+    /// Whether it runs as a service account at the highest run level.
+    pub service_highest: bool,
+    /// Its instances policy, as the Task Scheduler numbers it (`TASK_INSTANCES_POLICY`).
+    pub instances: i32,
+    /// Its execution limit.
+    pub limit: String,
+    /// The action's working folder (`IExecAction::WorkingDirectory`); empty for none.
+    pub working_dir: String,
+    /// Whether it is enabled (`ITaskSettings::Enabled`).
+    pub enabled: bool,
+    /// Whether it is hidden (`ITaskSettings::Hidden`).
+    pub hidden: bool,
+    /// How many triggers it has.
+    pub triggers: i32,
+    /// Its owner and DACL, as read back.
+    pub sddl: String,
 }
 
 /// The task action's program: `exe`'s path in double quotes, as a command line takes a path
@@ -167,8 +352,10 @@ pub fn hex(bytes: &[u8]) -> String {
 
 /// Whether `dir` lies strictly inside `profile` (the owner's `ProfileImagePath`), compared part
 /// by part as Windows compares names: case folded, any `\\?\` prefix and either separator, a
-/// trailing separator ignored. The walk opens every part of `dir` without following a reparse
-/// point, so its text is where it leads.
+/// trailing separator ignored. A check of the text alone: it opens nothing and follows no link,
+/// so a junction or symlink in the profile can still send `dir` elsewhere. The protection
+/// against that is `exe::owners_data_dir`, which resolves the folder as the owner and takes
+/// only one the owner owns.
 pub fn inside_profile(dir: &Path, profile: &Path) -> bool {
     let parts = |path: &Path| -> Vec<String> {
         let text = path.to_string_lossy();

@@ -1,6 +1,9 @@
 //! [`UserSetup`]: the app's side of the elevated set-up (S15 `PR4h`), as R17 holds it through
-//! [`SandboxSetup`]. It reads the set-up's state, starts the setup exe's admin copy and waits
-//! for it, and forgets a matter without admin.
+//! [`SandboxSetup`]. It reads the set-up's state, asks the set-up task for a set-up or an extend
+//! with no prompt (`setup_task`), starts the setup exe's admin copy and waits for it where
+//! there is no set-up task, or the task would set up another folder than the app's
+//! (`run_elevated`, `extend_elevated`), the clean-up and the removal, and forgets a matter
+//! without admin.
 //!
 //! The one exe it starts is the admin copy in `%ProgramFiles%\Clauseo\Sandbox\`
 //! (`admin_copy`), never the copy beside `Clauseo.exe`, which a per-user install keeps in a
@@ -54,13 +57,18 @@ use super::ledger::{Ledger, ledger_path};
 use super::marker::setup_state;
 use super::matters::MatterSids;
 use super::reclaim::hand_back_after;
-use super::record::{sandbox_group_sid, sandbox_pool_sids};
+use super::record::{current_user_sid, sandbox_group_sid, sandbox_pool_sids};
+use super::refresh::SystemTask;
+use super::refresh::task::task_enabled;
 use super::setup::SetupExit;
+use super::setup::adopt::windows_adopter::own_profile;
 use super::setup::args::quote;
 use super::setup::around::Around;
 use super::setup::result_file::{self, SetupResult};
+use super::setup::serve::{asks_admin, task_serves, via_task};
 use super::setup::taken_file;
 use super::setup::{launch_code, launch_error};
+use super::setup_task::request_set_up;
 use super::sids::{Reserved, Sid};
 use crate::{SandboxSetup, SetupError, SetupState};
 
@@ -85,10 +93,66 @@ impl UserSetup {
         UserSetup { data_dir }
     }
 
-    /// Adds `n` pool users to a pool this user set up (D-B5): one prompt, as [`SandboxSetup::run`]
-    /// raises. Every registered matter is fenced against the new users; no password is reset.
+    /// Whether [`SandboxSetup::run`] (or [`UserSetup::extend`]) asked now would go through the
+    /// prompt for an administrator, for the first run's words: `false` when
+    /// `\Clauseo\SandboxSetUp` is registered and enabled, as this user reads it, and it sets up
+    /// this data folder (`serve::task_serves`); `true` otherwise (`serve::asks_admin`). It
+    /// reads the task and the profile's path, and starts nothing. Blocks on COM calls: call it
+    /// off the UI thread.
+    pub fn asks_admin(&self) -> bool {
+        let enabled = task_enabled(SystemTask::SetUp).map_err(|error| error.to_string());
+        asks_admin(
+            enabled,
+            task_serves(own_profile_folder().as_deref(), &self.data_dir),
+        )
+    }
+
+    /// Adds `n` pool users to a pool this user set up (D-B5), through the set-up task with no
+    /// prompt, as [`SandboxSetup::run`] does (`setup_task::request_set_up`), or, on an install
+    /// with no set-up task, [`UserSetup::extend_elevated`]. Every registered matter is fenced
+    /// against the new users; no password is reset.
     pub fn extend(&self, n: u8) -> Result<(), SetupError> {
+        self.through_task(Some(n), || self.extend_elevated(n))
+    }
+
+    /// [`UserSetup::extend`] through the admin copy's `--set-up --add`, with its one prompt: the
+    /// path left for an install with no set-up task.
+    pub fn extend_elevated(&self, n: u8) -> Result<(), SetupError> {
         self.set_up(n)
+    }
+
+    /// The set-up (`add` none) or extend through its one prompt: the admin copy's `--set-up`,
+    /// started elevated, as before the set-up task. [`SandboxSetup::run`] falls back to it on an
+    /// install with no set-up task and when the task refuses this user (logged); its declined
+    /// prompt is `SetupError::Refused`.
+    pub fn run_elevated(&self) -> Result<(), SetupError> {
+        self.set_up(0)
+    }
+
+    /// Asks the set-up task (`setup_task::request_set_up`) and reads its reply as the exe's
+    /// result is read (`serve::via_task`); with no set-up task, or a refusal, `elevated`. The
+    /// last result file is removed first, as before a prompted run, so a request the task refused
+    /// before running anything leaves no earlier result to be read as its own. The task sets up
+    /// the folder it derives from this user's profile: when that isn't `data_dir`
+    /// (`serve::task_serves`), it isn't asked, the reason is logged, and `elevated` runs.
+    fn through_task(
+        &self,
+        add: Option<u8>,
+        elevated: impl FnOnce() -> Result<(), SetupError>,
+    ) -> Result<(), SetupError> {
+        result_file::remove(&self.data_dir).map_err(|error| {
+            SetupError::Failed(format!(
+                "the last set-up's result can't be cleared: {error}"
+            ))
+        })?;
+        if let Err(why) = task_serves(own_profile_folder().as_deref(), &self.data_dir) {
+            tracing::info!(
+                why,
+                "the set-up task sets up another folder; asking with the prompt"
+            );
+            return elevated();
+        }
+        via_task(request_set_up(add), elevated)
     }
 
     /// The elevated clean-up (D-B10, S15 `PR4i`): one prompt. `--reclaim` makes this user the
@@ -237,8 +301,11 @@ impl SandboxSetup for UserSetup {
         protection_state(&StateAdminCopy, marker, combined)
     }
 
+    /// The set-up through the set-up task, with no prompt (`setup_task::request_set_up`); on an
+    /// install with no set-up task, or a data folder the task wouldn't set up,
+    /// [`UserSetup::run_elevated`] and its prompt.
     fn run(&self) -> Result<(), SetupError> {
-        self.set_up(0)
+        self.through_task(None, || self.run_elevated())
     }
 
     /// `apply::forget_matter` through this user's ledger, then, once nothing of the matter's is
@@ -271,6 +338,13 @@ impl SandboxSetup for UserSetup {
         let code = launch("--remove")?;
         result_file::outcome(code, None)
     }
+}
+
+/// This user's own profile folder, as the set-up task reads it for them (`own_profile`);
+/// `None` when there is none or it can't be read.
+fn own_profile_folder() -> Option<PathBuf> {
+    let user = current_user_sid().ok()?;
+    own_profile(&user).ok().flatten()
 }
 
 /// The record's pool users, and the SIDs a ledger trusts: those and their group.

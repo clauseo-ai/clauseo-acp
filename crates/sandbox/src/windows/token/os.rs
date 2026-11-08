@@ -22,7 +22,7 @@ use windows::Win32::Security::{
     GetSecurityDescriptorDacl, GetTokenInformation, PROTECTED_DACL_SECURITY_INFORMATION,
     PSECURITY_DESCRIPTOR, PSID, SID_AND_ATTRIBUTES, SetTokenInformation, TOKEN_ALL_ACCESS,
     TOKEN_DEFAULT_DACL, TOKEN_GROUPS, TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_LABEL,
-    TokenDefaultDacl, TokenGroups, TokenIntegrityLevel,
+    TokenDefaultDacl, TokenGroups, TokenIntegrityLevel, TokenRestrictedSids,
 };
 use windows::Win32::Storage::FileSystem::WRITE_DAC;
 use windows::Win32::System::Diagnostics::ToolHelp::{
@@ -158,17 +158,40 @@ pub(in crate::windows) fn user(token: &Handle) -> io::Result<Sid> {
 
 /// `token`'s logon SID: the group marked `SE_GROUP_LOGON_ID`. Exactly one, or an error.
 pub(in crate::windows) fn logon_sid(token: &Handle) -> io::Result<Sid> {
-    let buffer = information(token, TokenGroups)?;
+    let mut found = groups(token)?
+        .into_iter()
+        .filter(|(_, attributes)| attributes & LOGON_ID == LOGON_ID)
+        .map(|(sid, _)| sid);
+    match (found.next(), found.next()) {
+        (Some(sid), None) => Ok(sid),
+        _ => Err(io::Error::other(
+            "the runner's token has no single logon SID",
+        )),
+    }
+}
+
+/// Every group of `token` (`TokenGroups`), with its attributes: enabled, deny-only or not.
+pub(in crate::windows) fn groups(token: &Handle) -> io::Result<Vec<(Sid, u32)>> {
+    sid_list(token, TokenGroups)
+}
+
+/// The SIDs `class` of `token` lists (a `TOKEN_GROUPS`), with their attributes.
+fn sid_list(token: &Handle, class: TOKEN_INFORMATION_CLASS) -> io::Result<Vec<(Sid, u32)>> {
+    let buffer = information(token, class)?;
     let bytes = size_of_val(buffer.as_slice());
-    if bytes < size_of::<TOKEN_GROUPS>() {
+    let offset = std::mem::offset_of!(TOKEN_GROUPS, Groups);
+    // An empty list (no restricting SIDs) may be only its count, shorter than a TOKEN_GROUPS.
+    if bytes < offset {
         return Err(io::Error::other("the token's groups are too short"));
     }
     let groups = buffer.as_ptr().cast::<TOKEN_GROUPS>();
-    // SAFETY: `buffer` holds at least a TOKEN_GROUPS, aligned (u64 words), as GetTokenInformation
-    // wrote it.
+    // SAFETY: `buffer` holds at least the count, aligned (u64 words), as GetTokenInformation
+    // wrote it; only that field is read.
     let count = unsafe { (*groups).GroupCount };
     let count = usize::try_from(count).map_err(io::Error::other)?;
-    let offset = std::mem::offset_of!(TOKEN_GROUPS, Groups);
+    if count == 0 {
+        return Ok(Vec::new());
+    }
     count
         .checked_mul(size_of::<SID_AND_ATTRIBUTES>())
         .and_then(|len| len.checked_add(offset))
@@ -183,16 +206,34 @@ pub(in crate::windows) fn logon_sid(token: &Handle) -> io::Result<Sid> {
             count,
         )
     };
-    let mut found = entries
+    entries
         .iter()
-        .filter(|group| group.Attributes & LOGON_ID == LOGON_ID)
-        .map(|group| sid_text(group.Sid));
-    match (found.next(), found.next()) {
-        (Some(sid), None) => sid,
-        _ => Err(io::Error::other(
-            "the runner's token has no single logon SID",
-        )),
+        .map(|group| Ok((sid_text(group.Sid)?, group.Attributes)))
+        .collect()
+}
+
+/// The relative id of `token`'s integrity level (`S-1-16-<rid>`).
+pub(in crate::windows) fn integrity(token: &Handle) -> io::Result<u32> {
+    let buffer = information(token, TokenIntegrityLevel)?;
+    if size_of_val(buffer.as_slice()) < size_of::<TOKEN_MANDATORY_LABEL>() {
+        return Err(io::Error::other("the token's label is too short"));
     }
+    // SAFETY: `buffer` holds a TOKEN_MANDATORY_LABEL, aligned, whose SID points into the buffer,
+    // which lives until `sid_text` has read it.
+    let label = unsafe { &*buffer.as_ptr().cast::<TOKEN_MANDATORY_LABEL>() };
+    let level = sid_text(label.Label.Sid)?;
+    level
+        .as_str()
+        .strip_prefix("S-1-16-")
+        .and_then(|rid| rid.parse().ok())
+        .ok_or_else(|| io::Error::other("the token's label isn't an integrity level"))
+}
+
+/// Whether `token` is restricted: it lists restricting SIDs (`TokenRestrictedSids`). A list
+/// that can't be read is an error, never "not restricted": `IsTokenRestricted`'s `FALSE`
+/// means both, so it isn't used.
+pub(in crate::windows) fn restricted(token: &Handle) -> io::Result<bool> {
+    Ok(!sid_list(token, TokenRestrictedSids)?.is_empty())
 }
 
 /// Makes the agent's token from `base` (the runner's own token) as `spec` says. The result is a

@@ -1,52 +1,60 @@
-//! The SYSTEM tasks `\Clauseo\SandboxRefresh` (ADR 0049, "Admin copy refresh") and
-//! `\Clauseo\SandboxStop` ("Stopping the pool's processes"), through the Task Scheduler's COM
-//! API (`ITaskService`), never `schtasks` text:
+//! The SYSTEM tasks `\Clauseo\SandboxRefresh` (ADR 0049, "Admin copy refresh"),
+//! `\Clauseo\SandboxStop` ("Stopping the pool's processes") and `\Clauseo\SandboxSetUp`
+//! (`setup::serve`), through the Task Scheduler's COM API (`ITaskService`), never `schtasks`
+//! text:
 //!
-//! - [`register_task`], which `--adopt` calls elevated for each of [`TASKS`](super::TASKS) per
-//!   user, and a per-machine install's set-up for the stop task (`late_steps::stop_task`): the task
-//!   runs as LOCAL SYSTEM, starts
+//! - [`register_task`], which plain `--adopt` calls elevated for each of [`TASKS`](super::TASKS)
+//!   per user, and every set-up with an admin copy for the owner it records
+//!   (`late_steps::tasks`): both per user, the stop task alone per machine. The task runs as
+//!   LOCAL SYSTEM, starts
 //!   `<FOLDERID_ProgramFiles>\Clauseo\Sandbox\clauseo-sandbox-setup.exe` with its one argument
 //!   (`--refresh`, `--stop`) and nothing else, on demand (the refresh also at the record owner's
 //!   logon), needs no network, stops after its limit (5 minutes, 2 minutes), and never runs twice
-//!   at once. Its descriptor ([`task_sddl`](super::task_sddl)) is owned by Administrators and lets
+//!   at once. Its descriptor ([`Starters::sddl`]) is owned by Administrators and lets
 //!   SYSTEM and Administrators do anything and the owner read and execute it (`FRFX`), which
-//!   starts it and ends a running one, nothing more; the folder `\Clauseo` gets the same owner
-//!   and DACL, made with them, or set again when an administrator made it; one anyone else made
-//!   is deleted with what is in it and made again (`task_folder.rs`).
+//!   starts it and ends a running one, nothing more. The set-up task (`--serve-set-up`, 30
+//!   minutes) is registered by `--adopt --place-only` for the lawyer and by a per-machine
+//!   `--adopt` for every interactive user ([`Starters::Interactive`]); like the others, a
+//!   start while it runs is dropped (the app starts it again when its pipe stays missing). The
+//!   folder `\Clauseo` gets its own fixed owner and DACL ([`FOLDER_SDDL`](super::FOLDER_SDDL)),
+//!   made with them, or set again when an administrator made it; one anyone else made is
+//!   deleted with what is in it and made again (`task_folder.rs`).
+//! - [`deny_set_up_to`], which a per-machine set-up calls once the pool's group exists: the
+//!   set-up task's descriptor again, the group refused first.
 //! - [`unregister_task`], which `--remove --uninstall` calls (it deletes staging itself,
-//!   taking it back if need be: `setup::admin_remove`).
+//!   taking it back if need be: `setup::admin_remove`). A running set-up is ended first.
 //! - [`request_admin_refresh`], which the app calls as the lawyer, unelevated, after an update,
 //!   and [`request_pool_stop`]: each asks the Task Scheduler to run its task
 //!   (`IRegisteredTask::Run`), which the owner's read-and-execute entry (`FRFX`) allows.
 #![expect(unsafe_code, reason = "FFI to COM and the Task Scheduler's interfaces")]
 
-use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, RPC_E_CHANGED_MODE, VARIANT_BOOL};
-use windows::Win32::Security::OWNER_SECURITY_INFORMATION;
+use std::path::Path;
+
+use windows::Win32::Foundation::{RPC_E_CHANGED_MODE, VARIANT_BOOL};
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
 };
 use windows::Win32::System::TaskScheduler::{
-    IExecAction, ILogonTrigger, IRegisteredTask, ITaskFolder, ITaskService, TASK_ACTION_EXEC,
-    TASK_CREATE_OR_UPDATE, TASK_ENUM_HIDDEN, TASK_INSTANCES_IGNORE_NEW, TASK_LOGON_SERVICE_ACCOUNT,
-    TASK_RUNLEVEL_HIGHEST, TASK_TRIGGER_LOGON, TaskScheduler,
+    IExecAction, ILogonTrigger, IRegisteredTask, ITaskService, TASK_ACTION_EXEC,
+    TASK_CREATE_OR_UPDATE, TASK_INSTANCES_POLICY, TASK_LOGON_SERVICE_ACCOUNT,
+    TASK_RUNLEVEL_HIGHEST, TASK_STATE_QUEUED, TASK_STATE_RUNNING, TASK_TRIGGER_LOGON,
+    TaskScheduler,
 };
 use windows::Win32::System::Variant::VARIANT;
-use windows::core::{BSTR, HRESULT, Interface};
+use windows::core::{BSTR, Interface};
 
 use super::last_run::{LastRun, last_run};
-use super::task_folder::{Folders, prepare};
+use super::task_scheduler::folder;
 use super::windows_refresher::{EXE_NAME, sandbox_dir};
-use super::{SystemTask, action_path, task_sddl};
+use super::{Retire, Starters, SystemTask, action_path};
 use crate::windows::sids::Sid;
 
 /// The task's folder.
 pub const TASK_FOLDER: &str = "\\Clauseo";
 /// The folder's name under the root, for creating and deleting it.
-const FOLDER_NAME: &str = "Clauseo";
+pub(super) const FOLDER_NAME: &str = "Clauseo";
 /// LOCAL SYSTEM, as the task's principal.
 const SYSTEM: &str = "S-1-5-18";
-/// How many folders below `\Clauseo` a deletion of someone else's `\Clauseo` goes.
-const FOLDER_DEPTH: usize = 8;
 
 /// Why a task call failed.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -68,10 +76,13 @@ pub enum TaskError {
     /// The folder couldn't be made ready (`task_folder::prepare`).
     #[error("the folder {TASK_FOLDER}: {0}")]
     Folder(String),
+    /// A task's descriptor couldn't be written out as Windows reads it back (`ensure_task`).
+    #[error("the task's descriptor: {0}")]
+    Descriptor(String),
 }
 
 /// `call` failed with `error`, as a line for the log.
-fn text(call: &'static str) -> impl Fn(windows::core::Error) -> String {
+pub(super) fn text(call: &'static str) -> impl Fn(windows::core::Error) -> String {
     move |error| com(call)(error).to_string()
 }
 
@@ -83,18 +94,18 @@ fn com(call: &'static str) -> impl Fn(windows::core::Error) -> TaskError {
     }
 }
 
-/// Whether `error` says the folder or task isn't there.
-fn missing(error: &windows::core::Error) -> bool {
-    error.code() == HRESULT::from_win32(ERROR_FILE_NOT_FOUND.0)
+/// Whether `error` says the folder or task isn't there (`rules::not_registered`).
+pub(super) fn missing(error: &windows::core::Error) -> bool {
+    super::not_registered(error.code().0.cast_unsigned())
 }
 
 /// COM on this thread for the guard's life: uninitialised on drop when this call initialised
 /// it; a thread already in another apartment keeps it and is used as it is.
-pub(super) struct Apartment(bool);
+pub(crate) struct Apartment(bool);
 
 impl Apartment {
     /// Joins the multithreaded apartment, or uses the thread's.
-    pub(super) fn enter() -> Result<Apartment, TaskError> {
+    pub(crate) fn enter() -> Result<Apartment, TaskError> {
         // SAFETY: no reserved pointer; undone on drop when it succeeded.
         let entered = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
         if entered == RPC_E_CHANGED_MODE {
@@ -115,7 +126,7 @@ impl Drop for Apartment {
 }
 
 /// The Task Scheduler on this machine, connected as this process's user.
-pub(super) fn service() -> Result<ITaskService, TaskError> {
+pub(crate) fn service() -> Result<ITaskService, TaskError> {
     // SAFETY: a registered in-process class and its interface; no outer object.
     let service: ITaskService =
         unsafe { CoCreateInstance(&TaskScheduler, None, CLSCTX_INPROC_SERVER) }
@@ -126,123 +137,28 @@ pub(super) fn service() -> Result<ITaskService, TaskError> {
     Ok(service)
 }
 
-/// The folder `\Clauseo`, as `task_folder::prepare` leaves it: an administrator's is given
-/// `sddl` (its owner and DACL) again; anyone else's is deleted with what is in it; a missing or
-/// deleted one is made with `sddl`.
-fn folder(service: &ITaskService, sddl: &str) -> Result<ITaskFolder, TaskError> {
-    prepare(&mut Scheduler(service), sddl).map_err(TaskError::Folder)
-}
-
-/// The Task Scheduler's folders, for `task_folder::prepare`.
-struct Scheduler<'a>(&'a ITaskService);
-
-impl Scheduler<'_> {
-    /// The root folder.
-    fn root(&self) -> Result<ITaskFolder, String> {
-        // SAFETY: a live service and a BSTR that outlives the call.
-        unsafe { self.0.GetFolder(&BSTR::from("\\")) }.map_err(text("ITaskService::GetFolder"))
-    }
-}
-
-/// Deletes every task in `folder` and each folder below it, `depth` folders down at most,
-/// then the folders themselves, deepest first; `folder` itself is left.
-fn empty(folder: &ITaskFolder, depth: usize) -> Result<(), String> {
-    // SAFETY: a live folder; hidden tasks too.
-    let tasks =
-        unsafe { folder.GetTasks(TASK_ENUM_HIDDEN.0) }.map_err(text("ITaskFolder::GetTasks"))?;
-    let mut names = Vec::new();
-    // SAFETY: a live collection.
-    let count = unsafe { tasks.Count() }.map_err(text("IRegisteredTaskCollection::Count"))?;
-    for at in 1..=count {
-        // SAFETY: a live collection and a 1-based index variant.
-        let task = unsafe { tasks.get_Item(&VARIANT::from(at)) }
-            .map_err(text("IRegisteredTaskCollection::Item"))?;
-        // SAFETY: a live task.
-        names.push(unsafe { task.Name() }.map_err(text("IRegisteredTask::Name"))?);
-    }
-    for name in names {
-        // SAFETY: a live folder and a BSTR; flags 0.
-        unsafe { folder.DeleteTask(&name, 0) }.map_err(text("ITaskFolder::DeleteTask"))?;
-    }
-    // SAFETY: a live folder; flags 0.
-    let subs = unsafe { folder.GetFolders(0) }.map_err(text("ITaskFolder::GetFolders"))?;
-    // SAFETY: a live collection.
-    let count = unsafe { subs.Count() }.map_err(text("ITaskFolderCollection::Count"))?;
-    let mut below = Vec::new();
-    for at in 1..=count {
-        // SAFETY: a live collection and a 1-based index variant.
-        let sub = unsafe { subs.get_Item(&VARIANT::from(at)) }
-            .map_err(text("ITaskFolderCollection::Item"))?;
-        below.push(sub);
-    }
-    if !below.is_empty() && depth == 0 {
-        return Err("the folder holds folders deeper than the deletion goes".to_owned());
-    }
-    for sub in below {
-        empty(&sub, depth.saturating_sub(1))?;
-        // SAFETY: a live folder.
-        let name = unsafe { sub.Name() }.map_err(text("ITaskFolder::Name"))?;
-        // SAFETY: a live folder and a BSTR naming its child; flags 0.
-        unsafe { folder.DeleteFolder(&name, 0) }.map_err(text("ITaskFolder::DeleteFolder"))?;
-    }
-    Ok(())
-}
-
-impl Folders for Scheduler<'_> {
-    type Folder = ITaskFolder;
-
-    fn find(&mut self) -> Result<Option<ITaskFolder>, String> {
-        // SAFETY: a live service and a BSTR that outlives the call.
-        match unsafe { self.0.GetFolder(&BSTR::from(TASK_FOLDER)) } {
-            Ok(folder) => Ok(Some(folder)),
-            Err(error) if missing(&error) => Ok(None),
-            Err(error) => Err(text("ITaskService::GetFolder")(error)),
-        }
-    }
-
-    fn owner_sddl(&mut self, folder: &ITaskFolder) -> Result<String, String> {
-        // SAFETY: a live folder; the owner alone.
-        let sddl =
-            unsafe { folder.GetSecurityDescriptor(OWNER_SECURITY_INFORMATION.0.cast_signed()) }
-                .map_err(text("ITaskFolder::GetSecurityDescriptor"))?;
-        Ok(sddl.to_string())
-    }
-
-    fn delete(&mut self, folder: ITaskFolder) -> Result<(), String> {
-        empty(&folder, FOLDER_DEPTH)?;
-        drop(folder);
-        // SAFETY: a live root folder and a BSTR; flags 0.
-        unsafe { self.root()?.DeleteFolder(&BSTR::from(FOLDER_NAME), 0) }
-            .map_err(text("ITaskFolder::DeleteFolder"))
-    }
-
-    fn create(&mut self, sddl: &str) -> Result<ITaskFolder, String> {
-        // SAFETY: a live root folder; the name and the VARIANT outlive the call.
-        unsafe {
-            self.root()?
-                .CreateFolder(&BSTR::from(FOLDER_NAME), &VARIANT::from(sddl))
-        }
-        .map_err(text("ITaskFolder::CreateFolder"))
-    }
-
-    fn set(&mut self, folder: &ITaskFolder, sddl: &str) -> Result<(), String> {
-        // SAFETY: a live folder and a BSTR; flags 0.
-        unsafe { folder.SetSecurityDescriptor(&BSTR::from(sddl), 0) }
-            .map_err(text("ITaskFolder::SetSecurityDescriptor"))
-    }
-}
-
-/// Registers (or updates) the task `spec` names as the module says, for the record owner
-/// `owner_sid`. Elevated: `--adopt` calls it for each task once the admin copy is locked in
-/// place, before it writes the record's admin-copy values (a refresh before then exits 33,
-/// changing nothing). On a per-machine install, the set-up calls it for the stop task once the
-/// record names `owner_sid`; a task already there is replaced, descriptor included.
-pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError> {
+/// Registers (or updates) the task `spec` names as the module says, startable by `starters`.
+/// Elevated: `--adopt` calls it for each task once the admin copy is locked in place, before
+/// it writes the record's admin-copy values (a refresh before then exits 33, changing
+/// nothing). On a per-machine install, the set-up calls it for the stop task once the record
+/// names the owner; a task already there is replaced, descriptor included.
+pub fn register_task(spec: SystemTask, starters: &Starters) -> Result<(), TaskError> {
     let exe = sandbox_dir().map_err(TaskError::Path)?.join(EXE_NAME);
-    let sddl = task_sddl(owner_sid);
+    register_in(FOLDER_NAME, spec, starters, &exe)
+}
+
+/// [`register_task`] into the folder `\<folder_name>`, its action `exe`: the tests' own
+/// folder and program, the production steps otherwise.
+pub(super) fn register_in(
+    folder_name: &str,
+    spec: SystemTask,
+    starters: &Starters,
+    exe: &Path,
+) -> Result<(), TaskError> {
+    let sddl = starters.sddl();
     let _apartment = Apartment::enter()?;
     let service = service()?;
-    let folder = folder(&service, &sddl)?;
+    let folder = folder(&service, folder_name)?;
     // SAFETY: each call below is on a live interface the one before returned, with BSTRs and
     // VARIANT values that outlive it; flags 0 for NewTask.
     unsafe {
@@ -272,7 +188,7 @@ pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError>
             .SetExecutionTimeLimit(&BSTR::from(spec.execution_limit()))
             .map_err(com("SetExecutionTimeLimit"))?;
         settings
-            .SetMultipleInstances(TASK_INSTANCES_IGNORE_NEW)
+            .SetMultipleInstances(TASK_INSTANCES_POLICY(spec.instances()))
             .map_err(com("SetMultipleInstances"))?;
         settings
             .SetAllowDemandStart(yes)
@@ -286,7 +202,9 @@ pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError>
         settings
             .SetEnabled(yes)
             .map_err(com("ITaskSettings::SetEnabled"))?;
-        if spec.at_logon() {
+        if spec.at_logon()
+            && let Some(owner_sid) = starters.owner()
+        {
             let trigger = task.Triggers().map_err(com("Triggers"))?;
             let trigger = trigger
                 .Create(TASK_TRIGGER_LOGON)
@@ -304,7 +222,7 @@ pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError>
         // Quoted: the path has a space (`Program Files`), and a command line split there would
         // name another program. Every folder on it is also under %ProgramFiles%, which only
         // administrators can write.
-        exec.SetPath(&BSTR::from(action_path(&exe)))
+        exec.SetPath(&BSTR::from(action_path(exe)))
             .map_err(com("IExecAction::SetPath"))?;
         exec.SetArguments(&BSTR::from(spec.argument()))
             .map_err(com("IExecAction::SetArguments"))?;
@@ -323,9 +241,12 @@ pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError>
     Ok(())
 }
 
-/// Deletes `task`, then the folder `\Clauseo` if nothing else is in it. A task or folder that
-/// isn't there is `Ok`. Elevated: `--remove --uninstall` calls it for each task, and a
-/// per-machine install's `--remove` for the stop task.
+/// Takes `task` down in [`RETIRE`](super::RETIRE)'s order (disabled, then its running instance
+/// stopped, then deleted), then deletes the folder `\Clauseo` if nothing else is in it. A task
+/// or folder that isn't there is `Ok`. Elevated: `--remove --uninstall` calls it for each task,
+/// and a per-machine install's `--remove` for the stop task. Disabled first, no start lands
+/// between the stop and the delete; stopped before the delete, as deleting a task leaves its
+/// run going, which for the set-up task would set up a pool the removal is taking down.
 pub fn unregister_task(task: SystemTask) -> Result<(), TaskError> {
     let _apartment = Apartment::enter()?;
     let service = service()?;
@@ -335,11 +256,22 @@ pub fn unregister_task(task: SystemTask) -> Result<(), TaskError> {
         Err(error) if missing(&error) => return Ok(()),
         Err(error) => return Err(com("ITaskService::GetFolder")(error)),
     };
-    // SAFETY: a live folder and a BSTR; flags 0.
-    match unsafe { folder.DeleteTask(&BSTR::from(task.name()), 0) } {
-        Ok(()) => {}
+    // SAFETY: a live folder and a BSTR that outlives the call.
+    match unsafe { folder.GetTask(&BSTR::from(task.name())) } {
+        Ok(registered) => super::retire(|step| match step {
+            // SAFETY: a live task.
+            Retire::Disable => unsafe { registered.SetEnabled(VARIANT_BOOL::from(false)) }
+                .map_err(com("IRegisteredTask::SetEnabled")),
+            // SAFETY: a live task; flags 0.
+            Retire::Stop => unsafe { registered.Stop(0) }.map_err(com("IRegisteredTask::Stop")),
+            // SAFETY: a live folder and a BSTR; flags 0.
+            Retire::Delete => match unsafe { folder.DeleteTask(&BSTR::from(task.name()), 0) } {
+                Err(error) if !missing(&error) => Err(com("ITaskFolder::DeleteTask")(error)),
+                _deleted_or_gone => Ok(()),
+            },
+        })?,
         Err(error) if missing(&error) => {}
-        Err(error) => return Err(com("ITaskFolder::DeleteTask")(error)),
+        Err(error) => return Err(com("ITaskFolder::GetTask")(error)),
     }
     // SAFETY: as above, on the root folder.
     let root =
@@ -383,14 +315,65 @@ pub fn request_pool_stop() -> bool {
     }
 }
 
-/// Runs `task` now, as whoever calls it, through the owner's read-and-execute entry (`FRFX`,
-/// `rules::task_sddl`): the Task Scheduler starts a task only for a caller with execute access,
-/// and refused the owner holding `FR` alone (CI run 42416074600).
-fn run_task(task: SystemTask) -> Result<(), TaskError> {
+/// Gives the set-up task `\Clauseo\SandboxSetUp` its per-machine descriptor again with
+/// `group` refused first (`Starters::Interactive`), through
+/// `IRegisteredTask::SetSecurityDescriptor` rather than a new registration, so a run in progress
+/// (the set-up that made the group) goes on.
+/// A per-machine set-up calls it, as SYSTEM or elevated, once the record names the group, and
+/// every re-run again. [`TaskError::NotRegistered`] when the install has no set-up task.
+pub fn deny_set_up_to(group: &Sid) -> Result<(), TaskError> {
+    set_starters_in(
+        FOLDER_NAME,
+        SystemTask::SetUp,
+        &Starters::Interactive {
+            denied: Some(group.clone()),
+        },
+    )
+}
+
+/// [`deny_set_up_to`]'s descriptor change for any task and folder, for the tests' folder.
+pub(super) fn set_starters_in(
+    folder_name: &str,
+    task: SystemTask,
+    starters: &Starters,
+) -> Result<(), TaskError> {
+    let sddl = starters.sddl();
+    with_task_in(folder_name, task, |task| {
+        // SAFETY: a live task and a BSTR that outlives the call; flags 0.
+        unsafe { task.SetSecurityDescriptor(&BSTR::from(sddl.as_str()), 0) }
+            .map_err(com("IRegisteredTask::SetSecurityDescriptor"))
+    })
+}
+
+/// Runs `task` now, as whoever calls it, through the read-and-execute entry its descriptor gives
+/// the caller (`FRFX`, `rules::Starters`): the Task Scheduler starts a task only for a caller
+/// with execute access, and refused the owner holding `FR` alone (CI run 42416074600). The app
+/// starts the set-up task through it (`windows::setup_task`).
+pub(crate) fn run_task(task: SystemTask) -> Result<(), TaskError> {
     with_task(task, |task| {
         // SAFETY: a live task and an empty VARIANT: no parameters.
         unsafe { task.Run(&VARIANT::default()) }.map_err(com("IRegisteredTask::Run"))?;
         Ok(())
+    })
+}
+
+/// Whether `task` is queued or running now (`IRegisteredTask::State`), read as whoever calls it;
+/// the app waits on the stop task through it before asking the set-up task again.
+pub(crate) fn task_busy(task: SystemTask) -> Result<bool, TaskError> {
+    with_task(task, |task| {
+        // SAFETY: a live task; it reads a value.
+        let state = unsafe { task.State() }.map_err(com("IRegisteredTask::State"))?;
+        Ok([TASK_STATE_QUEUED, TASK_STATE_RUNNING].contains(&state))
+    })
+}
+
+/// Whether `task` is registered and enabled (`IRegisteredTask::Enabled`), read as whoever calls
+/// it, without starting it: [`TaskError::NotRegistered`] when it, or `\Clauseo`, is missing.
+pub(crate) fn task_enabled(task: SystemTask) -> Result<bool, TaskError> {
+    with_task(task, |task| {
+        // SAFETY: a live task; it reads a value.
+        let enabled = unsafe { task.Enabled() }.map_err(com("IRegisteredTask::Enabled"))?;
+        Ok(enabled.as_bool())
     })
 }
 
@@ -410,13 +393,22 @@ pub fn last_refresh_run() -> Result<LastRun, TaskError> {
 }
 
 /// Runs `then` on the registered `task`, inside a COM apartment that outlives it.
-fn with_task<T>(
+pub(super) fn with_task<T>(
+    task: SystemTask,
+    then: impl FnOnce(&IRegisteredTask) -> Result<T, TaskError>,
+) -> Result<T, TaskError> {
+    with_task_in(FOLDER_NAME, task, then)
+}
+
+/// [`with_task`] in the folder `\<folder_name>`.
+pub(super) fn with_task_in<T>(
+    folder_name: &str,
     task: SystemTask,
     then: impl FnOnce(&IRegisteredTask) -> Result<T, TaskError>,
 ) -> Result<T, TaskError> {
     let _apartment = Apartment::enter()?;
     let service = service()?;
-    let path = format!("{TASK_FOLDER}\\{}", task.name());
+    let path = format!("\\{folder_name}\\{}", task.name());
     // SAFETY: a live service and a BSTR that outlives the call.
     let root =
         unsafe { service.GetFolder(&BSTR::from("\\")) }.map_err(com("ITaskService::GetFolder"))?;

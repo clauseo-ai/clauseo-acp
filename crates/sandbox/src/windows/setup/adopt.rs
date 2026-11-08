@@ -27,21 +27,36 @@
 //! 5. the admin folder holds only the copy, its signature and `staging\` (anything else is
 //!    deleted), and it and everything in it get the locked owner and DACL, read back exactly
 //!    (`admin_copy::locked`), else `Failed`;
-//! 6. per user, the SYSTEM tasks (`refresh::register_task`, PR 3) are registered for the
-//!    lawyer, in `refresh::TASKS`' order: `\Clauseo\SandboxRefresh`, then `\Clauseo\SandboxStop`.
+//! 6. per user, unless `--place-only`, the SYSTEM tasks (`refresh::register_task`, PR 3) are
+//!    registered for the lawyer, in `refresh::TASKS`' order: `\Clauseo\SandboxRefresh`, then
+//!    `\Clauseo\SandboxStop`.
 //!    Either failing is `Failed` with no value written, so the launcher's check finds the copy
 //!    missing rather than running it with no task to refresh it or to stop the pool's processes
 //!    (a refresh before the values exist exits 33, changing nothing). A per-machine install
-//!    doesn't update itself and has no owner yet, so it gets neither here; its set-up registers
-//!    the stop task for the owner it records (`late_steps::stop_task`);
+//!    has no owner yet, so it gets neither here. Every set-up with an admin copy registers them
+//!    for the owner it records (`late_steps::tasks`): both per user (the first run's after
+//!    `--place-only`, and the one step 8 runs, again), the stop task alone per machine.
+//!    `--place-only` registers the set-up task `\Clauseo\SandboxSetUp` instead, for the lawyer
+//!    alone (`Starters::Owner`); `--per-machine` registers it for every interactive user, the
+//!    record's pool group refused when there is one (`Starters::Interactive`; the first set-up
+//!    adds the deny otherwise, `late_steps::tasks`). Its failure is `Failed` at step
+//!    `set_up_task`, with no value written, as the others';
 //! 7. the copy's SHA-256, read from its file in the admin folder (a reparse point refused), the
 //!    install folder, this build's version and the owner (the SID, or `machine`) are written as
 //!    the record's `AdminCopySha256`, `UserInstallDir`, `AdminCopyVersion` and
 //!    `AdminCopyOwner`. `UserInstallDir` is checked as text only, and stays untrusted (0049);
-//! 8. per user, the normal `--set-up` for the lawyer and the data folder runs in this process
-//!    (which also requires the folder to be the lawyer's own), and its exit is `--adopt`'s;
+//! 8. per user, unless `--place-only`, the normal `--set-up` for the lawyer and the data folder
+//!    runs in this process (which also requires the folder to be the lawyer's own), and its exit
+//!    is `--adopt`'s;
 //!    `--per-machine` sets nobody up (each user's set-up runs later through the app) and exits
 //!    `Done`.
+//!
+//! `--place-only` (per user) is steps 1 to 5, the set-up task, and 7, with the same exits: the
+//! copy placed and locked down, `staging` taken back, the set-up task registered, the record's
+//! values written, and `Done`. It sets nobody up (no pool user, group, filters or WSL deny):
+//! the app's first run asks the set-up task (`setup::serve`), or the admin copy's `--set-up`,
+//! which make them and the other two tasks (`late_steps::tasks`) outside the installer's
+//! process tree, which Microsoft Defender quarantined when it made them (0049).
 //!
 //! Every step goes through [`Adopter`], so the order and the refusals are tested on every OS;
 //! `windows_adopter.rs` is the machine.
@@ -53,7 +68,7 @@ use super::outcome::SetupExit;
 use super::record_values::{AdminValues, CopyOwner};
 use crate::Blocked;
 use crate::windows::admin_copy::{self, Found, inside, level_safe, same_path};
-use crate::windows::refresh::{SystemTask, TASKS};
+use crate::windows::refresh::{Starters, SystemTask, TASKS};
 use crate::windows::sids::Sid;
 
 #[cfg(test)]
@@ -70,6 +85,8 @@ pub enum Target {
         owner_sid: Sid,
         /// `--data-dir`.
         data_dir: PathBuf,
+        /// `--place-only`: no task and no set-up; the app's first run does them.
+        place_only: bool,
     },
     /// A per-machine install (`--per-machine`): no set-up.
     Machine,
@@ -106,9 +123,9 @@ pub trait Adopter {
     fn unlock(&mut self);
     /// Writes the record's admin-copy values.
     fn write_values(&mut self, values: &AdminValues) -> Result<(), Cause>;
-    /// Registers (or updates) the SYSTEM task `task` for the record owner `owner`
+    /// Registers (or updates) the SYSTEM task `task`, startable by `starters`
     /// (`refresh::register_task`, S15 tier B PR 3).
-    fn register_task(&mut self, task: SystemTask, owner: &Sid) -> Result<(), Cause>;
+    fn register_task(&mut self, task: SystemTask, starters: &Starters) -> Result<(), Cause>;
     /// The normal `--set-up` for the lawyer found and `data_dir`, in this process.
     fn set_up(&mut self, data_dir: &Path) -> SetupExit;
     /// Records a step that failed (`explain.rs`): the Event Log's line, and, once the lawyer is
@@ -125,6 +142,8 @@ pub struct Records {
     pub copy_owner: Option<CopyOwner>,
     /// `AdminCopyVersion`.
     pub version: Option<String>,
+    /// `GroupSid`: the pool's group, once a set-up made it.
+    pub group: Option<Sid>,
 }
 
 /// Runs `--adopt` as the module says, for `target` with the install folder `install_dir`.
@@ -173,7 +192,17 @@ pub fn adopt(machine: &mut dyn Adopter, install_dir: &Path, target: &Target) -> 
         return exit;
     }
     match target {
-        Target::User { data_dir, .. } => machine.set_up(data_dir),
+        Target::User {
+            data_dir,
+            place_only: false,
+            ..
+        } => machine.set_up(data_dir),
+        Target::User {
+            place_only: true, ..
+        } => {
+            tracing::info!("--adopt --place-only: placed; the app's first run sets up");
+            SetupExit::Done
+        }
         Target::Machine => SetupExit::Done,
     }
 }
@@ -187,11 +216,12 @@ fn place(
     exe: &Path,
     owner: CopyOwner,
 ) -> Result<(), SetupExit> {
-    check_records(machine, &owner)?;
+    let group = check_records(machine, &owner)?;
     let allowed = match target {
         Target::User {
             owner_sid,
             data_dir,
+            ..
         } => {
             let profile = user_profile(machine, owner_sid)?;
             inside(install_dir, &profile)
@@ -234,11 +264,25 @@ fn place(
         }
         Err(error) => return Err(failed(machine, AdoptStep::Hash, "the admin copy", error)),
     };
-    if let Target::User { owner_sid, .. } = target {
-        for task in TASKS {
-            if let Err(error) = machine.register_task(task, owner_sid) {
-                return Err(failed(machine, AdoptStep::Task(task), task.name(), error));
-            }
+    let tasks: Vec<(SystemTask, Starters)> = match target {
+        Target::User {
+            owner_sid,
+            place_only: false,
+            ..
+        } => TASKS
+            .into_iter()
+            .map(|task| (task, Starters::Owner(owner_sid.clone())))
+            .collect(),
+        Target::User {
+            owner_sid,
+            place_only: true,
+            ..
+        } => vec![(SystemTask::SetUp, Starters::Owner(owner_sid.clone()))],
+        Target::Machine => vec![(SystemTask::SetUp, Starters::Interactive { denied: group })],
+    };
+    for (task, starters) in tasks {
+        if let Err(error) = machine.register_task(task, &starters) {
+            return Err(failed(machine, AdoptStep::Task(task), task.name(), error));
         }
     }
     let values = AdminValues {
@@ -299,8 +343,8 @@ fn check_place(
     }
 }
 
-/// Step 3: one owner, of one kind, and no downgrade.
-fn check_records(machine: &mut dyn Adopter, owner: &CopyOwner) -> Result<(), SetupExit> {
+/// Step 3: one owner, of one kind, and no downgrade; the pool's group when there is one.
+fn check_records(machine: &mut dyn Adopter, owner: &CopyOwner) -> Result<Option<Sid>, SetupExit> {
     let records = match machine.records() {
         Ok(records) => records,
         Err(error) => return Err(failed(machine, AdoptStep::Record, "the record", error)),
@@ -323,7 +367,7 @@ fn check_records(machine: &mut dyn Adopter, owner: &CopyOwner) -> Result<(), Set
         tracing::error!("--adopt won't replace a newer admin copy; nothing changed");
         return Err(SetupExit::Downgrade);
     }
-    Ok(())
+    Ok(records.group)
 }
 
 /// The lawyer's profile (`ProfileList`); otherwise the exit.

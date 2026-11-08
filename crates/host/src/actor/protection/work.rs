@@ -284,6 +284,16 @@ fn answer(
             );
             Answer::Failed
         }
+        (_, Some(Err(SetupError::Unreachable))) => {
+            // Windows' set-up task didn't answer: no server came, or another process held its
+            // pipe. Its kind only (0047); a named cause is the app thread's.
+            tracing::warn!(
+                work = work_name(work),
+                kind = "unreachable",
+                "the sandbox set-up task couldn't be reached"
+            );
+            Answer::Failed
+        }
         (ProtectionWork::SetUp, Some(Ok(()))) if !protected => Answer::Failed,
         (ProtectionWork::SetUp | ProtectionWork::Remove, Some(Ok(())))
         | (ProtectionWork::Check | ProtectionWork::Unknown, _) => Answer::Done,

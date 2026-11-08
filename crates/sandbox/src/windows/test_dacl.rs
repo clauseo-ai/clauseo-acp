@@ -218,16 +218,15 @@ pub(crate) fn elevated() -> bool {
     asked.is_ok() && elevation.TokenIsElevated != 0
 }
 
-/// Makes `sid` the owner of `path` (`SetNamedSecurityInfoW`, owner only), with
-/// `SeRestorePrivilege` enabled first, since the token doesn't hold `sid`: a test file made as
-/// another account would have made it (S15 `PR4h`). Elevated tests only.
+/// Enables `SeRestorePrivilege` in this test process's token, which lets it make any user or
+/// group an object's owner, LOCAL SYSTEM included. Elevated tests only; nextest runs each test
+/// in its own process.
 #[cfg(test)]
-pub(crate) fn give_owner(path: &Path, sid: &crate::windows::sids::Sid) -> io::Result<()> {
+pub(crate) fn enable_restore() -> io::Result<()> {
     use windows::Win32::Foundation::{CloseHandle, HANDLE, LUID};
     use windows::Win32::Security::{
-        AdjustTokenPrivileges, LUID_AND_ATTRIBUTES, LookupPrivilegeValueW,
-        OWNER_SECURITY_INFORMATION, PSID, SE_PRIVILEGE_ENABLED, TOKEN_ADJUST_PRIVILEGES,
-        TOKEN_PRIVILEGES,
+        AdjustTokenPrivileges, LUID_AND_ATTRIBUTES, LookupPrivilegeValueW, SE_PRIVILEGE_ENABLED,
+        TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES,
     };
     use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
     use windows::core::w;
@@ -252,7 +251,17 @@ pub(crate) fn give_owner(path: &Path, sid: &crate::windows::sids::Sid) -> io::Re
     });
     // SAFETY: the token was opened above and is closed once, here.
     drop(unsafe { CloseHandle(token) });
-    enabled.map_err(io::Error::other)?;
+    enabled.map_err(io::Error::other)
+}
+
+/// Makes `sid` the owner of `path` (`SetNamedSecurityInfoW`, owner only), with
+/// `SeRestorePrivilege` enabled first ([`enable_restore`]), since the token doesn't hold `sid`:
+/// a test file made as another account would have made it (S15 `PR4h`). Elevated tests only.
+#[cfg(test)]
+pub(crate) fn give_owner(path: &Path, sid: &crate::windows::sids::Sid) -> io::Result<()> {
+    use windows::Win32::Security::{OWNER_SECURITY_INFORMATION, PSID};
+
+    enable_restore()?;
     let target: Vec<u16> = path.as_os_str().encode_wide().chain(once(0)).collect();
     let mut bytes = crate::windows::acl_bytes::sid_bytes(sid);
     // SAFETY: `target` is NUL-terminated and `bytes` a valid SID; both outlive the call.

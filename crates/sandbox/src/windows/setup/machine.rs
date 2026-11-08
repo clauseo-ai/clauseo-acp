@@ -80,6 +80,19 @@ pub struct ProfileDir {
     pub temporary: bool,
 }
 
+/// The comment set-up gives the pool's group (`ClauseoSandboxUsers`) as it makes it.
+pub(crate) const GROUP_COMMENT: &str =
+    "Clauseo's protection runs each matter's agent as one of these users.";
+
+/// What [`Machine::group_facts`] reads of a local group.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct GroupFacts {
+    /// Its comment; empty for none.
+    pub comment: String,
+    /// Its members, by SID.
+    pub members: Vec<Sid>,
+}
+
 /// Everything the set-up asks of the machine besides the permission writes
 /// ([`AclWriter`](crate::windows::AclWriter)), one method per step of
 /// [`set_up`](super::set_up). Each is one Windows call or one file the owner keeps, so the
@@ -116,6 +129,10 @@ pub trait Machine {
     fn create_group(&mut self) -> Result<Sid, MachineError>;
     /// How many members the group `group` has.
     fn group_members(&mut self, group: &Sid) -> Result<usize, MachineError>;
+    /// Whether the account `member` is in the group `group`.
+    fn in_group(&mut self, member: &Sid, group: &Sid) -> Result<bool, MachineError>;
+    /// The group `group`'s comment and members, to tell one set-up made from an admin's.
+    fn group_facts(&mut self, group: &Sid) -> Result<GroupFacts, MachineError>;
     /// Deletes the group `group`.
     fn delete_group(&mut self, group: &Sid) -> Result<(), MachineError>;
     /// A new random password for a pool user (`PR4e`'s generator).
@@ -203,9 +220,25 @@ pub trait Machine {
     /// The record's `AdminCopyOwner`: who placed the admin copy, `None` when there is none.
     /// Read as this process.
     fn copy_owner(&mut self) -> Result<Option<CopyOwner>, MachineError>;
-    /// Registers, or replaces, the SYSTEM task `\Clauseo\SandboxStop` for the pool owner
-    /// `owner` (`refresh::register_task`, as `--adopt` does per user), as this process.
+    /// Registers, or replaces, the SYSTEM task `\Clauseo\SandboxRefresh` for the pool owner
+    /// `owner` (`refresh::register_task`, as plain `--adopt` does per user), as this process.
+    fn register_refresh_task(&mut self, owner: &Sid) -> Result<(), MachineError>;
+    /// The same for `\Clauseo\SandboxStop`.
     fn register_stop_task(&mut self, owner: &Sid) -> Result<(), MachineError>;
+    /// Per machine: gives the set-up task `\Clauseo\SandboxSetUp` its descriptor again with the
+    /// pool's `group` refused first (`refresh::deny_set_up_to`), as this process. `Ok(false)`
+    /// when the install has no set-up task.
+    fn deny_set_up_to(&mut self, group: &Sid) -> Result<bool, MachineError>;
+    /// An elevated set-up's self-heal: registers the set-up task `\Clauseo\SandboxSetUp` when
+    /// it is missing or its definition differs (`refresh::ensure_task`), as this process: for
+    /// `owner` alone with no `group` (per user), for interactive users with `group` refused (per
+    /// machine). `Ok(true)` once the task is as given; `Ok(false)` when this run doesn't heal
+    /// it: the set-up task's own run, which needs no prompt to be set up again.
+    fn ensure_set_up_task(
+        &mut self,
+        owner: &Sid,
+        group: Option<&Sid>,
+    ) -> Result<bool, MachineError>;
     /// The users of `pool` the reuse rule would hold back once this run has reset `resets`, for
     /// the top-up's count (`top_up.rs`, `MatterSids::held_after_resets`), the owner's ledger
     /// opened trusting `trusted`; an input that can't be read holds every user. The engine calls

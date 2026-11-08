@@ -1,8 +1,9 @@
 //! The setup exe's `tracing` lines at warn and above, to the Application Event Log (source
-//! "Clauseo Sandbox", `refresh::event_log`): the exe has no other log output. Only each line's
-//! message goes, never its fields: the fields carry errors, which may name a path or a SID,
-//! while the messages are fixed words. `--refresh` and `--stop` write their own lines, so
-//! `exe::main` installs this for the other modes only.
+//! "Clauseo Sandbox", `refresh::event_log`): the exe has no other log output. Each line goes as
+//! `event_line.rs` words it: its fixed message (withheld if it names a path or an account), where
+//! it was logged, and its whole-number fields; never a text field, which carries errors that
+//! may name a path or a SID. `--refresh` and `--stop` write their own lines, so `exe::main`
+//! installs this for the other modes only.
 
 use std::fmt;
 
@@ -11,16 +12,25 @@ use tracing::level_filters::LevelFilter;
 use tracing::span::{Attributes, Id, Record};
 use tracing::{Event, Level, Metadata, Subscriber};
 
+use super::event_line::event_line;
 use crate::windows::refresh::event_log;
 
 /// The subscriber: events at warn and above, no spans.
 struct EventLogTrace;
 
-/// An event's message, its other fields dropped.
+/// An event's message and its whole-number fields, its other fields dropped.
 #[derive(Default)]
-struct Message(String);
+struct Message(String, Vec<(&'static str, i128)>);
 
 impl Visit for Message {
+    fn record_i64(&mut self, field: &Field, value: i64) {
+        self.1.push((field.name(), i128::from(value)));
+    }
+
+    fn record_u64(&mut self, field: &Field, value: u64) {
+        self.1.push((field.name(), i128::from(value)));
+    }
+
     fn record_str(&mut self, field: &Field, value: &str) {
         if field.name() == "message" {
             value.clone_into(&mut self.0);
@@ -54,8 +64,13 @@ impl Subscriber for EventLogTrace {
     fn event(&self, event: &Event<'_>) {
         let mut message = Message::default();
         event.record(&mut message);
-        let error = *event.metadata().level() == Level::ERROR;
-        event_log(error, &format!("clauseo-sandbox-setup: {}", message.0));
+        let metadata = event.metadata();
+        let error = *metadata.level() == Level::ERROR;
+        let module = metadata.module_path().unwrap_or("setup");
+        event_log(
+            error,
+            &event_line(&message.0, module, metadata.line(), &message.1),
+        );
     }
 
     fn enter(&self, _span: &Id) {}

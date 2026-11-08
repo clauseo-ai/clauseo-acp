@@ -1,0 +1,569 @@
+//! The app's side of the set-up task (`setup::serve`): [`request_set_up`] asks
+//! `\Clauseo\SandboxSetUp` for a set-up, or an extend, with no prompt, and gives the server's
+//! reply. The desktop calls it for the first run's set-up and for a grow of the pool, off the UI
+//! thread, and maps the reply (`SetUpReply::outcome`) to its `SetupState`;
+//! [`SetUpError::NotRegistered`] means this install has no set-up task, and
+//! [`SetUpError::Disabled`] that it is disabled; for either the elevated `UserSetup` path, with
+//! its prompt, is the one left, and it registers the task again.
+//!
+//! In order (`serve::ask_with`, whose order this module's calls fill in):
+//!
+//! 1. reads the pipe name the running server published (`HKLM\SOFTWARE\Clauseo\Sandbox\
+//!    SetUpPipe`, which only LOCAL SYSTEM may write, `serve::windows_published`), then starts the
+//!    task (`IRegisteredTask::Run`, through the read-and-execute entry its descriptor gives this
+//!    user). Each server run draws its own random name, so no one can make it first;
+//! 2. reads the published name until one names a pipe, and opens it with identification-only
+//!    quality of service (`SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION`), so whoever serves
+//!    it can learn who this is but never act as them, and the pipe's client rights alone
+//!    (`pipe::PIPE_RIGHTS`, never a new instance). No name, or no pipe yet, is tried again for
+//!    `serve::CONNECT_WAIT`, the task started once more after `serve::RERUN_AFTER`; a busy pipe
+//!    is waited for (`WaitNamedPipeW`);
+//! 3. on that same handle, before writing anything, checks who serves it
+//!    (`setup::serve::check_server`). The proof is the pipe's owner, read first
+//!    (`GetSecurityInfo`): LOCAL SYSTEM, which no standard user can make. Then its session
+//!    (`GetNamedPipeServerSessionId`) is 0, its process (`GetNamedPipeServerProcessId`) is LOCAL
+//!    SYSTEM's in the kernel's process list, and its image, as the kernel names it, is the admin
+//!    copy: one that differs refuses, one Windows won't give this user is logged and set aside.
+//!    A name read before the start that fails the check, or refuses this user, is stale (its
+//!    server ended, and anyone may make a name once published) and the name is read again; a
+//!    name this start published that fails it gets nothing: [`SetUpError::NotTheServer`] when
+//!    its owner is one of the record's pool users or its group (`serve::pool_squat`), otherwise
+//!    [`SetUpError::Squatted`] at once. A server process no longer listed was ending as this
+//!    connected, and is taken as gone;
+//! 4. writes the request (`{"v":1,"op":"set_up"}`, or `{"v":1,"op":"add","n":n}`) and reads
+//!    the one-line reply, waiting as long as the task may run (`serve::REPLY_WAIT`); a server
+//!    that went away before replying (one that was ending as this connected) is asked again,
+//!    once, after the task is started again;
+//! 5. a pipe a pool user's process serves ([`SetUpError::NotTheServer`]): the
+//!    pool's processes are stopped (`request_pool_stop`), and once the stop task is done, steps
+//!    1 to 4 run once more. A pipe still someone else's is [`SetUpError::Squatted`]
+//!    (`serve::retry_squatted`).
+#![expect(unsafe_code, reason = "FFI to the named pipe and process list calls")]
+
+use std::path::Path;
+use std::time::Duration;
+
+use windows::Win32::Foundation::{
+    ERROR_ACCESS_DENIED, ERROR_BROKEN_PIPE, ERROR_FILE_NOT_FOUND, ERROR_IO_PENDING,
+    ERROR_PIPE_BUSY, ERROR_PIPE_NOT_CONNECTED, HANDLE, HLOCAL, LocalFree, NTSTATUS, UNICODE_STRING,
+};
+use windows::Win32::Security::Authorization::{GetSecurityInfo, SE_KERNEL_OBJECT};
+use windows::Win32::Security::{OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID};
+use windows::Win32::Storage::FileSystem::{
+    CreateFileW, FILE_FLAG_OVERLAPPED, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_NONE, OPEN_EXISTING,
+    QueryDosDeviceW, ReadFile, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT, WriteFile,
+};
+use windows::Win32::System::Pipes::{
+    GetNamedPipeServerProcessId, GetNamedPipeServerSessionId, WaitNamedPipeW,
+};
+use windows::Win32::System::SystemInformation::GetTickCount64;
+use windows::Win32::System::Threading::Sleep;
+use windows::core::{HSTRING, PWSTR};
+
+use super::acl::object::{Handle, os_error};
+use super::admin_copy::{self, os};
+use super::pipe::PIPE_RIGHTS;
+use super::pipe::os::Overlapped;
+use super::record::{sandbox_group_sid, sandbox_pool_sids};
+use super::refresh::task::{run_task, task_busy, task_enabled};
+use super::refresh::{SystemTask, TaskError, request_pool_stop};
+use super::setup::serve::windows_published::read_published;
+use super::setup::serve::{
+    Asker, Exchange, Op, Opened, REPLY_CAP, REPLY_WAIT, ServerFacts, ask_with, check_owner,
+    check_server, pool_squat, retry_squatted,
+};
+use super::setup::stop::windows_stopper::listed_users;
+use super::sids::Sid;
+use super::token::os::sid_text;
+
+pub use super::setup::serve::{Reply as SetUpReply, SetUpError};
+
+/// How long the request's write may take.
+const WRITE_WAIT: Duration = Duration::from_secs(5);
+/// The pause between two tries while the pipe isn't there, in milliseconds.
+const PAUSE_MS: u32 = 250;
+/// The pause between two looks at the stop task, in milliseconds.
+const SETTLE_PAUSE_MS: u32 = 500;
+/// How many looks at the stop task, at most: 60 s, past which the request is made anyway.
+const SETTLE_STEPS: u32 = 120;
+/// How long the stop task is waited for when its state can't be read, in milliseconds.
+const SETTLE_UNREAD_MS: u32 = 10_000;
+/// How long one wait for a busy pipe lasts, in milliseconds.
+const BUSY_WAIT_MS: u32 = 1_000;
+/// `SystemProcessIdInformation`: a process's image name by its id, with no handle to it.
+const PROCESS_ID_INFORMATION: u32 = 88;
+/// `STATUS_ACCESS_DENIED`.
+const STATUS_ACCESS_DENIED: NTSTATUS = NTSTATUS(0xC000_0022_u32.cast_signed());
+/// `STATUS_INVALID_CID`: no process has the id.
+const STATUS_INVALID_CID: NTSTATUS = NTSTATUS(0xC000_000B_u32.cast_signed());
+
+/// `NtQuerySystemInformation`, which the `windows` crate's features in use don't bind.
+mod nt {
+    windows::core::link!("ntdll.dll" "system" fn NtQuerySystemInformation(
+    class: u32,
+    information: *mut core::ffi::c_void,
+    length: u32,
+    returned: *mut u32
+) -> windows::Win32::Foundation::NTSTATUS);
+}
+
+/// Asks the set-up task for a set-up (`add` none) or an extend by `add` users, as the module
+/// says, as whoever calls it, and gives the server's reply. Blocks until the set-up ends: call it
+/// off the UI thread.
+pub fn request_set_up(add: Option<u8>) -> Result<SetUpReply, SetUpError> {
+    let op = add.map_or(Op::SetUp, Op::Add);
+    let request = op.to_bytes().unwrap_or_default();
+    if Op::parse(&request) != Ok(op) {
+        return Err(SetUpError::Request(format!("an extend by {add:?}")));
+    }
+    let program_files = os::program_files().map_err(|error| SetUpError::Pipe(error.to_string()))?;
+    let admin_exe = admin_copy::admin_exe(&program_files);
+    retry_squatted(
+        || ask(read_published, &request, &admin_exe, start),
+        request_pool_stop,
+        settle,
+    )
+}
+
+/// Waits for the stop task `request_pool_stop` started: a moment for it to begin, then while it
+/// is queued or running, up to [`SETTLE_STEPS`] pauses; a state that can't be read is waited
+/// out for the longest pause instead.
+fn settle() {
+    for step in 0..SETTLE_STEPS {
+        // SAFETY: plain value; it only waits.
+        unsafe { Sleep(SETTLE_PAUSE_MS) };
+        match task_busy(SystemTask::Stop) {
+            // The first look may come before the run began.
+            Ok(busy) if busy || step == 0 => {}
+            Ok(_done) => return,
+            Err(error) => {
+                tracing::warn!(%error, "the stop task's state can't be read");
+                // SAFETY: plain value; it only waits.
+                unsafe { Sleep(SETTLE_UNREAD_MS) };
+                return;
+            }
+        }
+    }
+}
+
+/// Steps 1 to 4 for `request`, the published name read by `published`, the task started by
+/// `start`, the server checked against the admin copy `admin_exe`; the tests pass their own.
+pub(crate) fn ask(
+    published: impl FnMut() -> Result<Option<String>, String>,
+    request: &[u8],
+    admin_exe: &Path,
+    start: impl FnMut() -> Result<(), SetUpError>,
+) -> Result<SetUpReply, SetUpError> {
+    ask_with(&mut WindowsAsker {
+        published,
+        start,
+        request,
+        admin_exe,
+    })
+}
+
+/// [`Asker`] on Windows: the published name, the task and the pipe's client end.
+struct WindowsAsker<'a, P, S> {
+    published: P,
+    start: S,
+    request: &'a [u8],
+    admin_exe: &'a Path,
+}
+
+impl<P, S> Asker for WindowsAsker<'_, P, S>
+where
+    P: FnMut() -> Result<Option<String>, String>,
+    S: FnMut() -> Result<(), SetUpError>,
+{
+    type Pipe = Handle;
+
+    fn start(&mut self) -> Result<(), SetUpError> {
+        (self.start)()
+    }
+
+    fn published(&mut self) -> Result<Option<String>, String> {
+        (self.published)()
+    }
+
+    fn now_ms(&mut self) -> u64 {
+        now_ms()
+    }
+
+    fn pause(&mut self) {
+        // SAFETY: plain value; it only waits.
+        unsafe { Sleep(PAUSE_MS) };
+    }
+
+    fn open(&mut self, name: &str) -> Opened<Handle> {
+        match open(name) {
+            Ok(pipe) => Opened::Open(pipe),
+            Err(code) if code == ERROR_FILE_NOT_FOUND => Opened::Missing,
+            Err(code) if code == ERROR_PIPE_BUSY => Opened::Busy,
+            Err(code) if code == ERROR_ACCESS_DENIED => Opened::Denied,
+            Err(code) => Opened::Failed(code.0),
+        }
+    }
+
+    fn wait_busy(&mut self, name: &str) -> bool {
+        // SAFETY: a live HSTRING; it only waits for an instance to be free.
+        unsafe { WaitNamedPipeW(&HSTRING::from(name), BUSY_WAIT_MS) }.as_bool()
+    }
+
+    fn exchange(&mut self, pipe: Handle) -> Result<SetUpReply, Exchange> {
+        exchange(&pipe, self.request, self.admin_exe)
+    }
+}
+
+/// `SCHED_E_TASK_DISABLED`: `IRegisteredTask::Run` on a disabled task.
+const SCHED_E_TASK_DISABLED: u32 = 0x8004_1326;
+
+/// Starts the set-up task. A disabled one (a crashed uninstall, or IT) is
+/// [`SetUpError::Disabled`] and isn't started, so the elevated set-up runs, whose
+/// `refresh::ensure_task` registers it again enabled; a state that can't be read leaves the
+/// answer to the start.
+fn start() -> Result<(), SetUpError> {
+    match task_enabled(SystemTask::SetUp) {
+        Ok(false) => return Err(SetUpError::Disabled),
+        Err(TaskError::NotRegistered) => return Err(SetUpError::NotRegistered),
+        Ok(true) | Err(_) => {}
+    }
+    match run_task(SystemTask::SetUp) {
+        Ok(()) => Ok(()),
+        Err(TaskError::NotRegistered) => Err(SetUpError::NotRegistered),
+        Err(TaskError::Com {
+            hresult: SCHED_E_TASK_DISABLED,
+            ..
+        }) => Err(SetUpError::Disabled),
+        Err(error) => Err(SetUpError::Task(error.to_string())),
+    }
+}
+
+/// The tick count, in milliseconds.
+fn now_ms() -> u64 {
+    // SAFETY: it only reads the tick count.
+    unsafe { GetTickCount64() }
+}
+
+/// The pipe's client end, overlapped so every wait on it has a limit, identification only; the
+/// Win32 error when it won't open.
+pub(in crate::windows) fn open(
+    name: &str,
+) -> Result<Handle, windows::Win32::Foundation::WIN32_ERROR> {
+    // SAFETY: the name is a live HSTRING; no security attributes; the handle returned is owned
+    // by `Handle`.
+    let opened = unsafe {
+        CreateFileW(
+            &HSTRING::from(name),
+            PIPE_RIGHTS,
+            FILE_SHARE_NONE,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAGS_AND_ATTRIBUTES(
+                FILE_FLAG_OVERLAPPED.0 | SECURITY_SQOS_PRESENT.0 | SECURITY_IDENTIFICATION.0,
+            ),
+            None,
+        )
+    };
+    opened.map(Handle).map_err(|error| {
+        windows::Win32::Foundation::WIN32_ERROR::from_error(&error).unwrap_or_default()
+    })
+}
+
+/// Checks the server on `pipe` against `admin_exe` ([`check_pipe`]), then sends `request`
+/// within [`WRITE_WAIT`] and reads the reply within [`REPLY_WAIT`] in all.
+fn exchange(pipe: &Handle, request: &[u8], admin_exe: &Path) -> Result<SetUpReply, Exchange> {
+    check_pipe(pipe, admin_exe)?;
+    match write_within(pipe, request) {
+        Ok(Some(_written)) => {}
+        Ok(None) => {
+            return Err(Exchange::Failed(
+                "the request wasn't taken in time".to_owned(),
+            ));
+        }
+        Err(error) => return Err(closed_or(&error)),
+    }
+    let deadline = now_ms().saturating_add(u64::try_from(REPLY_WAIT.as_millis()).unwrap_or(0));
+    let mut reply = Vec::new();
+    let mut chunk = [0u8; 4096];
+    while !reply.contains(&b'\n') {
+        if reply.len() > REPLY_CAP {
+            return Err(Exchange::Failed(format!(
+                "a reply of more than {REPLY_CAP} bytes"
+            )));
+        }
+        let left = Duration::from_millis(deadline.saturating_sub(now_ms()));
+        match read_within(pipe, &mut chunk, left) {
+            Ok(Some(0)) => break,
+            Ok(Some(read)) => reply.extend_from_slice(chunk.get(..read).unwrap_or_default()),
+            Ok(None) => {
+                return Err(Exchange::Failed(format!(
+                    "no reply within {} minutes",
+                    REPLY_WAIT.as_secs() / 60
+                )));
+            }
+            Err(error) if reply.is_empty() => return Err(closed_or(&error)),
+            Err(error) => return Err(Exchange::Failed(error.to_string())),
+        }
+    }
+    if reply.is_empty() {
+        return Err(Exchange::Gone);
+    }
+    SetUpReply::parse(&reply).map_err(Exchange::Failed)
+}
+
+/// Writes `request` to `pipe` within [`WRITE_WAIT`]: the bytes written, or `None` when it
+/// was cancelled for taking longer.
+fn write_within(pipe: &Handle, request: &[u8]) -> std::io::Result<Option<usize>> {
+    let mut io = Overlapped::new()?;
+    // SAFETY: a live client end opened overlapped; `request` and `io` outlive the operation,
+    // which `within` completes or cancels before either drops.
+    let started = unsafe { WriteFile(pipe.0, Some(request), None, Some(io.as_mut_ptr())) };
+    match started {
+        Ok(()) => {}
+        Err(error) if error.code() == ERROR_IO_PENDING.to_hresult() => {}
+        Err(error) => return Err(os_error(&error)),
+    }
+    io.within(pipe, WRITE_WAIT)
+}
+
+/// Reads into `chunk` from `pipe` within `wait`: the bytes read, or `None` when it was
+/// cancelled for taking longer.
+fn read_within(pipe: &Handle, chunk: &mut [u8], wait: Duration) -> std::io::Result<Option<usize>> {
+    let mut io = Overlapped::new()?;
+    // SAFETY: a live client end opened overlapped; `chunk` and `io` outlive the operation,
+    // which `within` completes or cancels before either drops.
+    let started = unsafe { ReadFile(pipe.0, Some(chunk), None, Some(io.as_mut_ptr())) };
+    match started {
+        Ok(()) => {}
+        Err(error) if error.code() == ERROR_IO_PENDING.to_hresult() => {}
+        Err(error) => return Err(os_error(&error)),
+    }
+    io.within(pipe, wait)
+}
+
+/// `error` as [`Exchange::Gone`] when it says the server closed, else a failure.
+fn closed_or(error: &std::io::Error) -> Exchange {
+    let closed = [ERROR_BROKEN_PIPE, ERROR_PIPE_NOT_CONNECTED]
+        .iter()
+        .any(|code| error.raw_os_error() == i32::try_from(code.0).ok());
+    if closed {
+        Exchange::Gone
+    } else {
+        Exchange::Failed(error.to_string())
+    }
+}
+
+/// `error` as [`Exchange::Gone`] when it says the server closed, else a failure.
+fn gone_or(error: &windows::core::Error) -> Exchange {
+    if [ERROR_BROKEN_PIPE, ERROR_PIPE_NOT_CONNECTED]
+        .iter()
+        .any(|code| error.code() == code.to_hresult())
+    {
+        Exchange::Gone
+    } else {
+        Exchange::Failed(os_error(error).to_string())
+    }
+}
+
+/// Step 3 on `pipe`: its owner first, then the server's other facts (`serve::check_server`), each
+/// fact Windows wouldn't give this user logged. Nothing is written before it passes.
+pub(in crate::windows) fn check_pipe(pipe: &Handle, admin_exe: &Path) -> Result<(), Exchange> {
+    let owner = pipe_owner(pipe);
+    if let Err(why) = check_owner(&owner) {
+        let (pool, groups) = record_pool();
+        return Err(if pool_squat(&owner, &pool, &groups) {
+            Exchange::NotTheServer(why)
+        } else {
+            Exchange::Squatted(why)
+        });
+    }
+    let facts = server_facts(pipe, owner)?;
+    let device = drive_device(admin_exe).map_err(Exchange::Failed)?;
+    // The pipe is LOCAL SYSTEM's, which no pool user can make: stopping the pool frees nothing.
+    let unread = check_server(&facts, admin_exe, &device).map_err(Exchange::Squatted)?;
+    if !unread.is_empty() {
+        tracing::info!(
+            ?unread,
+            "the set-up pipe is LOCAL SYSTEM's; taken on its owner, these facts unread"
+        );
+    }
+    Ok(())
+}
+
+/// The record's pool users (`PoolSids`) and its group (`GroupSid`), as this user reads them;
+/// a read that fails is logged and counts as none, so nothing is stopped on it.
+fn record_pool() -> (Vec<Sid>, Vec<Sid>) {
+    let pool = sandbox_pool_sids().unwrap_or_else(|error| {
+        tracing::warn!(%error, "the record's pool can't be read");
+        Vec::new()
+    });
+    let group = match sandbox_group_sid() {
+        Ok(group) => group.and_then(|text| Sid::parse(&text).ok()),
+        Err(error) => {
+            tracing::warn!(%error, "the record's group can't be read");
+            None
+        }
+    };
+    (pool, group.into_iter().collect())
+}
+
+/// Every fact [`check_pipe`] reads of `pipe`'s server, its owner included, unchecked: what a
+/// standard user can read, for the elevated tests to show.
+#[cfg(test)]
+pub(in crate::windows) fn read_facts(pipe: &Handle) -> Result<ServerFacts, Exchange> {
+    server_facts(pipe, pipe_owner(pipe))
+}
+
+/// The owner of the pipe `pipe` (`GetSecurityInfo`, which its `READ_CONTROL` allows).
+fn pipe_owner(pipe: &Handle) -> Result<Sid, String> {
+    let mut owner = PSID::default();
+    let mut descriptor = PSECURITY_DESCRIPTOR::default();
+    // SAFETY: a live client end opened with READ_CONTROL; both out-pointers are live; `owner`
+    // points into the descriptor, freed below once the owner is read.
+    let status = unsafe {
+        GetSecurityInfo(
+            pipe.0,
+            SE_KERNEL_OBJECT,
+            OWNER_SECURITY_INFORMATION,
+            Some(&raw mut owner),
+            None,
+            None,
+            None,
+            Some(&raw mut descriptor),
+        )
+    };
+    let read = if status.is_ok() {
+        sid_text(owner).map_err(|error| error.to_string())
+    } else {
+        Err(format!("GetSecurityInfo failed (error {})", status.0))
+    };
+    if !descriptor.0.is_null() {
+        // SAFETY: allocated by GetSecurityInfo with LocalAlloc, freed once, after the read.
+        unsafe { LocalFree(Some(HLOCAL(descriptor.0))) };
+    }
+    read
+}
+
+/// `error` reading `what` of the server: an access error leaves that fact unread (its line); a
+/// closed pipe is [`Exchange::Gone`]; anything else fails.
+fn unread(error: &windows::core::Error, what: &str) -> Result<String, Exchange> {
+    if error.code() == ERROR_ACCESS_DENIED.to_hresult() {
+        return Ok(os_error(error).to_string());
+    }
+    Err(match gone_or(error) {
+        Exchange::Failed(why) => Exchange::Failed(format!("{what}: {why}")),
+        Exchange::NotTheServer(why) => Exchange::NotTheServer(why),
+        Exchange::Squatted(why) => Exchange::Squatted(why),
+        Exchange::Gone => Exchange::Gone,
+    })
+}
+
+/// Who serves `pipe`, owned by `owner`: its session, and its process's user and image, read
+/// with no handle to it. A process the kernel no longer lists ended as this connected
+/// ([`Exchange::Gone`]).
+fn server_facts(pipe: &Handle, owner: Result<Sid, String>) -> Result<ServerFacts, Exchange> {
+    let mut session = 0u32;
+    // SAFETY: a live client end; `session` is a live out-pointer.
+    let session = match unsafe { GetNamedPipeServerSessionId(pipe.0, &raw mut session) } {
+        Ok(()) => Ok(session),
+        Err(error) => Err(unread(&error, "its session")?),
+    };
+    let mut pid = 0u32;
+    // SAFETY: a live client end; `pid` is a live out-pointer.
+    if let Err(error) = unsafe { GetNamedPipeServerProcessId(pipe.0, &raw mut pid) } {
+        let why = format!("its process: {}", unread(&error, "its process")?);
+        return Ok(ServerFacts {
+            owner,
+            session,
+            user: Err(why.clone()),
+            image: Err(why),
+        });
+    }
+    let user = match listed_users() {
+        // The whole list not given is this fact unread, as the owner already holds.
+        Err(why) => Err(why),
+        Ok(mut listed) => match listed.remove(&pid) {
+            None => return Err(Exchange::Gone),
+            Some((Some(user), _session)) => Ok(user),
+            Some((None, _session)) => Err("the process list gives no user".to_owned()),
+        },
+    };
+    Ok(ServerFacts {
+        owner,
+        session,
+        user,
+        image: image_of(pid)?,
+    })
+}
+
+/// `SYSTEM_PROCESS_ID_INFORMATION`: a process id in, its image name out.
+#[repr(C)]
+struct ProcessIdInformation {
+    process_id: HANDLE,
+    image_name: UNICODE_STRING,
+}
+
+/// The image of process `pid` as the kernel names it (`\Device\HarddiskVolumeN\...`), read by
+/// its id alone, so a process this user may not open still has one; `Err` (unread) when the
+/// kernel won't give it to this user, [`Exchange::Gone`] when no process has the id.
+fn image_of(pid: u32) -> Result<Result<String, String>, Exchange> {
+    let failed = |why: &str| Exchange::Failed(format!("its image: {why}"));
+    let mut name = vec![0u16; usize::from(u16::MAX / 2)];
+    let mut info = ProcessIdInformation {
+        process_id: HANDLE(
+            usize::try_from(pid).map_err(|error| failed(&format!("its id: {error}")))? as *mut _,
+        ),
+        image_name: UNICODE_STRING {
+            Length: 0,
+            MaximumLength: u16::try_from(name.len() * 2)
+                .map_err(|error| failed(&format!("its buffer: {error}")))?,
+            Buffer: PWSTR(name.as_mut_ptr()),
+        },
+    };
+    let size = u32::try_from(size_of::<ProcessIdInformation>())
+        .map_err(|error| failed(&format!("its size: {error}")))?;
+    // SAFETY: `info` is live and `size` bytes long, and its buffer is `name`, live and
+    // `MaximumLength` bytes long, for the call.
+    let status = unsafe {
+        nt::NtQuerySystemInformation(
+            PROCESS_ID_INFORMATION,
+            (&raw mut info).cast(),
+            size,
+            std::ptr::null_mut(),
+        )
+    };
+    if status == STATUS_ACCESS_DENIED {
+        return Ok(Err("the kernel won't give it".to_owned()));
+    }
+    if status == STATUS_INVALID_CID {
+        return Err(Exchange::Gone);
+    }
+    if status.is_err() {
+        return Err(failed(&format!("NTSTATUS {:#010x}", status.0)));
+    }
+    let units = usize::from(info.image_name.Length) / 2;
+    let image = name.get(..units).ok_or_else(|| failed("its length"))?;
+    String::from_utf16(image)
+        .map(Ok)
+        .map_err(|error| failed(&error.to_string()))
+}
+
+/// The device `admin_exe`'s drive names (`QueryDosDeviceW`).
+fn drive_device(admin_exe: &Path) -> Result<String, String> {
+    let text = admin_exe.to_string_lossy();
+    let drive = text.get(..2).ok_or("the admin copy's path has no drive")?;
+    let mut device = vec![0u16; 1024];
+    // SAFETY: a live HSTRING; `device` is writable for its length.
+    let written = unsafe { QueryDosDeviceW(&HSTRING::from(drive), Some(&mut device)) };
+    if written == 0 {
+        return Err(format!(
+            "the drive {drive}'s device: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    let end = device
+        .iter()
+        .position(|unit| *unit == 0)
+        .unwrap_or(device.len());
+    String::from_utf16(device.get(..end).unwrap_or_default()).map_err(|error| error.to_string())
+}

@@ -35,11 +35,12 @@
 //!
 //! The exe has no log output of its own: `--adopt`'s failures go to the Event Log and the
 //! result file (`explain.rs`), and `tracing` lines at warn and above go to the Event Log as
-//! their message alone (`event_trace.rs`).
+//! their fixed message and codes, never a path (`event_trace.rs`, `event_line.rs`).
 //!
 //! `--refresh` (`crate::windows::refresh`) is the SYSTEM task's: it exits with its own codes
 //! (`RefreshExit`, from 32), which is why [`main`] returns the process's exit code. So does
-//! `--stop` (`stop.rs`), the other SYSTEM task's (`StopExit`, from 45).
+//! `--stop` (`stop.rs`), the other SYSTEM task's (`StopExit`, from 45), and `--serve-set-up`
+//! (`serve.rs`), the set-up task's (`ServeExit`, from 63), whose set-ups are [`run_set_up_in`]'s.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -95,6 +96,9 @@ pub fn main(args: impl IntoIterator<Item = OsString>) -> u8 {
         return stop::windows_stopper::run().as_code();
     }
     super::event_trace::install();
+    if mode == Mode::ServeSetUp {
+        return super::serve::windows_host::run().as_code();
+    }
     run_mode(mode).as_code()
 }
 
@@ -122,11 +126,13 @@ fn run_mode(mode: Mode) -> SetupExit {
         Mode::Adopt {
             user_install_dir,
             user,
+            place_only,
         } => {
             let target = match user {
                 Some(user) => Target::User {
                     owner_sid: user.owner_sid,
                     data_dir: user.data_dir,
+                    place_only,
                 },
                 None => Target::Machine,
             };
@@ -145,15 +151,13 @@ fn run_mode(mode: Mode) -> SetupExit {
                 .ok();
             run_remove(Names::production(), invoker, per_machine, uninstall)
         }
-        Mode::Refresh | Mode::Stop => SetupExit::Usage,
+        Mode::Refresh | Mode::Stop | Mode::ServeSetUp => SetupExit::Usage,
     }
 }
 
 /// `--set-up` (or an extend, `add` above 0) on the machine `names` names, for `owner`, whose
 /// data folder is `data_dir`; `setup-result.json` written as the owner, whatever happened.
 pub(crate) fn run_set_up(names: Names, owner: Owner, given: &Path, add: u8) -> SetupExit {
-    // The owner the request names is the verified parent's token user, and nothing else.
-    let owner_sid = owner.sid().clone();
     // The folder is written as admin into the record's `DataDir`: resolved as the owner, and
     // the owner's, or refused before anything is touched or written, the result file included.
     let data_dir = match owners_data_dir(&owner, given) {
@@ -163,14 +167,29 @@ pub(crate) fn run_set_up(names: Names, owner: Owner, given: &Path, add: u8) -> S
             return exit;
         }
     };
-    let data_dir = data_dir.as_path();
+    let result = run_set_up_in(names, owner, &data_dir, add, true);
+    SetupExit::from_code(u32::from(result.exit)).unwrap_or(SetupExit::Failed)
+}
+
+/// [`run_set_up`] in `data_dir`, already resolved as `owner` (`owners_data_dir`): the
+/// outcome, as written to `setup-result.json` as the owner. The set-up task runs it for the
+/// user its pipe identified (`serve.rs`), with `heals` false; an elevated set-up, with `heals`
+/// true, also registers the set-up task again when it is missing or changed.
+pub(crate) fn run_set_up_in(
+    names: Names,
+    owner: Owner,
+    data_dir: &Path,
+    add: u8,
+    heals: bool,
+) -> SetupResult {
+    // The owner the request names is the given owner's token user, and nothing else.
+    let owner_sid = owner.sid().clone();
     let around = Box::new(Around::new(data_dir.to_owned()));
     let mut machine = WindowsMachine::new(names, owner, data_dir.to_owned(), around);
+    if heals {
+        machine = machine.healing_set_up_task();
+    }
     let outcome = request_and_run(&mut machine, &owner_sid, data_dir, add);
-    let exit = match &outcome {
-        Ok(_) => SetupExit::Done,
-        Err(failure) => failure.exit,
-    };
     let result = SetupResult::of(&outcome);
     let written = owned(&mut machine, |_| {
         result_file::write(data_dir, &result)
@@ -179,7 +198,7 @@ pub(crate) fn run_set_up(names: Names, owner: Owner, given: &Path, add: u8) -> S
     if let Err(error) = written {
         tracing::error!(%error, "setup-result.json couldn't be written");
     }
-    exit
+    result
 }
 
 /// The request for `owner`, checked, then the set-up, which reads the registered matters

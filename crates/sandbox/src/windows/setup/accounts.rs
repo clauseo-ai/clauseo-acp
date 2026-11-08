@@ -413,7 +413,7 @@ fn same_name(left: &str, right: &str) -> bool {
 
 /// `name`, if Windows can take it as a local account name that only names itself: 1 to 20
 /// characters, none of which qualifies it with a domain or computer.
-fn checked_name(name: &str) -> Result<(), MachineError> {
+pub(super) fn checked_name(name: &str) -> Result<(), MachineError> {
     let fits = (1..=NAME_MAX).contains(&name.chars().count());
     if fits && !name.contains(['\\', '/', '@', '\0']) {
         Ok(())
@@ -469,7 +469,7 @@ pub(super) fn net(call: &'static str, status: u32) -> Result<(), MachineError> {
 }
 
 /// `sid`'s text, from a valid SID.
-fn sid_text(sid: PSID) -> Result<Sid, MachineError> {
+pub(super) fn sid_text(sid: PSID) -> Result<Sid, MachineError> {
     let mut text = PWSTR::null();
     // SAFETY: the caller's SID is valid; `text` is a live out-pointer, freed below.
     unsafe { ConvertSidToStringSidW(sid, &raw mut text) }

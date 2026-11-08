@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use super::{Adopter, Records, Target, adopt};
 use crate::windows::admin_copy::{Found, os};
-use crate::windows::refresh::{SystemTask, TaskError, event_log};
+use crate::windows::refresh::{Starters, SystemTask, TaskError, event_log};
 use crate::windows::setup::exe::{owners_data_dir, run_set_up};
 use crate::windows::setup::explain::{AdoptFailure, AdoptStep, Cause, Code};
 use crate::windows::setup::lock::{Held, try_lock};
@@ -47,6 +47,7 @@ pub(crate) fn run_adopt(names: Names, install_dir: &Path, target: &Target) -> Se
     if let Target::User {
         owner_sid,
         data_dir,
+        ..
     } = target
     {
         machine.target = Some((owner_sid.clone(), data_dir.clone()));
@@ -89,6 +90,7 @@ impl Adopter for WindowsAdopter {
         let pool = record_write::read(key)?;
         let (copy_owner, version) = record_write::read_admin(key)?;
         Ok(Records {
+            group: pool.as_ref().map(|record| record.group.clone()),
             pool_owner: pool.map(|record| record.owner),
             copy_owner,
             version,
@@ -132,8 +134,8 @@ impl Adopter for WindowsAdopter {
         record_write::write_admin_values(&self.names.record_key, values).map_err(Cause::from)
     }
 
-    fn register_task(&mut self, task: SystemTask, owner: &Sid) -> Result<(), Cause> {
-        crate::windows::refresh::register_task(task, owner).map_err(|error| task_cause(&error))
+    fn register_task(&mut self, task: SystemTask, starters: &Starters) -> Result<(), Cause> {
+        crate::windows::refresh::register_task(task, starters).map_err(|error| task_cause(&error))
     }
 
     fn set_up(&mut self, data_dir: &Path) -> SetupExit {
@@ -177,8 +179,9 @@ impl Adopter for WindowsAdopter {
 fn task_cause(error: &TaskError) -> Cause {
     match error {
         TaskError::Com { hresult, .. } => Cause::with(error.to_string(), Code::Hresult(*hresult)),
-        TaskError::NotRegistered | TaskError::Path(_) | TaskError::Folder(_) => {
-            Cause::from(error.to_string())
-        }
+        TaskError::NotRegistered
+        | TaskError::Path(_)
+        | TaskError::Folder(_)
+        | TaskError::Descriptor(_) => Cause::from(error.to_string()),
     }
 }

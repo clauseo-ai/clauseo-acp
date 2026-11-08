@@ -52,8 +52,9 @@ pub enum TokenSpecError {
     /// The pool user is the desktop user: the agent would run as the lawyer.
     #[error("the pool user is the desktop user")]
     PoolIsDesktopUser,
-    /// A SID that must name one account is a well-known group or service instead.
-    #[error("{role} is a well-known SID ({sid}), not an account")]
+    /// A SID that must name one account is a well-known group or service instead. Its words
+    /// name the SID's authority at most (`S-1-5`), never the SID, which may be a person's.
+    #[error("{role} isn't an account (a SID of the authority {})", sid_authority(.sid))]
     NotAnAccount {
         /// Which input: the pool user, the desktop user or the matter SID.
         role: &'static str,
@@ -290,6 +291,16 @@ fn account(role: &'static str, sid: &Sid) -> Result<(), TokenSpecError> {
         role,
         sid: sid.clone(),
     })
+}
+
+/// `sid`'s authority, `S-1-<authority>` (`S-1-5` for NT accounts and services, `S-1-12` for
+/// Entra ID): all an error or a log line may say of a SID that might be a person's.
+pub fn sid_authority(sid: &Sid) -> String {
+    sid.as_str()
+        .split('-')
+        .take(3)
+        .collect::<Vec<_>>()
+        .join("-")
 }
 
 /// One of this file's well-known SIDs. They are canonical, so the error never comes.

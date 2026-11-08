@@ -20,13 +20,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use super::accounts::{self, Kind};
 use super::lock::{Acquired, Held, SETUP_MUTEX, SetupMutex};
 use super::machine::{
-    LogonRight, Machine, MachineError, Password, ProfileDir, ServiceStart, owned,
+    GROUP_COMMENT, GroupFacts, LogonRight, Machine, MachineError, Password, ProfileDir,
+    ServiceStart, owned,
 };
 use super::owner::Owner;
 use super::record_values::CopyOwner;
 use super::record_write::{self, RECORD_KEY};
 use super::registered::registered;
-use super::{ffi, journal, logon, password, preflight, profile};
+use super::{ffi, group_info, journal, logon, password, preflight, profile};
 use crate::SetupError;
 use crate::windows::acl;
 use crate::windows::apply::Surroundings;
@@ -36,16 +37,13 @@ use crate::windows::marker::{self, Marker, MarkerState};
 use crate::windows::matters::MatterSids;
 use crate::windows::pool::{MachineRecord, POOL_GROUP, POOL_PREFIX, pool_number};
 use crate::windows::record::current_user_sid;
-use crate::windows::refresh::{self, SystemTask};
+use crate::windows::refresh::{self, Starters, SystemTask, TaskError};
 use crate::windows::secrets;
 use crate::windows::sids::{Reserved, Sid};
 use crate::windows::wfp::{self, Namespace, NetworkReport, NetworkSetup};
 
 /// `BUILTIN\Administrators`, the owner a protected folder is handed to.
 const ADMINISTRATORS: &str = "S-1-5-32-544";
-
-/// The comment the pool group carries in Computer Management.
-const GROUP_COMMENT: &str = "Clauseo's protection runs each matter's agent as one of these users.";
 
 /// The machine-wide names a [`WindowsMachine`] works on, and what it may touch: the real ones
 /// ([`Names::production`]), or a test's, so a test never touches a real pool.
@@ -115,6 +113,9 @@ pub struct WindowsMachine {
     /// The account this process runs as, read when the machine is made (before any
     /// impersonation): a profile folder it loaded may be its own.
     own: Option<Sid>,
+    /// Whether this set-up registers the set-up task again when it is missing or changed: an
+    /// elevated one's (the prompt's `--set-up`, `--adopt`'s), never the set-up task's own run.
+    heals: bool,
 }
 
 impl WindowsMachine {
@@ -134,7 +135,15 @@ impl WindowsMachine {
             data_dir,
             acting: Rc::new(Cell::new(false)),
             own: current_user_sid().ok(),
+            heals: false,
         }
+    }
+
+    /// The machine, registering the set-up task again when it is missing or changed
+    /// (`Machine::ensure_set_up_task`): an elevated set-up's.
+    pub fn healing_set_up_task(mut self) -> WindowsMachine {
+        self.heals = true;
+        self
     }
 
     /// The group's name, once `group` is checked to be the pool group's SID: the account calls
@@ -182,7 +191,9 @@ impl Drop for Acting {
 fn from_setup(error: SetupError) -> MachineError {
     match error {
         SetupError::Failed(why) => MachineError::Other(why),
-        SetupError::Refused | SetupError::Blocked(_) => MachineError::Other(error.to_string()),
+        SetupError::Refused | SetupError::Blocked(_) | SetupError::Unreachable => {
+            MachineError::Other(error.to_string())
+        }
     }
 }
 
@@ -242,6 +253,18 @@ impl Machine for WindowsMachine {
 
     fn group_members(&mut self, group: &Sid) -> Result<usize, MachineError> {
         accounts::group_members(&self.group_name(group)?)
+    }
+
+    fn in_group(&mut self, member: &Sid, group: &Sid) -> Result<bool, MachineError> {
+        Ok(group_info::group_member_sids(&self.group_name(group)?)?.contains(member))
+    }
+
+    fn group_facts(&mut self, group: &Sid) -> Result<GroupFacts, MachineError> {
+        let name = self.group_name(group)?;
+        Ok(GroupFacts {
+            comment: group_info::group_comment(&name)?,
+            members: group_info::group_member_sids(&name)?,
+        })
     }
 
     fn delete_group(&mut self, group: &Sid) -> Result<(), MachineError> {
@@ -412,9 +435,44 @@ impl Machine for WindowsMachine {
         record_write::read_admin(&self.names.record_key).map(|(owner, _version)| owner)
     }
 
-    fn register_stop_task(&mut self, owner: &Sid) -> Result<(), MachineError> {
-        refresh::register_task(SystemTask::Stop, owner)
+    fn register_refresh_task(&mut self, owner: &Sid) -> Result<(), MachineError> {
+        refresh::register_task(SystemTask::Refresh, &Starters::Owner(owner.clone()))
             .map_err(|error| MachineError::Other(error.to_string()))
+    }
+
+    fn register_stop_task(&mut self, owner: &Sid) -> Result<(), MachineError> {
+        refresh::register_task(SystemTask::Stop, &Starters::Owner(owner.clone()))
+            .map_err(|error| MachineError::Other(error.to_string()))
+    }
+
+    fn ensure_set_up_task(
+        &mut self,
+        owner: &Sid,
+        group: Option<&Sid>,
+    ) -> Result<bool, MachineError> {
+        if !self.heals {
+            return Ok(false);
+        }
+        let starters = match group {
+            None => Starters::Owner(owner.clone()),
+            Some(group) => Starters::Interactive {
+                denied: Some(group.clone()),
+            },
+        };
+        let again = refresh::ensure_task(SystemTask::SetUp, &starters)
+            .map_err(|error| MachineError::Other(error.to_string()))?;
+        if again {
+            tracing::warn!("the set-up task was missing or changed; registered again");
+        }
+        Ok(true)
+    }
+
+    fn deny_set_up_to(&mut self, group: &Sid) -> Result<bool, MachineError> {
+        match refresh::deny_set_up_to(group) {
+            Ok(()) => Ok(true),
+            Err(TaskError::NotRegistered) => Ok(false),
+            Err(error) => Err(MachineError::Other(error.to_string())),
+        }
     }
 
     fn held_users(

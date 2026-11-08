@@ -34,8 +34,8 @@ use windows::Win32::System::Variant::VARIANT;
 use windows::core::{BSTR, HSTRING, Interface, PCWSTR, PWSTR, w};
 use zeroize::Zeroizing;
 
-use super::task::{Apartment, service};
-use super::task_sddl;
+use super::task::{Apartment, TaskError, service, with_task_in};
+use super::{SystemTask, task_sddl};
 use crate::test_support::TempDir;
 use crate::windows::setup::logon::tests::{TestUser, clear_leftovers, random_hex};
 use crate::windows::setup::strays::TASK_TEST_PREFIX;
@@ -57,6 +57,19 @@ fn gate(test: &str) -> bool {
     }
     eprintln!("skipped {test}: needs an elevated token and CLAUSEO_ELEVATED_TESTS=1");
     false
+}
+
+/// Unelevated, on every Windows CI run: a task in a folder that isn't there, and a task missing
+/// from a folder that is, are both `NotRegistered`, whichever of `ERROR_PATH_NOT_FOUND` and
+/// `ERROR_FILE_NOT_FOUND` Windows gives (`rules::not_registered`), so an install with no
+/// `\Clauseo` still meets the prompt.
+#[test]
+fn a_missing_folder_or_task_is_not_registered() {
+    let folder = format!("ClauseoTestMissing{}", std::process::id());
+    for folder in [folder.as_str(), "Microsoft"] {
+        let found = with_task_in(folder, SystemTask::SetUp, |_task| Ok(()));
+        assert_eq!(found, Err(TaskError::NotRegistered), "\\{folder}");
+    }
 }
 
 /// A quarter of a second, between two looks.
@@ -136,7 +149,7 @@ pub(crate) fn try_in_cmd(user: &TestUser, folder: &Path, script: &str) -> (Optio
 }
 
 /// The test folder and its tasks: each task ended and deleted, then the folder, on drop.
-struct Scheduled {
+pub(crate) struct Scheduled {
     root: ITaskFolder,
     folder: ITaskFolder,
     name: String,
@@ -145,7 +158,7 @@ struct Scheduled {
 
 impl Scheduled {
     /// Makes `\<name>` with `sddl`, as `task_folder::prepare` makes `\Clauseo`.
-    fn new(service: &ITaskService, name: &str, sddl: &str) -> Scheduled {
+    pub(crate) fn new(service: &ITaskService, name: &str, sddl: &str) -> Scheduled {
         // SAFETY: a live service; the BSTRs and the VARIANT outlive each call.
         let (root, folder) = unsafe {
             let root = service.GetFolder(&BSTR::from("\\")).unwrap();
@@ -164,7 +177,13 @@ impl Scheduled {
 
     /// Registers `task` in the folder: LOCAL SYSTEM runs `cmd.exe` with `arguments`, on demand
     /// only, as `register_task` sets its tasks up, with `sddl` as its descriptor.
-    fn register(&mut self, service: &ITaskService, task: &str, arguments: &str, sddl: &str) {
+    pub(crate) fn register(
+        &mut self,
+        service: &ITaskService,
+        task: &str,
+        arguments: &str,
+        sddl: &str,
+    ) {
         self.tasks.push(task.to_owned());
         let cmd = format!(r"{}\cmd.exe", system32());
         // SAFETY: each call is on a live interface the one before returned, with BSTRs and
@@ -209,7 +228,7 @@ impl Scheduled {
     }
 
     /// The task `task` in the folder, read afresh.
-    fn task(&self, task: &str) -> IRegisteredTask {
+    pub(crate) fn task(&self, task: &str) -> IRegisteredTask {
         // SAFETY: a live folder and a BSTR that outlives the call.
         unsafe { self.folder.GetTask(&BSTR::from(task)) }.unwrap()
     }

@@ -278,7 +278,11 @@ pub enum SpecError {
     NoPoolUser,
     /// A SID that isn't a local or domain account's (`S-1-5-21-<a>-<b>-<c>-<rid>`): a
     /// well-known group such as `Users` or `Everyone` would filter the lawyer's own programs.
-    #[error("{0} isn't a sandbox user's or group's SID")]
+    /// Its words name the SID's authority at most, never the SID.
+    #[error(
+        "a SID of the authority {} isn't a sandbox user's or group's SID",
+        crate::windows::token::sid_authority(.0)
+    )]
     NotAnAccount(Sid),
     /// The owner is named as a pool user or the group: the lawyer's own programs would lose the
     /// network.

@@ -179,6 +179,12 @@ fn a_pool_that_would_filter_the_wrong_programs_is_refused() {
         assert_eq!(new(&group(), &[sid(2001), bad.clone()]), refused);
         assert_eq!(new(&bad, &[sid(2001)]), refused, "as the group");
     }
+    // Its words name the authority, never the SID.
+    let words = SpecError::NotAnAccount(Sid::parse("S-1-5-21-9-9-9-1001").unwrap()).to_string();
+    assert_eq!(
+        words,
+        "a SID of the authority S-1-5 isn't a sandbox user's or group's SID"
+    );
     let owner_refused = Err(SpecError::OwnerInPool(owner()));
     assert_eq!(new(&group(), &[sid(2001), owner()]), owner_refused);
     assert_eq!(new(&owner(), &[sid(2001)]), owner_refused, "as the group");

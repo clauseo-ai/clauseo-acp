@@ -80,6 +80,8 @@ pub mod args;
 #[cfg(windows)]
 pub mod around;
 mod create;
+#[cfg(any(windows, test))]
+mod event_line;
 #[cfg(windows)]
 mod event_trace;
 #[cfg(windows)]
@@ -88,6 +90,8 @@ pub mod exe;
 pub mod explain;
 #[cfg(windows)]
 mod ffi;
+#[cfg(windows)]
+mod group_info;
 #[cfg(test)]
 #[cfg(windows)]
 mod handback_tests;
@@ -103,6 +107,7 @@ mod lock_tests;
 #[cfg(windows)]
 pub mod logon;
 mod machine;
+mod orphans;
 mod outcome;
 #[cfg(any(windows, test))]
 pub mod owner;
@@ -128,6 +133,8 @@ pub mod remove;
 mod resets;
 pub mod result_file;
 mod rollback;
+#[cfg(any(windows, test))]
+pub mod serve;
 #[cfg(any(windows, test))]
 mod shared;
 #[cfg(any(windows, test))]

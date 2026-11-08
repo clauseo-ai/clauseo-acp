@@ -1,6 +1,8 @@
-//! The two SYSTEM tasks' definitions (`rules.rs`), on every OS: the stop task is the refresh
-//! task with its own name, argument and limit, the same principal and descriptor, and no logon
-//! start; the uninstaller's removal takes both down before the copy they run.
+//! The SYSTEM tasks' definitions (`rules.rs`), on every OS: the stop task is the refresh task
+//! with its own name, argument and limit, the same principal and descriptor, and no logon start;
+//! the set-up task queues no runs and is started by the owner or by interactive users but the
+//! pool's group; the folder keeps its own descriptor; the uninstaller's removal takes every task
+//! down before the copy they run, the set-up task first.
 
 use super::*;
 use crate::windows::setup::args::{Mode, parse};
@@ -38,6 +40,60 @@ fn the_stop_task_is_the_refresh_task_but_for_its_name_argument_and_limit() {
     let mode = |task: SystemTask| parse([std::ffi::OsString::from(task.argument())]);
     assert_eq!(mode(refresh), Ok(Mode::Refresh));
     assert_eq!(mode(stop), Ok(Mode::Stop));
+    let set_up = SystemTask::SetUp;
+    assert_eq!(
+        (set_up.name(), set_up.argument(), set_up.execution_limit()),
+        ("SandboxSetUp", "--serve-set-up", "PT2H")
+    );
+    assert_eq!(mode(set_up), Ok(Mode::ServeSetUp));
+    assert!(!set_up.at_logon(), "started only on demand: no trigger");
+    // No run queues: a start during a set-up run is dropped, and the app starts it again.
+    assert!(!set_up.queues() && !refresh.queues() && !stop.queues());
+    assert_ne!(set_up.description(), "");
+}
+
+#[test]
+fn the_set_up_task_is_the_owners_per_user_and_interactive_users_but_the_pool_per_machine() {
+    let owner = crate::windows::sids::Sid::parse("S-1-5-21-1-2-3-1001").unwrap();
+    let group = crate::windows::sids::Sid::parse("S-1-5-21-1-2-3-1050").unwrap();
+    assert_eq!(Starters::Owner(owner.clone()).sddl(), task_sddl(&owner));
+    assert_eq!(Starters::Owner(owner.clone()).owner(), Some(&owner));
+    let install = Starters::Interactive { denied: None };
+    assert_eq!(
+        install.sddl(),
+        "O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;IU)"
+    );
+    assert_eq!(install.owner(), None);
+    // After the first set-up: the group's deny comes first, so it wins over IU's grant.
+    let denied = Starters::Interactive {
+        denied: Some(group),
+    };
+    assert_eq!(
+        denied.sddl(),
+        "O:BAD:P(D;;FRFX;;;S-1-5-21-1-2-3-1050)(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;IU)"
+    );
+    let sddl = denied.sddl();
+    let aces: Vec<&str> = sddl.split('(').skip(1).collect();
+    assert!(aces[0].starts_with("D;;FRFX;;;"), "{aces:?}");
+    for ace in &aces[3..] {
+        for wider in ["FA", "FW", "GA", "GW", "WD", "WO", "SD"] {
+            assert!(!ace.contains(wider), "{wider}: {ace}");
+        }
+    }
+}
+
+#[test]
+fn the_folder_has_its_own_descriptor_whatever_task_is_registered() {
+    // Not any task's: a folder given the stop task's descriptor (one owner) would shut every
+    // other interactive user out of the set-up task inside it.
+    assert_eq!(FOLDER_SDDL, "O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FR;;;IU)");
+    let owner = crate::windows::sids::Sid::parse("S-1-5-21-1-2-3-1001").unwrap();
+    assert_ne!(FOLDER_SDDL, task_sddl(&owner));
+    assert_ne!(FOLDER_SDDL, Starters::Interactive { denied: None }.sddl());
+    // Read alone for IU: no one but SYSTEM and Administrators adds or changes a task in it.
+    let aces: Vec<&str> = FOLDER_SDDL.split('(').skip(1).collect();
+    assert_eq!(aces.len(), 3);
+    assert_eq!(aces[2], "A;;FR;;;IU)");
 }
 
 #[test]
@@ -61,18 +117,19 @@ fn both_tasks_take_the_one_descriptor_the_owner_may_read_and_execute() {
 }
 
 #[test]
-fn the_removal_takes_both_tasks_down_after_the_values_and_before_the_copy() {
+fn the_removal_takes_every_task_down_after_the_values_and_before_the_copy() {
     assert_eq!(
         TEARDOWN,
         [
             Teardown::AdminValues,
+            Teardown::Task(SystemTask::SetUp),
             Teardown::Task(SystemTask::Refresh),
             Teardown::Task(SystemTask::Stop),
             Teardown::Staging,
             Teardown::AdminFolder,
         ]
     );
-    for task in TASKS {
+    for task in [SystemTask::SetUp, SystemTask::Refresh, SystemTask::Stop] {
         let at = TEARDOWN
             .iter()
             .position(|step| *step == Teardown::Task(task));
@@ -91,5 +148,119 @@ fn the_action_names_the_admin_copy_in_quotes() {
     assert_eq!(
         action_path(exe),
         r#""C:\Program Files\Clauseo\Sandbox\clauseo-sandbox-setup.exe""#
+    );
+}
+
+#[test]
+fn a_missing_task_or_folder_is_not_registered_whichever_code_windows_gives() {
+    // ERROR_FILE_NOT_FOUND and ERROR_PATH_NOT_FOUND as HRESULTs: either leaves the prompt.
+    assert!(not_registered(0x8007_0002));
+    assert!(not_registered(0x8007_0003));
+    // Access denied, and a bare Win32 code, are failures, not a missing task.
+    assert!(!not_registered(0x8007_0005));
+    assert!(!not_registered(2));
+}
+
+/// A change to a read-back definition, and what it is.
+type Change = (&'static str, fn(&mut Registered));
+
+/// `spec` for `starters` as a fresh `register_task` reads back, its action `path`.
+fn fresh(spec: SystemTask, starters: &Starters, path: &str) -> Registered {
+    Registered {
+        path: path.to_owned(),
+        arguments: spec.argument().to_owned(),
+        actions: 1,
+        user: "SYSTEM".to_owned(),
+        service_highest: true,
+        instances: INSTANCES_IGNORE_NEW,
+        limit: spec.execution_limit().to_owned(),
+        working_dir: String::new(),
+        enabled: true,
+        hidden: false,
+        triggers: i32::from(spec.at_logon() && starters.owner().is_some()),
+        sddl: starters.sddl(),
+    }
+}
+
+#[test]
+fn a_fresh_registration_is_current_and_any_change_to_its_definition_is_not() {
+    let path = r#""C:\Program Files\Clauseo\Sandbox\clauseo-sandbox-setup.exe""#;
+    let owner = Sid::parse("S-1-12-1-3263492174-1177263218-2391161522-1513380577").unwrap();
+    for starters in [
+        Starters::Owner(owner),
+        Starters::Interactive { denied: None },
+    ] {
+        let sddl = starters.sddl();
+        for spec in [SystemTask::Refresh, SystemTask::Stop, SystemTask::SetUp] {
+            let current = fresh(spec, &starters, path);
+            // Read back as it was written: no registration again on every set-up.
+            assert!(
+                spec.registered_as(&current, &starters, path, &sddl),
+                "{spec:?}"
+            );
+            let changes: [Change; 13] = [
+                ("parallel", |found| found.instances = 0),
+                ("queue", |found| found.instances = INSTANCES_QUEUE),
+                ("stop existing", |found| found.instances = 3),
+                ("disabled", |found| found.enabled = false),
+                ("hidden", |found| found.hidden = true),
+                ("a working folder", |found| {
+                    found.working_dir = r"C:\Temp".to_owned();
+                }),
+                ("another program", |found| {
+                    found.path = r#""C:\x.exe""#.to_owned();
+                }),
+                ("another argument", |found| {
+                    found.arguments = "--other".to_owned();
+                }),
+                ("two actions", |found| found.actions = 2),
+                ("another user", |found| {
+                    found.user = "S-1-5-21-1-2-3-1001".to_owned();
+                }),
+                ("not highest", |found| found.service_highest = false),
+                ("another limit", |found| found.limit = "PT72H".to_owned()),
+                ("another trigger", |found| found.triggers += 1),
+            ];
+            for (change, apply) in changes {
+                let mut found = current.clone();
+                apply(&mut found);
+                assert!(
+                    !spec.registered_as(&found, &starters, path, &sddl),
+                    "{spec:?}: {change}"
+                );
+            }
+        }
+    }
+    assert_eq!((INSTANCES_QUEUE, INSTANCES_IGNORE_NEW), (1, 2));
+}
+
+#[test]
+fn every_task_is_disabled_then_stopped_then_deleted() {
+    assert_eq!(RETIRE, [Retire::Disable, Retire::Stop, Retire::Delete]);
+    // The fake task: each step taken, in order, and the one that fails.
+    let take_down = |failing: Option<Retire>| {
+        let mut taken = Vec::new();
+        let done = retire(|step| {
+            taken.push(step);
+            if Some(step) == failing {
+                Err(step)
+            } else {
+                Ok(())
+            }
+        });
+        (taken, done)
+    };
+    assert_eq!(
+        take_down(None),
+        (vec![Retire::Disable, Retire::Stop, Retire::Delete], Ok(()))
+    );
+    // A task that can't be disabled is neither stopped nor deleted: the removal fails there.
+    assert_eq!(
+        take_down(Some(Retire::Disable)),
+        (vec![Retire::Disable], Err(Retire::Disable))
+    );
+    assert_eq!(
+        take_down(Some(Retire::Stop)),
+        (vec![Retire::Disable, Retire::Stop], Err(Retire::Stop))
     );
 }
