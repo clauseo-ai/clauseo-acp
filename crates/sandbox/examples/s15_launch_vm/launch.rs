@@ -139,7 +139,6 @@ pub(crate) fn message(
             env.push((name.to_owned(), value));
         }
     }
-    env.extend(spec.env.iter().cloned());
     let mut runtime = vec![bin];
     runtime.extend(spec.path.iter().map(|p| text(p)));
     let link = spec.credential_link.as_deref().map(text);
@@ -152,6 +151,7 @@ pub(crate) fn message(
         args: spec.args.clone(),
         cwd: matter.clone(),
         env,
+        agent_env: spec.env.clone(),
         state: state.clone(),
         tmpdir: None,
         runtime: runtime.clone(),

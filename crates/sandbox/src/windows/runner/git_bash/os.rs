@@ -18,21 +18,20 @@ use std::path::Path;
 use windows::Wdk::Foundation::OBJECT_ATTRIBUTES;
 use windows::Wdk::Storage::FileSystem::NtCreateDirectoryObject;
 use windows::Win32::Foundation::{
-    HANDLE, OBJ_CASE_INSENSITIVE, STATUS_OBJECT_NAME_COLLISION, UNICODE_STRING,
+    ERROR_FILE_NOT_FOUND, HANDLE, OBJ_CASE_INSENSITIVE, STATUS_OBJECT_NAME_COLLISION,
+    UNICODE_STRING,
 };
 use windows::Win32::Storage::FileSystem::{
     CopyFileW, DeleteFileW, FILE_FLAG_OPEN_REPARSE_POINT, FILE_NAME_NORMALIZED, FILE_SHARE_DELETE,
     FILE_SHARE_READ, GETFINALPATHNAMEBYHANDLE_FLAGS, GetFinalPathNameByHandleW,
-    MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW, VOLUME_NAME_DOS,
+    MOVEFILE_WRITE_THROUGH, MoveFileExW, VOLUME_NAME_DOS,
 };
 use windows::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows::Win32::System::Threading::GetCurrentProcessId;
-use windows::core::{HSTRING, PCWSTR, PWSTR, w};
+use windows::core::{HSTRING, PCWSTR, PWSTR};
 
-use self::ids::WindowsIds;
 use super::off::{NO_STUB, off_stub};
-use super::path_ids::{FileIds as _, dropped_entries};
-use super::{GitBashOs, Made, Ready, Runtime, prepare};
+use super::{FileId, GitBashOs, Made, Ready, Runtime, prepare};
 use crate::windows::acl::object::Handle;
 use crate::windows::admin_copy::os as admin_os;
 use crate::windows::git_tree::{RECORD_SUBKEY, checked_chain, checked_file};
@@ -66,8 +65,7 @@ pub(crate) struct GitBash {
 
 /// The run's Git Bash, or a stub (`off.rs`) with why it is off said on one line through `say`;
 /// `Err` with the plain line of a launch refused when no stub passes. `exe` is this runner's
-/// own exe, `data_dir` the launch's data folder. The `PATH` entries the agent's leaves out are
-/// found either way (`path_ids.rs`).
+/// own exe, `data_dir` the launch's data folder.
 pub(crate) fn for_run(
     message: &LaunchMessage,
     desktop: &Sid,
@@ -75,20 +73,12 @@ pub(crate) fn for_run(
     data_dir: &Path,
     say: fn(&str),
 ) -> Result<GitBash, String> {
-    let spec_path = message
-        .env
-        .iter()
-        .rev()
-        .find(|(name, _)| name.eq_ignore_ascii_case("PATH"))
-        .map_or("", |(_, value)| value.as_str());
-    let dropped = dropped_entries(spec_path, &lawyer_git_roots(), &mut WindowsIds);
     let mut os = WindowsGitBash { exe };
     let off = match prepare(&mut os, &message.pool_user, &message.pool_name, desktop) {
         Ok(Ready { tree, held }) => {
             return Ok(GitBash {
                 env: GitEnv {
                     bash: Bash::Tree(tree),
-                    dropped,
                 },
                 _held: held,
             });
@@ -113,30 +103,12 @@ pub(crate) fn for_run(
                         stub,
                         reason: off.to_string(),
                     },
-                    dropped,
                 },
                 _held: Vec::new(),
             })
         }
         Err(why) => Err(format!("{NO_STUB} ({why})")),
     }
-}
-
-/// The per-machine Git installs the lawyer's `PATH` may name: `HKLM\SOFTWARE\GitForWindows`'s
-/// `InstallPath`, `%ProgramFiles%\Git` and `%ProgramFiles(x86)%\Git`, compared by file ID. A
-/// per-user one lies in the lawyer's profile, which `env::agent_env` already keeps out.
-fn lawyer_git_roots() -> Vec<String> {
-    let mut roots = Vec::new();
-    if let Ok(Some(path)) = record::read_string(w!(r"SOFTWARE\GitForWindows"), w!("InstallPath")) {
-        roots.push(path);
-    }
-    for folder in [admin_os::program_files(), admin_os::program_files_x86()]
-        .into_iter()
-        .flatten()
-    {
-        roots.extend(folder.to_str().map(|folder| format!(r"{folder}\Git")));
-    }
-    roots
 }
 
 /// The machine, as the desktop user; `exe` is this runner's own exe.
@@ -265,7 +237,7 @@ impl GitBashOs for WindowsGitBash<'_> {
             .ok_or_else(|| "LocalAppData isn't text".to_owned())?;
         let drive = WinPath::parse(text).and_then(|path| path.drive().map(str::to_owned));
         match drive {
-            Some(drive) if !WindowsIds.remote(&drive) => Ok(text.to_owned()),
+            Some(drive) if !ids::remote(&drive) => Ok(text.to_owned()),
             _ => Err("LocalAppData is on the network".to_owned()),
         }
     }
@@ -295,27 +267,60 @@ impl GitBashOs for WindowsGitBash<'_> {
     fn copy_runner(&mut self, to: &WinPath) -> Result<(), String> {
         let mut random = [0_u8; 8];
         getrandom::fill(&mut random).map_err(|e| format!("random failed ({e})"))?;
-        let temp = HSTRING::from(format!(
-            "{}.{}.tmp",
-            to.display(),
-            crate::windows::refresh::hex(&random)
-        ));
+        let unique = crate::windows::refresh::hex(&random);
+        let temp = HSTRING::from(format!("{}.{unique}.tmp", to.display()));
+        let aside = HSTRING::from(format!("{}.{unique}.old", to.display()));
         let from = HSTRING::from(self.exe.as_os_str());
         let target = HSTRING::from(to.display());
+        clear_aside(to);
         // SAFETY: each string is NUL-terminated and outlives its call.
         unsafe { CopyFileW(&from, &temp, true) }
             .map_err(|e| format!("copying the runner failed ({})", e.code().0 & 0xFFFF))?;
-        let flags = MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH;
+        // A running stub can be renamed, never replaced: the old copy goes aside first.
         // SAFETY: as above.
-        if let Err(error) = unsafe { MoveFileExW(&temp, &target, flags) } {
-            // SAFETY: as above.
-            drop(unsafe { DeleteFileW(&temp) });
-            return Err(format!(
-                "putting the copy in place failed ({})",
-                error.code().0 & 0xFFFF
-            ));
+        let set_aside = unsafe { MoveFileExW(&target, &aside, MOVEFILE_WRITE_THROUGH) };
+        let missing = matches!(&set_aside, Err(e) if e.code() == ERROR_FILE_NOT_FOUND.to_hresult());
+        // SAFETY: as above.
+        let placed = (set_aside.is_ok() || missing)
+            .then(|| unsafe { MoveFileExW(&temp, &target, MOVEFILE_WRITE_THROUGH) });
+        if let Some(Ok(())) = placed {
+            return Ok(());
         }
-        Ok(())
+        // SAFETY: as above.
+        drop(unsafe { DeleteFileW(&temp) });
+        let code = match (set_aside, placed) {
+            (_, Some(Err(e))) | (Err(e), _) => e.code().0 & 0xFFFF,
+            _ => 0,
+        };
+        Err(format!("putting the copy in place failed ({code})"))
+    }
+
+    fn plain_id(&mut self, path: &WinPath) -> Option<(FileId, bool)> {
+        ids::plain_id(&path.display())
+    }
+}
+
+/// Deletes the copies set aside beside `stub` (`<stub>.<hex>.old`), each by name; one still
+/// running stays until a later launch.
+fn clear_aside(stub: &WinPath) {
+    let text = stub.display();
+    let (Some(name), Some((dir, _))) = (stub.parts().last(), text.rsplit_once('\\')) else {
+        return;
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let prefix = format!("{}.", name.to_ascii_lowercase());
+    for entry in entries.flatten() {
+        let file = entry.file_name().to_string_lossy().to_ascii_lowercase();
+        let old = Path::new(&file)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("old"));
+        if file.starts_with(&prefix) && old {
+            let path = HSTRING::from(entry.path().as_os_str());
+            // SAFETY: `path` is NUL-terminated and outlives the call. Failing is fine.
+            drop(unsafe { DeleteFileW(&path) });
+        }
     }
 }
 

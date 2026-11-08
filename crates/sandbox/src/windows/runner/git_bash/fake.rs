@@ -70,6 +70,8 @@ pub(super) struct Fake {
     pub(super) files: HashMap<String, String>,
     pub(super) copy: Result<String, String>,
     pub(super) copies: usize,
+    pub(super) links: Vec<String>,
+    pub(super) ids: HashMap<String, FileId>,
 }
 
 impl Fake {
@@ -98,6 +100,8 @@ impl Fake {
             files: HashMap::new(),
             copy: Ok(RUNNER_HASH.to_owned()),
             copies: 0,
+            links: Vec::new(),
+            ids: HashMap::new(),
         }
     }
 
@@ -203,5 +207,16 @@ impl GitBashOs for Fake {
         let hash = self.copy.clone()?;
         self.files.insert(to.display(), hash);
         Ok(())
+    }
+
+    fn plain_id(&mut self, path: &WinPath) -> Option<(FileId, bool)> {
+        let text = path.display().to_ascii_lowercase();
+        let id = self.ids.get(&text).copied().unwrap_or_else(|| {
+            let folded = text
+                .bytes()
+                .fold(0_u128, |id, b| id.wrapping_mul(31) ^ u128::from(b));
+            (1, folded)
+        });
+        Some((id, self.links.contains(&text)))
     }
 }

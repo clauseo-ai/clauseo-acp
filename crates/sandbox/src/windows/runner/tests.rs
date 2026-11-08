@@ -20,10 +20,8 @@ fn message() -> LaunchMessage {
         program: format!(r"{RUNTIME}\node.exe"),
         args: vec!["codex-acp.js".to_owned(), "--flag value".to_owned()],
         cwd: r"D:\Matters\Smith".to_owned(),
-        env: vec![
-            ("SystemRoot".to_owned(), r"C:\Windows".to_owned()),
-            ("CODEX_HOME".to_owned(), STATE.to_owned()),
-        ],
+        env: vec![("SystemRoot".to_owned(), r"C:\Windows".to_owned())],
+        agent_env: vec![("CODEX_HOME".to_owned(), STATE.to_owned())],
         state: STATE.to_owned(),
         tmpdir: None,
         runtime: vec![RUNTIME.to_owned()],
@@ -233,7 +231,7 @@ fn verbatim_paths_come_out_plain() {
 #[test]
 fn git_uses_openssl_and_codex_the_bundle() {
     let mut spec = message();
-    spec.env.extend([
+    spec.agent_env.extend([
         ("GIT_CONFIG_COUNT".to_owned(), "2".to_owned()),
         ("GIT_CONFIG_KEY_1".to_owned(), "core.sshCommand".to_owned()),
         ("git_config_value_1".to_owned(), "evil".to_owned()),
@@ -251,7 +249,7 @@ fn git_uses_openssl_and_codex_the_bundle() {
             Some(format!(r"{DATA}\sandbox-ca\roots.pem").as_str())
         );
     }
-    // With no bundle, the spec's own values pass.
+    // With no bundle, the host's own values pass.
     spec.ca_bundle = None;
     let env = agent_env(&spec, &profile(), &GitEnv::default()).unwrap();
     assert_eq!(get(&env, "SSL_CERT_FILE"), Some(r"C:\elsewhere.pem"));
@@ -261,7 +259,7 @@ fn git_uses_openssl_and_codex_the_bundle() {
 #[test]
 fn nothing_points_back_at_the_lawyers_profile() {
     let mut spec = message();
-    spec.env.extend([
+    spec.agent_env.extend([
         ("USERPROFILE".to_owned(), PROFILE.to_owned()),
         ("OneDrive".to_owned(), r"C:\Users\Lawyer\OneDrive".to_owned()),
         ("NPM_CONFIG_CACHE".to_owned(), r"c:/users/LAWYER/AppData/Roaming/npm-cache".to_owned()),
@@ -291,16 +289,22 @@ fn nothing_points_back_at_the_lawyers_profile() {
     ] {
         assert!(get(&env, gone).is_none(), "{gone} kept: {env:?}");
     }
-    assert_eq!(get(&env, "ProgramData"), Some(r"C:\ProgramData"));
+    assert_eq!(
+        get(&env, "ProgramData"),
+        Some(r"C:\ProgramData"),
+        "the host's"
+    );
     assert_eq!(
         get(&env, "CLAUSEO_NODE"),
         Some(format!(r"{RUNTIME}\node.exe").as_str())
     );
     assert_eq!(get(&env, "CODEX_HOME"), Some(STATE), "granted paths stay");
     assert_eq!(
-        get(&env, "PATH"),
-        Some(format!(r"C:\Windows\system32;{RUNTIME};{RUNTIME}\bin").as_str())
+        get(&env, "PATH").and_then(|path| path.split(';').next()),
+        Some(RUNTIME),
+        "the runtime, then Windows' own folders: none of the host's PATH"
     );
+    assert!(!get(&env, "PATH").unwrap().contains("fnm"));
     assert_eq!(
         get(&env, "PSModulePath"),
         Some(r"C:\Program Files\PowerShell\Modules")
@@ -320,19 +324,15 @@ fn nothing_points_back_at_the_lawyers_profile() {
 #[test]
 fn the_environment_is_sorted_with_one_entry_per_name() {
     let mut spec = message();
-    spec.env.push(("path".to_owned(), r"C:\a".to_owned()));
-    spec.env.push(("PATH".to_owned(), r"C:\b".to_owned()));
+    spec.agent_env.push(("Zeta".to_owned(), "1".to_owned()));
+    spec.agent_env.push(("zeta".to_owned(), "2".to_owned()));
     let env = agent_env(&spec, &profile(), &GitEnv::default()).unwrap();
     let names: Vec<String> = env.iter().map(|(n, _)| n.to_uppercase()).collect();
     let mut sorted = names.clone();
     sorted.sort();
     sorted.dedup();
     assert_eq!(names, sorted);
-    assert_eq!(
-        get(&env, "PATH"),
-        Some(r"C:\b"),
-        "the last of one name wins"
-    );
+    assert_eq!(get(&env, "ZETA"), Some("2"), "the last of one name wins");
 }
 
 #[test]

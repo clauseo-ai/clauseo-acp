@@ -1,45 +1,64 @@
-//! The agent's environment with and without Git Bash, the stub's order (`off.rs`) and the
-//! `PATH` entries judged by file ID (`path_ids.rs`), on every OS through the fakes.
-
-use std::collections::HashMap;
+//! The agent's environment with and without Git Bash (built from an allowlist), and the stub's
+//! order (`off.rs`), on every OS through the fake.
 
 use super::fake::*;
 use super::off::{NO_STUB, OWN_DIR, machine_stub, off_stub, own_dir_sddl};
-use super::path_ids::{FileId, FileIds, dropped_entries};
 use super::*;
 use crate::windows::admin_copy::fake::descriptor;
 use crate::windows::admin_copy::{FULL_ACCESS, READ_EXECUTE};
 use crate::windows::runner::LaunchMessage;
-use crate::windows::runner::env::{Bash, GIT_BASH_VAR, GitEnv, agent_env, lawyer_only};
+use crate::windows::runner::env::{Bash, GIT_BASH_VAR, GitEnv, agent_env, is_base};
 use crate::windows::runner::stub::OFF_VAR;
 
 const STUB_PATH: &str = r"C:\Program Files\Clauseo\Sandbox\git\_off\bash.exe";
 const DATA: &str = r"C:\Users\Lawyer\AppData\Local\Clauseo";
 const OWN_STUB: &str = r"C:\Users\Lawyer\AppData\Local\Clauseo\sandbox\git-off\bash.exe";
-const SPEC_PATH: &str =
-    r"C:\Windows\system32;C:\Program Files\Git\cmd;C:\Program Files\Git\mingw64\bin;D:\Tools";
+const RUNTIME: &str = r"C:\Users\Lawyer\AppData\Local\Clauseo\runtime\node";
+const WINDOWS_PATH: [&str; 5] = [
+    r"C:\Windows\System32",
+    r"C:\Windows",
+    r"C:\Windows\System32\Wbem",
+    r"C:\Windows\System32\WindowsPowerShell\v1.0",
+    r"C:\Windows\System32\OpenSSH",
+];
 
-fn launch(path: &str) -> LaunchMessage {
+/// A launch whose lawyer's environment has `lawyer` too, and whose host set `host`.
+fn launch(lawyer: &[(&str, &str)], host: &[(&str, &str)]) -> LaunchMessage {
     let state = r"C:\Users\Lawyer\AppData\Local\Clauseo\agent-state\m1\claude";
+    let pairs = |vars: &[(&str, &str)]| -> Vec<(String, String)> {
+        vars.iter()
+            .map(|(n, v)| ((*n).to_owned(), (*v).to_owned()))
+            .collect()
+    };
+    let mut env = pairs(&[
+        ("SystemRoot", r"C:\Windows"),
+        ("PATHEXT", ".COM;.EXE"),
+        ("PROCESSOR_ARCHITECTURE", "AMD64"),
+        (
+            "CommonProgramFiles(x86)",
+            r"C:\Program Files (x86)\Common Files",
+        ),
+        (
+            "Path",
+            r"C:\Windows\system32;C:\Program Files\Git\cmd;C:\PROGRA~1\Git\cmd;D:\Tools",
+        ),
+        (GIT_BASH_VAR, r"C:\Program Files\Git\bin\bash.exe"),
+    ]);
+    env.extend(pairs(lawyer));
     LaunchMessage {
         version: crate::windows::runner::LAUNCH_VERSION,
         pool_user: sid(POOL),
         pool_name: "ClauseoSb05".to_owned(),
         matter_sid: None,
-        program: r"C:\Program Files\Clauseo\node.exe".to_owned(),
+        program: format!(r"{RUNTIME}\node.exe"),
         args: Vec::new(),
         cwd: r"D:\Matters\Smith".to_owned(),
-        env: vec![
-            ("Path".to_owned(), path.to_owned()),
-            (
-                GIT_BASH_VAR.to_owned(),
-                r"C:\Program Files\Git\bin\bash.exe".to_owned(),
-            ),
-        ],
+        env,
+        agent_env: pairs(host),
         state: state.to_owned(),
         tmpdir: None,
-        runtime: Vec::new(),
-        granted: vec![state.to_owned()],
+        runtime: vec![RUNTIME.to_owned()],
+        granted: vec![state.to_owned(), RUNTIME.to_owned()],
         ca_bundle: None,
         credential_link: None,
         firm_ca: Vec::new(),
@@ -56,32 +75,25 @@ fn env_of(git: &GitEnv, spec: &LaunchMessage) -> Vec<(String, String)> {
     agent_env(spec, &WinPath::parse(r"C:\Users\Lawyer").unwrap(), git).unwrap()
 }
 
-/// The two entries `path_ids` would drop from [`SPEC_PATH`].
-fn dropped() -> Vec<String> {
-    vec![
-        r"C:\Program Files\Git\cmd".to_owned(),
-        r"C:\Program Files\Git\mingw64\bin".to_owned(),
-    ]
-}
-
 fn off(stub: &str) -> GitEnv {
     GitEnv {
         bash: Bash::Off {
             stub: WinPath::parse(stub).unwrap(),
             reason: Off::Squatted.to_string(),
         },
-        dropped: dropped(),
     }
+}
+
+fn system() -> String {
+    WINDOWS_PATH.join(";")
 }
 
 #[test]
 fn with_a_tree_the_agent_s_git_and_bash_are_the_tree_s() {
     let git = GitEnv {
         bash: Bash::Tree(WinPath::parse(&tree()).unwrap()),
-        dropped: dropped(),
     };
-    let mut spec = launch(SPEC_PATH);
-    spec.env.push((OFF_VAR.to_owned(), "the spec's".to_owned()));
+    let spec = launch(&[(OFF_VAR, "the lawyer's")], &[(OFF_VAR, "the host's")]);
     let env = env_of(&git, &spec);
     assert_eq!(
         get(&env, GIT_BASH_VAR),
@@ -89,13 +101,13 @@ fn with_a_tree_the_agent_s_git_and_bash_are_the_tree_s() {
     );
     assert_eq!(
         get(&env, "PATH"),
-        Some(format!(r"{}\cmd;C:\Windows\system32;D:\Tools", tree()).as_str()),
-        "the tree's cmd first, the dropped entries gone, the rest in order"
+        Some(format!(r"{}\cmd;{RUNTIME};{}", tree(), system()).as_str()),
+        "the tree's cmd, the runtime, Windows' own: nothing of the lawyer's PATH"
     );
     let paths = env.iter().filter(|(n, _)| n.eq_ignore_ascii_case("path"));
     assert_eq!(paths.count(), 1);
     assert_eq!(get(&env, "GIT_CONFIG_VALUE_0"), Some("openssl"));
-    assert_eq!(get(&env, OFF_VAR), None, "the spec's goes");
+    assert_eq!(get(&env, OFF_VAR), None, "neither's");
 }
 
 /// The opposite of the old fallback: with Git Bash off the variable is never left unset (Claude
@@ -103,148 +115,102 @@ fn with_a_tree_the_agent_s_git_and_bash_are_the_tree_s() {
 #[test]
 fn off_always_names_a_stub_never_nothing() {
     for stub in [STUB_PATH, OWN_STUB] {
-        let mut spec = launch(SPEC_PATH);
-        spec.env.push((OFF_VAR.to_owned(), "the spec's".to_owned()));
+        let spec = launch(&[], &[(OFF_VAR, "the host's"), (GIT_BASH_VAR, "x")]);
         let env = env_of(&off(stub), &spec);
         assert_eq!(get(&env, GIT_BASH_VAR), Some(stub), "never the lawyer's");
         assert_eq!(get(&env, OFF_VAR), Some(Off::Squatted.to_string().as_str()));
-        assert_eq!(get(&env, "PATH"), Some(r"C:\Windows\system32;D:\Tools"));
+        assert_eq!(
+            get(&env, "PATH"),
+            Some(format!("{RUNTIME};{}", system()).as_str())
+        );
     }
-    let only_git = launch(r"C:\Program Files\Git\cmd");
-    let env = env_of(&off(STUB_PATH), &only_git);
-    assert_eq!(get(&env, "PATH"), None);
-    assert_eq!(get(&env, GIT_BASH_VAR), Some(STUB_PATH));
 }
 
 #[test]
-fn the_lawyer_s_git_shell_and_ssh_settings_never_reach_the_agent() {
-    let mut spec = launch(SPEC_PATH);
-    let gone = [
-        "GIT_EXEC_PATH",
-        "git_ssh_command",
-        "GIT_ASKPASS",
-        "GIT_CONFIG_GLOBAL",
-        "GIT_CONFIG_KEY_7",
-        "SSH_ASKPASS",
-        "SSH_ASKPASS_REQUIRE",
-        "EXEPATH",
-        "ORIGINAL_PATH",
-        "MSYSTEM",
-        "MSYSTEM_PREFIX",
-        "MINGW_PREFIX",
-        "MSYS2_PATH_TYPE",
-        "SHELL",
-        "BASH_ENV",
-        "XDG_CONFIG_HOME",
-        "GNUPGHOME",
+fn only_the_base_set_the_host_s_variables_and_ours_reach_the_agent() {
+    let lawyer = [
+        ("PERL5OPT", "-Mevil"),
+        ("NODE_OPTIONS", "--require x"),
+        ("HTTPS_PROXY", "http://lawyer-proxy:8080"),
+        ("EDITOR", r"C:\Program Files\Git\usr\bin\vim.exe"),
+        ("VISUAL", r"C:\Program Files\Git\usr\bin\vim.exe"),
+        ("PAGER", r"C:\Program Files\Git\usr\bin\less.exe"),
+        (
+            "GIT_EXEC_PATH",
+            r"C:\Program Files\Git\mingw64\libexec\git-core",
+        ),
+        ("MSYSTEM", "MINGW64"),
+        ("SSH_ASKPASS", r"C:\x.exe"),
+        ("ANTHROPIC_API_KEY", "the lawyer's"),
+        ("HOME", r"D:\elsewhere"),
     ];
-    for name in gone {
-        assert!(lawyer_only(name), "{name}");
-        spec.env
-            .push((name.to_owned(), r"C:\Program Files\Git\x".to_owned()));
-    }
-    spec.env
-        .push(("HOME".to_owned(), r"D:\elsewhere".to_owned()));
-    spec.env
-        .push(("ANTHROPIC_MODEL".to_owned(), "m".to_owned()));
+    let host = [
+        ("HTTPS_PROXY", "http://127.0.0.1:46100"),
+        ("ANTHROPIC_API_KEY", "the host's"),
+        ("NODE_OPTIONS", "--require y"),
+        ("PATH", r"C:\Program Files\Git\cmd"),
+        ("HOME", r"D:\host"),
+        ("USERPROFILE", r"C:\Users\Lawyer"),
+    ];
+    let spec = launch(&lawyer, &host);
     let env = env_of(&off(STUB_PATH), &spec);
-    for name in gone {
-        assert_eq!(get(&env, name), None, "{name}");
-    }
-    assert_eq!(get(&env, "GIT_CONFIG_COUNT"), Some("1"), "the runner's own");
-    assert_eq!(get(&env, "GIT_CONFIG_KEY_0"), Some("http.sslBackend"));
-    assert_eq!(get(&env, "HOME"), Some(launch("").state.as_str()));
-    assert_eq!(get(&env, "ANTHROPIC_MODEL"), Some("m"), "the rest stays");
-    assert!(!lawyer_only("PATH") && !lawyer_only("SystemRoot") && !lawyer_only("HTTPS_PROXY"));
-}
-
-/// A machine of folders, each with an identity, some of them links.
-#[derive(Default)]
-struct Ids {
-    plain: HashMap<String, (FileId, bool)>,
-    roots: HashMap<String, FileId>,
-    remote: Vec<String>,
-    opened: Vec<String>,
-}
-
-impl Ids {
-    fn new() -> Ids {
-        let mut ids = Ids::default();
-        for (path, id) in [
-            (r"C:\", 1),
-            (r"C:\Program Files", 2),
-            (r"C:\Program Files\Git", 3),
-            (r"C:\Program Files\Git\cmd", 4),
-            (r"C:\Windows", 5),
-            (r"C:\Windows\system32", 6),
-            (r"D:\", 7),
-            (r"D:\Tools", 8),
-        ] {
-            ids.plain.insert(path.to_owned(), ((1, id), false));
+    for (name, _) in lawyer {
+        let host_set = host.iter().any(|(h, _)| h.eq_ignore_ascii_case(name));
+        if !host_set {
+            assert_eq!(get(&env, name), None, "{name}");
         }
-        // A junction to the Git install, and short names of its folders.
-        ids.plain.insert(r"D:\G".to_owned(), ((1, 90), true));
-        ids.plain.insert(r"D:\G\cmd".to_owned(), ((1, 4), false));
-        ids.plain.insert(r"C:\PROGRA~1".to_owned(), ((1, 2), false));
-        ids.plain
-            .insert(r"C:\PROGRA~1\Git".to_owned(), ((1, 3), false));
-        ids.plain
-            .insert(r"C:\PROGRA~1\Git\cmd".to_owned(), ((1, 4), false));
-        ids.roots.insert(r"C:\Program Files\Git".to_owned(), (1, 3));
-        ids.remote.push("N:".to_owned());
-        ids
     }
-}
-
-impl FileIds for Ids {
-    fn remote(&mut self, drive: &str) -> bool {
-        self.remote.iter().any(|d| d == drive)
+    assert_eq!(get(&env, "HTTPS_PROXY"), Some("http://127.0.0.1:46100"));
+    assert_eq!(get(&env, "ANTHROPIC_API_KEY"), Some("the host's"));
+    assert_eq!(get(&env, "NODE_OPTIONS"), None, "never, even the host's");
+    assert_eq!(get(&env, "HOME"), Some(spec.state.as_str()), "ours");
+    assert_eq!(get(&env, "USERPROFILE"), Some(spec.state.as_str()), "ours");
+    assert!(!get(&env, "PATH").unwrap().contains("Git"), "ours alone");
+    for (name, value) in [
+        ("SystemRoot", r"C:\Windows"),
+        ("PATHEXT", ".COM;.EXE"),
+        ("PROCESSOR_ARCHITECTURE", "AMD64"),
+        (
+            "CommonProgramFiles(x86)",
+            r"C:\Program Files (x86)\Common Files",
+        ),
+    ] {
+        assert_eq!(get(&env, name), Some(value), "the base set: {name}");
     }
-
-    fn plain_id(&mut self, path: &str) -> Option<(FileId, bool)> {
-        self.opened.push(path.to_owned());
-        self.plain.get(path).copied()
-    }
-
-    fn root_id(&mut self, path: &str) -> Option<FileId> {
-        self.opened.push(path.to_owned());
-        self.roots.get(path).copied()
-    }
+    assert!(is_base("windir") && is_base("processor_level") && is_base("COMMONPROGRAMW6432"));
+    assert!(!is_base("PATH") && !is_base("EDITOR") && !is_base("HTTPS_PROXY"));
 }
 
 #[test]
-fn path_entries_in_the_lawyer_s_git_go_by_file_id_whatever_their_text() {
-    let mut ids = Ids::new();
-    let roots = [
-        r"C:\Program Files\Git".to_owned(),
-        r"\\server\share\Git".to_owned(),
+fn the_own_copy_s_folder_must_lie_in_local_app_data_by_identity() {
+    let refuse: [fn(&mut Fake); 3] = [
+        |f| {
+            f.links
+                .push(r"c:\users\lawyer\appdata\local\clauseo".to_owned());
+        },
+        |f| {
+            f.links.push(r"c:\users\lawyer\appdata".to_owned());
+        },
+        // Another user's LocalAppData: another folder at that depth.
+        |f| f.app_data = Ok(r"C:\Users\Other\AppData\Local".to_owned()),
     ];
-    let gone = [
-        r"C:\Program Files\Git\cmd",
-        r"C:\PROGRA~1\Git\cmd",
-        r#""C:\PROGRA~1\Git\cmd""#,
-        r"C:\Windows\..\Program Files\Git\cmd",
-        r"C:\Program Files\Git.\cmd. ",
-        r"\\?\C:\Program Files\Git\cmd",
-        r"D:\G\cmd",
-        r"\\server\share\bin",
-        r"\\?\UNC\server\share\bin",
-        r"\\.\C:\Program Files\Git\cmd",
-        r"N:\bin",
-        r"relative\bin",
-        "",
-    ];
-    let kept = [r"C:\Windows\system32", r"D:\Tools", r"D:\Missing"];
-    let path: Vec<&str> = gone.iter().chain(kept.iter()).copied().collect();
-    let dropped = dropped_entries(&path.join(";"), &roots, &mut ids);
-    assert_eq!(dropped, gone.map(str::to_owned).to_vec());
-    assert!(
-        ids.opened
-            .iter()
-            .all(|p| !p.starts_with(r"\\") && !p.starts_with("N:")),
-        "no network path is ever opened: {:?}",
-        ids.opened
-    );
+    for change in refuse {
+        let mut fake = Fake::new();
+        fake.stub = Err("no machine stub".to_owned());
+        change(&mut fake);
+        assert!(off_stub(&mut fake, &sid(LAWYER), DATA).is_err());
+        assert_eq!(fake.copies, 0, "nothing made outside it");
+    }
+    // A short name of the same folder passes: the file IDs match, whatever the text.
+    let mut fake = Fake::new();
+    fake.stub = Err("no machine stub".to_owned());
+    fake.app_data = Ok(r"C:\Users\LAWYER~1\AppData\Local".to_owned());
+    let same = (7, 7);
+    fake.ids
+        .insert(r"c:\users\lawyer~1\appdata\local".to_owned(), same);
+    fake.ids
+        .insert(r"c:\users\lawyer\appdata\local".to_owned(), same);
+    assert!(off_stub(&mut fake, &sid(LAWYER), DATA).is_ok());
 }
 
 #[test]

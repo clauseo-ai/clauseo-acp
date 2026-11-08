@@ -23,9 +23,8 @@
 //! 7. both folders made, never opened: one already there is squatted ([`Off::Squatted`]).
 //!
 //! Each failure is one plain line on stderr and no Git Bash for the run: the agent's
-//! `CLAUDE_CODE_GIT_BASH_PATH` then names a stub (`off.rs`), or the launch is refused, and no
-//! `PATH` entry of the lawyer's Git is left (`path_ids.rs`). It never falls back to the
-//! lawyer's Git.
+//! `CLAUDE_CODE_GIT_BASH_PATH` then names a stub (`off.rs`), or the launch is refused, and its
+//! `PATH` is the runner's own (`env::built_path`). It never falls back to the lawyer's Git.
 
 use std::fmt;
 
@@ -39,11 +38,13 @@ mod fake;
 pub(crate) mod off;
 #[cfg(windows)]
 pub(crate) mod os;
-pub(crate) mod path_ids;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod tests_off;
+
+/// A file's identity: its volume's serial number and its 128-bit file ID.
+pub(crate) type FileId = (u64, u128);
 
 /// What precedes the shared id in `msys-2.0.dll`.
 pub(crate) const SHARED_ID_TAG: &[u8] = b"%%% MSYS shared id: ";
@@ -191,8 +192,12 @@ pub(crate) trait GitBashOs {
     fn runner_hash(&mut self) -> Result<String, String>;
     /// The SHA-256 of the regular file `file`, opened as itself; `None` when nothing is there.
     fn file_hash(&mut self, file: &WinPath) -> Result<Option<String>, String>;
-    /// Copies this runner's exe to `to` through a new file beside it, renamed over `to`.
+    /// Copies this runner's exe to `to` through a new file beside it, renamed into place once
+    /// what is at `to` is renamed aside (a running stub can be renamed, never replaced).
     fn copy_runner(&mut self, to: &WinPath) -> Result<(), String>;
+    /// The folder `path` opened as itself: its identity and whether it is a reparse point;
+    /// `None` when it can't be opened.
+    fn plain_id(&mut self, path: &WinPath) -> Option<(FileId, bool)>;
 }
 
 /// A run's Git Bash, ready: its tree, with its [`HELD`] files and msys's folders open for the

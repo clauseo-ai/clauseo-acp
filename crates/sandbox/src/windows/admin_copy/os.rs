@@ -35,8 +35,7 @@ use windows::Win32::Storage::FileSystem::{
 };
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::UI::Shell::{
-    FOLDERID_LocalAppData, FOLDERID_ProgramFiles, FOLDERID_ProgramFilesX86, KF_FLAG_DEFAULT,
-    SHGetKnownFolderPath,
+    FOLDERID_LocalAppData, FOLDERID_ProgramFiles, KF_FLAG_DEFAULT, SHGetKnownFolderPath,
 };
 use windows::core::{BOOL, PCWSTR, PWSTR};
 
@@ -213,11 +212,6 @@ pub(crate) fn program_files() -> io::Result<PathBuf> {
 /// reads its folder: the outer runner's own Git Bash stub lies below it.
 pub(crate) fn local_app_data() -> io::Result<PathBuf> {
     known_folder(FOLDERID_LocalAppData)
-}
-
-/// `%ProgramFiles(x86)%` (`FOLDERID_ProgramFilesX86`), as [`program_files`] reads its folder.
-pub(crate) fn program_files_x86() -> io::Result<PathBuf> {
-    known_folder(FOLDERID_ProgramFilesX86)
 }
 
 /// The known folder `folder`: the machine's, or this process's user's.

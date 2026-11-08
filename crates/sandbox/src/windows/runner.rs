@@ -174,8 +174,14 @@ pub struct LaunchMessage {
     pub args: Vec<String>,
     /// Its working folder, absolute.
     pub cwd: String,
-    /// The launch spec's whole environment; [`env::agent_env`] makes the agent's from it.
+    /// The launch spec's whole environment, the lawyer's inherited variables included:
+    /// [`env::agent_env`] takes only the Windows base set and `PATH` from it.
     pub env: Vec<(String, String)>,
+    /// The variables the host set for the agent itself (its settings', its hook's, the forced
+    /// ones and the proxy's), apart from what it inherited: [`env::agent_env`] takes these.
+    /// The host's launcher passes them to [`LaunchMessage::from_policy`].
+    #[serde(default)]
+    pub agent_env: Vec<(String, String)>,
     /// The agent's state folder.
     pub state: String,
     /// The session's temp folder (`Policy::session_tmpdir`), else `<state>\tmp`.
@@ -206,6 +212,7 @@ impl std::fmt::Debug for LaunchMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // The environment's values (the proxy's token among them) are never printed.
         let names: Vec<&str> = self.env.iter().map(|(name, _)| name.as_str()).collect();
+        let own: Vec<&str> = self.agent_env.iter().map(|(n, _)| n.as_str()).collect();
         f.debug_struct("LaunchMessage")
             .field("version", &self.version)
             .field("pool_user", &self.pool_user)
@@ -215,6 +222,7 @@ impl std::fmt::Debug for LaunchMessage {
             .field("args", &self.args.len())
             .field("cwd", &self.cwd)
             .field("env", &names)
+            .field("agent_env", &own)
             .field("state", &self.state)
             .field("tmpdir", &self.tmpdir)
             .field("firm_ca", &self.firm_ca)
@@ -224,16 +232,19 @@ impl std::fmt::Debug for LaunchMessage {
 
 impl LaunchMessage {
     /// The message for `spec` run as `pool` under `policy`, with the CA bundle `ca_bundle`:
-    /// the spec's program, arguments, folder and whole environment; the policy's state folder,
-    /// session temp folder, runtime paths, the paths it grants and its credential link. Refused
-    /// when a path or variable isn't UTF-8 or breaks [`LaunchMessage::check`]'s rules.
+    /// the spec's program, arguments, folder and whole environment; `agent_env`, the variables
+    /// the host set for the agent itself, apart from what it inherited (the agent gets only
+    /// those, the Windows base set and the runner's own); the policy's state folder, session
+    /// temp folder, runtime paths, the paths it grants and its credential link. Refused when a
+    /// path or variable isn't UTF-8 or breaks [`LaunchMessage::check`]'s rules.
     pub fn from_policy(
         policy: &crate::Policy,
         pool: &super::pool::PoolUser,
         spec: &clauseo_process::LaunchSpec,
+        agent_env: &[(std::ffi::OsString, std::ffi::OsString)],
         ca_bundle: Option<&Path>,
     ) -> Result<LaunchMessage, LaunchError> {
-        policy::message_from_policy(policy, pool, spec, ca_bundle)
+        policy::message_from_policy(policy, pool, spec, agent_env, ca_bundle)
     }
 
     /// Reads and checks a launch message: [`LaunchMessage::check`]'s rules.
@@ -300,13 +311,16 @@ impl LaunchMessage {
         for path in &self.firm_ca {
             local("firm_ca", path)?;
         }
-        if self.args.len() > ITEMS_CAP || self.env.len() > ITEMS_CAP {
+        if self.args.len() > ITEMS_CAP
+            || self.env.len() > ITEMS_CAP
+            || self.agent_env.len() > ITEMS_CAP
+        {
             return Err(field("args or env", "has more than 4096 items"));
         }
         if self.args.iter().any(|arg| arg.contains('\0')) {
             return Err(field("args", "hold a NUL"));
         }
-        for (name, value) in &self.env {
+        for (name, value) in self.env.iter().chain(&self.agent_env) {
             // A leading `=` is cmd's per-drive folder (`=C:`), which `agent_env` drops.
             if name.is_empty() || name.contains('\0') || name.chars().skip(1).any(|c| c == '=') {
                 return Err(field("env", "has a name that is empty or holds = or NUL"));

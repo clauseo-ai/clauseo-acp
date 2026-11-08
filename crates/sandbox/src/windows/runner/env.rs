@@ -1,38 +1,34 @@
-//! The agent's environment under tier B ([`agent_env`]), made by the outer runner from the
-//! launch spec's: what Windows' own profile variables would say for a user whose profile is the
-//! state folder, git over OpenSSL, the CA bundle, and nothing that points into the lawyer's
-//! profile.
+//! The agent's environment under tier B ([`agent_env`]), built by the outer runner, never the
+//! lawyer's filtered: only these reach the agent.
 //!
-//! - **Set**, whatever the spec said: `USERPROFILE`, `HOME`, `HOMEDRIVE` + `HOMEPATH` (git and
-//!   ssh look there before `USERPROFILE`) at `<state>`; `APPDATA` at `<state>\AppData\Roaming`,
-//!   `LOCALAPPDATA` at `<state>\AppData\Local`; `TEMP` and `TMP` at the session's temp folder
-//!   (`Policy::session_tmpdir`), else `<state>\tmp` (`Policy::tmpdir`'s fallback).
-//! - **git over OpenSSL** (§3: Schannel fails under any restricting-SID token,
+//! - **The Windows base set**, copied from the lawyer's environment ([`BASE`], [`BASE_PREFIXES`]):
+//!   `SystemRoot`, `windir`, `ComSpec`, `PATHEXT`, `OS`, `PROCESSOR_*`,
+//!   `NUMBER_OF_PROCESSORS`, `SystemDrive`, `ProgramFiles`, `ProgramFiles(x86)`,
+//!   `ProgramW6432`, `CommonProgramFiles*`, `ProgramData`, `ALLUSERSPROFILE`, `PUBLIC`,
+//!   `DriverData`.
+//! - **What the host set for the agent** (`LaunchMessage::agent_env`, never the lawyer's
+//!   inherited variables): each kept unless it is one of ours, `NODE_OPTIONS`/`NODE_PATH`
+//!   (`clauseo_process::NODE_ENV`), a per-drive folder (`=C:`), or a value with a `;`-separated
+//!   part in the lawyer's profile and in none of the paths the launch grants; `PSModulePath`
+//!   loses each such entry alone.
+//! - **Ours**, whatever else said: `USERPROFILE`, `HOME`, `HOMEDRIVE` + `HOMEPATH` at `<state>`;
+//!   `APPDATA` at `<state>\AppData\Roaming`, `LOCALAPPDATA` at `<state>\AppData\Local`; `TEMP`
+//!   and `TMP` at the session's temp folder (`Policy::session_tmpdir`), else `<state>\tmp`.
+//!   git over OpenSSL (§3: Schannel fails under any restricting-SID token,
 //!   `s15-spikes-traverse.md` (b)): `GIT_CONFIG_COUNT=1`, `GIT_CONFIG_KEY_0=http.sslBackend`,
-//!   `GIT_CONFIG_VALUE_0=openssl`; any other `GIT_CONFIG_KEY_n`/`VALUE_n` the spec had goes.
+//!   `GIT_CONFIG_VALUE_0=openssl`. The CA bundle (`s15-spikes-traverse.md` (d)):
+//!   `CODEX_CA_CERTIFICATE` and `SSL_CERT_FILE` at it, when the launch names one.
 //! - **Git Bash** (0049, "The Git tree"; [`GitEnv`], made by `git_bash.rs`): with the run's
-//!   checked tree, `CLAUDE_CODE_GIT_BASH_PATH` at `<tree>\bin\bash.exe` and `<tree>\cmd` first
-//!   in `PATH`, so the agent's `git` is the tree's and finds the tree's `sh.exe`. With none,
-//!   `CLAUDE_CODE_GIT_BASH_PATH` at a checked stub (`git_bash/off.rs`) and the reason in its
-//!   `OFF_VAR`, so Claude Code never looks for the lawyer's Git Bash; there is no third case.
-//!   Either way the spec's values of both go, and so does each `PATH` entry `git_bash/path_ids`
-//!   judged (by file ID) to be in the lawyer's Git, behind a link or on the network.
-//! - **The lawyer's Git and shell settings go** ([`lawyer_only`]): every `GIT_*` (the runner
-//!   sets its own `GIT_CONFIG_*`), `MSYSTEM*`, `MINGW_*`, `MSYS*`, `SSH_ASKPASS*`,
-//!   `SSH_AUTH_SOCK`, `EXEPATH`, `ORIGINAL_PATH`/`TEMP`/`TMP`, `CYGWIN`, `CHERE_INVOKING`,
-//!   `PLINK_PROTOCOL`, `SHELL`, `BASH_ENV`, `ENV`, `INPUTRC`, `GNUPGHOME` and the `XDG_*`
-//!   folders: what Git, its shell or ssh would read in place of the agent's own.
-//! - **CA bundle** (`s15-spikes-traverse.md` (d): codex's rustls finds no roots under the token):
-//!   `CODEX_CA_CERTIFICATE` and `SSL_CERT_FILE` at the bundle, when the launch names one.
-//!   `SSL_CERT_FILE` makes every OpenSSL tool trust exactly the machine's roots, as intended.
-//! - **Out:** `NODE_OPTIONS` and `NODE_PATH` (`clauseo_process::NODE_ENV`); any variable whose
-//!   value, or any `;`-separated part of it, lies in the lawyer's profile and in none of the
-//!   paths the launch grants (the state and data folders sit in the lawyer's `LocalAppData`); in
-//!   `PATH` and `PSModulePath`, each entry in the lawyer's profile unless it lies in one of the
-//!   launch's runtime paths; names starting with `=` (cmd's per-drive folders).
+//!   checked tree, `CLAUDE_CODE_GIT_BASH_PATH` at `<tree>\bin\bash.exe`; with none, at a checked
+//!   stub (`git_bash/off.rs`) and the reason in its `OFF_VAR`, so Claude Code never looks for the
+//!   lawyer's Git Bash. There is no third case.
+//! - **`PATH`, ours alone** ([`built_path`]): `<tree>\cmd` with a tree, then the launch's
+//!   runtime paths, then Windows' own folders under `SystemRoot`. No entry of the lawyer's or the
+//!   host's `PATH` is kept, so no Git of the lawyer's is on it.
 //!
-//! The result is sorted by name without case, one entry per name, as `CreateProcess` wants an
-//! environment block.
+//! The lawyer's `EDITOR`, `PAGER`, proxies, `PERL5OPT`, `GIT_*` and the rest never reach the
+//! agent. The result is sorted by name without case, one entry per name, as `CreateProcess` wants
+//! an environment block.
 
 use std::collections::BTreeMap;
 
@@ -51,8 +47,34 @@ pub const GIT_OPENSSL: [(&str, &str); 3] = [
 pub const CA_VARS: [&str; 2] = ["CODEX_CA_CERTIFICATE", "SSL_CERT_FILE"];
 /// Where Claude Code finds Git Bash.
 pub const GIT_BASH_VAR: &str = "CLAUDE_CODE_GIT_BASH_PATH";
-/// The variables whose entries are filtered one by one rather than kept or dropped whole.
-const LISTS: [&str; 2] = ["PATH", "PSModulePath"];
+/// The Windows base set copied from the lawyer's environment, by name without case.
+pub const BASE: [&str; 15] = [
+    "SystemRoot",
+    "windir",
+    "ComSpec",
+    "PATHEXT",
+    "OS",
+    "NUMBER_OF_PROCESSORS",
+    "SystemDrive",
+    "ProgramFiles",
+    "ProgramFiles(x86)",
+    "ProgramW6432",
+    "ProgramData",
+    "ALLUSERSPROFILE",
+    "PUBLIC",
+    "DriverData",
+    "CommonProgramW6432",
+];
+/// The base set's name prefixes, without case.
+pub const BASE_PREFIXES: [&str; 2] = ["PROCESSOR_", "CommonProgramFiles"];
+/// Windows' own `PATH` folders, under `SystemRoot`.
+const SYSTEM_PATH: [&str; 5] = [
+    r"System32",
+    "",
+    r"System32\Wbem",
+    r"System32\WindowsPowerShell\v1.0",
+    r"System32\OpenSSH",
+];
 
 /// The firm CA files to merge into the launch's CA bundle: `firm_ca`'s, each once and none the
 /// bundle itself; none without a bundle. The spec's own `SSL_CERT_FILE` is never one: it may be
@@ -109,14 +131,11 @@ pub enum Bash {
 pub struct GitEnv {
     /// Its Git Bash.
     pub bash: Bash,
-    /// The lawyer's `PATH` entries, as written, that the agent's leaves out
-    /// (`git_bash::path_ids`).
-    pub dropped: Vec<String>,
 }
 
 #[cfg(test)]
 impl Default for GitEnv {
-    /// Git Bash off with the machine's stub, no `PATH` entry dropped: the tests' plain case.
+    /// Git Bash off with the machine's stub: the tests' plain case.
     fn default() -> GitEnv {
         GitEnv {
             bash: Bash::Off {
@@ -124,7 +143,6 @@ impl Default for GitEnv {
                     .unwrap(),
                 reason: "off".to_owned(),
             },
-            dropped: Vec::new(),
         }
     }
 }
@@ -154,16 +172,19 @@ pub fn agent_env(
     // Keyed by the upper-cased name, so `Path` and `PATH` are one variable; the last wins.
     let mut out: BTreeMap<String, (String, String)> = BTreeMap::new();
     for (name, value) in &message.env {
+        if is_base(name) {
+            out.insert(name.to_uppercase(), (name.clone(), value.clone()));
+        }
+    }
+    for (name, value) in &message.agent_env {
         if name.starts_with('=')
+            || name.eq_ignore_ascii_case("PATH")
             || clauseo_process::is_node_env(std::ffi::OsStr::new(name))
             || overridden(name, message)
-            || lawyer_only(name)
         {
             continue;
         }
-        let kept = if name.eq_ignore_ascii_case("PATH") {
-            filter_list(value, profile, &runtime).and_then(|value| without(&value, &git.dropped))
-        } else if LISTS.iter().any(|list| list.eq_ignore_ascii_case(name)) {
+        let kept = if name.eq_ignore_ascii_case("PSModulePath") {
             filter_list(value, profile, &runtime)
         } else if lies_outside(value, profile, &granted) {
             None
@@ -177,6 +198,15 @@ pub fn agent_env(
     for (name, value) in set {
         out.insert(name.to_uppercase(), (name, value));
     }
+    let system_root = out.get("SYSTEMROOT").map(|(_, value)| value.clone());
+    let tree = match &git.bash {
+        Bash::Tree(tree) => Some(tree),
+        Bash::Off { .. } => None,
+    };
+    let path = built_path(tree, &runtime, system_root.as_deref());
+    if !path.is_empty() {
+        out.insert("PATH".to_owned(), ("PATH".to_owned(), path));
+    }
     let mut put = |name: &str, value: String| {
         out.insert(name.to_owned(), (name.to_owned(), value));
     };
@@ -185,15 +215,7 @@ pub fn agent_env(
             put(GIT_BASH_VAR, stub.display());
             put(OFF_VAR, reason.clone());
         }
-        Bash::Tree(tree) => {
-            put(GIT_BASH_VAR, tree.join("bin").join("bash.exe").display());
-            let cmd = tree.join("cmd").display();
-            let path = match out.remove("PATH") {
-                Some((name, value)) => (name, format!("{cmd};{value}")),
-                None => ("PATH".to_owned(), cmd),
-            };
-            out.insert("PATH".to_owned(), path);
-        }
+        Bash::Tree(tree) => put(GIT_BASH_VAR, tree.join("bin").join("bash.exe").display()),
     }
     Ok(out.into_values().collect())
 }
@@ -296,37 +318,36 @@ fn lies_outside(value: &str, profile: &WinPath, granted: &[WinPath]) -> bool {
         .any(|part| text_within(part, profile) && !granted.iter().any(|g| text_within(part, g)))
 }
 
-/// `value` (a `;` list) without its entries in `dropped` (as written); `None` when nothing
-/// is left.
-fn without(value: &str, dropped: &[String]) -> Option<String> {
-    let kept: Vec<&str> = value
-        .split(';')
-        .filter(|entry| !dropped.iter().any(|gone| gone == entry))
-        .collect();
-    (!kept.is_empty()).then(|| kept.join(";"))
+/// Whether `name` is in the Windows base set ([`BASE`], [`BASE_PREFIXES`]), without case.
+pub fn is_base(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    BASE.iter().any(|base| base.eq_ignore_ascii_case(name))
+        || BASE_PREFIXES
+            .iter()
+            .any(|prefix| upper.starts_with(&prefix.to_ascii_uppercase()))
 }
 
-/// Whether `name` is one of the lawyer's Git, shell or ssh settings the agent never gets
-/// (module docs); the runner sets its own `GIT_CONFIG_*` after.
-pub fn lawyer_only(name: &str) -> bool {
-    const PREFIXES: [&str; 6] = ["GIT_", "MSYSTEM", "MINGW_", "MSYS", "SSH_ASKPASS", "XDG_"];
-    const NAMES: [&str; 13] = [
-        "SSH_AUTH_SOCK",
-        "EXEPATH",
-        "ORIGINAL_PATH",
-        "ORIGINAL_TEMP",
-        "ORIGINAL_TMP",
-        "CYGWIN",
-        "CHERE_INVOKING",
-        "PLINK_PROTOCOL",
-        "SHELL",
-        "BASH_ENV",
-        "ENV",
-        "INPUTRC",
-        "GNUPGHOME",
-    ];
-    let upper = name.to_ascii_uppercase();
-    PREFIXES.iter().any(|prefix| upper.starts_with(prefix)) || NAMES.contains(&upper.as_str())
+/// The agent's `PATH`: `<tree>\cmd` with a tree, the launch's runtime paths, then Windows' own
+/// folders under `system_root` when it is a full local path.
+pub fn built_path(
+    tree: Option<&WinPath>,
+    runtime: &[WinPath],
+    system_root: Option<&str>,
+) -> String {
+    let mut entries: Vec<String> = tree
+        .map(|tree| tree.join("cmd").display())
+        .into_iter()
+        .collect();
+    entries.extend(runtime.iter().map(WinPath::display));
+    if let Some(root) = system_root.and_then(WinPath::parse) {
+        entries.extend(SYSTEM_PATH.iter().map(|rel| {
+            rel.split('\\')
+                .filter(|part| !part.is_empty())
+                .fold(root.clone(), |path, part| path.join(part))
+                .display()
+        }));
+    }
+    entries.join(";")
 }
 
 /// `value` (a `;` list) without its entries that lie in `profile` and in none of `runtime`;

@@ -47,7 +47,8 @@ fn a_written_launch_file_is_one_the_outer_runner_reads() {
         .build()
         .unwrap();
     let message =
-        LaunchMessage::from_policy(&policy, &pool(), &spec(&place.at("matter")), None).unwrap();
+        LaunchMessage::from_policy(&policy, &pool(), &spec(&place.at("matter")), &[], None)
+            .unwrap();
     let path = write_launch(&place.at("data"), &message).unwrap();
     let name = path.file_name().unwrap().to_str().unwrap();
     assert!(is_launch_name(name), "{name}");
@@ -74,9 +75,14 @@ fn the_message_carries_the_spec_and_the_policy() {
         .build()
         .unwrap();
     let bundle = place.at("roots.pem");
-    let message =
-        LaunchMessage::from_policy(&policy, &pool(), &spec(&place.at("matter")), Some(&bundle))
-            .unwrap();
+    let message = LaunchMessage::from_policy(
+        &policy,
+        &pool(),
+        &spec(&place.at("matter")),
+        &[],
+        Some(&bundle),
+    )
+    .unwrap();
     assert_eq!(message.pool_name, "ClauseoSb01");
     assert_eq!(message.program, r"C:\Windows\System32\whoami.exe");
     assert_eq!(message.args, ["/all"]);
