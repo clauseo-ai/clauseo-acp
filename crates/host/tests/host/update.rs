@@ -117,6 +117,7 @@ impl Updater for FakeUpdater {
         let offer = self.offer.map(|version| Offer {
             version: version.to_owned(),
             handle: Opaque::new(version),
+            refetch: false,
         });
         Box::pin(std::future::ready(Ok(offer)))
     }

@@ -12,6 +12,7 @@ use tauri_plugin_updater::{
     Error as PluginError, RemoteRelease, RemoteReleaseInner, UpdaterExt as _,
 };
 
+use super::super::arch::Target;
 use super::super::plugin::{self, Pending, PluginUpdater, Source};
 use super::{crate_dir, test_key_file};
 use crate::rust_only::PluginRustOnly as _;
@@ -197,7 +198,7 @@ fn the_install_verifies_the_saved_file_again() {
         pubkey: fixture_key(),
     };
     let update = source
-        .updater(app.handle())
+        .updater(app.handle(), Target::Native)
         .unwrap()
         .restore_update(for_this_machine(fixture("latest.json")))
         .unwrap()
@@ -208,7 +209,11 @@ fn the_install_verifies_the_saved_file_again() {
     let mut downloaded = Downloaded {
         version: "0.4.1".to_owned(),
         path,
-        handle: Opaque::new(Pending { update, source }),
+        handle: Opaque::new(Pending {
+            update,
+            source,
+            target: Target::Native,
+        }),
     };
     let refused = plugin::install(app.handle(), &downloaded);
     assert!(
@@ -247,7 +252,7 @@ fn the_install_refuses_a_validly_signed_file_of_another_name() {
         pubkey: fixture_key(),
     };
     let update = source
-        .updater(app.handle())
+        .updater(app.handle(), Target::Native)
         .unwrap()
         .restore_update(for_this_machine(fixture("latest.json")))
         .unwrap()
@@ -257,7 +262,11 @@ fn the_install_refuses_a_validly_signed_file_of_another_name() {
     let downloaded = Downloaded {
         version: "0.4.1".to_owned(),
         path: scratch.file("updates/0.4.1/Clauseo-update", &payload),
-        handle: Opaque::new(Pending { update, source }),
+        handle: Opaque::new(Pending {
+            update,
+            source,
+            target: Target::Native,
+        }),
     };
     let refused = plugin::install(app.handle(), &downloaded);
     let line = if cfg!(target_os = "linux") {
@@ -292,7 +301,10 @@ fn each_source_names_the_key_its_updater_trusts() {
 #[test]
 fn the_config_source_has_no_endpoint_yet() {
     let app = app();
-    let error = Source::Config.updater(app.handle()).err().unwrap();
+    let error = Source::Config
+        .updater(app.handle(), Target::Native)
+        .err()
+        .unwrap();
     assert!(matches!(error, PluginError::EmptyEndpoints), "{error:?}");
 }
 

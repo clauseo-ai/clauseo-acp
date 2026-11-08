@@ -60,6 +60,7 @@ crates/desktop/src/lib.rs context clippy::disallowed_methods
 crates/desktop/src/update/plugin.rs save_download clippy::disallowed_methods
 crates/desktop/src/update/install_kind.rs writable unsafe_code
 crates/desktop/src/update/install_kind/windows.rs - unsafe_code
+crates/desktop/src/update/arch.rs native_is_arm64 unsafe_code
 crates/desktop/src/profile.rs first_on_path clippy::disallowed_methods
 crates/desktop/src/window_events.rs raise_main_window clippy::let_underscore_must_use
 crates/desktop/src/lib.rs stop_host_then_exit clippy::exit

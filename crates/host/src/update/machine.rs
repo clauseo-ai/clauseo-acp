@@ -9,7 +9,8 @@
 //! |---|---|---|
 //! | `idle`, `failed` | timer, `CheckRequested` | `checking` |
 //! | `checking` | nothing offered | `idle`, `checked_at` set |
-//! | `checking` | an offer | `downloading` (`ready` when it is the cached version) |
+//! | `checking` | an offer | `downloading` (`ready` when it is the cached version, unless the |
+//! | | | offer asks to `refetch` it) |
 //! | `downloading` | done | `ready` |
 //! | `ready` | `InstallRequested(now)` | `installing`, after cancelling running turns |
 //! | `ready` | `InstallRequested(after_turn)` | `scheduled`, or `installing` if no turn runs |
@@ -295,7 +296,7 @@ impl Machine {
             Ok(Some(offer)) => offer,
         };
         self.checked_at = Some(now);
-        let Some(cached) = cached.filter(|c| c.version == offer.version) else {
+        let Some(cached) = cached.filter(|c| c.version == offer.version && !offer.refetch) else {
             self.state = UpdateState::Downloading {
                 version: offer.version.clone(),
                 received: Count::ZERO,
