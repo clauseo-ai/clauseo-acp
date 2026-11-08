@@ -49,6 +49,20 @@ const WINDOWS_KNOWN: [KnownFolder; 8] = [
 /// Folders at the root of the Windows system drive.
 const WINDOWS_DRIVE_ROOT: [&str; 2] = ["$Recycle.Bin", "System Volume Information"];
 
+/// The folders refused as a matter folder with everything inside them (`matters`' refused
+/// trees), as written: `~/.codex` and the folder `CODEX_HOME` names, which hold Codex's logins
+/// and settings (R17 PR-E). [`refused_folders`] lists them too, so a folder holding one is
+/// refused as well; `host` adds the data folder.
+pub fn refused_trees(dirs: &dyn PlatformDirs) -> Vec<PathBuf> {
+    let mut trees: Vec<PathBuf> = dirs
+        .home()
+        .map(|home| home.join(".codex"))
+        .into_iter()
+        .collect();
+    trees.extend(dirs.codex_home());
+    trees
+}
+
 /// The home folder, the folders inside it that hold app data and keys (`~/.codex` too, and the
 /// folder `CODEX_HOME` names), and the OS's system folders, as written (not canonicalised).
 /// `host` adds the data folder, and `matters` refuses drive roots, each listed folder and any

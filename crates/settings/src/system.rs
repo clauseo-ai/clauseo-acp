@@ -60,7 +60,11 @@ impl PlatformDirs for SystemDirs {
 
 /// The inherited `CODEX_HOME`, when it is an absolute path.
 fn codex_home() -> Option<PathBuf> {
-    std::env::var_os("CODEX_HOME")
-        .map(PathBuf::from)
-        .filter(|path| path.is_absolute())
+    codex_home_of(std::env::var_os("CODEX_HOME"))
+}
+
+/// `CODEX_HOME`'s `value` as a folder: a relative one (or none) counts as not set, since
+/// what it names depends on the working directory of whoever reads it.
+pub(crate) fn codex_home_of(value: Option<std::ffi::OsString>) -> Option<PathBuf> {
+    value.map(PathBuf::from).filter(|path| path.is_absolute())
 }

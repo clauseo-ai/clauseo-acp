@@ -193,7 +193,8 @@ pub(crate) fn load_effective(locations: &Locations) -> Effective {
 pub(crate) fn host_config(effective: Effective) -> HostConfig {
     let launcher = crate::host_launcher(SystemDirs.home());
     let config = HostConfig::new(effective, Arc::new(launcher))
-        .with_refused_folders(clauseo_settings::refused_folders(&SystemDirs));
+        .with_refused_folders(clauseo_settings::refused_folders(&SystemDirs))
+        .with_refused_trees(clauseo_settings::refused_trees(&SystemDirs));
     // With no path to this executable no guard hook goes; the permission check remains.
     match std::env::current_exe() {
         Ok(exe) => config.with_pre_write_guard(exe),

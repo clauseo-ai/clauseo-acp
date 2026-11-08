@@ -271,6 +271,9 @@ pub(crate) enum Input {
     /// The allowed sites' start-up read or a save's outcome, from their thread, or the read's
     /// deadline (`allowed/saving.rs`).
     Allowed(Box<super::allowed::AllowedInput>),
+    /// An owed forget's write or walk, the start-up read of those owed, or the stop's wait
+    /// (`protection/forget.rs`).
+    SandboxForget(Box<super::protection::forget::ForgetInput>),
 }
 
 impl std::fmt::Debug for Input {
@@ -307,6 +310,7 @@ impl std::fmt::Debug for Input {
             #[cfg(feature = "test-support")]
             Self::Abort(_) => "Abort",
             Self::Allowed(_) => "Allowed",
+            Self::SandboxForget(_) => "SandboxForget",
         };
         f.write_str(name)
     }

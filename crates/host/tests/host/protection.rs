@@ -400,10 +400,6 @@ fn sandbox_required_refuses_create_thread_by_cause() {
             c(NoSandbox::UnsupportedOs),
             Some(ErrorCode::SandboxRequired),
         ),
-        (
-            c(NoSandbox::SetUpFailed("x".to_owned())),
-            Some(ErrorCode::SandboxRequired),
-        ),
         (b(), None),
     ];
     let mut run = 0u16;

@@ -244,6 +244,10 @@ pub(super) fn requeue_of(
     stopped: Option<TurnId>,
     close: &TurnClose,
 ) -> Option<Requeue> {
+    // A turn that left the Safe workspace is never queued again (`agents/ended.rs`).
+    if close.stop == StopReason::LeftSafeWorkspace {
+        return None;
+    }
     let failed = close
         .failure
         .as_ref()

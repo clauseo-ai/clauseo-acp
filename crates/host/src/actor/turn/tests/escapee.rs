@@ -5,25 +5,27 @@
 //! reads it, while the turn is still ending, as Windows reports an exit after the prompt's
 //! `Closed` answer. An exit reported after the after-turn checkpoint answered still ends the
 //! turn `LeftSafeWorkspace`: the close waits for it, up to `EXIT_WAIT` on the host clock
-//! (`exit_wait.rs`); past that the turn ends as before and the late exit is only logged.
+//! (`exit_wait.rs`); past that the turn ends as before and the late exit is only logged. Only an
+//! agent launched while the computer had tier B runs under the runner: each test sets it.
 
 use std::cell::Cell;
 
-use clauseo_protocol::{DetachReason, DomainEvent, StopReason};
+use clauseo_protocol::{DetachReason, DomainEvent, Protection, ProtectionTier, StopReason};
 
 use super::agents::{send_prompt, until_settled};
 use super::rig::{Rig, kind};
 use crate::actor::Actor;
 use crate::actor::input::{Input, MatterTag};
+use crate::actor::protection::{Observed, ProtectionHost};
 use crate::actor::turn::TurnPhase;
 use crate::actor::turn::exit_wait::EXIT_WAIT;
 use crate::agent::{AgentInput, Ended};
 
 /// `clauseo-sandbox-run.exe`'s Escapee exit as Windows' `ExitStatus::code` gives it.
-const ESCAPEE: i32 = 0xE0C1_500F_u32.cast_signed();
+pub(super) const ESCAPEE: i32 = 0xE0C1_500F_u32.cast_signed();
 
 /// The agent exits 1 on the prompt without answering it.
-const EXIT_ON_PROMPT: &str = r#"{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+pub(super) const EXIT_ON_PROMPT: &str = r#"{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
 {"exit":{"code":1}}
 "#;
 
@@ -36,8 +38,22 @@ fn ending(actor: &Actor, thread: clauseo_protocol::ThreadId) -> bool {
         .is_some_and(|current| current.phase == TurnPhase::Ending)
 }
 
+/// The computer has tier B, so the agents the rig launches from now on run under the sandbox
+/// runner (`protection::tier_b`).
+pub(super) fn tier_b(rig: &mut Rig) {
+    let computer = Protection::Protected {
+        tier: ProtectionTier::B,
+    };
+    let observed = Observed {
+        computer,
+        asks_admin: false,
+        set_up_at: None,
+    };
+    rig.actor.protection = ProtectionHost::new(None, observed);
+}
+
 /// Whether `input` is an agent's end.
-fn is_end(input: &Input) -> bool {
+pub(super) fn is_end(input: &Input) -> bool {
     matches!(
         input,
         Input::Agent {
@@ -50,6 +66,7 @@ fn is_end(input: &Input) -> bool {
 #[test]
 fn an_escapee_exit_ends_the_turn_left_safe_workspace_with_no_failure() {
     let mut rig = Rig::start("turn-escapee", EXIT_ON_PROMPT);
+    tier_b(&mut rig);
     let thread = rig.thread();
     let turn = send_prompt(&mut rig, 10, thread);
     let saw_end = Cell::new(false);
@@ -126,7 +143,7 @@ fn waiting_for_exit(actor: &Actor, thread: clauseo_protocol::ThreadId) -> bool {
 
 /// Runs `rig`'s prompt until its turn's close waits for the agent's exit, the agent's `Ended`
 /// held back, then rewrites that exit's code to the Escapee's.
-fn until_waiting_with_a_held_escapee(rig: &mut Rig, thread: clauseo_protocol::ThreadId) {
+pub(super) fn until_waiting_with_a_held_escapee(rig: &mut Rig, thread: clauseo_protocol::ThreadId) {
     rig.run_holding(
         "the turn's close waiting for the agent's exit",
         |_, input| is_end(input),
@@ -151,7 +168,7 @@ fn until_waiting_with_a_held_escapee(rig: &mut Rig, thread: clauseo_protocol::Th
 
 /// The stop and the failures `thread`'s log holds for `turn`, and where its `TurnEnded` and
 /// the Escapee detach are in it.
-fn ended_in(
+pub(super) fn ended_in(
     log: &[DomainEvent],
     turn: clauseo_protocol::TurnId,
 ) -> (Option<StopReason>, bool, Option<usize>, Option<usize>) {
@@ -178,6 +195,7 @@ fn ended_in(
 #[test]
 fn an_escapee_exit_reported_after_the_checkpoint_still_ends_the_turn_left_safe_workspace() {
     let mut rig = Rig::start("turn-escapee-late", EXIT_ON_PROMPT);
+    tier_b(&mut rig);
     let thread = rig.thread();
     let turn = send_prompt(&mut rig, 10, thread);
     until_waiting_with_a_held_escapee(&mut rig, thread);
@@ -209,6 +227,7 @@ fn an_escapee_exit_reported_after_the_checkpoint_still_ends_the_turn_left_safe_w
 #[test]
 fn an_escapee_exit_past_the_wait_leaves_the_turn_failed_and_is_logged() {
     let mut rig = Rig::start("turn-escapee-past-wait", EXIT_ON_PROMPT);
+    tier_b(&mut rig);
     let thread = rig.thread();
     let turn = send_prompt(&mut rig, 10, thread);
     until_waiting_with_a_held_escapee(&mut rig, thread);

@@ -1,4 +1,4 @@
-use super::{LINUX_SYSTEM, MACOS_SYSTEM, refused_folders, refused_for};
+use super::{LINUX_SYSTEM, MACOS_SYSTEM, refused_folders, refused_for, refused_trees};
 use crate::locations::{KnownFolder, Os};
 use crate::testing::FakeDirs;
 use std::path::PathBuf;
@@ -59,6 +59,22 @@ fn the_codex_home_is_refused_where_codex_home_moved_it() {
         );
         assert!(!refused_for(os, &with_home()).contains(&PathBuf::from("/Volumes/Work/codex")));
     }
+}
+
+/// R17 PR-E: `~/.codex` and the folder `CODEX_HOME` names are refused trees too: every folder
+/// inside them is refused, not only the folder itself.
+#[test]
+fn the_codex_folders_are_refused_trees() {
+    assert_eq!(refused_trees(&with_home()), paths(&["/Users/ada/.codex"]));
+    let dirs = FakeDirs {
+        codex_home: Some(PathBuf::from("/Volumes/Work/codex")),
+        ..with_home()
+    };
+    assert_eq!(
+        refused_trees(&dirs),
+        paths(&["/Users/ada/.codex", "/Volumes/Work/codex"])
+    );
+    assert_eq!(refused_trees(&FakeDirs::default()), Vec::<PathBuf>::new());
 }
 
 #[test]

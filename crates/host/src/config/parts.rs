@@ -23,6 +23,7 @@ pub(crate) struct ConfigParts {
     pub(crate) launcher: Arc<dyn Launcher>,
     pub(crate) profile: Box<dyn ProfileHook>,
     pub(crate) refused_folders: Vec<PathBuf>,
+    pub(crate) refused_trees: Vec<PathBuf>,
     /// The default matters folder's late answer (`with_documents_later`), if it comes late.
     pub(crate) documents: Option<crate::actor::documents::Later>,
     pub(crate) home_folder: Option<PathBuf>,
@@ -60,6 +61,7 @@ impl From<HostConfig> for ConfigParts {
             launcher: config.launcher,
             profile: config.profile,
             refused_folders: config.refused_folders,
+            refused_trees: config.refused_trees,
             documents: config.documents,
             home_folder: config.home_folder,
             clock: config.clock,

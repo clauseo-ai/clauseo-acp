@@ -266,6 +266,14 @@ pub(super) fn end_unstarted(
     stop: StopReason,
     checkpoint: Option<(MatterId, TurnCheckpoint)>,
 ) {
+    // A turn whose agent left the Safe workspace ends `LeftSafeWorkspace`, with no `TurnFailed`.
+    let escaped = current(actor, thread)
+        .is_some_and(|current| current.workspace == super::state::Workspace::Left);
+    let (stop, failed) = if escaped {
+        (StopReason::LeftSafeWorkspace, None)
+    } else {
+        (stop, failed)
+    };
     let mut close = TurnClose::new(turn, stop);
     close.failure = failed.map(|failed| (failed.code, failed.detail));
     close.detach = current(actor, thread).and_then(|current| current.detach.take());

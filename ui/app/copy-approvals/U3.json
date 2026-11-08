@@ -817,8 +817,8 @@
     "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
   "U3-err-sandbox.pool_full": {
-    "en": "All the Safe workspace's places on this computer are in use, so Clauseo can't answer here yet. End a conversation in another matter to free one.",
-    "hi": "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र की सभी जगहें उपयोग में हैं, इसलिए Clauseo अभी यहाँ उत्तर नहीं दे सकता। एक जगह खाली करने के लिए किसी दूसरे मामले में बातचीत समाप्त करें।",
+    "en": "All the places in this computer's Safe workspace are in use, so Clauseo can't answer in this matter until one is free. End a conversation in another matter to free one.",
+    "hi": "इस कंप्यूटर के सुरक्षित कार्यक्षेत्र की सभी जगहें उपयोग में हैं, इसलिए जब तक कोई जगह खाली नहीं होती, Clauseo इस मामले में उत्तर नहीं दे सकता। एक जगह खाली करने के लिए किसी दूसरे मामले में बातचीत समाप्त करें।",
     "hi_status": "provisional",
     "hi_at": "2026-11-08",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
@@ -837,8 +837,8 @@
     "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
   "U3-err-sandbox.cant_label": {
-    "en": "The Safe workspace couldn't be given access to a folder in this matter, so Clauseo can't answer here. If it keeps happening, ask your IT team.",
-    "hi": "सुरक्षित कार्यक्षेत्र को इस मामले के एक फ़ोल्डर तक पहुँच नहीं दी जा सकी, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। अगर ऐसा बार-बार हो, तो अपनी IT टीम से पूछें।",
+    "en": "The Safe workspace couldn't be prepared for this matter, so Clauseo can't answer here. If it keeps happening, ask your IT team.",
+    "hi": "इस मामले के लिए सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। अगर ऐसा बार-बार हो, तो अपनी IT टीम से पूछें।",
     "hi_status": "provisional",
     "hi_at": "2026-11-08",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",

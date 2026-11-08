@@ -24,9 +24,10 @@ use std::path::{Path, PathBuf};
 
 use clauseo_protocol::MatterSource;
 
-use super::{Actor, RefusalNames, check_registry, claimed_folders, refused_folders, registered};
+use super::{
+    Actor, RefusalNames, check_registry, claimed_folders, refused_folders, registered, settings_of,
+};
 use crate::error::Error;
-use crate::matter_worker::matter_settings;
 
 /// The refusals of [`place`], run off the actor: the folder to check, or create's refusal.
 pub(crate) type PlaceCheck = Box<dyn FnOnce() -> Result<PathBuf, Error> + Send>;
@@ -40,7 +41,7 @@ pub(crate) fn place(actor: &Actor, source: &MatterSource) -> Result<PlaceCheck, 
             let refused = refused_folders(actor);
             let registry = claimed_folders(actor);
             let names = RefusalNames::of(actor);
-            let settings = matter_settings(actor.effective.data_dir());
+            let settings = settings_of(actor);
             Ok(Box::new(move || {
                 clauseo_matters::check_place(&path, &refused)
                     .map_err(Error::Matters)
@@ -57,7 +58,7 @@ pub(crate) fn place(actor: &Actor, source: &MatterSource) -> Result<PlaceCheck, 
         MatterSource::NewFolder { folder } => {
             let parent = registered(actor, folder)?;
             let names = RefusalNames::of(actor);
-            let settings = matter_settings(actor.effective.data_dir());
+            let settings = settings_of(actor);
             Ok(Box::new(move || {
                 let parent = dunce::canonicalize(&parent).unwrap_or(parent);
                 // A child of the parent, not the parent: create makes `parent/<name>`, and the

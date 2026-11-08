@@ -2,17 +2,18 @@
 //! agent whose connection is gone, the shutdown ladder's stop, and `Ended`: the detach it logs
 //! and the turn the exit cut short.
 
-use clauseo_protocol::{AgentSessionDetached, DetachReason, ErrorCode, StreamId, ThreadId};
+use clauseo_protocol::{
+    AgentSessionDetached, DetachReason, ErrorCode, ProtectionTier, StreamId, ThreadId,
+};
 
 use super::super::super::Actor;
 use super::super::launch_checks;
 use super::super::out::Out;
 use super::super::{End, Then, TurnPhase, current, end, state, updates};
-use super::{Agent, Stage, Waiting, fail_waiting, start};
+use super::{Agent, Stage, Waiting, fail_all, fail_waiting, start};
 use crate::agent::{Ended, StopStep};
 use crate::error::Error;
-use crate::log_file::Cause;
-use crate::log_file::LIFECYCLE;
+use crate::log_file::{Cause, LIFECYCLE};
 
 /// Why an agent is stopped, for the detach its `Ended::Stopped` logs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +61,25 @@ pub(in super::super) fn stop(actor: &mut Actor, thread: ThreadId) {
     launch_checks::relay::end_for(actor, thread);
 }
 
+/// The launch failed after the agent started: stop it and fail what waits for it. A launch whose
+/// connection closed (its process exited; the sandbox's first-act fail-closed exits here) leaves
+/// what waits to its exit report: `on_ended` fails it with the exit's own stop, so an Escapee
+/// exit before the session ends its turn `LeftSafeWorkspace`. `Ended` always follows the stop.
+pub(in super::super) fn launch_failed(actor: &mut Actor, thread: ThreadId, error: &Error) {
+    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
+        return;
+    };
+    tracing::warn!(%thread, error = %Cause(error), "the agent did not start");
+    agent.link.stop();
+    agent.stage = Stage::Stopping;
+    if matches!(error, Error::Acp(clauseo_acp::Error::Closed)) {
+        agent.stop_cause = StopCause::Closed;
+        return;
+    }
+    let waiting = std::mem::take(&mut agent.waiting);
+    fail_all(actor, thread, waiting, error);
+}
+
 /// Stops `thread`'s agent for idling (`idle.rs`) with the shutdown ladder: its `Ended` logs
 /// `AgentSessionDetached { reason: IdleStopped }`, unless its connection was already gone.
 pub(in super::super) fn idle_stop(actor: &mut Actor, thread: ThreadId) {
@@ -102,6 +122,7 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
         after_stop,
         stop_cause,
         denied_data_folder,
+        tier,
         ..
     } = *agent;
     let unresponsive = matches!(
@@ -111,30 +132,17 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
             ..
         }
     );
-    let reason = match ended {
-        Ended::Exited(reason) => reason,
-        Ended::Stopped { step, report } => {
-            if step == StopStep::Unresponsive {
-                let (kind, code) = reason_kind(&report);
-                tracing::warn!(%thread, kind, ?code, "the agent did not exit after its kill");
-            }
-            match stop_cause {
-                StopCause::Asked => DetachReason::Closed,
-                StopCause::Restarting => DetachReason::Restarting,
-                StopCause::IdleStopped => DetachReason::IdleStopped,
-                // It was gone before the stop: the exit is its own, not a close.
-                StopCause::Closed => report,
-            }
-        }
-    };
-    let escaped = left_safe_workspace(&reason);
-    if escaped && let Some(entry) = actor.threads.get(&thread) {
-        // Ids only: no path, no user name.
-        tracing::warn!(
-            agent = %entry.row.agent,
-            matter = %entry.row.matter,
-            "an agent's process left the Safe workspace; its session was stopped"
-        );
+    if let Ended::Stopped {
+        step: StopStep::Unresponsive,
+        report,
+    } = &ended
+    {
+        let (kind, code) = reason_kind(report);
+        tracing::warn!(%thread, kind, ?code, "the agent did not exit after its kill");
+    }
+    let (reason, escaped) = detach_of(ended, stop_cause, tier == Some(ProtectionTier::B));
+    if escaped {
+        escaped_from(actor, thread);
     }
     let (kind, code) = reason_kind(&reason);
     tracing::info!(
@@ -166,7 +174,12 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
             if let Some(reason) = detach {
                 log_detach(actor, thread, reason);
             }
-            end::end_turn(actor, thread, End::cancelled(None));
+            let end = if escaped {
+                End::left_safe_workspace(None)
+            } else {
+                End::cancelled(None)
+            };
+            end::end_turn(actor, thread, end);
         }
         (Some((TurnPhase::Ending, _)), Some(reason)) => {
             // Logged after the turn's `TurnEnded`, which is still to come.
@@ -195,7 +208,11 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
         (_, Some(reason)) => log_detach(actor, thread, reason),
         (_, None) => {}
     }
-    if !after_stop.is_empty() {
+    if escaped {
+        // Nothing starts again for what came while it stopped (a mode or config change in the
+        // closed window, the turn it held): it fails with the exit, the turn `LeftSafeWorkspace`.
+        fail_all(actor, thread, after_stop, &exited);
+    } else if !after_stop.is_empty() {
         start(actor, thread, after_stop);
     }
     super::super::sign_in::agent_ended(actor, thread, unresponsive);
@@ -215,6 +232,47 @@ pub(in super::super) fn exit_due(actor: &mut Actor, thread: ThreadId) -> bool {
             Stage::Closed => true,
             Stage::Initializing | Stage::Loading | Stage::Attached => agent.link.closed(),
         })
+}
+
+/// The detach `ended` logs for an agent stopped for `cause`, and whether its process left the
+/// Safe workspace. The Escapee exit is checked first, whoever stopped the agent: its code stays
+/// in the detach, as the agent's own exit, not the host's close, restart or idle stop. Only an
+/// agent launched while the computer had tier B (`tier_b`) ran under the sandbox runner.
+fn detach_of(ended: Ended, cause: StopCause, tier_b: bool) -> (DetachReason, bool) {
+    let report = match &ended {
+        Ended::Exited(report) | Ended::Stopped { report, .. } => report,
+    };
+    let escaped = tier_b && left_safe_workspace(report);
+    let reason = match ended {
+        Ended::Exited(reason) => reason,
+        Ended::Stopped { report, .. } if escaped => report,
+        Ended::Stopped { report, .. } => match cause {
+            StopCause::Asked => DetachReason::Closed,
+            StopCause::Restarting => DetachReason::Restarting,
+            StopCause::IdleStopped => DetachReason::IdleStopped,
+            // It was gone before the stop: the exit is its own, not a close.
+            StopCause::Closed => report,
+        },
+    };
+    (reason, escaped)
+}
+
+/// `thread`'s agent left the Safe workspace: one warning with ids only (no path, no user name),
+/// and its turn, whatever its phase, ends `LeftSafeWorkspace` with no `TurnFailed`, and is
+/// never queued again (`Current::workspace`). A turn still accepting its message used no agent.
+fn escaped_from(actor: &mut Actor, thread: ThreadId) {
+    if let Some(entry) = actor.threads.get(&thread) {
+        tracing::warn!(
+            agent = %entry.row.agent,
+            matter = %entry.row.matter,
+            "an agent's process left the Safe workspace; its session was stopped"
+        );
+    }
+    if let Some(current) = current(actor, thread)
+        && current.phase != TurnPhase::Accepting
+    {
+        current.workspace = super::super::state::Workspace::Left;
+    }
 }
 
 /// Whether the agent's process ended with the sandbox runner's (`clauseo-sandbox-run.exe`) Escapee
@@ -260,3 +318,6 @@ pub(in super::super) fn log_detach(actor: &mut Actor, thread: ThreadId, reason: 
         tracing::warn!(%thread, error = %Cause(&error), "the detach was not logged");
     }
 }
+
+#[cfg(test)]
+mod tests;
