@@ -108,6 +108,22 @@ fn a_full_removal_takes_each_user_off_in_the_uninstall_order_then_the_rest() {
     );
 }
 
+/// The uninstaller's admin-copy teardown (`remove_then`) runs with the set-up lock still held:
+/// after the record goes and before the unlock, so a refresh can't race the staging teardown.
+#[test]
+fn the_teardown_after_a_removal_runs_before_the_lock_is_given_back() {
+    let (mut machine, mut acl) = pool("remove-then-locked", Some(owner()));
+    let log = std::rc::Rc::clone(&machine.log);
+    let mut teardown = |removed: &Removed| {
+        assert!(matches!(removed, Removed::All(_)), "{removed:?}");
+        log.borrow_mut().push("teardown".to_owned());
+    };
+    remove_then(&mut machine, &mut acl, false, &mut teardown).unwrap();
+    let mut expected = full_removal();
+    expected.insert(expected.len() - 1, "teardown".to_owned());
+    assert_eq!(machine.lines(), expected);
+}
+
 /// A user whose profile has a reparse point on the way to `LocalLow` doesn't stop the removal:
 /// its deny goes with the profile, which is deleted, and every other step runs as usual.
 #[test]

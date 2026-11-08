@@ -47,7 +47,9 @@
 //!    can influence, so it is checked as `--data-dir` is and used only as `ledger_work.rs` says;
 //! 7. the group, when it is the record's and has no members left;
 //! 8. on a per-machine install, the stop task set-up registered for the owner, then the record
-//!    key.
+//!    key;
+//! 9. for the uninstaller only, the admin copy's teardown (`admin_remove.rs`, run through
+//!    [`remove_then`]), with the lock still held, so a refresh skips instead of racing it.
 //!
 //! The first failure stops the run there: [`SetupExit::RemovedPartly`], the record kept with
 //! `Removing = 1` and every pool SID (so a later run still trusts the ledger's entries), and the
@@ -200,13 +202,28 @@ pub fn remove(
     acl: &mut impl AclWriter,
     per_machine: bool,
 ) -> Result<Removed, RemoveFailure> {
+    remove_then(machine, acl, per_machine, &mut |_| {})
+}
+
+/// [`remove`], then `while_locked` with the set-up lock still held, given what was removed: the
+/// uninstaller's admin-copy teardown (`exe::run_remove`), so a refresh, which takes the same
+/// lock without waiting, skips rather than race the staging folder's removal. `while_locked`
+/// runs on every success but a per-user one by someone else decided before the lock
+/// ([`Removed::NotOwner`]): the pool has an owner then, so the copy isn't this removal's.
+pub fn remove_then(
+    machine: &mut impl Removal,
+    acl: &mut impl AclWriter,
+    per_machine: bool,
+    while_locked: &mut dyn FnMut(&Removed),
+) -> Result<Removed, RemoveFailure> {
     // Read once before the lock, so a machine with nothing set up, or a per-user uninstall by
     // someone else, ends at once and never waits for a set-up's lock.
     let before = read(machine)?;
     if before.is_none() {
         // No record, unless a set-up holding the lock is about to write it.
         lock(machine, 0)?;
-        machine.unlock();
+        let _locked = Locked(machine);
+        while_locked(&Removed::NothingSetUp);
         return Ok(Removed::NothingSetUp);
     }
     if let Decision::Stop(removed) = decide(machine, before.as_ref(), per_machine)? {
@@ -217,19 +234,25 @@ pub fn remove(
     let machine = &mut *locked.0;
     let record = read(machine)?;
     let acting = match decide(machine, record.as_ref(), per_machine)? {
-        Decision::Stop(removed) => return Ok(removed),
+        Decision::Stop(removed) => {
+            while_locked(&removed);
+            return Ok(removed);
+        }
         Decision::Act(acting) => acting,
     };
     let Some(record) = record else {
+        while_locked(&Removed::NothingSetUp);
         return Ok(Removed::NothingSetUp);
     };
-    steps(machine, acl, &record, acting)
+    let removed = steps(machine, acl, &record, acting)
         .map(Removed::All)
         .map_err(|(step, cause)| RemoveFailure {
             step,
             cause,
             exit: SetupExit::RemovedPartly,
-        })
+        })?;
+    while_locked(&removed);
+    Ok(removed)
 }
 
 /// The set-up lock, waited for up to `wait_ms`; held still is [`SetupExit::LockHeld`].
