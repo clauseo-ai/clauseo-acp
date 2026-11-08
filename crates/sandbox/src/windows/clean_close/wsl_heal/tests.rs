@@ -330,13 +330,17 @@ fn a_missing_deny_asks_the_deny_task_and_a_pending_upgrade_the_upgrade_task() {
 
 #[test]
 fn a_restored_deny_waits_for_an_upgrade_run_already_going_on() {
-    // The lawyer's own upgrade run is installing; the deny task puts the deny back at 1 s.
+    // The lawyer's own upgrade run starts at 0.5 s; the deny task puts the deny back at 1 s.
     let mut task = FakeTask::new();
     let done = LastRun::Ran {
         code: 0,
         at: 46_334.6,
     };
-    task.upgrade_last = vec![(secs(0.0), Ok(RUNNING)), (secs(100.0), Ok(done))];
+    task.upgrade_last = vec![
+        (secs(0.0), Ok(LastRun::NeverRun)),
+        (secs(0.5), Ok(RUNNING)),
+        (secs(100.0), Ok(done)),
+    ];
     let seen = Cell::new(0);
     let script = vec![(secs(0.0), MISSING), (secs(1.0), DENIED)];
     let found = heal(&mut task.checks(script), &task, &counter(&seen));
@@ -346,7 +350,7 @@ fn a_restored_deny_waits_for_an_upgrade_run_already_going_on() {
     assert_eq!((seen.get(), asked), (1, (1, 0)));
     // Still running at the upgrade's limit: refused, as the upgrade branch refuses.
     let mut task = FakeTask::new();
-    task.upgrade_last = vec![(secs(0.0), Ok(RUNNING))];
+    task.upgrade_last = vec![(secs(0.0), Ok(LastRun::NeverRun)), (secs(0.5), Ok(RUNNING))];
     let script = vec![(secs(0.0), MISSING), (secs(1.0), DENIED)];
     let found = heal(&mut task.checks(script), &task, &none);
     assert_eq!(found.unwrap_err().blocked, Blocked::WslUpgradePending);
@@ -377,4 +381,33 @@ fn a_run_that_left_msiexec_installing_refuses_the_launch() {
         assert_eq!(blocked, Blocked::WslUpgradePending);
         assert!(why.contains("StillInstalling (67)"), "{why}");
     }
+}
+
+#[test]
+fn a_deny_in_place_still_waits_for_an_upgrade_run_going_on() {
+    let mut task = FakeTask::new();
+    let done = LastRun::Ran {
+        code: 0,
+        at: 46_334.6,
+    };
+    task.upgrade_last = vec![(secs(0.0), Ok(RUNNING)), (secs(60.0), Ok(done))];
+    let seen = Cell::new(0);
+    let found = heal(
+        &mut task.checks(vec![(secs(0.0), DENIED)]),
+        &task,
+        &counter(&seen),
+    );
+    assert_eq!(found, Ok((Found::Denied(2), WslHealed::Nothing)));
+    assert_eq!((seen.get(), task.elapsed_now()), (1, secs(60.0)));
+    assert_eq!((task.requests.get(), task.upgrade_requests.get()), (0, 0));
+    // Still running at the limit: refused, the deny in place or not.
+    let mut task = FakeTask::new();
+    task.upgrade_last = vec![(secs(0.0), Ok(RUNNING))];
+    let found = heal(&mut task.checks(vec![(secs(0.0), DENIED)]), &task, &none);
+    assert_eq!(found.unwrap_err().blocked, Blocked::WslUpgradePending);
+    let at = task.elapsed_now();
+    assert!(
+        at >= UPGRADE_RUNNING_WAIT && at < UPGRADE_RUNNING_WAIT + POLL,
+        "{at:?}"
+    );
 }

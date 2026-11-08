@@ -33,10 +33,11 @@
 //! (`WslUpgradeExit::StillInstalling`, 67: `WslUpgradePending`). A deny restored by the deny task
 //! is trusted only once no upgrade run is going on: one that is (the lawyer's own, or one an
 //! abandoned launch asked for) is waited for as above, the result still
-//! [`WslHealed::DenyRestored`]. What remains is a residual: a pool user could start the same
-//! upgrade through `WslInstaller` during the session (its launch permission is the package's,
-//! `wsl::upgrade`), and the deny is off from the MSI's
-//! rewrite until the WSL deny task's run its events start.
+//! [`WslHealed::DenyRestored`]. Before any of it, at every check, an upgrade run already going on
+//! is waited for the same way, whether the deny is in place, missing or restored.
+//! What remains is a residual: a pool user could start the same upgrade through `WslInstaller`
+//! during the session (its launch permission is the package's, `wsl::upgrade`), and the deny is
+//! off from the MSI's rewrite until the WSL deny task's run its events start.
 
 use std::time::Duration;
 
@@ -143,6 +144,16 @@ pub(crate) fn heal(
     task: &dyn DenyTask,
     progress: &dyn Fn(LaunchProgress),
 ) -> Result<(Found, WslHealed), Refused> {
+    // The host hears the upgrade's notice at most once per check.
+    let told = std::cell::Cell::new(false);
+    let tell = || {
+        if !told.replace(true) {
+            progress(LaunchProgress::UpdatingWindowsComponent);
+        }
+    };
+    // Whatever the deny's state, an upgrade run going on is waited for first: its MSI rewrites
+    // the launch permissions mid-install, so no state read during it can be trusted.
+    wait_for_upgrade_run(task, &tell)?;
     let mut now = check();
     let mut upgrading = match now {
         Ok(Found::UpgradePending(_)) => true,
@@ -154,7 +165,7 @@ pub(crate) fn heal(
         }
     };
     if upgrading {
-        progress(LaunchProgress::UpdatingWindowsComponent);
+        tell();
     }
     let mut which = if upgrading {
         Which::Upgrade
@@ -201,7 +212,7 @@ pub(crate) fn heal(
                     // A missing deny that turns out a pending upgrade: the upgrade task's turn.
                     upgrading = true;
                     which = Which::Upgrade;
-                    progress(LaunchProgress::UpdatingWindowsComponent);
+                    tell();
                     before = task.last_run(which).ok();
                     if let Err(why) = task.request(which) {
                         let why = format!("{} couldn't be started: {why}", name(which));
@@ -253,11 +264,39 @@ pub(crate) fn heal(
                 adopted = true;
                 which = Which::Upgrade;
                 before = task.last_run(which).ok();
-                progress(LaunchProgress::UpdatingWindowsComponent);
+                tell();
             }
             Err(_) => {}
         }
     }
+}
+
+/// Waits while the WSL upgrade task's run goes on (the lawyer's own, or one an abandoned launch
+/// asked for), telling the host, up to [`UPGRADE_RUNNING_WAIT`]: a run still going then refuses
+/// (`WslUpgradePending`), as does one that ended with msiexec still installing (67).
+fn wait_for_upgrade_run(task: &dyn DenyTask, tell: &dyn Fn()) -> Result<(), Refused> {
+    if !running(task, Which::Upgrade) {
+        return Ok(());
+    }
+    tell();
+    let start = task.elapsed();
+    while running(task, Which::Upgrade) {
+        if task.elapsed().saturating_sub(start) >= UPGRADE_RUNNING_WAIT {
+            let secs = UPGRADE_RUNNING_WAIT.as_secs();
+            let last = last_run_text(task, Which::Upgrade);
+            let why = format!("the WSL upgrade task was still running after {secs} s: {last}");
+            return Err(Refused {
+                blocked: Blocked::WslUpgradePending,
+                why,
+            });
+        }
+        task.sleep(POLL);
+    }
+    let still = i32::from(WslUpgradeExit::StillInstalling.as_code());
+    if matches!(task.last_run(Which::Upgrade), Ok(LastRun::Ran { code, .. }) if code == still) {
+        return still_installing(task).map(|_never| ());
+    }
+    Ok(())
 }
 
 /// The refusal for an upgrade run whose msiexec outlived its wait and was left running
