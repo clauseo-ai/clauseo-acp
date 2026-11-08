@@ -90,7 +90,11 @@ fn expected(scratch: &Scratch) -> BTreeMap<String, String> {
             }
         }
         let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_owned());
-        map.insert("PATH".to_owned(), format!(r"{root}\System32;{root}"));
+        // Lower case, as `child_env` compares it (Windows paths compare without case).
+        map.insert(
+            "PATH".to_owned(),
+            format!(r"{root}\System32;{root}").to_lowercase(),
+        );
         map.insert("SystemRoot".to_owned(), root);
     } else {
         for name in ["http_proxy", "https_proxy", "all_proxy"] {
@@ -200,6 +204,12 @@ fn child_env(report: &Value, host_session: &str) -> BTreeMap<String, String> {
                     "{name} came through from the guard's env"
                 );
             }
+        }
+        // PATH starts with the system directory Windows reports (`GetSystemDirectoryW`), which
+        // can differ in case from `<SystemRoot>\System32` (e.g. `system32`): Windows paths
+        // compare without case, so the test does too.
+        if let Some(path) = env.get_mut("PATH") {
+            *path = path.to_lowercase();
         }
     }
     let session = env.remove("AGENT_BROWSER_SESSION").unwrap_or_default();
