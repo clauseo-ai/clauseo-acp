@@ -365,3 +365,44 @@ fn elevated_a_system_only_staging_is_taken_back_by_the_lock_down_and_the_teardow
     assert!(locked(&os::security(&staging).unwrap(), true));
     assert_eq!(std::fs::read_dir(&staging).unwrap().count(), 1);
 }
+
+/// The take-back of a file, opened once as itself: a SYSTEM-only file comes back locked and
+/// readable; one with a second name is refused and left; a link is left, never taken back
+/// through, and what it names keeps its descriptor.
+#[test]
+#[ignore = "elevated: takes a SYSTEM-only file back; CI's elevated step runs it"]
+fn elevated_a_file_is_taken_back_through_its_own_handle() {
+    use super::take_back::LockDownFs as _;
+    use super::take_back_os::NtfsLockDown;
+    use crate::windows::test_junction::junction;
+    if !elevated_tests_enabled() {
+        return;
+    }
+    let dir = TempDir::new("admin-copy-take-back-file");
+    let (_sandbox, _exe, staging) = shut_staging(&dir);
+    let old = staging.join("clauseo-sandbox-setup.exe.old");
+    NtfsLockDown.take_back(&old).unwrap();
+    assert!(locked(&os::security(&old).unwrap(), false));
+    assert_eq!(
+        os::sha256(&old).unwrap(),
+        os::sha256(&dir.file("same", "MZ old")).unwrap()
+    );
+    // Two names: refused, the descriptor as it was.
+    let linked = dir.file("linked.exe", "MZ");
+    dir.hard_link("second.exe", &linked);
+    system_only(&linked, false);
+    let before = os::security(&linked).unwrap();
+    assert!(NtfsLockDown.take_back(&linked).is_err());
+    assert_eq!(os::security(&linked).unwrap(), before);
+    // A junction: left, and what it names untouched.
+    let target = dir.dir("target");
+    protect_with(&target, OWN_FOLDER).unwrap();
+    let target_before = os::security(&target).unwrap();
+    let link = dir.path().join("link");
+    junction(&link, &target).unwrap();
+    NtfsLockDown.take_back(&link).unwrap();
+    assert_eq!(os::found(&link).unwrap(), Found::Link);
+    assert_eq!(os::security(&target).unwrap(), target_before);
+    // Nothing there: nothing to do.
+    NtfsLockDown.take_back(&dir.path().join("none")).unwrap();
+}

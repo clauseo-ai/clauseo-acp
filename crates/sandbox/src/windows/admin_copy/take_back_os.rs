@@ -2,7 +2,7 @@
 //! folder (`take_back.rs`). A take-back runs with `SeTakeOwnershipPrivilege`,
 //! `SeRestorePrivilege` and `SeBackupPrivilege` enabled for the call (`acl::privilege`, as
 //! `--reclaim` enables them), so its opens, all with backup semantics and none through a
-//! reparse point (`os::lock_down`, `lock_tree_os`, `os::found`), get `READ_CONTROL`,
+//! reparse point (`lock_tree_os`, `os::found`), get `READ_CONTROL`,
 //! `WRITE_DAC`, `WRITE_OWNER` and the listing whatever the DACL says. An elevated or SYSTEM
 //! token holds all three.
 
@@ -10,8 +10,8 @@ use std::io;
 use std::path::Path;
 
 use super::Found;
-use super::lock_tree_os::lock_tree;
-use super::os::{self, lock_down};
+use super::lock_tree_os::{self, lock_tree};
+use super::os;
 use super::take_back::LockDownFs;
 use crate::windows::acl::privilege::Privileges;
 
@@ -57,11 +57,6 @@ impl LockDownFs for NtfsLockDown {
 
     fn take_back(&mut self, path: &Path) -> io::Result<()> {
         let _privileges = Privileges::enable(&TAKE_BACK)?;
-        match os::found(path)? {
-            Found::Folder => lock_tree(path, None),
-            Found::File => lock_down(path, false),
-            // A link is deleted as itself, never taken back through.
-            Found::Link | Found::Missing => Ok(()),
-        }
+        lock_tree_os::take_back(path)
     }
 }

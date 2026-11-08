@@ -4,7 +4,8 @@
 //! if a reparse point, locked and listed through that handle (`FileIdBothDirectoryInfo`); each
 //! entry is opened relative to it (`NtCreateFile` with `RootDirectory`, `OBJ_DONT_REPARSE` and
 //! `FILE_OPEN_REPARSE_POINT`), and a link below is deleted as itself, through its own handle.
-//! A file with more than one name is refused, not locked (`os::lock_handle`).
+//! A file with more than one name is refused, not locked (`os::lock_handle`). A take-back
+//! ([`take_back`]) opens what it takes back the same way, a file as much as a folder.
 #![expect(unsafe_code, reason = "FFI to SetFileInformationByHandle")]
 
 use std::ffi::OsString;
@@ -30,6 +31,25 @@ pub(crate) fn lock_tree(dir: &Path, skip: Option<&str>) -> io::Result<()> {
         ));
     }
     lock_level(&root, skip)
+}
+
+/// A take-back's lock-down of `path` (`take_back_os`), opened once as itself and refused
+/// through no link: a folder is locked with all below it, as [`lock_tree`] does; a file is
+/// locked and read back through that same handle, and refused if it has more than one name. A
+/// link, or nothing there, is left: a link is deleted as itself, never taken back through.
+pub(crate) fn take_back(path: &Path) -> io::Result<()> {
+    // The listing right is `FILE_READ_DATA` on a file, which backup semantics grants.
+    let object = match Object::open_folder(path) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        other => other?,
+    };
+    if object.reparse() {
+        Ok(())
+    } else if object.folder {
+        lock_level(&object, None)
+    } else {
+        lock(&object)
+    }
 }
 
 /// Locks the open folder `folder`, then each entry it lists but `skip`, as the module says.
