@@ -2184,6 +2184,126 @@ run: the production descriptor with two standard users, a squat (exit 64, nothin
 standard user running the app's check against a server LOCAL SYSTEM runs, which shows what a
 standard user can read of it (the owner; the process list's user and the image by id).
 
+### The Git tree
+
+**Why.** Claude Code on Windows needs Git Bash (`CLAUDE_CODE_GIT_BASH_PATH`), and Git for Windows
+runs msys for `bash.exe` and for every `sh.exe` Git starts (`git clone`, hooks). msys2-runtime
+makes its shared objects under `\Sessions\BNOLINKS\<session>\msys-2.0S5-<key>`, a hard-coded
+path, where `<key>` is a hash of the msys install root's path. A pool user's restricted Low token
+can't create there, so Git Bash fails from the lawyer's Git. The fix has two parts. This part
+gives each pool account its own copy of the tree at a path of its own, so its key differs from
+the lawyer's and from every other pool account's. Part 2, the outer runner, pre-creates that
+key's directory for the run and points the agent at the tree. VM facts: a junction doesn't change
+the key (msys resolves it); copying only `usr\bin\{msys-2.0.dll,bash.exe,sh.exe}` changes it for
+bash, but `git.exe` finds `sh.exe` from its own install prefix, so working Git needs the whole
+tree. A full hard-linked tree was 870 folders and 9,620 files (409 MB linked, nothing copied),
+built in about 5 s as admin. A limited user can't hard-link Program Files' files (error 5), so the
+trees are built elevated or as SYSTEM.
+
+**Where.** `%ProgramFiles%\Clauseo\Sandbox\git\<account>\<tree id>\` (`git_tree`), inside the
+admin folder, whose chain only administrators can change: `%ProgramData%\Clauseo` can be made
+first by any standard user, and whoever owns a parent folder can rewrite the ACLs below it and
+swap another account's tree. Each run checks the admin folder's chain as `admin_copy::check`'s
+rule 2 does (`admin_dir_checked`). Each level below it (`git`, `<account>`, `<tree id>`, a
+temporary tree, `_source`) is made or opened as itself, relative to its parent's handle. A
+reparse point refuses it, and it gets owner SYSTEM and a protected DACL through that handle,
+read back:
+- `git\`: SYSTEM and Administrators full, the pool's group traverse only (`0x1200a0`, no listing);
+- `<account>\` and each tree: SYSTEM and Administrators full, that account read and execute
+  (`0x1200a9`), inherited below; no one else, so one pool account can't list another's tree;
+- `_source\` and its copy: SYSTEM and Administrators full, the pool's group read and execute.
+
+A hard link shares its file's security, so a tree's files keep the DACL of Git's own files
+(`Users` read and execute, in the pool token's restricting set). The folders' DACLs are what
+part the trees, and they never pass inheritance down onto the linked files. A file's content is
+the installed Git's and isn't secret. `admin_copy::expected_entry` accepts `git`, and `--adopt`'s
+lock-down and take-back keep `git\` and leave it out (`take_back::lock_down_with`), as they would
+otherwise hand each tree to Administrators and Users.
+
+**The source.** Only a per-machine Git for Windows: `HKLM\SOFTWARE\GitForWindows`' `InstallPath`
+(64-bit view), else `%ProgramFiles%\Git`. It must be a full local path (a drive letter, no `.` or
+`..`), not a network path (`folder_support`), with no reparse point from the volume root down. It
+must hold `usr\bin\msys-2.0.dll` and `cmd\git.exe` as regular files and lie outside the profiles
+folder. It and every folder above it must be ones only SYSTEM, Administrators or `TrustedInstaller`
+can change (`level_safe`), and the volume root is held to `root_safe`: `admin_copy::check`'s rule 2
+for another chain. Otherwise the owner of a writable parent could swap the install after the checks,
+and the trees would link the owner's files. A per-user Git (in a profile) is refused: its files'
+ACLs leave pool users out, and a link shares them. Copying such a Git is a follow-up's decision;
+until then those accounts record `per-user-git`. A reparse point anywhere in the tree refuses the
+build.
+
+**The tree id.** `<version>-<12 hex digits>`. The version is `cmd\git.exe`'s `FILEVERSION`,
+keeping `0-9`, `A-Z`, `a-z` and `.` (at most 24; `git` when none). The digits start a SHA-256
+over the root's path (lower case) and, for `msys-2.0.dll` and `git.exe`, the volume serial, the
+128-bit file ID, the size and the last write time. An installer replaces files under new IDs, so
+an update, a repair or a move names a new tree.
+
+**The build.** Per account, a tree already there under the current id is kept and secured again,
+so a run with the same Git builds nothing. Otherwise the tree is built as `<tree id>.tmp`. Folders
+are made in order (inheriting), and each file is a `CreateHardLinkW` of the source's. The build is
+then renamed into place, so no reader ever sees a half-built tree. Just before the rename, the
+install's `msys-2.0.dll` and `git.exe` must still have the identities the tree id names, so a Git
+update that ran during the build fails it (`build-failed`) and the next run builds the new Git.
+A failed build deletes its temporary tree. Some files come from a copy in
+`git\_source\<tree id>\`, made once (the same temporary-then-rename way). With the source on
+another volume than Program Files, every file does. Otherwise only each file with several names
+in the install does, as grouped by file ID: NTFS holds a file to 1023 names, and a tree linking
+all of a file's names adds that many each time. Each name is copied as a file of its own, and
+older copies are deleted (the trees' links keep their files). The install's listing is read only
+when some tree is built. A Git update never breaks
+a running session's tree: a link keeps the old file when the installer replaces the name.
+
+**When.** Set-up builds the trees for its live pool after the network step (step 8b,
+`late_steps::git_trees_then_journals`), elevated and not as the owner. Each `--refresh` run
+(`\Clauseo\SandboxRefresh`, SYSTEM) does the same after the admin copy's steps, under the same
+set-up lock, from the record's `PoolSids` and `GroupSid`, and never changes the refresh's exit.
+Neither builds anything during a removal (`Removing`). A per-machine install has no refresh task,
+so there a Git update reaches the trees at the next set-up (every install and update runs one).
+Until then the old tree keeps working.
+
+**Old trees.** They are retired only once the record naming the new trees is written; a record that
+can't be written retires nothing, as it may still name them. The previous tree stays while any
+process runs as that account (the process list, `setup::processes::running`, as SYSTEM with
+`SeDebugPrivilege`). A list that can't be read counts as running. Every older tree stays while that
+holds too, so no session ever loses its tree. Once the account runs nothing, every tree but the
+current one goes. A temporary tree is always deleted: only a killed run leaves one, since every
+build holds the set-up lock. The folder of an account no longer in the pool is deleted. Accepted: a
+process whose token user can't be read (a pool process that shut its token's DACL) isn't seen, so
+its own session may lose an old tree; only that account's own session suffers.
+
+**The record.** `HKLM\SOFTWARE\Clauseo\Sandbox\GitTrees`, rewritten whole each run, inheriting
+the record key's DACL (SYSTEM and Administrators write, Users read): one `REG_SZ` per pool SID.
+The value is the tree's full path, or `Git Bash unavailable: <code>` (`git_tree::Recorded`). An
+empty pool deletes the subkey and every tree. Part 2 reads it.
+
+**Failures never block set-up.** Each is recorded for the accounts it hits and written to the
+Event Log in fixed words, naming no path or account ("a sandbox account's Git tree isn't available
+(Git Bash unavailable: <code>)"). The codes (`git_tree::Unavailable`, appended only):
+
+| Code | Meaning |
+|---|---|
+| `no-git` | No per-machine Git, or one without `msys-2.0.dll` or `cmd\git.exe` |
+| `per-user-git` | The Git found is in a profile, or in a folder others than administrators can change |
+| `network-path` | The source or the admin folder is a network path, or the source path isn't local |
+| `reparse-point` | A link or junction on the way to the source, in it, or at a tree's folder |
+| `source-unreadable` | The source, its registry key or a volume couldn't be read |
+| `folder-refused` | The admin folder's chain, or a tree's folder, failed its check or couldn't be secured |
+| `build-failed` | A link, a copy, a delete before the build, or the rename into place failed |
+| `bad-account` | The account's name can't be a folder name |
+
+**Removal.** `--remove` deletes `git\` with every tree and source copy, and the `GitTrees` subkey,
+after the pool's processes are stopped and before the record (`RemoveStep::GitTrees`, appended;
+the subkey would otherwise keep the record's key). Its path comes from `%ProgramFiles%` alone, so
+a machine with no admin copy has nothing to remove and goes on. A failure there is
+`RemovedPartly`, and a re-run retries. A first set-up's rollback that leaves no record clears
+them the same way. `--remove --uninstall` deletes the admin folder with whatever is left.
+
+**Part 2 (not built here).** Before it points `CLAUDE_CODE_GIT_BASH_PATH` at a tree, the runner
+checks it: owner SYSTEM, no reparse point on the way, and the tree id the record names. It
+pre-creates the key's session directory. A launch reads the recorded path just before starting
+its first process as the account, so a refresh that retires the old tree in that gap leaves the
+launch without one; part 2 must check that the tree is still there before it uses it.
+
 ### The launcher (PR6 interface)
 
 This section is the single source both sides point to. The host and stage C agreed it, and the
