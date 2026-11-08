@@ -26,8 +26,8 @@
 //!   under any name NTFS matches, is still the planned one.
 //!
 //! A rename across volumes fails with `ERROR_NOT_SAME_DEVICE`: [`SetAsideFailure::OtherVolume`].
-//! So an item on another volume than the data folder goes to that volume's own set-aside folder
-//! (`Volume::items_root`, made by `private_dir::make_drive_folder`).
+//! So an item on another volume than the data folder goes to the lawyer's own set-aside folder on
+//! that volume (`Volume::items_root`, made by `private_dir::make_drive_folder`).
 #![expect(
     unsafe_code,
     reason = "FFI to open the set-aside's folders and items by handle and rename them"
@@ -156,7 +156,8 @@ impl Volume for Ntfs {
         if same_root(&root(sandbox)?, &there) {
             Ok(sandbox.to_owned())
         } else {
-            Ok(there.join(super::ITEMS_ROOT))
+            let user = crate::windows::record::current_user_sid()?;
+            Ok(there.join(super::drive_folder_name(user.as_str())))
         }
     }
 

@@ -11,10 +11,10 @@ use std::io;
 use std::os::unix::fs::MetadataExt as _;
 use std::path::{Path, PathBuf};
 
-use super::super::SetAsideFailure;
 use super::super::files::FileId;
 use super::super::run::Volume;
 use super::super::scan::{Kind, Listed};
+use super::super::{SetAsideFailure, drive_folder_name, not_yours};
 use crate::windows::write::{make_sandbox_dir, rename_new};
 
 pub(super) struct Posix {
@@ -30,9 +30,16 @@ pub(super) struct Posix {
     /// be read. [`POOL_USER`] alone unless a test says otherwise.
     pub(super) pool: RefCell<Option<Vec<String>>>,
     /// Another volume, as a test sets it ([`Posix::other_volume`]): every path under the first
-    /// folder is on it, and the second is its set-aside folder ([`Volume::items_root`]).
+    /// folder is on it, and the second is its root, where [`Posix::lawyer`]'s set-aside folder
+    /// is ([`Volume::items_root`]).
     pub(super) other: RefCell<Option<(PathBuf, PathBuf)>>,
+    /// The lawyer's SID, as the thread's user on NTFS: it names the drive folder
+    /// ([`drive_folder_name`]). [`LAWYER`] unless a test says otherwise.
+    pub(super) lawyer: RefCell<String>,
 }
+
+/// The lawyer [`Posix::lawyer`] starts as.
+pub(super) const LAWYER: &str = "S-1-5-21-1-2-3-1001";
 
 /// The owner [`Posix::foreign`] gives an item: a pool user the record names.
 pub(super) const POOL_USER: &str = "uid other";
@@ -45,11 +52,12 @@ impl Posix {
             owned: RefCell::default(),
             pool: RefCell::new(Some(vec![POOL_USER.to_owned()])),
             other: RefCell::default(),
+            lawyer: RefCell::new(LAWYER.to_owned()),
         }
     }
 
-    /// Says every path under `under` is on another volume than the data folder, whose
-    /// set-aside folder is `root`.
+    /// Says every path under `under` is on another volume than the data folder, whose root is
+    /// `root`.
     pub(super) fn other_volume(&self, under: &Path, root: &Path) {
         *self.other.borrow_mut() = Some((under.to_owned(), root.to_owned()));
     }
@@ -198,13 +206,21 @@ impl Volume for Posix {
 
     fn items_root(&self, sandbox: &Path, folder: &Path) -> io::Result<PathBuf> {
         Ok(match &*self.other.borrow() {
-            Some((under, root)) if folder.starts_with(under) => root.clone(),
+            Some((under, root)) if folder.starts_with(under) => {
+                root.join(drive_folder_name(&self.lawyer.borrow()))
+            }
             Some(_) | None => sandbox.to_owned(),
         })
     }
 
-    /// Each folder made, or refused if a link or not a folder (`make_sandbox_dir`).
+    /// Each folder made, or refused if a link or not a folder (`make_sandbox_dir`); `root`
+    /// refused with [`not_yours`] when [`Posix::foreign`] says another account owns it.
     fn secure_items_root(&self, root: &Path, parts: &[OsString]) -> io::Result<()> {
+        if let Ok(meta) = std::fs::symlink_metadata(root)
+            && self.foreign.borrow().contains_key(&meta.ino())
+        {
+            return Err(not_yours());
+        }
         make_sandbox_dir(root)?;
         let mut folder = root.to_owned();
         for part in parts {

@@ -17,6 +17,7 @@ mod bookkeeping;
 mod budget;
 mod crash;
 mod fast;
+mod heal;
 mod links;
 mod live;
 mod live_ends;
