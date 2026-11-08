@@ -4,16 +4,25 @@
 //! - **Name:** `\\.\pipe\clauseo-sandbox-watch-<32 hex>`, 128 random bits per run, published as
 //!   [`PIPE_VALUE`] in `HKLM\`[`WATCH_KEY`] (64-bit view). The key is volatile (gone at a
 //!   restart) and made fresh by each run with [`KEY_SDDL`]: SYSTEM writes it, Administrators
-//!   and Users read it. The run deletes it as it exits. A name left by a crash names no pipe, or
-//!   a squatter's: the client checks that the server's pipe is owned by SYSTEM before it reads
-//!   a byte, as `SetUp`'s client does.
+//!   and Users read it. The run deletes it as it exits, and `--remove` with the task. A key a
+//!   killed run left is SYSTEM's, and the next run deletes it ([`key_start`]); one anyone else
+//!   owns is refused (74). A name left by a crash names no pipe, or a squatter's: the client
+//!   checks that the server's pipe is owned by SYSTEM before it reads a byte, as `SetUp`'s
+//!   client does.
 //! - **Descriptor** ([`pipe_sddl`]): owned by SYSTEM, protected, SYSTEM full control and the
-//!   record's owner read only; nobody else, not a pool user. Every instance after the first is
-//!   made by this server; `FILE_FLAG_FIRST_PIPE_INSTANCE` refuses a name someone made first,
-//!   and `PIPE_REJECT_REMOTE_CLIENTS` refuses the network.
+//!   record's owner read only; nobody else, not a pool user. Outbound only. Every instance after
+//!   the first is made by this server while another is open (`instances.rs`), and its owner is
+//!   checked; `FILE_FLAG_FIRST_PIPE_INSTANCE` refuses a name someone made first, and
+//!   `PIPE_REJECT_REMOTE_CLIENTS` refuses the network.
 //! - **Lines:** UTF-8 JSON, one per `\n`: a refusal, `{"v":1,"sid":"S-1-5-21-…","pid":1234,
 //!   "path":"C:\\…","access":"read"|"write"|"unknown"}`, or what was dropped since the last
-//!   such line, `{"v":1,"dropped":n}`. The client reads; it never writes.
+//!   such line, `{"v":1,"dropped":n}`. A refusal outside every known local volume (a share, a
+//!   web folder, a device with no letter) adds `"net":true` and its `path` is for display
+//!   only: the client must never open or check it, which would reach a server a pool user chose
+//!   with the lawyer's credentials. `net` is optional and false when absent, so `v` stays 1.
+//!   `dropped` counts the refusals the rate held back, those the consumer's channel had no room
+//!   for, Creates whose name was too long, and the events ETW itself lost. The client reads; it
+//!   never writes.
 //! - **Rate:** at most [`RECORDS_PER_SECOND`] refusals a second; the rest are counted and sent
 //!   as one `dropped` line when the second ends (the runner caps at 20 a second).
 
@@ -40,6 +49,27 @@ pub const KEY_SDDL: &str = "O:SYD:P(A;;KA;;;SY)(A;;KR;;;BA)(A;;KR;;;BU)";
 pub const RECORDS_PER_SECOND: u32 = 200;
 /// The rate's window.
 pub const RATE_WINDOW: Duration = Duration::from_secs(1);
+
+/// What a run does with the [`WATCH_KEY`] it finds at its start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyStart {
+    /// There is none: make it.
+    Fresh,
+    /// SYSTEM owns it: a killed run's (one task instance runs at a time), deleted and made
+    /// again.
+    Stale,
+    /// Someone else owns it: refused (74).
+    Foreign,
+}
+
+/// What to do with the key, given whether its owner is SYSTEM (`None`: there is no key).
+pub fn key_start(owner_is_system: Option<bool>) -> KeyStart {
+    match owner_is_system {
+        None => KeyStart::Fresh,
+        Some(true) => KeyStart::Stale,
+        Some(false) => KeyStart::Foreign,
+    }
+}
 
 /// The pipe's full name for the random `bits`.
 pub fn pipe_name(bits: &[u8; 16]) -> String {
@@ -82,6 +112,9 @@ pub enum Line {
         path: String,
         /// `read`, `write` or `unknown`.
         access: String,
+        /// Not under a known local volume: `path` is for display only.
+        #[serde(default, skip_serializing_if = "is_false")]
+        net: bool,
     },
     /// Refusals dropped since the last such line.
     Dropped {
@@ -115,8 +148,18 @@ pub fn denied_line(record: &Record, pool: &[Sid]) -> Option<String> {
         pid: record.pid,
         path: record.path.clone(),
         access: record.access.as_str().to_owned(),
+        net: record.net,
     };
     serde_json::to_string(&line).ok().map(|text| text + "\n")
+}
+
+/// Whether `flag` is false: `net` is left out of a local refusal's line.
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if takes a reference"
+)]
+fn is_false(flag: &bool) -> bool {
+    !*flag
 }
 
 /// A `dropped` line with its `\n`.

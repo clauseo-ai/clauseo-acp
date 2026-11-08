@@ -181,6 +181,7 @@ fn task_cause(error: &TaskError) -> Cause {
         TaskError::NotRegistered
         | TaskError::Path(_)
         | TaskError::Folder(_)
-        | TaskError::Session(_) => Cause::from(error.to_string()),
+        | TaskError::Session(_)
+        | TaskError::WatchKey(_) => Cause::from(error.to_string()),
     }
 }

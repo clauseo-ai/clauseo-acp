@@ -111,12 +111,13 @@ impl Watcher for WindowsWatcher {
         self.server
             .as_mut()
             .map(Server::poll)
-            .ok_or_else(|| "the pipe isn't open".to_owned())
+            .ok_or_else(|| "the pipe isn't open".to_owned())?
     }
 
-    fn send(&mut self, line: &str) {
-        if let Some(server) = &mut self.server {
-            server.send(line.as_bytes());
+    fn send(&mut self, line: &str) -> Result<(), Failed> {
+        match &mut self.server {
+            Some(server) => server.send(line.as_bytes()),
+            None => Err("the pipe isn't open".to_owned()),
         }
     }
 

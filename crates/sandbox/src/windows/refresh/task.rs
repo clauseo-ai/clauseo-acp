@@ -78,6 +78,9 @@ pub enum TaskError {
     /// The watcher's trace session couldn't be stopped.
     #[error("the watcher's trace session: {0}")]
     Session(String),
+    /// The watcher's published pipe name couldn't be deleted.
+    #[error("the watcher's key: {0}")]
+    WatchKey(String),
 }
 
 /// `call` failed with `error`, as a line for the log.
@@ -370,8 +373,10 @@ pub fn unregister_task(task: SystemTask) -> Result<(), TaskError> {
 
 /// [`unregister_task`]'s first steps for a task that [`SystemTask::ends_before_delete`]: disable
 /// it, so nothing starts it again, end a running instance (`IRegisteredTask::Stop`), then stop
-/// the watcher's trace session by name, which an ended watcher leaves running. A task that
-/// isn't there is `Ok`; so is a session that isn't.
+/// the watcher's trace session by name and delete its published name
+/// (`HKLM\SOFTWARE\Clauseo\SandboxWatch`), both of which an ended watcher leaves (it is built
+/// with `panic = "abort"` and has no drop to run). A task, session or key that isn't there is
+/// `Ok`.
 fn end_before_delete(folder: &ITaskFolder, task: SystemTask) -> Result<(), TaskError> {
     // SAFETY: a live folder and a BSTR.
     let registered = match unsafe { folder.GetTask(&BSTR::from(task.name())) } {
@@ -387,6 +392,8 @@ fn end_before_delete(folder: &ITaskFolder, task: SystemTask) -> Result<(), TaskE
         unsafe { registered.Stop(0) }.map_err(com("IRegisteredTask::Stop"))?;
     }
     crate::windows::setup::watch::windows_trace::stop_session().map_err(TaskError::Session)?;
+    crate::windows::setup::watch::windows_pipe::unpublish()
+        .map_err(|error| TaskError::WatchKey(error.to_string()))?;
     Ok(())
 }
 

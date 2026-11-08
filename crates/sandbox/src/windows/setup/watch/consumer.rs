@@ -9,6 +9,16 @@
 //!   Create pairs with the next `OperationEnd` of its `Irp`; `Status` `STATUS_ACCESS_DENIED` makes
 //!   it a [`Record`]. The pending map holds at most [`PENDING_CAP`] Creates, the oldest evicted.
 //!
+//! Only the versions the offsets were written for are read: Create v1 and `OperationEnd` v0, as
+//! the spike recorded them on WS2025 26100 (`/tmp/asp-etw/logs/row1-sample-pair.xml`,
+//! `results.md:53,67`). An event of another version is skipped and counted
+//! ([`Counts::unknown_version`]), which the watcher logs once, as a count.
+//!
+//! Each Create keeps its `EventHeader.TimeStamp`; an `OperationEnd` stamped before the waiting
+//! Create of its `Irp` belongs to an earlier use of the IRP and pairs with nothing. A pool
+//! Create whose `FileName` is over [`MAX_NAME_UNITS`] is dropped, not truncated, and counted in
+//! what the clients are told was dropped.
+//!
 //! The payloads are read at fixed offsets, not through TDH: the consumer sees every
 //! `OperationEnd` on the machine (10⁴ a second during a build), and a TDH lookup per event would
 //! cost more than the whole consumer does now (0.1 % of a core in the spike). Each read checks
@@ -30,6 +40,27 @@ pub const END_ID: u16 = 24;
 pub const ACCESS_DENIED: u32 = 0xC000_0022;
 /// The most pool Creates waiting for their `OperationEnd`.
 pub const PENDING_CAP: usize = 4096;
+/// The longest `FileName` kept, in UTF-16 units.
+pub const MAX_NAME_UNITS: usize = 4096;
+/// The event versions the offsets were written for: Create v1, `OperationEnd` v0.
+pub const KNOWN_VERSIONS: [(u16, u8); 2] = [(CREATE_ID, 1), (END_ID, 0)];
+/// `EVENT_HEADER_EXT_TYPE_SID`, the extended data item holding the user's SID.
+pub const EXT_TYPE_SID: u16 = 2;
+
+/// Whether event `id` of `version` is one the offsets were written for.
+pub fn known_version(id: u16, version: u8) -> bool {
+    KNOWN_VERSIONS.contains(&(id, version))
+}
+
+/// The SID item among an event's extended data items (`(ExtType, its bytes)`, `None` when the
+/// item has no data): the first of type [`EXT_TYPE_SID`] with data. No other item is ever read
+/// as a SID.
+pub fn sid_in<'a>(items: impl IntoIterator<Item = (u16, Option<&'a [u8]>)>) -> Option<&'a [u8]> {
+    items
+        .into_iter()
+        .find(|(kind, data)| *kind == EXT_TYPE_SID && data.is_some())
+        .and_then(|(_, data)| data)
+}
 
 /// What the refused open asked for, as far as `CreateOptions` tells.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,8 +144,8 @@ pub fn irp_of(data: &[u8], wide: bool) -> Option<u64> {
     pointer(data, 0, wide)
 }
 
-/// A Create's payload, `wide` when its pointers are 8 bytes: `None` when it is too short or
-/// its `FileName` has no terminating NUL.
+/// A Create's payload, `wide` when its pointers are 8 bytes: `None` when it is too short, its
+/// `FileName` has no terminating NUL, or the name's bytes are odd in number.
 pub fn parse_create(data: &[u8], wide: bool) -> Option<Create> {
     let size = if wide { 8 } else { 4 };
     let irp = pointer(data, 0, wide)?;
@@ -122,6 +153,9 @@ pub fn parse_create(data: &[u8], wide: bool) -> Option<Create> {
     let options = u32_at(data, 2 * size + 4)?;
     // Then CreateAttributes and ShareAccess, then FileName to its NUL.
     let name = data.get(2 * size + 16..)?;
+    if name.len() % 2 != 0 {
+        return None;
+    }
     let (pairs, _odd) = name.as_chunks::<2>();
     let units: Vec<u16> = pairs
         .iter()
@@ -207,6 +241,10 @@ pub struct RawEvent<'a> {
     pub data: &'a [u8],
     /// Whether its pointers are 8 bytes (`EVENT_HEADER_FLAG_64_BIT_HEADER`).
     pub wide: bool,
+    /// `EventDescriptor.Version`.
+    pub version: u8,
+    /// `EventHeader.TimeStamp`.
+    pub stamp: i64,
 }
 
 /// A pool user's refused open: what goes on the wire.
@@ -216,8 +254,10 @@ pub struct Record {
     pub sid: Sid,
     /// The opening process, from the event's header.
     pub pid: u32,
-    /// The path with its drive letter (`C:\...`), or `\\server\share\...`.
+    /// The path with its drive letter (`C:\...`); for display only when [`Record::net`].
     pub path: String,
+    /// Not under a known local volume (`paths.rs`): never to be opened or checked.
+    pub net: bool,
     /// What the open asked for.
     pub access: Access,
 }
@@ -230,6 +270,8 @@ struct Pending {
     file_name: String,
     access: Access,
     seq: u64,
+    /// The Create's `EventHeader.TimeStamp`.
+    stamp: i64,
 }
 
 /// The pool Creates waiting for their `OperationEnd`, by `Irp`, bounded.
@@ -264,12 +306,13 @@ impl Pairing {
     }
 
     /// A pool Create, which replaces one of the same `Irp`; past the cap the oldest goes.
-    fn create(&mut self, sid: Sid, pid: u32, create: Create) {
+    fn create(&mut self, sid: Sid, pid: u32, stamp: i64, create: Create) {
         let seq = self.next;
         self.next += 1;
         let pending = Pending {
             sid,
             pid,
+            stamp,
             access: access_of(create.options),
             file_name: create.file_name,
             seq,
@@ -296,8 +339,13 @@ impl Pairing {
         self.pending.remove(&irp);
     }
 
-    /// An `OperationEnd`: the Create it ends, when one waits and it was refused.
-    fn end(&mut self, end: End) -> Option<Pending> {
+    /// An `OperationEnd` stamped `stamp`: the Create it ends, when one waits and it was
+    /// refused. One stamped before the waiting Create ends an earlier use of the IRP: the
+    /// Create keeps waiting.
+    fn end(&mut self, end: End, stamp: i64) -> Option<Pending> {
+        if self.pending.get(&end.irp)?.stamp > stamp {
+            return None;
+        }
         let pending = self.pending.remove(&end.irp)?;
         (end.status == ACCESS_DENIED).then_some(pending)
     }
@@ -310,10 +358,14 @@ pub struct Counts {
     pub kept: u64,
     /// Refusals passed on.
     pub refused: u64,
-    /// Refusals dropped: a device with no drive letter, or not a disk or share.
+    /// Refusals dropped: a path not under `\Device\`.
     pub unmapped: u64,
     /// Payloads too short to read.
     pub malformed: u64,
+    /// Events of a version the offsets weren't written for, skipped.
+    pub unknown_version: u64,
+    /// Pool Creates whose `FileName` was over [`MAX_NAME_UNITS`], dropped.
+    pub too_long: u64,
 }
 
 /// The callback's state: the pool, the pending Creates and the device map.
@@ -323,6 +375,8 @@ pub struct Consumer {
     pairing: Pairing,
     paths: DeviceMap,
     counts: Counts,
+    /// Refusals lost here since [`Consumer::take_dropped`], for the clients' `dropped` count.
+    dropped: u64,
 }
 
 impl Consumer {
@@ -333,7 +387,13 @@ impl Consumer {
             pairing: Pairing::new(PENDING_CAP),
             paths: DeviceMap::default(),
             counts: Counts::default(),
+            dropped: 0,
         }
+    }
+
+    /// What was dropped here since the last call, which goes into the clients' `dropped`.
+    pub fn take_dropped(&mut self) -> u64 {
+        std::mem::take(&mut self.dropped)
     }
 
     /// What it counted so far.
@@ -356,6 +416,12 @@ impl Consumer {
         devices: &mut dyn FnMut() -> Vec<(char, String)>,
         out: &mut dyn FnMut(Record),
     ) {
+        if !known_version(event.id, event.version) {
+            if event.id == CREATE_ID || event.id == END_ID {
+                self.counts.unknown_version += 1;
+            }
+            return;
+        }
         match event.id {
             CREATE_ID => {
                 let Some(sid) = event.sid.and_then(|bytes| self.pool.find(bytes)) else {
@@ -368,9 +434,15 @@ impl Consumer {
                 };
                 let sid = sid.clone();
                 match parse_create(event.data, event.wide) {
+                    Some(create) if create.file_name.encode_utf16().count() > MAX_NAME_UNITS => {
+                        // Its IRP's earlier Create is gone, as this open isn't kept.
+                        self.pairing.forget(create.irp);
+                        self.counts.too_long += 1;
+                        self.dropped += 1;
+                    }
                     Some(create) => {
                         self.counts.kept += 1;
-                        self.pairing.create(sid, event.pid, create);
+                        self.pairing.create(sid, event.pid, event.stamp, create);
                     }
                     None => self.counts.malformed += 1,
                 }
@@ -380,16 +452,17 @@ impl Consumer {
                     self.counts.malformed += 1;
                     return;
                 };
-                let Some(denied) = self.pairing.end(end) else {
+                let Some(denied) = self.pairing.end(end, event.stamp) else {
                     return;
                 };
                 match self.paths.map_path(&denied.file_name, now, devices) {
-                    Some(path) => {
+                    Some(mapped) => {
                         self.counts.refused += 1;
                         out(Record {
                             sid: denied.sid,
                             pid: denied.pid,
-                            path,
+                            path: mapped.path,
+                            net: mapped.net,
                             access: denied.access,
                         });
                     }
