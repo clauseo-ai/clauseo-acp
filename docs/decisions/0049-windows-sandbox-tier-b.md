@@ -512,7 +512,8 @@ started elevated, by the app or by the uninstall hook.
   launch and set-up meet the same cause. `AdminCopyVersion` (the app's version) newer than the
   running copy's own exits 9: no downgrade (`admin_copy::version_not_older`, which the refresh
   task uses too). Then `--adopt` deletes everything in `Sandbox` but the copy and its `.sig`,
-  `staging\` included (taken back first if it shuts Administrators out; "The staging folder's
+  `staging\` and the WSL deny task's `locks\` included (one a run holds stays, out of the lock-down;
+  taken back first if it shuts Administrators out; "The staging folder's
   DACL" below), gives the folder and everything left owner Administrators and a protected DACL
   (SYSTEM and Administrators full, Users read and run), reads each back exactly, records
   `AdminCopySha256`, `UserInstallDir`, `AdminCopyVersion` and `AdminCopyOwner`, and, per
@@ -536,9 +537,9 @@ started elevated, by the app or by the uninstall hook.
   write-attributes, delete, delete-child, `WRITE_DAC`, `WRITE_OWNER` or a generic right holding
   one; the volume root the same, but only delete-child, `WRITE_DAC`, `WRITE_OWNER` and the
   generic rights that hold them count there, since every Windows install lets Authenticated Users
-  add a folder at the root; `Sandbox` must hold nothing but the copy, its `.sig` and `staging\`
-  (else `AdminCopyUnsafe`; deny entries are ignored); and its SHA-256 must be the recorded one
-  (else `AdminCopyChanged`). Each is `sandbox.blocked`, not retryable, with words for IT. A
+  add a folder at the root; `Sandbox` must hold nothing but the copy, its `.sig`, `staging\` and
+  `locks\` (else `AdminCopyUnsafe`; deny entries are ignored); and its SHA-256 must be the recorded
+  one (else `AdminCopyChanged`). Each is `sandbox.blocked`, not retryable, with words for IT. A
   tier-B launch hashes the copy each time.
 - **The elevated start holds what it hashed.** `UserSetup` hashes the copy through a handle that
   shares read only (no write, no delete) and keeps it open until `ShellExecuteExW` has returned
@@ -2120,22 +2121,30 @@ be run again). A start while it runs starts beside it (`TASK_INSTANCES_PARALLEL`
 Queued starts (`TASK_INSTANCES_QUEUE`) had no bound but the Task Scheduler's own: a forged flood
 could have built hours of 20 s+ runs in a queue that may be the machine's, so the stop, the refresh
 or the heal request could be refused (Event 131). The lock is
-`%ProgramData%\Clauseo\Sandbox\wsl-deny.lock`, held as an open handle with no sharing, never a
-named mutex, which a pool user could make first in `Global\`. Its folders are made and checked as
-the sweep's admin-only log's (#750, ported, as that PR isn't in this one's base): each made with its
-descriptor at once (`Clauseo` as the installer makes it, `Sandbox` admin-only), reopened without
-following a reparse point, owner and DACL read through the handle; the file is made SYSTEM-only
-(`O:SYD:P(A;;FA;;;SY)`) and must be a plain file with one link kept so. A start that finds it held
-sets `WslDenyAgain` (`REG_DWORD`) in the SYSTEM-only record key and exits 0 at once. The holder
-clears the flag as each run starts and reads and clears it just before it would end: set, it runs
-once more within what is left of its 330 s budget; with the budget spent it ends, and the next
-trigger runs. So a second install's event during a held run still gives a run after it, the launch
-check's request isn't lost, and the backlog is at most one flag. Pool users can still start
+`%ProgramFiles%\Clauseo\Sandbox\locks\wsl-deny.lock`, held as an open handle with no sharing,
+never a named mutex, which a pool user could make first in `Global\`. Not `%ProgramData%`: any user
+may make `%ProgramData%\Clauseo` first, which would keep the lock refused for good. The admin folder
+must pass the admin copy's own check first (`admin_copy::check`: the chain from the volume root,
+nothing unexpected in it, the copy's hash). The lock has a folder of its own because that check and
+`--adopt`'s lock-down refuse or delete any other entry in `Sandbox`, and the lock-down gives what
+it keeps Users' read; `locks\` is named as expected, and `--adopt` deletes it when free, as it does
+`staging\`, and keeps one a run holds out of the lock-down. The task makes it when missing (SYSTEM
+and Administrators alone, as staging), so an install adopted before this gets one too; the
+uninstaller's removal deletes it with the folder. It is opened without following a reparse point,
+its owner and DACL read through the handle; the file is made SYSTEM-only (`O:SYD:P(A;;FA;;;SY)`)
+and must be a plain file with one link, SYSTEM its owner and nothing else in its DACL. A start that
+finds it held sets `WslDenyAgain` (`REG_DWORD`) in the SYSTEM-only record key and exits 0 at once.
+The holder clears the flag as each run starts and reads and clears it just before it would end: set,
+it runs once more within what is left of its 330 s budget; with the budget spent it ends, and the
+next trigger runs. So a second install's event during a held run still gives a run after it, the
+launch check's request isn't lost, and the backlog is at most one flag. Pool users can still start
 instances by forging events, but while one runs each sets the flag and exits at once; with none
-running, one takes the lock and runs a bounded re-check. A lock path that fails its checks (a
-junction, a file or folder another user owns or may change) is an error line, and the run goes on
-without the lock: availability wins for a task that only re-applies the deny, and unlocked runs are
-each bounded by the budget.
+running, one takes the lock and runs a bounded re-check. A lock that can't be had for any other
+reason (the admin copy missing or failing its check, a junction, a folder or file another user owns
+or may change, any error) is an error line, and the start exits 0 without a pass: running without
+the lock would let a broken lock path give unbounded parallel SYSTEM runs. Enforcement stays at
+launch, where a missing deny refuses the launch (`Blocked::WslDenyMissing`), and the next trigger
+tries again.
 It shares the other tasks' principal, descriptor (owned by Administrators, the
 owner `FRFX`) and folder, stops after 6 minutes (`PT6M`), and is registered and removed with
 them: `--adopt` registers it per user after `\Clauseo\SandboxStop` (`refresh::TASKS`), a
