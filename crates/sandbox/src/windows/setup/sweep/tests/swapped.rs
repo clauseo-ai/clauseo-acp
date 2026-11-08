@@ -176,3 +176,49 @@ fn an_id_unread_after_the_write_keeps_an_any_id_entry_and_the_owner_untrusted() 
     assert_eq!(sweep(&mut fake), SweepExit::Done);
     assert_eq!(fake.ids.record, Vec::<String>::new());
 }
+
+/// A fake whose record holds a pending entry for `\A\loose` with [`ORIGINAL`], as a crash
+/// between the write-ahead and its removal leaves it.
+fn after_a_crash() -> Fake {
+    let mut fake = loose(user(OWNER), descriptor("S-1-5-32-544", &loose_dacl()));
+    fake.ids.record = vec![format!("P{ORIGINAL}\\A\\loose")];
+    fake
+}
+
+#[test]
+fn a_pending_entry_whose_id_is_unchanged_clears_and_the_task_is_judged_on_its_owner() {
+    let mut fake = after_a_crash();
+    assert_eq!(sweep(&mut fake), SweepExit::Done);
+    // Judged as usual: hardened, its owner trusted.
+    assert_eq!(fake.secured.len(), 1);
+    assert_eq!(fake.ids.record, Vec::<String>::new());
+}
+
+#[test]
+fn a_pending_entry_whose_id_changed_settles_untrusted_and_is_56() {
+    let mut fake = after_a_crash();
+    fake.ids
+        .swaps
+        .push(("\\A\\loose".to_owned(), 1, SWAPPED.to_owned()));
+    assert_eq!(sweep(&mut fake), SweepExit::TasksLeft);
+    assert_eq!(fake.secured, []);
+    assert_eq!(fake.ids.record, [format!("{SWAPPED}\\A\\loose")]);
+}
+
+#[test]
+fn a_pending_entry_whose_id_cant_be_read_settles_as_any_id() {
+    let mut fake = after_a_crash();
+    fake.ids.unread_from = Some(("\\A\\loose".to_owned(), 1));
+    assert_eq!(sweep(&mut fake), SweepExit::TasksLeft);
+    assert_eq!(fake.secured, []);
+    assert_eq!(fake.ids.record, ["{*}\\A\\loose".to_owned()]);
+}
+
+#[test]
+fn a_pending_entry_whose_task_is_gone_clears() {
+    let mut fake = after_a_crash();
+    let tasks = &mut fake.folders.get_mut("\\A").unwrap().tasks;
+    tasks.retain(|task| task.name != "loose");
+    assert_eq!(sweep(&mut fake), SweepExit::Done);
+    assert_eq!(fake.ids.record, Vec::<String>::new());
+}

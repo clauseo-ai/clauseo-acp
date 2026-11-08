@@ -468,9 +468,16 @@ pub fn sweep_tasks<S: Sweeper>(fs: &mut S, pool: &[Sid], lawyer: Option<&Sid>) -
     let mut resolved = BTreeMap::new();
     let names = Names::of(fs, pool);
     let mut groups = Groups::of(fs);
-    // Read first: a task listed there has its owner ignored (`untrusted`).
+    // Read first, its pending entries settled: a task listed there has its owner ignored
+    // (`untrusted`). A settling not written only settles again next time.
     match untrusted::read(fs) {
-        Ok(list) => swept.owner_untrusted = list,
+        Ok(list) => {
+            let (list, written) = untrusted::settle(fs, list);
+            swept.owner_untrusted = list;
+            if let Err(why) = written {
+                swept.note(why);
+            }
+        }
         Err(why) => {
             swept.unlisted += 1;
             swept.note(why);

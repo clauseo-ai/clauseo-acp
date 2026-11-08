@@ -103,10 +103,10 @@ pub struct Hardened {
     /// Tasks whose `TaskCache\Tree` `Id` changed between the first read and the write (none
     /// written), or across the write ([`Hardened::swapped_after`]).
     pub swapped: usize,
-    /// Each task this run left in the record's `OwnerUntrusted` (`untrusted.rs`): its `Id`
-    /// changed across the write, or couldn't be read after it, or its entry couldn't be taken
-    /// off. Its path, not cleaned, and the `Id` read after the write, `None` where that couldn't
-    /// be read (or wasn't needed). Each keeps the sweep at 56.
+    /// Each task this run left in the record's `OwnerUntrusted` (`untrusted.rs`) for an `Id`
+    /// that changed across the write, or couldn't be read after it: its path, not cleaned, and
+    /// the `Id` read after the write, `None` where that couldn't be read. Each keeps the sweep
+    /// at 56.
     pub swapped_after: Vec<(String, Option<String>)>,
     /// One line per task for the admin-only log: its path, cleaned, and what changed or why not.
     pub notes: Vec<String>,
@@ -261,23 +261,23 @@ pub(super) fn harden_task<S: Sweeper>(
     let Ok(raw) = &raw else {
         return not(hardened, NO_PATH);
     };
-    if let Err(why) = untrusted::set(fs, lock, raw, Some(&same)) {
+    if let Err(why) = untrusted::set(fs, lock, raw, Some(&same), true) {
         let why = format!("its OwnerUntrusted entry couldn't be written ({why}), so nothing was");
         return not(hardened, &why);
     }
     if let Err(why) = fs.set_task_security(folder, name, &tightened) {
         // Nothing written: the entry would only hold the task at 56.
-        let cleared = untrusted::set(fs, lock, raw, None);
-        hardened.left_untrusted(cleared, raw, &same, &path);
+        let cleared = untrusted::set(fs, lock, raw, None, false);
+        hardened.left_untrusted(cleared, &path);
         return not(hardened, &format!("{why}; it would have lost: {lost}"));
     }
     let after = id(fs);
     if after.as_ref().ok() == Some(&Some(same.clone())) {
-        let cleared = untrusted::set(fs, lock, raw, None);
-        hardened.left_untrusted(cleared, raw, &same, &path);
+        let cleared = untrusted::set(fs, lock, raw, None, false);
+        hardened.left_untrusted(cleared, &path);
     } else {
         let new = after.ok().flatten();
-        let cleared = untrusted::set(fs, lock, raw, Some(new.as_deref().unwrap_or(ANY_ID)));
+        let cleared = untrusted::set(fs, lock, raw, Some(new.as_deref().unwrap_or(ANY_ID)), false);
         let note = format!(
             "hardened a task that runs as the lawyer, {path}, but another task may have taken \
              its name across the write, which may have given that task an administrator's \
@@ -450,17 +450,16 @@ impl Hardened {
         self.swapped_after.push((raw.to_owned(), new));
     }
 
-    /// When `cleared`, taking the entry for `raw` (`path` cleaned) off `OwnerUntrusted`,
-    /// failed: the task stays untrusted and keeps the run at 56 until it clears, logged.
-    fn left_untrusted(&mut self, cleared: Result<(), Failed>, raw: &str, id: &str, path: &str) {
+    /// When `cleared`, taking the pending entry of `path` off `OwnerUntrusted` once its `Id`
+    /// read the same, failed: logged. It holds that same `Id`, so the next sweep clears it
+    /// (`untrusted::settle`).
+    fn left_untrusted(&mut self, cleared: Result<(), Failed>, path: &str) {
         if let Err(why) = cleared {
             let note = format!(
-                "couldn't take {path} off OwnerUntrusted ({why}): its owner stays untrusted, and \
-                 the sweep 56, until its entry clears"
+                "couldn't take {path} off OwnerUntrusted ({why}): its entry stays pending, and \
+                 the next sweep clears it while its Id is the same"
             );
             self.notes.push(note);
-            self.swapped_after
-                .push((raw.to_owned(), Some(id.to_owned())));
         }
     }
 }
