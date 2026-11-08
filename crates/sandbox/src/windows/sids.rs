@@ -174,9 +174,58 @@ pub(crate) fn owner_allowed(owner: &Sid, user: &Sid) -> bool {
     owner == user || ["S-1-5-18", "S-1-5-32-544"].contains(&owner.as_str())
 }
 
+/// Whether `found` may own the data folder `requester` names for an elevated set-up (`--set-up`,
+/// `--adopt`, `--reclaim`, the set-up task): the requester, or Administrators when the requester
+/// is itself a member (`in_admins`, asked only then; an error refuses). Such a user can elevate
+/// anyway, and as the built-in Administrator, or with UAC off, the app makes its data folder
+/// Administrators'. SYSTEM, and anyone else, never: a standard user can't aim an elevated
+/// set-up at a folder such as `C:\ProgramData`.
+#[cfg(any(windows, test))]
+pub(crate) fn data_dir_owner_allowed<E>(
+    found: &Sid,
+    requester: &Sid,
+    in_admins: impl FnOnce() -> Result<bool, E>,
+) -> bool {
+    found == requester || (found.as_str() == "S-1-5-32-544" && in_admins().unwrap_or(false))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The data folder's owner check for `requester`, an administrator or not.
+    fn data_dir_ok(found: &str, admin: bool) -> bool {
+        let lawyer = Sid::parse("S-1-5-21-7-8-9-1001").unwrap();
+        let found = if found == "lawyer" {
+            lawyer.clone()
+        } else {
+            Sid::parse(found).unwrap()
+        };
+        data_dir_owner_allowed(&found, &lawyer, || Ok::<_, ()>(admin))
+    }
+
+    #[test]
+    fn the_lawyers_own_data_folder_passes_for_an_administrator_and_a_standard_user() {
+        assert!(data_dir_ok("lawyer", true));
+        assert!(data_dir_ok("lawyer", false));
+    }
+
+    #[test]
+    fn an_administrators_data_folder_passes_only_for_a_member_of_administrators() {
+        assert!(data_dir_ok("S-1-5-32-544", true));
+        assert!(!data_dir_ok("S-1-5-32-544", false));
+        let lawyer = Sid::parse("S-1-5-21-7-8-9-1001").unwrap();
+        let admins = Sid::parse("S-1-5-32-544").unwrap();
+        assert!(!data_dir_owner_allowed(&admins, &lawyer, || Err("unknown")));
+    }
+
+    #[test]
+    fn a_system_or_another_users_data_folder_is_refused_for_everyone() {
+        for found in ["S-1-5-18", "S-1-5-21-7-8-9-1002", "S-1-1-0"] {
+            assert!(!data_dir_ok(found, true), "{found}");
+            assert!(!data_dir_ok(found, false), "{found}");
+        }
+    }
 
     #[test]
     fn the_account_domain_is_the_three_parts_after_21() {

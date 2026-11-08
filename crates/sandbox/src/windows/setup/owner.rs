@@ -172,6 +172,18 @@ impl Owner {
         Ok(f())
     }
 
+    /// Whether the owner's token has Administrators, enabled or deny-only (a UAC-filtered
+    /// administrator's): a user who can elevate. Read acting as the owner (`TokenGroups` of the
+    /// thread's token); a failure is the `Err`, which callers take as no.
+    pub fn in_administrators(&self) -> Result<bool, MachineError> {
+        let groups = self
+            .run_as(crate::windows::record::current_token_groups)?
+            .map_err(|error| MachineError::Other(format!("the owner's groups: {error}")))?;
+        let admins = crate::windows::sids::Sid::parse("S-1-5-32-544")
+            .map_err(|error| MachineError::Other(error.to_string()))?;
+        Ok(groups.contains(&crate::windows::acl_bytes::sid_bytes(&admins)))
+    }
+
     /// What the owner's own token gets on a file whose security descriptor (owner, group, DACL
     /// and label, self-relative) is `descriptor`: what the owner's unelevated hand-back can do
     /// there. `--reclaim` takes only what the owner can't hand back (S15 `PR4i`).
