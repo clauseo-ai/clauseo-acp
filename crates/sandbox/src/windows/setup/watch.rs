@@ -7,8 +7,8 @@
 //!
 //! 1. refuses unless this process is LOCAL SYSTEM and runs from the admin copy's path (70);
 //! 2. reads `PoolSids` and `OwnerSid` from `HKLM\SOFTWARE\Clauseo\Sandbox`, which only the
-//!    elevated set-up writes (71 when unreadable). The task passes `--watch` alone: nothing the
-//!    lawyer gives reaches this process. No record, or an empty pool, is nothing to watch (0);
+//!    elevated set-up writes (71 when missing or unreadable). The task passes `--watch` alone:
+//!    nothing the lawyer gives reaches this process. An empty pool is nothing to watch (0);
 //! 3. holds every pool SID to the pool-user check, as `--stop` does (72);
 //! 4. starts the real-time session [`SESSION_NAME`], first stopping one of that name a crash
 //!    left, and enables `Microsoft-Windows-Kernel-File` for Create and `OperationEnd` with each
@@ -16,11 +16,15 @@
 //!    [`WatchExit::ProviderFull`] (68): the runner falls back to its host-side source. Any other
 //!    failure is 73;
 //! 5. makes a pipe with a random name, only the owner may open it, and publishes its name in
-//!    [`protocol::WATCH_KEY`], a key only SYSTEM may write (74 on failure);
+//!    [`protocol::WATCH_KEY`], a key only SYSTEM may write (74 on failure). A key a killed run
+//!    left (SYSTEM's) is replaced; anyone else's is refused (74);
 //! 6. serves ([`serve`]): the consumer (`consumer.rs`) drops every Create whose SID isn't a pool
 //!    user's on arrival, pairs a pool Create with the next `OperationEnd` of its IRP, and passes
 //!    on refusals (`STATUS_ACCESS_DENIED`) as JSON lines, at most
-//!    [`protocol::RECORDS_PER_SECOND`], to every client;
+//!    [`protocol::RECORDS_PER_SECOND`], to every client. The pipe's instances never reach zero
+//!    (`instances.rs`); a later instance that can't be made, or isn't SYSTEM's, ends the run
+//!    with 74. Every [`serve::OWNER_CHECK`] it reads the record again: another owner (or none)
+//!    ends the run with 0, so it never serves a previous owner after a new set-up;
 //! 7. exits once the last client has gone, after [`lifetime::LAST_CLIENT_GRACE`], or when none
 //!    came within [`lifetime::FIRST_CLIENT_WAIT`]: it stops the session, deletes the published
 //!    name and exits 0. A trace that ends on its own is 75.
@@ -41,14 +45,16 @@ pub use lifetime::{Lifetime, Verdict};
 pub use serve::serve;
 
 pub mod consumer;
+pub mod instances;
 pub mod lifetime;
+pub mod losses;
 pub mod paths;
 pub mod protocol;
 mod serve;
 #[cfg(test)]
 mod tests;
 #[cfg(windows)]
-mod windows_pipe;
+pub(crate) mod windows_pipe;
 #[cfg(windows)]
 pub(crate) mod windows_trace;
 #[cfg(windows)]
@@ -62,20 +68,22 @@ pub const SESSION_NAME: &str = "ClauseoSandboxWatch";
 /// 50, and the codes the other `\Clauseo` tasks hold (51 to 67). Appended, never renumbered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WatchExit {
-    /// 0: served until the last client left (or none came), or no pool is recorded.
+    /// 0: served until the last client left (or none came), the record's owner changed, or the
+    /// pool is empty.
     Done,
     /// 68: the provider's 8 sessions are taken (`ERROR_NO_SYSTEM_RESOURCES`); the runner falls
     /// back to its host-side source.
     ProviderFull,
     /// 70: not LOCAL SYSTEM, or not run from the admin copy's path.
     NotAllowed,
-    /// 71: the record can't be read, or its `PoolSids` or `OwnerSid` is malformed.
+    /// 71: there is no record, it can't be read, or its `PoolSids` or `OwnerSid` is malformed.
     NoRecord,
     /// 72: a SID `PoolSids` lists isn't a pool user's.
     NotPool,
     /// 73: the session couldn't be started, the provider enabled or the consumer opened.
     NoTrace,
-    /// 74: the pipe couldn't be made, its name published, or its clients polled.
+    /// 74: the pipe couldn't be made, its name published, or its clients polled; a later
+    /// instance couldn't be made or isn't SYSTEM's; or the published key is someone else's.
     NoPipe,
     /// 75: the trace ended while the watcher served.
     TraceLost,
@@ -146,7 +154,8 @@ pub trait Watcher {
     /// Takes clients that connected, drops those that left, and gives how many are connected.
     fn clients(&mut self) -> Result<usize, Failed>;
     /// Writes `line` to every connected client; one whose write fails or stalls is dropped.
-    fn send(&mut self, line: &str);
+    /// `Err` when the pipe can't keep an instance open (`instances.rs`): the run ends, 74.
+    fn send(&mut self, line: &str) -> Result<(), Failed>;
     /// The time since the watcher began, from a monotonic clock.
     fn now(&mut self) -> Duration;
     /// Writes one line to the log: `error` for a refusal or a failure.
@@ -175,7 +184,8 @@ fn run_steps(w: &mut impl Watcher) -> Result<String, Refusal> {
     allowed(w)?;
     let pool = match w.pool().map_err(|why| (WatchExit::NoRecord, why))? {
         Some(pool) if !pool.users.is_empty() => pool,
-        _ => return Ok("no pool users are recorded".to_owned()),
+        Some(_) => return Ok("no pool users are recorded".to_owned()),
+        None => return Err((WatchExit::NoRecord, "there is no record".to_owned())),
     };
     w.check_pool(&pool)
         .map_err(|why| (WatchExit::NotPool, why))?;
@@ -191,7 +201,7 @@ fn run_steps(w: &mut impl Watcher) -> Result<String, Refusal> {
         w.stop_trace();
         return Err((WatchExit::NoPipe, why));
     }
-    let served = serve(w, &pool.users);
+    let served = serve(w, &pool);
     w.close_pipe();
     w.stop_trace();
     served

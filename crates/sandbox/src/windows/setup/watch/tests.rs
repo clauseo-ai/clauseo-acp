@@ -7,13 +7,15 @@ use super::consumer::{
     ACCESS_DENIED, Access, CREATE_ID, Consumer, END_ID, PENDING_CAP, RawEvent, Record, access_of,
     parse_create, parse_end, sid_bytes,
 };
-use super::paths::{DeviceMap, REFRESH_EVERY};
+use super::paths::{DeviceMap, Mapped, REFRESH_EVERY};
 use super::protocol::{
     KEY_SDDL, Line, RECORDS_PER_SECOND, RateLimit, denied_line, dropped_line, is_pipe_name,
     pipe_name, pipe_sddl,
 };
 use crate::windows::sids::Sid;
 
+mod consumer;
+mod instances;
 mod run;
 
 /// Pool users and an outsider (the lawyer), all of one machine.
@@ -62,10 +64,31 @@ fn devices() -> Vec<(char, String)> {
     ]
 }
 
-/// A consumer fed events, collecting what it passes on.
+/// A consumer fed events, collecting what it passes on. Each event is stamped one later than
+/// the last unless a test gives its stamp.
 struct Fed {
     consumer: Consumer,
     out: Vec<Record>,
+    stamp: i64,
+}
+
+/// `path` as a local refusal's, as `map_path` gives it.
+#[expect(clippy::unnecessary_wraps, reason = "compared with map_path's Option")]
+fn local(path: &str) -> Option<Mapped> {
+    Some(mapped(path, false))
+}
+
+/// `path` as a network refusal's, for display only, as `map_path` gives it.
+#[expect(clippy::unnecessary_wraps, reason = "compared with map_path's Option")]
+fn net(path: &str) -> Option<Mapped> {
+    Some(mapped(path, true))
+}
+
+fn mapped(path: &str, net: bool) -> Mapped {
+    Mapped {
+        path: path.to_owned(),
+        net,
+    }
 }
 
 impl Fed {
@@ -73,6 +96,7 @@ impl Fed {
         Fed {
             consumer: Consumer::new(&pool()),
             out: Vec::new(),
+            stamp: 0,
         }
     }
 
@@ -87,16 +111,23 @@ impl Fed {
     }
 
     fn feed(&mut self, id: u16, pid: u32, sid: Option<&[u8]>, data: &[u8]) {
-        let event = RawEvent {
+        self.stamp += 1;
+        let version = u8::from(id == CREATE_ID);
+        self.raw(&RawEvent {
             id,
             pid,
             sid,
             data,
             wide: true,
-        };
+            version,
+            stamp: self.stamp,
+        });
+    }
+
+    fn raw(&mut self, event: &RawEvent<'_>) {
         let out = &mut self.out;
         self.consumer
-            .on_event(&event, Duration::ZERO, &mut devices, &mut |r| out.push(r));
+            .on_event(event, Duration::ZERO, &mut devices, &mut |r| out.push(r));
     }
 }
 
@@ -146,6 +177,7 @@ fn a_pool_users_refused_open_is_passed_on_with_its_drive_letter() {
             sid: sid(POOL_1),
             pid: 1234,
             path: r"C:\Users\lawyer\Documents\brief.docx".to_owned(),
+            net: false,
             access: Access::Unknown,
         }]
     );
@@ -263,20 +295,22 @@ fn device_paths_map_to_drive_letters_and_shares_and_nothing_else() {
     };
     assert_eq!(
         to(&mut map, r"\Device\HarddiskVolume3\Users\a.txt", &mut list),
-        Some(r"C:\Users\a.txt".to_owned())
+        local(r"C:\Users\a.txt")
     );
     assert_eq!(
         to(&mut map, r"\device\harddiskvolume5\x", &mut list),
-        Some(r"D:\x".to_owned())
+        local(r"D:\x")
     );
-    assert_eq!(to(&mut map, VOLUME, &mut list), Some(r"C:\".to_owned()));
-    // Volume 30 isn't volume 3.
-    assert_eq!(to(&mut map, r"\Device\HarddiskVolume30\x", &mut list), None);
+    assert_eq!(to(&mut map, VOLUME, &mut list), local(r"C:\"));
+    // Volume 30 isn't volume 3: no known local volume, so flagged.
+    let thirty = r"\Device\HarddiskVolume30\x";
+    assert_eq!(to(&mut map, thirty, &mut list), net(thirty));
     assert_eq!(
-        to(&mut map, r"\Device\Mup\server\share\f", &mut list),
-        Some(r"\\server\share\f".to_owned())
+        to(&mut map, r"\Device\NamedPipe\x", &mut list),
+        net(r"\Device\NamedPipe\x")
     );
-    assert_eq!(to(&mut map, r"\Device\NamedPipe\x", &mut list), None);
+    // Not a device path at all: dropped.
+    assert_eq!(to(&mut map, r"C:\x", &mut list), None);
     assert_eq!(
         listed, 1,
         "the misses within a second list the letters once"
@@ -290,20 +324,20 @@ fn a_miss_lists_the_letters_again_once_a_second() {
     let path = r"\Device\HarddiskVolume9\new";
     let list = |d: &Vec<(char, String)>| d.clone();
     let t0 = Duration::from_secs(5);
-    assert_eq!(map.map_path(path, t0, &mut || list(&drives)), None);
+    assert_eq!(map.map_path(path, t0, &mut || list(&drives)), net(path));
     // A drive mounted since: not seen until a second has passed.
     drives.push(('E', r"\Device\HarddiskVolume9".to_owned()));
     let soon = t0 + Duration::from_millis(500);
-    assert_eq!(map.map_path(path, soon, &mut || list(&drives)), None);
+    assert_eq!(map.map_path(path, soon, &mut || list(&drives)), net(path));
     let later = t0 + REFRESH_EVERY;
     assert_eq!(
         map.map_path(path, later, &mut || list(&drives)),
-        Some(r"E:\new".to_owned())
+        local(r"E:\new")
     );
     // A letter with no device isn't a prefix of everything.
     let mut map = DeviceMap::default();
     let mut odd = || vec![('Z', String::new()), ('1', VOLUME.to_owned())];
-    assert_eq!(map.map_path(path, t0, &mut odd), None);
+    assert_eq!(map.map_path(path, t0, &mut odd), net(path));
 }
 
 #[test]
@@ -312,6 +346,7 @@ fn lines_are_one_json_object_each_and_parse_back() {
         sid: sid(POOL_1),
         pid: 1234,
         path: r"C:\Users\a b\c.txt".to_owned(),
+        net: false,
         access: Access::Write,
     };
     let line = denied_line(&record, &pool()).unwrap();
@@ -328,6 +363,7 @@ fn lines_are_one_json_object_each_and_parse_back() {
             pid: 1234,
             path: record.path.clone(),
             access: "write".to_owned(),
+            net: false,
         })
     );
     assert_eq!(dropped_line(7), "{\"v\":1,\"dropped\":7}\n");

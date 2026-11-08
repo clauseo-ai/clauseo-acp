@@ -1,22 +1,29 @@
 //! The watcher's pipe server and the key that publishes its name (`protocol.rs` says what both
 //! are). Every instance is overlapped, so the serving loop never blocks on a client: a connect
 //! is polled, a client's departure is seen by `PeekNamedPipe`, and a write that doesn't finish
-//! within [`WRITE_WAIT_MS`] is cancelled and its client dropped.
+//! within [`WRITE_WAIT_MS`] is cancelled and its client dropped. Which instance is made or closed
+//! when is `instances.rs`'s, which never lets the count reach zero.
 #![expect(
     unsafe_code,
-    reason = "FFI to the named pipe, overlapped I/O and registry calls"
+    reason = "FFI to the named pipe, overlapped I/O, security and registry calls"
 )]
 
 use std::io;
 
 use windows::Win32::Foundation::{
-    ERROR_FILE_NOT_FOUND, ERROR_IO_PENDING, ERROR_PIPE_CONNECTED, ERROR_SUCCESS, WAIT_OBJECT_0,
-    WIN32_ERROR,
+    ERROR_FILE_NOT_FOUND, ERROR_IO_PENDING, ERROR_PIPE_CONNECTED, ERROR_SUCCESS, HANDLE, HLOCAL,
+    LocalFree, WAIT_OBJECT_0, WIN32_ERROR,
 };
-use windows::Win32::Security::SECURITY_ATTRIBUTES;
+use windows::Win32::Security::Authorization::{
+    GetSecurityInfo, SE_KERNEL_OBJECT, SE_OBJECT_TYPE, SE_REGISTRY_KEY,
+};
+use windows::Win32::Security::{
+    IsWellKnownSid, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
+    WinLocalSystemSid,
+};
 use windows::Win32::Storage::FileSystem::{
     FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, FILE_FLAGS_AND_ATTRIBUTES,
-    PIPE_ACCESS_DUPLEX, WriteFile,
+    PIPE_ACCESS_OUTBOUND, READ_CONTROL, WriteFile,
 };
 use windows::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
 use windows::Win32::System::Pipes::{
@@ -25,43 +32,45 @@ use windows::Win32::System::Pipes::{
 };
 use windows::Win32::System::Registry::{
     HKEY, HKEY_LOCAL_MACHINE, KEY_SET_VALUE, KEY_WOW64_64KEY, REG_CREATE_KEY_DISPOSITION,
-    REG_CREATED_NEW_KEY, REG_OPTION_VOLATILE, REG_SZ, RegCloseKey, RegCreateKeyExW,
-    RegDeleteKeyExW, RegSetValueExW,
+    REG_CREATED_NEW_KEY, REG_OPTION_VOLATILE, REG_SAM_FLAGS, REG_SZ, RegCloseKey, RegCreateKeyExW,
+    RegDeleteKeyExW, RegOpenKeyExW, RegSetValueExW,
 };
 use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
 use windows::core::HSTRING;
 
-use super::protocol::{KEY_SDDL, PIPE_VALUE, WATCH_KEY, pipe_name, pipe_sddl};
+use super::Failed;
+use super::instances::{Instances, MAX_INSTANCES, Pipes};
+use super::protocol::{KEY_SDDL, KeyStart, PIPE_VALUE, WATCH_KEY, key_start, pipe_name, pipe_sddl};
 use crate::windows::acl::object::{Handle, os_error};
 use crate::windows::sids::Sid;
 use crate::windows::token::os::LocalDescriptor;
 
-/// The most instances, so the most clients at once less one listening.
-const MAX_INSTANCES: u32 = 8;
 /// The out buffer: about 300 lines.
 const OUT_BUFFER: u32 = 64 * 1024;
-/// The in buffer: the client never writes.
+/// The in buffer: the client never writes (the pipe is outbound).
 const IN_BUFFER: u32 = 512;
 /// How long one write may take before its client is dropped, in milliseconds.
 const WRITE_WAIT_MS: u32 = 1000;
 
-/// An instance waiting for its client. Dropped with its connect pending, it cancels the connect
-/// and waits for it, so the kernel never writes into a freed `OVERLAPPED`.
-struct Listener {
-    /// `None` once handed to the clients.
-    pipe: Option<Handle>,
+/// One instance. Dropped with its connect pending, it cancels the connect and waits for it, so
+/// the kernel never writes into a freed `OVERLAPPED`.
+pub(super) struct Instance {
+    pipe: Handle,
     io: Box<OVERLAPPED>,
     _event: Handle,
-    /// `ConnectNamedPipe` said the client was already there.
-    connected: bool,
+    /// The connect is still outstanding.
+    pending: bool,
+}
+
+/// The real [`Pipes`]: instances of one name, with one descriptor.
+pub(super) struct WinPipes {
+    name: String,
+    sddl: String,
 }
 
 /// The pipe's instances and the published name.
 pub(super) struct Server {
-    name: String,
-    sddl: String,
-    listener: Option<Listener>,
-    clients: Vec<Handle>,
+    instances: Instances<WinPipes>,
     published: bool,
 }
 
@@ -71,21 +80,44 @@ impl Server {
     pub(super) fn open(owner: &Sid) -> io::Result<Server> {
         let mut bits = [0u8; 16];
         getrandom::fill(&mut bits).map_err(|error| io::Error::other(error.to_string()))?;
-        let mut server = Server {
+        let pipes = WinPipes {
             name: pipe_name(&bits),
             sddl: pipe_sddl(owner),
-            listener: None,
-            clients: Vec::new(),
-            published: false,
         };
-        server.listener = Some(server.listen(true)?);
-        publish(&server.name)?;
-        server.published = true;
-        Ok(server)
+        let first = pipes.listen(true)?;
+        publish(&pipes.name)?;
+        Ok(Server {
+            instances: Instances::new(pipes, first),
+            published: true,
+        })
     }
 
+    /// Takes a client that connected, listens again, drops clients that left, and gives how
+    /// many are connected. `Err` ends the run, with the name deleted.
+    pub(super) fn poll(&mut self) -> Result<usize, Failed> {
+        self.instances.poll()
+    }
+
+    /// Writes `line` to every client; one whose write fails or stalls is dropped.
+    pub(super) fn send(&mut self, line: &[u8]) -> Result<(), Failed> {
+        self.instances.send(line)
+    }
+
+    /// Deletes the published name, then closes every instance.
+    pub(super) fn close(mut self) {
+        if self.published {
+            if let Err(error) = unpublish() {
+                tracing::warn!(%error, "the watcher's pipe name wasn't deleted");
+            }
+            self.published = false;
+        }
+        self.instances.close_all();
+    }
+}
+
+impl WinPipes {
     /// A new instance with a connect pending; the first is made first or refused.
-    fn listen(&self, first: bool) -> io::Result<Listener> {
+    fn listen(&self, first: bool) -> io::Result<Instance> {
         let descriptor = LocalDescriptor::new(&self.sddl)?;
         let attributes = SECURITY_ATTRIBUTES {
             nLength: u32::try_from(size_of::<SECURITY_ATTRIBUTES>()).map_err(io::Error::other)?,
@@ -97,14 +129,15 @@ impl Server {
         } else {
             FILE_FLAGS_AND_ATTRIBUTES(0)
         };
+        let most = u32::try_from(MAX_INSTANCES).map_err(io::Error::other)?;
         // SAFETY: the name is a live HSTRING; `attributes` and its descriptor outlive the call;
         // the handle returned is owned by `Handle`.
         let pipe = unsafe {
             CreateNamedPipeW(
                 &HSTRING::from(self.name.as_str()),
-                PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | only,
+                PIPE_ACCESS_OUTBOUND | FILE_FLAG_OVERLAPPED | only,
                 PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
-                MAX_INSTANCES,
+                most,
                 OUT_BUFFER,
                 IN_BUFFER,
                 0,
@@ -123,84 +156,79 @@ impl Server {
             ..OVERLAPPED::default()
         });
         // SAFETY: a live server end; `io` is boxed and kept with the pipe until the connect is
-        // done or the pipe is closed, which ends it.
-        let connected = match unsafe { ConnectNamedPipe(pipe.0, Some(&raw mut *io)) } {
-            Ok(()) => true,
-            Err(error) if error.code() == ERROR_PIPE_CONNECTED.to_hresult() => true,
-            Err(error) if error.code() == ERROR_IO_PENDING.to_hresult() => false,
+        // done or cancelled and waited for (`Instance`'s drop).
+        let pending = match unsafe { ConnectNamedPipe(pipe.0, Some(&raw mut *io)) } {
+            Ok(()) => false,
+            Err(error) if error.code() == ERROR_PIPE_CONNECTED.to_hresult() => false,
+            Err(error) if error.code() == ERROR_IO_PENDING.to_hresult() => true,
             Err(error) => return Err(os_error(&error)),
         };
-        Ok(Listener {
-            pipe: Some(pipe),
+        Ok(Instance {
+            pipe,
             io,
             _event: event,
-            connected,
+            pending,
         })
-    }
-
-    /// Takes a client that connected, listens again, drops clients that left, and gives how
-    /// many are connected.
-    pub(super) fn poll(&mut self) -> usize {
-        if let Some(mut listener) = self.listener.take() {
-            match accepted(&listener) {
-                Some(true) => self.clients.extend(listener.pipe.take()),
-                Some(false) => self.listener = Some(listener),
-                // A connect that failed: the instance goes, another listens.
-                None => {}
-            }
-        }
-        self.clients.retain(|client| {
-            // SAFETY: a live server end; no buffer, so nothing is read.
-            let alive = unsafe { PeekNamedPipe(client.0, None, 0, None, None, None) }.is_ok();
-            if !alive {
-                disconnect(client);
-            }
-            alive
-        });
-        if self.listener.is_none() && self.clients.len() < (MAX_INSTANCES - 1) as usize {
-            match self.listen(false) {
-                Ok(listener) => self.listener = Some(listener),
-                Err(error) => tracing::warn!(%error, "the watcher's pipe couldn't listen again"),
-            }
-        }
-        self.clients.len()
-    }
-
-    /// Writes `line` to every client; one whose write fails or stalls is dropped.
-    pub(super) fn send(&mut self, line: &[u8]) {
-        self.clients.retain(|client| {
-            let sent = write_all(client, line);
-            if !sent {
-                disconnect(client);
-            }
-            sent
-        });
-    }
-
-    /// Deletes the published name; the instances close as the server drops.
-    pub(super) fn close(mut self) {
-        if self.published {
-            if let Err(error) = unpublish() {
-                tracing::warn!(%error, "the watcher's pipe name wasn't deleted");
-            }
-            self.published = false;
-        }
-        for client in &self.clients {
-            disconnect(client);
-        }
     }
 }
 
-impl Drop for Listener {
+impl Pipes for WinPipes {
+    type Pipe = Instance;
+
+    fn create(&mut self) -> Result<Instance, Failed> {
+        self.listen(false)
+            .map_err(|error| format!("the pipe couldn't listen again: {error}"))
+    }
+
+    fn owned_by_system(&mut self, pipe: &Instance) -> Result<bool, Failed> {
+        // The server end's write access holds READ_CONTROL (STANDARD_RIGHTS_WRITE).
+        owner_is_system(pipe.pipe.0, SE_KERNEL_OBJECT)
+            .map_err(|error| format!("the pipe's owner couldn't be read: {error}"))
+    }
+
+    fn accepted(&mut self, pipe: &mut Instance) -> Option<bool> {
+        if !pipe.pending {
+            return Some(true);
+        }
+        // SAFETY: the event is the connect's, live with the instance.
+        if unsafe { WaitForSingleObject(pipe.io.hEvent, 0) } != WAIT_OBJECT_0 {
+            return Some(false);
+        }
+        let mut moved = 0u32;
+        // SAFETY: the connect was started with this OVERLAPPED on this pipe and has completed.
+        let done =
+            unsafe { GetOverlappedResult(pipe.pipe.0, &raw const *pipe.io, &raw mut moved, false) };
+        pipe.pending = false;
+        done.is_ok().then_some(true)
+    }
+
+    fn alive(&mut self, pipe: &Instance) -> bool {
+        // SAFETY: a live server end; no buffer, so nothing is read.
+        unsafe { PeekNamedPipe(pipe.pipe.0, None, 0, None, None, None) }.is_ok()
+    }
+
+    fn write(&mut self, pipe: &Instance, line: &[u8]) -> bool {
+        write_all(&pipe.pipe, line)
+    }
+
+    fn close(&mut self, pipe: Instance) {
+        if !pipe.pending {
+            disconnect(&pipe.pipe);
+        }
+        drop(pipe);
+    }
+}
+
+impl Drop for Instance {
     fn drop(&mut self) {
-        if let Some(pipe) = &self.pipe {
+        if self.pending {
             let mut moved = 0u32;
-            // SAFETY: the connect, if still pending, was started with this OVERLAPPED on this
-            // pipe; cancelling a finished one does nothing, and the wait returns once it is done.
+            // SAFETY: the connect was started with this OVERLAPPED on this pipe; cancelling a
+            // finished one does nothing, and the wait returns once it is done.
             unsafe {
-                drop(CancelIoEx(pipe.0, Some(&raw const *self.io)));
+                drop(CancelIoEx(self.pipe.0, Some(&raw const *self.io)));
                 drop(GetOverlappedResult(
-                    pipe.0,
+                    self.pipe.0,
                     &raw const *self.io,
                     &raw mut moved,
                     true,
@@ -210,21 +238,33 @@ impl Drop for Listener {
     }
 }
 
-/// Whether `listener`'s client has connected: `None` when the connect failed.
-fn accepted(listener: &Listener) -> Option<bool> {
-    if listener.connected {
-        return Some(true);
+/// Whether the owner of `object` (open with `READ_CONTROL`) is LOCAL SYSTEM.
+fn owner_is_system(object: HANDLE, kind: SE_OBJECT_TYPE) -> io::Result<bool> {
+    let mut owner = PSID::default();
+    let mut descriptor = PSECURITY_DESCRIPTOR::default();
+    // SAFETY: the handle is open; both out-pointers are live; `owner` points into the
+    // descriptor, which is freed below after the owner is compared.
+    let code = unsafe {
+        GetSecurityInfo(
+            object,
+            kind,
+            OWNER_SECURITY_INFORMATION,
+            Some(&raw mut owner),
+            None,
+            None,
+            None,
+            Some(&raw mut descriptor),
+        )
+    };
+    checked(code)?;
+    // SAFETY: `owner` is a valid SID inside the live descriptor, or null, which isn't SYSTEM.
+    let system =
+        !owner.0.is_null() && unsafe { IsWellKnownSid(owner, WinLocalSystemSid) }.as_bool();
+    if !descriptor.0.is_null() {
+        // SAFETY: allocated by GetSecurityInfo with LocalAlloc, freed once.
+        unsafe { LocalFree(Some(HLOCAL(descriptor.0))) };
     }
-    let pipe = listener.pipe.as_ref()?;
-    // SAFETY: the event is the connect's, live with the listener.
-    if unsafe { WaitForSingleObject(listener.io.hEvent, 0) } != WAIT_OBJECT_0 {
-        return Some(false);
-    }
-    let mut moved = 0u32;
-    // SAFETY: the connect was started with this OVERLAPPED on this pipe and has completed.
-    let done =
-        unsafe { GetOverlappedResult(pipe.0, &raw const *listener.io, &raw mut moved, false) };
-    done.is_ok().then_some(true)
+    Ok(system)
 }
 
 /// Writes all of `line` to `client`, waiting up to [`WRITE_WAIT_MS`]: whether it went.
@@ -275,11 +315,20 @@ fn checked(code: WIN32_ERROR) -> io::Result<()> {
     }
 }
 
-/// Publishes `name` as [`PIPE_VALUE`] in a fresh, volatile [`WATCH_KEY`] with [`KEY_SDDL`]:
-/// one left by an earlier run is deleted first, and a key that was there after all (made in
-/// between, which only an administrator could) is refused.
+/// Publishes `name` as [`PIPE_VALUE`] in a fresh, volatile [`WATCH_KEY`] with [`KEY_SDDL`].
+/// A key there already is a killed run's when SYSTEM owns it (one task instance runs at a time),
+/// and is deleted; one anyone else owns is refused ([`key_start`]). A key that was there after
+/// all (made in between, which only an administrator could) is refused too.
 fn publish(name: &str) -> io::Result<()> {
-    unpublish()?;
+    match key_start(key_owner_is_system()?) {
+        KeyStart::Fresh => {}
+        KeyStart::Stale => unpublish()?,
+        KeyStart::Foreign => {
+            return Err(io::Error::other(
+                "the watch key is owned by someone other than SYSTEM",
+            ));
+        }
+    }
     let descriptor = LocalDescriptor::new(KEY_SDDL)?;
     let attributes = SECURITY_ATTRIBUTES {
         nLength: u32::try_from(size_of::<SECURITY_ATTRIBUTES>()).map_err(io::Error::other)?,
@@ -321,8 +370,32 @@ fn publish(name: &str) -> io::Result<()> {
     written
 }
 
-/// Deletes [`WATCH_KEY`]; one that isn't there is fine.
-fn unpublish() -> io::Result<()> {
+/// Whether [`WATCH_KEY`]'s owner is SYSTEM: `None` when there is no key.
+fn key_owner_is_system() -> io::Result<Option<bool>> {
+    let mut key = HKEY::default();
+    // SAFETY: the key's name is a live HSTRING and `key` a live out-pointer.
+    let code = unsafe {
+        RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            &HSTRING::from(WATCH_KEY),
+            None,
+            REG_SAM_FLAGS(READ_CONTROL.0) | KEY_WOW64_64KEY,
+            &raw mut key,
+        )
+    };
+    if code == ERROR_FILE_NOT_FOUND {
+        return Ok(None);
+    }
+    checked(code)?;
+    let system = owner_is_system(HANDLE(key.0), SE_REGISTRY_KEY);
+    // SAFETY: a key this call opened.
+    let _closed = unsafe { RegCloseKey(key) };
+    system.map(Some)
+}
+
+/// Deletes [`WATCH_KEY`]; one that isn't there is fine. `--remove` calls it too, through the
+/// task's removal (`refresh::task`), so a killed watcher's name doesn't outlive the task.
+pub(crate) fn unpublish() -> io::Result<()> {
     // SAFETY: the key's name is a live HSTRING.
     let code = unsafe {
         RegDeleteKeyExW(

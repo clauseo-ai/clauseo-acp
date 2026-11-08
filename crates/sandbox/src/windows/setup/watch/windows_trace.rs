@@ -1,7 +1,8 @@
 //! The watcher's ETW glue: the real-time session [`SESSION_NAME`], Kernel-File enabled on it
 //! with each event's SID, and the consumer thread (`OpenTraceW` in real-time, event-record mode,
 //! then `ProcessTrace`), whose callback hands each event's raw parts to the [`Consumer`] and
-//! its records to a bounded channel. Thin on purpose: every decision is in `consumer.rs`.
+//! its records to a bounded channel. Thin on purpose: every decision is in `consumer.rs`. Every
+//! few seconds it queries the session for the events ETW lost (`losses.rs`).
 #![expect(unsafe_code, reason = "FFI to the ETW controller and consumer calls")]
 
 use std::ffi::c_void;
@@ -20,16 +21,20 @@ use windows::Win32::System::Diagnostics::Etw::{
     CONTROLTRACE_HANDLE, CloseTrace, ControlTraceW, ENABLE_TRACE_PARAMETERS,
     ENABLE_TRACE_PARAMETERS_VERSION_2, EVENT_CONTROL_CODE_ENABLE_PROVIDER,
     EVENT_ENABLE_PROPERTY_SID, EVENT_HEADER_EXT_TYPE_SID, EVENT_HEADER_FLAG_64_BIT_HEADER,
-    EVENT_RECORD, EVENT_TRACE_CONTROL_STOP, EVENT_TRACE_LOGFILEW, EVENT_TRACE_PROPERTIES,
-    EVENT_TRACE_REAL_TIME_MODE, EnableTraceEx2, OpenTraceW, PROCESS_TRACE_MODE_EVENT_RECORD,
-    PROCESS_TRACE_MODE_REAL_TIME, PROCESSTRACE_HANDLE, ProcessTrace, StartTraceW,
-    WNODE_FLAG_TRACED_GUID,
+    EVENT_RECORD, EVENT_TRACE_CONTROL_QUERY, EVENT_TRACE_CONTROL_STOP, EVENT_TRACE_LOGFILEW,
+    EVENT_TRACE_PROPERTIES, EVENT_TRACE_REAL_TIME_MODE, EnableTraceEx2, OpenTraceW,
+    PROCESS_TRACE_MODE_EVENT_RECORD, PROCESS_TRACE_MODE_REAL_TIME, PROCESSTRACE_HANDLE,
+    ProcessTrace, StartTraceW, WNODE_FLAG_TRACED_GUID,
 };
 use windows::Win32::System::SystemInformation::GetTickCount64;
 use windows::core::{GUID, HSTRING, PWSTR};
 
-use super::consumer::{CREATE_ID, Consumer, END_ID, KERNEL_FILE, RawEvent, Record};
+use super::consumer::{
+    CREATE_ID, Consumer, END_ID, EXT_TYPE_SID, KERNEL_FILE, RawEvent, Record, sid_in,
+};
+use super::losses::Losses;
 use super::{Delivery, SESSION_NAME, TraceError};
+use crate::windows::refresh::event_log;
 use crate::windows::sids::Sid;
 
 /// Kernel-File's keywords `CREATE` (0x80) and `OP_END` (0x40).
@@ -46,6 +51,9 @@ const FLUSH_SECONDS: u32 = 1;
 const QPC: u32 = 1;
 /// The records the channel holds before the consumer counts the rest as lost.
 const CHANNEL_CAP: usize = 1024;
+// The pure SID lookup's item type is the header's.
+const _: () = assert!(EVENT_HEADER_EXT_TYPE_SID == EXT_TYPE_SID as u32);
+
 /// Room for a session name and a log file name after the properties, in UTF-16 units each.
 const NAME_ROOM: usize = 1024;
 
@@ -54,6 +62,9 @@ pub(crate) struct Trace {
     thread: Option<JoinHandle<()>>,
     records: Receiver<Record>,
     lost: Arc<AtomicU64>,
+    losses: Losses,
+    /// `GetTickCount64` when the trace began.
+    began_ms: u64,
 }
 
 /// The callback's state, owned by the consumer thread and reached through `UserContext`.
@@ -114,6 +125,25 @@ pub(crate) fn stop_session() -> Result<bool, String> {
         ERROR_WMI_INSTANCE_NOT_FOUND => Ok(false),
         code => Err(failed("ControlTraceW", code)),
     }
+}
+
+/// The session's `EventsLost` and `RealTimeBuffersLost`.
+fn query_session() -> Result<(u32, u32), String> {
+    let mut properties = Properties::new();
+    // SAFETY: as in `stop_session`.
+    let code = unsafe {
+        ControlTraceW(
+            CONTROLTRACE_HANDLE::default(),
+            &HSTRING::from(SESSION_NAME),
+            properties.as_mut_ptr(),
+            EVENT_TRACE_CONTROL_QUERY,
+        )
+    };
+    if code != ERROR_SUCCESS {
+        return Err(failed("ControlTraceW", code));
+    }
+    let fields = properties.fields();
+    Ok((fields.EventsLost, fields.RealTimeBuffersLost))
 }
 
 /// Starts the session, a stale one stopped first, with real-time delivery.
@@ -206,6 +236,9 @@ impl Trace {
             thread: Some(thread),
             records,
             lost,
+            losses: Losses::default(),
+            // SAFETY: GetTickCount64 only reads the tick count.
+            began_ms: unsafe { GetTickCount64() },
         })
     }
 
@@ -220,7 +253,16 @@ impl Trace {
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return Delivery::Ended,
         }
-        Delivery::Records(records, self.lost.swap(0, Ordering::Relaxed))
+        let mut lost = self.lost.swap(0, Ordering::Relaxed);
+        // SAFETY: GetTickCount64 only reads the tick count.
+        let now = Duration::from_millis(unsafe { GetTickCount64() }.saturating_sub(self.began_ms));
+        if self.losses.due(now) {
+            // A query that fails is tried again at the next due time.
+            if let Ok((events, buffers)) = query_session() {
+                lost = lost.saturating_add(self.losses.read(now, events, buffers));
+            }
+        }
+        Delivery::Records(records, lost)
     }
 
     /// Stops the session, which ends `ProcessTrace`, and waits for the consumer thread.
@@ -273,7 +315,16 @@ fn consume(handle: PROCESSTRACE_HANDLE, context: usize) {
     let _closed = unsafe { CloseTrace(handle) };
     // SAFETY: `context` came from Box::into_raw in `Trace::start`; the callback that used it
     // can't run again, so this thread owns it alone.
-    drop(unsafe { Box::from_raw(context as *mut Callback) });
+    let callback = unsafe { Box::from_raw(context as *mut Callback) };
+    let unknown = callback.consumer.counts().unknown_version;
+    if unknown > 0 {
+        let line = format!(
+            "the sandbox's watcher: {unknown} Kernel-File events of an unknown version were \
+             skipped"
+        );
+        event_log(true, &line);
+    }
+    drop(callback);
 }
 
 /// The callback: one event's header, SID item and payload to the consumer.
@@ -313,6 +364,8 @@ unsafe extern "system" fn on_event(record: *mut EVENT_RECORD) {
         },
         data,
         wide: u32::from(header.Flags) & EVENT_HEADER_FLAG_64_BIT_HEADER != 0,
+        version: header.EventDescriptor.Version,
+        stamp: header.TimeStamp,
     };
     let Callback {
         consumer,
@@ -327,9 +380,14 @@ unsafe extern "system" fn on_event(record: *mut EVENT_RECORD) {
             lost.fetch_add(1, Ordering::Relaxed);
         }
     });
+    let dropped = consumer.take_dropped();
+    if dropped > 0 {
+        lost.fetch_add(dropped, Ordering::Relaxed);
+    }
 }
 
-/// The record's `EVENT_HEADER_EXT_TYPE_SID` item, when it has one.
+/// The record's `EVENT_HEADER_EXT_TYPE_SID` item, when it has one: each item's type and bytes
+/// to [`sid_in`], which picks it.
 fn sid_item(record: &EVENT_RECORD) -> Option<&[u8]> {
     if record.ExtendedData.is_null() {
         return None;
@@ -338,15 +396,15 @@ fn sid_item(record: &EVENT_RECORD) -> Option<&[u8]> {
     let items = unsafe {
         std::slice::from_raw_parts(record.ExtendedData, usize::from(record.ExtendedDataCount))
     };
-    let item = items
-        .iter()
-        .find(|item| u32::from(item.ExtType) == EVENT_HEADER_EXT_TYPE_SID)?;
-    let at = usize::try_from(item.DataPtr).ok()?;
-    if at == 0 {
-        return None;
-    }
-    // SAFETY: the item's `DataSize` bytes at `DataPtr` are valid for the call.
-    Some(unsafe { std::slice::from_raw_parts(at as *const u8, usize::from(item.DataSize)) })
+    sid_in(items.iter().map(|item| {
+        let size = usize::from(item.DataSize);
+        let data = usize::try_from(item.DataPtr)
+            .ok()
+            .filter(|at| *at != 0)
+            // SAFETY: the item's `DataSize` bytes at `DataPtr` are valid for the call.
+            .map(|at| unsafe { std::slice::from_raw_parts(at as *const u8, size) });
+        (item.ExtType, data)
+    }))
 }
 
 /// Each drive letter's device (`QueryDosDeviceW`), for the device map.

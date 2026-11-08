@@ -1,5 +1,6 @@
 //! The watcher's steps over a fake [`Watcher`]: the refusals, the provider-full exit, the
-//! lifetime (connect, disconnect, exit), and that nothing not of the pool reaches the pipe.
+//! lifetime (connect, disconnect, exit), the owner's re-check, a pipe that fails while serving,
+//! and that nothing not of the pool reaches the pipe.
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -7,7 +8,7 @@ use std::time::Duration;
 
 use super::super::lifetime::{FIRST_CLIENT_WAIT, LAST_CLIENT_GRACE, Lifetime, MAX_RUN, Verdict};
 use super::super::protocol::{Line, RECORDS_PER_SECOND};
-use super::super::serve::TICK;
+use super::super::serve::{OWNER_CHECK, TICK};
 use super::super::{
     Delivery, Failed, Pool, TraceError, WatchExit, Watcher, consumer::Access, consumer::Record,
     watch,
@@ -28,7 +29,12 @@ struct Fake {
     system: bool,
     exe: PathBuf,
     pool: Result<Option<Pool>, Failed>,
+    /// What the record reads as at each re-check, in turn; then `pool` again.
+    rechecks: VecDeque<Result<Option<Pool>, Failed>>,
+    pool_reads: usize,
     not_pool: bool,
+    /// Every send fails: the pipe can't keep an instance.
+    send_fails: bool,
     trace: Result<(), TraceError>,
     pipe: Result<(), Failed>,
     ticks: VecDeque<Tick>,
@@ -49,7 +55,10 @@ impl Fake {
                 owner: sid(LAWYER),
                 users: pool(),
             })),
+            rechecks: VecDeque::new(),
+            pool_reads: 0,
             not_pool: false,
+            send_fails: false,
             trace: Ok(()),
             pipe: Ok(()),
             ticks: VecDeque::new(),
@@ -95,6 +104,12 @@ impl Watcher for Fake {
         ))
     }
     fn pool(&mut self) -> Result<Option<Pool>, Failed> {
+        self.pool_reads += 1;
+        if self.pool_reads > 1
+            && let Some(again) = self.rechecks.pop_front()
+        {
+            return again;
+        }
         self.pool.clone()
     }
     fn check_pool(&mut self, _pool: &Pool) -> Result<(), Failed> {
@@ -133,10 +148,14 @@ impl Watcher for Fake {
     fn clients(&mut self) -> Result<usize, Failed> {
         Ok(self.clients)
     }
-    fn send(&mut self, line: &str) {
+    fn send(&mut self, line: &str) -> Result<(), Failed> {
+        if self.send_fails {
+            return Err("a later instance couldn't be made".to_owned());
+        }
         if self.clients > 0 {
             self.sent.push(line.to_owned());
         }
+        Ok(())
     }
     fn now(&mut self) -> Duration {
         self.now
@@ -153,6 +172,7 @@ fn record(who: &str, path: &str) -> Record {
         sid: sid(who),
         pid: 1234,
         path: path.to_owned(),
+        net: false,
         access: Access::Unknown,
     }
 }
@@ -292,9 +312,17 @@ fn the_refusals_and_record_are_checked_first() {
     fake.not_pool = true;
     assert_eq!(watch(&mut fake).as_code(), 72);
     assert_eq!(fake.calls, Vec::<String>::new());
-    // No record is nothing to watch: 0, no session.
+    // No record is 71, as a malformed one is: no session.
     let mut fake = Fake::new();
     fake.pool = Ok(None);
+    assert_eq!(watch(&mut fake).as_code(), 71);
+    assert_eq!(fake.calls, Vec::<String>::new());
+    // An empty pool is nothing to watch: 0, no session.
+    let mut fake = Fake::new();
+    fake.pool = Ok(Some(Pool {
+        owner: sid(LAWYER),
+        users: Vec::new(),
+    }));
     assert_eq!(watch(&mut fake), WatchExit::Done);
     assert_eq!(fake.calls, Vec::<String>::new());
 }
@@ -342,4 +370,61 @@ fn past_the_rate_the_rest_go_as_one_dropped_line() {
         })
         .collect();
     assert_eq!(dropped, [34]);
+}
+
+/// The record as read again with `owner` as its owner.
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "a re-check's read, beside its failures"
+)]
+fn owned_by(owner: &str) -> Result<Option<Pool>, Failed> {
+    let pool = Pool {
+        owner: sid(owner),
+        users: pool(),
+    };
+    Ok(Some(pool))
+}
+
+#[test]
+fn another_owner_in_the_record_ends_the_run_with_0() {
+    let ticks_per_check = ticks(OWNER_CHECK);
+    let mut fake = Fake::new().idle(4 * ticks_per_check, 1);
+    // The first re-check reads the same owner, an unreadable one is let be, then a new set-up.
+    fake.rechecks = VecDeque::from([
+        owned_by(LAWYER),
+        Err("RegGetValueW failed (2)".to_owned()),
+        owned_by(POOL_1),
+    ]);
+    assert_eq!(watch(&mut fake), WatchExit::Done);
+    assert!(
+        fake.last_log().contains("the record's owner changed"),
+        "{}",
+        fake.last_log()
+    );
+    assert_eq!(fake.pool_reads, 4);
+    assert!(fake.now <= OWNER_CHECK * 3 + TICK, "{:?}", fake.now);
+    assert_eq!(
+        fake.calls[fake.calls.len() - 2..],
+        ["close_pipe", "stop_trace"]
+    );
+    // A record gone since is no owner: the run ends too.
+    let mut fake = Fake::new().idle(2 * ticks_per_check, 1);
+    fake.rechecks = VecDeque::from([Ok(None)]);
+    assert_eq!(watch(&mut fake), WatchExit::Done);
+    assert!(fake.last_log().contains("the record's owner changed"));
+}
+
+#[test]
+fn a_pipe_that_fails_to_send_ends_the_run_with_74() {
+    let mut fake = Fake::new().idle(1, 1).tick(Tick {
+        clients: 1,
+        records: vec![record(POOL_1, r"C:\x")],
+        ..Tick::default()
+    });
+    fake.send_fails = true;
+    assert_eq!(watch(&mut fake), WatchExit::NoPipe);
+    assert_eq!(
+        fake.calls[fake.calls.len() - 2..],
+        ["close_pipe", "stop_trace"]
+    );
 }
