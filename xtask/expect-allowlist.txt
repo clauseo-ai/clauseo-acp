@@ -620,6 +620,7 @@ crates/sandbox/examples/s15_launch_vm/win_suspend.rs - unsafe_code
 crates/sandbox/src/windows/wsl/os.rs - unsafe_code
 crates/sandbox/src/windows/wsl/msi.rs - unsafe_code
 crates/sandbox/src/windows/wsl/msi.rs install clippy::disallowed_methods
+crates/sandbox/src/windows/wsl/msi_files.rs - unsafe_code
 crates/sandbox/src/windows/clean_close/wsl_heal.rs WindowsDenyTask::new clippy::disallowed_methods
 crates/sandbox/src/windows/clean_close/wsl_heal.rs WindowsDenyTask::sleep clippy::disallowed_methods
 crates/sandbox/src/windows/setup/wsl_tests.rs - unsafe_code

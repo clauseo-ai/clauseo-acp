@@ -4,11 +4,14 @@
 //!
 //! - **When**: the package's version newer than the MSI's `Version`, as `IsUpdateNeeded`
 //!   compares them (`WslInstaller.cpp:142-165`) and as the launch check does
-//!   ([`msi_behind`]); a missing or empty `Version` isn't an upgrade (`upgrade.rs`).
+//!   (`upgrade::msi_behind`); a missing or empty `Version` isn't an upgrade (`upgrade.rs`).
 //! - **Which MSI**: `wsl.msi` in the folder of the `WslInstaller` service's image
 //!   (`GetMsiPackagePath`, `GetBasePath`, `WslInstaller.cpp:21-32`): the service's `ImagePath`,
 //!   which only administrators can write, names a folder directly under
-//!   `%ProgramFiles%\WindowsApps`, which only `TrustedInstaller` writes ([`installer_package`]).
+//!   `%ProgramFiles%\WindowsApps`, which only `TrustedInstaller` writes
+//!   (`upgrade::installer_package`), and checked before use (`msi_verify.rs`): the package
+//!   family's folder, no reparse point, the owner, Microsoft's signature, and the file held open
+//!   until msiexec ends.
 //! - **How**: `UpgradeViaMsi(path, L"SKIPMSIX=1")` (`WslInstaller.cpp:97-98`), which adds
 //!   `REBOOT=ReallySuppress` and calls `MsiInstallProduct` with no UI (`install.cpp:385-406`,
 //!   `MsiSetInternalUI(INSTALLUILEVEL_NONE…)` at `install.cpp:238`). Here: `msiexec.exe /i
@@ -36,8 +39,10 @@ use windows::Win32::System::Threading::WaitForSingleObject;
 use windows::core::{HSTRING, PCWSTR};
 
 use super::WindowsWsl;
-use super::seam::WslRead;
-use super::upgrade::{INSTALLER_SERVICE, PACKAGE_MSI, Version, installer_package, msi_behind};
+use super::msi_files::{HeldMsi, WindowsMsiFiles};
+pub use super::msi_verify::MsiUpgrade;
+use super::msi_verify::upgrade_with;
+use super::upgrade::INSTALLER_SERVICE;
 use crate::windows::record::read_units;
 
 /// How long the run waits for msiexec: an upgrade takes tens of seconds; the task's limit is 5
@@ -48,23 +53,8 @@ pub const MSI_ARGS: [&str; 3] = ["/qn", "SKIPMSIX=1", "REBOOT=ReallySuppress"];
 /// `ERROR_SUCCESS_REBOOT_REQUIRED`: installed, some files replaced at the next restart.
 const REBOOT_REQUIRED: i32 = 3010;
 
-/// What [`upgrade_pending`] did.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MsiUpgrade {
-    /// No upgrade was pending, or there is no `WslInstaller` service to take the MSI from.
-    NotPending,
-    /// The MSI at `from` was upgraded to the package's version `to`.
-    Upgraded {
-        /// The MSI's version before.
-        from: String,
-        /// The package's version.
-        to: Version,
-    },
-    /// The upgrade was owed and failed, or couldn't be tried: why, with codes, never a path.
-    Failed(String),
-}
-
-/// Installs WSL's pending MSI upgrade, as the module says. As LOCAL SYSTEM.
+/// Installs WSL's pending MSI upgrade, as the module says, once `msi_verify.rs`'s checks pass.
+/// As LOCAL SYSTEM.
 pub fn upgrade_pending(program_files: &Path) -> MsiUpgrade {
     let key = HSTRING::from(format!(
         r"SYSTEM\CurrentControlSet\Services\{INSTALLER_SERVICE}"
@@ -80,28 +70,14 @@ pub fn upgrade_pending(program_files: &Path) -> MsiUpgrade {
         Err(error) => return MsiUpgrade::Failed(format!("the installer service's image: {error}")),
     };
     let apps = program_files.join("WindowsApps");
-    let Some((folder, package)) = installer_package(&image, &apps.to_string_lossy()) else {
-        let why = "the installer service's image isn't in a WSL package's folder";
-        return MsiUpgrade::Failed(why.to_owned());
-    };
-    let msi = match WindowsWsl::reader().msi_version() {
-        Ok(msi) => msi,
-        Err(error) => return MsiUpgrade::Failed(format!("the MSI's version: {error}")),
-    };
-    if !msi_behind(package, msi.as_deref()) {
-        return MsiUpgrade::NotPending;
-    }
-    let path = Path::new(&folder).join(PACKAGE_MSI);
-    match std::fs::symlink_metadata(&path) {
-        Ok(meta) if meta.is_file() => {}
-        Ok(_) => return MsiUpgrade::Failed(format!("{PACKAGE_MSI} isn't a file")),
-        Err(error) => return MsiUpgrade::Failed(format!("{PACKAGE_MSI}: {error}")),
-    }
-    let from = msi.unwrap_or_default();
-    match install(&path) {
-        Ok(()) => MsiUpgrade::Upgraded { from, to: package },
-        Err(why) => MsiUpgrade::Failed(why),
-    }
+    let reader = WindowsWsl::reader();
+    upgrade_with(
+        &WindowsMsiFiles,
+        &reader,
+        &image,
+        &apps.to_string_lossy(),
+        install,
+    )
 }
 
 /// Runs msiexec on `msi` with [`MSI_ARGS`] and waits up to [`MSI_WAIT`].
@@ -109,7 +85,7 @@ pub fn upgrade_pending(program_files: &Path) -> MsiUpgrade {
     clippy::disallowed_methods,
     reason = "msiexec, a Windows tool the SYSTEM task runs to install WSL's MSI, not an agent"
 )]
-fn install(msi: &Path) -> Result<(), String> {
+fn install(msi: &str, _held: &HeldMsi) -> Result<(), String> {
     let msiexec = Path::new(&system_folder()?).join("msiexec.exe");
     let mut child = Command::new(msiexec)
         .arg("/i")

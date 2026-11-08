@@ -34,6 +34,11 @@ pub const PACKAGE_NAME: &str = "MicrosoftCorporationII.WindowsSubsystemForLinux"
 /// A version as WSL compares them: major, minor, revision.
 pub type Version = (u32, u32, u32);
 
+/// The publisher hash of the package's family, `<PACKAGE_NAME>_8wekyb3d8bbwe`: Microsoft's.
+pub const PACKAGE_PUBLISHER: &str = "8wekyb3d8bbwe";
+/// The architectures a package folder's name may name.
+const ARCHITECTURES: [&str; 5] = ["x64", "arm64", "x86", "arm", "neutral"];
+
 /// The packaged service whose image is in the package's folder (`AppxManifest.in:50`).
 pub const INSTALLER_SERVICE: &str = "WslInstaller";
 /// The service's image, in the package's folder.
@@ -91,11 +96,36 @@ fn package_version(full_name: &str) -> Option<Version> {
     version(rest.split('_').next()?)
 }
 
+/// The version in a WSL package folder's name, `<PACKAGE_NAME>_<version>_<arch>__<publisher>`
+/// (no resource id): the name and [`PACKAGE_PUBLISHER`] compared exactly, ASCII case ignored,
+/// the version four dotted numbers, the architecture a known one. `None` for any other name.
+pub fn package_folder_version(name: &str) -> Option<Version> {
+    let parts: Vec<&str> = name.split('_').collect();
+    let [family, numbers, arch, "", publisher] = parts.as_slice() else {
+        return None;
+    };
+    let digits = numbers
+        .bytes()
+        .all(|byte| byte.is_ascii_digit() || byte == b'.');
+    let known = ARCHITECTURES
+        .iter()
+        .any(|known| known.eq_ignore_ascii_case(arch));
+    if !family.eq_ignore_ascii_case(PACKAGE_NAME)
+        || !publisher.eq_ignore_ascii_case(PACKAGE_PUBLISHER)
+        || !known
+        || !digits
+        || numbers.split('.').count() != 4
+    {
+        return None;
+    }
+    version(numbers)
+}
+
 /// The `WslInstaller` service's package folder and the package's version, from the service's
 /// `ImagePath` `image_path` (quoted or not): `None` unless the image is `wslinstaller.exe` in a
-/// WSL package's folder directly under `windows_apps` (`%ProgramFiles%\WindowsApps`, which
-/// only `TrustedInstaller` writes). WSL's own installer runs the MSI in that folder
-/// ([`PACKAGE_MSI`]). Text only, so it is tested on every OS.
+/// WSL package's folder ([`package_folder_version`]) directly under `windows_apps`
+/// (`%ProgramFiles%\WindowsApps`, which only `TrustedInstaller` writes). WSL's own installer
+/// runs the MSI in that folder ([`PACKAGE_MSI`]). Text only, so it is tested on every OS.
 pub fn installer_package(image_path: &str, windows_apps: &str) -> Option<(String, Version)> {
     let text = image_path.trim();
     let exe = match text.strip_prefix('"') {
@@ -108,7 +138,7 @@ pub fn installer_package(image_path: &str, windows_apps: &str) -> Option<(String
     if !name.eq_ignore_ascii_case(INSTALLER_EXE) || !parent.eq_ignore_ascii_case(apps) {
         return None;
     }
-    Some((folder.to_owned(), package_version(package)?))
+    Some((folder.to_owned(), package_folder_version(package)?))
 }
 
 /// Whether the MSI version `msi` is older than `package`, as [`upgrade`] compares them for
@@ -165,7 +195,7 @@ pub fn upgrade(reg: &dyn WslRead) -> Upgrade {
 
 #[cfg(test)]
 mod tests {
-    use super::{installer_package, msi_behind};
+    use super::{installer_package, msi_behind, package_folder_version};
 
     const APPS: &str = r"C:\Program Files\WindowsApps";
     const FOLDER: &str = concat!(
@@ -197,6 +227,33 @@ mod tests {
         assert_eq!(for_image(&climbing), None);
         assert_eq!(for_image(&format!(r"{FOLDER}\wsl.exe")), None);
         assert_eq!(for_image(""), None);
+    }
+
+    #[test]
+    fn a_package_folder_is_wsl_s_only_with_its_family_s_name_and_publisher() {
+        let ok = "MicrosoftCorporationII.WindowsSubsystemForLinux_2.6.3.0_x64__8wekyb3d8bbwe";
+        assert_eq!(package_folder_version(ok), Some((2, 6, 3)));
+        let arm = "microsoftcorporationii.windowssubsystemforlinux_2.6.3.0_ARM64__8WEKYB3D8BBWE";
+        assert_eq!(package_folder_version(arm), Some((2, 6, 3)));
+        for name in [
+            // Another publisher, a longer or shorter name, a resource id, an unknown arch.
+            "MicrosoftCorporationII.WindowsSubsystemForLinux_2.6.3.0_x64__8wekyb3d8bbwf",
+            "MicrosoftCorporationII.WindowsSubsystemForLinux_2.6.3.0_x64__8wekyb3d8bbwex",
+            "MicrosoftCorporationII.WindowsSubsystemForLinuxX_2.6.3.0_x64__8wekyb3d8bbwe",
+            "Contoso.MicrosoftCorporationII.WindowsSubsystemForLinux_2.6.3.0_x64__8wekyb3d8bbwe",
+            "MicrosoftCorporationII.WindowsSubsystemForLinux_2.6.3.0_x64_en-us_8wekyb3d8bbwe",
+            "MicrosoftCorporationII.WindowsSubsystemForLinux_2.6.3.0_mips__8wekyb3d8bbwe",
+            // A version of three parts, with a space or a sign, or none; parts missing or added.
+            "MicrosoftCorporationII.WindowsSubsystemForLinux_2.6.3_x64__8wekyb3d8bbwe",
+            "MicrosoftCorporationII.WindowsSubsystemForLinux_2.6.3.0 _x64__8wekyb3d8bbwe",
+            "MicrosoftCorporationII.WindowsSubsystemForLinux_+2.6.3.0_x64__8wekyb3d8bbwe",
+            "MicrosoftCorporationII.WindowsSubsystemForLinux__x64__8wekyb3d8bbwe",
+            "MicrosoftCorporationII.WindowsSubsystemForLinux_2.6.3.0_x64_8wekyb3d8bbwe",
+            "MicrosoftCorporationII.WindowsSubsystemForLinux_2.6.3.0_x64__8wekyb3d8bbwe_",
+            "",
+        ] {
+            assert_eq!(package_folder_version(name), None, "{name}");
+        }
     }
 
     #[test]

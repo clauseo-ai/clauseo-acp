@@ -2622,6 +2622,23 @@ check (`check_launch_in`) passes WSL's check through `wsl_heal::heal`:
   says a removal is under way or names no group. An installed upgrade is one information line in
   the Event Log ("WSL's pending update was installed: <old> to <new>"), a failed one an error line
   with its code.
+- **The MSI is verified before SYSTEM installs it** (`wsl/msi_verify.rs`, `wsl/msi_files.rs`).
+  msiexec runs as SYSTEM, so nothing a non-admin lawyer (or a pool user) can place, link or
+  change may reach it; otherwise the self-healing would be an elevation path. The package folder's
+  name must be WSL's family,
+  `MicrosoftCorporationII.WindowsSubsystemForLinux_<version>_<arch>__8wekyb3d8bbwe`, name and
+  publisher hash compared exactly, ASCII case ignored
+  (`upgrade::package_folder_version`). `WindowsApps`, the package folder and `wsl.msi` are each
+  opened without following a reparse point (the folder and the file relative to their parent's
+  handle, with `OBJ_DONT_REPARSE`) and refused if any is one; `wsl.msi` must be a regular disk
+  file with one link. Its owner, read on its handle, must be `TrustedInstaller` or SYSTEM.
+  `WinVerifyTrust` (`WINTRUST_ACTION_GENERIC_VERIFY_V2`, no UI) must trust its signature, with
+  revocation not checked and URL retrieval cache-only, so an offline machine verifies as an
+  online one does, and its leaf signer must be "Microsoft Corporation". The handle stays open,
+  shared for reading only, and the two folders without delete sharing, until msiexec has ended,
+  so nothing is swapped between the checks and the install; msiexec gets the path that was
+  opened. A failed check is a failed upgrade (its reason names no path): the run still re-applies
+  the deny, as after any other failed upgrade.
 - **The launch's wait for it**: the host hears `LaunchProgress::UpdatingWindowsComponent` once,
   when the wait begins (the `progress` argument of `clean_close::check_launch`, a
   `&dyn Fn(LaunchProgress)`; the app owns the words, "Updating a Windows component before
