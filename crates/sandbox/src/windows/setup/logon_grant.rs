@@ -7,7 +7,7 @@
 //!   nothing to do;
 //! - policy defines it without the pool: no grant (a policy refresh would undo it), and the
 //!   set-up fails with [`LOGON_POLICY_EXCLUDES`](super::LOGON_POLICY_EXCLUDES), which is
-//!   `Blocked::LogonRight`;
+//!   `Blocked::LogonPolicy`;
 //! - policy can't be read ([`RightPolicy::Unknown`]): no grant; the logon is the test, and the
 //!   next set-up checks again;
 //! - no policy defines it: when the local holders ([`LogonRights::holders`]) already name the

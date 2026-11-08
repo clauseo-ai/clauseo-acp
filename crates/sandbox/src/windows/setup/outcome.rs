@@ -31,7 +31,7 @@ pub const LOGON_NOT_GRANTED: &str = "Windows' \"Allow log on locally\" setting d
      the sandbox users (error 1385): run set-up again, which grants it where no policy sets it, \
      or add the group ClauseoSandboxUsers to the setting";
 /// The cause when a GPO or Intune sets \"Allow log on locally\" without the pool accounts
-/// (`rights_policy.rs`): set-up grants nothing then, and the block is [`Blocked::LogonRight`].
+/// (`rights_policy.rs`): set-up grants nothing then, and the block is [`Blocked::LogonPolicy`].
 /// It starts with the lawyer's words.
 pub const LOGON_POLICY_EXCLUDES: &str = "This computer's settings don't let Clauseo's sandbox \
      accounts sign in yet: a policy sets Windows' \"Allow log on locally\" without the group \
@@ -274,10 +274,15 @@ pub struct SetupFailure {
 
 impl SetupFailure {
     /// The setting that blocked this failure, when one did (D-B4): a logon refused with 1385
-    /// ([`LOGON_NOT_GRANTED`], the cause [`cause_of`] gives it), or a policy that sets the
-    /// right without the pool ([`LOGON_POLICY_EXCLUDES`]). `None` for any other.
+    /// ([`LOGON_NOT_GRANTED`], the cause [`cause_of`] gives it), [`Blocked::LogonRight`]; a
+    /// policy that sets the right without the pool ([`LOGON_POLICY_EXCLUDES`]),
+    /// [`Blocked::LogonPolicy`]. `None` for any other.
     pub fn blocked(&self) -> Option<Blocked> {
-        (self.cause.starts_with(LOGON_NOT_GRANTED) || self.cause.starts_with(LOGON_POLICY_EXCLUDES))
+        if self.cause.starts_with(LOGON_POLICY_EXCLUDES) {
+            return Some(Blocked::LogonPolicy);
+        }
+        self.cause
+            .starts_with(LOGON_NOT_GRANTED)
             .then_some(Blocked::LogonRight)
     }
 

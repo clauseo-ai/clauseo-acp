@@ -32,7 +32,7 @@ const ADMINISTRATORS: &str = "S-1-5-32-544";
 /// granted to `group` where no policy defines it and no local holder admits the pool
 /// (`logon_grant.rs`); `users` are the recorded pool SIDs. A grant made is in `run`, for the
 /// rollback. A policy that defines the right without the pool is [`LOGON_POLICY_EXCLUDES`]
-/// (`Blocked::LogonRight`); a policy that can't be read grants nothing, and the logon decides.
+/// (`Blocked::LogonPolicy`); a policy that can't be read grants nothing, and the logon decides.
 pub(super) fn logon_right(
     machine: &mut impl Machine,
     group: &Sid,

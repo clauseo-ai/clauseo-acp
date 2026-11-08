@@ -63,7 +63,7 @@ fn a_policy_without_the_pool_blocks_and_grants_nothing() {
             .starts_with("This computer's settings don't let Clauseo's sandbox")
     );
     assert!(failure.cause.contains("ClauseoSandboxUsers"));
-    assert_eq!(failure.blocked(), Some(Blocked::LogonRight));
+    assert_eq!(failure.blocked(), Some(Blocked::LogonPolicy));
     assert!(failure.rolled_back);
     assert_eq!(machine.state.group, None, "the group this run made is gone");
     assert!(

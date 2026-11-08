@@ -183,6 +183,7 @@ mod tests {
                 "admin_copy_unsafe",
                 "other_account",
                 "tool_missing",
+                "logon_policy",
             ]
         );
         for blocked in crate::Blocked::ALL {

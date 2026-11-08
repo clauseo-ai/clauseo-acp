@@ -799,8 +799,12 @@ default Windows include, so most computers need nothing. Set-up checks the rest
   SID) to the record, then `LsaAddAccountRights` adds the right to the group. If the add fails,
   the value is cleared. A failed run's rollback takes the right off again. A policy that defines
   the right without the pool gets no grant (the next refresh would undo it): set-up fails at
-  `Step::LogonRight` with `LOGON_POLICY_EXCLUDES`, which is `Blocked::LogonRight`. The batch
-  fallback (PR6 C7a) will turn that into a working path. Only `SeInteractiveLogonRight` can be
+  `Step::LogonRight` with `LOGON_POLICY_EXCLUDES`, which is `Blocked::LogonPolicy`
+  (`logon_policy`; `Blocked::LogonRight` stays the local 1385, which setting up again fixes). Like
+  every `Blocked` today it refuses and rolls the run back: the set-up's own logon (step 6) is
+  interactive and would get 1385 anyway, so the run can't finish. **Once the batch fallback (PR6
+  C7a) exists, `LogonPolicy` stops blocking set-up:** set-up then makes the profiles through a
+  batch logon, records the state and finishes, and launches take the batch path. Only `SeInteractiveLogonRight` can be
   granted: the right's name is fixed in `preflight.rs`, and a test checks that no source names
   the Remote Desktop right.
 - **Removal.** `--remove`, before the group goes, takes the right off the SID
