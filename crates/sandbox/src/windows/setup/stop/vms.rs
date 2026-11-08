@@ -32,8 +32,11 @@ use crate::windows::sids::Sid;
 pub const LIST_WAIT: Duration = Duration::from_secs(3);
 /// How long one VM's termination is waited for, at most.
 pub const VM_WAIT: Duration = Duration::from_secs(5);
-/// How long the step's terminations may take all together: the task's 2 minutes hold the
-/// passes' 75 s, [`LIST_WAIT`], this, and the lock's 30 s wait.
+/// How long the step's terminations may take all together. The task's 2 minutes hold the
+/// passes' 75 s, [`LIST_WAIT`] and this, but not every wait for the set-up lock: each taking
+/// (the reservation, each mark, the completion) may wait up to 30 s, so a run that meets a
+/// slow holder can pass the limit and be ended. So each user is marked before its VM is
+/// terminated, and a run ended mid-step has marked every user it found.
 pub const VMS_BUDGET: Duration = Duration::from_secs(10);
 
 /// A compute system's id that is a GUID, held upper case with no braces: the form WSL names
@@ -163,8 +166,9 @@ impl Vms {
     }
 }
 
-/// Step 5b, as the module says: each WSL system the lawyer's folder names is left, and a pool
-/// user whose profile holds that folder too is added to `passes.suspects`; each a pool user's
+/// Step 5b, as the module says (users marked under the set-up lock before each termination):
+/// each WSL system the lawyer's folder names is left, and a pool user whose profile holds that
+/// folder too is added to `passes.suspects`; each a pool user's
 /// folder names is terminated, its user added to `passes.found`; every other one is counted
 /// unmapped and every pool user added to `passes.suspects`. A pool user whose folder can't be
 /// read is added to `passes.suspects`. No HCS is nothing to do. A list that can't be read is the
@@ -233,6 +237,8 @@ pub(super) fn stop_vms(
             passes.vms.left += 1;
             continue;
         }
+        // Marked first: a run the task's limit ends during the wait has marked the user.
+        super::mark_new(fs, &pool.users, passes);
         match fs.terminate_vm(&id, wait) {
             Ok(()) => passes.vms.ended += 1,
             Err(_why) => passes.vms.left += 1,
