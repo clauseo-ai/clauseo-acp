@@ -138,3 +138,46 @@ fn a_linked_head_and_a_commondir_head_are_set_aside_after_the_session() {
     assert_eq!(seen, [root.join("A/HEAD"), root.join("B/HEAD")]);
     assert!(root.join("A/brief.md").is_file() && root.join("B/commondir").is_file());
 }
+
+/// M1, on #784's deny: edits inside a git folder that was there at launch raise no event the
+/// watch acts on (it keeps a change record only for a reparse point), because the Windows plan
+/// write-denies each such folder's whole tree (`acl_plan` test
+/// `a_bare_repository_in_the_matter_gets_the_git_folders_deny`, from `MatterScan`'s
+/// `bare_repos` and `git_dirs`). So every git folder the set-aside's launch scan knows (each
+/// folder holding a `HEAD` outside every `.git`, each git folder's layout, each folder a
+/// `commondir` names) must be one of those.
+#[test]
+fn every_git_folder_the_watch_knows_at_launch_is_one_the_plan_denies() {
+    let (w, root, _data) = world("aside-m1");
+    bare(&w, "precedents.git");
+    w.dir.file("matter/linked/HEAD", "ref: refs/heads/other\n");
+    w.dir.file("matter/linked/commondir", "../common\n");
+    w.dir.dir("matter/common");
+    w.dir.file("matter/lone/HEAD", "ref: refs/heads/main\n");
+    w.dir
+        .file("matter/deep/er/x.git/HEAD", "ref: refs/heads/main\n");
+
+    let found = super::super::scan::scan(&super::volume(), &root);
+    let path = |key: &[OsString]| key.iter().fold(root.clone(), |at, part| at.join(part));
+    let mut known: Vec<std::path::PathBuf> = found
+        .items
+        .iter()
+        .filter(|item| item.kept == super::super::scan::Kept::Head)
+        .map(|item| path(&item.within))
+        .chain(found.bare.iter().map(|(key, _)| path(key)))
+        .chain(found.common.iter().map(|key| path(key)))
+        .collect();
+    known.sort();
+    known.dedup();
+    assert_eq!(known.len(), 5, "{known:?}");
+
+    let scan = crate::links::scan_matter(&root).unwrap();
+    let denied: Vec<&std::path::PathBuf> =
+        scan.bare_repos().iter().chain(scan.git_dirs()).collect();
+    for folder in &known {
+        assert!(
+            denied.contains(&folder),
+            "{folder:?} isn't denied: {denied:?}"
+        );
+    }
+}
