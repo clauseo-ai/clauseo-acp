@@ -39,15 +39,26 @@ fn a_set_up_covers_every_pool_user_before_its_marker() {
 }
 
 #[test]
-fn wsls_deny_follows_the_network_as_admin_and_its_failure_is_only_reported() {
+fn wsls_deny_comes_first_and_last_as_admin_and_its_failure_is_only_reported() {
     let mut machine = FakeMachine::new("wsl-deny");
     let mut acl = FakeAcl::default();
     let report = set_up_fresh(&mut machine, &mut acl);
     assert_eq!(report.wsl, Ok(crate::windows::wsl::WslApplied::default()));
+    // First once the group and the record exist, before the network; last after the marker.
+    let wsl: Vec<usize> = (0..machine.calls.len())
+        .filter(|at| machine.calls[*at] == "wsl_deny 1000")
+        .collect();
     let at = |line: &str| machine.calls.iter().position(|c| c == line).unwrap();
-    assert!(at("wsl_deny 1000") > at("network 1001,1002,1003,1004,1005,1006,1007,1008"));
-    assert!(at("wsl_deny 1000") < at("write_marker"));
-    // A failure leaves the set-up done: the launch check refuses while a deny is missing.
+    assert_eq!(wsl.len(), 2, "{:?}", machine.calls);
+    assert!(wsl[0] > at("write_record 1001") && wsl[0] < at("program_data"));
+    assert!(wsl[1] > at("write_marker"));
+    // The first pass failing is made up by the last, whose outcome is the report's.
+    machine.fail("wsl_deny 1000");
+    let req = request(&mut machine, 0, Vec::new());
+    let report = set_up(&mut machine, &mut acl, &req).unwrap();
+    assert!(report.wsl.is_ok(), "{:?}", report.wsl);
+    // Both failing leave the set-up done: the launch check refuses while a deny is missing.
+    machine.fail("wsl_deny 1000");
     machine.fail("wsl_deny 1000");
     let req = request(&mut machine, 0, Vec::new());
     let report = set_up(&mut machine, &mut acl, &req).unwrap();

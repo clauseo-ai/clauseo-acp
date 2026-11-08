@@ -53,6 +53,7 @@ fn an_extend_adds_users_and_fences_every_registered_matter_with_every_new_sid() 
             format!("log_on_once {name}"),
         ]);
     }
+    expected.push("wsl_deny 1000".to_owned());
     for n in 1..=12 {
         expected.extend([
             format!("exists ClauseoSb{n:02}"),
@@ -66,11 +67,11 @@ fn an_extend_adds_users_and_fences_every_registered_matter_with_every_new_sid() 
             "owner_of DeviceSync",
             "ledger",
             "network 1001,1002,1003,1004,1005,1006,1007,1008,1009,1010,1011,1012",
-            "wsl_deny 1000",
             "journal_volumes",
             "journal_size C:",
             "protect_for_owner 1009,1010,1011,1012",
             "write_marker",
+            "wsl_deny 1000",
             "unlock",
         ]
         .map(str::to_owned),
@@ -153,6 +154,7 @@ fn a_re_run_reuses_the_recorded_accounts_and_resets_their_passwords() {
             ["set_password", "add_to_group", "hide", "log_on_once"].map(|c| format!("{c} {name}")),
         );
     }
+    expected.push("wsl_deny 1000".to_owned());
     for n in 1..=8 {
         expected.extend([
             format!("exists ClauseoSb0{n}"),
@@ -165,11 +167,11 @@ fn a_re_run_reuses_the_recorded_accounts_and_resets_their_passwords() {
             "exists DeviceSync",
             "owner_of DeviceSync",
             "network 1001,1002,1003,1004,1005,1006,1007,1008",
-            "wsl_deny 1000",
             "journal_volumes",
             "journal_size C:",
             "protect_for_owner 1001,1002,1003,1004,1005,1006,1007,1008",
             "write_marker",
+            "wsl_deny 1000",
             "unlock",
         ]
         .map(str::to_owned),

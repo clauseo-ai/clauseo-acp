@@ -2031,7 +2031,10 @@ write can't race an MSI that is making the key (an earlier create-then-delete co
 is read back and checked. `AccessPermission`
 is left alone: the service ignores it.
 
-**When.** The elevated set-up writes it as step 8b, after the network filters, as admin. It never
+**When.** The elevated set-up writes it as admin twice: first as soon as the group and the record
+both exist (right after the record is written, since each target is recorded before its write,
+before the profiles, the fence and the network), and again after the marker, so a WSL installed or
+updated during the set-up is covered; the report holds the last pass's outcome. It never
 fails the set-up: the launch check refuses while a deny is missing, and the refresh task tries
 again. The SYSTEM task `\Clauseo\SandboxRefresh` re-applies it twice in every run that is allowed
 (LOCAL SYSTEM, from the admin copy): first, before the admin copy's steps, so the deny doesn't wait

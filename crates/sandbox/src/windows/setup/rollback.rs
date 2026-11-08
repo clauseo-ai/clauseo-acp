@@ -54,7 +54,7 @@ pub(super) struct Run {
     pub(super) kept: Vec<Sid>,
     /// The new passwords this run gave kept users (a re-run), as each was set.
     pub(super) reset: Vec<(Sid, Password)>,
-    /// WSL's deny was tried (step 8b), so some of it may be written.
+    /// WSL's deny was tried (its first pass, after the record), so some of it may be written.
     pub(super) wsl_tried: bool,
 }
 

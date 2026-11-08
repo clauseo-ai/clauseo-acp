@@ -285,10 +285,7 @@ fn a_rollback_takes_wsls_deny_off_before_the_group_and_keeps_the_group_if_it_can
     let at = |line: &str| machine.calls.iter().position(|c| c == line);
     assert!(at("wsl_remove 1000").unwrap() < at("delete_group 1000").unwrap());
     // A failure before the deny was tried asks nothing of WSL.
-    let (_, machine, _, _) = failing_at(
-        "setup-wsl-rollback-early",
-        "network 1001,1002,1003,1004,1005,1006,1007,1008",
-    );
+    let (_, machine, _, _) = failing_at("setup-wsl-rollback-early", "log_on_once ClauseoSb08");
     assert_eq!(at_in(&machine, "wsl_remove 1000"), None);
     // A removal that fails keeps the group, recorded, so the deny names a group that is there.
     let mut machine = FakeMachine::new("setup-wsl-rollback-kept");

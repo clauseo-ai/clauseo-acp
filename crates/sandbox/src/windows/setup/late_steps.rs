@@ -1,6 +1,6 @@
 //! Set-up's steps around the denies and the matters: the owners of the folders the shared-write
 //! denies protect (`PR4h`), reading the owner's registered matters after the lock (`PR4h`), step
-//! 8's fence of them against the grown pool, step 8b's WSL deny, step 9's change journals, and
+//! 8's fence of them against the grown pool, WSL's deny (after the record, and again after the marker), step 9's change journals, and
 //! the per-machine stop task once the owner is recorded.
 
 use std::io;
@@ -212,9 +212,9 @@ pub(super) fn network(
         .map_err(|error| (Step::Network, cause_of(&error)))
 }
 
-/// Step 8b, WSL's deny (`windows::wsl`): the pool group denied in the launch permission of
-/// every WSL class on this machine, after the group exists, elevated, not as the owner. Never
-/// fatal, like step 9: the launch check refuses a tier B launch while a deny is missing, and
+/// WSL's deny (`windows::wsl`): the pool group denied in the launch permission of every WSL
+/// class on this machine, elevated, not as the owner, twice: right after the record is written
+/// (the group and the record both exist), and again after the marker. Never fatal, like step 9: the launch check refuses a tier B launch while a deny is missing, and
 /// the refresh task tries again at the next logon or installer event. What failed is in the
 /// report and the log.
 pub(super) fn wsl_deny(machine: &mut impl Machine, group: &Sid) -> Result<WslApplied, String> {
