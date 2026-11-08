@@ -12,14 +12,14 @@ const REMOTE_TYPES: [&str; 5] = ["smbfs", "nfs", "afpfs", "webdav", "autofs"];
 /// Room for mounts made between the count and the read.
 const SPARE: usize = 8;
 
-/// Each mount without `MNT_LOCAL`, or of a [`REMOTE_TYPES`] type. Empty when the list can't be
-/// read (logged).
-pub(super) fn remote_mounts() -> Vec<PathBuf> {
+/// Each mount without `MNT_LOCAL`, or of a [`REMOTE_TYPES`] type. `None` when the list can't
+/// be read (logged), which the caller counts as every path remote.
+pub(super) fn remote_mounts() -> Option<Vec<PathBuf>> {
     // SAFETY: a null buffer of size 0 asks only for the number of mounts.
     let count = unsafe { libc::getfsstat(std::ptr::null_mut(), 0, libc::MNT_NOWAIT) };
     let Ok(count) = usize::try_from(count) else {
-        tracing::warn!("getfsstat failed; no mount counts as remote");
-        return Vec::new();
+        tracing::warn!("getfsstat failed; every path counts as remote");
+        return None;
     };
     let room = count.saturating_add(SPARE);
     // SAFETY: `statfs` is plain data, for which all zeroes is a valid value.
@@ -31,18 +31,20 @@ pub(super) fn remote_mounts() -> Vec<PathBuf> {
     // writes no more than `size` bytes and keeps no pointer to `list`.
     let got = unsafe { libc::getfsstat(list.as_mut_ptr(), size, libc::MNT_NOWAIT) };
     let Ok(got) = usize::try_from(got) else {
-        tracing::warn!("getfsstat failed; no mount counts as remote");
-        return Vec::new();
+        tracing::warn!("getfsstat failed; every path counts as remote");
+        return None;
     };
     list.truncate(got);
     let local_flag = u32::try_from(libc::MNT_LOCAL).unwrap_or(0);
-    list.iter()
+    let mounts = list
+        .iter()
         .filter(|mount| {
             let kind = bytes(&mount.f_fstypename);
             mount.f_flags & local_flag == 0 || REMOTE_TYPES.iter().any(|t| t.as_bytes() == kind)
         })
         .map(|mount| PathBuf::from(OsStr::from_bytes(&bytes(&mount.f_mntonname))))
-        .collect()
+        .collect();
+    Some(mounts)
 }
 
 /// A NUL-terminated C array's bytes, up to the NUL.

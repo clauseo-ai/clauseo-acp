@@ -1,9 +1,13 @@
-//! Where a path the agent chose really leads, without ever touching a network location: walked
+//! Where a path an agent named really leads, without ever touching a network location: walked
 //! name by name, each step checked by [`NetEnv::is_network`] before it is looked at, each link
 //! read (never followed by the system) and its target checked the same way before the walk goes
-//! on into it. `std::fs::canonicalize` and `dunce::canonicalize` would follow a local link to
-//! `/net/host/…` or a Windows link to a UNC target and sign in there, so neither is used on an
-//! agent's path.
+//! on into it. Fail-closed: anything the walk cannot vouch for (a link it can't read, an error
+//! other than a missing name, a loop or more than [`MAX_HOPS`] links, a relative path) is
+//! [`Walked::Refused`], so a caller never hands it to the file system. Every "may this agent
+//! path be touched?" decision uses it: the data fence, its held-open check, the after-turn tool
+//! paths and the pre-write guard. `std::fs::canonicalize` and `dunce::canonicalize` would
+//! follow a local link to `/net/host/…` or a Windows link to a UNC target and sign in there, so
+//! neither is used on an agent's path before this walk vouches for it.
 
 use std::ffi::OsString;
 use std::io;
@@ -14,8 +18,9 @@ use super::NetEnv;
 #[cfg(test)]
 pub(crate) mod tests;
 
-/// The most links one path may pass through before it counts as a loop (Linux's own limit).
-const MAX_HOPS: usize = 40;
+/// The most links one path may pass through; past it the walk refuses (fail-closed: Windows
+/// itself follows up to 63).
+pub(crate) const MAX_HOPS: usize = 40;
 
 /// What one name on the disk is, the link itself rather than its target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,22 +59,131 @@ impl Fs for RealFs {
     }
 }
 
+/// How the walk looks at the disk, and what counts as a network location.
+pub(crate) struct Disk<'a> {
+    /// What a name is and where a link points, never following one.
+    pub(crate) fs: &'a dyn Fs,
+    /// The canonical path of a local name that is not a link (its long name and its case as on
+    /// the disk), when it has one.
+    pub(crate) real: &'a dyn Fn(&Path) -> Option<PathBuf>,
+    /// The network rules and this system's remote mounts and drives.
+    pub(crate) net: &'a NetEnv,
+}
+
+impl<'a> Disk<'a> {
+    /// The real disk under `net`, each local name put in its canonical form (the data fence,
+    /// which compares the resolved path).
+    pub(crate) fn real(net: &'a NetEnv) -> Self {
+        Self {
+            fs: &RealFs,
+            real: &canonical,
+            net,
+        }
+    }
+
+    /// The real disk under `net`, names kept as written: for a yes or no on whether a path may
+    /// be touched ([`super::may_touch`]), which needs no canonical form.
+    pub(crate) fn vouch(net: &'a NetEnv) -> Self {
+        Self {
+            fs: &RealFs,
+            real: &as_written,
+            net,
+        }
+    }
+}
+
+/// No canonical form: the name as written.
+fn as_written(_: &Path) -> Option<PathBuf> {
+    None
+}
+
+/// `path` canonicalised (`dunce`), asked only of a local name that is not a link, once every
+/// name before it was vouched for.
+fn canonical(path: &Path) -> Option<PathBuf> {
+    dunce::canonicalize(path).ok()
+}
+
 /// Where a path leads.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Resolved {
-    /// A local path, resolved, and whether it is a file (or does not exist).
-    Local { path: PathBuf, is_file: bool },
-    /// It, or a link on the way, names a network location: decided before touching it.
-    Network,
-    /// A relative path, a link that can't be read or that leads nowhere a path can be read
-    /// from (a drive-relative target), an error other than a missing name, or a loop.
-    Unresolved,
+pub(crate) enum Walked {
+    /// A local path, every name on the way looked at (or missing) and every link's target
+    /// checked; resolved.
+    Local(PathBuf),
+    /// A network location on the way (found before touching it), or anything the walk cannot
+    /// vouch for: never to be handed to the file system.
+    Refused,
+}
+
+/// Where the absolute `path` leads on `disk`: each local name that is not a link put in its
+/// canonical form; a link read and its target walked in its place, a relative target from the
+/// link's own folder; a missing name kept as written, and every name after it still looked at
+/// (so a `..` back out of it reaches names that are checked: `C:\m\missing\..\link` checks
+/// `link`); `..` taken on what is resolved so far. [`Walked::Refused`] for a network location
+/// (the path, a name on the way, a link's target), a relative path, a link that can't be read, an
+/// error other than a missing name, or more than [`MAX_HOPS`] links.
+pub(crate) fn walk(path: &Path, disk: &Disk<'_>) -> Walked {
+    let net = disk.net;
+    if net.is_network(path) {
+        return Walked::Refused;
+    }
+    let path = net.plain(path);
+    if !path.is_absolute() {
+        return Walked::Refused;
+    }
+    let mut at = PathBuf::new();
+    let mut rest = parts_of(&path);
+    let mut hops = 0_usize;
+    while let Some(part) = rest.pop() {
+        match part {
+            Part::Root(root) => at.push(root),
+            Part::Up => {
+                at.pop();
+            }
+            Part::Name(name) => {
+                let next = at.join(&name);
+                if net.is_network(&next) {
+                    return Walked::Refused;
+                }
+                match disk.fs.entry(&next) {
+                    Ok(Entry::Link) => {
+                        hops = hops.saturating_add(1);
+                        if hops > MAX_HOPS {
+                            return Walked::Refused;
+                        }
+                        let Ok(target) = disk.fs.read_link(&next) else {
+                            return Walked::Refused;
+                        };
+                        let target = net.plain(&local(target));
+                        if net.is_network(&target) || net.is_network(&at.join(&target)) {
+                            return Walked::Refused;
+                        }
+                        if target.has_root() {
+                            at = PathBuf::new();
+                        }
+                        rest.extend(parts_of(&target));
+                    }
+                    Ok(Entry::Dir | Entry::File) => {
+                        at = (disk.real)(&next).map_or(next, local);
+                        if net.is_network(&at) {
+                            return Walked::Refused;
+                        }
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => at = next,
+                    Err(_) => return Walked::Refused,
+                }
+            }
+        }
+    }
+    Walked::Local(at)
 }
 
 /// One part of a path still to walk.
 enum Part {
+    /// A drive prefix or the root: the walk starts over from it.
     Root(OsString),
+    /// `..`.
     Up,
+    /// A name.
     Name(OsString),
 }
 
@@ -88,80 +202,55 @@ fn parts_of(path: &Path) -> Vec<Part> {
     parts
 }
 
-/// Where `path` leads on `fs`: an existing name resolved (links read and walked, `..` taken on
-/// what is resolved so far), a missing one and the names after it added as written (a `..`
-/// there drops the name before it) and read as a file. A network location anywhere on the way
-/// is [`Resolved::Network`], found before the walk touches it.
-pub(crate) fn resolve(path: &Path, fs: &dyn Fs, net: &NetEnv) -> Resolved {
-    if net.is_network(path) {
-        return Resolved::Network;
+/// `path` in its drive form on Windows when it names the local machine's own share
+/// ([`drive_form`]); as it is elsewhere.
+fn local(path: PathBuf) -> PathBuf {
+    if !cfg!(windows) {
+        return path;
     }
-    let path = net.plain(path);
-    if !path.is_absolute() {
-        return Resolved::Unresolved;
+    path.to_str()
+        .and_then(drive_form)
+        .map_or(path, PathBuf::from)
+}
+
+/// A Windows path to this machine's own drive in its drive form: `\\localhost\c$\x`,
+/// `\\127.0.0.1\c$\x`, `\\?\UNC\localhost\c$\x`, `\\.\UNC\localhost\c$\x`, `\\?\C:\x` and
+/// `\\.\C:\x` all become `C:\x`, `/` read as `\`, names in any case. `None` for any other path.
+/// Pure text, so it is tested on every system.
+pub(crate) fn drive_form(text: &str) -> Option<String> {
+    let text = text.replace('/', "\\");
+    let lower = text.to_ascii_lowercase();
+    // ASCII folding keeps every byte where it was, so a prefix of `lower` is one of `text`.
+    let strip = |prefix: &str| {
+        lower
+            .starts_with(prefix)
+            .then(|| text.get(prefix.len()..))
+            .flatten()
+    };
+    let (drive, rest) = if let Some(rest) = strip(r"\\?\unc\").or_else(|| strip(r"\\.\unc\")) {
+        share(rest)?
+    } else if let Some(rest) = strip(r"\\?\").or_else(|| strip(r"\\.\")) {
+        let mut chars = rest.chars();
+        let drive = chars.next().filter(char::is_ascii_alphabetic)?;
+        (drive, chars.as_str().strip_prefix(':')?)
+    } else {
+        share(strip(r"\\")?)?
+    };
+    let rest = rest.trim_start_matches('\\');
+    Some(format!("{}:\\{rest}", drive.to_ascii_uppercase()))
+}
+
+/// `localhost\c$\rest` (or `127.0.0.1`, `[::1]`): the drive letter of the share and the rest.
+fn share(text: &str) -> Option<(char, &str)> {
+    let (host, rest) = text.split_once('\\')?;
+    let local = ["localhost", "127.0.0.1", "[::1]", "::1"];
+    if !local.iter().any(|name| host.eq_ignore_ascii_case(name)) {
+        return None;
     }
-    let mut at = PathBuf::new();
-    let mut rest = parts_of(&path);
-    let mut hops = 0_usize;
-    let mut missing = false;
-    let mut last = Entry::Dir;
-    while let Some(part) = rest.pop() {
-        match part {
-            Part::Root(root) => at.push(root),
-            Part::Up => {
-                at.pop();
-                last = Entry::Dir;
-            }
-            Part::Name(name) => {
-                let next = at.join(&name);
-                if missing {
-                    at = next;
-                    continue;
-                }
-                if net.is_network(&next) {
-                    return Resolved::Network;
-                }
-                match fs.entry(&next) {
-                    Ok(Entry::Link) => {
-                        hops = hops.saturating_add(1);
-                        if hops > MAX_HOPS {
-                            return Resolved::Unresolved;
-                        }
-                        let Ok(target) = fs.read_link(&next) else {
-                            return Resolved::Unresolved;
-                        };
-                        if net.is_network(&target) {
-                            return Resolved::Network;
-                        }
-                        let target = net.plain(&target);
-                        if target.is_absolute() {
-                            at = PathBuf::new();
-                        } else if target.has_root()
-                            || target
-                                .components()
-                                .any(|c| matches!(c, Component::Prefix(_)))
-                        {
-                            return Resolved::Unresolved;
-                        } else if net.is_network(&at.join(&target)) {
-                            return Resolved::Network;
-                        }
-                        rest.extend(parts_of(&target));
-                    }
-                    Ok(entry) => {
-                        last = entry;
-                        at = next;
-                    }
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                        missing = true;
-                        at = next;
-                    }
-                    Err(_) => return Resolved::Unresolved,
-                }
-            }
-        }
-    }
-    Resolved::Local {
-        path: at,
-        is_file: missing || last == Entry::File,
+    let (share, rest) = rest.split_once('\\').unwrap_or((rest, ""));
+    let mut chars = share.chars();
+    match (chars.next(), chars.next(), chars.next()) {
+        (Some(drive), Some('$'), None) if drive.is_ascii_alphabetic() => Some((drive, rest)),
+        _ => None,
     }
 }

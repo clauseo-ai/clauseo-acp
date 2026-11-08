@@ -117,8 +117,8 @@ fn macos_automount_folders_are_network() {
     for text in ["/netflix/x", "/Users/a/net/x", "/home/a/Network"] {
         assert!(!network(text, &mac), "{text}");
     }
-    // Without folding, `/NET` is another folder.
-    assert!(!network("/NET/host", &plain_net(false)));
+    // A network check folds on every system: over-matching is its safe side.
+    assert!(network("/NET/host", &plain_net(false)));
 }
 
 #[test]
@@ -144,7 +144,7 @@ user@host:/x /home/a/remote fuse.sshfs rw 0 0
 tmpfs /tmp tmpfs rw 0 0
 //server/s3 /mnt/s3 smb3 rw 0 0
 ";
-    let mounts = linux_remote_mounts(table);
+    let mounts = linux_remote_mounts(table.as_bytes()).unwrap();
     let want: Vec<PathBuf> = ["/mnt/nfs", "/mnt/my share", "/home/a/remote", "/mnt/s3"]
         .into_iter()
         .map(PathBuf::from)
@@ -169,4 +169,43 @@ fn a_deny_name_folds_the_long_s_and_the_kelvin_sign() {
     assert_eq!(fold_name(".Clau\u{17F}eo"), ".clauseo");
     assert_eq!(fold_name("\u{212A}DATA"), "kdata");
     assert_eq!(fold_name(".GIT"), ".git");
+}
+
+/// A spelling APFS or NTFS takes as the same name reaches the mount and the automount folders:
+/// the long s, the Kelvin sign, and NFC against NFD.
+#[test]
+fn a_folded_or_normalised_spelling_of_a_mount_is_network() {
+    let net = NetEnv {
+        remote_mounts: vec!["/Volumes/Share".into(), "/Volumes/Caf\u{e9}".into()],
+        ..plain_net(false)
+    };
+    for text in [
+        "/Volume\u{17F}/Share/x",
+        "/Volumes/\u{17F}hare/x",
+        "/Netwo\u{72}\u{212A}/Servers/evil",
+        "/Volumes/Cafe\u{301}/x",
+    ] {
+        assert!(network(text, &net), "{text}");
+    }
+    let nfd_mount = NetEnv {
+        remote_mounts: vec!["/Volumes/Cafe\u{301}".into()],
+        ..plain_net(false)
+    };
+    assert!(network("/Volumes/Caf\u{e9}/x", &nfd_mount));
+    assert!(!network("/Volumes/Cafe/x", &nfd_mount));
+}
+
+#[test]
+fn a_linux_mount_table_is_read_as_bytes_and_an_unparsable_one_is_unknown() {
+    let mut table = b"/dev/sda1 / ext4 rw 0 0\nhost:/x /mnt/caf\xe9 nfs rw 0 0\n".to_vec();
+    table.extend_from_slice(b"systemd-1 /proc/sys/fs/binfmt_misc autofs rw 0 0\n");
+    table.extend_from_slice(b"gvfsd-fuse /run/user/1000/gvfs fuse.gvfsd-fuse rw 0 0\n");
+    let mounts = linux_remote_mounts(&table).unwrap();
+    assert_eq!(mounts.len(), 3);
+    assert_eq!(
+        mounts.get(1),
+        Some(&PathBuf::from("/proc/sys/fs/binfmt_misc"))
+    );
+    assert_eq!(linux_remote_mounts(b"/dev/sda1 /\n"), None);
+    assert_eq!(linux_remote_mounts(b""), Some(Vec::new()));
 }
