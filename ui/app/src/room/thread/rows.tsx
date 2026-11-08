@@ -1,6 +1,7 @@
 // The thread's rows, one per entry. A live row reads only its own entry and its own text from the view store, and is
 // memoized on its id, so a flush renders only the rows whose part changed. A paged row (older entries, page_entries)
-// shows the entry it was given. Permissions and elicitations are permission-row.tsx's; markers, versions and compaction
+// shows the entry it was given. Permissions and elicitations are permission-row.tsx's; R18's
+// denials and the paused answer, denial-row.tsx's; markers, versions and compaction
 // show nothing yet. A queued or removed message shows nothing (the queue's strip holds it), and a steer taken into the
 // answer shows as its mark (steer.ts, steer-rows.tsx).
 import { memo, useState, useSyncExternalStore, type ReactNode } from "react";
@@ -27,6 +28,7 @@ import type {
 import { Elicitation, LivePermission, PagedPermission } from "../permission-row.tsx";
 import { firstReadMarks, isFirstReadTurn, subscribeMarks } from "../first-read/marks.ts";
 import { stamp } from "./clock.ts";
+import { DenialRow, DenialsPaused } from "./denial-row.tsx";
 import { isolated, shownOf } from "./content.ts";
 import { noticeLine } from "./notice-words.ts";
 import { questionText, useQuestionText, useStreaming } from "./live.ts";
@@ -97,6 +99,28 @@ function Question({
   );
 }
 
+/** A message Clauseo sent on the lawyer's behalf (`by: "clauseo"`: the prompt that goes on after a restart): one quiet
+ * line, its text as sent, isolated, never "You" and never a question. Read by the field, never by its words. */
+function ClauseoLine({ id, text }: { id: EntryId; text: string }) {
+  return (
+    <p data-testid="message-clauseo" data-entry-id={id} className={`${ROW} ${QUIET}`}>
+      <bdi>{text}</bdi>
+    </p>
+  );
+}
+
+function LiveClauseoLine({
+  id,
+  stream,
+  entry,
+}: {
+  id: EntryId;
+  stream: StreamId;
+  entry: UserMessageEntry;
+}) {
+  return <ClauseoLine id={id} text={useQuestionText(stream, id, entry)} />;
+}
+
 function LiveQuestion({
   id,
   stream,
@@ -143,6 +167,7 @@ function LiveUserMessage({
 }) {
   const as = askedAs(entry, true);
   if (as === "hidden") return null;
+  if (entry.by === "clauseo") return <LiveClauseoLine id={id} stream={stream} entry={entry} />;
   if (outcomeOf(entry) === "injected")
     return <LiveSteerMark id={id} stream={stream} entry={entry} />;
   if (as === "mark")
@@ -259,6 +284,14 @@ function Notice({ id, entry }: { id: EntryId; entry: NoticeEntry }) {
   );
 }
 
+/** R18's entries, which read the thread's header too: a denial's card or line, and the paused answer. */
+function DenialEntries({ id, stream, entry }: { id: EntryId; stream: StreamId; entry: ViewEntry }) {
+  if (entry.denial !== undefined) return <DenialRow id={id} stream={stream} entry={entry.denial} />;
+  if (entry.denials_paused !== undefined)
+    return <DenialsPaused id={id} stream={stream} entry={entry.denials_paused} />;
+  return null;
+}
+
 /** The kinds that read nothing but their entry. */
 function EntryRow({
   id,
@@ -298,6 +331,8 @@ export const Row = memo(function Row({
     return <LiveAgentText id={id} stream={stream} thought={entry.agent_text.kind === "thought"} />;
   if (entry.permission !== undefined)
     return <LivePermission id={id} stream={stream} entry={entry.permission} />;
+  if (entry.denial !== undefined || entry.denials_paused !== undefined)
+    return <DenialEntries id={id} stream={stream} entry={entry} />;
   return <EntryRow id={id} entry={entry} sentNow={sentNow} />;
 });
 
@@ -318,6 +353,7 @@ export const PagedRow = memo(function PagedRow({
     const as = askedAs(m, true);
     if (as === "hidden") return null;
     const text = questionText(id, m, undefined);
+    if (m.by === "clauseo") return <ClauseoLine id={id} text={text} />;
     const question = (
       <>
         <Question id={id} entry={m} text={text} slots={false} />
@@ -338,5 +374,7 @@ export const PagedRow = memo(function PagedRow({
     );
   }
   if (entry.permission !== undefined) return <PagedPermission id={id} entry={entry.permission} />;
+  if (entry.denial !== undefined || entry.denials_paused !== undefined)
+    return <DenialEntries id={id} stream={stream} entry={entry} />;
   return <EntryRow id={id} entry={entry} sentNow={sentNow} />;
 });

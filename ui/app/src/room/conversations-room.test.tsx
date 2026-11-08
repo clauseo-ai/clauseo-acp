@@ -263,6 +263,8 @@ async function retryButton(retry: ThreadActions["retry"]) {
     answer: async () => {},
     answerElicitation: async () => {},
     stop: () => {},
+    escalate: async () => {},
+    dismissDenial: async () => {},
     ...(retry === undefined ? {} : { retry }),
   };
   await act(async () =>

@@ -6,6 +6,7 @@ import { HI as blocklist } from "./words-blocklist.hi.ts";
 import { HI as breaks } from "./words-breaks.hi.ts";
 import { HI as connectors } from "./words-connectors.hi.ts";
 import { HI as connectorsRoom } from "./words-connectors-room.hi.ts";
+import { HI as denials } from "./words-denials.hi.ts";
 import { HI as errors } from "./words-errors.hi.ts";
 import { HI as find } from "./words-find.hi.ts";
 import { HI as firstLaunch } from "./words-first-launch.hi.ts";
@@ -46,6 +47,7 @@ export const HINDI = {
   breaks,
   connectors,
   "connectors-room": connectorsRoom,
+  denials,
   errors,
   find,
   "first-launch": firstLaunch,

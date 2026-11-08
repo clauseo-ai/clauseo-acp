@@ -18,6 +18,7 @@ import type {
   ViewEntry,
 } from "../transport/protocol.ts";
 import { FakeTransport, type FakeHost, type FakeNextHost } from "../transport/fake-transport.ts";
+import { fakeDenials, isDenialCommand, type FakeDenialsScript } from "../transport/fake-denials.ts";
 import {
   WIRE,
   type NextErrorCode,
@@ -103,6 +104,10 @@ export type ThreadState = {
   /** The unsafe-site list's notices on the app feed (0053), and the code an allow is refused
    * with. */
   blocked?: { sites: SiteBlocked[]; refuse?: ErrorCode };
+  /** R18's cards: how the computer's own dialog answers, and the codes their commands are refused with. */
+  denials?: FakeDenialsScript;
+  /** The header says the agent is restarting for an allowed folder (R18's restarting_since). */
+  restarting?: boolean;
 };
 
 /** The app feed of a state with connectors (U15): the state, then the hint when it has one. */
@@ -158,6 +163,12 @@ export function threadHost(state: ThreadState): FakeTransport {
   head.header!.status = state.status ?? "idle";
   head.header!.commands = state.commands ?? [];
   head.header!.agent = agent;
+  if (state.restarting === true) head.header!.restarting_since = Date.UTC(2026, 10, 8, 10, 32);
+  // a card's change arrives as the host's next patch would, its cursor after the view's and `later`'s
+  let cursor = state.later === undefined ? 2 : 3 + state.later.length;
+  const denials = fakeDenials(state.entries, state.denials, (entry) =>
+    transport.deliver(event(batch(cursor++, [upsert(entry)]))),
+  );
   const transport: FakeTransport = new FakeTransport({
     query: (query) => {
       if (query === "list_matters")
@@ -177,12 +188,13 @@ export function threadHost(state: ThreadState): FakeTransport {
       if (got !== undefined) return { blob: { offset: 0, end: got.text.length, text: got.text } };
       throw new Error(`the review's host doesn't answer ${JSON.stringify(query)}`);
     },
-    dispatch: (envelope): CommandOutcome => {
+    dispatch: (envelope): CommandOutcome | Promise<CommandOutcome> => {
       const command = envelope.command;
       if (command.send_prompt !== undefined) {
         if (state.refuse !== undefined) throw refusal(state.refuse);
         return { prompt_accepted: { turn: TURN, message: THREAD } };
       }
+      if (isDenialCommand(command)) return denials(command);
       const refuseAllow = state.blocked?.refuse;
       if (command.allow_blocked_site !== undefined && refuseAllow !== undefined)
         throw refusal(refuseAllow);

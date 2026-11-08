@@ -23,6 +23,8 @@ const ACTIONS: ThreadActions = {
   answer: async () => undefined,
   answerElicitation: async () => undefined,
   stop: () => undefined,
+  escalate: async () => undefined,
+  dismissDenial: async () => undefined,
   retry: async () => undefined,
 };
 
