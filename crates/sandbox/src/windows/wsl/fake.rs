@@ -73,6 +73,11 @@ pub(crate) struct FakeWsl {
     pub(super) writes: Vec<String>,
     /// Each read of a value, as a line.
     pub(super) reads: RefCell<Vec<String>>,
+    /// Values another writer puts in place right after a read, one per read, in order: an
+    /// installer racing the merge.
+    pub(super) races: RefCell<Vec<Vec<u8>>>,
+    /// What the racing writer put in place, over `keys`, until our next write of that value.
+    pub(super) raced: RefCell<BTreeMap<AppId, Vec<u8>>>,
 }
 
 impl FakeWsl {
@@ -148,13 +153,24 @@ impl WslRead for FakeWsl {
     fn launch_permission(&self, app_id: &AppId) -> Result<Permission, WslError> {
         self.reads.borrow_mut().push(format!("read {app_id}"));
         self.failing(&format!("read {app_id}"))?;
-        Ok(match self.keys.get(app_id) {
-            None => Permission::NoKey,
-            Some(Key { value: None, .. }) => Permission::Absent,
-            Some(Key {
-                value: Some(bytes), ..
-            }) => Permission::Bytes(bytes.clone()),
-        })
+        let raced = self.raced.borrow().get(app_id).cloned();
+        let read = match (self.keys.get(app_id), raced) {
+            (None, _) => Permission::NoKey,
+            (Some(_), Some(bytes)) => Permission::Bytes(bytes),
+            (Some(Key { value: None, .. }), None) => Permission::Absent,
+            (
+                Some(Key {
+                    value: Some(bytes), ..
+                }),
+                None,
+            ) => Permission::Bytes(bytes.clone()),
+        };
+        let mut races = self.races.borrow_mut();
+        if !races.is_empty() {
+            let next = races.remove(0);
+            self.raced.borrow_mut().insert(app_id.clone(), next);
+        }
+        Ok(read)
     }
 
     fn packaged_class(&self) -> Result<bool, WslError> {
@@ -192,6 +208,7 @@ impl WslWrite for FakeWsl {
         self.writes.push(format!("write {app_id}"));
         self.failing(&format!("write {app_id}"))?;
         let stored = self.stores.clone().unwrap_or_else(|| bytes.to_vec());
+        self.raced.get_mut().remove(app_id);
         let key = self
             .keys
             .get_mut(app_id)
