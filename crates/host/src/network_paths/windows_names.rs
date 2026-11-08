@@ -3,7 +3,9 @@
 //! a reparse point's kind), so each is tested on every system.
 //!
 //! Refused names (with Windows' rules): a trailing dot or space (the system trims it, so
-//! `x.` opens `x`), a `:` anywhere but a drive letter's (an alternate data stream), and a
+//! `x.` opens `x`), a `:` anywhere but a drive letter's (an alternate data stream; a drive
+//! written inside a word, `grep -r x D:` of a script handed whole to a shell, is no stream and
+//! not refused: [`drive_in_a_word`]), and a
 //! reserved device name
 //! (`CON`, `PRN`, `AUX`, `NUL`, `COM1`-`COM9`, `LPT1`-`LPT9`, with any extension, in any
 //! case). A wildcard (`*`, `?`) is not refused: such a word is walked by its text, and the
@@ -42,12 +44,33 @@ pub(crate) fn refused_windows_name(path: &Path, net: &NetEnv) -> bool {
     names.any(refused)
 }
 
+/// Whether `name`'s only `:` is a drive written inside a word, the name's last character after
+/// a letter that follows a blank, a quote, a bracket, `=`, `,` or `;`: the `grep -r x D:` of a
+/// script handed whole to `bash -c`, or the `exec(open('D:` of a script's string, cut at the
+/// drive's separator. No alternate data stream: a stream has a name or a type after its `:`
+/// (`x:s`, `x::$DATA`, `x:$I30:$INDEX_ALLOCATION`), and those stay refused, as does a bare
+/// `x:` name. The system answers that such a name is invalid, so the walk keeps it as written
+/// (no such name), and the drive path inside the word is read on its own (the script's words one
+/// level down, the data folder's text anywhere in a word).
+fn drive_in_a_word(name: &str) -> bool {
+    let Some(head) = name.strip_suffix(':') else {
+        return false;
+    };
+    let mut before = head.chars().rev();
+    !head.contains(':')
+        && before.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && before
+            .next()
+            .is_some_and(|c| c.is_whitespace() || "'\"([{=,;`".contains(c))
+}
+
 /// Whether one name is refused (the module's rules).
 fn refused(name: &str) -> bool {
     if name == "." || name == ".." {
         return false;
     }
-    if name.ends_with('.') || name.ends_with(' ') || name.contains(':') {
+    if name.ends_with('.') || name.ends_with(' ') || (name.contains(':') && !drive_in_a_word(name))
+    {
         return true;
     }
     let base = name
@@ -151,6 +174,13 @@ mod tests {
             r"C:\m\brief.docx ",
             r"C:\m\brief.docx:secret",
             r"C:\m\x:\y",
+            r"C:\m\D:\x",
+            r"C:\m\x D:s\y",
+            r"C:\m\x D::$DATA",
+            r"C:\m\data::$INDEX_ALLOCATION\x",
+            r"C:\m\data:$I30:$INDEX_ALLOCATION\x",
+            r"C:\m\x D:.",
+            r"C:\m\xD:\y",
             r"C:\m\con",
             r"C:\m\CON.txt",
             r"C:\m\nul.tar.gz",
@@ -175,6 +205,13 @@ mod tests {
             r"C:\PROGRA~1\x",
             r"C:\Users\JONATH~1\AppData\Local\Temp\x",
             r"C:\m\Draft~2.docx",
+            // A drive inside a word, cut at its separator (#766's Windows CI): a script handed
+            // whole to a shell, a drive in a script's string.
+            "grep -r x D:/a/_temp/t/matter",
+            "ls D:/a/t/outside && wc -l D:/a/t/matter/sub/a.txt",
+            r"exec(open('D:\a\t\data/run/s1/x/run.py').read())",
+            r#"print(open("C:/m/x").read())"#,
+            "--file=D:/m/x",
         ] {
             assert!(!refused_windows_name(Path::new(text), &net), "{text}");
         }
