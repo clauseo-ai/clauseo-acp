@@ -6,6 +6,7 @@ import { LocateGate, MovedFolder } from "../room/moved.tsx";
 import { ScratchLine } from "../room/scratch-line.tsx";
 import type { Entry } from "./entry.ts";
 import { H11 } from "./registry-h11.tsx";
+import { ND } from "./registry-nd.tsx";
 import { U4 } from "./registry-u4.tsx";
 import { U4B } from "./registry-u4b.tsx";
 import { U10 } from "./registry-u10.tsx";
@@ -373,6 +374,7 @@ export const REGISTRY: readonly Entry[] = [
   ...U8,
   ...U9,
   ...H11,
+  ...ND,
   ...U6,
   ...U7,
   ...UTC,

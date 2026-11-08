@@ -1,0 +1,212 @@
+{
+  "ND-01": {
+    "en": "Cancel",
+    "hi": "रद्द करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; native dialogs in Hindi)"
+  },
+  "ND-02": {
+    "en": "Always allow?",
+    "hi": "हमेशा अनुमति दें?",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; native dialogs in Hindi)"
+  },
+  "ND-03": {
+    "en": "Clauseo won't ask again before doing things like this.",
+    "hi": "Clauseo इस तरह के काम करने से पहले आपसे दोबारा नहीं पूछेगा।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; native dialogs in Hindi)"
+  },
+  "ND-04": {
+    "en": "Always allow",
+    "hi": "हमेशा अनुमति दें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; native dialogs in Hindi)"
+  },
+  "ND-05": {
+    "en": "Use this folder for the matter?",
+    "hi": "मामले के लिए यह फ़ोल्डर इस्तेमाल करें?",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; native dialogs in Hindi)"
+  },
+  "ND-06": {
+    "en": "Use this folder",
+    "hi": "यह फ़ोल्डर इस्तेमाल करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; native dialogs in Hindi)"
+  },
+  "ND-07": {
+    "en": "Use your firm's address for {name}?",
+    "hi": "{name} के लिए आपकी फ़र्म का पता इस्तेमाल करें?",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; native dialogs in Hindi)"
+  },
+  "ND-08": {
+    "en": "{name} will send your work to {url} instead of its usual service.",
+    "hi": "{name} आपका काम अपनी सामान्य सेवा के बजाय {url} पर भेजेगा।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; native dialogs in Hindi)"
+  },
+  "ND-09": {
+    "en": "Use this address",
+    "hi": "यह पता इस्तेमाल करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; native dialogs in Hindi)"
+  },
+  "ND-10": {
+    "en": "Stop using your firm's address for {name}?",
+    "hi": "{name} के लिए आपकी फ़र्म का पता इस्तेमाल करना बंद करें?",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; native dialogs in Hindi)"
+  },
+  "ND-11": {
+    "en": "{name} will go back to its usual service.",
+    "hi": "{name} अपनी सामान्य सेवा पर लौट जाएगा।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; native dialogs in Hindi)"
+  },
+  "ND-12": {
+    "en": "Stop using it",
+    "hi": "इस्तेमाल बंद करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; native dialogs in Hindi)"
+  },
+  "ND-13": {
+    "en": "Sign in with a different account?",
+    "hi": "किसी दूसरे खाते से साइन इन करें?",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; native dialogs in Hindi)"
+  },
+  "ND-14": {
+    "en": "This signs you out of {name} first, in every matter. Then you can sign in with the account you want.",
+    "hi": "इससे पहले हर मामले में {name} से आपका साइन आउट हो जाएगा। फिर आप जिस खाते से चाहें, उससे साइन इन कर सकते हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; native dialogs in Hindi)"
+  },
+  "ND-15": {
+    "en": "Sign out and continue",
+    "hi": "साइन आउट करके आगे बढ़ें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; native dialogs in Hindi)"
+  },
+  "ND-16": {
+    "en": "Clauseo",
+    "hi": "Clauseo",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; native dialogs in Hindi)"
+  },
+  "ND-17": {
+    "en": "Clauseo needs Microsoft Edge WebView2 to open",
+    "hi": "Clauseo को खुलने के लिए Microsoft Edge WebView2 चाहिए",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; native dialogs in Hindi)"
+  },
+  "ND-18": {
+    "en": "If this computer is your firm's, its IT team may need to allow it.",
+    "hi": "अगर यह कंप्यूटर आपकी फ़र्म का है, तो उसकी IT टीम को इसकी अनुमति देनी पड़ सकती है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; native dialogs in Hindi)"
+  },
+  "ND-19": {
+    "en": "Open Clauseo again once it's installed.",
+    "hi": "इसके इंस्टॉल होने के बाद Clauseo फिर से खोलें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; native dialogs in Hindi)"
+  },
+  "ND-20": {
+    "en": "Download WebView2",
+    "hi": "WebView2 डाउनलोड करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; native dialogs in Hindi)"
+  },
+  "ND-21": {
+    "en": "Close",
+    "hi": "बंद करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; native dialogs in Hindi)"
+  }
+}

@@ -1,6 +1,8 @@
 //! The confirm's text: bidi, format and control characters escaped, letters kept.
 
-use super::escaped;
+use clauseo_protocol::Language;
+
+use super::{escaped, folder_words};
 
 /// Each case and how the confirm shows it.
 #[test]
@@ -31,4 +33,26 @@ fn the_confirm_escapes_bidi_and_controls_and_keeps_letters() {
     ] {
         assert_eq!(escaped(path), shown, "{path:?}");
     }
+}
+
+/// The confirm speaks the app's language, the path below its title either way.
+#[test]
+fn the_confirm_follows_the_language() {
+    let path = "C:\\Cases\\मेहरा \u{202E}";
+    let hi = folder_words(path, Language::Hi);
+    assert_eq!(hi.title, "मामले के लिए यह फ़ोल्डर इस्तेमाल करें?");
+    assert_eq!(
+        hi.message,
+        format!("{}\n\nC:\\Cases\\मेहरा <U+202E>", hi.title)
+    );
+    assert_eq!(
+        (hi.ok.as_str(), hi.cancel.as_str()),
+        ("यह फ़ोल्डर इस्तेमाल करें", "रद्द करें")
+    );
+    let en = folder_words(path, Language::En);
+    assert_eq!(en.title, "Use this folder for the matter?");
+    assert_eq!(
+        (en.ok.as_str(), en.cancel.as_str()),
+        ("Use this folder", "Cancel")
+    );
 }

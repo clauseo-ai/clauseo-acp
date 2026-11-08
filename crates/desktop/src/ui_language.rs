@@ -14,6 +14,10 @@
 //!   and is not retried; the next different language tries again.
 //! - Unit-test builds never write the real key: their [`follow`] writes nowhere, and the Windows
 //!   test writes a scratch key through [`windows::write_value`], whose key is a parameter.
+//! - Readers, for the words Rust draws without the bridge: [`current`] is the language the last
+//!   [`follow`] saw (English before the first), for the setup confirms; `saved` (Windows) reads
+//!   the value back before Tauri starts, for the `WebView2` check's dialog, `None` when it is
+//!   missing or no language's tag.
 
 use std::sync::{Mutex, PoisonError};
 
@@ -26,8 +30,8 @@ mod windows;
 
 /// The key under `HKCU`, which the installer's `MANUKEY` also names.
 #[cfg_attr(
-    not(all(windows, not(test))),
-    expect(dead_code, reason = "only Windows writes")
+    not(windows),
+    expect(dead_code, reason = "only Windows writes and reads")
 )]
 const KEY: &str = "Software\\Clauseo";
 
@@ -36,6 +40,24 @@ pub(crate) fn tag(language: Language) -> &'static str {
     match language {
         Language::En => "en",
         Language::Hi => "hi",
+    }
+}
+
+/// The language whose [`tag`] is `tag`, as the words Rust draws name it.
+#[cfg(any(windows, test))]
+pub(crate) fn from_tag(tag: &str) -> Option<clauseo_protocol::Language> {
+    match tag {
+        "en" => Some(clauseo_protocol::Language::En),
+        "hi" => Some(clauseo_protocol::Language::Hi),
+        _ => None,
+    }
+}
+
+/// `language` as the words Rust draws name it.
+fn shown(language: Language) -> clauseo_protocol::Language {
+    match language {
+        Language::En => clauseo_protocol::Language::En,
+        Language::Hi => clauseo_protocol::Language::Hi,
     }
 }
 
@@ -58,6 +80,11 @@ impl<W: Writer> Follower<W> {
             written: None,
             writer,
         }
+    }
+
+    /// The language last written or tried, `None` before the first.
+    pub(crate) fn current(&self) -> Option<Language> {
+        self.written
     }
 
     /// Writes `language` unless it is the one last written or tried.
@@ -95,4 +122,17 @@ pub(crate) fn follow(language: Language) {
     APP.lock()
         .unwrap_or_else(PoisonError::into_inner)
         .follow(language);
+}
+
+/// The effective language the last [`follow`] saw, English before the first (module docs).
+pub(crate) fn current() -> clauseo_protocol::Language {
+    let follower = APP.lock().unwrap_or_else(PoisonError::into_inner);
+    shown(follower.current().unwrap_or(Language::En))
+}
+
+/// The language the registry holds, read before Tauri starts: `None` when the value is missing,
+/// unreadable or no language's tag. It reads the real key, never in unit tests.
+#[cfg(windows)]
+pub(crate) fn saved() -> Option<clauseo_protocol::Language> {
+    windows::read_value(KEY).as_deref().and_then(from_tag)
 }

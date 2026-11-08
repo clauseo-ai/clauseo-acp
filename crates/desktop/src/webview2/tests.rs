@@ -1,7 +1,8 @@
 use super::DOWNLOAD_URL;
 use super::dialog::{APP_ICON, CLOSE, DOWNLOAD, Next, main_icon, message_box_text, next};
 use super::version::{MINIMUM, Verdict, Version, verdict};
-use super::words::{EN, WIDTH, fits};
+use super::words::{EN, HI, fits, words};
+use clauseo_protocol::Language;
 use serde_json::Value;
 use std::path::Path;
 
@@ -98,10 +99,61 @@ fn versions_compare_part_by_part() {
 
 #[test]
 fn every_string_is_there() {
-    for text in EN.all() {
+    for text in EN.all().into_iter().chain(HI.all()) {
         assert_ne!(text.trim(), "");
+        assert_eq!(text.trim(), text);
     }
     assert_eq!(EN.title, "Clauseo");
+    assert_eq!(HI.title, "Clauseo");
+}
+
+/// Each Hindi line is Devanagari (the title is the app's name in both), with a danda where the
+/// English has a full stop; the English keeps the app's voice.
+#[test]
+fn the_hindi_is_hindi_and_the_english_keeps_the_voice() {
+    for (en, hi) in EN.all().into_iter().zip(HI.all()).skip(1) {
+        assert!(
+            hi.chars().any(|c| ('\u{0900}'..='\u{097F}').contains(&c)),
+            "{hi}"
+        );
+        assert_eq!(en.ends_with('.'), hi.ends_with('।'), "{hi}");
+    }
+    for en in EN.all() {
+        for word in crate::dialogs::words::OFF_VOICE {
+            assert!(!en.to_lowercase().contains(word), "{en}");
+        }
+    }
+}
+
+/// The registry's language picks the words: Hindi for Hindi, English for English.
+#[test]
+fn the_language_picks_the_words() {
+    assert_eq!(words(Language::Hi).download, "WebView2 डाउनलोड करें");
+    assert_eq!(words(Language::Hi).close, "बंद करें");
+    assert_eq!(words(Language::En).download, "Download WebView2");
+    assert_eq!(
+        message_box_text(words(Language::Hi)),
+        format!("{}\n\n{}", HI.instruction, HI.content)
+    );
+}
+
+/// Every word of the dialog, in both languages, appears verbatim in its review home,
+/// `ui/app/src/review/registry-nd.tsx`, under ND-16 to ND-21.
+#[test]
+fn the_dialogs_words_are_the_reviewed_copy() {
+    let registry =
+        std::fs::read_to_string(manifest_dir().join("../../ui/app/src/review/registry-nd.tsx"))
+            .unwrap();
+    for (n, (en, hi)) in (16..).zip(EN.all().into_iter().zip(HI.all())) {
+        let id = format!("\"ND-{n}\"");
+        assert!(registry.contains(&id), "no {id}");
+        for text in [en, hi] {
+            assert!(
+                registry.contains(&format!("\"{text}\"")),
+                "{id} lacks {text}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -165,10 +217,12 @@ fn the_message_box_says_the_main_line_then_the_body() {
 
 #[test]
 fn the_dialog_is_wide_enough_for_the_main_line_and_no_wider_than_a_small_screen() {
-    assert!(fits(EN.instruction, WIDTH), "{WIDTH}");
     assert!(!fits(EN.instruction, 200));
-    // 150 % on a 1366 px wide screen: about 1.75 px a dialog unit at 100 %.
-    assert!(f64::from(WIDTH) * 1.75 * 1.5 < 1366.0);
+    for words in [&EN, &HI] {
+        assert!(fits(words.instruction, words.width), "{}", words.width);
+        // 150 % on a 1366 px wide screen: about 1.75 px a dialog unit at 100 %.
+        assert!(f64::from(words.width) * 1.75 * 1.5 < 1366.0);
+    }
 }
 
 /// The installer's language files, as `customLanguageFiles` names them, each with its NSIS

@@ -269,7 +269,7 @@ pub(crate) async fn answer_permission<R: Runtime>(
     option: AgentChoiceId,
 ) -> Result<(), HostError> {
     crate::ipc::timed("answer_permission", async {
-        let confirm = crate::dialogs::NativeConfirm::new(app);
+        let confirm = crate::dialogs::NativeConfirm::new(app, &bridge);
         bridge
             .answer_permission(&confirm, thread, request, option)
             .await

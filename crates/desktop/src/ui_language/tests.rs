@@ -1,6 +1,6 @@
 use clauseo_settings::Language;
 
-use super::{Follower, Writer, tag};
+use super::{Follower, Writer, from_tag, shown, tag};
 
 /// Every language, through its exhaustive match: a new one fails to compile here too.
 fn every_language() -> Vec<Language> {
@@ -89,4 +89,35 @@ fn the_value_is_written_to_the_registry_and_reads_back() {
     assert_eq!(reread.as_deref(), Some("en"));
     assert_eq!(deleted, Ok(()));
     assert_eq!(read_value(&key), None, "the scratch key is gone");
+}
+
+/// The registry's tag reads back as the language written, for the dialog drawn before Tauri;
+/// anything else reads as none, and the dialog falls back to English.
+#[test]
+fn each_tag_reads_back_as_its_language() {
+    for language in every_language() {
+        assert_eq!(
+            from_tag(tag(language)),
+            Some(shown(language)),
+            "{language:?}"
+        );
+    }
+    for other in ["", "EN", "hi-IN", "fr", " hi"] {
+        assert_eq!(from_tag(other), None, "{other:?}");
+    }
+}
+
+/// `current` is the language last followed, written or not, and none before the first.
+#[test]
+fn the_follower_knows_the_language_it_last_saw() {
+    let mut recorder = Recorder {
+        fail: Some(5),
+        ..Recorder::default()
+    };
+    let mut follower = Follower::new(&mut recorder);
+    assert_eq!(follower.current(), None);
+    follower.follow(Language::Hi);
+    assert_eq!(follower.current(), Some(Language::Hi));
+    follower.follow(Language::En);
+    assert_eq!(follower.current(), Some(Language::En));
 }

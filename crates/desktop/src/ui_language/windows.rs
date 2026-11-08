@@ -55,7 +55,6 @@ pub(super) fn write_value(key: &str, tag: &str) -> Result<(), u32> {
 }
 
 /// `HKCU\<key>\`[`VALUE`] as a string, `None` when it cannot be read.
-#[cfg(test)]
 pub(super) fn read_value(key: &str) -> Option<String> {
     use windows::Win32::System::Registry::{RRF_RT_REG_SZ, RegGetValueW};
     let subkey = HSTRING::from(key);

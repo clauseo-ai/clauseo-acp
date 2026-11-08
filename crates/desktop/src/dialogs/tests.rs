@@ -16,11 +16,14 @@ fn order(ok: &str, cancel: &str) -> (String, String) {
 
 #[test]
 fn cancel_comes_first_in_both_confirms() {
-    // "Always allow" (U4).
-    assert_eq!(
-        order(CONFIRM_OK, CONFIRM_CANCEL),
-        (CONFIRM_CANCEL.to_owned(), CONFIRM_OK.to_owned())
-    );
+    // "Always allow" (U4), both languages.
+    for language in [Language::En, Language::Hi] {
+        let words = always_allow_words(language);
+        assert_eq!(
+            order(&words.ok, &words.cancel),
+            (words.cancel.clone(), words.ok.clone())
+        );
+    }
     // The link confirm, both kinds, both languages.
     for words in LinkWords::every_table_for_tests() {
         assert_eq!(
@@ -52,15 +55,30 @@ fn only_the_accepting_button_accepts() {
 /// as does its Cancel button; only "Always allow" itself grants.
 #[test]
 fn escape_or_close_declines_always_allow() {
-    assert!(!accepted(&MessageDialogResult::Cancel, CONFIRM_OK));
-    assert!(!accepted(
-        &MessageDialogResult::Custom(CONFIRM_CANCEL.to_owned()),
-        CONFIRM_OK
-    ));
-    assert!(accepted(
-        &MessageDialogResult::Custom(CONFIRM_OK.to_owned()),
-        CONFIRM_OK
-    ));
+    for language in [Language::En, Language::Hi] {
+        let ConfirmWords { ok, cancel, .. } = always_allow_words(language);
+        assert!(!accepted(&MessageDialogResult::Cancel, &ok));
+        assert!(!accepted(&MessageDialogResult::Custom(cancel), &ok));
+        assert!(accepted(&MessageDialogResult::Custom(ok.clone()), &ok));
+    }
+}
+
+/// "Always allow" in Hindi says the Hindi words, and names Clauseo, not "the agent".
+#[test]
+fn always_allow_follows_the_language() {
+    let hi = always_allow_words(Language::Hi);
+    assert_eq!(hi.title, "हमेशा अनुमति दें?");
+    assert_eq!(hi.ok, "हमेशा अनुमति दें");
+    assert_eq!(hi.cancel, "रद्द करें");
+    let en = always_allow_words(Language::En);
+    assert_eq!(
+        en.message,
+        "Clauseo won't ask again before doing things like this."
+    );
+    assert_eq!(
+        (en.ok.as_str(), en.cancel.as_str()),
+        ("Always allow", "Cancel")
+    );
 }
 
 /// The confirms never go through the dialog plugin's message dialog, which turns rfd's plain
