@@ -3,7 +3,9 @@
 //! short name on Windows, its place under the lawyer's home (`~/…`, `~\…`, `$HOME/…`,
 //! `$env:USERPROFILE\…`, `%USERPROFILE%\…`) and under the folder variables it lives in
 //! (`%APPDATA%\…`, `$env:APPDATA\…`, `${env:APPDATA}\…`, `$APPDATA\…`, and the same for
-//! `LOCALAPPDATA`). Separators, doubled ones and case are left to the match
+//! `LOCALAPPDATA`). The short name is mixed name by name with the long one too
+//! ([`mixed_spellings`]: `C:\Users\JONATH~1\AppData\…` and `C:\Users\Jonathan\APPDAT~1\…`), as
+//! Windows opens any such mix. Separators, doubled ones and case are left to the match
 //! ([`super::command::embedded_paths`], which reads a run of separators as one and folds as a
 //! deny does).
 
@@ -11,6 +13,10 @@ use std::path::{Path, PathBuf};
 
 /// The folder variables the data folder may live under (Windows' roaming and local app data).
 const FOLDER_VARS: [&str; 2] = ["APPDATA", "LOCALAPPDATA"];
+
+/// The most mixes of long and short names [`mixed_spellings`] makes (four names with a short
+/// form of their own); past it only the all-long and all-short spellings are searched.
+const MAX_MIXED: usize = 16;
 
 /// What the data folder's spellings are made from.
 pub(super) struct Spellings<'a> {
@@ -29,15 +35,25 @@ pub(super) struct Spellings<'a> {
 /// Every spelling of the data folder a shell word may hold (the module's list), deduplicated.
 pub(super) fn needles(spellings: &Spellings<'_>) -> Vec<String> {
     let separator = if spellings.windows { '\\' } else { '/' };
-    let mut bases: Vec<&Path> = spellings.paths.to_vec();
-    bases.extend(spellings.short.as_deref());
+    let mut bases: Vec<PathBuf> = spellings
+        .paths
+        .iter()
+        .map(|path| path.to_path_buf())
+        .collect();
+    if let Some(short) = &spellings.short {
+        bases.extend(mixed_spellings(
+            spellings.paths[1],
+            short,
+            spellings.windows,
+        ));
+    }
     let mut needles: Vec<String> = Vec::new();
     let mut push = |needle: String| {
         if !needle.is_empty() && !needles.contains(&needle) {
             needles.push(needle);
         }
     };
-    for base in bases {
+    for base in &bases {
         let Some(text) = base.to_str() else {
             continue;
         };
@@ -68,6 +84,62 @@ pub(super) fn needles(spellings: &Spellings<'_>) -> Vec<String> {
         }
     }
     needles
+}
+
+/// Every spelling of the data folder whose names are each its long name (in `long`, the
+/// resolved path) or its 8.3 short name (in `short`, `GetShortPathNameW`'s answer for it, which
+/// shortens each name on its own, so the two have the same names one for one): the all-long and
+/// all-short ones and each mix, as Windows opens `C:\Users\JONATH~1\AppData\Roaming\Clauseo` and
+/// `C:\Users\Jonathan\APPDAT~1\Roaming\Clauseo` alike. A name whose short form is the same (ASCII
+/// case aside) gives one choice. Only `short` when the two don't pair up name for name, and only
+/// the all-long and all-short ones past [`MAX_MIXED`] mixes.
+fn mixed_spellings(long: &Path, short: &Path, windows: bool) -> Vec<PathBuf> {
+    let (Some(long), Some(short)) = (long.to_str(), short.to_str()) else {
+        return vec![short.to_path_buf()];
+    };
+    let separator = |c: char| c == '/' || (windows && c == '\\');
+    let (long_names, short_names): (Vec<&str>, Vec<&str>) = (
+        long.split(separator).collect(),
+        short.split(separator).collect(),
+    );
+    if long_names.len() != short_names.len() {
+        return vec![PathBuf::from(short)];
+    }
+    let choices: Vec<Vec<&str>> = long_names
+        .iter()
+        .zip(&short_names)
+        .map(|(long, short)| {
+            if long.eq_ignore_ascii_case(short) {
+                vec![*long]
+            } else {
+                vec![*long, *short]
+            }
+        })
+        .collect();
+    let count = choices
+        .iter()
+        .try_fold(1_usize, |count, names| count.checked_mul(names.len()));
+    if count.is_none_or(|count| count > MAX_MIXED) {
+        return vec![PathBuf::from(long), PathBuf::from(short)];
+    }
+    let joiner = if windows { "\\" } else { "/" };
+    let mut spellings: Vec<Vec<&str>> = vec![Vec::new()];
+    for names in &choices {
+        spellings = spellings
+            .iter()
+            .flat_map(|head| {
+                names.iter().map(move |name| {
+                    let mut next = head.clone();
+                    next.push(*name);
+                    next
+                })
+            })
+            .collect();
+    }
+    spellings
+        .into_iter()
+        .map(|names| PathBuf::from(names.join(joiner)))
+        .collect()
 }
 
 /// The rest of `text` after `root`, by whole names, separators trimmed: with Windows' rules
