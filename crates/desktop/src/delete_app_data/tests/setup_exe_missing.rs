@@ -347,8 +347,9 @@ fn the_uninstaller_says_nothing_when_the_key_names_no_owner() {
         values.contains("pub const OWNER_SID: &str = \"OwnerSid\";"),
         "record_values.rs"
     );
+    // OwnerSid comes first among the set-up's values, which a removal deletes.
     assert!(
-        values.contains("pub const SETUP_VALUES: [&str; 5] = [OWNER_SID,"),
+        values.contains("pub const SETUP_VALUES: [&str; 9] = [\n    OWNER_SID,"),
         "record_values.rs"
     );
 }
