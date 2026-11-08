@@ -52,8 +52,9 @@ fn os(call: &'static str, error: &windows::core::Error) -> SourceError {
     }
 }
 
-/// The bytes of the file at `path`, read as the module says, at most `cap` of them.
-pub(super) fn read_capped(path: &Path, cap: u64) -> Result<Vec<u8>, SourceError> {
+/// The bytes of the file at `path`, read as the module says, at most `cap` of them. Set-up's
+/// policy read uses it for the Group Policy templates (`setup::rights_source`).
+pub(crate) fn read_capped(path: &Path, cap: u64) -> Result<Vec<u8>, SourceError> {
     let file = open(path)?;
     let size = checked(&file)?;
     if size > cap {

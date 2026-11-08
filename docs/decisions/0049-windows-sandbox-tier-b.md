@@ -787,17 +787,26 @@ default Windows include, so most computers need nothing. Set-up checks the rest
   the files don't say which GPO wins. RSoP (`RSOP_UserPrivilegeRight`) is not read: the cache
   holds the same lists without WMI.
 - **`Unknown`.** Any read that fails (a folder or key a standard user can't open, a file that
-  can't be read) is `Unknown`. Nothing treats it as granted: set-up grants nothing and lets the
+  can't be read, a template or its folder that is a link, read without following it through
+  `refresh::source::read_capped`) is `Unknown`, and so is a file that isn't a template (UTF-16
+  with no byte-order mark, no `[section]`, a line in `[Privilege Rights]` that isn't a right):
+  never `NotDefined`. Nothing treats it as granted: set-up grants nothing and lets the
   logon decide, and the next run checks again.
 - **The cache.** For a launch's check, `rights_source::cached` keeps the parsed lists in one
   process-wide `PolicyCache`, keyed by each template's last-write time and the `PolicyManager`
   key's (`RegQueryInfoKey`). It re-reads when one changes, a template appears or goes, or after
-  10 minutes. An `Unknown` is never cached. Set-up reads afresh (`read_now`).
+  10 minutes. An `Unknown` is never cached. Set-up reads afresh (`read_now`). A launch's 1385
+  asks it (the outer runner, `steps::logon_failure`, only on a 1385): when it says a policy
+  leaves the pool out, the runner exits `RunExit::LogonPolicy` with `Blocked::LogonPolicy`'s
+  words; otherwise, an unreadable cache as the desktop user included, `RunExit::LogonRight`.
 - **The grant.** Step 3a, once the group exists and before any pool user logs on: when policy
   doesn't define "Allow log on locally" and `LsaEnumerateAccountsWithUserRight` lists none of the
   group, Users, Everyone or Authenticated Users, set-up writes `LogonRightAdded` (the group's
-  SID) to the record, then `LsaAddAccountRights` adds the right to the group. If the add fails,
-  the value is cleared. A failed run's rollback takes the right off again. A policy that defines
+  SID) to the record, then `LsaAddAccountRights` adds the right to the group. A fresh run writes
+  its record (the group, no users yet) before the value, so the value never sits in a key
+  `--remove` reads as no record. If the add fails, the value is cleared. A failed run's rollback
+  takes the right off again; when that fails, it keeps the record naming the group, so
+  `--remove` still finds the grant. A policy that defines
   the right without the pool gets no grant (the next refresh would undo it): set-up fails at
   `Step::LogonRight` with `LOGON_POLICY_EXCLUDES`, which is `Blocked::LogonPolicy`
   (`logon_policy`; `Blocked::LogonRight` stays the local 1385, which setting up again fixes). Like
@@ -808,7 +817,8 @@ default Windows include, so most computers need nothing. Set-up checks the rest
   granted: the right's name is fixed in `preflight.rs`, and a test checks that no source names
   the Remote Desktop right.
 - **Removal.** `--remove`, before the group goes, takes the right off the SID
-  `LogonRightAdded` names (`LsaRemoveAccountRights`, the SID's other rights kept), then clears
+  `LogonRightAdded` names, only when it is the record's group (anything else is logged and
+  left) (`LsaRemoveAccountRights`, the SID's other rights kept), then clears
   the value (`RemoveStep::LogonRight`). A right IT granted stays.
 - **Deny rights per logon type.** `preflight::deny_check(kind, pool)` reads the deny right of an
   interactive, batch or service logon and compares it with the SIDs that logon's token holds.

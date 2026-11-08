@@ -109,6 +109,54 @@ fn a_failed_run_takes_its_grant_back() {
 }
 
 #[test]
+fn a_fresh_run_records_its_group_before_it_grants() {
+    let mut machine = admins_only("logon-record-first");
+    // The grant fails: the record was written first and named the group.
+    machine.rights.fail = Some(format!("add {}", sid(1000)));
+    let req = request(&mut machine, 0, Vec::new());
+    set_up(&mut machine, &mut FakeAcl::default(), &req).unwrap_err();
+    assert_eq!(
+        machine.written.first().map(|r| (&r.group, r.pool.len())),
+        Some((&sid(1000), 0))
+    );
+    assert!(
+        !machine
+            .calls
+            .iter()
+            .any(|call| call.starts_with("create_user"))
+    );
+}
+
+#[test]
+fn a_grant_the_rollback_cant_take_off_keeps_the_record() {
+    let mut machine = admins_only("logon-undo-fails");
+    machine.fails.push((
+        "log_on_once ClauseoSb01".to_owned(),
+        MachineError::Other("no".to_owned()),
+    ));
+    machine.rights.fail = Some(format!("remove {}", sid(1000)));
+    let req = request(&mut machine, 0, Vec::new());
+    let failure = set_up(&mut machine, &mut FakeAcl::default(), &req).unwrap_err();
+    assert!(!failure.rolled_back);
+    assert!(
+        failure.cause.contains("Allow log on locally"),
+        "{}",
+        failure.cause
+    );
+    // The record still names the group, so `--remove` finds the grant and takes it off.
+    assert_eq!(
+        machine.state.record.as_ref().map(|r| &r.group),
+        Some(&sid(1000))
+    );
+    assert_eq!(machine.rights.recorded, Some(sid(1000)));
+    let mut remover = Remover::new(machine, Some(owner()));
+    let mut acl = remover.acl(FakeAcl::default());
+    remove(&mut remover, &mut acl, false).unwrap();
+    assert_eq!(remover.m.rights.recorded, None);
+    assert!(!remover.m.rights.holders.contains(&sid(1000)));
+}
+
+#[test]
 fn remove_takes_off_the_grant_set_up_added() {
     let mut machine = admins_only("logon-remove");
     let mut acl = FakeAcl::default();

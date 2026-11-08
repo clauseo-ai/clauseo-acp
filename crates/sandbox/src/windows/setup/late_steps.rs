@@ -8,10 +8,12 @@ use std::path::{Path, PathBuf};
 
 use clauseo_protocol::MatterId;
 
+use super::SetupRequest;
 use super::create::Failed;
+use super::create::write_record;
 use super::journal_plan::{JournalAction, journal_plan};
-use super::logon_grant::{GrantError, Granted, grant_interactive};
-use super::machine::{Machine, owned};
+use super::logon_grant::{GrantError, Granted, add_recorded, plan_grant};
+use super::machine::{Machine, MachineError, owned};
 use super::outcome::{JournalOutcome, LOGON_POLICY_EXCLUDES, SetupFailure, Step, cause_of};
 use super::record_values::CopyOwner;
 use super::rollback::Run;
@@ -30,30 +32,47 @@ const ADMINISTRATORS: &str = "S-1-5-32-544";
 
 /// Step 3a, once the group exists and before any pool user logs on: "Allow log on locally"
 /// granted to `group` where no policy defines it and no local holder admits the pool
-/// (`logon_grant.rs`); `users` are the recorded pool SIDs. A grant made is in `run`, for the
-/// rollback. A policy that defines the right without the pool is [`LOGON_POLICY_EXCLUDES`]
-/// (`Blocked::LogonPolicy`); a policy that can't be read grants nothing, and the logon decides.
+/// (`logon_grant.rs`); `users` are the recorded pool SIDs. A fresh run writes its record first
+/// (the group, no users yet), so `LogonRightAdded` never stands in a key `--remove` reads as no
+/// record. A grant made is in `run`, for the rollback. A policy that defines the right without
+/// the pool is [`LOGON_POLICY_EXCLUDES`] (`Blocked::LogonPolicy`); a policy that can't be read
+/// grants nothing, and the logon decides.
 pub(super) fn logon_right(
     machine: &mut impl Machine,
+    req: &SetupRequest,
     group: &Sid,
     users: &[Sid],
     run: &mut Run,
 ) -> Result<(), Failed> {
-    match grant_interactive(machine.logon_rights(), group, users) {
-        Ok(Granted::Added) => {
-            run.logon_added = Some(group.clone());
-            Ok(())
-        }
+    let failed = |error: &MachineError| (Step::LogonRight, cause_of(error));
+    match plan_grant(machine.logon_rights(), group, users) {
+        Ok(Granted::Added) => {}
         Ok(Granted::Unknown) => {
             tracing::warn!(
                 "whether a policy sets \"Allow log on locally\" couldn't be read; nothing granted"
             );
-            Ok(())
+            return Ok(());
         }
-        Ok(Granted::Covered | Granted::PolicyIncludes) => Ok(()),
-        Err(GrantError::Excluded) => Err((Step::LogonRight, LOGON_POLICY_EXCLUDES.to_owned())),
-        Err(GrantError::Failed(error)) => Err((Step::LogonRight, cause_of(&error))),
+        Ok(Granted::Covered | Granted::PolicyIncludes) => return Ok(()),
+        Err(GrantError::Excluded) => {
+            return Err((Step::LogonRight, LOGON_POLICY_EXCLUDES.to_owned()));
+        }
+        Err(GrantError::Failed(error)) => return Err(failed(&error)),
     }
+    if run.recorded().is_none() {
+        let record = MachineRecord {
+            owner: req.owner.clone(),
+            group: group.clone(),
+            pool: Vec::new(),
+            data_dir: req.data_dir.clone(),
+            removing: false,
+        };
+        write_record(machine, &record).map_err(|cause| (Step::WriteRecord, cause))?;
+        run.recorded = Some(record);
+    }
+    add_recorded(machine.logon_rights(), group).map_err(|error| failed(&error))?;
+    run.logon_added = Some(group.clone());
+    Ok(())
 }
 
 /// After step 5, once the record names `owner` as `OwnerSid`: on a per-machine install (the

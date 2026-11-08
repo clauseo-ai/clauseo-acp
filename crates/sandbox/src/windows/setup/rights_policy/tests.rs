@@ -84,7 +84,7 @@ fn a_template_lists_sids_and_names_in_its_privilege_rights_only() {
         "SeInteractiveLogonRight = *S-1-5-32-544,*S-1-5-32-545, \"CORP\\Lawyers\"\r\n\
          SeDenyBatchLogonRight =\r\n; a comment = *S-1-1-0",
     );
-    let rights = inf_rights(&text);
+    let rights = inf_rights(&text).unwrap();
     assert_eq!(
         rights["SeInteractiveLogonRight"],
         [
@@ -99,6 +99,7 @@ fn a_template_lists_sids_and_names_in_its_privilege_rights_only() {
     // A line of the same shape in another section isn't a right.
     assert!(
         !inf_rights("[Registry Values]\nSeBatchLogonRight = *S-1-1-0")
+            .unwrap()
             .contains_key("SeBatchLogonRight")
     );
 }
@@ -398,4 +399,59 @@ fn the_cache_holds_no_unknown() {
         cache.right(&mut source, INTERACTIVE_RIGHT, pool_of(&group), now),
         RightPolicy::NotDefined
     );
+}
+
+#[test]
+fn a_file_that_isnt_a_template_is_an_error() {
+    let text = template("SeInteractiveLogonRight = *S-1-5-32-545");
+    // UTF-16 with no byte-order mark reads as text full of NULs.
+    let bare: Vec<u8> = text.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    assert_eq!(inf_rights(&inf_text(&bare)), Err(InfError::NotText));
+    // Big-endian with its mark reads.
+    let mut big = vec![0xFE, 0xFF];
+    big.extend(text.encode_utf16().flat_map(u16::to_be_bytes));
+    assert!(
+        inf_rights(&inf_text(&big))
+            .unwrap()
+            .contains_key(INTERACTIVE_RIGHT)
+    );
+    assert_eq!(inf_rights(""), Err(InfError::NoSection));
+    assert_eq!(
+        inf_rights("SeInteractiveLogonRight = *S-1-5-32-545"),
+        Err(InfError::NoSection)
+    );
+    assert_eq!(
+        inf_rights(&inf_text(&[0x00, 0x9F, 0x92, 0x96, 0xC3])),
+        Err(InfError::NotText)
+    );
+    assert_eq!(
+        inf_rights("[Privilege Rights]\nnot a right"),
+        Err(InfError::BadLine)
+    );
+    assert_eq!(
+        inf_rights("[Privilege Rights]\n= *S-1-1-0"),
+        Err(InfError::BadLine)
+    );
+    // A template with sections but no user rights defines none.
+    assert_eq!(
+        inf_rights("[Unicode]\nUnicode=yes\n[Version]\nRevision=1"),
+        Ok(BTreeMap::new())
+    );
+}
+
+#[test]
+fn a_template_that_doesnt_parse_is_unknown_never_not_defined() {
+    let group = sid(GROUP);
+    let text = template("SeInteractiveLogonRight = *S-1-5-32-544");
+    let bare: Vec<u8> = text.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    for bytes in [bare, b"garbage, not a template".to_vec(), Vec::new()] {
+        let mut source = FakeSource::default();
+        source
+            .files
+            .insert(PathBuf::from("gpt00000.inf"), (1, bytes));
+        assert_eq!(
+            read_policy(&mut source, INTERACTIVE_RIGHT, pool_of(&group)),
+            RightPolicy::Unknown
+        );
+    }
 }

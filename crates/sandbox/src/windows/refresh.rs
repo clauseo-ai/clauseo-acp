@@ -82,7 +82,7 @@ mod refusal_tests;
 mod rules;
 pub mod signature;
 #[cfg(windows)]
-mod source;
+pub(crate) mod source;
 mod sources;
 #[cfg(windows)]
 mod staging;

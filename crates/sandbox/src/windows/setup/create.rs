@@ -274,7 +274,7 @@ fn change(
     run: &mut Run,
 ) -> Result<SetupReport, Failed> {
     let group = group(machine, run)?;
-    logon_right(machine, &group, &plan.base, run)?;
+    logon_right(machine, req, &group, &plan.base, run)?;
     let mut users = Users::default();
     run.kept = plan.kept.iter().map(|user| user.sid.clone()).collect();
     for user in &plan.kept {

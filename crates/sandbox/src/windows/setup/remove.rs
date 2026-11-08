@@ -45,8 +45,8 @@
 //! 5. `DeviceSync`'s deny;
 //! 6. the ledger's entries (`ledger_work.rs`), read from the record's `DataDir`, which the owner
 //!    can influence, so it is checked as `--data-dir` is and used only as `ledger_work.rs` says;
-//! 7. "Allow log on locally" off the SID the record's `LogonRightAdded` names, when set-up
-//!    granted it (`logon_grant::remove_grant`; a right IT granted stays), then the group, when
+//! 7. "Allow log on locally" off the record's group when `LogonRightAdded` names it (set-up
+//!    granted it; `logon_grant::remove_grant`; a right IT granted stays), then the group, when
 //!    it is the record's and has no members left;
 //! 8. on a per-machine install, the stop task set-up registered for the owner, then the record
 //!    key;
@@ -403,7 +403,7 @@ fn steps(
         )
     })?;
     report.ledger = ledger_work::run(machine, acl, record, acting)?;
-    logon_grant::remove_grant(machine.logon_rights())
+    logon_grant::remove_grant(machine.logon_rights(), &record.group)
         .map_err(|e| (RemoveStep::LogonRight, cause_of(&e)))?;
     report.group = remove_group(machine, record)?;
     remove_stop_task(machine)?;

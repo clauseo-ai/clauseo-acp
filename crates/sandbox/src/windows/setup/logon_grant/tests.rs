@@ -114,7 +114,7 @@ fn remove_takes_off_only_what_set_up_added() {
         holders: vec![group()],
         ..admins_only()
     };
-    assert_eq!(remove_grant(&mut rights), Ok(false));
+    assert_eq!(remove_grant(&mut rights, &group()), Ok(false));
     assert_eq!(rights.holders, [group()]);
     assert_eq!(rights.calls, ["recorded"]);
 
@@ -125,7 +125,7 @@ fn remove_takes_off_only_what_set_up_added() {
         recorded: Some(group()),
         ..FakeRights::default()
     };
-    assert_eq!(remove_grant(&mut rights), Ok(true));
+    assert_eq!(remove_grant(&mut rights, &group()), Ok(true));
     assert_eq!(rights.holders, [users]);
     assert_eq!(rights.recorded, None);
 
@@ -135,8 +135,37 @@ fn remove_takes_off_only_what_set_up_added() {
         fail: Some(format!("remove {}", group())),
         ..FakeRights::default()
     };
-    assert!(remove_grant(&mut rights).is_err());
+    assert!(remove_grant(&mut rights, &group()).is_err());
     assert_eq!(rights.recorded, Some(group()));
+}
+
+#[test]
+fn remove_leaves_a_recorded_sid_that_isnt_the_group() {
+    let other = sid("S-1-5-21-5-5-5-2000");
+    let mut rights = FakeRights {
+        holders: vec![other.clone()],
+        recorded: Some(other.clone()),
+        ..FakeRights::default()
+    };
+    assert_eq!(remove_grant(&mut rights, &group()), Ok(false));
+    assert_eq!(rights.holders, [other]);
+    assert!(!rights.calls.iter().any(|call| call.starts_with("remove")));
+}
+
+#[test]
+fn the_record_is_written_before_the_grant() {
+    let mut rights = admins_only();
+    // A crash right after the record leaves a value to remove, never an unrecorded grant.
+    rights.fail = Some(format!("add {}", group()));
+    assert!(add_recorded(&mut rights, &group()).is_err());
+    let at = |prefix: &str| {
+        rights
+            .calls
+            .iter()
+            .position(|c| c.starts_with(prefix))
+            .unwrap()
+    };
+    assert!(at("record S-") < at("add"));
 }
 
 #[test]
@@ -153,35 +182,67 @@ fn rdp_right() -> String {
     ["SeRemote", "InteractiveLogonRight"].concat()
 }
 
+/// The code files the workspace scan reads: every language that could call the LSA, add a group
+/// member or write a policy (Rust, TypeScript and JavaScript, the NSIS scripts, PowerShell, shell,
+/// and the config Clauseo ships).
+const SCANNED: [&str; 12] = [
+    "rs", "ts", "tsx", "js", "mjs", "nsh", "nsi", "ps1", "psm1", "sh", "toml", "json",
+];
+
 #[test]
 fn no_code_path_grants_the_remote_desktop_right() {
     assert_eq!(GRANTED_RIGHTS, [INTERACTIVE_RIGHT]);
     assert!(!GRANTED_RIGHTS.contains(&rdp_right().as_str()));
-    // No source in the crate names it, nor its Intune or group equivalents.
+    // No code in the workspace names the right, its Intune name, or the built-in Remote Desktop
+    // group (by name or SID), which would let the pool in by membership instead.
     let needles = [
         rdp_right(),
         ["AllowLogOn", "ThroughRemoteDesktop"].concat(),
         ["S-1-5-32-", "555"].concat(),
+        ["Remote Desktop", " Users"].concat(),
+        ["RemoteDesktop", "Users"].concat(),
     ];
-    let mut stack = vec![Path::new(env!("CARGO_MANIFEST_DIR")).join("src")];
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut stack = vec![root.clone()];
     let mut read = 0;
     while let Some(dir) = stack.pop() {
         for entry in std::fs::read_dir(&dir).unwrap() {
-            let path = entry.unwrap().path();
-            if path.is_dir() {
-                stack.push(path);
-            } else if path.extension().is_some_and(|ext| ext == "rs") {
-                let text = std::fs::read_to_string(&path).unwrap();
-                read += 1;
-                for needle in &needles {
-                    assert!(
-                        !text.contains(needle.as_str()),
-                        "{}: {needle}",
-                        path.display()
-                    );
+            let entry = entry.unwrap();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let kind = entry.file_type().unwrap();
+            if kind.is_dir() {
+                let skipped = ["target", "node_modules", "dist"].contains(&name.as_str())
+                    || (name.starts_with('.') && name != ".github");
+                if !skipped {
+                    stack.push(entry.path());
                 }
+                continue;
+            }
+            let path = entry.path();
+            let code = path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| SCANNED.contains(&ext));
+            if !kind.is_file() || !code {
+                continue;
+            }
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            read += 1;
+            let lower = text.to_lowercase();
+            for needle in &needles {
+                assert!(
+                    !lower.contains(&needle.to_lowercase()),
+                    "{}: {needle}",
+                    path.display()
+                );
             }
         }
     }
-    assert!(read > 100, "the scan read {read} files");
+    assert!(
+        read > 3000,
+        "the scan read {read} files under {}",
+        root.display()
+    );
 }

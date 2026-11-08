@@ -444,7 +444,12 @@ fn exit_codes_are_stable_and_map_to_set_up_causes() {
     assert_eq!(RunExit::PoolStop.no_sandbox(), None);
     assert_eq!(RunExit::MarkerUnwritable.code(), 0xE0C1_5011);
     assert_eq!(RunExit::MarkerUnwritable.no_sandbox(), None);
-    assert_eq!(RunExit::from_code(RUN_EXIT_BASE + 18), None);
+    assert_eq!(RunExit::LogonPolicy.code(), 0xE0C1_5012);
+    assert_eq!(
+        RunExit::LogonPolicy.no_sandbox(),
+        Some(crate::NoSandbox::SetUpBlocked(crate::Blocked::LogonPolicy))
+    );
+    assert_eq!(RunExit::from_code(RUN_EXIT_BASE + 19), None);
     assert_eq!(RunExit::DllSearch.no_sandbox(), None);
     assert_eq!(RunExit::AgentReserved.no_sandbox(), None);
     assert_eq!(RunExit::Sweep.no_sandbox(), None);
@@ -546,5 +551,37 @@ fn the_command_line_names_one_mode_and_sweep_takes_nothing_else() {
         &["--inner", "b", "--sweep"],
     ] {
         assert_eq!(mode(&args(wrong)), None, "{wrong:?}");
+    }
+}
+
+#[test]
+fn a_launch_1385_names_the_policy_only_when_the_cached_read_says_it_leaves_the_pool_out() {
+    use crate::windows::setup::rights_policy::RightPolicy;
+    let without = RightPolicy::Defined {
+        includes_pool: false,
+    };
+    let (exit, blocked) = logon_refusal(without);
+    assert_eq!(
+        (exit, blocked),
+        (RunExit::LogonPolicy, crate::Blocked::LogonPolicy)
+    );
+    let words = blocked.to_string();
+    assert!(words.starts_with("This computer's settings don't let Clauseo's sandbox accounts"));
+    assert!(
+        !words.contains("set up again") && !words.contains("Setting up"),
+        "{words}"
+    );
+    for policy in [
+        RightPolicy::Defined {
+            includes_pool: true,
+        },
+        RightPolicy::NotDefined,
+        RightPolicy::Unknown,
+    ] {
+        assert_eq!(
+            logon_refusal(policy),
+            (RunExit::LogonRight, crate::Blocked::LogonRight),
+            "{policy:?}"
+        );
     }
 }

@@ -46,10 +46,10 @@ pub trait LogonRights {
     fn record(&mut self, sid: Option<&Sid>) -> Result<(), MachineError>;
 }
 
-/// What the grant step did.
+/// What the grant step did, or, from [`plan_grant`], will do.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Granted {
-    /// Added to the group and recorded.
+    /// Added to the group and recorded; from [`plan_grant`], to be added ([`add_recorded`]).
     Added,
     /// No policy defines the right and a local holder already admits the pool.
     Covered,
@@ -68,8 +68,9 @@ pub enum GrantError {
     Failed(MachineError),
 }
 
-/// The grant, as the module says, for the group `group` and the pool accounts `users`.
-pub fn grant_interactive(
+/// What the grant would do for the group `group` and the pool accounts `users`, as the module
+/// says, changing nothing: [`Granted::Added`] means a grant is due.
+pub fn plan_grant(
     rights: &mut dyn LogonRights,
     group: &Sid,
     users: &[Sid],
@@ -97,19 +98,40 @@ pub fn grant_interactive(
     {
         return Ok(Granted::Covered);
     }
-    // Recorded first, so no grant is ever left that `--remove` can't find.
-    rights.record(Some(group)).map_err(GrantError::Failed)?;
+    Ok(Granted::Added)
+}
+
+/// The grant itself: `LogonRightAdded` written as `group` first, so no grant is ever left that
+/// `--remove` can't find, then the right added; a failed add clears the value again. The
+/// caller has written the record's other values already (`late_steps::logon_right`), so the
+/// value never stands in a key no reader takes for a record.
+pub fn add_recorded(rights: &mut dyn LogonRights, group: &Sid) -> Result<(), MachineError> {
+    rights.record(Some(group))?;
     if let Err(error) = rights.add_interactive(group) {
         if let Err(clear) = rights.record(None) {
             tracing::warn!(%clear, "LogonRightAdded couldn't be cleared after a failed grant");
         }
-        return Err(GrantError::Failed(error));
+        return Err(error);
     }
-    Ok(Granted::Added)
+    Ok(())
+}
+
+/// [`plan_grant`], then [`add_recorded`] when a grant is due.
+pub fn grant_interactive(
+    rights: &mut dyn LogonRights,
+    group: &Sid,
+    users: &[Sid],
+) -> Result<Granted, GrantError> {
+    let planned = plan_grant(rights, group, users)?;
+    if planned == Granted::Added {
+        add_recorded(rights, group).map_err(GrantError::Failed)?;
+    }
+    Ok(planned)
 }
 
 /// Takes the right off `sid`, which this run added it to, and clears the record: a failed
-/// set-up's rollback. What is left behind, in words, when either fails.
+/// set-up's rollback. What is left behind, in words, when either fails; then the caller keeps
+/// the record, so `--remove` still finds the grant.
 pub fn undo_grant(rights: &mut dyn LogonRights, sid: &Sid) -> Result<(), String> {
     rights
         .remove_interactive(sid)
@@ -118,11 +140,20 @@ pub fn undo_grant(rights: &mut dyn LogonRights, sid: &Sid) -> Result<(), String>
 }
 
 /// `--remove`'s step: the right taken off the SID `LogonRightAdded` names, then the value
-/// cleared; whether there was one. A right set-up didn't add is never touched.
-pub fn remove_grant(rights: &mut dyn LogonRights) -> Result<bool, MachineError> {
+/// cleared; whether it was. Only when that SID is `group`, the record's `ClauseoSandboxUsers`:
+/// a value naming anything else is left alone (logged), and its SID keeps its rights. A right
+/// set-up didn't add is never touched.
+pub fn remove_grant(rights: &mut dyn LogonRights, group: &Sid) -> Result<bool, MachineError> {
     let Some(sid) = rights.recorded()? else {
         return Ok(false);
     };
+    if sid != *group {
+        tracing::warn!(
+            %sid,
+            "LogonRightAdded doesn't name the sandbox group; its right is left as it is"
+        );
+        return Ok(false);
+    }
     rights.remove_interactive(&sid)?;
     rights.record(None)?;
     Ok(true)

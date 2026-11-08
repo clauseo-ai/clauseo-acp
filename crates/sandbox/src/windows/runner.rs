@@ -68,6 +68,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::pool::pool_number;
+#[cfg(any(windows, test, feature = "test-support"))]
+use super::setup::rights_policy::RightPolicy;
 use super::sids::Sid;
 
 #[cfg(windows)]
@@ -396,7 +398,8 @@ pub enum RunExit {
     NoSecret,
     /// The Secondary Logon service is disabled (1058).
     SecondaryLogon,
-    /// "Allow log on locally" doesn't include the pool user (1385).
+    /// "Allow log on locally" doesn't include the pool user (1385), and no policy is known to
+    /// leave the pool out ([`logon_refusal`]): setting up again usually fixes it.
     LogonRight,
     /// The pool user's password was refused (1326): set-up must run again.
     Password,
@@ -442,10 +445,13 @@ pub enum RunExit {
     /// it no id (`marker::marked`): the outer refuses the launch before any logon, so no session
     /// runs that no marker names.
     MarkerUnwritable,
+    /// A 1385 where a Group Policy or Intune setting defines "Allow log on locally" without the
+    /// pool, as the cached policy read says ([`logon_refusal`]): setting up again doesn't fix it.
+    LogonPolicy,
 }
 
 impl RunExit {
-    const ALL: [RunExit; 18] = [
+    const ALL: [RunExit; 19] = [
         RunExit::Usage,
         RunExit::BadLaunch,
         RunExit::NoSecret,
@@ -464,6 +470,7 @@ impl RunExit {
         RunExit::Escapee,
         RunExit::PoolStop,
         RunExit::MarkerUnwritable,
+        RunExit::LogonPolicy,
     ];
 
     /// The exit code.
@@ -489,6 +496,7 @@ impl RunExit {
         match self {
             RunExit::SecondaryLogon => Some(NoSandbox::SetUpFailed(SECLOGON_DISABLED.to_owned())),
             RunExit::LogonRight => Some(NoSandbox::SetUpBlocked(crate::Blocked::LogonRight)),
+            RunExit::LogonPolicy => Some(NoSandbox::SetUpBlocked(crate::Blocked::LogonPolicy)),
             RunExit::NoSecret | RunExit::Password => {
                 Some(NoSandbox::SetUpFailed(PASSWORD_LOST.to_owned()))
             }
@@ -507,6 +515,24 @@ impl RunExit {
             | RunExit::PoolStop
             | RunExit::MarkerUnwritable => None,
         }
+    }
+}
+
+/// What a launch's 1385 is, from what the cached policy read says of "Allow log on locally"
+/// (`setup::rights_source::cached`): a policy that defines it without the pool is
+/// [`RunExit::LogonPolicy`], with [`Blocked::LogonPolicy`](crate::Blocked::LogonPolicy)'s words;
+/// anything else, an unreadable policy included, stays [`RunExit::LogonRight`].
+#[cfg(any(windows, test, feature = "test-support"))]
+pub fn logon_refusal(policy: RightPolicy) -> (RunExit, crate::Blocked) {
+    match policy {
+        RightPolicy::Defined {
+            includes_pool: false,
+        } => (RunExit::LogonPolicy, crate::Blocked::LogonPolicy),
+        RightPolicy::Defined {
+            includes_pool: true,
+        }
+        | RightPolicy::NotDefined
+        | RightPolicy::Unknown => (RunExit::LogonRight, crate::Blocked::LogonRight),
     }
 }
 

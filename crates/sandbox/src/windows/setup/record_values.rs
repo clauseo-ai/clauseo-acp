@@ -460,6 +460,9 @@ mod tests {
         for name in [STOP_COMPLETED, STOP_SEQUENCE, STOP_NEXT] {
             assert!(SETUP_VALUES.contains(&name), "{name}");
         }
+        // And the logon-right grant's record, which `--remove` reads before it goes.
+        assert_eq!(LOGON_RIGHT_ADDED, "LogonRightAdded");
+        assert!(SETUP_VALUES.contains(&LOGON_RIGHT_ADDED));
     }
 
     #[test]

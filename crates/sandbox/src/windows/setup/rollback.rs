@@ -118,13 +118,20 @@ pub(super) fn roll_back(
         }
     }
     survivors.reverse();
+    // A grant that won't come off keeps the record naming its group, so `--remove` finds it.
+    let mut grant_left = false;
     if let Some(sid) = &run.logon_added
         && let Err(what) = undo_grant(machine.logon_rights(), sid)
     {
         left.push(what);
+        grant_left = true;
     }
     let group_gone = run.group_made && alive == 0 && delete_group(machine, run, &mut left);
-    rewrite_record(machine, req, run, &survivors, group_gone, &mut left);
+    let kept = Kept {
+        group_gone,
+        grant_left,
+    };
+    rewrite_record(machine, req, run, &survivors, kept, &mut left);
     if !run.reset.is_empty()
         && let Err(error) = owned(machine, |m| m.protect_for_owner(&run.reset, &run.kept))
     {
@@ -203,19 +210,29 @@ fn delete_group(machine: &mut impl Machine, run: &Run, left: &mut Vec<String>) -
     }
 }
 
+/// What the rollback left that the record must still name.
+#[derive(Debug, Clone, Copy)]
+struct Kept {
+    /// The group this run made is gone.
+    group_gone: bool,
+    /// The "Allow log on locally" grant this run made couldn't be taken off.
+    grant_left: bool,
+}
+
 /// The record written to what remains, after the users and the group: every SID the record
 /// held before the run (so nothing recorded before is dropped) plus `survivors`, with this run's
-/// group while it is still there, else the group before. No record at all when there was none
-/// before and nothing remains. Written only when it differs from what the machine holds.
+/// group while it is still there or its grant is left, else the group before. No record at all
+/// when there was none before and nothing remains. Written only when it differs from what the
+/// machine holds.
 fn rewrite_record(
     machine: &mut impl Machine,
     req: &SetupRequest,
     run: &Run,
     survivors: &[Sid],
-    group_gone: bool,
+    kept: Kept,
     left: &mut Vec<String>,
 ) {
-    let made_group_left = run.group_made && !group_gone;
+    let made_group_left = (run.group_made && !kept.group_gone) || kept.grant_left;
     let before = run.before.as_ref();
     let result = if before.is_none() && survivors.is_empty() && !made_group_left {
         match run.recorded {

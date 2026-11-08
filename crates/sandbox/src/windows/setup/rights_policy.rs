@@ -118,17 +118,24 @@ pub fn is_cache_file(name: &str) -> bool {
         && (extension.eq_ignore_ascii_case("inf") || extension.eq_ignore_ascii_case("dom"))
 }
 
-/// A template's text: UTF-16LE after its byte-order mark (as `secedit` writes them), else UTF-8
-/// (a lone bad byte replaced).
+/// A template's text: UTF-16 after its byte-order mark (little-endian, as `secedit` writes
+/// them, or big-endian), else UTF-8 (a lone bad byte replaced). Text that isn't a template is
+/// caught by [`inf_rights`].
 pub fn inf_text(bytes: &[u8]) -> String {
-    if let Some(body) = bytes.strip_prefix(&[0xFF, 0xFE]) {
+    let utf16 = |body: &[u8], read: fn([u8; 2]) -> u16| {
         let units: Vec<u16> = body
             .as_chunks::<2>()
             .0
             .iter()
-            .map(|pair| u16::from_le_bytes(*pair))
+            .map(|pair| read(*pair))
             .collect();
-        return String::from_utf16_lossy(&units);
+        String::from_utf16_lossy(&units)
+    };
+    if let Some(body) = bytes.strip_prefix(&[0xFF, 0xFE]) {
+        return utf16(body, u16::from_le_bytes);
+    }
+    if let Some(body) = bytes.strip_prefix(&[0xFE, 0xFF]) {
+        return utf16(body, u16::from_be_bytes);
     }
     let body = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
     String::from_utf8_lossy(body).into_owned()
@@ -150,27 +157,55 @@ pub fn principal_of(text: &str) -> Option<Principal> {
     Some(Principal::Name(text.to_owned()))
 }
 
+/// Why a cache file isn't a template [`inf_rights`] can read: its rights are then unknown,
+/// never "not defined".
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum InfError {
+    /// A NUL or a replacement character: UTF-16 without its byte-order mark, or binary.
+    #[error("the template isn't text")]
+    NotText,
+    /// No `[section]` line at all: every template has `[Unicode]` and `[Version]`.
+    #[error("the template has no section")]
+    NoSection,
+    /// A line in `[Privilege Rights]` that isn't `Right = list`.
+    #[error("a line in the template's [Privilege Rights] isn't a right")]
+    BadLine,
+}
+
 /// The rights a template's `[Privilege Rights]` section defines, each with its list. A right
-/// with an empty value is defined, for no one.
-pub fn inf_rights(text: &str) -> BTreeMap<String, Vec<Principal>> {
+/// with an empty value is defined, for no one; a template with no such section defines none.
+/// Text that isn't a template is an [`InfError`].
+pub fn inf_rights(text: &str) -> Result<BTreeMap<String, Vec<Principal>>, InfError> {
+    if text.contains(['\0', '\u{FFFD}']) {
+        return Err(InfError::NotText);
+    }
     let mut rights = BTreeMap::new();
-    let mut inside = false;
+    let (mut inside, mut sections) = (false, 0);
     for line in text.lines() {
         let line = line.trim();
         if line.is_empty() || line.starts_with(';') {
             continue;
         }
-        if line.starts_with('[') {
+        if line.starts_with('[') && line.ends_with(']') {
+            sections += 1;
             inside = line.eq_ignore_ascii_case("[Privilege Rights]");
             continue;
         }
-        let Some((name, value)) = line.split_once('=').filter(|_| inside) else {
+        if !inside {
             continue;
-        };
+        }
+        let (name, value) = line.split_once('=').ok_or(InfError::BadLine)?;
+        let name = name.trim();
+        if name.is_empty() || name.contains(char::is_whitespace) {
+            return Err(InfError::BadLine);
+        }
         let list = value.split(',').filter_map(principal_of).collect();
-        rights.insert(name.trim().to_owned(), list);
+        rights.insert(name.to_owned(), list);
     }
-    rights
+    if sections == 0 {
+        return Err(InfError::NoSection);
+    }
+    Ok(rights)
 }
 
 /// A `UserRights` CSP value's list: entries split by U+F000 (the CSP's separator) or commas, a
@@ -288,7 +323,9 @@ pub fn load(source: &mut dyn PolicySource, stamp: &Stamp) -> io::Result<Snapshot
     let watched = MDM_NAMES.map(|(right, _)| right);
     for (path, _) in &stamp.files {
         let text = inf_text(&source.read_file(path)?);
-        for (right, list) in inf_rights(&text) {
+        let rights =
+            inf_rights(&text).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        for (right, list) in rights {
             if let Some(right) = watched.iter().find(|r| r.eq_ignore_ascii_case(&right)) {
                 snapshot.add(right, resolved(source, list));
             }
