@@ -14,8 +14,8 @@
 // Every launch runs on the test's scratch folders (scratch.ts): `CLAUSEO_DATA_DIR` is a new data
 // folder, never the real one, and `E2E_MATTER_DIR` the matter folder. A spec picks fake_agent's
 // scenario, its extra arguments, the other agents and the matter's files with
-// `test.use({ scenario, agentArgs, otherAgents, matterFiles, fakeSignIn })`; `apps` starts and
-// stops more launches on the same folders (the restart spec).
+// `test.use({ scenario, agentArgs, otherAgents, matterFiles, fakeSignIn, fakeInstall })`; `apps`
+// starts and stops more launches on the same folders (the restart spec).
 //
 //   E2E_APP           path to the e2e build of clauseo-desktop.exe (required)
 //   E2E_FAKE_AGENT    path to fake_agent.exe (default: beside E2E_APP; needed with a scenario)
@@ -481,6 +481,8 @@ export interface AppOptions {
   firstRun: boolean;
   /** Agents whose sign-in the e2e build scripts (`E2E_FAKE_SIGNIN`): `ok` or `fail`. */
   fakeSignIn: Readonly<Record<string, FakeSignIn>>;
+  /** Agents whose install the e2e build scripts (`E2E_FAKE_INSTALL`): missing, ready on a press. */
+  fakeInstall: readonly string[];
   /**
    * The WebView2 profile of each launch: `fresh` (the default) a new one, as on a first launch;
    * `warm` the worker's one, reused, as on a later launch (the scoreboard's warm start).
@@ -498,6 +500,7 @@ export const test = base.extend<
   otherAgents: [{}, { option: true }],
   firstRun: [false, { option: true }],
   fakeSignIn: [{}, { option: true }],
+  fakeInstall: [[], { option: true }],
   profile: ["fresh", { option: true }],
 
   // One per worker, so it outlives each test's scratch folders; made only when a warm launch asks.
@@ -523,8 +526,19 @@ export const test = base.extend<
     { scope: "worker" },
   ],
 
-  scratch: async ({ scenario, matterFiles, agentArgs, otherAgents, firstRun, fakeSignIn }, use) => {
-    const options = { scenario, matterFiles, agentArgs, otherAgents, firstRun, fakeSignIn };
+  scratch: async (
+    { scenario, matterFiles, agentArgs, otherAgents, firstRun, fakeSignIn, fakeInstall },
+    use,
+  ) => {
+    const options = {
+      scenario,
+      matterFiles,
+      agentArgs,
+      otherAgents,
+      firstRun,
+      fakeSignIn,
+      fakeInstall,
+    };
     const scratch = makeScratch(options, () =>
       fakeAgentPath(process.env, appPath(), process.platform === "win32"),
     );

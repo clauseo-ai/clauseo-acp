@@ -25,7 +25,7 @@ const HOSTS = ["registry.npmjs.org", "nodejs.org"];
 const foot = () => byId("install-foot");
 const bar = () => foot()?.querySelector('[role="meter"]') ?? null;
 
-test("install: missing says the size, about, and sends nothing (desktop starts the install itself)", async () => {
+test("install: missing on the first screen says the size, about, and sends nothing until Sign in, which sends the room gate's start_sign_in", async () => {
   const t = await mountFirstRun({
     matters: [],
     first: [install(CLAUDE, { missing: { download_bytes: 160_000_000 } })],
@@ -33,6 +33,32 @@ test("install: missing says the size, about, and sends nothing (desktop starts t
   expect(foot()?.dataset["state"]).toBe("missing");
   expect(text()).toContain("Needs a download of about 160 MB");
   expect(setups(t)).toEqual([]);
+  const sign = byId("install-sign-in");
+  expect(sign?.textContent).toBe("Sign in");
+  expect(foot()?.contains(sign)).toBe(true);
+  await press(sign);
+  expect(setups(t)).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
+  // desktop starts the download and keeps the press: the line shows its progress, with no second Sign in
+  await play(
+    t,
+    signIn(CLAUDE, "queued"),
+    install(CLAUDE, { downloading: { received: 45_000_000, total: 160_000_000 } }),
+  );
+  expect(foot()?.dataset["state"]).toBe("downloading");
+  expect(byId("install-sign-in")).toBeNull();
+});
+
+test("install: missing in a matter leaves Sign in to the gate, with none on the line", async () => {
+  await mountFirstRun({
+    matters: [A],
+    first: [
+      install(CLAUDE, { missing: { download_bytes: 160_000_000 } }),
+      signIn(CLAUDE, { signed_out: {} }),
+    ],
+  });
+  expect(foot()?.dataset["state"]).toBe("missing");
+  expect(byId("install-sign-in")).toBeNull();
+  expect(byId("signin")).not.toBeNull();
 });
 
 test("install: missing with no bytes to download shows no line at all", async () => {

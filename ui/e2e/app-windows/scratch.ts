@@ -56,6 +56,8 @@ export interface ScratchOptions {
    * out: it is left out of `plans`, so its sign-in card shows.
    */
   fakeSignIn?: Readonly<Record<string, FakeSignIn>>;
+  /** Agents whose install the e2e build scripts (`E2E_FAKE_INSTALL`): missing, ready on a press. */
+  fakeInstall?: readonly string[];
 }
 
 /** How a scripted sign-in ends. */
@@ -90,6 +92,8 @@ export interface Scratch {
   setUp: readonly string[];
   /** `E2E_FAKE_SIGNIN`'s value, empty when no sign-in is scripted. */
   fakeSignIn?: string;
+  /** `E2E_FAKE_INSTALL`'s value, empty when no install is scripted. */
+  fakeInstall?: string;
 }
 
 /**
@@ -222,7 +226,8 @@ export function makeScratch(
     );
     writeFileSync(join(dataDir, "settings.json"), `${JSON.stringify(settings, null, 2)}\n`);
     const fakeSignIn = fakeSignInVar(options.fakeSignIn ?? {});
-    return { root, dataDir, matterDir, mattersDir, agentCommand, setUp, fakeSignIn };
+    const fakeInstall = (options.fakeInstall ?? []).join(",");
+    return { root, dataDir, matterDir, mattersDir, agentCommand, setUp, fakeSignIn, fakeInstall };
   } catch (error) {
     rmSync(root, { recursive: true, force: true });
     throw error;
@@ -439,6 +444,7 @@ export function scratchEnv(scratch: Scratch): Record<string, string> {
           E2E_FAKE_SIGNIN_HOLD_MS: String(FAKE_SIGNIN_HOLD_MS),
         }
       : {}),
+    ...(scratch.fakeInstall ? { E2E_FAKE_INSTALL: scratch.fakeInstall } : {}),
   };
 }
 

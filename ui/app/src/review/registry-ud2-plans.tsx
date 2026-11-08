@@ -82,11 +82,12 @@ const ADD0: Scene = {
     ],
   },
 };
+/** A fresh computer: Claude not here yet, with its size and the room gate's Sign in; ChatGPT's card with Add. */
 const ADD: Scene = {
   setup: {
     first: [
-      install(CLAUDE, READY),
-      signIn(CLAUDE, signed()),
+      install(CLAUDE, { missing: { download_bytes: 130_000_000 } }),
+      signIn(CLAUDE, { signed_out: {} }),
       install(CODEX, { missing: { download_bytes: 165_000_000 } }),
     ],
   },

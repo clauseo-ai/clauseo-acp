@@ -1,8 +1,9 @@
 // The first screen (design/03-system/src/pages/first-launch/welcome.tsx, way B, papers first). It is already the room,
 // with no matter in it yet: the work across the window asks for one thing, the folder for a matter, or a new matter
-// (U2's form, in place). The plan gets ready from the first second, on the working line at the foot where the composer
-// will stand, with the fine print under it; and the anonymous counts Clauseo sends by default, said plainly, with the
-// switch. The sample matter waits (UD1's brief), and so does the Safe workspace's line: no screen names it before UC.
+// (U2's form, in place). The plan's install shows on the working line at the foot where the composer will stand (its
+// size and Sign in until the lawyer presses it, since nothing downloads before then), with the fine print under it;
+// and the anonymous counts Clauseo sends by default, said plainly, with the switch. The sample matter waits (UD1's
+// brief), and so does the Safe workspace's line: no screen names it before UC.
 import { useId, type ReactNode, type Ref } from "react";
 import { IconNewMatter, IconOpen } from "../../icons/icons.tsx";
 import { useDisplay } from "../../lib/display.ts";

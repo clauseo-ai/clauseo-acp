@@ -2,6 +2,7 @@
 // the bytes as whole MB with the words of getting ready; and the set-up with no bytes. Each line's
 // live words hear the state alone, so the download's words, which change every 250 ms, are never
 // what the region says.
+import { isValidElement, type ReactElement } from "react";
 import { expect, test } from "vitest";
 import { loadHindi } from "../../lib/words-core.ts";
 import { installLine, type InstallActs, type InstallView } from "./install.tsx";
@@ -59,4 +60,32 @@ test("install lines: missing with no size says nothing, so no line stands", asyn
   await loadHindi();
   expect(installLine("en", { kind: "missing", mb: 0 }, "Claude", ACTS)).toBeNull();
   expect(installLine("hi", { kind: "missing", mb: 0 }, "Claude", ACTS)).toBeNull();
+});
+
+/** The one control in a missing line's actions, or null. */
+function controlOf(line: ReturnType<typeof installLine>) {
+  if (line === null || line.kind !== "wait") throw new Error("no wait line");
+  const wrap = line.actions as ReactElement<{
+    children: ReactElement<{ onClick: () => void; "data-testid": string; children: string }> | null;
+  }>;
+  return wrap.props.children;
+}
+
+test("install lines: missing offers Sign in only where the caller gives the press, and it calls that press", () => {
+  expect(controlOf(installLine("en", { kind: "missing", mb: 130 }, "Claude", ACTS))).toBeNull();
+  let pressed = 0;
+  const button = controlOf(
+    installLine(
+      "en",
+      { kind: "missing", mb: 130 },
+      "Claude",
+      { ...ACTS, signIn: () => pressed++ },
+      { signIn: "sign" },
+    ),
+  );
+  if (button === null || !isValidElement(button)) throw new Error("no control");
+  expect(button.props["data-testid"]).toBe("sign");
+  expect(button.props.children).toBe("Sign in");
+  button.props.onClick();
+  expect(pressed).toBe(1);
 });
