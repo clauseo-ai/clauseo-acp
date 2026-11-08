@@ -134,17 +134,19 @@ their paths under `node_modules`.
    product's equivalent for that file. Scanning stays on for everything else.
 2. **Allow by signer or hash, not by path.** Use Defender for Endpoint file or certificate
    indicators, or your EDR's certificate allow. The Node runtime's `node.exe` is signed by the
-   OpenJS Foundation and Codex's `codex.exe` by OpenAI; allow anything unsigned, possibly
-   `rg.exe`, by its hash. Hashes change when Clauseo downloads a new version.
+   OpenJS Foundation and Codex's `codex.exe` by OpenAI. Allow unsigned programs by their hash
+   (`rg.exe` may be one). A hash changes with each new version Clauseo downloads, so a hash allow
+   needs updating after an update; prefer the signer where there is one.
 
    Check on the laptop pass: the signers of `node.exe`, `codex.exe`, `rg.exe` and the programs
    in Claude's package.
 
 3. **A path exclusion only as a last resort.** An exclusion is not an allow: it turns scanning off
-   for everything in that folder. These folders are user-writable, so anything that can write
-   there is no longer scanned. If you need one, scope it to `agents\runtime\` and
-   `agents\<agent>\install\`, never the whole data folder, and prefer a process exclusion for
-   `node.exe` from that path if your product supports it. At an administrator's prompt,
+   for everything in that folder. These folders are user-writable, so files any program writes
+   there are no longer scanned. If you need one, scope it to `agents\runtime\` and
+   `agents\<agent>\install\`, never the whole data folder. Avoid process exclusions for
+   `node.exe`: they stop scanning of every file it opens, including the ones the AI tool writes
+   across the matter. At an administrator's prompt,
    `%LOCALAPPDATA%` is the administrator's folder, so name the user's own:
    `C:\Users\<user>\AppData\Local\ai.clauseo.desktop\agents\runtime\`.
 
