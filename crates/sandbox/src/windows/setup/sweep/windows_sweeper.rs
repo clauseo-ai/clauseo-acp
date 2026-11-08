@@ -29,7 +29,7 @@ use windows::core::{BSTR, HSTRING, PCWSTR, PWSTR};
 
 use super::{
     Failed, Listing, Principal, SweepExit, Sweeper, TASK_FILE_CAP, Task, TaskFile, sweep,
-    windows_listing, windows_task_file,
+    windows_groups, windows_listing, windows_task_file,
 };
 use crate::windows::refresh::event_log;
 use crate::windows::setup::accounts::{self, Kind};
@@ -317,6 +317,18 @@ impl Sweeper for WindowsSweeper {
     fn admin_log(&mut self, line: &str) -> Result<(), Failed> {
         admin_log::append(line)
     }
+
+    fn pool_group(&mut self) -> Result<Option<Sid>, Failed> {
+        windows_groups::pool_group()
+    }
+
+    fn is_group(&mut self, sid: &Sid) -> Result<bool, Failed> {
+        windows_groups::is_group(sid)
+    }
+
+    fn group_members(&mut self, sid: &Sid) -> Result<Vec<Sid>, Failed> {
+        windows_groups::group_members(sid)
+    }
 }
 
 /// Whether `a` and `b` are one task's path: `CompareStringOrdinal` with case ignored, as
@@ -348,7 +360,7 @@ fn read_task(task: &IRegisteredTask) -> Task {
     }
 }
 
-/// `task`'s principal: its definition's `UserId` and `GroupId`.
+/// `task`'s principal: its definition's `UserId` and `GroupId`, and its `Author`.
 fn principal(task: &IRegisteredTask) -> Result<Principal, Failed> {
     // SAFETY: a live task.
     let definition = unsafe { task.Definition() }.map_err(failed("IRegisteredTask::Definition"))?;
@@ -361,15 +373,29 @@ fn principal(task: &IRegisteredTask) -> Result<Principal, Failed> {
     let mut group = BSTR::new();
     // SAFETY: as above.
     unsafe { principal.GroupId(&raw mut group) }.map_err(failed("IPrincipal::GroupId"))?;
+    // The registrant writes `Author`: read for the log alone, never trusted, and empty where
+    // it can't be read.
+    // SAFETY: a live definition.
+    let author = unsafe { definition.RegistrationInfo() }
+        .ok()
+        .and_then(|info| {
+            let mut author = BSTR::new();
+            // SAFETY: a live registration info; `author` is a live out-pointer, freed with it.
+            unsafe { info.Author(&raw mut author) }
+                .ok()
+                .map(|()| author.to_string())
+        })
+        .unwrap_or_default();
     Ok(Principal {
         user_id: user.to_string(),
         group_id: group.to_string(),
+        author,
     })
 }
 
 /// The SID of the account or group `name`, as `LookupAccountNameW` resolves it on this machine
 /// (a local, built-in, well-known or domain name). The error names the call, never `name`.
-fn lookup_account(name: &str) -> Result<Sid, Failed> {
+pub(super) fn lookup_account(name: &str) -> Result<Sid, Failed> {
     let name = HSTRING::from(name);
     let (mut sid_size, mut domain_size) = (0u32, 0u32);
     let mut kind = SID_NAME_USE::default();

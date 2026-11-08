@@ -8,7 +8,9 @@
 //! or characters that disguise it, so each path is still cleaned ([`clean`]): every character
 //! outside printable ASCII is `?`, every SID-shaped run is `<sid>`, the path is quoted, and it
 //! is cut at [`PATH_CAP`] characters. At most [`LOGGED_CAP`] are named a run ([`listed`]).
-//! Pure but for that one call: tested on every OS.
+//! The `Author` a group task left at 56 gives goes there too, cleaned as a path is
+//! ([`authors`]): its registrant writes it, so it is never trusted. Pure but for that one
+//! call: tested on every OS.
 
 use super::Sweeper;
 
@@ -44,14 +46,16 @@ pub fn rotates(size: u64, add: u64) -> bool {
     size > 0 && size.saturating_add(add) > ADMIN_LOG_CAP
 }
 
-/// Writes the paths of the tasks that keep the run at 56 to `fs`'s admin-only log, and returns
-/// what the world-readable line says of them: `""` for none, else their count and whether the
-/// admin-only log holds them, never a path.
-pub(super) fn to_admin_log<S: Sweeper>(fs: &mut S, paths: &[String]) -> String {
+/// Writes the paths of the tasks that keep the run at 56, and the `Author` of each group task
+/// among them that gave one ([`authors`]), to `fs`'s admin-only log, and returns what the
+/// world-readable line says of them: `""` for none, else their count and whether the
+/// admin-only log holds them, never a path or an author.
+pub(super) fn to_admin_log<S: Sweeper>(fs: &mut S, paths: &[String], by: &[String]) -> String {
     let named = listed(paths);
     if named.is_empty() {
         return String::new();
     }
+    let named = format!("{named}{}", authors(by));
     let mut unique: Vec<&String> = paths.iter().collect();
     unique.sort_unstable();
     unique.dedup();
@@ -101,6 +105,21 @@ pub const PATH_CAP: usize = 260;
 /// once): `""` for none, else `; tasks that keep the sweep at 56: "a", "b"` with at most
 /// [`LOGGED_CAP`], then ` (+k more)`.
 pub fn listed(paths: &[String]) -> String {
+    named("tasks that keep the sweep at 56", paths)
+}
+
+/// The admin-only log line's part naming the `Author` each group task left at 56 gave, as
+/// [`listed`] names paths: cleaned, each once, at most [`LOGGED_CAP`]. Each is its registrant's
+/// word, so the line says it isn't trusted.
+pub fn authors(authors: &[String]) -> String {
+    named(
+        "the authors group tasks left at 56 give (their registrant's word, never trusted)",
+        authors,
+    )
+}
+
+/// `; <label>: "a", "b" (+k more)` for `paths`, as [`listed`] says; `""` for none.
+fn named(label: &str, paths: &[String]) -> String {
     let mut unique: Vec<&String> = Vec::new();
     for path in paths {
         if !unique.contains(&path) {
@@ -110,7 +129,7 @@ pub fn listed(paths: &[String]) -> String {
     if unique.is_empty() {
         return String::new();
     }
-    let named: Vec<String> = unique
+    let shown: Vec<String> = unique
         .iter()
         .take(LOGGED_CAP)
         .map(|path| clean(path))
@@ -121,10 +140,7 @@ pub fn listed(paths: &[String]) -> String {
     } else {
         String::new()
     };
-    format!(
-        "; tasks that keep the sweep at 56: {}{more}",
-        named.join(", ")
-    )
+    format!("; {label}: {}{more}", shown.join(", "))
 }
 
 /// `path` as the log line names it: each character outside printable ASCII (U+0020 to U+007E)

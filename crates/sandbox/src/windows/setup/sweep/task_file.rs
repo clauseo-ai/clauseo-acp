@@ -199,6 +199,7 @@ fn principal_in(xml: &str) -> Result<Principal, Failed> {
     Ok(Principal {
         user_id: read.user.unwrap_or_default(),
         group_id: read.group.unwrap_or_default(),
+        author: String::new(),
     })
 }
 

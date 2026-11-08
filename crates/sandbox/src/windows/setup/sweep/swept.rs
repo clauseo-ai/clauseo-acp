@@ -83,6 +83,19 @@ pub struct Swept {
     /// The path of each task that keeps the run at 56, where it was read: written, cleaned and
     /// capped, to the admin-only log alone ([`log_path`]).
     pub left_paths: Vec<String>,
+    /// Group tasks (`group.rs`): the pool-owned ones deleted.
+    pub group_tasks_deleted: usize,
+    /// Group tasks left, a readable owner that isn't a pool SID naming them not the pool's.
+    pub group_tasks_ignored: usize,
+    /// Group tasks that keep the run at 56: a pool owner's not deleted, or an owner that can't
+    /// be read.
+    pub group_tasks_56: usize,
+    /// Of the group tasks, those whose group may hold a pool user (`Groups::can_contain`):
+    /// logged, never part of a judgment.
+    pub group_tasks_open: usize,
+    /// The `Author` of each group task that keeps the run at 56 and gave one: its registrant's
+    /// word, never trusted; logged cleaned and capped ([`log_path`]).
+    pub group_authors: Vec<String>,
 }
 
 impl Swept {
@@ -156,8 +169,9 @@ pub(super) fn log_line(users: usize, swept: &Swept, jobs: &Result<Jobs, Failed>)
          pool's tasks deleted, {} unreadable ({} more skipped, not the pool's by their task \
          file), {} with no user or group, {} unresolved (no SID, not another domain's), {} \
          skipped (another domain's, no SID), {} not deleted, {} not listed (in a task file or \
-         the cache only), {} running instances stopped, {} not, {cancelled} BITS jobs \
-         cancelled, {failed} not{unlisted}{capped}{listed}{relisted}",
+         the cache only), {} group tasks deleted, {} ignored (not owned by a pool user), {} left \
+         ({} naming a group a pool user may be in), {} running instances stopped, {} not, \
+         {cancelled} BITS jobs cancelled, {failed} not{unlisted}{capped}{listed}{relisted}",
         swept.folders,
         swept.tasks,
         swept.deleted,
@@ -168,6 +182,10 @@ pub(super) fn log_line(users: usize, swept: &Swept, jobs: &Result<Jobs, Failed>)
         swept.skipped,
         swept.not_deleted,
         swept.hidden,
+        swept.group_tasks_deleted,
+        swept.group_tasks_ignored,
+        swept.group_tasks_56,
+        swept.group_tasks_open,
         swept.instances_stopped,
         swept.instances_not_stopped
     )

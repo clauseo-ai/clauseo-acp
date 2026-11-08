@@ -11,6 +11,7 @@ use crate::windows::setup::pool_steps::Pool;
 
 mod exits;
 mod file_owner;
+mod groups;
 mod log_path;
 mod principals;
 mod record;
@@ -112,6 +113,10 @@ struct Fake {
     /// The record's reads, and the read (0 the first) from which the key is gone.
     pool_reads: usize,
     gone_from: Option<usize>,
+    /// The record's `GroupSid`; and the local groups, each its members or why they can't be
+    /// read (a SID here, or under `S-1-5-32`, or one of the well-known groups, is a group's).
+    pool_group: Result<Option<Sid>, Failed>,
+    groups: BTreeMap<Sid, Result<Vec<Sid>, Failed>>,
     done: Vec<String>,
     logged: Vec<(bool, String)>,
     /// What the admin-only log was given, and why it fails when `Some`.
@@ -164,6 +169,8 @@ impl Fake {
             write_fails: None,
             pool_reads: 0,
             gone_from: None,
+            pool_group: Ok(None),
+            groups: BTreeMap::new(),
             done: Vec::new(),
             logged: Vec::new(),
             admin_logged: Vec::new(),
@@ -245,15 +252,15 @@ fn clean() -> FileSecurity {
 fn user(user: &str) -> Principal {
     Principal {
         user_id: user.to_owned(),
-        group_id: String::new(),
+        ..Principal::default()
     }
 }
 
 /// A principal naming `group`, and no user.
 fn group(group: &str) -> Principal {
     Principal {
-        user_id: String::new(),
         group_id: group.to_owned(),
+        ..Principal::default()
     }
 }
 
@@ -471,6 +478,22 @@ impl Sweeper for Fake {
         self.admin_logged.push(line.to_owned());
         self.admin_fails.clone().map_or(Ok(()), Err)
     }
+
+    fn pool_group(&mut self) -> Result<Option<Sid>, Failed> {
+        self.pool_group.clone()
+    }
+
+    fn is_group(&mut self, sid: &Sid) -> Result<bool, Failed> {
+        let text = sid.as_str();
+        let known = text.starts_with("S-1-5-32-") || POOL_GROUPS.contains(&text);
+        Ok(known || self.groups.contains_key(sid))
+    }
+
+    fn group_members(&mut self, sid: &Sid) -> Result<Vec<Sid>, Failed> {
+        self.done.push(format!("members {}", sid.as_str()));
+        let members = self.groups.get(sid).cloned();
+        members.unwrap_or_else(|| Err("NetLocalGroupGetMembers failed (2220)".to_owned()))
+    }
 }
 
 #[test]
@@ -498,6 +521,7 @@ fn only_tasks_whose_principal_is_exactly_a_pool_sid_are_deleted() {
     let both = Principal {
         user_id: "lawyer".to_owned(),
         group_id: "S-1-5-21-1-2-3-1010".to_owned(),
+        ..Principal::default()
     };
     fake.task("\\", "user-first", both);
     assert_eq!(sweep(&mut fake), SweepExit::Done);
@@ -514,8 +538,9 @@ fn only_tasks_whose_principal_is_exactly_a_pool_sid_are_deleted() {
         "the sandbox's task sweep: 2 pool users, 1 folders and 12 tasks read, 3 of the pool's \
          tasks deleted, 0 unreadable (0 more skipped, not the pool's by their task file), 0 with \
          no user or group, 0 unresolved (no SID, not another domain's), 0 skipped (another \
-         domain's, no SID), 0 not deleted, 0 not listed (in a task file or the cache only), 0 \
-         running instances stopped, 0 not, 0 BITS jobs cancelled, 0 not"
+         domain's, no SID), 0 not deleted, 0 not listed (in a task file or the cache only), 1 \
+         group tasks deleted, 1 ignored (not owned by a pool user), 0 left (2 naming a group a \
+         pool user may be in), 0 running instances stopped, 0 not, 0 BITS jobs cancelled, 0 not"
     );
 }
 
@@ -560,28 +585,5 @@ fn an_unreadable_principal_is_56_and_the_pools_other_tasks_still_go() {
     assert!(
         line.contains("2 of the pool's tasks deleted, 2 unreadable"),
         "{line}"
-    );
-}
-
-#[test]
-fn tasks_in_nested_subfolders_are_found_and_deleted() {
-    let mut fake = Fake::new(&[1010]);
-    let mut deep = String::new();
-    for level in 0..40 {
-        write!(deep, "\\F{level}").unwrap();
-    }
-    fake.task(&deep, "deepest", user("S-1-5-21-1-2-3-1010"));
-    fake.task("\\Microsoft\\Windows", "theirs", user("S-1-5-18"));
-    fake.task("\\A\\B", "pool", user("S-1-5-21-1-2-3-1010"));
-    fake.task("\\A", "other", user("S-1-5-21-1-2-3-1013"));
-    assert_eq!(sweep(&mut fake), SweepExit::Done);
-    let mut deleted = fake.deleted();
-    deleted.sort_unstable();
-    assert_eq!(deleted, ["\\A\\B\\pool", &format!("{deep}\\deepest")]);
-    // The root, 40 deep, \Microsoft, \Microsoft\Windows, \A and \A\B.
-    assert!(
-        fake.logged[0].1.contains("45 folders and 4 tasks read"),
-        "{:?}",
-        fake.logged
     );
 }

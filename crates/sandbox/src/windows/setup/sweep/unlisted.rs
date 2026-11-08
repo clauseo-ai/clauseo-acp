@@ -151,6 +151,7 @@ fn listed_again<S: Sweeper>(
                 pool: at.pool,
                 names: at.names,
                 resolved: &mut *at.resolved,
+                groups: &mut *at.groups,
                 swept: &mut *at.swept,
             };
             sweep_task(fs, &folder, task, one);
