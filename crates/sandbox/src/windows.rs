@@ -104,6 +104,8 @@ pub mod test_junction;
 #[cfg(test)]
 mod test_world;
 // Two attributes, not `all(windows, test)`: clippy's test allowances look for `cfg(test)`.
+#[cfg(windows)]
+pub mod setup_task;
 #[cfg(test)]
 #[cfg(windows)]
 mod tests;
