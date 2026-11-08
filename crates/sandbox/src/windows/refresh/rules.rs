@@ -306,8 +306,10 @@ pub fn hex(bytes: &[u8]) -> String {
 
 /// Whether `dir` lies strictly inside `profile` (the owner's `ProfileImagePath`), compared part
 /// by part as Windows compares names: case folded, any `\\?\` prefix and either separator, a
-/// trailing separator ignored. The walk opens every part of `dir` without following a reparse
-/// point, so its text is where it leads.
+/// trailing separator ignored. A check of the text alone: it opens nothing and follows no link,
+/// so a junction or symlink in the profile can still send `dir` elsewhere. The protection
+/// against that is `exe::owners_data_dir`, which resolves the folder as the owner and takes
+/// only one the owner owns.
 pub fn inside_profile(dir: &Path, profile: &Path) -> bool {
     let parts = |path: &Path| -> Vec<String> {
         let text = path.to_string_lossy();

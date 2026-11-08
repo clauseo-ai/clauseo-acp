@@ -441,7 +441,8 @@ pub fn task_serves(profile: Option<&Path>, data_dir: &Path) -> Result<(), &'stat
     }
 }
 
-/// The data folder in `profile`: [`DATA_SUFFIX`] below it, checked to lie inside it.
+/// The data folder in `profile`: [`DATA_SUFFIX`] below it, checked by its text to lie inside it
+/// (`refresh::inside_profile`); what a link in the profile does is `owners_data_dir`'s check.
 pub fn data_dir_in(profile: &Path) -> Option<PathBuf> {
     let dir = DATA_SUFFIX
         .iter()
