@@ -1517,7 +1517,8 @@ expression: counts_schema()
         "blocklist.notice_expired",
         "blocklist.allow_not_saved",
         "blocklist.revoke_not_saved",
-        "sandbox.cleaning_up"
+        "sandbox.cleaning_up",
+        "agent.install_setup_failed"
       ],
       "type": "string"
     },

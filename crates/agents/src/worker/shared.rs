@@ -93,6 +93,10 @@ impl Shared {
             inner.current = None;
         }
         let ready = matches!(state, InstallState::Ready { .. });
+        if ready || state == InstallState::Installing {
+            let word = if ready { "ready" } else { "installing" };
+            tracing::info!(agent = %ticket.agent, state = word, "agent install: state sent");
+        }
         Inner::set(&mut inner, &self.events, &ticket.agent, state, installed);
         drop(inner);
         // After the lock: a queued sign-in reads the install again once kicked.

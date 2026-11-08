@@ -49,7 +49,8 @@ pub enum InstallProgress {
     },
     /// Stopped with a failure; [`crate::SetupCommand::RetryAgentInstall`] starts again.
     Failed {
-        /// Why: `agent.install_blocked`, `agent.install_disk_full` or `agent.install_failed`.
+        /// Why: `agent.install_blocked`, `agent.install_disk_full`, `agent.install_failed` or
+        /// `agent.install_setup_failed`.
         code: ErrorCode,
         /// For `agent.install_disk_full`: the space needed, in MB (10^6 bytes).
         #[serde(default, skip_serializing_if = "Option::is_none")]

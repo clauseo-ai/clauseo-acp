@@ -254,6 +254,18 @@ impl SharedTimer {
             .collect()
     }
 
+    /// Blocks until a wait of one of `among` is armed (passing over the others), ends it and
+    /// says which it was.
+    pub(crate) fn fire_first_of(&self, among: &[Duration]) -> Duration {
+        loop {
+            let armed = futures::executor::block_on(self.manual.next_armed());
+            if among.contains(&armed) {
+                assert!(self.manual.fire(), "the {armed:?} wait was dropped");
+                return armed;
+            }
+        }
+    }
+
     /// Blocks until a wait of `duration` is armed (passing over the others), then ends it.
     pub(crate) fn fire_next(&self, duration: Duration) {
         loop {

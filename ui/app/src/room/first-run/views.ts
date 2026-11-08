@@ -36,6 +36,8 @@ export function installView(setup: AgentSetup | undefined): InstallView | null {
     if (f.code === "agent.install_blocked") return { kind: "blocked", hosts: f.hosts };
     if (f.code === "agent.install_disk_full")
       return { kind: "disk", need: f.need_mb ?? 0, free: f.free_mb ?? 0 };
+    // every file downloaded, and setting them up failed: words that say the download worked
+    if (f.code === "agent.install_setup_failed") return { kind: "failed", log: f.log, setup: true };
     return { kind: "failed", log: f.log };
   }
   return null;
