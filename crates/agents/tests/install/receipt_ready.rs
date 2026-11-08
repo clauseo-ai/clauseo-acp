@@ -35,6 +35,10 @@ struct State {
     held: usize,
     /// Every other launch fails too: the receipt's Node cannot start.
     fail_runs: bool,
+    /// Only the first `node --version` is held; later ones pass while it is.
+    once: bool,
+    /// A held `node --version` fails once let go ([`Gate::release`]).
+    fail_held: bool,
 }
 
 /// The test's hold on each `node --version`.
@@ -51,9 +55,28 @@ impl Gate {
                 mode,
                 held: 0,
                 fail_runs: false,
+                once: false,
+                fail_held: false,
             }),
             changed: Condvar::new(),
         })
+    }
+
+    /// A gate that holds the first `node --version` alone (the start's check), until
+    /// [`Gate::release`].
+    pub(crate) fn hold_first() -> Arc<Gate> {
+        let gate = Gate::new(Mode::Hold);
+        gate.lock().once = true;
+        gate
+    }
+
+    /// Lets the held `node --version` go, failing it when `fail`; every later one passes.
+    pub(crate) fn release(&self, fail: bool) {
+        let mut state = self.lock();
+        state.fail_held = fail;
+        state.mode = Mode::Pass;
+        drop(state);
+        self.changed.notify_all();
     }
 
     pub(crate) fn fail_runs(&self) {
@@ -98,7 +121,7 @@ impl Launcher for Gated {
             return self.inner.launch(spec);
         }
         let mut state = self.gate.lock();
-        if state.mode == Mode::Hold {
+        if state.mode == Mode::Hold && !(state.once && state.held > 0) {
             state.held += 1;
             self.gate.changed.notify_all();
             while state.mode == Mode::Hold {
@@ -107,6 +130,10 @@ impl Launcher for Gated {
                     .changed
                     .wait(state)
                     .unwrap_or_else(PoisonError::into_inner);
+            }
+            if state.fail_held {
+                drop(state);
+                return self.inner.launch(&missing(spec)?);
             }
         }
         let mode = state.mode;
@@ -181,6 +208,16 @@ pub(crate) fn start_gated(fx: &Fixture, gate: &Arc<Gate>) -> (Agents, Events) {
 /// The next install event, or `None` once [`BOUND`] passes with none.
 pub(crate) fn next_within(events: &Events) -> Option<(AgentId, InstallState)> {
     events.install.recv_timeout(BOUND).ok()
+}
+
+/// The next install event within `window`, or `None`.
+pub(crate) fn next_for(events: &Events, window: Duration) -> Option<(AgentId, InstallState)> {
+    events.install.recv_timeout(window).ok()
+}
+
+/// The install events already handed over, without waiting.
+pub(crate) fn drain_within(events: &Events) -> Vec<(AgentId, InstallState)> {
+    events.install.try_iter().collect()
 }
 
 /// Install events up to `agent`'s first one for which `done` holds, under [`BOUND`] each.
@@ -262,9 +299,19 @@ fn a_failed_node_check_turns_the_agent_failed_and_retry_repairs_it() {
         panic!("{failed:?}");
     };
     assert_eq!(failure.kind, FailureKind::SetupFailed);
+    // No try was made, and the log never says there were.
     assert_eq!(
         failure.log.lines().last().map(String::as_str),
-        Some("result: setup_failed after 0 tries")
+        Some("result: setup_failed (set-up needs repair: Node check failed)")
+    );
+    assert!(
+        !failure
+            .log
+            .lines()
+            .iter()
+            .any(|line| line.contains("tries")),
+        "{:?}",
+        failure.log.lines()
     );
     assert!(
         failure

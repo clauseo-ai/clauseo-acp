@@ -19,12 +19,12 @@ mod files;
 mod npm;
 mod try_error;
 
-pub(crate) use files::empty_npm_cache;
+pub(crate) use files::{empty_npm_cache, is_unc};
 use try_error::Next;
 pub(crate) use try_error::TryError;
 
 use std::fs::File;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::pin;
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use std::time::Duration;
@@ -39,7 +39,9 @@ use crate::disk;
 use crate::log::InstallLog;
 use crate::node::{self, FoundNode, NotUsed, UserSearch};
 use crate::platform::Libc;
-use crate::receipt::{install_folder, read_receipt, script_path, write_receipt};
+use crate::receipt::{
+    NodeStamp, Receipt, install_folder, missing_file, read_receipt, script_path, write_receipt,
+};
 use crate::state::{Failure, FailureKind, InstallState, Installed};
 use crate::worker::{Shared, Ticket};
 
@@ -200,7 +202,8 @@ impl<T: Timer + Send + Sync> Job<T> {
             }
         };
         let (launcher, timer) = (&*self.launcher, &*self.timer);
-        if let Some(installed) = ready_install(config, launcher, timer, agent, &search).await {
+        let found = ready_install(config, launcher, timer, agent, &search, Rewrite::Held).await;
+        if let Some(installed) = found {
             self.ready(installed, 0);
             return;
         }
@@ -451,13 +454,26 @@ pub(crate) async fn runtime_check<T: Timer>(
     }
 }
 
-/// `agent`'s finished install: a valid receipt in its `<hash>` folder, run with a Node this
-/// start would choose anyway. The receipt's Node is kept when it is the downloaded runtime and
-/// usable ([`RuntimeCheck::usable`]), or the Node the `PATH` search finds now, or one that
-/// search could not finish checking. Otherwise the receipt is rewritten (atomically) to name the
-/// Node found now, else the usable runtime, and stays ready: the adapter runs on any v22 or
-/// later. With neither, `None`, and the install is redone. A receipt never makes a program run
-/// that this start would not choose (the data folder is trusted at rest, but a receipt marks
+/// How [`ready_install`] may rewrite a receipt.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Rewrite<'a> {
+    /// The caller, an install job, holds `agents/.lock` already.
+    Held,
+    /// The start's check: the rewrite takes the job lock (`Worker::job_lock`), then
+    /// `agents/.lock`, both by trying; either held (an install runs here or in another Clauseo)
+    /// leaves the receipt as it is, to be rewritten at a later start.
+    Take(&'a Mutex<()>),
+}
+
+/// `agent`'s finished install: a valid receipt in its `<hash>` folder, with every path the
+/// launch needs there ([`missing_file`]), run with a Node this start would choose anyway. The
+/// receipt's Node is kept when it is the downloaded runtime and usable
+/// ([`RuntimeCheck::usable`]), or the Node the `PATH` search finds now, or one that search
+/// could not finish checking. Otherwise the receipt is rewritten (atomically, as `rewrite`
+/// allows) to name the Node found now, else the usable runtime, and stays ready: the adapter
+/// runs on any v22 or later. With neither, `None`, and the install is redone. A kept Node whose
+/// stamp changed has its stamp written again. A receipt never makes a program run that this
+/// start would not choose (the data folder is trusted at rest, but a receipt marks
 /// completeness, not which program may run).
 pub(crate) async fn ready_install<T: Timer>(
     config: &AgentsConfig,
@@ -465,11 +481,15 @@ pub(crate) async fn ready_install<T: Timer>(
     timer: &T,
     agent: &AgentId,
     user: &UserSearch,
+    rewrite: Rewrite<'_>,
 ) -> Option<Installed> {
     let entry = config.snapshot.agent(agent)?;
     let hash = config.snapshot.install_hash(agent, config.platform)?;
     let folder = install_folder(&config.data_dir, agent, &hash);
     let mut receipt = read_receipt(&folder, agent, &hash, config.platform)?;
+    if missing_file(&folder, entry, &receipt).is_some() {
+        return None;
+    }
     let runtime = node::runtime_dir(&config.data_dir, config.snapshot.node(), config.platform);
     let runtime = node::runtime_program(&runtime, config.platform.os);
     let mut runtime_usable = None;
@@ -483,7 +503,13 @@ pub(crate) async fn ready_install<T: Timer>(
             .is_some_and(|found| found.program == receipt.node)
             || user.timed_out.contains(&receipt.node)
     };
-    if !keep {
+    if keep {
+        let stamp = NodeStamp::of(&receipt.node);
+        if stamp.is_some() && receipt.node_stamp != stamp {
+            receipt.node_stamp = stamp;
+            save_receipt(config, &folder, &receipt, rewrite);
+        }
+    } else {
         let (program, version) = if let Some(found) = &user.found {
             (found.program.clone(), found.version.clone())
         } else {
@@ -499,10 +525,10 @@ pub(crate) async fn ready_install<T: Timer>(
                 format!("v{}", config.snapshot.node().version()),
             )
         };
+        receipt.node_stamp = NodeStamp::of(&program);
         receipt.node = program;
         receipt.node_version = version;
-        // A receipt that will not be rewritten now is rewritten at the next start.
-        drop(write_receipt(&folder, &receipt));
+        save_receipt(config, &folder, &receipt, rewrite);
     }
     tracing::info!(%agent, "agent start: {}", receipt.node_line(&runtime));
     Some(Installed {
@@ -511,4 +537,20 @@ pub(crate) async fn ready_install<T: Timer>(
         folder,
         version: receipt.version,
     })
+}
+
+/// Rewrites `receipt` in `folder` as `rewrite` allows. A receipt that will not be rewritten
+/// now is rewritten at a later start.
+fn save_receipt(config: &AgentsConfig, folder: &Path, receipt: &Receipt, rewrite: Rewrite<'_>) {
+    match rewrite {
+        Rewrite::Held => drop(write_receipt(folder, receipt)),
+        Rewrite::Take(turn) => {
+            let Ok(_turn) = turn.try_lock() else {
+                return;
+            };
+            if let Ok(Some(_lock)) = crate::write::try_lock_agents(&config.data_dir) {
+                drop(write_receipt(folder, receipt));
+            }
+        }
+    }
 }

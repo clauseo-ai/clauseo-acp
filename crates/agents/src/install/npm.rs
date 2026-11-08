@@ -51,7 +51,9 @@ use super::{Job, NodeChoice, Run, TryError};
 use crate::config::AgentsConfig;
 use crate::node::{self, NodeSource, node_line};
 use crate::platform::Os;
-use crate::receipt::{Receipt, install_folder, install_root, script_path, write_receipt};
+use crate::receipt::{
+    NodeStamp, Receipt, install_folder, install_root, key_paths, script_path, write_receipt,
+};
 use crate::state::{InstallState, Installed};
 use crate::write;
 
@@ -205,7 +207,7 @@ pub(super) async fn install<T: Timer + Send + Sync>(
         rename_held(job, &tmp, &folder)
             .await
             .map_err(io("renaming the install folder"))?;
-        let receipt = Receipt::new(
+        let mut receipt = Receipt::new(
             agent,
             pins.version(),
             &hash,
@@ -214,6 +216,9 @@ pub(super) async fn install<T: Timer + Send + Sync>(
             platform,
             config.clock.now(),
         );
+        // What the start's `Ready` stats, with no child run.
+        receipt.files = key_paths(&folder, entry, pins.lock());
+        receipt.node_stamp = NodeStamp::of(&program);
         write_receipt(&folder, &receipt).map_err(io("writing the receipt"))?;
         Ok(Installed {
             node: program.clone(),

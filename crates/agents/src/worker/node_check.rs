@@ -5,8 +5,11 @@
 //! The worker first sends `Managed`, and `Ready` for every agent whose receipt holds
 //! ([`receipt_install`]); launches and sign-ins take that install at once, never waiting for
 //! the check (a Node that then cannot start fails that launch or sign-in run, never hangs it).
-//! The check then runs the `PATH` search and [`install::ready_install`]
-//! as the start always did, per agent:
+//! A receipt missing a path the launch needs is `Failed` (`SetupFailed`) at once, repaired as
+//! below. Any other valid receipt leaves its agent undecided: an install pressed for it waits
+//! for the check's answer ([`Slot::defer`]) and starts only if the agent is not `Ready` then
+//! (a sign-in waits as it does for any install). The check then runs the `PATH` search and
+//! [`install::ready_install`] as the start always did, per agent:
 //!
 //! - a receipt agent whose Node still qualifies keeps its `Ready` (sent again only when the
 //!   receipt was rewritten to another Node);
@@ -18,18 +21,18 @@
 //! A state the check would replace is left alone once anything else changed it meanwhile (an
 //! install started, say). The stop cancels the check, which drops any `node --version` child.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::pin::pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, mpsc};
 
 use clauseo_process::{Launcher, Timer};
 use clauseo_protocol::AgentId;
 use futures::future::select;
 
-use super::{Agents, Inner, Shared, SigninStart, Worker};
+use super::{Agents, Command, Inner, Shared, SigninStart, Worker};
 use crate::cancel::Cancel;
 use crate::config::AgentsConfig;
-use crate::install;
+use crate::install::{self, Rewrite};
 use crate::log::InstallLog;
 use crate::signin::SigninError;
 use crate::state::{Failure, FailureKind, InstallState, Installed};
@@ -37,13 +40,26 @@ use crate::{node, receipt};
 
 /// The log line of an agent whose receipt's Node failed the start's check.
 const FAILED_LINE: &str = "the Node this agent runs on did not pass its check at start";
+/// The log line of an agent whose install misses a path the launch needs, before that path.
+const MISSING_LINE: &str = "a file this agent's install needs is missing:";
+/// The last log line of each, in place of an install's `after N tries`: no try was made.
+const FAILED_RESULT: &str = "set-up needs repair: Node check failed";
+const MISSING_RESULT: &str = "set-up needs repair: install files missing";
 
-/// `Inner`'s part for the check: its cancel while it runs, and each agent it turned `Failed`
-/// with that state, which a sign-in press repairs ([`repair_for_sign_in`]).
+/// `Inner`'s part for the check: its cancel while it runs, each agent it (or the start) turned
+/// `Failed` with that state, which a sign-in press repairs ([`repair_for_sign_in`]), and the
+/// undecided agents an install press waits for.
 #[derive(Debug, Default)]
 pub(super) struct Slot {
     cancel: Option<Arc<Cancel>>,
     failed: BTreeMap<AgentId, InstallState>,
+    /// Agents with a valid receipt and no state yet, until the check decides them.
+    pending: BTreeSet<AgentId>,
+    /// Those of them an install was pressed for meanwhile.
+    deferred: BTreeSet<AgentId>,
+    /// The worker's commands, to send a deferred press again: dropped once the check ends and
+    /// by the stop, so the worker still ends with the handle.
+    commands: Option<mpsc::Sender<Command>>,
 }
 
 impl Slot {
@@ -52,6 +68,30 @@ impl Slot {
         if let Some(cancel) = self.cancel.take() {
             cancel.cancel();
         }
+        self.end();
+    }
+
+    /// Keeps the worker's `commands` for a deferred press.
+    pub(super) fn set_commands(&mut self, commands: mpsc::Sender<Command>) {
+        self.commands = Some(commands);
+    }
+
+    /// An install pressed for `agent`: `true` when its check has not decided it yet, and then
+    /// the check sends the press again once it has, unless the agent is `Ready` by then. It
+    /// waits for that agent's check alone, and on no thread: the worker carries on.
+    pub(super) fn defer(&mut self, agent: &AgentId) -> bool {
+        if !self.pending.contains(agent) {
+            return false;
+        }
+        self.deferred.insert(agent.clone());
+        true
+    }
+
+    /// The check is over: no press waits any more.
+    fn end(&mut self) {
+        self.pending.clear();
+        self.deferred.clear();
+        self.commands = None;
     }
 }
 
@@ -101,6 +141,7 @@ pub(super) fn first_states<T: Timer + Send + Sync + 'static>(worker: &Worker<T>)
         undecided: Vec::new(),
         paths_ok,
     };
+    let mut pending = BTreeSet::new();
     for agent in agents {
         if config.managed.contains(&agent) {
             worker.shared.emit(&agent, InstallState::Managed, None);
@@ -124,19 +165,34 @@ pub(super) fn first_states<T: Timer + Send + Sync + 'static>(worker: &Worker<T>)
             // own rename.
             drop(scan.and_then(|scan| receipt::remove_stale(&scan)));
         }
-        if paths_ok && let Some(installed) = receipt_install(config, &agent) {
-            let version = installed.version.clone();
-            worker.shared.emit(
-                &agent,
-                InstallState::Ready { version },
-                Some(installed.clone()),
-            );
-            check.from_receipt.push((agent, installed));
-            continue;
+        match paths_ok.then(|| receipt_install(config, &agent)).flatten() {
+            Some(AtStart::Ready(installed)) => {
+                let version = installed.version.clone();
+                worker.shared.emit(
+                    &agent,
+                    InstallState::Ready { version },
+                    Some(installed.clone()),
+                );
+                check.from_receipt.push((agent, installed));
+                continue;
+            }
+            Some(AtStart::Broken(missing)) => {
+                tracing::warn!(%agent, "agent start: a file the install needs is missing; the agent is failed until repaired");
+                let state =
+                    repair_state(&agent, format!("{MISSING_LINE} {missing}"), MISSING_RESULT);
+                let mut inner = worker.shared.lock();
+                record_failed(&mut inner, &worker.shared, &agent, state);
+                continue;
+            }
+            Some(AtStart::Unsure) => {
+                pending.insert(agent.clone());
+            }
+            None => {}
         }
         check.undecided.push(agent);
     }
     drop(lock);
+    worker.shared.lock().node_check.pending = pending;
     start(worker, check);
 }
 
@@ -150,35 +206,83 @@ pub(super) struct Check {
     pub(super) paths_ok: bool,
 }
 
-/// `agent`'s install as its receipt says, from file reads and stats alone, with no child run:
-/// the start sends `Ready` from it at once and checks the Node with
-/// [`install::ready_install`] in the background. The receipt must be valid, and its Node a
-/// regular file that is either the downloaded runtime's program (the runtime complete) or a
-/// `node` the `PATH` search lists, as resolved: a receipt naming any other Node waits for the
-/// check, which rewrites it, so no launch ever takes a Node this start would not consider.
-pub(super) fn receipt_install(config: &AgentsConfig, agent: &AgentId) -> Option<Installed> {
+/// What [`receipt_install`] found.
+#[derive(Debug)]
+pub(super) enum AtStart {
+    /// The receipt holds: `Ready` at once with this install.
+    Ready(Installed),
+    /// The receipt is valid, but this path the launch needs (relative to the install) is not
+    /// there: `Failed` at once, repaired by a new install.
+    Broken(String),
+    /// The receipt is valid but its Node is not confirmed: the check decides.
+    Unsure,
+}
+
+/// `agent`'s install as its receipt says, from file reads and stats alone, with no child run;
+/// `None` with no valid receipt. The start sends `Ready` from it at once and checks the Node
+/// with [`install::ready_install`] in the background. Every path the launch needs must be there
+/// ([`receipt::missing_file`]), and the receipt's Node a regular file that is either the
+/// downloaded runtime's program (the runtime complete) or a `node` the `PATH` search lists, as
+/// resolved, the same program the receipt was written for ([`receipt::Receipt::node_unchanged`],
+/// so its recorded version) and not on the network ([`node::local_only`]: no stat there). A
+/// receipt naming any other Node waits for the check, which rewrites it, so no launch ever
+/// takes a Node this start would not consider.
+pub(super) fn receipt_install(config: &AgentsConfig, agent: &AgentId) -> Option<AtStart> {
     let entry = config.snapshot.agent(agent)?;
     let hash = config.snapshot.install_hash(agent, config.platform)?;
     let folder = receipt::install_folder(&config.data_dir, agent, &hash);
     let receipt = receipt::read_receipt(&folder, agent, &hash, config.platform)?;
+    if let Some(missing) = receipt::missing_file(&folder, entry, &receipt) {
+        return Some(AtStart::Broken(missing));
+    }
     if !std::fs::metadata(&receipt.node).is_ok_and(|meta| meta.is_file()) {
-        return None;
+        return Some(AtStart::Unsure);
     }
     let runtime = node::runtime_dir(&config.data_dir, config.snapshot.node(), config.platform);
     let runtime = node::runtime_program(&runtime, config.platform.os);
     let known = if receipt.node == runtime {
         install::runtime_ready(config)
     } else {
-        node::candidates(&config.node_search)
-            .iter()
-            .any(|candidate| dunce::canonicalize(candidate).is_ok_and(|path| path == receipt.node))
+        let candidates =
+            node::local_only(node::candidates(&config.node_search), config.platform.os);
+        receipt.node_unchanged()
+            && candidates.iter().any(|candidate| {
+                dunce::canonicalize(candidate).is_ok_and(|path| path == receipt.node)
+            })
     };
-    known.then(|| Installed {
+    if !known {
+        return Some(AtStart::Unsure);
+    }
+    Some(AtStart::Ready(Installed {
         node: receipt.node.clone(),
         script: receipt::script_path(&folder, entry),
         folder,
         version: receipt.version,
+    }))
+}
+
+/// A `Failed` (`SetupFailed`) that no try made: its log holds `line`, then `result` in place of
+/// an install's count of tries.
+fn repair_state(agent: &AgentId, line: String, result: &str) -> InstallState {
+    let mut log = InstallLog::new(agent);
+    log.push(line);
+    log.push(format!(
+        "result: {} ({result})",
+        FailureKind::SetupFailed.word()
+    ));
+    InstallState::Failed(Failure {
+        kind: FailureKind::SetupFailed,
+        need_mb: None,
+        free_mb: None,
+        log,
     })
+}
+
+/// Records and sends `state`, a `Failed` the start or its check set, keeping it for
+/// [`repair_for_sign_in`] under the same lock, so a press that sees it repairs it.
+fn record_failed(inner: &mut Inner, shared: &Shared, agent: &AgentId, state: InstallState) {
+    inner.node_check.failed.insert(agent.clone(), state.clone());
+    Inner::set(inner, &shared.events, agent, state, None);
 }
 
 /// The check's own copy of what it needs.
@@ -188,6 +292,8 @@ struct Run<T> {
     timer: Arc<T>,
     shared: Arc<Shared>,
     cancel: Arc<Cancel>,
+    /// The worker's job lock, which the check's receipt rewrite takes ([`Rewrite::Take`]).
+    turn: Arc<Mutex<()>>,
 }
 
 /// Starts the check on its own thread, counted as a job so the quit waits for it. A thread
@@ -201,6 +307,7 @@ pub(super) fn start<T: Timer + Send + Sync + 'static>(worker: &Worker<T>, check:
         timer: Arc::clone(&worker.timer),
         shared: Arc::clone(&worker.shared),
         cancel,
+        turn: Arc::clone(&worker.job_lock),
     });
     let check = Arc::new(std::sync::Mutex::new(Some(check)));
     let (on_thread, take) = (Arc::clone(&run), Arc::clone(&check));
@@ -238,44 +345,74 @@ impl<T: Timer> Run<T> {
             .is_some_and(|ours| Arc::ptr_eq(ours, &self.cancel))
         {
             inner.node_check.cancel = None;
+            inner.node_check.end();
         }
     }
 
     async fn work(&self, check: Check) {
         let (config, launcher, timer) = (&self.config, &*self.launcher, &*self.timer);
         let search = node::search_user_node(&config.node_search, launcher, timer).await;
+        let rewrite = Rewrite::Take(&self.turn);
         for agent in check.undecided {
-            if self.shared.lock().states.contains_key(&agent) {
-                // An install started meanwhile: it reports for itself.
-                continue;
-            }
-            let ready = if check.paths_ok {
-                install::ready_install(config, launcher, timer, &agent, &search).await
-            } else {
-                None
-            };
-            let (state, installed) = if let Some(installed) = ready {
-                let version = installed.version.clone();
-                (InstallState::Ready { version }, Some(installed))
-            } else {
-                let node_needed = search.found.is_none() && !install::runtime_ready(config);
-                let download_bytes = config
-                    .snapshot
-                    .download_bytes(&agent, config.platform, node_needed)
-                    .unwrap_or(0);
-                (InstallState::Missing { download_bytes }, None)
-            };
-            self.set_if(
-                &agent,
-                |inner| !inner.states.contains_key(&agent),
-                state,
-                installed,
-            );
+            self.decide(&agent, check.paths_ok, &search).await;
+            self.decided(&agent);
         }
         // After every first state: the receipt agents have theirs already.
         for (agent, sent) in check.from_receipt {
-            let checked = install::ready_install(config, launcher, timer, &agent, &search).await;
+            let checked =
+                install::ready_install(config, launcher, timer, &agent, &search, rewrite).await;
             self.checked(&agent, &sent, checked);
+        }
+    }
+
+    /// An undecided agent's first state, `Ready` or `Missing`, unless it has one already.
+    async fn decide(&self, agent: &AgentId, paths_ok: bool, search: &node::UserSearch) {
+        let (config, launcher, timer) = (&self.config, &*self.launcher, &*self.timer);
+        if self.shared.lock().states.contains_key(agent) {
+            // An install started meanwhile: it reports for itself.
+            return;
+        }
+        let rewrite = Rewrite::Take(&self.turn);
+        let ready = if paths_ok {
+            install::ready_install(config, launcher, timer, agent, search, rewrite).await
+        } else {
+            None
+        };
+        let (state, installed) = if let Some(installed) = ready {
+            let version = installed.version.clone();
+            (InstallState::Ready { version }, Some(installed))
+        } else {
+            let node_needed = search.found.is_none() && !install::runtime_ready(config);
+            let download_bytes = config
+                .snapshot
+                .download_bytes(agent, config.platform, node_needed)
+                .unwrap_or(0);
+            (InstallState::Missing { download_bytes }, None)
+        };
+        self.set_if(
+            agent,
+            |inner| !inner.states.contains_key(agent),
+            state,
+            installed,
+        );
+    }
+
+    /// `agent` has its first state: an install pressed while it was undecided
+    /// ([`Slot::defer`]) is sent to the worker again, unless the agent is `Ready`.
+    fn decided(&self, agent: &AgentId) {
+        let resend = {
+            let mut inner = self.shared.lock();
+            inner.node_check.pending.remove(agent);
+            let pressed = inner.node_check.deferred.remove(agent);
+            let ready = matches!(inner.states.get(agent), Some(InstallState::Ready { .. }));
+            (pressed && !ready && !self.cancel.is_cancelled())
+                .then(|| inner.node_check.commands.clone())
+                .flatten()
+        };
+        if let Some(commands) = resend {
+            tracing::info!(%agent, "agent install: pressed during the start's check, which found no install; it starts");
+            // Fails only once the worker is gone.
+            drop(commands.send(Command::Install(agent.clone())));
         }
     }
 
@@ -289,19 +426,8 @@ impl<T: Timer> Run<T> {
             }
             None => {
                 tracing::warn!(%agent, "agent start: the receipt's Node failed its check; the agent is failed until repaired");
-                let mut log = InstallLog::new(agent);
-                log.push(FAILED_LINE.to_owned());
-                log.push(format!(
-                    "result: {} after 0 tries",
-                    FailureKind::SetupFailed.word()
-                ));
-                let failure = Failure {
-                    kind: FailureKind::SetupFailed,
-                    need_mb: None,
-                    free_mb: None,
-                    log,
-                };
-                (InstallState::Failed(failure), None)
+                let state = repair_state(agent, FAILED_LINE.to_owned(), FAILED_RESULT);
+                (state, None)
             }
         };
         let still_sent = |inner: &Inner| {
@@ -312,8 +438,7 @@ impl<T: Timer> Run<T> {
     }
 
     /// Records and sends `state` when `holds` (under the lock) and the check is not cancelled.
-    /// A `Failed` is kept for [`repair_for_sign_in`] under the same lock, so a press that sees
-    /// it repairs it.
+    /// A `Failed` is kept for [`repair_for_sign_in`] under the same lock ([`record_failed`]).
     fn set_if(
         &self,
         agent: &AgentId,
@@ -326,7 +451,8 @@ impl<T: Timer> Run<T> {
             return;
         }
         if matches!(state, InstallState::Failed(_)) {
-            inner.node_check.failed.insert(agent.clone(), state.clone());
+            record_failed(&mut inner, &self.shared, agent, state);
+            return;
         }
         let ready = matches!(state, InstallState::Ready { .. });
         Inner::set(&mut inner, &self.shared.events, agent, state, installed);

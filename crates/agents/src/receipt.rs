@@ -43,7 +43,21 @@ pub fn script_path(folder: &Path, entry: &AgentEntry) -> PathBuf {
         .fold(folder.to_path_buf(), |path, part| path.join(part))
 }
 
-/// What `clauseo-receipt.json` holds.
+/// The most paths [`key_paths`] records.
+const KEY_PATHS: usize = 16;
+/// Codex's `vendor/<triple>/codex-path` folder, which Clauseo moves aside (to
+/// `codex-path.sac-off`) while Windows' Smart App Control is On: never a key path, so a moved
+/// folder never reads as a broken install.
+const MOVABLE: &str = "codex-path";
+
+/// Whether `path` (relative, with `/`) is in, or is, a folder Clauseo may move aside.
+fn movable(path: &str) -> bool {
+    path.split('/')
+        .any(|part| part == MOVABLE || part.starts_with("codex-path."))
+}
+
+/// What `clauseo-receipt.json` holds. The last two fields came after schema 1's first receipts,
+/// which lack them: optional, so those still read (and an older Clauseo reads these).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Receipt {
     /// [`SCHEMA`].
@@ -62,6 +76,36 @@ pub(crate) struct Receipt {
     pub(crate) platform: String,
     /// When the install finished, in Unix seconds.
     pub(crate) installed_at: u64,
+    /// The paths the launch needs, relative to the install folder with `/` ([`key_paths`]):
+    /// the start's `Ready` stats each. Empty in older receipts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) files: Vec<String>,
+    /// The Node's size and modified time when the receipt was written: the same at start means
+    /// the same program, so the same `node_version`, read with no child run. `None` in older
+    /// receipts, and when the Node could not be read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) node_stamp: Option<NodeStamp>,
+}
+
+/// A Node program's size and modified time ([`Receipt::node_stamp`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct NodeStamp {
+    /// Its size in bytes.
+    pub(crate) size: u64,
+    /// Its modified time, in nanoseconds since the Unix epoch.
+    pub(crate) modified_ns: u64,
+}
+
+impl NodeStamp {
+    /// The stamp of the program at `node`, through links; `None` when it cannot be read.
+    pub(crate) fn of(node: &Path) -> Option<NodeStamp> {
+        let meta = std::fs::metadata(node).ok()?;
+        let since = meta.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
+        Some(NodeStamp {
+            size: meta.len(),
+            modified_ns: u64::try_from(since.as_nanos()).ok()?,
+        })
+    }
 }
 
 impl Receipt {
@@ -86,7 +130,16 @@ impl Receipt {
             installed_at: installed_at
                 .duration_since(UNIX_EPOCH)
                 .map_or(0, |since| since.as_secs()),
+            files: Vec::new(),
+            node_stamp: None,
         }
+    }
+
+    /// Whether the receipt's Node is the program it was written for: its stamp is recorded and
+    /// the same now. A file stat, no child run.
+    pub(crate) fn node_unchanged(&self) -> bool {
+        self.node_stamp
+            .is_some_and(|stamp| NodeStamp::of(&self.node) == Some(stamp))
     }
 
     /// [`node_line`] for the receipt's Node: the pinned one when it is `runtime`, the program
@@ -107,6 +160,61 @@ impl Receipt {
             && self.lock_hash == lock_hash
             && self.platform == platform.to_string()
     }
+}
+
+/// The first of the launch's paths missing from `folder`, relative to it: the adapter's script
+/// (always, so a receipt without [`Receipt::files`] is checked too), then each recorded path.
+/// File stats alone. `None` when every one is there.
+pub(crate) fn missing_file(folder: &Path, entry: &AgentEntry, receipt: &Receipt) -> Option<String> {
+    let script = script_path(folder, entry);
+    if !script.is_file() {
+        let relative = script.strip_prefix(folder).unwrap_or(&script);
+        return Some(relative.to_string_lossy().replace('\\', "/"));
+    }
+    receipt
+        .files
+        .iter()
+        .filter(|path| !movable(path))
+        .find(|path| {
+            let full = path
+                .split('/')
+                .fold(folder.to_path_buf(), |full, part| full.join(part));
+            std::fs::metadata(full).is_err()
+        })
+        .cloned()
+}
+
+/// What a launch of the agent installed in `folder` needs, relative to it with `/`: the
+/// adapter's script, its package folder, and the folder of each of its direct `dependencies`
+/// as the derived `lock` places them (nested under the adapter first, else at the top), the
+/// ones there on disk, at most [`KEY_PATHS`] in all.
+pub(crate) fn key_paths(folder: &Path, entry: &AgentEntry, lock: &str) -> Vec<String> {
+    let package = format!("node_modules/{}", entry.root);
+    let mut paths = vec![format!("{package}/{}", entry.bin), package.clone()];
+    let lock: serde_json::Value = serde_json::from_str(lock).unwrap_or_default();
+    let packages = &lock["packages"];
+    if let Some(deps) = packages[package.as_str()]["dependencies"].as_object() {
+        for name in deps.keys() {
+            let nested = format!("{package}/node_modules/{name}");
+            let top = format!("node_modules/{name}");
+            let place = if packages.get(&nested).is_some() {
+                nested
+            } else {
+                top
+            };
+            paths.push(place);
+        }
+    }
+    // Codex's `codex-path` is moved aside under Smart App Control ([`MOVABLE`]).
+    paths.retain(|path| !movable(path));
+    paths.retain(|path| {
+        let full = path
+            .split('/')
+            .fold(folder.to_path_buf(), |full, part| full.join(part));
+        full.exists()
+    });
+    paths.truncate(KEY_PATHS);
+    paths
 }
 
 /// Writes `receipt` into `folder` atomically: the install's last step.

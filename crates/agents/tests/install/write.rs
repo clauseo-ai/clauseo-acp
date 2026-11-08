@@ -47,3 +47,12 @@ pub(crate) fn hold_lock(path: &Path) -> io::Result<std::fs::File> {
     file.lock()?;
     Ok(file)
 }
+
+/// Removes the file or the folder (with what is in it) at `path`: a file an antivirus took.
+pub(crate) fn remove(path: &Path) -> io::Result<()> {
+    if std::fs::symlink_metadata(path)?.is_dir() {
+        std::fs::remove_dir_all(path)
+    } else {
+        std::fs::remove_file(path)
+    }
+}

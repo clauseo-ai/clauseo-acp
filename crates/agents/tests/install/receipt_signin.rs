@@ -10,12 +10,12 @@ use clauseo_protocol::AgentId;
 use crate::receipt_ready::{BOUND, Events, Gate, Mode, install_first, start_gated, until_within};
 use crate::support::{A_PACKAGES, B_PACKAGES, BASE, Fixture, agent_b, node_entry, pins, platform};
 
-fn claude() -> AgentId {
+pub(crate) fn claude() -> AgentId {
     AgentId::new("claude-acp").unwrap()
 }
 
 /// The install fixture with its first agent named `claude-acp`, and a home for its sign-in.
-fn claude_fixture(label: &str) -> Fixture {
+pub(crate) fn claude_fixture(label: &str) -> Fixture {
     let mut fx = Fixture::new(label);
     let (package_json, lock) = pins(BASE, &fx.tarballs);
     let platform = platform();
@@ -47,7 +47,7 @@ fn claude_fixture(label: &str) -> Fixture {
 }
 
 /// Sign-in states up to the first of Claude's for which `done` holds, under [`BOUND`] each.
-fn signin_until(events: &Events, done: impl Fn(&SigninState) -> bool) -> SigninState {
+pub(crate) fn signin_until(events: &Events, done: impl Fn(&SigninState) -> bool) -> SigninState {
     loop {
         let (agent, state) = events
             .signin

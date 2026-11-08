@@ -131,6 +131,7 @@ impl Agents {
             events,
         });
         let (commands, inbox) = mpsc::channel();
+        shared.lock().node_check.set_commands(commands.clone());
         let network = Arc::new(RwLock::new(config.install.network()));
         let worker = Worker {
             config,
@@ -151,8 +152,10 @@ impl Agents {
     }
 
     /// Installs `agent`: `Managed` again for IT's runtime, `Ready` again when installed,
-    /// nothing when it is installing already. Otherwise any other agent's running install is
-    /// paused (its partial files kept) and this one starts, or resumes from its files.
+    /// nothing when it is installing already. One with a receipt the start's check has not
+    /// decided yet waits for that answer, then installs only if it is not `Ready`. Otherwise any
+    /// other agent's running install is paused (its partial files kept) and this one starts, or
+    /// resumes from its files.
     pub fn install(&self, agent: &AgentId) {
         self.send(Command::Install(agent.clone()));
     }
@@ -432,6 +435,10 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
             if let Some(ready @ InstallState::Ready { .. }) = inner.states.get(agent).cloned() {
                 let installed = inner.installed.get(agent).cloned();
                 Inner::set(&mut inner, &self.shared.events, agent, ready, installed);
+                return;
+            }
+            if inner.node_check.defer(agent) {
+                // Undecided: its check answers first, and sends this press again if needed.
                 return;
             }
             if inner

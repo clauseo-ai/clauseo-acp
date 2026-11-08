@@ -31,6 +31,8 @@ pub(crate) const MIN_MAJOR: u32 = 22;
 pub(crate) const VERSION_LIMIT: Duration = Duration::from_secs(10);
 /// The most stdout bytes kept from `node --version`; the rest is read and dropped.
 const VERSION_MAX: usize = 1024;
+/// How long resolving a candidate on a network share may take ([`on_network`]).
+pub(crate) const SHARE_LIMIT: Duration = Duration::from_secs(3);
 /// The receipt a complete runtime folder holds.
 pub(crate) const RUNTIME_RECEIPT: &str = "clauseo-runtime.json";
 
@@ -84,6 +86,8 @@ pub(crate) enum NotUsed {
     BadAnswer(Option<i32>),
     /// Its version is below [`MIN_MAJOR`].
     TooOld(String),
+    /// It is on a network share that did not answer within [`SHARE_LIMIT`].
+    SlowShare,
 }
 
 /// The candidates [`search_user_node`] tries, in order: `node` (`node.exe` on Windows) in each
@@ -112,6 +116,50 @@ pub(crate) fn candidates(search: &NodeSearch) -> Vec<PathBuf> {
     found
 }
 
+/// Whether `path` on `os` is on the network: a Windows share (`\\server\share\…`, as
+/// [`crate::install::is_unc`] reads it) or, on Windows itself, a drive letter mapped to one.
+/// Resolving such a path can wait on a server, so the start never stats it.
+pub(crate) fn on_network(path: &Path, os: Os) -> bool {
+    os == Os::Win32 && (crate::install::is_unc(&path.to_string_lossy()) || on_remote_drive(path))
+}
+
+/// Whether `path`'s drive letter is a mapped network drive (`DRIVE_REMOTE`). The drive is
+/// asked by its root, `X:\`, so nothing on it is opened.
+#[cfg(windows)]
+#[expect(unsafe_code, reason = "FFI to GetDriveTypeW")]
+fn on_remote_drive(path: &Path) -> bool {
+    use std::path::{Component, Prefix};
+    use windows::Win32::Storage::FileSystem::GetDriveTypeW;
+    use windows::core::PCWSTR;
+    /// `GetDriveTypeW`'s answer for a network drive.
+    const DRIVE_REMOTE: u32 = 4;
+    let letter = match path.components().next() {
+        Some(Component::Prefix(prefix)) => match prefix.kind() {
+            Prefix::Disk(letter) | Prefix::VerbatimDisk(letter) => letter,
+            _ => return false,
+        },
+        _ => return false,
+    };
+    let root = [u16::from(letter), u16::from(b':'), u16::from(b'\\'), 0];
+    // SAFETY: `root` is NUL-terminated UTF-16 that outlives the call.
+    unsafe { GetDriveTypeW(PCWSTR(root.as_ptr())) == DRIVE_REMOTE }
+}
+
+/// No mapped drives off Windows.
+#[cfg(not(windows))]
+fn on_remote_drive(_path: &Path) -> bool {
+    false
+}
+
+/// `candidates` without the ones on the network ([`on_network`]): what the start may stat
+/// for its `Ready` from a receipt, leaving the rest to the background check.
+pub(crate) fn local_only(candidates: Vec<PathBuf>, os: Os) -> Vec<PathBuf> {
+    candidates
+        .into_iter()
+        .filter(|candidate| !on_network(candidate, os))
+        .collect()
+}
+
 /// What a search for the user's Node saw.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct UserSearch {
@@ -135,7 +183,7 @@ pub(crate) async fn search_user_node<T: Timer>(
                 break;
             }
             Err(NotUsed::TimedOut) => {
-                if let Ok(program) = dunce::canonicalize(&candidate) {
+                if let Ok((program, _)) = resolve(&candidate, timer).await {
                     seen.timed_out.push(program);
                 }
             }
@@ -152,12 +200,7 @@ pub(crate) async fn check_node<T: Timer>(
     launcher: &dyn Launcher,
     timer: &T,
 ) -> Result<FoundNode, NotUsed> {
-    let program = dunce::canonicalize(candidate).map_err(|_missing| NotUsed::Missing)?;
-    if !std::fs::metadata(&program).is_ok_and(|meta| meta.is_file()) {
-        return Err(NotUsed::NotAFile);
-    }
-    let os = if cfg!(windows) { Os::Win32 } else { Os::Linux };
-    let npm_cli = npm_cli_for(&program, candidate, os).ok_or(NotUsed::NoNpm)?;
+    let (program, npm_cli) = resolve(candidate, timer).await?;
     let version = node_version(&program, launcher, timer).await?;
     match parse_version(&version) {
         Some((major, _, _)) if major >= MIN_MAJOR => Ok(FoundNode {
@@ -168,6 +211,38 @@ pub(crate) async fn check_node<T: Timer>(
         Some(_) => Err(NotUsed::TooOld(version)),
         None => Err(NotUsed::BadAnswer(Some(0))),
     }
+}
+
+/// `candidate` resolved (a regular file) and npm's `npm-cli.js` for it. A candidate on the
+/// network ([`on_network`]) is resolved on a thread of its own, and given up after
+/// [`SHARE_LIMIT`] (that thread ends by itself once the server answers).
+async fn resolve<T: Timer>(candidate: &Path, timer: &T) -> Result<(PathBuf, PathBuf), NotUsed> {
+    let os = if cfg!(windows) { Os::Win32 } else { Os::Linux };
+    if !on_network(candidate, os) {
+        return resolve_here(candidate, os);
+    }
+    let (sender, answer) = async_channel::bounded(1);
+    let owned = candidate.to_owned();
+    let spawned = std::thread::Builder::new()
+        .name("clauseo-node-share".to_owned())
+        .spawn(move || drop(sender.try_send(resolve_here(&owned, os))));
+    if spawned.is_err() {
+        return Err(NotUsed::SlowShare);
+    }
+    match select(pin!(answer.recv()), pin!(timer.after(SHARE_LIMIT))).await {
+        Either::Left((Ok(resolved), _)) => resolved,
+        Either::Left((Err(_), _)) | Either::Right(((), _)) => Err(NotUsed::SlowShare),
+    }
+}
+
+/// [`resolve`]'s file work, on the calling thread.
+fn resolve_here(candidate: &Path, os: Os) -> Result<(PathBuf, PathBuf), NotUsed> {
+    let program = dunce::canonicalize(candidate).map_err(|_missing| NotUsed::Missing)?;
+    if !std::fs::metadata(&program).is_ok_and(|meta| meta.is_file()) {
+        return Err(NotUsed::NotAFile);
+    }
+    let npm_cli = npm_cli_for(&program, candidate, os).ok_or(NotUsed::NoNpm)?;
+    Ok((program, npm_cli))
 }
 
 /// Runs `program --version` (without `NODE_OPTIONS` or `NODE_PATH`: the spawn drops both) and

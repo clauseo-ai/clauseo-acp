@@ -443,3 +443,26 @@ fn the_node_line_names_the_source_the_version_and_only_the_users_file_name() {
         "node=pinned version=v24.22.0"
     );
 }
+
+#[test]
+fn the_start_never_stats_a_candidate_on_a_share() {
+    let candidates: Vec<PathBuf> = [
+        r"\\server\share\nodejs\node.exe",
+        r"//server/share/nodejs/node.exe",
+        r"\\?\UNC\server\share\nodejs\node.exe",
+        r"C:\Program Files\nodejs\node.exe",
+        r"\\?\C:\nodejs\node.exe",
+    ]
+    .into_iter()
+    .map(PathBuf::from)
+    .collect();
+    assert_eq!(
+        local_only(candidates.clone(), Os::Win32),
+        vec![
+            PathBuf::from(r"C:\Program Files\nodejs\node.exe"),
+            PathBuf::from(r"\\?\C:\nodejs\node.exe"),
+        ]
+    );
+    // Off Windows a path is never a share.
+    assert_eq!(local_only(candidates.clone(), Os::Linux), candidates);
+}

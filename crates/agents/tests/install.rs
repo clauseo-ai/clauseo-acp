@@ -54,3 +54,7 @@ mod receipt_ready;
 #[cfg(test)]
 #[path = "install/receipt_signin.rs"]
 mod receipt_signin;
+
+#[cfg(test)]
+#[path = "install/receipt_repair.rs"]
+mod receipt_repair;

@@ -204,3 +204,56 @@ fn a_link_at_the_agents_folder_is_never_scanned() {
 fn a_link_at_install_is_never_scanned() {
     a_link_on_the_way_to_install("agents/claude-acp/install");
 }
+
+#[test]
+fn a_receipt_written_before_its_list_and_stamp_still_reads() {
+    let data = TestDir::new("receipt-old");
+    let mut old = serde_json::to_value(receipt(HASH)).unwrap();
+    assert!(old.get("files").is_none() && old.get("node_stamp").is_none());
+    old["installed_at"] = 1.into();
+    let dir = folder(&data, HASH, None);
+    write::write_atomic(&dir.join(RECEIPT), &serde_json::to_vec(&old).unwrap()).unwrap();
+    let read = read_receipt(&dir, &agent(), HASH, linux()).unwrap();
+    assert_eq!(read.files, Vec::<String>::new());
+    assert_eq!(read.node_stamp, None);
+    assert!(!read.node_unchanged(), "no stamp: the start cannot tell");
+}
+
+#[test]
+fn a_codex_path_moved_aside_is_not_a_missing_file() {
+    let data = TestDir::new("receipt-codex-path");
+    let dir = folder(&data, HASH, None);
+    let entry = AgentEntry::new(agent(), "Codex", "codex-acp", "bin/codex-acp.js");
+    let vendor = "node_modules/@openai/codex/vendor/x86_64-pc-windows-msvc";
+    for file in [
+        "node_modules/codex-acp/bin/codex-acp.js".to_owned(),
+        "node_modules/@openai/codex/package.json".to_owned(),
+        // Smart App Control is On: the folder is moved aside, its `rg.exe` with it.
+        format!("{vendor}/codex-path.sac-off/rg.exe"),
+    ] {
+        let path = file
+            .split('/')
+            .fold(dir.clone(), |path, part| path.join(part));
+        write::create_dir_all(path.parent().unwrap()).unwrap();
+        write::write_atomic(&path, b"x").unwrap();
+    }
+    let lock = serde_json::json!({ "packages": {
+        "node_modules/codex-acp": { "dependencies": { "@openai/codex": "1.0.0" } },
+        "node_modules/@openai/codex": {},
+    }});
+    let keys = key_paths(&dir, &entry, &lock.to_string());
+    assert_eq!(
+        keys,
+        vec![
+            "node_modules/codex-acp/bin/codex-acp.js",
+            "node_modules/codex-acp",
+            "node_modules/@openai/codex",
+        ]
+    );
+    // Even a receipt that lists the folder (or a file in it) reads complete without it.
+    let mut written = receipt(HASH);
+    written.files = keys;
+    written.files.push(format!("{vendor}/codex-path"));
+    written.files.push(format!("{vendor}/codex-path/rg.exe"));
+    assert_eq!(missing_file(&dir, &entry, &written), None);
+}
