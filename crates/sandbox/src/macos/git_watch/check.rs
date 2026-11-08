@@ -1,29 +1,42 @@
-//! The watch's decisions: which events and which entries of a scan are set aside.
+//! The watch's decisions: which events and which entries of a scan are found, and, once the
+//! session has ended, set aside.
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
-use super::aside::Aside;
+use super::aside::{Aside, Stuck};
+use super::state::{Baseline, Id, Known};
 use super::{
-    ARRIVED, Asks, Event, Fs, Kind, Launch, Meta, Phase, RESCAN, is_git, is_head, repo_head,
+    ARRIVED, Asks, Event, Fs, Kind, Launch, Meta, Phase, RESCAN, head_of, is_git, repo_head,
 };
+use crate::GitItem;
 use crate::policy::{name_key, path_key, under};
-use crate::{DenialSink, GitItem};
 
 /// One session's watch of one matter.
 pub(crate) struct Watch<F> {
     fs: F,
     matter: PathBuf,
     aside: Aside,
+    base: Baseline,
     /// The launch's repositories, left alone while each keeps its file ID: its `.git`s and its
-    /// bare repositories, by path key.
-    repos: HashMap<PathBuf, (u64, u64)>,
-    /// The launch's links leading out of the matter or nowhere, by path key, with their IDs.
-    links: HashMap<PathBuf, (u64, u64)>,
+    /// repository-shaped folders, by path key.
+    repos: HashMap<PathBuf, Id>,
+    /// The launch's folders holding a `HEAD` but not repository-shaped, by path key: left alone
+    /// while they keep their ID and stay that way.
+    heads: HashMap<PathBuf, Id>,
+    /// The launch's links leading out of the matter or nowhere, by path key.
+    links: HashMap<PathBuf, Id>,
+    /// The paths at the launch repositories' `commondir` targets, by path key, with the ID of
+    /// what was there at launch.
+    common: HashMap<PathBuf, (PathBuf, Option<Id>)>,
+    /// Folders never entered: the volume set-aside folder, when it is in the matter.
+    skip: HashSet<PathBuf>,
     /// The file IDs of the matter's folders at the start.
-    folders: HashSet<(u64, u64)>,
+    folders: HashSet<Id>,
+    /// Every folder counts as one that existed at the start: the scan of a session whose watch
+    /// stopped early, whose folders were never kept.
+    all_old: bool,
 }
 
 /// A folder's listing.
@@ -33,58 +46,82 @@ type Entries = [(OsString, Kind)];
 type Item = (PathBuf, GitItem, Kind);
 
 impl<F: Fs> Watch<F> {
-    /// The watch of `matter` for `session`, setting aside into `set_aside`. The launch's items'
-    /// file IDs are read now, and the matter is walked once for its folders and bare
-    /// repositories, so call it before the agent starts.
-    pub(crate) fn new(
-        fs: F,
-        matter: PathBuf,
-        set_aside: PathBuf,
-        session: String,
-        launch: &Launch,
-        notices: Arc<dyn DenialSink>,
-    ) -> Watch<F> {
-        let ids = |paths: &[PathBuf]| -> HashMap<PathBuf, (u64, u64)> {
+    /// The watch of `matter`, setting aside through `aside`. The launch's items' file IDs are
+    /// read now, and the matter is walked once for its folders, repositories and `HEAD`
+    /// folders, so call it before the agent starts.
+    pub(crate) fn new(fs: F, matter: PathBuf, aside: Aside, launch: &Launch) -> Watch<F> {
+        let known = |paths: &[PathBuf]| -> Vec<Known> {
             paths
                 .iter()
-                .filter_map(|path| Some((path_key(path), fs.meta(path)?.id)))
+                .filter_map(|path| Some(Known::new(path, fs.meta(path)?.id)))
                 .collect()
         };
-        let repos = ids(&launch.git);
-        let links = ids(&launch.links);
-        let aside = Aside {
-            matter: matter.clone(),
-            folder: set_aside,
-            session,
-            notices,
-            ended_by_us: false,
-            count: 0,
-        };
-        let mut watch = Watch {
-            fs,
-            matter,
-            aside,
-            repos,
-            links,
-            folders: HashSet::new(),
+        let mut base = Baseline {
+            repos: known(&launch.git),
+            links: known(&launch.links),
+            common: launch
+                .common
+                .iter()
+                .map(|path| (path.into(), fs.meta(path).map(|meta| meta.id)))
+                .collect(),
+            skip: launch
+                .skip
+                .iter()
+                .map(|path| path.as_path().into())
+                .collect(),
+            ..Baseline::default()
         };
         let mut folders = HashSet::new();
-        let mut bare = Vec::new();
+        let skip: HashSet<PathBuf> = launch.skip.iter().map(|p| path_key(p)).collect();
         walk(
-            &watch.fs,
-            &watch.matter,
-            &|_, _| false,
+            &fs,
+            &matter,
+            &|dir, _| skip.contains(&path_key(dir)),
             &mut |dir, meta, entries| {
                 folders.insert(meta.id);
                 if repo_head(entries).is_some() {
-                    bare.push((path_key(dir), meta.id));
+                    base.repos.push(Known::new(dir, meta.id));
+                } else if head_of(entries).is_some() {
+                    base.heads.push(Known::new(dir, meta.id));
                 }
                 true
             },
         );
+        let mut watch = Watch::resume(fs, matter, aside, base);
         watch.folders = folders;
-        watch.repos.extend(bare);
+        watch.all_old = false;
         watch
+    }
+
+    /// The watch of a session from its recorded `base`, for its final scan: every folder
+    /// counts as old, so a repository-shaped folder loses only its `HEAD`.
+    pub(crate) fn resume(fs: F, matter: PathBuf, aside: Aside, base: Baseline) -> Watch<F> {
+        let keyed = |list: &[Known]| -> HashMap<PathBuf, Id> {
+            list.iter()
+                .map(|known| (path_key(&known.path()), known.id))
+                .collect()
+        };
+        Watch {
+            repos: keyed(&base.repos),
+            heads: keyed(&base.heads),
+            links: keyed(&base.links),
+            common: base
+                .common
+                .iter()
+                .map(|(path, id)| (path_key(&path.path()), (path.path(), *id)))
+                .collect(),
+            skip: base
+                .skip
+                .iter()
+                .map(|path| path_key(&path.path()))
+                .collect(),
+            folders: HashSet::new(),
+            all_old: true,
+            fs,
+            matter,
+            aside,
+            base,
+        }
     }
 
     /// The matter.
@@ -92,27 +129,33 @@ impl<F: Fs> Watch<F> {
         &self.matter
     }
 
-    /// Makes the set-aside folder, before the agent starts.
-    pub(crate) fn make_set_aside(&self) -> std::io::Result<()> {
-        self.fs.make_dirs(&self.aside.folder)
+    /// What the launch knew, for the matter's state file.
+    pub(crate) fn baseline(&self) -> &Baseline {
+        &self.base
     }
 
-    /// The runner ended the session for a failed move.
+    /// The runner ended the session for a find.
     pub(crate) fn ended_session(&mut self) {
         self.aside.ended_by_us = true;
     }
 
-    /// Checks one batch of events.
-    pub(crate) fn events(&mut self, events: &[Event], phase: Phase) -> Asks {
+    /// The items that could neither move nor be neutralised in place, taken.
+    pub(crate) fn take_stuck(&mut self) -> Vec<Stuck> {
+        std::mem::take(&mut self.aside.stuck)
+    }
+
+    /// Checks one batch of events, while the agent may run: finds end the session.
+    pub(crate) fn events(&mut self, events: &[Event]) -> Asks {
         let mut items = Vec::new();
         let mut rescan = false;
         for event in events {
             rescan |= self.event(event, &mut items);
         }
-        Asks { rescan, end: false }.and(self.put(items, phase))
+        Asks { rescan, end: false }.and(self.put(items, Phase::Running))
     }
 
-    /// Scans the whole matter.
+    /// Scans the whole matter: while the agent may run a find ends the session; once it has
+    /// ended, each find is set aside.
     pub(crate) fn full_scan(&mut self, phase: Phase) -> Asks {
         let items = self.scan(&self.matter);
         self.put(items, phase)
@@ -122,36 +165,47 @@ impl<F: Fs> Watch<F> {
         let mut asks = Asks::default();
         for (path, what, kind) in items {
             let local = path.parent().is_some_and(|dir| self.fs.local(dir));
-            if local && self.fs.meta(&path).is_some() {
-                asks = asks.and(self.aside.put(&self.fs, &path, what, kind, phase));
+            if !local || self.fs.meta(&path).is_none() {
+                continue;
+            }
+            match phase {
+                Phase::Running => {
+                    tracing::warn!(
+                        path = %path.display(), ?what,
+                        "the git watch found what an agent left in the matter; ending the session"
+                    );
+                    asks.end = true;
+                }
+                Phase::Ended => self.aside.put(&self.fs, &path, what, kind),
             }
         }
         asks
     }
 
-    /// Whether `path` is one of the launch's repositories, still with its file ID.
-    fn launch_repo(&self, key: &Path, path: &Path) -> bool {
-        self.repos
-            .get(key)
+    /// Whether `path` (with path key `key`) is in `map`, still with its file ID.
+    fn kept(&self, map: &HashMap<PathBuf, Id>, key: &Path, path: &Path) -> bool {
+        map.get(key)
             .is_some_and(|id| self.fs.meta(path).is_some_and(|meta| meta.id == *id))
     }
 
-    /// Adds what `event` brings to `items`; true when it asks for a rescan. A `.git` at or above
-    /// its path is set aside itself; a folder that arrived is scanned; a `HEAD` or a link that
-    /// arrived is checked. Nothing at or below one of the launch's repositories is.
+    /// Adds what `event` brings to `items`; true when it asks for a rescan. A `.git` at or
+    /// above its path is found itself; its folder's `HEAD` is checked whatever happened; a
+    /// folder that arrived is scanned and a link that arrived is checked. Nothing at or below
+    /// one of the launch's repositories is.
     fn event(&self, event: &Event, items: &mut Vec<Item>) -> bool {
         if event.flags & RESCAN != 0 {
             return true;
         }
         let Ok(rel) = event.path.strip_prefix(&self.matter) else {
-            return false;
+            tracing::debug!(path = %event.path.display(), "an event outside the matter: rescan");
+            return true;
         };
         let mut at = self.matter.clone();
         let mut key = path_key(&self.matter);
         for name in rel {
             at.push(name);
             key.push(name_key(name));
-            if self.launch_repo(&key, &at) {
+            if self.kept(&self.repos, &key, &at) || self.skip.contains(&key) {
                 return false;
             }
             if is_git(name) {
@@ -161,46 +215,62 @@ impl<F: Fs> Watch<F> {
                 return false;
             }
         }
+        items.extend(self.common_at(&key));
+        if let Some(dir) = event
+            .path
+            .parent()
+            .filter(|dir| dir.starts_with(&self.matter))
+            && let Some(meta) = self.fs.meta(dir)
+            && let Ok(entries) = self.fs.list(dir)
+        {
+            items.extend(self.head(dir, meta, &entries));
+        }
         let Some(meta) = self.fs.meta(&event.path) else {
             return false;
         };
         if event.flags & ARRIVED == 0 {
             return false;
         }
-        let head = event.path.file_name().is_some_and(is_head);
         match meta.kind {
             Kind::Dir => items.extend(self.scan(&event.path)),
-            Kind::File | Kind::Link if head => items.push(self.head(&event.path, meta.kind)),
             Kind::Link => items.extend(self.link(&event.path, meta.kind)),
             Kind::File | Kind::Other => {}
         }
         false
     }
 
-    /// A new `HEAD` file or link: its folder when that is new and repository-shaped, else the file.
-    fn head(&self, path: &Path, kind: Kind) -> Item {
-        let new_repo = path
-            .parent()
-            .filter(|dir| *dir != self.matter)
-            .filter(|dir| {
-                self.fs
-                    .meta(dir)
-                    .is_some_and(|meta| !self.folders.contains(&meta.id))
-                    && self
-                        .fs
-                        .list(dir)
-                        .is_ok_and(|entries| repo_head(&entries).is_some())
-            });
-        match new_repo {
-            Some(dir) => (dir.to_owned(), GitItem::BareRepo, Kind::Dir),
-            None => (path.to_owned(), GitItem::BareRepoHead, kind),
+    /// The `commondir` path at or above path key `key`, when something new is there.
+    fn common_at(&self, key: &Path) -> Option<Item> {
+        let (path, launch) = self
+            .common
+            .iter()
+            .find(|(common, _)| key.starts_with(common))
+            .map(|(_, found)| found)?;
+        let meta = self.fs.meta(path)?;
+        (*launch != Some(meta.id)).then(|| (path.clone(), GitItem::CommonDirPart, meta.kind))
+    }
+
+    /// Folder `dir`'s `HEAD`, unless the folder is one of the launch's repositories, or a launch
+    /// folder with a `HEAD` that is still not repository-shaped: the folder whole when it is new
+    /// and repository-shaped, else the `HEAD` alone.
+    fn head(&self, dir: &Path, meta: Meta, entries: &Entries) -> Option<Item> {
+        let (head, kind) = head_of(entries)?;
+        let key = path_key(dir);
+        let shaped = repo_head(entries).is_some();
+        if self.kept(&self.repos, &key, dir) || (!shaped && self.kept(&self.heads, &key, dir)) {
+            return None;
         }
+        let new = dir != self.matter && !self.all_old && !self.folders.contains(&meta.id);
+        Some(if new && shaped {
+            (dir.to_owned(), GitItem::BareRepo, Kind::Dir)
+        } else {
+            (dir.join(head), GitItem::BareRepoHead, kind)
+        })
     }
 
     /// The link at `path`, when it leads out of the matter or nowhere and is not the launch's.
     fn link(&self, path: &Path, kind: Kind) -> Option<Item> {
-        let launch = self.links.get(&path_key(path));
-        if launch.is_some_and(|id| self.fs.meta(path).is_some_and(|meta| meta.id == *id)) {
+        if self.kept(&self.links, &path_key(path), path) {
             return None;
         }
         let inside = self
@@ -210,27 +280,31 @@ impl<F: Fs> Watch<F> {
         (!inside).then(|| (path.to_owned(), GitItem::OutsideLink, kind))
     }
 
-    /// Everything to set aside in folder `top` and below: each `.git` not the launch's, each
-    /// repository-shaped folder not the launch's (whole when new, else its `HEAD`), and each
-    /// link out.
+    /// Everything found in folder `top` and below: each `.git` not the launch's, each `HEAD`
+    /// [`Watch::head`] takes, each link out, and each new `commondir` path.
     fn scan(&self, top: &Path) -> Vec<Item> {
         let mut items = Vec::new();
-        let skip = |dir: &Path, _: Meta| self.launch_repo(&path_key(dir), dir);
+        let skip = |dir: &Path, _: Meta| {
+            let key = path_key(dir);
+            self.kept(&self.repos, &key, dir) || self.skip.contains(&key)
+        };
         walk(&self.fs, top, &skip, &mut |dir, meta, entries| {
-            if let Some(head) = repo_head(entries) {
-                if dir != self.matter && !self.folders.contains(&meta.id) {
-                    items.push((dir.to_owned(), GitItem::BareRepo, Kind::Dir));
+            if let Some(item) = self.head(dir, meta, entries) {
+                let whole = item.1 == GitItem::BareRepo;
+                items.push(item);
+                if whole {
                     return false;
                 }
-                let kind = self.fs.meta(&dir.join(head)).map_or(Kind::File, |m| m.kind);
-                items.push((dir.join(head), GitItem::BareRepoHead, kind));
             }
             for (name, kind) in entries {
                 let path = dir.join(name);
+                let key = path_key(&path);
                 if is_git(name) {
-                    if !self.launch_repo(&path_key(&path), &path) {
+                    if !self.kept(&self.repos, &key, &path) {
                         items.push((path, GitItem::DotGit, *kind));
                     }
+                } else if let Some(item) = self.common_at(&key).filter(|item| item.0 == path) {
+                    items.push(item);
                 } else if *kind == Kind::Link {
                     items.extend(self.link(&path, *kind));
                 }

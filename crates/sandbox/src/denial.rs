@@ -68,22 +68,21 @@ pub enum Denial {
         /// When the list that matched was made.
         generated: clauseo_blocklist::Generated,
     },
-    /// The macOS git watch set aside something an agent left in the matter while a session ran
-    /// that the lawyer's own git tools, or an editor's, would trust: a `.git`, a bare
-    /// repository's folder or `HEAD`, or a link leading out of the matter (decision record
-    /// 0038). git would run its hooks and `core.fsmonitor` as the lawyer. [`Denial::notice`]
-    /// is the lawyer's text. Never rate-capped.
+    /// The macOS git watch found something in the matter while a session ran that the
+    /// lawyer's own git tools, or an editor's, would trust: a `.git`, a bare repository's
+    /// folder or `HEAD`, a part of a launch repository's common dir, or a link leading out of
+    /// the matter (decision record 0038). git would run its hooks and `core.fsmonitor` as the
+    /// lawyer. The watch ended the session first, then set the item aside.
+    /// [`Denial::notice`] is the lawyer's text. Never rate-capped.
     GitSetAside {
         /// Its path, relative to the matter's root.
         path: PathBuf,
         /// What it was.
         what: GitItem,
-        /// Where it is now: in Clauseo's set-aside folder, or, when it could not move there,
-        /// its new name in place (`<name>-set-aside-by-clauseo-<n>`). `None` when even that
-        /// rename failed.
-        moved_to: Option<PathBuf>,
-        /// The move out of the matter failed while the agent ran, so the session was ended
-        /// first (fail-closed).
+        /// What became of it.
+        outcome: GitOutcome,
+        /// The watch ended the session for it; false for one a session left whose watch never
+        /// ran its final scan (the host quit), found at the matter's next launch.
         session_ended: bool,
     },
 }
@@ -96,58 +95,108 @@ pub enum GitItem {
     DotGit,
     /// A new folder laid out as a bare repository: `HEAD`, `objects` and `refs`.
     BareRepo,
-    /// The `HEAD` file that made a folder that already existed a repository.
+    /// A `HEAD` file or link in a folder that was not a repository at launch.
     BareRepoHead,
     /// A link whose target is outside the matter, or can't be found.
     OutsideLink,
+    /// A new `objects`, `refs`, `config` (or another name git reads there) at a launch
+    /// repository's `commondir` target.
+    CommonDirPart,
+}
+
+/// What became of an item the git watch set aside ([`Denial::GitSetAside`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GitOutcome {
+    /// Moved out of the matter, to this path in Clauseo's set-aside folder.
+    Moved(PathBuf),
+    /// It could not move, so it was renamed where it is, to this path, with any `HEAD` and
+    /// `config` inside renamed too: git no longer reads it.
+    RenamedInPlace(PathBuf),
+    /// A link that could not move was removed (a link holds no data); it led here.
+    LinkRemoved {
+        /// Where it led, as it was written.
+        target: PathBuf,
+    },
+    /// Neither: Clauseo refuses the matter's next launch until it is gone.
+    Stuck,
 }
 
 impl Denial {
-    /// The agent's refusal line, for the denials that carry one: [`Denial::GitSetAside`], so
-    /// the agent can work elsewhere.
+    /// The agent's refusal line, for the denials that carry one: [`Denial::GitSetAside`].
     pub fn refusal(&self) -> Option<String> {
         let Denial::GitSetAside { path, what, .. } = self else {
             return None;
         };
         let path = path.display();
         Some(match what {
-            GitItem::DotGit | GitItem::BareRepo | GitItem::BareRepoHead => format!(
-                "Clauseo set aside {path}: an agent can't create a git repository inside a \
-                 matter. Clone or init in your scratch folder instead."
-            ),
             GitItem::OutsideLink => format!(
-                "Clauseo set aside {path}: an agent can't leave a link inside a matter that \
-                 leads outside it. Work on the files in your scratch folder instead."
+                "Clauseo ended this session and set aside {path}: an agent can't leave a link \
+                 inside a matter that leads outside it."
+            ),
+            GitItem::DotGit
+            | GitItem::BareRepo
+            | GitItem::BareRepoHead
+            | GitItem::CommonDirPart => format!(
+                "Clauseo ended this session and set aside {path}: an agent can't make a git \
+                 repository inside a matter."
             ),
         })
     }
 
     /// The lawyer's notice, for the denials that carry one: [`Denial::GitSetAside`].
     pub fn notice(&self) -> Option<String> {
-        let Denial::GitSetAside { path, what, .. } = self else {
+        let Denial::GitSetAside {
+            path,
+            what,
+            outcome,
+            session_ended,
+        } = self
+        else {
             return None;
         };
-        let place = match path.parent() {
-            Some(folder) if !folder.as_os_str().is_empty() => folder.display().to_string(),
-            _ => "the matter's top folder".to_owned(),
-        };
-        let why = "because your own git tools would run code from it as you.";
-        Some(match what {
-            GitItem::DotGit => {
-                format!("An agent left a .git folder in {place}. Clauseo moved it aside {why}")
+        let at = path.display();
+        let first = match (what, session_ended) {
+            (GitItem::OutsideLink, true) => {
+                format!("The AI tool left a link at {at} that leads outside the matter.")
             }
-            GitItem::BareRepo => format!(
-                "An agent left a git repository folder in {place}. Clauseo moved it aside {why}"
+            (GitItem::OutsideLink, false) => format!(
+                "An AI tool left a link at {at} that leads outside the matter, in a session \
+                 Clauseo could not finish checking."
             ),
-            GitItem::BareRepoHead => format!(
-                "An agent turned {place} into a git repository. Clauseo moved its HEAD file \
-                 aside {why}"
+            (_, true) => {
+                format!("The AI tool tried to put a code repository in the matter at {at}.")
+            }
+            (_, false) => format!(
+                "An AI tool put a code repository in the matter at {at}, in a session Clauseo \
+                 could not finish checking."
             ),
-            GitItem::OutsideLink => format!(
-                "An agent left a link in {place} that leads outside the matter. Clauseo moved it \
-                 aside because your own git tools could follow it and run code as you."
+        };
+        let stopped = if *session_ended {
+            "Clauseo stopped it and "
+        } else {
+            "Clauseo "
+        };
+        let then = match outcome {
+            GitOutcome::Moved(to) => format!(
+                "moved it to {}. If you made it yourself, you can move it back: the session \
+                 has ended.",
+                to.display()
             ),
-        })
+            GitOutcome::RenamedInPlace(to) => format!(
+                "renamed it to {} where it is, as it could not move off the matter's disk, so \
+                 your git tools no longer read it.",
+                to.display()
+            ),
+            GitOutcome::LinkRemoved { target } => {
+                format!("removed the link, which led to {}.", target.display())
+            }
+            GitOutcome::Stuck => format!(
+                "could not move or rename it. Clauseo won't start an AI tool in this matter \
+                 until {at} is moved out of it."
+            ),
+        };
+        Some(format!("{first} {stopped}{then}"))
     }
 }
 

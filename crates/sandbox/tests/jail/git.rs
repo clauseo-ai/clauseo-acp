@@ -12,7 +12,7 @@ use crate::support::{World, git, git_outside, launcher, run_outside, sh, tree};
 /// git's runtime: what `xcode-select -p` names (the folder `/usr/bin/git` runs git from), or
 /// for Xcode the whole app, whose `Info.plist` and shared frameworks the shim reads. The
 /// Command Line Tools are in the base profile already.
-fn git_runtime(cwd: &std::path::Path) -> PathBuf {
+pub(crate) fn git_runtime(cwd: &std::path::Path) -> PathBuf {
     let out = run_outside("/usr/bin/xcode-select", &["-p"], cwd);
     out.assert_ok();
     let developer = PathBuf::from(out.stdout.trim());
@@ -121,21 +121,16 @@ fn no_git_can_be_made_or_renamed_onto_anywhere_in_the_matter() {
 }
 
 /// The name rule sees only the rename's destination, so a folder that already holds a `.git`,
-/// made outside the matter, can be moved in; the lawyer-side git watch (0038) sets it aside, with
-/// its record, and the launch's sink hears of it.
+/// made in the state folder (which Codex's own clones keep open to `.git`), can be moved in;
+/// the lawyer-side git watch (0038) ends the session, sets it aside with its record, and the
+/// launch's sink hears of it.
 #[test]
 fn a_folder_holding_a_git_moved_in_ends_set_aside() {
     let w = World::new();
-    w.dir("data/run/s1/tmp");
     let m1 = w.at("m1");
-    let policy = w
-        .builder()
-        .runtime(git_runtime(&m1))
-        .tmpdir(w.at("data/run/s1/tmp"))
-        .build()
-        .unwrap();
+    let policy = w.builder().runtime(git_runtime(&m1)).build().unwrap();
     let home = policy.state().to_string_lossy().into_owned();
-    let foo = policy.tmpdir().join("foo").to_string_lossy().into_owned();
+    let foo = policy.state().join("foo").to_string_lossy().into_owned();
     let (launcher, denials) = launcher(policy);
     git(
         &launcher,
@@ -161,7 +156,11 @@ fn a_folder_holding_a_git_moved_in_ends_set_aside() {
         .filter(|p| p.join("record.json").is_file())
         .collect();
     assert_eq!(folders.len(), 1, "{folders:?}");
-    assert!(folders[0].join("item/HEAD").is_file());
+    assert!(folders[0].join("item/objects").is_dir());
+    assert!(
+        !folders[0].join("item/HEAD").exists(),
+        "the set-aside copy's HEAD is renamed"
+    );
 }
 
 /// A bare repository needs no `.git` name: `HEAD`, `objects/` and `refs/` make one. No `HEAD`

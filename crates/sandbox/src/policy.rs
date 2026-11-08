@@ -7,6 +7,7 @@ use crate::links::{LinkFinding, MatterScan};
 use crate::{Access, Error, PathClass};
 
 mod build;
+pub(crate) mod git_aside;
 mod links;
 mod names;
 mod store;
@@ -147,7 +148,7 @@ pub struct Policy {
     link_targets: Vec<PathBuf>,
     link_folders: Vec<PathBuf>,
     read_only_in_matter: Vec<PathRule>,
-    git_set_aside: Option<PathBuf>,
+    pub(crate) git: git_aside::GitPlaces,
 }
 
 /// The policy's inputs, as given. [`PolicyBuilder::build`] checks and canonicalises them.
@@ -263,7 +264,13 @@ impl Policy {
     /// The folder the macOS git watch sets aside into ([`PolicyBuilder::git_set_aside`]),
     /// denied whole by the profile.
     pub fn git_set_aside(&self) -> Option<&Path> {
-        self.git_set_aside.as_deref()
+        self.git.set_aside.as_deref()
+    }
+
+    /// The `.clauseo` folder at the root of the matter's volume when that is a local volume
+    /// other than [`Policy::git_set_aside`]'s: the git watch sets aside into it there.
+    pub fn volume_set_aside(&self) -> Option<&Path> {
+        self.git.volume.as_deref()
     }
 
     /// The loopback ports the agent may connect out to (the proxy's listeners, the connector

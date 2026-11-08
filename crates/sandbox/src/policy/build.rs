@@ -6,6 +6,7 @@ use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
+use super::git_aside::{finish, places};
 use super::links::{canonical_findings, covered_targets, fit_budget, split_linked};
 use super::names::{Keys, path_key};
 use super::{
@@ -115,7 +116,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
     let link_targets = covered_targets(&links, &allowed, &allowed_exactly);
     let link_folders = fit_budget(&links, &link_targets, &matter, &working_trees)?;
 
-    check_git_set_aside(Policy {
+    finish(Policy {
         matter,
         state,
         tmpdir,
@@ -140,45 +141,8 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
         link_targets,
         link_folders,
         read_only_in_matter,
-        git_set_aside: set_aside_folder(b.git_set_aside.as_deref())?,
+        git: places(b.git_set_aside.as_deref())?,
     })
-}
-
-/// The git set-aside folder, canonical: it need not exist.
-fn set_aside_folder(dir: Option<&Path>) -> Result<Option<PathBuf>, Error> {
-    dir.map(|dir| beneath_existing(dir, "git set-aside folder"))
-        .transpose()
-}
-
-/// The git set-aside folder's rules: inside a hidden path, and neither inside nor holding the
-/// matter or a path allowed again, so the profile denies it whole.
-fn check_git_set_aside(policy: Policy) -> Result<Policy, Error> {
-    let Some(dir) = policy.git_set_aside() else {
-        return Ok(policy);
-    };
-    let shown = dir.display();
-    if !policy.hidden.iter().any(|h| under(dir, h)) {
-        return refuse(format!(
-            "the git set-aside folder must be inside a hidden path: {shown}"
-        ));
-    }
-    let mut reach = vec![policy.matter(), policy.state()];
-    reach.extend(policy.session_tmpdir());
-    reach.extend(policy.notes());
-    reach.extend(policy.credential_link());
-    reach.extend(policy.claude_store().map(|store| store.dir.as_path()));
-    reach.extend(policy.browser_socket_dir());
-    for paths in [&policy.runtime, &policy.read, &policy.allowed_folders] {
-        reach.extend(paths.iter().map(PathBuf::as_path));
-    }
-    if let Some(p) = reach.iter().find(|p| overlap(dir, p)) {
-        return refuse(format!(
-            "the git set-aside folder may not hold or sit inside a path the agent reaches: \
-             {shown} and {}",
-            p.display()
-        ));
-    }
-    Ok(policy)
 }
 
 /// `extra` added to `links`, each unless a finding already there names its path: `found` holds

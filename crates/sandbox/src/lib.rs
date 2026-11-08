@@ -93,9 +93,10 @@
 //!   [`Denial::Dropped`], and only logs network and device denials. A watcher that fails to
 //!   start or dies is logged and started again at most once a minute; launches run either way.
 //!   Each launch also starts the git watch on the matter before the agent (`src/macos/git_watch`),
-//!   which sets aside into [`Policy::git_set_aside`] what the agent leaves for the lawyer's git
-//!   to trust, reports each as [`Denial::GitSetAside`], and ends the session when an item can't
-//!   leave the matter; a policy without that folder is refused at launch.
+//!   which, on the first thing the agent leaves for the lawyer's git to trust, ends every
+//!   process of the session, then sets it aside into [`Policy::git_set_aside`] (or the matter
+//!   volume's [`Policy::volume_set_aside`]) and reports it as [`Denial::GitSetAside`]; a policy
+//!   without that folder is refused at launch.
 //! - [`start_proxy`] with a [`ProxyConfig`] (lists, the shared block list and the launch's
 //!   allowed sites, [`Upstream`], sink; an unloaded block list blocks nothing and is logged
 //!   once); the handle's ports,
@@ -182,7 +183,7 @@ pub mod windows;
 pub use browser_dir::BrowserSocketDir;
 pub use denial::{
     Access, CappedSink, Clock, DENIAL_WINDOW, DENIALS_PER_WINDOW, Denial, DenialSink, GitItem,
-    HostRefusal, PathClass, Reachability, SystemClock,
+    GitOutcome, HostRefusal, PathClass, Reachability, SystemClock,
 };
 pub use detect::{Detection, NoSandbox, SET_UP_BY_OTHER_USER, Tier, detect, probe};
 pub use error::Error;

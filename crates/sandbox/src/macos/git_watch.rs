@@ -1,52 +1,59 @@
 //! The git watch: the lawyer-side backstop against what an agent leaves in the matter for the
 //! lawyer's own git to trust (decision record 0038). The agent runs as the lawyer, so whatever
 //! it leaves is the lawyer's, and the lawyer's git, or an editor polling git, would run a
-//! repository's hooks and `core.fsmonitor` as the lawyer. Seatbelt refuses a new `.git` by
-//! name, but checks only the last name of a rename's destination: a folder holding a `.git`,
-//! made in `TMPDIR`, the state folder or the notes folder, moves into the matter under any other
-//! name. A bare repository needs no `.git` name at all, and a link can lead git out of the
-//! matter. So outside the jail, while each jailed session runs, the watch sets aside:
+//! repository's hooks and `core.fsmonitor` as the lawyer. Seatbelt refuses a new `.git` or
+//! `HEAD` by name, but checks only the last name of a rename's destination: a folder holding a
+//! repository, made in the state folder, moves into the matter under any other name. A link
+//! can lead git out of the matter. So outside the jail, while each jailed session runs, the
+//! watch looks for:
 //!
 //! - every new `.git` (a folder, or a file naming a `gitdir:`);
-//! - every new repository-shaped folder (`HEAD`, a file or a link, with `objects` and `refs`
-//!   folders or a `commondir` file), whole; in a folder that existed at launch, only its `HEAD`;
-//! - every new `HEAD` file or link, or its folder when that is new and repository-shaped;
-//! - every new link whose target resolves outside the matter, or doesn't resolve.
+//! - every `HEAD` (a file or a link) in a folder that was not a repository at launch, whatever
+//!   surrounds it; a new repository-shaped folder (`HEAD` with `objects` and `refs`, folders
+//!   or links, or a `commondir` file) is taken whole;
+//! - every new link whose target resolves outside the matter, or doesn't resolve;
+//! - anything new at a launch repository's `commondir` target that git would read there.
 //!
 //! Names compare as the volume does: without the code points HFS+ ignores
 //! (`strip_hfs_ignorables`), then by the policy's fold (APFS). How:
 //!
-//! - `FSEvents` watches the matter (`fsevents.rs`: file events, no defer, 0.1 s latency). A new
-//!   or renamed-in item is checked, and a new, renamed-in or cloned folder is scanned whole. A
-//!   dropped or must-scan event, or a changed root, rescans the matter. A stream that cannot
-//!   start falls back to a full scan every 2 s, logged.
+//! - `FSEvents` watches the matter (`fsevents.rs`: file events, no defer, 0.1 s latency). Any
+//!   event re-checks its parent folder; a new or renamed-in folder is scanned whole. A dropped
+//!   or must-scan event, a changed root, or a path outside the matter rescans the matter. A
+//!   stream that cannot start falls back to a full scan every 2 s, logged.
 //! - What was there at launch is left alone while it keeps its file ID: the `.git`s the
 //!   policy's walk found (the profile denies every write to them), the links it found leading
-//!   out, and the bare repositories and folders of the watch's own walk at its start.
-//! - A full scan runs once the jailed tree has exited.
+//!   out, and the repositories, `HEAD` folders and folders of the watch's own walk.
+//! - On the first find while the agent may run, the watch ends every process of the session:
+//!   the process group, the tree, and every process carrying the launch's Seatbelt probe
+//!   (`jail_procs.rs`), which finds a `setsid` child re-parented to launchd. Only once none
+//!   is left does it scan the matter and set aside, so nothing races the moves.
 //! - Setting aside is one `rename(2)`, never replacing, into
-//!   `<git_set_aside>/<UTC time>-<session>-<n>/item` beside a `record.json` (`aside.rs`). The
-//!   folder is in the data dir, hidden from the agent: the policy checks it is inside a hidden
-//!   path and apart from every path allowed again, and the profile denies it last. Nothing is
-//!   ever deleted.
-//! - A move that fails while the agent runs (`EXDEV`, a matter on another volume, or anything
-//!   else) ends the session through the process tree's kill; once the tree is gone the final
-//!   scan renames each such item in place to `<name>-set-aside-by-clauseo-<n>`, which git never
-//!   reads, and records it (fail-closed).
+//!   `<set-aside>/<UTC time>-<session>-<random>/item` beside a `record.json` (`aside.rs`),
+//!   with the item's own `HEAD` and `config` renamed. The folder is the data dir's, or a
+//!   `.clauseo` folder at the root of the matter's volume when that is another; the profile
+//!   denies both. An item that still can't move is neutralised in place: its `HEAD` and
+//!   `config` and its own name get a random `-set-aside-by-clauseo-` suffix, and a link is
+//!   removed once its target is recorded. If that fails too, the matter's next launch is
+//!   refused until the item is gone.
+//! - A small state file per matter (`state.rs`) records each running session's launch
+//!   baseline. A session whose host quit before its final scan gets that scan at the matter's
+//!   next launch, after its surviving processes are killed.
 //! - Each set-aside reaches the launch's sink as [`Denial::GitSetAside`](crate::Denial),
 //!   uncapped.
-//! - Scans never follow a link and never enter a network volume (`os::local`).
+//! - Scans never follow a link and never enter a network volume (`os::local`); a matter on
+//!   one is never scanned, which is logged.
 //!
 //! The pieces: [`Watch`] decides (`check.rs`), `aside.rs` moves and records, `run.rs` drives
-//! the watch from the stream and the session, `os.rs` is the real file system and
-//! `fsevents.rs` the stream.
+//! the watch from the stream and the session, `state.rs` keeps the per-matter record, `os.rs`
+//! is the real file system and `fsevents.rs` the stream.
 
 use std::ffi::{OsStr, OsString};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use crate::policy::opens_as;
+use crate::policy::{opens_as, under};
 use crate::{LinkKind, PathRule, Policy};
 
 mod aside;
@@ -54,6 +61,7 @@ mod check;
 mod fsevents;
 mod os;
 mod run;
+mod state;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -133,6 +141,12 @@ pub(crate) trait Fs: Send {
     fn rename_new(&self, from: &Path, to: &Path) -> io::Result<()>;
     /// Writes a new file; an existing one is `AlreadyExists`.
     fn write_new(&self, path: &Path, bytes: &[u8]) -> io::Result<()>;
+    /// Where the link at `path` leads, as written.
+    fn read_link(&self, path: &Path) -> io::Result<PathBuf>;
+    /// Removes the link at `path`, never anything else.
+    fn remove_link(&self, path: &Path) -> io::Result<()>;
+    /// A random number, for names no one can guess.
+    fn random(&self) -> u64;
     /// The wall time, for records.
     fn now(&self) -> SystemTime;
 }
@@ -140,9 +154,9 @@ pub(crate) trait Fs: Send {
 /// Whether the session's agent may still be running.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Phase {
-    /// It may: a failed move must end the session.
+    /// It may: a find ends the session, and nothing moves yet.
     Running,
-    /// Its tree is gone: a failed move renames in place.
+    /// Every process of it is gone: finds are set aside.
     Ended,
 }
 
@@ -152,7 +166,7 @@ pub(crate) enum Phase {
 pub(crate) struct Asks {
     /// The events were incomplete: scan the whole matter.
     pub(crate) rescan: bool,
-    /// A move failed while the agent ran: end the session.
+    /// Something was found while the agent may run: end the session.
     pub(crate) end: bool,
 }
 
@@ -165,12 +179,15 @@ impl Asks {
     }
 }
 
-/// What the launch knew of the matter, from its policy: its `.git`s, and its links that lead
-/// out of the matter or nowhere.
+/// What the launch knew of the matter, from its policy: its `.git`s, its links that lead out
+/// of the matter or nowhere, the paths at its repositories' `commondir` targets inside the
+/// matter, and the volume set-aside folder when it is inside the matter.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Launch {
     pub(crate) git: Vec<PathBuf>,
     pub(crate) links: Vec<PathBuf>,
+    pub(crate) common: Vec<PathBuf>,
+    pub(crate) skip: Vec<PathBuf>,
 }
 
 impl Launch {
@@ -190,6 +207,19 @@ impl Launch {
                 .iter()
                 .filter(|finding| finding.kind == LinkKind::Symlink)
                 .map(|finding| finding.path.clone())
+                .collect(),
+            common: policy
+                .git
+                .commondir
+                .iter()
+                .flat_map(crate::policy::git_aside::CommonDir::denied)
+                .filter(|path| under(path, policy.matter()))
+                .collect(),
+            skip: policy
+                .volume_set_aside()
+                .filter(|dir| under(dir, policy.matter()))
+                .map(Path::to_owned)
+                .into_iter()
                 .collect(),
         }
     }
@@ -211,23 +241,30 @@ fn is_head(name: &OsStr) -> bool {
     is_name(name, "HEAD")
 }
 
+/// The `HEAD` file or link in a folder's listing, with its kind.
+fn head_of(entries: &[(OsString, Kind)]) -> Option<(&OsStr, Kind)> {
+    entries
+        .iter()
+        .find(|(name, kind)| matches!(kind, Kind::File | Kind::Link) && is_head(name))
+        .map(|(name, kind)| (name.as_os_str(), *kind))
+}
+
 /// The name of the `HEAD` in a folder's listing that makes it a repository as git's discovery
-/// sees one (bare, or a `.git`'s insides): `HEAD` (a file or a link) with an `objects` and a
-/// `refs` folder, or with a `commondir` file (a linked worktree's git folder).
+/// sees one (bare, or a `.git`'s insides): `HEAD` (a file or a link) with `objects` and
+/// `refs` (folders, or links, which git follows), or with a `commondir` file (a linked
+/// worktree's git folder).
 fn repo_head(entries: &[(OsString, Kind)]) -> Option<&OsStr> {
     let has = |want: &str, dir: bool| {
         entries.iter().any(|(name, kind)| {
             let fits = if dir {
-                *kind == Kind::Dir
+                matches!(kind, Kind::Dir | Kind::Link)
             } else {
                 matches!(kind, Kind::File | Kind::Link)
             };
             fits && is_name(name, want)
         })
     };
-    let head = entries
-        .iter()
-        .find(|(name, kind)| matches!(kind, Kind::File | Kind::Link) && is_head(name))?;
+    let (head, _) = head_of(entries)?;
     let shaped = (has("objects", true) && has("refs", true)) || has("commondir", false);
-    shaped.then_some(head.0.as_os_str())
+    shaped.then_some(head)
 }

@@ -130,7 +130,12 @@ impl World {
 
     /// [`World::builder`] with the matter at `matter` (relative) in place of `m1`.
     pub(crate) fn builder_for(&self, matter: &str) -> PolicyBuilder {
-        Policy::builder(self.at(matter), self.at("data/agent-state/m1/codex"))
+        self.builder_at(&self.at(matter))
+    }
+
+    /// [`World::builder`] with the matter at `matter` (absolute) in place of `m1`.
+    pub(crate) fn builder_at(&self, matter: &Path) -> PolicyBuilder {
+        Policy::builder(matter, self.at("data/agent-state/m1/codex"))
             .home(self.at("home"))
             .notes(self.at("data/agent-state/m1/notes"))
             .credential_link(self.at("data/agent-state/m1/codex/auth.json"))

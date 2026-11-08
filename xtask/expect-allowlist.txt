@@ -389,6 +389,13 @@ crates/sandbox/src/macos/git_watch/os.rs Real::make_dirs clippy::disallowed_meth
 crates/sandbox/src/macos/git_watch/os.rs Real::make_dir clippy::disallowed_methods
 crates/sandbox/src/macos/git_watch/os.rs Real::write_new clippy::disallowed_methods
 crates/sandbox/src/macos/git_watch/os.rs Real::now clippy::disallowed_methods
+crates/sandbox/src/macos/git_watch/os.rs Real::remove_link clippy::disallowed_methods
+crates/sandbox/src/macos/git_watch/os.rs Lock::0 dead_code
+crates/sandbox/src/macos/git_watch/os.rs lock clippy::disallowed_methods
+crates/sandbox/src/macos/git_watch/os.rs replace clippy::disallowed_methods
+crates/sandbox/src/macos/git_watch/os.rs volume_folder clippy::disallowed_methods
+crates/sandbox/src/macos/git_watch/aside.rs Aside::done clippy::too_many_arguments
+crates/sandbox/src/macos/jail_procs.rs - unsafe_code
 crates/sandbox/src/macos/git_watch/tests_live.rs - clippy::disallowed_methods
 crates/sandbox/src/macos/launcher.rs make_tmpdir clippy::disallowed_methods
 crates/sandbox/tests/jail/support.rs - clippy::disallowed_methods

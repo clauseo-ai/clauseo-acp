@@ -264,6 +264,11 @@ expression: w.render(&policy)
   (require-all (vnode-type DIRECTORY) (path-ancestors (param "STATE_READ_ONLY_0")))
   (with message "clauseo-4242-7"))
 
+; The launch's probe name, which no service registers: the lawyer's side finds
+; the session's processes by it, whatever group or parent they have.
+(allow mach-lookup
+  (global-name (param "SESSION_PROBE")))
+
 ;; parameters
 MATTER = <root>/matter
 STATE = <root>/data/agent-state/m1/codex
@@ -282,3 +287,4 @@ READ_ONLY_10 = <root>/matter/sub/.git
 LINK_0 = <root>/matter/to-secret
 HIDDEN_0 = <root>/data
 STATE_READ_ONLY_0 = <root>/data/agent-state/m1/codex/config.toml
+SESSION_PROBE = <outside the temp folder: chat.clauseo.session.clauseo-4242-7>

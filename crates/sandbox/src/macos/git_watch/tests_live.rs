@@ -1,6 +1,8 @@
 //! The git watch on this Mac's `FSEvents`, one temp matter per test: a `git init` folder moved
-//! in, a bare repository moved in, a repository cloned whole by `clonefile(2)`, and links out
-//! of the matter, each set aside within 2 s with its record; a link inside the matter stays.
+//! in, a bare repository moved in, a repository cloned whole by `clonefile(2)`, a folder of
+//! `HEAD` and `config` moved in, `objects` and `refs` added to a launch `HEAD` folder, and
+//! links out of the matter: each ends the session, then is set aside within 2 s with its record;
+//! a link inside the matter stays.
 
 #![expect(
     clippy::disallowed_methods,
@@ -12,9 +14,11 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use super::aside::Aside;
 use super::run::start_with;
+use super::state::FileStore;
 use super::{Launch, Session, Watch, fsevents, os};
-use crate::{Clock as _, Denial, DenialSink, GitItem, SystemClock};
+use crate::{Clock as _, Denial, DenialSink, GitItem, GitOutcome, SystemClock};
 
 #[derive(Default)]
 struct Notices(Mutex<Vec<Denial>>);
@@ -33,7 +37,7 @@ impl Session for Running {
     }
 
     fn end(&self) {
-        panic!("the move must not fail on one volume");
+        self.0.store(true, Ordering::SeqCst);
     }
 }
 
@@ -52,6 +56,11 @@ struct Live {
 
 impl Live {
     fn new() -> Live {
+        Live::with(|_| {})
+    }
+
+    /// A live watch whose matter `setup` fills before the launch.
+    fn with(setup: impl FnOnce(&Path)) -> Live {
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
         let root = PathBuf::from(format!("/private/tmp/cgw-{}-{n}", std::process::id()));
         if root.exists() {
@@ -61,6 +70,7 @@ impl Live {
         let tmp = root.join("tmp");
         std::fs::create_dir_all(&matter).unwrap();
         std::fs::create_dir_all(&tmp).unwrap();
+        setup(&matter);
         let live = Live {
             set_aside: root.join("data/sandbox/git-set-aside"),
             root,
@@ -69,16 +79,17 @@ impl Live {
             notices: Arc::new(Notices::default()),
             gone: Arc::new(AtomicBool::new(false)),
         };
-        let watch = Watch::new(
-            os::Real,
+        let session = format!("clauseo-live-{n}");
+        let aside = Aside::new(
             live.matter.clone(),
             live.set_aside.clone(),
-            format!("clauseo-live-{n}"),
-            &Launch::default(),
+            session.clone(),
             Arc::clone(&live.notices) as Arc<dyn DenialSink>,
         );
-        let watching = start_with(watch, fsevents::start).unwrap();
-        watching.attach(Box::new(Running(Arc::clone(&live.gone))));
+        let watch = Watch::new(os::Real, live.matter.clone(), aside, &Launch::default());
+        let store = FileStore::new(&live.set_aside, &live.matter);
+        let watching = start_with(watch, session, store, fsevents::start).unwrap();
+        watching.attach(Arc::new(Running(Arc::clone(&live.gone))));
         live
     }
 
@@ -89,9 +100,14 @@ impl Live {
             std::fs::symlink_metadata(path).is_err()
         });
         println!("{} set aside {latency:?} after the change", path.display());
+        assert!(
+            self.gone.load(Ordering::SeqCst),
+            "the session was ended first"
+        );
         let folders: Vec<PathBuf> = std::fs::read_dir(&self.set_aside)
             .unwrap()
             .map(|e| e.unwrap().path())
+            .filter(|p| !p.ends_with("matters"))
             .collect();
         assert_eq!(folders.len(), 1, "{folders:?}");
         let record = folders[0].join("record.json");
@@ -99,7 +115,7 @@ impl Live {
         let record: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&record).unwrap()).unwrap();
         assert_eq!(record["original"], path.to_str().unwrap());
-        assert_eq!(record["how"], "moved");
+        assert!(record["outcome"]["moved"].is_string(), "{record}");
         wait_for("the notice", Duration::from_secs(1), || {
             !self.notices.0.lock().unwrap().is_empty()
         });
@@ -146,16 +162,61 @@ fn a_repository_moved_into_a_watched_matter_is_set_aside_within_two_seconds() {
     let moved = live.matter.join("foo/.git");
     let (_, folder, notices) = live.set_aside(&moved);
     assert!(live.matter.join("foo").is_dir(), "the folder itself stays");
-    assert!(folder.join("item/HEAD").exists());
+    assert!(folder.join("item/objects").is_dir());
+    assert!(
+        !folder.join("item/HEAD").exists(),
+        "the set-aside item's HEAD is renamed"
+    );
     assert_eq!(
         notices,
         [Denial::GitSetAside {
             path: Path::new("foo/.git").to_owned(),
             what: GitItem::DotGit,
-            moved_to: Some(folder.join("item")),
-            session_ended: false,
+            outcome: GitOutcome::Moved(folder.join("item")),
+            session_ended: true,
         }]
     );
+}
+
+#[test]
+fn a_folder_of_head_and_config_moved_in_loses_its_head() {
+    let live = Live::new();
+    let half = live.tmp.join("half");
+    std::fs::create_dir(&half).unwrap();
+    std::fs::write(half.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+    std::fs::write(half.join("config"), "[core]\n").unwrap();
+    std::fs::rename(&half, live.matter.join("half")).unwrap();
+    let (_, _, notices) = live.set_aside(&live.matter.join("half/HEAD"));
+    assert!(live.matter.join("half/config").exists());
+    assert!(matches!(
+        &notices[..],
+        [Denial::GitSetAside {
+            what: GitItem::BareRepoHead,
+            ..
+        }]
+    ));
+}
+
+#[test]
+fn objects_and_refs_added_to_a_launch_head_folder_take_its_head() {
+    let live = Live::with(|matter| {
+        let half = matter.join("half");
+        std::fs::create_dir(&half).unwrap();
+        std::fs::write(half.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        std::fs::write(half.join("config"), "[core]\n").unwrap();
+    });
+    let half = live.matter.join("half");
+    std::fs::create_dir(half.join("objects")).unwrap();
+    std::fs::create_dir(half.join("refs")).unwrap();
+    let (_, _, notices) = live.set_aside(&half.join("HEAD"));
+    assert!(half.join("objects").is_dir() && half.join("config").exists());
+    assert!(matches!(
+        &notices[..],
+        [Denial::GitSetAside {
+            what: GitItem::BareRepoHead,
+            ..
+        }]
+    ));
 }
 
 #[test]

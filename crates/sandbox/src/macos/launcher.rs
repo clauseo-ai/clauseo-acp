@@ -13,6 +13,7 @@ use clauseo_process::{
 };
 
 use super::git_watch::{self, Session};
+use super::jail_procs::Probe;
 use super::profile::{self, SeatbeltProfile};
 use super::watch::{self, Registration};
 use crate::{CappedSink, DenialSink, Policy};
@@ -34,10 +35,12 @@ pub(crate) type LaunchSink = CappedSink<Arc<dyn DenialSink>>;
 /// unregisters it, and the last one stops the watcher. So the host keeps the launcher alive
 /// while its agent runs: denials of an agent whose launcher is gone are not reported.
 ///
-/// Each launch starts the git watch on the matter before the agent, and it runs until the
-/// agent's tree is gone, whatever happens to the launcher (decision record 0038). A launch is
-/// refused when the policy names no [`git_set_aside`](crate::PolicyBuilder::git_set_aside)
-/// folder or that folder can't be made.
+/// Each launch starts the git watch on the matter before the agent, and it runs until every
+/// process of the session is gone, whatever happens to the launcher (decision record 0038). Each
+/// launch's profile gets a probe name of its own, by which the watch finds the session's
+/// processes even after `setsid`. A launch is refused when the policy names no
+/// [`git_set_aside`](crate::PolicyBuilder::git_set_aside) folder, a set-aside folder can't be
+/// made, or the matter's state refuses it (decision record 0038).
 pub struct SeatbeltLauncher {
     policy: Arc<Policy>,
     profile: SeatbeltProfile,
@@ -102,7 +105,16 @@ impl SeatbeltLauncher {
     /// ([`Policy::tmpdir`]), which `launch` starts with no inherited variables; the same
     /// working folder and the same secrets for the stderr tail to hide.
     pub fn jailed_spec(&self, spec: &LaunchSpec) -> Result<LaunchSpec, clauseo_process::Error> {
-        let mut args = self.profile.args();
+        self.jailed_spec_with(spec, &self.profile.args())
+    }
+
+    /// [`SeatbeltLauncher::jailed_spec`] with `sandbox-exec`'s arguments given.
+    fn jailed_spec_with(
+        &self,
+        spec: &LaunchSpec,
+        profile_args: &[OsString],
+    ) -> Result<LaunchSpec, clauseo_process::Error> {
+        let mut args = profile_args.to_vec();
         args.push(OsString::from(spec.program()));
         args.extend(spec.args().iter().cloned());
         let mut env = spec.env().clone();
@@ -137,44 +149,53 @@ impl SeatbeltLauncher {
 
 impl Launcher for SeatbeltLauncher {
     fn launch(&self, spec: &LaunchSpec) -> Result<Launched, clauseo_process::Error> {
-        let jailed = self.jailed_spec(spec)?;
+        let n = self.launches.fetch_add(1, Ordering::Relaxed);
+        let probe = Probe::new(&self.tag, n);
+        let jailed =
+            self.jailed_spec_with(spec, &profile::args_with_probe(&self.profile, probe.name()))?;
         make_tmpdir(&self.policy.tmpdir()).map_err(|source| clauseo_process::Error::Os {
             what: "the agent's TMPDIR could not be made",
             source,
         })?;
         self.register();
-        let n = self.launches.fetch_add(1, Ordering::Relaxed);
         let notices = Arc::clone(self.sink.inner());
-        let watching = git_watch::start(&self.policy, format!("{}-{n}", self.tag), notices)
-            .map_err(|source| clauseo_process::Error::Os {
-                what: "the git watch could not start",
-                source,
+        let session = format!("{}-{n}", self.tag);
+        let watching =
+            git_watch::start(&self.policy, &session, &probe, notices).map_err(|source| {
+                clauseo_process::Error::Os {
+                    what: "the git watch could not start",
+                    source,
+                }
             })?;
         let launched = spawn_in_tree(&jailed, &self.opts)?;
-        watching.attach(Box::new(Tree {
+        watching.attach(Arc::new(Tree {
             watch: launched.handle.tree_watch(),
             kill: launched.handle.tree_kill(),
+            probe,
         }));
         Ok(launched)
     }
 }
 
-/// The jailed tree, for the git watch: it ends with the tree, and ends the tree when a `.git`
-/// can't leave the matter.
+/// The jailed session, for the git watch: its process group and tree, and every process
+/// carrying its probe, which finds one that left the group with `setsid` and lost its parent.
 struct Tree {
     watch: TreeWatch,
     kill: TreeKill,
+    probe: Probe,
 }
 
 impl Session for Tree {
     fn gone(&self) -> bool {
-        self.watch.gone()
+        self.watch.gone() && self.probe.gone()
     }
 
     fn end(&self) {
         if !self.kill.kill() {
             tracing::error!("the jailed tree's kill did not go");
         }
+        let sent = self.probe.kill_all();
+        tracing::debug!(sent, "the jailed session's processes were sent SIGKILL");
     }
 }
 

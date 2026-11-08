@@ -2,6 +2,7 @@ use super::*;
 use crate::test_support::TempDir;
 
 mod allowed;
+mod commondir;
 mod links;
 mod nested;
 mod reallowed;

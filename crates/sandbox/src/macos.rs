@@ -6,6 +6,8 @@
 #[cfg(target_os = "macos")]
 mod git_watch;
 #[cfg(target_os = "macos")]
+mod jail_procs;
+#[cfg(target_os = "macos")]
 mod launcher;
 mod profile;
 #[cfg(target_os = "macos")]

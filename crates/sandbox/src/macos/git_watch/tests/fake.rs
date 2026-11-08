@@ -8,8 +8,10 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
-use super::super::{Asks, Event, Fs, Kind, Launch, Meta, Session, Watch, flags};
-use crate::{Denial, DenialSink, GitItem};
+use super::super::aside::Aside;
+use super::super::state::{MatterState, Store};
+use super::super::{Asks, Event, Fs, Kind, Launch, Meta, Phase, Session, Watch, flags};
+use crate::{Denial, DenialSink, GitItem, GitOutcome};
 
 /// The fake volume: every entry by path, with its kind and inode.
 #[derive(Default)]
@@ -22,6 +24,12 @@ struct Disk {
     fail_moves: Option<i32>,
     /// Each link's target, absolute.
     targets: BTreeMap<PathBuf, PathBuf>,
+    /// Renames in place and link removals fail too.
+    fail_in_place: bool,
+    /// Listing this folder panics.
+    panic_on: Option<PathBuf>,
+    /// The last random number given.
+    random: u64,
 }
 
 #[derive(Clone, Default)]
@@ -88,6 +96,27 @@ impl FakeFs {
         self.0.lock().unwrap().fail_moves = Some(code);
     }
 
+    /// Fails every rename in place and every link removal too.
+    pub(super) fn fail_in_place(&self) {
+        self.0.lock().unwrap().fail_in_place = true;
+    }
+
+    /// Makes a listing of `dir` panic.
+    pub(super) fn panic_on(&self, dir: &str) {
+        self.0.lock().unwrap().panic_on = Some(PathBuf::from(dir));
+    }
+
+    /// The paths in folder `dir` whose name starts with `prefix`.
+    pub(super) fn named(&self, dir: &str, prefix: &str) -> Vec<PathBuf> {
+        let disk = self.0.lock().unwrap();
+        disk.entries
+            .keys()
+            .filter(|p| p.parent() == Some(Path::new(dir)))
+            .filter(|p| p.file_name().unwrap().to_string_lossy().starts_with(prefix))
+            .cloned()
+            .collect()
+    }
+
     /// The paths under the set-aside folder.
     pub(super) fn set_aside(&self) -> Vec<PathBuf> {
         let disk = self.0.lock().unwrap();
@@ -132,6 +161,10 @@ impl Fs for FakeFs {
 
     fn list(&self, dir: &Path) -> io::Result<Vec<(OsString, Kind)>> {
         let disk = self.0.lock().unwrap();
+        if disk.panic_on.as_deref() == Some(dir) {
+            drop(disk);
+            panic!("the fake's listing of {} panics", dir.display());
+        }
         Ok(disk
             .entries
             .iter()
@@ -185,6 +218,9 @@ impl Fs for FakeFs {
         {
             return Err(io::Error::from_raw_os_error(code));
         }
+        if disk.fail_in_place && to.to_string_lossy().contains("set-aside-by-clauseo") {
+            return Err(io::Error::from_raw_os_error(1));
+        }
         if !disk.entries.contains_key(from) {
             return Err(io::ErrorKind::NotFound.into());
         }
@@ -221,8 +257,51 @@ impl Fs for FakeFs {
         Ok(())
     }
 
+    fn read_link(&self, path: &Path) -> io::Result<PathBuf> {
+        let disk = self.0.lock().unwrap();
+        disk.targets
+            .get(path)
+            .cloned()
+            .ok_or_else(|| io::ErrorKind::NotFound.into())
+    }
+
+    fn remove_link(&self, path: &Path) -> io::Result<()> {
+        let mut disk = self.0.lock().unwrap();
+        if disk.fail_in_place {
+            return Err(io::Error::from_raw_os_error(1));
+        }
+        match disk.entries.get(path) {
+            Some((Kind::Link, _)) => {
+                disk.entries.remove(path);
+                disk.targets.remove(path);
+                Ok(())
+            }
+            Some(_) => Err(io::Error::other("not a link")),
+            None => Err(io::ErrorKind::NotFound.into()),
+        }
+    }
+
+    fn random(&self) -> u64 {
+        let mut disk = self.0.lock().unwrap();
+        disk.random = disk
+            .random
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695);
+        disk.random
+    }
+
     fn now(&self) -> SystemTime {
         SystemTime::UNIX_EPOCH + Duration::from_hours(489_600)
+    }
+}
+
+/// A matter state in memory.
+#[derive(Clone, Default)]
+pub(super) struct MemStore(pub(super) Arc<Mutex<MatterState>>);
+
+impl Store for MemStore {
+    fn update<T>(&self, change: impl FnOnce(&mut MatterState) -> T) -> io::Result<T> {
+        Ok(change(&mut self.0.lock().unwrap()))
     }
 }
 
@@ -240,9 +319,13 @@ impl Notices {
     pub(super) fn taken(&self) -> Vec<Denial> {
         std::mem::take(&mut *self.0.lock().unwrap())
     }
+
+    pub(super) fn count(&self) -> usize {
+        self.0.lock().unwrap().len()
+    }
 }
 
-/// A session whose tree goes when told, or when ended (if `dies`).
+/// A session whose processes go when told, or when ended (if `dies`).
 #[derive(Clone, Default)]
 pub(super) struct FakeSession {
     pub(super) gone: Arc<AtomicBool>,
@@ -265,6 +348,17 @@ impl Session for FakeSession {
 
 static NEXT_SESSION: AtomicU32 = AtomicU32::new(0);
 
+/// The aside of a watch of `/m` for a new session.
+pub(super) fn aside(notices: &Arc<Notices>) -> Aside {
+    let n = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
+    Aside::new(
+        PathBuf::from(MATTER),
+        PathBuf::from(SET_ASIDE),
+        format!("clauseo-1-0-{n}"),
+        Arc::clone(notices) as Arc<dyn DenialSink>,
+    )
+}
+
 /// A watch of `/m`; `git` are the launch's `.git`s.
 pub(super) fn watch(fs: &FakeFs, git: &[&str]) -> (Watch<FakeFs>, Arc<Notices>) {
     watch_with(fs, git, &[])
@@ -276,21 +370,21 @@ pub(super) fn watch_with(
     git: &[&str],
     links: &[&str],
 ) -> (Watch<FakeFs>, Arc<Notices>) {
-    let notices = Arc::new(Notices::default());
     let paths = |p: &[&str]| p.iter().map(PathBuf::from).collect();
-    let launch = Launch {
-        git: paths(git),
-        links: paths(links),
-    };
-    let n = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
-    let watch = Watch::new(
-        fs.clone(),
-        PathBuf::from(MATTER),
-        PathBuf::from(SET_ASIDE),
-        format!("clauseo-1-0-{n}"),
-        &launch,
-        Arc::clone(&notices) as Arc<dyn DenialSink>,
-    );
+    watch_launch(
+        fs,
+        &Launch {
+            git: paths(git),
+            links: paths(links),
+            ..Launch::default()
+        },
+    )
+}
+
+/// [`watch`] with the launch given whole.
+pub(super) fn watch_launch(fs: &FakeFs, launch: &Launch) -> (Watch<FakeFs>, Arc<Notices>) {
+    let notices = Arc::new(Notices::default());
+    let watch = Watch::new(fs.clone(), PathBuf::from(MATTER), aside(&notices), launch);
     (watch, notices)
 }
 
@@ -301,9 +395,18 @@ pub(super) fn event(path: &str, flags: u32) -> Event {
     }
 }
 
-/// A check that must not ask to end the session.
+/// A check that found nothing: it does not ask to end the session.
 pub(super) fn quiet(asks: Asks) {
     assert!(!asks.end, "{asks:?}");
+}
+
+/// `events` find something while the agent may run: nothing moves, and the session must end.
+/// Then, the session ended, the final scan sets aside.
+pub(super) fn found(watch: &mut Watch<FakeFs>, events: &[Event]) {
+    let asks = watch.events(events);
+    assert!(asks.end, "{events:?}");
+    watch.ended_session();
+    quiet(watch.full_scan(Phase::Ended));
 }
 
 /// No notice came.
@@ -325,17 +428,12 @@ pub(super) fn assert_set_aside(notices: &Notices, rel: &str, want: GitItem) {
     let Denial::GitSetAside {
         path,
         what,
-        moved_to,
-        session_ended,
+        outcome: GitOutcome::Moved(to),
+        ..
     } = &notices[0]
     else {
         panic!("{notices:?}");
     };
     assert_eq!((path.as_path(), *what), (Path::new(rel), want));
-    assert!(
-        moved_to.as_ref().unwrap().starts_with(SET_ASIDE),
-        "{moved_to:?}"
-    );
-    assert!(moved_to.as_ref().unwrap().ends_with("item"));
-    assert!(!session_ended);
+    assert!(to.starts_with(SET_ASIDE) && to.ends_with("item"), "{to:?}");
 }
