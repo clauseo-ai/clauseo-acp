@@ -276,10 +276,11 @@ variant that carried each discriminating effect. On CI every variant gets 8 from
 `CreateDesktopW`, while their clipboard writes succeed, so the clipboard carries the row.
 
 Then the harness runs the positive control (`checks_ctl.rs`): `probe ui-control` once per
-variant, each on its own fresh window station `ClauseoS15Ctl-<hex>` made as the outer runner
-once made its named station (`CreateWindowStationW(name, 0, GENERIC_ALL, sa)`, a DACL of
-`SYSTEM`, the token's user and the harness's user, labelled Low, with a `Default` desktop),
-kept open while the process runs on `ClauseoS15Ctl-<hex>\Default`. No variant is in a job of
+variant, each on its own fresh control station (`win_station.rs`), made the unelevated way the
+outer runner makes the agent's: a pool user's interactive logon makes it unnamed
+(`Service-0x0-<LUID>$`), then the harness takes it over and gives it and its `Default` desktop
+a DACL of `SYSTEM`, the token's user and the harness's user (`GA` each), labelled Low. It is
+kept open while the process runs on `<station>\Default`. No variant is in a job of
 ours; each inherits whatever job the harness runs in (on CI, the runner service's), which the
 row notes. The probe tries `CreateDesktopW` on its own station, then the clipboard write, and
 prints each result with its token's user, integrity and restricting SIDs. Every variant's result
@@ -315,7 +316,7 @@ is printed. The variants, closest to the agent first:
 - (e) as (b), Low but with no restricting SIDs.
 - (f) the lawyer's own token unchanged, run as a child process the same way.
 
-A variant counts only when it ran on its station (`ClauseoS15Ctl-`, or the agent's for (g)) with
+A variant counts only when it ran on its station (a control one, or the agent's for (g)) with
 its own token shape. Of (a) to (f), only (d) or closer can carry an effect, since then the
 agent's refusal comes from the job's limits; what (e) and (f) succeed at is printed as evidence
 only. The row notes how each carrier differs from the agent. Any other read of the agent's

@@ -30,14 +30,13 @@ use clauseo_sandbox::windows::sids::Sid;
 use zeroize::Zeroizing;
 
 use super::checks::{pid_of, run, started};
-use super::checks_ui::random;
 use super::launch::{Running, Spec, deadline, launch_now, pool_of, summary};
 use super::manifest::Pool;
 use super::pool_verdict::{self, MID_SESSION_MS, Verdict, logon_sids};
 use super::rows::{Ctx, Outcome};
 use super::sys::{now, sleep};
-use super::win_desk::ControlStation;
 use super::win_logon::{Started, run_with_logon, start_with_logon};
+use super::win_station::ControlStation;
 use super::{token_verdict, win, win_pool};
 
 /// How long after the session's end `pool-processes-at-end` waits for the listing to empty.
@@ -107,9 +106,10 @@ pub(crate) fn settle(ctx: &Ctx<'_>, pool: &Pool) -> Result<(), String> {
     }
 }
 
-/// A fresh control station `ClauseoS15Ctl-<hex>` whose DACL names the harness and `pool`, its
-/// `Default` desktop's name, and `pool`'s password (`secret_for`, never printed): what a process
-/// the harness starts as `pool` outside any job needs. The call that failed otherwise.
+/// A fresh control station (`win_station.rs`, made through `pool`'s own logon) whose DACL names
+/// the harness and `pool`, its `Default` desktop's name, and `pool`'s password (`secret_for`,
+/// never printed): what a process the harness starts as `pool` outside any job needs. The call
+/// that failed otherwise.
 pub(crate) fn logon_parts(
     ctx: &Ctx<'_>,
     pool: &Pool,
@@ -117,14 +117,14 @@ pub(crate) fn logon_parts(
     let lawyer = win::own_token()
         .map_err(|e| format!("the harness's token: {e}"))?
         .user;
-    let station = format!("ClauseoS15Ctl-{}", random()?);
-    let held = ControlStation::open(&station, &[lawyer.as_str(), pool.sid.as_str()])
-        .map_err(|(call, code)| format!("{call} gave {code} (station {station})"))?;
     let sid = Sid::parse(&pool.sid).map_err(|e| e.to_string())?;
     // The crate's error text never holds the password.
     let password = secret_for(&ctx.manifest.data_dir, &sid)
         .map_err(|e| format!("secret_for({}): {e}", pool.sid))?;
-    Ok((held, format!("{station}\\Default"), password))
+    let held = ControlStation::open(&pool.name, &password, &[lawyer.as_str(), pool.sid.as_str()])
+        .map_err(|(call, code)| format!("{call} gave {code} (control station)"))?;
+    let desktop = held.desktop();
+    Ok((held, desktop, password))
 }
 
 /// The row's result from `verdict`: an INFO verdict marks the row INFO ([`Ctx::info`]).
