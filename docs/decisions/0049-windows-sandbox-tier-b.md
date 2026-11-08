@@ -1890,6 +1890,142 @@ process it couldn't stop, or once at Clauseo's start after an unclean session
 **What the app shows.** After a run that stopped something: "Clauseo stopped an agent that
 tried to leave the Safe workspace". The app thread owns the final copy and its Hindi.
 
+### The denial reporter, SYSTEM side
+
+On macOS the runner learns which files Seatbelt refused from `log stream` and shows them as
+`Denial::Path`. On Windows a refused open is logged nowhere unless someone asks. The spike
+(2026-11-08, WS2025 26100) settled the source: an ETW consumer of
+`Microsoft-Windows-Kernel-File`, run as SYSTEM, that keeps only the pool users' events. This
+section is the SYSTEM side (part A). The runner's client, classification and `Denial::Path` are
+part B; its fallback is the host-side source (a failed tool call, confirmed with
+`AuthzAccessCheck`).
+
+**The task.** Set-up registers `\Clauseo\SandboxWatch` (`SystemTask::Watch`,
+`late_steps::watch_task`) right after the stop task, for the owner it records, wherever an admin
+copy is installed (per machine or per user). The installer never registers it: `--adopt`
+registers `refresh::TASKS`, which leaves it out. It has the stop task's shape: LOCAL SYSTEM,
+`task_sddl` (the owner gets `FRFX`, so it can start and end it, nothing more), one instance at
+a time (`IGNORE_NEW`), no trigger, and the admin copy's action with `--watch` alone. Its time
+limit, 12 hours, is a backstop only. A failed registration doesn't fail the set-up: the
+reporter is a diagnostic with a fallback, and the next set-up tries again. `--remove` deletes
+it first in step 8, before the stop task and the record. `--remove --uninstall` deletes it in
+`refresh::TEARDOWN` after the stop task. Both go through `unregister_task`, which for this task
+disables it, ends a running watcher (`IRegisteredTask::Stop`), stops the session by name, and
+then deletes it. The runner starts it with `refresh::request_watch` (as the lawyer, through
+`FRFX`).
+
+**The watcher** (`setup::watch`, pure steps over the `Watcher` trait, Windows glue in
+`windows_trace.rs` and `windows_pipe.rs`):
+
+1. It refuses unless it runs as LOCAL SYSTEM from the admin copy (70).
+2. It reads `PoolSids` and `OwnerSid` from the record (71 when unreadable). Nothing comes from
+   the lawyer. An empty pool is nothing to watch (0).
+3. Every pool SID must pass `--stop`'s pool-user check (72).
+4. It stops any session named `ClauseoSandboxWatch` (`ControlTraceW`), so a crash leaves
+   nothing behind past the next start. It then starts that session in real time (64 KB
+   buffers, 4 to 64 of them, 1 s flush). It enables Kernel-File `{edd08927-9cc4-4e65-b970-
+   c2560fb5c289}` at level 5 with keywords `CREATE|OP_END` (`0xC0`), through `EnableTraceEx2`
+   with `EVENT_ENABLE_PROPERTY_SID`. PowerShell's module silently drops that property. A
+   provider whose 8 sessions are taken (`ERROR_NO_SYSTEM_RESOURCES`) exits **68**; part B then
+   uses the host-side source. Any other failure exits 73. Either way the session is stopped
+   again.
+5. It makes the pipe, publishes its name (74 on failure), and consumes on a thread
+   (`OpenTraceW` with `PROCESS_TRACE_MODE_REAL_TIME | PROCESS_TRACE_MODE_EVENT_RECORD`, then
+   `ProcessTrace`).
+
+**The consumer** (`consumer.rs`, with no Windows call):
+- **Create (12)** carries `Irp, FileObject, IssuingThreadId, CreateOptions, CreateAttributes,
+  ShareAccess, FileName`, and the opener's SID in its extended data. Kernel-File honours neither
+  the `EXECUTABLE_NAME` nor the `PID` scope filter (the spike measured both), so the SID is the
+  filter. A Create whose SID isn't a pool user's is dropped in the callback, its payload unread
+  past its `Irp`. That `Irp` serves only to forget a pending pool Create the IRP was reused
+  from.
+- **OperationEnd (24)** carries `Irp, ExtraInformation, Status`. IRPs are reused, so each pool
+  Create pairs with the next OperationEnd of its `Irp`. The pending map holds at most 4,096,
+  oldest evicted. `Status == 0xC0000022` makes a record.
+- **Parsing.** Payloads are read at fixed offsets, with lengths checked, not through TDH. The
+  consumer sees every OperationEnd on the machine (10⁴ a second during a build), and a TDH
+  lookup per event would cost more than the whole consumer does now.
+- **Access.** The access comes from `CreateOptions`: any disposition but `FILE_OPEN`, or
+  `FILE_DELETE_ON_CLOSE`, is `write`. A plain open is `unknown`, since a Create has no
+  `DesiredAccess`, and part B works it out with `AuthzAccessCheck`.
+- **Paths.** `FileName` is always the full `\Device\HarddiskVolumeN\…` path. It is mapped
+  through `QueryDosDeviceW` over the drive letters, listed again on a miss at most once a
+  second, and `\Device\Mup\` becomes `\\`. Any other device, or a volume with no letter, is
+  dropped, as macOS drops `/dev`.
+
+**The pipe.** `\\.\pipe\clauseo-sandbox-watch-<32 hex>`, 128 random bits per run.
+- **Descriptor:** `O:SYD:P(A;;FA;;;SY)(A;;FR;;;<OwnerSid>)S:(ML;;NWNR;;;ME)`. Only the record's
+  owner may open it, read only. The first instance uses `FILE_FLAG_FIRST_PIPE_INSTANCE`, every
+  instance uses `PIPE_REJECT_REMOTE_CLIENTS`, and at most 8 instances exist.
+- **The name** is published as `PipeName` (`REG_SZ`) in `HKLM\SOFTWARE\Clauseo\SandboxWatch`
+  (64-bit view). Each run deletes the key and makes it again, volatile, with
+  `O:SYD:P(A;;KA;;;SY)(A;;KR;;;BA)(A;;KR;;;BU)`, so only SYSTEM can point a client anywhere.
+  #733's SetUp pipe uses a fixed name, so this is the pattern its M2 will follow. The run
+  deletes the key as it exits; a crash leaves a name that names no pipe, and a restart clears
+  the key.
+- **Squatting.** A pool user can't make an instance of the live pipe: the DACL holds back
+  `FILE_CREATE_PIPE_INSTANCE`. After a crash, a pool user could make a pipe under the stale
+  name. So the client (part B) checks, as SetUp's client does, that the pipe's server is owned
+  by SYSTEM before it reads a byte, and only opens a name `protocol::is_pipe_name` accepts.
+- **Lines.** UTF-8 JSON, one per `\n`. A refusal is `{"v":1,"sid":"S-1-5-21-…","pid":1234,
+  "path":"C:\\…","access":"read"|"write"|"unknown"}`. What the rate dropped since the last
+  such line is `{"v":1,"dropped":n}`. `read` is reserved: this side never sends it today.
+  `protocol::Line::parse` reads both and refuses other versions. The client never writes.
+- **Rate.** At most 200 refusals a second at the source. The rest, and any the consumer's
+  1,024-record channel had no room for, go as one `dropped` line when the second ends. The
+  runner's own cap is 20 a second.
+
+**Lifetime** (`lifetime.rs`, the orchestrator's condition). The watcher runs only while a
+client is connected. It exits if no client connects within 30 s of its start, and 3 s after
+the last client leaves (a client back within the 3 s keeps it). Whatever the clients do, it
+ends after 11 hours, inside the task's 12, so it stops its session itself rather than be killed
+with it running. On every exit it deletes the published name, closes the pipe, stops the
+session and waits for the consumer thread. A trace that ends on its own exits 75. A watcher
+that is killed (the owner may end the task) leaves its session enabled. The kernel still
+generates events, which no one reads, until the next start, `--remove`, or a restart; sessions
+don't survive a restart.
+
+**Privacy.** A non-pool event is dropped in-process, in the callback. It is never stored,
+logged, persisted or sent. The output channel only ever carries a pool user's refusal, and the
+writer checks the SID against the pool again before a line goes out (`protocol::denied_line`).
+Unit tests cover both: a non-pool Create never reaches the consumer's output, and a non-pool
+record handed to the writer never reaches the pipe. Log lines carry counts only (clients, sent,
+dropped): no path, no SID. A pool user's paths go only to the record's owner, whose files they
+mostly are.
+
+**Cost** (spike pass 2, real-time, the same consumer logic). The consumer used 0.1 % of a core
+in every activity (at most 0.32 % in any run): about 88–96 % of events are dropped at once, by
+SID for 12 and by an empty or missed IRP lookup for 24. Nearly all the cost is kernel-side
+generation: about 0 at idle (235 events/s), 0.15 % of a core for an editing turn, and 1.85 %
+(SE 1.94) during `npm ci` (10,875 events/s, 649 kept). No events were lost. Latency is the 1 s
+flush.
+
+**Exit codes** (`WatchExit`; 68, then from 70; 69 is SetUp's):
+
+| Code | Meaning |
+|---|---|
+| 0 | served until the last client left, no client came, the run reached 11 h, or no pool is recorded |
+| 68 | the provider's 8 sessions are taken (`ERROR_NO_SYSTEM_RESOURCES`); part B falls back to the host-side source |
+| 70 | not LOCAL SYSTEM, or not run from the admin copy |
+| 71 | the record can't be read, or its `PoolSids` or `OwnerSid` is malformed |
+| 72 | a SID in `PoolSids` isn't a pool user |
+| 73 | the session couldn't be started, the provider enabled, or the consumer opened |
+| 74 | the pipe couldn't be made, its name published, or its clients polled |
+| 75 | the trace ended while serving |
+
+**Rows to check on the VM** (open):
+
+| Row | Check | Result |
+|---|---|---|
+| W1 | Lifetime after a run ends: the runner disconnects, and within 4 s the process is gone, `logman query -ets` lists no `ClauseoSandboxWatch`, and the `SandboxWatch` key is gone | open |
+| W2 | Lifetime after a crash: kill the watcher with `taskkill /f`; the session is left; the next `--watch` stops it first, and `--remove` stops it | open |
+| W3 | Defender (RTP on, no exclusions) and an EDR if available: no detection, no alert for the session or the task | open |
+| W4 | Windows 10 22H2 Home and Windows 11 Home: the task registers, the session starts, refusals arrive with the SID item | open |
+| W5 | Provider full: hold 8 sessions on Kernel-File, then `--watch` exits 68 and leaves no session | open |
+| W6 | Pipe squatting: a pool user makes `clauseo-sandbox-watch-<hex>` first (stale name after W2); the watcher's first instance is refused, and part B's SYSTEM-owner check refuses the squatter's pipe | open |
+| W7 | Cost re-measure: 10 `npm ci` on/off pairs in ABBA order, first runs included, as spike pass 2; consumer CPU, kernel-side total and lost events | open |
+
 ### The launcher (PR6 interface)
 
 This section is the single source both sides point to. The host and stage C agreed it, and the
