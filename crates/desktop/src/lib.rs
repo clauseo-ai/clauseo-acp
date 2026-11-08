@@ -95,6 +95,9 @@
 //! - The TypeScript bindings in `ui/app/src/transport/bindings.ts` are written by a unit test
 //!   (`src/commands/bindings.rs`); tauri-specta and specta are dev-dependencies only.
 
+// The admin copy's refresh at start-up runs on Windows; its decision is tested everywhere.
+#[cfg(any(windows, test))]
+mod admin_refresh;
 #[cfg(test)]
 mod agent_browser_pin;
 mod blocklist;
@@ -358,7 +361,8 @@ pub fn run() -> tauri::Result<()> {
 /// counts, which go to the host and to `app`'s `CountsState`, and whose task starts here. So
 /// does the agents' setup, from the same effective settings, on a `clauseo-setup` thread of its
 /// own (`setup/start.rs`), and the data connectors with their case-law relays
-/// (`connectors.rs`, R24). `proxies` are its egress proxies, on every OS (`egress.rs`).
+/// (`connectors.rs`, R24). `proxies` are its egress proxies, on every OS (`egress.rs`). On
+/// Windows, an `admin-refresh` thread follows it (`admin_refresh.rs`).
 fn start_host<R: Runtime>(
     app: AppHandle<R>,
     start: HostStart,
@@ -366,7 +370,7 @@ fn start_host<R: Runtime>(
     setup_parts: setup::SetupParts,
     proxies: Arc<egress::DesktopProxies>,
 ) -> std::io::Result<()> {
-    host_start::start_on_thread(start, move || {
+    let started = host_start::start_on_thread(start, move || {
         let began = open::now();
         // Off this thread: the host starts without Documents and takes it when it answers.
         let documents = host_start::documents_later(locations.clone(), began, |at| {
@@ -444,7 +448,11 @@ fn start_host<R: Runtime>(
         // The updater, and a watch on the host that exits the app to install (update.rs).
         let config = egress::with_proxies(update::with_updater(&app, config, &locations), &proxies);
         update::start_host(&app, with_profile(config, profile, hook))
-    })
+    });
+    // Once the host start is kicked off; nothing waits for it (admin_refresh.rs).
+    #[cfg(windows)]
+    admin_refresh::spawn();
+    started
 }
 
 /// Puts `counts` in `app`'s `CountsState` and starts their task, which asks the bridge's host

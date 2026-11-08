@@ -63,6 +63,8 @@ use sha2::{Digest, Sha256};
 
 #[cfg(test)]
 mod fake;
+#[cfg(windows)]
+pub mod installed;
 pub mod key;
 #[cfg(test)]
 mod key_tests;
@@ -92,6 +94,8 @@ mod windows_refresher;
 #[cfg(windows)]
 pub(crate) mod windows_tests;
 
+#[cfg(windows)]
+pub use installed::{installed_setup_sha256, recorded_admin_copy_sha256};
 pub use rules::{
     EXECUTION_LIMIT, REFRESH_ARG, STAGING_SDDL, STOP_ARG, STOP_EXECUTION_LIMIT, SystemTask, TASKS,
     TEARDOWN, Teardown, action_path, hex, inside_profile, same_path, sddl_matches, task_sddl,
