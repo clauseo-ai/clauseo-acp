@@ -96,7 +96,12 @@ impl TokenSpec {
         matter: Option<&Sid>,
     ) -> Result<TokenSpec, TokenSpecError> {
         account("the pool user", pool_user)?;
-        account("the desktop user", desktop_user)?;
+        if !desktop_user.is_user_account() {
+            return Err(TokenSpecError::NotAnAccount {
+                role: "the desktop user",
+                sid: desktop_user.clone(),
+            });
+        }
         if let Some(matter) = matter {
             account("the matter SID", matter)?;
         }
@@ -272,8 +277,9 @@ pub fn is_logon_sid(sid: &Sid) -> bool {
     parts.len() == 6 && parts.get(..4) == Some(&["S", "1", "5", "5"][..])
 }
 
-/// Refuses a SID that can't be one account: anything outside `S-1-5-21-…` (a machine or domain
-/// account), which leaves out every well-known group and service SID.
+/// Refuses a SID that can't be a pool user or a matter: anything outside `S-1-5-21-…` (a machine
+/// or domain account), which leaves out every well-known group and service SID. The desktop
+/// user is held to [`Sid::is_user_account`] instead, which takes an Entra ID user too.
 fn account(role: &'static str, sid: &Sid) -> Result<(), TokenSpecError> {
     let parts: Vec<&str> = sid.as_str().split('-').collect();
     // S-1-5-21-a-b-c-rid: an account of a machine or a domain.

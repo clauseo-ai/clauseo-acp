@@ -69,6 +69,18 @@ impl Sid {
             && rid.is_some_and(|rid| rid >= MATTER_RID_MIN)
     }
 
+    /// Whether this can be a person's own account, the user of an interactive logon: a machine's
+    /// or an AD domain's account (`S-1-5-21-<a>-<b>-<c>-<rid>`, which a local account linked to
+    /// a Microsoft account is too) or an Entra ID user (`S-1-12-1-<a>-<b>-<c>-<d>`). Every
+    /// well-known SID (`S-1-5-18`, `S-1-1-0`), builtin group (`S-1-5-32-…`), service
+    /// (`S-1-5-80-…`), virtual account (`S-1-5-83-…`, `S-1-5-90-…`, `S-1-5-96-…`), logon SID,
+    /// `AppContainer` and capability (`S-1-15-…`) is refused. [`Sid::parse`] already held the
+    /// text to canonical decimals, so the authority is compared exactly.
+    pub fn is_user_account(&self) -> bool {
+        let parts: Vec<&str> = self.0.split('-').collect();
+        parts.len() == 8 && matches!(parts.get(2..4), Some(["5", "21"] | ["12", "1"]))
+    }
+
     /// The account domain of a SID under `S-1-5-21` (a machine's or a domain's): the three
     /// sub-authorities after `21`, when a relative id follows them or not. `None` for others.
     pub fn domain(&self) -> Option<[u32; 3]> {
@@ -224,6 +236,43 @@ mod tests {
         for found in ["S-1-5-18", "S-1-5-21-7-8-9-1002", "S-1-1-0"] {
             assert!(!data_dir_ok(found, true), "{found}");
             assert!(!data_dir_ok(found, false), "{found}");
+        }
+    }
+
+    #[test]
+    fn a_user_account_is_a_machine_domain_or_entra_account_and_nothing_else() {
+        for user in [
+            "S-1-5-21-7-8-9-1001",
+            "S-1-5-21-1004336348-1177238915-682003330-500",
+            "S-1-12-1-3263492174-1177263218-2391161522-1513380577",
+        ] {
+            assert!(Sid::parse(user).unwrap().is_user_account(), "{user}");
+        }
+        for not_user in [
+            "S-1-5-18",
+            "S-1-5-19",
+            "S-1-5-20",
+            "S-1-1-0",
+            "S-1-5-4",
+            "S-1-5-32-544",
+            "S-1-5-5-0-123456",
+            "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464",
+            "S-1-5-83-1-1-2-3-4",
+            "S-1-5-90-0-1",
+            "S-1-5-96-0-1",
+            "S-1-15-2-1-2-3-4-5-6-7",
+            "S-1-15-3-1024-1-2-3-4-5-6-7",
+            "S-1-11-96-3623454863-58364-18864-2661722203-1597581903",
+            "S-1-5-21-7-8-9",
+            "S-1-5-21-7-8-9-1001-2",
+            "S-1-12-1-1-2-3",
+            "S-1-12-2-1-2-3-4",
+            "S-1-16-12288",
+        ] {
+            assert!(
+                !Sid::parse(not_user).unwrap().is_user_account(),
+                "{not_user}"
+            );
         }
     }
 
