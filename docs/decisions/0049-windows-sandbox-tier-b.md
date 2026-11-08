@@ -2028,13 +2028,16 @@ the pool-user check. No record, or an empty pool, is nothing to sweep. Then it:
    an `Id` value; a folder's holds none), opened read-only in the 64-bit view, each key from
    `HKLM` by its whole path. Each is capped at 100 000 entries (`LISTED_CAP`) and 10 000
    folders. A task either holds that the walk didn't list, compared exactly and then as
-   Windows compares names (below), is hidden and 56, unless its task file, under the
-   fallback's trust rules above, names a principal that resolves to a SID that isn't the
-   pool's or is another domain's name: then it is skipped, counted with the tasks skipped by
-   their file. With no task object there is no descriptor owner to read, so a hidden task is
-   never deleted: nothing is deleted through a file or the registry, and the run fails closed.
-   A listing that can't be read is 56 too. The log line counts hidden tasks ("not listed (in a
-   task file or the cache only)");
+   Windows compares names (below), is hidden and 56, unless the owner of the security
+   descriptor its cache key holds (the task's `TaskCache\Tree\<path>` key, its `SD` value,
+   `REG_BINARY`, read-only in the 64-bit view) isn't a pool SID, as the fallback asks of a
+   task's own descriptor, and its task file, under the fallback's trust rules above, names a
+   principal that resolves to a SID that isn't the pool's or is another domain's name: then it
+   is skipped, counted with the tasks skipped by their file. A pool owner, or an `SD` that is
+   missing or can't be read, keeps it 56. A hidden task is never deleted: with no task object,
+   nothing is deleted through a file or the registry, and the run fails closed. A listing that
+   can't be read is 56 too. The log line counts hidden tasks ("not listed (in a task file or
+   the cache only)");
 4. cancels every BITS job a pool user owns with the stop's BITS step
    (`pool_steps::cancel_pool_jobs`), whatever the walk found. Only then, with no pool task
    left to trigger and no job left to notify, it stops the running instances of the pool's

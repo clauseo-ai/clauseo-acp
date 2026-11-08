@@ -10,13 +10,16 @@
 //!   hides can't be checked. `SeBackupPrivilege` is enabled for the walk alone.
 //! - Every task under the Task Scheduler's cache,
 //!   `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tree` (a key holding
-//!   an `Id` value; a folder's key holds none), opened read-only in the 64-bit view.
+//!   an `Id` value; a folder's key holds none), opened read-only in the 64-bit view. A task's
+//!   key also holds its security descriptor, the `SD` value, which gives a hidden task's owner
+//!   ([`Sweeper::task_cache_owner`]).
 //!
 //! [`Sweeper::task_file_paths`]: super::Sweeper::task_file_paths
 //! [`Sweeper::task_cache_paths`]: super::Sweeper::task_cache_paths
+//! [`Sweeper::task_cache_owner`]: super::Sweeper::task_cache_owner
 #![expect(
     unsafe_code,
-    reason = "the registry calls that list the Task Scheduler's cache"
+    reason = "the registry calls that list and read the Task Scheduler's cache"
 )]
 
 use std::path::Path;
@@ -24,17 +27,22 @@ use std::path::Path;
 use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_NO_MORE_ITEMS, ERROR_SUCCESS};
 use windows::Win32::Storage::FileSystem::FILE_LIST_DIRECTORY;
 use windows::Win32::System::Registry::{
-    HKEY, HKEY_LOCAL_MACHINE, KEY_ENUMERATE_SUB_KEYS, KEY_QUERY_VALUE, KEY_WOW64_64KEY,
-    RegCloseKey, RegEnumKeyExW, RegOpenKeyExW, RegQueryValueExW,
+    HKEY, HKEY_LOCAL_MACHINE, KEY_ENUMERATE_SUB_KEYS, KEY_QUERY_VALUE, KEY_WOW64_64KEY, REG_BINARY,
+    REG_VALUE_TYPE, RegCloseKey, RegEnumKeyExW, RegOpenKeyExW, RegQueryValueExW,
 };
 use windows::core::{HSTRING, PWSTR, w};
 
 use super::{FOLDERS_CAP, Failed, LISTED_CAP};
 use crate::windows::acl::object::Object;
 use crate::windows::acl::privilege::Privileges;
+use crate::windows::acl_bytes::owner_sid;
+use crate::windows::sids::Sid;
 
 /// What the file walk enables.
 const BACKUP: [&str; 1] = ["SeBackupPrivilege"];
+
+/// The most a task's `SD` value is read to: a descriptor larger is refused.
+const SD_CAP: usize = 64 * 1024;
 
 /// The Task Scheduler's cache of task paths, below `HKEY_LOCAL_MACHINE`.
 const TREE: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tree";
@@ -181,6 +189,48 @@ impl Key {
             ))
         }
     }
+
+    /// This key's `SD` value, which must be `REG_BINARY`, at most [`SD_CAP`] bytes.
+    fn descriptor(&self) -> Result<Vec<u8>, Failed> {
+        let mut bytes = vec![0_u8; SD_CAP];
+        let mut length = u32::try_from(SD_CAP).unwrap_or(u32::MAX);
+        let mut kind = REG_VALUE_TYPE::default();
+        // SAFETY: the key is open and the name a NUL-terminated literal; `bytes` is writable
+        // for `length` bytes, and the call writes the type and the length it used back.
+        let read = unsafe {
+            RegQueryValueExW(
+                self.0,
+                w!("SD"),
+                None,
+                Some(&raw mut kind),
+                Some(bytes.as_mut_ptr()),
+                Some(&raw mut length),
+            )
+        };
+        if read != ERROR_SUCCESS {
+            return Err(format!(
+                "a task's descriptor in the Task Scheduler's cache couldn't be read ({})",
+                read.0
+            ));
+        }
+        if kind != REG_BINARY {
+            return Err(
+                "a task's descriptor in the Task Scheduler's cache isn't binary".to_owned(),
+            );
+        }
+        bytes.truncate(length as usize);
+        Ok(bytes)
+    }
+}
+
+/// The owner of the task at `path` (`\A\name`) that its key in the Task Scheduler's cache
+/// holds in its `SD` value, as the module says; `Err` when the key or value is missing, can't
+/// be read, or names no owner.
+pub(super) fn task_cache_owner(path: &str) -> Result<Sid, Failed> {
+    let key = Key::open(HKEY_LOCAL_MACHINE, &HSTRING::from(format!("{TREE}{path}")))?;
+    owner_sid(&key.descriptor()?).ok_or_else(|| {
+        "a task's descriptor in the Task Scheduler's cache names no owner".to_owned()
+    })
 }
 
 /// Every task the Task Scheduler's cache lists, as its path (`\A\B\name`), as the module says.

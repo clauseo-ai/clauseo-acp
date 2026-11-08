@@ -53,6 +53,32 @@ fn a_hidden_task_whose_trusted_file_names_another_principal_is_skipped() {
 }
 
 #[test]
+fn a_hidden_task_owned_by_a_pool_user_or_whose_cache_descriptor_cant_be_read_is_56() {
+    let system = || file("<UserId>S-1-5-18</UserId>");
+    let missing = "a task's descriptor in the Task Scheduler's cache couldn't be read (2)";
+    for owner in [Ok(sid(1010)), Err(missing.to_owned())] {
+        // A trusted file naming SYSTEM, which a pool owner may have rewritten the task past.
+        let mut fake = hiding(r"\A\hidden", Some((r"A\hidden", system())));
+        fake.cache_owners
+            .insert(r"\A\hidden".to_owned(), owner.clone());
+        assert_eq!(sweep(&mut fake), SweepExit::TasksLeft, "{owner:?}");
+        assert!(
+            fake.deleted().is_empty(),
+            "never deleted through the registry"
+        );
+        let line = &fake.logged[0].1;
+        assert!(line.contains("1 not listed"), "{line}");
+        assert!(!line.contains("1 more skipped"), "{line}");
+    }
+    // Another owner, with that file: skipped.
+    let mut other = hiding(r"\A\hidden", Some((r"A\hidden", system())));
+    other
+        .cache_owners
+        .insert(r"\A\hidden".to_owned(), Ok(sid(1001)));
+    assert_eq!(sweep(&mut other), SweepExit::Done);
+}
+
+#[test]
 fn a_listing_that_cant_be_read_is_56() {
     let mut files = hiding(r"\A\task", None);
     files.listings_fail[0] = true;
