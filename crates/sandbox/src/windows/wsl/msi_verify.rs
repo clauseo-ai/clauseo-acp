@@ -7,8 +7,8 @@
 //!    without following a reparse point and refused if one; `wsl.msi` is a regular file with one
 //!    link ([`MsiFiles::open`]).
 //! 3. **The owner**: `wsl.msi`'s, read on its handle, is `TrustedInstaller` or SYSTEM.
-//! 4. **The signature**: `WinVerifyTrust` trusts it, and its leaf signer is
-//!    [`MICROSOFT`].
+//! 4. **The signature**: `WinVerifyTrust` trusts it, and its signer's chain passes
+//!    `CERT_CHAIN_POLICY_MICROSOFT_ROOT`: it ends in one of Microsoft's own roots.
 //! 5. **The handle**: held, shared for reading only, until msiexec has ended, so the file can't
 //!    be renamed, replaced or written between the checks and the install.
 //!
@@ -26,8 +26,6 @@ pub(super) const TRUSTED_INSTALLER: &str =
     "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464";
 /// `LOCAL SYSTEM`.
 pub(super) const LOCAL_SYSTEM: &str = "S-1-5-18";
-/// The subject (simple display name) the MSI's leaf signer must have.
-pub(super) const MICROSOFT: &str = "Microsoft Corporation";
 
 /// What [`upgrade_with`] did.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,9 +53,10 @@ pub(super) trait MsiFiles {
     fn open(&self, apps: &str, package: &str) -> Result<Self::Held, String>;
     /// The held file's owner, as a string SID.
     fn owner(&self, msi: &Self::Held) -> Result<String, String>;
-    /// The held file's leaf signer's subject, once `WinVerifyTrust` trusts its signature;
-    /// `path` is the file's path, which the call takes alongside the handle.
-    fn signer(&self, msi: &Self::Held, path: &str) -> Result<String, String>;
+    /// Whether the held file's signature, once `WinVerifyTrust` trusts it, chains to a
+    /// Microsoft root (`CERT_CHAIN_POLICY_MICROSOFT_ROOT`); `path` is the file's path, which the
+    /// call takes alongside the handle.
+    fn microsoft_signed(&self, msi: &Self::Held, path: &str) -> Result<bool, String>;
 }
 
 /// Installs WSL's pending MSI upgrade, as `msi.rs` says, from the `WslInstaller` service's
@@ -113,9 +112,10 @@ fn verified<F: MsiFiles>(
             "{PACKAGE_MSI}'s owner is neither TrustedInstaller nor SYSTEM"
         ));
     }
-    let signer = files.signer(&held, path)?;
-    if signer != MICROSOFT {
-        return Err(format!("{PACKAGE_MSI}'s signer isn't {MICROSOFT}"));
+    if !files.microsoft_signed(&held, path)? {
+        return Err(format!(
+            "{PACKAGE_MSI}'s signature doesn't chain to a Microsoft root"
+        ));
     }
     Ok(held)
 }

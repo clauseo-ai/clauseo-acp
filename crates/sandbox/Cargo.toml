@@ -122,7 +122,7 @@ rustix = { workspace = true, features = ["fs", "process"] }
 # (NetworkManagement_IpHelper).
 # WSL's MSI checked before the SYSTEM run installs it (src/windows/wsl/msi_files.rs):
 # WinVerifyTrust (Security_WinTrust) and its WTHelper* calls (which also need Cryptography's
-# Catalog and Sip), and the signer's name (Cryptography).
+# Catalog and Sip), and the chain's Microsoft-root policy (Cryptography).
 # The admin copy's refresh (src/windows/refresh): its SYSTEM task through ITaskService
 # (System_TaskScheduler, with the BSTR and VARIANT types of System_Ole and System_Variant), and its
 # log lines in the Event Log (System_EventLog). The stop task's process snapshot

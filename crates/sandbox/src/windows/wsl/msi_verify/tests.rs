@@ -4,7 +4,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use super::{LOCAL_SYSTEM, MICROSOFT, MsiFiles, MsiUpgrade, TRUSTED_INSTALLER, upgrade_with};
+use super::{LOCAL_SYSTEM, MsiFiles, MsiUpgrade, TRUSTED_INSTALLER, upgrade_with};
 use crate::windows::wsl::FakeWsl;
 
 const APPS: &str = r"C:\Program Files\WindowsApps";
@@ -14,7 +14,7 @@ const PACKAGE: &str = "MicrosoftCorporationII.WindowsSubsystemForLinux_2.6.3.0_x
 struct Fake {
     open: Result<(), String>,
     owner: Result<&'static str, String>,
-    signer: Result<&'static str, String>,
+    signed: Result<bool, String>,
     events: Rc<RefCell<Vec<String>>>,
 }
 
@@ -23,7 +23,7 @@ impl Fake {
         Fake {
             open: Ok(()),
             owner: Ok(TRUSTED_INSTALLER),
-            signer: Ok(MICROSOFT),
+            signed: Ok(true),
             events: Rc::default(),
         }
     }
@@ -55,9 +55,9 @@ impl MsiFiles for Fake {
         self.owner.clone().map(str::to_owned)
     }
 
-    fn signer(&self, _msi: &Held, path: &str) -> Result<String, String> {
+    fn microsoft_signed(&self, _msi: &Held, path: &str) -> Result<bool, String> {
         self.log(format!("signer {path}"));
-        self.signer.clone().map(str::to_owned)
+        self.signed.clone()
     }
 }
 
@@ -161,24 +161,18 @@ fn an_msi_owned_by_anyone_else_is_refused_before_its_signature() {
 }
 
 #[test]
-fn an_untrusted_signature_or_another_signer_is_refused() {
+fn an_untrusted_signature_or_a_chain_to_another_root_is_refused() {
     let files = Fake {
-        signer: Err("WinVerifyTrust refused it: 0x800B0100".to_owned()),
+        signed: Err("WinVerifyTrust refused wsl.msi: 0x800B0100".to_owned()),
         ..Fake::passing()
     };
     assert!(assert_refused(&files).contains("WinVerifyTrust"));
-    for signer in [
-        "Contoso Ltd",
-        "Microsoft Corporation Ltd",
-        "microsoft corporation",
-        "",
-    ] {
-        let files = Fake {
-            signer: Ok(signer),
-            ..Fake::passing()
-        };
-        assert!(assert_refused(&files).contains("signer"), "{signer}");
-    }
+    // Trusted, but its chain ends in a root that isn't Microsoft's.
+    let files = Fake {
+        signed: Ok(false),
+        ..Fake::passing()
+    };
+    assert!(assert_refused(&files).contains("Microsoft root"));
 }
 
 #[test]
