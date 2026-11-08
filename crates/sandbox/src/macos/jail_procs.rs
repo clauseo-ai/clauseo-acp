@@ -12,8 +12,9 @@
 //! `SANDBOX_CHECK_NO_REPORT`, so they log no denial. A check that fails on a running process
 //! keeps the session running (fail-closed: only a plain "not sandboxed", "may not look up the
 //! session's name" or "may look up the control name" rules a process out), but is never
-//! grounds to kill it: only a process every check plainly puts in the session is killed. One pass over every
-//! process (`proc_listallpids`) takes about 2 ms for 700 processes on an M-series Mac.
+//! grounds to kill it: only a process every check plainly puts in the session is killed, after
+//! its start time is checked again. One pass over every process (`proc_listallpids`) takes
+//! about 2 ms for 700 processes on an M-series Mac.
 //!
 //! Each libproc and libsandbox call has one wrapper here, with its `unsafe` block.
 #![expect(
