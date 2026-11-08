@@ -53,8 +53,9 @@
 # - merge_group: passes in seconds.
 # No run is cancelled for an event on the same head commit: the concurrency group is the pull
 # request and its head commit, with cancel-in-progress off (#508: GitHub cancels in no set order,
-# and a cancelled newest run leaves a required check "expected"). e2e-changes cancels the pull
-# request's unfinished runs for any head other than the current one (actions: write). smoke is
+# and a cancelled newest run leaves a required check "expected"). e2e-cancel-stale cancels the pull
+# request's unfinished runs for any head other than the current one (actions: write), on pull
+# request events only, in a job that checks out nothing and runs only its own inline script. smoke is
 # never skipped as a whole (a skipped matrix job reports under the unexpanded name).
 
 name: e2e-windows
@@ -106,11 +107,11 @@ jobs:
     name: e2e-changes
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    # pull-requests: the reviews, for `ready`; actions: write, to cancel runs for an older head.
+    # pull-requests: the reviews, for `ready`. No actions: write: it runs changes.sh, and
+    # e2e-cancel-stale cancels the runs for an older head.
     permissions:
       contents: read
       pull-requests: read
-      actions: write
     outputs:
       app: ${{ steps.filter.outputs.app }}
       product: ${{ steps.filter.outputs.product }}
@@ -125,8 +126,14 @@ jobs:
           RELEVANT: ${{ (github.event_name != 'pull_request' && github.event_name != 'pull_request_review') || (github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'ready')) || (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && !contains(github.event.pull_request.labels.*.name, 'ready')) }}
         run: echo "relevant=$RELEVANT" | tee -a "$GITHUB_OUTPUT"
 
+      # changes.sh as the base has it, never as the pull request or the merge group's head changes
+      # it: the default checkout of a pull request or a merge group is the queued code. A merge
+      # group checks out the main commit it starts on, a pull request (or a review of one) its base
+      # branch, as windows-pr-tests.yml's `decide` does; a nightly run or a run on demand (an empty
+      # ref: the default checkout) reads no script.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.event.pull_request.base.ref }}
           persist-credentials: false
           sparse-checkout-cone-mode: false
           sparse-checkout: |
@@ -186,8 +193,8 @@ jobs:
           echo "No label ready and no approval of the head commit $HEAD_SHA: smoke waits for one."
           ready false
 
-      # The note on modes. A failed read of the head cancels nothing; a failed read of this
-      # commit's earlier result decides without it.
+      # The note on modes. A failed read of this commit's earlier result decides without it.
+      # e2e-cancel-stale cancels the runs for an older head.
       - name: Decide the mode
         id: mode
         env:
@@ -196,7 +203,6 @@ jobs:
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
           RUN_ID: ${{ github.run_id }}
           RELEVANT: ${{ steps.relevant.outputs.relevant }}
           APP: ${{ steps.filter.outputs.app }}
@@ -215,21 +221,8 @@ jobs:
               echo "This run is for $HEAD_SHA; the pull request's head is now $current."
               mode stale
             fi
-            if older=$(gh api -X GET "repos/$REPO/actions/workflows/e2e-windows.yml/runs" \
-                -f branch="$HEAD_REF" -f per_page=50 \
-                -q ".workflow_runs[] | select(.status != \"completed\" and .head_sha != \"$HEAD_SHA\") | .id"); then
-              for id in $older; do
-                if gh api -X POST "repos/$REPO/actions/runs/$id/cancel" > /dev/null; then
-                  echo "Cancelled run $id, for an older head."
-                else
-                  echo "::warning::Could not cancel run $id, for an older head"
-                fi
-              done
-            else
-              echo "::warning::Listing this pull request's runs failed; runs for an older head go on"
-            fi
           else
-            echo "::warning::Reading the pull request's head failed; no run is cancelled"
+            echo "::warning::Reading the pull request's head failed"
           fi
 
           # The newest finished smoke (windows-2025) of another run for this head commit. A rerun
@@ -254,6 +247,54 @@ jobs:
           if [ "$APP" != true ]; then mode noapp; fi
           if [ "$READY" != true ]; then mode wait; fi
           mode run
+
+  # Cancels this pull request's unfinished runs for any head other than the current one (the note
+  # on modes), as e2e-changes did before. The only job here with actions: write: pull request
+  # events only, never a merge group, and it checks out nothing; it runs only the script below,
+  # which reads the event and the API. A run for an older head (stale) cancels nothing, and a failed
+  # read cancels nothing. No job needs it: smoke reads e2e-changes alone.
+  e2e-cancel-stale:
+    name: e2e-cancel-stale
+    if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      pull-requests: read
+    steps:
+      - name: Cancel this pull request's runs for an older head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          if ! current=$(gh api "repos/$REPO/pulls/$PR" -q .head.sha) || [ -z "$current" ]; then
+            echo "::warning::Reading the pull request's head failed; no run is cancelled"
+            exit 0
+          fi
+          if [ "$current" != "$HEAD_SHA" ]; then
+            echo "This run is for $HEAD_SHA; the pull request's head is now $current. Nothing is cancelled."
+            exit 0
+          fi
+          # Only this repository's branch of that name: a fork's pull request from a branch with the
+          # same name is not this pull request. The filter reads REPO and HEAD_SHA from the
+          # environment (gh's jq `env`), so nothing is interpolated into it.
+          if ! older=$(gh api -X GET "repos/$REPO/actions/workflows/e2e-windows.yml/runs" \
+              -f branch="$HEAD_REF" -f per_page=50 \
+              -q '.workflow_runs[] | select(.status != "completed" and .head_sha != env.HEAD_SHA and .head_repository.full_name == env.REPO) | .id'); then
+            echo "::warning::Listing this pull request's runs failed; runs for an older head go on"
+            exit 0
+          fi
+          for id in $older; do
+            if gh api -X POST "repos/$REPO/actions/runs/$id/cancel" > /dev/null; then
+              echo "Cancelled run $id, for an older head."
+            else
+              echo "::warning::Could not cancel run $id, for an older head"
+            fi
+          done
 
   smoke:
     name: smoke (${{ matrix.runner }})
