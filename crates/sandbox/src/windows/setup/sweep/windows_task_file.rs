@@ -13,15 +13,23 @@
 //! with backup intent on each open, so a file whose descriptor shuts SYSTEM out is still read.
 //! Errors name the step, never a folder or task.
 //!
+//! The owner of a task file the cache holds no task for ([`Sweeper::task_file_owner`]) is
+//! read the same way: the folders opened alike, the file opened by handle for `READ_CONTROL`
+//! alone, refused if a reparse point or a folder, and its owner read through that handle.
+//!
 //! [`Sweeper::read_task_file`]: super::Sweeper::read_task_file
+//! [`Sweeper::task_file_owner`]: super::Sweeper::task_file_owner
 
 use std::path::Path;
 
 use windows::Win32::Security::{DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION};
+use windows::Win32::Storage::FileSystem::READ_CONTROL;
 
 use super::{Failed, TaskFile, file_trust};
 use crate::windows::acl::object::Object;
 use crate::windows::acl::privilege::Privileges;
+use crate::windows::acl_bytes::owner_sid;
+use crate::windows::sids::Sid;
 
 /// What the read enables.
 const BACKUP: [&str; 1] = ["SeBackupPrivilege"];
@@ -33,6 +41,40 @@ pub(super) fn read(system: &Path, parts: &[String], cap: usize) -> Result<TaskFi
         .split_last()
         .ok_or_else(|| "the task file has no name".to_owned())?;
     let _backup = Privileges::enable(&BACKUP).map_err(|error| error.to_string())?;
+    let folder = folder_of(system, folders)?;
+    let info = OWNER_SECURITY_INFORMATION.0 | DACL_SECURITY_INFORMATION.0;
+    let (bytes, descriptor) = match folder.read_child_secured(&wide(name), cap, info) {
+        Ok(Some(read)) => read,
+        Ok(None) => return Err("the task file is missing".to_owned()),
+        Err(error) => return Err(format!("the task file couldn't be read ({error})")),
+    };
+    let security = file_trust::file_security(&descriptor)?;
+    Ok(TaskFile { bytes, security })
+}
+
+/// The owner of the task file whose parts below `Tasks` are `parts`, in the system folder
+/// `system`, as the module says.
+pub(super) fn owner(system: &Path, parts: &[String]) -> Result<Sid, Failed> {
+    let (name, folders) = parts
+        .split_last()
+        .ok_or_else(|| "the task file has no name".to_owned())?;
+    let _backup = Privileges::enable(&BACKUP).map_err(|error| error.to_string())?;
+    let folder = folder_of(system, folders)?;
+    let file = folder
+        .open_child_for(&wide(name), READ_CONTROL.0)
+        .map_err(|error| format!("the task file couldn't be opened ({error})"))?;
+    if file.reparse() || file.folder {
+        return Err("the task file isn't a plain file".to_owned());
+    }
+    let descriptor = file
+        .security(OWNER_SECURITY_INFORMATION.0)
+        .map_err(|error| format!("the task file's owner couldn't be read ({error})"))?;
+    owner_sid(&descriptor).ok_or_else(|| "the task file's descriptor names no owner".to_owned())
+}
+
+/// The folder `folders` name below `Tasks` in the system folder `system`, each opened by
+/// handle as the module says.
+fn folder_of(system: &Path, folders: &[String]) -> Result<Object, Failed> {
     let mut folder = Object::open_for(system, 0)
         .map_err(|error| format!("the system folder couldn't be opened ({error})"))?;
     if folder.reparse() || !folder.folder {
@@ -47,14 +89,7 @@ pub(super) fn read(system: &Path, parts: &[String], cap: usize) -> Result<TaskFi
         }
         folder = next;
     }
-    let info = OWNER_SECURITY_INFORMATION.0 | DACL_SECURITY_INFORMATION.0;
-    let (bytes, descriptor) = match folder.read_child_secured(&wide(name), cap, info) {
-        Ok(Some(read)) => read,
-        Ok(None) => return Err("the task file is missing".to_owned()),
-        Err(error) => return Err(format!("the task file couldn't be read ({error})")),
-    };
-    let security = file_trust::file_security(&descriptor)?;
-    Ok(TaskFile { bytes, security })
+    Ok(folder)
 }
 
 /// `part` in UTF-16, with no NUL.

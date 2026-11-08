@@ -63,9 +63,12 @@
 //!    can't be read or trusted, the task is unreadable (56) and left. `GetTasks` may list only
 //!    the tasks the caller may read, so the walk is then held against every task file below
 //!    `Tasks` and every task in the Task Scheduler's cache (`HKLM\…\Schedule\TaskCache\Tree`),
-//!    read only ([`unlisted`]): a task either holds that the walk didn't list is 56, unless its
-//!    trusted task file names a principal that isn't the pool's, and is never deleted through a
-//!    file or the registry. A listing that can't be read is 56 too;
+//!    read only ([`unlisted`]). When they disagree, all three are read again once and only that
+//!    read is judged: a task both hold that the walk didn't list is 56, unless its trusted task
+//!    file names a principal that isn't the pool's; a task file alone is 56 when its own owner
+//!    is a pool SID or can't be read, else ignored; a cache key alone is 56 when its `SD`
+//!    names a pool owner, else ignored. Nothing is deleted through a file or the registry. A
+//!    listing that can't be read is 56 too;
 //! 5. cancels every BITS job a pool user owns, whatever step 4 found (`BG_JOB_ENUM_ALL_USERS`,
 //!    each job's owner). One that can't be cancelled, an owner that can't be read, a list that
 //!    can't be read, or one of `JOBS_CAP` jobs is 57; 56 wins when both. Only then, with no
@@ -121,6 +124,7 @@ pub use resolve::{Names, Resolved, canonical_sid, resolve, sddl_owner};
 pub use swept::Swept;
 use swept::log_line;
 pub use task_file::TASK_FILE_CAP;
+pub use unlisted::Listing;
 
 /// The sweep's exit codes. They start at 53, after [`StopExit`]'s 50 and the WSL deny task's 51
 /// and 52 (`WslDenyExit`), so the one exe never gives one number two meanings; codes are
@@ -258,13 +262,19 @@ pub trait Sweeper: Gate + Bits + Record {
     /// Windows keeps `…Tas\u{212A}` and `…Task` apart. `Err` when the comparison fails.
     fn same_task_path(&mut self, a: &str, b: &str) -> Result<bool, Failed>;
     /// Every task file below `%SystemRoot%\System32\Tasks`, as its task's path (`\A\name`),
-    /// walked as [`Sweeper::read_task_file`] opens: by handle, never through a link; `Err`
-    /// when a folder can't be opened or listed, a name is a reparse point, or past the caps.
-    fn task_file_paths(&mut self) -> Result<Vec<String>, Failed>;
+    /// walked as [`Sweeper::read_task_file`] opens: by handle, never through a link; a folder
+    /// gone before it was opened is left out and counted. `Err` when a folder can't be opened
+    /// or listed, a name is a reparse point, or past the caps.
+    fn task_file_paths(&mut self) -> Result<Listing, Failed>;
     /// Every task the Task Scheduler's cache holds (a key with an `Id` value under
     /// `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tree`, read
-    /// only, the 64-bit view), as its path; `Err` when a key can't be read, or past the cap.
-    fn task_cache_paths(&mut self) -> Result<Vec<String>, Failed>;
+    /// only, the 64-bit view), as its path; a key gone while listed is left out and counted.
+    /// `Err` when a key can't be read, or past the cap.
+    fn task_cache_paths(&mut self) -> Result<Listing, Failed>;
+    /// The owner of the task file whose path below `Tasks` is `parts`, from its own
+    /// descriptor, read through a handle opened as [`Sweeper::read_task_file`] opens (never
+    /// through a link) for `READ_CONTROL` alone; `Err` when it can't be opened or read.
+    fn task_file_owner(&mut self, parts: &[String]) -> Result<Sid, Failed>;
     /// The owner of the task at `path` (`\A\name`), from the security descriptor its cache
     /// key holds (`TaskCache\Tree\<path>`, its `SD` value, `REG_BINARY`, read only, the 64-bit
     /// view); `Err` when the key or value is missing or can't be read, or names no owner.

@@ -28,8 +28,8 @@ use windows::Win32::UI::Shell::{FOLDERID_System, KF_FLAG_DEFAULT, SHGetKnownFold
 use windows::core::{BSTR, HSTRING, PCWSTR, PWSTR};
 
 use super::{
-    Failed, Principal, SweepExit, Sweeper, TASK_FILE_CAP, Task, TaskFile, sweep, windows_listing,
-    windows_task_file,
+    Failed, Listing, Principal, SweepExit, Sweeper, TASK_FILE_CAP, Task, TaskFile, sweep,
+    windows_listing, windows_task_file,
 };
 use crate::windows::refresh::event_log;
 use crate::windows::setup::accounts::{self, Kind};
@@ -274,12 +274,16 @@ impl Sweeper for WindowsSweeper {
         same_task_path(a, b)
     }
 
-    fn task_file_paths(&mut self) -> Result<Vec<String>, Failed> {
+    fn task_file_paths(&mut self) -> Result<Listing, Failed> {
         windows_listing::task_files(&system_folder()?)
     }
 
-    fn task_cache_paths(&mut self) -> Result<Vec<String>, Failed> {
+    fn task_cache_paths(&mut self) -> Result<Listing, Failed> {
         windows_listing::task_cache()
+    }
+
+    fn task_file_owner(&mut self, parts: &[String]) -> Result<Sid, Failed> {
+        windows_task_file::owner(&system_folder()?, parts)
     }
 
     fn task_cache_owner(&mut self, path: &str) -> Result<Sid, Failed> {
