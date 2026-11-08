@@ -1,15 +1,17 @@
 //! The SYSTEM tasks `\Clauseo\SandboxRefresh` (ADR 0049, "Admin copy refresh"),
-//! `\Clauseo\SandboxStop` ("Stopping the pool's processes") and `\Clauseo\SandboxWslDeny`
-//! ("WSL"), through the Task Scheduler's COM API (`ITaskService`), never `schtasks` text:
+//! `\Clauseo\SandboxStop` ("Stopping the pool's processes"), `\Clauseo\SandboxWslDeny` and
+//! `\Clauseo\SandboxWslUpgrade` ("WSL"), through the Task Scheduler's COM API (`ITaskService`),
+//! never `schtasks` text:
 //!
 //! - [`register_task`], which `--adopt` calls elevated for each of [`TASKS`](super::TASKS) per
 //!   user, and a per-machine install's set-up for each of
 //!   [`MACHINE_TASKS`](super::MACHINE_TASKS) (`late_steps::machine_tasks`): the task runs as
 //!   LOCAL SYSTEM, starts `<FOLDERID_ProgramFiles>\Clauseo\Sandbox\clauseo-sandbox-setup.exe`
-//!   with its one argument (`--refresh`, `--stop`, `--wsl-deny`) and nothing else, on demand
+//!   with its one argument (`--refresh`, `--stop`, `--wsl-deny`, `--wsl-upgrade`) and nothing
+//!   else, on demand
 //!   (the refresh also at the record owner's logon; the WSL deny task on Windows Installer's
 //!   events, `rules::Trigger`, with no value queries), needs no network, stops after its limit
-//!   (5 minutes, 2 minutes, 5 minutes), and never runs twice at once. Its descriptor
+//!   (5 minutes, 2 minutes, 2 minutes, 5 minutes), and never runs twice at once. Its descriptor
 //!   ([`task_sddl`](super::task_sddl)) is owned by Administrators and lets
 //!   SYSTEM and Administrators do anything and the owner read and execute it (`FRFX`), which
 //!   starts it and ends a running one, nothing more; the folder `\Clauseo` gets the same owner
@@ -350,7 +352,7 @@ pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError>
 
 /// Deletes `task`, then the folder `\Clauseo` if nothing else is in it. A task or folder that
 /// isn't there is `Ok`. Elevated: `--remove --uninstall` calls it for each task, and a
-/// per-machine install's `--remove` for the stop and WSL deny tasks.
+/// per-machine install's `--remove` for the stop and WSL tasks.
 pub fn unregister_task(task: SystemTask) -> Result<(), TaskError> {
     let _apartment = Apartment::enter()?;
     let service = service()?;
@@ -417,6 +419,12 @@ pub fn request_wsl_deny() -> Result<(), TaskError> {
     run_task(SystemTask::WslDeny)
 }
 
+/// Asks the Task Scheduler to run `\Clauseo\SandboxWslUpgrade` now, as [`request_wsl_deny`]
+/// does: the launch check alone calls it, when WSL's upgrade is pending (`clean_close::wsl_heal`).
+pub fn request_wsl_upgrade() -> Result<(), TaskError> {
+    run_task(SystemTask::WslUpgrade)
+}
+
 /// Runs `task` now, as whoever calls it, through the owner's read-and-execute entry (`FRFX`,
 /// `rules::task_sddl`): the Task Scheduler starts a task only for a caller with execute access,
 /// and refused the owner holding `FR` alone (CI run 42416074600).
@@ -441,6 +449,12 @@ pub fn last_refresh_run() -> Result<LastRun, TaskError> {
 /// code read back through `WslDenyExit`. Blocks on COM calls.
 pub fn last_wsl_deny_run() -> Result<LastRun, TaskError> {
     last_task_run(SystemTask::WslDeny)
+}
+
+/// The WSL upgrade task's last run, as [`last_wsl_deny_run`] reads the deny task's, its code
+/// read back through `WslUpgradeExit`. Blocks on COM calls.
+pub fn last_wsl_upgrade_run() -> Result<LastRun, TaskError> {
+    last_task_run(SystemTask::WslUpgrade)
 }
 
 /// `task`'s last result and last run time, as whoever calls it.

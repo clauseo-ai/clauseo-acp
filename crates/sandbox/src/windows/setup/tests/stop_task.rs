@@ -19,11 +19,13 @@ fn installed(test: &str, copy: Option<CopyOwner>) -> FakeMachine {
 /// The owner the stop task names, as its relative id, once the WSL deny task names the same.
 fn task_owner(machine: &FakeMachine) -> Option<String> {
     assert_eq!(machine.state.stop_task, machine.state.wsl_task);
+    assert_eq!(machine.state.stop_task, machine.state.wsl_upgrade_task);
     machine.state.stop_task.as_ref().map(rid)
 }
 
 const STOP_1001: &str = "register_task SandboxStop 1001";
 const WSL_1001: &str = "register_task SandboxWslDeny 1001";
+const UPGRADE_1001: &str = "register_task SandboxWslUpgrade 1001";
 
 #[test]
 fn per_machine_set_up_registers_the_stop_task_for_the_recorded_owner() {
@@ -36,11 +38,13 @@ fn per_machine_set_up_registers_the_stop_task_for_the_recorded_owner() {
     let at = calls.iter().position(|c| *c == STOP_1001);
     let at = at.unwrap_or_else(|| panic!("{calls:?}"));
     assert_eq!(calls[at + 1], WSL_1001);
+    assert_eq!(calls[at + 2], UPGRADE_1001);
     let last_write = calls.iter().rposition(|c| c.starts_with("write_record"));
     assert!(last_write.is_some_and(|write| write < at), "{calls:?}");
     let mut expected = fresh_calls();
     expected.insert(at, STOP_1001.to_owned());
     expected.insert(at + 1, WSL_1001.to_owned());
+    expected.insert(at + 2, UPGRADE_1001.to_owned());
     assert_eq!(calls, expected);
     // A re-run registers it again, over the one there.
     let from = machine.calls.len();
@@ -124,13 +128,14 @@ fn pool(test: &str, copy: Option<CopyOwner>) -> (Remover, super::remove_fake::Re
     // Per user, `--adopt` registered it; the fake set-up didn't.
     machine.state.stop_task = Some(owner());
     machine.state.wsl_task = Some(owner());
+    machine.state.wsl_upgrade_task = Some(owner());
     let remover = Remover::new(machine, Some(owner()));
     let acl = remover.acl(acl);
     (remover, acl)
 }
 
 #[test]
-fn removing_a_per_machine_pool_deletes_both_tasks_before_the_record() {
+fn removing_a_per_machine_pool_deletes_every_task_before_the_record() {
     let (mut machine, mut acl) = pool("remove-stop-task", Some(CopyOwner::Machine));
     remove(&mut machine, &mut acl, true).unwrap();
     let lines = machine.lines();
@@ -139,14 +144,17 @@ fn removing_a_per_machine_pool_deletes_both_tasks_before_the_record() {
         .position(|l| l == "unregister_task SandboxStop");
     let at = at.unwrap_or_else(|| panic!("{lines:?}"));
     assert_eq!(lines[at + 1], "unregister_task SandboxWslDeny");
-    assert_eq!(lines[at + 2], "delete_record");
+    assert_eq!(lines[at + 2], "unregister_task SandboxWslUpgrade");
+    assert_eq!(lines[at + 3], "delete_record");
     assert_eq!(machine.m.state.stop_task, None);
     assert_eq!(machine.m.state.wsl_task, None);
+    assert_eq!(machine.m.state.wsl_upgrade_task, None);
     assert_eq!(machine.m.state.record, None);
     // A deletion that fails stops the removal there, the record kept for the next run.
     for (test, fail) in [
         ("remove-stop-task-fail", at),
         ("remove-wsl-task-fail", at + 1),
+        ("remove-wsl-upgrade-task-fail", at + 2),
     ] {
         let (mut machine, mut acl) = pool(test, Some(CopyOwner::Machine));
         machine.fail_at.set(Some(fail));
@@ -154,10 +162,11 @@ fn removing_a_per_machine_pool_deletes_both_tasks_before_the_record() {
         assert_eq!(failure.step, RemoveStep::StopTask);
         assert_eq!(failure.exit, SetupExit::RemovedPartly);
         assert!(machine.m.state.record.as_ref().is_some_and(|r| r.removing));
-        assert!(machine.m.state.wsl_task.is_some(), "{test}");
+        assert!(machine.m.state.wsl_upgrade_task.is_some(), "{test}");
         remove(&mut machine, &mut acl, true).unwrap();
         assert_eq!(machine.m.state.stop_task, None);
         assert_eq!(machine.m.state.wsl_task, None);
+        assert_eq!(machine.m.state.wsl_upgrade_task, None);
     }
 }
 
@@ -173,4 +182,5 @@ fn removing_a_per_user_pool_leaves_adopts_task() {
     );
     assert_eq!(machine.m.state.stop_task.as_ref(), Some(&owner()));
     assert_eq!(machine.m.state.wsl_task.as_ref(), Some(&owner()));
+    assert_eq!(machine.m.state.wsl_upgrade_task.as_ref(), Some(&owner()));
 }

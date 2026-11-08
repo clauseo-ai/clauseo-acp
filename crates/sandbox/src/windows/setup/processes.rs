@@ -189,7 +189,7 @@ fn pids() -> Result<Vec<u32>, MachineError> {
 /// `SeDebugPrivilege` enabled in this process's token for as long as this guard lives; on drop
 /// the token gets back the state it had before (`PreviousState`), on every return path. The stop
 /// holds one for its whole run.
-pub(super) struct DebugPrivilege {
+pub(crate) struct DebugPrivilege {
     /// The token, open for `TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY`.
     token: Handle,
     /// The privilege's state before the change; restored on drop.
@@ -199,7 +199,7 @@ pub(super) struct DebugPrivilege {
 impl DebugPrivilege {
     /// Enables the privilege where the token holds it; `None` when it couldn't (the stop then
     /// still reaches the processes whose DACL lets this token in).
-    pub(super) fn enable() -> Option<DebugPrivilege> {
+    pub(crate) fn enable() -> Option<DebugPrivilege> {
         let mut token = HANDLE::default();
         let access = TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY;
         // SAFETY: GetCurrentProcess returns a pseudo-handle that needs no close; `token` is a

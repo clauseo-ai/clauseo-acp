@@ -16,12 +16,17 @@ pub const EXECUTION_LIMIT: &str = "PT5M";
 pub const STOP_ARG: &str = "--stop";
 /// The stop task's execution limit: 2 minutes.
 pub const STOP_EXECUTION_LIMIT: &str = "PT2M";
-/// The WSL deny task's one argument (`wsl_phase::wsl_deny`): it installs WSL's pending upgrade
-/// when one is owed, re-applies WSL's deny, and does nothing else.
+/// The WSL deny task's one argument (`wsl_phase::wsl_deny`): it re-applies WSL's deny and does
+/// nothing else.
 pub const WSL_DENY_ARG: &str = "--wsl-deny";
-/// The WSL deny task's execution limit: 5 minutes, for WSL's MSI upgrade (msiexec waited for up
-/// to 4 minutes, `wsl::msi::MSI_WAIT`), then its phase, which waits 10 s for the lock.
-pub const WSL_DENY_EXECUTION_LIMIT: &str = "PT5M";
+/// The WSL deny task's execution limit: 2 minutes, for its phase, which waits 10 s for the lock.
+pub const WSL_DENY_EXECUTION_LIMIT: &str = "PT2M";
+/// The WSL upgrade task's one argument (`wsl_phase::wsl_upgrade`): it installs WSL's pending
+/// upgrade when one is owed and no pool user has a process, then re-applies WSL's deny.
+pub(super) const WSL_UPGRADE_ARG: &str = "--wsl-upgrade";
+/// The WSL upgrade task's execution limit: 5 minutes, for WSL's MSI upgrade (msiexec waited for
+/// up to 4 minutes, `wsl::msi::MSI_WAIT`), then its phase, which waits 10 s for the lock.
+pub(super) const WSL_UPGRADE_EXECUTION_LIMIT: &str = "PT5M";
 
 /// The Windows Installer events (`MsiInstaller` in the Application log) that start the WSL
 /// deny task, so WSL's deny comes back within seconds of a WSL update, repair or removal: product
@@ -39,7 +44,7 @@ pub enum Trigger {
     /// passes the task nothing from the event: no value queries, and the action keeps its one
     /// fixed argument. Anyone who can log on can write such an event (INTERACTIVE may write to
     /// the Application log), so only [`SystemTask::WslDeny`] has it: a forged event re-applies
-    /// the deny and does nothing else.
+    /// the deny and does nothing else; it never starts WSL's upgrade.
     MsiEvents,
 }
 
@@ -70,15 +75,27 @@ pub enum SystemTask {
     /// `\Clauseo\SandboxWslDeny`: re-applies WSL's deny and nothing else (`--wsl-deny`), on
     /// Windows Installer's events.
     WslDeny,
+    /// `\Clauseo\SandboxWslUpgrade`: installs WSL's pending upgrade, then re-applies the deny
+    /// (`--wsl-upgrade`), on demand only: the launch check (`clean_close::wsl_heal`) asks it.
+    WslUpgrade,
 }
 
 /// Every task, in the order `--adopt` registers them.
-pub const TASKS: [SystemTask; 3] = [SystemTask::Refresh, SystemTask::Stop, SystemTask::WslDeny];
+pub const TASKS: [SystemTask; 4] = [
+    SystemTask::Refresh,
+    SystemTask::Stop,
+    SystemTask::WslDeny,
+    SystemTask::WslUpgrade,
+];
 
 /// The tasks a per-machine install's set-up registers for the owner it records, and its
 /// `--remove` deletes (the refresh is `--adopt`'s per user only: a per-machine copy doesn't
 /// update itself).
-pub const MACHINE_TASKS: [SystemTask; 2] = [SystemTask::Stop, SystemTask::WslDeny];
+pub const MACHINE_TASKS: [SystemTask; 3] = [
+    SystemTask::Stop,
+    SystemTask::WslDeny,
+    SystemTask::WslUpgrade,
+];
 
 impl SystemTask {
     /// Its name in `\Clauseo`.
@@ -87,6 +104,7 @@ impl SystemTask {
             SystemTask::Refresh => "SandboxRefresh",
             SystemTask::Stop => "SandboxStop",
             SystemTask::WslDeny => "SandboxWslDeny",
+            SystemTask::WslUpgrade => "SandboxWslUpgrade",
         }
     }
 
@@ -96,6 +114,7 @@ impl SystemTask {
             SystemTask::Refresh => REFRESH_ARG,
             SystemTask::Stop => STOP_ARG,
             SystemTask::WslDeny => WSL_DENY_ARG,
+            SystemTask::WslUpgrade => WSL_UPGRADE_ARG,
         }
     }
 
@@ -105,6 +124,7 @@ impl SystemTask {
             SystemTask::Refresh => EXECUTION_LIMIT,
             SystemTask::Stop => STOP_EXECUTION_LIMIT,
             SystemTask::WslDeny => WSL_DENY_EXECUTION_LIMIT,
+            SystemTask::WslUpgrade => WSL_UPGRADE_EXECUTION_LIMIT,
         }
     }
 
@@ -114,11 +134,11 @@ impl SystemTask {
     }
 
     /// What starts it besides a demand: the refresh at the owner's logon; the WSL deny task on
-    /// Windows Installer's events (`wsl_phase.rs`); the stop only on demand.
+    /// Windows Installer's events (`wsl_phase.rs`); the stop and the WSL upgrade only on demand.
     pub fn triggers(self) -> &'static [Trigger] {
         match self {
             SystemTask::Refresh => &[Trigger::Logon],
-            SystemTask::Stop => &[],
+            SystemTask::Stop | SystemTask::WslUpgrade => &[],
             SystemTask::WslDeny => &[Trigger::MsiEvents],
         }
     }
@@ -131,6 +151,10 @@ impl SystemTask {
             }
             SystemTask::Stop => "Stops the processes of Clauseo's sandbox users.",
             SystemTask::WslDeny => "Keeps WSL closed to Clauseo's sandbox users.",
+            SystemTask::WslUpgrade => {
+                "Installs WSL's pending update before Clauseo's sandbox starts, then keeps WSL \
+                 closed to its users."
+            }
         }
     }
 }
@@ -149,11 +173,12 @@ pub enum Teardown {
 }
 
 /// The removal's steps, in order: every task in [`TASKS`] goes before the copy they run.
-pub const TEARDOWN: [Teardown; 6] = [
+pub const TEARDOWN: [Teardown; 7] = [
     Teardown::AdminValues,
     Teardown::Task(SystemTask::Refresh),
     Teardown::Task(SystemTask::Stop),
     Teardown::Task(SystemTask::WslDeny),
+    Teardown::Task(SystemTask::WslUpgrade),
     Teardown::Staging,
     Teardown::AdminFolder,
 ];
@@ -162,10 +187,10 @@ pub const TEARDOWN: [Teardown; 6] = [
 /// protected; SYSTEM and Administrators full control; the record owner `owner` read and execute
 /// (`FRFX`). Starting a task needs execute access: as the owner, `schtasks /run` with `FR`
 /// alone was refused (CI run 42416074600). Execute also ends a running task, so the owner can
-/// end a stop, a refresh or a WSL deny run: denial of service only, which code running as the
-/// owner could do to its own sessions anyway. An ended stop never writes `StopCompleted`
-/// (`setup::stop`), an ended refresh keeps the old copy, and a deny left off refuses the launch.
-/// The owner can't change or delete a task.
+/// end a stop, a refresh, a WSL deny or a WSL upgrade run: denial of service only, which code
+/// running as the owner could do to its own sessions anyway. An ended stop never writes
+/// `StopCompleted` (`setup::stop`), an ended refresh keeps the old copy, and a deny left off
+/// refuses the launch. The owner can't change or delete a task.
 pub fn task_sddl(owner: &Sid) -> String {
     format!("O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;{owner})")
 }

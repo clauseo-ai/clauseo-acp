@@ -19,16 +19,19 @@ pub enum WslHealed {
     Nothing,
     /// The deny was missing, the WSL deny task put it back, and the launch went on.
     DenyRestored,
-    /// A WSL upgrade was pending; it was installed on the lawyer's behalf (the WSL deny task's
+    /// A WSL upgrade was pending; it was installed on the lawyer's behalf (the WSL upgrade task's
     /// SYSTEM run, which this check requested), the deny is in place, and the launch went on.
     Upgraded,
-    /// A WSL upgrade was pending; the WSL deny task tried it on the lawyer's behalf and it failed
-    /// ("upgrade failed, deny applied", exit 52): WSL is as it was, the deny verified on it.
+    /// A WSL upgrade was pending; the WSL upgrade task tried it on the lawyer's behalf and it
+    /// failed ("upgrade failed, deny applied", exit 62): WSL is as it was, the deny verified on it.
     UpgradeFailed,
     /// A WSL upgrade was pending and isn't installed: the task couldn't be started, its run
     /// ended without it, or the wait ran out with no run going. The deny was verified, so the
     /// launch went on.
     UpgradeUnfinished,
+    /// A WSL upgrade was pending; the WSL upgrade task didn't start it because a pool user had a
+    /// process running ("deferred", exit 61): WSL is as it was, the deny verified on it.
+    UpgradeDeferred,
 }
 
 impl WslHealed {
@@ -50,6 +53,10 @@ impl WslHealed {
             WslHealed::UpgradeUnfinished => Some(
                 "WSL's pending update wasn't installed before the launch; WSL's deny for the \
                  sandbox users was verified",
+            ),
+            WslHealed::UpgradeDeferred => Some(
+                "WSL's pending update was deferred while a sandbox user had a process running; \
+                 WSL's deny for the sandbox users was verified",
             ),
         }
     }

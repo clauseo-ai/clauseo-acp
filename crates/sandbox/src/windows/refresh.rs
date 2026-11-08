@@ -60,7 +60,8 @@
 //! between them.
 //!
 //! Right after step 1, and again at the end of every allowed run whatever the steps gave, WSL's
-//! deny is re-applied (`wsl_phase.rs`, ADR 0049 "WSL"); `--wsl-deny` does that alone.
+//! deny is re-applied (`wsl_phase.rs`, ADR 0049 "WSL"); `--wsl-deny` does that alone, and
+//! `--wsl-upgrade` after WSL's pending upgrade.
 //!
 //! Any refusal keeps the old copy, writes one log line (the Event Log on Windows) naming no user
 //! path beyond the install folder, and exits with its own code ([`RefreshExit`]).
@@ -121,8 +122,8 @@ pub use task::{
 };
 pub use version::version_not_older;
 #[cfg(windows)]
-pub use windows_refresher::{WindowsRefresher, event_log, run, run_wsl_deny};
-pub use wsl_phase::{WslDenyExit, WslUpgrade, WslUpgraded, wsl_deny};
+pub use windows_refresher::{WindowsRefresher, event_log, run, run_wsl_deny, run_wsl_upgrade};
+pub use wsl_phase::{WslDenyExit, WslUpgrade, WslUpgradeExit, WslUpgraded, wsl_deny, wsl_upgrade};
 
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::sids::Sid;

@@ -907,17 +907,23 @@ would refuse:
   lets its owner start it) and waits up to 10 seconds for the deny to be back.
 - **A WSL update pending**: the WSL package from the Store
   (`MicrosoftCorporationII.WindowsSubsystemForLinux`) is newer than the WSL that is installed
-  (the `Version` value of `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss\MSI`). Any user
-  could start that update through WSL's own installer, which would take the deny off until
-  Clauseo puts it back, so Clauseo installs it first. The app shows that it is updating a
-  Windows component, and the same task, as LOCAL SYSTEM, runs WSL's own MSI from the package's
-  folder the way WSL's installer does: `msiexec.exe /i "<the package's folder under
-  C:\Program Files\WindowsApps>\wsl.msi" /qn SKIPMSIX=1 REBOOT=ReallySuppress` (silent, no
-  restart), then puts the deny back. The launch waits up to 2 minutes. If the update fails,
-  Windows Installer leaves WSL as it was, the deny is put back on that version, and the launch
-  goes on. Clauseo installs the update whatever `AutoUpgradeViaMsix` under that `MSI` key says,
-  as WSL's installer does when a user asks it (that value governs only its service's start); if
-  you hold WSL's updates back, keep the Store package at the installed version.
+  (the `Version` value of `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss\MSI`). Where
+  the package is registered for every user, any user could start that update through WSL's own
+  installer, which would take the deny off until Clauseo puts it back, so Clauseo installs it
+  first. The app shows that it is updating a Windows component, and Clauseo runs another task,
+  `\Clauseo\SandboxWslUpgrade`, which nothing starts but Clauseo's launch. As LOCAL SYSTEM, it
+  checks WSL's MSI in the package's folder (the folder is WSL's package, nothing in the path is a
+  link or junction, the file is owned by TrustedInstaller or SYSTEM, and its signature chains to
+  a Microsoft root), then runs it the way WSL's installer does: `msiexec.exe /i "<the package's
+  folder under C:\Program Files\WindowsApps>\wsl.msi" /qn SKIPMSIX=1 REBOOT=ReallySuppress`
+  (silent, no restart), then puts the deny back. While a sandbox user still has a process
+  running, it leaves the update for a later launch and only puts the deny back. The launch waits
+  up to 2 minutes, and up to 4 and a half minutes while the update is still installing; it doesn't start
+  while msiexec may still be running. If the update fails, Windows Installer leaves WSL as it
+  was, the deny is put back on that version, and the launch goes on. Clauseo installs the update
+  whatever `AutoUpgradeViaMsix` under that `MSI` key says, as WSL's installer does when a user
+  asks it (that value governs only its service's start); if you hold WSL's updates back, keep the
+  Store package at the installed version.
 
 What is logged: the task writes an information line to the Application log from the source
 `Clauseo Sandbox` ("WSL's pending update was installed: <old version> to <new version>"), or an
@@ -941,8 +947,10 @@ Clauseo refuses the launch with `sandbox.blocked` only when that repair fails:
   `WSLService` or `LxssManager` is installed: run `wsl --update` to finish installing it. Clauseo
   doesn't repair this one itself.
 
-A pending WSL update doesn't refuse a launch: `wsl_upgrade_pending` is a step the launch waits
-through, not a refusal.
+- **`wsl_upgrade_pending`**: a pending WSL update was still installing after 4 and a half minutes (msiexec
+  left running past its 4-minute wait). Try the launch again once it ends; the Application log
+  shows its result. Otherwise a pending WSL update doesn't refuse a launch: the launch waits
+  through it.
 
 With no WSL on the computer, nothing is refused. Uninstalling Clauseo (or its in-app removal)
 takes the deny off before it deletes the group. If you clear a leftover sandbox by hand

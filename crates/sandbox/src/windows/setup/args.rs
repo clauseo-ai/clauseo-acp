@@ -21,6 +21,9 @@
 //!   `\Clauseo\SandboxStop` runs. No other argument either: the pool comes from the record.
 //! - `--wsl-deny`: re-applies WSL's deny and nothing else (`refresh::wsl_deny`), which the
 //!   SYSTEM task `\Clauseo\SandboxWslDeny` runs on Windows Installer's events. No other argument.
+//! - `--wsl-upgrade`: installs WSL's pending upgrade, then re-applies the deny
+//!   (`refresh::wsl_upgrade`), which the SYSTEM task `\Clauseo\SandboxWslUpgrade` runs on demand
+//!   (the launch check's). No other argument.
 //!
 //! `--per-machine` (taken by `--remove` and `--adopt`) and `--uninstall` (`--remove` only)
 //! are the flags without a value. Every other flag takes its value as the next argument (never
@@ -79,6 +82,8 @@ pub enum Mode {
     Stop,
     /// `--wsl-deny`.
     WslDeny,
+    /// `--wsl-upgrade`.
+    WslUpgrade,
 }
 
 /// The lawyer a per-user `--adopt` sets up, as the unelevated installer named them.
@@ -96,21 +101,23 @@ pub struct AdoptUser {
     "usage: clauseo-sandbox-setup --set-up --parent <pid> --data-dir <path> [--add <n>] | \
          --reclaim --parent <pid> | --adopt --user-install-dir <path> (--owner-sid <sid> \
          --data-dir <path> | --per-machine) | --remove [--uninstall] [--per-machine] | --refresh | \
-         --stop | --wsl-deny ({0})"
+         --stop | --wsl-deny | --wsl-upgrade ({0})"
 )]
 pub struct Usage(pub String);
+
+/// The SYSTEM tasks' modes, which take nothing else: what they act on comes from the record.
+const ALONE_MODES: [(&str, Mode); 4] = [
+    ("--refresh", Mode::Refresh),
+    ("--stop", Mode::Stop),
+    ("--wsl-deny", Mode::WslDeny),
+    ("--wsl-upgrade", Mode::WslUpgrade),
+];
 
 /// Parses the arguments after the program's name.
 pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Mode, Usage> {
     let mut args = args.into_iter();
     let mode = args.next().ok_or_else(|| Usage("no mode".to_owned()))?;
-    // The SYSTEM tasks' modes take nothing else: what they act on comes from the record.
-    let alone_modes = [
-        ("--refresh", Mode::Refresh),
-        ("--stop", Mode::Stop),
-        ("--wsl-deny", Mode::WslDeny),
-    ];
-    for (alone, parsed) in alone_modes {
+    for (alone, parsed) in ALONE_MODES {
         if mode == alone {
             return match args.next() {
                 None => Ok(parsed),

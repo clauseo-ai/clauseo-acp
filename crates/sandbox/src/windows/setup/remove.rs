@@ -48,7 +48,7 @@
 //! 6. the ledger's entries (`ledger_work.rs`), read from the record's `DataDir`, which the owner
 //!    can influence, so it is checked as `--data-dir` is and used only as `ledger_work.rs` says;
 //! 7. the group, when it is the record's and has no members left;
-//! 8. on a per-machine install, the stop and WSL deny tasks set-up registered for the owner,
+//! 8. on a per-machine install, the stop and WSL tasks set-up registered for the owner,
 //!    then the record key;
 //! 9. for the uninstaller only, the admin copy's teardown (`admin_remove.rs`, run through
 //!    [`remove_then`]), with the lock still held, so a refresh skips instead of racing it.
@@ -147,7 +147,7 @@ pub enum RemoveStep {
     Record,
     /// Removing the network filters and firewall rules (S15 PR7).
     Network,
-    /// A per-machine install's stop and WSL deny tasks, deleted before the record.
+    /// A per-machine install's stop and WSL tasks, deleted before the record.
     StopTask,
     /// Taking WSL's deny for the group off its launch permissions (`windows::wsl::remove`).
     Wsl,
@@ -513,9 +513,9 @@ fn remove_group(machine: &mut impl Removal, record: &MachineRecord) -> Result<bo
 
 /// Step 8, before the record goes: on a per-machine install (`AdminCopyOwner` is `machine`),
 /// each of [`MACHINE_TASKS`] set-up registered for the record's owner (`\Clauseo\SandboxStop`,
-/// `\Clauseo\SandboxWslDeny`) is deleted, so the owner keeps no start right once their pool is
-/// gone. A per-user install's tasks stay (`--adopt` registered them; `--remove --uninstall`
-/// deletes them with the admin copy).
+/// `\Clauseo\SandboxWslDeny`, `\Clauseo\SandboxWslUpgrade`) is deleted, so the owner keeps no start
+/// right once their pool is gone. A per-user install's tasks stay (`--adopt` registered them;
+/// `--remove --uninstall` deletes them with the admin copy).
 fn remove_machine_tasks(machine: &mut impl Removal) -> Result<(), Failed> {
     let failed = |e: MachineError| (RemoveStep::StopTask, cause_of(&e));
     match machine.copy_owner().map_err(failed)? {

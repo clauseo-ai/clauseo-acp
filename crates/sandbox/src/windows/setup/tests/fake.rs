@@ -463,6 +463,7 @@ impl Machine for FakeMachine {
         let slot = match task {
             SystemTask::Stop => &mut self.state.stop_task,
             SystemTask::WslDeny => &mut self.state.wsl_task,
+            SystemTask::WslUpgrade => &mut self.state.wsl_upgrade_task,
             SystemTask::Refresh => panic!("the set-up never registers the refresh"),
         };
         *slot = Some(owner.clone());

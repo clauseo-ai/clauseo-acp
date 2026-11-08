@@ -207,7 +207,8 @@ pub trait Machine {
     /// Read as this process.
     fn copy_owner(&mut self) -> Result<Option<CopyOwner>, MachineError>;
     /// Registers, or replaces, the SYSTEM task `task` (one of `refresh::MACHINE_TASKS`:
-    /// `\Clauseo\SandboxStop`, `\Clauseo\SandboxWslDeny`) for the pool owner `owner`
+    /// `\Clauseo\SandboxStop`, `\Clauseo\SandboxWslDeny`, `\Clauseo\SandboxWslUpgrade`) for
+    /// the pool owner `owner`
     /// (`refresh::register_task`, as `--adopt` does per user), as this process.
     /// The task definitions build on Windows and in the tests only (`windows::refresh`).
     #[cfg(any(windows, test))]
