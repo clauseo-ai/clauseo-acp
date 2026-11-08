@@ -43,9 +43,11 @@ pub(crate) struct Changes {
     pub(crate) added: Vec<PathBuf>,
     /// Items changed that are reparse points now (with [`Layout::Plain`], every item changed).
     pub(crate) relinked: Vec<PathBuf>,
-    /// Of `added`, each that was a folder when reported: one gone by the check counts as gone
-    /// (`set_aside::live`). Empty with [`Layout::Plain`], which has no attributes to tell by.
-    pub(crate) folders: Vec<PathBuf>,
+    /// Of `added`, each folder renamed in (`FILE_ACTION_RENAMED_NEW_NAME`): one gone by the
+    /// check counts as gone (`set_aside::live`). A folder made (`FILE_ACTION_ADDED`) isn't
+    /// listed: whatever is put in it is reported on its own, so `mkdir tmp` then `rm -r tmp`
+    /// hides nothing. Empty with [`Layout::Plain`], which has no attributes to tell by.
+    pub(crate) renamed_folders: Vec<PathBuf>,
 }
 
 /// What the records in `buffer` (chained by `NextEntryOffset`) report. `None` when the buffer
@@ -69,8 +71,8 @@ pub(crate) fn changes(buffer: &[u8], layout: Layout) -> Option<Changes> {
         match action {
             ADDED | RENAMED_NEW_NAME => {
                 let path = path_of(name)?;
-                if folder {
-                    changes.folders.push(path.clone());
+                if folder && action == RENAMED_NEW_NAME {
+                    changes.renamed_folders.push(path.clone());
                 }
                 changes.added.push(path);
             }
