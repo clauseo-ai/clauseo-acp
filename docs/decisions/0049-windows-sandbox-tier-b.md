@@ -2654,13 +2654,17 @@ check (`check_launch_in`) passes WSL's check through `wsl_heal::heal`:
   `WinVerifyTrust` (`WINTRUST_ACTION_GENERIC_VERIFY_V2`, no UI) must trust its signature, with
   revocation not checked and URL retrieval cache-only, so an offline machine verifies as an
   online one does, and the signer's chain must pass
-  `CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_MICROSOFT_ROOT)`: it ends in one of
-  Microsoft's own roots, so a root added to the machine's store can't stand in for one; and the
-  leaf certificate must list the code-signing EKU (`szOID_PKIX_KP_CODE_SIGNING`). The
-  handle stays open, shared for reading only, and the two folders without delete sharing, until
-  msiexec has ended, so nothing is swapped between the checks and the install; msiexec gets the
-  path that was opened. A failed check is a failed upgrade (its reason names no path): the run still re-applies
-  the deny, as after any other failed upgrade.
+  `CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_MICROSOFT_ROOT)` with
+  `MICROSOFT_ROOT_CERT_CHAIN_POLICY_CHECK_APPLICATION_ROOT_FLAG` (never the test-root flag): it
+  ends in one of Microsoft's own roots, so a root added to the machine's store can't stand in for
+  one. The flag admits Microsoft Root Certificate Authority 2011, where `wsl.msi` chains (through
+  Microsoft Code Signing PCA 2024); with no flags the policy refused it on the VM (`0x800B0109`,
+  `CERT_E_UNTRUSTEDROOT`), so no upgrade could install. And the leaf certificate must list the
+  code-signing EKU (`szOID_PKIX_KP_CODE_SIGNING`). The handle stays open, shared for reading only,
+  and the two folders without delete sharing, until msiexec has ended, so nothing is swapped between
+  the checks and the install; msiexec gets the path that was opened. A failed check is a failed
+  upgrade (its reason names no path): the run still re-applies the deny, as after any other failed
+  upgrade.
 - **The launch's wait for it**: the host hears `LaunchProgress::UpdatingWindowsComponent` once,
   when the wait begins (the `progress` argument of `clean_close::check_launch`, a
   `&dyn Fn(LaunchProgress)`; the app owns the words, "Updating a Windows component before
