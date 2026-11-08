@@ -125,7 +125,8 @@ fn each_platform_expects_its_own_installer_name() {
 }
 
 /// The names are the ones the release signs: `productName`, release.yml's Windows matrix arch
-/// names, the installer it signs with `--app-version`, and the macOS archive the bundler signs.
+/// names, the installer it signs with `--app-version`, and the macOS archive signed under its
+/// per-arch name.
 #[test]
 fn the_expected_names_are_the_ones_the_release_signs() {
     let conf = std::fs::read_to_string(crate_dir().join("tauri.conf.json")).unwrap();
@@ -137,7 +138,8 @@ fn the_expected_names_are_the_ones_the_release_signs() {
         "{ target: x86_64-pc-windows-msvc, runner: windows-2025, tier: 1, arch: x64 }",
         "{ target: aarch64-pc-windows-msvc, runner: windows-11-arm, tier: 1, arch: arm64 }",
         r#"tauri signer sign --app-version "$VERSION" "$OUT/Clauseo_${VERSION}_${{ matrix.arch }}-setup.exe""#,
-        r#"cp "$bundle/macos/Clauseo.app.tar.gz" "$bundle/macos/Clauseo.app.tar.gz.sig" "$OUT/""#,
+        r"tarball=Clauseo_${VERSION}_${{ matrix.arch }}.app.tar.gz",
+        r#"cp "$bundle/macos/$tarball" "$bundle/macos/$tarball.sig" "$OUT/""#,
     ] {
         assert!(
             release.contains(needle),
@@ -374,12 +376,12 @@ fn the_gate_refuses_another_file_and_logs_both_names() {
     assert!(!text.contains(raw), "{text}");
 }
 
-/// macOS's two forms: today's bundler name for both architectures (in force), and the per-arch
-/// asset name stage F's release will sign once it signs after renaming. Windows and Linux are the
-/// same under both.
+/// macOS's two forms: the bundler's name for both architectures (the form before the per-arch
+/// signing), and the per-arch asset name the release signs now (in force). Windows and Linux are
+/// the same under both.
 #[test]
-fn macos_names_its_archive_in_either_form_and_the_bundle_form_is_in_force() {
-    assert_eq!(MAC_NAME, MacName::Bundle);
+fn macos_names_its_archive_in_either_form_and_the_per_arch_form_is_in_force() {
+    assert_eq!(MAC_NAME, MacName::PerArch);
     assert_eq!(mac_archive_arch("aarch64"), Some("aarch64"));
     assert_eq!(mac_archive_arch("x86_64"), Some("x64"));
     assert_eq!(mac_archive_arch("x86"), None);
@@ -466,7 +468,7 @@ fn decode(text: &str) -> String {
 
 /// The real test-v0.0.3 signatures: each installer names exactly the file `update_file_name`
 /// expects for its architecture at its version, and the sandbox tool's names neither, so both
-/// Windows builds refuse it. No macOS fixture yet: stage F is changing the signed Mac names.
+/// Windows builds refuse it. No macOS fixture yet: the signed Mac names are per-arch now.
 #[test]
 fn the_real_release_signatures_name_the_expected_files() {
     let x64 = update_file_name(MAC_NAME, "windows", "x86_64", "0.0.3").unwrap();
