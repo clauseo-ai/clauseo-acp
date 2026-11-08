@@ -111,32 +111,6 @@ pub(crate) fn lock_down_tree(dir: &Path, exe: &Path) -> io::Result<()> {
     super::take_back::lock_down_with(&mut super::take_back_os::NtfsLockDown, dir, exe)
 }
 
-/// [`lock_down`] on `dir` and, below it, on every folder and file but `skip` (a name in `dir`);
-/// a link below is deleted.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "deletes a link in the admin folder, only administrators' to change"
-)]
-pub(crate) fn lock_tree(dir: &Path, skip: Option<&str>) -> io::Result<()> {
-    lock_down(dir, true)?;
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        if skip.is_some_and(|skip| entry.file_name().eq_ignore_ascii_case(skip)) {
-            continue;
-        }
-        let path = entry.path();
-        match found(&path)? {
-            Found::Folder => lock_tree(&path, None)?,
-            Found::File => lock_down(&path, false)?,
-            Found::Link => {
-                std::fs::remove_file(&path).or_else(|_file| std::fs::remove_dir(&path))?;
-            }
-            Found::Missing => {}
-        }
-    }
-    Ok(())
-}
-
 /// [`WindowsAdminCopy`] for `UserSetup::state`, which the app asks at every tier query: the
 /// copy's hash is kept for its file identity (volume, file ID, size and last write, read from
 /// the handle it is hashed through) and computed again only when that changes. Every other read
@@ -312,8 +286,15 @@ fn hash_file(file: &mut File) -> io::Result<String> {
 /// Gives `path` (a folder when `folder`, else the admin copy) [`LOCKED_FOLDER_SDDL`]'s or
 /// [`LOCKED_FILE_SDDL`]'s owner and protected DACL, then reads it back and refuses unless it is
 /// exactly that ([`locked`]). Needs an elevated or SYSTEM token, which may assign
-/// Administrators as owner.
+/// Administrators as owner. Opened as itself, then [`lock_handle`].
 pub(crate) fn lock_down(path: &Path, folder: bool) -> io::Result<()> {
+    let access = READ_CONTROL.0 | WRITE_DAC.0 | WRITE_OWNER.0 | FILE_READ_ATTRIBUTES.0;
+    lock_handle(Handle::open(path, access)?.0, folder)
+}
+
+/// [`lock_down`] on what `handle` is open on (with `READ_CONTROL`, `WRITE_DAC`, `WRITE_OWNER`
+/// and `FILE_READ_ATTRIBUTES`).
+pub(super) fn lock_handle(handle: HANDLE, folder: bool) -> io::Result<()> {
     let sddl = if folder {
         LOCKED_FOLDER_SDDL
     } else {
@@ -321,12 +302,11 @@ pub(crate) fn lock_down(path: &Path, folder: bool) -> io::Result<()> {
     };
     let descriptor = Descriptor::from_sddl(sddl)?;
     let (owner, dacl) = descriptor.owner_and_dacl()?;
-    let handle = Handle::open(path, READ_CONTROL.0 | WRITE_DAC.0 | WRITE_OWNER.0)?;
     // SAFETY: the handle is open with WRITE_DAC and WRITE_OWNER; the owner and DACL point into
     // `descriptor`, alive for the call. A folder's inheritable entries reach what is inside.
     let set = unsafe {
         SetSecurityInfo(
-            handle.0,
+            handle,
             SE_FILE_OBJECT,
             OWNER_SECURITY_INFORMATION
                 | DACL_SECURITY_INFORMATION
@@ -342,7 +322,7 @@ pub(crate) fn lock_down(path: &Path, folder: bool) -> io::Result<()> {
             i32::try_from(set.0).unwrap_or(i32::MAX),
         ));
     }
-    let back = handle.security()?;
+    let back = security_of(handle)?;
     if !locked(&back, folder) {
         return Err(io::Error::other(
             "the admin folder's permissions didn't read back as set",
@@ -395,7 +375,7 @@ pub(crate) fn running_image() -> io::Result<PathBuf> {
 
 /// `path`'s owner and DACL as a self-relative descriptor, read from the name itself.
 pub(crate) fn security(path: &Path) -> io::Result<Vec<u8>> {
-    Handle::open(path, READ_CONTROL.0)?.security()
+    security_of(Handle::open(path, READ_CONTROL.0)?.0)
 }
 
 /// A string `SHGetKnownFolderPath` allocated, freed with `CoTaskMemFree` on drop.
@@ -432,39 +412,40 @@ impl Handle {
         .map(Handle)
         .map_err(|error| io::Error::from_raw_os_error(error.code().0 & 0xFFFF))
     }
+}
 
-    /// Its owner and DACL, self-relative (`GetKernelObjectSecurity`).
-    fn security(&self) -> io::Result<Vec<u8>> {
-        let info = (OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION).0;
-        let mut size = 256_u32;
-        for _ in 0..4 {
-            let mut buffer = vec![0_u64; usize::try_from(size).unwrap_or(0).div_ceil(8)];
-            let mut needed = 0_u32;
-            // SAFETY: the handle is open; `buffer` is writable for `size` bytes or more, and
-            // `needed` is a live out-pointer.
-            let read = unsafe {
-                GetKernelObjectSecurity(
-                    self.0,
-                    info,
-                    Some(PSECURITY_DESCRIPTOR(buffer.as_mut_ptr().cast())),
-                    size,
-                    &raw mut needed,
-                )
-            };
-            match read {
-                Ok(()) => {
-                    let mut bytes: Vec<u8> = buffer.iter().flat_map(|w| w.to_ne_bytes()).collect();
-                    bytes.truncate(usize::try_from(size).unwrap_or(0));
-                    return Ok(bytes);
-                }
-                Err(e) if e.code() == ERROR_INSUFFICIENT_BUFFER.to_hresult() => size = needed,
-                Err(e) => return Err(io::Error::from_raw_os_error(e.code().0 & 0xFFFF)),
+/// The owner and DACL of what `handle` is open on (with `READ_CONTROL`), self-relative
+/// (`GetKernelObjectSecurity`).
+fn security_of(handle: HANDLE) -> io::Result<Vec<u8>> {
+    let info = (OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION).0;
+    let mut size = 256_u32;
+    for _ in 0..4 {
+        let mut buffer = vec![0_u64; usize::try_from(size).unwrap_or(0).div_ceil(8)];
+        let mut needed = 0_u32;
+        // SAFETY: the handle is open; `buffer` is writable for `size` bytes or more, and
+        // `needed` is a live out-pointer.
+        let read = unsafe {
+            GetKernelObjectSecurity(
+                handle,
+                info,
+                Some(PSECURITY_DESCRIPTOR(buffer.as_mut_ptr().cast())),
+                size,
+                &raw mut needed,
+            )
+        };
+        match read {
+            Ok(()) => {
+                let mut bytes: Vec<u8> = buffer.iter().flat_map(|w| w.to_ne_bytes()).collect();
+                bytes.truncate(usize::try_from(size).unwrap_or(0));
+                return Ok(bytes);
             }
+            Err(e) if e.code() == ERROR_INSUFFICIENT_BUFFER.to_hresult() => size = needed,
+            Err(e) => return Err(io::Error::from_raw_os_error(e.code().0 & 0xFFFF)),
         }
-        Err(io::Error::other(
-            "a security descriptor kept growing while it was read",
-        ))
     }
+    Err(io::Error::other(
+        "a security descriptor kept growing while it was read",
+    ))
 }
 
 impl Drop for Handle {
