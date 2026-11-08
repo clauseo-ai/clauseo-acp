@@ -10,7 +10,8 @@
 //!
 //! Each try starts by emptying the npm cache ([`empty_npm_cache`]), so tries cut short never
 //! pile up its copies of the tarballs; except a try whose set-up is kept from one that failed
-//! only its rename, which renames it alone (`kept`).
+//! only its rename, which renames it alone (`kept`). Every way to `Ready` then removes the
+//! install's downloads and the npm cache ([`files::clean_up`]); a failed try keeps both.
 //! - A pause ends the job quietly where it is: `pause` has already sent `Paused`.
 //!
 //! Every wait and every npm run is raced against the job's [`Cancel`], and every event goes
@@ -206,6 +207,8 @@ impl<T: Timer + Send + Sync> Job<T> {
         };
         let (launcher, timer) = (&*self.launcher, &*self.timer);
         if let Some(installed) = ready_install(config, launcher, timer, agent, &search).await {
+            // Finished already (a try cut short after its receipt, say): what it fetched goes.
+            clean_up_finished(config, agent);
             self.ready(installed, 0);
             return;
         }
@@ -293,10 +296,12 @@ impl<T: Timer + Send + Sync> Job<T> {
             }
         };
         // A finished set-up whose rename failed: only the rename runs again.
+        // The earlier try's downloads and npm cache stay until this `Ready`, as a full try's do.
         if let Some(installed) = kept::finish_kept(self, &node)
             .await
             .map_err(TryError::in_setup)?
         {
+            clean_up_finished(config, &self.ticket.agent);
             return Ok(installed);
         }
         // A try cut short left its npm cache behind; this one starts with none, so a run of
@@ -308,7 +313,7 @@ impl<T: Timer + Send + Sync> Job<T> {
         let installed = npm::install(self, &node, &fetched, run)
             .await
             .map_err(TryError::in_setup)?;
-        files::clean_up(config, &fetched);
+        files::clean_up(config, fetched.downloaded());
         Ok(installed)
     }
 
@@ -412,6 +417,16 @@ fn finish_log(log: &mut InstallLog, run: &Run, kind: FailureKind) {
         run.total.div_ceil(MB)
     ));
     log.push(format!("result: {} after {} tries", kind.word(), run.tries));
+}
+
+/// The clean-up after `Ready` ([`files::clean_up`]) for a `Ready` that fetched nothing itself:
+/// a kept set-up renamed alone, or an install a job finds finished at its start.
+/// Every package tarball the install may have put in `downloads/` goes, with the npm cache, and
+/// Node's archive once the runtime is unpacked (another agent's install may still want it
+/// otherwise). Only with `agents/.lock` held.
+fn clean_up_finished(config: &AgentsConfig, agent: &AgentId) {
+    let with_node = runtime_ready(config);
+    files::clean_up(config, &files::install_downloads(config, agent, with_node));
 }
 
 /// Whether the downloaded Node is unpacked and complete.

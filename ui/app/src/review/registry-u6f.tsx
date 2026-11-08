@@ -133,25 +133,19 @@ export const U6F: Entry[] = [
   },
   {
     id: "U6F-16",
-    words: errorWords(
-      "Codex was downloaded, but setting it up didn't finish. Try again. If it keeps happening, ask your IT team to check your security software.",
-    ),
+    words: errorWords("Codex was downloaded, but setting it up didn't finish. Try again."),
     screen: "room/first-run",
     render: setupFailed({ kind: "codex", name: "Codex" }),
   },
   {
     id: "U6F-17",
-    words: errorWords(
-      "{name} was downloaded, but setting it up didn't finish. Try again. If it keeps happening, ask your IT team to check your security software.",
-    ),
+    words: errorWords("{name} was downloaded, but setting it up didn't finish. Try again."),
     screen: "room/first-run",
     render: setupFailed({ kind: undefined, name: "Codex" }),
   },
   {
     id: "U6F-18",
-    words: errorWords(
-      "The AI was downloaded, but setting it up didn't finish. Try again. If it keeps happening, ask your IT team to check your security software.",
-    ),
+    words: errorWords("The AI was downloaded, but setting it up didn't finish. Try again."),
     screen: "room/first-run",
     render: setupFailed({ kind: undefined, name: null }),
   },

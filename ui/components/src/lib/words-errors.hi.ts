@@ -149,14 +149,14 @@ export const HI = {
     "Clauseo के बंद होने तक यह वेबसाइट फिर से अवरुद्ध है। Clauseo यह बदलाव सहेज नहीं सका, इसलिए अगली बार Clauseo खुलने पर इसे फिर से अनुमति मिल सकती है।",
   "Clauseo is still tidying up the Safe workspace after it last closed. Try again in a moment. Your question is kept.":
     "Clauseo पिछली बार बंद होने के बाद अभी भी सुरक्षित कार्यक्षेत्र को व्यवस्थित कर रहा है। थोड़ी देर में फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
-  "Claude was downloaded, but setting it up didn't finish. Try again. If it keeps happening, ask your IT team to check your security software.":
-    "Claude डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें। अगर ऐसा बार-बार हो, तो अपनी IT टीम से अपने सुरक्षा सॉफ़्टवेयर की जाँच करने को कहें।",
-  "Codex was downloaded, but setting it up didn't finish. Try again. If it keeps happening, ask your IT team to check your security software.":
-    "Codex डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें। अगर ऐसा बार-बार हो, तो अपनी IT टीम से अपने सुरक्षा सॉफ़्टवेयर की जाँच करने को कहें।",
-  "{name} was downloaded, but setting it up didn't finish. Try again. If it keeps happening, ask your IT team to check your security software.":
-    "{name} डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें। अगर ऐसा बार-बार हो, तो अपनी IT टीम से अपने सुरक्षा सॉफ़्टवेयर की जाँच करने को कहें।",
-  "The AI was downloaded, but setting it up didn't finish. Try again. If it keeps happening, ask your IT team to check your security software.":
-    "AI डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें। अगर ऐसा बार-बार हो, तो अपनी IT टीम से अपने सुरक्षा सॉफ़्टवेयर की जाँच करने को कहें।",
+  "Claude was downloaded, but setting it up didn't finish. Try again.":
+    "Claude डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें।",
+  "Codex was downloaded, but setting it up didn't finish. Try again.":
+    "Codex डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें।",
+  "{name} was downloaded, but setting it up didn't finish. Try again.":
+    "{name} डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें।",
+  "The AI was downloaded, but setting it up didn't finish. Try again.":
+    "AI डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें।",
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

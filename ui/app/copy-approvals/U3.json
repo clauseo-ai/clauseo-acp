@@ -872,14 +872,14 @@
     "note": "A send refused while the Safe workspace's clean-up after an earlier session is still running; retryable (ADR 0049)"
   },
   "U3-err-agent.install_setup_failed": {
-    "en": "Claude was downloaded, but setting it up didn't finish. Try again. If it keeps happening, ask your IT team to check your security software.",
-    "hi": "Claude डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें। अगर ऐसा बार-बार हो, तो अपनी IT टीम से अपने सुरक्षा सॉफ़्टवेयर की जाँच करने को कहें।",
+    "en": "Claude was downloaded, but setting it up didn't finish. Try again.",
+    "hi": "Claude डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें।",
     "hi_status": "provisional",
     "hi_at": "2026-11-08",
     "hi_by": "orchestrator (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-08",
-    "by": "orchestrator (provisional; app copy review)",
+    "by": "orchestrator (provisional; app copy review; Rohan's rule: no line ends by telling the lawyer to ask IT)",
     "note": "Failed after every file downloaded: npm set-up, the rename into place or the receipt (Windows VM, Defender/folder walkers)"
   }
 }
