@@ -70,7 +70,8 @@ name, `HEAD` as the last, each letter a two-case class. It refuses `git init`, `
 rename's destination). Names that only contain it (`.gitignore`, `.github/`, `a.git`,
 `HEADER.md`, `ahead`) stay writable. The policy cost: agents can't clone or init a repository
 into a matter (`git worktree add`, submodules and git dependencies cloned into it fail too); they
-work in their own scratch or state folder.
+work in their own scratch or state folder. Nor can they create, rename onto or write any file
+named `head` in the matter (any case, ignorables included); `HEAD.txt` is unaffected.
 
 Case-insensitive HFS+ ignores U+200C to U+200F, U+202A to U+202E, U+206A to U+206F and U+FEFF
 when it compares names (TN1150), so `.g`, U+200C, `it` opens `.git` there. Both regexes allow
@@ -82,10 +83,12 @@ writable (jail-tested), and a matter path holding them changes nothing. `strip_h
 beside the policy's name fold, removes them before the fold for the watches' name checks.
 The `CLAUDE.md` regex and the root's protected names do not take the ignorables.
 
-At launch the walk that finds every `.git` also lists each repository-shaped folder outside one
-(a `HEAD` file, in any case, beside `objects` and `refs` folders: one stat each per `HEAD`
-listed). It is read-only with its whole tree, like a `.git`, on macOS and in the Windows ACL plan
-(a whole-tree DenyWrite). A matter whose root has that layout is read-only to the agent.
+At launch the walk that finds every `.git` also lists each repository-shaped folder outside one:
+a `HEAD` file or link beside `objects` and `refs` folders, or beside a `commondir` file (a
+linked worktree's git dir). Names compare without the ignorables, then by the policy's name fold
+(one listing of the folder per `HEAD`). It is read-only with its whole tree, like a `.git`, on
+macOS and in the Windows ACL plan (a whole-tree DenyWrite). A matter whose root has that layout
+is read-only to the agent.
 
 What the name rules cannot see, covered by the lawyer-side watch (a follow-up): a folder that
 already holds a `.git` or a bare layout, made in `TMPDIR`, the state or notes folder, and moved
