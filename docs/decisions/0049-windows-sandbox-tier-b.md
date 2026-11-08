@@ -2150,7 +2150,8 @@ positively, the lawyer first:
   limit ends during the termination has marked it), whose profile delete takes the user's distro
   registrations (in its hive) with it; then it is opened (`HcsOpenComputeSystem`) and terminated
   (`HcsTerminateComputeSystem`, at most 5 s each and 10 s in all, through an operation waited
-  for and closed). A system already gone is ended;
+  for, cancelled if the wait runs out (`HcsCancelOperation`, where `computecore.dll` has it),
+  and closed). A system already gone is ended;
 - **any other WSL system is unmapped**, as is one whose lawyer's folder can't be read or whose id
   isn't a GUID: nothing terminates it (it may be the lawyer's, or another account's), every pool
   user is marked, and the stop ends at 48.
