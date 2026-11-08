@@ -22,7 +22,8 @@
 //! - The folders below a pass's folder that mirror the item's folders in the matter
 //!   (`<pass>\sub\.git`) are made the same way as the pass's folder, one handle at a time.
 //! - The scan's folders are opened and listed, and its names probed, through handles too
-//!   (`scan.rs`).
+//!   (`scan.rs`), as is all the live watch reads: each item, its owner, and a link's target,
+//!   read with `FSCTL_GET_REPARSE_POINT` on the link's own handle (`link.rs`).
 //! - Final paths are compared with the planned ones part by part as NTFS compares names
 //!   (`CompareStringOrdinal`, case ignored), so an item a probe opened under another case, or
 //!   under any name NTFS matches, is still the planned one.
@@ -37,7 +38,7 @@
 
 use std::ffi::{OsStr, OsString};
 use std::io;
-use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
+use std::os::windows::ffi::OsStrExt as _;
 use std::path::{Path, PathBuf};
 
 use windows::Wdk::Foundation::OBJECT_ATTRIBUTES;
@@ -54,10 +55,9 @@ use windows::Win32::Foundation::{
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, DELETE, FILE_ACCESS_RIGHTS, FILE_ADD_FILE, FILE_ADD_SUBDIRECTORY,
     FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS,
-    FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAGS_AND_ATTRIBUTES, FILE_ID_INFO, FILE_NAME_NORMALIZED,
-    FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE,
-    FileAttributeTagInfo, FileIdInfo, GETFINALPATHNAMEBYHANDLE_FLAGS, GetFileInformationByHandleEx,
-    GetFinalPathNameByHandleW, OPEN_EXISTING, READ_CONTROL, SYNCHRONIZE, VOLUME_NAME_DOS,
+    FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAGS_AND_ATTRIBUTES, FILE_ID_INFO, FILE_READ_ATTRIBUTES,
+    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE, FileAttributeTagInfo,
+    FileIdInfo, GetFileInformationByHandleEx, OPEN_EXISTING, READ_CONTROL, SYNCHRONIZE,
 };
 use windows::Win32::System::IO::IO_STATUS_BLOCK;
 use windows::core::{PCWSTR, PWSTR};
@@ -65,19 +65,20 @@ use windows::core::{PCWSTR, PWSTR};
 use super::SetAsideFailure;
 use super::files::{FileId, io_failure};
 use super::run::{Need, Volume};
-use super::scan::Listed;
-use crate::windows::acl_plan::verbatim;
+use super::scan::{Kind, Listed};
 use crate::windows::folder::verbatim_wide;
 use crate::windows::private_dir::make_drive_folder;
 use crate::windows::setup::journal::volume_root;
 
 mod forget;
+mod link;
 mod read;
 mod scan;
 mod temps;
 
 pub(super) use forget::{forget_from_sandbox, forget_from_set_aside};
 pub(super) use scan::same_name;
+use scan::same_path;
 pub(super) use temps::remove_temps;
 
 /// `ERROR_REPARSE_POINT_ENCOUNTERED`: an open told not to follow a reparse point met one.
@@ -127,6 +128,26 @@ impl Volume for Ntfs {
 
     fn read_small(&self, folder: &Handle, name: &OsStr, max: u64) -> io::Result<Vec<u8>> {
         read::read_small(folder, name, max)
+    }
+
+    fn open_top(&self, top: &Path) -> io::Result<Handle> {
+        scan::open_top(top)
+    }
+
+    fn look(&self, folder: &Handle, name: &OsStr) -> io::Result<Option<(FileId, Kind)>> {
+        scan::look(folder, name)
+    }
+
+    fn link_target(&self, folder: &Handle, name: &OsStr) -> io::Result<PathBuf> {
+        link::link_target(folder, name)
+    }
+
+    fn owner_at(&self, folder: &Handle, name: &OsStr) -> io::Result<String> {
+        read::owner_at(folder, name)
+    }
+
+    fn folder_name(&self, folder: &Handle) -> io::Result<OsString> {
+        scan::folder_name(folder)
     }
 
     fn file_id(&self, path: &Path) -> io::Result<Option<FileId>> {
@@ -498,42 +519,6 @@ fn tag(handle: &Handle) -> io::Result<Option<u32>> {
     }
     .map_err(|e| os_error(&e))?;
     Ok((tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0).then_some(tag.ReparseTag))
-}
-
-/// Whether the handle's final path (normalized, with its drive letter) is `planned`, compared
-/// part by part as NTFS compares names ([`same_name`]), both sides in the verbatim form
-/// ([`verbatim`]): `dunce`'s plain form kept a final path past `MAX_PATH`, or with a name that
-/// isn't Unicode, verbatim while the planned path was plain (round 7, VM run 3).
-fn same_path(handle: &Handle, planned: &Path) -> io::Result<bool> {
-    let found = verbatim(&PathBuf::from(OsString::from_wide(&final_path(handle)?)));
-    let planned = verbatim(&std::path::absolute(planned)?);
-    let (mut a, mut b) = (found.components(), planned.components());
-    loop {
-        match (a.next(), b.next()) {
-            (None, None) => return Ok(true),
-            (Some(x), Some(y))
-                if scan::same_wide(&wide_os(x.as_os_str()), &wide_os(y.as_os_str())) => {}
-            _ => return Ok(false),
-        }
-    }
-}
-
-/// The handle's final path, normalized, with its drive letter (`\\?\C:\...`).
-fn final_path(handle: &Handle) -> io::Result<Vec<u16>> {
-    let flags = GETFINALPATHNAMEBYHANDLE_FLAGS(FILE_NAME_NORMALIZED.0 | VOLUME_NAME_DOS.0);
-    let mut buffer = vec![0u16; 512];
-    loop {
-        // SAFETY: the handle is open and `buffer` is a writable slice of its length.
-        let length = unsafe { GetFinalPathNameByHandleW(handle.0, &mut buffer, flags) };
-        match usize::try_from(length).map_err(io::Error::other)? {
-            0 => return Err(io::Error::last_os_error()),
-            n if n < buffer.len() => {
-                buffer.truncate(n);
-                return Ok(buffer);
-            }
-            n => buffer.resize(n + 1, 0),
-        }
-    }
 }
 
 /// `text` as UTF-16, without a NUL.

@@ -32,6 +32,21 @@ pub(super) fn set_aside(
     now: SystemTime,
     need: Need<'_>,
 ) -> Result<Entry, Refused> {
+    let owner = volume.owner(from).ok();
+    set_aside_owned(volume, place, (from, within, owner), reason, now, need)
+}
+
+/// [`set_aside`], with the intent's owner read by the caller: the live watch reads it through
+/// handles from the watched folder (`Volume::owner_at`), never by the item's full path, which
+/// would follow a link partway (`live.rs`).
+pub(super) fn set_aside_owned(
+    volume: &impl Volume,
+    place: &Place,
+    (from, within, owner): (&Path, &[OsString], Option<String>),
+    reason: Reason,
+    now: SystemTime,
+    need: Need<'_>,
+) -> Result<Entry, Refused> {
     let refuse = |failure| Refused::at(failure, from);
     let own = from
         .file_name()
@@ -44,7 +59,6 @@ pub(super) fn set_aside(
         .parent()
         .ok_or_else(|| refuse(SetAsideFailure::Io(io::ErrorKind::InvalidInput)))?;
     let root = items_root(volume, place, source).map_err(|refused| refuse(refused.failure))?;
-    let owner = volume.owner(from).ok();
     let folder = timestamp(now);
     let parts = place.parts(&folder, within);
     let mut manifest = load(volume, place).map_err(|refused| refuse(refused.failure))?;

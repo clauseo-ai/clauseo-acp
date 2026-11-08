@@ -33,6 +33,15 @@
 //! made ([`Watched::relinked`]). What git reads from a folder a launch `commondir` names
 //! (`scan::Kept::Common`) is moved when made, as a `.git` is.
 //!
+//! Every read here goes through handles, never by a full path (rule 8, `scan/reach.rs`): the
+//! watched folder is opened as itself, then each folder on the way relative to the one before,
+//! as itself, and a link on the way stops the read, never followed. An item past a folder that is
+//! a link now is gone from the watched folder, never moved through the link. A link's target is
+//! read from the link's own handle, and told inside the watched folder by identity, never by
+//! spelling (`scan/locate.rs`): a network path, another volume or a `..` past the folder leads
+//! out, and nothing of a network path is opened. The move itself still opens the item's folder by
+//! its path and checks its final path (`Volume::move_into`).
+//!
 //! An item is known, and left, when the record (the launch pass's `record.json`) holds it at the
 //! same key with the same file ID: the policy write-denies each `.git` there was at launch, and
 //! the watch leaves what is inside one. So a lawyer's own `.git` whose folder the agent renamed
@@ -54,7 +63,8 @@ use super::files::{FileId, Place, Record};
 use super::names::Key;
 use super::repo_names::{COMMON_NAMES, is_git, is_head, opens_as};
 use super::run::Volume;
-use super::scan::{COMMON_KEY, Item, Kept, Now, plain, same_key, scan, scan_visiting};
+use super::scan::{COMMON_KEY, Item, Kept, Kind, Last, Now, locate, reach, same_key};
+use super::scan::{scan, scan_visiting};
 use super::{Entry, SetAsideFailure};
 use crate::SetAsideWhat;
 
@@ -264,21 +274,22 @@ impl Watched {
         }
         let mut folders = Vec::new();
         for key in rest {
-            let full = self.path(&key);
             let repo = key.iter().position(|part| is_git(part)).map(|at| at + 1);
             if let Some(end) = repo.or_else(|| self.common_at(&key)) {
                 let part = key.get(..end).unwrap_or_default();
                 run.check(part, SetAsideWhat::GitRepository);
                 continue;
             }
-            let Ok(meta) = std::fs::symlink_metadata(&full) else {
-                continue;
-            };
-            let link = meta.file_type().is_symlink();
-            if link && self.leads_out(&full) {
-                run.check(&key, SetAsideWhat::LinkOut);
-            } else if meta.is_dir() && !link {
-                folders.push(key);
+            match reach(volume, &self.root, &key) {
+                Ok((folder, Some((_, Kind::Link)))) => {
+                    let out = self.link_leads_out(volume, &folder, &key);
+                    drop(folder);
+                    if out {
+                        run.check(&key, SetAsideWhat::LinkOut);
+                    }
+                }
+                Ok((_, Some((_, Kind::Folder)))) => folders.push(key),
+                Ok((_, Some((_, Kind::Other)) | None)) | Err(_) => {}
             }
         }
         for key in &folders {
@@ -306,14 +317,13 @@ impl Watched {
         if !is_head(last) {
             return false;
         }
-        let full = self.path(key);
-        let folder = std::fs::symlink_metadata(&full)
-            .is_ok_and(|meta| meta.is_dir() && !meta.file_type().is_symlink());
-        if folder {
-            return false;
+        match reach(volume, &self.root, key) {
+            Ok((_, Some((_, Kind::Folder)))) => false,
+            Ok((folder, _)) => !volume
+                .folder_id(&folder)
+                .is_ok_and(|id| self.git_folder(id)),
+            Err(_) => true,
         }
-        let parent = full.parent().map(|parent| volume.file_id(parent));
-        !matches!(parent, Some(Ok(Some(id))) if self.git_folder(id))
     }
 
     /// Checks each path the watch reported changed in its attributes as a reparse point now:
@@ -329,9 +339,11 @@ impl Watched {
         let mut live = Live::default();
         let mut run = Run::new(self, volume, now, hooks, &mut live);
         for key in paths.iter().filter_map(|path| key_of(path)) {
-            let full = self.path(&key);
-            let link = std::fs::symlink_metadata(&full).is_ok_and(|m| m.file_type().is_symlink());
-            if link && self.leads_out(&full) {
+            let out = match reach(volume, &self.root, &key) {
+                Ok((folder, Some((_, Kind::Link)))) => self.link_leads_out(volume, &folder, &key),
+                Ok(_) | Err(_) => false,
+            };
+            if out {
                 run.check(&key, SetAsideWhat::LinkOut);
             }
         }
@@ -407,22 +419,36 @@ impl Watched {
             .any(|(key, at)| *at == id && ends_in_git(key))
     }
 
-    /// Whether the link at `link` leads outside the watched folder, or its target can't be
-    /// read. Its target is resolved by its words alone, never opened: a link out is moved
-    /// before anything follows it.
-    fn leads_out(&self, link: &Path) -> bool {
-        let Ok(target) = std::fs::read_link(link) else {
+    /// Whether the item at `key` is a link that leads outside the watched folder, or one whose
+    /// target can't be read, or isn't a link there now, reached through handles ([`reach`]):
+    /// anything but a link read and found to lead within. A folder on the way that is a link
+    /// now counts as leading out (the move then finds the item gone, past it).
+    fn leads_out(&self, volume: &impl Volume, key: &[OsString]) -> bool {
+        match reach(volume, &self.root, key) {
+            Ok((folder, Some((_, Kind::Link)))) => self.link_leads_out(volume, &folder, key),
+            Ok(_) | Err(_) => true,
+        }
+    }
+
+    /// Whether the link at `key`, in the open `folder`, leads outside the watched folder, or its
+    /// target can't be read. The target is read from the link's own handle, never followed
+    /// ([`Volume::link_target`]), worked out from its words relative to the link's folder, and
+    /// told inside by identity ([`locate`]): never by spelling, and a network path is never
+    /// opened. A link out is moved before anything follows it.
+    fn link_leads_out<V: Volume>(&self, volume: &V, folder: &V::Folder, key: &[OsString]) -> bool {
+        let Some((name, parents)) = key.split_last() else {
             return true;
         };
-        let full = link
-            .parent()
-            .map_or_else(|| target.clone(), |at| at.join(&target));
-        let (full, root) = (plain(&full), plain(&self.root));
-        !(full.len() >= root.len()
-            && full
-                .iter()
-                .zip(&root)
-                .all(|(a, b)| a.eq_ignore_ascii_case(b)))
+        let Ok(target) = volume.link_target(folder, name) else {
+            return true;
+        };
+        locate(
+            volume,
+            &self.root,
+            (&self.path(parents), &target),
+            Last::Must,
+        )
+        .is_none()
     }
 
     /// The full path of `key`.

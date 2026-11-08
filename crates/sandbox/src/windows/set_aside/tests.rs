@@ -23,6 +23,8 @@ mod live;
 mod live_ends;
 #[cfg(unix)]
 mod live_hits;
+#[cfg(unix)]
+mod live_reads;
 mod nested;
 mod notes;
 #[cfg(unix)]
