@@ -18,9 +18,11 @@
 //!    the owner, named `ClauseoSbNN` when it resolves. One that fails stops nothing;
 //!    3a. reserves this run's number, before its first process snapshot ([`sequence::reserve`]):
 //!    under the set-up lock (a bounded wait), it checks the record still holds the pool, reads
-//!    `StopNext` (1 when absent), keeps it as `n` and writes it one higher. A lock that stays
-//!    held, a record gone or changed, or a write that fails is 50; a read that fails is 46.
-//!    Either way nothing is stopped. The task runs one instance at a time, so no two
+//!    `StopNext` (1 when absent), keeps it as `n` and writes it one higher. A record gone or
+//!    changed, or a write that fails, is 50 and a read that fails 46, with nothing stopped. A
+//!    lock that stays held doesn't stop the kill: the run goes on without a number and writes
+//!    nothing to the record (no marks, no completion), ending 50 at best, so a set-up holding
+//!    the lock can't keep an escapee alive. The task runs one instance at a time, so no two
 //!    reservations overlap;
 //! 4. passes over the processes until one finds none of the pool's: each takes a snapshot and
 //!    reads each process's user ([`Process`]) from the kernel's process list
@@ -138,8 +140,10 @@ pub enum StopExit {
     /// `StopCompleted` and `StopSequence` couldn't be written (the set-up lock stayed held, a
     /// write failed, the record was gone or its pool changed, or `StopSequence` was past `n`).
     NotMarked,
-    /// 50: `StopNext` couldn't be reserved before the first snapshot (the set-up lock stayed
-    /// held, the record was gone or its pool changed, or the write failed); nothing was stopped.
+    /// 50: `StopNext` couldn't be reserved before the first snapshot: the record was gone or its
+    /// pool changed, or the write failed (nothing was stopped), or the set-up lock stayed held
+    /// (the processes were still stopped and the jobs cancelled, but nothing was written to the
+    /// record). 48 wins over it.
     NotReserved,
 }
 
@@ -266,8 +270,16 @@ fn run_steps(fs: &mut impl Stopper) -> Result<String, Refusal> {
             return Err((StopExit::NotPool, format!("nothing was stopped: {why}")));
         }
     };
-    let n = sequence::reserve(fs, STOP, &pool.users).map_err(not_reserved)?;
+    // A lock that stays held stops nothing less: the run goes on, writing nothing.
+    let (n, unreserved) = match sequence::reserve(fs, STOP, &pool.users) {
+        Ok(n) => (n, None),
+        Err(NotReserved::Lock(why)) => (0, Some(why)),
+        Err(why) => return Err(not_reserved(why)),
+    };
     let mut passes = Passes::default();
+    if unreserved.is_some() {
+        passes.mark_failed = Some("nothing is written without a reserved number".to_owned());
+    }
     let ran = run_passes(fs, &pool.users, &mut passes);
     let cancelled = cancel_jobs(fs, &pool.users, &mut passes);
     // Without the list, a process no token names is unknown: the line says why.
@@ -299,7 +311,7 @@ fn run_steps(fs: &mut impl Stopper) -> Result<String, Refusal> {
         passes.jobs_cancelled,
         passes.jobs_failed
     );
-    mark_new(fs, &mut passes);
+    mark_new(fs, &pool.users, &mut passes);
     let not_stopped = |why: &str| Err((StopExit::NotStopped, format!("{counts}; {why}")));
     if let Err(why) = ran.and(cancelled) {
         return not_stopped(&why);
@@ -314,6 +326,10 @@ fn run_steps(fs: &mut impl Stopper) -> Result<String, Refusal> {
     }
     if passes.unknown > 0 {
         return not_stopped("a process's user couldn't be read, so it may be a pool user's");
+    }
+    if let Some(why) = unreserved {
+        let line = format!("{counts}; nothing was written to the record: {UNRESERVED}: {why}");
+        return Err((StopExit::NotReserved, line));
     }
     if let Some(why) = passes.mark_failed {
         return Err((StopExit::NotMarked, format!("{counts}; {why}")));
@@ -340,9 +356,12 @@ fn not_reserved(why: NotReserved) -> Refusal {
         NotReserved::Lock(why) | NotReserved::Changed(why) => (StopExit::NotReserved, why),
         NotReserved::Unread(why) => (StopExit::NoRecord, why),
     };
-    let line = format!("nothing was stopped: StopNext wasn't reserved: {why}");
+    let line = format!("nothing was stopped: {UNRESERVED}: {why}");
     (exit, line)
 }
+
+/// What a stop whose number wasn't reserved says.
+const UNRESERVED: &str = "StopNext wasn't reserved";
 
 /// Step 4: passes until a snapshot finds no pool user's process, or until [`PASS_LIMIT`] has
 /// passed, counted in `passes`. Each pass marks the pool users it found that aren't yet
@@ -369,7 +388,7 @@ fn run_passes(fs: &mut impl Stopper, pool: &[Sid], passes: &mut Passes) -> Resul
         passes
             .found
             .extend(picked.stop.iter().map(|(_, user)| user.clone()));
-        mark_new(fs, passes);
+        mark_new(fs, pool, passes);
         if picked.stop.is_empty() {
             passes.clean_at = Some(at);
             return Ok(());
@@ -418,9 +437,11 @@ fn cancel_jobs(fs: &mut impl Stopper, pool: &[Sid], passes: &mut Passes) -> Resu
 }
 
 /// Step 6: the users of `passes.found` and `passes.suspects` not yet marked are added to
-/// `ResetSids` under the set-up lock, and to `passes.marked`. Nothing is done when there are
-/// none, or once a mark has failed (`passes.mark_failed`), so the lock's wait comes once at most.
-fn mark_new(fs: &mut impl Stopper, passes: &mut Passes) {
+/// `ResetSids` under the set-up lock, and to `passes.marked`, once the record is checked to
+/// still hold `pool` (a set-up may have changed it since the gate). Nothing is done when there
+/// are none, or once a mark has failed (`passes.mark_failed`), so the lock's wait comes once at
+/// most.
+fn mark_new(fs: &mut impl Stopper, pool: &[Sid], passes: &mut Passes) {
     if passes.mark_failed.is_some() {
         return;
     }
@@ -434,7 +455,7 @@ fn mark_new(fs: &mut impl Stopper, passes: &mut Passes) {
     }
     let marked = match fs.lock() {
         Ok(true) => {
-            let marked = fs.mark_for_reset(&new);
+            let marked = still_holds(fs, pool).and_then(|()| fs.mark_for_reset(&new));
             fs.unlock();
             marked
         }
@@ -444,5 +465,15 @@ fn mark_new(fs: &mut impl Stopper, passes: &mut Passes) {
     match marked {
         Ok(()) => passes.marked.extend(new),
         Err(why) => passes.mark_failed = Some(format!("not every user was marked: {why}")),
+    }
+}
+
+/// Whether the record, read again under the lock, still holds `pool`.
+fn still_holds(fs: &mut impl Stopper, pool: &[Sid]) -> Result<(), Failed> {
+    let now = fs.pool()?.map(|pool| pool.users);
+    if sequence::holds(now, pool) {
+        Ok(())
+    } else {
+        Err("the record is gone, or its pool changed since the run began".to_owned())
     }
 }
