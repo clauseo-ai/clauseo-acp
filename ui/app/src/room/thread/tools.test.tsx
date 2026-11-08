@@ -220,10 +220,10 @@ test.each(ROWS)(
         ? "Download Chrome" + "From Google, once. Needs 1\u00a0GB free." + "200\u00a0MB"
         : reason === "Blocked by your firm"
           ? "Your firm doesn't allow apps to control a browser on this computer, so Clauseo can't use " +
-            "one for you. Your IT team can allow it for Clauseo alone."
+            "one for you."
           : reason === "Couldn't check browser settings"
             ? "Clauseo couldn't check this computer's browser settings, so it won't use a browser for " +
-              "now. It checks again the next time it needs one. If this keeps happening, ask your IT team."
+              "now. It checks again the next time it needs one."
             : "";
     expect(r.textContent).toBe(
       (tool.tool === "web_search" ? "Web search" : "Browser") +
