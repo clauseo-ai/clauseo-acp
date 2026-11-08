@@ -10,7 +10,9 @@
 //!    `Service-0x0-<logon LUID>$`, one per logon, with [`station_creation_sddl`]; then it goes
 //!    back to itself on every path ([`Reverting`]), and the logon's token is closed;
 //! 3. the outer opens the station by its name as itself and makes itself its owner;
-//! 4. it makes the desktop `Default` on it ([`desktop_creation_sddl`]);
+//! 4. it makes the desktop `Default` on it ([`desktop_creation_sddl`]), switched to the station
+//!    for that call alone and back on every path ([`Leaving`]); a `Default` that already exists
+//!    there refuses the launch ([`made_fresh`]);
 //! 5. it sets both last descriptors ([`station_sddl`], [`desktop_sddl`]): protected, labelled
 //!    Low.
 //!
@@ -31,6 +33,8 @@ pub(crate) trait StationSteps {
     type Station;
     /// A desktop handle.
     type Desktop;
+    /// This process's window station before [`StationSteps::enter_station`].
+    type Previous;
     /// A failure, naming its call; it refuses the launch.
     type Error;
     /// Logs the pool user on, interactive.
@@ -50,12 +54,15 @@ pub(crate) trait StationSteps {
     fn open_station(&mut self, name: &str) -> Result<Self::Station, Self::Error>;
     /// Makes `owner` the station's owner.
     fn set_owner(&mut self, station: &Self::Station, owner: &Sid) -> Result<(), Self::Error>;
-    /// Makes the desktop `Default` on `station` with the descriptor `sddl`.
-    fn create_desktop(
-        &mut self,
-        station: &Self::Station,
-        sddl: &str,
-    ) -> Result<Self::Desktop, Self::Error>;
+    /// Switches this process to `station` (a desktop is made on the caller's station); the
+    /// station it was on.
+    fn enter_station(&mut self, station: &Self::Station) -> Result<Self::Previous, Self::Error>;
+    /// Makes the desktop `Default` on this process's station with the descriptor `sddl`; one
+    /// that already exists there is a failure ([`made_fresh`]), never opened.
+    fn create_desktop(&mut self, sddl: &str) -> Result<Self::Desktop, Self::Error>;
+    /// Switches this process back to `previous`. It can't fail: Windows' ends the process when
+    /// Windows refuses, since the outer must never run on, or make more on, the agent's station.
+    fn leave_station(&mut self, previous: Self::Previous);
     /// Sets the station's protected DACL and label from `sddl`.
     fn secure_station(&mut self, station: &Self::Station, sddl: &str) -> Result<(), Self::Error>;
     /// Sets the desktop's protected DACL and label from `sddl`.
@@ -93,7 +100,7 @@ pub(crate) fn make_station<S: StationSteps>(
     // The outer's own handle holds the station from here.
     drop(created);
     steps.set_owner(&station, sids.creator)?;
-    let desktop = steps.create_desktop(&station, &desktop_creation_sddl(sids.creator))?;
+    let desktop = create_on(steps, &station, &desktop_creation_sddl(sids.creator))?;
     steps.secure_station(
         &station,
         &station_sddl(sids.creator, sids.pool_user, sids.matter),
@@ -119,6 +126,48 @@ fn create_as<S: StationSteps>(
     let reverting = Reverting(steps);
     reverting.0.impersonate(logon)?;
     reverting.0.create_station(&station_creation_sddl(creator))
+}
+
+/// The desktop made on `station`, this process switched to it for the call alone: back on its
+/// own station on every path out once the switch was made ([`Leaving`]'s drop).
+fn create_on<S: StationSteps>(
+    steps: &mut S,
+    station: &S::Station,
+    sddl: &str,
+) -> Result<S::Desktop, S::Error> {
+    let previous = steps.enter_station(station)?;
+    let leaving = Leaving {
+        steps,
+        previous: Some(previous),
+    };
+    leaving.steps.create_desktop(sddl)
+}
+
+/// `CreateDesktopW`'s `GetLastError` after it succeeded: `ERROR_ALREADY_EXISTS` (183) means it
+/// opened a `Default` someone made first (Windows has no create-only flag for desktops, as
+/// `CWF_CREATE_ONLY` is for stations), which refuses the launch.
+pub(crate) fn made_fresh(last_error: u32) -> Result<(), u32> {
+    if last_error == ERROR_ALREADY_EXISTS {
+        return Err(ERROR_ALREADY_EXISTS);
+    }
+    Ok(())
+}
+
+/// `ERROR_ALREADY_EXISTS`.
+const ERROR_ALREADY_EXISTS: u32 = 183;
+
+/// Switches back on drop: every path out of [`create_on`], an unwind too.
+struct Leaving<'a, S: StationSteps> {
+    steps: &'a mut S,
+    previous: Option<S::Previous>,
+}
+
+impl<S: StationSteps> Drop for Leaving<'_, S> {
+    fn drop(&mut self) {
+        if let Some(previous) = self.previous.take() {
+            self.steps.leave_station(previous);
+        }
+    }
 }
 
 /// Reverts on drop: every path out of [`create_as`], an unwind too.

@@ -552,6 +552,7 @@ crates/sandbox/src/windows/token/os.rs - unsafe_code
 crates/sandbox/src/windows/pipe/os.rs - unsafe_code
 crates/sandbox/src/windows/runner/spawn.rs - unsafe_code
 crates/sandbox/src/windows/runner/desktop.rs - unsafe_code
+crates/sandbox/src/windows/runner/desktop.rs refuse_now clippy::exit
 crates/sandbox/src/windows/runner/outer.rs exit_now clippy::exit
 crates/sandbox/src/windows/runner/sweep/os.rs - unsafe_code
 crates/sandbox/src/windows/runner/leftovers/os.rs - unsafe_code

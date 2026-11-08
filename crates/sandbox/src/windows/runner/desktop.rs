@@ -16,7 +16,7 @@
 use std::ffi::c_void;
 use std::io::{self, Write as _};
 
-use windows::Win32::Foundation::HANDLE;
+use windows::Win32::Foundation::{GetLastError, HANDLE, SetLastError, WIN32_ERROR};
 use windows::Win32::Security::Authorization::{SE_WINDOW_OBJECT, SetSecurityInfo};
 use windows::Win32::Security::{
     DACL_SECURITY_INFORMATION, GetTokenInformation, ImpersonateLoggedOnUser,
@@ -34,7 +34,7 @@ use windows::Win32::System::Threading::{GetCurrentThread, OpenThreadToken};
 use windows::core::{HSTRING, PCWSTR, w};
 use zeroize::Zeroizing;
 
-use super::station::{Made, StationSids, StationSteps, make_station};
+use super::station::{Made, StationSids, StationSteps, made_fresh, make_station};
 use crate::windows::acl::object::{Handle, os_error};
 use crate::windows::sids::Sid;
 use crate::windows::token::os::{LocalDescriptor, LocalSid, user};
@@ -111,6 +111,7 @@ impl StationSteps for OsStation<'_> {
     type Logon = Handle;
     type Station = Station;
     type Desktop = Desktop;
+    type Previous = HWINSTA;
     type Error = Failed;
 
     fn log_on(&mut self) -> Result<Handle, Failed> {
@@ -183,14 +184,7 @@ impl StationSteps for OsStation<'_> {
     fn revert(&mut self) {
         // SAFETY: no arguments; it ends whatever impersonation the calling thread has.
         if unsafe { RevertToSelf() }.is_err() {
-            let mut stderr = io::stderr().lock();
-            drop(
-                writeln!(stderr, "clauseo-sandbox-run: RevertToSelf failed")
-                    .and_then(|()| stderr.flush()),
-            );
-            std::process::exit(i32::from_ne_bytes(
-                super::RunExit::Token.code().to_ne_bytes(),
-            ));
+            refuse_now("RevertToSelf");
         }
     }
 
@@ -251,20 +245,26 @@ impl StationSteps for OsStation<'_> {
         win32(call, code.0)
     }
 
-    /// Switches this process to `station` for the call only (a desktop is made on the caller's
-    /// station), then back; a failed switch back fails the step too.
-    fn create_desktop(&mut self, station: &Station, sddl: &str) -> Result<Desktop, Failed> {
-        let descriptor = LocalDescriptor::new(sddl).map_err(|e| ("the descriptor", e))?;
-        let attributes = attributes(&descriptor)?;
+    fn enter_station(&mut self, station: &Station) -> Result<HWINSTA, Failed> {
         // SAFETY: a query of this process's own window station; the handle isn't closed (it is
         // the process's).
-        let old = unsafe { GetProcessWindowStation() }
+        let previous = unsafe { GetProcessWindowStation() }
             .map_err(|e| ("GetProcessWindowStation", os_error(&e)))?;
         // SAFETY: `station` is a live window station handle.
         unsafe { SetProcessWindowStation(station.0) }
             .map_err(|e| ("SetProcessWindowStation", os_error(&e)))?;
-        // SAFETY: the name is a live HSTRING; `attributes` and its descriptor outlive the call;
-        // the desktop is owned by `Desktop` at once.
+        Ok(previous)
+    }
+
+    fn create_desktop(&mut self, sddl: &str) -> Result<Desktop, Failed> {
+        let call = "CreateDesktopW";
+        let descriptor = LocalDescriptor::new(sddl).map_err(|e| ("the descriptor", e))?;
+        let attributes = attributes(&descriptor)?;
+        // SAFETY: only this thread's last-error value; cleared so a code left by an earlier
+        // call isn't read as this one's.
+        unsafe { SetLastError(WIN32_ERROR(0)) };
+        // SAFETY: the name is static; `attributes` and its descriptor outlive the call; the
+        // desktop is owned by `Desktop` at once.
         let desktop = unsafe {
             CreateDesktopW(
                 w!("Default"),
@@ -276,13 +276,24 @@ impl StationSteps for OsStation<'_> {
             )
         }
         .map(Desktop)
-        .map_err(|e| ("CreateDesktopW", os_error(&e)));
-        // SAFETY: `old` is this process's own window station, still open.
-        let back = unsafe { SetProcessWindowStation(old) }
-            .map_err(|e| ("SetProcessWindowStation (back)", os_error(&e)));
-        let desktop = desktop?;
-        back?;
+        .map_err(|e| (call, os_error(&e)))?;
+        // SAFETY: reads this thread's last-error value, set by the call above.
+        let last = unsafe { GetLastError() };
+        // A `Default` someone made first: closed by `desktop`'s drop, never used.
+        made_fresh(last.0).map_err(|code| {
+            (
+                call,
+                io::Error::from_raw_os_error(i32::try_from(code).unwrap_or(i32::MAX)),
+            )
+        })?;
         Ok(desktop)
+    }
+
+    fn leave_station(&mut self, previous: HWINSTA) {
+        // SAFETY: `previous` is this process's own window station, still open.
+        if unsafe { SetProcessWindowStation(previous) }.is_err() {
+            refuse_now("SetProcessWindowStation (back)");
+        }
     }
 
     fn secure_station(&mut self, station: &Station, sddl: &str) -> Result<(), Failed> {
@@ -292,6 +303,27 @@ impl StationSteps for OsStation<'_> {
     fn secure_desktop(&mut self, desktop: &Desktop, sddl: &str) -> Result<(), Failed> {
         secure(HANDLE(desktop.0.0), sddl)
     }
+}
+
+/// Ends the process at once with [`RunExit::Token`](super::RunExit::Token), after one stderr line
+/// naming `call`: a thread still acting as the pool user, or a process still on the agent's
+/// station, must run nothing more (no end path either; the session's marker stays).
+#[expect(
+    clippy::exit,
+    reason = "nothing more may run on this thread or this station, no end path either"
+)]
+fn refuse_now(call: &str) -> ! {
+    let mut stderr = io::stderr().lock();
+    drop(
+        writeln!(
+            stderr,
+            "clauseo-sandbox-run: the agent's window station: {call} failed"
+        )
+        .and_then(|()| stderr.flush()),
+    );
+    std::process::exit(i32::from_ne_bytes(
+        super::RunExit::Token.code().to_ne_bytes(),
+    ))
 }
 
 /// The impersonation level of the thread token `token`.
