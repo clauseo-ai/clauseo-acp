@@ -628,12 +628,12 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
   out, so it sets that one aside even when both stay in the matter. A folder the agent made
   that shuts the lawyer out can't be scanned when it is moved in; the after-session pass names it
   as unscanned and keeps the session open. The watch keeps a last-write `MODIFIED` record only
-  when the item carries the reparse-point attribute, and the launch walk doesn't write-deny a
-  bare repository the lawyer had in the matter at launch, so on this branch alone an agent could
-  edit that repository's hooks with no name made. PR #784 makes every folder holding a `HEAD`
-  at launch whole-tree read-only in the Windows plan and lands before this change (M1, confirmed
-  at the rebase). A `commondir` naming a folder outside the matter
-  isn't watched. The uninstaller and forget know only the data folder's set-aside, not the
+  when the item carries the reparse-point attribute: edits inside a git folder there at launch
+  need none, since #784 (merged) makes every folder holding a `HEAD`, and each folder a
+  `commondir` names, whole-tree read-only in the Windows plan (M1). A test pins that every git
+  folder the set-aside's launch scan knows is one of those (`repo_shapes.rs`
+  `every_git_folder_the_watch_knows_at_launch_is_one_the_plan_denies`). A `commondir` naming a
+  folder outside the matter isn't watched. The uninstaller and forget know only the data folder's set-aside, not the
   drive folders (a follow-up).
 - **A nested `CLAUDE.local.md` or `AGENTS.override.md`** the agent makes below the matter's
   root is not set aside: the two extra opens per folder cost 6.0% of the scan on average (4.8% to
