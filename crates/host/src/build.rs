@@ -188,6 +188,8 @@ pub(crate) fn user_message(
         acp_message_id,
         content,
         delivery,
+        // Every prompt the host logs today is the lawyer's; later R18 PRs log Clauseo's own.
+        by: clauseo_protocol::MessageBy::Lawyer,
     })
 }
 

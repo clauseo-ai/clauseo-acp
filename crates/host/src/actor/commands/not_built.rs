@@ -1,6 +1,6 @@
-//! The commands the host does not run yet: `RestartAgent`, and R18's four
-//! (`RequestEscalation`, `SwitchProtectionOn`, `ForgetAllowance`, `DismissDenial`) until its
-//! PR 3 brings the denial logic.
+//! The commands the host does not run yet: `RestartAgent`, and R18's five
+//! (`RequestEscalation`, `SwitchProtectionOn`, `ForgetAllowance`, `DismissDenial`,
+//! `GoOnInsideMatter`) until its later PRs bring the denial logic and the prompt Clauseo sends.
 
 use clauseo_protocol::ErrorCode;
 

@@ -288,7 +288,7 @@ wire_types! {
     title::{Title},
     tool::{PageVia, SearchSource, ToolCallPatch, ToolCallStatus, ToolKind, ToolLocation},
     turn::{
-        ChangeKind, Delivery, FileChange, SkippedFile, SkippedFileReason, SteerOutcome, StopReason,
+        ChangeKind, Delivery, FileChange, MessageBy, SkippedFile, SkippedFileReason, SteerOutcome, StopReason,
     },
     update::{FailedStage, InstallWhen, ManagedBy, UpdateMode, UpdateState, UpdateView},
     view::{

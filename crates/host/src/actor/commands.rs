@@ -2,9 +2,8 @@
 //! its receipt; concurrent duplicates sharing the first answer.
 //!
 //! A command waits in [`Actor::commands`] from its receipt lookup until its answer, so a
-//! duplicate that arrives meanwhile joins it (same hash) or is refused (`command.conflict`).
-//! A refused command stores no receipt. A failed commit answers with the stream's first
-//! failure.
+//! duplicate that arrives meanwhile joins it (same hash) or is refused (`command.conflict`). A
+//! refused command stores no receipt. A failed commit answers with the stream's first failure.
 
 mod not_built;
 mod to_turn;
@@ -327,7 +326,8 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         | HostCommand::RequestEscalation { .. }
         | HostCommand::SwitchProtectionOn { .. }
         | HostCommand::ForgetAllowance { .. }
-        | HostCommand::DismissDenial { .. } => not_built(actor, ctx),
+        | HostCommand::DismissDenial { .. }
+        | HostCommand::GoOnInsideMatter { .. } => not_built(actor, ctx),
     }
 }
 

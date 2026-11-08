@@ -145,7 +145,10 @@ golden! { HostCommand::name_of {
         matter: Some(matter_id(1)),
     };
     RequestEscalation => request_escalation: HostCommand::RequestEscalation {
-        request: EscalationRequest::Denial(denial_id(1)),
+        request: EscalationRequest::Denial {
+            thread: thread_id(2),
+            denial: denial_id(1),
+        },
     };
     SwitchProtectionOn => switch_protection_on: HostCommand::SwitchProtectionOn {
         matter: matter_id(1),
@@ -154,7 +157,13 @@ golden! { HostCommand::name_of {
         matter: matter_id(1),
         allowance: allowance_id(1),
     };
-    DismissDenial => dismiss_denial: HostCommand::DismissDenial { denial: denial_id(1) };
+    DismissDenial => dismiss_denial: HostCommand::DismissDenial {
+        thread: thread_id(2),
+        denial: denial_id(1),
+    };
+    GoOnInsideMatter => go_on_inside_matter: HostCommand::GoOnInsideMatter {
+        thread: thread_id(2),
+    };
     // Each `ConnectorCommand` has its own golden in `snapshots/connectors.rs`.
     Connector => connector: HostCommand::Connector(super::connectors::add_credits());
 } }

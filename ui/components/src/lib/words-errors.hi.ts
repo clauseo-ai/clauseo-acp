@@ -167,6 +167,9 @@ export const HI = {
     "इसकी अनुमति नहीं दी जा सकती। सुरक्षित कार्यक्षेत्र इसे हमेशा बंद रखता है, या आपकी फ़र्म की सेटिंग्स इसे बंद रखती हैं। कुछ भी नहीं बदला गया।",
   "Your firm doesn't allow Clauseo to work without the Safe workspace on this computer.":
     "आपकी फ़र्म इस कंप्यूटर पर Clauseo को सुरक्षित कार्यक्षेत्र के बिना काम करने की अनुमति नहीं देती।",
+  // provisional (R18, app thread's words)
+  "Clauseo can't use files from a network drive or shared folder. Copy them to a folder on this computer, then choose that folder.":
+    "Clauseo नेटवर्क ड्राइव या साझा फ़ोल्डर की फ़ाइलों का उपयोग नहीं कर सकता। उन्हें इस कंप्यूटर के किसी फ़ोल्डर में कॉपी करें, फिर वह फ़ोल्डर चुनें।",
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

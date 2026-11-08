@@ -164,6 +164,7 @@ fn event(n: u64) -> DomainEvent {
             acp_message_id: None,
             content: vec![ContentBlock::Text { text: text(n) }],
             delivery: Delivery::default(),
+            by: clauseo_protocol::MessageBy::Lawyer,
         }
         .into(),
         1 => TurnStarted {

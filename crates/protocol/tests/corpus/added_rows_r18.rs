@@ -1,6 +1,6 @@
-//! The frozen files R18 (denials and widening) added, with their pins: its nine kinds and its
-//! three error codes. Apart from `added_rows.rs` so that file stays under the line limit; a
-//! later addition's rows go here, in the order the writer prints them.
+//! The frozen files R18 (denials and widening) added, with their pins: its nine kinds, its four
+//! error codes and `MessageBy::Clauseo`. Apart from `added_rows.rs` so that file stays under
+//! the line limit; a later addition's rows go here, in the order the writer prints them.
 
 use super::Corpus;
 
@@ -89,5 +89,21 @@ pub(crate) const ADDED_IN_R18: &[Corpus] = &[
         include_bytes!("added/turn_failed-SandboxUnprotectedAutoForbidden.msgpack"),
         (372, 0x0955_bc86_460d_cb23),
         (275, 0x6848_0df3_5c6b_f996),
+    ),
+    (
+        "added/turn_failed-EscalationNetworkLocation",
+        include_bytes!("added/turn_failed-EscalationNetworkLocation.jsonl"),
+        include_bytes!("added/turn_failed-EscalationNetworkLocation.msgpack"),
+        (365, 0x2a3b_59b7_3e06_8b9f),
+        (267, 0x7de5_d6bc_e052_4d48),
+    ),
+    // `MessageBy::Clauseo`, added by hand: its value `clauseo` is also `RawFrom`'s, which v1
+    // holds, so the writer sees no gap (corpus/v1/README.md, the one gap).
+    (
+        "added/user_message-Clauseo",
+        include_bytes!("added/user_message-Clauseo.jsonl"),
+        include_bytes!("added/user_message-Clauseo.msgpack"),
+        (403, 0xf63c_5d52_650f_f6ba),
+        (270, 0x3a2e_fa40_43e8_0e7b),
     ),
 ];

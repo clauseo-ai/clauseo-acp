@@ -13,7 +13,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::open_enum::{open_data_enum, open_unit_enum};
-use crate::{AllowanceId, DenialId, MatterId, Timestamp, ToolCallId};
+use crate::{AllowanceId, DenialId, MatterId, ThreadId, Timestamp, ToolCallId};
 
 /// Another matter, as a denial or a read grant names it: its id and its name when the host
 /// logged it (display only, shown bidi-isolated; the name may have changed since).
@@ -135,8 +135,8 @@ open_data_enum! {
             matter: MatterId,
             /// The folder or file.
             path: String,
-            /// Whether `path` is a file.
-            #[serde(default)]
+            /// Whether `path` is a file. Required: a missing field would read as a folder, the
+            /// wider grant, so an entry without it does not decode.
             is_file: bool,
         },
         /// The exact host of a site.
@@ -198,8 +198,15 @@ pub struct MatterAllowance {
 pub enum EscalationRequest {
     /// A denial's card: "Allow access to this folder?" or "Allow this site?". Only a denial
     /// logged with `offered: true` and still pending; else `escalation.not_pending`, or
-    /// `escalation.not_offerable`. JSON: `{"denial": "<id>"}`.
-    Denial(DenialId),
+    /// `escalation.not_offerable`. `thread` names the thread whose card it is, so the host
+    /// checks the thread before it looks the denial up. JSON:
+    /// `{"denial": {"thread": "<id>", "denial": "<id>"}}`.
+    Denial {
+        /// The thread whose card it is.
+        thread: ThreadId,
+        /// The denial.
+        denial: DenialId,
+    },
     /// Switch protection off for `matter`: its agents run without the Safe workspace from their
     /// next launch. Refused before any dialog with `sandbox.required` or
     /// `sandbox.unprotected_auto_forbidden` when the firm's settings forbid it.

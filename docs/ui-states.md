@@ -358,6 +358,7 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | "Allow access" or "Allow this site" on a card no longer waiting (R18) | `ErrorCode::EscalationNotPending` | no |
 | "Allow access" on what the host never widens, by its rules or the firm's policy (R18) | `ErrorCode::EscalationNotOfferable` | no |
 | "Switch protection off" that the firm's settings forbid (R18) | `ErrorCode::SandboxUnprotectedAutoForbidden` | no |
+| "Use files from another matter" whose pick is on a network drive or shared folder (R18) | `ErrorCode::EscalationNetworkLocation` | no |
 | A code from a newer Clauseo | `ErrorCode::Unknown` | no |
 
 A failed turn shows its code from `turn_failed` on the step card (section 3).
@@ -379,5 +380,15 @@ These arrive later as additive events and commands.
 | One-time explanation of Not protected | planned: the `sandbox` crate | shown once per machine |
 | Denial card: a blocked web domain | planned: R18's cards; `ViewEntry::Denial` (`DenialKind::Site`) and `DenialState` exist | the domain; allowing it (`RequestEscalation`, a native dialog) |
 | Denial card: a blocked folder or file | planned: R18's cards; `ViewEntry::Denial` (`DenialKind::Folder`, `DenialKind::File`) and `DenialState` exist | the path; allowing it restarts the agent (`HeaderEntry.restarting_since`) and resumes the thread |
+| Denial card: hidden | planned: R18's cards; `DenialState::Dismissed` exists | nothing; hiding it is `DismissDenial { thread, denial }`, which grants nothing |
+| Denial card: no longer waiting | planned: R18's cards; `DenialState::Expired` exists | the request, without its buttons; the rule below |
+| Denials paused: "Keep to this matter's folder and go on." | planned: R18's cards; `ViewEntry::DenialsPaused` exists | how many were refused; the button sends `GoOnInsideMatter { thread }`, and the host writes the prompt (a `user_message` with `by: clauseo`, `UserMessageEntry.by`), so the window never sends text the lawyer did not type |
+
+A pending denial card (`DenialState::Pending`: offered, not answered) survives the end of its own
+turn, since an agent often ends the turn right after a refusal and the lawyer must still be able
+to answer it. It becomes `Expired` when the next turn starts in its thread, when the agent session
+ends (an idle stop or any detach but `DetachReason::Restarting`), when a restart fails or is cut
+short (a `turn_failed` or `turn_ended` while `HeaderEntry.restarting_since` is set, which also
+clears it), and when the thread is archived. A restart itself keeps it.
 | Agent download progress | planned: the `agents` crate | percent, failure |
 | Resuming after an idle stop | planned: the `agents` crate | the thread; `ThreadStatus::IdleStopped` is section 1 |

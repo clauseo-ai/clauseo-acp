@@ -93,6 +93,7 @@ fn thread_entries() -> Vec<ViewEntry> {
                 text: "Summarise".to_owned(),
             }],
             delivery: Delivery::Queue,
+            by: clauseo_protocol::MessageBy::Lawyer,
             status: UserMessageStatus::Queued,
             edited: false,
             steer: None,

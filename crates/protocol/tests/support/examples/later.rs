@@ -112,7 +112,7 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::SandboxRemoving,
             "the sandbox's set-up is being removed",
         ),
-        // R18's three: never a turn's failure in practice (commands' refusals); for the corpus.
+        // R18's four: never a turn's failure in practice (commands' refusals); for the corpus.
         failed(
             ErrorCode::EscalationNotPending,
             "the denial's card was already answered",
@@ -124,6 +124,10 @@ pub(super) fn failures() -> Vec<DomainEvent> {
         failed(
             ErrorCode::SandboxUnprotectedAutoForbidden,
             "sandbox.allow_unprotected_auto is false",
+        ),
+        failed(
+            ErrorCode::EscalationNetworkLocation,
+            "the picked folder is on a network share",
         ),
     ]
 }

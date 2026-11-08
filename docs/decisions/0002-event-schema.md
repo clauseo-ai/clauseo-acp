@@ -99,7 +99,7 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `agent_session_attached` | session, agent_version?, capabilities | acp | yes | T |
 | `agent_named` | agent_name (the agent's own display name, `initialize`'s title, cleaned) | host, from acp | yes | T |
 | `agent_session_detached` | reason (`DetachReason`) | acp, host | yes | T |
-| `user_message` | turn, message, acp_message_id?, content, delivery? | host; acp on replay | yes | T |
+| `user_message` | turn, message, acp_message_id?, content, delivery?, by? (`MessageBy`: lawyer, written as a missing field, or clauseo; R18) | host; acp on replay | yes | T |
 | `turn_queued` | turn, behind, behind_turn? | host | yes | T |
 | `queued_prompt_edited` | turn, message, content | host | yes | T |
 | `steer_resolved` | message, outcome (`SteerOutcome`), aside? (tool call ids) | host | yes | T |
@@ -359,6 +359,9 @@ Every limit and rule, with its constant:
 | same | no empty `Text` block; a visible character (as titles count it) or a `File` block | |
 | `EditQueuedPrompt.text` | at most 256 KiB, UTF-8 bytes; it replaces the queued prompt's text and keeps its file blocks, so empty text is refused by the host only for a prompt without files | `MAX_PROMPT_TEXT_BYTES` |
 | `SendPrompt.delivery` | a `DeliveryRequest`: closed, so a newer mode fails to decode, never run as another mode; queue is written as a missing field | |
+| `RequestEscalation` with `EscalationRequest::Denial`, `DismissDenial` (R18) | name the card's `thread` beside its `denial`, so the host checks the thread first | |
+| `RequestEscalation` with `FilesFromOtherMatter` (R18) | `from` is not `matter` | |
+| `GoOnInsideMatter` (R18) | names a thread only: the host writes the prompt and logs it as `user_message` with `by: clauseo`, so no window sends text the lawyer did not type; only `main` sends it | |
 | `Title` (`RenameThread.title`, `CreateMatter.name`) | at most 200 characters (`char`s) | `MAX_TITLE_CHARS` |
 | same | a visible character: not only whitespace, `Default_Ignorable_Code_Point` characters, U+2800 and combining marks (a heuristic) | |
 | same | no control character, bidi embedding, override or isolate (U+202A to U+202E, U+2066 to U+2069), or line or paragraph separator; the bidi marks U+200E, U+200F, U+061C are allowed | |
@@ -570,7 +573,7 @@ as the room left by the blocks before it allows, so a block past the limit comes
 | `ErrorCode` | open, `Unknown` | unit | |
 | `ContentBlock` | open, `Unsupported { kind, raw_from, raw }` | data | |
 | `DetachReason`, `SteerOutcome`, `Principal`, `ToolCallContent`, `ToolLocation`, `PermissionChoice`, `ElicitationRequest`, `ConfigOptionKind`, `ChangeKind`, `RestoreScope`, `NoticeKind`, `DenialKind`, `DenialSource`, `AllowTarget` | open, `Unknown { kind }` | data | |
-| `ToolKind`, `ToolCallStatus`, `PermissionKind`, `StopReason`, `NoticeLevel`, `PackSkipReason`, `Deliverable`, `CheckpointKind`, `ExpiryReason`, `RenameSource`, `Delivery`, `SkippedFileReason`, `TextKind`, `RawFrom`, `ElicitationOutcome`, `PlanPriority`, `PlanStatus`, `ConfigCategory`, `CompactionStatus`, `LimitStopReason`, `MatterKind`, `PageVia`, `SearchSource`, `DoneBy`, `SnoozeBy`, `PermissionAbout`, `EscalationAnswer`, `GrantMode` | open, `Unknown` | unit | |
+| `ToolKind`, `ToolCallStatus`, `PermissionKind`, `StopReason`, `NoticeLevel`, `PackSkipReason`, `Deliverable`, `CheckpointKind`, `ExpiryReason`, `RenameSource`, `Delivery`, `SkippedFileReason`, `TextKind`, `RawFrom`, `ElicitationOutcome`, `PlanPriority`, `PlanStatus`, `ConfigCategory`, `CompactionStatus`, `LimitStopReason`, `MatterKind`, `PageVia`, `SearchSource`, `DoneBy`, `SnoozeBy`, `PermissionAbout`, `EscalationAnswer`, `GrantMode`, `MessageBy` | open, `Unknown` | unit | |
 | `TextOrBlob` | closed | data | Inline text or a blob reference is how Clauseo stores a payload; a third form is a new storage format. |
 | `RawPayload` | closed | data | It is the data model of JSON and MessagePack themselves. |
 | `StreamId` | closed | data (one string) | A thread's or a matter's stream is the log's own keying; a new stream kind changes the store. |

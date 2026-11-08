@@ -97,7 +97,8 @@ macro_rules! logged_enums {
                 PermissionAbout,
                 PackSkipReason,
                 EscalationAnswer,
-                GrantMode;
+                GrantMode,
+                MessageBy;
             closed: TextOrBlob, RawPayload, StreamId;
         }
     };

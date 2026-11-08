@@ -1,11 +1,12 @@
 //! R18's logged values as an older or newer reader meets them: each open enum's known values
-//! keep their wire form and a newer one decodes to `Unknown`; a newer field inside a known
+//! keep their wire form and a newer one decodes to `Unknown`; a `user_message` without `by` is
+//! the lawyer's; a newer field inside a known
 //! payload or variant is skipped; and to a reader before R18 its kinds are `Unknown` events,
 //! which the fold skips (the reducer's `denials.rs` tests).
 
 use clauseo_protocol::{
     AllowTarget, DenialKind, DenialRecorded, DenialSource, DomainEvent, EscalationAnswer,
-    GrantMode, OtherMatter, ProtectionSwitched, ReadGrantedTo,
+    GrantMode, MessageBy, OtherMatter, ProtectionSwitched, ReadGrantedTo, UserMessage,
 };
 
 use super::unknown_variants::{data_enum_unknown, unit_enum};
@@ -33,6 +34,33 @@ fn grant_mode() {
         &[(GrantMode::ReadOnly, "read_only")],
         GrantMode::Unknown,
     );
+}
+
+#[test]
+fn message_by() {
+    let cases = [
+        (MessageBy::Lawyer, "lawyer"),
+        (MessageBy::Clauseo, "clauseo"),
+    ];
+    unit_enum(&MessageBy::ALL, &cases, MessageBy::Unknown);
+}
+
+/// `by` is left out for the lawyer, and a `user_message` without it (every entry before R18)
+/// reads as the lawyer's; Clauseo's is written.
+#[test]
+fn a_user_message_without_by_is_the_lawyers() {
+    let t = v7_text(3);
+    let old = format!(r#"{{"turn":"{t}","message":"{t}","content":[]}}"#);
+    let read: UserMessage = serde_json::from_str(&old).unwrap();
+    assert_eq!(read.by, MessageBy::Lawyer);
+    assert_eq!(serde_json::to_string(&read).unwrap(), old);
+    let clauseo = UserMessage {
+        by: MessageBy::Clauseo,
+        ..read
+    };
+    let written = serde_json::to_string(&clauseo).unwrap();
+    assert!(written.ends_with(r#""by":"clauseo"}"#), "{written}");
+    round_trips(&clauseo);
 }
 
 #[test]

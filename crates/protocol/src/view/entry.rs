@@ -8,11 +8,11 @@ use crate::{
     AgentId, AvailableCommand, CheckpointId, CheckpointKind, CompactString, CompactionStatus,
     ConfigOption, ContentBlock, Deliverable, Delivery, ElicitationId, ElicitationOutcome,
     ElicitationRequest, ErrorCode, EventId, ExpiryReason, FileChange, ImportSummary,
-    LimitStopReason, MatterAllowance, MatterId, MatterKind, MatterPath, MessageId, NoticeKind,
-    NoticeLevel, PageVia, PermissionAbout, PermissionChoice, PermissionOption, PermissionRequestId,
-    PlanEntry, Principal, ReadGrantedTo, RestoreScope, Seq, SkippedFile, SteerOutcome, StopReason,
-    TextKind, TextOrBlob, ThreadId, Timestamp, ToolCallContent, ToolCallId, ToolCallStatus,
-    ToolKind, ToolLocation, TurnId, TurnUsage, WebResult,
+    LimitStopReason, MatterAllowance, MatterId, MatterKind, MatterPath, MessageBy, MessageId,
+    NoticeKind, NoticeLevel, PageVia, PermissionAbout, PermissionChoice, PermissionOption,
+    PermissionRequestId, PlanEntry, Principal, ReadGrantedTo, RestoreScope, Seq, SkippedFile,
+    SteerOutcome, StopReason, TextKind, TextOrBlob, ThreadId, Timestamp, ToolCallContent,
+    ToolCallId, ToolCallStatus, ToolKind, ToolLocation, TurnId, TurnUsage, WebResult,
 };
 
 /// A thread's header. Entry id `header:<thread>`.
@@ -133,6 +133,9 @@ pub struct UserMessageEntry {
     /// field reads as queue.
     #[serde(default, skip_serializing_if = "Delivery::is_queue")]
     pub delivery: Delivery,
+    /// Who sent it: the lawyer (written as a missing field) or Clauseo.
+    #[serde(default, skip_serializing_if = "MessageBy::is_lawyer")]
+    pub by: MessageBy,
     /// Where it stands in the queue.
     pub status: UserMessageStatus,
     /// Whether it was edited while queued.

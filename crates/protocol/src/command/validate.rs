@@ -233,7 +233,8 @@ impl HostCommand {
             Self::RequestEscalation { .. }
             | Self::SwitchProtectionOn { .. }
             | Self::ForgetAllowance { .. }
-            | Self::DismissDenial { .. } => validate_escalations(self),
+            | Self::DismissDenial { .. }
+            | Self::GoOnInsideMatter { .. } => validate_escalations(self),
             Self::SetUpdateMode { mode } => check_update_mode(*mode),
             // Ids by shape; whether the connector or pack is known, live or added is state.
             Self::Connector(command) => command.check(),
@@ -286,7 +287,8 @@ fn validate_allowed_sites(command: &HostCommand) -> Result<(), Error> {
     Ok(())
 }
 
-/// R18's four commands: ids by their types, and whether a denial is pending, a matter's
+/// R18's five commands: ids by their types, and whether a thread holds the denial or is paused,
+/// whether a denial is pending, a matter's
 /// protection may be switched off or an allowance exists is state. Only `FilesFromOtherMatter`
 /// has a rule here: the other matter is another matter.
 fn validate_escalations(command: &HostCommand) -> Result<(), Error> {

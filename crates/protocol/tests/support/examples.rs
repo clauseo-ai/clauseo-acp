@@ -13,14 +13,14 @@ use clauseo_protocol::{
     CheckpointKind, CheckpointRecorded, CompactionChanged, CompactionStatus, ContentAppended,
     ContentBlock, ContentId, Cost, Delivery, DetachReason, DomainEvent, DoneBy, ErrorCode,
     FileChange, FilesChanged, ImportSummary, LimitStopReason, MatterCreated, MatterKind,
-    MatterRelocated, Notice, NoticeLevel, OutsideEdits, PageVia, PageVisited, PromptCapabilities,
-    QueuedPromptEdited, RawFrom, RenameSource, RestoreScope, SessionCapabilities, SkippedFile,
-    SkippedFileReason, SnoozeBy, SteerOutcome, SteerResolved, SteeringCapability, StepUndone,
-    StopReason, TextAppended, TextKind, TextOrBlob, ThreadArchived, ThreadCreated, ThreadDone,
-    ThreadRenamed, ThreadSnoozed, Timestamp, ToolCallContent, ToolCallPatch, ToolCallStarted,
-    ToolCallStatus, ToolCallUpdated, ToolKind, ToolLocation, TurnEnded, TurnFailed, TurnQueued,
-    TurnStarted, TurnStoppedAtLimit, TurnUsage, UsageUpdated, UserMessage, VersionRestored,
-    WebResult, WebSearchRecorded,
+    MatterRelocated, MessageBy, Notice, NoticeLevel, OutsideEdits, PageVia, PageVisited,
+    PromptCapabilities, QueuedPromptEdited, RawFrom, RenameSource, RestoreScope,
+    SessionCapabilities, SkippedFile, SkippedFileReason, SnoozeBy, SteerOutcome, SteerResolved,
+    SteeringCapability, StepUndone, StopReason, TextAppended, TextKind, TextOrBlob, ThreadArchived,
+    ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed, Timestamp, ToolCallContent,
+    ToolCallPatch, ToolCallStarted, ToolCallStatus, ToolCallUpdated, ToolKind, ToolLocation,
+    TurnEnded, TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit, TurnUsage, UsageUpdated,
+    UserMessage, VersionRestored, WebResult, WebSearchRecorded,
 };
 
 use crate::fixtures::{
@@ -305,6 +305,7 @@ fn thread_events() -> Vec<DomainEvent> {
                 text: "Summarise".to_owned(),
             }],
             delivery: Delivery::Steer,
+            by: MessageBy::Clauseo,
         }
         .into(),
         TurnQueued::new(thread_id(2), turn, thread_id(2), Some(turn_id(6)))

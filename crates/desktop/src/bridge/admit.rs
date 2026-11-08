@@ -18,10 +18,12 @@
 //! Of the unsafe-site override's two (0053, PR 2), `main` sends
 //! `AllowBlockedSite` from a block's notice and `RevokeAllowedSite`, and the settings window
 //! only `RevokeAllowedSite` (its list of allowed sites): no other window, and so nothing an
-//! agent shows or runs, may lift a block. Of R18's four, `main` sends all:
+//! agent shows or runs, may lift a block. Of R18's five, `main` sends all:
 //! `RequestEscalation` (a denial's card, "Switch protection off", "Use files from another
 //! matter"), which grants nothing until the native dialog drawn by Rust answers,
-//! `SwitchProtectionOn`, `ForgetAllowance` and `DismissDenial`; the settings window only
+//! `SwitchProtectionOn`, `ForgetAllowance`, `DismissDenial` and `GoOnInsideMatter` (the
+//! paused thread's "Keep to this matter's folder and go on.", whose prompt the host writes, so
+//! the window never sends text the lawyer did not type); the settings window only
 //! `ForgetAllowance`, from its list of remembered answers. Switching protection off comes from
 //! the main window alone.
 
@@ -137,7 +139,8 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         | HostCommand::RequestEscalation { .. }
         | HostCommand::SwitchProtectionOn { .. }
         | HostCommand::ForgetAllowance { .. }
-        | HostCommand::DismissDenial { .. } => Ok(()),
+        | HostCommand::DismissDenial { .. }
+        | HostCommand::GoOnInsideMatter { .. } => Ok(()),
         HostCommand::AnswerPermission { .. } => Err(invalid(
             "a permission is answered with answer_permission, not dispatch",
         )),

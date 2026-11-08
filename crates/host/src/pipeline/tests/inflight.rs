@@ -124,6 +124,7 @@ fn opening(turn: TurnId) -> Vec<DomainEvent> {
             acp_message_id: None,
             content: Vec::new(),
             delivery: Delivery::Queue,
+            by: clauseo_protocol::MessageBy::Lawyer,
         }),
         DomainEvent::TurnStarted(TurnStarted {
             turn,

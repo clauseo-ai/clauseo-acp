@@ -93,6 +93,7 @@ export type ErrorCode =
   | "escalation.not_pending"
   | "escalation.not_offerable"
   | "sandbox.unprotected_auto_forbidden"
+  | "escalation.network_location"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -237,6 +238,9 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   // provisional (R18 PR 1, words from the task): "Switch protection off" the firm forbids
   "sandbox.unprotected_auto_forbidden":
     "Your firm doesn't allow Clauseo to work without the Safe workspace on this computer.",
+  // provisional (R18, app thread's words): "Use files from another matter" picked a network place
+  "escalation.network_location":
+    "Clauseo can't use files from a network drive or shared folder. Copy them to a folder on this computer, then choose that folder.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };

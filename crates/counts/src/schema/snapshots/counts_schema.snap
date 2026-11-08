@@ -1523,7 +1523,8 @@ expression: counts_schema()
         "sandbox.removing",
         "escalation.not_pending",
         "escalation.not_offerable",
-        "sandbox.unprotected_auto_forbidden"
+        "sandbox.unprotected_auto_forbidden",
+        "escalation.network_location"
       ],
       "type": "string"
     },

@@ -1,10 +1,11 @@
-//! R18's escalations go by window: `RequestEscalation`, `SwitchProtectionOn` and
-//! `DismissDenial` from `main` alone, `ForgetAllowance` and the `ListAllowances` read from
+//! R18's escalations go by window: `RequestEscalation`, `SwitchProtectionOn`, `DismissDenial`
+//! and `GoOnInsideMatter` from `main` alone, `ForgetAllowance` and the `ListAllowances` read from
 //! `main` and `settings`, and every other label (another window, a webview inside one,
 //! whatever an agent's output could open) is refused with `command.invalid` before the host
-//! sees it. The host does not run the four yet (PR 3): `main`'s reach it and are refused there.
+//! sees it. The host does not run the five yet (later PRs): `main`'s reach it and are refused
+//! there.
 
-use clauseo_protocol::{AllowanceId, DenialId, MatterId};
+use clauseo_protocol::{AllowanceId, DenialId, MatterId, ThreadId};
 use serde_json::json;
 
 use super::*;
@@ -17,23 +18,25 @@ fn command(body: serde_json::Value) -> HostCommand {
 }
 
 #[test]
-fn the_four_commands_go_by_window() {
+fn the_five_commands_go_by_window() {
     let scratch = Scratch::new("admit-escalations", &[]);
     let host = scratch.start(Vec::new());
     let bridge = host.bridge();
     let denial = DenialId::new(Uuid::now_v7()).unwrap();
+    let thread = ThreadId::new(Uuid::now_v7()).unwrap();
     let matter = MatterId::new(Uuid::now_v7()).unwrap();
     let other = MatterId::new(Uuid::now_v7()).unwrap();
     let allowance = AllowanceId::new(Uuid::now_v7()).unwrap();
-    let card = json!({"request_escalation": {"request": {"denial": denial}}});
+    let card = json!({"request_escalation": {"request": {"denial": {"thread": thread, "denial": denial}}}});
     let off = json!({"request_escalation":
         {"request": {"switch_protection_off": {"matter": matter}}}});
     let files = json!({"request_escalation":
         {"request": {"files_from_other_matter": {"matter": matter, "from": other}}}});
     let on = json!({"switch_protection_on": {"matter": matter}});
     let forget = json!({"forget_allowance": {"matter": matter, "allowance": allowance}});
-    let dismiss = json!({"dismiss_denial": {"denial": denial}});
-    let main_only = [&card, &off, &files, &on, &dismiss];
+    let dismiss = json!({"dismiss_denial": {"thread": thread, "denial": denial}});
+    let go_on = json!({"go_on_inside_matter": {"thread": thread}});
+    let main_only = [&card, &off, &files, &on, &dismiss, &go_on];
     let mut rows = vec![(MAIN, &forget, true), (SETTINGS, &forget, true)];
     for body in main_only {
         rows.extend([(MAIN, body, true), (SETTINGS, body, false)]);
@@ -65,7 +68,7 @@ fn the_four_commands_go_by_window() {
             "{window}: {refusal:?}"
         );
     }
-    for body in [card, off, files, on, forget, dismiss] {
+    for body in [card, off, files, on, forget, dismiss, go_on] {
         let envelope = CommandEnvelope {
             command_id: CommandId::new(Uuid::now_v7()).unwrap(),
             command: command(body.clone()),

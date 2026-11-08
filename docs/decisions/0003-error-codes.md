@@ -125,6 +125,7 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `escalation.not_pending` | The escalation a request names isn't waiting any more (its card was answered, dismissed or expired, or the agent stopped), so nothing was asked or allowed. | no | host (`RequestEscalation` naming a denial that is no longer pending, R18); not retryable because the same denial stays settled, and a new refusal brings a new card |
 | `escalation.not_offerable` | What the request names can't be allowed: a secret place (the home folder, Clauseo's data, a .git folder, another matter's own Clauseo files) or the firm's policy keeps it closed, so nothing was asked or allowed. | no | host (`RequestEscalation` for a denial logged with `offered: false`, or a picked path the rules refuse, R18) |
 | `sandbox.unprotected_auto_forbidden` | The firm forbids agents to work without the sandbox (sandbox.allow_unprotected_auto is false), so protection was not switched off. | no | host (`RequestEscalation` with `switch_protection_off`, before any dialog, R18); not retryable because only the firm's settings change it |
+| `escalation.network_location` | The picked folder or file is on a network drive or shared folder; Clauseo doesn't open network locations the agent or picker names, so nothing was asked or allowed. | no | host (R18 PR 3b) |
 | `unknown` | A code from a newer Clauseo that this version does not know. Never produced here. | no | decoding only |
 
 Judgement calls on retryable: `agent.launch_failed` and `agent.exited` are retryable because a new

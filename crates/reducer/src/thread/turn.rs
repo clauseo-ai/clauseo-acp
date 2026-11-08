@@ -106,6 +106,7 @@ pub(super) fn user_message(
         turn: event.turn,
         content: event.content.clone(),
         delivery: event.delivery,
+        by: event.by,
         status: UserMessageStatus::Sent,
         edited: false,
         steer: None,

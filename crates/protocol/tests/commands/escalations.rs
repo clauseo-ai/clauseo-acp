@@ -1,5 +1,6 @@
 //! R18's commands (denials and widening): their JSON, `validate()`'s one rule, the closed
-//! `EscalationRequest`, `ListAllowances` and its answer, and the three new error codes.
+//! `EscalationRequest`, `ListAllowances` and its answer, a required `is_file`, and the four
+//! new error codes.
 
 use clauseo_protocol::{
     AllowTarget, ErrorCode, EscalationRequest, GrantMode, HostCommand, HostQuery, MatterAllowance,
@@ -7,7 +8,7 @@ use clauseo_protocol::{
 };
 
 use super::Validate;
-use super::fixtures::{allowance_id, denial_id, matter_id, round_trips, v7_text};
+use super::fixtures::{allowance_id, denial_id, matter_id, round_trips, thread_id, v7_text};
 
 fn escalate(request: EscalationRequest) -> HostCommand {
     HostCommand::RequestEscalation { request }
@@ -17,9 +18,13 @@ fn escalate(request: EscalationRequest) -> HostCommand {
 fn each_command_has_its_json_and_passes_validate() {
     let cases = [
         (
-            escalate(EscalationRequest::Denial(denial_id(1))),
+            escalate(EscalationRequest::Denial {
+                thread: thread_id(2),
+                denial: denial_id(1),
+            }),
             format!(
-                r#"{{"request_escalation":{{"request":{{"denial":"{}"}}}}}}"#,
+                r#"{{"request_escalation":{{"request":{{"denial":{{"thread":"{}","denial":"{}"}}}}}}}}"#,
+                v7_text(2),
                 v7_text(1)
             ),
         ),
@@ -65,9 +70,20 @@ fn each_command_has_its_json_and_passes_validate() {
         ),
         (
             HostCommand::DismissDenial {
+                thread: thread_id(2),
                 denial: denial_id(1),
             },
-            format!(r#"{{"dismiss_denial":{{"denial":"{}"}}}}"#, v7_text(1)),
+            format!(
+                r#"{{"dismiss_denial":{{"thread":"{}","denial":"{}"}}}}"#,
+                v7_text(2),
+                v7_text(1)
+            ),
+        ),
+        (
+            HostCommand::GoOnInsideMatter {
+                thread: thread_id(2),
+            },
+            format!(r#"{{"go_on_inside_matter":{{"thread":"{}"}}}}"#, v7_text(2)),
         ),
     ];
     for (command, json) in &cases {
@@ -102,8 +118,16 @@ fn a_request_is_closed() {
         format!(
             r#"{{"request_escalation":{{"request":{{"files_from_other_matter":{{"matter":"{m}","path":"/etc"}}}}}}}}"#
         ),
-        format!(r#"{{"request_escalation":{{"request":{{"denial":"{m}"}},"path":"/etc"}}}}"#),
-        format!(r#"{{"dismiss_denial":{{"denial":"{m}","forget":true}}}}"#),
+        format!(
+            r#"{{"request_escalation":{{"request":{{"denial":{{"thread":"{m}","denial":"{m}"}}}},"path":"/etc"}}}}"#
+        ),
+        // The denial without its thread, and the old bare id.
+        format!(r#"{{"request_escalation":{{"request":{{"denial":{{"denial":"{m}"}}}}}}}}"#),
+        format!(r#"{{"request_escalation":{{"request":{{"denial":"{m}"}}}}}}"#),
+        format!(r#"{{"dismiss_denial":{{"thread":"{m}","denial":"{m}","forget":true}}}}"#),
+        format!(r#"{{"dismiss_denial":{{"denial":"{m}"}}}}"#),
+        r#"{"go_on_inside_matter":{}}"#.to_owned(),
+        format!(r#"{{"go_on_inside_matter":{{"thread":"{m}","text":"go on"}}}}"#),
         format!(r#"{{"forget_allowance":{{"allowance":"{m}"}}}}"#),
     ] {
         assert!(serde_json::from_str::<HostCommand>(&bad).is_err(), "{bad}");
@@ -141,8 +165,26 @@ fn the_query_is_a_plain_string_and_its_answer_names_each_field() {
     round_trips(&answer);
 }
 
+/// `is_file` is required: a missing field would read as a folder, the wider grant, so a
+/// target without it is refused, in a list's answer as in the log.
 #[test]
-fn the_three_codes_are_not_retryable() {
+fn a_target_without_is_file_is_refused() {
+    let m = v7_text(1);
+    let missing = format!(r#"{{"other_matter_path":{{"matter":"{m}","path":"/Users/a/x"}}}}"#);
+    assert!(
+        serde_json::from_str::<AllowTarget>(&missing).is_err(),
+        "{missing}"
+    );
+    let given =
+        format!(r#"{{"other_matter_path":{{"matter":"{m}","path":"/Users/a/x","is_file":true}}}}"#);
+    assert!(matches!(
+        serde_json::from_str::<AllowTarget>(&given),
+        Ok(AllowTarget::OtherMatterPath { is_file: true, .. })
+    ));
+}
+
+#[test]
+fn the_four_codes_are_not_retryable() {
     for (code, text) in [
         (ErrorCode::EscalationNotPending, "escalation.not_pending"),
         (
@@ -152,6 +194,10 @@ fn the_three_codes_are_not_retryable() {
         (
             ErrorCode::SandboxUnprotectedAutoForbidden,
             "sandbox.unprotected_auto_forbidden",
+        ),
+        (
+            ErrorCode::EscalationNetworkLocation,
+            "escalation.network_location",
         ),
     ] {
         assert_eq!(code.as_str(), text);

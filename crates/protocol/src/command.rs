@@ -506,7 +506,7 @@ pub enum HostCommand {
     /// the command grants nothing, the dialog's answer does. Answers `Done` when the dialog
     /// closes, whatever the answer; `escalation.not_pending` for a denial no longer waiting,
     /// `escalation.not_offerable` for one the host never widens. Only the main window sends it.
-    /// JSON: `{"request_escalation": {"request": {"denial": "…"}}}`.
+    /// JSON: `{"request_escalation": {"request": {"denial": {"thread": "…", "denial": "…"}}}}`.
     RequestEscalation {
         /// What to ask.
         request: EscalationRequest,
@@ -529,7 +529,17 @@ pub enum HostCommand {
     /// Hide a denial's card; nothing is granted or remembered. Answers `Done`. Only the main
     /// window sends it.
     DismissDenial {
+        /// The thread whose card it is.
+        thread: ThreadId,
         /// The denial.
         denial: DenialId,
+    },
+    /// "Keep to this matter's folder and go on." after `denials_paused`: the host sends the
+    /// thread's agent its own prompt, logged as a `user_message` with `by: clauseo`, so the
+    /// window never sends text the lawyer did not type. Answers `Done` once the prompt is
+    /// queued. Only the main window sends it. JSON: `{"go_on_inside_matter": {"thread": "…"}}`.
+    GoOnInsideMatter {
+        /// The paused thread.
+        thread: ThreadId,
     },
 }

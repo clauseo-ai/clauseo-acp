@@ -318,6 +318,7 @@ fn user_message_and_agent_content_match_view_counts() {
         turn: turn(),
         content: built.value.content,
         delivery: Delivery::Queue,
+        by: clauseo_protocol::MessageBy::Lawyer,
         status: UserMessageStatus::Sent,
         edited: false,
         steer: None,

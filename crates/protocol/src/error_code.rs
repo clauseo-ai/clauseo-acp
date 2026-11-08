@@ -285,6 +285,9 @@ error_codes! {
     SandboxUnprotectedAutoForbidden = "sandbox.unprotected_auto_forbidden", retryable: false,
         meaning: "The firm forbids agents to work without the sandbox \
         (sandbox.allow_unprotected_auto is false), so protection was not switched off.";
+    EscalationNetworkLocation = "escalation.network_location", retryable: false, meaning: "The \
+        picked folder or file is on a network drive or shared folder; Clauseo doesn't open \
+        network locations the agent or picker names, so nothing was asked or allowed.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }
