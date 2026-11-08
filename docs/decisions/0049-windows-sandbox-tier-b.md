@@ -2372,6 +2372,12 @@ user puts the deny back; otherwise until `reconcile` at the next start does, or 
 reuse check counts a marked deny as a grant (`Ledger::grants_sid`), so the pool user serves no
 other matter meanwhile.
 
+Residual, made during the run: a `.git` file made in an allowed folder of another matter reads,
+as does a `.clauseo` file. It holds only a `gitdir:` pointer; the target stays closed unless it
+is inside the grant, and the grant is read-only. macOS refuses both by name. Test:
+`a_git_file_made_during_the_run_reads_but_its_gitdir_target_stays_closed`
+(`apply/tests/reads.rs`).
+
 Nothing fights the lift. `fence_applied` reads the ledger, where the entry is still `applied`,
 so no launch replans the fence because of it. A launch that writes the fence anyway (the other
 matter's own, or one that plans its fence) puts the deny back. The session then can't list the

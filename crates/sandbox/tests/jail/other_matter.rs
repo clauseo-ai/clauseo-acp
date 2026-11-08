@@ -166,3 +166,40 @@ fn a_read_grant_of_a_subfolder_refuses_links_out_of_it() {
     let out = sh(&launcher, &w.at("m1"), r#"ls "$1""#, &[&at("m2")]);
     assert_ne!(out.code, Some(0), "{out:#?}");
 }
+
+#[test]
+fn a_git_or_clauseo_made_during_the_run_in_a_granted_folder_stays_refused() {
+    let w = World::new();
+    other_matter(&w);
+    w.file("m2/.git/worktrees/made/HEAD", "ref\n");
+    let policy = w
+        .builder()
+        .hidden_matter(&w.at("m2"), "m2-id")
+        .other_matter_read(&w.at("m2/sub"), false)
+        .build()
+        .unwrap();
+    let (launcher, _) = launcher(policy);
+    // Made after the profile is written: a worktree's `.git` file and a `.clauseo` file, and a
+    // `.git` folder a level down; each is refused by name, as is the `gitdir:` target.
+    w.file("m2/sub/made/.git", "gitdir: ../../.git/worktrees/made\n");
+    w.file("m2/sub/made/.clauseo", "data\n");
+    w.file("m2/sub/made/deep/.git/HEAD", "ref\n");
+    w.file("m2/sub/made/plain.txt", "plain\n");
+    let at = |rel: &str| w.at(rel).to_str().unwrap().to_owned();
+    let refused = [
+        "m2/sub/made/.git",
+        "m2/sub/made/.clauseo",
+        "m2/sub/made/deep/.git/HEAD",
+        "m2/.git/worktrees/made/HEAD",
+    ]
+    .map(at);
+    let plain = at("m2/sub/made/plain.txt");
+    let mut all = vec![plain.as_str()];
+    all.extend(refused.iter().map(String::as_str));
+    let out = sh(&launcher, &w.at("m1"), READ_EACH, &all);
+    out.assert_ok();
+    assert_eq!(lines(&out.stdout, "READ "), [plain], "{out:#?}");
+    let mut want_refused = refused.to_vec();
+    want_refused.sort();
+    assert_eq!(lines(&out.stdout, "REFUSED "), want_refused, "{out:#?}");
+}

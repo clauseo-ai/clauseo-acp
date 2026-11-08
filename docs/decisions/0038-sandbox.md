@@ -101,6 +101,11 @@ name) reads through its granted name, since Seatbelt checks the path opened and 
 filter on a file's link count (Windows leaves a multi-link file out of the grant). Low: the
 link has to exist in the other matter already, and the reading agent can't make one there, as
 it writes nothing in that matter; git itself doesn't hard-link a working file into `.git`.
+Made during the run: a `.git` or `.clauseo` file (or a `.git` folder) made in a granted folder
+is refused by name, as is the `gitdir:` target outside the grant
+(`a_git_or_clauseo_made_during_the_run_in_a_granted_folder_stays_refused`). On Windows both
+files read: each holds only a pointer, the target stays hidden unless it is inside the grant,
+and the grant is read-only (0049).
 
 **Read-only names and links.** `.codex/`, `.claude/`, `.agents/`, `.clauseo/`, `.mcp.json`,
 `CLAUDE.md`, `CLAUDE.local.md` and `AGENTS.md` at the matter root, existing or not; each existing

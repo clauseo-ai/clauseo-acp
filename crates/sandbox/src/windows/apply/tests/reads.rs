@@ -165,6 +165,49 @@ fn a_file_made_during_the_run_in_an_allowed_folder_reads_and_a_folder_made_then_
 }
 
 #[test]
+fn a_git_file_made_during_the_run_reads_but_its_gitdir_target_stays_closed() {
+    for grant in ["other/m2", "other/m2/docs"] {
+        let w = World::new("reads-made-gitdir");
+        w.other_tree();
+        w.dir
+            .file("other/m2/.git/worktrees/docs/HEAD", "ref: refs/heads/docs");
+        let (mut ledger, mut acl) = (ledger(&w), volume(&w));
+        launch(&w, &mut ledger, &mut acl, &[(grant, false)]);
+        // Made after the grant: a worktree's `.git` file and a `.clauseo` file in an allowed
+        // folder take its allow for files; each holds a pointer, not the history.
+        w.dir
+            .file("other/m2/docs/.git", "gitdir: ../.git/worktrees/docs");
+        w.dir.file("other/m2/docs/.clauseo", "x");
+        assert!(reads(&w, &acl, "other/m2/docs/.git"), "{grant}");
+        assert!(reads(&w, &acl, "other/m2/docs/.clauseo"), "{grant}");
+        // What it points at, in the matter's own `.git`, has no allow and keeps the fence.
+        let mut closed = vec![
+            "other/m2/.git/worktrees/docs",
+            "other/m2/.git/worktrees/docs/HEAD",
+        ];
+        if grant == "other/m2/docs" {
+            closed.extend(["other/m2/sub", "other/m2/sub/e.txt"]);
+        }
+        for rel in closed {
+            assert!(!reads(&w, &acl, rel), "{grant}: {rel}");
+            let path = w.canonical(rel);
+            let allowed = acl
+                .aces
+                .iter()
+                .any(|(p, sid, rights, _)| p == &path && sid == USER_SID && !rights.is_deny());
+            assert!(!allowed, "{grant}: {rel}");
+        }
+        let below = (w.canonical("other/m2"), USER_SID.to_owned());
+        let fenced = acl.aces.iter().any(|(p, sid, rights, inherit)| {
+            (p, sid) == (&below.0, &below.1)
+                && *rights == Rights::DenyReadWrite
+                && *inherit == Inherit::Below
+        });
+        assert!(fenced, "{grant}");
+    }
+}
+
+#[test]
 fn a_read_of_a_folder_in_another_matter_beats_the_fence_inside_it() {
     let w = World::new("reads-child");
     w.other_tree();
