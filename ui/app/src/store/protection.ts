@@ -4,15 +4,16 @@
 // after each protection command answers and on each `protection_changed`, and replaced whole by R17
 // PR-B's `protection_view_changed` (read loosely: it isn't in bindings.ts yet). The view is null
 // while the query is refused (`command.invalid` before PR-B admits it), which hides or quiets every
-// line that needs it. The updater's view (`get_update`, both windows may read it) gives who manages
-// this install, which tells a per-machine install from a per-user one for design B's repair; read
-// once, with the view (the install kind doesn't change while the app runs). One store per
+// line that needs it. The updater's view (store/update.ts, the window's one read of `get_update`) gives who
+// manages this install, which tells a per-machine install from a per-user one for design B's repair;
+// followed from the update store, never read twice. One store per
 // transport, for either window. It sends no command: each window's live with it (room/protection/
 // commands.ts, settings/sections/workspace-commands.ts), run through protection-run.ts, which marks
 // `running` here. No timers and no polling: the host publishes, the store hears.
 import { nextHostOf, type AppEvent } from "../room/host-next.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { ManagedBy, ProtectionView, UpdateView } from "../transport/protocol.ts";
+import { updateStoreOf } from "./update.ts";
 
 /** A protection command running from this window: the one-time set-up (`retry_protection`) or its removal. */
 export type ProtectionAct = "set_up" | "remove";
@@ -81,14 +82,16 @@ export function createProtectionStore(transport: HostTransport): ProtectionStore
     }
     if (n === asked) set({ view });
   };
-  const readManaged = async (): Promise<void> => {
-    let managedBy: ManagedBy | null = null;
-    try {
-      managedBy = managedOf((await transport.query("get_update")).update);
-    } catch {
-      // refused or not scripted: a per-user install, as the repair reads it
-    }
-    set({ managedBy });
+  // the update store's view: undefined until it answers; refused or not scripted, a per-user install (null)
+  const followManaged = (): void => {
+    const update = updateStoreOf(transport);
+    const sync = () => {
+      const view = update.state().view;
+      const managedBy = view === undefined ? undefined : managedOf(view ?? undefined);
+      if (managedBy !== state.managedBy) set({ managedBy });
+    };
+    update.subscribe(sync);
+    sync();
   };
   const hear = (event: AppEvent) => {
     if ("protection_changed" in event) {
@@ -104,7 +107,7 @@ export function createProtectionStore(transport: HostTransport): ProtectionStore
   };
   nextHostOf(transport).app?.subscribeApp(hear);
   void read();
-  if (wired) void readManaged();
+  if (wired) followManaged();
   return {
     subscribe: (listener) => {
       listeners.add(listener);

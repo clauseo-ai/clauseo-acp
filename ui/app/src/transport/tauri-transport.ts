@@ -91,6 +91,8 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
   /** UC: the desktop carries the protection wire (settings/sections/workspace-shown.ts); before R17 PR-B its host
    * answers `command.invalid`, which hides or quiets every protection line. */
   readonly protectionWire = true;
+  /** R23: the desktop carries the updater (store/update.ts): `get_update`, `update_changed` and its commands. */
+  readonly updateWire = true;
   readonly #reader: ChannelReader;
   readonly #subs: Subscriptions;
   readonly #warn: (message: string) => void;
@@ -180,6 +182,7 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
           ("folder_scanned" in event && event.folder_scanned !== undefined) ||
           ("protection_changed" in event && event.protection_changed !== undefined) ||
           ("site_blocked" in event && event.site_blocked !== undefined) ||
+          ("update_changed" in event && event.update_changed !== undefined) ||
           // UC: R17 PR-B's whole ProtectionView, not in bindings.ts yet (store/protection.ts reads it loosely)
           Object.hasOwn(event, "protection_view_changed")
         ) {
@@ -256,7 +259,7 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
 
   /** Hears each app-wide event (`settings_changed`, `matters_changed`, `threads_changed`,
    * `browser_install`, `connectors_changed`, `case_law_hint`, `folder_scanned`,
-   * `protection_changed`, `site_blocked`). The first listener subscribes the window's channel to
+   * `protection_changed`, `site_blocked`, `update_changed`). The first listener subscribes the window's channel to
    * them; read the current state with `query` after `ready`, so no change falls between. */
   onAppEvent(listener: (event: HostEvent) => void): AppFeed {
     this.#appListeners.add(listener);

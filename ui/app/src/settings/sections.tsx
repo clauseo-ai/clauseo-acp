@@ -13,10 +13,12 @@ import {
   IconSafeWorkspace,
   IconSearch,
   IconSend,
+  IconTryAgain,
 } from "@clauseo/components/icons/icons.tsx";
 import type { Display, Lang } from "@clauseo/components/lib/display.ts";
 import { cw } from "@clauseo/components/lib/words-connectors.ts";
 import { LANGUAGE_NAMES, st, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
+import { uw } from "@clauseo/components/lib/words-update.ts";
 import type { DisplayStore } from "../room/display-store.ts";
 import type { UiSettings } from "../room/host-next.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
@@ -35,6 +37,8 @@ import { Appearance } from "./sections/appearance.tsx";
 import { Language } from "./sections/language.tsx";
 import { Privacy } from "./sections/privacy.tsx";
 import { Usage } from "./sections/usage.tsx";
+import { Updates } from "./sections/updates.tsx";
+import { carriesUpdate } from "../store/update.ts";
 import { ConnectorsSection } from "./sections/connectors-load.tsx";
 import { PlansSection } from "./sections/plans-load.tsx";
 import { carriesSetup } from "./sections/plans-shown.ts";
@@ -156,6 +160,14 @@ export const SECTIONS: readonly SectionEntry[] = [
         n: ctx.display.textSize,
       }),
     Body: Appearance,
+  },
+  {
+    // R23: where the transport carries the updater; no side note, so nothing waits on the updater's first answer
+    id: "updates",
+    name: (lang) => uw(lang, "Updates"),
+    icon: IconTryAgain,
+    shown: (ctx) => carriesUpdate(ctx.transport),
+    Body: Updates,
   },
   {
     id: "privacy",

@@ -57,6 +57,8 @@ import { kindOf, knownPlan } from "./agent.ts";
 import { AgentPlanContext, useThreadAgentName } from "./thread/agent-plan.ts";
 import { Conversations } from "./conversations.ts";
 import { AllThreads } from "./all-threads.ts";
+import { useRailShown } from "@clauseo/components/clauseo/rail-shown.ts";
+import { UpdateNotice } from "./update-notice.tsx";
 import { handWaits } from "./triage.ts";
 import { LivePlan } from "./limits/live-plan.tsx";
 import { Matters, type MattersView } from "./matters.ts";
@@ -384,6 +386,9 @@ function RoomFrame({
   // there, so asking whether the window is maximised would only be refused, on every resize
   const wired = useMemo(() => (platform === "mac" ? null : controls), [platform, controls]);
   const caption = useWindowFrame(wired);
+  // R23's update notice: at the rail's foot where the rail stands beside the work, else at the head of the wall
+  const atRail = useRailShown() && versions.rail == null;
+  const notice = <UpdateNotice transport={transport} threads={threads} />;
   const title =
     open !== null
       ? scratch
@@ -458,6 +463,7 @@ function RoomFrame({
           onEscape={fold}
           newMatterRef={newMatter}
           onSettings={openSettings}
+          {...(atRail ? { notice } : {})}
         />
       )}
       {newMounted && (
@@ -561,6 +567,7 @@ function RoomFrame({
           )}
         </main>
         <aside className="room-pane" ref={nodes.slot("pane")}>
+          {!atRail && notice}
           {papers !== null &&
             (papers.papers.length === 0 ? (
               <EmptyPapers body={false} />

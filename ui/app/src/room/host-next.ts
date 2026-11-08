@@ -33,6 +33,7 @@ import type {
   TurnId,
   ToolsPatch,
   ToolsSettingsView,
+  UpdateView,
 } from "../transport/protocol.ts";
 import {
   wireAgentsHost,
@@ -223,7 +224,8 @@ export type AppEvent =
   | { folder_scanned: FolderScanned }
   | { protection_changed: ProtectionChanged }
   | { protection_view_changed: unknown }
-  | { site_blocked: SiteBlocked };
+  | { site_blocked: SiteBlocked }
+  | { update_changed: UpdateView };
 
 /** 0053: a site the unsafe-site list blocked in a turn; re-sent with the same `block_id` and a
  * higher `count`. */

@@ -9,7 +9,15 @@
 // (U16b) are rail-snooze.tsx's: a row's buttons and menus, its line, the done fold and the Snoozed shelf; the morning
 // sweep is sweep.ts's. Snoozes are compared with the newest of the views' times and the moment the pointer came or went,
 // or the window came back, so a snooze whose time has come ends at the next render with no timer.
-import { Suspense, useEffect, useRef, useState, useSyncExternalStore, type Ref } from "react";
+import {
+  Suspense,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+  type Ref,
+} from "react";
 import {
   Rail,
   type FindSearch,
@@ -127,6 +135,7 @@ export function RoomRail({
   newMatterRef,
   onEscape,
   onSettings,
+  notice,
 }: {
   /** For Find's search inside the matters, and opening a paper it finds. */
   transport: HostTransport;
@@ -156,6 +165,8 @@ export function RoomRail({
   /** Settings at the rail's foot, pressed; left out where there is no settings window to open (outside the desktop
    * app), and the rail draws no Settings. */
   onSettings?: (() => void) | undefined;
+  /** Optional: what the room says about Clauseo itself (R23's update notice), at the rail's foot above Scratch matter. */
+  notice?: ReactNode;
 }) {
   const w = useWords();
   const every = useSyncExternalStore(threads.subscribe, threads.view, threads.view);
@@ -418,6 +429,7 @@ export function RoomRail({
       }}
       onEscape={onEscape}
       {...(onSettings === undefined ? {} : { onSettings })}
+      {...(notice === undefined ? {} : { notice })}
       testIds={{ newMatter: "new-matter", find: "find", settings: "open-settings" }}
     />
   );
