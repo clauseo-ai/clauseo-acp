@@ -28,7 +28,9 @@
 //!   and one that breaks while the agent runs ends the session: nothing stands in for it.
 //! - An item that can't be moved (the agent holding a handle to it, say) is tried again once
 //!   the session ended: fail closed.
-//! - Once the job is empty, the watch is stopped and rescans its folder one last time.
+//! - Once the job is empty, the watch is stopped and rescans its folder one last time. When the
+//!   watch ended the session and emptying the job failed, that rescan moves nothing either and
+//!   leaves what it finds for the check after the session.
 //! - Each item moved gets two records on the host's denial pipe (`denial_pipe`, never stderr,
 //!   which carries the agent's lines too): the lawyer's notice, where it went
 //!   ([`SetAsideWhat::notice`]), and the [`Denial::SetAside`] for the session's denial sink
@@ -258,10 +260,12 @@ pub(crate) fn watch<S: Source>(mut source: S, guard: &impl Guard, session: &impl
         left_said: Cell::new(false),
     };
     keep_watching(&mut source, guard, &ender);
-    // The job is empty: one last look, with nothing left to end, and nothing for the watchdog.
+    // One last look, with nothing left to end, and nothing for the watchdog. The job is empty
+    // unless the watch ended it and emptying it failed: then this look moves nothing either and
+    // leaves what it finds (`Live::left`) for the check after the session.
     session.pulse().end();
-    ender.ended.set(true);
-    ender.empty.set(true);
+    let emptied = !ender.ended.replace(true) || ender.empty.get();
+    ender.empty.set(emptied);
     act(&busy(session, || guard.rescan(&ender)), guard, &ender);
 }
 

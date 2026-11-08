@@ -342,6 +342,19 @@ fn the_last_rescan_at_the_stop_sets_aside_what_it_finds() {
     );
 }
 
+/// Final review, item 3: when emptying the job failed, the last rescan moves nothing either; what
+/// it finds is left for the check after the session, and said once.
+#[test]
+fn with_the_job_not_emptied_the_last_rescan_moves_nothing_and_leaves_it() {
+    let log = Log::default();
+    let mut found = guard(&log);
+    found.rescan_finds = vec![PathBuf::from("late/.git")];
+    let mut stuck = session(&log, 1);
+    stuck.empty = false;
+    watch(script(vec![added(&["a/.git"])]), &found, &stuck);
+    assert_eq!(log.lines(), ["changed", "said", "end", "said", "rescan"]);
+}
+
 #[test]
 fn a_git_that_cant_be_moved_is_tried_again_once_the_session_ended() {
     let log = Log::default();
