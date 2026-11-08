@@ -123,7 +123,16 @@ impl Scene {
 
     pub(super) fn launch(&self) -> LaunchCheck {
         let admin = crate::windows::admin_copy::fake::Fake::ready();
-        check_launch_with(&admin, &self.data, &self.ledger, &self.plan, &self.journal).unwrap()
+        let (data, ledger, plan, journal) = (&self.data, &self.ledger, &self.plan, &self.journal);
+        check_launch_with(
+            &admin,
+            &crate::windows::wsl::NoWsl,
+            data,
+            ledger,
+            plan,
+            journal,
+        )
+        .unwrap()
     }
 
     pub(super) fn launch_path(&self) -> LaunchPath {

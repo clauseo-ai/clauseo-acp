@@ -47,6 +47,8 @@
 //!   next launch reads the journal from it, through `NtfsJournal` on Windows, and skips the
 //!   own-tree walks and the set-aside scan when nothing in the trees changed, walks only the
 //!   changed folders when a few did, and walks in full on any doubt.
+//! - [`wsl`]: WSL denied to the pool, a deny in its classes' COM launch permission that set-up
+//!   and the refresh task write and each launch checks.
 //!
 //! The plan, the ledger, the records, the gate's logic, the apply order and the byte edits hold
 //! no Windows call, so they build and are tested on every OS; the folder check, the registry and
@@ -112,6 +114,7 @@ mod user_setup;
 pub mod wfp;
 mod write;
 pub mod writer;
+pub mod wsl;
 
 #[cfg(windows)]
 pub use acl::NtfsAcl;

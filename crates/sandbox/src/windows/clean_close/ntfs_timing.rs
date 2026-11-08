@@ -26,6 +26,7 @@ use crate::windows::test_dacl::auto_inherit_with;
 use crate::windows::test_world::{
     NOTES, OTHER_POOL_SIDS, STATE, USER_SID, World, matter_one, reserved, trusted,
 };
+use crate::windows::wsl::NoWsl;
 use crate::{PathRule, Policy};
 
 /// Around a temp matter: the real listing, every folder `Ok`, set-asides refused, no
@@ -203,7 +204,7 @@ fn later_launch(w: &World, files: usize, edit: Option<&dyn Fn()>) -> LaunchPath 
     let started = Instant::now();
     let admin = Fake::ready();
     let check: LaunchCheck =
-        check_launch_with(&admin, &data, &ledger(&data), &later, &NtfsJournal).unwrap();
+        check_launch_with(&admin, &NoWsl, &data, &ledger(&data), &later, &NtfsJournal).unwrap();
     let checked = started.elapsed();
     let started = Instant::now();
     before_launch_checked(&policy, &data, &matter, "s2", &[], at(120), &check).unwrap();

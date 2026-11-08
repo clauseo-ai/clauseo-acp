@@ -587,3 +587,4 @@ crates/sandbox/examples/s15_launch_vm/win_switch.rs - unsafe_code
 crates/sandbox/examples/s15_launch_vm/win_pool.rs - unsafe_code
 # The cancel row's thread states: NtQuerySystemInformation against ntdll, and a pid's token user.
 crates/sandbox/examples/s15_launch_vm/win_suspend.rs - unsafe_code
+crates/sandbox/src/windows/wsl/os.rs - unsafe_code

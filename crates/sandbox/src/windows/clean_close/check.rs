@@ -13,6 +13,7 @@ use crate::windows::acl_plan::{AdmittedPlan, in_folder};
 use crate::windows::admin_copy::{self, AdminCopyFs};
 use crate::windows::ledger::{EntryState, Ledger};
 use crate::windows::set_aside;
+use crate::windows::wsl::{self, WslRead};
 
 /// The launch check, on the host at the lawyer's token, before the set-aside's launch pass and
 /// `apply`. First the pool is this user's and the set-up program's admin copy passes
@@ -20,7 +21,10 @@ use crate::windows::set_aside;
 /// (`OtherAccount`, `AdminCopyMissing`, `AdminCopyChanged`, `AdminCopyUnsafe`, or `ToolMissing`
 /// for a copy gone after Windows security blocked it) and nothing
 /// is read or removed: without a copy only administrators can
-/// change, tier B can't top up, reclaim or be removed safely, so it doesn't run. Then, under the
+/// change, tier B can't top up, reclaim or be removed safely, so it doesn't run. Next, with WSL
+/// on the machine, its classes' launch permissions must deny the pool group first
+/// (`wsl::check`), or the launch is refused with `WslDenyMissing` or `WslDenyUnverifiable`:
+/// a pool user who can start WSL gets a Linux the network filters don't see. Then, under the
 /// matter's set-aside lock, it reads the matter's clean-close record and removes it, whatever
 /// comes next: a failed removal refuses the launch
 /// ([`Error::CleanClose`]), and a lock that can't be taken too ([`Error::SetAside`]). Then it
@@ -34,19 +38,23 @@ pub fn check_launch(
     journal: &dyn Journal,
 ) -> Result<LaunchCheck, Error> {
     let admin = admin_copy::os::WindowsAdminCopy;
-    check_launch_with(&admin, data_dir, ledger, plan, journal)
+    let wsl = wsl::WindowsWsl::reader();
+    check_launch_with(&admin, &wsl, data_dir, ledger, plan, journal)
 }
 
-/// [`check_launch`] with the admin copy read through `admin`: the machine on Windows, a fake
-/// in the tests.
+/// [`check_launch`] with the admin copy read through `admin` and WSL's registration through
+/// `wsl`: the machine on Windows, fakes in the tests.
 pub(crate) fn check_launch_with(
     admin: &dyn AdminCopyFs,
+    wsl: &dyn WslRead,
     data_dir: &Path,
     ledger: &Ledger,
     plan: &AdmittedPlan,
     journal: &dyn Journal,
 ) -> Result<LaunchCheck, Error> {
     admin_copy::check_launchable(admin).map_err(Error::Blocked)?;
+    let found = wsl::check(wsl).map_err(Error::Blocked)?;
+    tracing::info!(?found, "WSL's deny for the pool");
     let matter = plan.matter();
     let held = set_aside::under_lock(data_dir, &matter, |open| {
         let found = record::read(data_dir, &matter);
