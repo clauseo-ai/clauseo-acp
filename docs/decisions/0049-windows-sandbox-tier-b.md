@@ -2123,31 +2123,55 @@ stop left. One cause, one exit: no second refusal says the same.
 the process passes and the BITS step). WSL 1 needs nothing more: its pico processes and the pool
 user's `wslhost.exe` and `wslrelay.exe` carry the pool user's token, and the passes stop them.
 WSL 2's VM (and a WSL container's) is a Hyper-V compute system that `wslservice.exe` runs as
-SYSTEM, which the passes don't see. HCS names a system by id only, and WSL's owner string is
-`"WSL"` for every user, so the user comes from the profile: the service makes
-`%LOCALAPPDATA%\temp\<VM id>` (upper case, no braces) as the user for each VM it starts and
-deletes it when the VM ends (WSL `WslCoreVm.cpp:135,148`). The step lists every compute system
-(`HcsEnumerateComputeSystems`, a 3 s wait), keeps the ids that are GUIDs, and for each looks in
-every pool user's profile (`ProfileList`) for `AppData\Local\temp\<id>`, reading the profile
-folder and each part below it without following a link: a pool user could make a junction that
-points the check at the lawyer's folders. A system one names is that user's: it is opened
-(`HcsOpenComputeSystem`), terminated (`HcsTerminateComputeSystem`, at most 5 s each and 10 s
-in all, through an operation waited for and closed), and its user marked for a reset, whose
-profile delete takes the user's distro registrations (in its hive) with it. Every other system is
-left alone: the lawyer's VMs, other users', other containers. A system already gone is ended.
+SYSTEM, which the passes don't see. HCS names a system by id, and WSL's owner string is `"WSL"`
+for every user, so the step lists every compute system (`HcsEnumerateComputeSystems`, a 3 s wait),
+keeps those whose `Owner` is `WSL` (Docker's and other owners' are left alone), and reads the user
+from the profile: the service makes `%LOCALAPPDATA%\temp\<VM id>` (upper case, no braces) as the
+user for each VM it starts and deletes it when the VM ends (WSL `WslCoreVm.cpp:135,148`).
+
+That folder can't show a pool user's VM is absent. WSL finds `%LOCALAPPDATA%` with
+`SHGetKnownFolderPath(FOLDERID_LocalAppData, userToken)` (`filesystem.cpp`), which follows the
+user's own `HKCU\...\User Shell Folders`, and a folder it fails to make only logs and starts the
+VM anyway (`WslCoreVm.cpp:145-152`), so a pool user could redirect its folder, or deny itself the
+right to make it, and keep its VM out of a walk of its profile. So each WSL system is identified
+positively, the lawyer first:
+
+- **the lawyer's** (`OwnerSid`): its profile holds `AppData\Local\temp\<id>`, or `temp\<id>` under
+  the `Local AppData` its loaded hive names
+  (`HKU\<OwnerSid>\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders`,
+  `%USERPROFILE%` expanded against the lawyer's profile; an absolute path as it is; any other
+  variable can't be expanded and counts as unread). It is left alone, and a pool user whose
+  profile holds that folder too planted it and is marked: a pool user that learned the lawyer's
+  VM id can't have the stop end it;
+- **a pool user's**: its profile (`ProfileList`) holds `AppData\Local\temp\<id>`, read from the
+  profile folder down without following a link (a junction could point the check at the lawyer's
+  folders). It is opened (`HcsOpenComputeSystem`), terminated (`HcsTerminateComputeSystem`, at
+  most 5 s each and 10 s in all, through an operation waited for and closed), and its user marked
+  for a reset, whose profile delete takes the user's distro registrations (in its hive) with it. A
+  system already gone is ended;
+- **any other WSL system is unmapped**, as is one whose lawyer's folder can't be read or whose id
+  isn't a GUID: nothing terminates it (it may be the lawyer's, or another account's), every pool
+  user is marked, and the stop ends at 48.
+
+So on a machine where another Windows account also runs WSL, a stop that runs while that
+account's VM is up ends at 48 and marks the whole pool (fail closed). Its VM's folder is in no
+profile the stop trusts, and telling it from a pool user's hidden VM would mean trusting what a pool
+user can change (its own shell folders and its `temp`'s rights). The next stop after that VM ends
+completes. A lawyer whose hive isn't loaded has no redirect to read: its redirected VM, if one
+outlives its logon, is unmapped too.
+
 `computecore.dll` is loaded at run time from System32 (`LoadLibraryExW`, `GetProcAddress`),
 never imported, so the exe starts where it is missing; with it missing, or no `vmcompute`
 service, there is nothing to do and the log line says nothing of VMs. The stop ends at 48 when a
 pool user's VM isn't ended (a failure, a wait that ran out, or none tried once the 10 s are spent),
-when a VM may be a pool user's because that user's folder couldn't be read (a link on the way, or
-a read that failed; the user is marked), or when the list fails while `WSLService` or
-`LxssManager` is installed (either runs WSL 2); a list that fails with neither is logged and
-passed over. The log line adds counts only: VMs ended, not, and unmapped, never an id, a path or
-a SID. Not done: restarting `WSLService` as a fallback (it would end the lawyer's sessions too).
-Not verified on a VM: that SYSTEM's list shows WSL's VMs and that a termination from outside the
-service leaves it consistent (the elevated test checks only the calls, where HCS is). A pool user
-who learned another VM's id could make that folder in its own profile and have the stop end that
-VM: a denial of service only, and the ids are random GUIDs a pool user has no way to read.
+when a WSL system is unmapped, or when the list fails while `WSLService` or `LxssManager` is
+installed (either runs WSL 2); a list that fails with neither is logged and passed over. A pool
+user whose folder couldn't be read (a link on the way, or a read that failed) is marked. The log
+line adds counts only: VMs ended, not, and unmapped, never an id, a path or a SID. Not done:
+restarting `WSLService` as a fallback (it would end the lawyer's sessions too). Not verified on a
+VM: that SYSTEM's list shows WSL's VMs with `Owner` `WSL` and the folder's name as the id, and
+that a termination from outside the service leaves it consistent (the elevated test checks only
+the calls, where HCS is).
 
 **No mid-session watcher.** A WSL update during a tier B session can drop the deny until the
 event trigger's run, seconds after the installer's last event; the next launch checks it again.

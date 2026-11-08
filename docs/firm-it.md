@@ -367,6 +367,12 @@ file (`unknown images: ...`), by file name only. A security product that hides i
 tokens from SYSTEM can cause this on every run; tell Clauseo support the file names the line
 gives.
 
+The line's `unmapped` count is WSL 2 VMs the task couldn't tie to the signed-in lawyer or to a
+sandbox user, which it leaves running. Another Windows account that uses WSL on the same computer
+causes this while its VM runs (a VM's owner can only be read from the profile that holds its
+folder); the task then ends at 48 and resets every sandbox user, and a later run after that VM
+ends completes.
+
 ### If Defender quarantines a Clauseo file
 
 See [section 10](#10-if-windows-security-removed-clauseos-set-up-program): what the installers
