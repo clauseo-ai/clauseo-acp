@@ -281,7 +281,7 @@ fn elevated_a_system_only_staging_is_taken_back_by_the_lock_down_and_the_teardow
     // The take-back alone: re-secured as the locked folder, and readable again.
     let dir = TempDir::new("admin-copy-take-back-secure");
     let (_sandbox, _exe, staging) = shut_staging(&dir);
-    NtfsLockDown.take_back(&staging).unwrap();
+    NtfsLockDown.take_back(&staging, &[]).unwrap();
     assert!(locked(&os::security(&staging).unwrap(), true));
     assert_eq!(std::fs::read_dir(&staging).unwrap().count(), 1);
 }

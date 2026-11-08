@@ -19,6 +19,8 @@ struct Tree {
     /// The token holds the take-back privileges (an elevated one does).
     privileged: bool,
     calls: Vec<String>,
+    /// Made in the admin folder once it has been listed: a WSL deny run's `locks\` and file.
+    appears: Vec<(String, Found, bool)>,
 }
 
 impl Tree {
@@ -28,6 +30,7 @@ impl Tree {
             entries: BTreeMap::new(),
             privileged: true,
             calls: Vec::new(),
+            appears: Vec::new(),
         };
         tree.add(DIR, Found::Folder, false);
         tree.add(EXE, Found::File, false);
@@ -83,12 +86,16 @@ impl LockDownFs for Tree {
     }
 
     fn entries(&mut self, dir: &Path) -> io::Result<Vec<String>> {
-        Ok(self
+        let names = self
             .entries
             .keys()
             .filter(|at| at.parent() == Some(dir))
             .map(|at| at.file_name().unwrap().to_string_lossy().into_owned())
-            .collect())
+            .collect();
+        for (path, kind, shut) in std::mem::take(&mut self.appears) {
+            self.add(&path, kind, shut);
+        }
+        Ok(names)
     }
 
     fn remove(&mut self, path: &Path, _kind: Found) -> io::Result<()> {
@@ -113,13 +120,18 @@ impl LockDownFs for Tree {
         if shut { Err(refused()) } else { Ok(()) }
     }
 
-    fn take_back(&mut self, path: &Path) -> io::Result<()> {
+    fn take_back(&mut self, path: &Path, skip: &[String]) -> io::Result<()> {
         self.calls.push(format!("take back {}", shown(path)));
         if !self.privileged {
             return Err(io::Error::other("SeRestorePrivilege: not held"));
         }
-        for at in self.below(path) {
-            self.entries.get_mut(&at).unwrap().1 = false;
+        let skipped: Vec<_> = skip.iter().map(|name| path.join(name)).collect();
+        let below = self.below(path);
+        let kept = below
+            .iter()
+            .filter(|at| skipped.iter().all(|skipped| !at.starts_with(skipped)));
+        for at in kept {
+            self.entries.get_mut(at).unwrap().1 = false;
         }
         Ok(())
     }
@@ -247,4 +259,31 @@ fn the_wsl_deny_lock_folder_goes_as_staging_does_and_one_that_stays_is_left_out_
     assert_eq!(tree.found(Path::new(STAGED)).unwrap(), Found::Folder);
     assert_eq!(tree.calls.last(), Some(&format!("lock {DIR}")));
     assert!(expected_entry("locks") && expected_entry("LOCKS"));
+}
+
+#[test]
+fn a_locks_folder_made_after_the_listing_is_left_out_of_the_lock_down_and_the_take_back() {
+    let locks = format!("{DIR}/locks");
+    let lock = format!("{locks}/wsl-deny.lock");
+    // A WSL deny run makes locks\ and its SYSTEM-only file (shut to Administrators here) once
+    // --adopt has listed the folder: the lock-down skips it, so its descriptor stays.
+    let mut tree = Tree::new();
+    tree.appears = vec![
+        (locks.clone(), Found::Folder, true),
+        (lock.clone(), Found::File, true),
+    ];
+    lock_down_with(&mut tree, Path::new(DIR), Path::new(EXE)).unwrap();
+    assert_eq!(tree.calls, [format!("lock {DIR}")]);
+    assert!(tree.entries[Path::new(&locks)].1 && tree.entries[Path::new(&lock)].1);
+    // The copy shut out too: the folder is taken back, locks\ still left as it is.
+    let mut tree = Tree::new();
+    tree.entries.get_mut(Path::new(EXE)).unwrap().1 = true;
+    tree.appears = vec![
+        (locks.clone(), Found::Folder, true),
+        (lock.clone(), Found::File, true),
+    ];
+    lock_down_with(&mut tree, Path::new(DIR), Path::new(EXE)).unwrap();
+    assert_eq!(tree.calls.last(), Some(&format!("take back {DIR}")));
+    assert!(!tree.entries[Path::new(EXE)].1, "the copy is taken back");
+    assert!(tree.entries[Path::new(&locks)].1 && tree.entries[Path::new(&lock)].1);
 }

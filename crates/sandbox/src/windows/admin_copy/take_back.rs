@@ -12,7 +12,8 @@
 //! it), then deleted. [`lock_down_with`] is `--adopt`'s lock-down over it: `staging\` and
 //! `locks\` are always deleted (the refresh and the WSL deny task make them again), and never
 //! fail the lock-down: one that can't be deleted (a WSL deny run holding its lock) stays out of
-//! it. Pure: tested on every OS; `take_back_os.rs` is the machine.
+//! it, and `locks\` is always left out of the lock-down and the take-back of the folder. Pure:
+//! tested on every OS; `take_back_os.rs` is the machine.
 
 use std::io;
 use std::path::Path;
@@ -31,8 +32,8 @@ pub(crate) trait LockDownFs {
     /// owner and DACL, read back; a link below is deleted.
     fn lock_tree(&mut self, dir: &Path, skip: &[String]) -> io::Result<()>;
     /// Takes `path` back for Administrators, as the module says: afterwards it, and all below
-    /// it, has the locked owner and DACL.
-    fn take_back(&mut self, path: &Path) -> io::Result<()>;
+    /// it but `skip` (names in `path`), has the locked owner and DACL.
+    fn take_back(&mut self, path: &Path, skip: &[String]) -> io::Result<()>;
 }
 
 /// Whether `error` is Windows refusing access (`ERROR_ACCESS_DENIED`).
@@ -44,7 +45,7 @@ fn denied(error: &io::Error) -> bool {
 fn found_taking_back(fs: &mut dyn LockDownFs, path: &Path) -> io::Result<Found> {
     match fs.found(path) {
         Err(error) if denied(&error) => {
-            fs.take_back(path)?;
+            fs.take_back(path, &[])?;
             fs.found(path)
         }
         other => other,
@@ -60,7 +61,7 @@ pub(crate) fn remove_taking_back(fs: &mut dyn LockDownFs, path: &Path) -> io::Re
     }
     match fs.remove(path, kind) {
         Err(error) if denied(&error) => {
-            fs.take_back(path)?;
+            fs.take_back(path, &[])?;
             let kind = fs.found(path)?;
             if kind == Found::Missing {
                 return Ok(());
@@ -82,13 +83,19 @@ pub(crate) fn lock_down_with(fs: &mut dyn LockDownFs, dir: &Path, exe: &Path) ->
             "the admin folder or copy isn't a plain folder and file",
         ));
     }
-    let mut skip = Vec::new();
+    // `locks\` always: one the WSL deny task makes after the listing holds a SYSTEM-only lock
+    // file, which a lock-down would hand to Administrators and Users, refusing every later run.
+    let mut skip = vec![LOCKS.to_owned()];
+    let mut stuck = false;
     for name in fs.entries(dir)? {
         let path = dir.join(&name);
         if name.eq_ignore_ascii_case(STAGING) || name.eq_ignore_ascii_case(LOCKS) {
             if let Err(error) = remove_taking_back(fs, &path) {
                 tracing::warn!(%error, name, "--adopt: staging or locks stays");
-                skip.push(name);
+                stuck = true;
+                if !name.eq_ignore_ascii_case(LOCKS) {
+                    skip.push(name);
+                }
             }
             continue;
         }
@@ -99,7 +106,7 @@ pub(crate) fn lock_down_with(fs: &mut dyn LockDownFs, dir: &Path, exe: &Path) ->
         remove_taking_back(fs, &path)?;
     }
     match fs.lock_tree(dir, &skip) {
-        Err(error) if denied(&error) && skip.is_empty() => fs.take_back(dir),
+        Err(error) if denied(&error) && !stuck => fs.take_back(dir, &skip),
         other => other,
     }
 }

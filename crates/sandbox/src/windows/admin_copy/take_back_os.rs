@@ -55,10 +55,10 @@ impl LockDownFs for NtfsLockDown {
         lock_tree(dir, skip)
     }
 
-    fn take_back(&mut self, path: &Path) -> io::Result<()> {
+    fn take_back(&mut self, path: &Path, skip: &[String]) -> io::Result<()> {
         let _privileges = Privileges::enable(&TAKE_BACK)?;
         match os::found(path)? {
-            Found::Folder => lock_tree(path, &[]),
+            Found::Folder => lock_tree(path, skip),
             Found::File => lock_down(path, false),
             // A link is deleted as itself, never taken back through.
             Found::Link | Found::Missing => Ok(()),

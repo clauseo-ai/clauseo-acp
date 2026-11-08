@@ -2128,15 +2128,18 @@ must pass the admin copy's own check first (`admin_copy::check`: the chain from 
 nothing unexpected in it, the copy's hash). The lock has a folder of its own because that check and
 `--adopt`'s lock-down refuse or delete any other entry in `Sandbox`, and the lock-down gives what
 it keeps Users' read; `locks\` is named as expected, and `--adopt` deletes it when free, as it does
-`staging\`, and keeps one a run holds out of the lock-down. The task makes it when missing (SYSTEM
+`staging\`, and always leaves `locks\` out of its lock-down and take-back, so one a run holds, or
+made after the listing, keeps its SYSTEM-only file. The task makes it when missing (SYSTEM
 and Administrators alone, as staging), so an install adopted before this gets one too; the
 uninstaller's removal deletes it with the folder. It is opened without following a reparse point,
 its owner and DACL read through the handle; the file is made SYSTEM-only (`O:SYD:P(A;;FA;;;SY)`)
 and must be a plain file with one link, SYSTEM its owner and nothing else in its DACL. A start that
 finds it held sets `WslDenyAgain` (`REG_DWORD`) in the SYSTEM-only record key and exits 0 at once.
 The holder clears the flag as each run starts and reads and clears it just before it would end: set,
-it runs once more within what is left of its 330 s budget; with the budget spent it ends, and the
-next trigger runs. So a second install's event during a held run still gives a run after it, the
+it runs once more within what is left of its 330 s budget; with the budget spent it ends without
+looking at the flag again after its release, so a run asked for at that moment waits for the next
+trigger (the launch check still refuses a launch whose deny is missing).
+So a second install's event during a held run still gives a run after it, the
 launch check's request isn't lost, and the backlog is at most one flag. Pool users can still start
 instances by forging events, but while one runs each sets the flag and exits at once; with none
 running, one takes the lock and runs a bounded re-check. A lock that can't be had for any other
