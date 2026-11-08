@@ -7,9 +7,12 @@
 //!   to act on.
 //! - [`cancel_pool_jobs`]: cancels every BITS job whose owner is exactly one of the pool's SIDs,
 //!   all users' jobs listed, at most [`JOBS_CAP`] of them.
+//! - [`sequence`]: the number a run reserves before it observes, and the completion that
+//!   writes it, through [`Record`].
 //!
-//! Neither makes a Windows call: [`Gate`] and [`Bits`] carry every effect, implemented by
-//! `windows_gate.rs` and `windows_bits.rs` and faked by each mode's tests.
+//! None makes a Windows call: [`Gate`], [`Bits`] and [`Record`] carry every effect,
+//! implemented by `windows_gate.rs`, `windows_bits.rs` and `windows_record.rs` and faked by
+//! each mode's tests.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -17,10 +20,13 @@ use std::path::PathBuf;
 use crate::windows::refresh::same_path;
 use crate::windows::sids::Sid;
 
+pub mod sequence;
 #[cfg(windows)]
 pub(crate) mod windows_bits;
 #[cfg(windows)]
 pub(crate) mod windows_gate;
+#[cfg(windows)]
+pub(crate) mod windows_record;
 
 /// What the record gives a pool task.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,6 +57,24 @@ pub trait Gate {
     fn pool(&mut self) -> Result<Option<Pool>, Failed>;
     /// Whether every SID of `pool.users` passes the pool-user check (`strays::check_pool_sid`).
     fn check_pool(&mut self, pool: &Pool) -> Result<(), Failed>;
+}
+
+/// The record's effects a pool task's sequence needs ([`sequence`]): the set-up lock, the
+/// record's `REG_QWORD` values, and the wall clock.
+pub trait Record: Gate {
+    /// Waits a bounded time for the set-up lock and keeps it until [`Record::unlock`]:
+    /// `Ok(false)` when another still holds it.
+    fn lock(&mut self) -> Result<bool, Failed>;
+    /// Gives the set-up lock back, if held.
+    fn unlock(&mut self);
+    /// The record's `REG_QWORD` value `name` (`StopNext`, `SweepSequence`, …): `None` when
+    /// it, or the key, is missing. Called under the set-up lock.
+    fn read_value(&mut self, name: &'static str) -> Result<Option<u64>, Failed>;
+    /// Sets the record's `REG_QWORD` value `name` in the key as it is, never making the key.
+    /// Called under the set-up lock.
+    fn write_value(&mut self, name: &'static str, value: u64) -> Result<(), Failed>;
+    /// The wall clock, as a `FILETIME` (100 ns since 1601, UTC).
+    fn now(&mut self) -> u64;
 }
 
 /// Why the gate refused; each mode gives each its own exit code.

@@ -96,14 +96,14 @@
 use std::collections::BTreeSet;
 use std::time::Duration;
 
-use super::pool_steps::{Bits, Gate, JOBS_CAP, Refused, cancel_pool_jobs, gate};
+use super::pool_steps::sequence::{self, NotReserved, STOP};
+use super::pool_steps::{Bits, Gate, JOBS_CAP, Record, Refused, cancel_pool_jobs, gate};
 use crate::windows::sids::Sid;
 
 pub use super::pool_steps::{Failed, Pool};
 pub use pick::{Image, Picked, Process, image_names, kernel_made, pick};
 
 mod pick;
-mod sequence;
 #[cfg(test)]
 mod tests;
 #[cfg(windows)]
@@ -169,11 +169,12 @@ pub const EXIT_WAIT: Duration = Duration::from_secs(1);
 /// so the run ends inside the task's limit.
 pub const LAST_WAITS: Duration = Duration::from_secs(15);
 
-/// Every effect of the stop: the gate's ([`Gate`]), the BITS step's ([`Bits`]) and its own. The
+/// Every effect of the stop: the gate's ([`Gate`]), the BITS step's ([`Bits`]), the record's
+/// ([`Record`]: the set-up lock, its values, the wall clock) and its own. The
 /// real one reads the record and the admin copy's path itself, so no method takes a SID or a
 /// path the caller chose, but the pool the record gave. A list of [`JOBS_CAP`] BITS jobs may
 /// have been cut, so jobs of the pool's may be left past it: the run ends at 48.
-pub trait Stopper: Gate + Bits {
+pub trait Stopper: Gate + Bits + Record {
     /// Every running process with its user as each source gave it, from a fresh snapshot; the
     /// handles it opened replace the last snapshot's, for [`Stopper::suspend`] and
     /// [`Stopper::terminate`].
@@ -191,21 +192,8 @@ pub trait Stopper: Gate + Bits {
     /// Waits a moment before the next pass, after a termination failed, so a process that
     /// refuses isn't asked again at once.
     fn pause(&mut self);
-    /// Waits a bounded time for the set-up lock and keeps it until [`Stopper::unlock`]:
-    /// `Ok(false)` when another still holds it.
-    fn lock(&mut self) -> Result<bool, Failed>;
-    /// Gives the set-up lock back, if held.
-    fn unlock(&mut self);
     /// Adds `users` to the record's `ResetSids`, keeping what it lists.
     fn mark_for_reset(&mut self, users: &[Sid]) -> Result<(), Failed>;
-    /// The wall clock, as a `FILETIME` (100 ns since 1601, UTC).
-    fn now(&mut self) -> u64;
-    /// The record's `REG_QWORD` value `name` (`StopNext`, `StopSequence`): `None` when it, or
-    /// the key, is missing. Called under the set-up lock.
-    fn read_stop_value(&mut self, name: &'static str) -> Result<Option<u64>, Failed>;
-    /// Sets the record's `REG_QWORD` value `name` in the key as it is, never making the key.
-    /// Called under the set-up lock.
-    fn write_stop_value(&mut self, name: &'static str, value: u64) -> Result<(), Failed>;
     /// Writes one line to the log: `error` for a refusal or a failure.
     fn log(&mut self, error: bool, line: &str);
 }
@@ -278,7 +266,7 @@ fn run_steps(fs: &mut impl Stopper) -> Result<String, Refusal> {
             return Err((StopExit::NotPool, format!("nothing was stopped: {why}")));
         }
     };
-    let n = sequence::reserve(fs, &pool.users)?;
+    let n = sequence::reserve(fs, STOP, &pool.users).map_err(not_reserved)?;
     let mut passes = Passes::default();
     let ran = run_passes(fs, &pool.users, &mut passes);
     let cancelled = cancel_jobs(fs, &pool.users, &mut passes);
@@ -335,13 +323,25 @@ fn run_steps(fs: &mut impl Stopper) -> Result<String, Refusal> {
     let Some(at) = clean else {
         return not_stopped("no pass found the pool clear");
     };
-    sequence::completed(fs, at, n, &pool.users)
+    sequence::completed(fs, STOP, at, n, &pool.users)
         .map_err(|why| (StopExit::NotMarked, format!("{counts}; {why}")))?;
     let retried = passes.retried;
     Ok(format!(
         "the sandbox's stop: {counts}; {} users marked for a profile reset ({retried} retried)",
         passes.marked.len()
     ))
+}
+
+/// Step 3a's failure: nothing was stopped. A lock that stays held, a record that no longer holds
+/// the pool, or a write that fails is [`StopExit::NotReserved`]; a read that fails, or a
+/// `StopNext` at its end, is [`StopExit::NoRecord`].
+fn not_reserved(why: NotReserved) -> Refusal {
+    let (exit, why) = match why {
+        NotReserved::Lock(why) | NotReserved::Changed(why) => (StopExit::NotReserved, why),
+        NotReserved::Unread(why) => (StopExit::NoRecord, why),
+    };
+    let line = format!("nothing was stopped: StopNext wasn't reserved: {why}");
+    (exit, line)
 }
 
 /// Step 4: passes until a snapshot finds no pool user's process, or until [`PASS_LIMIT`] has

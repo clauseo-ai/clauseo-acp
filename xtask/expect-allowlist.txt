@@ -520,6 +520,8 @@ crates/sandbox/src/windows/setup/profile.rs wait clippy::disallowed_methods
 # it starts.
 crates/sandbox/src/windows/setup/stop/windows_stopper.rs - unsafe_code
 crates/sandbox/src/windows/setup/pool_steps/windows_bits.rs - unsafe_code
+# S15 W2: the pool tasks' wall clock (GetSystemTimeAsFileTime), shared by the stop and the sweep.
+crates/sandbox/src/windows/setup/pool_steps/windows_record.rs - unsafe_code
 crates/sandbox/src/windows/setup/stop/windows_tests.rs - unsafe_code
 crates/sandbox/src/windows/setup/stop/windows_tests.rs elevated_a_process_whose_token_shuts_out_system_is_named_by_its_owner_and_picked clippy::disallowed_methods
 # S15 W1: --sweep-tasks's Task Scheduler COM calls and LookupAccountNameW; its Windows test's

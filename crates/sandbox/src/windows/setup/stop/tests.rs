@@ -11,6 +11,7 @@ use crate::windows::setup::record_values::{STOP_COMPLETED, STOP_NEXT, STOP_SEQUE
 
 mod completed;
 mod jobs;
+mod record;
 mod sequence;
 mod users;
 
@@ -250,22 +251,6 @@ impl Stopper for Fake {
         self.done.push("pause".to_owned());
     }
 
-    fn lock(&mut self) -> Result<bool, Failed> {
-        assert!(!self.held, "taken once");
-        let busy = match self.marks {
-            Marks::ReserveBusy => true,
-            Marks::LockBusy => self.locks > 0,
-            Marks::Written | Marks::WriteFails | Marks::CompletionFails => false,
-        };
-        self.locks += 1;
-        self.held = !busy;
-        Ok(self.held)
-    }
-
-    fn unlock(&mut self) {
-        self.held = false;
-    }
-
     fn mark_for_reset(&mut self, users: &[Sid]) -> Result<(), Failed> {
         assert!(self.held, "marked under the set-up lock");
         if self.marks == Marks::WriteFails {
@@ -273,34 +258,6 @@ impl Stopper for Fake {
         }
         self.resets = crate::windows::setup::record_values::resets_with(&self.resets, users);
         self.done.push(format!("mark {}", users.len()));
-        Ok(())
-    }
-
-    fn now(&mut self) -> u64 {
-        filetime(self.now)
-    }
-
-    fn read_stop_value(&mut self, name: &'static str) -> Result<Option<u64>, Failed> {
-        assert!(self.held, "read under the set-up lock");
-        if self.read_fails == Some(name) {
-            return Err("the record's value isn't a REG_QWORD".to_owned());
-        }
-        if self.gone() {
-            return Ok(None);
-        }
-        Ok(self.values.get(name).copied())
-    }
-
-    fn write_stop_value(&mut self, name: &'static str, value: u64) -> Result<(), Failed> {
-        assert!(self.held, "written under the set-up lock");
-        if self.gone() {
-            return Err("the record's key is gone, so nothing was written".to_owned());
-        }
-        if self.marks == Marks::CompletionFails && name == STOP_COMPLETED {
-            return Err("RegSetValueExW failed (5)".to_owned());
-        }
-        self.values.insert(name, value);
-        self.done.push(format!("set {name}"));
         Ok(())
     }
 
