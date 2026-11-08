@@ -203,9 +203,9 @@ where
         }
     }
 
-    fn wait_busy(&mut self, name: &str) {
+    fn wait_busy(&mut self, name: &str) -> bool {
         // SAFETY: a live HSTRING; it only waits for an instance to be free.
-        let _free_or_timed_out = unsafe { WaitNamedPipeW(&HSTRING::from(name), BUSY_WAIT_MS) };
+        unsafe { WaitNamedPipeW(&HSTRING::from(name), BUSY_WAIT_MS) }.as_bool()
     }
 
     fn exchange(&mut self, pipe: Handle) -> Result<SetUpReply, Exchange> {

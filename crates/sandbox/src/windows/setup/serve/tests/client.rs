@@ -18,6 +18,8 @@ enum Server {
     Serves(Result<Sid, String>, Result<Reply, Exchange>),
     /// It refuses this user.
     Denies,
+    /// Every instance stays busy.
+    Busy,
 }
 
 /// LOCAL SYSTEM's pipe, answering `reply`.
@@ -88,13 +90,16 @@ impl Asker for FakeAsker {
         self.calls.push(format!("open {name}"));
         match self.pipes.get(name) {
             Some(Server::Denies) => Opened::Denied,
+            Some(Server::Busy) => Opened::Busy,
             Some(server) => Opened::Open(server.clone()),
             None => Opened::Missing,
         }
     }
 
-    fn wait_busy(&mut self, _name: &str) {
+    fn wait_busy(&mut self, name: &str) -> bool {
+        self.calls.push(format!("wait_busy {name}"));
         self.now += 1_000;
+        !matches!(self.pipes.get(name), Some(Server::Busy))
     }
 
     fn exchange(&mut self, pipe: Server) -> Result<Reply, Exchange> {
@@ -213,4 +218,30 @@ fn a_server_that_went_before_replying_is_asked_again_once_by_the_next_runs_name(
         .with(&first, system(Err(Exchange::Gone)))
         .with(&second, system(Err(Exchange::Gone)));
     assert!(matches!(ask_with(&mut asker), Err(SetUpError::Pipe(_))));
+}
+
+#[test]
+fn a_stale_name_held_busy_has_the_task_started_once_more_and_the_fresh_name_asked() {
+    let (stale, fresh) = (token_of(1), token_of(2));
+    // The first start dropped; the stale name's pipe stays busy. After one busy wait the task is
+    // started again, and the name it publishes is read and asked on.
+    let mut asker = FakeAsker::new(Some(stale.clone()), vec![None, Some(fresh.clone())])
+        .with(&stale, Server::Busy)
+        .with(&fresh, system(Ok(done())));
+    assert_eq!(ask_with(&mut asker), Ok(done()));
+    assert_eq!(asker.count("start"), 2);
+    assert_eq!(
+        asker.count(&format!("wait_busy {}", pipe_name(&stale).unwrap())),
+        1
+    );
+    assert!(
+        asker.now < RERUN_AFTER,
+        "before the missing pipe's restart: {}",
+        asker.now
+    );
+    // Still busy after that one start: no server in time, the task started again only once.
+    let mut asker = FakeAsker::new(Some(stale.clone()), Vec::new()).with(&stale, Server::Busy);
+    assert_eq!(ask_with(&mut asker), Err(SetUpError::NoServer));
+    assert_eq!(asker.count("start"), 2);
+    assert_eq!(asker.count("sent"), 0);
 }

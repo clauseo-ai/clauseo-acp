@@ -6,8 +6,10 @@
 //!    run that was ended left;
 //! 2. starts the task;
 //! 3. reads the published name until there is one, opening the pipe it names: a busy pipe is
-//!    waited for; a missing one, or none published, is read again after a pause, the task
-//!    started once more after [`RERUN_AFTER`], up to [`CONNECT_WAIT`];
+//!    waited for, and one still busy after that wait has the task started once more (a stale
+//!    name someone holds busy); a missing one, or none published, is read again after a pause,
+//!    the task started once more after [`RERUN_AFTER`], up to [`CONNECT_WAIT`]. The task is
+//!    started again once in all;
 //! 4. on that pipe the asker checks the server (its owner LOCAL SYSTEM first), then sends the
 //!    request and reads the reply. A pipe that fails the check, or refuses this user, by a name
 //!    known before the start is taken as stale (anyone may make a name once it was published
@@ -59,8 +61,9 @@ pub trait Asker {
     fn pause(&mut self);
     /// Opens the pipe `name`: identification only, the client rights alone, overlapped.
     fn open(&mut self, name: &str) -> Opened<Self::Pipe>;
-    /// Waits a bounded time for an instance of the busy pipe `name`.
-    fn wait_busy(&mut self, name: &str);
+    /// Waits a bounded time for an instance of the busy pipe `name`: `false` when none came free
+    /// in that time.
+    fn wait_busy(&mut self, name: &str) -> bool;
     /// Checks the server on `pipe` (its owner first), then sends the request and reads the reply.
     fn exchange(&mut self, pipe: Self::Pipe) -> Result<Reply, Exchange>;
 }
@@ -114,7 +117,12 @@ pub fn ask_with<A: Asker>(asker: &mut A) -> Result<Reply, SetUpError> {
             Opened::Open(pipe) => pipe,
             Opened::Busy => {
                 last = Last::NoServer;
-                asker.wait_busy(&name);
+                if !asker.wait_busy(&name) && !started_again {
+                    // Still busy: a stale name someone holds busy, with the start that would
+                    // publish a fresh one dropped. The one start again, then a fresh read.
+                    started_again = true;
+                    before = start(asker)?;
+                }
                 continue;
             }
             Opened::Missing => {
