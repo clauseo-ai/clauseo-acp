@@ -730,7 +730,17 @@ takes the user who asked from its recorded parent (D-B2), never from an argument
   name our SIDs alone. The Low label comes off such a folder only when the record's owner is in
   Administrators (`NetUserGetLocalGroups`, indirect included; unreadable is no), who could take
   it off anyway. Otherwise it stays, logged, so no other program's Low processes lose a folder
-  they write to (K1). No walk, label written, hand-back, add or delete.
+  they write to (K1). A read of another matter (R18) is an allow, so taking it back only
+  tightens: it is found by its recorded file ID where it is now (`located`), counts as removed
+  when no file has that ID, and otherwise is removed from that file by its ID
+  (`remove_recorded`) only when that place lies in a matter folder the ledger records (a
+  matter's own, or one a trusted fence deny names) and the folder holding it passes the same
+  check; a new item at the recorded path is left alone. A read from before file IDs is removed by
+  its path under the same checks. The copies a granted folder's files inherited stay, naming SIDs
+  the removal deletes (K10). Tests (`setup/tests/remove_reads.rs`):
+  `as_an_administrator_each_read_is_taken_back_by_its_file_id_wherever_its_item_went` and
+  `as_an_administrator_an_older_ledgers_reads_with_no_file_are_removed_by_their_paths`. No walk,
+  label written, hand-back, add or delete.
 - **Exits.** 0 (`SetupExit::Removed`) is the only one the hook reads as removed; only then may
   the app delete `sandbox\` when the box is ticked. The hook reads it only after an ended wait
   (`WAIT_OBJECT_0`) and a successful `GetExitCodeProcess`; a timeout, `WAIT_FAILED` or a failed
@@ -2489,11 +2499,16 @@ one back and writes it again with its item recorded. Tests (`apply/tests/read_fi
 `a_relaunch_takes_back_a_read_whose_item_moved_and_writes_it_on_the_item_there_now` and
 `an_older_ledgers_read_with_no_file_loads_and_is_written_again_with_one`.
 
-Residuals: a file moved out of an allowed folder during the run keeps the inherited copy of its
+A root handed back at a launch (`apply/roots.rs`) has its listed entries written again; a
+read's goes back only on the item its entry recorded (`add_recorded`), so a new folder at the
+root's path gets none
+(`a_handed_back_roots_read_goes_back_only_on_the_folder_its_entry_recorded`). An
+administrator's `--remove` for an absent owner takes reads back by their IDs too (see
+"Removal").
+
+Residual: a file moved out of an allowed folder during the run keeps the inherited copy of its
 folder's allow for files, as no entry names the file; the copy goes when something works out
-that file's entries again. And `--remove` run by an administrator for an absent owner removes
-no entry that records a file, reads included (K1): the pool users it deletes leave those allows
-naming dead SIDs (K10).
+that file's entries again.
 
 - **At the session's end:** `end_reads(ledger, matter, sids, acl, around)`, after
   `repair_after_session`. `sids` are the session's pool user, and the matter's SID when it is a

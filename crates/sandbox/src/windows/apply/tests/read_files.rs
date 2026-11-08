@@ -2,7 +2,7 @@
 //! file ID wherever it is now: moved, deleted or replaced during the run, at the run's end, a
 //! relaunch or start. No read is written into a tree the fence doesn't hold.
 
-use super::fake::Broad;
+use super::fake::{Broad, LAWYER};
 use super::reads::access::volume_default;
 use super::*;
 use crate::windows::ledger::Entry;
@@ -365,4 +365,36 @@ fn the_top_of_each_read_is_checked_on_its_own_but_a_matters_root() {
             .any(|(w, reach, s)| w == r && *reach == Reach::Children && *s)
     };
     assert!(checked(&m2) && checked(&m2.join("docs")) && checked(&m2.join("sub")));
+}
+
+/// A root handed back has its listed entries written again (`roots.rs`); a read of the other
+/// matter's root goes back only on the folder its entry recorded (R18): a new folder at the
+/// path gets none.
+#[test]
+fn a_handed_back_roots_read_goes_back_only_on_the_folder_its_entry_recorded() {
+    for renewed in [false, true] {
+        let w = World::new(&format!("files-hand-back-{renewed}"));
+        w.other_tree();
+        let (mut ledger, mut acl) = (ledger(&w), volume(&w));
+        launch(&w, &mut ledger, &mut acl, &[("other/m2", false)]);
+        let m2 = w.canonical("other/m2");
+        let on_root = |acl: &FakeAcl| {
+            let read = |k: &&Key| k.0 == m2 && k.1 == USER_SID && k.2 == Rights::ReadAndExecute;
+            acl.aces.iter().any(|k| read(&k))
+        };
+        assert!(on_root(&acl));
+        for root in [w.at("other/m2"), m2.clone()] {
+            acl.owners.insert(root, OTHER_POOL_SIDS[0].to_owned());
+        }
+        if renewed {
+            acl.make_new(&m2);
+        }
+        let registered = w.neighbour_m2().registered;
+        let pool = [sid(USER_SID), sid(OTHER_POOL_SIDS[0])];
+
+        fence_each(&mut ledger, &registered, &pool, &mut acl, &mut around(&w)).unwrap();
+
+        assert_eq!(acl.owners.get(&m2).map(String::as_str), Some(LAWYER));
+        assert_eq!(on_root(&acl), !renewed, "renewed: {renewed}");
+    }
 }

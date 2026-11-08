@@ -479,6 +479,10 @@ impl AclWriter for RemoveAcl {
         self.acl.present_recorded(file, grant)
     }
 
+    fn located(&mut self, file: &RecordedFile) -> io::Result<Option<PathBuf>> {
+        self.acl.located(file)
+    }
+
     fn add_expecting(&mut self, grant: &Grant, expected: &Path) -> Result<Added, ApplyFailure> {
         self.call("add", grant.path(), Some(grant.sid()))?;
         self.acl.add_expecting(grant, expected)

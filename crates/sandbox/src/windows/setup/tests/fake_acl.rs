@@ -35,6 +35,9 @@ pub(super) struct FakeAcl {
     pub(super) keeps_owner: BTreeSet<PathBuf>,
     /// The child the last failed walk refused.
     pub(super) refused: Option<PathBuf>,
+    /// Where a recorded file is now, by its recorded path: moved (`Some`) or deleted (`None`).
+    /// A file not listed is where it was recorded.
+    pub(super) moved: BTreeMap<PathBuf, Option<PathBuf>>,
 }
 
 pub(super) fn key(grant: &Grant) -> Key {
@@ -132,11 +135,27 @@ impl AclWriter for FakeAcl {
 
     fn remove_recorded(
         &mut self,
-        _file: &RecordedFile,
+        file: &RecordedFile,
         grant: &Grant,
         _prior: Option<Label>,
     ) -> Result<(), ApplyFailure> {
-        self.remove(grant)
+        match self.moved.get(&file.path) {
+            None => self.remove(grant),
+            Some(Some(now)) => {
+                let mut there = grant.clone();
+                there.path = now.clone();
+                self.remove(&there)
+            }
+            Some(None) => Ok(()),
+        }
+    }
+
+    fn located(&mut self, file: &RecordedFile) -> io::Result<Option<PathBuf>> {
+        Ok(self
+            .moved
+            .get(&file.path)
+            .cloned()
+            .unwrap_or_else(|| Some(file.path.clone())))
     }
 
     fn present_recorded(&mut self, _file: &RecordedFile, grant: &Grant) -> io::Result<bool> {

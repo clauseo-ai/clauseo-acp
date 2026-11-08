@@ -32,13 +32,23 @@
 //!   write), never a matter SID, the Low label, `OWNER RIGHTS` or anyone else;
 //! - is an allow or a deny, never a label (a recorded earlier label is never put back);
 //! - records no file by ID (a credential link's entry), which would be opened by its ID with no
-//!   path to check;
+//!   path to check; a read of another matter's (R18) is the one exception, below;
 //! - lies in a matter folder the ledger records ([`PathKind::Matter`], an allow to the whole tree
 //!   for a pool SID), not a drive's root;
 //! - and whose path, checked right before, is a folder reached with no junction or link, owned by
 //!   the record's owner, Administrators or SYSTEM (`owners::matter_folder`: an elevated process
 //!   makes Administrators the owner of the folders it creates), on a local volume that keeps
 //!   permissions (`Removal::admin_target`).
+//!
+//! A read of another matter (R18, [`PathKind::OtherMatterRead`]) is an allow, so removing it
+//! only tightens. One that names one of those SIDs is taken back where its item is now: found
+//! by its recorded file ID ([`AclWriter::located`]); counted removed when no file has that ID
+//! (deleted); and otherwise only when that place lies in a matter folder the ledger records (a
+//! matter's own, or another matter's a trusted fence deny names) and the folder holding it
+//! passes the same path check. Then [`AclWriter::remove_recorded`] removes the allow from the
+//! file with that ID, wherever it was moved, and a new item at the recorded path is left alone.
+//! A read from before file IDs (no `file`) is removed by its path, under the same checks. No
+//! walk: the copies a folder's files inherited stay, naming SIDs the removal deletes (K10).
 //!
 //! Besides, each recorded matter folder that passes that check has the Low label the ledger
 //! records on it taken off, through the same [`AclWriter::remove`] (the label alone, the folder
@@ -53,7 +63,7 @@
 //! else the ledger lists stays, counted in [`LedgerWork::AsAdmin`]: an entry naming a dead SID
 //! holds nothing (K10), and the record goes anyway (D-B9 as ruled).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use clauseo_protocol::MatterId;
 
@@ -218,7 +228,7 @@ fn as_admin(
         return LedgerWork::Nothing;
     }
     // Each path checked once, right before its first removal.
-    let mut checked: Vec<(&Path, Option<FolderOwner>)> = Vec::new();
+    let mut checked: Vec<(PathBuf, Option<FolderOwner>)> = Vec::new();
     let owner = &record.owner;
     let mut removed = 0;
     for entry in admin_targets(&all, trusted) {
@@ -226,6 +236,12 @@ fn as_admin(
         if passes(machine, &mut checked, path, owner).is_some()
             && acl.remove(&entry.grant()).is_ok()
         {
+            removed += 1;
+        }
+    }
+    let roots = read_roots(&all, trusted);
+    for entry in admin_reads(&all, trusted) {
+        if take_back_read(machine, acl, &mut checked, entry, &roots, owner) {
             removed += 1;
         }
     }
@@ -265,18 +281,81 @@ fn as_admin(
 
 /// Who owns `path` when it passes `Removal::admin_target` against `owner`; `None` when it
 /// doesn't. Asked once per path.
-fn passes<'p>(
+fn passes(
     machine: &mut impl Removal,
-    checked: &mut Vec<(&'p Path, Option<FolderOwner>)>,
-    path: &'p Path,
+    checked: &mut Vec<(PathBuf, Option<FolderOwner>)>,
+    path: &Path,
     owner: &Sid,
 ) -> Option<FolderOwner> {
-    if let Some((_, found)) = checked.iter().find(|(seen, _)| *seen == path) {
+    if let Some((_, found)) = checked.iter().find(|(seen, _)| seen == path) {
         return *found;
     }
     let found = machine.admin_target(path, owner).ok();
-    checked.push((path, found));
+    checked.push((path.to_owned(), found));
     found
+}
+
+/// The reads of other matters (R18) `entries` record for one of `trusted`: allows only.
+fn admin_reads<'l>(entries: &[&'l Entry], trusted: &[Sid]) -> Vec<&'l Entry> {
+    entries
+        .iter()
+        .filter(|e| {
+            e.kind == PathKind::OtherMatterRead && e.rights.is_allow() && trusted.contains(&e.sid)
+        })
+        .copied()
+        .collect()
+}
+
+/// Where a read may be taken back: the matter folders [`matter_roots`] finds, and each other
+/// matter's folder a trusted fence deny names, not a drive's root.
+fn read_roots<'l>(entries: &[&'l Entry], trusted: &[Sid]) -> Vec<&'l Path> {
+    let mut roots = matter_roots(entries, trusted);
+    for e in entries {
+        let fence = e.kind == PathKind::OtherMatter
+            && e.rights.is_deny()
+            && trusted.contains(&e.sid)
+            && e.path.parent().is_some();
+        if fence && !roots.iter().any(|seen| same_path(seen, &e.path)) {
+            roots.push(e.path.as_path());
+        }
+    }
+    roots
+}
+
+/// Takes back one read, as the module says; whether it is gone.
+fn take_back_read(
+    machine: &mut impl Removal,
+    acl: &mut impl AclWriter,
+    checked: &mut Vec<(PathBuf, Option<FolderOwner>)>,
+    entry: &Entry,
+    roots: &[&Path],
+    owner: &Sid,
+) -> bool {
+    let now = match &entry.file {
+        Some(file) => match acl.located(file) {
+            Ok(Some(now)) => now,
+            // Deleted: it took its allow with it.
+            Ok(None) => return true,
+            Err(error) => {
+                let error = error.kind();
+                tracing::warn!(%error, "a read's file wasn't found by its ID; its allow stays");
+                return false;
+            }
+        },
+        None => entry.path.clone(),
+    };
+    let inside = roots.iter().any(|root| in_folder(&now, root));
+    let Some(folder) = now.parent().filter(|_| inside) else {
+        return false;
+    };
+    if passes(machine, checked, folder, owner).is_none() {
+        return false;
+    }
+    let grant = entry.grant();
+    match &entry.file {
+        Some(file) => acl.remove_recorded(file, &grant, None).is_ok(),
+        None => acl.remove(&grant).is_ok(),
+    }
 }
 
 /// The matter folders `entries` record for one of `trusted`: each path with a trusted
@@ -302,8 +381,9 @@ fn same_path(a: &Path, b: &Path) -> bool {
 }
 
 /// The entries of `entries` an administrator may remove for an absent owner, before the path
-/// check: each names one of `trusted`, is an allow or a deny, records no file, and lies in (or
-/// is) one of the matter folders [`matter_roots`] finds.
+/// check: each names one of `trusted`, is an allow or a deny, records no file, is no read of
+/// another matter ([`admin_reads`] has those), and lies in (or is) one of the matter folders
+/// [`matter_roots`] finds.
 pub(super) fn admin_targets<'l>(entries: &[&'l Entry], trusted: &[Sid]) -> Vec<&'l Entry> {
     let roots = matter_roots(entries, trusted);
     entries
@@ -312,6 +392,7 @@ pub(super) fn admin_targets<'l>(entries: &[&'l Entry], trusted: &[Sid]) -> Vec<&
             trusted.contains(&e.sid)
                 && !e.rights.is_label()
                 && e.file.is_none()
+                && e.kind != PathKind::OtherMatterRead
                 && roots.iter().any(|root| in_folder(&e.path, root))
         })
         .copied()

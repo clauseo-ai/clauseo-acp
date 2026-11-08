@@ -79,7 +79,8 @@ pub(super) fn hand_back_roots(
 }
 
 /// Writes again each entry `ledger` lists, applied or pending, on `path`, a root just handed
-/// back (the credential link's aside: it is a file in the state folder, never a root). A write
+/// back (the credential link's aside: it is a file in the state folder, never a root); one that
+/// recorded its file, through [`AclWriter::add_recorded`]. A write
 /// that fails is tried once more. One that fails again leaves its entry `pending`, logged once
 /// with no path, and the launch goes on: that matter's next launch writes it again, as it writes
 /// every grant its plan names. Until then the matter's agent may lack its own access to the
@@ -98,7 +99,12 @@ fn restore_entries(ledger: &mut Ledger, acl: &mut dyn AclWriter, path: &Path) {
         .iter()
         .filter(|e| {
             let grant = e.grant();
-            acl.add(&grant).or_else(|_| acl.add(&grant)).is_err()
+            // A read of another matter (R18) goes only on the item its entry recorded.
+            let add = |acl: &mut dyn AclWriter| match &e.file {
+                Some(file) => acl.add_recorded(&grant, file),
+                None => acl.add(&grant),
+            };
+            add(acl).or_else(|_| add(acl)).is_err()
         })
         .map(|e| e.id)
         .collect();

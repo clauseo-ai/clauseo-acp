@@ -35,16 +35,22 @@ pub(super) fn matter_one() -> MatterId {
 }
 
 /// A matter a crafted ledger made up.
-fn matter_two() -> MatterId {
+pub(super) fn matter_two() -> MatterId {
     matter("01890a5d-ac96-774b-8cce-b302099a8058")
 }
 
 /// The fake's account or group with relative id `rid`.
-fn pool_sid(rid: u32) -> Sid {
+pub(super) fn pool_sid(rid: u32) -> Sid {
     super::fake::sid(rid)
 }
 
-fn grant(path: &Path, sid: &Sid, rights: Rights, inherit: Inherit, kind: PathKind) -> Grant {
+pub(super) fn grant(
+    path: &Path,
+    sid: &Sid,
+    rights: Rights,
+    inherit: Inherit,
+    kind: PathKind,
+) -> Grant {
     Grant {
         path: path.to_owned(),
         sid: sid.clone(),
@@ -55,7 +61,7 @@ fn grant(path: &Path, sid: &Sid, rights: Rights, inherit: Inherit, kind: PathKin
 }
 
 /// Every SID the tests' ledgers name: the pool users, the group and the owner.
-fn named() -> Vec<Sid> {
+pub(super) fn named() -> Vec<Sid> {
     (1000..=1004).map(pool_sid).chain([owner()]).collect()
 }
 
@@ -80,7 +86,7 @@ fn record(data_dir: &Path, matter: MatterId, grants: Vec<Grant>, file: Option<us
 }
 
 /// The owner's matter folder, under the fake's temporary folder.
-fn matters(machine: &Remover) -> PathBuf {
+pub(super) fn matters(machine: &Remover) -> PathBuf {
     machine.m.dir.path().join("matters")
 }
 
