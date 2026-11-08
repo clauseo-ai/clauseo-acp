@@ -1,6 +1,6 @@
 //! What the task walk (step 4) did, counted ([`Swept`]), and the run's one log line
 //! ([`log_line`]): counts, and the paths of at most five tasks that keep the run at 56,
-//! cleaned ([`log_path`]: SIDs redacted, control and formatting characters replaced, capped);
+//! cleaned ([`log_path`]: SIDs redacted, non-ASCII characters replaced, quoted, capped);
 //! never another task's path, nor a SID.
 
 use std::collections::BTreeMap;

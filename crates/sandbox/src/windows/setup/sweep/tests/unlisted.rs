@@ -28,7 +28,7 @@ fn a_task_the_listing_hides_is_56_and_left() {
         assert!(fake.deleted().is_empty(), "never deleted through a file");
         let line = &fake.logged[0].1;
         assert!(line.contains("1 not listed (in a task file"), "{line}");
-        let named = format!("; tasks that keep the sweep at 56: {path}");
+        let named = format!("; tasks that keep the sweep at 56: \"{path}\"");
         assert!(line.ends_with(&named), "only the task left named: {line}");
     }
     // A file naming a pool user, or owned by one, is no proof either.
