@@ -54,6 +54,27 @@ pub(super) fn stop_task(machine: &mut impl Machine, owner: &Sid) -> Result<(), F
     }
 }
 
+/// Right after step 5 records the group: on a machine with an admin copy (the record names its
+/// `AdminCopyOwner`), its folder and everything in it are locked again, the group denied
+/// (`admin_copy::locked`), so no pool process can hold the copy against the SYSTEM tasks that
+/// run it. A first install's `--adopt` locked before there was a group; a re-run locks again
+/// all the same, which also mends a deny that went missing. An install with no admin copy has
+/// nothing to lock. A record that can't be read or a lock that fails is [`Step::AdminLock`],
+/// rolled back; the deny itself isn't, and a deny for a group that is gone opens nothing.
+pub(super) fn admin_lock(machine: &mut impl Machine, group: &Sid) -> Result<(), Failed> {
+    let failed = |why: String| (Step::AdminLock, format!("the admin copy's lock: {why}"));
+    match machine.copy_owner() {
+        Ok(Some(_)) => machine
+            .lock_admin_copy(group)
+            .map_err(|error| failed(cause_of(&error))),
+        Ok(None) => Ok(()),
+        Err(error) => Err(failed(format!(
+            "the record's AdminCopyOwner can't be read ({})",
+            cause_of(&error)
+        ))),
+    }
+}
+
 /// Before step 7: the folders whose denies protect what is below them, which an owner could
 /// undo through its implied `WRITE_DAC` (each pool user's `AppData\LocalLow`, whose deny for the
 /// group is inherited and whose `OWNER RIGHTS` deny is inherit-only). A fresh profile's

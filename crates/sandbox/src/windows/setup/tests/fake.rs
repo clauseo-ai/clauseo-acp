@@ -474,6 +474,11 @@ impl Machine for FakeMachine {
         Ok(())
     }
 
+    fn lock_admin_copy(&mut self, group: &Sid) -> Result<(), MachineError> {
+        assert!(!self.acting.get(), "the admin copy is locked as admin");
+        self.call(format!("lock_admin_copy {}", rid(group)))
+    }
+
     fn held_users(
         &mut self,
         _pool: &[Sid],

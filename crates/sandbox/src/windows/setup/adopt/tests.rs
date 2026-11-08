@@ -9,6 +9,7 @@ use crate::windows::setup::explain::Code;
 use crate::windows::setup::record_values::{AdminValues, CopyOwner};
 
 mod cpu_type;
+mod deny;
 mod reports;
 
 const LAWYER: &str = "S-1-5-21-1-2-3-1001";
@@ -29,6 +30,8 @@ struct Fake {
     owner: Option<Sid>,
     copy_owner: Option<CopyOwner>,
     version: Option<String>,
+    /// The record's `GroupSid`.
+    group: Option<Sid>,
     found: Vec<(PathBuf, Found)>,
     security: Vec<u8>,
     changes: Vec<String>,
@@ -57,6 +60,7 @@ impl Fake {
             owner: None,
             copy_owner: None,
             version: None,
+            group: None,
             found: vec![
                 folder(r"C:\Program Files"),
                 folder(r"C:\Program Files\Clauseo"),
@@ -127,6 +131,7 @@ impl Adopter for Fake {
             pool_owner: self.owner.clone(),
             copy_owner: self.copy_owner.clone(),
             version: self.version.clone(),
+            group: self.group.clone(),
         })
     }
 
@@ -162,14 +167,15 @@ impl Adopter for Fake {
         self.held = false;
     }
 
-    fn lock_down(&mut self, dir: &Path, exe: &Path) -> Result<(), Cause> {
+    fn lock_down(&mut self, dir: &Path, exe: &Path, group: Option<&Sid>) -> Result<(), Cause> {
         assert!(
             self.held,
             "the admin folder changes only under the set-up lock"
         );
         assert!(same_path(exe, Path::new(ADMIN_EXE)), "{}", exe.display());
         self.failing(AdoptStep::LockDown)?;
-        self.changes.push(format!("lock {}", dir.display()));
+        let deny = group.map_or_else(String::new, |group| format!(" deny {group}"));
+        self.changes.push(format!("lock {}{deny}", dir.display()));
         Ok(())
     }
 

@@ -212,14 +212,14 @@ fn an_unsafe_folder_is_named_before_a_changed_hash() {
 
 #[test]
 fn locked_is_exactly_the_three_entries_protected_and_owned_by_administrators() {
-    assert!(locked(&locked_dacl(true), true));
-    assert!(locked(&locked_dacl(false), false));
+    assert!(locked(&locked_dacl(true), true, None));
+    assert!(locked(&locked_dacl(false), false, None));
     assert!(
-        !locked(&locked_dacl(true), false),
+        !locked(&locked_dacl(true), false, None),
         "folder entries on the file"
     );
     assert!(
-        !locked(&locked_dacl(false), true),
+        !locked(&locked_dacl(false), true, None),
         "file entries on the folder"
     );
     let open = descriptor(
@@ -231,13 +231,17 @@ fn locked_is_exactly_the_three_entries_protected_and_owned_by_administrators() {
         ]),
         false,
     );
-    assert!(!locked(&open, true), "not protected");
+    assert!(!locked(&open, true, None), "not protected");
     assert!(
-        !locked(&with_extra(true, (0, 3, READ_EXECUTE, EVERYONE)), true),
+        !locked(
+            &with_extra(true, (0, 3, READ_EXECUTE, EVERYONE)),
+            true,
+            None
+        ),
         "an extra entry"
     );
     let owned = descriptor(SYSTEM, Some(&[(0, 3, FULL_ACCESS, SYSTEM)]), true);
-    assert!(!locked(&owned, true), "owner SYSTEM");
+    assert!(!locked(&owned, true, None), "owner SYSTEM");
     let users_full = descriptor(
         ADMINISTRATORS,
         Some(&[
@@ -247,9 +251,9 @@ fn locked_is_exactly_the_three_entries_protected_and_owned_by_administrators() {
         ]),
         true,
     );
-    assert!(!locked(&users_full, true), "Users full control");
+    assert!(!locked(&users_full, true, None), "Users full control");
     assert!(
-        !locked(&descriptor(ADMINISTRATORS, None, true), true),
+        !locked(&descriptor(ADMINISTRATORS, None, true), true, None),
         "NULL DACL"
     );
 }

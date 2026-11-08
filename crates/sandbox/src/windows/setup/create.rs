@@ -6,7 +6,7 @@ use std::io;
 use std::path::PathBuf;
 
 use super::late_steps::{
-    fence, journals, network, own_protected, refuse_pool_owner, registered, stop_task,
+    admin_lock, fence, journals, network, own_protected, refuse_pool_owner, registered, stop_task,
 };
 use super::machine::{LogonRight, Machine, Password, ServiceStart, owned};
 use super::outcome::{
@@ -285,6 +285,7 @@ fn change(
         write_record(machine, &record).map_err(|cause| (Step::WriteRecord, cause))?;
         run.recorded = Some(record);
     }
+    admin_lock(machine, &group)?;
     // A failure after this leaves the task registered, naming this run's owner: the rollback has
     // no step for it. It still stops only what the record names: after a first set-up's rollback
     // there is no record (`--stop` then does nothing) or only the users the rollback couldn't

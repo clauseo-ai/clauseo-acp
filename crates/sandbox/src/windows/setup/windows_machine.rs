@@ -30,6 +30,7 @@ use super::registered::registered;
 use super::{ffi, journal, logon, password, preflight, profile};
 use crate::SetupError;
 use crate::windows::acl;
+use crate::windows::admin_copy;
 use crate::windows::apply::Surroundings;
 use crate::windows::fence::RegisteredMatter;
 use crate::windows::ledger::{Ledger, ledger_path};
@@ -429,6 +430,16 @@ impl Machine for WindowsMachine {
                 .map_err(|error| MachineError::Other(format!("{}: {error}", task.name())))?;
         }
         Ok(())
+    }
+
+    fn lock_admin_copy(&mut self, group: &Sid) -> Result<(), MachineError> {
+        let other = |error: std::io::Error| MachineError::Other(error.to_string());
+        let program_files = admin_copy::os::program_files().map_err(other)?;
+        let (dir, exe) = (
+            admin_copy::admin_dir(&program_files),
+            admin_copy::admin_exe(&program_files),
+        );
+        admin_copy::os::lock_down_tree(&dir, &exe, Some(group)).map_err(other)
     }
 
     fn held_users(

@@ -14,8 +14,9 @@
 //! 3. reads the record (`HKLM\SOFTWARE\Clauseo\Sandbox`): `AdminCopyOwner`, `UserInstallDir`
 //!    (a plain local path, which must lie inside the owner's profile as `ProfileList` names it,
 //!    a temporary profile counting as none; for a `machine` owner, a folder only SYSTEM,
-//!    Administrators or `TrustedInstaller` can change, `--adopt --per-machine`'s test) and
-//!    `AdminCopyVersion`; nothing else comes from outside: no argument, no environment. Not
+//!    Administrators or `TrustedInstaller` can change, `--adopt --per-machine`'s test),
+//!    `AdminCopyVersion` and `GroupSid` (the pool's group, which step 9's DACL denies; text that
+//!    isn't a SID refuses); nothing else comes from outside: no argument, no environment. Not
 //!    `OwnerSid`: the pool's owner, which the in-app `--remove` deletes while the copy stays;
 //! 4. clears what an earlier refresh left in staging;
 //! 5. reads the exe and its `.sig` from the install folder, which the lawyer controls and may
@@ -227,6 +228,8 @@ pub struct RefreshRecord {
     pub admin_copy_sha256: Option<String>,
     /// `AdminCopyVersion`: the admin copy's file version.
     pub admin_copy_version: Option<String>,
+    /// `GroupSid`: the pool's group, which the staged copy's DACL denies (`admin_copy::locked`).
+    pub group_sid: Option<String>,
 }
 
 /// A failed effect: what failed, as a line for the log. Names no user path.
@@ -269,8 +272,9 @@ pub trait Refresher {
     fn admin_copy_machine(&mut self) -> Result<Option<u16>, Failed>;
     /// The machine's own CPU type: `IsWow64Process2`'s native machine.
     fn native_machine(&mut self) -> Result<u16, Failed>;
-    /// Gives the staged file the admin copy's owner and protected DACL.
-    fn secure_staged(&mut self) -> Result<(), Failed>;
+    /// Gives the staged file the admin copy's owner and protected DACL, denying `group` when
+    /// the record names one (`admin_copy::locked_file_sddl`).
+    fn secure_staged(&mut self, group: Option<&Sid>) -> Result<(), Failed>;
     /// Opens the admin folder for adding a file, sharing read, write and delete, and keeps the
     /// handle until [`Refresher::release_admin_folder`]: while it is open, no one can open the
     /// folder in a way that fails the renames into it.
@@ -319,6 +323,7 @@ struct Checked {
     dir: PathBuf,
     sha256: Option<String>,
     version: String,
+    group: Option<Sid>,
 }
 
 /// The steps; `Ok` carries the log line of a run that left the admin copy current.
@@ -439,6 +444,11 @@ fn checked(fs: &mut impl Refresher, record: RefreshRecord) -> Result<Checked, Re
     let version = record
         .admin_copy_version
         .ok_or_else(|| refuse("the record has no AdminCopyVersion"))?;
+    let group = match record.group_sid.as_deref().map(Sid::parse) {
+        None => None,
+        Some(Ok(group)) => Some(group),
+        Some(Err(_)) => return Err(refuse("the record's GroupSid isn't a SID")),
+    };
     let outside = |why: String| (RefreshExit::OutsideProfile, why);
     match owner {
         CopyOwner::User(owner) => {
@@ -465,6 +475,7 @@ fn checked(fs: &mut impl Refresher, record: RefreshRecord) -> Result<Checked, Re
         dir,
         sha256: record.admin_copy_sha256,
         version,
+        group,
     })
 }
 
@@ -515,7 +526,7 @@ fn replace(
         );
         return Err((RefreshExit::Downgrade, why));
     }
-    fs.secure_staged()
+    fs.secure_staged(checked.group.as_ref())
         .map_err(|why| (RefreshExit::StagingFailed, why))?;
     fs.hold_admin_folder()
         .map_err(|why| (RefreshExit::FolderBusy, why))?;

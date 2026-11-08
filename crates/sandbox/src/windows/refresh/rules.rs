@@ -1,6 +1,6 @@
 //! The refresh's fixed values and pure rules: the tasks' arguments and limits, the order the
 //! uninstaller's removal takes them down in, the descriptors of the tasks and the staging folder
-//! (the admin copy's is `admin_copy::LOCKED_FILE_SDDL`, which `--adopt` gives the first copy),
+//! (the admin copy's is `admin_copy::locked_file_sddl`, which `--adopt` gives the first copy),
 //! and the comparisons of paths, descriptors and the install folder against the owner's
 //! profile. No Windows call; tested on every OS.
 

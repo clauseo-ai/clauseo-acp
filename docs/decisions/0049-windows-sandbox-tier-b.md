@@ -517,7 +517,9 @@ started elevated, by the app or by the uninstall hook.
   task uses too). Then `--adopt` deletes everything in `Sandbox` but the copy and its `.sig`,
   `staging\` included (taken back first if it shuts Administrators out; "The staging folder's
   DACL" below), gives the folder and everything left owner Administrators and a protected DACL
-  (SYSTEM and Administrators full, Users read and run), reads each back exactly, records
+  (SYSTEM and Administrators full, Users read and run, and, once the record names the pool's
+  group, that group denied everything, first: "The pool's group is denied the copy" below),
+  reads each back exactly, records
   `AdminCopySha256`, `UserInstallDir`, `AdminCopyVersion` and `AdminCopyOwner`, and, per
   user, runs the normal set-up in-process. Exits: 0 done, 1 usage, 2 another account, 3 failed,
   5 lock held, 6 data folder not the user's, 7 not elevated, 8 not the admin copy, 9 downgrade.
@@ -540,9 +542,40 @@ started elevated, by the app or by the uninstall hook.
   one; the volume root the same, but only delete-child, `WRITE_DAC`, `WRITE_OWNER` and the
   generic rights that hold them count there, since every Windows install lets Authenticated Users
   add a folder at the root; `Sandbox` must hold nothing but the copy, its `.sig` and `staging\`
-  (else `AdminCopyUnsafe`; deny entries are ignored); and its SHA-256 must be the recorded one
+  (else `AdminCopyUnsafe`; deny entries are ignored); once the record holds `GroupSid`,
+  `Sandbox` and the copy must each deny that group everything, before any allow entry (else
+  `AdminCopyUnsafe`; a `GroupSid` that can't be read is `AdminCopyMissing`); and its SHA-256
+  must be the recorded one
   (else `AdminCopyChanged`). Each is `sandbox.blocked`, not retryable, with words for IT. A
   tier-B launch hashes the copy each time.
+- **The pool's group is denied the copy.** Users may read the copy, so any process could open
+  it sharing nothing, and while that handle is open every SYSTEM task that runs it (the stop,
+  the refresh) fails to start. A pool process could do that to keep a running session from
+  being stopped (a launch fails closed; a running session didn't). So `Sandbox`, and everything
+  locked in it, carries a deny of everything (`FA`) for `ClauseoSandboxUsers`, first in the
+  DACL: `(D;OICI;FA;;;<GroupSid>)` on the folder, `(D;;FA;;;<GroupSid>)` on the copy
+  (`admin_copy::locked_folder_sddl`, `locked_file_sddl`). Users' read and run stay: the
+  lawyer's unelevated runner and the UAC start read the copy. The SID is the machine's own,
+  read from the record's `GroupSid`, never looked up by name.
+  - **Order.** A first install's `--adopt` locks before set-up has made the group, so with no
+    `GroupSid` it locks with no deny. The set-up, right after it makes or adopts the group and
+    the record names it, locks the folder again the way `--adopt` does, with the deny, on any
+    machine whose record names an `AdminCopyOwner` (`late_steps::admin_lock`, failing at
+    `Step::AdminLock`, rolled back; the deny itself stays, and a deny for a group that is gone
+    opens nothing). Every later `--adopt` and every refresh (the staged copy's DACL) deny the
+    recorded group. The exact read-backs (`admin_copy::locked`) require the deny when there is
+    a group and refuse it when there is none.
+  - **Drift.** The launch check requires the deny once there is a `GroupSid`, so a copy that
+    lost it is `AdminCopyUnsafe`, repaired as any other drift: the installer's repair runs
+    `--adopt`, which locks with the deny. A re-run of set-up locks again too.
+  - **Every pool token holds the group.** Set-up puts every pool user it makes or resets in
+    `ClauseoSandboxUsers`, and every runner logs on afresh (`CreateProcessWithLogonW`), so the
+    inner runner's and the sweeper's tokens hold the group enabled. The agent's token is
+    `CreateRestrictedToken` over the inner's: that can only make a SID deny-only, never drop it,
+    and only the logon SID is made deny-only. A deny entry matches an enabled or a deny-only SID,
+    so the deny covers every pool process, and any token a pool process derives from its own.
+    Nothing a pool process runs, loads or starts in lives in `Sandbox`: the runner exe sits in
+    the install folder, the inner runner starts in `System32` and the agent in its matter.
 - **The elevated start holds what it hashed.** `UserSetup` hashes the copy through a handle that
   shares read only (no write, no delete) and keeps it open until `ShellExecuteExW` has returned
   (`admin_copy::launch_checked`), so the file started is the file hashed. The start looks its
@@ -1714,7 +1747,8 @@ folder of it through a junction at any time, or re-run `--adopt` with another fo
    and a handle that shares read only would fail a rename into it, so one already open stops the
    run (exit 43) before anything moves, and none can be opened while it is held. It then renames
    the running copy into staging, which Windows allows for a running exe, and moves the staged
-   file into place with the admin copy's DACL. Only then does it write the new
+   file into place with the admin copy's DACL, the recorded group denied. Only then does it
+   write the new
    `AdminCopyVersion` (the signed version, as signed), then the new hash. The set-aside copy
    (`staging\clauseo-sandbox-setup.exe.old`) is the task's own running image, which Windows
    won't delete: it and `staging\` are scheduled for deletion at restart

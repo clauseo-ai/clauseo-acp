@@ -139,7 +139,7 @@ pub(super) fn clear(
         if running && same_path(&path, exe) {
             continue;
         }
-        remove_taking_back(&mut NtfsLockDown, &path)?;
+        remove_taking_back(&mut teardown(), &path)?;
     }
     if !running {
         return std::fs::remove_dir(dir);
@@ -168,7 +168,13 @@ pub(crate) fn unregister_task(task: SystemTask) -> Result<(), MachineError> {
 pub(crate) fn remove_staging() -> Result<(), MachineError> {
     let program_files = os::program_files().map_err(|e| other(&e))?;
     let staging = admin_copy::admin_dir(&program_files).join(admin_copy::STAGING);
-    remove_taking_back(&mut NtfsLockDown, &staging).map_err(|e| other(&e))
+    remove_taking_back(&mut teardown(), &staging).map_err(|e| other(&e))
+}
+
+/// The take-back the teardown deletes through: what it takes back is deleted at once, so its
+/// lock names no group.
+fn teardown() -> NtfsLockDown {
+    NtfsLockDown::new(None)
 }
 
 /// The name the running copy is renamed to in its own folder: one nothing starts.
