@@ -187,6 +187,7 @@ const ROWS: [ToolState, string | null][] = [
   [browser(off("no_proxy")), "Not available yet"],
   [browser(off("too_many_browsers")), "Too many browsers open"],
   [browser(off("browser_not_installed")), "Needs Chrome"],
+  [browser(off("browser_blocked_by_policy")), "Blocked by your firm"],
 ];
 
 test.each(ROWS)(
@@ -211,11 +212,15 @@ test.each(ROWS)(
         tool.availability !== "available" && reason === "In Settings",
       );
     // nothing else in words: the name, the chip and the reason; with no Chrome, the offer's words under it (the
-    // button, its hidden tooltip and the size)
+    // button, its hidden tooltip and the size); blocked by the firm's policy, the reason in full
+    // and no offer
     const offer =
       reason === "Needs Chrome"
         ? "Download Chrome" + "From Google, once. Needs 1\u00a0GB free." + "200\u00a0MB"
-        : "";
+        : reason === "Blocked by your firm"
+          ? "Your firm has turned off browser automation on this computer, so Clauseo can't use a " +
+            "browser for you. Your IT team can allow Clauseo specifically."
+          : "";
     expect(r.textContent).toBe(
       (tool.tool === "web_search" ? "Web search" : "Browser") +
         (reason === null ? "On" : "Off") +

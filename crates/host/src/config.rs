@@ -288,6 +288,17 @@ impl HostConfig {
         self
     }
 
+    /// What the firm's Chrome and Edge `RemoteDebuggingAllowed` says (default: this machine's
+    /// registry, managed preferences or policy folders), for tests that pass a fake.
+    #[cfg(feature = "test-support")]
+    pub fn with_remote_debugging_policy(
+        mut self,
+        policy: Arc<dyn clauseo_settings::chromium_policy::RemoteDebuggingPolicy>,
+    ) -> Self {
+        self.wiring.rd_policy = policy;
+        self
+    }
+
     /// Where the launch prep looks for Chrome (default: this machine's places, with the data
     /// folder as the app data folder that holds Chrome for Testing). Tests pass fixture folders.
     pub fn with_chrome_roots(mut self, roots: ChromeRoots) -> Self {

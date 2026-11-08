@@ -1007,7 +1007,15 @@ The guard cannot enforce these; stage C's egress proxy and sandbox must.
 The launch-prep thread (`actor/turn/launch_checks.rs`), never the actor, picks each session's
 Chrome and keeps it on the session's `RunFolders` (`chrome`), which fills
 `{browser_executable}`. It looks only when `tools.browser` is on and there is a proxy, so a
-session that cannot get the browser makes no file system calls for it. In order:
+session that cannot get the browser makes no file system calls for it. Before any of the steps
+below, the prep reads the firm's own Chrome and Edge `RemoteDebuggingAllowed` (registry
+`HKLM`/`HKCU`, macOS managed preferences files, Linux `managed` policy folders;
+`clauseo_settings::chromium_policy`, `host/src/browser/rd_policy.rs`). Chrome for Testing reads
+its own policy key and chrome-headless-shell none, so a false anywhere starts no browser at all,
+and the entry drops with `BrowserBlockedByPolicy`, unless the firm's Clauseo policy sets
+`browser.allow_when_remote_debugging_disabled` (policy only, a security key, default false). A
+missing value or an unreadable store does not block; it is logged once, with no path
+(`docs/firm-it.md`, "Browser automation and RemoteDebuggingAllowed"). In order:
 
 1. Google Chrome installed: on macOS `/Applications/Google Chrome.app/Contents/MacOS/Google
    Chrome`, then the same under `~/Applications`; on Windows `%ProgramFiles%`,

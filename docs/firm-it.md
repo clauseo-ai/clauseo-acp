@@ -648,6 +648,7 @@ Clauseo's readers with no warning, and fails when this table misses a key.
 | `skills.allow_scripts` | boolean | false | `REG_DWORD` 0 or 1 | 0: a pack holding a script or program is not loaded. With 1 such files are copied, never run by Clauseo, though the agent can run them. **Security key**: `false` if a source is unreadable or the value does not type |
 | `skills.enabled` | object: pack id to `sha256:<64 lowercase hex>`, the hash the pack had when turned on | empty | `REG_SZ`, JSON | `{"nda-kit": "sha256:a1b2…"}` (all 64 digits). A pack whose files no longer hash to its value is not loaded. Replaces the user's whole map and locks it. Until turning a pack on from the app ships (0040, PR-E), this is the map in the user's `settings.json` |
 | `update.mode` | `auto`, `notify`, `none` | `auto` | `REG_SZ` | `none`: Clauseo never checks for an update or installs one, and shows that your organisation manages updates. `auto` installs a downloaded update when Clauseo next opens; `notify` waits for the user. **Security key**: locks at `none` if a source is unreadable or the value does not type. A policy name this version doesn't know turns updates off until Clauseo is updated by hand; add new update.* policies only after the matching version is rolled out. Per-machine installs, and Macs where the user cannot write the `.app` itself or the folder it sits in, never update themselves anyway. Updates run only once release builds carry the update endpoint (R23 PR 6); until then every build shows updates as managed |
+| `browser.allow_when_remote_debugging_disabled` | boolean | false | `REG_DWORD` 0 or 1 | 1: Clauseo's browser may start on a computer where your firm turned off Chrome's or Edge's remote debugging ([below](#browser-automation-and-remotedebuggingallowed)). Policy only: a `settings.json` value is ignored with a warning. **Security key**: false if a source is unreadable |
 
 Sources: the key list and kinds are `KEYS` in `crates/settings/src/leaf.rs`; the values and
 defaults are in [`crates/settings/src/schema.rs`](../crates/settings/src/schema.rs).
@@ -679,6 +680,48 @@ pull request that makes Clauseo act on it. Same formats as above ([decision
 | `network.allowed_domains` | R17 | List of host names (`*.firm.example` for every name under it), added to every matter's allowlist. Default empty. `REG_MULTI_SZ`. Policy only: a `settings.json` value is ignored with a warning; a bad entry is left out with a warning. **Security key**: empty if a source is unreadable |
 | `network.allow_unsafe_site_override` | R17 | Boolean, default true, `REG_DWORD` 0 or 1. 0: the lawyer can't allow a site the block list names, and sites already allowed stop being honoured (they are kept) (decision 0053); the lawyer may also switch it off for themselves. A change in the policy file takes effect when Clauseo next starts. **Security key**: false if a source is unreadable or a policy value does not type |
 | `network.unsafe_site_list_updates` | R17 | Boolean, default true, `REG_DWORD` 0 or 1. 0: Clauseo never fetches block list updates and keeps the stored or bundled list (decision 0053). A change in the policy file takes effect when Clauseo next starts. Policy only: a `settings.json` value is ignored with a warning. **Security key**, locked at true (its default) if a source is unreadable or a policy value does not type: an unreadable policy must not stop protection updates |
+
+### Browser automation and RemoteDebuggingAllowed
+
+Clauseo's browser drives Chrome (or Chrome for Testing, which Clauseo can download) through
+Chrome's remote debugging. Chrome's and Edge's `RemoteDebuggingAllowed` policy turns that off.
+Chrome for Testing reads its own policy location rather than Chrome's, so Clauseo checks your
+Chrome and Edge policy itself. It does this before it starts any browser, whichever browser it
+would pick.
+
+**What Clauseo reads.** The value `RemoteDebuggingAllowed`, for both the computer and the user,
+in Chrome's and Edge's policy locations:
+
+- **Windows:** `HKLM\SOFTWARE\Policies\Google\Chrome`, `HKCU\SOFTWARE\Policies\Google\Chrome`,
+  `HKLM\SOFTWARE\Policies\Microsoft\Edge` and `HKCU\SOFTWARE\Policies\Microsoft\Edge`. Each is
+  a `REG_DWORD`, where 0 means false.
+- **macOS:** the managed preferences files `/Library/Managed Preferences/com.google.Chrome.plist`
+  and `com.microsoft.Edge.plist`, plus the same files under `/Library/Managed Preferences/<user>/`
+  for the signed-in user. Each value is a boolean.
+- **Linux:** every `*.json` in `/etc/opt/chrome/policies/managed/` and
+  `/etc/opt/microsoft/msedge/policies/managed/`. Clauseo skips `recommended/`, because Chrome
+  doesn't take this policy as a recommendation either.
+
+**The rule.** If any of these says false, Clauseo's browser doesn't start, and the app tells the
+lawyer that your firm has turned off browser automation on this computer. If a value is missing,
+or a source can't be read, that alone doesn't block: Clauseo writes one line to the host log
+naming which browser and scope it couldn't read (never a path). Clauseo reads Chrome's and Edge's
+policy again each time a session starts its browser, so a change there applies to the next
+session; its own key below, like every Clauseo policy key, applies on the next start.
+
+**Allowing Clauseo specifically.** Set Clauseo's policy key
+`browser.allow_when_remote_debugging_disabled` to true. Clauseo's browser then starts despite
+`RemoteDebuggingAllowed` false, and Chrome and Edge themselves stay as your policy sets them. A
+user's `settings.json` can't set this key; only policy can. Set it the same way as any Clauseo
+policy key (above):
+
+- **Windows:** `REG_DWORD` value `browser.allow_when_remote_debugging_disabled` = 1 under
+  `HKLM\SOFTWARE\Policies\Clauseo\Clauseo`, or `{"browser": {"allow_when_remote_debugging_disabled":
+  true}}` in `C:\ProgramData\Clauseo\policy.json`.
+- **macOS:** the key `browser.allow_when_remote_debugging_disabled`, boolean true, in the
+  `ai.clauseo.desktop` profile, or the same JSON in
+  `/Library/Application Support/Clauseo/policy.json`.
+- **Linux:** the same JSON in `/etc/clauseo/policy.json`.
 
 ## 7. Hosts Clauseo reaches
 

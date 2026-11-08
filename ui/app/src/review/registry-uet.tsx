@@ -156,6 +156,16 @@ export const UET: Entry[] = [
   entry("UET-18", lineWords("Not available yet"), [browser("no_proxy")]),
   entry("UET-19", lineWords("Too many browsers open"), [browser("too_many_browsers")]),
   entry("UET-20", lineWords("Needs Chrome"), NONE),
+  // the firm's Chrome or Edge policy blocks every browser: the reason, then in full under it,
+  // no download
+  entry("UET-44", lineWords("Blocked by your firm"), [browser("browser_blocked_by_policy")]),
+  entry(
+    "UET-45",
+    popWords(
+      "Your firm has turned off browser automation on this computer, so Clauseo can't use a browser for you. Your IT team can allow Clauseo specifically.",
+    ),
+    [browser("browser_blocked_by_policy")],
+  ),
   // the foot
   entry("UET-15", popWords("Open Settings"), [web("off")]),
   entry(

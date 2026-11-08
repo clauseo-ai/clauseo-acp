@@ -16,7 +16,7 @@ use crate::schema::{
 /// `false`, `network.upstream_proxy` unset (the OS's proxy), `network.ca_certs` and
 /// `network.allowed_domains` empty, `network.allow_unsafe_site_override` `false`, and
 /// `network.unsafe_site_list_updates` `true`, its default: an unreadable policy must not stop
-/// protection updates (0053).
+/// protection updates (0053), and `browser.allow_when_remote_debugging_disabled` `false`.
 /// Kept apart from [`reset`], which restores the default, since a security key's default can be
 /// on. `key` is one of [`SECURITY_KEYS`], or a prefix ending in
 /// `.` (`tools.`, `install.`) that names every security key under it. A single `plans.<id>`
@@ -55,6 +55,9 @@ pub(crate) fn refuse(key: &str, settings: &mut Settings) -> bool {
             "network.unsafe_site_list_updates" => {
                 settings.network.unsafe_site_list_updates =
                     NetworkSettings::default().unsafe_site_list_updates;
+            }
+            "browser.allow_when_remote_debugging_disabled" => {
+                settings.browser.allow_when_remote_debugging_disabled = false;
             }
             other => unreachable!("security key {other} has no refused value"),
         }
@@ -113,6 +116,9 @@ pub(super) fn reset(key: &str, settings: &mut Settings) {
         "network.unsafe_site_list_updates" => {
             settings.network.unsafe_site_list_updates =
                 NetworkSettings::default().unsafe_site_list_updates;
+        }
+        "browser.allow_when_remote_debugging_disabled" => {
+            settings.browser.allow_when_remote_debugging_disabled = false;
         }
         _ => {
             if let Some(id) = agent_id(key) {

@@ -361,6 +361,7 @@ fn tool_states_round_trip_in_a_header_with_every_reason() {
             "browser_not_installed",
             "too_many_browsers",
             "no_relay",
+            "browser_blocked_by_policy",
         ]
     );
 }
