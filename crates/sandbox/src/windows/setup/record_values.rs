@@ -119,9 +119,24 @@ pub const STOP_SEQUENCE: &str = "StopSequence";
 /// `StopSequence` and `StopCompleted` with the record and should clear the markers too, so no
 /// marker outlives its set-up.
 pub const STOP_NEXT: &str = "StopNext";
+/// `SweepCompleted` (`REG_QWORD`, a `FILETIME`): when the last completed sweep's walk began,
+/// written only by a `--sweep-tasks` run that ends 0, just before [`SWEEP_SEQUENCE`]. For
+/// diagnostics only. Deleted with the set-up's values.
+pub const SWEEP_COMPLETED: &str = "SweepCompleted";
+/// `SweepSequence` (`REG_QWORD`): the number the last completed sweep reserved from
+/// [`SWEEP_NEXT`], written after [`SWEEP_COMPLETED`] under the same set-up lock, only by a run
+/// that ends 0 and never lower than it was. Absent counts as 0. Deleted with the set-up's
+/// values, before [`SWEEP_NEXT`].
+pub const SWEEP_SEQUENCE: &str = "SweepSequence";
+/// `SweepNext` (`REG_QWORD`, 1 when absent): the number the next sweep reserves, under the
+/// set-up lock, before its walk, as [`STOP_NEXT`] is for the stop. A session's end reads it
+/// (without the lock, `pool_steps::sequence` says why) as the marker's `M`; the marker is
+/// clean once [`SWEEP_SEQUENCE`] `>= M`.
+pub const SWEEP_NEXT: &str = "SweepNext";
 /// The values the set-up owns, which a rollback or `--remove` deletes; the ones `--adopt`
-/// writes stay until `--remove` takes the admin copy away.
-pub const SETUP_VALUES: [&str; 9] = [
+/// writes stay until `--remove` takes the admin copy away. Each `…Sequence` comes before its
+/// `…Next`, so a marker read during a removal can only wait longer (`pool_steps::sequence`).
+pub const SETUP_VALUES: [&str; 12] = [
     OWNER_SID,
     GROUP_SID,
     POOL_SIDS,
@@ -131,6 +146,9 @@ pub const SETUP_VALUES: [&str; 9] = [
     STOP_COMPLETED,
     STOP_SEQUENCE,
     STOP_NEXT,
+    SWEEP_COMPLETED,
+    SWEEP_SEQUENCE,
+    SWEEP_NEXT,
 ];
 
 /// `listed` (`ResetSids` as read) with each of `add` it lacks appended, in order.
@@ -455,6 +473,20 @@ mod tests {
         for name in [STOP_COMPLETED, STOP_SEQUENCE, STOP_NEXT] {
             assert!(SETUP_VALUES.contains(&name), "{name}");
         }
+        // And the sweep's, each sequence deleted before its next.
+        assert_eq!(
+            (SWEEP_COMPLETED, SWEEP_SEQUENCE, SWEEP_NEXT),
+            ("SweepCompleted", "SweepSequence", "SweepNext")
+        );
+        let at = |name| {
+            SETUP_VALUES
+                .iter()
+                .position(|value| *value == name)
+                .unwrap()
+        };
+        assert!(at(STOP_SEQUENCE) < at(STOP_NEXT));
+        assert!(at(SWEEP_COMPLETED) < at(SWEEP_SEQUENCE));
+        assert!(at(SWEEP_SEQUENCE) < at(SWEEP_NEXT));
     }
 
     #[test]
