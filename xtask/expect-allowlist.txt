@@ -38,6 +38,7 @@ crates/desktop/src/open/mac_app.rs - unsafe_code
 crates/desktop/src/ui_language/windows.rs - unsafe_code
 crates/desktop/src/ui_language.rs KEY dead_code
 crates/desktop/src/chooser/windows.rs - unsafe_code
+crates/desktop/src/dialogs/ask/windows.rs - unsafe_code
 # WebView2's argument variable keeps the no-DNS rule: set_var, first thing in main.
 crates/desktop/src/navigation/browser_args.rs keep_no_dns_in_env unsafe_code
 # The WebView2 AdditionalBrowserArguments policy check: RegGetValueW.

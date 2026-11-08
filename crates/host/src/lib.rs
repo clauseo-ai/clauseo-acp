@@ -232,6 +232,7 @@ mod clock;
 mod coalesce;
 mod config;
 pub mod connectors;
+mod dialogs;
 mod encode;
 mod error;
 mod file_link;
@@ -271,6 +272,9 @@ pub use config::{
     CAP_MIN_IDLE, DEFAULT_TREE_WAIT, Detect, EgressProxy, HostConfig, IDLE_LIMIT, LIVE_AGENTS,
     NoProfile, PackRequest, ProfileHook, Sandbox, SessionKey,
 };
+#[cfg(feature = "test-support")]
+pub use dialogs::FakeDialogs;
+pub use dialogs::{Dialog, DialogAnswer, NativeDialogs, Pick};
 pub use encode::EncodedEvent;
 pub use error::Error;
 pub use handle::{

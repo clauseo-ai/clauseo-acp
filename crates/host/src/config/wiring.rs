@@ -72,6 +72,8 @@ pub(crate) struct LaunchWiring {
     pub(crate) held: HeldRuns,
     /// The block list's seams (ADR 0053, `BlockListSeams::apply`); `None`: no fetch.
     pub(crate) blocklist: Option<crate::blocklist::BlockListSeams>,
+    /// The native dialogs (R18, `HostConfig::with_dialogs`); `None`: nothing can be widened.
+    pub(crate) dialogs: Option<Arc<dyn crate::dialogs::NativeDialogs>>,
 }
 
 impl Default for LaunchWiring {
@@ -96,6 +98,7 @@ impl Default for LaunchWiring {
             removal_thread_fails: false,
             held: HeldRuns::default(),
             blocklist: None,
+            dialogs: None,
         }
     }
 }
@@ -115,6 +118,7 @@ impl std::fmt::Debug for LaunchWiring {
             .field("relays", &self.relays)
             .field("connectors", &self.connectors)
             .field("tree_wait", &self.tree_wait)
+            .field("dialogs", &self.dialogs.is_some())
             .finish_non_exhaustive()
     }
 }

@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 
 use clauseo_protocol::Language;
 
-use super::{ConfirmWords, Key, OFF_VOICE, fill, text};
+use super::{ConfirmWords, Key, OFF_VOICE, PENDING_HINDI, fill, isolate, text};
 
 /// The `{slot}` names in `text`.
 fn slots(text: &str) -> BTreeSet<&str> {
@@ -20,9 +20,16 @@ fn devanagari(text: &str) -> bool {
     text.chars().any(|c| ('\u{0900}'..='\u{097F}').contains(&c))
 }
 
+/// The keys whose Hindi is written: every key but [`PENDING_HINDI`]'s.
+fn written_in_hindi() -> impl Iterator<Item = Key> {
+    Key::ALL
+        .into_iter()
+        .filter(|key| !PENDING_HINDI.contains(key))
+}
+
 #[test]
 fn every_key_has_english_and_hindi_with_the_same_slots() {
-    for key in Key::ALL {
+    for key in written_in_hindi() {
         let (en, hi) = (text(Language::En, key), text(Language::Hi, key));
         assert!(!en.trim().is_empty(), "{key:?}");
         assert!(devanagari(hi), "{key:?}: {hi}");
@@ -46,7 +53,7 @@ fn the_english_keeps_the_apps_voice() {
 
 #[test]
 fn a_sentence_ends_in_a_danda_and_a_question_stays_a_question() {
-    for key in Key::ALL {
+    for key in written_in_hindi() {
         let (en, hi) = (text(Language::En, key), text(Language::Hi, key));
         if en.ends_with('.') {
             assert!(hi.ends_with('।'), "{key:?}: {hi}");
@@ -86,7 +93,7 @@ fn the_words_are_the_reviewed_copy() {
     let registry = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../ui/app/src/review/registry-nd.tsx");
     let registry = std::fs::read_to_string(&registry).unwrap();
-    for (n, key) in (1..).zip(Key::ALL) {
+    for (n, key) in (1..).zip(written_in_hindi()) {
         let id = format!("ND-{n:02}");
         assert!(registry.contains(&format!("\"{id}\"")), "no {id}");
         for language in [Language::En, Language::Hi] {
@@ -94,4 +101,44 @@ fn the_words_are_the_reviewed_copy() {
             assert!(registry.contains(&quoted), "{id} lacks {quoted}");
         }
     }
+}
+
+/// The keys the app thread has yet to put in Hindi: each has English, and its Hindi is either
+/// Devanagari already or listed in `PENDING_HINDI`, where English stands in, once, and only
+/// after the reviewed keys (so the review ids of those stay as they are).
+#[test]
+fn a_key_without_hindi_is_pending_and_still_has_english() {
+    for key in Key::ALL {
+        let (en, hi) = (text(Language::En, key), text(Language::Hi, key));
+        assert!(!en.trim().is_empty(), "{key:?}");
+        assert_eq!(en.trim(), en, "{key:?}");
+        assert!(!devanagari(en), "{key:?}: {en}");
+        assert!(
+            devanagari(hi) || PENDING_HINDI.contains(&key),
+            "{key:?}: {hi}"
+        );
+        if PENDING_HINDI.contains(&key) {
+            assert_eq!(hi, en, "{key:?}: a pending key stands in English");
+        }
+    }
+    for (n, key) in PENDING_HINDI.iter().enumerate() {
+        assert_eq!(
+            PENDING_HINDI.iter().filter(|k| *k == key).count(),
+            1,
+            "{key:?}"
+        );
+        let at = Key::ALL.iter().position(|k| k == key).unwrap();
+        assert_eq!(at, Key::ALL.len() - PENDING_HINDI.len() + n, "{key:?}");
+    }
+}
+
+/// A slot's value is isolated (FSI ... PDI) and loses its own bidi controls and line breaks,
+/// so it can neither reorder the words around it nor close the isolate early.
+#[test]
+fn isolate_wraps_and_strips_what_could_break_out() {
+    assert_eq!(isolate("Brown"), "\u{2068}Brown\u{2069}");
+    assert_eq!(isolate("قضية"), "\u{2068}قضية\u{2069}");
+    let hostile = "A\u{2069}\u{202E}B\u{200F}\nC\u{2066}";
+    assert_eq!(isolate(hostile), "\u{2068}ABC\u{2069}");
+    assert_eq!(isolate(""), "\u{2068}\u{2069}");
 }

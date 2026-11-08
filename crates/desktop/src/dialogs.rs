@@ -3,7 +3,8 @@
 //! behind a trait, so tests answer without a window, and the `e2e` build answers the picker and
 //! "always allow" from its variables (`e2e.rs`). The webview has no permission for the dialog
 //! plugin. The confirms speak the app's language: the link's from `open/words.rs`, the others
-//! from [`words`].
+//! from [`words`]. R18's widening questions and picker, the host's `NativeDialogs`, are
+//! [`ask`]'s.
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -31,6 +32,7 @@ pub(crate) trait Confirm: Send + Sync {
     fn confirm(&self) -> BoxFuture<'_, bool>;
 }
 
+pub(crate) mod ask;
 pub(crate) mod words;
 
 use words::{ConfirmWords, Key};
