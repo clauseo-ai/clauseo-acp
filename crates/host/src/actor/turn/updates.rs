@@ -1,7 +1,6 @@
-//! Agent events: the rate cap per session, then each event by its origin. `Turn` of the live
-//! turn is logged; `Late` is dropped; `Idle` is logged unless it needs a turn; `Replay` is
-//! dropped when the log already has it and otherwise logged outside a turn, which for text and
-//! tool calls (they name a turn) means dropped with a warning.
+//! Agent events: the rate cap per session, then each by its origin. `Turn` of the live turn is
+//! logged; `Late` dropped; `Idle` logged unless it needs a turn; `Replay` dropped when the log
+//! has it, else logged outside a turn (for text and tool calls, which name a turn: dropped).
 
 use clauseo_acp::{AcpEvent, AgentUpdate, MessageRole, Origin};
 use clauseo_protocol::{
@@ -15,7 +14,7 @@ use clauseo_store::BlobIn;
 use super::super::{Actor, title_source};
 use super::agents::{Agent, Stage};
 use super::out::Out;
-use super::{Then, TimerKind, TurnTimer, asks, current, lost, state, text};
+use super::{Then, TimerKind, TurnTimer, asks, current, denials, lost, state, text};
 use crate::build;
 use crate::coalesce::TextIn;
 use crate::error::Error;
@@ -351,6 +350,7 @@ fn tool_call(
     }
     let now = actor.clock.now();
     let id = actor.ids.mint(now.wall)?;
+    denials::tool_seen(actor, thread, turn, id, denials::Seen::call(&call));
     let case_law = source_of(actor, thread, |sources, agent| {
         sources.case_law.started(now.mono, turn, id, agent, &call)
     });
@@ -419,9 +419,8 @@ fn tool_update(
     if matches!(context, Context::Outside { replay: true }) {
         return Ok(());
     }
-    // The turn's paths stay in memory, so they take the patch as the agent sent it. The
-    // elicitation values withheld from this call (`withheld.rs`) then go before anything
-    // logged reads it: the sources, and `build.rs`'s inline or blob decision.
+    // The turn's paths take the patch as the agent sent it (they stay in memory); the withheld
+    // elicitation values (`withheld.rs`) go before anything logged (sources, `build.rs`) reads it.
     if let Some(current) = current(actor, thread) {
         if matches!(context, Context::Live(_)) {
             let locations = patch.locations.as_deref().unwrap_or_default();
@@ -434,6 +433,7 @@ fn tool_update(
     match context {
         Context::Outside { replay: true } => return Ok(()),
         Context::Live(turn) => {
+            denials::tool_seen(actor, thread, turn, id, denials::Seen::patch(&patch));
             let now = actor.now().mono;
             let case_law = source_of(actor, thread, |sources, agent| {
                 sources.case_law.updated(now, turn, acp_id, agent, &patch)

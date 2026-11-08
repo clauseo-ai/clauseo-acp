@@ -16,6 +16,7 @@ mod came_back;
 mod cancel;
 pub(super) mod case_law;
 mod close;
+pub(crate) mod denials;
 mod end;
 mod exit_wait;
 mod failure;
@@ -345,6 +346,7 @@ pub(crate) fn turn_input(actor: &mut Actor, input: TurnInput) {
         }
         TurnInput::RunRemoved { key, freed } => launch_checks::on_run_removed(actor, key, freed),
         TurnInput::CameBack(check) => came_back::on_due(actor, check),
+        TurnInput::Denial(checked) => denials::on_checked(actor, *checked),
         TurnInput::Log {
             thread,
             why,

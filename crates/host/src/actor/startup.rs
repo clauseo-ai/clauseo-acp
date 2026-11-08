@@ -113,6 +113,7 @@ pub(super) async fn open(
         event_subs: BTreeMap::new(),
         app_subs: Vec::new(),
         blocked: Box::default(),
+        denials: Box::default(),
         allowed,
         blocklist: None,
         limits: super::limits::LimitsHost::new(limits_reader),

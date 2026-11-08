@@ -1,5 +1,6 @@
 //! The commands that go to their thread's turn: `run_command` hands each here, and it reaches
-//! `turn::command` as the matching `TurnCommand` when its thread is listed.
+//! `turn::command` as the matching `TurnCommand` when its thread is listed. `DismissDenial`
+//! goes to `turn/denials.rs`.
 
 use clauseo_protocol::{HostCommand, ThreadId};
 
@@ -11,6 +12,10 @@ use crate::actor::Actor;
 /// `run_command` sends only these here. The chain is `if let`, not a `match`, so it needs no
 /// wildcard arm for the commands `run_command` keeps; anything else is not built.
 pub(super) fn run_turn_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
+    // A denial card's dismiss needs no turn (`turn/denials.rs`).
+    if let HostCommand::DismissDenial { thread, denial } = command {
+        return turn::denials::dismiss(actor, *ctx, thread, denial);
+    }
     let (thread, turn) = if let HostCommand::SendPrompt {
         thread,
         content,

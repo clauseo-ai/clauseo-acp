@@ -2,6 +2,7 @@
 
 mod agents;
 mod closed;
+mod denials;
 mod escapee;
 mod escapee_phases;
 mod failures;

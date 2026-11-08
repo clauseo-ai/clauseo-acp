@@ -38,6 +38,8 @@ pub(crate) enum TurnInput {
     },
     /// A check for papers an undo removed that came back is due (`came_back.rs`).
     CameBack(super::came_back::Check),
+    /// A denial's path was made canonical and its card decided (`denials.rs`).
+    Denial(Box<super::denials::Checked>),
 }
 
 /// An agent call's result.

@@ -576,3 +576,9 @@ crates/sandbox/examples/s15_launch_vm/win_ctl.rs - unsafe_code
 crates/sandbox/examples/s15_launch_vm/win_logon.rs - unsafe_code
 crates/sandbox/examples/s15_launch_vm/win_switch.rs - unsafe_code
 crates/sandbox/examples/s15_launch_vm/win_pool.rs - unsafe_code
+# R18 PR 3a: the denial sink R17 PR-D's launch path builds; only the tests build it until then.
+crates/host/src/actor/turn/denials/feed.rs DenialFeed dead_code
+crates/host/src/actor/turn/denials/feed.rs DenialFeed::new dead_code
+# R18 PR 3a: a network path is decided from the drive's root and the mount list, never the path.
+crates/host/src/actor/turn/denials/network/mac.rs - unsafe_code
+crates/host/src/actor/turn/denials/network/windows.rs - unsafe_code

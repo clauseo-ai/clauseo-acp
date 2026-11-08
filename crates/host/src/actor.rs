@@ -176,6 +176,8 @@ pub(crate) struct Actor {
     /// The sites the egress proxy refused, per thread, for the running turn (`blocked.rs`).
     /// Boxed, so the host thread's close future stays under clippy's `large_futures` limit.
     pub(crate) blocked: Box<blocked::Blocks>,
+    /// Each thread's denials for its turn (`turn/denials.rs`). Boxed, as is `blocked`.
+    pub(crate) denials: Box<turn::denials::Denials>,
     /// The lawyer's allowed sites: the notices an allow can name, the stored allows and the
     /// proxies' views (`allowed.rs`). Boxed, as is `blocked`, so the host thread's close future
     /// stays under clippy's `large_futures` limit on Windows.
@@ -513,6 +515,7 @@ impl Actor {
             Input::Protection(done) => protection::work::on_done(self, *done),
             Input::Allowed(input) => allowed::on_input(self, *input),
             Input::SandboxForget(input) => protection::forget::on_input(self, *input),
+            Input::Denial(input) => turn::denials::on_denial(self, *input),
             // The loop handles an abort before it gets here.
             #[cfg(feature = "test-support")]
             Input::Abort(reply) => {

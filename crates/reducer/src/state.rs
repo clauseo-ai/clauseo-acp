@@ -186,6 +186,15 @@ impl ThreadState {
     pub fn queued_order(&self) -> Vec<MessageId> {
         crate::queued_order(self.entries.values())
     }
+
+    /// The entry of `denial`, if the thread holds it (R18).
+    pub fn denial(&self, denial: DenialId) -> Option<&clauseo_protocol::DenialEntry> {
+        let order = self.index.denials.get(&denial)?;
+        let ViewEntry::Denial(entry) = self.entries.get(order)? else {
+            return None;
+        };
+        Some(entry)
+    }
 }
 
 /// A matter's folded state: its header and its Versions timeline.
