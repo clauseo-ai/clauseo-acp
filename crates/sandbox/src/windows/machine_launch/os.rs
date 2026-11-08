@@ -5,7 +5,8 @@
 //! the record, can't read or change it), and the state in the record itself, which this never
 //! makes: a missing record fails the state's write.
 //!
-//! The backup's values: `Written` (`REG_BINARY`), the bytes last written, set first; then
+//! The backup's values: `Written` (`REG_BINARY`), the bytes last written, set first;
+//! `PutBack` (`REG_DWORD`, 1 once a run has put the deny back since the first write); then
 //! `Original` (`REG_BINARY`), the value before Clauseo's first change, empty when there was
 //! none. A backup counts only once `Original` is there, so a write cut short between the two
 //! leaves none, and the value, not yet changed, is taken as the original again.
@@ -30,9 +31,9 @@ use windows::Win32::Security::{
 };
 use windows::Win32::System::Registry::{
     HKEY, HKEY_LOCAL_MACHINE, KEY_CREATE_SUB_KEY, KEY_SET_VALUE, KEY_WOW64_64KEY, REG_BINARY,
-    REG_OPTION_NON_VOLATILE, REG_SAM_FLAGS, REG_SZ, REG_VALUE_TYPE, RRF_NOEXPAND, RRF_RT_ANY,
-    RRF_SUBKEY_WOW6464KEY, RegCloseKey, RegCreateKeyExW, RegDeleteKeyExW, RegDeleteValueW,
-    RegGetValueW, RegOpenKeyExW, RegSetKeySecurity, RegSetValueExW,
+    REG_DWORD, REG_OPTION_NON_VOLATILE, REG_SAM_FLAGS, REG_SZ, REG_VALUE_TYPE, RRF_NOEXPAND,
+    RRF_RT_ANY, RRF_SUBKEY_WOW6464KEY, RegCloseKey, RegCreateKeyExW, RegDeleteKeyExW,
+    RegDeleteValueW, RegGetValueW, RegOpenKeyExW, RegSetKeySecurity, RegSetValueExW,
 };
 use windows::core::{HSTRING, PCWSTR};
 
@@ -53,6 +54,8 @@ const BACKUP_SDDL: &str = "O:BAD:P(A;;KA;;;SY)(A;;KA;;;BA)";
 const ORIGINAL: &str = "Original";
 /// The backup's value holding what was written last.
 const WRITTEN: &str = "Written";
+/// The backup's value set to 1 once a run has put the deny back (`Backup::put_back`).
+const PUT_BACK: &str = "PutBack";
 /// `WRITE_DAC`.
 const WRITE_DAC: REG_SAM_FLAGS = REG_SAM_FLAGS(0x0004_0000);
 /// `WRITE_OWNER`.
@@ -112,9 +115,17 @@ impl LaunchStore for WindowsLaunchStore {
             return Ok(None);
         };
         let written = binary(get(&key, WRITTEN)?, WRITTEN)?.unwrap_or_default();
+        // Missing or unreadable as a DWORD counts as a put-back: the removal then keeps the
+        // value and takes off only the deny.
+        let put_back = match get(&key, PUT_BACK)? {
+            None => false,
+            Some((REG_DWORD, data)) => data != [0, 0, 0, 0],
+            Some(_) => true,
+        };
         Ok(Some(Backup {
             original: (!original.is_empty()).then_some(original),
             written,
+            put_back,
         }))
     }
 
@@ -123,6 +134,8 @@ impl LaunchStore for WindowsLaunchStore {
             .ok_or_else(|| "the record's key is gone, so nothing was written".to_owned())?;
         let key = backup_key_in(&record)?;
         set(&key, WRITTEN, REG_BINARY, &backup.written)?;
+        let put_back = u32::from(backup.put_back).to_le_bytes();
+        set(&key, PUT_BACK, REG_DWORD, &put_back)?;
         let original = backup.original.as_deref().unwrap_or_default();
         set(&key, ORIGINAL, REG_BINARY, original)
     }

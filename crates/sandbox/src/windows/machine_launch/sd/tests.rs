@@ -62,10 +62,30 @@ fn a_weak_misplaced_inherit_only_or_other_groups_deny_gets_ours_in_front() {
     ];
     let parsed = LaunchSd::parse(&descriptor(&aces, false)).unwrap();
     assert_eq!(parsed.with_deny(&sid(GROUP)), None);
-    // The removal takes every deny naming the group and nothing else.
+    // The removal takes our exact deny and nothing else.
     let (kept, dropped) = parsed.without_denies(&sid(GROUP));
     assert_eq!(dropped, 1);
     assert_eq!(kept.aces(), [aces[0].clone(), aces[2].clone()].as_slice());
+}
+
+#[test]
+fn the_removal_keeps_a_near_miss_deny_for_the_group() {
+    let near = [
+        // Another mask.
+        ace(D, 0, 0xB, GROUP),
+        // Flags (container inherit).
+        ace(D, 0x2, DENY_MASK, GROUP),
+        // More rights than ours.
+        ace(D, 0, 0x7FF, GROUP),
+    ];
+    let mut aces = vec![ace(D, 0, DENY_MASK, GROUP)];
+    aces.extend(near.iter().cloned());
+    aces.push(ace(A, 0, 0x1F, "S-1-5-32-544"));
+    let parsed = LaunchSd::parse(&descriptor(&aces, false)).unwrap();
+    let (kept, dropped) = parsed.without_denies(&sid(GROUP));
+    assert_eq!(dropped, 1);
+    assert_eq!(kept.aces().get(..3), Some(near.as_slice()));
+    assert_eq!(kept.aces().len(), 4);
 }
 
 #[test]

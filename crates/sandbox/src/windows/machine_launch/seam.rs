@@ -21,6 +21,9 @@ pub struct Backup {
     pub original: Option<Vec<u8>>,
     /// The bytes Clauseo wrote last, recorded just before each write.
     pub written: Vec<u8>,
+    /// Whether a run has put the deny back since the first write (drift): the value then
+    /// holds what someone else wrote, which [`super::remove`] must keep.
+    pub put_back: bool,
 }
 
 /// A failed registry call, in words naming the call and its Windows error code; never a path

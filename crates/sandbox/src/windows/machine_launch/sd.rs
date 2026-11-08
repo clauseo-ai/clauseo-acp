@@ -217,18 +217,33 @@ impl LaunchSd {
     /// Whether a deny for `group`, holding all of [`DENY_MASK`] and applying to the object
     /// itself, comes before every allow entry: what the guard needs.
     pub fn denies_first(&self, group: &Sid) -> bool {
-        let group = sid_bytes(group);
-        for entry in &self.aces {
-            if is_allow(kind(entry)) {
-                return false;
-            }
-            let applies = flags(entry) & INHERIT_ONLY == 0;
-            let strong = mask(entry).is_some_and(|mask| mask & DENY_MASK == DENY_MASK);
-            if kind(entry) == DENIED && applies && strong && sid(entry) == Some(group.as_slice()) {
-                return true;
-            }
+        denies_first(&self.aces, group)
+    }
+
+    /// Whether the descriptor `bytes` denies `group` first, as [`LaunchSd::denies_first`]
+    /// asks, read leniently: only the header and the DACL's structure are checked, so a Group
+    /// Policy value without an owner or a group, or with entries in COM's old form, still
+    /// counts when it carries the deny. Only this check reads that way; nothing read so is
+    /// ever written.
+    pub fn policy_denies_first(bytes: &[u8], group: &Sid) -> Result<bool, SdError> {
+        if bytes.len() < HEADER || bytes.first() != Some(&1) {
+            return Err(SdError("shorter than its header, or not revision 1"));
         }
-        false
+        let control = u16_at(bytes, 2).ok_or(SdError("no control word"))?;
+        let dacl_at = u32_at(bytes, 16)
+            .and_then(|at| usize::try_from(at).ok())
+            .ok_or(SdError("no offset"))?;
+        if control & SELF_RELATIVE == 0 {
+            return Err(SdError("not self-relative"));
+        }
+        if control & DACL_PRESENT == 0 || dacl_at == 0 {
+            return Err(SdError("no DACL, or a NULL one"));
+        }
+        if dacl_at < HEADER {
+            return Err(SdError("an offset inside the header"));
+        }
+        let (_, aces, _) = acl_at(bytes, dacl_at)?;
+        Ok(denies_first(&aces, group))
     }
 
     /// This descriptor with `(D;;CCDCLCSWRP;;;group)` at DACL index 0 and every other entry
@@ -244,14 +259,14 @@ impl LaunchSd {
         Some(merged)
     }
 
-    /// This descriptor without any deny entry for `group` (`(D;...;;;group)`, whatever its
-    /// flags and mask), and how many went. `group` is `ClauseoSandboxUsers`, Clauseo's own
-    /// group, so any deny naming it is Clauseo's to take off; every other entry stays.
+    /// This descriptor without the deny [`LaunchSd::with_deny`] adds, matched exactly
+    /// (`(D;;CCDCLCSWRP;;;group)`: a plain deny, no flags, mask `0x1F`, `group`'s SID), and
+    /// how many went. Every other entry stays, a deny for `group` with another mask or other
+    /// flags included.
     pub fn without_denies(&self, group: &Sid) -> (LaunchSd, usize) {
-        let group = sid_bytes(group);
+        let ours = ace(DENIED, DENY_MASK, &sid_bytes(group));
         let mut kept = self.clone();
-        kept.aces
-            .retain(|entry| !(kind(entry) == DENIED && sid(entry) == Some(group.as_slice())));
+        kept.aces.retain(|entry| *entry != ours);
         let dropped = self.aces.len() - kept.aces.len();
         (kept, dropped)
     }
@@ -284,6 +299,23 @@ impl LaunchSd {
         }
         granted
     }
+}
+
+/// Whether `aces` hold a deny for `group`, with all of [`DENY_MASK`] and applying to the
+/// object itself, before every allow entry.
+fn denies_first(aces: &[Vec<u8>], group: &Sid) -> bool {
+    let group = sid_bytes(group);
+    for entry in aces {
+        if is_allow(kind(entry)) {
+            return false;
+        }
+        let applies = flags(entry) & INHERIT_ONLY == 0;
+        let strong = mask(entry).is_some_and(|mask| mask & DENY_MASK == DENY_MASK);
+        if kind(entry) == DENIED && applies && strong && sid(entry) == Some(group.as_slice()) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Refuses entries that break COM's rules (module doc): a plain allow or deny without

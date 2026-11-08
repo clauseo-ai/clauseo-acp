@@ -19,9 +19,9 @@
 //! `REG_SZ`, readable by Users, so the app and firm IT can read it): `applied`, `policy`, or
 //! `degraded: ...`. A degraded guard never fails the set-up: WSL's other layers stay.
 //!
-//! [`remove`] takes off only the pool group's denies. When the value is exactly what Clauseo
-//! wrote last, it puts the backup back byte for byte instead, deleting the value when there
-//! was none. Pure; tested on every OS.
+//! [`remove`] takes off only our exact deny. When the value is exactly what Clauseo's first
+//! write left, with no put-back since, it puts the backup back byte for byte instead, deleting
+//! the value when there was none. Pure; tested on every OS.
 
 use crate::windows::sids::Sid;
 
@@ -147,9 +147,9 @@ pub fn apply(store: &mut impl LaunchStore, group: &Sid) -> LaunchApplied {
     let mut whys: Vec<String> = Vec::new();
     let policy = match store.policy() {
         Ok(None) => None,
-        Ok(Some(Ok(bytes))) => match LaunchSd::parse(&bytes) {
-            Ok(policy) if policy.denies_first(group) => Some(Guard::ByPolicy),
-            Ok(_) => {
+        Ok(Some(Ok(bytes))) => match LaunchSd::policy_denies_first(&bytes, group) {
+            Ok(true) => Some(Guard::ByPolicy),
+            Ok(false) => {
                 whys.push("a Group Policy value overrides it".to_owned());
                 Some(Guard::PolicyOverrides)
             }
@@ -224,7 +224,10 @@ fn apply_value(store: &mut impl LaunchStore, group: &Sid) -> Result<Change, (Gua
     } else {
         Change::Added
     };
+    // A write over an existing backup is a put-back: the value it merged into is someone
+    // else's since, so the removal keeps it rather than restore the first original.
     let backup = Backup {
+        put_back: before.is_some(),
         original: before.map_or(original, |kept| kept.original),
         written: bytes.clone(),
     };
@@ -234,11 +237,18 @@ fn apply_value(store: &mut impl LaunchStore, group: &Sid) -> Result<Change, (Gua
 }
 
 /// Takes the guard for `group` off as the module says, then deletes the backup and the state.
-/// A failed read or write is the error, the backup kept for the next run.
+/// The backup goes back byte for byte only when the value is what the first write left and no
+/// put-back has happened since; otherwise only our exact deny comes off. A failed read or write
+/// is the error, the backup kept for the next run.
 pub fn remove(store: &mut impl LaunchStore, group: &Sid) -> Result<LaunchRemoved, StoreError> {
     let backup = store.backup()?;
+    let untouched = |bytes: &[u8]| {
+        backup
+            .as_ref()
+            .is_some_and(|kept| !kept.put_back && kept.written == bytes)
+    };
     let removed = match store.read()? {
-        Raw::Binary(bytes) if backup.as_ref().is_some_and(|kept| kept.written == bytes) => {
+        Raw::Binary(bytes) if untouched(&bytes) => {
             if let Some(original) = backup.as_ref().and_then(|kept| kept.original.as_ref()) {
                 store.write(original)?;
                 LaunchRemoved::Restored
@@ -255,7 +265,9 @@ pub fn remove(store: &mut impl LaunchStore, group: &Sid) -> Result<LaunchRemoved
             Err(error) => LaunchRemoved::Left(error.to_string()),
             Ok(current) => {
                 let (kept, dropped) = current.without_denies(group);
-                let was_absent = backup.as_ref().is_some_and(|kept| kept.original.is_none());
+                let was_absent = backup
+                    .as_ref()
+                    .is_some_and(|kept| kept.original.is_none() && !kept.put_back);
                 if dropped == 0 {
                     LaunchRemoved::Nothing
                 } else if was_absent && kept == LaunchSd::windows_default() {

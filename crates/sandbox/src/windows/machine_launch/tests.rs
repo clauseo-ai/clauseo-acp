@@ -162,6 +162,26 @@ fn a_group_policy_value_leaves_the_guard_degraded_unless_it_denies_the_group() {
     assert_eq!(applied.guard, Guard::ByPolicy);
     assert!(!applied.guard.degraded());
     assert_eq!(store.state.as_deref(), Some("policy"));
+    // The same ACE in SDDL with no owner or group, or beside entries in COM's old form: the
+    // strict parser refuses both, the policy check reads only the DACL and finds the deny.
+    let mut no_owner = descriptor(&aces, false);
+    no_owner[4..12].copy_from_slice(&[0; 8]);
+    let old_form = descriptor(
+        &[ace(D, 0, DENY_MASK, GROUP), ace(A, 0, 1, "S-1-1-0")],
+        false,
+    );
+    for policy in [no_owner, old_form] {
+        assert!(LaunchSd::parse(&policy).is_err());
+        let mut store = FakeStore::new(Raw::Binary(windows_11()));
+        store.policy = Some(Ok(policy));
+        assert_eq!(apply(&mut store, &sid(GROUP)).guard, Guard::ByPolicy);
+    }
+    // A lenient read still needs a DACL that holds the deny first.
+    let mut store = FakeStore::new(Raw::Binary(windows_11()));
+    let mut no_dacl = descriptor(&aces, false);
+    no_dacl[16..20].copy_from_slice(&[0; 4]);
+    store.policy = Some(Ok(no_dacl));
+    assert_eq!(apply(&mut store, &sid(GROUP)).guard, Guard::PolicyOverrides);
     // An unreadable policy key: degraded, failed.
     let mut store = FakeStore::new(Raw::Binary(windows_11()));
     store.fail = Some("policy");
@@ -188,6 +208,41 @@ fn drift_is_put_back_and_the_first_backup_kept() {
     let backup = store.backup.clone().unwrap();
     assert_eq!(backup.original, Some(windows_11()));
     assert_eq!(backup.written, bytes(&store));
+    assert!(backup.put_back);
+    // The value is what Clauseo wrote last, but it holds someone else's edit: uninstall keeps
+    // it and takes off only our deny, never the first original.
+    assert_eq!(
+        remove(&mut store, &sid(GROUP)),
+        Ok(LaunchRemoved::DeniesRemoved(1))
+    );
+    assert_eq!(parsed(&store).aces(), aces.as_slice());
+}
+
+#[test]
+fn after_a_put_back_on_an_absent_value_uninstall_keeps_the_others_entries() {
+    let mut store = FakeStore::new(Raw::Absent);
+    apply(&mut store, &sid(GROUP));
+    // Something rewrote the value: Windows' default and one entry more, without our deny.
+    let mut aces = LaunchSd::windows_default().aces().to_vec();
+    aces.push(ace(A, 0, 0xB, OTHER_GROUP));
+    store.value = Raw::Binary(descriptor(&aces, false));
+    assert_eq!(apply(&mut store, &sid(GROUP)).change, Change::PutBack);
+    assert_eq!(
+        remove(&mut store, &sid(GROUP)),
+        Ok(LaunchRemoved::DeniesRemoved(1))
+    );
+    assert_eq!(parsed(&store).aces(), aces.as_slice());
+    // Even a put-back that left only the default plus ours keeps the value: after a put-back
+    // the value is someone else's, so nothing but our deny is ours to take.
+    let mut store = FakeStore::new(Raw::Absent);
+    apply(&mut store, &sid(GROUP));
+    store.value = Raw::Binary(LaunchSd::windows_default().to_bytes());
+    apply(&mut store, &sid(GROUP));
+    assert_eq!(
+        remove(&mut store, &sid(GROUP)),
+        Ok(LaunchRemoved::DeniesRemoved(1))
+    );
+    assert_eq!(parsed(&store), LaunchSd::windows_default());
 }
 
 #[test]
