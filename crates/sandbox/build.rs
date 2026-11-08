@@ -32,8 +32,9 @@
 //! which aren't `KnownDLLs`. So the imports whose own imports aren't all `KnownDLLs` are
 //! delay-loaded (`/DELAYLOAD`, with `delayimp.lib`): `netapi32.dll` and `userenv.dll` (the
 //! accounts and profiles), since S15 PR7 `fwpuclnt.dll` (the WFP filters) and `iphlpapi.dll`
-//! (the port check's listener table), and `wtsapi32.dll` (the stop's process list,
-//! `WTSEnumerateProcessesExW`). They load at their first call, after `main` has run
+//! (the port check's listener table), `wtsapi32.dll` (the stop's process list,
+//! `WTSEnumerateProcessesExW`), and `wintrust.dll` (the WSL MSI's signature check). They load
+//! at their first call, after `main` has run
 //! `SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32)`, so they and their own imports come
 //! from System32; nothing calls them before `main` (no static initialiser or TLS callback in the
 //! crate). `tests/setup_exe.rs` checks the exe's import and delay-import directories, its
@@ -98,6 +99,7 @@ fn main() -> Result<(), Error> {
             "/DELAYLOAD:fwpuclnt.dll",
             "/DELAYLOAD:iphlpapi.dll",
             "/DELAYLOAD:wtsapi32.dll",
+            "/DELAYLOAD:wintrust.dll",
             "delayimp.lib",
             "/Brepro",
             "/DEBUG:NONE",
