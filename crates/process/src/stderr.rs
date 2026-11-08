@@ -1,5 +1,6 @@
-//! The agent's stderr: the pump that drains the pipe, the 256 KiB ring it fills, and the redacted
-//! tail of at most 4 KiB that an exit report carries.
+//! The agent's stderr: the pump that drains the pipe, the 256 KiB ring it fills, the optional line
+//! tap a launch sets (`SpawnOptions::stderr_tap`), and the redacted tail of at most 4 KiB that an
+//! exit report carries.
 
 use std::io;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -88,6 +89,22 @@ impl Ring {
 /// The ring an agent's pump fills, shared with its handle and exit reports.
 pub(crate) type SharedRing = Arc<Mutex<Ring>>;
 
+/// The line tap of a launch (`SpawnOptions::stderr_tap`), shared with the launch's options.
+#[derive(Clone)]
+pub(crate) struct StderrTap(Arc<dyn Fn(&str) + Send + Sync>);
+
+impl StderrTap {
+    pub(crate) fn new(tap: impl Fn(&str) + Send + Sync + 'static) -> StderrTap {
+        StderrTap(Arc::new(tap))
+    }
+}
+
+impl std::fmt::Debug for StderrTap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StderrTap").finish_non_exhaustive()
+    }
+}
+
 /// Drains the agent's stderr into its ring, to the end of the pipe. The caller must drive it, on
 /// its own executor or joined with other work: the crate never spawns, and an undrained stderr
 /// pipe stalls the agent once the OS buffer (about 64 KiB) fills.
@@ -95,6 +112,7 @@ pub(crate) type SharedRing = Arc<Mutex<Ring>>;
 pub struct StderrPump {
     pipe: ChildStderr,
     ring: SharedRing,
+    tap: Option<StderrTap>,
 }
 
 impl std::fmt::Debug for StderrPump {
@@ -104,8 +122,8 @@ impl std::fmt::Debug for StderrPump {
 }
 
 impl StderrPump {
-    pub(crate) fn new(pipe: ChildStderr, ring: SharedRing) -> StderrPump {
-        StderrPump { pipe, ring }
+    pub(crate) fn new(pipe: ChildStderr, ring: SharedRing, tap: Option<StderrTap>) -> StderrPump {
+        StderrPump { pipe, ring, tap }
     }
 
     /// Reads stderr to its end into the ring. Ends with the read error, if one comes first.
@@ -122,13 +140,16 @@ impl StderrPump {
     }
 
     async fn pump(mut self, mut on_line: Option<impl FnMut(&str)>) -> io::Result<()> {
+        let tap = self.tap.take();
+        // Lines are split only when something takes them, so a pump with neither reads as before.
+        let split = tap.is_some() || on_line.is_some();
         let mut buf = vec![0; READ];
         let mut lines = LineSplitter::default();
         loop {
             let n = self.pipe.read(&mut buf).await?;
             let Some(read) = buf.get(..n).filter(|read| !read.is_empty()) else {
-                if let Some(on_line) = &mut on_line {
-                    lines.finish(on_line);
+                if split {
+                    lines.finish(&mut |line| deliver(line, tap.as_ref(), on_line.as_mut()));
                 }
                 return Ok(());
             };
@@ -136,10 +157,22 @@ impl StderrPump {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .push(read);
-            if let Some(on_line) = &mut on_line {
-                lines.feed(read, on_line);
+            if split {
+                lines.feed(read, &mut |line| {
+                    deliver(line, tap.as_ref(), on_line.as_mut());
+                });
             }
         }
+    }
+}
+
+/// Passes `line` to the launch's tap, then to the caller's `on_line`.
+fn deliver(line: &str, tap: Option<&StderrTap>, on_line: Option<&mut impl FnMut(&str)>) {
+    if let Some(tap) = tap {
+        (tap.0)(line);
+    }
+    if let Some(on_line) = on_line {
+        on_line(line);
     }
 }
 
