@@ -50,7 +50,10 @@ Windows Server 2025 (build 26100) on 2026-11-03, with the 0.0.0 dry-run installe
   ran the installer. Declined or failed, Clauseo is installed and works without it, and
   running the installer again sets it up. A silent (`/S`) or passive (`/P`) per-user install
   raises no prompt and skips it; Clauseo's updates never prompt. The per-machine installer, already
-  elevated, sets up the same folder on every install and update.
+  elevated, writes and records the set-up program in the same folder on every install and update,
+  but sets nobody up: no sandbox users, tasks or network rules. Each lawyer's Safe workspace is set
+  up later, from Clauseo's first-run step, which raises a UAC prompt; a standard user needs an
+  administrator to type their password into it.
 
 **Exit codes** of the installers, besides NSIS's 0 (done), 1 (cancelled) and 2 (stopped by an
 error). Only the last code set is reported, so an install that set several reports one of them.
@@ -61,13 +64,12 @@ What a silent (`/S`) install can return:
 |---|---|
 | 20 | Per-machine install: installed, but Windows security removed the set-up program this install wrote (see [section 10](#10-if-windows-security-removed-clauseos-set-up-program)) |
 | 22 | Per-user install: installed, but Safe workspace is not set up (no prompt under `/S`) |
-| 23 | Per-machine install: installed, but Safe workspace's set-up failed or didn't finish (still running after 10 minutes), a failed copy included |
-| 24 | Per-machine install: installed, but Safe workspace is not set up because Clauseo was running in the session that ran the installer |
+| 23 | Per-machine install: installed, but placing the set-up program in `C:\Program Files\Clauseo\Sandbox` failed or didn't finish (still running after 10 minutes) |
+| 24 | Per-machine install: installed, but the set-up program wasn't placed because Clauseo was running in the session that ran the installer |
 | 25 | Per-machine install: nothing installed, because the installer couldn't make its protected temporary folder in `C:\Program Files\Clauseo` |
 
-A 23 after a 10-minute wait means the set-up may still be running; the Safe workspace section of
-Clauseo's Settings shows whether it finished. A `/S` run as SYSTEM (Intune) runs in session 0,
-which sees no user's Clauseo window, so it doesn't return 24 for a user's running Clauseo.
+A 23 after a 10-minute wait means the placing may still be running; it finishes on its own. A
+`/S` run as SYSTEM (Intune) runs in session 0, which sees no user's Clauseo window, so it doesn't return 24 for a user's running Clauseo.
 
 What an interactive install can also return:
 
@@ -76,7 +78,7 @@ What an interactive install can also return:
 | 20 | Installed, but Windows security removed the set-up program this install wrote (see [section 10](#10-if-windows-security-removed-clauseos-set-up-program)) |
 | 24 | Per-user install: installed, but Safe workspace is not set up because Clauseo was running |
 
-An interactive per-machine install never sets 23: it shows a box when setting up failed, and a
+An interactive per-machine install never sets 23: it shows a box when placing the set-up program failed, and a
 line in its details list when it was still running. It shows a box with 24 and 25 too, but not
 with 25 under `/P` or `/UPDATE`.
 
