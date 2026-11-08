@@ -9,7 +9,8 @@
 //!   host thread spawned, the event loop ready (`RunEvent::Ready`), the first response the app's
 //!   protocol built (`index_html` says whether it was the page; the hook runs on Tauri's async
 //!   runtime as the response is ready, before `WebView2` gets it back on the main thread), and
-//!   the main window's page load started and finished.
+//!   the main window's page load started and finished. On Windows also the main window's native
+//!   mark painted, the first time, and removed (`native_mark.rs`).
 //! - [`PAGE_TARGET`] (`clauseo_desktop::page::lifecycle`): the page's own marks
 //!   (`ui/app/src/start-marks.ts`), one line from `page_marks`, the first call of a run only. The
 //!   page sends each mark as how long before the call it was; the line puts it on the same clock,
