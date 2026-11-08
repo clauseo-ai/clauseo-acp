@@ -342,6 +342,10 @@ impl WslRead for WindowsWsl {
         Ok(found)
     }
 
+    fn app_id_exists(&self, app_id: &AppId) -> Result<bool, WslError> {
+        exists(&app_key(app_id))
+    }
+
     fn launch_permission(&self, app_id: &AppId) -> Result<Permission, WslError> {
         let path = app_key(app_id);
         if !exists(&path)? {

@@ -2412,7 +2412,11 @@ read, or whose `LocalService` isn't a `REG_SZ`, is logged and passed over, so an
 key can't refuse every launch), and the AppID of each of
 `LxssUserSession` (`{a9b7a1b9-…ce7e}`), `WSLCSessionManager` (`…ce8f`) and the inbox
 `LxssUserSessionInBox` (`{4F476546-…}`) that is registered, read from the class's `AppID` value
-in the 64-bit view. Each target's `LaunchPermission` is parsed strictly (`sd.rs`: revision 1,
+in the 64-bit view. Two more get the deny too, as hardening, when their keys are there:
+`{1FAB86C3-…}` (`wslcsession.exe`, the per-user WSLC session server) and `{17696EAC-…}`
+(`wsldevicehost.dll`'s DllSurrogate), which WSL's MSI registers with the same Authenticated Users
+grant but no `LocalService` (microsoft/WSL `msipackage/package.wix.in:189-196,326-335`). Each
+target's `LaunchPermission` is parsed strictly (`sd.rs`: revision 1,
 self-relative, an owner and a group, a DACL that isn't NULL, every size and SID inside its
 bounds; anything else is refused and never written) and gets `(D;;CCDCLCSWRP;;;G)` at DACL index
 0, with the owner, the group, every other entry and any SACL kept, and the parts laid out in the
