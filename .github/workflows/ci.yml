@@ -221,6 +221,11 @@ jobs:
       - name: Test the pre-push hook
         run: bash .github/scripts/pre-push-test.sh
 
+      # No job that a pull request, review or merge group runs holds actions: write while it checks
+      # out that event's code (workflow-token-test.rb, with its own planted cases).
+      - name: Test the workflows' token rule
+        run: ruby .github/scripts/workflow-token-test.rb
+
       # launch-xvfb.sh against a fake xvfb-run: the app's own status decides, not xvfb-run's
       # clean-up (#479's group, 2026-11-05).
       - name: Test launch-xvfb.sh
