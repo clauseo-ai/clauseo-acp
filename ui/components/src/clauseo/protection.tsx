@@ -145,7 +145,7 @@ export function NotProtectedNote({
                       : named1385
                         ? [
                             p(
-                              "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this. If it doesn't, ask whoever looks after this computer to add ClauseoSandboxUsers to the Allow log on locally policy.",
+                              "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this.",
                             ),
                           ]
                         : []),

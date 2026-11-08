@@ -207,13 +207,13 @@ test("admin_copy_missing: the repair's words and Get the installer, no command; 
   expect(reads(t)).toBe(1);
 });
 
-test("admin_copy_missing on a firm install: ask IT to install Clauseo again, with no button", async () => {
+test("admin_copy_missing on a firm install: the firm manages the install, with no button", async () => {
   const s = scripted(PROT.missing, { unprotected_auto_allowed: false });
   const t = await mount(s.host);
   await signInNow(t);
   expect(step()?.dataset["state"]).toBe("repair");
   expect(byId("protection-repair")?.textContent).toContain(
-    pw("en", "Ask your IT team to install Clauseo again."),
+    pw("en", "Your firm manages how Clauseo is installed on this computer."),
   );
   expect(byId("protection-installer")).toBeNull();
   expect(t.protectionCommands()).toEqual([]);

@@ -198,7 +198,7 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
   ["{name} is ready", { first: true, events: [install(CLAUDE, "installing"), READY] }, "welcome"],
   ["Setting up {name}…", { first: true, events: [install(CLAUDE, "installing")] }, "welcome"],
   ["Use the system proxy", { first: true, events: [blocked] }, "dl-blocked"],
-  ["Ask your IT team", { first: true, events: [blocked] }, "dl-blocked"],
+  ["Copy details for IT", { first: true, events: [blocked] }, "dl-blocked"],
   [
     "Message copied",
     { first: true, events: [blocked], clicks: ['[data-testid="install-ask-it"]'] },
@@ -488,7 +488,11 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
     { events: [READY, failed("signin.policy_unreadable")] },
     "signin-policy",
   ],
-  ["Ask your IT team.", { events: [READY, failed("signin.policy_unreadable")] }, "signin-policy"],
+  [
+    "Your firm manages these settings.",
+    { events: [READY, failed("signin.policy_unreadable")] },
+    "signin-policy",
+  ],
   // switching accounts (0048, #493), and a refusal meanwhile
   ["Switching accounts.", SWITCHING, "signin-switching"],
   [

@@ -186,10 +186,11 @@ test.each([
   },
 );
 
-test("set_up_failed with R17 PR-E's 1385 cause adds the line for IT", async () => {
+test("set_up_failed with R17 PR-E's 1385 cause adds the set-up-again line", async () => {
   await mount({ view: () => view(np({ set_up_failed: { why: "logon_right_denied_1385" } })) });
   expect(block()?.dataset["state"]).toBe("set_up_failed");
-  expect(text()).toContain("Allow log on locally");
+  expect(text()).toContain("Setting up the Safe workspace again usually fixes this.");
+  expect(text()).not.toContain("looks after this computer");
 });
 
 test.each([
@@ -385,12 +386,12 @@ test.each([
   ["required", { required: true }, null],
   ["no unprotected auto mode", { unprotected_auto_allowed: false }, null],
 ] as const)(
-  "admin_copy_missing on a firm install (%s): ask IT, with no button",
+  "admin_copy_missing on a firm install (%s): the firm manages the install, with no button",
   async (_c, over, by) => {
     if (by !== null) update = { current: "0.1.0", mode: "auto", state: { managed: { by } } };
     const t = await mount({ view: () => view(PROT.missing, over) });
     expect(one("protection-repair")?.textContent).toBe(
-      pw("en", "Ask your IT team to install Clauseo again."),
+      pw("en", "Your firm manages how Clauseo is installed on this computer."),
     );
     expect(one("protection-installer")).toBeNull();
     expect(one("protection-close-line")).toBeNull();
@@ -403,14 +404,18 @@ test.each([
   [
     "policy",
     PROT.policy,
-    "A Windows policy on this computer blocks the program that sets up the Safe workspace. Ask your IT team to allow it.",
+    "A Windows policy on this computer blocks the program that sets up the Safe workspace. Your firm manages this policy on this computer.",
   ],
   [
     "other_account",
     PROT.otherAccount,
-    "The Safe workspace on this computer belongs to another Windows account. Ask your IT team.",
+    "The Safe workspace on this computer belongs to another Windows account. Your firm manages this computer's Windows accounts.",
   ],
-  ["a reason from a newer Clauseo", PROT.blockedNewer, "Ask your IT team to look into it."],
+  [
+    "a reason from a newer Clauseo",
+    PROT.blockedNewer,
+    "Something on this computer stops the Safe workspace. Your firm manages this computer's settings.",
+  ],
 ] as const)("a block, %s: what stops it, its line, and no act", async (_c, p, line) => {
   await mount({ view: () => view(p) });
   expect(block()?.dataset["state"]).toBe("blocked");
@@ -439,7 +444,7 @@ test.each([
     expect(one("protection-block")?.textContent).toBe(
       pw(
         "en",
-        "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this. If it doesn't, ask whoever looks after this computer to add ClauseoSandboxUsers to the Allow log on locally policy.",
+        "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this.",
       ),
     );
     expect(one("protection-installer")).toBeNull();

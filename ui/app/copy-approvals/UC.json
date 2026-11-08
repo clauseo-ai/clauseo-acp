@@ -227,14 +227,14 @@
     "by": "app track (provisional; Rohan batch review)"
   },
   "UC-33": {
-    "en": "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this. If it doesn't, ask whoever looks after this computer to add ClauseoSandboxUsers to the Allow log on locally policy.",
-    "hi": "Windows सुरक्षित कार्यक्षेत्र के खातों को साइन इन नहीं करने दे रहा है। सुरक्षित कार्यक्षेत्र को फिर से तैयार करने से आमतौर पर यह ठीक हो जाता है। अगर ऐसा न हो, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति से ClauseoSandboxUsers को Allow log on locally नीति में जोड़ने को कहें।",
+    "en": "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this.",
+    "hi": "Windows सुरक्षित कार्यक्षेत्र के खातों को साइन इन नहीं करने दे रहा है। सुरक्षित कार्यक्षेत्र को फिर से तैयार करने से आमतौर पर यह ठीक हो जाता है।",
     "hi_status": "provisional",
     "hi_at": "2026-11-08",
-    "hi_by": "app copy (logon_right: set up again first)",
+    "hi_by": "app track (no IT endings)",
     "status": "provisional",
     "at": "2026-11-08",
-    "by": "app copy (logon_right: set up again first)"
+    "by": "app track (no IT endings)"
   },
   "UC-34": {
     "en": "Clauseo can add room for 4 more. Windows asks for permission first.",
@@ -532,24 +532,24 @@
     "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
   "UC-82": {
-    "en": "A Windows policy on this computer blocks the program that sets up the Safe workspace. Ask your IT team to allow it.",
-    "hi": "इस कंप्यूटर की एक Windows नीति सुरक्षित कार्यक्षेत्र तैयार करने वाले प्रोग्राम को रोकती है। अपनी IT टीम से इसकी अनुमति देने को कहें।",
+    "en": "A Windows policy on this computer blocks the program that sets up the Safe workspace. Your firm manages this policy on this computer.",
+    "hi": "इस कंप्यूटर की एक Windows नीति सुरक्षित कार्यक्षेत्र तैयार करने वाले प्रोग्राम को रोकती है। इस कंप्यूटर पर यह नीति आपकी फ़र्म प्रबंधित करती है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (no IT endings)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-08",
+    "by": "app track (no IT endings)"
   },
   "UC-83": {
-    "en": "The program that sets up the Safe workspace is missing, or security software blocked it. Ask your IT team to look into it.",
-    "hi": "सुरक्षित कार्यक्षेत्र तैयार करने वाला प्रोग्राम नहीं मिला, या किसी सुरक्षा सॉफ़्टवेयर ने उसे रोक दिया। अपनी IT टीम से इसकी जाँच करने को कहें।",
+    "en": "The program that sets up the Safe workspace is missing, or security software blocked it. Your firm manages the security software on this computer.",
+    "hi": "सुरक्षित कार्यक्षेत्र तैयार करने वाला प्रोग्राम नहीं मिला, या किसी सुरक्षा सॉफ़्टवेयर ने उसे रोक दिया। इस कंप्यूटर पर सुरक्षा सॉफ़्टवेयर आपकी फ़र्म प्रबंधित करती है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (no IT endings)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-08",
+    "by": "app track (no IT endings)"
   },
   "UC-84": {
     "en": "The Safe workspace wasn't set up when Clauseo was installed.",
@@ -582,54 +582,54 @@
     "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
   "UC-87": {
-    "en": "Ask your IT team to install Clauseo again.",
-    "hi": "अपनी IT टीम से Clauseo फिर से इंस्टॉल करने को कहें।",
+    "en": "Your firm manages how Clauseo is installed on this computer.",
+    "hi": "इस कंप्यूटर पर Clauseo का इंस्टॉलेशन आपकी फ़र्म प्रबंधित करती है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (no IT endings)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-08",
+    "by": "app track (no IT endings)"
   },
   "UC-88": {
-    "en": "The program that sets up the Safe workspace has changed since Clauseo was installed. Ask your IT team, or install Clauseo again.",
-    "hi": "Clauseo इंस्टॉल होने के बाद से सुरक्षित कार्यक्षेत्र तैयार करने वाला प्रोग्राम बदल गया है। अपनी IT टीम से पूछें, या Clauseo फिर से इंस्टॉल करें।",
+    "en": "The program that sets up the Safe workspace has changed since Clauseo was installed. Install Clauseo again to restore it.",
+    "hi": "Clauseo इंस्टॉल होने के बाद से सुरक्षित कार्यक्षेत्र तैयार करने वाला प्रोग्राम बदल गया है। उसे वापस लाने के लिए Clauseo फिर से इंस्टॉल करें।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (no IT endings)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-08",
+    "by": "app track (no IT endings)"
   },
   "UC-89": {
-    "en": "The folder that holds the Safe workspace's set-up program isn't limited to administrators, or holds files it shouldn't. Ask your IT team to look into it.",
-    "hi": "सुरक्षित कार्यक्षेत्र का सेटअप प्रोग्राम जिस फ़ोल्डर में है, वह केवल व्यवस्थापकों तक सीमित नहीं है, या उसमें ऐसी फ़ाइलें हैं जो नहीं होनी चाहिए। अपनी IT टीम से इसकी जाँच करने को कहें।",
+    "en": "The folder that holds the Safe workspace's set-up program isn't limited to administrators, or holds files it shouldn't. Your firm manages this folder on this computer.",
+    "hi": "सुरक्षित कार्यक्षेत्र का सेटअप प्रोग्राम जिस फ़ोल्डर में है, वह केवल व्यवस्थापकों तक सीमित नहीं है, या उसमें ऐसी फ़ाइलें हैं जो नहीं होनी चाहिए। इस कंप्यूटर पर यह फ़ोल्डर आपकी फ़र्म प्रबंधित करती है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (no IT endings)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-08",
+    "by": "app track (no IT endings)"
   },
   "UC-90": {
-    "en": "The Safe workspace on this computer belongs to another Windows account. Ask your IT team.",
-    "hi": "इस कंप्यूटर का सुरक्षित कार्यक्षेत्र किसी दूसरे Windows खाते का है। अपनी IT टीम से पूछें।",
+    "en": "The Safe workspace on this computer belongs to another Windows account. Your firm manages this computer's Windows accounts.",
+    "hi": "इस कंप्यूटर का सुरक्षित कार्यक्षेत्र किसी दूसरे Windows खाते का है। इस कंप्यूटर के Windows खाते आपकी फ़र्म प्रबंधित करती है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (no IT endings)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-08",
+    "by": "app track (no IT endings)"
   },
   "UC-91": {
-    "en": "Ask your IT team to look into it.",
-    "hi": "अपनी IT टीम से इसकी जाँच करने को कहें।",
+    "en": "Something on this computer stops the Safe workspace. Your firm manages this computer's settings.",
+    "hi": "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है। इस कंप्यूटर की सेटिंग्स आपकी फ़र्म प्रबंधित करती है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (no IT endings)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-08",
+    "by": "app track (no IT endings)"
   },
   "UC-92": {
     "en": "Your firm requires the Safe workspace on this computer, so Clauseo can't answer here until it's set up.",
@@ -642,14 +642,14 @@
     "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
   "UC-93": {
-    "en": "Something on this computer stops the Safe workspace, so Clauseo can't answer here. Ask your IT team to look into it.",
-    "hi": "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। अपनी IT टीम से इसकी जाँच करने को कहें।",
+    "en": "Something on this computer stops the Safe workspace, so Clauseo can't answer here. Your firm manages this computer's settings.",
+    "hi": "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। इस कंप्यूटर की सेटिंग्स आपकी फ़र्म प्रबंधित करती है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (no IT endings)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-08",
+    "by": "app track (no IT endings)"
   },
   "UC-94": {
     "en": "Add room for 4 more?",
