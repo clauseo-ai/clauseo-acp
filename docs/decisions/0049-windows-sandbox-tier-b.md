@@ -2276,8 +2276,15 @@ Edge cases:
   of that file shares, so the file reads by its other names too until the session ends.
   Informational: the agent reading can't make one (it writes nothing there), and the file was
   put in the granted tree.
-- A protected DACL: an explicit allow on the item still applies. Below an allowed tree, a
-  protected item inherits nothing and stays closed, as the lawyer set it.
+- Inheritance off, or an allow that beats the fence: before any allow is written, each granted
+  folder's children are walked strictly (`reads::check_trees`, `Reach::Children`, watching the
+  reading pool user too). A file or folder with a protected DACL, which the fence's deny doesn't
+  reach, refuses the launch (`ProtectedChild`), and so does one with an explicit allow for a
+  broad group or a pool user (`BroadAllowChild`), naming it, as `OtherMatterRead` (R18 LOW 5).
+  The reads the ledger lists are excused, as at every strict walk. This holds whether or not the
+  other matter's fence is new in the launch. A refused name directly in a granted folder is
+  checked as a child too, but nothing below it. The granted folder itself isn't: the fence's
+  walk checks it at the other matter's launches.
 - A child the lawyer can't open inside an allowed tree refuses the launch (`ChildShut`). It is
   outside the launch's own trees, so nothing is set aside.
 - A granted folder (a granted file's folder) must answer `Ok` to the folder check; any other
@@ -2314,6 +2321,10 @@ every inherited one, and an object's explicit denies before its explicit allows.
   a refused name, so it refuses or is repaired, as does any other allow there or one an agent
   wrote elsewhere. Without this, the other matter's own launch, and
   any launch planning its fence, would be refused while a read was live.
+
+Tests for the check (`apply/tests/read_files.rs`):
+`a_read_into_a_folder_with_inheritance_off_or_a_beating_allow_refuses_the_launch` and
+`the_reads_check_walks_each_granted_folders_children_strictly_and_nothing_else`.
 
 The tests model the access check (`apply/tests/reads/access.rs`):
 `a_read_of_another_matter_reads_its_tree_and_no_refused_name_at_any_depth` and
@@ -2515,7 +2526,9 @@ the reading session's pool user:
 - a granted folder deleted during the run: the run's end succeeds and drops its entries;
 - a granted folder replaced by a new one at the same path: the new one keeps its entries and the
   old one, moved aside, loses the read;
-- after a killed run, `reconcile` at start removes every read, a moved folder's included.
+- after a killed run, `reconcile` at start removes every read, a moved folder's included;
+- a granted folder holding a subfolder with inheritance off, or a file with an explicit
+  `Users` allow, refuses the launch before any read is written.
 
 ### The launcher (PR6 interface)
 

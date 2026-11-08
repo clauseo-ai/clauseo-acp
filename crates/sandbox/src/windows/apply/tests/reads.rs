@@ -270,16 +270,18 @@ fn the_runs_end_takes_every_read_back_and_a_second_end_takes_nothing() {
     assert_eq!(again, Narrowed::default());
 
     // The next launch writes them again; matter two's fence is in place, so each tree allowed
-    // gets a plain walk of its own, and none starts in a refused name.
+    // gets a plain walk of its own, and none starts in a refused name. The root is walked only
+    // by the reads' strict check of each granted folder's children (`reads::check_trees`).
     acl.walks.clear();
     launch(&w, &mut ledger, &mut acl, &[("other/m2", false)]);
     assert!(acl.walks.iter().any(|(r, _, s)| *r == docs && !*s));
     let git = w.canonical("other/m2/sub/.git");
     let m2 = w.canonical("other/m2");
+    let check = |reach: &Reach, strict: bool| *reach == Reach::Children && strict;
     assert!(
         acl.walks
             .iter()
-            .all(|(r, _, _)| !r.starts_with(&git) && *r != m2)
+            .all(|(r, reach, s)| !r.starts_with(&git) && (*r != m2 || check(reach, *s)))
     );
     assert!(reads(&w, &acl, "other/m2/docs/b.txt"));
 }

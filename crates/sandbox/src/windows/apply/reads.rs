@@ -21,6 +21,10 @@
 //! each read whose item isn't at its path any more, or that recorded none (an older ledger's),
 //! and writes it again on the item there now.
 //!
+//! Before any allow is written, each granted folder's children are walked strictly
+//! ([`check_trees`]): one with inheritance off, which the fence's deny doesn't reach, or with an
+//! allow beating it, refuses the launch.
+//!
 //! Each call takes back only the entries naming the session's own SIDs (`sids`: its pool user,
 //! and the matter's SID when that is a subject, off by default), so a second session of the
 //! matter, with a pool user of its own, keeps its reads. The matter's SID is the matter's, not
@@ -30,18 +34,18 @@
 
 use std::collections::BTreeSet;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clauseo_protocol::MatterId;
 
 use super::back::{finish, take_back};
 use super::lifts;
-use super::walk::Refused;
+use super::walk::{Refused, clearing};
 use super::{Surroundings, refused};
 use crate::windows::acl_plan::{AdmittedPlan, Grant, Sid, in_folder};
 use crate::windows::admit::PathKind;
 use crate::windows::ledger::{Entry, EntryId, Ledger, RecordedFile, Take};
-use crate::windows::writer::{AclWriter, Added, ApplyFailure};
+use crate::windows::writer::{AclWriter, Added, ApplyFailure, Reach, Strict, Walked};
 use crate::{Error, OtherMatterRead, Policy};
 
 /// What [`narrow_reads`] or [`end_reads`] took back.
@@ -241,4 +245,48 @@ pub(super) fn add(
         Some(file) => acl.add_recorded(grant, file),
         None => Err(ApplyFailure::Changed),
     }
+}
+
+/// Before any read of another matter is written (R18): each folder `plan` allows a read of
+/// has its children walked strictly, watching the launch's own subjects besides `strict`'s, so a
+/// subfolder or file with inheritance off (which the fence's deny doesn't reach), or with an
+/// explicit allow that beats the deny, refuses the launch, naming it, as at any strict walk. The
+/// reads the ledger lists are excused, as everywhere (`strict.excused`). Nothing is set aside:
+/// the tree is the other matter's. What the walks saw.
+pub(super) fn check_trees(
+    plan: &AdmittedPlan,
+    acl: &mut dyn AclWriter,
+    around: &mut dyn Surroundings,
+    strict: &Strict,
+) -> Result<Walked, Refused> {
+    let kind = PathKind::OtherMatterRead;
+    let folders: BTreeSet<&Path> = plan
+        .grants()
+        .iter()
+        .filter(|g| g.kind() == kind && is_folder(g.path()))
+        .map(Grant::path)
+        .collect();
+    let mut seen = Walked::default();
+    if folders.is_empty() {
+        return Ok(seen);
+    }
+    let mut watched: BTreeSet<Sid> = strict.watched.iter().cloned().collect();
+    watched.extend(plan.assigned_to(plan.matter()));
+    let check = Strict {
+        watched: watched.into_iter().collect(),
+        assigned: Vec::new(),
+        ..strict.clone()
+    };
+    for folder in folders {
+        let walked = clearing(acl, around, &[], kind, |acl| {
+            acl.propagate(folder, Reach::Children, Some(&check))
+        })?;
+        seen.add(walked);
+    }
+    Ok(seen)
+}
+
+/// Whether `path` is a folder, not followed if a link.
+fn is_folder(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|m| m.is_dir())
 }

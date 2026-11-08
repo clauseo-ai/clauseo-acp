@@ -239,3 +239,67 @@ fn start_takes_back_every_read_a_crashed_run_left_wherever_its_item_went() {
     // The launch's other entries stay.
     assert!(ledger.entries().any(|e| e.kind == PathKind::Matter));
 }
+
+/// Whether the launch refused as `failure` naming `OtherMatterRead`, at `at` when given, and
+/// left no read behind.
+fn assert_read_refused(w: &World, failure: ApplyFailure, at: Option<&Path>, plan_fenced: bool) {
+    let (mut ledger, mut acl) = (ledger(w), volume(w));
+    if let Some(at) = at {
+        let planted = (
+            at.to_owned(),
+            USER_SID.to_owned(),
+            Rights::Modify,
+            Inherit::ThisOnly,
+        );
+        acl.aces.insert(planted);
+    } else {
+        acl.fail_walk = Some((w.canonical("other/m2/docs/deep"), failure));
+    }
+    let mut plan = read_plan(w, &[("other/m2/docs", false)], plan_fenced);
+    let error = apply(&mut ledger, &mut plan, &mut acl, &mut around(w)).unwrap_err();
+    let Error::AclApply {
+        path_kind,
+        failure: f,
+        at: named,
+    } = &error
+    else {
+        panic!("{error:?}");
+    };
+    assert_eq!((*path_kind, *f), (PathKind::OtherMatterRead, failure));
+    if let Some(at) = at {
+        assert_eq!(named.as_deref(), Some(at));
+    }
+    assert_eq!(read_entries(&ledger), Vec::<Entry>::new());
+    let left = allows_in_other(w, &acl);
+    assert!(left.iter().all(|k| Some(k.0.as_path()) == at), "{left:?}");
+}
+
+#[test]
+fn a_read_into_a_folder_with_inheritance_off_or_a_beating_allow_refuses_the_launch() {
+    // Matter two's fence is applied already, so no fence walk of its tree runs in this launch:
+    // the read's own strict check refuses.
+    let w = World::new("files-strict-protected");
+    w.other_tree();
+    assert_read_refused(&w, ApplyFailure::ProtectedChild, None, true);
+    let w = World::new("files-strict-broad");
+    w.other_tree();
+    let b = w.canonical("other/m2/docs/b.txt");
+    assert_read_refused(&w, ApplyFailure::BroadAllowChild, Some(&b), true);
+}
+
+#[test]
+fn the_reads_check_walks_each_granted_folders_children_strictly_and_nothing_else() {
+    let w = World::new("files-strict-walks");
+    w.other_tree();
+    let (mut ledger, mut acl) = (ledger(&w), volume(&w));
+    let mut plan = read_plan(&w, &[("other/m2/docs", false)], true);
+    apply(&mut ledger, &mut plan, &mut acl, &mut around(&w)).unwrap();
+    let checks: Vec<PathBuf> = acl
+        .walks
+        .iter()
+        .filter(|(_, reach, strict)| *reach == Reach::Children && *strict)
+        .map(|(r, ..)| r.clone())
+        .collect();
+    let docs = w.canonical("other/m2/docs");
+    assert_eq!(checks, [docs.clone(), docs.join("deep")]);
+}
