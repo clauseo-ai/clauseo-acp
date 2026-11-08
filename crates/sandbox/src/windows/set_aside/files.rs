@@ -15,6 +15,8 @@
 //! or symbolic link) in the matter tree by its own path and file ID (R2). Each part, like each
 //! name and path in the manifest, is kept as the file system gave it (`names.rs`): a string
 //! when it is text, `{"utf16": [...]}` when it isn't.
+//! `notes-record.json`: the same for the matter's notes folder, when the run can write one, its
+//! paths below the notes folder.
 //! `manifest.json`: `{"version": 1, "next": 3, "entries": [<Entry>, ...], "intents": [<Entry>,
 //! ...]}`: `intents` holds the moves begun and not yet finished (N10), and is left out when
 //! empty.
@@ -46,6 +48,10 @@ use crate::windows::write;
 const RECORD_FILE: &str = SET_ASIDE_BOOKKEEPING[0];
 #[cfg(any(windows, test))]
 const MANIFEST_FILE: &str = SET_ASIDE_BOOKKEEPING[2];
+/// The notes folder's record, beside the matter's: the same shape, its keys below the notes
+/// folder, so the two never mix.
+#[cfg(any(windows, test))]
+const NOTES_RECORD_FILE: &str = SET_ASIDE_BOOKKEEPING[3];
 /// The matter's lock file: every read and write of the record or the manifest holds it.
 pub(super) const LOCK_FILE: &str = SET_ASIDE_BOOKKEEPING[1];
 /// The key, in [`Record::names`], that says the record holds the `HEAD` files
@@ -171,7 +177,10 @@ impl Default for Manifest {
     }
 }
 
-/// Where one matter's set-aside lives.
+/// Where one matter's set-aside lives, and which of its records a pass reads and writes: the
+/// matter folder's (`record.json`) or its notes folder's (`notes-record.json`). Both share the
+/// matter's lock, manifest and pass folders, so what a pass on the notes folder moves goes to
+/// the matter's set-aside.
 #[cfg(any(windows, test))]
 #[derive(Debug, Clone)]
 pub(super) struct Place {
@@ -181,6 +190,8 @@ pub(super) struct Place {
     /// `<data_dir>\sandbox\set-aside\<matter>`.
     base: PathBuf,
     matter: MatterId,
+    /// The record's file name in `base`.
+    record: &'static str,
 }
 
 #[cfg(any(windows, test))]
@@ -192,7 +203,21 @@ impl Place {
             sandbox,
             base,
             matter: *matter,
+            record: RECORD_FILE,
         }
+    }
+
+    /// The place of `matter`'s notes folder: the matter's own, with the notes record.
+    pub(super) fn notes(data_dir: &Path, matter: &MatterId) -> Place {
+        Place {
+            record: NOTES_RECORD_FILE,
+            ..Place::new(data_dir, matter)
+        }
+    }
+
+    /// Whether this is the notes folder's place ([`Place::notes`]).
+    pub(super) fn is_notes(&self) -> bool {
+        self.record == NOTES_RECORD_FILE
     }
 
     /// The matter.
@@ -253,7 +278,7 @@ impl Place {
     /// The record, or `None` when there is none. One that can't be read, or of another
     /// version or matter, is [`SetAsideFailure::Record`].
     pub(super) fn read_record(&self) -> Result<Option<Record>, SetAsideFailure> {
-        let Some(bytes) = read(&self.base.join(RECORD_FILE))? else {
+        let Some(bytes) = read(&self.base.join(self.record))? else {
             return Ok(None);
         };
         match serde_json::from_slice::<Record>(&bytes) {
@@ -268,7 +293,7 @@ impl Place {
     }
 
     pub(super) fn write_record(&self, record: &Record) -> Result<(), SetAsideFailure> {
-        save(&self.base.join(RECORD_FILE), record)
+        save(&self.base.join(self.record), record)
     }
 
     /// The manifest; an empty one when there is none.

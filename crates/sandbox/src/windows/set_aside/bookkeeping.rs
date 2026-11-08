@@ -2,15 +2,16 @@
 //! matter is forgotten (`setup/remove/ledger_work.rs`), never on the administrator's path (K1);
 //! and by the uninstaller's `--delete-app-data` (the desktop crate), from a set-aside holding
 //! nothing else. Every launch leaves `<data_dir>\sandbox\set-aside\<matter>\record.json` and
-//! `set-aside.lock`; a pass that set something aside leaves `manifest.json`, which a restore of
-//! every item empties ([`SET_ASIDE_BOOKKEEPING`]).
+//! `set-aside.lock`, and one with a notes folder `notes-record.json`; a pass that set something
+//! aside leaves `manifest.json`, which a restore of every item empties
+//! ([`SET_ASIDE_BOOKKEEPING`]).
 //!
 //! It is all or nothing, in two passes, under the matter's `set-aside.lock`, taken before the
 //! first pass and held to the deletes, as every writer takes it, so no writer changes the record
-//! meanwhile. First every name in the matter's folder is checked: each must be one of those three
+//! meanwhile. First every name in the matter's folder is checked: each must be one of those four
 //! (matched ignoring case, as NTFS matches), a plain file (no reparse point, no folder) with one
-//! link, and its contents must let it go ([`contents_allow`]): a record that lists no open
-//! session, a manifest with nothing outstanding (no item set aside and not restored, no move
+//! link, and its contents must let it go ([`contents_allow`]): a record (either) that lists no
+//! open session, a manifest with nothing outstanding (no item set aside and not restored, no move
 //! begun), and a manifest only beside such a record. Anything else (a pass folder, another name, a
 //! hard-linked file, a record still open or a manifest still listing an item, either unreadable or
 //! of another version) leaves the folder exactly as it is. Only then is each file deleted, and
@@ -63,11 +64,13 @@ pub(crate) fn set_aside_record_closed(bytes: &[u8]) -> bool {
 pub(super) const RECORD_AT: usize = 0;
 /// See [`RECORD_AT`].
 pub(super) const MANIFEST_AT: usize = 2;
+/// The notes folder's record's place in [`SET_ASIDE_BOOKKEEPING`]: read as the record is.
+pub(super) const NOTES_RECORD_AT: usize = 3;
 
 /// Whether the bookkeeping file at `at` in [`SET_ASIDE_BOOKKEEPING`] must be read before it
-/// goes: the record and the manifest; the lock goes whatever it holds.
+/// goes: the records and the manifest; the lock goes whatever it holds.
 pub(super) fn read_first(at: usize) -> bool {
-    at == RECORD_AT || at == MANIFEST_AT
+    at == RECORD_AT || at == MANIFEST_AT || at == NOTES_RECORD_AT
 }
 
 /// Whether the contents `bytes` of the bookkeeping file at `at` let it go: a record that lists
@@ -76,7 +79,7 @@ pub(super) fn read_first(at: usize) -> bool {
 pub(super) fn contents_allow(at: usize, bytes: &[u8]) -> bool {
     bytes.len() <= RECORD_CAP
         && match at {
-            RECORD_AT => set_aside_record_closed(bytes),
+            RECORD_AT | NOTES_RECORD_AT => set_aside_record_closed(bytes),
             MANIFEST_AT => super::files::Manifest::settled_empty(bytes),
             _ => true,
         }

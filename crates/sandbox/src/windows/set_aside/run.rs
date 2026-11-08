@@ -14,8 +14,10 @@ use super::check::{Aside, check, snapshot};
 use super::files::{FileId, Place, Record};
 use super::moves::{hand_over, load, set_aside};
 use super::repo_names::{is_commondir, is_git, is_head};
-use super::scan::{Kind, Listed, scan};
+use super::scan::{Kind, Listed, Scan, scan};
 use super::{Checked, Entry, Reason, SetAsideFailure};
+
+mod refusals;
 
 /// The file-system calls the set-aside makes: NTFS on Windows (`ntfs.rs`), and the tests'
 /// stand-in elsewhere.
@@ -212,12 +214,73 @@ pub(super) fn before_launch(
     running: &[&str],
     now: SystemTime,
 ) -> Result<Checked, Refused> {
-    let found = scan(volume, root);
     let place = Place::new(data_dir, matter);
+    launch_pass(volume, (root, data_dir), &place, session, running, now)
+}
+
+/// [`before_launch`] on the matter's notes folder `notes`, with its own record
+/// ([`Place::notes`]); what it moves goes to the matter's set-aside. A notes folder not there
+/// yet is recorded as empty, so whatever the session makes in it is new after.
+pub(super) fn notes_before_launch(
+    volume: &impl Volume,
+    notes: &Path,
+    data_dir: &Path,
+    matter: &MatterId,
+    session: &str,
+    running: &[&str],
+    now: SystemTime,
+) -> Result<Checked, Refused> {
+    let place = Place::notes(data_dir, matter);
+    launch_pass(volume, (notes, data_dir), &place, session, running, now)
+}
+
+/// [`after_session`] on the matter's notes folder `notes`, against its own record.
+pub(super) fn notes_after_session(
+    volume: &impl Volume,
+    notes: &Path,
+    data_dir: &Path,
+    matter: &MatterId,
+    session: &str,
+    now: SystemTime,
+) -> Result<Checked, Refused> {
+    let place = Place::notes(data_dir, matter);
+    session_pass(volume, notes, &place, session, now)
+}
+
+/// What `a` and then `b` moved, and the folders either couldn't scan.
+#[cfg(windows)]
+pub(super) fn both(mut a: Checked, b: Checked) -> Checked {
+    a.moved.extend(b.moved);
+    a.unscanned.extend(b.unscanned);
+    a
+}
+
+/// The scan of `root` for `place`'s pass: a notes folder that isn't there is an empty scan,
+/// not a partial one (it is made when first written).
+fn scan_for(volume: &impl Volume, root: &Path, place: &Place) -> Scan {
+    if place.is_notes() && matches!(volume.file_id(root), Ok(None)) {
+        return Scan::default();
+    }
+    scan(volume, root)
+}
+
+/// The launch pass over `root` with `place`'s record, as [`before_launch`] says; `data_dir`
+/// holds the matter's clean-close record, which a launch pass on the matter spends.
+fn launch_pass(
+    volume: &impl Volume,
+    (root, data_dir): (&Path, &Path),
+    place: &Place,
+    session: &str,
+    running: &[&str],
+    now: SystemTime,
+) -> Result<Checked, Refused> {
+    let found = scan_for(volume, root, place);
     let _held = place.lock()?;
-    items_root(volume, &place, root)?;
-    // A session is about to start: the last clean close no longer describes the matter.
-    super::fast::spend_clean_close(data_dir, matter)?;
+    items_root(volume, place, root)?;
+    if !place.is_notes() {
+        // A session is about to start: the last clean close no longer describes the matter.
+        super::fast::spend_clean_close(data_dir, &place.matter())?;
+    }
     let mut moved = Vec::new();
     let mut aside: Vec<Aside> = Vec::new();
     let mut sessions = BTreeSet::new();
@@ -227,7 +290,7 @@ pub(super) fn before_launch(
                 open = record.sessions.len(),
                 "a session of this matter is open; checking its protected names"
             );
-            aside = check(volume, &place, &found, &record, now, &mut moved)?;
+            aside = check(volume, place, &found, &record, now, &mut moved)?;
         }
         let (still, crashed): (BTreeSet<String>, BTreeSet<String>) = record
             .sessions
@@ -243,7 +306,7 @@ pub(super) fn before_launch(
     }
     sessions.insert(session.to_owned());
     let seen = snapshot(&found, &aside)?;
-    place.write_record(&Record::new(*matter, sessions, seen))?;
+    place.write_record(&Record::new(place.matter(), sessions, seen))?;
     Ok(Checked {
         moved,
         unscanned: found.unscanned,
@@ -260,12 +323,23 @@ pub(super) fn after_session(
     session: &str,
     now: SystemTime,
 ) -> Result<Checked, Refused> {
-    let found = scan(volume, root);
     let place = Place::new(data_dir, matter);
+    session_pass(volume, root, &place, session, now)
+}
+
+/// The after-session pass over `root` with `place`'s record, as [`after_session`] says.
+fn session_pass(
+    volume: &impl Volume,
+    root: &Path,
+    place: &Place,
+    session: &str,
+    now: SystemTime,
+) -> Result<Checked, Refused> {
+    let found = scan_for(volume, root, place);
     let _held = place.lock()?;
     let record = place.read_record()?.ok_or(SetAsideFailure::Record)?;
     let mut moved = Vec::new();
-    let aside = check(volume, &place, &found, &record, now, &mut moved)?;
+    let aside = check(volume, place, &found, &record, now, &mut moved)?;
     let mut sessions = record.sessions;
     if found.unscanned.is_empty() {
         sessions.remove(session);
@@ -273,7 +347,7 @@ pub(super) fn after_session(
         tracing::warn!("the scan was partial; the session stays open, so the next launch checks");
     }
     let seen = snapshot(&found, &aside)?;
-    place.write_record(&Record::new(*matter, sessions, seen))?;
+    place.write_record(&Record::new(place.matter(), sessions, seen))?;
     Ok(Checked {
         moved,
         unscanned: found.unscanned,
@@ -307,7 +381,8 @@ pub(super) fn list(
 
 /// See [`super::restore_set_aside`]. The manifest's own copy of the entry is used, found by its
 /// number, and only when `entry` names the same item; its folder, the folders within it and
-/// its name must each be one plain path part.
+/// its name must each be one plain path part. Besides a git folder, it refuses what was git's
+/// in a folder a launch `commondir` names, and a link leading out (`refusals.rs`).
 pub(super) fn restore(volume: &impl Volume, data_dir: &Path, entry: &Entry) -> Result<(), Refused> {
     let place = Place::new(data_dir, &entry.matter);
     let _held = place.lock()?;
@@ -324,9 +399,14 @@ pub(super) fn restore(volume: &impl Volume, data_dir: &Path, entry: &Entry) -> R
     if !plain || !found.from.is_absolute() {
         return Err(SetAsideFailure::Record.into());
     }
-    if holds_git(&found) || holds_repo(volume, &found) {
+    let common = refusals::common_targets(data_dir, &entry.matter);
+    if holds_git(&found) || holds_repo(volume, &found) || refusals::from_common(&found, &common) {
         tracing::info!("a set-aside git folder, or an item inside one, is never put back");
         return Err(SetAsideFailure::GitFolder.into());
+    }
+    if refusals::leads_out(&found) {
+        tracing::info!("a set-aside link leading out of the matter is never put back");
+        return Err(SetAsideFailure::LinkOut.into());
     }
     let parts = place.parts(&found.folder, &found.within);
     let root = root_of(volume, &place, &found, &parts)?;

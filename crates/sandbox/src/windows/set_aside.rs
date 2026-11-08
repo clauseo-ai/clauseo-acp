@@ -43,6 +43,13 @@
 //!
 //! A protected name the lawyer changes during a session is set aside too, which is accepted.
 //!
+//! The matter's notes folder (`Policy::notes`), which the agent can write too, gets the same
+//! passes at launch and after the session, with its own record (`notes-record.json`, its keys
+//! below the notes folder) beside the matter's, under the matter's lock; what they move goes to
+//! the matter's set-aside and manifest. Its live watch starts from that record, as the matter's
+//! does, so what is in notes at launch counts as known only once a launch pass checked it. The
+//! launch check's fast path covers the matter alone: the notes folder always gets its full pass.
+//!
 //! Everything lives in `<data_dir>\sandbox\set-aside\<matter>\`, under the sandbox folder's
 //! protected DACL, never in the state folder, which the agent can write: `record.json` (the
 //! names and links at the last pass, and the open sessions), `manifest.json` (each item set
@@ -116,17 +123,23 @@ use serde::{Deserialize, Serialize};
 /// so the uninstaller keeps it by this name, not by a copy of the string.
 pub const SET_ASIDE_DIR: &str = "set-aside";
 /// The set-aside's own bookkeeping in each matter's folder (`files.rs`): the record and the lock,
-/// which every launch leaves, and the manifest, which a pass that set something aside leaves and
+/// which every launch leaves, the notes folder's record, which a launch with a notes folder
+/// leaves, and the manifest, which a pass that set something aside leaves and
 /// a restore of every item empties. Public so the uninstaller counts a matter's folder holding
 /// only these as empty; `--remove` deletes them once the matter is forgotten (`bookkeeping.rs`),
 /// each only when its contents allow (a closed record, a manifest with nothing outstanding).
-pub const SET_ASIDE_BOOKKEEPING: [&str; 3] = ["record.json", "set-aside.lock", "manifest.json"];
+pub const SET_ASIDE_BOOKKEEPING: [&str; 4] = [
+    "record.json",
+    "set-aside.lock",
+    "manifest.json",
+    "notes-record.json",
+];
 /// The start of the name of a lawyer's set-aside folder at the root of a volume other than the
 /// data folder's ([`drive_folder_name`]): what is set aside from a matter on that volume goes
 /// there, since a rename can't cross volumes.
 pub const ITEMS_ROOT: &str = ".clauseo-set-aside";
 /// What follows a drive folder's own name once `SYSTEM` set it aside because another account
-/// made it (`heal.rs`): `<name>.squatted-<UTC second>`.
+/// made it (`heal.rs`): `<name>.squatted-<UTC second>-<8 random hex digits>`.
 #[cfg(any(windows, test))]
 pub(crate) const SQUATTED: &str = ".squatted-";
 
@@ -300,7 +313,16 @@ pub enum SetAsideFailure {
     /// else's, or can't be read, so it stays where it is for the check after the session.
     #[error("the item isn't the agent's, so it stays where it is")]
     NotTheAgents,
+    /// A restore of a link (a junction or a symbolic link) whose target, read by its words,
+    /// leads outside the folder it was set aside from, or can't be read, is refused: put back,
+    /// it would lead git, or the lawyer's own tools, outside the matter.
+    #[error("{}", LINK_REFUSAL)]
+    LinkOut,
 }
+
+/// [`SetAsideFailure::LinkOut`]'s words, for the lawyer.
+const LINK_REFUSAL: &str = "Clauseo won't put back a link that leads outside the matter: your \
+                            own tools would follow it out of the matter";
 
 /// [`SetAsideFailure::GitFolder`]'s words, for the lawyer.
 const GIT_REFUSAL: &str = "Clauseo won't put back a git folder or repository an agent made: your \
@@ -324,7 +346,13 @@ pub fn before_launch(
     now: SystemTime,
 ) -> Result<Checked, crate::Error> {
     let root = policy.matter();
-    run::before_launch(&ntfs::Ntfs, root, data_dir, matter, session, running, now)
+    let checked = run::before_launch(&ntfs::Ntfs, root, data_dir, matter, session, running, now)
+        .map_err(run::Refused::into_error)?;
+    let Some(notes) = policy.notes() else {
+        return Ok(checked);
+    };
+    run::notes_before_launch(&ntfs::Ntfs, notes, data_dir, matter, session, running, now)
+        .map(|more| run::both(checked, more))
         .map_err(run::Refused::into_error)
 }
 
@@ -347,7 +375,21 @@ pub fn before_launch_checked(
         let fast = fast::before_launch_fast(&ntfs::Ntfs, root, data_dir, matter, session, &touched)
             .map_err(run::Refused::into_error)?;
         if let Some(checked) = fast {
-            return Ok(checked);
+            // The launch check covers the matter alone: the notes folder gets its full pass.
+            let Some(notes) = policy.notes() else {
+                return Ok(checked);
+            };
+            return run::notes_before_launch(
+                &ntfs::Ntfs,
+                notes,
+                data_dir,
+                matter,
+                session,
+                running,
+                now,
+            )
+            .map(|more| run::both(checked, more))
+            .map_err(run::Refused::into_error);
         }
     }
     before_launch(policy, data_dir, matter, session, running, now)
@@ -369,8 +411,16 @@ pub fn after_session(
     now: SystemTime,
 ) -> Result<Checked, crate::Error> {
     let root = policy.matter();
-    run::after_session(&ntfs::Ntfs, root, data_dir, matter, session, now)
-        .map_err(run::Refused::into_error)
+    let checked = run::after_session(&ntfs::Ntfs, root, data_dir, matter, session, now);
+    // The notes folder's pass runs whatever the matter's did.
+    let notes = policy
+        .notes()
+        .map(|notes| run::notes_after_session(&ntfs::Ntfs, notes, data_dir, matter, session, now))
+        .transpose();
+    match (checked, notes) {
+        (Ok(checked), Ok(notes)) => Ok(run::both(checked, notes.unwrap_or_default())),
+        (Err(refused), _) | (_, Err(refused)) => Err(refused.into_error()),
+    }
 }
 
 /// Moves the one item at `path` (the strict walk's child the lawyer can't open: the `DELETE`
@@ -409,7 +459,8 @@ pub fn list_set_aside(data_dir: &Path, matter: &MatterId) -> Result<Vec<Entry>, 
 /// lawyer's (S15 `PR4a2`); a hand-back that fails, or a record unreadable or empty, is logged,
 /// and the next launch hands it back before its deny. A `.git`, or an item inside one, is never
 /// put back ([`SetAsideFailure::GitFolder`]): handed back it would be the lawyer's, and git
-/// trusts a lawyer's `.git`.
+/// trusts a lawyer's `.git`. Nor is a `config` or `hooks` set aside from a folder a launch
+/// `commondir` named, nor a link leading out of the matter ([`SetAsideFailure::LinkOut`]).
 #[cfg(windows)]
 pub fn restore_set_aside(data_dir: &Path, entry: &Entry) -> Result<(), SetAsideFailure> {
     run::restore(&ntfs::Ntfs, data_dir, entry).map_err(|refused| refused.failure)
@@ -428,10 +479,10 @@ impl GitGuard {
         GitGuard(live::Watched::new(&ntfs::Ntfs, root, data_dir, matter))
     }
 
-    /// The watch over another folder the agent can write (`matter`'s notes folder), knowing
-    /// what a scan finds there now; what it moves goes to `matter`'s set-aside.
-    pub(in crate::windows) fn scanned(root: &Path, data_dir: &Path, matter: &MatterId) -> GitGuard {
-        GitGuard(live::Watched::new_scanned(
+    /// The watch over `matter`'s notes folder `root`, knowing the git parts the notes record
+    /// holds (the launch pass's, [`before_launch`]); what it moves goes to `matter`'s set-aside.
+    pub(in crate::windows) fn notes(root: &Path, data_dir: &Path, matter: &MatterId) -> GitGuard {
+        GitGuard(live::Watched::new_notes(
             &ntfs::Ntfs,
             root,
             data_dir,
