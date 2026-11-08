@@ -77,6 +77,8 @@ classify() {
     ui/app/src/review/registry-h11.tsx | ui/package.json) ui=true app=true rust=true ;;
     # The page's first mark: native_mark.rs tests that its comma matches index.html's.
     ui/app/index.html) ui=true app=true rust=true ;;
+    # The native dialogs' review page: dialogs/words and webview2 tests check it matches their tables.
+    ui/app/src/review/registry-nd.tsx) ui=true app=true rust=true ;;
     docs/firm-it.md) rust=true ;;
     ui/app/doc-approvals.json) ui=true app=true rust=true ;;
     # The window's specs and scenarios: the host's e2e_scenarios test launches each one they play.
