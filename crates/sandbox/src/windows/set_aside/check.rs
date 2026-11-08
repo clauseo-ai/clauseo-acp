@@ -9,7 +9,7 @@ use super::moves::set_aside;
 use super::names::Key;
 use super::repo_names::is_git;
 use super::run::{Refused, Volume};
-use super::scan::{Item, Kept, Now, Scan, inside, same_key};
+use super::scan::{COMMON_KEY, Item, Kept, Now, Scan, inside, same_key};
 
 /// An item this pass set aside, or found gone: its key, and its file ID when the scan read
 /// one.
@@ -56,7 +56,9 @@ fn recorded(record: &Record, item: &Item) -> Option<FileId> {
         })
     }
     match item.kept {
-        Kept::Root | Kept::Nested | Kept::Head => find(&record.names, &item.key).flatten(),
+        Kept::Root | Kept::Nested | Kept::Head | Kept::Common => {
+            find(&record.names, &item.key).flatten()
+        }
         Kept::Link => find(&record.links, &item.key),
     }
 }
@@ -88,7 +90,8 @@ pub(super) fn check(
         .collect();
     let in_git = |item: &Item| item.through.last().is_some_and(|id| gits.contains(id));
     for item in &scan.items {
-        let head_left = item.kept == Kept::Head && (!heads || in_git(item));
+        let head_left = (item.kept == Kept::Head && (!heads || in_git(item)))
+            || (item.kept == Kept::Common && !heads);
         if gone_with(item, &aside) || head_left {
             continue;
         }
@@ -135,6 +138,10 @@ pub(super) fn check(
 pub(super) fn snapshot(scan: &Scan, aside: &[Aside]) -> Result<Snapshot, Refused> {
     let mut seen = Snapshot::default();
     seen.names.insert(vec![HEADS_RECORDED.into()], None);
+    for common in &scan.common {
+        let key = std::iter::once(COMMON_KEY.into()).chain(common.iter().cloned());
+        seen.names.insert(key.collect(), None);
+    }
     for item in &scan.items {
         let gone = gone_with(item, aside);
         match (item.kept, gone, item.now) {
@@ -142,7 +149,7 @@ pub(super) fn snapshot(scan: &Scan, aside: &[Aside]) -> Result<Snapshot, Refused
                 seen.names.insert(item.key.clone(), None);
             }
             (_, true, _) | (_, false, Now::Absent) => {}
-            (Kept::Root | Kept::Nested | Kept::Head, false, Now::At(id)) => {
+            (Kept::Root | Kept::Nested | Kept::Head | Kept::Common, false, Now::At(id)) => {
                 seen.names.insert(item.key.clone(), Some(id));
             }
             (Kept::Link, false, Now::At(id)) => {

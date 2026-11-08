@@ -1,36 +1,48 @@
-//! The outer runner's live watch for a git repository made in the matter (S15 tier B). The agent
-//! can rename a lawyer's own folder or file to `.git`, or fill one with a bare repository's
-//! `HEAD`, `objects` and `refs`; it stays the lawyer's, so git's ownership
-//! check trusts it, and the lawyer's VS Code polling (or the lawyer's own git) would run its
-//! `core.fsmonitor` or hooks as the lawyer before the after-session set-aside moves it. The outer
-//! runs as the lawyer for the whole session, so it watches the matter's folder itself, always on
-//! and depending on nothing IT can switch off (no `SandboxWatch`, no ETW):
+//! The outer runner's live watch for a git repository made in a folder the agent can write (S15
+//! tier B): the matter's, and its notes folder. The agent can rename a lawyer's own folder or
+//! file to `.git`, fill one with a bare repository's `HEAD`, `objects` and `refs`, or set a
+//! junction on an empty folder; it stays the lawyer's, so git's ownership check trusts it, and
+//! the lawyer's VS Code polling (or the lawyer's own git) would run its `core.fsmonitor` or
+//! hooks as the lawyer before the after-session set-aside moves it. The outer runs as the lawyer
+//! for the whole session, so it watches the folders itself, always on and depending on nothing
+//! IT can switch off (no `SandboxWatch`, no ETW):
 //!
-//! - `ReadDirectoryChangesW` on the matter's folder (`os.rs`), recursive, for names made and
-//!   renamed ([`added_names`]: `FILE_ACTION_ADDED` and `FILE_ACTION_RENAMED_NEW_NAME`), armed
-//!   before the inner runner starts. Each name reported goes to the set-aside's live check
+//! - `ReadDirectoryChangesExW` on each folder (`os.rs`), recursive, for names made and renamed
+//!   and for attributes and writes ([`records`]: `FILE_ACTION_ADDED`,
+//!   `FILE_ACTION_RENAMED_NEW_NAME`, and `FILE_ACTION_MODIFIED` of an item that is a reparse
+//!   point now), armed before the inner runner starts. Each goes to the set-aside's live check
 //!   (`set_aside/live.rs`), which moves an unknown `.git`, bare repository, `HEAD` or link out
-//!   of the matter at once, by the after-session pass's own move, manifest and lock, and scans
-//!   below a folder made or moved in.
+//!   at once, by the after-session pass's own move, manifest and lock.
+//! - Kill first: the first item found ends the session (the job ended and emptied, as every
+//!   end path does) before anything moves, so nothing races the moves. So does a scan past
+//!   `set_aside::SCAN_BUDGET`, [`OVERFLOWS`] overflows in a row, or one path reported gone
+//!   [`GONE_LIMIT`] times: an agent that keeps the watch busy ends its own session.
 //! - An overflow (`ERROR_NOTIFY_ENUM_DIR`, an empty or unreadable buffer) rescans the whole
-//!   matter and reads on. A watch that breaks, or can't be armed, rescans every
+//!   folder and reads on. A watch that breaks, or can't be armed, rescans every
 //!   [`RESCAN_EVERY`] and tries to arm again, saying so once (degraded).
-//! - An item that can't be moved (the agent holding a handle to it, say) ends the session first
-//!   (the job ended and emptied, as every end path does), then is tried again: fail closed.
-//! - Each item moved gets one plain line on the outer's stderr, its path and why
-//!   ([`SetAsideWhat::words`]), which the host reads back as a [`Denial::SetAside`] for the
-//!   agent; the manifest lists it, as it lists the after-session pass's. That pass stays the
-//!   backstop.
+//! - An item that can't be moved (the agent holding a handle to it, say) is tried again once
+//!   the session ended: fail closed.
+//! - Once the job is empty, the watch is stopped and rescans its folder one last time.
+//! - Each item moved gets two lines on the outer's stderr: the lawyer's notice, where it went
+//!   ([`SetAsideWhat::notice`]), and one the host reads back as a [`Denial::SetAside`]
+//!   ([`denial_from_line`]). The manifest lists it, as it lists the after-session pass's. That
+//!   pass stays the backstop.
 
+use std::cell::Cell;
+use std::collections::BTreeMap;
 use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::windows::set_aside::{Failed, Live};
+pub(crate) use self::records::Changes;
+#[cfg(windows)]
+pub(crate) use self::records::changes;
+use crate::windows::set_aside::{Ending, Failed, Hooks, Live};
 use crate::{Denial, SetAsideWhat};
 
 #[cfg(windows)]
 pub(super) mod os;
+mod records;
 // Two attributes, as in `windows.rs`: clippy's test allowances look for `cfg(test)`.
 #[cfg(test)]
 #[cfg(windows)]
@@ -38,25 +50,28 @@ mod ntfs_tests;
 #[cfg(test)]
 mod tests;
 
-/// How often the matter is rescanned while the watch can't be armed, or after it broke.
+/// How often the folder is rescanned while the watch can't be armed, or after it broke.
 pub(crate) const RESCAN_EVERY: Duration = Duration::from_secs(2);
-/// How many more tries a `.git` the watch couldn't move gets once the session ended.
+/// How many overflows in a row end the session.
+pub(crate) const OVERFLOWS: u32 = 3;
+/// How many times one path may be reported or found gone before the session ends.
+pub(crate) const GONE_LIMIT: u32 = 3;
+/// How many more tries an item the watch couldn't move gets once the session ended.
 const RETRIES: u32 = 5;
 /// The pause between two of those tries, while the ended agent's handles close.
 const RETRY_PAUSE: Duration = Duration::from_millis(200);
-/// `FILE_ACTION_ADDED`.
-const ADDED: u32 = 1;
-/// `FILE_ACTION_RENAMED_NEW_NAME`.
-const RENAMED_NEW_NAME: u32 = 5;
 
 /// What starts each line the outer says on its stderr.
 const SAID: &str = "clauseo-sandbox-run: ";
+/// What starts the line the host reads back as a [`Denial::SetAside`], after [`SAID`]; its
+/// fields follow, each after a tab, which no Windows name holds.
+const SET_ASIDE: &str = "set aside";
 
 /// What the watch saw next.
 #[derive(Debug)]
 pub(crate) enum Next {
-    /// Names made or renamed, relative to the matter's folder.
-    Changed(Vec<PathBuf>),
+    /// Names made or renamed, and items turned into reparse points, relative to the folder.
+    Changed(Changes),
     /// More changed than the watch could hold: what changed is unknown.
     Overflow,
     /// The watch failed and must be armed again.
@@ -65,7 +80,7 @@ pub(crate) enum Next {
     Stopped,
 }
 
-/// A watch armed on the matter's folder.
+/// A watch armed on the folder.
 pub(crate) trait Source {
     /// Blocks until something changed or the watch is stopped.
     fn next(&mut self) -> Next;
@@ -73,17 +88,18 @@ pub(crate) trait Source {
 
 /// The set-aside's live check (`set_aside::GitGuard` on Windows).
 pub(crate) trait Guard {
-    /// Checks the names the watch reported.
-    fn changed(&self, paths: &[PathBuf]) -> Live;
-    /// Scans the whole matter for an unknown `.git`.
-    fn rescan(&self) -> Live;
+    /// Checks what the watch reported.
+    fn changed(&self, changes: &Changes, hooks: &impl Hooks) -> Live;
+    /// Scans the whole folder.
+    fn rescan(&self, hooks: &impl Hooks) -> Live;
     /// Tries again what a check couldn't move.
-    fn retry(&self, failed: &[Failed]) -> Live;
+    fn retry(&self, failed: &[Failed], hooks: &impl Hooks) -> Live;
 }
 
 /// What the watch asks of the session.
 pub(crate) trait Session {
-    /// Ends the session: the agent's job ended and emptied, by the outer's own end path.
+    /// Ends the session: the agent's job ended and emptied, by the outer's own end path,
+    /// before it returns.
     fn end(&self);
     /// One line on the outer's stderr.
     fn say(&self, line: &str);
@@ -91,40 +107,91 @@ pub(crate) trait Session {
     fn pause(&self, wait: Duration) -> bool;
     /// Waits `wait`, stopped or not: between the tries after the session ended.
     fn settle(&self, wait: Duration);
+    /// A monotonic reading, for the scans' budget.
+    fn now(&self) -> Duration;
 }
 
-/// Runs the watch until it is stopped: `first` is the watch armed before the agent started,
-/// `arm` arms it again.
+/// The watch's own count of what ends the session.
+struct Ender<'a, S: Session> {
+    session: &'a S,
+    ended: Cell<bool>,
+    overflows: Cell<u32>,
+    gone: std::cell::RefCell<BTreeMap<PathBuf, u32>>,
+}
+
+impl<S: Session> Ender<'_, S> {
+    /// Ends the session the first time, saying why.
+    fn stop(&self, why: &str) {
+        if !self.ended.replace(true) {
+            self.session
+                .say(&format!("{SAID}git watch: {why}; ending the session"));
+            self.session.end();
+        }
+    }
+}
+
+impl<S: Session> Hooks for Ender<'_, S> {
+    fn end(&self, why: Ending) {
+        self.stop(match why {
+            Ending::Found => "a git repository or a link out appeared while the agent ran",
+            Ending::Slow => "a scan of the folder ran past its time",
+        });
+    }
+
+    fn now(&self) -> Duration {
+        self.session.now()
+    }
+}
+
+/// Runs the watch until it is stopped, then rescans once: `first` is the watch armed before the
+/// agent started, `arm` arms it again.
 pub(crate) fn watch<S: Source>(
     first: io::Result<S>,
     mut arm: impl FnMut() -> io::Result<S>,
     guard: &impl Guard,
     session: &impl Session,
 ) {
+    let ender = Ender {
+        session,
+        ended: Cell::new(false),
+        overflows: Cell::new(0),
+        gone: std::cell::RefCell::new(BTreeMap::new()),
+    };
+    keep_watching(first, &mut arm, guard, &ender);
+    // The job is empty: one last look, with nothing left to end.
+    ender.ended.set(true);
+    act(&guard.rescan(&ender), guard, &ender);
+}
+
+/// [`watch`]'s loop, until the watch is stopped.
+fn keep_watching<S: Source, T: Session>(
+    first: io::Result<S>,
+    arm: &mut impl FnMut() -> io::Result<S>,
+    guard: &impl Guard,
+    ender: &Ender<'_, T>,
+) {
+    let session = ender.session;
     let mut armed = first;
     let mut degraded = false;
     loop {
         match armed {
             Ok(mut source) => {
                 if std::mem::take(&mut degraded) {
-                    session.say("clauseo-sandbox-run: git watch: armed again");
-                    act(&guard.rescan(), guard, session);
+                    session.say(&format!("{SAID}git watch: armed again"));
+                    act(&guard.rescan(ender), guard, ender);
                 }
                 loop {
                     match source.next() {
-                        Next::Changed(paths) => act(&guard.changed(&paths), guard, session),
-                        Next::Overflow => {
-                            session.say(
-                                "clauseo-sandbox-run: git watch: too many changes at once; \
-                                 rescanning the matter",
-                            );
-                            act(&guard.rescan(), guard, session);
+                        Next::Changed(changes) => {
+                            ender.overflows.set(0);
+                            act(&guard.changed(&changes, ender), guard, ender);
                         }
+                        Next::Overflow => overflowed(guard, ender),
                         Next::Broken(error) => {
                             degraded = true;
                             session.say(&format!(
-                                "clauseo-sandbox-run: git watch: the watch failed ({}); \
-                                 rescanning the matter every {} s until it is armed again",
+                                "{SAID}git watch: the watch failed ({}); rescanning the folder \
+                                 every {} s until it is armed again",
                                 code(&error),
                                 RESCAN_EVERY.as_secs()
                             ));
@@ -137,8 +204,8 @@ pub(crate) fn watch<S: Source>(
             Err(error) => {
                 if !degraded {
                     session.say(&format!(
-                        "clauseo-sandbox-run: git watch: can't watch the matter ({}); \
-                         rescanning it every {} s instead",
+                        "{SAID}git watch: can't watch the folder ({}); rescanning it every {} s \
+                         instead",
                         code(&error),
                         RESCAN_EVERY.as_secs()
                     ));
@@ -146,7 +213,7 @@ pub(crate) fn watch<S: Source>(
                 }
             }
         }
-        act(&guard.rescan(), guard, session);
+        act(&guard.rescan(ender), guard, ender);
         if session.pause(RESCAN_EVERY) {
             return;
         }
@@ -154,24 +221,40 @@ pub(crate) fn watch<S: Source>(
     }
 }
 
-/// Tells the lawyer of each item `live` moved; when any couldn't be moved, ends the session,
-/// then tries those again.
-fn act(live: &Live, guard: &impl Guard, session: &impl Session) {
+/// An overflow: said, counted (past [`OVERFLOWS`] in a row the session ends), then a rescan.
+fn overflowed<T: Session>(guard: &impl Guard, ender: &Ender<'_, T>) {
+    let count = ender.overflows.get().saturating_add(1);
+    ender.overflows.set(count);
+    ender.session.say(&format!(
+        "{SAID}git watch: too many changes at once; rescanning the folder"
+    ));
+    if count >= OVERFLOWS {
+        ender.stop(&format!("{count} overflows in a row"));
+    }
+    act(&guard.rescan(ender), guard, ender);
+}
+
+/// Tells the lawyer of each item `live` moved and counts what went before it could be moved;
+/// when any couldn't be moved, ends the session (if the move's own kill didn't), then tries
+/// those again.
+fn act<T: Session>(live: &Live, guard: &impl Guard, ender: &Ender<'_, T>) {
+    let session = ender.session;
     tell(live, session);
+    count_gone(&live.gone, ender);
     if live.failed.is_empty() {
         return;
     }
     for failed in &live.failed {
         session.say(&format!(
-            "clauseo-sandbox-run: git watch: an item the agent made couldn't be set aside \
-             ({}); ending the session first",
+            "{SAID}git watch: an item couldn't be set aside ({}); trying again once the session \
+             ended",
             failed.failure
         ));
     }
-    session.end();
+    ender.stop("an item couldn't be set aside");
     let mut left = live.failed.clone();
     for _ in 0..RETRIES {
-        let again = guard.retry(&left);
+        let again = guard.retry(&left, ender);
         tell(&again, session);
         left = again.failed;
         if left.is_empty() {
@@ -180,19 +263,41 @@ fn act(live: &Live, guard: &impl Guard, session: &impl Session) {
         session.settle(RETRY_PAUSE);
     }
     session.say(&format!(
-        "clauseo-sandbox-run: git watch: {} item(s) the agent made still couldn't be set aside \
-         once the session ended; the check after the session tries again",
+        "{SAID}git watch: {} item(s) still couldn't be set aside once the session ended; the \
+         check after the session tries again",
         left.len()
     ));
 }
 
-/// One line for each item moved, its path below the matter and why: the lawyer sees it in the
-/// run's stderr, and the host reads it back as a [`Denial::SetAside`] ([`denial_from_line`])
-/// for the session's denial sink, which tells the agent.
+/// Counts each path gone; one gone [`GONE_LIMIT`] times ends the session.
+fn count_gone<T: Session>(gone: &[PathBuf], ender: &Ender<'_, T>) {
+    let mut over = false;
+    if let Ok(mut counts) = ender.gone.try_borrow_mut() {
+        for path in gone {
+            let count = counts.entry(path.clone()).or_insert(0);
+            *count = count.saturating_add(1);
+            over |= *count >= GONE_LIMIT;
+        }
+    }
+    if over {
+        ender.stop("an item kept going before it could be set aside");
+    }
+}
+
+/// Two lines for each item moved: the lawyer's notice, where it went, and the line the host
+/// reads back as a [`Denial::SetAside`] ([`denial_from_line`]) for the session's denial sink,
+/// which tells the agent.
 fn tell(live: &Live, session: &impl Session) {
     for moved in &live.moved {
         tracing::info!(id = moved.entry.id, "the git watch set an item aside");
-        session.say(&format!("{SAID}{}", moved.what.words(&moved.path)));
+        let to = &moved.entry.to;
+        session.say(&format!("{SAID}{}", moved.what.notice(&moved.path, to)));
+        session.say(&format!(
+            "{SAID}{SET_ASIDE}\t{}\t{}\t{}",
+            moved.path.display(),
+            to.display(),
+            moved.what.why()
+        ));
     }
 }
 
@@ -200,15 +305,20 @@ fn tell(live: &Live, session: &impl Session) {
 /// The Windows launcher passes each line to it and each denial to the launch's sink: the runner
 /// is another process, and its stderr is the one way back.
 pub fn denial_from_line(line: &str) -> Option<Denial> {
-    let rest = line
-        .strip_prefix(SAID)?
-        .strip_prefix("Clauseo set aside ")?;
-    let (path, why) = rest.split_once(": ")?;
+    let mut fields = line.strip_prefix(SAID)?.split('\t');
+    if fields.next()? != SET_ASIDE {
+        return None;
+    }
+    let (path, to, why) = (fields.next()?, fields.next()?, fields.next()?);
+    if fields.next().is_some() {
+        return None;
+    }
     let what = SetAsideWhat::ALL
         .into_iter()
         .find(|what| what.why() == why)?;
     Some(Denial::SetAside {
         path: PathBuf::from(path),
+        to: PathBuf::from(to),
         what,
     })
 }
@@ -218,50 +328,4 @@ fn code(error: &io::Error) -> String {
     error
         .raw_os_error()
         .map_or_else(|| error.kind().to_string(), |code| code.to_string())
-}
-
-/// The names `FILE_ACTION_ADDED` and `FILE_ACTION_RENAMED_NEW_NAME` records in `buffer` give
-/// (`FILE_NOTIFY_INFORMATION`, chained by `NextEntryOffset`), relative to the watched folder.
-/// `None` when the buffer doesn't read as records: the watch then rescans.
-pub(crate) fn added_names(buffer: &[u8]) -> Option<Vec<PathBuf>> {
-    let mut names = Vec::new();
-    let mut at = 0_usize;
-    loop {
-        let record = buffer.get(at..)?;
-        let next = word(record, 0)?;
-        let action = word(record, 4)?;
-        let length = usize::try_from(word(record, 8)?).ok()?;
-        let name = record.get(12..12_usize.checked_add(length)?)?;
-        if action == ADDED || action == RENAMED_NEW_NAME {
-            names.push(path_of(name)?);
-        }
-        if next == 0 {
-            return Some(names);
-        }
-        at = at.checked_add(usize::try_from(next).ok()?)?;
-    }
-}
-
-/// The little-endian `u32` at `at` in `bytes`.
-fn word(bytes: &[u8], at: usize) -> Option<u32> {
-    let four: [u8; 4] = bytes.get(at..at.checked_add(4)?)?.try_into().ok()?;
-    Some(u32::from_le_bytes(four))
-}
-
-/// A name in a record: UTF-16LE, kept as it is on Windows, text or not.
-fn path_of(name: &[u8]) -> Option<PathBuf> {
-    let (pairs, odd) = name.as_chunks::<2>();
-    if !odd.is_empty() {
-        return None;
-    }
-    let units: Vec<u16> = pairs.iter().map(|pair| u16::from_le_bytes(*pair)).collect();
-    #[cfg(windows)]
-    {
-        use std::os::windows::ffi::OsStringExt as _;
-        Some(PathBuf::from(std::ffi::OsString::from_wide(&units)))
-    }
-    #[cfg(not(windows))]
-    {
-        String::from_utf16(&units).ok().map(PathBuf::from)
-    }
 }

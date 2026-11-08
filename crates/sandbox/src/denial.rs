@@ -72,8 +72,11 @@ pub enum Denial {
     /// ran (Windows tier B's watch, `windows/runner/git_watch.rs`). Its words
     /// ([`SetAsideWhat::words`]) tell the agent why, so it can work elsewhere.
     SetAside {
-        /// Where it was, below the matter's folder.
+        /// Where it was, below the watched folder (the matter's, or its notes folder).
         path: PathBuf,
+        /// Where it is now, in the set-aside: the lawyer's notice names it
+        /// ([`SetAsideWhat::notice`]).
+        to: PathBuf,
         /// What it was.
         what: SetAsideWhat,
     },
@@ -99,6 +102,23 @@ impl SetAsideWhat {
     /// The plain refusal for the item at `path`, below the matter's folder.
     pub fn words(self, path: &std::path::Path) -> String {
         format!("Clauseo set aside {}: {}", path.display(), self.why())
+    }
+
+    /// The lawyer's notice for the item `name` moved to `to`: where it went, and, since a
+    /// restore refuses a git folder, the step to put back one the lawyer made.
+    pub fn notice(self, name: &std::path::Path, to: &std::path::Path) -> String {
+        let (name, to) = (name.display(), to.display());
+        match self {
+            SetAsideWhat::GitRepository => format!(
+                "The AI tool tried to put a code repository in the matter. Clauseo stopped it \
+                 and moved {name} to {to}. If you made it yourself, move it back after the \
+                 session ends."
+            ),
+            SetAsideWhat::LinkOut => format!(
+                "The AI tool made a link in the matter that leads outside it. Clauseo stopped \
+                 it and moved {name} to {to}."
+            ),
+        }
     }
 
     /// Why, after the path.

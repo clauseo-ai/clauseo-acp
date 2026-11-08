@@ -19,6 +19,7 @@ fn message() -> LaunchMessage {
         matter_sid: None,
         matter: crate::windows::test_world::matter_one(),
         matter_root: r"D:\Matters\Smith".to_owned(),
+        notes_root: None,
         program: format!(r"{RUNTIME}\node.exe"),
         args: vec!["codex-acp.js".to_owned(), "--flag value".to_owned()],
         cwd: r"D:\Matters\Smith".to_owned(),

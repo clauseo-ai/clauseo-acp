@@ -13,8 +13,8 @@ use clauseo_protocol::MatterId;
 use super::check::{Aside, check, snapshot};
 use super::files::{FileId, Place, Record};
 use super::moves::{hand_over, load, set_aside};
-use super::repo_names::is_git;
-use super::scan::{Listed, scan};
+use super::repo_names::{is_commondir, is_git, is_head};
+use super::scan::{Kind, Listed, scan};
 use super::{Checked, Entry, Reason, SetAsideFailure};
 
 /// The file-system calls the set-aside makes: NTFS on Windows (`ntfs.rs`), and the tests'
@@ -253,8 +253,8 @@ pub(super) fn restore(volume: &impl Volume, data_dir: &Path, entry: &Entry) -> R
     if !plain || !found.from.is_absolute() {
         return Err(SetAsideFailure::Record.into());
     }
-    if holds_git(&found) {
-        tracing::info!("a set-aside .git, or an item inside one, is never put back");
+    if holds_git(&found) || holds_repo(volume, &found) {
+        tracing::info!("a set-aside git folder, or an item inside one, is never put back");
         return Err(SetAsideFailure::GitFolder.into());
     }
     volume.move_back(
@@ -319,6 +319,44 @@ pub(super) fn holds_git(entry: &Entry) -> bool {
         }
     });
     in_path || is_git(&entry.name) || entry.within.iter().any(|part| is_git(part))
+}
+
+/// Whether `entry`'s item, where it is now, is or holds at any depth a `HEAD` (a file or a
+/// link), a `commondir` or a `.git`: a bare repository or a worktree's git folder set aside
+/// whole, which put back would be a git folder git trusts. Its folders are opened as the scan
+/// opens them, never through a link; one that can't be opened or listed counts as holding one.
+pub(super) fn holds_repo(volume: &impl Volume, entry: &Entry) -> bool {
+    let named = |name: &OsStr, kind: Kind| {
+        is_git(name) || (kind != Kind::Folder && (is_head(name) || is_commondir(name)))
+    };
+    let own = entry.from.file_name().unwrap_or(&entry.name);
+    let Ok(meta) = std::fs::symlink_metadata(&entry.to) else {
+        return named(own, Kind::Other);
+    };
+    if !meta.is_dir() || meta.file_type().is_symlink() {
+        return named(own, Kind::Other);
+    }
+    let Ok(top) = volume.open_root(&entry.to) else {
+        return true;
+    };
+    let mut stack = vec![top];
+    while let Some(folder) = stack.pop() {
+        let Ok(listed) = volume.list(&folder) else {
+            return true;
+        };
+        for child in listed {
+            if named(&child.name, child.kind) {
+                return true;
+            }
+            if child.kind == Kind::Folder {
+                match volume.open_folder(&folder, &child.name) {
+                    Ok(inner) => stack.push(inner),
+                    Err(_) => return true,
+                }
+            }
+        }
+    }
+    is_git(own)
 }
 
 /// Whether `name` is one plain path part: no separator, drive, `.` or `..`. Text or not.

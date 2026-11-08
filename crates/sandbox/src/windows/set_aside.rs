@@ -128,7 +128,7 @@ mod live;
 #[cfg(test)]
 pub(in crate::windows) use live::Moved;
 #[cfg(any(windows, test))]
-pub(in crate::windows) use live::{Failed, Live};
+pub(in crate::windows) use live::{Ending, Failed, Hooks, Live};
 #[cfg(any(windows, test))]
 mod moves;
 mod names;
@@ -232,16 +232,17 @@ pub enum SetAsideFailure {
     /// A file-system call failed, of this kind.
     #[error("a file-system call failed ({0})")]
     Io(io::ErrorKind),
-    /// A restore of a `.git`, or of an item inside one, is refused: put back, it would be the
-    /// lawyer's, and git trusts a lawyer's `.git`, so its hooks or `core.fsmonitor` would run
-    /// as the lawyer.
+    /// A restore of a `.git`, of an item inside one, or of anything holding a `HEAD` or a
+    /// `commondir` (a bare repository's or a worktree's git folder) is refused: put back, it would
+    /// be the lawyer's, and git trusts a lawyer's git folder, so its hooks or `core.fsmonitor`
+    /// would run as the lawyer.
     #[error("{}", GIT_REFUSAL)]
     GitFolder,
 }
 
 /// [`SetAsideFailure::GitFolder`]'s words, for the lawyer.
-const GIT_REFUSAL: &str = "Clauseo won't put back a .git folder an agent made: your own git \
-                           tools would run code from it as you";
+const GIT_REFUSAL: &str = "Clauseo won't put back a git folder or repository an agent made: your \
+                           own git tools would run code from it as you";
 
 /// The launch-time call, before `apply`. Scans the matter; when any session of the matter is
 /// open (running, or ended with no [`after_session`]), sets aside each protected name and link
@@ -352,7 +353,7 @@ pub fn restore_set_aside(data_dir: &Path, entry: &Entry) -> Result<(), SetAsideF
     run::restore(&ntfs::Ntfs, data_dir, entry).map_err(|refused| refused.failure)
 }
 
-/// The outer runner's live watch over one matter's root (`runner/git_watch.rs`): each git
+/// The outer runner's live watch over one watched folder (`runner/git_watch.rs`): each git
 /// repository or outbound link made during the session moved aside at once, by the
 /// after-session pass's own move (`live.rs`).
 #[cfg(windows)]
@@ -360,24 +361,60 @@ pub(in crate::windows) struct GitGuard(live::Watched);
 
 #[cfg(windows)]
 impl GitGuard {
-    /// The watch over `matter`'s folder `root`, knowing the `.git`s its record holds.
+    /// The watch over `matter`'s folder `root`, knowing the git parts its record holds.
     pub(in crate::windows) fn new(root: &Path, data_dir: &Path, matter: &MatterId) -> GitGuard {
         GitGuard(live::Watched::new(&ntfs::Ntfs, root, data_dir, matter))
     }
 
-    /// Checks the paths the watch reported, relative to the root.
-    pub(in crate::windows) fn changed(&self, paths: &[PathBuf], now: SystemTime) -> Live {
-        self.0.changed(&ntfs::Ntfs, paths, now)
+    /// The watch over another folder the agent can write (`matter`'s notes folder), knowing
+    /// what a scan finds there now; what it moves goes to `matter`'s set-aside.
+    pub(in crate::windows) fn scanned(root: &Path, data_dir: &Path, matter: &MatterId) -> GitGuard {
+        GitGuard(live::Watched::new_scanned(
+            &ntfs::Ntfs,
+            root,
+            data_dir,
+            matter,
+        ))
     }
 
-    /// Scans the whole matter for a `.git` its record doesn't know.
-    pub(in crate::windows) fn rescan(&self, now: SystemTime) -> Live {
-        self.0.rescan(&ntfs::Ntfs, now)
+    /// The folder watched.
+    pub(in crate::windows) fn root(&self) -> &Path {
+        self.0.root()
+    }
+
+    /// Checks the paths the watch reported made or renamed, relative to the root.
+    pub(in crate::windows) fn changed(
+        &self,
+        paths: &[PathBuf],
+        now: SystemTime,
+        hooks: &impl Hooks,
+    ) -> Live {
+        self.0.changed(&ntfs::Ntfs, paths, now, hooks)
+    }
+
+    /// Checks the paths the watch reported turned into reparse points, relative to the root.
+    pub(in crate::windows) fn relinked(
+        &self,
+        paths: &[PathBuf],
+        now: SystemTime,
+        hooks: &impl Hooks,
+    ) -> Live {
+        self.0.relinked(&ntfs::Ntfs, paths, now, hooks)
+    }
+
+    /// Scans the whole folder for what the watch moves.
+    pub(in crate::windows) fn rescan(&self, now: SystemTime, hooks: &impl Hooks) -> Live {
+        self.0.rescan(&ntfs::Ntfs, now, hooks)
     }
 
     /// Tries again what a check couldn't move.
-    pub(in crate::windows) fn retry(&self, failed: &[Failed], now: SystemTime) -> Live {
-        self.0.retry(&ntfs::Ntfs, failed, now)
+    pub(in crate::windows) fn retry(
+        &self,
+        failed: &[Failed],
+        now: SystemTime,
+        hooks: &impl Hooks,
+    ) -> Live {
+        self.0.retry(&ntfs::Ntfs, failed, now, hooks)
     }
 }
 

@@ -6,7 +6,7 @@
 
 use std::ffi::OsStr;
 
-use super::scan::same;
+use super::scan::{Kind, same};
 
 /// The name git opens for its folder, or for the file that names it.
 const GIT: &str = ".git";
@@ -38,16 +38,28 @@ pub(super) fn git_lookalike(name: &OsStr) -> bool {
     is_git(name) && !name.eq_ignore_ascii_case(GIT) && !same(name, OsStr::new(GIT))
 }
 
-/// Whether a folder's listing (each name, and whether it is a folder) is a git folder's, as git
-/// tests one: a `HEAD` (a file or a link) beside `objects` and `refs` folders (a bare
-/// repository), or beside a `commondir` file (a worktree's git folder).
-pub(super) fn bare_layout<'a>(listed: impl Iterator<Item = (&'a OsStr, bool)>) -> bool {
+/// What git reads from the folder a `commondir` names, as well as its git folder: its
+/// `config` and `hooks` would run code as the lawyer, the rest make it a repository.
+pub(super) const COMMON_NAMES: [&str; 6] =
+    ["config", "hooks", "objects", "refs", "packed-refs", "info"];
+
+/// Whether `name` opens as `commondir`.
+pub(super) fn is_commondir(name: &OsStr) -> bool {
+    opens_as(name, "commondir")
+}
+
+/// Whether a folder's listing (each name, and what the listing says it is) is a git folder's,
+/// as git tests one: a `HEAD` (a file or a link) beside `objects` and `refs` (folders, or links
+/// git would follow to folders) for a bare repository, or beside a `commondir` file for a
+/// worktree's git folder.
+pub(super) fn bare_layout<'a>(listed: impl Iterator<Item = (&'a OsStr, Kind)>) -> bool {
     let (mut head, mut objects, mut refs, mut common) = (false, false, false, false);
-    for (name, folder) in listed {
-        head |= !folder && is_head(name);
+    for (name, kind) in listed {
+        let folder = kind != Kind::Other;
+        head |= kind != Kind::Folder && is_head(name);
         objects |= folder && opens_as(name, "objects");
         refs |= folder && opens_as(name, "refs");
-        common |= !folder && opens_as(name, "commondir");
+        common |= kind != Kind::Folder && is_commondir(name);
     }
     head && ((objects && refs) || common)
 }
