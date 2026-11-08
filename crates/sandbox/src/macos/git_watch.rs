@@ -23,8 +23,8 @@
 //!   stream that cannot start falls back to a full scan every 2 s, logged.
 //! - A canary checks the stream (`run.rs`): every 10 s a file in the set-aside folder, on the
 //!   matter's volume and out of the agent's reach, is rewritten; when its event doesn't come
-//!   within 2 s the stream counts as silent, and the matter is scanned whole every 2 s until
-//!   it comes again.
+//!   within 2 s, or it can't be written, the stream is lost: the session ends as for a find,
+//!   and the lawyer gets [`Denial::GitWatchLost`](crate::Denial).
 //! - Every 30 s a pass lists the folders whose modification or status-change time changed
 //!   since the last pass (`check/sweep.rs`), at most 250 ms of work at a time, going on where
 //!   it stopped. What it finds ends the session as an event's find does.

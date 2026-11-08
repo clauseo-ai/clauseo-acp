@@ -10,8 +10,9 @@
 //! may not look up [`CONTROL`], a name no profile allows: no process outside a Seatbelt jail is
 //! sandboxed, and no other launch's profile allows this launch's name. The checks pass
 //! `SANDBOX_CHECK_NO_REPORT`, so they log no denial. A check that fails on a running process
-//! counts as the session's (fail-closed): only a plain "not sandboxed", "may not look up the
-//! session's name" or "may look up the control name" rules a process out. One pass over every
+//! keeps the session running (fail-closed: only a plain "not sandboxed", "may not look up the
+//! session's name" or "may look up the control name" rules a process out), but is never
+//! grounds to kill it: only a process every check plainly puts in the session is killed. One pass over every
 //! process (`proc_listallpids`) takes about 2 ms for 700 processes on an M-series Mac.
 //!
 //! Each libproc and libsandbox call has one wrapper here, with its `unsafe` block.
@@ -111,15 +112,11 @@ impl Probe {
         &self.name
     }
 
-    /// The running processes of the session, zombies left out; `None` when the processes
+    /// The running processes of the session, zombies left out, with those whose checks
+    /// failed (fail-closed: the session isn't over while one runs); `None` when the processes
     /// can't be listed.
     pub(crate) fn pids(&self) -> Option<Vec<i32>> {
-        Some(
-            all_pids()?
-                .into_iter()
-                .filter(|&pid| self.holds(pid))
-                .collect(),
-        )
+        Some(running_of(&all_pids()?, |pid| self.verdict(pid)))
     }
 
     /// Whether the session has no process left; a listing that fails counts as not yet.
@@ -127,40 +124,90 @@ impl Probe {
         self.pids().is_some_and(|pids| pids.is_empty())
     }
 
-    /// Sends SIGKILL to every process of the session, each checked again just before its
-    /// signal, so a pid reused since the listing is left alone. Returns how many were sent.
+    /// Sends SIGKILL to every process plainly of the session; a process whose checks failed
+    /// is never sent one. Right before each signal the process is checked again and its
+    /// identity (pid and start time) compared with the listing's, so a pid reused since is
+    /// left alone. Returns how many were sent.
     pub(crate) fn kill_all(&self) -> usize {
-        let Some(pids) = self.pids() else {
+        let Some(pids) = all_pids() else {
             tracing::error!(probe = %self.name, "the jailed processes could not be listed");
             return 0;
         };
-        let mut sent = 0;
-        for pid in pids {
-            if self.holds(pid)
-                && let Some(target) = Pid::from_raw(pid)
-                && kill_process(target, Signal::KILL).is_ok()
-            {
-                sent += 1;
-            }
-        }
-        sent
+        let send =
+            |pid| Pid::from_raw(pid).is_some_and(|pid| kill_process(pid, Signal::KILL).is_ok());
+        let identity = |pid| u32::try_from(pid).ok().and_then(start_of);
+        kill_with(&pids, |pid| self.verdict(pid), identity, send)
     }
 
-    /// Whether `pid` is a running process of this session; a failed check counts as yes.
-    fn holds(&self, pid: i32) -> bool {
-        in_session(
+    /// Whether `pid` is a running process of this session.
+    fn verdict(&self, pid: i32) -> Verdict {
+        let found = verdict(
             sandboxed(pid),
             may_look_up(pid, &self.c_name),
             may_look_up(pid, CONTROL),
-        ) && running(pid)
+        );
+        if found == Verdict::Out || !running(pid) {
+            Verdict::Out
+        } else {
+            found
+        }
     }
 }
 
-/// Whether a process belongs to the session, from its three checks (`None` for one that
-/// failed): fail-closed, so only a plain answer rules it out. A gone pid answers "sandboxed"
-/// but "may not look up" any name, so it is ruled out too.
-fn in_session(sandboxed: Option<bool>, probe: Option<bool>, control: Option<bool>) -> bool {
-    sandboxed != Some(false) && probe != Some(false) && control != Some(true)
+/// Whether a process is the session's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Verdict {
+    /// Plainly: every check answered so.
+    In,
+    /// Plainly not: one check answered so.
+    Out,
+    /// A check failed and none ruled it out: it keeps the session running, but is never killed.
+    Unsure,
+}
+
+/// A process's verdict from its three checks (`None` for one that failed). Only a plain answer
+/// rules it out, and only three plain answers rule it in. A gone pid answers "sandboxed" but
+/// "may not look up" any name, so it is ruled out.
+fn verdict(sandboxed: Option<bool>, probe: Option<bool>, control: Option<bool>) -> Verdict {
+    if sandboxed == Some(false) || probe == Some(false) || control == Some(true) {
+        Verdict::Out
+    } else if sandboxed == Some(true) && probe == Some(true) && control == Some(false) {
+        Verdict::In
+    } else {
+        Verdict::Unsure
+    }
+}
+
+/// The pids among `pids` that keep the session running: in it, or unsure.
+fn running_of(pids: &[i32], verdict: impl Fn(i32) -> Verdict) -> Vec<i32> {
+    pids.iter()
+        .copied()
+        .filter(|&pid| verdict(pid) != Verdict::Out)
+        .collect()
+}
+
+/// `send`s each pid among `pids` plainly in the session (`verdict`), noting its `identity`
+/// (its start); right before each send the verdict is read again and the identity compared,
+/// and a pid whose start changed (reused) or can't be read is skipped. Returns how many sends
+/// went.
+fn kill_with(
+    pids: &[i32],
+    verdict: impl Fn(i32) -> Verdict,
+    identity: impl Fn(i32) -> Option<u64>,
+    send: impl Fn(i32) -> bool,
+) -> usize {
+    let targets: Vec<(i32, u64)> = pids
+        .iter()
+        .copied()
+        .filter(|&pid| verdict(pid) == Verdict::In)
+        .filter_map(|pid| Some((pid, identity(pid)?)))
+        .collect();
+    targets
+        .into_iter()
+        .filter(|&(pid, start)| {
+            verdict(pid) == Verdict::In && identity(pid) == Some(start) && send(pid)
+        })
+        .count()
 }
 
 /// Whether `pid` is running: not a zombie, or, when its info can't be read, not gone.

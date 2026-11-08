@@ -85,6 +85,11 @@ pub enum Denial {
         /// ran its final scan (the host quit), found at the matter's next launch.
         session_ended: bool,
     },
+    /// The macOS git watch lost its view of the matter: its `FSEvents` stream stopped
+    /// delivering (its canary's event did not come within 2 s), or its canary could not be
+    /// written (decision record 0038). It ended the session first, then ran its final scan.
+    /// [`Denial::notice`] is the lawyer's text. Never rate-capped.
+    GitWatchLost,
 }
 
 /// What the git watch set aside ([`Denial::GitSetAside`]).
@@ -144,8 +149,16 @@ impl Denial {
         })
     }
 
-    /// The lawyer's notice, for the denials that carry one: [`Denial::GitSetAside`].
+    /// The lawyer's notice, for the denials that carry one: [`Denial::GitSetAside`] and
+    /// [`Denial::GitWatchLost`].
     pub fn notice(&self) -> Option<String> {
+        if *self == Denial::GitWatchLost {
+            return Some(
+                "Clauseo stopped the AI tool because it could no longer watch this matter's \
+                 folder for changes. You can start it again."
+                    .to_owned(),
+            );
+        }
         let Denial::GitSetAside {
             path,
             what,

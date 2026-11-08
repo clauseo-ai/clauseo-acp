@@ -1,6 +1,6 @@
-//! The backstops behind the stream: the canary that finds a silent stream and falls back to
-//! the 2 s rescan, the 30 s pass over changed folders and its cap, a kill that runs out
-//! keeping the session's record, and the host's quit.
+//! The backstops behind the stream: the canary whose miss ends the run, a must-scan or
+//! dropped flag that rescans and carries on, the 30 s pass over changed folders and its cap, a
+//! kill that runs out keeping the session's record, and the host's quit.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -8,12 +8,13 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use super::super::flags;
 use super::super::host::Register;
 use super::super::run::{
     CANARY_EVERY, CANARY_WAIT, Flow, Msg, Runner, SWEEP_CAP, SWEEP_EVERY, start_with,
 };
-use super::fake::{FakeFs, FakeSession, MemStore, SET_ASIDE, event, quiet, watch};
-use crate::{Clock, SystemClock};
+use super::fake::{FakeFs, FakeSession, MemStore, Notices, SET_ASIDE, event, none, quiet, watch};
+use crate::{Clock, Denial, SystemClock};
 
 const CANARY: &str = "/data/sandbox/git-set-aside/watch-canary";
 
@@ -22,8 +23,8 @@ fn ms(n: u64) -> Duration {
 }
 
 /// A runner of `/m` with the canary, its session attached and dying when ended.
-fn runner(fs: &FakeFs) -> (Runner<FakeFs>, FakeSession) {
-    let (watch, _notices) = watch(fs, &[]);
+fn runner(fs: &FakeFs) -> (Runner<FakeFs>, FakeSession, Arc<Notices>) {
+    let (watch, notices) = watch(fs, &[]);
     let mut runner = Runner::new(watch, false, Duration::ZERO)
         .with_canary(PathBuf::from(CANARY), Duration::ZERO);
     let session = FakeSession {
@@ -32,7 +33,7 @@ fn runner(fs: &FakeFs) -> (Runner<FakeFs>, FakeSession) {
     };
     let attach = Msg::Attach(Arc::new(session.clone()));
     assert_eq!(runner.input(Some(attach), Duration::ZERO), Flow::Go);
-    (runner, session)
+    (runner, session, notices)
 }
 
 fn echo() -> Msg {
@@ -44,56 +45,70 @@ fn ends(session: &FakeSession) -> u32 {
 }
 
 #[test]
-fn a_silent_stream_falls_back_to_the_two_second_rescan() {
+fn a_canary_miss_ends_the_run_kill_first_then_the_final_scan() {
     let fs = FakeFs::new();
-    let (mut runner, session) = runner(&fs);
+    let (mut runner, session, notices) = runner(&fs);
     assert_eq!(fs.touched(), [PathBuf::from(CANARY)], "written at once");
     // A repository arrives and the stream says nothing, the canary's event included.
     fs.repo("/m/.git");
     let before = CANARY_WAIT.checked_sub(ms(100)).unwrap();
     assert_eq!(runner.input(None, before), Flow::Go);
-    assert!(!runner.silent());
+    assert!(!runner.lost());
     assert_eq!(ends(&session), 0);
     assert_eq!(runner.input(None, CANARY_WAIT), Flow::Done);
-    assert!(runner.silent());
-    assert_eq!(
-        ends(&session),
-        1,
-        "the rescan found it and ended the session"
-    );
+    assert!(runner.lost());
+    assert_eq!(ends(&session), 1, "the session was killed");
+    assert!(fs.exists("/m/.git"), "nothing moved before the kill");
+    assert_eq!(notices.taken(), [Denial::GitWatchLost]);
     assert_eq!(runner.finish().len(), 0);
-    assert!(!fs.exists("/m/.git"));
+    assert!(!fs.exists("/m/.git"), "the final scan set it aside");
+    let after = notices.taken();
+    assert!(
+        matches!(after.as_slice(), [Denial::GitSetAside { .. }]),
+        "{after:?}"
+    );
 }
 
 #[test]
-fn the_canarys_event_keeps_the_stream_trusted_and_ends_a_silence() {
+fn the_canarys_event_keeps_the_stream_trusted() {
     let fs = FakeFs::new();
-    let (mut runner, session) = runner(&fs);
+    let (mut runner, session, notices) = runner(&fs);
     assert_eq!(runner.input(Some(echo()), ms(100)), Flow::Go);
     // Other events in the set-aside folder are not the matter's: no rescan.
     let other = Msg::Events(vec![event(&format!("{SET_ASIDE}/x/item"), 0x800)]);
     fs.repo("/m/.git");
     assert_eq!(runner.input(Some(other), ms(200)), Flow::Go);
     assert_eq!(runner.input(None, CANARY_WAIT * 2), Flow::Go);
-    assert!(!runner.silent());
-    assert_eq!(
-        ends(&session),
-        0,
-        "a trusted stream's silence about the matter is trusted"
-    );
     fs.remove("/m/.git");
-    // The next write's event doesn't come: silent, and the matter is scanned every 2 s.
+    // Each write's event comes: the run goes on.
     assert_eq!(runner.input(None, CANARY_EVERY), Flow::Go);
     assert_eq!(fs.touched().len(), 2);
-    assert_eq!(runner.input(None, CANARY_EVERY + CANARY_WAIT), Flow::Go);
-    assert!(runner.silent());
-    // Its event comes late: trusted again, no more rescans.
-    let late = CANARY_EVERY + CANARY_WAIT + ms(100);
-    assert_eq!(runner.input(Some(echo()), late), Flow::Go);
-    assert!(!runner.silent());
-    fs.repo("/m/.git");
-    assert_eq!(runner.input(None, late + CANARY_WAIT), Flow::Go);
+    assert_eq!(runner.input(Some(echo()), CANARY_EVERY + ms(100)), Flow::Go);
+    assert_eq!(runner.input(None, CANARY_EVERY + CANARY_WAIT * 2), Flow::Go);
+    assert!(!runner.lost());
     assert_eq!(ends(&session), 0);
+    none(&notices);
+}
+
+#[test]
+fn a_must_scan_or_dropped_flag_rescans_at_once_and_carries_on() {
+    for flag in [
+        flags::MUST_SCAN_SUB_DIRS,
+        flags::USER_DROPPED,
+        flags::KERNEL_DROPPED,
+    ] {
+        let fs = FakeFs::new();
+        let (mut runner, session, _notices) = runner(&fs);
+        let rescan = Msg::Events(vec![event("/m", flag)]);
+        assert_eq!(runner.input(Some(rescan), ms(100)), Flow::Go, "{flag:#x}");
+        assert_eq!(ends(&session), 0, "nothing found: the run goes on");
+        // The next one finds what arrived without an event of its own.
+        fs.dir("/m/deep");
+        fs.repo("/m/deep/.git");
+        let rescan = Msg::Events(vec![event("/m", flag)]);
+        assert_eq!(runner.input(Some(rescan), ms(200)), Flow::Done, "{flag:#x}");
+        assert_eq!(ends(&session), 1);
+    }
 }
 
 #[test]
@@ -101,7 +116,7 @@ fn the_thirty_second_pass_finds_what_the_events_missed() {
     let fs = FakeFs::new();
     fs.dir("/m/a");
     fs.dir("/m/a/b");
-    let (mut runner, session) = runner(&fs);
+    let (mut runner, session, _notices) = runner(&fs);
     // Each canary write's event comes; the matter's events never do.
     let mut at = Duration::ZERO;
     while at < SWEEP_EVERY {

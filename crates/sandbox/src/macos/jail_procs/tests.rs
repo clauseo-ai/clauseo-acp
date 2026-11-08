@@ -6,7 +6,7 @@ use std::process::Stdio;
 use async_process::{Child, Command};
 use std::time::Duration;
 
-use super::{Probe, in_session, running, start_of, this_process};
+use super::{Probe, Verdict, kill_with, running, running_of, start_of, this_process, verdict};
 use crate::{Clock as _, SystemClock};
 
 /// A jail allowing the probe's name, as the launcher's profile does.
@@ -100,30 +100,82 @@ fn this_process_has_a_start() {
 }
 
 #[test]
-fn a_failed_check_counts_as_the_sessions() {
-    // Only a plain answer rules a process out.
-    assert!(in_session(Some(true), Some(true), Some(false)));
-    assert!(
-        !in_session(Some(false), Some(true), Some(false)),
+fn a_failed_check_keeps_the_session_running_but_never_kills() {
+    use Verdict::{In, Out, Unsure};
+    assert_eq!(verdict(Some(true), Some(true), Some(false)), In);
+    assert_eq!(
+        verdict(Some(false), Some(true), Some(false)),
+        Out,
         "not sandboxed"
     );
-    assert!(
-        !in_session(Some(true), Some(false), Some(false)),
+    assert_eq!(
+        verdict(Some(true), Some(false), Some(false)),
+        Out,
         "another launch's"
     );
-    assert!(
-        !in_session(Some(true), Some(true), Some(true)),
+    assert_eq!(
+        verdict(Some(true), Some(true), Some(true)),
+        Out,
         "allows every name"
     );
-    // A check that fails on a running process: still the session's.
-    assert!(in_session(None, Some(true), Some(false)));
-    assert!(in_session(Some(true), None, Some(false)));
-    assert!(in_session(Some(true), Some(true), None));
-    assert!(in_session(None, None, None));
-    assert!(
-        !in_session(None, None, Some(true)),
+    assert_eq!(verdict(None, Some(true), Some(false)), Unsure);
+    assert_eq!(verdict(Some(true), None, Some(false)), Unsure);
+    assert_eq!(verdict(Some(true), Some(true), None), Unsure);
+    assert_eq!(verdict(None, None, None), Unsure);
+    assert_eq!(
+        verdict(None, None, Some(true)),
+        Out,
         "an unjailed process answers plainly"
     );
+    // Pid 1 is the session's, 2 errs, 3 is not the session's.
+    let of = |pid| match pid {
+        1 => In,
+        2 => Unsure,
+        _ => Out,
+    };
+    assert_eq!(
+        running_of(&[1, 2, 3], of),
+        [1, 2],
+        "the erring pid keeps the session running"
+    );
+    assert_eq!(
+        running_of(&[2, 3], of),
+        [2],
+        "so a session of one erring pid isn't over"
+    );
+    let sent = std::cell::RefCell::new(Vec::new());
+    let send = |pid| {
+        sent.borrow_mut().push(pid);
+        true
+    };
+    let start = |pid| u64::try_from(pid).ok();
+    assert_eq!(kill_with(&[1, 2, 3], of, start, send), 1);
+    assert_eq!(*sent.borrow(), [1], "the erring pid is never killed");
+}
+
+#[test]
+fn a_pid_reused_before_its_signal_is_not_signalled() {
+    let reads = std::cell::Cell::new(0_u64);
+    // Pid 7's start reads 100 at the listing, then 200: another process has the pid now.
+    let start = |pid: i32| {
+        reads.set(reads.get() + 1);
+        match (pid, reads.get()) {
+            (7, 1) => Some(100),
+            (7, _) => Some(200),
+            _ => Some(5),
+        }
+    };
+    let sent = std::cell::RefCell::new(Vec::new());
+    let send = |pid| {
+        sent.borrow_mut().push(pid);
+        true
+    };
+    assert_eq!(kill_with(&[7], |_| Verdict::In, start, send), 0);
+    assert!(sent.borrow().is_empty(), "the reused pid was not signalled");
+    // A pid whose start can't be read is not signalled either; an unchanged one is.
+    let start = |pid: i32| (pid == 8).then_some(5);
+    assert_eq!(kill_with(&[8, 9], |_| Verdict::In, start, send), 1);
+    assert_eq!(*sent.borrow(), [8]);
 }
 
 #[test]

@@ -127,9 +127,13 @@ matter on a network volume is never scanned, which is logged (to become the shar
 Two backstops cover a stream that loses events without saying so (seen on a disk image mounted
 seconds before, under a full parallel test run: nothing for over 10 s). **The canary:** every
 10 s the watch rewrites `watch-canary` in the set-aside folder it uses, which is on the matter's
-volume, denied to the agent and watched by the same stream (one stream, two paths). When no
-event for it comes within 2 s, the stream counts as silent, logged, and the matter is scanned
-whole every 2 s until the canary's event comes again (about 4 ms after the write on this Mac).
+volume, denied to the agent and watched by the same stream (one stream, two paths). Its event
+comes about 4 ms after the write on this Mac. When none comes within 2 s, or the canary can't
+be written, the stream is lost and the session ends as for a find: kill first, then the final
+scan, and the lawyer gets `Denial::GitWatchLost` ("Clauseo stopped the AI tool because it
+could no longer watch this matter's folder for changes."). There is no fallback to rescans. An
+event flagged must-scan-subdirectories or dropped (user or kernel) only rescans the matter at
+once, and the watch carries on.
 **The 30 s pass:** the watch keeps every folder of the matter with its file ID and its
 modification and status-change times (from its launch walk, then from its own listings); every
 30 s it reads them again and lists only the folders whose ID or times changed, adding their new
@@ -152,9 +156,12 @@ PID (a process can spawn with the "disclaim" attribute and be its own), and a pa
 counts as over only when its group is empty and no process carries the probe; its kill is
 `TreeKill` plus SIGKILL to each probed process, checked again just before its signal, sent again
 every 0.1 s; after 10 s the final scan runs anyway, logged, and the session's record stays (below).
-The probe fails closed: a `sandbox_check` that errs on a running process counts it as the
-session's, so only a plain "not sandboxed", "may not look up the session's name" or "may look up
-the control name" rules a process out. A process can't shed the probe from inside: a nested
+The probe fails closed: a `sandbox_check` that errs on a running process keeps the session
+running, so only a plain "not sandboxed", "may not look up the session's name" or "may look up
+the control name" rules a process out. Such a process is never killed, though: only one every
+check plainly puts in the session is, and right before each signal it is checked again and its
+start time (`proc_pidinfo`) compared with the listing's, so a reused pid is skipped. A process
+whose checks keep failing keeps the session alive past the kill's cap, so its record stays. A process can't shed the probe from inside: a nested
 `sandbox-exec` can't apply a profile, and `launchctl submit` hands launchd no job (jail tests).
 A watch thread that panics ends the session; an attach to a thread already gone ends it too.
 

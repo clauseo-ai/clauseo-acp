@@ -159,6 +159,11 @@ impl<F: Fs> Watch<F> {
         self.aside.ended_by_us = true;
     }
 
+    /// The runner lost the stream and ends the session: the lawyer is told.
+    pub(crate) fn lost_stream(&mut self) {
+        self.aside.notices.denied(crate::Denial::GitWatchLost);
+    }
+
     /// The items that could neither move nor be neutralised in place, taken.
     pub(crate) fn take_stuck(&mut self) -> Vec<Stuck> {
         std::mem::take(&mut self.aside.stuck)

@@ -1,12 +1,14 @@
 //! The git watch's driver: one thread per session that feeds the [`Watch`] the stream's
-//! events, checks the stream with a canary, scans every 2 s when the stream could not start or
-//! went silent, runs the 30 s pass over changed folders, ends every process of the session on
-//! the first find, and once none is left runs the final scan, which sets aside.
+//! events, checks the stream with a canary, scans every 2 s when the stream could not start,
+//! runs the 30 s pass over changed folders, ends every process of the session on the first
+//! find, and once none is left runs the final scan, which sets aside.
 //!
 //! The canary: every 10 s the thread rewrites a file in the set-aside folder it uses, which is
 //! on the matter's volume, out of the agent's reach, and watched by the same stream. When no
-//! event for it comes within 2 s, the stream counts as silent and the matter is scanned whole
-//! every 2 s until the canary's event comes again.
+//! event for it comes within 2 s, or it can't be written, the stream is lost: the session ends
+//! as for a find (kill first, then the final scan) and the lawyer gets
+//! [`Denial::GitWatchLost`](crate::Denial). An event that says events were dropped or must be
+//! rescanned only rescans the matter at once, and the watch carries on.
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -35,7 +37,7 @@ const KILL_CAP: Duration = Duration::from_secs(10);
 /// How often the canary file is rewritten.
 pub(crate) const CANARY_EVERY: Duration = Duration::from_secs(10);
 
-/// How long the canary's event may take before the stream counts as silent.
+/// How long the canary's event may take before the stream counts as lost.
 pub(crate) const CANARY_WAIT: Duration = Duration::from_secs(2);
 
 /// The canary file's name in the set-aside folder.
@@ -83,9 +85,9 @@ pub(crate) struct Runner<F> {
     watch: Watch<F>,
     /// The stream could not start: scan whole every [`RESCAN_EVERY`].
     no_stream: bool,
-    /// Since when the canary's event has not come: scan whole every [`RESCAN_EVERY`] until it
-    /// does.
-    silent: Option<Duration>,
+    /// When the canary's event did not come, or the canary could not be written: the session
+    /// ends.
+    lost: Option<Duration>,
     next_scan: Duration,
     canary: Option<Canary>,
     next_sweep: Duration,
@@ -115,7 +117,7 @@ impl<F: Fs> Runner<F> {
         Runner {
             watch,
             no_stream,
-            silent: None,
+            lost: None,
             next_scan: now,
             canary: None,
             next_sweep: now + SWEEP_EVERY,
@@ -149,10 +151,10 @@ impl<F: Fs> Runner<F> {
         self
     }
 
-    /// Whether the stream counts as silent.
+    /// Whether the stream was lost.
     #[cfg(test)]
-    pub(crate) fn silent(&self) -> bool {
-        self.silent.is_some()
+    pub(crate) fn lost(&self) -> bool {
+        self.lost.is_some()
     }
 
     /// Whether a process of the session may still run: the kill's cap ran out first.
@@ -176,8 +178,8 @@ impl<F: Fs> Runner<F> {
             Some(Msg::Abandon) => self.abandoned = true,
             None => {}
         }
-        self.canary(now);
-        if asks.rescan || ((self.no_stream || self.silent.is_some()) && now >= self.next_scan) {
+        asks.end |= self.canary(now);
+        if asks.rescan || (self.no_stream && now >= self.next_scan) {
             asks = asks.and(self.watch.full_scan(Phase::Running));
             self.next_scan = now + RESCAN_EVERY;
         }
@@ -244,46 +246,44 @@ impl<F: Fs> Runner<F> {
             .collect();
         if heard {
             canary.sent = None;
-            if let Some(since) = self.silent.take() {
-                tracing::info!(?since, "the git watch's FSEvents stream delivers again");
-            }
         }
         events
     }
 
-    /// Marks the stream silent when the canary's event is late, and rewrites the canary when
-    /// due. A canary that can't be written counts as silent.
-    fn canary(&mut self, now: Duration) {
+    /// Rewrites the canary when due. Returns true once, when the stream is lost: the canary's
+    /// event is late, or the canary can't be written. The lawyer is told then.
+    fn canary(&mut self, now: Duration) -> bool {
         let Some(canary) = &mut self.canary else {
-            return;
+            return false;
         };
+        if self.lost.is_some() {
+            return false;
+        }
         let late = canary
             .sent
             .is_some_and(|at| now.saturating_sub(at) >= CANARY_WAIT);
-        if late && self.silent.is_none() {
-            tracing::error!(
-                matter = %self.watch.matter().display(),
-                "the git watch's FSEvents stream is silent; scanning the matter every 2 s"
-            );
-            self.silent = Some(now);
-            self.next_scan = now;
-        }
-        if now < canary.next_touch {
-            return;
-        }
-        canary.next_touch = now + CANARY_EVERY;
-        match self.watch.fs().touch(&canary.path) {
-            Ok(()) => {
-                canary.sent.get_or_insert(now);
-            }
-            Err(error) => {
-                if self.silent.is_none() {
-                    tracing::error!(%error, "the git watch's canary can't be written; scanning");
-                    self.silent = Some(now);
-                    self.next_scan = now;
+        let mut lost = late;
+        if !lost && now >= canary.next_touch {
+            canary.next_touch = now + CANARY_EVERY;
+            match self.watch.fs().touch(&canary.path) {
+                Ok(()) => {
+                    canary.sent.get_or_insert(now);
+                }
+                Err(error) => {
+                    tracing::error!(%error, "the git watch's canary can't be written");
+                    lost = true;
                 }
             }
         }
+        if lost {
+            tracing::error!(
+                matter = %self.watch.matter().display(),
+                "the git watch lost its FSEvents stream; ending the session"
+            );
+            self.lost = Some(now);
+            self.watch.lost_stream();
+        }
+        lost
     }
 
     /// The final scan, every process gone: each find is set aside. Returns what could neither
