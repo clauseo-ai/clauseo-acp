@@ -14,7 +14,7 @@ use std::process::Command;
 
 use super::windows_sweeper::WindowsSweeper;
 use super::windows_sweeper::same_task_path;
-use super::{Names, Resolved, Sweeper as _, Task, resolve, sweep_tasks};
+use super::{Names, Resolved, Sweeper as _, Task, resolve, sddl_owner, sweep_tasks};
 use crate::test_support::TempDir;
 use crate::windows::refresh::windows_tests::{system32, try_in_cmd};
 use crate::windows::setup::logon::tests::{TestUser, clear_leftovers, random_hex};
@@ -307,4 +307,72 @@ fn elevated_a_task_whose_descriptor_shuts_system_out_is_deleted_or_56_never_left
         listed || caught,
         "the listing hid the task and the cross-check didn't find it: {swept:?}"
     );
+}
+
+#[test]
+#[ignore = "elevated: run by CI's elevated step with CLAUSEO_ELEVATED_TESTS=1"]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "writes the test user's task XML into the test's own folder"
+)]
+fn elevated_a_standard_user_cant_register_a_task_owned_by_system_or_administrators() {
+    if !gate("elevated_a_standard_user_cant_register_a_task_owned_by_system_or_administrators") {
+        return;
+    }
+    // Both owner checks (the task's own descriptor, its cache key's `SD`) rest on this: a
+    // standard user's task whose descriptor names SYSTEM or Administrators as its owner is
+    // refused, or registered owned by that user, never by the owner it named.
+    clear_leftovers(TASK_TEST_PREFIX);
+    let user = TestUser::named(TASK_TEST_PREFIX, &random_hex(3));
+    let sid = user.sid.clone();
+    eprintln!("1. the test user: {} {}", user.name, sid.as_str());
+    let dir = TempDir::new("sweep-owner");
+    let grant = format!(
+        "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;{})",
+        sid.as_str()
+    );
+    protect_with(dir.path(), &grant).unwrap();
+    let suffix = format!("{}{}", std::process::id(), random_hex(2));
+    let names = [
+        ("SY", format!("ClauseoSweepOwnerSy{suffix}")),
+        ("BA", format!("ClauseoSweepOwnerBa{suffix}")),
+    ];
+    // Dropped before the user, so the account outlives its tasks' clean-up.
+    let _made = Made(names.iter().map(|(_, name)| name.clone()).collect());
+    let schtasks = format!(r"{}\schtasks.exe", system32());
+    let mut sweeper = WindowsSweeper::new();
+    for (alias, name) in &names {
+        // 2. As that user: a task whose descriptor names `alias` its owner, readable by all
+        // three, so this process can read what owner it got.
+        let sddl = format!(
+            "O:{alias}D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;{})",
+            sid.as_str()
+        );
+        let xml = dir.path().join(format!("{alias}.xml"));
+        std::fs::write(&xml, task_xml(sid.as_str(), &sddl)).unwrap();
+        let create = format!(
+            r#""{schtasks}" /create /tn {name} /xml "{}" /f"#,
+            xml.display()
+        );
+        let (code, printed) = try_in_cmd(&user, dir.path(), &create);
+        eprintln!("2. O:{alias} as the test user: exit {code:?}\n{printed}");
+        if code != Some(0) {
+            eprintln!("   refused: the gap can't arise for O:{alias}");
+            continue;
+        }
+        // 3. Registered: its owner, from the cache key's `SD` and from the Task Scheduler,
+        // must be the test user.
+        let cached = sweeper.task_cache_owner(&format!(r"\{name}"));
+        eprintln!("3. its cache key's owner: {cached:?}");
+        assert_eq!(cached.as_ref(), Ok(&sid), "O:{alias}: the cache key's SD");
+        let root = sweeper.root().unwrap();
+        let read = sweeper.task_sddl(&root, name).unwrap();
+        let owner = sddl_owner(&read);
+        eprintln!("   its descriptor's owner: {owner:?}");
+        assert_eq!(
+            owner,
+            Ok(Some(sid.clone())),
+            "O:{alias}: the task's descriptor"
+        );
+    }
 }

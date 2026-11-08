@@ -2184,6 +2184,15 @@ A run deletes only the pool users' tasks and BITS jobs. An ended run never write
   `elevated_this_machines_tasks_all_have_a_principal_that_resolves` now also checks that every
   task on file and in the cache of CI's machine is listed or skipped by its file, so the
   cross-check doesn't end a clean machine's runs at 56.
+- **Assumption: a standard user can't register a task owned by someone else.** Both owner
+  checks, on a task's own descriptor and on its cache key's `SD`, take an owner that isn't a
+  pool SID to mean the task isn't the pool's, so they rest on a pool user being unable to
+  register a task whose descriptor names another owner (`O:SY`, `O:BA`). Elevated test (not
+  run yet): `elevated_a_standard_user_cant_register_a_task_owned_by_system_or_administrators`:
+  a standard test user registers, from XML, one task with an `O:SY` descriptor and one with
+  `O:BA`; each must be refused, or registered with the test user as the owner both its cache
+  key's `SD` and the Task Scheduler give, never SYSTEM or Administrators. Should it fail, both
+  checks must also hold a task's principal and file before trusting its owner.
 - The harness rows for this end (`cancel`, `stdin-unread-cancel`, `end-cleanup`) haven't
   run on a VM yet, nor have the elevated tests in `setup/sweep/windows_tests.rs`; the Windows
   code is only built and checked by clippy.
