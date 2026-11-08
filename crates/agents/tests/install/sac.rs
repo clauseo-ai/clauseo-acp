@@ -82,12 +82,26 @@ fn another_rg_is_left_in_place_at_install() {
 }
 
 #[test]
-fn a_start_with_sac_on_moves_an_installed_codex_path() {
+fn a_start_with_sac_on_moves_an_installed_codex_path_and_evaluation_moves_it_back() {
     let mut fx = Fixture::new("sac-start");
     let installed = install_ready(&fx);
     assert_eq!(dirs(&installed.folder), (true, false));
-    fx.config.sac_for_tests = Some(sac(SacState::Evaluation, FAKE_RG));
+    fx.config.sac_for_tests = Some(sac(SacState::On, FAKE_RG));
     let (a, _events) = first_state(&fx);
     assert!(matches!(a, InstallState::Ready { .. }), "{a:?}");
     assert_eq!(dirs(&installed.folder), (false, true));
+
+    // Evaluation blocks nothing: the next start moves ripgrep back, and the agent is Ready.
+    fx.config.sac_for_tests = Some(sac(SacState::Evaluation, FAKE_RG));
+    let (a, _events) = first_state(&fx);
+    assert!(matches!(a, InstallState::Ready { .. }), "{a:?}");
+    assert_eq!(dirs(&installed.folder), (true, false));
+}
+
+#[test]
+fn sac_evaluation_keeps_codex_path_at_install() {
+    let mut fx = Fixture::new("sac-eval");
+    fx.config.sac_for_tests = Some(sac(SacState::Evaluation, FAKE_RG));
+    let installed = install_ready(&fx);
+    assert_eq!(dirs(&installed.folder), (true, false));
 }
