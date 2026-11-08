@@ -558,3 +558,37 @@ fn a_version_is_three_or_four_numbers_and_compares_on_the_first_three() {
         assert_eq!(version(bad), None, "{bad}");
     }
 }
+
+#[test]
+fn a_value_that_changes_before_the_write_is_merged_again_from_what_it_is_now() {
+    // Another writer replaces LxssUserSession's value right after the first read: the re-read
+    // before the write sees it, and the deny goes on the new value, which is kept.
+    let mut fake = FakeWsl::lifted();
+    let theirs = LaunchSd::built_in_default().to_bytes();
+    fake.races = vec![theirs.clone()].into();
+    let applied = apply(&mut fake, &group()).unwrap();
+    assert!(applied.complete(), "{:?}", applied.failed);
+    let written = fake.sd(LXSS_APP);
+    assert!(written.denies_first(&group()));
+    let kept = LaunchSd::parse(&theirs).unwrap();
+    assert_eq!(
+        written.without_denies(&group()).0,
+        kept.without_denies(&group()).0
+    );
+    // A value that keeps changing is given up on after three merges, nothing written for it.
+    let mut fake = FakeWsl::lifted();
+    let default = LaunchSd::built_in_default().to_bytes();
+    let races = (0..8).map(|n| if n % 2 == 0 { default.clone() } else { stock() });
+    fake.races = races.collect::<Vec<_>>().into();
+    let applied = apply(&mut fake, &group()).unwrap();
+    assert!(
+        applied.failed[0].contains("changed between"),
+        "{:?}",
+        applied.failed
+    );
+    assert!(
+        !fake.writes.contains(&format!("write {LXSS_APP}")),
+        "{:?}",
+        fake.writes
+    );
+}

@@ -117,46 +117,67 @@ enum Outcome {
     Created,
 }
 
-/// One target, as [`apply`] says.
+/// How many times [`apply_one`] merges again when the value changed between its read and its
+/// write (an installer writing it meanwhile) before it gives up on the target.
+const MERGE_TRIES: usize = 3;
+
+/// One target, as [`apply`] says. The value is read again just before the write: one that
+/// changed since the merge's read is merged again from what it is now, up to [`MERGE_TRIES`]
+/// times, so the write never puts back what another writer just replaced. The value read back
+/// after the write must be the bytes written.
 fn apply_one(reg: &mut impl WslWrite, app_id: &AppId, group: &Sid) -> Result<Outcome, WslError> {
-    let (sd, absent) = match reg.launch_permission(app_id)? {
-        Permission::NoKey => return Ok(Outcome::NoKey),
-        Permission::Absent => (default_sd(reg)?, true),
-        Permission::Bytes(bytes) => (parsed(&bytes)?, false),
-    };
-    let mut record = reg.recorded()?;
-    let merged = match sd.with_deny(group) {
-        Some(merged) => merged,
-        None if absent => sd.clone(),
-        None => {
-            if record.add(app_id, false) {
-                reg.record(&record)?;
+    let mut read = reg.launch_permission(app_id)?;
+    for _try in 0..MERGE_TRIES {
+        let (sd, absent) = match &read {
+            Permission::NoKey => return Ok(Outcome::NoKey),
+            Permission::Absent => (default_sd(reg)?, true),
+            Permission::Bytes(bytes) => (parsed(bytes)?, false),
+        };
+        let mut record = reg.recorded()?;
+        let merged = match sd.with_deny(group) {
+            Some(merged) => merged,
+            None if absent => sd.clone(),
+            None => {
+                if record.add(app_id, false) {
+                    reg.record(&record)?;
+                }
+                return Ok(Outcome::Unchanged);
             }
-            return Ok(Outcome::Unchanged);
+        };
+        let bytes = merged.to_bytes();
+        let again = parsed(&bytes)?;
+        let kept = again.without_denies(group).0 == sd.without_denies(group).0;
+        if !again.denies_first(group) || !kept {
+            return Err(WslError(
+                "the merged value didn't check out, so it wasn't written".to_owned(),
+            ));
         }
-    };
-    let bytes = merged.to_bytes();
-    let again = parsed(&bytes)?;
-    if !again.denies_first(group) || again.without_denies(group).0 != sd.without_denies(group).0 {
-        return Err(WslError(
-            "the merged value didn't check out, so it wasn't written".to_owned(),
-        ));
-    }
-    if record.add(app_id, absent) {
-        reg.record(&record)?;
-    }
-    reg.write_launch_permission(app_id, &bytes)?;
-    match reg.launch_permission(app_id)? {
-        Permission::Bytes(read) if parsed(&read)?.denies_first(group) => {}
-        Permission::NoKey | Permission::Absent | Permission::Bytes(_) => {
-            return Err(WslError("the value read back has no deny first".to_owned()));
+        if record.add(app_id, absent) {
+            reg.record(&record)?;
         }
+        let now = reg.launch_permission(app_id)?;
+        if now != read {
+            read = now;
+            continue;
+        }
+        reg.write_launch_permission(app_id, &bytes)?;
+        match reg.launch_permission(app_id)? {
+            Permission::Bytes(back) if back == bytes => {}
+            Permission::NoKey | Permission::Absent | Permission::Bytes(_) => {
+                return Err(WslError(
+                    "the value read back isn't the one written".to_owned(),
+                ));
+            }
+        }
+        return Ok(if absent {
+            Outcome::Created
+        } else {
+            Outcome::Written
+        });
     }
-    Ok(if absent {
-        Outcome::Created
-    } else {
-        Outcome::Written
-    })
+    Err(WslError(format!(
+        "the value changed between each of {MERGE_TRIES} merges and its write, so it wasn't written"
+    )))
 }
 
 /// The launch permission COM uses for an `AppID` with none: `DefaultLaunchPermission` when the

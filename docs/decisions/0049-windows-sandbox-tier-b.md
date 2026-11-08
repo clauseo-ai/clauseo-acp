@@ -2426,8 +2426,11 @@ again and checked to be the old with the deny added, then Windows checks them to
 opens the key with `NtOpenKeyEx` and `REG_OPTION_BACKUP_RESTORE`, `SeBackupPrivilege` and
 `SeRestorePrivilege` enabled, so a key `TrustedInstaller` owns is written without taking its
 ownership or touching its DACL. That open never makes a key: a missing one is a failure, so a
-write can't race an MSI that is making the key (an earlier create-then-delete could); the value
-is read back and checked. `AccessPermission`
+write can't race an MSI that is making the key (an earlier create-then-delete could). The value
+is read again just before the write: one that changed since the merge's read (an installer
+writing it meanwhile) is merged again from what it is now, at most 3 times (`MERGE_TRIES`), then
+the target is listed as failed, so the write never puts back a value another writer just
+replaced; after the write the value read back must be the bytes written. `AccessPermission`
 is left alone: the service ignores it.
 
 **When.** The elevated set-up writes it as admin twice: first as soon as the group and the record
