@@ -26,10 +26,11 @@ use windows::core::{HSTRING, PCWSTR, w};
 use super::source::{Handle, read_capped};
 use super::{
     EXE_CAP, Failed, OWN_MACHINE, RefreshExit, RefreshRecord, Refresher, STAGING_SDDL, SourceError,
-    SourceFile, Sources, Trust, UPDATER_KEY, refresh, staging, walk,
+    SourceFile, Sources, Trust, UPDATER_KEY, pe_version, refresh, staging, walk,
 };
 use crate::windows::admin_copy::{self, Found, LOCKED_FILE_SDDL, level_safe, os};
 pub(crate) use crate::windows::admin_copy::{SETUP_EXE as EXE_NAME, SETUP_SIG as SIG_NAME};
+use crate::windows::detect::native_machine;
 use crate::windows::record::read_string;
 use crate::windows::setup::adopt::windows_adopter::own_profile;
 use crate::windows::setup::lock::{Held, SETUP_MUTEX, try_lock};
@@ -199,6 +200,20 @@ impl Refresher for WindowsRefresher {
             Err(SourceError::Missing) => Ok(None),
             Err(error) => Err(format!("the admin copy: {error}")),
         }
+    }
+
+    fn admin_copy_machine(&mut self) -> Result<Option<u16>, Failed> {
+        match read_capped(&self.at(EXE_NAME)?, EXE_CAP) {
+            Ok(bytes) => Ok(pe_version::plain_machine(&bytes)),
+            Err(SourceError::Missing) => Ok(None),
+            Err(error) => Err(format!("the admin copy: {error}")),
+        }
+    }
+
+    fn native_machine(&mut self) -> Result<u16, Failed> {
+        native_machine()
+            .map(|machine| machine.0)
+            .map_err(|error| format!("IsWow64Process2 failed ({})", error.code().0))
     }
 
     /// The descriptor `--adopt` gives the admin copy, so a refresh changes no access and the
