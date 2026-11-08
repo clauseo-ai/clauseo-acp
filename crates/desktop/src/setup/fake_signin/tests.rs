@@ -108,6 +108,8 @@ impl crate::setup::backend::SetupAgents for Real {
         true
     }
     fn set_network(&self, _: clauseo_agents::Network) {}
+    fn mark_chosen(&self, _: &AgentId) {}
+    fn clear_chosen(&self, _: &AgentId) {}
 }
 
 fn fake(hold: Duration) -> (FakeSignin, Arc<Real>, mpsc::UnboundedReceiver<AgentsEvent>) {

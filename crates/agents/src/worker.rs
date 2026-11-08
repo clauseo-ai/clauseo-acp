@@ -17,7 +17,7 @@
 //! (npm leads its own process group), so an ended thread has left no child. Once shut down or
 //! dropped, no job starts.
 
-use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex, PoisonError, RwLock};
 use std::time::Duration;
@@ -31,11 +31,13 @@ use crate::install::{self, Job};
 use crate::log::{InstallLog, redact};
 use crate::signin::{Found, Method, PasteCode, SigninError, SigninState};
 use crate::state::{AgentsEvent, Failure, FailureKind, InstallState, Installed};
-use crate::{node, receipt, sysproxy};
+use crate::{chosen, node, receipt, sysproxy};
 
 mod shared;
 mod signin;
 
+use self::shared::Inner;
+pub(crate) use self::shared::{Shared, Ticket};
 pub(crate) use self::signin::SigninHub;
 use self::signin::SigninStart;
 
@@ -44,6 +46,8 @@ use self::signin::SigninStart;
 pub struct Agents {
     commands: mpsc::Sender<Command>,
     shared: Arc<Shared>,
+    /// `config.data_dir`, for the sign-in flag.
+    data_dir: PathBuf,
 }
 
 /// What a call asks of the worker.
@@ -56,43 +60,6 @@ enum Command {
     SetNetwork(Box<Network>),
     /// Start a reserved sign-in, sign-out or status job.
     Signin(Box<SigninStart>),
-}
-
-/// What the handle, the worker and the jobs share.
-#[derive(Debug)]
-pub(crate) struct Shared {
-    inner: Mutex<Inner>,
-    /// How many job threads run, installs and sign-ins; `job_ended` wakes `shutdown` as one
-    /// ends.
-    jobs: Mutex<usize>,
-    job_ended: Condvar,
-    events: async_channel::Sender<AgentsEvent>,
-    /// Every agent's sign-in state and running sign-in job.
-    pub(crate) signin: SigninHub,
-}
-
-#[derive(Debug, Default)]
-struct Inner {
-    states: BTreeMap<AgentId, InstallState>,
-    installed: BTreeMap<AgentId, Installed>,
-    /// The job that may emit now, if any.
-    current: Option<Ticket>,
-    next_job: u64,
-    /// Each agent's tries in its last install job that ended, the last one included.
-    tries: BTreeMap<AgentId, u32>,
-    /// Set by `shutdown` or the drop: no job starts after it.
-    closed: bool,
-}
-
-/// One job's identity and pause signal.
-#[derive(Debug, Clone)]
-pub(crate) struct Ticket {
-    /// Unique per `Agents`.
-    pub(crate) job: u64,
-    /// The agent it installs or signs in.
-    pub(crate) agent: AgentId,
-    /// Set by a pause or a newer job; the job's emits stop then.
-    pub(crate) cancel: Arc<Cancel>,
 }
 
 impl Agents {
@@ -126,6 +93,7 @@ impl Agents {
             events,
         });
         let (commands, inbox) = mpsc::channel();
+        let data_dir = config.data_dir.clone();
         let network = Arc::new(RwLock::new(config.install.network()));
         let worker = Worker {
             config,
@@ -142,7 +110,14 @@ impl Agents {
             .spawn(move || worker.run(&inbox));
         // With no worker the events' sender is gone with it, so the receiver reports closed.
         drop(spawned);
-        (Agents { commands, shared }, receiver)
+        (
+            Agents {
+                commands,
+                shared,
+                data_dir,
+            },
+            receiver,
+        )
     }
 
     /// Installs `agent`: `Managed` again for IT's runtime, `Ready` again when installed,
@@ -150,6 +125,19 @@ impl Agents {
     /// paused (its partial files kept) and this one starts, or resumes from its files.
     pub fn install(&self, agent: &AgentId) {
         self.send(Command::Install(agent.clone()));
+    }
+
+    /// Writes `agent`'s sign-in flag (`agents/<id>/.chosen`), for a Sign in press: at the next
+    /// start, a flagged agent whose files are all in `agents/downloads/` and check is set up by
+    /// itself, with nothing fetched and no sign-in started. Best-effort: an error is logged.
+    pub fn mark_chosen(&self, agent: &AgentId) {
+        chosen::mark(&self.data_dir, agent);
+    }
+
+    /// Removes `agent`'s sign-in flag, for a successful sign-in, a cancel or a sign-out.
+    /// Best-effort: an error is logged.
+    pub fn clear_chosen(&self, agent: &AgentId) {
+        chosen::clear(&self.data_dir, agent);
     }
 
     /// Pauses `agent`'s install if it is running: `Paused`, its partial files kept.
@@ -399,7 +387,12 @@ struct Worker<T> {
 
 impl<T: Timer + Send + Sync + 'static> Worker<T> {
     fn run(mut self, inbox: &mpsc::Receiver<Command>) {
-        futures::executor::block_on(self.first_states());
+        let resume = futures::executor::block_on(self.first_states());
+        // One install runs at a time (a second pauses the first): the first flagged agent only.
+        if let Some(agent) = resume.first() {
+            tracing::info!(%agent, "agent install: set-up resumed from the downloaded files");
+            self.install(agent);
+        }
         while let Ok(command) = inbox.recv() {
             match command {
                 Command::Install(agent) => self.install(&agent),
@@ -411,8 +404,9 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
         }
     }
 
-    /// Each snapshot agent's state at start.
-    async fn first_states(&self) {
+    /// Each snapshot agent's state at start. Gives the flagged agents (`chosen`) whose every
+    /// file is downloaded and checked: their install is a set-up only.
+    async fn first_states(&self) -> Vec<AgentId> {
         let config = &self.config;
         let search =
             node::search_user_node(&config.node_search, &*self.launcher, &*self.timer).await;
@@ -431,8 +425,15 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
             // What a try cut short by the last quit left in the npm cache.
             install::empty_npm_cache(&config.data_dir);
         }
+        if paths_ok {
+            chosen::clear_unknown(config);
+        }
+        let mut resume = Vec::new();
         for agent in agents {
             if config.managed.contains(&agent) {
+                if paths_ok {
+                    chosen::clear(&config.data_dir, &agent);
+                }
                 self.shared.emit(&agent, InstallState::Managed, None);
                 continue;
             }
@@ -465,13 +466,15 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
                 continue;
             }
             let node_needed = search.found.is_none() && !install::runtime_ready(config);
-            let download_bytes = config
-                .snapshot
-                .download_bytes(&agent, config.platform, node_needed)
-                .unwrap_or(0);
+            let on_disk = chosen::on_disk(config, &agent, node_needed);
+            if paths_ok && on_disk.complete && chosen::is_marked(&config.data_dir, &agent) {
+                resume.push(agent.clone());
+            }
+            let download_bytes = on_disk.to_fetch;
             self.shared
                 .emit(&agent, InstallState::Missing { download_bytes }, None);
         }
+        resume
     }
 
     fn install(&mut self, agent: &AgentId) {

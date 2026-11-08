@@ -124,12 +124,15 @@ async fn follow(
             continue;
         }
         match state {
-            InstallState::Missing { download_bytes } => {
-                writeln!(
-                    out,
-                    "missing: about {:.1} MB to download",
-                    mb(download_bytes)
-                )?;
+            InstallState::Missing {
+                download_bytes: Some(bytes),
+            } => {
+                writeln!(out, "missing: about {:.1} MB to download", mb(bytes))?;
+            }
+            InstallState::Missing {
+                download_bytes: None,
+            } => {
+                writeln!(out, "missing: download size unknown")?;
             }
             InstallState::Waiting { reason, log } => {
                 writeln!(out, "waiting ({}): retries by itself", reason.code())?;

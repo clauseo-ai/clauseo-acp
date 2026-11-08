@@ -73,6 +73,21 @@ pub(super) fn joins_started(backend: &AgentsBackend, agent: &AgentId) -> bool {
     !lock(&backend.pending).contains_key(agent) && backend.events.sign_in_running(agent)
 }
 
+/// `CancelSignIn`: the sign-in flag goes, then the pending press (its install carries on), else
+/// S18's running sign-in.
+pub(super) fn cancel_sign_in(backend: &AgentsBackend, agent: &AgentId) -> Result<(), HostError> {
+    backend.compose.cancelling(agent);
+    let _gate = lock(&backend.signin_gate);
+    backend.agents.clear_chosen(agent);
+    if drop_press(backend, agent, "cancelled") {
+        return Ok(());
+    }
+    backend
+        .agents
+        .cancel_sign_in(agent)
+        .map_err(|error| signin_error(&error))
+}
+
 /// Drops `agent`'s pending press, if any, for `why` (logged), with the gate held: the
 /// sign-in state goes back to S18's. Whether one was dropped.
 pub(super) fn drop_press(backend: &AgentsBackend, agent: &AgentId, why: &'static str) -> bool {

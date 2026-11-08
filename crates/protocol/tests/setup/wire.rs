@@ -280,7 +280,7 @@ fn every_install() -> Vec<InstallProgress> {
     let hosts = vec!["registry.npmjs.org".to_owned(), "nodejs.org".to_owned()];
     vec![
         InstallProgress::Missing {
-            download_bytes: Count::from(61_000_000_u32),
+            download_bytes: Some(Count::from(61_000_000_u32)),
         },
         InstallProgress::Waiting {
             code: ErrorCode::AgentInstallOffline,
@@ -400,10 +400,19 @@ fn setup_events_have_their_json_form() {
             SetupEvent::AgentInstallProgress {
                 agent: claude(),
                 state: InstallProgress::Missing {
-                    download_bytes: Count::from(5_u32),
+                    download_bytes: Some(Count::from(5_u32)),
                 },
             },
             r#"{"agent_install_progress":{"agent":"claude-acp","state":{"missing":{"download_bytes":5}}}}"#,
+        ),
+        (
+            SetupEvent::AgentInstallProgress {
+                agent: claude(),
+                state: InstallProgress::Missing {
+                    download_bytes: None,
+                },
+            },
+            r#"{"agent_install_progress":{"agent":"claude-acp","state":{"missing":{"download_bytes":null}}}}"#,
         ),
     ];
     for (event, json) in cases {

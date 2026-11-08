@@ -78,7 +78,12 @@ fn a_settings_change_reaches_agents_and_the_launch_snapshot() {
 #[test]
 fn an_install_waits_for_the_first_route_and_goes_through_it() {
     let rig = rig_unrouted();
-    lock(&rig.agents.states).insert(claude(), InstallState::Missing { download_bytes: 1 });
+    lock(&rig.agents.states).insert(
+        claude(),
+        InstallState::Missing {
+            download_bytes: Some(1),
+        },
+    );
     let setup = rig.setup();
     let mut run = pin!(setup.run(MAIN, command("install_agent", &claude(), &json!({}))));
     let mut context = Context::from_waker(std::task::Waker::noop());

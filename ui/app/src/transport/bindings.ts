@@ -2710,10 +2710,12 @@ export type InstallProgress =
 /**  Not installed, and no install running. */
 ({ missing: {
 	/**
-	 *  Bytes an install would download here, Node's archive included when Node would be
-	 *  downloaded ("About {size} MB").
+	 *  Bytes an install would still download here, Node's archive included when Node would
+	 *  be downloaded ("About {size} MB"), less the files already downloaded and checked:
+	 *  `0` when every file is there (only the set-up is left), `null` when the size is
+	 *  not known (no size line).
 	 */
-	download_bytes: Count,
+	download_bytes: Count | null,
 } }) & { downloading?: never; failed?: never; ready?: never; waiting?: never } | 
 /**  Offline: the install waits and tries again by itself. */
 ({ waiting: {

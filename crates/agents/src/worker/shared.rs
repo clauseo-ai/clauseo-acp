@@ -1,13 +1,53 @@
 //! What the handle, the worker and the jobs share: the states, the installs and the emits.
 
+use std::collections::BTreeMap;
 use std::io;
-use std::sync::{Arc, MutexGuard, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use clauseo_protocol::AgentId;
 
-use super::{Inner, Shared, Ticket};
+use super::SigninHub;
+use crate::cancel::Cancel;
 use crate::state::{AgentsEvent, InstallState, Installed};
+
+/// What the handle, the worker and the jobs share.
+#[derive(Debug)]
+pub(crate) struct Shared {
+    pub(super) inner: Mutex<Inner>,
+    /// How many job threads run, installs and sign-ins; `job_ended` wakes `shutdown` as one
+    /// ends.
+    pub(super) jobs: Mutex<usize>,
+    pub(super) job_ended: Condvar,
+    pub(super) events: async_channel::Sender<AgentsEvent>,
+    /// Every agent's sign-in state and running sign-in job.
+    pub(crate) signin: SigninHub,
+}
+
+/// The states and the running job, under `Shared`'s lock.
+#[derive(Debug, Default)]
+pub(super) struct Inner {
+    pub(super) states: BTreeMap<AgentId, InstallState>,
+    pub(super) installed: BTreeMap<AgentId, Installed>,
+    /// The job that may emit now, if any.
+    pub(super) current: Option<Ticket>,
+    pub(super) next_job: u64,
+    /// Each agent's tries in its last install job that ended, the last one included.
+    pub(super) tries: BTreeMap<AgentId, u32>,
+    /// Set by `shutdown` or the drop: no job starts after it.
+    pub(super) closed: bool,
+}
+
+/// One job's identity and pause signal.
+#[derive(Debug, Clone)]
+pub(crate) struct Ticket {
+    /// Unique per `Agents`.
+    pub(crate) job: u64,
+    /// The agent it installs or signs in.
+    pub(crate) agent: AgentId,
+    /// Set by a pause or a newer job; the job's emits stop then.
+    pub(crate) cancel: Arc<Cancel>,
+}
 
 impl Shared {
     pub(super) fn lock(&self) -> MutexGuard<'_, Inner> {

@@ -236,8 +236,9 @@ setting, and start-up neither cleans nor reads anything under a relative data fo
 
 **When an install starts: only at first use.** Nothing downloads until the lawyer chooses an
 agent or signs in to it. There is no first-run install: a fresh computer, with nothing installed
-and nothing managed, shows each agent's card with its size (`Missing { download_bytes }`) and
-fetches nothing. Desktop starts an install from three presses only, and nothing else calls
+and nothing managed, shows each agent's card with its size (`Missing { download_bytes }`: the
+bytes still to fetch, less the files already in `agents/downloads/` that check; `Some(0)` with
+every file there, `None` with no size for the platform) and fetches nothing. Desktop starts an install from three presses only, and nothing else calls
 `Agents::install` or `Agents::retry`:
 1. `InstallAgent`, the lawyer choosing a card. It asks no confirm: the card showed the size.
 2. `RetryAgentInstall` on a failed, waiting or paused install.
@@ -252,6 +253,13 @@ fetches nothing. Desktop starts an install from three presses only, and nothing 
    waits `Queued` until the install is `Ready`) still serves the sign-in host's wait; desktop
    hands S18 no sign-in for an agent not installed, since S18 would keep it through a failure
    and run it with no new check.
+
+One exception, with nothing fetched: a Sign in press writes the flag `agents/<id>/.chosen` (fixed
+content), which a successful sign-in, `CancelSignIn`, a sign-out, a managed agent and an agent
+gone from the snapshot remove (best-effort; an error is logged). At start, a flagged agent whose
+every tarball (and Node's archive, when it would be downloaded) is in `agents/downloads/` and
+checks is set up by itself, the first such agent only; at its `Ready` no sign-in starts and the
+card shows Sign in. One file missing or wrong, or no flag, and nothing starts.
 
 A policy that pre-selects or requires agents, a policy reload, a settings change, a managed
 agent and an update start no install either: the agent waits for first use. A firm's bundle or

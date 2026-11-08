@@ -28,6 +28,11 @@ test("missing says the download's size, about, from the bytes the host gives", (
     kind: "missing",
     mb: 0,
   });
+  // a size the host does not know: no size, so no line
+  expect(installView(setup({ missing: { download_bytes: null } }))).toEqual({
+    kind: "missing",
+    mb: null,
+  });
 });
 
 test("downloading carries the bytes for the bar and whole MB for the words: 45 MB of 160 MB", () => {

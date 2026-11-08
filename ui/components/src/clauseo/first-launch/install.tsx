@@ -16,7 +16,7 @@ import { InstallBar as Bar } from "./parts.tsx";
 export type InstallView =
   /** Not here yet, about to download or paused: the size it will download, about, in MB. 0 when
    * no size is known, and then the line says nothing. */
-  | { kind: "missing"; mb: number }
+  | { kind: "missing"; mb: number | null }
   /** Downloading: the bytes for the bar, and the whole MB the words say (done never above
    * total). */
   | {
@@ -88,9 +88,9 @@ export function installLine(
   );
   switch (view.kind) {
     case "missing":
-      // no size to say (a download of no bytes): no line at all, so the next state is a change
-      // the reader hears
-      if (view.mb === 0) return null;
+      // no size to say (a download of no bytes, or a size not known): no line at all, so the next
+      // state is a change the reader hears
+      if (view.mb === 0 || view.mb === null) return null;
       return {
         kind: "wait",
         words: w("Needs a download of about {mb} MB", { mb: view.mb }),

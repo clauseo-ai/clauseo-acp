@@ -25,7 +25,7 @@ fn retry_on_a_missing_agent_installs_nothing_and_asks_nothing() {
             version: "1.0.0".to_owned(),
         },
         InstallState::Missing {
-            download_bytes: 41_500_001,
+            download_bytes: Some(41_500_001),
         },
         InstallState::Installing,
     ] {

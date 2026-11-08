@@ -19,7 +19,7 @@ mod files;
 mod npm;
 mod try_error;
 
-pub(crate) use files::empty_npm_cache;
+pub(crate) use files::{downloads_dir, empty_npm_cache};
 use try_error::Next;
 pub(crate) use try_error::TryError;
 

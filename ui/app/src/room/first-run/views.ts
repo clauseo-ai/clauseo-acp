@@ -16,8 +16,11 @@ export function installView(setup: AgentSetup | undefined): InstallView | null {
   // paused: another plan's download goes first; it says where it stands, still
   if (install === "paused")
     return setup?.mb === undefined ? null : { kind: "missing", mb: aboutMb(setup.mb) };
-  if ("missing" in install && install.missing !== undefined)
-    return { kind: "missing", mb: aboutMb(mbOf(install.missing.download_bytes)) };
+  if ("missing" in install && install.missing !== undefined) {
+    // null: the size is not known, and the line says none
+    const bytes = install.missing.download_bytes;
+    return { kind: "missing", mb: bytes === null ? null : aboutMb(mbOf(bytes)) };
+  }
   if ("downloading" in install && install.downloading !== undefined) {
     const { received, total } = install.downloading;
     // done never above total: the bar and the words agree

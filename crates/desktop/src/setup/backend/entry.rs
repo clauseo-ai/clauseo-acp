@@ -55,7 +55,7 @@ pub(crate) fn launch(
 pub(crate) fn progress(state: &InstallState, hosts: &[String]) -> Option<InstallProgress> {
     Some(match state {
         InstallState::Missing { download_bytes } => InstallProgress::Missing {
-            download_bytes: Count::clamped(*download_bytes),
+            download_bytes: download_bytes.map(Count::clamped),
         },
         InstallState::Waiting { reason, log } => InstallProgress::Waiting {
             code: ErrorCode::from_str_lossy(reason.code()),

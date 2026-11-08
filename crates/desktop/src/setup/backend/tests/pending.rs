@@ -35,7 +35,7 @@ fn not_installed(rig: &Rig, agent: &AgentId) {
     lock(&rig.agents.states).insert(
         agent.clone(),
         InstallState::Missing {
-            download_bytes: 120_000_000,
+            download_bytes: Some(120_000_000),
         },
     );
 }

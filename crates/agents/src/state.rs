@@ -57,11 +57,13 @@ pub enum AgentsEvent {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum InstallState {
-    /// Not installed, and no install running. `download_bytes` is what an install would fetch
-    /// here, Node's archive included when Node would be downloaded (UD1's "About {size} MB").
+    /// Not installed, and no install running. `download_bytes` is what an install would still
+    /// fetch here, Node's archive included when Node would be downloaded (UD1's "About {size}
+    /// MB"), less the files already in `agents/downloads/` with the right digest: `Some(0)`
+    /// when every file is there, `None` when the snapshot has no size for this platform.
     Missing {
-        /// Bytes an install would download.
-        download_bytes: u64,
+        /// Bytes an install would still download, when known.
+        download_bytes: Option<u64>,
     },
     /// Waiting to try again by itself; no try is counted. `reason` is
     /// [`FailureKind::Offline`] today: name resolution or connect failed with no route.

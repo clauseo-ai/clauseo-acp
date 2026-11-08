@@ -153,6 +153,8 @@ impl AgentsBackend {
                 self.refuse_reused(&agent)?;
                 self.refuse_start(&agent)?;
                 let method = plan_method(&agent, console)?;
+                // The sign-in flag: a relaunch sets up an agent whose files are all here.
+                agents.mark_chosen(&agent);
                 if pending::joins_started(self, &agent) {
                     tracing::info!(%agent, "sign-in joined: the kept press started meanwhile");
                     return Ok(());
@@ -165,17 +167,7 @@ impl AgentsBackend {
                     self.replaced(&agent);
                 }
             }
-            SetupCommand::CancelSignIn { .. } => {
-                self.compose.cancelling(&agent);
-                let _gate = lock(&self.signin_gate);
-                // A pending press goes; its install carries on.
-                if pending::drop_press(self, &agent, "cancelled") {
-                    return Ok(());
-                }
-                agents
-                    .cancel_sign_in(&agent)
-                    .map_err(|error| signin_error(&error))?;
-            }
+            SetupCommand::CancelSignIn { .. } => pending::cancel_sign_in(self, &agent)?,
             SetupCommand::PasteSignInCode { code, .. } => {
                 let code = PasteCode::new(code.into_zeroizing());
                 agents
@@ -186,6 +178,7 @@ impl AgentsBackend {
                 let _gate = lock(&self.signin_gate);
                 self.refuse_reused(&agent)?;
                 self.refuse_start(&agent)?;
+                agents.mark_chosen(&agent);
                 if !pending::keep_press(self, &agent, Press::SignIn(Method::DeviceCode)) {
                     agents
                         .sign_in(&agent, Method::DeviceCode)
@@ -201,6 +194,7 @@ impl AgentsBackend {
             }
             SetupCommand::SignOut { .. } => {
                 self.refuse_reused(&agent)?;
+                agents.clear_chosen(&agent);
                 agents
                     .sign_out(&agent)
                     .map_err(|error| signin_error(&error))?;
@@ -217,6 +211,7 @@ impl AgentsBackend {
                 }
                 let _gate = lock(&self.signin_gate);
                 self.refuse_start(&agent)?;
+                agents.mark_chosen(&agent);
                 if !pending::keep_press(self, &agent, Press::DifferentAccount) {
                     agents
                         .use_different_account(&agent)
@@ -502,6 +497,9 @@ impl AgentsBackend {
                     pending::follow_press(self, &agent, &state);
                 }
                 AgentsEvent::Signin { agent, state } => {
+                    if matches!(state, SigninState::SignedIn { .. }) {
+                        self.agents.clear_chosen(&agent);
+                    }
                     lock(&self.rechecks).remove(&agent);
                     tally.signin(&*self.counts, &self.compose, &agent, &state);
                     leave::signin_event(self, &agent, state).await;

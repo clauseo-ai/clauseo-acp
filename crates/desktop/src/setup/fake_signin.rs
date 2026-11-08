@@ -378,6 +378,12 @@ impl SetupAgents for FakeSignin {
     fn set_network(&self, network: clauseo_agents::Network) {
         self.real.set_network(network);
     }
+    fn mark_chosen(&self, agent: &AgentId) {
+        self.real.mark_chosen(agent);
+    }
+    fn clear_chosen(&self, agent: &AgentId) {
+        self.real.clear_chosen(agent);
+    }
 }
 
 #[cfg(test)]

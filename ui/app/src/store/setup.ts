@@ -157,7 +157,13 @@ export function createSetupStore(transport: HostTransport & SetupSource): SetupS
       const { agent: id, state: install } = event.agent_install_progress;
       const was = state.agents[id];
       const patch: AgentSetup = { install };
-      if (typeof install === "object" && "missing" in install && install.missing !== undefined)
+      // a size not known (null) leaves the last one heard
+      if (
+        typeof install === "object" &&
+        "missing" in install &&
+        install.missing !== undefined &&
+        install.missing.download_bytes !== null
+      )
         patch.mb = mbOf(install.missing.download_bytes);
       if (
         typeof install === "object" &&

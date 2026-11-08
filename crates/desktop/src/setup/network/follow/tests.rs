@@ -116,6 +116,8 @@ impl SetupAgents for Networks {
     fn set_network(&self, network: clauseo_agents::Network) {
         lock(&self.0).push(network);
     }
+    fn mark_chosen(&self, _: &AgentId) {}
+    fn clear_chosen(&self, _: &AgentId) {}
 }
 
 /// Log lines, as the subscriber writes them.

@@ -20,9 +20,11 @@ pub const MAX_INSTALL_LOG_LINE_BYTES: usize = 400;
 pub enum InstallProgress {
     /// Not installed, and no install running.
     Missing {
-        /// Bytes an install would download here, Node's archive included when Node would be
-        /// downloaded ("About {size} MB").
-        download_bytes: Count,
+        /// Bytes an install would still download here, Node's archive included when Node would
+        /// be downloaded ("About {size} MB"), less the files already downloaded and checked:
+        /// `0` when every file is there (only the set-up is left), `null` when the size is
+        /// not known (no size line).
+        download_bytes: Option<Count>,
     },
     /// Offline: the install waits and tries again by itself.
     Waiting {

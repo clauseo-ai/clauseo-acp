@@ -6,6 +6,7 @@
 
 mod after;
 mod auth_held;
+mod chosen;
 mod counts;
 mod endpoint;
 mod fakes;
@@ -74,7 +75,7 @@ fn an_install_asks_nothing_and_a_declined_endpoint_runs_nothing() {
     lock(&rig.agents.states).insert(
         claude(),
         InstallState::Missing {
-            download_bytes: 41_500_001,
+            download_bytes: Some(41_500_001),
         },
     );
     let setup = rig.setup();
@@ -227,7 +228,7 @@ pub(super) fn missing(agent: AgentId) -> AgentsEvent {
     AgentsEvent::Install {
         agent,
         state: InstallState::Missing {
-            download_bytes: 1_000,
+            download_bytes: Some(1_000),
         },
     }
 }
@@ -268,7 +269,7 @@ fn a_new_follower_gets_setup_info_then_each_agent_s_install_then_sign_in() {
             SetupEvent::AgentInstallProgress {
                 agent: claude(),
                 state: InstallProgress::Missing {
-                    download_bytes: clauseo_protocol::Count::clamped(1_000)
+                    download_bytes: Some(clauseo_protocol::Count::clamped(1_000))
                 },
             },
             SetupEvent::SignInChanged {

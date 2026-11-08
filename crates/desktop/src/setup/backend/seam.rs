@@ -47,6 +47,10 @@ pub(crate) trait SetupAgents: Send + Sync {
     fn shutdown(&self, wait: Duration) -> bool;
     /// `Agents::set_network`: the proxies and CA files the next install and sign-in take.
     fn set_network(&self, network: Network);
+    /// `Agents::mark_chosen`: the sign-in flag, written on a Sign in press.
+    fn mark_chosen(&self, agent: &AgentId);
+    /// `Agents::clear_chosen`: the flag removed on a sign-in, a cancel or a sign-out.
+    fn clear_chosen(&self, agent: &AgentId);
 }
 
 impl SetupAgents for Agents {
@@ -103,5 +107,11 @@ impl SetupAgents for Agents {
     }
     fn set_network(&self, network: Network) {
         Agents::set_network(self, network);
+    }
+    fn mark_chosen(&self, agent: &AgentId) {
+        Agents::mark_chosen(self, agent);
+    }
+    fn clear_chosen(&self, agent: &AgentId) {
+        Agents::clear_chosen(self, agent);
     }
 }

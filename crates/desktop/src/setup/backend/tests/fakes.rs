@@ -36,8 +36,10 @@ use crate::setup::wiring::Wiring;
 use crate::setup::{Setup, SetupBackend, SetupEvents};
 use crate::test_support::block_on;
 
+mod host_call;
 mod ui;
 
+pub(super) use self::host_call::HostCall;
 pub(super) use self::ui::{FakeConfirm, FakeOpener};
 pub(super) use super::wire::{command, setup_events};
 
@@ -72,6 +74,8 @@ pub(super) struct FakeAgents {
     pub(super) tries: Mutex<BTreeMap<AgentId, u32>>,
     /// Each `set_network`, in order.
     pub(crate) networks: Mutex<Vec<clauseo_agents::Network>>,
+    /// Each `mark_chosen` and `clear_chosen`, in order, kept out of `calls`.
+    pub(super) chosen: Calls,
 }
 
 impl FakeAgents {
@@ -183,6 +187,12 @@ impl SetupAgents for FakeAgents {
     fn set_network(&self, network: clauseo_agents::Network) {
         lock(&self.networks).push(network);
     }
+    fn mark_chosen(&self, agent: &AgentId) {
+        lock(&self.chosen).push(("mark_chosen", agent.clone()));
+    }
+    fn clear_chosen(&self, agent: &AgentId) {
+        lock(&self.chosen).push(("clear_chosen", agent.clone()));
+    }
 }
 
 /// The usage counts, recording each event.
@@ -224,38 +234,6 @@ impl LeaveReaders for FakeReaders {
     }
     fn set_blocked(&self, blocked: BTreeSet<AgentId>) {
         *lock(&self.blocked) = Some(blocked);
-    }
-}
-
-/// One host call as `RecordingHost` saw it.
-#[derive(Clone, PartialEq, Eq)]
-pub(super) enum HostCall {
-    SetAgentLaunch(AgentId, AgentLaunch),
-    SetEndpoint(AgentId, Option<String>),
-    RestartAgents(AgentId),
-    StopAgents(AgentId),
-    SetReusedLogin(AgentId, bool),
-    RemoveLoginLinks(AgentId),
-    LoginChanged(AgentId),
-    SetLaunchRefused(AgentId, Option<ErrorCode>),
-}
-
-impl std::fmt::Debug for HostCall {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::SetAgentLaunch(agent, launch) => {
-                write!(f, "set_agent_launch({agent}, {launch:?})")
-            }
-            Self::SetEndpoint(agent, url) => write!(f, "set_endpoint({agent}, {url:?})"),
-            Self::RestartAgents(agent) => write!(f, "restart_agents({agent})"),
-            Self::StopAgents(agent) => write!(f, "stop_agents({agent})"),
-            Self::SetReusedLogin(agent, reused) => write!(f, "set_reused_login({agent}, {reused})"),
-            Self::RemoveLoginLinks(agent) => write!(f, "remove_login_links({agent})"),
-            Self::LoginChanged(agent) => write!(f, "login_changed({agent})"),
-            Self::SetLaunchRefused(agent, code) => {
-                write!(f, "set_launch_refused({agent}, {code:?})")
-            }
-        }
     }
 }
 

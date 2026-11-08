@@ -13,8 +13,9 @@
 //! - The layout under `<data_dir>/agents`: `runtime/node-v<version>-<os>-<arch>/` (a downloaded
 //!   Node), `<id>/install/<hash>/` (`package.json`, `package-lock.json`, `node_modules/`,
 //!   `clauseo-receipt.json`), `downloads/` (files named by digest), `npm-cache/`, `npmrc`,
-//!   `npmrc-global` and `.lock`. `<id>/home/` and `signin/` are S18's. `limits` writes
-//!   `clauseo-claude-usage.mjs` into Claude's install folder; nothing here touches it.
+//!   `npmrc-global`, `.lock` and `<id>/.chosen` (the sign-in flag, `chosen.rs`). `<id>/home/`
+//!   and `signin/` are S18's. `limits` writes `clauseo-claude-usage.mjs` into Claude's install
+//!   folder; nothing here touches it.
 //! - Node: the user's when it is a regular file, reports v22 or later and has `npm-cli.js`
 //!   beside it; otherwise the pinned download, checked by SHA-256.
 //! - Downloads (Rust's): each tarball the derived lock lists for this platform, with `Range`
@@ -46,8 +47,9 @@
 //! - [`Agents::start`]`(config, launcher, timer)` gives an [`Agents`] and the `Receiver` of
 //!   [`AgentsEvent`]s ([`Agents::start_with_launchers`]`(config, install, signin, timer)` with
 //!   one launcher for installs and one, clearing the environment, for sign-in); `install`,
-//!   `pause`, `retry(agent, use_system_proxy)`, `state` and `installed`; `sign_in(agent,
-//!   Method)`, `try_again` (Codex's busy port), `cancel_sign_in`,
+//!   `pause`, `retry(agent, use_system_proxy)`, `state`, `installed`, `mark_chosen` and
+//!   `clear_chosen` (the sign-in flag); `sign_in(agent, Method)`, `try_again` (Codex's busy
+//!   port), `cancel_sign_in`,
 //!   `paste_code(agent, PasteCode)`, `sign_out`, `check_status`, `find_login`,
 //!   `use_found_login`, `use_different_account`, `stop_using_login(agent, Option<Found>)` (each
 //!   `Result<(), SigninError>`), `signin_state` and `sign_in_going`.
@@ -117,6 +119,7 @@
 //! for sign-in, `signin.rs` and its modules, then `status.rs` and `fileid.rs`.
 
 mod cancel;
+mod chosen;
 mod config;
 mod disk;
 mod download;

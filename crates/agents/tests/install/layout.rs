@@ -217,7 +217,7 @@ mod node_20 {
         assert_eq!(
             a,
             InstallState::Missing {
-                download_bytes: want
+                download_bytes: Some(want)
             }
         );
 

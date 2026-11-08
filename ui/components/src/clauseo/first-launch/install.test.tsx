@@ -59,6 +59,8 @@ test("install lines: missing with no size says nothing, so no line stands", asyn
   await loadHindi();
   expect(installLine("en", { kind: "missing", mb: 0 }, "Claude", ACTS)).toBeNull();
   expect(installLine("hi", { kind: "missing", mb: 0 }, "Claude", ACTS)).toBeNull();
+  expect(installLine("en", { kind: "missing", mb: null }, "Claude", ACTS)).toBeNull();
+  expect(installLine("hi", { kind: "missing", mb: null }, "Claude", ACTS)).toBeNull();
 });
 
 test("install lines: a failed set-up says the download worked and has its own code; a failed download keeps its words", async () => {

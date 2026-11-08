@@ -172,7 +172,8 @@ fn assert_snake_case(ts: &str) {
 }
 
 /// Left-out optional fields are `field?: T`. The only `null`s are JSON's own, in a JSON value,
-/// and `UpdateMatter`'s three fields where `null` clears the detail (`FieldChange`); floats are
+/// `UpdateMatter`'s three fields where `null` clears the detail (`FieldChange`), and
+/// `InstallProgress::Missing`'s `download_bytes`, where `null` is a size not known; floats are
 /// `Finite`, never `null`.
 fn assert_optional(ts: &str) {
     assert_block(ts, "Envelope", |b| {
@@ -205,7 +206,8 @@ fn assert_optional(ts: &str) {
             || line.starts_with("export type RawPayload = null | ")
             || line.trim() == "client?: ClientName | null,"
             || line.trim() == "next_date?: Date | null,"
-            || line.trim() == "skill_packs?: PackList | null,";
+            || line.trim() == "skill_packs?: PackList | null,"
+            || line.trim() == "download_bytes: Count | null,";
         assert!(allowed, "unexpected `null` in: {line}");
     }
 }

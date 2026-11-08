@@ -78,7 +78,7 @@ window sent still passes through Tauri's buffers, which Clauseo does not zero.
   no Secret Service; the key screens hide). A new subscription gets it first, then every agent's
   install and sign-in state, before any newer event.
 - `AgentInstallProgress { agent, state: InstallProgress }`, S17's `InstallState`:
-  `Missing { download_bytes }`, `Waiting { code, hosts, log }` (offline; it retries by itself),
+  `Missing { download_bytes }` (still to fetch; `null` when not known), `Waiting { code, hosts, log }` (offline; it retries by itself),
   `Downloading { received, total }`, `Installing`, `Ready { version }`,
   `Failed { code, need_mb, free_mb, hosts, log }`, `Paused`, `Managed`. A waiting or failed
   install carries the snapshot's install hosts for "Ask your IT team" and its `InstallLog` for
