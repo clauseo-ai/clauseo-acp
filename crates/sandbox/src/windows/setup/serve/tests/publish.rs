@@ -124,6 +124,81 @@ fn a_name_is_published_only_for_a_pipe_this_run_made_and_cleared_on_every_exit_a
     }
 }
 
+#[test]
+fn a_spare_that_cant_be_made_unpublishes_the_name_before_the_client_goes() {
+    // The spare is made before each client is let go: the name always has an instance.
+    let mut host = FakeHost::new();
+    let mut pipe = FakePipe {
+        waiting: vec![FakeClient::asking(LAWYER, SET_UP)].into(),
+        events: Rc::clone(&host.events),
+        ..FakePipe::default()
+    };
+    assert_eq!(
+        run(&mut host, |_name, _sddl| Ok(&mut pipe)),
+        ServeExit::Done
+    );
+    assert_eq!(
+        *host.events.borrow(),
+        ["publish", "spare", "reply", "unpublish"]
+    );
+    // No spare: the name is unpublished before the client goes, a first instance made after,
+    // and the name published again only then; the next client is served.
+    let mut host = FakeHost::new();
+    let mut pipe = FakePipe {
+        waiting: vec![
+            FakeClient::asking(LAWYER, SET_UP),
+            FakeClient::asking(LAWYER, SET_UP),
+        ]
+        .into(),
+        spare_fails: true,
+        events: Rc::clone(&host.events),
+        ..FakePipe::default()
+    };
+    assert_eq!(
+        run(&mut host, |_name, _sddl| Ok(&mut pipe)),
+        ServeExit::Done
+    );
+    assert_eq!(pipe.replies.len(), 2);
+    assert_eq!(
+        host.events.borrow()[..6],
+        ["publish", "spare", "unpublish", "reply", "first", "publish"]
+    );
+    assert!(
+        host.lines
+            .iter()
+            .any(|(error, line)| *error && line.contains("no spare instance"))
+    );
+    // The name taken in that gap: a squat, never published again; a first instance that fails
+    // otherwise: the pipe failed.
+    for (fails, exit) in [
+        (Unmade::Taken, ServeExit::Squatted),
+        (Unmade::Failed("error 5".to_owned()), ServeExit::PipeFailed),
+    ] {
+        let mut host = FakeHost::new();
+        let mut pipe = FakePipe {
+            waiting: vec![FakeClient::asking(LAWYER, SET_UP)].into(),
+            spare_fails: true,
+            first_fails: Some(fails),
+            events: Rc::clone(&host.events),
+            ..FakePipe::default()
+        };
+        assert_eq!(run(&mut host, |_name, _sddl| Ok(&mut pipe)), exit);
+        assert_eq!(pipe.replies.len(), 1, "the client still has its reply");
+        assert_eq!(
+            host.events.borrow()[..],
+            [
+                "publish",
+                "spare",
+                "unpublish",
+                "reply",
+                "first",
+                "unpublish"
+            ]
+        );
+        assert_eq!(host.published, None, "{exit:?}");
+    }
+}
+
 impl Pipe for &mut FakePipe {
     type Client = FakeClient;
 
@@ -137,6 +212,14 @@ impl Pipe for &mut FakePipe {
 
     fn facts(&mut self, client: &mut FakeClient) -> Result<ClientFacts, String> {
         (**self).facts(client)
+    }
+
+    fn spare(&mut self) -> Result<(), String> {
+        (**self).spare()
+    }
+
+    fn first(&mut self) -> Result<(), Unmade> {
+        (**self).first()
     }
 
     fn reply(&mut self, client: FakeClient, line: &[u8]) {

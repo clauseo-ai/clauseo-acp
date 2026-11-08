@@ -121,22 +121,39 @@ impl Pipe for WindowsPipe {
     type Client = Client;
 
     fn next(&mut self, wait: Duration) -> Result<Option<Client>, Unmade> {
-        // With no spare (its creation failed), no instance of this process's is left: a new one
-        // is the first again, or nothing, so a name someone took meanwhile is never shared, and
-        // is a squat (`Unmade::Taken`).
-        let waiting = match self.spare.take() {
-            Some(waiting) => waiting,
-            None => instance(&self.name, &self.sddl, true).map_err(|error| unmade(&error))?,
+        // `serve` leaves a spare before it lets a client go (`Pipe::spare`, `Pipe::first`); were
+        // none left, a new one is the first again, or nothing, so a name someone took meanwhile
+        // is never shared, and is a squat (`Unmade::Taken`).
+        if self.spare.is_none() {
+            self.first()?;
+        }
+        let Some(waiting) = self.spare.take() else {
+            return Err(Unmade::Failed("no instance of the pipe".to_owned()));
         };
         if !connect(&waiting, wait).map_err(|error| Unmade::Failed(error.to_string()))? {
             return Ok(None);
         }
-        // The spare, made before this client is served, so the name stays this process's.
-        match instance(&self.name, &self.sddl, false) {
-            Ok(spare) => self.spare = Some(spare),
-            Err(error) => tracing::warn!(%error, "no spare instance of the set-up pipe"),
+        // The spare, made before this client is served, so the next can connect meanwhile; one
+        // that fails here is tried again before this client is let go (`Pipe::spare`).
+        if let Err(error) = self.spare() {
+            tracing::warn!(%error, "no spare instance of the set-up pipe yet");
         }
         Ok(Some(Client(waiting)))
+    }
+
+    fn spare(&mut self) -> Result<(), String> {
+        if self.spare.is_none() {
+            let spare =
+                instance(&self.name, &self.sddl, false).map_err(|error| error.to_string())?;
+            self.spare = Some(spare);
+        }
+        Ok(())
+    }
+
+    fn first(&mut self) -> Result<(), Unmade> {
+        let first = instance(&self.name, &self.sddl, true).map_err(|error| unmade(&error))?;
+        self.spare = Some(first);
+        Ok(())
     }
 
     fn request(&mut self, client: &mut Client) -> Result<Vec<u8>, String> {

@@ -2,8 +2,10 @@
 //! order each client is served in, and what each reply says. The gate's rules and the app's
 //! check of the server are in `tests/identify.rs`.
 
+use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::time::Duration;
 
 use super::*;
@@ -72,6 +74,13 @@ pub(crate) struct FakePipe {
     pub(crate) fail_next: bool,
     /// The next wait finds the name someone else's.
     pub(crate) taken_next: bool,
+    /// The spare instance can't be made.
+    pub(crate) spare_fails: bool,
+    /// What making a first instance again fails with.
+    pub(crate) first_fails: Option<Unmade>,
+    /// Each reply, spare and first instance, in order with the host's publishing when the
+    /// host shares it ([`FakeHost::events`]).
+    pub(crate) events: Rc<RefCell<Vec<String>>>,
 }
 
 impl Pipe for FakePipe {
@@ -96,8 +105,22 @@ impl Pipe for FakePipe {
         client.facts.clone()
     }
 
+    fn spare(&mut self) -> Result<(), String> {
+        self.events.borrow_mut().push("spare".to_owned());
+        if self.spare_fails {
+            return Err("CreateNamedPipeW failed (error 8)".to_owned());
+        }
+        Ok(())
+    }
+
+    fn first(&mut self) -> Result<(), Unmade> {
+        self.events.borrow_mut().push("first".to_owned());
+        self.first_fails.clone().map_or(Ok(()), Err)
+    }
+
     fn reply(&mut self, _client: FakeClient, line: &[u8]) {
         assert_eq!(line.last(), Some(&b'\n'), "one line");
+        self.events.borrow_mut().push("reply".to_owned());
         self.replies.push(Reply::parse(line).unwrap());
     }
 }
@@ -136,6 +159,8 @@ pub(crate) struct FakeHost {
     pub(crate) published: Option<String>,
     /// Publishing fails with this.
     pub(crate) publish_fails: Option<String>,
+    /// Each publish and unpublish, shared with a pipe's [`FakePipe::events`].
+    pub(crate) events: Rc<RefCell<Vec<String>>>,
 }
 
 impl FakeHost {
@@ -164,6 +189,7 @@ impl FakeHost {
             random: Ok([0xa5; TOKEN_BYTES]),
             published: None,
             publish_fails: None,
+            events: Rc::default(),
         }
     }
 
@@ -280,6 +306,7 @@ impl Host for FakeHost {
 
     fn publish(&mut self, token: &str) -> Result<(), String> {
         self.calls.push(format!("publish {token}"));
+        self.events.borrow_mut().push("publish".to_owned());
         if let Some(why) = &self.publish_fails {
             return Err(why.clone());
         }
@@ -289,6 +316,7 @@ impl Host for FakeHost {
 
     fn unpublish(&mut self, token: &str) {
         self.calls.push(format!("unpublish {token}"));
+        self.events.borrow_mut().push("unpublish".to_owned());
         if self.published.as_deref() == Some(token) {
             self.published = None;
         }
@@ -344,6 +372,14 @@ impl Pipe for Recording<'_> {
 
     fn facts(&mut self, client: &mut FakeClient) -> Result<ClientFacts, String> {
         self.0.facts(client)
+    }
+
+    fn spare(&mut self) -> Result<(), String> {
+        self.0.spare()
+    }
+
+    fn first(&mut self) -> Result<(), Unmade> {
+        self.0.first()
     }
 
     fn reply(&mut self, client: FakeClient, line: &[u8]) {
