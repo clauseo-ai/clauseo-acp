@@ -4,17 +4,12 @@
 //! `--reclaim` enables them), so its opens, all with backup semantics and none through a reparse
 //! point (`os::lock_down`, `os::found`), get `READ_CONTROL`, `WRITE_DAC`, `WRITE_OWNER` and the
 //! listing whatever the DACL says. An elevated or SYSTEM token holds all three.
-#![expect(
-    clippy::disallowed_methods,
-    reason = "deletes in the admin folder, only administrators' to change, which holds no file \
-              of the lawyer's: not the data folder's write module's work"
-)]
 
 use std::io;
 use std::path::Path;
 
 use super::Found;
-use super::os::{self, lock_down, lock_tree_skipping};
+use super::os::{self, lock_down, lock_tree};
 use super::take_back::LockDownFs;
 use crate::windows::acl::privilege::Privileges;
 
@@ -39,6 +34,11 @@ impl LockDownFs for NtfsLockDown {
             .collect()
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "deletes in the admin folder, only administrators' to change, which holds no \
+                  file of the lawyer's: not the data folder's write module's work"
+    )]
     fn remove(&mut self, path: &Path, kind: Found) -> io::Result<()> {
         match kind {
             Found::Folder => std::fs::remove_dir_all(path),
@@ -50,13 +50,13 @@ impl LockDownFs for NtfsLockDown {
     }
 
     fn lock_tree(&mut self, dir: &Path, skip: Option<&str>) -> io::Result<()> {
-        lock_tree_skipping(dir, skip)
+        lock_tree(dir, skip)
     }
 
     fn take_back(&mut self, path: &Path) -> io::Result<()> {
         let _privileges = Privileges::enable(&TAKE_BACK)?;
         match os::found(path)? {
-            Found::Folder => lock_tree_skipping(path, None),
+            Found::Folder => lock_tree(path, None),
             Found::File => lock_down(path, false),
             // A link is deleted as itself, never taken back through.
             Found::Link | Found::Missing => Ok(()),

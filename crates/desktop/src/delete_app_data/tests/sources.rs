@@ -117,21 +117,11 @@ fn the_hooks_removal_passes_the_exes_own_arguments_and_reads_its_0_within_two_mi
 
     let code = hook_code();
     let body = preuninstall(&code);
-    // A finished removal is exit 0 (`SetupExit::Removed`), or 10 (`AdminCopyLeft`: the
-    // protection gone, the admin copy, administrators' alone, left), and only those set $R5.
+    // A finished removal is exit 0 (`SetupExit::Removed`), or 10 (the test below), and only
+    // those set $R5.
     let removed = SetupExit::Removed.as_code();
     assert_eq!(removed, 0);
-    let left = SetupExit::AdminCopyLeft.as_code();
-    line_with(
-        &code,
-        &[&format!("!define CLAUSEO_REMOVED_COPY_LEFT {left}")],
-    );
     let exited = line_with(body, &[&format!("${{If}} $R8 = {removed}")]);
-    assert_eq!(
-        body[exited + 1],
-        "${OrIf} $R8 = ${CLAUSEO_REMOVED_COPY_LEFT}",
-        "{body:?}"
-    );
     assert_eq!(body[exited + 2], "StrCpy $R5 1", "{body:?}");
     // The arguments: exactly `--remove --uninstall` (the app's in-app removal passes `--remove`
     // alone, keeping the admin copy), and `--per-machine` after it in the per-machine
@@ -531,4 +521,26 @@ fn the_hooks_exit_codes_and_words_are_the_apps() {
     );
     // The messages never show under /S.
     line_with(&code, &["${IfNot} ${Silent}"]);
+}
+
+#[test]
+fn the_hook_counts_an_admin_copy_left_as_removed() {
+    use clauseo_sandbox::windows::setup::SetupExit;
+
+    // 10 (`AdminCopyLeft`): the protection is gone and only the admin copy, administrators'
+    // alone, stays; the tool logged why. The hook sets $R5 for it as for 0.
+    let code = hook_code();
+    let body = preuninstall(&code);
+    let left = SetupExit::AdminCopyLeft.as_code();
+    line_with(
+        &code,
+        &[&format!("!define CLAUSEO_REMOVED_COPY_LEFT {left}")],
+    );
+    let exited = line_with(body, &["${If} $R8 = 0"]);
+    let or = "${OrIf} $R8 = ${CLAUSEO_REMOVED_COPY_LEFT}";
+    assert_eq!(
+        body[exited + 1..=exited + 2],
+        [or, "StrCpy $R5 1"],
+        "{body:?}"
+    );
 }
