@@ -124,6 +124,19 @@ pub(crate) fn locked_dacl_denying(folder: bool, group: &str) -> Vec<u8> {
     )
 }
 
+/// `bytes` (a descriptor [`descriptor`] made) with its DACL's
+/// first entry moved to the end: a deny placed after the allows, which Windows reads last.
+pub(crate) fn deny_last(bytes: &[u8]) -> Vec<u8> {
+    let at = usize::try_from(u32::from_le_bytes(bytes[16..20].try_into().unwrap())).unwrap();
+    let first = at + 8;
+    let size = usize::from(u16::from_le_bytes([bytes[first + 2], bytes[first + 3]]));
+    let acl_size = usize::from(u16::from_le_bytes([bytes[at + 2], bytes[at + 3]]));
+    let mut out = bytes[..first].to_vec();
+    out.extend(&bytes[first + size..at + acl_size]);
+    out.extend(&bytes[first..first + size]);
+    out
+}
+
 /// The recorded hash every [`Fake::ready`] copy has.
 pub(crate) const HASH: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
@@ -152,8 +165,9 @@ pub(crate) struct Fake {
     pub(crate) task: Task,
     pub(crate) refreshes: std::cell::Cell<u32>,
     pub(crate) healed: std::cell::Cell<bool>,
-    /// How many pauses the heal's wait took.
+    /// How many pauses the heal's wait took, and the clock, which each pause moves on.
     pub(crate) pauses: std::cell::Cell<u32>,
+    pub(crate) clock: std::cell::Cell<std::time::Duration>,
 }
 
 /// What asking the fake's refresh task does.
@@ -196,6 +210,7 @@ impl Fake {
             refreshes: std::cell::Cell::new(0),
             healed: std::cell::Cell::new(false),
             pauses: std::cell::Cell::new(0),
+            clock: std::cell::Cell::new(std::time::Duration::ZERO),
         };
         fake.set(Path::new(r"C:\"), Found::Folder, volume_root_dacl());
         fake.set(&program_files, Found::Folder, program_files_dacl());
@@ -297,8 +312,13 @@ impl AdminCopyFs for Fake {
         Ok(())
     }
 
-    fn pause(&self, _pause: std::time::Duration) {
+    fn pause(&self, pause: std::time::Duration) {
         self.pauses.set(self.pauses.get() + 1);
+        self.clock.set(self.clock.get() + pause);
+    }
+
+    fn clock(&self) -> std::time::Duration {
+        self.clock.get()
     }
 
     fn entries(&self, dir: &Path) -> io::Result<Vec<String>> {

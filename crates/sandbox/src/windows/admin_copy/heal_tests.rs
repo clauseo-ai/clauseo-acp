@@ -2,10 +2,10 @@
 //! and the lawyer's side asking the refresh task and waiting, bounded, before each check.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use super::fake::{Fake, Task, descriptor, locked_dacl, locked_dacl_denying};
-use super::heal::{ASK_EVERY, HEAL_LOOKS, heal_with};
+use super::fake::{Fake, Task, deny_last, descriptor, locked_dacl, locked_dacl_denying};
+use super::heal::{ASK_EVERY, Asker, HEAL_LOOKS, QUIET, heal_with};
 use super::*;
 
 const GROUP: &str = "S-1-5-21-1-2-3-1100";
@@ -88,13 +88,13 @@ fn a_copy_lacking_only_the_deny_asks_the_refresh_task_and_passes_once_it_ran() {
     let mut fake = lacking();
     fake.task = Task::HealsAt(1);
     assert_eq!(check(&fake), Err(Blocked::AdminCopyUnsafe), "before");
-    let flag = AtomicBool::new(false);
-    assert!(heal_with(&fake, &flag));
+    let flag = AtomicU64::new(0);
+    assert!(heal_with(&fake, Asker::State, &flag));
     assert_eq!((fake.refreshes.get(), fake.pauses.get()), (1, 1));
     assert_eq!(check(&fake), Ok(exe()));
-    assert!(!flag.load(Ordering::Relaxed));
+    assert_eq!(flag.load(Ordering::Relaxed), 0, "no back-off");
     // Healed, nothing is asked again.
-    assert!(!heal_with(&fake, &flag));
+    assert!(!heal_with(&fake, Asker::State, &flag));
     assert_eq!(fake.refreshes.get(), 1);
 }
 
@@ -102,30 +102,120 @@ fn a_copy_lacking_only_the_deny_asks_the_refresh_task_and_passes_once_it_ran() {
 fn a_run_from_the_old_copy_swaps_but_cant_heal_so_the_task_is_asked_again() {
     let mut fake = lacking();
     fake.task = Task::HealsAt(2);
-    assert!(heal_with(&fake, &AtomicBool::new(false)));
+    assert!(heal_with(&fake, Asker::State, &AtomicU64::new(0)));
     assert_eq!(fake.refreshes.get(), 2);
     assert_eq!(fake.pauses.get(), ASK_EVERY + 1);
     assert_eq!(check(&fake), Ok(exe()));
 }
 
 #[test]
-fn a_heal_that_never_comes_waits_its_bound_once_then_looks_only_once() {
+fn a_heal_that_never_comes_backs_off_state_queries_for_ten_minutes() {
     let fake = lacking();
-    let flag = AtomicBool::new(false);
-    assert!(!heal_with(&fake, &flag));
+    let quiet = AtomicU64::new(0);
+    assert!(!heal_with(&fake, Asker::State, &quiet));
     assert_eq!(fake.pauses.get(), HEAL_LOOKS);
     assert_eq!(fake.refreshes.get(), 1 + HEAL_LOOKS / ASK_EVERY);
-    assert!(flag.load(Ordering::Relaxed));
+    let waited = fake.clock.get();
+    assert_eq!(
+        quiet.load(Ordering::Relaxed),
+        u64::try_from((waited + QUIET).as_millis()).unwrap()
+    );
     assert_eq!(check(&fake), Err(Blocked::AdminCopyUnsafe));
-    assert!(!heal_with(&fake, &flag));
-    assert_eq!(fake.pauses.get(), HEAL_LOOKS + 1, "one look");
+    let (asks, pauses) = (fake.refreshes.get(), fake.pauses.get());
+    // A state query in the back-off asks nothing and waits for nothing.
+    assert!(!heal_with(&fake, Asker::State, &quiet));
+    assert_eq!((fake.refreshes.get(), fake.pauses.get()), (asks, pauses));
+    // A launch in it asks once and looks once, and doesn't lengthen it.
+    assert!(!heal_with(&fake, Asker::Launch, &quiet));
+    assert_eq!(
+        (fake.refreshes.get(), fake.pauses.get()),
+        (asks + 1, pauses + 1)
+    );
+    let until = u64::try_from((waited + QUIET).as_millis()).unwrap();
+    assert_eq!(quiet.load(Ordering::Relaxed), until);
+    // Ten minutes on, a state query waits in full again.
+    fake.clock.set(waited + QUIET);
+    assert!(!heal_with(&fake, Asker::State, &quiet));
+    assert_eq!(fake.pauses.get(), pauses + 1 + HEAL_LOOKS);
+}
+
+#[test]
+fn a_launch_in_the_back_off_that_heals_ends_it() {
+    let mut fake = lacking();
+    fake.task = Task::HealsAt(1);
+    let quiet = AtomicU64::new(u64::MAX);
+    assert!(!heal_with(&fake, Asker::State, &quiet));
+    assert_eq!(fake.refreshes.get(), 0);
+    assert!(heal_with(&fake, Asker::Launch, &quiet));
+    assert_eq!((fake.refreshes.get(), fake.pauses.get()), (1, 1));
+    assert_eq!(quiet.load(Ordering::Relaxed), 0);
+    assert_eq!(check(&fake), Ok(exe()));
+}
+
+#[test]
+fn a_malformed_deny_stays_unsafe_and_isnt_healed() {
+    let g = group();
+    let entries = |deny_mask: u32, deny_flags: u8, folder: bool| {
+        let inherit = if folder { 0x3 } else { 0 };
+        descriptor(
+            ADMINISTRATORS,
+            Some(&[
+                (1, deny_flags, deny_mask, GROUP),
+                (0, inherit, FULL_ACCESS, SYSTEM),
+                (0, inherit, FULL_ACCESS, ADMINISTRATORS),
+                (0, inherit, READ_EXECUTE, USERS),
+            ]),
+            true,
+        )
+    };
+    let malformed = [
+        ("wrong mask", entries(WRITE_DATA | DELETE, 0, false), false),
+        ("wrong mask, folder", entries(READ_EXECUTE, 0x3, true), true),
+        ("inherit-only", entries(FULL_ACCESS, 0xB, true), true),
+        (
+            "deny last",
+            deny_last(&locked_dacl_denying(false, GROUP)),
+            false,
+        ),
+        (
+            "deny last, folder",
+            deny_last(&locked_dacl_denying(true, GROUP)),
+            true,
+        ),
+    ];
+    for (why, bytes, folder) in malformed {
+        let mut fake = lacking();
+        fake.task = Task::HealsAt(1);
+        let (path, found) = if folder {
+            (sandbox(), Found::Folder)
+        } else {
+            (exe(), Found::File)
+        };
+        fake.set(&path, found, bytes.clone());
+        let (dir_bytes, exe_bytes) = (
+            fake.security(&sandbox()).unwrap(),
+            fake.security(&exe()).unwrap(),
+        );
+        assert_eq!(owed(&dir_bytes, &exe_bytes, &g), Owed::Drift, "{why}");
+        assert!(
+            !heal_with(&fake, Asker::Launch, &AtomicU64::new(0)),
+            "{why}"
+        );
+        assert_eq!(fake.refreshes.get(), 0, "{why}: nothing asked");
+        assert_eq!(check(&fake), Err(Blocked::AdminCopyUnsafe), "{why}");
+        assert_eq!(
+            check_launchable(&fake),
+            Err(Blocked::AdminCopyUnsafe),
+            "{why}"
+        );
+    }
 }
 
 #[test]
 fn nothing_is_asked_unless_the_deny_is_the_only_fault() {
-    let flag = AtomicBool::new(false);
+    let flag = AtomicU64::new(0);
     let asked = |fake: &Fake, why: &str| {
-        assert!(!heal_with(fake, &flag), "{why}");
+        assert!(!heal_with(fake, Asker::State, &flag), "{why}");
         assert_eq!((fake.refreshes.get(), fake.pauses.get()), (0, 0), "{why}");
     };
     // No group recorded: no deny is owed.
@@ -158,14 +248,14 @@ fn nothing_is_asked_unless_the_deny_is_the_only_fault() {
     let mut fake = lacking();
     fake.group_unreadable = true;
     asked(&fake, "unreadable group");
-    assert!(!flag.load(Ordering::Relaxed));
+    assert_eq!(flag.load(Ordering::Relaxed), 0);
 }
 
 #[test]
 fn a_task_that_cant_be_started_is_no_wait() {
     let mut fake = lacking();
     fake.task = Task::Fails;
-    assert!(!heal_with(&fake, &AtomicBool::new(false)));
+    assert!(!heal_with(&fake, Asker::State, &AtomicU64::new(0)));
     assert_eq!(fake.pauses.get(), 0);
     assert_eq!(check(&fake), Err(Blocked::AdminCopyUnsafe));
 }
