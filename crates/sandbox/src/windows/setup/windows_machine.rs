@@ -543,7 +543,12 @@ impl Machine for WindowsMachine {
                 sid: user.sid.clone(),
             })
             .collect();
-        git_tree::ensure_for(&accounts, group);
+        // The Git Bash stub is the runner, copied; without one it stays as it is (logged).
+        let runner = git_tree::runner_for_stub();
+        if runner.is_none() {
+            tracing::warn!("no runner was found to copy the Git Bash stub from");
+        }
+        git_tree::ensure_for(&accounts, group, runner.as_deref());
         Ok(())
     }
 

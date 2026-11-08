@@ -29,6 +29,7 @@ use crate::windows::acl::privilege::Privileges;
 use crate::windows::admin_copy::{Found, os as admin_os};
 use crate::windows::record;
 use crate::windows::refresh::{event_log, pe_version};
+use crate::windows::runner::RUNNER_EXE;
 use crate::windows::setup::preflight::account_name;
 use crate::windows::sids::Sid;
 
@@ -37,6 +38,7 @@ mod files;
 mod level;
 mod nt;
 mod put;
+mod stub;
 mod walk;
 
 /// The record key under `HKLM`, as `setup/record_write.rs` names it.
@@ -55,9 +57,30 @@ const VALUE_NAME_MAX: usize = 16_384;
 /// The machine's Git trees.
 pub struct WindowsTrees;
 
-/// Builds or keeps every account's tree and records each ([`build::ensure`]), on this machine.
-pub fn ensure_for(accounts: &[Account], group: &Sid) -> Vec<(Sid, Recorded)> {
-    build::ensure(&mut WindowsTrees, accounts, group)
+/// Builds or keeps every account's tree and records each, and places the Git Bash stub from
+/// `runner` ([`build::ensure_with`]), on this machine.
+pub fn ensure_for(
+    accounts: &[Account],
+    group: &Sid,
+    runner: Option<&Path>,
+) -> Vec<(Sid, Recorded)> {
+    build::ensure_with(&mut WindowsTrees, accounts, group, runner)
+}
+
+/// The runner the set-up copies the Git Bash stub from: [`RUNNER_EXE`] beside this exe (a
+/// set-up run from the install folder), else in the record's `UserInstallDir` (the install
+/// folder `--adopt` recorded; the admin copy has no runner beside it), each a regular file
+/// there; `None` when neither is. The copy opens it as itself (`stub.rs`).
+pub fn runner_for_stub() -> Option<PathBuf> {
+    let beside = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf));
+    let install = record::user_install_dir().ok().flatten();
+    [beside, install]
+        .into_iter()
+        .flatten()
+        .map(|dir| dir.join(RUNNER_EXE))
+        .find(|path| matches!(admin_os::found(path), Ok(Found::File)))
 }
 
 /// [`ensure_for`] the pool the machine record names, for the SYSTEM refresh: nothing while a
@@ -99,7 +122,8 @@ pub fn ensure_from_record() {
             }
         }
     }
-    ensure_for(&accounts, &group);
+    // The refresh has no runner beside the admin copy: the stub there stays.
+    ensure_for(&accounts, &group, None);
 }
 
 /// Deletes every tree and the record ([`retire::remove`]), on this machine.
@@ -207,6 +231,16 @@ impl TreeFs for WindowsTrees {
 
     fn delete_at_reboot(&mut self, path: &Path) -> Result<(), String> {
         delete::delete_at_reboot(path)
+    }
+
+    fn place_file(
+        &mut self,
+        from: &Path,
+        dir: &Path,
+        temp: &str,
+        name: &str,
+    ) -> Result<(), Refused> {
+        stub::place_file(from, dir, temp, name)
     }
 
     fn unique(&mut self) -> String {

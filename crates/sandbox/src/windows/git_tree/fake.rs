@@ -485,6 +485,34 @@ impl TreeFs for FakeTrees {
         Ok(())
     }
 
+    fn place_file(
+        &mut self,
+        from: &Path,
+        dir: &Path,
+        temp: &str,
+        name: &str,
+    ) -> Result<(), Refused> {
+        let (temp, to) = (dir.join(temp), dir.join(name));
+        self.call(format!("place_file {} -> {}", key(from), key(&to)))
+            .map_err(Refused::Other)?;
+        match self.node(from) {
+            Some(Node::File(_)) => {}
+            Some(Node::Link) => return Err(Refused::Reparse),
+            _ => return Err(Refused::Other(format!("{} isn't a file", key(from)))),
+        }
+        self.parent_folder(&to).map_err(Refused::Other)?;
+        if matches!(self.node(&to), Some(Node::Folder(_) | Node::Link))
+            || self.in_use.contains(&key(&to))
+        {
+            return Err(Refused::Other(format!("{} can't be replaced", key(&to))));
+        }
+        self.new_file(&key(&temp));
+        let made = self.nodes.remove(&key(&temp));
+        self.nodes.insert(key(&to), made.unwrap_or(Node::File(0)));
+        self.meta.remove(&key(&to));
+        Ok(())
+    }
+
     fn unique(&mut self) -> String {
         format!("{:016x}", self.stamp())
     }

@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use super::build::intact;
 use super::discard::{discard, empty_trash};
 use super::{
-    Account, BUILDING, GIT_DIR, Inspected, Owner, Recorded, SOURCE_DIR, TRASH_DIR, TreeFs,
+    Account, BUILDING, GIT_DIR, Inspected, OFF_DIR, Owner, Recorded, SOURCE_DIR, TRASH_DIR, TreeFs,
     folder_name_ok, marker_text,
 };
 use crate::windows::admin_copy::{self, Found};
@@ -72,7 +72,8 @@ pub(super) fn write_record(fs: &mut impl TreeFs, values: &[(Sid, String)]) -> Re
 }
 
 /// Step 7, once the record names only current trees: each account's old trees, the folders of
-/// accounts no longer in the pool, the older source copies, and the trash. `git` is the trees'
+/// accounts no longer in the pool, the older source copies, and the trash. The Git Bash stub's
+/// folder stays. `git` is the trees'
 /// folder when this run found it, `current` the tree id it built.
 pub(super) fn retire_all(
     fs: &mut impl TreeFs,
@@ -100,7 +101,10 @@ pub(super) fn retire_all(
         let pool = accounts
             .iter()
             .any(|account| account.name.eq_ignore_ascii_case(&name));
-        if pool || name.eq_ignore_ascii_case(SOURCE_DIR) || name.eq_ignore_ascii_case(TRASH_DIR) {
+        let ours = [SOURCE_DIR, TRASH_DIR, OFF_DIR]
+            .iter()
+            .any(|kept| name.eq_ignore_ascii_case(kept));
+        if pool || ours {
             continue;
         }
         // A dropped SID's account is gone, and a rolled-back user was deleted: no run of

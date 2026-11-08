@@ -93,7 +93,7 @@ fn remove_object(object: &Object, left: &mut usize) {
 /// Marks what `handle` is open on (with `DELETE`) deleted: `FileDispositionInfoEx` with POSIX
 /// semantics, ignoring the read-only attribute, else `FileDispositionInfo` where that isn't
 /// supported (the name then goes when the last handle closes).
-fn dispose(handle: &Handle) -> io::Result<()> {
+pub(super) fn dispose(handle: &Handle) -> io::Result<()> {
     let ex = FILE_DISPOSITION_INFO_EX {
         Flags: FILE_DISPOSITION_INFO_EX_FLAGS(
             FILE_DISPOSITION_FLAG_DELETE.0

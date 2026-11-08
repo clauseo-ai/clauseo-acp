@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use super::discard::{Discarded, discard, empty_trash};
 use super::discover::{discover, identity};
 use super::retire::{remove, retire_all, write_record};
+use super::stub::place_stub;
 use super::{
     Account, BUILDING, Entry, GIT_DIR, GIT_EXE, MARKER, MSYS_DLL, Owner, Recorded, Refused,
     SOURCE_DIR, Source, TreeFs, Unavailable, account_sddl, folder_name_ok, git_dir_sddl, joined,
@@ -19,6 +20,17 @@ use crate::windows::sids::Sid;
 /// uses, as the module says. Returns what it recorded, one entry per account, in order. Never
 /// fails: a failure is logged and recorded as `Git Bash unavailable: <code>`.
 pub fn ensure(fs: &mut impl TreeFs, accounts: &[Account], group: &Sid) -> Vec<(Sid, Recorded)> {
+    ensure_with(fs, accounts, group, None)
+}
+
+/// [`ensure`], and the Git Bash stub copied from `runner` (the set-up's;
+/// `stub::place_stub`) once `git\` is checked; `None` (the refresh) keeps the stub there.
+pub fn ensure_with(
+    fs: &mut impl TreeFs,
+    accounts: &[Account],
+    group: &Sid,
+    runner: Option<&Path>,
+) -> Vec<(Sid, Recorded)> {
     if accounts.is_empty() {
         // No pool (an in-app removal kept the admin copy and its refresh): nothing to serve.
         if let Err(why) = remove(fs) {
@@ -43,6 +55,12 @@ pub fn ensure(fs: &mut impl TreeFs, accounts: &[Account], group: &Sid) -> Vec<(S
             (outcomes, None)
         }
     };
+    place_stub(
+        fs,
+        plan.as_ref().map(|plan| plan.git.as_path()),
+        runner,
+        group,
+    );
     let values: Vec<(Sid, String)> = outcomes
         .iter()
         .map(|(sid, recorded)| (sid.clone(), recorded.text()))
@@ -326,7 +344,7 @@ fn building(to: &Path) -> PathBuf {
 
 /// A folder of the trees' chain below `git\`: discarded first when it is there but isn't a
 /// folder SYSTEM owns (what someone else made, or a link), then [`level`].
-fn fresh_level(
+pub(super) fn fresh_level(
     fs: &mut impl TreeFs,
     git: &Path,
     path: &Path,

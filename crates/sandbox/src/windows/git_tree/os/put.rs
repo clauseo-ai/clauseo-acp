@@ -239,7 +239,7 @@ fn opened_error(path: &Path, error: &io::Error) -> Refused {
 }
 
 /// Copies everything `source` holds into `target` from where each is; how many bytes.
-fn copy_data(source: &Handle, target: &Handle) -> io::Result<u64> {
+pub(super) fn copy_data(source: &Handle, target: &Handle) -> io::Result<u64> {
     let mut buffer = vec![0_u8; CHUNK];
     let mut total = 0_u64;
     loop {

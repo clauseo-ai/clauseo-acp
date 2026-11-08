@@ -56,20 +56,24 @@ mod fake;
 #[cfg(windows)]
 mod os;
 mod retire;
+mod stub;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod tests_more;
 #[cfg(test)]
 mod tests_safe;
+#[cfg(test)]
+mod tests_stub;
 
-pub use build::ensure;
+pub use build::{ensure, ensure_with};
 #[cfg(windows)]
 pub use os::{
     WindowsTrees, check_adopted_here, ensure_for, ensure_from_record, remove_all,
-    remove_folder_here,
+    remove_folder_here, runner_for_stub,
 };
 pub use retire::{check_adopted, remove};
+pub use stub::{OFF_DIR, STUB_NAME, off_sddl};
 
 /// The trees' folder in the admin folder.
 pub const GIT_DIR: &str = crate::windows::admin_copy::GIT;
@@ -97,7 +101,7 @@ const TRAVERSE: &str = "0x1200a0";
 /// The ACE that lets any signed-in user read a folder's owner and DACL, not inherited:
 /// `READ_CONTROL | FILE_READ_ATTRIBUTES | SYNCHRONIZE`, no listing and no file read. The outer
 /// runner, the unelevated desktop user, checks each level of a tree through it (part 2).
-const READ_SECURITY: &str = "(A;;0x120080;;;AU)";
+pub(super) const READ_SECURITY: &str = "(A;;0x120080;;;AU)";
 
 /// Why an account has no tree: the record's `Git Bash unavailable: <code>`. Appended only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -342,6 +346,18 @@ pub trait TreeFs {
     /// Schedules `path` and everything below it for deletion at the next restart
     /// (`MOVEFILE_DELAY_UNTIL_REBOOT`), the deepest first.
     fn delete_at_reboot(&mut self, path: &Path) -> Result<(), Failed>;
+    /// Copies the regular file `from` (its folder's chain opened plainly, the file opened as
+    /// itself relative to its folder's handle, no reparse point) into the folder `dir` as
+    /// `temp`, made relative to its handle, owner SYSTEM, its DACL inherited, written through;
+    /// then renames it to `name` relative to the same handle, replacing a file there. A failure
+    /// deletes `temp`.
+    fn place_file(
+        &mut self,
+        from: &Path,
+        dir: &Path,
+        temp: &str,
+        name: &str,
+    ) -> Result<(), Refused>;
     /// A random name for the trash: 16 lower-case hex digits.
     fn unique(&mut self) -> String;
     /// Whether any process runs as `account`.

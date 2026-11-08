@@ -2220,6 +2220,10 @@ handle (`SetKernelObjectSecurity`, which never propagates), read back:
   install files have. A tree's files are links of the copy's and share that descriptor, so the
   outer runner (the unelevated lawyer) can read a tree's `usr\bin\msys-2.0.dll`;
 - `_trash\`: SYSTEM and Administrators full, inherited; no one else;
+- `_off\bash.exe`, the Git Bash stub (the runner, copied by each set-up through handles under a
+  temporary name, then renamed over it): `_source\`'s DACL plus the Authenticated Users entry;
+  kept by the refresh (which has no runner to copy), by retirement and by `--adopt` when SYSTEM's
+  or Administrators', deleted with `git\`; a failure to place it is logged, never a set-up failure;
 - each tree's and copy's completion marker, `.clauseo-tree`: owner SYSTEM, a protected DACL with
   SYSTEM and Administrators full, a tree's account read and execute, and Authenticated Users
   `FILE_GENERIC_READ` (`0x120089`), so the outer runner can read it.
