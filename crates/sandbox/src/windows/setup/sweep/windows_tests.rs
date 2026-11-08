@@ -304,9 +304,15 @@ fn elevated_a_task_whose_descriptor_shuts_system_out_is_deleted_or_56_never_left
         !left || swept.left(),
         "the task was left and the sweep would have ended 0: {swept:?}"
     );
-    // Missing from the listing, only the cross-check could have caught it.
+    // Missing from the listing, only the cross-check could have caught it: this task, by its
+    // path, among the hidden ones, not just any hidden task.
+    let path = format!(r"\{name}");
+    let caught = swept
+        .hidden_paths
+        .iter()
+        .any(|hidden| same_task_path(hidden, &path) == Ok(true));
     assert!(
-        listed || swept.hidden > 0,
+        listed || caught,
         "the listing hid the task and the cross-check didn't find it: {swept:?}"
     );
 }
