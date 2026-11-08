@@ -37,6 +37,21 @@
       {
         "property": "__TAURI__",
         "message": "Tauri's injected globals are reached only under src/transport/; everything else talks to the host through HostTransport."
+      },
+      {
+        "property": "getPointAtLength",
+        "message": "getPointAtLength measures the whole path again on every call (0.9 ms a read for the pen's ink in Chrome; the pen's 2,380-read table held \"Setting up\" off the screen for about 8 s on the Windows VM, PR #775). Work the points out in script from the path's own text, as components/src/clauseo/ink-lookup.ts does."
+      },
+      {
+        "property": "getTotalLength",
+        "message": "getTotalLength measures the whole path on every call. Only pen-mark.tsx's one read per pen, which scales the script's lengths to the page's, has an override by exact name in ui/app/.oxlintrc.json; work lengths out in script, as components/src/clauseo/ink-lookup.ts does."
+      }
+    ],
+    "no-warning-comments": [
+      "error",
+      {
+        "terms": ["no-restricted-properties"],
+        "location": "anywhere"
       }
     ],
     "no-alert": "error"
@@ -47,7 +62,17 @@
       "rules": {
         "no-restricted-imports": "off",
         "no-restricted-globals": "off",
-        "no-restricted-properties": "off"
+        "no-restricted-properties": [
+          "error",
+          {
+            "property": "getPointAtLength",
+            "message": "getPointAtLength measures the whole path again on every call (0.9 ms a read for the pen's ink in Chrome; the pen's 2,380-read table held \"Setting up\" off the screen for about 8 s on the Windows VM, PR #775). Work the points out in script from the path's own text, as components/src/clauseo/ink-lookup.ts does."
+          },
+          {
+            "property": "getTotalLength",
+            "message": "getTotalLength measures the whole path on every call. Only pen-mark.tsx's one read per pen, which scales the script's lengths to the page's, has an override by exact name in ui/app/.oxlintrc.json; work lengths out in script, as components/src/clauseo/ink-lookup.ts does."
+          }
+        ]
       }
     },
     {
@@ -289,6 +314,14 @@
           {
             "property": "writeHeapSnapshot",
             "message": "v8.writeHeapSnapshot writes a file past the node:fs ban under scripts/; no script needs it. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+          },
+          {
+            "property": "getPointAtLength",
+            "message": "getPointAtLength measures the whole path again on every call (0.9 ms a read for the pen's ink in Chrome; the pen's 2,380-read table held \"Setting up\" off the screen for about 8 s on the Windows VM, PR #775). Work the points out in script from the path's own text, as components/src/clauseo/ink-lookup.ts does."
+          },
+          {
+            "property": "getTotalLength",
+            "message": "getTotalLength measures the whole path on every call. Only pen-mark.tsx's one read per pen, which scales the script's lengths to the page's, has an override by exact name in ui/app/.oxlintrc.json; work lengths out in script, as components/src/clauseo/ink-lookup.ts does."
           }
         ],
         "no-eval": "error",
@@ -592,7 +625,8 @@
       "files": [
         "scripts/buildtime-lib.test.mjs",
         "scripts/guard.test.mjs",
-        "scripts/oxlint-bans.test.mjs"
+        "scripts/oxlint-bans.test.mjs",
+        "scripts/oxlint-geometry.test.mjs"
       ],
       "rules": {
         "no-restricted-imports": [
@@ -884,6 +918,42 @@
                 "message": "Tauri APIs are imported only under src/transport/; everything else talks to the host through HostTransport."
               }
             ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["components/src/clauseo/pen-mark.tsx"],
+      "rules": {
+        "no-restricted-properties": [
+          "error",
+          {
+            "property": "__TAURI_INTERNALS__",
+            "message": "Tauri's injected globals are reached only under src/transport/; everything else talks to the host through HostTransport."
+          },
+          {
+            "property": "__TAURI__",
+            "message": "Tauri's injected globals are reached only under src/transport/; everything else talks to the host through HostTransport."
+          },
+          {
+            "property": "getPointAtLength",
+            "message": "getPointAtLength measures the whole path again on every call (0.9 ms a read for the pen's ink in Chrome; the pen's 2,380-read table held \"Setting up\" off the screen for about 8 s on the Windows VM, PR #775). Work the points out in script from the path's own text, as components/src/clauseo/ink-lookup.ts does."
+          }
+        ]
+      }
+    },
+    {
+      "files": ["components/src/clauseo/pen-mark.test.tsx", "src/room/pen-axe.test.tsx"],
+      "rules": {
+        "no-restricted-properties": [
+          "error",
+          {
+            "property": "__TAURI_INTERNALS__",
+            "message": "Tauri's injected globals are reached only under src/transport/; everything else talks to the host through HostTransport."
+          },
+          {
+            "property": "__TAURI__",
+            "message": "Tauri's injected globals are reached only under src/transport/; everything else talks to the host through HostTransport."
           }
         ]
       }
