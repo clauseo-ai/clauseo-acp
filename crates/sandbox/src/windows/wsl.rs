@@ -43,6 +43,10 @@ mod check;
 #[cfg(windows)]
 pub mod msi;
 #[cfg(windows)]
+mod msi_files;
+#[cfg(any(windows, test))]
+pub mod msi_verify;
+#[cfg(windows)]
 mod os;
 mod record;
 mod sd;
@@ -57,8 +61,8 @@ pub use record::{AppId, RECORD_ABSENT, RECORD_APP_IDS, WslRecord};
 pub use sd::{DENY_MASK, LaunchSd, NEEDED_MASK, SdError};
 pub use seam::{ClassEntry, Permission, WslError, WslRead, WslWrite};
 pub use upgrade::{
-    INSTALLER_SERVICE, PACKAGE_MSI, PACKAGE_NAME, Upgrade, Version, installer_package, msi_behind,
-    upgrade, version,
+    INSTALLER_SERVICE, PACKAGE_MSI, PACKAGE_NAME, PACKAGE_PUBLISHER, Upgrade, Version,
+    installer_package, msi_behind, package_folder_version, upgrade, version,
 };
 
 /// The lifted WSL's service (the MSI's `wslservice.exe`), which runs WSL2's VMs.
