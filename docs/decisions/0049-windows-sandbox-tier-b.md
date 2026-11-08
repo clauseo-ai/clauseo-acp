@@ -1876,18 +1876,18 @@ It kills nothing: stopping processes is `--stop`'s, and its `Sweeper` trait has 
 call. It writes no record value. It logs one Event Log line with counts only (pool users, folders
 and tasks read, the pool's tasks deleted, unreadable and not deleted, BITS jobs cancelled and
 not), with no path, task name or SID, since every local user can read the Application log. Its
-exit codes (`SweepExit`) start after the stop's:
+exit codes (`SweepExit`) start after the stop's 50 and the WSL deny task's 51 (`WslDenyExit`):
 
 | Code | Meaning |
 |---|---|
 | 0 | every pool user's task found was deleted and every pool user's BITS job cancelled, or no pool is recorded |
-| 51 | not LOCAL SYSTEM, or not run from the admin copy; nothing touched |
-| 52 | the record can't be read, or its `PoolSids` or `OwnerSid` is malformed; nothing touched |
-| 53 | a SID in `PoolSids` isn't a pool user; nothing touched |
-| 54 | a task was unreadable or not deleted, a folder couldn't be listed, or there were more than 10 000 folders; the BITS step still ran |
-| 55 | every task was read and the pool's deleted, but a pool user's BITS job wasn't cancelled, a job's owner or the list couldn't be read, or the list reached its cap |
+| 52 | not LOCAL SYSTEM, or not run from the admin copy; nothing touched |
+| 53 | the record can't be read, or its `PoolSids` or `OwnerSid` is malformed; nothing touched |
+| 54 | a SID in `PoolSids` isn't a pool user; nothing touched |
+| 55 | a task was unreadable or not deleted, a folder couldn't be listed, or there were more than 10 000 folders; the BITS step still ran |
+| 56 | every task was read and the pool's deleted, but a pool user's BITS job wasn't cancelled, a job's owner or the list couldn't be read, or the list reached its cap |
 
-54 wins when both apply. A non-zero run leaves the session's unclean-session marker ("The
+55 wins when both apply. A non-zero run leaves the session's unclean-session marker ("The
 runner", "The session's end").
 
 **Misuse.** As with the stop, any code running as the lawyer can start the task or end a run.
@@ -1897,7 +1897,7 @@ marker stays.
 **Risks.**
 - A task whose principal names an account that can't be resolved (a domain account with no
   domain controller reachable, or a deleted account) counts as unreadable. On such a machine
-  every run ends 54 and every session leaves its marker, until the task goes or its account
+  every run ends 55 and every session leaves its marker, until the task goes or its account
   resolves. `elevated_this_machines_tasks_all_have_a_principal_that_resolves` checks CI's
   machine only.
 - The harness rows for this end (`cancel`, `stdin-unread-cancel`, `end-cleanup`) haven't

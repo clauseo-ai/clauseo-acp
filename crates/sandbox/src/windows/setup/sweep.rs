@@ -10,14 +10,14 @@
 //! [`Sweeper`], which `windows_sweeper.rs` implements and the tests fake. Steps 1 to 3 are the
 //! gate `--stop` uses and step 5 its BITS step (`pool_steps.rs`). It:
 //!
-//! 1. refuses unless this process is LOCAL SYSTEM and runs from the admin copy's path (51);
+//! 1. refuses unless this process is LOCAL SYSTEM and runs from the admin copy's path (52);
 //! 2. reads the pool from the machine's record, `HKLM\SOFTWARE\Clauseo\Sandbox`: `PoolSids` and
 //!    `OwnerSid`, which only the elevated set-up writes. Nothing else names a SID: no argument
 //!    (the task passes `--sweep-tasks` alone, `args.rs`), no environment, nothing under the
-//!    lawyer's data folder. A record that can't be read is 52; no record, or an empty pool, is
+//!    lawyer's data folder. A record that can't be read is 53; no record, or an empty pool, is
 //!    nothing to sweep (0);
 //! 3. holds every SID to the pool-user check (`processes::check_pool`): a local account of this
-//!    machine, not built in, not SYSTEM, not the owner. One that fails touches nothing (53);
+//!    machine, not built in, not SYSTEM, not the owner. One that fails touches nothing (54);
 //! 4. walks every Task Scheduler folder from `\`, each folder's subfolders too, with no depth
 //!    limit but at most [`FOLDERS_CAP`] folders. In each it reads every task, hidden ones
 //!    included, and its definition's principal: `UserId`, or `GroupId` when that is empty. It
@@ -31,15 +31,15 @@
 //!    only when its account part is a pool user's name, without case, with no prefix or one of
 //!    `.\`, this computer's `NetBIOS` name or its DNS host name ([`Names::is_pool_name`]); it is
 //!    then deleted. Any other such name is skipped, counted in the log line (never named), and
-//!    not 54. A task whose principal names neither a user nor a group isn't the pool's. A task
+//!    not 55. A task whose principal names neither a user nor a group isn't the pool's. A task
 //!    whose definition or principal can't be read is unreadable and never deleted. Unreadable
 //!    tasks, a folder whose tasks or subfolders can't be listed, a delete that fails, and more
-//!    than [`FOLDERS_CAP`] folders are 54, and none stops the walk: every other task is still
+//!    than [`FOLDERS_CAP`] folders are 55, and none stops the walk: every other task is still
 //!    read, and every pool task still deleted. A task's running instance is left running:
 //!    deleting the task ends nothing;
 //! 5. cancels every BITS job a pool user owns, whatever step 4 found (`BG_JOB_ENUM_ALL_USERS`,
 //!    each job's owner). One that can't be cancelled, an owner that can't be read, a list that
-//!    can't be read, or one of `JOBS_CAP` jobs is 55; 54 wins when both;
+//!    can't be read, or one of `JOBS_CAP` jobs is 56; 55 wins when both;
 //! 6. logs one line with counts only: no path, task name or SID, as the Application log is
 //!    readable by every local user.
 //!
@@ -59,8 +59,9 @@ pub(crate) mod windows_sweeper;
 #[cfg(test)]
 mod windows_tests;
 
-/// The sweep's exit codes. They start at 51, after [`StopExit`]'s 50, so the one exe never gives
-/// one number two meanings; codes are appended from here on, never renumbered.
+/// The sweep's exit codes. They start at 52, after [`StopExit`]'s 50 and the WSL deny task's 51
+/// (`WslDenyExit`), so the one exe never gives one number two meanings; codes are appended from
+/// here on, never renumbered.
 ///
 /// [`StopExit`]: super::stop::StopExit
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,18 +69,18 @@ pub enum SweepExit {
     /// 0: every pool user's task found was deleted and every pool user's BITS job cancelled,
     /// every task and folder read (with a pool recorded; with none there is nothing to sweep).
     Done,
-    /// 51: not LOCAL SYSTEM, or not run from the admin copy's path; nothing was touched.
+    /// 52: not LOCAL SYSTEM, or not run from the admin copy's path; nothing was touched.
     NotAllowed,
-    /// 52: the record can't be read, or its `PoolSids` or `OwnerSid` is malformed; nothing was
+    /// 53: the record can't be read, or its `PoolSids` or `OwnerSid` is malformed; nothing was
     /// touched.
     NoRecord,
-    /// 53: a SID `PoolSids` lists isn't a pool user's; nothing was touched.
+    /// 54: a SID `PoolSids` lists isn't a pool user's; nothing was touched.
     NotPool,
-    /// 54: a task's principal couldn't be read, a pool user's task couldn't be
+    /// 55: a task's principal couldn't be read, a pool user's task couldn't be
     /// deleted, a folder's tasks or subfolders couldn't be listed, or there were more than
     /// [`FOLDERS_CAP`] folders. The BITS step still ran.
     TasksLeft,
-    /// 55: every task was read and the pool's deleted, but a pool user's BITS job wasn't
+    /// 56: every task was read and the pool's deleted, but a pool user's BITS job wasn't
     /// cancelled, a job's owner couldn't be read, or the BITS list couldn't be read or reached
     /// `JOBS_CAP`.
     JobsLeft,
@@ -90,16 +91,16 @@ impl SweepExit {
     pub fn as_code(self) -> u8 {
         match self {
             SweepExit::Done => 0,
-            SweepExit::NotAllowed => 51,
-            SweepExit::NoRecord => 52,
-            SweepExit::NotPool => 53,
-            SweepExit::TasksLeft => 54,
-            SweepExit::JobsLeft => 55,
+            SweepExit::NotAllowed => 52,
+            SweepExit::NoRecord => 53,
+            SweepExit::NotPool => 54,
+            SweepExit::TasksLeft => 55,
+            SweepExit::JobsLeft => 56,
         }
     }
 }
 
-/// The most Task Scheduler folders the walk reads: one more left to read is 54.
+/// The most Task Scheduler folders the walk reads: one more left to read is 55.
 pub const FOLDERS_CAP: usize = 10_000;
 
 /// A task's principal as its definition gives it; either may be empty.
@@ -186,7 +187,7 @@ pub struct Swept {
 }
 
 impl Swept {
-    /// Whether a task of the pool's may be left: step 4's 54.
+    /// Whether a task of the pool's may be left: step 4's 55.
     pub fn left(&self) -> bool {
         self.unreadable > 0 || self.not_deleted > 0 || self.unlisted > 0 || self.capped
     }

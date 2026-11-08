@@ -311,14 +311,14 @@ fn the_service_names_map_to_their_sids_in_any_case_and_nothing_else_does() {
 }
 
 #[test]
-fn an_unreadable_principal_is_54_and_the_pools_other_tasks_still_go() {
+fn an_unreadable_principal_is_55_and_the_pools_other_tasks_still_go() {
     let mut fake = Fake::new(&[1010]);
     fake.task("\\", "first", user("S-1-5-21-1-2-3-1010"));
     fake.unread("\\", "unread");
     fake.unread("\\", "unread-too");
     fake.task("\\", "last", group("S-1-5-21-1-2-3-1010"));
     assert_eq!(sweep(&mut fake), SweepExit::TasksLeft);
-    assert_eq!(SweepExit::TasksLeft.as_code(), 54);
+    assert_eq!(SweepExit::TasksLeft.as_code(), 55);
     assert_eq!(fake.deleted(), ["\\first", "\\last"]);
     // The BITS step still ran.
     assert_eq!(fake.done.last().map(String::as_str), Some("jobs"));
@@ -354,7 +354,7 @@ fn tasks_in_nested_subfolders_are_found_and_deleted() {
 }
 
 #[test]
-fn a_folder_that_cant_be_listed_is_54_and_the_rest_are_still_walked() {
+fn a_folder_that_cant_be_listed_is_55_and_the_rest_are_still_walked() {
     let mut fake = Fake::new(&[1010]);
     fake.task("\\A", "hidden-from-us", user("S-1-5-21-1-2-3-1010"));
     fake.task("\\A\\B", "below", user("S-1-5-21-1-2-3-1010"));
@@ -377,7 +377,7 @@ fn a_folder_that_cant_be_listed_is_54_and_the_rest_are_still_walked() {
 }
 
 #[test]
-fn a_failed_delete_is_54_and_the_task_is_counted() {
+fn a_failed_delete_is_55_and_the_task_is_counted() {
     let mut fake = Fake::new(&[1010]);
     fake.task("\\", "stuck", user("S-1-5-21-1-2-3-1010"));
     fake.task("\\", "goes", user("S-1-5-21-1-2-3-1010"));
@@ -393,7 +393,7 @@ fn a_failed_delete_is_54_and_the_task_is_counted() {
 }
 
 #[test]
-fn more_folders_than_the_cap_is_54_and_the_cap_itself_is_not() {
+fn more_folders_than_the_cap_is_55_and_the_cap_itself_is_not() {
     for (extra, exit) in [(0, SweepExit::Done), (1, SweepExit::TasksLeft)] {
         let mut fake = Fake::new(&[1010]);
         // The root and FOLDERS_CAP - 1 below it, then `extra` more.
@@ -415,7 +415,7 @@ fn more_folders_than_the_cap_is_54_and_the_cap_itself_is_not() {
 }
 
 #[test]
-fn only_the_pools_bits_jobs_are_cancelled_and_a_job_left_is_55() {
+fn only_the_pools_bits_jobs_are_cancelled_and_a_job_left_is_56() {
     let mut fake = Fake::new(&[1010, 1011]);
     let owner = Some(Sid::parse(OWNER).unwrap());
     fake.jobs = Ok(vec![
@@ -449,8 +449,8 @@ fn only_the_pools_bits_jobs_are_cancelled_and_a_job_left_is_55() {
         assert!(fake.logged[0].0);
         assert_eq!(fake.deleted(), Vec::<&str>::new());
     }
-    assert_eq!(SweepExit::JobsLeft.as_code(), 55);
-    // A task left and a job left: 54 wins, and the job of the pool's is still cancelled.
+    assert_eq!(SweepExit::JobsLeft.as_code(), 56);
+    // A task left and a job left: 55 wins, and the job of the pool's is still cancelled.
     let mut fake = Fake::new(&[1010]);
     fake.unread("\\", "unread");
     fake.jobs = Ok(vec![None, Some(sid(1010))]);
@@ -538,7 +538,7 @@ fn the_exit_codes_follow_the_stop_codes_and_are_never_shared() {
         SweepExit::JobsLeft,
     ];
     let codes: Vec<u8> = all.iter().map(|exit| exit.as_code()).collect();
-    assert_eq!(codes, [0, 51, 52, 53, 54, 55]);
+    assert_eq!(codes, [0, 52, 53, 54, 55, 56]);
     let stop = StopExit::NotReserved.as_code();
     assert_eq!(stop, 50, "the stop's last code");
     let mut by_code = BTreeMap::new();
@@ -546,4 +546,6 @@ fn the_exit_codes_follow_the_stop_codes_and_are_never_shared() {
         assert!(by_code.insert(exit.as_code(), exit).is_none());
     }
     assert!(codes[1..].iter().all(|code| *code > stop));
+    // 51 is the WSL deny task's (`WslDenyExit::NotAllowed`).
+    assert!(!codes.contains(&51));
 }
