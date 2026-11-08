@@ -60,21 +60,24 @@ impl WindowsPipe {
     /// Makes `name` with the descriptor `sddl`, its first instance or nothing: a name another
     /// process made first is [`Unmade::Taken`].
     pub(crate) fn create(name: &str, sddl: &str) -> Result<WindowsPipe, Unmade> {
-        let first = instance(name, sddl, true).map_err(|error| {
-            let taken = [ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, ERROR_PIPE_BUSY]
-                .iter()
-                .any(|code| error.raw_os_error() == i32::try_from(code.0).ok());
-            if taken {
-                Unmade::Taken
-            } else {
-                Unmade::Failed(error.to_string())
-            }
-        })?;
+        let first = instance(name, sddl, true).map_err(|error| unmade(&error))?;
         Ok(WindowsPipe {
             name: name.to_owned(),
             sddl: sddl.to_owned(),
             spare: Some(first),
         })
+    }
+}
+
+/// Why a first instance couldn't be made: [`Unmade::Taken`] when another process holds the name.
+fn unmade(error: &io::Error) -> Unmade {
+    let taken = [ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, ERROR_PIPE_BUSY]
+        .iter()
+        .any(|code| error.raw_os_error() == i32::try_from(code.0).ok());
+    if taken {
+        Unmade::Taken
+    } else {
+        Unmade::Failed(error.to_string())
     }
 }
 
@@ -117,14 +120,15 @@ pub(crate) struct Client(Handle);
 impl Pipe for WindowsPipe {
     type Client = Client;
 
-    fn next(&mut self, wait: Duration) -> Result<Option<Client>, String> {
+    fn next(&mut self, wait: Duration) -> Result<Option<Client>, Unmade> {
         // With no spare (its creation failed), no instance of this process's is left: a new one
-        // is the first again, or nothing, so a name someone took meanwhile is never shared.
+        // is the first again, or nothing, so a name someone took meanwhile is never shared, and
+        // is a squat (`Unmade::Taken`).
         let waiting = match self.spare.take() {
             Some(waiting) => waiting,
-            None => instance(&self.name, &self.sddl, true).map_err(|e| e.to_string())?,
+            None => instance(&self.name, &self.sddl, true).map_err(|error| unmade(&error))?,
         };
-        if !connect(&waiting, wait).map_err(|error| error.to_string())? {
+        if !connect(&waiting, wait).map_err(|error| Unmade::Failed(error.to_string()))? {
             return Ok(None);
         }
         // The spare, made before this client is served, so the name stays this process's.

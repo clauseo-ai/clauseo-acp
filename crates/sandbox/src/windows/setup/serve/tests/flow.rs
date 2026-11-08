@@ -300,6 +300,12 @@ fn only_system_from_the_admin_copy_with_a_recorded_copy_makes_the_pipe() {
         ..FakePipe::default()
     };
     assert_eq!(run_on(&mut host, &mut pipe).0, ServeExit::PipeFailed);
+    // The name taken while the spare was made again: a squat, not a failed pipe.
+    let mut pipe = FakePipe {
+        taken_next: true,
+        ..FakePipe::default()
+    };
+    assert_eq!(run_on(&mut host, &mut pipe).0, ServeExit::Squatted);
     let mut pipe = FakePipe::default();
     let (exit, sddl) = run_on(&mut FakeHost::new(), &mut pipe);
     assert_eq!(exit, ServeExit::Done);

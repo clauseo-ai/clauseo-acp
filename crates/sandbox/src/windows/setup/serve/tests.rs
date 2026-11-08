@@ -67,15 +67,20 @@ pub(crate) struct FakePipe {
     pub(crate) waits: Vec<Duration>,
     pub(crate) replies: Vec<Reply>,
     pub(crate) fail_next: bool,
+    /// The next wait finds the name someone else's.
+    pub(crate) taken_next: bool,
 }
 
 impl Pipe for FakePipe {
     type Client = FakeClient;
 
-    fn next(&mut self, wait: Duration) -> Result<Option<FakeClient>, String> {
+    fn next(&mut self, wait: Duration) -> Result<Option<FakeClient>, Unmade> {
         self.waits.push(wait);
         if self.fail_next {
-            return Err("ConnectNamedPipe failed".to_owned());
+            return Err(Unmade::Failed("ConnectNamedPipe failed".to_owned()));
+        }
+        if self.taken_next {
+            return Err(Unmade::Taken);
         }
         Ok(self.waiting.pop_front())
     }
@@ -280,7 +285,7 @@ impl Drop for Recording<'_> {
 impl Pipe for Recording<'_> {
     type Client = FakeClient;
 
-    fn next(&mut self, wait: Duration) -> Result<Option<FakeClient>, String> {
+    fn next(&mut self, wait: Duration) -> Result<Option<FakeClient>, Unmade> {
         self.0.next(wait)
     }
 

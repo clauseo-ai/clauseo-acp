@@ -2002,7 +2002,9 @@ upgrade's 60-62):
    control, then per user the owner and per machine `IU` with read and write less
    `FILE_CREATE_PIPE_INSTANCE` (`0x12019b`), and a Medium no-read-up, no-write-up label. A name
    someone made first is logged and served to no one (64); a pipe that can't be made is 66;
-4. waits 30 s for the first client and 5 s for each after, then exits 0 (a failed wait is 66).
+4. waits 30 s for the first client and 5 s for each after, then exits 0 (a failed wait is 66; a
+   name someone took while no instance was left is 64; a client that closed before the server
+   reached it is let go and the wait goes on).
    A spare instance waits while one client is served, so the name is never free while the server
    runs. A client has 2 s to send its request, so one that sends nothing holds no one up.
 

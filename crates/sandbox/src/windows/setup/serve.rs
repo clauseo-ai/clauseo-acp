@@ -109,7 +109,8 @@ pub enum ServeExit {
     Done,
     /// 63: not LOCAL SYSTEM, or not run from the admin copy's path; no pipe was made.
     NotAllowed,
-    /// 64: someone else made the pipe's name first; no one was served.
+    /// 64: someone else made the pipe's name first, or took it while no instance was left; no
+    /// one was served from then on.
     Squatted,
     /// 65: the record can't be read, or holds no admin copy; no pipe was made.
     NoRecord,
@@ -143,8 +144,9 @@ pub enum Unmade {
 pub trait Pipe {
     /// A connected client.
     type Client;
-    /// Waits up to `wait` for the next client; `None` when none came.
-    fn next(&mut self, wait: Duration) -> Result<Option<Self::Client>, String>;
+    /// Waits up to `wait` for the next client; `None` when none came. [`Unmade::Taken`] when the
+    /// instance it had to make again was someone else's name by then.
+    fn next(&mut self, wait: Duration) -> Result<Option<Self::Client>, Unmade>;
     /// The client's one request message, read within [`READ_WAIT`], at most [`REQUEST_CAP`]
     /// bytes.
     fn request(&mut self, client: &mut Self::Client) -> Result<Vec<u8>, String>;
@@ -243,7 +245,11 @@ pub fn run<P: Pipe>(
                 pipe.reply(client, &reply.to_line());
             }
             Ok(None) => return ServeExit::Done,
-            Err(error) => {
+            Err(Unmade::Taken) => {
+                host.log(true, "--serve-set-up: another process took the pipe's name");
+                return ServeExit::Squatted;
+            }
+            Err(Unmade::Failed(error)) => {
                 host.log(
                     true,
                     &format!("--serve-set-up: waiting for a client: {error}"),

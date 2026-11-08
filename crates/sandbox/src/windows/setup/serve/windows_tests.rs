@@ -23,7 +23,7 @@ use std::time::Duration;
 
 use super::tests::{FakeHost, SET_UP};
 use super::windows_pipe::WindowsPipe;
-use super::{ClientFacts, Pipe, Refusal, Reply, ServeExit, SetUpError, run};
+use super::{ClientFacts, Pipe, Refusal, Reply, ServeExit, SetUpError, Unmade, run};
 use crate::test_support::TempDir;
 use crate::windows::refresh::windows_tests::{system32, try_in_cmd};
 use crate::windows::setup::logon::tests::{TestUser, clear_leftovers, random_hex};
@@ -53,7 +53,7 @@ struct Seen<'a>(WindowsPipe, &'a mut Vec<ClientFacts>);
 impl Pipe for Seen<'_> {
     type Client = <WindowsPipe as Pipe>::Client;
 
-    fn next(&mut self, wait: Duration) -> Result<Option<Self::Client>, String> {
+    fn next(&mut self, wait: Duration) -> Result<Option<Self::Client>, Unmade> {
         self.0.next(wait)
     }
 
