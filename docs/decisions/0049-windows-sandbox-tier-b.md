@@ -2226,6 +2226,9 @@ and the plan gives the pool user `ReadAndExecute` (`PathKind::OtherMatterRead`, 
   A folder with a refused name among its files (a worktree's `.git` file), and the other
   matter's root (see "The fence"), take an allow on each of their other files instead.
 - A refused name gets nothing, and neither does anything in it.
+  A name matches in any letter case by Unicode case folding (`policy/ascii_fold.rs`, shared
+  with the policy and the macOS profile), so a `.clauſeo` (U+017F, long s) is refused too; NTFS's
+  upcase table maps U+017F to `S`, so it would open as `.CLAUSEO` (R18 MEDIUM 1).
 - A granted file: an allow on itself.
 
 Rejected for MED 2: one allow inherited down a clean folder's tree, as first built. A folder
