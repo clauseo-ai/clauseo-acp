@@ -66,6 +66,7 @@ mod back;
 #[cfg(any(windows, test, feature = "test-support"))]
 mod fence;
 mod lift;
+mod reads;
 mod roots;
 mod stuck;
 mod walk;
@@ -73,6 +74,7 @@ mod walk;
 pub use back::{forget_matter, reconcile};
 #[cfg(any(windows, test, feature = "test-support"))]
 pub use fence::{FencedEach, fence_each, fence_registered};
+pub use reads::{Narrowed, end_reads, narrow_reads};
 pub(crate) use walk::{OWN_KINDS, strict_for, strict_of};
 use walk::{Refused, Walk, clearing, inside_any, own_roots, owner_passes, strict_at, walks};
 
@@ -141,6 +143,9 @@ pub fn apply(
 /// listed then, each deny is found in place (an explicit entry on the item itself), and nothing
 /// is written. They aren't walk inputs (`WalkInputs`): no own-tree walk depends on them, so a
 /// changed set of them can't make a skip leave anything out.
+///
+/// First, before anything is recorded, each of the matter's reads of other matters that `plan`
+/// doesn't list is taken back (`reads.rs`, R18): an earlier run that crashed left it.
 pub fn apply_checked(
     ledger: &mut Ledger,
     plan: &mut AdmittedPlan,
@@ -148,6 +153,8 @@ pub fn apply_checked(
     around: &mut dyn Surroundings,
     check: &LaunchCheck,
 ) -> Result<Applied, Error> {
+    // R18: the matter's reads of other matters a crashed run left, and the plan doesn't list.
+    reads::drop_stale(ledger, plan, acl, around)?;
     apply_with_pool(ledger, plan, acl, around, check, &[])
 }
 

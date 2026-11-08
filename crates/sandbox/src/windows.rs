@@ -119,9 +119,10 @@ pub use acl::NtfsAcl;
 pub use admit::admit;
 #[cfg(any(test, feature = "test-support"))]
 pub use admit::admit_with;
-pub use admit::{Admitted, FolderList, FolderRefusal, PathKind, ReadDir};
+pub use admit::{Admitted, FolderList, FolderRefusal, PathKind, ReadDir, ReadGrant};
 pub use apply::{
-    Applied, Surroundings, apply, apply_checked, forget_matter, reconcile, repair_after_session,
+    Applied, Narrowed, Surroundings, apply, apply_checked, end_reads, forget_matter, narrow_reads,
+    reconcile, repair_after_session,
 };
 #[cfg(any(windows, test, feature = "test-support"))]
 pub use apply::{FencedEach, fence_each, fence_registered};
