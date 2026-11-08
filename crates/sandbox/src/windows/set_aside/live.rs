@@ -19,7 +19,9 @@
 //! The watch ends the session before it moves anything ([`Hooks::end`], kill first): the
 //! first item found ends the agent's job, so nothing alive races the moves that follow. Each
 //! scan moves what it finds as it finds it (`scan::Found`), never after the whole tree, and a
-//! scan that runs past [`SCAN_BUDGET`] ends the session too. An item gone before it could be
+//! scan that runs past [`SCAN_BUDGET`] ends the session too. In a folder made or moved in, that
+//! scan stops there, and the folder goes whole when a pool user owns it (`Run::below`); a full
+//! rescan, or one at the stop with the job empty, walks on. An item gone before it could be
 //! moved is listed ([`Live::gone`]), so the watch can end a session whose agent keeps renaming
 //! one back and forth. A folder that becomes a link (`FILE_ACTION_MODIFIED` with the reparse
 //! attribute: a junction set on an empty folder, `mklink /J`'s two steps) is checked as a link
@@ -36,11 +38,12 @@
 //! one the agent removed.
 
 use std::ffi::OsString;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use clauseo_protocol::MatterId;
 
+use self::keys::{below_git, ends_in_git, holds, key_of, repo_part};
 use super::files::{FileId, Place, Record};
 use super::moves::set_aside;
 use super::names::Key;
@@ -52,6 +55,8 @@ use super::scan::{
 };
 use super::{Entry, Reason, SetAsideFailure};
 use crate::SetAsideWhat;
+
+mod keys;
 
 /// How long one scan may run while the agent could still be changing the tree: past it, the
 /// session ends, and the scan carries on with nothing alive to race it.
@@ -321,6 +326,7 @@ impl Watched {
         match what {
             SetAsideWhat::LinkOut => holds(&self.links, key, Some(id)),
             SetAsideWhat::GitRepository => holds(&self.known, key, Some(id)),
+            SetAsideWhat::UncheckedFolder => false,
         }
     }
 
@@ -381,6 +387,8 @@ struct Run<'a, V: Volume, H: Hooks> {
     live: &'a mut Live,
     began: Duration,
     slow: bool,
+    /// Past [`SCAN_BUDGET`] in a folder made or moved in: the scan stops ([`Step::Stop`]).
+    stopping: bool,
 }
 
 impl<'a, V: Volume, H: Hooks> Run<'a, V, H> {
@@ -400,16 +408,29 @@ impl<'a, V: Volume, H: Hooks> Run<'a, V, H> {
             live,
             began,
             slow: false,
+            stopping: false,
         }
     }
 
     /// Scans below the folder `key`, made or moved in, moving as it goes. A folder gone is
-    /// nothing to scan.
+    /// nothing to scan. Past [`SCAN_BUDGET`] the session has ended and the scan stops: an agent
+    /// moving in a vast tree with a repository last would keep it there a long while. A folder a
+    /// pool user owns (one the agent made) is then set aside whole; anyone else's (the lawyer's,
+    /// dragged in while the agent ran) stays, for the check after the session.
     fn below(&mut self, key: &[OsString]) {
         let (volume, root) = (self.volume, self.watched.root.clone());
-        match scan_part_visiting(volume, &root, key, true, &mut |found| {
+        let scanned = scan_part_visiting(volume, &root, key, true, &mut |found| {
             self.visit(found, true)
-        }) {
+        });
+        match scanned {
+            Ok(Some(scan)) if scan.stopped => {
+                self.stopping = false;
+                if self.agents(key) {
+                    self.check(key, SetAsideWhat::UncheckedFolder);
+                } else {
+                    tracing::info!("a folder too big to check in time isn't the agent's; left");
+                }
+            }
             Ok(_) => {}
             Err(error) => {
                 let error = error.kind();
@@ -418,14 +439,28 @@ impl<'a, V: Volume, H: Hooks> Run<'a, V, H> {
         }
     }
 
+    /// Whether a pool user (the agent) owns the item at `key`: `false` when either can't be read.
+    fn agents(&self, key: &[OsString]) -> bool {
+        let owner = self.volume.owner(&self.watched.path(key));
+        let pool = self.volume.pool();
+        matches!((owner, pool), (Ok(owner), Ok(pool)) if pool.contains(&owner))
+    }
+
     /// What the scan found, moved at once when the watch moves it and doesn't know it: in a
     /// folder made or moved in (`new`), a git folder whole; what is below a `.git` is left to
     /// that one (the known one's tree is denied, an unknown one goes whole). [`Step::Prune`]
     /// once moved, so nothing below it is scanned.
     fn visit(&mut self, found: Found<'_>, new: bool) -> Step {
+        if self.stopping {
+            return Step::Stop;
+        }
         if !self.slow && self.hooks.now().saturating_sub(self.began) > SCAN_BUDGET {
             self.slow = true;
             self.hooks.end(Ending::Slow);
+            if new {
+                self.stopping = true;
+                return Step::Stop;
+            }
         }
         let watched = self.watched;
         let in_git = |id: Option<FileId>| id.is_some_and(|id| watched.git_folder(id));
@@ -505,6 +540,7 @@ impl<'a, V: Volume, H: Hooks> Run<'a, V, H> {
         let seen = match what {
             SetAsideWhat::LinkOut => holds(&watched.links, &item.key, None),
             SetAsideWhat::GitRepository => holds(&watched.known, &item.key, None),
+            SetAsideWhat::UncheckedFolder => false,
         };
         let reason = if seen { Reason::Changed } else { Reason::New };
         let place = &watched.place;
@@ -547,44 +583,4 @@ impl<'a, V: Volume, H: Hooks> Run<'a, V, H> {
             }
         }
     }
-}
-
-/// Whether `key` is below a `.git`.
-fn below_git(key: &[OsString]) -> bool {
-    let parents = key.get(..key.len().saturating_sub(1)).unwrap_or_default();
-    parents.iter().any(|part| is_git(part))
-}
-
-/// Whether `list` holds `key` (as [`same_key`] compares), with the file ID `id` when one is
-/// given.
-fn holds(list: &[(Key, FileId)], key: &[OsString], id: Option<FileId>) -> bool {
-    list.iter()
-        .any(|(known, at)| id.is_none_or(|id| *at == id) && same_key(known, key))
-}
-
-/// Whether `key`'s own name opens as `.git`.
-fn ends_in_git(key: &[OsString]) -> bool {
-    key.last().is_some_and(|name| is_git(name))
-}
-
-/// Whether `key` names a `.git`, or a `HEAD` outside every `.git`: what the watch knows.
-fn repo_part(key: &[OsString]) -> bool {
-    ends_in_git(key) || key.last().is_some_and(|name| is_head(name))
-}
-
-/// `path`'s parts, when each is a plain name (no root, drive, `.` or `..`).
-fn key_of(path: &Path) -> Option<Key> {
-    let mut key = Vec::new();
-    for part in path.components() {
-        match part {
-            Component::Normal(name) => key.push(name.to_owned()),
-            Component::Prefix(_)
-            | Component::RootDir
-            | Component::CurDir
-            | Component::ParentDir => {
-                return None;
-            }
-        }
-    }
-    (!key.is_empty()).then_some(key)
 }

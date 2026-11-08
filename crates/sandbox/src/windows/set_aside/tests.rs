@@ -13,6 +13,8 @@ use crate::windows::test_world::{STATE, World, matter_one};
 use crate::windows::write::rename_new;
 
 mod bookkeeping;
+#[cfg(unix)]
+mod budget;
 mod crash;
 mod fast;
 mod links;

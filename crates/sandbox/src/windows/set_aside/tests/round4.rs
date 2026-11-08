@@ -50,6 +50,7 @@ fn a_git_differing_only_in_case_from_one_set_aside_is_still_checked_and_recorded
         folders: Vec::new(),
         bare: Vec::new(),
         common: Vec::new(),
+        stopped: false,
     };
     let lower = id(&root.join("lower/.git"));
     let seen = Snapshot {
@@ -79,6 +80,7 @@ fn a_git_differing_only_in_case_from_one_set_aside_is_still_checked_and_recorded
         folders: Vec::new(),
         bare: Vec::new(),
         common: Vec::new(),
+        stopped: false,
     };
     let mut moved = Vec::new();
     check(&volume(), &place, &scan, &record, exit(), &mut moved).unwrap();

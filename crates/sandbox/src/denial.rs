@@ -93,11 +93,18 @@ pub enum SetAsideWhat {
     /// A link (a junction or symbolic link) that leads outside the matter, or nowhere Clauseo
     /// can tell.
     LinkOut,
+    /// A folder the agent made or moved in, too big to check while it ran: set aside whole once
+    /// a scan of it ran past its time, so a repository deep inside can't stay there meanwhile.
+    UncheckedFolder,
 }
 
 impl SetAsideWhat {
     /// Every kind, for reading a line back.
-    pub const ALL: [SetAsideWhat; 2] = [SetAsideWhat::GitRepository, SetAsideWhat::LinkOut];
+    pub const ALL: [SetAsideWhat; 3] = [
+        SetAsideWhat::GitRepository,
+        SetAsideWhat::LinkOut,
+        SetAsideWhat::UncheckedFolder,
+    ];
 
     /// The plain refusal for the item at `path`, below the matter's folder.
     pub fn words(self, path: &std::path::Path) -> String {
@@ -118,6 +125,10 @@ impl SetAsideWhat {
                 "The AI tool made a link in the matter that leads outside it. Clauseo stopped \
                  it and moved {name} to {to}."
             ),
+            SetAsideWhat::UncheckedFolder => format!(
+                "The AI tool added a folder to the matter too big to check while it worked. \
+                 Clauseo stopped it and moved {name} to {to}. Nothing was lost."
+            ),
         }
     }
 
@@ -131,6 +142,10 @@ impl SetAsideWhat {
             SetAsideWhat::LinkOut => {
                 "an agent can't make a link inside a matter that leads outside it. Work on those \
                  files where they are, or copy them into your scratch folder."
+            }
+            SetAsideWhat::UncheckedFolder => {
+                "an agent can't add a folder tree to a matter too big to check while it runs. \
+                 Unpack or build big trees in your scratch folder instead."
             }
         }
     }

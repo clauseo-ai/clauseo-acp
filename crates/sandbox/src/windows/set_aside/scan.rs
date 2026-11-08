@@ -124,6 +124,8 @@ pub(super) enum Step {
     Go,
     /// The visitor moved it: nothing below it is scanned.
     Prune,
+    /// The scan stops here, scanning nothing more ([`Scan::stopped`]).
+    Stop,
 }
 
 /// One protected name or link the scan found.
@@ -158,6 +160,8 @@ pub(super) struct Scan {
     /// The key of each folder in the matter a git folder's `commondir` names, outside every
     /// `.git` (`[]` for the matter's own folder), whether or not it is there.
     pub(super) common: Vec<Key>,
+    /// Whether the visitor stopped the scan ([`Step::Stop`]) before it was done.
+    pub(super) stopped: bool,
 }
 
 /// Scans the matter tree below `root` through `volume`; see the module's docs.
@@ -201,7 +205,9 @@ fn scan_with<V: Volume>(
         (true, nested),
         visit,
     );
-    common_items(volume, root, &mut scan, visit);
+    if !scan.stopped {
+        common_items(volume, root, &mut scan, visit);
+    }
     if !scan.unscanned.is_empty() {
         tracing::warn!(
             folders = scan.unscanned.len(),
@@ -254,7 +260,9 @@ pub(super) fn scan_part_visiting<V: Volume>(
         (below, &NESTED_NAMES),
         visit,
     );
-    common_items(volume, root, &mut scan, visit);
+    if !scan.stopped {
+        common_items(volume, root, &mut scan, visit);
+    }
     Ok(Some(scan))
 }
 
@@ -265,6 +273,7 @@ type Visit<F> = (F, PathBuf, Vec<OsString>, Vec<FileId>);
 /// Scans `start`, and with `below` every folder below it, into `scan`, probing `nested` in
 /// each folder below the root and telling `visit` of each git folder and item as it finds it:
 /// a git folder before anything in it, so the visitor can move it whole and skip its insides.
+/// [`Step::Stop`] ends it before the next item or folder, every folder it opened closed.
 fn scan_from<V: Volume>(
     volume: &V,
     scan: &mut Scan,
@@ -272,9 +281,15 @@ fn scan_from<V: Volume>(
     (below, nested): (bool, &[&str]),
     visit: &mut dyn FnMut(Found<'_>) -> Step,
 ) {
+    let stopped = std::cell::Cell::new(false);
+    let visit = &mut |found: Found<'_>| {
+        let step = visit(found);
+        stopped.set(stopped.get() || step == Step::Stop);
+        step
+    };
     let mut stack = vec![start];
     while let Some((folder, path, parts, through)) = stack.pop() {
-        if visit(Found::Folder) == Step::Prune {
+        if stopped.get() || visit(Found::Folder) != Step::Go {
             continue;
         }
         let at_root = parts.is_empty();
@@ -327,6 +342,9 @@ fn scan_from<V: Volume>(
             }
         };
         for child in listed {
+            if stopped.get() {
+                break;
+            }
             // From the listing: a `HEAD` file, and a name only stripping makes `.git`, which
             // the probes above don't open.
             let named = match child.kind {
@@ -354,6 +372,8 @@ fn scan_from<V: Volume>(
                     }
                 },
                 Kind::Folder if !below || pruned.iter().any(|p| same(p, &child.name)) => {}
+                // One folder may hold very many: the visitor keeps time before each is opened.
+                Kind::Folder if visit(Found::Folder) != Step::Go => {}
                 Kind::Folder => {
                     let next = path.join(&child.name);
                     let opened = volume
@@ -374,6 +394,7 @@ fn scan_from<V: Volume>(
             }
         }
     }
+    scan.stopped = stopped.get();
 }
 
 /// Pushes `item` onto the scan and tells `visit`; whether the visitor moved it.

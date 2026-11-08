@@ -3,10 +3,9 @@
 //! the restore that never puts a repository back.
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use super::links::link;
-use super::live::{calm, origins, reported, ticking, watched};
+use super::live::{calm, origins, reported, watched};
 use super::{after, before, exit, launch, volume, world};
 use crate::SetAsideWhat;
 use crate::windows::set_aside::live::{Ending, Watched};
@@ -35,31 +34,6 @@ fn the_session_ends_before_the_first_move_and_only_when_something_moves() {
     let live = watch.changed(&volume(), &reported(&[".git"]), exit(), &hooks);
     assert_eq!(origins(&live), [root.join(".git")]);
     assert_eq!(*hooks.ends.borrow(), [Ending::Found]);
-}
-
-/// H3: a scan of a big tree moved in ends the session once past its budget, and still moves
-/// what it finds; each `.git` goes as the scan reaches it.
-#[test]
-fn a_scan_past_its_budget_ends_the_session_and_carries_on() {
-    let (w, root, data) = world("live-budget");
-    let watch = watched(&root, &data);
-    for at in 0..6 {
-        w.dir.file(&format!("matter/big/f{at}/keep.txt"), "");
-    }
-    w.dir.file(
-        "matter/big/f5/.git/HEAD",
-        "ref: refs/heads/main
-",
-    );
-
-    let hooks = ticking(Duration::from_millis(500));
-    let live = watch.changed(&volume(), &reported(&["big"]), exit(), &hooks);
-    assert_eq!(origins(&live), [root.join("big/f5/.git")]);
-    assert!(
-        hooks.ends.borrow().contains(&Ending::Slow),
-        "{:?}",
-        hooks.ends
-    );
 }
 
 /// A reported `.git` already gone is listed, so the watch can count a path renamed back and
