@@ -12,6 +12,7 @@ use crate::windows::setup::pool_steps::Pool;
 mod exits;
 mod principals;
 mod record;
+mod running;
 mod sequence;
 mod task_file;
 
@@ -54,6 +55,11 @@ struct Fake {
     computer: Vec<String>,
     /// Task names whose delete fails.
     delete_refuse: Vec<String>,
+    /// The running task instances: each its task's path, `Err` where it can't be read; `Err`
+    /// when the list can't be.
+    running: Result<Vec<Result<String, Failed>>, Failed>,
+    /// Indexes of the instances whose stop fails.
+    stop_refuse: Vec<usize>,
     /// Each task's security descriptor by its name, `Err` where it can't be read; one not
     /// here is the Administrators'.
     owners: BTreeMap<String, Result<String, Failed>>,
@@ -97,6 +103,8 @@ impl Fake {
             // is the same name and so is listed once.
             computer: vec!["PC-7".to_owned()],
             delete_refuse: Vec::new(),
+            running: Ok(Vec::new()),
+            stop_refuse: Vec::new(),
             owners: BTreeMap::new(),
             files: BTreeMap::new(),
             jobs: Ok(Vec::new()),
@@ -273,6 +281,20 @@ impl Sweeper for Fake {
         file.unwrap_or_else(|| Err("the task file is missing".to_owned()))
     }
 
+    fn running_tasks(&mut self) -> Result<Vec<Result<String, Failed>>, Failed> {
+        self.done.push("running".to_owned());
+        self.running.clone()
+    }
+
+    fn stop_running(&mut self, at: usize) -> Result<(), Failed> {
+        if self.stop_refuse.contains(&at) {
+            return Err("IRunningTask::Stop failed (0x80070005)".to_owned());
+        }
+        let path = self.running.as_ref().unwrap()[at].clone().unwrap();
+        self.done.push(format!("stop {path}"));
+        Ok(())
+    }
+
     fn delete_task(&mut self, folder: &String, name: &str) -> Result<(), Failed> {
         if self.delete_refuse.iter().any(|refused| refused == name) {
             return Err("ITaskFolder::DeleteTask failed (0x80070005)".to_owned());
@@ -334,7 +356,8 @@ fn only_tasks_whose_principal_is_exactly_a_pool_sid_are_deleted() {
         "the sandbox's task sweep: 2 pool users, 1 folders and 12 tasks read, 3 of the pool's \
          tasks deleted, 0 unreadable (0 more skipped, not the pool's by their task file), 0 with \
          no user or group, 0 unresolved (no SID, not another domain's), 0 skipped (another \
-         domain's, no SID), 0 not deleted, 0 BITS jobs cancelled, 0 not"
+         domain's, no SID), 0 not deleted, 0 running instances stopped, 0 not, 0 BITS jobs \
+         cancelled, 0 not"
     );
 }
 
