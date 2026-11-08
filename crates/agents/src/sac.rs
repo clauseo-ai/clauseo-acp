@@ -3,16 +3,19 @@
 //! `@openai/codex`'s Windows package ships the official ripgrep's `rg.exe`, which is unsigned,
 //! in `vendor/<triple>/codex-path/`. codex.exe puts that folder first on its own `PATH` as it
 //! starts (openai/codex `codex-rs/arg0/src/lib.rs:161-172`), so the model's shell `rg` runs it.
-//! With SAC On (or in evaluation) Windows refuses to start it (error 4551) and may show the
+//! With SAC On Windows refuses to start it (error 4551) and may show the
 //! lawyer a notification for each try. When the folder is gone, codex prepends nothing: the
 //! model's `rg` finds the user's own ripgrep, or none, and Codex's prompt tells it to use
 //! alternatives then. Codex's `@` file search walks files in-process and is not affected.
 //!
 //! So after an install, and at every start, on Windows:
-//! - SAC On or Evaluation: `codex-path` is renamed to `codex-path.sac-off` beside it, when its
+//! - SAC On: `codex-path` is renamed to `codex-path.sac-off` beside it, when its
 //!   `rg.exe` is the pinned ripgrep. Another file (another Codex) is left alone, with a warning:
 //!   the pin is updated with the Codex pin.
-//! - SAC Off: `codex-path.sac-off` is renamed back, so ripgrep returns with no download.
+//! - SAC Off or Evaluation: `codex-path.sac-off` is renamed back, so ripgrep returns with no
+//!   download. Evaluation blocks nothing, and fresh Windows 11 installs often sit in it: moving
+//!   ripgrep there would cut Codex's search down to `findstr` for no protection. If SAC turns
+//!   from Evaluation to On during a session, the bundled rg is blocked until the next start.
 //! - SAC's state unknown (another value, no value, an unreadable key): nothing moves.
 //!
 //! Every move is a rename, idempotent and best-effort: a failure is logged and never fails the
@@ -66,7 +69,7 @@ pub enum SacState {
     Off,
     /// 1: on, enforcing.
     On,
-    /// 2: evaluation, which Windows treats as on for what it blocks.
+    /// 2: evaluation: Windows watches and blocks nothing yet.
     Evaluation,
     /// Another value (`Some`), or no value or an unreadable key (`None`).
     Unknown(Option<u32>),
@@ -101,7 +104,7 @@ pub struct SacForTests {
 pub(crate) enum Outcome {
     /// SAC is on: `codex-path` was moved aside.
     Moved,
-    /// SAC is off: `codex-path.sac-off` was moved back.
+    /// SAC is off or in evaluation: `codex-path.sac-off` was moved back.
     Restored,
     /// SAC is on but `rg.exe` is not the pinned file (its hash, or why it did not read).
     Mismatch(String),
@@ -177,7 +180,7 @@ fn apply_one(dir: &Path, pin: &str, state: SacState) -> Option<Outcome> {
     let path_dir = dir.join(PATH_DIR);
     let moved = dir.join(MOVED_DIR);
     match state {
-        SacState::On | SacState::Evaluation => {
+        SacState::On => {
             if !path_dir.is_dir() {
                 return None;
             }
@@ -195,7 +198,7 @@ fn apply_one(dir: &Path, pin: &str, state: SacState) -> Option<Outcome> {
                 Err(err) => Outcome::Failed(format!("moving {PATH_DIR} aside: {err}")),
             })
         }
-        SacState::Off => {
+        SacState::Off | SacState::Evaluation => {
             if path_dir.exists() || !moved.is_dir() {
                 return None;
             }
@@ -243,7 +246,7 @@ fn describe(outcome: &Outcome) -> String {
              ({PATH_DIR} -> {MOVED_DIR})"
         ),
         Outcome::Restored => format!(
-            "Smart App Control is off: Codex's rg.exe moved back ({MOVED_DIR} -> {PATH_DIR})"
+            "Smart App Control is off or in evaluation: Codex's rg.exe moved back ({MOVED_DIR} -> {PATH_DIR})"
         ),
         Outcome::Mismatch(found) => format!(
             "Smart App Control is on, but Codex's rg.exe is not the pinned ripgrep ({found}): \

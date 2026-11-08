@@ -72,11 +72,17 @@ fn sac_on_with_the_pinned_rg_moves_codex_path_aside() {
 }
 
 #[test]
-fn sac_evaluation_moves_codex_path_aside() {
+fn sac_evaluation_keeps_codex_path_and_moves_a_moved_one_back() {
     let (_dir, vendor) = install();
-    let outcomes = run(&vendor, &sha(RG_BYTES), SacState::Evaluation);
-    assert_eq!(outcomes, [Outcome::Moved]);
-    assert_eq!(dirs(&vendor), (false, true));
+    let pin = sha(RG_BYTES);
+    assert_eq!(run(&vendor, &pin, SacState::Evaluation), []);
+    assert_eq!(dirs(&vendor), (true, false));
+    assert_eq!(run(&vendor, &pin, SacState::On), [Outcome::Moved]);
+    assert_eq!(
+        run(&vendor, &pin, SacState::Evaluation),
+        [Outcome::Restored]
+    );
+    assert_eq!(dirs(&vendor), (true, false));
 }
 
 #[test]
