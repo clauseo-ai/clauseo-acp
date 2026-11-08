@@ -5,7 +5,9 @@
 //! armed refuses the launch, plainly. A thread that panics or ends before it is stopped ends the
 //! session: fail closed. Each watch has a watchdog thread (`git_watch::watchdog`) that ends the
 //! session when one check stays busy past the budget: a call blocked on an agent's oplock never
-//! leaves the matter unwatched while the agent runs.
+//! leaves the matter unwatched while the agent runs. The watches' records (the lawyer's notices
+//! and the set-asides) go to the host's denial pipe (`denial_pipe`), opened here before the
+//! agent runs, or only to the log when the launch names none.
 
 use std::io;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -21,17 +23,23 @@ use super::super::git_watch::os::{DirWatch, Stop};
 use super::super::git_watch::{Cause, Changes, Dog, Guard, Pulse, Session, watch, watchdog};
 use super::super::{LaunchMessage, RunExit};
 use super::{End, Failure, os, say};
+use crate::windows::denial_pipe::Record;
+use crate::windows::denial_pipe::os::open_sink;
+use crate::windows::denial_pipe::sink::RecordSink;
 use crate::windows::set_aside::{Failed, GitGuard, Hooks, Live};
 
 /// How long the outer waits at its end for each watch's last rescan and stop. Past this the
 /// process exits without it, and a move cut short is settled at the manifest's next load, as a
 /// crash's is; the check after the session covers the rest.
 const STOP_WAIT: Duration = Duration::from_secs(10);
+/// How long the outer then waits for the records still queued to reach the denial pipe.
+const RECORDS_WAIT: Duration = Duration::from_secs(2);
 
 /// The watches' threads, running.
 pub(in super::super) struct Running {
     stop: Arc<Stop>,
     done: Vec<mpsc::Receiver<()>>,
+    records: Arc<RecordSink>,
 }
 
 impl Running {
@@ -46,6 +54,7 @@ impl Running {
                 );
             }
         }
+        self.records.drain(RECORDS_WAIT);
     }
 }
 
@@ -72,7 +81,7 @@ fn start(
     data_dir: &Path,
     matter: MatterId,
     end: &End,
-    stop: &Arc<Stop>,
+    (stop, records): (&Arc<Stop>, &Arc<RecordSink>),
 ) -> Result<mpsc::Receiver<()>, NotStarted> {
     let (armed, first_armed) = mpsc::channel();
     let (finished, done) = mpsc::channel();
@@ -84,6 +93,7 @@ fn start(
         Arc::clone(stop),
     );
     let (dog_end, dog_stop, dog_pulse) = (Arc::clone(&end), Arc::clone(&stop), Arc::clone(&pulse));
+    let (records, dog_records) = (Arc::clone(records), Arc::clone(records));
     thread::Builder::new()
         .name("git-watch".to_owned())
         .spawn(move || {
@@ -97,6 +107,7 @@ fn start(
                     end: Arc::clone(&end),
                     stop: &stop,
                     pulse: &pulse,
+                    records: &records,
                 };
                 match DirWatch::arm(guard.0.root(), &stop) {
                     Ok(source) => {
@@ -117,10 +128,7 @@ fn start(
                     panicked = ran.is_err(),
                     "the git watch ended before its stop"
                 );
-                say(&format!(
-                    "clauseo-sandbox-run: {}",
-                    Cause::WatchFailed.notice()
-                ));
+                records.send(&Record::notice(Cause::WatchFailed.notice()));
                 end.trigger(EndSignal::Failed);
             }
             let _sent = finished.send(());
@@ -139,6 +147,7 @@ fn start(
     let dog = OsDog {
         end: dog_end,
         stop: dog_stop,
+        records: dog_records,
     };
     thread::Builder::new()
         .name("git-watchdog".to_owned())
@@ -147,10 +156,11 @@ fn start(
     Ok(done)
 }
 
-/// The watchdog's side of the session: the outer's end path, its stderr and the stop.
+/// The watchdog's side of the session: the outer's end path, the denial pipe and the stop.
 struct OsDog {
     end: End,
     stop: Arc<Stop>,
+    records: Arc<RecordSink>,
 }
 
 impl Dog for OsDog {
@@ -164,7 +174,7 @@ impl Dog for OsDog {
 
     fn stall(&self, first: bool) {
         if first {
-            say(&format!("clauseo-sandbox-run: {}", Cause::Stalled.notice()));
+            self.records.send(&Record::notice(Cause::Stalled.notice()));
         }
         // As a panic's: the job ended and emptied, then the end sweeper started.
         self.end.trigger(EndSignal::Failed);
@@ -193,12 +203,13 @@ impl Guard for OsGuard {
     }
 }
 
-/// The session as the watch sees it: the outer's end path, its stderr, the stop and what it
-/// shares with its watchdog.
+/// The session as the watch sees it: the outer's end path, its stderr, the denial pipe, the
+/// stop and what it shares with its watchdog.
 struct OsSession<'a> {
     end: End,
     stop: &'a Stop,
     pulse: &'a Pulse,
+    records: &'a RecordSink,
 }
 
 impl Session for OsSession<'_> {
@@ -210,6 +221,10 @@ impl Session for OsSession<'_> {
 
     fn say(&self, line: &str) {
         say(line);
+    }
+
+    fn record(&self, record: &Record) {
+        self.records.send(record);
     }
 
     fn pause(&self, wait: Duration) -> bool {
@@ -279,6 +294,7 @@ pub(super) fn keep(message: &LaunchMessage, end: &End) -> Result<(), Failure> {
             .as_ref()
             .map(|notes| (PathBuf::from(notes), Folder::Other)),
     );
+    let records = Arc::new(open_sink(message.denial_pipe.as_deref()));
     let mut done = Vec::new();
     for (root, folder) in &folders {
         let started = start(
@@ -286,13 +302,17 @@ pub(super) fn keep(message: &LaunchMessage, end: &End) -> Result<(), Failure> {
             &end.steps().data_dir,
             message.matter,
             end,
-            &stop,
+            (&stop, &records),
         );
         match started {
             Ok(finished) => done.push(finished),
             Err(not) => {
                 // The watches already running stop with the failed launch.
-                end.steps().keep_watch(Running { stop, done });
+                end.steps().keep_watch(Running {
+                    stop,
+                    done,
+                    records,
+                });
                 return Err(Failure::new(
                     RunExit::Spawn,
                     match not {
@@ -307,6 +327,10 @@ pub(super) fn keep(message: &LaunchMessage, end: &End) -> Result<(), Failure> {
             }
         }
     }
-    end.steps().keep_watch(Running { stop, done });
+    end.steps().keep_watch(Running {
+        stop,
+        done,
+        records,
+    });
     Ok(())
 }

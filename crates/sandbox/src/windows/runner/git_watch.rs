@@ -29,9 +29,10 @@
 //! - An item that can't be moved (the agent holding a handle to it, say) is tried again once
 //!   the session ended: fail closed.
 //! - Once the job is empty, the watch is stopped and rescans its folder one last time.
-//! - Each item moved gets two lines on the outer's stderr: the lawyer's notice, where it went
-//!   ([`SetAsideWhat::notice`]), and one the host reads back as a [`Denial::SetAside`]
-//!   ([`denial_from_line`]). The manifest lists it, as it lists the after-session pass's. That
+//! - Each item moved gets two records on the host's denial pipe (`denial_pipe`, never stderr,
+//!   which carries the agent's lines too): the lawyer's notice, where it went
+//!   ([`SetAsideWhat::notice`]), and the [`Denial::SetAside`] for the session's denial sink
+//!   ([`Session::record`]). The manifest lists it, as it lists the after-session pass's. That
 //!   pass stays the backstop.
 
 use std::cell::Cell;
@@ -43,7 +44,9 @@ pub(crate) use self::records::Changes;
 #[cfg(windows)]
 pub(crate) use self::records::changes;
 pub(crate) use self::watchdog::{Dog, Pulse, watchdog};
+use crate::windows::denial_pipe::Record;
 use crate::windows::set_aside::{Ending, Failed, Hooks, Live};
+#[cfg(doc)]
 use crate::{Denial, SetAsideWhat};
 
 #[cfg(windows)]
@@ -68,11 +71,8 @@ const RETRIES: u32 = 5;
 /// The pause between two of those tries, while the ended agent's handles close.
 const RETRY_PAUSE: Duration = Duration::from_millis(200);
 
-/// What starts each line the outer says on its stderr.
+/// What starts each line the outer says on its stderr: log lines only, which nothing reads back.
 const SAID: &str = "clauseo-sandbox-run: ";
-/// What starts the line the host reads back as a [`Denial::SetAside`], after [`SAID`]; its
-/// fields follow, each after a tab, which no Windows name holds.
-const SET_ASIDE: &str = "set aside";
 
 /// What the watch saw next.
 #[derive(Debug)]
@@ -108,8 +108,10 @@ pub(crate) trait Session {
     /// Ends the session by the outer's own end path. Whether the agent's job is truly empty
     /// once it returns: only then does the watch move anything while the session runs.
     fn end(&self) -> bool;
-    /// One line on the outer's stderr.
+    /// One line on the outer's stderr, for the log: never a notice or a set-aside.
     fn say(&self, line: &str);
+    /// One record for the host, on its denial pipe: the lawyer's notices and the set-asides.
+    fn record(&self, record: &Record);
     /// Waits up to `wait`; `true`, early, once the watch is stopped.
     fn pause(&self, wait: Duration) -> bool;
     /// Waits `wait`, stopped or not: between the tries after the session ended.
@@ -215,7 +217,7 @@ impl<S: Session> Ender<'_, S> {
         if !self.ended.replace(true) {
             tracing::warn!(cause = cause.log(), "the git watch is ending the session");
             if self.session.pulse().end() {
-                self.session.say(&format!("{SAID}{}", cause.notice()));
+                self.session.record(&Record::notice(cause.notice()));
             }
             self.empty.set(self.session.end());
         }
@@ -359,44 +361,16 @@ fn count_gone<T: Session>(gone: &[PathBuf], ender: &Ender<'_, T>) {
     }
 }
 
-/// Two lines for each item moved: the lawyer's notice, where it went, and the line the host
-/// reads back as a [`Denial::SetAside`] ([`denial_from_line`]) for the session's denial sink,
-/// which tells the agent.
+/// Two records for each item moved: the lawyer's notice, where it went, and the set-aside the
+/// host makes a [`Denial::SetAside`] of for the session's denial sink, which tells the agent.
 fn tell(live: &Live, session: &impl Session) {
     for moved in &live.moved {
         tracing::info!(id = moved.entry.id, "the git watch set an item aside");
         let to = &moved.entry.to;
         let notice = moved.what.notice_by(&moved.path, to, moved.by_agent);
-        session.say(&format!("{SAID}{notice}"));
-        session.say(&format!(
-            "{SAID}{SET_ASIDE}\t{}\t{}\t{}",
-            moved.path.display(),
-            to.display(),
-            moved.what.why()
-        ));
+        session.record(&Record::notice(notice));
+        session.record(&Record::set_aside(&moved.path, to, moved.what));
     }
-}
-
-/// The [`Denial::SetAside`] a line of the outer's stderr reports, if it is one the watch said.
-/// The Windows launcher passes each line to it and each denial to the launch's sink: the runner
-/// is another process, and its stderr is the one way back.
-pub fn denial_from_line(line: &str) -> Option<Denial> {
-    let mut fields = line.strip_prefix(SAID)?.split('\t');
-    if fields.next()? != SET_ASIDE {
-        return None;
-    }
-    let (path, to, why) = (fields.next()?, fields.next()?, fields.next()?);
-    if fields.next().is_some() {
-        return None;
-    }
-    let what = SetAsideWhat::ALL
-        .into_iter()
-        .find(|what| what.why() == why)?;
-    Some(Denial::SetAside {
-        path: PathBuf::from(path),
-        to: PathBuf::from(to),
-        what,
-    })
 }
 
 /// An error's code, or its kind: never a path.

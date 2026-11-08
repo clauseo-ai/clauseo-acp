@@ -38,6 +38,7 @@ fn message() -> LaunchMessage {
         ca_bundle: Some(format!(r"{DATA}\sandbox-ca\roots.pem")),
         credential_link: Some(format!(r"{STATE}\auth.json")),
         firm_ca: Vec::new(),
+        denial_pipe: None,
     }
 }
 
@@ -55,6 +56,10 @@ fn get<'a>(env: &'a [(String, String)], name: &str) -> Option<&'a str> {
 fn a_message_round_trips_and_parses() {
     let bytes = message().to_bytes().unwrap();
     assert_eq!(LaunchMessage::parse(&bytes).unwrap(), message());
+    let mut piped = message();
+    piped.denial_pipe = Some(crate::windows::denial_pipe::random_pipe_name().unwrap());
+    let bytes = piped.to_bytes().unwrap();
+    assert_eq!(LaunchMessage::parse(&bytes).unwrap(), piped);
 }
 
 #[test]
@@ -105,6 +110,10 @@ fn the_parse_refuses_what_breaks_a_rule() {
             Box::new(|m| m.env.push(("A".to_owned(), "x\0y".to_owned()))),
         ),
         ("args", Box::new(|m| m.args.push("a\0".to_owned()))),
+        (
+            "denial_pipe",
+            Box::new(|m| m.denial_pipe = Some(format!(r"{}\..\x", m.matter_root))),
+        ),
     ];
     for (field, change) in cases {
         let mut bad = message();

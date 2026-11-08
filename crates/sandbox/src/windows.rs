@@ -63,6 +63,7 @@ pub mod admit;
 pub mod apply;
 pub mod ca_bundle;
 pub mod clean_close;
+pub mod denial_pipe;
 #[cfg(windows)]
 mod detect;
 pub mod fence;

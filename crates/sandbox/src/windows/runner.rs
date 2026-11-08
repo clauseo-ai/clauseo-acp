@@ -70,6 +70,7 @@ use std::path::{Path, PathBuf};
 use clauseo_protocol::MatterId;
 use serde::{Deserialize, Serialize};
 
+use super::denial_pipe::check_pipe_name;
 use super::pool::pool_number;
 use super::sids::Sid;
 
@@ -107,14 +108,13 @@ mod sweeper;
 mod sweeper_flow;
 
 pub use env::agent_env;
-#[cfg(any(windows, test))]
-pub use git_watch::denial_from_line;
 #[cfg(windows)]
 pub use inner::run_inner;
 #[cfg(any(windows, test))]
 pub use marker::{UncleanSession, unclean_sessions};
 #[cfg(windows)]
 pub use outer::run_outer;
+use paths::is_batch;
 pub use paths::{WinPath, codex_reuse};
 #[cfg(windows)]
 pub use policy::codex_link_in_policy;
@@ -213,6 +213,10 @@ pub struct LaunchMessage {
     /// `SSL_CERT_FILE` is merged the same way.
     #[serde(default)]
     pub firm_ca: Vec<String>,
+    /// The host's denial pipe (`denial_pipe`), which the git watch's records go to; with none,
+    /// or one that can't be opened, they are only logged, never said on stderr.
+    #[serde(default)]
+    pub denial_pipe: Option<String>,
 }
 
 impl std::fmt::Debug for LaunchMessage {
@@ -283,7 +287,7 @@ impl LaunchMessage {
     /// The rules: this version; a pool name `ClauseoSbNN`; the program, folders and paths full
     /// local paths with no `.` or `..` part and no NUL; the program no batch file; variable names
     /// non-empty with no NUL and no `=` but a leading one, values with no NUL; at most 4096
-    /// arguments and variables.
+    /// arguments and variables; a denial pipe's name as `denial_pipe::check_pipe_name` makes it.
     pub fn check(&self) -> Result<(), LaunchError> {
         if self.version != LAUNCH_VERSION {
             return Err(LaunchError::Version(self.version));
@@ -327,6 +331,10 @@ impl LaunchMessage {
         }
         for path in &self.firm_ca {
             local("firm_ca", path)?;
+        }
+        if let Some(pipe) = &self.denial_pipe {
+            check_pipe_name(pipe)
+                .map_err(|_bad| field("denial_pipe", "is not a denial pipe's name"))?;
         }
         if self.args.len() > ITEMS_CAP || self.env.len() > ITEMS_CAP {
             return Err(field("args or env", "has more than 4096 items"));
@@ -579,14 +587,6 @@ fn local(name: &'static str, value: &str) -> Result<(), LaunchError> {
             "is not a full local path without . or .. parts",
         )),
     }
-}
-
-/// Whether `program` names a batch file: `.cmd` or `.bat`, in any case, trailing dots and
-/// spaces dropped as Windows drops them.
-fn is_batch(program: &str) -> bool {
-    let trimmed = program.trim_end_matches(['.', ' ']);
-    let extension = trimmed.rsplit_once('.').map(|(_, extension)| extension);
-    extension.is_some_and(|ext| ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat"))
 }
 
 #[cfg(test)]

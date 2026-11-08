@@ -12,10 +12,10 @@ use std::time::Duration;
 
 use super::records::{Layout, changes};
 use super::{
-    Changes, GONE_LIMIT, Guard, Live, Next, OVERFLOWS, Pulse, Session, Source, denial_from_line,
-    watch,
+    Cause, Changes, GONE_LIMIT, Guard, Live, Next, OVERFLOWS, Pulse, Session, Source, watch,
 };
 use crate::windows::SetAsideFailure;
+use crate::windows::denial_pipe::Record;
 use crate::windows::set_aside::{Ending, Entry, Failed, Hooks, Moved, Reason};
 use crate::windows::test_world::matter_one;
 use crate::{Denial, SetAsideWhat};
@@ -166,14 +166,17 @@ impl Session for FakeSession<'_> {
     }
 
     fn say(&self, line: &str) {
-        let line = if line.contains("Clauseo stopped it") {
-            "notice"
-        } else if denial_from_line(line).is_some() {
-            "denial"
-        } else {
-            "said"
-        };
-        self.log.push(line);
+        assert!(!for_the_host(line), "{line}");
+        self.log.push("said");
+    }
+
+    fn record(&self, record: &Record) {
+        self.log.push(match record {
+            Record::SetAside { .. } => "denial",
+            Record::Notice { text } if text.contains("Clauseo stopped it") => "notice",
+            // A stopped session's notice: the sequences count it with the lines said.
+            Record::Notice { .. } => "said",
+        });
     }
 
     fn pause(&self, _wait: Duration) -> bool {
@@ -193,6 +196,11 @@ impl Session for FakeSession<'_> {
     fn pulse(&self) -> &Pulse {
         &self.pulse
     }
+}
+
+/// Whether a stderr line looks like a record for the host: a notice, or the old set-aside line.
+fn for_the_host(line: &str) -> bool {
+    line.contains("Clauseo stopped") || line.contains("set aside\t")
 }
 
 fn session(log: &Log, stop_after: usize) -> FakeSession<'_> {
@@ -473,16 +481,25 @@ fn a_buffer_that_doesnt_read_as_records_is_an_overflow() {
 }
 
 /// The lawyer's notice says where the item went (the agent's, here: no step to put it back);
-/// the host's line reads back as the denial its sink takes, with the agent's plain words.
+/// the set-aside the host's sink takes goes with it. Both are records for the denial pipe:
+/// nothing said on stderr, where the agent's own lines go too, reads as either.
 #[test]
-fn each_item_moved_is_noticed_and_said_in_a_line_the_host_reads_back_as_a_denial() {
-    struct Said(RefCell<Vec<String>>, Pulse);
-    impl Session for Said {
+fn each_item_moved_is_recorded_for_the_host_and_never_said_on_stderr() {
+    #[derive(Default)]
+    struct Heard {
+        said: RefCell<Vec<String>>,
+        records: RefCell<Vec<Record>>,
+        pulse: Pulse,
+    }
+    impl Session for Heard {
         fn end(&self) -> bool {
             true
         }
         fn say(&self, line: &str) {
-            self.0.borrow_mut().push(line.to_owned());
+            self.said.borrow_mut().push(line.to_owned());
+        }
+        fn record(&self, record: &Record) {
+            self.records.borrow_mut().push(record.clone());
         }
         fn pause(&self, _wait: Duration) -> bool {
             true
@@ -492,56 +509,43 @@ fn each_item_moved_is_noticed_and_said_in_a_line_the_host_reads_back_as_a_denial
             Duration::ZERO
         }
         fn pulse(&self) -> &Pulse {
-            &self.1
+            &self.pulse
         }
     }
     let log = Log::default();
-    let said = Said(RefCell::new(Vec::new()), Pulse::default());
+    let heard = Heard::default();
     let git = PathBuf::from("Precedents").join(".git");
-    let first = script(vec![added(&[git.to_str().unwrap()])]);
-    watch(first, &guard(&log), &said);
+    watch(
+        script(vec![added(&[git.to_str().unwrap()])]),
+        &guard(&log),
+        &heard,
+    );
 
-    let lines = said.0.borrow();
     let to = PathBuf::from("aside").join(&git);
+    let notice = format!(
+        "The AI tool tried to put a code repository in the matter. Clauseo stopped it and moved \
+         {} to {}.",
+        git.display(),
+        to.display()
+    );
+    let records = heard.records.borrow();
     assert_eq!(
-        lines[1],
-        format!(
-            "clauseo-sandbox-run: The AI tool tried to put a code repository in the matter. \
-             Clauseo stopped it and moved {} to {}.",
-            git.display(),
-            to.display()
-        )
+        *records,
+        [
+            Record::notice(Cause::Found.notice()),
+            Record::notice(notice),
+            Record::set_aside(&git, &to, SetAsideWhat::GitRepository),
+        ]
     );
     assert_eq!(
-        denial_from_line(&lines[2]),
+        records[2].denial(),
         Some(Denial::SetAside {
             path: git,
             to,
             what: SetAsideWhat::GitRepository,
         })
     );
-    assert!(
-        SetAsideWhat::GitRepository
-            .why()
-            .starts_with("an agent can't create a git repository")
-    );
-    let link = format!(
-        "clauseo-sandbox-run: set aside\tfoo\taside\\foo\t{}",
-        SetAsideWhat::LinkOut.why()
-    );
-    assert_eq!(
-        denial_from_line(&link),
-        Some(Denial::SetAside {
-            path: PathBuf::from("foo"),
-            to: PathBuf::from("aside\\foo"),
-            what: SetAsideWhat::LinkOut,
-        })
-    );
-    for not in [
-        "clauseo-sandbox-run: git watch: armed again",
-        "clauseo-sandbox-run: set aside\tfoo\tbar",
-        "clauseo-sandbox-run: set aside\tfoo\tbar\tno such words",
-    ] {
-        assert_eq!(denial_from_line(not), None, "{not}");
+    for line in heard.said.borrow().iter() {
+        assert!(!for_the_host(line), "{line}");
     }
 }

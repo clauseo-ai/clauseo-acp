@@ -178,6 +178,7 @@ pub(crate) fn message(
         ca_bundle: spec.ca_bundle.as_deref().map(text),
         credential_link: link,
         firm_ca: Vec::new(),
+        denial_pipe: None,
     };
     message.check().map_err(|e| e.to_string())?;
     Ok(message)
