@@ -150,7 +150,10 @@ Var ClauseoAdminTimedOut
   StrCpy $R8 ${CLAUSEO_ADMIN_NOT_RUN}
   !insertmacro CLAUSEO_ADMIN_EXTRACT
   ${IfNot} ${Errors}
-    ExecWait '"${CLAUSEO_ADMIN_DIR}\clauseo-sandbox-setup.exe" --adopt ${ARGS}' $R8
+    ; EXPERIMENT (Defender control C4, not for merge): the admin copy is written, --adopt is not
+    ; run, so no sandbox users, tasks or network rules are made. Reports success.
+    StrCpy $R8 0
+    ClearErrors
     ${If} ${Errors}
       StrCpy $R8 ${CLAUSEO_ADMIN_NOT_RUN}
       ${IfNot} ${FileExists} "${CLAUSEO_ADMIN_DIR}\clauseo-sandbox-setup.exe"
