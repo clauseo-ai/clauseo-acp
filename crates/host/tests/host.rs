@@ -328,6 +328,9 @@ mod restart;
 #[path = "host/sandbox_launch.rs"]
 mod sandbox_launch;
 #[cfg(test)]
+#[path = "host/sandbox_policy.rs"]
+mod sandbox_policy;
+#[cfg(test)]
 #[path = "host/sandbox_rig.rs"]
 mod sandbox_rig;
 #[cfg(test)]

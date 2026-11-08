@@ -10,7 +10,7 @@ use serde_json::{Map, Value};
 
 use super::super::super::Actor;
 use super::super::key_retry::KeyRetry;
-use super::super::launch_checks::{CodexPrepared, RunFolders};
+use super::super::launch_checks::{CodexPrepared, RunFolders, Sandboxed};
 use super::{CodexAgent, codex_hooks};
 use crate::agent;
 use crate::agent::login_link::Checked;
@@ -94,4 +94,27 @@ pub(super) fn claude(
         .filter(|_| claude_home.is_some())
         .map(|state| agent::home::claude_launch_env(state, store))
         .unwrap_or_default()
+}
+
+/// A jailed launch's variables (`Sandboxed::env`: the session proxy's, which carry its token, and
+/// the CA bundle's) put over `forced`, so they win over every other source; the names it
+/// removes (`ALL_PROXY`, `all_proxy`) come back to be dropped from every source. Tier C
+/// (`sandbox` none) changes nothing.
+pub(super) fn jailed(
+    forced: &mut BTreeMap<OsString, OsString>,
+    sandbox: Option<&Sandboxed>,
+) -> Vec<String> {
+    let mut removed = Vec::new();
+    for (name, value) in sandbox.map(|jail| jail.env.as_slice()).unwrap_or_default() {
+        match value {
+            Some(value) => {
+                forced.insert(name.clone(), value.clone());
+            }
+            None => {
+                forced.remove(name);
+                removed.extend(name.to_str().map(str::to_owned));
+            }
+        }
+    }
+    removed
 }

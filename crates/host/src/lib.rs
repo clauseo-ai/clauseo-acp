@@ -278,10 +278,11 @@ pub use clock::ManualClock;
 pub use clock::{Clock, Now, SystemClock};
 #[cfg(feature = "test-support")]
 pub use config::TestProxy;
+pub use config::sandbox::{CaRoots, InstallFolders, Reservation};
 pub use config::{
-    CAP_MIN_IDLE, DEFAULT_TREE_WAIT, Detect, EgressProxy, HostConfig, IDLE_LIMIT, LIVE_AGENTS,
-    NoProfile, PackRequest, ProfileHook, Sandbox, SandboxLaunch, SandboxLaunchers, SessionEnd,
-    SessionKey,
+    AgentListener, CAP_MIN_IDLE, DEFAULT_TREE_WAIT, Detect, EgressProxy, HostConfig, IDLE_LIMIT,
+    LIVE_AGENTS, NoProfile, PackRequest, ProfileHook, Sandbox, SandboxLaunch, SandboxLaunchers,
+    SessionEnd, SessionKey,
 };
 pub use encode::EncodedEvent;
 pub use error::Error;

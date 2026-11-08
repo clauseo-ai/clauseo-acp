@@ -225,6 +225,27 @@ pub(super) fn warn_if_still_full(actor: &Actor, run: &super::RunFolders) {
     }
 }
 
+/// The browser entry's sidecars, as the profile hook gives it for `agent`: its `clauseo-mcp` (the
+/// command) and agent-browser (its `--agent-browser` argument); `None` with no entry. A jailed
+/// launch with the browser reads and runs their folders (`sandbox/policy.rs`).
+pub(super) fn sidecars(actor: &Actor, agent: &clauseo_protocol::AgentId) -> Option<Vec<PathBuf>> {
+    let entry = actor.profile.mcp_servers(agent).into_iter().find(|server| {
+        let clauseo_acp::McpServer::Stdio { name, .. } = server;
+        name == clauseo_profile::servers::BROWSER
+    });
+    let Some(clauseo_acp::McpServer::Stdio { command, args, .. }) = entry else {
+        return None;
+    };
+    let mut sidecars = vec![command];
+    sidecars.extend(
+        args.iter()
+            .position(|arg| arg == "--agent-browser")
+            .and_then(|at| args.get(at + 1))
+            .map(PathBuf::from),
+    );
+    Some(sidecars)
+}
+
 /// What the launch prep does for `agent`'s session `key`, from the actor's state: nothing when
 /// no browser can go to it (`tools.browser` off, no proxy, no `browser` entry from the profile
 /// hook, or no slot and none coming free).
@@ -248,20 +269,9 @@ pub(super) fn browser_prep(
     {
         return skip;
     }
-    let entry = actor.profile.mcp_servers(agent).into_iter().find(|server| {
-        let clauseo_acp::McpServer::Stdio { name, .. } = server;
-        name == clauseo_profile::servers::BROWSER
-    });
-    let Some(clauseo_acp::McpServer::Stdio { command, args, .. }) = entry else {
+    let Some(sidecars) = sidecars(actor, agent) else {
         return skip;
     };
-    let mut sidecars = vec![command];
-    sidecars.extend(
-        args.iter()
-            .position(|arg| arg == "--agent-browser")
-            .and_then(|at| args.get(at + 1))
-            .map(PathBuf::from),
-    );
     let chrome = match &actor.wiring.browser_executable {
         Some(chrome) => ChromeSearch::Forced(chrome.clone()),
         None => ChromeSearch::Roots(actor.wiring.chrome_roots.clone()),

@@ -84,6 +84,17 @@ impl EgressProxy for Recording {
         Some(8123)
     }
 
+    fn agent_listener(&self, _session: SessionKey) -> Option<clauseo_host::AgentListener> {
+        let url = std::ffi::OsString::from("http://clauseo:secret@127.0.0.1:8124");
+        Some(clauseo_host::AgentListener::new(
+            8124,
+            vec![
+                ("HTTPS_PROXY".into(), Some(url)),
+                ("ALL_PROXY".into(), None),
+            ],
+        ))
+    }
+
     fn close(&self, session: SessionKey) {
         self.calls
             .lock()

@@ -119,6 +119,14 @@ impl EgressProxy for RealProxy {
             .and_then(ProxyHandle::browser_port)
     }
 
+    fn agent_listener(&self, session: SessionKey) -> Option<clauseo_host::AgentListener> {
+        self.open
+            .lock()
+            .unwrap()
+            .get(&session)
+            .map(|handle| clauseo_host::AgentListener::new(handle.port(), handle.env()))
+    }
+
     fn close(&self, session: SessionKey) {
         drop(self.open.lock().unwrap().remove(&session));
     }

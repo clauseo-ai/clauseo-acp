@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use futures::future::Either;
 
-use clauseo_host::{Sandbox, SandboxLaunch, SandboxLaunchers, SessionEnd, SessionKey};
+use clauseo_host::{Reservation, Sandbox, SandboxLaunch, SandboxLaunchers, SessionEnd, SessionKey};
 use clauseo_process::{LaunchSpec, Launched, Launcher, PassthroughLauncher, SpawnOptions};
 use clauseo_protocol::{DomainEvent, ErrorCode, MatterId, StreamId, ThreadId, TurnId};
 use clauseo_sandbox::{DenialSink, Detection, Policy, SetAside, Tier};
@@ -19,10 +19,15 @@ use crate::support::{Dir, FAKE, Running, Scenario, wait};
 /// The launch's wait (`codex::prepare::LAUNCH_WAIT`): the launch checks' and the seam's.
 pub(crate) const LAUNCH_WAIT: Duration = Duration::from_secs(30);
 
-/// A launcher that counts its launches and starts each as the tests' launcher does.
+/// A launch's environment, as the spawn got it.
+pub(crate) type Env = std::collections::BTreeMap<std::ffi::OsString, std::ffi::OsString>;
+
+/// A launcher that counts its launches, keeps each one's environment and starts each as the
+/// tests' launcher does.
 pub(crate) struct Counting {
     inner: PassthroughLauncher,
     launched: Arc<AtomicUsize>,
+    envs: Mutex<Vec<Env>>,
 }
 
 impl Counting {
@@ -31,14 +36,21 @@ impl Counting {
         let counting = Arc::new(Self {
             inner: dir.launcher(),
             launched: Arc::clone(&launched),
+            envs: Mutex::new(Vec::new()),
         });
         (counting, launched)
+    }
+
+    /// The environments of its launches so far.
+    pub(crate) fn envs(&self) -> Vec<Env> {
+        self.envs.lock().unwrap().clone()
     }
 }
 
 impl Launcher for Counting {
     fn launch(&self, spec: &LaunchSpec) -> Result<Launched, clauseo_process::Error> {
         self.launched.fetch_add(1, Ordering::SeqCst);
+        self.envs.lock().unwrap().push(spec.env().clone());
         self.inner.launch(spec)
     }
 }
@@ -53,7 +65,7 @@ pub(crate) enum Answer {
     Panic,
 }
 
-/// One call of the seam's `launcher`.
+/// One call of the seam's `launcher`, with what its `reserve` was given.
 #[derive(Debug, Clone)]
 pub(crate) struct Call {
     pub(crate) matter: MatterId,
@@ -62,11 +74,25 @@ pub(crate) struct Call {
     pub(crate) policy: Policy,
 }
 
+/// The ports every fake reservation holds, in each jailed launch's `proxy_ports`.
+pub(crate) const RESERVED_PORTS: [u16; 2] = [46_111, 46_112];
+
+/// Counts a fake reservation's release: dropped with it.
+struct Released(Arc<AtomicUsize>);
+
+impl Drop for Released {
+    fn drop(&mut self) {
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
 /// A seam that records what it was asked and may wait for a word from the test first.
 pub(crate) struct Fake {
     answer: Answer,
     launcher: Arc<Counting>,
     calls: Mutex<Vec<Call>>,
+    reserved: Mutex<Vec<(SessionKey, Vec<SessionKey>)>>,
+    released: Arc<AtomicUsize>,
     after: Mutex<Vec<SessionEnd>>,
     after_moves: Mutex<Vec<&'static str>>,
     hold: Option<Mutex<mpsc::Receiver<()>>>,
@@ -93,6 +119,8 @@ impl Fake {
             answer,
             launcher,
             calls: Mutex::new(Vec::new()),
+            reserved: Mutex::new(Vec::new()),
+            released: Arc::new(AtomicUsize::new(0)),
             after: Mutex::new(Vec::new()),
             after_moves: Mutex::new(Vec::new()),
             hold: hold.map(Mutex::new),
@@ -125,6 +153,21 @@ impl Fake {
 
     pub(crate) fn calls(&self) -> Vec<Call> {
         self.calls.lock().unwrap().clone()
+    }
+
+    /// The environments its launcher's launches got.
+    pub(crate) fn envs(&self) -> Vec<Env> {
+        self.launcher.envs()
+    }
+
+    /// How many reservations were made.
+    pub(crate) fn reserved(&self) -> usize {
+        self.reserved.lock().unwrap().len()
+    }
+
+    /// How many reservations were released (dropped).
+    pub(crate) fn released(&self) -> usize {
+        self.released.load(Ordering::SeqCst)
     }
 
     pub(crate) fn after(&self) -> Vec<SessionEnd> {
@@ -171,19 +214,43 @@ pub(crate) fn moved(matter: &Path, name: &str) -> PathBuf {
 }
 
 impl SandboxLaunchers for Fake {
+    fn reserve(
+        &self,
+        matter: &MatterId,
+        session: &SessionKey,
+        running: &[SessionKey],
+    ) -> Result<Reservation, clauseo_sandbox::Error> {
+        self.reserved
+            .lock()
+            .unwrap()
+            .push((*session, running.to_vec()));
+        let released = Box::new(Released(Arc::clone(&self.released)));
+        Ok(Reservation::fixed(RESERVED_PORTS.to_vec(), *matter, *session).with_guard(released))
+    }
+
     fn launcher(
         &self,
         policy: Policy,
         matter: &MatterId,
         session: &SessionKey,
-        running: &[SessionKey],
+        reservation: Reservation,
         _opts: SpawnOptions,
         _denials: Arc<dyn DenialSink>,
     ) -> Result<SandboxLaunch, clauseo_sandbox::Error> {
+        reservation.check(matter, session)?;
+        let running = self
+            .reserved
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|(reserved, _)| reserved == session)
+            .map(|(_, running)| running.clone())
+            .unwrap_or_default();
         self.calls.lock().unwrap().push(Call {
             matter: *matter,
             session: *session,
-            running: running.to_vec(),
+            running,
             policy: policy.clone(),
         });
         if let Some(entered) = self.entered.lock().unwrap().take() {
@@ -230,14 +297,29 @@ pub(crate) fn dir(test: &str, scenario: &'static str) -> Dir {
 /// Starts a host whose own launcher is counted (the returned count), with `fake` as the seam's
 /// launchers when given, else the seam alone.
 pub(crate) fn start(dir: &Dir, fake: Option<Arc<Fake>>) -> (Running, Arc<AtomicUsize>) {
+    let (host, host_launched, _) = start_with(dir, fake, |config| config);
+    (host, host_launched)
+}
+
+/// As [`start`], the config adjusted by `adjust` too, the sandbox's CA roots one fixed root;
+/// also gives the host launcher, for its launches' environments.
+pub(crate) fn start_with(
+    dir: &Dir,
+    fake: Option<Arc<Fake>>,
+    adjust: impl FnOnce(clauseo_host::HostConfig) -> clauseo_host::HostConfig,
+) -> (Running, Arc<AtomicUsize>, Arc<Counting>) {
     let (host_launcher, host_launched) = Counting::new(dir);
-    let mut sandbox = Sandbox::new(Arc::new(tier_a), None);
+    let mut sandbox = Sandbox::new(Arc::new(tier_a), None)
+        .with_ca_roots(Arc::new(|| vec![vec![0x30, 0x01, 0x00]]));
     if let Some(fake) = fake {
         let launchers: Arc<dyn SandboxLaunchers> = fake;
         sandbox = sandbox.with_launchers(launchers, SpawnOptions::new());
     }
-    let host = dir.start_launching(0, host_launcher, move |config| config.with_sandbox(sandbox));
-    (host, host_launched)
+    let launcher: Arc<dyn Launcher> = Arc::clone(&host_launcher) as _;
+    let host = dir.start_launching(0, launcher, move |config| {
+        adjust(config.with_sandbox(sandbox))
+    });
+    (host, host_launched, host_launcher)
 }
 
 /// `turn`'s `TurnFailed`, if logged.

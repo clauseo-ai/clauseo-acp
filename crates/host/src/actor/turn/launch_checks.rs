@@ -576,7 +576,7 @@ mod removal;
 use removal::discard;
 pub(super) use removal::on_run_removed;
 mod sandbox;
-pub(super) use sandbox::{SandboxInput, launcher, on_sandbox_input};
+pub(super) use sandbox::{SandboxInput, Sandboxed, launcher, on_sandbox_input};
 mod spawn;
 use spawn::launch_prepared;
 mod sweep;

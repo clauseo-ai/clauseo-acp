@@ -286,7 +286,7 @@ fn launch(
     // The relay token reaches the agent in a file; its stderr tail hides it all the same.
     let redacted = super::launch_checks::relay::redacted(&prepared.run);
     let folder = prepared.stored;
-    let (forced, codex) = forced::of(
+    let (mut forced, codex) = forced::of(
         actor,
         &row.agent,
         &settings.env,
@@ -300,11 +300,17 @@ fn launch(
         codex.key_retry = KeyRetry::at_launch(&hook, login);
         codex
     });
-    let dropped: &[&str] = if codex.is_some() {
+    let removed = forced::jailed(&mut forced, prepared.sandbox.as_ref());
+    let codex_dropped: &[&str] = if codex.is_some() {
         &agent::codex::DROPPED_VARS
     } else {
         &[]
     };
+    let dropped: Vec<&str> = codex_dropped
+        .iter()
+        .copied()
+        .chain(removed.iter().map(String::as_str))
+        .collect();
     let inherited: Vec<_> = match &actor.wiring.inherited_env {
         Some(env) => env.clone(),
         None => std::env::vars_os().collect(),
@@ -315,7 +321,7 @@ fn launch(
         settings,
         hook,
         forced,
-        dropped,
+        &dropped,
         inherited.into_iter(),
         agent::session_folder(&folder),
         actor.wiring.path_prepend.as_deref(),
