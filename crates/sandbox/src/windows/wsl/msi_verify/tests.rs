@@ -5,7 +5,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use super::{
-    InstallError, LOCAL_SYSTEM, MsiFiles, MsiUpgrade, Signature, TRUSTED_INSTALLER, upgrade_with,
+    InstallError, LOCAL_SYSTEM, MsiFiles, MsiUpgrade, Signature, TRUSTED_INSTALLER, leaf_org_ok,
+    upgrade_with,
 };
 use crate::windows::wsl::FakeWsl;
 
@@ -14,6 +15,7 @@ const APPS: &str = r"C:\Program Files\WindowsApps";
 const SIGNED: Signature = Signature {
     microsoft_root: true,
     code_signing: true,
+    leaf_org: true,
 };
 const PACKAGE: &str = "MicrosoftCorporationII.WindowsSubsystemForLinux_2.6.3.0_x64__8wekyb3d8bbwe";
 
@@ -192,6 +194,37 @@ fn an_untrusted_signature_or_a_chain_to_another_root_is_refused() {
         ..Fake::passing()
     };
     assert!(assert_refused(&files).contains("code-signing"));
+}
+
+#[test]
+fn a_leaf_with_the_code_signing_eku_but_another_organization_is_refused() {
+    // Trusted to a Microsoft root, with the code-signing EKU, but the leaf's subject O isn't
+    // `Microsoft Corporation`: the same refusal as a failed EKU.
+    let files = Fake {
+        signed: Ok(Signature {
+            leaf_org: false,
+            ..SIGNED
+        }),
+        ..Fake::passing()
+    };
+    assert!(assert_refused(&files).contains("Microsoft Corporation"));
+    let events = files.events.borrow();
+    assert_eq!(events.last().map(String::as_str), Some("closed"));
+}
+
+#[test]
+fn the_leaf_organization_is_exactly_microsoft_corporation() {
+    assert!(leaf_org_ok(Some("Microsoft Corporation")));
+    for org in [
+        None,
+        Some(""),
+        Some("Microsoft Corporation "),
+        Some("microsoft corporation"),
+        Some("Contoso"),
+        Some("Microsoft Corporation, Inc"),
+    ] {
+        assert!(!leaf_org_ok(org), "{org:?}");
+    }
 }
 
 #[test]
