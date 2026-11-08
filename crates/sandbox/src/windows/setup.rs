@@ -107,6 +107,8 @@ mod outcome;
 #[cfg(any(windows, test))]
 pub mod owner;
 pub mod password;
+#[cfg(any(windows, test))]
+pub mod pool_steps;
 #[cfg(windows)]
 pub mod preflight;
 #[cfg(windows)]
