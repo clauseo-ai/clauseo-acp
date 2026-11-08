@@ -154,18 +154,19 @@ pub(crate) fn add_reset_sids(key: &str, users: &[Sid]) -> Result<(), MachineErro
     set_value(&open_existing(key)?, RESET_SIDS, &sids_value(&all))
 }
 
-/// The stop's `REG_QWORD` value `name` of `HKLM\<key>` (`StopNext`, `StopSequence`):
-/// `None` when it, or the key, is missing; one of another type is an error.
-pub(crate) fn read_stop_value(key: &str, name: &str) -> Result<Option<u64>, MachineError> {
+/// A pool task's `REG_QWORD` value `name` of `HKLM\<key>` (`StopNext`, `SweepSequence`, …):
+/// `None` when it, or the key, is missing; one of another type is an error. Read by the tasks
+/// as SYSTEM, and by the runner and the desktop as the lawyer (the record grants Users read).
+pub(crate) fn read_pool_value(key: &str, name: &str) -> Result<Option<u64>, MachineError> {
     let subkey = HSTRING::from(key);
     let name = HSTRING::from(name);
     read_qword(PCWSTR(subkey.as_ptr()), PCWSTR(name.as_ptr())).map_err(reading)
 }
 
-/// Sets the stop's `REG_QWORD` value `name` (`StopNext`, `StopCompleted`, `StopSequence`)
-/// in `HKLM\<key>` as it is: never made, so a stop still running after `--remove` can't bring
-/// the key back ([`open_existing`]). The stop task calls it as SYSTEM, under the set-up lock.
-pub(crate) fn write_stop_value(key: &str, name: &str, value: u64) -> Result<(), MachineError> {
+/// Sets a pool task's `REG_QWORD` value `name` (`StopNext`, `SweepCompleted`, …) in
+/// `HKLM\<key>` as it is: never made, so a task still running after `--remove` can't bring
+/// the key back ([`open_existing`]). The tasks call it as SYSTEM, under the set-up lock.
+pub(crate) fn write_pool_value(key: &str, name: &str, value: u64) -> Result<(), MachineError> {
     set_value(&open_existing(key)?, name, &RegValue::Qword(value))
 }
 
