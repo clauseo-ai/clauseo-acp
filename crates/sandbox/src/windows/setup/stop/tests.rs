@@ -88,6 +88,8 @@ struct Fake {
     /// The task's end: terminating this pid kills the run there, as the Task Scheduler's end
     /// (or its time limit) kills the process.
     end_at: Option<u32>,
+    /// The sweep task's requests, each with how many snapshots were taken by then.
+    sweeps: Vec<usize>,
     done: Vec<String>,
     logged: Vec<(bool, String)>,
 }
@@ -120,6 +122,7 @@ impl Fake {
             pool_from: None,
             read_fails: None,
             end_at: None,
+            sweeps: Vec::new(),
             done: Vec::new(),
             logged: Vec::new(),
         }
@@ -262,6 +265,11 @@ impl Stopper for Fake {
         Ok(())
     }
 
+    fn request_sweep(&mut self) -> Result<(), Failed> {
+        self.sweeps.push(self.snapshots_taken());
+        Ok(())
+    }
+
     fn log(&mut self, error: bool, line: &str) {
         self.logged.push((error, line.to_owned()));
     }
@@ -332,9 +340,11 @@ fn only_the_records_pool_users_processes_are_stopped_and_those_users_marked() {
     assert_eq!(
         line,
         "the sandbox's stop: 3 pool users, 2 found running, 3 processes stopped in 2 passes, \
-         0 left, 0 unknown, 0 BITS jobs cancelled, 0 not; 2 users marked for a profile reset \
-         (0 retried)"
+         0 left, 0 unknown, 0 BITS jobs cancelled, 0 not; the sweep task was requested; 2 \
+         users marked for a profile reset (0 retried)"
     );
+    // The sweep is asked for once, after the last pass.
+    assert_eq!(fake.sweeps, [2]);
     assert!(!line.contains("S-1-5"), "counts only: {line}");
 }
 

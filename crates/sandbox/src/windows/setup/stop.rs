@@ -36,20 +36,23 @@
 //!    and terminates each through the handle its user was read through, so a reused pid can't
 //!    redirect it and a parent can't start another between two terminations. The passes stop
 //!    once one finds no pool user's process, or after [`PASS_LIMIT`]; what is still there then
-//!    is left (48). A process whose user neither the list nor the token gives is unknown (48) and
-//!    never stopped, with two exceptions. Its owner is a pool SID: it is stopped (the owner may
-//!    add a process, never clear one: an owner is its creator, not its user, and an elevated
-//!    administrator's processes are owned by Administrators). Or it is one of the kernel's
-//!    minimal processes: it can't be opened to be terminated, the list put it in session 0, it
-//!    has no image file and it isn't a subsystem (WSL 1 pico) process ([`kernel_made`]).
-//!    Any image at all makes it unknown, wherever it lies and whoever signed it: a pool user's
-//!    scheduled task (S4U, or "run whether logged on or not") reaches session 0 and can start a
-//!    Windows-signed System32 binary as a protected process (PPL), which SYSTEM can open with
-//!    neither `READ_CONTROL` nor `PROCESS_TERMINATE`, and whose token's DACL can shut SYSTEM
-//!    out of the list. SYSTEM can't kill it, so the answer is 48 and a reset, not a kill. A
-//!    list that couldn't be read at all leaves no exemption, so a run where it failed ends at
-//!    48 unless each process's token, or a pool owner, named it. A run that ends 48 with
-//!    unknown processes lists their image file names in its log line, never a folder or a SID;
+//!    is left (48). Once they stop, it requests `\Clauseo\SandboxSweep`
+//!    ([`Stopper::request_sweep`], logged, never an exit): the escapee it killed may have
+//!    registered a task or a BITS job, and a marker it held re-marks to a sweep whose number is
+//!    read once this stop completed. A process whose user neither the list nor the token gives is
+//!    unknown (48) and never stopped, with two exceptions. Its owner is a pool SID: it is stopped
+//!    (the owner may add a process, never clear one: an owner is its creator, not its user, and an
+//!    elevated administrator's processes are owned by Administrators). Or it is one of the kernel's
+//!    minimal processes: it can't be opened to be terminated, the list put it in session 0, it has
+//!    no image file and it isn't a subsystem (WSL 1 pico) process ([`kernel_made`]). Any image at
+//!    all makes it unknown, wherever it lies and whoever signed it: a pool user's scheduled task
+//!    (S4U, or "run whether logged on or not") reaches session 0 and can start a Windows-signed
+//!    System32 binary as a protected process (PPL), which SYSTEM can open with neither
+//!    `READ_CONTROL` nor `PROCESS_TERMINATE`, and whose token's DACL can shut SYSTEM out of the
+//!    list. SYSTEM can't kill it, so the answer is 48 and a reset, not a kill. A list that couldn't
+//!    be read at all leaves no exemption, so a run where it failed ends at 48 unless each process's
+//!    token, or a pool owner, named it. A run that ends 48 with unknown processes lists their image
+//!    file names in its log line, never a folder or a SID;
 //! 5. cancels every BITS job a pool user owns (`BG_JOB_ENUM_ALL_USERS`, each job's owner), even
 //!    when no process was found: a pool user's job doesn't run, but stays queued until it is
 //!    cancelled. One that can't be cancelled, or whose owner can't be read, is 48; so is a list
@@ -80,9 +83,10 @@
 //! ended stop must never pass for a finished one: only a completed stop writes `StopSequence`.
 //! The rule the follow-up PR keeps: its unclean-session marker records `StopNext` as it reads it
 //! when written (M), reading it under the set-up lock so it can't interleave with a
-//! reservation's read-then-write and record a stale M. The logon refusal (F4) and the marker
-//! clear only when `StopSequence >= M`: a stop reserved its number after the marker existed and
-//! then completed, so its observation began after the marker. Nothing trusts the clock;
+//! reservation's read-then-write and record a stale M. The logon refusal (F4) lifts, and the
+//! marker moves on to a sweep whose number is read then, only when `StopSequence >= M`: a stop
+//! reserved its number after the marker existed and then completed, so its observation began
+//! after the marker. Nothing trusts the clock;
 //! `StopCompleted` is for diagnostics. `--remove` deletes `StopNext`, `StopSequence` and
 //! `StopCompleted` with the record, and should clear the markers, so no marker outlives its
 //! set-up. Ending a stop is denial of service only, which code running as the owner could do to
@@ -198,6 +202,8 @@ pub trait Stopper: Gate + Bits + Record {
     fn pause(&mut self);
     /// Adds `users` to the record's `ResetSids`, keeping what it lists.
     fn mark_for_reset(&mut self, users: &[Sid]) -> Result<(), Failed>;
+    /// Asks the Task Scheduler to run `\Clauseo\SandboxSweep`; `Err` names the failed call.
+    fn request_sweep(&mut self) -> Result<(), Failed>;
     /// Writes one line to the log: `error` for a refusal or a failure.
     fn log(&mut self, error: bool, line: &str);
 }
@@ -281,6 +287,11 @@ fn run_steps(fs: &mut impl Stopper) -> Result<String, Refusal> {
         passes.mark_failed = Some("nothing is written without a reserved number".to_owned());
     }
     let ran = run_passes(fs, &pool.users, &mut passes);
+    // What the processes left (a task, a job) is the sweep's: asked for once the kills are done.
+    let requested = match fs.request_sweep() {
+        Ok(()) => "; the sweep task was requested".to_owned(),
+        Err(why) => format!("; the sweep task couldn't be requested ({why})"),
+    };
     let cancelled = cancel_jobs(fs, &pool.users, &mut passes);
     // Without the list, a process no token names is unknown: the line says why.
     let list = if passes.list_failed {
@@ -301,7 +312,7 @@ fn run_steps(fs: &mut impl Stopper) -> Result<String, Refusal> {
     };
     let counts = format!(
         "{} pool users, {} found running, {} processes stopped in {} passes, {} left, \
-         {} unknown{list}, {} BITS jobs cancelled, {} not{capped}{images}",
+         {} unknown{list}, {} BITS jobs cancelled, {} not{capped}{images}{requested}",
         pool.users.len(),
         passes.found.len(),
         passes.stopped,

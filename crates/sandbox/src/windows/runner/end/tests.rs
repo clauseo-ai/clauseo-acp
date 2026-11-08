@@ -1,7 +1,7 @@
 //! The session's end through a recording fake: the job emptied first, then `SweepNext` read and
 //! the sweep task requested once a session on every end path, even after a job that didn't
 //! empty; a failed request logged with the exit code unchanged; the marker settled with no wait
-//! for any run (awaiting a sweep, or a stop too after an escapee); the host's stdin end set apart
+//! for any run (awaiting a sweep, or a stop alone after an escapee); the host's stdin end set apart
 //! from the agent's; and the exit code on a cancel.
 
 use std::collections::VecDeque;
@@ -488,7 +488,7 @@ fn every_end_without_an_escapee_awaits_the_sweep_next_it_read_and_never_waits() 
 }
 
 #[test]
-fn an_escapee_reads_stop_next_then_requests_the_stop_and_awaits_both() {
+fn an_escapee_reads_stop_next_then_requests_the_stop_and_awaits_it_alone() {
     let end = SessionEnd::new(Record::default());
     end.mark_escapee();
     end.trigger(EndSignal::InnerExited);
@@ -496,10 +496,8 @@ fn an_escapee_reads_stop_next_then_requests_the_stop_and_awaits_both() {
     let mut want = lines(&ENDED);
     want.extend(lines(&["read StopNext", "request stop", "settle"]));
     assert_eq!(end.steps().done(), want);
-    let awaiting = MarkerState::AwaitingStop {
-        stop: STOP_AT,
-        sweep: SWEEP_AT,
-    };
+    // No sweep number: the one read while the escapee lived proves nothing.
+    let awaiting = MarkerState::AwaitingStop { stop: STOP_AT };
     assert_eq!(end.steps().settled(), [awaiting]);
     // A stop that couldn't be requested is said; the marker still awaits one.
     let end = SessionEnd::new(Record {
@@ -517,11 +515,7 @@ fn an_escapee_reads_stop_next_then_requests_the_stop_and_awaits_both() {
 
 #[test]
 fn a_number_that_cant_be_read_or_no_end_leaves_the_marker_open() {
-    for (fail, escaped) in [
-        ("read SweepNext", false),
-        ("read SweepNext", true),
-        ("read StopNext", true),
-    ] {
+    for (fail, escaped) in [("read SweepNext", false), ("read StopNext", true)] {
         let end = SessionEnd::new(Record {
             fail: Some(fail),
             ..Record::default()
@@ -545,6 +539,16 @@ fn a_number_that_cant_be_read_or_no_end_leaves_the_marker_open() {
             "{fail}"
         );
     }
+    // An escapee's marker needs no SweepNext: it awaits the stop all the same.
+    let end = SessionEnd::new(Record {
+        fail: Some("read SweepNext"),
+        ..Record::default()
+    });
+    end.mark_escapee();
+    end.trigger(EndSignal::InnerExited);
+    end.finish();
+    let awaiting = MarkerState::AwaitingStop { stop: STOP_AT };
+    assert_eq!(end.steps().settled(), [awaiting]);
     // No end began: nothing read, nothing written.
     let end = SessionEnd::new(Record::default());
     end.finish();

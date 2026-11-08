@@ -24,8 +24,10 @@
 //! tier B), and its end fits in 3 s. At its end ([`SessionEnd::finish`]) it writes the session's
 //! marker as awaiting a sweep `>= M`, whatever the end was (a failure, a cancel past its grace or
 //! a job that didn't empty too: the next inner's first act kills what is left and reports an
-//! escapee). When a sweep found an escapee it also reads `StopNext`, requests
-//! `\Clauseo\SandboxStop` and writes the marker as awaiting that stop too. The next launch
+//! escapee). When a sweep found an escapee it reads `StopNext`, requests `\Clauseo\SandboxStop`
+//! and writes the marker as awaiting that stop alone: its `M` was read while the escapee lived,
+//! so a sweep reading it could have completed before the escapee registered a task. Once the
+//! stop completed, whoever reads the marker reads `SweepNext` then (`unclean.rs`). The next launch
 //! (`clean_close::check_launch`) and the pool user's next logon (`outer/unclean.rs`) check it
 //! (`marker.rs`).
 //!
@@ -278,16 +280,17 @@ impl<S: EndSteps> SessionEnd<S> {
     /// run. With no end begun it stays open. With no escapee it awaits a sweep `>= M`, the
     /// `SweepNext` read at the end: whatever the end was, since the next inner's first act kills
     /// what is left of the pool user's and reports an escapee. When a sweep found an escapee,
-    /// `StopNext` is read, the stop task requested, and it awaits that stop as well. A number that
-    /// couldn't be read leaves it open, which the pool user's next logon, or the desktop's start,
-    /// makes one awaiting a stop (`outer/unclean.rs`).
+    /// `StopNext` is read, the stop task requested, and it awaits that stop alone (its sweep is
+    /// read once the stop completed, `unclean.rs`). A number that couldn't be read leaves it
+    /// open, which the pool user's next logon, or the desktop's start, makes one awaiting a stop
+    /// (`outer/unclean.rs`).
     pub(crate) fn finish(&self) {
         self.finished.get_or_init(|| {
             let Some(began) = self.began.get() else {
                 return;
             };
             let state = if self.escaped() {
-                self.awaiting_stop(began.sweep)
+                self.awaiting_stop()
             } else {
                 began
                     .sweep
@@ -306,17 +309,15 @@ impl<S: EndSteps> SessionEnd<S> {
     }
 
     /// An escapee's marker: `StopNext` read before the stop task is requested, so the run it
-    /// queues takes that number or a later one; `None` when a number couldn't be read.
-    fn awaiting_stop(&self, sweep: Option<u64>) -> Option<MarkerState> {
+    /// queues takes that number or a later one; `None` when it couldn't be read. No sweep number:
+    /// one read while the escapee lives proves nothing.
+    fn awaiting_stop(&self) -> Option<MarkerState> {
         let stop = next_number(&self.steps, STOP_NEXT);
         if !self.steps.request_stop() {
             self.steps
                 .log("clauseo-sandbox-run: warning: the sandbox stop task couldn't be requested");
         }
-        Some(MarkerState::AwaitingStop {
-            stop: stop?,
-            sweep: sweep?,
-        })
+        Some(MarkerState::AwaitingStop { stop: stop? })
     }
 
     /// The outer's exit code for a run that would exit `code`: [`RunExit::Escapee`] when a sweep
