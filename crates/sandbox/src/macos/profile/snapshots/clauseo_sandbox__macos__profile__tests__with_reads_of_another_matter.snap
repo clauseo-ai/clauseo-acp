@@ -252,7 +252,7 @@ expression: w.render(&policy)
 ; In them, at any depth and in any letter case: no .git, .clauseo, .claude,
 ; .codex or .agents.
 (deny file-read* file-write*
-  (require-all (subpath (param "OTHER_MATTER_READ_0")) (regex #"/\.([gG][iI][tT]|[cC][lL][aA][uU][sS][eE][oO]|[cC][lL][aA][uU][dD][eE]|[cC][oO][dD][eE][xX]|[aA][gG][eE][nN][tT][sS])(/|$)"))
+  (require-all (subpath (param "OTHER_MATTER_READ_0")) (regex #"/\.([gG]([iI]|İ|ı)[tT]|[cC][lL][aA][uU]([sS]|ſ)[eE][oO]|[cC][lL][aA][uU][dD][eE]|[cC][oO][dD][eE][xX]|[aA][gG][eE][nN][tT]([sS]|ſ))(/|$)"))
   (with message "clauseo-4242-7"))
 
 ; The matter, state and notes folders themselves: not removed, not replaced.

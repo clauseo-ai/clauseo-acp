@@ -8,11 +8,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::PolicyBuilder;
+use super::ascii_fold;
 use super::build::{all_beneath, beneath_existing, existing, refuse};
 use super::{same, under};
 use crate::Error;
 
-/// The names that stay refused in a read of another matter, in any ASCII letter case: its git
+/// The names that stay refused in a read of another matter, in any letter case (by Unicode case
+/// folding: [`ascii_fold`](super::ascii_fold), so `.clauſeo` with a long s too): its git
 /// history, its Clauseo data folder, and its agents' config and instructions. The policy refuses
 /// a grant with one anywhere in its path; the macOS profile denies reads and writes of each at
 /// any depth of a granted tree; Windows tier B leaves each out of the grant (decision 0049).
@@ -63,11 +65,12 @@ impl OtherMatterRead {
     }
 }
 
-/// Whether `name` is one of [`REFUSED_IN_OTHER_MATTER`], in any ASCII letter case.
+/// Whether `name` is one of [`REFUSED_IN_OTHER_MATTER`] in any letter case, each letter folded
+/// as [`ascii_fold::folds_to`] does, on every OS (refusing more is safe).
 pub(crate) fn refused_name(name: &std::ffi::OsStr) -> bool {
     REFUSED_IN_OTHER_MATTER
         .iter()
-        .any(|refused| name.eq_ignore_ascii_case(refused))
+        .any(|refused| ascii_fold::folds_to(name, refused))
 }
 
 /// Whether `path` is under `root` with one of its names below `root` one of

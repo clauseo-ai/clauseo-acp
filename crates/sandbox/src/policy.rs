@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use crate::links::{LinkFinding, MatterScan};
 use crate::{Access, Error, PathClass};
 
+pub(crate) mod ascii_fold;
 mod build;
 mod links;
 mod names;

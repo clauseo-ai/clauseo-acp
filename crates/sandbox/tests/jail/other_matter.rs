@@ -203,3 +203,47 @@ fn a_git_or_clauseo_made_during_the_run_in_a_granted_folder_stays_refused() {
     want_refused.sort();
     assert_eq!(lines(&out.stdout, "REFUSED "), want_refused, "{out:#?}");
 }
+
+/// R18 MEDIUM-1: APFS opens `.clauſeo` (a long s, U+017F) as `.clauseo`, and `.agentſ` as
+/// `.agents`; each is refused through a grant on their parent, as are other letter cases.
+/// Seatbelt matches the name as stored, so the ASCII-only regex refused these too (measured);
+/// the profile's refused names take every spelling that folds to their letters all the same.
+#[test]
+fn refused_names_spelled_in_any_case_or_with_a_long_s_stay_refused() {
+    let w = World::new();
+    other_matter(&w);
+    w.file("m2/.agents/x", "a\n");
+    w.file("m2/.git/HEAD", "ref\n");
+    let policy = w
+        .builder()
+        .hidden_matter(&w.at("m2"), "m2-id")
+        .other_matter_read(&w.at("m2"), false)
+        .build()
+        .unwrap();
+    let (launcher, _) = launcher(policy);
+    let at = |rel: &str| w.at(rel).to_str().unwrap().to_owned();
+    let refused = [
+        "m2/.clau\u{17F}eo/x",
+        "m2/.CLAUSEO/x",
+        "m2/.ClAuSeO/x",
+        "m2/.agent\u{17F}/x",
+        "m2/.GIT/HEAD",
+    ]
+    .map(at);
+    // On a case-insensitive volume (this Mac's), each spelling reaches the real file outside the
+    // jail, so the refusals below are the profile's doing.
+    if w.at("m2/.CLAUSEO/x").exists() {
+        for path in &refused {
+            assert!(std::fs::read(path).is_ok(), "{path}");
+        }
+    }
+    let doc = at("m2/doc.txt");
+    let mut all = vec![doc.as_str()];
+    all.extend(refused.iter().map(String::as_str));
+    let out = sh(&launcher, &w.at("m1"), READ_EACH, &all);
+    out.assert_ok();
+    assert_eq!(lines(&out.stdout, "READ "), [doc], "{out:#?}");
+    let mut want_refused = refused.to_vec();
+    want_refused.sort();
+    assert_eq!(lines(&out.stdout, "REFUSED "), want_refused, "{out:#?}");
+}

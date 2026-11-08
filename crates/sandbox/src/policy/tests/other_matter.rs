@@ -224,3 +224,50 @@ fn refused_paths_in_another_matter_classify_as_that_matter() {
     let data = canon(&w.at("data")).join("x");
     assert_eq!(policy.classify(&data, Access::Read), PathClass::Hidden);
 }
+
+/// R18 MEDIUM-1: a refused name spelled in any case, or with a code point APFS folds to one of
+/// its letters (the long s, U+017F), is refused through a grant on its parent, and as a grant.
+#[test]
+fn refused_names_in_any_case_or_with_a_long_s_are_refused() {
+    let w = world("other-read-fold");
+    let policy = with_m2(&w)
+        .other_matter_read(&w.at("m2"), false)
+        .build()
+        .unwrap();
+    let m2 = canon(&w.at("m2"));
+    let read = &policy.other_matter_reads()[0];
+    let refused_too = PathClass::OtherMatter {
+        matter: "m2-id".to_owned(),
+        refused: true,
+    };
+    for rel in [
+        ".clau\u{17F}eo/x",
+        ".CLAUSEO/x",
+        ".ClAuSeO/x",
+        ".agent\u{17F}/x",
+        ".GIT/HEAD",
+        "docs/.g\u{131}t/HEAD",
+    ] {
+        assert!(read.refuses(&m2.join(rel)), "{rel}");
+        assert_eq!(
+            policy.classify(&m2.join(rel), Access::Read),
+            refused_too,
+            "{rel}"
+        );
+    }
+    assert!(!read.refuses(&m2.join("docs/.clau\u{17F}eox/x")));
+    // As a grant: a folder with the long s in its name (its own folder, so that on a
+    // case-sensitive volume it exists too).
+    for (rel, name) in [
+        ("m2/docs/.clau\u{17F}eo", ".clau\u{17F}eo"),
+        ("m2/docs/.agent\u{17F}", ".agent\u{17F}"),
+    ] {
+        w.dir.dir(rel);
+        let rule = format!("a read of another matter may not be or sit in a {name}");
+        refused(
+            with_m2(&w).other_matter_read(&w.at(rel), false).build(),
+            &rule,
+            &w.at(rel),
+        );
+    }
+}

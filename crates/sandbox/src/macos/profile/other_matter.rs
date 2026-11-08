@@ -1,15 +1,20 @@
 //! Reads of other matters (R18): each grant read again after the hidden paths, and the names
-//! that stay refused in it denied after that, at any depth and in any letter case.
+//! that stay refused in it denied after that, at any depth and in any letter case (by Unicode
+//! case folding, as APFS matches names).
 
 use std::path::PathBuf;
 
 use super::{Writer, ancestors, literal, subpath};
+use crate::policy::ascii_fold;
 use crate::{Policy, REFUSED_IN_OTHER_MATTER};
 
 /// One pattern on the path for every one of [`REFUSED_IN_OTHER_MATTER`] as a whole name, each
-/// letter in both cases (Seatbelt's regex has no case flag): `/\.(git|clauseo|...)(/|$)`. The
-/// policy refuses a grant with one of them anywhere in its own path, so within a grant the
-/// pattern only matches names below it.
+/// letter in every spelling a case-insensitive APFS volume opens as it (Seatbelt's regex has no
+/// case flag): both ASCII cases as a class, and any code point beyond ASCII that folds to the
+/// letter as an alternative, whole, since it is more than one byte in UTF-8 (`([sS]|ſ)`, from
+/// [`ascii_fold`]). So `/\.(git|clauseo|...)(/|$)` in any case. The names are ASCII, so APFS's
+/// normalisation adds nothing ([`ascii_fold`] says why). The policy refuses a grant with one of
+/// them anywhere in its own path, so within a grant the pattern only matches names below it.
 pub(super) fn refused_regex() -> String {
     let names: Vec<String> = REFUSED_IN_OTHER_MATTER
         .iter()
@@ -17,10 +22,17 @@ pub(super) fn refused_regex() -> String {
             name.trim_start_matches('.')
                 .chars()
                 .map(|c| {
-                    if c.is_ascii_alphabetic() {
-                        format!("[{}{}]", c.to_ascii_lowercase(), c.to_ascii_uppercase())
+                    if !c.is_ascii_alphabetic() {
+                        return c.to_string();
+                    }
+                    let spellings = ascii_fold::spellings(c);
+                    let (ascii, beyond) = spellings.split_at(2);
+                    let class = format!("[{}{}]", ascii[0], ascii[1]);
+                    if beyond.is_empty() {
+                        class
                     } else {
-                        c.to_string()
+                        let beyond: Vec<String> = beyond.iter().map(char::to_string).collect();
+                        format!("({class}|{})", beyond.join("|"))
                     }
                 })
                 .collect()

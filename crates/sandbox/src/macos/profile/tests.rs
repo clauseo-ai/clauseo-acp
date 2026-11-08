@@ -222,11 +222,12 @@ fn with_reads_of_another_matter() {
 #[test]
 fn the_refused_names_pattern_matches_whole_names_in_any_case() {
     let regex = other_matter::refused_regex();
-    assert!(
-        regex.starts_with("/\\.([gG][iI][tT]|[cC][lL][aA][uU][sS][eE][oO]|"),
-        "{regex}"
+    // `i` takes the Turkic İ and ı, `s` the long s (R18 MEDIUM-1), each an alternative whole.
+    assert_eq!(
+        regex,
+        "/\\.([gG]([iI]|\u{130}|\u{131})[tT]|[cC][lL][aA][uU]([sS]|\u{17F})[eE][oO]|\
+         [cC][lL][aA][uU][dD][eE]|[cC][oO][dD][eE][xX]|[aA][gG][eE][nN][tT]([sS]|\u{17F}))(/|$)"
     );
-    assert!(regex.ends_with("[aA][gG][eE][nN][tT][sS])(/|$)"), "{regex}");
 }
 
 #[test]
