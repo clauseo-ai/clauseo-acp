@@ -31,6 +31,12 @@ pub trait Removal {
     fn delete_record(&mut self) -> Result<(), MachineError>;
     /// The record's `AdminCopyOwner`: who placed the admin copy, `None` when there is none.
     fn copy_owner(&mut self) -> Result<Option<CopyOwner>, MachineError>;
+    /// Disables the SYSTEM task `\Clauseo\SandboxSetUp`, so no set-up starts from here on; one
+    /// not there is `Ok`.
+    fn disable_set_up_task(&mut self) -> Result<(), MachineError>;
+    /// Ends the set-up task's running instance (`IRegisteredTask::Stop`), whose set-up gives the
+    /// lock back as it ends; one not there, or not running, is `Ok`.
+    fn stop_set_up_task(&mut self) -> Result<(), MachineError>;
     /// Deletes the SYSTEM task `\Clauseo\SandboxStop` (`refresh::unregister_task`); one
     /// already gone is `Ok`.
     fn unregister_stop_task(&mut self) -> Result<(), MachineError>;

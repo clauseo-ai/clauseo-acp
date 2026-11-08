@@ -289,7 +289,13 @@ pub(crate) fn run_remove(
         taken =
             remove_admin_copy_if_theirs(&record_key, uninstall, per_machine, invoker_sid.as_ref());
     };
-    match remove_then(&mut machine, &mut acl, per_machine, &mut teardown) {
+    match remove_then(
+        &mut machine,
+        &mut acl,
+        per_machine,
+        uninstall,
+        &mut teardown,
+    ) {
         Ok(removed) => {
             tracing::info!(?removed, "the removal finished");
             removal_exit(taken, &mut |line| refresh::event_log(true, line))

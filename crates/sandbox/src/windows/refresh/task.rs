@@ -367,6 +367,34 @@ pub(crate) fn task_busy(task: SystemTask) -> Result<bool, TaskError> {
     })
 }
 
+/// Disables `task` (`IRegisteredTask::put_Enabled(false)`), so no start lands from here on;
+/// one that isn't registered is `Ok`. The uninstaller's removal calls it for the set-up task
+/// before it waits for the set-up lock.
+pub(crate) fn disable_task(task: SystemTask) -> Result<(), TaskError> {
+    let disabled = with_task(task, |task| {
+        // SAFETY: a live task; a plain value.
+        unsafe { task.SetEnabled(VARIANT_BOOL::from(false)) }
+            .map_err(com("IRegisteredTask::SetEnabled"))
+    });
+    match disabled {
+        Err(TaskError::NotRegistered) => Ok(()),
+        other => other,
+    }
+}
+
+/// Ends `task`'s running instance (`IRegisteredTask::Stop`); one that isn't registered, or
+/// isn't running, is `Ok`.
+pub(crate) fn stop_task(task: SystemTask) -> Result<(), TaskError> {
+    let stopped = with_task(task, |task| {
+        // SAFETY: a live task; flags 0.
+        unsafe { task.Stop(0) }.map_err(com("IRegisteredTask::Stop"))
+    });
+    match stopped {
+        Err(TaskError::NotRegistered) => Ok(()),
+        other => other,
+    }
+}
+
 /// Whether `task` is registered and enabled (`IRegisteredTask::Enabled`), read as whoever calls
 /// it, without starting it: [`TaskError::NotRegistered`] when it, or `\Clauseo`, is missing.
 pub(crate) fn task_enabled(task: SystemTask) -> Result<bool, TaskError> {

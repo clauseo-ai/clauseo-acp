@@ -726,7 +726,9 @@ takes the user who asked from its recorded parent (D-B2), never from an argument
   prompt with `--remove --per-machine` (an elevated process may remove the whole record, whoever
   asks; when the owner asks, the ledger work still runs as the owner).
 - **Order**, under the set-up lock, waited for at most 60 s (else exit 5, nothing touched; with
-  no record, the lock is still tried without waiting, and a set-up holding it is exit 5):
+  no record, the lock is still tried without waiting, and a set-up holding it is exit 5). The
+  uninstaller's `--uninstall` first disables the set-up task and stops its run, which may hold the
+  lock for two hours, then waits for the lock as above:
   `Removing = 1`; every process running as a pool SID stopped (D-B13); per pool user, its
   `LocalLow` denies (planned again from the record, D-B11), its profile, then its account and
   sign-in screen value; `DeviceSync`'s deny; the ledger's entries; the group; the record (its

@@ -118,10 +118,45 @@ fn the_teardown_after_a_removal_runs_before_the_lock_is_given_back() {
         assert!(matches!(removed, Removed::All(_)), "{removed:?}");
         log.borrow_mut().push("teardown".to_owned());
     };
-    remove_then(&mut machine, &mut acl, false, &mut teardown).unwrap();
+    remove_then(&mut machine, &mut acl, false, false, &mut teardown).unwrap();
     let mut expected = full_removal();
     expected.insert(expected.len() - 1, "teardown".to_owned());
     assert_eq!(machine.lines(), expected);
+}
+
+#[test]
+fn an_uninstall_disables_then_stops_the_set_up_task_before_it_waits_for_the_lock() {
+    let (mut machine, mut acl) = pool("remove-uninstall-quiet", Some(owner()));
+    remove_then(&mut machine, &mut acl, false, true, &mut |_| {}).unwrap();
+    let mut expected = full_removal();
+    let at = expected
+        .iter()
+        .position(|line| line == "lock 60000")
+        .unwrap();
+    expected.insert(at, "stop_set_up_task".to_owned());
+    expected.insert(at, "disable_set_up_task".to_owned());
+    assert_eq!(machine.lines(), expected);
+    // Either failing is logged, and the lock is waited for as before.
+    let (mut machine, mut acl) = pool("remove-uninstall-quiet-fails", Some(owner()));
+    machine.fail_at.set(Some(1));
+    remove_then(&mut machine, &mut acl, false, true, &mut |_| {}).unwrap();
+    let lines = machine.lines();
+    let first = [
+        "read_record",
+        "disable_set_up_task",
+        "stop_set_up_task",
+        "lock 60000",
+    ];
+    assert_eq!(lines[..4], first);
+    // The app's own removal leaves the task alone.
+    let (mut machine, mut acl) = pool("remove-app-keeps-task", Some(owner()));
+    remove(&mut machine, &mut acl, false).unwrap();
+    assert!(
+        !machine
+            .lines()
+            .iter()
+            .any(|line| line.contains("set_up_task"))
+    );
 }
 
 /// A user whose profile has a reparse point on the way to `LocalLow` doesn't stop the removal:
