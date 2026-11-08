@@ -46,8 +46,8 @@
 //! 6. the ledger's entries (`ledger_work.rs`), read from the record's `DataDir`, which the owner
 //!    can influence, so it is checked as `--data-dir` is and used only as `ledger_work.rs` says;
 //! 7. the group, when it is the record's and has no members left;
-//! 8. on a per-machine install, the stop task set-up registered for the owner, then the record
-//!    key;
+//! 8. on a per-machine install, the stop and sweep tasks set-up registered for the owner, then
+//!    the record key;
 //! 9. for the uninstaller only, the admin copy's teardown (`admin_remove.rs`, run through
 //!    [`remove_then`]), with the lock still held, so a refresh skips instead of racing it.
 //!
@@ -142,7 +142,7 @@ pub enum RemoveStep {
     Record,
     /// Removing the network filters and firewall rules (S15 PR7).
     Network,
-    /// A per-machine install's stop task, deleted before the record.
+    /// A per-machine install's stop and sweep tasks, deleted before the record.
     StopTask,
 }
 
@@ -162,7 +162,7 @@ impl std::fmt::Display for RemoveStep {
             RemoveStep::Group => "deleting the sandbox group",
             RemoveStep::Record => "deleting the machine's record",
             RemoveStep::Network => "removing the network filters",
-            RemoveStep::StopTask => "deleting the sandbox's stop task",
+            RemoveStep::StopTask => "deleting the sandbox's stop and sweep tasks",
         })
     }
 }
@@ -501,9 +501,10 @@ fn remove_group(machine: &mut impl Removal, record: &MachineRecord) -> Result<bo
 }
 
 /// Step 8, before the record goes: on a per-machine install (`AdminCopyOwner` is `machine`),
-/// the task `\Clauseo\SandboxStop` set-up registered for the record's owner is deleted, so
-/// the owner keeps no start right once their pool is gone. A per-user install's task stays
-/// (`--adopt` registered it; `--remove --uninstall` deletes it with the admin copy).
+/// the tasks `\Clauseo\SandboxStop` and `\Clauseo\SandboxSweep` set-up registered for the
+/// record's owner are deleted, so the owner keeps no start right once their pool is gone. A
+/// per-user install's tasks stay (`--adopt` registered them; `--remove --uninstall` deletes
+/// them with the admin copy).
 fn remove_stop_task(machine: &mut impl Removal) -> Result<(), Failed> {
     let failed = |e: MachineError| (RemoveStep::StopTask, cause_of(&e));
     match machine.copy_owner().map_err(failed)? {

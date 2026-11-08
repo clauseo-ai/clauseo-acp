@@ -1,7 +1,8 @@
-//! The per-machine stop task (`late_steps::stop_task`, `remove::remove_stop_task`): on a
-//! per-machine install the set-up registers `\Clauseo\SandboxStop` for the owner it records,
-//! a new owner's set-up replaces a previous owner's, the removal deletes it before the record,
-//! and a failed registration fails the set-up closed. A per-user install is left to `--adopt`.
+//! The per-machine stop and sweep tasks (`late_steps::stop_task`, `remove::remove_stop_task`): on
+//! a per-machine install the set-up registers `\Clauseo\SandboxStop` and `\Clauseo\SandboxSweep`
+//! for the owner it records (one `Machine` call, `refresh::POOL_TASKS` on Windows), a new
+//! owner's set-up replaces a previous owner's, the removal deletes them before the record, and a
+//! failed registration fails the set-up closed. A per-user install is left to `--adopt`.
 
 use super::fake::{FakeAcl, FakeMachine, OTHER_OWNER, rid};
 use super::remove_fake::Remover;

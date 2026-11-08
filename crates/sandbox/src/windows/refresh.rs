@@ -106,14 +106,15 @@ pub(crate) mod windows_tests;
 #[cfg(windows)]
 pub use installed::{installed_setup_sha256, recorded_admin_copy_sha256};
 pub use rules::{
-    EXECUTION_LIMIT, REFRESH_ARG, STAGING_SDDL, STOP_ARG, STOP_EXECUTION_LIMIT, SystemTask, TASKS,
-    TEARDOWN, Teardown, action_path, hex, inside_profile, same_path, sddl_matches, task_sddl,
+    EXECUTION_LIMIT, POOL_TASKS, REFRESH_ARG, STAGING_SDDL, STOP_ARG, STOP_EXECUTION_LIMIT,
+    SWEEP_ARG, SWEEP_EXECUTION_LIMIT, SystemTask, TASKS, TEARDOWN, Teardown, action_path, hex,
+    inside_profile, same_path, sddl_matches, task_sddl,
 };
 pub use sources::{SourceError, SourceFile, Sources};
 #[cfg(windows)]
 pub use task::{
-    TASK_FOLDER, TaskError, last_refresh_run, register_task, request_admin_refresh,
-    request_pool_stop, unregister_task,
+    SweepRun, TASK_FOLDER, TaskError, last_refresh_run, pool_sweep_result, register_task,
+    request_admin_refresh, request_pool_stop, request_pool_sweep, unregister_task,
 };
 pub use version::version_not_older;
 #[cfg(windows)]
