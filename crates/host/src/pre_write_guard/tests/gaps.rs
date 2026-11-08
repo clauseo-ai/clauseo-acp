@@ -234,13 +234,14 @@ fn six_huge_calls(test: &str, n: usize) -> std::time::Duration {
 /// length. The quadratic resolution this guards against is the one thing a wall-clock bound cannot
 /// tell from a loaded machine, so the test checks the scaling instead of the time: the six calls
 /// run at `N` = `25_000` and at `2N` = `50_000` repeats, three rounds each, interleaved, and the
-/// ratio of the two minimum times must stay at or under 3.0. Linear work gives about 2 and
-/// quadratic work about 4. Load slows both sizes alike, so it cancels out of the ratio. Taking the
-/// minimum of three rounds drops the rounds a scheduling spike hit: on a machine at load 19 on 8
-/// cores, single rounds at `75_000` and `150_000` once gave ratios of 3.1 and 3.2. `N` is chosen so
-/// that the smaller size takes about 1 s on a debug build on this loaded machine, far above the 50
-/// ms where a ratio is only noise. The whole test does about 1.5 times the work of the old single
-/// `150_000` run. The 120 s bound on the whole run is only a backstop, so a hang still fails.
+/// ratio of the two minimum times must stay at or under 3.4. Linear work gives about 2 (up to 2.8
+/// seen under heavy load) and quadratic work about 4, so 3.4 sits between them. Load slows both
+/// sizes alike, so it cancels out of the ratio. Taking the minimum of three rounds drops the rounds
+/// a scheduling spike hit: on a machine at load 19 on 8 cores, single rounds at `75_000` and
+/// `150_000` once gave ratios of 3.1 and 3.2. `N` is chosen so that the smaller size takes about
+/// 1 s on a debug build on this loaded machine, far above the 50 ms where a ratio is only noise.
+/// The whole test does about 1.5 times the work of the old single `150_000` run. The 120 s bound
+/// on the whole run is only a backstop, so a hang still fails.
 #[test]
 fn a_huge_word_or_path_is_read_quickly() {
     const ROUNDS: usize = 3;
@@ -262,7 +263,7 @@ fn a_huge_word_or_path_is_read_quickly() {
     let (small, large) = outcome.expect("the guard took over 120 s on the six calls");
     let ratio = large.as_secs_f64() / small.as_secs_f64();
     assert!(
-        ratio <= 3.0,
+        ratio <= 3.4,
         "the time grew {ratio:.2}x for twice the input ({small:?}, then {large:?}): \
          linear is about 2x, quadratic about 4x"
     );
