@@ -1971,13 +1971,18 @@ the refresh and stop tasks' descriptor (`task_sddl`, the owner read and execute)
 `--adopt` registers it for every interactive user:
 `O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;IU)`. Pool users log on interactively, so they hold
 `IU` too. Execute also ends a running task, so per machine any interactive user can end another
-user's set-up while it runs (`schtasks /end`). That is accepted as denial of service only, and it
+user's set-up while it runs (`schtasks /end`), and with it every client that server holds. That is
+accepted as denial of service only, and it
 binds the set-up to stay restartable: an ended run leaves no lock held (the set-up mutex is
 abandoned with the process) and nothing a later run can't redo, and the asking app reads the
 broken pipe as a failure, not a success. Each per-machine set-up then puts
 `(D;;FRFX;;;<GroupSid>)` first, through
 `IRegisteredTask::SetSecurityDescriptor` (`late_steps::tasks`, step "keeping the sandbox users
-from the set-up task"); a reinstall over a set-up pool registers it with the deny already. Plain
+from the set-up task"); a reinstall over a set-up pool registers it with the deny already.
+The deny names only the recorded group (`GroupSid`), not a `ClauseoSandboxUsers` group a failed
+first set-up left under another SID; that is accepted, as the pipe's descriptor and the gate
+refuse both (the pool rules read the token, whatever the task's descriptor says), so such a
+member can start the task but is served nothing. Plain
 per-user `--adopt` doesn't register it. Every elevated set-up (the prompt's `--set-up`,
 `--adopt`'s) registers it again when it is missing or its definition differs
 (`refresh::ensure_task`, `Machine::ensure_set_up_task`), so a lawyer whose task was deleted meets
@@ -2064,6 +2069,8 @@ A request that isn't such an object, or a known op with wrong fields, is `refuse
 **Set up before.** An older Clauseo's set-up (an older `setup.json` version,
 `SetupState::Outdated`) is `NoSandbox::NeedsReSetUp`, a first set-up `NoSandbox::NeedsSetUp`;
 for `NeedsReSetUp` the host runs the set-up again through the pipe, silently, once per app start.
+Holding it to once per start is the host's job (D3a's start-up checks), not the sandbox crate's:
+`request_set_up` asks whenever it is called.
 
 **The app** (`request_set_up`, which `UserSetup::run` and `UserSetup::extend` call):
 
