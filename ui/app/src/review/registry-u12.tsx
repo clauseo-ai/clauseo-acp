@@ -86,6 +86,29 @@ const figures = (used: number, over: Partial<AgentLimitsView> = {}): AgentLimits
   checked_at: READ,
   ...over,
 });
+/** A ChatGPT Plus plan with a model's own limit beside Codex's: Spark's 5-hour and weekly windows. */
+const MODEL_BUCKET = figures(62, {
+  plan: "ChatGPT Plus",
+  windows: [
+    row(62),
+    weekly(20),
+    row(90, {
+      id: "codex_spark:primary",
+      kind: "model",
+      label: "Spark 5-hour limit",
+      model: "Spark",
+      duration_mins: 300,
+    }),
+    row(95, {
+      id: "codex_spark:secondary",
+      kind: "model",
+      label: "Spark weekly limit",
+      model: "Spark",
+      duration_mins: 10080,
+      resets_at: LATER_RESET,
+    }),
+  ],
+});
 /** An entry with no figures. */
 const bare = (over: Partial<AgentLimitsView>): AgentLimitsView => {
   const { meter: _, ...e } = figures(0, { windows: [], ...over });
@@ -360,4 +383,6 @@ export const U12: Entry[] = [
   ),
   // a per-model window's label, the model as the host names it: a Max plan's Fable row (#236)
   card("U12-44", planCardWords("{model} weekly limit"), "limits/plan-card", EVERY_WINDOW, 900),
+  // a per-model 5-hour window: a ChatGPT plan's Spark bucket
+  card("U12-45", planCardWords("{model} 5-hour limit"), "limits/plan-card", MODEL_BUCKET, 700),
 ];

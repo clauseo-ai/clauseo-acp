@@ -11,13 +11,15 @@ use crate::view::tightest;
 /// its reset; credits and the spend cap stand. An agent with no account still has hits from its
 /// shown rows (`LiveOnly` after a failed read or `MethodMissing`), so the host gets the reset time
 /// of the stopped turn; with no row and no reached limit (which only a good read sets, with the
-/// account), the answer is `None`.
+/// account), the answer is `None`. Where the kind's per-model rows do not stop the agent (Codex),
+/// they count nowhere here ([`AgentState::stop_rows`]), neither as a hit nor as a row a reached
+/// limit ends with.
 pub(crate) fn at_limit(state: &AgentState, now: Timestamp) -> Option<LimitHit> {
     if state.source == LimitSource::NotApplicable {
         return None;
     }
     let current = || {
-        state.visible_rows().iter().filter(|row| {
+        state.stop_rows().filter(|row| {
             !row.reset_passed && row.window.resets_at.is_none_or(|resets_at| resets_at > now)
         })
     };
@@ -31,7 +33,7 @@ pub(crate) fn at_limit(state: &AgentState, now: Timestamp) -> Option<LimitHit> {
         // A plan window resets with time: once every shown row is past its reset, the reached
         // limit the read gave has passed with them (#204). With no row there is nothing to time
         // it by, so it stands until the next read.
-        Some(_) if !state.visible_rows().is_empty() && current().next().is_none() => None,
+        Some(_) if state.stop_rows().next().is_some() && current().next().is_none() => None,
         Some(_) => Some(hit(tightest(current()), LimitStopReason::PlanWindow)),
         None => None,
     }

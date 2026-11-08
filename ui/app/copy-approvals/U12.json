@@ -312,5 +312,16 @@
     "at": "2026-11-03",
     "by": "Rohan",
     "note": "Rohan, via the orchestrator (#236)"
+  },
+  "U12-45": {
+    "en": "{model} 5-hour limit",
+    "hi": "{model} की 5 घंटे की सीमा",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "Shamil's track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "Shamil's track (provisional; Rohan batch review)",
+    "note": "A per-model 5-hour window, such as a ChatGPT plan's Spark bucket; U12-44's form with U12-12's length"
   }
 }

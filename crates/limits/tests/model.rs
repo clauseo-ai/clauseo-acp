@@ -48,3 +48,7 @@ mod unread_email;
 #[cfg(test)]
 #[path = "model/login_changed.rs"]
 mod login_changed;
+
+#[cfg(test)]
+#[path = "model/model_rows.rs"]
+mod model_rows;

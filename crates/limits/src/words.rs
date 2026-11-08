@@ -152,6 +152,14 @@ pub(crate) fn codex_window_label(mins: i64) -> String {
     }
 }
 
+/// The label of a Codex window that counts one model, from the limit's name and the label its
+/// length gives: "Spark 5-hour limit", "Spark weekly limit".
+pub(crate) fn codex_model_label(model: &str, window: &str) -> String {
+    let mut chars = window.chars();
+    let first = chars.next().map(|c| c.to_lowercase().to_string());
+    format!("{model} {}{}", first.unwrap_or_default(), chars.as_str())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

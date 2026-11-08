@@ -31,6 +31,9 @@ pub(crate) struct KindRules {
     pub(crate) turn_read_after_ms_no_live: i64,
     /// A live signal may add a window no read named yet (Claude's 5-hour and weekly windows).
     pub(crate) live_rows: bool,
+    /// A per-model row at its limit counts as the agent at its limit. Not for Codex, whose model
+    /// buckets (Spark) limit one model while the agent goes on with its own.
+    pub(crate) model_rows_stop: bool,
     /// The at-limit line of an account that pauses at its limit, which names the agent.
     pub(crate) pauses_words: &'static str,
 }
@@ -42,12 +45,14 @@ pub(crate) const fn kind_rules(agent: AgentKind) -> KindRules {
             turn_read_after_ms: 10 * 60 * 1000,
             turn_read_after_ms_no_live: 2 * 60 * 1000,
             live_rows: true,
+            model_rows_stop: true,
             pauses_words: at_limit_words::CLAUDE_PAUSES,
         },
         AgentKind::Codex => KindRules {
             turn_read_after_ms: 60 * 1000,
             turn_read_after_ms_no_live: 60 * 1000,
             live_rows: false,
+            model_rows_stop: false,
             pauses_words: at_limit_words::CODEX_PAUSES,
         },
     }
