@@ -63,6 +63,10 @@ mod web_urls;
 #[path = "events/triage.rs"]
 mod triage;
 
+#[cfg(test)]
+#[path = "events/tier_b_compat.rs"]
+mod tier_b_compat;
+
 use clauseo_protocol::{
     DomainEvent, ElicitationRequest, ElicitationRequested, Envelope, MAX_RAW_DEPTH,
     MAX_RAW_ENCODE_DEPTH, PromptBlock, RawPayload, SCHEMA_VERSION, StopReason, StreamId,

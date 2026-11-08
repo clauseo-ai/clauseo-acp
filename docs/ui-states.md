@@ -126,7 +126,8 @@ reported it.
 | Cancelled (by the lawyer or by send now) | `StopReason::Cancelled` | as above; a queued prompt removed before it started gets no step card, only `UserMessageStatus::Removed` |
 | Ended by a refusal: the agent cancelled the turn right after the lawyer's Don't allow (Codex), with no Stop after it | `StopReason::NotAllowed` | as cancelled; the words say the lawyer did not allow it and the answer ended there |
 | Stopped at the usage limit | `StopReason::AtLimit` | as above; the `ViewEntry::LimitStop` card in section 8 |
-| Failed | `StopReason::Failed` | `failure`: the error code (section 9); the event's detail is never shown |
+| Stopped because part of the agent tried to run outside the Safe workspace (Windows tier B, R17 PR-E) | `StopReason::LeftSafeWorkspace` | as above, with no `failure`; no popup; the lawyer's next turn is a normal launch |
+| Failed | `StopReason::Failed` | `failure`: the error code (section 9); `failure_at`: the item in the matter's folder the failure names, when it names one; the event's detail is never shown |
 | Stop reason from a newer Clauseo | `StopReason::Unknown` | as failed, without a code |
 | File added | `ChangeKind::Added` | path, size, after content id |
 | File modified | `ChangeKind::Modified` | path, size, before and after content ids |
@@ -249,7 +250,10 @@ its step card, and compare (below) lists the files between any two versions.
 | Not protected: set-up not done | `NotProtectedCause::NeedsSetUp` | offer the set-up (`HostCommand::RetryProtection`) |
 | Not protected: set-up refused | `NotProtectedCause::SetUpRefused` | the administrator prompt was declined; offer it again |
 | Not protected: set-up failed | `NotProtectedCause::SetUpFailed` | offer to try again |
-| Not protected: the pool is full | `NotProtectedCause::PoolFull` | counts: `size`, `open`, `held`, `owed`, `set_aside` |
+| Not protected: the pool is full | `NotProtectedCause::PoolFull` | counts: `size`, `open`, `held`, `owed`, `set_aside`, `needs_reset` (users only a reset frees: "Free up protected spaces"); every launch refused with `sandbox.pool_full` |
+| Not protected: blocked by a setting only IT or the installer can fix (R17 PR-E) | `NotProtectedCause::Blocked` | `reason`, the sandbox's name for the block (`logon_right`, `policy`, `admin_copy_missing`, `admin_copy_changed`, `admin_copy_unsafe`, `tool_missing`, or a newer one); no "Try again"; every launch refused with `sandbox.blocked` whatever the settings |
+| Not protected: another Windows account owns the sandbox's set-up (R17 PR-E) | `NotProtectedCause::OtherAccount` | no "Try again"; every launch refused with `sandbox.blocked` whatever the settings |
+| Not protected: a sandbox user still owns an item in the matter's folder (R17 PR-E) | `NotProtectedCause::PoolOwned` | every launch in the matter refused with `sandbox.pool_owned` |
 | Not protected: switched off | `NotProtectedCause::SwitchedOff` | `at` |
 | Not protected: a cause from a newer Clauseo | `NotProtectedCause::Unknown` | show as Not protected |
 | This computer's protection (0051) | `HostQuery::Protection` returns `QueryResult::Protection` | `tier`, `computer` (a `Protection`), `required`, `unprotected_auto_allowed`; `command.invalid` until the host builds it |
@@ -343,6 +347,10 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Sandbox set-up needed, or required by the firm and not available (0051) | `ErrorCode::SandboxSetupRequired`, `ErrorCode::SandboxRequired` | no |
 | The matter's folder is there without its Clauseo file (the locate-folder flow) | `ErrorCode::MatterFolderNotAMatter` | no |
 | Sandbox blocked by a Windows setting or security tool, such as its set-up program missing (S15) | `ErrorCode::SandboxBlocked` | no |
+| Every sandbox user of the pool is held by another matter (R17 PR-E) | `ErrorCode::SandboxPoolFull` | yes |
+| A sandbox user still owns an item in the matter's folder (R17 PR-E) | `ErrorCode::SandboxPoolOwned` | no; the item is `TurnFailed.at` |
+| The sandbox can't label a folder in the matter (R17 PR-E) | `ErrorCode::SandboxCantLabel` | no; the item is `TurnFailed.at` |
+| The sandbox's set-up is being removed (R17 PR-E) | `ErrorCode::SandboxRemoving` | yes |
 | "Allow this site" is turned off, by the firm's policy or in settings (0053) | `ErrorCode::BlocklistOverrideOff` | no |
 | "Allow this site" from a notice the host no longer keeps (0053) | `ErrorCode::BlocklistNoticeExpired` | no |
 | "Allow this site" that lasts until Clauseo closes, because Clauseo couldn't save it (0053) | `ErrorCode::BlocklistAllowNotSaved` | no |

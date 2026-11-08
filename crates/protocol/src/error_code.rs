@@ -261,6 +261,20 @@ error_codes! {
     BlocklistRevokeNotSaved = "blocklist.revoke_not_saved", retryable: false, meaning: "The \
         site is blocked again until Clauseo closes, but Clauseo couldn't save that or void the \
         saved allows, so the site may be allowed again after a restart.";
+    SandboxPoolFull = "sandbox.pool_full", retryable: true, meaning: "Every agent user of the \
+        Windows sandbox's pool on this computer is held by another matter, so no agent was \
+        started here; the same launch works once another matter frees one.";
+    SandboxPoolOwned = "sandbox.pool_owned", retryable: false, meaning: "A Windows sandbox user \
+        still owns an item in this matter's folder because handing it back failed, so no agent \
+        was started here; an administrator's reclaim, or IT, fixes it. The item is in \
+        TurnFailed's at, never in the detail.";
+    SandboxCantLabel = "sandbox.cant_label", retryable: false, meaning: "The Windows sandbox \
+        could not give a folder in this matter the label it needs (no right to change its \
+        owner), so no agent was started here; IT fixes it. The kind is in the detail, the item \
+        in TurnFailed's at.";
+    SandboxRemoving = "sandbox.removing", retryable: true, meaning: "The sandbox's set-up is \
+        being removed from this computer, so no agent was started; the same launch works once \
+        the removal ends.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

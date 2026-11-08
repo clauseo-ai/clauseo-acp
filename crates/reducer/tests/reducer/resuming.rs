@@ -269,27 +269,31 @@ fn a_prompt_sent_during_the_stop_stays_starting_and_resumes_from_the_detach() {
     }
 }
 
+/// A snapshot from before the resume cue (10) or before R17 PR-E's `TurnFailed.at` and
+/// `LeftSafeWorkspace` (11) is refolded from events.
 #[test]
-fn a_schema_10_snapshot_is_refolded() {
-    assert_eq!(REDUCER_SCHEMA_VERSION, 11);
+fn a_schema_10_or_11_snapshot_is_refolded() {
+    assert_eq!(REDUCER_SCHEMA_VERSION, 12);
     let (mut log, mut state) = created(59);
     idle_stop(&mut log, &mut state);
     send(&mut log, &mut state, "Go.");
-    let old = SnapshotRef {
-        reducer_schema: 10,
-        state: &state,
-    };
-    let read = Snapshot::from_bytes(&old.to_bytes().unwrap());
-    assert!(
-        matches!(
-            read,
-            Err(clauseo_reducer::Error::SchemaMismatch {
-                found: 10,
-                expected: REDUCER_SCHEMA_VERSION
-            })
-        ),
-        "{read:?}"
-    );
+    for found in [10, 11] {
+        let old = SnapshotRef {
+            reducer_schema: found,
+            state: &state,
+        };
+        let read = Snapshot::from_bytes(&old.to_bytes().unwrap());
+        assert!(
+            matches!(
+                read,
+                Err(clauseo_reducer::Error::SchemaMismatch {
+                    found: f,
+                    expected: REDUCER_SCHEMA_VERSION
+                }) if f == found
+            ),
+            "{read:?}"
+        );
+    }
 }
 
 #[test]

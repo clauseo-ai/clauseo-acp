@@ -2,6 +2,7 @@
 
 mod agents;
 mod closed;
+mod escapee;
 mod failures;
 mod idle;
 mod idle_busy;

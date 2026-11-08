@@ -12,7 +12,7 @@ use crate::Applied;
 use crate::change::{Anomaly, ViewChange};
 use crate::order::insert_entry;
 use crate::split::push_user_upsert;
-use crate::state::{ThreadState, TurnFiles};
+use crate::state::{ThreadState, TurnFailure, TurnFiles};
 
 /// The status while a turn runs: `NeedsYou` while the lawyer is asked, else `Running`.
 pub(super) fn running_status(state: &ThreadState) -> ThreadStatus {
@@ -183,11 +183,15 @@ pub(super) fn files_changed(state: &mut ThreadState, event: &FilesChanged, out: 
 pub(super) fn turn_failed(state: &mut ThreadState, event: &TurnFailed, out: &mut Applied) {
     if let Some(order) = state.index.steps.get(&event.turn).copied() {
         update_step(state, order, out, |step| {
-            set(&mut step.failure, Some(event.code))
+            set(&mut step.failure, Some(event.code)) | set(&mut step.failure_at, event.at.clone())
         });
         return;
     }
-    state.failures.insert(event.turn, event.code);
+    let failure = TurnFailure {
+        code: event.code,
+        at: event.at.clone(),
+    };
+    state.failures.insert(event.turn, failure);
 }
 
 /// The at-limit card, and `PausedAtLimit` when the turn is the thread's last one, even after
@@ -269,13 +273,18 @@ pub(super) fn turn_ended(
         // A turn that failed before it started: its prompt was sent, and stays.
         settle_prompt(state, event.turn, UserMessageStatus::Sent, out);
     }
+    let (failure, failure_at) = state
+        .failures
+        .remove(&event.turn)
+        .map_or((None, None), |f| (Some(f.code), f.at));
     let files = state.files.remove(&event.turn);
     let (files, skipped) = files.map_or_else(Default::default, |f| (f.files, f.skipped));
     let entry = StepEntry {
         order: seq,
         turn: event.turn,
         stop: event.stop,
-        failure: state.failures.remove(&event.turn),
+        failure,
+        failure_at,
         files,
         skipped,
         checkpoint_after: event.checkpoint_after,

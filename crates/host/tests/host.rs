@@ -289,6 +289,9 @@ mod profile_rig;
 #[path = "host/protection.rs"]
 mod protection;
 #[cfg(test)]
+#[path = "host/protection_blocked.rs"]
+mod protection_blocked;
+#[cfg(test)]
 #[path = "host/protection_edges.rs"]
 mod protection_edges;
 #[cfg(test)]

@@ -24,6 +24,8 @@ use crate::{
     EventSubscription, Host, HostConfig, HostHandle, HostJoin, ManualClock, SequentialIds,
 };
 
+mod schema_rebuild;
+
 /// A host on `dir` with `fake-agent` in its settings, the manual clock and run `run`'s ids.
 fn start(dir: &Path, run: u16) -> (HostHandle, HostJoin) {
     // Settings keep only an agent whose command is absolute, so the path is absolute on every

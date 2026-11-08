@@ -4,10 +4,11 @@
 
 use clauseo_protocol::{
     AgentId, DomainEvent, ErrorCode, MatterPath, Notice, NoticeKind, NoticeLevel, PackId,
-    PackSkipReason, PageVia, PageVisited, SearchSource, TurnFailed, WebResult, WebSearchRecorded,
+    PackSkipReason, PageVia, PageVisited, SearchSource, StopReason, TurnEnded, TurnFailed,
+    WebResult, WebSearchRecorded,
 };
 
-use crate::fixtures::{tool_call_id, turn_id};
+use crate::fixtures::{checkpoint_id, tool_call_id, turn_id};
 
 /// One `TurnFailed` of turn 3 for each later code, in the order the corpus first saw them.
 pub(super) fn failures() -> Vec<DomainEvent> {
@@ -97,15 +98,41 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::BlocklistRevokeNotSaved,
             "the data folder is read-only",
         ),
+        failed(
+            ErrorCode::SandboxPoolFull,
+            "every agent user of the sandbox's pool is held by another matter",
+        ),
+        failed_at(
+            ErrorCode::SandboxPoolOwned,
+            "a sandbox user still owns an item in this matter's folder",
+            "Pleadings/Draft.docx",
+        ),
+        failed_at(ErrorCode::SandboxCantLabel, "access_denied", "Pleadings"),
+        failed(
+            ErrorCode::SandboxRemoving,
+            "the sandbox's set-up is being removed",
+        ),
     ]
 }
 
-/// A `TurnFailed` of turn 3 with `code` and `detail`.
-fn failed(code: ErrorCode, detail: &str) -> DomainEvent {
+/// A `TurnFailed` of turn 3 with `code` and `detail` that names the item `at`.
+fn failed_at(code: ErrorCode, detail: &str, at: &str) -> DomainEvent {
     TurnFailed {
         turn: turn_id(3),
         code,
         detail: Some(detail.to_owned()),
+        at: Some(MatterPath::new(at).unwrap()),
+    }
+    .into()
+}
+
+/// A `TurnFailed` of turn 3 with `code` and `detail`.
+pub(super) fn failed(code: ErrorCode, detail: &str) -> DomainEvent {
+    TurnFailed {
+        turn: turn_id(3),
+        code,
+        detail: Some(detail.to_owned()),
+        at: None,
     }
     .into()
 }
@@ -179,6 +206,26 @@ fn skill_pack_notice(reason: PackSkipReason, words: &str) -> Notice {
 /// [`failures`], then [`case_law`], as the corpus first saw them.
 pub(super) fn failures_then_case_law() -> Vec<DomainEvent> {
     failures().into_iter().chain(case_law()).collect()
+}
+
+/// The stop reasons added after v1: `NotAllowed`, and R17 PR-E's `LeftSafeWorkspace`.
+pub(super) fn stops() -> Vec<DomainEvent> {
+    vec![
+        TurnEnded {
+            turn: turn_id(3),
+            stop: StopReason::NotAllowed,
+            usage: None,
+            checkpoint_after: Some(checkpoint_id(14)),
+        }
+        .into(),
+        TurnEnded {
+            turn: turn_id(3),
+            stop: StopReason::LeftSafeWorkspace,
+            usage: None,
+            checkpoint_after: Some(checkpoint_id(14)),
+        }
+        .into(),
+    ]
 }
 
 /// R24: a document read through the case-law connector, and the connector's search.

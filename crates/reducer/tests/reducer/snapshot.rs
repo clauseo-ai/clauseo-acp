@@ -162,6 +162,7 @@ fn mid_turn() -> (Log, StreamState) {
         turn,
         code: ErrorCode::ALL[0],
         detail: None,
+        at: None,
     };
     log.push(failed).unwrap();
     let reason = DetachReason::Closed;
