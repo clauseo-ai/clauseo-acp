@@ -4,9 +4,11 @@
 //! under that name, the runner prints one line and exits 1. Claude Code takes the variable only
 //! for a file that exists and is named `bash.exe`, so the stub needs nothing but its name.
 //!
-//! The set-up places it ([`place_stub`], given the runner it found); the refresh has no runner
-//! beside the admin copy and keeps whatever stub is there. Placing it never fails the set-up:
-//! a failure is logged. Pure: tested on every OS with the fake.
+//! The set-up and the SYSTEM refresh place it ([`place_stub`], given the runner `runner_for_stub`
+//! found: beside the set-up, else in the record's install folder); with none found the stub
+//! there stays. The install folder of a per-user install is the lawyer's to write, but the stub
+//! runs as the pool user, as the runner beside it does, so nothing gains a right. Placing it
+//! never fails the set-up: a failure is logged. Pure: tested on every OS with the fake.
 
 use std::path::Path;
 
@@ -29,7 +31,7 @@ pub fn off_sddl(group: &Sid) -> String {
 }
 
 /// Copies `runner` to `git\_off\bash.exe` under a temporary name, then renames it into place;
-/// `None` (the refresh) leaves what is there. `git` is the trees' folder when this run checked
+/// `None` (no runner found) leaves what is there. `git` is the trees' folder when this run checked
 /// it; else it is found, made when missing, and left alone when it isn't SYSTEM's (the next
 /// run with a Git clears it). Anything else in `_off` is deleted. Logs, never fails.
 pub(super) fn place_stub(
