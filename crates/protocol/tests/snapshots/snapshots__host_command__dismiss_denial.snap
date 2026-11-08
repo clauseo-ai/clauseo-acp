@@ -1,0 +1,9 @@
+---
+source: crates/protocol/tests/snapshots/host_command.rs
+expression: "HostCommand::DismissDenial { denial: denial_id(1) }"
+---
+{
+  "dismiss_denial": {
+    "denial": "01900000-0000-7000-8000-000000000001"
+  }
+}

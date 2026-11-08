@@ -13,10 +13,10 @@
 use std::fmt::{Debug, Display};
 
 use clauseo_protocol::{
-    AgentChoiceId, AgentId, BlobHash, BlobRef, BlockedSiteId, CheckpointId, CommandId,
-    CompactString, Count, DomainEvent, ElicitationId, Envelope, EventId, FileRefId, Finite,
-    FolderRefId, MatterId, MatterPath, MessageId, PermissionRequestId, RawPayload, Seq, StreamId,
-    ThreadId, Timestamp, Title, ToolCallId, TurnId,
+    AgentChoiceId, AgentId, AllowanceId, BlobHash, BlobRef, BlockedSiteId, CheckpointId, CommandId,
+    CompactString, Count, DenialId, DomainEvent, ElicitationId, Envelope, EscalationRequestId,
+    EventId, FileRefId, Finite, FolderRefId, MatterId, MatterPath, MessageId, PermissionRequestId,
+    RawPayload, Seq, StreamId, ThreadId, Timestamp, Title, ToolCallId, TurnId,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -54,6 +54,21 @@ pub fn turn_id(n: u64) -> TurnId {
 /// A `BlockedSiteId` from `v7(n)`.
 pub fn blocked_site_id(n: u64) -> BlockedSiteId {
     BlockedSiteId::new(v7(n)).unwrap()
+}
+
+/// A `DenialId` from `v7(n)`.
+pub fn denial_id(n: u64) -> DenialId {
+    DenialId::new(v7(n)).unwrap()
+}
+
+/// An `AllowanceId` from `v7(n)`.
+pub fn allowance_id(n: u64) -> AllowanceId {
+    AllowanceId::new(v7(n)).unwrap()
+}
+
+/// An `EscalationRequestId` from `v7(n)`.
+pub fn escalation_request_id(n: u64) -> EscalationRequestId {
+    EscalationRequestId::new(v7(n)).unwrap()
 }
 
 /// A `MessageId` from `v7(n)`.

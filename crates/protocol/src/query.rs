@@ -9,10 +9,10 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use crate::open_enum::open_unit_enum;
 use crate::{
     AgentId, AgentKind, AllowedSite, BlobHash, CheckpointId, ClientName, CompactString, Count,
-    Date, Error, FileChange, FileRefId, LastStop, MatterId, MatterKind, MatterPath, MatterSource,
-    MatterStatus, PackList, PackStatus, Protection, ProtectionView, QueueHoldReason,
-    RestoreRequest, SearchAnswer, SearchRequest, Seq, SettingsView, SkippedFile, StreamId,
-    ThreadId, ThreadStatus, Timestamp, TurnId, UpdateView, ViewEntry,
+    Date, Error, FileChange, FileRefId, LastStop, MatterAllowance, MatterId, MatterKind,
+    MatterPath, MatterSource, MatterStatus, PackList, PackStatus, Protection, ProtectionView,
+    QueueHoldReason, RestoreRequest, SearchAnswer, SearchRequest, Seq, SettingsView, SkippedFile,
+    StreamId, ThreadId, ThreadStatus, Timestamp, TurnId, UpdateView, ViewEntry,
 };
 
 /// Most entries one `PageEntries` returns: the size of a `Reset`'s view window (about 200 recent
@@ -197,6 +197,10 @@ pub enum HostQuery {
     /// `SettingsView::locked` says so. Answered `QueryResult::AllowedSites`.
     /// JSON: `"allowed_sites"`.
     AllowedSites,
+    /// Every matter's remembered answers to escalations (R18), allowed and refused, sorted by
+    /// matter, then as recorded. Answered `QueryResult::Allowances`.
+    /// JSON: `"list_allowances"`.
+    ListAllowances,
 }
 
 /// A query's answer.
@@ -255,6 +259,8 @@ pub enum QueryResult {
     Protection(ProtectionView),
     /// For `AllowedSites`.
     AllowedSites(Vec<AllowedSite>),
+    /// For `ListAllowances`.
+    Allowances(Vec<MatterAllowance>),
 }
 
 /// A picked folder's check, for `FolderSupport`. A struct, so later fields are additive; it

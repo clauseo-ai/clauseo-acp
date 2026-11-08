@@ -478,6 +478,7 @@ mod admit;
 mod allowed_sites;
 mod app;
 mod connectors;
+mod escalations;
 mod limits;
 mod permission;
 mod update;

@@ -64,7 +64,10 @@ macro_rules! logged_enums {
                 ConfigOptionKind(Unknown),
                 ChangeKind(Unknown),
                 RestoreScope(Unknown),
-                NoticeKind(Unknown);
+                NoticeKind(Unknown),
+                DenialKind(Unknown),
+                DenialSource(Unknown),
+                AllowTarget(Unknown);
             unit:
                 ErrorCode,
                 ToolKind,
@@ -92,7 +95,9 @@ macro_rules! logged_enums {
                 DoneBy,
                 SnoozeBy,
                 PermissionAbout,
-                PackSkipReason;
+                PackSkipReason,
+                EscalationAnswer,
+                GrantMode;
             closed: TextOrBlob, RawPayload, StreamId;
         }
     };

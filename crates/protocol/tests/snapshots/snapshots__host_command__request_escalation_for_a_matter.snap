@@ -1,0 +1,17 @@
+---
+source: crates/protocol/tests/snapshots/host_command.rs
+expression: requests
+---
+[
+  {
+    "switch_protection_off": {
+      "matter": "01900000-0000-7000-8000-000000000001"
+    }
+  },
+  {
+    "files_from_other_matter": {
+      "matter": "01900000-0000-7000-8000-000000000001",
+      "from": "01900000-0000-7000-8000-000000000003"
+    }
+  }
+]

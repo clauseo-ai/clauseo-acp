@@ -1,0 +1,10 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"denials_paused\")"
+---
+{
+  "denials_paused": {
+    "turn": "01900000-0000-7000-8000-000000000003",
+    "refused": 3
+  }
+}

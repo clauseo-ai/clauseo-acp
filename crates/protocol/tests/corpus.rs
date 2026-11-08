@@ -2,11 +2,11 @@
 //! at `SCHEMA_VERSION` 1 that hold every kind and every variant of every open enum then known,
 //! data and unit alike, in JSON (`events.jsonl`) and in `MessagePack` (`events.msgpack`). A kind
 //! added after v1 brings its own frozen entry under `corpus/added/`, listed in
-//! [`ADDED_AFTER_V1`]; the ignored test `write_the_added_pairs` writes those files into
-//! `target/` from `support/examples.rs`, for the author to move in. Every entry must keep
-//! decoding with the current types, so a new required field in any variant, a renamed field or a
-//! removed kind fails here. Nothing writes into `corpus/`; the files' fingerprints are pinned
-//! below, so an edit to them shows up as a change to this test.
+//! [`ADDED_AFTER_V1`] or, from R18 on, [`ADDED_IN_R18`]; the ignored test `write_the_added_pairs`
+//! writes those files into `target/` from `support/examples.rs`, for the author to move in. Every
+//! entry must keep decoding with the current types, so a new required field in any variant, a
+//! renamed field or a removed kind fails here. Nothing writes into `corpus/`; the files'
+//! fingerprints are pinned below, so an edit to them shows up as a change to this test.
 
 #![forbid(clippy::disallowed_methods, clippy::disallowed_types)]
 
@@ -42,7 +42,10 @@ use helpers::{json_entries, json_lines, kinds, missing, packed_entries, table_op
 
 #[path = "corpus/added_rows.rs"]
 mod added_rows;
+#[path = "corpus/added_rows_r18.rs"]
+mod added_rows_r18;
 use added_rows::ADDED_AFTER_V1;
+use added_rows_r18::ADDED_IN_R18;
 
 /// A frozen set of log entries: its name under `corpus/`, its JSON (one `Envelope` per line,
 /// as `serde_json::to_string` wrote it), its `MessagePack` (one array of the same entries, as
@@ -64,10 +67,11 @@ const V1: Corpus = (
     (34_613, 0x383c_376f_5604_7c2e),
 );
 
-/// V1, then every file in [`ADDED_AFTER_V1`].
+/// V1, then every file in [`ADDED_AFTER_V1`] and [`ADDED_IN_R18`].
 fn every_corpus() -> Vec<Corpus> {
     [V1].into_iter()
         .chain(ADDED_AFTER_V1.iter().copied())
+        .chain(ADDED_IN_R18.iter().copied())
         .collect()
 }
 
@@ -289,7 +293,7 @@ fn the_known_kinds_are_v1_and_the_added_ones() {
     let removed: Vec<&String> = v1.difference(&known).collect();
     assert!(removed.is_empty(), "v1 kinds no longer known: {removed:?}");
     let mut held = v1;
-    for added in ADDED_AFTER_V1 {
+    for added in ADDED_AFTER_V1.iter().chain(ADDED_IN_R18) {
         let name = added
             .0
             .strip_prefix("added/")
@@ -307,7 +311,7 @@ fn the_known_kinds_are_v1_and_the_added_ones() {
     assert!(
         unfrozen.is_empty(),
         "kinds with no frozen entry: {unfrozen:?}; add corpus/added/<kind>.jsonl and .msgpack \
-         and list them in ADDED_AFTER_V1 (see corpus/v1/README.md)"
+         and list them in ADDED_IN_R18 (see corpus/v1/README.md)"
     );
 }
 

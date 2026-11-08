@@ -355,6 +355,9 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | "Allow this site" from a notice the host no longer keeps (0053) | `ErrorCode::BlocklistNoticeExpired` | no |
 | "Allow this site" that lasts until Clauseo closes, because Clauseo couldn't save it (0053) | `ErrorCode::BlocklistAllowNotSaved` | no |
 | Removing an allowed site that is blocked again until Clauseo closes, because Clauseo couldn't save that (0053) | `ErrorCode::BlocklistRevokeNotSaved` | no |
+| "Allow access" or "Allow this site" on a card no longer waiting (R18) | `ErrorCode::EscalationNotPending` | no |
+| "Allow access" on what the host never widens, by its rules or the firm's policy (R18) | `ErrorCode::EscalationNotOfferable` | no |
+| "Switch protection off" that the firm's settings forbid (R18) | `ErrorCode::SandboxUnprotectedAutoForbidden` | no |
 | A code from a newer Clauseo | `ErrorCode::Unknown` | no |
 
 A failed turn shows its code from `turn_failed` on the step card (section 3).
@@ -374,7 +377,7 @@ These arrive later as additive events and commands.
 | Protection status: protected | planned: the `sandbox` crate | the protection level, what the agent can reach |
 | Protection status: Not protected | planned: the `sandbox` crate | the matter runs without the sandbox; persistent on the matter |
 | One-time explanation of Not protected | planned: the `sandbox` crate | shown once per machine |
-| Denial card: a blocked web domain | planned: the `sandbox` crate | the domain; allowing it |
-| Denial card: a blocked folder | planned: the `sandbox` crate | the path; allowing it restarts the agent and resumes the thread |
+| Denial card: a blocked web domain | planned: R18's cards; `ViewEntry::Denial` (`DenialKind::Site`) and `DenialState` exist | the domain; allowing it (`RequestEscalation`, a native dialog) |
+| Denial card: a blocked folder or file | planned: R18's cards; `ViewEntry::Denial` (`DenialKind::Folder`, `DenialKind::File`) and `DenialState` exist | the path; allowing it restarts the agent (`HeaderEntry.restarting_since`) and resumes the thread |
 | Agent download progress | planned: the `agents` crate | percent, failure |
 | Resuming after an idle stop | planned: the `agents` crate | the thread; `ThreadStatus::IdleStopped` is section 1 |

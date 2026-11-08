@@ -1,0 +1,9 @@
+---
+source: crates/protocol/tests/snapshots/host_command.rs
+expression: "HostCommand::SwitchProtectionOn { matter: matter_id(1), }"
+---
+{
+  "switch_protection_on": {
+    "matter": "01900000-0000-7000-8000-000000000001"
+  }
+}

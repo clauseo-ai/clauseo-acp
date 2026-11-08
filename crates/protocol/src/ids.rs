@@ -164,6 +164,23 @@ uuid_id! {
     pub struct BlockedSiteId(v7);
 }
 
+uuid_id! {
+    /// One refused path or site in one thread (R18): the `DenialRecorded` that logs it, its
+    /// card and `DismissDenial`. The host re-logs the same id with a higher `count` when the
+    /// same refusal comes again in the turn.
+    pub struct DenialId(v7);
+}
+uuid_id! {
+    /// One remembered answer of a matter (R18): a folder, a file or a site allowed or refused
+    /// for the matter, `AllowanceRecorded` to `AllowanceForgotten`.
+    pub struct AllowanceId(v7);
+}
+uuid_id! {
+    /// One escalation the host asked about through a native dialog (R18), minted when it opens
+    /// the dialog; `EscalationAnswered` names it.
+    pub struct EscalationRequestId(v7);
+}
+
 /// A 32-byte BLAKE3 digest naming a blob. A human-readable format (JSON) writes its text form, 64
 /// lowercase hex characters, and every other format (`MessagePack`) its 32 bytes, so the stored
 /// form is 32 bytes and a JSON copy stays readable. Each format decodes only its own form.

@@ -1,0 +1,11 @@
+---
+source: crates/protocol/tests/snapshots/host_command.rs
+expression: "HostCommand::RequestEscalation\n{ request: EscalationRequest::Denial(denial_id(1)), }"
+---
+{
+  "request_escalation": {
+    "request": {
+      "denial": "01900000-0000-7000-8000-000000000001"
+    }
+  }
+}

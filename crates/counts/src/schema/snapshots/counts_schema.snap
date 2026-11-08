@@ -1520,7 +1520,10 @@ expression: counts_schema()
         "sandbox.pool_full",
         "sandbox.pool_owned",
         "sandbox.cant_label",
-        "sandbox.removing"
+        "sandbox.removing",
+        "escalation.not_pending",
+        "escalation.not_offerable",
+        "sandbox.unprotected_auto_forbidden"
       ],
       "type": "string"
     },

@@ -28,6 +28,8 @@ use crate::fixtures::{
     turn_id,
 };
 
+#[path = "examples/denial.rs"]
+mod denial;
 #[path = "examples/later.rs"]
 mod later;
 #[path = "examples/session.rs"]
@@ -216,6 +218,7 @@ pub fn later_variants() -> Vec<DomainEvent> {
     .chain(later::stops())
     .chain(setup::turns())
     .chain(later::notices())
+    .chain(denial::variants())
     .collect()
 }
 
@@ -226,7 +229,9 @@ pub fn every_event() -> Vec<DomainEvent> {
         streaming_events(),
         session::session_events(),
         turn_end_events(),
+        denial::denial_events(),
         matter_events(),
+        denial::allowance_events(),
     ]
     .concat()
 }

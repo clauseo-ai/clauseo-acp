@@ -160,6 +160,13 @@ export const HI = {
     "Clauseo के बंद होने तक इस वेबसाइट को अनुमति है। Clauseo यह बदलाव सहेज नहीं सका, इसलिए अगली बार Clauseo खुलने पर यह फिर से अवरुद्ध होगी।",
   "This site is blocked again until Clauseo closes. Clauseo couldn't save the change, so it may be allowed again next time Clauseo opens.":
     "Clauseo के बंद होने तक यह वेबसाइट फिर से अवरुद्ध है। Clauseo यह बदलाव सहेज नहीं सका, इसलिए अगली बार Clauseo खुलने पर इसे फिर से अनुमति मिल सकती है।",
+  // provisional (R18 PR 1, words from the task)
+  "That request isn't waiting any more. If Clauseo still needs it, it will ask again.":
+    "वह अनुरोध अब प्रतीक्षा में नहीं है। अगर Clauseo को अब भी इसकी ज़रूरत होगी, तो वह फिर से पूछेगा।",
+  "This can't be allowed from here. Your firm's settings or the Safe workspace keep it closed.":
+    "इसकी अनुमति यहाँ से नहीं दी जा सकती। आपकी फ़र्म की सेटिंग्स या सुरक्षित कार्यक्षेत्र इसे बंद रखते हैं।",
+  "Your firm doesn't allow Clauseo to work without the Safe workspace on this computer.":
+    "आपकी फ़र्म इस कंप्यूटर पर Clauseo को सुरक्षित कार्यक्षेत्र के बिना काम करने की अनुमति नहीं देती।",
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

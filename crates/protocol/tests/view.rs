@@ -483,6 +483,9 @@ fn a_snapshot_header_is_only_a_header_entry() {
         name: "Smith v Jones".to_owned(),
         kind: MatterKind::Folder,
         import: None,
+        allowances: Vec::new(),
+        read_grants: Vec::new(),
+        switched_off: false,
     };
     let json = serde_json::to_string(&ViewEntry::MatterHeader(matter.clone())).unwrap();
     let decoded: ViewWindow = serde_json::from_str(&snapshot(&json)).unwrap();

@@ -23,14 +23,16 @@ use crate::RawPayload;
 use crate::open_enum::{UnknownKind, serialize_one_key};
 
 pub use payload::{
-    AgentNamed, AgentSessionAttached, AgentSessionDetached, CheckpointRecorded, CommandsAvailable,
-    CompactionChanged, ConfigOptionsReplaced, ContentAppended, ElicitationExpired,
-    ElicitationRequested, ElicitationResolved, FilesChanged, MatterCreated, MatterRelocated,
-    ModeChanged, Notice, OutsideEdits, PageVisited, PermissionExpired, PermissionRequested,
-    PermissionResolved, PlanReplaced, QueuedPromptEdited, SteerResolved, StepUndone, TextAppended,
-    ThreadArchived, ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed, ToolCallStarted,
-    ToolCallUpdated, TurnEnded, TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit,
-    UsageUpdated, UserMessage, VersionRestored, WebResult, WebSearchRecorded,
+    AgentNamed, AgentSessionAttached, AgentSessionDetached, AllowanceForgotten, AllowanceRecorded,
+    CheckpointRecorded, CommandsAvailable, CompactionChanged, ConfigOptionsReplaced,
+    ContentAppended, DenialDismissed, DenialRecorded, DenialsPaused, ElicitationExpired,
+    ElicitationRequested, ElicitationResolved, EscalationAnswered, FilesChanged, MatterCreated,
+    MatterRelocated, ModeChanged, Notice, OutsideEdits, PageVisited, PermissionExpired,
+    PermissionRequested, PermissionResolved, PlanReplaced, ProtectionSwitched, QueuedPromptEdited,
+    ReadGrantForgotten, ReadGrantedTo, SteerResolved, StepUndone, TextAppended, ThreadArchived,
+    ThreadCreated, ThreadDone, ThreadRenamed, ThreadSnoozed, ToolCallStarted, ToolCallUpdated,
+    TurnEnded, TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit, UsageUpdated, UserMessage,
+    VersionRestored, WebResult, WebSearchRecorded,
 };
 
 /// `true` for the `matter` stream, `false` for `thread`; any other word does not compile.
@@ -268,6 +270,14 @@ domain_events! {
     TurnEnded(TurnEnded) = "turn_ended", thread;
     /// A step was undone (host, matters).
     StepUndone(StepUndone) = "step_undone", thread;
+    /// The jail or the egress proxy refused a path or a site (host; R18).
+    DenialRecorded(Box<DenialRecorded>) = "denial_recorded", thread;
+    /// The lawyer answered an escalation's native dialog (host; R18).
+    EscalationAnswered(EscalationAnswered) = "escalation_answered", thread;
+    /// The lawyer dismissed a denial's card (host; R18).
+    DenialDismissed(DenialDismissed) = "denial_dismissed", thread;
+    /// Too many refusals: the host cancelled the turn (host; R18).
+    DenialsPaused(DenialsPaused) = "denials_paused", thread;
     /// A matter was created (matter stream; host).
     MatterCreated(MatterCreated) = "matter_created", matter;
     /// A checkpoint was recorded (matter stream; matters, through host).
@@ -278,6 +288,16 @@ domain_events! {
     VersionRestored(VersionRestored) = "version_restored", matter;
     /// The matter's folder was located after it moved (matter stream; host, matters).
     MatterRelocated(MatterRelocated) = "matter_relocated", matter;
+    /// The matter remembers an answer (matter stream; host; R18).
+    AllowanceRecorded(AllowanceRecorded) = "allowance_recorded", matter;
+    /// The matter forgot a remembered answer (matter stream; host; R18).
+    AllowanceForgotten(AllowanceForgotten) = "allowance_forgotten", matter;
+    /// Another matter's agents may read some of this matter's files (matter stream; host; R18).
+    ReadGrantedTo(ReadGrantedTo) = "read_granted_to", matter;
+    /// A read grant to another matter ended (matter stream; host; R18).
+    ReadGrantForgotten(ReadGrantForgotten) = "read_grant_forgotten", matter;
+    /// The matter's protection was switched off or on (matter stream; host; R18).
+    ProtectionSwitched(ProtectionSwitched) = "protection_switched", matter;
 }
 
 // The boxed variants also convert from the bare payload, so a caller never boxes by hand.
@@ -294,6 +314,7 @@ macro_rules! from_unboxed {
 }
 
 from_unboxed!(
+    DenialRecorded,
     ContentAppended,
     ToolCallStarted,
     ToolCallUpdated,

@@ -67,6 +67,10 @@ mod triage;
 #[path = "events/tier_b_compat.rs"]
 mod tier_b_compat;
 
+#[cfg(test)]
+#[path = "events/r18_compat.rs"]
+mod r18_compat;
+
 use clauseo_protocol::{
     DomainEvent, ElicitationRequest, ElicitationRequested, Envelope, MAX_RAW_DEPTH,
     MAX_RAW_ENCODE_DEPTH, PromptBlock, RawPayload, SCHEMA_VERSION, StopReason, StreamId,

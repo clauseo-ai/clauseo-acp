@@ -1,0 +1,10 @@
+---
+source: crates/protocol/tests/snapshots/host_command.rs
+expression: "HostCommand::ForgetAllowance\n{ matter: matter_id(1), allowance: allowance_id(1), }"
+---
+{
+  "forget_allowance": {
+    "matter": "01900000-0000-7000-8000-000000000001",
+    "allowance": "01900000-0000-7000-8000-000000000001"
+  }
+}

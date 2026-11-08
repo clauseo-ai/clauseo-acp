@@ -63,6 +63,10 @@ mod protection;
 #[path = "commands/allowed_sites.rs"]
 mod allowed_sites;
 
+#[cfg(test)]
+#[path = "commands/escalations.rs"]
+mod escalations;
+
 use std::str::FromStr;
 
 use clauseo_protocol::{

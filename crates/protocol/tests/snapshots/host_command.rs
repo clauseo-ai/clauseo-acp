@@ -144,6 +144,17 @@ golden! { HostCommand::name_of {
         scope: AllowScope::Matter,
         matter: Some(matter_id(1)),
     };
+    RequestEscalation => request_escalation: HostCommand::RequestEscalation {
+        request: EscalationRequest::Denial(denial_id(1)),
+    };
+    SwitchProtectionOn => switch_protection_on: HostCommand::SwitchProtectionOn {
+        matter: matter_id(1),
+    };
+    ForgetAllowance => forget_allowance: HostCommand::ForgetAllowance {
+        matter: matter_id(1),
+        allowance: allowance_id(1),
+    };
+    DismissDenial => dismiss_denial: HostCommand::DismissDenial { denial: denial_id(1) };
     // Each `ConnectorCommand` has its own golden in `snapshots/connectors.rs`.
     Connector => connector: HostCommand::Connector(super::connectors::add_credits());
 } }
@@ -157,6 +168,22 @@ fn refresh_limits_every_agent() {
     };
     snapshot!("refresh_limits_every_agent", command);
     round_trips(&command);
+}
+
+/// `RequestEscalation`'s two matter-level requests.
+#[test]
+fn request_escalation_for_a_matter() {
+    let requests = [
+        EscalationRequest::SwitchProtectionOff {
+            matter: matter_id(1),
+        },
+        EscalationRequest::FilesFromOtherMatter {
+            matter: matter_id(1),
+            from: matter_id(3),
+        },
+    ];
+    snapshot!("request_escalation_for_a_matter", requests);
+    round_trips(&requests);
 }
 
 /// Each `RefreshWhy` value, in order.

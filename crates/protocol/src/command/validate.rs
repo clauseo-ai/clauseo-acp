@@ -9,8 +9,8 @@ use crate::title::shows_something;
 #[cfg(doc)]
 use crate::{AgentChoiceId, DeliveryRequest, check_display_title};
 use crate::{
-    AllowScope, CommandId, Delivery, ElicitationResponse, Error, FileChoice, FileDecision,
-    MatterPath, PromptBlock, RawPayload, RestoreRequest, Title, UpdateMode,
+    AllowScope, CommandId, Delivery, ElicitationResponse, Error, EscalationRequest, FileChoice,
+    FileDecision, MatterPath, PromptBlock, RawPayload, RestoreRequest, Title, UpdateMode,
     is_windows_reserved_name,
 };
 
@@ -230,6 +230,10 @@ impl HostCommand {
             Self::AllowBlockedSite { .. } | Self::RevokeAllowedSite { .. } => {
                 validate_allowed_sites(self)
             }
+            Self::RequestEscalation { .. }
+            | Self::SwitchProtectionOn { .. }
+            | Self::ForgetAllowance { .. }
+            | Self::DismissDenial { .. } => validate_escalations(self),
             Self::SetUpdateMode { mode } => check_update_mode(*mode),
             // Ids by shape; whether the connector or pack is known, live or added is state.
             Self::Connector(command) => command.check(),
@@ -278,6 +282,23 @@ fn validate_allowed_sites(command: &HostCommand) -> Result<(), Error> {
     } = command
     {
         return check_revoke(host, *scope, matter.is_some());
+    }
+    Ok(())
+}
+
+/// R18's four commands: ids by their types, and whether a denial is pending, a matter's
+/// protection may be switched off or an allowance exists is state. Only `FilesFromOtherMatter`
+/// has a rule here: the other matter is another matter.
+fn validate_escalations(command: &HostCommand) -> Result<(), Error> {
+    if let HostCommand::RequestEscalation {
+        request: EscalationRequest::FilesFromOtherMatter { matter, from },
+    } = command
+        && matter == from
+    {
+        return Err(Error::Format {
+            kind: "RequestEscalation",
+            rule: "files from another matter name a matter other than the one that reads",
+        });
     }
     Ok(())
 }

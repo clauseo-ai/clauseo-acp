@@ -7,7 +7,7 @@ use clauseo_protocol::{
 };
 
 use super::queue::{mark_prompt, mark_put_back, settle_prompt};
-use super::{insert_marker, insert_new, not_yet, set, set_status, set_vec, update_header};
+use super::{insert_marker, insert_new, set, set_status, set_vec, update_header};
 use crate::Applied;
 use crate::change::{Anomaly, ViewChange};
 use crate::order::insert_entry;
@@ -36,7 +36,9 @@ pub(super) fn settled_status(state: &ThreadState) -> ThreadStatus {
 
 /// The agent's session detached at `ts`. A thread idle-stopped while its next prompt waited
 /// for the agent (the prompt came during the stop, so the thread is `Starting`) stays
-/// `Starting`, and its resume starts now: `resuming_since` is the detach's `ts`.
+/// `Starting`, and its resume starts now: `resuming_since` is the detach's `ts`. A restart
+/// sets `restarting_since` and changes nothing else; any other detach expires pending denial
+/// cards and ends a restart.
 pub(super) fn detached(
     state: &mut ThreadState,
     reason: &DetachReason,
@@ -47,11 +49,20 @@ pub(super) fn detached(
         DetachReason::Exited { .. } | DetachReason::Unknown { .. } => ThreadStatus::AgentExited,
         DetachReason::Closed => ThreadStatus::Idle,
         DetachReason::IdleStopped => ThreadStatus::IdleStopped,
+        // The host stops the agent to start it again with a wider policy (R18): the status,
+        // a running turn and its cards stay, and the header shows the restart until the next
+        // attach.
         DetachReason::Restarting => {
-            not_yet(out, "agent_session_detached");
+            update_header(state, "agent_session_detached", out, |h| {
+                h.restarting_since.is_none() && set(&mut h.restarting_since, Some(ts))
+            });
             return;
         }
     };
+    super::denials::expire_pending(state, out);
+    update_header(state, "agent_session_detached", out, |h| {
+        set(&mut h.restarting_since, None)
+    });
     if state.running.is_some() {
         state.after_turn = Some(status);
         return;

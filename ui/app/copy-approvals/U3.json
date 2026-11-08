@@ -899,5 +899,38 @@
     "at": "2026-11-08",
     "by": "app track (provisional; Rohan batch review)",
     "note": "The removal of an allow that lasts until Clauseo closes, because Clauseo couldn't save it (ADR 0053)"
+  },
+  "U3-err-escalation.not_pending": {
+    "en": "That request isn't waiting any more. If Clauseo still needs it, it will ask again.",
+    "hi": "वह अनुरोध अब प्रतीक्षा में नहीं है। अगर Clauseo को अब भी इसकी ज़रूरत होगी, तो वह फिर से पूछेगा।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "\"Allow access\" or \"Allow this site\" on a card that is no longer waiting (R18)"
+  },
+  "U3-err-escalation.not_offerable": {
+    "en": "This can't be allowed from here. Your firm's settings or the Safe workspace keep it closed.",
+    "hi": "इसकी अनुमति यहाँ से नहीं दी जा सकती। आपकी फ़र्म की सेटिंग्स या सुरक्षित कार्यक्षेत्र इसे बंद रखते हैं।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "\"Allow access\" on something Clauseo never opens up, by its rules or the firm's policy (R18)"
+  },
+  "U3-err-sandbox.unprotected_auto_forbidden": {
+    "en": "Your firm doesn't allow Clauseo to work without the Safe workspace on this computer.",
+    "hi": "आपकी फ़र्म इस कंप्यूटर पर Clauseo को सुरक्षित कार्यक्षेत्र के बिना काम करने की अनुमति नहीं देती।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "\"Switch protection off\" that the firm's settings forbid (R18)"
   }
 }

@@ -219,6 +219,15 @@ impl Layer {
             | DomainEvent::CheckpointRecorded(_)
             | DomainEvent::OutsideEdits(_)
             | DomainEvent::VersionRestored(_)
+            | DomainEvent::DenialRecorded(_)
+            | DomainEvent::EscalationAnswered(_)
+            | DomainEvent::DenialDismissed(_)
+            | DomainEvent::DenialsPaused(_)
+            | DomainEvent::AllowanceRecorded(_)
+            | DomainEvent::AllowanceForgotten(_)
+            | DomainEvent::ReadGrantedTo(_)
+            | DomainEvent::ReadGrantForgotten(_)
+            | DomainEvent::ProtectionSwitched(_)
             | DomainEvent::Unknown { .. } => {}
         }
     }

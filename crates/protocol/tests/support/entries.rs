@@ -9,20 +9,22 @@
 //! ```
 
 use clauseo_protocol::{
-    AgentContentEntry, AgentTextEntry, BackgroundMark, CheckpointKind, ContentBlock, ContextUsage,
-    Deliverable, Delivery, ElicitationEntry, ElicitationRequest, ElicitationState, ExpiryReason,
-    HeaderEntry, ImportSummary, LimitStopEntry, LimitStopReason, MarkerEntry, MarkerKind,
-    MatterHeaderEntry, MatterKind, NoticeEntry, NoticeKind, NoticeLevel, PageVia, PermissionAbout,
-    PermissionChoice, PermissionEntry, PermissionKind, PermissionOption, PermissionState,
-    Principal, QueueHoldReason, StepEntry, StopReason, TextKind, TextOrBlob, ThreadStatus,
-    Timestamp, ToolCallEntry, ToolCallPage, ToolCallSearch, ToolCallWeb, UserMessageEntry,
-    UserMessageStatus, VersionEntry, ViewEntry, WebResult,
+    AgentContentEntry, AgentTextEntry, AllowTarget, BackgroundMark, CheckpointKind, ContentBlock,
+    ContextUsage, Deliverable, Delivery, DenialEntry, DenialKind, DenialSource, DenialState,
+    DenialsPausedEntry, ElicitationEntry, ElicitationRequest, ElicitationState, ExpiryReason,
+    GrantMode, HeaderEntry, ImportSummary, LimitStopEntry, LimitStopReason, MarkerEntry,
+    MarkerKind, MatterAllowance, MatterHeaderEntry, MatterKind, NoticeEntry, NoticeKind,
+    NoticeLevel, PageVia, PermissionAbout, PermissionChoice, PermissionEntry, PermissionKind,
+    PermissionOption, PermissionState, Principal, QueueHoldReason, ReadGrantedTo, StepEntry,
+    StopReason, TextKind, TextOrBlob, ThreadStatus, Timestamp, ToolCallEntry, ToolCallPage,
+    ToolCallSearch, ToolCallWeb, UserMessageEntry, UserMessageStatus, VersionEntry, ViewEntry,
+    WebResult,
 };
 
 use crate::examples::{file_changes, tool_call_started};
 use crate::fixtures::{
-    agent, checkpoint_id, count, elicitation_id, event_id, matter_id, message_id, path,
-    permission_request_id, raw, seq, short, thread_id, turn_id,
+    agent, allowance_id, checkpoint_id, count, denial_id, elicitation_id, event_id, matter_id,
+    message_id, path, permission_request_id, raw, seq, short, thread_id, turn_id,
 };
 
 /// One example of every `ViewEntry` kind, in declaration order.
@@ -31,6 +33,7 @@ pub fn every_entry() -> Vec<ViewEntry> {
         thread_entries(),
         approval_entries(),
         turn_entries(),
+        denial_entries(),
         matter_entries(),
     ]
     .concat()
@@ -47,6 +50,7 @@ pub fn header_entry() -> HeaderEntry {
         agent_name: None,
         status: ThreadStatus::Idle,
         resuming_since: None,
+        restarting_since: None,
         queue_held: true,
         queue_held_reason: Some(QueueHoldReason::Paused),
         steer_joins_turn: true,
@@ -226,7 +230,34 @@ fn turn_entries() -> Vec<ViewEntry> {
     ]
 }
 
-/// A matter's header and one version.
+/// A refusal still waiting on its card, and a paused answer (R18).
+fn denial_entries() -> Vec<ViewEntry> {
+    vec![
+        ViewEntry::Denial(DenialEntry {
+            order: seq(12),
+            denial: denial_id(1),
+            turn: Some(turn_id(3)),
+            kind: DenialKind::Folder {
+                path: "/Users/a/Deals".to_owned(),
+                other_matter: None,
+            },
+            source: DenialSource::Sandbox,
+            state: DenialState::Pending,
+            answer: None,
+            count: 2,
+            ts: Timestamp::new(1_760_000_007_000).unwrap(),
+        }),
+        ViewEntry::DenialsPaused(DenialsPausedEntry {
+            order: seq(13),
+            event: event_id(23),
+            turn: turn_id(3),
+            refused: 3,
+            ts: Timestamp::new(1_760_000_008_000).unwrap(),
+        }),
+    ]
+}
+
+/// A matter's header, with a remembered answer and a read grant, and one version.
 fn matter_entries() -> Vec<ViewEntry> {
     vec![
         ViewEntry::MatterHeader(MatterHeaderEntry {
@@ -239,6 +270,22 @@ fn matter_entries() -> Vec<ViewEntry> {
                 bytes: count(4_000_000),
                 cloud_only: 1,
             }),
+            allowances: vec![MatterAllowance {
+                matter: matter_id(1),
+                allowance: allowance_id(1),
+                target: AllowTarget::Site {
+                    host: "example.com".to_owned(),
+                },
+                mode: GrantMode::ReadOnly,
+                allowed: true,
+                at: Timestamp::new(1_760_000_009_000).unwrap(),
+            }],
+            read_grants: vec![ReadGrantedTo {
+                by_matter: matter_id(3),
+                by_name: "Jones estate".to_owned(),
+                allowance: allowance_id(2),
+            }],
+            switched_off: false,
         }),
         ViewEntry::Version(VersionEntry {
             order: seq(2),

@@ -142,8 +142,7 @@ pub(super) fn query(
         }
         HostQuery::GetDefaultLocation => default_location(actor, reply),
         HostQuery::GetSettings => {
-            let view = super::settings::view(actor);
-            let _gone = reply.send(Ok(QueryResult::Settings(view)));
+            let _gone = reply.send(Ok(QueryResult::Settings(super::settings::view(actor))));
         }
         HostQuery::GetUpdate => super::update::answer(actor, reply),
         HostQuery::ListSkillPacks => skill_packs::list(actor, reply),
@@ -153,6 +152,7 @@ pub(super) fn query(
             let _gone = reply.send(Ok(QueryResult::Protection(view)));
         }
         HostQuery::AllowedSites => super::allowed::list(actor, reply),
+        HostQuery::ListAllowances => no_allowances(reply),
         HostQuery::ListPapers { matter } => {
             if let Err(error) = actor.check_matter(matter) {
                 let _gone = reply.send(Err(error));
@@ -359,4 +359,9 @@ pub(super) fn own_versions(
         }
     }
     Ok(())
+}
+
+/// R18's remembered answers: none is recorded until its PR 3, so the list is empty.
+fn no_allowances(reply: Reply<QueryResult>) {
+    let _gone = reply.send(Ok(QueryResult::Allowances(Vec::new())));
 }
