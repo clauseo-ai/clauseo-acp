@@ -29,9 +29,9 @@ impl Reach {
     /// Where `path` (absolute) leads, when the guard may stat, resolve or open it: the walked
     /// path, which the guard uses from then on and never resolves the agent's text again
     /// ([`touchable`]), and opens only with no link followed
-    /// ([`crate::network_paths::open_no_follow`]). `None` for one it may not touch, and for one longer than
-    /// [`MAX_RESOLVED`] bytes, which is not walked (its time grows with its length) and so is
-    /// judged by its text alone.
+    /// ([`crate::network_paths::open_no_follow`]). `None` for one it may not touch, and for one
+    /// longer than [`MAX_RESOLVED`] bytes, which is not walked (its time grows with its length)
+    /// and so is judged by its text alone.
     pub(super) fn walked(&self, path: &Path) -> Option<WalkedPath> {
         self.walked_on(path, &Disk::resolved(&self.net))
     }

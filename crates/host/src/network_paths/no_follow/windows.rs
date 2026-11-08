@@ -225,6 +225,47 @@ impl Handle {
     /// The listing entry `name` of this folder, read on a fresh handle to it (a handle's
     /// listing keeps the pattern of its first query): nothing opened but the folder itself.
     fn listed(&self, name: &OsStr) -> io::Result<EntryInfo> {
+        match self.listed_by_query(name) {
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+                self.attributes_by_open(name)
+            }
+            other => other,
+        }
+    }
+
+    /// [`Self::listed`] for a folder this user may pass through but not list (only a stat
+    /// needed that before): the entry opened as itself (`FILE_OPEN_REPARSE_POINT`, attributes
+    /// only, never followed) and its attributes and tag read from that handle. A local path under
+    /// such a folder stays usable.
+    fn attributes_by_open(&self, name: &OsStr) -> io::Result<EntryInfo> {
+        let wide = wide_name(name)?;
+        let (rights, share, options) = rights(Access::Look);
+        let opened = nt_open(Some(&self.0), &wide, rights, share, options)?;
+        let mut info = FILE_ATTRIBUTE_TAG_INFO::default();
+        let size = u32::try_from(size_of::<FILE_ATTRIBUTE_TAG_INFO>()).unwrap_or(0);
+        // SAFETY: `opened` is open; `info` is a FILE_ATTRIBUTE_TAG_INFO of `size` bytes.
+        unsafe {
+            GetFileInformationByHandleEx(
+                HANDLE(opened.as_raw_handle()),
+                FileAttributeTagInfo,
+                (&raw mut info).cast(),
+                size,
+            )
+        }
+        .map_err(|error| win_error(&error))?;
+        Ok(EntryInfo {
+            attributes: info.FileAttributes,
+            tag: if info.FileAttributes & REPARSE_POINT == 0 {
+                0
+            } else {
+                info.ReparseTag
+            },
+            name: wide,
+        })
+    }
+
+    /// The entry `name` from this folder's listing, filtered to that one name.
+    fn listed_by_query(&self, name: &OsStr) -> io::Result<EntryInfo> {
         let wide = wide_name(name)?;
         let (list, share, folder) = rights(Access::List);
         let fresh = nt_open(Some(&self.0), &[], list, share, folder)?;
