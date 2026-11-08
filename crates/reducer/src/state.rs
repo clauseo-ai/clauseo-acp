@@ -122,6 +122,9 @@ pub struct ThreadState {
     pub(crate) running: Option<TurnId>,
     /// The status a detach during the running turn gives once the turn ends.
     pub(crate) after_turn: Option<ThreadStatus>,
+    /// The turn a `Restarting` detach restarts (the running one, else the one launching), while
+    /// the header shows the restart: only its `TurnFailed` or `TurnEnded` ends the restart.
+    pub(crate) restarting: Option<TurnId>,
     /// `FilesChanged` of turns that have not ended.
     pub(crate) files: BTreeMap<TurnId, TurnFiles>,
     /// `TurnFailed` codes (and items) of turns that have not ended.
@@ -140,6 +143,7 @@ impl ThreadState {
             turn: None,
             running: None,
             after_turn: None,
+            restarting: None,
             files: BTreeMap::new(),
             failures: BTreeMap::new(),
             index: Index::default(),

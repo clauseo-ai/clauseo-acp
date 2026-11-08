@@ -53,6 +53,13 @@ pub(super) fn detached(
         // a running turn and its cards stay, and the header shows the restart until the next
         // attach.
         DetachReason::Restarting => {
+            if state
+                .header
+                .as_ref()
+                .is_some_and(|h| h.restarting_since.is_none())
+            {
+                state.restarting = super::denials::restarted_turn(state);
+            }
             update_header(state, "agent_session_detached", out, |h| {
                 h.restarting_since.is_none() && set(&mut h.restarting_since, Some(ts))
             });
@@ -60,6 +67,7 @@ pub(super) fn detached(
         }
     };
     super::denials::expire_pending(state, out);
+    state.restarting = None;
     update_header(state, "agent_session_detached", out, |h| {
         set(&mut h.restarting_since, None)
     });
@@ -194,9 +202,9 @@ pub(super) fn files_changed(state: &mut ThreadState, event: &FilesChanged, out: 
 }
 
 /// Keeps the failure's code for the turn's step, or updates the step when the turn has ended.
-/// A failure while a restart is shown also ends the restart (`denials::end_restart`).
+/// A failure of the restarted turn also ends the restart (`denials::end_restart`).
 pub(super) fn turn_failed(state: &mut ThreadState, event: &TurnFailed, out: &mut Applied) {
-    super::denials::end_restart(state, "turn_failed", out);
+    super::denials::end_restart(state, event.turn, "turn_failed", out);
     if let Some(order) = state.index.steps.get(&event.turn).copied() {
         update_step(state, order, out, |step| {
             set(&mut step.failure, Some(event.code)) | set(&mut step.failure_at, event.at.clone())
@@ -252,8 +260,8 @@ pub(super) fn stopped_at_limit(
 /// leaves the status, but for `Starting` from that turn's own prompt, or `Queued` from its wait
 /// for another thread's writer, while no turn runs, which settles (to `Idle` unless the lawyer
 /// is asked). A second `TurnEnded` of a turn with a step is [`Anomaly::Duplicate`]. Pending
-/// denial cards survive it, but a `TurnEnded` while a restart is shown ends the restart and
-/// expires them (`denials::end_restart`).
+/// denial cards survive it, but the restarted turn's `TurnEnded` while a restart is shown ends
+/// the restart and expires them (`denials::end_restart`).
 pub(super) fn turn_ended(
     state: &mut ThreadState,
     seq: Seq,
@@ -268,7 +276,7 @@ pub(super) fn turn_ended(
         });
         return;
     }
-    super::denials::end_restart(state, "turn_ended", out);
+    super::denials::end_restart(state, event.turn, "turn_ended", out);
     let running = state.running == Some(event.turn);
     if !running && event.stop != StopReason::Failed {
         state.files.remove(&event.turn);

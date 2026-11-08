@@ -94,6 +94,7 @@ expression: "Snapshot::of(&state)"
       "turn": "01900000-0000-7000-8000-000800000002",
       "running": "01900000-0000-7000-8000-000800000002",
       "after_turn": "idle",
+      "restarting": null,
       "files": {
         "01900000-0000-7000-8000-000800000002": {
           "files": [

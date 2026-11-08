@@ -387,8 +387,10 @@ These arrive later as additive events and commands.
 A pending denial card (`DenialState::Pending`: offered, not answered) survives the end of its own
 turn, since an agent often ends the turn right after a refusal and the lawyer must still be able
 to answer it. It becomes `Expired` when the next turn starts in its thread, when the agent session
-ends (an idle stop or any detach but `DetachReason::Restarting`), when a restart fails or is cut
-short (a `turn_failed` or `turn_ended` while `HeaderEntry.restarting_since` is set, which also
-clears it), and when the thread is archived. A restart itself keeps it.
+ends (an idle stop or any detach but `DetachReason::Restarting`), when a restart fails (a
+`turn_failed` or `turn_ended` of the restarted turn, the running one or else the one launching,
+while `HeaderEntry.restarting_since` is set, which also clears it; another turn's end, such as a
+queued prompt removed during the relaunch, does not), and when the thread is archived. A restart
+itself keeps it.
 | Agent download progress | planned: the `agents` crate | percent, failure |
 | Resuming after an idle stop | planned: the `agents` crate | the thread; `ThreadStatus::IdleStopped` is section 1 |

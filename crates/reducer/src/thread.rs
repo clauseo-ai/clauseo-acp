@@ -69,6 +69,7 @@ fn fold_event(state: &mut ThreadState, envelope: &Envelope, out: &mut Applied) {
         // turn.
         DomainEvent::AgentSessionAttached(event) => {
             queue::session_attached(state, &event.capabilities, out);
+            state.restarting = None;
             update_header(state, "agent_session_attached", out, |h| {
                 set(&mut h.resuming_since, None) | set(&mut h.restarting_since, None)
             });

@@ -1,17 +1,18 @@
 //! When a pending denial card stops waiting (R18): it survives the end of its own turn, and it
-//! expires when the next turn starts, when the agent session ends (an idle stop), when a restart
-//! fails or is cut short (which also clears `restarting_since`), and when the thread is archived.
+//! expires when the next turn starts, when the agent session ends (an idle stop, or a `Closed`
+//! detach after a restart), when the restarted turn fails (which also clears `restarting_since`;
+//! another turn's end does not), and when the thread is archived.
 //! A replay gives the same state each time.
 
 use clauseo_protocol::{
     AgentSessionDetached, DenialId, DenialKind, DenialRecorded, DenialSource, DenialState,
     DetachReason, DomainEvent, ErrorCode, StopReason, ThreadArchived, Timestamp, TurnEnded,
-    TurnFailed, TurnId, TurnStarted, ViewEntry,
+    TurnFailed, TurnId, TurnQueued, TurnStarted, ViewEntry,
 };
 use clauseo_reducer::{Applied, StreamState, apply};
 
-use crate::fixtures::{Log, start_turn, thread_created, turn_ended, user_message};
-use crate::helpers::fold;
+use crate::fixtures::{Log, start_turn, thread_created, thread_id, turn_ended, user_message};
+use crate::helpers::{fold, round_trip};
 
 /// Pushes `event` and applies it, returning what the apply gave.
 #[cfg(test)]
@@ -121,7 +122,7 @@ fn archiving_the_thread_expires_a_pending_card() {
     assert_eq!(state, fold(log.events()));
 }
 
-/// The relaunch after a restart fails before its turn starts: the host logs `TurnFailed` and
+/// The relaunch of a launching turn fails before the turn starts: the host logs `TurnFailed` and
 /// `TurnEnded { Failed }` for the turn that would go on (a sign-in refusal or
 /// `sandbox.required` through `fail_all`, or `agent.launch_failed`). The restart ends and the
 /// card expires at the failure.
@@ -134,11 +135,12 @@ fn a_failed_relaunch_ends_the_restart_and_expires_the_card() {
     ] {
         let (mut log, mut state, turn, denial) = with_card(n);
         end(&mut log, &mut state, turn);
-        detach(&mut log, &mut state, DetachReason::Restarting);
-        assert!(restarting_since(&state).is_some());
+        // The host restarts the launching turn, before its `TurnStarted`.
         let next: TurnId = log.fresh().unwrap();
         let message = log.fresh().unwrap();
         push(&mut log, &mut state, user_message(next, message, "Go on."));
+        detach(&mut log, &mut state, DetachReason::Restarting);
+        assert!(restarting_since(&state).is_some());
         assert_eq!(card(&state, denial), DenialState::Pending, "{code:?}");
         let failed = TurnFailed {
             turn: next,
@@ -164,24 +166,58 @@ fn a_failed_relaunch_ends_the_restart_and_expires_the_card() {
     }
 }
 
-/// Clauseo quits mid-restart: the running turn ends (here cancelled) before any attach. The
-/// restart ends and the card expires.
+/// Clauseo quits mid-restart: the host drops the launching turn silently, and at the next
+/// start it logs a `Closed` detach for a thread whose log ends in a `Restarting` one (R18 PR
+/// 3b). That detach ends the restart and expires the card.
 #[test]
-fn a_quit_mid_restart_ends_the_restart_and_expires_the_card() {
-    let (mut log, mut state, turn, denial) = with_card(107);
+fn a_closed_detach_after_a_restart_ends_it_and_expires_the_card() {
+    let (mut log, mut state, _, denial) = with_card(107);
     detach(&mut log, &mut state, DetachReason::Restarting);
     assert!(restarting_since(&state).is_some());
     assert_eq!(card(&state, denial), DenialState::Pending);
+    detach(&mut log, &mut state, DetachReason::Closed);
+    assert_eq!(restarting_since(&state), None);
+    assert_eq!(card(&state, denial), DenialState::Expired);
+    assert_eq!(state, fold(log.events()));
+}
+
+/// A queued prompt removed during the relaunch ends its own turn, not the restart: the header
+/// and the card stay. The restarted turn's failure still ends the restart.
+#[test]
+fn only_the_restarted_turns_end_ends_the_restart() {
+    let (mut log, mut state, turn, denial) = with_card(109);
+    let thread = thread_id(109).unwrap();
+    let (queued, message): (TurnId, _) = (log.fresh().unwrap(), log.fresh().unwrap());
+    push(
+        &mut log,
+        &mut state,
+        user_message(queued, message, "And the leases."),
+    );
+    let waits = TurnQueued::new(thread, queued, thread, Some(turn)).unwrap();
+    push(&mut log, &mut state, waits);
+    detach(&mut log, &mut state, DetachReason::Restarting);
+    let since = restarting_since(&state);
+    assert!(since.is_some());
     push(
         &mut log,
         &mut state,
         TurnEnded {
-            turn,
+            turn: queued,
             stop: StopReason::Cancelled,
             usage: None,
             checkpoint_after: None,
         },
     );
+    assert_eq!(restarting_since(&state), since);
+    assert_eq!(card(&state, denial), DenialState::Pending);
+    assert_eq!(round_trip(&state), state);
+    let failed = TurnFailed {
+        turn,
+        code: ErrorCode::AgentLaunchFailed,
+        detail: None,
+        at: None,
+    };
+    push(&mut log, &mut state, failed);
     assert_eq!(restarting_since(&state), None);
     assert_eq!(card(&state, denial), DenialState::Expired);
     assert_eq!(state, fold(log.events()));

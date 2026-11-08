@@ -273,6 +273,7 @@ expression: "Snapshot::of(&every)"
       "turn": "01900000-0000-7000-8000-000c00000002",
       "running": null,
       "after_turn": null,
+      "restarting": null,
       "files": {},
       "failures": {}
     }

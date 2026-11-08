@@ -4,7 +4,7 @@
 use clauseo_protocol::{
     DenialDismissed, DenialEntry, DenialId, DenialRecorded, DenialState, DenialsPaused,
     DenialsPausedEntry, EntryId, EscalationAnswer, EscalationAnswered, EventId, Seq, Timestamp,
-    ViewEntry,
+    TurnId, UserMessageStatus, ViewEntry,
 };
 
 use super::{insert_new, set};
@@ -112,20 +112,51 @@ pub(super) fn expire_pending(state: &mut ThreadState, out: &mut Applied) {
     }
 }
 
-/// A `TurnFailed` or `TurnEnded` while the header shows a restart: the relaunch failed (a
-/// sign-in refusal, `sandbox.required`, `agent.launch_failed`) or the host quit mid-restart.
+/// A `TurnFailed` or `TurnEnded` of the turn being restarted while the header shows the
+/// restart: the relaunch failed (a sign-in refusal, `sandbox.required`, `agent.launch_failed`).
 /// The restart is over and its pending cards expire; without this the header would show the
-/// restart for good. Nothing happens when no restart is shown.
-pub(super) fn end_restart(state: &mut ThreadState, event: &'static str, out: &mut Applied) {
-    if state
+/// restart for good. Another turn's end (a queued prompt removed during the relaunch) leaves
+/// both alone; a restart that named no turn ends at any turn's end. Nothing happens when no
+/// restart is shown.
+pub(super) fn end_restart(
+    state: &mut ThreadState,
+    turn: TurnId,
+    event: &'static str,
+    out: &mut Applied,
+) {
+    let shown = state
         .header
         .as_ref()
-        .is_none_or(|h| h.restarting_since.is_none())
-    {
+        .is_some_and(|h| h.restarting_since.is_some());
+    if !shown || state.restarting.is_some_and(|restarted| restarted != turn) {
         return;
     }
+    state.restarting = None;
     expire_pending(state, out);
     super::update_header(state, event, out, |h| set(&mut h.restarting_since, None));
+}
+
+/// The turn a restart now restarts: the running turn, else the one launching (a turn that has
+/// neither started nor ended whose prompt has left the queue), else the head of the queue,
+/// else none.
+pub(super) fn restarted_turn(state: &ThreadState) -> Option<TurnId> {
+    if state.running.is_some() {
+        return state.running;
+    }
+    let prompt = |order: Seq| match state.entries.get(&order) {
+        Some(ViewEntry::UserMessage(prompt)) => Some(prompt),
+        _ => None,
+    };
+    let launching =
+        state.index.unstarted.iter().find(|(_, order)| {
+            prompt(*order).is_some_and(|p| p.status != UserMessageStatus::Queued)
+        });
+    if let Some((turn, _)) = launching {
+        return Some(*turn);
+    }
+    let head = state.queued_order().into_iter().next()?;
+    let order = state.index.users.get(&head).copied()?;
+    prompt(order).map(|p| p.turn)
 }
 
 /// Changes the denial's entry with `change`, which says whether it changed anything, and emits
