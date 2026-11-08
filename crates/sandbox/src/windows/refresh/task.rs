@@ -18,8 +18,10 @@
 //! - [`unregister_task`], which `--remove --uninstall` calls (it deletes staging itself,
 //!   taking it back if need be: `setup::admin_remove`).
 //! - [`request_admin_refresh`], which the app calls as the lawyer, unelevated, after an update,
-//!   and [`request_pool_stop`]: each asks the Task Scheduler to run its task
-//!   (`IRegisteredTask::Run`), which the owner's read-and-execute entry (`FRFX`) allows.
+//!   [`request_pool_stop`], and [`request_wsl_deny`], which the launch check calls as the
+//!   lawyer when WSL's deny is missing (`clean_close::wsl_heal`): each asks the Task Scheduler
+//!   to run its task (`IRegisteredTask::Run`), which the owner's read-and-execute entry
+//!   (`FRFX`) allows; [`last_refresh_run`] and [`last_wsl_deny_run`] read a task's last run.
 #![expect(unsafe_code, reason = "FFI to COM and the Task Scheduler's interfaces")]
 
 use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, RPC_E_CHANGED_MODE, VARIANT_BOOL};
@@ -406,6 +408,15 @@ pub fn request_pool_stop() -> bool {
     }
 }
 
+/// Asks the Task Scheduler to run `\Clauseo\SandboxWslDeny` now, as whoever calls it: the launch
+/// check calls it as the lawyer, unelevated, when WSL's deny is missing
+/// (`clean_close::wsl_heal`), then waits for the deny. It returns once the run is queued; a run
+/// already going on keeps going and this start is dropped (`TASK_INSTANCES_IGNORE_NEW`). Blocks
+/// on COM calls.
+pub fn request_wsl_deny() -> Result<(), TaskError> {
+    run_task(SystemTask::WslDeny)
+}
+
 /// Runs `task` now, as whoever calls it, through the owner's read-and-execute entry (`FRFX`,
 /// `rules::task_sddl`): the Task Scheduler starts a task only for a caller with execute access,
 /// and refused the owner holding `FR` alone (CI run 42416074600).
@@ -422,7 +433,19 @@ fn run_task(task: SystemTask) -> Result<(), TaskError> {
 /// path [`request_admin_refresh`] takes; the desktop logs it at start-up (`last_run.rs`).
 /// [`TaskError::NotRegistered`] as there. Blocks on COM calls: call it off the UI thread.
 pub fn last_refresh_run() -> Result<LastRun, TaskError> {
-    with_task(SystemTask::Refresh, |task| {
+    last_task_run(SystemTask::Refresh)
+}
+
+/// The WSL deny task's last run, read as [`last_refresh_run`] reads the refresh's: the launch
+/// check logs it when WSL's deny is still missing after its wait (`clean_close::wsl_heal`), its
+/// code read back through `WslDenyExit`. Blocks on COM calls.
+pub fn last_wsl_deny_run() -> Result<LastRun, TaskError> {
+    last_task_run(SystemTask::WslDeny)
+}
+
+/// `task`'s last result and last run time, as whoever calls it.
+fn last_task_run(task: SystemTask) -> Result<LastRun, TaskError> {
+    with_task(task, |task| {
         // SAFETY: a live task; both read a value into memory the call owns.
         let code =
             unsafe { task.LastTaskResult() }.map_err(com("IRegisteredTask::LastTaskResult"))?;

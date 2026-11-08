@@ -36,6 +36,16 @@ pub enum WslDenyExit {
 }
 
 impl WslDenyExit {
+    /// Every exit, in order; appended with each new one.
+    pub const ALL: [WslDenyExit; 2] = [WslDenyExit::Done, WslDenyExit::NotAllowed];
+
+    /// The exit whose [`as_code`](Self::as_code) is `code` (the task's last result), if any.
+    pub fn from_code(code: i32) -> Option<WslDenyExit> {
+        Self::ALL
+            .into_iter()
+            .find(|exit| i32::from(exit.as_code()) == code)
+    }
+
     /// The process exit code.
     pub const fn as_code(self) -> u8 {
         match self {

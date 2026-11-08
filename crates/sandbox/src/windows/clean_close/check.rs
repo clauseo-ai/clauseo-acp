@@ -7,6 +7,9 @@ use std::path::Path;
 use super::changes::{Live, most_touched, read_volume, reduce, resolve};
 use super::journal::Journal;
 use super::record::{self, CleanRecord, Unusable};
+#[cfg(windows)]
+use super::wsl_heal::WindowsDenyTask;
+use super::wsl_heal::{self, DenyTask};
 use super::{FullReason, LaunchCheck, WalkInputs};
 use crate::Error;
 use crate::windows::acl_plan::{AdmittedPlan, in_folder};
@@ -25,7 +28,9 @@ use crate::windows::wsl::{self, WslRead};
 /// on the machine, its classes' launch permissions must deny the pool group first
 /// (`wsl::check`), or the launch is refused with `WslDenyMissing` or `WslDenyUnverifiable`,
 /// and no WSL upgrade may be pending (`WslUpgradePending`): a pool user who can start WSL gets a
-/// Linux the network filters don't see. Then, under the
+/// Linux the network filters don't see. A missing deny is healed first: the WSL deny task is
+/// asked to run and the check waits for it (`wsl_heal`); what the healing did is
+/// [`LaunchCheck::wsl_healed`], for the host's log. Then, under the
 /// matter's set-aside lock, it reads the matter's clean-close record and removes it, whatever
 /// comes next: a failed removal refuses the launch
 /// ([`Error::CleanClose`]), and a lock that can't be taken too ([`Error::SetAside`]). Then it
@@ -38,13 +43,26 @@ pub fn check_launch(
     plan: &AdmittedPlan,
     journal: &dyn Journal,
 ) -> Result<LaunchCheck, Error> {
-    let admin = admin_copy::os::WindowsAdminCopy;
-    let wsl = wsl::WindowsWsl::reader();
-    check_launch_with(&admin, &wsl, data_dir, ledger, plan, journal)
+    let seams = Seams {
+        admin: &admin_copy::os::WindowsAdminCopy,
+        wsl: &wsl::WindowsWsl::reader(),
+        task: &WindowsDenyTask::new(),
+    };
+    check_launch_in(&seams, data_dir, ledger, plan, journal)
 }
 
-/// [`check_launch`] with the admin copy read through `admin` and WSL's registration through
-/// `wsl`: the machine on Windows, fakes in the tests.
+/// What the launch check reads through: the machine on Windows, fakes in the tests.
+pub(crate) struct Seams<'a> {
+    /// The admin copy.
+    pub(crate) admin: &'a dyn AdminCopyFs,
+    /// WSL's registration.
+    pub(crate) wsl: &'a dyn WslRead,
+    /// The WSL deny task, and the clock its waits use.
+    pub(crate) task: &'a dyn DenyTask,
+}
+
+/// [`check_launch`] with no WSL deny task (a request fails, as where it isn't registered).
+#[cfg(test)]
 pub(crate) fn check_launch_with(
     admin: &dyn AdminCopyFs,
     wsl: &dyn WslRead,
@@ -53,9 +71,42 @@ pub(crate) fn check_launch_with(
     plan: &AdmittedPlan,
     journal: &dyn Journal,
 ) -> Result<LaunchCheck, Error> {
-    admin_copy::check_launchable(admin).map_err(Error::Blocked)?;
-    let found = wsl::check(wsl).map_err(Error::Blocked)?;
-    tracing::info!(?found, "WSL's deny for the pool");
+    let task = super::wsl_heal::fake::FakeTask::absent();
+    let seams = Seams {
+        admin,
+        wsl,
+        task: &task,
+    };
+    check_launch_in(&seams, data_dir, ledger, plan, journal)
+}
+
+/// [`check_launch`] through `seams`.
+pub(crate) fn check_launch_in(
+    seams: &Seams<'_>,
+    data_dir: &Path,
+    ledger: &Ledger,
+    plan: &AdmittedPlan,
+    journal: &dyn Journal,
+) -> Result<LaunchCheck, Error> {
+    admin_copy::check_launchable(seams.admin).map_err(Error::Blocked)?;
+    let healed = wsl_heal::heal(&mut || wsl::check(seams.wsl), seams.task);
+    let (found, healed) = healed.map_err(|refused| {
+        let (blocked, why) = (refused.blocked, refused.why);
+        tracing::warn!(?blocked, %why, "WSL's check refused the launch");
+        Error::Blocked(blocked)
+    })?;
+    tracing::info!(?found, ?healed, "WSL's deny for the pool");
+    let check = record_check(data_dir, ledger, plan, journal)?;
+    Ok(check.with_wsl(healed))
+}
+
+/// The clean-close record read and removed under the matter's lock, then the decision.
+fn record_check(
+    data_dir: &Path,
+    ledger: &Ledger,
+    plan: &AdmittedPlan,
+    journal: &dyn Journal,
+) -> Result<LaunchCheck, Error> {
     let matter = plan.matter();
     let held = set_aside::under_lock(data_dir, &matter, |open| {
         let found = record::read(data_dir, &matter);
