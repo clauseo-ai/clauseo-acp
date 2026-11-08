@@ -3,9 +3,9 @@
 
 use std::collections::BTreeMap;
 
-#[cfg(doc)]
-use super::running;
 use super::{FOLDERS_CAP, Failed, JOBS_CAP, Jobs};
+#[cfg(doc)]
+use super::{running, unlisted};
 
 /// What the task walk (step 4) did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -46,6 +46,10 @@ pub struct Swept {
     /// folder's path couldn't be read), for the instance stop after the BITS step
     /// ([`running`]); never logged.
     pub pool_paths: Vec<Result<String, Failed>>,
+    /// Tasks a task file or the Task Scheduler's cache holds that the Task Scheduler's listing
+    /// didn't give (one whose descriptor shuts this process out, say), and whose task file
+    /// didn't show them not the pool's ([`unlisted`]).
+    pub hidden: usize,
 }
 
 impl Swept {
@@ -56,6 +60,7 @@ impl Swept {
             || self.unresolved > 0
             || self.not_deleted > 0
             || self.instances_not_stopped > 0
+            || self.hidden > 0
             || self.unlisted > 0
             || self.capped
     }
@@ -91,8 +96,8 @@ pub(super) fn log_line(users: usize, swept: &Swept, jobs: &Result<Jobs, Failed>)
          pool's tasks deleted, {} unreadable ({} more skipped, not the pool's by their task \
          file), {} with no user or group, {} unresolved (no SID, \
          not another domain's), {} skipped (another domain's, no SID), {} not deleted, {} \
-         running instances stopped, {} not, {cancelled} BITS jobs cancelled, {failed} \
-         not{unlisted}{capped}{listed}",
+         not listed (in a task file or the cache only), {} running instances stopped, {} not, \
+         {cancelled} BITS jobs cancelled, {failed} not{unlisted}{capped}{listed}",
         swept.folders,
         swept.tasks,
         swept.deleted,
@@ -102,6 +107,7 @@ pub(super) fn log_line(users: usize, swept: &Swept, jobs: &Result<Jobs, Failed>)
         swept.unresolved,
         swept.skipped,
         swept.not_deleted,
+        swept.hidden,
         swept.instances_stopped,
         swept.instances_not_stopped
     )

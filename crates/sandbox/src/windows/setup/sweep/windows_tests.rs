@@ -1,8 +1,10 @@
 //! The sweep's task step on a real machine (`windows_sweeper.rs`): a test user's scheduled task,
 //! made as that user, is deleted when the pool is that user's SID, and the task this process's
 //! user (the lawyer, here an elevated administrator) made beside it is left. And this machine's
-//! own tasks all have a principal that reads and resolves, so a real run doesn't end 56 on a
-//! clean machine.
+//! own tasks all have a principal that reads and resolves, and every task on file and in the
+//! Task Scheduler's cache is listed (the cross-check), so a real run doesn't end 56 on a clean
+//! machine. And a test user's task whose descriptor shuts SYSTEM and Administrators out is
+//! deleted or 56, never left behind a sweep that would end 0.
 //!
 //! The gate is skipped (it needs LOCAL SYSTEM and a `ClauseoSbNN` pool), as the stop's BITS test
 //! skips it: the step is called with the pool the test chose. Elevated, as CI's elevated step
@@ -193,4 +195,97 @@ fn task_paths_compare_as_windows_compares_them_not_by_unicode_lowercase() {
         Ok(true)
     );
     assert_eq!(same_task_path(r"\A\Task", r"\A\Tasks"), Ok(false));
+}
+
+/// A task as the test user registers it from XML: its own, on a trigger far ahead, with `sddl`
+/// as its descriptor; UTF-16LE after its byte order mark, as `schtasks /xml` reads it.
+fn task_xml(user: &str, sddl: &str) -> Vec<u8> {
+    let xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\r\n<Task version=\"1.2\" \
+         xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\r\n  \
+         <RegistrationInfo><SecurityDescriptor>{sddl}</SecurityDescriptor></RegistrationInfo>\
+         \r\n  <Triggers><TimeTrigger><StartBoundary>2099-01-01T00:00:00</StartBoundary>\
+         </TimeTrigger></Triggers>\r\n  <Principals><Principal id=\"Author\"><UserId>{user}\
+         </UserId><LogonType>InteractiveToken</LogonType></Principal></Principals>\r\n  \
+         <Actions Context=\"Author\"><Exec><Command>{}\\cmd.exe</Command><Arguments>/c exit 0\
+         </Arguments></Exec></Actions>\r\n</Task>\r\n",
+        system32()
+    );
+    let mut bytes = vec![0xFF, 0xFE];
+    bytes.extend(xml.encode_utf16().flat_map(u16::to_le_bytes));
+    bytes
+}
+
+#[test]
+#[ignore = "elevated: run by CI's elevated step with CLAUSEO_ELEVATED_TESTS=1"]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "writes the test user's task XML into the test's own folder"
+)]
+fn elevated_a_task_whose_descriptor_shuts_system_out_is_deleted_or_56_never_left_at_0() {
+    if !gate("elevated_a_task_whose_descriptor_shuts_system_out_is_deleted_or_56_never_left_at_0") {
+        return;
+    }
+    // 1. A standard account, as the test above makes one.
+    clear_leftovers(TASK_TEST_PREFIX);
+    let user = TestUser::named(TASK_TEST_PREFIX, &random_hex(3));
+    let sid = user.sid.clone();
+    eprintln!("1. the test user: {} {}", user.name, sid.as_str());
+    let dir = TempDir::new("sweep-hidden");
+    let grant = format!(
+        "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;{})",
+        sid.as_str()
+    );
+    protect_with(dir.path(), &grant).unwrap();
+    let name = format!("ClauseoSweepHidden{}{}", std::process::id(), random_hex(2));
+    let schtasks = format!(r"{}\schtasks.exe", system32());
+
+    // 2. As that user: a task whose descriptor denies SYSTEM, and Administrators (this process
+    // is an elevated administrator standing in for SYSTEM, which runs the real sweep), all
+    // access. A Task Scheduler that lists only what its caller may read leaves it out.
+    let sddl = format!(
+        "O:{0}D:P(D;;FA;;;SY)(D;;FA;;;BA)(A;;FA;;;{0})",
+        sid.as_str()
+    );
+    let xml = dir.path().join("hidden.xml");
+    std::fs::write(&xml, task_xml(sid.as_str(), &sddl)).unwrap();
+    let create = format!(
+        r#""{schtasks}" /create /tn {name} /xml "{}" /f"#,
+        xml.display()
+    );
+    let (code, printed) = try_in_cmd(&user, dir.path(), &create);
+    eprintln!("2. as the test user: {create}\nexit {code:?}\n{printed}");
+    // Should Windows refuse such a descriptor from a standard user, the gap can't arise: say so
+    // in 0049 ("Sweeping the pool's tasks and BITS jobs") and drop this test.
+    assert_eq!(
+        code,
+        Some(0),
+        "schtasks /create /xml as the test user:\n{printed}"
+    );
+
+    // 3. The walk and the cross-check, the test user the pool.
+    let mut sweeper = WindowsSweeper::new();
+    let swept = sweep_tasks(&mut sweeper, std::slice::from_ref(&sid));
+    eprintln!(
+        "3. {} deleted, {} unreadable, {} not deleted, {} hidden, {} unlisted",
+        swept.deleted, swept.unreadable, swept.not_deleted, swept.hidden, swept.unlisted
+    );
+    for (why, count) in &swept.why {
+        eprintln!("{count} x {why}");
+    }
+
+    // 4. As the test user, who may read its own task: is it still there?
+    let query = format!(r#""{schtasks}" /query /tn {name}"#);
+    let (code, printed) = try_in_cmd(&user, dir.path(), &query);
+    let left = code == Some(0);
+    eprintln!("4. still there: {left}\n{printed}");
+    if left {
+        let delete = format!(r#""{schtasks}" /delete /tn {name} /f"#);
+        let (code, printed) = try_in_cmd(&user, dir.path(), &delete);
+        eprintln!("the clean-up, as the test user: exit {code:?}\n{printed}");
+    }
+    assert!(
+        !left || swept.left(),
+        "the task was left and the sweep would have ended 0: {swept:?}"
+    );
 }

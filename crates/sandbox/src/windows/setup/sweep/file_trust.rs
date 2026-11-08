@@ -137,6 +137,33 @@ pub(super) fn by_file<S: Sweeper>(
     }
 }
 
+/// Whether the file of the task at `path` (`\A\name`), which the Task Scheduler's listing
+/// didn't give but a task file or its cache holds (`unlisted.rs`), shows the task isn't the
+/// pool's: the file [`trusted`] and its principal resolving to a SID that isn't the pool's, or
+/// another domain's name. `Err` with why not. With no task to ask for its descriptor, the file
+/// alone decides, and only ever to skip it; nothing is deleted through a file.
+pub(super) fn not_pool_by_path<S: Sweeper>(
+    fs: &mut S,
+    path: &str,
+    pool: &[Sid],
+    names: &Names,
+    resolved: &mut BTreeMap<String, Resolved>,
+) -> Result<(), Failed> {
+    let (folder, name) = path
+        .rsplit_once('\\')
+        .ok_or_else(|| "the task's path doesn't start at the root".to_owned())?;
+    let folder = if folder.is_empty() { "\\" } else { folder };
+    let principal = principal_at(fs, folder, name, pool)?;
+    match by_name(fs, pool, names, resolved, &principal) {
+        Found::NotPool | Found::Skipped(_) => Ok(()),
+        Found::Pool
+        | Found::Unresolved(_)
+        | Found::NoPrincipal
+        | Found::Unread(_)
+        | Found::FileSkipped => Err(NOT_SKIPPED.to_owned()),
+    }
+}
+
 /// The principal's name the file of the task `name` in `folder` gives ([`task_file`]): its
 /// path's parts checked, the file read, its security [`trusted`] and its XML read. `Err` for
 /// anything that fails, or a file that names no user or group.
@@ -147,7 +174,17 @@ fn from_file<S: Sweeper>(
     pool: &[Sid],
 ) -> Result<String, Failed> {
     let path = fs.folder_path(folder)?;
-    let parts = task_file::parts(&path, name)?;
+    principal_at(fs, &path, name, pool)
+}
+
+/// [`from_file`] for the folder whose path is `folder` (`\` the root, `\A\B` below).
+fn principal_at<S: Sweeper>(
+    fs: &mut S,
+    folder: &str,
+    name: &str,
+    pool: &[Sid],
+) -> Result<String, Failed> {
+    let parts = task_file::parts(folder, name)?;
     let file = fs.read_task_file(&parts)?;
     trusted(&file.security, pool)?;
     let principal = task_file::principal_of(&file.bytes)?;
