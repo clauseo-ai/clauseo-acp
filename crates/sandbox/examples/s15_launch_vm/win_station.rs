@@ -40,8 +40,8 @@ use super::win::{Owned, code_of};
 type Failed = (&'static str, u32);
 
 /// What the maker's logon asks for on the station it makes, and what the creation DACL grants
-/// `OWNER RIGHTS` (the maker owns it then): `READ_CONTROL` and the station's use rights.
-const MAKE_RIGHTS: u32 = 0x0002_007F;
+/// `OWNER RIGHTS` (the maker owns it then): `READ_CONTROL` alone, as the runner's.
+const MAKE_RIGHTS: u32 = 0x0002_0000;
 /// What the harness asks for when it opens the station, and what the creation DACL grants it:
 /// `READ_CONTROL | WRITE_DAC | WRITE_OWNER | WINSTA_CREATEDESKTOP`.
 const OPEN_RIGHTS: u32 = 0x000E_0008;

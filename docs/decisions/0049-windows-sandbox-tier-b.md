@@ -1042,22 +1042,26 @@ leaves that profile, both naming the part.
     first three alone fail with 8), and switches back; a failed switch back fails the launch.
     Last, as their owner, it sets both last descriptors.
   - **The descriptor it is made with** is always explicit: the default DACL grants `Everyone`
-    and `RESTRICTED` `0xF037F`. `D:P(A;;0xF037F;;;SY)(A;;0xE0008;;;<lawyer>)(A;;0x2007F;;;OW)`
-    for the station; the pool user owns it until the lawyer takes it, and the `OWNER RIGHTS`
-    entry, held to use rights, takes away the owner's implied `READ_CONTROL | WRITE_DAC`, so no
-    pool process rewrites its DACL in that window. The desktop is made with
-    `D:P(A;;0xF01FF;;;SY)(A;;0xE00C7;;;<lawyer>)(A;;0xC7;;;OW)`.
+    and `RESTRICTED` `0xF037F`. `D:P(A;;0xF037F;;;SY)(A;;0xE0008;;;<lawyer>)(A;;0x20000;;;OW)`
+    for the station. The pool user owns it until the lawyer takes it, and the `OWNER RIGHTS`
+    entry, held to `READ_CONTROL`, takes away the owner's implied `WRITE_DAC` and grants it no
+    use right, so no pool process rewrites the DACL, or makes `Default` first
+    (`WINSTA_CREATEDESKTOP`), in that window. The logon asks for `READ_CONTROL` alone when it
+    makes the station. The desktop is made with
+    `D:P(A;;0xF01FF;;;SY)(A;;0xE00C7;;;<lawyer>)(A;;0x20000;;;OW)`.
   - **The last descriptors** (`token::station_sddl`, `token::desktop_sddl`), protected and
     labelled Low: `D:P(A;;0xF037F;;;SY)(A;;0xE0000;;;<lawyer>)(A;;0x2007F;;;<pool>)
-    (A;;0x2007F;;;OW)S:(ML;;NW;;;LW)` on the station and `D:P(A;;0xF01FF;;;SY)
-    (A;;0xE0000;;;<lawyer>)(A;;0xC7;;;<pool>)(A;;0xC7;;;OW)S:(ML;;NW;;;LW)` on the desktop, the
-    matter SID given the pool's rights after the pool user when the launch restricts with one.
+    S:(ML;;NW;;;LW)` on the station and `D:P(A;;0xF01FF;;;SY)(A;;0xE0000;;;<lawyer>)
+    (A;;0xC7;;;<pool>)S:(ML;;NW;;;LW)` on the desktop, the matter SID given the pool's rights
+    after the pool user when the launch restricts with one. No `OWNER RIGHTS` entry: the lawyer
+    owns both by then, and one would give the lawyer's processes, Low ones included, the pool's
+    use rights. The owner keeps its implied `READ_CONTROL | WRITE_DAC` and the explicit
+    `READ_CONTROL | WRITE_DAC | WRITE_OWNER`, enough to clean up, and no use right.
     The pool's station rights must be `READ_CONTROL` and `0x7F`: less, and user32 fails to start
     the agent's GUI DLLs (`0x45A`). Without the Low label a Low agent hangs in conhost's start
     (PowerShell and `whoami` hang). The pool user's effective rights read `0x2007F` and `0xC7`,
     and none of the pool user, the run's group or `RESTRICTED` gets `WRITE_DAC`, `WRITE_OWNER`
-    or `DELETE` (read by hand on both machines). The lawyer keeps `READ_CONTROL | WRITE_DAC |
-    WRITE_OWNER` and no use right.
+    or `DELETE` (read by hand on both machines).
   - **Nothing to clean.** The station goes with its last handle: the outer's, held until its
     `serve` returns, and the inner's and the agent's own.
   - **Any failure refuses the launch**, with the call named (`the agent's window station:
