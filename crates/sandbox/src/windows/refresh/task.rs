@@ -13,7 +13,8 @@
 //!   starts it and ends a running one, nothing more; the folder `\Clauseo` gets the same owner
 //!   and DACL, made with them, or set again when an administrator made it; one anyone else made
 //!   is deleted with what is in it and made again (`task_folder.rs`).
-//! - [`unregister_task`] and [`remove_staging`], which `--remove --uninstall` calls.
+//! - [`unregister_task`], which `--remove --uninstall` calls (it deletes staging itself,
+//!   taking it back if need be: `setup::admin_remove`).
 //! - [`request_admin_refresh`], which the app calls as the lawyer, unelevated, after an update,
 //!   and [`request_pool_stop`]: each asks the Task Scheduler to run its task
 //!   (`IRegisteredTask::Run`), which the owner's read-and-execute entry (`FRFX`) allows.
@@ -34,8 +35,8 @@ use windows::core::{BSTR, HRESULT, Interface};
 
 use super::last_run::{LastRun, last_run};
 use super::task_folder::{Folders, prepare};
-use super::windows_refresher::{EXE_NAME, SET_ASIDE_NAME, STAGED_NAME, sandbox_dir};
-use super::{SystemTask, action_path, staging, task_sddl};
+use super::windows_refresher::{EXE_NAME, sandbox_dir};
+use super::{SystemTask, action_path, task_sddl};
 use crate::windows::sids::Sid;
 
 /// The task's folder.
@@ -347,16 +348,6 @@ pub fn unregister_task(task: SystemTask) -> Result<(), TaskError> {
     // SAFETY: a live root folder and a BSTR; flags 0.
     let _kept_if_not_empty = unsafe { root.DeleteFolder(&BSTR::from(FOLDER_NAME), 0) };
     Ok(())
-}
-
-/// Deletes the refresh's staging folder (its two known files, then the folder, which is left
-/// when anything else is in it). One that isn't there is `Ok`. Elevated: `--remove` calls it.
-pub fn remove_staging() -> Result<(), String> {
-    let staging_dir = sandbox_dir()?.join(crate::windows::admin_copy::STAGING);
-    for name in [STAGED_NAME, SET_ASIDE_NAME] {
-        staging::delete(&staging_dir.join(name))?;
-    }
-    staging::remove_dir(&staging_dir)
 }
 
 /// Asks the Task Scheduler to run `\Clauseo\SandboxRefresh` now, as whoever calls it: the app

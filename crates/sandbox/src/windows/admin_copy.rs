@@ -52,6 +52,9 @@ mod ntfs_tests;
 #[cfg(windows)]
 pub(crate) mod os;
 mod security_block;
+pub(crate) mod take_back;
+#[cfg(windows)]
+pub(crate) mod take_back_os;
 #[cfg(test)]
 mod tests;
 mod version;
