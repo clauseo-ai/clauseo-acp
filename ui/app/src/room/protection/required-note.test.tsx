@@ -42,10 +42,7 @@ const openNote = async () => {
 /** Lines that say Clauseo goes on working here without the Safe workspace. */
 const WORKS_WITHOUT = /works without|answers without|can read any file|anywhere on this computer/;
 
-const POOL_LINE = pw(
-  "en",
-  "Your firm requires the Safe workspace, and all its places on this computer are in use, so Clauseo can't answer here yet. End a conversation in another matter to free one.",
-);
+const POOL_LINE = errorWords("en", "sandbox.pool_full");
 
 test("the required pool note says the firm's line, not that the matter works without it", async () => {
   await mount(PROT.pool);

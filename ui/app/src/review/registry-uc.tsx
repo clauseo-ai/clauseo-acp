@@ -393,9 +393,7 @@ export const UC: Entry[] = [
   // the note while the firm requires the Safe workspace: the firm's line in the cause's place
   room(
     "UC-52",
-    pw(
-      "Your firm requires the Safe workspace, and all its places on this computer are in use, so Clauseo can't answer here yet. End a conversation in another matter to free one.",
-    ),
+    errorWords(ERROR_WORDS["sandbox.pool_full"] as Parameters<typeof errorWords>[0]),
     "room/np-note-pool",
     { ...note(P.pool), over: { required: true } },
   ),
