@@ -15,6 +15,8 @@
 //! `RemoveSandboxSetup`, come from both: the settings window's protection section and the
 //! main window's protection notice. Neither carries a field, and the host holds each answer
 //! until the set-up (with its administrator prompt) ends.
+//! The browser's `InstallBrowser`, `CancelBrowserInstall` and `RecheckBrowserPolicy` (0029)
+//! are `main`'s alone: its tool line offers them.
 //! Of the unsafe-site override's two (0053, PR 2), `main` sends
 //! `AllowBlockedSite` from a block's notice and `RevokeAllowedSite`, and the settings window
 //! only `RevokeAllowedSite` (its list of allowed sites): no other window, and so nothing an
@@ -112,6 +114,9 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         // it after the lawyer agrees, and its Cancel button the cancel. No field to check.
         | HostCommand::InstallBrowser {}
         | HostCommand::CancelBrowserInstall {}
+        // The browser row's "Try again" when the firm's browser policy was not read (0029):
+        // a read on the host, which runs one at a time. No field to check.
+        | HostCommand::RecheckBrowserPolicy {}
         // R23: the rail card's update actions, "Restart to update" (now or after the answer),
         // taking a scheduled install back, and "Check again"; settings may not install (0037).
         | HostCommand::InstallUpdate { .. }

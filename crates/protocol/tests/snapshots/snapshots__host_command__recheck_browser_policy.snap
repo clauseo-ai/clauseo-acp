@@ -1,0 +1,7 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "HostCommand::RecheckBrowserPolicy {}"
+---
+{
+  "recheck_browser_policy": {}
+}

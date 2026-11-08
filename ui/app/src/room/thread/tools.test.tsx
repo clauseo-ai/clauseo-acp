@@ -214,7 +214,7 @@ test.each(ROWS)(
       );
     // nothing else in words: the name, the chip and the reason; with no Chrome, the offer's words under it (the
     // button, its hidden tooltip and the size); blocked by the firm's policy, or a policy Clauseo
-    // couldn't check, the reason in full and no offer
+    // couldn't check, the reason in full and no offer (that one, Try again)
     const offer =
       reason === "Needs Chrome"
         ? "Download Chrome" + "From Google, once. Needs 1\u00a0GB free." + "200\u00a0MB"
@@ -223,7 +223,8 @@ test.each(ROWS)(
             "one for you."
           : reason === "Couldn't check browser settings"
             ? "Clauseo couldn't check this computer's browser settings, so it won't use a browser for " +
-              "now. It checks again the next time it needs one."
+              "now. It checks again the next time it needs one." +
+              "Try again"
             : "";
     expect(r.textContent).toBe(
       (tool.tool === "web_search" ? "Web search" : "Browser") +

@@ -221,6 +221,8 @@ impl HostCommand {
             // No fields; a second download while one runs is the host's refusal (state).
             | Self::InstallBrowser {}
             | Self::CancelBrowserInstall {}
+            // No fields; a read in flight is joined by the host.
+            | Self::RecheckBrowserPolicy {}
             // Whether the updater's state takes them is the host's check.
             | Self::CheckForUpdate {}
             | Self::InstallUpdate { when: _ }

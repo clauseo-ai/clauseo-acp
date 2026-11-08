@@ -751,7 +751,9 @@ a managed preferences file or a policy folder. To have Clauseo honour such a pol
 - **A place Clauseo can't read** (permission denied or any other read failure, or past a limit
   above): Clauseo doesn't know what it says, so its browser doesn't start, and the app tells the
   lawyer Clauseo couldn't check this computer's browser settings. A false elsewhere still wins:
-  the lawyer then hears that your firm doesn't allow it.
+  the lawyer then hears that your firm doesn't allow it. The lawyer can try again from that
+  message: Clauseo reads the policy then, and again each time a session starts its browser. A
+  session already running keeps going without a browser; the next one gets it once nothing blocks.
 
 Clauseo writes one line to the host log for each place it couldn't read and each value it
 ignored, naming the browser and scope (never a path), once each time Clauseo starts. It reads

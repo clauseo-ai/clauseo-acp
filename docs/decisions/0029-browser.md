@@ -1018,7 +1018,10 @@ chrome-headless-shell none, so a false anywhere starts no browser at all, and th
 `BrowserBlockedByPolicy`. Nothing set, or a value Chrome would not take, does not block; a place
 that cannot be read (not missing: denied, failed or past a cap) means nothing is known, so with no
 false elsewhere the entry drops with its own `BrowserPolicyUnreadable`, read again at the next
-launch. The firm's Clauseo policy `browser.allow_when_remote_debugging_disabled` (policy only, a
+launch, or at once when the lawyer presses Try again (`HostCommand::RecheckBrowserPolicy`, main
+window only, off the actor, one read at a time; `HostEvent::BrowserPolicy` says what it found, a
+running session keeps its header, and `Blocked` re-words the headers that said unreadable). The
+firm's Clauseo policy `browser.allow_when_remote_debugging_disabled` (policy only, a
 security key, default false) overrides both. Each unread place and bad value is logged once per
 host, with no path (`docs/firm-it.md`, "Browser automation and RemoteDebuggingAllowed"). In
 order:

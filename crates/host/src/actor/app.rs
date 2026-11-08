@@ -24,7 +24,9 @@
 //! (`settings.rs`), `MattersChanged` and `ThreadsChanged` when a row of the rail changes
 //! (`app_lists.rs`), `FolderScanned` as a folder scan goes (`scan.rs`, throttled; its last
 //! event is part of the catch-up), `BrowserInstall` at each step of the Chrome for Testing
-//! download (`browser_install.rs`), and `ConnectorsChanged` when the connector state changes
+//! download (`browser_install.rs`), `BrowserPolicy` as the lawyer's re-read of the firm's
+//! browser policy starts and ends (`browser_policy.rs`; its latest in the catch-up), and
+//! `ConnectorsChanged` when the connector state changes
 //! (`connectors.rs`, R24; whole, and in the catch-up when connectors are wired). Still to come,
 //! each through [`publish`] and each adding its part of the current state to [`catch_up`]:
 //! notices. The limits have their own subscribers
@@ -212,7 +214,8 @@ pub(super) fn on_unsubscribed(actor: &mut Actor, id: SubId) {
 
 /// The current state, as the events that start a subscription and bring a lagged subscriber up
 /// to date: the settings, the matter list, each matter's thread list, the last folder scan
-/// event, the download's latest `BrowserInstall` and, with connectors wired, the whole
+/// event, the download's latest `BrowserInstall`, the policy re-read's latest `BrowserPolicy`
+/// and, with connectors wired, the whole
 /// `ConnectorsChanged`. Each event here must replace what a window
 /// holds whole; see the module doc before adding a partial one.
 fn catch_up(actor: &mut Actor) -> Vec<EncodedEvent> {
@@ -220,6 +223,7 @@ fn catch_up(actor: &mut Actor) -> Vec<EncodedEvent> {
     events.extend(super::app_lists::current(actor));
     events.extend(super::scan::catch_up(actor));
     events.extend(super::browser_install::current(actor));
+    events.extend(super::browser_policy::current(actor));
     events.extend(super::connectors::current(actor));
     events
         .iter()

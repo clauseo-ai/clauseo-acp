@@ -185,6 +185,8 @@ test("each row: its glyph, name, an On or Off chip, and the reason in a few word
       note: notes[tool.state] ?? null,
       settings: tool.state === "off",
       download: null,
+      // without the app feed, no Try again
+      recheck: null,
     });
   }
 });
@@ -467,4 +469,36 @@ test("in Hindi, the tools' words say their Hindi, and a reason keeps its brand n
   expect(toolsLabel("hi", [{ tool: "browser", state: "browser_blocked_by_policy" }])).toBe(
     "ब्राउज़र: बंद, आपकी फ़र्म ने रोका है।",
   );
+});
+
+test("Try again sits only under the browser whose policy Clauseo couldn't check, waiting while the read runs", () => {
+  const unread: KnownTool = { tool: "browser", state: "browser_policy_unreadable" };
+  expect(words(unread, { policy: { state: null } }).recheck).toEqual({
+    button: "Try again",
+    waiting: false,
+  });
+  expect(words(unread, { policy: { state: "unreadable" } }).recheck?.waiting).toBe(false);
+  expect(words(unread, { policy: { state: "checking" } }).recheck).toEqual({
+    button: "Try again",
+    waiting: true,
+  });
+  expect(toolRow("hi", unread, { ...ROOM, policy: { state: null } }).recheck?.button).toBe(
+    "फिर से प्रयास करें",
+  );
+  // no app feed to hear the read on: nothing to press
+  expect(words(unread).recheck).toBeNull();
+  // the firm's block, and every other state, gets none
+  for (const state of BROWSER.filter((s) => s !== "browser_policy_unreadable"))
+    expect(words({ tool: "browser", state }, { policy: { state: null } }).recheck).toBeNull();
+});
+
+test("a read that found the policy clear says the browser is ready, in the download's words", () => {
+  const unread: KnownTool = { tool: "browser", state: "browser_policy_unreadable" };
+  expect(words(unread, { policy: { state: "clear" } })).toMatchObject({
+    reason: "Ready for new conversations",
+    reasonTip: "The browser comes with your next conversation.",
+    note: null,
+    recheck: null,
+    download: null,
+  });
 });

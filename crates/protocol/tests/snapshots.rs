@@ -34,6 +34,7 @@ use clauseo_protocol::{
     AppendTarget,
     BrowserInstallFailure,
     BrowserInstallState,
+    BrowserPolicyState,
     ClientName,
     ConfigValue,
     ContentBlock,
@@ -440,6 +441,9 @@ mod host_event {
                 code: BrowserInstallFailure::SizeMismatch,
                 message: "the zip is 10 bytes, its Content-Length 12".to_owned(),
             },
+        };
+        BrowserPolicy => browser_policy: HostEvent::BrowserPolicy {
+            state: BrowserPolicyState::Unreadable,
         };
         UpdateChanged => update_changed: HostEvent::UpdateChanged(super::update::update_view());
         ConnectorsChanged => connectors_changed: HostEvent::ConnectorsChanged(

@@ -172,6 +172,10 @@ pub(super) fn session_loads(
         browser_dir: &run.browser,
         claims: run.browser_session.as_deref().map(Claims::of),
     };
+    if let Some(blocked) = run.browser_blocked {
+        // A Clear the app heard from a "Try again" no longer holds.
+        super::super::browser_policy::on_launch_read(actor, blocked);
+    }
     let mut servers = loads::mcp_servers(&actor.effective, control);
     let (hook_servers, browser_state) = browser::hook_servers(hook, &inputs);
     servers.extend(hook_servers);
