@@ -52,8 +52,12 @@
 # github.com/orgs/community/discussions/77942). So the concurrency group is the pull request and
 # its head commit, with cancel-in-progress off: a second run for the same commit waits for the
 # first, then finds its result and is `covered` (or `failed`). Runs for an older head of the same
-# pull request are cancelled by `decide` (actions: write), as cancel-in-progress did before.
-# "Older" is measured against the pull request's head as the API gives it when `decide` runs,
+# pull request are cancelled by `windows-cancel-stale`, as cancel-in-progress did before. It is
+# the only job here with actions: write: pull request and review events only, never a merge group,
+# and it checks out nothing; it runs only its own inline script, which reads the event (through
+# env) and the API (e2e-windows.yml's e2e-cancel-stale, #737, is the same job). `decide` reads
+# only, so the base branch's scripts it runs never hold a token that can cancel or re-run runs.
+# "Older" is measured against the pull request's head as the API gives it when the job runs,
 # not the event's: on #536 (2026-11-06) a review run for the old head waited 40 minutes behind
 # that head's test run, and its `decide`, comparing against its own stale head, cancelled both
 # runs of the new head, whose check then stayed failed until they were re-run by hand. A run
@@ -84,11 +88,12 @@ jobs:
     name: decide
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    # actions: write, to cancel this pull request's runs for an older head.
+    # Read-only, as e2e-windows.yml's e2e-changes: windows-cancel-stale holds the actions: write
+    # that cancelling needs. gate-prior.sh's reads of check runs and jobs need no actions
+    # permission on a public repository.
     permissions:
       contents: read
       pull-requests: read
-      actions: write
     outputs:
       mode: ${{ steps.mode.outputs.mode }}
       prior: ${{ steps.mode.outputs.prior }}
@@ -111,7 +116,6 @@ jobs:
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
           RUN_ID: ${{ github.run_id }}
           READY: ${{ contains(github.event.pull_request.labels.*.name, 'ready') }}
           REVIEW_STATE: ${{ github.event.review.state }}
@@ -122,34 +126,14 @@ jobs:
           if [ "$EVENT" = merge_group ]; then mode merge_group; fi
 
           # The pull request's head now. A run started for an earlier head is stale: it tests
-          # nothing and cancels nothing (the note at the top). If the read fails, nothing is
-          # cancelled and the run goes on for its own head.
+          # nothing (the note at the top). If the read fails, the run goes on for its own head.
           if current=$(gh api "repos/$REPO/pulls/$PR" -q .head.sha) && [ -n "$current" ]; then
             if [ "$current" != "$HEAD_SHA" ]; then
               echo "This run is for $HEAD_SHA; the pull request's head is now $current."
               mode stale
             fi
           else
-            echo "::warning::Reading the pull request's head failed; no run is cancelled"
-            current=""
-          fi
-
-          # This pull request's unfinished runs for an older head are obsolete (the note at the
-          # top). A failure here only leaves them running.
-          if [ -z "$current" ]; then
-            :
-          elif older=$(gh api -X GET "repos/$REPO/actions/workflows/windows-pr-tests.yml/runs" \
-              -f branch="$HEAD_REF" -f per_page=50 \
-              -q ".workflow_runs[] | select(.status != \"completed\" and .head_sha != \"$HEAD_SHA\") | .id"); then
-            for id in $older; do
-              if gh api -X POST "repos/$REPO/actions/runs/$id/cancel" > /dev/null; then
-                echo "Cancelled run $id, for an older head."
-              else
-                echo "::warning::Could not cancel run $id, for an older head"
-              fi
-            done
-          else
-            echo "::warning::Listing this pull request's runs failed; runs for an older head go on"
+            echo "::warning::Reading the pull request's head failed; going on for this run's head"
           fi
 
           # This head commit's last real result: the newest `windows tests (PR)` of another run
@@ -211,6 +195,54 @@ jobs:
             mode run
           fi
           mode wait
+
+  # Cancels this pull request's unfinished runs for any head other than the current one (the note
+  # at the top), as decide did before. The only job here with actions: write: pull request and
+  # review events only, never a merge group, and it checks out nothing; it runs only the script
+  # below, which reads the event through env and the API. A run for an older head (stale) cancels
+  # nothing, and a failed read cancels nothing. No job needs it: build reads decide alone.
+  windows-cancel-stale:
+    name: windows-cancel-stale
+    if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      pull-requests: read
+    steps:
+      - name: Cancel this pull request's runs for an older head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          if ! current=$(gh api "repos/$REPO/pulls/$PR" -q .head.sha) || [ -z "$current" ]; then
+            echo "::warning::Reading the pull request's head failed; no run is cancelled"
+            exit 0
+          fi
+          if [ "$current" != "$HEAD_SHA" ]; then
+            echo "This run is for $HEAD_SHA; the pull request's head is now $current. Nothing is cancelled."
+            exit 0
+          fi
+          # Only this repository's branch of that name: a fork's pull request from a branch with the
+          # same name is not this pull request. The filter reads REPO and HEAD_SHA from the
+          # environment (gh's jq `env`), so nothing is interpolated into it.
+          if ! older=$(gh api -X GET "repos/$REPO/actions/workflows/windows-pr-tests.yml/runs" \
+              -f branch="$HEAD_REF" -f per_page=50 \
+              -q '.workflow_runs[] | select(.status != "completed" and .head_sha != env.HEAD_SHA and .head_repository.full_name == env.REPO) | .id'); then
+            echo "::warning::Listing this pull request's runs failed; runs for an older head go on"
+            exit 0
+          fi
+          for id in $older; do
+            if gh api -X POST "repos/$REPO/actions/runs/$id/cancel" > /dev/null; then
+              echo "Cancelled run $id, for an older head."
+            else
+              echo "::warning::Could not cancel run $id, for an older head"
+            fi
+          done
 
   # The job id must stay `build`: see the note at the top.
   build:
