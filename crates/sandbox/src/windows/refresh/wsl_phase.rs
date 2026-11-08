@@ -7,9 +7,18 @@
 //! - `\Clauseo\SandboxWslDeny` (`--wsl-deny`, [`wsl_deny`]), on Windows Installer's events
 //!   in the Application log: once allowed, as the refresh is, it runs the phase once and does
 //!   nothing else, no admin-copy step. Anyone who can log on can forge such an event, so the
-//!   trigger is on this task alone: a forged one gains a re-applied deny. The trigger starts it
-//!   at once (no delay), and the task ignores a start while it runs: a burst of installer events
-//!   gives one run, and an event after it ends gives another.
+//!   trigger is on this task alone: a forged one gains a re-applied deny, and WSL's pending
+//!   upgrade installed (below), which any user may start through WSL's own installer anyway.
+//!   The trigger starts it at once (no delay), and the task ignores a start while it runs: a
+//!   burst of installer events gives one run, and an event after it ends gives another. The
+//!   launch check starts it too, as the lawyer (`clean_close::wsl_heal`).
+//!
+//! Before its phase, `--wsl-deny` installs WSL's pending MSI upgrade, when the Store package is
+//! newer than the MSI ([`WslUpgrade`], `wsl/msi.rs`): the upgrade rewrites the launch
+//! permissions, so the phase after it puts the deny back. A failed upgrade leaves WSL as it was
+//! (Windows Installer rolls it back), the phase still runs, and the run exits
+//! [`WslDenyExit::UpgradeFailed`], which the launch check takes as "the deny is applied on the
+//! current WSL" once it has verified the deny itself.
 //!
 //! The phase is idempotent and cheap.
 //!
@@ -17,10 +26,10 @@
 //! holder briefly (`--adopt`, another refresh's admin-copy steps) still re-applies; one still
 //! held then is logged, and a set-up or removal holding it does its own WSL step.
 //!
-//! Its outcome never changes the exit: the launch check refuses a launch whose deny is missing
-//! (`Blocked::WslDenyMissing`), so the deny's state is enforced there, and a failure here is one
-//! Event Log error line, naming `AppID`s and Windows error codes, never a path or a SID. A run
-//! that changed nothing writes no line.
+//! The phase's outcome never changes the exit: the launch check refuses a launch whose deny is
+//! missing (`Blocked::WslDenyMissing`), so the deny's state is enforced there, and a failure here
+//! is one Event Log error line, naming `AppID`s and Windows error codes, never a path or a SID.
+//! A run that changed nothing writes no line.
 
 use super::{Refresher, WSL_LOCK_WAIT, allowed};
 
@@ -33,11 +42,36 @@ pub enum WslDenyExit {
     Done,
     /// 51: not LOCAL SYSTEM, or not run from the admin copy's path; nothing was read or changed.
     NotAllowed,
+    /// 52: "upgrade failed, deny applied": WSL's pending upgrade was owed and failed (or couldn't
+    /// be tried), WSL is as it was, and the phase ran after it, as for [`WslDenyExit::Done`].
+    UpgradeFailed,
+}
+
+/// What the run's upgrade step did ([`WslUpgrade`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WslUpgraded {
+    /// No upgrade pending (or none this run can find): nothing was run.
+    NotPending,
+    /// WSL's pending MSI upgrade was installed: the Event Log's line.
+    Installed(String),
+    /// It was owed and failed, or couldn't be tried: why, with codes, never a path.
+    Failed(String),
+}
+
+/// The run's upgrade step: WSL's pending MSI upgrade installed as WSL's own installer installs
+/// it (`wsl/msi.rs`), as LOCAL SYSTEM. The machine on Windows, a fake in the tests.
+pub trait WslUpgrade {
+    /// Installs the upgrade when one is pending; nothing while a removal is under way.
+    fn upgrade_wsl(&mut self) -> WslUpgraded;
 }
 
 impl WslDenyExit {
     /// Every exit, in order; appended with each new one.
-    pub const ALL: [WslDenyExit; 2] = [WslDenyExit::Done, WslDenyExit::NotAllowed];
+    pub const ALL: [WslDenyExit; 3] = [
+        WslDenyExit::Done,
+        WslDenyExit::NotAllowed,
+        WslDenyExit::UpgradeFailed,
+    ];
 
     /// The exit whose [`as_code`](Self::as_code) is `code` (the task's last result), if any.
     pub fn from_code(code: i32) -> Option<WslDenyExit> {
@@ -51,19 +85,34 @@ impl WslDenyExit {
         match self {
             WslDenyExit::Done => 0,
             WslDenyExit::NotAllowed => 51,
+            WslDenyExit::UpgradeFailed => 52,
         }
     }
 }
 
 /// `--wsl-deny`, the task `\Clauseo\SandboxWslDeny`'s run: once allowed (LOCAL SYSTEM, from the
-/// admin copy, as the refresh's step 1), the phase once, and nothing else.
-pub fn wsl_deny(fs: &mut impl Refresher) -> WslDenyExit {
+/// admin copy, as the refresh's step 1), WSL's pending upgrade when one is owed, then the phase
+/// once, and nothing else. An installed upgrade is an information line, a failed one an error
+/// line and [`WslDenyExit::UpgradeFailed`].
+pub fn wsl_deny<F: Refresher + WslUpgrade>(fs: &mut F) -> WslDenyExit {
     if let Err((_, why)) = allowed(fs) {
         fs.log(true, &format!("WSL's deny wasn't re-applied: {why}"));
         return WslDenyExit::NotAllowed;
     }
+    let upgraded = fs.upgrade_wsl();
+    match &upgraded {
+        WslUpgraded::NotPending => {}
+        WslUpgraded::Installed(line) => fs.log(false, line),
+        WslUpgraded::Failed(why) => {
+            let line = format!("WSL's pending update wasn't installed; WSL is as it was: {why}");
+            fs.log(true, &line);
+        }
+    }
     run(fs);
-    WslDenyExit::Done
+    match upgraded {
+        WslUpgraded::Failed(_) => WslDenyExit::UpgradeFailed,
+        WslUpgraded::NotPending | WslUpgraded::Installed(_) => WslDenyExit::Done,
+    }
 }
 
 /// Re-applies WSL's deny under the set-up lock, logging the outcome as the module says.
@@ -96,7 +145,7 @@ pub(super) fn run(fs: &mut impl Refresher) {
 mod tests {
     use super::super::fake::{Fake, good, key, new, old, run_fake};
     use super::super::{RefreshExit, SourceError};
-    use super::{WslDenyExit, wsl_deny};
+    use super::{WslDenyExit, WslUpgraded, wsl_deny};
     use crate::windows::refresh::test_signer::TestKey;
 
     /// The fake machine, ready to refresh, and the key its exe is signed with.
@@ -183,21 +232,60 @@ mod tests {
             .copied()
             .filter(|c| !allowed.contains(c))
             .collect();
-        assert_eq!(rest, ["lock_waiting", "reapply_wsl", "unlock"]);
+        assert_eq!(
+            rest,
+            ["upgrade_wsl", "lock_waiting", "reapply_wsl", "unlock"]
+        );
         assert!(machine.logs.is_empty(), "{:?}", machine.logs);
         // Not LOCAL SYSTEM: refused, nothing re-applied, one error line, its own code.
         let (mut machine, _key) = fake();
         machine.system = false;
         assert_eq!(wsl_deny(&mut machine), WslDenyExit::NotAllowed);
         assert!(!machine.calls.contains(&"reapply_wsl"));
+        assert!(!machine.calls.contains(&"upgrade_wsl"));
         assert_eq!(machine.logs.len(), 1);
         assert!(machine.logs[0].0, "{:?}", machine.logs);
-        assert_eq!(
-            (
-                WslDenyExit::Done.as_code(),
-                WslDenyExit::NotAllowed.as_code()
-            ),
-            (0, 51)
+        assert_eq!(WslDenyExit::ALL.map(WslDenyExit::as_code), [0, 51, 52]);
+        for exit in WslDenyExit::ALL {
+            assert_eq!(WslDenyExit::from_code(exit.as_code().into()), Some(exit));
+        }
+    }
+
+    /// The calls of `machine` that are the upgrade's or the phase's.
+    fn steps(machine: &Fake) -> Vec<&'static str> {
+        let wanted = ["upgrade_wsl", "lock_waiting", "reapply_wsl", "unlock"];
+        let calls = machine.calls.iter().filter(|call| wanted.contains(*call));
+        calls.copied().collect()
+    }
+
+    #[test]
+    fn a_pending_upgrade_is_installed_then_the_deny_is_reapplied() {
+        let (mut machine, _key) = fake();
+        let line = "WSL's pending update was installed: 2.6.1 to 2.6.3";
+        machine.upgrade = WslUpgraded::Installed(line.to_owned());
+        assert_eq!(wsl_deny(&mut machine), WslDenyExit::Done);
+        let order = ["upgrade_wsl", "lock_waiting", "reapply_wsl", "unlock"];
+        assert_eq!(steps(&machine), order);
+        assert_eq!(machine.logs, [(false, line.to_owned())]);
+    }
+
+    #[test]
+    fn a_failed_upgrade_still_reapplies_the_deny_and_exits_52() {
+        let (mut machine, _key) = fake();
+        machine.upgrade = WslUpgraded::Failed("msiexec ended with 1603".to_owned());
+        assert_eq!(wsl_deny(&mut machine), WslDenyExit::UpgradeFailed);
+        let order = ["upgrade_wsl", "lock_waiting", "reapply_wsl", "unlock"];
+        assert_eq!(steps(&machine), order);
+        let (error, line) = &machine.logs[0];
+        assert!(
+            *error && line.ends_with("WSL is as it was: msiexec ended with 1603"),
+            "{line}"
         );
+        // The phase failing too keeps 52: the launch check verifies the deny itself.
+        let (mut machine, _key) = fake();
+        machine.upgrade = WslUpgraded::Failed("msiexec ended with 1618".to_owned());
+        machine.wsl = Err("RegSetValueExW failed (5)".to_owned());
+        assert_eq!(wsl_deny(&mut machine), WslDenyExit::UpgradeFailed);
+        assert_eq!(machine.logs.len(), 2, "{:?}", machine.logs);
     }
 }

@@ -26,7 +26,8 @@ use windows::core::{HSTRING, PCWSTR, w};
 use super::source::{Handle, read_capped};
 use super::{
     EXE_CAP, Failed, OWN_MACHINE, RefreshExit, RefreshRecord, Refresher, STAGING_SDDL, SourceError,
-    SourceFile, Sources, Trust, UPDATER_KEY, WslDenyExit, refresh, staging, walk, wsl_deny,
+    SourceFile, Sources, Trust, UPDATER_KEY, WslDenyExit, WslUpgrade, WslUpgraded, refresh,
+    staging, walk, wsl_deny,
 };
 use crate::windows::admin_copy::{self, Found, LOCKED_FILE_SDDL, level_safe, os};
 pub(crate) use crate::windows::admin_copy::{SETUP_EXE as EXE_NAME, SETUP_SIG as SIG_NAME};
@@ -115,7 +116,7 @@ pub(crate) fn sandbox_dir() -> Result<PathBuf, Failed> {
 }
 
 /// `%ProgramFiles%` as Windows knows it (`FOLDERID_ProgramFiles`), never from the environment.
-fn program_files() -> Result<PathBuf, Failed> {
+pub(crate) fn program_files() -> Result<PathBuf, Failed> {
     let folder = FOLDERID_ProgramFiles;
     // SAFETY: `folder` is a live GUID for the call; no token is passed. The string returned is
     // copied, then freed with CoTaskMemFree, once.
@@ -294,6 +295,36 @@ impl Refresher for WindowsRefresher {
         let applied = wsl::apply(&mut wsl::WindowsWsl::writer(RECORD_KEY), &group)
             .map_err(|error| error.to_string())?;
         applied.outcome()
+    }
+}
+
+impl WslUpgrade for WindowsRefresher {
+    fn upgrade_wsl(&mut self) -> WslUpgraded {
+        // Nothing while a removal is under way, or with no group: no deny is owed then, and the
+        // launch check that asked has nothing to launch.
+        match (sandbox_removing(), sandbox_group_sid()) {
+            (Ok(false), Ok(Some(_))) => {}
+            (Ok(_), Ok(_)) => return WslUpgraded::NotPending,
+            (Err(error), _) | (_, Err(error)) => {
+                return WslUpgraded::Failed(format!("the record: {error}"));
+            }
+        }
+        let program_files = match program_files() {
+            Ok(folder) => folder,
+            Err(why) => return WslUpgraded::Failed(why),
+        };
+        match wsl::msi::upgrade_pending(&program_files) {
+            wsl::msi::MsiUpgrade::NotPending => WslUpgraded::NotPending,
+            wsl::msi::MsiUpgrade::Upgraded {
+                from,
+                to: (major, minor, revision),
+            } => {
+                let to = format!("{major}.{minor}.{revision}");
+                let line = format!("WSL's pending update was installed: {from} to {to}");
+                WslUpgraded::Installed(line)
+            }
+            wsl::msi::MsiUpgrade::Failed(why) => WslUpgraded::Failed(why),
+        }
     }
 }
 

@@ -16,11 +16,12 @@ pub const EXECUTION_LIMIT: &str = "PT5M";
 pub const STOP_ARG: &str = "--stop";
 /// The stop task's execution limit: 2 minutes.
 pub const STOP_EXECUTION_LIMIT: &str = "PT2M";
-/// The WSL deny task's one argument (`wsl_phase::wsl_deny`): it re-applies WSL's deny and
-/// does nothing else.
+/// The WSL deny task's one argument (`wsl_phase::wsl_deny`): it installs WSL's pending upgrade
+/// when one is owed, re-applies WSL's deny, and does nothing else.
 pub const WSL_DENY_ARG: &str = "--wsl-deny";
-/// The WSL deny task's execution limit: 1 minute (its one phase waits 10 s for the lock).
-pub const WSL_DENY_EXECUTION_LIMIT: &str = "PT1M";
+/// The WSL deny task's execution limit: 5 minutes, for WSL's MSI upgrade (msiexec waited for up
+/// to 4 minutes, `wsl::msi::MSI_WAIT`), then its phase, which waits 10 s for the lock.
+pub const WSL_DENY_EXECUTION_LIMIT: &str = "PT5M";
 
 /// The Windows Installer events (`MsiInstaller` in the Application log) that start the WSL
 /// deny task, so WSL's deny comes back within seconds of a WSL update, repair or removal: product

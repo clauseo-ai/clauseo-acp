@@ -109,9 +109,10 @@ pub enum Error {
     /// fix (D-B4): the set-up program's admin copy is missing, changed or in a folder others
     /// can change (`Blocked::AdminCopy*`, from `windows::clean_close::check_launch`), or gone
     /// after Windows security blocked it (`Blocked::ToolMissing`), or WSL's deny for the pool is
-    /// missing or can't be checked, or a WSL update is pending (`Blocked::WslDenyMissing`,
-    /// `WslDenyUnverifiable`, `WslUpgradePending`, from
-    /// `windows::wsl::check`). Nothing was planned or
+    /// missing or can't be checked (`Blocked::WslDenyMissing`, `WslDenyUnverifiable`, from
+    /// `windows::wsl::check`, once the launch check's self-healing couldn't repair it), or a WSL
+    /// update is pending (`WslUpgradePending`, from `wsl::check` alone: the launch check has it
+    /// installed and refuses only a deny it can't verify after). Nothing was planned or
     /// written, and the caller shows the cause rather than run on a weaker tier in silence.
     #[error("the sandbox can't run: {0}")]
     Blocked(crate::Blocked),

@@ -26,7 +26,9 @@
 //!   that can't be read or parsed, a class with no `AppID`, or a packaged-COM registration of
 //!   WSL's class (which would bypass the `AppID`) refuses with `Blocked::WslDenyUnverifiable`,
 //!   the inbox WSL's too: from Windows 10 2004 on it runs WSL2's VMs as well. With no WSL at all
-//!   nothing is refused.
+//!   nothing is refused. The launch heals first (`clean_close::wsl_heal`): a missing deny, or a
+//!   pending upgrade ([`inspect`]), has the WSL deny task run, which installs the upgrade
+//!   ([`msi`]) and re-applies the deny, and the launch waits for it.
 //! - **Removal** ([`remove`], `--remove`): only our denies come off each recorded target, and a
 //!   value we made goes once what is left is the default it was made from. No old value is ever
 //!   written back: it may be older than a WSL update since.
@@ -38,6 +40,8 @@
 mod apply;
 mod check;
 #[cfg(windows)]
+pub mod msi;
+#[cfg(windows)]
 mod os;
 mod record;
 mod sd;
@@ -45,13 +49,16 @@ mod seam;
 mod upgrade;
 
 pub use apply::{WslApplied, WslRemoved, apply, local_group, remove};
-pub use check::{Found, Resolved, check, resolve};
+pub use check::{Found, Resolved, check, inspect, resolve};
 #[cfg(windows)]
 pub use os::WindowsWsl;
 pub use record::{AppId, RECORD_ABSENT, RECORD_APP_IDS, WslRecord};
 pub use sd::{DENY_MASK, LaunchSd, NEEDED_MASK, SdError};
 pub use seam::{ClassEntry, Permission, WslError, WslRead, WslWrite};
-pub use upgrade::{PACKAGE_NAME, Upgrade, upgrade, version};
+pub use upgrade::{
+    INSTALLER_SERVICE, PACKAGE_MSI, PACKAGE_NAME, Upgrade, Version, installer_package, msi_behind,
+    upgrade, version,
+};
 
 /// The lifted WSL's service (the MSI's `wslservice.exe`), which runs WSL2's VMs.
 pub const WSL_SERVICE: &str = "WSLService";
