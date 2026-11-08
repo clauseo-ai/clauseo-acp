@@ -153,10 +153,17 @@ fn each_cause_refuses_by_its_code_and_the_setting() {
             Some(ErrorCode::SandboxSetupRequired),
             None,
         ),
+        // A set-up in place but broken fails closed whatever the setting (R17 PR-E review).
         (
             NotProtectedCause::SetUpFailed,
-            Some(ErrorCode::SandboxRequired),
-            None,
+            Some(ErrorCode::SandboxBlocked),
+            Some(ErrorCode::SandboxBlocked),
+        ),
+        (
+            // A cause this host does not know, as a newer sandbox's would decode.
+            serde_json::from_value(serde_json::json!("slot_lost")).unwrap(),
+            Some(ErrorCode::SandboxBlocked),
+            Some(ErrorCode::SandboxBlocked),
         ),
         (
             NotProtectedCause::Unsupported {

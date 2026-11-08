@@ -61,7 +61,7 @@ pub(super) fn start_worker(
 ) -> Result<MatterWorker<MatterTag>, Error> {
     let post = actor.post.clone();
     MatterWorker::start(
-        matter_settings(actor.effective.data_dir()),
+        settings_of(actor),
         Box::new(move |tag, reply| {
             let _gone = post.try_send(Input::Matter { matter, tag, reply });
         }),
@@ -119,6 +119,16 @@ pub(super) fn registry(actor: &Actor, matter: MatterId) -> Registry {
             .filter(|(id, _)| *id != matter)
             .collect(),
     }
+}
+
+/// The matters' settings (`matter_settings`), with the configured refused trees beside the data
+/// folder.
+pub(super) fn settings_of(actor: &Actor) -> clauseo_matters::Settings {
+    let mut settings = matter_settings(actor.effective.data_dir());
+    settings
+        .refused_trees
+        .extend(actor.refused_trees.iter().cloned());
+    settings
 }
 
 /// The folders import refuses: the configured ones and the data folder.

@@ -71,6 +71,14 @@ pub(crate) fn matter_busy(actor: &Actor, matter: MatterId) -> bool {
         })
 }
 
+/// Whether every agent of `matter` is gone: no thread of it has an agent or a launch being
+/// prepared (the sandbox's forget waits for it, `protection/forget.rs`).
+pub(crate) fn agents_gone(actor: &Actor, matter: MatterId) -> bool {
+    !actor.threads.values().any(|entry| {
+        entry.row.matter == matter && (entry.turn.agent.is_some() || entry.turn.preparing.is_some())
+    })
+}
+
 /// Stops the agent of every thread of `matter` with the shutdown ladder (`ForgetMatter`); each
 /// posts `Ended` and logs its detach as any stop does.
 pub(crate) fn stop_agents(actor: &mut Actor, matter: MatterId) {

@@ -54,6 +54,8 @@ pub(crate) struct ProtectionHost {
     next_work: u64,
     /// The view last sent to app subscribers (at start, the start's view).
     sent: Option<ProtectionView>,
+    /// The forgotten matters' forgets owed and running (`forget.rs`).
+    forgets: forget::Forgets,
 }
 
 impl ProtectionHost {
@@ -65,6 +67,7 @@ impl ProtectionHost {
             running: None,
             next_work: 0,
             sent: None,
+            forgets: forget::Forgets::default(),
         }
     }
 
@@ -216,16 +219,20 @@ pub(super) fn start(actor: &mut Actor) {
     let _first = actor.protection.take_changed(required, auto);
 }
 
-/// Sends `ProtectionViewChanged` to every app subscriber when the view changed.
+/// Sends `ProtectionViewChanged` to every app subscriber when the view changed, and stops the
+/// unprotected agents once launches are refused (`turn/unprotected.rs`).
 pub(super) fn publish_view(actor: &mut Actor) {
     let (required, auto) = settings(actor);
     if let Some(view) = actor.protection.take_changed(required, auto) {
         super::app::publish(actor, &HostEvent::ProtectionViewChanged { view });
+        super::turn::protection_changed(actor);
     }
 }
 
-/// After every input: when either protection setting changed, the new view goes out.
+/// After every input: an owed forget whose matter's agents are gone starts (`forget.rs`), and
+/// when either protection setting changed, the new view goes out.
 pub(super) fn tick(actor: &mut Actor) {
+    forget::tick(actor);
     let (required, auto) = settings(actor);
     if actor.protection.settings_moved(required, auto) {
         publish_view(actor);
@@ -247,14 +254,28 @@ fn matters_changed(actor: &mut Actor) {
     actor.lists.touch_all();
 }
 
+/// This computer's tier now, `None` when unprotected: an agent launched under tier B runs under
+/// the sandbox runner, whose Escapee exit ends its turn `LeftSafeWorkspace`
+/// (`turn/agents/ended.rs`).
+// TODO(PR-D): the launch itself says whether it went through the runner.
+pub(crate) fn tier(actor: &Actor) -> Option<ProtectionTier> {
+    match actor.protection.computer() {
+        Protection::Protected { tier } => Some(*tier),
+        Protection::NotProtected { .. } => None,
+    }
+}
+
 /// The refusal of `CreateThread` and of a turn's launch by this computer's protection: none
-/// when it is protected. A computer that has the sandbox but can't use it now refuses whatever
-/// `sandbox.required` or `sandbox.allow_unprotected_auto` say (R17 PR-E; that setting covers
-/// only a computer that can't have the sandbox): `Blocked` and `OtherAccount` with
-/// `sandbox.blocked`, `PoolFull` with `sandbox.pool_full`, `PoolOwned` with
-/// `sandbox.pool_owned`. Every other cause refuses only under `sandbox.required`:
+/// when it is protected. A computer that has the sandbox but can't use it now, or whose set-up
+/// is in place but broken, refuses whatever `sandbox.required` or
+/// `sandbox.allow_unprotected_auto` say (R17 PR-E, fail closed; that setting covers only a
+/// computer without the sandbox set up): `Blocked`, `OtherAccount`, `SetUpFailed` (a failed
+/// set-up or check, a probe that failed, no reason, a reason this host does not know) and
+/// `Unknown` with `sandbox.blocked`, `PoolFull` with `sandbox.pool_full`, `PoolOwned` with
+/// `sandbox.pool_owned`. Only a sandbox not set up at all (`NeedsSetUp`, `SetUpRefused`,
+/// `Unsupported`) or switched off refuses only under `sandbox.required`:
 /// `sandbox.setup_required` when the set-up would fix it (`NeedsSetUp`, `SetUpRefused`),
-/// `sandbox.required` otherwise.
+/// `sandbox.required` otherwise. The app words each from the cause.
 ///
 /// While the sandbox's set-up is being removed (`RemoveSandboxSetup`, the view's `in_progress:
 /// remove`), every launch and `CreateThread` is refused with `sandbox.removing` (retryable)
@@ -282,6 +303,12 @@ fn refusal_of(cause: &NotProtectedCause, required: bool) -> Option<Error> {
                 "a setting only whoever looks after this computer can change blocks the sandbox",
             ));
         }
+        NotProtectedCause::SetUpFailed | NotProtectedCause::Unknown { .. } => {
+            return Some(Error::refused(
+                ErrorCode::SandboxBlocked,
+                "the sandbox's set-up is broken; set it up again",
+            ));
+        }
         // TODO(stage C's slot-groups PR): the sandbox's `Error::PoolFull { why }` gives this
         // cause at a tier-B launch, mapped one-to-one into `why`; until then no host builds it.
         NotProtectedCause::PoolFull { .. } => {
@@ -299,9 +326,7 @@ fn refusal_of(cause: &NotProtectedCause, required: bool) -> Option<Error> {
         NotProtectedCause::Unsupported { .. }
         | NotProtectedCause::NeedsSetUp
         | NotProtectedCause::SetUpRefused
-        | NotProtectedCause::SetUpFailed
-        | NotProtectedCause::SwitchedOff { .. }
-        | NotProtectedCause::Unknown { .. } => {}
+        | NotProtectedCause::SwitchedOff { .. } => {}
     }
     if !required {
         return None;

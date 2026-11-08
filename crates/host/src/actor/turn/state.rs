@@ -31,6 +31,15 @@ pub(super) enum TurnPhase {
     Ending,
 }
 
+/// Whether a turn's agent's process stayed in the Safe workspace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Workspace {
+    /// It did, or it ran without the sandbox runner.
+    Inside,
+    /// It ended with the sandbox runner's Escapee exit (`agents/ended.rs`).
+    Left,
+}
+
 /// A limit signal that stops the turn at the limit.
 #[derive(Debug, Clone)]
 pub(super) struct LimitMark {
@@ -133,6 +142,7 @@ impl Current {
             abort: false,
             store_failed: None,
             detach: None,
+            workspace: Workspace::Inside,
             limit_read: None,
             exit_wait: super::exit_wait::ExitWait::default(),
             started,

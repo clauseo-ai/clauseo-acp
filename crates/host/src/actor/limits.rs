@@ -106,8 +106,8 @@ pub(crate) struct LimitsHost {
     stops: Vec<stops::PendingStop>,
     /// The number the next read started gets.
     next_read: u64,
-    /// The agents whose read `sandbox.required` refused, each logged once (decision record
-    /// 0051): no reader runs outside the jail until R17 PR-D/E runs it inside.
+    /// The agents whose read the computer's protection refused, each logged once (decision
+    /// record 0051): no reader runs outside the jail until R17 PR-D runs it inside.
     refused_reads: Vec<AgentKind>,
 }
 
@@ -397,18 +397,25 @@ fn carry_out(actor: &mut Actor, actions: Vec<Action>, now: Timestamp) {
 }
 
 /// Starts one read on the pool, numbered; its outcome comes back as [`LimitsInput::Read`].
-/// Under `sandbox.required` no reader starts (it would run outside the jail, 0051): the read
-/// fails at once, so the plan-limits line shows it could not read.
+/// A reader launches the agent's program outside the jail (0051), so it starts only when a
+/// session's launch would (`protection::refusal`: `sandbox.required`, a blocked or broken
+/// set-up, a removal): otherwise the read fails at once, so the plan-limits line shows it could
+/// not read. The refusal is logged once per agent kind, by its code only.
 fn start_read(actor: &mut Actor, agent: AgentKind) {
     let number = actor.limits.next_read;
     actor.limits.next_read = number.saturating_add(1);
-    if actor.effective.settings().sandbox.required {
+    if let Some(refused) = super::protection::refusal(actor) {
         if !actor.limits.refused_reads.contains(&agent) {
             actor.limits.refused_reads.push(agent);
-            tracing::info!(?agent, "limits not read: the firm requires the sandbox");
+            let code = refused.code();
+            tracing::info!(
+                ?agent,
+                code = code.as_str(),
+                "limits not read: launches are refused"
+            );
         }
         let outcome = ReadOutcome::Failed(ReadFailure::LaunchFailed(
-            "the firm requires the sandbox".to_owned(),
+            "the Safe workspace refuses agent launches now".to_owned(),
         ));
         actor.spawn_post(async move {
             Input::Limits(LimitsInput::Read {

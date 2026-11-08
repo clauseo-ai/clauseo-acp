@@ -1,7 +1,7 @@
 //! A refused folder gets one code per reason (decision record 0022): a drive root, the home
 //! folder, a system folder, a folder or `matter.json` that does not read, a folder that is, holds
-//! or sits inside another matter's (naming it), Clauseo's own data folder, and on Windows a path
-//! too long for Windows to start programs in.
+//! or sits inside another matter's (naming it), Clauseo's own data folder, a refused tree or a
+//! folder inside one, and on Windows a path too long for Windows to start programs in.
 
 use std::path::Path;
 
@@ -79,6 +79,27 @@ fn home_and_system_folders_have_codes_of_their_own() {
             .with_refused_folders(vec![home.clone()])
     });
     refused(&host, &home, ErrorCode::MatterFolderIsSystem);
+    host.shutdown();
+}
+
+/// R17 PR-E: a refused tree (`~/.codex`, the folder `CODEX_HOME` names) is refused with every
+/// folder inside it and every folder holding it, as a system folder.
+#[test]
+fn a_refused_tree_refuses_the_folders_inside_it() {
+    let dir = Dir::new("refuse_tree", &[]);
+    let codex = dir.folder("home-of-lawyer/.codex", &[("auth.json", "{}\n")]);
+    let inside = dir.folder("home-of-lawyer/.codex/sessions/2026", &[("a.txt", "x\n")]);
+    let holding = dir.folder("home-of-lawyer", &[]);
+    let beside = dir.folder("home-of-lawyer/Documents/Case", &[("a.txt", "x\n")]);
+    let host = dir.start_with(0, |config| {
+        config
+            .with_home_folder(None)
+            .with_refused_trees(vec![codex.clone()])
+    });
+    refused(&host, &codex, ErrorCode::MatterFolderIsSystem);
+    refused(&host, &inside, ErrorCode::MatterFolderIsSystem);
+    refused(&host, &holding, ErrorCode::MatterFolderIsSystem);
+    imported(&host, &beside);
     host.shutdown();
 }
 

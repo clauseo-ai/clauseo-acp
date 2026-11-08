@@ -96,6 +96,7 @@ pub(super) async fn open(
         pack_generations: BTreeMap::new(),
         turn_path: super::turn::wide::TurnPath::new(parts.idle),
         refused_folders: parts.refused_folders,
+        refused_trees: parts.refused_trees,
         documents: super::documents::DocumentsWait::new(parts.documents),
         home_spellings: super::rail::home_spellings(parts.home_folder.as_deref()),
         home: parts.home_folder,

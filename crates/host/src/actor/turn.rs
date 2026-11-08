@@ -40,6 +40,7 @@ mod steps;
 mod text;
 mod undo;
 pub(crate) mod undo_preview;
+mod unprotected;
 mod updates;
 pub(crate) mod wide;
 mod withheld;
@@ -80,8 +81,9 @@ pub(crate) use route::{TurnCommand, command};
 pub(crate) use sign_in::on_request as sign_in_request;
 pub(crate) use state::busy;
 use state::{End, LimitMark, TurnPhase};
+pub(crate) use unprotected::protection_changed;
 pub(crate) use writer::{
-    hold_for_relocate, matter_busy, release_relocate, stop_agents, writer_busy,
+    agents_gone, hold_for_relocate, matter_busy, release_relocate, stop_agents, writer_busy,
 };
 
 /// How long a cancelled turn waits for the agent's answer before the host stops the agent.
@@ -208,6 +210,9 @@ struct Current {
     store_failed: Option<ErrorCode>,
     /// The agent exited before the prompt went out; logged last, after `TurnEnded`.
     detach: Option<DetachReason>,
+    /// Its agent's process left the Safe workspace (`agents/ended.rs`): however it ends, it ends
+    /// `LeftSafeWorkspace` with no `TurnFailed`, and it never goes back to the queue.
+    workspace: state::Workspace,
     /// A Codex prompt failed with a JSON-RPC error: the turn's end waits for a limits read.
     limit_read: Option<end::LimitRead>,
     /// The turn's end waits for its agent's exit report (`exit_wait.rs`).

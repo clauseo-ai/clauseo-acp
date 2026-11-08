@@ -53,6 +53,7 @@ pub struct HostConfig {
     launcher: Arc<dyn Launcher>,
     profile: Box<dyn ProfileHook>,
     refused_folders: Vec<PathBuf>,
+    refused_trees: Vec<PathBuf>,
     documents: Option<crate::actor::documents::Later>,
     home_folder: Option<PathBuf>,
     pub(crate) clock: Arc<dyn Clock>,
@@ -91,6 +92,7 @@ impl HostConfig {
             launcher,
             profile: Box::new(NoProfile),
             refused_folders: Vec::new(),
+            refused_trees: Vec::new(),
             documents: None,
             home_folder: SystemDirs.home(),
             clock: Arc::new(SystemClock),
@@ -163,6 +165,13 @@ impl HostConfig {
     /// (default: none). The host adds its data folder.
     pub fn with_refused_folders(mut self, folders: Vec<PathBuf>) -> Self {
         self.refused_folders = folders;
+        self
+    }
+
+    /// Folders a lawyer may not pick as a matter, nor any folder inside them, from
+    /// `clauseo_settings::refused_trees` (default: none). The host adds its data folder.
+    pub fn with_refused_trees(mut self, trees: Vec<PathBuf>) -> Self {
+        self.refused_trees = trees;
         self
     }
 

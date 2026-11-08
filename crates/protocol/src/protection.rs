@@ -82,15 +82,16 @@ enum_with_names! {
 
 open_data_enum! {
     /// Why a matter, or this computer, has no sandbox. A cause from a newer Clauseo decodes to
-    /// `Unknown`. What follows depends on `sandbox.required` (decision record 0051): when it is
-    /// false, any cause runs the agents at tier C, in the ask modes (auto only when
+    /// `Unknown`. Six causes refuse `CreateThread` and a turn's launch whatever
+    /// `sandbox.required` or `sandbox.allow_unprotected_auto` say, as a computer whose sandbox
+    /// is set up but can't be used now, or is broken (R17 PR-E, fail closed): `Blocked`,
+    /// `OtherAccount`, `SetUpFailed` and `Unknown` with `sandbox.blocked`, `PoolFull` with
+    /// `sandbox.pool_full` and `PoolOwned` with `sandbox.pool_owned`. The rest, a sandbox not
+    /// set up at all or switched off, depend on `sandbox.required` (decision record 0051): when
+    /// it is false they run the agents at tier C, in the ask modes (auto only when
     /// `sandbox.allow_unprotected_auto` is true), with no refusal; when it is true, there is
     /// never a silent fallback: `NeedsSetUp` and `SetUpRefused`, which the set-up fixes, refuse
-    /// `CreateThread` and a turn's launch with `sandbox.setup_required`, and every other cause
-    /// (`Unknown` included) with `sandbox.required`. Four causes refuse whatever either setting
-    /// says, as a computer that has the sandbox but can't use it now (R17 PR-E): `Blocked` and
-    /// `OtherAccount` with `sandbox.blocked`, `PoolFull` with `sandbox.pool_full` and
-    /// `PoolOwned` with `sandbox.pool_owned`.
+    /// with `sandbox.setup_required`, `Unsupported` and `SwitchedOff` with `sandbox.required`.
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum NotProtectedCause {
         /// This computer has no sandbox Clauseo can use: `why` says which case (an OS without
@@ -106,7 +107,8 @@ open_data_enum! {
         /// The set-up was asked for, and the lawyer declined the administrator prompt or Windows
         /// refused to raise it.
         SetUpRefused = "set_up_refused",
-        /// The set-up, or the check that the sandbox works, failed.
+        /// The set-up, or the check that the sandbox works, failed: no agent starts on this
+        /// computer whatever either setting says, `sandbox.blocked`, until a set-up repairs it.
         SetUpFailed = "set_up_failed",
         /// Every agent user of the set-up pool is taken, so this matter has no sandbox until one
         /// is free. Counts only, never an account name or a SID; the host passes the sandbox's

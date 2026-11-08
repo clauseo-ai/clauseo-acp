@@ -198,13 +198,13 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   // provisional (stage E, app thread's words for copy review): the pool's refusal, moved from
   // words-protection.ts
   "sandbox.pool_full":
-    "All the Safe workspace's places on this computer are in use, so Clauseo can't answer here yet. End a conversation in another matter to free one.",
-  // provisional placeholder: app thread rewrites
+    "All the places in this computer's Safe workspace are in use, so Clauseo can't answer in this matter until one is free. End a conversation in another matter to free one.",
+  // pool_owned without TurnFailed.at; the {where} version is in words-errors-where.ts (#713)
   "sandbox.pool_owned":
     "Part of this matter's folder still belongs to the Safe workspace, so Clauseo can't answer here. Ask your IT team to give you back ownership of it.",
   // provisional (stage E, app thread's words for copy review)
   "sandbox.cant_label":
-    "The Safe workspace couldn't be given access to a folder in this matter, so Clauseo can't answer here. If it keeps happening, ask your IT team.",
+    "The Safe workspace couldn't be prepared for this matter, so Clauseo can't answer here. If it keeps happening, ask your IT team.",
   // provisional (stage E, app thread's words for copy review)
   "sandbox.removing":
     "The Safe workspace is being removed from this computer. Try again once that's finished.",

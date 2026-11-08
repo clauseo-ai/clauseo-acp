@@ -271,3 +271,26 @@ fn windows_documents_on_a_dead_share_child() {
     assert_eq!(documents, None);
     assert!(took < std::time::Duration::from_secs(5), "{took:?}");
 }
+
+/// R17 PR-E review: a relative `CODEX_HOME` (or an empty one) counts as not set.
+#[test]
+fn a_relative_or_empty_codex_home_is_not_set() {
+    use std::ffi::OsString;
+    use std::path::PathBuf;
+
+    use super::codex_home_of;
+
+    assert_eq!(codex_home_of(None), None);
+    assert_eq!(codex_home_of(Some(OsString::new())), None);
+    assert_eq!(codex_home_of(Some(OsString::from("codex"))), None);
+    assert_eq!(codex_home_of(Some(OsString::from("./.codex"))), None);
+    let absolute = if cfg!(windows) {
+        r"C:\codex"
+    } else {
+        "/srv/codex"
+    };
+    assert_eq!(
+        codex_home_of(Some(OsString::from(absolute))),
+        Some(PathBuf::from(absolute))
+    );
+}
