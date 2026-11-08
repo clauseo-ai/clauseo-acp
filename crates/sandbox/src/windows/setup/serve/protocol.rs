@@ -279,8 +279,10 @@ pub fn retry_squatted(
 /// read as the exe's result is ([`Reply::outcome`]); an install with no set-up task, or a
 /// refusal (one the gate didn't foresee for a lawyer it should serve), runs `elevated`, the
 /// set-up with its prompt, whose declined prompt is still `SetupError::Refused`. The prompt
-/// needs an administrator's credentials, so falling back to it grants no one anything. Any
-/// other failure to ask is a failure saying why, with no prompt raised.
+/// needs an administrator's credentials, so falling back to it grants no one anything. A task
+/// that couldn't be reached (a squatted pipe, no server or no published name in time) is
+/// `SetupError::Unreachable`, its details logged; any other failure to ask is a failure saying
+/// why. Neither raises a prompt.
 pub fn via_task(
     asked: Result<Reply, SetUpError>,
     elevated: impl FnOnce() -> Result<(), SetupError>,
@@ -292,6 +294,17 @@ pub fn via_task(
         }
         Ok(reply) => reply.outcome(),
         Err(SetUpError::NotRegistered) => elevated(),
-        Err(error) => Err(SetupError::Failed(error.to_string())),
+        Err(
+            error @ (SetUpError::Squatted(_)
+            | SetUpError::NotTheServer(_)
+            | SetUpError::NoServer
+            | SetUpError::Unpublished),
+        ) => {
+            tracing::warn!(%error, "the set-up task couldn't be reached");
+            Err(SetupError::Unreachable)
+        }
+        Err(error @ (SetUpError::Request(_) | SetUpError::Task(_) | SetUpError::Pipe(_))) => {
+            Err(SetupError::Failed(error.to_string()))
+        }
     }
 }

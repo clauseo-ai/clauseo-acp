@@ -73,6 +73,13 @@ pub enum SetupError {
     /// users lack (1385).
     #[error("sandbox set-up is blocked: {0}")]
     Blocked(Blocked),
+    /// Windows: the set-up task (`\Clauseo\SandboxSetUp`) couldn't be reached: its server
+    /// never came (no pipe, or no published name, in time), or another process held its pipe.
+    /// Nothing was sent and no prompt was raised; the details are logged, not carried, and the
+    /// host names its own cause. A task that refused this user isn't this (it falls back to the
+    /// prompt), nor is another user owning the pool (`SetupState::SetUpByOtherUser`).
+    #[error("the sandbox set-up task couldn't be reached")]
+    Unreachable,
 }
 
 /// What blocks the set-up, named so firm IT can act on it (D-B4). Its words name the setting

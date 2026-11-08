@@ -2138,6 +2138,16 @@ Holding it to once per start is the host's job (D3a's start-up checks), not the 
    that didn't start, is a failure naming a squatted pipe (`SetUpError::Squatted`), with nothing
    sent and no prompt.
 
+**For the app's words.** A task that couldn't be reached (a squatted pipe, `NoServer`,
+`Unpublished`) is `SetupError::Unreachable` (appended), its details in the app's log only, so
+the host maps it to its own cause; `Request`, `Task` and `Pipe` stay `SetupError::Failed`.
+Another user owning the pool stays `SetupState::SetUpByOtherUser`, and a refusal the gate
+didn't foresee still falls back to the prompt. `UserSetup::asks_admin()` tells the first run
+whether its set-up would raise the prompt: `false` only when `\Clauseo\SandboxSetUp` is
+registered and enabled as the user reads it (`IRegisteredTask::Enabled`, nothing started) and
+`serve::task_serves` holds for the app's data folder; a task that can't be read counts as one
+that may not serve.
+
 **Accepted.** A non-admin user can now make local accounts, WFP filters and the D5 claim on a
 per-machine install; IT opts in by deploying it. The set-up's change journal step grows journals
 on volumes the user's registered matters name, now with no admin consent, bounded at 256 MiB

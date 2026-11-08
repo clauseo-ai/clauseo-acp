@@ -367,6 +367,16 @@ pub(crate) fn task_busy(task: SystemTask) -> Result<bool, TaskError> {
     })
 }
 
+/// Whether `task` is registered and enabled (`IRegisteredTask::Enabled`), read as whoever calls
+/// it, without starting it: [`TaskError::NotRegistered`] when it, or `\Clauseo`, is missing.
+pub(crate) fn task_enabled(task: SystemTask) -> Result<bool, TaskError> {
+    with_task(task, |task| {
+        // SAFETY: a live task; it reads a value.
+        let enabled = unsafe { task.Enabled() }.map_err(com("IRegisteredTask::Enabled"))?;
+        Ok(enabled.as_bool())
+    })
+}
+
 /// The refresh task's last run: its last result and last run time
 /// (`IRegisteredTask::LastTaskResult`, `LastRunTime`), read as whoever calls it, through the
 /// path [`request_admin_refresh`] takes; the desktop logs it at start-up (`last_run.rs`).

@@ -193,7 +193,9 @@ impl Drop for Acting {
 fn from_setup(error: SetupError) -> MachineError {
     match error {
         SetupError::Failed(why) => MachineError::Other(why),
-        SetupError::Refused | SetupError::Blocked(_) => MachineError::Other(error.to_string()),
+        SetupError::Refused | SetupError::Blocked(_) | SetupError::Unreachable => {
+            MachineError::Other(error.to_string())
+        }
     }
 }
 

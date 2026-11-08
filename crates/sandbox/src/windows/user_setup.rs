@@ -58,12 +58,14 @@ use super::marker::setup_state;
 use super::matters::MatterSids;
 use super::reclaim::hand_back_after;
 use super::record::{current_user_sid, sandbox_group_sid, sandbox_pool_sids};
+use super::refresh::SystemTask;
+use super::refresh::task::task_enabled;
 use super::setup::SetupExit;
 use super::setup::adopt::windows_adopter::own_profile;
 use super::setup::args::quote;
 use super::setup::around::Around;
 use super::setup::result_file::{self, SetupResult};
-use super::setup::serve::{task_serves, via_task};
+use super::setup::serve::{asks_admin, task_serves, via_task};
 use super::setup::taken_file;
 use super::setup::{launch_code, launch_error};
 use super::setup_task::request_set_up;
@@ -89,6 +91,20 @@ impl UserSetup {
     /// is the admin copy (`admin_copy::launch_checked`).
     pub fn new(data_dir: PathBuf) -> UserSetup {
         UserSetup { data_dir }
+    }
+
+    /// Whether [`SandboxSetup::run`] (or [`UserSetup::extend`]) asked now would go through the
+    /// prompt for an administrator, for the first run's words: `false` when
+    /// `\Clauseo\SandboxSetUp` is registered and enabled, as this user reads it, and it sets up
+    /// this data folder (`serve::task_serves`); `true` otherwise (`serve::asks_admin`). It
+    /// reads the task and the profile's path, and starts nothing. Blocks on COM calls: call it
+    /// off the UI thread.
+    pub fn asks_admin(&self) -> bool {
+        let enabled = task_enabled(SystemTask::SetUp).map_err(|error| error.to_string());
+        asks_admin(
+            enabled,
+            task_serves(own_profile_folder().as_deref(), &self.data_dir),
+        )
     }
 
     /// Adds `n` pool users to a pool this user set up (D-B5), through the set-up task with no

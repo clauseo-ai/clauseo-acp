@@ -512,6 +512,18 @@ pub fn task_serves(profile: Option<&Path>, data_dir: &Path) -> Result<(), &'stat
     }
 }
 
+/// Whether a set-up or an extend asked now would raise the prompt for an administrator, for
+/// the app's first-run words: `false` only when the set-up task is registered and enabled as
+/// this user reads it (`enabled`, read without starting it; `Err` why not read) and it sets up
+/// the app's data folder (`serves`, [`task_serves`]'s answer). A task that can't be read is
+/// taken as one that may not serve, so the words never promise no prompt wrongly.
+pub fn asks_admin(enabled: Result<bool, String>, serves: Result<(), &str>) -> bool {
+    if let Err(why) = &enabled {
+        tracing::info!(%why, "the set-up task can't be read; the set-up may ask for an admin");
+    }
+    !matches!((enabled, serves), (Ok(true), Ok(())))
+}
+
 /// The data folder in `profile`: [`DATA_SUFFIX`] below it, checked by its text to lie inside it
 /// (`refresh::inside_profile`); what a link in the profile does is `owners_data_dir`'s check.
 pub fn data_dir_in(profile: &Path) -> Option<PathBuf> {

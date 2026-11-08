@@ -18,15 +18,27 @@ fn the_app_maps_the_tasks_answer_and_falls_back_to_the_prompt_without_a_task_or_
         Err(SetupError::Failed(_))
     ));
     for error in [
-        SetUpError::NoServer,
-        SetUpError::NotTheServer("a pool user's".to_owned()),
         SetUpError::Pipe("broken".to_owned()),
         SetUpError::Task("0x80070005".to_owned()),
+        SetUpError::Request("an extend by 40".to_owned()),
     ] {
         let Err(SetupError::Failed(words)) = via_task(Err(error.clone()), elevated) else {
             panic!("{error:?}");
         };
         assert_eq!(words, error.to_string());
+    }
+    // No server, no published name, a squat: unreachable, for the host's own cause.
+    for error in [
+        SetUpError::NoServer,
+        SetUpError::Unpublished,
+        SetUpError::Squatted("the pipe isn't owned by LOCAL SYSTEM".to_owned()),
+        SetUpError::NotTheServer("a pool user's".to_owned()),
+    ] {
+        assert_eq!(
+            via_task(Err(error.clone()), elevated),
+            Err(SetupError::Unreachable),
+            "{error:?}"
+        );
     }
     assert_eq!(
         prompted.get(),
@@ -107,12 +119,9 @@ fn a_squatted_pipe_stops_the_pool_and_asks_once_more_then_refuses_naming_the_squ
     ] {
         assert_eq!(run(vec![first.clone()], true), (1, 0, 0, first));
     }
-    // The app reads the refusal as a failure saying so, with no prompt.
+    // The app reads the squat as an unreachable task, with no prompt.
     let refused = via_task(Err(SetUpError::Squatted("x".into())), || Ok(()));
-    assert!(
-        matches!(refused, Err(crate::SetupError::Failed(_))),
-        "{refused:?}"
-    );
+    assert_eq!(refused, Err(crate::SetupError::Unreachable));
 }
 
 #[test]
@@ -131,4 +140,34 @@ fn only_a_pipe_a_pool_user_or_the_pool_group_owns_is_a_pool_squat() {
     }
     // No pool recorded (unread, or none yet): nothing is a pool squat.
     assert!(!pool_squat(&Ok(sid(POOL)), &[], &[]));
+}
+
+#[test]
+fn the_set_up_asks_for_an_admin_unless_the_task_is_there_enabled_and_serves_the_folder() {
+    let serves = Ok(());
+    let elsewhere = Err("the app's data folder isn't AppData\\Local\\ai.clauseo.desktop");
+    assert!(!asks_admin(Ok(true), serves), "the task, with no prompt");
+    // A disabled task, no task (an install from before it, or \Clauseo gone), one that can't be
+    // read, or a data folder the task wouldn't set up: the prompt.
+    assert!(asks_admin(Ok(false), serves));
+    assert!(asks_admin(
+        Err("this install has no set-up task".to_owned()),
+        serves
+    ));
+    assert!(asks_admin(
+        Err("ITaskFolder::GetTask failed".to_owned()),
+        serves
+    ));
+    assert!(asks_admin(Ok(true), elsewhere));
+    assert!(asks_admin(
+        Ok(true),
+        Err("this user has no profile folder of their own")
+    ));
+    // The folder half is the task's own rule: the profile's AppData\Local\ai.clauseo.desktop.
+    let profile = Path::new(r"C:\Users\lawyer");
+    let ours = profile.join(r"AppData\Local\ai.clauseo.desktop");
+    assert!(!asks_admin(Ok(true), task_serves(Some(profile), &ours)));
+    let moved = Path::new(r"D:\Data\ai.clauseo.desktop");
+    assert!(asks_admin(Ok(true), task_serves(Some(profile), moved)));
+    assert!(asks_admin(Ok(true), task_serves(None, &ours)));
 }
