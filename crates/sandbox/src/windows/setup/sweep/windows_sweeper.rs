@@ -19,6 +19,7 @@ use windows::core::{BSTR, HSTRING, PCWSTR, PWSTR};
 
 use super::{Failed, Principal, SweepExit, Sweeper, Task, sweep};
 use crate::windows::refresh::event_log;
+use crate::windows::setup::accounts::{self, Kind};
 use crate::windows::setup::pool_steps::windows_bits::{Com, WindowsBits};
 use crate::windows::setup::pool_steps::{Bits, Gate, Pool, windows_gate};
 use crate::windows::setup::preflight::sid_text;
@@ -155,6 +156,18 @@ impl Sweeper for WindowsSweeper {
 
     fn lookup_account(&mut self, name: &str) -> Result<Sid, Failed> {
         lookup_account(name)
+    }
+
+    fn account_name(&mut self, sid: &Sid) -> Result<String, Failed> {
+        match accounts::name_of(sid, Kind::User) {
+            Ok(Some(name)) => Ok(name),
+            Ok(None) => Err("no local account has the SID".to_owned()),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn computer_names(&mut self) -> Vec<String> {
+        accounts::computer_names()
     }
 
     fn delete_task(&mut self, folder: &ITaskFolder, name: &str) -> Result<(), Failed> {
