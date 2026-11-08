@@ -1,6 +1,6 @@
 //! The rows (S15 PR7; per-slot ports, 0049 "Loopback ports per slot"): set-up's blocks catch
-//! every pool token, derived ones included, everywhere outside its slot's ports on 127.0.0.1;
-//! the listeners' per-launch secrets still guard the proxy and relay (rows `measured`); the
+//! every pool token, derived ones included, on every loopback port, its own slot's too: no
+//! static filter permits a connect until PR6's SYSTEM server adds per-session permits; the
 //! owner may read set-up's filters and change none; a launch refuses a filter set-up didn't
 //! write and a listener in its host ports that isn't this app's (`foreign`).
 
@@ -345,47 +345,46 @@ fn outside_rows(p: &Ports) -> Vec<Row> {
         .collect()
 }
 
-/// A's rows inside the range: its own listeners reached; other matters' listeners reached at
-/// the WFP layer (measured), the secret refusing a wrong credential.
+/// A's rows on slot ports: all filtered until PR6's per-session permits open its own.
 fn range_rows(p: &Ports, cred_a: &str, cred_b: &str) -> Vec<Row> {
-    use Expect::{Measured, NotReached, Reached};
+    use Expect::Filtered;
     let local = |port: u16| format!("connect:127.0.0.1:{port}");
-    let range = "the range is open to every pool user; the listener's secret is the check";
+    let range = "no static permit; PR6's are per session and exact-port";
     let table: [(String, String, Expect); 7] = [
         (
             "the proxy port".into(),
             format!("proxy:{}:{cred_a}", p.pa),
-            Reached,
+            Filtered,
         ),
         (
             "a listed loopback port (the relay)".into(),
             local(p.ra),
-            Reached,
+            Filtered,
         ),
         (
             "a loopback pair on a listed port".into(),
             format!("pair:{}", p.pair_a),
-            Reached,
+            Filtered,
         ),
         (
             format!("matter B's proxy port: {range}"),
             local(p.pb),
-            Measured,
+            Filtered,
         ),
         (
             "matter B's proxy with A's own credential (407)".into(),
             format!("proxy:{}:{cred_a}", p.pb),
-            NotReached,
+            Filtered,
         ),
         (
             "matter B's proxy with B's credential (control)".into(),
             format!("proxy:{}:{cred_b}", p.pb),
-            Measured,
+            Filtered,
         ),
         (
             format!("an unlisted listener in the range: {range}"),
             local(p.xa),
-            Measured,
+            Filtered,
         ),
     ];
     table
@@ -441,25 +440,25 @@ fn optional_rows(options: &Options) -> Vec<Row> {
 /// Matter B's rows.
 fn matter_b_rows(p: &Ports, cred_b: &str) -> Vec<Row> {
     let local = |port: u16| format!("connect:127.0.0.1:{port}");
-    let range = "the range is open to every pool user; the listener's secret is the check";
+    let range = "another slot's port, never permitted";
     vec![
         row(
             "B",
             &format!("matter B to matter A's relay port: {range}"),
             local(p.ra),
-            Expect::Measured,
+            Expect::Filtered,
         ),
         row(
             "B",
             &format!("matter B to matter A's proxy port: {range}"),
             local(p.pa),
-            Expect::Measured,
+            Expect::Filtered,
         ),
         row(
             "B",
-            "matter B's own proxy port",
+            "matter B's own proxy port (no static permit; PR6's opens it)",
             format!("proxy:{}:{cred_b}", p.pb),
-            Expect::Reached,
+            Expect::Filtered,
         ),
         row(
             "B",

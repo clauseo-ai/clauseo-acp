@@ -7,8 +7,9 @@ use super::super::check::{
     FoundCondition, FoundFilter, Kind, NetworkGap, SetupReader, check_setup, classify,
 };
 use super::super::spec::{
-    Action, Condition, FilterSpec, Match, Namespace, SUBLAYER_WEIGHT, not_pool_sddl,
-    old_permit_filter, slot_filters, slot_key, user_sddl,
+    Action, Condition, FilterSpec, Layer, Match, Namespace, PERMIT_WEIGHT, PROTOCOL_TCP,
+    SUBLAYER_WEIGHT, not_pool_sddl, old_permit_filter, slot_filters, slot_key, slot_offset_key,
+    user_sddl,
 };
 use super::{group, setup, sid, slot_of};
 use crate::windows::sids::Sid;
@@ -114,8 +115,9 @@ fn a_whole_set_up_passes_for_each_covered_user_only() {
     assert!(matches!(found[0], Kind::Block(0, _)));
     assert!(matches!(found[11], Kind::Block(11, _)));
     assert_eq!(found[12], Kind::Slot(slot_of(2001), 0, sid(2001)));
-    assert_eq!(found[18], Kind::Slot(slot_of(2001), 6, sid(2001)));
-    assert_eq!(found[19], Kind::Slot(slot_of(2002), 0, sid(2002)));
+    assert_eq!(found[17], Kind::Slot(slot_of(2001), 5, sid(2001)));
+    assert_eq!(found[18], Kind::Slot(slot_of(2002), 0, sid(2002)));
+    assert_eq!(found.len(), 12 + 2 * 6);
 }
 
 #[test]
@@ -155,9 +157,9 @@ fn each_missing_changed_or_foreign_filter_refuses_the_launch() {
             connect(),
         ),
         (
-            "the slot's connect permit gone",
+            "the slot's pool listen permit gone",
             |w, _, p| drop(w.filters.remove(&p)),
-            NetworkGap::FilterMissing("Clauseo sandbox connect_host slot 17".to_owned()),
+            NetworkGap::FilterMissing("Clauseo sandbox listen_pool slot 17".to_owned()),
         ),
         (
             "a block turned permit",
@@ -204,8 +206,8 @@ fn each_missing_changed_or_foreign_filter_refuses_the_launch() {
         ),
         (
             "a permit widened to every port",
-            |w, _, p| w.filter(p).conditions[3] = FoundCondition::RemotePorts(1, 65535),
-            foreign("Clauseo sandbox connect_host slot 17"),
+            |w, _, p| w.filter(p).conditions[1] = FoundCondition::LocalPorts(1, 65535),
+            foreign("Clauseo sandbox listen_pool slot 17"),
         ),
         (
             "a permit for two users",
@@ -216,12 +218,12 @@ fn each_missing_changed_or_foreign_filter_refuses_the_launch() {
                     sddl: sddl.to_owned(),
                 };
             },
-            foreign("Clauseo sandbox connect_host slot 17"),
+            foreign("Clauseo sandbox listen_pool slot 17"),
         ),
         (
             "a permit that clears its action right",
             |w, _, p| w.filter(p).flags.clear_action_right = true,
-            foreign("Clauseo sandbox connect_host slot 17"),
+            foreign("Clauseo sandbox listen_pool slot 17"),
         ),
         (
             "someone else's filter in our sublayer",
@@ -285,7 +287,7 @@ fn a_disabled_or_moved_filter_a_reweighted_sublayer_or_an_outside_permit_refuses
                     w.filters.insert(spec.key, as_written(&ns, &spec));
                 }
             },
-            foreign("Clauseo sandbox connect_host slot 21"),
+            foreign("Clauseo sandbox listen_pool slot 21"),
         ),
         (
             "a second slot for the same user",
@@ -295,7 +297,7 @@ fn a_disabled_or_moved_filter_a_reweighted_sublayer_or_an_outside_permit_refuses
                     w.filters.insert(spec.key, as_written(&ns, &spec));
                 }
             },
-            foreign("Clauseo sandbox connect_host slot 21"),
+            foreign("Clauseo sandbox listen_pool slot 21"),
         ),
         (
             "a slot filter naming another user than the rest",
@@ -306,7 +308,7 @@ fn a_disabled_or_moved_filter_a_reweighted_sublayer_or_an_outside_permit_refuses
                     sddl: sddl.to_owned(),
                 };
             },
-            foreign("Clauseo sandbox connect_pool slot 17"),
+            foreign("Clauseo sandbox listen_daemon slot 17"),
         ),
         (
             "an earlier set-up's shared permit left beside the slot's",
@@ -383,4 +385,41 @@ fn an_old_install_with_the_shared_permit_needs_set_up() {
         "{missing:?}"
     );
     assert!(missing.needs_setup());
+}
+
+#[test]
+fn an_earlier_builds_static_connect_permit_refuses_the_launch_until_set_up_runs() {
+    let ns = Namespace::production();
+    let slot = slot_of(2001);
+    let host = slot.host();
+    // What an earlier build of this branch wrote at slot offset 0 (`connect_host`, F1).
+    let retired = FilterSpec {
+        key: slot_offset_key(&ns, slot, 0),
+        name: "Clauseo sandbox connect_host slot 17".to_owned(),
+        layer: Layer::ConnectV4,
+        action: Action::Permit,
+        weight: PERMIT_WEIGHT,
+        conditions: vec![
+            Condition::Users(vec![sid(2001)]),
+            Condition::RemoteV4(std::net::Ipv4Addr::LOCALHOST),
+            Condition::Protocol(PROTOCOL_TCP),
+            Condition::RemotePorts(*host.start(), *host.end()),
+        ],
+    };
+    let mut wfp = FakeWfp::installed(&ns, &[2001]);
+    assert!(
+        wfp.filters
+            .values()
+            .all(|f| !f.name.contains("connect_host"))
+    );
+    wfp.filters.insert(retired.key, as_written(&ns, &retired));
+    assert_eq!(classify(&ns, &wfp.filters[&retired.key]), Kind::Foreign);
+    let refused = check_setup(&ns, &sid(2001), &mut wfp).unwrap_err();
+    assert_eq!(
+        refused,
+        NetworkGap::ForeignFilter("Clauseo sandbox connect_host slot 17".to_owned())
+    );
+    assert!(refused.needs_setup());
+    // Set-up's and removal's sweep names every retired key too (`removal_keys`).
+    assert!(ns.removal_keys().contains(&retired.key));
 }

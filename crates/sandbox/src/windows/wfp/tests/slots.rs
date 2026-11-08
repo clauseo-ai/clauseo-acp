@@ -1,34 +1,23 @@
 //! Each slot's filters (0049, "Loopback ports per slot"): their exact conditions, weights and
-//! keys, the listen blocks, slots from account names, and what WFP's arbitration in our
-//! sublayer makes of them for the traffic that matters (a small model of it: the matching
-//! filter with the highest weight decides).
-
-use std::net::Ipv4Addr;
+//! keys, the listen blocks, and slots from account names. What WFP's arbitration makes of them
+//! is in `arbitration.rs`.
 
 use super::super::spec::{
-    Action, BLOCK_WEIGHT, Condition, FilterSpec, Layer, Namespace, NetworkSetup, PERMIT_BASE,
-    PERMIT_WEIGHT, PROTOCOL_TCP, SLOT_BASE, SLOT_STRIDE, SpecError, slot_filters, slot_key,
-    slots_of,
+    Action, BLOCK_WEIGHT, Condition, Layer, Namespace, NetworkSetup, PERMIT_BASE, PERMIT_WEIGHT,
+    RETIRED_OFFSETS, SLOT_BASE, SLOT_FIRST, SLOT_STRIDE, SpecError, slot_filters, slot_key,
+    slot_offset_key, slots_of,
 };
-use super::{group, owner, setup, sid, slot_of};
+use super::{group, owner, setup, sid};
 use crate::ports::{DAEMON_BLOCK, HOST_BLOCK, POOL_BLOCK, Slot};
 use crate::windows::pool::PoolUser;
 use crate::windows::sids::Sid;
 
 #[test]
-fn each_slot_gets_exactly_its_connect_and_listen_filters() {
+fn each_slot_gets_exactly_its_listen_filters_and_no_connect_permit() {
     let ns = Namespace::production();
     let s = Slot::new(4).unwrap();
     let us = sid(2004);
     let filters = slot_filters(&ns, s, &us);
-    let connect = |low: u16| {
-        vec![
-            Condition::Users(vec![us.clone()]),
-            Condition::RemoteV4(Ipv4Addr::LOCALHOST),
-            Condition::Protocol(PROTOCOL_TCP),
-            Condition::RemotePorts(low, low + 7),
-        ]
-    };
     let listen = |low: u16| {
         vec![
             Condition::Users(vec![us.clone()]),
@@ -40,27 +29,6 @@ fn each_slot_gets_exactly_its_connect_and_listen_filters() {
         Condition::LocalPorts(46_388, 46_395),
     ];
     let expected: Vec<(&str, Layer, Action, u8, Vec<Condition>)> = vec![
-        (
-            "connect_host",
-            Layer::ConnectV4,
-            Action::Permit,
-            PERMIT_WEIGHT,
-            connect(46_132),
-        ),
-        (
-            "connect_pool",
-            Layer::ConnectV4,
-            Action::Permit,
-            PERMIT_WEIGHT,
-            connect(46_388),
-        ),
-        (
-            "connect_daemon",
-            Layer::ConnectV4,
-            Action::Permit,
-            PERMIT_WEIGHT,
-            connect(65_056),
-        ),
         (
             "listen_pool",
             Layer::ListenV4,
@@ -89,13 +57,31 @@ fn each_slot_gets_exactly_its_connect_and_listen_filters() {
             BLOCK_WEIGHT,
             only,
         ),
+        (
+            "listen_pool_v6",
+            Layer::ListenV6,
+            Action::Permit,
+            PERMIT_WEIGHT,
+            listen(46_388),
+        ),
+        (
+            "listen_daemon_v6",
+            Layer::ListenV6,
+            Action::Permit,
+            PERMIT_WEIGHT,
+            listen(65_056),
+        ),
     ];
     assert_eq!(filters.len(), expected.len());
     for (n, (filter, (name, layer, action, weight, conditions))) in
         (0u16..).zip(filters.iter().zip(expected))
     {
         assert_eq!(filter.name, format!("Clauseo sandbox {name} slot 4"));
-        assert_eq!(filter.key, ns.filter_key(SLOT_BASE + SLOT_STRIDE * 4 + n));
+        // The keys an earlier build's connect permits had (offsets 0 to 2) stay unused.
+        assert_eq!(
+            filter.key,
+            ns.filter_key(SLOT_BASE + SLOT_STRIDE * 4 + 3 + n)
+        );
         assert_eq!(filter.key, slot_key(&ns, s, n));
         assert_eq!(
             (filter.layer, filter.action, filter.weight),
@@ -106,7 +92,12 @@ fn each_slot_gets_exactly_its_connect_and_listen_filters() {
         assert!(filter.flags().persistent);
         assert_eq!(filter.flags().clear_action_right, action == Action::Block);
     }
-    const { assert!(PERMIT_WEIGHT > BLOCK_WEIGHT) };
+    const { assert!(PERMIT_WEIGHT > BLOCK_WEIGHT && SLOT_FIRST == 3) };
+    // No static filter of set-up's permits a connect (PR6's SYSTEM server adds them).
+    let all = setup(&[2001, 2002]).filters(&ns);
+    assert!(all.iter().all(|f| {
+        !matches!(f.layer, Layer::ConnectV4 | Layer::ConnectV6) || f.action == Action::Block
+    }));
 }
 
 #[test]
@@ -221,157 +212,20 @@ fn two_users_in_one_slot_or_one_user_in_two_are_refused() {
 }
 
 #[test]
-fn removal_deletes_every_slots_keys_and_the_old_shared_permits() {
+fn removal_deletes_every_slots_keys_the_retired_ones_and_the_old_shared_permits() {
     let ns = Namespace::production();
     let keys = ns.removal_keys();
     for slot in Slot::all() {
         for filter in slot_filters(&ns, slot, &sid(2001)) {
             assert!(keys.contains(&filter.key), "{}", filter.name);
         }
+        // An earlier build of this branch's static connect permits.
+        for offset in RETIRED_OFFSETS {
+            assert!(keys.contains(&slot_offset_key(&ns, slot, offset)));
+        }
     }
     assert!(keys.contains(&ns.filter_key(PERMIT_BASE)));
     assert!(keys.contains(&ns.filter_key(PERMIT_BASE + 31)));
     // The slots' keys clear the old permits' and the blocks'.
     const { assert!(PERMIT_BASE + 32 <= SLOT_BASE && 12 < PERMIT_BASE) };
-}
-
-/// One socket operation, as our sublayer sees it.
-#[derive(Clone)]
-struct Traffic {
-    layer: Layer,
-    user: Sid,
-    pool_member: bool,
-    remote: Option<Ipv4Addr>,
-    remote_port: u16,
-    local_port: u16,
-}
-
-/// Whether `condition` matches `t` (the user conditions as access checks of a plain token).
-fn matches(condition: &Condition, t: &Traffic) -> bool {
-    match condition {
-        Condition::Users(users) => users.contains(&t.user),
-        Condition::NotUsers(users) => !users.contains(&t.user),
-        Condition::NotPool { .. } => t.pool_member,
-        Condition::NotLoopback => false,
-        Condition::Protocol(p) => *p == PROTOCOL_TCP,
-        Condition::RemoteV4(address) => t.remote == Some(*address),
-        Condition::RemotePorts(low, high) => (*low..=*high).contains(&t.remote_port),
-        Condition::LocalPorts(low, high) => (*low..=*high).contains(&t.local_port),
-    }
-}
-
-/// What our sublayer decides for `t`: the matching filter with the highest weight, a block
-/// winning a tie; `None` when nothing matches (another sublayer decides).
-fn decide(filters: &[FilterSpec], t: &Traffic) -> Option<Action> {
-    filters
-        .iter()
-        .filter(|f| f.layer == t.layer && f.conditions.iter().all(|c| matches(c, t)))
-        .max_by_key(|f| (f.weight, f.action == Action::Block))
-        .map(|f| f.action)
-}
-
-#[test]
-fn a_slot_connects_to_its_own_24_ports_on_127_0_0_1_and_nothing_else_on_loopback() {
-    let ns = Namespace::production();
-    let filters = setup(&[2001, 2002]).filters(&ns);
-    let (ours, theirs) = (slot_of(2001), slot_of(2002));
-    let connect = |user: Sid, address: Ipv4Addr, port: u16| Traffic {
-        layer: Layer::ConnectV4,
-        pool_member: user != owner(),
-        user,
-        remote: Some(address),
-        remote_port: port,
-        local_port: 50_000,
-    };
-    let local = Ipv4Addr::LOCALHOST;
-    for port in ours.host().chain(ours.pool()).chain(ours.daemon()) {
-        let permitted = decide(&filters, &connect(sid(2001), local, port));
-        assert_eq!(permitted, Some(Action::Permit), "{port}");
-    }
-    let p = *ours.pool().start();
-    let refused = [
-        connect(sid(2001), local, *theirs.pool().start()),
-        connect(sid(2001), local, *theirs.daemon().start()),
-        connect(sid(2001), local, *theirs.host().start()),
-        connect(sid(2001), local, 9222),
-        connect(sid(2001), Ipv4Addr::new(127, 0, 0, 2), p),
-        connect(sid(2001), Ipv4Addr::new(192, 168, 1, 5), p),
-        connect(sid(2002), local, p),
-        Traffic {
-            layer: Layer::ConnectV6,
-            remote: None,
-            ..connect(sid(2001), local, p)
-        },
-    ];
-    for traffic in &refused {
-        assert_eq!(decide(&filters, traffic), Some(Action::Block));
-    }
-    assert_eq!(decide(&filters, &connect(owner(), local, 9222)), None);
-}
-
-#[test]
-fn only_the_slots_user_listens_on_its_pool_ports_and_no_other_pool_user_on_its_daemon_ports() {
-    let filters = setup(&[2001, 2002]).filters(&Namespace::production());
-    let ours = slot_of(2001);
-    let listen = |user: Sid, layer: Layer, port: u16| Traffic {
-        layer,
-        pool_member: user != owner() && user != sid(4000),
-        user,
-        remote: None,
-        remote_port: 0,
-        local_port: port,
-    };
-    let (v4, v6) = (Layer::ListenV4, Layer::ListenV6);
-    let (p, d, h) = (
-        *ours.pool().start(),
-        *ours.daemon().end(),
-        *ours.host().start(),
-    );
-    let (us, other, lawyer, service) = (sid(2001), sid(2002), owner(), sid(4000));
-    let (permit, block) = (Some(Action::Permit), Some(Action::Block));
-    let cases = [
-        ("Us on its pool port", listen(us.clone(), v4, p), permit),
-        ("Us on its daemon port", listen(us.clone(), v4, d), permit),
-        (
-            "Us on its pool port over IPv6",
-            listen(us.clone(), v6, p),
-            block,
-        ),
-        ("Us on its host port", listen(us.clone(), v4, h), block),
-        (
-            "Us on an unused slot's pool port",
-            listen(us, v4, 46_600),
-            block,
-        ),
-        (
-            "another slot on Us's pool port",
-            listen(other.clone(), v4, p),
-            block,
-        ),
-        (
-            "another slot on Us's daemon port",
-            listen(other, v6, d),
-            block,
-        ),
-        (
-            "the lawyer on Us's pool port",
-            listen(lawyer.clone(), v4, p),
-            block,
-        ),
-        (
-            "the lawyer on Us's pool port, v6",
-            listen(lawyer.clone(), v6, p),
-            block,
-        ),
-        (
-            "the lawyer on Us's daemon port",
-            listen(lawyer.clone(), v4, d),
-            None,
-        ),
-        ("the lawyer on Us's host port", listen(lawyer, v4, h), None),
-        ("a service on Us's pool port", listen(service, v4, p), block),
-    ];
-    for (what, traffic, expected) in cases {
-        assert_eq!(decide(&filters, &traffic), expected, "{what}");
-    }
 }

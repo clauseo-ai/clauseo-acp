@@ -346,3 +346,57 @@ fn a_failure_midway_aborts_the_transaction_and_never_commits() {
     assert_eq!(calls.last().map(String::as_str), Some("abort"));
     assert!(!calls.iter().any(|c| c == "commit"), "{calls:?}");
 }
+
+/// An earlier build of this branch's install in `fake`: today's filters, and its static
+/// connect permit (`connect_host`, F1) at each slot's retired offset 0.
+fn earlier_branch_install(fake: &Fake, ns: &Namespace) -> Vec<u128> {
+    use super::super::spec::{Action, Condition, Layer, PERMIT_WEIGHT, slot_offset_key};
+    let mut specs = setup(&[2001, 2002]).filters(ns);
+    let mut retired = Vec::new();
+    for rid in [2001, 2002] {
+        let slot = super::slot_of(rid);
+        let key = slot_offset_key(ns, slot, 0);
+        retired.push(key);
+        specs.push(FilterSpec {
+            key,
+            name: format!("{} connect_host slot {}", ns.display, slot.index()),
+            layer: Layer::ConnectV4,
+            action: Action::Permit,
+            weight: PERMIT_WEIGHT,
+            conditions: vec![Condition::Users(vec![super::sid(rid)])],
+        });
+    }
+    for spec in &specs {
+        fake.add_filter(ns, spec, Some(ADMIN_OWNED)).unwrap();
+    }
+    fake.calls.borrow_mut().clear();
+    retired
+}
+
+#[test]
+fn set_up_and_removal_delete_an_earlier_builds_static_connect_permits() {
+    let ns = Namespace::production();
+    let gone = |fake: &Fake| {
+        fake.filters
+            .borrow()
+            .iter()
+            .all(|f| !f.name.contains("connect_host"))
+    };
+    let fake = Fake::new();
+    let retired = earlier_branch_install(&fake, &ns);
+    assert!(!gone(&fake));
+    let filters = setup(&[2001, 2002]).filters(&ns);
+    // They read as filters set-up didn't write (no build in the field wrote them), so set-up
+    // counts and logs them as it deletes them.
+    assert_eq!(replace(&fake, &ns, &filters), Ok(2));
+    assert!(gone(&fake));
+    assert_eq!(fake.filters.borrow().len(), filters.len());
+    // The key sweep names them too, whatever the sublayer enumeration returned.
+    for key in &retired {
+        assert!(ns.removal_keys().contains(key));
+    }
+    let fake = Fake::new();
+    earlier_branch_install(&fake, &ns);
+    assert_eq!(remove_objects(&fake, &ns), Ok(2));
+    assert!(fake.filters.borrow().is_empty());
+}

@@ -1,8 +1,9 @@
 //! A tier-B launch's network check (S15 PR7): set-up's filters are read as the desktop user
 //! (set-up's read-only grants) and checked ([`check_setup`]) before the agent starts. Nothing is
-//! added: set-up's per-slot filters open each pool user's own slot's ports to it alone (0049,
-//! "Loopback ports per slot"), and the check gives the launch that slot, whose ports its
-//! listeners and the browser's claims then use (`ports`).
+//! added: set-up's per-slot filters decide who may listen on each slot's ports (0049, "Loopback
+//! ports per slot"), and the check gives the launch that slot, whose ports its listeners and the
+//! browser's claims then use (`ports`). No static filter lets the agent connect to them; PR6's
+//! SYSTEM server will add exact-port permits for each session.
 
 use super::check::{NetworkGap, check_setup};
 use super::engine::Engine;

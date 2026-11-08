@@ -18,6 +18,7 @@ use crate::windows::sids::Sid;
 use crate::{Error, Loopback, Policy};
 use clauseo_protocol::ErrorCode;
 
+mod arbitration;
 mod check;
 mod ports;
 mod slots;
@@ -149,8 +150,8 @@ fn an_extend_covers_the_new_user() {
         };
         assert_eq!(pool, &[sid(2001), sid(2002), sid(2003)]);
     }
-    assert_eq!(after.len(), 12 + 3 * 7);
-    for filter in &after[12 + 2 * 7..] {
+    assert_eq!(after.len(), 12 + 3 * 6);
+    for filter in &after[12 + 2 * 6..] {
         let named = [
             Condition::Users(vec![sid(2003)]),
             Condition::NotUsers(vec![sid(2003)]),

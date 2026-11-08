@@ -15,9 +15,9 @@
 //!   loopback included, ICMP at resource assignment, inbound that isn't loopback, and a listen on
 //!   any slot's port (blocks H, P and D, `ports::slot`), IPv4 and IPv6;
 //! - each pool user's slot gets its own filters (`slot_filters.rs`, 0049 "Loopback ports per
-//!   slot"): connects to `127.0.0.1` over TCP on its 24 ports and listens on its pool and daemon
-//!   ports permitted (weight [`PERMIT_WEIGHT`]), and a listen on its pool ports blocked for
-//!   every token but its own. Nothing opens `::1` or any other loopback address;
+//!   slot"): listens on its pool and daemon ports permitted (weight [`PERMIT_WEIGHT`]), and a
+//!   listen on its pool ports blocked for every token but its own. No static filter permits a
+//!   loopback connect: PR6's SYSTEM server adds exact-port permits per session;
 //! - the firewall rules, in Windows Firewall's own sublayer, block what isn't loopback, loopback
 //!   UDP, and loopback TCP outside the three blocks, a second cap on the permits.
 
@@ -29,8 +29,9 @@ pub use super::rules::{
 };
 pub use super::sddl::{allowed_users, denied_users, not_pool_sddl, user_sddl};
 pub use super::slot_filters::{
-    OLD_PERMIT_PORTS, SLOT_BASE, SLOT_FILTERS, SLOT_STRIDE, checked_ports, is_old_permit_key,
-    old_permit_filter, permit_ports, slot_filters, slot_key, slots_of,
+    OLD_PERMIT_PORTS, RETIRED_OFFSETS, SLOT_BASE, SLOT_FILTERS, SLOT_FIRST, SLOT_STRIDE,
+    checked_ports, is_old_permit_key, old_permit_filter, permit_ports, slot_filters, slot_key,
+    slot_offset_key, slots_of,
 };
 use crate::ports::{DAEMON_BLOCK, HOST_BLOCK, POOL_BLOCK, Slot};
 use crate::windows::pool::POOL_CAP;
@@ -128,13 +129,13 @@ impl Namespace {
 
     /// Every filter key set-up has ever written here: the block keys (with room for later
     /// ones), an earlier set-up's shared permit key per pool user the record can hold, and
-    /// every slot's filter keys. Removal and set-up delete them, and every other filter in our
-    /// sublayer too.
+    /// every key of every slot (its filters', the retired connect permits' and the spare ones).
+    /// Removal and set-up delete them, and every other filter in our sublayer too.
     pub fn removal_keys(&self) -> Vec<u128> {
         let blocks = (0..REMOVAL_KEYS).map(|n| self.filter_key(n));
         let permits = (0..u16::from(POOL_CAP)).map(|i| self.filter_key(PERMIT_BASE + i));
-        let slots = Slot::all().flat_map(|slot| (0..SLOT_FILTERS).map(move |n| (slot, n)));
-        let slots = slots.map(|(slot, n)| slot_key(self, slot, n));
+        let slots = Slot::all().flat_map(|slot| (0..SLOT_STRIDE).map(move |n| (slot, n)));
+        let slots = slots.map(|(slot, n)| slot_offset_key(self, slot, n));
         blocks.chain(permits).chain(slots).collect()
     }
 }
