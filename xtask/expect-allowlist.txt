@@ -42,6 +42,8 @@ crates/desktop/src/window_size/windows_theme.rs - unsafe_code
 crates/desktop/src/window_size.rs ground_in_env unsafe_code
 # The main window's mark through WebView2's start: a CBT hook for the build, a subclass to the page's load, GDI and GDI+.
 crates/desktop/src/native_mark/windows.rs - unsafe_code
+# One RegGetValueW of HKLM's Smart App Control state, off the UI thread (the page's one-time note).
+crates/desktop/src/smart_app_control/windows.rs - unsafe_code
 crates/desktop/src/ui_language.rs KEY dead_code
 crates/desktop/src/chooser/windows.rs - unsafe_code
 # WebView2's argument variable keeps the no-DNS rule: set_var, first thing in main.

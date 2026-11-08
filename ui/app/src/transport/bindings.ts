@@ -1262,6 +1262,11 @@ export type DisplayInfo = {
 	 *  shows no button.
 	 */
 	release_mode: ReleaseMode,
+	/**
+	 *  Windows' Smart App Control state, read once per run (`smart_app_control.rs`): the page
+	 *  shows a one-time note in `evaluation`. `None` on macOS and Linux, or when unreadable.
+	 */
+	smart_app_control: SmartAppControl | null,
 };
 
 /**
@@ -5022,6 +5027,15 @@ export type SkippedFileReason =
 "cloud_only" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
+
+/**  Smart App Control's state, as `display_info` reports it; `None` there when unknown. */
+export type SmartAppControl = 
+/**  On: it blocks apps it doesn't trust, unsigned Clauseo among them. */
+"on" | 
+/**  Evaluation: it blocks nothing yet, and later turns itself On or Off. */
+"evaluation" | 
+/**  Off. */
+"off";
 
 /**  A run of a hit's snippet. */
 export type SnippetPart = {
