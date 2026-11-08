@@ -19,6 +19,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::accounts::{self, Kind};
 use super::lock::{Acquired, Held, SETUP_MUTEX, SetupMutex};
+use super::logon_grant::LogonRights;
+use super::lsa_rights::WindowsRights;
 use super::machine::{
     LogonRight, Machine, MachineError, Password, ProfileDir, ServiceStart, owned,
 };
@@ -115,6 +117,8 @@ pub struct WindowsMachine {
     /// The account this process runs as, read when the machine is made (before any
     /// impersonation): a profile folder it loaded may be its own.
     own: Option<Sid>,
+    /// The LSA's logon rights and the record's `LogonRightAdded` (`logon_grant.rs`).
+    rights: WindowsRights,
 }
 
 impl WindowsMachine {
@@ -126,8 +130,12 @@ impl WindowsMachine {
         data_dir: PathBuf,
         around: Box<dyn Surroundings>,
     ) -> WindowsMachine {
+        let rights = WindowsRights {
+            record_key: names.record_key.clone(),
+        };
         WindowsMachine {
             names,
+            rights,
             held: None,
             around,
             owner: Rc::new(owner),
@@ -222,6 +230,10 @@ impl Machine for WindowsMachine {
 
     fn logon_right(&mut self) -> Result<LogonRight, MachineError> {
         preflight::logon_right()
+    }
+
+    fn logon_rights(&mut self) -> &mut dyn LogonRights {
+        &mut self.rights
     }
 
     fn account_sid(&mut self, name: &str) -> Result<Option<Sid>, MachineError> {

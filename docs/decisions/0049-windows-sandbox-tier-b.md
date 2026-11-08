@@ -764,6 +764,52 @@ below the root stay (no walk runs for an absent owner), as do labels on folders 
 check: there a Low-integrity process of the owner's may still write where the owner can. The
 owner's own uninstall first, or the per-user install, avoids it.
 
+### Logon rights
+
+The pool accounts are started with an interactive logon, which needs "Allow log on locally"
+(`SeInteractiveLogonRight`); refused, the logon fails with 1385, which is
+`Blocked::LogonRight`. They are in `Users` (`windows_machine.rs`), which CIS L1, the STIG and a
+default Windows include, so most computers need nothing. Set-up checks the rest
+(`setup/rights_policy.rs`, `setup/logon_grant.rs`).
+
+- **Detection.** A right is *defined by policy* when a source lists it: first the Group Policy
+  template cache, `%windir%\security\templates\policies\gpt*.inf` and `gpt*.dom` (each applied
+  GPO's `[Privilege Rights]`, UTF-16 or UTF-8), then Intune's UserRights CSP under
+  `HKLM\SOFTWARE\Microsoft\PolicyManager\current\device\UserRights` (`AllowLocalLogOn`,
+  `DenyLocalLogOn`, `LogOnAsBatchJob`, `DenyLogOnAsBatchJob`, `LogOnAsService`,
+  `DenyLogOnAsService`; entries split on U+F000). The answer is `Defined { includes_pool }`,
+  `NotDefined` or `Unknown`. `includes_pool` holds when every list that defines the right
+  names a principal the pool's token holds for that logon type (`answers::pool_sids_for`:
+  Everyone, LOCAL, the logon type's SID, Authenticated Users, Local account, Users), the group,
+  or a pool account. Entries are SIDs (`*S-1-…`) or names, resolved by `LookupAccountNameW`;
+  a name that doesn't resolve is compared by its last part (`ClauseoSandboxUsers`, `Users`,
+  `Everyone`, `Authenticated Users`, `ClauseoSbNN`). Every list must include the pool because
+  the files don't say which GPO wins. RSoP (`RSOP_UserPrivilegeRight`) is not read: the cache
+  holds the same lists without WMI.
+- **`Unknown`.** Any read that fails (a folder or key a standard user can't open, a file that
+  can't be read) is `Unknown`. Nothing treats it as granted: set-up grants nothing and lets the
+  logon decide, and the next run checks again.
+- **The cache.** For a launch's check, `rights_source::cached` keeps the parsed lists in one
+  process-wide `PolicyCache`, keyed by each template's last-write time and the `PolicyManager`
+  key's (`RegQueryInfoKey`). It re-reads when one changes, a template appears or goes, or after
+  10 minutes. An `Unknown` is never cached. Set-up reads afresh (`read_now`).
+- **The grant.** Step 3a, once the group exists and before any pool user logs on: when policy
+  doesn't define "Allow log on locally" and `LsaEnumerateAccountsWithUserRight` lists none of the
+  group, Users, Everyone or Authenticated Users, set-up writes `LogonRightAdded` (the group's
+  SID) to the record, then `LsaAddAccountRights` adds the right to the group. If the add fails,
+  the value is cleared. A failed run's rollback takes the right off again. A policy that defines
+  the right without the pool gets no grant (the next refresh would undo it): set-up fails at
+  `Step::LogonRight` with `LOGON_POLICY_EXCLUDES`, which is `Blocked::LogonRight`. The batch
+  fallback (PR6 C7a) will turn that into a working path. Only `SeInteractiveLogonRight` can be
+  granted: the right's name is fixed in `preflight.rs`, and a test checks that no source names
+  the Remote Desktop right.
+- **Removal.** `--remove`, before the group goes, takes the right off the SID
+  `LogonRightAdded` names (`LsaRemoveAccountRights`, the SID's other rights kept), then clears
+  the value (`RemoveStep::LogonRight`). A right IT granted stays.
+- **Deny rights per logon type.** `preflight::deny_check(kind, pool)` reads the deny right of an
+  interactive, batch or service logon and compares it with the SIDs that logon's token holds.
+  "Deny log on locally" naming INTERACTIVE refuses only the interactive logon.
+
 ### Shared writable places
 
 A spike probed 62,145 folders under a Low-integrity sandbox token and found two it could write:

@@ -11,6 +11,7 @@ use super::FolderOwner;
 use crate::windows::apply::Surroundings;
 use crate::windows::ledger::Ledger;
 use crate::windows::pool::MachineRecord;
+use crate::windows::setup::logon_grant::LogonRights;
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::setup::{MachineError, ProfileDir};
 use crate::windows::sids::Sid;
@@ -31,6 +32,9 @@ pub trait Removal {
     fn delete_record(&mut self) -> Result<(), MachineError>;
     /// The record's `AdminCopyOwner`: who placed the admin copy, `None` when there is none.
     fn copy_owner(&mut self) -> Result<Option<CopyOwner>, MachineError>;
+    /// The LSA's logon rights and the record's `LogonRightAdded`, for taking off the right
+    /// set-up added (`logon_grant::remove_grant`).
+    fn logon_rights(&mut self) -> &mut dyn LogonRights;
     /// Deletes the SYSTEM task `\Clauseo\SandboxStop` (`refresh::unregister_task`); one
     /// already gone is `Ok`.
     fn unregister_stop_task(&mut self) -> Result<(), MachineError>;

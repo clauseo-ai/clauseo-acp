@@ -6,7 +6,7 @@ use std::io;
 use std::path::PathBuf;
 
 use super::late_steps::{
-    fence, journals, network, own_protected, refuse_pool_owner, registered, stop_task,
+    fence, journals, logon_right, network, own_protected, refuse_pool_owner, registered, stop_task,
 };
 use super::machine::{LogonRight, Machine, Password, ServiceStart, owned};
 use super::outcome::{
@@ -274,6 +274,7 @@ fn change(
     run: &mut Run,
 ) -> Result<SetupReport, Failed> {
     let group = group(machine, run)?;
+    logon_right(machine, &group, &plan.base, run)?;
     let mut users = Users::default();
     run.kept = plan.kept.iter().map(|user| user.sid.clone()).collect();
     for user in &plan.kept {

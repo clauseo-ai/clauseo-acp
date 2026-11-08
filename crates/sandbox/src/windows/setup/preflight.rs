@@ -3,19 +3,23 @@
 //! group every pool user is in (`LsaEnumerateAccountsWithUserRight`). Both answer before any
 //! account exists; "Allow log on locally" is tested by the logon itself (step 6), where
 //! `ERROR_LOGON_TYPE_NOT_GRANTED` (1385) gets its named cause (D-B4). Also this machine's
-//! account domain, which the process stop and the profile delete check pool SIDs against.
+//! account domain, which the process stop and the profile delete check pool SIDs against. And the
+//! LSA calls of the logon-right grant (`logon_grant.rs`): a right's holders, and "Allow log on
+//! locally" added to or taken off one SID; that right's name is fixed here, so no caller can
+//! grant another.
 #![expect(unsafe_code, reason = "FFI to the service manager and the LSA policy")]
 
 use std::ffi::c_void;
 
 use windows::Win32::Foundation::{
     ERROR_INSUFFICIENT_BUFFER, ERROR_NONE_MAPPED, ERROR_SERVICE_DOES_NOT_EXIST, HLOCAL, LocalFree,
-    NTSTATUS, STATUS_NO_MORE_ENTRIES,
+    NTSTATUS, STATUS_NO_MORE_ENTRIES, STATUS_OBJECT_NAME_NOT_FOUND,
 };
 use windows::Win32::Security::Authentication::Identity::{
-    LSA_ENUMERATION_INFORMATION, LSA_HANDLE, LSA_OBJECT_ATTRIBUTES, LSA_UNICODE_STRING, LsaClose,
-    LsaEnumerateAccountsWithUserRight, LsaFreeMemory, LsaNtStatusToWinError, LsaOpenPolicy,
-    LsaQueryInformationPolicy, POLICY_ACCOUNT_DOMAIN_INFO, POLICY_LOOKUP_NAMES,
+    LSA_ENUMERATION_INFORMATION, LSA_HANDLE, LSA_OBJECT_ATTRIBUTES, LSA_UNICODE_STRING,
+    LsaAddAccountRights, LsaClose, LsaEnumerateAccountsWithUserRight, LsaFreeMemory,
+    LsaNtStatusToWinError, LsaOpenPolicy, LsaQueryInformationPolicy, LsaRemoveAccountRights,
+    POLICY_ACCOUNT_DOMAIN_INFO, POLICY_CREATE_ACCOUNT, POLICY_LOOKUP_NAMES,
     POLICY_VIEW_LOCAL_INFORMATION, PolicyAccountDomainInformation,
 };
 use windows::Win32::Security::Authorization::{ConvertSidToStringSidW, ConvertStringSidToSidW};
@@ -28,9 +32,12 @@ use windows::Win32::System::Services::{
 };
 use windows::core::{PCWSTR, PWSTR, w};
 
-use super::answers::{DENY_INTERACTIVE_RIGHT, logon_right_of, service_start};
+#[cfg(doc)]
+use super::answers::logon_right_of;
+use super::answers::{LogonKind, logon_right_for, service_start};
 use super::ffi::{os, wide};
 use super::machine::{LogonRight, MachineError, ServiceStart};
+use super::rights_policy::INTERACTIVE_RIGHT;
 use crate::windows::pool::POOL_GROUP;
 use crate::windows::sids::Sid;
 
@@ -81,22 +88,32 @@ pub fn seclogon() -> Result<ServiceStart, MachineError> {
     })
 }
 
-/// Whether "Deny log on locally" refuses the pool users ([`logon_right_of`]), counting the
+/// Whether "Deny log on locally" refuses the pool users
+/// ([`logon_right_of`](super::answers::logon_right_of)), counting the
 /// pool group's SID when the group exists. Needs an administrator: the right's holders are
 /// not readable by a standard user.
 pub fn logon_right() -> Result<LogonRight, MachineError> {
-    let access = POLICY_LOOKUP_NAMES | POLICY_VIEW_LOCAL_INFORMATION;
-    let policy = open_policy(access)?;
-    let mut right: Vec<u16> = DENY_INTERACTIVE_RIGHT.encode_utf16().collect();
-    let length = u16::try_from(size_of_val(right.as_slice())).unwrap_or(0);
-    let name = LSA_UNICODE_STRING {
-        Length: length,
-        MaximumLength: length,
-        Buffer: PWSTR(right.as_mut_ptr()),
-    };
+    deny_check(LogonKind::Interactive, &[])
+}
+
+/// Whether the deny right of a `kind` logon refuses the pool users ([`logon_right_for`]):
+/// "Deny log on locally", "as a batch job" or "as a service", as local policy holds it now,
+/// against the SIDs a pool user's token holds in that logon, the pool group's SID when the
+/// group exists, and `pool`, the pool users' own SIDs. For a launch to call per logon type
+/// (the batch fallback); needs an administrator or SYSTEM.
+pub fn deny_check(kind: LogonKind, pool: &[Sid]) -> Result<LogonRight, MachineError> {
+    let denied = holders(kind.deny_right())?;
+    Ok(logon_right_for(kind, &denied, group_sid()?.as_ref(), pool))
+}
+
+/// The SIDs local policy gives `right` to; none is an empty list. Needs an administrator.
+pub(super) fn holders(right: &str) -> Result<Vec<Sid>, MachineError> {
+    let policy = open_policy(POLICY_LOOKUP_NAMES | POLICY_VIEW_LOCAL_INFORMATION)?;
+    let mut name: Vec<u16> = right.encode_utf16().collect();
+    let name = unicode(&mut name);
     let mut buffer: *mut c_void = std::ptr::null_mut();
     let mut count = 0u32;
-    // SAFETY: `policy` is open; `name` points into `right`, which outlives the call; `buffer`
+    // SAFETY: `policy` is open; `name` points into a buffer that outlives the call; `buffer`
     // and `count` are live out-pointers, and the buffer is freed by `LsaBuffer`.
     let status = unsafe {
         LsaEnumerateAccountsWithUserRight(
@@ -107,7 +124,7 @@ pub fn logon_right() -> Result<LogonRight, MachineError> {
         )
     };
     if status == STATUS_NO_MORE_ENTRIES {
-        return Ok(LogonRight::Allowed);
+        return Ok(Vec::new());
     }
     lsa_check("LsaEnumerateAccountsWithUserRight", status)?;
     let buffer = LsaBuffer(buffer);
@@ -123,16 +140,64 @@ pub fn logon_right() -> Result<LogonRight, MachineError> {
             )
         }
     };
-    let mut denied = Vec::with_capacity(entries.len());
+    let mut sids = Vec::with_capacity(entries.len());
     for entry in entries {
         // SAFETY: `entry.Sid` is a valid SID inside the live buffer.
         if let Some(sid) = unsafe { sid_text(entry.Sid) }? {
-            denied.push(sid);
+            sids.push(sid);
         }
     }
     drop(buffer);
     drop(policy);
-    Ok(logon_right_of(&denied, group_sid()?.as_ref()))
+    Ok(sids)
+}
+
+/// Adds "Allow log on locally" to `sid`. Held already is `Ok`.
+pub(super) fn add_interactive(sid: &Sid) -> Result<(), MachineError> {
+    let policy = open_policy(POLICY_CREATE_ACCOUNT | POLICY_LOOKUP_NAMES)?;
+    let account = parsed(sid)?;
+    let mut name: Vec<u16> = INTERACTIVE_RIGHT.encode_utf16().collect();
+    let rights = [unicode(&mut name)];
+    // SAFETY: `policy` is open; `account` is a valid SID; `rights` points into `name`, which
+    // outlives the call.
+    let status = unsafe { LsaAddAccountRights(policy.0, account.0, &rights) };
+    lsa_check("LsaAddAccountRights", status)
+}
+
+/// Takes "Allow log on locally" off `sid`, its other rights kept. Not held, or no rights at
+/// all, is `Ok`.
+pub(super) fn remove_interactive(sid: &Sid) -> Result<(), MachineError> {
+    let policy = open_policy(POLICY_LOOKUP_NAMES)?;
+    let account = parsed(sid)?;
+    let mut name: Vec<u16> = INTERACTIVE_RIGHT.encode_utf16().collect();
+    let rights = [unicode(&mut name)];
+    // SAFETY: as in `add_interactive`; `false` keeps every other right the SID holds.
+    let status = unsafe { LsaRemoveAccountRights(policy.0, account.0, false, Some(&rights)) };
+    if status == STATUS_OBJECT_NAME_NOT_FOUND {
+        return Ok(());
+    }
+    lsa_check("LsaRemoveAccountRights", status)
+}
+
+/// `units` as an `LSA_UNICODE_STRING`, lengths in bytes, no NUL; it points into `units`.
+fn unicode(units: &mut [u16]) -> LSA_UNICODE_STRING {
+    let length = u16::try_from(size_of_val(units)).unwrap_or(0);
+    LSA_UNICODE_STRING {
+        Length: length,
+        MaximumLength: length,
+        Buffer: PWSTR(units.as_mut_ptr()),
+    }
+}
+
+/// `sid` as a Windows SID, freed on drop.
+fn parsed(sid: &Sid) -> Result<LocalSid, MachineError> {
+    let text = wide(sid.as_str());
+    let mut parsed = PSID::default();
+    // SAFETY: `text` is NUL-terminated and outlives the call; `parsed` is a live out-pointer,
+    // owned by `LocalSid`.
+    unsafe { ConvertStringSidToSidW(PCWSTR(text.as_ptr()), &raw mut parsed) }
+        .map_err(|error| os("ConvertStringSidToSidW", &error))?;
+    Ok(LocalSid(parsed))
 }
 
 /// This machine's account domain: the three parts after `S-1-5-21` that every local account's
@@ -160,7 +225,14 @@ pub(super) fn machine_domain() -> Result<[u32; 3], MachineError> {
 
 /// The SID of the local group `ClauseoSandboxUsers`, if it exists (`LookupAccountNameW`).
 fn group_sid() -> Result<Option<Sid>, MachineError> {
-    let name = wide(POOL_GROUP);
+    // A local group is an alias; an account of another kind by that name isn't the group.
+    Ok(sid_of_name(POOL_GROUP)?.and_then(|(sid, kind)| (kind == SidTypeAlias).then_some(sid)))
+}
+
+/// The SID `name` resolves to (`LookupAccountNameW`, as Windows resolves it: a local name, a
+/// domain one, `DOMAIN\name`), with its kind; `None` when nothing has that name.
+pub(super) fn sid_of_name(name: &str) -> Result<Option<(Sid, SID_NAME_USE)>, MachineError> {
+    let name = wide(name);
     let (mut sid_size, mut domain_size) = (0u32, 0u32);
     let mut kind = SID_NAME_USE::default();
     // SAFETY: the name is NUL-terminated and outlives the call; no buffers ask only for the
@@ -199,12 +271,9 @@ fn group_sid() -> Result<Option<Sid>, MachineError> {
         )
     }
     .map_err(|error| os("LookupAccountNameW", &error))?;
-    // A local group is an alias; an account of another kind by that name isn't the group.
-    if kind != SidTypeAlias {
-        return Ok(None);
-    }
     // SAFETY: the call wrote a valid SID into `sid`, which is live.
-    unsafe { sid_text(PSID(sid.as_mut_ptr().cast())) }
+    let sid = unsafe { sid_text(PSID(sid.as_mut_ptr().cast())) }?;
+    Ok(sid.map(|sid| (sid, kind)))
 }
 
 /// The name of the account whose SID is `sid` (`LookupAccountSidW`); `None` when no account
@@ -339,7 +408,7 @@ impl Drop for LsaBuffer {
         if self.0.is_null() {
             return;
         }
-        // SAFETY: the buffer came from LsaEnumerateAccountsWithUserRight and is freed once.
+        // SAFETY: the buffer came from an LSA call that allocates it, and is freed once.
         let status = unsafe { LsaFreeMemory(Some(self.0.cast_const())) };
         if status.0 < 0 {
             tracing::debug!(status = status.0, "LsaFreeMemory failed");

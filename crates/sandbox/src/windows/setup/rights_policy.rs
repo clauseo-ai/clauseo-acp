@@ -1,0 +1,386 @@
+//! Whether a policy, rather than this computer's own settings, defines a logon right (the
+//! pool accounts' logon rights, 0049's "Logon rights"). A right a policy defines is written
+//! over by Windows at every policy refresh, so set-up grants a right only when no policy
+//! defines it (`logon_grant.rs`).
+//!
+//! Two sources, read in this order:
+//!
+//! 1. the Group Policy security-template cache, `%windir%\security\templates\policies\gpt*.inf`
+//!    and `gpt*.dom`: each applied GPO's template, whose `[Privilege Rights]` section lists the
+//!    rights it defines ([`inf_rights`]);
+//! 2. Intune (MDM): the `UserRights` CSP's values under [`MDM_KEY`] ([`MDM_NAMES`]).
+//!
+//! A right listed by any of them is [`RightPolicy::Defined`], and includes the pool only when
+//! every list that defines it does, since which one wins isn't known from here. Any read that
+//! fails is [`RightPolicy::Unknown`], which no caller treats as granted.
+//!
+//! [`PolicyCache`] keeps the parsed lists in memory for a launch's check, keyed by the cache
+//! files' last-write times and the MDM key's (`RegQueryInfoKey`), re-read when one changes or
+//! after [`CACHE_TTL`]. No WMI is read here. Pure apart from [`PolicySource`]
+//! (`rights_source.rs` on Windows), so it is tested on every OS.
+
+use std::collections::BTreeMap;
+use std::io;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use super::answers::{DENY_BATCH_RIGHT, DENY_INTERACTIVE_RIGHT, DENY_SERVICE_RIGHT};
+use super::answers::{LogonKind, pool_sids_for};
+use crate::windows::pool::{POOL_GROUP, pool_number};
+use crate::windows::sids::Sid;
+
+/// "Allow log on locally".
+pub const INTERACTIVE_RIGHT: &str = "SeInteractiveLogonRight";
+/// "Log on as a batch job".
+pub const BATCH_RIGHT: &str = "SeBatchLogonRight";
+/// "Log on as a service".
+pub const SERVICE_RIGHT: &str = "SeServiceLogonRight";
+
+/// The Intune `UserRights` CSP's settings, as `PolicyManager` stores them.
+pub const MDM_KEY: &str = r"SOFTWARE\Microsoft\PolicyManager\current\device\UserRights";
+
+/// Each right this module reads, with the `UserRights` CSP's name for it (Microsoft Learn,
+/// "Policy CSP - `UserRights`").
+pub const MDM_NAMES: [(&str, &str); 6] = [
+    (INTERACTIVE_RIGHT, "AllowLocalLogOn"),
+    (DENY_INTERACTIVE_RIGHT, "DenyLocalLogOn"),
+    (BATCH_RIGHT, "LogOnAsBatchJob"),
+    (DENY_BATCH_RIGHT, "DenyLogOnAsBatchJob"),
+    (SERVICE_RIGHT, "LogOnAsService"),
+    (DENY_SERVICE_RIGHT, "DenyLogOnAsService"),
+];
+
+/// How long [`PolicyCache`] trusts what it read while no timestamp changes.
+pub const CACHE_TTL: Duration = Duration::from_mins(10);
+
+/// What policy says of a right.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RightPolicy {
+    /// A GPO or Intune defines it; `includes_pool` when every list that defines it names a
+    /// principal the pool accounts' tokens hold.
+    Defined {
+        /// The lists include the pool accounts.
+        includes_pool: bool,
+    },
+    /// No policy defines it: this computer's own setting stands.
+    NotDefined,
+    /// A source couldn't be read: never treated as granted, and checked again next time.
+    Unknown,
+}
+
+/// One entry of a right's list: a SID (`*S-1-…` in a template), or a name no lookup resolved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Principal {
+    /// A SID.
+    Sid(Sid),
+    /// A name, as written.
+    Name(String),
+}
+
+/// The pool, as the lists are compared against it: the group's SID once it exists, and the
+/// pool accounts' SIDs.
+#[derive(Debug, Clone, Copy)]
+pub struct Pool<'a> {
+    /// `ClauseoSandboxUsers`' SID, when the group exists.
+    pub group: Option<&'a Sid>,
+    /// The pool accounts' SIDs.
+    pub users: &'a [Sid],
+}
+
+/// Where the policy is read from: the files and the registry on Windows, a fake in the tests.
+pub trait PolicySource {
+    /// Every file in the template cache's folder with its last-write time (any unit, compared
+    /// only for change); a missing folder is none.
+    fn cache_files(&mut self) -> io::Result<Vec<(PathBuf, u64)>>;
+    /// The bytes of the cache file `path`.
+    fn read_file(&mut self, path: &Path) -> io::Result<Vec<u8>>;
+    /// [`MDM_KEY`]'s last-write time; `None` when the key is missing.
+    fn mdm_stamp(&mut self) -> io::Result<Option<u64>>;
+    /// The `REG_SZ` value `name` under [`MDM_KEY`]; `None` when it is missing.
+    fn mdm_value(&mut self, name: &str) -> io::Result<Option<String>>;
+    /// The SID of the account or group `name`; `None` when no lookup finds it.
+    fn resolve(&mut self, name: &str) -> Option<Sid>;
+}
+
+/// Whether `name` is a template the cache holds: `gpt*.inf` or `gpt*.dom`, without case.
+pub fn is_cache_file(name: &str) -> bool {
+    let path = Path::new(name);
+    let stem = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or_default();
+    let extension = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or_default();
+    stem.get(..3)
+        .is_some_and(|start| start.eq_ignore_ascii_case("gpt"))
+        && (extension.eq_ignore_ascii_case("inf") || extension.eq_ignore_ascii_case("dom"))
+}
+
+/// A template's text: UTF-16LE after its byte-order mark (as `secedit` writes them), else UTF-8
+/// (a lone bad byte replaced).
+pub fn inf_text(bytes: &[u8]) -> String {
+    if let Some(body) = bytes.strip_prefix(&[0xFF, 0xFE]) {
+        let units: Vec<u16> = body
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| u16::from_le_bytes(*pair))
+            .collect();
+        return String::from_utf16_lossy(&units);
+    }
+    let body = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
+    String::from_utf8_lossy(body).into_owned()
+}
+
+/// The entry `text` of a list: `*S-1-…` is a SID, anything else a name; quotes and spaces
+/// around it are dropped; an empty entry is none.
+pub fn principal_of(text: &str) -> Option<Principal> {
+    let text = text.trim().trim_matches('"').trim();
+    if text.is_empty() {
+        return None;
+    }
+    if let Some(sid) = text.strip_prefix('*') {
+        return Some(match Sid::parse(sid.trim()) {
+            Ok(sid) => Principal::Sid(sid),
+            Err(_not_a_sid) => Principal::Name(text.to_owned()),
+        });
+    }
+    Some(Principal::Name(text.to_owned()))
+}
+
+/// The rights a template's `[Privilege Rights]` section defines, each with its list. A right
+/// with an empty value is defined, for no one.
+pub fn inf_rights(text: &str) -> BTreeMap<String, Vec<Principal>> {
+    let mut rights = BTreeMap::new();
+    let mut inside = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with(';') {
+            continue;
+        }
+        if line.starts_with('[') {
+            inside = line.eq_ignore_ascii_case("[Privilege Rights]");
+            continue;
+        }
+        let Some((name, value)) = line.split_once('=').filter(|_| inside) else {
+            continue;
+        };
+        let list = value.split(',').filter_map(principal_of).collect();
+        rights.insert(name.trim().to_owned(), list);
+    }
+    rights
+}
+
+/// A `UserRights` CSP value's list: entries split by U+F000 (the CSP's separator) or commas, a
+/// `<![CDATA[…]]>` wrapper and `&#xF000;` written as text read the same.
+pub fn mdm_principals(value: &str) -> Vec<Principal> {
+    let value = value
+        .replace("<![CDATA[", "")
+        .replace("]]>", "")
+        .replace("&#xF000;", "\u{F000}");
+    value
+        .split(['\u{F000}', ',', '\0'])
+        .flat_map(|chunk| {
+            // `*S-1-5-32-544*S-1-5-11`, two SIDs whose separator was lost on the way.
+            let starts: Vec<usize> = chunk.match_indices('*').map(|(at, _)| at).collect();
+            if starts.len() > 1 && starts.first() == Some(&0) {
+                let mut ends = starts.clone();
+                ends.remove(0);
+                ends.push(chunk.len());
+                starts
+                    .iter()
+                    .zip(ends)
+                    .map(|(&start, end)| chunk.get(start..end).unwrap_or_default().to_owned())
+                    .collect()
+            } else {
+                vec![chunk.to_owned()]
+            }
+        })
+        .filter_map(|entry| principal_of(&entry))
+        .collect()
+}
+
+/// The right's logon kind and whether it is a deny right; `None` for a right not read here.
+fn kind_of(right: &str) -> Option<LogonKind> {
+    match right {
+        INTERACTIVE_RIGHT | DENY_INTERACTIVE_RIGHT => Some(LogonKind::Interactive),
+        BATCH_RIGHT | DENY_BATCH_RIGHT => Some(LogonKind::Batch),
+        SERVICE_RIGHT | DENY_SERVICE_RIGHT => Some(LogonKind::Service),
+        _ => None,
+    }
+}
+
+/// Whether `principal` stands for the pool accounts in a `kind` logon: a SID their token holds
+/// ([`pool_sids_for`]), the group's, or one of theirs; or, for a name no lookup resolved,
+/// `ClauseoSandboxUsers`, `Users`, `Everyone`, `Authenticated Users` or a pool account's name,
+/// with or without its domain, compared without case.
+pub fn names_pool(principal: &Principal, kind: LogonKind, pool: Pool<'_>) -> bool {
+    match principal {
+        Principal::Sid(sid) => {
+            pool_sids_for(kind).contains(&sid.as_str())
+                || Some(sid) == pool.group
+                || pool.users.contains(sid)
+        }
+        Principal::Name(name) => {
+            let leaf = name.rsplit('\\').next().unwrap_or(name);
+            [POOL_GROUP, "Users", "Everyone", "Authenticated Users"]
+                .iter()
+                .any(|known| leaf.eq_ignore_ascii_case(known))
+                || pool_number(leaf).is_some()
+        }
+    }
+}
+
+/// What every source said, each right with one list per source that defines it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Snapshot {
+    lists: BTreeMap<String, Vec<Vec<Principal>>>,
+}
+
+impl Snapshot {
+    /// What policy says of `right` for `pool`.
+    pub fn right(&self, right: &str, pool: Pool<'_>) -> RightPolicy {
+        let Some(lists) = self.lists.get(right).filter(|lists| !lists.is_empty()) else {
+            return RightPolicy::NotDefined;
+        };
+        let Some(kind) = kind_of(right) else {
+            return RightPolicy::Unknown;
+        };
+        let includes_pool = lists
+            .iter()
+            .all(|list| list.iter().any(|entry| names_pool(entry, kind, pool)));
+        RightPolicy::Defined { includes_pool }
+    }
+
+    fn add(&mut self, right: &str, list: Vec<Principal>) {
+        self.lists.entry(right.to_owned()).or_default().push(list);
+    }
+}
+
+/// What the cache is keyed by: each template's path and last-write time, and the MDM key's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Stamp {
+    files: Vec<(PathBuf, u64)>,
+    mdm: Option<u64>,
+}
+
+/// The stamp now: the templates sorted by path, others in the folder left out.
+pub fn stamp(source: &mut dyn PolicySource) -> io::Result<Stamp> {
+    let mut files: Vec<(PathBuf, u64)> = source
+        .cache_files()?
+        .into_iter()
+        .filter(|(path, _)| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(is_cache_file)
+        })
+        .collect();
+    files.sort();
+    let mdm = source.mdm_stamp()?;
+    Ok(Stamp { files, mdm })
+}
+
+/// Reads every source `stamp` names, names resolved to SIDs where a lookup finds them.
+pub fn load(source: &mut dyn PolicySource, stamp: &Stamp) -> io::Result<Snapshot> {
+    let mut snapshot = Snapshot::default();
+    let watched = MDM_NAMES.map(|(right, _)| right);
+    for (path, _) in &stamp.files {
+        let text = inf_text(&source.read_file(path)?);
+        for (right, list) in inf_rights(&text) {
+            if let Some(right) = watched.iter().find(|r| r.eq_ignore_ascii_case(&right)) {
+                snapshot.add(right, resolved(source, list));
+            }
+        }
+    }
+    if stamp.mdm.is_some() {
+        for (right, name) in MDM_NAMES {
+            if let Some(value) = source.mdm_value(name)? {
+                let list = resolved(source, mdm_principals(&value));
+                snapshot.add(right, list);
+            }
+        }
+    }
+    Ok(snapshot)
+}
+
+fn resolved(source: &mut dyn PolicySource, list: Vec<Principal>) -> Vec<Principal> {
+    list.into_iter()
+        .map(|entry| match entry {
+            Principal::Name(name) => source
+                .resolve(&name)
+                .map_or(Principal::Name(name), Principal::Sid),
+            sid @ Principal::Sid(_) => sid,
+        })
+        .collect()
+}
+
+/// What policy says of `right` now, read afresh (set-up's check); a failed read is
+/// [`RightPolicy::Unknown`].
+pub fn read_policy(source: &mut dyn PolicySource, right: &str, pool: Pool<'_>) -> RightPolicy {
+    let read = stamp(source).and_then(|stamp| load(source, &stamp));
+    match read {
+        Ok(snapshot) => snapshot.right(right, pool),
+        Err(error) => {
+            tracing::warn!(%error, right, "the logon-right policy couldn't be read");
+            RightPolicy::Unknown
+        }
+    }
+}
+
+/// The lists in memory between launches, as the module says.
+#[derive(Debug)]
+pub struct PolicyCache {
+    ttl: Duration,
+    held: Option<(Stamp, Duration, Snapshot)>,
+}
+
+impl PolicyCache {
+    /// An empty cache whose reads are trusted for `ttl`.
+    pub fn new(ttl: Duration) -> PolicyCache {
+        PolicyCache { ttl, held: None }
+    }
+
+    /// What policy says of `right` for `pool` at `now` (monotonic time since any fixed start,
+    /// as the caller's clock gives it): the held lists while the stamp is the
+    /// same and younger than the TTL, else read again. A failed read is
+    /// [`RightPolicy::Unknown`] and drops what was held.
+    pub fn right(
+        &mut self,
+        source: &mut dyn PolicySource,
+        right: &str,
+        pool: Pool<'_>,
+        now: Duration,
+    ) -> RightPolicy {
+        let stamp = match stamp(source) {
+            Ok(stamp) => stamp,
+            Err(error) => {
+                tracing::warn!(%error, "the logon-right policy's timestamps couldn't be read");
+                self.held = None;
+                return RightPolicy::Unknown;
+            }
+        };
+        if let Some((held, at, snapshot)) = &self.held
+            && *held == stamp
+            && now.saturating_sub(*at) < self.ttl
+        {
+            return snapshot.right(right, pool);
+        }
+        match load(source, &stamp) {
+            Ok(snapshot) => {
+                let answer = snapshot.right(right, pool);
+                self.held = Some((stamp, now, snapshot));
+                answer
+            }
+            Err(error) => {
+                tracing::warn!(%error, "the logon-right policy couldn't be read");
+                self.held = None;
+                RightPolicy::Unknown
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;

@@ -45,7 +45,9 @@
 //! 5. `DeviceSync`'s deny;
 //! 6. the ledger's entries (`ledger_work.rs`), read from the record's `DataDir`, which the owner
 //!    can influence, so it is checked as `--data-dir` is and used only as `ledger_work.rs` says;
-//! 7. the group, when it is the record's and has no members left;
+//! 7. "Allow log on locally" off the SID the record's `LogonRightAdded` names, when set-up
+//!    granted it (`logon_grant::remove_grant`; a right IT granted stays), then the group, when
+//!    it is the record's and has no members left;
 //! 8. on a per-machine install, the stop task set-up registered for the owner, then the record
 //!    key;
 //! 9. for the uninstaller only, the admin copy's teardown (`admin_remove.rs`, run through
@@ -61,6 +63,7 @@
 
 use std::path::PathBuf;
 
+use super::logon_grant;
 use super::machine::{MachineError, ProfileDir};
 use super::outcome::{SetupExit, cause_of};
 use super::record_values::CopyOwner;
@@ -144,6 +147,8 @@ pub enum RemoveStep {
     Network,
     /// A per-machine install's stop task, deleted before the record.
     StopTask,
+    /// Taking off the "Allow log on locally" right set-up added.
+    LogonRight,
 }
 
 impl std::fmt::Display for RemoveStep {
@@ -163,6 +168,7 @@ impl std::fmt::Display for RemoveStep {
             RemoveStep::Record => "deleting the machine's record",
             RemoveStep::Network => "removing the network filters",
             RemoveStep::StopTask => "deleting the sandbox's stop task",
+            RemoveStep::LogonRight => "taking off the logon right set-up added",
         })
     }
 }
@@ -397,6 +403,8 @@ fn steps(
         )
     })?;
     report.ledger = ledger_work::run(machine, acl, record, acting)?;
+    logon_grant::remove_grant(machine.logon_rights())
+        .map_err(|e| (RemoveStep::LogonRight, cause_of(&e)))?;
     report.group = remove_group(machine, record)?;
     remove_stop_task(machine)?;
     machine

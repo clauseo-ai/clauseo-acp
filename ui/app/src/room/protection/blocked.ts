@@ -77,8 +77,10 @@ export const needsInstaller = (cause: Cause | null): boolean =>
 
 /** Whether setting up again usually fixes the block, so it offers the same set-up as `needs_set_up`
  * (the same button, `retry_protection`, and the confirm where Windows' prompt follows): only
- * `logon_right`, since stage C's set-up grants "Allow log on locally" itself. Every other block
- * offers no set-up (a missing admin copy has the installer instead). */
+ * `logon_right`, since set-up grants "Allow log on locally" to ClauseoSandboxUsers itself when no
+ * Group Policy or Intune setting defines that right (where one defines it without the group, set-up
+ * grants nothing and the block stays). Every other block offers no set-up (a missing admin copy has
+ * the installer instead). */
 export const setUpFixes = (cause: Cause | null): boolean => blockOf(cause) === "logon_right";
 
 /** The updater's word on who manages this install (`UpdateView.state`'s `managed.by`, from

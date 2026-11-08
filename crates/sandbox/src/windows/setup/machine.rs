@@ -12,6 +12,7 @@ use crate::windows::fence::RegisteredMatter;
 use crate::windows::ledger::Ledger;
 use crate::windows::marker::{Marker, MarkerState};
 use crate::windows::pool::MachineRecord;
+use crate::windows::setup::logon_grant::LogonRights;
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::sids::Sid;
 use crate::windows::wfp::{NetworkReport, NetworkSetup};
@@ -106,6 +107,9 @@ pub trait Machine {
     fn seclogon(&mut self) -> Result<ServiceStart, MachineError>;
     /// Whether local policy refuses the interactive logon right to `Users`.
     fn logon_right(&mut self) -> Result<LogonRight, MachineError>;
+    /// The LSA's logon rights and the record's `LogonRightAdded`, for the grant of "Allow log
+    /// on locally" to the group (`logon_grant.rs`), as this process.
+    fn logon_rights(&mut self) -> &mut dyn LogonRights;
     /// The SID of the account named `name`, if one exists.
     fn account_sid(&mut self, name: &str) -> Result<Option<Sid>, MachineError>;
     /// The name of the account whose SID is `sid`, if one exists.

@@ -119,9 +119,13 @@ pub const STOP_SEQUENCE: &str = "StopSequence";
 /// `StopSequence` and `StopCompleted` with the record and should clear the markers too, so no
 /// marker outlives its set-up.
 pub const STOP_NEXT: &str = "StopNext";
+/// `LogonRightAdded` (`REG_SZ`, a SID): the SID set-up added "Allow log on locally" to, the
+/// pool group's, written before the grant (`logon_grant.rs`). `--remove` takes the right off
+/// that SID alone, then deletes the value with the set-up's. Outside [`MachineRecord`].
+pub const LOGON_RIGHT_ADDED: &str = "LogonRightAdded";
 /// The values the set-up owns, which a rollback or `--remove` deletes; the ones `--adopt`
 /// writes stay until `--remove` takes the admin copy away.
-pub const SETUP_VALUES: [&str; 9] = [
+pub const SETUP_VALUES: [&str; 10] = [
     OWNER_SID,
     GROUP_SID,
     POOL_SIDS,
@@ -131,6 +135,7 @@ pub const SETUP_VALUES: [&str; 9] = [
     STOP_COMPLETED,
     STOP_SEQUENCE,
     STOP_NEXT,
+    LOGON_RIGHT_ADDED,
 ];
 
 /// `listed` (`ResetSids` as read) with each of `add` it lacks appended, in order.

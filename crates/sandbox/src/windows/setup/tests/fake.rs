@@ -18,6 +18,8 @@ use crate::windows::fence::RegisteredMatter;
 use crate::windows::ledger::{Ledger, ledger_path};
 use crate::windows::marker::{Marker, MarkerState};
 use crate::windows::pool::MachineRecord;
+use crate::windows::setup::logon_grant::LogonRights;
+use crate::windows::setup::logon_grant::fake::FakeRights;
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::setup::{
     LogonRight, Machine, MachineError, Password, ProfileDir, ServiceStart,
@@ -113,6 +115,8 @@ pub(super) struct FakeMachine {
     pub(super) next_rid: u32,
     pub(super) passwords: u32,
     pub(super) around: Around,
+    /// The LSA's logon rights and `LogonRightAdded`, with their own call lines.
+    pub(super) rights: FakeRights,
 }
 
 impl Machine for FakeMachine {
@@ -154,6 +158,10 @@ impl Machine for FakeMachine {
     fn logon_right(&mut self) -> Result<LogonRight, MachineError> {
         self.call("logon_right")?;
         Ok(self.logon_right)
+    }
+
+    fn logon_rights(&mut self) -> &mut dyn LogonRights {
+        &mut self.rights
     }
 
     fn account_sid(&mut self, name: &str) -> Result<Option<Sid>, MachineError> {

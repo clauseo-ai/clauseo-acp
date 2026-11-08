@@ -17,6 +17,7 @@ mod fake;
 mod fake_acl;
 mod fake_more;
 mod local_low;
+mod logon_right;
 mod network;
 mod owner;
 mod registered;

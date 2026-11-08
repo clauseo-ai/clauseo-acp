@@ -36,6 +36,8 @@ use clauseo_protocol::MatterId;
 use super::super::accounts::{self, Kind};
 use super::super::around::Around;
 use super::super::lock::{Acquired, Held, SetupMutex};
+use super::super::logon_grant::LogonRights;
+use super::super::lsa_rights::WindowsRights;
 use super::super::machine::{MachineError, ProfileDir};
 use super::super::outcome::cause_of;
 use super::super::owner::Owner;
@@ -71,6 +73,8 @@ pub struct WindowsRemoval {
     around: Around,
     /// The data folder [`Removal::owners_ledger`] checked, as the owner.
     checked: Option<PathBuf>,
+    /// The LSA's logon rights and the record's `LogonRightAdded` (`logon_grant.rs`).
+    rights: WindowsRights,
 }
 
 impl WindowsRemoval {
@@ -78,8 +82,12 @@ impl WindowsRemoval {
     pub fn new(names: Names, invoker: Option<Owner>) -> WindowsRemoval {
         let sid = invoker.as_ref().map(|owner| owner.sid().clone());
         let actor = invoker.and_then(|owner| acting_token(owner, Owner::elevated, Owner::lowered));
+        let rights = WindowsRights {
+            record_key: names.record_key.clone(),
+        };
         WindowsRemoval {
             names,
+            rights,
             held: None,
             invoker: sid,
             actor: actor.map(Rc::new),
@@ -213,6 +221,10 @@ impl Removal for WindowsRemoval {
 
     fn delete_record(&mut self) -> Result<(), MachineError> {
         record_write::delete(&self.names.record_key)
+    }
+
+    fn logon_rights(&mut self) -> &mut dyn LogonRights {
+        &mut self.rights
     }
 
     fn copy_owner(&mut self) -> Result<Option<CopyOwner>, MachineError> {

@@ -3,7 +3,8 @@
 //! and it is empty. Then the record is written to what really remains: every SID it held before,
 //! each made user still there (or gone but named by a ledger entry), and a group this run made
 //! that is still there, so no account or group is left that the record doesn't name. Every other
-//! deny stays (D12). Nothing that existed before the run is removed.
+//! deny stays (D12). Nothing that existed before the run is removed. "Allow log on locally",
+//! when this run granted it (`logon_grant.rs`), is taken off the group before the group goes.
 //!
 //! A re-run's new passwords for the recorded users can't be undone, so the rollback writes them
 //! to `secrets.bin` (keeping the blobs of the users not reset), and the pool still works. The
@@ -13,6 +14,7 @@ use std::path::{Path, PathBuf};
 
 use super::SetupRequest;
 use super::create::write_record;
+use super::logon_grant::undo_grant;
 use super::machine::{Machine, Password, owned};
 use super::outcome::cause_of;
 use crate::windows::acl_plan::Grant;
@@ -53,6 +55,8 @@ pub(super) struct Run {
     pub(super) kept: Vec<Sid>,
     /// The new passwords this run gave kept users (a re-run), as each was set.
     pub(super) reset: Vec<(Sid, Password)>,
+    /// The SID this run granted "Allow log on locally" to (step 3a), and recorded.
+    pub(super) logon_added: Option<Sid>,
 }
 
 impl Run {
@@ -68,6 +72,7 @@ impl Run {
             ledger: None,
             kept: Vec::new(),
             reset: Vec::new(),
+            logon_added: None,
         }
     }
 
@@ -113,6 +118,11 @@ pub(super) fn roll_back(
         }
     }
     survivors.reverse();
+    if let Some(sid) = &run.logon_added
+        && let Err(what) = undo_grant(machine.logon_rights(), sid)
+    {
+        left.push(what);
+    }
     let group_gone = run.group_made && alive == 0 && delete_group(machine, run, &mut left);
     rewrite_record(machine, req, run, &survivors, group_gone, &mut left);
     if !run.reset.is_empty()

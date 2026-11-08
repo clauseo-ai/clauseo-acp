@@ -1,7 +1,7 @@
 //! Set-up's steps around the denies and the matters: the owners of the folders the shared-write
 //! denies protect (`PR4h`), reading the owner's registered matters after the lock (`PR4h`), step
-//! 8's fence of them against the grown pool, step 9's change journals, and the per-machine
-//! stop task once the owner is recorded.
+//! 8's fence of them against the grown pool, step 9's change journals, the per-machine stop task
+//! once the owner is recorded, and step 3a's grant of "Allow log on locally" (`logon_grant.rs`).
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -10,8 +10,9 @@ use clauseo_protocol::MatterId;
 
 use super::create::Failed;
 use super::journal_plan::{JournalAction, journal_plan};
+use super::logon_grant::{GrantError, Granted, grant_interactive};
 use super::machine::{Machine, owned};
-use super::outcome::{JournalOutcome, SetupFailure, Step, cause_of};
+use super::outcome::{JournalOutcome, LOGON_POLICY_EXCLUDES, SetupFailure, Step, cause_of};
 use super::record_values::CopyOwner;
 use super::rollback::Run;
 use crate::Error;
@@ -26,6 +27,34 @@ use crate::windows::writer::AclWriter;
 const SYSTEM: &str = "S-1-5-18";
 /// `BUILTIN\Administrators`.
 const ADMINISTRATORS: &str = "S-1-5-32-544";
+
+/// Step 3a, once the group exists and before any pool user logs on: "Allow log on locally"
+/// granted to `group` where no policy defines it and no local holder admits the pool
+/// (`logon_grant.rs`); `users` are the recorded pool SIDs. A grant made is in `run`, for the
+/// rollback. A policy that defines the right without the pool is [`LOGON_POLICY_EXCLUDES`]
+/// (`Blocked::LogonRight`); a policy that can't be read grants nothing, and the logon decides.
+pub(super) fn logon_right(
+    machine: &mut impl Machine,
+    group: &Sid,
+    users: &[Sid],
+    run: &mut Run,
+) -> Result<(), Failed> {
+    match grant_interactive(machine.logon_rights(), group, users) {
+        Ok(Granted::Added) => {
+            run.logon_added = Some(group.clone());
+            Ok(())
+        }
+        Ok(Granted::Unknown) => {
+            tracing::warn!(
+                "whether a policy sets \"Allow log on locally\" couldn't be read; nothing granted"
+            );
+            Ok(())
+        }
+        Ok(Granted::Covered | Granted::PolicyIncludes) => Ok(()),
+        Err(GrantError::Excluded) => Err((Step::LogonRight, LOGON_POLICY_EXCLUDES.to_owned())),
+        Err(GrantError::Failed(error)) => Err((Step::LogonRight, cause_of(&error))),
+    }
+}
 
 /// After step 5, once the record names `owner` as `OwnerSid`: on a per-machine install (the
 /// record's `AdminCopyOwner` is `machine`), the SYSTEM task `\Clauseo\SandboxStop` is

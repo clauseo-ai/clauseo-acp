@@ -16,6 +16,7 @@ use crate::windows::apply::Surroundings;
 use crate::windows::ledger::{Ledger, RecordedFile, ledger_path};
 use crate::windows::pool::MachineRecord;
 use crate::windows::set_aside::forget_bookkeeping;
+use crate::windows::setup::logon_grant::LogonRights;
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::setup::remove::Removal;
 use crate::windows::setup::remove::{FolderOwner, owners};
@@ -207,6 +208,10 @@ impl Removal for Remover {
     fn delete_record(&mut self) -> Result<(), MachineError> {
         self.call("delete_record")?;
         Machine::delete_record(&mut self.m)
+    }
+
+    fn logon_rights(&mut self) -> &mut dyn LogonRights {
+        &mut self.m.rights
     }
 
     fn copy_owner(&mut self) -> Result<Option<CopyOwner>, MachineError> {

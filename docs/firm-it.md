@@ -123,7 +123,8 @@ registered by an earlier version keep their old `UninstallString` until reinstal
   delete by hand when something could not be deleted and nothing was kept.
 - Where Clauseo's Windows protection was set up (task S15), uninstalling first removes it, elevated
   (`clauseo-sandbox-setup.exe --remove`): the local sandbox users `ClauseoSb01` to `ClauseoSb32`,
-  their profiles, the group `ClauseoSandboxUsers`, the key `HKLM\SOFTWARE\Clauseo\Sandbox` and the
+  their profiles, the group `ClauseoSandboxUsers`, the "Allow log on locally" right set-up granted
+  it (only when set-up added it, see section 11), the key `HKLM\SOFTWARE\Clauseo\Sandbox` and the
   access rules Clauseo put on the lawyer's folders. A per-user uninstall asks for one UAC prompt
   and removes it only for the Windows user who set it up; anyone else's uninstall leaves it. A
   silent per-user uninstall (`/S`) asks for nothing, so it leaves the protection in place and
@@ -971,6 +972,47 @@ listed (shown as a bare `S-1-5-21-…` once the account is gone) grants nothing;
 `sandbox\set-aside`: those are files set aside from a matter.
 
 Clauseo adds no firewall rules. Network filters (WFP) come later, with how to remove them here.
+
+## 11. Windows protection: the sandbox accounts' logon rights
+
+Clauseo's Windows protection runs each matter's agent as one of the local accounts `ClauseoSb01` to
+`ClauseoSb32`. They are members of the local group `ClauseoSandboxUsers` and of `Users`. Windows
+has to let these accounts sign in, through one of three user rights:
+
+| Right | Constant | Used for |
+|---|---|---|
+| Allow log on locally | `SeInteractiveLogonRight` | today's launch (an interactive logon) |
+| Log on as a batch job | `SeBatchLogonRight` | a later fallback launch, from Clauseo's service |
+| Log on as a service | `SeServiceLogonRight` | a second fallback |
+
+The matching deny rights (`SeDenyInteractiveLogonRight`, `SeDenyBatchLogonRight`,
+`SeDenyServiceLogonRight`) must not name `ClauseoSandboxUsers`, `Users`, `Everyone`,
+`Authenticated Users`, `Local account` or `LOCAL`. CIS's denies (Guests) are fine.
+
+**What set-up does.** Set-up checks whether a Group Policy (the templates in
+`%windir%\security\templates\policies`) or Intune (the UserRights CSP, under
+`HKLM\SOFTWARE\Microsoft\PolicyManager\current\device\UserRights`) sets "Allow log on locally":
+
+- No policy sets it: set-up grants it to `ClauseoSandboxUsers` when the local setting doesn't
+  already include that group, `Users`, `Everyone` or `Authenticated Users`, and records that in
+  the value `LogonRightAdded` of `HKLM\SOFTWARE\Clauseo\Sandbox`. A default Windows already
+  includes `Users`, so most computers get no grant.
+- A policy sets it and includes `ClauseoSandboxUsers`, `Users`, `Everyone` or `Authenticated
+  Users` (CIS L1 and the STIG set *Administrators, Users*): nothing to do.
+- A policy sets it without any of them: set-up grants nothing, since the next policy refresh
+  would undo it, and stops with "This computer's settings don't let Clauseo's sandbox accounts
+  sign in yet". Add `ClauseoSandboxUsers` (or `Users`) to the policy's "Allow log on locally",
+  then run set-up again.
+- The policy can't be read: set-up grants nothing and checks again next time.
+
+Set-up never grants "Allow log on through Remote Desktop Services".
+
+**Removal.** Uninstalling takes "Allow log on locally" off `ClauseoSandboxUsers` only when
+`LogonRightAdded` says set-up added it. A right you granted yourself stays.
+
+To check by hand, from an elevated prompt:
+`secedit /export /areas USER_RIGHTS /cfg "$env:TEMP\rights.inf"`, then look for
+`SeInteractiveLogonRight` in that file (delete it when done). `gpresult /h` shows which GPO sets the right.
 
 ## Later
 
