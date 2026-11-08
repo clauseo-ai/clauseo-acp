@@ -77,7 +77,11 @@ fn a_codex_sign_in_completes_with_the_account_and_plan_from_account_read() {
     agents.sign_in(&codex(), Method::Browser).unwrap();
     let (seen, last) = events.until_end();
     assert_eq!(last, signed_in());
-    assert_eq!(states(&seen), [waiting(), signed_in()]);
+    // the quick status check a sign-in makes first shows `Checking`
+    assert_eq!(
+        states(&seen),
+        [SigninState::Checking, waiting(), signed_in()]
+    );
     assert_eq!(agents.signin_state(&codex()), Some(signed_in()));
     let logins = fx.codex_runs(&["login"]);
     assert_eq!(logins.len(), 1);
@@ -126,7 +130,10 @@ fn port_1455_taken_gives_port_busy_and_try_again_waits_for_it() {
     let (agents, events) = start(&fx);
     agents.sign_in(&codex(), Method::Browser).unwrap();
     let (seen, last) = events.until_end();
-    assert_eq!(states(&seen), [failed(SigninCode::PortBusy)]);
+    assert_eq!(
+        states(&seen),
+        [SigninState::Checking, failed(SigninCode::PortBusy)]
+    );
     assert_eq!(last, failed(SigninCode::PortBusy));
     // Only the quick status check before the sign-in ran: no login while the port is taken.
     assert_eq!(
@@ -190,7 +197,10 @@ fn device_code_gives_the_url_code_and_expiry_and_expires_at_15_minutes() {
         expires_at: now() + CODE_LIFETIME,
     };
     let seen = events.until(|state| matches!(state, SigninState::DeviceCode { .. }));
-    assert_eq!(states(&seen), [waiting(), device.clone()]);
+    assert_eq!(
+        states(&seen),
+        [SigninState::Checking, waiting(), device.clone()]
+    );
     assert_eq!(agents.signin_state(&codex()), Some(device));
     let logins = fx.codex_runs(&["login", "--device-auth"]);
     assert_eq!(logins.len(), 1);
@@ -211,7 +221,11 @@ fn device_off_gives_device_code_off() {
     let (seen, last) = events.until_end();
     assert_eq!(
         states(&seen),
-        [waiting(), failed(SigninCode::DeviceCodeOff)]
+        [
+            SigninState::Checking,
+            waiting(),
+            failed(SigninCode::DeviceCodeOff)
+        ]
     );
     assert_eq!(last, failed(SigninCode::DeviceCodeOff));
 }
@@ -274,7 +288,7 @@ fn cancel_kills_the_codex_run_and_its_tree() {
     agents.sign_in(&codex(), Method::Browser).unwrap();
     assert_eq!(
         states(&events.until(|state| *state == waiting())),
-        [waiting()]
+        [SigninState::Checking, waiting()]
     );
     eventually("the login started", || {
         !fx.codex_runs(&["login"]).is_empty()
@@ -380,7 +394,7 @@ fn paste_code_to_codex_is_refused() {
     agents.sign_in(&codex(), Method::Browser).unwrap();
     assert_eq!(
         states(&events.until(|state| *state == waiting())),
-        [waiting()]
+        [SigninState::Checking, waiting()]
     );
     assert_eq!(
         agents.paste_code(&codex(), clauseo_agents::PasteCode::from("x".to_owned())),

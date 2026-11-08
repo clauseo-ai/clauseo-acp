@@ -332,3 +332,17 @@ test("install: each install code's screen counts error_shown with its code, once
     { error_shown: { code: "agent.install_offline" } },
   ]);
 });
+
+test("checking on the first screen: the foot says it is checking and Sign in is busy until the check answers", async () => {
+  const t = await mountFirstRun({
+    matters: [],
+    first: [install(CLAUDE, READY), signIn(CLAUDE, "checking")],
+  });
+  expect(foot()?.dataset["state"]).toBe("checking");
+  expect(text()).toContain("Checking whether you're signed in to Claude…");
+  expect(byId<HTMLButtonElement>("install-sign-in")?.disabled).toBe(true);
+  expect(byId("install-sign-in")?.getAttribute("aria-busy")).toBe("true");
+  await play(t, signIn(CLAUDE, { signed_out: {} }));
+  expect(text()).not.toContain("Checking whether");
+  expect(byId("install-sign-in")).toBeNull();
+});

@@ -44,7 +44,8 @@ fn start_waiting(fx: &Fixture, method: Method) -> (clauseo_agents::Agents, Event
     let (agents, events) = fx.start();
     agents.sign_in(&claude(), method).unwrap();
     let seen = events.until(|state| matches!(state, SigninState::Waiting { .. }));
-    assert_eq!(states(&seen), [waiting(false)]);
+    // the quick status check a sign-in makes first shows `Checking`
+    assert_eq!(states(&seen), [SigninState::Checking, waiting(false)]);
     (agents, events)
 }
 
@@ -55,7 +56,10 @@ fn a_sign_in_completes_with_the_account_plan_and_time() {
     agents.sign_in(&claude(), Method::ClaudeAi).unwrap();
     let (seen, last) = events.until_end();
     assert_eq!(last, signed_in());
-    assert_eq!(states(&seen), [waiting(false), signed_in()]);
+    assert_eq!(
+        states(&seen),
+        [SigninState::Checking, waiting(false), signed_in()]
+    );
     assert_eq!(agents.signin_state(&claude()), Some(signed_in()));
     let logins = fx.runs_of("login");
     assert_eq!(logins.len(), 1);
