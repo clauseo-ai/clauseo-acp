@@ -6,6 +6,7 @@ import { nextHostOf, type MatterInfo } from "../room/host-next.ts";
 import type { SectionId } from "../settings/sections.tsx";
 import { SettingsApp } from "../settings/settings-app.tsx";
 import type { FakeBlocklistHost } from "../transport/fake-blocklist.ts";
+import type { FakeUpdateHost } from "../transport/fake-update.ts";
 import { FakeTransport, type FakeProtectionHost } from "../transport/fake-transport.ts";
 import type {
   ConnectorsState,
@@ -39,6 +40,7 @@ export function SettingsOver({
   plans,
   protection,
   blocklist,
+  update,
   matters = [],
 }: {
   section: SectionId;
@@ -58,6 +60,8 @@ export function SettingsOver({
   protection?: FakeProtectionHost;
   /** The unsafe-site list's host (0053), Privacy's allowed sites; none listed when left out. */
   blocklist?: FakeBlocklistHost;
+  /** R23's updater (fake-update.ts), Settings' Updates; none when left out, and Updates doesn't show. */
+  update?: FakeUpdateHost;
   /** The matters the app feed's first frames list, for the allowed sites' matter names. */
   matters?: MatterInfo[];
 }) {
@@ -86,6 +90,7 @@ export function SettingsOver({
       },
       ...(protection === undefined ? {} : { protection }),
       ...(blocklist === undefined ? {} : { blocklist }),
+      ...(update === undefined ? {} : { update }),
       ...(setup === undefined
         ? {}
         : {

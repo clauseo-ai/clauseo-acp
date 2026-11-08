@@ -17,6 +17,8 @@ import type {
 } from "../room/host-next.ts";
 import { NO_NEXT, WIRE } from "../room/host-next.ts";
 import { isBlocklistCommand, type FakeBlocklistHost } from "./fake-blocklist.ts";
+import { protectionCommandOf, quietScan, type FakeProtectionHost } from "./fake-protection.ts";
+import { isUpdateCommand, type FakeUpdateHost } from "./fake-update.ts";
 import { ChannelReader, streamFailedOf, type ChannelEvent } from "./channel.ts";
 import { chooserOf } from "./chooser.ts";
 import { fakeChooserSession, type FakeChooser, type FakeChooserCall } from "./fake-chooser.ts";
@@ -45,7 +47,6 @@ import type {
   PermissionRequestId,
   PickedFolder,
   Protection,
-  ProtectionView,
   QueryResult,
   RevealTarget,
   SetupCommand,
@@ -53,6 +54,7 @@ import type {
   StreamId,
   ThreadId,
   UiCount,
+  UpdateView,
   ViewPosition,
 } from "./protocol.ts";
 import { LimitsFeed, limitsOf, type LimitsSource } from "./limits-feed.ts";
@@ -151,32 +153,18 @@ export type FakeHost = {
   protection?: FakeProtectionHost;
   /** 0053: the unsafe-site list's host (fake-blocklist.ts); without it allowed_sites lists none. */
   blocklist?: FakeBlocklistHost;
+  /** R23: with it, the fake carries the updater (`updateWire`, fake-update.ts). Read when made. */
+  update?: FakeUpdateHost;
 };
 
-/** UC's protection wire, scripted: the `protection` query and the two commands. Their events are the test's to play
- * (`protectionChanged`, `protectionViewChanged`, which need `host.next`'s app part). */
-export type FakeProtectionHost = {
-  /** Answers each `protection` query; throwing refuses it (`command.invalid`, before PR-B admits it). */
-  view: () => ProtectionView | Promise<ProtectionView>;
-  /** Answers `retry_protection` and `remove_sandbox_setup`; throwing refuses. Done when left out. */
-  command?: (command: "retry_protection" | "remove_sandbox_setup") => void | Promise<void>;
-};
-
-/** A scan the fake host says nothing of: cancelled, nothing counted. */
-const quietScan = (folder: FolderRefId): FolderScanned => ({
-  folder,
-  files: 0,
-  bytes: 0,
-  place: "local",
-  cloud_only: 0,
-  done: true,
-  cancelled: true,
-});
+export type { FakeProtectionHost };
 
 export class FakeTransport implements HostTransport, NextHostSource, LimitsSource {
   readonly kind = "fake";
   /** UC: whether the protection wire is scripted (`host.protection`). */
   readonly protectionWire: boolean;
+  /** R23: whether the updater is scripted (`host.update`). */
+  readonly updateWire: boolean;
   readonly calls: FakeCall[] = [];
   /** The start-up marks' send (start-marks.ts): none unless a test sets it. */
   pageMarks: SendMarks | undefined = undefined;
@@ -285,6 +273,7 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
   constructor(host: FakeHost = {}) {
     this.host = host;
     this.protectionWire = host.protection !== undefined;
+    this.updateWire = host.update !== undefined;
     this.openSettings =
       host.openSettings === undefined
         ? undefined
@@ -442,13 +431,12 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
 
   /** UC: the protection commands dispatched, in order. */
   protectionCommands(): ("retry_protection" | "remove_sandbox_setup")[] {
-    return this.only("dispatch").flatMap(({ command }) =>
-      command.command.retry_protection !== undefined
-        ? ["retry_protection" as const]
-        : command.command.remove_sandbox_setup !== undefined
-          ? ["remove_sandbox_setup" as const]
-          : [],
-    );
+    return this.only("dispatch").flatMap(({ command }) => protectionCommandOf(command) ?? []);
+  }
+
+  /** R23: plays `update_changed`, the whole view, as the host sends it to every window. */
+  updateChanged(view: UpdateView): void {
+    this.appEvent({ update_changed: view });
   }
 
   async #nextCommand(command: NextCommand): Promise<NextOutcome> {
@@ -488,17 +476,17 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     for (const listener of this.#dispatched) listener(command);
     this.calls.push({ call: "dispatch", command });
     let outcome: CommandOutcome = "done";
-    const protecting =
-      command.command.retry_protection !== undefined
-        ? "retry_protection"
-        : command.command.remove_sandbox_setup !== undefined
-          ? "remove_sandbox_setup"
-          : null;
+    const protecting = protectionCommandOf(command);
+    const update = this.host.update;
     if (protecting !== null && this.host.protection !== undefined)
       await this.#answer(() => this.host.protection?.command?.(protecting));
     else if (isBlocklistCommand(command.command) && this.host.blocklist !== undefined) {
       const [blocklist, sent] = [this.host.blocklist, command.command];
       await this.#answer(() => blocklist.command?.(sent));
+    } else if (isUpdateCommand(command.command) && update !== undefined) {
+      const sent = command.command;
+      const view = await this.#answer(() => update.command?.(sent));
+      if (view !== undefined) this.updateChanged(view);
     } else if (this.host.dispatch !== undefined)
       try {
         outcome = await this.host.dispatch(command);
@@ -519,6 +507,9 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     const protection = this.host.protection;
     if (query === "protection" && protection !== undefined)
       return { protection: await this.#answer(() => protection.view()) };
+    const update = this.host.update;
+    if (query === "get_update" && update !== undefined)
+      return { update: await this.#answer(() => update.view()) };
     if (this.host.query === undefined) throw internalError("the fake host answers no query");
     try {
       return await this.host.query(query);
