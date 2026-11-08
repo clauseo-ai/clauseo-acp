@@ -10,6 +10,16 @@
 #   only when it is missing or at another version, checking the pinned sha256, and then checks its
 #   version.
 # - Needs the Rust toolchain installed first: the pins are read by building and running xtask.
+# - Fallback, only after a download has failed (GitHub's release downloads returned 504s on
+#   2026-11-08): fallback.sh installs the same pins from crates.io (cargo tools: cargo install
+#   --locked --version =<pin>), npm (lefthook) or the Go module proxy (gitleaks), each with a
+#   ::warning:: saying so, and the version checks below run after it as after a download. Order:
+#   [a cache restore, #736, goes first] -> the GitHub download -> the fallback. A tool already at
+#   its pin is never installed again, so a restore in front composes with both.
+# - The fallback is opt-in: `allow-fallback: "true"`, set only by CI callers (tests, lints,
+#   mutants). With the default "false" nothing changes: the sha256-pinned download, failing the job
+#   when GitHub is down. No release, signing or publishing job may set it; fallback-guard-test.rb
+#   checks every workflow.
 
 name: Install the pinned tools
 description: Installs the tools xtask/src/setup.rs pins, as prebuilt binaries, and checks them.
@@ -21,6 +31,14 @@ inputs:
       ...). Empty installs every pinned tool.
     required: false
     default: ""
+  allow-fallback:
+    description: >-
+      "true" lets a failed GitHub download fall back to crates.io, npm and go install at the same
+      pins, checked by the registries' own checksums instead of the pinned sha256, then by the
+      pinned versions. CI callers only; never a release, signing or publishing job. "false" (the
+      default): the pinned download only.
+    required: false
+    default: "false"
 
 runs:
   using: composite
@@ -54,11 +72,24 @@ runs:
         echo "cargo tools: ${spec:-none}"
         echo "binaries: ${binaries:-none}"
 
+    # (#736: the cache restore of the tools slots in here, before any download.)
+
+    # The GitHub download. With allow-fallback, its failure is not the job's: the next step falls
+    # back; without, it fails the job as before.
     - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+      id: download
       if: steps.pins.outputs.spec != ''
+      continue-on-error: ${{ inputs.allow-fallback == 'true' }}
       with:
         tool: ${{ steps.pins.outputs.spec }}
         fallback: none
+
+    # Only when that download failed: install-action's own fallback (cargo-binstall) checks no
+    # sha256 and fetches from GitHub too, so it stays off; crates.io at the exact pin instead.
+    - name: Install the cargo tools from crates.io (the GitHub download failed)
+      if: inputs.allow-fallback == 'true' && steps.pins.outputs.spec != '' && steps.download.outcome == 'failure'
+      shell: bash
+      run: bash "$GITHUB_WORKSPACE/.github/actions/install-pinned-tools/fallback.sh" cargo-tools
 
     # cargo-<x> runs as `cargo <x> --version`, <x>-cli as `<x> --version`; each prints its name
     # and then its version as the second word.
@@ -82,12 +113,35 @@ runs:
         done < "$RUNNER_TEMP/cargo-tools.tsv"
         exit "$failed"
 
+    # The GitHub download, with its sha256 check. With allow-fallback, its failure is not the
+    # job's: the fallback and the check after it decide; without, it fails the job as before.
     - name: Install and check the binaries (cargo xtask setup --binaries)
+      id: binaries
       if: steps.pins.outputs.binaries != ''
+      continue-on-error: ${{ inputs.allow-fallback == 'true' }}
       shell: bash
       env:
         ONLY: ${{ steps.pins.outputs.binaries }}
       run: |
         # $ONLY is "--only <name> ..." and is split on purpose.
+        # shellcheck disable=SC2086
+        cargo xtask setup --binaries $ONLY
+
+    # Only when that failed: lefthook from npm, gitleaks with go install, at the pins.
+    - name: Install the binaries from npm and the Go module proxy (the GitHub download failed)
+      if: inputs.allow-fallback == 'true' && steps.pins.outputs.binaries != '' && steps.binaries.outcome == 'failure'
+      shell: bash
+      env:
+        ONLY: ${{ steps.pins.outputs.binaries }}
+      run: bash "$GITHUB_WORKSPACE/.github/actions/install-pinned-tools/fallback.sh" binaries
+
+    # The version check after the fallback: setup --binaries finds each at its pin and installs
+    # nothing, or fails the job as before.
+    - name: Check the binaries' versions after the fallback
+      if: inputs.allow-fallback == 'true' && steps.pins.outputs.binaries != '' && steps.binaries.outcome == 'failure'
+      shell: bash
+      env:
+        ONLY: ${{ steps.pins.outputs.binaries }}
+      run: |
         # shellcheck disable=SC2086
         cargo xtask setup --binaries $ONLY

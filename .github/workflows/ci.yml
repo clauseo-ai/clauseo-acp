@@ -210,11 +210,20 @@ jobs:
         uses: ./.github/actions/install-pinned-tools
         with:
           tools: ${{ steps.tools.outputs.names }}
+          # A failed GitHub download falls back to crates.io, npm or go install (CI only).
+          allow-fallback: "true"
 
       # The pre-push hook's script, alone and through the pinned lefthook with a local remote: a
       # push of deletes only passes without the check, every other push runs it.
       - name: Test the pre-push hook
         run: bash .github/scripts/pre-push-test.sh
+
+      # install-pinned-tools' fallback (crates.io, npm, go install) with fake cargo, npm and go;
+      # and that no release, signing or publishing job opts in to it.
+      - name: Test the pinned tools' fallback and who may use it
+        run: |
+          bash .github/scripts/tools-fallback-test.sh
+          ruby .github/scripts/fallback-guard-test.rb
 
       # launch-xvfb.sh against a fake xvfb-run: the app's own status decides, not xvfb-run's
       # clean-up (#479's group, 2026-11-05).
@@ -469,6 +478,8 @@ jobs:
         uses: ./.github/actions/install-pinned-tools
         with:
           tools: cargo-nextest
+          # A failed GitHub download falls back to crates.io, npm or go install (CI only).
+          allow-fallback: "true"
 
       # cfg-gated code is linted only on its own OS.
       - name: clippy
@@ -714,6 +725,8 @@ jobs:
         uses: ./.github/actions/install-pinned-tools
         with:
           tools: cargo-mutants cargo-nextest
+          # A failed GitHub download falls back to crates.io, npm or go install (CI only).
+          allow-fallback: "true"
 
       - name: cargo xtask mutants
         id: mutants
@@ -952,6 +965,8 @@ jobs:
         uses: ./.github/actions/install-pinned-tools
         with:
           tools: cargo-nextest
+          # A failed GitHub download falls back to crates.io, npm or go install (CI only).
+          allow-fallback: "true"
 
       - name: The quarantined tests
         run: cargo nextest run --workspace --profile quarantine --no-tests=pass

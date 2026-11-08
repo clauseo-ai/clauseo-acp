@@ -233,6 +233,8 @@ jobs:
         uses: ./.github/actions/install-pinned-tools # zizmor: ignore[self-repository]
         with:
           tools: cargo-mutants cargo-nextest
+          # A failed GitHub download falls back to crates.io, npm or go install (CI only).
+          allow-fallback: "true"
 
       # process's tests start fake_agent, which `-p clauseo-process` does not build. The binary
       # stays in this tree's target/, which the mutants' copies leave out, so it is named by path.
