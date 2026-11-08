@@ -1984,13 +1984,24 @@ the pool-user check. No record, or an empty pool, is nothing to sweep. Then it:
    its principal. A task with neither a user nor a group is 56 unless its owner is the pool's;
    a task whose principal or owner can't be read is unreadable, never deleted, and 56. A task
    whose definition or principal the Task Scheduler won't give (its descriptor shuts SYSTEM
-   out, say) is read from its file instead, `%SystemRoot%\System32\Tasks\<folder>\<name>`
+   out, say) is first held to the owner its own security descriptor names: a pool SID makes it
+   the pool's, deleted; an owner that can't be read is 56. Only then is it read from its file, `%SystemRoot%\System32\Tasks\<folder>\<name>`
    (`sweep::task_file`, `sweep/windows_task_file.rs`): every part of the path a plain name (no
    `..`, `:` or separator; the Task Scheduler's names aren't trusted), the system folder from
    `SHGetKnownFolderPath`, `Tasks` and each folder below it opened by handle relative to the
    one above with `OBJ_DONT_REPARSE` and refused if a reparse point, the file refused unless a
    plain file with one name, `SeBackupPrivilege` enabled for the opens alone and put back
-   after. Its XML is read narrowly: at most 64 KiB, no DTD, no entity but the predefined ones,
+   after; the folders are opened without write rights, and the file's owner and DACL are read
+   through the same handle (`sweep::file_trust`). The file counts only when its owner isn't a
+   pool SID, it has a DACL, and no allow gives write, append, extended-attribute, attribute,
+   delete, `WRITE_DAC`, `WRITE_OWNER`, generic-write or generic-all access to anyone but
+   SYSTEM, Administrators, the service accounts, a service SID, CREATOR OWNER, OWNER RIGHTS or
+   another domain's accounts and groups: a pool user may be able to rewrite its own task's file,
+   and with `WRITE_DAC` move its grant to any group it is in, so an allowlist, not a short
+   list of broad groups. Otherwise the task stays unreadable, 56. A hidden task whose file
+   grants write to another local account (the lawyer's, say) is 56 too. What it leaves: a pool
+   user holding `WRITE_DAC` through its own entry can edit the file and then drop that entry;
+   only the descriptor-owner check above catches that, when the owner is the pool user. Its XML is read narrowly: at most 64 KiB, no DTD, no entity but the predefined ones,
    only `Task/Principals/Principal/UserId` and `GroupId`. When that principal resolves to a
    SID that isn't the pool's, or is another domain's name, the task is skipped and counted;
    when it is the pool's, resolves to nothing else, or the file can't be read or is
@@ -2026,7 +2037,7 @@ exit codes (`SweepExit`) start after the stop's 50 and the WSL deny task's 51 an
 | 53 | not LOCAL SYSTEM, or not run from the admin copy; nothing touched |
 | 54 | the record can't be read, or its `PoolSids` or `OwnerSid` is malformed; nothing touched |
 | 55 | a SID in `PoolSids` isn't a pool user; nothing touched |
-| 56 | a task was unreadable or not deleted, a pool task's running instance wasn't stopped (or the instances couldn't be read), a folder couldn't be listed, or there were more than 10 000 folders; the BITS step still ran |
+| 56 | a task was unreadable or not deleted (a hidden task whose owner can't be read, or whose task file a pool user could have changed, among them), a pool task's running instance wasn't stopped (or the instances couldn't be read), a folder couldn't be listed, or there were more than 10 000 folders; the BITS step still ran |
 | 57 | every task was read and the pool's deleted, but a pool user's BITS job wasn't cancelled, a job's owner or the list couldn't be read, or the list reached its cap |
 | 58 | `SweepNext` couldn't be reserved: the record was gone or its pool changed, or the write failed (nothing touched), or the lock stayed held (swept, nothing recorded); 56 and 57 win |
 | 59 | the run would have ended 0, but `SweepCompleted` and `SweepSequence` couldn't be written |
@@ -2060,6 +2071,10 @@ A run deletes only the pool users' tasks and BITS jobs. An ended run never write
   whose user is the pool SID exists between sessions, which refuses the launch with
   `UncleanSession` and requests `\Clauseo\SandboxStop`. Until then the stop clears X only
   when an escapee report, an F4 refusal or Clauseo's start asks for it.
+- VM row (not run): as a pool user, register a task whose descriptor shuts SYSTEM out, edit
+  its file's principal to SYSTEM, run `--sweep-tasks`, and check whether the task still runs
+  after the edit. Expect 56, or the task deleted when its descriptor's owner is the pool user,
+  never 0 with the task left.
 - VM row (not run): does `IRunningTask::Stop` also end the processes the instance started, or
   only the action's own process? If only the latter, a child of a stopped instance survives
   like X above, and the pre-logon check is what catches it.

@@ -186,3 +186,17 @@ pub fn sddl_owner(sddl: &str) -> Result<Option<Sid>, Failed> {
     }
     Err(malformed())
 }
+
+/// Whether the owner the security descriptor of the task `name` in `folder` names is a pool
+/// SID ([`sddl_owner`]); `Err` when it can't be read.
+pub(super) fn pool_owned<S: Sweeper>(
+    fs: &mut S,
+    folder: &S::Folder,
+    name: &str,
+    pool: &[Sid],
+) -> Result<bool, Failed> {
+    let owner = fs
+        .task_sddl(folder, name)
+        .and_then(|sddl| sddl_owner(&sddl))?;
+    Ok(owner.is_some_and(|owner| pool.contains(&owner)))
+}
