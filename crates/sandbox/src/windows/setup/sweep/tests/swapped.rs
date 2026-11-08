@@ -19,20 +19,34 @@ pub(super) struct Ids {
     pub(super) swaps: Vec<(String, usize, String)>,
     /// The record's `OwnerUntrusted`.
     pub(super) record: Vec<String>,
+    /// Whether the set-up lock was held at each write of it.
+    pub(super) held: Vec<bool>,
+    /// Its writes fail.
+    pub(super) store_fails: bool,
+    /// From the given read of the path on (1-based), its `Id` can't be read.
+    pub(super) unread_from: Option<(String, usize)>,
 }
 
 /// The `Id` of `fake`'s task at `path`: [`ORIGINAL`], or a swap's from its read on; `None`
 /// once the task is gone.
-pub(super) fn cache_id(fake: &mut Fake, path: &str) -> Option<String> {
+pub(super) fn cache_id(fake: &mut Fake, path: &str) -> Result<Option<String>, Failed> {
     if !fake.on_disk().iter().any(|held| held == path) {
-        return None;
+        return Ok(None);
     }
     let reads = fake.ids.reads.entry(path.to_owned()).or_default();
     *reads += 1;
     let read = *reads;
+    if let Some((at, from)) = &fake.ids.unread_from
+        && at == path
+        && read >= *from
+    {
+        return Err("RegQueryValueExW failed (5)".to_owned());
+    }
     let mut swap = fake.ids.swaps.iter().rev();
     let swap = swap.find(|(at, from, _)| at == path && read >= *from);
-    Some(swap.map_or(ORIGINAL, |(_, _, id)| id.as_str()).to_owned())
+    Ok(Some(
+        swap.map_or(ORIGINAL, |(_, _, id)| id.as_str()).to_owned(),
+    ))
 }
 
 /// An administrator's loose task `\A\loose` that runs as the lawyer, its `Id` swapped from
@@ -115,11 +129,50 @@ fn an_entry_whose_id_no_longer_matches_clears_and_the_task_is_judged_as_usual() 
 }
 
 #[test]
-fn the_normal_path_reads_the_id_three_times_and_records_nothing() {
+fn the_normal_path_reads_the_id_three_times_and_a_clean_write_removes_its_entry() {
     let mut fake = loose(user(OWNER), descriptor("S-1-5-32-544", &loose_dacl()));
     assert_eq!(sweep(&mut fake), SweepExit::Done);
     assert_eq!(fake.secured.len(), 1);
     assert_eq!(fake.ids.reads.get("\\A\\loose"), Some(&3));
+    // Written ahead under the lock, then taken off.
+    assert_eq!(fake.ids.held, [true, true]);
     assert_eq!(fake.ids.record, Vec::<String>::new());
     assert!(!fake.logged[0].1.contains("took the name"));
+}
+
+#[test]
+fn an_entry_that_cant_be_written_ahead_means_no_write() {
+    let mut fake = loose(user(OWNER), descriptor("S-1-5-32-544", &loose_dacl()));
+    fake.ids.store_fails = true;
+    assert_eq!(sweep(&mut fake), SweepExit::Done);
+    assert_eq!(fake.secured, []);
+    let line = &fake.logged[0].1;
+    assert!(line.contains("write removed, 1 couldn't be"), "{line}");
+    let admin = fake.admin_logged.join("\n");
+    assert!(
+        admin.contains("its OwnerUntrusted entry couldn't be written"),
+        "{admin}"
+    );
+}
+
+#[test]
+fn an_id_unread_after_the_write_keeps_an_any_id_entry_and_the_owner_untrusted() {
+    let mut fake = loose(user(OWNER), descriptor("S-1-5-32-544", &loose_dacl()));
+    fake.ids.unread_from = Some(("\\A\\loose".to_owned(), 3));
+    assert_eq!(sweep(&mut fake), SweepExit::TasksLeft);
+    assert_eq!(fake.secured.len(), 1);
+    let entry = "{*}\\A\\loose".to_owned();
+    assert_eq!(fake.ids.record, std::slice::from_ref(&entry));
+    // The next sweep reads an `Id` again: any matches, so the owner is ignored and the
+    // lawyer's task is 56, not hardened again.
+    fake.ids.unread_from = None;
+    fake.logged.clear();
+    assert_eq!(sweep(&mut fake), SweepExit::TasksLeft);
+    assert_eq!(fake.secured.len(), 1);
+    assert_eq!(fake.ids.record, [entry]);
+    // Gone: the entry clears.
+    let tasks = &mut fake.folders.get_mut("\\A").unwrap().tasks;
+    tasks.retain(|task| task.name != "loose");
+    assert_eq!(sweep(&mut fake), SweepExit::Done);
+    assert_eq!(fake.ids.record, Vec::<String>::new());
 }

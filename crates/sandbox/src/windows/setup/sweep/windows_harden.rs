@@ -25,9 +25,9 @@ use windows::Win32::Security::{
 use windows::Win32::System::TaskScheduler::{ITaskFolder, TASK_DONT_ADD_PRINCIPAL_ACE};
 use windows::core::{BSTR, PWSTR};
 
+use super::Failed;
 use super::harden::{TaskSecurity, harden_loose_tasks, to_admin_log};
 use super::windows_sweeper::{WindowsSweeper, failed};
-use super::{Failed, untrusted};
 use crate::windows::acl::privilege::Privileges;
 use crate::windows::setup::lock::Descriptor;
 use crate::windows::setup::pool_steps::windows_gate;
@@ -133,7 +133,7 @@ pub(super) fn set_task_security(
 /// ([`harden_loose_tasks`]), and what changed appended to the admin-only log. Set-up makes that
 /// log when it is missing, owned by Administrators (an administrator can't make a file owned by
 /// SYSTEM; `admin_log::append_as_admin`), and the sweep's checks take either owner. A task
-/// whose `Id` changed across the write goes to the record's `OwnerUntrusted`. Returns
+/// whose `Id` changed across the write stays in the record's `OwnerUntrusted`. Returns
 /// the counts for the Event Log, `""` when there was nothing to do; `Err` when the record
 /// can't be read.
 pub(crate) fn at_set_up() -> Result<String, Failed> {
@@ -146,20 +146,6 @@ pub(crate) fn at_set_up() -> Result<String, Failed> {
     if hardened.unlisted > 0 {
         let unread = hardened.unlisted;
         line = format!("{line}; {unread} task folders couldn't be read, their tasks unchecked");
-    }
-    if !hardened.swapped_after.is_empty() {
-        // Set-up holds the set-up lock already.
-        let stored = match untrusted::read(&mut sweeper) {
-            Ok(read) => {
-                let list =
-                    untrusted::with_added(&mut sweeper, read.clone(), &hardened.swapped_after);
-                untrusted::store(&mut sweeper, &read, &list, false)
-            }
-            Err(why) => Err(why),
-        };
-        if let Err(why) = stored {
-            line = format!("{line}; the record's OwnerUntrusted couldn't be written: {why}");
-        }
     }
     Ok(line)
 }

@@ -2334,16 +2334,23 @@ actions, and they would run as the lawyer. So the sweep hardens such tasks:
   pool's task, and the read-back would pass. So the task's `TaskCache\Tree` `Id` (read as
   #750's `windows_listing` reads it) is read before the first read, again just before the
   write, and again after it. Changed before the write: nothing is written, the task is counted
-  as swapped and logged, and the walk's own judgment of it stands. Changed across the write:
-  nothing is restored, the task is counted and logged, and the run ends 56 with its path in the
-  56 list. Not a skip, because our write may have made a pool task look admin-owned. Its path
-  and new `Id` go to the record's `OwnerUntrusted` (`REG_MULTI_SZ` in
+  as swapped and logged, and the walk's own judgment of it stands. Otherwise, before
+  the write, the task's path and `Id` go to the record's `OwnerUntrusted` (`REG_MULTI_SZ` in
   `HKLM\SOFTWARE\Clauseo\Sandbox`, entries `{Id}\A\name`; SYSTEM and Administrators write,
-  Users read; a set-up value `--remove` deletes). Every later sweep, for a listed task there
+  Users read; a set-up value `--remove` deletes). If that can't be written, nothing is written
+  to the task and it counts as not hardened. After the write, the same `Id` takes the entry
+  off. Changed across the write, or unreadable: nothing is restored, the task is counted and
+  logged, and the run ends 56 with its path in the 56 list. Not a skip, because our write may
+  have made a pool task look admin-owned. The entry stays with the new `Id`, or `{*}`
+  (any `Id`) when it couldn't be read. An entry that couldn't be taken off after a clean
+  write stays too, logged, and the run is 56: conservative. Every later sweep, for a listed task there
   whose `Id` still matches, ignores the owner and judges by principal and file alone: a pool
   principal is deleted, and anything that only its owner could pass is 56 again. An entry
   clears once its task is gone or its `Id` no longer matches; a list that can't be read is 56
-  (`sweep/untrusted.rs`).
+  (`sweep/untrusted.rs`). So an untrusted task keeps every sweep at 56 until it is deleted
+  or its `Id` changes. An administrator clears it by deleting and re-creating the task, or
+  with `--remove`; there is no narrower command. An administrator's own update of that task
+  during a sweep can set it off.
 - **When:** in every sweep, inside the walk (SYSTEM), and once at set-up, right after the stop
   and sweep tasks (`late_steps::harden_tasks`). Set-up runs as the elevated administrator, not
   SYSTEM: `--set-up` and `--adopt` have no SYSTEM step, so an administrator may fail to

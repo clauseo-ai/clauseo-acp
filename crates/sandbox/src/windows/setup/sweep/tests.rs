@@ -574,7 +574,7 @@ impl Sweeper for Fake {
     }
 
     fn task_cache_id(&mut self, path: &str) -> Result<Option<String>, Failed> {
-        Ok(swapped::cache_id(self, path))
+        swapped::cache_id(self, path)
     }
 
     fn owner_untrusted(&mut self) -> Result<Vec<String>, Failed> {
@@ -582,7 +582,10 @@ impl Sweeper for Fake {
     }
 
     fn set_owner_untrusted(&mut self, entries: &[String]) -> Result<(), Failed> {
-        assert_eq!(self.held, 1, "written under the set-up lock");
+        self.ids.held.push(self.held == 1);
+        if self.ids.store_fails {
+            return Err("RegSetValueExW failed (5)".to_owned());
+        }
         self.ids.record = entries.to_vec();
         Ok(())
     }

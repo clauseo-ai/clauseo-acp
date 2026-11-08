@@ -417,11 +417,9 @@ pub fn sweep(fs: &mut impl Sweeper) -> SweepExit {
         SweepExit::Done
     };
     let mut line = log_line(pool.users.len(), &swept, &jobs);
-    // The tasks whose owner hardening may have written, kept and added (`untrusted`).
-    let kept = untrusted::still_listed(fs, &swept.owner_untrusted);
-    let list = untrusted::with_added(fs, kept, &swept.hardened.swapped_after);
-    // A failure here leaves a task added unlisted, but this run is 56 already for it.
-    if let Err(why) = untrusted::store(fs, &swept.owner_untrusted, &list, true) {
+    // The tasks whose owner hardening may have written, those gone or changed cleared
+    // (`untrusted`); a failure only keeps an entry longer.
+    if let Err(why) = untrusted::clear_gone(fs) {
         line = format!("{line}; the record's OwnerUntrusted couldn't be written: {why}");
     }
     line.push_str(&log_path::to_admin_log(

@@ -33,9 +33,11 @@
 //! under the name, and SYSTEM would stamp the read `O:SY` or `O:BA` descriptor onto it. The
 //! task's `TaskCache\Tree` `Id` is read before the first read, before the write and after it.
 //! Changed before the write: nothing is written, the task is counted as swapped and logged, and
-//! the walk's judgment stands. Changed across it: nothing is restored, it is counted and logged,
-//! the sweep is 56 for its path, and its path and new `Id` go to the record's
-//! `OwnerUntrusted` (`untrusted.rs`), so later sweeps ignore its owner while that `Id` holds.
+//! the walk's judgment stands. Otherwise its path and `Id` go to the record's `OwnerUntrusted`
+//! (`untrusted.rs`) before the write (no write when they can't), and come off after it when
+//! the `Id` reads the same. Changed across it, or unread: nothing is restored, it is counted
+//! and logged, the sweep is 56 for its path, and the entry stays, so later sweeps ignore its
+//! owner while it holds.
 //! It undoes nothing a pool user changed during a session: pre-logon hardening comes with the
 //! run-group PR.
 
@@ -43,6 +45,7 @@ use std::collections::BTreeMap;
 
 use super::group::Groups;
 use super::log_path::clean;
+use super::untrusted::{self, ANY_ID};
 use super::{FOLDERS_CAP, Failed, Names, Sweeper, resolve, running};
 use crate::windows::setup::pool_steps::Pool;
 use crate::windows::sids::Sid;
@@ -73,6 +76,9 @@ pub const TASK_WRITE: u32 =
 /// is tightened; its other rights (read, execute, `READ_CONTROL`, `SYNCHRONIZE`) stay.
 pub const STRIPPED: u32 = TASK_WRITE | 0x1_0000;
 
+/// Why a task whose folder's path can't be read isn't written: its `Id` can't be read.
+const NO_PATH: &str = "its folder's path couldn't be read, so nothing was written";
+
 /// The most tasks one run names in the admin-only log; past it, their count.
 pub const HARDENED_LOGGED_CAP: usize = 100;
 
@@ -97,9 +103,10 @@ pub struct Hardened {
     /// Tasks whose `TaskCache\Tree` `Id` changed between the first read and the write (none
     /// written), or across the write ([`Hardened::swapped_after`]).
     pub swapped: usize,
-    /// Of those, each whose `Id` changed across the write: its path, not cleaned, and the `Id`
-    /// read after it (`None` where that couldn't be read), for the record's `OwnerUntrusted`
-    /// (`untrusted.rs`). Each keeps the sweep at 56.
+    /// Each task this run left in the record's `OwnerUntrusted` (`untrusted.rs`): its `Id`
+    /// changed across the write, or couldn't be read after it, or its entry couldn't be taken
+    /// off. Its path, not cleaned, and the `Id` read after the write, `None` where that couldn't
+    /// be read (or wasn't needed). Each keeps the sweep at 56.
     pub swapped_after: Vec<(String, Option<String>)>,
     /// One line per task for the admin-only log: its path, cleaned, and what changed or why not.
     pub notes: Vec<String>,
@@ -140,6 +147,9 @@ pub(super) struct HardenWith<'h> {
     pub(super) groups: &'h mut Groups,
     /// The counts.
     pub(super) hardened: &'h mut Hardened,
+    /// Whether the record's `OwnerUntrusted` is written under the set-up lock (the sweep), or
+    /// the caller holds it (set-up).
+    pub(super) lock: bool,
 }
 
 /// The owner of the self-relative descriptor `descriptor`; off Windows none, so nothing is
@@ -179,6 +189,7 @@ pub(super) fn harden_task<S: Sweeper>(
         lawyer,
         groups,
         hardened,
+        lock,
     } = at;
     let raw = fs
         .folder_path(folder)
@@ -246,28 +257,33 @@ pub(super) fn harden_task<S: Sweeper>(
             return;
         }
     };
+    // Written ahead, so a swap across the write is recorded whatever happens after it.
+    let Ok(raw) = &raw else {
+        return not(hardened, NO_PATH);
+    };
+    if let Err(why) = untrusted::set(fs, lock, raw, Some(&same)) {
+        let why = format!("its OwnerUntrusted entry couldn't be written ({why}), so nothing was");
+        return not(hardened, &why);
+    }
     if let Err(why) = fs.set_task_security(folder, name, &tightened) {
+        // Nothing written: the entry would only hold the task at 56.
+        let cleared = untrusted::set(fs, lock, raw, None);
+        hardened.left_untrusted(cleared, raw, &same, &path);
         return not(hardened, &format!("{why}; it would have lost: {lost}"));
     }
     let after = id(fs);
-    if after.as_ref().ok() != Some(&Some(same)) {
-        // 56, not a skip: our write may have stamped an `O:SY` or `O:BA` descriptor onto a
-        // pool user's task, which would then pass the owner rule. Nothing is restored; the
-        // task is listed in the record's `OwnerUntrusted` (`untrusted`), so later sweeps
-        // ignore its owner while its `Id` holds.
-        hardened.swapped += 1;
+    if after.as_ref().ok() == Some(&Some(same.clone())) {
+        let cleared = untrusted::set(fs, lock, raw, None);
+        hardened.left_untrusted(cleared, raw, &same, &path);
+    } else {
+        let new = after.ok().flatten();
+        let cleared = untrusted::set(fs, lock, raw, Some(new.as_deref().unwrap_or(ANY_ID)));
         let note = format!(
             "hardened a task that runs as the lawyer, {path}, but another task may have taken \
              its name across the write, which may have given that task an administrator's \
              owner; its owner is no longer trusted: {lost}; its DACL before: {before}"
         );
-        hardened.notes.push(note);
-        if let Ok(raw) = &raw {
-            hardened
-                .swapped_after
-                .push((raw.clone(), after.ok().flatten()));
-        }
-        return;
+        return hardened.swapped_across(cleared, raw, new, note, &path);
     }
     let checked = fs
         .task_security(folder, name, true)
@@ -385,6 +401,7 @@ pub(crate) fn harden_loose_tasks<S: Sweeper>(fs: &mut S, pool: &Pool) -> Hardene
                             lawyer,
                             groups: &mut groups,
                             hardened: &mut hardened,
+                            lock: false,
                         };
                         harden_task(fs, &folder, &task.name, at);
                     }
@@ -405,6 +422,47 @@ pub(crate) fn harden_loose_tasks<S: Sweeper>(fs: &mut S, pool: &Pool) -> Hardene
         }
     }
     hardened
+}
+
+impl Hardened {
+    /// A task whose `Id` changed across the write (`new` after it, `None` when unread), its
+    /// `OwnerUntrusted` entry set to it (`set`), counted with `note`. 56, not a skip: our
+    /// write may have stamped an `O:SY` or `O:BA` descriptor onto a pool user's task, which
+    /// would then pass the owner rule. Nothing is restored; the entry written ahead stays, with
+    /// the new `Id` or any `Id` ([`ANY_ID`]), so later sweeps ignore its owner.
+    fn swapped_across(
+        &mut self,
+        set: Result<(), Failed>,
+        raw: &str,
+        new: Option<String>,
+        note: String,
+        path: &str,
+    ) {
+        if let Err(why) = set {
+            let note = format!(
+                "couldn't change the OwnerUntrusted entry of {path} to its new Id ({why}); it \
+                 keeps the old one"
+            );
+            self.notes.push(note);
+        }
+        self.swapped += 1;
+        self.notes.push(note);
+        self.swapped_after.push((raw.to_owned(), new));
+    }
+
+    /// When `cleared`, taking the entry for `raw` (`path` cleaned) off `OwnerUntrusted`,
+    /// failed: the task stays untrusted and keeps the run at 56 until it clears, logged.
+    fn left_untrusted(&mut self, cleared: Result<(), Failed>, raw: &str, id: &str, path: &str) {
+        if let Err(why) = cleared {
+            let note = format!(
+                "couldn't take {path} off OwnerUntrusted ({why}): its owner stays untrusted, and \
+                 the sweep 56, until its entry clears"
+            );
+            self.notes.push(note);
+            self.swapped_after
+                .push((raw.to_owned(), Some(id.to_owned())));
+        }
+    }
 }
 
 /// Writes `hardened`'s notes to `fs`'s admin-only log, each a line starting `by`, at most

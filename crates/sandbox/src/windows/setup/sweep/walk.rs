@@ -157,6 +157,7 @@ pub(super) fn sweep_task<S: Sweeper>(fs: &mut S, folder: &S::Folder, task: Task,
             lawyer,
             groups: &mut *groups,
             hardened: &mut swept.hardened,
+            lock: true,
         };
         harden::harden_task(fs, folder, &task.name, at);
     }

@@ -1,14 +1,15 @@
-//! The tasks whose owner hardening may have written (`harden.rs`): when a task's
-//! `TaskCache\Tree` `Id` changed after hardening wrote its descriptor, a pool user may have
-//! swapped in its own task under the name, and the write stamped our `O:SY` or `O:BA` owner
-//! onto it. Its path and its new `Id` go to the record's `OwnerUntrusted` (`REG_MULTI_SZ` in
-//! `HKLM\SOFTWARE\Clauseo\Sandbox`: SYSTEM and Administrators write, Users read), each entry
-//! `{Id}\A\name`.
+//! The tasks whose owner hardening may have written (`harden.rs`): a pool user may swap in its
+//! own task under the name across hardening's write, which then stamps our `O:SY` or `O:BA`
+//! owner onto it. So before the write the task's path and `Id` go to the record's
+//! `OwnerUntrusted` (`REG_MULTI_SZ` in `HKLM\SOFTWARE\Clauseo\Sandbox`: SYSTEM and
+//! Administrators write, Users read), each entry `{Id}\A\name` (no write when that fails).
+//! After it the entry goes when the `Id` read is the same, and otherwise stays, with the new
+//! `Id`, or [`ANY_ID`] when it couldn't be read.
 //!
 //! A task listed there whose `Id` still matches has its owner ignored ([`distrusts`]): it is
 //! judged by its principal and its file alone, deleted when they name the pool, and 56
 //! otherwise, since only its owner could have passed it. An entry clears once its task is gone
-//! or its `Id` no longer matches ([`still_listed`]). A list that can't be read is 56, every
+//! or its `Id` no longer matches ([`clear_gone`]). A list that can't be read is 56, every
 //! owner then in doubt.
 
 use super::{Failed, Sweeper};
@@ -53,81 +54,86 @@ pub(super) fn read<S: Sweeper>(fs: &mut S) -> Result<Vec<Untrusted>, Failed> {
         .collect()
 }
 
+/// The `Id` an entry holds when the one after hardening's write couldn't be read: it matches
+/// any `Id`, so the entry holds until its task is gone.
+pub const ANY_ID: &str = "{*}";
+
+/// Whether the entry `one` holds for the `Id` read, `id`: the same `Id`, or any for
+/// [`ANY_ID`]; an `Id` that can't be read holds it too, the owner staying in doubt.
+fn holds(one: &Untrusted, id: &Result<Option<String>, Failed>) -> bool {
+    match id {
+        Ok(Some(id)) => one.id == ANY_ID || *id == one.id,
+        Ok(None) => false,
+        Err(_) => true,
+    }
+}
+
 /// Whether the task at `path` is one of `list` whose `Id` still matches, so its owner is
-/// ignored. An `Id` that can't be read counts as a match: the owner stays in doubt.
+/// ignored.
 pub(super) fn distrusts<S: Sweeper>(fs: &mut S, list: &[Untrusted], path: &str) -> bool {
     for one in list {
         let same = one.path == path || fs.same_task_path(&one.path, path).unwrap_or(true);
-        if same
-            && fs
-                .task_cache_id(path)
-                .map_or(true, |id| id.as_ref() == Some(&one.id))
-        {
+        if same && holds(one, &fs.task_cache_id(path)) {
             return true;
         }
     }
     false
 }
 
-/// Those of `list` still to keep: each whose task is there with the same `Id`, or whose `Id`
-/// can't be read; one gone, or with another `Id`, clears.
-pub(super) fn still_listed<S: Sweeper>(fs: &mut S, list: &[Untrusted]) -> Vec<Untrusted> {
-    let mut kept = Vec::new();
-    for one in list {
-        if fs
-            .task_cache_id(&one.path)
-            .map_or(true, |id| id.as_ref() == Some(&one.id))
-        {
-            kept.push(one.clone());
-        }
-    }
-    kept
-}
-
-/// `list` with `added` (path and the `Id` read after the write, `None` where it couldn't be),
-/// each `None` read once more; one still unread, or gone, isn't listed. Duplicates go.
-pub(super) fn with_added<S: Sweeper>(
+/// Changes the record's list by `change`, written only when it changed, under the set-up lock
+/// when `lock` (the sweep; set-up holds it already).
+pub(super) fn update<S: Sweeper>(
     fs: &mut S,
-    mut list: Vec<Untrusted>,
-    added: &[(String, Option<String>)],
-) -> Vec<Untrusted> {
-    for (path, id) in added {
-        let id = match id {
-            Some(id) => Some(id.clone()),
-            None => fs.task_cache_id(path).ok().flatten(),
-        };
-        if let Some(id) = id {
-            let one = Untrusted {
-                path: path.clone(),
-                id,
-            };
-            if !list.contains(&one) {
-                list.push(one);
-            }
-        }
-    }
-    list
-}
-
-/// Writes `list` as the record's `OwnerUntrusted` when it differs from `read`, under the
-/// set-up lock when `lock` (the sweep; set-up holds it already).
-pub(super) fn store<S: Sweeper>(
-    fs: &mut S,
-    read: &[Untrusted],
-    list: &[Untrusted],
     lock: bool,
+    change: impl FnOnce(&mut S, &mut Vec<Untrusted>),
 ) -> Result<(), Failed> {
-    if read == list {
-        return Ok(());
-    }
-    let texts: Vec<String> = list.iter().map(Untrusted::text).collect();
-    if !lock {
-        return fs.set_owner_untrusted(&texts);
-    }
-    if !fs.lock()? {
+    if lock && !fs.lock()? {
         return Err("the set-up lock is held".to_owned());
     }
-    let written = fs.set_owner_untrusted(&texts);
-    fs.unlock();
-    written
+    let done = read(fs).and_then(|read| {
+        let mut list = read.clone();
+        change(fs, &mut list);
+        if list == read {
+            return Ok(());
+        }
+        let texts: Vec<String> = list.iter().map(Untrusted::text).collect();
+        fs.set_owner_untrusted(&texts)
+    });
+    if lock {
+        fs.unlock();
+    }
+    done
+}
+
+/// Clears each entry whose task is gone or has another `Id` (the sweep's end).
+pub(super) fn clear_gone<S: Sweeper>(fs: &mut S) -> Result<(), Failed> {
+    // Read first without the lock: most runs have nothing to clear.
+    let listed = read(fs)?;
+    if listed
+        .iter()
+        .all(|one| holds(one, &fs.task_cache_id(&one.path)))
+    {
+        return Ok(());
+    }
+    update(fs, true, |fs, list| {
+        list.retain(|one| holds(one, &fs.task_cache_id(&one.path)));
+    })
+}
+
+/// Sets the entry for `path` to `id`, or takes it off when `id` is `None`.
+pub(super) fn set<S: Sweeper>(
+    fs: &mut S,
+    lock: bool,
+    path: &str,
+    id: Option<&str>,
+) -> Result<(), Failed> {
+    update(fs, lock, |_, list| {
+        list.retain(|one| one.path != path);
+        if let Some(id) = id {
+            list.push(Untrusted {
+                path: path.to_owned(),
+                id: id.to_owned(),
+            });
+        }
+    })
 }
