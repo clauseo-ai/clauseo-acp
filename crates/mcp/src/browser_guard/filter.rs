@@ -20,8 +20,10 @@
 //!    `about:blank`, or names a local or private host (`host.rs`);
 //!    f. an `extraArgs` that is not an array of strings each in [`EXTRA_ARGS_ALLOWED`];
 //!    g. any other string, at any depth, shaped like a command-line flag (`-x`, `--x`,
-//!    `--x=y`, see [`looks_like_flag`]): agent-browser's MCP server puts typed values into the
-//!    CLI's argv, and the CLI reads global flags anywhere in argv (`mcp.rs:2659-2661`).
+//!    `--x=y`, see [`looks_like_flag`]), or holding one in any piece split on commas and
+//!    whitespace, or naming a switch that weakens Chrome's sandbox anywhere in it:
+//!    agent-browser's MCP server puts typed values into the CLI's argv, and the CLI reads
+//!    global flags anywhere in argv (`mcp.rs:2659-2661`).
 //!    `agent_browser_eval`'s `script` is exempt: it travels on stdin (`mcp.rs:3950-3957`).
 //!
 //!    A refused request gets an `isError` tool result with its id; a refused notification is
@@ -29,7 +31,11 @@
 
 mod host;
 
+use std::ffi::OsStr;
+
 use serde_json::{Map, Value, json};
+
+use super::chrome::sandbox;
 
 /// The longest agent line the guard reads, in bytes without the newline. A longer one is
 /// refused as a parse error and never forwarded.
@@ -254,13 +260,33 @@ fn check_extra_args(extra: &Value) -> Result<(), String> {
     Ok(())
 }
 
-/// Every string in `value`, at any depth, that the CLI could read as a flag.
+/// Every string in `value`, at any depth, that the CLI could read as a flag, or that holds one:
+/// each piece of it split on commas and whitespace is checked, since a value may be split again
+/// downstream (`AGENT_BROWSER_ARGS` is split on both), and any mention of a switch or feature
+/// that weakens Chrome's sandbox ([`sandbox::weakening_in`]) is refused wherever it stands. The
+/// cost: typed text that happens to name one (`single-process`) is refused too.
 fn check_no_flags(value: &Value) -> Result<(), String> {
     match value {
-        Value::String(text) if looks_like_flag(text) => Err(flag_name(text)),
+        Value::String(text) => check_text(text),
         Value::Array(items) => items.iter().try_for_each(check_no_flags),
         Value::Object(map) => map.values().try_for_each(check_no_flags),
         _ => Ok(()),
+    }
+}
+
+fn check_text(text: &str) -> Result<(), String> {
+    if let Some(piece) = text
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .find(|piece| looks_like_flag(piece))
+    {
+        return Err(flag_name(piece));
+    }
+    match sandbox::weakening_in(OsStr::new(text)) {
+        Some(name) => Err(format!(
+            "the browser setting {}",
+            name.trim_end_matches('=')
+        )),
+        None => Ok(()),
     }
 }
 

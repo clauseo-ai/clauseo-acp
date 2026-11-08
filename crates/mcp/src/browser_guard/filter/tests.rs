@@ -207,7 +207,6 @@ fn typed_strings_that_read_as_flags_are_refused() {
         "---",
         "---x",
         "- item",
-        "a --headed",
         "",
         "−−headed",
         "--Select--",
@@ -231,6 +230,49 @@ fn typed_strings_that_read_as_flags_are_refused() {
             Some(name),
             "{bad}"
         );
+    }
+}
+
+#[test]
+fn a_flag_inside_a_longer_string_is_refused() {
+    for (text, name) in [
+        ("x,--no-sandbox", "--no-sandbox"),
+        ("a --headed", "--headed"),
+        ("ok\t-p", "-p"),
+        ("a,b --proxy=http://evil:1", "--proxy"),
+        ("x--NO-SANDBOX", "the browser setting no-sandbox"),
+        (
+            "please run single-process",
+            "the browser setting single-process",
+        ),
+        (
+            "x=disable-features=NetworkServiceSandbox",
+            "the browser setting networkservicesandbox",
+        ),
+    ] {
+        assert_eq!(
+            refused(&json!({ "text": text })).as_deref(),
+            Some(name),
+            "{text}"
+        );
+        assert_eq!(
+            refused(&json!({ "values": ["ok", text] })).as_deref(),
+            Some(name),
+            "{text}"
+        );
+    }
+    assert_eq!(
+        refused_on("agent_browser_eval", &json!({ "script": "x,--no-sandbox" })),
+        None,
+        "eval's script stays exempt"
+    );
+    for fine in [
+        "Smith, J., 2019 - see p. 4",
+        "a,b,c",
+        "Section 138 -- cheque, -5",
+        "well-known, read-only",
+    ] {
+        assert_eq!(refused(&json!({ "text": fine })), None, "{fine:?}");
     }
 }
 
