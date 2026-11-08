@@ -417,6 +417,34 @@ do when `clauseo-sandbox-setup.exe` is gone, and how to get it back and check it
   (task S15). A policy that forbids local accounts leaves agents running without it, shown in the
   app as "Not protected".
 
+### Windows in S mode
+
+- **A device in S mode can't run Clauseo.** S mode runs only Microsoft Store apps; anything else
+  gets "this mode of Windows only runs Microsoft-verified apps". That blocks Clauseo's installer,
+  and the Node runtime and agent tools Clauseo downloads and runs, so a Store build would not help
+  either. Intune's S mode supplemental policy for Win32 apps needs a signed app catalog, which
+  unsigned Clauseo and its downloaded tools can't have
+  ([Enable Win32 apps on S mode devices](https://learn.microsoft.com/en-us/intune/app-management/deployment/enable-win32-s-mode)).
+- **The user can switch out alone, unless your policy blocks it.** Settings > System > Activation
+  (Windows 11), then the Store's "Switch out of S mode" page; [the lawyer's
+  guide](install/windows-s-mode.md) has the clicks. Microsoft: "Your organization can choose to keep
+  all devices in S mode"
+  ([S mode FAQ](https://support.microsoft.com/en-us/windows/experience/platform-variants/windows-10-and-windows-11-in-s-mode-faq)).
+  That is the WindowsLicensing CSP's `SMode/SwitchingPolicy` set to `1`, "User Blocked", or Intune's
+  **Switch out of S mode** set to **Keep in S mode**. The switch also goes through the Microsoft
+  Store, so a policy that turns the Store off can stop it too.
+- **To switch managed devices with Intune:** Devices > Manage devices > Configuration > Create >
+  New policy, platform **Windows 10 and later**, profile type **Templates > Edition upgrade and mode
+  switch**; under Mode switch, set **Switch out of S mode** to **Switch**
+  ([Upgrade Windows editions or switch out of S mode](https://learn.microsoft.com/en-us/intune/device-configuration/templates/configure-edition-upgrade-windows),
+  [the settings](https://learn.microsoft.com/en-us/intune/device-configuration/templates/ref-edition-upgrade-settings-windows)).
+  It applies at the next check-in. Other MDMs can run the CSP node
+  `./Vendor/MSFT/WindowsLicensing/SMode/SwitchFromSMode` (Exec; it does not reboot), which works
+  even when `SwitchingPolicy` blocks the user
+  ([WindowsLicensing CSP](https://learn.microsoft.com/en-us/windows/client-management/mdm/windowslicensing-csp)).
+- **Switching is one-way.** The device can't go back to S mode, and removing the Intune assignment
+  later doesn't revert it (both pages above).
+
 ## 4. WebView2
 
 Clauseo draws its window with Microsoft Edge WebView2, Evergreen.
