@@ -4,6 +4,7 @@
 use zeroize::Zeroizing;
 
 use super::super::RunExit;
+use super::super::inner_user::{self, check_inner_user};
 use super::super::spawn::{Process, assign, log_on, resume};
 use super::super::start::Steps;
 use super::super::station::StationDesktop;
@@ -52,18 +53,13 @@ impl Steps for Start<'_> {
     }
 
     /// Its token's user, read now: from its first instruction the inner shuts its token to all
-    /// but SYSTEM until the launch arrives over `ctl`.
+    /// but SYSTEM until the launch arrives over `ctl`. On the agent's own station the token
+    /// refuses this process (5), and the user is read without it (`inner_user.rs`).
     fn check_user(&mut self, inner: &Process) -> Result<(), Failure> {
-        let user = inner
-            .user()
-            .map_err(|e| Failure::new(RunExit::Logon, os("the inner runner's token", &e)))?;
-        if user != *self.pool_user {
-            return Err(Failure::new(
-                RunExit::Logon,
-                "the inner runner isn't the pool user",
-            ));
-        }
-        Ok(())
+        check_inner_user(self.pool_user, inner.user(), || {
+            inner_user::os::telemetry(inner)
+        })
+        .map_err(|(exit, message)| Failure::new(exit, message))
     }
 
     fn assign(&mut self, inner: &Process) -> Result<(), Failure> {

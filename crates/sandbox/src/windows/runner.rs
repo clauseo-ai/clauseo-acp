@@ -85,6 +85,8 @@ mod inner;
 #[cfg(any(windows, test))]
 mod inner_flow;
 #[cfg(any(windows, test))]
+mod inner_user;
+#[cfg(any(windows, test))]
 mod leftovers;
 #[cfg(any(windows, test))]
 pub mod marker;
