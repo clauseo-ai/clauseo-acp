@@ -2077,10 +2077,24 @@ INTERACTIVE or a `BUILTIN` group there would deny the lawyer too.
 is the admin copy with the fixed argument `--wsl-deny` and nothing else; the trigger has no value
 queries, so nothing from the event reaches the run. The run (`wsl_phase::wsl_deny`) is refused
 unless it is LOCAL SYSTEM from the admin copy's path, as the refresh's step 1, then runs the WSL
-phase, then four more passes 5 s apart (`WSL_RECHECKS`, `WSL_RECHECK_PAUSE`): an installer may
-write the launch permissions in more than one pass, and each pass re-reads them and re-applies
-what changed, writing nothing otherwise (at most 70 s with every lock wait, inside `PT2M`). It
-does nothing else: no admin-copy step, no record read beyond the phase's own, and
+phase on a schedule (`wsl_phase/schedule.rs`). An installer may write the launch permissions in
+more than one pass, and each pass re-reads them and re-applies what changed, writing nothing
+otherwise; the phase stays the deny's only writer. Before every pass, the first included, the run
+arms one `RegNotifyChangeKeyValue` on `HKLM\SOFTWARE\Classes\AppID` (the machine key in the
+64-bit view, never `HKEY_CLASSES_ROOT`; subtree, names and values, thread agnostic) and on
+Windows Installer's keys, so a change made while a pass reads still fires (arm, then read, then
+act). The floor stays: four more passes 5 s apart (`WSL_RECHECKS`, `WSL_RECHECK_PAUSE`), change
+or none, so with no install and no change the run is what it was. A change wakes the run: it
+settles 250 ms, and at least 1 s after its last pass, so a storm of changes gives at most one pass
+a second, then re-arms and passes. While Windows Installer's `InProgress` is there (admin-only),
+and until it has been gone for 3 s, the run holds past the floor, waking on each change; the
+`_MSIExecute` mutex is a hint only, logged when held with no `InProgress`, since anyone with a
+global-object right can hold it and it outlives an install. It ends once the floor is done,
+`InProgress` has been gone 3 s and a pass verifies every target; one that doesn't is retried
+every 5 s after an install (a run that saw none ends after the floor, as before). Its own budget,
+330 s, ends it whatever it waits for, 30 s inside the task's 6 minutes (`PT6M`), and no pass
+starts that its 1 s gap and 10 s lock wait could carry past the budget. A failure that repeats is
+logged once while it repeats. It does nothing else: no admin-copy step, no record read beyond the phase's own, and
 never WSL's upgrade. The event trigger is on this task alone because anyone who can log on can
 fire it: INTERACTIVE may write to the Application log, so the lawyer or a pool user can forge an
 `MsiInstaller` event, and on the refresh that started the admin copy's steps as SYSTEM. Here a
@@ -2089,7 +2103,7 @@ each holding the set-up lock for a moment (a set-up that meets it then fails at 
 run again). The task ignores a start while it runs (`TASK_INSTANCES_IGNORE_NEW`): the phase is
 quick and idempotent, so an installer's burst of events gives one run, and an event after it ends
 gives another. It shares the other tasks' principal, descriptor (owned by Administrators, the
-owner `FRFX`) and folder, stops after 2 minutes (`PT2M`), and is registered and removed with
+owner `FRFX`) and folder, stops after 6 minutes (`PT6M`), and is registered and removed with
 them: `--adopt` registers it per user after `\Clauseo\SandboxStop` (`refresh::TASKS`), a
 per-machine install's set-up after the stop task (`refresh::MACHINE_TASKS`), a per-machine
 `--remove` deletes it with the stop task, and `--remove --uninstall` with the admin copy
@@ -2324,13 +2338,25 @@ starts one within about a second of a pending Store update) rewrites the AppIDs,
 off until the `MsiInstaller`-event task re-applies it: about 1.2 s measured on the VM. The task's
 re-checks put back a later pass's rewrite. An external `msiexec` install of WSL measured the same
 way at 07f03807a (run 42470456515, three trials): the deny was off 1.06, 1.09 and 1.05 s. WSL's
-installer deletes the AppID keys about 5 s in and writes them again about 21 s in; the task's
-five passes ended just before that rewrite, and the install-complete event's run restored the
-deny. **Not measured:** the roughly 16 s while the AppID keys don't exist at all, when COM's
-default launch permissions apply to WSL's servers instead of the deny; we don't probe it. The
-mid-session WSL watcher (the next wiring PR) stops a session if a pool-owned WSL process or an
-`LxssUserSession` activation appears, and carries the VM row for the key-absent window and a pass
-schedule that reaches past the rewrite.
+installer deletes the AppID keys about 5 s in and writes them again about 21 s in. At 07f03807a
+the task's five fixed passes ended just before that rewrite, and the install-complete event's run
+restored the deny. The task now holds while `InProgress` is there and wakes on the AppID keys'
+change, so the rewrite is re-denied about 250 ms after it (the settle) plus the notification's
+latency, not when the install-complete event's run comes. This only shortens the gap after the
+rewrite. **Not measured:** the roughly 16 s while the AppID keys don't exist at all, when COM's
+default launch permissions apply to WSL's servers instead of the deny; we don't probe it, and no
+pass can deny on a key that isn't there. The pause and the guard (later PRs) narrow that window;
+they don't close it: a VM started through an activation already in flight can live a few seconds
+before either acts. They carry the VM row for the key-absent window.
+
+VM row (normal flow, observe only): an external `msiexec /i wsl.<version>.msi /qn` install of WSL
+as an administrator during no session, with the deny-off time measured as at 07f03807a (from the
+rewrite's appearance to the deny's return, three trials) and the `InProgress` and `_MSIExecute`
+times recorded beside the AppID keys'. Expected: the deny-off time falls from about 1.1 s to about
+the notification latency plus the 250 ms settle; `InProgress` spans the deletion and the rewrite;
+the task's run ends about 3 s after `InProgress` goes, its Event Log line saying the deny was put
+back. Which of the two `Installer` keys holds `InProgress` (`SOFTWARE\Microsoft\Windows` or
+`...\CurrentVersion`) is recorded too; the run reads both.
 
 **The stop ends a pool user's WSL** (`setup/stop/vms.rs`, step 5b of `--stop`, SYSTEM, after
 the process passes and the BITS step). WSL 1 needs nothing more: its pico processes and the pool
