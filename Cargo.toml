@@ -142,6 +142,9 @@ unicode-normalization = "0.1.26"
 # clauseo-sandbox: Unicode full case folding (CaseFolding.txt C and F) for the policy's path keys on
 # macOS, as a case-insensitive APFS volume folds names.
 caseless = "0.2.2"
+# clauseo-sandbox: General_Category and Default_Ignorable_Code_Point, so a denial's path is shown
+# with every invisible or control character escaped (already in the lock through url's idna).
+icu_properties = "2.3.0"
 # The Word round trip test (crates/host/tests/host/word_round_trip.rs) reads a .docx's zip entry
 # (deflate, from flate2) and its word/document.xml (quick-xml). Both are already in the lock.
 flate2 = "1.1.10"

@@ -26,8 +26,8 @@
 //!   default says) and its path is `X:\...` ([`is_local_drive_path`]); anything else is
 //!   for display only, opens nothing at all, and its `unknown` is a read. Then
 //!   `policy.classify`, which compares strings and opens nothing, and [`Denial::Path`] into that
-//!   launch's capped sink, its path shown through `display_safe_path` (controls and bidi or
-//!   invisible formatting escaped). A `dropped` line carries no SID; it goes
+//!   launch's capped sink, its path shown through `display_safe_path` (each invisible or
+//!   control character escaped). A `dropped` line carries no SID; it goes
 //!   to the launch of the last refusal routed, or to every launch when none was. Sinks are
 //!   ticked every [`TICK`].
 //! - **The key and the server:** a name is trusted only from a key LOCAL SYSTEM owns; the pipe

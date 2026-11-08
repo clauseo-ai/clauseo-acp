@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
+use icu_properties::props::{DefaultIgnorableCodePoint, GeneralCategory};
+use icu_properties::{CodePointMapData, CodePointSetData};
 use serde::Serialize;
 
 /// Something the jail or the egress proxy refused. One definition for every OS and for the
@@ -306,28 +308,40 @@ impl<S: DenialSink, C: Clock> DenialSink for CappedSink<S, C> {
     }
 }
 
-/// Whether `c` is one [`display_safe`] escapes: a C0 or C1 control or DEL, or bidi or
-/// invisible formatting (zero-width space to right-to-left mark, the embeddings and overrides,
-/// the isolates, the Arabic letter mark, the byte order mark).
-fn needs_escape(c: char) -> bool {
-    c.is_control()
-        || matches!(
-            c,
-            '\u{200B}'..='\u{200F}'
-                | '\u{202A}'..='\u{202E}'
-                | '\u{2066}'..='\u{2069}'
-                | '\u{061C}'
-                | '\u{FEFF}'
-        )
+/// Whether `c` is invisible or a control, the characters [`display_safe`] escapes:
+/// - by `General_Category`: a control (Cc: C0, C1 and DEL), any format character (Cf: bidi
+///   marks, embeddings, overrides and isolates, zero-width characters, the byte order mark,
+///   tags), the line and paragraph separators (Zl, Zp), private use (Co: U+E000–F8FF and planes
+///   15 and 16), a surrogate (Cs; a `char` holds none, and a lone one in a path arrives as
+///   U+FFFD), and unassigned (Cn), which includes the noncharacters;
+/// - every `Default_Ignorable_Code_Point` (`DerivedCoreProperties.txt`): U+00AD, U+034F,
+///   U+115F–1160, U+17B4–17B5, U+180B–180F, U+3164, U+FE00–FE0F, U+FFA0 and the rest.
+///
+/// The data is ICU4X's compiled Unicode data (`icu_properties`); a code point assigned in a
+/// later Unicode than it knows reads as unassigned, and is escaped. Letters and marks of every
+/// script (Devanagari with its nukta and virama, CJK, accented Latin) and emoji are kept. Named
+/// so a log sanitiser could share it.
+pub fn is_invisible_or_control(c: char) -> bool {
+    let category = CodePointMapData::<GeneralCategory>::new().get(c);
+    matches!(
+        category,
+        GeneralCategory::Control
+            | GeneralCategory::Format
+            | GeneralCategory::LineSeparator
+            | GeneralCategory::ParagraphSeparator
+            | GeneralCategory::PrivateUse
+            | GeneralCategory::Surrogate
+            | GeneralCategory::Unassigned
+    ) || CodePointSetData::new::<DefaultIgnorableCodePoint>().contains(c)
 }
 
-/// `text` safe to show the lawyer: each control character (C0, C1, DEL) and each bidi or
-/// invisible formatting character becomes a visible escape, `\u{202E}`, so a name can't hide a
+/// `text` safe to show the lawyer: each invisible or control character
+/// ([`is_invisible_or_control`]) becomes a visible escape, `\u{202E}`, so a name can't hide a
 /// part of itself, reorder what is shown, or break a line. Everything else is kept.
 pub fn display_safe(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
-        if needs_escape(c) {
+        if is_invisible_or_control(c) {
             // Writing to a String can't fail.
             write!(out, "\\u{{{:04X}}}", u32::from(c)).unwrap_or_default();
         } else {

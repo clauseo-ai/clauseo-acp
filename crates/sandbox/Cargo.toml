@@ -38,6 +38,9 @@ dunce = { workspace = true }
 # (src/policy/names.rs): canonical caseless matching, NFD of the full case fold of NFD.
 unicode-normalization = { workspace = true }
 caseless = { workspace = true }
+# A denial's path shown with each invisible or control character escaped (src/denial.rs): its
+# General_Category and Default_Ignorable_Code_Point, from ICU4X's compiled data.
+icu_properties = { workspace = true }
 # The egress proxy (src/proxy.rs): its thread runs async-io's block_on over an async-executor
 # LocalExecutor; DNS and the upstream lookup run on blocking's pool; httparse reads request and
 # response heads; url turns host names to ASCII (IDN) and parses http:// targets; psl refuses a

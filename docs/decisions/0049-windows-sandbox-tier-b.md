@@ -2158,9 +2158,13 @@ order before the launch (M1) is kept free of anything else. Row C2 measures what
   else, `"net":true` or a `\\…` display string included, opens nothing at all, and its
   `unknown` becomes a read.
 - `policy.classify` compares strings only and opens nothing. The path goes out through
-  `display_safe_path` (`denial.rs`), which escapes C0 and C1 controls, DEL, and bidi or
-  invisible formatting (U+200B–U+200F, U+202A–U+202E, U+2066–U+2069, U+061C, U+FEFF) as
-  `\u{202E}`. The macOS reporter doesn't use it yet.
+  `display_safe_path` (`denial.rs`). It escapes every character `is_invisible_or_control`
+  names as `\u{202E}`: General_Category Cc, Cf, Zl, Zp, Co, Cs and Cn (so noncharacters and
+  unassigned code points too), and every Default_Ignorable_Code_Point, from ICU4X's compiled
+  data (`icu_properties`). It is not ASCII-only: letters and marks of every script (a Hindi
+  name with its nukta, CJK, accented Latin) and plain emoji are kept. An emoji sequence joined by
+  ZWJ or carrying a variation selector shows those as escapes. A character newer than ICU4X's
+  Unicode reads as unassigned and is escaped. The macOS reporter doesn't use it yet.
 - The watcher's breaker sends `{"paused":{"secs":n,"reason":"rate"}}` during heavy disk
   activity. Every registered launch gets `Denial::ReporterPaused { secs }` once (appended to
   `Denial`), which says file refusals aren't reported for that long and the host-side source
