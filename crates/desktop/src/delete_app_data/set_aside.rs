@@ -8,9 +8,10 @@
 //!
 //! It counts as empty when each entry in it is a real folder (no reparse point) holding only
 //! regular files (no reparse point, no folder) named exactly `record.json`,
-//! `notes-record.json`, `set-aside.lock` or `manifest.json`. Anything else (a pass folder with moved files, any other name, a name with a
-//! trailing dot or space, a link, a folder under a bookkeeping name, an entry that cannot be
-//! listed or read) keeps the whole set-aside, untouched. Each folder is pinned while it is listed
+//! `notes-record.json`, `set-aside.lock` or `manifest.json`. Anything else (a pass folder with
+//! moved files, any other name, a name with a trailing dot or space, a link, a folder under a
+//! bookkeeping name, an entry that cannot be listed or read) keeps the whole set-aside,
+//! untouched. Each folder is pinned while it is listed
 //! (`ops::pin_folder`: refused if a reparse point).
 //!
 //! The deletion itself is the sandbox crate's (`forget_set_aside_bookkeeping`), one matter at a
