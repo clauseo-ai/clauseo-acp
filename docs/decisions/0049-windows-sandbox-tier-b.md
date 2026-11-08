@@ -2177,6 +2177,9 @@ A run deletes only the pool users' tasks and BITS jobs. An ended run never write
 - VM row (not run): does `IRunningTask::Stop` also end the processes the instance started, or
   only the action's own process? If only the latter, a child of a stopped instance survives
   like X above, and the pre-logon check is what catches it.
+- VM row (not run): after the sweep deletes a task, does `GetRunningTasks` still list that
+  task's running instance, and does `IRunningTask::Stop` still stop it? Step 4 relies on both.
+  If not, the instance step finds nothing and the instance runs on, like X above.
 - Elevated test (not run yet):
   `elevated_a_task_whose_descriptor_shuts_system_out_is_deleted_or_56_never_left_at_0`: a
   standard test user registers, from XML, a task whose descriptor denies SYSTEM and
