@@ -24,6 +24,11 @@ pub const STOP_EXECUTION_LIMIT: &str = "PT2M";
 /// 1040, 11728, 1035 and 1042 for a WSL repair (R5c, T3b).
 pub(super) const MSI_EVENT_IDS: [u32; 8] = [1022, 1033, 1035, 1040, 1042, 11707, 11724, 11728];
 
+/// How long the event trigger waits after an installer event before it starts the refresh
+/// (ISO 8601): an installer's burst of events falls inside it, and the task ignores a start
+/// while it runs, so the burst gives one run, whose last WSL phase comes after the burst.
+pub(super) const MSI_EVENT_DELAY: &str = "PT15S";
+
 /// What starts a task besides a demand.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Trigger {
@@ -100,16 +105,6 @@ impl SystemTask {
         match self {
             SystemTask::Refresh => &[Trigger::Logon, Trigger::MsiEvents],
             SystemTask::Stop => &[],
-        }
-    }
-
-    /// Whether a start while it runs waits its turn (`TASK_INSTANCES_QUEUE`) rather than being
-    /// dropped: the refresh's, so an installer event during a run still gets a run after it,
-    /// one at a time. The stop drops it (`TASK_INSTANCES_IGNORE_NEW`).
-    pub fn queues(self) -> bool {
-        match self {
-            SystemTask::Refresh => true,
-            SystemTask::Stop => false,
         }
     }
 

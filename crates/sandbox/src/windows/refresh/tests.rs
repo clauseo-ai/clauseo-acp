@@ -166,7 +166,20 @@ fn a_held_set_up_lock_reads_and_moves_nothing_and_a_run_holds_it_throughout() {
     fake.fail = Some("lock");
     assert_eq!(run_fake(&mut fake, &key), RefreshExit::LockHeld);
     assert_eq!(RefreshExit::LockHeld.as_code(), 44);
-    assert_eq!(fake.calls, ["is_system", "lock"]);
+    // Only WSL's two phases besides the lock's try: nothing of the copy is read.
+    assert_eq!(
+        fake.calls,
+        [
+            "is_system",
+            "lock_waiting",
+            "reapply_wsl",
+            "unlock",
+            "lock",
+            "lock_waiting",
+            "reapply_wsl",
+            "unlock"
+        ]
+    );
     assert_eq!(fake.admin_file, Some(old()));
     assert_eq!(fake.record.admin_copy_sha256, Some(sha_hex(&old())));
     // Taken before the record is read, given back after its last write, failed or not.
@@ -176,6 +189,14 @@ fn a_held_set_up_lock_reads_and_moves_nothing_and_a_run_holds_it_throughout() {
         let _exit = run_fake(&mut fake, &key);
         let at = |name| fake.calls.iter().position(|call| *call == name).unwrap();
         assert!(at("lock") < at("record"), "{fail:?}");
+        let last_copy = fake.calls.iter().rposition(|call| *call == "lock").unwrap();
+        assert_eq!(
+            fake.calls[last_copy..]
+                .iter()
+                .filter(|c| **c == "unlock")
+                .count(),
+            2
+        );
         assert_eq!(fake.calls.last(), Some(&"unlock"), "{fail:?}");
     }
 }

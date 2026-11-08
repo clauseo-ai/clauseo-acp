@@ -148,6 +148,11 @@ impl Refresher for Fake {
         self.calls.push("lock");
         Ok(self.fail != Some("lock"))
     }
+    fn lock_waiting(&mut self) -> Result<bool, Failed> {
+        // `fail: Some("lock_waiting")` is another holder past the wait.
+        self.calls.push("lock_waiting");
+        Ok(self.fail != Some("lock_waiting"))
+    }
     fn unlock(&mut self) {
         self.calls.push("unlock");
     }

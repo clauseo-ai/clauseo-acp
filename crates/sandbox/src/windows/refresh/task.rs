@@ -29,14 +29,14 @@ use windows::Win32::System::Com::{
 use windows::Win32::System::TaskScheduler::{
     IEventTrigger, IExecAction, ILogonTrigger, IRegisteredTask, ITaskFolder, ITaskService,
     TASK_ACTION_EXEC, TASK_CREATE_OR_UPDATE, TASK_ENUM_HIDDEN, TASK_INSTANCES_IGNORE_NEW,
-    TASK_INSTANCES_QUEUE, TASK_LOGON_SERVICE_ACCOUNT, TASK_RUNLEVEL_HIGHEST, TASK_TRIGGER_EVENT,
-    TASK_TRIGGER_LOGON, TaskScheduler,
+    TASK_LOGON_SERVICE_ACCOUNT, TASK_RUNLEVEL_HIGHEST, TASK_TRIGGER_EVENT, TASK_TRIGGER_LOGON,
+    TaskScheduler,
 };
 use windows::Win32::System::Variant::VARIANT;
 use windows::core::{BSTR, HRESULT, Interface};
 
 use super::last_run::{LastRun, last_run};
-use super::rules::{Trigger, msi_event_query};
+use super::rules::{MSI_EVENT_DELAY, Trigger, msi_event_query};
 use super::task_folder::{Folders, prepare};
 use super::windows_refresher::{EXE_NAME, sandbox_dir};
 use super::{SystemTask, action_path, task_sddl};
@@ -274,13 +274,9 @@ pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError>
         settings
             .SetExecutionTimeLimit(&BSTR::from(spec.execution_limit()))
             .map_err(com("SetExecutionTimeLimit"))?;
-        let instances = if spec.queues() {
-            TASK_INSTANCES_QUEUE
-        } else {
-            TASK_INSTANCES_IGNORE_NEW
-        };
+        // A start while it runs is dropped: the refresh's last WSL phase covers it.
         settings
-            .SetMultipleInstances(instances)
+            .SetMultipleInstances(TASK_INSTANCES_IGNORE_NEW)
             .map_err(com("SetMultipleInstances"))?;
         settings
             .SetAllowDemandStart(yes)
@@ -316,6 +312,9 @@ pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError>
                     event
                         .SetSubscription(&BSTR::from(msi_event_query()))
                         .map_err(com("IEventTrigger::SetSubscription"))?;
+                    event
+                        .SetDelay(&BSTR::from(MSI_EVENT_DELAY))
+                        .map_err(com("IEventTrigger::SetDelay"))?;
                 }
             }
         }

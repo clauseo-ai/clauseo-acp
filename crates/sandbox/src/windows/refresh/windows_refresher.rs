@@ -32,7 +32,7 @@ use crate::windows::admin_copy::{self, Found, LOCKED_FILE_SDDL, level_safe, os};
 pub(crate) use crate::windows::admin_copy::{SETUP_EXE as EXE_NAME, SETUP_SIG as SIG_NAME};
 use crate::windows::record::{read_string, sandbox_group_sid, sandbox_removing};
 use crate::windows::setup::adopt::windows_adopter::own_profile;
-use crate::windows::setup::lock::{Held, SETUP_MUTEX, try_lock};
+use crate::windows::setup::lock::{Held, SETUP_MUTEX, lock_within, try_lock};
 use crate::windows::setup::owner::this_process;
 use crate::windows::setup::record_values::{
     ADMIN_COPY_OWNER, ADMIN_COPY_SHA256, ADMIN_COPY_VERSION, USER_INSTALL_DIR,
@@ -143,6 +143,13 @@ impl Refresher for WindowsRefresher {
 
     fn lock(&mut self) -> Result<bool, Failed> {
         self.lock = try_lock(SETUP_MUTEX).map_err(|error| format!("the set-up lock: {error}"))?;
+        Ok(self.lock.is_some())
+    }
+
+    fn lock_waiting(&mut self) -> Result<bool, Failed> {
+        let wait_ms = u32::try_from(super::WSL_LOCK_WAIT.as_millis()).unwrap_or(u32::MAX);
+        self.lock = lock_within(SETUP_MUTEX, wait_ms)
+            .map_err(|error| format!("the set-up lock: {error}"))?;
         Ok(self.lock.is_some())
     }
 
