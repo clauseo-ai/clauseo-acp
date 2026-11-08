@@ -247,6 +247,7 @@ mod ids;
 pub mod log_file;
 mod matter_marker;
 mod matter_worker;
+mod network_paths;
 mod pipeline;
 pub mod pre_write_guard;
 mod principal;

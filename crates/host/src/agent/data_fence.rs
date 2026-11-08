@@ -38,6 +38,10 @@ use std::path::{Component, Path, PathBuf};
 
 use clauseo_matters::{HeldOpen, held_open_at};
 use clauseo_protocol::MatterPath;
+use resolve::{Disk, Found};
+
+use crate::network_paths::resolve::{Entry, Fs, RealFs, Resolved};
+use crate::network_paths::{self, FOLD_CASE, NetEnv, fold_name, under_share_matter};
 pub(crate) use input::{candidates, candidates_roots, candidates_words};
 pub(crate) use launch::{LaunchDeny, claude_projects, launch_deny};
 
@@ -233,50 +237,59 @@ pub(crate) struct FenceCheck {
 impl FenceCheck {
     /// Whether any path resolves into `<data>` and outside every own folder, comparing ignoring
     /// case on Windows and macOS, whose file systems do. Stats the file system.
+    #[cfg(test)]
     pub(crate) fn touches_data(&self) -> bool {
-        self.touches_data_as(cfg!(any(windows, target_os = "macos")))
+        self.touches_data_as(FOLD_CASE)
     }
 
     /// [`Self::touches_data`], ignoring case when `insensitive`. A path that passes through a
     /// link loop counts as in `<data>`, as does every path when `<data>` itself does not
     /// resolve.
+    #[cfg(test)]
     pub(crate) fn touches_data_as(&self, insensitive: bool) -> bool {
+        let net = NetEnv::current();
+        self.touches_data_on(insensitive, &Disk::real(&net))
+    }
+
+    /// [`Self::touches_data_as`] on `disk`. A path that is, or leads to, a network location
+    /// counts as in `<data>` (found before anything touches it), unless it lies by its text in
+    /// the matter folder the lawyer keeps on a share, which counts as outside, untouched.
+    pub(crate) fn touches_data_on(&self, insensitive: bool, disk: &Disk<'_>) -> bool {
         let home = self.home.as_deref();
-        let Some(real_data) = resolve::resolve(&self.data, &self.cwd, home) else {
+        let Found::Path(real_data) = resolve::resolve(&self.data, &self.cwd, home, disk) else {
             return !self.paths.is_empty() || !self.words.is_empty() || !self.roots.is_empty();
         };
         let data = key(&real_data, insensitive);
-        let own = self.own(&real_data, insensitive);
-        let inside = |found: &Option<PathBuf>| match found {
-            None => true,
-            Some(path) => {
+        let own = self.own(&real_data, insensitive, disk);
+        let inside = |found: &Found| match found {
+            Found::Refused => true,
+            Found::ShareMatter => false,
+            Found::Path(path) => {
                 let path = key(path, insensitive);
                 path.starts_with(&data) && !own.iter().any(|folder| path.starts_with(folder))
             }
         };
         let embedded = self.embedded(&real_data, insensitive);
         let reached = self.paths.iter().chain(&embedded).any(|path| {
-            resolve::resolve_all(path, &self.cwd, home)
+            resolve::resolve_all(path, &self.cwd, home, disk)
                 .iter()
                 .any(inside)
         });
         // A search from a folder that holds `<data>` (or is it) reaches all of it.
-        let holds = |found: &Option<PathBuf>| {
+        let holds = |found: &Found| {
             inside(found)
-                || found
-                    .as_ref()
-                    .is_some_and(|root| data.starts_with(&key(root, insensitive)))
+                || matches!(found, Found::Path(root) if data.starts_with(&key(root, insensitive)))
         };
         reached
             || self.roots.iter().any(|root| {
-                resolve::resolve_all(root, &self.cwd, home)
+                resolve::resolve_all(root, &self.cwd, home, disk)
                     .iter()
                     .any(holds)
             })
     }
 
     /// The own folders that count ([`Self::allowed`], [`Self::cwd`]), as keys.
-    fn own(&self, real_data: &Path, insensitive: bool) -> Vec<Vec<OsString>> {
+    fn own(&self, real_data: &Path, insensitive: bool, disk: &Disk<'_>) -> Vec<Vec<OsString>> {
         let home = self.home.as_deref();
         let data = key(real_data, insensitive);
         let mut own = Vec::new();
@@ -289,14 +302,16 @@ impl FenceCheck {
                 .components()
                 .all(|part| matches!(part, Component::Normal(_)));
             let expected = key(&real_data.join(place), insensitive);
-            let found = resolve::resolve(&folder, &self.cwd, home);
-            if named && found.is_some_and(|found| key(&found, insensitive) == expected) {
+            let found = resolve::resolve(&folder, &self.cwd, home, disk);
+            if named && matches!(found, Found::Path(found) if key(&found, insensitive) == expected)
+            {
                 own.push(expected);
             }
         }
-        if let Some(cwd) = resolve::resolve(&self.cwd, &self.cwd, home) {
+        if let Found::Path(cwd) = resolve::resolve(&self.cwd, &self.cwd, home, disk) {
             let cwd_key = key(&cwd, insensitive);
-            let linked = self.cwd.is_symlink() && cwd_key.starts_with(&data);
+            let linked =
+                matches!(disk.fs.entry(&self.cwd), Ok(Entry::Link)) && cwd_key.starts_with(&data);
             if !data.starts_with(&cwd_key) && !linked {
                 own.push(cwd_key);
             }
@@ -341,29 +356,46 @@ pub(crate) enum PathsChecked {
     Held(Option<(MatterPath, HeldOpen)>),
 }
 
-/// The data-folder check, then the held-open check of `paths` in the matter `folder`.
+/// The data-folder check, then the held-open check of `paths` in the matter `folder`. A path
+/// that is or leads to a network location, or lies by its text in a matter folder on a share,
+/// is never looked at for being held ([`may_look`]).
 pub(crate) fn check_paths(
     folder: &Path,
     paths: Vec<PathBuf>,
     fence: Option<&FenceCheck>,
 ) -> PathsChecked {
-    if fence.is_some_and(FenceCheck::touches_data) {
+    let net = NetEnv::current();
+    if fence.is_some_and(|fence| fence.touches_data_on(FOLD_CASE, &Disk::real(&net))) {
         return PathsChecked::DataFolder;
     }
     PathsChecked::Held(
         paths
             .into_iter()
+            .filter(|path| may_look(folder, path, &net, &RealFs))
             .find_map(|path| held_open_at(folder, &path)),
     )
 }
 
-/// `path`'s parts for a prefix comparison, lowercased when `insensitive`.
+/// Whether the held-open check may look at `path` (absolute, or taken from the matter
+/// `folder`) on the disk: not when it lies by its text in `folder` kept on a share, nor when it
+/// is or leads to a network location (walked by [`network_paths::resolve::resolve`], which
+/// stops before one).
+fn may_look(folder: &Path, path: &Path, net: &NetEnv, fs: &dyn Fs) -> bool {
+    let joined = folder.join(path);
+    [path, joined.as_path()].iter().all(|path| {
+        !under_share_matter(path, folder, net)
+            && (!net.is_network(path) || network_paths::is_url(&path.to_string_lossy()))
+    }) && network_paths::resolve::resolve(&joined, fs, net) != Resolved::Network
+}
+
+/// `path`'s parts for a prefix comparison, folded when `insensitive` ([`fold_name`]: a deny
+/// folds at least as broadly as the file system, `ſ` and the Kelvin sign included).
 fn key(path: &Path, insensitive: bool) -> Vec<OsString> {
     path.components()
         .map(|part| {
             let part = part.as_os_str();
             if insensitive {
-                OsString::from(part.to_string_lossy().to_lowercase())
+                OsString::from(fold_name(&part.to_string_lossy()))
             } else {
                 part.to_owned()
             }
@@ -380,6 +412,8 @@ mod input;
 mod launch;
 #[cfg(test)]
 mod launch_tests;
+#[cfg(test)]
+mod network_tests;
 mod resolve;
 mod search;
 #[cfg(test)]

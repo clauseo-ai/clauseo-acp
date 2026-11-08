@@ -70,6 +70,10 @@ rustix = { workspace = true, features = ["fs"] }
 # user database.
 nix = { workspace = true, features = ["user"] }
 
+# The network path checks' remote mount list (network_paths/mac.rs): getfsstat.
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = { workspace = true }
+
 # The Chrome for Testing download's Win32 calls (browser/install/windows.rs): System32's folder
 # (SystemInformation), the free disk space (Storage_FileSystem), and Authenticode on chrome.exe
 # (Security_WinTrust, whose WINTRUST_DATA needs Security_Cryptography).
