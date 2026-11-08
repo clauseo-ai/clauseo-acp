@@ -212,6 +212,16 @@ pub trait Machine {
     /// pool's `group` refused first (`refresh::deny_set_up_to`), as this process. `Ok(false)`
     /// when the install has no set-up task.
     fn deny_set_up_to(&mut self, group: &Sid) -> Result<bool, MachineError>;
+    /// An elevated set-up's self-heal: registers the set-up task `\Clauseo\SandboxSetUp` when
+    /// it is missing or its definition differs (`refresh::ensure_task`), as this process: for
+    /// `owner` alone with no `group` (per user), for interactive users with `group` refused (per
+    /// machine). `Ok(true)` once the task is as given; `Ok(false)` when this run doesn't heal
+    /// it: the set-up task's own run, which needs no prompt to be set up again.
+    fn ensure_set_up_task(
+        &mut self,
+        owner: &Sid,
+        group: Option<&Sid>,
+    ) -> Result<bool, MachineError>;
     /// The users of `pool` the reuse rule would hold back once this run has reset `resets`, for
     /// the top-up's count (`top_up.rs`, `MatterSids::held_after_resets`), the owner's ledger
     /// opened trusting `trusted`; an input that can't be read holds every user. The engine calls

@@ -75,6 +75,9 @@ pub enum TaskError {
     /// The folder couldn't be made ready (`task_folder::prepare`).
     #[error("the folder {TASK_FOLDER}: {0}")]
     Folder(String),
+    /// A task's descriptor couldn't be written out as Windows reads it back (`ensure_task`).
+    #[error("the task's descriptor: {0}")]
+    Descriptor(String),
 }
 
 /// `call` failed with `error`, as a line for the log.
@@ -373,7 +376,7 @@ pub fn last_refresh_run() -> Result<LastRun, TaskError> {
 }
 
 /// Runs `then` on the registered `task`, inside a COM apartment that outlives it.
-fn with_task<T>(
+pub(super) fn with_task<T>(
     task: SystemTask,
     then: impl FnOnce(&IRegisteredTask) -> Result<T, TaskError>,
 ) -> Result<T, TaskError> {

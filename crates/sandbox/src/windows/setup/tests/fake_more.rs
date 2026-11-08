@@ -170,6 +170,9 @@ pub(super) struct State {
     pub(super) refresh_task: Option<Sid>,
     /// The group the set-up task `\Clauseo\SandboxSetUp`'s descriptor refuses, once set.
     pub(super) set_up_denied: Option<Sid>,
+    /// Who the set-up task was last registered for by a set-up's self-heal: the owner, and
+    /// per machine the group refused.
+    pub(super) set_up_task: Option<(Sid, Option<Sid>)>,
 }
 
 /// [`FakeMachine::new`]: a machine with only the owner's account, `DeviceSync`, an empty data
@@ -200,6 +203,7 @@ pub(super) fn new_machine(test: &str) -> FakeMachine {
             stop_task: None,
             refresh_task: None,
             set_up_denied: None,
+            set_up_task: None,
         },
         written: Vec::new(),
         temporary: BTreeSet::new(),
@@ -213,6 +217,7 @@ pub(super) fn new_machine(test: &str) -> FakeMachine {
         acting: Rc::new(Cell::new(false)),
         outside_owner: Vec::new(),
         refuse_owner: false,
+        run: super::fake::Run::Elevated,
         matters: Vec::new(),
         owners: BTreeMap::new(),
         self_owned_local_low: BTreeSet::new(),

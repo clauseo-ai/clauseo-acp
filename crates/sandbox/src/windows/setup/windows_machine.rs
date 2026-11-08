@@ -115,6 +115,9 @@ pub struct WindowsMachine {
     /// The account this process runs as, read when the machine is made (before any
     /// impersonation): a profile folder it loaded may be its own.
     own: Option<Sid>,
+    /// Whether this set-up registers the set-up task again when it is missing or changed: an
+    /// elevated one's (the prompt's `--set-up`, `--adopt`'s), never the set-up task's own run.
+    heals: bool,
 }
 
 impl WindowsMachine {
@@ -134,7 +137,15 @@ impl WindowsMachine {
             data_dir,
             acting: Rc::new(Cell::new(false)),
             own: current_user_sid().ok(),
+            heals: false,
         }
+    }
+
+    /// The machine, registering the set-up task again when it is missing or changed
+    /// (`Machine::ensure_set_up_task`): an elevated set-up's.
+    pub fn healing_set_up_task(mut self) -> WindowsMachine {
+        self.heals = true;
+        self
     }
 
     /// The group's name, once `group` is checked to be the pool group's SID: the account calls
@@ -420,6 +431,28 @@ impl Machine for WindowsMachine {
     fn register_stop_task(&mut self, owner: &Sid) -> Result<(), MachineError> {
         refresh::register_task(SystemTask::Stop, &Starters::Owner(owner.clone()))
             .map_err(|error| MachineError::Other(error.to_string()))
+    }
+
+    fn ensure_set_up_task(
+        &mut self,
+        owner: &Sid,
+        group: Option<&Sid>,
+    ) -> Result<bool, MachineError> {
+        if !self.heals {
+            return Ok(false);
+        }
+        let starters = match group {
+            None => Starters::Owner(owner.clone()),
+            Some(group) => Starters::Interactive {
+                denied: Some(group.clone()),
+            },
+        };
+        let again = refresh::ensure_task(SystemTask::SetUp, &starters)
+            .map_err(|error| MachineError::Other(error.to_string()))?;
+        if again {
+            tracing::warn!("the set-up task was missing or changed; registered again");
+        }
+        Ok(true)
     }
 
     fn deny_set_up_to(&mut self, group: &Sid) -> Result<bool, MachineError> {

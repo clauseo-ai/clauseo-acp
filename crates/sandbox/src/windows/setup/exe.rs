@@ -167,18 +167,28 @@ pub(crate) fn run_set_up(names: Names, owner: Owner, given: &Path, add: u8) -> S
             return exit;
         }
     };
-    let result = run_set_up_in(names, owner, &data_dir, add);
+    let result = run_set_up_in(names, owner, &data_dir, add, true);
     SetupExit::from_code(u32::from(result.exit)).unwrap_or(SetupExit::Failed)
 }
 
 /// [`run_set_up`] in `data_dir`, already resolved as `owner` (`owners_data_dir`): the
 /// outcome, as written to `setup-result.json` as the owner. The set-up task runs it for the
-/// user its pipe identified (`serve.rs`).
-pub(crate) fn run_set_up_in(names: Names, owner: Owner, data_dir: &Path, add: u8) -> SetupResult {
+/// user its pipe identified (`serve.rs`), with `heals` false; an elevated set-up, with `heals`
+/// true, also registers the set-up task again when it is missing or changed.
+pub(crate) fn run_set_up_in(
+    names: Names,
+    owner: Owner,
+    data_dir: &Path,
+    add: u8,
+    heals: bool,
+) -> SetupResult {
     // The owner the request names is the given owner's token user, and nothing else.
     let owner_sid = owner.sid().clone();
     let around = Box::new(Around::new(data_dir.to_owned()));
     let mut machine = WindowsMachine::new(names, owner, data_dir.to_owned(), around);
+    if heals {
+        machine = machine.healing_set_up_task();
+    }
     let outcome = request_and_run(&mut machine, &owner_sid, data_dir, add);
     let result = SetupResult::of(&outcome);
     let written = owned(&mut machine, |_| {

@@ -57,6 +57,15 @@ pub(super) fn rids(sids: &[Sid]) -> String {
     sids.iter().map(rid).collect::<Vec<_>>().join(",")
 }
 
+/// Whose set-up a fake machine runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Run {
+    /// An elevated set-up: the prompt's `--set-up`, or `--adopt`'s.
+    Elevated,
+    /// The set-up task's own run.
+    Task,
+}
+
 /// The machine, in memory.
 pub(super) struct FakeMachine {
     pub(super) dir: TempDir,
@@ -87,6 +96,9 @@ pub(super) struct FakeMachine {
     pub(super) outside_owner: Vec<String>,
     /// `as_owner` fails, as an impersonation Windows refuses would.
     pub(super) refuse_owner: bool,
+    /// Whose set-up this is: an elevated one registers the set-up task again; the set-up task's
+    /// own run doesn't.
+    pub(super) run: Run,
     /// The owner's registered matters, as `registered_matters` reads them.
     pub(super) matters: Vec<RegisteredMatter>,
     /// Each folder's owner; one not listed is `SYSTEM`'s.
@@ -467,6 +479,25 @@ impl Machine for FakeMachine {
         self.call(format!("register_stop_task {}", rid(owner)))?;
         self.state.stop_task = Some(owner.clone());
         Ok(())
+    }
+
+    fn ensure_set_up_task(
+        &mut self,
+        owner: &Sid,
+        group: Option<&Sid>,
+    ) -> Result<bool, MachineError> {
+        assert!(!self.acting.get(), "the task is registered as admin");
+        if self.run == Run::Task {
+            return Ok(false);
+        }
+        let starters = match group {
+            None => format!("owner {}", rid(owner)),
+            // The group is checked through `set_up_task`: its SID isn't known before the run.
+            Some(_) => "interactive".to_owned(),
+        };
+        self.call(format!("ensure_set_up_task {starters}"))?;
+        self.state.set_up_task = Some((owner.clone(), group.cloned()));
+        Ok(true)
     }
 
     fn deny_set_up_to(&mut self, group: &Sid) -> Result<bool, MachineError> {

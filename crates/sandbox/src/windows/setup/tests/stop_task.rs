@@ -6,7 +6,7 @@
 //! user's copy, or none, gets nothing. A per-machine removal deletes the stop task before the
 //! record.
 
-use super::fake::{FakeAcl, FakeMachine, OTHER_OWNER, rid};
+use super::fake::{FakeAcl, FakeMachine, OTHER_OWNER, Run, rid};
 use super::remove_fake::Remover;
 use super::*;
 use crate::windows::setup::record_values::CopyOwner;
@@ -38,24 +38,35 @@ const REGISTERED: [&str; 2] = ["register_refresh_task 1001", "register_stop_task
 
 /// A fresh set-up registers `want` once the record names the owner, right after its write and
 /// before anything after the users' steps; a re-run (the elevated first run again, or any later
-/// set-up) registers them again over the ones there, changing nothing else about them. Per
-/// machine, each run then refuses the recorded group the set-up task.
-fn registers_then_again(test: &str, copy: CopyOwner, want: &[&str]) {
+/// set-up) registers them again over the ones there, changing nothing else about them. Then an
+/// elevated set-up (`heals`) registers the set-up task again if missing or changed: per user for
+/// the owner, per machine for interactive users with the group refused. The set-up task's own
+/// run doesn't; per machine it refuses the recorded group the set-up task instead.
+fn registers_then_again(test: &str, copy: CopyOwner, want: &[&str], heals: bool) {
     let refresh = want.len() == 2;
     let mut machine = installed(test, Some(copy));
+    machine.run = if heals { Run::Elevated } else { Run::Task };
     let mut acl = FakeAcl::default();
     set_up_fresh(&mut machine, &mut acl);
     let group = machine.state.group.clone().unwrap();
     let mut want: Vec<&str> = want.to_vec();
-    if refresh {
-        assert_eq!(
-            machine.state.set_up_denied, None,
-            "{test}: per user, the owner alone"
-        );
-    } else {
-        want.push("deny_set_up_to");
-        assert_eq!(machine.state.set_up_denied.as_ref(), Some(&group), "{test}");
-    }
+    let (task, denied) = match (refresh, heals) {
+        (true, true) => {
+            want.push("ensure_set_up_task owner 1001");
+            (Some((owner(), None)), None)
+        }
+        (false, true) => {
+            want.push("ensure_set_up_task interactive");
+            (Some((owner(), Some(group))), None)
+        }
+        (true, false) => (None, None),
+        (false, false) => {
+            want.push("deny_set_up_to");
+            (None, Some(group))
+        }
+    };
+    assert_eq!(machine.state.set_up_task, task, "{test}");
+    assert_eq!(machine.state.set_up_denied, denied, "{test}");
     let want = want.as_slice();
     assert_eq!(task_owners(&machine), for_owner(refresh), "{test}");
     let calls = machine.calls_since(0);
@@ -79,7 +90,9 @@ fn registers_then_again(test: &str, copy: CopyOwner, want: &[&str]) {
             .iter()
             .copied()
             .filter(|c| {
-                c.starts_with("register_") && c.ends_with("_task 1001") || *c == "deny_set_up_to"
+                c.starts_with("register_") && c.ends_with("_task 1001")
+                    || c.starts_with("ensure_set_up_task")
+                    || *c == "deny_set_up_to"
             })
             .collect();
         assert_eq!(found, want, "{test}: {again:?}");
@@ -92,14 +105,37 @@ fn registers_then_again(test: &str, copy: CopyOwner, want: &[&str]) {
 #[test]
 fn per_machine_set_up_registers_the_stop_task_for_the_recorded_owner_idempotently() {
     // No refresh task: IT updates a per-machine install.
-    registers_then_again("setup-tasks-machine", CopyOwner::Machine, &REGISTERED[1..]);
+    registers_then_again(
+        "setup-tasks-machine",
+        CopyOwner::Machine,
+        &REGISTERED[1..],
+        true,
+    );
+    // The set-up task's own run: the deny alone, no registration of itself.
+    registers_then_again(
+        "setup-tasks-machine-task",
+        CopyOwner::Machine,
+        &REGISTERED[1..],
+        false,
+    );
 }
 
 #[test]
 fn per_user_set_up_registers_both_tasks_for_its_copy_owner_idempotently() {
     // `--adopt --place-only` placed the copy and registered nothing; the app's first run's
     // set-up, from the admin copy, makes both tasks.
-    registers_then_again("setup-tasks-user", CopyOwner::User(owner()), &REGISTERED);
+    registers_then_again(
+        "setup-tasks-user",
+        CopyOwner::User(owner()),
+        &REGISTERED,
+        true,
+    );
+    registers_then_again(
+        "setup-tasks-user-task",
+        CopyOwner::User(owner()),
+        &REGISTERED,
+        false,
+    );
 }
 
 #[test]
@@ -126,14 +162,18 @@ fn a_failed_registration_fails_the_set_up_closed() {
         ("setup-tasks-fail-stop", user(), 1, stop),
         ("setup-tasks-fail-refresh", user(), 0, refresh),
         ("setup-tasks-fail-deny", CopyOwner::Machine, 2, set_up_task),
+        ("setup-tasks-fail-heal", CopyOwner::Machine, 3, set_up_task),
     ] {
         let per_user = copy != CopyOwner::Machine;
         let mut machine = installed(test, Some(copy));
         let mut before = machine.state.clone();
-        if failing == 2 {
-            machine.fail("deny_set_up_to");
-        } else {
-            machine.fail(REGISTERED[failing]);
+        match failing {
+            2 => {
+                machine.run = Run::Task;
+                machine.fail("deny_set_up_to");
+            }
+            3 => machine.fail("ensure_set_up_task interactive"),
+            _ => machine.fail(REGISTERED[failing]),
         }
         let mut acl = FakeAcl::default();
         let req = request(&mut machine, 0, Vec::new());
@@ -148,7 +188,7 @@ fn a_failed_registration_fails_the_set_up_closed() {
         if per_user && failing == 1 {
             before.refresh_task = Some(owner());
         }
-        if failing == 2 {
+        if failing >= 2 {
             before.stop_task = Some(owner());
         }
         assert_eq!(machine.state, before, "{test}");

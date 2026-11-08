@@ -120,7 +120,8 @@ impl Host for WindowsHost {
     }
 
     fn set_up(&mut self, owner: Owner, data_dir: &Path, add: u8) -> SetupResult {
-        run_set_up_in(self.names.clone(), owner, data_dir, add)
+        // The set-up task's own run: it needs no prompt, so it doesn't register itself again.
+        run_set_up_in(self.names.clone(), owner, data_dir, add, false)
     }
 
     fn log(&mut self, error: bool, line: &str) {

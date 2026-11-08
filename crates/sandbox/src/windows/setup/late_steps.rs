@@ -42,12 +42,16 @@ const ADMINISTRATORS: &str = "S-1-5-32-544";
 /// registered either. A record that can't be read fails at [`Step::StopTask`]; a registration
 /// that fails at [`Step::RefreshTask`] or [`Step::StopTask`]; each rolled back.
 ///
-/// Per machine, the set-up task `--adopt` registered for every interactive user then refuses the
-/// pool's `group`, which may exist only since this run (`Machine::deny_set_up_to`, every run,
-/// as a reinstall gives the task its install-time descriptor): a pool user holds `IU` too. A
-/// failure is [`Step::SetUpTask`]; an install with no set-up task skips it. The set-up task's
-/// server refuses a pool user whatever the descriptor says (`setup::serve`), so this is a
-/// second wall, not the only one. Per user, the task names the owner alone and needs nothing.
+/// An elevated set-up then registers the set-up task again when it is missing or its definition
+/// differs (`Machine::ensure_set_up_task`): per user for `owner`, per machine for interactive
+/// users with the pool's `group` refused. So a lawyer whose task was deleted meets the prompt
+/// once, not on every set-up. The set-up task's own run doesn't: per machine it gives the task
+/// the deny of `group`, which may exist only since this run (`Machine::deny_set_up_to`, every
+/// run, as a reinstall gives the task its install-time descriptor), as a pool user holds `IU`
+/// too; per user the task names the owner alone and needs nothing. A failure is
+/// [`Step::SetUpTask`]; a task run on an install with no set-up task skips the deny. The set-up
+/// task's server refuses a pool user whatever the descriptor says (`setup::serve`), so the deny
+/// is a second wall, not the only one.
 pub(super) fn tasks(machine: &mut impl Machine, owner: &Sid, group: &Sid) -> Result<(), Failed> {
     let refresh = match machine.copy_owner() {
         Ok(Some(CopyOwner::Machine)) => false,
@@ -78,7 +82,11 @@ pub(super) fn tasks(machine: &mut impl Machine, owner: &Sid, group: &Sid) -> Res
     machine
         .register_stop_task(owner)
         .map_err(|error| failed(Step::StopTask, "SandboxStop", &error))?;
-    if !refresh {
+    let per_machine = (!refresh).then_some(group);
+    let healed = machine
+        .ensure_set_up_task(owner, per_machine)
+        .map_err(|error| failed(Step::SetUpTask, "SandboxSetUp", &error))?;
+    if !refresh && !healed {
         let denied = machine
             .deny_set_up_to(group)
             .map_err(|error| failed(Step::SetUpTask, "SandboxSetUp", &error))?;

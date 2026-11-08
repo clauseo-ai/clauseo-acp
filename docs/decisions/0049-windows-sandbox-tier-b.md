@@ -1966,7 +1966,10 @@ the refresh and stop tasks' descriptor (`task_sddl`, the owner read and execute)
 `IU` too. Each per-machine set-up then puts `(D;;FRFX;;;<GroupSid>)` first, through
 `IRegisteredTask::SetSecurityDescriptor` (`late_steps::tasks`, step "keeping the sandbox users
 from the set-up task"); a reinstall over a set-up pool registers it with the deny already. Plain
-per-user `--adopt` doesn't register it. `--remove --uninstall` deletes it first among the tasks
+per-user `--adopt` doesn't register it. Every elevated set-up (the prompt's `--set-up`,
+`--adopt`'s) registers it again when it is missing or its definition differs
+(`refresh::ensure_task`, `Machine::ensure_set_up_task`), so a lawyer whose task was deleted meets
+the prompt once; the task's own run doesn't register itself. `--remove --uninstall` deletes it first among the tasks
 (`refresh::TEARDOWN`), ending a running instance; the app's `--remove` keeps it, so the owner
 can set up again with no admin.
 

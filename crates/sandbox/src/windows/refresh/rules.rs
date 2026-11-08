@@ -87,6 +87,33 @@ impl SystemTask {
         }
     }
 
+    /// Whether `found` is this task as `register_task` would register it now for `starters`, its
+    /// action `path` (quoted, [`action_path`]) and its descriptor `sddl` as Windows writes it
+    /// back: the one action and argument, LOCAL SYSTEM at the highest level, the instances policy,
+    /// the limit, a logon trigger only where one belongs, and the descriptor. Anything else is a
+    /// definition that differs, which an elevated set-up registers again.
+    pub fn registered_as(
+        self,
+        found: &Registered,
+        starters: &Starters,
+        path: &str,
+        sddl: &str,
+    ) -> bool {
+        let system = ["S-1-5-18", "SYSTEM", "NT AUTHORITY\\SYSTEM"]
+            .iter()
+            .any(|name| found.user.eq_ignore_ascii_case(name));
+        let triggers = i32::from(self.at_logon() && starters.owner().is_some());
+        found.actions == 1
+            && found.path.eq_ignore_ascii_case(path)
+            && found.arguments == self.argument()
+            && system
+            && found.service_highest
+            && found.queues == self.queues()
+            && found.limit == self.execution_limit()
+            && found.triggers == triggers
+            && sddl_matches(&found.sddl, sddl)
+    }
+
     /// Its description, as the Task Scheduler shows it.
     pub fn description(self) -> &'static str {
         match self {
@@ -181,6 +208,29 @@ impl Starters {
             Starters::Interactive { .. } => None,
         }
     }
+}
+
+/// A registered task as the Task Scheduler gives it back, for [`SystemTask::registered_as`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Registered {
+    /// The action's program (`IExecAction::Path`), as registered: quoted.
+    pub path: String,
+    /// The action's arguments.
+    pub arguments: String,
+    /// How many actions it has.
+    pub actions: i32,
+    /// The principal's user, as read back (`S-1-5-18`, or a name for it).
+    pub user: String,
+    /// Whether it runs as a service account at the highest run level.
+    pub service_highest: bool,
+    /// Whether a start while it runs queues another (`TASK_INSTANCES_QUEUE`).
+    pub queues: bool,
+    /// Its execution limit.
+    pub limit: String,
+    /// How many triggers it has.
+    pub triggers: i32,
+    /// Its owner and DACL, as read back.
+    pub sddl: String,
 }
 
 /// The task action's program: `exe`'s path in double quotes, as a command line takes a path
