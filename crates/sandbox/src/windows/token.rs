@@ -6,9 +6,12 @@
 //!   `Everyone` stays (D11): without it codex's `bcrypt.dll` can't open `\Device\KsecDD` and
 //!   nsiproxy refuses name lookups (`s15-spikes-everyone.md`). `Users` stays (PR0): System32 DLLs
 //!   outside `KnownDLLs` grant `Users` alone.
-//! - **The logon SID deny-only.** `CreateProcessWithLogonW` hands the runner the desktop user's
-//!   own logon SID, so it is no boundary between launches; deny-only, it opens nothing the
-//!   lawyer's processes or another runner's agent hold through it (PR0 (a) and (d)).
+//! - **The logon SID deny-only.** On the agent's own station (`runner/station.rs`)
+//!   `CreateProcessWithLogonW` gives the runner's pool logon a fresh logon SID of its own, made
+//!   per run, rather than the desktop user's; the deny-only entry is that one, read from the
+//!   runner's own token. Deny-only, it opens nothing the runner itself or another run's processes
+//!   hold through it (PR0 (a) and (d)); the runner's token DACL names it, not the desktop user,
+//!   which is why the outer reads the inner's user without the token (`runner/inner_user.rs`).
 //! - **Low integrity** (`S-1-16-4096`): the agent writes nothing labelled higher; the matter,
 //!   state and notes folders carry the Low label PR3 writes.
 //! - **Default DACL:** the pool user and `SYSTEM` with full access, and the desktop user with
