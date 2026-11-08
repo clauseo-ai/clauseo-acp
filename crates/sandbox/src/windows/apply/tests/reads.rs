@@ -89,7 +89,10 @@ fn a_read_of_another_matter_reads_its_tree_and_no_refused_name_at_any_depth() {
     let (mut ledger, mut acl) = (ledger(&w), volume(&w));
     launch(&w, &mut ledger, &mut acl, &[("other/m2", false)]);
 
+    // The folder itself too: a read of the whole folder lifts its fence deny for this pool user,
+    // and a deny of writes stands in for it, so the folder lists and still takes no write.
     let readable = [
+        "other/m2",
         "other/m2/a.txt",
         "other/m2/docs",
         "other/m2/docs/b.txt",
@@ -116,10 +119,8 @@ fn a_read_of_another_matter_reads_its_tree_and_no_refused_name_at_any_depth() {
     for rel in refused {
         assert!(!reads(&w, &acl, rel), "{rel}");
     }
-    // The fence: a read of the whole folder lifts its deny on the folder alone for this pool
-    // user, so the folder lists; its deny for what is below stays, so a child the read doesn't
-    // allow stays closed, and an allow on a child comes before the deny the child inherits.
-    assert!(reads(&w, &acl, "other/m2"));
+    // The fence's deny for what is below the folder stays, so a child the read doesn't allow
+    // stays closed, and an allow on a child comes before the deny the child inherits.
     // Another pool user reads none of it; matter two's own still reads and writes.
     let other = [OTHER_POOL_SIDS[1], GROUP_SID, USERS];
     let b = w.canonical("other/m2/docs/b.txt");

@@ -4,11 +4,11 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use super::reads::access::{POOL_TOKEN, READ, USERS, granted, volume_default};
+use super::reads::access::{APPEND, POOL_TOKEN, READ, USERS, WRITE, granted, volume_default};
 use super::*;
 
 /// A fake with the volume's default entry at the top.
-fn volume(w: &World) -> FakeAcl {
+pub(super) fn volume(w: &World) -> FakeAcl {
     let mut acl = FakeAcl::default();
     let top = dunce::canonicalize(w.dir.path()).unwrap();
     acl.aces.insert(volume_default(&top));
@@ -16,7 +16,7 @@ fn volume(w: &World) -> FakeAcl {
 }
 
 /// Matter one's launch reading each of `reads`, matter two's fence planned.
-fn launch(w: &World, ledger: &mut Ledger, acl: &mut FakeAcl, reads: &[(&str, bool)]) {
+pub(super) fn launch(w: &World, ledger: &mut Ledger, acl: &mut FakeAcl, reads: &[(&str, bool)]) {
     let policy = w.reading(reads);
     let ok = |_: &Path| Ok(FolderSupport::Ok);
     let (data, others) = (w.at("data"), w.neighbour_m2());
@@ -25,12 +25,12 @@ fn launch(w: &World, ledger: &mut Ledger, acl: &mut FakeAcl, reads: &[(&str, boo
     apply(ledger, &mut plan, acl, &mut around(w)).unwrap();
 }
 
-fn reads(w: &World, acl: &FakeAcl, rel: &str) -> bool {
+pub(super) fn reads(w: &World, acl: &FakeAcl, rel: &str) -> bool {
     granted(&acl.aces, &w.canonical(rel), &POOL_TOKEN, READ)
 }
 
 /// Matter two's deny of matter one's pool user on its folder alone.
-fn root_deny(w: &World) -> Key {
+pub(super) fn root_deny(w: &World) -> Key {
     let root = w.canonical("other/m2");
     (
         root,
@@ -40,29 +40,46 @@ fn root_deny(w: &World) -> Key {
     )
 }
 
+/// What stands in for it while it is lifted: the same deny of writes alone.
+pub(super) fn stand_in(w: &World) -> Key {
+    let (root, sid, _, inherit) = root_deny(w);
+    (root, sid, Rights::DenyWrite, inherit)
+}
+
+/// Whether matter one's pool user can make a file or a folder in matter two's folder.
+pub(super) fn root_writable(w: &World, acl: &FakeAcl) -> bool {
+    let root = w.canonical("other/m2");
+    granted(&acl.aces, &root, &POOL_TOKEN, WRITE) || granted(&acl.aces, &root, &POOL_TOKEN, APPEND)
+}
+
 /// Whether the ledger marks that deny lifted by matter one.
-fn marked(w: &World, ledger: &Ledger) -> bool {
+pub(super) fn marked(w: &World, ledger: &Ledger) -> bool {
     let root = w.canonical("other/m2");
     ledger
         .entries()
         .any(|e| e.path == root && e.inherit == Inherit::ThisOnly && e.lifted == Some(matter_one()))
 }
 
-fn pool() -> Vec<Sid> {
+pub(super) fn pool() -> Vec<Sid> {
     vec![sid(USER_SID)]
 }
 
-/// The state a read of the whole folder runs in: listed, the deny off and marked.
-fn assert_lifted(w: &World, ledger: &Ledger, acl: &FakeAcl) {
+/// The state a read of the whole folder runs in: listed, never written, the deny off, its
+/// stand-in on, and marked.
+pub(super) fn assert_lifted(w: &World, ledger: &Ledger, acl: &FakeAcl) {
     assert!(reads(w, acl, "other/m2"), "the folder lists");
+    assert!(!root_writable(w, acl), "the folder takes no write");
     assert!(!acl.aces.contains(&root_deny(w)));
+    assert!(acl.aces.contains(&stand_in(w)));
     assert!(marked(w, ledger));
 }
 
-/// The state after: the deny back, unmarked, the folder closed.
-fn assert_restored(w: &World, ledger: &Ledger, acl: &FakeAcl) {
+/// The state after: the deny back, its stand-in gone, unmarked, the folder closed.
+pub(super) fn assert_restored(w: &World, ledger: &Ledger, acl: &FakeAcl) {
     assert!(!reads(w, acl, "other/m2"), "the folder is closed");
+    assert!(!root_writable(w, acl), "the folder takes no write");
     assert!(acl.aces.contains(&root_deny(w)));
+    assert!(!acl.aces.contains(&stand_in(w)));
     assert!(!marked(w, ledger));
 }
 
@@ -187,7 +204,7 @@ fn a_crashed_runs_lift_goes_back_at_the_next_launch_at_start_or_on_a_forget() {
 }
 
 #[test]
-fn a_crash_between_the_mark_and_the_lift_leaves_the_deny_and_start_clears_the_mark() {
+fn a_crash_before_the_lifts_removal_leaves_the_deny_and_start_clears_the_mark() {
     let w = World::new("lift-crash-mark");
     w.other_tree();
     let (mut ledger, mut acl) = (ledger(&w), volume(&w));
@@ -200,7 +217,10 @@ fn a_crash_between_the_mark_and_the_lift_leaves_the_deny_and_start_clears_the_ma
     acl.panic_remove = false;
     let mut ledger = super::ledger(&w);
     assert!(marked(&w, &ledger), "marked before the deny was touched");
+    // The stand-in was written before the deny's removal: both are there, nothing opens.
     assert!(acl.aces.contains(&root_deny(&w)));
+    assert!(acl.aces.contains(&stand_in(&w)));
+    assert!(!reads(&w, &acl, "other/m2") && !root_writable(&w, &acl));
     reconcile(&mut ledger, &mut acl).unwrap();
     assert_restored(&w, &ledger, &acl);
 }

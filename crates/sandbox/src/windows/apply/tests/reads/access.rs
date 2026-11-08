@@ -25,6 +25,9 @@ pub(in crate::windows::apply::tests) const READ: u32 = 0x0012_0089;
 /// `FILE_WRITE_DATA` (or add a file to a folder).
 pub(in crate::windows::apply::tests) const WRITE: u32 = 0x2;
 
+/// `FILE_APPEND_DATA` (or add a folder to a folder).
+pub(in crate::windows::apply::tests) const APPEND: u32 = 0x4;
+
 /// Matter one's pool user's token: the pool user, its group, `Users`.
 pub(in crate::windows::apply::tests) const POOL_TOKEN: [&str; 3] = [USER_SID, GROUP_SID, USERS];
 

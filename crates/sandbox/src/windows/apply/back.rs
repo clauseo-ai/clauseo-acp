@@ -222,7 +222,9 @@ pub fn forget_matter(
     }
     let failed = |e: io::Error| refused(PathKind::Matter, ApplyFailure::Ledger(e.kind()));
     // R18: each fence deny its sessions lifted goes back; a failure keeps the mark, and the mark
-    // keeps the pool user from serving another matter until a later try puts it back.
+    // keeps the pool user from serving another matter until a later try puts it back. Its own
+    // denies another session lifted go back too, so their stand-ins go; one left by a failure
+    // only denies a pool user writes on a folder no longer a matter's.
     if let Err(error) = super::lifts::restore_matter(ledger, acl, matter) {
         tracing::warn!(%error, "a forgotten matter's lifted fence deny wasn't put back");
     }
