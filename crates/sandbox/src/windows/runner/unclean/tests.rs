@@ -154,7 +154,11 @@ fn f4_refuses_until_stop_sequence_reaches_the_markers_number() {
     fake.marker("a1", Some(POOL_A), Some(STOP));
     fake.done = Sequences { stop: 2, sweep: 2 };
     let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
-    assert!(refused.contains("awaits the sandbox's stop"), "{refused}");
+    assert_eq!(refused.exit, RunExit::AwaitingStop);
+    assert!(
+        refused.why.contains("awaits the sandbox's stop"),
+        "{refused:?}"
+    );
     assert_eq!(fake.asked("stop"), 1, "each refusal asks for the stop");
     assert_eq!(fake.state("a1"), Some(STOP));
     // An absent StopSequence is 0: refused too.
@@ -182,7 +186,11 @@ fn f4_waits_for_the_sweep_a_re_mark_requested_and_refuses_without_a_stop_if_it_d
     fake.marker("a1", Some(POOL_A), Some(STOP));
     fake.done = Sequences { stop: 3, sweep: 2 };
     let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
-    assert!(refused.contains("didn't finish within 15 s"), "{refused}");
+    assert_eq!(refused.exit, RunExit::AwaitingSweep, "no stop is awaited");
+    assert!(
+        refused.why.contains("didn't finish within 15 s"),
+        "{refused:?}"
+    );
     // Re-marked, its sweep requested once, waited for 15 s, and no stop asked for.
     assert_eq!(fake.state("a1"), Some(REMARKED));
     assert_eq!(fake.asked("sweep"), 1);
@@ -367,7 +375,8 @@ fn a_marker_whose_stop_completed_but_cant_be_re_marked_refuses_a_launch() {
     assert_eq!(fake.state("a1"), Some(STOP));
     // F4 refuses the logon too, without asking for the stop, which has completed.
     let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
-    assert!(refused.contains("completed stop"), "{refused}");
+    assert_eq!(refused.exit, RunExit::AwaitingSweep, "no stop is awaited");
+    assert!(refused.why.contains("completed stop"), "{refused:?}");
     assert_eq!(fake.state("a1"), Some(STOP));
     assert_eq!(fake.asked("stop"), 0);
 }
@@ -442,7 +451,11 @@ fn f4_replaces_an_unreadable_marker_with_one_awaiting_a_stop_read_now() {
     let open = (None, Some(MarkerState::Open), Some(INSTALL.to_owned()));
     fake.markers.insert("x2".to_owned(), open);
     let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
-    assert!(refused.contains("the stop was requested"), "{refused}");
+    assert_eq!(refused.exit, RunExit::AwaitingStop);
+    assert!(
+        refused.why.contains("the stop was requested"),
+        "{refused:?}"
+    );
     // Both now await the stop that begins after this read, naming no pool user, under the
     // current install: no longer a refusal for good.
     let read = MarkerState::AwaitingStop { stop: 5 };
