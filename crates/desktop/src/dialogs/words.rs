@@ -81,9 +81,6 @@ pub(crate) enum Key {
     AskSwitchOffTitle,
     /// ND-40, R18: its message.
     AskSwitchOffMessage,
-    /// R18, its confirming button, in place of Allow: no review id yet (the Hindi is the app
-    /// thread's provisional word).
-    AskSwitchOffConfirm,
     /// ND-41, R18: confirming a picked folder: the title.
     AskPickFolderTitle,
     /// ND-42, R18: confirming a picked file: the title.
@@ -94,6 +91,9 @@ pub(crate) enum Key {
     PickFolderTitle,
     /// ND-45, R18: the file picker's title.
     PickFileTitle,
+    /// R18, its confirming button, in place of Allow: no review id yet (the Hindi is the app
+    /// thread's provisional word).
+    AskSwitchOffConfirm,
 }
 
 impl Key {
@@ -134,12 +134,12 @@ impl Key {
         Self::AskSharedHostingNote,
         Self::AskSwitchOffTitle,
         Self::AskSwitchOffMessage,
-        Self::AskSwitchOffConfirm,
         Self::AskPickFolderTitle,
         Self::AskPickFileTitle,
         Self::AskPickMessage,
         Self::PickFolderTitle,
         Self::PickFileTitle,
+        Self::AskSwitchOffConfirm,
     ];
 }
 
