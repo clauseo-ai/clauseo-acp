@@ -107,6 +107,22 @@
   .np-note-counts > span {
     display: block;
   }
+  /* R18: the matter's remembered answers under their head, one row each, Forget at its end */
+  .np-note-remembered-head {
+    display: block;
+    font-weight: 520;
+  }
+  .np-note-remembered > [role="list"] {
+    display: grid;
+    gap: var(--s1);
+    margin-top: var(--s1);
+  }
+  .np-note-remembered [role="listitem"] {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s3);
+  }
   .np-note-wait {
     align-self: center;
     margin-right: auto;

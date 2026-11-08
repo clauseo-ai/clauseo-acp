@@ -139,7 +139,8 @@ export const commands = {
 	/**
 	 *  Opens the settings window, or brings it forward when it is open (`settings_window.rs`), at
 	 *  `section` when one is named (`"connectors"`: the room's case-law hint and banner;
-	 *  `"protection"`: UC's first-run button, R17). An
+	 *  `"protection"`: UC's first-run button, R17; `"remembered_answers"`: the matter menu's
+	 *  "Remembered answers…", R18). An
 	 *  unknown section is refused as the arguments decode. Granted to `main` only.
 	 */
 	openSettings: (section: 
@@ -149,7 +150,12 @@ export const commands = {
  *  The Protection section: the sandbox's state, its set-up and removal (decision record
  *  0051). The page is the app's.
  */
-"protection" | null) => typedError<null, HostError>(__TAURI_INVOKE("open_settings", { section })),
+"protection" | 
+/**
+ *  The Remembered answers section (R18): each matter's kept answers to the native dialogs,
+ *  with Forget. The page is the app's (`ui/app/src/settings/sections/allowances.tsx`).
+ */
+"remembered_answers" | null) => typedError<null, HostError>(__TAURI_INVOKE("open_settings", { section })),
 	/**
 	 *  Counts one of the events only the webview sees (`counts/ui.rs`, 0036). Granted to `main`
 	 *  alone, by its own capability (`capabilities/counts.json`). The counts open before the host
@@ -5283,7 +5289,8 @@ export type SessionCapabilities = {
 
 /**
  *  A part of the settings window `open_settings` can open it at (R24: the room's case-law hint
- *  and banner open Connectors; R17: UC's first-run button opens Protection). Closed, as the app
+ *  and banner open Connectors; R17: UC's first-run button opens Protection; R18: the matter
+ *  menu's "Remembered answers…" opens Remembered answers). Closed, as the app
  *  asked: a value the build does not know is refused when the command's arguments decode, never
  *  ignored, and a new section is added here together with the page that shows it (ADR 0002's
  *  rule for commands, which a webview sends).
@@ -5295,7 +5302,12 @@ export type SettingsSection =
  *  The Protection section: the sandbox's state, its set-up and removal (decision record
  *  0051). The page is the app's.
  */
-"protection";
+"protection" | 
+/**
+ *  The Remembered answers section (R18): each matter's kept answers to the native dialogs,
+ *  with Forget. The page is the app's (`ui/app/src/settings/sections/allowances.tsx`).
+ */
+"remembered_answers";
 
 /**  What `GetSettings` answers and `SettingsChanged` carries. */
 export type SettingsView = {

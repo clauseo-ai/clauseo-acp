@@ -99,6 +99,9 @@ export type MatterRowProps = {
   triage?: Triage | undefined;
   /** Optional (U16b): what stands in the row's place: the line after a snooze or Done, or the snooze picker. */
   replace?: ReactNode;
+  /** Optional (R18): more of the matter's menu items, after Show in Finder: the Safe workspace's switch and "Use files
+   * from another matter…". */
+  more?: ReactNode;
 };
 
 /** A matter's actions: pin it to the top, show its folder in the computer's own file manager, or find a folder that
@@ -115,6 +118,7 @@ type ActionProps = Pick<
   | "onReveal"
   | "onRemove"
   | "triage"
+  | "more"
 >;
 
 /** Whether the folder has moved, for the actions: the flag where given, else the moved state. */
@@ -131,7 +135,9 @@ const hasActions = ({
   onReveal,
   onRemove,
   triage,
+  more,
 }: ActionProps) =>
+  more !== undefined ||
   onPin !== undefined ||
   triage !== undefined ||
   ((movedOf(moved, state) || locateAsked === true) && onLocate !== undefined) ||
@@ -149,12 +155,17 @@ function MatterActions({
   onReveal,
   onRemove,
   triage,
+  more,
 }: ActionProps) {
   const { lang, platform } = useDisplay();
   const moved = movedOf(movedFlag, state);
   const locate = moved || locateAsked === true ? onLocate : undefined;
   const above =
-    onPin !== undefined || triage !== undefined || locate !== undefined || onReveal !== undefined;
+    onPin !== undefined ||
+    triage !== undefined ||
+    locate !== undefined ||
+    onReveal !== undefined ||
+    more !== undefined;
   return (
     <>
       {above && (
@@ -184,6 +195,7 @@ function MatterActions({
               onClick={onReveal}
             />
           )}
+          {more}
         </MenuGroup>
       )}
       {above && onRemove !== undefined && <MenuSeparator />}
@@ -329,6 +341,7 @@ export function MatterRow({
   replace,
   conversationsDone,
   snoozed,
+  more,
 }: MatterRowProps) {
   const w = useWords();
   if (replace !== undefined && !(current && conversations !== undefined)) return <li>{replace}</li>;
@@ -344,6 +357,7 @@ export function MatterRow({
     onReveal,
     onRemove,
     triage,
+    more,
   };
   const menu = hasActions(actions);
   const button = (

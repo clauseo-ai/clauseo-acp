@@ -25,6 +25,7 @@ import type { Lang } from "@clauseo/components/lib/display.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { isolate } from "@clauseo/components/lib/bidi.ts";
+import type { ViewStore } from "../store/store.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { MatterId } from "../transport/protocol.ts";
 import type { AllThreads } from "./all-threads.ts";
@@ -33,6 +34,7 @@ import { openConversation } from "./open-conversation.ts";
 import { locatable } from "./act-refusals.ts";
 import { railView, recentDays } from "./rail-lists.ts";
 import { RailTriage } from "./rail-triage.ts";
+import { useMatterSafety } from "./allowances/menu.tsx";
 import type { TriageStatus } from "./triage.ts";
 import { planName } from "./agent.ts";
 import { rowWords } from "./conversation-status.ts";
@@ -113,6 +115,7 @@ const newestFirst = (a: MatterInfo, b: MatterInfo) =>
 
 export function RoomRail({
   transport,
+  views,
   matters,
   view,
   conversations,
@@ -130,6 +133,8 @@ export function RoomRail({
 }: {
   /** For Find's search inside the matters, and opening a paper it finds. */
   transport: HostTransport;
+  /** The window's view store: the open matter's header says whether it has remembered answers (R18). */
+  views: ViewStore;
   matters: Matters;
   view: MattersView;
   conversations: Conversations;
@@ -197,6 +202,8 @@ export function RoomRail({
     now,
   });
   const room = { matters, conversations };
+  // R18: the open matter's Safe workspace switch and "Use files from another matter…"
+  const safety = useMatterSafety(transport, view.open, view.matters, w.lang, views);
   const untitled = mt(w.lang, "New conversation");
   const row = (m: MatterInfo): MatterRowProps => {
     const current = view.open?.matter === m.matter;
@@ -220,7 +227,7 @@ export function RoomRail({
     return {
       id: m.matter,
       name: m.name,
-      note: revealed === null ? "" : errorWords(w.lang, revealed),
+      note: revealed === null ? (safety.failedFor(m.matter) ?? "") : errorWords(w.lang, revealed),
       locateAsked: locatable(revealed),
       hint:
         m.folder_display === undefined || m.folder_display === "" ? "" : isolate(m.folder_display),
@@ -262,6 +269,7 @@ export function RoomRail({
             },
       // Show in Finder (File Explorer): the menu greys it while the folder has moved
       onReveal: () => void matters.reveal(m.matter),
+      ...(current && safety.items !== undefined ? { more: safety.items } : {}),
       ...(detailed
         ? {
             pinned: m.pinned,
@@ -323,102 +331,105 @@ export function RoomRail({
     onMoved();
   };
   return (
-    <Rail
-      groups={groups}
-      pinned={pinned.map(row)}
-      open={open}
-      onNewMatter={onNewMatter}
-      {...(onNewMatterPreload === undefined ? {} : { onNewMatterPreload })}
-      newMatterRef={newMatterRef}
-      // nothing to find on an empty rail
-      {...(folders.length === 0
-        ? {}
-        : {
-            find: {
-              all,
-              recent,
-              covers: detailed ? ("nameClient" as const) : ("name" as const),
-              results,
-              onPreload: () => void preloadFind(),
-            },
-          })}
-      {...(scratch === undefined
-        ? {}
-        : {
-            scratch: {
-              current: view.open?.matter === scratch.matter,
-              onOpen: openScratch(scratch.matter),
-            },
-          })}
-      empty={view.phase === "ready"}
-      aside={
-        <RailSwitch
-          view={list}
-          onView={(v) => {
-            railView.set(v);
-            setList(v);
-          }}
-          testId="rail-switch"
-        />
-      }
-      {...(list === "recent"
-        ? {
-            list: (
-              <Suspense fallback={null}>
-                <RailRecent
-                  days={recentDays({
-                    lists: every.lists,
-                    matters: view.matters,
-                    current: talks.thread,
-                    now,
-                    zone,
-                    lang: w.lang,
-                    onOpen: (matter, thread) => {
-                      openConversation(room, matter, thread);
-                      onConversation();
-                    },
-                  })}
-                  testId="rail-recent"
-                />
-              </Suspense>
-            ),
-          }
-        : {})}
-      shelf={snoozedShelf(
-        sc,
-        view.matters,
-        every.lists,
-        {
-          conversation: (matter, thread) => {
-            openConversation(room, matter, thread);
-            onConversation();
-          },
-          matter: (id) => openScratch(id)(),
-        },
-        placed.group,
-      )}
-      onHover={(on) => {
-        onRail.current.pointer = on;
-        setOver(on);
-        setStamp(Date.now());
-        if (on) void preloadSnooze();
-        else {
-          // the pointer leaving lets the rows go where they now belong, as before; the focus holds them only from the
-          // keyboard
-          onRail.current.focus = false;
-          setFocused(false);
-          snooze.leave();
+    <>
+      <Rail
+        groups={groups}
+        pinned={pinned.map(row)}
+        open={open}
+        onNewMatter={onNewMatter}
+        {...(onNewMatterPreload === undefined ? {} : { onNewMatterPreload })}
+        newMatterRef={newMatterRef}
+        // nothing to find on an empty rail
+        {...(folders.length === 0
+          ? {}
+          : {
+              find: {
+                all,
+                recent,
+                covers: detailed ? ("nameClient" as const) : ("name" as const),
+                results,
+                onPreload: () => void preloadFind(),
+              },
+            })}
+        {...(scratch === undefined
+          ? {}
+          : {
+              scratch: {
+                current: view.open?.matter === scratch.matter,
+                onOpen: openScratch(scratch.matter),
+              },
+            })}
+        empty={view.phase === "ready"}
+        aside={
+          <RailSwitch
+            view={list}
+            onView={(v) => {
+              railView.set(v);
+              setList(v);
+            }}
+            testId="rail-switch"
+          />
         }
-      }}
-      onFocusMove={(inside, elsewhere) => {
-        onRail.current.focus = inside;
-        setFocused(inside);
-        if (inside) void preloadSnooze();
-        if (elsewhere) snooze.leave();
-      }}
-      onEscape={onEscape}
-      {...(onSettings === undefined ? {} : { onSettings })}
-      testIds={{ newMatter: "new-matter", find: "find", settings: "open-settings" }}
-    />
+        {...(list === "recent"
+          ? {
+              list: (
+                <Suspense fallback={null}>
+                  <RailRecent
+                    days={recentDays({
+                      lists: every.lists,
+                      matters: view.matters,
+                      current: talks.thread,
+                      now,
+                      zone,
+                      lang: w.lang,
+                      onOpen: (matter, thread) => {
+                        openConversation(room, matter, thread);
+                        onConversation();
+                      },
+                    })}
+                    testId="rail-recent"
+                  />
+                </Suspense>
+              ),
+            }
+          : {})}
+        shelf={snoozedShelf(
+          sc,
+          view.matters,
+          every.lists,
+          {
+            conversation: (matter, thread) => {
+              openConversation(room, matter, thread);
+              onConversation();
+            },
+            matter: (id) => openScratch(id)(),
+          },
+          placed.group,
+        )}
+        onHover={(on) => {
+          onRail.current.pointer = on;
+          setOver(on);
+          setStamp(Date.now());
+          if (on) void preloadSnooze();
+          else {
+            // the pointer leaving lets the rows go where they now belong, as before; the focus holds them only from the
+            // keyboard
+            onRail.current.focus = false;
+            setFocused(false);
+            snooze.leave();
+          }
+        }}
+        onFocusMove={(inside, elsewhere) => {
+          onRail.current.focus = inside;
+          setFocused(inside);
+          if (inside) void preloadSnooze();
+          if (elsewhere) snooze.leave();
+        }}
+        onEscape={onEscape}
+        {...(onSettings === undefined ? {} : { onSettings })}
+        testIds={{ newMatter: "new-matter", find: "find", settings: "open-settings" }}
+      />
+      {safety.dialog}
+    </>
   );
 }

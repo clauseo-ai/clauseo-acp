@@ -5,6 +5,7 @@ import { createDisplayStore, DEFAULT_UI } from "../room/display-store.ts";
 import { nextHostOf, type MatterInfo } from "../room/host-next.ts";
 import type { SectionId } from "../settings/sections.tsx";
 import { SettingsApp } from "../settings/settings-app.tsx";
+import { withAllowances, type FakeAllowances } from "../transport/fake-allowances.ts";
 import type { FakeBlocklistHost } from "../transport/fake-blocklist.ts";
 import { FakeTransport, type FakeProtectionHost } from "../transport/fake-transport.ts";
 import type {
@@ -39,6 +40,7 @@ export function SettingsOver({
   plans,
   protection,
   blocklist,
+  allowances,
   matters = [],
 }: {
   section: SectionId;
@@ -58,12 +60,15 @@ export function SettingsOver({
   protection?: FakeProtectionHost;
   /** The unsafe-site list's host (0053), Privacy's allowed sites; none listed when left out. */
   blocklist?: FakeBlocklistHost;
+  /** R18's remembered answers (fake-allowances.ts); with it the window lists and forgets them. */
+  allowances?: FakeAllowances;
   /** The matters the app feed's first frames list, for the allowed sites' matter names. */
   matters?: MatterInfo[];
 }) {
   const [made] = useState(() => {
     const transport = new FakeTransport({
       releaseDate,
+      ...(allowances === undefined ? {} : withAllowances({}, allowances)),
       next: {
         query: (query) => {
           if (query === "get_settings")
@@ -101,6 +106,7 @@ export function SettingsOver({
           }),
     });
     if (limits !== undefined) transport.limitsChanged(limits);
+    allowances?.bind(transport);
     const store = createDisplayStore({
       storage: null,
       matchMedia: null,

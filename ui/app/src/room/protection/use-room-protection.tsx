@@ -5,6 +5,7 @@
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { protectionStoreOf } from "../../store/protection.ts";
+import type { ViewStore } from "../../store/store.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { MatterInfo } from "../host-next.ts";
 import { notProtectedCause } from "./causes.ts";
@@ -24,6 +25,8 @@ export function useRoomProtection(
   transport: HostTransport,
   open: MatterInfo | null,
   plan: PlanKind,
+  /** The window's view store: the note reads the matter's remembered answers from it (R18). */
+  views: ViewStore,
 ): RoomProtection {
   // memoised by hand: the composer's value alone needs to hold still, and the Compiler's cache would double this hook
   "use no memo";
@@ -64,6 +67,7 @@ export function useRoomProtection(
           matterId={open.matter}
           transport={transport}
           store={store}
+          views={views}
           matter={open.name}
           cause={cause}
           open={noteOpen}

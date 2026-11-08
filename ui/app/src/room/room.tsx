@@ -362,7 +362,7 @@ function RoomFrame({
       : { kind: kindOf(openAgent, talks.agents), name: threadName ?? openAgent };
   const plan = planOfOpen === null ? "" : th(w.lang, "Uses your {name} plan", { name: planOfOpen });
   // UC: the open matter's protection: the composer's line and hold, the toolbar's mark, and the note
-  const shield = useRoomProtection(transport, open, kindOf(openAgent, talks.agents));
+  const shield = useRoomProtection(transport, open, kindOf(openAgent, talks.agents), store);
   // the tool line's room: the plan's name its words use, Settings, and the transport whose Chrome download it offers
   // (browser-install.ts, made by the line's chunk once it is in)
   const toolRoom = useMemo(
@@ -440,6 +440,7 @@ function RoomFrame({
       {versions.rail ?? (
         <RoomRail
           transport={transport}
+          views={store}
           matters={matters}
           view={view}
           conversations={conversations}
