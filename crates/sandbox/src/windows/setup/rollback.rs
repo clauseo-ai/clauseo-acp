@@ -185,7 +185,14 @@ fn delete_group(machine: &mut impl Machine, run: &Run, left: &mut Vec<String>) -
     };
     let result = match machine.group_members(group) {
         Ok(0) if run.wsl_tried => match machine.wsl_remove(group) {
-            Ok(_removed) => machine.delete_group(group),
+            Ok(removed) => {
+                // A value that can't be parsed keeps whatever deny it holds, as `--remove` does.
+                if !removed.skipped.is_empty() {
+                    let skipped = &removed.skipped;
+                    tracing::warn!(?skipped, "WSL launch permissions left as they were");
+                }
+                machine.delete_group(group)
+            }
             Err(error) => Err(error),
         },
         Ok(0) => machine.delete_group(group),
