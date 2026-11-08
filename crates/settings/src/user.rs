@@ -76,6 +76,16 @@ pub(crate) fn read(path: &Path, files: &dyn Files, warnings: &mut Vec<Warning>) 
     }
 }
 
+/// Whether the user's `settings.json` sets `key` (dotted, such as `ui.language`), with a value
+/// that types or one that does not. A missing, unreadable or unparsable file sets none.
+/// [`crate::Effective::settings`] cannot tell the lawyer's own value from the default; this
+/// can.
+pub fn user_sets(locations: &Locations, files: &dyn Files, key: &str) -> bool {
+    read(locations.settings_file(), files, &mut Vec::new())
+        .iter()
+        .any(|leaf| leaf.key() == key)
+}
+
 /// Saves a [`UiPatch`] to the user's `settings.json`: the patch's fields replace those in the
 /// file's `ui` section, and every other key stays, in its order, unknown keys included. The
 /// file is written as plain JSON, so its comments are lost. A file that does not parse is left

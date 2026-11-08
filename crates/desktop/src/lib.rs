@@ -389,7 +389,9 @@ fn start_host<R: Runtime>(
             .map_err(|err| tracing::warn!(%err, "no launch profile: agents start without it"))
             .ok();
         chooser::trace::mark("host start: launch profile built", began, "");
-        let effective = load_effective(&locations);
+        let mut effective = load_effective(&locations);
+        // Before the host and the registry's follower see it: a first run takes the installer's.
+        ui_language::seed_from_registry(&mut effective);
         let setup_read = setup::SetupStart::read(&effective, &locations);
         // The host starts refusing launches until the keys load, and those policy blocks.
         let refusals = setup_read.launch_refusals();

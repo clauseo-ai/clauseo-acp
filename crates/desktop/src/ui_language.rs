@@ -9,15 +9,22 @@
 //! - [`follow`] runs on each settings read of `setup/start.rs` `follow_settings`: the first, at
 //!   start (which covers first run), and one per `SettingsChanged`. It writes when the language
 //!   differs from the last one it wrote or tried, never when it is unchanged.
+//! - [`seed_from_registry`] reads it once, at start, before the host and the first [`follow`]
+//!   see the settings: when the lawyer's `settings.json` holds no `ui.language` at all
+//!   (`clauseo_settings::user_sets`, so a written `en` counts) and no firm policy locks it, a
+//!   known tag is saved there as their `ui.language` (`Effective::apply_ui_patch`). A fresh
+//!   data dir then speaks the language the installer recorded, instead of writing `en` over it.
+//!   An empty or unknown value is ignored. Off Windows nothing is read.
 //! - Best effort: it never fails or blocks the follower beyond one local `HKCU` write on the
 //!   setup host thread (not the UI thread). A failed write logs one warning with the Win32 code
 //!   and is not retried; the next different language tries again.
-//! - Unit-test builds never write the real key: their [`follow`] writes nowhere, and the Windows
-//!   test writes a scratch key through [`windows::write_value`], whose key is a parameter.
+//! - Unit-test builds never touch the real key: their [`follow`] writes nowhere and their
+//!   [`seed_from_registry`] reads nothing; the Windows test writes and reads a scratch key
+//!   through [`windows::write_value`] and [`windows::read_value`], whose key is a parameter.
 
 use std::sync::{Mutex, PoisonError};
 
-use clauseo_settings::Language;
+use clauseo_settings::{Effective, Files, Language, SystemFiles, UiPatch, user_sets};
 
 #[cfg(test)]
 mod tests;
@@ -27,7 +34,7 @@ mod windows;
 /// The key under `HKCU`, which the installer's `MANUKEY` also names.
 #[cfg_attr(
     not(all(windows, not(test))),
-    expect(dead_code, reason = "only Windows writes")
+    expect(dead_code, reason = "only Windows writes and reads")
 )]
 const KEY: &str = "Software\\Clauseo";
 
@@ -36,6 +43,15 @@ pub(crate) fn tag(language: Language) -> &'static str {
     match language {
         Language::En => "en",
         Language::Hi => "hi",
+    }
+}
+
+/// The language whose [`tag`] is `tag`, `None` for any other text.
+pub(crate) fn language(tag: &str) -> Option<Language> {
+    match tag {
+        "en" => Some(Language::En),
+        "hi" => Some(Language::Hi),
+        _ => None,
     }
 }
 
@@ -95,4 +111,58 @@ pub(crate) fn follow(language: Language) {
     APP.lock()
         .unwrap_or_else(PoisonError::into_inner)
         .follow(language);
+}
+
+/// Where the recorded tag is read. `None` when there is none or it cannot be read.
+pub(crate) trait Reader {
+    /// The value, as written.
+    fn read(&self) -> Option<String>;
+}
+
+impl Reader for App {
+    #[cfg(all(windows, not(test)))]
+    fn read(&self) -> Option<String> {
+        windows::read_value(KEY)
+    }
+
+    #[cfg(not(all(windows, not(test))))]
+    fn read(&self) -> Option<String> {
+        None
+    }
+}
+
+/// Saves the recorded language as the lawyer's `ui.language` when they have none and no
+/// policy locks it (module docs). Returns the language it saved.
+pub(crate) fn seed(
+    effective: &mut Effective,
+    files: &dyn Files,
+    reader: &dyn Reader,
+) -> Option<Language> {
+    const KEY: &str = "ui.language";
+    if effective.is_locked(KEY) {
+        return None;
+    }
+    let language = reader.read().as_deref().and_then(language)?;
+    if user_sets(effective.locations(), files, KEY) {
+        return None;
+    }
+    let patch = UiPatch {
+        language: Some(language),
+        ..UiPatch::default()
+    };
+    match effective.apply_ui_patch(files, &patch) {
+        Ok(()) => {
+            tracing::info!("the UI language came from the installer's record");
+            Some(language)
+        }
+        Err(err) => {
+            tracing::warn!(%err, "the installer's UI language was not saved to the settings");
+            None
+        }
+    }
+}
+
+/// [`seed`] from `HKCU\`[`KEY`] into `settings.json`, at start. Off Windows it reads nothing.
+pub(crate) fn seed_from_registry(effective: &mut Effective) {
+    let _seeded = seed(effective, &SystemFiles, &App);
 }
