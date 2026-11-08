@@ -16,15 +16,36 @@ fn agent(name: &str) -> AgentId {
 }
 
 fn config(name: &str) -> ProxyConfig {
-    proxy_config(&agent(name), Arc::new(CountDenials::default()), None, true)
+    proxy_config(
+        &agent(name),
+        Arc::new(CountDenials::default()),
+        (None, Arc::default()),
+        true,
+    )
 }
 
 /// The browser listener is asked for only by a launch that offers the browser.
 #[test]
 fn the_browser_listener_follows_the_launch() {
     let denials = || Arc::new(CountDenials::default());
-    assert!(proxy_config(&agent("claude-acp"), denials(), None, true).browser);
-    assert!(!proxy_config(&agent("claude-acp"), denials(), None, false).browser);
+    assert!(
+        proxy_config(
+            &agent("claude-acp"),
+            denials(),
+            (None, Arc::default()),
+            true
+        )
+        .browser
+    );
+    assert!(
+        !proxy_config(
+            &agent("claude-acp"),
+            denials(),
+            (None, Arc::default()),
+            false
+        )
+        .browser
+    );
 }
 
 /// A session's proxy is a tier-C launch's until R17 PR-E passes `ListenerFor::TierB` for a
@@ -91,11 +112,16 @@ fn the_config_shares_the_block_list_it_is_given() {
     let shared = proxy_config(
         &agent("claude-acp"),
         denials(),
-        Some(Arc::clone(&current)),
+        (Some(Arc::clone(&current)), Arc::default()),
         true,
     );
     assert!(Arc::ptr_eq(&shared.block, &current));
-    let none = proxy_config(&agent("claude-acp"), denials(), None, true);
+    let none = proxy_config(
+        &agent("claude-acp"),
+        denials(),
+        (None, Arc::default()),
+        true,
+    );
     assert!(!Arc::ptr_eq(&none.block, &current));
     assert!(none.block.get().is_unloaded());
 }
