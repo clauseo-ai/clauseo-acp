@@ -2146,10 +2146,11 @@ positively, the lawyer first:
   VM id can't have the stop end it;
 - **a pool user's**: its profile (`ProfileList`) holds `AppData\Local\temp\<id>`, read from the
   profile folder down without following a link (a junction could point the check at the lawyer's
-  folders). It is opened (`HcsOpenComputeSystem`), terminated (`HcsTerminateComputeSystem`, at
-  most 5 s each and 10 s in all, through an operation waited for and closed), and its user marked
-  for a reset, whose profile delete takes the user's distro registrations (in its hive) with it. A
-  system already gone is ended;
+  folders). Its user is marked for a reset first (under the set-up lock, so a run the task's
+  limit ends during the termination has marked it), whose profile delete takes the user's distro
+  registrations (in its hive) with it; then it is opened (`HcsOpenComputeSystem`) and terminated
+  (`HcsTerminateComputeSystem`, at most 5 s each and 10 s in all, through an operation waited
+  for and closed). A system already gone is ended;
 - **any other WSL system is unmapped**, as is one whose lawyer's folder can't be read or whose id
   isn't a GUID: nothing terminates it (it may be the lawyer's, or another account's), every pool
   user is marked, and the stop ends at 48.

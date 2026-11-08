@@ -150,6 +150,27 @@ fn a_pool_users_vm_is_ended_and_its_user_marked_and_the_lawyers_left() {
 }
 
 #[test]
+fn a_pool_user_is_marked_before_its_vm_is_terminated() {
+    let mut fake = with_vms(&[POOL_VM]);
+    assert_eq!(stop(&mut fake), StopExit::Done);
+    let at = |line: &str| fake.done.iter().position(|done| done == line);
+    let (marked, ended) = (at("mark 1"), at(&format!("end vm {POOL_VM}")));
+    assert!(marked.is_some() && marked < ended, "{:?}", fake.done);
+    // A termination that hangs past the task's limit still leaves the user marked.
+    let mut fake = with_vms(&[POOL_VM]);
+    fake.vms.hang = vec![POOL_VM.to_owned()];
+    assert_eq!(stop(&mut fake), StopExit::NotStopped);
+    assert_eq!(fake.resets, [sid(1011)]);
+    assert_eq!(
+        fake.done
+            .iter()
+            .filter(|done| done.starts_with("mark"))
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn with_no_hcs_nothing_is_asked_and_the_line_says_nothing_of_vms() {
     let mut fake = Fake::new(&[1010]);
     fake.vms.wsl = true;
