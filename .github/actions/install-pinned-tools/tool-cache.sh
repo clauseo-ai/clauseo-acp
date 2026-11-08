@@ -2,6 +2,9 @@
 # The cache of install-pinned-tools (action.yml beside this script): the pinned tools, restored
 # from main's Actions cache before anything is downloaded, and checked against their checksums.
 #
+#   tool-cache.sh pins           writes the pins (PINS_JSON, NAMES) into a new folder: pins.json,
+#                                cargo-tools.tsv and binary-names.txt; its path (dir), the
+#                                install-action spec and the --only flags, to $GITHUB_OUTPUT
 #   tool-cache.sh key            the cache key and folder, to $GITHUB_OUTPUT
 #   tool-cache.sh restore        checks and places what the restore brought; cargo_tools=true when
 #                                every cargo tool came from it, to $GITHUB_OUTPUT
@@ -10,7 +13,8 @@
 #   tool-cache.sh fill           on main after a miss, once the tools are installed and checked:
 #                                copies each cargo tool in from CARGO_HOME/bin when its sha256 is
 #                                the pin; save=true when the folder holds every tool, to
-#                                $GITHUB_OUTPUT
+#                                $GITHUB_OUTPUT. A tool that is not its pin fails the step (exit 1):
+#                                fill runs only on main, where a stale pin must show at once
 #
 # The folder holds two things:
 # - assets/: the binaries' release assets (gitleaks, lefthook), as downloaded. The sha256 of each is
@@ -31,15 +35,22 @@
 # sha256 of the versions, this OS's pinned asset and binary sha256s, and this script and action.yml
 # (whose install-action commit pins install-action's manifests). A pin bump makes a new key.
 #
-# Environment: RUNNER_TEMP (pins.json, cargo-tools.tsv and binary-names.txt, from the action's pins
-# step), RUNNER_OS, RUNNER_ARCH, ImageOS, GITHUB_OUTPUT, CARGO_HOME. For the tests: CARGO_BIN (where
-# tools go), TOOL_CACHE_DIR (the folder), CURL (the download command).
+# The restore: actions/cache unpacks with `tar -P` and no path filter, so a crafted entry could
+# write files outside its folder. So nothing the steps after it read is written before it: the
+# action runs `pins` once for the key and again after the restore, into a new folder, from
+# PINS_JSON, a step output (held by the runner, not in a file); restore, fetch-assets and fill read
+# only that second folder. This script runs from the checkout, never from a copy.
+#
+# Environment: PINS_DIR (the folder `pins` wrote; every command but `pins` reads it), PINS_JSON
+# and NAMES (for `pins`), RUNNER_TEMP, RUNNER_OS, RUNNER_ARCH, ImageOS, GITHUB_OUTPUT, CARGO_HOME.
+# For the tests: CARGO_BIN (where tools go), TOOL_CACHE_DIR (the folder), CURL (the download
+# command).
 set -euo pipefail
 
 here=${GITHUB_WORKSPACE:?}/.github/actions/install-pinned-tools
-pins=$RUNNER_TEMP/pins.json
-cargo_tools=$RUNNER_TEMP/cargo-tools.tsv
-binary_names=$RUNNER_TEMP/binary-names.txt
+pins=${PINS_DIR:-/nonexistent}/pins.json
+cargo_tools=${PINS_DIR:-/nonexistent}/cargo-tools.tsv
+binary_names=${PINS_DIR:-/nonexistent}/binary-names.txt
 dir=${TOOL_CACHE_DIR:-$RUNNER_TEMP/pinned-tools-cache}
 output=${GITHUB_OUTPUT:-/dev/null}
 
@@ -122,6 +133,28 @@ place_asset() {
   chmod 755 "$work/$name"
   mv -f "$work/$name" "$bin/$name"
   rm -rf "$work"
+}
+
+# jq on Windows ends its lines with CRLF, so each of its outputs drops the CR.
+cmd_pins() {
+  local new names spec binaries
+  new=$(mktemp -d "${RUNNER_TEMP:?}/pinned-tools-pins.XXXXXX")
+  printf '%s\n' "${PINS_JSON:?}" > "$new/pins.json"
+  names=$(jq -cn --arg s "${NAMES:-}" '$s | split(" ") | map(select(. != ""))' | tr -d '\r')
+  jq -r --argjson want "$names" \
+    '.tools[] | select(($want | length) == 0 or (.name as $n | $want | index($n)))
+     | "\(.name)\t\(.version)"' "$new/pins.json" | tr -d '\r' > "$new/cargo-tools.tsv"
+  jq -r --argjson want "$names" \
+    '[.binaries[].name] | unique[] | select(($want | length) == 0 or (. as $n | $want | index($n)))' \
+    "$new/pins.json" | tr -d '\r' > "$new/binary-names.txt"
+  spec=$(awk -F '\t' '{ printf "%s%s@%s", (NR > 1 ? "," : ""), $1, $2 }' "$new/cargo-tools.tsv")
+  binaries=$(sed 's/^/--only /' "$new/binary-names.txt" | tr '\n' ' ')
+  {
+    echo "dir=$new"
+    echo "spec=$spec"
+    echo "binaries=$binaries"
+  } >> "$output"
+  echo "pins in $new; cargo tools: ${spec:-none}; binaries: ${binaries:-none}"
 }
 
 cmd_key() {
@@ -221,7 +254,7 @@ cmd_fetch_assets() {
 }
 
 cmd_fill() {
-  local complete=true
+  local complete=true mismatch=false
   while IFS=$'\t' read -r name _asset want _url; do
     [ -n "$name" ] || continue
     if [ ! -f "$dir/assets/$_asset" ] || [ "$(sha256 "$dir/assets/$_asset")" != "$want" ]; then
@@ -248,9 +281,10 @@ cmd_fill() {
       else
         cp "$bin/$file" "$dir/bin/$file"
         if [ "$(sha256 "$dir/bin/$file")" != "$want" ]; then
-          warn "$bin/$file has sha256 $(sha256 "$dir/bin/$file"), not the pinned $want; not cached"
+          echo "::error title=pinned tools cache::$bin/$file has sha256 $(sha256 "$dir/bin/$file"), not the pinned $want in xtask/src/setup/bin_sha256.rs; not cached. Update the pin if install-action now installs another build"
           rm -f "$dir/bin/$file"
           complete=false
+          mismatch=true
         fi
       fi
     done < <(tr -d '\r' < "$cargo_tools")
@@ -262,12 +296,14 @@ cmd_fill() {
     echo "save=false" >> "$output"
     echo "the folder lacks a tool, or is empty; not saving it"
   fi
+  [ "$mismatch" = false ]
 }
 
 case "${1:-}" in
+  pins) cmd_pins ;;
   key) cmd_key ;;
   restore) cmd_restore ;;
   fetch-assets) cmd_fetch_assets ;;
   fill) cmd_fill ;;
-  *) echo "usage: tool-cache.sh key | restore | fetch-assets | fill" >&2; exit 2 ;;
+  *) echo "usage: tool-cache.sh pins | key | restore | fetch-assets | fill" >&2; exit 2 ;;
 esac

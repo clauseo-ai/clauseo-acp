@@ -16,7 +16,8 @@
 #   restoring). What is missing or does not match is downloaded as above. Only main's scheduled
 #   and on-demand runs save, and only after a miss (./.github/actions/cache-save-main), so pull
 #   requests and merge groups never save; the nightly prune deletes the older entries. The cache
-#   service down is a warning, and everything is downloaded.
+#   service down is a warning, and everything is downloaded. On main, a cargo tool install-action
+#   installed that is not its pin fails the job (tool-cache.sh fill), so a stale pin shows at once.
 # - The scripts run from `$GITHUB_WORKSPACE/.github/...`, not `github.action_path`, which is a
 #   backslash path on Windows.
 
@@ -34,6 +35,10 @@ inputs:
 runs:
   using: composite
   steps:
+    # No file the steps after the restore read is written before it: actions/cache unpacks with
+    # `tar -P` and no path filter, so a crafted entry could replace such a file. The pins travel as
+    # a step output (json), which the runner holds, and are written to a new folder twice: once for
+    # the key, and again after the restore for everything that follows (pins-after).
     - name: Read the pins from cargo xtask setup --list=json
       id: pins
       shell: bash
@@ -42,31 +47,27 @@ runs:
       run: |
         set -euo pipefail
         # jq on Windows ends its lines with CRLF, so each of its outputs drops the CR.
-        cargo xtask setup --list=json > "$RUNNER_TEMP/pins.json"
+        json=$(cargo xtask setup --list=json | jq -c . | tr -d '\r')
         # Each name given must be pinned, as `setup --only` requires.
         for name in $NAMES; do
-          jq -e --arg n "$name" '[.tools[], .binaries[]] | any(.name == $n)' \
-            "$RUNNER_TEMP/pins.json" > /dev/null \
+          jq -e --arg n "$name" '[.tools[], .binaries[]] | any(.name == $n)' <<< "$json" > /dev/null \
             || { echo "::error::$name is not a pinned tool in xtask/src/setup.rs"; exit 1; }
         done
-        names=$(jq -cn --arg s "$NAMES" '$s | split(" ") | map(select(. != ""))' | tr -d '\r')
-        jq -r --argjson want "$names" \
-          '.tools[] | select(($want | length) == 0 or (.name as $n | $want | index($n)))
-           | "\(.name)\t\(.version)"' "$RUNNER_TEMP/pins.json" | tr -d '\r' > "$RUNNER_TEMP/cargo-tools.tsv"
-        spec=$(awk -F '\t' '{ printf "%s%s@%s", (NR > 1 ? "," : ""), $1, $2 }' \
-          "$RUNNER_TEMP/cargo-tools.tsv")
-        jq -r --argjson want "$names" \
-          '[.binaries[].name] | unique[] | select(($want | length) == 0 or (. as $n | $want | index($n)))' \
-          "$RUNNER_TEMP/pins.json" | tr -d '\r' > "$RUNNER_TEMP/binary-names.txt"
-        binaries=$(sed 's/^/--only /' "$RUNNER_TEMP/binary-names.txt" | tr '\n' ' ')
-        echo "spec=$spec" >> "$GITHUB_OUTPUT"
-        echo "binaries=$binaries" >> "$GITHUB_OUTPUT"
-        echo "cargo tools: ${spec:-none}"
-        echo "binaries: ${binaries:-none}"
+        echo "json=$json" >> "$GITHUB_OUTPUT"
+
+    - name: The pins, for the key
+      id: pins-key
+      shell: bash
+      env:
+        PINS_JSON: ${{ steps.pins.outputs.json }}
+        NAMES: ${{ inputs.tools }}
+      run: bash "$GITHUB_WORKSPACE/.github/actions/install-pinned-tools/tool-cache.sh" pins
 
     - name: The tools cache's key
       id: cache-key
       shell: bash
+      env:
+        PINS_DIR: ${{ steps.pins-key.outputs.dir }}
       run: bash "$GITHUB_WORKSPACE/.github/actions/install-pinned-tools/tool-cache.sh" key
 
     - name: Restore the tools from main's cache
@@ -76,9 +77,19 @@ runs:
         path: ${{ steps.cache-key.outputs.dir }}
         key: ${{ steps.cache-key.outputs.key }}
 
+    - name: The pins again, written after the restore
+      id: pins-after
+      shell: bash
+      env:
+        PINS_JSON: ${{ steps.pins.outputs.json }}
+        NAMES: ${{ inputs.tools }}
+      run: bash "$GITHUB_WORKSPACE/.github/actions/install-pinned-tools/tool-cache.sh" pins
+
     - name: Check the restored tools against their checksums, and put them on PATH
       id: restored
       shell: bash
+      env:
+        PINS_DIR: ${{ steps.pins-after.outputs.dir }}
       run: bash "$GITHUB_WORKSPACE/.github/actions/install-pinned-tools/tool-cache.sh" restore
 
     # On main after a miss, the binaries' assets are downloaded here, into the folder that is saved,
@@ -88,19 +99,23 @@ runs:
         steps.cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
         && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
       shell: bash
+      env:
+        PINS_DIR: ${{ steps.pins-after.outputs.dir }}
       run: bash "$GITHUB_WORKSPACE/.github/actions/install-pinned-tools/tool-cache.sh" fetch-assets
 
     - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
-      if: steps.pins.outputs.spec != '' && steps.restored.outputs.cargo_tools != 'true'
+      if: steps.pins-after.outputs.spec != '' && steps.restored.outputs.cargo_tools != 'true'
       with:
-        tool: ${{ steps.pins.outputs.spec }}
+        tool: ${{ steps.pins-after.outputs.spec }}
         fallback: none
 
     # cargo-<x> runs as `cargo <x> --version`, <x>-cli as `<x> --version`; each prints its name
     # and then its version as the second word.
     - name: Check the cargo tools' versions against the pins
-      if: steps.pins.outputs.spec != ''
+      if: steps.pins-after.outputs.spec != ''
       shell: bash
+      env:
+        PINS_DIR: ${{ steps.pins-after.outputs.dir }}
       run: |
         set -euo pipefail
         failed=0
@@ -115,14 +130,14 @@ runs:
             echo "::error::$name is at '$got', but xtask/src/setup.rs pins $version"
             failed=1
           fi
-        done < "$RUNNER_TEMP/cargo-tools.tsv"
+        done < "$PINS_DIR/cargo-tools.tsv"
         exit "$failed"
 
     - name: Install and check the binaries (cargo xtask setup --binaries)
-      if: steps.pins.outputs.binaries != ''
+      if: steps.pins-after.outputs.binaries != ''
       shell: bash
       env:
-        ONLY: ${{ steps.pins.outputs.binaries }}
+        ONLY: ${{ steps.pins-after.outputs.binaries }}
       run: |
         # $ONLY is "--only <name> ..." and is split on purpose.
         # shellcheck disable=SC2086
@@ -134,6 +149,8 @@ runs:
         steps.cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
         && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
       shell: bash
+      env:
+        PINS_DIR: ${{ steps.pins-after.outputs.dir }}
       run: bash "$GITHUB_WORKSPACE/.github/actions/install-pinned-tools/tool-cache.sh" fill
 
     - name: Save the tools (main, after a miss)
