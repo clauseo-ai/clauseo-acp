@@ -2497,11 +2497,12 @@ listed), which `Users` can read; the MSI's from `Version`, as WSL reads it. A pa
 its MSI is in. A package registered for one user only may be missing there, its packaged-COM registration
 being that user's (`HKCU\Software\Classes\PackagedCom\Package`), so with none in `HKLM` the check
 (running as the lawyer) reads the lawyer's own before it decides there is no package. A package
-registered only for the lawyer is WSL present but no pending upgrade: COM activates a packaged
-class only for a user the package is registered for, through that user's own registration, and a
-pool user's hive has none, so a pool user can't activate `WslInstaller`'s class; an upgrade the
-lawyer starts is the refresh trigger's to cover. Its registrations unreadable is
-`WslDenyUnverifiable`. The MSI's version older is `WslUpgradePending`. No MSI version (missing or empty) isn't an
+registered only for the lawyer is WSL present and is still compared, its version taken from the
+lawyer's registration: a pool user's hive has none, so a pool user shouldn't be able to activate
+`WslInstaller`'s class, but that isn't verified, and a pending upgrade refuses whoever could start
+it. Its registrations unreadable is `WslDenyUnverifiable`; its version (or the MSI's) unreadable
+is `WslDenyUnverifiable` where `WSLService` or `LxssManager` is installed (WSL 2 can run), and
+refuses nothing where neither is. The MSI's version older is `WslUpgradePending`. No MSI version (missing or empty) isn't an
 upgrade under way: WSL's installer would install the MSI rather than upgrade it, and a package whose
 MSI was never run may stay that way for good, so "let the update complete" would never end. With
 `WSLService` or `LxssManager` installed, WSL 2 can run beside an MSI WSL doesn't record, which

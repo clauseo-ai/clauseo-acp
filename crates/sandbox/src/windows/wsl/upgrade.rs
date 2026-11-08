@@ -15,12 +15,12 @@
 //! A package registered for one user only may not be listed there: its packaged-COM
 //! registration is that user's, in `HKCU\Software\Classes\PackagedCom\Package`. So with none in
 //! `HKLM`, the lawyer's own (the check runs as the lawyer) is read before taking it as
-//! [`Upgrade::NoPackage`]. A package registered only for the lawyer is
-//! [`Upgrade::LawyerOnly`]: WSL is present, but no upgrade a pool user could start is pending.
-//! COM activates a packaged class only for a user the package is registered for, through that
-//! user's own registration, and a pool user's hive holds none, so a pool user can't activate
-//! `WslInstaller`'s class; the lawyer may, and an upgrade the lawyer starts is the refresh's to
-//! cover (its `MsiInstaller` trigger).
+//! [`Upgrade::NoPackage`]. A package registered only for the lawyer is still compared, its
+//! version taken from the lawyer's registration: newer than the MSI is [`Upgrade::Pending`], as
+//! new or older is [`Upgrade::LawyerOnly`], and a version that can't be read or parsed is
+//! [`Upgrade::LawyerUnreadable`]. A pool user's hive holds no registration of it, so a pool user
+//! shouldn't be able to activate `WslInstaller`'s class, but that isn't verified, and a pending
+//! upgrade refuses the launch whoever could start it.
 //!
 //! [`Blocked::WslUpgradePending`]: crate::Blocked::WslUpgradePending
 
@@ -37,8 +37,8 @@ type Version = (u32, u32, u32);
 pub enum Upgrade {
     /// No WSL package is registered: nothing can upgrade through it.
     NoPackage,
-    /// The WSL package is registered for the lawyer only (`HKCU`): WSL is here, but a pool
-    /// user can't start its upgrade.
+    /// The WSL package is registered for the lawyer only (`HKCU`), and the MSI is as new as
+    /// the lawyer's package, or newer.
     LawyerOnly,
     /// The installed MSI is as new as the package, or newer.
     Current,
@@ -50,8 +50,14 @@ pub enum Upgrade {
     ///
     /// [`check`]: super::check
     NoMsi,
-    /// The package is registered and a version can't be read or parsed.
+    /// The package is registered (machine-wide) and a version can't be read or parsed, or the
+    /// registrations can't be listed.
     Unreadable,
+    /// The package is registered for the lawyer only and a version (the lawyer's package's or
+    /// the MSI's) can't be read or parsed: unverifiable where WSL 2 can run ([`check`]).
+    ///
+    /// [`check`]: super::check
+    LawyerUnreadable,
 }
 
 /// The first three parts of `text`, a dotted version of three or four numbers (the fourth,
@@ -75,39 +81,47 @@ fn package_version(full_name: &str) -> Option<Version> {
     version(rest.split('_').next()?)
 }
 
-/// Whether a WSL upgrade is pending, as the module says. A read that fails (the lawyer's own
-/// registrations' too), a listed full name
-/// whose version doesn't parse, or an MSI version that doesn't parse, is
-/// [`Upgrade::Unreadable`]; a missing or empty MSI version is [`Upgrade::NoMsi`].
+/// Whether a WSL upgrade is pending, as the module says. A listing that fails (the lawyer's
+/// own registrations' too) is [`Upgrade::Unreadable`]; a listed full name whose version doesn't
+/// parse, or an MSI version that can't be read or parsed, is [`Upgrade::Unreadable`] for a
+/// machine-wide package and [`Upgrade::LawyerUnreadable`] for the lawyer's own; a missing or
+/// empty MSI version is [`Upgrade::NoMsi`].
 pub fn upgrade(reg: &dyn WslRead) -> Upgrade {
-    let Ok(names) = reg.wsl_packages() else {
+    let Ok(machine) = reg.wsl_packages() else {
         return Upgrade::Unreadable;
     };
-    if names.is_empty() {
-        return match reg.user_wsl_packages() {
-            Err(_) => Upgrade::Unreadable,
-            Ok(mine) if mine.is_empty() => Upgrade::NoPackage,
-            Ok(_) => Upgrade::LawyerOnly,
-        };
-    }
+    let lawyer = machine.is_empty();
+    let names = if lawyer {
+        match reg.user_wsl_packages() {
+            Err(_) => return Upgrade::Unreadable,
+            Ok(mine) => mine,
+        }
+    } else {
+        machine
+    };
+    let (unreadable, current) = if lawyer {
+        (Upgrade::LawyerUnreadable, Upgrade::LawyerOnly)
+    } else {
+        (Upgrade::Unreadable, Upgrade::Current)
+    };
     let Some(versions) = names
         .iter()
         .map(|name| package_version(name))
         .collect::<Option<Vec<Version>>>()
     else {
-        return Upgrade::Unreadable;
+        return unreadable;
     };
     let Some(package) = versions.into_iter().max() else {
         return Upgrade::NoPackage;
     };
     match reg.msi_version() {
-        Err(_) => Upgrade::Unreadable,
+        Err(_) => unreadable,
         Ok(None) => Upgrade::NoMsi,
         Ok(Some(text)) if text.trim().is_empty() => Upgrade::NoMsi,
         Ok(Some(text)) => match version(&text) {
-            None => Upgrade::Unreadable,
+            None => unreadable,
             Some(installed) if installed < package => Upgrade::Pending,
-            Some(_) => Upgrade::Current,
+            Some(_) => current,
         },
     }
 }
