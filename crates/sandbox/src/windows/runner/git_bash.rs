@@ -22,9 +22,10 @@
 //!    ([`msys_key`]); the file gives the shared id ([`shared_id`]);
 //! 7. both folders made, never opened: one already there is squatted ([`Off::Squatted`]).
 //!
-//! Each failure is one plain line on stderr and no Git Bash for the run: the agent then gets
-//! neither `CLAUDE_CODE_GIT_BASH_PATH` nor any Git a PATH entry of the lawyer's Git names
-//! (`env::agent_env`). It never falls back to the lawyer's Git.
+//! Each failure is one plain line on stderr and no Git Bash for the run: the agent's
+//! `CLAUDE_CODE_GIT_BASH_PATH` then names a stub (`off.rs`), or the launch is refused, and no
+//! `PATH` entry of the lawyer's Git is left (`path_ids.rs`). It never falls back to the
+//! lawyer's Git.
 
 use std::fmt;
 
@@ -33,10 +34,16 @@ use crate::windows::git_tree::{BUILDING, GIT_DIR, Recorded, UNAVAILABLE};
 use crate::windows::git_tree::{account_sddl, folder_name_ok, git_dir_sddl};
 use crate::windows::sids::Sid;
 
+#[cfg(test)]
+mod fake;
+pub(crate) mod off;
 #[cfg(windows)]
 pub(crate) mod os;
+pub(crate) mod path_ids;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_off;
 
 /// What precedes the shared id in `msys-2.0.dll`.
 pub(crate) const SHARED_ID_TAG: &[u8] = b"%%% MSYS shared id: ";
@@ -167,6 +174,25 @@ pub(crate) trait GitBashOs {
     fn session(&mut self) -> Result<u32, String>;
     /// Makes the object folder `path` with the descriptor `sddl`, never opening one there.
     fn make_dir(&mut self, path: &str, sddl: &str) -> Result<Self::Held, Made>;
+    /// [`GitBashOs::check_levels`], then the file `name` in the last level, opened as itself
+    /// relative to it: a regular file's owner and DACL, self-relative.
+    fn stub_security(
+        &mut self,
+        admin: &WinPath,
+        levels: &[(String, String)],
+        name: &str,
+    ) -> Result<Vec<u8>, String>;
+    /// The desktop user's `LocalAppData` (the known folder), refused when on a network drive.
+    fn local_app_data(&mut self) -> Result<String, String>;
+    /// Makes the folder `dir` (and its parents) when missing, then refuses unless it is a
+    /// folder and no link, owned by this user, and gives it `sddl`'s protected DACL, read back.
+    fn secure_dir(&mut self, dir: &WinPath, sddl: &str) -> Result<(), String>;
+    /// The SHA-256 of this runner's own exe, lowercase hex.
+    fn runner_hash(&mut self) -> Result<String, String>;
+    /// The SHA-256 of the regular file `file`, opened as itself; `None` when nothing is there.
+    fn file_hash(&mut self, file: &WinPath) -> Result<Option<String>, String>;
+    /// Copies this runner's exe to `to` through a new file beside it, renamed over `to`.
+    fn copy_runner(&mut self, to: &WinPath) -> Result<(), String>;
 }
 
 /// A run's Git Bash, ready: its tree, with its [`HELD`] files and msys's folders open for the

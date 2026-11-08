@@ -35,7 +35,8 @@ use windows::Win32::Storage::FileSystem::{
 };
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::UI::Shell::{
-    FOLDERID_ProgramFiles, FOLDERID_ProgramFilesX86, KF_FLAG_DEFAULT, SHGetKnownFolderPath,
+    FOLDERID_LocalAppData, FOLDERID_ProgramFiles, FOLDERID_ProgramFilesX86, KF_FLAG_DEFAULT,
+    SHGetKnownFolderPath,
 };
 use windows::core::{BOOL, PCWSTR, PWSTR};
 
@@ -208,22 +209,28 @@ pub(crate) fn program_files() -> io::Result<PathBuf> {
     known_folder(FOLDERID_ProgramFiles)
 }
 
+/// This user's `LocalAppData` (`FOLDERID_LocalAppData`, never roaming), as [`program_files`]
+/// reads its folder: the outer runner's own Git Bash stub lies below it.
+pub(crate) fn local_app_data() -> io::Result<PathBuf> {
+    known_folder(FOLDERID_LocalAppData)
+}
+
 /// `%ProgramFiles(x86)%` (`FOLDERID_ProgramFilesX86`), as [`program_files`] reads its folder.
 pub(crate) fn program_files_x86() -> io::Result<PathBuf> {
     known_folder(FOLDERID_ProgramFilesX86)
 }
 
-/// The machine's known folder `folder`.
+/// The known folder `folder`: the machine's, or this process's user's.
 fn known_folder(folder: windows::core::GUID) -> io::Result<PathBuf> {
-    // SAFETY: `folder` is a live GUID for the call; no token is passed (Program Files is the
-    // machine's). The string returned is freed by `TaskString`.
+    // SAFETY: `folder` is a live GUID for the call; no token is passed (the machine's folder, or
+    // this process's user's). The string returned is freed by `TaskString`.
     let path = unsafe { SHGetKnownFolderPath(&raw const folder, KF_FLAG_DEFAULT, None) }
         .map_err(|error| io::Error::from_raw_os_error(error.code().0 & 0xFFFF))?;
     let path = TaskString(path);
     // SAFETY: on success the call wrote a NUL-terminated string, alive until `path` drops.
     let units = unsafe { path.0.as_wide() };
     if units.is_empty() {
-        return Err(io::Error::other("Windows gave no Program Files folder"));
+        return Err(io::Error::other("Windows gave no such folder"));
     }
     Ok(PathBuf::from(OsString::from_wide(units)))
 }

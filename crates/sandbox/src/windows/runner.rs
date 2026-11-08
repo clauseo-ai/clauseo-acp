@@ -445,10 +445,14 @@ pub enum RunExit {
     /// it no id (`marker::marked`): the outer refuses the launch before any logon, so no session
     /// runs that no marker names.
     MarkerUnwritable,
+    /// Git Bash is off for the run and no stub passed its checks (`git_bash/off.rs`): the
+    /// outer refuses the launch before any logon, so Claude Code never looks for the lawyer's
+    /// own Git Bash.
+    GitBashUnsafe,
 }
 
 impl RunExit {
-    const ALL: [RunExit; 18] = [
+    const ALL: [RunExit; 19] = [
         RunExit::Usage,
         RunExit::BadLaunch,
         RunExit::NoSecret,
@@ -467,6 +471,7 @@ impl RunExit {
         RunExit::Escapee,
         RunExit::PoolStop,
         RunExit::MarkerUnwritable,
+        RunExit::GitBashUnsafe,
     ];
 
     /// The exit code.
@@ -508,7 +513,8 @@ impl RunExit {
             | RunExit::DllSearch
             | RunExit::Escapee
             | RunExit::PoolStop
-            | RunExit::MarkerUnwritable => None,
+            | RunExit::MarkerUnwritable
+            | RunExit::GitBashUnsafe => None,
         }
     }
 }

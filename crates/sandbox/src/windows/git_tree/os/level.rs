@@ -87,6 +87,34 @@ pub(super) fn level(path: &Path, sddl: &str) -> Result<(), Refused> {
 /// The outer runner's check of a tree, as the unelevated desktop user: each level's
 /// `READ_SECURITY` ACE lets it read them. The words name a level, never a path.
 pub(crate) fn checked_chain(admin: &Path, levels: &[(String, String)]) -> Result<(), String> {
+    open_chain(admin, levels).map(drop)
+}
+
+/// [`checked_chain`], then the file `file` in the last level, opened relative to its handle the
+/// same way for its security alone: a regular file and no reparse point. Its owner and DACL
+/// (self-relative) are returned for the caller's rule; the outer runner holds the Git Bash
+/// stub to `admin_copy::level_safe`.
+pub(crate) fn checked_file(
+    admin: &Path,
+    levels: &[(String, String)],
+    file: &str,
+) -> Result<Vec<u8>, String> {
+    let above = open_chain(admin, levels)?;
+    let wide: Vec<u16> = file.encode_utf16().collect();
+    let found = match above.open_child_for(&wide, READ_CONTROL.0) {
+        Ok(found) => found,
+        Err(error) if reparse_refused(&error) => return Err(format!("{file} is a link")),
+        Err(error) => return Err(format!("opening {file} failed ({})", kind(&error))),
+    };
+    if found.reparse() || found.folder {
+        return Err(format!("{file} is a link or a folder"));
+    }
+    kernel_security(found.handle(), OWNER_DACL.0)
+        .map_err(|error| format!("reading {file}'s security failed ({})", kind(&error)))
+}
+
+/// [`checked_chain`]'s walk, giving the last level open.
+fn open_chain(admin: &Path, levels: &[(String, String)]) -> Result<Object, String> {
     let mut above = Object::open_folder(admin)
         .map_err(|error| format!("opening the admin folder failed ({})", kind(&error)))?;
     if above.reparse() || !above.folder {
@@ -102,7 +130,7 @@ pub(crate) fn checked_chain(admin: &Path, levels: &[(String, String)]) -> Result
         if level.reparse() || !level.folder {
             return Err(format!("{name} is a link or no folder"));
         }
-        let back = kernel_security(level.handle(), READ_BACK.0)
+        let back = kernel_security(level.handle(), OWNER_DACL.0)
             .map_err(|error| format!("reading {name}'s security failed ({})", kind(&error)))?;
         let mut back = words(&back);
         let found = to_sddl(PSECURITY_DESCRIPTOR(back.as_mut_ptr().cast()))?;
@@ -111,7 +139,7 @@ pub(crate) fn checked_chain(admin: &Path, levels: &[(String, String)]) -> Result
         }
         above = level;
     }
-    Ok(())
+    Ok(above)
 }
 
 /// `error`'s code, else its kind.

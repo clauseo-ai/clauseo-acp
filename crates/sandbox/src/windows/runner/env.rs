@@ -13,9 +13,15 @@
 //! - **Git Bash** (0049, "The Git tree"; [`GitEnv`], made by `git_bash.rs`): with the run's
 //!   checked tree, `CLAUDE_CODE_GIT_BASH_PATH` at `<tree>\bin\bash.exe` and `<tree>\cmd` first
 //!   in `PATH`, so the agent's `git` is the tree's and finds the tree's `sh.exe`. With none,
-//!   `CLAUDE_CODE_GIT_BASH_PATH` at the stub (`stub.rs`) and the reason in its `OFF_VAR`, so
-//!   Claude Code never looks for the lawyer's Git Bash. Either way the spec's values of both go,
-//!   and so does each `PATH` entry in the lawyer's Git: the agent never gets the lawyer's Git.
+//!   `CLAUDE_CODE_GIT_BASH_PATH` at a checked stub (`git_bash/off.rs`) and the reason in its
+//!   `OFF_VAR`, so Claude Code never looks for the lawyer's Git Bash; there is no third case.
+//!   Either way the spec's values of both go, and so does each `PATH` entry `git_bash/path_ids`
+//!   judged (by file ID) to be in the lawyer's Git, behind a link or on the network.
+//! - **The lawyer's Git and shell settings go** ([`lawyer_only`]): every `GIT_*` (the runner
+//!   sets its own `GIT_CONFIG_*`), `MSYSTEM*`, `MINGW_*`, `MSYS*`, `SSH_ASKPASS*`,
+//!   `SSH_AUTH_SOCK`, `EXEPATH`, `ORIGINAL_PATH`/`TEMP`/`TMP`, `CYGWIN`, `CHERE_INVOKING`,
+//!   `PLINK_PROTOCOL`, `SHELL`, `BASH_ENV`, `ENV`, `INPUTRC`, `GNUPGHOME` and the `XDG_*`
+//!   folders: what Git, its shell or ssh would read in place of the agent's own.
 //! - **CA bundle** (`s15-spikes-traverse.md` (d): codex's rustls finds no roots under the token):
 //!   `CODEX_CA_CERTIFICATE` and `SSL_CERT_FILE` at the bundle, when the launch names one.
 //!   `SSL_CERT_FILE` makes every OpenSSL tool trust exactly the machine's roots, as intended.
@@ -84,20 +90,43 @@ pub fn profile_folders(message: &LaunchMessage) -> Result<Vec<String>, LaunchErr
     Ok(folders)
 }
 
+/// The Git Bash `CLAUDE_CODE_GIT_BASH_PATH` names: always one, never left to Claude Code.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Bash {
+    /// The run's checked Git tree.
+    Tree(WinPath),
+    /// Git Bash is off: a checked stub (`git_bash/off.rs`), and why, for the stub to say.
+    Off {
+        /// The stub.
+        stub: WinPath,
+        /// Why Git Bash is off.
+        reason: String,
+    },
+}
+
 /// What the agent's environment says of Git.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitEnv {
-    /// The run's checked Git tree; `None` when Git Bash is off for the run.
-    pub tree: Option<WinPath>,
-    /// With no tree, the stub (`<admin>\git\_off\bash.exe`) when it is there.
-    pub stub: Option<WinPath>,
-    /// With no tree, why Git Bash is off, for the stub to say.
-    pub off: Option<String>,
-    /// The lawyer's per-machine Git installs, which no `PATH` entry of the agent's may lie in.
-    pub lawyer_git: Vec<WinPath>,
-    /// `PATH` entries with their long forms (`GetLongPathNameW`), where they differ: an entry
-    /// is in a Git install when either form is.
-    pub long_names: Vec<(String, String)>,
+    /// Its Git Bash.
+    pub bash: Bash,
+    /// The lawyer's `PATH` entries, as written, that the agent's leaves out
+    /// (`git_bash::path_ids`).
+    pub dropped: Vec<String>,
+}
+
+#[cfg(test)]
+impl Default for GitEnv {
+    /// Git Bash off with the machine's stub, no `PATH` entry dropped: the tests' plain case.
+    fn default() -> GitEnv {
+        GitEnv {
+            bash: Bash::Off {
+                stub: WinPath::parse(r"C:\Program Files\Clauseo\Sandbox\git\_off\bash.exe")
+                    .unwrap(),
+                reason: "off".to_owned(),
+            },
+            dropped: Vec::new(),
+        }
+    }
 }
 
 /// The agent's environment from `message`, for a lawyer whose profile folder is `profile`,
@@ -128,11 +157,12 @@ pub fn agent_env(
         if name.starts_with('=')
             || clauseo_process::is_node_env(std::ffi::OsStr::new(name))
             || overridden(name, message)
+            || lawyer_only(name)
         {
             continue;
         }
         let kept = if name.eq_ignore_ascii_case("PATH") {
-            filter_list(value, profile, &runtime).and_then(|value| without_git(&value, git))
+            filter_list(value, profile, &runtime).and_then(|value| without(&value, &git.dropped))
         } else if LISTS.iter().any(|list| list.eq_ignore_ascii_case(name)) {
             filter_list(value, profile, &runtime)
         } else if lies_outside(value, profile, &granted) {
@@ -147,26 +177,23 @@ pub fn agent_env(
     for (name, value) in set {
         out.insert(name.to_uppercase(), (name, value));
     }
-    if let (None, Some(stub)) = (&git.tree, &git.stub) {
-        let off = git.off.clone().unwrap_or_else(|| "unknown".to_owned());
-        for (name, value) in [(GIT_BASH_VAR, stub.display()), (OFF_VAR, off)] {
-            out.insert(name.to_owned(), (name.to_owned(), value));
+    let mut put = |name: &str, value: String| {
+        out.insert(name.to_owned(), (name.to_owned(), value));
+    };
+    match &git.bash {
+        Bash::Off { stub, reason } => {
+            put(GIT_BASH_VAR, stub.display());
+            put(OFF_VAR, reason.clone());
         }
-    }
-    if let Some(tree) = &git.tree {
-        out.insert(
-            GIT_BASH_VAR.to_owned(),
-            (
-                GIT_BASH_VAR.to_owned(),
-                tree.join("bin").join("bash.exe").display(),
-            ),
-        );
-        let cmd = tree.join("cmd").display();
-        let path = match out.remove("PATH") {
-            Some((name, value)) => (name, format!("{cmd};{value}")),
-            None => ("PATH".to_owned(), cmd),
-        };
-        out.insert("PATH".to_owned(), path);
+        Bash::Tree(tree) => {
+            put(GIT_BASH_VAR, tree.join("bin").join("bash.exe").display());
+            let cmd = tree.join("cmd").display();
+            let path = match out.remove("PATH") {
+                Some((name, value)) => (name, format!("{cmd};{value}")),
+                None => ("PATH".to_owned(), cmd),
+            };
+            out.insert("PATH".to_owned(), path);
+        }
     }
     Ok(out.into_values().collect())
 }
@@ -269,22 +296,37 @@ fn lies_outside(value: &str, profile: &WinPath, granted: &[WinPath]) -> bool {
         .any(|part| text_within(part, profile) && !granted.iter().any(|g| text_within(part, g)))
 }
 
-/// `value` (a `;` list) without its entries that lie, as written or in their long form, in
-/// any of `git`'s lawyer's Git installs; `None` when nothing is left.
-fn without_git(value: &str, git: &GitEnv) -> Option<String> {
-    let in_git = |entry: &str| {
-        let long = git
-            .long_names
-            .iter()
-            .find(|(short, _)| short == entry)
-            .map(|(_, long)| long.as_str());
-        [Some(entry), long]
-            .into_iter()
-            .flatten()
-            .any(|form| git.lawyer_git.iter().any(|root| text_within(form, root)))
-    };
-    let kept: Vec<&str> = value.split(';').filter(|entry| !in_git(entry)).collect();
+/// `value` (a `;` list) without its entries in `dropped` (as written); `None` when nothing
+/// is left.
+fn without(value: &str, dropped: &[String]) -> Option<String> {
+    let kept: Vec<&str> = value
+        .split(';')
+        .filter(|entry| !dropped.iter().any(|gone| gone == entry))
+        .collect();
     (!kept.is_empty()).then(|| kept.join(";"))
+}
+
+/// Whether `name` is one of the lawyer's Git, shell or ssh settings the agent never gets
+/// (module docs); the runner sets its own `GIT_CONFIG_*` after.
+pub fn lawyer_only(name: &str) -> bool {
+    const PREFIXES: [&str; 6] = ["GIT_", "MSYSTEM", "MINGW_", "MSYS", "SSH_ASKPASS", "XDG_"];
+    const NAMES: [&str; 13] = [
+        "SSH_AUTH_SOCK",
+        "EXEPATH",
+        "ORIGINAL_PATH",
+        "ORIGINAL_TEMP",
+        "ORIGINAL_TMP",
+        "CYGWIN",
+        "CHERE_INVOKING",
+        "PLINK_PROTOCOL",
+        "SHELL",
+        "BASH_ENV",
+        "ENV",
+        "INPUTRC",
+        "GNUPGHOME",
+    ];
+    let upper = name.to_ascii_uppercase();
+    PREFIXES.iter().any(|prefix| upper.starts_with(prefix)) || NAMES.contains(&upper.as_str())
 }
 
 /// `value` (a `;` list) without its entries that lie in `profile` and in none of `runtime`;

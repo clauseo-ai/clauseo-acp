@@ -143,7 +143,10 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
     let profile = own_profile().map_err(|e| Failure::new(RunExit::BadLaunch, os("profile", &e)))?;
     refuse_codex_reuse(message, &profile)?;
     // Held until this process exits: msys's folders for the tree go with their last handle.
-    let git_bash = super::git_bash::os::for_run(message, &desktop, say);
+    // With Git Bash off and no stub that passes, the launch is refused (`git_bash/off.rs`).
+    let exe = Path::new(&sweeper.exe);
+    let git_bash = super::git_bash::os::for_run(message, &desktop, exe, data_dir, say)
+        .map_err(|why| Failure::new(RunExit::GitBashUnsafe, why))?;
     let env = agent_env(message, &profile, &git_bash.env)
         .map_err(|e| Failure::new(RunExit::BadLaunch, e.to_string()))?;
     let env = super::ca::with_firm_ca(message, &desktop, env, say);

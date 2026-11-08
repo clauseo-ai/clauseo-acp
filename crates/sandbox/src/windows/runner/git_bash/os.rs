@@ -1,11 +1,13 @@
 //! [`GitBashOs`] on Windows, as the desktop user: the record, the tree's checks through
 //! handles (`git_tree::checked_chain`), the runtime's final path, and msys's folders made with
-//! `NtCreateDirectoryObject`.
+//! `NtCreateDirectoryObject`; the Git Bash stubs' checks and the outer runner's own copy.
 #![expect(
     unsafe_code,
-    reason = "FFI to GetFinalPathNameByHandleW, GetLongPathNameW, ProcessIdToSessionId and \
-              NtCreateDirectoryObject"
+    reason = "FFI to GetFinalPathNameByHandleW, ProcessIdToSessionId, NtCreateDirectoryObject, \
+              CopyFileW, MoveFileExW and DeleteFileW"
 )]
+
+mod ids;
 
 use std::fs::File;
 use std::io::{self, Read as _};
@@ -19,24 +21,27 @@ use windows::Win32::Foundation::{
     HANDLE, OBJ_CASE_INSENSITIVE, STATUS_OBJECT_NAME_COLLISION, UNICODE_STRING,
 };
 use windows::Win32::Storage::FileSystem::{
-    FILE_FLAG_OPEN_REPARSE_POINT, FILE_NAME_NORMALIZED, FILE_SHARE_DELETE, FILE_SHARE_READ,
-    GETFINALPATHNAMEBYHANDLE_FLAGS, GetFinalPathNameByHandleW, GetLongPathNameW, VOLUME_NAME_DOS,
+    CopyFileW, DeleteFileW, FILE_FLAG_OPEN_REPARSE_POINT, FILE_NAME_NORMALIZED, FILE_SHARE_DELETE,
+    FILE_SHARE_READ, GETFINALPATHNAMEBYHANDLE_FLAGS, GetFinalPathNameByHandleW,
+    MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW, VOLUME_NAME_DOS,
 };
 use windows::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows::Win32::System::Threading::GetCurrentProcessId;
 use windows::core::{HSTRING, PCWSTR, PWSTR, w};
 
+use self::ids::WindowsIds;
+use super::off::{NO_STUB, off_stub};
+use super::path_ids::{FileIds as _, dropped_entries};
 use super::{GitBashOs, Made, Ready, Runtime, prepare};
 use crate::windows::acl::object::Handle;
 use crate::windows::admin_copy::os as admin_os;
-use crate::windows::git_tree::{RECORD_SUBKEY, checked_chain};
-use crate::windows::record;
+use crate::windows::git_tree::{RECORD_SUBKEY, checked_chain, checked_file};
 use crate::windows::runner::LaunchMessage;
-use crate::windows::runner::env::GitEnv;
+use crate::windows::runner::env::{Bash, GitEnv};
 use crate::windows::runner::paths::WinPath;
-use crate::windows::runner::stub::STUB;
 use crate::windows::sids::Sid;
 use crate::windows::token::os::LocalDescriptor;
+use crate::windows::{private_dir, record};
 
 /// The record key under `HKLM`.
 const RECORD_KEY: &str = r"SOFTWARE\Clauseo\Sandbox";
@@ -59,66 +64,68 @@ pub(crate) struct GitBash {
     _held: Vec<Handle>,
 }
 
-/// The run's Git Bash, or none with its reason said on one line through `say`. The lawyer's
-/// Git roots, which the agent's `PATH` never names, are found either way, with each `PATH`
-/// entry's long form.
-pub(crate) fn for_run(message: &LaunchMessage, desktop: &Sid, say: fn(&str)) -> GitBash {
-    let lawyer_git = lawyer_git_roots();
-    let long_names = long_names(message);
-    match prepare(
-        &mut WindowsGitBash,
-        &message.pool_user,
-        &message.pool_name,
-        desktop,
-    ) {
-        Ok(Ready { tree, held }) => GitBash {
-            env: GitEnv {
-                tree: Some(tree),
-                stub: None,
-                off: None,
-                lawyer_git,
-                long_names,
-            },
-            _held: held,
-        },
-        Err(off) => {
-            say(&format!(
-                "clauseo-sandbox-run: Git Bash is off for this run: {off}"
-            ));
-            let stub = stub();
-            if stub.is_none() {
-                say(
-                    "clauseo-sandbox-run: the Git Bash stub isn't there, so Claude Code may look \
-                     for another Git Bash, which fails under the sandbox user",
-                );
-            }
-            GitBash {
+/// The run's Git Bash, or a stub (`off.rs`) with why it is off said on one line through `say`;
+/// `Err` with the plain line of a launch refused when no stub passes. `exe` is this runner's
+/// own exe, `data_dir` the launch's data folder. The `PATH` entries the agent's leaves out are
+/// found either way (`path_ids.rs`).
+pub(crate) fn for_run(
+    message: &LaunchMessage,
+    desktop: &Sid,
+    exe: &Path,
+    data_dir: &Path,
+    say: fn(&str),
+) -> Result<GitBash, String> {
+    let spec_path = message
+        .env
+        .iter()
+        .rev()
+        .find(|(name, _)| name.eq_ignore_ascii_case("PATH"))
+        .map_or("", |(_, value)| value.as_str());
+    let dropped = dropped_entries(spec_path, &lawyer_git_roots(), &mut WindowsIds);
+    let mut os = WindowsGitBash { exe };
+    let off = match prepare(&mut os, &message.pool_user, &message.pool_name, desktop) {
+        Ok(Ready { tree, held }) => {
+            return Ok(GitBash {
                 env: GitEnv {
-                    tree: None,
-                    stub,
-                    off: Some(off.to_string()),
-                    lawyer_git,
-                    long_names,
+                    bash: Bash::Tree(tree),
+                    dropped,
+                },
+                _held: held,
+            });
+        }
+        Err(off) => off,
+    };
+    say(&format!(
+        "clauseo-sandbox-run: Git Bash is off for this run: {off}"
+    ));
+    let data_dir = data_dir.to_str().unwrap_or_default();
+    match off_stub(&mut os, desktop, data_dir) {
+        Ok((stub, machine)) => {
+            if let Some(why) = machine {
+                say(&format!(
+                    "clauseo-sandbox-run: the machine's Git Bash stub was passed over ({why}); \
+                     the runner's own copy stands in"
+                ));
+            }
+            Ok(GitBash {
+                env: GitEnv {
+                    bash: Bash::Off {
+                        stub,
+                        reason: off.to_string(),
+                    },
+                    dropped,
                 },
                 _held: Vec::new(),
-            }
+            })
         }
+        Err(why) => Err(format!("{NO_STUB} ({why})")),
     }
 }
 
-/// The stub (`stub::STUB` in the admin folder, once its chain passes its check), when it is a
-/// regular file there.
-fn stub() -> Option<WinPath> {
-    let admin = admin_os::admin_dir_checked().ok()?;
-    let stub = STUB.iter().fold(admin, |path, part| path.join(part));
-    open_plain(stub.to_str()?, SHARE_ALL).ok()?;
-    WinPath::parse(stub.to_str()?)
-}
-
 /// The per-machine Git installs the lawyer's `PATH` may name: `HKLM\SOFTWARE\GitForWindows`'s
-/// `InstallPath`, `%ProgramFiles%\Git` and `%ProgramFiles(x86)%\Git`, each also in its long
-/// form. A per-user one lies in the lawyer's profile, which `env::agent_env` already keeps out.
-fn lawyer_git_roots() -> Vec<WinPath> {
+/// `InstallPath`, `%ProgramFiles%\Git` and `%ProgramFiles(x86)%\Git`, compared by file ID. A
+/// per-user one lies in the lawyer's profile, which `env::agent_env` already keeps out.
+fn lawyer_git_roots() -> Vec<String> {
     let mut roots = Vec::new();
     if let Ok(Some(path)) = record::read_string(w!(r"SOFTWARE\GitForWindows"), w!("InstallPath")) {
         roots.push(path);
@@ -129,53 +136,15 @@ fn lawyer_git_roots() -> Vec<WinPath> {
     {
         roots.extend(folder.to_str().map(|folder| format!(r"{folder}\Git")));
     }
-    let long: Vec<String> = roots.iter().filter_map(|root| long_path(root)).collect();
-    roots.extend(long);
     roots
-        .iter()
-        .filter_map(|root| WinPath::parse(root))
-        .collect()
 }
 
-/// Each entry of the launch's `PATH` whose long form (`GetLongPathNameW`, where it exists)
-/// differs, with that form: so `C:\PROGRA~1\Git\cmd` is seen in `C:\Program Files\Git`.
-fn long_names(message: &LaunchMessage) -> Vec<(String, String)> {
-    message
-        .env
-        .iter()
-        .filter(|(name, _)| name.eq_ignore_ascii_case("PATH"))
-        .flat_map(|(_, value)| value.split(';'))
-        .filter_map(|entry| {
-            let long = long_path(entry.trim())?;
-            (long != entry).then(|| (entry.to_owned(), long))
-        })
-        .collect()
+/// The machine, as the desktop user; `exe` is this runner's own exe.
+struct WindowsGitBash<'a> {
+    exe: &'a Path,
 }
 
-/// `path`'s long form, when it exists; `None` otherwise or when it is the same.
-fn long_path(path: &str) -> Option<String> {
-    if path.is_empty() {
-        return None;
-    }
-    let wide = HSTRING::from(path);
-    let mut buffer = vec![0_u16; 512];
-    for _ in 0..3 {
-        // SAFETY: `wide` is NUL-terminated and outlives the call; `buffer` is live and writable.
-        let len = unsafe { GetLongPathNameW(PCWSTR(wide.as_ptr()), Some(&mut buffer)) };
-        let len = usize::try_from(len).ok().filter(|len| *len > 0)?;
-        if len < buffer.len() {
-            let long = String::from_utf16(buffer.get(..len)?).ok()?;
-            return (long != path).then_some(long);
-        }
-        buffer.resize(len + 1, 0);
-    }
-    None
-}
-
-/// The machine, as the desktop user.
-struct WindowsGitBash;
-
-impl GitBashOs for WindowsGitBash {
+impl GitBashOs for WindowsGitBash<'_> {
     type Held = Handle;
 
     fn record(&mut self, pool_user: &Sid) -> Result<Option<String>, String> {
@@ -279,6 +248,75 @@ impl GitBashOs for WindowsGitBash {
         }
         Ok(Handle(handle))
     }
+
+    fn stub_security(
+        &mut self,
+        admin: &WinPath,
+        levels: &[(String, String)],
+        name: &str,
+    ) -> Result<Vec<u8>, String> {
+        checked_file(Path::new(&admin.display()), levels, name)
+    }
+
+    fn local_app_data(&mut self) -> Result<String, String> {
+        let folder = admin_os::local_app_data().map_err(|e| said("finding LocalAppData", &e))?;
+        let text = folder
+            .to_str()
+            .ok_or_else(|| "LocalAppData isn't text".to_owned())?;
+        let drive = WinPath::parse(text).and_then(|path| path.drive().map(str::to_owned));
+        match drive {
+            Some(drive) if !WindowsIds.remote(&drive) => Ok(text.to_owned()),
+            _ => Err("LocalAppData is on the network".to_owned()),
+        }
+    }
+
+    fn secure_dir(&mut self, dir: &WinPath, sddl: &str) -> Result<(), String> {
+        let path = Path::new(&dir.display()).to_path_buf();
+        let made = private_dir::create_with(&path, sddl).map_err(|e| said("making it", &e))?;
+        if !made {
+            private_dir::secure_existing(&path, sddl).map_err(|e| said("securing it", &e))?;
+        }
+        Ok(())
+    }
+
+    fn runner_hash(&mut self) -> Result<String, String> {
+        admin_os::sha256(self.exe).map_err(|e| said("hashing the runner", &e))
+    }
+
+    fn file_hash(&mut self, file: &WinPath) -> Result<Option<String>, String> {
+        // Opened as itself: a link or a folder there is refused, never followed.
+        match admin_os::sha256(Path::new(&file.display())) {
+            Ok(hash) => Ok(Some(hash)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(said("hashing the copy", &error)),
+        }
+    }
+
+    fn copy_runner(&mut self, to: &WinPath) -> Result<(), String> {
+        let mut random = [0_u8; 8];
+        getrandom::fill(&mut random).map_err(|e| format!("random failed ({e})"))?;
+        let temp = HSTRING::from(format!(
+            "{}.{}.tmp",
+            to.display(),
+            crate::windows::refresh::hex(&random)
+        ));
+        let from = HSTRING::from(self.exe.as_os_str());
+        let target = HSTRING::from(to.display());
+        // SAFETY: each string is NUL-terminated and outlives its call.
+        unsafe { CopyFileW(&from, &temp, true) }
+            .map_err(|e| format!("copying the runner failed ({})", e.code().0 & 0xFFFF))?;
+        let flags = MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH;
+        // SAFETY: as above.
+        if let Err(error) = unsafe { MoveFileExW(&temp, &target, flags) } {
+            // SAFETY: as above.
+            drop(unsafe { DeleteFileW(&temp) });
+            return Err(format!(
+                "putting the copy in place failed ({})",
+                error.code().0 & 0xFFFF
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// The regular file `path`, opened as itself to read, sharing `share`; a reparse point or a
@@ -337,7 +375,7 @@ mod tests {
     /// held, and goes with its handle (Windows CI).
     #[test]
     fn a_second_make_of_a_held_object_folder_is_refused() {
-        let mut os = WindowsGitBash;
+        let mut os = WindowsGitBash { exe: Path::new("") };
         let session = os.session().unwrap();
         let mut random = [0_u8; 8];
         getrandom::fill(&mut random).unwrap();

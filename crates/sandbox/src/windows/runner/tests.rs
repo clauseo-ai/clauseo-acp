@@ -450,7 +450,9 @@ fn exit_codes_are_stable_and_map_to_set_up_causes() {
     assert_eq!(RunExit::PoolStop.no_sandbox(), None);
     assert_eq!(RunExit::MarkerUnwritable.code(), 0xE0C1_5011);
     assert_eq!(RunExit::MarkerUnwritable.no_sandbox(), None);
-    assert_eq!(RunExit::from_code(RUN_EXIT_BASE + 18), None);
+    assert_eq!(RunExit::GitBashUnsafe.code(), 0xE0C1_5012, "appended");
+    assert_eq!(RunExit::GitBashUnsafe.no_sandbox(), None);
+    assert_eq!(RunExit::from_code(RUN_EXIT_BASE + 19), None);
     assert_eq!(RunExit::DllSearch.no_sandbox(), None);
     assert_eq!(RunExit::AgentReserved.no_sandbox(), None);
     assert_eq!(RunExit::Sweep.no_sandbox(), None);
