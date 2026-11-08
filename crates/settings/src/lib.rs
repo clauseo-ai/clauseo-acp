@@ -164,4 +164,5 @@ pub use system::{SystemDirs, SystemEnv};
 pub use tools::ToolsPatch;
 pub use ui::UiPatch;
 pub use update::UpdateChoice;
+pub use user::user_sets;
 pub use warning::{Origin, Position, Warning, WarningKind};

@@ -1,10 +1,10 @@
-//! Windows: the value written under `HKCU`.
+//! Windows: the value written and read under `HKCU`.
 #![expect(unsafe_code, reason = "FFI to the Win32 registry")]
 
 use windows::Win32::Foundation::ERROR_SUCCESS;
 use windows::Win32::System::Registry::{
-    HKEY, HKEY_CURRENT_USER, KEY_SET_VALUE, REG_OPTION_NON_VOLATILE, REG_SZ, RegCloseKey,
-    RegCreateKeyExW, RegSetValueExW,
+    HKEY, HKEY_CURRENT_USER, KEY_SET_VALUE, REG_OPTION_NON_VOLATILE, REG_SZ, RRF_RT_REG_SZ,
+    RegCloseKey, RegCreateKeyExW, RegGetValueW, RegSetValueExW,
 };
 use windows::core::{HSTRING, PCWSTR};
 
@@ -55,9 +55,7 @@ pub(super) fn write_value(key: &str, tag: &str) -> Result<(), u32> {
 }
 
 /// `HKCU\<key>\`[`VALUE`] as a string, `None` when it cannot be read.
-#[cfg(test)]
 pub(super) fn read_value(key: &str) -> Option<String> {
-    use windows::Win32::System::Registry::{RRF_RT_REG_SZ, RegGetValueW};
     let subkey = HSTRING::from(key);
     let name = HSTRING::from(VALUE);
     let mut buffer = [0u16; 64];
