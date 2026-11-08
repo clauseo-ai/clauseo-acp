@@ -98,7 +98,7 @@ impl NtfsAcl {
 
 impl AclWriter for NtfsAcl {
     fn add(&mut self, grant: &Grant) -> Result<Added, ApplyFailure> {
-        write(grant, None)
+        write(grant, Expect::Nothing)
     }
 
     fn remove(&mut self, grant: &Grant) -> Result<(), ApplyFailure> {
@@ -210,7 +210,20 @@ impl AclWriter for NtfsAcl {
     }
 
     fn add_expecting(&mut self, grant: &Grant, expected: &Path) -> Result<Added, ApplyFailure> {
-        write(grant, Some(expected))
+        write(grant, Expect::Named(expected))
+    }
+
+    fn add_recorded(&mut self, grant: &Grant, file: &RecordedFile) -> Result<Added, ApplyFailure> {
+        write(grant, Expect::Id(file.id))
+    }
+
+    fn located(&mut self, file: &RecordedFile) -> io::Result<Option<PathBuf>> {
+        let Some(object) = Object::open_by_id(&file.path, file.id, 0)? else {
+            return Ok(None);
+        };
+        Ok(Some(PathBuf::from(OsString::from_wide(
+            &object.normalized()?,
+        ))))
     }
 
     fn refused_at(&mut self) -> Option<PathBuf> {
@@ -383,21 +396,39 @@ pub(crate) fn descriptor(path: &Path) -> io::Result<Vec<u8>> {
     Object::open(path)?.security(READ_ALL)
 }
 
-/// [`AclWriter::add`], and with `expected` [`AclWriter::add_expecting`]: the target opened
-/// once and checked; with `expected`, compared by the file ID on that same handle with the file
-/// `expected` names (opened without following; a link there is `Changed`); then written
-/// through that handle (N8).
-fn write(grant: &Grant, expected: Option<&Path>) -> Result<Added, ApplyFailure> {
+/// What a write must find on the handle it writes through, besides the planned target.
+#[derive(Clone, Copy)]
+enum Expect<'a> {
+    Nothing,
+    /// The file this path names (the credential link's, N8).
+    Named(&'a Path),
+    /// The file with this ID (a read of another matter's, R18).
+    Id(super::writer::FileId),
+}
+
+/// [`AclWriter::add`], [`AclWriter::add_expecting`] and [`AclWriter::add_recorded`]: the
+/// target opened once and checked; then compared by the file ID on that same handle with what
+/// `expected` names (a named file opened without following; a link there is `Changed`); then
+/// written through that handle (N8).
+fn write(grant: &Grant, expected: Expect<'_>) -> Result<Added, ApplyFailure> {
     let io = |e: io::Error| ApplyFailure::Io(e.kind());
     let target = Object::open(grant.path()).map_err(io)?;
     check_target(&target, grant)?;
-    if let Some(expected) = expected {
-        let expected = Object::open(expected).map_err(io)?;
-        if expected.name_surrogate()
-            || target.file_id().map_err(io)? != expected.file_id().map_err(io)?
-        {
-            return Err(ApplyFailure::Changed);
+    let want = match expected {
+        Expect::Nothing => None,
+        Expect::Named(expected) => {
+            let expected = Object::open(expected).map_err(io)?;
+            if expected.name_surrogate() {
+                return Err(ApplyFailure::Changed);
+            }
+            Some(expected.file_id().map_err(io)?)
         }
+        Expect::Id(id) => Some((id.volume, id.id)),
+    };
+    if let Some(want) = want
+        && target.file_id().map_err(io)? != want
+    {
+        return Err(ApplyFailure::Changed);
     }
     let spec = AceSpec::for_grant(grant, target.folder).map_err(io)?;
     let current = target.security(READ_ALL).map_err(io)?;

@@ -55,6 +55,27 @@ pub(super) fn present_entry(acl: &mut dyn AclWriter, entry: &Entry) -> io::Resul
     }
 }
 
+/// Where `entry`'s tree is to be walked after its take-back: its path; or, for an entry that
+/// recorded its file (a read of another matter's, R18), wherever that file is now, found by its
+/// ID, so a folder moved during the run loses the inherited copies below it where it went.
+/// `None` once no file has that ID: there is nothing left to walk.
+pub(super) fn tree_of(
+    acl: &mut dyn AclWriter,
+    entry: &Entry,
+) -> Result<Option<PathBuf>, ApplyFailure> {
+    match &entry.file {
+        Some(file) => acl.located(file).map_err(|e| ApplyFailure::of(&e)),
+        None => Ok(Some(entry.path.clone())),
+    }
+}
+
+/// Whether a walk of `root` that failed as `failure` found no `root` at all: a folder
+/// deleted since has nothing below it left to walk.
+fn root_gone(root: &Path, failure: ApplyFailure) -> bool {
+    failure == ApplyFailure::Io(io::ErrorKind::NotFound)
+        && matches!(std::fs::symlink_metadata(root), Err(e) if e.kind() == io::ErrorKind::NotFound)
+}
+
 /// Which names are one file, through the writer that also removes the entries.
 struct Files<'a, 'b>(&'a RefCell<&'b mut dyn AclWriter>);
 
@@ -133,11 +154,24 @@ pub(super) fn finish(
     reclaim: &[(PathBuf, Vec<Sid>)],
 ) -> Result<usize, Refused> {
     let mut trees: BTreeMap<(usize, PathBuf), Reach> = BTreeMap::new();
+    // Each removed entry's tree, where it is now (`tree_of`); one not found stays `removing`.
+    let mut roots: BTreeMap<EntryId, Option<PathBuf>> = BTreeMap::new();
+    let mut failed: Option<Refused> = None;
     for entry in &taken.removed {
         if entry.inherit == Inherit::ThisOnly {
             continue;
         }
-        let key = (entry.path.components().count(), entry.path.clone());
+        let root = match tree_of(acl, entry) {
+            Ok(root) => root,
+            Err(failure) => {
+                tracing::warn!(%failure, "a taken-back entry's file wasn't found by its ID");
+                failed.get_or_insert(Refused::new(PathKind::Matter, failure));
+                continue;
+            }
+        };
+        roots.insert(entry.id, root.clone());
+        let Some(root) = root else { continue };
+        let key = (root.components().count(), root);
         let slot = trees.entry(key).or_insert(reach_of(entry.inherit));
         if reach_of(entry.inherit) == Reach::Tree {
             *slot = Reach::Tree;
@@ -153,10 +187,12 @@ pub(super) fn finish(
         })
         .unwrap_or_default();
     let mut walked: Vec<PathBuf> = Vec::new();
-    let mut failed: Option<Refused> = None;
+    // The roots walked through their whole tree: only those cover a tree inside them. A walk of
+    // a folder's files (a read's, R18) leaves a subfolder's files to that subfolder's own walk.
+    let mut whole: Vec<PathBuf> = Vec::new();
     for ((_, root), reach) in &trees {
         let pool = reclaim.iter().find(|(r, _)| r == root).map(|(_, p)| p);
-        let inside = walked.iter().any(|w| w != root && in_folder(root, w));
+        let inside = whole.iter().any(|w| w != root && in_folder(root, w));
         if inside && pool.is_none() {
             walked.push(root.clone());
             continue;
@@ -168,8 +204,12 @@ pub(super) fn finish(
                 acl.propagate(root, *reach, None)
             }),
         };
+        if done.is_ok() && (pool.is_some() || *reach == Reach::Tree) {
+            whole.push(root.clone());
+        }
         match done {
             Ok(_) => walked.push(root.clone()),
+            Err(refused) if root_gone(root, refused.failure) => walked.push(root.clone()),
             Err(refused) => {
                 let failure = refused.failure;
                 tracing::warn!(%failure, "a walk after a take-back failed; its entries stay removing");
@@ -180,7 +220,14 @@ pub(super) fn finish(
     let ids: Vec<EntryId> = taken
         .removed
         .iter()
-        .filter(|e| e.inherit == Inherit::ThisOnly || walked.contains(&e.path))
+        .filter(|e| {
+            e.inherit == Inherit::ThisOnly
+                || match roots.get(&e.id) {
+                    Some(Some(root)) => walked.contains(root),
+                    Some(None) => true,
+                    None => false,
+                }
+        })
         .map(|e| e.id)
         .collect();
     let dropped = ledger

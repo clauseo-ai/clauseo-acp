@@ -286,6 +286,24 @@ pub trait AclWriter {
     /// to write is the file `expected` names (one file ID, compared on that same handle): the
     /// credential link's write (L5, N8).
     fn add_expecting(&mut self, grant: &Grant, expected: &Path) -> Result<Added, ApplyFailure>;
+    /// [`AclWriter::add`], refused as [`ApplyFailure::Changed`] unless the object it opened to
+    /// write has `file`'s ID (compared on that same handle): a read of another matter's write,
+    /// on the item its entry recorded before (R18). The default, for writers that never write
+    /// one, is `Unsupported`.
+    fn add_recorded(
+        &mut self,
+        _grant: &Grant,
+        _file: &RecordedFile,
+    ) -> Result<Added, ApplyFailure> {
+        Err(ApplyFailure::Io(io::ErrorKind::Unsupported))
+    }
+    /// Where the file `file` recorded is now: its final path, opened by its ID as
+    /// [`AclWriter::remove_recorded`] opens it; `None` when no file has that ID any more. A
+    /// read's tree is walked there after its take-back, wherever it was moved (R18). The
+    /// default, for writers that never take one back, is `Unsupported`.
+    fn located(&mut self, _file: &RecordedFile) -> io::Result<Option<PathBuf>> {
+        Err(io::Error::from(io::ErrorKind::Unsupported))
+    }
     /// The child the last failed walk refused, when it was one (for the lawyer to see; never
     /// logged). Taking it clears it.
     fn refused_at(&mut self) -> Option<PathBuf>;

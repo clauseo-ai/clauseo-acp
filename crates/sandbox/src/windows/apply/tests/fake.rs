@@ -87,6 +87,9 @@ pub(super) struct FakeAcl {
     pub(super) fail_allow: Option<(PathBuf, u32)>,
     /// Whether a strict walk refuses an explicit allow below its root for a watched SID.
     pub(super) broad: Broad,
+    /// Paths where a new item was made after the one first there ([`FakeAcl::make_new`]): each
+    /// time, the item there, and any below it, has another ID.
+    pub(super) renewed: BTreeMap<PathBuf, u8>,
 }
 
 /// What the fake's strict walk does with an explicit allow below its root for a watched SID.
@@ -174,6 +177,36 @@ impl FakeAcl {
                 && !excused(p, sid, *rights, *inherit)
         })
         .map(|(p, ..)| p.clone())
+    }
+
+    /// Moves the item at `from` (a file, or a folder and all below it) to `to`, as a rename
+    /// on one volume does: its entries and its ID go with it, and nothing is at `from` after.
+    pub(super) fn move_item(&mut self, from: &Path, to: &Path) {
+        let moved = |p: &Path| p.strip_prefix(from).ok().map(|rest| to.join(rest));
+        let aces = std::mem::take(&mut self.aces);
+        self.aces = aces
+            .into_iter()
+            .map(|(p, s, r, i)| (moved(&p).unwrap_or(p), s, r, i))
+            .collect();
+        for path in self.issued.values_mut() {
+            if let Some(new) = moved(path) {
+                *path = new;
+            }
+        }
+        self.gone.insert(from.to_owned());
+    }
+
+    /// Deletes the item at `path` (and all below it): its entries and its ID go.
+    pub(super) fn delete_item(&mut self, path: &Path) {
+        self.aces.retain(|(p, ..)| !p.starts_with(path));
+        self.issued.retain(|_, p| !p.starts_with(path));
+        self.gone.insert(path.to_owned());
+    }
+
+    /// A new item made at `path`, where none is now: an ID no item had before.
+    pub(super) fn make_new(&mut self, path: &Path) {
+        self.gone.remove(path);
+        *self.renewed.entry(path.to_owned()).or_default() += 1;
     }
 
     fn shut_below(&mut self, root: &Path) -> Option<PathBuf> {
@@ -410,15 +443,35 @@ impl AclWriter for FakeAcl {
         self.add(grant)
     }
 
+    /// Refused unless the item at `grant`'s path now has `file`'s ID.
+    fn add_recorded(&mut self, grant: &Grant, file: &RecordedFile) -> Result<Added, ApplyFailure> {
+        let now = self.file_id(grant.path()).ok().flatten();
+        if now != Some(file.id) {
+            return Err(ApplyFailure::Changed);
+        }
+        self.add(grant)
+    }
+
+    fn located(&mut self, file: &RecordedFile) -> io::Result<Option<PathBuf>> {
+        Ok(self.by_id(file))
+    }
+
     /// A made-up ID from the file `path` names, kept in `issued`.
     fn file_id(&mut self, path: &Path) -> io::Result<Option<FileId>> {
-        if self.gone.contains(path) {
+        if self.gone.iter().any(|gone| path.starts_with(gone)) {
             return Ok(None);
         }
         let file = self.file(path);
+        // A new item at a folder's path holds new items: theirs are new IDs too.
+        let renewed: u32 = self
+            .renewed
+            .iter()
+            .filter(|(at, _)| file.starts_with(at))
+            .map(|(_, n)| u32::from(*n))
+            .sum();
         let half = |salt: u8| {
             let mut hasher = std::hash::DefaultHasher::new();
-            std::hash::Hash::hash(&(salt, &file), &mut hasher);
+            std::hash::Hash::hash(&(salt, &file, renewed), &mut hasher);
             std::hash::Hasher::finish(&hasher).to_le_bytes()
         };
         let mut id = [0; 16];

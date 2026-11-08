@@ -2442,6 +2442,39 @@ allow is a ledger entry of the reading matter, and each removal goes through
 `Ledger::take_back`: entries marked `removing`, allows removed, trees walked again so the
 inherited copies go, entries dropped (`apply/reads.rs`).
 
+Each allow is removed by the item's file ID, not its path (R18 MEDIUM 2). Before an allow is
+written, its entry records the item at its path: the volume's serial number and the 128-bit
+file ID (`Entry::file`, `RecordedFile`, as the credential link's entries do). The allow is
+written only through a handle on the item with that ID (`AclWriter::add_recorded`). The
+take-back opens the item by its ID (`OpenFileById`) wherever it is now and removes the allow
+there, then walks that folder's files where it is now (`AclWriter::located`):
+
+- a granted folder or file moved during the run (by the other matter's agent or the lawyer)
+  loses the allow where it went;
+- an item deleted took its allow with it, and counts as removed;
+- a new item at the same path is left alone; the old one loses the allow wherever it is.
+
+A launch also takes back, as stale, each read whose item isn't at its path any more, and
+writes it again on the item there now. A walk of a folder's files no longer stands in for a
+subfolder's: each granted folder's files are walked again after a take-back.
+
+The ledger format keeps version 1: `file` is an optional field, read by every version since
+the credential link's entries brought it in. A ledger written before this change loads as it
+is. Its reads carry no `file`, so they are removed by path; the matter's next launch takes each
+one back and writes it again with its item recorded. Tests (`apply/tests/read_files.rs`):
+`every_read_entry_records_the_file_id_of_the_item_it_is_written_on`,
+`a_granted_folder_moved_during_the_run_loses_the_read_where_it_went`,
+`a_granted_folder_deleted_during_the_run_counts_as_taken_back`,
+`a_new_item_at_a_granted_path_is_left_alone_and_the_old_one_loses_the_read`,
+`a_relaunch_takes_back_a_read_whose_item_moved_and_writes_it_on_the_item_there_now` and
+`an_older_ledgers_read_with_no_file_loads_and_is_written_again_with_one`.
+
+Residuals: a file moved out of an allowed folder during the run keeps the inherited copy of its
+folder's allow for files, as no entry names the file; the copy goes when something works out
+that file's entries again. And `--remove` run by an administrator for an absent owner removes
+no entry that records a file, reads included (K1): the pool users it deletes leave those allows
+naming dead SIDs (K10).
+
 - **At the session's end:** `end_reads(ledger, matter, sids, acl, around)`, after
   `repair_after_session`. `sids` are the session's pool user, and the matter's SID when it is a
   subject, so a second session of the matter with its own pool user keeps its reads.
@@ -2476,7 +2509,12 @@ the reading session's pool user:
 - `narrow_reads` takes a read back at once; after a killed run, the next launch restores the
   root's deny and drops the reads;
 - the fence's migration, and the strict walk excusing a live read during the other matter's
-  launch.
+  launch;
+- a granted folder moved during the run (within the other matter, and out of it) loses the pool
+  user's read at the run's end, on the folder and on its files, where it went;
+- a granted folder deleted during the run: the run's end succeeds and drops its entries;
+- a granted folder replaced by a new one at the same path: the new one keeps its entries and the
+  old one, moved aside, loses the read.
 
 ### The launcher (PR6 interface)
 

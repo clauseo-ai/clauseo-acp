@@ -21,6 +21,7 @@ mod fake;
 mod lifts;
 mod owners;
 mod protected_link;
+mod read_files;
 mod read_only;
 mod reads;
 mod review;

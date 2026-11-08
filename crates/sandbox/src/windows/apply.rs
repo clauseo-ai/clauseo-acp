@@ -352,6 +352,8 @@ fn write_all(
             }
         }
     }
+    // R18: each new read records its item by file ID before its allow is written.
+    reads::record_files(ledger, plan, acl)?;
     // M2: an entry still pending (this launch's, or one an earlier launch left) gets its walk.
     let pending: BTreeSet<EntryId> = ledger
         .entries()
@@ -388,6 +390,9 @@ fn write_all(
             let added = match (grant.kind(), around.credentials()) {
                 (PathKind::CredentialLink, Some(expected)) => acl.add_expecting(grant, &expected),
                 (PathKind::CredentialLink, None) => Err(ApplyFailure::Changed),
+                (PathKind::OtherMatterRead, _) => {
+                    reads::add(ledger, plan.entries().get(i).copied(), grant, acl)
+                }
                 _ => acl.add(grant),
             };
             // A link at a protected name is named, for `protected_link`; so is an item the

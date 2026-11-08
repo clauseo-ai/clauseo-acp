@@ -12,6 +12,15 @@
 //! and only then the entries dropped. A removal or walk that fails leaves its entries
 //! `removing`, for the next call, [`reconcile`](super::reconcile) or the next launch.
 //!
+//! Each read's entry records the item it is written on, by its file ID (`RecordedFile`), before
+//! the allow is written, and the allow is written only on the item with that ID
+//! ([`AclWriter::add_recorded`]). The take-back removes it from that item, opened by its ID
+//! wherever it is now, and walks its tree there (`back.rs`): a granted folder the other matter's
+//! agent or the lawyer moved during the run loses the allow where it went; an item deleted took
+//! its allow with it; a new item at the same path is left alone. A launch takes back, as stale,
+//! each read whose item isn't at its path any more, or that recorded none (an older ledger's),
+//! and writes it again on the item there now.
+//!
 //! Each call takes back only the entries naming the session's own SIDs (`sids`: its pool user,
 //! and the matter's SID when that is a subject, off by default), so a second session of the
 //! matter, with a pool user of its own, keeps its reads. The matter's SID is the matter's, not
@@ -29,10 +38,10 @@ use super::back::{finish, take_back};
 use super::lifts;
 use super::walk::Refused;
 use super::{Surroundings, refused};
-use crate::windows::acl_plan::{AdmittedPlan, Sid, in_folder};
+use crate::windows::acl_plan::{AdmittedPlan, Grant, Sid, in_folder};
 use crate::windows::admit::PathKind;
-use crate::windows::ledger::{Entry, Ledger, Take};
-use crate::windows::writer::{AclWriter, ApplyFailure};
+use crate::windows::ledger::{Entry, EntryId, Ledger, RecordedFile, Take};
+use crate::windows::writer::{AclWriter, Added, ApplyFailure};
 use crate::{Error, OtherMatterRead, Policy};
 
 /// What [`narrow_reads`] or [`end_reads`] took back.
@@ -116,7 +125,8 @@ fn finished(
 
 /// At a launch, before anything is recorded: takes back each of the plan's matter's reads of
 /// other matters naming the launch's own subjects that `plan` doesn't list, as an earlier run
-/// that crashed left them.
+/// that crashed left them, and each one whose recorded item isn't at its path now (moved,
+/// replaced, or none recorded), so the launch writes it again on the item there.
 pub(super) fn drop_stale(
     ledger: &mut Ledger,
     plan: &AdmittedPlan,
@@ -124,8 +134,21 @@ pub(super) fn drop_stale(
     around: &mut dyn Surroundings,
 ) -> Result<(), Error> {
     let matter = plan.matter();
-    let listed = |entry: &Entry| plan.grants().contains(&entry.grant());
     let sids = plan.assigned_to(matter);
+    let mine: Vec<Entry> = ledger
+        .entries()
+        .filter(|e| e.matter == matter && e.kind == PathKind::OtherMatterRead)
+        .filter(|e| sids.contains(&e.sid))
+        .cloned()
+        .collect();
+    let mut here: BTreeSet<EntryId> = BTreeSet::new();
+    for entry in mine {
+        let Some(file) = &entry.file else { continue };
+        if acl.file_id(&entry.path).ok().flatten() == Some(file.id) {
+            here.insert(entry.id);
+        }
+    }
+    let listed = |entry: &Entry| here.contains(&entry.id) && plan.grants().contains(&entry.grant());
     // A deny lifted for a folder the plan no longer allows itself goes back first.
     let read = |e: &Entry| {
         let on = |g: &crate::windows::acl_plan::Grant| {
@@ -178,4 +201,44 @@ fn take_reads(
         removed: removed.into_iter().collect(),
         restored: Vec::new(),
     })
+}
+
+/// Before `plan`'s allows are written: records on each read of another matter's entry this
+/// launch added the item its path names now, by its file ID, so the take-back finds it wherever
+/// it goes. An item missing now, or a link there, refuses as [`ApplyFailure::Changed`].
+pub(super) fn record_files(
+    ledger: &mut Ledger,
+    plan: &AdmittedPlan,
+    acl: &mut dyn AclWriter,
+) -> Result<(), Refused> {
+    let kind = PathKind::OtherMatterRead;
+    for (grant, &id) in plan.grants().iter().zip(plan.entries()) {
+        if grant.kind() != kind || !plan.created().contains(&id) {
+            continue;
+        }
+        let file = match acl.file_id(grant.path()) {
+            Ok(Some(file)) => RecordedFile::new(grant.path().to_owned(), file),
+            Ok(None) => return Err(Refused::new(kind, ApplyFailure::Changed)),
+            Err(error) => return Err(Refused::new(kind, ApplyFailure::of(&error))),
+        };
+        ledger
+            .set_file(plan, id, &file)
+            .map_err(|e| Refused::new(kind, ApplyFailure::Ledger(e.kind())))?;
+    }
+    Ok(())
+}
+
+/// Writes read `grant` (entry `id`) on the item its entry recorded, and nowhere else: one
+/// recording none, or another item at the path now, is [`ApplyFailure::Changed`].
+pub(super) fn add(
+    ledger: &Ledger,
+    id: Option<EntryId>,
+    grant: &Grant,
+    acl: &mut dyn AclWriter,
+) -> Result<Added, ApplyFailure> {
+    let entry = ledger.entries().find(|e| Some(e.id) == id);
+    match entry.and_then(|e| e.file.as_ref()) {
+        Some(file) => acl.add_recorded(grant, file),
+        None => Err(ApplyFailure::Changed),
+    }
 }
