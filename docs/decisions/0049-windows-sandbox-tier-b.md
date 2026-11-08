@@ -443,8 +443,8 @@ build 26100):
     records each deny, and forget hands it back like any other. A link with one of these names
     that leads into the matter is listed too, as a `.git` link is, so the permission write
     refuses the launch there, as at the root, with `Error::ProtectedLink` naming the item
-    (escaped) relative to the matter (`matter.protected_link`). macOS reads the same list: its profile
-    gains one subpath parameter per item.
+    (escaped) relative to the matter (`matter.protected_link`). macOS reads the same list: its
+    profile gains one subpath parameter per item.
   - An owner gets `WRITE_DAC` before any deny is read, so a protected item a pool user owns (one
     the lawyer restored from the set-aside or renamed, or one made before PR4a) is handed to the
     desktop user before its deny is written, as forget hands it back (`AclWriter::hand_back`,
