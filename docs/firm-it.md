@@ -683,17 +683,22 @@ Chrome and Edge policy itself. It does this before it starts any browser, whiche
 would pick.
 
 **What Clauseo reads.** The value `RemoteDebuggingAllowed`, for both the computer and the user,
-in Chrome's and Edge's policy locations:
+in Chrome's and Edge's policy locations, and Chromium's on macOS and Linux:
 
 - **Windows:** `HKLM\SOFTWARE\Policies\Google\Chrome`, `HKCU\SOFTWARE\Policies\Google\Chrome`,
   `HKLM\SOFTWARE\Policies\Microsoft\Edge` and `HKCU\SOFTWARE\Policies\Microsoft\Edge`. Each is
   a `REG_DWORD`, where 0 means false.
-- **macOS:** the managed preferences files `/Library/Managed Preferences/com.google.Chrome.plist`
-  and `com.microsoft.Edge.plist`, plus the same files under `/Library/Managed Preferences/<user>/`
-  for the signed-in user. Each value is a boolean.
-- **Linux:** every `*.json` in `/etc/opt/chrome/policies/managed/` and
-  `/etc/opt/microsoft/msedge/policies/managed/`. Clauseo skips `recommended/`, because Chrome
-  doesn't take this policy as a recommendation either.
+- **macOS:** the managed preferences files `/Library/Managed Preferences/com.google.Chrome.plist`,
+  `com.microsoft.Edge.plist` and `org.chromium.Chromium.plist`, plus the same files under
+  `/Library/Managed Preferences/<user>/` for the signed-in user. Each value is a boolean.
+- **Linux:** every `*.json` in `/etc/opt/chrome/policies/managed/`,
+  `/etc/opt/edge/policies/managed/` and `/etc/chromium/policies/managed/`. Clauseo skips
+  `recommended/`, because Chrome doesn't take this policy as a recommendation either.
+
+**What Clauseo doesn't read.** Brave's policy, and Chrome or Edge policy pushed from the cloud
+(Chrome Browser Cloud Management, Edge management service) that is not written to the registry,
+a managed preferences file or a policy folder. To have Clauseo honour such a policy, deploy
+`RemoteDebuggingAllowed` through one of the places above too.
 
 **The rule.** If any of these says false, Clauseo's browser doesn't start, and the app tells the
 lawyer that your firm has turned off browser automation on this computer. If a value is missing,

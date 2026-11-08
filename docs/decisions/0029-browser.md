@@ -1009,7 +1009,8 @@ Chrome and keeps it on the session's `RunFolders` (`chrome`), which fills
 `{browser_executable}`. It looks only when `tools.browser` is on and there is a proxy, so a
 session that cannot get the browser makes no file system calls for it. Before any of the steps
 below, the prep reads the firm's own Chrome and Edge `RemoteDebuggingAllowed` (registry
-`HKLM`/`HKCU`, macOS managed preferences files, Linux `managed` policy folders;
+`HKLM`/`HKCU`; macOS managed preferences files, Chromium's `org.chromium.Chromium` too; Linux
+`managed` policy folders of Chrome, Edge (`/etc/opt/edge`) and Chromium (`/etc/chromium`);
 `clauseo_settings::chromium_policy`, `host/src/browser/rd_policy.rs`). Chrome for Testing reads
 its own policy key and chrome-headless-shell none, so a false anywhere starts no browser at all,
 and the entry drops with `BrowserBlockedByPolicy`, unless the firm's Clauseo policy sets
