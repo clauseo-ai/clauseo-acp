@@ -1,13 +1,17 @@
 //! The walk on a fake disk that records each look: links read and walked, `..`, a missing name,
 //! every way to a network location stopped before the walk touches it, and every failure
-//! refused (fail-closed). Then once on the real disk.
+//! refused (fail-closed). Then once on the real disk. The fake disk's tests use Unix paths, which
+//! are not absolute on Windows: they run on Unix, and the walk's Windows rules are tested in
+//! `windows_tests.rs` (Windows' rules on the fake disk, and drive paths on Windows itself).
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use super::{Disk, Entry, Fs, MAX_HOPS, Walked, walk};
+#[cfg(unix)]
+use super::MAX_HOPS;
+use super::{Disk, Entry, Fs, Walked, walk};
 use crate::network_paths::NetEnv;
 use crate::network_paths::tests::plain_net;
 
@@ -92,6 +96,7 @@ impl Fs for FakeFs {
     }
 }
 
+#[cfg(unix)]
 fn paths(list: &[&str]) -> Vec<PathBuf> {
     list.iter().map(PathBuf::from).collect()
 }
@@ -106,10 +111,12 @@ fn on(path: &str, fs: &FakeFs, net: &NetEnv) -> Walked {
     walk(Path::new(path), &disk)
 }
 
+#[cfg(unix)]
 fn local(path: &str) -> Walked {
     Walked::Local(path.into())
 }
 
+#[cfg(unix)]
 #[test]
 fn links_and_dot_dots_resolve_and_a_missing_name_is_kept() {
     let fs = FakeFs::with(&[
@@ -138,6 +145,7 @@ fn links_and_dot_dots_resolve_and_a_missing_name_is_kept() {
 
 /// A `..` back out of a missing name reaches names that are still looked at: on Windows
 /// `C:\m\missing\..\link` opens `link`, so a link there to a share is refused.
+#[cfg(unix)]
 #[test]
 fn a_link_after_a_missing_name_and_a_dot_dot_is_still_checked() {
     let fs = FakeFs::with(&[("/m/link", Fake::Link(r"\\server\share".into()))]);
@@ -147,6 +155,7 @@ fn a_link_after_a_missing_name_and_a_dot_dot_is_still_checked() {
     assert_eq!(fs.touched(), want);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_loop_an_unreadable_link_or_an_error_is_refused() {
     let net = plain_net(false);
@@ -183,6 +192,7 @@ fn a_network_path_is_never_touched() {
     assert!(fs.touched().is_empty(), "{:?}", fs.touched());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_local_link_to_a_network_path_stops_at_the_link() {
     let net = NetEnv {
@@ -208,6 +218,7 @@ fn a_local_link_to_a_network_path_stops_at_the_link() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn a_link_to_a_link_to_a_share_stops_at_the_second_link() {
     let fs = FakeFs::with(&[
@@ -257,6 +268,7 @@ fn the_real_disk_resolves_links_and_dot_dots() {
 
 /// A name the system rejects (a shell word's wildcard, a URL's `https:`) is kept as written and
 /// the walk goes on; a network name after it is still refused before it is touched.
+#[cfg(unix)]
 #[test]
 fn a_rejected_name_is_kept_and_later_names_still_checked() {
     let net = NetEnv {

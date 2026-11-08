@@ -257,7 +257,8 @@ impl FenceCheck {
     /// the matter folder the lawyer keeps on a share, which counts as outside, untouched. A data
     /// folder that is itself on the network (redirected app data) is never touched for its
     /// identity: a path that resolves locally can't be in it, and every network path is refused.
-    /// An identity that can't be read refuses the request ([`DataIdentity`]).
+    /// A path whose identity can't be read is refused; the data folder's own identity, when it
+    /// can't be read, is compared by text alone, logged ([`DataIdentity`]).
     pub(crate) fn touches_data_on(&self, insensitive: bool, disk: &Disk<'_>) -> bool {
         let anything = !self.paths.is_empty() || !self.words.is_empty() || !self.roots.is_empty();
         let home = self.home.as_deref();
@@ -273,10 +274,7 @@ impl FenceCheck {
         let identity = if network_data {
             DataIdentity::none(disk.fs)
         } else {
-            match DataIdentity::capture(disk.fs, &real_data) {
-                Some(identity) => identity,
-                None => return anything,
-            }
+            DataIdentity::capture(disk.fs, &real_data)
         };
         let data = key(&real_data, insensitive);
         let own = if network_data {
@@ -456,6 +454,9 @@ mod search;
 mod search_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+#[cfg(windows)]
+mod windows_real_tests;
 #[cfg(test)]
 mod windows_tests;
 mod words;

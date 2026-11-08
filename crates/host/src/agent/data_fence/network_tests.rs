@@ -27,6 +27,15 @@ pub(super) fn fence(cwd: &str, paths: &[&str]) -> FenceCheck {
     }
 }
 
+/// [`fence`] for a matter on a share or a mapped drive, the data folder at `/d`, or at `C:\d` on
+/// Windows (where `/d` is not absolute, so the fence would refuse every path for it).
+fn share_fence(cwd: &str, paths: &[&str]) -> FenceCheck {
+    FenceCheck {
+        data: PathBuf::from(if cfg!(windows) { r"C:\d" } else { "/d" }),
+        ..fence(cwd, paths)
+    }
+}
+
 /// Whether the fence refuses `check` on `fs` under `net`.
 pub(super) fn refused(check: &FenceCheck, net: &NetEnv, fs: &FakeFs) -> bool {
     let real = |_: &Path| None;
@@ -199,7 +208,7 @@ fn a_path_in_a_share_matter_is_outside_untouched_and_anything_else_refused() {
         "//srv/share/m/brief.docx",
         r"//srv\share/m\sub/brief.docx",
     ] {
-        assert!(!refused(&fence(matter, &[path]), &net, &fs), "{path}");
+        assert!(!refused(&share_fence(matter, &[path]), &net, &fs), "{path}");
         assert!(
             !look(Path::new(matter), Path::new(path), &net, &fs),
             "{path}"
@@ -217,7 +226,7 @@ fn a_path_in_a_share_matter_is_outside_untouched_and_anything_else_refused() {
         r"\\?\UNC\srv\share\m\x",
         r"Z:\m\x",
     ] {
-        assert!(refused(&fence(matter, &[path]), &net, &fs), "{path}");
+        assert!(refused(&share_fence(matter, &[path]), &net, &fs), "{path}");
     }
     assert_eq!(network_touched(&fs), Vec::<PathBuf>::new());
 }
@@ -229,12 +238,12 @@ fn the_kelvin_sign_is_not_k() {
     let net = windows_net();
     let matter = r"\\srv\share\kases";
     assert!(!refused(
-        &fence(matter, &[r"\\srv\share\Kases\x"]),
+        &share_fence(matter, &[r"\\srv\share\Kases\x"]),
         &net,
         &fs
     ));
     assert!(refused(
-        &fence(matter, &[r"\\srv\share\\u{212A}ases\x"]),
+        &share_fence(matter, &[r"\\srv\share\\u{212A}ases\x"]),
         &net,
         &fs
     ));
@@ -248,20 +257,28 @@ fn only_the_matter_folders_own_form_matches() {
     let fs = FakeFs::default();
     let net = windows_net();
     assert!(!refused(
-        &fence(r"Z:\m", &[r"Z:\m\x.docx", "z:/m/x.docx"]),
-        &net,
-        &fs
-    ));
-    assert!(refused(&fence(r"Z:\m", &[r"\\srv\share\m\x"]), &net, &fs));
-    assert!(refused(&fence(r"Z:\m", &[r"\\?\Z:\m\x"]), &net, &fs));
-    assert!(refused(&fence(r"\\srv\share\m", &[r"Z:\m\x"]), &net, &fs));
-    assert!(refused(
-        &fence(r"\\?\UNC\srv\share\m", &[r"\\srv\share\m\x"]),
+        &share_fence(r"Z:\m", &[r"Z:\m\x.docx", "z:/m/x.docx"]),
         &net,
         &fs
     ));
     assert!(refused(
-        &fence(r"\\srv\share\m", &[r"\\?\UNC\srv\share\m\x"]),
+        &share_fence(r"Z:\m", &[r"\\srv\share\m\x"]),
+        &net,
+        &fs
+    ));
+    assert!(refused(&share_fence(r"Z:\m", &[r"\\?\Z:\m\x"]), &net, &fs));
+    assert!(refused(
+        &share_fence(r"\\srv\share\m", &[r"Z:\m\x"]),
+        &net,
+        &fs
+    ));
+    assert!(refused(
+        &share_fence(r"\\?\UNC\srv\share\m", &[r"\\srv\share\m\x"]),
+        &net,
+        &fs
+    ));
+    assert!(refused(
+        &share_fence(r"\\srv\share\m", &[r"\\?\UNC\srv\share\m\x"]),
         &net,
         &fs
     ));
@@ -271,6 +288,7 @@ fn only_the_matter_folders_own_form_matches() {
 /// A deny folds at least as broadly as APFS and NTFS: the long s and the Kelvin sign reach the
 /// data folder, in a path and inside a command's word. The same Kelvin-sign spelling never gets
 /// the share matter's exception, which compares strictly (`the_kelvin_sign_is_not_k`).
+#[cfg(unix)]
 #[test]
 fn a_long_s_or_kelvin_sign_spelling_of_the_data_folder_is_refused() {
     let fs = FakeFs::default();
@@ -383,28 +401,49 @@ fn a_wildcard_or_url_word_is_not_refused() {
     assert!(look(Path::new("/m"), Path::new("docs/*.docx"), &net, &fs));
 }
 
-/// An identity the fence can't read (any error but a missing name) refuses the request, never
-/// turning the identity backstop off: the data folder's own, or one of a path's folders. A
-/// missing name is no error.
+/// An identity the fence can't read refuses the path it serves, and only that one: one of a
+/// path's folders, or a search root. A missing name, or one the system rejects as a name (a
+/// wildcard), is no error. The data folder's own identity, or one of its parents', when it can't
+/// be read, refuses nothing: the text compare still runs (logged), so local matters work.
 #[cfg(unix)]
 #[test]
-fn an_identity_that_cannot_be_read_refuses_the_request() {
+fn an_identity_that_cannot_be_read_refuses_only_the_path_it_serves() {
     let net = plain_net(false);
-    let mut fs = FakeFs::with(&[("/other/x", Fake::File)]);
+    let mut fs = FakeFs::with(&[
+        ("/other/x", Fake::File),
+        ("/m/brief.docx", Fake::File),
+        ("/m/docs/*.docx", Fake::BadName),
+    ]);
     fs.ids.insert(PathBuf::from("/d"), (1, 7));
     fs.ids.insert(PathBuf::from("/other"), (1, 8));
+    fs.ids.insert(PathBuf::from("/m"), (1, 9));
     assert!(!refused(&fence("/m", &["/other/x"]), &net, &fs));
     assert!(!refused(&fence("/m", &["/other/new.docx"]), &net, &fs));
+    assert!(!refused(&fence("/m", &["docs/*.docx"]), &net, &fs));
     fs.unreadable_ids.push(PathBuf::from("/other"));
     assert!(refused(&fence("/m", &["/other/x"]), &net, &fs));
+    assert!(!refused(&fence("/m", &["/m/brief.docx"]), &net, &fs));
     let mut search = fence("/m", &[]);
     search.roots = vec![PathBuf::from("/other")];
     assert!(refused(&search, &net, &fs));
-    let mut fs = FakeFs::with(&[("/other/x", Fake::File)]);
-    fs.unreadable_ids.push(PathBuf::from("/d"));
-    assert!(refused(&fence("/m", &["/other/x"]), &net, &fs));
-    // With nothing to check there is nothing to refuse.
-    assert!(!refused(&fence("/m", &[]), &net, &fs));
+    search.roots = vec![PathBuf::from("/m")];
+    assert!(!refused(&search, &net, &fs));
+    // The data folder's own identity, or its parent's, unreadable: local matters still work,
+    // and the data folder is still found by its text.
+    for unreadable in ["/d", "/"] {
+        let mut fs = FakeFs::with(&[("/other/x", Fake::File), ("/m/brief.docx", Fake::File)]);
+        fs.ids.insert(PathBuf::from("/d"), (1, 7));
+        fs.unreadable_ids.push(PathBuf::from(unreadable));
+        assert!(!refused(
+            &fence("/m", &["/other/x", "/m/brief.docx"]),
+            &net,
+            &fs
+        ));
+        let mut search = fence("/m", &[]);
+        search.roots = vec![PathBuf::from("/m")];
+        assert!(!refused(&search, &net, &fs), "{unreadable}");
+        assert!(refused(&fence("/m", &["/d/state.sqlite"]), &net, &fs));
+    }
 }
 
 /// A data folder that is itself on the network (redirected app data): its identity is never
