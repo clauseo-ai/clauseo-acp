@@ -928,6 +928,97 @@ jobs:
             done
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # Windows on ARM, per machine: the x64 installer silently, the arm64 one over it, then the
+  # registered silent uninstall, which must leave nothing behind (decision 0035's tier 1, design
+  # VM row A4). Every mode, dry included. Not blocking yet: continue-on-error, and assemble doesn't
+  # need it. The orchestrator approves making it blocking (drop continue-on-error, add it to
+  # assemble's needs) after three passing runs.
+  arm64-install-smoke:
+    name: arm64-install-smoke
+    needs: [check, sign-windows]
+    runs-on: windows-11-arm
+    timeout-minutes: 20
+    continue-on-error: true
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-*-pc-windows-msvc
+          path: ${{ runner.temp }}/legs
+
+      - name: Install x64, then arm64 over it, uninstall, and check what is left
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $log = New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/smoke"
+          Start-Transcript "$log/smoke.log"
+          $legs = "$env:RUNNER_TEMP/legs"
+          $dir = "$env:ProgramFiles\Clauseo"
+          $uninstKey = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Clauseo'
+          function Run($exe, $arguments) {
+            Write-Host "> $exe $arguments"
+            $code = (Start-Process -FilePath $exe -ArgumentList $arguments -Wait -PassThru).ExitCode
+            if ($code -ne 0) { throw "exit code $code from $exe" }
+          }
+          # IMAGE_FILE_HEADER.Machine: the u16 after "PE\0\0", whose offset is at 0x3C.
+          function Machine($exe) {
+            $b = [IO.File]::ReadAllBytes($exe)
+            $pe = [BitConverter]::ToInt32($b, 0x3C)
+            if ([BitConverter]::ToUInt32($b, $pe) -ne 0x4550) { throw "$exe has no PE header" }
+            [BitConverter]::ToUInt16($b, $pe + 4)
+          }
+          Run "$legs/release-x86_64-pc-windows-msvc/Clauseo_${env:VERSION}_x64-machine-setup.exe" '/S'
+          if ((Machine "$dir\Clauseo.exe") -ne 0x8664) { throw 'the x64 install is not x64' }
+          Run "$legs/release-aarch64-pc-windows-msvc/Clauseo_${env:VERSION}_arm64-machine-setup.exe" '/S'
+          $m = Machine "$dir\Clauseo.exe"
+          if ($m -ne 0xAA64) { throw ('Clauseo.exe over the x64 install has machine 0x{0:X4}, not ARM64' -f $m) }
+          # The uninstall the install registered: "<dir>\uninstall.exe" /S _?=<dir>, which runs in
+          # place (uninstall_in_place.nsh), so the wait is for the uninstall itself; its
+          # self-delete removes uninstall.exe and the folder about 3 s after it exits.
+          $quiet = (Get-ItemProperty $uninstKey).QuietUninstallString
+          if ($quiet -notmatch '^"([^"]+)"\s+(/S _\?=.+)$') { throw "unexpected QuietUninstallString: $quiet" }
+          Run $Matches[1] $Matches[2]
+          for ($i = 0; $i -lt 30 -and (Test-Path $dir); $i++) { Start-Sleep 2 }
+          $left = @()
+          if (Test-Path $dir) { $left += "${dir}: " + ((Get-ChildItem -Recurse -Force $dir).FullName -join ', ') }
+          if (Test-Path $uninstKey) { $left += $uninstKey }
+          # HKLM\SOFTWARE\Clauseo\Clauseo (and the then-empty HKLM\SOFTWARE\Clauseo) goes only with
+          # #769's NSIS_HOOK_POSTUNINSTALL; before it lands, a notice instead of a failure.
+          $regkeyFix = Select-String -Quiet -Path crates/desktop/windows/hooks.nsh -Pattern '^!macro NSIS_HOOK_POSTUNINSTALL'
+          foreach ($key in 'HKLM:\SOFTWARE\Clauseo\Clauseo', 'HKLM:\SOFTWARE\Clauseo') {
+            if (-not (Test-Path $key)) { continue }
+            if ($regkeyFix) { $left += $key } else { Write-Host "::notice::$key is left; expected gone once #769 lands" }
+          }
+          # Any other key under it (the sandbox's record, Sandbox) is left whatever #769 does.
+          if (Test-Path 'HKLM:\SOFTWARE\Clauseo') {
+            $extra = Get-ChildItem 'HKLM:\SOFTWARE\Clauseo' | Where-Object PSChildName -ne 'Clauseo' | ForEach-Object Name
+            if ($extra) { $left += $extra }
+          }
+          $tasks = Get-ScheduledTask -TaskPath '\Clauseo\*' -ErrorAction SilentlyContinue
+          if ($tasks) { $left += $tasks | ForEach-Object { "task $($_.TaskPath)$($_.TaskName)" } }
+          foreach ($lnk in "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Clauseo.lnk", "$env:PUBLIC\Desktop\Clauseo.lnk") {
+            if (Test-Path $lnk) { $left += $lnk }
+          }
+          # C:\ProgramData\Clauseo, the firm-policy folder, stays by design (hooks.nsh).
+          if ($left) { $left | ForEach-Object { Write-Host "::error::left after the uninstall: $_" }; exit 1 }
+          Write-Host 'arm64 over x64 per machine: installed, Clauseo.exe is ARM64, uninstalled clean'
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: arm64-install-smoke-log
+          path: ${{ runner.temp }}/smoke
+          if-no-files-found: warn
+
   # The Release: latest.json, SHA256SUMS.txt, an attestation per asset, then a draft (release) or
   # a public pre-release (test). A dry run stops at the artifact dist-assets.
   assemble:
