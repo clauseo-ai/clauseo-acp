@@ -1637,7 +1637,7 @@ folder of it through a junction at any time, or re-run `--adopt` with another fo
    Administrators alone, read back; "The staging folder's DACL" below),
    and verifies the staged bytes, never the user's file, so a swap after the check changes nothing;
 6. requires the staged image's CPU type (its PE `Machine`) to be the running copy's, so a signed
-   exe for another CPU never replaces it;
+   exe for another CPU never replaces it, save one move ("The one move across CPU types");
 7. checks the versions ("Versions" below), so an older signed exe can't roll the copy back;
 8. stops when the staged SHA-256 is already recorded;
 9. otherwise opens `Sandbox\` for adding a file (`FILE_WRITE_DATA | FILE_ADD_FILE`), sharing
@@ -1703,6 +1703,19 @@ checked.
 - An older version is refused. So is an equal version whose bytes differ from the copy in place.
 - A leading `v` is dropped. A record's `X.Y.Z.0` reads as the release `X.Y.Z`. Anything
   unreadable, a non-zero fourth part included, refuses the run.
+
+**The one move across CPU types.** Windows ARM64 is tier 1, so an x64 install on an ARM64 machine
+moves to the native build through the normal update, and nobody is told to reinstall. Step 6
+allows that one move and no other (`refresh/machine.rs`). The running copy must be x64, and so
+must the copy on disk it replaces, its PE `Machine` read by handle as its hash is. The staged
+image must be plain ARM64, not ARM64EC or ARM64X (a load config naming CHPE metadata marks a
+hybrid). The machine must be natively ARM64 (`IsWow64Process2`'s native machine, which
+detection reads). The signed version must be strictly newer than `AdminCopyVersion`: the equal
+version a same-CPU run repairs with never moves the copy. The signature, its `file:`, the
+`FILEVERSION` binding, the hash record, the set-up lock and staging apply as before. Anything
+else across CPU types exits 42, ARM64 to x64 included: it would put a native copy back under
+emulation, a downgrade of the platform match. `--adopt` checks no CPU type, so the per-machine
+installer already moves an x64 copy to ARM64 on the version rule alone.
 
 **The key.** `crates/sandbox/build.rs` builds the key in: `CLAUSEO_UPDATER_PUBKEY`, else
 `plugins.updater.pubkey` from `tauri.conf.json`, else the placeholder `AC986E7C6BA67AB9`. The
