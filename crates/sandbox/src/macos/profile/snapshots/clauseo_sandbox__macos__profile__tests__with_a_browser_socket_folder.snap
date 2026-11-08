@@ -177,6 +177,17 @@ expression: text
     (regex #"^/dev/ttys[0-9]+$")
     (extension "com.apple.sandbox.pty")))
 
+; Operations `(deny default)` does not refuse (macOS 27.2, measured): refused by
+; name. NVRAM variables, read or written (`nvram -p`).
+(deny nvram* (with message "clauseo-4242-7"))
+; IORegistry properties (`ioreg`): the Mac's serial number, its hardware.
+(deny iokit-get-properties (with message "clauseo-4242-7"))
+; Processes outside the jail: no arguments (`kern.procargs2`), path or other info.
+; The base allows the jail's own (`same-sandbox`); this keeps it.
+(deny process-info*
+  (require-not (target same-sandbox))
+  (with message "clauseo-4242-7"))
+
 ; The matter and the state folder: read and write.
 (allow file-read* file-write*
   (subpath (param "MATTER"))
@@ -259,6 +270,10 @@ expression: text
 ; The folders above it: metadata only, so its path resolves.
 (allow file-read-metadata
   (path-ancestors (param "BROWSER_SOCKETS")))
+; chrome-headless-shell's port rendezvous: the browser registers the name and its
+; children look it up; without it the browser stops at start.
+(allow mach-register mach-lookup
+  (global-name-prefix "org.chromium.Chromium.MachPortRendezvousServer."))
 
 ; Network: the proxy's loopback ports and the browser socket folder only; no DNS.
 (allow network-outbound

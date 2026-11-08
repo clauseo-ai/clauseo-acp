@@ -99,6 +99,19 @@ impl World {
         path
     }
 
+    /// The C program `source`, compiled outside the jail with `cc` to `rel` and linked against
+    /// `frameworks`. Its source is left beside it as `<rel>.c`.
+    pub(crate) fn compile_c(&self, rel: &str, source: &str, frameworks: &[&str]) -> PathBuf {
+        let c = self.file(&format!("{rel}.c"), source);
+        let out = self.at(rel);
+        let mut args = vec![c.to_str().unwrap(), "-o", out.to_str().unwrap()];
+        for framework in frameworks {
+            args.extend(["-framework", framework]);
+        }
+        run_outside("/usr/bin/cc", &args, &self.root).assert_ok();
+        out
+    }
+
     pub(crate) fn hard_link(&self, original: &str, link: &str) -> PathBuf {
         let path = self.at(link);
         std::fs::hard_link(self.at(original), &path).unwrap();

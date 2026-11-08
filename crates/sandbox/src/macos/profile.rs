@@ -180,6 +180,7 @@ impl Writer {
         self.line(&deny_default);
         self.line("");
         self.text.push_str(BASE);
+        self.default_gaps();
         self.allows(policy, &p);
         self.keychain(policy, &p);
         self.denies(policy, &p);
@@ -189,6 +190,34 @@ impl Writer {
         self.read_only_state(&p);
         self.browser_sockets(policy);
         self.network(policy);
+    }
+
+    /// The operations `(deny default)` leaves allowed, refused by name. No later rule allows
+    /// them, so they hold for the whole profile. Measured on macOS 27.2 (26B123), 2026-11-09:
+    /// a jailed `nvram -p` printed every variable, `ioreg` the Mac's serial number, and a
+    /// `KERN_PROCARGS2` sysctl the arguments of a process outside the jail until these rules
+    /// named them (`tests/jail/deny.rs`, `tests/jail/outside.rs`).
+    fn default_gaps(&mut self) {
+        self.text.push_str(concat!(
+            "\n; Operations `(deny default)` does not refuse (macOS 27.2, measured): refused by\n",
+            "; name. NVRAM variables, read or written (`nvram -p`).\n",
+        ));
+        let nvram = format!("(deny nvram* {})", self.message);
+        self.line(&nvram);
+        self.text.push_str(
+            "; IORegistry properties (`ioreg`): the Mac's serial number, its hardware.\n",
+        );
+        let properties = format!("(deny iokit-get-properties {})", self.message);
+        self.line(&properties);
+        self.note(
+            "; Processes outside the jail: no arguments (`kern.procargs2`), path or other info.",
+        );
+        self.note("; The base allows the jail's own (`same-sandbox`); this keeps it.");
+        self.rule(
+            "deny",
+            "process-info*",
+            &["(require-not (target same-sandbox))".to_owned()],
+        );
     }
 
     /// The policy's allows, before any of its denies.
@@ -457,6 +486,18 @@ impl Writer {
         );
         self.note("; The folders above it: metadata only, so its path resolves.");
         self.rule("allow", "file-read-metadata", &[ancestors(&dir)]);
+        self.note(
+            "; chrome-headless-shell's port rendezvous: the browser registers the name and its",
+        );
+        self.note("; children look it up; without it the browser stops at start.");
+        self.rule(
+            "allow",
+            "mach-register mach-lookup",
+            &[
+                "(global-name-prefix \"org.chromium.Chromium.MachPortRendezvousServer.\")"
+                    .to_owned(),
+            ],
+        );
     }
 
     fn network(&mut self, policy: &Policy) {

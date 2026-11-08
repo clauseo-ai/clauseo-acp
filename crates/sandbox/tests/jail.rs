@@ -65,3 +65,18 @@ mod env;
 #[cfg(target_os = "macos")]
 #[path = "jail/unicode.rs"]
 mod unicode;
+
+#[cfg(test)]
+#[cfg(target_os = "macos")]
+#[path = "jail/deny.rs"]
+mod deny;
+
+#[cfg(test)]
+#[cfg(target_os = "macos")]
+#[path = "jail/outside.rs"]
+mod outside;
+
+#[cfg(test)]
+#[cfg(target_os = "macos")]
+#[path = "jail/chrome.rs"]
+mod chrome;
