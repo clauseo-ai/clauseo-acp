@@ -217,9 +217,11 @@ pub(crate) fn allowed_sites(
     }
 }
 
-/// Takes the block list's seams out of `config`, with what the thread needs beside them.
-pub(crate) fn take(config: &mut crate::HostConfig) -> Option<Start> {
-    let seams = *config.wiring.blocklist.take()?;
+/// The block list's seams in `config`, with what the thread needs beside them. The seams stay
+/// in the config's wiring too: each launch's proxy reads the same shared [`Current`] from there
+/// (`launch_checks/egress.rs`).
+pub(crate) fn prepare(config: &crate::HostConfig) -> Option<Start> {
+    let seams = config.wiring.blocklist.as_deref()?.clone();
     Some(Start {
         seams,
         data_dir: config.effective.data_dir().to_path_buf(),

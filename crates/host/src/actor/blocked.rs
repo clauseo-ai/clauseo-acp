@@ -1,6 +1,7 @@
-//! The lawyer's notice of a blocked site (decision record 0053): the egress proxy's sink calls
-//! `HostHandle::site_blocked` for each site the block list made it refuse, and the host tells
-//! the app with `HostEvent::SiteBlocked`.
+//! The lawyer's notice of a blocked site (decision record 0053): the session proxy's sink
+//! (`launch_checks/egress.rs`) posts `Input::SiteBlocked` for each site the block list made it
+//! refuse, as `HostHandle::site_blocked` does for an outside proxy, and the host tells the app
+//! with `HostEvent::SiteBlocked`.
 //!
 //! - Attributed to the session's thread and the turn running on it then (none when no turn
 //!   runs).

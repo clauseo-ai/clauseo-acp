@@ -149,6 +149,9 @@ mod e2e_scenarios;
 #[path = "host/egress.rs"]
 mod egress;
 #[cfg(test)]
+#[path = "host/egress_block.rs"]
+mod egress_block;
+#[cfg(test)]
 #[path = "host/egress_wait.rs"]
 mod egress_wait;
 #[cfg(test)]
