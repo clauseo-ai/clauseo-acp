@@ -6,10 +6,12 @@
 //! the file read through its own handle (`Object::read_child_secured`: a plain file with one
 //! name, not a reparse point, at most the cap), with its owner and DACL read through that same
 //! handle for `file_trust.rs`. Each folder is opened for its attributes alone, the file for
-//! reading and `READ_CONTROL`: no open asks for a right to write. `SeBackupPrivilege` is
-//! enabled for the opens alone and put back after (`acl::privilege`), with backup intent on each
-//! open, so a file whose descriptor shuts SYSTEM out is still read. Errors name the step, never
-//! a folder or task.
+//! reading and `READ_CONTROL`: no open asks for a right to write. The file is opened sharing
+//! reads alone, so a write handle the pool user opened before the DACL changed can't write it
+//! during the read; while one is open the read fails (a sharing violation), and the task is 56.
+//! `SeBackupPrivilege` is enabled for the opens alone and put back after (`acl::privilege`),
+//! with backup intent on each open, so a file whose descriptor shuts SYSTEM out is still read.
+//! Errors name the step, never a folder or task.
 //!
 //! [`Sweeper::read_task_file`]: super::Sweeper::read_task_file
 

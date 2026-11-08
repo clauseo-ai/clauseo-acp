@@ -223,6 +223,7 @@ crates/sandbox/src/windows/acl/tests.rs a_subfolder_swapped_for_a_junction_after
 crates/sandbox/src/windows/acl/tests.rs a_subfolder_moved_after_its_check_refuses_the_walk clippy::disallowed_methods
 crates/sandbox/src/windows/acl/tests.rs presence_through_a_swapped_name_is_an_error clippy::disallowed_methods
 crates/sandbox/src/windows/acl/tests.rs a_subfolder_moved_after_its_own_listing_refuses_the_walk clippy::disallowed_methods
+crates/sandbox/src/windows/acl/tests/read_child.rs a_secured_read_refuses_a_file_held_open_for_writing clippy::disallowed_methods
 # The elevated clean-up (S15 PR4i): its privilege guard, the tests reading the token back and a
 # path's short name, the strip that only the Windows hand-back calls, and the VM harness's FFI.
 crates/sandbox/src/windows/acl/privilege.rs - unsafe_code
