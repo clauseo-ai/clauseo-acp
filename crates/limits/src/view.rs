@@ -19,7 +19,7 @@ const AT_LIMIT_PERCENT: f64 = 100.0;
 /// `state`'s entry in the view at `now`.
 pub(crate) fn agent_view(state: &AgentState, now: Timestamp) -> AgentLimitsView {
     let rows = state.visible_rows();
-    let meter = tightest(rows.iter().filter(|row| !row.reset_passed)).map(|row| LimitMeter {
+    let meter = tightest(state.stop_rows().filter(|row| !row.reset_passed)).map(|row| LimitMeter {
         tone: row_tone(row),
         used_percent: row.window.used_percent,
         window_label: row.window.label.clone(),
@@ -100,6 +100,7 @@ fn row_view(row: &Row, source: &LimitSource, now: Timestamp) -> LimitWindowView 
         kind: row.window.kind,
         label: row.window.label.clone(),
         model: row.window.model.clone(),
+        duration_mins: row.window.duration_mins,
         used_percent: (!row.reset_passed).then_some(row.window.used_percent),
         tone: row_tone(row),
         resets_at: row.window.resets_at,

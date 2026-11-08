@@ -1,5 +1,6 @@
 //! Codex's answers, from the fixtures and from hand-made edge cases, to the exact outcome.
 
+mod buckets;
 mod prepare;
 mod talk;
 
@@ -14,8 +15,8 @@ use super::{Answers, outcome};
 use crate::{AccountRead, ReadFailure, ReadOutcome};
 
 /// The resets in the fixtures, in Unix seconds.
-const FIVE_HOUR_RESET: i64 = 1_793_642_400;
-const WEEK_RESET: i64 = 1_793_955_600;
+pub(super) const FIVE_HOUR_RESET: i64 = 1_793_642_400;
+pub(super) const WEEK_RESET: i64 = 1_793_955_600;
 const MONTH_RESET: i64 = 1_795_000_000;
 
 /// A fixture's `{accountRead, rateLimitsRead}` as JSON.
@@ -40,7 +41,7 @@ fn read(text: &str) -> ReadOutcome {
     outcome(answers(&fixture(text)))
 }
 
-fn window(
+pub(super) fn window(
     id: &str,
     kind: WindowKind,
     label: &str,
@@ -60,7 +61,7 @@ fn window(
     }
 }
 
-fn session(used: f64) -> LimitWindow {
+pub(super) fn session(used: f64) -> LimitWindow {
     window(
         "primary",
         WindowKind::Session,
@@ -71,7 +72,7 @@ fn session(used: f64) -> LimitWindow {
     )
 }
 
-fn weekly(used: f64) -> LimitWindow {
+pub(super) fn weekly(used: f64) -> LimitWindow {
     window(
         "secondary",
         WindowKind::Weekly,
@@ -130,7 +131,7 @@ pub(super) fn plus_unread_outcome() -> ReadOutcome {
     } = plan(
         "plan",
         "ChatGPT Plus",
-        vec![session(25.0), weekly(40.0)],
+        buckets::plus_windows(),
         AtLimitBehaviour::Pauses,
         None,
     )
@@ -149,14 +150,14 @@ pub(super) fn plus_outcome() -> ReadOutcome {
     plan(
         "plus.user@example.com",
         "ChatGPT Plus",
-        vec![session(25.0), weekly(40.0)],
+        buckets::plus_windows(),
         AtLimitBehaviour::Pauses,
         None,
     )
 }
 
 #[test]
-fn plus_takes_its_rows_from_the_codex_bucket_not_the_model_bucket() {
+fn plus_takes_its_rows_from_the_codex_bucket_and_its_reached_from_codex_alone() {
     assert_eq!(
         read(include_str!("../../../fixtures/codex/plus.json")),
         plus_outcome()
@@ -305,7 +306,7 @@ fn chatgpt(plan_type: &str, snapshot: &Value) -> ReadOutcome {
     })))
 }
 
-fn limits_of(outcome: ReadOutcome) -> (AccountLimits, Option<LimitStopReason>) {
+pub(super) fn limits_of(outcome: ReadOutcome) -> (AccountLimits, Option<LimitStopReason>) {
     match outcome {
         ReadOutcome::Usage {
             limits, reached, ..

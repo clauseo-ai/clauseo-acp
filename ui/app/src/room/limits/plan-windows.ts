@@ -19,15 +19,26 @@ const LABELS = new Set<string>([
   "Usage limit",
 ]);
 
-/** A window's label: a per-model window's as "{model} weekly limit", the model as the host names it ("Opus", "Fable"),
- * never read out of the English label; any other by the host's label, translated when the card knows it. The room's
- * card, Settings' tiles and the side note all take it from here, through windowOf. */
-export const windowLabel = (lang: Lang, w: Pick<LimitWindowView, "label" | "model">): string =>
-  w.model !== undefined && w.model !== ""
-    ? pc(lang, "{model} weekly limit", { model: w.model })
-    : LABELS.has(w.label)
-      ? pc(lang, w.label as PlanCardKey)
-      : w.label;
+/** The lengths, in minutes, a per-model window's label names: 5 hours and a week. */
+const FIVE_HOURS = 300;
+const WEEK = 7 * 24 * 60;
+
+/** A window's label: a per-model window's by its length, "{model} 5-hour limit" or "{model} weekly limit" (a week, or
+ * no length given), the model as the host names it ("Opus", "Fable", "Spark"), never read out of the English label, and
+ * one of another length by the host's label; any other window by the host's label, translated when the card knows it.
+ * The room's card, Settings' tiles and the side note all take it from here, through windowOf. */
+export const windowLabel = (
+  lang: Lang,
+  w: Pick<LimitWindowView, "label" | "model" | "duration_mins">,
+): string => {
+  const model = w.model;
+  if (model === undefined || model === "")
+    return LABELS.has(w.label) ? pc(lang, w.label as PlanCardKey) : w.label;
+  if (w.duration_mins === FIVE_HOURS) return pc(lang, "{model} 5-hour limit", { model });
+  if (w.duration_mins === undefined || w.duration_mins === WEEK)
+    return pc(lang, "{model} weekly limit", { model });
+  return w.label;
+};
 
 /** A window's reset: "Resets 6:10 pm" ahead, "The limit reset at 4:10 pm." once passed; "" without one. */
 export function resetOf(lang: Lang, w: LimitWindowView, now: number): string {

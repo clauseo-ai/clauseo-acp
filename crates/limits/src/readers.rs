@@ -33,6 +33,11 @@ use paths::{CLAUDE_ID, CODEX_ID};
 pub use tap::StdoutTap;
 pub use time::parse_rfc3339;
 
+/// The most windows one read keeps.
+const MAX_WINDOWS: usize = 16;
+/// The most chars a label, or a model's name, keeps.
+const MAX_LABEL: usize = 64;
+
 /// How a read ended.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ReadOutcome {

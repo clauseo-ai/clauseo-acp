@@ -13,7 +13,7 @@ use clauseo_protocol::{
     LimitStopReason, LimitWindow, PlanLabel, StaleReason, Timestamp, WindowKind,
 };
 
-use crate::policy::Reads;
+use crate::policy::{Reads, kind_rules};
 
 pub(crate) use hit::at_limit;
 pub(crate) use merge::{apply_live, apply_read};
@@ -206,6 +206,16 @@ impl AgentState {
         } else {
             &[]
         }
+    }
+
+    /// The visible rows that can stop the agent, which `at_limit` and the toolbar's meter read:
+    /// every one, except a per-model row where the kind's model rows do not stop it (a Codex
+    /// model bucket). The card still shows those.
+    pub(crate) fn stop_rows(&self) -> impl Iterator<Item = &Row> + Clone {
+        let model_rows_stop = kind_rules(self.agent).model_rows_stop;
+        self.visible_rows()
+            .iter()
+            .filter(move |row| model_rows_stop || row.window.kind != WindowKind::Model)
     }
 
     /// The visible rows, to change their flags.
