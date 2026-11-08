@@ -29,13 +29,6 @@ impl TempDir {
             std::env::temp_dir().join(format!("clauseo-host-{test}-{}-{n}", std::process::id()));
         write::remove_dir_all(&path).unwrap();
         write::create_dir_all(&path).unwrap();
-        // On Windows in its long form: a runner's temp folder may be an 8.3 name
-        // (`C:\Users\RUNNER~1`), which a path an agent names may not hold (`network_paths`).
-        let path = if cfg!(windows) {
-            dunce::canonicalize(&path).unwrap_or(path)
-        } else {
-            path
-        };
         Self(path)
     }
 
