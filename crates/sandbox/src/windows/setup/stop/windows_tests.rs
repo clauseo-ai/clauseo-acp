@@ -304,5 +304,17 @@ fn elevated_the_stops_hcs_calls_list_and_treat_a_missing_system_as_gone() {
     );
     let nobody = Sid::parse("S-1-5-21-1-2-3-4000").unwrap();
     assert_eq!(stopper.vm_folder(&nobody, &unused), Ok(false));
-    assert_eq!(stopper.owner_vm_folder(&nobody, &unused), Ok(false));
+    assert_eq!(stopper.non_pool_vm_folder(&nobody, &unused), Ok(false));
+    // This machine's profiles list, SYSTEM's among them.
+    let sids = stopper.profile_sids().unwrap();
+    assert!(
+        sids.iter().any(|sid| sid.as_str() == "S-1-5-18"),
+        "{sids:?}"
+    );
+    // Each profile's folder reads, through its hive loaded or loaded read-only, or fails;
+    // none panics, and an id no VM has is in none.
+    for sid in &sids {
+        let read = stopper.non_pool_vm_folder(sid, &unused);
+        assert!(!matches!(read, Ok(true)), "{read:?}");
+    }
 }

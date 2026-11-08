@@ -8,15 +8,20 @@
 //!
 //! That folder can't prove a pool user's VM absent: WSL finds `%LOCALAPPDATA%` through the
 //! user's own `User Shell Folders`, which the user may point elsewhere, and a folder it fails to
-//! make (a pool user may deny itself the right) still starts the VM. So each WSL system is
-//! identified positively. The lawyer's (`OwnerSid`'s) profile is checked first, at its default
-//! `AppData\Local` and at its `Local AppData` redirect: a system whose folder is there is the
-//! lawyer's and left alone, and a pool user whose profile also holds that folder planted it, and
-//! is marked. Then a system whose folder is in a pool user's profile is that user's: it is
-//! terminated, and the user marked for a reset. Any other WSL system (one whose folder can't be
-//! found, or whose lawyer's folder can't be read) is unmapped: nothing terminates it, every pool
-//! user is marked, and the stop ends at 48. A machine where another Windows account runs WSL too
-//! ends its stops at 48 while that account's VM runs.
+//! make (a pool user may deny itself the right) still starts the VM. So the profiles no pool
+//! user can write are checked first: the lawyer's (`OwnerSid`'s), then every other profile
+//! `ProfileList` lists that isn't a pool user's, each at its default `AppData\Local` and at the
+//! `Local AppData` redirect its hive names (loaded, or loaded read-only for the read). A system
+//! whose folder is there is that account's and left alone, and a pool user whose profile also
+//! holds that folder planted it, and is marked. Then a system whose folder is in a pool user's
+//! profile is that user's: it is terminated, and the user marked for a reset. A system whose
+//! folder is in no profile is most likely a pool user's that hid its folder: every pool user is
+//! marked, and it is terminated too, unless a non-pool profile (or the list of them) couldn't be
+//! read anywhere in the step, as it could be that account's. Another account's profile that
+//! can't be read is otherwise passed over; the lawyer's can't be: a system whose lawyer's folder
+//! can't be read is unmapped even with a pool user's folder (that pool user may have planted
+//! it), as is one left running for want of a read, or whose id isn't a GUID: nothing terminates
+//! it, every pool user is marked, and the stop ends at 48.
 //!
 //! The seam is [`VmStopper`], which `windows_hcs.rs` implements and the tests fake. The step
 //! runs after the process passes, so no pool user's process is left to change its profile
@@ -128,11 +133,15 @@ pub trait VmStopper {
     /// `false` with no profile, or nothing at any step of the way. A component that is a link
     /// (or a file where a folder belongs) on the way, or a read that fails, is the error.
     fn vm_folder(&mut self, user: &Sid, id: &VmId) -> Result<bool, Failed>;
-    /// Whether the lawyer `owner`'s profile holds `temp\<id>` under its `Local AppData`: at
-    /// the default `AppData\Local`, or where `HKU\<owner>`'s `User Shell Folders` points it
-    /// ([`local_app_data`]). `false` with no profile; a hive that isn't loaded has no
-    /// redirect. A redirect that can't be read or expanded, or a read that fails, is the error.
-    fn owner_vm_folder(&mut self, owner: &Sid, id: &VmId) -> Result<bool, Failed>;
+    /// Whether a non-pool user's (the lawyer's, or another account's) profile holds `temp\<id>`
+    /// under its `Local AppData`: at the default `AppData\Local`, or where its hive's `User
+    /// Shell Folders` points it ([`local_app_data`]): `HKU\<user>` when the hive is loaded,
+    /// else its `NTUSER.DAT` loaded read-only for the read. `false` with no profile, or with no
+    /// `NTUSER.DAT`. A hive or redirect that can't be read or expanded, or a read that fails,
+    /// is the error.
+    fn non_pool_vm_folder(&mut self, user: &Sid, id: &VmId) -> Result<bool, Failed>;
+    /// Every SID `ProfileList` lists (a subkey whose name isn't a SID is passed over).
+    fn profile_sids(&mut self) -> Result<Vec<Sid>, Failed>;
     /// Terminates the compute system `id` and waits up to `wait` for it to end; one already
     /// gone is `Ok`.
     fn terminate_vm(&mut self, id: &VmId, wait: Duration) -> Result<(), Failed>;
@@ -143,14 +152,18 @@ pub trait VmStopper {
 pub(super) struct Vms {
     /// HCS was there and listed its systems.
     pub(super) listed: bool,
-    /// Pool users' VMs terminated.
+    /// Pool users' VMs terminated, those in no profile included.
     pub(super) ended: usize,
     /// Pool users' VMs not terminated: a termination that failed or ran out of time, or none
     /// tried once [`VMS_BUDGET`] was spent.
     pub(super) left: usize,
-    /// WSL systems neither the lawyer's nor a pool user's folder names, or whose lawyer's
-    /// folder couldn't be read: each may be a pool user's, and none is terminated.
+    /// WSL systems left running though they may be a pool user's: the lawyer's folder couldn't
+    /// be read, the id isn't a GUID, or the folder is in no profile while a non-pool profile
+    /// couldn't be read.
     pub(super) unmapped: usize,
+    /// WSL systems whose folder is in no profile, taken as a pool user's (each counted in
+    /// `ended` or `left` too).
+    pub(super) nowhere: usize,
 }
 
 impl Vms {
@@ -160,20 +173,23 @@ impl Vms {
             return String::new();
         }
         format!(
-            ", {} pool WSL VMs ended, {} not, {} unmapped",
-            self.ended, self.left, self.unmapped
+            ", {} pool WSL VMs ended, {} not, {} unmapped, {} in no profile",
+            self.ended, self.left, self.unmapped, self.nowhere
         )
     }
 }
 
 /// Step 5b, as the module says (users marked under the set-up lock before each termination):
-/// each WSL system the lawyer's folder names is left, and a pool user whose profile holds that
-/// folder too is added to `passes.suspects`; each a pool user's
-/// folder names is terminated, its user added to `passes.found`; every other one is counted
-/// unmapped and every pool user added to `passes.suspects`. A pool user whose folder can't be
-/// read is added to `passes.suspects`. No HCS is nothing to do. A list that can't be read is the
-/// error while a WSL that runs VMs is installed, and is logged and passed over otherwise (no
-/// WSL, no WSL VM). A WSL system whose id isn't a GUID is unmapped.
+/// each WSL system a non-pool profile's folder names (the lawyer's first) is left, and a pool
+/// user whose profile holds that folder too is added to `passes.suspects`; each a pool user's
+/// folder names is terminated, its user added to `passes.found`; each in no profile adds every
+/// pool user to `passes.suspects` and is terminated, unless a non-pool read failed anywhere in
+/// the step, when it is unmapped. One whose lawyer's folder can't be read, or whose id isn't a
+/// GUID, is unmapped and adds every pool user to `passes.suspects`; another non-pool profile
+/// that can't be read is passed over. A pool
+/// user whose folder can't be read is added to `passes.suspects`. No HCS is nothing to do. A
+/// list that can't be read is the error while a WSL that runs VMs is installed, and is logged
+/// and passed over otherwise (no WSL, no WSL VM).
 pub(super) fn stop_vms(
     fs: &mut impl Stopper,
     pool: &Pool,
@@ -192,14 +208,23 @@ pub(super) fn stop_vms(
     };
     passes.vms.listed = true;
     let began = fs.elapsed();
+    // The profiles no pool user can write: the lawyer's first, then every other one listed.
+    let (others, mut unread) = match fs.profile_sids() {
+        Ok(sids) => {
+            let other = |sid: &Sid| *sid != pool.owner && !pool.users.contains(sid);
+            (sids.into_iter().filter(other).collect(), false)
+        }
+        Err(_why) => (Vec::new(), true),
+    };
+    let mut nowhere = Vec::new();
     for listed in &ids {
         let Some(id) = VmId::parse(listed) else {
             unmapped(pool, passes);
             continue;
         };
-        match fs.owner_vm_folder(&pool.owner, &id) {
-            Ok(true) => {
-                // The lawyer's: a pool user holding its folder too planted it.
+        match non_pool_folder(fs, &pool.owner, &others, &id, &mut unread) {
+            Held::Yes => {
+                // A non-pool account's: a pool user holding its folder too planted it.
                 for user in &pool.users {
                     if !matches!(fs.vm_folder(user, &id), Ok(false)) {
                         passes.suspects.insert(user.clone());
@@ -207,47 +232,105 @@ pub(super) fn stop_vms(
                 }
                 continue;
             }
-            Ok(false) => {}
-            Err(_why) => {
+            Held::Unknown => {
+                unread = true;
                 unmapped(pool, passes);
                 continue;
             }
+            Held::No => {}
         }
-        let mut owner = None;
-        for user in &pool.users {
-            match fs.vm_folder(user, &id) {
-                Ok(true) => {
-                    owner = Some(user.clone());
-                    break;
-                }
-                Ok(false) => {}
-                Err(_why) => {
-                    passes.suspects.insert(user.clone());
-                }
+        match pool_user(fs, pool, &id, passes) {
+            Some(user) => {
+                passes.found.insert(user);
+                end(fs, &id, began, passes);
             }
+            None => nowhere.push(id),
         }
-        let Some(user) = owner else {
+    }
+    // In no profile: most likely a pool user's VM that hid its folder, so it is ended, every
+    // pool user marked first; but not while a non-pool profile couldn't be read, as it may be
+    // that account's.
+    for id in nowhere {
+        if unread {
             unmapped(pool, passes);
             continue;
-        };
-        passes.found.insert(user);
-        let spent = fs.elapsed().saturating_sub(began);
-        let wait = VM_WAIT.min(VMS_BUDGET.saturating_sub(spent));
-        if wait.is_zero() {
-            passes.vms.left += 1;
-            continue;
         }
-        // Marked first: a run the task's limit ends during the wait has marked the user.
-        super::mark_new(fs, passes);
-        match fs.terminate_vm(&id, wait) {
-            Ok(()) => passes.vms.ended += 1,
-            Err(_why) => passes.vms.left += 1,
-        }
+        passes.suspects.extend(pool.users.iter().cloned());
+        passes.vms.nowhere += 1;
+        end(fs, &id, began, passes);
     }
     Ok(())
 }
 
-/// A WSL system no folder maps: counted, and every pool user marked, as it may be any of theirs.
+/// Whether a non-pool profile holds a VM's folder.
+enum Held {
+    /// One of them does.
+    Yes,
+    /// None does as far as was read, but the lawyer's couldn't be read.
+    Unknown,
+    /// None of those read does.
+    No,
+}
+
+/// Whether the lawyer's profile or one of `others` holds `id`'s folder, the lawyer's read
+/// first. Another's that can't be read is passed over, and sets `unread`.
+fn non_pool_folder(
+    fs: &mut impl Stopper,
+    owner: &Sid,
+    others: &[Sid],
+    id: &VmId,
+    unread: &mut bool,
+) -> Held {
+    let mut held = Held::No;
+    match fs.non_pool_vm_folder(owner, id) {
+        Ok(true) => return Held::Yes,
+        Ok(false) => {}
+        Err(_why) => held = Held::Unknown,
+    }
+    for user in others {
+        match fs.non_pool_vm_folder(user, id) {
+            Ok(true) => return Held::Yes,
+            Ok(false) => {}
+            Err(_why) => *unread = true,
+        }
+    }
+    held
+}
+
+/// The pool user whose profile holds `id`'s folder; one whose folder can't be read is added
+/// to `passes.suspects`.
+fn pool_user(fs: &mut impl Stopper, pool: &Pool, id: &VmId, passes: &mut Passes) -> Option<Sid> {
+    for user in &pool.users {
+        match fs.vm_folder(user, id) {
+            Ok(true) => return Some(user.clone()),
+            Ok(false) => {}
+            Err(_why) => {
+                passes.suspects.insert(user.clone());
+            }
+        }
+    }
+    None
+}
+
+/// Terminates `id` within what is left of [`VMS_BUDGET`] since `began`, the users found so
+/// far marked first; one not ended (a failure, a wait that ran out, or none tried) is counted
+/// left.
+fn end(fs: &mut impl Stopper, id: &VmId, began: Duration, passes: &mut Passes) {
+    let spent = fs.elapsed().saturating_sub(began);
+    let wait = VM_WAIT.min(VMS_BUDGET.saturating_sub(spent));
+    if wait.is_zero() {
+        passes.vms.left += 1;
+        return;
+    }
+    // Marked first: a run the task's limit ends during the wait has marked the user.
+    super::mark_new(fs, passes);
+    match fs.terminate_vm(id, wait) {
+        Ok(()) => passes.vms.ended += 1,
+        Err(_why) => passes.vms.left += 1,
+    }
+}
+
+/// A WSL system left running that may be a pool user's: counted, and every pool user marked.
 fn unmapped(pool: &Pool, passes: &mut Passes) {
     passes.vms.unmapped += 1;
     passes.suspects.extend(pool.users.iter().cloned());

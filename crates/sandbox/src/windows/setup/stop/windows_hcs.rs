@@ -1,6 +1,6 @@
 //! The stop's WSL step on the machine ([`VmStopper`] for [`WindowsStopper`]): HCS's compute
-//! systems through `computecore.dll`, the profiles through `ProfileList`, the lawyer's
-//! `Local AppData` redirect through its loaded hive (`HKU\<OwnerSid>`), and the services' keys.
+//! systems through `computecore.dll`, the pool's profiles through `ProfileList`, the non-pool
+//! profiles through `windows_profiles.rs`, and the services' keys.
 //! `computecore.dll` is loaded at run time from System32 (`LoadLibraryExW`,
 //! `LOAD_LIBRARY_SEARCH_SYSTEM32`) and its exports found by name, never imported: a machine without
 //! it (no Hyper-V platform) must still start the exe, and has no VM to end. Every HCS call is
@@ -8,32 +8,25 @@
 //! (`HcsWaitForOperationResult`), one whose wait times out is cancelled (`HcsCancelOperation`,
 //! where the DLL has it), and every operation and system handle is closed on drop. Errors name the
 //! call and its code, never a path, an id or a SID.
-#![expect(
-    unsafe_code,
-    reason = "FFI to computecore.dll, loaded at run time, and RegGetValueW on HKEY_USERS"
-)]
+#![expect(unsafe_code, reason = "FFI to computecore.dll, loaded at run time")]
 
 use std::ffi::c_void;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::ptr;
 use std::time::Duration;
 
 use windows::Win32::Foundation::{
-    ERROR_FILE_NOT_FOUND, ERROR_MOD_NOT_FOUND, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS, ERROR_TIMEOUT,
-    FreeLibrary, GENERIC_ALL, HCS_E_OPERATION_TIMEOUT, HCS_E_SYSTEM_ALREADY_STOPPED,
-    HCS_E_SYSTEM_NOT_FOUND, HLOCAL, HMODULE, LocalFree, WIN32_ERROR,
+    ERROR_MOD_NOT_FOUND, ERROR_TIMEOUT, FreeLibrary, GENERIC_ALL, HCS_E_OPERATION_TIMEOUT,
+    HCS_E_SYSTEM_ALREADY_STOPPED, HCS_E_SYSTEM_NOT_FOUND, HLOCAL, HMODULE, LocalFree,
 };
 use windows::Win32::System::LibraryLoader::{
     GetProcAddress, LOAD_LIBRARY_SEARCH_SYSTEM32, LoadLibraryExW,
-};
-use windows::Win32::System::Registry::{
-    HKEY_USERS, RRF_NOEXPAND, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ, RegGetValueW,
 };
 use windows::core::{HRESULT, HSTRING, PCSTR, PCWSTR, PWSTR, s, w};
 
 use super::Failed;
 use super::windows_stopper::WindowsStopper;
-use super::{LIST_WAIT, VmId, VmStopper, local_app_data, wsl_ids_from_json};
+use super::{LIST_WAIT, VmId, VmStopper, windows_profiles, wsl_ids_from_json};
 use crate::windows::admin_copy::{Found, os};
 use crate::windows::setup::profile::profile_of;
 use crate::windows::sids::Sid;
@@ -127,107 +120,18 @@ impl VmStopper for WindowsStopper {
         Ok(true)
     }
 
-    fn owner_vm_folder(&mut self, owner: &Sid, id: &VmId) -> Result<bool, Failed> {
-        let profile = profile_of(owner)
-            .map_err(|_error| "the lawyer's ProfileList entry couldn't be read".to_owned())?;
-        let Some(profile) = profile else {
-            return Ok(false);
-        };
-        // The lawyer's own folders: no pool user can write them, so links are followed.
-        let mut default = profile.path.join(r"AppData\Local\temp");
-        default.push(id.as_str());
-        if owner_folder(&default)? {
-            return Ok(true);
-        }
-        let Some(value) = redirect(owner)? else {
-            return Ok(false);
-        };
-        let root = profile
-            .path
-            .to_str()
-            .ok_or_else(|| "the lawyer's profile folder isn't text".to_owned())?;
-        let local = local_app_data(&value, root)
-            .ok_or_else(|| "the lawyer's Local AppData redirect can't be expanded".to_owned())?;
-        let mut redirected = PathBuf::from(local);
-        redirected.push("temp");
-        redirected.push(id.as_str());
-        owner_folder(&redirected)
+    fn non_pool_vm_folder(&mut self, user: &Sid, id: &VmId) -> Result<bool, Failed> {
+        windows_profiles::non_pool_vm_folder(user, id)
+    }
+
+    fn profile_sids(&mut self) -> Result<Vec<Sid>, Failed> {
+        windows_profiles::profile_sids()
     }
 
     fn terminate_vm(&mut self, id: &VmId, wait: Duration) -> Result<(), Failed> {
         let hcs = Hcs::load()?.ok_or_else(|| "computecore.dll is gone".to_owned())?;
         hcs.terminate(id, wait)
     }
-}
-
-/// Whether the lawyer's folder `at` is there, following links; nothing there is `false`.
-fn owner_folder(at: &Path) -> Result<bool, Failed> {
-    match std::fs::metadata(at) {
-        Ok(found) => Ok(found.is_dir()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => {
-            let code = error.raw_os_error().unwrap_or(0);
-            Err(format!("the lawyer's profile couldn't be read ({code})"))
-        }
-    }
-}
-
-/// `HKU\<owner>\...\Explorer\User Shell Folders`' `Local AppData`, unexpanded; `None` when it,
-/// its key, or the loaded hive is missing.
-fn redirect(owner: &Sid) -> Result<Option<String>, Failed> {
-    let subkey = HSTRING::from(format!(
-        r"{owner}\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders"
-    ));
-    let name = w!("Local AppData");
-    let flags = RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ | RRF_NOEXPAND;
-    let present = |code: WIN32_ERROR| match code {
-        ERROR_SUCCESS => Ok(true),
-        ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND => Ok(false),
-        other => Err(format!(
-            "the lawyer's Local AppData redirect couldn't be read ({})",
-            other.0
-        )),
-    };
-    let mut size = 0u32;
-    // SAFETY: NUL-terminated names; no data pointer asks only for the size.
-    let code = unsafe {
-        RegGetValueW(
-            HKEY_USERS,
-            &subkey,
-            name,
-            flags,
-            None,
-            None,
-            Some(&raw mut size),
-        )
-    };
-    if !present(code)? {
-        return Ok(None);
-    }
-    let mut buffer = vec![0u16; usize::try_from(size).unwrap_or(0).div_ceil(2)];
-    // SAFETY: `buffer` is live, writable and at least `size` bytes long for the call.
-    let code = unsafe {
-        RegGetValueW(
-            HKEY_USERS,
-            &subkey,
-            name,
-            flags,
-            None,
-            Some(buffer.as_mut_ptr().cast()),
-            Some(&raw mut size),
-        )
-    };
-    if !present(code)? {
-        return Ok(None);
-    }
-    let end = buffer
-        .iter()
-        .position(|unit| *unit == 0)
-        .unwrap_or(buffer.len());
-    let text = buffer.get(..end).unwrap_or_default();
-    String::from_utf16(text)
-        .map(Some)
-        .map_err(|_error| "the lawyer's Local AppData redirect isn't text".to_owned())
 }
 
 /// What is at `at`, never following a link there (its parents were each checked first).
