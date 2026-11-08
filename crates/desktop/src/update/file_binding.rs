@@ -27,25 +27,27 @@ use super::install::LIFECYCLE;
 /// NSIS bundle puts first (`<productName>_<version>_<arch>-setup.exe`).
 const PRODUCT: &str = "Clauseo";
 
-/// The macOS updater archive's name as the bundler signs it: both macOS legs bundle
-/// `bundle/macos/Clauseo.app.tar.gz` and sign it under that base name (release.yml, "Collect
-/// this leg's assets"); the release renames it per architecture only after signing ("Name the
-/// assets"), so the signed name cannot tell x64 from aarch64, and the version binds it.
+/// The bundler's macOS updater archive name, `bundle/macos/Clauseo.app.tar.gz`. The release no
+/// longer signs under this name: it renames each leg's archive to its per-arch asset name, then
+/// signs it (release.yml, "Bundle the .app and the DMG, and sign the updater archive under its
+/// arch name"). Kept only as the [`MacName::Bundle`] alternative.
 const MAC_ARCHIVE: &str = "Clauseo.app.tar.gz";
 
 /// How the release names the macOS archive it signs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum MacName {
-    /// The bundler's `Clauseo.app.tar.gz`, one name for both architectures (today's release).
+    /// The bundler's `Clauseo.app.tar.gz`, one name for both architectures (the name before the
+    /// per-arch signing).
     Bundle,
-    /// `Clauseo_<version>_<aarch64|x64>.app.tar.gz`, the asset's name, once the release signs
-    /// after renaming (stage F).
+    /// `Clauseo_<version>_<aarch64|x64>.app.tar.gz`, the asset's name: the release renames the
+    /// archive to it and signs it under that name, so the signature binds the arch as well as
+    /// the version.
     PerArch,
 }
 
-/// The macOS name in force. Flip [`MAC_SIGNS_PER_ARCH`] only together with the release change
-/// that signs the renamed archive: an app bound to the per-arch name refuses every update the
-/// release signs as `Clauseo.app.tar.gz`.
+/// The macOS name in force: [`MacName::PerArch`], as [`MAC_SIGNS_PER_ARCH`] is `true`. The
+/// release signs each archive under its per-arch name, so an app bound to the bundler's name
+/// would refuse every update the release now signs.
 pub(super) const MAC_NAME: MacName = if MAC_SIGNS_PER_ARCH {
     MacName::PerArch
 } else {
@@ -53,8 +55,10 @@ pub(super) const MAC_NAME: MacName = if MAC_SIGNS_PER_ARCH {
 };
 
 /// The switch [`MAC_NAME`] follows: whether the release signs the macOS archive under its
-/// per-arch asset name. `false` until stage F's release signs after renaming.
-const MAC_SIGNS_PER_ARCH: bool = false;
+/// per-arch asset name. `true`: the release renames each archive to `Clauseo_<version>_<arch>`
+/// and signs it under that name (release.yml, "Bundle the .app and the DMG, and sign the updater
+/// archive under its arch name").
+const MAC_SIGNS_PER_ARCH: bool = true;
 
 /// Why an update's file was refused.
 #[derive(Debug, Clone, PartialEq, Eq)]

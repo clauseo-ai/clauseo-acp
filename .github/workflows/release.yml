@@ -1163,6 +1163,8 @@ jobs:
             echo "- **For every account on the computer** (IT, run as an administrator): \`Clauseo_${VERSION}_x64-machine-setup.exe\`, or \`Clauseo_${VERSION}_arm64-machine-setup.exe\`."
             echo "- If Windows says it only runs Microsoft-verified apps, see [Switching out of S mode](https://github.com/clauseo-ai/clauseo-acp/blob/main/docs/install/windows-s-mode.md)."
             echo "- **Installed the x64 Clauseo on Windows on ARM?** Installed for your own account, it moves itself to the ARM64 build at its next update. Installed for every account, it doesn't update itself: IT deploys \`Clauseo_${VERSION}_arm64-machine-setup.exe\` instead."
+            # 0.0.5 only (orchestrator): drop this line after the 0.0.5 release.
+            echo "- On a Mac with Clauseo 0.0.4, download and install 0.0.5 once from this page. It updates itself after that. On Windows, Clauseo updates as usual."
             if [ -s missing.txt ]; then
               echo
               echo "Not in this release (a tier 2 build failed):"
