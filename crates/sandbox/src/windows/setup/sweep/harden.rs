@@ -28,12 +28,14 @@
 //! its DACL needs nothing more. Each task changed, with the SIDs that lost which rights and its
 //! DACL before as SDDL, and each that couldn't be changed or read, go to the admin-only log
 //! ([`to_admin_log`]); the world-readable line gets their counts. Hardening is never 56, a
-//! failure included, but for one case. Each read and the write look the task up by name, so a
+//! failure included, but for a swap. Each read and the write look the task up by name, so a
 //! pool user holding `DELETE` (taken here, but held until then) could swap in its own task
 //! under the name, and SYSTEM would stamp the read `O:SY` or `O:BA` descriptor onto it. The
 //! task's `TaskCache\Tree` `Id` is read before the first read, before the write and after it.
-//! Changed before the write: nothing is written, the task is counted as swapped and logged, and
-//! the walk's judgment stands. Otherwise its path and `Id` go to the record's `OwnerUntrusted`
+//! Changed before the write: nothing is written, the task is counted as swapped and logged, the
+//! sweep is 56 for its path, and the task now under the name is judged again in the same sweep
+//! (`walk::sweep_task`, `replaced.rs`), deleted when the pool's; set-up's hardening only counts
+//! it. Otherwise its path and `Id` go to the record's `OwnerUntrusted`
 //! (`untrusted.rs`) before the write (no write when they can't), and come off after it when
 //! the `Id` reads the same. Changed across it, or unread: nothing is restored, it is counted
 //! and logged, the sweep is 56 for its path, and the entry stays, so later sweeps ignore its
@@ -101,7 +103,7 @@ pub struct Hardened {
     /// or past [`FOLDERS_CAP`]; their tasks weren't checked.
     pub unlisted: usize,
     /// Tasks whose `TaskCache\Tree` `Id` changed between the first read and the write (none
-    /// written), or across the write ([`Hardened::swapped_after`]).
+    /// written), or across the write ([`Hardened::swapped_after`]). Each keeps the sweep at 56.
     pub swapped: usize,
     /// Each task this run left in the record's `OwnerUntrusted` (`untrusted.rs`) for an `Id`
     /// that changed across the write, or couldn't be read after it: its path, not cleaned, and
@@ -246,7 +248,8 @@ pub(super) fn harden_task<S: Sweeper>(
             let why = format!("its Id couldn't be read ({why}), so nothing was written");
             return not(hardened, &why);
         }
-        // Another task under the name: nothing written, and the walk's judgment stands.
+        // Another task under the name: nothing written; the sweep is 56 for it and judges the
+        // task now under the name again (`walk::sweep_task`).
         _ => {
             hardened.swapped += 1;
             let note = format!(

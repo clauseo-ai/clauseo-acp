@@ -10,8 +10,8 @@ use super::group;
 use super::group::Groups;
 use super::harden::{self, HardenWith};
 use super::{
-    Failed, Names, Resolved, Sweeper, Swept, Task, file_trust, pool_owned, resolve, running,
-    untrusted,
+    Failed, Names, Resolved, Sweeper, Swept, Task, file_trust, pool_owned, replaced, resolve,
+    running, untrusted,
 };
 use crate::windows::sids::Sid;
 
@@ -61,9 +61,13 @@ pub(super) enum Found {
 /// way. A task the Task Scheduler won't give is held to its owner and its file
 /// ([`file_trust::by_file`]). A group's task is judged alike (a pool owner deleted, an owner
 /// that can't be read 56, any other ignored) and counted apart. A task left whose principal may
-/// be the lawyer is hardened ([`harden::harden_task`]), never 56 unless its `Id` changed across
-/// the write. A task in the record's `OwnerUntrusted` has its owner ignored ([`untrusted`]).
+/// be the lawyer is hardened ([`harden::harden_task`]), never 56 unless its `Id` changed before
+/// the write or across it; one changed before it is judged again, the task now under the name
+/// deleted when the pool's ([`replaced::again`]). A task in the record's `OwnerUntrusted` has
+/// its owner ignored ([`untrusted`]). Its `Id` is read first, for [`replaced::recheck`].
 pub(super) fn sweep_task<S: Sweeper>(fs: &mut S, folder: &S::Folder, task: Task, at: Walk<'_>) {
+    let mut at = at;
+    replaced::record(fs, folder, &task.name, &mut at);
     let Walk {
         pool,
         lawyer,
@@ -151,16 +155,11 @@ pub(super) fn sweep_task<S: Sweeper>(fs: &mut S, folder: &S::Folder, task: Task,
         }
         Found::FileSkipped => swept.file_skipped += 1,
     }
-    if harden && let Some(lawyer) = lawyer {
-        let at = HardenWith {
-            pool,
-            lawyer,
-            groups: &mut *groups,
-            hardened: &mut swept.hardened,
-            lock: true,
-        };
-        harden::harden_task(fs, folder, &task.name, at);
-    }
+    let swapped_before = harden
+        && lawyer.is_some_and(|lawyer| {
+            let hardened = &mut swept.hardened;
+            swapped_before_write(fs, folder, &task.name, pool, lawyer, groups, hardened)
+        });
     let left = swept.left_tasks() > left_before;
     if let Some(may_hold_pool) = group {
         if may_hold_pool {
@@ -177,11 +176,48 @@ pub(super) fn sweep_task<S: Sweeper>(fs: &mut S, folder: &S::Folder, task: Task,
             swept.group_tasks_ignored += 1;
         }
     }
-    if left && let Ok(folder) = fs.folder_path(folder) {
-        swept
-            .left_paths
-            .push(running::task_path(&folder, &task.name));
+    let path = fs
+        .folder_path(folder)
+        .map(|folder| running::task_path(&folder, &task.name));
+    if left && let Ok(path) = &path {
+        swept.left_paths.push(path.clone());
     }
+    // Another task took the name before hardening's write: nothing was written, the run is 56
+    // for it, and the task now under the name is judged as the walk judges, in this sweep.
+    if swapped_before && let Ok(path) = path {
+        let at = Walk {
+            pool,
+            lawyer,
+            names,
+            resolved,
+            groups,
+            swept,
+        };
+        replaced::again(fs, path, at);
+    }
+}
+
+/// Hardens the task `name` in `folder` ([`harden::harden_task`]) into `hardened`; whether
+/// another task took its name before the write, so nothing was written.
+fn swapped_before_write<S: Sweeper>(
+    fs: &mut S,
+    folder: &S::Folder,
+    name: &str,
+    pool: &[Sid],
+    lawyer: &Sid,
+    groups: &mut Groups,
+    hardened: &mut harden::Hardened,
+) -> bool {
+    let (swapped, across) = (hardened.swapped, hardened.swapped_after.len());
+    let at = HardenWith {
+        pool,
+        lawyer,
+        groups,
+        hardened: &mut *hardened,
+        lock: true,
+    };
+    harden::harden_task(fs, folder, name, at);
+    hardened.swapped > swapped && hardened.swapped_after.len() == across
 }
 
 /// `found` for the task `name` in `folder`, unless hardening may have written its owner

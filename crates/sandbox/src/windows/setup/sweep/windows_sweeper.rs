@@ -174,6 +174,12 @@ impl Sweeper for WindowsSweeper {
         unsafe { service.GetFolder(&BSTR::from("\\")) }.map_err(failed("ITaskService::GetFolder"))
     }
 
+    fn folder_at(&mut self, path: &str) -> Result<ITaskFolder, Failed> {
+        let service = self.service()?;
+        // SAFETY: a live service and a BSTR that outlives the call.
+        unsafe { service.GetFolder(&BSTR::from(path)) }.map_err(failed("ITaskService::GetFolder"))
+    }
+
     fn subfolders(
         &mut self,
         folder: &ITaskFolder,

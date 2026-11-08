@@ -13,6 +13,7 @@
 use std::process::Command;
 
 mod admin_log;
+mod task_id;
 
 use super::windows_listing::{is_guid, parse_id, task_cache, task_cache_id_units};
 use super::windows_sweeper::WindowsSweeper;

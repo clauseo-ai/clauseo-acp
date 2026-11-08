@@ -75,12 +75,16 @@
 //!    owner is a pool SID or can't be read, else ignored; a cache key alone whose task can run
 //!    is 56 unless its `SD` reads and names an owner that isn't a pool SID; a folder or key gone
 //!    while listed and there again is 56. Nothing is deleted through a file or the registry. A
-//!    listing that can't be read is 56 too. A listed task left whose owner is SYSTEM,
+//!    listing that can't be read is 56 too. The walk's tasks are held by path and
+//!    `TaskCache\Tree` `Id`, the `Id` read before each was judged ([`replaced`]): one whose
+//!    `Id` changed since, replaced under its name, is judged again, and 56 when it can't be.
+//!    A listed task left whose owner is SYSTEM,
 //!    Administrators or `TrustedInstaller` and whose principal may be the lawyer loses every
 //!    write, delete and permission change its DACL gives an account a pool user may be
 //!    ([`harden`]): the owner rule catches a task a pool user registered, this one a task it
-//!    could modify. Never 56, a failure included, except a task whose `Id` changed across the
-//!    write: 56, and its owner ignored from then on while its `Id` holds ([`untrusted`]);
+//!    could modify. Never 56, a failure included, except a task whose `Id` changed before the
+//!    write (56, nothing written, the task now under the name judged again) or across it: 56,
+//!    and its owner ignored from then on while its `Id` holds ([`untrusted`]);
 //! 5. cancels every BITS job a pool user owns, whatever step 4 found (`BG_JOB_ENUM_ALL_USERS`,
 //!    each job's owner). One that can't be cancelled, an owner that can't be read, a list that
 //!    can't be read, or one of `JOBS_CAP` jobs is 57; 56 wins when both. Only then, with no
@@ -117,6 +121,7 @@ mod file_trust;
 mod group;
 pub mod harden;
 pub mod log_path;
+mod replaced;
 mod resolve;
 mod running;
 mod swept;
@@ -255,6 +260,9 @@ pub trait Sweeper: Gate + Bits + Record {
     type Folder;
     /// The root folder, `\`.
     fn root(&mut self) -> Result<Self::Folder, Failed>;
+    /// The folder at `path` (`\` or `\A\B`, `ITaskService::GetFolder`); `Err` when it can't
+    /// be opened.
+    fn folder_at(&mut self, path: &str) -> Result<Self::Folder, Failed>;
     /// The folders directly below `folder`, each `Err` where it couldn't be read; `Err` when
     /// the list couldn't be.
     fn subfolders(
@@ -559,6 +567,15 @@ pub fn sweep_tasks<S: Sweeper>(fs: &mut S, pool: &[Sid], lawyer: Option<&Sid>) -
             swept: &mut swept,
         };
         unlisted::cross_check(fs, &listed, at);
+        let at = Walk {
+            pool,
+            lawyer,
+            names: &names,
+            resolved: &mut resolved,
+            groups: &mut groups,
+            swept: &mut swept,
+        };
+        replaced::recheck(fs, at);
     }
     swept
 }

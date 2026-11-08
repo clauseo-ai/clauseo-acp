@@ -17,6 +17,7 @@ mod hardening;
 mod log_path;
 mod principals;
 mod record;
+mod replaced;
 mod running;
 mod sequence;
 mod swapped;
@@ -347,6 +348,10 @@ impl Sweeper for Fake {
     fn root(&mut self) -> Result<String, Failed> {
         self.done.push("root".to_owned());
         Ok("\\".to_owned())
+    }
+
+    fn folder_at(&mut self, path: &str) -> Result<String, Failed> {
+        swapped::folder_at(self, path)
     }
 
     fn subfolders(&mut self, folder: &String) -> Result<Vec<Result<String, Failed>>, Failed> {
