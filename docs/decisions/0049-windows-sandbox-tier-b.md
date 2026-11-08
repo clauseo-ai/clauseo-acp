@@ -1421,6 +1421,96 @@ process it couldn't stop, or once at Clauseo's start after an unclean session
 **What the app shows.** After a run that stopped something: "Clauseo stopped an agent that
 tried to leave the Safe workspace". The app thread owns the final copy and its Hindi.
 
+### The launcher (PR6 interface)
+
+This section is the single source both sides point to. The host and stage C agreed it, and the
+orchestrator ruled on it. It is how the host starts a tier B agent. The host's
+`SandboxLaunchers` seam (#660, R17 PR-D's D3) wraps it, as it wraps `SeatbeltLauncher` on
+macOS. The sandbox takes no host types: matters and sessions are the host's stable text forms
+(`MatterId`'s `Display`, and the run folder's session name).
+
+```rust
+// crates/sandbox/src/windows/launch.rs, #[cfg(windows)]
+impl Launchers {
+    /// `runner`: the install's `clauseo-sandbox-run.exe`, absolute.
+    pub fn new(data_dir: &Path, runner: &Path) -> Result<Launchers, Error>;
+
+    /// Starts the matter's first-launch walk, or joins the one already running, and returns at
+    /// once. One walk per matter: a call with another session's policy (a different tmpdir or
+    /// credentials) joins it.
+    pub fn prepare(&self, matter: &str, policy: &Policy) -> Preparing;
+
+    /// Cheap (the ledger and a change-journal check): whether `launch` takes the fast path.
+    pub fn is_prepared(&self, matter: &str, policy: &Policy) -> bool;
+
+    /// The fast path, within the host's bound. A matter that isn't prepared is refused at once
+    /// with `Error::NotPrepared`; the trees are never walked inline. A failure after the
+    /// session was marked open undoes itself, so the host doesn't call `after_session` for it.
+    pub fn launch(&self, policy: Policy, matter: &str, session: &str, running: &[&str],
+        opts: SpawnOptions, denials: Arc<dyn DenialSink>)
+        -> Result<(Arc<dyn clauseo_process::Launcher>, Vec<SetAside>), Error>;
+
+    /// Once per spawned agent, and only after its process tree is gone (the host's straggler
+    /// wait): the repair, `set_aside::after_session` and the clean-close record.
+    pub fn after_session(&self, matter: &str, session: &str, policy: &Policy) -> Vec<SetAside>;
+}
+
+impl Preparing {
+    pub fn progress(&self) -> Progress;
+    /// Stops at the next folder. The work so far is kept in the ACL ledger, so the next
+    /// `prepare` or `launch` continues from it.
+    pub fn cancel(&self);
+}
+
+pub struct Progress { pub walked: u64, pub done: bool, pub failed: Option<Arc<Error>> }
+```
+
+- **What `launch` does**, in order:
+  1. the launch check (the admin copy, the WSL deny, the clean-close record);
+  2. marks the session open;
+  3. assigns the pool user;
+  4. the gate and the plan;
+  5. `wfp::check_launch`;
+  6. `apply` of the session's own items;
+  7. writes the protected launch file;
+  8. returns a launcher that starts `clauseo-sandbox-run.exe --launch <file>` through
+     `spawn_in_tree`.
+
+  Each returned launcher starts one agent. The agent's whole environment, including the proxy's
+  variables, travels in the launch file, never on the runner's command line. `Handle::pid()` is
+  the outer runner's.
+- **What the host passes in the `Policy`:**
+  - the network as `Loopback::Ports` inside 46100-46199, from a `ListenerFor::TierB` proxy,
+    never `Any`;
+  - the agent's credentials file, through `Policy::credentials(path)`.
+
+  `denials` is accepted but unused: WFP gives no denial feed, and the host's proxy reports
+  denials.
+- **Errors:** `Error` with `code()` and `cause()`. Appended: `PoolFull` (the host shows
+  `NotProtectedCause::PoolFull`), `NotPrepared` (retryable: the host goes back to `prepare`) and
+  `Cancelled`. There is no "matter busy" error: a matter's second concurrent session gets a pool
+  user of its own (the extra-user-per-matter PR).
+- **The exit:** the host decodes the child's exit status with `RunOutcome::from_exit` (`Agent`,
+  `Runner(RunExit)`, `HostEnded`, `Unknown`) or `RunExit::from_code`. `RunExit::Escapee` becomes
+  the host's "left the Safe workspace" stop (R17 PR-E). The outer asks the stop task itself.
+- **The host's side:**
+  - `launch_bound` is 180 s on Windows tier B;
+  - a launch on an unprepared matter calls `prepare` and polls `progress()` with no cap, showing
+    "preparing this matter";
+  - the lawyer's Stop ends the wait, not the walk;
+  - `cancel()` runs on matter close or app quit;
+  - `SpawnOptions::stdin_grace` is 5 s on Windows tier B. The outer's end fits well inside it:
+    the agent's 1 s `GRACE`, ending its job, and the escapee snapshot (at most 230 ms measured)
+    come to about 1.5 s. The cancel tests pin the outer finishing within 3 s.
+- **Measured cost of the first walk** (Server 2025 copy, optimised build): 17 s at 20k files,
+  30 s at 50k. Later launches use the clean-close record and take 20-70 ms.
+- **Open, for the extra-user-per-matter PR:** grants name the pool user today, so a matter's
+  second pool user would need its own first walk. The orchestrator prefers granting the matter's
+  trees through a group, so one walk covers every pool user the matter uses. A test then shows a
+  second concurrent session of a prepared matter starting on the fast path. Changing a local
+  group's members needs an administrator, so the design (for example static slot groups made at
+  set-up) comes to the orchestrator before that PR.
+
 ## Consequences
 
 - A finished set-up moves the machine to tier B at the next tier query; R17's
