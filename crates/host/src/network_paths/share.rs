@@ -7,18 +7,20 @@
 use std::path::Path;
 
 use super::NetEnv;
-use super::resolve::{Fs, Resolved, resolve};
+use super::resolve::{Disk, Walked, walk};
 
 /// Whether a path an agent named (absolute, or taken from the matter folder `matter`) may be
-/// handed to the file system: when it lies by its text in `matter` kept on a share (the
-/// lawyer's own), or when neither its text nor anything on its way (each name, each link's
-/// target, walked on `fs` and checked before it is touched) is a network location.
-pub(crate) fn may_touch(path: &Path, matter: &Path, net: &NetEnv, fs: &dyn Fs) -> bool {
+/// handed to the file system: only when the network-safe walk vouches for it (no network
+/// location in its text, on its way or as a link's target, nothing it can't look at:
+/// [`walk`] on `disk`, fail-closed). Never one that lies by its text in `matter` kept on a
+/// share: that one is the lawyer's own, judged by its text alone, untouched.
+pub(crate) fn may_touch(path: &Path, matter: &Path, disk: &Disk<'_>) -> bool {
     let joined = matter.join(path);
+    let net = disk.net;
     if under_share_matter(path, matter, net) || under_share_matter(&joined, matter, net) {
-        return true;
+        return false;
     }
-    !net.is_network(path) && resolve(&joined, fs, net) != Resolved::Network
+    !net.is_network(path) && matches!(walk(&joined, disk), Walked::Local(_))
 }
 
 /// Whether `path` lies, by its text alone, at or under `matter` when `matter` is itself a

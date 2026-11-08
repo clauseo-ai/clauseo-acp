@@ -51,6 +51,17 @@ fn network_touched(fs: &FakeFs) -> Vec<PathBuf> {
         .collect()
 }
 
+/// Whether the held-open check may look at `path` from the matter `folder`, on `fs`.
+fn look(folder: &Path, path: &Path, net: &NetEnv, fs: &FakeFs) -> bool {
+    let real = |_: &Path| None;
+    let disk = Disk {
+        fs,
+        real: &real,
+        net,
+    };
+    may_look(folder, path, &disk)
+}
+
 /// Windows' rules with drive `Z:` a mapped share.
 fn windows_net() -> NetEnv {
     NetEnv {
@@ -72,7 +83,7 @@ fn a_unc_or_device_path_in_a_local_matter_is_refused_untouched() {
             r"\\?\GLOBALROOT\Device\Mup\server",
         ] {
             assert!(refused(&fence("/m", &[path]), &net, &fs), "{path}");
-            let held = may_look(Path::new("/m"), Path::new(path), &net, &fs);
+            let held = look(Path::new("/m"), Path::new(path), &net, &fs);
             assert!(!held, "{path}");
         }
     }
@@ -105,7 +116,7 @@ fn a_path_under_a_remote_mount_or_an_automount_folder_is_refused_untouched() {
         "/Network/Servers/x",
     ] {
         assert!(refused(&fence("/m", &[path]), &net, &fs), "{path}");
-        assert!(!may_look(Path::new("/m"), Path::new(path), &net, &fs));
+        assert!(!look(Path::new("/m"), Path::new(path), &net, &fs));
     }
     assert_eq!(network_touched(&fs), Vec::<PathBuf>::new());
     let touched = fs.touched();
@@ -146,7 +157,7 @@ fn a_link_to_a_network_target_is_refused_before_it_is_followed() {
             })
             .collect();
         assert!(past.is_empty(), "{target}: {past:?}");
-        assert!(!may_look(
+        assert!(!look(
             Path::new("/m"),
             Path::new("link/doc.docx"),
             &net,
@@ -171,12 +182,7 @@ fn a_local_path_is_walked_as_before() {
     ));
     assert!(refused(&fence("/m", &["/m/in/settings.json"]), &net, &fs));
     assert!(refused(&fence("/m", &["/m/x/../in/y"]), &net, &fs));
-    assert!(may_look(
-        Path::new("/m"),
-        Path::new("brief.docx"),
-        &net,
-        &fs
-    ));
+    assert!(look(Path::new("/m"), Path::new("brief.docx"), &net, &fs));
 }
 
 /// In a matter on a share, a path by its text under the matter is outside and never looked at;
@@ -195,7 +201,7 @@ fn a_path_in_a_share_matter_is_outside_untouched_and_anything_else_refused() {
     ] {
         assert!(!refused(&fence(matter, &[path]), &net, &fs), "{path}");
         assert!(
-            !may_look(Path::new(matter), Path::new(path), &net, &fs),
+            !look(Path::new(matter), Path::new(path), &net, &fs),
             "{path}"
         );
     }
@@ -298,4 +304,63 @@ fn a_long_s_or_kelvin_sign_spelling_of_the_data_folder_is_refused() {
     let matter = r"\\srv\share\kdata";
     let kelvin = r"\\srv\share\\u{212A}data\x";
     assert!(refused(&fence(matter, &[kelvin]), &share, &fs));
+}
+
+/// A long-s, Kelvin-sign or other-normalisation spelling of a remote mount or of `/Network`
+/// is refused with nothing looked at.
+#[test]
+fn a_folded_or_normalised_spelling_of_a_mount_is_refused_untouched() {
+    let fs = FakeFs::default();
+    let net = NetEnv {
+        remote_mounts: vec!["/Volumes/Share".into(), "/Volumes/Caf\u{e9}".into()],
+        ..plain_net(false)
+    };
+    for path in [
+        "/Volume\u{17F}/Share/x",
+        "/Netwo\u{72}\u{212A}/Servers/evil",
+        "/Volumes/Cafe\u{301}/x",
+    ] {
+        assert!(refused(&fence("/m", &[path]), &net, &fs), "{path}");
+        assert!(!look(Path::new("/m"), Path::new(path), &net, &fs), "{path}");
+    }
+    let touched = fs.touched();
+    assert!(
+        !touched
+            .iter()
+            .any(|p| p.starts_with("/Volumes") || p.starts_with("/Volume\u{17F}")),
+        "{touched:?}"
+    );
+}
+
+/// A path in a share matter is never looked at by the held-open check, the guard or the
+/// after-turn tool paths (they share `may_touch`): judged by its text, and the ask goes to the
+/// lawyer.
+#[test]
+fn a_path_in_a_share_matter_is_never_touched_by_a_held_or_tool_path_check() {
+    let fs = FakeFs::default();
+    let net = windows_net();
+    let matter = Path::new(r"\\srv\share\m");
+    for path in [r"\\srv\share\m\brief.docx", "brief.docx", r"sub\x.docx"] {
+        assert!(!look(matter, Path::new(path), &net, &fs), "{path}");
+    }
+    assert!(fs.touched().is_empty(), "{:?}", fs.touched());
+}
+
+/// A failed look (a name the walk may not read, a link it can't read) is refused, never
+/// walked past.
+#[cfg(unix)]
+#[test]
+fn a_name_the_walk_cannot_look_at_is_refused() {
+    let fs = FakeFs::with(&[("/m/locked", Fake::Denied), ("/m/bad", Fake::BadLink)]);
+    let net = plain_net(false);
+    for path in ["/m/locked/x", "/m/bad/x"] {
+        assert!(refused(&fence("/m", &[path]), &net, &fs), "{path}");
+        assert!(!look(Path::new("/m"), Path::new(path), &net, &fs), "{path}");
+    }
+    let past: Vec<PathBuf> = fs
+        .touched()
+        .into_iter()
+        .filter(|p| p.starts_with("/m/locked/x") || p.starts_with("/m/bad/x"))
+        .collect();
+    assert!(past.is_empty(), "{past:?}");
 }
