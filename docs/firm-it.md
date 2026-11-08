@@ -371,14 +371,14 @@ file (`unknown images: ...`), by file name only. A security product that hides i
 tokens from SYSTEM can cause this on every run; tell Clauseo support the file names the line
 gives.
 
-### If the SandboxSweep task ends with 54 or 55
+### If the SandboxSweep task ends with 55 or 56
 
 The SYSTEM task `\Clauseo\SandboxSweep` runs at the end of every sandboxed session. It deletes the
-sandbox users' scheduled tasks and cancels their BITS jobs; it stops no process. Exit 54 means a
+sandbox users' scheduled tasks and cancels their BITS jobs; it stops no process. Exit 55 means a
 scheduled task on the machine couldn't be read or deleted, or a Task Scheduler folder couldn't be
-listed. Exit 55 means a sandbox user's BITS job couldn't be cancelled. Either way Clauseo counts
+listed. Exit 56 means a sandbox user's BITS job couldn't be cancelled. Either way Clauseo counts
 the session as not cleanly ended. The task's Application Event Log line gives counts only, never
-task names. The usual cause of 54 on every run is a task whose "run as" account can't be found: a
+task names. The usual cause of 55 on every run is a task whose "run as" account can't be found: a
 domain account while no domain controller is reachable, or a deleted account. Look in Task
 Scheduler for tasks whose user shows as a bare SID or can't be resolved, and fix or delete them;
 the next session's run then ends 0.
