@@ -130,6 +130,8 @@ pub trait Markers {
     fn request_sweep(&mut self) -> Result<(), String>;
     /// Waits `pause`.
     fn pause(&mut self, pause: Duration);
+    /// Says `line` on the outer's stderr: what went wrong but refuses nothing.
+    fn note(&mut self, line: &str);
 }
 
 /// The markers, the stale ones removed: those of a pool user the record no longer lists, and
@@ -245,7 +247,8 @@ fn remark_swept(
 /// session. One whose sweep before its final stop completed (now or earlier) is re-marked to
 /// await that stop, which is requested, and refuses the logon. One whose stop or sweep completed
 /// but couldn't be re-marked refuses the logon with no stop requested. One whose final stop
-/// completed is clean.
+/// completed is clean. A clean one that can't be removed refuses nothing: it is noted
+/// ([`Markers::note`]).
 pub fn logon_check(fs: &mut impl Markers, pool_user: &Sid) -> Result<(), Refused> {
     let (sessions, known) = current(fs)
         .map_err(|e| Refused::stop(format!("the session markers can't be read ({e})")))?;
@@ -320,7 +323,18 @@ pub fn logon_check(fs: &mut impl Markers, pool_user: &Sid) -> Result<(), Refused
     let mut awaits = "the sandbox's stop";
     if !standing {
         // A task the escapee registered is live until its sweep ran: wait for it here.
-        let (swept, done) = wait_for_sweeps(fs, sweeping, requested.is_some())?;
+        let (left, done) = wait_for_sweeps(fs, sweeping, requested.is_some())?;
+        // Only one awaiting the re-mark to its final stop owes a stop. Any other left is clean
+        // but couldn't be removed (another program holds it open): it refuses nothing.
+        let (swept, unremoved): (Vec<_>, Vec<_>) = left
+            .into_iter()
+            .partition(|session| session.state.is_some_and(|state| state.swept(done)));
+        for session in unremoved {
+            fs.note(&format!(
+                "an earlier session's marker {} is clean but couldn't be removed",
+                session.id
+            ));
+        }
         if swept.is_empty() {
             return Ok(());
         }
