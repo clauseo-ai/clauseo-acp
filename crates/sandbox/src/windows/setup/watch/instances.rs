@@ -33,8 +33,9 @@ pub trait Pipes {
     fn owned_by_system(&mut self, pipe: &Self::Pipe) -> Result<bool, Failed>;
     /// Whether `pipe`'s client has connected: `None` when the connect failed.
     fn accepted(&mut self, pipe: &mut Self::Pipe) -> Option<bool>;
-    /// Whether `pipe`'s client is still there.
-    fn alive(&mut self, pipe: &Self::Pipe) -> bool;
+    /// Whether `pipe`'s client is still there. `Err` when that can't be told (the handle
+    /// lacks the access to ask), which ends the run rather than drop every client unseen.
+    fn alive(&mut self, pipe: &Self::Pipe) -> Result<bool, Failed>;
     /// Writes all of `line` to `pipe`'s client: whether it went.
     fn write(&mut self, pipe: &Self::Pipe, line: &[u8]) -> bool;
     /// Disconnects and closes `pipe`.
@@ -111,12 +112,21 @@ impl<P: Pipes> Instances<P> {
         // with another instance already open.
         self.listen_if_room()?;
         let mut gone = Vec::new();
+        let mut failed = None;
         for client in std::mem::take(&mut self.clients) {
-            if self.pipes.alive(&client) {
-                self.clients.push(client);
-            } else {
-                gone.push(client);
+            match self.pipes.alive(&client) {
+                Ok(false) if failed.is_none() => gone.push(client),
+                Ok(_) => self.clients.push(client),
+                Err(why) => {
+                    failed.get_or_insert(why);
+                    self.clients.push(client);
+                }
             }
+        }
+        if let Some(why) = failed {
+            // Kept, to close after the name is deleted.
+            self.clients.extend(gone);
+            return Err(why);
         }
         self.retire(gone)?;
         self.listen_if_room()?;

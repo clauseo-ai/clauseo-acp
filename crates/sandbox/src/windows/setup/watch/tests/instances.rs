@@ -8,6 +8,17 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use super::super::Failed;
 use super::super::instances::{Instances, MAX_INSTANCES, Pipes};
 
+/// What the fake's handles are refused.
+#[derive(Default, PartialEq, Eq)]
+enum Refused {
+    #[default]
+    Nothing,
+    /// A later instance's owner isn't SYSTEM.
+    Owner,
+    /// `PeekNamedPipe` answers access denied.
+    Peek,
+}
+
 /// Instances by number, with what each poll or write finds scripted.
 #[derive(Default)]
 struct FakePipes {
@@ -19,7 +30,7 @@ struct FakePipes {
     gone: HashSet<u32>,
     writes_fail: bool,
     create_fails: bool,
-    foreign: bool,
+    refused: Refused,
     calls: Vec<String>,
 }
 
@@ -53,15 +64,18 @@ impl Pipes for FakePipes {
     }
 
     fn owned_by_system(&mut self, _pipe: &u32) -> Result<bool, Failed> {
-        Ok(!self.foreign)
+        Ok(self.refused != Refused::Owner)
     }
 
     fn accepted(&mut self, pipe: &mut u32) -> Option<bool> {
         self.accepted.get(pipe).copied().unwrap_or(Some(false))
     }
 
-    fn alive(&mut self, pipe: &u32) -> bool {
-        !self.gone.contains(pipe)
+    fn alive(&mut self, pipe: &u32) -> Result<bool, Failed> {
+        if self.refused == Refused::Peek {
+            return Err("PeekNamedPipe was refused on the server end".to_owned());
+        }
+        Ok(!self.gone.contains(pipe))
     }
 
     fn write(&mut self, pipe: &u32, _line: &[u8]) -> bool {
@@ -162,7 +176,7 @@ fn a_listen_that_fails_ends_the_run_with_the_instances_kept() {
 #[test]
 fn a_later_instance_not_owned_by_system_ends_the_run() {
     let mut inst = FakePipes::start();
-    inst.pipes().foreign = true;
+    inst.pipes().refused = Refused::Owner;
     assert!(connect(&mut inst).unwrap_err().contains("SYSTEM"));
     // The foreign one is closed; ours is still held.
     assert_eq!(inst.count(), 1);
@@ -244,4 +258,18 @@ fn a_long_mixed_run_never_reaches_zero() {
         never_zero(&mut inst);
         assert!(inst.pipes().open.len() <= MAX_INSTANCES);
     }
+}
+
+#[test]
+fn a_peek_the_handle_may_not_make_ends_the_run_and_drops_no_client() {
+    let mut inst = FakePipes::start();
+    connect(&mut inst).unwrap();
+    connect(&mut inst).unwrap();
+    inst.pipes().gone.insert(0);
+    inst.pipes().refused = Refused::Peek;
+    assert!(inst.poll().unwrap_err().contains("refused"));
+    // Nothing closed: the run deletes the name, then closes them all.
+    assert_eq!((inst.clients(), inst.count()), (2, 3));
+    assert!(!inst.pipes().calls.iter().any(|c| c.starts_with("close")));
+    never_zero(&mut inst);
 }

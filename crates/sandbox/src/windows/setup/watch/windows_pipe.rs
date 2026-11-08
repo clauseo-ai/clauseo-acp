@@ -11,8 +11,8 @@
 use std::io;
 
 use windows::Win32::Foundation::{
-    ERROR_FILE_NOT_FOUND, ERROR_IO_PENDING, ERROR_PIPE_CONNECTED, ERROR_SUCCESS, HANDLE, HLOCAL,
-    LocalFree, WAIT_OBJECT_0, WIN32_ERROR,
+    ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND, ERROR_IO_PENDING, ERROR_PIPE_CONNECTED,
+    ERROR_SUCCESS, HANDLE, HLOCAL, LocalFree, WAIT_OBJECT_0, WIN32_ERROR,
 };
 use windows::Win32::Security::Authorization::{
     GetSecurityInfo, SE_KERNEL_OBJECT, SE_OBJECT_TYPE, SE_REGISTRY_KEY,
@@ -23,7 +23,7 @@ use windows::Win32::Security::{
 };
 use windows::Win32::Storage::FileSystem::{
     FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, FILE_FLAGS_AND_ATTRIBUTES,
-    PIPE_ACCESS_OUTBOUND, READ_CONTROL, WriteFile,
+    PIPE_ACCESS_DUPLEX, READ_CONTROL, WriteFile,
 };
 use windows::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
 use windows::Win32::System::Pipes::{
@@ -47,7 +47,7 @@ use crate::windows::token::os::LocalDescriptor;
 
 /// The out buffer: about 300 lines.
 const OUT_BUFFER: u32 = 64 * 1024;
-/// The in buffer: the client never writes (the pipe is outbound).
+/// The in buffer: the client never writes (its DACL entry is `FR`).
 const IN_BUFFER: u32 = 512;
 /// How long one write may take before its client is dropped, in milliseconds.
 const WRITE_WAIT_MS: u32 = 1000;
@@ -135,7 +135,9 @@ impl WinPipes {
         let pipe = unsafe {
             CreateNamedPipeW(
                 &HSTRING::from(self.name.as_str()),
-                PIPE_ACCESS_OUTBOUND | FILE_FLAG_OVERLAPPED | only,
+                // DUPLEX, not OUTBOUND: `PeekNamedPipe` (`alive`) needs read access on the server
+                // end. Clients can't write all the same: the DACL gives them `FR` only.
+                PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | only,
                 PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
                 most,
                 OUT_BUFFER,
@@ -181,7 +183,7 @@ impl Pipes for WinPipes {
     }
 
     fn owned_by_system(&mut self, pipe: &Instance) -> Result<bool, Failed> {
-        // The server end's write access holds READ_CONTROL (STANDARD_RIGHTS_WRITE).
+        // The server end's access holds READ_CONTROL (STANDARD_RIGHTS_READ and _WRITE).
         owner_is_system(pipe.pipe.0, SE_KERNEL_OBJECT)
             .map_err(|error| format!("the pipe's owner couldn't be read: {error}"))
     }
@@ -202,9 +204,16 @@ impl Pipes for WinPipes {
         done.is_ok().then_some(true)
     }
 
-    fn alive(&mut self, pipe: &Instance) -> bool {
+    fn alive(&mut self, pipe: &Instance) -> Result<bool, Failed> {
         // SAFETY: a live server end; no buffer, so nothing is read.
-        unsafe { PeekNamedPipe(pipe.pipe.0, None, 0, None, None, None) }.is_ok()
+        match unsafe { PeekNamedPipe(pipe.pipe.0, None, 0, None, None, None) } {
+            Ok(()) => Ok(true),
+            // The handle can't ask: every client would look gone. Fail loudly instead (74).
+            Err(error) if error.code() == ERROR_ACCESS_DENIED.to_hresult() => Err(format!(
+                "PeekNamedPipe was refused on the server end: {error}"
+            )),
+            Err(_gone) => Ok(false),
+        }
     }
 
     fn write(&mut self, pipe: &Instance, line: &[u8]) -> bool {

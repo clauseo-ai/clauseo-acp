@@ -272,12 +272,12 @@ fn a_network_refusal_goes_out_with_net_and_a_local_one_without() {
         .filter_map(|r| denied_line(r, &pool()))
         .collect();
     assert!(lines[0].contains("\"net\":true"), "{}", lines[0]);
-    assert!(!lines[1].contains("net"), "{}", lines[1]);
+    assert!(lines[1].contains("\"net\":false"), "{}", lines[1]);
     assert!(matches!(
         Line::parse(lines[0].trim_end()),
         Some(Line::Denied { net: true, .. })
     ));
-    // A line with no net reads as local: v stays 1.
+    // Sent as false, a local line reads as local.
     assert!(matches!(
         Line::parse(lines[1].trim_end()),
         Some(Line::Denied { net: false, .. })
@@ -306,4 +306,31 @@ fn a_key_a_killed_run_left_is_replaced_and_anyone_elses_refused() {
     assert_eq!(key_start(None), KeyStart::Fresh);
     assert_eq!(key_start(Some(true)), KeyStart::Stale);
     assert_eq!(key_start(Some(false)), KeyStart::Foreign);
+}
+
+#[test]
+fn a_line_with_no_net_reads_as_network() {
+    let line = r#"{"v":1,"sid":"S-1-5-21-1-2-3-1003","pid":1,"path":"C:\\x","access":"unknown"}"#;
+    assert!(matches!(
+        Line::parse(line),
+        Some(Line::Denied { net: true, .. })
+    ));
+}
+
+#[test]
+fn a_waiting_create_older_than_two_seconds_is_stale_and_pairs_with_nothing() {
+    use super::super::consumer::STALE_AFTER_SECONDS;
+    let rate = 1000;
+    let mut fed = Fed::new();
+    fed.consumer.set_stamp_rate(rate);
+    let limit = STALE_AFTER_SECONDS * rate;
+    // An end whose own Create came late finds an older, stale entry: dropped, unpaired.
+    create_at(&mut fed, 0, 0x60, NAME);
+    end_at(&mut fed, limit + 1, 0x60, ACCESS_DENIED);
+    assert_eq!(fed.out, []);
+    assert_eq!(fed.consumer.pending(), 0);
+    // At the limit it still pairs.
+    create_at(&mut fed, 10, 0x61, NAME);
+    end_at(&mut fed, 10 + limit, 0x61, ACCESS_DENIED);
+    assert_eq!(fed.out.len(), 1);
 }
