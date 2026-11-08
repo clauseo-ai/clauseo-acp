@@ -94,7 +94,12 @@ fn at_10_minutes_the_route_is_not_reused_and_a_meant_proxy_refuses() {
     let (rig, answers) = failing_rig();
     let (address, route, _heads) = firm_proxy();
     set(&answers, "a.test", Answer::Route(route));
-    assert_eq!(rig.connect("a.test:443").1, 200);
+    let (first, code) = rig.connect("a.test:443");
+    assert_eq!(code, 200);
+    // A tunnel is recorded only once its relay ends; close it and wait for that record so the
+    // refusal's record cannot land ahead of it.
+    drop(first);
+    assert_eq!(rig.records(1)[0].verdict, Verdict::Tunnel);
     set(&answers, "a.test", meant());
     rig.clock.advance(Duration::from_mins(10));
     assert_eq!(rig.connect("a.test:443").1, 502);
