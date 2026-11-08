@@ -1,6 +1,6 @@
 //! The markers' effects on Windows (`unclean.rs`), as the lawyer: the run folder's markers, the
 //! record's sequences and `PoolSids` (the record grants Users read), and requests for the stop
-//! and sweep tasks through the owner's `FRFX` entry.
+//! and sweep tasks through the owner's `FRFX` entry. [`start_up_requests`] is the desktop's call.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -10,7 +10,7 @@ use super::super::marker::{
     MarkerState, Sequences, UncleanSession, marker_path, remove_marker, unclean_sessions,
     write_marker_at,
 };
-use super::{Markers, logon_check};
+use super::{Markers, StartUp, await_sweeps, logon_check, start_up};
 use crate::windows::record::sandbox_pool_sids;
 use crate::windows::refresh::{request_pool_stop, request_pool_sweep};
 use crate::windows::setup::read_record_value;
@@ -85,4 +85,19 @@ impl Markers for OsMarkers {
 /// F4, for the outer before it writes its own marker (`unclean::logon_check`).
 pub(crate) fn check_logon(data_dir: &Path, pool_user: &Sid) -> Result<(), String> {
     logon_check(&mut OsMarkers::new(data_dir), pool_user)
+}
+
+/// A launch's check, for `clean_close::check_launch` (`unclean::await_sweeps`).
+pub(crate) fn check_sweeps(data_dir: &Path) -> Result<(), String> {
+    await_sweeps(&mut OsMarkers::new(data_dir))
+}
+
+/// The desktop's call at its start, once, before any launch and off the UI thread (it makes
+/// COM calls and reads the registry): every marker a dead outer left becomes one awaiting a stop,
+/// the clean and stale ones go, and `\Clauseo\SandboxStop` and `\Clauseo\SandboxSweep` are
+/// requested for what is still awaited. It never waits for a run: the next launch and logon
+/// check the markers again (`unclean.rs`). `data_dir` is the app's data folder. An error is the
+/// run folder that couldn't be listed.
+pub fn start_up_requests(data_dir: &Path) -> io::Result<StartUp> {
+    start_up(&mut OsMarkers::new(data_dir))
 }
