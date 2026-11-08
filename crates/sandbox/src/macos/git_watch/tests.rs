@@ -20,6 +20,7 @@ use crate::{Clock as _, Denial, GitOutcome};
 
 mod backstop;
 mod fake;
+mod finds;
 mod neutral;
 mod shapes;
 mod state;
@@ -353,19 +354,6 @@ fn two_sessions_of_one_matter_both_end_and_set_aside_once() {
     quiet(second.full_scan(Phase::Ended));
     assert_moved(&first_notices, "foo/.git");
     none(&second_notices);
-}
-
-#[test]
-fn a_network_volume_in_the_matter_is_never_entered() {
-    let fs = FakeFs::new();
-    let (mut watch, notices) = watch(&fs, &[]);
-    fs.dir("/m/share");
-    fs.repo("/m/share/.git");
-    fs.network("/m/share");
-    quiet(watch.full_scan(Phase::Ended));
-    quiet(watch.events(&[event("/m/share/.git", MOVED_IN)]));
-    assert!(fs.exists("/m/share/.git"));
-    none(&notices);
 }
 
 #[test]

@@ -1,9 +1,11 @@
 //! The watch's decisions: which events and which entries of a scan are found, and, once the
 //! session has ended, set aside.
 
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::aside::{Aside, Stuck};
 use super::state::{Baseline, Id, Known};
@@ -13,9 +15,24 @@ use super::{
 use crate::GitItem;
 use crate::policy::{name_key, path_key, under};
 
+mod names;
 mod sweep;
 
 pub(crate) use sweep::Sweep;
+
+/// The most entries the scans of one batch's arrived folders list while the agent may run:
+/// past it the scan stops and the session ends, so a huge folder can't stall the watch while
+/// the agent works. The final scan, once the session has ended, has no cap.
+pub(crate) const SCAN_BUDGET: usize = 20_000;
+
+/// Items an event reported that were gone when it was checked, in every watch of this host.
+static GONE: AtomicU64 = AtomicU64::new(0);
+
+/// How many items events reported that were gone when checked, in every watch since the host
+/// started: a rename in and out again before the check leaves only this trace.
+pub(crate) fn gone_total() -> u64 {
+    GONE.load(Ordering::Relaxed)
+}
 
 /// One session's watch of one matter.
 pub(crate) struct Watch<F> {
@@ -43,6 +60,8 @@ pub(crate) struct Watch<F> {
     all_old: bool,
     /// The 30 s pass's folders and where it stopped.
     sweep: Sweep,
+    /// Items this watch's events reported that were gone when checked.
+    gone: u64,
 }
 
 /// A folder's listing.
@@ -108,7 +127,11 @@ impl<F: Fs> Watch<F> {
     }
 
     /// The watch of a session from its recorded `base`, for its final scan: every folder
-    /// counts as old, so a repository-shaped folder loses only its `HEAD`.
+    /// counts as old. It sets aside repository shapes only, never a whole folder of the
+    /// lawyer's: each `.git` not the launch's, the `HEAD` of a folder that was not a launch
+    /// repository (a repository-shaped one keeps the rest), each link out of the matter and
+    /// each new `commondir` path. A repository the lawyer made since the session died loses
+    /// its `.git` or its `HEAD` the same way.
     pub(crate) fn resume(fs: F, matter: PathBuf, aside: Aside, base: Baseline) -> Watch<F> {
         let keyed = |list: &[Known]| -> HashMap<PathBuf, Id> {
             list.iter()
@@ -132,6 +155,7 @@ impl<F: Fs> Watch<F> {
             folders: HashSet::new(),
             all_old: true,
             sweep: Sweep::default(),
+            gone: 0,
             fs,
             matter,
             aside,
@@ -169,39 +193,95 @@ impl<F: Fs> Watch<F> {
         std::mem::take(&mut self.aside.stuck)
     }
 
-    /// Checks one batch of events, while the agent may run: finds end the session.
+    /// How many items this watch's events reported that were gone when checked.
+    pub(crate) fn gone(&self) -> u64 {
+        self.gone
+    }
+
+    /// Checks one batch of events, while the agent may run: finds end the session, whether
+    /// or not the item is still there. Each event's path is checked by name first
+    /// (`check/names.rs`), reading no folder: one hit ends the session at once, with no
+    /// scan. Else each event is checked, its arrived folders scanned within [`SCAN_BUDGET`]
+    /// entries in all; past it the session ends too.
     pub(crate) fn events(&mut self, events: &[Event]) -> Asks {
+        let rescan = events.iter().any(|event| event.flags & RESCAN != 0);
+        if let Some(hit) = events.iter().find(|event| names::named(self, event)) {
+            for event in events {
+                self.count_gone(event);
+            }
+            tracing::warn!(
+                path = %hit.path.display(),
+                "an event named a git item in the matter; ending the session"
+            );
+            return Asks { rescan, end: true };
+        }
         let mut items = Vec::new();
-        let mut rescan = false;
+        let budget = Cell::new(SCAN_BUDGET);
+        let mut rescan = rescan;
         for event in events {
-            rescan |= self.event(event, &mut items);
+            self.count_gone(event);
+            let asks = self.event(event, &mut items, &budget);
+            rescan |= asks.rescan;
+            if asks.end {
+                tracing::warn!(
+                    path = %event.path.display(), budget = SCAN_BUDGET,
+                    "the git watch's scan of an arrived folder ran past its budget; ending the \
+                     session"
+                );
+                return Asks { rescan, end: true };
+            }
         }
         Asks { rescan, end: false }.and(self.put(items, Phase::Running))
+    }
+
+    /// Counts `event`'s item when something arrived there and is gone now.
+    fn count_gone(&mut self, event: &Event) {
+        if event.flags & ARRIVED == 0
+            || !event.path.starts_with(&self.matter)
+            || self.fs.meta(&event.path).is_some()
+        {
+            return;
+        }
+        self.gone += 1;
+        let total = GONE.fetch_add(1, Ordering::Relaxed) + 1;
+        tracing::debug!(
+            path = %event.path.display(), session = self.gone, total,
+            "an event's item was gone when checked"
+        );
     }
 
     /// Scans the whole matter: while the agent may run a find ends the session; once it has
     /// ended, each find is set aside.
     pub(crate) fn full_scan(&mut self, phase: Phase) -> Asks {
+        if phase == Phase::Ended && self.gone() > 0 {
+            tracing::info!(
+                matter = %self.matter.display(), session = self.gone(), total = gone_total(),
+                "items the session's events reported were gone when checked"
+            );
+        }
         let items = self.scan(&self.matter);
         self.put(items, phase)
     }
 
+    /// While the agent may run, any item ends the session, gone or not; once it has ended,
+    /// each item still there, on a local volume, is set aside.
     fn put(&mut self, items: Vec<Item>, phase: Phase) -> Asks {
         let mut asks = Asks::default();
         for (path, what, kind) in items {
-            let local = path.parent().is_some_and(|dir| self.fs.local(dir));
-            if !local || self.fs.meta(&path).is_none() {
-                continue;
-            }
             match phase {
                 Phase::Running => {
                     tracing::warn!(
                         path = %path.display(), ?what,
-                        "the git watch found what an agent left in the matter; ending the session"
+                        "the git watch found a git item in the matter; ending the session"
                     );
                     asks.end = true;
                 }
-                Phase::Ended => self.aside.put(&self.fs, &path, what, kind),
+                Phase::Ended => {
+                    let local = path.parent().is_some_and(|dir| self.fs.local(dir));
+                    if local && self.fs.meta(&path).is_some() {
+                        self.aside.put(&self.fs, &path, what, kind);
+                    }
+                }
             }
         }
         asks
@@ -213,17 +293,23 @@ impl<F: Fs> Watch<F> {
             .is_some_and(|id| self.fs.meta(path).is_some_and(|meta| meta.id == *id))
     }
 
-    /// Adds what `event` brings to `items`; true when it asks for a rescan. A `.git` at or
-    /// above its path is found itself; its folder's `HEAD` is checked whatever happened; a
-    /// folder that arrived is scanned and a link that arrived is checked. Nothing at or below
-    /// one of the launch's repositories is.
-    fn event(&self, event: &Event, items: &mut Vec<Item>) -> bool {
+    /// Adds what `event` brings to `items`, after `names::named` found no name in it. A
+    /// `.git` at or above its path is found itself, there or not; its folder's `HEAD` is
+    /// checked whatever happened; a folder that arrived is scanned, taking from `budget` the
+    /// entries it lists, and a link that arrived is checked. Nothing at or below one of the
+    /// launch's repositories is. Asks for a rescan when the events are incomplete or the path
+    /// is outside the matter, and to end the session when the scan ran past the budget.
+    fn event(&self, event: &Event, items: &mut Vec<Item>, budget: &Cell<usize>) -> Asks {
+        let rescan = Asks {
+            rescan: true,
+            end: false,
+        };
         if event.flags & RESCAN != 0 {
-            return true;
+            return rescan;
         }
         let Ok(rel) = event.path.strip_prefix(&self.matter) else {
             tracing::debug!(path = %event.path.display(), "an event outside the matter: rescan");
-            return true;
+            return rescan;
         };
         let mut at = self.matter.clone();
         let mut key = path_key(&self.matter);
@@ -231,13 +317,12 @@ impl<F: Fs> Watch<F> {
             at.push(name);
             key.push(name_key(name));
             if self.kept(&self.repos, &key, &at) || self.skip.contains(&key) {
-                return false;
+                return Asks::default();
             }
             if is_git(name) {
-                if let Some(meta) = self.fs.meta(&at) {
-                    items.push((at, GitItem::DotGit, meta.kind));
-                }
-                return false;
+                let kind = self.fs.meta(&at).map_or(Kind::Dir, |meta| meta.kind);
+                items.push((at, GitItem::DotGit, kind));
+                return Asks::default();
             }
         }
         items.extend(self.common_at(&key));
@@ -251,17 +336,18 @@ impl<F: Fs> Watch<F> {
             items.extend(self.head(dir, meta, &entries));
         }
         let Some(meta) = self.fs.meta(&event.path) else {
-            return false;
+            return Asks::default();
         };
         if event.flags & ARRIVED == 0 {
-            return false;
+            return Asks::default();
         }
+        let mut asks = Asks::default();
         match meta.kind {
-            Kind::Dir => items.extend(self.scan(&event.path)),
+            Kind::Dir => asks.end = !self.scan_within(&event.path, budget, items),
             Kind::Link => items.extend(self.link(&event.path, meta.kind)),
             Kind::File | Kind::Other => {}
         }
-        false
+        asks
     }
 
     /// The `commondir` path at or above path key `key`, when something new is there.
@@ -309,11 +395,25 @@ impl<F: Fs> Watch<F> {
     /// [`Watch::head`] takes, each link out, and each new `commondir` path.
     fn scan(&self, top: &Path) -> Vec<Item> {
         let mut items = Vec::new();
-        let skip = |dir: &Path, _: Meta| self.passed(&path_key(dir), dir);
-        walk(&self.fs, top, &skip, &mut |dir, meta, entries| {
-            self.folder(dir, meta, entries, &mut items)
-        });
+        let unbounded = Cell::new(usize::MAX);
+        self.scan_within(top, &unbounded, &mut items);
         items
+    }
+
+    /// [`Watch::scan`] of `top` into `items`, listing at most `budget`'s entries, which it
+    /// takes from it. Returns false when it ran past the budget and stopped.
+    fn scan_within(&self, top: &Path, budget: &Cell<usize>, items: &mut Vec<Item>) -> bool {
+        let over = Cell::new(false);
+        let skip = |dir: &Path, _: Meta| over.get() || self.passed(&path_key(dir), dir);
+        walk(&self.fs, top, &skip, &mut |dir, meta, entries| {
+            let Some(left) = budget.get().checked_sub(entries.len()) else {
+                over.set(true);
+                return false;
+            };
+            budget.set(left);
+            self.folder(dir, meta, entries, items)
+        });
+        !over.get()
     }
 
     /// The next stretch of the 30 s pass (`check/sweep.rs`), while the agent may run, until

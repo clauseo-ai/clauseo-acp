@@ -118,7 +118,7 @@ fn a_folder_with_only_head_and_config_moved_in_loses_its_head_at_once() {
 }
 
 #[test]
-fn objects_and_refs_added_to_a_launch_head_folder_are_caught_by_the_parent_check() {
+fn objects_arriving_in_a_launch_head_folder_end_the_session_by_name() {
     let fs = FakeFs::new();
     fs.dir("/m/half");
     fs.file("/m/half/HEAD");
@@ -127,8 +127,14 @@ fn objects_and_refs_added_to_a_launch_head_folder_are_caught_by_the_parent_check
     // At launch a folder with a HEAD is the lawyer's while it stays that way.
     fs.file("/m/half/notes.txt");
     quiet(watch.events(&[event("/m/half/notes.txt", CREATED_FILE)]));
+    // An objects folder arriving beside the HEAD ends the session by its name, before the
+    // folder is repository-shaped.
     fs.dir("/m/half/objects");
-    quiet(watch.events(&[event("/m/half/objects", CREATED_DIR)]));
+    assert!(watch.events(&[event("/m/half/objects", CREATED_DIR)]).end);
+    // Not shaped, the folder stays the lawyer's: the final scan leaves it.
+    quiet(watch.full_scan(Phase::Ended));
+    none(&notices);
+    // With refs too it is a repository: its HEAD goes.
     fs.dir("/m/half/refs");
     found(&mut watch, &[event("/m/half/refs", CREATED_DIR)]);
     assert!(fs.exists("/m/half/objects") && !fs.exists("/m/half/HEAD"));

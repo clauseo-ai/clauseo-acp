@@ -36,6 +36,8 @@ struct Disk {
     dated: u64,
     /// The canary's writes, by path.
     touched: Vec<PathBuf>,
+    /// How many folders were listed.
+    lists: u64,
 }
 
 impl Disk {
@@ -101,6 +103,11 @@ impl FakeFs {
     /// How many entries `dated` has read.
     pub(super) fn dated_reads(&self) -> u64 {
         self.0.lock().unwrap().dated
+    }
+
+    /// How many folders have been listed.
+    pub(super) fn listings(&self) -> u64 {
+        self.0.lock().unwrap().lists
     }
 
     /// The canary's writes.
@@ -206,7 +213,8 @@ impl Fs for FakeFs {
     }
 
     fn list(&self, dir: &Path) -> io::Result<Vec<(OsString, Kind)>> {
-        let disk = self.0.lock().unwrap();
+        let mut disk = self.0.lock().unwrap();
+        disk.lists += 1;
         if disk.panic_on.as_deref() == Some(dir) {
             drop(disk);
             panic!("the fake's listing of {} panics", dir.display());
