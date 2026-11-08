@@ -5,7 +5,8 @@
 //!
 //! [`set_up`] takes the machine-wide lock, then:
 //!
-//! 1. reads `HKLM\SOFTWARE\Clauseo\Sandbox` and refuses when another user owns it (D5), with that
+//! 1. secures `HKLM\SOFTWARE\Clauseo` (`vendor_key.rs`), then reads
+//!    `HKLM\SOFTWARE\Clauseo\Sandbox` and refuses when another user owns it (D5), with that
 //!    user's SID in the cause;
 //! 2. preflight: the Secondary Logon service is not disabled, and local policy doesn't refuse
 //!    `Users` the interactive logon right; either fails with a named cause before any account
@@ -147,6 +148,8 @@ pub mod sweep;
 #[cfg(any(windows, test))]
 pub mod taken_file;
 mod top_up;
+#[cfg(any(windows, test))]
+mod vendor_key;
 #[cfg(windows)]
 mod windows_machine;
 

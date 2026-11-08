@@ -29,6 +29,7 @@ use super::record_values::{
     RESET_OWED, RESET_SIDS, RawRecord, RegValue, SETUP_VALUES, USER_INSTALL_DIR, resets_with,
     resets_without, sids_value,
 };
+use super::vendor_key;
 use crate::windows::pool::{MachineRecord, pool_sids_from_multi_sz};
 use crate::windows::record::{RecordError, read_dword, read_qword, read_string, read_units};
 use crate::windows::sids::Sid;
@@ -243,6 +244,7 @@ pub(crate) fn remove_reset_sids(key: &str, done: &[Sid]) -> Result<(), MachineEr
 /// `HKLM\<key>` opened to set values, made when missing, with its owner (Administrators) and
 /// DACL ([`RECORD_SDDL`]) set again before any value.
 fn open_secured(key: &str) -> Result<Key, MachineError> {
+    vendor_key::secure()?;
     let descriptor = Descriptor::from_sddl(&format!("{RECORD_OWNER}{RECORD_SDDL}"))?;
     let attributes = windows::Win32::Security::SECURITY_ATTRIBUTES {
         nLength: u32::try_from(size_of::<windows::Win32::Security::SECURITY_ATTRIBUTES>())
