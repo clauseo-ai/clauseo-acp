@@ -125,7 +125,8 @@ impl Pipe for WindowsPipe {
         // none left, a new one is the first again, or nothing, so a name someone took meanwhile
         // is never shared, and is a squat (`Unmade::Taken`).
         if self.spare.is_none() {
-            self.first()?;
+            let name = self.name.clone();
+            self.first(&name)?;
         }
         let Some(waiting) = self.spare.take() else {
             return Err(Unmade::Failed("no instance of the pipe".to_owned()));
@@ -150,8 +151,9 @@ impl Pipe for WindowsPipe {
         Ok(())
     }
 
-    fn first(&mut self) -> Result<(), Unmade> {
-        let first = instance(&self.name, &self.sddl, true).map_err(|error| unmade(&error))?;
+    fn first(&mut self, name: &str) -> Result<(), Unmade> {
+        let first = instance(name, &self.sddl, true).map_err(|error| unmade(&error))?;
+        name.clone_into(&mut self.name);
         self.spare = Some(first);
         Ok(())
     }

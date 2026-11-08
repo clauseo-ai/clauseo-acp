@@ -78,6 +78,8 @@ pub(crate) struct FakePipe {
     pub(crate) spare_fails: bool,
     /// What making a first instance again fails with.
     pub(crate) first_fails: Option<Unmade>,
+    /// The name each first instance made again was made under.
+    pub(crate) firsts: Vec<String>,
     /// Each reply, spare and first instance, in order with the host's publishing when the
     /// host shares it ([`FakeHost::events`]).
     pub(crate) events: Rc<RefCell<Vec<String>>>,
@@ -113,8 +115,9 @@ impl Pipe for FakePipe {
         Ok(())
     }
 
-    fn first(&mut self) -> Result<(), Unmade> {
+    fn first(&mut self, name: &str) -> Result<(), Unmade> {
         self.events.borrow_mut().push("first".to_owned());
+        self.firsts.push(name.to_owned());
         self.first_fails.clone().map_or(Ok(()), Err)
     }
 
@@ -153,8 +156,11 @@ pub(crate) struct FakeHost {
     pub(crate) tick: Duration,
     /// What `admin_copy::check` gives.
     pub(crate) copy_check: Result<(), String>,
-    /// What the random bytes for the pipe's name are.
+    /// What the random bytes for the pipe's name are: the first draw's; each later draw adds
+    /// one to the last byte, so each draws its own name.
     pub(crate) random: Result<[u8; TOKEN_BYTES], String>,
+    /// How many names were drawn.
+    pub(crate) draws: u8,
     /// The published token, as the subkey holds it.
     pub(crate) published: Option<String>,
     /// Publishing fails with this.
@@ -187,6 +193,7 @@ impl FakeHost {
             tick: Duration::ZERO,
             copy_check: Ok(()),
             random: Ok([0xa5; TOKEN_BYTES]),
+            draws: 0,
             published: None,
             publish_fails: None,
             events: Rc::default(),
@@ -301,7 +308,12 @@ impl Host for FakeHost {
 
     fn random(&mut self) -> Result<[u8; TOKEN_BYTES], String> {
         self.calls.push("random".to_owned());
-        self.random.clone()
+        let drawn = self.draws;
+        self.draws = self.draws.wrapping_add(1);
+        self.random.clone().map(|mut bytes| {
+            bytes[TOKEN_BYTES - 1] = bytes[TOKEN_BYTES - 1].wrapping_add(drawn);
+            bytes
+        })
     }
 
     fn publish(&mut self, token: &str) -> Result<(), String> {
@@ -378,8 +390,8 @@ impl Pipe for Recording<'_> {
         self.0.spare()
     }
 
-    fn first(&mut self) -> Result<(), Unmade> {
-        self.0.first()
+    fn first(&mut self, name: &str) -> Result<(), Unmade> {
+        self.0.first(name)
     }
 
     fn reply(&mut self, client: FakeClient, line: &[u8]) {

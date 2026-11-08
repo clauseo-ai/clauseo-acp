@@ -2037,7 +2037,8 @@ upgrade's 60-62 and 67, and the denial watcher's 68, "provider full"):
    name someone took while no instance was left is 64; a client that closed before the server
    reached it is let go and the wait goes on).
    A spare instance waits while one client is served, so the name is never free while the server
-   runs. A client has 2 s to send its request, so one that sends nothing holds no one up.
+   runs. With no spare, the name is unpublished before the client goes, and a fresh random name
+   is published once a new first instance holds it. A client has 2 s to send its request, so one that sends nothing holds no one up.
 
 **Each client**, in order:
 

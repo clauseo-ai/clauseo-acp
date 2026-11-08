@@ -163,6 +163,19 @@ fn a_spare_that_cant_be_made_unpublishes_the_name_before_the_client_goes() {
         host.events.borrow()[..6],
         ["publish", "spare", "unpublish", "reply", "first", "publish"]
     );
+    // Each republish is under a fresh name: anyone may have read the one unpublished.
+    let mut second = [0xa5; TOKEN_BYTES];
+    second[TOKEN_BYTES - 1] = 0xa6;
+    let (first, second) = (fake_token(), token(&second));
+    assert_ne!(first, second);
+    let published: Vec<&str> = host
+        .calls
+        .iter()
+        .filter_map(|call| call.strip_prefix("publish "))
+        .collect();
+    assert_eq!(published[..2], [first.as_str(), second.as_str()]);
+    assert_eq!(pipe.firsts.first(), pipe_name(&second).as_ref());
+    assert!(host.calls.contains(&format!("unpublish {first}")));
     assert!(
         host.lines
             .iter()
@@ -218,8 +231,8 @@ impl Pipe for &mut FakePipe {
         (**self).spare()
     }
 
-    fn first(&mut self) -> Result<(), Unmade> {
-        (**self).first()
+    fn first(&mut self, name: &str) -> Result<(), Unmade> {
+        (**self).first(name)
     }
 
     fn reply(&mut self, client: FakeClient, line: &[u8]) {
