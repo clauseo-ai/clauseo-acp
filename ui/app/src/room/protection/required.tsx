@@ -19,7 +19,7 @@ import type { ProtectionStore } from "../../store/protection.ts";
 import { useProtection } from "../../store/protection-run.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { Cause } from "./causes.ts";
-import { blockLine, needsInstaller, repairLine } from "./blocked.ts";
+import { blockLine, needsInstaller, repairLine, setUpFixes } from "./blocked.ts";
 import { retryProtection } from "./commands.ts";
 import { whyOf } from "./detail.ts";
 import { failedWords, useSetUpPress, waitingWords } from "./setup.tsx";
@@ -41,7 +41,9 @@ export function RequiredNotice({
     () => void retryProtection(transport, store),
   );
   const repair = needsInstaller(cause);
-  const fixable = !repair && (cause.name === "needs_set_up" || cause.name === "set_up_refused");
+  const fixable =
+    !repair &&
+    (cause.name === "needs_set_up" || cause.name === "set_up_refused" || setUpFixes(cause));
   const notBuilt = whyOf(cause) === "not_built";
   const block = repair ? null : blockLine(lang, cause);
   const waiting = fixable ? waitingWords(lang, state, cause) : null;

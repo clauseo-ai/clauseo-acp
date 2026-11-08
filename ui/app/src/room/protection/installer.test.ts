@@ -5,7 +5,8 @@
 import { INSTALLER_CLOSE, pw } from "@clauseo/components/lib/words-protection.ts";
 import { afterEach, expect, test, vi } from "vitest";
 import { causeOf } from "./causes.ts";
-import { blockLine, blockOf, firmInstall, needsInstaller } from "./blocked.ts";
+import { blockLine, blockOf, firmInstall, needsInstaller, setUpFixes } from "./blocked.ts";
+import { canRetry } from "./view.ts";
 import { PROT, view } from "./fixtures.ts";
 import { installerPage, openInstallerPage, repairPage } from "./installer.ts";
 import { FakeTransport } from "../../transport/fake-transport.ts";
@@ -57,7 +58,7 @@ const cause = (c: unknown) => causeOf(c as NotProtectedCause);
 test.each([
   [
     "logon_right",
-    "Windows policy on this computer doesn't let the Safe workspace's accounts sign in. Ask your IT team to add them to the Allow log on locally policy.",
+    "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this. If it doesn't, ask whoever looks after this computer to add ClauseoSandboxUsers to the Allow log on locally policy.",
   ],
   [
     "policy",
@@ -104,6 +105,24 @@ test("the repair is the installer only for a missing admin copy; set-up causes k
     { blocked: { reason: "policy" } },
   ])
     expect(needsInstaller(cause(c))).toBe(false);
+});
+
+test("setting up again is offered for logon_right only; every other block keeps no retry", () => {
+  expect(setUpFixes(cause({ blocked: { reason: "logon_right" } }))).toBe(true);
+  expect(canRetry(cause({ blocked: { reason: "logon_right" } }))).toBe(true);
+  for (const reason of [
+    "policy",
+    "tool_missing",
+    "admin_copy_missing",
+    "admin_copy_changed",
+    "admin_copy_unsafe",
+    "something_new",
+  ]) {
+    expect(setUpFixes(cause({ blocked: { reason } }))).toBe(false);
+    expect(canRetry(cause({ blocked: { reason } }))).toBe(false);
+  }
+  expect(setUpFixes(cause("other_account"))).toBe(false);
+  expect(setUpFixes(cause("set_up_failed"))).toBe(false);
 });
 
 test("a firm install: per machine, or the firm's policy as a hint; a per-user install isn't", () => {

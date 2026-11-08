@@ -34,7 +34,8 @@ const GROUP: Partial<Record<string, CauseGroup>> = {
   switched_off: "off",
   // R17 PR-E appends these two (TODO(R17 PR-E): drop this note once bindings.ts has them):
   // something on this computer stops the Safe workspace (blocked { reason }), or another Windows
-  // account owns it; neither offers Try again, and blocked.ts says each in words
+  // account owns it; neither offers Try again (save logon_right, which offers the set-up: blocked.ts's
+  // setUpFixes), and blocked.ts says each in words
   blocked: "cant",
   other_account: "cant",
 };

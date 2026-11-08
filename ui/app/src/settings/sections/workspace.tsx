@@ -30,6 +30,7 @@ import {
   firmInstall,
   needsInstaller,
   repairLine,
+  setUpFixes,
 } from "../../room/protection/blocked.ts";
 import { openInstallerPage, repairPage } from "../../room/protection/installer.ts";
 import type { SectionContext } from "../sections.tsx";
@@ -166,10 +167,15 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
     >
       {w.say(pw(lang, "Remove set-up"))}
     </Button>
-  ) : status === "needs_set_up" || status === "set_up_refused" || status === "set_up_failed" ? (
+  ) : status === "needs_set_up" ||
+    status === "set_up_refused" ||
+    status === "set_up_failed" ||
+    setUpFixes(cause) ? (
     <Button kind="tone" size="small" onClick={press} data-testid="protection-setup">
       {w.say(
-        status === "needs_set_up" ? pw(lang, "Set up the Safe workspace") : w.s("Set up again"),
+        status === "needs_set_up" || status === "blocked"
+          ? pw(lang, "Set up the Safe workspace")
+          : w.s("Set up again"),
       )}
     </Button>
   ) : null;
@@ -205,7 +211,7 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
               {w.say(
                 pw(
                   lang,
-                  "Windows policy on this computer doesn't let the Safe workspace's accounts sign in. Ask your IT team to add them to the Allow log on locally policy.",
+                  "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this. If it doesn't, ask whoever looks after this computer to add ClauseoSandboxUsers to the Allow log on locally policy.",
                 ),
               )}
             </p>

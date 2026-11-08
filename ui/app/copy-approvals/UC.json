@@ -227,14 +227,14 @@
     "by": "app track (provisional; Rohan batch review)"
   },
   "UC-33": {
-    "en": "Windows policy on this computer doesn't let the Safe workspace's accounts sign in. Ask your IT team to add them to the Allow log on locally policy.",
-    "hi": "इस कंप्यूटर की Windows नीति सुरक्षित कार्यक्षेत्र के खातों को साइन इन नहीं करने देती। अपनी IT टीम से उन्हें Allow log on locally नीति में जोड़ने को कहें।",
+    "en": "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this. If it doesn't, ask whoever looks after this computer to add ClauseoSandboxUsers to the Allow log on locally policy.",
+    "hi": "Windows सुरक्षित कार्यक्षेत्र के खातों को साइन इन नहीं करने दे रहा है। सुरक्षित कार्यक्षेत्र को फिर से तैयार करने से आमतौर पर यह ठीक हो जाता है। अगर ऐसा न हो, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति से ClauseoSandboxUsers को Allow log on locally नीति में जोड़ने को कहें।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy (logon_right: set up again first)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-08",
+    "by": "app copy (logon_right: set up again first)"
   },
   "UC-34": {
     "en": "Clauseo can add room for 4 more. Windows asks for permission first.",

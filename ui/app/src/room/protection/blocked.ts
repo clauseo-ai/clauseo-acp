@@ -24,7 +24,7 @@ export type BlockReason =
 /** Each reason's line: ask IT, except a missing admin copy, whose repair (repairLine) follows. */
 const REASON_WORDS: Record<BlockReason, ProtectionKey> = {
   logon_right:
-    "Windows policy on this computer doesn't let the Safe workspace's accounts sign in. Ask your IT team to add them to the Allow log on locally policy.",
+    "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this. If it doesn't, ask whoever looks after this computer to add ClauseoSandboxUsers to the Allow log on locally policy.",
   policy:
     "A Windows policy on this computer blocks the program that sets up the Safe workspace. Ask your IT team to allow it.",
   tool_missing:
@@ -71,6 +71,12 @@ export function blockLine(lang: Lang, cause: Cause | null): string | null {
  * announce line where `retry_asks_admin` says Windows' prompt follows (stage C's PR 2). */
 export const needsInstaller = (cause: Cause | null): boolean =>
   blockOf(cause) === "admin_copy_missing";
+
+/** Whether setting up again usually fixes the block, so it offers the same set-up as `needs_set_up`
+ * (the same button, `retry_protection`, and the confirm where Windows' prompt follows): only
+ * `logon_right`, since stage C's set-up grants "Allow log on locally" itself. Every other block
+ * offers no set-up (a missing admin copy has the installer instead). */
+export const setUpFixes = (cause: Cause | null): boolean => blockOf(cause) === "logon_right";
 
 /** The updater's word on who manages this install (`UpdateView.state`'s `managed.by`, from
  * desktop's install_kind.rs): "per_machine" for a per-machine install, "policy" where the firm's

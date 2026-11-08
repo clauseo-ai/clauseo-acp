@@ -41,12 +41,12 @@ const P = {
   needs: np("needs_set_up"),
   refused: np("set_up_refused"),
   failed: np("set_up_failed"),
-  failed1385: np({ set_up_failed: { why: "logon_right_denied_1385" } }),
   cant: np("unsupported"),
   pool: np({ pool_full: { size: 8, open: 5, held: 0, owed: 2, set_aside: 1 } }),
   off: np({ switched_off: { at: Date.UTC(2026, 10, 6, 10, 0) } }),
   // design B (R17 PR-E's causes, not in bindings.ts yet)
   missing: np({ blocked: { reason: "admin_copy_missing" } }),
+  logon: np({ blocked: { reason: "logon_right" } }),
   policy: np({ blocked: { reason: "policy" } }),
   tool: np({ blocked: { reason: "tool_missing" } }),
   changed: np({ blocked: { reason: "admin_copy_changed" } }),
@@ -314,10 +314,10 @@ export const UC: Entry[] = [
   room(
     "UC-33",
     pw(
-      "Windows policy on this computer doesn't let the Safe workspace's accounts sign in. Ask your IT team to add them to the Allow log on locally policy.",
+      "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this. If it doesn't, ask whoever looks after this computer to add ClauseoSandboxUsers to the Allow log on locally policy.",
     ),
     "room/np-note",
-    note(P.failed1385),
+    note(P.logon),
   ),
   room(
     "UC-34",

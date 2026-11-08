@@ -140,6 +140,11 @@ test.each([
     PROT.otherAccount,
     "The Safe workspace on this computer belongs to another Windows account. Ask your IT team.",
   ],
+  [
+    "policy",
+    PROT.policy,
+    "A Windows policy on this computer blocks the program that sets up the Safe workspace. Ask your IT team to allow it.",
+  ],
   ["a reason from a newer Clauseo", PROT.blockedNewer, "Ask your IT team to look into it."],
 ] as const)(
   "a block, %s: the note says what stops it and its line, with no retry",
@@ -158,6 +163,37 @@ test.each([
     expect(note?.textContent).toContain(pw("en", line));
     expect(inBody("protection-setup")).toBeNull();
     expect(inBody("protection-installer")).toBeNull();
+  },
+);
+
+test.each([
+  ["Windows' prompt follows: the set-up's confirm first, then", true],
+  ["no prompt: at once", false],
+] as const)(
+  "logon_right: the note says setting up again usually fixes it and offers the set-up; %s retry_protection",
+  async (_c, asks) => {
+    await mount(PROT.logon, PROT.logon, { retry_asks_admin: asks } as Partial<ProtectionView>);
+    await h!.click(h!.one("workspace-line"));
+    await settle();
+    const note = inBody("np-note");
+    expect(note?.dataset["cause"]).toBe("blocked");
+    expect(note?.textContent).toContain(
+      pw(
+        "en",
+        "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this. If it doesn't, ask whoever looks after this computer to add ClauseoSandboxUsers to the Allow log on locally policy.",
+      ),
+    );
+    expect(inBody("protection-installer")).toBeNull();
+    expect(inBody("protection-setup")?.textContent).toBe(pw("en", "Set up the Safe workspace"));
+    await h!.click(inBody("protection-setup"));
+    await settle();
+    if (asks) {
+      expect(inBody("protection-confirm")?.dataset["act"]).toBe("setup");
+      expect(sentRetries()).toEqual([]);
+      await h!.click(inBody("protection-confirm-ok"));
+      await settle();
+    } else expect(inBody("protection-confirm")).toBeNull();
+    expect(sentRetries()).toEqual(["retry_protection"]);
   },
 );
 
