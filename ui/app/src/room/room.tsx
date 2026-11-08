@@ -86,6 +86,8 @@ import { useWindowFrame } from "../window/use-window-frame.ts";
 import { ToolLineContext } from "./tool-line-context.ts";
 import { hasSetup } from "./first-run/hold.ts";
 import { FirstRun } from "./first-run/first-run.tsx";
+import { useDeciding } from "./deciding.ts";
+import { FirstMark } from "./first-mark.tsx";
 import { ProtectionContext } from "./protection/context.ts";
 import { useRoomProtection } from "./protection/use-room-protection.tsx";
 
@@ -266,6 +268,8 @@ function RoomFrame({
     view.phase === "ready" &&
     open === null &&
     view.matters.every((m) => m.kind === "scratch");
+  // until the list says welcome or room, the room is unseen and the page's mark stands (deciding.ts)
+  const deciding = useDeciding(setup, view.phase);
   const listed = usePapers(matters.next.papers, open?.matter ?? null);
   const papers = listed?.papers ?? null;
   const answers = useAnswerHost(transport, open?.matter ?? null, listed, matters.refusals);
@@ -402,8 +406,11 @@ function RoomFrame({
     <div
       className="room-window"
       data-panel={versions.open ? "" : undefined}
+      data-deciding={deciding ? "" : undefined}
       ref={nodes.slot("window")}
     >
+      {/* index.html's own #first-mark style keeps it seen in the unseen window: visibility: visible, fixed */}
+      {deciding && <FirstMark />}
       <RoomToolbar
         chrome="own"
         caption={caption}
