@@ -211,6 +211,35 @@ fn system_only(path: &Path, folder: bool) {
     protect_with(path, dacl).unwrap();
 }
 
+/// Whether the descriptor in `bytes` is SYSTEM's alone: owned by SYSTEM, a protected DACL, and
+/// allow entries for SYSTEM and nobody else.
+fn system_alone(bytes: &[u8]) -> bool {
+    if acl_bytes::owner_sid(bytes)
+        .as_ref()
+        .map(crate::windows::sids::Sid::as_str)
+        != Some(SYSTEM)
+    {
+        return false;
+    }
+    let Ok(descriptor) = Descriptor::parse(bytes) else {
+        return false;
+    };
+    let Some(dacl) = descriptor.dacl.filter(|_| descriptor.dacl_protected()) else {
+        return false;
+    };
+    let Ok(dacl) = Acl::parse(dacl) else {
+        return false;
+    };
+    let aces = dacl.aces();
+    !aces.is_empty()
+        && aces.iter().all(|ace| {
+            acl_bytes::kind(ace) == acl_bytes::ALLOWED
+                && acl_bytes::sid(ace)
+                    .and_then(acl_bytes::sid_text)
+                    .is_some_and(|sid| sid.as_str() == SYSTEM)
+        })
+}
+
 /// A Sandbox stand-in with the copy and a `staging\` holding a set-aside `.old`, both SYSTEM's
 /// alone: what a successful refresh leaves until the restart.
 fn shut_staging(dir: &TempDir) -> (PathBuf, PathBuf, PathBuf) {
@@ -222,7 +251,10 @@ fn shut_staging(dir: &TempDir) -> (PathBuf, PathBuf, PathBuf) {
     let staging = old.parent().unwrap().to_path_buf();
     system_only(&old, false);
     system_only(&staging, true);
-    assert!(std::fs::read_dir(&staging).is_err(), "shut to this token");
+    // Not a `read_dir` check: it opens with backup intent, so a token with an enabled
+    // SeBackupPrivilege lists the folder anyway. The descriptor is what shuts it.
+    let bytes = os::security(&staging).unwrap();
+    assert!(system_alone(&bytes), "shut to SYSTEM alone");
     (exe.parent().unwrap().to_path_buf(), exe, staging)
 }
 
