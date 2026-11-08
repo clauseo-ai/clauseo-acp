@@ -174,13 +174,11 @@ fn a_matter_on_another_volume_sets_aside_on_that_volume() {
     ] {
         sh(&launcher, &m1, script, &[at]).assert_refused();
     }
-    // A link out of the matter ends the session and moves aside on the matter's own volume.
-    sh(
-        &launcher,
-        &m1,
-        r#"ln -s "$1" out && exec /bin/sleep 30"#,
-        &[&state],
-    );
+    // A link out of the matter is set aside on the matter's own volume. The shell exits at once,
+    // so the final scan takes it: on a disk image mounted a moment before, FSEvents has been seen
+    // to deliver nothing for over 10 s under a full parallel test run, and the kill on detect is
+    // the main volume's test above.
+    sh(&launcher, &m1, r#"ln -s "$1" out"#, &[&state]).assert_ok();
     let (path, what, outcome) = notice(&denials);
     assert_eq!((path, what), (PathBuf::from("out"), GitItem::OutsideLink));
     let GitOutcome::Moved(to) = outcome else {

@@ -111,9 +111,14 @@ impl Live {
             .collect();
         assert_eq!(folders.len(), 1, "{folders:?}");
         let record = folders[0].join("record.json");
-        wait_for("the record", Duration::from_secs(1), || record.exists());
-        let record: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(&record).unwrap()).unwrap();
+        // The record is made, then written: wait until it reads whole.
+        let parsed = || {
+            std::fs::read(&record)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        };
+        wait_for("the record", Duration::from_secs(1), || parsed().is_some());
+        let record = parsed().unwrap();
         assert_eq!(record["original"], path.to_str().unwrap());
         assert!(record["outcome"]["moved"].is_string(), "{record}");
         wait_for("the notice", Duration::from_secs(1), || {
@@ -125,9 +130,17 @@ impl Live {
 }
 
 impl Drop for Live {
+    /// Ends the session and removes the root, again for up to 3 s while the watch's last state
+    /// write races the removal.
     fn drop(&mut self) {
         self.gone.store(true, Ordering::SeqCst);
-        drop(std::fs::remove_dir_all(&self.root));
+        let clock = SystemClock::new();
+        while std::fs::remove_dir_all(&self.root).is_err()
+            && self.root.exists()
+            && clock.now() < Duration::from_secs(3)
+        {
+            async_io::block_on(async_io::Timer::after(Duration::from_millis(100)));
+        }
     }
 }
 
