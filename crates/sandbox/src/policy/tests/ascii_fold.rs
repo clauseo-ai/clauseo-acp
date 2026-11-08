@@ -101,6 +101,18 @@ fn no_full_fold_spells_a_run_of_a_refused_name() {
     }
 }
 
+/// The crate-root wrappers the host calls answer as the sandbox's own functions do.
+#[test]
+fn the_public_wrappers_answer_as_the_sandbox_does() {
+    use crate::{name_folds_to, refused_in_other_matter};
+
+    assert!(name_folds_to(OsStr::new(".clau\u{17F}eo"), ".clauseo"));
+    assert!(!name_folds_to(OsStr::new(".clauseox"), ".clauseo"));
+    assert!(refused_in_other_matter(OsStr::new(".GIT")));
+    assert!(refused_in_other_matter(OsStr::new(".clau\u{17F}eo")));
+    assert!(!refused_in_other_matter(OsStr::new("src")));
+}
+
 #[test]
 fn a_name_folds_to_a_refused_name_in_any_case_and_with_a_long_s() {
     for (name, refused) in [

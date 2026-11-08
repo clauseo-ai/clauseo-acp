@@ -10,7 +10,7 @@ pub(crate) mod ascii_fold;
 mod build;
 mod links;
 mod names;
-mod other_matter;
+pub(crate) mod other_matter;
 mod overlap;
 mod rule;
 mod store;

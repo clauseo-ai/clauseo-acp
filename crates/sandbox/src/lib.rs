@@ -64,6 +64,8 @@
 //! - [`scan_links`]`(matter) -> Vec<`[`LinkFinding`]`>` ([`LinkKind`]), and [`scan_matter`],
 //!   which also lists every `.git`, the folders `.git` files name, and the other
 //!   [`PROTECTED_AT_ANY_DEPTH`] names.
+//! - [`name_folds_to`] and [`refused_in_other_matter`]: the refused names and their case
+//!   folding, for the host's offer rules (the same table the sandbox uses).
 //! - [`detect`]`(setup)` and [`probe`]`(setup)` return a [`Detection`]: tier A on macOS when
 //!   Seatbelt applies a profile (`setup` unused); on Windows, C with [`NoSandbox::UnsupportedOs`]
 //!   on ARM64 or before Windows 10 22H2, else B when `setup`'s state is [`SetupState::Ready`] and
@@ -200,3 +202,16 @@ pub use proxy::{
 pub use setup::{Blocked, SandboxSetup, SetAside, SetupError, SetupState};
 #[cfg(windows)]
 pub use windows::UserSetup;
+
+/// Whether `name` equals the ASCII name `ascii` under Unicode simple and common case folding,
+/// as APFS and NTFS compare names; the same table the sandbox's refused names use.
+pub fn name_folds_to(name: &std::ffi::OsStr, ascii: &str) -> bool {
+    policy::ascii_fold::folds_to(name, ascii)
+}
+
+/// Whether `name` is one of the names never readable in another matter's folder (`.git`,
+/// `.clauseo`, `.claude`, `.codex`, `.agents`) in any case-folded spelling; the host's offer
+/// rules use this so they match the sandbox exactly.
+pub fn refused_in_other_matter(name: &std::ffi::OsStr) -> bool {
+    policy::other_matter::refused_name(name)
+}
