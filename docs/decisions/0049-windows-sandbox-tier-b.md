@@ -2378,7 +2378,10 @@ matter's own, or one that plans its fence) puts the deny back. The session then 
 root until its next launch lifts it again, so it fails closed, and the restore finds the deny
 there, removes the stand-in and clears the mark.
 
-The tests (`apply/tests/read_only.rs`, against the modelled access check): at each level of a
+The tests (`apply/tests/read_only.rs` and `apply/tests/lifts.rs`, against the modelled access
+check): while the root is lifted the pool user is granted read and list on it and none of
+`FILE_ADD_FILE` (`0x2`), `FILE_ADD_SUBDIRECTORY` (`0x4`) or `DELETE` (`0x10000`), checked in
+every lift test (`lifts::assert_lifted`); at each level of a
 grant (the whole folder, a folder in it, a folder holding a refused name, one file), the pool
 user can't make a file or a folder (a rename into a folder is one of those), write, append,
 delete, rename away or set attributes, extended attributes, permissions or owner, in the root,
@@ -2449,6 +2452,20 @@ inherited copies go, entries dropped (`apply/reads.rs`).
   Until then the reuse check (`Ledger::grants_sid`) keeps the pool user from serving another
   matter. The set-aside, `--reclaim` and the clean-close record don't take part: they cover the
   launch's own trees.
+
+**Unmeasured: PR6's VM rows.** Nothing in this section has run on real NTFS. The rows, each as
+the reading session's pool user:
+
+- a grant of another matter's root lists it; files and subfolders in a grant read, writes fail;
+- the refused names, at the top and nested, refuse an open by direct path;
+- the other matter's root is not writable or renamable after the lift: making a file or a
+  folder in it, deleting or renaming it, and setting its attributes all fail, and the
+  stand-in is gone once the run ends;
+- a folder made during the run (a `git init`) stays unreadable until the next launch;
+- `narrow_reads` takes a read back at once; after a killed run, the next launch restores the
+  root's deny and drops the reads;
+- the fence's migration, and the strict walk excusing a live read during the other matter's
+  launch.
 
 ### The launcher (PR6 interface)
 

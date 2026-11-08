@@ -4,7 +4,9 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use super::reads::access::{APPEND, POOL_TOKEN, READ, USERS, WRITE, granted, volume_default};
+use super::reads::access::{
+    APPEND, DELETE, POOL_TOKEN, READ, USERS, WRITE, granted, volume_default,
+};
 use super::*;
 
 /// A fake with the volume's default entry at the top.
@@ -46,10 +48,14 @@ pub(super) fn stand_in(w: &World) -> Key {
     (root, sid, Rights::DenyWrite, inherit)
 }
 
-/// Whether matter one's pool user can make a file or a folder in matter two's folder.
+/// Whether matter one's pool user can make a file or a folder in matter two's folder, or
+/// delete or rename the folder: any one of `FILE_ADD_FILE`, `FILE_ADD_SUBDIRECTORY` and
+/// `DELETE` granted on it.
 pub(super) fn root_writable(w: &World, acl: &FakeAcl) -> bool {
     let root = w.canonical("other/m2");
-    granted(&acl.aces, &root, &POOL_TOKEN, WRITE) || granted(&acl.aces, &root, &POOL_TOKEN, APPEND)
+    [WRITE, APPEND, DELETE]
+        .into_iter()
+        .any(|want| granted(&acl.aces, &root, &POOL_TOKEN, want))
 }
 
 /// Whether the ledger marks that deny lifted by matter one.

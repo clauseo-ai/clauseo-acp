@@ -11,7 +11,7 @@ use super::lifts::{
     assert_lifted, assert_restored, launch, marked, pool, reads, root_deny, root_writable,
     stand_in, volume,
 };
-use super::reads::access::{APPEND, POOL_TOKEN, READ, USERS, WRITE, granted};
+use super::reads::access::{APPEND, DELETE, POOL_TOKEN, READ, USERS, WRITE, granted};
 use super::*;
 
 /// `FILE_WRITE_EA`.
@@ -20,8 +20,6 @@ const WRITE_EA: u32 = 0x10;
 const DELETE_CHILD: u32 = 0x40;
 /// `FILE_WRITE_ATTRIBUTES`.
 const WRITE_ATTRIBUTES: u32 = 0x100;
-/// `DELETE`.
-const DELETE: u32 = 0x1_0000;
 /// `WRITE_DAC`.
 const WRITE_DAC: u32 = 0x4_0000;
 /// `WRITE_OWNER`.
@@ -157,6 +155,10 @@ fn the_whole_folders_read_lists_it_with_its_deny_of_writes_standing_in() {
         can(&w, &acl, "other/m2", READ),
         "lists and reads its attributes"
     );
+    // Neither a file nor a folder may be made in it, and it may not be deleted or renamed.
+    for want in [WRITE, APPEND, DELETE] {
+        assert!(!can(&w, &acl, "other/m2", want), "{want:#x}");
+    }
     // The stand-in is the folder's alone: what is below keeps the fence's own deny.
     let (path, sid, rights, inherit) = stand_in(&w);
     assert_eq!((rights, inherit), (Rights::DenyWrite, Inherit::ThisOnly));
