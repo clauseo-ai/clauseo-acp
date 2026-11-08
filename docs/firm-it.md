@@ -380,11 +380,13 @@ listed. Exit 57 means a sandbox user's BITS job couldn't be cancelled. Either wa
 recorded as complete, so the next sandboxed launch asks for another run and waits up to 15 seconds
 for it; if that run fails too, the launch is refused with "the sandbox's clean-up after an earlier
 session isn't finished". The task's Application Event Log line gives counts only, never task names.
-A task whose "run as" account can't be found (a domain account while no domain controller is
-reachable, or a deleted account) no longer causes 56: it is skipped and counted as "skipped" in
-that line. The usual cause of 56 on every run is a task whose definition the SYSTEM account can't
-read. Look in Task Scheduler for tasks that won't open, and fix or delete them; the next run then
-ends 0. Exit 58 or 59 means the run couldn't record its number, usually because another Clauseo
+A task whose "run as" account is a domain account that can't be found (no domain controller is
+reachable) doesn't cause 56: it is skipped and counted as "skipped" in that line. A "run as"
+account that can't be found and isn't another domain's (a deleted local account, say) does, and is
+counted as "unresolved"; so does a task with no "run as" account ("with no user or group"). The
+usual cause of 56 on every run is a task whose definition the SYSTEM account can't read, or one
+of those. Look in Task Scheduler for tasks that won't open or whose account is gone, and fix or
+delete them; the next run then ends 0. Exit 58 or 59 means the run couldn't record its number, usually because another Clauseo
 set-up held its lock; the next launch asks again.
 
 ### If Defender quarantines a Clauseo file
