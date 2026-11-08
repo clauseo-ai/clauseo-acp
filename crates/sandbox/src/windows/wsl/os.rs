@@ -354,8 +354,11 @@ impl WslRead for WindowsWsl {
     }
 
     fn packaged_class(&self) -> Result<bool, WslError> {
+        // The machine's index, then the calling user's (the lawyer's, at the launch check): a
+        // package registered for that user alone indexes its classes in its own hive.
         for clsid in CLASSES {
-            if exists(&format!(r"{PACKAGED_INDEX}\{clsid}"))? {
+            let path = format!(r"{PACKAGED_INDEX}\{clsid}");
+            if exists(&path)? || open_in(HKEY_CURRENT_USER, &path)?.is_some() {
                 return Ok(true);
             }
         }
