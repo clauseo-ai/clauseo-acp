@@ -310,7 +310,10 @@ impl Removal for WindowsRemoval {
     }
 
     fn remove_remote_logon_deny(&mut self, group: &Sid) -> Result<(), MachineError> {
-        self.group_name(group)?;
+        // A group under the name must be the record's; with none, the deny goes by its SID.
+        if accounts::sid_of(&self.names.group, Kind::Group)?.is_some() {
+            self.group_name(group)?;
+        }
         preflight::remove_right(group, DENY_REMOTE_INTERACTIVE_RIGHT)
     }
 

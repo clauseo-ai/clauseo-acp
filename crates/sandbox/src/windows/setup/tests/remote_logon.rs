@@ -128,6 +128,25 @@ fn a_removal_takes_the_deny_off_before_deleting_the_group() {
 }
 
 #[test]
+fn a_removal_takes_the_deny_off_by_the_records_sid_when_the_group_is_gone() {
+    let (mut machine, mut acl) = pool("remove-rdp-gone", Some(owner()));
+    // The group deleted outside the removal, its deny left keyed by its SID.
+    machine.m.state.group = None;
+    assert_eq!(denied(&machine.m.state), [sid(1000)]);
+    remove(&mut machine, &mut acl, false).unwrap();
+    assert!(machine.m.state.remote_denied.is_empty());
+    let lines = machine.lines();
+    assert!(
+        lines.iter().any(|l| l == "remove_remote_logon_deny 1000"),
+        "{lines:?}"
+    );
+    assert!(
+        !lines.iter().any(|l| l.starts_with("delete_group")),
+        "{lines:?}"
+    );
+}
+
+#[test]
 fn a_deny_that_wont_come_off_stops_the_removal_with_the_group_kept() {
     let (mut machine, mut acl) = pool("remove-rdp-fails", Some(owner()));
     let at = full_removal()

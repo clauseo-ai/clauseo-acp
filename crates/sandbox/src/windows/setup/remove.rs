@@ -497,10 +497,14 @@ fn remove_denies(acl: &mut impl AclWriter, group: &Sid, targets: &[PathBuf]) -> 
 /// The group, when it is the record's and empty; whether it was deleted. Gone already is
 /// `false`; another group under the name, or one with members, stops the run. Its Remote
 /// Desktop deny comes off just before the delete ([`RemoveStep::RemoteLogon`] when it won't):
-/// a user right is keyed by SID, and would outlive the group.
+/// a user right is keyed by SID, and would outlive the group. With the group gone already,
+/// the deny still comes off by the record's `GroupSid`, as an earlier run may have left it.
 fn remove_group(machine: &mut impl Removal, record: &MachineRecord) -> Result<bool, Failed> {
     let failed = |e: MachineError| (RemoveStep::Group, cause_of(&e));
     let Some(group) = machine.group().map_err(failed)? else {
+        machine
+            .remove_remote_logon_deny(&record.group)
+            .map_err(|e| (RemoveStep::RemoteLogon, cause_of(&e)))?;
         return Ok(false);
     };
     if group != record.group {
@@ -524,11 +528,6 @@ fn remove_group(machine: &mut impl Removal, record: &MachineRecord) -> Result<bo
     }
 }
 
-/// Step 8, before the record goes: on a per-machine install (`AdminCopyOwner` is `machine`),
-/// the tasks `\Clauseo\SandboxStop` and `\Clauseo\SandboxSweep` set-up registered for the
-/// record's owner are deleted, so the owner keeps no start right once their pool is gone. A
-/// per-user install's tasks stay (`--adopt` registered them; `--remove --uninstall` deletes
-/// them with the admin copy).
 /// Step 8, as the owner: the unclean-session markers in the data folder `owners_ledger` checked.
 fn clear_markers(machine: &mut impl Removal) -> Result<(), Failed> {
     match machine.as_owner(Removal::clear_markers) {
@@ -537,6 +536,11 @@ fn clear_markers(machine: &mut impl Removal) -> Result<(), Failed> {
     }
 }
 
+/// Step 8, before the record goes: on a per-machine install (`AdminCopyOwner` is `machine`),
+/// the tasks `\Clauseo\SandboxStop` and `\Clauseo\SandboxSweep` set-up registered for the
+/// record's owner are deleted, so the owner keeps no start right once their pool is gone. A
+/// per-user install's tasks stay (`--adopt` registered them; `--remove --uninstall` deletes
+/// them with the admin copy).
 fn remove_stop_task(machine: &mut impl Removal) -> Result<(), Failed> {
     let failed = |e: MachineError| (RemoveStep::StopTask, cause_of(&e));
     match machine.copy_owner().map_err(failed)? {
