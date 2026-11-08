@@ -240,7 +240,11 @@ impl DenialSink for CountDenials {
             Some((session, post)),
         ) = (d, &self.blocked)
         {
-            // The host only (never a path); a closed channel means the host has stopped.
+            // The host only (never a path). The internal channel is unbounded, which is fine: the
+            // proxy passes on at most 20 refusals a second per session (S14's rate cap; more come
+            // as one `Denial::Dropped`), each host name is at most 253 bytes, and the 403 was
+            // decided before this send, so nothing here holds up the refusal. A failed send
+            // happens only once the host has stopped, and the report is then dropped.
             let site = BlockedSite {
                 host,
                 tag,
