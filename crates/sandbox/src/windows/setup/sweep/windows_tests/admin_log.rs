@@ -2,11 +2,13 @@
 //! folder of the test's own instead of `%ProgramData%`: a squatted `Clauseo` (made by the
 //! test's standard user, or one Users may write) and a `Clauseo\Sandbox` that is a junction are
 //! refused, and nothing is written. Each refusal comes before the writer makes anything owned
-//! by SYSTEM, so this elevated administrator can run them. Gated like the tests above.
+//! by SYSTEM, so this elevated administrator can run them. Set-up's writer, run as this
+//! administrator, makes them owned by Administrators, and both writers then accept them. Gated
+//! like the tests above.
 
 use std::path::Path;
 
-use super::super::windows_sweeper::admin_log::append_in;
+use super::super::windows_sweeper::admin_log::{append_as_admin_in, append_in};
 use super::{gate, try_in_cmd};
 use crate::test_support::TempDir;
 use crate::windows::private_dir::set_owner;
@@ -106,4 +108,22 @@ fn elevated_the_admin_log_writer_refuses_a_sandbox_folder_that_is_a_junction() {
         Vec::<String>::new(),
         "nothing written through it"
     );
+}
+
+#[test]
+#[ignore = "elevated: run by CI's elevated step with CLAUSEO_ELEVATED_TESTS=1"]
+fn elevated_set_ups_admin_log_is_made_by_administrators_and_passes_both_writers_checks() {
+    if !gate("elevated_set_ups_admin_log_is_made_by_administrators_and_passes_both_writers_checks")
+    {
+        return;
+    }
+    // (c) Nothing there: set-up's writer makes Clauseo, Sandbox and the log, owned by
+    // Administrators; a second append checks them all as the sweep's writer does, and the
+    // sweep's writer, finding them there, appends too.
+    let base = TempDir::new("admin-log-as-admin");
+    append_as_admin_in(base.path(), "set-up's first line").unwrap();
+    append_as_admin_in(base.path(), "set-up's second line").unwrap();
+    append_in(base.path(), "the sweep's line").unwrap();
+    let sandbox = base.path().join("Clauseo").join("Sandbox");
+    assert_eq!(entries(&sandbox), ["sweep-admin.log"]);
 }

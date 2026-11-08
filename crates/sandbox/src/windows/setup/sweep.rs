@@ -333,10 +333,16 @@ pub trait Sweeper: Gate + Bits + Record {
     /// by the name `LookupAccountSidW` gives, which must resolve back to `sid`); `Err` when
     /// it isn't one or they can't all be read.
     fn group_members(&mut self, sid: &Sid) -> Result<Vec<Sid>, Failed>;
-    /// The security descriptor of the task `name` in `folder`, self-relative, with its owner,
-    /// group, DACL and SACL (`IRegisteredTask::GetSecurityDescriptor`, its SDDL converted);
-    /// `Err` when any part can't be read.
-    fn task_security(&mut self, folder: &Self::Folder, name: &str) -> Result<Vec<u8>, Failed>;
+    /// The security descriptor of the task `name` in `folder`, self-relative and as SDDL,
+    /// with its owner, group and DACL, and its SACL when `sacl`
+    /// (`IRegisteredTask::GetSecurityDescriptor`, its SDDL converted); `Err` when any part
+    /// asked for can't be read.
+    fn task_security(
+        &mut self,
+        folder: &Self::Folder,
+        name: &str,
+        sacl: bool,
+    ) -> Result<harden::TaskSecurity, Failed>;
     /// Gives the task `name` in `folder` the self-relative descriptor `descriptor`, its owner,
     /// group, DACL and SACL (`IRegisteredTask::SetSecurityDescriptor` with
     /// `TASK_DONT_ADD_PRINCIPAL_ACE`, so no entry is added for its principal).

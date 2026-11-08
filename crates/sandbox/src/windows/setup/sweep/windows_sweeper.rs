@@ -27,6 +27,7 @@ use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Shell::{FOLDERID_System, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
 use windows::core::{BSTR, HSTRING, PCWSTR, PWSTR};
 
+use super::harden::TaskSecurity;
 use super::{
     Failed, Listing, Principal, SweepExit, Sweeper, TASK_FILE_CAP, Task, TaskFile, sweep,
     windows_groups, windows_harden, windows_listing, windows_task_file,
@@ -56,9 +57,10 @@ pub(crate) struct WindowsSweeper {
     service: Option<ITaskService>,
     /// The last list of running task instances, `None` where one couldn't be read.
     running: Vec<Option<IRunningTask>>,
-    /// Whether the admin-only log is made when missing: the sweep's, as SYSTEM; set-up's
-    /// administrator only appends to one already there (`admin_log::append_existing`).
-    make_admin_log: bool,
+    /// Whether the admin-only log is made, when missing, owned by Administrators: set-up's
+    /// administrator can't make it owned by SYSTEM, as the sweep does
+    /// (`admin_log::append_as_admin`).
+    admin_log_as_admin: bool,
     /// COM on this thread; the last field, so it is uninitialised after every interface above.
     _com: Com,
 }
@@ -71,16 +73,16 @@ impl WindowsSweeper {
             bits: WindowsBits::default(),
             service: None,
             running: Vec::new(),
-            make_admin_log: true,
+            admin_log_as_admin: false,
             _com: Com::new(),
         }
     }
 
     /// The machine for set-up's hardening (`windows_harden::at_set_up`): as [`Self::new`],
-    /// but the admin-only log is only appended to when it is there already.
+    /// but the admin-only log is made, when missing, owned by Administrators.
     pub(super) fn for_set_up() -> WindowsSweeper {
         WindowsSweeper {
-            make_admin_log: false,
+            admin_log_as_admin: true,
             ..WindowsSweeper::new()
         }
     }
@@ -328,10 +330,10 @@ impl Sweeper for WindowsSweeper {
     }
 
     fn admin_log(&mut self, line: &str) -> Result<(), Failed> {
-        if self.make_admin_log {
-            admin_log::append(line)
+        if self.admin_log_as_admin {
+            admin_log::append_as_admin(line)
         } else {
-            admin_log::append_existing(line)
+            admin_log::append(line)
         }
     }
 
@@ -347,8 +349,13 @@ impl Sweeper for WindowsSweeper {
         windows_groups::group_members(sid)
     }
 
-    fn task_security(&mut self, folder: &ITaskFolder, name: &str) -> Result<Vec<u8>, Failed> {
-        windows_harden::task_security(folder, name)
+    fn task_security(
+        &mut self,
+        folder: &ITaskFolder,
+        name: &str,
+        sacl: bool,
+    ) -> Result<TaskSecurity, Failed> {
+        windows_harden::task_security(folder, name, sacl)
     }
 
     fn set_task_security(

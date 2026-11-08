@@ -87,13 +87,7 @@ fn with_aces(acl: &[u8], aces: &[Vec<u8>]) -> Vec<u8> {
 /// The self-relative descriptor `descriptor` with `dacl` as its DACL: its revision, control,
 /// owner, group and `sacl` as they are. `None` when its group can't be read.
 fn with_dacl(descriptor: &[u8], sacl: Option<&[u8]>, dacl: &[u8]) -> Option<Vec<u8>> {
-    let group = match u32::from_le_bytes(descriptor.get(8..12)?.try_into().ok()?) {
-        0 => None,
-        offset => {
-            let at = descriptor.get(usize::try_from(offset).ok()?..)?;
-            Some(at.get(..8 + 4 * usize::from(*at.get(1)?))?)
-        }
-    };
+    let group = group_bytes(descriptor).ok()?;
     let mut out = descriptor.get(..4)?.to_vec();
     out.extend_from_slice(&[0; 16]);
     let parts = [
@@ -111,4 +105,49 @@ fn with_dacl(descriptor: &[u8], sacl: Option<&[u8]>, dacl: &[u8]) -> Option<Vec<
         }
     }
     Some(out)
+}
+
+/// The group of the self-relative descriptor `descriptor`, as bytes: `Ok(None)` when it
+/// names none, `Err` when its offset runs past it.
+fn group_bytes(descriptor: &[u8]) -> Result<Option<&[u8]>, &'static str> {
+    let past = "the descriptor's group runs past it";
+    let offset = descriptor.get(8..12).ok_or(past)?;
+    let offset = u32::from_le_bytes(offset.try_into().ok().ok_or(past)?);
+    if offset == 0 {
+        return Ok(None);
+    }
+    let at = usize::try_from(offset).ok().ok_or(past)?;
+    let at = descriptor.get(at..).ok_or(past)?;
+    let len = 8 + 4 * usize::from(*at.get(1).ok_or(past)?);
+    at.get(..len).map(Some).ok_or(past)
+}
+
+/// Whether `back`, a task's descriptor read back after hardening wrote it, keeps the owner,
+/// group and SACL of `read`, the one hardening read before: `Err` naming each that differs
+/// or can't be read. Compared as bytes, wherever each sits in either.
+pub(super) fn kept_as_read(read: &[u8], back: &[u8]) -> Result<(), String> {
+    let mut differ = Vec::new();
+    if owner_bytes(read).is_none() || owner_bytes(read) != owner_bytes(back) {
+        differ.push("owner");
+    }
+    if group_bytes(read).is_err() || group_bytes(read) != group_bytes(back) {
+        differ.push("group");
+    }
+    if sacl_bytes(read).is_err() || sacl_bytes(read) != sacl_bytes(back) {
+        differ.push("SACL");
+    }
+    if differ.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("its {} read back changed", differ.join(", ")))
+    }
+}
+
+/// The SACL of the self-relative descriptor `descriptor`: `Ok(None)` when it has none, `Err`
+/// when it doesn't parse.
+fn sacl_bytes(descriptor: &[u8]) -> Result<Option<&[u8]>, &'static str> {
+    let parsed = Descriptor::parse(descriptor)
+        .ok()
+        .ok_or("the descriptor doesn't parse")?;
+    Ok(parsed.sacl)
 }

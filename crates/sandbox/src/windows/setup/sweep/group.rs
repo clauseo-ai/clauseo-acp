@@ -141,17 +141,20 @@ impl Groups {
 
     /// Whether the group `sid` may hold `lawyer`: a group outside `S-1-5-21` (a well-known or
     /// built-in one: Users, Everyone, Administrators, …) may; a local or domain group may when
-    /// its members ([`Sweeper::group_members`]) include the lawyer or a group outside
-    /// `S-1-5-21`, or can't be read.
+    /// its members ([`Sweeper::group_members`]) can't be read, or include the lawyer, a group
+    /// outside `S-1-5-21`, or any group or SID whose kind can't be read ([`Sweeper::is_group`]):
+    /// a nested group (Domain Users in a local group, say) may hold the lawyer, and its own
+    /// members aren't read.
     fn may_hold_lawyer(&mut self, fs: &mut impl Sweeper, sid: &Sid, lawyer: &Sid) -> bool {
         if sid.domain().is_none() {
             return true;
         }
-        self.members(fs, sid).is_none_or(|members| {
-            members
-                .iter()
-                .any(|member| member == lawyer || member.domain().is_none())
-        })
+        let Some(members) = self.members(fs, sid).cloned() else {
+            return true;
+        };
+        members
+            .iter()
+            .any(|member| member == lawyer || member.domain().is_none() || self.kind(fs, member))
     }
 
     /// The members of the group `sid` ([`Sweeper::group_members`]), read once a run; `None`

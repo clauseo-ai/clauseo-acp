@@ -130,7 +130,18 @@ struct Fake {
     descriptors: BTreeMap<String, Result<Vec<u8>, Failed>>,
     secure_refuse: Vec<String>,
     secured: Vec<(String, Vec<u8>)>,
+    /// Each task's SDDL as the Task Scheduler gives it, by name; one not here is
+    /// [`DEFAULT_SDDL`]. The names whose SACL can't be read, and those whose descriptor a write
+    /// leaves as [`hardening::admin_owned`] (another owner, no SACL) whatever it was given.
+    sddls: BTreeMap<String, String>,
+    sacl_refuse: Vec<String>,
+    secure_mangles: Vec<String>,
+    /// SIDs whose kind (`is_group`) can't be read.
+    kinds_unread: Vec<Sid>,
 }
+
+/// The SDDL the fake gives a task not in `Fake::sddls`.
+const DEFAULT_SDDL: &str = "O:BAG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;BU)";
 
 impl Fake {
     fn new(users: &[u32]) -> Fake {
@@ -186,6 +197,10 @@ impl Fake {
             descriptors: BTreeMap::new(),
             secure_refuse: Vec::new(),
             secured: Vec::new(),
+            sddls: BTreeMap::new(),
+            sacl_refuse: Vec::new(),
+            secure_mangles: Vec::new(),
+            kinds_unread: Vec::new(),
         }
     }
 
@@ -495,6 +510,9 @@ impl Sweeper for Fake {
     }
 
     fn is_group(&mut self, sid: &Sid) -> Result<bool, Failed> {
+        if self.kinds_unread.contains(sid) {
+            return Err("LookupAccountSidW failed (1332)".to_owned());
+        }
         let text = sid.as_str();
         let known = text.starts_with("S-1-5-32-") || POOL_GROUPS.contains(&text);
         Ok(known || self.groups.contains_key(sid))
@@ -506,9 +524,24 @@ impl Sweeper for Fake {
         members.unwrap_or_else(|| Err("NetLocalGroupGetMembers failed (2220)".to_owned()))
     }
 
-    fn task_security(&mut self, _folder: &String, name: &str) -> Result<Vec<u8>, Failed> {
+    fn task_security(
+        &mut self,
+        _folder: &String,
+        name: &str,
+        sacl: bool,
+    ) -> Result<harden::TaskSecurity, Failed> {
+        self.done.push(format!("security {name} {sacl}"));
+        if sacl && self.sacl_refuse.iter().any(|refused| refused == name) {
+            return Err("IRegisteredTask::GetSecurityDescriptor failed (0x80070522)".to_owned());
+        }
         let found = self.descriptors.get(name).cloned();
-        found.unwrap_or_else(|| Ok(hardening::admin_owned()))
+        let mut bytes = found.unwrap_or_else(|| Ok(hardening::admin_owned()))?;
+        if !sacl {
+            hardening::drop_sacl(&mut bytes);
+        }
+        let sddl = self.sddls.get(name).cloned();
+        let sddl = sddl.unwrap_or_else(|| DEFAULT_SDDL.to_owned());
+        Ok(harden::TaskSecurity { bytes, sddl })
     }
 
     fn set_task_security(
@@ -521,8 +554,12 @@ impl Sweeper for Fake {
             return Err("IRegisteredTask::SetSecurityDescriptor failed (0x80070005)".to_owned());
         }
         self.secured.push((name.to_owned(), descriptor.to_vec()));
-        self.descriptors
-            .insert(name.to_owned(), Ok(descriptor.to_vec()));
+        let stored = if self.secure_mangles.iter().any(|mangled| mangled == name) {
+            hardening::admin_owned()
+        } else {
+            descriptor.to_vec()
+        };
+        self.descriptors.insert(name.to_owned(), Ok(stored));
         Ok(())
     }
 }

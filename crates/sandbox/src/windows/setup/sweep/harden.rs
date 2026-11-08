@@ -10,8 +10,9 @@
 //!   ([`HARDENED_OWNERS`]). A task the lawyer or any other user owns is never touched: its owner
 //!   may change its DACL back at will, and it isn't ours to change;
 //! - its principal may be the lawyer (`Groups::runs_as_lawyer`): the record's `OwnerSid`, a
-//!   group that may hold the lawyer (one outside `S-1-5-21`, or a local group with the lawyer
-//!   among its members, a failed lookup counting as yes), or a name that resolves to no SID.
+//!   group that may hold the lawyer (one outside `S-1-5-21`, or a local group with the lawyer,
+//!   such a group, or a group or SID of unknown kind among its members, a failed lookup
+//!   counting as yes), or a name that resolves to no SID.
 //!
 //! Hardening takes, from each allow in its DACL that gives one of [`TASK_WRITE`] to a SID a pool
 //! user's token may hold (`Groups::pool_may_hold`: Users, Authenticated Users, Everyone,
@@ -19,11 +20,15 @@
 //! pool member), the rights [`STRIPPED`]; an entry left with no right goes. Every other entry
 //! stays byte for byte and in order, and the owner, group, SACL and control stay as read
 //! ([`tightened`]). Nothing is ever added; a NULL DACL, which only an added DACL could close, is
-//! left and counted as not hardened. The new descriptor goes through the task's own interface
+//! left and counted as not hardened. Whether a task needs it is told from its descriptor read
+//! without the SACL; only a task that does is read whole, SACL included (no write when that
+//! fails), and the new descriptor goes through the task's own interface
 //! (`Sweeper::set_task_security`: `IRegisteredTask::SetSecurityDescriptor`, with no entry added
-//! for the principal). Each task changed, with the SIDs that lost which rights, and each that
-//! couldn't be, go to the admin-only log ([`to_admin_log`]); the world-readable line gets their
-//! counts. Hardening is never 56, a failure included.
+//! for the principal), then is read back to check its owner, group and SACL are as read. Each
+//! task changed, with the SIDs that lost which rights and its DACL before as SDDL, and each that
+//! couldn't be changed or read, go to the admin-only log ([`to_admin_log`]); the world-readable
+//! line gets their counts. Hardening is never 56, a failure included. It undoes nothing a pool
+//! user changed during a session: pre-logon hardening comes with the run-group PR.
 
 use std::collections::BTreeMap;
 
@@ -36,9 +41,9 @@ use crate::windows::sids::Sid;
 #[cfg(any(windows, test))]
 mod bytes;
 #[cfg(any(windows, test))]
-use bytes::owner_of;
-#[cfg(any(windows, test))]
 pub use bytes::tightened;
+#[cfg(any(windows, test))]
+use bytes::{kept_as_read, owner_of};
 
 /// The owners whose tasks are hardened: SYSTEM, Administrators and `TrustedInstaller`.
 pub const HARDENED_OWNERS: [&str; 3] = [
@@ -67,9 +72,16 @@ pub const HARDENED_LOGGED_CAP: usize = 100;
 pub struct Hardened {
     /// Tasks whose descriptor was rewritten.
     pub tasks: usize,
-    /// Tasks that run as the lawyer that needed it and whose descriptor couldn't be read,
-    /// parsed or written, or has a NULL DACL.
+    /// Tasks that run as the lawyer that needed it and couldn't have it: a full descriptor
+    /// (with its SACL) that couldn't be read, a DACL that couldn't be parsed or is NULL, a write
+    /// refused, or a read-back whose owner, group or SACL changed.
     pub failed: usize,
+    /// Tasks that run as the lawyer whose descriptor (without its SACL) couldn't be read, so
+    /// whether they need it can't be told.
+    pub unread: usize,
+    /// For [`harden_loose_tasks`] alone: tasks whose principal couldn't be read, so whether
+    /// they run as the lawyer can't be told.
+    pub principal_unreadable: usize,
     /// For [`harden_loose_tasks`] alone: folders whose tasks or subfolders couldn't be listed,
     /// or past [`FOLDERS_CAP`]; their tasks weren't checked.
     pub unlisted: usize,
@@ -93,6 +105,15 @@ pub struct Loosened {
 /// needed it.
 pub type Tightened = Option<(Vec<u8>, Vec<Loosened>)>;
 
+/// A task's security descriptor as `Sweeper::task_security` reads it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskSecurity {
+    /// Self-relative.
+    pub bytes: Vec<u8>,
+    /// The SDDL the Task Scheduler gave, for the admin-only log.
+    pub sddl: String,
+}
+
 /// What [`harden_task`] works with.
 pub(super) struct HardenWith<'h> {
     /// The pool's SIDs.
@@ -112,6 +133,12 @@ fn owner_of(_descriptor: &[u8]) -> Option<Sid> {
     None
 }
 
+/// `bytes::kept_as_read`'s stand-in off Windows, where no descriptor is read.
+#[cfg(not(any(windows, test)))]
+fn kept_as_read(_read: &[u8], _back: &[u8]) -> Result<(), String> {
+    Ok(())
+}
+
 /// `bytes::tightened`'s stand-in off Windows, where no descriptor is read.
 #[cfg(not(any(windows, test)))]
 fn tightened(
@@ -122,7 +149,9 @@ fn tightened(
 }
 
 /// Hardens the task `name` in `folder`, whose principal may be the lawyer, as the module says,
-/// into `at`'s counts.
+/// into `at`'s counts. Whether it needs it is told from its descriptor without the SACL; only
+/// then is the whole one read (no write when that fails), tightened again, written, and read
+/// back to check its owner, group and SACL are as read.
 pub(super) fn harden_task<S: Sweeper>(
     fs: &mut S,
     folder: &S::Folder,
@@ -139,36 +168,89 @@ pub(super) fn harden_task<S: Sweeper>(
         |_| format!("<a folder that can't be read>\\{name}"),
         |folder| running::task_path(&folder, name),
     );
+    let path = clean(&path);
     let not = |hardened: &mut Hardened, why: &str| {
         hardened.failed += 1;
-        let path = clean(&path);
         let note = format!("couldn't harden a task that runs as the lawyer, {path}: {why}");
         hardened.notes.push(note);
     };
-    let descriptor = match fs.task_security(folder, name) {
-        Ok(descriptor) => descriptor,
-        Err(why) => return not(hardened, &why),
+    let first = match fs.task_security(folder, name, false) {
+        Ok(first) => first,
+        Err(why) => {
+            hardened.unread += 1;
+            let note = format!("couldn't read a task that runs as the lawyer, {path}: {why}");
+            hardened.notes.push(note);
+            return;
+        }
     };
-    let owner = owner_of(&descriptor);
-    if !owner.is_some_and(|owner| HARDENED_OWNERS.contains(&owner.as_str())) {
-        return;
+    match needs(fs, groups, pool, lawyer, &first.bytes) {
+        Ok(Some(_)) => {}
+        Ok(None) => return,
+        Err(why) => return not(hardened, &why),
     }
-    let mut loose = |sid: Option<&Sid>| groups.pool_may_hold(fs, sid, pool, lawyer);
-    let (tightened, changes) = match tightened(&descriptor, &mut loose) {
+    let read = match fs.task_security(folder, name, true) {
+        Ok(read) => read,
+        Err(why) => {
+            let why = format!("its SACL couldn't be read ({why}), so nothing was written");
+            return not(hardened, &why);
+        }
+    };
+    let (tightened, changes) = match needs(fs, groups, pool, lawyer, &read.bytes) {
         Ok(Some(tightened)) => tightened,
         Ok(None) => return,
         Err(why) => return not(hardened, &why),
     };
     let lost = describe(&changes);
-    match fs.set_task_security(folder, name, &tightened) {
+    let before = dacl_part(&read.sddl);
+    if let Err(why) = fs.set_task_security(folder, name, &tightened) {
+        return not(hardened, &format!("{why}; it would have lost: {lost}"));
+    }
+    let checked = fs
+        .task_security(folder, name, true)
+        .map_err(|why| format!("it couldn't be read back ({why})"))
+        .and_then(|back| kept_as_read(&read.bytes, &back.bytes));
+    match checked {
         Ok(()) => {
             hardened.tasks += 1;
-            let path = clean(&path);
-            let note = format!("hardened a task that runs as the lawyer, {path}: {lost}");
+            let note = format!(
+                "hardened a task that runs as the lawyer, {path}: {lost}; its DACL before: \
+                 {before}"
+            );
             hardened.notes.push(note);
         }
-        Err(why) => not(hardened, &format!("{why}; it would have lost: {lost}")),
+        Err(why) => not(
+            hardened,
+            &format!("written ({lost}; its DACL before: {before}), but {why}"),
+        ),
     }
+}
+
+/// `descriptor` [`tightened`] when its owner is one of [`HARDENED_OWNERS`] (`Ok(None)` for
+/// any other owner, or none), for the pool `pool` and the lawyer `lawyer`.
+fn needs<S: Sweeper>(
+    fs: &mut S,
+    groups: &mut Groups,
+    pool: &[Sid],
+    lawyer: &Sid,
+    descriptor: &[u8],
+) -> Result<Tightened, Failed> {
+    let owner = owner_of(descriptor);
+    if !owner.is_some_and(|owner| HARDENED_OWNERS.contains(&owner.as_str())) {
+        return Ok(None);
+    }
+    let mut loose = |sid: Option<&Sid>| groups.pool_may_hold(fs, sid, pool, lawyer);
+    tightened(descriptor, &mut loose)
+}
+
+/// The DACL part of the SDDL `sddl` (`D:` up to `S:` or the end), for undoing a change by
+/// hand; `sddl` whole when it has none.
+pub fn dacl_part(sddl: &str) -> &str {
+    let Some(start) = sddl.find("D:") else {
+        return sddl;
+    };
+    let rest = sddl.get(start..).unwrap_or(sddl);
+    let end = rest.find("S:").unwrap_or(rest.len());
+    rest.get(..end).unwrap_or(rest)
 }
 
 /// `changes` for the admin-only log: `S-1-5-32-545 lost 0x40000000; S-1-1-0 lost 0x001f01ff
@@ -219,6 +301,7 @@ pub(crate) fn harden_loose_tasks<S: Sweeper>(fs: &mut S, pool: &Pool) -> Hardene
             Ok(tasks) => {
                 for task in tasks {
                     let Ok(principal) = task.principal else {
+                        hardened.principal_unreadable += 1;
                         continue;
                     };
                     if let Some(name) = principal.name() {
@@ -257,9 +340,17 @@ pub(crate) fn harden_loose_tasks<S: Sweeper>(fs: &mut S, pool: &Pool) -> Hardene
 
 /// Writes `hardened`'s notes to `fs`'s admin-only log, each a line starting `by`, at most
 /// [`HARDENED_LOGGED_CAP`] and then their count, and returns what the world-readable line says
-/// of them: `""` when nothing was hardened or failed, else the counts alone, never a path.
+/// of them: `""` when nothing was hardened, failed or unread, else the counts alone, never a
+/// path.
 pub(crate) fn to_admin_log<S: Sweeper>(fs: &mut S, hardened: &Hardened, by: &str) -> String {
-    if hardened.tasks == 0 && hardened.failed == 0 {
+    let Hardened {
+        tasks,
+        failed,
+        unread,
+        principal_unreadable,
+        ..
+    } = *hardened;
+    if tasks == 0 && failed == 0 && unread == 0 && principal_unreadable == 0 {
         return String::new();
     }
     let mut written = Ok(());
@@ -271,11 +362,13 @@ pub(crate) fn to_admin_log<S: Sweeper>(fs: &mut S, hardened: &Hardened, by: &str
         let line = format!("{by}: {more} more tasks that run as the lawyer, not named");
         written = written.and_then(|()| fs.admin_log(&line));
     }
-    let counts = format!(
-        "; {} tasks that run as the lawyer had standard users' write removed, {} couldn't \
-         be",
-        hardened.tasks, hardened.failed
+    let mut counts = format!(
+        "; {tasks} tasks that run as the lawyer had standard users' write removed, {failed} \
+         couldn't be, {unread} couldn't be read"
     );
+    if principal_unreadable > 0 {
+        counts = format!("{counts}, {principal_unreadable} tasks whose principal couldn't be read");
+    }
     match written {
         Ok(()) => format!("{counts} (named in the admin-only log)"),
         Err(why) => format!("{counts} (not named: the admin-only log couldn't be written: {why})"),

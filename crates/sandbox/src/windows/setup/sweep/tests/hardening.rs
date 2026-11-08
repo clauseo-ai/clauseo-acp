@@ -3,7 +3,7 @@
 //! gives an account a pool user may be, every other byte kept; a task anyone else owns, or that
 //! runs as someone else, is untouched; nothing is ever added, and a failure is counted, never 56.
 
-use super::super::harden::{STRIPPED, harden_loose_tasks};
+use super::super::harden::{STRIPPED, harden_loose_tasks, to_admin_log};
 use super::*;
 use crate::windows::acl_bytes::{AceSpec, Acl, Descriptor, mask, sid_bytes};
 
@@ -73,6 +73,12 @@ fn descriptor(owner: &str, dacl: &[Vec<u8>]) -> Vec<u8> {
     described(owner, None, dacl)
 }
 
+/// `bytes` as a read without the SACL gives it: no SACL present, its offset 0.
+pub(super) fn drop_sacl(bytes: &mut [u8]) {
+    bytes[2] &= !0x10;
+    bytes[12..16].copy_from_slice(&[0; 4]);
+}
+
 /// A task's descriptor as the Task Scheduler leaves an administrator's: owned by
 /// Administrators, all access for SYSTEM and Administrators, read and execute for Users.
 pub(super) fn admin_owned() -> Vec<u8> {
@@ -129,21 +135,28 @@ fn line(fake: &Fake) -> &str {
 #[test]
 fn a_loose_admin_owned_task_that_runs_as_the_lawyer_loses_only_the_offending_entries() {
     let sacl = [ace(AUDIT, 0x80, FA, "S-1-1-0")];
-    let mut fake = loose(
-        user(OWNER),
-        described("S-1-5-32-544", Some(&sacl), &loose_dacl()),
-    );
+    let read = described("S-1-5-32-544", Some(&sacl), &loose_dacl());
+    let mut fake = loose(user(OWNER), read);
+    let sddl = "O:BAG:SYD:P(A;;FA;;;SY)(A;;GW;;;BU)(A;;FA;;;WD)S:(AU;FA;FA;;;WD)";
+    fake.sddls.insert("loose".to_owned(), sddl.to_owned());
     assert_eq!(sweep(&mut fake), SweepExit::Done);
     assert_eq!(fake.deleted(), Vec::<&str>::new());
-    // Byte for byte: the owner, group, SACL and control as they were, and the DACL less
+    // Told from a read without the SACL, then read whole, written, and read back.
+    let reads: Vec<&str> = fake
+        .done
+        .iter()
+        .filter_map(|l| l.strip_prefix("security "))
+        .collect();
+    assert_eq!(reads, ["loose false", "loose true", "loose true"]);
+    // Byte for byte: the owner, group, SACL and control as read whole, and the DACL less
     // exactly the two entries.
     let want = described("S-1-5-32-544", Some(&sacl), &hardened_dacl());
     assert_eq!(fake.secured, [("loose".to_owned(), want)]);
     let line = line(&fake);
     assert!(
         line.ends_with(
-            "; 1 tasks that run as the lawyer had standard users' write removed, 0 couldn't be \
-             (named in the admin-only log)"
+            "; 1 tasks that run as the lawyer had standard users' write removed, 0 couldn't be, \
+             0 couldn't be read (named in the admin-only log)"
         ),
         "{line}"
     );
@@ -156,21 +169,36 @@ fn a_loose_admin_owned_task_that_runs_as_the_lawyer_loses_only_the_offending_ent
         "no path in the world-readable line: {line}"
     );
     let admin = fake.admin_logged.join("\n");
+    // The change, and the DACL before it as SDDL, so it can be undone by hand; not the SACL.
     assert!(
         admin.contains(
             "the sandbox's task sweep hardened a task that runs as the lawyer, \"\\A\\loose\": \
-             S-1-5-32-545 lost 0x40000000 (its entry removed); S-1-1-0 lost 0x000d0116"
+             S-1-5-32-545 lost 0x40000000 (its entry removed); S-1-1-0 lost 0x000d0116; its DACL \
+             before: D:P(A;;FA;;;SY)(A;;GW;;;BU)(A;;FA;;;WD)"
         ),
         "{admin}"
     );
+    assert!(!admin.contains("S:(AU"), "{admin}");
 }
 
 #[test]
 fn a_loose_task_naming_a_group_the_lawyer_may_be_in_is_hardened() {
-    // Users, and a local group whose members hold the lawyer.
-    for named in ["S-1-5-32-545", "S-1-5-21-1-2-3-1200"] {
+    // Users; local groups whose members hold the lawyer, a nested group (Domain Users, say),
+    // and a SID whose kind can't be read.
+    for named in [
+        "S-1-5-32-545",
+        "S-1-5-21-1-2-3-1200",
+        "S-1-5-21-1-2-3-1203",
+        "S-1-5-21-1-2-3-1204",
+    ] {
         let mut fake = loose(group(named), descriptor("S-1-5-18", &loose_dacl()));
         fake.groups.insert(sid(1200), Ok(vec![sid(1001)]));
+        let domain_users = Sid::parse("S-1-5-21-9-9-9-513").unwrap();
+        fake.groups.insert(domain_users.clone(), Ok(Vec::new()));
+        fake.groups
+            .insert(sid(1203), Ok(vec![sid(1500), domain_users]));
+        fake.groups.insert(sid(1204), Ok(vec![sid(1501)]));
+        fake.kinds_unread.push(sid(1501));
         assert_eq!(sweep(&mut fake), SweepExit::Done, "{named}");
         let want = descriptor("S-1-5-18", &hardened_dacl());
         assert_eq!(fake.secured, [("loose".to_owned(), want)], "{named}");
@@ -323,16 +351,18 @@ fn a_failed_write_is_counted_and_logged_and_never_56() {
     assert!(!error, "{line}");
     assert!(
         line.contains(
-            "; 0 tasks that run as the lawyer had standard users' write removed, 3 \
-                       couldn't be"
+            "; 0 tasks that run as the lawyer had standard users' write removed, 2 couldn't be, \
+             1 couldn't be read"
         ),
         "{line}"
     );
     let admin = fake.admin_logged.join("\n");
-    for name in ["loose", "unread", "null"] {
+    for name in ["loose", "null"] {
         let want = format!("couldn't harden a task that runs as the lawyer, \"\\A\\{name}\"");
         assert!(admin.contains(&want), "{admin}");
     }
+    let want = "couldn't read a task that runs as the lawyer, \"\\A\\unread\"";
+    assert!(admin.contains(want), "{admin}");
     assert!(admin.contains("SetSecurityDescriptor failed"), "{admin}");
     assert!(
         admin.contains("it would have lost: S-1-5-32-545 lost"),
@@ -377,4 +407,63 @@ fn harden_loose_tasks_walks_every_folder_and_deletes_nothing() {
     let mut secured: Vec<&str> = fake.secured.iter().map(|(name, _)| name.as_str()).collect();
     secured.sort_unstable();
     assert_eq!(secured, ["deep", "loose"]);
+}
+
+#[test]
+fn a_sacl_that_cant_be_read_means_no_write_and_a_task_that_needs_nothing_is_no_failure() {
+    let mut fake = loose(user(OWNER), descriptor("S-1-5-18", &loose_dacl()));
+    fake.sacl_refuse.push("loose".to_owned());
+    // Needs nothing: SYSTEM and Administrators alone, Users read. Its SACL can't be read either,
+    // but nothing asks for it.
+    fake.task("\\A", "tight", user(OWNER));
+    fake.sacl_refuse.push("tight".to_owned());
+    assert_eq!(sweep(&mut fake), SweepExit::Done);
+    assert_eq!(fake.secured, []);
+    let reads: Vec<&str> = fake
+        .done
+        .iter()
+        .filter_map(|l| l.strip_prefix("security "))
+        .collect();
+    assert_eq!(reads, ["loose false", "loose true", "tight false"]);
+    let line = line(&fake);
+    let want = "0 tasks that run as the lawyer had standard users' write removed, 1 couldn't be, 0";
+    assert!(line.contains(want), "{line}");
+    let admin = fake.admin_logged.join("\n");
+    assert!(admin.contains("its SACL couldn't be read"), "{admin}");
+    assert!(!admin.contains("tight"), "{admin}");
+}
+
+#[test]
+fn a_write_whose_read_back_changed_the_owner_group_or_sacl_is_a_failure() {
+    let sacl = [ace(AUDIT, 0x80, FA, "S-1-1-0")];
+    let mut fake = loose(
+        user(OWNER),
+        described("S-1-5-18", Some(&sacl), &loose_dacl()),
+    );
+    fake.secure_mangles.push("loose".to_owned());
+    assert_eq!(sweep(&mut fake), SweepExit::Done);
+    assert_eq!(fake.secured.len(), 1);
+    let line = line(&fake);
+    assert!(line.contains("write removed, 1 couldn't be"), "{line}");
+    let admin = fake.admin_logged.join("\n");
+    assert!(
+        admin.contains("but its owner, SACL read back changed"),
+        "{admin}"
+    );
+    assert!(admin.contains("its DACL before: D:"), "{admin}");
+}
+
+#[test]
+fn a_task_whose_principal_cant_be_read_is_counted_by_harden_loose_tasks() {
+    let mut fake = Fake::new(&[1010]);
+    fake.unread("\\A", "unread");
+    let pool = Pool {
+        owner: Sid::parse(OWNER).unwrap(),
+        users: vec![sid(1010)],
+    };
+    let hardened = harden_loose_tasks(&mut fake, &pool);
+    assert_eq!(hardened.principal_unreadable, 1);
+    let line = to_admin_log(&mut fake, &hardened, "set-up");
+    let want = "0 couldn't be read, 1 tasks whose principal couldn't be read";
+    assert!(line.contains(want), "{line}");
 }
