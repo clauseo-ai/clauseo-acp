@@ -13,9 +13,10 @@
 //! 2. reads the record: with no admin copy recorded there is no one to serve
 //!    ([`ServeExit::NoRecord`]);
 //! 3. makes the pipe, its first instance or nothing (`FILE_FLAG_FIRST_PIPE_INSTANCE`), local
-//!    clients only, with a protected DACL built now from the record ([`pipe_sddl`]): per user the
-//!    owner, per machine interactive users, the pool's group refused first once it exists. A name
-//!    someone else made first is logged and served to no one ([`ServeExit::Squatted`]);
+//!    clients only, owned by LOCAL SYSTEM, with a protected DACL built now from the record
+//!    ([`pipe_sddl`]): per user the owner, per machine interactive users, the pool's group refused
+//!    first once it exists. A name someone else made first is logged and served to no one
+//!    ([`ServeExit::Squatted`]);
 //! 4. serves each client in turn ([`handle`]), waiting [`FIRST_WAIT`] for the first and
 //!    [`IDLE_WAIT`] for each after, then exits [`ServeExit::Done`]. While one is served the next
 //!    can connect and wait; the task queues a start made as this process ends, and the app
@@ -57,7 +58,9 @@ use super::result_file::SetupResult;
 use crate::windows::refresh::same_path;
 use crate::windows::sids::Sid;
 
-pub use identify::{ClientFacts, Gate, Refusal, ServerFacts, check_server, identify, pipe_sddl};
+pub use identify::{
+    ClientFacts, Gate, Refusal, ServerFacts, check_owner, check_server, identify, pipe_sddl,
+};
 pub use protocol::{Op, PROTOCOL, REPLY_CAP, REQUEST_CAP, Reply, SetUpError, via_task};
 
 mod identify;

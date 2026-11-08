@@ -1,6 +1,6 @@
 //! The set-up pipe's two checks, with no Windows call: the server's gate on who asked
-//! ([`identify`]) and the pipe's DACL ([`pipe_sddl`]), and the app's check of who answers
-//! ([`check_server`]) before it sends anything.
+//! ([`identify`]) and the pipe's descriptor ([`pipe_sddl`]), and the app's check of who
+//! answers ([`check_server`]) before it sends anything.
 
 use std::fmt;
 use std::path::Path;
@@ -136,11 +136,12 @@ pub fn identify(
     Ok(client.user.clone())
 }
 
-/// The pipe's descriptor, from the record as it is when the server starts: protected; each of
-/// the pool's groups refused everything first; SYSTEM everything; per user the owner, per
-/// machine every interactive user (`IU`), [`PIPE_RIGHTS`] (read and write, never a new instance,
-/// so no client can serve the name); a Medium label with no-write-up and no-read-up. `None`
-/// with no admin copy recorded.
+/// The pipe's descriptor, from the record as it is when the server starts: owned by LOCAL
+/// SYSTEM (`O:SY`, the proof [`check_server`] reads: no one but SYSTEM or an administrator can
+/// make an object SYSTEM owns); protected; each of the pool's groups refused everything first;
+/// SYSTEM everything; per user the owner, per machine every interactive user (`IU`),
+/// [`PIPE_RIGHTS`] (read and write, never a new instance, so no client can serve the name); a
+/// Medium label with no-write-up and no-read-up. `None` with no admin copy recorded.
 pub fn pipe_sddl(gate: &Gate) -> Option<String> {
     let client = match gate.copy_owner.as_ref()? {
         CopyOwner::User(owner) => owner.to_string(),
@@ -153,50 +154,70 @@ pub fn pipe_sddl(gate: &Gate) -> Option<String> {
         denies
     });
     Some(format!(
-        "D:P{denies}(A;;GA;;;SY)(A;;0x{PIPE_RIGHTS:x};;;{client})S:(ML;;NWNR;;;ME)"
+        "O:SYD:P{denies}(A;;GA;;;SY)(A;;0x{PIPE_RIGHTS:x};;;{client})S:(ML;;NWNR;;;ME)"
     ))
 }
 
-/// Who answers on the pipe, as the app reads it on the handle it opened, before it writes.
+/// Who answers on the pipe, as the app reads it on the handle it opened, before it writes. A
+/// fact is `Err`, with why, when Windows wouldn't give it to this user.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerFacts {
+    /// The pipe's owner (`GetSecurityInfo` on the handle, which [`PIPE_RIGHTS`]' `READ_CONTROL`
+    /// allows).
+    pub owner: Result<Sid, String>,
     /// The server's session (`GetNamedPipeServerSessionId`).
-    pub session: u32,
-    /// The server process's user, from the kernel's process list; `None` when not given.
-    pub user: Option<Sid>,
-    /// The server process's image as the kernel names it (`\Device\HarddiskVolumeN\...`);
-    /// `None` when not given.
-    pub image: Option<String>,
+    pub session: Result<u32, String>,
+    /// The server process's user, from the kernel's process list.
+    pub user: Result<Sid, String>,
+    /// The server process's image as the kernel names it (`\Device\HarddiskVolumeN\...`).
+    pub image: Result<String, String>,
 }
 
-/// Whether `server` is the set-up task's: session 0, LOCAL SYSTEM, running the admin copy
-/// `admin_exe`, whose drive is the device `drive_device` (`QueryDosDeviceW` of its letter).
-/// Anything unknown refuses: a pool user can make the pipe's name first, and must get nothing.
+/// The pipe's owner check, the proof [`check_server`] starts with: `owner` is LOCAL SYSTEM. The
+/// app reads it before anything else, so a squatter's pipe is refused on it alone, whatever
+/// became of the process that made it.
+pub fn check_owner(owner: &Result<Sid, String>) -> Result<(), String> {
+    match owner {
+        Ok(owner) if owner.as_str() == SYSTEM => Ok(()),
+        Ok(_) => Err("the pipe isn't owned by LOCAL SYSTEM".to_owned()),
+        Err(why) => Err(format!("the pipe's owner can't be read: {why}")),
+    }
+}
+
+/// Whether `server` is the set-up task's. The proof is the pipe's owner ([`check_owner`]): the
+/// server makes the pipe owned by LOCAL SYSTEM ([`pipe_sddl`]), which a pool user can't, and
+/// the owner stays with the pipe, so a squatter's pipe passed to another process, or a server
+/// id reused after the squatter ended, proves nothing. The rest back it up: session 0, LOCAL
+/// SYSTEM, running the admin copy `admin_exe`, whose drive is the device `drive_device`
+/// (`QueryDosDeviceW` of its letter). A fact read that differs refuses; a fact Windows wouldn't
+/// give this user is set aside on the owner's word, and returned, a line each, for the log.
 pub fn check_server(
     server: &ServerFacts,
     admin_exe: &Path,
     drive_device: &str,
-) -> Result<(), String> {
-    if server.session != 0 {
-        return Err(format!(
-            "the pipe's server runs in session {}",
-            server.session
-        ));
+) -> Result<Vec<String>, String> {
+    check_owner(&server.owner)?;
+    let mut unread = Vec::new();
+    match &server.session {
+        Ok(0) => {}
+        Ok(session) => return Err(format!("the pipe's server runs in session {session}")),
+        Err(why) => unread.push(format!("its session: {why}")),
     }
     match &server.user {
-        Some(user) if user.as_str() == SYSTEM => {}
-        Some(_) => return Err("the pipe's server isn't LOCAL SYSTEM".to_owned()),
-        None => return Err("the pipe's server's user can't be read".to_owned()),
+        Ok(user) if user.as_str() == SYSTEM => {}
+        Ok(_) => return Err("the pipe's server isn't LOCAL SYSTEM".to_owned()),
+        Err(why) => unread.push(format!("its user: {why}")),
     }
     let exe = admin_exe.to_string_lossy();
     let expected = exe
         .get(2..)
         .filter(|_| exe.as_bytes().get(1) == Some(&b':'))
-        .map(|rest| format!("{}{rest}", drive_device.trim_end_matches('\\')));
-    match (&server.image, expected) {
-        (Some(image), Some(expected)) if image.to_lowercase() == expected.to_lowercase() => Ok(()),
-        (Some(_), Some(_)) => Err("the pipe's server isn't the admin copy".to_owned()),
-        (None, _) => Err("the pipe's server's image can't be read".to_owned()),
-        (_, None) => Err("the admin copy's path has no drive".to_owned()),
+        .map(|rest| format!("{}{rest}", drive_device.trim_end_matches('\\')))
+        .ok_or("the admin copy's path has no drive")?;
+    match &server.image {
+        Ok(image) if image.to_lowercase() == expected.to_lowercase() => {}
+        Ok(_) => return Err("the pipe's server isn't the admin copy".to_owned()),
+        Err(why) => unread.push(format!("its image: {why}")),
     }
+    Ok(unread)
 }

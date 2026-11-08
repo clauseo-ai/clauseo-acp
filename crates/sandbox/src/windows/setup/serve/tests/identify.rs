@@ -149,72 +149,115 @@ fn the_pipe_names_the_owner_or_interactive_users_and_refuses_the_pool_first() {
     let per_machine = pipe_sddl(&machine_gate()).unwrap();
     assert_eq!(
         per_machine,
-        format!("D:P(D;;GA;;;{GROUP})(A;;GA;;;SY)(A;;0x12019b;;;IU)S:(ML;;NWNR;;;ME)")
+        format!("O:SYD:P(D;;GA;;;{GROUP})(A;;GA;;;SY)(A;;0x12019b;;;IU)S:(ML;;NWNR;;;ME)")
     );
     let mut per_user = machine_gate();
     per_user.copy_owner = Some(CopyOwner::User(sid(LAWYER)));
     per_user.groups.clear();
     assert_eq!(
         pipe_sddl(&per_user).unwrap(),
-        format!("D:P(A;;GA;;;SY)(A;;0x12019b;;;{LAWYER})S:(ML;;NWNR;;;ME)")
+        format!("O:SYD:P(A;;GA;;;SY)(A;;0x12019b;;;{LAWYER})S:(ML;;NWNR;;;ME)")
     );
-    // A client's rights never include a new instance (FILE_CREATE_PIPE_INSTANCE, 0x4).
+    // A client's rights never include a new instance (FILE_CREATE_PIPE_INSTANCE, 0x4), and
+    // always READ_CONTROL (0x20000), which the app's read of the pipe's owner needs.
     assert_eq!(crate::windows::pipe::PIPE_RIGHTS & 0x4, 0);
+    assert_eq!(crate::windows::pipe::PIPE_RIGHTS & 0x2_0000, 0x2_0000);
     assert_eq!(pipe_sddl(&Gate::default()), None);
 }
 
-#[test]
-fn the_app_talks_only_to_system_in_session_0_running_the_admin_copy() {
-    let exe = Path::new(ADMIN_EXE);
-    let device = r"\Device\HarddiskVolume3";
-    let real = ServerFacts {
-        session: 0,
-        user: Some(sid("S-1-5-18")),
-        image: Some(
+/// The facts of the set-up task's own server, as a standard user reads them.
+fn real_server() -> ServerFacts {
+    ServerFacts {
+        owner: Ok(sid("S-1-5-18")),
+        session: Ok(0),
+        user: Ok(sid("S-1-5-18")),
+        image: Ok(
             r"\Device\HarddiskVolume3\Program Files\Clauseo\Sandbox\clauseo-sandbox-setup.exe"
                 .to_owned(),
         ),
-    };
-    assert_eq!(check_server(&real, exe, device), Ok(()));
+    }
+}
+
+#[test]
+fn the_app_talks_only_to_a_pipe_system_owns_served_by_the_admin_copy() {
+    let exe = Path::new(ADMIN_EXE);
+    let device = r"\Device\HarddiskVolume3";
+    let real = real_server();
+    assert_eq!(check_server(&real, exe, device), Ok(Vec::new()));
     let upper = ServerFacts {
-        image: real.image.as_ref().map(|image| image.to_uppercase()),
+        image: real.image.clone().map(|image| image.to_uppercase()),
         ..real.clone()
     };
-    assert_eq!(check_server(&upper, exe, device), Ok(()), "case folded");
+    assert_eq!(
+        check_server(&upper, exe, device),
+        Ok(Vec::new()),
+        "case folded"
+    );
     let squats = [
-        // A pool user's process in its own session.
+        // A pool user's pipe is the pool user's, whatever else it shows: the PID a squatter's
+        // pipe names may since be a SYSTEM admin-copy process's.
         ServerFacts {
-            session: 1,
-            user: Some(sid(POOL)),
+            owner: Ok(sid(POOL)),
+            ..real.clone()
+        },
+        ServerFacts {
+            owner: Ok(sid("S-1-5-32-544")),
+            ..real.clone()
+        },
+        ServerFacts {
+            owner: Err("error 5".to_owned()),
+            ..real.clone()
+        },
+        // A pool user's process in its own session, on a pipe SYSTEM somehow owns.
+        ServerFacts {
+            session: Ok(1),
             ..real.clone()
         },
         // A pool user's scheduled task reaches session 0, but isn't SYSTEM.
         ServerFacts {
-            user: Some(sid(POOL)),
-            ..real.clone()
-        },
-        ServerFacts {
-            user: None,
+            user: Ok(sid(POOL)),
             ..real.clone()
         },
         // SYSTEM running anything else, or on another volume.
         ServerFacts {
-            image: Some(r"\Device\HarddiskVolume3\Windows\System32\cmd.exe".to_owned()),
+            image: Ok(r"\Device\HarddiskVolume3\Windows\System32\cmd.exe".to_owned()),
             ..real.clone()
         },
         ServerFacts {
-            image: Some(
+            image: Ok(
                 r"\Device\HarddiskVolume4\Program Files\Clauseo\Sandbox\clauseo-sandbox-setup.exe"
                     .to_owned(),
             ),
             ..real.clone()
         },
-        ServerFacts {
-            image: None,
-            ..real
-        },
     ];
     for squat in squats {
         assert!(check_server(&squat, exe, device).is_err(), "{squat:?}");
     }
+    assert!(check_owner(&Ok(sid(POOL))).is_err());
+    assert_eq!(check_owner(&Ok(sid("S-1-5-18"))), Ok(()));
+    let no_drive = check_server(&real, Path::new(r"\\server\share\setup.exe"), device);
+    assert!(no_drive.is_err(), "{no_drive:?}");
+}
+
+#[test]
+fn facts_windows_wont_give_are_set_aside_on_the_owners_word_and_logged() {
+    let exe = Path::new(ADMIN_EXE);
+    let device = r"\Device\HarddiskVolume3";
+    let unread = ServerFacts {
+        session: Err("access denied".to_owned()),
+        user: Err("the process list gives no user".to_owned()),
+        image: Err("the kernel won't give it".to_owned()),
+        ..real_server()
+    };
+    let lines = check_server(&unread, exe, device).unwrap();
+    assert_eq!(lines.len(), 3, "{lines:?}");
+    assert!(lines[0].starts_with("its session"), "{lines:?}");
+    assert!(lines[2].starts_with("its image"), "{lines:?}");
+    // Never without the owner: a pipe whose owner can't be read gets nothing.
+    let blind = ServerFacts {
+        owner: Err("error 5".to_owned()),
+        ..unread
+    };
+    assert!(check_server(&blind, exe, device).is_err());
 }
