@@ -2362,21 +2362,27 @@ pool account:
 3. It opens `git`, `<account>` and `<tree id>` relative to the level above, never through a
    reparse point (`git_tree::checked_chain`). Each must be a folder owned by SYSTEM whose
    protected DACL is exactly set-up's; it reads them through the Authenticated Users ACE above.
-4. The tree's completion marker `.clauseo-tree` must hold the record's tree id and the run's
+4. It holds `usr\bin\msys-2.0.dll`, `bin\bash.exe` and `cmd\git.exe` open for the run, sharing
+   read alone. While they are held, no one can delete or rename them, so their folders and the
+   tree stay put, and a refresh can't retire the tree between this check and the agent's first
+   Git (it falls back to a trash rename). A handle on a folder would hold nothing here: the
+   desktop user's only right on the tree's folders is the read-security ACE, and a handle with
+   no read, write or delete right takes no share.
+5. The tree's completion marker `.clauseo-tree` must hold the record's tree id and the run's
    pool SID.
-5. It opens `usr\bin\msys-2.0.dll` as itself. Its final path (`GetFinalPathNameByHandleW`)
+6. It opens `usr\bin\msys-2.0.dll` as itself. Its final path (`GetFinalPathNameByHandleW`)
    must be the tree's own and plain ASCII. The key is 16 hex digits of msys's `hash_path_name`
    over its NT form `\??\C:\…`, upper-cased (`mm/cygheap.cc`). Pinned vectors:
    `C:\Program Files\Git` gives `1888ae32e00d56aa`, and `C:\clauseo-test\run-A\git` gives
    `45a176edb0b42059`. The prefix (`msys-2.0S5`) comes from the same file: whatever follows
    `%%% MSYS shared id: `, which must read `msys-<digits>.<digits>S<digits>`.
-6. It makes `\Sessions\<its session>\BaseNamedObjects\<prefix>-<key>` and
+7. It makes `\Sessions\<its session>\BaseNamedObjects\<prefix>-<key>` and
    `\BaseNamedObjects\<prefix>-<key>` (just the global one in session 0) with
    `NtCreateDirectoryObject` and no `OBJ_OPENIF`. Their descriptor:
    `O:<desktop user>D:(A;;0xF000F;;;SY)(A;;0xF000F;;;<desktop user>)(A;;0x2000F;;;<pool user>)S:(ML;;NW;;;LW)`.
    It holds both handles until it exits, and the folders go with the last handle. One already
    there counts as squatted: Git Bash is off and the line says so.
-7. The agent gets `CLAUDE_CODE_GIT_BASH_PATH=<tree>\bin\bash.exe` and `<tree>\cmd` first in its
+8. The agent gets `CLAUDE_CODE_GIT_BASH_PATH=<tree>\bin\bash.exe` and `<tree>\cmd` first in its
    `PATH`, so its `git` is the tree's and finds the tree's `sh.exe`. `GIT_CONFIG_*` stays as it
    was.
 
@@ -2384,10 +2390,20 @@ VM facts: with both folders made this way, Git Bash, a local clone and an HTTPS 
 under the agent's token. Each step that fails writes one line on stderr, `clauseo-sandbox-run:
 Git Bash is off for this run: <reason>`, naming no path, and the run goes on with no Git Bash.
 That fails closed: the spec's `CLAUDE_CODE_GIT_BASH_PATH` goes, and so does every `PATH` entry
-in a per-machine Git install (`GitForWindows`' `InstallPath`, `%ProgramFiles%\Git`), so the
-agent never falls back to the lawyer's Git. A Git elsewhere on a `PATH` the lawyer set (a
+in a per-machine Git install (`GitForWindows`' `InstallPath`, `%ProgramFiles%\Git`,
+`%ProgramFiles(x86)%\Git`), matched as written and in its long form (`GetLongPathNameW`, so
+`C:\PROGRA~1\Git\cmd` is caught), so the agent's `PATH` never leads to the lawyer's Git. A Git elsewhere on a `PATH` the lawyer set (a
 package manager's shim, say) isn't recognised and stays. Under the agent's token it fails as
 the lawyer's Git would.
+
+Claude Code itself still probes for the lawyer's Git Bash. Read from Claude Code 2.1.318's
+bundle: when `CLAUDE_CODE_GIT_BASH_PATH` is unset, or names a file that isn't there, it tries
+`C:\Program Files\Git\bin\bash.exe` and then `C:\Program Files (x86)\Git\bin\bash.exe`.
+Only after those does it derive `bin\bash.exe` from the `git` on `PATH`. So with Git Bash
+off, the agent can start the lawyer's own `bash.exe` under its token. That bash has the
+lawyer's key, whose session folder the pool user can't create, so it fails, as it did before
+the trees (VM row). That doesn't hold while the lawyer has Git Bash running in the session: msys
+has then made that folder already, and what the agent's bash does with it isn't verified.
 
 **Residuals (ruled acceptable for launch).**
 - msys's objects in the global folder (the pid table with each process's exe path, and
