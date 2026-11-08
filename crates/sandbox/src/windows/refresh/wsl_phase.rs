@@ -8,7 +8,7 @@
 //!   in the Application log: once allowed, as the refresh is, it runs the phase once and does
 //!   nothing else, no admin-copy step. Anyone who can log on can forge such an event, so the
 //!   trigger is on this task alone: a forged one gains a re-applied deny, and WSL's pending
-//!   upgrade installed (below), which any user may start through WSL's own installer anyway.
+//!   upgrade installed (below).
 //!   The trigger starts it at once (no delay), and the task ignores a start while it runs: a
 //!   burst of installer events gives one run, and an event after it ends gives another. The
 //!   launch check starts it too, as the lawyer (`clean_close::wsl_heal`).
