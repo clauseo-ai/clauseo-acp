@@ -75,3 +75,8 @@ mod deny;
 #[cfg(target_os = "macos")]
 #[path = "jail/outside.rs"]
 mod outside;
+
+#[cfg(test)]
+#[cfg(target_os = "macos")]
+#[path = "jail/chrome.rs"]
+mod chrome;

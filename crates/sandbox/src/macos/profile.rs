@@ -478,6 +478,18 @@ impl Writer {
         );
         self.note("; The folders above it: metadata only, so its path resolves.");
         self.rule("allow", "file-read-metadata", &[ancestors(&dir)]);
+        self.note(
+            "; chrome-headless-shell's port rendezvous: the browser registers the name and its",
+        );
+        self.note("; children look it up; without it the browser stops at start.");
+        self.rule(
+            "allow",
+            "mach-register mach-lookup",
+            &[
+                "(global-name-prefix \"org.chromium.Chromium.MachPortRendezvousServer.\")"
+                    .to_owned(),
+            ],
+        );
     }
 
     fn network(&mut self, policy: &Policy) {
