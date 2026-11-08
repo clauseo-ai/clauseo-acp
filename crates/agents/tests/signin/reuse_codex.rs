@@ -12,8 +12,6 @@ use clauseo_agents::{
     codex_link_holds, codex_login_shared, same_file, unlink_reused_login,
 };
 
-#[cfg(unix)]
-use crate::codex::CANCEL_GRACE;
 use crate::support::{Events, Fixture, Launch, codex, now};
 #[cfg(unix)]
 use crate::support::{claude, eventually};
@@ -269,9 +267,7 @@ fn a_codex_login_logout_or_authenticate_is_refused_while_the_files_share_an_id()
         let (agents, events) = start(&fx);
         // Under `own` the switch guard refuses first; past it, the shared-file guard still holds.
         let refused = Err(SigninError::OwnLoginPresent(codex()));
-        if own {
-            assert_eq!(agents.sign_in(&codex(), Method::Browser), refused);
-        }
+        assert!(!own || agents.sign_in(&codex(), Method::Browser) == refused);
         agents.sign_in_switching(&codex(), Method::Browser).unwrap();
         assert_eq!(
             events.state(),
@@ -415,7 +411,7 @@ fn cancelling_use_it_during_its_account_read_makes_no_link() {
     until_app_servers(&fx, before + 1);
     agents.cancel_sign_in(&codex()).unwrap();
     // The stalled app-server ignores its closed stdin: killed when the grace passes.
-    fx.timer.fire(CANCEL_GRACE);
+    fx.timer.fire(crate::codex::CANCEL_GRACE);
     let (_, last) = events.until_end();
     assert_eq!(
         last,
@@ -490,7 +486,7 @@ fn cancelling_use_it_during_its_detection_gives_cancelled() {
     agents.use_found_login(&codex()).unwrap();
     until_app_servers(&fx, before + 1);
     agents.cancel_sign_in(&codex()).unwrap();
-    fx.timer.fire(CANCEL_GRACE);
+    fx.timer.fire(crate::codex::CANCEL_GRACE);
     assert_eq!(
         events.state(),
         SigninState::Failed {

@@ -58,9 +58,10 @@ fn cancel_sends_cancel_and_the_login_ends_writing_nothing() {
         "no /cancel came"
     );
     assert!(!login_file(&fx).exists());
+    // The sign-in's quick check before the login, then one check after it.
     assert_eq!(
         fx.codex_runs(&["login", "status"]).len(),
-        1,
+        2,
         "one check after"
     );
     #[cfg(target_os = "linux")]
@@ -81,7 +82,8 @@ fn quit_sends_cancel_and_ends_inside_its_bound() {
         "no /cancel came"
     );
     assert!(!login_file(&fx).exists());
-    assert_eq!(fx.codex_runs(&["login", "status"]), []);
+    // Only the sign-in's quick check before the login: no check after it.
+    assert_eq!(fx.codex_runs(&["login", "status"]).len(), 1);
     assert_eq!(fx.codex_runs(&["logout"]), []);
     #[cfg(target_os = "linux")]
     assert!(crate::support::gone(login.pid), "pid {} runs", login.pid);
