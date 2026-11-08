@@ -11,6 +11,7 @@
 use std::process::Command;
 
 use super::windows_sweeper::WindowsSweeper;
+use super::windows_sweeper::same_task_path;
 use super::{Names, Resolved, Sweeper as _, Task, resolve, sweep_tasks};
 use crate::test_support::TempDir;
 use crate::windows::refresh::windows_tests::{system32, try_in_cmd};
@@ -179,4 +180,17 @@ fn elevated_this_machines_tasks_all_have_a_principal_that_resolves() {
         "tasks or folders that can't be read: {:?}",
         swept.why
     );
+}
+
+#[test]
+fn task_paths_compare_as_windows_compares_them_not_by_unicode_lowercase() {
+    // CompareStringOrdinal, case ignored: case doesn't matter, but the Kelvin sign (U+212A),
+    // which Unicode lowercases to `k`, is a character of its own.
+    assert_eq!(same_task_path(r"\A\Task", r"\a\TASK"), Ok(true));
+    assert_eq!(same_task_path("\\A\\Tas\u{212A}", r"\A\Task"), Ok(false));
+    assert_eq!(
+        same_task_path("\\A\\TAS\u{212A}", "\\a\\tas\u{212A}"),
+        Ok(true)
+    );
+    assert_eq!(same_task_path(r"\A\Task", r"\A\Tasks"), Ok(false));
 }
