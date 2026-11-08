@@ -542,9 +542,9 @@ Then set it up again from Clauseo, signed in as the other account.
 - Coming (stage D): Clauseo will download Node and the agents into each user's data folder,
   `%LOCALAPPDATA%\ai.clauseo.desktop\`, which default AppLocker rules block. Don't allow that
   folder by path: the user can write there. Instead, in order of preference:
-  - **publisher** rules for the signed runtime and tools: Node's `node.exe` is signed by the
-    OpenJS Foundation, Codex's `codex.exe` by OpenAI (Check on the laptop pass: both
-    publishers). Use **hash** rules for anything unsigned, such as `rg.exe`; those hashes
+  - **publisher** rules for the signed runtime and tools, such as Node's `node.exe` and Codex's
+    `codex.exe`: check the signer under the file's Properties → Digital Signatures, and allow
+    that signer. Use **hash** rules for anything unsigned, such as `rg.exe`; those hashes
     change each time Clauseo downloads a new version;
   - or the IT-installed runtime under Program Files once its policy key lands (`install.bundle`,
     section 6, "Coming");
