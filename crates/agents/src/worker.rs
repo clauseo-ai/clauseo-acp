@@ -427,6 +427,10 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
                     .flatten()
             })
             .flatten();
+        if lock.is_some() {
+            // What a try cut short by the last quit left in the npm cache.
+            install::empty_npm_cache(&config.data_dir);
+        }
         for agent in agents {
             if config.managed.contains(&agent) {
                 self.shared.emit(&agent, InstallState::Managed, None);

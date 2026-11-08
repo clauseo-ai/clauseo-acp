@@ -7,10 +7,12 @@
 //!   same gate and checks as a direct press (`signin_gate`, `refuse_reused`, `refuse_start`),
 //!   checked then: a key, an endpoint or a policy that bars it now refuses it, with the
 //!   refusal logged by its code and the sign-in state back to S18's.
-//! - **Kept** while the install downloads, installs or waits offline to try again (`Waiting`).
-//! - **Dropped** when the install ends `Failed` or `Paused` (the failed view shows; a fresh
-//!   press is needed), when the agent turns out `Managed`, on `CancelSignIn` (the install
-//!   carries on), and when a key or an endpoint takes over (`AgentsBackend::end_sign_in`).
+//! - **Kept** while the install downloads, installs or waits offline to try again (`Waiting`),
+//!   and when it ends `Failed`: the failed view shows with its Retry, and a retry that ends
+//!   `Ready` carries on to the sign-in the lawyer asked for.
+//! - **Dropped** when the install ends `Paused`, when the agent turns out `Managed`, on
+//!   `CancelSignIn` (the install carries on), and when a key or an endpoint takes over
+//!   (`AgentsBackend::end_sign_in`).
 //! - One per agent: a second press replaces the first (`Setup` lets it past the sign-in join).
 //! - Memory only: nothing of it outlives a quit.
 //!
@@ -82,11 +84,10 @@ pub(super) fn drop_press(backend: &AgentsBackend, agent: &AgentId, why: &'static
     true
 }
 
-/// The pump's install `state` for `agent` other than `Ready`: `Failed`, `Paused` and
-/// `Managed` drop a pending press; any other keeps it.
+/// The pump's install `state` for `agent` other than `Ready`: `Paused` and `Managed` drop a
+/// pending press; any other keeps it, `Failed` too (a retry's `Ready` runs it).
 pub(super) fn follow_press(backend: &AgentsBackend, agent: &AgentId, state: &InstallState) {
     let why = match state {
-        InstallState::Failed(_) => "the install failed",
         InstallState::Paused => "the install paused",
         InstallState::Managed => "the agent is the firm's",
         _ => return,

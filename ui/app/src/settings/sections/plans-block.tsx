@@ -246,7 +246,7 @@ export function PlanBlock({
                 size="small"
                 data-testid="plans-add"
                 onClick={() => {
-                  // desktop's own confirm names the size; a declined one leaves the block as it was
+                  // the install starts with no confirm (the block named the size); a refused send leaves the block as it was
                   addsOf(store).add(agent);
                   setAdding(true);
                   void store.send({ install_agent: { agent } }).then((ok) => {

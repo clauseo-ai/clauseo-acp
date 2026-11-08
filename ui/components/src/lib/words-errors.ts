@@ -63,6 +63,7 @@ export type ErrorCode =
   | "agent.install_blocked"
   | "agent.install_disk_full"
   | "agent.install_failed"
+  | "agent.install_setup_failed"
   | "signin.cancelled"
   | "signin.link_expired"
   | "signin.no_plan"
@@ -160,6 +161,9 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   "agent.install_blocked": "Your network is blocking the download.",
   "agent.install_disk_full": "There isn't enough free space on this computer for the download.",
   "agent.install_failed": "Setting up didn't finish. Try again.",
+  // provisional (install resume PR): copy review and Hindi review are the app's
+  "agent.install_setup_failed":
+    "Claude was downloaded but couldn't be set up on this computer. Try again; if it keeps happening, your security software may be blocking it.",
   "signin.cancelled": "Sign-in was cancelled.",
   "signin.link_expired": "The sign-in link expired. Try again.",
   "signin.no_plan": "This account has no plan that works with Clauseo.",
@@ -246,6 +250,15 @@ const PLANNED: Partial<
     chatgpt: "This version of Codex doesn't work with Clauseo.",
     named: "This version of {name} doesn't work with Clauseo.",
     nameless: "This version of the AI doesn't work with Clauseo.",
+  },
+  // provisional (install resume PR), as ERROR_WORDS' sentence
+  "agent.install_setup_failed": {
+    chatgpt:
+      "Codex was downloaded but couldn't be set up on this computer. Try again; if it keeps happening, your security software may be blocking it.",
+    named:
+      "{name} was downloaded but couldn't be set up on this computer. Try again; if it keeps happening, your security software may be blocking it.",
+    nameless:
+      "The AI was downloaded but couldn't be set up on this computer. Try again; if it keeps happening, your security software may be blocking it.",
   },
   "agent.guard_missing": {
     chatgpt: "Clauseo can't start ChatGPT safely here. Reinstall Clauseo.",

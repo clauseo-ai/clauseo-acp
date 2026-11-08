@@ -108,16 +108,22 @@ pub enum FailureKind {
     DiskFull,
     /// Anything else, after three tries.
     Failed,
+    /// The files all downloaded and checked, but setting them up failed, after three tries:
+    /// unpacking Node, `npm ci`, the check for links, the rename into place or the receipt.
+    /// Often an antivirus holding the fresh files on Windows.
+    SetupFailed,
 }
 
 impl FailureKind {
-    /// The error code: `agent.install_offline`, `_blocked`, `_disk_full` or `_failed`.
+    /// The error code: `agent.install_offline`, `_blocked`, `_disk_full`, `_failed` or
+    /// `_setup_failed`.
     pub fn code(self) -> &'static str {
         match self {
             FailureKind::Offline => "agent.install_offline",
             FailureKind::Blocked => "agent.install_blocked",
             FailureKind::DiskFull => "agent.install_disk_full",
             FailureKind::Failed => "agent.install_failed",
+            FailureKind::SetupFailed => "agent.install_setup_failed",
         }
     }
 
@@ -128,6 +134,7 @@ impl FailureKind {
             FailureKind::Blocked => "blocked",
             FailureKind::DiskFull => "disk_full",
             FailureKind::Failed => "failed",
+            FailureKind::SetupFailed => "setup_failed",
         }
     }
 }

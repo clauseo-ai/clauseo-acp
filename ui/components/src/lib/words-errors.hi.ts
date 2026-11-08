@@ -149,6 +149,14 @@ export const HI = {
     "Clauseo के बंद होने तक यह वेबसाइट फिर से अवरुद्ध है। Clauseo यह बदलाव सहेज नहीं सका, इसलिए अगली बार Clauseo खुलने पर इसे फिर से अनुमति मिल सकती है।",
   "Clauseo is still tidying up the Safe workspace after it last closed. Try again in a moment. Your question is kept.":
     "Clauseo पिछली बार बंद होने के बाद अभी भी सुरक्षित कार्यक्षेत्र को व्यवस्थित कर रहा है। थोड़ी देर में फिर से प्रयास करें। आपका प्रश्न रखा गया है।",
+  "Claude was downloaded but couldn't be set up on this computer. Try again; if it keeps happening, your security software may be blocking it.":
+    "Claude डाउनलोड हो गया, लेकिन इस कंप्यूटर पर सेट अप नहीं हो सका। फिर से प्रयास करें; अगर ऐसा बार-बार हो, तो हो सकता है आपका सुरक्षा सॉफ़्टवेयर इसे रोक रहा हो।",
+  "Codex was downloaded but couldn't be set up on this computer. Try again; if it keeps happening, your security software may be blocking it.":
+    "Codex डाउनलोड हो गया, लेकिन इस कंप्यूटर पर सेट अप नहीं हो सका। फिर से प्रयास करें; अगर ऐसा बार-बार हो, तो हो सकता है आपका सुरक्षा सॉफ़्टवेयर इसे रोक रहा हो।",
+  "{name} was downloaded but couldn't be set up on this computer. Try again; if it keeps happening, your security software may be blocking it.":
+    "{name} डाउनलोड हो गया, लेकिन इस कंप्यूटर पर सेट अप नहीं हो सका। फिर से प्रयास करें; अगर ऐसा बार-बार हो, तो हो सकता है आपका सुरक्षा सॉफ़्टवेयर इसे रोक रहा हो।",
+  "The AI was downloaded but couldn't be set up on this computer. Try again; if it keeps happening, your security software may be blocking it.":
+    "AI डाउनलोड हो गया, लेकिन इस कंप्यूटर पर सेट अप नहीं हो सका। फिर से प्रयास करें; अगर ऐसा बार-बार हो, तो हो सकता है आपका सुरक्षा सॉफ़्टवेयर इसे रोक रहा हो।",
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */
