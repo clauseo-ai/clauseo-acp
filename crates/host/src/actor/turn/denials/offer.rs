@@ -10,9 +10,12 @@
 //!   `LinkTarget`, and a site refused for anything but `NotAllowed` (`PrivateAddress` above all).
 //! - Another matter (matched against the registry): the asked path alone, read-only, never its
 //!   root and never anything under its dot folders (`.clauseo`, `.claude`, `.codex`, `.agents`,
-//!   `.git`: [`names::refused_in_other_matter`]).
+//!   `.git`: [`refused_in_other_matter`]).
 //! - A file whose folder is never offered (one directly in home): a card for that file alone,
 //!   unless the file itself falls under a rule above.
+//! - Never offered whole, by identity (worked out off the actor, [`Refused::Path`]'s
+//!   `holds_protected`): a folder that holds a protected place under any spelling, or a mounted
+//!   volume's root (`/System/Volumes/Data`).
 //!
 //! The folder rules are those of `Policy::check_allowed_folder`
 //! (`crates/sandbox/src/policy/build.rs`), which the host can't call until PR-D builds a
@@ -24,8 +27,9 @@ use std::path::{Component, Path, PathBuf};
 use clauseo_protocol::{DenialKind, MatterId, OtherMatter};
 use clauseo_sandbox::{HostRefusal, PathClass};
 
+use crate::network_paths::ascii_fold::{name_folds_to, refused_in_other_matter};
+
 pub(crate) mod identity;
-pub(crate) mod names;
 mod ruling;
 #[cfg(test)]
 mod tests;
@@ -71,10 +75,14 @@ pub(crate) struct OfferRules {
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Refused<'a> {
     /// A path: canonical, whether it is a file (or does not exist), and the sandbox's class.
+    /// `holds_protected`: the folder a whole-folder card would name (the path, or a file's
+    /// folder) holds a protected place by identity or is a mounted volume's root
+    /// ([`identity::Places::holds_protected`]); such a folder is never offered whole.
     Path {
         path: &'a Path,
         is_file: bool,
         class: PathClass,
+        holds_protected: bool,
     },
     /// A site the egress proxy refused.
     Site {
@@ -107,7 +115,8 @@ pub(crate) fn offer(rules: &OfferRules, refused: Refused<'_>) -> Offer {
             path,
             is_file,
             class,
-        } => path_offer(rules, path, is_file, class),
+            holds_protected,
+        } => path_offer(rules, path, is_file, class, holds_protected),
         Refused::Site {
             host,
             shared_hosting,
@@ -135,7 +144,13 @@ pub(crate) fn offer(rules: &OfferRules, refused: Refused<'_>) -> Offer {
     }
 }
 
-fn path_offer(rules: &OfferRules, path: &Path, is_file: bool, class: PathClass) -> Offer {
+fn path_offer(
+    rules: &OfferRules,
+    path: &Path,
+    is_file: bool,
+    class: PathClass,
+    holds_protected: bool,
+) -> Offer {
     let folder = if is_file {
         path.parent().unwrap_or(path)
     } else {
@@ -150,6 +165,7 @@ fn path_offer(rules: &OfferRules, path: &Path, is_file: bool, class: PathClass) 
         // Until #735 the sandbox hides other matters, so their refusals come as `Hidden`.
         let class_ok = matches!(class, PathClass::Outside | PathClass::Hidden);
         let offered = class_ok
+            && (is_file || !holds_protected)
             && !rules.same(path, &other.root)
             && !OfferRules::in_refused_of(path, &other.root)
             && !rules.never(path)
@@ -168,7 +184,7 @@ fn path_offer(rules: &OfferRules, path: &Path, is_file: bool, class: PathClass) 
         return Offer { kind, offered };
     }
     let outside = class == PathClass::Outside;
-    if outside && rules.folder_offerable(folder) {
+    if outside && !holds_protected && rules.folder_offerable(folder) {
         let kind = DenialKind::Folder {
             path: shown(folder),
             other_matter: None,
@@ -203,7 +219,7 @@ impl OfferRules {
     fn in_refused_of(path: &Path, root: &Path) -> bool {
         let depth = root.components().count();
         path.components().skip(depth).any(|c| match c {
-            Component::Normal(name) => names::refused_in_other_matter(name),
+            Component::Normal(name) => refused_in_other_matter(name),
             Component::Prefix(_)
             | Component::RootDir
             | Component::CurDir
@@ -251,7 +267,7 @@ impl OfferRules {
                     fold_name(&name.to_string_lossy()).starts_with('.')
                         || CREDENTIAL_STORES
                             .iter()
-                            .any(|store| names::name_folds_to(name, store))
+                            .any(|store| name_folds_to(name, store))
                 }
                 Component::Prefix(_)
                 | Component::RootDir
@@ -275,49 +291,6 @@ impl OfferRules {
 
     pub(crate) fn under(&self, path: &Path, prefix: &Path) -> bool {
         under(path, prefix, self.fold_case)
-    }
-
-    /// The rules with every path made canonical (on the disk: off the actor), where it
-    /// resolves, and the home folder left out of the refused list. These are the host's own
-    /// paths, not the agent's; one `is_network` calls a network location (a matter on a share)
-    /// is still kept as written, so a check never signs in to a share.
-    pub(crate) fn canonical(self, is_network: &dyn Fn(&Path) -> bool) -> Self {
-        let fold = |p: PathBuf| {
-            if is_network(&p) {
-                p
-            } else {
-                dunce::canonicalize(&p).unwrap_or(p)
-            }
-        };
-        let home = self.home.map(fold);
-        let fold_case = self.fold_case;
-        let refused = self
-            .refused
-            .into_iter()
-            .map(fold)
-            .filter(|r| {
-                !home
-                    .as_deref()
-                    .is_some_and(|home| under(r, home, fold_case) && under(home, r, fold_case))
-            })
-            .collect();
-        let matters = self
-            .matters
-            .into_iter()
-            .map(|known| KnownMatter {
-                root: fold(known.root),
-                ..known
-            })
-            .collect();
-        Self {
-            home,
-            data_dir: fold(self.data_dir),
-            matter: self.matter,
-            matter_root: fold(self.matter_root),
-            refused,
-            matters,
-            fold_case,
-        }
     }
 }
 

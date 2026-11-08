@@ -166,16 +166,16 @@ fn a_card_not_offered_gives_way_to_an_offered_one_of_the_same_target() {
                 count: 1
             },
             Recorded::Log {
-                denial: denial(2),
-                count: 1
+                denial: denial(1),
+                count: 2
             },
             Recorded::Log {
-                denial: denial(2),
-                count: 2
+                denial: denial(1),
+                count: 3
             },
         ]
     );
-    assert_eq!(denials.card_target(key.0, denial(2)), Some(&card));
+    assert_eq!(denials.card_target(key.0, denial(1)), Some(&card));
     assert_eq!(denials.cards(key.0).len(), 1);
 }
 

@@ -4,6 +4,7 @@
 //! targets' sameness.
 
 use std::collections::BTreeMap;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -13,12 +14,20 @@ use uuid::Uuid;
 
 use super::{Captured, FileId, Identity, Places, Target};
 use crate::actor::turn::denials::offer::{KnownMatter, Offer, OfferRules, Refused, offer};
+use crate::actor::turn::denials::resolve::Disk;
+use crate::network_paths::NetEnv;
+use crate::network_paths::resolve::tests::FakeFs;
+use crate::network_paths::tests::plain_net;
 
-/// Identities in memory: each path's, aliases sharing one; every path asked is kept.
+mod holders;
+
+/// Identities in memory: each path's, aliases sharing one; every path asked is kept. Any other
+/// path is missing (`NotFound`), one in `unreadable` can't be read.
 #[derive(Debug, Default)]
 pub(crate) struct FakeIds {
     pub(crate) ids: BTreeMap<PathBuf, FileId>,
     pub(crate) asked: Mutex<Vec<PathBuf>>,
+    pub(crate) unreadable: Vec<PathBuf>,
 }
 
 impl FakeIds {
@@ -33,6 +42,7 @@ impl FakeIds {
         Self {
             ids,
             asked: Mutex::new(Vec::new()),
+            unreadable: Vec::new(),
         }
     }
 
@@ -42,10 +52,32 @@ impl FakeIds {
 }
 
 impl Identity for FakeIds {
-    fn id(&self, path: &Path) -> Option<FileId> {
+    fn id(&self, path: &Path) -> io::Result<FileId> {
         self.asked.lock().unwrap().push(path.to_path_buf());
-        self.ids.get(path).copied()
+        if self.unreadable.iter().any(|unreadable| unreadable == path) {
+            return Err(io::ErrorKind::PermissionDenied.into());
+        }
+        self.ids
+            .get(path)
+            .copied()
+            .ok_or_else(|| io::ErrorKind::NotFound.into())
     }
+}
+
+/// `rules` captured on `fs` under `net` (names as written), identities from `ids`.
+pub(crate) fn capture_on(rules: OfferRules, ids: &FakeIds, fs: &FakeFs, net: &NetEnv) -> Captured {
+    let real = |_: &Path| None;
+    let disk = Disk {
+        fs,
+        real: &real,
+        net,
+    };
+    Captured::new(rules, &disk, ids)
+}
+
+/// `rules` captured on an empty disk (every path walks to itself), identities from `ids`.
+pub(crate) fn capture(rules: OfferRules, ids: &FakeIds) -> Captured {
+    capture_on(rules, ids, &FakeFs::default(), &plain_net(false))
 }
 
 pub(crate) fn matter(n: u128) -> MatterId {
@@ -115,14 +147,23 @@ fn smith() -> OtherMatter {
     }
 }
 
-fn card(captured: &Captured, ids: &FakeIds, path: &str, is_file: bool) -> Offer {
-    let pinned = captured.places.pin(Path::new(path), ids);
+/// The card for `path` as `check::decide_walked` makes it: pinned, its whole folder asked by
+/// identity.
+pub(crate) fn card(captured: &Captured, ids: &FakeIds, path: &str, is_file: bool) -> Offer {
+    let path = Path::new(path);
+    let pinned = captured.places.pin(path, ids).unwrap();
+    let folder = if is_file {
+        path.parent().unwrap()
+    } else {
+        path
+    };
     offer(
         &captured.rules,
         Refused::Path {
             path: &pinned,
             is_file,
             class: PathClass::Outside,
+            holds_protected: captured.places.holds_protected(folder, ids),
         },
     )
 }
@@ -137,7 +178,7 @@ fn folder(path: &str, other_matter: Option<OtherMatter>) -> DenialKind {
 #[test]
 fn every_spelling_of_a_known_place_is_judged_as_that_place() {
     let ids = aliased();
-    let captured = Captured::new(rules(), &ids, &|_| false);
+    let captured = capture(rules(), &ids);
     let not_offered = |path: &str, is_file: bool, kind: DenialKind| {
         let got = card(&captured, &ids, path, is_file);
         assert_eq!(
@@ -217,7 +258,7 @@ fn a_network_place_is_never_asked_about() {
         root: "/net/server/Share".into(),
     });
     let ids = aliased();
-    let captured = Captured::new(rules, &ids, &|p| p.starts_with("/net"));
+    let captured = capture(rules, &ids);
     assert!(
         ids.asked().iter().all(|p| !p.starts_with("/net")),
         "{:?}",

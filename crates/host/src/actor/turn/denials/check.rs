@@ -79,8 +79,9 @@ impl Unchecked {
     }
 }
 
-/// One thread's session: its rules made canonical and its places captured once, again only for
-/// a new launch or when the host's rules change. Shared with the checks off the actor.
+/// One thread's session: its rules walked and its places captured once, again only for a new
+/// launch, when the host's rules change, or when a place missing at capture has appeared since
+/// (a new `.ssh`: [`Places::stale`]). Shared with the checks off the actor.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SessionCache(Arc<Mutex<Option<Held>>>);
 
@@ -94,13 +95,13 @@ struct Held {
 
 impl SessionCache {
     /// The session's capture for `launch` under `raw`: the one held, or a new one (off the
-    /// actor: it reads the disk).
+    /// actor: it reads `disk`).
     pub(crate) fn captured(
         &self,
         launch: u64,
         raw: OfferRules,
+        disk: &Disk<'_>,
         ids: &dyn Identity,
-        is_network: &dyn Fn(&Path) -> bool,
     ) -> Arc<Captured> {
         let mut hasher = DefaultHasher::new();
         format!("{raw:?}").hash(&mut hasher);
@@ -109,10 +110,11 @@ impl SessionCache {
         if let Some(held) = held.as_ref()
             && held.launch == launch
             && held.rules == rules
+            && !held.captured.places.stale(ids)
         {
             return Arc::clone(&held.captured);
         }
-        let captured = Arc::new(Captured::new(raw, ids, is_network));
+        let captured = Arc::new(Captured::new(raw, disk, ids));
         *held = Some(Held {
             launch,
             rules,
@@ -141,8 +143,9 @@ pub(crate) fn check_path(
         let work = move || {
             let _flight = flight;
             let (net, ids) = (NetEnv::current(), RealIdentity);
-            let captured = session.captured(key.launch, rules, &ids, &|p| net.is_network(p));
-            Ok(decide(&captured, &path, class, &Disk::real(&net), &ids))
+            let disk = Disk::real(&net);
+            let captured = session.captured(key.launch, rules, &disk, &ids);
+            Ok(decide(&captured, &path, class, &disk, &ids))
         };
         let decided = off_actor(clock, job, work).await.ok()?;
         let checked = Checked {
@@ -175,8 +178,8 @@ pub(crate) fn check_tool_call(
         let work = move || {
             let _flight = flight;
             let (net, ids) = (NetEnv::current(), RealIdentity);
-            let captured = session.captured(launch, rules, &ids, &|p| net.is_network(p));
             let disk = Disk::real(&net);
+            let captured = session.captured(launch, rules, &disk, &ids);
             let outside = outside_jail_walked(&folder, &captured, &named, &disk, &ids);
             Ok(outside.map(|(asked, walked, class)| {
                 decide_walked(&captured, &asked, walked, class, &ids)
@@ -233,11 +236,19 @@ pub(crate) fn decide_walked(
         Resolved::Network => unchecked(Unchecked::Network),
         Resolved::Unresolved => unchecked(Unchecked::Unresolved),
         Resolved::Local { path, is_file } => {
-            let pinned = captured.places.pin(&path, ids);
+            let Ok(pinned) = captured.places.pin(&path, ids) else {
+                return unchecked(Unchecked::Unresolved);
+            };
+            let folder = if is_file {
+                path.parent().unwrap_or(&path)
+            } else {
+                &path
+            };
             let refused = Refused::Path {
                 path: &pinned,
                 is_file,
                 class,
+                holds_protected: captured.places.holds_protected(folder, ids),
             };
             let offer = offer::offer(rules, refused);
             let facts = offer::facts(rules, &pinned, is_file, class, &Jail(rules));
@@ -275,7 +286,9 @@ pub(crate) fn outside_jail(
     let found = outside_jail_walked(folder, captured, named, disk, ids)?;
     let (asked, walked, class) = found;
     match walked {
-        Resolved::Local { path, .. } => Some((captured.places.pin(&path, ids), class)),
+        Resolved::Local { path, .. } => {
+            Some((captured.places.pin(&path, ids).unwrap_or(asked), class))
+        }
         Resolved::Network | Resolved::Unresolved => Some((asked, class)),
     }
 }
@@ -315,7 +328,10 @@ pub(crate) fn outside_jail_walked(
             // A network path, or one not known to be inside: refused, its card never offered.
             walked @ (Resolved::Network | Resolved::Unresolved) => Some((asked, walked, class)),
             Resolved::Local { path, is_file } => {
-                let pinned = captured.places.pin(&path, ids);
+                let Ok(pinned) = captured.places.pin(&path, ids) else {
+                    // An identity on the way can't be read: not known to be inside.
+                    return Some((asked, Resolved::Unresolved, class));
+                };
                 let inside = under(&pinned, root) || under(&pinned, data);
                 (!inside).then_some((asked, Resolved::Local { path, is_file }, class))
             }

@@ -85,16 +85,16 @@ fn a_tool_calls_path_is_a_denial_only_outside_the_jail() {
         crate::write::create_dir_all(folder).unwrap();
     }
     let net = plain_net(cfg!(windows));
+    let real = Disk::real(&net);
     let captured = Captured::new(
         OfferRules {
             matter_root: matter.clone(),
             data_dir: data.clone(),
             ..rules()
         },
+        &real,
         &RealIdentity,
-        &|_| false,
     );
-    let real = Disk::real(&net);
     let jail = |named: &[String]| outside_jail(&matter, &captured, named, &real, &RealIdentity);
     let named = |paths: &[&Path]| -> Vec<String> {
         paths.iter().map(|p| p.display().to_string()).collect()

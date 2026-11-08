@@ -17,7 +17,8 @@
 //!   `completed` with no counted denial since the previous tool call ended.
 //! - **Dedupe:** one card per kind and target per turn, the target by identity when it has one,
 //!   else by its text folded on a folding volume; a repeat grows its count. A card not offered
-//!   that an offered decision of the same target follows is replaced by a new, offered one. A
+//!   that an offered decision of the same target follows becomes offered under its own id
+//!   (`DenialRecorded` again, which the reducer folds into its entry, now `Pending`). A
 //!   denial checked after its turn ended goes to that turn's cards (kept until the next turn
 //!   ends), with their dedupe and cap; one older than that is not recorded.
 

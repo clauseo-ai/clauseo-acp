@@ -91,13 +91,6 @@ pub(crate) fn name_folds_to(name: &OsStr, ascii: &str) -> bool {
 }
 
 /// Whether `name` is one of [`REFUSED_IN_OTHER_MATTER`] ([`name_folds_to`]).
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "stage E's #764 takes it from here; the host refuses .codex alone"
-    )
-)]
 pub(crate) fn refused_in_other_matter(name: &OsStr) -> bool {
     REFUSED_IN_OTHER_MATTER
         .iter()

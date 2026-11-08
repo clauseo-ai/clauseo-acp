@@ -6,10 +6,10 @@
 
 use std::cell::Cell;
 use std::io;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 pub(crate) use crate::network_paths::resolve::{Disk, Entry, Fs};
-use crate::network_paths::resolve::{Walked, walk};
+use crate::network_paths::resolve::{Walked, lexical, walk};
 use crate::network_paths::{NetEnv, refused_windows_name};
 
 #[cfg(test)]
@@ -86,22 +86,7 @@ impl Fs for Seen<'_> {
         Ok(target)
     }
 
-    fn identity(&self, path: &Path) -> Option<(u64, u128)> {
+    fn identity(&self, path: &Path) -> io::Result<(u64, u128)> {
         self.fs.identity(path)
     }
-}
-
-/// `path` with `.` and `..` taken off by their text (for the log's word only).
-fn lexical(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for part in path.components() {
-        match part {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                out.pop();
-            }
-            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => out.push(part),
-        }
-    }
-    out
 }

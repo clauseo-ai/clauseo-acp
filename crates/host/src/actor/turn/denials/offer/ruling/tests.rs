@@ -8,8 +8,7 @@ use clauseo_protocol::{DenialKind, OtherMatter};
 use clauseo_sandbox::PathClass;
 
 use super::{Facts, Jail, LaunchPolicy, facts, tool_call_ruling};
-use crate::actor::turn::denials::offer::identity::Captured;
-use crate::actor::turn::denials::offer::identity::tests::{aliased, matter, rules};
+use crate::actor::turn::denials::offer::identity::tests::{aliased, capture, matter, rules};
 use crate::actor::turn::denials::offer::{Offer, Refused, offer};
 
 /// Denies everything, or nothing.
@@ -32,6 +31,7 @@ fn judged(path: &str, is_file: bool, policy: &dyn LaunchPolicy) -> (Offer, Facts
             path,
             is_file,
             class,
+            holds_protected: false,
         },
     );
     (base, facts(&rules, path, is_file, class, policy))
@@ -109,7 +109,7 @@ fn anything_else_is_one_file_the_launch_would_deny() {
 #[test]
 fn the_jail_judges_a_pinned_path_so_a_respelled_matter_is_inside() {
     let ids = aliased();
-    let captured = Captured::new(rules(), &ids, &|_| false);
+    let captured = capture(rules(), &ids);
     let jail = Jail(&captured.rules);
     assert!(!jail.would_deny(Path::new("/home/a/Matters/Acme/brief.docx")));
     assert!(!jail.would_deny(Path::new("/home/a/.local/share/clauseo/run/x")));
@@ -117,6 +117,7 @@ fn the_jail_judges_a_pinned_path_so_a_respelled_matter_is_inside() {
     // `CLAUSE~1` is the data folder: pinned, it is inside.
     let alias = captured
         .places
-        .pin(Path::new("/home/a/.local/share/CLAUSE~1/run/x"), &ids);
+        .pin(Path::new("/home/a/.local/share/CLAUSE~1/run/x"), &ids)
+        .unwrap();
     assert!(!jail.would_deny(&alias));
 }

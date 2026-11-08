@@ -47,8 +47,8 @@ fn ids() -> FakeIds {
 /// The check of `path` (refused `class`), and the card a tool call gets for it.
 fn claim(path: &str, class: PathClass, confirmed: bool) -> (Decided, Offer) {
     let (fs, ids) = (fake(), ids());
-    let captured = Captured::new(rules(), &ids, &|_| false);
     let net = plain_net(false);
+    let captured = Captured::new(rules(), &disk(&fs, &net), &ids);
     let decided = decide(&captured, Path::new(path), class, &disk(&fs, &net), &ids);
     let (offer, _) = ruled(&decided, false, |_| confirmed);
     (decided, offer)
@@ -86,8 +86,8 @@ fn a_tool_calls_claim_on_another_matter_gives_no_grant() {
 #[test]
 fn the_same_file_confirmed_by_an_os_report_gives_the_read_only_card() {
     let (fs, ids) = (fake(), ids());
-    let captured = Captured::new(rules(), &ids, &|_| false);
     let net = plain_net(false);
+    let captured = Captured::new(rules(), &disk(&fs, &net), &ids);
     let (thread, turn) = (ThreadId::new(v7(1)).unwrap(), TurnId::new(v7(2)).unwrap());
     let mut denials = Denials::default();
     // The OS reports the file by its 8.3 folder name; the tool call by its own.

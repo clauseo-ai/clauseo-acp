@@ -71,6 +71,7 @@ fn path_offer(rules: &OfferRules, path: &str, is_file: bool, class: PathClass) -
             path: Path::new(path),
             is_file,
             class,
+            holds_protected: false,
         },
     )
 }

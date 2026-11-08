@@ -132,9 +132,9 @@ impl TurnDenials {
             .any(|seen| seen.os && seen.target.same_file(asked))
     }
 
-    /// The card for `record`: a repeat grows its count (a card not offered followed by an
-    /// offered one of the same target is replaced by a new card); a new one gets `mint`'s id,
-    /// up to the cap.
+    /// The card for `record`: a repeat grows its count; a card not offered followed by an offered
+    /// decision of the same target becomes that offered card under its own id (logged again, the
+    /// reducer folds it into the one entry); a new one gets `mint`'s id, up to the cap.
     pub(super) fn card(
         &mut self,
         record: &Record<'_>,
@@ -145,19 +145,17 @@ impl TurnDenials {
             .cards
             .iter()
             .position(|card| shape_of(&card.kind) == want && card.target.same(record.card));
-        if let Some(at) = held {
-            match self.cards.get_mut(at) {
-                Some(card) if card.offered || !record.offered => {
-                    card.count = card.count.saturating_add(1);
-                    return Ok(Recorded::Log {
-                        denial: card.denial,
-                        count: card.count,
-                    });
-                }
-                Some(_) | None => {
-                    self.cards.remove(at);
-                }
+        if let Some(card) = held.and_then(|at| self.cards.get_mut(at)) {
+            card.count = card.count.saturating_add(1);
+            if record.offered && !card.offered {
+                card.kind = record.kind.clone();
+                card.target = record.card.clone();
+                card.offered = true;
             }
+            return Ok(Recorded::Log {
+                denial: card.denial,
+                count: card.count,
+            });
         }
         if self.cards.len() >= MAX_CARDS_PER_TURN {
             let first = !self.capped_logged;

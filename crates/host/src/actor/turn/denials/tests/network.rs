@@ -169,10 +169,10 @@ fn macos_firmlinked_home_is_home() {
         &["/Users/a", "/System/Volumes/Data/Users/a"],
         &["/Users", "/System/Volumes/Data/Users"],
     ]);
-    let places = Places::capture(&rules, &ids, &|_| false);
-    let captured = Captured { rules, places };
     let fs = FakeFs::with(&[("/System/Volumes/Data/Users/a/Deals/x.docx", Fake::File)]);
     let net = mac_net(&[]);
+    let places = Places::capture(&rules, &disk(&fs, &net), &ids);
+    let captured = Captured { rules, places };
     let at = |path: &str, is_file| {
         let got = decide(
             &captured,

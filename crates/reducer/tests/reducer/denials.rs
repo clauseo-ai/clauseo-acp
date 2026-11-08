@@ -193,6 +193,48 @@ fn an_answer_or_dismissal_of_an_unknown_denial_is_reported() {
     }
 }
 
+/// A tool call's claim not offered, then the OS report that confirms it, logged under the same
+/// denial: one entry, now `Pending`, with the OS report's kind and source. An answered or
+/// dismissed card keeps its state.
+#[test]
+fn a_card_not_offered_logged_again_offered_is_one_pending_card() {
+    let (mut log, mut state, turn) = running(89);
+    let denial: DenialId = log.fresh().unwrap();
+    let claim = DenialRecorded {
+        kind: DenialKind::File {
+            path: "/Users/a/Deals/spa.docx".to_owned(),
+            other_matter: None,
+        },
+        source: DenialSource::ToolCall {
+            tool_call: id(5).unwrap(),
+        },
+        ..refused(turn, denial, false, 1)
+    };
+    push(&mut log, &mut state, claim);
+    assert_eq!(entry(&state, denial).state, DenialState::NotOffered);
+    let out = push(&mut log, &mut state, refused(turn, denial, true, 2));
+    assert!(out.anomalies.is_empty(), "{:?}", out.anomalies);
+    assert_eq!(out.changes.len(), 1);
+    let shown = entry(&state, denial);
+    assert_eq!(
+        (shown.state, shown.kind, shown.source, shown.count),
+        (DenialState::Pending, folder(), DenialSource::Sandbox, 2)
+    );
+    let denials = state.entries().values();
+    assert_eq!(
+        denials
+            .filter(|e| matches!(e, ViewEntry::Denial(_)))
+            .count(),
+        1
+    );
+    // Dismissed, it stays dismissed however it is logged again.
+    push(&mut log, &mut state, DenialDismissed { denial });
+    push(&mut log, &mut state, refused(turn, denial, true, 3));
+    assert_eq!(entry(&state, denial).state, DenialState::Dismissed);
+    assert_eq!(state, fold(log.events()));
+    assert_eq!(round_trip(&state), state);
+}
+
 #[test]
 fn a_dismissed_card_is_dismissed() {
     let (mut log, mut state, turn) = running(86);

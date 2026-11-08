@@ -248,7 +248,7 @@ pub mod log_file;
 mod matter_marker;
 mod matter_worker;
 // #766's module, ahead of it: on this base R18 3a's denials are its only user, so the data
-// fence's parts (`may_touch`, `Disk::vouch`) are not used yet. This drops out when #766 lands.
+// fence's parts (`touchable`, `Disk::resolved`) are not used yet. This drops out when #766 lands.
 #[expect(
     dead_code,
     unused_imports,
