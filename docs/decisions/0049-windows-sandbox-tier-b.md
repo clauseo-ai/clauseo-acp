@@ -2036,13 +2036,14 @@ A run deletes only the pool users' tasks and BITS jobs. An ended run never write
 - **Known gap: a task that deletes itself.** A pool task can start a process (X) and then
   delete itself (or be deleted by X). The sweep's walk never sees it, and its instance stop only
   covers instances of the tasks it finds, so X can live on into the next logon gap: it runs as
-  the pool user outside every job, possibly in session 0. The next inner's first-act sweep
-  can't see session-0 processes of another logon, and the unelevated outer can't list another
-  user's processes in session 0, so neither can check for it. The fix belongs in the
+  the pool user outside every job, possibly in session 0. The next inner's first-act sweep finds
+  and ends it (its snapshot sees every session, and the pool user can open its own session-0
+  processes), but only once that logon happened: X is alive during the logon gap, before the
+  first act's sweep kills it, and the unelevated outer can't list another user's processes in
+  session 0, so nothing checks for it before the logon. The fix belongs in the
   kernel-process-list PR, next in the order: a `SYSTEM`-side pre-logon check that no process
   whose user is the pool SID exists between sessions, which refuses the launch with
-  `UncleanSession` and requests `\Clauseo\SandboxStop`. Until then the stop clears X only
-  when an escapee report, an F4 refusal or Clauseo's start asks for it.
+  `UncleanSession` and requests `\Clauseo\SandboxStop`. That check closes the gap.
 - VM row (not run): as a pool user, register a task whose descriptor shuts SYSTEM out, edit
   its file's principal to SYSTEM, run `--sweep-tasks`, and check whether the task still runs
   after the edit. Expect 56, or the task deleted when its descriptor's owner is the pool user,
