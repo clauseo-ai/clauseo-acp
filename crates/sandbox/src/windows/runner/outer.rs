@@ -208,8 +208,10 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
         base: set.base(),
         cwd: &sweeper.cwd,
         job,
+        end,
     };
-    // The git watch on the matter's folder, armed before the agent runs (`outer/watch.rs`).
+    // The git watch on the matter's folder, armed before the agent runs (`outer/watch.rs`). It
+    // can end the session from here: then `start` makes no inner, or kills it unresumed.
     watch::keep(message, end)?;
     let inner = start(&mut steps)?;
     let launch = InnerLaunch {

@@ -203,11 +203,9 @@ struct OsSession<'a> {
 
 impl Session for OsSession<'_> {
     fn end(&self) -> bool {
-        // Every end path's own: the job ended and emptied, then the end sweeper started.
-        // `trigger` returns once the job is ended and emptied; the end's own word on whether it
-        // is empty takes over once `End` gives it.
-        self.end.trigger(EndSignal::Failed);
-        true
+        // The job ended, and waited on until it is empty: only then may the moves go ahead. The
+        // end sweeper's logon starts after, off the moves' path.
+        self.end.kill_now(EndSignal::Failed)
     }
 
     fn say(&self, line: &str) {
