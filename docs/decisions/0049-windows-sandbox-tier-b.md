@@ -2706,8 +2706,15 @@ start was, CI run 42416074600).
 Another accepted residual: a WSL self-update not started by our task (Windows' own updater
 starts one within about a second of a pending Store update) rewrites the AppIDs, and the deny is
 off until the `MsiInstaller`-event task re-applies it: about 1.2 s measured on the VM. The task's
-re-checks put back a later pass's rewrite. The mid-session WSL watcher (the next wiring PR) stops
-a session if a pool-owned WSL process or an `LxssUserSession` activation appears.
+re-checks put back a later pass's rewrite. An external `msiexec` install of WSL measured the same
+way at 07f03807a (run 42470456515, three trials): the deny was off 1.06, 1.09 and 1.05 s. WSL's
+installer deletes the AppID keys about 5 s in and writes them again about 21 s in; the task's
+five passes ended just before that rewrite, and the install-complete event's run restored the
+deny. **Not measured:** the roughly 16 s while the AppID keys don't exist at all, when COM's
+default launch permissions apply to WSL's servers instead of the deny; we don't probe it. The
+mid-session WSL watcher (the next wiring PR) stops a session if a pool-owned WSL process or an
+`LxssUserSession` activation appears, and carries the VM row for the key-absent window and a pass
+schedule that reaches past the rewrite.
 
 **The stop ends a pool user's WSL** (`setup/stop/vms.rs`, step 5b of `--stop`, SYSTEM, after
 the process passes and the BITS step). WSL 1 needs nothing more: its pico processes and the pool
