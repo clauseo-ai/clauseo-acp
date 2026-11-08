@@ -2364,6 +2364,7 @@ pub struct Progress { pub walked: u64, pub done: bool, pub failed: Option<Arc<Er
   second concurrent session of a prepared matter starting on the fast path. Changing a local
   group's members needs an administrator, so the design (for example static slot groups made at
   set-up) comes to the orchestrator before that PR.
+
 ### WSL
 
 **Why.** WSL is open to every user who can log on, the pool users included. Its service,
