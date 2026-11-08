@@ -2,24 +2,21 @@
 // composer's send is held (room.tsx's context) and this notice says why in its notice slot, saving
 // the host's round trip; U10's error line stays the fallback. Where a set-up with no Windows prompt
 // would fix it (needs_set_up, set_up_refused), "Set up the Safe workspace" sends it. Where the
-// repair is the installer (design B, blocked.ts's needsInstaller), the notice says so and asks IT
-// to install Clauseo again: a firm install's repair, with no button. A full pool says R17 PR-E's
-// sandbox.pool_full words; a build without the Safe workspace says it comes in an update
+// repair is the installer (design B, blocked.ts's repairByInstaller: a missing admin copy, or R17
+// PR-E M4's broken set-up), the notice says so and asks IT
+// to install Clauseo again: a firm install's repair, with no button. A full pool says
+// sandbox.pool_full's words; a build without the Safe workspace says it comes in an update
 // (not_built); every other cause says sandbox.required's, then a block's own line.
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
-import {
-  POOL_FULL_CODE,
-  protectionErrorWords,
-  pw,
-} from "@clauseo/components/lib/words-protection.ts";
+import { pw } from "@clauseo/components/lib/words-protection.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import type { ProtectionStore } from "../../store/protection.ts";
 import { useProtection } from "../../store/protection-run.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { Cause } from "./causes.ts";
-import { blockLine, needsInstaller, repairLine } from "./blocked.ts";
+import { blockLine, repairByInstaller, repairLine } from "./blocked.ts";
 import { retryProtection } from "./commands.ts";
 import { whyOf } from "./detail.ts";
 import { failedWords, useSetUpPress, waitingWords } from "./setup.tsx";
@@ -40,7 +37,7 @@ export function RequiredNotice({
     cause,
     () => void retryProtection(transport, store),
   );
-  const repair = needsInstaller(cause);
+  const repair = repairByInstaller(cause);
   const fixable = !repair && (cause.name === "needs_set_up" || cause.name === "set_up_refused");
   const notBuilt = whyOf(cause) === "not_built";
   const block = repair ? null : blockLine(lang, cause);
@@ -66,7 +63,7 @@ export function RequiredNotice({
                   "Your firm requires the Safe workspace on this computer. Set it up once, then ask here.",
                 )
               : cause.group === "pool"
-                ? protectionErrorWords(lang, POOL_FULL_CODE)
+                ? errorWords(lang, "sandbox.pool_full")
                 : notBuilt
                   ? pw(
                       lang,

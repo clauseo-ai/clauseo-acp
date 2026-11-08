@@ -186,12 +186,6 @@ test.each([
   },
 );
 
-test("set_up_failed with R17 PR-E's 1385 cause adds the line for IT", async () => {
-  await mount({ view: () => view(np({ set_up_failed: { why: "logon_right_denied_1385" } })) });
-  expect(block()?.dataset["state"]).toBe("set_up_failed");
-  expect(text()).toContain("Allow log on locally");
-});
-
 test.each([
   [
     "plain unsupported on Linux",

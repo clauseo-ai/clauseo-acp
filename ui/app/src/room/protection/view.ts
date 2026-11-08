@@ -1,7 +1,8 @@
 // UC: what this computer's ProtectionView says beyond a matter's cause: whether a retry is offered, and when it was set
 // up, whether a retry brings Windows' administrator prompt, and what the host is doing now. R17 PR-B and PR-E add
-// `retry_asks_admin`, `in_progress` and `set_up_at` after #529, so each is read loosely. Outside the room's first load:
-// the note's chunk (which hands them to the first run's step) and Settings import it.
+// `retry_asks_admin`, `in_progress` and `set_up_at` after #529, each left out by an older host, so each is checked
+// before use. Outside the room's first load: the note's chunk (which hands them to the first run's step) and Settings
+// import it.
 import type { ProtectionView } from "../../transport/protocol.ts";
 import { notProtectedCause, type Cause } from "./causes.ts";
 import { poolOf } from "./detail.ts";
@@ -9,13 +10,24 @@ import { poolOf } from "./detail.ts";
 /** The pool's size past which Retry adds no room (R17: 4 more each time, up to 32). */
 export const POOL_MAX = 32;
 
-/** Whether a cause offers Try again: the set-up group, and a full pool still under its largest size. */
+/** Whether a cause offers its retry: the set-up group, and a full pool still under its largest size (Add room), save
+ * one whose matter already has two conversations working (R17 PR-E's matter_sessions_full: no pool action). */
 export const canRetry = (cause: Cause): boolean =>
-  cause.group === "setup" || (cause.group === "pool" && poolOf(cause).size < POOL_MAX);
+  cause.group === "setup" ||
+  (cause.group === "pool" &&
+    poolOf(cause).why !== "matter_sessions_full" &&
+    poolOf(cause).size < POOL_MAX);
+
+/** Whether a full pool offers "Free up places": places only a reset frees (`needs_reset` above 0, never before R17
+ * PR-D), and not for a matter that already has two conversations working. */
+export const canFreeUp = (cause: Cause): boolean =>
+  cause.group === "pool" &&
+  poolOf(cause).why !== "matter_sessions_full" &&
+  poolOf(cause).needs_reset > 0;
 
 /** R17 PR-E's `set_up_at`, when the view has it: when the set-up was done, in ms. */
 export function setUpAt(view: ProtectionView | null | undefined): number | null {
-  const value = (view as { set_up_at?: unknown } | null | undefined)?.set_up_at;
+  const value: unknown = view?.set_up_at;
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
@@ -28,7 +40,7 @@ export const computerCause = (view: ProtectionView | null | undefined): Cause | 
  * lacks it, gets the fallback: true for a pool cause (a full pool's Retry adds room behind the same prompt), else
  * true when the computer is `needs_set_up` or `set_up_refused`. */
 export function asksAdmin(view: ProtectionView | null | undefined, cause?: Cause | null): boolean {
-  const field = (view as { retry_asks_admin?: unknown } | null | undefined)?.retry_asks_admin;
+  const field: unknown = view?.retry_asks_admin;
   if (typeof field === "boolean") return field;
   if (cause?.group === "pool") return true;
   const computer = computerCause(view);
@@ -39,6 +51,6 @@ export function asksAdmin(view: ProtectionView | null | undefined, cause?: Cause
 export function inProgress(
   view: ProtectionView | null | undefined,
 ): "set_up" | "remove" | "check" | null {
-  const value = (view as { in_progress?: unknown } | null | undefined)?.in_progress;
+  const value: unknown = view?.in_progress;
   return value === "set_up" || value === "remove" || value === "check" ? value : null;
 }

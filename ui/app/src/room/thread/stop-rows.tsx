@@ -9,10 +9,11 @@ import { lazy, Suspense, useLayoutEffect, useRef, useState } from "react";
 import { late } from "@clauseo/components/lib/late.ts";
 import { ChangeNote } from "@clauseo/components/clauseo/change-note.tsx";
 import { NoticeCard, StopMark } from "@clauseo/components/clauseo/limit-note.tsx";
-import { IconChecking } from "@clauseo/components/icons/icons.tsx";
+import { IconChecking, IconNotProtected } from "@clauseo/components/icons/icons.tsx";
 import { useDisplay, type Lang } from "@clauseo/components/lib/display.ts";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
+import { failureWords } from "@clauseo/components/lib/words-errors-where.ts";
 import { lim } from "@clauseo/components/lib/words-limits.ts";
 import { limThread } from "@clauseo/components/lib/words-limits-thread.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
@@ -220,14 +221,44 @@ export function StepRow({
     >
       {sentNow && <SentNowLine ts={entry.ts} />}
       {!sentNow && takesMark(entry) && <StoppedMark ts={entry.ts} />}
-      {line !== null && !takesMark(entry) && (
+      {line?.kind === "left_safe_workspace" && <LeftSafeWorkspace />}
+      {line !== null && line.kind !== "left_safe_workspace" && !takesMark(entry) && (
         <p className={QUIET} data-code={line.code}>
           <Say>
-            {line.kind === "error" ? errorWords(w.lang, line.code, plan) : th(w.lang, line.key)}
+            {line.kind === "error"
+              ? failureWords(w.lang, line.code, { at: line.at }, plan)
+              : th(w.lang, line.key)}
           </Say>
         </p>
       )}
       {entry.files.length > 0 && <Changed entry={entry} />}
+    </div>
+  );
+}
+
+/** The stop where part of the answer tried to run outside the Safe workspace (R17 PR-E's left_safe_workspace): a
+ * notice in NoticeCard's look, led by the open lock, naming the plan as the limit's words do, and the way on. */
+function LeftSafeWorkspace() {
+  const w = useWords();
+  const name = planNameOf(useAgentPlan());
+  const title = th(
+    w.lang,
+    "Clauseo stopped {name}: part of it tried to run outside the Safe workspace.",
+    {
+      name,
+    },
+  );
+  return (
+    <div role="status" data-testid="left-safe-workspace" className="mt-(--s2)">
+      <NoticeCard
+        icon={<IconNotProtected size={18} />}
+        label={title}
+        title={title}
+        sub={th(
+          w.lang,
+          "Ask again to carry on. If this keeps happening, tell whoever looks after this computer.",
+        )}
+      />
     </div>
   );
 }

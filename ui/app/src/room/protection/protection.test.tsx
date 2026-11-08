@@ -212,9 +212,14 @@ const noteText = () => note()?.textContent ?? "";
 test.each([
   ["needs", "needs_set_up", "The Safe workspace isn't set up on this computer yet."],
   ["refused", "set_up_refused", "The Safe workspace couldn't be set up on this computer"],
-  ["failed", "set_up_failed", "The Safe workspace couldn't be set up on this computer"],
+  // M4: a broken set-up and a cause from a newer Clauseo refuse; the broken set-up's button is Get the installer
+  ["failed", "set_up_failed", "The Safe workspace on this computer isn't working"],
   ["unsupported", "cant", "This computer can't run the Safe workspace"],
-  ["newer", "cant", "This computer can't run the Safe workspace"],
+  [
+    "newer",
+    "unknown",
+    "This version of Clauseo doesn't recognise what's stopping the Safe workspace",
+  ],
   ["off", "off", "The Safe workspace is off for Sharma v. State of Delhi."],
 ] as const)("the note for %s says its cause, and what is still kept", async (key, why, words) => {
   await mount(PROT[key]);
@@ -228,7 +233,7 @@ test.each([
   expect(noteText()).not.toContain("asks before each change");
   const buttons = [...note()!.querySelectorAll("button")].map((b) => b.textContent);
   expect(buttons.at(-1)).toBe(vt("en", "Understood"));
-  expect(buttons.length).toBe(why === "off" || why === "cant" ? 1 : 2);
+  expect(buttons.length).toBe(why === "off" || why === "cant" || why === "unknown" ? 1 : 2);
 });
 
 test("the pool's note: counts only, one line per nonzero count, and its ways out", async () => {
@@ -239,7 +244,7 @@ test("the pool's note: counts only, one line per nonzero count, and its ways out
   expect(text).toContain(
     pw(
       "en",
-      "All {size} places in this computer's Safe workspace are in use, so this matter works without it for now. It goes back in once a place is free.",
+      "All {size} places in this computer's Safe workspace are in use, so Clauseo can't answer in this matter until one is free. End a conversation in another matter to free one.",
       { size: 8 },
     ),
   );
@@ -252,7 +257,6 @@ test("the pool's note: counts only, one line per nonzero count, and its ways out
     pw("en", "Still holding files set aside: {n}", { n: 1 }),
   ]);
   expect(text).not.toContain("Kept by matters with nothing open");
-  expect(text).toContain(pw("en", "To free one now, end a conversation in another matter."));
   expect(text).toContain(
     pw("en", "Clauseo can add room for 4 more. Windows asks for permission first."),
   );
@@ -270,7 +274,7 @@ test("a pool at its largest offers no Add room", async () => {
   await waitNote();
   expect(noteText()).toContain(pw("en", "Kept by matters with nothing open: {n}", { n: 32 }));
   expect(noteText()).not.toContain(
-    pw("en", "To free one now, end a conversation in another matter."),
+    pw("en", "Clauseo can add room for 4 more. Windows asks for permission first."),
   );
   expect(document.body.querySelector('[data-testid="protection-setup"]')).toBeNull();
 });

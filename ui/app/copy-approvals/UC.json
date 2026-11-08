@@ -167,14 +167,14 @@
     "by": "design"
   },
   "UC-27": {
-    "en": "All {size} places in this computer's Safe workspace are in use, so this matter works without it for now. It goes back in once a place is free.",
-    "hi": "इस कंप्यूटर के सुरक्षित कार्यक्षेत्र की सभी {size} जगहें उपयोग में हैं, इसलिए यह मामला अभी उसके बिना काम करता है। कोई जगह खाली होते ही यह फिर उसमें आ जाएगा।",
+    "en": "All {size} places in this computer's Safe workspace are in use, so Clauseo can't answer in this matter until one is free. End a conversation in another matter to free one.",
+    "hi": "इस कंप्यूटर के सुरक्षित कार्यक्षेत्र की सभी {size} जगहें उपयोग में हैं, इसलिए जब तक कोई जगह खाली नहीं होती, Clauseo इस मामले में उत्तर नहीं दे सकता। एक जगह खाली करने के लिए किसी दूसरे मामले में बातचीत समाप्त करें।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
+    "hi_at": "2026-11-08",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; R17 PR-E app follow-up, words.md)"
   },
   "UC-28": {
     "en": "In use by other open matters: {n}",
@@ -209,16 +209,6 @@
   "UC-31": {
     "en": "Still holding files set aside: {n}",
     "hi": "अलग रखी फ़ाइलें अब भी इनमें हैं: {n}",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-06",
-    "by": "app track (provisional; Rohan batch review)"
-  },
-  "UC-32": {
-    "en": "To free one now, end a conversation in another matter.",
-    "hi": "अभी एक स्थान खाली करने के लिए किसी दूसरे मामले की बातचीत समाप्त करें।",
     "hi_status": "provisional",
     "hi_at": "2026-11-06",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
@@ -511,16 +501,6 @@
     "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review)"
   },
-  "UC-80": {
-    "en": "Something on this computer stops the Safe workspace, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
-    "hi": "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है, इसलिए Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं। वह इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
-    "hi_status": "provisional",
-    "hi_at": "2026-11-07",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
-  },
   "UC-81": {
     "en": "Something on this computer stops the Safe workspace, so Clauseo asks before changing anything outside a matter's folder.",
     "hi": "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है, इसलिए Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
@@ -690,5 +670,158 @@
     "status": "provisional",
     "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-97": {
+    "en": "All {size} places in this computer's Safe workspace are in use by open conversations. End a conversation in another matter to free one.",
+    "hi": "इस कंप्यूटर के सुरक्षित कार्यक्षेत्र की सभी {size} जगहें खुली बातचीत में उपयोग में हैं। एक जगह खाली करने के लिए किसी दूसरे मामले में बातचीत समाप्त करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; R17 PR-E app follow-up, words.md)"
+  },
+  "UC-98": {
+    "en": "Two conversations are already working in this matter. Try again when one finishes.",
+    "hi": "इस मामले में पहले से दो बातचीत चल रही हैं। किसी एक के पूरा होने पर फिर से प्रयास करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; R17 PR-E app follow-up, words.md)"
+  },
+  "UC-99": {
+    "en": "One of them needs resetting before it can be used again. Windows asks for permission first.",
+    "hi": "उनमें से एक को दोबारा इस्तेमाल से पहले रीसेट करना होगा। Windows पहले अनुमति माँगता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; R17 PR-E app follow-up, words.md)"
+  },
+  "UC-100": {
+    "en": "{n} of them need resetting before they can be used again. Windows asks for permission first.",
+    "hi": "उनमें से {n} को दोबारा इस्तेमाल से पहले रीसेट करना होगा। Windows पहले अनुमति माँगता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; R17 PR-E app follow-up, words.md)"
+  },
+  "UC-101": {
+    "en": "Free up places",
+    "hi": "जगहें खाली करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; R17 PR-E app follow-up, words.md)"
+  },
+  "UC-102": {
+    "en": "Part of this matter's folder wasn't handed back to you after the Safe workspace last used it, so Clauseo can't answer in this matter until it is.",
+    "hi": "सुरक्षित कार्यक्षेत्र के पिछली बार इस्तेमाल करने के बाद इस मामले के फ़ोल्डर का एक हिस्सा आपको वापस नहीं सौंपा गया, इसलिए जब तक वह वापस नहीं सौंपा जाता, Clauseo इस मामले में उत्तर नहीं दे सकता।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; R17 PR-E app follow-up, words.md)"
+  },
+  "UC-103": {
+    "en": "Ask your IT team to give you back ownership of it.",
+    "hi": "अपनी IT टीम से इसका स्वामित्व आपको वापस देने को कहें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; R17 PR-E app follow-up, words.md)"
+  },
+  "UC-104": {
+    "en": "The Safe workspace on this computer isn't working, so Clauseo can't answer here until it's set up again.",
+    "hi": "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र काम नहीं कर रहा है, इसलिए जब तक इसे फिर से तैयार नहीं किया जाता, Clauseo यहाँ उत्तर नहीं दे सकता।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; R17 PR-E app follow-up, words.md M4)"
+  },
+  "UC-105": {
+    "en": "If that doesn't help, ask your IT team.",
+    "hi": "अगर इससे मदद न मिले, तो अपनी IT टीम से पूछें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; R17 PR-E app follow-up, words.md M4)"
+  },
+  "UC-106": {
+    "en": "Something on this computer stops the Safe workspace, so Clauseo can't answer here.",
+    "hi": "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; R17 PR-E app follow-up, words.md M4)"
+  },
+  "UC-107": {
+    "en": "This version of Clauseo doesn't recognise what's stopping the Safe workspace, so it can't answer here. Update Clauseo, or ask your IT team.",
+    "hi": "Clauseo का यह संस्करण यह नहीं पहचानता कि सुरक्षित कार्यक्षेत्र को क्या रोक रहा है, इसलिए वह यहाँ उत्तर नहीं दे सकता। Clauseo अपडेट करें, या अपनी IT टीम से पूछें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; R17 PR-E app follow-up, words.md M4)"
+  },
+  "UC-108": {
+    "en": "Get the installer",
+    "hi": "इंस्टॉलर पाएँ",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; R17 PR-E app follow-up, words.md M4)",
+    "note": "UC-86's line, on a broken set-up's note (R17 PR-E M4)"
+  },
+  "UC-109": {
+    "en": "Run the Clauseo installer again to set up the Safe workspace.",
+    "hi": "सुरक्षित कार्यक्षेत्र तैयार करने के लिए Clauseo इंस्टॉलर फिर से चलाएँ।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; R17 PR-E app follow-up, words.md M4)",
+    "note": "UC-85's line, on a broken set-up's note (R17 PR-E M4)"
+  },
+  "UC-110": {
+    "en": "Ask your IT team to install Clauseo again.",
+    "hi": "अपनी IT टीम से Clauseo फिर से इंस्टॉल करने को कहें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; R17 PR-E app follow-up, words.md M4)",
+    "note": "UC-87's line, on a broken set-up's note (R17 PR-E M4)"
+  },
+  "UC-111": {
+    "en": "Clauseo couldn't check the Safe workspace on this computer, so it can't answer here yet. Try again. If it keeps happening, restart Clauseo.",
+    "hi": "Clauseo इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र की जाँच नहीं कर सका, इसलिए वह अभी यहाँ उत्तर नहीं दे सकता। फिर से प्रयास करें। अगर ऐसा बार-बार हो, तो Clauseo फिर से शुरू करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; R17 PR-E app follow-up, #722's probe_failed)"
   }
 }

@@ -42,14 +42,28 @@ export const HI = {
   "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update. Until then, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.":
     "Clauseo के इस संस्करण में अभी सुरक्षित कार्यक्षेत्र नहीं है। यह एक अपडेट में आएगा। तब तक Clauseo इस कंप्यूटर की हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं, और इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
   // the pool, counts only (UC-27 to UC-32, UC-34, UC-35)
-  "All {size} places in this computer's Safe workspace are in use, so this matter works without it for now. It goes back in once a place is free.":
-    "इस कंप्यूटर के सुरक्षित कार्यक्षेत्र की सभी {size} जगहें उपयोग में हैं, इसलिए यह मामला अभी उसके बिना काम करता है। कोई जगह खाली होते ही यह फिर उसमें आ जाएगा।",
+  // R17 PR-E: a full pool refuses once tier B is in use, so the note says Clauseo can't answer here; by the
+  // sandbox's why when the host gives one (provisional)
+  "All {size} places in this computer's Safe workspace are in use, so Clauseo can't answer in this matter until one is free. End a conversation in another matter to free one.":
+    "इस कंप्यूटर के सुरक्षित कार्यक्षेत्र की सभी {size} जगहें उपयोग में हैं, इसलिए जब तक कोई जगह खाली नहीं होती, Clauseo इस मामले में उत्तर नहीं दे सकता। एक जगह खाली करने के लिए किसी दूसरे मामले में बातचीत समाप्त करें।",
+  "All {size} places in this computer's Safe workspace are in use by open conversations. End a conversation in another matter to free one.":
+    "इस कंप्यूटर के सुरक्षित कार्यक्षेत्र की सभी {size} जगहें खुली बातचीत में उपयोग में हैं। एक जगह खाली करने के लिए किसी दूसरे मामले में बातचीत समाप्त करें।",
+  // matter_sessions_full, until the host queues and starts the third itself
+  "Two conversations are already working in this matter. Try again when one finishes.":
+    "इस मामले में पहले से दो बातचीत चल रही हैं। किसी एक के पूरा होने पर फिर से प्रयास करें।",
+  // places only a reset frees (needs_reset > 0, never before R17 PR-D), and the button that asks for it
+  "One of them needs resetting before it can be used again. Windows asks for permission first.":
+    "उनमें से एक को दोबारा इस्तेमाल से पहले रीसेट करना होगा। Windows पहले अनुमति माँगता है।",
+  "{n} of them need resetting before they can be used again. Windows asks for permission first.":
+    "उनमें से {n} को दोबारा इस्तेमाल से पहले रीसेट करना होगा। Windows पहले अनुमति माँगता है।",
+  "Free up places": "जगहें खाली करें",
+  // pool_owned: an item a place didn't hand back (its IT line is words-errors.ts's)
+  "Part of this matter's folder wasn't handed back to you after the Safe workspace last used it, so Clauseo can't answer in this matter until it is.":
+    "सुरक्षित कार्यक्षेत्र के पिछली बार इस्तेमाल करने के बाद इस मामले के फ़ोल्डर का एक हिस्सा आपको वापस नहीं सौंपा गया, इसलिए जब तक वह वापस नहीं सौंपा जाता, Clauseo इस मामले में उत्तर नहीं दे सकता।",
   "In use by other open matters: {n}": "खुले दूसरे मामलों के उपयोग में: {n}",
   "Kept by matters with nothing open: {n}": "ऐसे मामलों के पास जिनमें कुछ खुला नहीं: {n}",
   "Freed the next time Clauseo starts work: {n}": "Clauseo के अगली बार काम शुरू करने पर खाली होंगे: {n}",
   "Still holding files set aside: {n}": "अलग रखी फ़ाइलें अब भी इनमें हैं: {n}",
-  "To free one now, end a conversation in another matter.":
-    "अभी एक स्थान खाली करने के लिए किसी दूसरे मामले की बातचीत समाप्त करें।",
   "Clauseo can add room for 4 more. Windows asks for permission first.":
     "Clauseo 4 और स्थानों के लिए जगह जोड़ सकता है। Windows पहले अनुमति माँगता है।",
   // Windows error 1385, once R17 PR-E names it (UC-33)
@@ -63,8 +77,18 @@ export const HI = {
   // design B: what stops the Safe workspace (R17 PR-E's NotProtectedCause blocked { reason } and
   // other_account), said by blocked.ts; the body, in the note and in Settings, then the reason's
   // line (UC-80 to UC-95)
-  "Something on this computer stops the Safe workspace, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.":
-    "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है, इसलिए Clauseo इसकी हर वह फ़ाइल पढ़ सकता है जिसे आप खोल सकते हैं। वह इस मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+  // R17 PR-E's M4: a Safe workspace set up but broken, blocked, or stopped by a cause this version doesn't know refuses
+  // every launch whatever the settings; provisional
+  "Something on this computer stops the Safe workspace, so Clauseo can't answer here.":
+    "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता।",
+  "The Safe workspace on this computer isn't working, so Clauseo can't answer here until it's set up again.":
+    "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र काम नहीं कर रहा है, इसलिए जब तक इसे फिर से तैयार नहीं किया जाता, Clauseo यहाँ उत्तर नहीं दे सकता।",
+  // #722: a check of the Safe workspace that couldn't confirm it; provisional
+  "Clauseo couldn't check the Safe workspace on this computer, so it can't answer here yet. Try again. If it keeps happening, restart Clauseo.":
+    "Clauseo इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र की जाँच नहीं कर सका, इसलिए वह अभी यहाँ उत्तर नहीं दे सकता। फिर से प्रयास करें। अगर ऐसा बार-बार हो, तो Clauseo फिर से शुरू करें।",
+  "If that doesn't help, ask your IT team.": "अगर इससे मदद न मिले, तो अपनी IT टीम से पूछें।",
+  "This version of Clauseo doesn't recognise what's stopping the Safe workspace, so it can't answer here. Update Clauseo, or ask your IT team.":
+    "Clauseo का यह संस्करण यह नहीं पहचानता कि सुरक्षित कार्यक्षेत्र को क्या रोक रहा है, इसलिए वह यहाँ उत्तर नहीं दे सकता। Clauseo अपडेट करें, या अपनी IT टीम से पूछें।",
   "Something on this computer stops the Safe workspace, so Clauseo asks before changing anything outside a matter's folder.":
     "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है, इसलिए Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
   "A Windows policy on this computer blocks the program that sets up the Safe workspace. Ask your IT team to allow it.":

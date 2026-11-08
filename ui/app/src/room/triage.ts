@@ -118,7 +118,9 @@ export function needOf(t: Pick<ThreadSummary, "status" | "seen" | "last_stop">):
     t.status === "idle" &&
     reason !== "at_limit" &&
     reason !== "cancelled" &&
-    reason !== "not_allowed"
+    reason !== "not_allowed" &&
+    // R17 PR-E: a turn stopped for leaving the Safe workspace counts as a stop, as the host's rules have it
+    reason !== "left_safe_workspace"
   )
     return "ready";
   return null;

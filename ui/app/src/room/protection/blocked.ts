@@ -3,12 +3,10 @@
 // of snake_case names, and `other_account` (another Windows account on this computer owns the Safe
 // workspace). The words are picked from the protection state's cause, never from a refused turn's
 // `sandbox.blocked`. Each reason has its own line; an unknown one, from a newer Clauseo, says to
-// ask IT. Outside the room's first load: the note's chunk and Settings import it. TODO(R17 PR-E):
-// bindings.ts lacks both causes on this base, so the reason is read loosely; once PR-E lands, read
-// the generated type and keep this table keyed on the same names.
+// ask IT. Outside the room's first load: the note's chunk and Settings import it.
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { pw, type ProtectionKey } from "@clauseo/components/lib/words-protection.ts";
-import type { ProtectionView } from "../../transport/protocol.ts";
+import type { NotProtectedCause, ProtectionView } from "../../transport/protocol.ts";
 import type { Cause } from "./causes.ts";
 
 /** A reason the lawyer is told something specific about, and `other_account`. */
@@ -46,8 +44,11 @@ const UNKNOWN_WORDS: ProtectionKey = "Ask your IT team to look into it.";
 export function blockOf(cause: Cause | null): BlockReason | "unknown" | null {
   if (cause?.name === "other_account") return "other_account";
   if (cause?.name !== "blocked") return null;
-  const raw = cause.raw as { blocked?: { reason?: unknown } } | null;
-  const reason = typeof raw === "object" && raw !== null ? raw.blocked?.reason : undefined;
+  const raw = cause.raw;
+  const reason: unknown =
+    typeof raw === "object" && raw !== null && "blocked" in raw
+      ? (raw as Extract<NotProtectedCause, { blocked: unknown }>).blocked?.reason
+      : undefined;
   return typeof reason === "string" &&
     reason !== "other_account" &&
     Object.hasOwn(REASON_WORDS, reason)
@@ -71,6 +72,13 @@ export function blockLine(lang: Lang, cause: Cause | null): string | null {
  * announce line where `retry_asks_admin` says Windows' prompt follows (stage C's PR 2). */
 export const needsInstaller = (cause: Cause | null): boolean =>
   blockOf(cause) === "admin_copy_missing";
+
+/** Whether the note and the firm's notice give the installer's repair (its line, and on a personal install "Get the
+ * installer"): a missing admin copy (needsInstaller), and R17 PR-E's M4 broken set-up (`set_up_failed`), which no
+ * retry mends. A sibling, not a change to needsInstaller, since the first run's step and Settings read that one as
+ * "not set up yet". */
+export const repairByInstaller = (cause: Cause | null): boolean =>
+  needsInstaller(cause) || cause?.name === "set_up_failed";
 
 /** The updater's word on who manages this install (`UpdateView.state`'s `managed.by`, from
  * desktop's install_kind.rs): "per_machine" for a per-machine install, "policy" where the firm's

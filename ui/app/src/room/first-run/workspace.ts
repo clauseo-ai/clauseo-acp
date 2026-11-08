@@ -48,7 +48,9 @@ export function workspaceStep(
   if (view === null || cause === null) return null;
   const due = entered(view, readers);
   if (step === null) return due ? "pending" : null;
-  if (step === "done") return cause.group === "setup" || due ? "off" : null;
+  // a broken set-up (R17 PR-E's M4 repair group) ends the step as the set-up group does
+  if (step === "done")
+    return cause.group === "setup" || cause.name === "set_up_failed" || due ? "off" : null;
   if (needsInstaller(cause)) return "repair";
   const running = state.running === "set_up" || inProgress(view) === "set_up";
   if (!running) return "ask";

@@ -14,6 +14,7 @@ import { ProtectionConfirm } from "@clauseo/components/clauseo/protection-confir
 import { IconSafeWorkspace } from "@clauseo/components/icons/icons.tsx";
 import { useDisplay, type Lang } from "@clauseo/components/lib/display.ts";
 import { INSTALLER_CLOSE, pw } from "@clauseo/components/lib/words-protection.ts";
+import { vt } from "@clauseo/components/lib/words-versions.ts";
 import { useSettingsWords, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import { useEffect, useId, useRef, useState } from "react";
@@ -23,7 +24,7 @@ import type { ProtectionView } from "../../transport/protocol.ts";
 import type { Cause } from "../../room/protection/causes.ts";
 import { failedWords, useSetUpPress, waitingWords } from "../../room/protection/setup.tsx";
 import { computerCause, setUpAt } from "../../room/protection/view.ts";
-import { named1385, whyOf } from "../../room/protection/detail.ts";
+import { whyOf } from "../../room/protection/detail.ts";
 import {
   blockLine,
   blockOf,
@@ -44,13 +45,15 @@ type Status =
   | "needs_set_up"
   | "set_up_refused"
   | "set_up_failed"
+  | "probe_failed"
   | "blocked"
   | "cant";
 
 const statusOf = (view: ProtectionView, cause: Cause | null, platform: string): Status => {
   if (cause === null) return view.tier === "b" ? "b" : platform === "windows" ? "a-win" : "a-mac";
   if (blockOf(cause) !== null) return "blocked";
-  if (cause.group === "setup") return cause.name as Status;
+  // a broken set-up (R17 PR-E's M4 repair group) keeps its own status here, as before
+  if (cause.group === "setup" || cause.name === "set_up_failed") return cause.name as Status;
   return "cant";
 };
 
@@ -132,16 +135,21 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
               ? w.s(
                   "Windows didn't allow the set-up, so Clauseo asks before changing anything outside a matter's folder.",
                 )
-              : status === "set_up_failed"
-                ? w.s(
-                    "The Safe workspace couldn't be set up on this computer, so Clauseo asks before changing anything outside a matter's folder.",
+              : status === "probe_failed"
+                ? pw(
+                    lang,
+                    "Clauseo couldn't check the Safe workspace on this computer, so it can't answer here yet. Try again. If it keeps happening, restart Clauseo.",
                   )
-                : status === "blocked"
-                  ? pw(
-                      lang,
-                      "Something on this computer stops the Safe workspace, so Clauseo asks before changing anything outside a matter's folder.",
+                : status === "set_up_failed"
+                  ? w.s(
+                      "The Safe workspace couldn't be set up on this computer, so Clauseo asks before changing anything outside a matter's folder.",
                     )
-                  : w.s(cantKey(cause ?? { name: "unknown", group: "cant", raw: null }));
+                  : status === "blocked"
+                    ? pw(
+                        lang,
+                        "Something on this computer stops the Safe workspace, so Clauseo asks before changing anything outside a matter's folder.",
+                      )
+                    : w.s(cantKey(cause ?? { name: "unknown", group: "cant", raw: "unknown" }));
   const repair = needsInstaller(cause);
   const page = repair && !firmInstall(view, state.managedBy) ? repairPage(display) : null;
   const block = blockLine(lang, cause);
@@ -166,10 +174,17 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
     >
       {w.say(pw(lang, "Remove set-up"))}
     </Button>
-  ) : status === "needs_set_up" || status === "set_up_refused" || status === "set_up_failed" ? (
+  ) : status === "needs_set_up" ||
+    status === "set_up_refused" ||
+    status === "set_up_failed" ||
+    status === "probe_failed" ? (
     <Button kind="tone" size="small" onClick={press} data-testid="protection-setup">
       {w.say(
-        status === "needs_set_up" ? pw(lang, "Set up the Safe workspace") : w.s("Set up again"),
+        status === "needs_set_up"
+          ? pw(lang, "Set up the Safe workspace")
+          : status === "probe_failed"
+            ? vt(lang, "Try again")
+            : w.s("Set up again"),
       )}
     </Button>
   ) : null;
@@ -198,16 +213,6 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
           {page !== null && (
             <p className="set-note" data-testid="protection-close-line">
               {w.say(pw(lang, INSTALLER_CLOSE))}
-            </p>
-          )}
-          {cause !== null && named1385(cause) && (
-            <p className="set-note">
-              {w.say(
-                pw(
-                  lang,
-                  "Windows policy on this computer doesn't let the Safe workspace's accounts sign in. Ask your IT team to add them to the Allow log on locally policy.",
-                ),
-              )}
             </p>
           )}
           {view.required && <Managed id={managed} />}
