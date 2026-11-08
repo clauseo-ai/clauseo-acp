@@ -108,6 +108,9 @@ struct Writer {
     message: String,
     /// A comment written before the next rule, and dropped if a new comment comes first.
     comment: Option<String>,
+    /// Every `subpath` and `literal` filter of a rule that allows a write, in order: where the
+    /// agent can put a file, so where [`Writer::native_code`] refuses mapping code.
+    writable: Vec<String>,
 }
 
 impl Writer {
@@ -117,6 +120,7 @@ impl Writer {
             params: Vec::new(),
             message: format!("(with message \"{tag}\")"),
             comment: None,
+            writable: Vec::new(),
         }
     }
 
@@ -168,6 +172,12 @@ impl Writer {
             rule.push_str("\n  ");
             rule.push_str(filter);
         }
+        if action == "allow" && ops.contains("file-write") {
+            let roots = seen
+                .iter()
+                .filter(|f| f.starts_with("(subpath ") || f.starts_with("(literal "));
+            self.writable.extend(roots.map(|f| (*f).clone()));
+        }
         if action == "deny" {
             rule.push_str("\n  ");
             rule.push_str(&self.message);
@@ -192,6 +202,7 @@ impl Writer {
         self.read_only_state(&p);
         self.browser_sockets(policy);
         self.network(policy);
+        self.native_code(policy);
     }
 
     /// The policy's allows, before any of its denies.
@@ -492,6 +503,21 @@ impl Writer {
                 .collect();
             self.rule("allow", "network-bind network-inbound", &filters);
         }
+    }
+
+    /// With [`Policy::native_code_deny`] on, no file in a place the profile lets the agent
+    /// write maps as code, last of all so no allow wins over it. `(deny default)` does not cover
+    /// `file-map-executable` of a readable file (macOS 27.2), so this rule is the control. Exec
+    /// stays: a child inherits the jail, and `node_modules/.bin` scripts need it. The base's
+    /// write allows are devices, never mapped as code, and have no filter of this shape.
+    fn native_code(&mut self, policy: &Policy) {
+        if !policy.native_code_deny() {
+            return;
+        }
+        self.note("\n; Native code: nothing in a place the agent may write maps as code. Last, so");
+        self.note("; it wins; (deny default) does not cover file-map-executable on its own.");
+        let roots = std::mem::take(&mut self.writable);
+        self.rule("deny", "file-map-executable", &roots);
     }
 
     fn keychain(&mut self, policy: &Policy, p: &Params) {

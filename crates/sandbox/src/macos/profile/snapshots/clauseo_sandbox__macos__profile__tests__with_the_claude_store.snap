@@ -149,7 +149,10 @@ expression: w.render(&policy)
   ; The Xcode licence record the git shim checks before it runs git.
   (literal "/Library/Preferences/com.apple.dt.Xcode.plist"))
 
-; Mapping system libraries as code.
+; Mapping system libraries as code. This list never narrowed mapping: on macOS 27.2 (26B123)
+; `(deny default)` does not refuse file-map-executable of a file the profile lets the process
+; read, so a dylib in the matter mapped too. The control is the explicit deny the profile ends
+; with when Policy::native_code_deny is on, over every place the agent may write (0038).
 (allow file-map-executable
   (subpath "/System")
   (subpath "/usr/lib")
