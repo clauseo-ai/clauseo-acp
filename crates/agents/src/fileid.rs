@@ -29,7 +29,7 @@ pub fn same_file(a: &Path, b: &Path) -> io::Result<bool> {
 
 /// The file's id: (device, inode). `None` for a symbolic link.
 #[cfg(unix)]
-fn file_id(path: &Path) -> io::Result<Option<(u64, u64)>> {
+pub(crate) fn file_id(path: &Path) -> io::Result<Option<(u64, u64)>> {
     use std::os::unix::fs::MetadataExt as _;
 
     let meta = std::fs::symlink_metadata(path)?;
@@ -46,7 +46,7 @@ fn file_id(path: &Path) -> io::Result<Option<(u64, u64)>> {
     unsafe_code,
     reason = "CreateFileW and GetFileInformationByHandle are the OS's file-id calls; std has no stable one"
 )]
-fn file_id(path: &Path) -> io::Result<Option<(u64, u64)>> {
+pub(crate) fn file_id(path: &Path) -> io::Result<Option<(u64, u64)>> {
     use std::os::windows::ffi::OsStrExt as _;
     use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
 

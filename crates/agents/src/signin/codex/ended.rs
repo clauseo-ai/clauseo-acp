@@ -9,6 +9,7 @@ use std::pin::pin;
 use clauseo_process::Timer;
 use futures::future::{Either, select};
 
+use super::written::LoginRun;
 use super::{Confirmation, LOGOUT_STOP, confirm, confirm_account, signed_in};
 use crate::cancel::{Cancel, Stop};
 use crate::signin::claude::LOGOUT_LIMIT;
@@ -33,13 +34,15 @@ fn ending_now(cancel: &Cancel) -> bool {
 /// ended): that login, confirmed. Anything else: `failed`, the sign-in card's signed-out view,
 /// and the home keeps no unconfirmed login ([`remove_own_login`]). The check has a cancel of its
 /// own, ended by a stop at once (a newer job, the quit's bound); during the quit it does not run.
+/// Only a login file `login_run` wrote may go ([`LoginRun::may_remove`]).
 pub(super) async fn checked_again<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     failed: SigninState,
+    login_run: &LoginRun,
 ) -> SigninState {
     let cancel = &job.ticket.cancel;
     if cancel.quit_seen() {
-        drop_unmarked_login(job);
+        drop_unmarked_login(job, login_run);
         return failed;
     }
     if ending_now(cancel) {
@@ -51,7 +54,7 @@ pub(super) async fn checked_again<T: Timer + Send + Sync>(
         match confirm(job, &own, kind, &job.home).await {
             Confirmation::Confirmed(identity) => Some(identity),
             Confirmation::SignedOut | Confirmation::Unknown => {
-                unconfirmed_goes(job, &own).await;
+                unconfirmed_goes(job, &own, login_run).await;
                 None
             }
         }
@@ -80,12 +83,16 @@ pub(super) async fn checked_again<T: Timer + Send + Sync>(
 /// An unconfirmed login in the home goes: with Codex's `logout` ([`remove_own_login`], under
 /// `cancel`), except once the quit is seen, when no logout could finish inside its bound (and,
 /// cut at the app's exit, would leave the file): then the file is removed directly
-/// ([`drop_unmarked_login`]).
-async fn unconfirmed_goes<T: Timer + Send + Sync>(job: &SigninJob<T>, cancel: &Cancel) {
+/// ([`drop_unmarked_login`]). Either only for a file `login_run` wrote.
+async fn unconfirmed_goes<T: Timer + Send + Sync>(
+    job: &SigninJob<T>,
+    cancel: &Cancel,
+    login_run: &LoginRun,
+) {
     if job.ticket.cancel.quit_seen() {
-        drop_unmarked_login(job);
+        drop_unmarked_login(job, login_run);
     } else {
-        let _gone = remove_own_login(job, cancel).await;
+        let _gone = remove_own_login(job, cancel, Removal::Unconfirmed(login_run)).await;
     }
 }
 
@@ -94,8 +101,12 @@ async fn unconfirmed_goes<T: Timer + Send + Sync>(job: &SigninJob<T>, cancel: &C
 /// at the next start an unmarked file in the home reads as reused, whose split check would sign
 /// the login out. So such a file goes now: the guard (`reuse::codex_login_shared`), then the
 /// file removed directly (`reuse::remove_home_login`, which never reads it). A file
-/// under an `own` record is left: it reads as Clauseo's own, and its status says how it stands.
-fn drop_unmarked_login<T>(job: &SigninJob<T>) {
+/// under an `own` record is left: it reads as Clauseo's own, and its status says how it stands;
+/// so is a file `login_run` did not write ([`LoginRun::may_remove`]).
+fn drop_unmarked_login<T>(job: &SigninJob<T>, login_run: &LoginRun) {
+    if !login_run.may_remove(&job.home) {
+        return;
+    }
     let source = crate::signin::marker::read_source(&job.config.data_dir, &job.ticket.agent);
     if source == Some(crate::signin::marker::LoginSource::Own) {
         return;
@@ -117,15 +128,16 @@ pub(super) async fn confirmed_or_failed<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     cancel: &Cancel,
     polled: bool,
+    login_run: &LoginRun,
 ) -> SigninState {
     // The quit's bound leaves no time for a check or a logout: an unconfirmed login goes.
     if cancel.quit_seen() {
-        drop_unmarked_login(job);
+        drop_unmarked_login(job, login_run);
         return job.failed(SigninCode::Cancelled);
     }
     // The lawyer's Cancel came while the login saved: what Codex says now is shown.
     if cancel.is_cancelled() && !cancel.is_killed() {
-        return checked_again(job, job.failed(SigninCode::Cancelled)).await;
+        return checked_again(job, job.failed(SigninCode::Cancelled), login_run).await;
     }
     let own = RunKind::Own { home: &job.home };
     let confirmation = if polled {
@@ -138,12 +150,21 @@ pub(super) async fn confirmed_or_failed<T: Timer + Send + Sync>(
     }
     // The login ran, so the home may hold its file: unconfirmed, it goes. A removal that failed
     // leaves it; nothing more can be done here.
-    unconfirmed_goes(job, &Cancel::new()).await;
+    unconfirmed_goes(job, &Cancel::new(), login_run).await;
     if cancel.is_cancelled() {
         job.failed(SigninCode::Cancelled)
     } else {
         job.failed(SigninCode::Failed)
     }
+}
+
+/// Why [`remove_own_login`] runs.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum Removal<'a> {
+    /// A login that ran and did not confirm: only the file it wrote may go.
+    Unconfirmed(&'a LoginRun),
+    /// The lawyer's Sign out, with no CLI to run `logout`.
+    SignOut,
 }
 
 /// Clauseo's own login in the home goes, for a login that ran and did not confirm, and for a
@@ -155,10 +176,22 @@ pub(super) async fn confirmed_or_failed<T: Timer + Send + Sync>(
 /// [`crate::signin::reuse::codex_login_shared`]), and never when the
 /// lawyer's home folder is not known, since the guard cannot then tell: nothing is touched.
 /// `true` when the home holds no login file afterwards.
+///
+/// For a login that did not confirm (`Removal::Unconfirmed`) only a file that login wrote goes
+/// ([`LoginRun::may_remove`]): a login process was spawned and the file changed since it
+/// started. Any other file (the login from before, which a slow or offline status could not
+/// confirm) is left, and no logout runs. The lawyer's Sign out with no CLI
+/// (`Removal::SignOut`) removes it whatever wrote it.
 pub(super) async fn remove_own_login<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     cancel: &Cancel,
+    why: Removal<'_>,
 ) -> bool {
+    if let Removal::Unconfirmed(login_run) = why
+        && !login_run.may_remove(&job.home)
+    {
+        return false;
+    }
     let Some(lawyer) = job.config.signin.lawyer_home() else {
         return false;
     };

@@ -217,10 +217,16 @@ impl<T: Timer + Send + Sync> SigninJob<T> {
         });
         // Sign in pressed: a quick status check first, so a login already there is signed in
         // with no login run and no browser.
-        if matches!(self.task, Task::SignIn(_))
-            && let Some(state) = found::quick_check(self).await
-        {
-            return Some(state);
+        if matches!(self.task, Task::SignIn(_)) {
+            if let Some(state) = found::quick_check(self).await {
+                return Some(state);
+            }
+            // Cancelled while the quick check ran (the card showed `Checking`): it ends here,
+            // with no login started and nothing after it (no `Waiting`, no status check, no
+            // removal of a login already there).
+            if self.ticket.cancel.is_cancelled() {
+                return Some(self.failed(SigninCode::Cancelled));
+            }
         }
         match (self.vendor, self.task) {
             (Vendor::Claude, Task::SignIn(method)) => {
