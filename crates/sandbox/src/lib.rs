@@ -167,6 +167,7 @@ mod macos;
 mod policy;
 pub mod ports;
 pub mod proxy;
+mod reservation;
 mod setup;
 #[cfg(test)]
 mod test_support;
@@ -194,6 +195,7 @@ pub use proxy::{
     Upstream, UpstreamAnswer, Verdict, builtin_allowlist, start_proxy, upstream_answer,
     upstream_for,
 };
+pub use reservation::Reservation;
 pub use setup::{Blocked, SandboxSetup, SetAside, SetupError, SetupState};
 #[cfg(windows)]
 pub use windows::UserSetup;

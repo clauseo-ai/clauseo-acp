@@ -2310,6 +2310,43 @@ pub struct Progress { pub walked: u64, pub done: bool, pub failed: Option<Arc<Er
   group's members needs an administrator, so the design (for example static slot groups made at
   set-up) comes to the orchestrator before that PR.
 
+#### As built (PR6 C2 and C3)
+
+The orchestrator's rulings change the interface above in these ways:
+
+- **A reservation comes first.** `Launchers::reserve(matter, session, running)` assigns the
+  matter's pool user and claims a network slot. It is bookkeeping only and fits the launch
+  bound. It returns a `clauseo_sandbox::Reservation`, a type on every OS with `matter()`,
+  `session()`, `ports()` (the slot's host ports, which the host binds before it builds the
+  policy), `slot()` and `pool_user()`. macOS makes one with `Reservation::unpooled`, and the
+  host's fakes with `Reservation::fixed` (`test-support`). A dropped reservation undoes what was
+  done for its session.
+- **`prepare(reservation, &policy)` is the walk.** Its `Preparing` hands the reservation back,
+  prepared. `launch` takes it by value and refuses one of another matter, session or set of
+  launchers with `Error::WrongReservation`, and one not prepared with `Error::NotPrepared`.
+  `running` goes to `reserve`, not `launch`. `is_prepared` is gone: a later launch's walk takes
+  20-70 ms inside `prepare`.
+- **The walk's order:** the gate and the plan, `check_launch`, `wfp::check_launch`, leftovers,
+  the set-aside's launch pass, `PrepareRun{slot}`, then `apply`. Nothing runs as the pool user
+  and nothing is granted to it before `check_launch` passes, and a failed check drops the
+  reservation. A process left running as the pool user is stopped by the stop task and the pool
+  user's sweep, then looked for again. If one survives to the 180 s bound, the launch is refused
+  with `Error::LeftoverProcess`. `PrepareRun` answering that a set-up is running is retried
+  within the same bound.
+- **One live agent per matter.** The matter stays held from its reservation until
+  `after_session` has finished. Until then `reserve` refuses with `Error::MatterBusy`, a plain
+  refusal with no fallback, until the extra-user-per-matter PR. `Launchers::with_steps` clears
+  stale launch files and slot claims first, so a crash strands no slot.
+- **Errors:** `Error` is `#[non_exhaustive]`, so callers outside the crate match with a
+  wildcard. `Error::kind()` gives every variant a phrase with no path in it. The appended
+  variants are `PoolFull { cause }` (counts for `NotProtectedCause::PoolFull`), `NotPrepared`,
+  `Cancelled`, `MatterBusy`, `WrongReservation` and `LeftoverProcess`. `Blocked` gets
+  `LooseTask` (`loose_task`).
+- **The exit:** `RunOutcome::meaning()` tells the host what each exit means, and `HOST_ENDED`
+  is public.
+- **What is left:** the steps are a `LaunchSteps` trait, so the order is tested on every OS.
+  The real steps are C5's and `TierBLauncher` is C4's.
+
 ## Consequences
 
 - A finished set-up moves the machine to tier B at the next tier query; R17's
