@@ -78,6 +78,9 @@ pub trait Removal {
     fn group_members(&mut self, group: &Sid) -> Result<usize, MachineError>;
     /// Deletes the group `group`.
     fn delete_group(&mut self, group: &Sid) -> Result<(), MachineError>;
+    /// Deletes every pool user's Git tree, `%ProgramFiles%\Clauseo\Sandbox\git\`, and the
+    /// record's `GitTrees` subkey (`git_tree::remove`); either missing is `Ok`.
+    fn remove_git_trees(&mut self) -> Result<(), MachineError>;
     /// Runs `f` with the calling thread acting as [`Removal::invoker`] (`Owner::run_as`), with
     /// the token [`Removal::can_act_as_owner`] names, then as itself again; called again inside
     /// `f`, runs `f` as it is. No invoker, or a failed impersonation, is the `Err`, and `f`

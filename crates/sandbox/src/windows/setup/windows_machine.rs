@@ -33,10 +33,11 @@ use crate::SetupError;
 use crate::windows::acl;
 use crate::windows::apply::Surroundings;
 use crate::windows::fence::RegisteredMatter;
+use crate::windows::git_tree;
 use crate::windows::ledger::{Ledger, ledger_path};
 use crate::windows::marker::{self, Marker, MarkerState};
 use crate::windows::matters::MatterSids;
-use crate::windows::pool::{MachineRecord, POOL_GROUP, POOL_PREFIX, pool_number};
+use crate::windows::pool::{MachineRecord, POOL_GROUP, POOL_PREFIX, PoolUser, pool_number};
 use crate::windows::record::current_user_sid;
 use crate::windows::refresh::{self, Starters, SystemTask, TaskError};
 use crate::windows::secrets;
@@ -527,6 +528,23 @@ impl Machine for WindowsMachine {
             ));
         }
         journal::grow_journal(volume, max, delta)
+    }
+
+    fn git_trees(&mut self, pool: &[PoolUser], group: &Sid) -> Result<(), MachineError> {
+        // Elevated, never as the owner: the trees are under Program Files. A test's machine
+        // leaves them, and the real record, alone.
+        if self.names.record_key != RECORD_KEY {
+            return Ok(());
+        }
+        let accounts: Vec<git_tree::Account> = pool
+            .iter()
+            .map(|user| git_tree::Account {
+                name: self.names.real(&user.name),
+                sid: user.sid.clone(),
+            })
+            .collect();
+        git_tree::ensure_for(&accounts, group);
+        Ok(())
     }
 
     fn network(&mut self, setup: &NetworkSetup) -> Result<NetworkReport, MachineError> {

@@ -267,6 +267,10 @@ impl Refresher for WindowsRefresher {
     fn log(&mut self, error: bool, line: &str) {
         event_log(error, line);
     }
+
+    fn git_trees(&mut self) {
+        crate::windows::git_tree::ensure_from_record();
+    }
 }
 
 /// Sets the `REG_SZ` `name` of the record's key (which must exist) to `text`, and flushes the

@@ -209,7 +209,16 @@ fn rewrite_record(
     let before = run.before.as_ref();
     let result = if before.is_none() && survivors.is_empty() && !made_group_left {
         match run.recorded {
-            Some(_) => machine.delete_record().map_err(|error| cause_of(&error)),
+            Some(_) => {
+                // No pool remains: its Git trees go, with their record's subkey, which would
+                // otherwise keep the record's key (`Machine::git_trees` with none).
+                if let Some(group) = run.group.as_ref()
+                    && let Err(error) = machine.git_trees(&[], group)
+                {
+                    tracing::warn!(%error, "a rolled-back pool's Git trees stay");
+                }
+                machine.delete_record().map_err(|error| cause_of(&error))
+            }
             None => Ok(()),
         }
     } else {

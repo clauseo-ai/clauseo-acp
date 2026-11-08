@@ -17,7 +17,7 @@ use super::rollback::Run;
 use crate::Error;
 use crate::windows::apply::{Applied, fence_each};
 use crate::windows::fence::RegisteredMatter;
-use crate::windows::pool::MachineRecord;
+use crate::windows::pool::{MachineRecord, PoolUser};
 use crate::windows::sids::Sid;
 use crate::windows::wfp::{NetworkReport, NetworkSetup};
 use crate::windows::writer::AclWriter;
@@ -267,10 +267,26 @@ pub(super) fn network(
         .map_err(|error| (Step::Network, cause_of(&error)))
 }
 
+/// Step 8b, then step 9: every live pool user's Git tree (`Machine::git_trees`, 0049 "The Git
+/// tree"), then [`journals`]. A failed tree step is logged in fixed words and never fails the
+/// set-up: the engine records "Git Bash unavailable" for each account it couldn't serve.
+pub(super) fn git_trees_then_journals(
+    machine: &mut impl Machine,
+    matters: &[RegisteredMatter],
+    group: &Sid,
+    profiles: &[(PoolUser, PathBuf)],
+) -> Result<Vec<(PathBuf, JournalOutcome)>, String> {
+    let pool: Vec<PoolUser> = profiles.iter().map(|(user, _)| user.clone()).collect();
+    if let Err(error) = machine.git_trees(&pool, group) {
+        tracing::warn!(%error, "the sandbox accounts' Git trees weren't built; set-up goes on");
+    }
+    journals(machine, matters)
+}
+
 /// Step 9: each chosen volume's change journal made [`super::JOURNAL_MAX`] when smaller
 /// ([`journal_plan`], D-B12).
 /// Failures are listed, never fatal: they cost only full walks later.
-pub(super) fn journals(
+fn journals(
     machine: &mut impl Machine,
     matters: &[RegisteredMatter],
 ) -> Result<Vec<(PathBuf, JournalOutcome)>, String> {

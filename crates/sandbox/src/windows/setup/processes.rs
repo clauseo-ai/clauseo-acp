@@ -118,9 +118,9 @@ pub(super) fn check_pool(pool: &[Sid], owner: &Sid) -> Result<(), MachineError> 
     Ok(())
 }
 
-/// Every running process with its token user, for the tests.
-#[cfg(test)]
-pub(super) fn running() -> Result<Vec<Seen>, MachineError> {
+/// Every running process with its token user: the tests', and the Git trees' check that no
+/// process runs as an account (`git_tree::os`).
+pub(crate) fn running() -> Result<Vec<Seen>, MachineError> {
     Ok(look()?.into_iter().map(|(seen, _)| seen).collect())
 }
 

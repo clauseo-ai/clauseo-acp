@@ -146,6 +146,8 @@ pub enum RemoveStep {
     Network,
     /// A per-machine install's stop task, deleted before the record.
     StopTask,
+    /// The pool users' Git trees and their record (0049, "The Git tree").
+    GitTrees,
 }
 
 impl std::fmt::Display for RemoveStep {
@@ -165,6 +167,7 @@ impl std::fmt::Display for RemoveStep {
             RemoveStep::Record => "deleting the machine's record",
             RemoveStep::Network => "removing the network filters",
             RemoveStep::StopTask => "deleting the sandbox's stop task",
+            RemoveStep::GitTrees => "deleting the sandbox users' Git trees",
         })
     }
 }
@@ -422,6 +425,10 @@ fn steps(
     report.ledger = ledger_work::run(machine, acl, record, acting)?;
     report.group = remove_group(machine, record)?;
     remove_stop_task(machine)?;
+    // Before the record: its `GitTrees` subkey would keep the record's key.
+    machine
+        .remove_git_trees()
+        .map_err(|e| (RemoveStep::GitTrees, cause_of(&e)))?;
     machine
         .delete_record()
         .map_err(|e| (RemoveStep::Record, cause_of(&e)))?;

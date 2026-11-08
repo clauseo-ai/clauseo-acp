@@ -217,6 +217,20 @@ pub(crate) fn program_files() -> io::Result<PathBuf> {
     Ok(PathBuf::from(OsString::from_wide(units)))
 }
 
+/// The admin folder once its chain passes [`check`](super::check)'s rule 2 (the copy's level
+/// included), with no hash and no listing: the cheap check the WSL deny task makes before its
+/// run lock, so a start that loses the lock hashes nothing, and the one the Git trees
+/// (`git_tree`) make before they build under the admin folder.
+pub(crate) fn admin_dir_checked() -> Result<PathBuf, crate::Blocked> {
+    let program_files = program_files().map_err(|error| {
+        tracing::warn!(%error, "Windows gave no Program Files folder");
+        crate::Blocked::AdminCopyMissing
+    })?;
+    let exe = super::admin_exe(&program_files);
+    super::check_chain(&WindowsAdminCopy, &program_files, &exe)?;
+    Ok(super::admin_dir(&program_files))
+}
+
 /// What is at `path`, from its own attributes (`symlink_metadata` never follows a link).
 pub(crate) fn found(path: &Path) -> io::Result<Found> {
     match std::fs::symlink_metadata(path) {

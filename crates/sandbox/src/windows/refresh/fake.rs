@@ -249,6 +249,10 @@ impl Refresher for Fake {
     fn log(&mut self, error: bool, line: &str) {
         self.logs.push((error, line.to_owned()));
     }
+
+    fn git_trees(&mut self) {
+        self.calls.push("git_trees");
+    }
 }
 
 pub(super) fn sha_hex(bytes: &[u8]) -> String {
