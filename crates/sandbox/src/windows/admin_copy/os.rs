@@ -102,57 +102,31 @@ impl AdminCopyFs for WindowsAdminCopy {
     }
 }
 
-/// `--adopt`'s lock-down of the admin folder `dir`, whose copy is `exe`: every entry but the
-/// expected ones (`expected_entry`, each of its own kind) deleted, a link deleted as itself and
-/// never followed; then `dir` and everything left in it given the locked owner and DACL, read
+/// `--adopt`'s lock-down of the admin folder `dir`, whose copy is `exe`
+/// (`take_back::lock_down_with`): `staging\` deleted, every entry but the copy and its signature
+/// deleted, a link deleted as itself and never followed, anything that shuts Administrators out
+/// taken back first; then `dir` and everything left in it given the locked owner and DACL, read
 /// back exactly ([`lock_down`]), so no older file keeps its own entries or owner.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "deletes what the admin folder, only administrators' to change, mustn't hold"
-)]
 pub(crate) fn lock_down_tree(dir: &Path, exe: &Path) -> io::Result<()> {
-    if found(dir)? != Found::Folder || found(exe)? != Found::File {
-        return Err(io::Error::other(
-            "the admin folder or copy isn't a plain folder and file",
-        ));
-    }
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let path = entry.path();
-        let kind = found(&path)?;
-        let wanted = if name.eq_ignore_ascii_case(super::STAGING) {
-            Found::Folder
-        } else {
-            Found::File
-        };
-        if super::expected_entry(&name) && kind == wanted {
-            continue;
-        }
-        match kind {
-            Found::Folder => std::fs::remove_dir_all(&path)?,
-            Found::File => std::fs::remove_file(&path)?,
-            // A link to a folder goes with `remove_dir`, any other with `remove_file`.
-            Found::Link => {
-                std::fs::remove_file(&path).or_else(|_file| std::fs::remove_dir(&path))?;
-            }
-            Found::Missing => {}
-        }
-    }
-    lock_tree(dir)
+    super::take_back::lock_down_with(&mut super::take_back_os::NtfsLockDown, dir, exe)
 }
 
-/// [`lock_down`] on `dir` and, below it, on every folder and file; a link below is deleted.
+/// [`lock_down`] on `dir` and, below it, on every folder and file but `skip` (a name in `dir`);
+/// a link below is deleted.
 #[expect(
     clippy::disallowed_methods,
-    reason = "deletes a link in the staging folder, only administrators' to change"
+    reason = "deletes a link in the admin folder, only administrators' to change"
 )]
-fn lock_tree(dir: &Path) -> io::Result<()> {
+pub(crate) fn lock_tree_skipping(dir: &Path, skip: Option<&str>) -> io::Result<()> {
     lock_down(dir, true)?;
     for entry in std::fs::read_dir(dir)? {
-        let path = entry?.path();
+        let entry = entry?;
+        if skip.is_some_and(|skip| entry.file_name().eq_ignore_ascii_case(skip)) {
+            continue;
+        }
+        let path = entry.path();
         match found(&path)? {
-            Found::Folder => lock_tree(&path)?,
+            Found::Folder => lock_tree_skipping(&path, None)?,
             Found::File => lock_down(&path, false)?,
             Found::Link => {
                 std::fs::remove_file(&path).or_else(|_file| std::fs::remove_dir(&path))?;

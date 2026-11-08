@@ -2,7 +2,8 @@
 //! the machine, the admin copy goes too. In `refresh::TEARDOWN`'s order: the record's four
 //! admin-copy values (`ADMIN_VALUES`, so no launcher trusts the copy from here on), then the
 //! SYSTEM tasks `\Clauseo\SandboxRefresh` and `\Clauseo\SandboxStop` ([`unregister_task`]),
-//! then the refresh's staging ([`remove_staging`]), then everything in
+//! then the refresh's staging ([`remove_staging`], taken back if it shuts Administrators out),
+//! then everything in
 //! `%ProgramFiles%\Clauseo\Sandbox\`, then the folder. Only the uninstaller's
 //! `--remove --uninstall` runs it: the app's in-app removal keeps all of these.
 //!
@@ -35,6 +36,8 @@ use windows::core::PCWSTR;
 use super::explain::{Cause, CopyLeft};
 use super::machine::MachineError;
 use super::record_write;
+use crate::windows::admin_copy::take_back::remove_taking_back;
+use crate::windows::admin_copy::take_back_os::NtfsLockDown;
 use crate::windows::admin_copy::{self, Found, os, same_path};
 use crate::windows::refresh::{self, SystemTask, TEARDOWN, Teardown};
 
@@ -105,7 +108,8 @@ pub(super) struct Restart<'a> {
 /// running exe (`running`), it is renamed in place to [`parked_name`] instead, and `schedule`
 /// is given that name, `dir` and `app` (`%ProgramFiles%\Clauseo`), in that order, to delete
 /// at restart; if the rename fails, `exe` itself is scheduled in its place. A link inside is
-/// deleted as itself, never followed.
+/// deleted as itself, never followed; an entry that shuts Administrators out is taken back
+/// first (`admin_copy::take_back`).
 pub(super) fn clear(
     dir: &Path,
     exe: &Path,
@@ -118,14 +122,7 @@ pub(super) fn clear(
         if running && same_path(&path, exe) {
             continue;
         }
-        match os::found(&path)? {
-            Found::Folder => std::fs::remove_dir_all(&path)?,
-            Found::File => std::fs::remove_file(&path)?,
-            Found::Link => {
-                std::fs::remove_file(&path).or_else(|_file| std::fs::remove_dir(&path))?;
-            }
-            Found::Missing => {}
-        }
+        remove_taking_back(&mut NtfsLockDown, &path)?;
     }
     if !running {
         return std::fs::remove_dir(dir);
@@ -150,11 +147,14 @@ pub(crate) fn unregister_task(task: SystemTask) -> Result<(), MachineError> {
     refresh::unregister_task(task).map_err(|error| MachineError::Other(error.to_string()))
 }
 
-/// PR 3's hook: deletes the refresh task's staging folder,
-/// `%ProgramFiles%\Clauseo\Sandbox\staging\`, its own way (`refresh::remove_staging`; it goes
-/// with the rest of the admin folder's contents after anyway).
+/// Deletes the refresh task's staging folder, `%ProgramFiles%\Clauseo\Sandbox\staging\`, with
+/// whatever is in it (a refresh's set-aside `.old` copy, a staged `.new`), taking it back first
+/// when its DACL shuts Administrators out (`admin_copy::take_back`), as an older refresh's
+/// SYSTEM-only one does.
 pub(crate) fn remove_staging() -> Result<(), MachineError> {
-    refresh::remove_staging().map_err(MachineError::Other)
+    let program_files = os::program_files().map_err(|e| other(&e))?;
+    let staging = admin_copy::admin_dir(&program_files).join(admin_copy::STAGING);
+    remove_taking_back(&mut NtfsLockDown, &staging).map_err(|e| other(&e))
 }
 
 /// The name the running copy is renamed to in its own folder: one nothing starts.

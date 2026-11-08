@@ -195,3 +195,61 @@ fn elevated_admin_copy_lock_down_reads_back_and_a_planted_users_write_refuses() 
     lock_down(&exe, false).unwrap();
     assert_eq!(check(&fs), Err(Blocked::AdminCopyChanged));
 }
+
+/// `path` made SYSTEM's alone, owner and protected DACL, as a refresh made `staging\` under the
+/// old `STAGING_SDDL`; `SeRestorePrivilege` back as it was after.
+fn system_only(path: &Path, folder: bool) {
+    use crate::windows::acl::privilege::Privileges;
+    let system = crate::windows::sids::Sid::parse("S-1-5-18").unwrap();
+    let _restore = Privileges::enable(&["SeRestorePrivilege"]).unwrap();
+    crate::windows::test_dacl::give_owner(path, &system).unwrap();
+    let dacl = if folder {
+        "D:P(A;OICI;FA;;;SY)"
+    } else {
+        "D:P(A;;FA;;;SY)"
+    };
+    protect_with(path, dacl).unwrap();
+}
+
+/// A Sandbox stand-in with the copy and a `staging\` holding a set-aside `.old`, both SYSTEM's
+/// alone: what a successful refresh leaves until the restart.
+fn shut_staging(dir: &TempDir) -> (PathBuf, PathBuf, PathBuf) {
+    let exe = dir.file(r"pf\Clauseo\Sandbox\clauseo-sandbox-setup.exe", "MZ");
+    let old = dir.file(
+        r"pf\Clauseo\Sandbox\staging\clauseo-sandbox-setup.exe.old",
+        "MZ old",
+    );
+    let staging = old.parent().unwrap().to_path_buf();
+    system_only(&old, false);
+    system_only(&staging, true);
+    assert!(std::fs::read_dir(&staging).is_err(), "shut to this token");
+    (exe.parent().unwrap().to_path_buf(), exe, staging)
+}
+
+#[test]
+#[ignore = "elevated: takes a SYSTEM-only folder back; CI's elevated step runs it"]
+fn elevated_a_system_only_staging_is_taken_back_by_the_lock_down_and_the_teardown() {
+    use super::take_back::{LockDownFs as _, remove_taking_back};
+    use super::take_back_os::NtfsLockDown;
+    if !elevated_tests_enabled() {
+        return;
+    }
+    // --adopt (a repair after a refresh): staging goes, the rest is locked.
+    let dir = TempDir::new("admin-copy-take-back-adopt");
+    let (sandbox, exe, staging) = shut_staging(&dir);
+    lock_down_tree(&sandbox, &exe).unwrap();
+    assert_eq!(os::found(&staging).unwrap(), Found::Missing);
+    assert!(locked(&os::security(&sandbox).unwrap(), true));
+    assert!(locked(&os::security(&exe).unwrap(), false));
+    // --remove --uninstall's teardown: deleted.
+    let dir = TempDir::new("admin-copy-take-back-remove");
+    let (_sandbox, _exe, staging) = shut_staging(&dir);
+    remove_taking_back(&mut NtfsLockDown, &staging).unwrap();
+    assert_eq!(os::found(&staging).unwrap(), Found::Missing);
+    // The take-back alone: re-secured as the locked folder, and readable again.
+    let dir = TempDir::new("admin-copy-take-back-secure");
+    let (_sandbox, _exe, staging) = shut_staging(&dir);
+    NtfsLockDown.take_back(&staging).unwrap();
+    assert!(locked(&os::security(&staging).unwrap(), true));
+    assert_eq!(std::fs::read_dir(&staging).unwrap().count(), 1);
+}

@@ -109,7 +109,7 @@ pub use rules::{
 };
 #[cfg(windows)]
 pub use task::{
-    TASK_FOLDER, TaskError, last_refresh_run, register_task, remove_staging, request_admin_refresh,
+    TASK_FOLDER, TaskError, last_refresh_run, register_task, request_admin_refresh,
     request_pool_stop, unregister_task,
 };
 pub use version::version_not_older;
