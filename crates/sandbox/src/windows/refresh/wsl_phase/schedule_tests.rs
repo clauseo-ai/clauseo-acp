@@ -92,6 +92,21 @@ fn machine_with_keys(events: Vec<(Duration, KeyEvent)>) -> Fake {
 }
 
 #[test]
+fn with_no_in_progress_a_recorded_key_missing_holds_the_run_past_the_rewrite() {
+    // InProgress at neither path: the deleted keys alone keep the run past its floor.
+    let mut machine = machine_with_keys(vec![
+        (secs(5.0), KeyEvent::Delete),
+        (secs(21.0), KeyEvent::Rewrite),
+    ]);
+    run(&mut machine);
+    let keys = machine.watch.keys.as_ref().unwrap();
+    assert!(keys.present && keys.denied);
+    assert_eq!(keys.off, [WSL_WAKE_SETTLE]);
+    assert_eq!(machine.watch.clock, secs(21.25));
+    assert_eq!(errors(&machine), 1, "{:?}", machine.logs);
+}
+
+#[test]
 fn the_mutex_without_in_progress_holds_nothing_and_is_logged() {
     let mut machine = fake();
     machine.watch.mutex = vec![(secs(0.0), secs(1000.0))];
@@ -205,6 +220,20 @@ fn an_install_that_never_ends_stops_the_run_at_its_budget() {
     let (error, line) = machine.logs.last().unwrap();
     assert!(!error && line.contains("time limit"), "{line}");
     assert!(line.ends_with("still in progress"), "{line}");
+    // A deny left unverified at the budget (a recorded key that never comes back) is an error.
+    let mut machine = machine_with_keys(vec![(secs(5.0), KeyEvent::Delete)]);
+    run(&mut machine);
+    assert!(
+        machine.watch.clock <= WSL_DENY_BUDGET,
+        "{:?}",
+        machine.watch.clock
+    );
+    let (error, line) = machine.logs.last().unwrap();
+    assert!(
+        *error && line.ends_with("WSL's deny wasn't verified"),
+        "{line}"
+    );
+    assert_eq!(errors(&machine), 2, "{:?}", machine.logs);
     // The budget sits 30 s inside the task's limit.
     assert_eq!(WSL_DENY_EXECUTION_LIMIT, "PT6M");
     assert_eq!(

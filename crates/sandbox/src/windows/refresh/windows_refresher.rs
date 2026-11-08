@@ -343,10 +343,11 @@ impl WslWatch for WindowsRefresher {
             match watch.wait(time) {
                 Ok(woke) => return woke,
                 Err(why) => {
-                    // Unwatched from here on, as an arm that fails: the waits are timed alone.
+                    // The watch is dropped and this wait is timed; the next arm opens a new one
+                    // (one line per failed wait, at most).
                     event_log(
                         true,
-                        &format!("WSL's AppID keys are no longer watched: {why}"),
+                        &format!("WSL's AppID keys' watch failed and is opened again: {why}"),
                     );
                     self.watch = None;
                 }
@@ -358,6 +359,21 @@ impl WslWatch for WindowsRefresher {
 
     fn installer(&mut self) -> Installer {
         windows_watch::installer()
+    }
+
+    fn recorded_key_missing(&mut self) -> Result<bool, Failed> {
+        use crate::windows::wsl::{WslRead as _, WslWrite as _};
+        let reg = wsl::WindowsWsl::writer(RECORD_KEY);
+        let record = reg.recorded().map_err(|error| error.to_string())?;
+        for app_id in &record.app_ids {
+            if !reg
+                .app_id_exists(app_id)
+                .map_err(|error| error.to_string())?
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 }
 

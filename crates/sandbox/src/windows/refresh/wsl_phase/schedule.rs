@@ -14,9 +14,15 @@
 //! - **The hold.** While `InProgress` is there, and until it has been gone for
 //!   [`WSL_INSTALL_QUIET`], the run keeps waiting for changes, past the floor. WSL's installer
 //!   deletes its `AppID` keys ~5 s in and writes them back ~21 s in, with stock permissions; the
-//!   wake re-denies them. Windows Installer's `_MSIExecute` mutex is a hint only, never a hold:
-//!   it can be held by a process that isn't an install, and stays after one. It is logged when
-//!   held with no `InProgress`, so a VM run shows the two disagree.
+//!   wake re-denies them. The Windows Installer service writes `InProgress` for any user's
+//!   install, so a pool user's per-user MSI can hold the run too: up to [`WSL_DENY_BUDGET`],
+//!   re-checking the deny, never weakening it. `InProgress` is read at two paths, neither
+//!   confirmed on a VM, so the run also holds while any `AppID` the record lists
+//!   (`WslDenyAppIds`) has no key ([`WslWatch::recorded_key_missing`]): such a pass is never
+//!   verified, and WSL's keys-absent window keeps the run whatever `InProgress` says.
+//!   Windows Installer's `_MSIExecute` mutex is a hint only, never a hold: it can be held by a
+//!   process that isn't an install, and stays after one. It is logged when held with no
+//!   `InProgress`, so a VM run shows the two disagree.
 //! - **The end.** Once the floor is done and `InProgress` has been gone for
 //!   [`WSL_INSTALL_QUIET`], a pass that verifies every target ends the run. One that doesn't
 //!   is tried again every [`WSL_RECHECK_PAUSE`] after an install, or ends the run when the run
@@ -48,8 +54,9 @@ const PASS_WORST: Duration = WSL_WAKE_GAP.saturating_add(WSL_LOCK_WAIT);
 /// What [`WslWatch::installer`] read.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Installer {
-    /// Windows Installer's `InProgress` key or value is there: an install is under way. Only
-    /// administrators and SYSTEM can write it. The hold rests on it alone.
+    /// Windows Installer's `InProgress` key or value is there: an install is under way, any
+    /// user's (the service writes it for a per-user MSI too). Only administrators and SYSTEM
+    /// can write it directly. With a recorded `AppID`'s key missing, it holds the run.
     pub in_progress: bool,
     /// `Global\_MSIExecute` is there: a hint, logged, never a hold.
     pub mutex: bool,
@@ -61,7 +68,7 @@ pub trait WslWatch: Refresher {
     /// A monotonic clock: the time since a fixed point.
     fn now(&mut self) -> Duration;
     /// Arms one notification (re-arms it, after the first) of a change under
-    /// `HKLM\SOFTWARE\Classes\AppID`, subtree, a name or a value, and of `InProgress`
+    /// `HKLM\SOFTWARE\Classes\AppID`, subtree, a name, a value or a descriptor, and of `InProgress`
     /// appearing or going. A change before the arm that wasn't waited for is dropped: the pass
     /// after the arm reads it.
     fn watch(&mut self) -> Result<(), Failed>;
@@ -70,6 +77,10 @@ pub trait WslWatch: Refresher {
     fn wait_change(&mut self, time: Duration) -> bool;
     /// Windows Installer's state now.
     fn installer(&mut self) -> Installer;
+    /// Whether any `AppID` in the record's `WslDenyAppIds` has no key under
+    /// `HKLM\SOFTWARE\Classes\AppID`. A read that fails is the error, which holds as a missing
+    /// key does.
+    fn recorded_key_missing(&mut self) -> Result<bool, Failed>;
 }
 
 /// The run's state between its passes; times are since its start.
@@ -77,7 +88,7 @@ struct Schedule {
     start: Duration,
     /// The floor's passes still owed.
     ticks: u32,
-    /// Whether `InProgress` was seen in this run.
+    /// Whether `InProgress` was seen in this run, or a recorded `AppID`'s key was missing.
     held: bool,
     /// Since when `InProgress` has been gone; `None` while it is there.
     idle_since: Option<Duration>,
@@ -118,13 +129,15 @@ pub(super) fn passes<F: WslWatch>(fs: &mut F) {
             .saturating_sub(PASS_WORST)
             .saturating_sub(at);
         if left.is_zero() {
-            let why = if run.idle_since.is_none() {
-                "Windows Installer's install was still in progress"
+            // An unverified deny is an error; an install still running with the deny in place,
+            // information.
+            let (error, why) = if run.verified {
+                (false, "Windows Installer's install was still in progress")
             } else {
-                "WSL's deny wasn't verified"
+                (true, "WSL's deny wasn't verified")
             };
             fs.log(
-                false,
+                error,
                 &format!("WSL's deny task stopped at its time limit: {why}"),
             );
             break;
@@ -245,7 +258,11 @@ impl Schedule {
     fn pass(&mut self, fs: &mut impl WslWatch, at: Duration) {
         let pass = pass(fs);
         self.last_pass = at;
-        self.verified = pass.verified;
+        // A recorded AppID with no key is never verified, and holds the run (WSL's installer
+        // deletes the keys, then writes them back ~16 s later).
+        let missing = fs.recorded_key_missing().unwrap_or(true);
+        self.held |= missing;
+        self.verified = pass.verified && !missing;
         let Some((error, line)) = pass.line else {
             self.repeating = None;
             return;

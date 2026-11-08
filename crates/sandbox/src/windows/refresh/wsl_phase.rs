@@ -246,6 +246,7 @@ mod tests {
             "watch",
             "wait_change",
             "installer",
+            "recorded_key_missing",
         ];
         let rest: Vec<&str> = machine
             .calls

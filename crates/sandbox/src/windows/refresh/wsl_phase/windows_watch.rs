@@ -15,8 +15,8 @@ use windows::Win32::Foundation::{
 };
 use windows::Win32::System::Registry::{
     HKEY, HKEY_LOCAL_MACHINE, KEY_NOTIFY, KEY_WOW64_64KEY, REG_NOTIFY_CHANGE_LAST_SET,
-    REG_NOTIFY_CHANGE_NAME, REG_NOTIFY_THREAD_AGNOSTIC, RRF_RT_ANY, RRF_SUBKEY_WOW6464KEY,
-    RegCloseKey, RegGetValueW, RegNotifyChangeKeyValue, RegOpenKeyExW,
+    REG_NOTIFY_CHANGE_NAME, REG_NOTIFY_CHANGE_SECURITY, REG_NOTIFY_THREAD_AGNOSTIC, RRF_RT_ANY,
+    RRF_SUBKEY_WOW6464KEY, RegCloseKey, RegGetValueW, RegNotifyChangeKeyValue, RegOpenKeyExW,
 };
 use windows::Win32::System::SystemInformation::GetTickCount64;
 use windows::Win32::System::Threading::{
@@ -85,11 +85,14 @@ impl Watch {
     }
 
     /// Arms a notification on each key with none armed: the event reset, then
-    /// `RegNotifyChangeKeyValue` (names and values, thread agnostic, so it isn't tied to the
-    /// thread's life). One armed and unfired is left as it is: it fires on the next change.
+    /// `RegNotifyChangeKeyValue` (names, values and descriptors, thread agnostic, so it isn't
+    /// tied to the thread's life). One armed and unfired is left as it is: it fires on the next
+    /// change.
     pub(in crate::windows::refresh) fn arm(&mut self) -> Result<(), Failed> {
-        let filter =
-            REG_NOTIFY_CHANGE_NAME | REG_NOTIFY_CHANGE_LAST_SET | REG_NOTIFY_THREAD_AGNOSTIC;
+        let filter = REG_NOTIFY_CHANGE_NAME
+            | REG_NOTIFY_CHANGE_LAST_SET
+            | REG_NOTIFY_CHANGE_SECURITY
+            | REG_NOTIFY_THREAD_AGNOSTIC;
         for watched in self.keys.iter_mut().filter(|watched| !watched.armed) {
             // SAFETY: the event is a live manual-reset event this watch owns.
             unsafe { ResetEvent(watched.event.0) }

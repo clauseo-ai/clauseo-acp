@@ -200,6 +200,11 @@ impl WslWatch for Fake {
         }
     }
 
+    fn recorded_key_missing(&mut self) -> Result<bool, Failed> {
+        self.calls.push("recorded_key_missing");
+        Ok(self.watch.keys.as_ref().is_some_and(|keys| !keys.present))
+    }
+
     fn installer(&mut self) -> Installer {
         self.calls.push("installer");
         Installer {
