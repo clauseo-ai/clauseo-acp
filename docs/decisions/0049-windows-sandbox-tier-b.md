@@ -2220,11 +2220,18 @@ handle (`SetKernelObjectSecurity`, which never propagates), read back:
   install files have. A tree's files are links of the copy's and share that descriptor, so the
   outer runner (the unelevated lawyer) can read a tree's `usr\bin\msys-2.0.dll`;
 - `_trash\`: SYSTEM and Administrators full, inherited; no one else;
-- `_off\bash.exe`, the Git Bash stub (the runner, copied by each set-up through handles under a
-  temporary name, then renamed over it): `_source\`'s DACL plus the Authenticated Users entry;
-  placed again by each SYSTEM refresh from the runner in the record's install folder, kept when
-  none is found, by retirement and by `--adopt` when SYSTEM's or Administrators', deleted with
-  `git\`; a failure to place it is logged, never a set-up failure;
+- `_off\bash.exe`, the Git Bash stub: one file for the whole machine, not one per account,
+  which every pool account's runs with Git Bash off start. It is the runner, copied by each
+  set-up and each SYSTEM refresh (from beside the set-up, else the record's `UserInstallDir`)
+  only when its `clauseo-sandbox-run.exe.sig` verifies with the updater key built in, the
+  refresh's own check of the set-up exe (`refresh::signature::verify_file`, the trusted comment
+  naming `clauseo-sandbox-run.exe`). The exe and the `.sig` are each read through one handle
+  opened as itself, and those same bytes are written: no re-open between check and copy. The
+  copy is made under a temporary name, the old stub renamed aside as `bash.exe.<hex>.old` (a
+  running one can be renamed, never replaced), then renamed in; the asides go at the next
+  placing, one still running staying. `_source\`'s DACL plus the Authenticated Users entry;
+  kept when no signed runner is found, by retirement and by `--adopt` when SYSTEM's or
+  Administrators', deleted with `git\`; a failure to place it is logged, never a set-up failure;
 - each tree's and copy's completion marker, `.clauseo-tree`: owner SYSTEM, a protected DACL with
   SYSTEM and Administrators full, a tree's account read and execute, and Authenticated Users
   `FILE_GENERIC_READ` (`0x120089`), so the outer runner can read it.
@@ -2393,28 +2400,25 @@ Git Bash is off for this run: <reason>`, naming no path, and the run goes on wit
 That fails closed: `CLAUDE_CODE_GIT_BASH_PATH` names a stub (below), and `CLAUSEO_GIT_BASH_OFF`
 holds the reason; both replace the spec's values.
 
-**The agent's environment is built, not filtered** (`runner/env.rs`). Beyond what the runner
-sets, the lawyer's Git, shell and ssh settings never reach the agent: every `GIT_*` (the runner
-then sets its own `GIT_CONFIG_*`), `MSYSTEM*`, `MINGW_*`, `MSYS*`, `SSH_ASKPASS*`,
-`SSH_AUTH_SOCK`, `EXEPATH`, `ORIGINAL_PATH`, `ORIGINAL_TEMP`, `ORIGINAL_TMP`, `CYGWIN`,
-`CHERE_INVOKING`, `PLINK_PROTOCOL`, `SHELL`, `BASH_ENV`, `ENV`, `INPUTRC`, `GNUPGHOME` and
-the `XDG_*` folders. `HOME`, `USERPROFILE` and the rest of the profile are the runner's.
+**The agent's environment is built, not filtered** (`runner/env.rs`), from an allowlist:
+- the Windows base set, copied from the lawyer's environment: `SystemRoot`, `windir`,
+  `ComSpec`, `PATHEXT`, `OS`, `PROCESSOR_*`, `NUMBER_OF_PROCESSORS`, `SystemDrive`,
+  `ProgramFiles`, `ProgramFiles(x86)`, `ProgramW6432`, `CommonProgramFiles*`,
+  `CommonProgramW6432`, `ProgramData`, `ALLUSERSPROFILE`, `PUBLIC`, `DriverData`;
+- what the host set for the agent itself, `LaunchMessage::agent_env` (below, "The launcher"),
+  never what the host inherited from the lawyer; `NODE_OPTIONS`/`NODE_PATH` and any value
+  pointing into the lawyer's profile outside the granted paths still go;
+- ours: the profile variables at the run's state and temp folders, `GIT_CONFIG_*` for OpenSSL,
+  the CA bundle's variables, `CLAUDE_CODE_GIT_BASH_PATH` and `CLAUSEO_GIT_BASH_OFF`;
+- `PATH`, ours alone: `<tree>\cmd` with a tree, the launch's runtime paths, then Windows' own
+  folders under `SystemRoot` (`System32`, itself, `Wbem`, `WindowsPowerShell\v1.0`,
+  `OpenSSH`). No entry of the lawyer's or the host's `PATH` is kept.
 
-**`PATH` by file identity** (`runner/git_bash/path_ids.rs`, `os/ids.rs`). Each entry of the
-lawyer's `PATH` is judged by what it is on disk, never by its text. It is trimmed of spaces and
-quotes and normalized as Windows' own search does (`.` goes, `..` takes the part before it,
-each part loses its trailing dots and spaces). It goes when it isn't a full local path (relative,
-drive-relative, a `\\.\` or other device form), when it is on the network (UNC, `\\?\UNC\`
-or a network drive by `GetDriveTypeW`; none of these is ever opened or looked up), when it or a
-folder above it is a reparse point (each opened as itself), or when it or a folder above it has
-the volume serial and file ID (`FileIdInfo`) of a per-machine Git install (`GitForWindows`'
-`InstallPath`, `%ProgramFiles%\Git`, `%ProgramFiles(x86)%\Git`, opened through their links).
-So a short name (`C:\PROGRA~1\Git\cmd`), a quoted entry, `..`, a trailing dot, `\\?\C:\` or a
-junction can't keep the lawyer's `git.exe` there. An entry that isn't there, or can't be opened,
-stays. A Git outside `%ProgramFiles%`, `%ProgramFiles(x86)%` and the `HKLM` `InstallPath` (a
-package manager's shim, say) isn't recognised and stays; under the agent's token it fails as the
-lawyer's Git would. The filter is a convenience, so the agent's `git` is the tree's; the
-boundary is the agent's token, not this list.
+So the lawyer's `EDITOR`, `VISUAL`, `PAGER`, proxies, `PERL5OPT`, `GIT_*`, `MSYSTEM*`,
+`SSH_ASKPASS` and the rest never reach the agent. With `PATH` ours alone, the earlier filter
+of the lawyer's `PATH` against the known Git installs by file ID is gone: no lawyer's entry is
+left to filter, so no Git of the lawyer's is on the agent's `PATH`, wherever it is installed.
+The boundary stays the agent's token; the built environment keeps the agent's `git` the tree's.
 
 **The stub** (`runner/git_bash/off.rs`). Read from Claude Code 2.1.317's bundle (function
 `S()` beside the variable's read): when `CLAUDE_CODE_GIT_BASH_PATH` is unset, or names a file
@@ -2430,23 +2434,29 @@ file is named `bash.exe` (`runner/stub.rs`). It writes `Git Bash isn't available
 workspace for this session: <reason>` on stderr and exits 1. The setup exe can't be the stub:
 its manifest asks for an administrator, so the agent can't start it. The outer picks the stub in
 this order:
-1. **The machine's**, `<admin>\git\_off\bash.exe`. Set-up and each SYSTEM refresh copy it from
-   the runner beside the set-up or in the record's `UserInstallDir` (`git_tree::runner_for_stub`),
-   so a silent per-user update that runs no set-up still gets it. A per-user install folder is
-   the lawyer's to write, but SYSTEM only copies the file, never runs it, which the one-owner
-   rule accepts; the stub runs as the pool user, as the runner beside it does, so nothing gains
-   a right. `git` and `_off` must pass `git_tree::checked_chain` (opened as
+1. **The machine's**, `<admin>\git\_off\bash.exe`, one file every pool account shares. Set-up
+   and each SYSTEM refresh copy it from the runner beside the set-up or in the record's
+   `UserInstallDir` (`git_tree::runner_for_stub`), so a silent per-user update that runs no
+   set-up still gets it. Those folders are a lawyer's to write, and a file planted there would
+   run in every other lawyer's pool accounts too. So SYSTEM copies only a runner whose `.sig`
+   verifies with the updater key built in, over the very bytes it writes (above, "The Git
+   tree"); a planted, unsigned or wrongly signed runner is logged and never copied, and the
+   order goes on. SYSTEM only copies the file, never runs it. `git` and `_off` must pass `git_tree::checked_chain` (opened as
    themselves, owner SYSTEM, set-up's exact protected DACL), and the file, opened as itself
    relative to `_off` (`checked_file`), `admin_copy::level_safe` (owner SYSTEM, Administrators
    or `TrustedInstaller`; no one else may change it).
 2. **The outer runner's own**, its exe copied as `<data_dir>\sandbox\git-off\bash.exe`. The data
    folder must lie in `LocalAppData` (the known folder, never the environment, never roaming) on
-   a local drive, never a network one. `git-off` is made by the desktop user with its protected
+   a local drive, never a network one, by identity: every folder from the drive's root down to
+   `sandbox` is opened as itself and none may be a link, and the one as deep as `LocalAppData`
+   must have its file ID (a short name of it passes, another folder spelled alike doesn't).
+   `git-off` is made by the desktop user with its protected
    DACL in place: the owner full and the sandbox users' group read and execute, both inherited,
    nothing else (`O:<desktop user>D:P(A;OICI;FA;;;<desktop user>)(A;OICI;0x1200a9;;;<group>)`),
    and secured again through a handle when already there. At each launch the copy is compared
    with a SHA-256 of the runner's own exe; on any difference the runner is copied to a new file
-   beside it and renamed over it, then hashed again, all before the variable names it. The pool
+   beside it, the old copy renamed aside (it may be running) and the new one renamed in, then
+   hashed again, all before the variable names it; the asides go at the next copy. The pool
    user has read and execute on it, nothing more, and reaches it by bypassing traverse checks, as
    it reaches the trees. Residual: the desktop user's own processes could swap the copy between
    that check and Claude Code starting it. They can already change the runner itself, and the
@@ -2535,6 +2545,11 @@ pub struct Progress { pub walked: u64, pub done: bool, pub failed: Option<Arc<Er
   8. returns a launcher that starts `clauseo-sandbox-run.exe --launch <file>` through
      `spawn_in_tree`.
 
+  The host's launcher passes `LaunchMessage::from_policy` the variables it set for the agent
+  itself, `agent_env: &[(OsString, OsString)]` (its settings', its hook's, the forced ones and
+  the proxy's), apart from the inherited ones; the spec's one merged map
+  (`crates/host/src/agent/spec.rs`) can't tell them apart. The launch file carries both: `env`, from
+  which the runner copies only the Windows base set, and `agent_env`. To be agreed with the host.
   Each returned launcher starts one agent. The agent's whole environment, including the proxy's
   variables, travels in the launch file, never on the runner's command line. `Handle::pid()` is
   the outer runner's.
