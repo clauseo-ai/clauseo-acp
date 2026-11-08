@@ -17,9 +17,9 @@ use unicode_normalization::UnicodeNormalization;
 use super::shell::script;
 use super::words::{Escape, Segments, ansi_c_char, candidates, shell_segments};
 use super::{MAX_WORDS, Refusal, timings};
-use crate::network_paths::no_follow::{NoFollow, log_refusal};
+use crate::network_paths::no_follow::{MatterRoot, NoFollow, log_refusal};
 use crate::network_paths::resolve::Entry;
-use crate::network_paths::{Access, open_path};
+use crate::network_paths::{Access, NetEnv};
 
 pub(super) use allow::{read_only, textutil_writes};
 pub(super) use stetdoc::{Stetdoc, stetdoc};
@@ -131,9 +131,10 @@ const SHARE_MODES: bool = cfg!(windows);
 /// ([`clauseo_matters::held_open_in`], in each folder that has an owner file `~$…`, given
 /// that folder's owner files from this one listing), read breadth first: no folder whose name
 /// starts with `.`, no symlink followed, at most [`MAX_ENTRIES`] entries. Each folder is opened
-/// with no link followed on its way ([`open_path`]): one an agent swapped for a link after its
-/// parent was listed is skipped, never followed, and every look at its files goes through that
-/// handle. Each folder is listed
+/// with no link followed below the matter's root ([`MatterRoot`]: a share matter's root on
+/// Windows opened as stored, by the share-matter exception's rule): one an agent swapped for a
+/// link after its parent was listed is skipped, never followed, and every look at its files goes
+/// through that handle. Each folder is listed
 /// once and its names matched against its owner files in memory
 /// ([`clauseo_matters::OwnersBeside`]); only a file one may point at is looked up, so a folder of
 /// thousands of files beside one owner file costs its listing and a few calls. On Windows a file
@@ -141,18 +142,18 @@ const SHARE_MODES: bool = cfg!(windows);
 /// text or wildcard matches its name ([`SHARE_MODES`]): the lookup there also finds a file a
 /// program holds by a share mode alone, and this keeps finding it in such a folder. A file so held
 /// in a folder with no owner file is not found here.
-pub(super) fn held_files(folder: &Path) -> Vec<Held> {
-    held_files_with(folder, SHARE_MODES)
+pub(super) fn held_files(folder: &Path, net: &NetEnv) -> Vec<Held> {
+    held_files_with(&MatterRoot::new(folder, net), SHARE_MODES)
 }
 
-/// [`held_files`], keeping the files no owner file points at to open later when `share_modes`.
-fn held_files_with(folder: &Path, share_modes: bool) -> Vec<Held> {
-    let root = dunce::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
+/// [`held_files`] from `root`, keeping the files no owner file points at to open later when
+/// `share_modes`.
+fn held_files_with(root: &MatterRoot<'_>, share_modes: bool) -> Vec<Held> {
     let mut held = Vec::new();
     let mut queue: std::collections::VecDeque<PathBuf> = std::iter::once(PathBuf::new()).collect();
     let mut walk = timings::Walk::default();
     while let Some(relative) = queue.pop_front() {
-        let opened = open_path(&root.join(&relative), Access::List);
+        let opened = root.open(&relative, Access::List);
         if let Err(error) = &opened {
             log_refusal(error);
         }
@@ -507,7 +508,7 @@ pub(super) fn shell_refusal(
     hits: &[String],
     reach: &super::Reach,
 ) -> Option<Refusal> {
-    let held = held_files(folder);
+    let held = held_files(folder, reach.net());
     super::timings::mark("walk");
     let mut segments = Segments::new(MAX_WORDS);
     shell_segments(text, escape, &mut segments);

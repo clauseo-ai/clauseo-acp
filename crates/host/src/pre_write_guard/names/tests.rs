@@ -1,4 +1,10 @@
+use std::cell::RefCell;
+use std::path::{Path, PathBuf};
+
 use super::{bounds, held_files_with, holds, named_in, raw_text};
+use crate::network_paths::Access;
+use crate::network_paths::no_follow::{MatterRoot, NoFollow, open_path};
+use crate::network_paths::tests::plain_net;
 use crate::pre_write_guard::timings;
 use crate::pre_write_guard::words::Escape;
 use crate::write;
@@ -33,6 +39,68 @@ impl Drop for Folder {
     }
 }
 
+/// The root of the local matter `folder`.
+fn local(folder: &Path) -> MatterRoot<'static> {
+    MatterRoot::new(folder, &plain_net(cfg!(windows)))
+}
+
+/// A Windows matter on a share (`\\server\deals\Acme`, its root as stored): the scan opens that
+/// root by the share-matter exception's rule, through the seam (CI mounts no share), and every
+/// folder below it with no link followed from that handle, so a document held open on the share
+/// is found. A root the rule does not admit is never opened nor canonicalised: nothing is found.
+#[test]
+fn a_share_matters_held_files_are_found_from_its_root_as_stored() {
+    let folder = Folder::new("share");
+    write::create_dir_all(&folder.0.join("sub")).unwrap();
+    write::write_file(&folder.0.join("sub/Contract.docx"), b"x").unwrap();
+    write::write_file(&folder.0.join("sub/~$ntract.docx"), b"x").unwrap();
+    let asked: RefCell<Vec<PathBuf>> = RefCell::new(Vec::new());
+    let open = |path: &Path| -> std::io::Result<NoFollow> {
+        asked.borrow_mut().push(path.to_path_buf());
+        open_path(&dunce::canonicalize(&folder.0)?, Access::List)
+    };
+    let net = plain_net(true);
+    for stored in [r"\\server\deals\Acme", r"\\server\deals\Acme\", r"Z:\Acme"] {
+        let net = crate::network_paths::NetEnv {
+            remote_drive: Box::new(|letter| letter == 'Z'),
+            ..plain_net(true)
+        };
+        asked.borrow_mut().clear();
+        let held = held_files_with(&MatterRoot::with(Path::new(stored), &net, &open), false);
+        let mut paths: Vec<&str> = held.iter().map(|file| file.path.as_str()).collect();
+        paths.sort_unstable();
+        assert_eq!(paths, ["Contract.docx", "sub/Contract.docx"], "{stored}");
+        // The root as stored, once to start and once to list it; never another text.
+        assert!(!asked.borrow().is_empty());
+        assert!(
+            asked.borrow().iter().all(|path| path == Path::new(stored)),
+            "{stored}"
+        );
+    }
+    for refused in [
+        r"\\server\deals\..\Acme",
+        r"\\server\deals\.\Acme",
+        r"\\server\deals\Acme.",
+        r"\\server\\deals\Acme",
+        r"\\?\UNC\server\deals\Acme",
+        r"\\.\pipe\Acme",
+        "//server/deals/Acme",
+    ] {
+        asked.borrow_mut().clear();
+        let held = held_files_with(&MatterRoot::with(Path::new(refused), &net, &open), false);
+        assert!(held.is_empty(), "{refused}");
+        assert!(asked.borrow().is_empty(), "{refused}");
+    }
+    // With Unix's rules a share's mount is a local folder: the exception never applies.
+    #[cfg(unix)]
+    {
+        asked.borrow_mut().clear();
+        let unix = MatterRoot::with(Path::new(r"\\server\deals\Acme"), &plain_net(false), &open);
+        assert!(held_files_with(&unix, false).is_empty(), "Unix's rules");
+        assert!(asked.borrow().is_empty());
+    }
+}
+
 /// The counts at the end of the timings line `line`: `checked` and `probed`.
 fn counts(line: &str) -> (usize, usize) {
     let number = |key: &str| {
@@ -52,7 +120,7 @@ fn the_walk_looks_up_only_what_an_owner_file_may_point_at() {
     for share_modes in [false, true] {
         let folder = Folder::new(&format!("only-{share_modes}"));
         timings::start(true);
-        let held = held_files_with(&folder.0, share_modes);
+        let held = held_files_with(&local(&folder.0), share_modes);
         assert_eq!(
             named_in("echo hi > new.txt", Escape::Backslash, &held),
             None
@@ -72,7 +140,7 @@ fn the_walk_looks_up_only_what_an_owner_file_may_point_at() {
 fn with_share_modes_a_named_file_is_looked_up_once_when_named() {
     let folder = Folder::new("lazy");
     timings::start(true);
-    let held = held_files_with(&folder.0, true);
+    let held = held_files_with(&local(&folder.0), true);
     for command in ["cat Free.docx", "cat Free.docx", "rm Doc\\ 7.txt"] {
         assert_eq!(
             named_in(command, Escape::Backslash, &held),

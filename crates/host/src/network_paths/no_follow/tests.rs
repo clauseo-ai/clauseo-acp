@@ -1,14 +1,15 @@
 //! The no-follow open on Linux, on real folders: a walked path opens; a folder or the file on it
 //! swapped for a symlink after the walk refuses, the link's target never reached (the held-open
 //! check through it finds nothing); the per-name fallback a kernel without `openat2` takes
-//! refuses the same, through the `openat2` seam answering `ENOSYS`; and the walk's own looks
+//! refuses the same, through the `openat2` seam answering `ENOSYS` or a seccomp filter's
+//! `EPERM`; and the walk's own looks
 //! still read a link and walk its target.
 
 use std::path::{Path, PathBuf};
 
 use rustix::io::Errno;
 
-use super::sys::{self, by_name, fell_back, open_linux, reset_fallback};
+use super::sys::{self, by_name, fell_back, open_whole, reset_fallback};
 use super::{Access, Kind, WalkedPath, held_open_walked, is_link_on_the_way, open_no_follow};
 use crate::network_paths::resolve::{Disk, Entry, Fs as _, RealFs, Walked, walk};
 use crate::network_paths::tests::plain_net;
@@ -136,19 +137,45 @@ fn without_openat2_the_open_goes_name_by_name_and_still_refuses_a_link() {
     let (matter, document) = held_matter(&scratch);
     let no_openat2 = |_: &Path, _| Err(Errno::NOSYS);
     reset_fallback();
-    let opened = open_linux(&document, Access::Look, &no_openat2).unwrap();
+    let opened = open_whole(&document, Access::Look, &no_openat2).unwrap();
     assert!(fell_back(), "ENOSYS is remembered");
     assert_eq!(opened.kind().unwrap(), Kind::File);
     // Once remembered, `openat2` is not asked again.
     let never = |_: &Path, _| -> rustix::io::Result<std::os::fd::OwnedFd> {
         panic!("openat2 asked after ENOSYS")
     };
-    assert!(open_linux(&matter.join("sub"), Access::List, &never).is_ok());
+    assert!(open_whole(&matter.join("sub"), Access::List, &never).is_ok());
     write::rename(&matter.join("sub"), &matter.join("was-sub")).unwrap();
     symlink(&scratch.0.join("outside"), &matter.join("sub")).unwrap();
-    let error = open_linux(&document, Access::Read, &never).unwrap_err();
+    let error = open_whole(&document, Access::Read, &never).unwrap_err();
     assert!(is_link_on_the_way(&error), "{error}");
     reset_fallback();
+}
+
+/// A seccomp filter that forbids `openat2` (older Docker) answers `EPERM`: the open goes name
+/// by name, as safe, instead of failing every touch.
+#[test]
+fn a_seccomp_eperm_from_openat2_goes_name_by_name_and_still_refuses_a_link() {
+    let scratch = Scratch::new("eperm");
+    let (matter, document) = held_matter(&scratch);
+    let forbidden = |_: &Path, _| Err(Errno::PERM);
+    reset_fallback();
+    let opened = open_whole(&document, Access::Read, &forbidden).unwrap();
+    assert!(fell_back(), "EPERM is remembered");
+    assert_eq!(opened.kind().unwrap(), Kind::File);
+    let never = |_: &Path, _| -> rustix::io::Result<std::os::fd::OwnedFd> {
+        panic!("openat2 asked after EPERM")
+    };
+    write::rename(&matter.join("sub"), &matter.join("was-sub")).unwrap();
+    symlink(&scratch.0.join("outside"), &matter.join("sub")).unwrap();
+    let error = open_whole(&document, Access::Look, &never).unwrap_err();
+    assert!(is_link_on_the_way(&error), "{error}");
+    reset_fallback();
+    // Any other answer is the path's own refusal, not a missing call: never a fallback.
+    let denied = |_: &Path, _| Err(Errno::ACCESS);
+    let error = open_whole(&matter, Access::Look, &denied).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+    assert!(!fell_back());
 }
 
 #[test]

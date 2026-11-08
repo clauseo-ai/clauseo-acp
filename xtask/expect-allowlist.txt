@@ -594,6 +594,9 @@ crates/sandbox/examples/s15_launch_vm/win_suspend.rs - unsafe_code
 crates/host/src/network_paths/mac.rs - unsafe_code
 crates/host/src/network_paths/windows.rs - unsafe_code
 crates/host/src/network_paths/no_follow/windows.rs - unsafe_code
+# A share matter's root opened as stored (CreateFileW), and the subst drive test (DefineDosDeviceW).
+crates/host/src/network_paths/no_follow/windows_share.rs - unsafe_code
+crates/host/src/network_paths/no_follow/windows_tests.rs - unsafe_code
 crates/host/src/network_paths/no_follow/windows.rs Handle::local_apfs_or_hfs clippy::unused_self
 crates/host/src/network_paths/no_follow/unix.rs Handle::local_apfs_or_hfs clippy::unused_self
 # Vendored from clauseo_sandbox (stage C, #735) with its exported names; stage E's #764 calls it.

@@ -294,3 +294,10 @@ pub(crate) fn symlink(target: &Path, link: &Path) -> io::Result<()> {
 pub(crate) fn symlink(target: &Path, link: &Path) -> io::Result<()> {
     std::os::windows::fs::symlink_dir(target, link)
 }
+
+/// Makes `link` a symbolic link to the file `target`; fails without the right to make links
+/// (`ERROR_PRIVILEGE_NOT_HELD`). For unit tests.
+#[cfg(all(test, windows))]
+pub(crate) fn symlink_file(target: &Path, link: &Path) -> io::Result<()> {
+    std::os::windows::fs::symlink_file(target, link)
+}

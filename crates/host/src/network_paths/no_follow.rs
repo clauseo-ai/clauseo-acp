@@ -8,15 +8,20 @@
 //! folder by name ([`NoFollow`] is the held-open check's [`DocumentFolder`]).
 //!
 //! - Linux: `openat2` with `RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS`; on a kernel without it
-//!   (`ENOSYS`) an `openat` per name, each `O_NOFOLLOW` and checked not to be a link. Never a
-//!   plain open.
-//! - macOS: the same `openat` per name with `O_NOFOLLOW`, from `/`.
+//!   (`ENOSYS`) or a seccomp filter that forbids it (`EPERM`) an `openat` per name, each
+//!   `O_NOFOLLOW` and checked not to be a link. Never a plain open.
+//! - macOS: `open` with `O_NOFOLLOW_ANY`; on `EINVAL` or `ENOTSUP` (a system before 11, which
+//!   the app does not run on) the same `openat` per name, from `/`.
 //! - Windows: `NtCreateFile` per name relative to the folder's handle, from the volume's own
 //!   device (the drive letter read with `QueryDosDeviceW`, a `subst` followed, so a letter
 //!   mapped to a share since the walk is never opened). Each name is first read from its
 //!   folder's listing (`NtQueryDirectoryFile`, which opens nothing): a link refuses, as does a
 //!   reparse point not known to be local; the open itself takes `FILE_OPEN_REPARSE_POINT` and
-//!   its attributes are checked again.
+//!   its attributes are checked again. Folders on the way are opened for their attributes only.
+//!
+//! The guard's scan of a matter's held files starts from the matter's root ([`MatterRoot`]): on
+//! Windows a share matter's root is opened as the lawyer stored it, by the share-matter
+//! exception's rule, and every name below it with no link followed.
 //!
 //! The walk's own looks ([`super::resolve::RealFs`]) go through the same opens, so no look at an
 //! agent's path, before or after the walk vouches for it, follows a link the walk did not read.
@@ -41,6 +46,14 @@ mod sys;
 
 #[cfg(any(windows, test))]
 mod listing;
+mod matter_root;
+#[cfg(windows)]
+mod windows_share;
+#[cfg(test)]
+#[cfg(windows)]
+mod windows_tests;
+
+pub(crate) use matter_root::MatterRoot;
 #[cfg(test)]
 #[cfg(target_os = "linux")]
 mod tests;
@@ -73,8 +86,8 @@ impl WalkedPath {
 pub(crate) enum Access {
     /// Its kind and identity only (`O_PATH` on Linux, `FILE_READ_ATTRIBUTES` on Windows).
     Look,
-    /// A folder whose entries are looked at by name only (`O_PATH` on Linux: no read
-    /// permission needed, as for a `stat` through it).
+    /// A folder whose entries are looked at by name only (`O_PATH` on Linux, its attributes only
+    /// on Windows: no read or list permission needed, as for a `stat` through it).
     Folder,
     /// A folder whose entries are listed, or looked at by name.
     List,
