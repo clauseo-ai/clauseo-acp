@@ -72,7 +72,7 @@ pub(super) enum Mode<'a> {
     Strict {
         watched: &'a [Vec<u8>],
         pool: &'a [Vec<u8>],
-        reads: &'a [(std::path::PathBuf, Vec<u8>)],
+        reads: &'a [(std::path::PathBuf, Vec<u8>, u8)],
         foreign: Option<Foreign<'a>>,
     },
     /// `forget_matter`'s: what one of `pool` owns goes back to `me`, cleaned. `own` (a strict

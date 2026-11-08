@@ -33,8 +33,9 @@ use windows::Win32::Storage::FileSystem::{WRITE_DAC, WRITE_OWNER};
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 use super::acl_bytes::{
-    AceSpec, Acl, DACL_AUTO_INHERITED, DACL_PROTECTED, Descriptor, SACL_AUTO_INHERITED,
-    SACL_PROTECTED, build_descriptor, empty_acl, explicit_label, label_spec, owner_sid, sid_bytes,
+    AceSpec, Acl, DACL_AUTO_INHERITED, DACL_PROTECTED, Descriptor, Listed, SACL_AUTO_INHERITED,
+    SACL_PROTECTED, build_descriptor, empty_acl, explicit_label, label_spec, owner_sid, read_flags,
+    sid_bytes,
 };
 use super::acl_plan::{Grant, Inherit, Sid, in_folder};
 use super::admit::PathKind;
@@ -166,12 +167,14 @@ impl AclWriter for NtfsAcl {
         } else {
             sid_bytes(&current_user_sid().map_err(|e| ApplyFailure::Io(e.kind()))?)
         };
-        // R18: each read of another matter the ledger lists, its path as final paths are written.
+        // R18: each read of another matter the ledger lists, its path as final paths are written,
+        // with the flags its allow is written with; a shape no read takes excuses nothing.
         let reads = strict
             .excused
             .iter()
-            .map(|(path, sid)| Ok((final_form(path)?, sid_bytes(sid))))
-            .collect::<io::Result<Vec<(PathBuf, Vec<u8>)>>>()
+            .filter_map(|(path, sid, inherit)| Some((path, sid, read_flags(*inherit)?)))
+            .map(|(path, sid, flags)| Ok((final_form(path)?, sid_bytes(sid), flags)))
+            .collect::<io::Result<Vec<(PathBuf, Vec<u8>, u8)>>>()
             .map_err(|e| ApplyFailure::Io(e.kind()))?;
         let mode = Mode::Strict {
             watched: &watched,
@@ -525,17 +528,22 @@ fn final_form(planned: &Path) -> io::Result<PathBuf> {
     Ok(PathBuf::from(OsString::from_wide(&wide)))
 }
 
-/// The SIDs `reads` (final-form paths, SIDs as bytes) lists a read of another matter for on
-/// `target`: the strict walk excuses exactly those allows there (R18).
-fn reads_on<'r>(target: &Object, reads: &'r [(PathBuf, Vec<u8>)]) -> io::Result<Vec<&'r [u8]>> {
+/// The SIDs `reads` (final-form paths, SIDs as bytes, flags) lists a read of another matter for
+/// on `target`, each with its flags: the strict walk excuses exactly those allows there (R18).
+fn reads_on<'r>(
+    target: &Object,
+    reads: &'r [(PathBuf, Vec<u8>, u8)],
+) -> io::Result<Vec<Listed<'r>>> {
     if reads.is_empty() {
         return Ok(Vec::new());
     }
     let at = PathBuf::from(OsString::from_wide(&target.normalized()?));
     let here = reads
         .iter()
-        .filter(|(p, _)| in_folder(&at, p) && in_folder(p, &at));
-    Ok(here.map(|(_, sid)| sid.as_slice()).collect())
+        .filter(|(p, ..)| in_folder(&at, p) && in_folder(p, &at));
+    Ok(here
+        .map(|(_, sid, flags)| (sid.as_slice(), *flags))
+        .collect())
 }
 
 /// The DACL control bits a write on a target keeps: its protection, and the auto-inherited mark

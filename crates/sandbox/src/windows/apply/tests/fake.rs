@@ -155,23 +155,23 @@ impl FakeAcl {
 
     /// A shut child below `root`, taken off the list, as the walk reports it.
     /// The first path below `root` holding an explicit allow for one of `strict`'s watched SIDs
-    /// that isn't a read of another matter it excuses there.
+    /// that isn't a read of another matter it excuses there, in the shape it is listed in.
     fn broad_below(&self, root: &Path, strict: &Strict) -> Option<PathBuf> {
         let watched = |sid: &str| strict.watched.iter().any(|w| w.as_str() == sid);
-        let excused = |p: &Path, sid: &str, rights: Rights| {
+        let excused = |p: &Path, sid: &str, rights: Rights, inherit: Inherit| {
             rights == Rights::ReadAndExecute
                 && strict
                     .excused
                     .iter()
-                    .any(|(e, s)| e == p && s.as_str() == sid)
+                    .any(|(e, s, i)| e == p && s.as_str() == sid && *i == inherit)
         };
         let mut aces = self.aces.iter();
-        aces.find(|(p, sid, rights, _)| {
+        aces.find(|(p, sid, rights, inherit)| {
             p != root
                 && p.starts_with(root)
                 && rights.is_allow()
                 && watched(sid)
-                && !excused(p, sid, *rights)
+                && !excused(p, sid, *rights, *inherit)
         })
         .map(|(p, ..)| p.clone())
     }

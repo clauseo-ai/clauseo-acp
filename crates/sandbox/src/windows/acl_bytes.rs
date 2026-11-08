@@ -20,7 +20,7 @@ use super::acl_plan::{Grant, Inherit};
 use super::sids::Sid;
 use super::writer::Label;
 #[cfg(windows)]
-pub(crate) use excused::{broad_allow_but, without_broad_but};
+pub(crate) use excused::{Listed, broad_allow_but, read_flags, without_broad_but};
 pub(crate) use repair::{bare_child, owner_descriptor, rebuild, without_inherited};
 #[cfg(test)]
 pub(crate) use steps::bare;

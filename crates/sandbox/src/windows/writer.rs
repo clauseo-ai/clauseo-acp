@@ -76,9 +76,9 @@ pub struct Strict {
     /// outside a matter's tree (a sibling, the parent's files, the shared folders).
     pub assigned: Vec<Sid>,
     /// The reads of other matters the ledger lists (R18), each path with the SID its allow
-    /// names: that exact allow, on that path, isn't one that beats an inherited deny
-    /// (`acl_bytes/excused.rs`).
-    pub excused: Vec<(std::path::PathBuf, Sid)>,
+    /// names and how far it reaches: that exact allow, on that path, isn't one that beats an
+    /// inherited deny (`acl_bytes/excused.rs`).
+    pub excused: Vec<(std::path::PathBuf, Sid, crate::windows::acl_plan::Inherit)>,
 }
 
 impl Walked {

@@ -403,3 +403,33 @@ fn a_strict_walk_of_the_other_matter_passes_its_listed_reads_and_refuses_any_oth
         "{error:?}"
     );
 }
+
+#[test]
+fn a_strict_walk_refuses_an_inheriting_allow_where_the_ledger_lists_a_read_of_the_folder_alone() {
+    let w = World::new("reads-strict-shape");
+    w.other_tree();
+    let (mut ledger, mut acl) = (ledger(&w), volume(&w));
+    // The read of the whole folder plans `sub` (it holds a refused name) for the folder alone;
+    // the same allow made to reach the tree, there before, would open `sub\.git`.
+    let sub = w.canonical("other/m2/sub");
+    let sid = USER_SID.to_owned();
+    acl.aces
+        .insert((sub.clone(), sid, Rights::ReadAndExecute, Inherit::Tree));
+    let policy = w.reading(&[("other/m2", false)]);
+    let ok = |_: &Path| Ok(FolderSupport::Ok);
+    let (data, others) = (w.at("data"), w.neighbour_m2());
+    let admitted = admit_with(&policy, &data, &others, ok, &FakeFolders::default()).unwrap();
+    let mut plan = plan(&admitted, &sids(), matter_one()).unwrap();
+    let alone = plan.grants().iter().any(|g| {
+        g.kind() == PathKind::OtherMatterRead && g.path() == sub && g.inherit() == Inherit::ThisOnly
+    });
+    assert!(alone);
+    // Matter two's new fence walks its tree strictly with that read listed on `sub` for that
+    // SID, the folder alone: the inheriting allow isn't it, and refuses.
+    let error = apply(&mut ledger, &mut plan, &mut acl, &mut around(&w)).unwrap_err();
+    let failure = ApplyFailure::BroadAllowChild;
+    assert!(
+        matches!(error, Error::AclApply { failure: f, .. } if f == failure),
+        "{error:?}"
+    );
+}
