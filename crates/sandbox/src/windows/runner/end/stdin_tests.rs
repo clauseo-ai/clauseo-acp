@@ -36,30 +36,23 @@ struct Steps {
     unblock: Mutex<Option<mpsc::Sender<()>>>,
 }
 
-impl SweeperSteps for Steps {
-    type Sweeper = ();
+impl EndSteps for Steps {
+    type Run = ();
     fn empty_job(&self) -> Result<(), String> {
         note(&self.events, self.origin, "job ended");
         drop(self.unblock.lock().unwrap().take());
         Ok(())
     }
-    fn log_on(&self) -> Result<(), String> {
+    fn request_sweep(&self) -> Result<(), String> {
         Ok(())
     }
-    fn shut(&self, (): &()) -> Result<(), String> {
-        Ok(())
+    fn sweep_result(&self, (): &()) -> Result<Option<u32>, String> {
+        Ok(Some(0))
     }
-    fn resume(&self, (): &()) -> Result<(), String> {
-        Ok(())
-    }
-    fn kill(&self, (): &()) {}
-    fn keep(&self, (): ()) {}
+    fn pause(&self, _: Duration) {}
     fn log(&self, _: &str) {}
     fn now(&self) -> Duration {
         clock().saturating_duration_since(self.origin)
-    }
-    fn wait(&self) -> Swept {
-        Swept::Unclean
     }
 }
 
@@ -121,7 +114,7 @@ fn the_deadline_starts_at_the_hosts_stdin_end_while_the_write_to_the_agent_is_bl
     let origin = clock();
     let events = Events::default();
     let (unblock, unblocked) = mpsc::channel();
-    let end = EndSweep::new(Steps {
+    let end = SessionEnd::new(Steps {
         origin,
         events: Arc::clone(&events),
         unblock: Mutex::new(Some(unblock)),

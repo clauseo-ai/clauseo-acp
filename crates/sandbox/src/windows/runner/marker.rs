@@ -2,11 +2,13 @@
 //! file's 16 hex. The outer writes it as soon as it has read the launch, before anything runs as
 //! the pool user ([`marked`]: a marker that can't be written refuses the launch), and removes it
 //! only at a clean end: the inner exited (no failure, and no cancel whose agent outlived its
-//! grace), reported the agent's exit, the end sweeper exited 0, and no sweep found an escapee
-//! (`end::EndSweep::clean`). A crash, a cancel whose agent outlived its
-//! grace, a failure or an escapee leaves it, and
-//! [`unclean_sessions`] lists what was left, so Clauseo can make sure no process of that pool
-//! user lives on (0049; the `\Clauseo\SandboxStop` task, B's PR 3, is its caller).
+//! grace), reported the agent's exit, the job emptied, the `SYSTEM` sweep task's run requested at
+//! the end returned 0 within the outer's wait, and no sweep found an escapee
+//! (`end::SessionEnd::clean`). A crash, a cancel whose agent outlived its grace, a failure, a job
+//! that didn't empty, a sweep task that couldn't read or delete a pool user's task (non-zero), or
+//! an escapee leaves it, and [`unclean_sessions`] lists what was left, so Clauseo can make sure no
+//! process of that pool user lives on (0049; the `\Clauseo\SandboxStop` task, B's PR 3, is its
+//! caller).
 //!
 //! It lives in the run folder, which only the desktop user, `SYSTEM` and `Administrators` may
 //! open (`write::make_sandbox_dir`): the pool user can neither write nor remove it, and gets no
