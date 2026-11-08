@@ -162,12 +162,15 @@ crates/store/benches/reopen.rs - clippy::unwrap_used
 crates/store/benches/commit.rs - clippy::unwrap_used
 
 # The pool users' Git trees (0049, "The Git tree"): the FFI of their handle-relative walks,
-# folder security, hard links, copies, registry record and process list, and the read of
-# git.exe's FILEVERSION.
+# folder security, hard links, copies, plain deletes, registry record and process list, and
+# the read of git.exe's FILEVERSION.
 crates/sandbox/src/windows/git_tree/os.rs - unsafe_code
+crates/sandbox/src/windows/git_tree/os/delete.rs - unsafe_code
 crates/sandbox/src/windows/git_tree/os/files.rs - unsafe_code
 crates/sandbox/src/windows/git_tree/os/files.rs read_capped clippy::disallowed_methods
 crates/sandbox/src/windows/git_tree/os/level.rs - unsafe_code
+crates/sandbox/src/windows/git_tree/os/nt.rs - unsafe_code
+crates/sandbox/src/windows/git_tree/os/put.rs - unsafe_code
 
 # The setup exe's VERSIONINFO .rc, written into OUT_DIR by the build script.
 crates/sandbox/build.rs write_out clippy::disallowed_methods

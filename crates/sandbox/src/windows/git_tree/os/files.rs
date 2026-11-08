@@ -1,13 +1,15 @@
-//! The Git trees' files and folders on NTFS. Every path is opened as itself
-//! (`FILE_FLAG_OPEN_REPARSE_POINT`), a walk's and a chain's folders each relative to the one
-//! above (`acl::object::Object`, `OBJ_DONT_REPARSE`), and every per-file call goes through the
-//! `\\?\` form, so a deep path in a tree of ten thousand files is never cut at `MAX_PATH`.
+//! The Git trees' files and folders on NTFS, read: every path opened as itself
+//! (`FILE_FLAG_OPEN_REPARSE_POINT`), a chain's folders and an inspected path each relative to
+//! the one above (`acl::object::Object`, `OBJ_DONT_REPARSE`), and every call by path through
+//! the `\\?\` form, so a deep path is never cut at `MAX_PATH`. The walk is in `walk.rs`, what
+//! is made in `put.rs`, what is deleted in `delete.rs`.
 #![expect(
     unsafe_code,
     reason = "FFI to CreateFileW, GetFileInformationByHandleEx and the per-file calls"
 )]
 
 use std::ffi::OsString;
+use std::fmt::Display;
 use std::fs::File;
 use std::io::{self, Read as _};
 use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
@@ -15,23 +17,30 @@ use std::path::{Component, Path, PathBuf};
 
 use windows::Win32::Security::{DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION};
 use windows::Win32::Storage::FileSystem::{
-    COPY_FILE_FAIL_IF_EXISTS, CopyFileExW, CreateDirectoryW, CreateFileW, CreateHardLinkW,
-    FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO,
+    CreateFileW, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO,
     FILE_BASIC_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_ID_INFO,
     FILE_INFO_BY_HANDLE_CLASS, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ,
     FILE_SHARE_WRITE, FILE_STANDARD_INFO, FileAttributeTagInfo, FileBasicInfo, FileIdInfo,
     FileStandardInfo, GetFileInformationByHandleEx, MOVEFILE_WRITE_THROUGH, MoveFileExW,
-    OPEN_EXISTING,
+    OPEN_EXISTING, READ_CONTROL,
 };
 use windows::core::PCWSTR;
 
-use super::super::{Entry, FileId, Refused};
+use super::super::{FileId, Inspected, MARKER, Owner, Refused};
 use crate::windows::FolderSupport;
 use crate::windows::acl::object::{Handle, Object, os_error, reparse_refused};
-use crate::windows::admin_copy::take_back::remove_taking_back;
-use crate::windows::admin_copy::take_back_os::NtfsLockDown;
+use crate::windows::acl::privilege::Privileges;
+use crate::windows::acl_bytes::owner_sid;
 use crate::windows::admin_copy::{Found, level_safe, os as admin_os, root_safe};
 use crate::windows::folder::{folder_support, verbatim_wide};
+use crate::windows::sids::Sid;
+
+/// `LocalSystem`'s SID: [`Owner::System`].
+const SYSTEM: &str = "S-1-5-18";
+/// Administrators' SID: [`Owner::Administrators`].
+const ADMINISTRATORS: &str = "S-1-5-32-544";
+/// The most of a marker [`read_marker`] reads: a tree id and a SID.
+const MARKER_CAP: usize = 4096;
 
 /// Whether `path` is a network path (`folder::folder_support`'s first and third steps): UNC,
 /// on a remote drive, or a folder whose final path is UNC. A file is asked of its folder.
@@ -73,6 +82,7 @@ pub(super) fn admin_only(dir: &Path) -> Result<bool, String> {
         Ok(()) => Ok(safe),
         Err(Refused::Reparse) => Ok(false),
         Err(Refused::Other(why)) => Err(why),
+        Err(Refused::Changed) => Err(format!("{} changed while it was read", dir.display())),
     }
 }
 
@@ -144,69 +154,75 @@ pub(super) fn file_id(path: &Path) -> Result<Option<FileId>, Refused> {
     }))
 }
 
-/// The serial number of the volume holding `path` (`FileIdInfo` of `path` itself).
-pub(super) fn volume(path: &Path) -> Result<u64, String> {
-    let read = open_itself(path).and_then(|handle| info::<FILE_ID_INFO>(&handle, FileIdInfo));
-    read.map(|id| id.VolumeSerialNumber)
-        .map_err(|error| format!("reading {}'s volume: {error}", path.display()))
-}
-
-/// Every folder and file below `root`, each folder before what it holds, listed through
-/// handles each opened relative to its folder; a reparse point anywhere refuses.
-pub(super) fn walk(root: &Path) -> Result<Vec<Entry>, Refused> {
-    let folder = open_plain_folder(root)?;
-    let mut out = Vec::new();
-    walk_in(root, &folder, Path::new(""), &mut out)?;
-    Ok(out)
-}
-
-/// [`walk`] below the open folder `folder`, whose path from the root is `rel`.
-fn walk_in(root: &Path, folder: &Object, rel: &Path, out: &mut Vec<Entry>) -> Result<(), Refused> {
-    let children = folder.children().map_err(|error| refused(root, &error))?;
-    for child in children {
-        if child.reparse {
-            return Err(Refused::Reparse);
-        }
-        let path = rel.join(OsString::from_wide(&child.name));
-        if !child.folder {
-            // Opened as itself for its attributes alone: its 128-bit file ID, the same under every
-            // name it has, inside the install or in a tree.
-            let file = folder
-                .open_child_for(&child.name, 0)
-                .map_err(|error| refused(root, &error))?;
-            if file.reparse() {
-                return Err(Refused::Reparse);
-            }
-            if file.folder {
-                return Err(other(root, "changed while it was listed"));
-            }
-            let (_volume, id) = file
-                .file_id()
-                .map_err(|error| other(root, &format!("reading a file's ID: {error}")))?;
-            out.push(Entry {
-                rel: path,
-                folder: false,
-                id: u128::from_le_bytes(id),
-            });
-            continue;
-        }
-        out.push(Entry {
-            rel: path.clone(),
-            folder: true,
-            id: 0,
-        });
-        let below = folder
-            .open_child(&child.name, true)
-            .map_err(|error| refused(root, &error))?;
-        if below.reparse() {
-            return Err(Refused::Reparse);
-        }
-        if !below.folder {
-            return Err(other(root, "changed while it was listed"));
-        }
-        walk_in(root, &below, &path, out)?;
+/// What is at `path`, opened as itself relative to its parent's handle (`OBJ_DONT_REPARSE`,
+/// `FILE_OPEN_REPARSE_POINT`) for its owner, DACL and attributes; `None` when nothing is there,
+/// or nothing is at its parent. A parent that is a reparse point or a file fails.
+pub(super) fn inspect(path: &Path) -> Result<Option<Inspected>, String> {
+    let fail = |why: &dyn Display| format!("reading {}: {why}", path.display());
+    let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+        return Err(fail(&"it has no parent"));
+    };
+    // Backup intent with the privilege opens what a DACL shuts Administrators out of; without
+    // it, such a one fails to open, which fails the call.
+    let _backup = Privileges::enable(&["SeBackupPrivilege"]).ok();
+    let above = match Object::open_folder(parent) {
+        Ok(above) => above,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(fail(&error)),
+    };
+    if above.reparse() || !above.folder {
+        return Err(fail(&"its parent isn't a plain folder"));
     }
-    Ok(())
+    let wide: Vec<u16> = name.encode_wide().collect();
+    let object = match above.open_child_for(&wide, READ_CONTROL.0) {
+        Ok(object) => object,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(fail(&error)),
+    };
+    let bytes = object
+        .security((OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION).0)
+        .map_err(|error| fail(&error))?;
+    let basic: FILE_BASIC_INFO =
+        info(object.handle(), FileBasicInfo).map_err(|error| fail(&error))?;
+    let kind = if object.reparse() {
+        Found::Link
+    } else if object.folder {
+        Found::Folder
+    } else {
+        Found::File
+    };
+    let owner = match owner_sid(&bytes).as_ref().map(Sid::as_str) {
+        Some(SYSTEM) => Owner::System,
+        Some(ADMINISTRATORS) => Owner::Administrators,
+        _ => Owner::Other,
+    };
+    Ok(Some(Inspected {
+        kind,
+        owner,
+        admin_only: level_safe(&bytes),
+        created: u64::try_from(basic.CreationTime).unwrap_or(0),
+    }))
+}
+
+/// The text of [`MARKER`] in the folder `dir`, read through a handle opened relative to
+/// `dir`'s (`Object::read_child`: a plain file with one name, at most [`MARKER_CAP`] bytes);
+/// `None` when it, or `dir`, is missing.
+pub(super) fn read_marker(dir: &Path) -> Result<Option<String>, String> {
+    let fail = |why: &dyn Display| format!("reading {}'s marker: {why}", dir.display());
+    let _backup = Privileges::enable(&["SeBackupPrivilege"]).ok();
+    let folder = match Object::open_folder(dir) {
+        Ok(folder) => folder,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(fail(&error)),
+    };
+    if folder.reparse() || !folder.folder {
+        return Err(fail(&"it isn't a plain folder"));
+    }
+    let name: Vec<u16> = MARKER.encode_utf16().collect();
+    let bytes = folder
+        .read_child(&name, MARKER_CAP)
+        .map_err(|error| fail(&error))?;
+    Ok(bytes.map(|bytes| String::from_utf8_lossy(&bytes).into_owned()))
 }
 
 /// The names in the folder `dir`, listed through its own handle; none when it is missing. A
@@ -233,43 +249,8 @@ pub(super) fn entries(dir: &Path) -> Result<Vec<String>, String> {
         .collect())
 }
 
-/// Makes the folder `path` with no descriptor of its own, so it inherits its parent's DACL.
-pub(super) fn make_dir(path: &Path) -> Result<(), String> {
-    let wide = wide(path)?;
-    // SAFETY: `wide` is NUL-terminated and outlives the call; no security attributes.
-    unsafe { CreateDirectoryW(PCWSTR(wide.as_ptr()), None) }
-        .map_err(|error| format!("making {}: {}", path.display(), os_error(&error)))
-}
-
-/// Makes `link` a new name of the file `existing`.
-pub(super) fn hard_link(existing: &Path, link: &Path) -> Result<(), String> {
-    let (from, to) = (wide(existing)?, wide(link)?);
-    // SAFETY: both strings are NUL-terminated and outlive the call; no security attributes
-    // (a hard link has its file's).
-    unsafe { CreateHardLinkW(PCWSTR(to.as_ptr()), PCWSTR(from.as_ptr()), None) }
-        .map_err(|error| format!("linking {}: {}", link.display(), os_error(&error)))
-}
-
-/// Copies the file `from` to the new file `to`, refused when `to` is there. `CopyFileExW`
-/// copies the data, the streams and the attributes, not the DACL: `to` inherits its folder's.
-pub(super) fn copy_file(from: &Path, to: &Path) -> Result<(), String> {
-    let (source, target) = (wide(from)?, wide(to)?);
-    // SAFETY: both strings are NUL-terminated and outlive the call; no progress routine, data
-    // or cancel flag.
-    unsafe {
-        CopyFileExW(
-            PCWSTR(source.as_ptr()),
-            PCWSTR(target.as_ptr()),
-            None,
-            None,
-            None,
-            COPY_FILE_FAIL_IF_EXISTS,
-        )
-    }
-    .map_err(|error| format!("copying to {}: {}", to.display(), os_error(&error)))
-}
-
-/// Renames the folder `from` to `to`, which must not exist, written through before it returns.
+/// Renames the folder or file `from` to `to`, which must not exist, written through before it
+/// returns.
 pub(super) fn rename(from: &Path, to: &Path) -> Result<(), String> {
     let (source, target) = (wide(from)?, wide(to)?);
     // SAFETY: both strings are NUL-terminated and outlive the call. Without
@@ -282,13 +263,6 @@ pub(super) fn rename(from: &Path, to: &Path) -> Result<(), String> {
         )
     }
     .map_err(|error| format!("renaming {}: {}", from.display(), os_error(&error)))
-}
-
-/// Deletes `path` and all below it, a link as itself and never through one, taking back what
-/// shuts Administrators out (`admin_copy::take_back`); missing is `Ok`.
-pub(super) fn remove_tree(path: &Path) -> Result<(), String> {
-    remove_taking_back(&mut NtfsLockDown, path)
-        .map_err(|error| format!("deleting {}: {error}", path.display()))
 }
 
 /// The whole of the regular file `path`, opened as itself, refused over `cap` bytes.
@@ -320,7 +294,7 @@ pub(super) fn read_capped(path: &Path, cap: u64) -> Result<Vec<u8>, String> {
 }
 
 /// `root` opened as itself to list, refused unless a plain folder.
-fn open_plain_folder(root: &Path) -> Result<Object, Refused> {
+pub(super) fn open_plain_folder(root: &Path) -> Result<Object, Refused> {
     let folder = Object::open_folder(root).map_err(|error| refused(root, &error))?;
     if folder.reparse() {
         return Err(Refused::Reparse);
@@ -368,7 +342,7 @@ fn wide(path: &Path) -> Result<Vec<u16>, String> {
 }
 
 /// A failed open on the way to or below `path`: a reparse point met is [`Refused::Reparse`].
-fn refused(path: &Path, error: &io::Error) -> Refused {
+pub(super) fn refused(path: &Path, error: &io::Error) -> Refused {
     if reparse_refused(error) {
         Refused::Reparse
     } else {
@@ -377,6 +351,6 @@ fn refused(path: &Path, error: &io::Error) -> Refused {
 }
 
 /// [`Refused::Other`], naming `path`.
-fn other(path: &Path, why: &str) -> Refused {
+pub(super) fn other(path: &Path, why: &str) -> Refused {
     Refused::Other(format!("{}: {why}", path.display()))
 }

@@ -1,24 +1,30 @@
 //! [`TreeFs`] on Windows: the Git trees' effects, as SYSTEM or an elevated administrator.
-//! The files and folders are in `os/files.rs` (every one opened as itself, a folder of a
-//! tree's own chain relative to its parent's handle) and `os/level.rs` (a tree's folders made
-//! and given their owner and DACL); the record, the processes and the Event Log are here.
+//! The files and folders are in `os/`, every one opened as itself and, below a known folder,
+//! relative to its parent's handle: `files.rs` reads, `walk.rs` walks, `put.rs` copies, links
+//! and writes the marker, `delete.rs` deletes, `level.rs` gives a tree's folders their owner
+//! and DACL, and `nt.rs` holds the NT calls they share. The record, the processes and the
+//! Event Log are here.
 #![expect(
     unsafe_code,
     reason = "FFI to the registry calls that read the profiles folder and write the record"
 )]
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, WIN32_ERROR};
+use windows::Win32::Foundation::{
+    ERROR_FILE_NOT_FOUND, ERROR_NO_MORE_ITEMS, ERROR_PATH_NOT_FOUND, WIN32_ERROR,
+};
 use windows::Win32::System::Registry::{
     HKEY, HKEY_LOCAL_MACHINE, KEY_CREATE_SUB_KEY, KEY_ENUMERATE_SUB_KEYS, KEY_QUERY_VALUE,
     KEY_SET_VALUE, KEY_WOW64_64KEY, REG_OPTION_NON_VOLATILE, REG_SAM_FLAGS, REG_SZ, RRF_RT_REG_SZ,
-    RRF_SUBKEY_WOW6464KEY, RegCloseKey, RegCreateKeyExW, RegDeleteTreeW, RegGetValueW,
-    RegOpenKeyExW, RegSetValueExW,
+    RRF_SUBKEY_WOW6464KEY, RegCloseKey, RegCreateKeyExW, RegDeleteTreeW, RegDeleteValueW,
+    RegEnumValueW, RegGetValueW, RegOpenKeyExW, RegSetValueExW,
 };
-use windows::core::{HSTRING, PCWSTR, w};
+use windows::Win32::System::SystemInformation::GetSystemTimePreciseAsFileTime;
+use windows::core::{HSTRING, PCWSTR, PWSTR, w};
 
-use super::{Account, Entry, FileId, Recorded, Refused, TreeFs, build};
+use super::{Account, Entry, FileId, Inspected, Recorded, Refused, TreeFs, build, retire};
 use crate::windows::acl::privilege::Privileges;
 use crate::windows::admin_copy::{Found, os as admin_os};
 use crate::windows::record;
@@ -26,8 +32,12 @@ use crate::windows::refresh::{event_log, pe_version};
 use crate::windows::setup::preflight::account_name;
 use crate::windows::sids::Sid;
 
+mod delete;
 mod files;
 mod level;
+mod nt;
+mod put;
+mod walk;
 
 /// The record key under `HKLM`, as `setup/record_write.rs` names it.
 const RECORD_KEY: &str = r"SOFTWARE\Clauseo\Sandbox";
@@ -37,6 +47,10 @@ const PROFILE_LIST: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Profil
 const KEY_DELETE: REG_SAM_FLAGS = REG_SAM_FLAGS(0x0001_0000);
 /// The most of an exe [`TreeFs::file_version`] reads.
 const VERSION_CAP: u64 = 128 * 1024 * 1024;
+/// How many names [`TreeFs::unique`] made without randomness, which keeps each its own.
+static UNIQUE_CALLS: AtomicU64 = AtomicU64::new(0);
+/// The longest registry value name, in UTF-16 units, and its NUL.
+const VALUE_NAME_MAX: usize = 16_384;
 
 /// The machine's Git trees.
 pub struct WindowsTrees;
@@ -88,9 +102,21 @@ pub fn ensure_from_record() {
     ensure_for(&accounts, &group);
 }
 
-/// Deletes every tree and the record ([`build::remove`]), on this machine.
+/// Deletes every tree and the record ([`retire::remove`]), on this machine.
 pub fn remove_all() -> Result<(), String> {
-    build::remove(&mut WindowsTrees)
+    retire::remove(&mut WindowsTrees)
+}
+
+/// Checks the trees' folder `git` an adopted install brings ([`retire::check_adopted`]), on
+/// this machine.
+pub fn check_adopted_here(git: &Path) {
+    retire::check_adopted(&mut WindowsTrees, git);
+}
+
+/// Deletes the trees' folder `git` by a plain delete ([`retire::remove_folder`]), on this
+/// machine: the uninstaller's clear of the admin folder, which never takes `git\` back.
+pub fn remove_folder_here(git: &Path) {
+    retire::remove_folder(&mut WindowsTrees, git);
 }
 
 impl TreeFs for WindowsTrees {
@@ -135,16 +161,16 @@ impl TreeFs for WindowsTrees {
         Ok(pe_version::file_version(&image).map(pe_version::dotted))
     }
 
-    fn volume(&mut self, path: &Path) -> Result<u64, String> {
-        files::volume(path)
-    }
-
     fn walk(&mut self, root: &Path) -> Result<Vec<Entry>, Refused> {
-        files::walk(root)
+        walk::walk(root)
     }
 
     fn found(&mut self, path: &Path) -> Result<Found, String> {
         admin_os::found(path).map_err(|error| format!("reading {}: {error}", path.display()))
+    }
+
+    fn inspect(&mut self, path: &Path) -> Result<Option<Inspected>, String> {
+        files::inspect(path)
     }
 
     fn level(&mut self, path: &Path, sddl: &str) -> Result<(), Refused> {
@@ -155,16 +181,20 @@ impl TreeFs for WindowsTrees {
         files::entries(dir)
     }
 
-    fn make_dir(&mut self, path: &Path) -> Result<(), String> {
-        files::make_dir(path)
+    fn copy_tree(&mut self, from: &Path, entries: &[Entry], to: &Path) -> Result<(), Refused> {
+        put::copy_tree(from, entries, to)
     }
 
-    fn hard_link(&mut self, existing: &Path, link: &Path) -> Result<(), String> {
-        files::hard_link(existing, link)
+    fn link_tree(&mut self, from: &Path, entries: &[Entry], to: &Path) -> Result<(), Refused> {
+        put::link_tree(from, entries, to)
     }
 
-    fn copy_file(&mut self, from: &Path, to: &Path) -> Result<(), String> {
-        files::copy_file(from, to)
+    fn read_marker(&mut self, dir: &Path) -> Result<Option<String>, String> {
+        files::read_marker(dir)
+    }
+
+    fn write_marker(&mut self, dir: &Path, text: &str, sddl: &str) -> Result<(), String> {
+        put::write_marker(dir, text, sddl)
     }
 
     fn rename(&mut self, from: &Path, to: &Path) -> Result<(), String> {
@@ -172,7 +202,26 @@ impl TreeFs for WindowsTrees {
     }
 
     fn remove_tree(&mut self, path: &Path) -> Result<(), String> {
-        files::remove_tree(path)
+        delete::remove_tree(path)
+    }
+
+    fn delete_at_reboot(&mut self, path: &Path) -> Result<(), String> {
+        delete::delete_at_reboot(path)
+    }
+
+    fn unique(&mut self) -> String {
+        let mut bytes = [0_u8; 8];
+        if getrandom::fill(&mut bytes).is_ok() {
+            return crate::windows::refresh::hex(&bytes);
+        }
+        // No randomness: the time, the process ID and a count still make a name no other
+        // call made.
+        // SAFETY: the call takes nothing and returns the time by value.
+        let time = unsafe { GetSystemTimePreciseAsFileTime() };
+        let time = (u64::from(time.dwHighDateTime) << 32) | u64::from(time.dwLowDateTime);
+        let pid = u64::from(std::process::id()).rotate_left(40);
+        let count = UNIQUE_CALLS.fetch_add(1, Ordering::Relaxed);
+        format!("{:016x}", time ^ pid ^ count.rotate_left(20))
     }
 
     fn active(&mut self, account: &Sid) -> Result<bool, String> {
@@ -189,18 +238,17 @@ impl TreeFs for WindowsTrees {
             .any(|process| process.user.as_ref() == Some(account)))
     }
 
-    fn write_record(&mut self, values: &[(Sid, String)]) -> Result<(), String> {
+    fn set_record_value(&mut self, account: &Sid, text: &str) -> Result<(), String> {
         let Some(record) = open_record_key()? else {
             return Err(
                 "the record's key is missing, so the Git trees weren't recorded".to_owned(),
             );
         };
-        delete_subkey(&record)?;
         let subkey = HSTRING::from(super::RECORD_SUBKEY);
         let mut made = HKEY::default();
         // SAFETY: the record key is open with KEY_CREATE_SUB_KEY; the subkey name is
-        // NUL-terminated; no security attributes are passed, so the subkey inherits the record
-        // key's DACL; `made` is a live out-pointer, closed by `Key`.
+        // NUL-terminated; no security attributes are passed, so a subkey made here inherits the
+        // record key's DACL; `made` is a live out-pointer, closed by `Key`.
         let created = unsafe {
             RegCreateKeyExW(
                 record.0,
@@ -216,19 +264,63 @@ impl TreeFs for WindowsTrees {
         };
         check("RegCreateKeyExW", created)?;
         let made = Key(made);
-        for (sid, text) in values {
-            let data: Vec<u8> = text
-                .encode_utf16()
-                .chain([0])
-                .flat_map(u16::to_le_bytes)
-                .collect();
-            let name = HSTRING::from(sid.as_str());
-            // SAFETY: the key is open with KEY_SET_VALUE; the name is NUL-terminated and `data`
-            // is a live slice holding the NUL-terminated UTF-16 text.
-            let set = unsafe { RegSetValueExW(made.0, &name, None, REG_SZ, Some(&data)) };
-            check("RegSetValueExW", set)?;
+        let data: Vec<u8> = text
+            .encode_utf16()
+            .chain([0])
+            .flat_map(u16::to_le_bytes)
+            .collect();
+        let name = HSTRING::from(account.as_str());
+        // SAFETY: the key is open with KEY_SET_VALUE; the name is NUL-terminated and `data` is
+        // a live slice holding the NUL-terminated UTF-16 text. One call replaces the value.
+        let set = unsafe { RegSetValueExW(made.0, &name, None, REG_SZ, Some(&data)) };
+        check("RegSetValueExW", set)
+    }
+
+    fn record_names(&mut self) -> Result<Vec<String>, String> {
+        let Some(subkey) = open_subkey(KEY_QUERY_VALUE)? else {
+            return Ok(Vec::new());
+        };
+        let mut names = Vec::new();
+        let mut buffer = vec![0_u16; VALUE_NAME_MAX];
+        for index in 0.. {
+            let mut length = u32::try_from(buffer.len()).unwrap_or(u32::MAX);
+            // SAFETY: the key is open with KEY_QUERY_VALUE; `buffer` is writable for `length`
+            // UTF-16 units and `length` a live in-out pointer; no type or data is asked for.
+            let read = unsafe {
+                RegEnumValueW(
+                    subkey.0,
+                    index,
+                    Some(PWSTR(buffer.as_mut_ptr())),
+                    &raw mut length,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+            };
+            if read == ERROR_NO_MORE_ITEMS {
+                break;
+            }
+            check("RegEnumValueW", read)?;
+            let length = usize::try_from(length).unwrap_or(0);
+            names.push(String::from_utf16_lossy(
+                buffer.get(..length).unwrap_or_default(),
+            ));
         }
-        Ok(())
+        Ok(names)
+    }
+
+    fn delete_record_value(&mut self, name: &str) -> Result<(), String> {
+        let Some(subkey) = open_subkey(KEY_SET_VALUE)? else {
+            return Ok(());
+        };
+        let name = HSTRING::from(name);
+        // SAFETY: the key is open with KEY_SET_VALUE; the name is NUL-terminated.
+        let deleted = unsafe { RegDeleteValueW(subkey.0, &name) };
+        if missing(deleted) {
+            return Ok(());
+        }
+        check("RegDeleteValueW", deleted)
     }
 
     fn delete_record(&mut self) -> Result<(), String> {
@@ -267,6 +359,28 @@ fn open_record_key() -> Result<Option<Key>, String> {
         | KEY_WOW64_64KEY;
     // SAFETY: the subkey is NUL-terminated; `opened` is a live out-pointer, closed by `Key`.
     let open = unsafe { RegOpenKeyExW(HKEY_LOCAL_MACHINE, &subkey, None, access, &raw mut opened) };
+    if missing(open) {
+        return Ok(None);
+    }
+    check("RegOpenKeyExW", open)?;
+    Ok(Some(Key(opened)))
+}
+
+/// The record's subkey (`HKLM\SOFTWARE\Clauseo\Sandbox\GitTrees`, 64-bit view) opened for
+/// `access`; `None` when it, or the record key, is missing. It is never made here.
+fn open_subkey(access: REG_SAM_FLAGS) -> Result<Option<Key>, String> {
+    let subkey = HSTRING::from(format!(r"{RECORD_KEY}\{}", super::RECORD_SUBKEY));
+    let mut opened = HKEY::default();
+    // SAFETY: the subkey is NUL-terminated; `opened` is a live out-pointer, closed by `Key`.
+    let open = unsafe {
+        RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            &subkey,
+            None,
+            access | KEY_WOW64_64KEY,
+            &raw mut opened,
+        )
+    };
     if missing(open) {
         return Ok(None);
     }

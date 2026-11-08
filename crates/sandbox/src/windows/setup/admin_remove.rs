@@ -127,7 +127,10 @@ pub(super) struct Restart<'a> {
 /// at restart; if the rename fails, nothing is scheduled and the rename's error is returned,
 /// `exe` left in place (never scheduled under its own name). A link inside is
 /// deleted as itself, never followed; an entry that shuts Administrators out is taken back
-/// first (`admin_copy::take_back`).
+/// first (`admin_copy::take_back`). `git\`, the Git trees, is never taken back: its files are
+/// hard links whose security a take-back's propagating DACL would rewrite. It goes by plain
+/// deletes (`git_tree::remove_folder`), and what a running process still holds there is
+/// scheduled for the restart with `dir` and `app`, never failing the step.
 pub(super) fn clear(
     dir: &Path,
     exe: &Path,
@@ -135,15 +138,33 @@ pub(super) fn clear(
     app: &Path,
     fs: &mut Restart<'_>,
 ) -> io::Result<()> {
+    let mut git_left = false;
     for entry in std::fs::read_dir(dir)? {
-        let path = entry?.path();
+        let entry = entry?;
+        let path = entry.path();
         if running && same_path(&path, exe) {
+            continue;
+        }
+        if entry
+            .file_name()
+            .to_string_lossy()
+            .eq_ignore_ascii_case(admin_copy::GIT)
+        {
+            crate::windows::git_tree::remove_folder_here(&path);
+            git_left = os::found(&path)? != Found::Missing;
             continue;
         }
         remove_taking_back(&mut NtfsLockDown, &path)?;
     }
-    if !running {
+    if !running && !git_left {
         return std::fs::remove_dir(dir);
+    }
+    if !running {
+        // `git\`'s files in use are scheduled already; the folders follow them at the restart.
+        for path in [dir, app] {
+            (fs.schedule)(path)?;
+        }
+        return Ok(());
     }
     let parked = parked_name(exe, std::process::id());
     if let Err(error) = (fs.rename)(exe, &parked) {

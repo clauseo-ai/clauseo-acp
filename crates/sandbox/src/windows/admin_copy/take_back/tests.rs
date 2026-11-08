@@ -132,6 +132,10 @@ impl LockDownFs for Tree {
         }
         Ok(())
     }
+
+    fn check_git(&mut self, git: &Path) {
+        self.calls.push(format!("check git {}", shown(git)));
+    }
 }
 
 #[test]
@@ -246,7 +250,11 @@ fn the_git_trees_are_kept_and_left_out_of_the_lock_down() {
     );
     lock_down_with(&mut tree, Path::new(DIR), Path::new(EXE)).unwrap();
     assert_eq!(tree.found(Path::new(GIT_TREES)).unwrap(), Found::Folder);
-    assert_eq!(tree.calls, [format!("lock {DIR}")], "nothing removed");
+    assert_eq!(
+        tree.calls,
+        [format!("check git {GIT_TREES}"), format!("lock {DIR}")],
+        "checked, never removed, locked or taken back"
+    );
     assert_eq!(tree.skips, [vec!["git".to_owned()]]);
 }
 
@@ -260,7 +268,11 @@ fn the_git_trees_shut_to_administrators_neither_fail_nor_get_taken_back() {
     lock_down_with(&mut tree, Path::new(DIR), Path::new(EXE)).unwrap();
     assert_eq!(
         tree.calls,
-        [format!("lock {DIR}"), format!("take back {DIR}")]
+        [
+            format!("check git {GIT_TREES}"),
+            format!("lock {DIR}"),
+            format!("take back {DIR}")
+        ]
     );
     assert_eq!(tree.skips, [vec!["git".to_owned()], vec!["git".to_owned()]]);
     assert!(

@@ -59,4 +59,8 @@ impl LockDownFs for NtfsLockDown {
         let _privileges = Privileges::enable(&TAKE_BACK)?;
         lock_tree_os::take_back(path, skip)
     }
+
+    fn check_git(&mut self, git: &Path) {
+        crate::windows::git_tree::check_adopted_here(git);
+    }
 }

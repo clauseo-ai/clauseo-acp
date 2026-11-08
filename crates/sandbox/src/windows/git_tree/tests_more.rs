@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use super::fake::{ADMIN, FakeTrees, GIT_ROOT, key};
+use super::fake::{ADMIN, FakeTrees, GIT_FILES, GIT_ROOT, Node, key};
 use super::tests::{account, group, id_of, tree};
 use super::{Recorded, UNAVAILABLE, Unavailable, build, ensure, remove};
 
@@ -16,11 +16,16 @@ fn a_refresh_with_the_same_git_builds_nothing() {
     let second = ensure(&mut fake, &accounts, &group());
     assert_eq!(first, second);
     assert_eq!(fake.count("hard_link"), links, "no file linked again");
-    assert_eq!(fake.count("rename"), 2, "only the first run renamed");
+    assert_eq!(
+        fake.count("rename"),
+        3,
+        "only the first run renamed: the copy and two trees"
+    );
+    assert_eq!(fake.count("copy_file"), GIT_FILES.len(), "copied once");
     assert_eq!(
         fake.count("walk"),
-        1,
-        "the first run listed the install once"
+        3,
+        "each run lists the install; the first, its copy too"
     );
 }
 
@@ -40,27 +45,40 @@ fn a_refresh_after_a_git_update_builds_a_new_tree_and_records_it() {
     assert_eq!(record[0].1, current.display().to_string());
 }
 
-#[test]
-fn an_accounts_previous_tree_stays_while_it_runs_and_goes_after() {
-    let mut fake = FakeTrees::new();
-    let old = id_of(&mut fake);
-    ensure(&mut fake, &[account(1), account(2)], &group());
-    fake.running.insert(account(1).sid);
+/// A Git update: the install's `git.exe` replaced.
+pub(super) fn update(fake: &mut FakeTrees) {
     fake.new_file(r"C:\Program Files\Git\cmd\git.exe");
-    let new = id_of(&mut fake);
-    ensure(&mut fake, &[account(1), account(2)], &group());
+}
+
+#[test]
+fn the_current_and_previous_trees_stay_and_older_ones_go_once_the_account_is_idle() {
+    let mut fake = FakeTrees::new();
+    let accounts = [account(1), account(2)];
+    let oldest = id_of(&mut fake);
+    ensure(&mut fake, &accounts, &group());
+    update(&mut fake);
+    let previous = id_of(&mut fake);
+    ensure(&mut fake, &accounts, &group());
+    fake.running.insert(account(1).sid);
+    update(&mut fake);
+    let current = id_of(&mut fake);
+    ensure(&mut fake, &accounts, &group());
+    for id in [&oldest, &previous, &current] {
+        assert!(
+            fake.node(&tree(&account(1), id)).is_some(),
+            "account 1 runs"
+        );
+    }
     assert!(
-        fake.node(&tree(&account(1), &old)).is_some(),
-        "account 1 runs"
-    );
-    assert!(fake.node(&tree(&account(1), &new)).is_some());
-    assert!(
-        fake.node(&tree(&account(2), &old)).is_none(),
+        fake.node(&tree(&account(2), &oldest)).is_none(),
         "account 2 doesn't"
     );
-    // A file of the kept tree is still the old install's file, whatever the update did.
+    for id in [&previous, &current] {
+        assert!(fake.node(&tree(&account(2), id)).is_some(), "kept: {id}");
+    }
+    // A file of a kept tree is still the old copy's, whatever the update did.
     let kept = fake
-        .node(&tree(&account(1), &old).join(r"cmd\git.exe"))
+        .node(&tree(&account(1), &oldest).join(r"cmd\git.exe"))
         .cloned();
     let now = fake
         .node(Path::new(r"C:\Program Files\Git\cmd\git.exe"))
@@ -68,12 +86,14 @@ fn an_accounts_previous_tree_stays_while_it_runs_and_goes_after() {
     assert_ne!(kept, now);
 
     fake.running.clear();
-    ensure(&mut fake, &[account(1), account(2)], &group());
+    ensure(&mut fake, &accounts, &group());
     assert!(
-        fake.node(&tree(&account(1), &old)).is_none(),
+        fake.node(&tree(&account(1), &oldest)).is_none(),
         "its run ended"
     );
-    assert!(fake.node(&tree(&account(1), &new)).is_some());
+    for id in [&previous, &current] {
+        assert!(fake.node(&tree(&account(1), id)).is_some(), "kept: {id}");
+    }
 }
 
 #[test]
@@ -152,12 +172,37 @@ fn removal_deletes_every_tree_and_the_record() {
 }
 
 #[test]
-fn removal_tries_the_record_when_the_folder_fails_and_reports_it() {
+fn removal_with_a_file_in_use_succeeds_and_schedules_the_rest_for_the_restart() {
+    let mut fake = FakeTrees::new();
+    let id = id_of(&mut fake);
+    ensure(&mut fake, &[account(1)], &group());
+    let bash = key(&tree(&account(1), &id).join(r"usr\bin\bash.exe"));
+    fake.in_use.insert(bash);
+    remove(&mut fake).expect("a file in use never fails the removal");
+    assert!(fake.record.is_none());
+    let git = key(&Path::new(ADMIN).join("git"));
+    assert_eq!(fake.reboot, std::slice::from_ref(&git));
+    let left: Vec<&String> = fake.in_use.iter().collect();
+    assert_eq!(left.len(), 1);
+    assert!(
+        left[0].starts_with(&format!(r"{git}\_trash\")),
+        "the file in use waits in the trash: {left:?}"
+    );
+    assert_eq!(fake.below(&tree(&account(1), &id)), Vec::<String>::new());
+    assert!(
+        fake.logs
+            .iter()
+            .any(|(error, line)| !error && line.contains("next restart"))
+    );
+}
+
+#[test]
+fn removal_reports_a_record_that_cant_be_deleted() {
     let mut fake = FakeTrees::new();
     ensure(&mut fake, &[account(1)], &group());
-    fake.fail.push("remove_tree ".to_owned());
+    fake.fail.push("delete_record".to_owned());
     assert!(remove(&mut fake).is_err());
-    assert!(fake.record.is_none());
+    assert!(fake.node(&Path::new(ADMIN).join("git")).is_none());
 }
 
 #[test]
@@ -214,7 +259,7 @@ fn an_admin_folder_that_fails_its_check_leaves_every_account_unavailable() {
 fn a_record_that_cant_be_written_is_logged_and_the_trees_stay() {
     let mut fake = FakeTrees::new();
     let id = id_of(&mut fake);
-    fake.fail.push("write_record".to_owned());
+    fake.fail.push("set_record_value".to_owned());
     let out = ensure(&mut fake, &[account(1)], &group());
     assert_eq!(out[0].1, Recorded::Tree(tree(&account(1), &id)));
     assert!(
@@ -248,8 +293,11 @@ fn a_name_that_cant_be_a_folder_is_bad_account() {
 }
 
 #[test]
-fn git_gone_later_records_unavailable_and_retires_idle_trees() {
+fn git_gone_later_records_unavailable_and_keeps_only_the_newest_idle_tree() {
     let mut fake = FakeTrees::new();
+    let older = id_of(&mut fake);
+    ensure(&mut fake, &[account(1), account(2)], &group());
+    update(&mut fake);
     let id = id_of(&mut fake);
     ensure(&mut fake, &[account(1), account(2)], &group());
     fake.running.insert(account(2).sid);
@@ -261,9 +309,13 @@ fn git_gone_later_records_unavailable_and_retires_idle_trees() {
         out.iter()
             .all(|(_, r)| *r == Recorded::Unavailable(Unavailable::NoGit))
     );
-    assert!(fake.node(&tree(&account(1), &id)).is_none());
+    assert!(fake.node(&tree(&account(1), &older)).is_none());
     assert!(
-        fake.node(&tree(&account(2), &id)).is_some(),
+        fake.node(&tree(&account(1), &id)).is_some(),
+        "the previous tree"
+    );
+    assert!(
+        fake.node(&tree(&account(2), &older)).is_some(),
         "account 2 runs"
     );
 }
@@ -288,9 +340,9 @@ fn a_recorded_value_reads_back_as_written() {
 }
 
 #[test]
-fn a_file_with_several_names_in_the_install_is_linked_from_one_copy_of_each_name() {
-    // NTFS holds a file to 1023 names: Git's built-ins linked to one git.exe, times every tree,
-    // would pass it.
+fn the_trees_link_only_the_copy_and_never_the_install() {
+    // NTFS holds a file to 1023 names, and the copy's files are ours: one name each, plus one
+    // per tree. The install's built-ins linked to one git.exe are copied name by name.
     let mut fake = FakeTrees::new();
     let git = Path::new(GIT_ROOT).join(r"mingw64\bin\git.exe");
     let node = fake.node(&git).cloned().unwrap();
@@ -302,36 +354,42 @@ fn a_file_with_several_names_in_the_install_is_linked_from_one_copy_of_each_name
     ensure(&mut fake, &accounts, &group());
     assert_eq!(
         fake.count("copy_file"),
-        2,
-        "each name of the shared file, once"
+        GIT_FILES.len() + 1,
+        "each name once"
     );
-    let copy = Path::new(ADMIN).join("git").join("_source").join(&id);
-    let copied = fake.node(&copy.join(r"mingw64\bin\git.exe")).cloned();
-    assert_ne!(copied, Some(node.clone()));
-    assert!(
-        fake.node(&copy.join(r"usr\bin\bash.exe")).is_none(),
-        "one name: not copied"
-    );
+    let install: Vec<Node> = fake
+        .below(Path::new(GIT_ROOT))
+        .iter()
+        .filter_map(|rel| fake.node(&Path::new(GIT_ROOT).join(rel)).cloned())
+        .filter(|node| matches!(node, Node::File(_)))
+        .collect();
     for account in &accounts {
         let tree = tree(account, &id);
-        assert_eq!(
-            fake.node(&tree.join(r"mingw64\bin\git.exe")).cloned(),
-            copied
-        );
-        let bash = Path::new(GIT_ROOT).join(r"usr\bin\bash.exe");
-        assert_eq!(fake.node(&tree.join(r"usr\bin\bash.exe")), fake.node(&bash));
+        for rel in fake.below(&tree) {
+            let linked = fake.node(&tree.join(&rel)).cloned().unwrap();
+            assert!(!install.contains(&linked), "{rel} isn't the install's file");
+        }
         assert!(
             fake.node(&tree.join(r"mingw64\libexec\git-core\git-add.exe"))
                 .is_some()
         );
     }
+    let links: Vec<&String> = fake
+        .calls
+        .iter()
+        .filter(|c| c.starts_with("hard_link "))
+        .collect();
+    assert!(
+        links.iter().all(|c| c.contains(r"\git\_source\")),
+        "every link names the copy: {links:?}"
+    );
     assert_eq!(fake.node(&git), Some(&node), "the install is as it was");
 }
 
 #[test]
 fn git_updated_during_a_build_fails_it_and_names_no_tree() {
     let mut fake = FakeTrees::new();
-    fake.replace_on_link = Some(r"C:\Program Files\Git\cmd\git.exe".to_owned());
+    fake.replace_on_copy = Some(r"C:\Program Files\Git\cmd\git.exe".to_owned());
     let out = ensure(&mut fake, &[account(1)], &group());
     assert_eq!(out[0].1, Recorded::Unavailable(Unavailable::BuildFailed));
     assert_eq!(fake.count("rename"), 0);
@@ -361,11 +419,16 @@ fn the_record_names_the_new_tree_before_an_old_one_goes() {
     let mut fake = FakeTrees::new();
     let old = id_of(&mut fake);
     ensure(&mut fake, &[account(1)], &group());
-    fake.new_file(r"C:\Program Files\Git\cmd\git.exe");
+    update(&mut fake);
+    ensure(&mut fake, &[account(1)], &group());
+    update(&mut fake);
     let from = fake.calls.len();
     ensure(&mut fake, &[account(1)], &group());
     let calls = &fake.calls[from..];
-    let write = calls.iter().position(|c| c == "write_record -").unwrap();
+    let write = calls
+        .iter()
+        .position(|c| c.starts_with("set_record_value "))
+        .unwrap();
     let old_tree = format!("remove_tree {}", key(&tree(&account(1), &old)));
     let gone = calls.iter().position(|c| *c == old_tree).unwrap();
     assert!(write < gone, "{calls:?}");
@@ -376,8 +439,10 @@ fn a_record_that_cant_be_written_retires_nothing() {
     let mut fake = FakeTrees::new();
     let old = id_of(&mut fake);
     ensure(&mut fake, &[account(1)], &group());
-    fake.new_file(r"C:\Program Files\Git\cmd\git.exe");
-    fake.fail.push("write_record".to_owned());
+    update(&mut fake);
+    ensure(&mut fake, &[account(1)], &group());
+    update(&mut fake);
+    fake.fail.push("set_record_value".to_owned());
     ensure(&mut fake, &[account(1)], &group());
     assert!(
         fake.node(&tree(&account(1), &old)).is_some(),

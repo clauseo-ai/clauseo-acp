@@ -79,7 +79,9 @@ pub trait Removal {
     /// Deletes the group `group`.
     fn delete_group(&mut self, group: &Sid) -> Result<(), MachineError>;
     /// Deletes every pool user's Git tree, `%ProgramFiles%\Clauseo\Sandbox\git\`, and the
-    /// record's `GitTrees` subkey (`git_tree::remove`); either missing is `Ok`.
+    /// record's `GitTrees` subkey (`git_tree::remove`); either missing is `Ok`. The files are
+    /// best effort: what a running process holds waits for the restart and never fails this;
+    /// only a subkey that can't be deleted does.
     fn remove_git_trees(&mut self) -> Result<(), MachineError>;
     /// Runs `f` with the calling thread acting as [`Removal::invoker`] (`Owner::run_as`), with
     /// the token [`Removal::can_act_as_owner`] names, then as itself again; called again inside

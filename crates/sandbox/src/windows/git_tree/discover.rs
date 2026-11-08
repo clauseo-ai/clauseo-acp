@@ -1,13 +1,17 @@
-//! Step 2 of `git_tree.rs`: the per-machine Git for Windows, refused when it is per-user, on a
-//! network path, behind a reparse point or in a folder others than administrators can change,
-//! and its tree id. Pure: tested on every OS with the fake.
+//! Steps 2 and 3 of `git_tree.rs`: the per-machine Git for Windows, refused when it is per-user,
+//! on a network path, behind a reparse point, in a folder others than administrators can change,
+//! or holding a reparse point or a folder or file others can change; its walk and its tree id.
+//! Pure: tested on every OS with the fake.
 
 use std::path::{Path, PathBuf};
 
-use super::{FileId, GIT_EXE, MSYS_DLL, Refused, Source, TreeFs, Unavailable, joined, tree_id};
+use super::{
+    Entry, FileId, GIT_EXE, MARKER, MSYS_DLL, Refused, Source, TreeFs, Unavailable, digest, joined,
+    tree_id,
+};
 use crate::windows::admin_copy::Found;
 
-/// Step 2: the per-machine Git, as the module says, with its tree id.
+/// Steps 2 and 3: the per-machine Git, as the module says, with its walk and its tree id.
 pub(super) fn discover(fs: &mut impl TreeFs) -> Result<Source, Unavailable> {
     let registered = fs.registry_install().map_err(|why| {
         tracing::warn!(%why, "Git for Windows' registry key couldn't be read");
@@ -41,6 +45,7 @@ pub(super) fn discover(fs: &mut impl TreeFs) -> Result<Source, Unavailable> {
             tracing::warn!(%why, "the Git install's folders couldn't be opened");
             return Err(Unavailable::NoGit);
         }
+        Err(Refused::Changed) => return Err(Unavailable::SourceUnreadable),
     }
     if !fs.admin_only(&root).unwrap_or(false) {
         return Err(Unavailable::PerUserGit);
@@ -49,12 +54,40 @@ pub(super) fn discover(fs: &mut impl TreeFs) -> Result<Source, Unavailable> {
     let git_exe = joined(&root, &GIT_EXE);
     let git = identity(fs, &git_exe)?;
     let version = fs.file_version(&git_exe).ok().flatten();
-    let id = tree_id(&root, version.as_deref(), &msys, &git);
+    let listing = listing(fs, &root)?;
+    let id = tree_id(&root, version.as_deref(), [&msys, &git], &digest(&listing));
     Ok(Source {
         root,
         id,
         files: [msys, git],
+        listing,
     })
+}
+
+/// The install's walk: every folder and file in it, each one only administrators can change
+/// (`level_safe` through its own handle), else `source-unsafe`, and none a reparse point. A
+/// [`MARKER`] at its root is left out: the copy writes its own.
+fn listing(fs: &mut impl TreeFs, root: &Path) -> Result<Vec<Entry>, Unavailable> {
+    let entries = fs.walk(root).map_err(|refused| match refused {
+        Refused::Reparse => Unavailable::ReparsePoint,
+        Refused::Other(why) => {
+            tracing::warn!(%why, "the Git install couldn't be listed");
+            Unavailable::SourceUnreadable
+        }
+        Refused::Changed => Unavailable::SourceUnreadable,
+    })?;
+    if entries.iter().any(|entry| entry.reparse) {
+        return Err(Unavailable::ReparsePoint);
+    }
+    if let Some(entry) = entries.iter().find(|entry| !entry.admin_only) {
+        let rel = entry.rel.display();
+        tracing::warn!(entry = %rel, "the Git install holds one others can change");
+        return Err(Unavailable::SourceUnsafe);
+    }
+    Ok(entries
+        .into_iter()
+        .filter(|entry| !entry.rel.as_os_str().eq_ignore_ascii_case(MARKER))
+        .collect())
 }
 
 /// A file the install must hold: its identity, `NoGit` when it isn't there.
@@ -67,6 +100,7 @@ pub(super) fn identity(fs: &mut impl TreeFs, path: &Path) -> Result<FileId, Unav
             tracing::warn!(%why, "a Git file couldn't be read");
             Err(Unavailable::SourceUnreadable)
         }
+        Err(Refused::Changed) => Err(Unavailable::SourceUnreadable),
     }
 }
 

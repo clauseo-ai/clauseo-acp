@@ -1,12 +1,14 @@
 //! The Git trees' fake machine: an in-memory volume set, a registry value, the processes'
-//! users, the record and the log, with failures injected by call line.
+//! users, the record and the log, with failures injected by call line and files held in use.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use super::{Entry, FileId, Refused, TreeFs};
+use super::{Entry, FileId, Inspected, MARKER, Owner, Refused, TreeFs};
 use crate::windows::admin_copy::Found;
 use crate::windows::sids::Sid;
+
+mod moves;
 
 /// `%ProgramFiles%` in the fake.
 pub(super) const PROGRAM_FILES: &str = r"C:\Program Files";
@@ -35,16 +37,42 @@ pub(super) enum Node {
     Link,
 }
 
+/// A path's owner, whether only administrators can change it, and when it was made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Meta {
+    pub(super) owner: Owner,
+    pub(super) admin_only: bool,
+    pub(super) created: u64,
+}
+
+/// What a path has when nothing set it: SYSTEM's, administrators only, made at time 0.
+const META: Meta = Meta {
+    owner: Owner::System,
+    admin_only: true,
+    created: 0,
+};
+
 /// The fake.
 #[derive(Debug)]
 pub(super) struct FakeTrees {
     /// Every path, normalized ([`key`]).
     pub(super) nodes: BTreeMap<String, Node>,
+    /// The paths whose [`Meta`] isn't [`META`].
+    pub(super) meta: BTreeMap<String, Meta>,
+    /// The text of each marker file, by path.
+    pub(super) texts: BTreeMap<String, String>,
+    /// The descriptor each marker file was made with, by path.
+    pub(super) marker_sddls: BTreeMap<String, String>,
+    /// Files and folders a process holds open: none can be deleted, nor a folder above one, or
+    /// a held folder, renamed (a held file can be, as a loaded image can).
+    pub(super) in_use: BTreeSet<String>,
+    /// The paths scheduled for deletion at the restart.
+    pub(super) reboot: Vec<String>,
     /// `InstallPath`.
     pub(super) registry: Option<String>,
     /// Paths that are network paths, as prefixes.
     pub(super) network: Vec<String>,
-    /// Whether the install folder is administrators-only.
+    /// Whether the install folder's chain is administrators-only.
     pub(super) admin_only: bool,
     /// The `FILEVERSION` of every `git.exe`.
     pub(super) version: Option<String>,
@@ -52,7 +80,7 @@ pub(super) struct FakeTrees {
     pub(super) running: BTreeSet<Sid>,
     /// Whether the process list can't be read.
     pub(super) processes_unreadable: bool,
-    /// The record's subkey, when there.
+    /// The record's subkey, when there: its values in the order first written.
     pub(super) record: Option<Vec<(Sid, String)>>,
     /// Every call, as a line.
     pub(super) calls: Vec<String>,
@@ -60,9 +88,9 @@ pub(super) struct FakeTrees {
     pub(super) fail: Vec<String>,
     /// The log's lines and whether each was an error.
     pub(super) logs: Vec<(bool, String)>,
-    /// A file the installer replaces as the first link is made, as an update during a build.
-    pub(super) replace_on_link: Option<String>,
-    /// The next inode.
+    /// A file the installer replaces as the first file is copied, as an update during a build.
+    pub(super) replace_on_copy: Option<String>,
+    /// The next inode and creation time.
     next: u64,
 }
 
@@ -71,11 +99,21 @@ pub(super) fn key(path: &Path) -> String {
     path.to_string_lossy().replace('/', "\\").to_lowercase()
 }
 
+/// Whether the key `at` is `path` or below it.
+pub(super) fn under(at: &str, path: &str) -> bool {
+    at == path || at.starts_with(&format!("{path}\\"))
+}
+
 impl FakeTrees {
     /// A machine with the admin folder and Git in `%ProgramFiles%\Git`, registered.
     pub(super) fn new() -> FakeTrees {
         let mut fake = FakeTrees {
             nodes: BTreeMap::new(),
+            meta: BTreeMap::new(),
+            texts: BTreeMap::new(),
+            marker_sddls: BTreeMap::new(),
+            in_use: BTreeSet::new(),
+            reboot: Vec::new(),
             registry: Some(GIT_ROOT.to_owned()),
             network: Vec::new(),
             admin_only: true,
@@ -86,7 +124,7 @@ impl FakeTrees {
             calls: Vec::new(),
             fail: Vec::new(),
             logs: Vec::new(),
-            replace_on_link: None,
+            replace_on_copy: None,
             next: 1,
         };
         fake.folders(ADMIN);
@@ -121,14 +159,43 @@ impl FakeTrees {
 
     /// Puts a new file at `path` (another inode), as an installer replacing it does.
     pub(super) fn new_file(&mut self, path: &str) {
-        let inode = self.next;
-        self.next += 1;
+        let inode = self.stamp();
         self.nodes.insert(path.to_lowercase(), Node::File(inode));
+    }
+
+    /// The next inode or creation time.
+    fn stamp(&mut self) -> u64 {
+        let now = self.next;
+        self.next += 1;
+        now
     }
 
     /// What is at `path`.
     pub(super) fn node(&self, path: &Path) -> Option<&Node> {
         self.nodes.get(&key(path))
+    }
+
+    /// The [`Meta`] of `path`.
+    pub(super) fn meta_of(&self, path: &Path) -> Meta {
+        self.meta.get(&key(path)).copied().unwrap_or(META)
+    }
+
+    /// Gives `path` the owner `owner`.
+    pub(super) fn own(&mut self, path: &Path, owner: Owner) {
+        let meta = Meta {
+            owner,
+            ..self.meta_of(path)
+        };
+        self.meta.insert(key(path), meta);
+    }
+
+    /// Makes `path` one others than administrators can change.
+    pub(super) fn open_to_users(&mut self, path: &Path) {
+        let meta = Meta {
+            admin_only: false,
+            ..self.meta_of(path)
+        };
+        self.meta.insert(key(path), meta);
     }
 
     /// The paths below `dir`, from it, lower case.
@@ -169,14 +236,6 @@ impl FakeTrees {
             Some(Node::Folder(_)) => Ok(()),
             _ => Err(format!("no folder above {}", key(path))),
         }
-    }
-
-    /// The volume of `path`: its drive letter's place in the alphabet.
-    fn volume_of(path: &Path) -> u64 {
-        key(path)
-            .bytes()
-            .next()
-            .map_or(0, |letter| u64::from(letter.saturating_sub(b'a')) + 1)
     }
 }
 
@@ -231,13 +290,17 @@ impl TreeFs for FakeTrees {
     fn file_id(&mut self, path: &Path) -> Result<Option<FileId>, Refused> {
         self.call(format!("file_id {}", key(path)))
             .map_err(Refused::Other)?;
+        let volume = key(path)
+            .bytes()
+            .next()
+            .map_or(0, |letter| u64::from(letter.saturating_sub(b'a')) + 1);
         match self.node(path) {
             None => Ok(None),
             Some(Node::File(inode)) => Ok(Some(FileId {
-                volume: Self::volume_of(path),
+                volume,
                 id: u128::from(*inode),
                 size: 100,
-                written: 7,
+                written: *inode,
             })),
             Some(Node::Link) => Err(Refused::Reparse),
             Some(Node::Folder(_)) => Err(Refused::Other("a folder".to_owned())),
@@ -248,28 +311,32 @@ impl TreeFs for FakeTrees {
         Ok(self.version.clone())
     }
 
-    fn volume(&mut self, path: &Path) -> Result<u64, String> {
-        Ok(Self::volume_of(path))
-    }
-
     fn walk(&mut self, root: &Path) -> Result<Vec<Entry>, Refused> {
         self.call(format!("walk {}", key(root)))
             .map_err(Refused::Other)?;
+        if self.node(root) == Some(&Node::Link) {
+            return Err(Refused::Reparse);
+        }
         let prefix = format!("{}\\", key(root));
         let mut entries = Vec::new();
         for (path, node) in &self.nodes {
             let Some(rel) = path.strip_prefix(&prefix) else {
                 continue;
             };
-            let (folder, id) = match node {
-                Node::Folder(_) => (true, 0),
-                Node::File(inode) => (false, u128::from(*inode)),
-                Node::Link => return Err(Refused::Reparse),
+            let meta = self.meta.get(path).copied().unwrap_or(META);
+            let (folder, reparse, id) = match node {
+                Node::Folder(_) => (true, false, 0),
+                Node::File(inode) => (false, false, *inode),
+                Node::Link => (false, true, 0),
             };
             entries.push(Entry {
                 rel: PathBuf::from(rel),
                 folder,
-                id,
+                reparse,
+                id: u128::from(id),
+                size: if folder { 0 } else { 100 },
+                written: id,
+                admin_only: meta.admin_only,
             });
         }
         Ok(entries)
@@ -284,6 +351,23 @@ impl TreeFs for FakeTrees {
         })
     }
 
+    fn inspect(&mut self, path: &Path) -> Result<Option<Inspected>, String> {
+        self.call(format!("inspect {}", key(path)))?;
+        let meta = self.meta_of(path);
+        let kind = match self.node(path) {
+            None => return Ok(None),
+            Some(Node::Folder(_)) => Found::Folder,
+            Some(Node::File(_)) => Found::File,
+            Some(Node::Link) => Found::Link,
+        };
+        Ok(Some(Inspected {
+            kind,
+            owner: meta.owner,
+            admin_only: meta.admin_only,
+            created: meta.created,
+        }))
+    }
+
     fn level(&mut self, path: &Path, sddl: &str) -> Result<(), Refused> {
         self.call(format!("level {}", key(path)))
             .map_err(Refused::Other)?;
@@ -291,9 +375,19 @@ impl TreeFs for FakeTrees {
         match self.nodes.get(&key(path)) {
             Some(Node::Link) => Err(Refused::Reparse),
             Some(Node::File(_)) => Err(Refused::Other("a file".to_owned())),
-            _ => {
+            found => {
+                let created = match found {
+                    None => self.stamp(),
+                    Some(_) => self.meta_of(path).created,
+                };
                 self.nodes
                     .insert(key(path), Node::Folder(Some(sddl.to_owned())));
+                let meta = Meta {
+                    owner: Owner::System,
+                    admin_only: true,
+                    created,
+                };
+                self.meta.insert(key(path), meta);
                 Ok(())
             }
         }
@@ -307,72 +401,92 @@ impl TreeFs for FakeTrees {
             .collect())
     }
 
-    fn make_dir(&mut self, path: &Path) -> Result<(), String> {
-        self.call(format!("make_dir {}", key(path)))?;
-        self.parent_folder(path)?;
-        if self.node(path).is_some() {
-            return Err(format!("{} is there", key(path)));
-        }
-        self.nodes.insert(key(path), Node::Folder(None));
-        Ok(())
+    fn copy_tree(&mut self, from: &Path, entries: &[Entry], to: &Path) -> Result<(), Refused> {
+        moves::put_tree(self, from, entries, to, false)
     }
 
-    fn hard_link(&mut self, existing: &Path, link: &Path) -> Result<(), String> {
-        self.call(format!("hard_link {} -> {}", key(existing), key(link)))?;
-        if let Some(replaced) = self.replace_on_link.take() {
-            self.new_file(&replaced);
-        }
-        self.parent_folder(link)?;
-        let Some(Node::File(inode)) = self.node(existing).cloned() else {
-            return Err(format!("{} isn't a file", key(existing)));
-        };
-        if Self::volume_of(existing) != Self::volume_of(link) {
-            return Err("ERROR_NOT_SAME_DEVICE".to_owned());
-        }
-        if self.node(link).is_some() {
-            return Err(format!("{} is there", key(link)));
-        }
-        self.nodes.insert(key(link), Node::File(inode));
-        Ok(())
+    fn link_tree(&mut self, from: &Path, entries: &[Entry], to: &Path) -> Result<(), Refused> {
+        moves::put_tree(self, from, entries, to, true)
     }
 
-    fn copy_file(&mut self, from: &Path, to: &Path) -> Result<(), String> {
-        self.call(format!("copy_file {} -> {}", key(from), key(to)))?;
-        self.parent_folder(to)?;
-        if !matches!(self.node(from), Some(Node::File(_))) || self.node(to).is_some() {
-            return Err("can't copy".to_owned());
+    fn read_marker(&mut self, dir: &Path) -> Result<Option<String>, String> {
+        Ok(self.texts.get(&key(&dir.join(MARKER))).cloned())
+    }
+
+    fn write_marker(&mut self, dir: &Path, text: &str, sddl: &str) -> Result<(), String> {
+        let path = dir.join(MARKER);
+        self.call(format!("write_marker {}", key(dir)))?;
+        self.parent_folder(&path)?;
+        if self.node(&path).is_some() {
+            return Err(format!("{} is there", key(&path)));
         }
-        self.new_file(&key(to));
+        self.new_file(&key(&path));
+        self.texts.insert(key(&path), text.to_owned());
+        self.marker_sddls.insert(key(&path), sddl.to_owned());
         Ok(())
     }
 
     fn rename(&mut self, from: &Path, to: &Path) -> Result<(), String> {
         self.call(format!("rename {} -> {}", key(from), key(to)))?;
+        self.parent_folder(to)?;
         if self.node(to).is_some() {
             return Err(format!("{} is there", key(to)));
         }
         let (from, to) = (key(from), key(to));
-        let moved: Vec<String> = self
-            .nodes
-            .keys()
-            .filter(|path| **path == from || path.starts_with(&format!("{from}\\")))
-            .cloned()
-            .collect();
-        for path in moved {
-            if let Some(node) = self.nodes.remove(&path) {
-                let rest = path.get(from.len()..).unwrap_or_default();
-                self.nodes.insert(format!("{to}{rest}"), node);
-            }
+        let held_folder =
+            self.in_use.contains(&from) && matches!(self.nodes.get(&from), Some(Node::Folder(_)));
+        if held_folder
+            || self
+                .in_use
+                .iter()
+                .any(|at| at.starts_with(&format!("{from}\\")))
+        {
+            return Err("ERROR_SHARING_VIOLATION: it, or a file in it, is open".to_owned());
         }
+        moves::move_keys(self, &from, &to);
         Ok(())
     }
 
     fn remove_tree(&mut self, path: &Path) -> Result<(), String> {
         self.call(format!("remove_tree {}", key(path)))?;
         let path = key(path);
-        self.nodes
-            .retain(|at, _| *at != path && !at.starts_with(&format!("{path}\\")));
+        let held: Vec<String> = self
+            .in_use
+            .iter()
+            .filter(|at| under(at, &path))
+            .cloned()
+            .collect();
+        let kept = |at: &str| held.iter().any(|file| under(file, at));
+        let gone: Vec<String> = self
+            .nodes
+            .keys()
+            .filter(|at| under(at, &path) && !kept(at))
+            .cloned()
+            .collect();
+        for at in gone {
+            self.nodes.remove(&at);
+            self.meta.remove(&at);
+            self.texts.remove(&at);
+            self.marker_sddls.remove(&at);
+        }
+        if held.is_empty() {
+            Ok(())
+        } else {
+            Err(format!(
+                "ERROR_ACCESS_DENIED: {} file(s) in use",
+                held.len()
+            ))
+        }
+    }
+
+    fn delete_at_reboot(&mut self, path: &Path) -> Result<(), String> {
+        self.call(format!("delete_at_reboot {}", key(path)))?;
+        self.reboot.push(key(path));
         Ok(())
+    }
+
+    fn unique(&mut self) -> String {
+        format!("{:016x}", self.stamp())
     }
 
     fn active(&mut self, account: &Sid) -> Result<bool, String> {
@@ -383,9 +497,30 @@ impl TreeFs for FakeTrees {
         Ok(self.running.contains(account))
     }
 
-    fn write_record(&mut self, values: &[(Sid, String)]) -> Result<(), String> {
-        self.call("write_record -".to_owned())?;
-        self.record = Some(values.to_vec());
+    fn set_record_value(&mut self, account: &Sid, text: &str) -> Result<(), String> {
+        self.call(format!("set_record_value {account}"))?;
+        let record = self.record.get_or_insert_with(Vec::new);
+        match record.iter_mut().find(|(sid, _)| sid == account) {
+            Some(value) => value.1 = text.to_owned(),
+            None => record.push((account.clone(), text.to_owned())),
+        }
+        Ok(())
+    }
+
+    fn record_names(&mut self) -> Result<Vec<String>, String> {
+        Ok(self
+            .record
+            .iter()
+            .flatten()
+            .map(|(sid, _)| sid.as_str().to_owned())
+            .collect())
+    }
+
+    fn delete_record_value(&mut self, name: &str) -> Result<(), String> {
+        self.call(format!("delete_record_value {name}"))?;
+        if let Some(record) = self.record.as_mut() {
+            record.retain(|(sid, _)| !sid.as_str().eq_ignore_ascii_case(name));
+        }
         Ok(())
     }
 

@@ -185,26 +185,37 @@ fn the_tree_id_is_the_version_and_a_hash_of_the_files() {
     };
     let git = FileId { id: 11, ..msys };
     let root = Path::new(GIT_ROOT);
-    let id = tree_id(root, Some("2.47.1.1"), &msys, &git);
+    let id = tree_id(root, Some("2.47.1.1"), [&msys, &git], &[0; 32]);
     let (version, hash) = id.rsplit_once('-').unwrap();
     assert_eq!(version, "2.47.1.1");
     assert_eq!(hash.len(), 12);
     assert!(hash.bytes().all(|b| b.is_ascii_hexdigit()));
-    assert_eq!(id, tree_id(root, Some("2.47.1.1"), &msys, &git));
+    assert_eq!(id, tree_id(root, Some("2.47.1.1"), [&msys, &git], &[0; 32]));
     let replaced = FileId { id: 12, ..git };
-    assert_ne!(id, tree_id(root, Some("2.47.1.1"), &msys, &replaced));
-    let grown = FileId { size: 9, ..msys };
-    assert_ne!(id, tree_id(root, Some("2.47.1.1"), &grown, &git));
     assert_ne!(
         id,
-        tree_id(Path::new(r"D:\Git"), Some("2.47.1.1"), &msys, &git)
+        tree_id(root, Some("2.47.1.1"), [&msys, &replaced], &[0; 32])
+    );
+    let grown = FileId { size: 9, ..msys };
+    assert_ne!(
+        id,
+        tree_id(root, Some("2.47.1.1"), [&grown, &git], &[0; 32])
+    );
+    assert_ne!(
+        id,
+        tree_id(
+            Path::new(r"D:\Git"),
+            Some("2.47.1.1"),
+            [&msys, &git],
+            &[0; 32]
+        )
     );
     assert!(
-        tree_id(root, Some(r"2.48\..\x"), &msys, &git).starts_with("2.48..x-"),
+        tree_id(root, Some(r"2.48\..\x"), [&msys, &git], &[0; 32]).starts_with("2.48..x-"),
         "only letters, digits and dots stay"
     );
-    assert!(tree_id(root, None, &msys, &git).starts_with("git-"));
-    assert!(tree_id(root, Some("..."), &msys, &git).starts_with("git-"));
+    assert!(tree_id(root, None, [&msys, &git], &[0; 32]).starts_with("git-"));
+    assert!(tree_id(root, Some("..."), [&msys, &git], &[0; 32]).starts_with("git-"));
 }
 
 #[test]
@@ -228,11 +239,14 @@ fn every_file_is_linked_into_each_accounts_tree_with_its_own_dacl() {
     for (at, account) in accounts.iter().enumerate() {
         let tree = tree(account, &id);
         assert_eq!(out[at], (account.sid.clone(), Recorded::Tree(tree.clone())));
+        let copy = Path::new(ADMIN).join(r"git\_source").join(&id);
         for file in GIT_FILES {
-            let source = fake.node(&Path::new(GIT_ROOT).join(file)).cloned();
+            let source = fake.node(&copy.join(file)).cloned();
             let linked = fake.node(&tree.join(file)).cloned();
             assert!(matches!(source, Some(Node::File(_))));
-            assert_eq!(linked, source, "{file} is a link of the install's file");
+            assert_eq!(linked, source, "{file} is a link of the copy's file");
+            let install = fake.node(&Path::new(GIT_ROOT).join(file)).cloned();
+            assert_ne!(linked, install, "{file} never links the install");
         }
         let sddl = Some(account_sddl(&account.sid));
         assert_eq!(fake.node(&tree), Some(&Node::Folder(sddl.clone())));
@@ -244,7 +258,7 @@ fn every_file_is_linked_into_each_accounts_tree_with_its_own_dacl() {
         );
     }
     assert_eq!(fake.count("hard_link"), 2 * GIT_FILES.len());
-    assert_eq!(fake.count("copy_file"), 0);
+    assert_eq!(fake.count("copy_file"), GIT_FILES.len());
     let git = Path::new(ADMIN).join("git");
     assert_eq!(
         fake.node(&git),
@@ -276,10 +290,14 @@ fn the_account_dacl_grants_that_account_read_and_execute_alone() {
         !source_sddl(&group()).contains(";AU)"),
         "only the tree's own chain shows its security"
     );
+    assert!(
+        source_sddl(&group()).ends_with("(A;OIIO;0x1200a9;;;BU)"),
+        "every file of the copy, and so of each tree, grants Users read and execute"
+    );
 }
 
 #[test]
-fn a_source_on_another_volume_is_copied_once_and_the_trees_link_the_copy() {
+fn the_install_is_copied_once_and_the_trees_link_the_copy() {
     let mut fake = FakeTrees::new();
     fake.install(r"D:\Git");
     fake.registry = Some(r"D:\Git".to_owned());
@@ -362,7 +380,13 @@ fn a_tree_is_built_under_a_temporary_name_then_renamed_into_place() {
         .iter()
         .rposition(|line| line.starts_with("hard_link "))
         .unwrap();
-    assert!(rename > last_link, "the rename comes after the last link");
+    let marker = fake
+        .calls
+        .iter()
+        .position(|line| *line == format!("write_marker {temp}"))
+        .unwrap();
+    assert!(marker > last_link, "the marker comes after the last link");
+    assert!(rename > marker, "the rename comes after the marker");
     assert!(fake.node(Path::new(&temp)).is_none());
 }
 

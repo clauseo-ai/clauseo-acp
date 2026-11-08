@@ -16,21 +16,28 @@
 //! 2. finds the per-machine Git ([`discover`](discover::discover)): `HKLM\SOFTWARE\GitForWindows`'s
 //!    `InstallPath`, else `%ProgramFiles%\Git`, each a local path with no reparse point on the
 //!    way, holding `usr\bin\msys-2.0.dll` and `cmd\git.exe`, outside the profiles folder, in a
-//!    chain of folders only administrators can change. A per-user Git is refused: its files'
-//!    ACLs leave pool users out, and a hard link shares its file's ACL;
-//! 3. names the tree ([`tree_id`]) by the Git version and a hash of the two files' identities;
-//! 4. per account, keeps a tree already there under the current id, so only a changed Git
-//!    rebuilds; else builds it under a temporary name, links every file, checks the two files
-//!    are still the ones the id names, and renames it into place;
-//! 5. links from a copy in `git\_source\<id>\`, made once, every file when the install is on
-//!    another volume, and otherwise each file with several names in the install (NTFS holds a
-//!    file to 1023 names, and each tree would add all of them);
+//!    chain of folders only administrators can change. Every folder and file in it must be one
+//!    only administrators can change too (else `source-unsafe`), and none a reparse point. A
+//!    per-user Git is refused: its files' ACLs leave pool users out;
+//! 3. names the tree ([`tree_id`]) by the Git version, the two files' identities and a digest
+//!    of every name, size and write time in the install;
+//! 4. copies the install once per tree id into `git\_source\<id>\`, SYSTEM's own files, each
+//!    read through a handle opened relative to its walked folder and checked to be the file the
+//!    walk saw. The trees link only that copy, never the lawyer's install: the lawyer's Git
+//!    processes never hold a tree's file, and a pool process never holds the install's;
+//! 5. per account, keeps a tree already there under the current id when its owner is SYSTEM
+//!    and its completion marker names the id and the account's SID; else builds it under a
+//!    temporary name, links every file of the copy, writes the marker last and renames it
+//!    into place;
 //! 6. records each account's tree, or `Git Bash unavailable: <code>`, in
-//!    `HKLM\SOFTWARE\Clauseo\Sandbox\GitTrees` ([`TreeFs::write_record`]);
-//! 7. once that record is written, deletes an account's older trees when no process runs as
-//!    that account ([`TreeFs::active`]; one that can't be told counts as running), every
-//!    temporary tree, the folders of accounts no longer in the pool, and older source copies.
+//!    `HKLM\SOFTWARE\Clauseo\Sandbox\GitTrees`, one value at a time;
+//! 7. once that record is written, deletes an account's trees but the current and the previous
+//!    when no process runs as that account ([`TreeFs::active`]; one that can't be told counts
+//!    as running), every temporary tree, the folders of accounts no longer in the pool, and
+//!    older source copies.
 //!
+//! Nothing here changes the security of a file below `git\`, and nothing is deleted but by a
+//! plain delete (`discard.rs`): what is in use moves to `git\_trash\`, which each run empties.
 //! Nothing here fails the caller: a failure is logged in fixed words and recorded as
 //! [`Unavailable`].
 
@@ -42,24 +49,36 @@ use crate::windows::admin_copy::Found;
 use crate::windows::sids::Sid;
 
 mod build;
+mod discard;
 mod discover;
 #[cfg(test)]
 mod fake;
 #[cfg(windows)]
 mod os;
+mod retire;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod tests_more;
+#[cfg(test)]
+mod tests_safe;
 
-pub use build::{ensure, remove};
+pub use build::ensure;
 #[cfg(windows)]
-pub use os::{WindowsTrees, ensure_for, ensure_from_record, remove_all};
+pub use os::{
+    WindowsTrees, check_adopted_here, ensure_for, ensure_from_record, remove_all,
+    remove_folder_here,
+};
+pub use retire::{check_adopted, remove};
 
 /// The trees' folder in the admin folder.
 pub const GIT_DIR: &str = crate::windows::admin_copy::GIT;
-/// The cross-volume source copies' folder in [`GIT_DIR`].
+/// The source copies' folder in [`GIT_DIR`]: one copy of the install per tree id.
 pub const SOURCE_DIR: &str = "_source";
+/// The folder in [`GIT_DIR`] what couldn't be deleted at once waits in, under random names.
+pub const TRASH_DIR: &str = "_trash";
+/// The completion marker in each tree and source copy, written last ([`marker_text`]).
+pub const MARKER: &str = ".clauseo-tree";
 /// What a tree being built is named after: `<tree id>.tmp`.
 pub const BUILDING: &str = ".tmp";
 /// The record's subkey under `HKLM\SOFTWARE\Clauseo\Sandbox`.
@@ -102,6 +121,9 @@ pub enum Unavailable {
     BuildFailed,
     /// `bad-account`: the account's name can't be a folder name, or it has none.
     BadAccount,
+    /// `source-unsafe`: a folder or file in the install is one others than administrators can
+    /// change.
+    SourceUnsafe,
 }
 
 impl Unavailable {
@@ -116,6 +138,7 @@ impl Unavailable {
             Unavailable::FolderRefused => "folder-refused",
             Unavailable::BuildFailed => "build-failed",
             Unavailable::BadAccount => "bad-account",
+            Unavailable::SourceUnsafe => "source-unsafe",
         }
     }
 
@@ -126,7 +149,7 @@ impl Unavailable {
 }
 
 /// Every [`Unavailable`], in order.
-const ALL: [Unavailable; 8] = [
+const ALL: [Unavailable; 9] = [
     Unavailable::NoGit,
     Unavailable::PerUserGit,
     Unavailable::NetworkPath,
@@ -135,6 +158,7 @@ const ALL: [Unavailable; 8] = [
     Unavailable::FolderRefused,
     Unavailable::BuildFailed,
     Unavailable::BadAccount,
+    Unavailable::SourceUnsafe,
 ];
 
 /// One account's record value, as written and as the runner (part 2) reads it.
@@ -187,15 +211,48 @@ pub struct FileId {
     pub written: u64,
 }
 
-/// One entry of the source, from its root.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// One entry of a walked folder, from its root.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Entry {
     /// Its path from the root, one part per component.
     pub rel: PathBuf,
-    /// A folder, else a regular file.
+    /// A folder, else a regular file or a reparse point.
     pub folder: bool,
-    /// A file's 128-bit file ID, which its other names in the install share; 0 for a folder.
+    /// A reparse point (a link, a junction, any tag), listed as itself and never entered.
+    pub reparse: bool,
+    /// A file's 128-bit file ID, which its other names share; 0 for a folder.
     pub id: u128,
+    /// A file's size in bytes; 0 for a folder.
+    pub size: u64,
+    /// Its last write time, as a `FILETIME`.
+    pub written: u64,
+    /// Whether only SYSTEM, Administrators or `TrustedInstaller` can change it: its owner and
+    /// DACL, read through the handle it was opened by, pass `admin_copy::level_safe`.
+    pub admin_only: bool,
+}
+
+/// Who owns a folder or a file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Owner {
+    /// `S-1-5-18`.
+    System,
+    /// `S-1-5-32-544`.
+    Administrators,
+    /// Anyone else.
+    Other,
+}
+
+/// What is at a path, read through a handle opened on it as itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Inspected {
+    /// A folder, a file or a link (never `Missing`).
+    pub kind: Found,
+    /// Its owner.
+    pub owner: Owner,
+    /// Whether its owner and DACL pass `admin_copy::level_safe`.
+    pub admin_only: bool,
+    /// When it was made, as a `FILETIME` (a rename keeps it).
+    pub created: u64,
 }
 
 /// A refused or failed effect: a reparse point met, or anything else with its words for the
@@ -206,13 +263,16 @@ pub enum Refused {
     Reparse,
     /// Anything else.
     Other(String),
+    /// A file opened by its name isn't the one the walk saw: another file ID, size or write time.
+    Changed,
 }
 
 /// A failed effect's words, for the local log only.
 pub type Failed = String;
 
 /// Every effect of the trees. Paths are full local paths; the real one opens each folder of the
-/// trees' own chain relative to its parent's handle, never through a reparse point.
+/// trees' own chain relative to its parent's handle, never through a reparse point, and never
+/// changes the security of anything but a folder [`TreeFs::level`] is given.
 pub trait TreeFs {
     /// The admin folder (`%ProgramFiles%\Clauseo\Sandbox`) once its chain passes
     /// `admin_copy::check`'s rule 2.
@@ -238,33 +298,61 @@ pub trait TreeFs {
     fn file_id(&mut self, path: &Path) -> Result<Option<FileId>, Refused>;
     /// The `FILEVERSION` of the exe `path`, dotted; `None` when it carries none.
     fn file_version(&mut self, path: &Path) -> Result<Option<String>, Failed>;
-    /// The serial number of the volume holding `path`.
-    fn volume(&mut self, path: &Path) -> Result<u64, Failed>;
-    /// Every folder and file below `root`, each folder before what it holds, each file with its
-    /// file ID; a reparse point anywhere refuses.
+    /// Every folder, file and reparse point below the folder `root` (not `root` itself), each
+    /// folder before what it holds. Each is opened relative to its walked folder's handle as
+    /// itself, never following a link, and described from that handle (its file ID, size,
+    /// write time, and owner and DACL for [`Entry::admin_only`]); a reparse point is listed and
+    /// never entered. `root` a reparse point is [`Refused::Reparse`].
     fn walk(&mut self, root: &Path) -> Result<Vec<Entry>, Refused>;
     /// What is at `path`, never following a link.
     fn found(&mut self, path: &Path) -> Result<Found, Failed>;
+    /// What is at `path`, opened as itself relative to its parent's handle; `None` when
+    /// nothing is there.
+    fn inspect(&mut self, path: &Path) -> Result<Option<Inspected>, Failed>;
     /// Makes the folder `path` if missing, opened as itself relative to its parent; refuses a
     /// reparse point or a file there; gives it the owner and protected DACL `sddl` describes
-    /// through that handle and reads them back.
+    /// through that handle, which never propagates below, and reads them back.
     fn level(&mut self, path: &Path, sddl: &str) -> Result<(), Refused>;
     /// The names in the folder `dir`; none when it is missing.
     fn entries(&mut self, dir: &Path) -> Result<Vec<String>, Failed>;
-    /// Makes the folder `path`, inheriting its parent's DACL.
-    fn make_dir(&mut self, path: &Path) -> Result<(), Failed>;
-    /// Makes `link` a new name of the file `existing` (`CreateHardLinkW`).
-    fn hard_link(&mut self, existing: &Path, link: &Path) -> Result<(), Failed>;
-    /// Copies the file `from` to the new file `to`, which inherits its folder's DACL.
-    fn copy_file(&mut self, from: &Path, to: &Path) -> Result<(), Failed>;
-    /// Renames the folder `from` to `to`, which must not exist (write-through).
+    /// Into the empty folder `to`, `entries` of the folder `from` (a walk's, in its order):
+    /// each folder made relative to its parent's handle, owner SYSTEM, its DACL inherited; each
+    /// file opened relative to its walked folder's handle as itself, refused unless its file
+    /// ID, size and write time are the entry's ([`Refused::Changed`]), and its data copied
+    /// through that handle into a new file made relative to its folder's handle, owner SYSTEM,
+    /// its DACL inherited. A reparse point is [`Refused::Reparse`].
+    fn copy_tree(&mut self, from: &Path, entries: &[Entry], to: &Path) -> Result<(), Refused>;
+    /// [`TreeFs::copy_tree`], but each file is linked, not copied: opened as itself relative to
+    /// its walked folder's handle, its file ID checked, and given a new name relative to the
+    /// destination folder's handle (`FileLinkInformation`), sharing its security.
+    fn link_tree(&mut self, from: &Path, entries: &[Entry], to: &Path) -> Result<(), Refused>;
+    /// The text of [`MARKER`] in the folder `dir`, a plain file with one name opened relative
+    /// to `dir`'s handle; `None` when it is missing.
+    fn read_marker(&mut self, dir: &Path) -> Result<Option<String>, Failed>;
+    /// Makes [`MARKER`] in the folder `dir`, relative to its handle, with the owner and
+    /// protected DACL `sddl` describes ([`marker_sddl`]), holding `text`, written through.
+    fn write_marker(&mut self, dir: &Path, text: &str, sddl: &str) -> Result<(), Failed>;
+    /// Renames `from` to `to`, which must not exist (write-through).
     fn rename(&mut self, from: &Path, to: &Path) -> Result<(), Failed>;
-    /// Deletes `path` and all below it, a link as itself, never through one; missing is `Ok`.
+    /// Deletes `path` and all below it by a plain delete: each entry opened relative to its
+    /// folder's handle as itself, a link deleted as itself and never followed, nothing's
+    /// security changed. Goes on past what it can't delete (a file in use), then fails;
+    /// missing is `Ok`.
     fn remove_tree(&mut self, path: &Path) -> Result<(), Failed>;
+    /// Schedules `path` and everything below it for deletion at the next restart
+    /// (`MOVEFILE_DELAY_UNTIL_REBOOT`), the deepest first.
+    fn delete_at_reboot(&mut self, path: &Path) -> Result<(), Failed>;
+    /// A random name for the trash: 16 lower-case hex digits.
+    fn unique(&mut self) -> String;
     /// Whether any process runs as `account`.
     fn active(&mut self, account: &Sid) -> Result<bool, Failed>;
-    /// Replaces the record's subkey with one value per account: its SID's string, `REG_SZ`.
-    fn write_record(&mut self, values: &[(Sid, String)]) -> Result<(), Failed>;
+    /// Sets the record subkey's value named by `account`'s SID to `text` (`REG_SZ`), one
+    /// write that replaces it whole; makes the subkey when missing.
+    fn set_record_value(&mut self, account: &Sid, text: &str) -> Result<(), Failed>;
+    /// The names of the record subkey's values; none when it is missing.
+    fn record_names(&mut self) -> Result<Vec<String>, Failed>;
+    /// Deletes the record subkey's value `name`; missing is `Ok`.
+    fn delete_record_value(&mut self, name: &str) -> Result<(), Failed>;
     /// Deletes the record's subkey; missing is `Ok`.
     fn delete_record(&mut self) -> Result<(), Failed>;
     /// Writes one line to the log, the Event Log on Windows: fixed words, no path, no name.
@@ -279,24 +367,34 @@ pub struct Source {
     /// Its tree id ([`tree_id`]).
     pub id: String,
     /// The identities of its `msys-2.0.dll` and `git.exe` the id was made from, checked again
-    /// before a tree is renamed into place.
+    /// before its copy is renamed into place.
     pub files: [FileId; 2],
+    /// Its walk, which the id's digest covers and its copy follows, without a [`MARKER`] at
+    /// its root.
+    pub listing: Vec<Entry>,
 }
 
-/// The tree id of the Git at `root`, version `version`, from its `msys-2.0.dll` and `git.exe`:
-/// `<version>-<12 hex digits>`, the digits the start of a SHA-256 over the root's path (lower
-/// case) and each file's volume, ID, size and last write time. A replaced file has another ID,
-/// so an update, a repair or a move names a new tree. The version keeps `0-9`, `A-Z`, `a-z` and
-/// `.`, at most 24 of them; with none left it is `git`.
-pub fn tree_id(root: &Path, version: Option<&str>, msys: &FileId, git: &FileId) -> String {
+/// The tree id of the Git at `root`, version `version`, from its `msys-2.0.dll` and `git.exe`
+/// and its listing's [`digest`]: `<version>-<12 hex digits>`, the digits the start of a SHA-256
+/// over the root's path (lower case), each file's volume, ID, size and last write time, and the
+/// digest. A replaced file has another ID, and a repair that swaps any other file changes the
+/// digest, so an update, a repair or a move names a new tree. The version keeps `0-9`, `A-Z`,
+/// `a-z` and `.`, at most 24 of them; with none left it is `git`.
+pub fn tree_id(
+    root: &Path,
+    version: Option<&str>,
+    files: [&FileId; 2],
+    listing: &[u8; 32],
+) -> String {
     let mut hash = Sha256::new();
     hash.update(root.to_string_lossy().to_lowercase().as_bytes());
-    for file in [msys, git] {
+    for file in files {
         hash.update(file.volume.to_le_bytes());
         hash.update(file.id.to_le_bytes());
         hash.update(file.size.to_le_bytes());
         hash.update(file.written.to_le_bytes());
     }
+    hash.update(listing);
     let digest = hash.finalize();
     let short = crate::windows::refresh::hex(digest.get(..6).unwrap_or_default());
     let version: String = version
@@ -308,6 +406,59 @@ pub fn tree_id(root: &Path, version: Option<&str>, msys: &FileId, git: &FileId) 
     let version = version.trim_matches('.');
     let version = if version.is_empty() { "git" } else { version };
     format!("{version}-{short}")
+}
+
+/// The digest of a walk's `entries`: a SHA-256 over each one's path (lower case), kind, size
+/// and last write time, in order. Metadata only: no file is read.
+pub fn digest(entries: &[Entry]) -> [u8; 32] {
+    let mut hash = Sha256::new();
+    for entry in entries {
+        let rel = entry.rel.to_string_lossy().to_lowercase();
+        hash.update(u64::try_from(rel.len()).unwrap_or(u64::MAX).to_le_bytes());
+        hash.update(rel.as_bytes());
+        hash.update([u8::from(entry.folder), u8::from(entry.reparse)]);
+        hash.update(entry.size.to_le_bytes());
+        hash.update(entry.written.to_le_bytes());
+    }
+    hash.finalize().into()
+}
+
+/// The text of a completion marker, as the outer runner (part 2) reads it: `<tree id>\n`, then
+/// for an account's tree `<SID>\n`.
+pub fn marker_text(id: &str, account: Option<&Sid>) -> String {
+    match account {
+        Some(sid) => format!("{id}\n{sid}\n"),
+        None => format!("{id}\n"),
+    }
+}
+
+/// Whether the marker text `found` is `wanted` ([`marker_text`]): line by line, a `\r` before
+/// each `\n` accepted, the tree id compared without case, the SID exactly.
+pub fn marker_matches(found: &str, wanted: &str) -> bool {
+    let lines = |text: &str| -> Vec<String> {
+        text.lines()
+            .map(|line| line.trim_end_matches('\r').to_owned())
+            .collect()
+    };
+    let (found, wanted) = (lines(found), lines(wanted));
+    found.len() == wanted.len()
+        && found.iter().zip(&wanted).enumerate().all(|(at, (a, b))| {
+            if at == 0 {
+                a.eq_ignore_ascii_case(b)
+            } else {
+                a == b
+            }
+        })
+}
+
+/// The descriptor of a completion marker: owner SYSTEM, a protected DACL with SYSTEM and
+/// Administrators full, an account's tree's account read and execute, and Authenticated Users
+/// `FILE_GENERIC_READ` (`0x120089`), so the unelevated outer runner can read it (part 2).
+pub fn marker_sddl(account: Option<&Sid>) -> String {
+    let reader = account
+        .map(|sid| format!("(A;;{READ_EXECUTE};;;{sid})"))
+        .unwrap_or_default();
+    format!("O:SYD:P(A;;FA;;;SY)(A;;FA;;;BA){reader}(A;;0x120089;;;AU)")
 }
 
 /// Whether `name` may name an account's folder: 1 to 20 of `0-9`, `A-Z`, `a-z`, `-` and `_`,
@@ -336,9 +487,24 @@ pub fn account_sddl(account: &Sid) -> String {
 }
 
 /// The DACL of [`SOURCE_DIR`] and of each source copy: SYSTEM and Administrators full, the
-/// pool's group read and execute, inherited by all below.
+/// pool's group read and execute, inherited by all below; and Users read and execute on every
+/// file below (inherit-only, object inherit), as Git's own install files have: a tree's files
+/// are links of these, sharing their descriptor, and the unelevated outer runner reads a
+/// tree's `msys-2.0.dll` (part 2). Git's content isn't secret.
 pub fn source_sddl(group: &Sid) -> String {
-    format!("O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;{READ_EXECUTE};;;{group})")
+    format!(
+        "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;{READ_EXECUTE};;;{group})\
+         (A;OIIO;{READ_EXECUTE};;;BU)"
+    )
+}
+
+/// The DACL of [`TRASH_DIR`]: SYSTEM and Administrators full, inherited; no one else.
+pub const TRASH_SDDL: &str = "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)";
+
+/// Whether `a` and `b` are the same path, ignoring case and the separator.
+pub(crate) fn same(a: &Path, b: &Path) -> bool {
+    let text = |path: &Path| path.to_string_lossy().replace('/', "\\").to_lowercase();
+    text(a).trim_end_matches('\\') == text(b).trim_end_matches('\\')
 }
 
 /// `path` joined with each of `parts`.
