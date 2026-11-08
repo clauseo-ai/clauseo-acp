@@ -155,10 +155,15 @@ fn a_malformed_launch_file_names_where_it_failed_and_no_value() {
 }
 
 #[test]
-fn the_station_name_is_its_own_random_value() {
-    let name = station_name([0xab; 8]);
-    assert_eq!(name, "ClauseoRun-abababababababab");
-    assert_ne!(station_name([1; 8]), station_name([2; 8]));
+fn the_job_carries_every_ui_limit() {
+    // HANDLES, READCLIPBOARD, WRITECLIPBOARD, SYSTEMPARAMETERS, DISPLAYSETTINGS, GLOBALATOMS,
+    // DESKTOP, EXITWINDOWS: the eight flags Windows defines, every one set.
+    let flags = [0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80];
+    assert_eq!(
+        flags.iter().fold(0u32, |all, flag| all | flag),
+        UI_LIMIT_MASK
+    );
+    assert_eq!(UI_LIMIT_MASK, 0xFF);
 }
 
 #[test]

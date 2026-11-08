@@ -176,11 +176,13 @@ pub(super) fn log_on(
     }
 }
 
-/// The job's UI limits, as Chromium's sandbox sets them. `WinSta0`, not the desktop, owns the
-/// clipboard and the global atom table, so the private desktop alone doesn't keep the agent from
-/// the lawyer's clipboard or atoms. `DESKTOP`: no process in the job makes or switches desktops,
-/// so the agent can't make its own desktop the one the lawyer sees; the outer runner makes the
-/// agent's desktop before the inner runner joins the job.
+/// The job's UI limits, every one Windows has ([`super::UI_LIMIT_MASK`]), as Chromium's sandbox
+/// sets them, defence in depth behind the agent's own window station (`desktop.rs`). `WinSta0`,
+/// not the desktop, owns the clipboard and the global atom table, so a private desktop alone
+/// doesn't keep the agent from the lawyer's clipboard or atoms. `DESKTOP`: no process in the job
+/// makes or switches desktops, so the agent can't make its own desktop the one the lawyer sees,
+/// nor one on its station (whose DACL grants the pool user `WINSTA_CREATEDESKTOP`); the outer
+/// runner makes the agent's desktop before the inner runner joins the job.
 pub(super) const UI_LIMITS: JOB_OBJECT_UILIMIT = JOB_OBJECT_UILIMIT(
     JOB_OBJECT_UILIMIT_READCLIPBOARD.0
         | JOB_OBJECT_UILIMIT_WRITECLIPBOARD.0
@@ -191,6 +193,8 @@ pub(super) const UI_LIMITS: JOB_OBJECT_UILIMIT = JOB_OBJECT_UILIMIT(
         | JOB_OBJECT_UILIMIT_EXITWINDOWS.0
         | JOB_OBJECT_UILIMIT_DESKTOP.0,
 );
+// Every flag, as the tests that run on every OS read it (`UI_LIMIT_MASK`, 0xFF).
+const _: () = assert!(UI_LIMITS.0 == super::UI_LIMIT_MASK);
 
 /// A job whose last handle closing ends every process in it, with no breakaway allowed and
 /// [`UI_LIMITS`]: the inner runner, the agent and all it starts.

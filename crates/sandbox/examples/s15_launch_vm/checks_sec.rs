@@ -9,6 +9,7 @@ use std::time::Duration;
 use windows::Win32::System::JobObjects::JOB_OBJECT_UILIMIT_DESKTOP;
 
 use super::checks::{DENIED, pipes_as, run, started, values};
+use super::checks_ctl::is_agent_station;
 use super::launch::{Running, Spec, deadline, launch, pool_of, run_command, summary};
 use super::manifest::SECOND_A;
 use super::pool_verdict;
@@ -19,8 +20,6 @@ use super::win_desk::{self, UserObject};
 use super::win_thread;
 use super::{win, win_pool};
 
-/// The start of the agent's own window station's name (the outer runner makes it).
-const STATION_PREFIX: &str = "ClauseoRun-";
 /// `ERROR_INVALID_PARAMETER`: the pid names no process, so a refusal proves nothing.
 const NO_SUCH_PROCESS: &str = "87";
 
@@ -393,9 +392,9 @@ pub(crate) fn handles(ctx: &Ctx<'_>) -> Result<String, String> {
     ))
 }
 
-/// The `desktop` row: the agent runs on a `ClauseoRun-…` window station, can't open `WinSta0`
-/// (nor, if it could, `Default` there) nor switch desktops, the job has the desktop UI limit,
-/// and `Default`'s DACL has no ACE for A's pool SID. The DACLs of
+/// The `desktop` row: the agent runs on a `Service-0x0-<LUID>$` window station, can't open
+/// `WinSta0` (nor, if it could, `Default` there) nor switch desktops, the job has the desktop UI
+/// limit, and `Default`'s DACL has no ACE for A's pool SID. The DACLs of
 /// `WinSta0` and `Default` are dumped while the agent runs; the GDI capture is information.
 pub(crate) fn desktop(ctx: &Ctx<'_>) -> Result<String, String> {
     let pool = pool_of(ctx.manifest, "A")?;
@@ -476,16 +475,16 @@ pub(crate) fn desktop(ctx: &Ctx<'_>) -> Result<String, String> {
     ))
 }
 
-/// The agent's side of the screen-capture path: its own station is `ClauseoRun-…`, and
+/// The agent's side of the screen-capture path: its own station is `Service-0x0-<LUID>$`, and
 /// `WinSta0` doesn't open; if it does, `Default` on it must not open after
 /// `SetProcessWindowStation`.
 fn winsta0(ctx: &Ctx<'_>, first: &dyn Fn(&str) -> Option<String>, bad: &mut Vec<String>) {
     let station = first("desktop station").unwrap_or_default();
-    if station.starts_with(STATION_PREFIX) {
+    if is_agent_station(&station) {
         ctx.note(&format!("the agent's window station is {station}"));
     } else {
         bad.push(format!(
-            "the agent's window station is {station:?}, not {STATION_PREFIX}…"
+            "the agent's window station is {station:?}, not Service-0x0-<LUID>$"
         ));
     }
     match first("desktop open-winsta0").as_deref() {

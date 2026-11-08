@@ -19,10 +19,11 @@ use windows::Win32::Security::Authorization::{
 };
 use windows::Win32::Security::{
     ACL, CreateRestrictedToken, DACL_SECURITY_INFORMATION, DISABLE_MAX_PRIVILEGE, GetLengthSid,
-    GetSecurityDescriptorDacl, GetTokenInformation, PROTECTED_DACL_SECURITY_INFORMATION,
-    PSECURITY_DESCRIPTOR, PSID, SID_AND_ATTRIBUTES, SetTokenInformation, TOKEN_ALL_ACCESS,
-    TOKEN_DEFAULT_DACL, TOKEN_GROUPS, TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_LABEL,
-    TokenDefaultDacl, TokenGroups, TokenIntegrityLevel,
+    GetSecurityDescriptorDacl, GetSecurityDescriptorSacl, GetTokenInformation,
+    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SID_AND_ATTRIBUTES,
+    SetTokenInformation, TOKEN_ALL_ACCESS, TOKEN_DEFAULT_DACL, TOKEN_GROUPS,
+    TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_LABEL, TokenDefaultDacl, TokenGroups,
+    TokenIntegrityLevel,
 };
 use windows::Win32::Storage::FileSystem::WRITE_DAC;
 use windows::Win32::System::Diagnostics::ToolHelp::{
@@ -113,6 +114,22 @@ impl LocalDescriptor {
             return Err(io::Error::other("the default DACL's SDDL gave no DACL"));
         }
         Ok(dacl)
+    }
+
+    /// Its SACL (a label's), valid while `self` lives.
+    pub(in crate::windows) fn sacl(&self) -> io::Result<*mut ACL> {
+        let mut present = BOOL(0);
+        let mut sacl: *mut ACL = null_mut();
+        let mut defaulted = BOOL(0);
+        // SAFETY: the descriptor is valid while `self` lives; the out-pointers are live.
+        unsafe {
+            GetSecurityDescriptorSacl(self.0, &raw mut present, &raw mut sacl, &raw mut defaulted)
+        }
+        .map_err(|error| os_error(&error))?;
+        if !present.as_bool() || sacl.is_null() {
+            return Err(io::Error::other("the SDDL gave no SACL"));
+        }
+        Ok(sacl)
     }
 }
 

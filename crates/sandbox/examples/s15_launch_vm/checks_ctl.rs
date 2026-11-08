@@ -1,7 +1,7 @@
 //! The positive control for the UI-limit effects ([`controls`]): when the agent's innermost job
 //! reads `0x0` (or in strict mode), the harness runs `probe ui-control` once per [`VARIANTS`]
 //! entry, each on a fresh `ClauseoS15Ctl-<hex>` station and outside any job of ours, and, while
-//! the agent still runs, variant [`G`] on the agent's own `ClauseoRun-<hex>\Default`. Each
+//! the agent still runs, variant [`G`] on the agent's own `Service-0x0-<LUID>$\Default`. Each
 //! result is printed; `gate.rs` decides per effect which variants carry it.
 
 use std::time::Duration;
@@ -123,7 +123,7 @@ const G: Variant = Variant {
     differs: "only in not being in the runner's job: the agent's token shape (pool user A, Low, \
               the four restricting SIDs, the logon SID deny-only) made by a relay running as \
               pool user A, as (a)'s relay does as A2, and started on the agent's own \
-              ClauseoRun-<hex>\\Default while the agent waits",
+              Service-0x0-<LUID>$\\Default while the agent waits",
     restricted: 4,
     low: true,
 };
@@ -151,7 +151,7 @@ pub(crate) enum Live<'a> {
 enum Station<'a> {
     /// A fresh `ClauseoS15Ctl-<hex>`.
     Control,
-    /// The agent's own, by the name it printed (`ClauseoRun-<hex>`).
+    /// The agent's own, by the name it printed (`Service-0x0-<LUID>$`).
     Agent(&'a str),
     /// The user's interactive `WinSta0` (strict mode's (w)).
     Interactive,
@@ -181,7 +181,7 @@ pub(crate) fn controls(
     ctx.note(&format!(
         "positive control: probe ui-control as variant (g) on the agent's own station while it \
          waits, then (a) to (f), each on a fresh ClauseoS15Ctl-<hex> station made as the outer \
-         runner makes ClauseoRun-… (GENERIC_ALL; DACL SYSTEM and the token's user, the \
+         runner once made its named station (GENERIC_ALL; DACL SYSTEM and the token's user, the \
          harness's user too; Low label); none in a job of ours. Per effect, (g) alone carries it \
          when (g) ran, else (a) to (d); {}",
         win_ctl::own_job()
@@ -253,16 +253,24 @@ pub(crate) fn controls(
     judged
 }
 
-/// The agent's own station, from its `ui-effect station` line: a `ClauseoRun-` name.
+/// Whether `name` is the shape of the agent's own station: the outer runner makes it unnamed while
+/// acting as the pool user's logon, and Windows names it `Service-0x0-<logon LUID>$`.
+pub(crate) fn is_agent_station(name: &str) -> bool {
+    name.strip_prefix("Service-0x0-")
+        .and_then(|rest| rest.strip_suffix('$'))
+        .is_some_and(|luid| !luid.is_empty() && luid.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
+/// The agent's own station, from its `ui-effect station` line: [`is_agent_station`]'s shape.
 fn agent_station(lines: &[String]) -> Result<&str, String> {
     let station = lines
         .iter()
         .find_map(|l| l.strip_prefix("ui-effect station "))
         .map(str::trim);
     match station {
-        Some(name) if name.starts_with("ClauseoRun-") => Ok(name),
+        Some(name) if is_agent_station(name) => Ok(name),
         other => Err(format!(
-            "the agent printed station {other:?}, not a ClauseoRun- one"
+            "the agent printed station {other:?}, not a Service-0x0-<LUID>$ one"
         )),
     }
 }
@@ -413,14 +421,14 @@ fn facts(lines: &[String]) -> String {
 }
 
 /// A variant's shape, on its `probe ui-control` lines: it ran on the station `on` names (a
-/// `ClauseoS15Ctl-` one, or exactly the agent's `ClauseoRun-` one) as `user`, with the integrity
-/// and restricting SIDs `variant` names (and explicit attributes for (c)). Otherwise why. What it
-/// got at each effect is `gate.rs`'s.
+/// `ClauseoS15Ctl-` one, or exactly the agent's `Service-0x0-<LUID>$` one) as `user`, with the
+/// integrity and restricting SIDs `variant` names (and explicit attributes for (c)). Otherwise
+/// why. What it got at each effect is `gate.rs`'s.
 fn shape(variant: &Variant, user: &str, lines: &[String], on: Station<'_>) -> Result<(), String> {
     let station = get(lines, "station");
     let right = match on {
         Station::Control => station.is_some_and(|s| s.starts_with("ClauseoS15Ctl-")),
-        Station::Agent(name) => station == Some(name) && name.starts_with("ClauseoRun-"),
+        Station::Agent(name) => station == Some(name) && is_agent_station(name),
         Station::Interactive => station == Some("WinSta0"),
     };
     if !right {
@@ -522,7 +530,7 @@ mod tests {
         let open = swap(3, "ui-control restricted 0");
         assert_eq!(shape(unrestricted, user, &open, on), Ok(()));
         assert!(shape(lawyer, user, &swap(0, "ui-control station WinSta0"), on).is_err());
-        let agents = swap(0, "ui-control station ClauseoRun-0123456789abcdef");
+        let agents = swap(0, "ui-control station Service-0x0-1a2b3c$");
         assert!(shape(pool, user, &agents, on).is_err());
         assert!(shape(lawyer, user, &lines(&GOOD[..4]), on).is_err());
     }
@@ -530,12 +538,12 @@ mod tests {
     #[test]
     fn variant_g_must_be_on_the_agents_own_station_as_pool_user_low_restricted() {
         let user = "S-1-5-21-1-1001";
-        let name = "ClauseoRun-0123456789abcdef";
+        let name = "Service-0x0-1a2b3c$";
         let on = Station::Agent(name);
-        let agents = swap(0, "ui-control station ClauseoRun-0123456789abcdef");
+        let agents = swap(0, "ui-control station Service-0x0-1a2b3c$");
         assert_eq!(shape(&G, user, &agents, on), Ok(()));
         assert!(shape(&G, user, &lines(&GOOD), on).is_err());
-        let other = swap(0, "ui-control station ClauseoRun-fedcba9876543210");
+        let other = swap(0, "ui-control station Service-0x0-4d5e6f$");
         assert!(shape(&G, user, &other, on).is_err());
         let ctl = Station::Agent("ClauseoS15Ctl-00");
         assert!(shape(&G, user, &lines(&GOOD), ctl).is_err());
@@ -546,9 +554,25 @@ mod tests {
         let mut open = agents;
         open[3] = "ui-control restricted 0".to_owned();
         assert!(shape(&G, user, &open, on).is_err());
-        let printed = lines(&["ui-effect station ClauseoRun-0123456789abcdef"]);
+        let printed = lines(&["ui-effect station Service-0x0-1a2b3c$"]);
         assert_eq!(agent_station(&printed), Ok(name));
         assert!(agent_station(&lines(&["ui-effect station ClauseoS15Ctl-00"])).is_err());
         assert!(agent_station(&[]).is_err());
+        let winsta0 = lines(&["ui-effect station WinSta0"]);
+        assert!(agent_station(&winsta0).is_err());
+    }
+
+    #[test]
+    fn the_agents_station_is_a_logons_unnamed_one() {
+        assert!(is_agent_station("Service-0x0-1a2b3c$"));
+        for not in [
+            "WinSta0",
+            "Service-0x0-$",
+            "Service-0x0-1a2b3c",
+            "ClauseoRun-0123",
+            "x$",
+        ] {
+            assert!(!is_agent_station(not), "{not}");
+        }
     }
 }

@@ -14,6 +14,7 @@ use super::marker::{marked, remove_marker};
 use super::paths::{CodexReuse, WinPath};
 use super::spawn::{Process, kill_on_close_job, restrict_dll_search, system_folder};
 use super::start::start;
+use super::station::StationSids;
 use super::{LAUNCH_CAP, LaunchMessage, RUN_DIR, RunExit, agent_env, codex_reuse, is_launch_name};
 use crate::windows::matters::SANDBOX_DIR;
 use crate::windows::pipe::os::ServerPipe;
@@ -21,7 +22,6 @@ use crate::windows::pipe::{PipeSet, Role, pipe_sddl};
 use crate::windows::record::current_user_sid;
 use crate::windows::secrets::{SecretError, secret_for};
 use crate::windows::token::os::{logon_sid, own_token, profile_folder};
-use crate::windows::token::{desktop_sddl, station_sddl};
 use crate::windows::{private_dir, write};
 use end::OsSweeper;
 use steps::Start;
@@ -168,30 +168,16 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
         | SecretError::Malformed(_)
         | SecretError::Dpapi { .. }) => Failure::new(RunExit::NoSecret, other.to_string()),
     })?;
-    // The agent's window station and desktop (`desktop.rs`), made here so the job can carry the
-    // desktop UI limit: no process in it may make or switch desktops. They live as long as this
-    // process.
-    let mut random = [0u8; 8];
-    getrandom::fill(&mut random).map_err(|error| {
-        Failure::new(
-            RunExit::Token,
-            format!("the window station's name: random failed ({error})"),
-        )
-    })?;
-    let station_name = super::station_name(random);
-    let matter = message.matter_sid.as_ref();
-    let agent_desktop = AgentDesktop::create(
-        &station_name,
-        &desktop,
-        &station_sddl(&message.pool_user, matter),
-        &desktop_sddl(&message.pool_user, matter),
-    )
-    .map_err(|(call, e)| {
-        Failure::new(
-            RunExit::Token,
-            os(&format!("the agent's window station: {call}"), &e),
-        )
-    })?;
+    // The agent's window station and desktop (`station.rs`, `desktop.rs`), made here so the
+    // job can carry the desktop UI limit: no process in it may make or switch desktops. They
+    // live as long as this process. Any failure refuses the launch: no other station is used.
+    let sids = StationSids {
+        creator: &desktop,
+        pool_user: &message.pool_user,
+        matter: message.matter_sid.as_ref(),
+    };
+    let agent_desktop = AgentDesktop::create(&message.pool_name, &password, &sids)
+        .map_err(|(call, e)| station_failure(call, &e))?;
     // The logon, the user's check, the job, the shut, then the resume (`start.rs`); the inner's
     // first act is the sweep of every other process of the pool user's. The job's one handle stays
     // this process's, so the job's processes end with it.
@@ -222,6 +208,8 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
             .unwrap_or_default(),
     };
     let result = serve(&inner, pipes, &launch, end);
+    // Held until here: the station goes with its last handle.
+    drop(agent_desktop);
     // `serve` returns only on a failure (`relay` exits the process): the job ends and empties,
     // then the end sweeper starts.
     end.trigger(EndSignal::Failed);
@@ -565,6 +553,18 @@ fn logon_failure(code: u32) -> Failure {
         other => Failure::new(
             RunExit::Logon,
             format!("CreateProcessWithLogonW failed ({other})"),
+        ),
+    }
+}
+
+/// Maps a failure of the agent's window station's `call` to its failure: `LogonUserW`'s refused
+/// password or logon right as the inner's logon's ([`logon_failure`]), the rest [`RunExit::Token`].
+fn station_failure(call: &str, error: &io::Error) -> Failure {
+    match (call, error.raw_os_error()) {
+        ("LogonUserW", Some(code @ (1326 | 1385))) => logon_failure(code.unsigned_abs()),
+        _ => Failure::new(
+            RunExit::Token,
+            os(&format!("the agent's window station: {call}"), error),
         ),
     }
 }

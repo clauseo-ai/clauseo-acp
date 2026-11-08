@@ -342,8 +342,8 @@ fn create_desktop_sized(attributes: *const std::ffi::c_void, heap_kb: Option<u32
     0
 }
 
-/// The control station: the window station `name`, made as `runner/desktop.rs` makes
-/// `ClauseoRun-…` (`CreateWindowStationW(name, 0, GENERIC_ALL, sa)` with a DACL of `SYSTEM`
+/// The control station: the window station `name`, made as `runner/desktop.rs` once made its
+/// named station (`CreateWindowStationW(name, 0, GENERIC_ALL, sa)` with a DACL of `SYSTEM`
 /// and `sids`, labelled Low), and its desktop `Default` (`GENERIC_ALL`, the same descriptor),
 /// made with this process switched to it for the call only. Both stay open while it lives, so the
 /// control process can start on `<name>\Default`; closed on drop.
