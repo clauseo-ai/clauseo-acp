@@ -263,6 +263,18 @@ fn only_a_pool_users_possible_sids_count_as_open() {
         ("S-1-5-32-545", true),
         ("S-1-5-6", true),
         ("S-1-15-2-1", true),
+        // An Entra ID account or group (the lawyer's, say) is no pool user's.
+        (
+            "S-1-12-1-1111111111-2222222222-3333333333-1444444444",
+            false,
+        ),
+        (
+            "S-1-12-1-3555555555-1666666666-2777777777-3888888888",
+            false,
+        ),
+        // Another S-1-12 form, or an unknown authority, may still be.
+        ("S-1-12-2-1", true),
+        ("S-1-99-1", true),
     ] {
         let sid = Sid::parse(text).unwrap();
         assert_eq!(may_be_pool(Some(&sid), &pool), open, "{text}");
