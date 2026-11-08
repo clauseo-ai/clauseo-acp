@@ -4,7 +4,9 @@
 use clauseo_protocol::{ErrorCode, NotProtectedCause, Protection, ProtectionTier, UnsupportedWhy};
 use clauseo_sandbox::{Blocked, Detection, NoSandbox, SET_UP_BY_OTHER_USER, SetupState, Tier};
 
-use super::{Observed, ProtectionHost, asks_admin, observe, protection_of, refusal_of};
+use super::{
+    Observed, ProtectionHost, asks_admin, observe, observe_within, protection_of, refusal_of,
+};
 
 fn c(reason: NoSandbox) -> Detection {
     Detection {
@@ -403,4 +405,92 @@ fn a_change_of_either_setting_gives_the_new_view_once() {
     let auto = host.take_changed(true, true).unwrap();
     assert!(auto.unprotected_auto_allowed);
     assert_eq!(host.take_changed(true, true), None);
+}
+
+/// #813's security review, 1: macOS' detection-only seam (tier A, no set-up, no launchers) has
+/// nothing to set up: `set_up_state` is `None`, the computer not-built, and no retry asks.
+#[test]
+fn a_seam_with_no_set_up_and_no_launchers_has_no_set_up_state() {
+    let tier_a = Detection {
+        tier: Tier::A,
+        reason: None,
+    };
+    let sandbox = crate::config::Sandbox::new(std::sync::Arc::new(move || tier_a.clone()), None);
+    let observed = observe(Some(&sandbox), std::path::Path::new("data"));
+    assert_eq!(
+        observed.computer,
+        not(NotProtectedCause::Unsupported {
+            why: UnsupportedWhy::NotBuilt,
+        })
+    );
+    assert_eq!(observed.set_up_state, None);
+    assert!(!observed.asks_admin);
+    let view = ProtectionHost::new(None, observed).view(false, false);
+    assert_eq!(view.set_up_state, None);
+}
+
+/// #813's security review, 2: with no jail on this computer (Windows on ARM, an older build),
+/// a set-up the record calls needed or failed can't help: no retry runs it, with launchers or
+/// without.
+#[test]
+fn no_jail_means_no_administrator_retry() {
+    for state in [SetupState::Needed, SetupState::Failed("x".to_owned())] {
+        for launchers in [false, true] {
+            let sandbox = seam(c(NoSandbox::UnsupportedOs), state.clone(), launchers);
+            let observed = observe(Some(&sandbox), std::path::Path::new("data"));
+            assert!(!observed.asks_admin, "{state:?}, launchers {launchers}");
+            assert!(matches!(
+                observed.computer,
+                Protection::NotProtected {
+                    cause: NotProtectedCause::Unsupported { .. }
+                }
+            ));
+        }
+    }
+}
+
+/// #813's security review, 3: a detection that doesn't answer within the wait is a failed
+/// probe (`SetUpFailed`, fail closed) and the start goes on; one that answers is taken.
+#[test]
+fn a_detection_past_its_wait_is_a_failed_probe() {
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    let held = std::sync::Mutex::new(held);
+    let hangs = crate::config::Sandbox::new(
+        std::sync::Arc::new(move || {
+            let _released = held.lock().map(|held| held.recv());
+            Detection {
+                tier: Tier::B,
+                reason: None,
+            }
+        }),
+        None,
+    )
+    .with_launchers(
+        std::sync::Arc::new(NoLaunch),
+        clauseo_process::SpawnOptions::new(),
+    );
+    let wait = std::time::Duration::from_millis(50);
+    let observed = observe_within(Some(&hangs), std::path::Path::new("data"), wait);
+    // Here at all: the detection is still held, so the wait gave up on it.
+    assert_eq!(observed.computer, not(NotProtectedCause::SetUpFailed));
+    drop(release);
+    let answers = seam(
+        Detection {
+            tier: Tier::B,
+            reason: None,
+        },
+        SetupState::Ready,
+        true,
+    );
+    let observed = observe_within(
+        Some(&answers),
+        std::path::Path::new("data"),
+        std::time::Duration::from_secs(5),
+    );
+    assert_eq!(
+        observed.computer,
+        Protection::Protected {
+            tier: ProtectionTier::B,
+        }
+    );
 }

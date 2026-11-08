@@ -306,7 +306,7 @@ mod protection_removing;
 #[cfg(test)]
 #[path = "host/protection_rig.rs"]
 mod protection_rig;
-
+#[cfg(test)]
 #[path = "host/protection_set_up_only.rs"]
 mod protection_set_up_only;
 #[cfg(test)]

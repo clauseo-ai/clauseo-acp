@@ -8,8 +8,10 @@
 //!   blocking for minutes) runs only from the app's set-up action, `RetryProtection`, on the
 //!   host's set-up thread; never from the installer, the UI thread or the host's actor.
 //! - macOS and Linux: detection only, no set-up. Linux's detection says no jail on this OS
-//!   (`unsupported { why: os }`); macOS' says tier A, which goes to `set_up_state` alone.
-//! - The first detection runs in `Host::start`, on the host's start thread, never the UI's.
+//!   (`unsupported { why: os }`); macOS' says tier A, which the host keeps out of the view
+//!   (no set-up, so no `set_up_state`; the computer `not_built`) until D3b's Seatbelt.
+//! - The first detection runs in `Host::start`, on the host's start thread, never the UI's,
+//!   bounded at 5 s by the host (a later answer is a failed probe), so quit waits no longer.
 //! - The `sandbox` feature (on by default) gates this; without it the host has no seam, as
 //!   before.
 

@@ -22,6 +22,7 @@
 //! - A change of the computer's protection sends `ProtectionChanged` for every listed matter.
 
 use std::path::Path;
+use std::time::Duration;
 
 use clauseo_protocol::{
     ErrorCode, HostEvent, NotProtectedCause, Protection, ProtectionTier, ProtectionView,
@@ -144,10 +145,20 @@ impl ProtectionHost {
     }
 }
 
-/// Detects this computer's protection through `sandbox`, on the calling thread: never the
+/// How long a detection may take before it counts as a failed probe (#813's security review):
+/// macOS' first one starts `sandbox-exec`, and the app's quit waits for the host's start.
+const DETECT_WAIT: Duration = Duration::from_secs(5);
+
+/// Detects this computer's protection through `sandbox`, from the calling thread: never the
 /// actor's. No seam: `Unsupported { why: not_built }`, with no retry to offer. A set-up that is
-/// done gives its time from its marker in `data_dir` (`set_up_at`).
+/// done gives its time from its marker in `data_dir` (`set_up_at`). The detection itself runs
+/// on a thread of its own, bounded by [`DETECT_WAIT`] ([`detect_within`]).
 pub(crate) fn observe(sandbox: Option<&Sandbox>, data_dir: &Path) -> Observed {
+    observe_within(sandbox, data_dir, DETECT_WAIT)
+}
+
+/// [`observe`], the detection bounded by `wait`.
+fn observe_within(sandbox: Option<&Sandbox>, data_dir: &Path, wait: Duration) -> Observed {
     let Some(sandbox) = sandbox else {
         return Observed {
             computer: Protection::NotProtected {
@@ -160,19 +171,60 @@ pub(crate) fn observe(sandbox: Option<&Sandbox>, data_dir: &Path) -> Observed {
             set_up_state: None,
         };
     };
-    let detection = (sandbox.detect)();
+    let detection = detect_within(&sandbox.detect, wait);
     let state = sandbox.setup.as_ref().map(|setup| setup.state());
     let set_up_at = match state {
         Some(SetupState::Ready) => set_up_at::read(data_dir),
         _ => None,
     };
-    let (computer, set_up_state) = gated(sandbox, protection_of(&detection));
+    let found = protection_of(&detection);
+    // No jail on this computer (an OS without one, Windows on ARM, an older build): a set-up
+    // can't help, so a retry only checks again (#813's security review).
+    let no_jail = is_unsupported(&found);
+    let (computer, set_up_state) = gated(sandbox, found);
     Observed {
         computer,
-        asks_admin: state.as_ref().is_some_and(asks_admin),
+        asks_admin: !no_jail && state.as_ref().is_some_and(asks_admin),
         set_up_at,
         set_up_state,
     }
+}
+
+/// Runs `detect` on a thread of its own and waits at most `wait` for it. Past the wait, or
+/// with no thread or one that ended without an answer, the detection is a failed probe
+/// (`SetUpFailed`, fail closed), logged by its kind; a late answer is dropped.
+fn detect_within(detect: &crate::config::Detect, wait: Duration) -> Detection {
+    let (answer, answered) = std::sync::mpsc::sync_channel(1);
+    let detect = std::sync::Arc::clone(detect);
+    let spawned = std::thread::Builder::new()
+        .name("clauseo-sandbox-detect".to_owned())
+        .spawn(move || {
+            // The waiter may have given up; nobody is left to tell.
+            let _gone = answer.send(detect());
+        });
+    let kind = match spawned {
+        Err(_) => "no_thread",
+        Ok(_thread) => match answered.recv_timeout(wait) {
+            Ok(detection) => return detection,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => "timed_out",
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => "ended",
+        },
+    };
+    tracing::warn!(kind, "the sandbox check gave no answer");
+    Detection {
+        tier: Tier::C,
+        reason: Some(NoSandbox::ProbeFailed(kind.to_owned())),
+    }
+}
+
+/// Whether `found` says this computer has no jail Clauseo can use.
+fn is_unsupported(found: &Protection) -> bool {
+    matches!(
+        found,
+        Protection::NotProtected {
+            cause: NotProtectedCause::Unsupported { .. }
+        }
+    )
 }
 
 /// The rule (R17 PR-D3a, orchestrator-approved): a seam without launchers never drives launch
@@ -181,16 +233,11 @@ pub(crate) fn observe(sandbox: Option<&Sandbox>, data_dir: &Path) -> Observed {
 /// the computer is `Unsupported { why: not_built }` as with no seam: `sandbox.required` refuses
 /// as for not-built, none of R17 PR-E's always-refuse causes refuses, nothing runs under the
 /// runner (`tier` is none), and `found` goes to the view's `set_up_state` for the set-up
-/// screen only. An OS with no jail at all (`Unsupported`) has nothing to set up: it is the
-/// computer's protection as it stands, refused the same way as not-built.
+/// screen only, where there is a set-up (Windows' tier B; never macOS' detection-only seam,
+/// #813's security review). An OS with no jail at all (`Unsupported`) has nothing to set up:
+/// it is the computer's protection as it stands, refused the same way as not-built.
 fn gated(sandbox: &Sandbox, found: Protection) -> (Protection, Option<Protection>) {
-    let no_jail = matches!(
-        found,
-        Protection::NotProtected {
-            cause: NotProtectedCause::Unsupported { .. }
-        }
-    );
-    if sandbox.launchers.is_some() || no_jail {
+    if sandbox.launchers.is_some() || is_unsupported(&found) {
         return (found, None);
     }
     let not_built = Protection::NotProtected {
@@ -198,7 +245,7 @@ fn gated(sandbox: &Sandbox, found: Protection) -> (Protection, Option<Protection
             why: UnsupportedWhy::NotBuilt,
         },
     };
-    (not_built, Some(found))
+    (not_built, sandbox.setup.is_some().then_some(found))
 }
 
 /// Whether a set-up in `state` is one `RetryProtection` runs, with its administrator prompt:

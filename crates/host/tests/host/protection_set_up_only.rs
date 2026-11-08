@@ -13,7 +13,7 @@ use clauseo_protocol::{
 };
 use clauseo_sandbox::{Blocked, NoSandbox, SetupState};
 
-use crate::codex::Recording;
+use crate::codex::{Recording, turn_failed};
 use crate::protection::{dir, start};
 use crate::protection_rig::{
     Gated, Plan, b, c, protection_events, protection_events_to_end, rig, send, subscribe, view,
@@ -59,7 +59,8 @@ fn create_thread(matter: clauseo_protocol::MatterId) -> HostCommand {
 
 /// Test 1: tier B set up, no launchers: a turn's agent starts through the host's own launcher,
 /// as today, and the view says not-built for launches beside the set-up state tier B; every
-/// matter's row says not-built too.
+/// matter's row says not-built too. With `sandbox.required` on, the launch is refused with
+/// `sandbox.required`, as for not-built.
 #[test]
 fn a_set_up_sandbox_without_launchers_launches_as_today_and_says_set_up() {
     let dir = dir("set_up_only_launch");
@@ -92,6 +93,23 @@ fn a_set_up_sandbox_without_launchers_launches_as_today_and_says_set_up() {
         events.dump()
     );
     assert_eq!(launches.lock().unwrap().len(), 1, "the host's launcher");
+    host.shutdown();
+    // Set up, and the firm requires the sandbox: the turn's launch is refused as not-built's,
+    // `sandbox.required`, and no agent starts.
+    settings(&dir, true, false);
+    let recording = Recording::new(&dir);
+    let launches = Arc::clone(&recording.envs);
+    let sandbox = rig(Plan::set_up_only(vec![b()], vec![SetupState::Ready])).sandbox;
+    let host = dir.start_launching(2, Arc::new(recording), move |config| {
+        config.with_sandbox(sandbox)
+    });
+    assert_eq!(view(&host).set_up_state, Some(tier_b()));
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Look at the matter again.");
+    assert_eq!(events.until_turn_ended(turn).stop, StopReason::Failed);
+    let failed = turn_failed(&events, turn).unwrap_or_else(|| panic!("{}", events.dump()));
+    assert_eq!(failed.code, ErrorCode::SandboxRequired);
+    assert!(launches.lock().unwrap().is_empty(), "an agent started");
     host.shutdown();
 }
 
