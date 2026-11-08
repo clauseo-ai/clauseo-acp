@@ -109,13 +109,14 @@ mod windows_refresher;
 #[cfg(windows)]
 pub(crate) mod windows_tests;
 
+pub use crate::windows::setup::{Ensured, TASK_REENABLED};
 #[cfg(windows)]
 pub use installed::{installed_setup_sha256, recorded_admin_copy_sha256};
 pub use rules::{
-    EXECUTION_LIMIT, Ensured, FOLDER_SDDL, INSTANCES_IGNORE_NEW, INSTANCES_QUEUE, REFRESH_ARG,
-    RETIRE, Registered, Retire, SET_UP_ARG, SET_UP_EXECUTION_LIMIT, STAGING_SDDL, STOP_ARG,
-    STOP_EXECUTION_LIMIT, Starters, SystemTask, TASK_REENABLED, TASKS, TEARDOWN, Teardown,
-    action_path, hex, inside_profile, not_registered, retire, same_path, sddl_matches, task_sddl,
+    EXECUTION_LIMIT, FOLDER_SDDL, INSTANCES_IGNORE_NEW, INSTANCES_QUEUE, REFRESH_ARG, RETIRE,
+    Registered, Retire, SET_UP_ARG, SET_UP_EXECUTION_LIMIT, STAGING_SDDL, STOP_ARG,
+    STOP_EXECUTION_LIMIT, Starters, SystemTask, TASKS, TEARDOWN, Teardown, action_path, hex,
+    inside_profile, not_registered, retire, same_path, sddl_matches, task_sddl,
 };
 pub use sources::{SourceError, SourceFile, Sources};
 #[cfg(windows)]

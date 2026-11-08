@@ -256,7 +256,7 @@ fn removing_a_per_user_pool_leaves_adopts_task() {
 
 #[test]
 fn a_set_up_task_found_disabled_is_turned_back_on_and_written_to_the_event_log() {
-    use crate::windows::refresh::TASK_REENABLED;
+    use crate::windows::setup::TASK_REENABLED;
     use crate::windows::setup::event_line::fixed_words;
     let line = format!("event_log {TASK_REENABLED}");
     let mut machine = installed("setup-tasks-disabled", Some(CopyOwner::Machine));

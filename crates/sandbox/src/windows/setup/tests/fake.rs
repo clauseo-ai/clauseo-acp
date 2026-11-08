@@ -18,7 +18,6 @@ use crate::windows::fence::RegisteredMatter;
 use crate::windows::ledger::{Ledger, ledger_path};
 use crate::windows::marker::{Marker, MarkerState};
 use crate::windows::pool::MachineRecord;
-use crate::windows::refresh::Ensured;
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::setup::{
     LogonRight, Machine, MachineError, Password, ProfileDir, ServiceStart, machine::GroupFacts,
@@ -500,24 +499,9 @@ impl Machine for FakeMachine {
         &mut self,
         owner: &Sid,
         group: Option<&Sid>,
-    ) -> Result<Option<Ensured>, MachineError> {
+    ) -> Result<Option<crate::windows::setup::Ensured>, MachineError> {
         assert!(!self.acting.get(), "the task is registered as admin");
-        if self.run == Run::Task {
-            return Ok(None);
-        }
-        let starters = match group {
-            None => format!("owner {}", rid(owner)),
-            // The group is checked through `set_up_task`: its SID isn't known before the run.
-            Some(_) => "interactive".to_owned(),
-        };
-        self.call(format!("ensure_set_up_task {starters}"))?;
-        self.state.set_up_task = Some((owner.clone(), group.cloned()));
-        let disabled = std::mem::take(&mut self.state.set_up_task_disabled);
-        Ok(Some(if disabled {
-            Ensured::ReEnabled
-        } else {
-            Ensured::Current
-        }))
+        self.heal_set_up_task(owner, group)
     }
 
     fn event_log(&mut self, line: &str) {

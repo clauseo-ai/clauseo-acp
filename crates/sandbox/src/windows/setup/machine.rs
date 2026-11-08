@@ -12,7 +12,6 @@ use crate::windows::fence::RegisteredMatter;
 use crate::windows::ledger::Ledger;
 use crate::windows::marker::{Marker, MarkerState};
 use crate::windows::pool::MachineRecord;
-use crate::windows::refresh::Ensured;
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::sids::Sid;
 use crate::windows::wfp::{NetworkReport, NetworkSetup};
@@ -93,6 +92,22 @@ pub struct GroupFacts {
     /// Its members, by SID.
     pub members: Vec<Sid>,
 }
+
+/// What `ensure_task` found and did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ensured {
+    /// The task was there as `register_task` would register it: nothing done.
+    Current,
+    /// It was missing, or its definition differed while enabled: registered again.
+    Registered,
+    /// It was there but disabled (a crashed uninstall, or IT): registered again, enabled, which
+    /// the set-up writes to the Event Log so IT sees it ([`TASK_REENABLED`]).
+    ReEnabled,
+}
+
+/// The Event Log's line for a set-up task a set-up found disabled and turned back on: fixed
+/// words, naming no path or account.
+pub const TASK_REENABLED: &str = "the Clauseo set-up task was disabled; set-up turned it back on";
 
 /// Everything the set-up asks of the machine besides the permission writes
 /// ([`AclWriter`](crate::windows::AclWriter)), one method per step of

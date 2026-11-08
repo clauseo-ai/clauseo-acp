@@ -15,9 +15,9 @@ use crate::windows::setup::record_values::CopyOwner;
 use std::cell::Cell;
 use std::rc::Rc;
 
-use super::fake::{FakeMachine, OWNER, OWNER_NAME, VOLUME, sid};
+use super::fake::{FakeMachine, OWNER, OWNER_NAME, Run, VOLUME, rid, sid};
 use crate::test_support::TempDir;
-use crate::windows::setup::{LogonRight, MachineError, ServiceStart};
+use crate::windows::setup::{Ensured, LogonRight, MachineError, ServiceStart};
 
 use crate::windows::FolderSupport;
 use crate::windows::admit::{FolderList, ReadDir};
@@ -242,6 +242,32 @@ pub(super) fn new_machine(test: &str) -> FakeMachine {
 }
 
 impl FakeMachine {
+    /// `Machine::ensure_set_up_task`: none on the set-up task's own run; else the task
+    /// registered for `owner` (and per machine `group` refused), said re-enabled once when it
+    /// was disabled.
+    pub(super) fn heal_set_up_task(
+        &mut self,
+        owner: &Sid,
+        group: Option<&Sid>,
+    ) -> Result<Option<Ensured>, MachineError> {
+        if self.run == Run::Task {
+            return Ok(None);
+        }
+        let starters = match group {
+            None => format!("owner {}", rid(owner)),
+            // The group is checked through `set_up_task`: its SID isn't known before the run.
+            Some(_) => "interactive".to_owned(),
+        };
+        self.call(format!("ensure_set_up_task {starters}"))?;
+        self.state.set_up_task = Some((owner.clone(), group.cloned()));
+        let disabled = std::mem::take(&mut self.state.set_up_task_disabled);
+        Ok(Some(if disabled {
+            Ensured::ReEnabled
+        } else {
+            Ensured::Current
+        }))
+    }
+
     /// A machine with only the owner's account, `DeviceSync`, an empty data folder and a 32 MiB
     /// journal on [`VOLUME`].
     pub(super) fn new(test: &str) -> FakeMachine {

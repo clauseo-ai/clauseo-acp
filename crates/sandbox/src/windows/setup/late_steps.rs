@@ -10,7 +10,7 @@ use clauseo_protocol::MatterId;
 
 use super::create::Failed;
 use super::journal_plan::{JournalAction, journal_plan};
-use super::machine::{Machine, MachineError, owned};
+use super::machine::{Ensured, Machine, MachineError, TASK_REENABLED, owned};
 use super::outcome::{JournalOutcome, SetupFailure, Step, cause_of};
 use super::record_values::CopyOwner;
 use super::rollback::Run;
@@ -18,7 +18,6 @@ use crate::Error;
 use crate::windows::apply::{Applied, fence_each};
 use crate::windows::fence::RegisteredMatter;
 use crate::windows::pool::MachineRecord;
-use crate::windows::refresh::{Ensured, TASK_REENABLED};
 use crate::windows::sids::Sid;
 use crate::windows::wfp::{NetworkReport, NetworkSetup};
 use crate::windows::writer::AclWriter;
@@ -47,8 +46,9 @@ const ADMINISTRATORS: &str = "S-1-5-32-544";
 /// differs (`Machine::ensure_set_up_task`): per user for `owner`, per machine for interactive
 /// users with the pool's `group` refused. So a lawyer whose task was deleted meets the prompt
 /// once, not on every set-up. One it found disabled is written to the Event Log
-/// (`refresh::TASK_REENABLED`), so IT sees it turned back on. The set-up task's own run
-/// doesn't: per machine it gives the task the deny of `group`, which may exist only since this run (`Machine::deny_set_up_to`, every
+/// ([`TASK_REENABLED`]), so IT sees it turned back on. The set-up task's own run doesn't: per
+/// machine it gives the task the deny of `group`, which may exist only since this run
+/// (`Machine::deny_set_up_to`, every
 /// run, as a reinstall gives the task its install-time descriptor), as a pool user holds `IU`
 /// too; per user the task names the owner alone and needs nothing. A failure is
 /// [`Step::SetUpTask`]; a task run on an install with no set-up task skips the deny. The set-up
