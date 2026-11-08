@@ -54,6 +54,10 @@ const TRUSTED: [&str; 6] = [
 /// one.
 const SERVICE: &str = "S-1-5-80-";
 
+/// An Entra ID account's or group's SID (`S-1-12-1-…`): a pool user is always a local
+/// `S-1-5-21-<this machine>` account, so none is one, and no local token holds one but its own.
+const ENTRA: &str = "S-1-12-1-";
+
 /// Why a task the fallback read stays unreadable: its file's principal is the pool's, or may be.
 const NOT_SKIPPED: &str = "the task file names a pool user or a name that resolves to none";
 
@@ -81,13 +85,15 @@ pub fn trusted(security: &FileSecurity, pool: &[Sid]) -> Result<(), Failed> {
 /// Whether a pool user's token may hold `sid` (`None`: an allow whose SID wasn't read). A local
 /// account's token holds its own SID, groups of its machine, `BUILTIN` groups and well-known
 /// ones (Everyone, Users, Authenticated Users, INTERACTIVE, LOCAL, its logon session's), never
-/// another domain's account or group; so every SID may be, but [`TRUSTED`], a service's, and an
-/// account or group under `S-1-5-21` whose domain is no pool SID's.
+/// another domain's account or group; so every SID may be, but [`TRUSTED`], a service's, an
+/// Entra ID account or group (`S-1-12-1-…`: pool users are local accounts), and an account or
+/// group under `S-1-5-21` whose domain is no pool SID's.
 pub fn may_be_pool(sid: Option<&Sid>, pool: &[Sid]) -> bool {
     let Some(sid) = sid else {
         return true;
     };
-    if TRUSTED.contains(&sid.as_str()) || sid.as_str().starts_with(SERVICE) {
+    let text = sid.as_str();
+    if TRUSTED.contains(&text) || text.starts_with(SERVICE) || text.starts_with(ENTRA) {
         return false;
     }
     match sid.domain() {
