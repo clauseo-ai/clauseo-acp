@@ -48,6 +48,8 @@ mod deny_tests;
 #[cfg(test)]
 pub(crate) mod fake;
 mod heal;
+#[cfg(windows)]
+pub(crate) mod heal_os;
 #[cfg(test)]
 mod heal_tests;
 #[cfg(test)]
@@ -68,11 +70,13 @@ pub(crate) mod take_back;
 pub(crate) mod take_back_os;
 #[cfg(test)]
 mod tests;
+mod text;
 mod version;
 
 pub use heal::{Owed, owed};
 pub use locked::{group_denied, locked, locked_file_sddl, locked_folder_sddl};
 pub use security_block::launch_recorded;
+pub use text::{hex, is_sha256_hex};
 pub use version::{compare_versions, parse_version, version_not_older};
 
 /// The admin copy's folder under `%ProgramFiles%`, one part at a time.
@@ -190,6 +194,10 @@ pub trait AdminCopyFs {
     }
     /// Waits `pause` between looks at a copy being healed.
     fn pause(&self, _pause: std::time::Duration) {}
+    /// A monotonic clock, for the heal's back-off.
+    fn clock(&self) -> std::time::Duration {
+        std::time::Duration::ZERO
+    }
 }
 
 /// What keeps a hashed admin copy unchanged ([`AdminCopyFs::sha256_held`]): on Windows the
@@ -213,7 +221,7 @@ impl Held {
 /// be read does: [`Blocked::AdminCopyMissing`], never "no other owner".
 pub fn check_launchable(fs: &dyn AdminCopyFs) -> Result<PathBuf, Blocked> {
     owner_check(fs)?;
-    heal::heal_owed(fs);
+    heal::heal_owed(fs, heal::Asker::Launch);
     check(fs)
 }
 
@@ -226,7 +234,7 @@ pub fn launch_checked<T>(
     start: impl FnOnce(&Path) -> T,
 ) -> Result<T, Blocked> {
     owner_check(fs)?;
-    heal::heal_owed(fs);
+    heal::heal_owed(fs, heal::Asker::Launch);
     let (exe, held) = checked(fs, true, |exe| fs.sha256_held(exe))?;
     let started = start(&exe);
     drop(held);
@@ -477,23 +485,6 @@ fn safe_against(bytes: &[u8], rights: u32) -> bool {
     })
 }
 
-/// Whether `text` is a SHA-256 as the record holds it: 64 lowercase hex digits.
-pub fn is_sha256_hex(text: &str) -> bool {
-    text.len() == 64
-        && text
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-}
-
-/// `bytes` as lowercase hex.
-pub fn hex(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-    bytes.iter().fold(String::new(), |mut out, byte| {
-        let _infallible = write!(out, "{byte:02x}");
-        out
-    })
-}
-
 /// A Windows path's text as compared here: `/` read as `\`, a `\\?\` prefix (not `\\?\UNC\`)
 /// dropped, and no trailing `\` but a root's.
 fn normal(path: &Path) -> String {
@@ -543,7 +534,7 @@ pub fn protection_state(
     marker: SetupState,
     combined: SetupState,
 ) -> SetupState {
-    heal::heal_owed(fs);
+    heal::heal_owed(fs, heal::Asker::State);
     if let Err(blocked) = check(fs) {
         return SetupState::Blocked(blocked);
     }

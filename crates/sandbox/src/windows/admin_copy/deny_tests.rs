@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use super::fake::{Fake, locked_dacl, locked_dacl_denying};
+use super::fake::{Fake, deny_last, locked_dacl, locked_dacl_denying};
 use super::*;
 
 const GROUP: &str = "S-1-5-21-1-2-3-1100";
@@ -20,19 +20,6 @@ fn sandbox() -> PathBuf {
 
 fn exe() -> PathBuf {
     admin_exe(Path::new(r"C:\Program Files"))
-}
-
-/// `bytes` (a descriptor [`fake::descriptor`](super::fake::descriptor) made) with its DACL's
-/// first entry moved to the end: a deny placed after the allows, which Windows reads last.
-fn deny_last(bytes: &[u8]) -> Vec<u8> {
-    let at = usize::try_from(u32::from_le_bytes(bytes[16..20].try_into().unwrap())).unwrap();
-    let first = at + 8;
-    let size = usize::from(u16::from_le_bytes([bytes[first + 2], bytes[first + 3]]));
-    let acl_size = usize::from(u16::from_le_bytes([bytes[at + 2], bytes[at + 3]]));
-    let mut out = bytes[..first].to_vec();
-    out.extend(&bytes[first + size..at + acl_size]);
-    out.extend(&bytes[first..first + size]);
-    out
 }
 
 #[test]

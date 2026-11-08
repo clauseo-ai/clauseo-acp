@@ -1,6 +1,8 @@
 //! The refresh's heal of the group's deny (step 3, `admin_copy/heal.rs` says why): with the
 //! set-up lock held and the record read, a `GroupSid` that is a SID has the admin folder and
-//! copy given its deny when both are locked exactly and either lacks only that. It runs before
+//! copy given its deny when both are locked exactly and either lacks only that: only once every
+//! level from the volume root to the copy passes the check's chain rule, each opened once as
+//! itself and read and written through that handle (`admin_copy/heal_os.rs`). It runs before
 //! anything else the run may refuse on, so a run that copies nothing still heals; the launcher
 //! asks the task for it and waits. A failure is logged and the run goes on: the copy stays as it
 //! was, and the launcher refuses it as before.

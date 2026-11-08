@@ -110,39 +110,12 @@ impl AdminCopyFs for WindowsAdminCopy {
     }
 
     fn pause(&self, pause: std::time::Duration) {
-        wait(pause);
+        super::heal_os::wait(pause);
     }
-}
 
-/// Sleeps `pause`: the heal's wait (`heal.rs`), off the actor's thread.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the heal's bounded wait, which the tests' fake replaces (AdminCopyFs::pause)"
-)]
-fn wait(pause: std::time::Duration) {
-    std::thread::sleep(pause);
-}
-
-/// The refresh's heal (`refresh/deny.rs`), as SYSTEM: when the admin folder `dir` and the copy
-/// `exe` are each locked exactly, with or without `group`'s deny, and either lacks it
-/// (`heal::owed`), each that lacks it is locked again with the deny ([`lock_down`]); whether
-/// anything was. Anything else is left as it is.
-pub(crate) fn heal_deny(dir: &Path, exe: &Path, group: &Sid) -> io::Result<bool> {
-    if found(dir)? != Found::Folder || found(exe)? != Found::File {
-        return Ok(false);
+    fn clock(&self) -> std::time::Duration {
+        super::heal_os::clock()
     }
-    let super::Owed::Lacking { folder, copy } =
-        super::owed(&security(dir)?, &security(exe)?, group)
-    else {
-        return Ok(false);
-    };
-    if folder {
-        lock_down(dir, true, Some(group))?;
-    }
-    if copy {
-        lock_down(exe, false, Some(group))?;
-    }
-    Ok(true)
 }
 
 /// The record's `GroupSid` (`HKLM`, written by the elevated set-up), checked as a SID.
@@ -220,7 +193,11 @@ impl AdminCopyFs for StateAdminCopy {
     }
 
     fn pause(&self, pause: std::time::Duration) {
-        wait(pause);
+        super::heal_os::wait(pause);
+    }
+
+    fn clock(&self) -> std::time::Duration {
+        super::heal_os::clock()
     }
 }
 
@@ -351,9 +328,9 @@ fn hash_file(file: &mut File) -> io::Result<String> {
 /// Gives `path` (a folder when `folder`, else the admin copy) [`locked_folder_sddl`]'s or
 /// [`locked_file_sddl`]'s owner and protected DACL for `group`, then reads it back and refuses
 /// unless it is exactly that ([`locked`]). Needs an elevated or SYSTEM token, which may assign
-/// Administrators as owner. Opened as itself, then [`lock_handle`]. The tests' lock-down and
-/// the refresh's heal ([`heal_deny`]): the set-up's walks lock through handles of their own
-/// (`lock_tree_os`).
+/// Administrators as owner. Opened as itself, then [`lock_handle`]. The tests' lock-down:
+/// the set-up's walks lock through handles of their own (`lock_tree_os`).
+#[cfg(test)]
 pub(crate) fn lock_down(path: &Path, folder: bool, group: Option<&Sid>) -> io::Result<()> {
     use windows::Win32::Storage::FileSystem::{WRITE_DAC, WRITE_OWNER};
     let access = READ_CONTROL.0 | WRITE_DAC.0 | WRITE_OWNER.0 | FILE_READ_ATTRIBUTES.0;
@@ -471,11 +448,11 @@ impl Drop for TaskString {
 }
 
 /// A file or folder opened as itself; closed on drop.
-struct Handle(HANDLE);
+pub(super) struct Handle(pub(super) HANDLE);
 
 impl Handle {
     /// Opens `path` itself (`FILE_FLAG_OPEN_REPARSE_POINT`), a folder too, asking for `access`.
-    fn open(path: &Path, access: u32) -> io::Result<Handle> {
+    pub(super) fn open(path: &Path, access: u32) -> io::Result<Handle> {
         let target: Vec<u16> = path.as_os_str().encode_wide().chain(once(0)).collect();
         // SAFETY: `target` is NUL-terminated and outlives the call; no security attributes or
         // template are passed, and the handle is owned by `Handle` from here.
@@ -497,7 +474,7 @@ impl Handle {
 
 /// The owner and DACL of what `handle` is open on (with `READ_CONTROL`), self-relative
 /// (`GetKernelObjectSecurity`).
-fn security_of(handle: HANDLE) -> io::Result<Vec<u8>> {
+pub(super) fn security_of(handle: HANDLE) -> io::Result<Vec<u8>> {
     let info = (OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION).0;
     let mut size = 256_u32;
     for _ in 0..4 {

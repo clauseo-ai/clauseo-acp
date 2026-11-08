@@ -5,6 +5,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
+use super::heal_os::{heal_at, heal_deny};
 use super::os::{self, WindowsAdminCopy, lock_down, lock_down_tree};
 use super::*;
 use crate::test_support::TempDir;
@@ -209,7 +210,8 @@ fn elevated_admin_copy_lock_down_reads_back_and_a_planted_users_write_refuses() 
 /// The lock with the pool's group denied, as Windows writes and reads it: the set-up's tree
 /// lock reads back exactly ([`locked`] with the group), the check passes with that group
 /// recorded, and a lock with no deny, read against the recorded group, is unsafe until the
-/// refresh's heal (`os::heal_deny`) gives it the deny; drift it leaves.
+/// refresh's heal (`heal_os::heal_deny`) gives it the deny; drift, or a level above it others
+/// can change, it leaves.
 #[test]
 #[ignore = "elevated: makes Administrators the owner; CI's elevated step runs it"]
 fn elevated_the_lock_denies_the_recorded_group_and_the_check_requires_it() {
@@ -243,13 +245,82 @@ fn elevated_the_lock_denies_the_recorded_group_and_the_check_requires_it() {
     lock_down_tree(&sandbox, &exe, None).unwrap();
     assert_eq!(check(&fs), Err(Blocked::AdminCopyUnsafe));
     // The refresh's heal: the old lock gets the deny and passes; a second heal changes nothing.
-    assert!(os::heal_deny(&sandbox, &exe, &group).unwrap());
+    assert!(heal_deny(&fs, &group).unwrap());
     assert!(check(&fs).is_ok());
-    assert!(!os::heal_deny(&sandbox, &exe, &group).unwrap());
+    assert!(!heal_deny(&fs, &group).unwrap());
     // Drift is left as it is.
     protect_with(&exe, OWN_FILE).unwrap();
-    assert!(!os::heal_deny(&sandbox, &exe, &group).unwrap());
+    assert!(!heal_deny(&fs, &group).unwrap());
     assert!(!locked(&os::security(&exe).unwrap(), false, Some(&group)));
+    // A level above the copy that others can change: nothing is healed.
+    lock_down_tree(&sandbox, &exe, None).unwrap();
+    protect_with(&fs.root.join(ADMIN_DIR[0]), PLANTED).unwrap();
+    assert!(!heal_deny(&fs, &group).unwrap());
+    assert!(locked(&os::security(&sandbox).unwrap(), true, None));
+}
+
+/// The refresh's heal opens the folder and the copy as themselves: a junction at the folder or
+/// a symbolic link at the copy, each to an old lock, is refused and left, and what it names
+/// keeps its descriptor; the chain rule refuses both before that.
+#[test]
+#[ignore = "elevated: makes Administrators the owner; CI's elevated step runs it"]
+fn elevated_the_heal_refuses_a_reparse_point_at_the_folder_or_the_copy() {
+    use crate::windows::test_junction::junction;
+    if !elevated_tests_enabled() {
+        return;
+    }
+    let group = Sid::parse("S-1-5-21-1-2-3-1100").unwrap();
+    let dir = TempDir::new("admin-copy-heal-links");
+    // The real folder and copy, locked with no deny, elsewhere.
+    let real_exe = dir.file(r"real\clauseo-sandbox-setup.exe", "MZ stand-in");
+    let real = real_exe.parent().unwrap().to_path_buf();
+    lock_down_tree(&real, &real_exe, None).unwrap();
+    let before = (
+        os::security(&real).unwrap(),
+        os::security(&real_exe).unwrap(),
+    );
+    // The folder a junction to it.
+    let root = dir.dir(r"pf1\Clauseo").parent().unwrap().to_path_buf();
+    let sandbox = admin_dir(&root);
+    junction(&sandbox, &real).unwrap();
+    assert!(
+        !heal_at(&sandbox, &admin_exe(&root), &group).unwrap(),
+        "junction"
+    );
+    let fs = Rooted {
+        root,
+        recorded: None,
+        group: Some(group.clone()),
+    };
+    assert!(!heal_deny(&fs, &group).unwrap(), "junction, by the chain");
+    assert_eq!(os::found(&sandbox).unwrap(), Found::Link);
+    // The copy a symbolic link to the real copy, in a plain folder locked with no deny.
+    let root = dir
+        .dir(r"pf2\Clauseo\Sandbox")
+        .ancestors()
+        .nth(2)
+        .unwrap()
+        .to_path_buf();
+    let (sandbox, exe) = (admin_dir(&root), admin_exe(&root));
+    crate::test_support::symlink_file_at(&exe, &real_exe);
+    lock_down(&sandbox, true, None).unwrap();
+    assert!(!heal_at(&sandbox, &exe, &group).unwrap(), "symbolic link");
+    let fs = Rooted {
+        root,
+        recorded: None,
+        group: Some(group.clone()),
+    };
+    assert!(
+        !heal_deny(&fs, &group).unwrap(),
+        "symbolic link, by the chain"
+    );
+    assert_eq!(os::found(&exe).unwrap(), Found::Link);
+    assert!(locked(&os::security(&sandbox).unwrap(), true, None), "left");
+    let after = (
+        os::security(&real).unwrap(),
+        os::security(&real_exe).unwrap(),
+    );
+    assert_eq!(before, after, "what the links name keeps its descriptors");
 }
 
 /// A protected DACL no lock-down writes, so a descriptor left alone reads back as it was: the

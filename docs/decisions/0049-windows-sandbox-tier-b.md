@@ -573,14 +573,18 @@ started elevated, by the app or by the uninstall hook.
     - every refresh run of this build, with the set-up lock held and the record read, before
       anything it may refuse on, locks the folder and the copy again with the deny when each
       is exactly the locked form, with or without the deny, and one lacks it
-      (`admin_copy::owed`; `refresh/deny.rs`). A failed heal is logged and the run goes on;
+      (`admin_copy::owed`; `refresh/deny.rs`). It first requires every level from the volume
+      root to the copy to pass the check's chain rule, then opens the folder and the copy once
+      each as themselves, refuses a reparse point at either, and reads and writes each through
+      that one handle (`admin_copy/heal_os.rs`). A failed heal is logged and the run goes on;
     - before the launch check, the elevated start's check and the state the app shows, a copy
       that passes every rule but the deny, its folder and copy each in one of those two forms,
       asks the refresh task to run (the lawyer may start it) and looks again every 0.5 s, for
       at most 20 s, asking again every 3 s: the first run may be the old copy's, which swaps
       this build in but can't heal, and the task never runs twice at once. Then the check
-      decides. Once a wait has run out in a process, later ones ask and look once. The app's
-      first detection can take those seconds once after such an update.
+      decides. A full wait that didn't heal starts a 10-minute back-off, in memory: state
+      queries then neither start the task nor wait, and a launch or set-up asks once and looks
+      once. The app's first detection can take those seconds once after such an update.
   - **Drift.** Anything else (another group's deny, an extra entry, the deny on one and drift on
     the other) is `AdminCopyUnsafe`, repaired as any other drift: the installer's repair runs
     `--adopt`, which locks with the deny. A re-run of set-up locks again too.

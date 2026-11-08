@@ -224,8 +224,7 @@ impl Refresher for WindowsRefresher {
     }
 
     fn deny_group(&mut self, group: &Sid) -> Result<bool, Failed> {
-        let sandbox = self.sandbox.clone()?;
-        os::heal_deny(&sandbox, &sandbox.join(EXE_NAME), group)
+        admin_copy::heal_os::heal_deny(&os::WindowsAdminCopy, group)
             .map_err(|error| format!("the admin folder's deny: {error}"))
     }
 

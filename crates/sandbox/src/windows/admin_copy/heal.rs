@@ -6,23 +6,27 @@
 //!
 //! - **SYSTEM.** Each refresh run of this build, with the set-up lock held and the record read,
 //!   gives the folder and the copy the deny when [`owed`] says each is locked one way or the
-//!   other and one lacks it (`refresh/deny.rs`). Nothing else is changed.
+//!   other and one lacks it (`refresh/deny.rs`, `heal_os.rs`): only once every level above
+//!   the copy passes the check's chain rule ([`chain_safe`]), and each is opened once, as
+//!   itself, read and written through that one handle. Nothing else is changed.
 //! - **The lawyer's side.** Before each check that refuses a launch or a set-up, or shows the
 //!   state ([`heal_owed`]): when the copy lacks only the deny (every other rule holds and
 //!   [`owed`] says [`Owed::Lacking`]), it asks the refresh task to run and looks again every
 //!   [`HEAL_PAUSE`], at most [`HEAL_LOOKS`] times, asking again every [`ASK_EVERY`] looks (the
 //!   run it started may be the old copy's, which swaps in this one but can't heal; the task
 //!   never runs twice at once, so an ask during a run is ignored). Then the check decides, as
-//!   ever. Once a wait has run out in a process, later ones ask and look once, so a heal that
-//!   can't happen never stalls each state query.
+//!   ever. A full wait that didn't heal starts a back-off of [`QUIET`], kept in memory: a state
+//!   query then asks nothing and waits for nothing, and a launch or set-up asks once and looks
+//!   once, so a heal that can't happen never stalls each state query or starts a run for it.
 //!
 //! Anything but the exact old form, or the deny on one and drift on the other, stays
 //! `AdminCopyUnsafe`, for the installer's repair.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use super::{AdminCopyFs, admin_dir, admin_exe, checked, locked};
+use super::{AdminCopyFs, admin_dir, admin_exe, check_chain, checked, locked};
 use crate::windows::sids::Sid;
 
 /// How long the lawyer's side waits between looks at a copy being healed.
@@ -33,8 +37,20 @@ pub(crate) const HEAL_LOOKS: u32 = 40;
 /// It asks the task again every this many looks: every 3 seconds.
 pub(crate) const ASK_EVERY: u32 = 6;
 
-/// Whether a wait has run out in this process.
-static WAITED_OUT: AtomicBool = AtomicBool::new(false);
+/// The back-off after a full wait that didn't heal: 10 minutes.
+pub(crate) const QUIET: Duration = Duration::from_secs(600);
+
+/// When this process's back-off ends, as milliseconds of [`AdminCopyFs::clock`]; 0 for none.
+static QUIET_UNTIL: AtomicU64 = AtomicU64::new(0);
+
+/// Who asks for a heal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Asker {
+    /// A state query: during a back-off it asks nothing.
+    State,
+    /// A launch or an elevated start: during a back-off it asks once and looks once.
+    Launch,
+}
 
 /// How the admin folder and the copy stand against the recorded group's deny.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,12 +90,12 @@ pub fn owed(folder: &[u8], copy: &[u8], group: &Sid) -> Owed {
 /// The lawyer's side, as the module says: asks the refresh task to heal a copy that lacks only
 /// the group's deny, and waits for it, bounded. Changes nothing itself; the check that follows
 /// decides.
-pub(super) fn heal_owed(fs: &dyn AdminCopyFs) {
-    heal_with(fs, &WAITED_OUT);
+pub(super) fn heal_owed(fs: &dyn AdminCopyFs, asker: Asker) {
+    heal_with(fs, asker, &QUIET_UNTIL);
 }
 
-/// [`heal_owed`], with `waited_out` as the process's flag; whether the deny is there now.
-pub(super) fn heal_with(fs: &dyn AdminCopyFs, waited_out: &AtomicBool) -> bool {
+/// [`heal_owed`], with `quiet_until` as the process's back-off; whether the deny is there now.
+pub(super) fn heal_with(fs: &dyn AdminCopyFs, asker: Asker, quiet_until: &AtomicU64) -> bool {
     if !matches!(standing(fs), Some(Owed::Lacking { .. })) {
         return false;
     }
@@ -87,16 +103,17 @@ pub(super) fn heal_with(fs: &dyn AdminCopyFs, waited_out: &AtomicBool) -> bool {
     if rest.is_err() {
         return false;
     }
+    let quiet = millis(fs.clock()) < quiet_until.load(Ordering::Relaxed);
+    if quiet && asker == Asker::State {
+        tracing::debug!("the admin copy lacks the sandbox group's deny; backing off");
+        return false;
+    }
     tracing::info!("the admin copy lacks the sandbox group's deny; asking the refresh task");
     if let Err(error) = fs.request_refresh() {
         tracing::warn!(%error, "the refresh task couldn't be started to heal the admin copy");
         return false;
     }
-    let looks = if waited_out.load(Ordering::Relaxed) {
-        1
-    } else {
-        HEAL_LOOKS
-    };
+    let looks = if quiet { 1 } else { HEAL_LOOKS };
     for look in 1..=looks {
         fs.pause(HEAL_PAUSE);
         // Nothing to read is the old copy's swap between its two renames: look again.
@@ -104,6 +121,7 @@ pub(super) fn heal_with(fs: &dyn AdminCopyFs, waited_out: &AtomicBool) -> bool {
             Some(Owed::Lacking { .. }) | None => {}
             Some(Owed::Locked) => {
                 tracing::info!("the refresh task gave the admin copy the sandbox group's deny");
+                quiet_until.store(0, Ordering::Relaxed);
                 return true;
             }
             Some(Owed::Drift) => return false,
@@ -114,9 +132,23 @@ pub(super) fn heal_with(fs: &dyn AdminCopyFs, waited_out: &AtomicBool) -> bool {
             tracing::warn!(%error, "the refresh task couldn't be started again");
         }
     }
-    waited_out.store(true, Ordering::Relaxed);
+    if !quiet {
+        let until = millis(fs.clock().saturating_add(QUIET)).max(1);
+        quiet_until.store(until, Ordering::Relaxed);
+    }
     tracing::warn!("the admin copy still lacks the sandbox group's deny");
     false
+}
+
+/// `at` in whole milliseconds.
+fn millis(at: Duration) -> u64 {
+    u64::try_from(at.as_millis()).unwrap_or(u64::MAX)
+}
+
+/// The check's chain rule for every level from the volume root to the copy under
+/// `program_files`: what the refresh's heal requires before it opens anything (`heal_os.rs`).
+pub(crate) fn chain_safe(fs: &dyn AdminCopyFs, program_files: &Path) -> bool {
+    check_chain(fs, program_files, &admin_exe(program_files)).is_ok()
 }
 
 /// [`owed`] for the machine's folder and copy and its recorded group; `None` with no group or
