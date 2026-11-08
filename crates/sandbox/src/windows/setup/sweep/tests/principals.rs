@@ -1,6 +1,6 @@
 //! How the sweep matches a principal: a SID's text directly, a name through the local lookup,
 //! and a name that resolves to no SID only by a pool user's name, with no prefix or this
-//! computer's; anything else such is skipped, not 55. A principal that can't be read still is.
+//! computer's; anything else such is skipped, not 56. A principal that can't be read still is.
 
 use super::*;
 

@@ -10,20 +10,20 @@
 //! [`Sweeper`], which `windows_sweeper.rs` implements and the tests fake. Steps 1 to 3 are the
 //! gate `--stop` uses and step 5 its BITS step (`pool_steps.rs`). It:
 //!
-//! 1. refuses unless this process is LOCAL SYSTEM and runs from the admin copy's path (52);
+//! 1. refuses unless this process is LOCAL SYSTEM and runs from the admin copy's path (53);
 //! 2. reads the pool from the machine's record, `HKLM\SOFTWARE\Clauseo\Sandbox`: `PoolSids` and
 //!    `OwnerSid`, which only the elevated set-up writes. Nothing else names a SID: no argument
 //!    (the task passes `--sweep-tasks` alone, `args.rs`), no environment, nothing under the
-//!    lawyer's data folder. A record that can't be read is 53; no record, or an empty pool, is
+//!    lawyer's data folder. A record that can't be read is 54; no record, or an empty pool, is
 //!    nothing to sweep (0);
 //! 3. holds every SID to the pool-user check (`processes::check_pool`): a local account of this
-//!    machine, not built in, not SYSTEM, not the owner. One that fails touches nothing (54).
+//!    machine, not built in, not SYSTEM, not the owner. One that fails touches nothing (55).
 //!    Then it reserves this run's number before its walk, as `--stop` does
 //!    (`pool_steps::sequence`): under the set-up lock, it checks the record still holds the
 //!    pool, reads `SweepNext` (1 when absent), keeps it as `n` and writes it one higher. A
-//!    record gone or changed, or a write that fails, is 57 with nothing touched; a read that
-//!    fails is 53. A lock that stays held still lets the run sweep, but it then records nothing
-//!    and ends 57 at best;
+//!    record gone or changed, or a write that fails, is 58 with nothing touched; a read that
+//!    fails is 54. A lock that stays held still lets the run sweep, but it then records nothing
+//!    and ends 58 at best;
 //! 4. walks every Task Scheduler folder from `\`, each folder's subfolders too, with no depth
 //!    limit but at most [`FOLDERS_CAP`] folders. In each it reads every task, hidden ones
 //!    included, and its definition's principal: `UserId`, or `GroupId` when that is empty. It
@@ -37,19 +37,19 @@
 //!    only when its account part is a pool user's name, without case, with no prefix or one of
 //!    `.\`, this computer's `NetBIOS` name or its DNS host name ([`Names::is_pool_name`]); it is
 //!    then deleted. Any other such name is skipped, counted in the log line (never named), and
-//!    not 55. A task whose principal names neither a user nor a group isn't the pool's. A task
+//!    not 56. A task whose principal names neither a user nor a group isn't the pool's. A task
 //!    whose definition or principal can't be read is unreadable and never deleted. Unreadable
 //!    tasks, a folder whose tasks or subfolders can't be listed, a delete that fails, and more
-//!    than [`FOLDERS_CAP`] folders are 55, and none stops the walk: every other task is still
+//!    than [`FOLDERS_CAP`] folders are 56, and none stops the walk: every other task is still
 //!    read, and every pool task still deleted. A task's running instance is left running:
 //!    deleting the task ends nothing;
 //! 5. cancels every BITS job a pool user owns, whatever step 4 found (`BG_JOB_ENUM_ALL_USERS`,
 //!    each job's owner). One that can't be cancelled, an owner that can't be read, a list that
-//!    can't be read, or one of `JOBS_CAP` jobs is 56; 55 wins when both;
+//!    can't be read, or one of `JOBS_CAP` jobs is 57; 56 wins when both;
 //! 6. only on a run that will end 0, under the set-up lock, checks the record still holds the
 //!    pool and writes `SweepCompleted` (when the walk began) and then `SweepSequence = n`; a
 //!    `SweepSequence` already past `n`, a record gone or changed, a write that fails or a lock
-//!    that stays held is 58. A run that is ended or ends non-zero never writes them. A session's
+//!    that stays held is 59. A run that is ended or ends non-zero never writes them. A session's
 //!    unclean-session marker waits for `SweepSequence` to reach the `SweepNext` it read
 //!    (`runner::marker`);
 //! 7. logs one line with counts only: no path, task name or SID, as the Application log is
@@ -73,9 +73,9 @@ pub(crate) mod windows_sweeper;
 #[cfg(test)]
 mod windows_tests;
 
-/// The sweep's exit codes. They start at 52, after [`StopExit`]'s 50 and the WSL deny task's 51
-/// (`WslDenyExit`), so the one exe never gives one number two meanings; codes are appended from
-/// here on, never renumbered.
+/// The sweep's exit codes. They start at 53, after [`StopExit`]'s 50 and the WSL deny task's 51
+/// and 52 (`WslDenyExit`), so the one exe never gives one number two meanings; codes are
+/// appended from here on, never renumbered.
 ///
 /// [`StopExit`]: super::stop::StopExit
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,26 +83,26 @@ pub enum SweepExit {
     /// 0: every pool user's task found was deleted and every pool user's BITS job cancelled,
     /// every task and folder read (with a pool recorded; with none there is nothing to sweep).
     Done,
-    /// 52: not LOCAL SYSTEM, or not run from the admin copy's path; nothing was touched.
+    /// 53: not LOCAL SYSTEM, or not run from the admin copy's path; nothing was touched.
     NotAllowed,
-    /// 53: the record can't be read, or its `PoolSids` or `OwnerSid` is malformed; nothing was
+    /// 54: the record can't be read, or its `PoolSids` or `OwnerSid` is malformed; nothing was
     /// touched.
     NoRecord,
-    /// 54: a SID `PoolSids` lists isn't a pool user's; nothing was touched.
+    /// 55: a SID `PoolSids` lists isn't a pool user's; nothing was touched.
     NotPool,
-    /// 55: a task's principal couldn't be read, a pool user's task couldn't be
+    /// 56: a task's principal couldn't be read, a pool user's task couldn't be
     /// deleted, a folder's tasks or subfolders couldn't be listed, or there were more than
     /// [`FOLDERS_CAP`] folders. The BITS step still ran.
     TasksLeft,
-    /// 56: every task was read and the pool's deleted, but a pool user's BITS job wasn't
+    /// 57: every task was read and the pool's deleted, but a pool user's BITS job wasn't
     /// cancelled, a job's owner couldn't be read, or the BITS list couldn't be read or reached
     /// `JOBS_CAP`.
     JobsLeft,
-    /// 57: `SweepNext` couldn't be reserved before the walk: the record was gone or its pool
+    /// 58: `SweepNext` couldn't be reserved before the walk: the record was gone or its pool
     /// changed, or the write failed (nothing was touched), or the set-up lock stayed held (the
-    /// tasks and jobs were still swept, but nothing was recorded). 55 and 56 win over it.
+    /// tasks and jobs were still swept, but nothing was recorded). 56 and 57 win over it.
     NotReserved,
-    /// 58: the run would have ended 0, but `SweepCompleted` and `SweepSequence` couldn't be
+    /// 59: the run would have ended 0, but `SweepCompleted` and `SweepSequence` couldn't be
     /// written (the set-up lock stayed held, a write failed, the record was gone or its pool
     /// changed, or `SweepSequence` was past `n`).
     NotRecorded,
@@ -113,18 +113,18 @@ impl SweepExit {
     pub fn as_code(self) -> u8 {
         match self {
             SweepExit::Done => 0,
-            SweepExit::NotAllowed => 52,
-            SweepExit::NoRecord => 53,
-            SweepExit::NotPool => 54,
-            SweepExit::TasksLeft => 55,
-            SweepExit::JobsLeft => 56,
-            SweepExit::NotReserved => 57,
-            SweepExit::NotRecorded => 58,
+            SweepExit::NotAllowed => 53,
+            SweepExit::NoRecord => 54,
+            SweepExit::NotPool => 55,
+            SweepExit::TasksLeft => 56,
+            SweepExit::JobsLeft => 57,
+            SweepExit::NotReserved => 58,
+            SweepExit::NotRecorded => 59,
         }
     }
 }
 
-/// The most Task Scheduler folders the walk reads: one more left to read is 55.
+/// The most Task Scheduler folders the walk reads: one more left to read is 56.
 pub const FOLDERS_CAP: usize = 10_000;
 
 /// A task's principal as its definition gives it; either may be empty.
@@ -211,7 +211,7 @@ pub struct Swept {
 }
 
 impl Swept {
-    /// Whether a task of the pool's may be left: step 4's 55.
+    /// Whether a task of the pool's may be left: step 4's 56.
     pub fn left(&self) -> bool {
         self.unreadable > 0 || self.not_deleted > 0 || self.unlisted > 0 || self.capped
     }
