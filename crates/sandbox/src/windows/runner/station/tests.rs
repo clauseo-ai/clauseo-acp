@@ -18,6 +18,8 @@ struct Record {
     fail: Option<&'static str>,
     /// Whether the thread acts as the pool user now.
     impersonating: bool,
+    /// Whether this process is on the agent's station now.
+    entered: bool,
 }
 
 impl Record {
@@ -38,6 +40,7 @@ impl StationSteps for Record {
     type Logon = u32;
     type Station = &'static str;
     type Desktop = u32;
+    type Previous = &'static str;
     type Error = String;
 
     fn log_on(&mut self) -> Result<u32, String> {
@@ -73,12 +76,24 @@ impl StationSteps for Record {
         assert_eq!(*station, "opened");
         self.step("set owner", owner.as_str())
     }
-    fn create_desktop(&mut self, station: &&'static str, sddl: &str) -> Result<u32, String> {
+    fn enter_station(&mut self, station: &&'static str) -> Result<&'static str, String> {
         assert_eq!(*station, "opened");
+        self.step("enter station", "")?;
+        self.entered = true;
+        Ok("own")
+    }
+    fn create_desktop(&mut self, sddl: &str) -> Result<u32, String> {
+        assert!(self.entered, "the desktop is made on the agent's station");
         self.step("create desktop", sddl).map(|()| 9)
+    }
+    fn leave_station(&mut self, previous: &'static str) {
+        assert_eq!(previous, "own");
+        self.entered = false;
+        self.done.push("leave station".to_owned());
     }
     fn secure_station(&mut self, station: &&'static str, sddl: &str) -> Result<(), String> {
         assert_eq!(*station, "opened");
+        assert!(!self.entered, "the outer is back on its own station");
         self.step("secure station", sddl)
     }
     fn secure_desktop(&mut self, desktop: &u32, sddl: &str) -> Result<(), String> {
@@ -111,7 +126,7 @@ fn names(record: &Record) -> Vec<String> {
         .collect()
 }
 
-const ORDER: [&str; 11] = [
+const ORDER: [&str; 13] = [
     "log on",
     "impersonate",
     "create station",
@@ -120,7 +135,9 @@ const ORDER: [&str; 11] = [
     "name",
     "open station",
     "set owner",
+    "enter station",
     "create desktop",
+    "leave station",
     "secure station",
     "secure desktop",
 ];
@@ -167,7 +184,7 @@ fn each_step_gets_its_descriptor() {
 #[test]
 fn every_failure_refuses_and_runs_nothing_after_it() {
     for (at, step) in ORDER.iter().enumerate() {
-        if ["revert", "close logon"].contains(step) {
+        if ["revert", "close logon", "leave station"].contains(step) {
             continue;
         }
         let mut record = Record {
@@ -179,6 +196,10 @@ fn every_failure_refuses_and_runs_nothing_after_it() {
         // A failure while acting as the pool user still reverts, then closes the logon.
         if ["impersonate", "create station"].contains(step) {
             want.extend(["revert".to_owned(), "close logon".to_owned()]);
+        }
+        // A failure on the agent's station still switches back.
+        if *step == "create desktop" {
+            want.push("leave station".to_owned());
         }
         assert_eq!(names(&record), want, "{step}");
     }
@@ -193,6 +214,7 @@ fn the_thread_is_itself_again_after_every_failure() {
         };
         drop(run(&mut record));
         assert!(!record.impersonating, "{step}");
+        assert!(!record.entered, "{step}");
         let reverts = record.done.iter().filter(|s| *s == "revert").count();
         let impersonated = record.done.iter().any(|s| s == "impersonate");
         assert_eq!(reverts, usize::from(impersonated), "{step}");
@@ -207,4 +229,26 @@ fn a_failed_logon_impersonates_nothing() {
     };
     assert_eq!(run(&mut record).err(), Some("log on".to_owned()));
     assert_eq!(record.done, ["log on"]);
+}
+
+#[test]
+fn the_outer_leaves_the_agents_station_on_every_path_once_it_entered() {
+    for step in ORDER {
+        let mut record = Record {
+            fail: Some(step),
+            ..Record::default()
+        };
+        drop(run(&mut record));
+        let leaves = record.done.iter().filter(|s| *s == "leave station").count();
+        let entered = record.done.iter().any(|s| s == "enter station") && step != "enter station";
+        assert_eq!(leaves, usize::from(entered), "{step}");
+    }
+}
+
+#[test]
+fn a_default_desktop_someone_made_first_refuses() {
+    assert_eq!(made_fresh(0), Ok(()));
+    assert_eq!(made_fresh(183), Err(183));
+    // Any other code left over from an earlier call isn't this one's.
+    assert_eq!(made_fresh(5), Ok(()));
 }

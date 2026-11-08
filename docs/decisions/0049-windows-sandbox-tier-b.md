@@ -1039,8 +1039,12 @@ leaves that profile, both naming the part.
     with `READ_CONTROL | WRITE_DAC | WRITE_OWNER | WINSTA_CREATEDESKTOP`, and makes the lawyer
     its owner. It switches this process to the station for `CreateDesktopW("Default")` alone,
     asking for `READ_CONTROL | WRITE_DAC | WRITE_OWNER` and the desktop use rights `0xC7` (the
-    first three alone fail with 8), and switches back; a failed switch back fails the launch.
-    Last, as their owner, it sets both last descriptors.
+    first three alone fail with 8), and switches back on every path; a switch back Windows
+    refuses ends the process at once (`RunExit::Token`), as a failed `RevertToSelf` does, so the
+    outer never runs on the agent's station. Windows has no create-only flag for desktops
+    (`CWF_CREATE_ONLY` is for stations), so a `CreateDesktopW` that succeeds with
+    `ERROR_ALREADY_EXISTS` (a `Default` someone made first) refuses the launch too. Last, as
+    their owner, it sets both last descriptors.
   - **The descriptor it is made with** is always explicit: the default DACL grants `Everyone`
     and `RESTRICTED` `0xF037F`. `D:P(A;;0xF037F;;;SY)(A;;0xE0008;;;<lawyer>)(A;;0x20000;;;OW)`
     for the station. The pool user owns it until the lawyer takes it, and the `OWNER RIGHTS`
