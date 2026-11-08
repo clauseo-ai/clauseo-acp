@@ -65,6 +65,7 @@ use crate::windows::sids::Sid;
 /// [`SetupExit`]'s, for `--refresh` a [`refresh::RefreshExit`]'s, for `--stop` a
 /// [`stop::StopExit`]'s.
 pub fn main(args: impl IntoIterator<Item = OsString>) -> u8 {
+    experiment_trace();
     // First: no DLL from beside the exe (a folder a standard user may write) loads from here on.
     if let Err(error) = restrict_dll_search() {
         tracing::error!(%error, "the DLL search couldn't be kept to System32");
@@ -84,6 +85,38 @@ pub fn main(args: impl IntoIterator<Item = OsString>) -> u8 {
         return stop::windows_stopper::run().as_code();
     }
     run_mode(mode).as_code()
+}
+
+/// EXPERIMENT (exp-arm64-x64emu only, never for main): every tracing event appended to the file
+/// `CLAUSEO_SETUP_TRACE` names, when it is set, so a CI run shows which step `--remove` stopped at.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "an experiment's trace file in CI's temp folder, never shipped"
+)]
+fn experiment_trace() {
+    let Some(path) = std::env::var_os("CLAUSEO_SETUP_TRACE") else {
+        return;
+    };
+    let Ok(file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    else {
+        return;
+    };
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    drop(
+        tracing_subscriber::fmt()
+            .with_writer(std::sync::Mutex::new(file))
+            .with_ansi(false)
+            .with_max_level(tracing::Level::TRACE)
+            .try_init(),
+    );
+    tracing::info!(
+        ?args,
+        pid = std::process::id(),
+        "experiment trace: the setup exe started"
+    );
 }
 
 /// Every mode but `--refresh` and `--stop`, which [`main`] runs.

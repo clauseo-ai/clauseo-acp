@@ -137,6 +137,8 @@ rustix = { workspace = true, features = ["fs", "process"] }
 # collections take a VARIANT index: System_Variant, System_Ole) and BITS jobs
 # (Networking_BackgroundIntelligentTransferService).
 [target.'cfg(windows)'.dependencies]
+# EXPERIMENT (exp-arm64-x64emu only): the setup exe's tracing to a file, CLAUSEO_SETUP_TRACE.
+tracing-subscriber = { workspace = true, features = ["fmt", "std"] }
 # The SHA-256 of the set-up program's admin copy (`windows::admin_copy`).
 sha2 = { workspace = true }
 socket2 = { workspace = true }

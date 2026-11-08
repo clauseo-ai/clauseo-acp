@@ -142,6 +142,8 @@ jobs:
 
       - name: Prepare (the set-up), the emu rows, as matter A's pool user
         id: emu
+        env:
+          CLAUSEO_SETUP_TRACE: ${{ runner.temp }}\emu-out\setup-trace.log
         run: |
           $out = Join-Path $env:RUNNER_TEMP 'emu-out'
           New-Item -ItemType Directory -Force $out | Out-Null
@@ -166,9 +168,44 @@ jobs:
 
       - name: Cleanup (the set-up's --remove)
         if: always()
+        env:
+          CLAUSEO_SETUP_TRACE: ${{ runner.temp }}\emu-out\setup-trace.log
         run: |
+          "EMU_CLEAN_SINCE=$((Get-Date).ToUniversalTime().ToString('o'))" >> $env:GITHUB_ENV
+          "pool users' processes before cleanup:"
+          Get-Process -IncludeUserName -ErrorAction SilentlyContinue | Where-Object UserName -like '*ClauseoSb*' |
+            ForEach-Object { "PROC $($_.Id) $($_.ProcessName) $($_.UserName)" }
+          Get-CimInstance Win32_UserProfile | Where-Object LocalPath -like '*ClauseoSb*' |
+            ForEach-Object { "PROFILE $($_.LocalPath) loaded=$($_.Loaded) sid=$($_.SID)" }
           $exe = "target\$env:TARGET\debug\examples\s15_launch_vm.exe"
           if (Test-Path $exe) { & $exe cleanup --root $env:EMU_ROOT 2>&1 }
+
+      # EXPERIMENT: why --remove exits 4 (RemovedPartly): the setup exe's trace, and what stayed.
+      - name: The set-up's trace and what --remove left
+        if: always()
+        run: |
+          $trace = Join-Path $env:RUNNER_TEMP 'emu-out\setup-trace.log'
+          if (Test-Path $trace) { Get-Content $trace | ForEach-Object { "TRACE $_" } } else { "no $trace" }
+          if (Test-Path $env:EMU_ROOT) {
+            "LEFT owner of data: $((Get-Acl (Join-Path $env:EMU_ROOT 'data')).Owner)"
+            icacls (Join-Path $env:EMU_ROOT 'data') | ForEach-Object { "ACL $_" }
+            Get-ChildItem $env:EMU_ROOT -Recurse -Force -ErrorAction Continue | Select-Object -First 100 |
+              ForEach-Object { "LEFT $($_.FullName)" }
+          } else { "no $env:EMU_ROOT" }
+          Get-LocalUser | Where-Object Name -like 'ClauseoSb*' | ForEach-Object { "USER $($_.Name) enabled=$($_.Enabled)" }
+          Get-LocalGroup | Where-Object Name -like 'Clauseo*' | ForEach-Object { "GROUP $($_.Name)" }
+          Get-CimInstance Win32_UserProfile | Where-Object LocalPath -like '*ClauseoSb*' |
+            ForEach-Object { "PROFILE $($_.LocalPath) loaded=$($_.Loaded) sid=$($_.SID)" }
+          Get-ChildItem C:\Users -Directory -Force -Filter 'ClauseoSb*' -ErrorAction SilentlyContinue | ForEach-Object { "USERDIR $($_.FullName)" }
+          Get-Process -IncludeUserName -ErrorAction SilentlyContinue | Where-Object UserName -like '*ClauseoSb*' |
+            ForEach-Object { "PROC $($_.Id) $($_.ProcessName) $($_.UserName)" }
+          reg query 'HKLM\SOFTWARE\Clauseo\Sandbox' /s 2>&1 | ForEach-Object { "REG $_" }
+          if ($env:EMU_CLEAN_SINCE) {
+            $since = [datetime]::Parse($env:EMU_CLEAN_SINCE).ToLocalTime()
+            Get-WinEvent -FilterHashtable @{ LogName = 'Application', 'System', 'Microsoft-Windows-User Profile Service/Operational'; StartTime = $since } -ErrorAction SilentlyContinue |
+              Select-Object -First 120 |
+              ForEach-Object { "CEVT $($_.LogName) $($_.TimeCreated.ToString('o')) [$($_.LevelDisplayName)] $($_.ProviderName) $($_.Id): $(($_.Message -split "`n")[0])" }
+          }
 
       - name: The emulation cache and the event logs after
         if: always()
