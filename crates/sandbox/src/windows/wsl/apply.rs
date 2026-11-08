@@ -64,7 +64,8 @@ pub struct WslRemoved {
 /// ([`LaunchSd::with_deny`]), or built from the default when it is missing; the new bytes parsed
 /// again and checked to be the old with the deny added before they are written; the target
 /// recorded before its write, so a crash between the two leaves nothing unrecorded; the value
-/// read back and checked after. A target whose key is gone is skipped. One that fails is listed
+/// read back and checked after. A target whose key isn't there (a class names an `AppID` with
+/// no key) is listed as failed, so the log says why the launch check refuses. One that fails is listed
 /// in [`WslApplied::failed`] and the rest go on; a failure to find the targets or read the record
 /// is the error.
 pub fn apply(reg: &mut impl WslWrite, group: &Sid) -> Result<WslApplied, WslError> {
@@ -75,7 +76,9 @@ pub fn apply(reg: &mut impl WslWrite, group: &Sid) -> Result<WslApplied, WslErro
     };
     for app_id in &resolved.app_ids {
         match apply_one(reg, app_id, group) {
-            Ok(Outcome::NoKey) => {}
+            Ok(Outcome::NoKey) => applied.failed.push(format!(
+                "{app_id}: a WSL class names this AppID, whose key isn't there"
+            )),
             Ok(Outcome::Unchanged) => applied.unchanged += 1,
             Ok(Outcome::Written) => applied.written += 1,
             Ok(Outcome::Created) => applied.created += 1,

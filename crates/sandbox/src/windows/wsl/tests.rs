@@ -352,3 +352,20 @@ fn the_refresh_line_names_counts_and_appids_only() {
     );
     assert!(!line.contains("S-1-") && !line.contains('\\'), "{line}");
 }
+
+#[test]
+fn a_class_naming_an_appid_with_no_key_is_a_listed_failure_and_refused() {
+    let mut fake = FakeWsl::lifted();
+    fake.keys.remove(&app(WSLC_APP));
+    let applied = apply(&mut fake, &group()).unwrap();
+    assert_eq!((applied.targets, applied.written), (2, 1));
+    assert_eq!(applied.failed.len(), 1, "{:?}", applied.failed);
+    assert!(
+        applied.failed[0].starts_with(WSLC_APP) && applied.failed[0].contains("key isn't there"),
+        "{:?}",
+        applied.failed
+    );
+    assert!(!fake.keys.contains_key(&app(WSLC_APP)), "never made");
+    assert!(applied.outcome().is_err());
+    assert_eq!(check(&fake), Err(Blocked::WslDenyMissing));
+}
