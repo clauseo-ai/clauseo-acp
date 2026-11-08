@@ -1246,8 +1246,8 @@ leaves that profile, both naming the part.
     - **A launch.** `clean_close::check_launch`, once the admin copy passes and before the
       clean-close record is touched, finds every marker awaiting a sweep clean, or requests the
       sweep and reads `SweepSequence` every 100 ms for up to 15 s (inside the host's 180 s); one
-      still short refuses the launch with `Error::UncleanSession` (appended, `AgentLaunchFailed`).
-      `Open` markers are left there: they may be live sessions'.
+      still short refuses the launch with `Error::UncleanSession` (appended,
+      `sandbox.cleaning_up`, retryable). `Open` markers are left there: they may be live sessions'.
     - **The desktop's start** (`runner::start_up_requests(data_dir)`, once, before any launch,
       off the UI thread): every outer of the last run is gone, so each `Open` or unreadable
       marker becomes `AwaitingStop` with the numbers read then (an unreadable one naming no pool
@@ -2006,9 +2006,10 @@ pub struct Progress { pub walked: u64, pub done: bool, pub failed: Option<Arc<Er
   denials.
 - **Errors:** `Error` with `code()` and `cause()`. Appended: `PoolFull` (the host shows
   `NotProtectedCause::PoolFull`), `NotPrepared` (retryable: the host goes back to `prepare`) and
-  `Cancelled`. `UncleanSession` (`AgentLaunchFailed`) is the launch check's, for a marker whose
-  sweep didn't complete within 15 s; a later launch checks again. There is no "matter busy" error:
-  a matter's second concurrent session gets a pool user of its own (the extra-user-per-matter PR).
+  `Cancelled`. `UncleanSession` (`sandbox.cleaning_up`, retryable) is the launch check's, for a
+  marker whose sweep didn't complete within 15 s; a later launch checks again. There is no "matter
+  busy" error: a matter's second concurrent session gets a pool user of its own (the
+  extra-user-per-matter PR).
 - **The exit:** the host decodes the child's exit status with `RunOutcome::from_exit` (`Agent`,
   `Runner(RunExit)`, `HostEnded`, `Unknown`) or `RunExit::from_code`. `RunExit::Escapee` becomes
   the host's "left the Safe workspace" stop (R17 PR-E). The outer asks the stop task itself.

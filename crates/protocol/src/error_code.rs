@@ -261,6 +261,10 @@ error_codes! {
     BlocklistRevokeNotSaved = "blocklist.revoke_not_saved", retryable: false, meaning: "The \
         site is blocked again until Clauseo closes, but Clauseo couldn't save that or void the \
         saved allows, so the site may be allowed again after a restart.";
+    SandboxCleaningUp = "sandbox.cleaning_up", retryable: true, meaning: "An earlier Safe \
+        workspace session's clean-up (its unclean-session marker's stop or sweep) wasn't finished \
+        after Clauseo waited for it, so no agent was started; trying again in a moment can \
+        succeed.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }
