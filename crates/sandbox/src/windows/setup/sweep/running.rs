@@ -8,7 +8,8 @@
 //! an instance started may outlive it: the final stop after the sweep ends it
 //! (`runner::marker`).
 //!
-//! An instance whose path can't be read may be a pool task's: it counts as not stopped, as does
+//! An instance whose path can't be read, or can't be compared, may be a pool task's: it counts
+//! as not stopped, as does
 //! a list that can't be read, a pool task whose folder's path couldn't be read, and a stop that
 //! fails. Each is 56.
 
@@ -33,11 +34,14 @@ pub(super) fn stop_instances<S: Sweeper>(fs: &mut S, swept: &mut Swept) {
     };
     for (at, instance) in running.into_iter().enumerate() {
         match instance {
-            Ok(of) if paths.iter().any(|path| same_path(&of, path)) => match fs.stop_running(at) {
-                Ok(()) => swept.instances_stopped += 1,
+            Ok(of) => match theirs(fs, &of, &paths) {
+                Ok(true) => match fs.stop_running(at) {
+                    Ok(()) => swept.instances_stopped += 1,
+                    Err(why) => not_stopped(swept, why),
+                },
+                Ok(false) => {}
                 Err(why) => not_stopped(swept, why),
             },
-            Ok(_) => {}
             Err(why) => not_stopped(swept, why),
         }
     }
@@ -59,7 +63,15 @@ pub(super) fn task_path(folder: &str, name: &str) -> String {
     }
 }
 
-/// Whether two task paths are the same task's: the Task Scheduler's paths ignore case.
-fn same_path(a: &str, b: &str) -> bool {
-    a.to_lowercase() == b.to_lowercase()
+/// Whether the instance whose task's path is `of` is one of `paths`' tasks, compared as
+/// Windows compares task paths ([`Sweeper::same_task_path`]: `CompareStringOrdinal`, case
+/// ignored), never by Unicode's full lowercase, which would let a pool task named with the
+/// Kelvin sign alias another task in its folder. `Err` when a comparison fails: it may be.
+fn theirs<S: Sweeper>(fs: &mut S, of: &str, paths: &[String]) -> Result<bool, Failed> {
+    for path in paths {
+        if fs.same_task_path(of, path)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }

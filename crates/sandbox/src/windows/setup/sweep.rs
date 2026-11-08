@@ -66,7 +66,8 @@
 //!    can't be read, or one of `JOBS_CAP` jobs is 57; 56 wins when both. Only then, with no
 //!    pool task left to trigger and no job left to notify, it stops the running instances of
 //!    the pool's tasks step 4 found, deleted or not ([`running`]: `GetRunningTasks`, each
-//!    instance whose path is one of theirs, `IRunningTask::Stop`), since deleting a task ends
+//!    instance whose path is one of theirs as Windows compares paths, `CompareStringOrdinal`
+//!    with case ignored, `IRunningTask::Stop`), since deleting a task ends
 //!    nothing; one not stopped, or whose path can't be read, is 56. A process an instance
 //!    started may outlive it: a marker past its first stop also waits for a final stop
 //!    reserved after this run completed (`runner::marker`);
@@ -238,6 +239,11 @@ pub trait Sweeper: Gate + Bits + Record {
     fn running_tasks(&mut self) -> Result<Vec<Result<String, Failed>>, Failed>;
     /// Stops the instance at `at` in the last list (`IRunningTask::Stop`).
     fn stop_running(&mut self, at: usize) -> Result<(), Failed>;
+    /// Whether `a` and `b` are one task's path as Windows compares them:
+    /// `CompareStringOrdinal` with case ignored, the uppercase table NTFS and the registry use.
+    /// Never Unicode's full lowercase, under which the Kelvin sign (U+212A) is `k` while
+    /// Windows keeps `…Tas\u{212A}` and `…Task` apart. `Err` when the comparison fails.
+    fn same_task_path(&mut self, a: &str, b: &str) -> Result<bool, Failed>;
     /// Deletes the task `name` from `folder`.
     fn delete_task(&mut self, folder: &Self::Folder, name: &str) -> Result<(), Failed>;
     /// Writes one line to the log: `error` for a refusal or a failure.
