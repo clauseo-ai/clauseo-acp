@@ -5,9 +5,10 @@
 
 use super::file_owner::{Dacl, descriptor};
 use super::*;
+use crate::windows::admin_copy::level_safe;
 use crate::windows::setup::sweep::log_path::{
-    ADMIN_FOLDER_SDDL, ADMIN_LOG_CAP, ADMIN_LOG_DIR, ADMIN_LOG_NAME, ADMIN_LOG_SDDL, LOGGED_CAP,
-    PATH_CAP, admin_only, clean, listed, rotates,
+    ADMIN_FOLDER_SDDL, ADMIN_LOG_CAP, ADMIN_LOG_FOLDERS, ADMIN_LOG_NAME, ADMIN_LOG_SDDL,
+    CLAUSEO_FOLDER_SDDL, LOGGED_CAP, PATH_CAP, admin_only, clean, listed, rotates,
 };
 
 #[test]
@@ -153,7 +154,11 @@ fn an_admin_only_log_that_cant_be_written_still_names_no_path_in_the_world_reada
 fn the_admin_only_log_is_made_for_system_and_administrators_alone() {
     assert_eq!(ADMIN_LOG_SDDL, "O:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)");
     assert_eq!(ADMIN_FOLDER_SDDL, "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)");
-    assert_eq!(ADMIN_LOG_DIR, ["Clauseo", "Sandbox"]);
+    let folders = [
+        ("Clauseo", CLAUSEO_FOLDER_SDDL),
+        ("Sandbox", ADMIN_FOLDER_SDDL),
+    ];
+    assert_eq!(ADMIN_LOG_FOLDERS, folders);
     assert_eq!(ADMIN_LOG_NAME, "sweep-admin.log");
     // That descriptor, as bytes: owner SYSTEM, a protected DACL, full control for SYSTEM and
     // Administrators. Anything wider, unprotected or owned by another isn't admin-only.
@@ -188,6 +193,49 @@ fn the_admin_only_log_is_made_for_system_and_administrators_alone() {
         Some("S-1-5-18"),
         Dacl::Of(deny)
     ))));
+}
+
+#[test]
+fn the_clauseo_folder_is_made_as_the_installer_makes_it() {
+    let hooks = concat!(env!("CARGO_MANIFEST_DIR"), "/../desktop/windows/hooks.nsh");
+    let hooks = std::fs::read_to_string(hooks).unwrap();
+    let made =
+        format!("ConvertStringSecurityDescriptorToSecurityDescriptorW(w \"{CLAUSEO_FOLDER_SDDL}\"");
+    assert!(
+        hooks.contains(&made),
+        "hooks.nsh no longer makes the folder with {made}"
+    );
+}
+
+#[test]
+fn an_installer_made_clauseo_folder_passes_and_a_user_owned_or_writable_one_doesnt() {
+    let full = 0x001F_01FF;
+    let users = "S-1-5-32-545";
+    // The installer's: owner Administrators (or SYSTEM, when the sweep made it), Users read
+    // and run.
+    let installer: &[(u8, &str, u32)] = &[
+        (0, "S-1-5-18", full),
+        (0, "S-1-5-32-544", full),
+        (0, users, 0x0012_00A9),
+    ];
+    for owner in ["S-1-5-32-544", "S-1-5-18"] {
+        assert!(
+            level_safe(&descriptor(Some(owner), Dacl::Of(installer))),
+            "{owner}"
+        );
+    }
+    // Owned by a standard user (who may always rewrite its DACL), or Users may write.
+    let squatter = "S-1-5-21-1-2-3-1010";
+    assert!(!level_safe(&descriptor(
+        Some(squatter),
+        Dacl::Of(installer)
+    )));
+    let writable: &[(u8, &str, u32)] = &[(0, "S-1-5-18", full), (0, users, 0x0013_01BF)];
+    assert!(!level_safe(&descriptor(
+        Some("S-1-5-32-544"),
+        Dacl::Of(writable)
+    )));
+    assert!(!level_safe(&descriptor(Some("S-1-5-32-544"), Dacl::Null)));
 }
 
 #[test]

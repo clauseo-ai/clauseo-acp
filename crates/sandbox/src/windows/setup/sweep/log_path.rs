@@ -16,12 +16,21 @@ use super::Sweeper;
 /// for SYSTEM and Administrators alone, protected.
 pub const ADMIN_LOG_SDDL: &str = "O:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)";
 
-/// The folders below `%ProgramData%` the admin-only log lives in, each made, when missing,
-/// with [`ADMIN_FOLDER_SDDL`]; one there already must let only SYSTEM, Administrators or
+/// The folders below `%ProgramData%` the admin-only log lives in, each with what it is made
+/// with when missing; one there already must let only SYSTEM, Administrators or
 /// `TrustedInstaller` change it (`admin_copy::level_safe`), or nothing is written.
-pub const ADMIN_LOG_DIR: [&str; 2] = ["Clauseo", "Sandbox"];
+pub const ADMIN_LOG_FOLDERS: [(&str, &str); 2] = [
+    ("Clauseo", CLAUSEO_FOLDER_SDDL),
+    ("Sandbox", ADMIN_FOLDER_SDDL),
+];
 
-/// What a folder of [`ADMIN_LOG_DIR`] is made with.
+/// `%ProgramData%\Clauseo` as the installer makes it (`crates/desktop/windows/hooks.nsh`, the
+/// policy folder's `ConvertStringSecurityDescriptorToSecurityDescriptorW`; keep the two the
+/// same): Users may read it, since the app reads a firm's `policy.json` there.
+pub const CLAUSEO_FOLDER_SDDL: &str =
+    "O:BAG:BAD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)";
+
+/// What `Clauseo\Sandbox` is made with: SYSTEM and Administrators alone.
 pub const ADMIN_FOLDER_SDDL: &str = "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)";
 
 /// The admin-only log's file name; rotated once to `sweep-admin.log.1`.
