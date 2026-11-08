@@ -66,3 +66,32 @@ fn the_wired_reader_in_tests_finds_nothing_set() {
     let wiring = crate::config::LaunchWiring::default();
     assert_eq!(format!("{:?}", wiring.rd_policy.reader), "NothingSet");
 }
+
+/// A reader that says what it was given, every time.
+#[derive(Debug)]
+struct Says(Vec<Found>);
+
+impl clauseo_settings::chromium_policy::RemoteDebuggingPolicy for Says {
+    fn read(&self) -> RemoteDebugging {
+        read(&self.0)
+    }
+}
+
+/// The lawyer's "Try again" reads with the same rule as a launch, the opt-in included.
+#[test]
+fn a_recheck_reads_with_the_launch_rule() {
+    let cases = [
+        (vec![unreadable()], Some(BrowserPolicyUnreadable)),
+        (
+            vec![unreadable(), Found::Disallowed],
+            Some(BrowserBlockedByPolicy),
+        ),
+        (vec![Found::Allowed, bad()], None),
+    ];
+    for (found, reason) in cases {
+        let policy = RdPolicy::new(std::sync::Arc::new(Says(found.clone())));
+        assert_eq!(policy.recheck(false), reason, "{found:?}");
+        assert_eq!(policy.recheck(false), policy.check(false), "{found:?}");
+        assert_eq!(policy.recheck(true), None, "{found:?}");
+    }
+}

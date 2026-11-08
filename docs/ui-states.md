@@ -199,6 +199,8 @@ reported it.
 | Edit, remove or send now refused: the turn already started | `ErrorCode::ThreadTurnNotQueued` | the turn's current state |
 | Close to the limit: `used_percent` at 95% or more, or the window's `warning` | `AgentLimitsView.meter` (`LimitMeter`, tone `MeterTone::Near`) | tone (`MeterTone::Near` starts at 75%, not at this 95%), used percent, window label, reset time; section 8 |
 | Context usage | `HeaderEntry.usage` (`ContextUsage`) | context used, context size, cost |
+| Browser off: the firm's browser policy couldn't be read | `HeaderEntry.tools`, the browser `ToolAvailability::Unavailable` with `ToolsUnavailableReason::BrowserPolicyUnreadable` | the reason and its note (UET-46, UET-47), and Try again (UET-31): `HostCommand::RecheckBrowserPolicy`, from the main window only; it answers `Done` and logs nothing, and a second one while a read runs joins it |
+| The policy re-read, app-wide | `HostEvent::BrowserPolicy` with `BrowserPolicyState::Checking`, `Unreadable`, `Blocked` or `Clear`; the latest in every app catch-up | `Checking`: Try again waits (disabled, busy); `Unreadable`: as before; `Blocked`: the host re-words those headers to `BrowserBlockedByPolicy` (UET-44, UET-45, no button); `Clear`: "Ready for new conversations" with "The browser comes with your next conversation." (as after a Chrome download); a running session's header and tools stay as they are |
 | Cost line, pay as you go only | `AgentLimitsView.billing` is `BillingKind::PayAsYouGo`; `ContextUsage.cost` | amount and currency, an estimate; hidden for `BillingKind::Plan` |
 
 ## 6. Versions

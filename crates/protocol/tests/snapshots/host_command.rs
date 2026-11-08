@@ -129,6 +129,7 @@ golden! { HostCommand::name_of {
     CancelScan => cancel_scan: HostCommand::CancelScan { folder: folder_ref_id(2) };
     InstallBrowser => install_browser: HostCommand::InstallBrowser {};
     CancelBrowserInstall => cancel_browser_install: HostCommand::CancelBrowserInstall {};
+    RecheckBrowserPolicy => recheck_browser_policy: HostCommand::RecheckBrowserPolicy {};
     CheckForUpdate => check_for_update: HostCommand::CheckForUpdate {};
     InstallUpdate => install_update: HostCommand::InstallUpdate { when: InstallWhen::AfterTurn };
     CancelScheduledUpdate => cancel_scheduled_update: HostCommand::CancelScheduledUpdate {};

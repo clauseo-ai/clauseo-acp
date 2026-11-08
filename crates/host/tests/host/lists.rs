@@ -6,7 +6,7 @@
 
 use clauseo_protocol::{
     CommandOutcome, ErrorCode, FieldChange, HostCommand, HostEvent, MatterId, MatterKind,
-    MatterStatus, MattersChanged, StopReason, StreamId, ThreadId, ThreadsChanged,
+    MatterStatus, MattersChanged, Principal, StopReason, StreamId, ThreadId, ThreadsChanged,
 };
 
 use crate::settings::{ready, subscribe_app};
@@ -434,8 +434,7 @@ fn rows_sent_while_the_first_frames_are_unread_come_after_them() {
     let (matter, _, _) = matter_with_thread(&dir, &host, "m", &[("a.txt", "x\n")], FAKE);
     let mut sub = crate::support::wait(
         "subscribe_app",
-        host.handle
-            .subscribe_app(clauseo_protocol::Principal::LocalDesktop),
+        host.handle.subscribe_app(Principal::LocalDesktop),
     )
     .unwrap();
     // Two changes before the window reads anything: they queue behind the four frames.
@@ -492,8 +491,7 @@ fn pin(matter: MatterId, pinned: bool) -> HostCommand {
 fn unread(host: &Running) -> clauseo_host::AppSubscription {
     crate::support::wait(
         "subscribe_app",
-        host.handle
-            .subscribe_app(clauseo_protocol::Principal::LocalDesktop),
+        host.handle.subscribe_app(Principal::LocalDesktop),
     )
     .unwrap()
 }
@@ -514,6 +512,7 @@ fn whole(event: &HostEvent) -> bool {
         | HostEvent::AccountLimitsChanged(_)
         | HostEvent::LimitsViewChanged(_)
         | HostEvent::BrowserInstall { .. }
+        | HostEvent::BrowserPolicy { .. }
         | HostEvent::CaseLawHint { .. }
         | HostEvent::ProtectionChanged { .. }
         | HostEvent::ProtectionViewChanged { .. }

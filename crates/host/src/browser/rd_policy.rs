@@ -9,7 +9,8 @@
 //! read starts none either (`BrowserPolicyUnreadable`): nothing is known there, and the lawyer is
 //! not told the firm turned the browser off. Either way the firm's Clauseo policy can allow
 //! Clauseo's browser anyway (`browser.allow_when_remote_debugging_disabled`). Nothing set, or a
-//! value Chrome would not take, does not block. Blocking reads: off the actor (the launch prep).
+//! value Chrome would not take, does not block. Blocking reads: off the actor (the launch prep,
+//! and the lawyer's "Try again", `RecheckBrowserPolicy`, on a thread of its own).
 
 #[cfg(test)]
 mod tests;
@@ -18,7 +19,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use clauseo_protocol::ToolsUnavailableReason;
-use clauseo_settings::chromium_policy::{RemoteDebugging, RemoteDebuggingPolicy};
+use clauseo_settings::chromium_policy::{Place, RemoteDebugging, RemoteDebuggingPolicy};
 
 /// The wiring's reader of the firm's browser policy, with its log-once guards: each place it
 /// could not read, and each bad value, is logged the first time this reader sees one (once per
@@ -59,6 +60,17 @@ impl RdPolicy {
         decide(&read, allowed_anyway)
     }
 
+    /// Why no browser would start, read now for the lawyer's "Try again"
+    /// (`actor/browser_policy.rs`): [`Self::check`]'s rule and its log-once guards, without the
+    /// line each launch logs, since no session is left out by it.
+    pub(crate) fn recheck(&self, allowed_anyway: bool) -> Option<ToolsUnavailableReason> {
+        let read = self.reader.read();
+        self.log_once(&read);
+        rule(&read)
+            .filter(|_| !allowed_anyway)
+            .map(|(_, reason)| reason)
+    }
+
     /// The first unreadable place and the first bad value this reader sees, each logged once.
     fn log_once(&self, read: &RemoteDebugging) {
         if read.unreadable().next().is_some()
@@ -88,13 +100,7 @@ impl RdPolicy {
 /// [`RdPolicy::check`]'s rule over what was read, with its log line: a false wins over a read
 /// error, and the firm's Clauseo opt-in overrides both.
 fn decide(read: &RemoteDebugging, allowed_anyway: bool) -> Option<ToolsUnavailableReason> {
-    let (place, reason) = if let Some(place) = read.turned_off_by() {
-        (place, ToolsUnavailableReason::BrowserBlockedByPolicy)
-    } else if let Some((place, _)) = read.unreadable().next() {
-        (place, ToolsUnavailableReason::BrowserPolicyUnreadable)
-    } else {
-        return None;
-    };
+    let (place, reason) = rule(read)?;
     let off = reason == ToolsUnavailableReason::BrowserBlockedByPolicy;
     if allowed_anyway {
         tracing::info!(
@@ -117,4 +123,16 @@ fn decide(read: &RemoteDebugging, allowed_anyway: bool) -> Option<ToolsUnavailab
         );
     }
     Some(reason)
+}
+
+/// The rule alone, before the firm's Clauseo opt-in: the place that blocks and why, a false
+/// before a read error; `None` when nothing blocks.
+fn rule(read: &RemoteDebugging) -> Option<(Place, ToolsUnavailableReason)> {
+    if let Some(place) = read.turned_off_by() {
+        Some((place, ToolsUnavailableReason::BrowserBlockedByPolicy))
+    } else {
+        read.unreadable()
+            .next()
+            .map(|(place, _)| (place, ToolsUnavailableReason::BrowserPolicyUnreadable))
+    }
 }

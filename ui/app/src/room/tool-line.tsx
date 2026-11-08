@@ -7,6 +7,7 @@ import { lazy, Suspense, use, useMemo } from "react";
 import { ToolGlyph } from "@clauseo/components/icons/tool-glyph.tsx";
 import { late } from "@clauseo/components/lib/late.ts";
 import { browserInstallOf } from "./browser-install.ts";
+import { browserPolicyOf } from "./browser-policy.ts";
 import { ToolLineContext } from "./tool-line-context.ts";
 import type { ToolLineRoom } from "./tool-line-room.ts";
 import { glyphState, type KnownTool } from "./tools.ts";
@@ -33,6 +34,7 @@ export function ToolLine({ label, tools }: { label: string; tools: readonly Know
       plan,
       openSettings,
       install: transport === null ? null : browserInstallOf(transport),
+      policy: transport === null ? null : browserPolicyOf(transport),
     }),
     [plan, openSettings, transport],
   );
