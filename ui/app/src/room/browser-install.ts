@@ -12,15 +12,18 @@ import type { BrowserInstallState } from "../transport/protocol.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import { nextHostOf, type AppEvent } from "./host-next.ts";
 
-/** Why the download failed: the connection dropped, a size or signature that didn't match, under about 1 GB free, a
- * host the network refused, an archive that wouldn't unpack, a computer that can't download it (no system curl,
- * ditto or tar, or Windows on ARM64), a download stopped; `unknown` for any value this version doesn't know. */
+/** Why the download failed: the connection dropped, a size, fingerprint or signature that didn't match, under about
+ * 1 GB free, a host the network refused, an archive that wouldn't unpack, no verified list of Chrome versions yet (so
+ * nothing was downloaded), a computer that can't download it (no system curl, ditto or tar, or Windows on ARM64), a
+ * download stopped; `unknown` for any value this version doesn't know. */
 export type InstallFailCode =
   | "network"
   | "size_mismatch"
   | "disk_space"
   | "host_refused"
   | "signature"
+  | "hash_mismatch"
+  | "list_unavailable"
   | "unpack"
   | "unsupported"
   | "cancelled"
@@ -32,6 +35,8 @@ const FAIL_CODES: ReadonlySet<string> = new Set<InstallFailCode>([
   "disk_space",
   "host_refused",
   "signature",
+  "hash_mismatch",
+  "list_unavailable",
   "unpack",
   "unsupported",
   "cancelled",

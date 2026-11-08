@@ -167,7 +167,8 @@ pub(super) fn session_loads(
         proxy_set: actor.wiring.proxy.is_some(),
         // Only a proxy that opened for this session gives a port (`launch_checks::egress`).
         port: run.egress.as_ref().and_then(|egress| egress.port()),
-        blocked_by_policy: run.browser_blocked,
+        blocked: run.browser_blocked,
+        notice: run.browser_notice,
         executable: run.chrome.as_deref(),
         browser_dir: &run.browser,
         claims: run.browser_session.as_deref().map(Claims::of),

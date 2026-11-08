@@ -1,5 +1,7 @@
 //! The download engine with fake tools, and its checks one by one.
 
+mod links;
+mod pinned;
 mod review;
 mod support;
 
@@ -10,9 +12,10 @@ use clauseo_protocol::{BrowserInstallFailure, BrowserInstallState, Count};
 use super::system::{content_length, curl_exit};
 use super::{Cancel, Failure, Job, archive, check_signature, manifest, run};
 use crate::browser::chrome::{self, ChromeRoots, Platform};
+use crate::browser::pins::Pins;
 use crate::pipeline::tests::support::TempDir;
 use crate::write;
-use support::{Fake, Length, MAC_BINARY, Made, VERSION, ZipEntry, file, google_url, versions, zip};
+use support::{Fake, Length, MAC_BINARY, Made, VERSION, ZipEntry, file, zip};
 
 /// A job for `platform` with the app data folder under `dir`.
 fn job(dir: &Path, platform: Platform) -> Job {
@@ -23,14 +26,25 @@ fn job(dir: &Path, platform: Platform) -> Job {
     }
 }
 
-/// Runs `job` with `tools`, returning its result and the states it reported.
+/// Runs `job` with `tools` and pins of their zip, returning its result and the states it
+/// reported.
 fn run_with(
     job: &Job,
     tools: &Fake,
     cancel: &Cancel,
 ) -> (Result<PathBuf, Failure>, Vec<BrowserInstallState>) {
+    run_pinned(job, Some(&tools.pins()), tools, cancel)
+}
+
+/// [`run_with`] with `pins` given.
+fn run_pinned(
+    job: &Job,
+    pins: Option<&Pins>,
+    tools: &Fake,
+    cancel: &Cancel,
+) -> (Result<PathBuf, Failure>, Vec<BrowserInstallState>) {
     let mut states = Vec::new();
-    let result = run(job, tools, cancel, &mut |state| states.push(state));
+    let result = run(job, pins, tools, cancel, &mut |state| states.push(state));
     (result, states)
 }
 
@@ -80,10 +94,7 @@ fn a_download_reports_progress_then_unpacking_and_find_finds_it() {
             BrowserInstallState::Unpacking,
         ]
     );
-    assert_eq!(
-        tools.calls(),
-        ["fetch_versions", "download", "unpack", "verify_signature"]
-    );
+    assert_eq!(tools.calls(), ["download", "unpack", "verify_signature"]);
     let browsers_dir = dir.path().join("app").join("browsers");
     assert_eq!(folder, browsers_dir.join(format!("chrome-{VERSION}")));
     assert_eq!(browsers(dir.path()), [format!("chrome-{VERSION}")]);
@@ -132,10 +143,10 @@ fn a_cancel_during_the_download_leaves_no_folder() {
         ..Fake::working()
     };
     fails_with("cft-cancel", &tools, BrowserInstallFailure::Cancelled);
-    assert_eq!(tools.calls(), ["fetch_versions", "download"]);
+    assert_eq!(tools.calls(), ["download"]);
 }
 
-/// A cancel set before the download starts stops it before the version list is read.
+/// A cancel set before the download starts stops it before anything is fetched.
 #[test]
 fn a_cancel_before_the_start_downloads_nothing() {
     let dir = TempDir::new("cft-cancel-first");
@@ -161,63 +172,18 @@ fn a_size_mismatch_or_a_missing_length_is_refused() {
         ..Fake::working()
     };
     fails_with("cft-no-length", &none, BrowserInstallFailure::SizeMismatch);
-    assert_eq!(none.calls(), ["fetch_versions", "download"]);
+    assert_eq!(none.calls(), ["download"]);
 }
 
-/// A version list naming another host's URL, or a version that is not dotted digits, is
-/// refused before anything downloads.
+/// Versions are dotted digits of bounded length.
 #[test]
-fn a_refused_url_or_version_downloads_nothing() {
-    let other_host = Fake {
-        versions: versions(VERSION, "https://example.com/chrome-mac-arm64.zip"),
-        ..Fake::working()
-    };
-    fails_with("cft-host", &other_host, BrowserInstallFailure::HostRefused);
-    assert_eq!(other_host.calls(), ["fetch_versions"]);
-    let climbing = Fake {
-        versions: versions("../131", &google_url("../131")),
-        ..Fake::working()
-    };
-    fails_with("cft-version", &climbing, BrowserInstallFailure::HostRefused);
-    let not_json = Fake {
-        versions: b"<html>".to_vec(),
-        ..Fake::working()
-    };
-    fails_with("cft-json", &not_json, BrowserInstallFailure::HostRefused);
-}
-
-/// Each way a zip URL can differ from Google's is refused, and says which.
-#[test]
-fn zip_urls_must_be_exactly_googles() {
-    let refused = |url: &str| {
-        let failure = manifest::check_zip_url(url, VERSION, "mac-arm64").unwrap_err();
-        assert_eq!(failure.code, BrowserInstallFailure::HostRefused);
-        failure.message
-    };
-    let good = google_url(VERSION);
-    manifest::check_zip_url(&good, VERSION, "mac-arm64").unwrap();
-    assert!(refused(&good.replace("https://", "http://")).contains("not https"));
-    assert!(refused(&good.replace("storage.googleapis.com", "evil.example")).contains("host"));
-    assert!(refused(&good.replace(".com/", ".com:8443/")).contains("host"));
-    assert!(refused(&good.replace("https://", "https://user@")).contains("host"));
-    assert!(refused(&good.replace(VERSION, "131.0.1.1")).contains("version"));
-    assert!(refused(&format!("{good}?x=1")).contains("path"));
-    assert!(refused(&good.replace("mac-arm64.zip", "mac-x64.zip")).contains("path"));
-    assert!(refused(&good.replace("/mac-arm64/", "/mac-arm64/../")).contains("path"));
-}
-
-/// Versions are dotted digits of bounded length; the version list's own URL is Google's.
-#[test]
-fn versions_and_the_list_url_are_checked() {
+fn versions_are_checked() {
     for version in ["131.0.6778.85", "1"] {
         manifest::check_version(version).unwrap();
     }
     for version in ["", "131.0.x", "../1", "1/2", "131.0 .1", &"1.".repeat(40)] {
         assert!(manifest::check_version(version).is_err(), "{version:?}");
     }
-    manifest::check_versions_url(super::VERSIONS_URL).unwrap();
-    assert!(manifest::check_versions_url("http://googlechromelabs.github.io/x.json").is_err());
-    assert!(manifest::check_versions_url("https://googlechromelabs.github.io.evil/x").is_err());
 }
 
 /// A zip entry that climbs out with `..` is refused before the unpack tool runs, and nothing
@@ -233,7 +199,7 @@ fn a_climbing_zip_entry_is_refused_before_unpacking() {
     };
     let failure = fails_with("cft-dotdot", &tools, BrowserInstallFailure::Unpack);
     assert!(failure.message.contains(".."), "{}", failure.message);
-    assert_eq!(tools.calls(), ["fetch_versions", "download"]);
+    assert_eq!(tools.calls(), ["download"]);
 }
 
 /// Every name the zip check refuses, and one it takes.
@@ -243,7 +209,7 @@ fn zip_entry_names_are_checked() {
         let dir = TempDir::new("cft-names");
         let path = dir.path().join("t.zip");
         write::write_file(&path, &zip(entries)).unwrap();
-        archive::check_zip(&path)
+        archive::check_zip(&path, true)
     };
     checks(&[file("a/b.txt", b"1"), file("a/c.txt", b"")]).unwrap();
     for name in [
@@ -430,8 +396,9 @@ fn curl_exits_map_to_codes() {
     }
 }
 
-/// A real download from Google with the system tools, on macOS or Windows x64 only. By hand:
-/// `cargo test -p clauseo-host --lib real_download -- --ignored --nocapture`.
+/// A real download from Google with the system tools, on macOS or Windows x64 only, pinned by
+/// the signed pins in the folder `CLAUSEO_BROWSER_PINS` names. By hand:
+/// `CLAUSEO_BROWSER_PINS=<folder> cargo test -p clauseo-host --lib real_download -- --ignored`.
 #[test]
 #[ignore = "downloads about 200 MB from Google; run by hand on macOS or Windows"]
 fn real_download() {
@@ -442,10 +409,22 @@ fn real_download() {
         random: "real".to_owned(),
     };
     let mut states = Vec::new();
-    let result = run(&job, &super::SystemTools, &Cancel::new(), &mut |state| {
-        println!("{state:?}");
-        states.push(state);
-    });
+    // The real pins: the bundled copy in a release's resource folder, given by hand.
+    let folder = std::env::var_os("CLAUSEO_BROWSER_PINS").map(PathBuf::from);
+    let source = crate::browser::pins::BrowserPins::release(folder).source(dir.path());
+    // 2100: no copy is set aside as dated ahead.
+    let now = clauseo_protocol::Timestamp::new(4_102_444_800_000).unwrap();
+    let pins = source.newest(now);
+    let result = run(
+        &job,
+        pins.as_ref(),
+        &super::SystemTools,
+        &Cancel::new(),
+        &mut |state| {
+            println!("{state:?}");
+            states.push(state);
+        },
+    );
     let folder = result.unwrap();
     println!("installed in {}", folder.display());
     assert!(states.contains(&BrowserInstallState::Unpacking));

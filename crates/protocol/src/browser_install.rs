@@ -44,13 +44,13 @@ open_unit_enum! {
         /// The network failed: curl could not connect, the server answered an error, or the
         /// transfer stalled (slower than 1 byte a second for 60 s).
         Network,
-        /// The zip's size did not match its `Content-Length`, the response had none, or it was
-        /// larger than the 400 MiB cap.
+        /// The zip's size did not match its `Content-Length` or the size the signed browser list
+        /// pins, the response had none, or it was larger than the pinned size.
         SizeMismatch,
         /// Less than about 1 GB is free in the app data folder.
         DiskSpace,
-        /// The version list named a URL or version the host does not accept: not `https`, not
-        /// Google's host, or a path that does not match the version and platform.
+        /// The signed browser list pins a version the host does not accept (not dotted digits),
+        /// or the server answered with a redirect, which the host does not follow.
         HostRefused,
         /// Chrome's code signature did not check out (only while the host requires it).
         Signature,
@@ -62,6 +62,13 @@ open_unit_enum! {
         Unsupported,
         /// The lawyer cancelled, or the app quit, during the download.
         Cancelled,
+        /// No signed browser list verifies (neither the bundled one nor a fetched one), so the
+        /// host does not know which Chrome for Testing to download, nor its hash; nothing is
+        /// downloaded.
+        ListUnavailable,
+        /// The downloaded zip's sha256 differs from the one the signed browser list pins; the
+        /// zip was removed and nothing is installed.
+        HashMismatch,
     }
     test mod browser_install_failure;
 }

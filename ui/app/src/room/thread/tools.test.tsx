@@ -189,6 +189,8 @@ const ROWS: [ToolState, string | null][] = [
   [browser(off("browser_not_installed")), "Needs Chrome"],
   [browser(off("browser_blocked_by_policy")), "Blocked by your firm"],
   [browser(off("browser_policy_unreadable")), "Couldn't check browser settings"],
+  [browser(off("browser_out_of_date")), "Needs a newer Chrome"],
+  [browser(off("browser_list_unavailable")), "Couldn't check Chrome's version"],
 ];
 
 test.each(ROWS)(
@@ -213,10 +215,10 @@ test.each(ROWS)(
         tool.availability !== "available" && reason === "In Settings",
       );
     // nothing else in words: the name, the chip and the reason; with no Chrome, the offer's words under it (the
-    // button, its hidden tooltip and the size); blocked by the firm's policy, or a policy Clauseo
-    // couldn't check, the reason in full and no offer
+    // button, its hidden tooltip and the size), and with a Chrome too old the same; blocked by the firm's policy, a
+    // policy Clauseo couldn't check, or a Chrome version it couldn't check, the reason in full and no offer
     const offer =
-      reason === "Needs Chrome"
+      reason === "Needs Chrome" || reason === "Needs a newer Chrome"
         ? "Download Chrome" + "From Google, once. Needs 1\u00a0GB free." + "200\u00a0MB"
         : reason === "Blocked by your firm"
           ? "Your firm doesn't allow apps to control a browser on this computer, so Clauseo can't use " +
@@ -224,7 +226,10 @@ test.each(ROWS)(
           : reason === "Couldn't check browser settings"
             ? "Clauseo couldn't check this computer's browser settings, so it won't use a browser for " +
               "now. It checks again the next time it needs one."
-            : "";
+            : reason === "Couldn't check Chrome's version"
+              ? "Clauseo couldn't check that its copy of Chrome is up to date, so it won't use a browser " +
+                "for now. It keeps trying on its own."
+              : "";
     expect(r.textContent).toBe(
       (tool.tool === "web_search" ? "Web search" : "Browser") +
         (reason === null ? "On" : "Off") +
@@ -233,6 +238,18 @@ test.each(ROWS)(
     );
   },
 );
+
+test("a browser that is on with an old list of Chrome versions: on as drawn, its notice a muted line under it", async () => {
+  h = await open([{ ...browser("available"), notice: "browser_list_old" } as ToolState]);
+  expect(line()?.getAttribute("aria-label")).toBe("Browser: on.");
+  await openPopover();
+  expect(said("browser", "tool-row-chip")).toBe("On");
+  expect(said("browser", "tool-row-reason")).toBeNull();
+  expect(said("browser", "tool-row-full")).toBe(
+    "Clauseo hasn't checked for a newer Chrome in a while. The browser still works.",
+  );
+  expect(row("browser")?.querySelector("button")).toBeNull();
+});
 
 const settingsButtons = () => [
   ...document.body.querySelectorAll<HTMLElement>('[data-testid="tool-settings"]'),
@@ -374,6 +391,8 @@ test.each([
   ["network", "Connection dropped"],
   ["size_mismatch", "File didn't match"],
   ["signature", "File didn't match"],
+  ["hash_mismatch", "File didn't match"],
+  ["list_unavailable", "Not ready to download yet"],
   ["disk_space", "Needs 1\u00a0GB free"],
   ["host_refused", "Network blocked it"],
   ["unpack", "Couldn't unpack"],

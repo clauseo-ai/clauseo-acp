@@ -49,7 +49,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::SignatureFile => f.write_str("the signature file is not a minisign signature"),
-            Error::NoKey => f.write_str("no block list key is compiled in"),
+            Error::NoKey => f.write_str("no usable public key is compiled in"),
             Error::Signature => f.write_str("the signature does not verify"),
             Error::Comment => f.write_str("the trusted comment is not the v1 form"),
             Error::Gzip => f.write_str("the list does not decompress"),

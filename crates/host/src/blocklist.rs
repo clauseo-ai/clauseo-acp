@@ -26,6 +26,10 @@
 //!   restores the pair. No mismatched pair is ever read as good.
 //! - Redirects (`fetch.rs`): followed by hand, at most five hops, each resolved against the URL
 //!   before it, `https` only (when asked) and to an allowed host only.
+//! - The browser pins (`browser::pins`): each round also fetches the signed browser pins pair
+//!   by the same fetch rules, whatever `network.unsafe_site_list_updates` says (it is about the
+//!   block list only), verifies it, applies the pins' no-rollback rule and stores it under
+//!   `<data_dir>/browser-pins/` (`updater/pins.rs`). Readers read it from disk.
 //! - The lawyer's allowed sites (PR 2, `allowed.rs`): the per-matter views the proxies read,
 //!   which the seams carry ([`BlockListSeams::with_allowed`]) and the actor publishes; and the
 //!   OS secret store holding `allowed.json`'s hash ([`BlockListSeams::with_secrets`]).
@@ -204,6 +208,8 @@ pub(crate) struct Start {
     /// The settings each round reads; the actor keeps a clone current.
     pub(crate) live: Live,
     pub(crate) clock: Arc<dyn Clock>,
+    /// The browser pins' URLs, keys and bundled copy (the launch wiring's).
+    pub(crate) pins: crate::browser::pins::BrowserPins,
 }
 
 /// The allowed sites' views `config`'s seams carry (a fresh one without seams), and their
@@ -225,6 +231,7 @@ pub(crate) fn take(config: &mut crate::HostConfig) -> Option<Start> {
         data_dir: config.effective.data_dir().to_path_buf(),
         live: Live::new(Fetching::of(config.effective.settings())),
         clock: Arc::clone(&config.clock),
+        pins: config.wiring.browser_pins.clone(),
     })
 }
 
@@ -243,7 +250,13 @@ pub(crate) struct Running {
 /// Starts the thread; `None` (logged) when the OS refused a thread, and the host runs on with
 /// whatever list the seams' `current` holds.
 pub(crate) fn start(start: Start) -> Option<Running> {
-    let updater = Updater::new(start.seams, &start.data_dir, start.live, start.clock);
+    let updater = Updater::new(
+        start.seams,
+        &start.data_dir,
+        start.live,
+        start.clock,
+        start.pins,
+    );
     spawn(updater, |_round| {})
         .map_err(|error| tracing::warn!(kind = ?error.kind(), "no block list thread"))
         .ok()

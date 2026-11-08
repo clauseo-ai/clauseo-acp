@@ -37,6 +37,8 @@ fn the_failure_codes_are_these_strings() {
             r#""unpack""#,
             r#""unsupported""#,
             r#""cancelled""#,
+            r#""list_unavailable""#,
+            r#""hash_mismatch""#,
             r#""unknown""#,
         ]
     );

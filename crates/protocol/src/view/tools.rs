@@ -14,6 +14,10 @@ pub struct ToolState {
     pub tool: ClauseoTool,
     /// Whether the agent has it.
     pub availability: ToolAvailability,
+    /// Something the lawyer should know about an available tool, if anything; left out when
+    /// none, so a header from before it writes back the same.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<ToolNotice>,
 }
 
 open_unit_enum! {
@@ -84,6 +88,26 @@ open_unit_enum! {
         /// whether remote debugging is allowed; none says false, and the firm's Clauseo policy does
         /// not allow Clauseo's browser anyway. Checked again at the next launch.
         BrowserPolicyUnreadable,
+        /// The browser only: the Chrome for Testing Clauseo downloaded is more than one major
+        /// version behind the version Clauseo's signed browser list pins; the app offers the
+        /// download, which fetches the pinned version. Chrome installed on the machine is never
+        /// judged so.
+        BrowserOutOfDate,
+        /// The browser only: a Chrome for Testing Clauseo downloaded is the browser, and no
+        /// signed browser list verifies (neither the bundled one nor a fetched one), so its
+        /// version cannot be checked.
+        BrowserListUnavailable,
     }
     test mod tools_unavailable_reason;
+}
+
+open_unit_enum! {
+    /// Something the lawyer should know about a tool the agent has.
+    pub enum ToolNotice {
+        /// The browser only: it is a Chrome for Testing Clauseo downloaded, and the newest
+        /// signed browser list the app has was published over 14 days ago, so a newer Chrome
+        /// may be out; the browser stays available.
+        BrowserListOld,
+    }
+    test mod tool_notice;
 }

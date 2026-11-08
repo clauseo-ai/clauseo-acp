@@ -383,5 +383,60 @@
     "at": "2026-11-08",
     "by": "app track (provisional; Rohan batch review)",
     "note": "Browser policy (RemoteDebuggingAllowed) couldn't be read (browser_policy_unreadable): pending copy review; no download offered"
+  },
+  "UET-48": {
+    "en": "Needs a newer Chrome",
+    "hi": "नया Chrome चाहिए",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (final provisional Hindi; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "The Chrome Clauseo downloaded is more than one major version behind its signed browser list (browser_out_of_date): pending copy review; the download is offered, as for Needs Chrome"
+  },
+  "UET-49": {
+    "en": "Couldn't check Chrome's version",
+    "hi": "Chrome के संस्करण की जाँच नहीं हो सकी",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (final provisional Hindi; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "No verified browser list, so the downloaded Chrome's version can't be checked (browser_list_unavailable): pending copy review; no download offered"
+  },
+  "UET-50": {
+    "en": "Clauseo couldn't check that its copy of Chrome is up to date, so it won't use a browser for now. It keeps trying on its own.",
+    "hi": "Clauseo यह जाँच नहीं कर सका कि उसका Chrome अप-टू-डेट है या नहीं, इसलिए वह अभी ब्राउज़र का उपयोग नहीं करेगा। वह अपने आप कोशिश करता रहेगा।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (final provisional Hindi; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "No verified browser list (browser_list_unavailable), in full under the reason: pending copy review; Clauseo fetches the list in the background; no download offered"
+  },
+  "UET-51": {
+    "en": "Not ready to download yet",
+    "hi": "अभी डाउनलोड के लिए तैयार नहीं",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (final provisional Hindi; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "A download failed with list_unavailable (no verified browser list, nothing downloaded), with Try again: pending copy review"
+  },
+  "UET-52": {
+    "en": "Clauseo hasn't checked for a newer Chrome in a while. The browser still works.",
+    "hi": "Clauseo ने कुछ समय से नए Chrome की जाँच नहीं की है। ब्राउज़र अब भी काम करता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (final provisional Hindi; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Non-blocking notice on an available browser (notice browser_list_old: newest browser list over 14 days old): pending copy review"
   }
 }

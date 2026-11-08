@@ -1,18 +1,20 @@
 //! The launch prep's browser part: which sessions get one, the firm's browser policy
-//! (`browser::rd_policy`), the sidecar check, the Chrome search and the session's claims
-//! (`browser::session`). See `launch_checks.rs` and decision record
-//! 0029.
+//! (`browser::rd_policy`), the sidecar check, the Chrome search with a downloaded Chrome for
+//! Testing judged by the signed browser pins (`browser::chrome::find_checked`,
+//! `browser::pins`) and the session's claims (`browser::session`). See `launch_checks.rs` and
+//! decision record 0029.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use super::super::super::Actor;
-use crate::browser::chrome::ChromeRoots;
+use crate::browser::chrome::{ChromeRoots, Picked};
+use crate::browser::pins::{self, PinsSource};
 use crate::browser::rd_policy::RdPolicy;
 use crate::browser::session::BrowserSession;
 use crate::config::SessionKey;
-use clauseo_protocol::ToolsUnavailableReason;
+use clauseo_protocol::{Timestamp, ToolNotice, ToolsUnavailableReason};
 
 /// How the launch prep picks the session's Chrome.
 enum ChromeSearch {
@@ -25,14 +27,24 @@ enum ChromeSearch {
 }
 
 impl ChromeSearch {
-    /// The Chrome found. File system calls: off the actor.
-    fn find(self, data: &Path) -> Option<PathBuf> {
+    /// The Chrome found, a downloaded Chrome for Testing judged by the newest verified pins in
+    /// `pins` at `now` (read only then); a forced one is never judged. File system calls: off
+    /// the actor.
+    fn find(
+        self,
+        data: &Path,
+        pins: &PinsSource,
+        now: Timestamp,
+    ) -> Result<Picked, ToolsUnavailableReason> {
         match self {
-            Self::Skip => None,
-            Self::Forced(chrome) => Some(chrome),
+            Self::Skip => Err(ToolsUnavailableReason::BrowserNotInstalled),
+            Self::Forced(chrome) => Ok(Picked {
+                path: chrome,
+                pins_published: None,
+            }),
             Self::Roots(roots) => {
                 let roots = roots.unwrap_or_else(|| ChromeRoots::system(data));
-                crate::browser::chrome::find(&roots)
+                crate::browser::chrome::find_checked(&roots, || pins.newest(now))
             }
         }
     }
@@ -41,16 +53,21 @@ impl ChromeSearch {
     /// (`browser::write_config`). Without the file the guard cannot start, so a failure to
     /// write it leaves the browser out (`BrowserNotInstalled`), with a warning; the launch goes
     /// on. File system calls: off the actor.
-    fn find_with_config(self, data: &Path) -> Option<PathBuf> {
-        let chrome = self.find(data)?;
+    fn find_with_config(
+        self,
+        data: &Path,
+        pins: &PinsSource,
+        now: Timestamp,
+    ) -> Result<Picked, ToolsUnavailableReason> {
+        let chrome = self.find(data, pins, now)?;
         match crate::browser::write_config(data) {
-            Ok(_) => Some(chrome),
+            Ok(_) => Ok(chrome),
             Err(error) => {
                 tracing::warn!(
                     error = %crate::log_file::Cause(&error),
                     "agent-browser's config file was not written; the session has no browser"
                 );
-                None
+                Err(ToolsUnavailableReason::BrowserNotInstalled)
             }
         }
     }
@@ -67,6 +84,12 @@ pub(super) struct BrowserPrep {
     rd_policy: Arc<RdPolicy>,
     /// The firm's `browser.allow_when_remote_debugging_disabled`.
     allowed_anyway: bool,
+    /// Where the signed browser pins are read from, when a downloaded Chrome for Testing is
+    /// found.
+    pins: PinsSource,
+    /// The host clock's time when the launch prep was made: pins dated over a day ahead of it
+    /// are set aside, and its notice is judged by it.
+    now: Timestamp,
     /// Where the socket folder goes; `None` is `/tmp`.
     #[cfg(unix)]
     socket_root: Option<PathBuf>,
@@ -92,17 +115,19 @@ impl BrowserPrep {
     /// The Chrome found and the session's claims. The firm's browser policy comes first,
     /// before any Chrome is picked, forced or found (`browser::rd_policy`), read again at each
     /// launch: when it blocks, both are left out and the entry drops with
-    /// `BrowserBlockedByPolicy` or `BrowserPolicyUnreadable`. A missing sidecar
-    /// leaves both out, with a warning (a development build has no agent-browser); a failed
-    /// claim leaves the claims out. Either way the entry drops with `BrowserNotInstalled`.
-    /// Registry, file system and socket calls: off the actor.
+    /// `BrowserBlockedByPolicy` or `BrowserPolicyUnreadable`. A downloaded Chrome for Testing
+    /// the pins refuse leaves both out too, with `BrowserOutOfDate` or `BrowserListUnavailable`;
+    /// one they take carries [`ToolNotice::BrowserListOld`] when they are over 14 days old. A
+    /// missing sidecar leaves both out, with a warning (a development build has no
+    /// agent-browser); a failed claim leaves the claims out. Either way the entry drops with
+    /// `BrowserNotInstalled`. Registry, file system and socket calls: off the actor.
     pub(super) fn prepare(self, data: &Path, session_id: &str) -> Prepared {
         if matches!(self.chrome, ChromeSearch::Skip) {
             return Prepared::default();
         }
         if let Some(reason) = self.rd_policy.check(self.allowed_anyway) {
             return Prepared {
-                policy_block: Some(reason),
+                blocked: Some(reason),
                 ..Prepared::default()
             };
         }
@@ -110,9 +135,20 @@ impl BrowserPrep {
             tracing::warn!("a browser sidecar is missing; the session has no browser");
             return Prepared::default();
         }
-        let Some(chrome) = self.chrome.find_with_config(data) else {
-            return Prepared::default();
+        let picked = match self.chrome.find_with_config(data, &self.pins, self.now) {
+            Ok(picked) => picked,
+            Err(ToolsUnavailableReason::BrowserNotInstalled) => return Prepared::default(),
+            Err(reason) => {
+                return Prepared {
+                    blocked: Some(reason),
+                    ..Prepared::default()
+                };
+            }
         };
+        let notice = picked
+            .pins_published
+            .and_then(|published| pins::notice(published, self.now));
+        let chrome = picked.path;
         let claimed = BrowserSession::claim(
             session_id,
             #[cfg(unix)]
@@ -128,7 +164,8 @@ impl BrowserPrep {
                 Prepared {
                     chrome: Some(chrome),
                     session: Some(Arc::new(session)),
-                    policy_block: None,
+                    blocked: None,
+                    notice,
                 }
             }
             Err(error) => {
@@ -152,8 +189,11 @@ pub(super) struct Prepared {
     pub(super) chrome: Option<PathBuf>,
     /// The session's claims, if made.
     pub(super) session: Option<Arc<BrowserSession>>,
-    /// Why the firm's browser policy left the browser out, if it did (`browser::rd_policy`).
-    pub(super) policy_block: Option<ToolsUnavailableReason>,
+    /// Why the browser was left out before any claim, if it was: the firm's browser policy
+    /// (`browser::rd_policy`), or the pins refusing a downloaded Chrome for Testing.
+    pub(super) blocked: Option<ToolsUnavailableReason>,
+    /// The notice the browser's header carries, if any (`browser::pins::notice`).
+    pub(super) notice: Option<ToolNotice>,
 }
 
 /// How long a launch prep waits for a browser slot that a running removal may free
@@ -223,6 +263,8 @@ pub(super) fn browser_prep(
         chrome: ChromeSearch::Skip,
         rd_policy: Arc::clone(&actor.wiring.rd_policy),
         allowed_anyway: settings.browser.allow_when_remote_debugging_disabled,
+        pins: actor.wiring.browser_pins.source(actor.effective.data_dir()),
+        now: actor.clock.now().wall,
         #[cfg(unix)]
         socket_root: None,
     };

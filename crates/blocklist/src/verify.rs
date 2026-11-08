@@ -24,6 +24,15 @@ pub struct Header {
 /// entries with no usable key line are skipped) and reads its trusted comment. Only prehashed
 /// signatures (`ED`, minisign's default) verify; the legacy kind is refused.
 pub fn verify(gz: &[u8], minisig: &[u8], keys: &[&str]) -> Result<Header, Error> {
+    header(&trusted_comment(gz, minisig, keys)?).ok_or(Error::Comment)
+}
+
+/// The signature part of [`verify`], for any signed file (the block list, the browser pins):
+/// checks `minisig` over the exact bytes of `data` against `keys` (key files or bare key
+/// lines; entries with no usable key line are skipped) and returns the trusted comment the
+/// signature covers, unparsed. Only prehashed signatures (`ED`) verify. The caller parses the
+/// comment: it is signed, but its form is the caller's to check.
+pub fn trusted_comment(data: &[u8], minisig: &[u8], keys: &[&str]) -> Result<String, Error> {
     if minisig.len() > MAX_SIGNATURE {
         return Err(Error::SignatureFile);
     }
@@ -40,11 +49,11 @@ pub fn verify(gz: &[u8], minisig: &[u8], keys: &[&str]) -> Result<Header, Error>
     }
     if !keys
         .iter()
-        .any(|key| key.verify(gz, &signature, false).is_ok())
+        .any(|key| key.verify(data, &signature, false).is_ok())
     {
         return Err(Error::Signature);
     }
-    header(signature.trusted_comment()).ok_or(Error::Comment)
+    Ok(signature.trusted_comment().to_owned())
 }
 
 /// Verifies, then decompresses and parses: the list, or why it was refused.

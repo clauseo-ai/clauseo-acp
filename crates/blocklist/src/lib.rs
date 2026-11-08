@@ -49,7 +49,7 @@ pub use generated::{Generated, accept};
 pub use keys::{PUBLIC_KEYS, STAGE_F_KEY_FILE, key_line};
 pub use list::{BlockList, Hit, Tag};
 pub use parse::{MAX_ENTRIES, MAX_TEXT, parse_gz, parse_plain};
-pub use verify::{Header, MAX_SIGNATURE, load, verify};
+pub use verify::{Header, MAX_SIGNATURE, load, trusted_comment, verify};
 
 /// The list's file name, as published and as stored.
 pub const LIST_FILE: &str = "blocklist-v1.txt.gz";

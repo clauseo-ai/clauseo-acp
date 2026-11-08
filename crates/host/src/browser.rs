@@ -2,14 +2,16 @@
 //! ([`chrome`]), how many run at once and the limits each gets ([`limits`]), the sites every
 //! matter's allowlist starts from ([`seed_sites`]) and the background hosts the proxy denies
 //! ([`deny_hosts`]), each session's loopback ports and socket folder ([`session`]), whether
-//! the firm's Chrome, Edge and Chromium policy lets any browser start ([`rd_policy`]), and where
-//! Chrome runs ([`BrowserLaunch`]). The `browser` entry itself is
+//! the firm's Chrome, Edge and Chromium policy lets any browser start ([`rd_policy`]), the signed
+//! list of which Chrome for Testing to download and its hashes ([`pins`]), and where Chrome runs
+//! ([`BrowserLaunch`]). The `browser` entry itself is
 //! filled in `agent/loads/browser.rs`; the pages it opens are recorded in `sources/browser.rs`.
 
 pub mod chrome;
 pub mod deny_hosts;
 pub mod install;
 pub mod limits;
+pub mod pins;
 pub(crate) mod rd_policy;
 pub mod seed_sites;
 pub(crate) mod session;

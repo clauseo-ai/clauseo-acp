@@ -1,5 +1,7 @@
 //! The Chrome for Testing download through the host (S27, decision record 0029): `InstallBrowser`
-//! and `CancelBrowserInstall` with fake tools, and what reaches the app subscription.
+//! and `CancelBrowserInstall` with fake tools, and what reaches the app subscription. The
+//! version and the zip's hash come from a signed browser pins fixture (`pins-131`, signed by the
+//! block list's test key A) given as the bundled copy.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -9,7 +11,7 @@ use std::time::Duration;
 
 use clauseo_host::browser::chrome::{self, ChromeRoots, Platform};
 use clauseo_host::browser::install::{Cancel, Failure, InstallTools};
-use clauseo_host::{AppSubscription, HostConfig};
+use clauseo_host::{AppSubscription, BrowserPins, HostConfig};
 use clauseo_protocol::{
     BrowserInstallFailure, BrowserInstallState, CommandOutcome, Count, HostCommand, HostEvent,
     Principal,
@@ -31,7 +33,38 @@ const EMPTY_ZIP: [u8; 22] = [
     0x50, 0x4b, 0x05, 0x06, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
 
-/// Fake tools: Stable is `131.0.6778.85`; the download either finishes at once or, when
+/// The browser pins fixtures (`tests/data/browser-pins/make_fixtures.py`).
+const PINS_FIXTURES: &str = include_str!("../data/browser-pins/fixtures.json");
+
+/// Writes the pins fixture `name` into `folder` under the published names.
+pub(crate) fn put_pins(folder: &Path, name: &str) {
+    let all: serde_json::Value = serde_json::from_str(PINS_FIXTURES).unwrap();
+    write::create_dir_all(folder);
+    let text = |field: &str| all[name][field].as_str().unwrap().as_bytes().to_vec();
+    write::write(&folder.join("browser-pins-v1.json"), &text("body"));
+    write::write(
+        &folder.join("browser-pins-v1.json.minisig"),
+        &text("minisig"),
+    );
+}
+
+/// The release's pins but the block list's test key A, and `pins-131` (Chrome 131.0.6778.85,
+/// its Apple silicon zip [`EMPTY_ZIP`]) written as the bundled copy under `dir`.
+pub(crate) fn pins(dir: &Dir) -> BrowserPins {
+    let bundled = dir.home().join("bundled-pins");
+    put_pins(&bundled, "pins-131");
+    let key = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../blocklist/tests/data/key-a.pub"
+    ))
+    .unwrap();
+    BrowserPins {
+        keys: vec![key],
+        ..BrowserPins::release(Some(bundled))
+    }
+}
+
+/// Fake tools: the pins give `131.0.6778.85`; the download either finishes at once or, when
 /// `block` is set, says it started and runs until released (then finishes) or cancelled.
 pub(super) struct Fake {
     block: bool,
@@ -66,31 +99,21 @@ impl InstallTools for Fake {
         Ok(u64::MAX)
     }
 
-    fn fetch_versions(
-        &self,
-        _url: &str,
-        _work: &Path,
-        _cancel: &Cancel,
-    ) -> Result<Vec<u8>, Failure> {
-        let version = "131.0.6778.85";
-        let url = format!(
-            "https://storage.googleapis.com/chrome-for-testing-public/{version}/mac-arm64/\
-             chrome-mac-arm64.zip"
-        );
-        let list = serde_json::json!({"channels": {"Stable": {
-            "version": version,
-            "downloads": {"chrome": [{"platform": "mac-arm64", "url": url}]},
-        }}});
-        Ok(list.to_string().into_bytes())
-    }
-
     fn download(
         &self,
-        _url: &str,
+        url: &str,
         zip: &Path,
+        max_bytes: u64,
         cancel: &Cancel,
         progress: &mut dyn FnMut(u64, u64),
     ) -> Result<Option<u64>, Failure> {
+        // The URL from the template for the pinned version, curl capped at the pin's size.
+        assert_eq!(
+            url,
+            "https://storage.googleapis.com/chrome-for-testing-public/131.0.6778.85/mac-arm64/\
+             chrome-mac-arm64.zip"
+        );
+        assert_eq!(max_bytes, 22);
         self.downloads.fetch_add(1, Ordering::SeqCst);
         write::write(zip, &EMPTY_ZIP);
         progress(22, 22);
@@ -140,11 +163,12 @@ pub(super) fn roots(dir: &Dir) -> ChromeRoots {
     }
 }
 
-/// Starts a host on `dir` with `tools` and [`roots`].
+/// Starts a host on `dir` with `tools`, [`roots`] and [`pins`].
 fn start(dir: &Dir, tools: Arc<Fake>) -> Running {
     let found = roots(dir);
+    let pins = pins(dir);
     dir.start_with(0, move |config: HostConfig| {
-        config
+        pins.apply(config)
             .with_browser_install_tools(tools)
             .with_chrome_roots(found)
     })
@@ -271,19 +295,16 @@ impl InstallTools for SlowCancel {
         self.inner.free_bytes(folder)
     }
 
-    fn fetch_versions(&self, url: &str, work: &Path, cancel: &Cancel) -> Result<Vec<u8>, Failure> {
-        self.inner.fetch_versions(url, work, cancel)
-    }
-
     fn download(
         &self,
         url: &str,
         zip: &Path,
+        max_bytes: u64,
         cancel: &Cancel,
         progress: &mut dyn FnMut(u64, u64),
     ) -> Result<Option<u64>, Failure> {
         if self.inner.downloads.load(Ordering::SeqCst) > 0 {
-            return self.inner.download(url, zip, cancel, progress);
+            return self.inner.download(url, zip, max_bytes, cancel, progress);
         }
         self.inner.downloads.fetch_add(1, Ordering::SeqCst);
         write::write(zip, &EMPTY_ZIP);
@@ -327,8 +348,9 @@ fn an_install_right_after_a_cancel_starts_once_the_cancelled_one_ends() {
         ended: Mutex::new(ended),
     });
     let found = roots(&dir);
+    let pins = pins(&dir);
     let host = dir.start_with(0, move |config: HostConfig| {
-        config
+        pins.apply(config)
             .with_browser_install_tools(tools)
             .with_chrome_roots(found)
     });
@@ -391,6 +413,40 @@ fn a_cancel_ends_a_running_download() {
         states(&mut sub).pop(),
         Some(BrowserInstallState::Failed { .. })
     ));
+    host.shutdown();
+}
+
+/// With no signed browser pins that verify (here signed by key A, only key C in the set), the
+/// download fails as `list_unavailable` before anything is fetched.
+#[test]
+fn no_verified_pins_fail_the_download_before_any_fetch() {
+    let dir = Dir::new("browser_install_no_pins", &[]);
+    let (tools, _handles) = Fake::new(false);
+    let found = roots(&dir);
+    let pins = BrowserPins {
+        keys: vec![
+            std::fs::read_to_string(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../blocklist/tests/data/key-c.pub"
+            ))
+            .unwrap(),
+        ],
+        ..pins(&dir)
+    };
+    let fake = Arc::clone(&tools);
+    let host = dir.start_with(0, move |config: HostConfig| {
+        pins.apply(config)
+            .with_browser_install_tools(fake)
+            .with_chrome_roots(found)
+    });
+    let mut sub = subscribe(&host);
+    host.ok(HostCommand::InstallBrowser {});
+    let last = states(&mut sub).pop().unwrap();
+    let BrowserInstallState::Failed { code, .. } = last else {
+        panic!("{last:?}");
+    };
+    assert_eq!(code, BrowserInstallFailure::ListUnavailable);
+    assert_eq!(tools.downloads.load(Ordering::SeqCst), 0);
     host.shutdown();
 }
 

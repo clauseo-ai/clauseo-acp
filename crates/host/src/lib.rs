@@ -268,6 +268,7 @@ pub use agent::login_link::{
 pub use agent::login_splits::LoginSplits;
 pub use agent::session_folder;
 pub use blocklist::{AllowedSites, BlockListSeams, BlockListUpdate, block_list_is_stale};
+pub use browser::pins::BrowserPins;
 pub use clauseo_acp::McpServer;
 #[cfg(feature = "test-support")]
 pub use clock::ManualClock;

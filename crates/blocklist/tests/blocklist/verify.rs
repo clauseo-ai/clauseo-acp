@@ -1,6 +1,8 @@
 //! The minisign check: good, bad, wrong key, rotated key, tampered comment, legacy.
 
-use clauseo_blocklist::{Error, PUBLIC_KEYS, STAGE_F_KEY_FILE, key_line, load, verify};
+use clauseo_blocklist::{
+    Error, PUBLIC_KEYS, STAGE_F_KEY_FILE, key_line, load, trusted_comment, verify,
+};
 
 use crate::fixtures::{
     BY_B, BY_C, LEGACY, LIST, MISCOUNTED, NEWER, Signed, generated, key_a, key_b, key_c,
@@ -16,6 +18,26 @@ fn a_good_signature_verifies_and_the_comment_gives_the_header() {
     assert_eq!(header.generated, generated("2026-11-07T06:00:00Z"));
     assert_eq!(header.entries, 6);
     assert_eq!(check(&LIST, &[key_a()]), Ok(6));
+}
+
+#[test]
+fn the_signature_part_alone_gives_the_trusted_comment_unparsed() {
+    assert_eq!(
+        trusted_comment(LIST.gz, LIST.minisig, &[key_a()]).as_deref(),
+        Ok("clauseo-blocklist v1 generated=2026-11-07T06:00:00Z entries=6")
+    );
+    assert_eq!(
+        trusted_comment(BY_C.gz, BY_C.minisig, &[key_a(), key_b()]),
+        Err(Error::Signature)
+    );
+    assert_eq!(
+        trusted_comment(LIST.gz, LIST.minisig, &["not a key"]),
+        Err(Error::NoKey)
+    );
+    assert_eq!(
+        trusted_comment(LIST.gz, b"hello", &[key_a()]),
+        Err(Error::SignatureFile)
+    );
 }
 
 #[test]

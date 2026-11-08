@@ -140,6 +140,7 @@ mod tests {
         let tools = vec![ToolState {
             tool: ClauseoTool::WebSearch,
             availability: ToolAvailability::Available,
+            notice: None,
         }];
         let mut kept = HeaderTools::default();
         kept.shown.insert(thread(1), tools.clone());

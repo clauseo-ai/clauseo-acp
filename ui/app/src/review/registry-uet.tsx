@@ -44,6 +44,8 @@ const browser = (reason?: string): ToolState => ({
   tool: "browser",
   availability: reason === undefined ? "available" : ({ unavailable: { reason } } as never),
 });
+/** A browser that is on, with a notice. */
+const noticed = (notice: string): ToolState => ({ ...browser(), notice }) as never;
 
 /** A host with one matter and its one thread, whose header carries `tools`, with Settings, and the app feed that
  * plays `install`'s reports once the view is in. */
@@ -177,6 +179,25 @@ export const UET: Entry[] = [
     ),
     [browser("browser_policy_unreadable")],
   ),
+  // the Chrome Clauseo downloaded is too old: the reason, with the download offered under it
+  entry("UET-48", lineWords("Needs a newer Chrome"), [browser("browser_out_of_date")]),
+  // no verified list of Chrome versions: the reason, then in full under it, no download
+  entry("UET-49", lineWords("Couldn't check Chrome's version"), [
+    browser("browser_list_unavailable"),
+  ]),
+  entry(
+    "UET-50",
+    popWords(
+      "Clauseo couldn't check that its copy of Chrome is up to date, so it won't use a browser for now. It keeps trying on its own.",
+    ),
+    [browser("browser_list_unavailable")],
+  ),
+  // the browser is on, and the newest list of Chrome versions is old: a muted line, nothing off
+  entry(
+    "UET-52",
+    popWords("Clauseo hasn't checked for a newer Chrome in a while. The browser still works."),
+    [web(), noticed("browser_list_old")],
+  ),
   // the foot
   entry("UET-15", popWords("Open Settings"), [web("off")]),
   entry(
@@ -208,6 +229,9 @@ export const UET: Entry[] = [
   entry("UET-27", popWords("Needs 1\u00a0GB free"), NONE, failed("disk_space")),
   entry("UET-28", popWords("Network blocked it"), NONE, failed("host_refused")),
   entry("UET-35", popWords("Couldn't unpack"), NONE, failed("unpack")),
+  // no verified list of Chrome versions yet: nothing was downloaded (a fingerprint that didn't match
+  // says UET-29's File didn't match)
+  entry("UET-51", popWords("Not ready to download yet"), NONE, failed("list_unavailable")),
   // a code this version doesn't know reads as unknown
   entry("UET-30", popWords("Download failed"), NONE, failed("a_newer_code")),
   entry("UET-31", popWords("Try again"), NONE, failed("host_refused"), { tip: "tool-retry" }),

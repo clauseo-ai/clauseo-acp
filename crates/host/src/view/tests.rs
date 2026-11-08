@@ -253,6 +253,7 @@ fn the_header_tools_ride_a_replayed_window_and_a_reloaded_stream() {
         availability: ToolAvailability::Unavailable {
             reason: ToolsUnavailableReason::NoProxy,
         },
+        notice: None,
     }];
     let mut enc = Encoder::new();
 

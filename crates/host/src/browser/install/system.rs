@@ -1,4 +1,4 @@
-//! The production tools ([`SystemTools`]): curl for the version list and the zip, ditto (macOS)
+//! The production tools ([`SystemTools`]): curl for the zip, ditto (macOS)
 //! or tar (Windows) to unpack, the OS's signature check, and the free space on the disk.
 //!
 //! Each tool is an absolute path, never a `PATH` lookup: `/usr/bin/curl`, `/usr/bin/ditto` and
@@ -7,9 +7,10 @@
 //! `clauseo_process::spawn_in_tree`, in a process tree of its own, and is watched every 250 ms:
 //! a cancel ends its tree and waits for it to exit before the working folder is removed.
 //!
-//! Every curl gets `-q` first (no `.curlrc` may add flags) and [`CURL_FLAGS`]. The zip's
-//! download writes the response headers with `-D`, and the progress comes from polling the
-//! partial file's size against the final response's `Content-Length`.
+//! Every curl gets `-q` first (no `.curlrc` may add flags), [`CURL_FLAGS`] and `--max-filesize`
+//! with the pin's size. The zip's download writes the response headers with `-D`, and the
+//! progress comes from polling the partial file's size against the final response's
+//! `Content-Length`.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -30,10 +31,11 @@ use crate::browser::chrome::Platform;
 
 /// The flags every curl gets: HTTPS only, redirects included, TLS 1.2 or later, an HTTP error
 /// fails, no redirect followed (one fails as curl's exit 47, `host_refused`: HTTPS to Google's
-/// host is the integrity check, so a redirect elsewhere must not replace it; neither URL
-/// redirects today), at most 400 MiB, 30 s to connect, and a transfer slower than 1 byte a
-/// second for 60 s is ended.
-pub const CURL_FLAGS: [&str; 17] = [
+/// host carries the pinned zip, so a redirect elsewhere must not replace it; the URL does not
+/// redirect today), 30 s to connect, and a transfer slower than 1 byte a second for 60 s is
+/// ended. The size cap (`--max-filesize`, the pin's size) is added per download
+/// ([`download_args`]).
+pub const CURL_FLAGS: [&str; 15] = [
     "--proto",
     "=https",
     "--proto-redir",
@@ -43,8 +45,6 @@ pub const CURL_FLAGS: [&str; 17] = [
     "--location",
     "--max-redirs",
     "0",
-    "--max-filesize",
-    "419430400",
     "--connect-timeout",
     "30",
     "-y",
@@ -62,9 +62,6 @@ pub const CURL_REDIRECTED: i32 = 47;
 /// How often a running tool is looked at: cancel, and the download's progress.
 const TICK: Duration = Duration::from_millis(250);
 
-/// The most the version list may be.
-const MAX_VERSIONS_BYTES: usize = 1024 * 1024;
-
 /// The most of a tool's stderr kept, for the log and for `codesign -dv`.
 const MAX_STDERR_BYTES: usize = 64 * 1024;
 
@@ -80,32 +77,18 @@ impl InstallTools for SystemTools {
         free_bytes(folder)
     }
 
-    fn fetch_versions(&self, url: &str, work: &Path, cancel: &Cancel) -> Result<Vec<u8>, Failure> {
-        let curl = tool("curl")?;
-        let ran = run_tool(
-            &curl,
-            curl_args([url]),
-            work,
-            cancel,
-            MAX_VERSIONS_BYTES,
-            &mut || {},
-        )
-        .map_err(|stop| stop.failure(BrowserInstallFailure::Network))?;
-        curl_result(&ran)?;
-        Ok(ran.stdout)
-    }
-
     fn download(
         &self,
         url: &str,
         zip: &Path,
+        max_bytes: u64,
         cancel: &Cancel,
         progress: &mut dyn FnMut(u64, u64),
     ) -> Result<Option<u64>, Failure> {
         let curl = tool("curl")?;
         let work = zip.parent().unwrap_or(zip);
         let headers = work.join("headers.txt");
-        let args = download_args(url, &headers, zip);
+        let args = download_args(url, &headers, zip, max_bytes);
         let mut last = None;
         let mut tick = || {
             let total = std::fs::read_to_string(&headers)
@@ -208,10 +191,18 @@ fn codesign(app: &Path, cancel: &Cancel) -> Result<(), String> {
     }
 }
 
-/// The zip download's curl arguments: the response headers to `headers`, the body to `zip`.
-pub(super) fn download_args(url: &str, headers: &Path, zip: &Path) -> Vec<OsString> {
+/// The zip download's curl arguments: at most `max_bytes` (the pin's size), the response
+/// headers to `headers`, the body to `zip`.
+pub(super) fn download_args(
+    url: &str,
+    headers: &Path,
+    zip: &Path,
+    max_bytes: u64,
+) -> Vec<OsString> {
     let mut args = curl_args::<&str>([]);
     args.extend([
+        "--max-filesize".into(),
+        max_bytes.to_string().into(),
         "-D".into(),
         headers.into(),
         "-o".into(),
@@ -238,7 +229,7 @@ pub fn curl_exit(code: Option<i32>, stderr: &str) -> Result<(), Failure> {
         Some(0) => Ok(()),
         Some(CURL_TOO_LARGE) => Err(Failure::new(
             BrowserInstallFailure::SizeMismatch,
-            "the download is larger than the 400 MiB cap",
+            "the download is larger than its pinned size",
         )),
         Some(CURL_REDIRECTED) => Err(Failure::new(
             BrowserInstallFailure::HostRefused,
@@ -316,14 +307,15 @@ fn free_bytes(folder: &Path) -> std::io::Result<u64> {
 }
 
 /// What a finished tool left.
-struct Ran {
-    code: Option<i32>,
-    stdout: Vec<u8>,
-    stderr: String,
+pub(super) struct Ran {
+    /// Its exit code.
+    pub(super) code: Option<i32>,
+    /// Its stderr, up to 64 KiB.
+    pub(super) stderr: String,
 }
 
 /// Why a tool did not finish.
-enum Stop {
+pub(super) enum Stop {
     Cancelled,
     /// It did not start, or wrote more than its cap to stdout.
     Failed(String),
@@ -339,8 +331,8 @@ impl Stop {
 }
 
 /// Runs `program` with `args` in `cwd` to its exit, calling `tick` every 250 ms. A cancel, or
-/// more than `stdout_cap` bytes on stdout, ends its tree.
-fn run_tool(
+/// more than `stdout_cap` bytes on stdout, ends its tree. The tests unpack with it too.
+pub(super) fn run_tool(
     program: &Path,
     args: Vec<OsString>,
     cwd: &Path,
@@ -409,9 +401,9 @@ async fn supervise(
         }
     };
     match outcome {
-        Ok((report, stdout)) => Ok(Ran {
+        // No caller reads stdout: each passes a cap of 0, so any output ends the tool.
+        Ok((report, _stdout)) => Ok(Ran {
             code: report.code(),
-            stdout,
             stderr: errors.into_inner(),
         }),
         Err(stop) => {

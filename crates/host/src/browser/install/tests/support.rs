@@ -1,11 +1,19 @@
-//! What the download's tests share: a zip builder, a version list, and fake tools.
+//! What the download's tests share: a zip builder, pins, and fake tools.
 
+use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::Mutex;
 
+use sha2::Digest as _;
+
+use super::super::system::run_tool;
 use super::super::{Cancel, Failure, InstallTools};
 use crate::browser::chrome::Platform;
+use crate::browser::pins::{Pin, Pins};
 use crate::write;
+
+/// The system's unzip, which the link tests unpack with when it is there.
+pub(super) const UNZIP: &str = "/usr/bin/unzip";
 
 /// The version every test downloads.
 pub(super) const VERSION: &str = "131.0.6778.85";
@@ -38,15 +46,33 @@ fn u32_le(out: &mut Vec<u8>, value: usize) {
     out.extend_from_slice(&u32::try_from(value).unwrap().to_le_bytes());
 }
 
-/// A zip of `entries`, stored (no compression), with no CRC: the checks never read either.
+/// The CRC-32 (IEEE) of `bytes`, so a real unzip takes the zip.
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = u32::MAX;
+    for byte in bytes {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 {
+            crc = if crc & 1 == 1 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    !crc
+}
+
+/// A zip of `entries`, stored (no compression), with their CRCs.
 pub(super) fn zip(entries: &[ZipEntry<'_>]) -> Vec<u8> {
     let mut out = Vec::new();
     let mut central = Vec::new();
     for entry in entries {
         let offset = out.len();
+        let crc = crc32(entry.bytes).to_le_bytes();
         u32_le(&mut out, 0x0403_4b50);
         u16_le(&mut out, 20);
-        out.extend_from_slice(&[0; 12]); // flags, method, time, date, crc
+        out.extend_from_slice(&[0; 8]); // flags, method, time, date
+        out.extend_from_slice(&crc);
         u32_le(&mut out, entry.bytes.len());
         u32_le(&mut out, entry.bytes.len());
         u16_le(&mut out, entry.name.len());
@@ -58,7 +84,8 @@ pub(super) fn zip(entries: &[ZipEntry<'_>]) -> Vec<u8> {
         let made_by = if entry.mode.is_some() { 0x031e } else { 20 };
         u16_le(&mut central, made_by);
         u16_le(&mut central, 20);
-        central.extend_from_slice(&[0; 12]); // flags, method, time, date, crc
+        central.extend_from_slice(&[0; 8]); // flags, method, time, date
+        central.extend_from_slice(&crc);
         u32_le(&mut central, entry.bytes.len());
         u32_le(&mut central, entry.bytes.len());
         u16_le(&mut central, entry.name.len());
@@ -80,26 +107,28 @@ pub(super) fn zip(entries: &[ZipEntry<'_>]) -> Vec<u8> {
     out
 }
 
-/// A version list whose Stable is `version`, with `url` as the `mac-arm64` chrome zip.
-pub(super) fn versions(version: &str, url: &str) -> Vec<u8> {
-    serde_json::json!({
-        "timestamp": "2026-11-02T00:00:00.000Z",
-        "channels": {
-            "Stable": {
-                "channel": "Stable",
-                "version": version,
-                "revision": "1",
-                "downloads": {
-                    "chrome": [
-                        {"platform": "linux64", "url": "https://example.com/linux.zip"},
-                        {"platform": "mac-arm64", "url": url},
-                    ],
-                },
-            },
-        },
-    })
-    .to_string()
-    .into_bytes()
+/// The pin of `zip`: its sha256 and size.
+pub(super) fn pin_of(zip: &[u8]) -> Pin {
+    let digest = sha2::Sha256::digest(zip);
+    Pin {
+        sha256: digest.iter().fold(String::new(), |mut hex, byte| {
+            write!(hex, "{byte:02x}").unwrap();
+            hex
+        }),
+        size: u64::try_from(zip.len()).unwrap(),
+    }
+}
+
+/// Pins of [`VERSION`] whose `chrome` zip for Apple silicon and Windows x64 is `pin`.
+pub(super) fn pins_with(pin: &Pin) -> Pins {
+    Pins::for_tests(
+        "2026-11-07T06:00:00Z",
+        VERSION,
+        &[
+            ("chrome", "mac-arm64", pin.clone()),
+            ("chrome", "win64", pin.clone()),
+        ],
+    )
 }
 
 /// Google's URL for `version`'s `mac-arm64` zip.
@@ -128,10 +157,9 @@ pub(super) enum Length {
     Missing,
 }
 
-/// Fake tools: a fixed free space, version list, zip, `Content-Length`, unpack and signature.
+/// Fake tools: a fixed free space, zip, `Content-Length`, unpack and signature.
 pub(super) struct Fake {
     pub(super) free: u64,
-    pub(super) versions: Vec<u8>,
     pub(super) zip: Vec<u8>,
     /// The `Content-Length` the download reports.
     pub(super) length: Length,
@@ -139,23 +167,37 @@ pub(super) struct Fake {
     pub(super) signed: Result<(), String>,
     /// The download sets the cancel halfway, as the lawyer's click would, and the tool ends.
     pub(super) cancel_in_download: bool,
+    /// The unpack runs the system's `/usr/bin/unzip` on the zip, in place of `made`.
+    pub(super) unzip: bool,
     /// Each tool called, in order.
     pub(super) calls: Mutex<Vec<&'static str>>,
+    /// Each download's URL and size cap.
+    pub(super) downloads: Mutex<Vec<(String, u64)>>,
 }
 
 impl Fake {
-    /// A download that works: Stable is [`VERSION`], the zip holds the Mac browser.
+    /// A download that works: the zip holds the Mac browser ([`Fake::pins`] pin it).
     pub(super) fn working() -> Self {
         Self {
             free: u64::MAX,
-            versions: versions(VERSION, &google_url(VERSION)),
             zip: zip(&[file(MAC_BINARY, b"chrome")]),
             length: Length::Right,
             made: vec![Made::File(MAC_BINARY)],
             signed: Ok(()),
             cancel_in_download: false,
+            unzip: false,
             calls: Mutex::new(Vec::new()),
+            downloads: Mutex::new(Vec::new()),
         }
+    }
+
+    /// Pins of [`VERSION`] pinning this fake's zip.
+    pub(super) fn pins(&self) -> Pins {
+        pins_with(&pin_of(&self.zip))
+    }
+
+    pub(super) fn downloads(&self) -> Vec<(String, u64)> {
+        self.downloads.lock().unwrap().clone()
     }
 
     pub(super) fn calls(&self) -> Vec<&'static str> {
@@ -172,25 +214,19 @@ impl InstallTools for Fake {
         Ok(self.free)
     }
 
-    fn fetch_versions(
-        &self,
-        _url: &str,
-        _work: &Path,
-        cancel: &Cancel,
-    ) -> Result<Vec<u8>, Failure> {
-        self.call("fetch_versions");
-        cancel.check()?;
-        Ok(self.versions.clone())
-    }
-
     fn download(
         &self,
-        _url: &str,
+        url: &str,
         zip: &Path,
+        max_bytes: u64,
         cancel: &Cancel,
         progress: &mut dyn FnMut(u64, u64),
     ) -> Result<Option<u64>, Failure> {
         self.call("download");
+        self.downloads
+            .lock()
+            .unwrap()
+            .push((url.to_owned(), max_bytes));
         let total = u64::try_from(self.zip.len()).unwrap();
         let half = self.zip.len() / 2;
         write::write_file(zip, &self.zip[..half]).unwrap();
@@ -208,8 +244,16 @@ impl InstallTools for Fake {
         })
     }
 
-    fn unpack(&self, _zip: &Path, into: &Path, _cancel: &Cancel) -> Result<(), Failure> {
+    fn unpack(&self, zip: &Path, into: &Path, cancel: &Cancel) -> Result<(), Failure> {
         self.call("unpack");
+        if self.unzip {
+            let args = vec!["-q".into(), zip.into(), "-d".into(), into.into()];
+            let ran = run_tool(Path::new(UNZIP), args, into, cancel, 0, &mut || {})
+                .map_err(|_stop| Failure::cancelled())
+                .unwrap();
+            assert_eq!(ran.code, Some(0), "unzip: {}", ran.stderr);
+            return Ok(());
+        }
         for made in &self.made {
             match made {
                 Made::File(name) => {

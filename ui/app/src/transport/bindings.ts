@@ -537,15 +537,15 @@ export type BrowserInstallFailure =
  */
 "network" | 
 /**
- *  The zip's size did not match its `Content-Length`, the response had none, or it was
- *  larger than the 400 MiB cap.
+ *  The zip's size did not match its `Content-Length` or the size the signed browser list
+ *  pins, the response had none, or it was larger than the pinned size.
  */
 "size_mismatch" | 
 /**  Less than about 1 GB is free in the app data folder. */
 "disk_space" | 
 /**
- *  The version list named a URL or version the host does not accept: not `https`, not
- *  Google's host, or a path that does not match the version and platform.
+ *  The signed browser list pins a version the host does not accept (not dotted digits),
+ *  or the server answered with a redirect, which the host does not follow.
  */
 "host_refused" | 
 /**  Chrome's code signature did not check out (only while the host requires it). */
@@ -562,6 +562,17 @@ export type BrowserInstallFailure =
 "unsupported" | 
 /**  The lawyer cancelled, or the app quit, during the download. */
 "cancelled" | 
+/**
+ *  No signed browser list verifies (neither the bundled one nor a fetched one), so the
+ *  host does not know which Chrome for Testing to download, nor its hash; nothing is
+ *  downloaded.
+ */
+"list_unavailable" | 
+/**
+ *  The downloaded zip's sha256 differs from the one the signed browser list pins; the
+ *  zip was removed and nothing is installed.
+ */
+"hash_mismatch" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
 
@@ -5756,12 +5767,28 @@ export type ToolLocation =
 /**  A place from a newer Clauseo; written back as the plain string `kind`. */
 string;
 
+/**  Something the lawyer should know about a tool the agent has. */
+export type ToolNotice = 
+/**
+ *  The browser only: it is a Chrome for Testing Clauseo downloaded, and the newest
+ *  signed browser list the app has was published over 14 days ago, so a newer Chrome
+ *  may be out; the browser stays available.
+ */
+"browser_list_old" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
+
 /**  One of Clauseo's own tools and whether the agent has it in this session. */
 export type ToolState = {
 	/**  The tool. */
 	tool: ClauseoTool,
 	/**  Whether the agent has it. */
 	availability: ToolAvailability,
+	/**
+	 *  Something the lawyer should know about an available tool, if anything; left out when
+	 *  none, so a header from before it writes back the same.
+	 */
+	notice?: ToolNotice,
 };
 
 /**
@@ -5831,6 +5858,19 @@ export type ToolsUnavailableReason =
  *  not allow Clauseo's browser anyway. Checked again at the next launch.
  */
 "browser_policy_unreadable" | 
+/**
+ *  The browser only: the Chrome for Testing Clauseo downloaded is more than one major
+ *  version behind the version Clauseo's signed browser list pins; the app offers the
+ *  download, which fetches the pinned version. Chrome installed on the machine is never
+ *  judged so.
+ */
+"browser_out_of_date" | 
+/**
+ *  The browser only: a Chrome for Testing Clauseo downloaded is the browser, and no
+ *  signed browser list verifies (neither the bundled one nor a fetched one), so its
+ *  version cannot be checked.
+ */
+"browser_list_unavailable" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
 

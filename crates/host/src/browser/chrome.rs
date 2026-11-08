@@ -15,12 +15,23 @@
 //!    Skipped on Windows ARM64, where only a slow emulated x64 build exists.
 //! 4. Otherwise none.
 //!
+//! The launch prep asks [`find_checked`], which judges a Chrome for Testing Clauseo downloaded
+//! (only that: Chrome and Edge installed on the machine never are) by the newest verified
+//! browser pins (`super::pins`): more than one major version behind the pinned one is
+//! `BrowserOutOfDate` (pins of 157: 156 is fine, 155 refused), and no pins that verify is
+//! `BrowserListUnavailable`. The pins are read only when such a browser is the one found.
+//!
 //! On Linux (development and CI only) the host takes `/usr/bin/google-chrome`, then
 //! `/usr/bin/chromium`.
 //!
 //! Every root comes in through [`ChromeRoots`], so the tests use fixture folders.
 
 use std::path::{Path, PathBuf};
+
+use clauseo_blocklist::Generated;
+use clauseo_protocol::ToolsUnavailableReason;
+
+use super::pins::Pins;
 
 /// Whether Microsoft Edge may stand in for Chrome on Windows. False until G17 item 4 shows it
 /// works with agent-browser (its issues #177 and #1867; agent-browser does not detect Edge).
@@ -190,27 +201,93 @@ impl ChromeRoots {
     }
 }
 
-/// The Chrome this machine offers, or `None` (`BrowserNotInstalled`). File system calls: off
-/// the actor.
+/// The Chrome this machine offers, or `None` (`BrowserNotInstalled`), unjudged. File system
+/// calls: off the actor.
 pub fn find(roots: &ChromeRoots) -> Option<PathBuf> {
-    find_with(roots, EDGE_ALLOWED)
+    locate(roots, EDGE_ALLOWED).map(|found| found.path)
 }
 
-/// [`find`] with the Edge switch given, so its test covers both values.
-fn find_with(roots: &ChromeRoots, edge_allowed: bool) -> Option<PathBuf> {
-    roots
+/// The Chrome the launch prep picked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Picked {
+    /// Its binary.
+    pub path: PathBuf,
+    /// When it is a Chrome for Testing Clauseo downloaded: the `published` time of the pins it
+    /// was judged by, for the freshness notice (`pins::notice`). `None` for Chrome or Edge
+    /// installed on the machine.
+    pub pins_published: Option<Generated>,
+}
+
+/// The Chrome this machine offers, judged: Chrome or Edge installed on the machine as found;
+/// a Chrome for Testing Clauseo downloaded only when `pins()` (called then, and only then)
+/// gives verified pins whose major version is at most one above the browser's. Else why not:
+/// `BrowserNotInstalled`, `BrowserOutOfDate` or `BrowserListUnavailable`. File system calls:
+/// off the actor.
+pub fn find_checked(
+    roots: &ChromeRoots,
+    pins: impl FnOnce() -> Option<Pins>,
+) -> Result<Picked, ToolsUnavailableReason> {
+    let found = locate(roots, EDGE_ALLOWED).ok_or(ToolsUnavailableReason::BrowserNotInstalled)?;
+    let Some(version) = found.downloaded else {
+        return Ok(Picked {
+            path: found.path,
+            pins_published: None,
+        });
+    };
+    let pins = pins().ok_or(ToolsUnavailableReason::BrowserListUnavailable)?;
+    let installed = version.first().copied().unwrap_or_default();
+    if installed.saturating_add(1) < pins.major() {
+        tracing::info!(
+            installed,
+            pinned = pins.version(),
+            run = pins.run(),
+            "the downloaded Chrome for Testing is out of date"
+        );
+        return Err(ToolsUnavailableReason::BrowserOutOfDate);
+    }
+    Ok(Picked {
+        path: found.path,
+        pins_published: Some(pins.published()),
+    })
+}
+
+/// A Chrome found, before any judging.
+struct Found {
+    path: PathBuf,
+    /// The version of a Chrome for Testing Clauseo downloaded; `None` for an installed one.
+    downloaded: Option<Vec<u64>>,
+}
+
+/// The Chrome found with the Edge switch given, so its test covers both values.
+fn locate(roots: &ChromeRoots, edge_allowed: bool) -> Option<Found> {
+    let installed = roots
         .installed(edge_allowed)
         .into_iter()
         .find(|path| is_file(path))
-        .or_else(|| chrome_for_testing(roots))
+        .map(|path| Found {
+            path,
+            downloaded: None,
+        });
+    installed.or_else(|| {
+        chrome_for_testing(roots).map(|(version, path)| Found {
+            path,
+            downloaded: Some(version),
+        })
+    })
+}
+
+/// [`find`] with the Edge switch given, for its test.
+#[cfg(test)]
+fn find_with(roots: &ChromeRoots, edge_allowed: bool) -> Option<PathBuf> {
+    locate(roots, edge_allowed).map(|found| found.path)
 }
 
 /// The highest-versioned Chrome for Testing under `<app data>/browsers/` whose binary is there.
 /// A version folder must be a real folder (a link is passed over, by `file_type`, which does not
 /// follow it), and the binary, links resolved, must still sit under the browsers folder, so a
 /// link planted in the folder cannot pick another program. The folder must be outside what an
-/// agent can write (record 0029).
-fn chrome_for_testing(roots: &ChromeRoots) -> Option<PathBuf> {
+/// agent can write (record 0029). With its version.
+fn chrome_for_testing(roots: &ChromeRoots) -> Option<(Vec<u64>, PathBuf)> {
     let binary = roots.platform.cft_binary()?;
     let browsers = roots.app_data.join(BROWSERS_DIR);
     let real_browsers = dunce::canonicalize(&browsers).ok()?;
@@ -230,7 +307,7 @@ fn chrome_for_testing(roots: &ChromeRoots) -> Option<PathBuf> {
         })
         .collect();
     found.sort();
-    found.pop().map(|(_, path)| path)
+    found.pop()
 }
 
 /// A dotted version, such as `131.0.6778.85`, as numbers to compare; `None` when it is not one.

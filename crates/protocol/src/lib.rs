@@ -292,7 +292,7 @@ wire_types! {
         ToolCallPage, ToolCallSearch, ToolCallWeb, UserMessageEntry, UserMessageStatus,
         VersionEntry, ViewEntry,
     },
-    view::{ClauseoTool, ToolAvailability, ToolState, ToolsUnavailableReason},
+    view::{ClauseoTool, ToolAvailability, ToolNotice, ToolState, ToolsUnavailableReason},
     view::{QueueHoldReason},
 }
 

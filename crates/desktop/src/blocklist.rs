@@ -4,13 +4,16 @@
 //! starts unloaded and blocks nothing until the host's first fetch succeeds. Beside it, the
 //! lawyer's allowed sites (PR 2): the views the host publishes them to, one per matter, and the
 //! OS keychain that keeps `allowed.json`'s hash, under the service [`KEYCHAIN_SERVICE`] (none on
-//! Linux, where allows last one run).
+//! Linux, where allows last one run). And the signed browser pins' bundled copy, at
+//! `<resource dir>/browser-pins/` (`browser-pins-v1.json` and its `.minisig`), which the host
+//! reads beside the copy its block list thread fetches; a build without it has none until the
+//! first fetch.
 
 use std::sync::Arc;
 
 use clauseo_blocklist::Current;
 use clauseo_connectors::KeyringStore;
-use clauseo_host::{AllowedSites, BlockListSeams, HostConfig};
+use clauseo_host::{AllowedSites, BlockListSeams, BrowserPins, HostConfig};
 use tauri::{AppHandle, Manager as _, Runtime};
 
 /// The keychain service the allowed sites' hash is filed under, apart from the connectors'.
@@ -18,6 +21,9 @@ pub(crate) const KEYCHAIN_SERVICE: &str = "ai.clauseo.desktop.blocklist";
 
 /// The bundled snapshot's folder under the app's resource folder.
 const BUNDLED_FOLDER: &str = "blocklist";
+
+/// The bundled browser pins' folder under the app's resource folder.
+const BUNDLED_PINS_FOLDER: &str = clauseo_host::browser::pins::PINS_FOLDER;
 
 /// The list in use, shared with the host's updater, in Tauri's managed state: what R17 PR-D's
 /// proxy wiring passes to `ProxyConfig::block`, so the proxy reads every list the host swaps in.
@@ -51,18 +57,26 @@ impl std::ops::Deref for AllowedSitesInUse {
 /// [`BlockListInUse`]), fresh allowed sites' views (in it as [`AllowedSitesInUse`]), the bundled
 /// folder when Tauri knows the resource folder, the release's update settings, and `secrets`,
 /// the keychain the connectors use too (`connectors::secret_store`), under [`KEYCHAIN_SERVICE`].
+/// With the release's browser pins too, their bundled copy's folder beside the list's.
 pub(crate) fn with_blocklist<R: Runtime>(
     app: &AppHandle<R>,
     config: HostConfig,
     secrets: Option<KeyringStore>,
 ) -> HostConfig {
-    let bundled = match app.path().resource_dir() {
-        Ok(folder) => Some(folder.join(BUNDLED_FOLDER)),
+    let resources = match app.path().resource_dir() {
+        Ok(folder) => Some(folder),
         Err(err) => {
-            tracing::info!(%err, "no resource folder: no bundled block list");
+            tracing::info!(%err, "no resource folder: no bundled block list or browser pins");
             None
         }
     };
+    let bundled = resources.as_ref().map(|folder| folder.join(BUNDLED_FOLDER));
+    let config = BrowserPins::release(
+        resources
+            .as_ref()
+            .map(|folder| folder.join(BUNDLED_PINS_FOLDER)),
+    )
+    .apply(config);
     let current = Arc::new(Current::default());
     app.manage(BlockListInUse(Arc::clone(&current)));
     let allowed = Arc::new(AllowedSites::default());

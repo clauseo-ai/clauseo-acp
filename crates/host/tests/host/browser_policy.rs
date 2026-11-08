@@ -3,7 +3,9 @@
 //! Chrome for Testing in the roots), and a place that cannot be read with
 //! `BrowserPolicyUnreadable`, until a later launch reads it, unless the firm's Clauseo policy
 //! allows Clauseo's browser anyway; a policy that says nothing, or holds a bad value, leaves the
-//! browser on.
+//! browser on. With the policy on, a Chrome for Testing Clauseo downloaded is judged by the
+//! signed browser pins: none that verify, `BrowserListUnavailable`; two majors behind,
+//! `BrowserOutOfDate`; else offered, with `BrowserListOld` when the pins are over 14 days old.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -11,7 +13,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use clauseo_host::browser::chrome::{ChromeRoots, Platform};
 use clauseo_host::{HostConfig, TestProxy};
-use clauseo_protocol::{ClauseoTool, ToolsUnavailableReason};
+use clauseo_protocol::{
+    ClauseoTool, ToolAvailability, ToolNotice, ToolState, ToolsUnavailableReason,
+};
 use clauseo_settings::chromium_policy::{
     Browser, Found, Place, RemoteDebugging, RemoteDebuggingPolicy, Scope,
 };
@@ -64,6 +68,8 @@ enum Chrome {
     Forced,
     /// Chrome for Testing that Clauseo downloaded, in the roots, and nothing installed.
     ForTesting,
+    /// As `ForTesting`, with the pins fixture of this name as the bundled copy (key A).
+    Pinned(&'static str),
 }
 
 /// The browser state one `CLAUDE` session shows under `says`, with the firm's Clauseo
@@ -88,7 +94,32 @@ fn reasons(
     chrome: Chrome,
     launches: usize,
 ) -> Vec<Option<ToolsUnavailableReason>> {
+    states(test, rd_policy, policy, chrome, launches)
+        .into_iter()
+        .map(|state| match state.availability {
+            ToolAvailability::Unavailable { reason } => Some(reason),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The browser's header state each of `launches` sessions shows, as [`reasons`].
+fn states(
+    test: &str,
+    rd_policy: Arc<dyn RemoteDebuggingPolicy>,
+    policy: Option<&str>,
+    chrome: Chrome,
+    launches: usize,
+) -> Vec<ToolState> {
     let dir = Dir::new(test, &[]);
+    let pins = match chrome {
+        Chrome::Pinned(name) => {
+            let pins = crate::browser_install::pins(&dir);
+            crate::browser_install::put_pins(pins.bundled.as_deref().unwrap(), name);
+            Some(pins)
+        }
+        Chrome::Forced | Chrome::ForTesting => None,
+    };
     let claude = template(
         &dir,
         "claude",
@@ -128,6 +159,10 @@ fn reasons(
             }))
             .with_egress_proxy(Arc::new(TestProxy(8123)))
             .with_remote_debugging_policy(rd_policy);
+        let config = match pins {
+            Some(pins) => pins.apply(config),
+            None => config,
+        };
         with_chrome(config, chrome, roots)
     });
     let matter = host.create_matter("m", &dir.folder("m", &[]));
@@ -140,10 +175,7 @@ fn reasons(
             .iter()
             .find(|state| state.tool == ClauseoTool::Browser)
             .expect("the header shows the browser");
-        found.push(match &state.availability {
-            clauseo_protocol::ToolAvailability::Unavailable { reason } => Some(*reason),
-            _ => None,
-        });
+        found.push(state.clone());
     }
     host.shutdown();
     found
@@ -152,7 +184,7 @@ fn reasons(
 fn with_chrome(config: HostConfig, chrome: Chrome, roots: ChromeRoots) -> HostConfig {
     match chrome {
         Chrome::Forced => config.with_browser_executable(Some(PathBuf::from("/chrome"))),
-        Chrome::ForTesting => config.with_chrome_roots(roots),
+        Chrome::ForTesting | Chrome::Pinned(_) => config.with_chrome_roots(roots),
     }
 }
 
@@ -224,4 +256,41 @@ fn the_firms_clauseo_policy_allows_the_browser_when_the_policy_was_not_read() {
         ),
         None
     );
+}
+
+#[test]
+fn chrome_for_testing_without_verified_pins_is_list_unavailable() {
+    assert_eq!(
+        reason("cft_no_pins", Found::Allowed, None, Chrome::ForTesting),
+        Some(ToolsUnavailableReason::BrowserListUnavailable)
+    );
+}
+
+#[test]
+fn chrome_for_testing_two_majors_behind_the_pins_is_out_of_date() {
+    assert_eq!(
+        reason(
+            "cft_out_of_date",
+            Found::Allowed,
+            None,
+            Chrome::Pinned("pins-157-early")
+        ),
+        Some(ToolsUnavailableReason::BrowserOutOfDate)
+    );
+}
+
+#[test]
+fn chrome_for_testing_at_the_pinned_version_is_offered_with_the_old_list_notice() {
+    // The pins were published 2026-01-01; the host clock starts in September 2026.
+    let state = states(
+        "cft_pinned",
+        Arc::new(Says(Found::Allowed)),
+        None,
+        Chrome::Pinned("pins-131"),
+        1,
+    )
+    .pop()
+    .unwrap();
+    assert_eq!(state.availability, ToolAvailability::Available);
+    assert_eq!(state.notice, Some(ToolNotice::BrowserListOld));
 }

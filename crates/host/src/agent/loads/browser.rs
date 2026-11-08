@@ -12,11 +12,16 @@
 //! 4. No proxy set: `NoProxy`.
 //! 5. The firm's Chrome or Edge policy turns remote debugging off and its Clauseo policy does
 //!    not allow Clauseo's browser anyway (`browser::rd_policy`): `BrowserBlockedByPolicy`; or,
-//!    with no false, a place of that policy could not be read: `BrowserPolicyUnreadable`.
+//!    with no false, a place of that policy could not be read: `BrowserPolicyUnreadable`. Or the
+//!    Chrome found is a Chrome for Testing Clauseo downloaded that the signed browser pins refuse
+//!    (`browser::chrome::find_checked`): `BrowserOutOfDate` or `BrowserListUnavailable`.
 //! 6. No Chrome picked, a sidecar (`clauseo-mcp` or agent-browser) missing, or the session's
 //!    ports or socket folder not claimed (`browser::session`): `BrowserNotInstalled`.
 //! 7. The session's proxy did not open, so it has no port: `NoProxy`. The proxy opens only
 //!    after 6 found everything (`actor/turn/launch_checks/egress.rs`).
+//!
+//! An available browser's header carries the launch prep's notice, if any
+//! (`ToolNotice::BrowserListOld`, `browser::pins::notice`).
 //!
 //! Each value is filled into one decoded string (one argument, one variable's value) in one
 //! pass, so a folder whose name holds a token stays literal; MCP arguments go as a list with no
@@ -30,7 +35,9 @@ use clauseo_profile::placeholders::{
     SESSION_ID, SOCKET_DIR, STREAM_PORT,
 };
 use clauseo_profile::servers::BROWSER;
-use clauseo_protocol::{ClauseoTool, ToolAvailability, ToolState, ToolsUnavailableReason};
+use clauseo_protocol::{
+    ClauseoTool, ToolAvailability, ToolNotice, ToolState, ToolsUnavailableReason,
+};
 
 use super::McpControl;
 
@@ -67,8 +74,12 @@ pub(crate) struct BrowserInputs<'a> {
     pub(crate) proxy_set: bool,
     /// The port of this session's proxy, if it opened.
     pub(crate) port: Option<u16>,
-    /// Why the firm's browser policy left the browser out, if it did (`browser::rd_policy`).
-    pub(crate) blocked_by_policy: Option<ToolsUnavailableReason>,
+    /// Why the launch prep left the browser out before any claim, if it did: the firm's
+    /// browser policy (`browser::rd_policy`) or the pins refusing a downloaded Chrome for
+    /// Testing (`browser::chrome::find_checked`).
+    pub(crate) blocked: Option<ToolsUnavailableReason>,
+    /// The notice an available browser's header carries, if any (`browser::pins::notice`).
+    pub(crate) notice: Option<ToolNotice>,
     /// The Chrome picked for this session, if any.
     pub(crate) executable: Option<&'a Path>,
     /// The session's browser state folder, `<data>/run/<session id>/browser`.
@@ -130,16 +141,17 @@ pub(crate) fn hook_servers(
             }
             continue;
         }
-        let availability = match browser_entry(server, inputs) {
+        let (availability, notice) = match browser_entry(server, inputs) {
             Ok(filled) => {
                 servers.push(filled);
-                ToolAvailability::Available
+                (ToolAvailability::Available, inputs.notice)
             }
-            Err(reason) => ToolAvailability::Unavailable { reason },
+            Err(reason) => (ToolAvailability::Unavailable { reason }, None),
         };
         state = Some(ToolState {
             tool: ClauseoTool::Browser,
             availability,
+            notice,
         });
     }
     (servers, state)
@@ -162,7 +174,7 @@ fn browser_entry(
     if !inputs.proxy_set {
         return Err(ToolsUnavailableReason::NoProxy);
     }
-    if let Some(reason) = inputs.blocked_by_policy {
+    if let Some(reason) = inputs.blocked {
         return Err(reason);
     }
     let executable = inputs

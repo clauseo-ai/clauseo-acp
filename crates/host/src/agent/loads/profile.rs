@@ -349,6 +349,7 @@ pub(crate) fn web_search_state(
     Some(ToolState {
         tool: ClauseoTool::WebSearch,
         availability,
+        notice: None,
     })
 }
 
