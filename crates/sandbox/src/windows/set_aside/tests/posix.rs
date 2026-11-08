@@ -47,6 +47,9 @@ pub(super) struct Posix {
     /// Owners [`Volume::move_into`] reads on the item it renames instead of the true one, by
     /// path: an item swapped between a read by path and the move.
     pub(super) swapped: RefCell<BTreeMap<PathBuf, String>>,
+    /// Items whose owner [`Volume::move_into`] can't read on the handle it renames, by path: an
+    /// item whose DACL denies the lawyer `READ_CONTROL`.
+    pub(super) unreadable: RefCell<Vec<PathBuf>>,
     /// Short names, as NTFS's 8.3 ones: a name not there that is a key here opens the name it
     /// maps to in the same folder.
     pub(super) aliases: RefCell<BTreeMap<OsString, OsString>>,
@@ -76,6 +79,7 @@ impl Posix {
             reads: RefCell::default(),
             oplocked: RefCell::default(),
             swapped: RefCell::default(),
+            unreadable: RefCell::default(),
             aliases: RefCell::default(),
             opened: RefCell::default(),
             by_path: RefCell::default(),
@@ -363,7 +367,11 @@ impl Volume for Posix {
         // The owner of the item about to be renamed, as NTFS reads it from that handle.
         let at = self.at(from);
         let swapped = self.swapped.borrow().get(&at).cloned();
-        let owner = swapped.or_else(|| self.owner_of(&at).ok());
+        let owner = if self.unreadable.borrow().contains(&at) {
+            None
+        } else {
+            swapped.or_else(|| self.owner_of(&at).ok())
+        };
         if std::fs::symlink_metadata(&at).is_ok() && !need.allows(owner.as_deref()) {
             return Err(SetAsideFailure::NotTheAgents);
         }

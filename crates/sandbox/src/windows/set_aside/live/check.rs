@@ -273,10 +273,11 @@ impl<'a, V: Volume, H: Hooks> Run<'a, V, H> {
             });
         match moved {
             Ok(entry) => {
+                // An owner that can't be read counts as the agent's (`Moved::by_agent`).
                 let by_agent = entry
                     .owner
                     .as_ref()
-                    .is_some_and(|owner| pool.contains(owner));
+                    .is_none_or(|owner| pool.contains(owner));
                 self.live.moved.push(Moved {
                     entry,
                     path: item.key.iter().collect(),

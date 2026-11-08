@@ -150,7 +150,9 @@ pub(super) enum Need<'a> {
     /// Anyone's.
     Anyone,
     /// One of these SIDs' (the pool's, exactly): a folder the live watch sets aside whole
-    /// unchecked, which must be the agent's (`live.rs`). An owner that can't be read is refused.
+    /// unchecked, which must be the agent's (`live.rs`). An owner that can't be read counts as
+    /// the agent's and moves: the agent can deny the lawyer read access on what it made, and
+    /// that must not keep a folder too big to check in the matter.
     Pool(&'a [String]),
 }
 
@@ -159,7 +161,7 @@ impl Need<'_> {
     pub(super) fn allows(self, owner: Option<&str>) -> bool {
         match self {
             Need::Anyone => true,
-            Need::Pool(pool) => owner.is_some_and(|owner| pool.iter().any(|sid| sid == owner)),
+            Need::Pool(pool) => owner.is_none_or(|owner| pool.iter().any(|sid| sid == owner)),
         }
     }
 }

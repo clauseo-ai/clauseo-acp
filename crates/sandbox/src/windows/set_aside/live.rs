@@ -25,7 +25,7 @@
 //! scan moves what it finds as it finds it (`scan::Found`), never after the whole tree, and a
 //! scan that runs past [`SCAN_BUDGET`] ends the session too. In a folder made or moved in, that
 //! scan stops there, and the folder goes whole when a pool user owns it, read from the handle
-//! the move renames (`check::Run::below`); a full
+//! the move renames, or its owner can't be read (`check::Run::below`); a full
 //! rescan, or one at the stop with the job empty, walks on. An item gone before it could be
 //! moved is listed ([`Live::gone`]), so the watch can end a session whose agent keeps renaming
 //! one back and forth. A folder that becomes a link (`FILE_ACTION_MODIFIED` with the reparse
@@ -83,8 +83,9 @@ pub(crate) struct Moved {
     pub(crate) path: PathBuf,
     pub(crate) what: SetAsideWhat,
     /// Whether the owner read from the handle the move renamed is a pool SID the machine's record
-    /// names: the agent made it. One whose owner couldn't be read is not, so the lawyer's notice
-    /// says how to put back what the lawyer may have made.
+    /// names: the agent made it, and the lawyer's notice has no step to put it back. One whose
+    /// owner couldn't be read counts as the agent's too: the agent can deny the lawyer read
+    /// access on its own `.git`, and that must not earn it the notice that says to move it back.
     pub(crate) by_agent: bool,
 }
 

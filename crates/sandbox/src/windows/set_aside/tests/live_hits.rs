@@ -3,7 +3,7 @@
 //! confirm the job is empty moves nothing; an unknown git folder ends the session before its
 //! `commondir` is read, and one an oplock holds counts as unreadable; the owner of a folder set
 //! aside whole is read from the handle the move renames; and each repository moved says
-//! whether the agent made it.
+//! whether the agent made it, one whose owner can't be read counting as the agent's.
 
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -213,4 +213,45 @@ fn each_repository_moved_says_whether_the_agent_made_it() {
             (PathBuf::from("sub2/.git"), false)
         ]
     );
+}
+
+/// Final review, item 2: a `.git` whose owner can't be read (the agent denied the lawyer
+/// `READ_CONTROL` on it) counts as the agent's, so its notice has no step to move it back.
+#[test]
+fn a_repository_whose_owner_cant_be_read_counts_as_the_agents() {
+    let (w, root, data) = world("live-owner-unreadable");
+    let watch = watched(&root, &data);
+    let volume = Posix::new(true);
+    w.dir.file("matter/made/.git/HEAD", HEAD);
+    volume.unreadable.borrow_mut().push(root.join("made/.git"));
+
+    let live = watch.changed(&volume, &reported(&["made/.git"]), exit(), &calm());
+    let moved = live.moved.last().expect("the repository moved");
+    assert_eq!(
+        (moved.path.clone(), moved.by_agent),
+        (PathBuf::from("made/.git"), true)
+    );
+    assert_eq!(moved.entry.owner, None);
+}
+
+/// Final review, item 2: past the budget, a folder whose owner can't be read on the handle the
+/// move renames counts as the agent's and goes whole.
+#[test]
+fn past_its_budget_a_folder_whose_owner_cant_be_read_goes_whole() {
+    let (w, root, data) = world("live-owner-unreadable-big");
+    let watch = watched(&root, &data);
+    for at in 0..40 {
+        w.dir.file(&format!("matter/big/f{at}/keep.txt"), "");
+    }
+    let volume = Posix::new(true);
+    volume.unreadable.borrow_mut().push(root.join("big"));
+    let hooks = ticking(Duration::from_millis(500));
+    let live = watch.changed(&volume, &reported(&["big"]), exit(), &hooks);
+    assert_eq!(*hooks.ends.borrow(), [Ending::Slow]);
+    let last = live.moved.last().expect("the folder moved");
+    assert_eq!(
+        (last.entry.from.clone(), last.what, last.by_agent),
+        (root.join("big"), SetAsideWhat::UncheckedFolder, true)
+    );
+    assert!(!root.join("big").exists());
 }
