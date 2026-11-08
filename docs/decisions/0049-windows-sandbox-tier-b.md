@@ -2294,6 +2294,11 @@ A run deletes only the pool users' tasks and BITS jobs. An ended run never write
   delete its file under `System32\Tasks` if its DACL lets it (else, as an administrator,
   delete the file alone). Run `--sweep-tasks`: expect 56, the log line counting one cache key
   with no task file, none ignored. Repeat with a descriptor whose DACL is near 64 KiB: 56.
+- VM row (not run): the cache-key rule assumes the Task Scheduler assigns a task's `Id`
+  itself, and can't run a task whose `TaskCache\Tasks\{Id}` key is missing. Register a test
+  task, delete its `Tasks\{Id}` key as SYSTEM, then `schtasks /run` it: expect a failure,
+  or no run (its action leaves no trace). If it runs, a key alone whose `Tasks` key is missing
+  must be held to its owner too.
 - VM row (not run): while `--sweep-tasks` runs, register a task as a pool user (a loop,
   so one lands between the walks): expect it deleted, and the run 56 with the log line
   counting a pool task new to the second walk.
