@@ -524,6 +524,15 @@ Function .onInit
   ${IfNot} ${Errors}
     StrCpy $UpdateMode 1
   ${EndIf}
+  ; >>> clauseo: ui-language
+  ; Clauseo's change to tauri-cli 2.12.2's template (decision 0035, "English and Hindi in the
+  ; installer"): the language the lawyer chose in the app, when there is one, instead of Windows'
+  ; display language (hooks.nsh, CLAUSEO_UI_LANGUAGE). Here, before the language selector, because
+  ; NSIS fixes the pages' language right after .onInit. Without hooks.nsh it does nothing.
+  !ifmacrodef CLAUSEO_UI_LANGUAGE
+    !insertmacro CLAUSEO_UI_LANGUAGE
+  !endif
+  ; <<< clauseo: ui-language
 
   !if "${DISPLAYLANGUAGESELECTOR}" == "true"
     !insertmacro MUI_LANGDLL_DISPLAY

@@ -24,10 +24,10 @@ The install guides for the people at the firm, with each warning and the clicks 
 [Windows](install/windows.md) and [macOS](install/macos.md).
 
 Both Windows installers ship the same `Clauseo.exe` and use the stock NSIS pages, in English and
-Hindi (decision 0035): the installer follows Windows' display language, and the uninstaller the
-language chosen in the app (`HKCU\Software\Clauseo\UiLanguage`, `en` or `hi`) at the last install
-or update. Seen on Windows Server 2025 (build 26100) on 2026-11-03, with the
-0.0.0 dry-run installers:
+Hindi (decision 0035): the installer follows the language chosen in the app
+(`HKCU\Software\Clauseo\UiLanguage`, `en` or `hi`) when it is set, else Windows' display
+language, and the uninstaller that value as it was at the last install or update. Seen on
+Windows Server 2025 (build 26100) on 2026-11-03, with the 0.0.0 dry-run installers:
 
 - The per-machine installer raises a UAC prompt, installs `Clauseo.exe` and `uninstall.exe` in
   `C:\Program Files\Clauseo` and writes
