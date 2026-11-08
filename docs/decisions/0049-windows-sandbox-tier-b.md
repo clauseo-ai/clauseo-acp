@@ -2258,11 +2258,17 @@ Edge cases:
 - A file with another name elsewhere (a hard link): left out of the explicit allows (the writer
   refuses an allow on one, `LinkedFile`) and skipped by the walk. A granted file that has
   another name grants nothing.
-- Made during the run: inside an allowed tree, a new child inherits the allow and is readable.
-  Directly in a folder above a refused name it inherits nothing from the grant and stays closed
-  behind the fence until the next launch lists it. A refused name made during the run (a
-  `git init` in an allowed tree) inherits the allow and is readable until the session ends.
-  Accepted: the session is short, and nothing of the other matter's existing history opens.
+- Made during the run: a file or folder made inside a folder with an inherited allow (a clean
+  folder's tree) inherits the read and is readable at once, a new `.git` included: a refused
+  name made during the run (a `git init` in an allowed tree) is readable until the session
+  ends. Directly in a folder above a refused name a new child inherits nothing from the grant
+  and stays closed behind the fence until the next launch lists it. Accepted: the session is
+  short, and nothing of the other matter's existing history opens.
+- A hard link made during the run inside a folder with an inherited allow (by the other
+  matter's agent or the lawyer) gets the inherited read on its file's one DACL, which every name
+  of that file shares, so the file reads by its other names too until the session ends.
+  Informational: the agent reading can't make one (it writes nothing there), and the file was
+  put in the granted tree.
 - A protected DACL: an explicit allow on the item still applies. Below an allowed tree, a
   protected item inherits nothing and stays closed, as the lawyer set it.
 - A child the lawyer can't open inside an allowed tree refuses the launch (`ChildShut`). It is
@@ -2294,9 +2300,12 @@ every inherited one, and an object's explicit denies before its explicit allows.
   denies, as an attack on the fence: it refuses the launch on the lawyer's child
   (`BroadAllowChild`) and strips the allow on a pool user's. A read's allows are exactly that,
   so every strict walk excuses the reads the ledger lists (`Strict::excused`,
-  `acl_bytes/excused.rs`): only a plain `ReadAndExecute` allow, for the item alone or its
-  tree, on the listed path, for the listed SID. Any other allow there, or one an agent wrote
-  elsewhere, still refuses or is repaired. Without this, the other matter's own launch, and
+  `acl_bytes/excused.rs`): only a plain `ReadAndExecute` allow, on the listed path, for the
+  listed SID, in the shape the entry lists (L1): for the item alone where the read is the
+  item's alone (the root, a folder holding a refused name, a file), inherited where the read is
+  the tree's. An inheriting allow where the ledger lists a read of the item alone would reach
+  a refused name, so it refuses or is repaired, as does any other allow there or one an agent
+  wrote elsewhere. Without this, the other matter's own launch, and
   any launch planning its fence, would be refused while a read was live.
 
 The tests model the access check (`apply/tests/reads/access.rs`):
@@ -2304,27 +2313,55 @@ The tests model the access check (`apply/tests/reads/access.rs`):
 `a_read_of_a_folder_in_another_matter_beats_the_fence_inside_it` (`apply/tests/reads.rs`),
 `a_read_of_the_whole_folder_lists_it_and_keeps_every_refused_name_closed`
 (`apply/tests/lifts.rs`), and
-`a_strict_walk_of_the_other_matter_passes_its_listed_reads_and_refuses_any_other_allow`.
+`a_strict_walk_of_the_other_matter_passes_its_listed_reads_and_refuses_any_other_allow`, and
+`a_strict_walk_refuses_an_inheriting_allow_where_the_ledger_lists_a_read_of_the_folder_alone`.
 
 **Listing the root.** After a launch applies a grant of another matter's root, `apply` lifts
 that matter's root deny of the session's pool user (`apply/lifts.rs`). The entry stays the
 other matter's. The ledger marks it lifted by the reading matter (`Entry::lifted`, under the
-lock) before the deny is removed. The deny is put back, then the mark cleared:
+lock) before anything changes on the root.
+
+The lift is a swap, not a removal (H1). With no deny on the root, nothing would deny that pool
+user writes there: the root inherits `Users`' create-files and create-folders from `C:\`
+(`Users` is in the token's restricting set), and it carries the Low label, so a Low token's
+write isn't stopped either. The agent could make a `CLAUDE.md`, an `AGENTS.md` or a `.claude\`
+in the other matter's root for that matter's agent to load, and as the new file's owner hold
+`WRITE_DAC` on it. So in place of the `DenyReadWrite` the lift writes a `DenyWrite`
+(`0xd0156`: write data and add a file, append and add a folder, extended attributes,
+attributes, delete a child, `DELETE`, `WRITE_DAC`, `WRITE_OWNER`) for the same pool user on
+the root alone (`lifts::stand_in`), and removes the `DenyReadWrite` only once it is written. The
+mark stands for the stand-in: no entry of its own. The restore writes the `DenyReadWrite` back,
+removes the stand-in only once it is back, then clears the mark. At every step one of the two
+denies is on the root, so a crash between any two writes leaves it unwritable:
+
+| Crash after | On the root | This pool user |
+| --- | --- | --- |
+| the mark | `DenyReadWrite` | nothing |
+| the stand-in's write | both | nothing |
+| the lift's removal | `DenyWrite` | lists the root, writes nothing |
+| the restore's write | both | nothing |
+
+Every restore below removes a stand-in it finds, and writes the deny only when it is missing.
+The stand-in and the restore run:
 
 - at the session's end (`end_reads`), before the allows are taken back;
 - when `narrow_reads` gets a policy without the root grant;
 - at the matter's next launch, when its plan no longer grants the root;
-- in `forget_matter` of the reading matter;
+- in `forget_matter` of the reading matter, and in `forget_matter` of the read matter, before
+  its fence is removed, so no stand-in outlives the fence (one left by a failed removal only
+  denies a pool user writes on a folder that is no longer a matter's);
 - at start, in `reconcile`, for every mark (no session runs then).
 
-Exposure: the lift opens the root's names and attributes to that one pool user. Every other pool
+Exposure: the lift opens the root's names and attributes to that one pool user, for reading
+only. Every other pool
 user keeps its own root deny, and the inherit-only deny still closes each child the grant doesn't
 allow (the refused names, and anything made in the root during the run). No group deny sits on a
 registered matter's root: the sibling walk never denies a registered matter or a folder holding
 one, and the walk-down set stops at it.
 
-A crash leaves at most the mark and the lifted deny: this pool user can list the root's names
-until the matter's next launch, its forget, or the next start puts the deny back. The reuse check
+A crash leaves at most the mark, the stand-in and the lifted deny: this pool user can list the
+root's names, and write nothing there, until the matter's next launch, its forget, or the next
+start puts the deny back. The reuse check
 counts a marked deny as a grant (`Ledger::grants_sid`), so the pool user serves no other matter
 meanwhile.
 
@@ -2332,7 +2369,43 @@ Nothing fights the lift. `fence_applied` reads the ledger, where the entry is st
 so no launch replans the fence because of it. A launch that writes the fence anyway (the other
 matter's own, or one that plans its fence) puts the deny back. The session then can't list the
 root until its next launch lifts it again, so it fails closed, and the restore finds the deny
-there and only clears the mark.
+there, removes the stand-in and clears the mark.
+
+The tests (`apply/tests/read_only.rs`, against the modelled access check): at each level of a
+grant (the whole folder, a folder in it, a folder holding a refused name, one file), the pool
+user can't make a file or a folder (a rename into a folder is one of those), write, append,
+delete, rename away or set attributes, extended attributes, permissions or owner, in the root,
+in any folder below, refused names included, and can't plant a `CLAUDE.md`, an `AGENTS.md` or
+a `.claude\` anywhere; a crash at the stand-in's write, at the restore's write and at the
+stand-in's removal leaves nothing writable, and `reconcile` puts the deny back.
+
+**The Low label, between sessions.** A matter's Low label is one of its own ledger entries
+(`Plan::labels`, `Rights::LowLabel` inherited on its root), planned at each of its launches. Only
+`forget_matter` (or a refused launch's rollback of an entry it made) takes it back; the
+session's end doesn't. So a matter root keeps the Low label from its first tier-B launch until
+it is forgotten, and before H1 a lifted root was open to a Low token's writes whenever the read
+matter had ever been launched: in practice always.
+
+**No write allowance reaches another matter.** The macOS jail tests
+(`tests/jail/other_matter_writes.rs`) found two allowances that could. The profile re-allows
+the Claude store's names and the browser socket folder after the hidden-path deny, so a store
+or a socket folder pointed at another matter let the agent write there (`.credentials.json`,
+the store's lock folders, a `CLAUDE.md` in one), with or without a read grant. The shared policy
+build now refuses both (`policy/overlap.rs`, `Error::HiddenOverlap` and
+`HiddenOverlapAllowance`, appended): a Claude store, or its `<dir>.lock`, on, inside or above a
+hidden matter, or on or above any other hidden path (Clauseo's own login home sits inside the
+hidden data folder, so inside a plain hidden path stays allowed); a browser socket folder on,
+inside or above any hidden path. On Windows the same shape was open too: the plan gives the
+pool user `CreateFiles` on the store folder and `Modify` on its files (`acl_plan.rs`, the
+store's allows) and the Low label on its tree, and an explicit allow on a child beats the
+fence's inherited deny. The gate's `NestedMatter` check compares only the matter's own folders,
+so nothing refused it there. The build's refusal now makes it unreachable. Tier B grants nothing
+on a browser socket folder. Every other write allowance (the matter, state, notes and session
+temp folders, allowed folders) is refused over another matter by the existing overlap checks,
+and with the other matter under the home folder, or with a runtime or read path inside it,
+writes are still refused. Residual: a matter hidden only through `hidden(...)`, not
+`hidden_matter`, could still hold a store inside it. No host code builds a policy yet, so the
+launcher must hide every registered matter through `hidden_matter`.
 
 **Migrating the fence.** A ledger written before R18 lists one whole-tree deny on each matter
 root. `fence_applied` doesn't count that as the split fence, so the launcher passes the matter as
@@ -2361,7 +2434,11 @@ inherited copies go, entries dropped (`apply/reads.rs`).
   until the host's relaunch at the next turn boundary.
 - **After a crash:** the matter's next launch takes back, before it records anything, each read
   entry naming its subjects that its plan doesn't list (`apply_checked`). `forget_matter` takes
-  them back with the matter's other entries. `reconcile` finishes a take-back a crash cut short.
+  them back with the matter's other entries. `reconcile` finishes a take-back a crash cut short
+  and puts back every lifted deny, but leaves the reading matter's `applied` read allows until
+  its next launch or its forget: it can't tell a live session's from a dead one's. That is
+  bounded: the runner's Job Object kills every agent when the host exits, so no agent outlives
+  the host to use them, and the pool user serves no other matter meanwhile.
   Until then the reuse check (`Ledger::grants_sid`) keeps the pool user from serving another
   matter. The set-aside, `--reclaim` and the clean-close record don't take part: they cover the
   launch's own trees.
