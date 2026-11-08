@@ -1,23 +1,28 @@
-//! The SYSTEM tasks `\Clauseo\SandboxRefresh` (ADR 0049, "Admin copy refresh") and
-//! `\Clauseo\SandboxStop` ("Stopping the pool's processes"), through the Task Scheduler's COM
-//! API (`ITaskService`), never `schtasks` text:
+//! The SYSTEM tasks `\Clauseo\SandboxRefresh` (ADR 0049, "Admin copy refresh"),
+//! `\Clauseo\SandboxStop` ("Stopping the pool's processes") and `\Clauseo\SandboxSweep` ("The
+//! pool's tasks and BITS jobs"), through the Task Scheduler's COM API (`ITaskService`), never
+//! `schtasks` text:
 //!
 //! - [`register_task`], which `--adopt` calls elevated for each of [`TASKS`](super::TASKS) per
-//!   user, and a per-machine install's set-up for the stop task (`late_steps::stop_task`): the task
-//!   runs as LOCAL SYSTEM, starts
-//!   `<FOLDERID_ProgramFiles>\Clauseo\Sandbox\clauseo-sandbox-setup.exe` with its one argument
-//!   (`--refresh`, `--stop`) and nothing else, on demand (the refresh also at the record owner's
-//!   logon), needs no network, stops after its limit (5 minutes, 2 minutes), and never runs twice
-//!   at once. Its descriptor ([`task_sddl`](super::task_sddl)) is owned by Administrators and lets
-//!   SYSTEM and Administrators do anything and the owner read and execute it (`FRFX`), which
+//!   user, and a per-machine install's set-up for the stop and sweep tasks
+//!   ([`POOL_TASKS`](super::POOL_TASKS), `late_steps::stop_task`): the task runs as LOCAL
+//!   SYSTEM, starts `<FOLDERID_ProgramFiles>\Clauseo\Sandbox\clauseo-sandbox-setup.exe` with its
+//!   one argument (`--refresh`, `--stop`, `--sweep-tasks`) and nothing else, on demand (the
+//!   refresh also at the record owner's logon), needs no network, stops after its limit (5
+//!   minutes, 2 minutes, 2 minutes), and never runs twice at once: a sweep asked for while one
+//!   runs is queued after it, any other run is dropped. Its descriptor
+//!   ([`task_sddl`](super::task_sddl)) is owned by Administrators and lets SYSTEM and
+//!   Administrators do anything and the owner read and execute it (`FRFX`), which
 //!   starts it and ends a running one, nothing more; the folder `\Clauseo` gets the same owner
 //!   and DACL, made with them, or set again when an administrator made it; one anyone else made
 //!   is deleted with what is in it and made again (`task_folder.rs`).
 //! - [`unregister_task`], which `--remove --uninstall` calls (it deletes staging itself,
 //!   taking it back if need be: `setup::admin_remove`).
 //! - [`request_admin_refresh`], which the app calls as the lawyer, unelevated, after an update,
-//!   and [`request_pool_stop`]: each asks the Task Scheduler to run its task
-//!   (`IRegisteredTask::Run`), which the owner's read-and-execute entry (`FRFX`) allows.
+//!   [`request_pool_stop`], and [`request_pool_sweep`], which the outer runner calls as the
+//!   lawyer at every session's end: each asks the Task Scheduler to run its task
+//!   (`IRegisteredTask::Run`), which the owner's read-and-execute entry (`FRFX`) allows. The
+//!   outer then looks at its sweep's run until it ended ([`pool_sweep_result`]).
 #![expect(unsafe_code, reason = "FFI to COM and the Task Scheduler's interfaces")]
 
 use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, RPC_E_CHANGED_MODE, VARIANT_BOOL};
@@ -27,8 +32,8 @@ use windows::Win32::System::Com::{
 };
 use windows::Win32::System::TaskScheduler::{
     IExecAction, ILogonTrigger, IRegisteredTask, ITaskFolder, ITaskService, TASK_ACTION_EXEC,
-    TASK_CREATE_OR_UPDATE, TASK_ENUM_HIDDEN, TASK_INSTANCES_IGNORE_NEW, TASK_LOGON_SERVICE_ACCOUNT,
-    TASK_RUNLEVEL_HIGHEST, TASK_TRIGGER_LOGON, TaskScheduler,
+    TASK_CREATE_OR_UPDATE, TASK_ENUM_HIDDEN, TASK_INSTANCES_IGNORE_NEW, TASK_INSTANCES_QUEUE,
+    TASK_LOGON_SERVICE_ACCOUNT, TASK_RUNLEVEL_HIGHEST, TASK_TRIGGER_LOGON, TaskScheduler,
 };
 use windows::Win32::System::Variant::VARIANT;
 use windows::core::{BSTR, HRESULT, Interface};
@@ -235,8 +240,8 @@ impl Folders for Scheduler<'_> {
 /// Registers (or updates) the task `spec` names as the module says, for the record owner
 /// `owner_sid`. Elevated: `--adopt` calls it for each task once the admin copy is locked in
 /// place, before it writes the record's admin-copy values (a refresh before then exits 33,
-/// changing nothing). On a per-machine install, the set-up calls it for the stop task once the
-/// record names `owner_sid`; a task already there is replaced, descriptor included.
+/// changing nothing). On a per-machine install, the set-up calls it for the stop and sweep tasks
+/// once the record names `owner_sid`; a task already there is replaced, descriptor included.
 pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError> {
     let exe = sandbox_dir().map_err(TaskError::Path)?.join(EXE_NAME);
     let sddl = task_sddl(owner_sid);
@@ -271,8 +276,13 @@ pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError>
         settings
             .SetExecutionTimeLimit(&BSTR::from(spec.execution_limit()))
             .map_err(com("SetExecutionTimeLimit"))?;
+        let instances = if spec.queues() {
+            TASK_INSTANCES_QUEUE
+        } else {
+            TASK_INSTANCES_IGNORE_NEW
+        };
         settings
-            .SetMultipleInstances(TASK_INSTANCES_IGNORE_NEW)
+            .SetMultipleInstances(instances)
             .map_err(com("SetMultipleInstances"))?;
         settings
             .SetAllowDemandStart(yes)
@@ -325,7 +335,7 @@ pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError>
 
 /// Deletes `task`, then the folder `\Clauseo` if nothing else is in it. A task or folder that
 /// isn't there is `Ok`. Elevated: `--remove --uninstall` calls it for each task, and a
-/// per-machine install's `--remove` for the stop task.
+/// per-machine install's `--remove` for the stop and sweep tasks.
 pub fn unregister_task(task: SystemTask) -> Result<(), TaskError> {
     let _apartment = Apartment::enter()?;
     let service = service()?;
@@ -381,6 +391,71 @@ pub fn request_pool_stop() -> bool {
             false
         }
     }
+}
+
+/// A run of `\Clauseo\SandboxSweep` [`request_pool_sweep`] asked for: its instance's GUID, and
+/// the task's last run time (`IRegisteredTask::LastRunTime`, an OLE date) just before the ask.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SweepRun {
+    instance: String,
+    before: f64,
+}
+
+/// Asks the Task Scheduler to run `\Clauseo\SandboxSweep` now, as whoever calls it: the outer
+/// runner, as the lawyer, at every session's end. The task deletes the pool users' scheduled
+/// tasks and cancels their BITS jobs, and kills nothing (`setup::sweep`). A run asked for while
+/// one runs is queued after it, so the run asked for begins after the ask. It returns once the
+/// run is queued; [`pool_sweep_result`] says when it ended and how. Blocks on COM calls.
+pub fn request_pool_sweep() -> Result<SweepRun, TaskError> {
+    with_task(SystemTask::Sweep, |task| {
+        // SAFETY: a live task; reads a value into memory the call owns.
+        let before = unsafe { task.LastRunTime() }.map_err(com("IRegisteredTask::LastRunTime"))?;
+        // SAFETY: a live task and an empty VARIANT: no parameters.
+        let running =
+            unsafe { task.Run(&VARIANT::default()) }.map_err(com("IRegisteredTask::Run"))?;
+        // SAFETY: a live running task.
+        let instance =
+            unsafe { running.InstanceGuid() }.map_err(com("IRunningTask::InstanceGuid"))?;
+        Ok(SweepRun {
+            instance: instance.to_string(),
+            before,
+        })
+    })
+}
+
+/// How `run` ended, read as whoever asked for it: `None` while its instance is still listed
+/// (queued or running), or while the task's last run began no later than the ask (the run
+/// hasn't started); else the task's last result (`LastTaskResult`), the sweep's exit code
+/// (`SweepExit`). A run that ended and was followed by another, still running, reads as that
+/// one's `SCHED_S_TASK_RUNNING`, never 0. Blocks on COM calls.
+pub fn pool_sweep_result(run: &SweepRun) -> Result<Option<u32>, TaskError> {
+    with_task(SystemTask::Sweep, |task| {
+        // SAFETY: a live task; flags 0.
+        let instances =
+            unsafe { task.GetInstances(0) }.map_err(com("IRegisteredTask::GetInstances"))?;
+        // SAFETY: a live collection.
+        let count = unsafe { instances.Count() }.map_err(com("IRunningTaskCollection::Count"))?;
+        for at in 1..=count {
+            // SAFETY: a live collection and a 1-based index variant.
+            let instance = unsafe { instances.get_Item(&VARIANT::from(at)) }
+                .map_err(com("IRunningTaskCollection::Item"))?;
+            // SAFETY: a live running task.
+            let guid =
+                unsafe { instance.InstanceGuid() }.map_err(com("IRunningTask::InstanceGuid"))?;
+            if guid == run.instance {
+                return Ok(None);
+            }
+        }
+        // SAFETY: a live task; both read a value into memory the call owns.
+        let at = unsafe { task.LastRunTime() }.map_err(com("IRegisteredTask::LastRunTime"))?;
+        if at <= run.before {
+            return Ok(None);
+        }
+        // SAFETY: as above.
+        let code =
+            unsafe { task.LastTaskResult() }.map_err(com("IRegisteredTask::LastTaskResult"))?;
+        Ok(Some(code.cast_unsigned()))
+    })
 }
 
 /// Runs `task` now, as whoever calls it, through the owner's read-and-execute entry (`FRFX`,

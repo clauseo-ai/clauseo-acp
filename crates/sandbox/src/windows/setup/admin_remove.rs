@@ -1,9 +1,9 @@
 //! `--remove`'s last step (S15 tier B, "Admin copy" in 0049): once no tier-B owner is left on
 //! the machine, the admin copy goes too. In `refresh::TEARDOWN`'s order: the record's four
 //! admin-copy values (`ADMIN_VALUES`, so no launcher trusts the copy from here on), then the
-//! SYSTEM tasks `\Clauseo\SandboxRefresh` and `\Clauseo\SandboxStop` ([`unregister_task`]),
-//! then the refresh's staging ([`remove_staging`], taken back if it shuts Administrators out),
-//! then everything in
+//! SYSTEM tasks `\Clauseo\SandboxRefresh`, `\Clauseo\SandboxStop` and `\Clauseo\SandboxSweep`
+//! ([`unregister_task`]), then the refresh's staging ([`remove_staging`], taken back if it
+//! shuts Administrators out), then everything in
 //! `%ProgramFiles%\Clauseo\Sandbox\`, then the folder. Only the uninstaller's
 //! `--remove --uninstall` runs it: the app's in-app removal keeps all of these.
 //!
