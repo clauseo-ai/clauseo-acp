@@ -1979,6 +1979,112 @@ pub struct Progress { pub walked: u64, pub done: bool, pub failed: Option<Arc<Er
   second concurrent session of a prepared matter starting on the fast path. Changing a local
   group's members needs an administrator, so the design (for example static slot groups made at
   set-up) comes to the orchestrator before that PR.
+### WSL
+
+**Why.** WSL is open to every user who can log on, the pool users included. Its service,
+`wslservice.exe`, runs as LOCAL SYSTEM, takes its COM access check from its own descriptor
+(`O:BAG:BAD:(A;;0xB;;;AU)(A;;0xB;;;PS)(A;;0xB;;;SY)`, so the AppID's `AccessPermission` is
+ignored), refuses only LOCAL SYSTEM as a caller, and has no per-user or per-group policy
+(`AllowWSL` is machine-wide). A pool user who starts WSL2 gets a VM whose traffic WFP's
+per-user filters don't see, and files the service writes on its behalf. Every route in goes
+through one COM activation: `wsl.exe`, `wslg.exe`, `bash.exe`, `wslconfig.exe`, `wslhost.exe`,
+the inbox stubs and `wslapi.dll`, `\\wsl$` (p9rdr calls the service as the user), and a direct
+`CoCreateInstance` from PowerShell. WSL1 and WSL2 share that entry point; WSL's containers
+(`WSLCSessionManager`, which makes its own VM) have a class and AppID of their own.
+
+**What the VM showed** (R5c, Server 2025 26100.33650, WSL 3.0.3.0). Both lifted classes,
+`LxssUserSession` and `WSLCSessionManager`, carry the MSI's stock `LaunchPermission` (120 bytes,
+`O:BAG:BAD:(A;;CCDCSW;;;AU)(A;;CCDCSW;;;PS)(A;;CCDCSW;;;SY)`), in keys owned by SYSTEM that
+Administrators can write and `Users` can read. A deny for `ClauseoSandboxUsers` (mask `0x1F`) at
+DACL index 0 of `LxssUserSession`'s value refused every pool-user route: `wsl -l`, `--import`,
+`-d` and `bash.exe` with `E_ACCESSDENIED`, `CreateInstance` with 0x80070005, a DCOM 10016 in
+the System log, with the service stopped (T1) and with the owner's distro running (T2: RPCSS
+checks activation against a running server too). The owner's WSL kept working (T1o). An
+`msiexec /fa` repair left the deny in place (it reinstalls files only) and logged `MsiInstaller`
+1040, 11728, 1035 and 1042; an upgrade is untested and is expected to rewrite the values.
+`\\wsl.localhost\` was inconclusive: in that form it fails for the owner too.
+
+**The deny** (`windows::wsl`). The targets are found at each run, never hard-coded: every AppID
+whose `LocalService` is `WSLService` or `LxssManager` (listing `HKLM\SOFTWARE\Classes\AppID`
+finds every class on such an AppID, so a future WSL class is caught), and the AppID of each of
+`LxssUserSession` (`{a9b7a1b9-…ce7e}`), `WSLCSessionManager` (`…ce8f`) and the inbox
+`LxssUserSessionInBox` (`{4F476546-…}`) that is registered, read from the class's `AppID` value
+in the 64-bit view. Each target's `LaunchPermission` is parsed strictly (`sd.rs`: revision 1,
+self-relative, an owner and a group, a DACL that isn't NULL, every size and SID inside its
+bounds; anything else is refused and never written) and gets `(D;;CCDCLCSWRP;;;G)` at DACL index
+0, with the owner, the group, every other entry and any SACL kept, and the parts laid out in the
+order they had, so taking the deny off gives back the same bytes. Nothing is written when a
+deny for the group holding at least `0xB` (execute, local launch, local activation) already
+comes before every allow. A missing value is built from
+`HKLM\SOFTWARE\Microsoft\Ole\DefaultLaunchPermission`, or, without one, from COM's built-in
+default (`O:BAG:BAD:(A;;CCDCLCSWRP;;;BA)(A;;CCDCLCSWRP;;;IU)(A;;CCDCLCSWRP;;;SY)`, which grants
+INTERACTIVE, and a seclogon pool token is INTERACTIVE), then denied. The new bytes are parsed
+again and checked to be the old with the deny added; the write opens the key with
+`REG_OPTION_BACKUP_RESTORE` and `SeBackupPrivilege` and `SeRestorePrivilege` enabled, so a key
+`TrustedInstaller` owns is written without taking its ownership or touching its DACL, and the
+open never makes a key that isn't there; the value is read back and checked. `AccessPermission`
+is left alone: the service ignores it.
+
+**When.** The elevated set-up writes it as step 8b, after the network filters, as admin. It never
+fails the set-up: the launch check refuses while a deny is missing, and the refresh task tries
+again. The SYSTEM task `\Clauseo\SandboxRefresh` re-applies it on every run, after the admin
+copy's steps whatever they gave, under the set-up lock (`refresh/wsl_phase.rs`); not when the
+run wasn't allowed or the lock was held (a set-up or removal holding it does its own WSL step),
+nor while the record says a removal is under way, nor with no `GroupSid`. The task now also
+starts on an event trigger: the Application log, provider `MsiInstaller`, IDs 1022, 1033, 1035,
+1040, 1042, 11707, 11724 and 11728 (`rules::msi_event_query`). The trigger has no value queries,
+so nothing from the event reaches the run, whose argument stays the fixed `--refresh`; a start
+while it runs queues one more run rather than being dropped (`TASK_INSTANCES_QUEUE`, still one at
+a time), so an install's last event always gets a run after it. Its outcome never changes the
+refresh's exit: a failure is one Event Log error line (AppIDs and Windows error codes, never a
+path or a SID), and a run that changed nothing writes no line. No new exit: the launch check
+enforces the deny, so an exit code would tell no one more.
+
+**The record.** Each target is recorded before its value is written, in two values appended to
+the set-up's (`SETUP_VALUES`, now 11): `WslDenyAppIds` (`REG_MULTI_SZ`, every AppID given the
+deny or found with it, braced and upper-case) and `WslDenyAbsent` (those whose value was made
+from the default). A list holding anything but braced GUIDs is refused whole, so no record text
+becomes a key path. The writes never make the record's key, so a refresh after `--remove` can't
+bring it back. A rollback leaves the deny, as it leaves every deny (D12): one naming a group that
+is gone grants and refuses nothing.
+
+**The launch check** (`wsl::check`, unelevated, in `clean_close::check_launch` right after the
+admin copy's check, before the clean-close record is read). WSL is present when `WSLService` or
+`LxssManager` is installed or any of the three classes is registered; a read that fails counts
+as present. With WSL present, a target whose value (or key) is missing, or whose deny for the
+record's `GroupSid` is missing or comes after an allow, refuses the launch with
+`Blocked::WslDenyMissing` (`wsl_deny_missing`). Otherwise, with `WSLService` present, a target
+that can't be read or parsed, a class with no `AppID`, targets that can't be listed, or
+`HKLM\SOFTWARE\Classes\PackagedCom\ClassIndex\{A9B7A1B9-…CE7E}` (a pre-2.0 Store registration,
+whose launch permission is the package's and overrides the AppID's) refuses with
+`Blocked::WslDenyUnverifiable` (`wsl_deny_unverifiable`). The inbox WSL alone runs no VM, so an
+unreadable inbox value is logged, not refused. With no WSL nothing is refused. Both are
+`sandbox.blocked`, a refused turn the app words generically ("Something on this computer stops
+the Safe workspace, …"); the check is the launch's, not the protection state's, so no reason
+line of `blocked.ts` is shown for it, and none is added here. `Blocked::WslPoolResidue`
+(`wsl_pool_residue`) is reserved for the stop's WSL clean-up (part B), and nothing gives it yet.
+
+**No mid-session watcher.** A WSL update during a tier B session can drop the deny until the
+event trigger's run, seconds after the installer's last event; the next launch checks it again.
+A watcher on the AppID keys (`RegNotifyChangeKeyValue`) that stopped the session was weighed
+and left out: the window is the installer's own run plus a few seconds, and closing it would
+end the lawyer's session for an update the lawyer may have started.
+
+**Drift.** A WSL update (Store, WinGet, `wsl --update`, its own updater), an MSI repair or a
+reinstall may rewrite `LaunchPermission` and drop the deny; a reinstall may bring a new AppID,
+which the next run finds from the class. An OS update may reset the inbox AppID. Each is closed
+by the event trigger or the next logon's run, and refused at launch until then. Nothing ever
+blocks the MSI's writes (an ACL on the AppID key, say): a WSL update that couldn't write its
+keys would fail and roll back for the lawyer.
+
+**Removal.** `--remove` takes the deny off before the group goes (`RemoveStep::Wsl`, after
+`DeviceSync`'s deny), elevated, as admin: for each recorded target, and each target found now,
+only the entries `(D;…;;;G)` come off, and the result is checked, written and read back. A value
+we made is deleted instead once what is left is the default it was made from. No saved value is
+ever written back: it may be older than a WSL update since. A value that can't be parsed is left
+as it is and logged. A read or write that fails stops the removal there (`RemovedPartly`), with
+the record kept for the next run. Then the record's two values go. The event trigger goes with
+the refresh task, which `--remove --uninstall` deletes.
 
 ## Consequences
 
@@ -1992,8 +2098,8 @@ pub struct Progress { pub walked: u64, pub done: bool, pub failed: Option<Arc<Er
   machine stays on tier C. Firms often lock admin rights down, so this is common. A "B-minus"
   tier (the lawyer's own token at Low integrity, no accounts, no prompt) may follow v1.
 - Uninstall (S15 PR4j, "Removal" above) removes, for each pool user, its `LocalLow` deny, its
-  profile and then its account, then `DeviceSync`'s deny, the ledger's entries, the group and the
-  record. Deleting the account first would leave its profile folder and `ProfileList` key behind.
+  profile and then its account, then `DeviceSync`'s deny, WSL's deny ("WSL" above), the ledger's
+  entries, the group and the record. Deleting the account first would leave its profile folder and `ProfileList` key behind.
 - The token, the default DACL and the desktop come from spikes on Windows Server 2025; Windows 11
   and Windows 10 22H2 are unmeasured.
 

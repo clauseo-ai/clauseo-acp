@@ -871,6 +871,46 @@ listed (shown as a bare `S-1-5-21-…` once the account is gone) grants nothing;
 
 Clauseo adds no firewall rules. Network filters (WFP) come later, with how to remove them here.
 
+## 11. WSL and Clauseo's sandbox users
+
+Clauseo keeps its sandbox users (the group `ClauseoSandboxUsers`) out of WSL, whose Linux, and
+WSL2's VM in particular, the sandbox's network filters can't see. It adds one deny entry for that
+group, `(D;;CCDCLCSWRP;;;<group SID>)`, at the top of the COM launch permission
+(`LaunchPermission`) of each WSL class's AppID under `HKLM\SOFTWARE\Classes\AppID`: the AppIDs whose
+`LocalService` is `WSLService` or `LxssManager`, and those of WSL's `LxssUserSession` and
+`WSLCSessionManager` classes and the inbox class. Everything else in each value stays as it was;
+the keys' owners and permissions aren't changed; `AccessPermission` isn't touched. Your own
+accounts and the lawyer's WSL work as before: only members of that group are refused. Where an
+AppID had no `LaunchPermission`, Clauseo writes one made from `DefaultLaunchPermission` (or
+COM's default) with the deny on top, and deletes it again on removal. Source:
+[decision 0049](decisions/0049-windows-sandbox-tier-b.md), "WSL", and its VM run on Windows
+Server 2025 with WSL 3.0.3.0, where the deny refused every WSL route for a sandbox user, the
+service running or not, and the owner's WSL kept working.
+
+A WSL update or repair can rewrite these values. Clauseo's task `\Clauseo\SandboxRefresh` puts
+the deny back at each sign-in and within seconds of any Windows Installer event in the
+Application log (`MsiInstaller` 1022, 1033, 1035, 1040, 1042, 11707, 11724, 11728); the task passes
+nothing from the event. A failure is an error in the Application log from the source
+`Clauseo Sandbox`. Don't put permissions on the AppID keys to protect the entry: WSL's own updates
+must be able to write them.
+
+Before each Safe workspace launch, Clauseo checks the deny, and refuses the launch with
+`sandbox.blocked` when:
+
+- **`wsl_deny_missing`**: WSL is on the computer and a WSL class's launch permission lacks the
+  deny, or has it after an allow entry. Signing out and in again (or running the task:
+  `schtasks /run /tn \Clauseo\SandboxRefresh` as an administrator) puts it back.
+- **`wsl_deny_unverifiable`**: `WSLService` (the WSL that runs VMs) is installed and Clauseo can't
+  check the deny: a launch permission can't be read or isn't a valid descriptor, a WSL class names
+  no AppID, or WSL's class is registered as packaged COM
+  (`HKLM\SOFTWARE\Classes\PackagedCom\ClassIndex\{A9B7A1B9-0671-405C-95F1-E0612CB4CE7E}`, left by a
+  WSL from before 2.0). Repairing or updating WSL (`wsl --update`) usually fixes it.
+
+With no WSL on the computer, nothing is refused. Uninstalling Clauseo (or its in-app removal)
+takes the deny off before it deletes the group. If you clear a leftover sandbox by hand
+(section 1), a deny left in a WSL launch permission names a group that is gone and grants or
+refuses nothing; a WSL repair rewrites the value without it.
+
 ## Later
 
 Codex on Windows has no data-folder deny. Clauseo runs Codex there in Codex's unelevated
