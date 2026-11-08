@@ -2248,8 +2248,8 @@ to the admin-only log for a group task left at 56, cleaned as a path is, and not
 vendor's group task with an odd descriptor therefore blocks launches like any other 56 until an administrator clears
 it. Availability for such residue comes from the planned recycle (P2), not from a skip.
 
-**Q4 (not measured; the sweep's rule doesn't depend on it): can a standard user register a
-group-principal task?** Microsoft's documentation describes group principals but doesn't say
+**Q4 (not measured; the sweep's rules don't depend on it): can a standard user register a
+group-principal task, or modify a task that runs as someone else?** Microsoft's documentation describes group principals but doesn't say
 who may register one:
 - "IPrincipal::put_GroupId"
   (https://learn.microsoft.com/en-us/windows/win32/api/taskschd/nf-taskschd-iprincipal-put_groupid):
@@ -2281,14 +2281,66 @@ owner tests under "Risks" check that a standard user can't make it anyone else),
 above deletes it; an owner it can't read is 56. If Windows refuses it, the rule costs nothing.
 The elevated registration test (`elevated_a_standard_user_cant_register_a_task_for_another_principal`)
 still covers the `UserId` case, which the trusted-file skip rests on. Its `GroupId` half no
-longer bears on the sweep.
+longer bears on the sweep. Modification is Q4's other half, also not measured: whether a
+standard user can rewrite a task it didn't register comes down to that task's DACL, which its
+registrant (an administrator, an installer) chose. The hardening rule below closes it whatever
+the answer, so nothing measures it.
+
+**Hardening tasks that run as the lawyer** (`sweep/harden.rs`). The owner rule catches a task a
+pool user *registered*: its owner is the pool user, and the task is deleted. It doesn't catch
+one a pool user *modified*. Take an administrator's task whose DACL gives Users write, with the
+lawyer (or a group the lawyer may be in) as its principal. A pool user could rewrite its
+actions, and they would run as the lawyer. So the sweep hardens such tasks:
+- **Scope:** a listed task whose descriptor's owner is SYSTEM (`S-1-5-18`), Administrators
+  (`S-1-5-32-544`) or `TrustedInstaller`, **and** whose principal may be the lawyer. That
+  means the record's `OwnerSid`, a group that may hold the lawyer, or a name that resolves to
+  no SID. A group that may hold the lawyer is one outside `S-1-5-21` (Users, Everyone,
+  Administrators, …), or a local group whose members include the lawyer or such a group; a
+  failed lookup counts as yes. A task the lawyer or any other user owns is never touched, and
+  neither is one that runs as SYSTEM, a service account, a pool user or another user.
+- **The change:** from each allow in its DACL that gives a right to rewrite the task
+  (`FILE_WRITE_DATA`, `FILE_APPEND_DATA`, `FILE_WRITE_EA`, `FILE_WRITE_ATTRIBUTES`,
+  `WRITE_DAC`, `WRITE_OWNER`, `GENERIC_WRITE` or `GENERIC_ALL`; `FILE_ALL_ACCESS` holds the
+  first) to an account a pool user may be, those rights and `DELETE` are taken. An entry left
+  with no right goes; a mixed one keeps its other rights and its flags. The accounts a pool user
+  may be are Users, Authenticated Users, Everyone, INTERACTIVE, LOCAL, CONSOLE LOGON,
+  `ClauseoSandboxUsers`, the pool's SIDs, and a local group with a pool member
+  (`Groups::can_contain`). Never the lawyer, SYSTEM, Administrators, `CREATOR OWNER`,
+  `OWNER RIGHTS` or another user's own SID. Every other entry stays byte for byte, in order,
+  and the owner, group, SACL and control stay as read. Nothing is ever added: a NULL DACL,
+  which only an added DACL would close, is counted as not hardened. `WRITE_OWNER` counts as
+  write because an owner holds `WRITE_DAC`; `DELETE` alone doesn't, since deleting the task
+  runs nothing as the lawyer.
+- **The write:** through the task's own interface. `IRegisteredTask::GetSecurityDescriptor`
+  reads the owner, group, DACL and SACL, and `SetSecurityDescriptor` writes them back with
+  `TASK_DONT_ADD_PRINCIPAL_ACE` (without it the Task Scheduler adds an allow for the
+  principal), `SeSecurityPrivilege` enabled for the two calls alone. MS-TSCH's
+  `SchRpcSetSecurity` doesn't say how a descriptor missing a part is applied, so all four
+  parts are always written.
+- **When:** in every sweep, inside the walk (SYSTEM), and once at set-up, right after the stop
+  and sweep tasks (`late_steps::harden_tasks`). Set-up runs as the elevated administrator, not
+  SYSTEM: `--set-up` and `--adopt` have no SYSTEM step, so an administrator may fail to
+  write some `TrustedInstaller`-owned tasks, and the sweep retries them at each session's end.
+  Once the SYSTEM set-up task (`SandboxSetUp`, #733) lands, the set-up call can move there.
+  The same walk is `pub(crate) fn harden_loose_tasks`, which the pre-logon SYSTEM check (a
+  later PR) must call at every session's start (follow-up below).
+- **Log:** each task hardened, with the SIDs that lost which rights, and each that couldn't be,
+  with why, go to the admin-only log, its path cleaned as the 56 paths are. The world-readable
+  line gets the two counts only. Set-up's administrator can't make that log (it is created
+  `O:SY`), so set-up appends only to one already there that passes the same checks. Set-up has
+  no other admin-only log: its result file is the lawyer's and the Event Log is every user's.
+  So otherwise set-up logs the counts alone.
+- **Never 56:** hardening isn't a failure, and a failed one (`SetSecurityDescriptor` refused, a
+  descriptor that can't be read) is logged and counted, still not 56. Option 3, fingerprinting
+  such tasks and refusing launches when one changes, stays in reserve. Whether any task on a
+  real machine needs hardening is not measured; the rule is there because modification isn't.
 
 It kills nothing itself: stopping processes is `--stop`'s, and its `Sweeper` trait has no
 process call; a pool task's running instance is stopped by the Task Scheduler. It logs one
 Event Log line of counts (pool users, folders and tasks read, the pool's tasks deleted,
 unreadable, skipped and not deleted, not listed, group tasks deleted, ignored and left at 56
 with how many name a group a pool user may be in, running instances stopped and not, BITS jobs
-cancelled and not). Every local user can read the Application log, so it names no task and no SID;
+cancelled and not, and, when any, the tasks that run as the lawyer hardened and not). Every local user can read the Application log, so it names no task and no SID;
 when tasks keep the run at 56 it gives their count and whether the admin-only log holds
 them. Those tasks (a hidden task, a pool task not deleted, an unreadable or unresolved one or
 one naming no one, a folder or key there again, a pool task new to the second walk) are
@@ -2367,6 +2419,10 @@ A run deletes only the pool users' tasks and BITS jobs. An ended run never write
 - Any other task whose principal or owner can't be read, that names no one, or whose name
   resolves to no SID and isn't another domain's, ends every run at 56 the same way. Another domain's name that can't be resolved doesn't (step 2).
   `elevated_this_machines_tasks_all_have_a_principal_that_resolves` checks CI's machine only.
+- **Follow-up: the pre-logon SYSTEM check hardens too.** The check the kernel-process-list PR
+  adds (below) must call `sweep::harden::harden_loose_tasks` at every session's start, so a task
+  loosened since the last sweep is closed before the session can use it. Until then a task
+  loosened during a session stays open until that session's end-of-session sweep.
 - **Known gap: a task that deletes itself.** A pool task can start a process (X) and then
   delete itself (or be deleted by X). The sweep's walk never sees it, and its instance stop only
   covers instances of the tasks it finds, so X can live on into the next logon gap: it runs as
@@ -2418,6 +2474,13 @@ A run deletes only the pool users' tasks and BITS jobs. An ended run never write
   session. Expect the run 0, the pool user's task deleted, the administrator's task left, and
   the log line counting 0 group tasks deleted, 1 ignored, 0 left (1 naming a group a pool user
   may be in).
+- VM row (not run), the normal flow with hardening: as an administrator, register a task whose
+  principal is the lawyer and whose descriptor gives Users write (`(A;;FA;;;BA)(A;;FA;;;SY)`
+  `(A;;GRGW;;;BU)`, say), and save its full SDDL. Run an agent session and end it. Expect the
+  run 0 and the task's SDDL unchanged but for Users' entry, now `GR` alone; the log line counts
+  1 task hardened, 0 not, and `sweep-admin.log` names it with `S-1-5-32-545 lost 0x40000000`.
+  Users then has no write, and everything else (owner, group, other entries, any SACL) is as it
+  was. Run set-up again with the same task loosened anew: it is hardened at set-up.
 - VM row (not run): while `--sweep-tasks` runs, register a task as a pool user (a loop,
   so one lands between the walks): expect it deleted, and the run 56 with the log line
   counting a pool task new to the second walk.
