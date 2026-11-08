@@ -73,7 +73,7 @@ pub(crate) fn file_sddl(user: &str) -> String {
 }
 
 pub(crate) use super::sids::owner_allowed;
-pub(crate) use drive::make_drive_folder;
+pub(crate) use drive::{heal_drive_folders, make_drive_folder};
 
 mod drive;
 

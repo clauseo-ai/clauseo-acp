@@ -61,6 +61,10 @@
 //!
 //! Any refusal keeps the old copy, writes one log line (the Event Log on Windows) naming no user
 //! path beyond the install folder, and exits with its own code ([`RefreshExit`]).
+//!
+//! After the refresh, whatever it decided, a run that was allowed heals the lawyers' drive
+//! folders another account made first (`set_aside/heal.rs`, `windows_refresher::run`): its
+//! own Event Log lines, never its exit code.
 
 use std::cmp::Ordering;
 use std::path::{Path, PathBuf};

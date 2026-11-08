@@ -61,18 +61,20 @@
 //! (`Volume::remove_emptied`), so a matter whose items were all restored holds only bookkeeping.
 //!
 //! A rename can't cross volumes, so an item whose folder is on another volume than the data
-//! folder goes to that volume's own set-aside folder instead (`<volume root>\.clauseo-set-aside`,
-//! [`ITEMS_ROOT`]), holding `set-aside\<matter>\<pass>\...` as the sandbox folder does
-//! (`Volume::items_root`). It is made and secured by the sandbox folder's mechanics
-//! (`private_dir::make_drive_folder`: refused if a link, taken back from another owner or
-//! refused) with its own protected DACL: the lawyer and `SYSTEM`, and a deny for the pool group.
-//! It is made at each launch for the matter's own folder and checked again before each move into
-//! it; a launch that can't make it (a read-only drive, one that keeps no permissions, a folder
-//! that can't be secured) is refused ([`SetAsideFailure::DriveFolder`]). The record, the
-//! manifest and the lock stay in the data folder. The uninstaller and forget (`bookkeeping.rs`,
-//! `ntfs/forget.rs`) know only the data folder's set-aside, not these. Its name holds no SID, so
-//! a second Windows user of the machine finds it the first one's, and that user's launch of a
-//! matter on the volume is refused.
+//! folder goes to that volume's own set-aside folder instead, one per lawyer
+//! (`<volume root>\.clauseo-set-aside-<lawyer's SID>`, [`drive_folder_name`]), holding
+//! `set-aside\<matter>\<pass>\...` as the sandbox folder does (`Volume::items_root`). It is made
+//! with its own protected DACL (the lawyer and `SYSTEM`, and a deny for the pool group) and
+//! secured by the sandbox folder's mechanics (`private_dir::make_drive_folder`), except that one
+//! already there the lawyer doesn't own is never taken back: a launch that finds one is refused
+//! ([`SetAsideFailure::DriveFolderNotYours`]) until `SYSTEM` sets it aside by its handle,
+//! contents unopened (`heal.rs`, from the refresh task). Another lawyer's folder on the same
+//! volume has another name, so it never refuses this lawyer. It is made at each launch for the
+//! matter's own folder and checked again before each move into it; a launch that can't make it
+//! (a read-only drive, one that keeps no permissions, a link there) is refused
+//! ([`SetAsideFailure::DriveFolder`]). The record, the manifest and the lock stay in the data
+//! folder. The uninstaller and forget (`bookkeeping.rs`, `ntfs/forget.rs`) know only the data
+//! folder's set-aside, not these.
 //!
 //! A set-aside that can't happen refuses the launch with [`crate::Error::SetAside`], whose
 //! `at` names the item for the running page: an item a rename still can't move across volumes
@@ -119,10 +121,21 @@ pub const SET_ASIDE_DIR: &str = "set-aside";
 /// only these as empty; `--remove` deletes them once the matter is forgotten (`bookkeeping.rs`),
 /// each only when its contents allow (a closed record, a manifest with nothing outstanding).
 pub const SET_ASIDE_BOOKKEEPING: [&str; 3] = ["record.json", "set-aside.lock", "manifest.json"];
-/// The name of the set-aside folder at the root of a volume other than the data folder's
-/// (`<volume root>\.clauseo-set-aside`): what is set aside from a matter on that volume goes
+/// The start of the name of a lawyer's set-aside folder at the root of a volume other than the
+/// data folder's ([`drive_folder_name`]): what is set aside from a matter on that volume goes
 /// there, since a rename can't cross volumes.
 pub const ITEMS_ROOT: &str = ".clauseo-set-aside";
+/// What follows a drive folder's own name once `SYSTEM` set it aside because another account
+/// made it (`heal.rs`): `<name>.squatted-<UTC second>`.
+#[cfg(any(windows, test))]
+pub(crate) const SQUATTED: &str = ".squatted-";
+
+/// The name of the set-aside folder the lawyer whose SID is `user` (its string form) has at the
+/// root of a volume other than the data folder's: `.clauseo-set-aside-<user>` ([`ITEMS_ROOT`]).
+#[cfg(any(windows, test))]
+pub(crate) fn drive_folder_name(user: &str) -> String {
+    format!("{ITEMS_ROOT}-{user}")
+}
 
 #[cfg(any(windows, test))]
 pub(crate) use bookkeeping::forget_bookkeeping;
@@ -142,6 +155,8 @@ mod fast;
 #[cfg(any(windows, test, feature = "test-support"))]
 mod files;
 #[cfg(any(windows, test))]
+pub(crate) mod heal;
+#[cfg(any(windows, test))]
 mod live;
 #[cfg(test)]
 pub(in crate::windows) use live::Moved;
@@ -158,6 +173,8 @@ mod repo_names;
 pub(in crate::windows) use ntfs::make_folders;
 #[cfg(any(windows, test))]
 mod run;
+#[cfg(any(windows, test))]
+pub(crate) use run::not_yours;
 #[cfg(any(windows, test))]
 mod scan;
 #[cfg(any(windows, test))]
@@ -190,8 +207,8 @@ pub struct Entry {
     #[serde(with = "names::path")]
     pub from: PathBuf,
     /// Where it is now: `<data_dir>\sandbox\set-aside\<matter>\<folder>\<within...>\<name>`, or
-    /// the same below the item's own volume's set-aside folder ([`ITEMS_ROOT`]) when the
-    /// matter is on another volume than the data folder.
+    /// the same below the lawyer's set-aside folder on the item's own volume
+    /// ([`drive_folder_name`]) when the matter is on another volume than the data folder.
     #[serde(with = "names::path")]
     pub to: PathBuf,
     /// The pass's folder, named for its UTC time.
@@ -260,15 +277,24 @@ pub enum SetAsideFailure {
     /// would run as the lawyer.
     #[error("{}", GIT_REFUSAL)]
     GitFolder,
-    /// The set-aside folder on the matter's own volume (`<volume root>\.clauseo-set-aside`,
-    /// [`ITEMS_ROOT`]) can't be made or secured: the volume is read-only or keeps no ACLs, the
-    /// folder is a link or not a folder, another account owns it and it can't be taken back, or
-    /// the volume's root can't be read.
+    /// The lawyer's set-aside folder on the matter's own volume ([`drive_folder_name`]) can't be
+    /// made or secured: the volume is read-only or keeps no ACLs, the folder is a link or not a
+    /// folder, or the volume's root can't be read.
     #[error(
         "Clauseo can't make a private folder on the matter's drive for what it moves out of \
              the matter"
     )]
     DriveFolder,
+    /// The lawyer's set-aside folder on the matter's own volume ([`drive_folder_name`]) is there
+    /// and another account owns it (one that made it first, a pool user before the launch). It
+    /// is never taken back: `SYSTEM` sets it aside by its handle, unopened, and makes the
+    /// lawyer's afresh (`heal.rs`, run by the refresh task, [`crate::windows::refresh`]), and
+    /// the next launch goes on.
+    #[error(
+        "Clauseo's private folder on the matter's drive belongs to another account, so Clauseo \
+         won't use it until its system task moves it aside"
+    )]
+    DriveFolderNotYours,
 }
 
 /// [`SetAsideFailure::GitFolder`]'s words, for the lawyer.

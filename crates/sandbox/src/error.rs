@@ -66,9 +66,9 @@ pub enum Error {
     },
     /// Windows tier B couldn't set aside a protected name that changed in a session, or the
     /// item the strict walk found the lawyer can't open, or couldn't read or write the record it
-    /// checks against, or couldn't make its private folder on the matter's own drive
-    /// (`windows::set_aside`). The launch is refused, and the record stays as it was, so the next
-    /// launch checks again. Its message names no path.
+    /// checks against, or couldn't make its private folder on the matter's own drive, or found that
+    /// folder another account's (`windows::set_aside`). The launch is refused, and the record stays
+    /// as it was, so the next launch checks again. Its message names no path.
     #[error("the sandbox couldn't set aside a changed protected name: {failure}")]
     SetAside {
         /// What failed.

@@ -50,17 +50,18 @@ pub(super) trait Volume {
     fn owner(&self, path: &Path) -> io::Result<String>;
 
     /// The folder where what is set aside out of `folder` (the folder an item is in, or the
-    /// matter's own) starts its chain: `sandbox` itself when `folder` is on its volume, else
-    /// `<folder's volume root>\.clauseo-set-aside` ([`super::ITEMS_ROOT`]), since a rename can't
-    /// cross volumes. Volumes are told apart by their roots (`GetVolumePathNameW` on NTFS), which
-    /// need no handle, so a missing item's folder has one too, and a volume mounted on a folder
-    /// is its own.
+    /// matter's own) starts its chain: `sandbox` itself when `folder` is on its volume, else the
+    /// lawyer's `<folder's volume root>\.clauseo-set-aside-<SID>` ([`super::drive_folder_name`] of
+    /// this thread's user), since a rename can't cross volumes. Volumes are told apart by their
+    /// roots (`GetVolumePathNameW` on NTFS), which need no handle, so a missing item's folder has
+    /// one too, and a volume mounted on a folder is its own.
     fn items_root(&self, sandbox: &Path, folder: &Path) -> io::Result<PathBuf>;
 
     /// Makes, or checks when there, the folder `root` an [`Volume::items_root`] gave other than
     /// the sandbox folder, then each of `parts` below it in turn (`set-aside` and the matter's
     /// folder), as [`Place::lock`] does the sandbox folder's: refused if a link or not a folder,
-    /// secured for the lawyer alone (`private_dir::make_drive_folder` on NTFS).
+    /// secured for the lawyer alone (`private_dir::make_drive_folder` on NTFS). A `root` already
+    /// there that another account owns is refused with [`not_yours`]'s error, never taken back.
     fn secure_items_root(&self, root: &Path, parts: &[OsString]) -> io::Result<()>;
 
     /// Moves the item at `from` (itself, not what a link names; its final path must be `from`)
@@ -142,6 +143,31 @@ impl From<SetAsideFailure> for Refused {
     fn from(failure: SetAsideFailure) -> Refused {
         Refused { failure, at: None }
     }
+}
+
+/// What [`Volume::secure_items_root`] fails with when the drive folder there is another
+/// account's: [`SetAsideFailure::DriveFolderNotYours`], not [`SetAsideFailure::DriveFolder`].
+#[derive(Debug)]
+struct NotYours;
+
+impl std::fmt::Display for NotYours {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the set-aside folder on the drive is another account's")
+    }
+}
+
+impl std::error::Error for NotYours {}
+
+/// The error for a drive folder another account owns ([`NotYours`]).
+pub(crate) fn not_yours() -> io::Error {
+    io::Error::new(io::ErrorKind::PermissionDenied, NotYours)
+}
+
+/// Whether `error` is [`not_yours`]'s.
+fn is_not_yours(error: &io::Error) -> bool {
+    error
+        .get_ref()
+        .is_some_and(<dyn std::error::Error + Send + Sync>::is::<NotYours>)
 }
 
 /// See [`super::before_launch`]. The scan runs before the matter's lock is taken, so a long
@@ -307,13 +333,18 @@ pub(super) fn restore(volume: &impl Volume, data_dir: &Path, entry: &Entry) -> R
 /// ([`Volume::secure_items_root`]). Every launch checks the matter's own folder's, and every
 /// move its item's folder's, so a folder that can't be made or secured refuses the launch, and
 /// no item is left in place for want of one. A failure is [`SetAsideFailure::DriveFolder`] at
-/// that folder (at `folder` when its volume's root can't be read).
+/// that folder (at `folder` when its volume's root can't be read), or
+/// [`SetAsideFailure::DriveFolderNotYours`] at it when another account owns it.
 pub(super) fn items_root(
     volume: &impl Volume,
     place: &Place,
     folder: &Path,
 ) -> Result<PathBuf, Refused> {
     let refuse = |at: &Path, error: &io::Error| {
+        if is_not_yours(error) {
+            tracing::warn!("the set-aside folder on the matter's drive is another account's");
+            return Refused::at(SetAsideFailure::DriveFolderNotYours, at);
+        }
         let kind = error.kind();
         tracing::warn!(%kind, "the set-aside folder on the matter's drive can't be made");
         tracing::debug!(%error, "the set-aside folder on the matter's drive");
@@ -332,8 +363,10 @@ pub(super) fn items_root(
 
 /// The folder `found`'s chain (`parts`, then its name) starts from, read off its `to`: each
 /// last part of `to` must be the one `parts` and its name say. It is trusted only when it is the
-/// sandbox folder or the one [`Volume::items_root`] gives for the folder the item goes back to;
-/// anything else is [`SetAsideFailure::Record`], so a manifest never sends a restore elsewhere.
+/// sandbox folder or the one [`Volume::items_root`] gives for the folder the item goes back to:
+/// this lawyer's own drive folder there, named for its SID ([`super::drive_folder_name`]), never
+/// another lawyer's, a set-aside squatter's or the unnamed `.clauseo-set-aside`. Anything else is
+/// [`SetAsideFailure::Record`], so a manifest never sends a restore elsewhere.
 fn root_of(
     volume: &impl Volume,
     place: &Place,
