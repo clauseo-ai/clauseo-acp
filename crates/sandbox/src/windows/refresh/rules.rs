@@ -16,21 +16,32 @@ pub const EXECUTION_LIMIT: &str = "PT5M";
 pub const STOP_ARG: &str = "--stop";
 /// The stop task's execution limit: 2 minutes.
 pub const STOP_EXECUTION_LIMIT: &str = "PT2M";
+/// The sweep task's one argument (`setup::sweep`): nothing else.
+pub const SWEEP_ARG: &str = "--sweep-tasks";
+/// The sweep task's execution limit: 2 minutes.
+pub const SWEEP_EXECUTION_LIMIT: &str = "PT2M";
 
 /// The SYSTEM tasks `--adopt` registers in `\Clauseo`, each running the admin copy with one
-/// fixed argument. Both share the principal (LOCAL SYSTEM), the descriptor ([`task_sddl`]),
-/// one instance at a time and the settings `task.rs` gives every task; they differ only in
-/// what [`SystemTask`]'s methods say.
+/// fixed argument. They share the principal (LOCAL SYSTEM), the descriptor ([`task_sddl`]),
+/// one instance running at a time and the settings `task.rs` gives every task; they differ
+/// only in what [`SystemTask`]'s methods say.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SystemTask {
     /// `\Clauseo\SandboxRefresh`: the admin copy's refresh (`--refresh`).
     Refresh,
     /// `\Clauseo\SandboxStop`: stops every process of the pool's users (`--stop`).
     Stop,
+    /// `\Clauseo\SandboxSweep`: deletes the pool users' scheduled tasks and cancels their BITS
+    /// jobs, killing nothing (`--sweep-tasks`); the outer runner asks for it at every session's
+    /// end.
+    Sweep,
 }
 
 /// Every task, in the order `--adopt` registers them.
-pub const TASKS: [SystemTask; 2] = [SystemTask::Refresh, SystemTask::Stop];
+pub const TASKS: [SystemTask; 3] = [SystemTask::Refresh, SystemTask::Stop, SystemTask::Sweep];
+/// The tasks a per-machine install's set-up registers for the pool's owner and its `--remove`
+/// deletes (`late_steps::stop_task`, `remove::remove_stop_task`): the two that act on the pool.
+pub const POOL_TASKS: [SystemTask; 2] = [SystemTask::Stop, SystemTask::Sweep];
 
 impl SystemTask {
     /// Its name in `\Clauseo`.
@@ -38,6 +49,7 @@ impl SystemTask {
         match self {
             SystemTask::Refresh => "SandboxRefresh",
             SystemTask::Stop => "SandboxStop",
+            SystemTask::Sweep => "SandboxSweep",
         }
     }
 
@@ -46,6 +58,7 @@ impl SystemTask {
         match self {
             SystemTask::Refresh => REFRESH_ARG,
             SystemTask::Stop => STOP_ARG,
+            SystemTask::Sweep => SWEEP_ARG,
         }
     }
 
@@ -54,6 +67,7 @@ impl SystemTask {
         match self {
             SystemTask::Refresh => EXECUTION_LIMIT,
             SystemTask::Stop => STOP_EXECUTION_LIMIT,
+            SystemTask::Sweep => SWEEP_EXECUTION_LIMIT,
         }
     }
 
@@ -61,7 +75,16 @@ impl SystemTask {
     pub fn at_logon(self) -> bool {
         match self {
             SystemTask::Refresh => true,
-            SystemTask::Stop => false,
+            SystemTask::Stop | SystemTask::Sweep => false,
+        }
+    }
+
+    /// Whether a run asked for while one is running is queued to run after it, rather than
+    /// dropped: the sweep's, so every session's end gets a whole run that began after it.
+    pub fn queues(self) -> bool {
+        match self {
+            SystemTask::Refresh | SystemTask::Stop => false,
+            SystemTask::Sweep => true,
         }
     }
 
@@ -72,6 +95,9 @@ impl SystemTask {
                 "Keeps the admin copy of Clauseo's sandbox set-up program current."
             }
             SystemTask::Stop => "Stops the processes of Clauseo's sandbox users.",
+            SystemTask::Sweep => {
+                "Deletes the scheduled tasks and BITS jobs of Clauseo's sandbox users."
+            }
         }
     }
 }
@@ -90,10 +116,11 @@ pub enum Teardown {
 }
 
 /// The removal's steps, in order: every task in [`TASKS`] goes before the copy they run.
-pub const TEARDOWN: [Teardown; 5] = [
+pub const TEARDOWN: [Teardown; 6] = [
     Teardown::AdminValues,
     Teardown::Task(SystemTask::Refresh),
     Teardown::Task(SystemTask::Stop),
+    Teardown::Task(SystemTask::Sweep),
     Teardown::Staging,
     Teardown::AdminFolder,
 ];
@@ -102,9 +129,10 @@ pub const TEARDOWN: [Teardown; 5] = [
 /// protected; SYSTEM and Administrators full control; the record owner `owner` read and execute
 /// (`FRFX`). Starting a task needs execute access: as the owner, `schtasks /run` with `FR`
 /// alone was refused (CI run 42416074600). Execute also ends a running task, so the owner can
-/// end a stop or a refresh: denial of service only, which code running as the owner could do to
-/// its own sessions anyway. An ended stop never writes `StopCompleted` (`setup::stop`), and an
-/// ended refresh keeps the old copy. The owner can't change or delete a task.
+/// end a stop, a sweep or a refresh: denial of service only, which code running as the owner
+/// could do to its own sessions anyway. An ended stop never writes `StopCompleted`
+/// (`setup::stop`), an ended sweep gives the outer runner no 0, so its session's marker stays,
+/// and an ended refresh keeps the old copy. The owner can't change or delete a task.
 pub fn task_sddl(owner: &Sid) -> String {
     format!("O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;{owner})")
 }

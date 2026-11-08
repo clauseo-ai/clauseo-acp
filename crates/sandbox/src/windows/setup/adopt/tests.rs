@@ -233,27 +233,33 @@ fn refused(fake: &mut Fake, install: &str, target: &Target, exit: SetupExit, cas
 }
 
 #[test]
-fn a_per_user_adopt_locks_registers_both_tasks_records_then_sets_up_in_that_order() {
+fn a_per_user_adopt_locks_registers_every_task_records_then_sets_up_in_that_order() {
     let mut fake = Fake::new();
     assert_eq!(
         adopt(&mut fake, Path::new(INSTALL), &user()),
         SetupExit::Done
     );
-    assert_eq!(fake.changes.len(), 5, "{:?}", fake.changes);
+    assert_eq!(fake.changes.len(), 6, "{:?}", fake.changes);
     assert!(fake.changes[0].starts_with("lock "), "{:?}", fake.changes);
     let version = admin_copy::APP_VERSION;
     assert_eq!(fake.changes[1], format!("task SandboxRefresh {LAWYER}"));
     assert_eq!(fake.changes[2], format!("task SandboxStop {LAWYER}"));
+    assert_eq!(fake.changes[3], format!("task SandboxSweep {LAWYER}"));
     assert_eq!(
-        fake.changes[3],
+        fake.changes[4],
         format!("record {HASH} {INSTALL} {version} {LAWYER}")
     );
-    assert_eq!(fake.changes[4], format!("set-up {DATA}"));
+    assert_eq!(fake.changes[5], format!("set-up {DATA}"));
 }
 
 #[test]
 fn a_task_that_cant_be_registered_leaves_no_record_so_the_check_fails() {
-    for (failing, before) in [(SystemTask::Refresh, 1), (SystemTask::Stop, 2)] {
+    let tasks = [
+        (SystemTask::Refresh, 1),
+        (SystemTask::Stop, 2),
+        (SystemTask::Sweep, 3),
+    ];
+    for (failing, before) in tasks {
         let mut fake = Fake::new();
         fake.failing_task = Some(failing);
         assert_eq!(
@@ -261,7 +267,7 @@ fn a_task_that_cant_be_registered_leaves_no_record_so_the_check_fails() {
             SetupExit::Failed,
             "{failing:?}"
         );
-        // The lock, and the refresh task when the stop task is the one refused; no record.
+        // The lock, and each task registered before the one refused; no record.
         assert_eq!(fake.changes.len(), before, "{:?}", fake.changes);
         assert!(fake.changes[0].starts_with("lock "), "{:?}", fake.changes);
         assert!(fake.recorded.is_none(), "{failing:?}");
