@@ -1286,7 +1286,9 @@ leaves that profile, both naming the part.
     logons until the new `StopSequence` caught up. It is stale and removed. A marker with no id
     while the record has none either (an install from before the id, which a later set-up
     doesn't give one, so its live markers aren't dropped) keeps the rules above. An id that
-    can't be read makes no marker stale. `--remove` clears the markers as
+    can't be read makes no marker stale, and while it can't be, an unreadable marker isn't
+    written again (F4 still refuses and requests the stop): written without the id, it would
+    read as another install's and be removed. `--remove` clears the markers as
     the owner; an administrator's removal leaves them to that rule.
   - **Why "just after resume" holds.** Nothing the pool user left behind can start at its next
     logon before the first act. The first act removes the classes, `Run` values and Startup
