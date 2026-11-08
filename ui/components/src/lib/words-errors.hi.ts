@@ -147,6 +147,18 @@ export const HI = {
   "Part of this matter's folder still belongs to the Safe workspace, so Clauseo can't answer here. Ask your IT team to give you back ownership of it.":
     "इस मामले के फ़ोल्डर का एक हिस्सा अभी भी सुरक्षित कार्यक्षेत्र का है, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। अपनी IT टीम से उसका स्वामित्व आपको वापस देने को कहें।",
   // provisional (stage E, app thread's words for copy review)
+  // provisional (R17 PR-E's app follow-up): a refused turn that names where (TurnFailed's at), the cant_label kinds,
+  // and the IT line the pool_owned note shares (words-errors-where.ts)
+  "{where} in this matter still belongs to the Safe workspace, so Clauseo can't answer here.":
+    "इस मामले में {where} अभी भी सुरक्षित कार्यक्षेत्र का है, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता।",
+  "Ask your IT team to give you back ownership of {where}.":
+    "अपनी IT टीम से {where} का स्वामित्व आपको वापस देने को कहें।",
+  "Ask your IT team to give you back ownership of it.":
+    "अपनी IT टीम से इसका स्वामित्व आपको वापस देने को कहें।",
+  "The Safe workspace couldn't be given access to {where}, so Clauseo can't answer here. If it keeps happening, ask your IT team.":
+    "सुरक्षित कार्यक्षेत्र को {where} तक पहुँच नहीं दी जा सकी, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। अगर ऐसा बार-बार हो, तो अपनी IT टीम से पूछें।",
+  "The Safe workspace couldn't be given access to this matter's notes, so Clauseo can't answer here. If it keeps happening, ask your IT team.":
+    "सुरक्षित कार्यक्षेत्र को इस मामले के नोट्स तक पहुँच नहीं दी जा सकी, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। अगर ऐसा बार-बार हो, तो अपनी IT टीम से पूछें।",
   "The Safe workspace couldn't be prepared for this matter, so Clauseo can't answer here. If it keeps happening, ask your IT team.":
     "इस मामले के लिए सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। अगर ऐसा बार-बार हो, तो अपनी IT टीम से पूछें।",
   // provisional (stage E, app thread's words for copy review)

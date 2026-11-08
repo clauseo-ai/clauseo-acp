@@ -43,11 +43,11 @@ const P = {
   needs: np("needs_set_up"),
   refused: np("set_up_refused"),
   failed: np("set_up_failed"),
-  failed1385: np({ set_up_failed: { why: "logon_right_denied_1385" } }),
+  logon: np({ blocked: { reason: "logon_right" } }),
   cant: np("unsupported"),
   pool: np({ pool_full: { size: 8, open: 5, held: 0, owed: 2, set_aside: 1 } }),
   off: np({ switched_off: { at: Date.UTC(2026, 10, 6, 10, 0) } }),
-  // design B (R17 PR-E's causes, not in bindings.ts yet)
+  // design B (R17 PR-E's causes)
   missing: np({ blocked: { reason: "admin_copy_missing" } }),
   policy: np({ blocked: { reason: "policy" } }),
   tool: np({ blocked: { reason: "tool_missing" } }),
@@ -80,7 +80,7 @@ const quiet = () =>
     JSON.stringify({ computer: true, matters: [MATTER.matter] }),
   );
 
-type RoomScene = {
+export type RoomScene = {
   protection: Protection;
   computer?: Protection;
   over?: Partial<ProtectionView>;
@@ -88,7 +88,7 @@ type RoomScene = {
   press?: string[];
 };
 
-const roomHost = (s: RoomScene) => () => {
+export const roomHost = (s: RoomScene) => () => {
   quiet();
   const matter: MatterSummary = { ...MATTER, protection: s.protection };
   return new FakeTransport({
@@ -113,7 +113,7 @@ const pressing = (press: string[] | undefined, children: React.ReactNode) =>
 const LINE = '[data-testid="workspace-line"]';
 const SETUP = '[data-testid="protection-setup"]';
 
-const room = (id: string, words: WordsRef, screen: string, s: RoomScene): Entry => ({
+export const room = (id: string, words: WordsRef, screen: string, s: RoomScene): Entry => ({
   id,
   words,
   screen,
@@ -178,14 +178,15 @@ const settings = (
 
 const pw = (key: ProtectionKey) => protectionWords(key);
 const fw = (key: FirstLaunchKey) => firstLaunchWords(key);
-const note = (protection: Protection): RoomScene => ({ protection, press: [LINE] });
+export const note = (protection: Protection): RoomScene => ({ protection, press: [LINE] });
 const REFUSED_INVALID: FakeProtectionHost = {
   view: () => {
     throw { code: "command.invalid", message: "not admitted yet", retryable: false };
   },
 };
 
-/** UC's entries, UC-01 to UC-96, each id written as it is; ids missing are unused. */
+/** UC's entries, UC-01 to UC-96, each id written as it is; ids missing are unused. R17 PR-E's tier-B notes are
+ * registry-uc-tierb.tsx's (UC-97 on). */
 export const UC: Entry[] = [
   room(
     "UC-01",
@@ -288,7 +289,7 @@ export const UC: Entry[] = [
   room(
     "UC-27",
     pw(
-      "All {size} places in this computer's Safe workspace are in use, so this matter works without it for now. It goes back in once a place is free.",
+      "All {size} places in this computer's Safe workspace are in use, so Clauseo can't answer in this matter until one is free. End a conversation in another matter to free one.",
     ),
     "room/np-note-pool",
     note(P.pool),
@@ -307,19 +308,14 @@ export const UC: Entry[] = [
     note(P.pool),
   ),
   room("UC-31", pw("Still holding files set aside: {n}"), "room/np-note-pool", note(P.pool)),
-  room(
-    "UC-32",
-    pw("To free one now, end a conversation in another matter."),
-    "room/np-note-pool",
-    note(P.pool),
-  ),
+  // UC-32 was "To free one now, end a conversation in another matter.", which R17 PR-E's pool body now says itself
   room(
     "UC-33",
     pw(
       "Windows policy on this computer doesn't let the Safe workspace's accounts sign in. Ask your IT team to add them to the Allow log on locally policy.",
     ),
     "room/np-note",
-    note(P.failed1385),
+    note(P.logon),
   ),
   room(
     "UC-34",
@@ -444,14 +440,8 @@ export const UC: Entry[] = [
     { protection: np({ unsupported: { why: "not_built" } }), over: { required: true } },
   ),
   // design B: what stops the Safe workspace, and the repair
-  room(
-    "UC-80",
-    pw(
-      "Something on this computer stops the Safe workspace, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
-    ),
-    "room/np-note",
-    note(P.policy),
-  ),
+  // UC-80 was the blocked note's "…so Clauseo can read any file you can open on it…" opening, which R17 PR-E's M4
+  // made a refusal (registry-uc-tierb.tsx's UC-106)
   settings(
     "UC-81",
     pw(

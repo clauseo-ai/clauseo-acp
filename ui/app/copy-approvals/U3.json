@@ -899,5 +899,86 @@
     "at": "2026-11-08",
     "by": "app track (provisional; Rohan batch review)",
     "note": "The removal of an allow that lasts until Clauseo closes, because Clauseo couldn't save it (ADR 0053)"
+  },
+  "U3-52": {
+    "en": "{where} in this matter still belongs to the Safe workspace, so Clauseo can't answer here.",
+    "hi": "इस मामले में {where} अभी भी सुरक्षित कार्यक्षेत्र का है, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; R17 PR-E app follow-up, words.md)"
+  },
+  "U3-53": {
+    "en": "Ask your IT team to give you back ownership of {where}.",
+    "hi": "अपनी IT टीम से {where} का स्वामित्व आपको वापस देने को कहें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; R17 PR-E app follow-up, words.md)"
+  },
+  "U3-54": {
+    "en": "The Safe workspace couldn't be given access to {where}, so Clauseo can't answer here. If it keeps happening, ask your IT team.",
+    "hi": "सुरक्षित कार्यक्षेत्र को {where} तक पहुँच नहीं दी जा सकी, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। अगर ऐसा बार-बार हो, तो अपनी IT टीम से पूछें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; R17 PR-E app follow-up, words.md)"
+  },
+  "U3-55": {
+    "en": "The Safe workspace couldn't be given access to this matter's notes, so Clauseo can't answer here. If it keeps happening, ask your IT team.",
+    "hi": "सुरक्षित कार्यक्षेत्र को इस मामले के नोट्स तक पहुँच नहीं दी जा सकी, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। अगर ऐसा बार-बार हो, तो अपनी IT टीम से पूछें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; R17 PR-E app follow-up, words.md)"
+  },
+  "U3-56": {
+    "en": "The Safe workspace couldn't be prepared for this matter, so Clauseo can't answer here. If it keeps happening, ask your IT team.",
+    "hi": "इस मामले के लिए सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। अगर ऐसा बार-बार हो, तो अपनी IT टीम से पूछें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; R17 PR-E app follow-up, words.md)"
+  },
+  "U3-57": {
+    "en": "Clauseo stopped {name}: part of it tried to run outside the Safe workspace.",
+    "hi": "Clauseo ने {name} को रोक दिया: उसका एक हिस्सा सुरक्षित कार्यक्षेत्र के बाहर चलने की कोशिश कर रहा था।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy, sent to stage C 2026-11-07",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; R17 PR-E app follow-up, words.md)"
+  },
+  "U3-58": {
+    "en": "Ask again to carry on. If this keeps happening, tell whoever looks after this computer.",
+    "hi": "जारी रखने के लिए फिर से पूछें। अगर ऐसा बार-बार हो, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति को बताएँ।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy, sent to stage C 2026-11-07",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; R17 PR-E app follow-up, words.md)"
+  },
+  "U3-59": {
+    "en": "Try again",
+    "hi": "फिर से प्रयास करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review; R17 PR-E app follow-up, words.md)",
+    "note": "U3-17's Try again, on the full pool's refused turn (R17 PR-E)"
   }
 }

@@ -12,7 +12,7 @@ export const PROT = {
   newer: np("some_newer_cause"),
   pool: np({ pool_full: { size: 8, open: 5, held: 0, owed: 2, set_aside: 1 } }),
   off: np({ switched_off: { at: 1_762_400_000_000 } }),
-  // design B: R17 PR-E's causes, not in bindings.ts yet
+  // design B: R17 PR-E's causes
   missing: np({ blocked: { reason: "admin_copy_missing" } }),
   policy: np({ blocked: { reason: "policy" } }),
   blockedNewer: np({ blocked: { reason: "a_reason_from_a_newer_clauseo" } }),

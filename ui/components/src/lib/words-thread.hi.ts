@@ -28,6 +28,11 @@ export const HI = {
   Stopped: "रोका गया",
   "You stopped the answer. The answer so far is kept.":
     "आपने उत्तर रोक दिया। अब तक का उत्तर रखा गया है।",
+  // R17 PR-E's left_safe_workspace (the sandbox runner's Escapee exit), the plan's name in {name}; provisional
+  "Clauseo stopped {name}: part of it tried to run outside the Safe workspace.":
+    "Clauseo ने {name} को रोक दिया: उसका एक हिस्सा सुरक्षित कार्यक्षेत्र के बाहर चलने की कोशिश कर रहा था।",
+  "Ask again to carry on. If this keeps happening, tell whoever looks after this computer.":
+    "जारी रखने के लिए फिर से पूछें। अगर ऐसा बार-बार हो, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति को बताएँ।",
   "You didn't allow a request, so the answer stopped. The answer so far is kept.":
     "आपने एक अनुरोध की अनुमति नहीं दी, इसलिए उत्तर रुक गया। अब तक का उत्तर सुरक्षित है।",
   "The answer stopped at its limit, before it finished.": "उत्तर पूरा होने से पहले अपनी सीमा पर रुक गया।",

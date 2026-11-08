@@ -27,6 +27,10 @@ export const RESTARTS = new Set<string>([
   "thread.interrupted",
 ]);
 
+/** The codes asking again can mend with no restart (R17 PR-E's `sandbox.pool_full`, retryable: the same launch works
+ * once another matter frees a place): the line offers Try again, which asks the stopped question once more. */
+export const ASKS_AGAIN = new Set<string>(["sandbox.pool_full"]);
+
 /** Whether a step's stop takes the mark where it stopped (stopped-mark.tsx) rather than its code's sentence. */
 export const takesMark = (step: StepEntry): boolean =>
   step.stop === "failed" && step.failure === TIMED;
@@ -148,7 +152,10 @@ export function refillOf(
   live: boolean,
   restart: RestartHost | null,
 ): { key: EntryId; text: string } | null {
-  return brk !== null && live && restart === null && RESTARTS.has(brk.code) && brk.question !== ""
+  return brk !== null &&
+    live &&
+    ((restart === null && RESTARTS.has(brk.code)) || ASKS_AGAIN.has(brk.code)) &&
+    brk.question !== ""
     ? { key: brk.id, text: brk.question }
     : null;
 }
@@ -156,7 +163,7 @@ export function refillOf(
 /** The break's lines (break-lines.ts), which arrive with the thread's chunk: stopped-mark.tsx, in that chunk, loads
  * them, and they hand themselves over here. A break or a lost stream comes only on an open thread, which opens only
  * once that chunk is in (session.ts), so they are here by then; the first paint carries none of them. */
-export type BreakLines = Pick<typeof Lines, "stoppedLine" | "streamFailedLine">;
+export type BreakLines = Pick<typeof Lines, "stoppedLine" | "streamFailedLine" | "askAgainLine">;
 let provided: BreakLines | null = null;
 const heard = new Set<() => void>();
 
@@ -188,7 +195,10 @@ export function useStoppedLine({
   restart,
   lines,
   plan,
+  askAgain,
 }: {
+  /** Asks a question again, for an ASKS_AGAIN code's Try again; without it, no Try again. */
+  askAgain?: ((question: string) => void) | undefined;
   /** The lines' chunk, once loaded. */
   lines: BreakLines | null;
   /** The thread's agent, for the words that name it (agent-plan.ts). */
@@ -200,6 +210,8 @@ export function useStoppedLine({
   thread: ThreadId | null;
   restart: RestartHost | null;
 }): BreakLine | null {
+  // per break: Try again pressed, once: the line goes, and the question is asked once per press
+  const [again, setAgain] = useState<EntryId | null>(null);
   // per break: Restart pressed (and not refused), or its refusal
   const [press, setPress] = useState<{ id: EntryId; refused: HostError | null } | null>(null);
   const id = brk?.id ?? null;
@@ -215,9 +227,21 @@ export function useStoppedLine({
     brk === null ||
     !shown ||
     busy ||
-    (pressed !== null && pressed.refused === null)
+    (pressed !== null && pressed.refused === null) ||
+    again === brk.id
   )
     return null;
+  if (ASKS_AGAIN.has(brk.code)) {
+    const question = brk.question;
+    const onAgain =
+      askAgain === undefined || question === ""
+        ? null
+        : () => {
+            setAgain(brk.id);
+            askAgain(question);
+          };
+    return lines.askAgainLine(lang, brk, onAgain, plan);
+  }
   return lines.stoppedLine(
     lang,
     brk,

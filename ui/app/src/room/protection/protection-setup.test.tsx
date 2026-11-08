@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 // UC's commands in the room, over FakeTransport with the protection wire. Design B: only a missing
-// admin copy (blocked { admin_copy_missing }) gives the installer repair. needs_set_up,
-// set_up_refused and set_up_failed (a set-up after an in-app Remove, or a re-run) keep the app's
-// button, and the "Unknown publisher" confirm comes before a retry_protection that asks an
+// admin copy (blocked { admin_copy_missing }) and R17 PR-E M4's broken set-up (set_up_failed) give
+// the installer repair. needs_set_up and set_up_refused (a set-up after an in-app Remove, or a
+// re-run) keep the app's button, and the "Unknown publisher" confirm comes before a retry_protection that asks an
 // administrator, as does Add room's; only confirming sends it (Cancel sends nothing). Without R17's
 // retry_asks_admin the fallback asks for needs_set_up, set_up_refused and a full pool; the field
 // alone decides once it is there. The waiting line ends on the answer or the first
@@ -25,6 +25,7 @@ import { mountRoom, THE_MATTER, type Harness } from "../thread/harness.ts";
 import type { RoomProtectionCommand } from "./commands.ts";
 import { APP_VERSION } from "../../settings/version.ts";
 import { NO_PROMPT, np, PROT, view } from "./fixtures.ts";
+import { vt } from "@clauseo/components/lib/words-versions.ts";
 import { installerPage } from "./installer.ts";
 
 let h: Harness | null = null;
@@ -80,7 +81,6 @@ async function pressRetry() {
 test.each([
   ["needs_set_up", PROT.needs, "Set up the Safe workspace"],
   ["set_up_refused", PROT.refused, "Try again"],
-  ["set_up_failed (a re-run)", PROT.failed, "Try again"],
 ] as const)(
   "%s with retry_asks_admin true: the app's retry opens the set-up's confirm first; Cancel sends nothing",
   async (_c, p, label) => {
@@ -152,7 +152,7 @@ test.each([
     expect(note?.textContent).toContain(
       pw(
         "en",
-        "Something on this computer stops the Safe workspace, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
+        "Something on this computer stops the Safe workspace, so Clauseo can't answer here.",
       ),
     );
     expect(note?.textContent).toContain(pw("en", line));
@@ -187,12 +187,83 @@ test("Add room: its confirm first; confirming sends one retry_protection, and a 
   expect(sentRetries()).toEqual(["retry_protection"]);
 });
 
-test("set_up_failed with no retry_asks_admin: Try again sends at once, no confirm", async () => {
+test("set_up_failed (M4): a refusal with the installer's repair and its last resort, no Try again, nothing sent", async () => {
   await mount(PROT.failed);
-  await pressRetry();
+  await h!.click(h!.one("workspace-line"));
+  await settle();
+  const note = inBody("np-note");
+  expect(note?.dataset["cause"]).toBe("set_up_failed");
+  const text = note?.textContent ?? "";
+  const body = pw(
+    "en",
+    "The Safe workspace on this computer isn't working, so Clauseo can't answer here until it's set up again.",
+  );
+  const repair = pw("en", "Run the Clauseo installer again to set up the Safe workspace.");
+  const last = pw("en", "If that doesn't help, ask your IT team.");
+  expect(text).toContain(body);
+  expect(text.indexOf(body)).toBeLessThan(text.indexOf(repair));
+  expect(text.indexOf(repair)).toBeLessThan(text.indexOf(last));
+  expect(text).not.toContain("can read any file");
+  expect(inBody("protection-setup")).toBeNull();
+  expect(inBody("protection-installer")?.textContent).toBe(pw("en", "Get the installer"));
+  expect(sentRetries()).toEqual([]);
+});
+
+test("set_up_failed (M4) on a firm's install: the IT line, no Get the installer", async () => {
+  await mount(PROT.failed, PROT.failed, { unprotected_auto_allowed: false });
+  await h!.click(h!.one("workspace-line"));
+  await settle();
+  const text = inBody("np-note")?.textContent ?? "";
+  expect(text).toContain(pw("en", "Ask your IT team to install Clauseo again."));
+  expect(text).toContain(pw("en", "If that doesn't help, ask your IT team."));
+  expect(inBody("protection-installer")).toBeNull();
+  expect(inBody("protection-setup")).toBeNull();
+});
+
+test("probe_failed (#722): its line, Try again, and the press sends retry_protection at once with no confirm", async () => {
+  const probe = np("probe_failed");
+  await mount(probe, probe, NO_PROMPT);
+  await h!.click(h!.one("workspace-line"));
+  await settle();
+  const note = inBody("np-note");
+  expect(note?.dataset["cause"]).toBe("probe_failed");
+  expect(note?.textContent).toContain(
+    pw(
+      "en",
+      "Clauseo couldn't check the Safe workspace on this computer, so it can't answer here yet. Try again. If it keeps happening, restart Clauseo.",
+    ),
+  );
+  expect(note?.textContent).not.toContain("can read any file");
+  expect(inBody("protection-installer")).toBeNull();
+  expect(inBody("protection-setup")?.textContent).toBe(vt("en", "Try again"));
+  await h!.click(inBody("protection-setup"));
+  await settle();
   expect(inBody("protection-confirm")).toBeNull();
   expect(sentRetries()).toEqual(["retry_protection"]);
-  expect(inBody("protection-wait")?.textContent).toBe(pw("en", "Setting up the Safe workspace."));
+});
+
+test("probe_failed (#722) when retry_asks_admin says Windows prompts: the confirm comes first", async () => {
+  const probe = np("probe_failed");
+  await mount(probe, probe, { retry_asks_admin: true } as Partial<ProtectionView>);
+  await pressRetry();
+  expect(inBody("protection-confirm")).not.toBeNull();
+  expect(sentRetries()).toEqual([]);
+});
+
+test("a cause from a newer Clauseo (M4): its own refusal, no Try again", async () => {
+  await mount(PROT.newer);
+  await h!.click(h!.one("workspace-line"));
+  await settle();
+  const note = inBody("np-note");
+  expect(note?.dataset["cause"]).toBe("unknown");
+  expect(note?.textContent).toContain(
+    pw(
+      "en",
+      "This version of Clauseo doesn't recognise what's stopping the Safe workspace, so it can't answer here. Update Clauseo, or ask your IT team.",
+    ),
+  );
+  expect(note?.textContent).not.toContain("can read any file");
+  expect(inBody("protection-setup")).toBeNull();
 });
 
 test("needs_set_up with retry_asks_admin false: the field wins over the fallback, and the set-up goes at once", async () => {
@@ -221,7 +292,7 @@ test.each([
 );
 
 test("the wait ends on the answer, then the view is read once; the protected matter's note closes", async () => {
-  const answers = await mount(PROT.failed);
+  const answers = await mount(PROT.refused, PROT.refused, NO_PROMPT);
   await pressRetry();
   const before = viewReads();
   expect(inBody("protection-wait")).not.toBeNull();
@@ -237,7 +308,7 @@ test("the wait ends on the answer, then the view is read once; the protected mat
 });
 
 test("the wait ends on the first protection_changed when it comes before the answer", async () => {
-  await mount(PROT.failed);
+  await mount(PROT.refused, PROT.refused, NO_PROMPT);
   await pressRetry();
   expect(inBody("protection-wait")).not.toBeNull();
   const before = viewReads();
@@ -250,7 +321,7 @@ test("the wait ends on the first protection_changed when it comes before the ans
 test.each([["sandbox.setup_refused"], ["sandbox.setup_failed"], ["command.invalid"]])(
   "a refused retry (%s) says its code's words under the note",
   async (code) => {
-    const answers = await mount(PROT.failed);
+    const answers = await mount(PROT.refused, PROT.refused, NO_PROMPT);
     await pressRetry();
     await act(async () => answers[0]!.reject({ code, message: "no", retryable: true }));
     await settle();
@@ -260,7 +331,7 @@ test.each([["sandbox.setup_refused"], ["sandbox.setup_failed"], ["command.invali
 );
 
 test("a refused retry with sandbox.blocked says the generic words; the reason comes from the cause", async () => {
-  const answers = await mount(PROT.failed);
+  const answers = await mount(PROT.refused, PROT.refused, NO_PROMPT);
   await pressRetry();
   await act(async () =>
     answers[0]!.reject({ code: "sandbox.blocked", message: "no", retryable: false }),
@@ -272,7 +343,7 @@ test("a refused retry with sandbox.blocked says the generic words; the reason co
 });
 
 test("a declined native confirm (transport.unauthorized) says nothing new", async () => {
-  const answers = await mount(PROT.failed);
+  const answers = await mount(PROT.refused, PROT.refused, NO_PROMPT);
   await pressRetry();
   await act(async () =>
     answers[0]!.reject({ code: "transport.unauthorized", message: "no", retryable: true }),
@@ -320,7 +391,15 @@ test.each([
     ),
     false,
   ],
-  ["set_up_failed", PROT.failed, errorWords("en", "sandbox.required"), false],
+  [
+    "set_up_failed (M4: the installer's repair)",
+    PROT.failed,
+    pw(
+      "en",
+      "Your firm requires the Safe workspace on this computer, so Clauseo can't answer here until it's set up.",
+    ),
+    false,
+  ],
   ["unsupported", PROT.unsupported, errorWords("en", "sandbox.required"), false],
   ["switched off", PROT.off, errorWords("en", "sandbox.required"), false],
   [

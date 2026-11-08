@@ -5,6 +5,7 @@ import { createElement } from "react";
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { brk as say, streamFailedWords } from "@clauseo/components/lib/words-breaks.ts";
 import { errorWords, type AgentName } from "@clauseo/components/lib/words-errors.ts";
+import { failureWords } from "@clauseo/components/lib/words-errors-where.ts";
 import type { HostError } from "../transport/protocol.ts";
 import { RestartButton, RetryButton } from "./break-buttons.tsx";
 import { provideBreakLines, RESTARTS, TIMED, type Break, type BreakLine } from "./thread-break.ts";
@@ -80,4 +81,26 @@ export function streamFailedLine(
   };
 }
 
-provideBreakLines({ stoppedLine, streamFailedLine });
+/** The working line for a turn refused with a code asking again can mend (thread-break.ts's ASKS_AGAIN): its code's
+ * words, with Try again, which asks the stopped question once more, when `onAgain` is given. */
+export function askAgainLine(
+  lang: Lang,
+  brk: Break,
+  onAgain: (() => void) | null,
+  agent?: AgentName,
+): BreakLine {
+  return {
+    testId: "ask-again",
+    state: {
+      kind: "wait",
+      words: failureWords(lang, brk.code, { at: brk.step.failure_at }, agent),
+      pill: null,
+      code: brk.code,
+      ...(onAgain === null
+        ? {}
+        : { actions: createElement(RetryButton, { lang, onRetry: onAgain }) }),
+    },
+  };
+}
+
+provideBreakLines({ stoppedLine, streamFailedLine, askAgainLine });

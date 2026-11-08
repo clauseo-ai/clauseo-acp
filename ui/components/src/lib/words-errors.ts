@@ -4,7 +4,7 @@
 // key, the exact string on screen. The Hindi is a specialist's draft, waiting for a Hindi-speaking lawyer: the formal
 // आप, the danda, Western digits, English names in Latin script. Nothing here says मैं, पेंसिल, स्याही, चरण or कदम.
 import type { Lang } from "./display.ts";
-import { wordsOf } from "./words-core.ts";
+import { isolate, wordsOf } from "./words-core.ts";
 import { th } from "./words-thread.ts";
 import type { HI } from "./words-errors.hi.ts";
 
@@ -298,3 +298,13 @@ export function errorWords(lang: Lang, code: string, agent?: AgentName): string 
     ? errorSentence(lang, key)
     : own(lang, key, { name });
 }
+
+/** A matter path as a refusal names it (TurnFailed's `at`): the path in the matter's folder, isolated. */
+export const whereOf = (at: string): string => isolate(at);
+
+/** The IT line of an item a Safe workspace place didn't hand back (R17 PR-E's pool_owned): naming where when known,
+ * else "it". Here, not in words-errors-where.ts, so the Not protected note's chunk takes it from the first load. */
+export const ownershipLine = (lang: Lang, at?: string | null): string =>
+  typeof at === "string" && at !== ""
+    ? own(lang, "Ask your IT team to give you back ownership of {where}.", { where: whereOf(at) })
+    : own(lang, "Ask your IT team to give you back ownership of it.");

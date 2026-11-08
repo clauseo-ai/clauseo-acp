@@ -168,6 +168,12 @@ export function Work({
     restart: archived ? null : restart,
     lines,
     plan: agentPlan,
+    // Try again for a refusal asking again mends (sandbox.pool_full): the refilled question leaves the field, then
+    // goes once
+    askAgain: (question) => {
+      field.current?.clear(question);
+      void ask(question);
+    },
   });
   // UD2: the question held for the plan's sign-in (queue_held_reason "sign_in"; from an older host that says no why, a held queue
   // after a turn failed with agent.auth_required). Any other reason keeps the held strip's own line

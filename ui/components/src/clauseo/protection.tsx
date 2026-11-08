@@ -9,12 +9,19 @@
 // (the caller's act). Understood, the act, is the dark primary and takes the starting focus. A
 // set-up cause offers its retry beside it ("Set up the Safe workspace", "Try again"; a full pool's
 // "Add room" while it can grow), which leaves the note open: the waiting line stands in the
-// button's place, and a refusal's words under it. The open lock leads it, in concrete: nothing here
-// is red.
+// button's place, and a refusal's words under it. R17 PR-E: a full pool refuses once tier B is in use,
+// so its body says Clauseo can't answer here, by the sandbox's why (no free place, or two
+// conversations already working in this matter, which offers no pool action), with the reset line
+// and "Free up places" where places need a reset; an item a place didn't hand back (pool_owned)
+// says so with the IT line, naming where when known. The open lock leads it, in concrete: nothing
+// here is red. R17 PR-E's M4: a set-up in place but broken, a block, and a cause this version
+// doesn't know refuse every launch, so their bodies say Clauseo can't answer here, with no retry. #722's probe_failed
+// refuses too, and its Try again checks again.
 import { AlertDialog, AlertDialogClose, AlertDialogPopup } from "../ui/alert-dialog.tsx";
 import { Button } from "../ui/button.tsx";
 import { IconNotProtected } from "../icons/icons.tsx";
 import { useDisplay } from "../lib/display.ts";
+import { ownershipLine } from "../lib/words-errors.ts";
 import { INSTALLER_CLOSE, pw } from "../lib/words-protection.ts";
 import { useVersionWords } from "../lib/words-versions.ts";
 import { Say } from "./say.tsx";
@@ -29,7 +36,10 @@ export type NoteWhy =
   | "cant"
   | "not_built"
   | "pool"
-  | "blocked";
+  | "pool_owned"
+  | "blocked"
+  | "unknown"
+  | "probe_failed";
 
 /** The pool's counts (NotProtectedCause's pool_full): how many protected spaces, and what holds them. */
 export type NotePool = {
@@ -38,20 +48,29 @@ export type NotePool = {
   held: number;
   owed: number;
   set_aside: number;
+  /** Optional: the places only a reset frees (R17 PR-E's needs_reset; 0 before PR-D). */
+  needs_reset?: number | undefined;
+  /** Optional: why no place was free, as the sandbox names it; anything else (or none) reads as the plain full pool. */
+  why?: string | null | undefined;
 };
+
+/** The pool's body by its why: no free place, two conversations already in this matter, or the plain full pool. */
+const poolKind = (pool: NotePool | undefined): "no_free_slot" | "matter_sessions_full" | "full" =>
+  pool?.why === "no_free_slot" || pool?.why === "matter_sessions_full" ? pool.why : "full";
 
 export function NotProtectedNote({
   open,
   matter,
   why,
   pool,
-  named1385 = false,
   addRoom = false,
   waiting = null,
   failed = null,
   extra = [],
+  where = null,
   onClose,
   onProtect,
+  onFreeUp,
   onGetInstaller,
 }: {
   open: boolean;
@@ -60,8 +79,6 @@ export function NotProtectedNote({
   why: NoteWhy;
   /** The pool's counts, for "pool". */
   pool?: NotePool | undefined;
-  /** Optional: R17 PR-E names Windows error 1385 inside a failed set-up; its line takes the platform line's place. */
-  named1385?: boolean;
   /** Optional, for "pool": the pool can grow, so "Add room" shows. */
   addRoom?: boolean;
   /** Optional: the waiting line, in the retry's place while its command runs. */
@@ -71,7 +88,12 @@ export function NotProtectedNote({
   /** Optional: lines after the cause's body, in the page's language (design B: the block's reason,
    * the repair). */
   extra?: string[];
+  /** Optional, for "pool_owned": the item's IT line names it (a refused turn's `at`); without it, "it". */
+  where?: string | null;
   onClose: () => void;
+  /** Optional, for "pool": frees the places only a reset frees (`retry_protection`, behind Windows' prompt); shown
+   * only while the pool's `needs_reset` is above 0. */
+  onFreeUp?: (() => void) | undefined;
   /** The retry: set protection up, try again, or add room. Without it, no retry shows. */
   onProtect?: (() => void) | undefined;
   /** Optional: opens the installer's page ("Get the installer"); without it, no such button. */
@@ -82,8 +104,12 @@ export function NotProtectedNote({
   const p = (key: Parameters<typeof pw>[1], slots?: Parameters<typeof pw>[2]) =>
     pw(w.lang, key, slots);
   const refused = why === "setup" || why === "set_up_refused";
+  const kind = poolKind(pool);
+  // two conversations already in this matter: the pool's counts and ways out don't apply
+  const poolWide = why === "pool" && kind !== "matter_sessions_full";
+  const resets = poolWide ? (pool?.needs_reset ?? 0) : 0;
   const counts: [number, string][] =
-    why === "pool" && pool !== undefined
+    poolWide && pool !== undefined
       ? [
           [pool.open, p("In use by other open matters: {n}", { n: pool.open })],
           [pool.held, p("Kept by matters with nothing open: {n}", { n: pool.held })],
@@ -105,51 +131,85 @@ export function NotProtectedNote({
               "The Safe workspace isn't set up on this computer yet. Until it is, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
             ),
           ]
-        : why === "not_built"
+        : why === "probe_failed"
           ? [
               p(
-                "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update. Until then, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
+                "Clauseo couldn't check the Safe workspace on this computer, so it can't answer here yet. Try again. If it keeps happening, restart Clauseo.",
               ),
             ]
-          : why === "blocked"
+          : why === "not_built"
             ? [
                 p(
-                  "Something on this computer stops the Safe workspace, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
+                  "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update. Until then, Clauseo can read any file you can open on this computer, and asks before changing anything outside this matter's folder.",
                 ),
               ]
-            : why === "cant"
+            : why === "blocked"
               ? [
                   p(
-                    "This computer can't run the Safe workspace, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
+                    "Something on this computer stops the Safe workspace, so Clauseo can't answer here.",
                   ),
                 ]
-              : why === "pool"
+              : why === "cant"
                 ? [
                     p(
-                      "All {size} places in this computer's Safe workspace are in use, so this matter works without it for now. It goes back in once a place is free.",
-                      { size: pool?.size ?? 0 },
+                      "This computer can't run the Safe workspace, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
                     ),
                   ]
-                : [
-                    p(
-                      "The Safe workspace couldn't be set up on this computer, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
-                    ),
-                    ...(refused
+                : why === "pool"
+                  ? [
+                      kind === "matter_sessions_full"
+                        ? p(
+                            "Two conversations are already working in this matter. Try again when one finishes.",
+                          )
+                        : kind === "no_free_slot"
+                          ? p(
+                              "All {size} places in this computer's Safe workspace are in use by open conversations. End a conversation in another matter to free one.",
+                              { size: pool?.size ?? 0 },
+                            )
+                          : p(
+                              "All {size} places in this computer's Safe workspace are in use, so Clauseo can't answer in this matter until one is free. End a conversation in another matter to free one.",
+                              { size: pool?.size ?? 0 },
+                            ),
+                    ]
+                  : why === "pool_owned"
+                    ? [
+                        p(
+                          "Part of this matter's folder wasn't handed back to you after the Safe workspace last used it, so Clauseo can't answer in this matter until it is.",
+                        ),
+                        ownershipLine(w.lang, where),
+                      ]
+                    : why === "set_up_failed"
                       ? [
-                          platform === "windows"
-                            ? w.v("Windows didn't allow the Safe workspace on this computer.")
-                            : platform === "linux"
-                              ? w.v("Linux didn't allow the Safe workspace on this computer.")
-                              : w.v("macOS didn't allow the Safe workspace on this computer."),
+                          p(
+                            "The Safe workspace on this computer isn't working, so Clauseo can't answer here until it's set up again.",
+                          ),
                         ]
-                      : named1385
+                      : why === "unknown"
                         ? [
                             p(
-                              "Windows policy on this computer doesn't let the Safe workspace's accounts sign in. Ask your IT team to add them to the Allow log on locally policy.",
+                              "This version of Clauseo doesn't recognise what's stopping the Safe workspace, so it can't answer here. Update Clauseo, or ask your IT team.",
                             ),
                           ]
-                        : []),
-                  ];
+                        : [
+                            p(
+                              "The Safe workspace couldn't be set up on this computer, so Clauseo can read any file you can open on it. It asks before changing anything outside this matter's folder.",
+                            ),
+                            ...(refused
+                              ? [
+                                  platform === "windows"
+                                    ? w.v(
+                                        "Windows didn't allow the Safe workspace on this computer.",
+                                      )
+                                    : platform === "linux"
+                                      ? w.v(
+                                          "Linux didn't allow the Safe workspace on this computer.",
+                                        )
+                                      : w.v(
+                                          "macOS didn't allow the Safe workspace on this computer.",
+                                        ),
+                                ]
+                              : []),
+                          ];
   // the line beside the installer's button: the button quits Clauseo once the page is open
   const close = onGetInstaller === undefined ? [] : [p(INSTALLER_CLOSE)];
   const retry =
@@ -157,8 +217,11 @@ export function NotProtectedNote({
     why === "off" ||
     why === "cant" ||
     why === "blocked" ||
+    why === "pool_owned" ||
+    why === "set_up_failed" ||
+    why === "unknown" ||
     why === "not_built" ||
-    (why === "pool" && !addRoom)
+    (why === "pool" && (!addRoom || !poolWide))
       ? null
       : why === "needs_set_up"
         ? p("Set up the Safe workspace")
@@ -201,17 +264,24 @@ export function NotProtectedNote({
             )}
             {/* the ways out: ending a conversation frees a space another open matter holds; under the largest pool,
                 Add room makes 4 more behind Windows' prompt */}
-            {why === "pool" && ((pool?.open ?? 0) > 0 || addRoom) && (
+            {poolWide && addRoom && (
               <span data-testid="np-pool-out">
                 <Say>
-                  {[
-                    ...((pool?.open ?? 0) > 0
-                      ? [p("To free one now, end a conversation in another matter.")]
-                      : []),
-                    ...(addRoom
-                      ? [p("Clauseo can add room for 4 more. Windows asks for permission first.")]
-                      : []),
-                  ].join(" ")}
+                  {p("Clauseo can add room for 4 more. Windows asks for permission first.")}
+                </Say>
+              </span>
+            )}
+            {resets > 0 && (
+              <span data-testid="np-pool-reset">
+                <Say>
+                  {resets === 1
+                    ? p(
+                        "One of them needs resetting before it can be used again. Windows asks for permission first.",
+                      )
+                    : p(
+                        "{n} of them need resetting before they can be used again. Windows asks for permission first.",
+                        { n: resets },
+                      )}
                 </Say>
               </span>
             )}
@@ -244,6 +314,19 @@ export function NotProtectedNote({
               ) : (
                 <Button kind="quiet" onClick={onProtect} data-testid="protection-setup">
                   <span className="deva-nudge">{retry}</span>
+                </Button>
+              ))}
+            {resets > 0 &&
+              onFreeUp !== undefined &&
+              (waiting !== null ? (
+                retry === null && (
+                  <span className="np-note-wait" role="status" data-testid="protection-wait">
+                    <Say>{waiting}</Say>
+                  </span>
+                )
+              ) : (
+                <Button kind="quiet" onClick={onFreeUp} data-testid="protection-free-up">
+                  <span className="deva-nudge">{p("Free up places")}</span>
                 </Button>
               ))}
             <AlertDialogClose render={<Button kind="primary" />}>
