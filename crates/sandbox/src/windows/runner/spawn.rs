@@ -45,6 +45,7 @@ use windows::Win32::System::Threading::{
 use windows::core::{HSTRING, PCWSTR, PWSTR};
 use zeroize::Zeroizing;
 
+use super::station::StationDesktop;
 use crate::windows::acl::object::{Handle, os_error};
 
 /// `SW_HIDE`.
@@ -118,16 +119,18 @@ unsafe impl Send for Job {}
 unsafe impl Sync for Job {}
 
 /// The outer's call: starts `exe <args>` (`--inner <base>`, or `--sweep`) as the pool user
-/// `name` (on this computer) with its profile loaded, suspended, hidden, in `cwd`, with the pool
-/// user's own environment; with `output`, its stdout and stderr are that handle, which the
-/// Secondary Logon service duplicates from this process into the new one. The password buffer is
-/// wiped when this returns. A failure gives the Win32 code.
+/// `name` (on this computer) with its profile loaded, suspended, hidden, in `cwd`, on `desktop`
+/// (never `NULL`: the Secondary Logon service would grant the pool user's logon the lawyer's
+/// `WinSta0\Default`), with the pool user's own environment; with `output`, its stdout and
+/// stderr are that handle, which the Secondary Logon service duplicates from this process into
+/// the new one. The password buffer is wiped when this returns. A failure gives the Win32 code.
 pub(super) fn log_on(
     name: &str,
     password: Zeroizing<String>,
     exe: &str,
     args: &str,
     cwd: &str,
+    desktop: &StationDesktop,
     output: Option<HANDLE>,
 ) -> Result<Process, u32> {
     let user = HSTRING::from(name);
@@ -139,17 +142,8 @@ pub(super) fn log_on(
         .encode_utf16()
         .chain([0])
         .collect();
-    let mut startup = STARTUPINFOW {
-        cb: u32::try_from(size_of::<STARTUPINFOW>()).unwrap_or(0),
-        dwFlags: STARTF_USESHOWWINDOW,
-        wShowWindow: SW_HIDE,
-        ..STARTUPINFOW::default()
-    };
-    if let Some(output) = output {
-        startup.dwFlags |= STARTF_USESTDHANDLES;
-        startup.hStdOutput = output;
-        startup.hStdError = output;
-    }
+    let mut desktop = desktop.wide();
+    let startup = logon_startup(&mut desktop, output);
     let mut info = PROCESS_INFORMATION::default();
     // SAFETY: every string is NUL-terminated and outlives the call, the command line writable as
     // the call requires; no environment, so the pool user's own is made from its profile;
@@ -174,6 +168,25 @@ pub(super) fn log_on(
         Ok(()) => Ok(Process::from(info)),
         Err(error) => Err(u32::try_from(error.code().0 & 0xFFFF).unwrap_or(u32::MAX)),
     }
+}
+
+/// The `STARTUPINFOW` of [`log_on`]'s call: hidden, on `desktop` (a NUL-terminated
+/// [`StationDesktop::wide`], which must outlive the call), and with `output` as its stdout and
+/// stderr when given.
+pub(super) fn logon_startup(desktop: &mut [u16], output: Option<HANDLE>) -> STARTUPINFOW {
+    let mut startup = STARTUPINFOW {
+        cb: u32::try_from(size_of::<STARTUPINFOW>()).unwrap_or(0),
+        lpDesktop: PWSTR(desktop.as_mut_ptr()),
+        dwFlags: STARTF_USESHOWWINDOW,
+        wShowWindow: SW_HIDE,
+        ..STARTUPINFOW::default()
+    };
+    if let Some(output) = output {
+        startup.dwFlags |= STARTF_USESTDHANDLES;
+        startup.hStdOutput = output;
+        startup.hStdError = output;
+    }
+    startup
 }
 
 /// The job's UI limits, every one Windows has ([`super::UI_LIMIT_MASK`]), as Chromium's sandbox

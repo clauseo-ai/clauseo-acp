@@ -14,8 +14,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use super::super::RunExit;
+use super::super::desktop::AgentDesktop;
 use super::super::end::{EMPTY_POLL, EMPTY_WAIT, SweeperSteps, Swept, wait_empty};
 use super::super::spawn::{Job, Process, active_processes, end_job, log_on, output_pipe, resume};
+use super::super::station::StationSids;
 use super::super::sweep::SWEPT;
 use super::{os, say};
 use crate::windows::acl::object::Handle;
@@ -41,6 +43,9 @@ pub(super) struct OsSweeper {
     pub(super) kept: Mutex<Option<Process>>,
     /// The launch's kill-on-close job, once `session` made it.
     pub(super) job: OnceLock<Job>,
+    /// The agent's window station and desktop, once `session` made them; the sweeper starts on
+    /// them. A session that failed before makes one for the sweeper alone (`log_on`).
+    pub(super) agent_desktop: OnceLock<AgentDesktop>,
     /// The session's unclean-session marker (`marker.rs`).
     pub(super) marker: PathBuf,
 }
@@ -50,6 +55,12 @@ impl OsSweeper {
     /// session uses. It closes when this process exits.
     pub(super) fn hold_job(&self, job: Handle) -> &Handle {
         &self.job.get_or_init(move || Job(job)).0
+    }
+
+    /// Keeps `made`, the agent's window station and desktop, until this process exits; the one
+    /// kept.
+    pub(super) fn hold_desktop(&self, made: AgentDesktop) -> &AgentDesktop {
+        self.agent_desktop.get_or_init(move || made)
     }
 }
 
@@ -95,6 +106,22 @@ impl SweeperSteps for OsSweeper {
     fn log_on(&self) -> Result<Process, String> {
         LOGON_BEGAN.get_or_init(clock);
         let password = secret_for(&self.data_dir, &self.pool_user).map_err(|e| e.to_string())?;
+        // Never `WinSta0`: the agent's station, or one of its own when the session failed before
+        // it made the agent's.
+        let station = if let Some(made) = self.agent_desktop.get() {
+            made
+        } else {
+            let sids = StationSids {
+                creator: &self.desktop,
+                pool_user: &self.pool_user,
+                matter: None,
+            };
+            let made =
+                AgentDesktop::create(&self.pool_name, &password, &sids).map_err(|(call, e)| {
+                    os(&format!("the end sweeper's window station: {call}"), &e)
+                })?;
+            self.hold_desktop(made)
+        };
         let (read, write) = output_pipe().map_err(|e| os("CreatePipe", &e))?;
         // `log_on` takes the password and wipes it as it returns.
         let sweeper = log_on(
@@ -103,6 +130,7 @@ impl SweeperSteps for OsSweeper {
             &self.exe,
             "--sweep",
             &self.cwd,
+            &station.path,
             Some(write.0),
         )
         .map_err(|code| format!("CreateProcessWithLogonW failed ({code})"))?;
@@ -131,7 +159,14 @@ impl SweeperSteps for OsSweeper {
             &runner_process_sddl(&self.desktop, &self.logon),
         )
         .and_then(|()| shut_object(sweeper.thread.0, &runner_thread_sddl(&self.desktop)))
-        .map_err(|e| os("the end sweeper's DACL", &e))
+        .map_err(|e| os("the end sweeper's DACL", &e))?;
+        // The sweeper outlives this process, and its station goes with its last handle.
+        match self.agent_desktop.get() {
+            Some(made) => made
+                .lend_to(sweeper.handle.0)
+                .map_err(|e| os("the end sweeper's window station", &e)),
+            None => Err("the end sweeper has no window station".to_owned()),
+        }
     }
 
     fn resume(&self, sweeper: &Process) -> Result<(), String> {

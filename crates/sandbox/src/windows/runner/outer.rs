@@ -117,6 +117,7 @@ fn marked_outer(
         cwd,
         kept: Mutex::new(None),
         job: OnceLock::new(),
+        agent_desktop: OnceLock::new(),
         marker,
     }));
     let result = session(message, &end);
@@ -176,8 +177,12 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
         pool_user: &message.pool_user,
         matter: message.matter_sid.as_ref(),
     };
-    let agent_desktop = AgentDesktop::create(&message.pool_name, &password, &sids)
-        .map_err(|(call, e)| station_failure(call, &e))?;
+    // Kept in the end sweeper's steps, so it lives as long as this process and the sweeper
+    // starts on it too.
+    let agent_desktop = sweeper.hold_desktop(
+        AgentDesktop::create(&message.pool_name, &password, &sids)
+            .map_err(|(call, e)| station_failure(call, &e))?,
+    );
     // The logon, the user's check, the job, the shut, then the resume (`start.rs`); the inner's
     // first act is the sweep of every other process of the pool user's. The job's one handle stays
     // this process's, so the job's processes end with it.
@@ -190,6 +195,7 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
         exe: &sweeper.exe,
         base: set.base(),
         cwd: &sweeper.cwd,
+        station_desktop: &agent_desktop.path,
         job,
     };
     let inner = start(&mut steps)?;
@@ -202,14 +208,12 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
         cwd: message.cwd.clone(),
         env,
         folders,
-        desktop: agent_desktop.path.clone(),
+        desktop: agent_desktop.path.as_str().to_owned(),
         folder_base: WinPath::parse(&message.state)
             .map(|state| state.display())
             .unwrap_or_default(),
     };
     let result = serve(&inner, pipes, &launch, end);
-    // Held until here: the station goes with its last handle.
-    drop(agent_desktop);
     // `serve` returns only on a failure (`relay` exits the process): the job ends and empties,
     // then the end sweeper starts.
     end.trigger(EndSignal::Failed);

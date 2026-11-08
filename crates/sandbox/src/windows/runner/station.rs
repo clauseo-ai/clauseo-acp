@@ -69,6 +69,34 @@ pub(crate) trait StationSteps {
     fn secure_desktop(&mut self, desktop: &Self::Desktop, sddl: &str) -> Result<(), Self::Error>;
 }
 
+/// `<station>\Default` on a station [`make_station`] made: the only desktop the runners start a
+/// process on (the inner runner, the end sweeper, the agent). Built only from a name of the shape
+/// Windows gives an unnamed station, `Service-0x<hex>-<hex>$`, so neither `WinSta0` nor an empty
+/// `lpDesktop` (which has the Secondary Logon service grant the pool user's logon the lawyer's
+/// `WinSta0\Default`) can reach a `CreateProcessWithLogonW`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StationDesktop(String);
+
+impl StationDesktop {
+    /// The desktop `Default` on the station `name`; `None` for a name of any other shape.
+    pub(crate) fn of(name: &str) -> Option<StationDesktop> {
+        let luid = name.strip_prefix("Service-0x")?.strip_suffix('$')?;
+        let (high, low) = luid.split_once("-0x").or_else(|| luid.split_once('-'))?;
+        let hex = |part: &str| !part.is_empty() && part.chars().all(|c| c.is_ascii_hexdigit());
+        (hex(high) && hex(low)).then(|| StationDesktop(format!(r"{name}\Default")))
+    }
+
+    /// The path, `<station>\Default`.
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// The path as a NUL-terminated UTF-16 string, for a `STARTUPINFO`'s `lpDesktop`.
+    pub(crate) fn wide(&self) -> Vec<u16> {
+        self.0.encode_utf16().chain([0]).collect()
+    }
+}
+
 /// Who the descriptors name.
 pub(crate) struct StationSids<'a> {
     /// The desktop user: the outer runner's own user, the station's last owner.

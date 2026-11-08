@@ -1058,8 +1058,18 @@ leaves that profile, both naming the part.
     (PowerShell and `whoami` hang). The pool user's effective rights read `0x2007F` and `0xC7`,
     and none of the pool user, the run's group or `RESTRICTED` gets `WRITE_DAC`, `WRITE_OWNER`
     or `DELETE` (read by hand on both machines).
-  - **Nothing to clean.** The station goes with its last handle: the outer's, held until its
-    `serve` returns, and the inner's and the agent's own.
+  - **Every runner process starts on it, never on `WinSta0`.** The inner runner's and the end
+    sweeper's `CreateProcessWithLogonW` name `<station>\Default` as `lpDesktop`, as the agent's
+    `CreateProcessAsUserW` does. With `lpDesktop` `NULL` the Secondary Logon service grants the
+    new logon access to the caller's `WinSta0\Default`, which put a Medium pool process where it
+    could reach the lawyer's windows; with a named desktop it changes no DACL. The path is a
+    `station::StationDesktop`, built only from an unnamed station's name
+    (`Service-0x<hex>-<hex>$`), so `spawn::log_on` can't be given `WinSta0` or nothing. A
+    session that fails before it made the agent's station makes one for the end sweeper alone.
+  - **Nothing to clean.** The station goes with its last handle: the outer's, kept until it
+    exits, the inner's and the agent's own, and the end sweeper's, which outlives the outer: the
+    outer duplicates a `READ_CONTROL` handle to the station and one to the desktop into the
+    suspended sweeper, so neither goes before the sweeper's user32 opens them.
   - **Any failure refuses the launch**, with the call named (`the agent's window station:
     CreateWindowStationW failed (5)`), as `RunExit::Token`, whose meaning already covered the
     agent's desktop, so no code is added. A `LogonUserW` refused for the password (1326) or the

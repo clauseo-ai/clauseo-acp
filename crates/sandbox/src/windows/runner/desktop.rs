@@ -16,7 +16,9 @@
 use std::ffi::c_void;
 use std::io::{self, Write as _};
 
-use windows::Win32::Foundation::{GetLastError, HANDLE, SetLastError, WIN32_ERROR};
+use windows::Win32::Foundation::{
+    DUPLICATE_HANDLE_OPTIONS, DuplicateHandle, GetLastError, HANDLE, SetLastError, WIN32_ERROR,
+};
 use windows::Win32::Security::Authorization::{SE_WINDOW_OBJECT, SetSecurityInfo};
 use windows::Win32::Security::{
     DACL_SECURITY_INFORMATION, GetTokenInformation, ImpersonateLoggedOnUser,
@@ -25,16 +27,17 @@ use windows::Win32::Security::{
     RevertToSelf, SECURITY_ATTRIBUTES, SECURITY_IMPERSONATION_LEVEL, SecurityImpersonation,
     TOKEN_QUERY, TokenImpersonationLevel,
 };
+use windows::Win32::Storage::FileSystem::READ_CONTROL;
 use windows::Win32::System::StationsAndDesktops::{
     CloseDesktop, CloseWindowStation, CreateDesktopW, CreateWindowStationW, DESKTOP_CONTROL_FLAGS,
     GetProcessWindowStation, GetUserObjectInformationW, HDESK, HWINSTA, OpenWindowStationW,
     SetProcessWindowStation, UOI_NAME,
 };
-use windows::Win32::System::Threading::{GetCurrentThread, OpenThreadToken};
+use windows::Win32::System::Threading::{GetCurrentProcess, GetCurrentThread, OpenThreadToken};
 use windows::core::{HSTRING, PCWSTR, w};
 use zeroize::Zeroizing;
 
-use super::station::{Made, StationSids, StationSteps, made_fresh, make_station};
+use super::station::{Made, StationDesktop, StationSids, StationSteps, made_fresh, make_station};
 use crate::windows::acl::object::{Handle, os_error};
 use crate::windows::sids::Sid;
 use crate::windows::token::os::{LocalDescriptor, LocalSid, user};
@@ -46,11 +49,18 @@ type Failed = (&'static str, io::Error);
 /// The agent's window station and its desktop, closed on drop (the outer runner keeps them for
 /// its whole run), the desktop first.
 pub(super) struct AgentDesktop {
-    _desktop: Desktop,
-    _station: Station,
-    /// `<station>\Default`, for the agent's `lpDesktop`.
-    pub(super) path: String,
+    desktop: Desktop,
+    station: Station,
+    /// `<station>\Default`, the `lpDesktop` of every process the runners start: the inner
+    /// runner, the end sweeper and the agent.
+    pub(super) path: StationDesktop,
 }
+
+// SAFETY: the handles are kernel handles any thread may use; they are only closed, once, on
+// drop. The outer keeps the value in its end sweeper's steps, which its threads share.
+unsafe impl Send for AgentDesktop {}
+// SAFETY: as above; a shared one is only read (its path) or lent (`lend_to`, a duplication).
+unsafe impl Sync for AgentDesktop {}
 
 impl AgentDesktop {
     /// Makes the agent's window station and desktop `station.rs`'s way: the pool user `pool_name`
@@ -71,11 +81,43 @@ impl AgentDesktop {
             desktop,
             name,
         } = make_station(&mut steps, sids)?;
+        let path = StationDesktop::of(&name).ok_or_else(|| {
+            (
+                "GetUserObjectInformationW",
+                io::Error::other("the station's name isn't an unnamed station's"),
+            )
+        })?;
         Ok(AgentDesktop {
-            _desktop: desktop,
-            _station: station,
-            path: format!(r"{name}\Default"),
+            desktop,
+            station,
+            path,
         })
+    }
+
+    /// Gives `process` (the suspended end sweeper, a live handle with `PROCESS_DUP_HANDLE`) a
+    /// handle to the station and one to the desktop, `READ_CONTROL` alone, so both outlive this
+    /// process while it runs: the sweeper outlives the outer, and a station goes with its last
+    /// handle. The sweeper never uses them.
+    pub(super) fn lend_to(&self, process: HANDLE) -> io::Result<()> {
+        for object in [HANDLE(self.station.0.0), HANDLE(self.desktop.0.0)] {
+            let mut lent = HANDLE::default();
+            // SAFETY: both process handles are live (this process's pseudo-handle, and the
+            // caller's); `object` is live; `lent` is a live out-pointer, a handle in `process`
+            // that this process never uses or closes.
+            unsafe {
+                DuplicateHandle(
+                    GetCurrentProcess(),
+                    object,
+                    process,
+                    &raw mut lent,
+                    READ_CONTROL.0,
+                    false,
+                    DUPLICATE_HANDLE_OPTIONS(0),
+                )
+            }
+            .map_err(|e| os_error(&e))?;
+        }
+        Ok(())
     }
 }
 
@@ -213,8 +255,11 @@ impl StationSteps for OsStation<'_> {
             .unwrap_or(buffer.len());
         let name = String::from_utf16(buffer.get(..end).unwrap_or_default())
             .map_err(|e| (call, io::Error::other(e)))?;
-        if name.is_empty() || name.contains('\\') {
-            return Err((call, io::Error::other("the station has no usable name")));
+        if StationDesktop::of(&name).is_none() {
+            return Err((
+                call,
+                io::Error::other("the station's name isn't an unnamed station's"),
+            ));
         }
         Ok(name)
     }
