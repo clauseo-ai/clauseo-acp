@@ -165,13 +165,43 @@ fn f4_refuses_until_stop_sequence_reaches_the_markers_number() {
         0,
         "no sweep number while the escapee lives"
     );
-    // Once the stop that reserved 3 completed: the logon goes, and the marker awaits a sweep
-    // whose number is read now, which is requested.
+    // Once the stop that reserved 3 completed: the marker awaits a sweep whose number is read
+    // now, which is requested and waited for; once it completes, the logon goes.
     fake.done = Sequences { stop: 3, sweep: 2 };
+    fake.sweeps = vec![2, 9];
     assert_eq!(logon_check(&mut fake, &sid(POOL_A)), Ok(()));
-    assert_eq!(fake.state("a1"), Some(REMARKED));
+    assert!(!fake.has("a1"), "cleared by the sweep F4 waited for");
     assert_eq!(fake.asked("stop"), 2);
     assert_eq!(fake.asked("sweep"), 1);
+    assert_eq!(fake.asked("pause"), 2);
+}
+
+#[test]
+fn f4_waits_for_the_sweep_a_re_mark_requested_and_refuses_without_a_stop_if_it_doesnt_come() {
+    let mut fake = Fake::new();
+    fake.marker("a1", Some(POOL_A), Some(STOP));
+    fake.done = Sequences { stop: 3, sweep: 2 };
+    let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
+    assert!(refused.contains("didn't finish within 15 s"), "{refused}");
+    // Re-marked, its sweep requested once, waited for 15 s, and no stop asked for.
+    assert_eq!(fake.state("a1"), Some(REMARKED));
+    assert_eq!(fake.asked("sweep"), 1);
+    assert_eq!(fake.asked("pause"), 150);
+    assert_eq!(fake.asked("stop"), 0);
+    // A marker awaiting a sweep already, not re-marked now: the sweep is asked for, and waited.
+    let mut pending = Fake::new();
+    let awaiting = MarkerState::AwaitingSweep { sweep: 7 };
+    pending.marker("a2", Some(POOL_A), Some(awaiting));
+    pending.done.sweep = 6;
+    pending.sweeps = vec![7];
+    assert_eq!(logon_check(&mut pending, &sid(POOL_A)), Ok(()));
+    assert_eq!(pending.log, ["sweep", "pause", "remove a2"]);
+    // One already met: the logon goes at once.
+    let mut met = Fake::new();
+    met.marker("a3", Some(POOL_A), Some(awaiting));
+    met.done.sweep = 7;
+    assert_eq!(logon_check(&mut met, &sid(POOL_A)), Ok(()));
+    assert_eq!(met.log, ["remove a3"]);
 }
 
 #[test]
@@ -188,18 +218,19 @@ fn f4_counts_this_pool_users_markers_and_those_naming_none() {
     assert!(logon_check(&mut fake, &sid(POOL_A)).is_err());
     fake.markers.remove("x2");
     fake.log.clear();
-    // A marker awaiting only a sweep is the launch's to wait for, not F4's.
+    // Another pool user's marker awaiting a sweep isn't this one's to wait for.
     fake.marker(
-        "a2",
-        Some(POOL_A),
+        "b2",
+        Some(POOL_B),
         Some(MarkerState::AwaitingSweep { sweep: 40 }),
     );
     assert_eq!(logon_check(&mut fake, &sid(POOL_A)), Ok(()));
-    // A stop met: the logon goes, and the marker, re-marked, stays for the launch.
+    // A stop met: the marker is re-marked, and the logon goes once its sweep completed.
     fake.marker("a3", Some(POOL_A), Some(STOP));
     fake.done = Sequences { stop: 3, sweep: 1 };
+    fake.sweeps = vec![9];
     assert_eq!(logon_check(&mut fake, &sid(POOL_A)), Ok(()));
-    assert_eq!(fake.state("a3"), Some(REMARKED));
+    assert!(!fake.has("a3"));
     // Sequences that can't be read refuse a marker awaiting a stop.
     fake.marker("a4", Some(POOL_A), Some(STOP));
     fake.unreadable = true;
@@ -224,11 +255,9 @@ fn f4_makes_a_dead_outers_marker_await_a_stop_read_now() {
     assert!(logon_check(&mut fake, &sid(POOL_A)).is_err());
     fake.done.stop = 5;
     fake.sweep_next = 100;
+    fake.sweeps = vec![100];
     assert_eq!(logon_check(&mut fake, &sid(POOL_A)), Ok(()));
-    assert_eq!(
-        fake.state("a1"),
-        Some(MarkerState::AwaitingSweep { sweep: 100 })
-    );
+    assert!(!fake.has("a1"));
 }
 
 #[test]
@@ -423,9 +452,15 @@ fn f4_replaces_an_unreadable_marker_with_one_awaiting_a_stop_read_now() {
     fake.done.stop = 4;
     assert!(logon_check(&mut fake, &sid(POOL_A)).is_err());
     fake.done.stop = 5;
-    assert_eq!(logon_check(&mut fake, &sid(POOL_A)), Ok(()));
+    assert!(
+        logon_check(&mut fake, &sid(POOL_A)).is_err(),
+        "its sweep is waited for"
+    );
     assert_eq!(fake.state("x1"), Some(REMARKED));
     assert_eq!(fake.state("x2"), Some(REMARKED));
+    fake.sweeps = vec![9];
+    assert_eq!(logon_check(&mut fake, &sid(POOL_A)), Ok(()));
+    assert!(fake.markers.is_empty(), "{:?}", fake.markers);
 }
 
 const INSTALL: &str = "0123456789abcdef0123456789abcdef";
@@ -441,14 +476,8 @@ fn a_marker_of_another_install_is_stale_and_removed() {
     fake.installed("old", Some(stuck), Some(OLD_INSTALL));
     // One from before the ids, after the reinstall wrote one.
     fake.installed("none", Some(stuck), None);
-    fake.installed(
-        "ours",
-        Some(MarkerState::AwaitingSweep { sweep: 0 }),
-        Some(INSTALL),
-    );
     assert_eq!(logon_check(&mut fake, &sid(POOL_A)), Ok(()));
     assert!(!fake.has("old") && !fake.has("none"), "{:?}", fake.markers);
-    assert!(fake.has("ours"));
     assert_eq!(fake.asked("stop"), 0);
     // A marker the current install wrote isn't stale: it still refuses.
     fake.installed("now", Some(stuck), Some(INSTALL));
