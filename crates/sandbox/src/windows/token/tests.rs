@@ -189,38 +189,11 @@ fn the_deny_only_sid_must_be_a_logon_sid() {
 }
 
 #[test]
-fn the_private_desktop_is_low_and_shut_to_the_logon_sid() {
-    let sddl = desktop_sddl(&sid(POOL), None);
-    assert_eq!(
-        sddl,
-        format!("D:(A;;GA;;;SY)(A;;GA;;;{POOL})S:(ML;;NW;;;LW)")
-    );
-    assert!(!sddl.contains(DESKTOP));
-    let with_matter = desktop_sddl(&sid(POOL), Some(&sid(MATTER)));
-    assert!(
-        with_matter.contains(&format!("(A;;GA;;;{MATTER})S:")),
-        "{with_matter}"
-    );
-}
-
-#[test]
 fn display_names_every_part() {
     let spec = TokenSpec::for_pool(&sid(POOL), &sid(LOGON), &sid(DESKTOP), None).unwrap();
     let text = spec.to_string();
     for part in [POOL, LOGON, "S-1-16-4096", "0x101001"] {
         assert!(text.contains(part), "{text}");
-    }
-}
-
-#[test]
-fn the_agents_window_station_names_only_system_and_the_pool_user_at_low() {
-    let sddl = station_sddl(&sid(POOL), None);
-    assert_eq!(
-        sddl,
-        format!("D:(A;;GA;;;SY)(A;;GA;;;{POOL})S:(ML;;NW;;;LW)")
-    );
-    for absent in [DESKTOP, LOGON, ";WD)", ";BU)"] {
-        assert!(!sddl.contains(absent), "{absent} in {sddl}");
     }
 }
 

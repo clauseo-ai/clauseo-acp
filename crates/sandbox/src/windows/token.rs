@@ -222,21 +222,103 @@ pub fn runner_default_dacl(desktop_user: &Sid) -> String {
 /// adds the desktop user's `TOKEN_QUERY` once the launch names them.
 pub const RUNNER_TOKEN_FIRST_SDDL: &str = "D:P(A;;GA;;;SY)(A;;RC;;;OW)";
 
-/// The private desktop's descriptor: `SYSTEM` and the pool user full (and the matter SID when
-/// the launch restricts with one), labelled Low so the Low agent may draw on it; no logon SID and
-/// no desktop user, so neither the lawyer's processes nor another runner's agent can open it
-/// (`s15-spikes-traverse/s15.c:350-356`, the `pm` mode).
-pub fn desktop_sddl(pool_user: &Sid, matter: Option<&Sid>) -> String {
-    let matter = matter
-        .map(|sid| format!("(A;;GA;;;{sid})"))
-        .unwrap_or_default();
-    format!("D:(A;;GA;;;SY)(A;;GA;;;{pool_user}){matter}S:(ML;;NW;;;LW)")
+/// `SYSTEM`'s rights on the agent's window station: `WINSTA_ALL_ACCESS` (`0x37F`) and the
+/// standard rights (`0xF0000`).
+pub const STATION_SYSTEM_RIGHTS: u32 = 0x000F_037F;
+/// `SYSTEM`'s rights on the agent's desktop: `DESKTOP`'s every right (`0x1FF`) and the
+/// standard rights.
+pub const DESKTOP_SYSTEM_RIGHTS: u32 = 0x000F_01FF;
+/// The pool user's rights on the agent's window station, and `OWNER RIGHTS`': `READ_CONTROL`
+/// (`0x20000`) and the station's use rights `0x7F` (enumerate and make desktops, read and write
+/// attributes, the clipboard, global atoms, exit Windows). Less makes user32 fail to start the
+/// agent's GUI DLLs (`0x45A`, `ERROR_DLL_INIT_FAILED`); no `WRITE_DAC`, `WRITE_OWNER` or
+/// `DELETE`.
+pub const STATION_POOL_RIGHTS: u32 = 0x0002_007F;
+/// The pool user's rights on the agent's desktop, and `OWNER RIGHTS`': read objects, make
+/// windows and menus, enumerate, write objects (`0xC7`); no hooks, no journal, no switch.
+pub const DESKTOP_POOL_RIGHTS: u32 = 0x0000_00C7;
+/// The desktop user's rights on both once set up: `READ_CONTROL | WRITE_DAC | WRITE_OWNER`
+/// (`0xE0000`), for the owner's own descriptor work and nothing of their use.
+pub const CREATOR_RIGHTS: u32 = 0x000E_0000;
+/// `WINSTA_CREATEDESKTOP`.
+const WINSTA_CREATEDESKTOP: u32 = 0x8;
+/// What the desktop user asks for when it opens the station the pool user's logon made, and what
+/// the station's creation DACL grants it: [`CREATOR_RIGHTS`] and `WINSTA_CREATEDESKTOP`, to make
+/// `Default` on it.
+pub const STATION_OPEN_RIGHTS: u32 = CREATOR_RIGHTS | WINSTA_CREATEDESKTOP;
+/// What the desktop user asks for when it makes the desktop, and what the desktop's creation
+/// DACL grants it: [`CREATOR_RIGHTS`] and [`DESKTOP_POOL_RIGHTS`] (`CreateDesktopW` asked for
+/// `READ_CONTROL | WRITE_DAC | WRITE_OWNER` alone fails with 8).
+pub const DESKTOP_MAKE_RIGHTS: u32 = CREATOR_RIGHTS | DESKTOP_POOL_RIGHTS;
+/// What the pool user's logon asks for when it makes the station: the [`STATION_POOL_RIGHTS`]
+/// its creation DACL grants `OWNER RIGHTS`, the pool user being its owner then.
+pub const STATION_MAKE_RIGHTS: u32 = STATION_POOL_RIGHTS;
+
+/// The agent's window station's descriptor as the pool user's logon makes it (`runner/station.rs`):
+/// `D:P(A;;0xF037F;;;SY)(A;;0xE0008;;;<desktop user>)(A;;0x2007F;;;OW)`. The pool user owns it
+/// then; `OWNER RIGHTS` held to its use rights takes away the owner's implied `READ_CONTROL` and
+/// `WRITE_DAC`, so no process of the pool user's rewrites the DACL before the desktop user takes
+/// the station over. The desktop user gets [`STATION_OPEN_RIGHTS`]. Never the default DACL, which
+/// grants `Everyone` and `RESTRICTED` `0xF037F`.
+pub fn station_creation_sddl(creator: &Sid) -> String {
+    format!(
+        "D:P(A;;0x{STATION_SYSTEM_RIGHTS:X};;;SY)(A;;0x{STATION_OPEN_RIGHTS:X};;;{creator})\
+         (A;;0x{STATION_POOL_RIGHTS:X};;;OW)"
+    )
 }
 
-/// The agent's window station's descriptor: as [`desktop_sddl`], `SYSTEM` and the pool user
-/// (and the matter SID when the launch restricts with one), labelled Low.
-pub fn station_sddl(pool_user: &Sid, matter: Option<&Sid>) -> String {
-    desktop_sddl(pool_user, matter)
+/// The agent's desktop's descriptor as the desktop user makes it:
+/// `D:P(A;;0xF01FF;;;SY)(A;;0xE00C7;;;<desktop user>)(A;;0xC7;;;OW)`.
+pub fn desktop_creation_sddl(creator: &Sid) -> String {
+    format!(
+        "D:P(A;;0x{DESKTOP_SYSTEM_RIGHTS:X};;;SY)(A;;0x{DESKTOP_MAKE_RIGHTS:X};;;{creator})\
+         (A;;0x{DESKTOP_POOL_RIGHTS:X};;;OW)"
+    )
+}
+
+/// The agent's window station's last descriptor, set by the desktop user once it owns it:
+/// `D:P(A;;0xF037F;;;SY)(A;;0xE0000;;;<desktop user>)(A;;0x2007F;;;<pool user>)(A;;0x2007F;;;OW)
+/// S:(ML;;NW;;;LW)`, the matter SID given the pool user's rights after the pool user's when the
+/// launch restricts with one. Protected, labelled Low: without the label a Low agent hangs in
+/// conhost's start (PowerShell and `whoami` hang). No logon SID, so neither the lawyer's
+/// processes nor another runner's agent opens it.
+pub fn station_sddl(creator: &Sid, pool_user: &Sid, matter: Option<&Sid>) -> String {
+    final_sddl(
+        STATION_SYSTEM_RIGHTS,
+        STATION_POOL_RIGHTS,
+        creator,
+        pool_user,
+        matter,
+    )
+}
+
+/// The agent's desktop's last descriptor: `D:P(A;;0xF01FF;;;SY)(A;;0xE0000;;;<desktop user>)
+/// (A;;0xC7;;;<pool user>)(A;;0xC7;;;OW)S:(ML;;NW;;;LW)`, the matter SID as in [`station_sddl`].
+pub fn desktop_sddl(creator: &Sid, pool_user: &Sid, matter: Option<&Sid>) -> String {
+    final_sddl(
+        DESKTOP_SYSTEM_RIGHTS,
+        DESKTOP_POOL_RIGHTS,
+        creator,
+        pool_user,
+        matter,
+    )
+}
+
+/// [`station_sddl`]'s and [`desktop_sddl`]'s shape with their masks.
+fn final_sddl(
+    system: u32,
+    pool: u32,
+    creator: &Sid,
+    pool_user: &Sid,
+    matter: Option<&Sid>,
+) -> String {
+    let matter = matter
+        .map(|sid| format!("(A;;0x{pool:X};;;{sid})"))
+        .unwrap_or_default();
+    format!(
+        "D:P(A;;0x{system:X};;;SY)(A;;0x{CREATOR_RIGHTS:X};;;{creator})\
+         (A;;0x{pool:X};;;{pool_user}){matter}(A;;0x{pool:X};;;OW)S:(ML;;NW;;;LW)"
+    )
 }
 
 /// Whether `sid` is a logon SID: `S-1-5-5-X-Y`.
@@ -267,6 +349,8 @@ fn known(text: &'static str) -> Result<Sid, TokenSpecError> {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod window_tests;
 
 // Two attributes, not `all(windows, test)`: clippy's test allowances look for `cfg(test)`.
 #[cfg(test)]

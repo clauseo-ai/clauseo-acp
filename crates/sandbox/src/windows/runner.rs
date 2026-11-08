@@ -97,6 +97,8 @@ mod spawn;
 #[cfg(any(windows, test))]
 mod start;
 #[cfg(any(windows, test))]
+mod station;
+#[cfg(any(windows, test))]
 mod sweep;
 #[cfg(any(windows, test))]
 pub mod unclean;
@@ -409,7 +411,10 @@ pub enum RunExit {
     Pipe,
     /// The inner runner couldn't be put in the job, or the job made.
     Job,
-    /// The inner runner's token, desktop or folders couldn't be made.
+    /// The inner runner's token, desktop or folders couldn't be made, or the outer's window
+    /// station and desktop for the agent (`desktop.rs`): any of their calls but a refused
+    /// `LogonUserW` password or right, which are [`RunExit::Password`] and
+    /// [`RunExit::LogonRight`] as the inner's logon's are.
     Token,
     /// The agent couldn't be started.
     Spawn,
@@ -534,12 +539,11 @@ pub fn agent_code(code: u32) -> u32 {
     }
 }
 
-/// The agent's window station's name, `ClauseoRun-<16 hex>`, from 64 bits of its own randomness:
-/// nothing another process can read first (the pipe base is in the `\\.\pipe\` listing), and
-/// the station is made only if no station has the name (`CWF_CREATE_ONLY`).
-pub fn station_name(random: [u8; 8]) -> String {
-    format!("ClauseoRun-{}", super::pipe::hex(&random))
-}
+/// The UI limits the launch's job carries: every `JOB_OBJECT_UILIMIT_*` flag (`HANDLES` `0x1`,
+/// `READCLIPBOARD` `0x2`, `WRITECLIPBOARD` `0x4`, `SYSTEMPARAMETERS` `0x8`, `DISPLAYSETTINGS`
+/// `0x10`, `GLOBALATOMS` `0x20`, `DESKTOP` `0x40`, `EXITWINDOWS` `0x80`), behind the agent's own
+/// window station. `spawn::UI_LIMITS` is checked against it when it compiles.
+pub const UI_LIMIT_MASK: u32 = 0xFF;
 
 /// The cause when the Secondary Logon service is disabled: set-up's own words.
 pub const SECLOGON_DISABLED: &str = "the Secondary Logon service (seclogon) is disabled: IT can \
