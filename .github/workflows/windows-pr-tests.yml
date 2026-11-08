@@ -28,7 +28,9 @@
 #     annotation and a row of the job summary (.github/scripts/windows-pr-failures.sh).
 #   - wait: none of these: the check fails, naming the label.
 # - merge_group: the check passes in seconds; ci.yml's `build (x86_64-pc-windows-msvc)` runs the
-#   same tests in the merge group.
+#   same tests in the merge group, and `build (aarch64-pc-windows-msvc)` runs them on Windows
+#   ARM64 (not required yet), elevated tests included, without clippy and the keychain smoke test. A pull request runs nothing on ARM64 (2026-11-08): its first ARM64
+#   test run is in the merge group.
 #
 # - `build` is never skipped as a whole: a required check skipped that way counts as passed. It
 #   always runs and branches on the mode inside. A failed `decide` runs the tests.
