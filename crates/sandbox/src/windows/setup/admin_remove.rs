@@ -73,6 +73,7 @@ pub(super) fn teardown_name(step: Teardown) -> &'static str {
         Teardown::AdminValues => "admin_values",
         Teardown::Task(SystemTask::Refresh) => "refresh_task",
         Teardown::Task(SystemTask::Stop) => "stop_task",
+        Teardown::Task(SystemTask::Sweep) => "sweep_task",
         Teardown::Staging => "staging",
         Teardown::AdminFolder => "admin_folder",
     }
