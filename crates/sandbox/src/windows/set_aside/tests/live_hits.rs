@@ -3,7 +3,8 @@
 //! confirm the job is empty moves nothing; an unknown git folder ends the session before its
 //! `commondir` is read, and one an oplock holds counts as unreadable; the owner of a folder set
 //! aside whole is read from the handle the move renames; and each repository moved says
-//! whether the agent made it, one whose owner can't be read counting as the agent's.
+//! whether the agent made it, one whose owner can't be read counting as the agent's; a folder
+//! reported and gone by its check counts as gone.
 
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -254,4 +255,23 @@ fn past_its_budget_a_folder_whose_owner_cant_be_read_goes_whole() {
         (root.join("big"), SetAsideWhat::UncheckedFolder, true)
     );
     assert!(!root.join("big").exists());
+}
+
+/// Final review, item 4: a folder reported made and gone by its check (renamed in with a `.git`
+/// inside and back out) counts as gone, as a gone `.git` does; a file reported and gone
+/// doesn't (an editor's temporary file), nor does a folder still there.
+#[test]
+fn a_folder_reported_and_gone_by_its_check_counts_as_gone() {
+    let (w, root, data) = world("live-folder-gone");
+    let watch = watched(&root, &data);
+    w.dir.file("matter/kept/memo.md", "");
+    let paths = reported(&["came-and-went", "tmp~1.md", "kept", "kept/gone-too"]);
+    let folders = reported(&["came-and-went", "kept", "kept/gone-too"]);
+    let hooks = calm();
+    let live = watch.changed_with_folders(&Posix::new(true), &paths, &folders, exit(), &hooks);
+    assert_eq!(
+        live.gone,
+        ["came-and-went", "kept/gone-too"].map(PathBuf::from)
+    );
+    assert!(live.moved.is_empty() && hooks.ends.borrow().is_empty());
 }

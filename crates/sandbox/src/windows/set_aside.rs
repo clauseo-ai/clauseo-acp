@@ -496,14 +496,17 @@ impl GitGuard {
         self.0.root()
     }
 
-    /// Checks the paths the watch reported made or renamed, relative to the root.
+    /// Checks the paths the watch reported made or renamed, relative to the root; `folders`
+    /// are those reported as folders, each counted gone when gone by the check.
     pub(in crate::windows) fn changed(
         &self,
         paths: &[PathBuf],
+        folders: &[PathBuf],
         now: SystemTime,
         hooks: &impl Hooks,
     ) -> Live {
-        self.0.changed(&ntfs::Ntfs, paths, now, hooks)
+        self.0
+            .changed_with_folders(&ntfs::Ntfs, paths, folders, now, hooks)
     }
 
     /// Checks the paths the watch reported turned into reparse points, relative to the root.

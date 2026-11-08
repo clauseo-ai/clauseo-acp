@@ -14,6 +14,8 @@ const MODIFIED: u32 = 3;
 const RENAMED_NEW_NAME: u32 = 5;
 /// `FILE_ATTRIBUTE_REPARSE_POINT`.
 const REPARSE_POINT: u32 = 0x400;
+/// `FILE_ATTRIBUTE_DIRECTORY`.
+const DIRECTORY: u32 = 0x10;
 
 /// Where a record's fields are.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,6 +43,9 @@ pub(crate) struct Changes {
     pub(crate) added: Vec<PathBuf>,
     /// Items changed that are reparse points now (with [`Layout::Plain`], every item changed).
     pub(crate) relinked: Vec<PathBuf>,
+    /// Of `added`, each that was a folder when reported: one gone by the check counts as gone
+    /// (`set_aside::live`). Empty with [`Layout::Plain`], which has no attributes to tell by.
+    pub(crate) folders: Vec<PathBuf>,
 }
 
 /// What the records in `buffer` (chained by `NextEntryOffset`) report. `None` when the buffer
@@ -55,12 +60,20 @@ pub(crate) fn changes(buffer: &[u8], layout: Layout) -> Option<Changes> {
         let action = word(record, 4)?;
         let length = usize::try_from(word(record, length_at)?).ok()?;
         let name = record.get(name_at..name_at.checked_add(length)?)?;
-        let reparse = match attributes_at {
-            Some(offset) => word(record, offset)? & REPARSE_POINT != 0,
-            None => true,
+        let attributes = match attributes_at {
+            Some(offset) => Some(word(record, offset)?),
+            None => None,
         };
+        let reparse = attributes.is_none_or(|bits| bits & REPARSE_POINT != 0);
+        let folder = attributes.is_some_and(|bits| bits & DIRECTORY != 0);
         match action {
-            ADDED | RENAMED_NEW_NAME => changes.added.push(path_of(name)?),
+            ADDED | RENAMED_NEW_NAME => {
+                let path = path_of(name)?;
+                if folder {
+                    changes.folders.push(path.clone());
+                }
+                changes.added.push(path);
+            }
             MODIFIED if reparse => changes.relinked.push(path_of(name)?),
             _ => {}
         }

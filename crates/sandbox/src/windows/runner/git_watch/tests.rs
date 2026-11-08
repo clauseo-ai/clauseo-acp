@@ -34,6 +34,7 @@ fn added(paths: &[&str]) -> Next {
     Next::Changed(Changes {
         added: paths.iter().map(PathBuf::from).collect(),
         relinked: Vec::new(),
+        folders: Vec::new(),
     })
 }
 
@@ -471,11 +472,13 @@ fn names_made_and_items_turned_into_reparse_points_are_read_from_the_buffer() {
     let read = changes(&buffer(Layout::Extended, &records), Layout::Extended).unwrap();
     assert_eq!(read.added, [".git", "sub/.GIT", "foo"].map(PathBuf::from));
     assert_eq!(read.relinked, [PathBuf::from("junction")]);
+    assert_eq!(read.folders, [".git", "sub/.GIT"].map(PathBuf::from));
 
     // With no attributes to tell by, every change is checked.
     let read = changes(&buffer(Layout::Plain, &records), Layout::Plain).unwrap();
     assert_eq!(read.added, [".git", "sub/.GIT", "foo"].map(PathBuf::from));
     assert_eq!(read.relinked, ["edited", "junction"].map(PathBuf::from));
+    assert!(read.folders.is_empty());
 }
 
 #[test]
