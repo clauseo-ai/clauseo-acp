@@ -87,27 +87,17 @@ pub fn main(args: impl IntoIterator<Item = OsString>) -> u8 {
     run_mode(mode).as_code()
 }
 
-/// EXPERIMENT (exp-arm64-x64emu only, never for main): every tracing event appended to the file
-/// `CLAUSEO_SETUP_TRACE` names, when it is set, so a CI run shows which step `--remove` stopped at.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "an experiment's trace file in CI's temp folder, never shipped"
-)]
+/// EXPERIMENT (exp-arm64-x64emu only, never for main): every tracing event written to stderr
+/// when `CLAUSEO_SETUP_TRACE` is set, so a CI run shows which step `--remove` stopped at (the
+/// s15 harness prints the exe's stderr when it fails).
 fn experiment_trace() {
-    let Some(path) = std::env::var_os("CLAUSEO_SETUP_TRACE") else {
+    if std::env::var_os("CLAUSEO_SETUP_TRACE").is_none() {
         return;
-    };
-    let Ok(file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-    else {
-        return;
-    };
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     drop(
         tracing_subscriber::fmt()
-            .with_writer(std::sync::Mutex::new(file))
+            .with_writer(std::io::stderr)
             .with_ansi(false)
             .with_max_level(tracing::Level::TRACE)
             .try_init(),

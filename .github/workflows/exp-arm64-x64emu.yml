@@ -143,7 +143,7 @@ jobs:
       - name: Prepare (the set-up), the emu rows, as matter A's pool user
         id: emu
         env:
-          CLAUSEO_SETUP_TRACE: ${{ runner.temp }}\emu-out\setup-trace.log
+          CLAUSEO_SETUP_TRACE: "1"
         run: |
           $out = Join-Path $env:RUNNER_TEMP 'emu-out'
           New-Item -ItemType Directory -Force $out | Out-Null
@@ -169,7 +169,7 @@ jobs:
       - name: Cleanup (the set-up's --remove)
         if: always()
         env:
-          CLAUSEO_SETUP_TRACE: ${{ runner.temp }}\emu-out\setup-trace.log
+          CLAUSEO_SETUP_TRACE: "1"
         run: |
           "EMU_CLEAN_SINCE=$((Get-Date).ToUniversalTime().ToString('o'))" >> $env:GITHUB_ENV
           "pool users' processes before cleanup:"
@@ -184,8 +184,7 @@ jobs:
       - name: The set-up's trace and what --remove left
         if: always()
         run: |
-          $trace = Join-Path $env:RUNNER_TEMP 'emu-out\setup-trace.log'
-          if (Test-Path $trace) { Get-Content $trace | ForEach-Object { "TRACE $_" } } else { "no $trace" }
+          # The setup exe's trace is in the harness's output (prepare:   setup: / cleanup:   setup: lines).
           if (Test-Path $env:EMU_ROOT) {
             "LEFT owner of data: $((Get-Acl (Join-Path $env:EMU_ROOT 'data')).Owner)"
             icacls (Join-Path $env:EMU_ROOT 'data') | ForEach-Object { "ACL $_" }
