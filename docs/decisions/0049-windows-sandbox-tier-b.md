@@ -2154,13 +2154,19 @@ the pool-user check. No record, or an empty pool, is nothing to sweep. Then it:
    is 56, and only one still gone is skipped and counted. A walk that already couldn't list
    a folder is 56 and isn't repeated. In the read judged, a task the walk didn't list is one
    of three kinds:
-   - **in a task file and the cache**: hidden and 56, unless the owner of the security
+   - **in a task file and the cache**: the trusted task file decides. Hidden and 56, unless its
+     task file, under the fallback's trust rules above, names a principal that resolves to a
+     SID that isn't the pool's or is another domain's name, and the owner of the security
      descriptor its cache key holds (the task's `TaskCache\Tree\<path>` key, its `SD` value,
-     `REG_BINARY`, read-only in the 64-bit view) isn't a pool SID, as the fallback asks of a
-     task's own descriptor, and its task file, under the fallback's trust rules above, names a
-     principal that resolves to a SID that isn't the pool's or is another domain's name: then it
-     is skipped, counted with the tasks skipped by their file. A pool owner, or an `SD` that is
-     missing or can't be read, keeps it 56;
+     `REG_BINARY`, read-only in the 64-bit view) isn't readably a pool SID: then it is
+     skipped, counted with the tasks skipped by their file, or as one with an odd descriptor
+     when that owner can't be read (an `SD` unreadable, ownerless or over its cap). A
+     readable pool owner, a trusted file naming the pool, and a file that isn't trusted keep
+     it 56. Why the file decides: the Task Scheduler writes it, and a standard user can't
+     register a task for another principal without that principal's credentials, so a trusted
+     file naming someone else isn't a pool user's task; a vendor's task whose odd `SD` hides it
+     from SYSTEM then doesn't block every launch. A key alone (no file) has no such evidence,
+     hence its stricter rule below;
    - **in a task file alone** (no cache key, so the Task Scheduler holds no such task): the
      file's own NTFS owner decides, read through a handle opened as the fallback opens (by
      handle below `Tasks`, never through a link, refused if a reparse point or a folder) for
