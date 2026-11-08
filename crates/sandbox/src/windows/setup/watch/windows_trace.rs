@@ -7,7 +7,7 @@
 
 use std::ffi::c_void;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError, sync_channel};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -19,12 +19,13 @@ use windows::Win32::Foundation::{
 use windows::Win32::Storage::FileSystem::{GetLogicalDrives, QueryDosDeviceW};
 use windows::Win32::System::Diagnostics::Etw::{
     CONTROLTRACE_HANDLE, CloseTrace, ControlTraceW, ENABLE_TRACE_PARAMETERS,
-    ENABLE_TRACE_PARAMETERS_VERSION_2, EVENT_CONTROL_CODE_ENABLE_PROVIDER,
-    EVENT_ENABLE_PROPERTY_SID, EVENT_HEADER_EXT_TYPE_SID, EVENT_HEADER_FLAG_64_BIT_HEADER,
-    EVENT_RECORD, EVENT_TRACE_CONTROL_QUERY, EVENT_TRACE_CONTROL_STOP, EVENT_TRACE_LOGFILEW,
-    EVENT_TRACE_PROPERTIES, EVENT_TRACE_REAL_TIME_MODE, EnableTraceEx2, OpenTraceW,
-    PROCESS_TRACE_MODE_EVENT_RECORD, PROCESS_TRACE_MODE_REAL_TIME, PROCESSTRACE_HANDLE,
-    ProcessTrace, StartTraceW, WNODE_FLAG_TRACED_GUID,
+    ENABLE_TRACE_PARAMETERS_VERSION_2, EVENT_CONTROL_CODE_DISABLE_PROVIDER,
+    EVENT_CONTROL_CODE_ENABLE_PROVIDER, EVENT_ENABLE_PROPERTY_SID, EVENT_HEADER_EXT_TYPE_SID,
+    EVENT_HEADER_FLAG_64_BIT_HEADER, EVENT_RECORD, EVENT_TRACE_CONTROL_QUERY,
+    EVENT_TRACE_CONTROL_STOP, EVENT_TRACE_LOGFILEW, EVENT_TRACE_PROPERTIES,
+    EVENT_TRACE_REAL_TIME_MODE, EnableTraceEx2, OpenTraceW, PROCESS_TRACE_MODE_EVENT_RECORD,
+    PROCESS_TRACE_MODE_REAL_TIME, PROCESSTRACE_HANDLE, ProcessTrace, StartTraceW,
+    WNODE_FLAG_TRACED_GUID,
 };
 use windows::Win32::System::SystemInformation::GetTickCount64;
 use windows::core::{GUID, HSTRING, PWSTR};
@@ -65,6 +66,11 @@ pub(crate) struct Trace {
     losses: Losses,
     /// `GetTickCount64` when the trace began.
     began_ms: u64,
+    session: CONTROLTRACE_HANDLE,
+    /// Every Kernel-File event the callback saw, for the breaker.
+    events: Arc<AtomicU64>,
+    /// Set by a pause: the callback clears the pending Creates before its next event.
+    clear: Arc<AtomicBool>,
 }
 
 /// The callback's state, owned by the consumer thread and reached through `UserContext`.
@@ -72,6 +78,8 @@ struct Callback {
     consumer: Consumer,
     out: SyncSender<Record>,
     lost: Arc<AtomicU64>,
+    events: Arc<AtomicU64>,
+    clear: Arc<AtomicBool>,
     /// `GetTickCount64` when the consumer began.
     began_ms: u64,
 }
@@ -196,10 +204,14 @@ impl Trace {
         }
         let (out, records) = sync_channel(CHANNEL_CAP);
         let lost = Arc::new(AtomicU64::new(0));
+        let events = Arc::new(AtomicU64::new(0));
+        let clear = Arc::new(AtomicBool::new(false));
         let callback = Box::new(Callback {
             consumer: Consumer::new(pool),
             out,
             lost: Arc::clone(&lost),
+            events: Arc::clone(&events),
+            clear: Arc::clone(&clear),
             // SAFETY: GetTickCount64 only reads the tick count.
             began_ms: unsafe { GetTickCount64() },
         });
@@ -239,6 +251,9 @@ impl Trace {
             losses: Losses::default(),
             // SAFETY: GetTickCount64 only reads the tick count.
             began_ms: unsafe { GetTickCount64() },
+            session,
+            events,
+            clear,
         })
     }
 
@@ -265,6 +280,26 @@ impl Trace {
         Delivery::Records(records, lost)
     }
 
+    /// How many Kernel-File events the callback has seen.
+    pub(crate) fn events(&self) -> u64 {
+        self.events.load(Ordering::Relaxed)
+    }
+
+    /// Disables Kernel-File on the session, and has the callback clear its pending Creates.
+    pub(crate) fn pause(&mut self) -> Result<(), String> {
+        self.clear.store(true, Ordering::Relaxed);
+        control(self.session, EVENT_CONTROL_CODE_DISABLE_PROVIDER.0).map_err(|error| match error {
+            TraceError::ProviderFull(why) | TraceError::Other(why) => why,
+        })
+    }
+
+    /// Enables Kernel-File on the session again.
+    pub(crate) fn resume(&mut self) -> Result<(), String> {
+        enable(self.session).map_err(|error| match error {
+            TraceError::ProviderFull(why) | TraceError::Other(why) => why,
+        })
+    }
+
     /// Stops the session, which ends `ProcessTrace`, and waits for the consumer thread.
     pub(crate) fn stop(mut self) -> Result<(), String> {
         let stopped = stop_session().map(drop);
@@ -277,6 +312,11 @@ impl Trace {
 
 /// Enables Kernel-File on `session` for Create and `OperationEnd`, with each event's SID.
 fn enable(session: CONTROLTRACE_HANDLE) -> Result<(), TraceError> {
+    control(session, EVENT_CONTROL_CODE_ENABLE_PROVIDER.0)
+}
+
+/// `EnableTraceEx2` with `code` (enable or disable) for Kernel-File on `session`.
+fn control(session: CONTROLTRACE_HANDLE, code: u32) -> Result<(), TraceError> {
     let parameters = ENABLE_TRACE_PARAMETERS {
         Version: ENABLE_TRACE_PARAMETERS_VERSION_2,
         EnableProperty: EVENT_ENABLE_PROPERTY_SID,
@@ -288,7 +328,7 @@ fn enable(session: CONTROLTRACE_HANDLE) -> Result<(), TraceError> {
         EnableTraceEx2(
             session,
             &raw const provider,
-            EVENT_CONTROL_CODE_ENABLE_PROVIDER.0,
+            code,
             LEVEL,
             KEYWORDS,
             0,
@@ -335,7 +375,7 @@ unsafe extern "system" fn on_event(record: *mut EVENT_RECORD) {
     };
     let header = &record.EventHeader;
     let id = header.EventDescriptor.Id;
-    if header.ProviderId != GUID::from_u128(KERNEL_FILE) || (id != CREATE_ID && id != END_ID) {
+    if header.ProviderId != GUID::from_u128(KERNEL_FILE) {
         return;
     }
     // SAFETY: `UserContext` is the `Context` `Trace::start` gave, a live Callback that only
@@ -343,6 +383,14 @@ unsafe extern "system" fn on_event(record: *mut EVENT_RECORD) {
     let Some(state) = (unsafe { record.UserContext.cast::<Callback>().as_mut() }) else {
         return;
     };
+    // The breaker counts every Kernel-File event, before anything else is read.
+    state.events.fetch_add(1, Ordering::Relaxed);
+    if state.clear.load(Ordering::Relaxed) && state.clear.swap(false, Ordering::Relaxed) {
+        state.consumer.clear_pending();
+    }
+    if id != CREATE_ID && id != END_ID {
+        return;
+    }
     let data: &[u8] = if record.UserData.is_null() {
         &[]
     } else {
@@ -372,6 +420,7 @@ unsafe extern "system" fn on_event(record: *mut EVENT_RECORD) {
         out,
         lost,
         began_ms,
+        ..
     } = state;
     // SAFETY: GetTickCount64 only reads the tick count.
     let now = Duration::from_millis(unsafe { GetTickCount64() }.saturating_sub(*began_ms));

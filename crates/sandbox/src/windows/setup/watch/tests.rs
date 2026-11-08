@@ -14,6 +14,7 @@ use super::protocol::{
 };
 use crate::windows::sids::Sid;
 
+mod breaker;
 mod consumer;
 mod instances;
 mod run;

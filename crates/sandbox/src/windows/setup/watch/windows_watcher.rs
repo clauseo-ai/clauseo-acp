@@ -10,7 +10,10 @@ use windows::Win32::System::SystemInformation::GetTickCount64;
 use super::windows_pipe::Server;
 use super::windows_trace::Trace;
 use super::{Delivery, Failed, Pool, TraceError, WatchExit, Watcher, watch};
+use windows::core::w;
+
 use crate::windows::admin_copy::{self, os};
+use crate::windows::record::read_dword;
 use crate::windows::refresh::event_log;
 use crate::windows::setup::machine::MachineError;
 use crate::windows::setup::owner::this_process;
@@ -98,6 +101,27 @@ impl Watcher for WindowsWatcher {
         if let Some(server) = self.server.take() {
             server.close();
         }
+    }
+
+    fn events(&mut self) -> u64 {
+        self.trace.as_ref().map_or(0, Trace::events)
+    }
+
+    fn pause_trace(&mut self) -> Result<(), Failed> {
+        self.trace
+            .as_mut()
+            .map_or_else(|| Err("no trace".to_owned()), Trace::pause)
+    }
+
+    fn resume_trace(&mut self) -> Result<(), Failed> {
+        self.trace
+            .as_mut()
+            .map_or_else(|| Err("no trace".to_owned()), Trace::resume)
+    }
+
+    fn rate_log(&mut self) -> bool {
+        read_dword(w!(r"SOFTWARE\Policies\Clauseo\Sandbox"), w!("WatchRateLog"))
+            .is_ok_and(|value| value == Some(1))
     }
 
     fn records(&mut self, wait: Duration) -> Delivery {

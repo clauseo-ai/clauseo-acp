@@ -25,6 +25,7 @@ struct Tick {
 }
 
 /// A fake machine: the record, the trace and the pipe, scripted tick by tick.
+#[expect(clippy::struct_excessive_bools, reason = "a test fake's switches")]
 struct Fake {
     system: bool,
     exe: PathBuf,
@@ -35,6 +36,10 @@ struct Fake {
     not_pool: bool,
     /// Every send fails: the pipe can't keep an instance.
     send_fails: bool,
+    /// Kernel-File events the callback sees each tick, and all so far.
+    events_per_tick: u64,
+    events: u64,
+    rate_log: bool,
     trace: Result<(), TraceError>,
     pipe: Result<(), Failed>,
     ticks: VecDeque<Tick>,
@@ -59,6 +64,9 @@ impl Fake {
             pool_reads: 0,
             not_pool: false,
             send_fails: false,
+            events_per_tick: 0,
+            events: 0,
+            rate_log: false,
             trace: Ok(()),
             pipe: Ok(()),
             ticks: VecDeque::new(),
@@ -132,8 +140,23 @@ impl Watcher for Fake {
     fn close_pipe(&mut self) {
         self.calls.push("close_pipe".to_owned());
     }
+    fn events(&mut self) -> u64 {
+        self.events
+    }
+    fn pause_trace(&mut self) -> Result<(), Failed> {
+        self.calls.push(format!("pause_trace {:?}", self.now));
+        Ok(())
+    }
+    fn resume_trace(&mut self) -> Result<(), Failed> {
+        self.calls.push(format!("resume_trace {:?}", self.now));
+        Ok(())
+    }
+    fn rate_log(&mut self) -> bool {
+        self.rate_log
+    }
     fn records(&mut self, wait: Duration) -> Delivery {
         self.now += wait;
+        self.events += self.events_per_tick;
         // Past the script, the last tick's clients stay and nothing comes.
         let tick = self.ticks.pop_front().unwrap_or(Tick {
             clients: self.clients,
@@ -426,5 +449,43 @@ fn a_pipe_that_fails_to_send_ends_the_run_with_74() {
     assert_eq!(
         fake.calls[fake.calls.len() - 2..],
         ["close_pipe", "stop_trace"]
+    );
+}
+
+#[test]
+fn a_busy_machine_pauses_the_trace_tells_the_clients_and_resumes() {
+    use super::super::breaker::{PAUSE, PAUSE_RATE, WINDOW_SECONDS};
+    // Hot from the start: the rate per tick is the breaker's rate a quarter-second.
+    let mut fake = Fake::new().idle(ticks(Duration::from_secs(75)), 1);
+    fake = fake.idle(ticks(LAST_CLIENT_GRACE) + 2, 0);
+    fake.events_per_tick = PAUSE_RATE / 4 + 10;
+    fake.rate_log = true;
+    assert_eq!(watch(&mut fake), WatchExit::Done);
+    let window = Duration::from_secs(u64::from(WINDOW_SECONDS));
+    let paused = format!("pause_trace {window:?}");
+    let resumed = format!("resume_trace {:?}", window + PAUSE);
+    assert!(fake.calls.contains(&paused), "{:?}", fake.calls);
+    assert!(fake.calls.contains(&resumed), "{:?}", fake.calls);
+    let lines: Vec<_> = fake
+        .sent
+        .iter()
+        .filter_map(|line| Line::parse(line.trim_end()))
+        .collect();
+    assert!(matches!(
+        &lines[0],
+        Line::Paused { paused, .. } if paused.secs == 60 && paused.reason == "rate"
+    ));
+    assert!(matches!(lines[1], Line::Resumed { resumed: true, .. }));
+    // The rate log is a number a line, and the end line counts the trips.
+    let rates = fake
+        .logs
+        .iter()
+        .filter(|(_, line)| line.starts_with("the sandbox's watcher's event rate: "))
+        .count();
+    assert!(rates >= 75, "{rates}");
+    assert!(
+        fake.last_log().contains("paused 1 times"),
+        "{}",
+        fake.last_log()
     );
 }
