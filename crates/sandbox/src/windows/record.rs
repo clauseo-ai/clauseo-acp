@@ -102,6 +102,12 @@ pub(crate) fn admin_copy_sha256() -> Result<Option<String>, RecordError> {
     read_string(RECORD_KEY, w!("AdminCopySha256"))
 }
 
+/// The install folder `--adopt` was given (`UserInstallDir`, read unexpanded), the folder the
+/// refresh task copies from; `Ok(None)` when the key or the value is missing. Untrusted.
+pub(crate) fn user_install_dir() -> Result<Option<PathBuf>, RecordError> {
+    Ok(read_string(RECORD_KEY, w!("UserInstallDir"))?.map(PathBuf::from))
+}
+
 /// The admin copy's owner as `--adopt` recorded it (`AdminCopyOwner`: a SID, or `machine`);
 /// `Ok(None)` when the key or the value is missing.
 pub(crate) fn admin_copy_owner() -> Result<Option<String>, RecordError> {
