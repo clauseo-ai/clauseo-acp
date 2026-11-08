@@ -87,8 +87,9 @@
 //!    that stays held is 59. A run that is ended or ends non-zero never writes them. A session's
 //!    unclean-session marker waits for `SweepSequence` to reach the `SweepNext` it read
 //!    (`runner::marker`);
-//! 7. logs one line with counts only: no path, task name or SID, as the Application log is
-//!    readable by every local user.
+//! 7. logs one line of counts, naming only the paths of at most five tasks that keep it at 56,
+//!    SIDs redacted and hidden characters replaced ([`log_path`]): the Application log is
+//!    readable by every local user, so no other path, and no SID.
 //!
 //! It marks no profile for a reset, unlike `--stop`.
 
@@ -101,6 +102,7 @@ use super::pool_steps::{
 use crate::windows::sids::Sid;
 
 mod file_trust;
+pub mod log_path;
 mod resolve;
 mod running;
 mod swept;
@@ -503,6 +505,7 @@ fn sweep_task<S: Sweeper>(fs: &mut S, folder: &S::Folder, task: Task, at: Walk<'
         swept,
     } = at;
     swept.tasks += 1;
+    let left_before = swept.left_tasks();
     let found = match task.principal {
         Ok(principal) => {
             let found = match principal.name() {
@@ -559,6 +562,13 @@ fn sweep_task<S: Sweeper>(fs: &mut S, folder: &S::Folder, task: Task, at: Walk<'
             swept.note(why);
         }
         Found::FileSkipped => swept.file_skipped += 1,
+    }
+    if swept.left_tasks() > left_before
+        && let Ok(folder) = fs.folder_path(folder)
+    {
+        swept
+            .left_paths
+            .push(running::task_path(&folder, &task.name));
     }
 }
 

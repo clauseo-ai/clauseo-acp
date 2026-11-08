@@ -28,7 +28,8 @@ fn a_task_the_listing_hides_is_56_and_left() {
         assert!(fake.deleted().is_empty(), "never deleted through a file");
         let line = &fake.logged[0].1;
         assert!(line.contains("1 not listed (in a task file"), "{line}");
-        assert!(!line.contains("hidden"), "no task named: {line}");
+        let named = format!("; tasks that keep the sweep at 56: {path}");
+        assert!(line.ends_with(&named), "only the task left named: {line}");
     }
     // A file naming a pool user, or owned by one, is no proof either.
     let pool = file("<UserId>S-1-5-21-1-2-3-1010</UserId>");
@@ -145,14 +146,15 @@ fn every_listed_task_on_file_and_in_the_cache_passes() {
     assert_eq!(fake.deleted(), [r"\A\pool"]);
 }
 
-/// The sweep of `fake`, its exit and its log line, which must name no path or SID.
+/// The sweep of `fake`, its exit and its log line, which must name no SID, and no path
+/// unless the run is 56.
 fn swept_line(fake: &mut Fake) -> (SweepExit, String) {
     let exit = sweep(fake);
     let line = fake.logged[0].1.clone();
-    assert!(
-        !line.contains("stray") && !line.contains("stale"),
-        "no path: {line}"
-    );
+    if exit == SweepExit::Done {
+        let named = line.contains("stray") || line.contains("stale") || line.contains("keep");
+        assert!(!named, "no path: {line}");
+    }
     assert!(!line.contains("S-1-"), "no SID: {line}");
     (exit, line)
 }
