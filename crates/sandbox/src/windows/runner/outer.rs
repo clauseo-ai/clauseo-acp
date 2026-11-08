@@ -14,6 +14,7 @@ use super::marker::marked;
 use super::paths::{CodexReuse, WinPath};
 use super::spawn::{Process, kill_on_close_job, restrict_dll_search, system_folder};
 use super::start::start;
+use super::unclean::os::check_logon;
 use super::{LAUNCH_CAP, LaunchMessage, RUN_DIR, RunExit, agent_env, codex_reuse, is_launch_name};
 use crate::windows::matters::SANDBOX_DIR;
 use crate::windows::pipe::os::ServerPipe;
@@ -75,6 +76,10 @@ pub fn run_outer(launch_file: &Path, exe: &Path) -> u32 {
 fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
     let message = read_launch(launch_file)?;
     let data_dir = data_dir_of(launch_file)?;
+    // F4, before this session's marker: a marker of this pool user's that awaits a stop refuses
+    // the logon until the stop completes (`unclean.rs`).
+    check_logon(&data_dir, &message.pool_user)
+        .map_err(|why| Failure::new(RunExit::AwaitingStop, why))?;
     // The unclean-session marker, before anything runs as the pool user; only a clean end in
     // `relay` removes it. One that can't be written refuses the launch with its own code
     // (`RunExit::MarkerUnwritable`): no logon follows.
