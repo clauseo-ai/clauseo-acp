@@ -2208,7 +2208,10 @@ the pool-user check. No record, or an empty pool, is nothing to sweep. Then it:
    at the walk, a folder or list that can't be read, a task the listing hides that the cache
    still holds, or a path replaced again after it was judged again. A path gone is no task.
    The Task Scheduler assigns the `Id`, and a task re-created under a name gets a new one
-   (`elevated_a_re_created_task_gets_a_new_cache_id`, not yet run);
+   (`elevated_a_re_created_task_gets_a_new_cache_id`, not yet run). The re-check reads each
+   path's `Id` once more after the walk, not after its own re-judging, so a third replacement
+   made after that re-judging is unseen and can end 0: within the accepted residual of a live
+   pool process racing the sweep;
 4. cancels every BITS job a pool user owns with the stop's BITS step
    (`pool_steps::cancel_pool_jobs`), whatever the walk found. Only then, with no pool task
    left to trigger and no job left to notify, it stops the running instances of the pool's
