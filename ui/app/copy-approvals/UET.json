@@ -339,5 +339,27 @@
     "at": "2026-11-04",
     "by": "Rohan",
     "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-44": {
+    "en": "Blocked by your firm",
+    "hi": "आपकी फ़र्म ने रोका है",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review); app thread writes the final Hindi",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Browser blocked by the firm's RemoteDebuggingAllowed policy (browser_blocked_by_policy): pending copy review; no download offered"
+  },
+  "UET-45": {
+    "en": "Your firm has turned off browser automation on this computer, so Clauseo can't use a browser for you. Your IT team can allow Clauseo specifically.",
+    "hi": "आपकी फ़र्म ने इस कंप्यूटर पर ब्राउज़र ऑटोमेशन बंद कर दिया है, इसलिए Clauseo आपके लिए ब्राउज़र का उपयोग नहीं कर सकता। आपकी IT टीम ख़ास तौर पर Clauseo को अनुमति दे सकती है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review); app thread writes the final Hindi",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Browser blocked by the firm's RemoteDebuggingAllowed policy (browser_blocked_by_policy): pending copy review; no download offered"
   }
 }

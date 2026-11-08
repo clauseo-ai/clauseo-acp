@@ -1,6 +1,7 @@
 // Each row of the tool line's popover, in the fewest words (DESIGN.md §Icons): the tool's glyph and name, an On or
-// Off chip, the reason in a few words only when off, and under the browser with no Chrome, the download. Pure, so the
-// tests can read every state; loaded with the popover only.
+// Off chip, the reason in a few words only when off, and under the browser with no Chrome, the
+// download; under the browser the firm's policy blocks, the reason in full. Pure, so the tests can
+// read every state; loaded with the popover only.
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { tw, type ToolsKey } from "@clauseo/components/lib/words-tools.ts";
 import { toolsLine } from "@clauseo/components/lib/words-tools-line.ts";
@@ -36,6 +37,9 @@ export type ToolRowWords = {
   beside: boolean;
   /** The reason's tooltip and description: once Chrome is in, when the browser comes; else null. */
   reasonTip: string | null;
+  /** A muted line under the reason saying it in full: the firm's policy blocks the browser;
+   * else null. */
+  note: string | null;
   /** Off in Settings, with the settings window to turn it on: the popover's foot offers Open Settings. */
   settings: boolean;
   download: DownloadPart | null;
@@ -96,6 +100,9 @@ export function downloadPart(lang: Lang, install: BrowserInstall | null): Downlo
   return { kind: "failed", cause: tw(lang, FAILED[p.failed.code]) };
 }
 
+const POLICY: ToolsKey =
+  "Your firm has turned off browser automation on this computer, so Clauseo can't use a browser for you. Your IT team can allow Clauseo specifically.";
+
 /** One row, for a tool the line speaks for. */
 export function toolRow(lang: Lang, tool: KnownTool, room: ToolRowRoom): ToolRowWords {
   const on = tool.state === "available";
@@ -120,6 +127,11 @@ export function toolRow(lang: Lang, tool: KnownTool, room: ToolRowRoom): ToolRow
     beside: tool.state === "off",
     reasonTip:
       download?.kind === "done" ? tw(lang, "The browser comes with your next conversation.") : null,
+    // a download can't help here: the firm's block holds for every browser on this computer
+    note:
+      tool.tool === "browser" && tool.state === "browser_blocked_by_policy"
+        ? tw(lang, POLICY)
+        : null,
     settings: tool.state === "off" && room.settings,
     download,
   };

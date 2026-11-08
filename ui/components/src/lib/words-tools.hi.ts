@@ -27,6 +27,10 @@ export const HI = {
   "Couldn't unpack": "अनपैक नहीं हो सका",
   "Download failed": "डाउनलोड विफल",
   "Try again": "फिर से प्रयास करें",
+  // under the browser's reason when the firm's policy blocks it, in full: no download helps
+  // (provisional Hindi)
+  "Your firm has turned off browser automation on this computer, so Clauseo can't use a browser for you. Your IT team can allow Clauseo specifically.":
+    "आपकी फ़र्म ने इस कंप्यूटर पर ब्राउज़र ऑटोमेशन बंद कर दिया है, इसलिए Clauseo आपके लिए ब्राउज़र का उपयोग नहीं कर सकता। आपकी IT टीम ख़ास तौर पर Clauseo को अनुमति दे सकती है।",
 } as const;
 
 /** Every string, English and Hindi, for the tests that hold the voice. */

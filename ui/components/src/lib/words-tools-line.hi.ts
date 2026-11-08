@@ -18,6 +18,9 @@ export const HI = {
   "Not available yet": "अभी उपलब्ध नहीं",
   "Too many browsers open": "बहुत सारे ब्राउज़र खुले हैं",
   "Needs Chrome": "Chrome चाहिए",
+  // the firm's Chrome or Edge policy turns off remote debugging, so no browser starts
+  // (provisional Hindi)
+  "Blocked by your firm": "आपकी फ़र्म ने रोका है",
 } as const;
 
 /** Every string, English and Hindi, for the tests that hold the voice. */

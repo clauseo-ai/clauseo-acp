@@ -33,6 +33,7 @@ const BROWSER: BrowserState[] = [
   "no_proxy",
   "too_many_browsers",
   "browser_not_installed",
+  "browser_blocked_by_policy",
 ];
 const avail = (state: string): ToolState["availability"] =>
   state === "available" ? "available" : ({ unavailable: { reason: state } } as never);
@@ -81,7 +82,7 @@ const label = (web: WebState | null, browser: BrowserState | null) => {
   return toolsLabel("en", tools);
 };
 
-test("each glyph's state: on as drawn, the firm's lock for locked off and managed by firm, every other off slashed", () => {
+test("each glyph's state: on as drawn, the firm's lock for locked off, managed by firm and its policy, every other off slashed", () => {
   const web: Record<WebState, string> = {
     available: "on",
     off: "off",
@@ -96,6 +97,7 @@ test("each glyph's state: on as drawn, the firm's lock for locked off and manage
     no_proxy: "off",
     too_many_browsers: "off",
     browser_not_installed: "off",
+    browser_blocked_by_policy: "locked",
   };
   for (const w of WEB) expect(glyphState({ tool: "web_search", state: w })).toBe(web[w]);
   for (const b of BROWSER) expect(glyphState({ tool: "browser", state: b })).toBe(browser[b]);
@@ -117,6 +119,9 @@ test("the line's name and tooltip: one sentence per tool, web search first, its 
   );
   expect(label(null, "too_many_browsers")).toBe("Browser: off, too many browsers open.");
   expect(label(null, "locked_off")).toBe("Browser: off, managed by firm.");
+  expect(label("available", "browser_blocked_by_policy")).toBe(
+    "Web search: on. Browser: off, blocked by your firm.",
+  );
 });
 
 test("sameTools reads two lists the same only when every tool and state match", () => {
@@ -125,6 +130,10 @@ test("sameTools reads two lists the same only when every tool and state match", 
   expect(sameTools(a, [{ tool: "browser", state: "no_proxy" }])).toBe(false);
   expect(sameTools(a, [])).toBe(false);
 });
+
+const POLICY =
+  "Your firm has turned off browser automation on this computer, so Clauseo can't use a browser for you. " +
+  "Your IT team can allow Clauseo specifically.";
 
 const ROOM: ToolRowRoom = { settings: true, install: null };
 const words = (tool: KnownTool, room: Partial<ToolRowRoom> = {}) =>
@@ -140,6 +149,7 @@ test("each row: its glyph, name, an On or Off chip, and the reason in a few word
     no_proxy: "Not available yet",
     too_many_browsers: "Too many browsers open",
     browser_not_installed: "Needs Chrome",
+    browser_blocked_by_policy: "Blocked by your firm",
   };
   const rows: KnownTool[] = [
     ...WEB.map((state): KnownTool => ({ tool: "web_search", state })),
@@ -158,6 +168,8 @@ test("each row: its glyph, name, an On or Off chip, and the reason in a few word
       // In Settings sits in the chip's row
       beside: tool.state === "off",
       reasonTip: null,
+      // the firm's policy says it in full
+      note: tool.state === "browser_blocked_by_policy" ? POLICY : null,
       settings: tool.state === "off",
       download: null,
     });
@@ -398,6 +410,19 @@ test("the download's words leave the other browser states alone", () => {
   });
 });
 
+test("the firm's browser policy offers no download in any download state: it blocks every browser", () => {
+  const blocked: KnownTool = { tool: "browser", state: "browser_blocked_by_policy" };
+  for (const install of [null, offer, { progress: "done" }] as (BrowserInstall | null)[])
+    expect(words(blocked, { install })).toMatchObject({
+      glyph: "locked",
+      reason: "Blocked by your firm",
+      reasonTip: null,
+      note: POLICY,
+      settings: false,
+      download: null,
+    });
+});
+
 test("in Hindi, the tools' words say their Hindi, and a reason keeps its brand name's capital", () => {
   expect(toolRow("hi", { tool: "browser", state: "available" }, ROOM).name).toBe("ब्राउज़र");
   expect(toolRow("hi", { tool: "browser", state: "locked_off" }, ROOM).reason).toBe(
@@ -405,5 +430,9 @@ test("in Hindi, the tools' words say their Hindi, and a reason keeps its brand n
   );
   expect(toolsLabel("hi", [{ tool: "browser", state: "browser_not_installed" }])).toBe(
     "ब्राउज़र: बंद, Chrome चाहिए।",
+  );
+  // provisional Hindi, until the app thread writes it
+  expect(toolsLabel("hi", [{ tool: "browser", state: "browser_blocked_by_policy" }])).toBe(
+    "ब्राउज़र: बंद, आपकी फ़र्म ने रोका है।",
   );
 });

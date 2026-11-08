@@ -5817,6 +5817,13 @@ export type ToolsUnavailableReason =
 "too_many_browsers" | 
 /**  Case law only: the host could not open the session's loopback relay. */
 "no_relay" | 
+/**
+ *  The browser only: the firm turned off Chrome's or Edge's remote debugging
+ *  (`RemoteDebuggingAllowed` false), which Clauseo's browser needs, and its Clauseo
+ *  policy does not allow Clauseo's browser anyway
+ *  (`browser.allow_when_remote_debugging_disabled`).
+ */
+"browser_blocked_by_policy" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
 

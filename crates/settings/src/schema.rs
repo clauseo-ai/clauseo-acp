@@ -15,9 +15,9 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// The top-level keys of `settings.json`, each an object.
-pub(crate) const SECTIONS: [&str; 12] = [
+pub(crate) const SECTIONS: [&str; 13] = [
     "matters", "agents", "mcp", "ui", "tools", "privacy", "update", "plans", "install", "skills",
-    "sandbox", "network",
+    "sandbox", "network", "browser",
 ];
 
 /// Every setting, as `Effective::settings` gives it: the defaults, then `settings.json`, then
@@ -52,6 +52,8 @@ pub struct Settings {
     pub sandbox: SandboxSettings,
     /// The firm's network: its proxy, CA files and allowed domains (decision record 0051).
     pub network: NetworkSettings,
+    /// What the firm allows Clauseo's browser beyond its browser policy.
+    pub browser: BrowserSettings,
 }
 
 /// The `matters` section.
@@ -196,6 +198,18 @@ impl Default for NetworkSettings {
             unsafe_site_list_updates: true,
         }
     }
+}
+
+/// The `browser` section. Its key is a security key, set by policy only: a policy source that
+/// cannot be read locks it `false`, its default, and a `settings.json` value is ignored with a
+/// warning.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(default)]
+pub struct BrowserSettings {
+    /// Whether Clauseo's browser may start when the firm turned off Chrome's or Edge's remote
+    /// debugging (their `RemoteDebuggingAllowed` policy false), which every browser Clauseo
+    /// drives needs. Off by default: such a policy then turns Clauseo's browser off too.
+    pub allow_when_remote_debugging_disabled: bool,
 }
 
 /// The `skills` section (decision record 0040). `extra`, `curated` and `allow_scripts` are

@@ -1,6 +1,7 @@
 //! Windows' policy sources: the registry, then `ProgramData\Clauseo\policy.json`, read only
 //! when an administrator owns it ([`acl`]). This module only collects the registry's raw values;
-//! [`super::registry::parse`] reads them.
+//! [`super::registry::parse`] reads them. It also reads Chrome's and Edge's
+//! `RemoteDebuggingAllowed` for [`crate::chromium_policy`] ([`SystemRegistry`]).
 #![expect(unsafe_code, reason = "FFI to the OS policy store")]
 
 mod acl;
@@ -12,12 +13,16 @@ pub(super) use acl::trust;
 use super::registry::{self, KEY, RegValue, SOURCE};
 use super::{PolicyRead, PolicySource, TrustedFilePolicy};
 use crate::SystemDirs;
+use crate::chromium_policy::{Hive, Registry as ChromiumRegistry};
 use crate::error::Error;
 use crate::locations::{KnownFolder, PlatformDirs as _};
-use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_NO_MORE_ITEMS, ERROR_SUCCESS};
+use windows::Win32::Foundation::{
+    ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA, ERROR_NO_MORE_ITEMS, ERROR_SUCCESS,
+};
 use windows::Win32::System::Registry::{
-    HKEY, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_64KEY, REG_DWORD, REG_MULTI_SZ, REG_SZ,
-    RegCloseKey, RegEnumValueW, RegOpenKeyExW, RegQueryInfoKeyW,
+    HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_64KEY, REG_DWORD,
+    REG_MULTI_SZ, REG_ROUTINE_FLAGS, REG_SZ, REG_VALUE_TYPE, RRF_RT_ANY, RRF_SUBKEY_WOW6464KEY,
+    RegCloseKey, RegEnumValueW, RegGetValueW, RegOpenKeyExW, RegQueryInfoKeyW,
 };
 use windows::core::{HSTRING, PWSTR};
 
@@ -183,5 +188,49 @@ impl Drop for Key {
         // SAFETY: the key was opened by RegOpenKeyExW and is closed only here. A failed close
         // leaves nothing to do.
         let _closed = unsafe { RegCloseKey(self.0) };
+    }
+}
+
+/// This machine's registry, one value at a time, for [`crate::chromium_policy`].
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SystemRegistry;
+
+impl ChromiumRegistry for SystemRegistry {
+    fn value(&self, hive: Hive, key: &str, value: &str) -> Result<Option<RegValue>, u32> {
+        let root = match hive {
+            Hive::LocalMachine => HKEY_LOCAL_MACHINE,
+            Hive::CurrentUser => HKEY_CURRENT_USER,
+        };
+        let mut kind = REG_VALUE_TYPE(0);
+        let mut data = [0u8; 4];
+        let mut len = u32::try_from(data.len()).unwrap_or(0);
+        // SAFETY: the key and value names are NUL-terminated wide strings that outlive the call;
+        // `kind` and `len` are valid places, and `data` is writable for the `len` bytes passed.
+        let read = unsafe {
+            RegGetValueW(
+                root,
+                &HSTRING::from(key),
+                &HSTRING::from(value),
+                REG_ROUTINE_FLAGS(RRF_RT_ANY.0 | RRF_SUBKEY_WOW6464KEY.0),
+                Some(&raw mut kind),
+                Some(data.as_mut_ptr().cast()),
+                Some(&raw mut len),
+            )
+        };
+        if read == ERROR_FILE_NOT_FOUND {
+            return Ok(None);
+        }
+        // Longer than a DWORD: a string or binary value, of the wrong type either way.
+        if read == ERROR_MORE_DATA {
+            return Ok(Some(RegValue::Other(kind.0)));
+        }
+        if read != ERROR_SUCCESS {
+            return Err(read.0);
+        }
+        Ok(Some(if kind == REG_DWORD && len == 4 {
+            RegValue::Dword(u32::from_le_bytes(data))
+        } else {
+            RegValue::Other(kind.0)
+        }))
     }
 }
