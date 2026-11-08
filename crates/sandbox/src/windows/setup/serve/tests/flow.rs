@@ -408,9 +408,7 @@ fn the_log_names_the_op_by_its_tag_and_never_echoes_the_client() {
 
 #[test]
 fn the_app_waits_for_a_reply_as_long_as_the_task_may_run() {
-    use crate::windows::refresh::SET_UP_EXECUTION_LIMIT;
-    assert_eq!(SET_UP_EXECUTION_LIMIT, "PT30M");
-    assert!(REPLY_WAIT > Duration::from_mins(30), "past the limit");
+    assert!(REPLY_WAIT > RUN_LIMIT, "past the limit");
     assert!(
         READ_WAIT <= Duration::from_secs(2),
         "a silent client holds no one up"

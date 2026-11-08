@@ -18,7 +18,9 @@
 //!    first once it exists. A name someone else made first is logged and served to no one
 //!    ([`ServeExit::Squatted`]);
 //! 4. serves each client in turn ([`handle`]), waiting [`FIRST_WAIT`] for the first and
-//!    [`IDLE_WAIT`] for each after, then exits [`ServeExit::Done`]. While one is served the next
+//!    [`IDLE_WAIT`] for each after, then exits [`ServeExit::Done`]. It takes a client only while
+//!    [`CLIENT_LIMIT`] of the run's [`RUN_LIMIT`] is left after the wait, so each set-up taken
+//!    gets its full time; past that it exits [`ServeExit::Done`] too. While one is served the next
 //!    can connect and wait; the task queues a start made as this process ends, and the app
 //!    starts it again when the pipe stays missing, so no request is dropped.
 //!
@@ -89,10 +91,18 @@ pub const IDLE_WAIT: Duration = Duration::from_secs(5);
 /// How long a connected client has to send its request: short, as a client holding its
 /// instance unsent keeps the next one waiting.
 pub const READ_WAIT: Duration = Duration::from_secs(2);
-/// How long the app waits for its reply once the request is sent: the set-up task's execution
-/// limit (`refresh::SET_UP_EXECUTION_LIMIT`, 30 minutes, past which the Task Scheduler ends the
-/// server) and a minute more, so a set-up that runs to the limit is never cut short by the app.
-pub const REPLY_WAIT: Duration = Duration::from_mins(31);
+/// The time each client the server takes is owed for its set-up: the server takes a client only
+/// while this much of [`RUN_LIMIT`] is left after the wait for it, so a stream of clients (Remote
+/// Desktop, several lawyers) never cuts a slow set-up short.
+pub const CLIENT_LIMIT: Duration = Duration::from_mins(30);
+/// The set-up task's execution limit (`refresh::SET_UP_EXECUTION_LIMIT`, two hours), past which
+/// the Task Scheduler ends the server: the backstop for a run that hangs. Past the time it may
+/// still take a client ([`CLIENT_LIMIT`]), the server exits and the app's next start serves.
+pub const RUN_LIMIT: Duration = Duration::from_hours(2);
+/// How long the app waits for its reply once the request is sent: [`RUN_LIMIT`] and a minute
+/// more, so a set-up the server took, even one queued behind another's, is never cut short by
+/// the app; the server is gone by then at the latest.
+pub const REPLY_WAIT: Duration = Duration::from_mins(121);
 /// How long the app tries the pipe for, in milliseconds (`windows::setup_task`).
 pub const CONNECT_WAIT: u64 = 30_000;
 /// After how long without a pipe the app starts the task once more, in milliseconds.
@@ -192,6 +202,8 @@ pub trait Host {
     fn set_up(&mut self, owner: Self::Owner, data_dir: &Path, add: u8) -> SetupResult;
     /// Writes one line to the log: `error` for a refusal or a failure.
     fn log(&mut self, error: bool, line: &str);
+    /// How long this server has run.
+    fn elapsed(&mut self) -> Duration;
 }
 
 /// `--serve-set-up` as the module says, the pipe made by `open` with its descriptor.
@@ -240,6 +252,13 @@ pub fn run<P: Pipe>(
     };
     let mut wait = FIRST_WAIT;
     loop {
+        if host.elapsed() + wait + CLIENT_LIMIT > RUN_LIMIT {
+            host.log(
+                false,
+                "--serve-set-up: too little of the run's time is left for another set-up",
+            );
+            return ServeExit::Done;
+        }
         match pipe.next(wait) {
             Ok(Some(mut client)) => {
                 let reply = handle(&mut pipe, host, &mut client);

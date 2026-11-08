@@ -18,9 +18,10 @@ pub const STOP_ARG: &str = "--stop";
 pub const STOP_EXECUTION_LIMIT: &str = "PT2M";
 /// The set-up task's one argument (`setup::serve`): nothing else.
 pub const SET_UP_ARG: &str = "--serve-set-up";
-/// The set-up task's execution limit: 30 minutes, for a set-up (users, logons, filters) and
-/// the clients waiting behind it; the app waits as long for its reply (`serve::REPLY_WAIT`).
-pub const SET_UP_EXECUTION_LIMIT: &str = "PT30M";
+/// The set-up task's execution limit: two hours (`serve::RUN_LIMIT`), the backstop for a run
+/// that hangs. The server takes a client only while 30 minutes are left for its set-up
+/// (`serve::CLIENT_LIMIT`); the app waits a minute past the limit (`serve::REPLY_WAIT`).
+pub const SET_UP_EXECUTION_LIMIT: &str = "PT2H";
 /// `TASK_INSTANCES_QUEUE`: a start while it runs queues another run.
 pub const INSTANCES_QUEUE: i32 = 1;
 /// `TASK_INSTANCES_IGNORE_NEW`: a start while it runs is dropped.

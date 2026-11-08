@@ -3,8 +3,9 @@
 //! user's set-up state read as them, the set-up itself (`exe::run_set_up_in`), and the Event Log.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
-use super::windows_pipe::WindowsPipe;
+use super::windows_pipe::{WindowsPipe, ticks};
 use super::{Gate, Host, PIPE_NAME, ServeExit};
 use crate::SetupState;
 use crate::windows::admin_copy::{self, os};
@@ -23,7 +24,7 @@ use crate::windows::setup::windows_machine::Names;
 use crate::windows::sids::Sid;
 
 /// How long a request waits for the set-up lock, in milliseconds: a removal, a refresh, a stop or
-/// a set-up started with a prompt may hold it; well inside the task's 30-minute limit.
+/// a set-up started with a prompt may hold it; well inside each client's 30 minutes.
 const LOCK_WAIT_MS: u32 = 300_000;
 
 /// `--serve-set-up`: [`super::run`] over a [`WindowsHost`] and the pipe [`PIPE_NAME`].
@@ -48,6 +49,8 @@ fn unread(error: &MachineError) -> String {
 /// The machine the server reads and sets up, with the names `names`.
 pub(crate) struct WindowsHost {
     names: Names,
+    /// When the server started, by its clock (`windows_pipe::ticks`).
+    started: Duration,
     /// The set-up lock, while held.
     held: Option<Held>,
 }
@@ -55,7 +58,11 @@ pub(crate) struct WindowsHost {
 impl WindowsHost {
     /// The host with the names `names` (`Names::production()` for a real task).
     pub(crate) fn new(names: Names) -> WindowsHost {
-        WindowsHost { names, held: None }
+        WindowsHost {
+            names,
+            started: ticks(),
+            held: None,
+        }
     }
 }
 
@@ -139,6 +146,10 @@ impl Host for WindowsHost {
 
     fn log(&mut self, error: bool, line: &str) {
         event_log(error, line);
+    }
+
+    fn elapsed(&mut self) -> Duration {
+        ticks().saturating_sub(self.started)
     }
 }
 

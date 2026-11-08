@@ -122,6 +122,10 @@ pub(crate) struct FakeHost {
     pub(crate) held: bool,
     pub(crate) calls: Vec<String>,
     pub(crate) lines: Vec<(bool, String)>,
+    /// How long the server has run, at its next look.
+    pub(crate) clock: Duration,
+    /// How far the clock moves at each look.
+    pub(crate) tick: Duration,
 }
 
 impl FakeHost {
@@ -144,6 +148,8 @@ impl FakeHost {
             held: false,
             calls: Vec::new(),
             lines: Vec::new(),
+            clock: Duration::ZERO,
+            tick: Duration::ZERO,
         }
     }
 
@@ -244,6 +250,12 @@ impl Host for FakeHost {
 
     fn log(&mut self, error: bool, line: &str) {
         self.lines.push((error, line.to_owned()));
+    }
+
+    fn elapsed(&mut self) -> Duration {
+        let now = self.clock;
+        self.clock += self.tick;
+        now
     }
 }
 
@@ -421,4 +433,32 @@ fn a_client_that_closes_before_the_server_reaches_it_is_let_go_and_the_next_serv
         ),
         Err("DisconnectNamedPipe")
     );
+}
+
+#[test]
+fn each_client_taken_gets_its_full_time_and_the_server_stops_taking_them_when_it_cant() {
+    use crate::windows::refresh::SET_UP_EXECUTION_LIMIT;
+    assert_eq!(SET_UP_EXECUTION_LIMIT, "PT2H");
+    assert_eq!(RUN_LIMIT, Duration::from_hours(2), "the task's limit");
+    assert!(REPLY_WAIT > RUN_LIMIT, "the app never cuts a set-up short");
+    // Each set-up takes 40 minutes: three fit, a fourth wouldn't get its 30 and isn't taken.
+    let mut host = FakeHost::new();
+    host.tick = Duration::from_mins(40);
+    let clients = (0..5).map(|_| FakeClient::asking(LAWYER, SET_UP)).collect();
+    let (exit, replies, waits) = serve_all(&mut host, clients);
+    assert_eq!(exit, ServeExit::Done);
+    assert_eq!(replies.len(), 3);
+    assert_eq!(waits, [FIRST_WAIT, IDLE_WAIT, IDLE_WAIT]);
+    assert!(
+        host.lines
+            .iter()
+            .any(|(error, line)| !error && line.contains("too little of the run's time")),
+        "{:?}",
+        host.lines
+    );
+    // A run started too late for even one: no wait at all.
+    let mut host = FakeHost::new();
+    host.clock = RUN_LIMIT.checked_sub(CLIENT_LIMIT).unwrap();
+    let (exit, replies, waits) = serve_all(&mut host, vec![FakeClient::asking(LAWYER, SET_UP)]);
+    assert_eq!((exit, replies.len(), waits.len()), (ServeExit::Done, 0, 0));
 }

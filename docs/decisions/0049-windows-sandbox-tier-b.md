@@ -1958,7 +1958,10 @@ session, never from an argument. This section is the pipe's contract: the app
 (`windows::setup_task::request_set_up`) and the server (`setup::serve`) both follow it.
 
 **The task.** `SystemTask::SetUp`: LOCAL SYSTEM runs the admin copy with `--serve-set-up` and
-nothing else. It has no trigger, runs on demand and stops after 30 minutes. A start made while it
+nothing else. It has no trigger, runs on demand and stops after two hours, a backstop for a run
+that hangs; the server itself takes a client only while 30 minutes are left for its set-up
+(`serve::CLIENT_LIMIT`), so on Remote Desktop a stream of clients never cuts a slow set-up short,
+and past that it exits and the app's next start serves. A start made while it
 runs is dropped (`TASK_INSTANCES_IGNORE_NEW`), as for the other tasks: the Task Scheduler's queue
 has no limit, so with `TASK_INSTANCES_QUEUE` any interactive user could pile up runs. The running
 server serves every client that connects, and the app starts the task again itself when the pipe
@@ -2083,8 +2086,8 @@ for `NeedsReSetUp` the host runs the set-up again through the pipe, silently, on
    (`SystemProcessIdInformation`) is the admin copy. A fact that differs refuses; one Windows won't
    give a standard user is logged and set aside on the owner's word. A process no longer listed
    was ending as the app connected, and counts as gone;
-5. writes the request (5 s) and reads the reply line, waiting as long as the task may run, 30
-   minutes and one more. A server that closed before replying (one that was ending) is asked
+5. writes the request (5 s) and reads the reply line, waiting as long as the task may run, two
+   hours and one more minute. A server that closed before replying (one that was ending) is asked
    again once, after another start. The reply maps to `SandboxSetup::run`'s result as the exe's
    result file does, except `refused`: the gate shouldn't refuse a lawyer, so for one it didn't
    foresee the app logs why and runs the prompted `--set-up` (`serve::via_task`), which needs an

@@ -43,7 +43,7 @@ fn the_stop_task_is_the_refresh_task_but_for_its_name_argument_and_limit() {
     let set_up = SystemTask::SetUp;
     assert_eq!(
         (set_up.name(), set_up.argument(), set_up.execution_limit()),
-        ("SandboxSetUp", "--serve-set-up", "PT30M")
+        ("SandboxSetUp", "--serve-set-up", "PT2H")
     );
     assert_eq!(mode(set_up), Ok(Mode::ServeSetUp));
     assert!(!set_up.at_logon(), "started only on demand: no trigger");
