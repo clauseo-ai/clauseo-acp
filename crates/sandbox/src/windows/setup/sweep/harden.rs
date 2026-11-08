@@ -24,11 +24,12 @@
 //! without the SACL; only a task that does is read whole, SACL included (no write when that
 //! fails), and the new descriptor goes through the task's own interface
 //! (`Sweeper::set_task_security`: `IRegisteredTask::SetSecurityDescriptor`, with no entry added
-//! for the principal), then is read back to check its owner, group and SACL are as read. Each
-//! task changed, with the SIDs that lost which rights and its DACL before as SDDL, and each that
-//! couldn't be changed or read, go to the admin-only log ([`to_admin_log`]); the world-readable
-//! line gets their counts. Hardening is never 56, a failure included. It undoes nothing a pool
-//! user changed during a session: pre-logon hardening comes with the run-group PR.
+//! for the principal), then is read back to check its owner, group and SACL are as read and
+//! its DACL needs nothing more. Each task changed, with the SIDs that lost which rights and its
+//! DACL before as SDDL, and each that couldn't be changed or read, go to the admin-only log
+//! ([`to_admin_log`]); the world-readable line gets their counts. Hardening is never 56, a
+//! failure included. It undoes nothing a pool user changed during a session: pre-logon
+//! hardening comes with the run-group PR.
 
 use std::collections::BTreeMap;
 
@@ -74,7 +75,7 @@ pub struct Hardened {
     pub tasks: usize,
     /// Tasks that run as the lawyer that needed it and couldn't have it: a full descriptor
     /// (with its SACL) that couldn't be read, a DACL that couldn't be parsed or is NULL, a write
-    /// refused, or a read-back whose owner, group or SACL changed.
+    /// refused, or a read-back whose owner, group or SACL changed, or whose DACL still needs it.
     pub failed: usize,
     /// Tasks that run as the lawyer whose descriptor (without its SACL) couldn't be read, so
     /// whether they need it can't be told.
@@ -208,7 +209,12 @@ pub(super) fn harden_task<S: Sweeper>(
     let checked = fs
         .task_security(folder, name, true)
         .map_err(|why| format!("it couldn't be read back ({why})"))
-        .and_then(|back| kept_as_read(&read.bytes, &back.bytes));
+        .and_then(|back| kept_as_read(&read.bytes, &back.bytes).map(|()| back.bytes))
+        .and_then(|back| match needs(fs, groups, pool, lawyer, &back) {
+            Ok(None) => Ok(()),
+            Ok(Some(_)) => Err("its DACL still gives standard users write".to_owned()),
+            Err(why) => Err(format!("its DACL couldn't be checked ({why})")),
+        });
     match checked {
         Ok(()) => {
             hardened.tasks += 1;

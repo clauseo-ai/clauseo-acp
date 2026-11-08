@@ -454,6 +454,38 @@ fn a_write_whose_read_back_changed_the_owner_group_or_sacl_is_a_failure() {
 }
 
 #[test]
+fn a_write_whose_read_back_still_gives_users_write_is_a_failure() {
+    let mut fake = loose(user(OWNER), descriptor("S-1-5-32-544", &loose_dacl()));
+    // The write is taken, but the descriptor reads back as it was: Users still hold write.
+    fake.secure_keeps.push("loose".to_owned());
+    assert_eq!(sweep(&mut fake), SweepExit::Done);
+    assert_eq!(fake.secured.len(), 1);
+    let line = line(&fake);
+    assert!(line.contains("write removed, 1 couldn't be"), "{line}");
+    let admin = fake.admin_logged.join("\n");
+    assert!(
+        admin.contains("but its DACL still gives standard users write"),
+        "{admin}"
+    );
+    assert!(!admin.contains("hardened a task"), "{admin}");
+}
+
+#[test]
+fn a_write_whose_read_back_is_clean_is_counted_as_hardened() {
+    let mut fake = loose(user(OWNER), descriptor("S-1-5-32-544", &loose_dacl()));
+    assert_eq!(sweep(&mut fake), SweepExit::Done);
+    assert_eq!(fake.secured.len(), 1);
+    let line = line(&fake);
+    assert!(
+        line.contains("write removed, 0 couldn't be, 0 couldn't be read"),
+        "{line}"
+    );
+    let admin = fake.admin_logged.join("\n");
+    assert!(admin.contains("hardened a task"), "{admin}");
+    assert!(!admin.contains("but its"), "{admin}");
+}
+
+#[test]
 fn a_task_whose_principal_cant_be_read_is_counted_by_harden_loose_tasks() {
     let mut fake = Fake::new(&[1010]);
     fake.unread("\\A", "unread");

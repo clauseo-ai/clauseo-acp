@@ -136,6 +136,8 @@ struct Fake {
     sddls: BTreeMap<String, String>,
     sacl_refuse: Vec<String>,
     secure_mangles: Vec<String>,
+    /// The names whose write is recorded but leaves the descriptor as it was.
+    secure_keeps: Vec<String>,
     /// SIDs whose kind (`is_group`) can't be read.
     kinds_unread: Vec<Sid>,
 }
@@ -200,6 +202,7 @@ impl Fake {
             sddls: BTreeMap::new(),
             sacl_refuse: Vec::new(),
             secure_mangles: Vec::new(),
+            secure_keeps: Vec::new(),
             kinds_unread: Vec::new(),
         }
     }
@@ -554,6 +557,9 @@ impl Sweeper for Fake {
             return Err("IRegisteredTask::SetSecurityDescriptor failed (0x80070005)".to_owned());
         }
         self.secured.push((name.to_owned(), descriptor.to_vec()));
+        if self.secure_keeps.iter().any(|kept| kept == name) {
+            return Ok(());
+        }
         let stored = if self.secure_mangles.iter().any(|mangled| mangled == name) {
             hardening::admin_owned()
         } else {
