@@ -1043,15 +1043,17 @@ What set-up changes:
   `O:BAG:BAD:(A;;CCDCLCSWRP;;;BA)(A;;CCDCSW;;;WD)`, with the deny in front.
 - The value as it was before is kept in `HKLM\SOFTWARE\Clauseo\Sandbox\MachineLaunch`, a key only
   SYSTEM and Administrators can open: `Original` holds the old bytes (empty when there was no
-  value) and `Written` holds what Clauseo last wrote.
+  value), `Written` holds what Clauseo last wrote, and `PutBack` is 1 once Clauseo has had to put
+  its deny back after something else rewrote the value.
 - Clauseo's SYSTEM task `\Clauseo\SandboxRefresh` puts the deny back at each run if something
   removed it, and writes an Event Log line (source "Clauseo Sandbox") when it does.
 - A value Clauseo can't read as a valid COM security descriptor is never changed. Neither is a
   value whose entries use COM's old form, `COM_RIGHTS_EXECUTE` alone, since COM refuses a list
   that mixes the two forms.
-- Uninstalling takes the deny off. If the value is still exactly what Clauseo wrote, the old bytes
-  go back unchanged, and a value that wasn't there before is deleted. If something changed the
-  value since, only Clauseo's deny comes off.
+- Uninstalling takes the deny off. If the value is still exactly what set-up first wrote, the old
+  bytes go back unchanged, and a value that wasn't there before is deleted. If anything rewrote
+  the value since, even when Clauseo then put its deny back, only Clauseo's exact entry comes
+  off and everything else stays.
 
 The guard's state is in `HKLM\SOFTWARE\Clauseo\Sandbox`, value `MachineLaunchDeny`:
 

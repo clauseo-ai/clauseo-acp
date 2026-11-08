@@ -2403,7 +2403,9 @@ group machine-wide takes nothing from them.
   subkey `HKLM\SOFTWARE\Clauseo\Sandbox\MachineLaunch` (`Original`, empty when there was no
   value). The subkey has a protected DACL that grants only SYSTEM and Administrators, so the
   pool, which reads the record, can't read or change the backup. The guard also stores the bytes
-  it last wrote (`Written`), set before each write. A later re-apply keeps the first `Original`.
+  it last wrote (`Written`), set before each write. A later re-apply (a put-back after drift)
+  keeps the first `Original` and sets `PutBack` to 1: from then on the value holds someone
+  else's edit, which no restore may undo.
 - **Where.** Set-up step 8c applies the guard elevated, after the network and once the group and
   the record exist (`late_steps::launch_deny`). Every run of `\Clauseo\SandboxRefresh` applies
   it again as SYSTEM, after the admin copy's steps, under the set-up lock
@@ -2411,17 +2413,21 @@ group machine-wide takes nothing from them.
   `Removing` set. A run that finds a deny Clauseo wrote has gone (drift) puts it back and logs an
   information line. The step never fails the set-up.
 - **Removal.** `--remove` (after `DeviceSync`'s deny, before the group goes) checks the value
-  first. If it is exactly the bytes Clauseo wrote last, the backup goes back byte for byte, and
-  a backup of "no value" deletes the value. Otherwise only the denies naming the group come off
-  and every other entry stays. A value that holds nothing but Windows' default after that, on a
-  machine that had no value, is deleted. A value that won't parse is left and logged. Then the
+  first. The backup goes back byte for byte only when the value is exactly the bytes Clauseo
+  wrote and there has been no put-back since the first write, and a backup of "no value" then
+  deletes the value. Otherwise only our exact deny comes off: a plain deny, no flags, mask
+  `0x1F`, the group's SID. Every other entry stays, a deny for the group with another mask or
+  flags included. A value that holds nothing but Windows' default after that, on a machine that
+  had no value and saw no put-back, is deleted. A value that won't parse is left and logged. Then the
   backup subkey and the state go. A set-up rollback that deletes a group it made removes the
   deny first, and keeps the group if it can't.
 - **Group Policy.** `HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DCOM\MachineLaunchRestriction`
   (an SDDL string, written by the "DCOM: Machine Launch Restrictions in Security Descriptor
   Definition Language (SDDL) syntax" policy, and common on Entra- or Intune-managed machines)
   takes the place of the value, so our write doesn't count while the policy is set. The guard
-  converts the policy's SDDL with Windows and checks it for the same deny. If the deny is there,
+  converts the policy's SDDL with Windows and checks it for the same deny. That check reads only
+  the header and the DACL's structure, so SDDL with no `O:`/`G:` part, or with old-form entries,
+  still counts; nothing read so is ever written. If the deny is there,
   the state is `policy`. If not, the state is `degraded: group policy`. The value is still
   written either way, so the guard holds once the policy goes. Firm IT adds the ACE to the GPO
   (`docs/firm-it.md`).
