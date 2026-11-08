@@ -11,7 +11,7 @@ use serde_json::json;
 
 use super::super::pending::Press;
 use super::fakes::{Rig, command, rig, setup_events};
-use super::{MAIN, claude, codex, missing};
+use super::{MAIN, SETTINGS, claude, codex, missing};
 use crate::bridge::lock;
 use crate::setup::refresh::{SettingsRead, apply_settings};
 use crate::setup::{KeyWrite, SetupBackend};
@@ -273,6 +273,40 @@ fn cancel_after_a_failed_install_drops_the_press() {
         "{:?}",
         rig.calls()
     );
+}
+
+/// `SignOut` after a failed install drops the kept press: a later Retry's `Ready` starts no
+/// stale sign-in.
+#[test]
+fn sign_out_after_a_failed_install_drops_the_press() {
+    let rig = rig(true);
+    not_installed(&rig, &codex());
+    press(&rig, "start_sign_in", &codex(), &json!({}));
+    pump(
+        &rig,
+        &codex(),
+        vec![failed(&codex(), FailureKind::SetupFailed)],
+    );
+    lock(&rig.agents.states).insert(codex(), failed(&codex(), FailureKind::SetupFailed));
+    assert_eq!(
+        pending(&rig, &codex()),
+        Some(Press::SignIn(Method::Browser))
+    );
+    // SignOut comes from the settings window.
+    let answer = block_on(
+        rig.setup()
+            .run(SETTINGS, command("sign_out", &codex(), &json!({}))),
+    );
+    assert_eq!(answer, Ok(CommandOutcome::Done), "sign_out");
+    assert_eq!(pending(&rig, &codex()), None, "dropped on SignOut");
+    press(
+        &rig,
+        "retry_agent_install",
+        &codex(),
+        &json!({ "use_system_proxy": false }),
+    );
+    pump(&rig, &codex(), vec![InstallState::Installing, ready()]);
+    assert_eq!(sign_ins_started(&rig), 0, "{:?}", rig.calls());
 }
 
 #[test]

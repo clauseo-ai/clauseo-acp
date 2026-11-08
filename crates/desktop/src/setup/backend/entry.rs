@@ -83,9 +83,23 @@ pub(crate) fn progress(state: &InstallState, hosts: &[String]) -> Option<Install
     })
 }
 
+/// Logs `state` published to the windows, every state but the download's ticks: with the
+/// agents' own line as each is sent, the log shows any lag between the job and the windows.
+/// On the lifecycle target, as host.log keeps INFO only from `clauseo_*::lifecycle`.
+pub(super) fn log_published(agent: &AgentId, state: &InstallState) {
+    if let Some(word) = published_word(state) {
+        tracing::info!(
+            target: "clauseo_desktop::lifecycle",
+            %agent,
+            state = word,
+            "install state published to the windows"
+        );
+    }
+}
+
 /// The word for an install state's publish line; `None` for `Downloading`, which ticks every
 /// 250 ms.
-pub(super) fn published_word(state: &InstallState) -> Option<&'static str> {
+fn published_word(state: &InstallState) -> Option<&'static str> {
     match state {
         InstallState::Downloading { .. } => None,
         InstallState::Installing => Some("installing"),

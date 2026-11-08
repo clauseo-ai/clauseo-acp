@@ -29,11 +29,12 @@
 //! `EBUSY`, `EPERM` or `EACCES`, and on Windows the rename meeting
 //! `ERROR_SHARING_VIOLATION`, `ERROR_LOCK_VIOLATION` or `ERROR_ACCESS_DENIED` (an antivirus
 //! scanning the files npm has just written holds them open for a moment). `npm ci` runs again
-//! after 250 ms, 500 ms, 1 s and 2 s, the rename after those and 4 s and 8 s more, keeping the
-//! temp folder and the checked tarballs; only then does the try fail and the job's own retry,
-//! which starts the folder over, take it. Before either runs again, and before the rename,
-//! npm's whole process tree (its job object on Windows, its group on Unix) has ended, so no
-//! process of ours holds a file in the folder.
+//! after 250 ms, 500 ms, 1 s and 2 s, the rename after those, 4 s, and 8 s six times more
+//! (55.75 s), keeping the temp folder and the checked tarballs. Then the try fails: after a
+//! failed `npm ci` the job's own retry starts the folder over, and after a failed rename it
+//! retries the rename alone on the kept, re-checked tree (`kept`). Before either runs
+//! again, and before the rename, npm's whole process tree (its job object on Windows, its
+//! group on Unix) has ended, so no process of ours holds a file in the folder.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -47,11 +48,12 @@ use futures::AsyncReadExt as _;
 use futures::future::{Either, join3, select};
 
 use super::files::{Fetched, npm_cache};
+use super::kept::{self, Placed};
 use super::{Job, NodeChoice, Run, TryError};
 use crate::config::AgentsConfig;
 use crate::node::{self, NodeSource, node_line};
 use crate::platform::Os;
-use crate::receipt::{Receipt, install_folder, install_root, script_path, write_receipt};
+use crate::receipt::install_root;
 use crate::state::{InstallState, Installed};
 use crate::write;
 
@@ -71,15 +73,21 @@ const NPM_WAITS: [Duration; 4] = [
     Duration::from_secs(1),
     Duration::from_secs(2),
 ];
-/// The waits before each in-place retry of the rename after a sharing or lock error: 15.75 s
-/// in all, since an antivirus may scan the thousands of fresh files for several seconds (the
-/// Windows VM with Defender on met `Access is denied` on three tries in a row).
-const RENAME_WAITS: [Duration; 6] = [
+/// The waits before each in-place retry of the rename after a sharing or lock error: doubling
+/// to 8 s, then every 8 s, 55.75 s in all. A folder walker (an indexer, a backup, an EDR) may
+/// hold the thousands of fresh files for most of a minute; the Windows VM met `Access is
+/// denied` past the first 15.75 s. A tree still held after that is kept (`kept`).
+const RENAME_WAITS: [Duration; 11] = [
     Duration::from_millis(250),
     Duration::from_millis(500),
     Duration::from_secs(1),
     Duration::from_secs(2),
     Duration::from_secs(4),
+    Duration::from_secs(8),
+    Duration::from_secs(8),
+    Duration::from_secs(8),
+    Duration::from_secs(8),
+    Duration::from_secs(8),
     Duration::from_secs(8),
 ];
 /// How often, and how many times, a finished npm's process tree is checked for its end
@@ -113,7 +121,7 @@ pub(super) async fn install<T: Timer + Send + Sync>(
     let agent = &job.ticket.agent;
     let snapshot = &config.snapshot;
     let platform = config.platform;
-    let missing = || TryError::retry("the snapshot does not know this agent", config);
+    let missing = || missing_agent(config);
     let entry = snapshot.agent(agent).ok_or_else(missing)?;
     let pins = snapshot.pins(agent).ok_or_else(missing)?;
     let hash = snapshot.install_hash(agent, platform).ok_or_else(missing)?;
@@ -132,7 +140,7 @@ pub(super) async fn install<T: Timer + Send + Sync>(
             if *fetch {
                 let archive = snapshot.node_archive(platform);
                 let (Some(path), Some(archive)) = (&fetched.node_archive, archive) else {
-                    return Err(TryError::retry("Node's archive is missing", config));
+                    return Err(missing_archive(config));
                 };
                 node::install_runtime(path, snapshot.node(), archive, dir, platform.os)
                     .map_err(|err| TryError::extract(&err, config))?;
@@ -175,6 +183,7 @@ pub(super) async fn install<T: Timer + Send + Sync>(
         },
         common: common_flags(&cache, &npmrc, &global),
     };
+    let marked = std::cell::Cell::new(false);
     let done = async {
         let lock = pins
             .lock_with_tarballs(&fetched.tarballs, platform)
@@ -195,44 +204,56 @@ pub(super) async fn install<T: Timer + Send + Sync>(
             |failed: &NpmFailed| failed.busy().map(str::to_owned),
         )
         .await
-        .map_err(|failed| failed.err)?;
+        .map_err(|ended| match ended {
+            Ended::Failed(failed) => failed.err,
+            Ended::Paused => TryError::cancelled(),
+        })?;
         if let Some(link) = first_link(&tmp) {
             let detail = format!("npm left a link in the install folder: {}", link.display());
             return Err(TryError::retry(&detail, config));
         }
-        let folder = install_folder(&config.data_dir, agent, &hash);
-        write::remove_dir_all(&folder).map_err(io("clearing the install folder"))?;
-        rename_held(job, &tmp, &folder)
-            .await
-            .map_err(io("renaming the install folder"))?;
-        let receipt = Receipt::new(
-            agent,
-            pins.version(),
-            &hash,
-            &program,
-            &version,
-            platform,
-            config.clock.now(),
-        );
-        write_receipt(&folder, &receipt).map_err(io("writing the receipt"))?;
-        Ok(Installed {
-            node: program.clone(),
-            script: script_path(&folder, entry),
-            folder,
-            version: pins.version().to_owned(),
-        })
+        // From here the tree is finished: a failed rename keeps it for the next try (`kept`).
+        kept::mark(&tmp, agent, pins.version(), &hash).map_err(io("marking the set-up done"))?;
+        marked.set(true);
+        let placed = Placed {
+            hash: &hash,
+            version: pins.version(),
+            entry,
+            program: &program,
+            node_version: &version,
+        };
+        kept::place(job, &tmp, &placed).await
     }
     .await;
-    if done.is_err() {
+    if done.is_err() && !marked.get() {
         drop(write::remove_dir_all(&tmp));
     }
     done
 }
 
+/// How an in-place retry ended without success.
+#[derive(Debug)]
+pub(super) enum Ended<E> {
+    /// The step's error: not a sharing or lock one, or the last retry's.
+    Failed(E),
+    /// A pause came during a wait: the try ends as paused, not with the step's error.
+    Paused,
+}
+
+/// The snapshot does not know the agent: deterministic, so never `SetupFailed`.
+pub(super) fn missing_agent(config: &AgentsConfig) -> TryError {
+    TryError::retry("the snapshot does not know this agent", config).not_setup()
+}
+
+/// Node's archive was not fetched though it was needed: no set-up failure either.
+pub(super) fn missing_archive(config: &AgentsConfig) -> TryError {
+    TryError::retry("Node's archive is missing", config).not_setup()
+}
+
 /// Runs `step`, and again after each of `waits` while it fails with an error `busy`
-/// names a sharing or lock cause for; any other error, the last retry's, or a pause during a
-/// wait (`wait` answering `false`) ends it with that error. Each retry is logged with fixed
-/// words, naming `what`, the cause and the wait.
+/// names a sharing or lock cause for; any other error or the last retry's ends it with that
+/// error, and a pause during a wait (`wait` answering `false`) as [`Ended::Paused`]. Each
+/// retry is logged with fixed words, naming `what`, the cause and the wait.
 pub(super) async fn in_place<R, E>(
     what: &str,
     agent: &AgentId,
@@ -240,7 +261,7 @@ pub(super) async fn in_place<R, E>(
     wait: impl AsyncFn(Duration) -> bool,
     mut step: impl AsyncFnMut() -> Result<R, E>,
     busy: impl Fn(&E) -> Option<String>,
-) -> Result<R, E> {
+) -> Result<R, Ended<E>> {
     let mut waits = waits.iter();
     loop {
         let err = match step().await {
@@ -248,10 +269,10 @@ pub(super) async fn in_place<R, E>(
             Err(err) => err,
         };
         let Some(cause) = busy(&err) else {
-            return Err(err);
+            return Err(Ended::Failed(err));
         };
         let Some(&pause) = waits.next() else {
-            return Err(err);
+            return Err(Ended::Failed(err));
         };
         tracing::warn!(
             %agent,
@@ -261,18 +282,18 @@ pub(super) async fn in_place<R, E>(
             "agent install: a sharing or lock error; retrying the step in place"
         );
         if !wait(pause).await {
-            return Err(err);
+            return Err(Ended::Paused);
         }
     }
 }
 
 /// Renames `tmp` to `folder`, retried in place after [`RENAME_WAITS`] while another process
 /// holds a file in it (Windows' 5, 32 or 33: a folder walker, an indexer, an antivirus).
-async fn rename_held<T: Timer + Send + Sync>(
+pub(super) async fn rename_held<T: Timer + Send + Sync>(
     job: &Job<T>,
     tmp: &Path,
     folder: &Path,
-) -> std::io::Result<()> {
+) -> Result<(), TryError> {
     let config = &job.config;
     let os = rename_os(config);
     in_place(
@@ -284,6 +305,10 @@ async fn rename_held<T: Timer + Send + Sync>(
         |err: &std::io::Error| windows_busy(err, os),
     )
     .await
+    .map_err(|ended| match ended {
+        Ended::Failed(err) => TryError::io("renaming the install folder", &err, config),
+        Ended::Paused => TryError::cancelled(),
+    })
 }
 
 /// Renames the finished temp folder to its `<hash>` folder; under `test-support`, a
@@ -354,7 +379,7 @@ fn common_flags(cache: &Path, npmrc: &Path, global: &Path) -> Vec<OsString> {
 }
 
 /// The first symbolic link or junction under `dir`, not following any.
-fn first_link(dir: &Path) -> Option<PathBuf> {
+pub(super) fn first_link(dir: &Path) -> Option<PathBuf> {
     let mut stack = vec![dir.to_path_buf()];
     while let Some(folder) = stack.pop() {
         let Ok(entries) = std::fs::read_dir(&folder) else {
@@ -399,15 +424,25 @@ impl<T> Npm<'_, T> {
 
 impl<T: Timer + Send + Sync> Npm<'_, T> {
     /// Waits, up to 10 s, until npm's whole tree has ended (its handle has sent the kill),
-    /// so nothing of ours still holds a file in the folder npm ran in. A pause ends the wait.
-    async fn tree_ended(&self, tree: &TreeWatch) {
+    /// so nothing of ours still holds a file in the folder npm ran in, whether npm exited, ran
+    /// out of time or was cut short by a pause: the temp folder's removal that follows a pause
+    /// or a timeout must not race npm's last writes. After an exit a pause ends the wait (the
+    /// job is ending); after a pause (`pausable` false) only the tree's end or the 10 s does.
+    async fn tree_ended(&self, tree: &TreeWatch, pausable: bool) {
         if tree.gone() {
             return;
         }
         let agent = &self.job.ticket.agent;
         tracing::info!(%agent, "agent install: waiting for npm's processes to end");
         for _ in 0..TREE_POLLS {
-            if !self.job.wait(TREE_POLL).await || tree.gone() {
+            if pausable {
+                if !self.job.wait(TREE_POLL).await {
+                    return;
+                }
+            } else {
+                self.job.timer.after(TREE_POLL).await;
+            }
+            if tree.gone() {
                 return;
             }
         }
@@ -496,9 +531,8 @@ impl<T: Timer + Send + Sync> Npm<'_, T> {
         };
         let tree = handle.tree_watch();
         drop(handle);
-        if ran.is_ok() {
-            self.tree_ended(&tree).await;
-        }
+        // A pause (`Err(None)`) has cancelled the job: its wait must not end at once.
+        self.tree_ended(&tree, !matches!(ran, Err(None))).await;
         match ran {
             Ok(Some(0)) => Ok(()),
             Ok(code) => {
@@ -512,8 +546,9 @@ impl<T: Timer + Send + Sync> Npm<'_, T> {
                 if module_missing && code_line.is_none() {
                     self.drop_runtime(&mut detail);
                 }
-                let enospc = code_line.as_deref().is_some_and(|l| l.ends_with("ENOSPC"));
-                Err((TryError::npm(&detail, enospc, config), code_line))
+                let code = code_line.as_deref().and_then(npm_code);
+                let err = TryError::npm(&detail, code, config);
+                Err((err, code_line))
             }
             Err(None) => Err((TryError::cancelled(), None)),
             Err(Some(())) => Err((

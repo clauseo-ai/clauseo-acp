@@ -11,8 +11,8 @@
 //!   and when it ends `Failed`: the failed view shows with its Retry, and a retry that ends
 //!   `Ready` carries on to the sign-in the lawyer asked for.
 //! - **Dropped** when the install ends `Paused`, when the agent turns out `Managed`, on
-//!   `CancelSignIn` (the install carries on), and when a key or an endpoint takes over
-//!   (`AgentsBackend::end_sign_in`).
+//!   `CancelSignIn` (the install carries on), on `SignOut`, and when a key or an endpoint takes
+//!   over (`AgentsBackend::end_sign_in`).
 //! - One per agent: a second press replaces the first (`Setup` lets it past the sign-in join).
 //! - Memory only: nothing of it outlives a quit.
 //!
@@ -82,6 +82,23 @@ pub(super) fn drop_press(backend: &AgentsBackend, agent: &AgentId, why: &'static
     tracing::info!(%agent, method = ?press, why, "pending sign-in dropped");
     show_s18(backend, agent);
     true
+}
+
+/// `SignOut`, refused over the lawyer's own login: a press kept through a failed install goes
+/// first, with the gate held, so a later Retry's `Ready` never starts a sign-in the lawyer has
+/// since signed out of; then the sign-out.
+pub(super) fn sign_out(backend: &AgentsBackend, agent: &AgentId) -> Result<(), HostError> {
+    backend.refuse_reused(agent)?;
+    {
+        let _gate = lock(&backend.signin_gate);
+        drop_press(backend, agent, "signed out");
+    }
+    backend
+        .agents
+        .sign_out(agent)
+        .map_err(|error| signin_error(&error))?;
+    backend.replaced(agent);
+    Ok(())
 }
 
 /// The pump's install `state` for `agent` other than `Ready`: `Paused` and `Managed` drop a
