@@ -417,8 +417,8 @@ fn the_refusal_says_the_accounts_stay_only_to_their_owner() {
                  Safe workspace, because it couldn't confirm that the program that sets it up, in \
                  Program Files, is the one Clauseo installed and that only administrators can \
                  change it. The Safe workspace's hidden Windows accounts are still on this \
-                 computer. Whoever looks after this computer can remove them. Clauseo's notes for \
-                 IT explain how.\"";
+                 computer. Your firm manages this computer's Windows accounts, and Clauseo's notes \
+                 for IT explain how to remove them.\"";
     assert!(english.lines().any(|line| line == words), "{words}");
     let approvals: serde_json::Value =
         serde_json::from_str(&read("../../ui/app/doc-approvals.json")).unwrap();
