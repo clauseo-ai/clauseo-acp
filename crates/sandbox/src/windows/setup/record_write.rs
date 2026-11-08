@@ -25,9 +25,9 @@ use super::lock::Descriptor;
 use super::record_key::{self, Counts, Keys};
 use super::record_values::{
     self, ADMIN_COPY_OWNER, ADMIN_COPY_SHA256, ADMIN_COPY_VERSION, ADMIN_VALUES, AdminValues,
-    CopyOwner, DATA_DIR, GROUP_SID, INSTALL_ID, OWNER_SID, POOL_SIDS, RECORD_SDDL, REMOVING,
-    RESET_OWED, RESET_SIDS, RawRecord, RegValue, SETUP_VALUES, USER_INSTALL_DIR, resets_with,
-    resets_without, sids_value,
+    CopyOwner, DATA_DIR, GROUP_SID, INSTALL_ID, OWNER_SID, OWNER_UNTRUSTED, POOL_SIDS, RECORD_SDDL,
+    REMOVING, RESET_OWED, RESET_SIDS, RawRecord, RegValue, SETUP_VALUES, USER_INSTALL_DIR,
+    resets_with, resets_without, sids_value,
 };
 use crate::windows::pool::{MachineRecord, pool_sids_from_multi_sz};
 use crate::windows::record::{RecordError, read_dword, read_qword, read_string, read_units};
@@ -172,6 +172,43 @@ pub(crate) fn write_reset_owed(key: &str, users: &[Sid]) -> Result<(), MachineEr
         return delete_values(key, &[RESET_OWED]);
     }
     set_value(&open_existing(key)?, RESET_OWED, &sids_value(users))
+}
+
+/// The record's `OwnerUntrusted` (`record_values::OWNER_UNTRUSTED`), each entry as written:
+/// empty when the key or the value is missing. The sweep reads it as SYSTEM.
+pub(crate) fn read_owner_untrusted(key: &str) -> Result<Vec<String>, MachineError> {
+    let subkey = HSTRING::from(key);
+    let name = HSTRING::from(OWNER_UNTRUSTED);
+    let units = read_units(
+        PCWSTR(subkey.as_ptr()),
+        PCWSTR(name.as_ptr()),
+        RRF_RT_REG_MULTI_SZ,
+    )
+    .map_err(reading)?;
+    let units = units.unwrap_or_default();
+    let texts = units
+        .split(|unit| *unit == 0)
+        .filter(|text| !text.is_empty());
+    Ok(texts.map(String::from_utf16_lossy).collect())
+}
+
+/// Writes the record's `OwnerUntrusted` as `entries`, deleting it when there are none, in the
+/// key as it is: never made ([`open_existing`]). The sweep calls it as SYSTEM under the set-up
+/// lock, and set-up under its own.
+pub(crate) fn write_owner_untrusted(key: &str, entries: &[String]) -> Result<(), MachineError> {
+    if entries.is_empty() {
+        return delete_values(key, &[OWNER_UNTRUSTED]);
+    }
+    let mut units: Vec<u16> = entries
+        .iter()
+        .flat_map(|entry| entry.encode_utf16().chain([0]))
+        .collect();
+    units.push(0);
+    set_value(
+        &open_existing(key)?,
+        OWNER_UNTRUSTED,
+        &RegValue::MultiSz(units),
+    )
 }
 
 /// The record's `REG_MULTI_SZ` list of SIDs `value`: empty when the key or the value is

@@ -38,6 +38,7 @@ use crate::windows::setup::pool_steps::windows_bits::{Com, WindowsBits};
 use crate::windows::setup::pool_steps::windows_record::{self, RecordLock};
 use crate::windows::setup::pool_steps::{Bits, Gate, Pool, Record, windows_gate};
 use crate::windows::setup::preflight::sid_text;
+use crate::windows::setup::record_write::{self, RECORD_KEY};
 use crate::windows::sids::Sid;
 
 pub(crate) mod admin_log;
@@ -365,6 +366,18 @@ impl Sweeper for WindowsSweeper {
         descriptor: &[u8],
     ) -> Result<(), Failed> {
         windows_harden::set_task_security(folder, name, descriptor)
+    }
+
+    fn task_cache_id(&mut self, path: &str) -> Result<Option<String>, Failed> {
+        windows_listing::task_cache_id(path)
+    }
+
+    fn owner_untrusted(&mut self) -> Result<Vec<String>, Failed> {
+        record_write::read_owner_untrusted(RECORD_KEY).map_err(|error| error.to_string())
+    }
+
+    fn set_owner_untrusted(&mut self, entries: &[String]) -> Result<(), Failed> {
+        record_write::write_owner_untrusted(RECORD_KEY, entries).map_err(|error| error.to_string())
     }
 }
 

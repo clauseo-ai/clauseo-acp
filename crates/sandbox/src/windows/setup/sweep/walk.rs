@@ -11,8 +11,14 @@ use super::group::Groups;
 use super::harden::{self, HardenWith};
 use super::{
     Failed, Names, Resolved, Sweeper, Swept, Task, file_trust, pool_owned, resolve, running,
+    untrusted,
 };
 use crate::windows::sids::Sid;
+
+/// Why a task whose owner hardening may have written, and that no principal or file names the
+/// pool's, is 56.
+const UNTRUSTED: &str = "hardening may have written this task's owner, and nothing else \
+                         names it not the pool's";
 
 /// What one task's sweep works with.
 pub(super) struct Walk<'w> {
@@ -55,7 +61,8 @@ pub(super) enum Found {
 /// way. A task the Task Scheduler won't give is held to its owner and its file
 /// ([`file_trust::by_file`]). A group's task is judged alike (a pool owner deleted, an owner
 /// that can't be read 56, any other ignored) and counted apart. A task left whose principal may
-/// be the lawyer is hardened ([`harden::harden_task`]), never 56.
+/// be the lawyer is hardened ([`harden::harden_task`]), never 56 unless its `Id` changed across
+/// the write. A task in the record's `OwnerUntrusted` has its owner ignored ([`untrusted`]).
 pub(super) fn sweep_task<S: Sweeper>(fs: &mut S, folder: &S::Folder, task: Task, at: Walk<'_>) {
     let Walk {
         pool,
@@ -103,6 +110,7 @@ pub(super) fn sweep_task<S: Sweeper>(fs: &mut S, folder: &S::Folder, task: Task,
             (found, group)
         }
     };
+    let found = distrusted(fs, folder, &task.name, found, swept);
     // Only a task left and read: a pool task is deleted, and one whose owner can't be read
     // can't be hardened either.
     let harden = lawyer_task
@@ -172,6 +180,31 @@ pub(super) fn sweep_task<S: Sweeper>(fs: &mut S, folder: &S::Folder, task: Task,
         swept
             .left_paths
             .push(running::task_path(&folder, &task.name));
+    }
+}
+
+/// `found` for the task `name` in `folder`, unless hardening may have written its owner
+/// ([`untrusted`]): then only its principal or its file naming the pool counts, and anything
+/// else, which only an owner could pass, is 56.
+fn distrusted<S: Sweeper>(
+    fs: &mut S,
+    folder: &S::Folder,
+    name: &str,
+    found: Found,
+    swept: &Swept,
+) -> Found {
+    if matches!(found, Found::Pool) || swept.owner_untrusted.is_empty() {
+        return found;
+    }
+    // A folder whose path can't be read is 56 already (`sweep_tasks`).
+    let path = fs
+        .folder_path(folder)
+        .map(|at| running::task_path(&at, name));
+    match path {
+        Ok(path) if untrusted::distrusts(fs, &swept.owner_untrusted, &path) => {
+            Found::Unread(UNTRUSTED.to_owned())
+        }
+        _ => found,
     }
 }
 

@@ -14,7 +14,7 @@
 //!   such a group, or a group or SID of unknown kind among its members, a failed lookup
 //!   counting as yes), or a name that resolves to no SID.
 //!
-//! Hardening takes, from each allow in its DACL that gives one of [`TASK_WRITE`] to a SID a pool
+//! Hardening takes, from each allow in its DACL that gives one of [`STRIPPED`] to a SID a pool
 //! user's token may hold (`Groups::pool_may_hold`: Users, Authenticated Users, Everyone,
 //! INTERACTIVE, LOCAL, CONSOLE LOGON, `ClauseoSandboxUsers`, a pool SID, a local group with a
 //! pool member), the rights [`STRIPPED`]; an entry left with no right goes. Every other entry
@@ -28,8 +28,16 @@
 //! its DACL needs nothing more. Each task changed, with the SIDs that lost which rights and its
 //! DACL before as SDDL, and each that couldn't be changed or read, go to the admin-only log
 //! ([`to_admin_log`]); the world-readable line gets their counts. Hardening is never 56, a
-//! failure included. It undoes nothing a pool user changed during a session: pre-logon
-//! hardening comes with the run-group PR.
+//! failure included, but for one case. Each read and the write look the task up by name, so a
+//! pool user holding `DELETE` (taken here, but held until then) could swap in its own task
+//! under the name, and SYSTEM would stamp the read `O:SY` or `O:BA` descriptor onto it. The
+//! task's `TaskCache\Tree` `Id` is read before the first read, before the write and after it.
+//! Changed before the write: nothing is written, the task is counted as swapped and logged, and
+//! the walk's judgment stands. Changed across it: nothing is restored, it is counted and logged,
+//! the sweep is 56 for its path, and its path and new `Id` go to the record's
+//! `OwnerUntrusted` (`untrusted.rs`), so later sweeps ignore its owner while that `Id` holds.
+//! It undoes nothing a pool user changed during a session: pre-logon hardening comes with the
+//! run-group PR.
 
 use std::collections::BTreeMap;
 
@@ -56,13 +64,13 @@ pub const HARDENED_OWNERS: [&str; 3] = [
 /// The rights that let their holder rewrite a task, or its DACL or owner and then the task:
 /// `FILE_WRITE_DATA`, `FILE_APPEND_DATA`, `FILE_WRITE_EA`, `FILE_WRITE_ATTRIBUTES` (the Task
 /// Scheduler's write bits), `WRITE_DAC`, `WRITE_OWNER` (an owner holds `WRITE_DAC`),
-/// `GENERIC_ALL` and `GENERIC_WRITE`; `FILE_ALL_ACCESS` holds the first. An allow giving any to a
-/// SID a pool user may hold is tightened.
+/// `GENERIC_ALL` and `GENERIC_WRITE`; `FILE_ALL_ACCESS` holds the first.
 pub const TASK_WRITE: u32 =
     0x2 | 0x4 | 0x10 | 0x100 | 0x4_0000 | 0x8_0000 | 0x1000_0000 | 0x4000_0000;
 
-/// What such an allow loses: [`TASK_WRITE`] and `DELETE`. Its other rights (read, execute,
-/// `READ_CONTROL`, `SYNCHRONIZE`) stay.
+/// What an allow to a SID a pool user may hold loses: [`TASK_WRITE`] and `DELETE`, which lets
+/// its holder delete the task and register its own under the name. An allow giving any of them
+/// is tightened; its other rights (read, execute, `READ_CONTROL`, `SYNCHRONIZE`) stay.
 pub const STRIPPED: u32 = TASK_WRITE | 0x1_0000;
 
 /// The most tasks one run names in the admin-only log; past it, their count.
@@ -86,6 +94,13 @@ pub struct Hardened {
     /// For [`harden_loose_tasks`] alone: folders whose tasks or subfolders couldn't be listed,
     /// or past [`FOLDERS_CAP`]; their tasks weren't checked.
     pub unlisted: usize,
+    /// Tasks whose `TaskCache\Tree` `Id` changed between the first read and the write (none
+    /// written), or across the write ([`Hardened::swapped_after`]).
+    pub swapped: usize,
+    /// Of those, each whose `Id` changed across the write: its path, not cleaned, and the `Id`
+    /// read after it (`None` where that couldn't be read), for the record's `OwnerUntrusted`
+    /// (`untrusted.rs`). Each keeps the sweep at 56.
+    pub swapped_after: Vec<(String, Option<String>)>,
     /// One line per task for the admin-only log: its path, cleaned, and what changed or why not.
     pub notes: Vec<String>,
 }
@@ -165,11 +180,22 @@ pub(super) fn harden_task<S: Sweeper>(
         groups,
         hardened,
     } = at;
-    let path = fs.folder_path(folder).map_or_else(
+    let raw = fs
+        .folder_path(folder)
+        .map(|folder| running::task_path(&folder, name));
+    let path = raw.as_ref().map_or_else(
         |_| format!("<a folder that can't be read>\\{name}"),
-        |folder| running::task_path(&folder, name),
+        Clone::clone,
     );
     let path = clean(&path);
+    // The task is looked up by name for each read and the write: its `TaskCache\Tree` `Id`,
+    // read before the first read, before the write and after it, tells whether a pool user
+    // holding `DELETE` swapped in its own task under the name meanwhile.
+    let id = |fs: &mut S| match &raw {
+        Ok(raw) => fs.task_cache_id(raw),
+        Err(why) => Err(why.clone()),
+    };
+    let first_id = id(fs);
     let not = |hardened: &mut Hardened, why: &str| {
         hardened.failed += 1;
         let note = format!("couldn't harden a task that runs as the lawyer, {path}: {why}");
@@ -203,8 +229,45 @@ pub(super) fn harden_task<S: Sweeper>(
     };
     let lost = describe(&changes);
     let before = dacl_part(&read.sddl);
+    let same = match (first_id, id(fs)) {
+        (Ok(Some(first)), Ok(Some(now))) if first == now => now,
+        (Err(why), _) | (_, Err(why)) => {
+            let why = format!("its Id couldn't be read ({why}), so nothing was written");
+            return not(hardened, &why);
+        }
+        // Another task under the name: nothing written, and the walk's judgment stands.
+        _ => {
+            hardened.swapped += 1;
+            let note = format!(
+                "didn't harden a task that runs as the lawyer, {path}: another task took its \
+                 name while it was read, so nothing was written"
+            );
+            hardened.notes.push(note);
+            return;
+        }
+    };
     if let Err(why) = fs.set_task_security(folder, name, &tightened) {
         return not(hardened, &format!("{why}; it would have lost: {lost}"));
+    }
+    let after = id(fs);
+    if after.as_ref().ok() != Some(&Some(same)) {
+        // 56, not a skip: our write may have stamped an `O:SY` or `O:BA` descriptor onto a
+        // pool user's task, which would then pass the owner rule. Nothing is restored; the
+        // task is listed in the record's `OwnerUntrusted` (`untrusted`), so later sweeps
+        // ignore its owner while its `Id` holds.
+        hardened.swapped += 1;
+        let note = format!(
+            "hardened a task that runs as the lawyer, {path}, but another task may have taken \
+             its name across the write, which may have given that task an administrator's \
+             owner; its owner is no longer trusted: {lost}; its DACL before: {before}"
+        );
+        hardened.notes.push(note);
+        if let Ok(raw) = &raw {
+            hardened
+                .swapped_after
+                .push((raw.clone(), after.ok().flatten()));
+        }
+        return;
     }
     let checked = fs
         .task_security(folder, name, true)
@@ -212,7 +275,7 @@ pub(super) fn harden_task<S: Sweeper>(
         .and_then(|back| kept_as_read(&read.bytes, &back.bytes).map(|()| back.bytes))
         .and_then(|back| match needs(fs, groups, pool, lawyer, &back) {
             Ok(None) => Ok(()),
-            Ok(Some(_)) => Err("its DACL still gives standard users write".to_owned()),
+            Ok(Some(_)) => Err("its DACL still gives standard users write or delete".to_owned()),
             Err(why) => Err(format!("its DACL couldn't be checked ({why})")),
         });
     match checked {
@@ -346,17 +409,18 @@ pub(crate) fn harden_loose_tasks<S: Sweeper>(fs: &mut S, pool: &Pool) -> Hardene
 
 /// Writes `hardened`'s notes to `fs`'s admin-only log, each a line starting `by`, at most
 /// [`HARDENED_LOGGED_CAP`] and then their count, and returns what the world-readable line says
-/// of them: `""` when nothing was hardened, failed or unread, else the counts alone, never a
-/// path.
+/// of them: `""` when nothing was hardened, failed, unread or swapped, else the counts alone,
+/// never a path.
 pub(crate) fn to_admin_log<S: Sweeper>(fs: &mut S, hardened: &Hardened, by: &str) -> String {
     let Hardened {
         tasks,
         failed,
         unread,
         principal_unreadable,
+        swapped,
         ..
     } = *hardened;
-    if tasks == 0 && failed == 0 && unread == 0 && principal_unreadable == 0 {
+    if tasks == 0 && failed == 0 && unread == 0 && principal_unreadable == 0 && swapped == 0 {
         return String::new();
     }
     let mut written = Ok(());
@@ -374,6 +438,9 @@ pub(crate) fn to_admin_log<S: Sweeper>(fs: &mut S, hardened: &Hardened, by: &str
     );
     if principal_unreadable > 0 {
         counts = format!("{counts}, {principal_unreadable} tasks whose principal couldn't be read");
+    }
+    if swapped > 0 {
+        counts = format!("{counts}, {swapped} tasks another task took the name of while hardened");
     }
     match written {
         Ok(()) => format!("{counts} (named in the admin-only log)"),

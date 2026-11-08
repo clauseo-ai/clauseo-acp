@@ -77,9 +77,10 @@
 //!    while listed and there again is 56. Nothing is deleted through a file or the registry. A
 //!    listing that can't be read is 56 too. A listed task left whose owner is SYSTEM,
 //!    Administrators or `TrustedInstaller` and whose principal may be the lawyer loses every
-//!    write its DACL gives an account a pool user may be ([`harden`]): the owner rule catches
-//!    a task a pool user registered, this one a task it could modify. Never 56, a failure
-//!    included;
+//!    write, delete and permission change its DACL gives an account a pool user may be
+//!    ([`harden`]): the owner rule catches a task a pool user registered, this one a task it
+//!    could modify. Never 56, a failure included, except a task whose `Id` changed across the
+//!    write: 56, and its owner ignored from then on while its `Id` holds ([`untrusted`]);
 //! 5. cancels every BITS job a pool user owns, whatever step 4 found (`BG_JOB_ENUM_ALL_USERS`,
 //!    each job's owner). One that can't be cancelled, an owner that can't be read, a list that
 //!    can't be read, or one of `JOBS_CAP` jobs is 57; 56 wins when both. Only then, with no
@@ -123,6 +124,7 @@ pub mod task_file;
 #[cfg(test)]
 mod tests;
 mod unlisted;
+pub mod untrusted;
 mod walk;
 #[cfg(windows)]
 mod windows_groups;
@@ -352,6 +354,14 @@ pub trait Sweeper: Gate + Bits + Record {
         name: &str,
         descriptor: &[u8],
     ) -> Result<(), Failed>;
+    /// The `Id` (a GUID in braces) of the task at `path` (`\A\name`) in the Task Scheduler's
+    /// cache (`TaskCache\Tree`); `Ok(None)` when its key is gone.
+    fn task_cache_id(&mut self, path: &str) -> Result<Option<String>, Failed>;
+    /// The record's `OwnerUntrusted` entries ([`untrusted`]), empty when it is missing.
+    fn owner_untrusted(&mut self) -> Result<Vec<String>, Failed>;
+    /// Writes the record's `OwnerUntrusted` as `entries`, deleting it when there are none, in
+    /// the key as it is. Called under the set-up lock.
+    fn set_owner_untrusted(&mut self, entries: &[String]) -> Result<(), Failed>;
 }
 
 /// Runs the sweep as the module says.
@@ -407,6 +417,13 @@ pub fn sweep(fs: &mut impl Sweeper) -> SweepExit {
         SweepExit::Done
     };
     let mut line = log_line(pool.users.len(), &swept, &jobs);
+    // The tasks whose owner hardening may have written, kept and added (`untrusted`).
+    let kept = untrusted::still_listed(fs, &swept.owner_untrusted);
+    let list = untrusted::with_added(fs, kept, &swept.hardened.swapped_after);
+    // A failure here leaves a task added unlisted, but this run is 56 already for it.
+    if let Err(why) = untrusted::store(fs, &swept.owner_untrusted, &list, true) {
+        line = format!("{line}; the record's OwnerUntrusted couldn't be written: {why}");
+    }
     line.push_str(&log_path::to_admin_log(
         fs,
         &swept.left_paths,
@@ -453,6 +470,14 @@ pub fn sweep_tasks<S: Sweeper>(fs: &mut S, pool: &[Sid], lawyer: Option<&Sid>) -
     let mut resolved = BTreeMap::new();
     let names = Names::of(fs, pool);
     let mut groups = Groups::of(fs);
+    // Read first: a task listed there has its owner ignored (`untrusted`).
+    match untrusted::read(fs) {
+        Ok(list) => swept.owner_untrusted = list,
+        Err(why) => {
+            swept.unlisted += 1;
+            swept.note(why);
+        }
+    }
     // Every task the listing gave, by path, for the cross-check (`unlisted`).
     let mut listed = Vec::new();
     let mut stack = match fs.root() {

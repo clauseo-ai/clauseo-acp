@@ -387,6 +387,17 @@ fn has_entry(
     Ok(false)
 }
 
+/// The `Id` of the task at `path` (`\A\name`), for [`Sweeper::task_cache_id`]: its `Tree`
+/// key's `Id`, read as [`task_cache_runnable`] reads it; `Ok(None)` when the key is gone.
+///
+/// [`Sweeper::task_cache_id`]: super::Sweeper::task_cache_id
+pub(super) fn task_cache_id(path: &str) -> Result<Option<String>, Failed> {
+    match Key::open(HKEY_LOCAL_MACHINE, &HSTRING::from(format!("{TREE}{path}")))? {
+        Some(key) => key.id(),
+        None => Ok(None),
+    }
+}
+
 /// Whether the key at `path` below `Tree` is there.
 pub(super) fn task_cache_key_present(path: &str) -> Result<bool, Failed> {
     let key = Key::open(HKEY_LOCAL_MACHINE, &HSTRING::from(format!("{TREE}{path}")))?;

@@ -147,10 +147,14 @@ pub const SWEEP_SEQUENCE: &str = "SweepSequence";
 /// (without the lock, `pool_steps::sequence` says why) as the marker's `M`; the marker is
 /// clean once [`SWEEP_SEQUENCE`] `>= M`.
 pub const SWEEP_NEXT: &str = "SweepNext";
+/// `OwnerUntrusted` (`REG_MULTI_SZ`, a set-up value): the tasks whose owner hardening may have
+/// written, each `{Id}\A\name`, whose owner the sweep ignores while their `Id` holds
+/// (`sweep::untrusted`). The sweep (as SYSTEM, under the set-up lock) and set-up write it.
+pub const OWNER_UNTRUSTED: &str = "OwnerUntrusted";
 /// The values the set-up owns, which a rollback or `--remove` deletes; the ones `--adopt`
 /// writes stay until `--remove` takes the admin copy away. Each `…Sequence` comes before its
 /// `…Next`, so a marker read during a removal can only wait longer (`pool_steps::sequence`).
-pub const SETUP_VALUES: [&str; 14] = [
+pub const SETUP_VALUES: [&str; 15] = [
     OWNER_SID,
     GROUP_SID,
     POOL_SIDS,
@@ -165,6 +169,7 @@ pub const SETUP_VALUES: [&str; 14] = [
     SWEEP_COMPLETED,
     SWEEP_SEQUENCE,
     SWEEP_NEXT,
+    OWNER_UNTRUSTED,
 ];
 
 /// `listed` (`ResetSids` as read) with each of `add` it lacks appended, in order.

@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 
 use super::harden::Hardened;
+use super::untrusted::Untrusted;
 use super::{FOLDERS_CAP, Failed, JOBS_CAP, Jobs};
 #[cfg(doc)]
 use super::{log_path, running, unlisted};
@@ -98,15 +99,23 @@ pub struct Swept {
     /// word, never trusted; logged cleaned and capped ([`log_path`]).
     pub group_authors: Vec<String>,
     /// The tasks that run as the lawyer hardened, and those that couldn't be (`harden.rs`):
-    /// counted in the log line, named in the admin-only log alone; never 56.
+    /// counted in the log line, named in the admin-only log alone; 56 only for a task whose
+    /// `Id` changed across the write ([`Hardened::swapped_after`]).
     pub hardened: Hardened,
+    /// The record's `OwnerUntrusted` as read at the walk's start (`untrusted.rs`): tasks whose
+    /// owner is ignored while their `Id` holds.
+    pub owner_untrusted: Vec<Untrusted>,
 }
 
 impl Swept {
     /// How many tasks the walk found that keep the run at 56: unreadable, unresolved, naming no
-    /// one, or the pool's and not deleted.
+    /// one, the pool's and not deleted, or swapped across hardening's write.
     pub(super) fn left_tasks(&self) -> usize {
-        self.unreadable + self.unresolved + self.no_principal + self.not_deleted
+        self.unreadable
+            + self.unresolved
+            + self.no_principal
+            + self.not_deleted
+            + self.hardened.swapped_after.len()
     }
 
     /// Whether a task of the pool's may be left: step 4's 56.
@@ -115,6 +124,7 @@ impl Swept {
             || self.no_principal > 0
             || self.unresolved > 0
             || self.not_deleted > 0
+            || !self.hardened.swapped_after.is_empty()
             || self.instances_not_stopped > 0
             || self.hidden > 0
             || self.arrived_pool > 0

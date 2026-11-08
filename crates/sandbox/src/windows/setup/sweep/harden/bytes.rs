@@ -4,7 +4,7 @@
 
 use std::fmt::Display;
 
-use super::{Failed, Loosened, STRIPPED, TASK_WRITE, Tightened};
+use super::{Failed, Loosened, STRIPPED, Tightened};
 use crate::windows::acl_bytes::{
     Acl, Descriptor, kind, mask, owner_bytes, owner_sid, sid, sid_text,
 };
@@ -15,7 +15,7 @@ pub(super) fn owner_of(descriptor: &[u8]) -> Option<Sid> {
     owner_sid(descriptor)
 }
 
-/// The self-relative descriptor `descriptor` with each allow that gives one of [`TASK_WRITE`] to
+/// The self-relative descriptor `descriptor` with each allow that gives one of [`STRIPPED`] to
 /// a SID `loose` holds tightened, as the module says: [`STRIPPED`] taken from its mask (the
 /// entry otherwise byte for byte, its flags kept), or the entry removed when nothing is left.
 /// `Ok(None)` when no allow is; `Err` when the descriptor or its DACL doesn't parse, or it has
@@ -39,7 +39,7 @@ pub fn tightened(
     let mut changes = Vec::new();
     for ace in acl.aces() {
         let rights = mask(ace).filter(|_| matches!(kind(ace), 0 | 4 | 5 | 9 | 11));
-        let Some(rights) = rights.filter(|rights| rights & TASK_WRITE != 0) else {
+        let Some(rights) = rights.filter(|rights| rights & STRIPPED != 0) else {
             kept.push(ace.to_vec());
             continue;
         };

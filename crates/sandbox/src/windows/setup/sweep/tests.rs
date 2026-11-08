@@ -19,6 +19,7 @@ mod principals;
 mod record;
 mod running;
 mod sequence;
+mod swapped;
 mod task_file;
 mod unlisted;
 mod walk;
@@ -140,6 +141,8 @@ struct Fake {
     secure_keeps: Vec<String>,
     /// SIDs whose kind (`is_group`) can't be read.
     kinds_unread: Vec<Sid>,
+    /// The tasks' cache `Id`s and the record's `OwnerUntrusted` ([`swapped::Ids`]).
+    ids: swapped::Ids,
 }
 
 /// The SDDL the fake gives a task not in `Fake::sddls`.
@@ -204,6 +207,7 @@ impl Fake {
             secure_mangles: Vec::new(),
             secure_keeps: Vec::new(),
             kinds_unread: Vec::new(),
+            ids: swapped::Ids::default(),
         }
     }
 
@@ -566,6 +570,20 @@ impl Sweeper for Fake {
             descriptor.to_vec()
         };
         self.descriptors.insert(name.to_owned(), Ok(stored));
+        Ok(())
+    }
+
+    fn task_cache_id(&mut self, path: &str) -> Result<Option<String>, Failed> {
+        Ok(swapped::cache_id(self, path))
+    }
+
+    fn owner_untrusted(&mut self) -> Result<Vec<String>, Failed> {
+        Ok(self.ids.record.clone())
+    }
+
+    fn set_owner_untrusted(&mut self, entries: &[String]) -> Result<(), Failed> {
+        assert_eq!(self.held, 1, "written under the set-up lock");
+        self.ids.record = entries.to_vec();
         Ok(())
     }
 }

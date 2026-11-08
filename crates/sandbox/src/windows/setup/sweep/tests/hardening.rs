@@ -1,7 +1,8 @@
 //! Hardening the tasks that run as the lawyer (`harden.rs`): an administrator's, SYSTEM's or
-//! `TrustedInstaller`'s task whose principal may be the lawyer loses exactly the write its DACL
-//! gives an account a pool user may be, every other byte kept; a task anyone else owns, or that
-//! runs as someone else, is untouched; nothing is ever added, and a failure is counted, never 56.
+//! `TrustedInstaller`'s task whose principal may be the lawyer loses exactly the write, delete
+//! and permission changes its DACL gives an account a pool user may be, every other byte kept;
+//! a task anyone else owns, or that runs as someone else, is untouched; nothing is ever added,
+//! and a failure is counted, never 56 (a swap across the write aside: `swapped.rs`).
 
 use super::super::harden::{STRIPPED, harden_loose_tasks, to_admin_log};
 use super::*;
@@ -69,7 +70,7 @@ fn described(owner: &str, sacl: Option<&[Vec<u8>]>, dacl: &[Vec<u8>]) -> Vec<u8>
 }
 
 /// A descriptor owned by `owner` with `dacl`, no SACL.
-fn descriptor(owner: &str, dacl: &[Vec<u8>]) -> Vec<u8> {
+pub(super) fn descriptor(owner: &str, dacl: &[Vec<u8>]) -> Vec<u8> {
     described(owner, None, dacl)
 }
 
@@ -94,7 +95,7 @@ pub(super) fn admin_owned() -> Vec<u8> {
 
 /// The DACL of a loose task: SYSTEM's and Administrators' all access, the lawyer's write, a
 /// deny, Users given write alone (`GW`), Everyone all access, and Authenticated Users read.
-fn loose_dacl() -> Vec<Vec<u8>> {
+pub(super) fn loose_dacl() -> Vec<Vec<u8>> {
     vec![
         ace(1, 0, GW, "S-1-5-21-1-2-3-1500"),
         allow(FA, "S-1-5-18"),
@@ -120,7 +121,7 @@ fn hardened_dacl() -> Vec<Vec<u8>> {
 }
 
 /// A fake of pool user 1010 whose task `\A\loose` runs as `principal` with `descriptor`.
-fn loose(principal: Principal, descriptor: Vec<u8>) -> Fake {
+pub(super) fn loose(principal: Principal, descriptor: Vec<u8>) -> Fake {
     let mut fake = Fake::new(&[1010]);
     fake.task("\\A", "loose", principal);
     fake.descriptors.insert("loose".to_owned(), Ok(descriptor));
@@ -277,6 +278,31 @@ fn a_mixed_entry_keeps_its_read_rights_and_its_flags() {
 }
 
 #[test]
+fn a_delete_only_entry_for_a_pool_may_be_sid_is_removed() {
+    let entries = [allow(FA, "S-1-5-18"), allow(0x1_0000, "S-1-5-32-545")];
+    let mut fake = loose(user(OWNER), descriptor("S-1-5-32-544", &entries));
+    assert_eq!(sweep(&mut fake), SweepExit::Done);
+    let want = descriptor("S-1-5-32-544", &[allow(FA, "S-1-5-18")]);
+    assert_eq!(fake.secured, [("loose".to_owned(), want)]);
+    let admin = fake.admin_logged.join("\n");
+    assert!(
+        admin.contains("S-1-5-32-545 lost 0x00010000 (its entry removed)"),
+        "{admin}"
+    );
+}
+
+#[test]
+fn a_mixed_entry_loses_delete_and_keeps_its_read_rights() {
+    // Everyone: read, execute and DELETE; the lawyer's DELETE stays.
+    let entries = [allow(FRFX | 0x1_0000, "S-1-1-0"), allow(0x1_0000, OWNER)];
+    let mut fake = loose(user(OWNER), descriptor("S-1-5-32-544", &entries));
+    assert_eq!(sweep(&mut fake), SweepExit::Done);
+    let want = [allow(FRFX, "S-1-1-0"), allow(0x1_0000, OWNER)];
+    let want = descriptor("S-1-5-32-544", &want);
+    assert_eq!(fake.secured, [("loose".to_owned(), want)]);
+}
+
+#[test]
 fn hardening_never_adds_a_right_and_spares_the_lawyer_admins_and_denies() {
     let entries = [
         allow(FA, "S-1-5-18"),
@@ -325,8 +351,7 @@ fn hardening_never_adds_a_right_and_spares_the_lawyer_admins_and_denies() {
         ace(1, 0, FA, "S-1-5-32-545"),
         allow(0x8000_0000, "S-1-5-32-545"),
         allow(0x1, "S-1-5-4"),
-        // DELETE alone isn't a write: left.
-        allow(0x1_0000, "S-1-1-0"),
+        // DELETE alone: the entry gone.
         allow(FA & !STRIPPED, "S-1-5-21-1-2-3-1100"),
         allow(FA & !STRIPPED, "S-1-5-21-1-2-3-1010"),
         allow(FA & !STRIPPED, "S-1-2-0"),
