@@ -169,7 +169,7 @@ impl Reserved {
 /// Whether `owner` may own the sandbox folder, or a file in it, of the desktop user `user`: the
 /// user, `SYSTEM` or `Administrators` (what an elevated process makes the owner of what it
 /// creates). The removal holds the data folder and the matter folders to it too.
-#[cfg(any(windows, test))]
+#[cfg(any(windows, test, feature = "test-support"))]
 pub(crate) fn owner_allowed(owner: &Sid, user: &Sid) -> bool {
     owner == user || ["S-1-5-18", "S-1-5-32-544"].contains(&owner.as_str())
 }
@@ -180,7 +180,7 @@ pub(crate) fn owner_allowed(owner: &Sid, user: &Sid) -> bool {
 /// anyway, and as the built-in Administrator, or with UAC off, the app makes its data folder
 /// Administrators'. SYSTEM, and anyone else, never: a standard user can't aim an elevated
 /// set-up at a folder such as `C:\ProgramData`.
-#[cfg(any(windows, test))]
+#[cfg(any(windows, test, feature = "test-support"))]
 pub(crate) fn data_dir_owner_allowed<E>(
     found: &Sid,
     requester: &Sid,

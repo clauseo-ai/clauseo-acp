@@ -39,7 +39,7 @@ use super::super::owner::Owner;
 use super::super::record_values::CopyOwner;
 use super::super::windows_machine::{Acting, Names};
 use super::super::{args, ffi, processes, profile, record_write};
-use super::{Removal, acting_token};
+use super::{Removal, acting_token, owners};
 use crate::windows::acl::object::Object;
 use crate::windows::acl_plan::in_folder;
 use crate::windows::apply::Surroundings;
@@ -49,7 +49,7 @@ use crate::windows::pool::MachineRecord;
 use crate::windows::private_dir::resolve_folder;
 use crate::windows::refresh::{self, SystemTask};
 use crate::windows::set_aside::forget_bookkeeping;
-use crate::windows::sids::{Reserved, Sid, owner_allowed};
+use crate::windows::sids::{Reserved, Sid};
 use crate::windows::wfp;
 use crate::windows::{FolderSupport, folder_support};
 
@@ -116,7 +116,7 @@ fn kind_of(what: &str, error: &io::Error) -> MachineError {
 }
 
 /// The record's `data_dir`, checked as the module says, its owner (and its `sandbox` folder's)
-/// held to [`owned_as_allowed`]: its final path; `None` when the folder or `sandbox` is missing.
+/// held to [`owners`]' rules: its final path; `None` when the folder or `sandbox` is missing.
 fn checked_data_dir(data_dir: &Path, owner: &Sid) -> Result<Option<PathBuf>, MachineError> {
     // The usage error quotes the path, which no cause here carries.
     let Ok(plain) = args::data_dir_of(Some(data_dir.as_os_str().to_owned())) else {
@@ -132,25 +132,13 @@ fn checked_data_dir(data_dir: &Path, owner: &Sid) -> Result<Option<PathBuf>, Mac
     let Some((folder, folder_owner)) = resolve(&plain, "the record's data folder")? else {
         return Ok(None);
     };
-    owned_as_allowed(&folder_owner, owner)?;
+    owners::data_folder(&folder_owner, owner)?;
     let sandbox = folder.join(SANDBOX_DIR);
     match resolve(&sandbox, "the data folder's sandbox folder")? {
         None => Ok(None),
-        Some((_, sandbox_owner)) => owned_as_allowed(&sandbox_owner, owner).map(|()| Some(folder)),
-    }
-}
-
-/// Whether `found`, the owner of the data folder or of its `sandbox` folder, may own it for the
-/// record's `owner`: the rule the sandbox folder is made and repaired by (`owner_allowed`:
-/// `owner`, Administrators or SYSTEM). Anyone else (a pool user, another account, Everyone)
-/// could have planted the ledger, so the folder is refused.
-fn owned_as_allowed(found: &Sid, owner: &Sid) -> Result<(), MachineError> {
-    if owner_allowed(found, owner) {
-        Ok(())
-    } else {
-        Err(MachineError::Other(
-            "the record's data folder isn't its owner's own".to_owned(),
-        ))
+        Some((_, sandbox_owner)) => {
+            owners::sandbox_folder(&sandbox_owner, owner).map(|()| Some(folder))
+        }
     }
 }
 
@@ -388,11 +376,7 @@ impl Removal for WindowsRemoval {
         }
         // The owner, Administrators or SYSTEM, as for the data folder: all that is done on a
         // folder that passes is taking our own pool and group entries, and our Low label, off.
-        if !owner_allowed(&folder_owner, owner) {
-            return Err(MachineError::Other(
-                "a matter's folder isn't its owner's own".to_owned(),
-            ));
-        }
+        owners::matter_folder(&folder_owner, owner)?;
         match folder_support(&folder) {
             Ok(FolderSupport::Ok) => Ok(()),
             Ok(other) => Err(MachineError::Other(format!(
@@ -400,43 +384,5 @@ impl Removal for WindowsRemoval {
             ))),
             Err(error) => Err(kind_of("a matter's folder check", &error)),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::owned_as_allowed;
-    use crate::windows::sids::Sid;
-
-    const OWNER: &str = "S-1-5-21-1000000001-1000000002-1000000003-1001";
-
-    fn allowed(found: &str) -> bool {
-        owned_as_allowed(&Sid::parse(found).unwrap(), &Sid::parse(OWNER).unwrap()).is_ok()
-    }
-
-    #[test]
-    fn the_records_owner_may_own_the_data_folder() {
-        assert!(allowed(OWNER));
-    }
-
-    #[test]
-    fn administrators_may_own_the_data_folder() {
-        assert!(allowed("S-1-5-32-544"));
-    }
-
-    #[test]
-    fn system_may_own_the_data_folder() {
-        assert!(allowed("S-1-5-18"));
-    }
-
-    #[test]
-    fn a_pool_user_may_not_own_the_data_folder() {
-        assert!(!allowed("S-1-5-21-1000000001-1000000002-1000000003-1042"));
-    }
-
-    #[test]
-    fn another_user_may_not_own_the_data_folder() {
-        assert!(!allowed("S-1-5-21-2000000001-2000000002-2000000003-1001"));
-        assert!(!allowed("S-1-1-0"));
     }
 }
