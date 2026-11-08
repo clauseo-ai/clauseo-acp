@@ -39,7 +39,7 @@ fn fixture_key() -> String {
 const ENDPOINT: &str = "https://example.invalid/latest.json";
 
 /// An app on the mock runtime with the app's checked context and the updater plugin.
-fn app() -> App<MockRuntime> {
+pub(super) fn app() -> App<MockRuntime> {
     mock_builder()
         .plugin_rust_only(tauri_plugin_updater::Builder::new().build())
         .build(crate::context::<MockRuntime>())
@@ -164,7 +164,7 @@ fn a_bad_signature_is_refused() {
 
 /// `latest.json` with this machine's own lookup keys added, so `Source` (which sets no target)
 /// finds an entry on every OS the tests run on.
-fn for_this_machine(mut manifest: Value) -> Value {
+pub(super) fn for_this_machine(mut manifest: Value) -> Value {
     let os = if cfg!(windows) {
         "windows"
     } else if cfg!(target_os = "macos") {
@@ -233,6 +233,58 @@ fn the_install_verifies_the_saved_file_again() {
         matches!(foreign, Err(UpdaterError::Other(_))),
         "{foreign:?}"
     );
+}
+
+/// The install refuses a file whose signature verifies but names another file: the fixture's
+/// payload is signed by the key for this version, as `file:payload.bin`, never this platform's
+/// installer. Refused before the plugin's `install` (which would run it) is reached.
+#[test]
+fn the_install_refuses_a_validly_signed_file_of_another_name() {
+    let app = app();
+    let scratch = Scratch::new("update-install-name", &["updates/0.4.1"]);
+    let source = Source::Endpoint {
+        url: ENDPOINT.parse().unwrap(),
+        pubkey: fixture_key(),
+    };
+    let update = source
+        .updater(app.handle())
+        .unwrap()
+        .restore_update(for_this_machine(fixture("latest.json")))
+        .unwrap()
+        .unwrap();
+    let payload = fixture_bytes("payload.bin");
+    update.verify(&payload).unwrap();
+    let downloaded = Downloaded {
+        version: "0.4.1".to_owned(),
+        path: scratch.file("updates/0.4.1/Clauseo-update", &payload),
+        handle: Opaque::new(Pending { update, source }),
+    };
+    let refused = plugin::install(app.handle(), &downloaded);
+    let line = if cfg!(target_os = "linux") {
+        "this platform installs no update"
+    } else {
+        "the signature is for another file than this platform's installer"
+    };
+    assert_eq!(refused, Err(UpdaterError::Signature(line.to_owned())));
+}
+
+/// The config's source takes its key from `plugins.updater.pubkey`, and has none while that is
+/// empty; a source set in code has its own.
+#[test]
+fn each_source_names_the_key_its_updater_trusts() {
+    let app = app();
+    let mut config = app.config().clone();
+    assert_eq!(Source::Config.pubkey(&config), None);
+    config.plugins.0.insert(
+        "updater".to_owned(),
+        serde_json::json!({ "pubkey": "a2V5" }),
+    );
+    assert_eq!(Source::Config.pubkey(&config).as_deref(), Some("a2V5"));
+    let endpoint = Source::Endpoint {
+        url: ENDPOINT.parse().unwrap(),
+        pubkey: fixture_key(),
+    };
+    assert_eq!(endpoint.pubkey(&config), Some(fixture_key()));
 }
 
 /// The config's source names no endpoint until R23 PR 6, so its updater fails to build, which is

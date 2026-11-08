@@ -199,7 +199,7 @@ pub(crate) fn after_host(
 
 /// The host log's target for the install's lines (0047's lifecycle targets: the file keeps info
 /// from a `clauseo_*` crate's `::lifecycle` target), so it records that an install ran.
-const LIFECYCLE: &str = "clauseo_desktop::lifecycle";
+pub(super) const LIFECYCLE: &str = "clauseo_desktop::lifecycle";
 
 /// An error's fixed line, for the log. Every error [`Steps::install`] gives is one of
 /// `plugin.rs`'s fixed lines (`failure`), never the plugin's text, so it names no path or URL.

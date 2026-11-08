@@ -33,6 +33,8 @@ use crate::test_support::Scratch;
 #[cfg(feature = "e2e")]
 use crate::test_support::block_on;
 
+mod download_binding;
+mod file_binding;
 mod plugin;
 mod test_key;
 mod watchdog;
