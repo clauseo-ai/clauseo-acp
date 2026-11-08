@@ -147,10 +147,19 @@ pub const SWEEP_SEQUENCE: &str = "SweepSequence";
 /// (without the lock, `pool_steps::sequence` says why) as the marker's `M`; the marker is
 /// clean once [`SWEEP_SEQUENCE`] `>= M`.
 pub const SWEEP_NEXT: &str = "SweepNext";
+/// `SweepLastExit` (`REG_DWORD`): the exit code of the last `--sweep-tasks` run past its
+/// gate, whatever it was, written by that run just before its log line, without the set-up
+/// lock (one instance runs at a time), before [`SWEEP_LAST_SEQUENCE`]. A launch whose marker
+/// awaits a sweep that a run ending 56 already served is refused at once (`runner::unclean`).
+/// Deleted with the set-up's values, before the sweep's numbers.
+pub const SWEEP_LAST_EXIT: &str = "SweepLastExit";
+/// `SweepLastSequence` (`REG_QWORD`): the number that run reserved from [`SWEEP_NEXT`],
+/// written after [`SWEEP_LAST_EXIT`]; a run that reserved none leaves it as it was.
+pub const SWEEP_LAST_SEQUENCE: &str = "SweepLastSequence";
 /// The values the set-up owns, which a rollback or `--remove` deletes; the ones `--adopt`
 /// writes stay until `--remove` takes the admin copy away. Each `…Sequence` comes before its
 /// `…Next`, so a marker read during a removal can only wait longer (`pool_steps::sequence`).
-pub const SETUP_VALUES: [&str; 14] = [
+pub const SETUP_VALUES: [&str; 16] = [
     OWNER_SID,
     GROUP_SID,
     POOL_SIDS,
@@ -162,6 +171,8 @@ pub const SETUP_VALUES: [&str; 14] = [
     STOP_COMPLETED,
     STOP_SEQUENCE,
     STOP_NEXT,
+    SWEEP_LAST_EXIT,
+    SWEEP_LAST_SEQUENCE,
     SWEEP_COMPLETED,
     SWEEP_SEQUENCE,
     SWEEP_NEXT,
@@ -537,6 +548,13 @@ mod tests {
         assert!(at(STOP_SEQUENCE) < at(STOP_NEXT));
         assert!(at(SWEEP_COMPLETED) < at(SWEEP_SEQUENCE));
         assert!(at(SWEEP_SEQUENCE) < at(SWEEP_NEXT));
+        // The last run's exit and number go first, so none outlives the numbers it counts in.
+        assert_eq!(
+            (SWEEP_LAST_EXIT, SWEEP_LAST_SEQUENCE),
+            ("SweepLastExit", "SweepLastSequence")
+        );
+        assert!(at(SWEEP_LAST_EXIT) < at(SWEEP_LAST_SEQUENCE));
+        assert!(at(SWEEP_LAST_SEQUENCE) < at(SWEEP_COMPLETED));
     }
 
     #[test]
