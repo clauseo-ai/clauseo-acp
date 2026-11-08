@@ -15,7 +15,9 @@ import { AlertDialog, AlertDialogClose, AlertDialogPopup } from "../ui/alert-dia
 import { Button } from "../ui/button.tsx";
 import { IconNotProtected } from "../icons/icons.tsx";
 import { useDisplay } from "../lib/display.ts";
+import { aw } from "../lib/words-allowances.ts";
 import { INSTALLER_CLOSE, pw } from "../lib/words-protection.ts";
+import type { ReactNode } from "react";
 import { useVersionWords } from "../lib/words-versions.ts";
 import { Say } from "./say.tsx";
 
@@ -53,6 +55,8 @@ export function NotProtectedNote({
   onClose,
   onProtect,
   onGetInstaller,
+  onSwitchOn,
+  remembered,
 }: {
   open: boolean;
   /** The matter's name as filed. */
@@ -76,6 +80,11 @@ export function NotProtectedNote({
   onProtect?: (() => void) | undefined;
   /** Optional: opens the installer's page ("Get the installer"); without it, no such button. */
   onGetInstaller?: (() => void) | undefined;
+  /** Optional, for "off" (R18): switches the Safe workspace back on ("Switch it back on"); without it, no button. */
+  onSwitchOn?: (() => void) | undefined;
+  /** Optional (R18): the matter's remembered answers, the rows under "Remembered for this matter"; none when left
+   * out. */
+  remembered?: ReactNode;
 }) {
   const w = useVersionWords();
   const { platform } = useDisplay();
@@ -98,6 +107,8 @@ export function NotProtectedNote({
             "The Safe workspace is off for {matter}. Clauseo can read and change files anywhere on this computer while it works here, without asking first.",
             { matter },
           ),
+          // R18: switching it off or on waits for the matter's next launch
+          aw(w.lang, "It applies the next time Clauseo starts work in this matter."),
         ]
       : why === "needs_set_up"
         ? [
@@ -222,6 +233,14 @@ export function NotProtectedNote({
                 )}
               </Say>
             </span>
+            {remembered !== undefined && (
+              <span className="np-note-remembered" data-testid="np-remembered">
+                <span className="np-note-remembered-head">
+                  <Say>{aw(w.lang, "Remembered for this matter")}</Say>
+                </span>
+                <span role="list">{remembered}</span>
+              </span>
+            )}
             {failed !== null && (
               <span className="np-note-failed" role="status" data-testid="protection-failed">
                 <Say>{failed}</Say>
@@ -234,6 +253,11 @@ export function NotProtectedNote({
             {onGetInstaller !== undefined && (
               <Button kind="quiet" onClick={onGetInstaller} data-testid="protection-installer">
                 <span className="deva-nudge">{p("Get the installer")}</span>
+              </Button>
+            )}
+            {why === "off" && onSwitchOn !== undefined && (
+              <Button kind="quiet" onClick={onSwitchOn} data-testid="protection-switch-on">
+                <span className="deva-nudge">{aw(w.lang, "Switch it back on")}</span>
               </Button>
             )}
             {retry !== null &&

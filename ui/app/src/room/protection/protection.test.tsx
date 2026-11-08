@@ -228,7 +228,9 @@ test.each([
   expect(noteText()).not.toContain("asks before each change");
   const buttons = [...note()!.querySelectorAll("button")].map((b) => b.textContent);
   expect(buttons.at(-1)).toBe(vt("en", "Understood"));
-  expect(buttons.length).toBe(why === "off" || why === "cant" ? 1 : 2);
+  // off: R18's "Switch it back on" beside Understood; cant: Understood alone
+  expect(buttons.length).toBe(why === "cant" ? 1 : 2);
+  if (why === "off") expect(buttons[0]).toBe("Switch it back on");
 });
 
 test("the pool's note: counts only, one line per nonzero count, and its ways out", async () => {

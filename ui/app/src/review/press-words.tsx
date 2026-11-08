@@ -52,3 +52,26 @@ export function PressInOrder({
   }, [press]);
   return children;
 }
+
+/** Presses, in order, each menu item or button whose words or accessible name are one of `texts`, each once it is on
+ * the page (R18: a menu's items, in its portal, carry no test id). */
+export function PressText({ texts, children }: { texts: readonly string[]; children: ReactNode }) {
+  useEffect(() => {
+    let done = 0;
+    const take = () => {
+      const text = texts[done];
+      if (text === undefined) return;
+      const el = [
+        ...document.querySelectorAll<HTMLElement>('[role="menuitem"], button, [aria-label]'),
+      ].find((e) => e.textContent === text || e.getAttribute("aria-label") === text);
+      if (el === undefined) return;
+      done += 1;
+      el.click();
+    };
+    const watch = new MutationObserver(take);
+    watch.observe(document.body, { subtree: true, childList: true });
+    take();
+    return () => watch.disconnect();
+  }, [texts]);
+  return children;
+}

@@ -15,6 +15,7 @@ import {
   IconSend,
 } from "@clauseo/components/icons/icons.tsx";
 import type { Display, Lang } from "@clauseo/components/lib/display.ts";
+import { aw } from "@clauseo/components/lib/words-allowances.ts";
 import { cw } from "@clauseo/components/lib/words-connectors.ts";
 import { LANGUAGE_NAMES, st, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
 import type { DisplayStore } from "../room/display-store.ts";
@@ -39,6 +40,7 @@ import { ConnectorsSection } from "./sections/connectors-load.tsx";
 import { PlansSection } from "./sections/plans-load.tsx";
 import { carriesSetup } from "./sections/plans-shown.ts";
 import { WorkspaceSection } from "./sections/workspace-load.tsx";
+import { AllowancesSection } from "./sections/allowances-load.tsx";
 import { carriesProtectionWire } from "./sections/workspace-shown.ts";
 import { connectorsNote } from "./sections/connectors-note.ts";
 import { usageNote } from "./sections/usage-note.ts";
@@ -50,6 +52,7 @@ export const SECTION_ORDER = [
   "connectors",
   "matters",
   "workspace",
+  "allowances",
   "language",
   "appearance",
   "updates",
@@ -136,6 +139,16 @@ export const SECTIONS: readonly SectionEntry[] = [
     icon: IconSafeWorkspace,
     shown: (ctx) => carriesProtectionWire(ctx.transport),
     Body: WorkspaceSection,
+  },
+  {
+    // R18: each matter's kept answers to the host's dialogs, with Forget; beside the Safe workspace, whose wire it
+    // needs. No side note, so the list stays out of the first load
+    id: "allowances",
+    name: (lang) => aw(lang, "Remembered answers"),
+    icon: IconSafeWorkspace,
+    lead: (lang) => aw(lang, "The folders and sites each matter keeps your answer for."),
+    shown: (ctx) => carriesProtectionWire(ctx.transport),
+    Body: AllowancesSection,
   },
   {
     id: "language",

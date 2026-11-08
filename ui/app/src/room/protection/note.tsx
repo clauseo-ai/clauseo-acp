@@ -4,7 +4,8 @@
 // the body. Design B: a block says its reason's line (blocked.ts), and where the repair is the
 // installer the retry gives way to its line and, on a personal install, "Get the installer". When
 // the matter becomes protected the note closes. The firm's notice (required.tsx) rides in the same
-// chunk.
+// chunk. R18: the matter's remembered answers under the body, with Forget, and on a matter whose
+// Safe workspace is off, "Switch it back on" (room/allowances/remembered.tsx).
 import { NotProtectedNote, type NoteWhy } from "@clauseo/components/clauseo/protection.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { blockLine, blockOf, firmInstall, needsInstaller, repairLine } from "./blocked.ts";
@@ -20,6 +21,8 @@ import { retryProtection } from "./commands.ts";
 import { failedWords, useSetUpPress, waitingWords } from "./setup.tsx";
 import { canRetry } from "./view.ts";
 import { named1385, poolOf, whyOf } from "./detail.ts";
+import type { ViewStore } from "../../store/store.ts";
+import { useRemembered } from "../allowances/remembered.tsx";
 
 /** The note's `why` for a cause: a missing admin copy reads as not set up yet. */
 const noteWhy = (cause: Cause): NoteWhy =>
@@ -40,6 +43,7 @@ const noteWhy = (cause: Cause): NoteWhy =>
 export function ProtectionNote({
   transport,
   store,
+  views,
   matterId,
   matter,
   cause,
@@ -50,6 +54,8 @@ export function ProtectionNote({
   matterId: MatterId;
   transport: HostTransport;
   store: ProtectionStore;
+  /** The window's view store, for the matter's header and its remembered answers (R18). */
+  views: ViewStore;
   /** The matter's name as filed. */
   matter: string;
   /** The open matter's cause; null once it is protected (or not known), which closes the note. */
@@ -80,6 +86,7 @@ export function ProtectionNote({
     setAuto(false);
     onClose();
   };
+  const remembered = useRemembered(transport, views, matterId, open || auto, lang);
   const gone = cause === null;
   useEffect(() => {
     if (gone && open) onClose();
@@ -102,11 +109,13 @@ export function ProtectionNote({
         {...(cause.group === "pool" ? { pool: poolOf(cause), addRoom: retry } : {})}
         named1385={named1385(cause)}
         waiting={retry ? waitingWords(lang, state, cause) : null}
-        failed={retry ? failedWords(lang, state) : null}
+        failed={retry ? (failedWords(lang, state) ?? remembered.failed) : remembered.failed}
         extra={extra}
         onGetInstaller={page === null ? undefined : () => void openInstallerPage(transport, page)}
         onClose={close}
         onProtect={retry ? press : undefined}
+        onSwitchOn={cause.group === "off" ? remembered.switchOn : undefined}
+        remembered={remembered.rows}
       />
       {confirm}
     </>
