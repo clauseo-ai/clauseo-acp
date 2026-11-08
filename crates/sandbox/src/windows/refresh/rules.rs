@@ -133,7 +133,7 @@ impl SystemTask {
             && found.enabled
             && !found.hidden
             && found.triggers == triggers
-            && sddl_matches(&found.sddl, sddl)
+            && task_sddl_matches(&found.sddl, sddl)
     }
 
     /// Its description, as the Task Scheduler shows it.
@@ -328,6 +328,46 @@ pub fn sddl_matches(found: &str, expected: &str) -> bool {
         None => sddl.to_owned(),
     };
     plain(found) == plain(expected)
+}
+
+/// The one entry the Task Scheduler adds to a task's DACL as it stores it: read for the task's
+/// principal, LOCAL SYSTEM for every SYSTEM task, appended after the entries given. CI run
+/// 42504256341 registered `O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;IU)` and read back
+/// `O:BAD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;IU)(A;;FR;;;SY)`. SYSTEM already has full
+/// control in every task descriptor, so it grants nothing.
+pub const TASK_SCHEDULER_ADDS: &str = "(A;;FR;;;SY)";
+
+/// Whether `found`, a task's owner and DACL read back as SDDL, is `expected` as the Task
+/// Scheduler stores it. The Task Scheduler drops the DACL's protected flag and appends
+/// [`TASK_SCHEDULER_ADDS`], so neither makes a task read as changed. Everything else must be
+/// exactly as given: the same owner, every entry of `expected` in its order with the same
+/// rights, and nothing more than that one entry, once, at the end. A missing or reordered entry,
+/// a broader mask, any other added grant, an inherited entry or a null DACL reads as changed. The
+/// flags may be only `P`, `AI` and `AR`, which grant nothing when every entry is compared. As
+/// with [`sddl_matches`], `expected` goes through `staging::as_read_back` first on Windows.
+pub fn task_sddl_matches(found: &str, expected: &str) -> bool {
+    let split = |sddl: &str| -> Option<(String, String)> {
+        let (owner, dacl) = sddl.split_once("D:")?;
+        let start = dacl.find('(').unwrap_or(dacl.len());
+        let (flags, aces) = dacl.split_at(start);
+        let mut rest = flags;
+        while !rest.is_empty() {
+            rest = ["P", "AI", "AR"]
+                .iter()
+                .find_map(|flag| rest.strip_prefix(flag))?;
+        }
+        // Entries alone, each `(...)`, and nothing after them (no SACL or group).
+        let whole = aces
+            .split_inclusive(')')
+            .all(|ace| ace.starts_with('(') && ace.ends_with(')') && ace[1..].find('(').is_none());
+        whole.then(|| (owner.to_owned(), aces.to_owned()))
+    };
+    let (Some((found_owner, found_aces)), Some((owner, aces))) = (split(found), split(expected))
+    else {
+        return false;
+    };
+    let added = found_aces.strip_prefix(aces.as_str());
+    found_owner == owner && matches!(added, Some("" | TASK_SCHEDULER_ADDS))
 }
 
 /// Whether `a` and `b` name the same path, as Windows compares them: case folded, with any

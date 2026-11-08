@@ -235,6 +235,109 @@ fn a_fresh_registration_is_current_and_any_change_to_its_definition_is_not() {
 }
 
 #[test]
+fn a_task_descriptor_reads_back_current_with_only_the_task_schedulers_own_changes() {
+    // As CI run 42504256341 registered the set-up task and read it back.
+    let given = "O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;IU)";
+    let stored = "O:BAD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;IU)(A;;FR;;;SY)";
+    assert_eq!(TASK_SCHEDULER_ADDS, "(A;;FR;;;SY)");
+    assert!(
+        !sddl_matches(stored, given),
+        "the plain compare tells them apart"
+    );
+    for current in [
+        given,
+        stored,
+        "O:BAD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;IU)",
+        "O:BAD:PAI(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;IU)(A;;FR;;;SY)",
+    ] {
+        assert!(task_sddl_matches(current, given), "{current}");
+    }
+    let changed = [
+        (
+            "a write grant added",
+            "O:BAD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;IU)(A;;FW;;;IU)",
+        ),
+        (
+            "a write grant after SYSTEM's read",
+            "O:BAD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;IU)(A;;FR;;;SY)(A;;FW;;;IU)",
+        ),
+        (
+            "a grant to everyone in its place",
+            "O:BAD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;IU)(A;;FR;;;WD)",
+        ),
+        (
+            "SYSTEM's read twice",
+            "O:BAD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;IU)(A;;FR;;;SY)(A;;FR;;;SY)",
+        ),
+        (
+            "a broader mask",
+            "O:BAD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;IU)(A;;FR;;;SY)",
+        ),
+        (
+            "an entry missing",
+            "O:BAD:(A;;FA;;;SY)(A;;0x1200a9;;;IU)(A;;FR;;;SY)",
+        ),
+        (
+            "reordered",
+            "O:BAD:(A;;FA;;;BA)(A;;FA;;;SY)(A;;0x1200a9;;;IU)(A;;FR;;;SY)",
+        ),
+        (
+            "inherited",
+            "O:BAD:AI(A;;FA;;;SY)(A;;FA;;;BA)(A;ID;0x1200a9;;;IU)(A;;FR;;;SY)",
+        ),
+        (
+            "an added entry first",
+            "O:BAD:(A;;FR;;;SY)(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;IU)",
+        ),
+        (
+            "another owner",
+            "O:S-1-5-21-1-2-3-1001D:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;IU)(A;;FR;;;SY)",
+        ),
+        ("a null DACL", "O:BAD:NO_ACCESS_CONTROL"),
+        ("no DACL", "O:BA"),
+        (
+            "a SACL after it",
+            "O:BAD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;IU)(A;;FR;;;SY)S:(ML;;NW;;;LW)",
+        ),
+    ];
+    for (change, found) in changed {
+        assert!(!task_sddl_matches(found, given), "{change}");
+    }
+    // The pool's group refused first: its deny must stay, in front.
+    let denied =
+        "O:BAD:P(D;;0x1200a9;;;S-1-5-21-1-2-3-1050)(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;IU)";
+    let stored = "O:BAD:(D;;0x1200a9;;;S-1-5-21-1-2-3-1050)(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;IU)(A;;FR;;;SY)";
+    assert!(task_sddl_matches(stored, denied));
+    assert!(!task_sddl_matches(
+        stored
+            .replacen("(D;;0x1200a9;;;S-1-5-21-1-2-3-1050)", "", 1)
+            .as_str(),
+        denied
+    ));
+}
+
+#[test]
+fn a_set_up_task_stored_by_the_task_scheduler_is_current_and_a_widened_one_is_not() {
+    let path = r#""C:\Program Files\Clauseo\Sandbox\clauseo-sandbox-setup.exe""#;
+    let starters = Starters::Interactive { denied: None };
+    let sddl = starters.sddl();
+    let spec = SystemTask::SetUp;
+    let mut found = fresh(spec, &starters, path);
+    found.sddl = format!("{}{TASK_SCHEDULER_ADDS}", sddl.replacen("D:P", "D:", 1));
+    assert!(
+        spec.registered_as(&found, &starters, path, &sddl),
+        "{}",
+        found.sddl
+    );
+    found.sddl = format!("{}(A;;FW;;;IU)", sddl.replacen("D:P", "D:", 1));
+    assert!(
+        !spec.registered_as(&found, &starters, path, &sddl),
+        "{}",
+        found.sddl
+    );
+}
+
+#[test]
 fn every_task_is_disabled_then_stopped_then_deleted() {
     assert_eq!(RETIRE, [Retire::Disable, Retire::Stop, Retire::Delete]);
     // The fake task: each step taken, in order, and the one that fails.

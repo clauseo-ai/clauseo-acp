@@ -114,8 +114,9 @@ pub use installed::{installed_setup_sha256, recorded_admin_copy_sha256};
 pub use rules::{
     EXECUTION_LIMIT, FOLDER_SDDL, INSTANCES_IGNORE_NEW, INSTANCES_QUEUE, REFRESH_ARG, RETIRE,
     Registered, Retire, SET_UP_ARG, SET_UP_EXECUTION_LIMIT, STAGING_SDDL, STOP_ARG,
-    STOP_EXECUTION_LIMIT, Starters, SystemTask, TASKS, TEARDOWN, Teardown, action_path, hex,
-    inside_profile, not_registered, retire, same_path, sddl_matches, task_sddl,
+    STOP_EXECUTION_LIMIT, Starters, SystemTask, TASK_SCHEDULER_ADDS, TASKS, TEARDOWN, Teardown,
+    action_path, hex, inside_profile, not_registered, retire, same_path, sddl_matches, task_sddl,
+    task_sddl_matches,
 };
 pub use sources::{SourceError, SourceFile, Sources};
 #[cfg(windows)]

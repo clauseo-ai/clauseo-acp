@@ -21,7 +21,7 @@ use windows::core::BSTR;
 use super::staging::as_read_back;
 use super::task::{Apartment, register_in, service, set_starters_in};
 use super::windows_tests::{system32, try_in_cmd};
-use super::{FOLDER_SDDL, Starters, SystemTask, sddl_matches};
+use super::{FOLDER_SDDL, Starters, SystemTask, sddl_matches, task_sddl_matches};
 use crate::test_support::TempDir;
 use crate::windows::record::current_user_sid;
 use crate::windows::setup::logon::tests::{TestUser, clear_leftovers, random_hex};
@@ -88,9 +88,17 @@ impl Drop for Folder<'_> {
     }
 }
 
-/// Whether `found`, read back, is `expected` as Windows writes it.
+/// Whether the folder's `found`, read back, is `expected` as Windows writes it.
 fn same(found: &str, expected: &str) -> bool {
     sddl_matches(found, &as_read_back(expected).unwrap())
+}
+
+/// Whether a task's `found`, read back, is `expected` as the Task Scheduler stores it: every
+/// entry given, in order, its protected flag dropped and SYSTEM's read appended
+/// (`task_sddl_matches`), the comparison `ensure_task` makes. The runs below check the rights
+/// themselves: the standard user starts the set-up task, and not once it is refused.
+fn same_task(found: &str, expected: &str) -> bool {
+    task_sddl_matches(found, &as_read_back(expected).unwrap())
 }
 
 #[test]
@@ -133,7 +141,7 @@ fn elevated_a_standard_user_can_start_the_set_up_task_beside_another_owners_stop
     let set_up_sd = folder.read_back(Some(SystemTask::SetUp));
     eprintln!("the folder: {folder_sd}\nthe set-up task: {set_up_sd}");
     assert!(same(&folder_sd, FOLDER_SDDL), "{folder_sd}");
-    assert!(same(&set_up_sd, &interactive.sddl()), "{set_up_sd}");
+    assert!(same_task(&set_up_sd, &interactive.sddl()), "{set_up_sd}");
 
     let schtasks = format!(r"{}\schtasks.exe", system32());
     let run = |task: SystemTask| {
@@ -157,7 +165,7 @@ fn elevated_a_standard_user_can_start_the_set_up_task_beside_another_owners_stop
     set_starters_in(&folder.name, SystemTask::SetUp, &denied).unwrap();
     let denied_sd = folder.read_back(Some(SystemTask::SetUp));
     eprintln!("the set-up task, the user refused: {denied_sd}");
-    assert!(same(&denied_sd, &denied.sddl()), "{denied_sd}");
+    assert!(same_task(&denied_sd, &denied.sddl()), "{denied_sd}");
     assert_ne!(run(SystemTask::SetUp), Some(0), "refused by the deny");
     // The descriptor change left the folder's own.
     assert!(same(&folder.read_back(None), FOLDER_SDDL));
@@ -170,7 +178,7 @@ fn elevated_ensure_task_keeps_a_current_task_and_registers_a_changed_one_again()
     use windows::Win32::System::TaskScheduler::{TASK_INSTANCES_IGNORE_NEW, TASK_INSTANCES_QUEUE};
 
     use super::task::with_task_in;
-    use super::task_check::ensure_in;
+    use super::task_check::{ensure_in, read};
     use super::{INSTANCES_IGNORE_NEW, INSTANCES_QUEUE};
 
     assert_eq!(INSTANCES_QUEUE, TASK_INSTANCES_QUEUE.0);
@@ -189,6 +197,9 @@ fn elevated_ensure_task_keeps_a_current_task_and_registers_a_changed_one_again()
     let ensure = || ensure_in(&folder.name, SystemTask::SetUp, &starters, &exe);
     // Missing: registered. Then read back as written: current, not registered again.
     assert_eq!(ensure(), Ok(true));
+    // What a mismatch below would be told from: the definition as read back.
+    let found = with_task_in(&folder.name, SystemTask::SetUp, |task| Ok(read(task)));
+    eprintln!("the set-up task, read back: {found:?}");
     assert_eq!(
         ensure(),
         Ok(false),

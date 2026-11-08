@@ -53,7 +53,7 @@ pub(super) fn ensure_in(
 }
 
 /// `task`'s definition as [`Registered`]; `None` when any of it can't be read.
-fn read(task: &IRegisteredTask) -> Option<Registered> {
+pub(super) fn read(task: &IRegisteredTask) -> Option<Registered> {
     let info = (OWNER_SECURITY_INFORMATION.0 | DACL_SECURITY_INFORMATION.0).cast_signed();
     let mut found = Registered::default();
     // SAFETY: every call is on a live interface the one before returned, each out-pointer live
