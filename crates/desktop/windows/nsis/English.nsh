@@ -33,13 +33,13 @@ LangString deleteAppDataKeptFailed ${LANG_ENGLISH} "Clauseo couldn't delete all 
 ; deleteAppDataFailedUnnamed: as deleteAppDataFailed, but the data folder is itself a link (or
 ; could not be read), so no path is shown: one would lead through the link. The folder is named
 ; by its name instead. Provisional (app thread, 2026-11-06).
-LangString deleteAppDataFailedUnnamed ${LANG_ENGLISH} "Clauseo couldn't delete all of its data. It's in the ai.clauseo.desktop folder in your local AppData folder. Ask whoever looks after this computer to remove it."
+LangString deleteAppDataFailedUnnamed ${LANG_ENGLISH} "Clauseo couldn't delete all of its data. It's in the ai.clauseo.desktop folder in your local AppData folder. Restart your computer, then delete that folder."
 ; policyFolderExists and policyFolderFailed: the per-machine installer's lines in its details list
 ; (DetailPrint, windows/hooks.nsh NSIS_HOOK_POSTINSTALL) about the firm-policy folder;
 ; $APPDATA is C:\ProgramData there. Exists: something was already at that path, left as it
 ; is. Failed: the folder could not be created. Provisional (stage F, 2026-11-06).
 LangString policyFolderExists ${LANG_ENGLISH} "Clauseo left the existing folder $APPDATA\Clauseo as it is. A firm policy there is read only if administrators own the folder."
-LangString policyFolderFailed ${LANG_ENGLISH} "Clauseo couldn't create $APPDATA\Clauseo for a firm policy. Your IT team can create it."
+LangString policyFolderFailed ${LANG_ENGLISH} "Clauseo couldn't create $APPDATA\Clauseo for a firm policy. Your firm manages this folder on this computer."
 ; removeStillRunning: S15's removal of the Safe workspace (clauseo-sandbox-setup.exe --remove)
 ; was still running when the uninstaller stopped waiting for it, after 2 minutes; it carries on
 ; and finishes by itself. In the uninstaller's details list (DetailPrint), never a box.
@@ -55,15 +55,15 @@ LangString removeSkippedSilent ${LANG_ENGLISH} "Clauseo didn't remove the Safe w
 ; installer wrote the admin copy in Program Files, the one launches run, and found it gone when it
 ; tried to start it; the install stays. A details line and exit code 20; a box only interactively,
 ; no code under /P. Provisional (app thread, stage C's fact check, 2026-11-07).
-LangString removeExeMissing ${LANG_ENGLISH} "Clauseo couldn't remove the Safe workspace, because Windows security removed the program that sets it up. The Safe workspace's hidden Windows accounts are still on this computer. Whoever looks after this computer can remove them. Clauseo's notes for IT explain how."
+LangString removeExeMissing ${LANG_ENGLISH} "Clauseo couldn't remove the Safe workspace, because Windows security removed the program that sets it up. The Safe workspace's hidden Windows accounts are still on this computer. Your firm manages this computer's Windows accounts, and Clauseo's notes for IT explain how to remove them."
 ; removeAdminCopyRefused: the uninstaller found S15's set-up program in Program Files, but a
 ; folder on its way or the file itself can be changed by more than administrators, or its SHA-256
 ; isn't the one the machine's record holds (or either couldn't be read), so it didn't start it.
 ; Said only when the record names a set-up's owner (per user, the uninstalling user), whose
 ; accounts are then still there: a details line, and a box unless /S. Draft, for the app thread
 ; (2026-11-07).
-LangString removeAdminCopyRefused ${LANG_ENGLISH} "Clauseo couldn't remove the Safe workspace, because it couldn't confirm that the program that sets it up, in Program Files, is the one Clauseo installed and that only administrators can change it. The Safe workspace's hidden Windows accounts are still on this computer. Whoever looks after this computer can remove them. Clauseo's notes for IT explain how."
-LangString setupExeRemoved ${LANG_ENGLISH} "Windows security removed part of Clauseo while it was installing: the program that sets up the Safe workspace. Until it's restored, Clauseo won't start Claude or ChatGPT in the Safe workspace. Whoever looks after this computer can restore it. Clauseo's notes for IT explain how."
+LangString removeAdminCopyRefused ${LANG_ENGLISH} "Clauseo couldn't remove the Safe workspace, because it couldn't confirm that the program that sets it up, in Program Files, is the one Clauseo installed and that only administrators can change it. The Safe workspace's hidden Windows accounts are still on this computer. Your firm manages this computer's Windows accounts, and Clauseo's notes for IT explain how to remove them."
+LangString setupExeRemoved ${LANG_ENGLISH} "Windows security removed part of Clauseo while it was installing: the program that sets up the Safe workspace. Until it's restored, Clauseo won't start Claude or ChatGPT in the Safe workspace. Run this installer again to restore it. If Windows security removes it again, your firm manages the security software on this computer."
 ; The admin copy (windows/admin_copy.nsh): tier B, which the app calls Safe workspace (and so do
 ; these lines), needs one UAC prompt at install. Their Hindi is in Hindi.nsh. Provisional (app
 ; thread and stage F, 2026-11-07).
@@ -101,14 +101,14 @@ LangString adminCopySkippedSilent ${LANG_ENGLISH} "The Safe workspace isn't set 
 ; installTempFailed: the per-machine installer couldn't make its own temporary folder under
 ; Program Files (windows/safe_temp.nsh), so it stops before it loads anything; a box, skipped by
 ; /S, /P and /UPDATE, then exit code 25. Provisional (stage F, 2026-11-07).
-LangString installTempFailed ${LANG_ENGLISH} "Clauseo wasn't installed, because the installer couldn't make a folder for its temporary files in Program Files that only administrators can change. Run the installer again. If it fails again, ask whoever looks after this computer."
+LangString installTempFailed ${LANG_ENGLISH} "Clauseo wasn't installed, because the installer couldn't make a folder for its temporary files in Program Files that only administrators can change. Run the installer again."
 ; uninstallTempFailed: the same for the per-machine uninstaller, which stops before it removes
 ; anything; a box, skipped by /S, /P and /UPDATE, then exit code 25. Provisional (2026-11-07).
-LangString uninstallTempFailed ${LANG_ENGLISH} "Clauseo wasn't uninstalled, because the uninstaller couldn't make a folder for its temporary files in Program Files that only administrators can change. Nothing was removed. Run the uninstaller again. If it fails again, ask whoever looks after this computer."
+LangString uninstallTempFailed ${LANG_ENGLISH} "Clauseo wasn't uninstalled, because the uninstaller couldn't make a folder for its temporary files in Program Files that only administrators can change. Nothing was removed. Run the uninstaller again."
 ; uninstallNotInPlace: the per-machine uninstaller wasn't started in its own folder, as with options
 ; added after _?= (windows/uninstall_in_place.nsh); a box, skipped by /S, then exit code 26.
 ; Provisional (2026-11-07).
-LangString uninstallNotInPlace ${LANG_ENGLISH} "Clauseo wasn't uninstalled, because the uninstaller wasn't started from Clauseo's own folder. Nothing was removed. Uninstall Clauseo from Settings > Apps, or ask whoever looks after this computer."
+LangString uninstallNotInPlace ${LANG_ENGLISH} "Clauseo wasn't uninstalled, because the uninstaller wasn't started from Clauseo's own folder. Nothing was removed. Uninstall Clauseo from Settings > Apps."
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
 ; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), deleteAppData aside, with one fix:
