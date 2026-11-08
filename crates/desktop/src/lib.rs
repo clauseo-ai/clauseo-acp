@@ -168,6 +168,8 @@ use rust_only::PluginRustOnly;
 use tauri::webview::PageLoadEvent;
 use tauri::{App, AppHandle, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindowBuilder};
 pub(crate) use window_events::{follows_limits, on_window_event, raise_main_window};
+#[cfg(windows)]
+pub use window_size::ground_in_env;
 
 /// Bumped by `cargo xtask buildtime` to time an edit to this crate. Nothing reads it.
 pub const BUILDTIME_MARKER: u64 = 0;
