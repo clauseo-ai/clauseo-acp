@@ -60,11 +60,25 @@
 //! (its pass folder, the folders within it) go, by handle and only if empty
 //! (`Volume::remove_emptied`), so a matter whose items were all restored holds only bookkeeping.
 //!
+//! A rename can't cross volumes, so an item whose folder is on another volume than the data
+//! folder goes to that volume's own set-aside folder instead (`<volume root>\.clauseo-set-aside`,
+//! [`ITEMS_ROOT`]), holding `set-aside\<matter>\<pass>\...` as the sandbox folder does
+//! (`Volume::items_root`). It is made and secured by the sandbox folder's mechanics
+//! (`private_dir::make_drive_folder`: refused if a link, taken back from another owner or
+//! refused) with its own protected DACL: the lawyer and `SYSTEM`, and a deny for the pool group.
+//! It is made at each launch for the matter's own folder and checked again before each move into
+//! it; a launch that can't make it (a read-only drive, one that keeps no permissions, a folder
+//! that can't be secured) is refused ([`SetAsideFailure::DriveFolder`]). The record, the
+//! manifest and the lock stay in the data folder. The uninstaller and forget (`bookkeeping.rs`,
+//! `ntfs/forget.rs`) know only the data folder's set-aside, not these. Its name holds no SID, so
+//! a second Windows user of the machine finds it the first one's, and that user's launch of a
+//! matter on the volume is refused.
+//!
 //! A set-aside that can't happen refuses the launch with [`crate::Error::SetAside`], whose
-//! `at` names the item for the running page: an item on another volume than the data folder
-//! ([`SetAsideFailure::OtherVolume`]: nothing is copied), or one whose folder doesn't give the
-//! lawyer `FILE_DELETE_CHILD` (`Io(PermissionDenied)`). The name must then be moved or removed
-//! by hand.
+//! `at` names the item for the running page: an item a rename still can't move across volumes
+//! (a volume mounted on a folder inside the matter: [`SetAsideFailure::OtherVolume`], nothing
+//! is copied), or one whose folder doesn't give the lawyer `FILE_DELETE_CHILD`
+//! (`Io(PermissionDenied)`). The name must then be moved or removed by hand.
 //!
 //! Known limits:
 //! - The check compares file IDs only, so a nested protected item is caught when it is
@@ -105,6 +119,10 @@ pub const SET_ASIDE_DIR: &str = "set-aside";
 /// only these as empty; `--remove` deletes them once the matter is forgotten (`bookkeeping.rs`),
 /// each only when its contents allow (a closed record, a manifest with nothing outstanding).
 pub const SET_ASIDE_BOOKKEEPING: [&str; 3] = ["record.json", "set-aside.lock", "manifest.json"];
+/// The name of the set-aside folder at the root of a volume other than the data folder's
+/// (`<volume root>\.clauseo-set-aside`): what is set aside from a matter on that volume goes
+/// there, since a rename can't cross volumes.
+pub const ITEMS_ROOT: &str = ".clauseo-set-aside";
 
 #[cfg(any(windows, test))]
 pub(crate) use bookkeeping::forget_bookkeeping;
@@ -171,7 +189,9 @@ pub struct Entry {
     /// Where it was, in the matter.
     #[serde(with = "names::path")]
     pub from: PathBuf,
-    /// Where it is now: `<data_dir>\sandbox\set-aside\<matter>\<folder>\<within...>\<name>`.
+    /// Where it is now: `<data_dir>\sandbox\set-aside\<matter>\<folder>\<within...>\<name>`, or
+    /// the same below the item's own volume's set-aside folder ([`ITEMS_ROOT`]) when the
+    /// matter is on another volume than the data folder.
     #[serde(with = "names::path")]
     pub to: PathBuf,
     /// The pass's folder, named for its UTC time.
@@ -218,8 +238,10 @@ pub enum SetAsideFailure {
     /// The item isn't there any more, or the manifest no longer lists it.
     #[error("the item is gone")]
     Gone,
-    /// The matter is on another volume than the data folder, and an item can't be renamed
-    /// across volumes (`ERROR_NOT_SAME_DEVICE`); nothing is copied.
+    /// The item and the folder it would move to are on different volumes, and an item can't be
+    /// renamed across volumes (`ERROR_NOT_SAME_DEVICE`); nothing is copied. A matter on another
+    /// drive than the data folder has its own set-aside folder there, so this is a volume
+    /// mounted on a folder inside the matter, or one the volume roots don't tell apart.
     #[error("the matter is on another drive than Clauseo's data folder")]
     OtherVolume,
     /// A folder on the way is a link (a reparse point), or the item's final path isn't the one
@@ -238,6 +260,15 @@ pub enum SetAsideFailure {
     /// would run as the lawyer.
     #[error("{}", GIT_REFUSAL)]
     GitFolder,
+    /// The set-aside folder on the matter's own volume (`<volume root>\.clauseo-set-aside`,
+    /// [`ITEMS_ROOT`]) can't be made or secured: the volume is read-only or keeps no ACLs, the
+    /// folder is a link or not a folder, another account owns it and it can't be taken back, or
+    /// the volume's root can't be read.
+    #[error(
+        "Clauseo can't make a private folder on the matter's drive for what it moves out of \
+             the matter"
+    )]
+    DriveFolder,
 }
 
 /// [`SetAsideFailure::GitFolder`]'s words, for the lawyer.

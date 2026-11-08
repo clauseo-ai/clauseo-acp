@@ -66,15 +66,16 @@ pub enum Error {
     },
     /// Windows tier B couldn't set aside a protected name that changed in a session, or the
     /// item the strict walk found the lawyer can't open, or couldn't read or write the record it
-    /// checks against (`windows::set_aside`). The launch is refused, and the record stays as it
-    /// was, so the next launch checks again. Its message names no path.
+    /// checks against, or couldn't make its private folder on the matter's own drive
+    /// (`windows::set_aside`). The launch is refused, and the record stays as it was, so the next
+    /// launch checks again. Its message names no path.
     #[error("the sandbox couldn't set aside a changed protected name: {failure}")]
     SetAside {
         /// What failed.
         failure: crate::windows::SetAsideFailure,
         /// The item that couldn't be read or moved, when it was one: for the running page to
-        /// show the lawyer (one on another drive, one whose folder the lawyer can't delete
-        /// from). Never logged.
+        /// show the lawyer (one a rename can't move across drives, one whose folder the lawyer
+        /// can't delete from, the folder on the matter's drive). Never logged.
         at: Option<std::path::PathBuf>,
     },
     /// Windows tier B couldn't remove the matter's clean-close record at launch

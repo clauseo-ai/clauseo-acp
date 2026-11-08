@@ -49,6 +49,20 @@ pub(super) trait Volume {
     /// The SID of the owner of `path` itself, as text.
     fn owner(&self, path: &Path) -> io::Result<String>;
 
+    /// The folder where what is set aside out of `folder` (the folder an item is in, or the
+    /// matter's own) starts its chain: `sandbox` itself when `folder` is on its volume, else
+    /// `<folder's volume root>\.clauseo-set-aside` ([`super::ITEMS_ROOT`]), since a rename can't
+    /// cross volumes. Volumes are told apart by their roots (`GetVolumePathNameW` on NTFS), which
+    /// need no handle, so a missing item's folder has one too, and a volume mounted on a folder
+    /// is its own.
+    fn items_root(&self, sandbox: &Path, folder: &Path) -> io::Result<PathBuf>;
+
+    /// Makes, or checks when there, the folder `root` an [`Volume::items_root`] gave other than
+    /// the sandbox folder, then each of `parts` below it in turn (`set-aside` and the matter's
+    /// folder), as [`Place::lock`] does the sandbox folder's: refused if a link or not a folder,
+    /// secured for the lawyer alone (`private_dir::make_drive_folder` on NTFS).
+    fn secure_items_root(&self, root: &Path, parts: &[OsString]) -> io::Result<()>;
+
     /// Moves the item at `from` (itself, not what a link names; its final path must be `from`)
     /// into the folder `parts` below `sandbox`, each part made or opened in turn without
     /// following a link, as `name`. Never replaces: a taken name is
@@ -145,6 +159,7 @@ pub(super) fn before_launch(
     let found = scan(volume, root);
     let place = Place::new(data_dir, matter);
     let _held = place.lock()?;
+    items_root(volume, &place, root)?;
     // A session is about to start: the last clean close no longer describes the matter.
     super::fast::spend_clean_close(data_dir, matter)?;
     let mut moved = Vec::new();
@@ -257,12 +272,9 @@ pub(super) fn restore(volume: &impl Volume, data_dir: &Path, entry: &Entry) -> R
         tracing::info!("a set-aside git folder, or an item inside one, is never put back");
         return Err(SetAsideFailure::GitFolder.into());
     }
-    volume.move_back(
-        &place.sandbox,
-        &place.parts(&found.folder, &found.within),
-        &found.name,
-        &found.from,
-    )?;
+    let parts = place.parts(&found.folder, &found.within);
+    let root = root_of(volume, &place, &found, &parts)?;
+    volume.move_back(&root, &parts, &found.name, &found.from)?;
     tracing::info!(reason = ?found.reason, "a set-aside item was restored");
     place.write_manifest(&manifest)?;
     // Only now, with the manifest listing the item no more, the folders it leaves empty go, so a
@@ -270,7 +282,6 @@ pub(super) fn restore(volume: &impl Volume, data_dir: &Path, entry: &Entry) -> R
     // removed) only means the uninstaller keeps the set-aside; it never fails the restore.
     // Never a folder that is itself an item still listed (a move reuses a folder already there):
     // the removal stops below the deepest such folder on the way.
-    let parts = place.parts(&found.folder, &found.within);
     let listed: Vec<Vec<OsString>> = manifest
         .entries
         .iter()
@@ -282,13 +293,71 @@ pub(super) fn restore(volume: &impl Volume, data_dir: &Path, entry: &Entry) -> R
         })
         .collect();
     let kept = kept_levels(&parts, &listed, 2);
-    if let Err(failure) = volume.remove_emptied(&place.sandbox, &parts, kept) {
+    if let Err(failure) = volume.remove_emptied(&root, &parts, kept) {
         tracing::warn!(%failure, "a restore's emptied set-aside folder stays");
     }
     // The item is back and listed no more, so a failure here doesn't undo the restore; the
     // next launch's apply hands a pool user's protected item back before its deny anyway.
     hand_over(volume, &found.from, "a restored item");
     Ok(())
+}
+
+/// The folder `place`'s matter's set-aside starts from for what is set aside out of `folder`
+/// ([`Volume::items_root`]), made or checked first when it isn't the sandbox folder
+/// ([`Volume::secure_items_root`]). Every launch checks the matter's own folder's, and every
+/// move its item's folder's, so a folder that can't be made or secured refuses the launch, and
+/// no item is left in place for want of one. A failure is [`SetAsideFailure::DriveFolder`] at
+/// that folder (at `folder` when its volume's root can't be read).
+pub(super) fn items_root(
+    volume: &impl Volume,
+    place: &Place,
+    folder: &Path,
+) -> Result<PathBuf, Refused> {
+    let refuse = |at: &Path, error: &io::Error| {
+        let kind = error.kind();
+        tracing::warn!(%kind, "the set-aside folder on the matter's drive can't be made");
+        tracing::debug!(%error, "the set-aside folder on the matter's drive");
+        Refused::at(SetAsideFailure::DriveFolder, at)
+    };
+    let root = volume
+        .items_root(&place.sandbox, folder)
+        .map_err(|error| refuse(folder, &error))?;
+    if root != place.sandbox {
+        volume
+            .secure_items_root(&root, &place.matter_parts())
+            .map_err(|error| refuse(&root, &error))?;
+    }
+    Ok(root)
+}
+
+/// The folder `found`'s chain (`parts`, then its name) starts from, read off its `to`: each
+/// last part of `to` must be the one `parts` and its name say. It is trusted only when it is the
+/// sandbox folder or the one [`Volume::items_root`] gives for the folder the item goes back to;
+/// anything else is [`SetAsideFailure::Record`], so a manifest never sends a restore elsewhere.
+fn root_of(
+    volume: &impl Volume,
+    place: &Place,
+    found: &Entry,
+    parts: &[OsString],
+) -> Result<PathBuf, Refused> {
+    let mut root = found.to.as_path();
+    for part in parts.iter().chain([&found.name]).rev() {
+        if root.file_name() != Some(part.as_os_str()) {
+            return Err(SetAsideFailure::Record.into());
+        }
+        root = root.parent().ok_or(SetAsideFailure::Record)?;
+    }
+    if root == place.sandbox {
+        return Ok(root.to_owned());
+    }
+    let folder = found.from.parent().ok_or(SetAsideFailure::Record)?;
+    match volume.items_root(&place.sandbox, folder) {
+        Ok(expected) if expected == root => Ok(expected),
+        Ok(_) | Err(_) => {
+            tracing::warn!("a set-aside entry names a folder that isn't its drive's; refused");
+            Err(SetAsideFailure::Record.into())
+        }
+    }
 }
 
 /// How many leading folders of `parts` a restore's removal must keep: at least `kept`, and every

@@ -29,6 +29,9 @@ pub(super) struct Posix {
     /// The machine record's pool, as [`Volume::pool`] reads it: `None` is a record that can't
     /// be read. [`POOL_USER`] alone unless a test says otherwise.
     pub(super) pool: RefCell<Option<Vec<String>>>,
+    /// Another volume, as a test sets it ([`Posix::other_volume`]): every path under the first
+    /// folder is on it, and the second is its set-aside folder ([`Volume::items_root`]).
+    pub(super) other: RefCell<Option<(PathBuf, PathBuf)>>,
 }
 
 /// The owner [`Posix::foreign`] gives an item: a pool user the record names.
@@ -41,7 +44,14 @@ impl Posix {
             foreign: RefCell::default(),
             owned: RefCell::default(),
             pool: RefCell::new(Some(vec![POOL_USER.to_owned()])),
+            other: RefCell::default(),
         }
+    }
+
+    /// Says every path under `under` is on another volume than the data folder, whose
+    /// set-aside folder is `root`.
+    pub(super) fn other_volume(&self, under: &Path, root: &Path) {
+        *self.other.borrow_mut() = Some((under.to_owned(), root.to_owned()));
     }
 
     /// Marks the item at `path` as a pool user's ([`POOL_USER`]).
@@ -182,6 +192,24 @@ impl Volume for Posix {
                     stack.push(entry?.path());
                 }
             }
+        }
+        Ok(())
+    }
+
+    fn items_root(&self, sandbox: &Path, folder: &Path) -> io::Result<PathBuf> {
+        Ok(match &*self.other.borrow() {
+            Some((under, root)) if folder.starts_with(under) => root.clone(),
+            Some(_) | None => sandbox.to_owned(),
+        })
+    }
+
+    /// Each folder made, or refused if a link or not a folder (`make_sandbox_dir`).
+    fn secure_items_root(&self, root: &Path, parts: &[OsString]) -> io::Result<()> {
+        make_sandbox_dir(root)?;
+        let mut folder = root.to_owned();
+        for part in parts {
+            folder.push(part);
+            make_sandbox_dir(&folder)?;
         }
         Ok(())
     }

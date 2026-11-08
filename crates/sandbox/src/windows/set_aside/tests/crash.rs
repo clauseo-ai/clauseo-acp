@@ -59,6 +59,14 @@ impl<V: Volume> Volume for Stopping<V> {
         self.inner.file_id(path)
     }
 
+    fn items_root(&self, sandbox: &Path, folder: &Path) -> io::Result<PathBuf> {
+        self.inner.items_root(sandbox, folder)
+    }
+
+    fn secure_items_root(&self, root: &Path, parts: &[OsString]) -> io::Result<()> {
+        self.inner.secure_items_root(root, parts)
+    }
+
     fn remove_emptied(
         &self,
         sandbox: &Path,

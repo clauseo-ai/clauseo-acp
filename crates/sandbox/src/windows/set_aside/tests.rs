@@ -31,6 +31,8 @@ mod scans;
 mod sessions;
 #[cfg(unix)]
 mod timing;
+#[cfg(unix)]
+mod volumes;
 
 #[cfg(windows)]
 fn volume() -> super::ntfs::Ntfs {

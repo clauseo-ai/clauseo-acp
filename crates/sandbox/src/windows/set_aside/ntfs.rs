@@ -26,6 +26,8 @@
 //!   under any name NTFS matches, is still the planned one.
 //!
 //! A rename across volumes fails with `ERROR_NOT_SAME_DEVICE`: [`SetAsideFailure::OtherVolume`].
+//! So an item on another volume than the data folder goes to that volume's own set-aside folder
+//! (`Volume::items_root`, made by `private_dir::make_drive_folder`).
 #![expect(
     unsafe_code,
     reason = "FFI to open the set-aside's folders and items by handle and rename them"
@@ -64,6 +66,8 @@ use super::run::Volume;
 use super::scan::Listed;
 use crate::windows::acl_plan::verbatim;
 use crate::windows::folder::verbatim_wide;
+use crate::windows::private_dir::make_drive_folder;
+use crate::windows::setup::journal::volume_root;
 
 mod forget;
 mod scan;
@@ -144,6 +148,28 @@ impl Volume for Ntfs {
         crate::windows::acl::own(path, &pool)
     }
 
+    fn items_root(&self, sandbox: &Path, folder: &Path) -> io::Result<PathBuf> {
+        let root = |path: &Path| {
+            volume_root(path).ok_or_else(|| io::Error::other("the volume's root can't be read"))
+        };
+        let there = root(folder)?;
+        if same_root(&root(sandbox)?, &there) {
+            Ok(sandbox.to_owned())
+        } else {
+            Ok(there.join(super::ITEMS_ROOT))
+        }
+    }
+
+    fn secure_items_root(&self, root: &Path, parts: &[OsString]) -> io::Result<()> {
+        make_drive_folder(root, true)?;
+        let mut folder = root.to_owned();
+        for part in parts {
+            folder.push(part);
+            make_drive_folder(&folder, false)?;
+        }
+        Ok(())
+    }
+
     fn move_into(
         &self,
         from: &Path,
@@ -206,6 +232,24 @@ impl Volume for Ntfs {
     ) -> Result<(), SetAsideFailure> {
         forget::remove_emptied(sandbox, parts, kept)
     }
+}
+
+/// Whether the volume roots `a` and `b` (`GetVolumePathNameW`'s) name one volume: equal once a
+/// verbatim `\\?\` is dropped (not `\\?\UNC\`), ignoring ASCII case as drive letters and NTFS
+/// names compare. A `subst` drive may read as its own root: its items then go to a set-aside
+/// folder of its own, on the same volume, which a rename still reaches.
+fn same_root(a: &Path, b: &Path) -> bool {
+    let plain = |path: &Path| {
+        let text = path.as_os_str().as_encoded_bytes();
+        let unc = text
+            .get(..8)
+            .is_some_and(|head| head.eq_ignore_ascii_case(br"\\?\UNC\"));
+        match text.strip_prefix(br"\\?\") {
+            Some(rest) if !unc => rest.to_vec(),
+            Some(_) | None => text.to_vec(),
+        }
+    };
+    plain(a).eq_ignore_ascii_case(&plain(b))
 }
 
 /// The file ID of the handle's file, folder or link.

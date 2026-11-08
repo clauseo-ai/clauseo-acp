@@ -175,7 +175,8 @@ impl Default for Manifest {
 #[cfg(any(windows, test))]
 #[derive(Debug, Clone)]
 pub(super) struct Place {
-    /// `<data_dir>\sandbox`, where each move's folder chain starts.
+    /// `<data_dir>\sandbox`, where each move's folder chain starts unless the item is on another
+    /// volume (`Volume::items_root`).
     pub(super) sandbox: PathBuf,
     /// `<data_dir>\sandbox\set-aside\<matter>`.
     base: PathBuf,
@@ -212,11 +213,26 @@ impl Place {
         .collect()
     }
 
-    /// Where `name` in the folder `within` in the pass's folder `folder` is.
-    pub(super) fn to(&self, folder: &str, within: &[OsString], name: &OsStr) -> PathBuf {
-        within
+    /// The parts below the sandbox folder of the matter's folder: `set-aside`, the matter.
+    pub(super) fn matter_parts(&self) -> [OsString; 2] {
+        [
+            OsString::from(SET_ASIDE_DIR),
+            OsString::from(self.matter.to_string()),
+        ]
+    }
+
+    /// Where `name` in the folder `within` in the pass's folder `folder` is, below `root`: the
+    /// sandbox folder, or the set-aside folder on the item's volume (`Volume::items_root`).
+    pub(super) fn to(
+        &self,
+        root: &Path,
+        folder: &str,
+        within: &[OsString],
+        name: &OsStr,
+    ) -> PathBuf {
+        self.parts(folder, within)
             .iter()
-            .fold(self.base.join(folder), |path, part| path.join(part))
+            .fold(root.to_owned(), |path, part| path.join(part))
             .join(name)
     }
 

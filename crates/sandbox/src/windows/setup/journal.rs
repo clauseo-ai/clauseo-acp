@@ -126,7 +126,7 @@ pub fn grow_journal(volume: &Path, max: u64, delta: u64) -> Result<(), MachineEr
 
 /// The root of the volume holding `path` (`GetVolumePathNameW`: `C:\`, or a mounted folder,
 /// with its trailing backslash); `None` when it can't be read.
-fn volume_root(path: &Path) -> Option<PathBuf> {
+pub(crate) fn volume_root(path: &Path) -> Option<PathBuf> {
     let wide_path: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
     let mut root = vec![0u16; wide_path.len().max(MAX_PATH_WIDE)];
     // SAFETY: `wide_path` is NUL-terminated and outlives the call; `root` is writable for its

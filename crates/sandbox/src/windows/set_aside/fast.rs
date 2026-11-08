@@ -95,6 +95,7 @@ pub(super) fn before_launch_fast(
     }
     let place = Place::new(data_dir, matter);
     let _held = place.lock()?;
+    super::run::items_root(volume, &place, root)?;
     spend_clean_close(data_dir, matter)?;
     let Some(record) = place.read_record()? else {
         return Ok(None);
