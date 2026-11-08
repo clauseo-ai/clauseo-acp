@@ -261,7 +261,13 @@ build 26100):
     job ended and emptied), before anything moves, so nothing alive races the moves or puts
     another back. Each scan moves what it finds as it finds it, never after the whole tree. An
     agent can't stretch the window: a scan past 2 s, 3 overflows in a row, or one path found gone
-    3 times (a tree renamed back and forth) ends the session too. An overflow
+    3 times (a tree renamed back and forth) ends the session too. A scan of a folder made or
+    moved in stops at the 2 s mark instead of walking on (a million empty folders with a
+    repository last would keep it there for tens of seconds): a pool user's folder is set aside
+    whole at once, and anyone else's (a lawyer dragging a big client folder in) stays for the
+    after-session pass. Full rescans walk on, with the job already ended. Each cause gives the
+    lawyer its own plain line, e.g. "Clauseo stopped this session because the matter changed
+    faster than Clauseo could check it (very many files at once). Nothing was lost." An overflow
     (`ERROR_NOTIFY_ENUM_DIR`, an empty or unreadable buffer) rescans the whole folder and reads
     on; a watch that breaks or can't be armed rescans every 2 s and tries again, saying so once.
     A watch thread that panics or ends before it is stopped ends the run. Once the job is empty,
