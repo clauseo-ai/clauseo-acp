@@ -65,12 +65,13 @@ fn loopback_ports_without_the_browser_bind_one_listener() {
 }
 
 #[test]
-fn a_tier_c_proxy_s_listeners_and_any_browser_listener_stay_out_of_tier_b_s_range() {
-    use crate::ports::{ListenerFor, TIER_B_PORTS};
+fn a_tier_b_proxy_binds_both_listeners_in_its_slots_host_ports_and_tier_c_outside() {
+    use crate::ports::{ListenerFor, Slot, TIER_B_PORTS};
+    let slot = Slot::new(20).unwrap();
     for (listener, browser) in [
         (ListenerFor::Other, true),
         (ListenerFor::Other, false),
-        (ListenerFor::TierB, true),
+        (ListenerFor::TierB { slot }, true),
     ] {
         let mut config = ProxyConfig::new(
             Allowlist::default(),
@@ -81,21 +82,16 @@ fn a_tier_c_proxy_s_listeners_and_any_browser_listener_stay_out_of_tier_b_s_rang
         config.browser = browser;
         config.listener = listener;
         let handle = start_proxy(config).unwrap();
-        if let Some(port) = handle.browser_port() {
-            assert!(!TIER_B_PORTS.contains(&port), "browser {port}");
+        let ports = [Some(handle.port()), handle.browser_port()];
+        for port in ports.into_iter().flatten() {
+            if listener == ListenerFor::Other {
+                assert!(!TIER_B_PORTS.contains(&port), "{port}");
+            } else if cfg!(windows) {
+                assert!(slot.host().contains(&port), "{port}");
+            }
         }
-        if listener == ListenerFor::Other {
-            assert!(
-                !TIER_B_PORTS.contains(&handle.port()),
-                "agent {}",
-                handle.port()
-            );
-        } else if cfg!(windows) {
-            assert!(
-                TIER_B_PORTS.contains(&handle.port()),
-                "agent {}",
-                handle.port()
-            );
+        if browser {
+            assert_ne!(handle.browser_port(), Some(handle.port()));
         }
     }
 }

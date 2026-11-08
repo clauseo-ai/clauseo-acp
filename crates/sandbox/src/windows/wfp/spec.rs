@@ -3,7 +3,7 @@
 // at 092d3acd6bec3e3a14bdc7e7a2810ab628ab759d (rust-v0.162.1); see PROVENANCE.md
 
 //! What tier B's network objects are, with no Windows call, so they build and are tested on
-//! every OS (S15 PR7): set-up's persistent block filters and static permits, the owner's
+//! every OS (S15 PR7): set-up's persistent block filters and per-slot filters, the owner's
 //! read-only grants and the firewall rules ([`NetworkSetup`]), and how each filter maps to WFP's
 //! match types and flags ([`Condition::matching`], [`FilterSpec::flags`]).
 //!
@@ -11,26 +11,31 @@
 //! highest weight decides; across sublayers a block wins over a permit that didn't clear its
 //! action right. So:
 //! - set-up's block filters (weight [`BLOCK_WEIGHT`]) catch every token that holds a pool user's
-//!   SID or the pool group's, enabled or deny-only (`sddl.rs`), and block every connect, loopback
-//!   and 46100-46199 included, ICMP at resource assignment, and inbound that isn't loopback;
-//! - one static permit per pool user (weight [`PERMIT_WEIGHT`]) opens `127.0.0.1` over TCP on
-//!   46100-46199 for that user, and nothing else. Within the range the listeners' per-launch
-//!   secrets are the cross-matter check (orchestrator ruling, 2026-11-07);
-//! - the firewall rules, in Windows Firewall's own sublayer, block what isn't loopback and
-//!   loopback TCP outside the range, a second cap on the permits.
+//!   SID or the pool group's, enabled or deny-only (`sddl.rs`), and block every connect,
+//!   loopback included, ICMP at resource assignment, inbound that isn't loopback, and a listen on
+//!   any slot's port (blocks H, P and D, `ports::slot`), IPv4 and IPv6;
+//! - each pool user's slot gets its own filters (`slot_filters.rs`, 0049 "Loopback ports per
+//!   slot"): listens on its pool and daemon ports permitted (weight [`PERMIT_WEIGHT`]), and a
+//!   listen on its pool ports blocked for every token but its own. No static filter permits a
+//!   loopback connect: PR6's SYSTEM server adds exact-port permits per session;
+//! - the firewall rules, in Windows Firewall's own sublayer, block what isn't loopback, loopback
+//!   UDP, and loopback TCP outside the three blocks, a second cap on the permits.
 
 use std::net::Ipv4Addr;
 
-use super::check::NetworkGap;
 pub use super::rules::{
     Direction, FIREWALL_UNDER_POLICY, FirewallOutcome, FirewallTrouble, LOOPBACK_ADDRESSES,
     NON_LOOPBACK_ADDRESSES, RuleProtocol, RuleSpec, outside_range, rule_names, rule_users,
 };
 pub use super::sddl::{allowed_users, denied_users, not_pool_sddl, user_sddl};
-use crate::ports::TIER_B_PORTS;
+pub use super::slot_filters::{
+    OLD_PERMIT_PORTS, RETIRED_OFFSETS, SLOT_BASE, SLOT_FILTERS, SLOT_FIRST, SLOT_STRIDE,
+    checked_ports, is_old_permit_key, old_permit_filter, permit_ports, slot_filters, slot_key,
+    slot_offset_key, slots_of,
+};
+use crate::ports::{DAEMON_BLOCK, HOST_BLOCK, POOL_BLOCK, Slot};
 use crate::windows::pool::POOL_CAP;
 use crate::windows::sids::Sid;
-use crate::{Loopback, Policy};
 
 /// The weight (`FWP_UINT8`) of set-up's block filters in our sublayer.
 pub const BLOCK_WEIGHT: u8 = 1;
@@ -52,8 +57,10 @@ pub const PROTOCOL_TCP: u8 = 6;
 /// `IPPROTO_ICMPV6`.
 pub const PROTOCOL_ICMPV6: u8 = 58;
 
-/// The first static permit's offset from [`Namespace::filters`]: permit `i` (the `i`th pool user,
-/// sorted) is `filter_key(PERMIT_BASE + i)`.
+/// The first of an earlier set-up's shared loopback permits' offsets from
+/// [`Namespace::filters`]: permit `i` (the `i`th pool user, sorted) was
+/// `filter_key(PERMIT_BASE + i)`. No set-up writes them now; set-up and removal delete them, and a
+/// launch that finds one asks for set-up again.
 pub const PERMIT_BASE: u16 = 0x100;
 
 /// Where tier B's WFP objects and firewall rules live: the real ones
@@ -121,12 +128,15 @@ impl Namespace {
     }
 
     /// Every filter key set-up has ever written here: the block keys (with room for later
-    /// ones) and a permit key per pool user the record can hold. Removal and set-up delete them,
-    /// and every other filter in our sublayer too.
+    /// ones), an earlier set-up's shared permit key per pool user the record can hold, and
+    /// every key of every slot (its filters', the retired connect permits' and the spare ones).
+    /// Removal and set-up delete them, and every other filter in our sublayer too.
     pub fn removal_keys(&self) -> Vec<u128> {
         let blocks = (0..REMOVAL_KEYS).map(|n| self.filter_key(n));
         let permits = (0..u16::from(POOL_CAP)).map(|i| self.filter_key(PERMIT_BASE + i));
-        blocks.chain(permits).collect()
+        let slots = Slot::all().flat_map(|slot| (0..SLOT_STRIDE).map(move |n| (slot, n)));
+        let slots = slots.map(|(slot, n)| slot_offset_key(self, slot, n));
+        blocks.chain(permits).chain(slots).collect()
     }
 }
 
@@ -149,6 +159,11 @@ pub enum Layer {
     AssignV4,
     /// `FWPM_LAYER_ALE_RESOURCE_ASSIGNMENT_V6`.
     AssignV6,
+    /// `FWPM_LAYER_ALE_AUTH_LISTEN_V4`: a TCP socket's `listen`. Never resource assignment,
+    /// which every outbound connect's source port also passes.
+    ListenV4,
+    /// `FWPM_LAYER_ALE_AUTH_LISTEN_V6`, dual-stack sockets included.
+    ListenV6,
 }
 
 /// What a filter does with what it matches.
@@ -196,6 +211,13 @@ pub enum Condition {
     RemoteV4(Ipv4Addr),
     /// `FWPM_CONDITION_IP_REMOTE_PORT` is in this range, both ends included.
     RemotePorts(u16, u16),
+    /// `FWPM_CONDITION_IP_LOCAL_PORT` is in this range, both ends included: at a listen layer,
+    /// the port listened on, whatever the address (`0.0.0.0`, `::`, `::1`, any `127.x`).
+    LocalPorts(u16, u16),
+    /// `FWPM_CONDITION_ALE_USER_ID`, `NOT_EQUAL`, over [`user_sddl`]: the token is none of these
+    /// users, its SID enabled. Every other token matches: other pool users, the lawyer's,
+    /// services'.
+    NotUsers(Vec<Sid>),
 }
 
 impl Condition {
@@ -203,9 +225,9 @@ impl Condition {
     pub fn matching(&self) -> Match {
         match self {
             Condition::Users(_) | Condition::Protocol(_) | Condition::RemoteV4(_) => Match::Equal,
-            Condition::NotPool { .. } => Match::NotEqual,
+            Condition::NotPool { .. } | Condition::NotUsers(_) => Match::NotEqual,
             Condition::NotLoopback => Match::FlagsNoneSet,
-            Condition::RemotePorts(..) => Match::Range,
+            Condition::RemotePorts(..) | Condition::LocalPorts(..) => Match::Range,
         }
     }
 }
@@ -284,6 +306,12 @@ pub enum SpecError {
     /// network.
     #[error("the owner, {0}, is named as a sandbox user or group")]
     OwnerInPool(Sid),
+    /// A pool user whose account name isn't `ClauseoSbNN`, so it has no slot.
+    #[error("the sandbox user {0} isn't named ClauseoSb01 to ClauseoSb32")]
+    NoSlot(String),
+    /// Two pool users with one slot, or one user with two.
+    #[error("the sandbox users' loopback slots clash at {0}")]
+    SlotClash(Slot),
 }
 
 /// Set-up's network step: who gets the read grants, the pool group, and the pool users.
@@ -292,11 +320,12 @@ pub struct NetworkSetup {
     owner: Sid,
     group: Sid,
     pool: Vec<Sid>,
+    slots: Vec<(Slot, Sid)>,
 }
 
 /// Set-up's block filters, in key order: each one's name, layer and conditions besides the
 /// pool's. Appended only, so each keeps its key.
-const BLOCKS: [(&str, Layer, Block); 6] = [
+const BLOCKS: [(&str, Layer, Block); 12] = [
     ("block_connect_v4", Layer::ConnectV4, Block::All),
     ("block_connect_v6", Layer::ConnectV6, Block::All),
     ("block_inbound_v4", Layer::RecvAcceptV4, Block::NotLoopback),
@@ -311,23 +340,69 @@ const BLOCKS: [(&str, Layer, Block); 6] = [
         Layer::AssignV6,
         Block::Protocol(PROTOCOL_ICMPV6),
     ),
+    (
+        "block_listen_host_v4",
+        Layer::ListenV4,
+        Block::Listen(HOST_BLOCK),
+    ),
+    (
+        "block_listen_host_v6",
+        Layer::ListenV6,
+        Block::Listen(HOST_BLOCK),
+    ),
+    (
+        "block_listen_pool_v4",
+        Layer::ListenV4,
+        Block::Listen(POOL_BLOCK),
+    ),
+    (
+        "block_listen_pool_v6",
+        Layer::ListenV6,
+        Block::Listen(POOL_BLOCK),
+    ),
+    (
+        "block_listen_daemon_v4",
+        Layer::ListenV4,
+        Block::Listen(DAEMON_BLOCK),
+    ),
+    (
+        "block_listen_daemon_v6",
+        Layer::ListenV6,
+        Block::Listen(DAEMON_BLOCK),
+    ),
 ];
 
 /// A block filter's conditions besides the pool's.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 enum Block {
     All,
     NotLoopback,
     Protocol(u8),
+    Listen(std::ops::RangeInclusive<u16>),
 }
 
 impl NetworkSetup {
-    /// The step for `owner`'s set-up, with pool group `group`, covering every SID in `pool`,
-    /// sorted and de-duplicated so a re-run over the same pool builds the same filters.
-    pub fn new(owner: &Sid, group: &Sid, pool: &[Sid]) -> Result<NetworkSetup, SpecError> {
-        let mut sorted = pool.to_vec();
+    /// The step for `owner`'s set-up, with pool group `group`, covering every pool user in
+    /// `pool` with its slot ([`slots_of`] reads them from the account names), sorted and
+    /// de-duplicated so a re-run over the same pool builds the same filters. A slot named for
+    /// two users, or a user with two slots, is refused.
+    pub fn new(owner: &Sid, group: &Sid, pool: &[(Slot, Sid)]) -> Result<NetworkSetup, SpecError> {
+        let mut slots = pool.to_vec();
+        slots.sort();
+        slots.dedup();
+        for pair in slots.windows(2) {
+            if let [(a, _), (b, _)] = pair
+                && a == b
+            {
+                return Err(SpecError::SlotClash(*a));
+            }
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some((slot, _)) = slots.iter().find(|(_, sid)| !seen.insert(sid.clone())) {
+            return Err(SpecError::SlotClash(*slot));
+        }
+        let mut sorted: Vec<Sid> = seen.into_iter().collect();
         sorted.sort();
-        sorted.dedup();
         if sorted.is_empty() {
             return Err(SpecError::NoPoolUser);
         }
@@ -343,6 +418,7 @@ impl NetworkSetup {
             owner: owner.clone(),
             group: group.clone(),
             pool: sorted,
+            slots,
         })
     }
 
@@ -356,15 +432,18 @@ impl NetworkSetup {
         &self.pool
     }
 
-    /// Set-up's filters, persistent, in key order: the blocks ([`block_filters`]), then one
-    /// static permit per pool user ([`permit_filter`]).
+    /// Each pool user's slot, by slot.
+    pub fn slots(&self) -> &[(Slot, Sid)] {
+        &self.slots
+    }
+
+    /// Set-up's filters, persistent, in key order: the blocks ([`block_filters`]), then each
+    /// pool user's slot's ([`slot_filters`]), by slot.
     pub fn filters(&self, ns: &Namespace) -> Vec<FilterSpec> {
         let mut filters = block_filters(ns, &self.group, &self.pool);
-        filters.extend(
-            (0u16..)
-                .zip(&self.pool)
-                .map(|(i, user)| permit_filter(ns, i, user)),
-        );
+        for (slot, user) in &self.slots {
+            filters.extend(slot_filters(ns, *slot, user));
+        }
         filters
     }
 
@@ -418,6 +497,9 @@ pub fn block_filters(ns: &Namespace, group: &Sid, pool: &[Sid]) -> Vec<FilterSpe
                 Block::All => {}
                 Block::NotLoopback => conditions.push(Condition::NotLoopback),
                 Block::Protocol(protocol) => conditions.push(Condition::Protocol(protocol)),
+                Block::Listen(ports) => {
+                    conditions.push(Condition::LocalPorts(*ports.start(), *ports.end()));
+                }
             }
             FilterSpec {
                 key: ns.filter_key(n),
@@ -434,66 +516,16 @@ pub fn block_filters(ns: &Namespace, group: &Sid, pool: &[Sid]) -> Vec<FilterSpe
 /// How many block filters set-up writes.
 pub const BLOCK_COUNT: usize = BLOCKS.len();
 
-/// The static permit for `user`, the `i`th pool user (sorted): `127.0.0.1` over TCP on
-/// [`TIER_B_PORTS`], at `ALE_AUTH_CONNECT_V4` and [`PERMIT_WEIGHT`], persistent.
-pub fn permit_filter(ns: &Namespace, i: u16, user: &Sid) -> FilterSpec {
-    FilterSpec {
-        key: ns.filter_key(PERMIT_BASE + i),
-        name: format!("{} permit loopback range {user}", ns.display),
-        layer: Layer::ConnectV4,
-        action: Action::Permit,
-        weight: PERMIT_WEIGHT,
-        conditions: vec![
-            Condition::Users(vec![user.clone()]),
-            Condition::RemoteV4(Ipv4Addr::LOCALHOST),
-            Condition::Protocol(PROTOCOL_TCP),
-            Condition::RemotePorts(*TIER_B_PORTS.start(), *TIER_B_PORTS.end()),
-        ],
-    }
-}
-
-/// Whether `key` is one of the static permits' keys in `ns`.
-pub fn is_permit_key(ns: &Namespace, key: u128) -> bool {
-    (0..u16::from(POOL_CAP)).any(|i| ns.filter_key(PERMIT_BASE + i) == key)
-}
-
 /// Whether `sid` is an account's or a local group's: `S-1-5-21-<a>-<b>-<c>-<rid>`, never a
 /// well-known group.
 pub fn is_account(sid: &Sid) -> bool {
     sid.domain().is_some() && sid.as_str().split('-').count() == 8
 }
 
-/// The loopback ports a launch names: `policy`'s proxy ports and its [`Loopback::Ports`]
-/// ([`checked_ports`]). The static permit opens the whole range, so these narrow nothing at the
-/// WFP layer; they are still checked, so a launch never counts on a port the firewall blocks.
-/// [`Loopback::Any`] is refused (D10: the browser, the only entry that asks for it, is off on
-/// tier B).
-pub fn permit_ports(policy: &Policy) -> Result<Vec<u16>, NetworkGap> {
-    let mut ports = policy.proxy_ports().to_vec();
-    match policy.loopback() {
-        Loopback::None => {}
-        Loopback::Ports(more) => ports.extend(more),
-        Loopback::Any => return Err(NetworkGap::LoopbackAny),
-    }
-    checked_ports(&ports)
-}
-
-/// `ports` sorted and de-duplicated; a port outside [`TIER_B_PORTS`], which the firewall
-/// and the permit leave closed, is refused.
-pub fn checked_ports(ports: &[u16]) -> Result<Vec<u16>, NetworkGap> {
-    let mut ports = ports.to_vec();
-    ports.sort_unstable();
-    ports.dedup();
-    if let Some(port) = ports.iter().find(|port| !TIER_B_PORTS.contains(port)) {
-        return Err(NetworkGap::PortOutsideRange(*port));
-    }
-    Ok(ports)
-}
-
 /// What set-up's network step did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetworkReport {
-    /// How many filters it wrote: the blocks and one permit per pool user.
+    /// How many filters it wrote: the blocks and each pool user's slot's.
     pub filters: usize,
     /// How many filters in our sublayer it deleted that weren't ours.
     pub foreign_removed: usize,

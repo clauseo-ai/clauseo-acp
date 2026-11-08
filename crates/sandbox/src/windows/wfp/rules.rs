@@ -3,13 +3,14 @@
 // at 092d3acd6bec3e3a14bdc7e7a2810ab628ab759d (rust-v0.162.1); see PROVENANCE.md
 
 //! Set-up's Windows Firewall rules as plain data (S15 PR7), built and tested on every OS: what
-//! isn't loopback blocked both ways, loopback UDP blocked, and loopback TCP blocked outside
-//! [`TIER_B_PORTS`], the one place the range is excepted (`spec.rs` says why). `firewall.rs`
-//! writes them on Windows.
+//! isn't loopback blocked both ways, loopback UDP blocked, and loopback TCP blocked outside the
+//! slots' blocks H, P and D (`ports::slot`), the one place they are excepted (`spec.rs` says
+//! why). The firewall can't tell one slot from another; WFP's per-slot filters do that.
+//! `firewall.rs` writes them on Windows.
 
 use super::sddl::aces;
 use super::spec::Namespace;
-use crate::ports::TIER_B_PORTS;
+use crate::ports::{DAEMON_BLOCK, TIER_B_PORTS};
 use crate::windows::sids::Sid;
 
 /// The remote addresses the firewall rules call loopback (Codex's literal).
@@ -57,8 +58,8 @@ pub struct RuleSpec {
     pub users: String,
 }
 
-/// The firewall rules: what isn't loopback, both ways; loopback UDP; loopback TCP outside
-/// [`TIER_B_PORTS`], the one place the range is excepted.
+/// The firewall rules: what isn't loopback, both ways; loopback UDP; loopback TCP outside the
+/// slots' blocks, the one place they are excepted.
 pub fn rules(ns: &Namespace, pool: &[Sid]) -> Vec<RuleSpec> {
     let users = rule_users(pool);
     let rule = |suffix: &str, description: &str, direction, protocol, remote, ports| RuleSpec {
@@ -97,7 +98,7 @@ pub fn rules(ns: &Namespace, pool: &[Sid]) -> Vec<RuleSpec> {
         ),
         rule(
             "block_loopback_tcp",
-            "Block Loopback TCP Outside 46100-46199",
+            "Block Loopback TCP Outside 46100-46611 and 65024-65279",
             Direction::Out,
             RuleProtocol::Tcp,
             LOOPBACK_ADDRESSES,
@@ -124,12 +125,15 @@ pub fn rule_users(sids: &[Sid]) -> String {
     format!("O:LSD:{}", aces('A', sids))
 }
 
-/// Every TCP port outside [`TIER_B_PORTS`], as the firewall writes port ranges.
+/// Every TCP port outside the slots' blocks ([`TIER_B_PORTS`], H and P, and [`DAEMON_BLOCK`]),
+/// as the firewall writes port ranges.
 pub fn outside_range() -> String {
     format!(
-        "1-{},{}-65535",
+        "1-{},{}-{},{}-65535",
         TIER_B_PORTS.start() - 1,
-        TIER_B_PORTS.end() + 1
+        TIER_B_PORTS.end() + 1,
+        DAEMON_BLOCK.start() - 1,
+        DAEMON_BLOCK.end() + 1
     )
 }
 

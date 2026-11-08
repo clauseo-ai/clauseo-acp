@@ -15,7 +15,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use clauseo_sandbox::ports::{ListenerFor, bind_loopback};
+use clauseo_sandbox::ports::{ListenerFor, Slot, bind_loopback};
 
 use super::checks_ctl::Live;
 use super::launch::{Spec, deadline, launch, pool_of, run_command, summary, text};
@@ -108,7 +108,7 @@ fn run(ctx: &Ctx<'_>, codex: &Path, node: &Path, atom: &str) -> Result<String, S
     }
     let log = m.logs().join("codex-mock.jsonl");
     drop(remove_file(&log));
-    let want = tier_b_port()?;
+    let want = tier_b_port(m)?;
     let mut command = Command::new(node);
     command
         .arg(m.root.join(MOCK_FILE))
@@ -241,10 +241,13 @@ fn job_ui(ctx: &Ctx<'_>, job_file: &Path, atom: &str) -> Result<String, String> 
     Ok(limits)
 }
 
-/// A free port in `TIER_B_PORTS`, found by binding it, then left for the mock to bind: tier B's
-/// WFP filters let A reach no other loopback port.
-fn tier_b_port() -> Result<u16, String> {
-    let free = bind_loopback(ListenerFor::TierB).map_err(|e| format!("no tier-B port: {e}"))?;
+/// A free port of A's slot's host ports, found by binding it, then left for the mock to bind:
+/// tier B's WFP filters let A reach no loopback port outside its slot's.
+fn tier_b_port(m: &Manifest) -> Result<u16, String> {
+    let slot =
+        Slot::from_account(&pool_of(m, "A")?.name).ok_or("pool user A isn't named ClauseoSbNN")?;
+    let free =
+        bind_loopback(ListenerFor::TierB { slot }).map_err(|e| format!("no tier-B port: {e}"))?;
     let port = free
         .local_addr()
         .map_err(|e| format!("the tier-B port: {e}"))?

@@ -3,6 +3,7 @@
 //! the loopback refusal stays real.
 
 mod allowed;
+mod auth_log;
 mod blocked;
 mod browser;
 mod connect;

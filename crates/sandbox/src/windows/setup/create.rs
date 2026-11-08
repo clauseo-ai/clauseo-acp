@@ -302,7 +302,8 @@ fn change(
         Some((applied, skipped)) => (Some(applied), skipped),
         None => (None, Vec::new()),
     };
-    let network = network(machine, &req.owner, &group, &live)?;
+    let pool: Vec<PoolUser> = users.profiles.iter().map(|(u, _)| u.clone()).collect();
+    let network = network(machine, &req.owner, &group, &pool)?;
     let journals = journals(machine, &plan.matters);
     owned(machine, |machine| {
         machine.protect_for_owner(&users.secrets, &live)

@@ -205,6 +205,8 @@ clauseo-fake_agent = { path = "../fake_agent" }
 clauseo-process = { path = "../process", features = ["test-support"] }
 # The refresh's signature tests sign with an Ed25519 key they make.
 ring = { workspace = true }
+# The reserved-port check's test binds without listening on every OS.
+socket2 = { workspace = true }
 
 # The jail tests drive the launched programs, wait for a jailed tree's exits with kqueue, and
 # open a pty outside the jail (`term`, and `fs` for its name).

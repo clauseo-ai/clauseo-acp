@@ -17,11 +17,12 @@ use windows::Win32::Foundation::{
 use windows::Win32::NetworkManagement::WindowsFilteringPlatform::{
     FWP_ACTION_BLOCK, FWP_ACTION_PERMIT, FWP_CONDITION_FLAG_IS_LOOPBACK, FWP_RANGE_TYPE,
     FWP_SECURITY_DESCRIPTOR_TYPE, FWP_UINT8, FWP_UINT16, FWP_UINT32, FWP_VALUE0,
-    FWPM_CONDITION_ALE_USER_ID, FWPM_CONDITION_FLAGS, FWPM_CONDITION_IP_PROTOCOL,
-    FWPM_CONDITION_IP_REMOTE_ADDRESS, FWPM_CONDITION_IP_REMOTE_PORT, FWPM_FILTER_CONDITION0,
-    FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT, FWPM_FILTER_FLAG_PERSISTENT, FWPM_FILTER0, FWPM_PROVIDER0,
-    FWPM_SUBLAYER0, FwpmFilterCreateEnumHandle0, FwpmFilterDestroyEnumHandle0, FwpmFilterEnum0,
-    FwpmFreeMemory0, FwpmProviderGetByKey0, FwpmSubLayerGetByKey0,
+    FWPM_CONDITION_ALE_USER_ID, FWPM_CONDITION_FLAGS, FWPM_CONDITION_IP_LOCAL_PORT,
+    FWPM_CONDITION_IP_PROTOCOL, FWPM_CONDITION_IP_REMOTE_ADDRESS, FWPM_CONDITION_IP_REMOTE_PORT,
+    FWPM_FILTER_CONDITION0, FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT, FWPM_FILTER_FLAG_PERSISTENT,
+    FWPM_FILTER0, FWPM_PROVIDER0, FWPM_SUBLAYER0, FwpmFilterCreateEnumHandle0,
+    FwpmFilterDestroyEnumHandle0, FwpmFilterEnum0, FwpmFreeMemory0, FwpmProviderGetByKey0,
+    FwpmSubLayerGetByKey0,
 };
 use windows::Win32::Security::Authorization::{
     ConvertSecurityDescriptorToStringSecurityDescriptorW, SDDL_REVISION_1,
@@ -239,13 +240,16 @@ unsafe fn read_condition(condition: &FWPM_FILTER_CONDITION0) -> Result<FoundCond
             && value.r#type == FWP_UINT32
         {
             FoundCondition::RemoteV4(value.Anonymous.uint32)
-        } else if field == FWPM_CONDITION_IP_REMOTE_PORT
+        } else if (field == FWPM_CONDITION_IP_REMOTE_PORT || field == FWPM_CONDITION_IP_LOCAL_PORT)
             && matching == Some(Match::Range)
             && value.r#type == FWP_RANGE_TYPE
             && !value.Anonymous.rangeValue.is_null()
         {
             let range = &*value.Anonymous.rangeValue;
             match (uint16(&range.valueLow), uint16(&range.valueHigh)) {
+                (Some(low), Some(high)) if field == FWPM_CONDITION_IP_LOCAL_PORT => {
+                    FoundCondition::LocalPorts(low, high)
+                }
                 (Some(low), Some(high)) => FoundCondition::RemotePorts(low, high),
                 _ => FoundCondition::Other,
             }

@@ -1,15 +1,22 @@
 //! A launch's fail-closed check of set-up's network objects (S15 PR7), with no Windows call:
 //! before a tier-B launch starts its agent, set-up's provider and sublayer must be there, and
 //! every filter in our sublayer must be one of set-up's, exactly as set-up writes it: the block
-//! filters catching the launch's pool user, and a static permit for it. Any other filter in the
-//! sublayer, any change, or a read the owner is refused, refuses the launch with a named cause
-//! ([`NetworkGap`]), so no agent runs unfiltered. The reads go through [`SetupReader`];
-//! `engine/read.rs` reads WFP itself. Set-up uses [`classify`] to find foreign filters.
+//! filters catching the launch's pool user, and every filter of its slot naming it (the slot is
+//! what the check returns, so the launch's ports follow set-up's filters). Any other filter in
+//! the sublayer, an earlier set-up's shared permit, any change, or a read the owner is refused,
+//! refuses the launch with a named cause ([`NetworkGap`]), so no agent runs unfiltered. The reads
+//! go through [`SetupReader`]; `engine/read.rs` reads WFP itself. Set-up uses [`classify`] to
+//! find foreign filters.
 
+use std::collections::BTreeMap;
+
+use super::slot_filters::slot_of_key;
 use super::spec::{
-    Action, BLOCK_COUNT, Condition, FilterSpec, Flags, Layer, Match, Namespace, SUBLAYER_WEIGHT,
-    allowed_users, block_filters, denied_users, is_account, is_permit_key, permit_filter,
+    Action, BLOCK_COUNT, Condition, FilterSpec, Flags, Layer, Match, Namespace, SLOT_FILTERS,
+    SUBLAYER_WEIGHT, allowed_users, block_filters, denied_users, is_account, is_old_permit_key,
+    old_permit_filter, slot_filters,
 };
+use crate::ports::Slot;
 use crate::windows::sids::Sid;
 
 /// Why a tier-B launch can't get its network filtered, so it is refused. The host maps each
@@ -23,7 +30,7 @@ pub enum NetworkGap {
     /// One of set-up's filters is missing or not as set-up wrote it; its name.
     #[error("the sandbox's network filter {0} is missing or changed")]
     FilterMissing(String),
-    /// Set-up's filters don't catch the launch's pool user, or it has no static permit.
+    /// Set-up's filters don't catch the launch's pool user, or its slot's filters are missing.
     #[error("the sandbox's network filters don't cover this matter's sandbox user")]
     PoolUserNotCovered,
     /// Set-up's objects couldn't be read: the owner's read grant is missing, or WFP failed.
@@ -38,9 +45,9 @@ pub enum NetworkGap {
     /// off on tier B).
     #[error("the sandbox can't give an agent every loopback port on this computer")]
     LoopbackAny,
-    /// The policy names a loopback port outside 46100-46199 (`TIER_B_PORTS`), which the
-    /// firewall blocks.
-    #[error("the sandbox can't permit loopback port {0}, outside 46100-46199")]
+    /// The policy names a loopback port that isn't one of the pool user's slot's
+    /// (`ports::Slot`), which its filters leave closed.
+    #[error("the sandbox can't permit loopback port {0}, outside this matter's sandbox ports")]
     PortOutsideRange(u16),
     /// WFP couldn't be opened to check (the Base Filtering Engine isn't running, say).
     #[error("the sandbox couldn't check its network filters ({call} failed, error {code:#x})")]
@@ -57,7 +64,7 @@ pub enum NetworkGap {
     /// Windows' TCP dynamic port range (first and last port) overlaps `ports::TIER_B_PORTS`, so
     /// the OS can hand those ports to any program.
     #[error(
-        "Windows' dynamic port range ({first}-{last}) overlaps the sandbox's ports 46100-46199: \
+        "Windows' dynamic port range ({first}-{last}) overlaps the sandbox's ports 46100-46611: \
          IT can move it back to its default with \
          `netsh int ipv4 set dynamicport tcp start=49152 num=16384`"
     )]
@@ -67,17 +74,31 @@ pub enum NetworkGap {
         /// Its last port.
         last: u16,
     },
-    /// A port of `ports::TIER_B_PORTS` that Windows refuses to bind: an excluded port range.
+    /// All 8 ports of one block of the launch's slot are unusable: reserved by Windows (an
+    /// excluded port range), or, in its host block, held by other programs' listeners. Only
+    /// launches on this slot are refused.
     #[error(
-        "port {0} of the sandbox's ports 46100-46199 is reserved on this computer (Hyper-V, WSL \
-         and Docker reserve port ranges; see `netsh int ipv4 show excludedportrange \
-         protocol=tcp`)"
+        "all 8 of this matter's {block} ports on this computer, {first}-{last} (those of the \
+         sandbox user {account}), are reserved by Windows or held by other programs (Hyper-V, \
+         WSL and Docker reserve port ranges; see `netsh int ipv4 show excludedportrange \
+         protocol=tcp`)",
+        account = .slot.account()
     )]
-    PortsReserved(u16),
-    /// A TCP listener in `ports::TIER_B_PORTS` that isn't this app's: its port and its program.
+    SlotPortsUnusable {
+        /// The slot.
+        slot: crate::ports::Slot,
+        /// Which of its blocks: "host", "browser" or "browser daemon".
+        block: &'static str,
+        /// The block's first port.
+        first: u16,
+        /// Its last port.
+        last: u16,
+    },
+    /// A TCP listener on a port the launch's policy names, its own listener's, that isn't this
+    /// app's: its port and its program.
     #[error(
-        "another program ({program}) listens on port {port}, inside the sandbox's ports \
-         46100-46199, where a sandboxed agent could reach it"
+        "another program ({program}) listens on port {port}, one of this launch's own ports, \
+         where a sandboxed agent could reach it"
     )]
     ForeignListener {
         /// Its port.
@@ -93,6 +114,14 @@ pub enum NetworkGap {
         /// Its result code.
         code: u32,
     },
+    /// An earlier set-up's shared loopback permit, which let every sandbox user reach every
+    /// other's loopback ports; its name. Running set-up again replaces it with the per-slot
+    /// filters.
+    #[error(
+        "the sandbox's network filters are from an earlier version of set-up ({0}); run set-up \
+         again"
+    )]
+    OldSetup(String),
 }
 
 impl NetworkGap {
@@ -108,6 +137,7 @@ impl NetworkGap {
                 | NetworkGap::PoolUserNotCovered
                 | NetworkGap::Unreadable { .. }
                 | NetworkGap::ForeignFilter(_)
+                | NetworkGap::OldSetup(_)
         )
     }
 }
@@ -193,6 +223,8 @@ pub enum FoundCondition {
     RemotePorts(u16, u16),
     /// Anything else.
     Other,
+    /// `FWPM_CONDITION_IP_LOCAL_PORT`, `RANGE`.
+    LocalPorts(u16, u16),
 }
 
 /// A filter in our sublayer as WFP holds it.
@@ -236,10 +268,13 @@ pub trait SetupReader {
 pub enum Kind {
     /// Set-up's block filter `n`, as set-up writes it, catching these SIDs (group and pool).
     Block(usize, Vec<Sid>),
-    /// A static permit for this pool user, as set-up writes it.
+    /// An earlier set-up's shared loopback permit for this pool user, as that set-up wrote it.
+    /// A launch refuses it ([`NetworkGap::OldSetup`]); set-up deletes it.
     Permit(Sid),
     /// Anything else: not set-up's, or changed.
     Foreign,
+    /// Filter `n` of this slot, as set-up writes it, for this pool user.
+    Slot(Slot, u16, Sid),
 }
 
 /// `spec`'s conditions as WFP would hold them, the user descriptor left out, sorted.
@@ -247,11 +282,12 @@ fn plain(conditions: &[Condition]) -> Vec<FoundCondition> {
     let mut plain: Vec<FoundCondition> = conditions
         .iter()
         .filter_map(|c| match c {
-            Condition::Users(_) | Condition::NotPool { .. } => None,
+            Condition::Users(_) | Condition::NotPool { .. } | Condition::NotUsers(_) => None,
             Condition::NotLoopback => Some(FoundCondition::NotLoopback),
             Condition::Protocol(p) => Some(FoundCondition::Protocol(*p)),
             Condition::RemoteV4(a) => Some(FoundCondition::RemoteV4(u32::from(*a))),
             Condition::RemotePorts(lo, hi) => Some(FoundCondition::RemotePorts(*lo, *hi)),
+            Condition::LocalPorts(lo, hi) => Some(FoundCondition::LocalPorts(*lo, *hi)),
         })
         .collect();
     plain.sort();
@@ -310,11 +346,26 @@ pub fn classify(ns: &Namespace, found: &FoundFilter) -> Kind {
             _ => Kind::Foreign,
         };
     }
-    if !is_permit_key(ns, found.key) {
+    if let Some((slot, n)) = slot_of_key(ns, found.key) {
+        let specs = slot_filters(ns, slot, &placeholder);
+        let user = specs.get(usize::from(n)).and_then(|spec| {
+            let matching = if spec.action == Action::Permit {
+                Match::Equal
+            } else {
+                Match::NotEqual
+            };
+            shaped_like(found, spec, matching).and_then(allowed_users)
+        });
+        return match user.as_deref() {
+            Some([user]) if is_account(user) => Kind::Slot(slot, n, user.clone()),
+            _ => Kind::Foreign,
+        };
+    }
+    if !is_old_permit_key(ns, found.key) {
         return Kind::Foreign;
     }
     let permit = (0u16..)
-        .map(|i| permit_filter(ns, i, &placeholder))
+        .map(|i| old_permit_filter(ns, i, &placeholder))
         .take(usize::from(crate::windows::pool::POOL_CAP))
         .find(|spec| spec.key == found.key);
     let users = permit
@@ -329,13 +380,15 @@ pub fn classify(ns: &Namespace, found: &FoundFilter) -> Kind {
 
 /// Checks set-up's objects in `ns` for a launch of `user`: the provider and the sublayer are
 /// there, the sublayer at set-up's weight; every filter in the sublayer is one of set-up's
-/// ([`classify`]); all the blocks are there and each catches `user`; `user` has a static permit;
-/// and every permit names a user the blocks catch (the pool set-up recorded).
+/// ([`classify`]), and none is an earlier set-up's shared permit; all the blocks are there and
+/// each catches `user`; every slot with a filter has all of them, each naming the same user, a
+/// user the blocks catch (the pool set-up recorded), and no user has two slots; and `user` has
+/// a slot. That slot, whose ports the launch then uses.
 pub fn check_setup(
     ns: &Namespace,
     user: &Sid,
     reader: &mut impl SetupReader,
-) -> Result<(), NetworkGap> {
+) -> Result<Slot, NetworkGap> {
     let unreadable = |(call, code)| NetworkGap::Unreadable { call, code };
     if !reader.provider(ns.provider).map_err(unreadable)? {
         return Err(NetworkGap::NotSetUp);
@@ -351,7 +404,7 @@ pub fn check_setup(
         Some(_) => {}
     }
     let mut blocks: Vec<Option<Vec<Sid>>> = vec![None; BLOCK_COUNT];
-    let mut permits: Vec<(Sid, String)> = Vec::new();
+    let mut slots: BTreeMap<Slot, Vec<Option<(Sid, String)>>> = BTreeMap::new();
     for found in reader.filters_in(ns.sublayer).map_err(unreadable)? {
         match classify(ns, &found) {
             Kind::Block(n, denied) => {
@@ -359,13 +412,40 @@ pub fn check_setup(
                     *slot = Some(denied);
                 }
             }
-            Kind::Permit(sid) => permits.push((sid, found.name)),
+            Kind::Slot(slot, n, sid) => {
+                let filters = slots
+                    .entry(slot)
+                    .or_insert_with(|| vec![None; usize::from(SLOT_FILTERS)]);
+                if let Some(entry) = filters.get_mut(usize::from(n)) {
+                    *entry = Some((sid, found.name));
+                }
+            }
+            Kind::Permit(_) => return Err(NetworkGap::OldSetup(found.name)),
             Kind::Foreign => return Err(NetworkGap::ForeignFilter(found.name)),
         }
     }
     let Ok(placeholder) = Sid::parse("S-1-5-21-0-0-0-1000") else {
         return Err(NetworkGap::NotSetUp);
     };
+    let mut owners: BTreeMap<Sid, Slot> = BTreeMap::new();
+    for (slot, filters) in &slots {
+        let specs = slot_filters(ns, *slot, &placeholder);
+        let mut named: Option<&Sid> = None;
+        for (spec, entry) in specs.iter().zip(filters) {
+            let Some((sid, name)) = entry else {
+                return Err(NetworkGap::FilterMissing(spec.name.clone()));
+            };
+            if named.is_some_and(|first| first != sid) {
+                return Err(NetworkGap::ForeignFilter(name.clone()));
+            }
+            named = Some(sid);
+        }
+        if let Some(sid) = named
+            && owners.insert(sid.clone(), *slot).is_some()
+        {
+            return Err(NetworkGap::ForeignFilter(spec_name(filters)));
+        }
+    }
     for (spec, denied) in block_filters(ns, &placeholder, &[]).iter().zip(&blocks) {
         let Some(denied) = denied else {
             return Err(NetworkGap::FilterMissing(spec.name.clone()));
@@ -373,13 +453,23 @@ pub fn check_setup(
         if !denied.contains(user) {
             return Err(NetworkGap::PoolUserNotCovered);
         }
-        if let Some((_, name)) = permits.iter().find(|(sid, _)| !denied.contains(sid)) {
-            return Err(NetworkGap::ForeignFilter(name.clone()));
+        if let Some((_, slot)) = owners.iter().find(|(sid, _)| !denied.contains(sid)) {
+            let name = slots.get(slot).map(|f| spec_name(f)).unwrap_or_default();
+            return Err(NetworkGap::ForeignFilter(name));
         }
     }
-    if permits.iter().any(|(sid, _)| sid == user) {
-        Ok(())
-    } else {
-        Err(NetworkGap::PoolUserNotCovered)
-    }
+    owners
+        .get(user)
+        .copied()
+        .ok_or(NetworkGap::PoolUserNotCovered)
+}
+
+/// The name of a slot's first filter found, for a refusal.
+fn spec_name(filters: &[Option<(Sid, String)>]) -> String {
+    filters
+        .iter()
+        .flatten()
+        .map(|(_, name)| name.clone())
+        .next()
+        .unwrap_or_default()
 }

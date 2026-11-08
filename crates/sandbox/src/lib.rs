@@ -25,7 +25,7 @@
 //!   checks, the unsafe-site block list (ADR 0053: by name or IP literal, before the allowlist,
 //!   no DNS), the firm's upstream, refusals as [`Denial::Host`] and [`Denial::Blocked`]
 //!   (`Clauseo-Blocked: <tag>` on a plain-http 403). [`ports::bind_loopback`] binds
-//!   every per-launch loopback listener; [`ports::claim_port`] and [`ports::claim_port_at`]
+//!   every per-launch loopback listener; [`ports::claim_pool_port`] and the other claims
 //!   hold a loopback port for a session in a process-wide registry ([`ports::PortClaim`]),
 //!   which no bind or claim of this process hands out again until the claim drops (on macOS
 //!   and Linux a dropped claim's port is retired, never handed out again).

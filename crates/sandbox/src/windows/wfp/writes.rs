@@ -20,9 +20,15 @@ use super::spec::{FilterSpec, Namespace, Object};
 /// Administrators` (`BA`), no group and no DACL, so WFP still applies its default DACL.
 pub(super) const ADMIN_OWNED: &str = "O:BA";
 
-/// The WFP calls set-up's writes make, inside the caller's transaction. A creation names the
-/// descriptor it passes (`None`: WFP's default, for the owner probe alone).
+/// The WFP calls set-up's writes make. A creation names the descriptor it passes (`None`: WFP's
+/// default, for the owner probe alone).
 pub(super) trait SetupWriter {
+    /// Begins an explicit transaction.
+    fn begin(&self) -> Result<(), WfpError>;
+    /// Commits it.
+    fn commit(&self) -> Result<(), WfpError>;
+    /// Aborts it: nothing written since [`SetupWriter::begin`] takes effect.
+    fn abort(&self);
     /// Adds the persistent provider; one already there is kept.
     fn add_provider(&self, ns: &Namespace, sddl: Option<&str>) -> Result<(), WfpError>;
     /// Adds the persistent sublayer under the provider; one already there is kept.
@@ -107,6 +113,26 @@ pub(super) fn write_objects(
         }
     }
     Ok(foreign)
+}
+
+/// Replaces every filter in `ns`'s sublayer with `filters` ([`write_objects`]) in one WFP
+/// transaction, so no moment has both an earlier set-up's filters and these, or neither: an
+/// earlier set-up's shared loopback permits go in the same commit that adds the per-slot
+/// filters. A failure aborts it, leaving what was there.
+pub(super) fn replace(
+    wfp: &impl SetupWriter,
+    ns: &Namespace,
+    filters: &[FilterSpec],
+) -> Result<usize, WfpError> {
+    wfp.begin()?;
+    let written = write_objects(wfp, ns, filters).and_then(|foreign| {
+        wfp.commit()?;
+        Ok(foreign)
+    });
+    if written.is_err() {
+        wfp.abort();
+    }
+    written
 }
 
 /// Deletes set-up's objects in `ns`, inside the caller's transaction: every filter in the
