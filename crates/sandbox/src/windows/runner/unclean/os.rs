@@ -1,0 +1,88 @@
+//! The markers' effects on Windows (`unclean.rs`), as the lawyer: the run folder's markers, the
+//! record's sequences and `PoolSids` (the record grants Users read), and requests for the stop
+//! and sweep tasks through the owner's `FRFX` entry.
+
+use std::io;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use super::super::marker::{
+    MarkerState, Sequences, UncleanSession, marker_path, remove_marker, unclean_sessions,
+    write_marker_at,
+};
+use super::{Markers, logon_check};
+use crate::windows::record::sandbox_pool_sids;
+use crate::windows::refresh::{request_pool_stop, request_pool_sweep};
+use crate::windows::setup::read_record_value;
+use crate::windows::setup::record_values::{STOP_SEQUENCE, SWEEP_SEQUENCE};
+use crate::windows::sids::Sid;
+
+/// The markers of the data folder `data_dir`.
+pub(crate) struct OsMarkers {
+    data_dir: PathBuf,
+}
+
+impl OsMarkers {
+    pub(crate) fn new(data_dir: &Path) -> OsMarkers {
+        OsMarkers {
+            data_dir: data_dir.to_path_buf(),
+        }
+    }
+}
+
+/// A record value as the lawyer reads it, `absent` when it is missing.
+fn value(name: &str, absent: u64) -> Result<u64, String> {
+    let read = read_record_value(name).map_err(|error| error.to_string())?;
+    Ok(read.unwrap_or(absent))
+}
+
+impl Markers for OsMarkers {
+    fn sessions(&mut self) -> io::Result<Vec<UncleanSession>> {
+        unclean_sessions(&self.data_dir)
+    }
+
+    fn sequences(&mut self) -> Result<Sequences, String> {
+        Ok(Sequences {
+            stop: value(STOP_SEQUENCE, 0)?,
+            sweep: value(SWEEP_SEQUENCE, 0)?,
+        })
+    }
+
+    fn next_number(&mut self, name: &'static str) -> Result<u64, String> {
+        value(name, 1)
+    }
+
+    fn pool(&mut self) -> Vec<Sid> {
+        sandbox_pool_sids().unwrap_or_default()
+    }
+
+    fn settle(&mut self, id: &str, pool_user: Option<&Sid>, state: MarkerState) -> io::Result<()> {
+        write_marker_at(&marker_path(&self.data_dir, id), pool_user, state)
+    }
+
+    fn remove(&mut self, id: &str) -> io::Result<()> {
+        remove_marker(&marker_path(&self.data_dir, id))
+    }
+
+    fn request_stop(&mut self) -> bool {
+        request_pool_stop()
+    }
+
+    fn request_sweep(&mut self) -> Result<(), String> {
+        request_pool_sweep().map_err(|error| error.to_string())
+    }
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a launch's bounded wait for a sweep a marker awaits, 100 ms at a time; the \
+                  tests inject the pause (`Markers::pause`)"
+    )]
+    fn pause(&mut self, pause: Duration) {
+        std::thread::sleep(pause);
+    }
+}
+
+/// F4, for the outer before it writes its own marker (`unclean::logon_check`).
+pub(crate) fn check_logon(data_dir: &Path, pool_user: &Sid) -> Result<(), String> {
+    logon_check(&mut OsMarkers::new(data_dir), pool_user)
+}
