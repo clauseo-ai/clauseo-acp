@@ -2276,15 +2276,19 @@ Edge cases:
   of that file shares, so the file reads by its other names too until the session ends.
   Informational: the agent reading can't make one (it writes nothing there), and the file was
   put in the granted tree.
-- Inheritance off, or an allow that beats the fence: before any allow is written, each granted
-  folder's children are walked strictly (`reads::check_trees`, `Reach::Children`, watching the
-  reading pool user too). A file or folder with a protected DACL, which the fence's deny doesn't
+- Inheritance off, or an allow that beats the fence: before any allow is written, the whole
+  granted tree is checked, watching the reading pool user too (`reads::check_trees`). Each
+  granted folder's children are walked strictly (`Reach::Children`); every folder of a read, at
+  any depth, has allows of its own, so every folder is walked and every item below the top is
+  checked as a child. The top of each read (a folder or a file) is checked on its own
+  (`AclWriter::check_item`), unless it is the other matter's root, which carries the fence's
+  explicit deny on itself. A file or folder with a protected DACL, which the fence's deny doesn't
   reach, refuses the launch (`ProtectedChild`), and so does one with an explicit allow for a
   broad group or a pool user (`BroadAllowChild`), naming it, as `OtherMatterRead` (R18 LOW 5).
-  The reads the ledger lists are excused, as at every strict walk. This holds whether or not the
-  other matter's fence is new in the launch. A refused name directly in a granted folder is
-  checked as a child too, but nothing below it. The granted folder itself isn't: the fence's
-  walk checks it at the other matter's launches.
+  The top's check repairs nothing, even on an item a pool user owns: it refuses. The reads the
+  ledger lists are excused, as at every strict walk. This holds whether or not the other
+  matter's fence is new in the launch. A refused name directly in a granted folder is checked as
+  a child too, but nothing below it.
 - A child the lawyer can't open inside an allowed tree refuses the launch (`ChildShut`). It is
   outside the launch's own trees, so nothing is set aside.
 - A granted folder (a granted file's folder) must answer `Ok` to the folder check; any other
@@ -2323,8 +2327,10 @@ every inherited one, and an object's explicit denies before its explicit allows.
   any launch planning its fence, would be refused while a read was live.
 
 Tests for the check (`apply/tests/read_files.rs`):
-`a_read_into_a_folder_with_inheritance_off_or_a_beating_allow_refuses_the_launch` and
-`the_reads_check_walks_each_granted_folders_children_strictly_and_nothing_else`.
+`a_read_into_a_folder_with_inheritance_off_or_a_beating_allow_refuses_the_launch`,
+`the_reads_check_walks_each_granted_folders_children_strictly_and_nothing_else`,
+`the_top_granted_folder_with_inheritance_off_or_a_beating_allow_refuses_the_launch` and
+`the_top_of_each_read_is_checked_on_its_own_but_a_matters_root`.
 
 The tests model the access check (`apply/tests/reads/access.rs`):
 `a_read_of_another_matter_reads_its_tree_and_no_refused_name_at_any_depth` and
@@ -2528,7 +2534,8 @@ the reading session's pool user:
   old one, moved aside, loses the read;
 - after a killed run, `reconcile` at start removes every read, a moved folder's included;
 - a granted folder holding a subfolder with inheritance off, or a file with an explicit
-  `Users` allow, refuses the launch before any read is written.
+  `Users` allow, refuses the launch before any read is written, and so does a granted folder
+  that is itself protected or carries one.
 
 ### The launcher (PR6 interface)
 

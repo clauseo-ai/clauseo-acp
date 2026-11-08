@@ -21,9 +21,9 @@
 //! each read whose item isn't at its path any more, or that recorded none (an older ledger's),
 //! and writes it again on the item there now.
 //!
-//! Before any allow is written, each granted folder's children are walked strictly
-//! ([`check_trees`]): one with inheritance off, which the fence's deny doesn't reach, or with an
-//! allow beating it, refuses the launch.
+//! Before any allow is written, the granted tree is held to the strict walk's rule
+//! ([`check_trees`]): an item with inheritance off, which the fence's deny doesn't reach, or with
+//! an allow beating it, refuses the launch.
 //!
 //! Each call takes back only the entries naming the session's own SIDs (`sids`: its pool user,
 //! and the matter's SID when that is a subject, off by default), so a second session of the
@@ -42,7 +42,7 @@ use super::back::{finish, take_back};
 use super::lifts;
 use super::walk::{Refused, clearing};
 use super::{Surroundings, refused};
-use crate::windows::acl_plan::{AdmittedPlan, Grant, Sid, in_folder};
+use crate::windows::acl_plan::{AdmittedPlan, Grant, Inherit, Rights, Sid, in_folder};
 use crate::windows::admit::PathKind;
 use crate::windows::ledger::{Entry, EntryId, Ledger, RecordedFile, Take};
 use crate::windows::writer::{AclWriter, Added, ApplyFailure, Reach, Strict, Walked};
@@ -247,27 +247,32 @@ pub(super) fn add(
     }
 }
 
-/// Before any read of another matter is written (R18): each folder `plan` allows a read of
-/// has its children walked strictly, watching the launch's own subjects besides `strict`'s, so a
-/// subfolder or file with inheritance off (which the fence's deny doesn't reach), or with an
-/// explicit allow that beats the deny, refuses the launch, naming it, as at any strict walk. The
-/// reads the ledger lists are excused, as everywhere (`strict.excused`). Nothing is set aside:
-/// the tree is the other matter's. What the walks saw.
+/// Before any read of another matter is written (R18): the whole granted tree is held to the
+/// strict walk's rule, watching the launch's own subjects besides `strict`'s. Each granted folder
+/// has its children walked strictly; every folder of a read, at any depth, has allows of its own
+/// in the plan, so every folder is walked and every item below the top is a child of one. The
+/// top of each read (a folder or a file no other read holds) is checked on its own
+/// ([`AclWriter::check_item`]), unless it is a matter's root, which carries the fence's explicit
+/// deny on itself, first in its DACL. An item with inheritance off (which the fence's deny
+/// doesn't reach), or with an explicit allow that beats the deny, refuses the launch, naming it.
+/// The reads the ledger lists are excused, as everywhere (`strict.excused`). Nothing is set
+/// aside: the tree is the other matter's. What the walks saw.
 pub(super) fn check_trees(
+    ledger: &Ledger,
     plan: &AdmittedPlan,
     acl: &mut dyn AclWriter,
     around: &mut dyn Surroundings,
     strict: &Strict,
 ) -> Result<Walked, Refused> {
     let kind = PathKind::OtherMatterRead;
-    let folders: BTreeSet<&Path> = plan
+    let paths: BTreeSet<&Path> = plan
         .grants()
         .iter()
-        .filter(|g| g.kind() == kind && is_folder(g.path()))
+        .filter(|g| g.kind() == kind)
         .map(Grant::path)
         .collect();
     let mut seen = Walked::default();
-    if folders.is_empty() {
+    if paths.is_empty() {
         return Ok(seen);
     }
     let mut watched: BTreeSet<Sid> = strict.watched.iter().cloned().collect();
@@ -277,7 +282,30 @@ pub(super) fn check_trees(
         assigned: Vec::new(),
         ..strict.clone()
     };
-    for folder in folders {
+    // A matter's root: the fence's deny on the folder alone, planned now or listed.
+    let root_deny = |k: PathKind, r: Rights, i: Inherit| {
+        k == PathKind::Matter && r == Rights::DenyReadWrite && i == Inherit::ThisOnly
+    };
+    let planned = plan.grants().iter();
+    let planned = planned.filter(|g| root_deny(g.kind(), g.rights(), g.inherit()));
+    let listed = ledger
+        .entries()
+        .filter(|e| root_deny(e.kind, e.rights, e.inherit));
+    let roots: Vec<&Path> = planned
+        .map(Grant::path)
+        .chain(listed.map(|e| e.path.as_path()))
+        .collect();
+    let top = |p: &&Path| !paths.iter().any(|f| f != p && in_folder(p, f));
+    for item in paths.iter().copied().filter(top) {
+        if roots.iter().any(|root| same_path(root, item)) {
+            continue;
+        }
+        acl.check_item(item, &check).map_err(|failure| Refused {
+            at: Some(item.to_path_buf()),
+            ..Refused::new(kind, failure)
+        })?;
+    }
+    for folder in paths.iter().filter(|p| is_folder(p)) {
         let walked = clearing(acl, around, &[], kind, |acl| {
             acl.propagate(folder, Reach::Children, Some(&check))
         })?;

@@ -297,6 +297,14 @@ pub trait AclWriter {
     ) -> Result<Added, ApplyFailure> {
         Err(ApplyFailure::Io(io::ErrorKind::Unsupported))
     }
+    /// `path` itself (never what a link at it names) held to `strict` as a strict walk holds a
+    /// child: a protected DACL is [`ApplyFailure::ProtectedChild`], an explicit allow that beats
+    /// an inherited deny, but a listed read, [`ApplyFailure::BroadAllowChild`]. Nothing is
+    /// written. The top of a read of another matter, which no walk visits as a child (R18). The
+    /// default, for writers that never check one, is `Unsupported`.
+    fn check_item(&mut self, _path: &Path, _strict: &Strict) -> Result<(), ApplyFailure> {
+        Err(ApplyFailure::Io(io::ErrorKind::Unsupported))
+    }
     /// Where the file `file` recorded is now: its final path, opened by its ID as
     /// [`AclWriter::remove_recorded`] opens it; `None` when no file has that ID any more. A
     /// read's tree is walked there after its take-back, wherever it was moved (R18). The

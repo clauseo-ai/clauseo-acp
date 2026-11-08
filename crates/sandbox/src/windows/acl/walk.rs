@@ -43,8 +43,10 @@ use crate::windows::acl_bytes::{
 use crate::windows::writer::{ApplyFailure, Owned, Reach, Walked};
 
 mod handed;
+mod item;
 
 use handed::{Writes, make};
+pub(super) use item::{check_item, listed_reads};
 
 /// Files' generic rights, for working out inherited entries.
 const MAPPING: GENERIC_MAPPING = GENERIC_MAPPING {

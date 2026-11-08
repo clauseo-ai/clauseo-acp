@@ -367,7 +367,7 @@ fn write_all(
     let own = own_roots(plan);
     // R18: no read is written into a tree the other matter's fence doesn't hold.
     run.walked
-        .add(reads::check_trees(plan, acl, around, &strict)?);
+        .add(reads::check_trees(ledger, plan, acl, around, &strict)?);
     let mut by_path: BTreeMap<(usize, &Path), Vec<usize>> = BTreeMap::new();
     for (i, grant) in grants.iter().enumerate() {
         let depth = grant.path().components().count();

@@ -34,8 +34,7 @@ use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 use super::acl_bytes::{
     AceSpec, Acl, DACL_AUTO_INHERITED, DACL_PROTECTED, Descriptor, Listed, SACL_AUTO_INHERITED,
-    SACL_PROTECTED, build_descriptor, empty_acl, explicit_label, label_spec, owner_sid, read_flags,
-    sid_bytes,
+    SACL_PROTECTED, build_descriptor, empty_acl, explicit_label, label_spec, owner_sid, sid_bytes,
 };
 use super::acl_plan::{Grant, Inherit, Sid, in_folder};
 use super::admit::PathKind;
@@ -44,7 +43,7 @@ use super::ledger::RecordedFile;
 use super::record::{current_token_groups, current_user_sid};
 use super::writer::{AclWriter, Added, ApplyFailure, DenyStrip, Label, Reach, Strict, Walked};
 use object::{Handle, Object, os_error};
-use walk::{Foreign, Mode};
+use walk::{Foreign, Mode, listed_reads};
 
 pub(in crate::windows) mod object;
 pub(in crate::windows) mod privilege;
@@ -167,15 +166,8 @@ impl AclWriter for NtfsAcl {
         } else {
             sid_bytes(&current_user_sid().map_err(|e| ApplyFailure::Io(e.kind()))?)
         };
-        // R18: each read of another matter the ledger lists, its path as final paths are written,
-        // with the flags its allow is written with; a shape no read takes excuses nothing.
-        let reads = strict
-            .excused
-            .iter()
-            .filter_map(|(path, sid, inherit)| Some((path, sid, read_flags(*inherit)?)))
-            .map(|(path, sid, flags)| Ok((final_form(path)?, sid_bytes(sid), flags)))
-            .collect::<io::Result<Vec<(PathBuf, Vec<u8>, u8)>>>()
-            .map_err(|e| ApplyFailure::Io(e.kind()))?;
+        // R18: each read of another matter the ledger lists (`walk::listed_reads`).
+        let reads = listed_reads(strict).map_err(|e| ApplyFailure::Io(e.kind()))?;
         let mode = Mode::Strict {
             watched: &watched,
             pool: &pool,
@@ -215,6 +207,10 @@ impl AclWriter for NtfsAcl {
 
     fn add_recorded(&mut self, grant: &Grant, file: &RecordedFile) -> Result<Added, ApplyFailure> {
         write(grant, Expect::Id(file.id))
+    }
+
+    fn check_item(&mut self, path: &Path, strict: &Strict) -> Result<(), ApplyFailure> {
+        walk::check_item(&self.token, path, strict)
     }
 
     fn located(&mut self, file: &RecordedFile) -> io::Result<Option<PathBuf>> {

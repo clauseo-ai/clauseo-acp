@@ -90,6 +90,10 @@ pub(super) struct FakeAcl {
     /// Paths where a new item was made after the one first there ([`FakeAcl::make_new`]): each
     /// time, the item there, and any below it, has another ID.
     pub(super) renewed: BTreeMap<PathBuf, u8>,
+    /// Items whose DACL is protected: [`AclWriter::check_item`] refuses each.
+    pub(super) protected: BTreeSet<PathBuf>,
+    /// The items [`AclWriter::check_item`] was asked about, in order.
+    pub(super) items: Vec<PathBuf>,
 }
 
 /// What the fake's strict walk does with an explicit allow below its root for a watched SID.
@@ -160,23 +164,9 @@ impl FakeAcl {
     /// The first path below `root` holding an explicit allow for one of `strict`'s watched SIDs
     /// that isn't a read of another matter it excuses there, in the shape it is listed in.
     fn broad_below(&self, root: &Path, strict: &Strict) -> Option<PathBuf> {
-        let watched = |sid: &str| strict.watched.iter().any(|w| w.as_str() == sid);
-        let excused = |p: &Path, sid: &str, rights: Rights, inherit: Inherit| {
-            rights == Rights::ReadAndExecute
-                && strict
-                    .excused
-                    .iter()
-                    .any(|(e, s, i)| e == p && s.as_str() == sid && *i == inherit)
-        };
         let mut aces = self.aces.iter();
-        aces.find(|(p, sid, rights, inherit)| {
-            p != root
-                && p.starts_with(root)
-                && rights.is_allow()
-                && watched(sid)
-                && !excused(p, sid, *rights, *inherit)
-        })
-        .map(|(p, ..)| p.clone())
+        aces.find(|key| key.0 != root && key.0.starts_with(root) && offends(key, strict))
+            .map(|(p, ..)| p.clone())
     }
 
     /// Moves the item at `from` (a file, or a folder and all below it) to `to`, as a rename
@@ -452,6 +442,20 @@ impl AclWriter for FakeAcl {
         self.add(grant)
     }
 
+    /// `NtfsAcl`'s rule for the item alone: protected, or (when `broad` refuses) an explicit
+    /// allow on it for a watched SID that isn't a listed read.
+    fn check_item(&mut self, path: &Path, strict: &Strict) -> Result<(), ApplyFailure> {
+        self.items.push(path.to_owned());
+        if self.protected.contains(path) {
+            return Err(ApplyFailure::ProtectedChild);
+        }
+        let here = |key: &Key| key.0 == path && offends(key, strict);
+        if self.broad == Broad::Refused && self.aces.iter().any(here) {
+            return Err(ApplyFailure::BroadAllowChild);
+        }
+        Ok(())
+    }
+
     fn located(&mut self, file: &RecordedFile) -> io::Result<Option<PathBuf>> {
         Ok(self.by_id(file))
     }
@@ -533,4 +537,17 @@ impl AclWriter for FakeAcl {
         self.labels.insert(self.file(grant.path()), label);
         Ok(())
     }
+}
+
+/// Whether entry `key` is an explicit allow for one of `strict`'s watched SIDs that isn't a read
+/// of another matter it excuses there, in the shape it is listed in.
+fn offends(key: &Key, strict: &Strict) -> bool {
+    let (p, sid, rights, inherit) = key;
+    let watched = strict.watched.iter().any(|w| w.as_str() == sid);
+    let excused = *rights == Rights::ReadAndExecute
+        && strict
+            .excused
+            .iter()
+            .any(|(e, s, i)| e == p && s.as_str() == sid && i == inherit);
+    rights.is_allow() && watched && !excused
 }

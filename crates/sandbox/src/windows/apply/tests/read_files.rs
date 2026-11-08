@@ -303,3 +303,77 @@ fn the_reads_check_walks_each_granted_folders_children_strictly_and_nothing_else
     let docs = w.canonical("other/m2/docs");
     assert_eq!(checks, [docs.clone(), docs.join("deep")]);
 }
+
+#[test]
+fn the_top_granted_folder_with_inheritance_off_or_a_beating_allow_refuses_the_launch() {
+    for protected in [true, false] {
+        let w = World::new("files-strict-top");
+        w.other_tree();
+        let docs = w.canonical("other/m2/docs");
+        let (mut ledger, mut acl) = (ledger(&w), volume(&w));
+        if protected {
+            acl.protected.insert(docs.clone());
+        } else {
+            let planted = (
+                docs.clone(),
+                USER_SID.to_owned(),
+                Rights::Modify,
+                Inherit::ThisOnly,
+            );
+            acl.aces.insert(planted);
+        }
+        let mut plan = read_plan(&w, &[("other/m2/docs", false)], true);
+        let error = apply(&mut ledger, &mut plan, &mut acl, &mut around(&w)).unwrap_err();
+        let failure = if protected {
+            ApplyFailure::ProtectedChild
+        } else {
+            ApplyFailure::BroadAllowChild
+        };
+        let Error::AclApply {
+            path_kind,
+            failure: f,
+            at,
+        } = &error
+        else {
+            panic!("{error:?}");
+        };
+        assert_eq!((*path_kind, *f), (PathKind::OtherMatterRead, failure));
+        assert_eq!(at.as_deref(), Some(docs.as_path()));
+        assert_eq!(read_entries(&ledger), Vec::<Entry>::new());
+        // Nothing was written: only the planted allow is there.
+        let left = allows_in_other(&w, &acl);
+        assert!(
+            left.iter().all(|k| k.0 == docs && k.2 == Rights::Modify),
+            "{left:?}"
+        );
+    }
+}
+
+#[test]
+fn the_top_of_each_read_is_checked_on_its_own_but_a_matters_root() {
+    let w = World::new("files-strict-tops");
+    w.other_tree();
+    let (mut ledger, mut acl) = (super::ledger(&w), volume(&w));
+    let reads = [("other/m2/docs", false), ("other/m2/a.txt", true)];
+    let mut plan = read_plan(&w, &reads, true);
+    apply(&mut ledger, &mut plan, &mut acl, &mut around(&w)).unwrap();
+    let a = w.canonical("other/m2/a.txt");
+    assert_eq!(acl.items, [a, w.canonical("other/m2/docs")]);
+
+    // A read of the whole folder: its root carries the fence's explicit deny, and isn't
+    // checked; each folder in it is checked as a child of its folder.
+    let w = World::new("files-strict-root");
+    w.other_tree();
+    let (mut ledger, mut acl) = (super::ledger(&w), volume(&w));
+    acl.broad = Broad::Ignored;
+    let mut plan = read_plan(&w, &[("other/m2", false)], false);
+    apply(&mut ledger, &mut plan, &mut acl, &mut around(&w)).unwrap();
+    assert_eq!(acl.items, Vec::<PathBuf>::new());
+    let m2 = w.canonical("other/m2");
+    let checked = |r: &Path| {
+        acl.walks
+            .iter()
+            .any(|(w, reach, s)| w == r && *reach == Reach::Children && *s)
+    };
+    assert!(checked(&m2) && checked(&m2.join("docs")) && checked(&m2.join("sub")));
+}
