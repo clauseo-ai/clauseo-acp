@@ -2093,7 +2093,11 @@ process call; a pool task's running instance is stopped by the Task Scheduler. I
 Event Log line with counts only (pool users, folders and tasks read, the pool's tasks deleted,
 unreadable, skipped and not deleted, running instances stopped and not, BITS jobs cancelled
 and not), with
-no path, task name or SID, since every local user can read the Application log. Its
+no path, task name or SID, since every local user can read the Application log. A refusal
+that comes from a value that isn't a SID (a record value, a `REG_MULTI_SZ` of SIDs) says so in
+fixed words (`sids::NOT_A_SID`, "the list holds a string that isn't a SID", "the list holds
+a SID twice"), never the value: the stop's and the gate's lines take those messages as they
+are. Its
 exit codes (`SweepExit`) start after the stop's 50 and the WSL deny task's 51 and 52
 (`WslDenyExit`):
 
