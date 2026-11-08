@@ -114,6 +114,28 @@ fn well_known_sids_are_not_accounts() {
 }
 
 #[test]
+fn an_entra_desktop_user_is_an_account_and_an_entra_pool_user_is_not() {
+    let entra = "S-1-12-1-3263492174-1177263218-2391161522-1513380577";
+    let spec = TokenSpec::for_pool(&sid(POOL), &sid(LOGON), &sid(entra), None).unwrap();
+    assert_eq!(
+        spec.default_dacl,
+        format!("D:(A;;GA;;;{POOL})(A;;GA;;;SY)(A;;0x101001;;;{entra})")
+    );
+    assert!(spec.token_dacl.contains(entra), "{}", spec.token_dacl);
+    let refused = TokenSpec::for_pool(&sid(entra), &sid(LOGON), &sid(DESKTOP), None);
+    assert!(
+        matches!(
+            refused,
+            Err(TokenSpecError::NotAnAccount {
+                role: "the pool user",
+                ..
+            })
+        ),
+        "{refused:?}"
+    );
+}
+
+#[test]
 fn the_deny_only_sid_must_be_a_logon_sid() {
     for not_logon in [POOL, "S-1-5-5-1", "S-1-5-5-1-2-3", "S-1-5-18"] {
         assert_eq!(
