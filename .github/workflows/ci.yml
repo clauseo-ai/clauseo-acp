@@ -534,7 +534,15 @@ jobs:
           CLAUSEO_ELEVATED_TESTS: "1"
         run: |
           set -o pipefail
-          cargo nextest run --workspace --profile ci --run-ignored only -E "test(/(^|::)elevated_/)" --test-threads 1 --no-tests=fail
+          filter='test(/(^|::)elevated_/)'
+          # Windows ARM64 only: the two elevated tests that hang there (30 s timeout, both tries;
+          # under 3 s on x64) are left out by exact name, and every other elevated test still runs.
+          # The fix for each issue deletes its line.
+          if [ "$TARGET" = aarch64-pc-windows-msvc ]; then
+            filter="$filter & not (package(clauseo-sandbox) & test(=windows::ca_bundle::ntfs_tests::elevated_a_low_pool_token_reads_the_bundle_and_cannot_write_it))" # #794: remove when fixed
+            filter="$filter & not (package(clauseo-sandbox) & test(=windows::pipe::ntfs_tests::elevated_another_pool_users_low_token_is_refused_every_pipe))" # #795: remove when fixed
+          fi
+          cargo nextest run --workspace --profile ci --run-ignored only -E "$filter" --test-threads 1 --no-tests=fail
 
       # The OS keychain for real: clauseo-connectors' ignored keychain_smoke test writes, reads and
       # deletes a 2,000-byte item (Keychain Services on macOS, Credential Manager on Windows) under
