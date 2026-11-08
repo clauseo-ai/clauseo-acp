@@ -40,6 +40,7 @@ import {
   sandboxAsset,
   signatureCheck,
   signedVersion,
+  tier1Platforms,
   versionString,
 } from "./latest-json.mjs";
 
@@ -110,12 +111,30 @@ test("a full release gives the plugin's static format, Windows under both keys",
 
 test("a missing tier 2 asset is named, and its platform left out", () => {
   const { manifest, missing, problems } = build("1.2.3", {
-    leave: ["Clauseo_1.2.3_arm64-setup.exe", "Clauseo_1.2.3_amd64.deb"],
+    leave: ["Clauseo_1.2.3_x64.app.tar.gz", "Clauseo_1.2.3_amd64.deb"],
   });
   assert.deepEqual(problems, []);
-  assert.deepEqual(missing, ["Clauseo_1.2.3_arm64-setup.exe", "Clauseo_1.2.3_amd64.deb"]);
-  assert.equal("windows-aarch64" in manifest.platforms, false);
-  assert.equal("windows-aarch64-nsis" in manifest.platforms, false);
+  assert.deepEqual(missing, ["Clauseo_1.2.3_x64.app.tar.gz", "Clauseo_1.2.3_amd64.deb"]);
+  assert.equal("darwin-x86_64-app" in manifest.platforms, false);
+});
+
+test("Windows ARM64 is tier 1: a missing arm64 installer, or its keys in latest.json, is refused", () => {
+  assert.deepEqual(build("1.2.3", { leave: ["Clauseo_1.2.3_arm64-setup.exe"] }).problems, [
+    "Clauseo_1.2.3_arm64-setup.exe is missing (tier 1)",
+  ]);
+  assert.deepEqual(build("1.2.3", { leave: ["Clauseo_1.2.3_arm64-machine-setup.exe"] }).problems, [
+    "Clauseo_1.2.3_arm64-machine-setup.exe is missing (tier 1)",
+  ]);
+  assert.ok(tier1Platforms("1.2.3").includes("windows-aarch64"));
+  assert.ok(tier1Platforms("1.2.3").includes("windows-aarch64-nsis"));
+  const { manifest } = build("1.2.3");
+  const broken = structuredClone(manifest);
+  delete broken.platforms["windows-aarch64"];
+  delete broken.platforms["windows-aarch64-nsis"];
+  assert.deepEqual(manifestProblems(broken, "1.2.3"), [
+    "platforms has no windows-aarch64-nsis (tier 1)",
+    "platforms has no windows-aarch64 (tier 1)",
+  ]);
 });
 
 test("a missing tier 1 asset or signature is refused", () => {
@@ -383,7 +402,7 @@ test("release.yml names the sandbox tool once, and latest-json.mjs publishes it 
   const rows = assets("1.2.3", exe).filter((asset) => asset.signed);
   assert.deepEqual(rows, [
     { name: `${base}-x64.exe`, tier: 1, signed: true },
-    { name: `${base}-arm64.exe`, tier: 2, signed: true },
+    { name: `${base}-arm64.exe`, tier: 1, signed: true },
   ]);
   assert.equal(sandboxAsset(exe, "x64"), `${base}-x64.exe`);
   // No two assets (or their .sig) share a name.
@@ -394,8 +413,15 @@ test("release.yml names the sandbox tool once, and latest-json.mjs publishes it 
   const dir = release("1.2.3");
   try {
     const sig = fakeSig("timestamp:1793641889\tfile:x\tversion:1.2.3");
+    // Both architectures are tier 1.
+    assert.deepEqual(buildManifest(dir, "1.2.3", BASE, DATE, exe).problems, [
+      `${base}-x64.exe is missing (tier 1)`,
+      `${base}-arm64.exe is missing (tier 1)`,
+    ]);
+    writeFileSync(join(dir, `${base}-arm64.exe`), "exe");
+    writeFileSync(join(dir, `${base}-arm64.exe.sig`), sig);
     writeFileSync(join(dir, `${base}-x64.exe`), "exe");
-    // The x64 exe is tier 1 and needs its .sig; arm64 is tier 2.
+    // Each needs its .sig.
     assert.deepEqual(buildManifest(dir, "1.2.3", BASE, DATE, exe).problems, [`${base}-x64.exe.sig is missing`]);
     writeFileSync(join(dir, `${base}-x64.exe.sig`), fakeSig("timestamp:1793641889\tfile:x\tversion:1.2.2"));
     assert.deepEqual(buildManifest(dir, "1.2.3", BASE, DATE, exe).problems, [
@@ -404,11 +430,14 @@ test("release.yml names the sandbox tool once, and latest-json.mjs publishes it 
     writeFileSync(join(dir, `${base}-x64.exe.sig`), sig);
     const { manifest, missing, problems } = buildManifest(dir, "1.2.3", BASE, DATE, exe);
     assert.deepEqual(problems, []);
-    assert.deepEqual(missing, [`${base}-arm64.exe`]);
+    assert.deepEqual(missing, []);
     // The updater never sees it.
     assert.deepEqual(manifest, buildManifest(dir, "1.2.3", BASE, DATE).manifest);
     rmSync(join(dir, `${base}-x64.exe`));
     assert.deepEqual(buildManifest(dir, "1.2.3", BASE, DATE, exe).problems, [`${base}-x64.exe is missing (tier 1)`]);
+    writeFileSync(join(dir, `${base}-x64.exe`), "exe");
+    rmSync(join(dir, `${base}-arm64.exe`));
+    assert.deepEqual(buildManifest(dir, "1.2.3", BASE, DATE, exe).problems, [`${base}-arm64.exe is missing (tier 1)`]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

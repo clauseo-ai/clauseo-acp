@@ -15,7 +15,7 @@ Each release on GitHub ([decision 0035](decisions/0035-release-builds.md), "Arte
 |---|---|---|
 | `Clauseo_<v>_x64-machine-setup.exe` | **Firms.** Per machine, needs an administrator, never updates itself | `C:\Program Files\Clauseo` |
 | `Clauseo_<v>_x64-setup.exe` | People who install it themselves. Per user, no administrator, updates itself | `%LOCALAPPDATA%\Clauseo` |
-| `Clauseo_<v>_arm64-machine-setup.exe`, `Clauseo_<v>_arm64-setup.exe` | Windows on ARM. Tier 2: a release may ship without them | as above |
+| `Clauseo_<v>_arm64-machine-setup.exe`, `Clauseo_<v>_arm64-setup.exe` | Windows on ARM, in every release. The x64 per-machine installer still installs there, under emulation, and names the arm64 one in its details list | as above |
 | `Clauseo_<v>_aarch64.dmg`, `Clauseo_<v>_x64.dmg` | Macs (Apple silicon; Intel is tier 2) | `/Applications` |
 | `Clauseo_<v>_amd64.deb`, `Clauseo-<v>-1.x86_64.rpm` | Linux (tier 2). Updates come through your package manager only | |
 | `SHA256SUMS.txt` | The SHA-256 of every file above | |

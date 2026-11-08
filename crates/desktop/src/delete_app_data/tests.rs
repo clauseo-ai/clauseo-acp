@@ -11,6 +11,7 @@ mod admin_copy_record;
 mod installer_language;
 mod installer_version_info;
 mod make;
+mod native_arm64;
 mod nsis_names;
 mod nsis_run;
 mod repair;

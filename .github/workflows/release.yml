@@ -44,8 +44,10 @@
 #   release, fails unless minisign verifies it with crates/blocklist/keys/stage-f.pub (the key the
 #   app compiles in), and every job that builds or bundles with release.conf.json downloads it into
 #   crates/desktop/blocklist/ (gitignored) first and passes blocklist.conf.json after it.
-# - Tier 1 is macOS Apple silicon and Windows x64; tier 2 (Intel macOS, Windows ARM64, Linux) is
-#   continue-on-error, and the release notes name a tier 2 asset that is missing.
+# - Tier 1 is macOS Apple silicon, Windows x64 and Windows ARM64; tier 2 (Intel macOS, Linux) is
+#   continue-on-error, and the release notes name a tier 2 asset that is missing. A release needs
+#   both Windows architectures: the x64 app on Windows on ARM moves itself to the ARM64 build at
+#   its next update (the updater's windows-aarch64 target), which a release without it would strand.
 
 name: release
 
@@ -385,7 +387,7 @@ jobs:
           - { target: aarch64-apple-darwin, runner: macos-15, tier: 1, signs: true, arch: aarch64, rustflags: "-C force-frame-pointers=yes" }
           - { target: x86_64-apple-darwin, runner: macos-15, tier: 2, signs: true, arch: x64, rustflags: "-C force-frame-pointers=yes" }
           - { target: x86_64-pc-windows-msvc, runner: windows-2025, tier: 1, signs: false, arch: x64, rustflags: "-C force-frame-pointers=yes" }
-          - { target: aarch64-pc-windows-msvc, runner: windows-11-arm, tier: 2, signs: false, arch: arm64, rustflags: "-C force-frame-pointers=yes" }
+          - { target: aarch64-pc-windows-msvc, runner: windows-11-arm, tier: 1, signs: false, arch: arm64, rustflags: "-C force-frame-pointers=yes" }
           - { target: x86_64-unknown-linux-gnu, runner: ubuntu-22.04, tier: 2, signs: false, arch: amd64, rustflags: "-C force-frame-pointers=yes -C link-arg=-Wl,--build-id=sha1" }
     env:
       TARGET: ${{ matrix.target }}
@@ -735,7 +737,7 @@ jobs:
       matrix:
         include:
           - { target: x86_64-pc-windows-msvc, runner: windows-2025, tier: 1, arch: x64 }
-          - { target: aarch64-pc-windows-msvc, runner: windows-11-arm, tier: 2, arch: arm64 }
+          - { target: aarch64-pc-windows-msvc, runner: windows-11-arm, tier: 1, arch: arm64 }
     env:
       TARGET: ${{ matrix.target }}
       MODE: ${{ needs.check.outputs.mode }}
@@ -1002,8 +1004,8 @@ jobs:
           (cd dist && sha256sum -c SHA256SUMS.txt)
           # S15's sandbox tool: per architecture, both installers must place exactly the published
           # exe and its .sig at the install folder's root, and the .sig (and the currentUser
-          # installer's) must hold under this mode's updater public key. A tier 2 leg that failed
-          # left none of these files; latest-json.mjs has already required the tier 1 ones.
+          # installer's) must hold under this mode's updater public key. Both architectures are tier
+          # 1, so all four files of each must be here (latest-json.mjs has already required them).
           updater_pub() {
             case "$MODE" in
               dry) cat "$RUNNER_TEMP/pub/dry-updater-pub-$1/dry-updater.key.pub" ;;
@@ -1021,8 +1023,7 @@ jobs:
             files=("dist/Clauseo_${VERSION}_${arch}-setup.exe" "dist/Clauseo_${VERSION}_${arch}-machine-setup.exe" "$exe" "$exe.sig")
             present=0
             for file in "${files[@]}"; do [ ! -f "$file" ] || present=$((present + 1)); done
-            [ "$present" != 0 ] || continue
-            [ "$present" = 4 ] || { echo "::error::the $arch leg left only some of ${files[*]}"; exit 1; }
+            [ "$present" = 4 ] || { echo "::error::the $arch leg left $present of ${files[*]}"; exit 1; }
             pub=$RUNNER_TEMP/updater-$arch.pub
             updater_pub "$target" > "$pub" || true
             [ -n "$(tr -d '[:space:]' < "$pub")" ] || { echo "::error::no updater public key for $arch in a $MODE run"; exit 1; }
@@ -1055,6 +1056,22 @@ jobs:
             done
             inside+=("| $label | \`$(basename "$exe")\` | \`$(sha256sum < "$exe" | cut -d ' ' -f 1)\` |")
           done
+          # The x64 and arm64 installers of each kind hold the same paths, so the arm64 per-user
+          # installer run over an x64 install (the app's cross-architecture update, /UPDATE) and the
+          # arm64 per-machine one run over an x64 per-machine install replace every file and leave
+          # no stale x64 one. No path is architecture-specific today: the sidecars and the sandbox
+          # tool are installed under names without the target triple. One that becomes so must be
+          # named here as an exception, not dropped from the check.
+          for kind in setup machine-setup; do
+            listings=()
+            for arch in x64 arm64; do
+              listings+=("$RUNNER_TEMP/paths-$arch-$kind.txt")
+              7z l -slt -ba "dist/Clauseo_${VERSION}_${arch}-$kind.exe" | sed -n 's/^Path = //p' | LC_ALL=C sort > "${listings[-1]}"
+              [ -s "${listings[-1]}" ] || { echo "::error::7-Zip listed no files in Clauseo_${VERSION}_${arch}-$kind.exe"; exit 1; }
+            done
+            diff "${listings[0]}" "${listings[1]}" ||
+              { echo "::error::the x64 and arm64 $kind installers hold different files (above: < x64, > arm64)"; exit 1; }
+          done
           {
             echo "Clauseo $VERSION, built from $GITHUB_SHA by $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID."
             echo
@@ -1065,6 +1082,7 @@ jobs:
             echo "- **For your own Windows account** (most people): \`Clauseo_${VERSION}_x64-setup.exe\`, or \`Clauseo_${VERSION}_arm64-setup.exe\` on Windows on ARM."
             echo "- **For every account on the computer** (IT, run as an administrator): \`Clauseo_${VERSION}_x64-machine-setup.exe\`, or \`Clauseo_${VERSION}_arm64-machine-setup.exe\`."
             echo "- If Windows says it only runs Microsoft-verified apps, see [Switching out of S mode](https://github.com/clauseo-ai/clauseo-acp/blob/main/docs/install/windows-s-mode.md)."
+            echo "- **Installed the x64 Clauseo on Windows on ARM?** Installed for your own account, it moves itself to the ARM64 build at its next update. Installed for every account, it doesn't update itself: IT deploys \`Clauseo_${VERSION}_arm64-machine-setup.exe\` instead."
             if [ -s missing.txt ]; then
               echo
               echo "Not in this release (a tier 2 build failed):"
