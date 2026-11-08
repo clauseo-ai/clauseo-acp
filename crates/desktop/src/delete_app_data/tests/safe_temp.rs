@@ -115,7 +115,11 @@ fn the_folder_is_made_fresh_under_program_files_owned_locked_and_then_used() {
     let code = admin_code();
     line_with(
         &code,
-        &["!define CLAUSEO_INSTALLER_TEMP \"$PROGRAMFILES64\\Clauseo\\installer-temp\""],
+        &["!define CLAUSEO_TEMP_PARENT \"$PROGRAMFILES64\\Clauseo\""],
+    );
+    line_with(
+        &code,
+        &["!define CLAUSEO_OLD_TEMP_PARENT \"$PROGRAMFILES64\\Clauseo\\installer-temp\""],
     );
     line_with(
         &code,
@@ -123,7 +127,9 @@ fn the_folder_is_made_fresh_under_program_files_owned_locked_and_then_used() {
     );
     line_with(&code, &["!define CLAUSEO_SID_SYSTEM \"*S-1-5-18\""]);
     line_with(&code, &["!define CLAUSEO_EXIT_TEMP_FAILED 25"]);
-    // Every step, in order: a name GetTempFileName made free, a folder in its place, icacls'
+    // Every step, in order: earlier builds' parent removed only when empty (never /r: an older
+    // install running meanwhile keeps its folder), a name GetTempFileName made free directly in
+    // %ProgramFiles%\Clauseo (no parent of its own to stay behind), a folder in its place, icacls'
     // owner and protected DACL (each exit code 0, a start that failed counted as a failure), then
     // $PLUGINSDIR and $TEMP. Any failure removes what it made, never recursively, and quits.
     assert_eq!(
@@ -131,10 +137,11 @@ fn the_folder_is_made_fresh_under_program_files_owned_locked_and_then_used() {
         [
             "Push $0",
             "Push $1",
+            "RMDir \"${CLAUSEO_OLD_TEMP_PARENT}\"",
             "StrCpy $1 1",
             "ClearErrors",
-            "CreateDirectory \"${CLAUSEO_INSTALLER_TEMP}\"",
-            "GetTempFileName $0 \"${CLAUSEO_INSTALLER_TEMP}\"",
+            "CreateDirectory \"${CLAUSEO_TEMP_PARENT}\"",
+            "GetTempFileName $0 \"${CLAUSEO_TEMP_PARENT}\"",
             "${IfNot} ${Errors}",
             "Delete \"$0\"",
             "CreateDirectory \"$0\"",

@@ -142,7 +142,7 @@ Developer ID.
   nine marked blocks (S15 tier B, 2026-11-07; `ui-language`, above, 2026-11-08).
   `admin-section`, at the top of `.onInit`, runs the per-user installer's elevated instance
   (`/CLAUSEO_ADMIN_SECTION`) and quits before any plug-in, page or section; in the per-machine installer it first makes the run's own temporary folder
-  under `%ProgramFiles%\Clauseo\installer-temp`, locked to Administrators and SYSTEM, and points
+  directly in `%ProgramFiles%\Clauseo`, locked to Administrators and SYSTEM, and points
   `$PLUGINSDIR` and `$TEMP` at it (`safe_temp.nsh`, decision 0049). The hooks alone couldn't do
   either: the template's `.onInit` calls plug-ins (`${RunningX64}` in `SetContext` on every run,
   `SemverCompare` under `/S`), which NSIS extracts into `$PLUGINSDIR` under `%TEMP%`, a folder

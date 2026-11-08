@@ -23,9 +23,10 @@
 ;   with it (they name only that file and the folder, non-recursively). At the end of the section
 ;   (block "uninstall-self-delete") CLAUSEO_UNINSTALL_SELF_DELETE builds a hidden cmd line that,
 ;   about 3 s later (PING -n 4), once the uninstaller has exited, deletes uninstall.exe if the
-;   main exe isn't there, then removes $INSTDIR\installer-temp and $INSTDIR, each only when empty
-;   (rmdir without /s). By then NSIS's exit cleanup has removed the uninstaller's own plug-in
-;   folder inside installer-temp (safe_temp.nsh).
+;   main exe isn't there, then removes $INSTDIR only when empty (rmdir without /s). By then NSIS's
+;   exit cleanup has removed the uninstaller's own plug-in folder, which sits directly in
+;   %ProgramFiles%\Clauseo, the default $INSTDIR (safe_temp.nsh). un.onInit has already removed
+;   earlier builds' empty installer-temp there (the same macro).
 ; - The guard: an install writes the main exe (File, first in Section Install) before
 ;   WriteUninstaller, so with no main exe the uninstall.exe there is still this old one. A new
 ;   install in the folder meanwhile writes the main exe first, and the line leaves its
@@ -128,15 +129,15 @@ Var ClauseoSelfDelete
   !if "${INSTALLMODE}" == "perMachine"
     Push $0
     StrCpy $ClauseoSelfDelete ""
-    ; The longest path the line names; $INSTDIR\installer-temp adds only safe characters.
+    ; The longest path the line names.
     !insertmacro CLAUSEO_CMD_SAFE "$INSTDIR\${MAINBINARYNAME}.exe" $0
     ${If} $0 = 1
     ${AndIf} ${FileExists} "$INSTDIR\uninstall.exe"
       ; /d: an elevated cmd would otherwise run HKCU's Command Processor AutoRun, the user's own
       ; hive under split-token UAC. /v:off: no ! expansion, whatever HKCU says. The outer quotes:
       ; with more than two quotes, cmd /c drops the first and the last. The brackets end the if
-      ; before the rmdirs (a quoted ")" in a path doesn't close them).
-      StrCpy $ClauseoSelfDelete '/d /v:off /c ""$SYSDIR\PING.EXE" -n 4 127.0.0.1 >nul & (if not exist "$INSTDIR\${MAINBINARYNAME}.exe" del /f /q "$INSTDIR\uninstall.exe") & rmdir "$INSTDIR\installer-temp" & rmdir "$INSTDIR""'
+      ; before the rmdir (a quoted ")" in a path doesn't close them).
+      StrCpy $ClauseoSelfDelete '/d /v:off /c ""$SYSDIR\PING.EXE" -n 4 127.0.0.1 >nul & (if not exist "$INSTDIR\${MAINBINARYNAME}.exe" del /f /q "$INSTDIR\uninstall.exe") & rmdir "$INSTDIR""'
     ${EndIf}
     Pop $0
     ; /S: no window, so no un.onGUIEnd; start it now. Interactive and /P wait for un.onGUIEnd.

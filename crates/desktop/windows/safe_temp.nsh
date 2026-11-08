@@ -13,7 +13,8 @@
 ; util.c:59-73), but its parent lets the lawyer's code rename it away and put a folder of its own,
 ; with its own DLL, at the same name before the elevated LoadLibrary.
 ;
-; What. A fresh folder under CLAUSEO_INSTALLER_TEMP, which inherits Program Files' rules: only
+; What. A fresh folder directly in CLAUSEO_TEMP_PARENT (%ProgramFiles%\Clauseo), which inherits
+; Program Files' rules: only
 ; administrators, SYSTEM and TrustedInstaller can create, rename or delete anything there. Its name
 ; comes from GetTempFileName (Win32 creates the file exclusively, so the name was free); the file
 ; is deleted and a folder made in its place. icacls ($SYSDIR's, by full path; a console program, so
@@ -26,15 +27,26 @@
 ;   writes to $TEMP and runs elevated;
 ; - at exit NSIS deletes $PLUGINSDIR, recursively, and nothing else (CleanUp, Main.c:470-489),
 ;   on every way out, Quit and Abort in .onInit included (Ui.c:396 returns, then Main.c:427-429);
-;   a file still in use goes at the next restart (DEL_REBOOT). So no RMDir of our own is needed.
+;   a file still in use goes at the next restart (DEL_REBOOT). So no RMDir of our own is needed,
+;   and nothing of the run stays: there is no parent of its own to outlive it.
+;   %ProgramFiles%\Clauseo is where the admin copy lives (Sandbox, admin_copy.nsh) and the
+;   per-machine $INSTDIR by default, so the folder can sit inside $INSTDIR. Nothing there removes
+;   what it didn't put: the uninstaller deletes its own files by name, and $INSTDIR only when
+;   empty, never recursively (the template's section; then its delayed rmdir,
+;   uninstall_in_place.nsh, which runs once its own exit cleanup is done), and so does the old
+;   uninstaller that an install over a running one starts.
+;
+; Earlier builds made the folders in a parent of their own, %ProgramFiles%\Clauseo\installer-temp,
+; which stayed, empty, after every run. Each run removes it first, without /r (RMDir fails on a
+; folder that isn't empty), so an older installer running at the same time keeps its folder.
 ;
 ; Ownership. NSIS can't read an owner or a DACL without a plug-in, so neither is checked. The
 ; parent is the proof: no one but an administrator can create anything under Program Files, so no
-; one else can have made the folder, or a link at Clauseo or installer-temp, before us, and an
-; administrator can already write anywhere. That matters because CreateDirectory doesn't fail on a
-; folder that is already there (exec.c:389-398); icacls then sets the owner and DACL anyway.
+; one else can have made the folder, or a link at Clauseo, before us, and an administrator can
+; already write anywhere. That matters because CreateDirectory doesn't fail on a folder that is
+; already there (exec.c:389-398); icacls then sets the owner and DACL anyway.
 ;
-; No sweep of old folders in CLAUSEO_INSTALLER_TEMP: two installs may run at once, and one would
+; No sweep of old folders in CLAUSEO_TEMP_PARENT: two installs may run at once, and one would
 ; delete the other's plug-ins. A folder stays only when an installer is killed. (RMDir /r follows
 ; junctions; none can be under Program Files but an administrator's.)
 ;
@@ -47,7 +59,9 @@
 ; uninstallTempFailed the same way, with 25 too (nothing uninstalled); the per-user elevated
 ; instance quits with 99 (not run), which its outer instance reports as a failed set-up.
 
-!define CLAUSEO_INSTALLER_TEMP "$PROGRAMFILES64\Clauseo\installer-temp"
+!define CLAUSEO_TEMP_PARENT "$PROGRAMFILES64\Clauseo"
+; Earlier builds' parent (header), removed only when empty.
+!define CLAUSEO_OLD_TEMP_PARENT "$PROGRAMFILES64\Clauseo\installer-temp"
 ; BUILTIN\Administrators and LocalSystem, as icacls takes a SID.
 !define CLAUSEO_SID_ADMINISTRATORS "*S-1-5-32-544"
 !define CLAUSEO_SID_SYSTEM "*S-1-5-18"
@@ -60,10 +74,11 @@
 !macro CLAUSEO_SAFE_PLUGINSDIR
   Push $0
   Push $1
+  RMDir "${CLAUSEO_OLD_TEMP_PARENT}"
   StrCpy $1 1
   ClearErrors
-  CreateDirectory "${CLAUSEO_INSTALLER_TEMP}"
-  GetTempFileName $0 "${CLAUSEO_INSTALLER_TEMP}"
+  CreateDirectory "${CLAUSEO_TEMP_PARENT}"
+  GetTempFileName $0 "${CLAUSEO_TEMP_PARENT}"
   ${IfNot} ${Errors}
     Delete "$0"
     CreateDirectory "$0"
