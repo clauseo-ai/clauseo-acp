@@ -134,6 +134,8 @@ impl Fetcher {
             .http_status_as_error(false)
             .https_only(https_only)
             .max_redirects(MAX_REDIRECTS)
+            // A name lookup that hangs is bounded like the connect.
+            .timeout_resolve(Some(CONNECT_TIMEOUT))
             .timeout_connect(Some(CONNECT_TIMEOUT))
             .timeout_recv_response(Some(READ_TIMEOUT))
             .timeout_per_read(Some(READ_TIMEOUT))

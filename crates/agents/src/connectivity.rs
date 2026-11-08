@@ -63,6 +63,26 @@ impl ConnectivityWatch for NoWatch {
     }
 }
 
+/// Windows' connectivity levels (`NL_NETWORK_CONNECTIVITY_LEVEL_HINT`, netioapi.h).
+#[cfg(any(windows, test))]
+pub(crate) mod level {
+    pub(crate) const INTERNET_ACCESS: i32 = 3;
+    pub(crate) const CONSTRAINED_INTERNET_ACCESS: i32 = 4;
+}
+
+/// Whether the OS's notice of level `now`, after `last`, is a hint: a change to internet access
+/// (constrained or not) from a different level. Unknown, local access, none, and a notice that
+/// changes only the cost or roaming (the same level) are not. `last` is `None` before the
+/// first notice (the initial one), which only records the level.
+#[cfg(any(windows, test))]
+pub(crate) fn is_hint(last: Option<i32>, now: i32) -> bool {
+    let internet = matches!(
+        now,
+        level::INTERNET_ACCESS | level::CONSTRAINED_INTERNET_ACCESS
+    );
+    internet && last.is_some_and(|last| last != now)
+}
+
 /// This platform's watch: the OS's connectivity hints on Windows, [`NoWatch`] elsewhere.
 pub(crate) fn platform_watch() -> Arc<dyn ConnectivityWatch> {
     #[cfg(windows)]
@@ -79,6 +99,8 @@ pub(crate) fn platform_watch() -> Arc<dyn ConnectivityWatch> {
 /// when this drops.
 #[derive(Debug)]
 pub(crate) struct Listening {
+    /// Declared first, so it drops first: once the subscription is cancelled, a send from a
+    /// callback still running only fails.
     pub(crate) hints: UnboundedReceiver<()>,
     _subscription: Option<Subscription>,
 }
@@ -103,3 +125,6 @@ impl Listening {
         any
     }
 }
+
+#[cfg(test)]
+mod tests;

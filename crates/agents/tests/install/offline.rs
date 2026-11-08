@@ -1,7 +1,8 @@
 //! Offline retries: a try made from `Waiting` stays `Waiting` until the network answers, and a
 //! connectivity hint (a `FakeWatch`) starts the next try 2 s later instead of at the next 30 s
-//! retry. Time is the fixture's manual timer; the only real-time bound is a ceiling on a wait
-//! that should be armed, so a broken rule fails at once rather than hanging the test.
+//! retry; a server's error status ends `Waiting` too. Time is the fixture's manual timer; the
+//! only real-time bound is a ceiling on a wait that should be armed, so a broken rule fails at
+//! once rather than hanging the test.
 
 use std::io;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
@@ -204,5 +205,97 @@ fn shutdown_while_waiting_unsubscribes() {
     events.until(&agent_a(), is_waiting);
     assert_eq!(watch.live(), 1);
     assert!(agents.shutdown(secs(10)));
+    assert_eq!(watch.live(), 0);
+}
+
+/// A server answering 503 while `Waiting` ends `Waiting`: the network is there. The job sends
+/// `Downloading`, drops its subscription, and retries after its 2 s back-off.
+#[test]
+fn an_error_status_while_waiting_ends_waiting() {
+    let (fx, online, watch) = offline_fixture("waiting-503");
+    fx.registry
+        .then(&tarball_path("adapter-a"), Behaviour::Status(503));
+    let (agents, events) = fx.start();
+    events.first_states();
+    agents.install(&agent_a());
+    events.until(&agent_a(), is_waiting);
+
+    online.store(true, Ordering::SeqCst);
+    fx.timer.fire_next(secs(30));
+    // The 503's try is over once its back-off is armed: every state it sent is queued.
+    assert!(
+        fx.timer.armed_within(secs(2), BOUND),
+        "the 503 is a counted try with a back-off"
+    );
+    let first = fx.registry.requests().remove(0);
+    assert_eq!(
+        first.path,
+        tarball_path("adapter-a"),
+        "the 503 was the first answer"
+    );
+    let after = events.drain();
+    assert!(
+        after.iter().any(|(_, s)| is_downloading(s)),
+        "Waiting ended: {after:?}"
+    );
+    assert!(!after.iter().any(|(_, s)| is_waiting(s)), "{after:?}");
+    assert_eq!(watch.live(), 0, "unsubscribed on leaving Waiting");
+
+    assert!(fx.timer.fire_read());
+    let (_, last) = events.until_end(&agent_a());
+    assert!(matches!(last, InstallState::Ready { .. }), "{last:?}");
+    assert_eq!(fx.requests_for("adapter-a").len(), 2);
+    assert!(agents.shutdown(secs(10)));
+}
+
+/// The job subscribes before `Waiting` goes out, so a hint the UI's `Waiting` could prompt is
+/// never missed. The fake holds the job in its subscription while the test looks.
+#[test]
+fn the_job_subscribes_before_waiting_goes_out() {
+    let (fx, _online, watch) = offline_fixture("subscribe-order");
+    let (at_tx, at_rx) = mpsc::channel::<()>();
+    let (go_tx, go_rx) = mpsc::channel::<()>();
+    let (at_tx, go_rx) = (Mutex::new(at_tx), Mutex::new(go_rx));
+    watch.on_subscribe(move || {
+        at_tx.lock().unwrap().send(()).unwrap();
+        go_rx.lock().unwrap().recv().unwrap();
+    });
+    let (agents, events) = fx.start();
+    events.first_states();
+    agents.install(&agent_a());
+    at_rx.recv().unwrap();
+    // The job is held in its subscription: every state it has sent is queued.
+    let before = events.drain();
+    assert!(
+        !before.iter().any(|(_, s)| is_waiting(s)),
+        "Waiting went out before the subscription: {before:?}"
+    );
+    go_tx.send(()).unwrap();
+    events.until(&agent_a(), is_waiting);
+    assert_eq!(watch.live(), 1);
+    assert!(agents.shutdown(secs(10)));
+}
+
+/// A pause during the 2 s debounce pauses the job at once, with no try.
+#[test]
+fn a_pause_during_the_debounce_pauses_with_no_try() {
+    let (fx, online, watch) = offline_fixture("hint-pause");
+    let (agents, events) = fx.start();
+    events.first_states();
+    agents.install(&agent_a());
+    events.until(&agent_a(), is_waiting);
+
+    // Online now, so a try would reach the registry.
+    online.store(true, Ordering::SeqCst);
+    assert_eq!(watch.change(), 1);
+    assert!(
+        fx.timer.armed_within(secs(2), BOUND),
+        "the hint arms the debounce"
+    );
+    agents.pause(&agent_a());
+    events.until(&agent_a(), |s| matches!(s, InstallState::Paused));
+    // Neither the debounce nor the 30 s wait is ended: the pause alone ends the job.
+    assert!(agents.shutdown(secs(10)), "the job ended at the pause");
+    assert!(fx.registry.requests().is_empty(), "no try");
     assert_eq!(watch.live(), 0);
 }

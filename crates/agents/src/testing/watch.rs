@@ -13,6 +13,8 @@ pub struct FakeWatch {
 
 #[derive(Debug, Default)]
 struct Subscribers {
+    /// Called at the start of each subscription, on the subscribing thread.
+    hook: Option<Hook>,
     next: u64,
     live: Vec<(u64, Hint)>,
     /// Subscriptions made so far.
@@ -45,6 +47,12 @@ impl FakeWatch {
         self.lock().made
     }
 
+    /// Calls `hook` at the start of each later subscription, on the job's thread, before the
+    /// subscription is made: a hook that blocks holds the job there.
+    pub fn on_subscribe(&self, hook: impl Fn() + Send + Sync + 'static) {
+        self.lock().hook = Some(Hook(Arc::new(hook)));
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, Subscribers> {
         self.shared.lock().unwrap_or_else(PoisonError::into_inner)
     }
@@ -52,6 +60,10 @@ impl FakeWatch {
 
 impl ConnectivityWatch for FakeWatch {
     fn subscribe(&self, hint: Hint) -> Option<Subscription> {
+        let hook = self.lock().hook.clone();
+        if let Some(Hook(hook)) = hook {
+            hook();
+        }
         let id = {
             let mut subscribers = self.lock();
             let id = subscribers.next;
@@ -64,6 +76,16 @@ impl ConnectivityWatch for FakeWatch {
             shared: Arc::clone(&self.shared),
             id,
         }))
+    }
+}
+
+/// [`FakeWatch::on_subscribe`]'s hook.
+#[derive(Clone)]
+struct Hook(Arc<dyn Fn() + Send + Sync>);
+
+impl std::fmt::Debug for Hook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Hook")
     }
 }
 

@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use clauseo_process::Timer;
 
-use super::{Job, NodeChoice, Run, TryError};
+use super::{Job, Next, NodeChoice, Run, TryError};
 use crate::config::AgentsConfig;
 use crate::download::firm::{BundleEntry, bundle_file, bundle_path, copy_from_bundle, mirror_url};
 use crate::download::{FetchJob, Fetcher, Magic, part_path};
@@ -67,7 +67,8 @@ pub(crate) fn downloads_dir(data_dir: &Path) -> PathBuf {
 }
 
 /// Fetches (or finds in the bundle) every file of the try, sending progress. A try made while
-/// `Waiting` sends none until a server answers, or until every file is had with no request.
+/// `Waiting` sends none until a server's first bytes, or an error status (which ends `Waiting`
+/// too), or until every file is had with no request.
 pub(super) fn fetch_all<T: Timer + Send + Sync>(
     job: &Job<T>,
     node: &NodeChoice,
@@ -151,7 +152,7 @@ pub(super) fn fetch_all<T: Timer + Send + Sync>(
                     return Err(TryError::retry("no HTTP client", config));
                 };
                 let answered = Cell::new(false);
-                let size = client.fetch(
+                let fetched_size = client.fetch(
                     &fetch_job,
                     job.cancel(),
                     &|| answered.set(true),
@@ -165,7 +166,23 @@ pub(super) fn fetch_all<T: Timer + Send + Sync>(
                         }
                         progress.tick(job, run, first);
                     },
-                )?;
+                );
+                let size = match fetched_size {
+                    Ok(size) => size,
+                    Err(err) => {
+                        let err = TryError::from(err);
+                        // A server answered, with an error status: the network is there, so the
+                        // job leaves `Waiting`. A retry follows a `Downloading`; a stop goes
+                        // straight to its `Failed`.
+                        if answered.get() && run.is_waiting() {
+                            run.left_waiting();
+                            if matches!(err.next, Next::Retry) {
+                                progress.tick(job, run, true);
+                            }
+                        }
+                        return Err(err);
+                    }
+                };
                 progress.done(n, size);
                 fetched.downloaded.push(fetch_job.dest.clone());
                 fetch_job.dest

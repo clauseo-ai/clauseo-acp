@@ -1,6 +1,7 @@
 //! Windows' connectivity hints: `NotifyNetworkConnectivityHintChange` (iphlpapi) calls back on a
-//! system thread at each change of the aggregate connectivity level, and `CancelMibChangeNotify2`
-//! ends the registration. The callback only sends on the job's channel ([`Hint::send`]).
+//! system thread with the aggregate connectivity level, and `CancelMibChangeNotify2` ends the
+//! registration. The callback records the level and, on a change to internet access
+//! ([`is_hint`]), only sends on the job's channel ([`Hint::send`]).
 //!
 //! The function is Windows 10 2004 (build 19041) and later, so it is looked up at run time: a
 //! static import would stop the whole app from loading on an older Windows. Without it the
@@ -12,28 +13,54 @@
 
 use std::ffi::c_void;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicI32, Ordering};
 
 use windows::Win32::Foundation::{HANDLE, NO_ERROR, WIN32_ERROR};
-use windows::Win32::NetworkManagement::IpHelper::{
-    CancelMibChangeNotify2, PNETWORK_CONNECTIVITY_HINT_CHANGE_CALLBACK,
-};
-use windows::Win32::Networking::WinSock::{
-    NL_NETWORK_CONNECTIVITY_HINT, NetworkConnectivityLevelHintNone,
-};
+use windows::Win32::NetworkManagement::IpHelper::CancelMibChangeNotify2;
+use windows::Win32::Networking::WinSock::NL_NETWORK_CONNECTIVITY_HINT;
 use windows::Win32::System::LibraryLoader::{
     GetProcAddress, LOAD_LIBRARY_SEARCH_SYSTEM32, LoadLibraryExW,
 };
 use windows::core::{s, w};
 
-use super::{ConnectivityWatch, Hint, Subscription};
+use super::{ConnectivityWatch, Hint, Subscription, is_hint};
 
-/// `NotifyNetworkConnectivityHintChange`'s signature (netioapi.h).
-type NotifyFn = unsafe extern "system" fn(
-    PNETWORK_CONNECTIVITY_HINT_CHANGE_CALLBACK,
-    *const c_void,
-    bool,
-    *mut HANDLE,
-) -> WIN32_ERROR;
+/// `NL_NETWORK_CONNECTIVITY_HINT` (netioapi.h): `ConnectivityLevel` and `ConnectivityCost` (C
+/// enums, `int`), then `ApproachingDataLimit`, `OverDataLimit` and `Roaming` (`BOOLEAN`,
+/// `unsigned char`), with C layout: 12 bytes, aligned to 4. Declared here with `u8`s, so no Rust
+/// `bool` is ever read from the OS's bytes; the assertion below keeps it the SDK's size and
+/// alignment.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct RawHint {
+    level: i32,
+    _cost: i32,
+    _approaching_data_limit: u8,
+    _over_data_limit: u8,
+    _roaming: u8,
+}
+
+const _: () = assert!(
+    size_of::<RawHint>() == size_of::<NL_NETWORK_CONNECTIVITY_HINT>()
+        && align_of::<RawHint>() == align_of::<NL_NETWORK_CONNECTIVITY_HINT>()
+);
+
+/// `PNETWORK_CONNECTIVITY_HINT_CHANGE_CALLBACK`, taking [`RawHint`] by value.
+type Callback = unsafe extern "system" fn(*const c_void, RawHint);
+
+/// `NotifyNetworkConnectivityHintChange`'s signature (netioapi.h), with `InitialNotification`
+/// as the `BOOLEAN` (`u8`) it is.
+type NotifyFn =
+    unsafe extern "system" fn(Option<Callback>, *const c_void, u8, *mut HANDLE) -> WIN32_ERROR;
+
+/// No level recorded yet: the initial notice has not come.
+const NO_LEVEL: i32 = i32::MIN;
+
+/// What the callback reads: the job's channel and the last level seen.
+struct Context {
+    hint: Hint,
+    last: AtomicI32,
+}
 
 /// The OS's connectivity hints.
 #[derive(Debug, Clone, Copy, Default)]
@@ -42,17 +69,20 @@ pub(super) struct HintWatch;
 impl ConnectivityWatch for HintWatch {
     fn subscribe(&self, hint: Hint) -> Option<Subscription> {
         let notify = notify_fn()?;
-        let context = Box::into_raw(Box::new(hint));
+        let context = Box::into_raw(Box::new(Context {
+            hint,
+            last: AtomicI32::new(NO_LEVEL),
+        }));
         let mut handle = HANDLE::default();
-        // SAFETY: `notify` is the export of that name, of that signature. `on_hint` matches the
-        // callback type; `context` points to a live `Hint` that stays alive until the
+        // SAFETY: `notify` is the export of that name, of `NotifyFn`'s signature, and `on_hint`
+        // is of the callback's. `context` points to a live `Context` that stays alive until the
         // registration is cancelled (`Registered::drop`); `handle` is a valid, writable HANDLE.
-        // No initial notification: only a change after this call is a hint.
+        // The initial notice (1) only records the level the network is at now.
         let result = unsafe {
             notify(
                 Some(on_hint),
                 context.cast_const().cast(),
-                false,
+                1,
                 &raw mut handle,
             )
         };
@@ -70,22 +100,27 @@ impl ConnectivityWatch for HintWatch {
 /// A registration, cancelled when it drops.
 struct Registered {
     handle: HANDLE,
-    context: *mut Hint,
+    context: *mut Context,
 }
 
-// SAFETY: the registration handle may be cancelled from any thread, and `context` (a `Hint`,
-// which is `Send` and `Sync`) is only freed by `drop`, after the OS has stopped calling back.
+// SAFETY: the registration handle may be cancelled from any thread, and `context` (a `Hint` and
+// an atomic, both `Send` and `Sync`) is only freed by `drop`, after the cancel.
 unsafe impl Send for Registered {}
 
 impl Drop for Registered {
     fn drop(&mut self) {
-        // SAFETY: `handle` came from a successful registration and is cancelled once, here,
-        // never from the callback (which would deadlock).
+        // SAFETY: `handle` came from a successful registration and is cancelled once, here.
         let result = unsafe { CancelMibChangeNotify2(self.handle) };
         if result == NO_ERROR {
-            // SAFETY: once CancelMibChangeNotify2 has returned, no callback for this handle is
-            // running (it waits for one running now; that is why calling it from the callback
-            // deadlocks) and none starts, so nothing reads `context` any more. It came from
+            // SAFETY: that no callback for this handle runs once CancelMibChangeNotify2 has
+            // returned is inferred, not documented for this function: its page lists only the
+            // older `Notify*` functions, and says that calling it from the callback for the same
+            // handle deadlocks, which means it waits for a callback in flight. The deadlock's
+            // conditions are not met here: the cancel runs only on the job's thread (the
+            // subscription drops there, never in the callback); the callback only makes a
+            // non-blocking send on an unbounded channel and an atomic swap; the two share no
+            // lock; and the job's receiver is dropped before the subscription (`Listening`), so
+            // a late send only fails. Then nothing reads `context` any more. It came from
             // `Box::into_raw` in `subscribe` and is freed once, here.
             drop(unsafe { Box::from_raw(self.context) });
         } else {
@@ -95,17 +130,20 @@ impl Drop for Registered {
     }
 }
 
-/// The callback, on a system thread: a level other than none is a hint. It only sends on an
-/// unbounded channel, which never blocks.
-unsafe extern "system" fn on_hint(context: *const c_void, hint: NL_NETWORK_CONNECTIVITY_HINT) {
-    if context.is_null() || hint.ConnectivityLevel == NetworkConnectivityLevelHintNone {
+/// The callback, on a system thread: records the level, and sends a hint on a change to internet
+/// access. It never blocks and takes no lock.
+unsafe extern "system" fn on_hint(context: *const c_void, hint: RawHint) {
+    if context.is_null() {
         return;
     }
-    // SAFETY: `context` is the `Hint` registered with this callback, alive until the
-    // registration is cancelled, which waits for this call to return (`Registered::drop`).
-    // `Hint` is `Sync`, so calls on several threads at once may share it.
-    let hint = unsafe { &*context.cast::<Hint>() };
-    hint.send();
+    // SAFETY: `context` is the `Context` registered with this callback, alive until the
+    // registration is cancelled (`Registered::drop`). `Context` is `Sync`, so calls on several
+    // threads at once may share it.
+    let context = unsafe { &*context.cast::<Context>() };
+    let last = context.last.swap(hint.level, Ordering::AcqRel);
+    if is_hint((last != NO_LEVEL).then_some(last), hint.level) {
+        context.hint.send();
+    }
 }
 
 /// `NotifyNetworkConnectivityHintChange`, looked up once in iphlpapi; `None` before build 19041.
@@ -119,8 +157,9 @@ fn notify_fn() -> Option<NotifyFn> {
                 .ok()?;
         // SAFETY: `module` is loaded, and the name is a static NUL-terminated string.
         let found = unsafe { GetProcAddress(module, s!("NotifyNetworkConnectivityHintChange")) }?;
-        // SAFETY: the export of that name has `NotifyFn`'s signature (netioapi.h); both are
-        // `extern "system"` function pointers of the same size.
+        // SAFETY: the export of that name has `NotifyFn`'s signature (netioapi.h, with
+        // `RawHint` laid out as the SDK's struct); both are `extern "system"` function pointers
+        // of the same size.
         Some(unsafe {
             std::mem::transmute::<unsafe extern "system" fn() -> isize, NotifyFn>(found)
         })

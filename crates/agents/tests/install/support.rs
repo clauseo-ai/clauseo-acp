@@ -274,15 +274,28 @@ impl SharedTimer {
     /// armed by then, so a missing wait fails the test at once instead of hanging it. The bound
     /// is a ceiling, never a timing being asserted.
     pub(crate) fn fire_next_within(&self, duration: Duration, bound: Duration) -> bool {
+        let found = self.armed_within(duration, bound);
+        assert!(
+            !found || self.fire_read(),
+            "the {duration:?} wait was dropped"
+        );
+        found
+    }
+
+    /// Reads armed waits until one of `duration` (passing over the others), without ending it,
+    /// giving up after `bound` of real time; [`Self::fire_read`] ends it.
+    pub(crate) fn armed_within(&self, duration: Duration, bound: Duration) -> bool {
         let find = pin!(async { while self.manual.next_armed().await != duration {} });
         let gave_up = pin!(AsyncIoTimer.after(bound));
-        match futures::executor::block_on(select(find, gave_up)) {
-            Either::Left(((), _)) => {
-                assert!(self.manual.fire(), "the {duration:?} wait was dropped");
-                true
-            }
-            Either::Right(((), _)) => false,
-        }
+        matches!(
+            futures::executor::block_on(select(find, gave_up)),
+            Either::Left(_)
+        )
+    }
+
+    /// Ends the wait read last; `false` when its future was dropped.
+    pub(crate) fn fire_read(&self) -> bool {
+        self.manual.fire()
     }
 
     /// Blocks until a wait of `duration` is armed (passing over the others), then ends it.
