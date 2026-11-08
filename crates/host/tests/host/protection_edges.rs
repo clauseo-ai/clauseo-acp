@@ -1,6 +1,6 @@
 //! The set-up commands' edge cases (decision record 0051, R17 PR-B1, stage C's review): a
-//! set-up thread that panics or never starts, a retry joining a running check, and a second
-//! removal joining the first.
+//! set-up thread that panics or never starts, a retry joining a running check, a removal
+//! waiting behind a check, and a second removal joining the first.
 
 use std::sync::atomic::Ordering;
 
@@ -73,16 +73,47 @@ fn a_retry_during_a_check_joins_it() {
     gate.started.recv().unwrap();
     assert_eq!(view(&host).in_progress, Some(ProtectionWork::Check));
     let second = send(&host.handle, HostCommand::RetryProtection {});
-    // Sent after the second, so answered after it has joined.
-    host.refused(
-        HostCommand::RemoveSandboxSetup {},
-        ErrorCode::CommandInvalid,
-    );
+    // A query sent after the second is answered after it has joined.
+    host.settle();
     gate.release.send(()).unwrap();
     assert_eq!(wait("the first retry", first), Ok(CommandOutcome::Done));
     assert_eq!(wait("the second retry", second), Ok(CommandOutcome::Done));
     assert_eq!(rig.detections.load(Ordering::SeqCst), 2);
     assert_eq!(rig.setup.run_calls.load(Ordering::SeqCst), 0);
+    host.shutdown();
+}
+
+/// R17 PR-E follow-up: a removal asked while a check runs (a "Try again", or a refused launch's
+/// re-probe) is not refused: it waits behind the check, launches are refused with
+/// `sandbox.removing` meanwhile, and it runs once the check ends, then answers.
+#[test]
+fn a_removal_during_a_check_waits_for_it_then_runs() {
+    let dir = dir("protection_check_then_remove");
+    let other = || c(NoSandbox::SetUpFailed("another user".to_owned()));
+    let mut plan = Plan::new(vec![other(), other()], vec![SetupState::SetUpByOtherUser]);
+    plan.gated = Gated::Detect;
+    let (host, rig) = start(&dir, 0, plan);
+    let gate = rig.gate.as_ref().unwrap();
+    // Nothing a set-up can fix: the retry is a check.
+    let retry = send(&host.handle, HostCommand::RetryProtection {});
+    gate.started.recv().unwrap();
+    assert_eq!(view(&host).in_progress, Some(ProtectionWork::Check));
+    let removal = send(&host.handle, HostCommand::RemoveSandboxSetup {});
+    let matter = host.matters()[0].matter;
+    let command = HostCommand::CreateThread {
+        matter,
+        agent: clauseo_protocol::AgentId::new(crate::support::FAKE).unwrap(),
+    };
+    drop(host.refused(command, ErrorCode::SandboxRemoving));
+    assert_eq!(rig.setup.remove_calls.load(Ordering::SeqCst), 0);
+    gate.release.send(()).unwrap();
+    assert_eq!(wait("the retry", retry), Ok(CommandOutcome::Done));
+    // The removal's own detection after `remove()`.
+    gate.started.recv().unwrap();
+    gate.release.send(()).unwrap();
+    assert_eq!(wait("the removal", removal), Ok(CommandOutcome::Done));
+    assert_eq!(rig.setup.remove_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(rig.detections.load(Ordering::SeqCst), 3);
     host.shutdown();
 }
 

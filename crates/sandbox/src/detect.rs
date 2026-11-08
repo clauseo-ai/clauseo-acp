@@ -1,6 +1,8 @@
-//! Tier detection: how strong a jail this machine gives. What the OS can give is probed once
-//! and cached; on Windows, whether tier B is set up is read on every call (D6), so a set-up that
-//! finishes shows without a restart.
+//! Tier detection: how strong a jail this machine gives. What the OS can give is probed and
+//! cached once it settles (a jail found, or none here); a probe that could not confirm either is
+//! never cached, so the next call probes again and a flaky check heals without a restart. On
+//! Windows, whether tier B is set up is read on every call (D6), so a set-up that finishes shows
+//! without a restart.
 
 use std::sync::OnceLock;
 
@@ -26,12 +28,15 @@ pub enum Tier {
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum NoSandbox {
-    /// This OS has no jail in Clauseo (Linux stays tier C, shared ruling 6), or this Windows
-    /// has none: ARM64, or a build before Windows 10 22H2.
+    /// The jail does not exist here: this OS has none in Clauseo (Linux stays tier C, shared
+    /// ruling 6), this Windows has none (ARM64, or a build before Windows 10 22H2), or this
+    /// macOS has no `/usr/bin/sandbox-exec`.
     UnsupportedOs,
     /// The jail for this OS is not built yet. Nothing gives it since S15; kept for the wire.
     NotBuilt,
-    /// The jail's probe failed; what it said.
+    /// The jail should exist here, but its probe could not confirm it works: macOS'
+    /// `sandbox-exec` would not start, failed or hung, or Windows' build can't be read. Fails
+    /// closed, and is never cached. What it said, which names no path.
     ProbeFailed(String),
     /// Windows: the sandbox user is not set up for this user, or an older Clauseo set it up.
     NeedsSetUp,
@@ -61,14 +66,37 @@ impl Detection {
             reason: Some(reason),
         }
     }
+
+    /// Whether this detection may be cached for the process: a jail, or none on this OS. A
+    /// failed probe, or any other reason, is probed again at the next call.
+    #[cfg(any(not(windows), test))]
+    fn settled(&self) -> bool {
+        matches!(self.reason, None | Some(NoSandbox::UnsupportedOs))
+    }
+}
+
+/// `cell`'s value, else `probe`'s, which fills `cell` only when `keep` says it settled: a
+/// value that did not is probed again at the next call.
+fn cached<T: Clone>(cell: &OnceLock<T>, probe: impl FnOnce() -> T, keep: impl Fn(&T) -> bool) -> T {
+    if let Some(value) = cell.get() {
+        return value.clone();
+    }
+    let value = probe();
+    if keep(&value) {
+        // Another thread may have filled it meanwhile, with a value as good.
+        let _filled = cell.set(value.clone());
+    }
+    value
 }
 
 /// The reason [`SetupState::SetUpByOtherUser`] gives, in [`NoSandbox::SetUpFailed`].
 pub const SET_UP_BY_OTHER_USER: &str = "set up by another Windows user";
 
-/// The tier of this machine. The OS's part is probed on the first call and cached for the
-/// process. macOS: the Seatbelt probe, as [`probe`] describes; `setup` is never asked. Windows:
-/// the OS's part (architecture and build) is cached, then `setup`'s
+/// The tier of this machine. The OS's part is probed and, once it settles, cached for the
+/// process; a failed probe is not cached, so every call probes until one settles. macOS: the
+/// Seatbelt probe, as [`probe`] describes, cached when it is tier A or there is no
+/// `sandbox-exec`; `setup` is never asked. Windows: the OS's part (architecture and build) is
+/// cached once the build reads (or the machine is ARM64), then `setup`'s
 /// [`state`](SandboxSetup::state) is read on every call: tier B only when it is
 /// [`SetupState::Ready`], else C with its reason; no `setup` is C with
 /// [`NoSandbox::NeedsSetUp`]. Others: C with [`NoSandbox::UnsupportedOs`].
@@ -76,25 +104,33 @@ pub fn detect(setup: Option<&dyn SandboxSetup>) -> Detection {
     #[cfg(windows)]
     {
         static OS: OnceLock<OsFacts> = OnceLock::new();
-        decide(OS.get_or_init(crate::windows::os_facts), setup)
+        decide(
+            &cached(&OS, crate::windows::os_facts, OsFacts::settled),
+            setup,
+        )
     }
     #[cfg(not(windows))]
     {
         static DETECTED: OnceLock<Detection> = OnceLock::new();
         let _ = setup;
-        DETECTED.get_or_init(|| probe(None)).clone()
+        cached(&DETECTED, || probe(None), Detection::settled)
     }
 }
 
 /// The probe behind [`detect`], uncached. macOS: tier A when `/usr/bin/sandbox-exec` runs
-/// `/usr/bin/true` under `(version 1)(allow default)` and it exits 0, else C with
-/// [`NoSandbox::ProbeFailed`]; `setup` is never asked. Windows: as [`detect`], with the OS read
+/// `/usr/bin/true` under `(version 1)(allow default)` and it exits 0 within 5 seconds; C with
+/// [`NoSandbox::UnsupportedOs`] when there is no `sandbox-exec` (`NotFound`); else C with
+/// [`NoSandbox::ProbeFailed`] (it exits non-zero, is killed, does not start for another
+/// reason, or hangs); `setup` is never asked. Windows: as [`detect`], with the OS read
 /// again. Others: C with [`NoSandbox::UnsupportedOs`].
 pub fn probe(setup: Option<&dyn SandboxSetup>) -> Detection {
     #[cfg(target_os = "macos")]
     {
         let _ = setup;
-        seatbelt::probe(std::path::Path::new(seatbelt::SANDBOX_EXEC))
+        seatbelt::probe(
+            std::path::Path::new(seatbelt::SANDBOX_EXEC),
+            seatbelt::TIMEOUT,
+        )
     }
     #[cfg(windows)]
     {
@@ -118,14 +154,25 @@ pub(crate) struct OsFacts {
     pub(crate) build: Result<u32, String>,
 }
 
+#[cfg(any(windows, test))]
+impl OsFacts {
+    /// Whether these facts may be cached: the build read, or ARM64, which is tier C whatever
+    /// the build. A build that did not read is read again at the next call.
+    pub(crate) fn settled(&self) -> bool {
+        self.arm64 || self.build.is_ok()
+    }
+}
+
 /// Windows 10 22H2's build; tier B needs it or later.
 #[cfg(any(windows, test))]
 pub(crate) const FIRST_BUILD: u32 = 19045;
 
 /// The Windows tier from the cached OS facts and the set-up's live state. ARM64 and builds
 /// before [`FIRST_BUILD`] are C with [`NoSandbox::UnsupportedOs`] whatever the set-up says, and a
-/// build that can't be read is C with [`NoSandbox::ProbeFailed`]. Tier A (S15a's MXC probe) is
-/// not built, so the rest is tier B when the state is [`SetupState::Ready`] and C otherwise.
+/// build that can't be read is C with [`NoSandbox::ProbeFailed`] (fail closed, before the
+/// set-up is asked, so even a computer never set up refuses until it reads). Tier A (S15a's
+/// MXC probe) is not built, so the rest is tier B when the state is [`SetupState::Ready`] and C
+/// otherwise.
 #[cfg(any(windows, test))]
 fn decide(os: &OsFacts, setup: Option<&dyn SandboxSetup>) -> Detection {
     if os.arm64 {
@@ -155,83 +202,7 @@ fn decide(os: &OsFacts, setup: Option<&dyn SandboxSetup>) -> Detection {
 }
 
 #[cfg(target_os = "macos")]
-mod seatbelt {
-    use std::io;
-    use std::path::Path;
-    use std::process::{Command, ExitStatus, Stdio};
-
-    use super::{Detection, NoSandbox, Tier};
-    use crate::Error;
-
-    /// The Seatbelt front end; the launcher runs the agent through it too.
-    pub(super) const SANDBOX_EXEC: &str = "/usr/bin/sandbox-exec";
-    /// A profile that allows everything: the probe asks only whether Seatbelt applies one.
-    const PROFILE: &str = "(version 1)(allow default)";
-    /// What the probe runs in the jail.
-    const TRUE: &str = "/usr/bin/true";
-
-    /// Runs `program` as `sandbox-exec` with the probe profile.
-    pub(super) fn probe(program: &Path) -> Detection {
-        match run(program) {
-            Ok(status) if status.success() => Detection {
-                tier: Tier::A,
-                reason: None,
-            },
-            Ok(status) => Detection::none(NoSandbox::ProbeFailed(format!(
-                "{} exited with {status}",
-                program.display()
-            ))),
-            Err(error) => {
-                let error = Error::Probe(error);
-                tracing::warn!(%error, "Seatbelt probe failed");
-                Detection::none(NoSandbox::ProbeFailed(format!(
-                    "{}: {error}",
-                    program.display()
-                )))
-            }
-        }
-    }
-
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "the one-off Seatbelt probe at host start is not an agent launch; it waits for a \
-                  process that exits at once"
-    )]
-    fn run(program: &Path) -> io::Result<ExitStatus> {
-        Command::new(program)
-            .args(["-p", PROFILE, TRUE])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-
-        #[test]
-        fn a_missing_sandbox_exec_is_tier_c_with_the_reason() {
-            let found = probe(Path::new("/nonexistent/sandbox-exec"));
-            assert_eq!(found.tier, Tier::C);
-            let Some(NoSandbox::ProbeFailed(why)) = found.reason else {
-                panic!("expected ProbeFailed, got {found:?}");
-            };
-            assert!(why.contains("/nonexistent/sandbox-exec"), "{why}");
-        }
-
-        #[test]
-        fn a_failing_probe_is_tier_c() {
-            // `/usr/bin/false` takes the profile's arguments and exits 1.
-            let found = probe(Path::new("/usr/bin/false"));
-            assert_eq!(found.tier, Tier::C);
-            assert!(
-                matches!(found.reason, Some(NoSandbox::ProbeFailed(_))),
-                "{found:?}"
-            );
-        }
-    }
-}
+mod seatbelt;
 
 #[cfg(test)]
 mod tests;

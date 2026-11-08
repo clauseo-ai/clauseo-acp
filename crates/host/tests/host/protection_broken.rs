@@ -1,15 +1,17 @@
-//! R17 PR-E review: a set-up in place but broken fails closed, refusing every launch with
-//! `sandbox.blocked` whatever the settings say, and its cause stays `SetUpFailed` for the app's
-//! words; the limits reader, which runs the agent's program outside the jail, starts only when
-//! a launch would; and a turn already running when the computer's cause turns `Blocked`
+//! R17 PR-E review: a set-up in place but broken, or a check that could not confirm the
+//! sandbox, fails closed, refusing every launch with `sandbox.blocked` whatever the settings say,
+//! with its cause (`SetUpFailed`, `ProbeFailed`) for the app's words; a failed probe's retry
+//! checks again; the limits reader, which runs the agent's program outside the jail, starts
+//! only when a launch would; and a turn already running when the computer's cause turns `Blocked`
 //! finishes, then its unprotected agent stops (at once when it is between turns), so the
 //! thread's next send needs a launch, which is refused.
 
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use clauseo_protocol::{
     AgentKind, CommandOutcome, DetachReason, DomainEvent, ErrorCode, HostCommand,
-    NotProtectedCause, Protection, StopReason, StreamId, ThreadId,
+    NotProtectedCause, Protection, ProtectionWork, StopReason, StreamId, ThreadId,
 };
 use clauseo_sandbox::{Blocked, NoSandbox, SetupState};
 
@@ -20,6 +22,9 @@ use crate::permissions::{KINDS_ANSWERS, answer_from, until_first_request};
 use crate::protection::dir;
 use crate::protection_rig::{Plan, c, rig, view};
 use crate::support::{Dir, FAKE, Running, Scenario};
+
+/// How often a refused launch may re-probe, on the host clock (`protection::REPROBE_EVERY`).
+const REPROBE_EVERY: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// One launch's environment, as `Recording` keeps it.
 type Env = std::collections::BTreeMap<std::ffi::OsString, std::ffi::OsString>;
@@ -32,29 +37,37 @@ fn lenient(dir: &Dir, agents: &[(&str, Scenario)]) {
     );
 }
 
-/// A failed set-up and a failed probe: both `SetUpFailed`, both refused with `sandbox.blocked`
-/// though both settings would let an unprotected agent run.
+/// A failed set-up (`SetUpFailed`) and a failed probe (`ProbeFailed`, R17 PR-E's follow-up:
+/// Windows' unreadable build, even on a computer never set up, is not a set-up's refusal): both
+/// refused with `sandbox.blocked` though both settings would let an unprotected agent run.
 #[test]
 fn a_broken_set_up_refuses_every_launch_whatever_the_settings() {
     let dir = dir("protection_broken_create");
     lenient(&dir, &[(FAKE, Scenario::Bundled("prompt-stream"))]);
+    let probe_failed = || c(NoSandbox::ProbeFailed("no build number".to_owned()));
     let cases = [
         (
             c(NoSandbox::SetUpFailed(
                 "the record is unreadable".to_owned(),
             )),
             SetupState::Failed("the record is unreadable".to_owned()),
+            NotProtectedCause::SetUpFailed,
         ),
         (
-            c(NoSandbox::ProbeFailed("no build number".to_owned())),
+            probe_failed(),
             SetupState::Ready,
+            NotProtectedCause::ProbeFailed,
+        ),
+        (
+            probe_failed(),
+            SetupState::Needed,
+            NotProtectedCause::ProbeFailed,
         ),
     ];
-    for (run, (detection, state)) in (0u16..).zip(cases) {
+    for (run, (detection, state, cause)) in (0u16..).zip(cases) {
         let (host, _rig) =
             crate::protection::start(&dir, run, Plan::new(vec![detection], vec![state]));
         let answer = view(&host);
-        let cause = NotProtectedCause::SetUpFailed;
         assert_eq!(
             answer.computer,
             Protection::NotProtected { cause },
@@ -67,6 +80,46 @@ fn a_broken_set_up_refuses_every_launch_whatever_the_settings() {
             agent: clauseo_protocol::AgentId::new(FAKE).unwrap(),
         };
         drop(host.refused(command, ErrorCode::SandboxBlocked));
+        host.shutdown();
+    }
+}
+
+/// A failed probe is never cached: "Try again" only checks again, asking no administrator even
+/// where the set-up is not done, and a check that now confirms the sandbox makes the computer
+/// protected, so a launch runs.
+#[test]
+fn a_retry_after_a_failed_probe_checks_again_and_can_become_protected() {
+    let dir = dir("protection_broken_retry");
+    lenient(&dir, &[(FAKE, Scenario::Bundled("prompt-stream"))]);
+    let failed = c(NoSandbox::ProbeFailed(
+        "sandbox-exec exited with 1".to_owned(),
+    ));
+    let tier_a = clauseo_sandbox::Detection {
+        tier: clauseo_sandbox::Tier::A,
+        reason: None,
+    };
+    for (run, state) in (0u16..).zip([SetupState::Ready, SetupState::Needed]) {
+        let plan = Plan::new(vec![failed.clone(), tier_a.clone()], vec![state]);
+        let (host, rig) = crate::protection::start(&dir, run, plan);
+        let before = view(&host);
+        let cause = NotProtectedCause::ProbeFailed;
+        assert_eq!(before.computer, Protection::NotProtected { cause });
+        assert!(!before.retry_asks_admin, "run {run}");
+        let matter = host.matters()[0].matter;
+        let create = || HostCommand::CreateThread {
+            matter,
+            agent: clauseo_protocol::AgentId::new(FAKE).unwrap(),
+        };
+        // No launch first: a refused one would start its own re-probe (tested below).
+        assert_eq!(
+            host.ok(HostCommand::RetryProtection {}),
+            CommandOutcome::Done
+        );
+        assert_eq!(rig.detections.load(Ordering::SeqCst), 2, "run {run}");
+        assert_eq!(rig.setup.run_calls.load(Ordering::SeqCst), 0, "run {run}");
+        let tier = clauseo_protocol::ProtectionTier::A;
+        assert_eq!(view(&host).computer, Protection::Protected { tier });
+        let _created = host.ok(create());
         host.shutdown();
     }
 }
@@ -209,5 +262,96 @@ fn an_idle_unprotected_session_stops_when_the_sandbox_turns_blocked() {
     check_finds_the_block(&host);
     events.until("the idle session's stop", detached);
     next_send_refused(&host, &mut events, thread, &launches);
+    host.shutdown();
+}
+
+/// The re-probe's two view changes: its check in progress, then its result (a failed probe's
+/// result view equals the one before, so the second is the check's end).
+fn until_reprobed(sub: &mut clauseo_host::AppSubscription) {
+    let events = crate::protection_rig::protection_events(sub, 2);
+    let in_progress: Vec<_> = events
+        .iter()
+        .map(|event| match event {
+            clauseo_protocol::HostEvent::ProtectionViewChanged { view } => Some(view.in_progress),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        in_progress,
+        [Some(Some(ProtectionWork::Check)), Some(None)],
+        "{events:?}"
+    );
+}
+
+/// R17 PR-E follow-up: a turn's launch refused for a failed probe still fails, and starts one
+/// re-probe off the actor; another refused within `REPROBE_EVERY` (10 s on the host clock)
+/// starts none, and one after it starts the next.
+#[test]
+fn a_launch_refused_for_a_failed_probe_re_probes_at_most_every_ten_seconds() {
+    let dir = Dir::new("protection_broken_reprobe", &[]);
+    lenient(&dir, &[(FAKE, Scenario::Bundled("prompt-stream"))]);
+    let thread = one_thread(&dir);
+    let failed = c(NoSandbox::ProbeFailed(
+        "sandbox-exec exited with 1".to_owned(),
+    ));
+    let rig = rig(Plan::new(vec![failed], vec![SetupState::Ready]));
+    let sandbox = rig.sandbox.clone();
+    let host = dir.start_with(1, move |config| config.with_sandbox(sandbox));
+    let mut sub = crate::protection_rig::subscribe(&host);
+    let mut events = host.events(StreamId::Thread(thread));
+    let mut refused_send = || {
+        let (turn, _) = host.prompt(thread, "Look at the matter.");
+        assert_eq!(events.until_turn_ended(turn).stop, StopReason::Failed);
+        let code = turn_failed(&events, turn).map(|failed| failed.code);
+        assert_eq!(code, Some(ErrorCode::SandboxBlocked), "{}", events.dump());
+    };
+    refused_send();
+    until_reprobed(&mut sub);
+    assert_eq!(rig.detections.load(Ordering::SeqCst), 2);
+    refused_send();
+    host.settle();
+    assert_eq!(
+        rig.detections.load(Ordering::SeqCst),
+        2,
+        "a second re-probe in the window"
+    );
+    host.clock.advance(REPROBE_EVERY);
+    refused_send();
+    until_reprobed(&mut sub);
+    assert_eq!(rig.detections.load(Ordering::SeqCst), 3);
+    host.shutdown();
+}
+
+/// A refused `CreateThread` under a failed probe re-probes; once that passes, the next one
+/// runs, with no "Try again".
+#[test]
+fn after_a_passing_re_probe_the_next_send_launches() {
+    let dir = dir("protection_broken_reprobe_pass");
+    lenient(&dir, &[(FAKE, Scenario::Bundled("prompt-stream"))]);
+    let failed = c(NoSandbox::ProbeFailed(
+        "sandbox-exec exited with 1".to_owned(),
+    ));
+    let tier_a = clauseo_sandbox::Detection {
+        tier: clauseo_sandbox::Tier::A,
+        reason: None,
+    };
+    let plan = Plan::new(vec![failed, tier_a], vec![SetupState::Ready]);
+    let (host, rig) = crate::protection::start(&dir, 0, plan);
+    let mut sub = crate::protection_rig::subscribe(&host);
+    let matter = host.matters()[0].matter;
+    let create = || HostCommand::CreateThread {
+        matter,
+        agent: clauseo_protocol::AgentId::new(FAKE).unwrap(),
+    };
+    drop(host.refused(create(), ErrorCode::SandboxBlocked));
+    let ended = crate::protection_rig::protection_events(&mut sub, 2);
+    let tier = clauseo_protocol::ProtectionTier::A;
+    assert!(
+        matches!(ended.last(), Some(clauseo_protocol::HostEvent::ProtectionViewChanged { view })
+            if view.computer == Protection::Protected { tier }),
+        "{ended:?}"
+    );
+    assert_eq!(rig.detections.load(Ordering::SeqCst), 2);
+    let _created = host.ok(create());
     host.shutdown();
 }

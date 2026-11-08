@@ -246,10 +246,11 @@ its step card, and compare (below) lists the files between any two versions.
 | Matter list | `HostQuery::ListMatters` returns `QueryResult::Matters` | name, kind, client, next date, pinned, last opened, last activity, folder display, status and protection per matter |
 | Matter protected (0051) | `Protection::Protected` with `ProtectionTier::A` or `ProtectionTier::B` | `tier`; `MatterSummary::protection`, `HostEvent::ProtectionChanged` |
 | Matter Not protected (0051) | `Protection::NotProtected` (tier `ProtectionTier::C`) | `cause`, below; missing `protection` means not known yet |
-| Not protected: no sandbox on this computer | `NotProtectedCause::Unsupported` | Linux, Windows on ARM, a build without it |
+| Not protected: no sandbox on this computer | `NotProtectedCause::Unsupported` | Linux, Windows on ARM or before Windows 10 22H2, a Mac without `sandbox-exec`, a build without it |
 | Not protected: set-up not done | `NotProtectedCause::NeedsSetUp` | offer the set-up (`HostCommand::RetryProtection`) |
 | Not protected: set-up refused | `NotProtectedCause::SetUpRefused` | the administrator prompt was declined; offer it again |
-| Not protected: set-up failed | `NotProtectedCause::SetUpFailed` | offer to try again |
+| Not protected: set-up failed | `NotProtectedCause::SetUpFailed` | Windows' set-up failed or its records don't read; offer to try again; every launch refused with `sandbox.blocked` whatever the settings |
+| Not protected: the sandbox check couldn't confirm it works (R17 PR-E follow-up) | `NotProtectedCause::ProbeFailed` | macOS' `sandbox-exec` failed or hung, or Windows' build number doesn't read; every launch refused with `sandbox.blocked` whatever the settings; "Try again" (`HostCommand::RetryProtection`) checks again, no administrator prompt; never cached |
 | Not protected: the pool is full | `NotProtectedCause::PoolFull` | counts: `size`, `open`, `held`, `owed`, `set_aside`, `needs_reset` (users only a reset frees: "Free up protected spaces"); every launch refused with `sandbox.pool_full` |
 | Not protected: blocked by a setting only IT or the installer can fix (R17 PR-E) | `NotProtectedCause::Blocked` | `reason`, the sandbox's name for the block (`logon_right`, `policy`, `admin_copy_missing`, `admin_copy_changed`, `admin_copy_unsafe`, `tool_missing`, or a newer one); no "Try again"; every launch refused with `sandbox.blocked` whatever the settings |
 | Not protected: another Windows account owns the sandbox's set-up (R17 PR-E) | `NotProtectedCause::OtherAccount` | no "Try again"; every launch refused with `sandbox.blocked` whatever the settings |

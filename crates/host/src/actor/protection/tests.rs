@@ -55,9 +55,9 @@ fn each_detection_maps_to_its_protection() {
         ),
         (
             c(NoSandbox::ProbeFailed(
-                "/usr/bin/sandbox-exec: gone".to_owned(),
+                "sandbox-exec exited with 1".to_owned(),
             )),
-            not(NotProtectedCause::SetUpFailed),
+            not(NotProtectedCause::ProbeFailed),
         ),
         (
             c(NoSandbox::SetUpFailed("C:\\Users\\x".to_owned())),
@@ -152,6 +152,12 @@ fn each_cause_refuses_by_its_code_and_the_setting() {
             NotProtectedCause::SetUpRefused,
             Some(ErrorCode::SandboxSetupRequired),
             None,
+        ),
+        // A check that could not confirm the sandbox fails closed whatever the setting.
+        (
+            NotProtectedCause::ProbeFailed,
+            Some(ErrorCode::SandboxBlocked),
+            Some(ErrorCode::SandboxBlocked),
         ),
         // A set-up in place but broken fails closed whatever the setting (R17 PR-E review).
         (

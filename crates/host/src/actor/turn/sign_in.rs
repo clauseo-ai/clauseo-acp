@@ -165,7 +165,8 @@ pub(super) fn launch_refusal(actor: &Actor, thread: ThreadId) -> Option<Error> {
     // lookup below, whose early return must never skip it. (That return is not reached from a
     // launch, which always names a known thread.) The hold above goes first: it refuses too,
     // and a held turn waits for the sign-in rather than failing.
-    if let Some(refused) = crate::actor::protection::refusal(actor) {
+    // A refusal for a failed probe also asks for a re-probe (`protection::launch_refusal`).
+    if let Some(refused) = crate::actor::protection::launch_refusal(actor) {
         return Some(refused);
     }
     let agent = &actor.threads.get(&thread)?.row.agent;

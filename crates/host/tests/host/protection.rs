@@ -69,8 +69,10 @@ fn each_detection_reaches_the_query_and_every_row() {
             }),
         ),
         (
-            c(NoSandbox::ProbeFailed("/usr/bin/sandbox-exec".to_owned())),
-            not(NotProtectedCause::SetUpFailed),
+            c(NoSandbox::ProbeFailed(
+                "sandbox-exec exited with 1".to_owned(),
+            )),
+            not(NotProtectedCause::ProbeFailed),
         ),
         (
             c(NoSandbox::SetUpFailed("C:\\Users\\lawyer".to_owned())),
