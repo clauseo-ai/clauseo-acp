@@ -828,8 +828,8 @@ jobs:
             "$RUNNER_TEMP/sandbox-sig.conf.json" "$sig" "$SANDBOX_EXE.sig"
           # makensis's warnings (an unused LangString, a macro left out, a jump to nowhere) don't fail its
           # compile, and the bundler hides makensis's output unless --verbose. So both bundles run verbose
-          # into one log (pipefail keeps tauri's own exit code), which must hold makensis's output, so the
-          # check can't pass on an empty log, and no "N warning(s):" summary.
+          # into one log (each call piped to tee; pipefail keeps tauri's own exit code), which must hold
+          # makensis's output, so the check can't pass on an empty log, and no "N warning(s):" summary.
           log=$RUNNER_TEMP/makensis.log
           : > "$log"
           bundle() {
@@ -837,11 +837,11 @@ jobs:
             pnpm -C ui tauri bundle --ci --verbose --target "$TARGET" ${FEATURES:+--features "$FEATURES"} --bundles nsis \
               --no-binary-patching --no-sign --config release/release.conf.json --config release/blocklist.conf.json \
               --config release/windows.conf.json "$@" \
-              --config "$RUNNER_TEMP/sandbox-sig.conf.json" --config release/sidecars.generated.json 2>&1 | tee -a "$log"
+              --config "$RUNNER_TEMP/sandbox-sig.conf.json" --config release/sidecars.generated.json
           }
-          bundle
+          bundle 2>&1 | tee -a "$log"
           mv "$nsis/Clauseo_${VERSION}_${{ matrix.arch }}-setup.exe" "$OUT/"
-          bundle --config release/machine.conf.json
+          bundle --config release/machine.conf.json 2>&1 | tee -a "$log"
           mv "$nsis/Clauseo_${VERSION}_${{ matrix.arch }}-setup.exe" "$OUT/Clauseo_${VERSION}_${{ matrix.arch }}-machine-setup.exe"
           if ! grep -Eq 'Processing script file|Output: ".*\.exe"' "$log"; then
             echo "::error::no makensis output in the bundle log, so its warnings can't be checked"
