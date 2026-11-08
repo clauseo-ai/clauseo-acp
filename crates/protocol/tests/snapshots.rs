@@ -46,6 +46,7 @@ use clauseo_protocol::{
     EntryId,
     Envelope,
     ErrorCode,
+    EscalationRequest,
     FieldChange,
     FileChoice,
     FileDecision,
@@ -102,9 +103,9 @@ use clauseo_protocol::{
 use entries::{agent_text_entry, every_entry, header_entry};
 use examples::{acp_unsupported_block, every_event};
 use fixtures::{
-    agent, blocked_site_id, checkpoint_id, choice, count, elicitation_id, event_id, file_ref_id,
-    folder_ref_id, matter_id, message_id, path, permission_request_id, raw, round_trips, seq,
-    short, thread_id, title, turn_id, unknown_event, unknown_of, v7,
+    agent, allowance_id, blocked_site_id, checkpoint_id, choice, count, denial_id, elicitation_id,
+    event_id, file_ref_id, folder_ref_id, matter_id, message_id, path, permission_request_id, raw,
+    round_trips, seq, short, thread_id, title, turn_id, unknown_event, unknown_of, v7,
 };
 use fixtures::{blob as sample_blob, envelope as sample_envelope};
 use limits::{account_limits, limits_view};
@@ -238,11 +239,20 @@ mod domain_event {
         TurnStoppedAtLimit => turn_stopped_at_limit: event("turn_stopped_at_limit");
         TurnEnded => turn_ended: event("turn_ended");
         StepUndone => step_undone: event("step_undone");
+        DenialRecorded => denial_recorded: event("denial_recorded");
+        EscalationAnswered => escalation_answered: event("escalation_answered");
+        DenialDismissed => denial_dismissed: event("denial_dismissed");
+        DenialsPaused => denials_paused: event("denials_paused");
         MatterCreated => matter_created: event("matter_created");
         CheckpointRecorded => checkpoint_recorded: event("checkpoint_recorded");
         OutsideEdits => outside_edits: event("outside_edits");
         VersionRestored => version_restored: event("version_restored");
         MatterRelocated => matter_relocated: event("matter_relocated");
+        AllowanceRecorded => allowance_recorded: event("allowance_recorded");
+        AllowanceForgotten => allowance_forgotten: event("allowance_forgotten");
+        ReadGrantedTo => read_granted_to: event("read_granted_to");
+        ReadGrantForgotten => read_grant_forgotten: event("read_grant_forgotten");
+        ProtectionSwitched => protection_switched: event("protection_switched");
         Unknown => unknown: unknown_event("later_kind", raw(r#"{"z":1,"a":[true]}"#));
     } }
 
@@ -335,6 +345,8 @@ mod view_entry {
         LimitStop => limit_stop: entry("limit_stop");
         Notice => notice: entry("notice");
         Marker => marker: entry("marker");
+        Denial => denial: entry("denial");
+        DenialsPaused => denials_paused: entry("denials_paused");
         MatterHeader => matter_header: entry("matter_header");
         Version => version: entry("version");
     } }

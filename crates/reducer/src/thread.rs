@@ -6,6 +6,7 @@
 //! no old entry is cloned to compare afterwards.
 
 mod asks;
+mod denials;
 mod queue;
 mod triage;
 mod turn;
@@ -51,6 +52,7 @@ fn fold_event(state: &mut ThreadState, envelope: &Envelope, out: &mut Applied) {
             });
         }
         DomainEvent::ThreadArchived(_) => {
+            denials::expire_pending(state, out);
             set_status(state, "thread_archived", out, ThreadStatus::Archived);
         }
         DomainEvent::ThreadSnoozed(event) => triage::snoozed(state, event, out),
@@ -67,8 +69,9 @@ fn fold_event(state: &mut ThreadState, envelope: &Envelope, out: &mut Applied) {
         // turn.
         DomainEvent::AgentSessionAttached(event) => {
             queue::session_attached(state, &event.capabilities, out);
+            state.restarting = None;
             update_header(state, "agent_session_attached", out, |h| {
-                set(&mut h.resuming_since, None)
+                set(&mut h.resuming_since, None) | set(&mut h.restarting_since, None)
             });
             if state.status() == ThreadStatus::IdleStopped {
                 let status = turn::settled_status(state);
@@ -138,16 +141,23 @@ fn fold_event(state: &mut ThreadState, envelope: &Envelope, out: &mut Applied) {
         }
         DomainEvent::TurnEnded(event) => turn::turn_ended(state, seq, ts, event, out),
         DomainEvent::StepUndone(event) => turn::step_undone(state, seq, event_id, ts, event, out),
+        DomainEvent::DenialRecorded(event) => denials::recorded(state, seq, ts, event, out),
+        DomainEvent::EscalationAnswered(event) => denials::answered(state, event, out),
+        DomainEvent::DenialDismissed(event) => denials::dismissed(state, event, out),
+        DomainEvent::DenialsPaused(event) => {
+            denials::paused(state, seq, event_id, ts, event, out);
+        }
         DomainEvent::MatterCreated(_) => wrong_stream(out, "matter_created"),
         DomainEvent::CheckpointRecorded(_) => wrong_stream(out, "checkpoint_recorded"),
         DomainEvent::OutsideEdits(_) => wrong_stream(out, "outside_edits"),
         DomainEvent::VersionRestored(_) => wrong_stream(out, "version_restored"),
         DomainEvent::MatterRelocated(_) => wrong_stream(out, "matter_relocated"),
+        DomainEvent::AllowanceRecorded(_) => wrong_stream(out, "allowance_recorded"),
+        DomainEvent::AllowanceForgotten(_) => wrong_stream(out, "allowance_forgotten"),
+        DomainEvent::ReadGrantedTo(_) => wrong_stream(out, "read_granted_to"),
+        DomainEvent::ReadGrantForgotten(_) => wrong_stream(out, "read_grant_forgotten"),
+        DomainEvent::ProtectionSwitched(_) => wrong_stream(out, "protection_switched"),
     }
-}
-
-fn not_yet(out: &mut Applied, event: &'static str) {
-    out.anomalies.push(Anomaly::NotYetFolded { event });
 }
 
 fn wrong_stream(out: &mut Applied, event: &'static str) {
@@ -245,6 +255,7 @@ fn thread_created(state: &mut ThreadState, seq: Seq, event: &ThreadCreated, out:
         agent_name: None,
         status: ThreadStatus::Idle,
         resuming_since: None,
+        restarting_since: None,
         queue_held: false,
         queue_held_reason: None,
         steer_joins_turn: queue::steer_joins_by_kind(&event.agent),

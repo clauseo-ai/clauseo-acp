@@ -1,0 +1,10 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"read_grant_forgotten\")"
+---
+{
+  "read_grant_forgotten": {
+    "by_matter": "01900000-0000-7000-8000-000000000004",
+    "allowance": "01900000-0000-7000-8000-000000000002"
+  }
+}

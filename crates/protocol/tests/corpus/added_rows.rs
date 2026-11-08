@@ -1,5 +1,6 @@
-//! The frozen files added after v1 (see `corpus/v1/README.md`), with their pins. Kept apart from
-//! `corpus.rs` so that file stays under the line limit.
+//! The frozen files added after v1 (see `corpus/v1/README.md`), with their pins, up to R18's,
+//! which are in `added_rows_r18.rs`. Kept apart from `corpus.rs` so that file stays under the
+//! line limit.
 
 use super::Corpus;
 

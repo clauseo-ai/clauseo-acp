@@ -137,6 +137,7 @@ fn without_content(entry: &UserMessageEntry) -> UserMessageEntry {
         turn: entry.turn,
         content: Vec::new(),
         delivery: entry.delivery,
+        by: entry.by,
         status: entry.status,
         edited: entry.edited,
         steer: entry.steer.clone(),

@@ -8,7 +8,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use clauseo_protocol::{
-    CheckpointId, ElicitationId, ElicitationState, ErrorCode, FileChange, HeaderEntry,
+    CheckpointId, DenialId, ElicitationId, ElicitationState, ErrorCode, FileChange, HeaderEntry,
     MatterHeaderEntry, MatterId, MatterPath, MessageId, PermissionRequestId, PermissionState, Seq,
     SkippedFile, StreamId, ThreadId, ThreadStatus, ToolCallId, TurnId, UserMessageStatus,
     ViewEntry, utf16_len,
@@ -122,6 +122,9 @@ pub struct ThreadState {
     pub(crate) running: Option<TurnId>,
     /// The status a detach during the running turn gives once the turn ends.
     pub(crate) after_turn: Option<ThreadStatus>,
+    /// The turn a `Restarting` detach restarts (the running one, else the one launching), while
+    /// the header shows the restart: only its `TurnFailed` or `TurnEnded` ends the restart.
+    pub(crate) restarting: Option<TurnId>,
     /// `FilesChanged` of turns that have not ended.
     pub(crate) files: BTreeMap<TurnId, TurnFiles>,
     /// `TurnFailed` codes (and items) of turns that have not ended.
@@ -140,6 +143,7 @@ impl ThreadState {
             turn: None,
             running: None,
             after_turn: None,
+            restarting: None,
             files: BTreeMap::new(),
             failures: BTreeMap::new(),
             index: Index::default(),
@@ -265,6 +269,8 @@ pub(crate) struct Index {
     pub(crate) elicitations: HashMap<ElicitationId, Seq>,
     pub(crate) steps: HashMap<TurnId, Seq>,
     pub(crate) limit_stops: HashMap<TurnId, Seq>,
+    /// Each denial's entry (R18).
+    pub(crate) denials: HashMap<DenialId, Seq>,
     /// The prompt of each turn that has neither started nor ended (queued, launching, or waiting
     /// for the writer), by its prompt's order. A short list (the queue holds at most ten), so a
     /// scan beats hashing on the fold's hot path, where every turn adds and removes one.
@@ -324,9 +330,13 @@ impl Index {
                 ViewEntry::LimitStop(stop) => {
                     index.limit_stops.insert(stop.turn, order);
                 }
+                ViewEntry::Denial(denial) => {
+                    index.denials.insert(denial.denial, order);
+                }
                 ViewEntry::Header(_)
                 | ViewEntry::AgentContent(_)
                 | ViewEntry::Notice(_)
+                | ViewEntry::DenialsPaused(_)
                 | ViewEntry::Marker(_)
                 | ViewEntry::MatterHeader(_)
                 | ViewEntry::Version(_) => {}

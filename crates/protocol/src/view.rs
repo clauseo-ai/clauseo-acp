@@ -12,14 +12,17 @@ use serde::{Deserialize, Serialize};
 use crate::open_enum::enum_with_names;
 use crate::stream::{split_kind, unknown_prefix};
 use crate::{
-    CheckpointId, ContentBlock, Cost, Count, ElicitationId, Error, EventId, MatterId, MessageId,
-    PermissionRequestId, Seq, TextOrBlob, ThreadId, Timestamp, ToolCallContent, ToolCallId, TurnId,
+    CheckpointId, ContentBlock, Cost, Count, DenialId, ElicitationId, Error, EventId, MatterId,
+    MessageId, PermissionRequestId, Seq, TextOrBlob, ThreadId, Timestamp, ToolCallContent,
+    ToolCallId, TurnId,
 };
 
+mod denial;
 mod entry;
 mod hold;
 mod tools;
 
+pub use denial::{DenialEntry, DenialState, DenialsPausedEntry};
 pub use entry::{
     AgentContentEntry, AgentTextEntry, BackgroundMark, ElicitationEntry, ElicitationState,
     HeaderEntry, LimitStopEntry, MarkerEntry, MarkerKind, MatterHeaderEntry, NoticeEntry,
@@ -193,6 +196,10 @@ view_entries! {
         Notice(NoticeEntry, event: EventId) = "notice",
         /// An undo, a restore or a compaction.
         Marker(MarkerEntry, event: EventId) = "marker",
+        /// A refused path or site, with its card when it may be widened (R18).
+        Denial(DenialEntry, denial: DenialId) = "denial",
+        /// An answer the host paused after too many refusals (R18).
+        DenialsPaused(DenialsPausedEntry, event: EventId) = "denials_paused",
         /// The matter's header.
         MatterHeader(MatterHeaderEntry, matter: MatterId) = "matter_header",
         /// One version of the matter's files.
@@ -233,6 +240,8 @@ impl ViewEntry {
             | Self::Step(_)
             | Self::LimitStop(_)
             | Self::Notice(_)
+            | Self::Denial(_)
+            | Self::DenialsPaused(_)
             | Self::MatterHeader(_)
             | Self::Version(_) => 0,
         }

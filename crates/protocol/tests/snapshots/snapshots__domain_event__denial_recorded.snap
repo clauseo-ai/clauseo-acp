@@ -1,0 +1,22 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"denial_recorded\")"
+---
+{
+  "denial_recorded": {
+    "turn": "01900000-0000-7000-8000-000000000003",
+    "denial": "01900000-0000-7000-8000-000000000001",
+    "kind": {
+      "folder": {
+        "path": "/Users/asha/Matters/Smith v Jones/Pleadings",
+        "other_matter": {
+          "matter": "01900000-0000-7000-8000-000000000003",
+          "name": "Smith v Jones"
+        }
+      }
+    },
+    "source": "sandbox",
+    "offered": true,
+    "count": 2
+  }
+}

@@ -91,6 +91,8 @@ const ID_FIELD = {
   limit_stop: "turn",
   notice: "event",
   marker: "event",
+  denial: "denial",
+  denials_paused: "event",
   matter_header: "matter",
   version: "checkpoint",
 } as const satisfies { readonly [K in Kind]-?: keyof NonNullable<ViewEntry[K]> };

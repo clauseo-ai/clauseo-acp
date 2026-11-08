@@ -160,6 +160,16 @@ export const HI = {
     "Clauseo के बंद होने तक इस वेबसाइट को अनुमति है। Clauseo यह बदलाव सहेज नहीं सका, इसलिए अगली बार Clauseo खुलने पर यह फिर से अवरुद्ध होगी।",
   "This site is blocked again until Clauseo closes. Clauseo couldn't save the change, so it may be allowed again next time Clauseo opens.":
     "Clauseo के बंद होने तक यह वेबसाइट फिर से अवरुद्ध है। Clauseo यह बदलाव सहेज नहीं सका, इसलिए अगली बार Clauseo खुलने पर इसे फिर से अनुमति मिल सकती है।",
+  // provisional (R18 PR 1, words from the task)
+  "That request isn't waiting any more. If Clauseo still needs it, it will ask again.":
+    "वह अनुरोध अब प्रतीक्षा में नहीं है। अगर Clauseo को अब भी इसकी ज़रूरत होगी, तो वह फिर से पूछेगा।",
+  "This can't be allowed. The Safe workspace always keeps this closed, or your firm's settings do. Nothing was changed.":
+    "इसकी अनुमति नहीं दी जा सकती। सुरक्षित कार्यक्षेत्र इसे हमेशा बंद रखता है, या आपकी फ़र्म की सेटिंग्स इसे बंद रखती हैं। कुछ भी नहीं बदला गया।",
+  "Your firm doesn't allow Clauseo to work without the Safe workspace on this computer.":
+    "आपकी फ़र्म इस कंप्यूटर पर Clauseo को सुरक्षित कार्यक्षेत्र के बिना काम करने की अनुमति नहीं देती।",
+  // provisional (R18, app thread's words)
+  "Clauseo can't use files from a network drive or shared folder. Copy them to a folder on this computer, then choose that folder.":
+    "Clauseo नेटवर्क ड्राइव या साझा फ़ोल्डर की फ़ाइलों का उपयोग नहीं कर सकता। उन्हें इस कंप्यूटर के किसी फ़ोल्डर में कॉपी करें, फिर वह फ़ोल्डर चुनें।",
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

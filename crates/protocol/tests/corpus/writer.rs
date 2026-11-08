@@ -53,8 +53,9 @@ fn added_pairs(corpora: &[Corpus]) -> (Vec<(String, Vec<Envelope>)>, Vec<String>
 
 /// Writes the `added/` files for every kind and variant the corpus lacks into
 /// `target/tmp/corpus-added/`, never into `corpus/`, and prints each file's move and its
-/// [`ADDED_AFTER_V1`] row. Run as the corpus README says, with `INSTA_UPDATE=always`: the files
-/// are written as insta binary snapshots, the crate's one way to write a file from a test.
+/// [`ADDED_IN_R18`](crate::ADDED_IN_R18) row. Run as the corpus README says, with
+/// `INSTA_UPDATE=always`: the files are written as insta binary snapshots, the crate's one way to
+/// write a file from a test.
 #[test]
 #[ignore = "writes the corpus/added files into target/; run it by name, as corpus/v1/README.md says"]
 fn write_the_added_pairs() {

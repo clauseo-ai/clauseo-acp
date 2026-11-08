@@ -5,8 +5,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::serde_util::BorrowedStr;
 use crate::{
     CheckpointId, CompactString, ContentBlock, Delivery, Error, ErrorCode, FileChange,
-    LimitStopReason, MatterPath, MessageId, SkippedFile, SteerOutcome, StopReason, TextKind,
-    ThreadId, Timestamp, ToolCallId, TurnId, TurnUsage,
+    LimitStopReason, MatterPath, MessageBy, MessageId, SkippedFile, SteerOutcome, StopReason,
+    TextKind, ThreadId, Timestamp, ToolCallId, TurnId, TurnUsage,
 };
 
 /// The lawyer's message, logged before its turn is queued or started. `session/load` replays
@@ -28,6 +28,10 @@ pub struct UserMessage {
     /// missing field reads as queue.
     #[serde(default, skip_serializing_if = "Delivery::is_queue")]
     pub delivery: Delivery,
+    /// Who sent it. The lawyer is written as a missing field, and a missing field (every entry
+    /// before R18) reads as the lawyer.
+    #[serde(default, skip_serializing_if = "MessageBy::is_lawyer")]
+    pub by: MessageBy,
 }
 
 /// A turn waits: behind its own thread's running turn, or behind another thread's writer.

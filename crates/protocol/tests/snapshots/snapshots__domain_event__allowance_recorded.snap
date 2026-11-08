@@ -1,0 +1,16 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"allowance_recorded\")"
+---
+{
+  "allowance_recorded": {
+    "allowance": "01900000-0000-7000-8000-000000000001",
+    "target": {
+      "folder": {
+        "path": "/Users/asha/Deals"
+      }
+    },
+    "mode": "read_only",
+    "allowed": true
+  }
+}

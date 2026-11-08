@@ -216,9 +216,9 @@ impl Bridge {
     /// Answers the window `label`'s `query`. `main` may send every read the host has: the
     /// match is an allow-list like `admit_main`'s, so a read the host adds does not compile here
     /// until the bridge rules on it. The `settings` window reads the settings (0028), the
-    /// updater's state (0037), the skill packs (0040), the protection view (0051) and the
-    /// allowed sites (0053) alone, and
-    /// any other window nothing.
+    /// updater's state (0037), the skill packs (0040), the protection view (0051), the
+    /// allowed sites (0053) and the remembered answers (R18) alone, and any other window
+    /// nothing.
     pub(crate) async fn query(
         &self,
         label: &str,
@@ -234,11 +234,12 @@ impl Bridge {
                         | HostQuery::ListSkillPacks
                         | HostQuery::Protection
                         | HostQuery::AllowedSites
+                        | HostQuery::ListAllowances
                 ) => {}
             SETTINGS_WINDOW => {
                 return Err(invalid(
                     "the settings window reads only the settings, the update state, the skill \
-                     packs, the protection view and the allowed sites",
+                     packs, the protection view, the allowed sites and the allowances",
                 ));
             }
             _ => return Err(invalid(format!("window {label} may send no query"))),
@@ -265,7 +266,10 @@ impl Bridge {
             // The sandbox's view (0051): the host's cache, read only. Both windows show it.
             | HostQuery::Protection
             // The sites allowed despite the block list (0053, PR 2): stored state, no paths.
-            | HostQuery::AllowedSites => {}
+            | HostQuery::AllowedSites
+            // The remembered answers (R18): the matters' logs, folded; the paths in them are
+            // display text the host logged, and no command names one.
+            | HostQuery::ListAllowances => {}
             HostQuery::Search(request) => return search::page(self, label, request.clone()).await,
             // The New matter dialog's folder warning: only a ref this run's picker issued, as
             // for `CreateMatter`.

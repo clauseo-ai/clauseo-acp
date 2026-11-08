@@ -13,6 +13,7 @@ expression: "event(\"user_message\")"
         }
       }
     ],
-    "delivery": "steer"
+    "delivery": "steer",
+    "by": "clauseo"
   }
 }

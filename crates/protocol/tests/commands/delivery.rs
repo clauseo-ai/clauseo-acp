@@ -60,6 +60,7 @@ fn queue_has_one_wire_form() {
             text: "hi".to_owned(),
         }],
         delivery,
+        by: clauseo_protocol::MessageBy::Lawyer,
     };
     let entry = |delivery: Delivery| UserMessageEntry {
         order: Seq::FIRST,
@@ -67,6 +68,7 @@ fn queue_has_one_wire_form() {
         turn: turn_id(3),
         content: Vec::new(),
         delivery,
+        by: clauseo_protocol::MessageBy::Lawyer,
         status: UserMessageStatus::Queued,
         edited: false,
         steer: None,

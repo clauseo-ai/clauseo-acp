@@ -144,6 +144,7 @@ mod browser_install;
 mod command;
 mod connectors;
 mod content;
+mod denial;
 mod details;
 mod envelope;
 mod error;
@@ -211,10 +212,16 @@ wire_types! {
         DaySpendView, PackView, RechargeOutcome, RecentSpend, RedactedString, ConnectorSignInMethod,
     },
     content::{ContentBlock, PromptBlock, RawFrom, ToolCallContent},
+    denial::{
+        AllowTarget, MatterAllowance, DenialKind, DenialSource, EscalationAnswer, EscalationRequest,
+        GrantMode, OtherMatter,
+    },
     details::{ClientName, Date, MatterStatus, PackId, PackList},
     envelope::{Envelope},
     error_code::{ErrorCode, HostError},
     event::{
+        AllowanceForgotten, AllowanceRecorded, DenialDismissed, DenialRecorded, DenialsPaused,
+        EscalationAnswered, ProtectionSwitched, ReadGrantForgotten, ReadGrantedTo,
         AgentNamed, AgentSessionAttached, AgentSessionDetached, CheckpointRecorded, CommandsAvailable,
         CompactionChanged, ConfigOptionsReplaced, ContentAppended, DomainEvent, ElicitationExpired,
         ElicitationRequested, ElicitationResolved, FilesChanged, MatterCreated, MatterRelocated,
@@ -226,8 +233,8 @@ wire_types! {
         UsageUpdated, UserMessage, VersionRestored, WebResult, WebSearchRecorded,
     },
     ids::{
-        AgentChoiceId, AgentId, AgentSessionId, BlobHash, BlockedSiteId, CheckpointId, CommandId,
-        ContentId,
+        AgentChoiceId, AgentId, AgentSessionId, AllowanceId, BlobHash, BlockedSiteId, CheckpointId,
+        CommandId, ContentId, DenialId, EscalationRequestId,
         ElicitationId, EnvName, EventId, FileRefId, FolderRefId, MatterId, MatterPath, MessageId,
         PermissionRequestId, ThreadId, ToolCallId, TurnId, ViewEpoch,
     },
@@ -281,11 +288,12 @@ wire_types! {
     title::{Title},
     tool::{PageVia, SearchSource, ToolCallPatch, ToolCallStatus, ToolKind, ToolLocation},
     turn::{
-        ChangeKind, Delivery, FileChange, SkippedFile, SkippedFileReason, SteerOutcome, StopReason,
+        ChangeKind, Delivery, FileChange, MessageBy, SkippedFile, SkippedFileReason, SteerOutcome, StopReason,
     },
     update::{FailedStage, InstallWhen, ManagedBy, UpdateMode, UpdateState, UpdateView},
     view::{
-        AgentContentEntry, AgentTextEntry, BackgroundMark, ContextUsage, ElicitationEntry,
+        AgentContentEntry, AgentTextEntry, BackgroundMark, ContextUsage, DenialEntry,
+        DenialState, DenialsPausedEntry, ElicitationEntry,
         ElicitationState,
         EntryId, HeaderEntry, LimitStopEntry, MarkerEntry, MarkerKind, MatterHeaderEntry,
         NoticeEntry, PermissionEntry, PermissionState, StepEntry, ThreadStatus, ToolCallEntry,

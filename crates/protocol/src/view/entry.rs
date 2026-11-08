@@ -8,11 +8,11 @@ use crate::{
     AgentId, AvailableCommand, CheckpointId, CheckpointKind, CompactString, CompactionStatus,
     ConfigOption, ContentBlock, Deliverable, Delivery, ElicitationId, ElicitationOutcome,
     ElicitationRequest, ErrorCode, EventId, ExpiryReason, FileChange, ImportSummary,
-    LimitStopReason, MatterId, MatterKind, MatterPath, MessageId, NoticeKind, NoticeLevel, PageVia,
-    PermissionAbout, PermissionChoice, PermissionOption, PermissionRequestId, PlanEntry, Principal,
-    RestoreScope, Seq, SkippedFile, SteerOutcome, StopReason, TextKind, TextOrBlob, ThreadId,
-    Timestamp, ToolCallContent, ToolCallId, ToolCallStatus, ToolKind, ToolLocation, TurnId,
-    TurnUsage, WebResult,
+    LimitStopReason, MatterAllowance, MatterId, MatterKind, MatterPath, MessageBy, MessageId,
+    NoticeKind, NoticeLevel, PageVia, PermissionAbout, PermissionChoice, PermissionOption,
+    PermissionRequestId, PlanEntry, Principal, ReadGrantedTo, RestoreScope, Seq, SkippedFile,
+    SteerOutcome, StopReason, TextKind, TextOrBlob, ThreadId, Timestamp, ToolCallContent,
+    ToolCallId, ToolCallStatus, ToolKind, ToolLocation, TurnId, TurnUsage, WebResult,
 };
 
 /// A thread's header. Entry id `header:<thread>`.
@@ -45,6 +45,12 @@ pub struct HeaderEntry {
     /// Missing reads as `None`, so a header written before the field still decodes.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub resuming_since: Option<Timestamp>,
+    /// When the host stopped the agent to start it again with a wider policy (R18: an allowed
+    /// folder): the `ts` of the `AgentSessionDetached` with `DetachReason::Restarting`. The
+    /// status stays as it was, since a running turn goes on. Cleared by the next
+    /// `AgentSessionAttached` and by any other detach. Set by the reducer only.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub restarting_since: Option<Timestamp>,
     /// Whether the thread's queue is held: its queued turns wait for `ResumeQueue`. Filled by
     /// the host; also true after a restart, when every turn that never started comes back held.
     /// Missing reads as `false`, so a header written before the field still decodes.
@@ -127,6 +133,9 @@ pub struct UserMessageEntry {
     /// field reads as queue.
     #[serde(default, skip_serializing_if = "Delivery::is_queue")]
     pub delivery: Delivery,
+    /// Who sent it: the lawyer (written as a missing field) or Clauseo.
+    #[serde(default, skip_serializing_if = "MessageBy::is_lawyer")]
+    pub by: MessageBy,
     /// Where it stands in the queue.
     pub status: UserMessageStatus,
     /// Whether it was edited while queued.
@@ -528,6 +537,18 @@ pub struct MatterHeaderEntry {
     /// What the import found, for a folder matter.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub import: Option<ImportSummary>,
+    /// Its remembered answers to escalations (R18), as recorded, forgotten ones gone. Left out
+    /// when empty, so a header from before R18 reads with none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowances: Vec<MatterAllowance>,
+    /// The other matters whose agents may read some of its files (R18), as granted. Left out
+    /// when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub read_grants: Vec<ReadGrantedTo>,
+    /// Whether the lawyer switched its protection off (R18), from its next launch. Left out
+    /// when false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub switched_off: bool,
 }
 
 /// One version of the matter's files, in the Versions timeline. Entry id `version:<checkpoint>`.

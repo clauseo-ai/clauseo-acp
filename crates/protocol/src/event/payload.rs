@@ -1,15 +1,21 @@
 //! Every event payload struct, each the payload of the `DomainEvent` variant of the same name.
 //! One file per subject: `thread.rs` (the thread and its agent session), `turn.rs` (a turn,
 //! from the lawyer's message to its end), `tool.rs` (tool calls, web searches and pages,
-//! permissions and elicitations) and `matter.rs` (the matter-level events). The value types
+//! permissions and elicitations), `matter.rs` (the matter-level events) and `denial.rs`
+//! (refusals and widening, R18, in both streams). The value types
 //! they hold live by topic outside `event`: `content.rs`, `tool.rs`, `session.rs`, `turn.rs`,
 //! `approval.rs`, `matter.rs` and `limits.rs`.
 
+mod denial;
 mod matter;
 mod thread;
 mod tool;
 mod turn;
 
+pub use denial::{
+    AllowanceForgotten, AllowanceRecorded, DenialDismissed, DenialRecorded, DenialsPaused,
+    EscalationAnswered, ProtectionSwitched, ReadGrantForgotten, ReadGrantedTo,
+};
 pub use matter::{
     CheckpointRecorded, MatterCreated, MatterRelocated, OutsideEdits, VersionRestored,
 };

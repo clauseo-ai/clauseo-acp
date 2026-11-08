@@ -12,6 +12,27 @@ expression: "entry(\"matter_header\")"
       "files": 12,
       "bytes": 4000000,
       "cloud_only": 1
-    }
+    },
+    "allowances": [
+      {
+        "matter": "01900000-0000-7000-8000-000000000001",
+        "allowance": "01900000-0000-7000-8000-000000000001",
+        "target": {
+          "site": {
+            "host": "example.com"
+          }
+        },
+        "mode": "read_only",
+        "allowed": true,
+        "at": 1760000009000
+      }
+    ],
+    "read_grants": [
+      {
+        "by_matter": "01900000-0000-7000-8000-000000000003",
+        "by_name": "Jones estate",
+        "allowance": "01900000-0000-7000-8000-000000000002"
+      }
+    ]
   }
 }

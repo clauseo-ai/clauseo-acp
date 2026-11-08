@@ -4,7 +4,7 @@ description: "The snapshot shape changed: bump REDUCER_SCHEMA_VERSION (crates/re
 expression: "Snapshot::of(&every)"
 ---
 {
-  "reducer_schema": 12,
+  "reducer_schema": 13,
   "state": {
     "thread": {
       "thread": "01900000-0000-7000-8000-000c00000000",
@@ -273,6 +273,7 @@ expression: "Snapshot::of(&every)"
       "turn": "01900000-0000-7000-8000-000c00000002",
       "running": null,
       "after_turn": null,
+      "restarting": null,
       "files": {},
       "failures": {}
     }

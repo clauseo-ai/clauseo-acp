@@ -47,6 +47,7 @@ pub fn user_message(turn: TurnId, message: MessageId, text: &str) -> DomainEvent
             text: text.to_owned(),
         }],
         delivery: Delivery::Queue,
+        by: clauseo_protocol::MessageBy::Lawyer,
     }
     .into()
 }

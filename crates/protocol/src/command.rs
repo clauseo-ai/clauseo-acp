@@ -14,23 +14,25 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::MatterPath;
 use crate::{
-    AgentChoiceId, AgentId, AgentKind, AllowScope, BlockedSiteId, CheckpointId, ClientName,
-    CommandId, Date, Delivery, ElicitationId, ElicitationResponse, FieldChange, FileDecision,
-    FolderRefId, MatterId, PackId, PackList, PermissionRequestId, PrivacyPatch, PromptBlock,
-    RestoreScope, ThreadId, Timestamp, Title, ToolsPatch, TurnId, UiPatch,
+    AgentChoiceId, AgentId, AgentKind, AllowScope, AllowanceId, BlockedSiteId, CheckpointId,
+    ClientName, CommandId, Date, Delivery, DenialId, ElicitationId, ElicitationResponse,
+    EscalationRequest, FieldChange, FileDecision, FolderRefId, MatterId, PackId, PackList,
+    PermissionRequestId, PrivacyPatch, PromptBlock, ThreadId, Timestamp, Title, ToolsPatch, TurnId,
+    UiPatch,
 };
 #[cfg(doc)]
-use crate::{FileChoice, RawPayload};
+use crate::{FileChoice, MatterPath, RawPayload};
 use crate::{InstallWhen, UpdateMode};
 
 mod connectors;
 mod outcome;
+mod requests;
 mod validate;
 
 pub use connectors::{ConnectorCommand, MAX_CONNECTOR_ID_BYTES};
 pub use outcome::CommandOutcome;
+pub use requests::{ConfigValue, DeliveryRequest, RefreshWhy, RestoreRequest};
 pub use validate::{
     MAX_ALLOWED_HOST_BYTES, MAX_ELICITATION_VALUES_BYTES, MAX_FILE_LIST, MAX_MATTER_NAME_BYTES,
     MAX_PATH_LIST_BYTES, MAX_PROMPT_BLOCKS, MAX_PROMPT_FILES, MAX_PROMPT_TEXT_BYTES,
@@ -97,82 +99,6 @@ pub enum MatterSource {
     /// is picked. The name follows [`MatterSource::NewFolder`]'s folder-name rules.
     /// JSON: the plain string `"default_location"`.
     DefaultLocation,
-}
-
-/// What a restore puts back, as a command asks for it: the strict, closed twin of the logged
-/// [`RestoreScope`], with the same wire form. Unknown fields and kinds are refused, as in every
-/// command; the host turns it into the scope it logs with `From`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
-pub enum RestoreRequest {
-    /// The whole matter.
-    Matter,
-    /// These files only. JSON: `{"files": {"paths": [..]}}`.
-    Files {
-        /// The files, relative to the matter folder.
-        paths: Vec<MatterPath>,
-    },
-}
-
-impl From<RestoreRequest> for RestoreScope {
-    fn from(request: RestoreRequest) -> Self {
-        match request {
-            RestoreRequest::Matter => Self::Matter,
-            RestoreRequest::Files { paths } => Self::Files { paths },
-        }
-    }
-}
-
-/// How to deliver a prompt while a turn runs, as a command asks for it: the strict, closed twin
-/// of the logged [`Delivery`], with the same wire form, so a mode from a newer client is refused
-/// when the command decodes, never run as another mode. The host turns it into the delivery it
-/// logs with `From`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
-pub enum DeliveryRequest {
-    /// Wait in the thread's queue; also what a missing field means.
-    #[default]
-    Queue,
-    /// Cancel the running turn, then send this prompt next.
-    SendNow,
-    /// Add it to the running turn where the agent can, else send it now.
-    Steer,
-}
-
-impl From<DeliveryRequest> for Delivery {
-    fn from(request: DeliveryRequest) -> Self {
-        match request {
-            DeliveryRequest::Queue => Self::Queue,
-            DeliveryRequest::SendNow => Self::SendNow,
-            DeliveryRequest::Steer => Self::Steer,
-        }
-    }
-}
-
-/// Why account limits are refreshed, as `RefreshLimits` asks for it: a window got focus, or a
-/// meter or the settings page opened (`Shown`), or the lawyer pressed "Try again" (`TryAgain`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
-pub enum RefreshWhy {
-    /// A window got focus, or a meter or the settings page opened. Reads only data older than
-    /// 5 minutes.
-    Shown,
-    /// The lawyer asked again. Reads now, unless a read is in flight.
-    TryAgain,
-}
-
-/// A config option's new value, matching the option's kind.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
-pub enum ConfigValue {
-    /// The value of one of a select option's choices.
-    Select(AgentChoiceId),
-    /// A boolean option's value.
-    Boolean(bool),
 }
 
 /// What a client asks the host to do. JSON: `{"send_prompt": {...}}`; unknown fields and unknown
@@ -575,5 +501,45 @@ pub enum HostCommand {
         /// The allow's matter, for `Matter`; left out for `Always`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         matter: Option<MatterId>,
+    },
+    /// Ask the host to put an escalation to the lawyer in a native dialog drawn by Rust (R18):
+    /// the command grants nothing, the dialog's answer does. Answers `Done` when the dialog
+    /// closes, whatever the answer; `escalation.not_pending` for a denial no longer waiting,
+    /// `escalation.not_offerable` for one the host never widens. Only the main window sends it.
+    /// JSON: `{"request_escalation": {"request": {"denial": {"thread": "…", "denial": "…"}}}}`.
+    RequestEscalation {
+        /// What to ask.
+        request: EscalationRequest,
+    },
+    /// Switch the matter's protection back on, from its next launch; no dialog. Answers
+    /// `Done`, also when it was on. Only the main window sends it.
+    SwitchProtectionOn {
+        /// The matter.
+        matter: MatterId,
+    },
+    /// Forget one of the matter's remembered answers: a site at once, a folder or file at the
+    /// next launch. Forgetting one that is not there does nothing. Answers `Done`. The main and
+    /// settings windows send it.
+    ForgetAllowance {
+        /// The matter.
+        matter: MatterId,
+        /// The remembered answer, as `HostQuery::ListAllowances` lists it.
+        allowance: AllowanceId,
+    },
+    /// Hide a denial's card; nothing is granted or remembered. Answers `Done`. Only the main
+    /// window sends it.
+    DismissDenial {
+        /// The thread whose card it is.
+        thread: ThreadId,
+        /// The denial.
+        denial: DenialId,
+    },
+    /// "Keep to this matter's folder and go on." after `denials_paused`: the host sends the
+    /// thread's agent its own prompt, logged as a `user_message` with `by: clauseo`, so the
+    /// window never sends text the lawyer did not type. Answers `Done` once the prompt is
+    /// queued. Only the main window sends it. JSON: `{"go_on_inside_matter": {"thread": "…"}}`.
+    GoOnInsideMatter {
+        /// The paused thread.
+        thread: ThreadId,
     },
 }

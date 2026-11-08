@@ -1,0 +1,10 @@
+---
+source: crates/protocol/tests/snapshots/host_command.rs
+expression: "HostCommand::DismissDenial { thread: thread_id(2), denial: denial_id(1), }"
+---
+{
+  "dismiss_denial": {
+    "thread": "01900000-0000-7000-8000-000000000002",
+    "denial": "01900000-0000-7000-8000-000000000001"
+  }
+}

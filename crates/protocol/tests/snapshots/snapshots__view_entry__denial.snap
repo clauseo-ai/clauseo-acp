@@ -1,0 +1,20 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "entry(\"denial\")"
+---
+{
+  "denial": {
+    "order": 12,
+    "denial": "01900000-0000-7000-8000-000000000001",
+    "turn": "01900000-0000-7000-8000-000000000003",
+    "kind": {
+      "folder": {
+        "path": "/Users/a/Deals"
+      }
+    },
+    "source": "sandbox",
+    "state": "pending",
+    "count": 2,
+    "ts": 1760000007000
+  }
+}

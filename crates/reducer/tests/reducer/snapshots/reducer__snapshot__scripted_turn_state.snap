@@ -1075,6 +1075,7 @@ expression: fold(&scripted_turn().unwrap())
     "turn": "01900000-0000-7000-8000-000300000002",
     "running": null,
     "after_turn": null,
+    "restarting": null,
     "files": {},
     "failures": {}
   }

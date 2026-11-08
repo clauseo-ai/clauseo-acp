@@ -1,4 +1,7 @@
-//! The fold of a matter's stream: its header and its Versions timeline.
+//! The fold of a matter's stream: its header and its Versions timeline; the header's
+//! remembered answers, read grants and protection switch (R18) in `matter/allowances.rs`.
+
+mod allowances;
 
 use clauseo_protocol::{
     DomainEvent, EntryId, Envelope, MarkerEntry, MarkerKind, MatterHeaderEntry, OutsideEdits,
@@ -27,6 +30,9 @@ pub(crate) fn fold(state: &mut MatterState, envelope: &Envelope, out: &mut Appli
                 name: event.name().to_owned(),
                 kind: event.kind(),
                 import: event.import(),
+                allowances: Vec::new(),
+                read_grants: Vec::new(),
+                switched_off: false,
             };
             out.changes
                 .push(ViewChange::Upsert(Box::new(ViewEntry::MatterHeader(
@@ -72,6 +78,11 @@ pub(crate) fn fold(state: &mut MatterState, envelope: &Envelope, out: &mut Appli
             };
             marker(state, envelope, kind, out);
         }
+        DomainEvent::AllowanceRecorded(event) => allowances::recorded(state, envelope, event, out),
+        DomainEvent::AllowanceForgotten(event) => allowances::forgotten(state, event, out),
+        DomainEvent::ReadGrantedTo(event) => allowances::granted(state, event, out),
+        DomainEvent::ReadGrantForgotten(event) => allowances::grant_forgotten(state, event, out),
+        DomainEvent::ProtectionSwitched(event) => allowances::switched(state, *event, out),
         DomainEvent::ThreadCreated(_)
         | DomainEvent::ThreadRenamed(_)
         | DomainEvent::ThreadArchived(_)
@@ -108,7 +119,11 @@ pub(crate) fn fold(state: &mut MatterState, envelope: &Envelope, out: &mut Appli
         | DomainEvent::TurnFailed(_)
         | DomainEvent::TurnStoppedAtLimit(_)
         | DomainEvent::TurnEnded(_)
-        | DomainEvent::StepUndone(_) => {
+        | DomainEvent::StepUndone(_)
+        | DomainEvent::DenialRecorded(_)
+        | DomainEvent::EscalationAnswered(_)
+        | DomainEvent::DenialDismissed(_)
+        | DomainEvent::DenialsPaused(_) => {
             out.anomalies.push(Anomaly::WrongStreamKind {
                 event: thread_kind(&envelope.event),
             });

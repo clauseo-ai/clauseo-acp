@@ -1,0 +1,9 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"allowance_forgotten\")"
+---
+{
+  "allowance_forgotten": {
+    "allowance": "01900000-0000-7000-8000-000000000001"
+  }
+}

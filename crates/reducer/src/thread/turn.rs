@@ -7,7 +7,7 @@ use clauseo_protocol::{
 };
 
 use super::queue::{mark_prompt, mark_put_back, settle_prompt};
-use super::{insert_marker, insert_new, not_yet, set, set_status, set_vec, update_header};
+use super::{insert_marker, insert_new, set, set_status, set_vec, update_header};
 use crate::Applied;
 use crate::change::{Anomaly, ViewChange};
 use crate::order::insert_entry;
@@ -36,7 +36,9 @@ pub(super) fn settled_status(state: &ThreadState) -> ThreadStatus {
 
 /// The agent's session detached at `ts`. A thread idle-stopped while its next prompt waited
 /// for the agent (the prompt came during the stop, so the thread is `Starting`) stays
-/// `Starting`, and its resume starts now: `resuming_since` is the detach's `ts`.
+/// `Starting`, and its resume starts now: `resuming_since` is the detach's `ts`. A restart
+/// sets `restarting_since` and changes nothing else; any other detach ends the agent session,
+/// so it expires pending denial cards and ends a restart.
 pub(super) fn detached(
     state: &mut ThreadState,
     reason: &DetachReason,
@@ -47,11 +49,28 @@ pub(super) fn detached(
         DetachReason::Exited { .. } | DetachReason::Unknown { .. } => ThreadStatus::AgentExited,
         DetachReason::Closed => ThreadStatus::Idle,
         DetachReason::IdleStopped => ThreadStatus::IdleStopped,
+        // The host stops the agent to start it again with a wider policy (R18): the status,
+        // a running turn and its cards stay, and the header shows the restart until the next
+        // attach.
         DetachReason::Restarting => {
-            not_yet(out, "agent_session_detached");
+            if state
+                .header
+                .as_ref()
+                .is_some_and(|h| h.restarting_since.is_none())
+            {
+                state.restarting = super::denials::restarted_turn(state);
+            }
+            update_header(state, "agent_session_detached", out, |h| {
+                h.restarting_since.is_none() && set(&mut h.restarting_since, Some(ts))
+            });
             return;
         }
     };
+    super::denials::expire_pending(state, out);
+    state.restarting = None;
+    update_header(state, "agent_session_detached", out, |h| {
+        set(&mut h.restarting_since, None)
+    });
     if state.running.is_some() {
         state.after_turn = Some(status);
         return;
@@ -95,6 +114,7 @@ pub(super) fn user_message(
         turn: event.turn,
         content: event.content.clone(),
         delivery: event.delivery,
+        by: event.by,
         status: UserMessageStatus::Sent,
         edited: false,
         steer: None,
@@ -155,7 +175,9 @@ pub(super) fn turn_queued(state: &mut ThreadState, event: &TurnQueued, out: &mut
     }
 }
 
+/// A turn starts: the cards still pending from earlier turns expire (`denials::expire_pending`).
 pub(super) fn turn_started(state: &mut ThreadState, turn: TurnId, out: &mut Applied) {
+    super::denials::expire_pending(state, out);
     settle_prompt(state, turn, UserMessageStatus::Sent, out);
     state.running = Some(turn);
     state.turn = Some(turn);
@@ -180,7 +202,9 @@ pub(super) fn files_changed(state: &mut ThreadState, event: &FilesChanged, out: 
 }
 
 /// Keeps the failure's code for the turn's step, or updates the step when the turn has ended.
+/// A failure of the restarted turn also ends the restart (`denials::end_restart`).
 pub(super) fn turn_failed(state: &mut ThreadState, event: &TurnFailed, out: &mut Applied) {
+    super::denials::end_restart(state, event.turn, "turn_failed", out);
     if let Some(order) = state.index.steps.get(&event.turn).copied() {
         update_step(state, order, out, |step| {
             set(&mut step.failure, Some(event.code)) | set(&mut step.failure_at, event.at.clone())
@@ -235,7 +259,9 @@ pub(super) fn stopped_at_limit(
 /// removed or cancelled before its turn) makes no step and marks its user message `Removed`; it
 /// leaves the status, but for `Starting` from that turn's own prompt, or `Queued` from its wait
 /// for another thread's writer, while no turn runs, which settles (to `Idle` unless the lawyer
-/// is asked). A second `TurnEnded` of a turn with a step is [`Anomaly::Duplicate`].
+/// is asked). A second `TurnEnded` of a turn with a step is [`Anomaly::Duplicate`]. Pending
+/// denial cards survive it, but the restarted turn's `TurnEnded` while a restart is shown ends
+/// the restart and expires them (`denials::end_restart`).
 pub(super) fn turn_ended(
     state: &mut ThreadState,
     seq: Seq,
@@ -250,6 +276,7 @@ pub(super) fn turn_ended(
         });
         return;
     }
+    super::denials::end_restart(state, event.turn, "turn_ended", out);
     let running = state.running == Some(event.turn);
     if !running && event.stop != StopReason::Failed {
         state.files.remove(&event.turn);

@@ -18,7 +18,14 @@
 //! Of the unsafe-site override's two (0053, PR 2), `main` sends
 //! `AllowBlockedSite` from a block's notice and `RevokeAllowedSite`, and the settings window
 //! only `RevokeAllowedSite` (its list of allowed sites): no other window, and so nothing an
-//! agent shows or runs, may lift a block.
+//! agent shows or runs, may lift a block. Of R18's five, `main` sends all:
+//! `RequestEscalation` (a denial's card, "Switch protection off", "Use files from another
+//! matter"), which grants nothing until the native dialog drawn by Rust answers,
+//! `SwitchProtectionOn`, `ForgetAllowance`, `DismissDenial` and `GoOnInsideMatter` (the
+//! paused thread's "Keep to this matter's folder and go on.", whose prompt the host writes, so
+//! the window never sends text the lawyer did not type); the settings window only
+//! `ForgetAllowance`, from its list of remembered answers. Switching protection off comes from
+//! the main window alone.
 
 use clauseo_protocol::{ConnectorCommand, FolderRefId, HostCommand, HostError, MatterSource};
 
@@ -30,7 +37,8 @@ use super::{Bridge, SETTINGS_WINDOW, invalid, lock};
 /// Plan and usage `RefreshLimits` (0028, U12; `dispatch_at` throttles it), for its
 /// updates row `SetUpdateMode` and `CheckForUpdate` (0037), and for its Connectors section
 /// the connector commands but the hint's (R24), for its protection section `RetryProtection`
-/// and `RemoveSandboxSetup` (0051), any other window nothing.
+/// and `RemoveSandboxSetup` (0051), `RevokeAllowedSite` (0053) and `ForgetAllowance` (R18) for
+/// its lists, any other window nothing.
 pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Result<(), HostError> {
     match label {
         crate::MAIN_WINDOW => admit_main(bridge, command),
@@ -51,13 +59,15 @@ pub(super) fn admit(bridge: &Bridge, label: &str, command: &HostCommand) -> Resu
             | HostCommand::RetryProtection {}
             | HostCommand::RemoveSandboxSetup {}
             // The allowed sites' list (0053, PR 2) takes one back; allowing is main's.
-            | HostCommand::RevokeAllowedSite { .. } => Ok(()),
+            | HostCommand::RevokeAllowedSite { .. }
+            // The remembered answers' list (R18) forgets one; asking is main's.
+            | HostCommand::ForgetAllowance { .. } => Ok(()),
             HostCommand::Connector(connector) => connector_settings(connector),
             _ => Err(invalid(
                 "the settings window sends only set_ui_settings, set_tool_settings, \
                  set_privacy_settings, set_skill_pack, refresh_limits, set_update_mode, \
-                 check_for_update, retry_protection, remove_sandbox_setup, revoke_allowed_site \
-                 and the connector commands",
+                 check_for_update, retry_protection, remove_sandbox_setup, revoke_allowed_site, \
+                 forget_allowance and the connector commands",
             )),
         },
         _ => Err(invalid(format!("window {label} may send no command"))),
@@ -123,7 +133,14 @@ fn admit_main(bridge: &Bridge, command: &HostCommand) -> Result<(), HostError> {
         // 0053, PR 2: a block's notice offers "Allow this site", and its undo takes it back.
         // The host allows only the host of a notice it sent, and refuses while policy forbids.
         | HostCommand::AllowBlockedSite { .. }
-        | HostCommand::RevokeAllowedSite { .. } => Ok(()),
+        | HostCommand::RevokeAllowedSite { .. }
+        // R18: a request grants nothing, the native dialog drawn by Rust answers it; the host
+        // offers only what its rules allow. Protection is switched off from here alone.
+        | HostCommand::RequestEscalation { .. }
+        | HostCommand::SwitchProtectionOn { .. }
+        | HostCommand::ForgetAllowance { .. }
+        | HostCommand::DismissDenial { .. }
+        | HostCommand::GoOnInsideMatter { .. } => Ok(()),
         HostCommand::AnswerPermission { .. } => Err(invalid(
             "a permission is answered with answer_permission, not dispatch",
         )),

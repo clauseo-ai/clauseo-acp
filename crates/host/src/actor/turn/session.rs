@@ -582,6 +582,8 @@ fn has_earlier_turns(actor: &Actor, thread: ThreadId) -> bool {
                 | ViewEntry::LimitStop(_)
                 | ViewEntry::Notice(_)
                 | ViewEntry::Marker(_)
+                | ViewEntry::Denial(_)
+                | ViewEntry::DenialsPaused(_)
                 | ViewEntry::MatterHeader(_)
                 | ViewEntry::Version(_) => false,
             })

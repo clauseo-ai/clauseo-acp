@@ -2,10 +2,10 @@
 //! its receipt; concurrent duplicates sharing the first answer.
 //!
 //! A command waits in [`Actor::commands`] from its receipt lookup until its answer, so a
-//! duplicate that arrives meanwhile joins it (same hash) or is refused (`command.conflict`).
-//! A refused command stores no receipt. A failed commit answers with the stream's first
-//! failure.
+//! duplicate that arrives meanwhile joins it (same hash) or is refused (`command.conflict`). A
+//! refused command stores no receipt. A failed commit answers with the stream's first failure.
 
+mod not_built;
 mod to_turn;
 
 use clauseo_protocol::{
@@ -14,6 +14,7 @@ use clauseo_protocol::{
     ValidatedCommand,
 };
 use clauseo_store::{Receipt, ThreadRow, command_hash};
+use not_built::not_built;
 
 use super::input::Reply;
 use super::matters::{PendingMatter, Stage};
@@ -298,7 +299,6 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         // R24's connector commands: no receipt, ever (decision D2), since nothing here commits,
         // so the API key never reaches the receipts table, not even as a hash.
         HostCommand::Connector(command) => super::connectors::run(actor, ctx, command),
-        HostCommand::RestartAgent { .. } => not_built(actor, ctx),
         HostCommand::InstallBrowser {} => super::browser_install::install(actor, ctx),
         HostCommand::CancelBrowserInstall {} => super::browser_install::cancel(actor, ctx),
         HostCommand::CheckForUpdate {} => super::update::command(actor, ctx, Asked::Check),
@@ -322,13 +322,13 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         } => {
             super::allowed::revoke(actor, ctx, &host, scope, matter);
         }
+        HostCommand::RestartAgent { .. }
+        | HostCommand::RequestEscalation { .. }
+        | HostCommand::SwitchProtectionOn { .. }
+        | HostCommand::ForgetAllowance { .. }
+        | HostCommand::DismissDenial { .. }
+        | HostCommand::GoOnInsideMatter { .. } => not_built(actor, ctx),
     }
-}
-
-/// A command the host does not run yet (`RestartAgent`): `command.invalid`, with no receipt.
-fn not_built(actor: &mut Actor, ctx: &CommandCtx) {
-    let refusal = Error::refused(ErrorCode::CommandInvalid, "not built yet");
-    actor.finish_command(ctx.id, Err(refusal));
 }
 
 /// A command's commit returned.

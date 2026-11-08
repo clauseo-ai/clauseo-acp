@@ -35,6 +35,35 @@ impl Delivery {
     }
 }
 
+open_unit_enum! {
+    /// Who sent a user message: the lawyer, or Clauseo on the lawyer's behalf (the prompt that
+    /// goes on after a restart, or after denials were paused). A sender from a newer Clauseo
+    /// decodes to `Unknown`.
+    pub enum MessageBy {
+        /// The lawyer typed it (also when the field is missing).
+        Lawyer,
+        /// Clauseo sent it, with text the lawyer did not type.
+        Clauseo,
+    }
+    test mod message_by;
+}
+
+impl Default for MessageBy {
+    /// [`MessageBy::Lawyer`], what a missing field means.
+    fn default() -> Self {
+        Self::Lawyer
+    }
+}
+
+impl MessageBy {
+    /// Whether `by` is the lawyer, which every `by` field writes as a missing field, so the
+    /// lawyer has one wire form. For `skip_serializing_if`, which passes a reference; generic
+    /// as [`Delivery::is_queue`] is.
+    pub(crate) fn is_lawyer<T: Copy + Into<Self>>(by: &T) -> bool {
+        (*by).into() == Self::Lawyer
+    }
+}
+
 open_data_enum! {
     /// Where a steered message went. `turn` is always the turn that answers the message.
     ///

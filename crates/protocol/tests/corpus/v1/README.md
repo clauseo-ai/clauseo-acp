@@ -44,11 +44,12 @@ beside `v1/`, decoded and pinned the same way:
    for a new kind, with every example of it; `<kind>-<Variant>` for a new variant, with the first
    example that holds it, `<kind>` being that example's event. The files are insta binary
    snapshots, the crate's one way to write a file from a test. For each pair it prints the two
-   `mv` commands that put the files in `corpus/added/` and the pair's `ADDED_AFTER_V1` row, with
-   each file's byte length and FNV-1a hash.
-3. Run the printed `mv` commands and paste the row into `ADDED_AFTER_V1` in
-   `crates/protocol/tests/corpus/added_rows.rs`. A row whose pins are still `(0, 0)` fails with
-   the pin to set.
+   `mv` commands that put the files in `corpus/added/` and the pair's row, with each file's byte
+   length and FNV-1a hash.
+3. Run the printed `mv` commands and paste the row at the end of `ADDED_IN_R18` in
+   `crates/protocol/tests/corpus/added_rows_r18.rs` (`ADDED_AFTER_V1` in `added_rows.rs` holds
+   the rows from before R18 and is at the line limit). A row whose pins are still `(0, 0)` fails
+   with the pin to set.
 
 The test fails until this is done: the known kinds must be exactly v1's plus those of the added
 files, and every variant must appear somewhere in v1 or the added files. The added files are as

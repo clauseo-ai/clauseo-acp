@@ -275,6 +275,19 @@ error_codes! {
     SandboxRemoving = "sandbox.removing", retryable: true, meaning: "The sandbox's set-up is \
         being removed from this computer, so no agent was started; the same launch works once \
         the removal ends.";
+    EscalationNotPending = "escalation.not_pending", retryable: false, meaning: "The \
+        escalation a request names isn't waiting any more (its card was answered, dismissed or \
+        expired, or the agent stopped), so nothing was asked or allowed.";
+    EscalationNotOfferable = "escalation.not_offerable", retryable: false, meaning: "What the \
+        request names can't be allowed: a secret place (the home folder, Clauseo's data, a \
+        .git folder, another matter's own Clauseo files) or the firm's policy keeps it closed, \
+        so nothing was asked or allowed.";
+    SandboxUnprotectedAutoForbidden = "sandbox.unprotected_auto_forbidden", retryable: false,
+        meaning: "The firm forbids agents to work without the sandbox \
+        (sandbox.allow_unprotected_auto is false), so protection was not switched off.";
+    EscalationNetworkLocation = "escalation.network_location", retryable: false, meaning: "The \
+        picked folder or file is on a network drive or shared folder; Clauseo doesn't open \
+        network locations the agent or picker names, so nothing was asked or allowed.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

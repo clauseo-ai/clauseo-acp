@@ -226,6 +226,7 @@ fn long_text_split_at_inline_limit() {
             .map(|text| ContentBlock::Text { text: text.clone() })
             .collect(),
         delivery: Delivery::Queue,
+        by: clauseo_protocol::MessageBy::Lawyer,
     };
     let out = apply(&mut state, &log.push(event).unwrap()).unwrap();
     let ViewEntry::UserMessage(sent) = first_upsert(&out.changes) else {

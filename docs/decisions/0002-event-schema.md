@@ -99,7 +99,7 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `agent_session_attached` | session, agent_version?, capabilities | acp | yes | T |
 | `agent_named` | agent_name (the agent's own display name, `initialize`'s title, cleaned) | host, from acp | yes | T |
 | `agent_session_detached` | reason (`DetachReason`) | acp, host | yes | T |
-| `user_message` | turn, message, acp_message_id?, content, delivery? | host; acp on replay | yes | T |
+| `user_message` | turn, message, acp_message_id?, content, delivery?, by? (`MessageBy`: lawyer, written as a missing field, or clauseo; R18) | host; acp on replay | yes | T |
 | `turn_queued` | turn, behind, behind_turn? | host | yes | T |
 | `queued_prompt_edited` | turn, message, content | host | yes | T |
 | `steer_resolved` | message, outcome (`SteerOutcome`), aside? (tool call ids) | host | yes | T |
@@ -128,11 +128,20 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `turn_stopped_at_limit` | turn, window?, resets_at?, reason | limits, through the host | yes | T |
 | `turn_ended` | turn, stop, usage?, checkpoint_after? | host | yes | T |
 | `step_undone` | turn, checkpoint, restored, kept | host, matters | yes | T |
+| `denial_recorded` | turn?, denial, kind (`DenialKind`: folder or file with other_matter?, site with shared_hosting, upstream_auth), source (`DenialSource`: sandbox, proxy, tool_call), offered, count (R18) | host | yes | T |
+| `escalation_answered` | request, denial?, answer (`EscalationAnswer`) (R18) | host | yes | T |
+| `denial_dismissed` | denial (R18) | host | yes | T |
+| `denials_paused` | turn, refused (R18) | host | yes | T |
 | `matter_created` | name, kind, import? | host | yes | M |
 | `checkpoint_recorded` | checkpoint, kind, thread?, turn? | matters, through the host | yes | M |
 | `outside_edits` | checkpoint, files | matters, through the host | yes | M |
 | `version_restored` | from, checkpoint, scope | host, matters | yes | M |
 | `matter_relocated` | folder | host, matters | yes | M |
+| `allowance_recorded` | allowance, target (`AllowTarget`), mode (`GrantMode`), allowed (R18) | host | yes | M |
+| `allowance_forgotten` | allowance (R18) | host | yes | M |
+| `read_granted_to` | by_matter, by_name, allowance (R18) | host | yes | M |
+| `read_grant_forgotten` | by_matter, allowance (R18) | host | yes | M |
+| `protection_switched` | off (R18) | host | yes | M |
 | `patches` (`HostEvent`) | `PatchBatch`: stream, epoch, patches | host | no | the subscribed stream |
 | `events` (`HostEvent`) | envelopes, replayed then live | host | no | the subscribed stream |
 | `caught_up` (`HostEvent`) | stream, last_seq; once per `SubscribeEvents`, between replay and live | host | no | the subscribed stream |
@@ -350,6 +359,9 @@ Every limit and rule, with its constant:
 | same | no empty `Text` block; a visible character (as titles count it) or a `File` block | |
 | `EditQueuedPrompt.text` | at most 256 KiB, UTF-8 bytes; it replaces the queued prompt's text and keeps its file blocks, so empty text is refused by the host only for a prompt without files | `MAX_PROMPT_TEXT_BYTES` |
 | `SendPrompt.delivery` | a `DeliveryRequest`: closed, so a newer mode fails to decode, never run as another mode; queue is written as a missing field | |
+| `RequestEscalation` with `EscalationRequest::Denial`, `DismissDenial` (R18) | name the card's `thread` beside its `denial`, so the host checks the thread first | |
+| `RequestEscalation` with `FilesFromOtherMatter` (R18) | `from` is not `matter` | |
+| `GoOnInsideMatter` (R18) | names a thread only: the host writes the prompt and logs it as `user_message` with `by: clauseo`, so no window sends text the lawyer did not type; only `main` sends it | |
 | `Title` (`RenameThread.title`, `CreateMatter.name`) | at most 200 characters (`char`s) | `MAX_TITLE_CHARS` |
 | same | a visible character: not only whitespace, `Default_Ignorable_Code_Point` characters, U+2800 and combining marks (a heuristic) | |
 | same | no control character, bidi embedding, override or isolate (U+202A to U+202E, U+2066 to U+2069), or line or paragraph separator; the bidi marks U+200E, U+200F, U+061C are allowed | |
@@ -560,8 +572,8 @@ as the room left by the blocks before it allows, so a block past the limit comes
 | `DomainEvent` | open, `Unknown { kind, payload }` | data | |
 | `ErrorCode` | open, `Unknown` | unit | |
 | `ContentBlock` | open, `Unsupported { kind, raw_from, raw }` | data | |
-| `DetachReason`, `SteerOutcome`, `Principal`, `ToolCallContent`, `ToolLocation`, `PermissionChoice`, `ElicitationRequest`, `ConfigOptionKind`, `ChangeKind`, `RestoreScope`, `NoticeKind` | open, `Unknown { kind }` | data | |
-| `ToolKind`, `ToolCallStatus`, `PermissionKind`, `StopReason`, `NoticeLevel`, `PackSkipReason`, `Deliverable`, `CheckpointKind`, `ExpiryReason`, `RenameSource`, `Delivery`, `SkippedFileReason`, `TextKind`, `RawFrom`, `ElicitationOutcome`, `PlanPriority`, `PlanStatus`, `ConfigCategory`, `CompactionStatus`, `LimitStopReason`, `MatterKind`, `PageVia`, `SearchSource`, `DoneBy`, `SnoozeBy`, `PermissionAbout` | open, `Unknown` | unit | |
+| `DetachReason`, `SteerOutcome`, `Principal`, `ToolCallContent`, `ToolLocation`, `PermissionChoice`, `ElicitationRequest`, `ConfigOptionKind`, `ChangeKind`, `RestoreScope`, `NoticeKind`, `DenialKind`, `DenialSource`, `AllowTarget` | open, `Unknown { kind }` | data | |
+| `ToolKind`, `ToolCallStatus`, `PermissionKind`, `StopReason`, `NoticeLevel`, `PackSkipReason`, `Deliverable`, `CheckpointKind`, `ExpiryReason`, `RenameSource`, `Delivery`, `SkippedFileReason`, `TextKind`, `RawFrom`, `ElicitationOutcome`, `PlanPriority`, `PlanStatus`, `ConfigCategory`, `CompactionStatus`, `LimitStopReason`, `MatterKind`, `PageVia`, `SearchSource`, `DoneBy`, `SnoozeBy`, `PermissionAbout`, `EscalationAnswer`, `GrantMode`, `MessageBy` | open, `Unknown` | unit | |
 | `TextOrBlob` | closed | data | Inline text or a blob reference is how Clauseo stores a payload; a third form is a new storage format. |
 | `RawPayload` | closed | data | It is the data model of JSON and MessagePack themselves. |
 | `StreamId` | closed | data (one string) | A thread's or a matter's stream is the log's own keying; a new stream kind changes the store. |
@@ -639,9 +651,9 @@ as the room left by the blocks before it allows, so a block past the limit comes
   was frozen, and no test repeats it, since a field added later is rightly absent. The files are
   never edited or regenerated, and insta never touches them: the test pins each file's length
   and FNV-1a hash. A kind, or a variant of an open enum, added without a `schema_version` bump
-  brings its own frozen entries in `corpus/added/`, listed in the test's `ADDED_AFTER_V1`; the
-  known kinds must be v1's plus the added ones, so a removed kind fails and an added one without
-  its entry fails too. A unit value counts for every enum its string decodes as, so a new unit
+  brings its own frozen entries in `corpus/added/`, listed in the test's `ADDED_AFTER_V1` or
+  `ADDED_IN_R18`; the known kinds must be v1's plus the added ones, so a removed kind fails and an
+  added one without its entry fails too. A unit value counts for every enum its string decodes as, so a new unit
   variant spelled like a value of another enum that the corpus holds passes unseen. A later
   schema adds `v2/` beside v1, and v1 keeps decoding. The steps for adding a pair, and the
   command that writes it, are in the
@@ -673,7 +685,8 @@ A new kind:
 5. Its row in the kind table under Kinds above, Logged `yes` and Stream `T` or `M`, in `KINDS`
    order: `kind_table_matches_record` (tests/events/rules.rs).
 6. Its frozen entries: the pair `<kind>.jsonl` and `<kind>.msgpack` in `tests/corpus/added/` and
-   its row in `ADDED_AFTER_V1` in `tests/corpus/added_rows.rs`. The ignored
+   its row in `ADDED_IN_R18` in `tests/corpus/added_rows_r18.rs` (`ADDED_AFTER_V1`, in
+   `added_rows.rs`, holds the rows from before R18). The ignored
    `write_the_added_pairs` writes the pair from step 3's example into `target/tmp/corpus-added/`
    and prints the `mv` commands and the row; `tests/corpus/v1/README.md` (Adding a kind or a
    variant after v1) gives the command: `the_known_kinds_are_v1_and_the_added_ones`.
@@ -692,7 +705,7 @@ A new variant of an open enum:
    holds for a new variant of a closed enum on that list.
 4. If the enum is logged, an example in `tests/support/examples.rs` that holds the variant, and
    its frozen entries: the pair `<kind>-<Variant>.jsonl` and `.msgpack` in `tests/corpus/added/`
-   and its `ADDED_AFTER_V1` row, which `write_the_added_pairs` writes from that example as in
+   and its `ADDED_IN_R18` row, which `write_the_added_pairs` writes from that example as in
    step 6 of a new kind: `the_corpus_holds_every_variant_of_every_open_enum` (tests/corpus.rs).
    A unit value spelled like one the corpus holds for another enum passes that test unseen, so
    the pair is still added by hand.
