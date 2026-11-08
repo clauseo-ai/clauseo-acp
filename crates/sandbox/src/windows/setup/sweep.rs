@@ -60,7 +60,12 @@
 //!    another domain's accounts and groups; a NULL DACL lets everyone in. When such a file's
 //!    principal resolves to a SID that isn't the pool's, or is another domain's name, the task
 //!    is skipped and counted; when it is the pool's or resolves to nothing else, or the file
-//!    can't be read or trusted, the task is unreadable (56) and left;
+//!    can't be read or trusted, the task is unreadable (56) and left. `GetTasks` may list only
+//!    the tasks the caller may read, so the walk is then held against every task file below
+//!    `Tasks` and every task in the Task Scheduler's cache (`HKLM\…\Schedule\TaskCache\Tree`),
+//!    read only ([`unlisted`]): a task either holds that the walk didn't list is 56, unless its
+//!    trusted task file names a principal that isn't the pool's, and is never deleted through a
+//!    file or the registry. A listing that can't be read is 56 too;
 //! 5. cancels every BITS job a pool user owns, whatever step 4 found (`BG_JOB_ENUM_ALL_USERS`,
 //!    each job's owner). One that can't be cancelled, an owner that can't be read, a list that
 //!    can't be read, or one of `JOBS_CAP` jobs is 57; 56 wins when both. Only then, with no
@@ -97,6 +102,9 @@ mod swept;
 pub mod task_file;
 #[cfg(test)]
 mod tests;
+mod unlisted;
+#[cfg(windows)]
+mod windows_listing;
 #[cfg(windows)]
 pub(crate) mod windows_sweeper;
 #[cfg(windows)]
@@ -135,7 +143,9 @@ pub enum SweepExit {
     /// resolves to no SID and isn't another domain's (a task file read instead whose owner or
     /// DACL lets a pool user change it counts as unread); a pool user's task couldn't be
     /// deleted, or a running instance of one couldn't be stopped (or its path read), a folder's
-    /// tasks or subfolders couldn't be listed, or there were more than [`FOLDERS_CAP`] folders.
+    /// tasks or subfolders couldn't be listed, or there were more than [`FOLDERS_CAP`] folders;
+    /// or a task file or the Task Scheduler's cache holds a task the listing didn't give, and
+    /// its file doesn't show it isn't the pool's, or either couldn't be listed ([`unlisted`]).
     /// The BITS step still ran.
     TasksLeft,
     /// 57: every task was read and the pool's deleted, but a pool user's BITS job wasn't
@@ -170,6 +180,9 @@ impl SweepExit {
 
 /// The most Task Scheduler folders the walk reads: one more left to read is 56.
 pub const FOLDERS_CAP: usize = 10_000;
+/// The most task paths either listing of the cross-check gives ([`unlisted`]): one more fails
+/// that listing, 56.
+pub const LISTED_CAP: usize = 100_000;
 
 /// A task's principal as its definition gives it; either may be empty.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -244,6 +257,14 @@ pub trait Sweeper: Gate + Bits + Record {
     /// Never Unicode's full lowercase, under which the Kelvin sign (U+212A) is `k` while
     /// Windows keeps `…Tas\u{212A}` and `…Task` apart. `Err` when the comparison fails.
     fn same_task_path(&mut self, a: &str, b: &str) -> Result<bool, Failed>;
+    /// Every task file below `%SystemRoot%\System32\Tasks`, as its task's path (`\A\name`),
+    /// walked as [`Sweeper::read_task_file`] opens: by handle, never through a link; `Err`
+    /// when a folder can't be opened or listed, a name is a reparse point, or past the caps.
+    fn task_file_paths(&mut self) -> Result<Vec<String>, Failed>;
+    /// Every task the Task Scheduler's cache holds (a key with an `Id` value under
+    /// `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tree`, read
+    /// only, the 64-bit view), as its path; `Err` when a key can't be read, or past the cap.
+    fn task_cache_paths(&mut self) -> Result<Vec<String>, Failed>;
     /// Deletes the task `name` from `folder`.
     fn delete_task(&mut self, folder: &Self::Folder, name: &str) -> Result<(), Failed>;
     /// Writes one line to the log: `error` for a refusal or a failure.
@@ -337,6 +358,8 @@ pub fn sweep_tasks<S: Sweeper>(fs: &mut S, pool: &[Sid]) -> Swept {
     let mut swept = Swept::default();
     let mut resolved = BTreeMap::new();
     let names = Names::of(fs, pool);
+    // Every task the listing gave, by path, for the cross-check (`unlisted`).
+    let mut listed = Vec::new();
     let mut stack = match fs.root() {
         Ok(root) => vec![root],
         Err(why) => {
@@ -353,6 +376,19 @@ pub fn sweep_tasks<S: Sweeper>(fs: &mut S, pool: &[Sid]) -> Swept {
         swept.folders += 1;
         match fs.tasks(&folder) {
             Ok(tasks) => {
+                match fs.folder_path(&folder) {
+                    Ok(path) => {
+                        let paths = tasks
+                            .iter()
+                            .map(|task| running::task_path(&path, &task.name));
+                        listed.extend(paths);
+                    }
+                    // Its tasks can't be matched against the other listings.
+                    Err(why) => {
+                        swept.unlisted += 1;
+                        swept.note(why);
+                    }
+                }
                 for task in tasks {
                     let at = Walk {
                         pool,
@@ -385,6 +421,15 @@ pub fn sweep_tasks<S: Sweeper>(fs: &mut S, pool: &[Sid]) -> Swept {
                 swept.note(why);
             }
         }
+    }
+    if !swept.capped {
+        let at = Walk {
+            pool,
+            names: &names,
+            resolved: &mut resolved,
+            swept: &mut swept,
+        };
+        unlisted::cross_check(fs, &listed, at);
     }
     swept
 }

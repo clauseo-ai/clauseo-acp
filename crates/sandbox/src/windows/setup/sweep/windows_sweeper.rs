@@ -1,7 +1,8 @@
 //! The sweep's real [`Sweeper`]: the gate's reads (`pool_steps::windows_gate`), BITS
 //! (`pool_steps::windows_bits`), the Task Scheduler's COM API (`ITaskService`, connected as this
 //! process, LOCAL SYSTEM under the task; a task's owner from `GetSecurityDescriptor`), a task's
-//! file (`windows_task_file.rs`), `LookupAccountNameW`, the record's lock and values
+//! file (`windows_task_file.rs`), the task files' and the Task Scheduler cache's listings
+//! (`windows_listing.rs`), `LookupAccountNameW`, the record's lock and values
 //! (`pool_steps::windows_record`), and the Event Log.
 #![expect(
     unsafe_code,
@@ -27,7 +28,8 @@ use windows::Win32::UI::Shell::{FOLDERID_System, KF_FLAG_DEFAULT, SHGetKnownFold
 use windows::core::{BSTR, HSTRING, PCWSTR, PWSTR};
 
 use super::{
-    Failed, Principal, SweepExit, Sweeper, TASK_FILE_CAP, Task, TaskFile, sweep, windows_task_file,
+    Failed, Principal, SweepExit, Sweeper, TASK_FILE_CAP, Task, TaskFile, sweep, windows_listing,
+    windows_task_file,
 };
 use crate::windows::refresh::event_log;
 use crate::windows::setup::accounts::{self, Kind};
@@ -270,6 +272,14 @@ impl Sweeper for WindowsSweeper {
 
     fn same_task_path(&mut self, a: &str, b: &str) -> Result<bool, Failed> {
         same_task_path(a, b)
+    }
+
+    fn task_file_paths(&mut self) -> Result<Vec<String>, Failed> {
+        windows_listing::task_files(&system_folder()?)
+    }
+
+    fn task_cache_paths(&mut self) -> Result<Vec<String>, Failed> {
+        windows_listing::task_cache()
     }
 
     fn delete_task(&mut self, folder: &ITaskFolder, name: &str) -> Result<(), Failed> {

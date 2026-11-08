@@ -1272,8 +1272,8 @@ leaves that profile, both naming the part.
       (`RunExit::AwaitingStop`); one that couldn't be re-marked (`StopNext` unreadable, the
       write failed) refuses it with `RunExit::AwaitingSweep`, no stop requested. One awaiting a
       final stop refuses the logon and requests the stop, as one awaiting its first stop does,
-      until `StopSequence` reaches its number; then it is clean. A marker naming no pool user (an unreadable one, replaced) awaits a
-      stop for every pool user: while every stop ends 48 (a process it can't kill or can't
+      until `StopSequence` reaches its number; then it is clean. A marker naming no pool user
+      (an unreadable one, replaced) awaits a stop for every pool user: while every stop ends 48 (a process it can't kill or can't
       place, a BITS job it can't cancel, a cut list), `StopSequence` never moves and every pool
       user's logon is refused. That is the fail-closed answer, since the escapee may be any of
       theirs. It clears once the 48's cause is gone and a stop completes (an administrator running
@@ -2016,7 +2016,25 @@ the pool-user check. No record, or an empty pool, is nothing to sweep. Then it:
    SID that isn't the pool's, or is another domain's name, the task is skipped and counted;
    when it is the pool's, resolves to nothing else, or the file can't be read or is
    malformed, the task stays unreadable and 56. No failure stops the walk. A pool task is
-   deleted as soon as it is found, so its trigger starts nothing more;
+   deleted as soon as it is found, so its trigger starts nothing more.
+   **The cross-check** (`sweep::unlisted`). The Task Scheduler's `GetTasks` may list only the
+   tasks its caller may read, so a pool task whose descriptor shuts SYSTEM out could be missing
+   from the walk, and the run end 0 with it left. Once the walk is done (and wasn't capped), it
+   reads two more listings: every task file below `%SystemRoot%\System32\Tasks`, walked as the
+   fallback opens (`sweep/windows_listing.rs`: by handle, never through a link, a name that is
+   a reparse point or isn't UTF-16 text failing the walk, `SeBackupPrivilege` for the walk
+   alone), and every task in the Task Scheduler's cache,
+   `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tree` (a key holding
+   an `Id` value; a folder's holds none), opened read-only in the 64-bit view, each key from
+   `HKLM` by its whole path. Each is capped at 100 000 entries (`LISTED_CAP`) and 10 000
+   folders. A task either holds that the walk didn't list, compared exactly and then as
+   Windows compares names (below), is hidden and 56, unless its task file, under the
+   fallback's trust rules above, names a principal that resolves to a SID that isn't the
+   pool's or is another domain's name: then it is skipped, counted with the tasks skipped by
+   their file. With no task object there is no descriptor owner to read, so a hidden task is
+   never deleted: nothing is deleted through a file or the registry, and the run fails closed.
+   A listing that can't be read is 56 too. The log line counts hidden tasks ("not listed (in a
+   task file or the cache only)");
 4. cancels every BITS job a pool user owns with the stop's BITS step
    (`pool_steps::cancel_pool_jobs`), whatever the walk found. Only then, with no pool task
    left to trigger and no job left to notify, it stops the running instances of the pool's
@@ -2029,8 +2047,9 @@ the pool-user check. No record, or an empty pool, is nothing to sweep. Then it:
    the instances of `Task` in the same folder, the lawyer's or an updater's. Stopping them
    before the delete, as an earlier version did, left an instance its trigger started in
    between. A stop that fails, an instance whose path can't be read or compared (it may be
-   theirs), a list that can't be read, or a pool task whose folder's path can't be read is 56. An instance's children may outlive it: the final stop a marker
-   past its first stop waits for ends them ("The unclean-session marker");
+   theirs), a list that can't be read, or a pool task whose folder's path can't be read is
+   56. An instance's children may outlive it: the final stop a marker past its first stop
+   waits for ends them ("The unclean-session marker");
 5. only on a run that will end 0, under the set-up lock, checks the record still holds the pool
    and writes `SweepCompleted` (`REG_QWORD`, a `FILETIME`: when the walk began) and then
    `SweepSequence = n` (`REG_QWORD`, never lowered). A record gone or changed, a sequence
@@ -2054,7 +2073,7 @@ exit codes (`SweepExit`) start after the stop's 50 and the WSL deny task's 51 an
 | 53 | not LOCAL SYSTEM, or not run from the admin copy; nothing touched |
 | 54 | the record can't be read, or its `PoolSids` or `OwnerSid` is malformed; nothing touched |
 | 55 | a SID in `PoolSids` isn't a pool user; nothing touched |
-| 56 | a task was unreadable or not deleted (a hidden task whose owner can't be read, or whose task file a pool user could have changed, among them), a pool task's running instance wasn't stopped (or the instances couldn't be read), a folder couldn't be listed, or there were more than 10 000 folders; the BITS step still ran |
+| 56 | a task was unreadable or not deleted (a hidden task whose owner can't be read, or whose task file a pool user could have changed, among them), a task file or the Task Scheduler's cache holds a task the listing didn't give and its file doesn't show it isn't the pool's, a pool task's running instance wasn't stopped (or the instances couldn't be read), a folder, the task files or the cache couldn't be listed, or there were more than 10 000 folders; the BITS step still ran |
 | 57 | every task was read and the pool's deleted, but a pool user's BITS job wasn't cancelled, a job's owner or the list couldn't be read, or the list reached its cap |
 | 58 | `SweepNext` couldn't be reserved: the record was gone or its pool changed, or the write failed (nothing touched), or the lock stayed held (swept, nothing recorded); 56 and 57 win |
 | 59 | the run would have ended 0, but `SweepCompleted` and `SweepSequence` couldn't be written |
@@ -2096,6 +2115,15 @@ A run deletes only the pool users' tasks and BITS jobs. An ended run never write
 - VM row (not run): does `IRunningTask::Stop` also end the processes the instance started, or
   only the action's own process? If only the latter, a child of a stopped instance survives
   like X above, and the pre-logon check is what catches it.
+- Elevated test (not run yet):
+  `elevated_a_task_whose_descriptor_shuts_system_out_is_deleted_or_56_never_left_at_0`: a
+  standard test user registers, from XML, a task whose descriptor denies SYSTEM and
+  Administrators all access; the walk and the cross-check, run as CI's elevated administrator
+  standing in for SYSTEM, must delete it or count 56, never neither. If Windows refuses such a
+  descriptor from a standard user, the gap can't arise and the test says so.
+  `elevated_this_machines_tasks_all_have_a_principal_that_resolves` now also checks that every
+  task on file and in the cache of CI's machine is listed or skipped by its file, so the
+  cross-check doesn't end a clean machine's runs at 56.
 - The harness rows for this end (`cancel`, `stdin-unread-cancel`, `end-cleanup`) haven't
   run on a VM yet, nor have the elevated tests in `setup/sweep/windows_tests.rs`; the Windows
   code is only built and checked by clippy.

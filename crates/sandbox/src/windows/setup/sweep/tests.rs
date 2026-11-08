@@ -16,6 +16,8 @@ mod record;
 mod running;
 mod sequence;
 mod task_file;
+mod unlisted;
+mod walk;
 
 const OWNER: &str = "S-1-5-21-1-2-3-1001";
 const ADMIN_EXE: &str = r"C:\Program Files\Clauseo\Sandbox\clauseo-sandbox-setup.exe";
@@ -61,6 +63,10 @@ struct Fake {
     running: Result<Vec<Result<String, Failed>>, Failed>,
     /// Indexes of the instances whose stop fails.
     stop_refuse: Vec<usize>,
+    /// Tasks the task files and the cache hold but the listing hides, by path; and whether
+    /// each of those listings (the task files', the cache's) fails.
+    hidden: Vec<String>,
+    listings_fail: [bool; 2],
     /// Each task's security descriptor by its name, `Err` where it can't be read; one not
     /// here is the Administrators'.
     owners: BTreeMap<String, Result<String, Failed>>,
@@ -108,6 +114,8 @@ impl Fake {
             delete_refuse: Vec::new(),
             running: Ok(Vec::new()),
             stop_refuse: Vec::new(),
+            hidden: Vec::new(),
+            listings_fail: [false; 2],
             owners: BTreeMap::new(),
             files: BTreeMap::new(),
             securities: BTreeMap::new(),
@@ -149,6 +157,16 @@ impl Fake {
             self.folder(parent).subs.push(Ok(path.to_owned()));
         }
         self.folders.entry(path.to_owned()).or_default()
+    }
+
+    /// Every task the machine holds, by path: those the folders list, and the hidden ones.
+    fn on_disk(&self) -> Vec<String> {
+        let mut paths = self.hidden.clone();
+        for (folder, held) in &self.folders {
+            let tasks = held.tasks.iter();
+            paths.extend(tasks.map(|task| super::running::task_path(folder, &task.name)));
+        }
+        paths
     }
 
     /// The task paths deleted, in order.
@@ -331,6 +349,20 @@ impl Sweeper for Fake {
         Ok(upper(a) == upper(b))
     }
 
+    fn task_file_paths(&mut self) -> Result<Vec<String>, Failed> {
+        if self.listings_fail[0] {
+            return Err("a folder below Tasks couldn't be listed (5)".to_owned());
+        }
+        Ok(self.on_disk())
+    }
+
+    fn task_cache_paths(&mut self) -> Result<Vec<String>, Failed> {
+        if self.listings_fail[1] {
+            return Err("a key of the Task Scheduler's cache couldn't be listed (5)".to_owned());
+        }
+        Ok(self.on_disk())
+    }
+
     fn delete_task(&mut self, folder: &String, name: &str) -> Result<(), Failed> {
         if self.delete_refuse.iter().any(|refused| refused == name) {
             return Err("ITaskFolder::DeleteTask failed (0x80070005)".to_owned());
@@ -392,8 +424,8 @@ fn only_tasks_whose_principal_is_exactly_a_pool_sid_are_deleted() {
         "the sandbox's task sweep: 2 pool users, 1 folders and 12 tasks read, 3 of the pool's \
          tasks deleted, 0 unreadable (0 more skipped, not the pool's by their task file), 0 with \
          no user or group, 0 unresolved (no SID, not another domain's), 0 skipped (another \
-         domain's, no SID), 0 not deleted, 0 running instances stopped, 0 not, 0 BITS jobs \
-         cancelled, 0 not"
+         domain's, no SID), 0 not deleted, 0 not listed (in a task file or the cache only), 0 \
+         running instances stopped, 0 not, 0 BITS jobs cancelled, 0 not"
     );
 }
 
@@ -462,104 +494,4 @@ fn tasks_in_nested_subfolders_are_found_and_deleted() {
         "{:?}",
         fake.logged
     );
-}
-
-#[test]
-fn a_folder_that_cant_be_listed_is_56_and_the_rest_are_still_walked() {
-    let mut fake = Fake::new(&[1010]);
-    fake.task("\\A", "hidden-from-us", user("S-1-5-21-1-2-3-1010"));
-    fake.task("\\A\\B", "below", user("S-1-5-21-1-2-3-1010"));
-    fake.task("\\C", "kept", user("S-1-5-21-1-2-3-1010"));
-    fake.task("\\C\\D", "under-c", user("S-1-5-21-1-2-3-1010"));
-    fake.task("\\E", "fine", user("S-1-5-21-1-2-3-1010"));
-    // \A's tasks can't be listed, but its subfolders can; \C's subfolders can't, but its tasks
-    // can; a subfolder of the root can't be read at all.
-    fake.folder("\\A").tasks_fail = true;
-    fake.folder("\\C").subs_fail = true;
-    fake.folder("\\")
-        .subs
-        .push(Err("ITaskFolderCollection::Item failed".to_owned()));
-    assert_eq!(sweep(&mut fake), SweepExit::TasksLeft);
-    let mut deleted = fake.deleted();
-    deleted.sort_unstable();
-    assert_eq!(deleted, ["\\A\\B\\below", "\\C\\kept", "\\E\\fine"]);
-    let line = &fake.logged[0].1;
-    assert!(line.contains("; 3 folders couldn't be listed"), "{line}");
-}
-
-#[test]
-fn a_failed_delete_is_56_and_the_task_is_counted() {
-    let mut fake = Fake::new(&[1010]);
-    fake.task("\\", "stuck", user("S-1-5-21-1-2-3-1010"));
-    fake.task("\\", "goes", user("S-1-5-21-1-2-3-1010"));
-    fake.delete_refuse = vec!["stuck".to_owned()];
-    assert_eq!(sweep(&mut fake), SweepExit::TasksLeft);
-    assert_eq!(fake.deleted(), ["\\goes"]);
-    let line = &fake.logged[0].1;
-    assert!(
-        line.contains("1 of the pool's tasks deleted, 0 unreadable"),
-        "{line}"
-    );
-    assert!(line.contains("no SID), 1 not deleted"), "{line}");
-}
-
-#[test]
-fn more_folders_than_the_cap_is_56_and_the_cap_itself_is_not() {
-    for (extra, exit) in [(0, SweepExit::Done), (1, SweepExit::TasksLeft)] {
-        let mut fake = Fake::new(&[1010]);
-        // The root and FOLDERS_CAP - 1 below it, then `extra` more.
-        for at in 0..FOLDERS_CAP - 1 + extra {
-            fake.folder(&format!("\\F{at}"));
-        }
-        assert_eq!(sweep(&mut fake), exit, "{extra}");
-        let line = &fake.logged[0].1;
-        assert!(
-            line.contains(&format!("{FOLDERS_CAP} folders and")),
-            "{line}"
-        );
-        assert_eq!(
-            line.contains("more than 10000 folders"),
-            extra == 1,
-            "{line}"
-        );
-    }
-}
-
-#[test]
-fn the_log_line_holds_no_sid_task_name_or_account_name() {
-    let mut fake = Fake::new(&[1010]);
-    fake.accounts.insert("ClauseoSb01".to_owned(), sid(1010));
-    fake.task("\\Secret", "MatterTask", user("ClauseoSb01"));
-    fake.task("\\Secret", "Stuck", user("S-1-5-21-1-2-3-1010"));
-    fake.unread("\\Secret", "Unread");
-    fake.task("\\Secret", "Skipped", user(r"CORP\unknown-person"));
-    fake.task("\\Secret", "Unresolved", user("gone-person"));
-    fake.delete_refuse = vec!["Stuck".to_owned()];
-    fake.jobs = Ok(vec![Some(sid(1010)), None]);
-    assert_eq!(sweep(&mut fake), SweepExit::TasksLeft);
-    let line = &fake.logged[0].1;
-    for secret in [
-        "S-1-",
-        "Secret",
-        "MatterTask",
-        "Stuck",
-        "Unread",
-        "Skipped",
-        "Unresolved",
-        "ClauseoSb",
-        "CORP",
-        "unknown",
-        "gone",
-    ] {
-        assert!(!line.contains(secret), "{secret}: {line}");
-    }
-    // Counts only.
-    assert!(
-        line.contains("1 of the pool's tasks deleted, 1 unreadable (0 more skipped"),
-        "{line}"
-    );
-    assert!(line.contains(", 1 unresolved (no SID"), "{line}");
-    assert!(line.contains(", 1 skipped (another"), "{line}");
-    assert!(line.contains("no SID), 1 not deleted"), "{line}");
-    assert!(line.contains("1 BITS jobs cancelled, 1 not"), "{line}");
 }
