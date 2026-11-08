@@ -1,6 +1,7 @@
 //! The markers' checks through a fake, on every OS: F4 refusing a logon until `StopSequence`
-//! reaches a stop-awaiting marker's number, a dead outer's marker made one awaiting a stop, a
-//! launch's bounded wait for a sweep, and the desktop's start-up requests.
+//! reaches a stop-awaiting marker's number, a dead outer's marker made one awaiting a stop, the
+//! re-mark once that stop completed (its sweep read only then), a launch's bounded wait for a
+//! sweep, and the desktop's start-up requests.
 
 use std::collections::BTreeMap;
 
@@ -23,6 +24,8 @@ struct Fake {
     sweep_next: u64,
     pool: Vec<Sid>,
     unreadable: bool,
+    /// `SweepNext` can't be read.
+    sweep_next_fails: bool,
     log: Vec<String>,
 }
 
@@ -36,6 +39,7 @@ impl Fake {
             sweep_next: 9,
             pool: vec![sid(POOL_A), sid(POOL_B)],
             unreadable: false,
+            sweep_next_fails: false,
             log: Vec::new(),
         }
     }
@@ -78,6 +82,9 @@ impl Markers for Fake {
     }
     fn next_number(&mut self, name: &'static str) -> Result<u64, String> {
         self.log.push(format!("read {name}"));
+        if name == SWEEP_NEXT && self.sweep_next_fails {
+            return Err("RegGetValueW failed (5)".to_owned());
+        }
         Ok(if name == STOP_NEXT {
             self.stop_next
         } else {
@@ -114,7 +121,9 @@ impl Markers for Fake {
     }
 }
 
-const STOP: MarkerState = MarkerState::AwaitingStop { stop: 3, sweep: 2 };
+const STOP: MarkerState = MarkerState::AwaitingStop { stop: 3 };
+/// What [`STOP`] becomes once its stop completed: the fake's `SweepNext`, read then.
+const REMARKED: MarkerState = MarkerState::AwaitingSweep { sweep: 9 };
 
 #[test]
 fn f4_refuses_until_stop_sequence_reaches_the_markers_number() {
@@ -128,11 +137,18 @@ fn f4_refuses_until_stop_sequence_reaches_the_markers_number() {
     // An absent StopSequence is 0: refused too.
     fake.done = Sequences::default();
     assert!(logon_check(&mut fake, &sid(POOL_A)).is_err());
-    // Once the stop that reserved 3 completed, and the sweep too: the logon goes, the marker goes.
+    assert_eq!(
+        fake.asked("read SweepNext"),
+        0,
+        "no sweep number while the escapee lives"
+    );
+    // Once the stop that reserved 3 completed: the logon goes, and the marker awaits a sweep
+    // whose number is read now, which is requested.
     fake.done = Sequences { stop: 3, sweep: 2 };
     assert_eq!(logon_check(&mut fake, &sid(POOL_A)), Ok(()));
-    assert!(!fake.has("a1"));
+    assert_eq!(fake.state("a1"), Some(REMARKED));
     assert_eq!(fake.asked("stop"), 2);
+    assert_eq!(fake.asked("sweep"), 1);
 }
 
 #[test]
@@ -155,12 +171,13 @@ fn f4_counts_this_pool_users_markers_and_those_naming_none() {
         Some(MarkerState::AwaitingSweep { sweep: 40 }),
     );
     assert_eq!(logon_check(&mut fake, &sid(POOL_A)), Ok(()));
-    // A stop met but a sweep not: the logon goes, and the marker stays for the launch.
+    // A stop met: the logon goes, and the marker, re-marked, stays for the launch.
     fake.marker("a3", Some(POOL_A), Some(STOP));
     fake.done = Sequences { stop: 3, sweep: 1 };
     assert_eq!(logon_check(&mut fake, &sid(POOL_A)), Ok(()));
-    assert_eq!(fake.state("a3"), Some(STOP));
-    // Sequences that can't be read refuse.
+    assert_eq!(fake.state("a3"), Some(REMARKED));
+    // Sequences that can't be read refuse a marker awaiting a stop.
+    fake.marker("a4", Some(POOL_A), Some(STOP));
     fake.unreadable = true;
     assert!(logon_check(&mut fake, &sid(POOL_A)).is_err());
 }
@@ -175,16 +192,19 @@ fn f4_makes_a_dead_outers_marker_await_a_stop_read_now() {
     };
     // Refused even though every earlier stop completed: the stop must begin after this read.
     assert!(logon_check(&mut fake, &sid(POOL_A)).is_err());
-    let read = MarkerState::AwaitingStop { stop: 5, sweep: 9 };
+    let read = MarkerState::AwaitingStop { stop: 5 };
     assert_eq!(fake.state("a1"), Some(read));
-    assert_eq!(fake.log, ["read StopNext", "read SweepNext", "stop"]);
-    // The stop that reserved 5 completed, and a sweep past 9: the next logon goes.
-    fake.done = Sequences { stop: 5, sweep: 9 };
-    fake.done.stop = 4;
+    assert_eq!(fake.log, ["read StopNext", "stop"]);
+    // The stop that reserved 5 completed: the next logon goes, the marker awaiting a sweep.
+    fake.done = Sequences { stop: 4, sweep: 99 };
     assert!(logon_check(&mut fake, &sid(POOL_A)).is_err());
     fake.done.stop = 5;
+    fake.sweep_next = 100;
     assert_eq!(logon_check(&mut fake, &sid(POOL_A)), Ok(()));
-    assert!(!fake.has("a1"));
+    assert_eq!(
+        fake.state("a1"),
+        Some(MarkerState::AwaitingSweep { sweep: 100 })
+    );
 }
 
 #[test]
@@ -243,16 +263,58 @@ fn a_launch_asks_for_a_sweep_and_waits_for_it_bounded() {
 }
 
 #[test]
-fn a_stop_awaiting_marker_holds_a_launch_only_for_its_sweep() {
+fn a_stop_awaiting_marker_holds_a_launch_only_once_its_stop_completed() {
     let mut fake = Fake::new();
     fake.marker("a1", Some(POOL_A), Some(STOP));
     fake.done = Sequences { stop: 0, sweep: 2 };
-    // Its sweep is met; its stop is F4's, so the launch goes and the marker stays.
+    // Its stop is F4's: the launch goes, the marker stays, and no sweep number is read.
     assert_eq!(await_sweeps(&mut fake), Ok(()));
     assert_eq!(fake.state("a1"), Some(STOP));
+    assert!(fake.log.is_empty(), "{:?}", fake.log);
     // Sequences that can't be read refuse.
     fake.unreadable = true;
     assert!(await_sweeps(&mut fake).is_err());
+}
+
+#[test]
+fn a_sweep_before_the_stop_doesnt_clear_an_escapees_marker_and_one_after_it_does() {
+    let mut fake = Fake::new();
+    let escapee = MarkerState::AwaitingStop { stop: 5 };
+    fake.marker("a1", Some(POOL_A), Some(escapee));
+    // Sweeps complete while the escapee lives: it could register a task after any of them.
+    fake.done = Sequences { stop: 4, sweep: 50 };
+    assert!(logon_check(&mut fake, &sid(POOL_A)).is_err());
+    assert_eq!(await_sweeps(&mut fake), Ok(()));
+    assert_eq!(
+        fake.state("a1"),
+        Some(escapee),
+        "not cleared by an earlier sweep"
+    );
+    assert_eq!(fake.asked("read SweepNext"), 0);
+    // The stop completes, the escapee dead. `SweepNext` is read now: 51, past every sweep so far.
+    fake.done.stop = 5;
+    fake.sweep_next = 51;
+    fake.log.clear();
+    // The launch re-marks it, requests the sweep once, and waits for it.
+    fake.sweeps = vec![50, 51];
+    assert_eq!(await_sweeps(&mut fake), Ok(()));
+    assert!(!fake.has("a1"), "cleared by the sweep after the stop");
+    let first = ["read SweepNext", "sweep", "pause", "pause", "remove a1"];
+    assert_eq!(fake.log, first);
+}
+
+#[test]
+fn a_marker_whose_stop_completed_but_cant_be_re_marked_refuses_a_launch() {
+    let mut fake = Fake::new();
+    fake.marker("a1", Some(POOL_A), Some(STOP));
+    fake.done = Sequences { stop: 3, sweep: 99 };
+    fake.sweep_next_fails = true;
+    let refused = await_sweeps(&mut fake).unwrap_err();
+    assert!(refused.contains("completed stop"), "{refused}");
+    assert_eq!(fake.state("a1"), Some(STOP));
+    // F4 lets the logon go: the stop it would ask for has completed.
+    assert_eq!(logon_check(&mut fake, &sid(POOL_A)), Ok(()));
+    assert_eq!(fake.asked("stop"), 0);
 }
 
 #[test]
@@ -280,20 +342,30 @@ fn the_desktops_start_makes_dead_outers_markers_await_a_stop_and_asks_for_both()
         Some(MarkerState::AwaitingSweep { sweep: 3 }),
     );
     fake.done = Sequences { stop: 0, sweep: 3 };
+    // An escapee's whose stop completed: re-marked, and the sweep requested.
+    fake.marker(
+        "b2",
+        Some(POOL_B),
+        Some(MarkerState::AwaitingStop { stop: 2 }),
+    );
+    fake.done = Sequences { stop: 2, sweep: 3 };
     let found = start_up(&mut fake).unwrap();
-    let read = MarkerState::AwaitingStop { stop: 5, sweep: 9 };
+    let read = MarkerState::AwaitingStop { stop: 5 };
     assert_eq!(fake.state("a1"), Some(read));
     // An unreadable one is written again, naming no pool user, so it counts for all.
     assert_eq!(fake.markers["x1"], (None, Some(read)));
     assert!(!fake.has("b1"), "a clean one goes");
+    assert_eq!(fake.state("b2"), Some(REMARKED));
     let want = StartUp {
-        left: 2,
+        left: 3,
         stop_requested: true,
         sweep_requested: true,
     };
     assert_eq!(found, want);
-    // Each number read once; it never waits.
+    // Each number read once, the sweep asked for once; it never waits.
     assert_eq!(fake.asked("read StopNext"), 1);
+    assert_eq!(fake.asked("read SweepNext"), 1);
+    assert_eq!(fake.asked("sweep"), 1);
     assert_eq!(fake.asked("pause"), 0);
     // Nothing awaited: nothing asked for.
     let mut clean = Fake::new();

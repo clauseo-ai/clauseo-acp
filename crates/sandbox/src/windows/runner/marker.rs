@@ -7,11 +7,14 @@
 //! - [`MarkerState::AwaitingSweep`] `{ sweep: M }`: every end without an escapee, `M` the
 //!   `SweepNext` read once the job ended. Clean once `SweepSequence >= M`: a sweep reserved its
 //!   number after the session could launch nothing more, and completed.
-//! - [`MarkerState::AwaitingStop`] `{ stop, sweep }`: a session a sweep found an escapee in, `stop`
-//!   the `StopNext` read then. Clean once `StopSequence >= stop` and `SweepSequence >= sweep`.
+//! - [`MarkerState::AwaitingStop`] `{ stop }`: a session a sweep found an escapee in, `stop`
+//!   the `StopNext` read then. Never clean itself: once `StopSequence >= stop`, whoever reads
+//!   it reads `SweepNext` (`M`) only then, requests the sweep and makes it `AwaitingSweep`
+//!   `{ sweep: M }` (`unclean.rs`). A sweep number read before the escapee was dead could
+//!   belong to a sweep it watched complete before it registered a task.
 //! - [`MarkerState::Open`] left standing: the outer died (the host's job end after its
 //!   `stdin_grace`, a crash) or couldn't read a number. The pool user's next logon or the
-//!   desktop's start makes it `AwaitingStop`, reading both numbers then (`unclean.rs`).
+//!   desktop's start makes it `AwaitingStop`, reading `StopNext` then (`unclean.rs`).
 //!
 //! An absent `…Sequence` counts as 0. A clean marker is removed by whoever finds it clean. The
 //! numbers are read without the set-up lock, which only an administrator can take; why that is
@@ -54,7 +57,7 @@ struct Marker {
 
 /// What a marker waits for before it is clean.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(from = "WireState", into = "WireState")]
 pub enum MarkerState {
     /// Written at the session's start; standing once its outer is gone, it is never clean.
     #[default]
@@ -64,13 +67,48 @@ pub enum MarkerState {
         /// `SweepNext` as read once the session could launch nothing more.
         sweep: u64,
     },
-    /// An escapee, or an outer that died: a stop and a sweep must complete.
+    /// An escapee, or an outer that died: a stop must complete, after which the marker awaits a
+    /// sweep whose number is read then.
     AwaitingStop {
         /// `StopNext` as read once the session could launch nothing more.
         stop: u64,
-        /// `SweepNext` as read then.
+    },
+}
+
+/// [`MarkerState`] as a marker holds it.
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum WireState {
+    Open,
+    AwaitingSweep {
         sweep: u64,
     },
+    AwaitingStop {
+        stop: u64,
+        /// The `SweepNext` a marker written before the re-mark held: read, and ignored.
+        #[serde(default, rename = "sweep", skip_serializing)]
+        _sweep: Option<u64>,
+    },
+}
+
+impl From<WireState> for MarkerState {
+    fn from(wire: WireState) -> MarkerState {
+        match wire {
+            WireState::Open => MarkerState::Open,
+            WireState::AwaitingSweep { sweep } => MarkerState::AwaitingSweep { sweep },
+            WireState::AwaitingStop { stop, .. } => MarkerState::AwaitingStop { stop },
+        }
+    }
+}
+
+impl From<MarkerState> for WireState {
+    fn from(state: MarkerState) -> WireState {
+        match state {
+            MarkerState::Open => WireState::Open,
+            MarkerState::AwaitingSweep { sweep } => WireState::AwaitingSweep { sweep },
+            MarkerState::AwaitingStop { stop } => WireState::AwaitingStop { stop, _sweep: None },
+        }
+    }
 }
 
 /// The pool tasks' completed sequences, as read now: `StopSequence` and `SweepSequence`, each 0
@@ -87,7 +125,7 @@ impl MarkerState {
     /// The stop this marker waits for, if any.
     pub fn stop(self) -> Option<u64> {
         match self {
-            MarkerState::AwaitingStop { stop, .. } => Some(stop),
+            MarkerState::AwaitingStop { stop } => Some(stop),
             MarkerState::Open | MarkerState::AwaitingSweep { .. } => None,
         }
     }
@@ -95,20 +133,23 @@ impl MarkerState {
     /// The sweep this marker waits for, if any.
     pub fn sweep(self) -> Option<u64> {
         match self {
-            MarkerState::AwaitingSweep { sweep } | MarkerState::AwaitingStop { sweep, .. } => {
-                Some(sweep)
-            }
-            MarkerState::Open => None,
+            MarkerState::AwaitingSweep { sweep } => Some(sweep),
+            MarkerState::Open | MarkerState::AwaitingStop { .. } => None,
         }
     }
 
-    /// Whether `done` meets every number this marker waits for: never when open.
+    /// Whether `done` meets the sweep this marker waits for: never when open or awaiting a stop,
+    /// which is made one awaiting a sweep first ([`MarkerState::stopped`]).
     pub fn clean(self, done: Sequences) -> bool {
         match self {
-            MarkerState::Open => false,
             MarkerState::AwaitingSweep { sweep } => done.sweep >= sweep,
-            MarkerState::AwaitingStop { stop, sweep } => done.stop >= stop && done.sweep >= sweep,
+            MarkerState::Open | MarkerState::AwaitingStop { .. } => false,
         }
+    }
+
+    /// Whether this marker awaits a stop that `done` shows completed: it is due its re-mark.
+    pub fn stopped(self, done: Sequences) -> bool {
+        self.stop().is_some_and(|stop| done.stop >= stop)
     }
 }
 

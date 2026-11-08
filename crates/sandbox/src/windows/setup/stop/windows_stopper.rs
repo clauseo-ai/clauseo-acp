@@ -177,6 +177,10 @@ impl Stopper for WindowsStopper {
         record_write::add_reset_sids(RECORD_KEY, users).map_err(|error| error.to_string())
     }
 
+    fn request_sweep(&mut self) -> Result<(), Failed> {
+        crate::windows::refresh::request_pool_sweep().map_err(|error| error.to_string())
+    }
+
     fn log(&mut self, error: bool, line: &str) {
         event_log(error, line);
     }

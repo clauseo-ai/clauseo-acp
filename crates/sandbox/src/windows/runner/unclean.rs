@@ -6,10 +6,10 @@
 //!   refused while a marker of this pool user, or one naming none or unreadable, awaits a stop
 //!   with `StopSequence` below its number. An `Open` marker of this pool user is a dead outer's
 //!   (one live session per pool user, and this outer hasn't written its own yet): it becomes
-//!   `AwaitingStop`, with `StopNext` and `SweepNext` read now, after its session's last launch
-//!   path closed. Each refusal requests the stop task. TODO: once slot groups land (two pool
-//!   users share a slot's grants on a matter), the scope becomes the pool user's slot, since an
-//!   escapee of one user still holds the slot group's grants.
+//!   `AwaitingStop`, with `StopNext` read now, after its session's last launch path closed.
+//!   Each refusal requests the stop task. TODO: once slot groups land (two pool users share a
+//!   slot's grants on a matter), the scope becomes the pool user's slot, since an escapee of one
+//!   user still holds the slot group's grants.
 //! - **A launch** ([`await_sweeps`], `clean_close::check_launch`, inside the host's 180 s): any
 //!   marker awaiting a sweep is clean once `SweepSequence` reaches its number. Otherwise the
 //!   launch requests a sweep and waits for it, up to [`SWEEP_WAIT`], and refuses if it still
@@ -18,9 +18,14 @@
 //!   is gone, so each `Open` or unreadable marker becomes `AwaitingStop`, and the stop and sweep
 //!   tasks are requested for what is still awaited. It never waits.
 //!
-//! A clean marker is removed by whoever finds it clean. A marker naming a pool user the record no
-//! longer lists is stale (a removal stopped every process of that SID before it deleted the
-//! account) and is removed too. An absent `…Sequence` counts as 0, an absent `…Next` as 1.
+//! Each of the three re-marks a marker awaiting a stop that completed ([`remark`]): only then,
+//! with the escapee dead, it reads `SweepNext` (`M`), requests the sweep and makes the marker
+//! `AwaitingSweep { sweep: M }`. A sweep that completed before the stop proves nothing, since the
+//! escapee could have registered a task after it. A launch refuses while a marker whose stop
+//! completed couldn't be re-marked. A clean marker is removed by whoever finds it clean. A
+//! marker naming a pool user the record no longer lists is stale (a removal stopped every
+//! process of that SID before it deleted the account) and is removed too. An absent `…Sequence`
+//! counts as 0, an absent `…Next` as 1.
 //!
 //! No Windows call here: [`Markers`] carries every effect (`unclean/os.rs`), so the tests run on
 //! every OS.
@@ -99,6 +104,39 @@ fn sweep_clean(
     left
 }
 
+/// Every one of `sessions` awaiting a stop that `done` shows completed, re-marked: `SweepNext`
+/// read now (once), the sweep requested, and the marker written as awaiting that sweep. One whose
+/// number can't be read, or whose write fails, stays as it was. The sessions as they now stand,
+/// and whether a sweep was requested (`Some(queued)`).
+fn remark(
+    fs: &mut impl Markers,
+    mut sessions: Vec<UncleanSession>,
+    done: Sequences,
+) -> (Vec<UncleanSession>, Option<bool>) {
+    if !sessions
+        .iter()
+        .any(|session| session.state.is_some_and(|state| state.stopped(done)))
+    {
+        return (sessions, None);
+    }
+    // Read only now that `StopSequence` shows the escapee dead.
+    let Ok(sweep) = fs.next_number(SWEEP_NEXT) else {
+        return (sessions, None);
+    };
+    let queued = fs.request_sweep().is_ok();
+    let state = MarkerState::AwaitingSweep { sweep };
+    for session in &mut sessions {
+        if session.state.is_some_and(|state| state.stopped(done))
+            && fs
+                .settle(&session.id, session.pool_user.as_ref(), state)
+                .is_ok()
+        {
+            session.state = Some(state);
+        }
+    }
+    (sessions, Some(queued))
+}
+
 /// F4: whether `pool_user` may log on. `Err` says why not; the stop task was requested then.
 pub fn logon_check(fs: &mut impl Markers, pool_user: &Sid) -> Result<(), String> {
     let sessions = current(fs).map_err(|e| format!("the session markers can't be read ({e})"))?;
@@ -122,21 +160,22 @@ pub fn logon_check(fs: &mut impl Markers, pool_user: &Sid) -> Result<(), String>
                     drop(fs.settle(&session.id, Some(pool_user), state));
                 }
             }
-            Some(state @ MarkerState::AwaitingStop { .. }) => awaiting.push((session, state)),
+            Some(MarkerState::AwaitingStop { .. }) => awaiting.push(session),
             Some(MarkerState::AwaitingSweep { .. }) => {}
             Some(MarkerState::Open) | None => standing = true,
         }
     }
     if !awaiting.is_empty() {
         match fs.sequences() {
+            // One whose stop completed is re-marked: the launch waits for its sweep.
             Ok(done) => {
-                for (session, state) in awaiting {
-                    if state.stop().is_some_and(|stop| done.stop < stop) {
-                        standing = true;
-                    } else if state.clean(done) {
-                        drop(fs.remove(&session.id));
-                    }
-                }
+                let (left, _) = remark(fs, awaiting, done);
+                standing |= left.iter().any(|session| {
+                    session
+                        .state
+                        .and_then(MarkerState::stop)
+                        .is_some_and(|stop| done.stop < stop)
+                });
             }
             Err(_) => standing = true,
         }
@@ -154,11 +193,10 @@ pub fn logon_check(fs: &mut impl Markers, pool_user: &Sid) -> Result<(), String>
     ))
 }
 
-/// A dead outer's marker: `StopNext` and `SweepNext` read now; `None` when either can't be.
+/// A dead outer's marker: `StopNext` read now; `None` when it can't be.
 fn dead_outer(fs: &mut impl Markers) -> Option<MarkerState> {
     let stop = fs.next_number(STOP_NEXT).ok()?;
-    let sweep = fs.next_number(SWEEP_NEXT).ok()?;
-    Some(MarkerState::AwaitingStop { stop, sweep })
+    Some(MarkerState::AwaitingStop { stop })
 }
 
 /// A launch's check: every marker awaiting a sweep is clean, or becomes clean within
@@ -167,6 +205,15 @@ pub fn await_sweeps(fs: &mut impl Markers) -> Result<(), String> {
     let sessions = current(fs).map_err(|e| format!("the session markers can't be read ({e})"))?;
     let unread = |e: String| format!("the sandbox's sweep sequence can't be read ({e})");
     let mut done = fs.sequences().map_err(unread)?;
+    let (sessions, requested) = remark(fs, sessions, done);
+    if sessions
+        .iter()
+        .any(|session| session.state.is_some_and(|state| state.stopped(done)))
+    {
+        return Err(
+            "an earlier session's marker couldn't be moved on from its completed stop".to_owned(),
+        );
+    }
     let left = sweep_clean(fs, sessions, done);
     let wanted = left
         .iter()
@@ -175,8 +222,10 @@ pub fn await_sweeps(fs: &mut impl Markers) -> Result<(), String> {
     let Some(wanted) = wanted.filter(|wanted| done.sweep < *wanted) else {
         return Ok(());
     };
-    // A request that fails may still find a run queued: the wait says.
-    drop(fs.request_sweep());
+    // A request that fails may still find a run queued: the wait says. A re-mark asked already.
+    if requested.is_none() {
+        drop(fs.request_sweep());
+    }
     let polls = SWEEP_WAIT.as_millis() / SWEEP_POLL.as_millis().max(1);
     for _ in 0..polls {
         fs.pause(SWEEP_POLL);
@@ -204,9 +253,10 @@ pub struct StartUp {
 }
 
 /// The desktop's start, once, before any launch: every `Open` or unreadable marker is a dead
-/// outer's and becomes `AwaitingStop` with the numbers read now; the clean and stale ones are
-/// removed; the stop task is requested when a marker still awaits a stop, the sweep task when one
-/// still awaits a sweep. It never waits.
+/// outer's and becomes `AwaitingStop` with `StopNext` read now; one whose stop completed is
+/// re-marked ([`remark`]); the clean and stale ones are removed; the stop task is requested
+/// when a marker still awaits a stop, the sweep task when one still awaits a sweep. It never
+/// waits.
 pub fn start_up(fs: &mut impl Markers) -> io::Result<StartUp> {
     let mut sessions = current(fs)?;
     let mut numbers = None;
@@ -235,13 +285,18 @@ pub fn start_up(fs: &mut impl Markers) -> io::Result<StartUp> {
             ..StartUp::default()
         });
     };
+    let (sessions, remarked) = remark(fs, sessions, done);
     let left = sweep_clean(fs, sessions, done);
     let states = || left.iter().filter_map(|session| session.state);
     let stop = states().any(|state| state.stop().is_some_and(|stop| done.stop < stop));
     let sweep = states().any(|state| state.sweep().is_some_and(|sweep| done.sweep < sweep));
+    let sweep_requested = match remarked {
+        Some(queued) => queued,
+        None => sweep && fs.request_sweep().is_ok(),
+    };
     Ok(StartUp {
         left: left.len(),
         stop_requested: stop && fs.request_stop(),
-        sweep_requested: sweep && fs.request_sweep().is_ok(),
+        sweep_requested,
     })
 }
