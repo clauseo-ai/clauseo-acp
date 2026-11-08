@@ -30,10 +30,11 @@ serde_json = { workspace = true }
 # detached daemon, and the pid of the process listening on the daemon's socket (`socket`:
 # SO_PEERCRED, LOCAL_PEERPID), in src/browser_guard/chrome.rs and reaper.rs, and the kept Chrome
 # profile's files written and the folder listed relative to a folder opened once (`fs`: openat,
-# renameat, unlinkat; `dir`: fdopendir; in src/write/unix.rs), through nix's safe wrappers. nix needs only libc, bitflags and cfg-if; no
+# renameat, unlinkat; `dir`: fdopendir; in src/write/unix.rs), and the effective user, whose
+# root refuses the browser on Linux (`user`: geteuid; src/browser_guard/chrome/sandbox.rs), through nix's safe wrappers. nix needs only libc, bitflags and cfg-if; no
 # socket crate.
 [target.'cfg(unix)'.dependencies]
-nix = { workspace = true, features = ["socket", "fs", "dir"] }
+nix = { workspace = true, features = ["socket", "fs", "dir", "user"] }
 
 # macOS only: `getxattr` and `setxattr` for a download's `com.apple.quarantine` mark
 # (src/browser_guard/downloads/marks.rs, src/write/mac.rs). libc is already nix's dependency.

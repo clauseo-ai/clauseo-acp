@@ -164,3 +164,38 @@ fn agent_browser_arguments_naming_a_weakening_switch_are_refused() {
         assert_eq!(launches(&scratch), 0, "{name}");
     }
 }
+
+/// Chrome that exits at its start with nothing the guard recognises is not started again either:
+/// the call gets the ordinary failed start, not the sandbox's sentence, and the guard exits 1
+/// with the existing failed-start error.
+#[test]
+fn chrome_that_exits_early_with_unknown_text_is_not_started_again() {
+    let scratch = Scratch::new("sandbox_unknown");
+    scratch.chrome_mode(
+        "sandbox-exit:[1:1:0101/000000.000000:FATAL:somewhere.cc(1)] Something else went wrong",
+    );
+    let log = scratch.log();
+    let mut guard = Guard::start(guard_command(
+        &scratch,
+        &example("echo_stub"),
+        &[log.as_os_str()],
+    ));
+    guard.send_call("open");
+    guard.send_call("again");
+    let answer = guard.read();
+    assert_eq!(answer["id"], "open", "{answer}");
+    assert_eq!(answer["error"]["code"], -32603, "{answer}");
+    assert_ne!(answer["error"]["message"], REFUSAL, "{answer}");
+    let (status, (_, stderr)) = guard.finish_with_stderr();
+    assert_eq!(status.code(), Some(1), "{stderr}");
+    let last = stderr.trim_end().lines().last().unwrap_or_default();
+    assert!(
+        last.starts_with(
+            "clauseo-mcp browser-guard: Chrome stopped before it listened on the claimed \
+             debugging port"
+        ) && last.contains("Something else went wrong"),
+        "{stderr}"
+    );
+    assert_eq!(launches(&scratch), 1, "Chrome started again: {stderr}");
+    assert!(!log.exists(), "agent-browser never started");
+}

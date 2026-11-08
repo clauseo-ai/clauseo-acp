@@ -6,8 +6,10 @@
 //! The switches and features below are Chromium's own (main, November 2026):
 //! `sandbox/policy/switches.cc`, `content/public/common/content_switches.cc`,
 //! `sandbox/policy/features.cc` and `content/public/common/content_features.cc`. Chrome reads a
-//! switch after `--` or `-` (and `/` on Windows), trims ASCII whitespace first and, on Windows,
-//! lowercases its name (`base/command_line.cc`), so the check does all of that on every OS.
+//! switch after `--` or `-` (and `/` on Windows), trims whitespace first (ASCII on POSIX, all
+//! Unicode whitespace on Windows: `TrimWhitespace`, `base/command_line.cc:654`) and, on Windows,
+//! lowercases its name (`base/command_line.cc`), so the check does all of that, with the Unicode
+//! set, on every OS.
 
 use std::ffi::OsStr;
 
@@ -80,7 +82,13 @@ pub(crate) const DISABLE_FEATURES: &[&str] = &[
     "restrictcloneparameters",
 ];
 
-/// Words that mark a disabled feature as the sandbox's, whatever Chromium names it next.
+/// Words that mark a disabled feature as the sandbox's, whatever Chromium names it next: the
+/// sandbox's own words, and `outofprocess`, a service that runs in its own (sandboxed) process
+/// and, disabled, in the browser's, outside any sandbox. Chromium's out-of-process service
+/// features (main, November 2026): `AudioServiceOutOfProcess`
+/// (`content/public/common/content_features.cc`; its `AudioServiceSandbox` is refused by
+/// `sandbox`) and `UseOutOfProcessVideoEncoding` (`media/base/media_switches.cc`); none in
+/// `services/network/public/cpp/features.cc`.
 const DISABLE_WORDS: &[&str] = &[
     "sandbox",
     "sbox",
@@ -88,13 +96,29 @@ const DISABLE_WORDS: &[&str] = &[
     "lpac",
     "seccomp",
     "landlock",
+    "outofprocess",
 ];
 
 /// Features whose `--enable-features` entry loosens the sandbox: the network service in the
 /// browser's process, out of its own sandbox (`content_features.cc`, `NetworkServiceInProcess2`;
-/// earlier Chromium's name for it without the 2).
+/// earlier Chromium's name for it without the 2). Any name with a word of [`ENABLE_WORDS`] is
+/// refused too.
 pub(crate) const ENABLE_FEATURES: &[&str] =
     &["networkserviceinprocess2", "networkserviceinprocess"];
+
+/// Words that mark an enabled feature as one that moves a service into the browser's process,
+/// outside the sandbox its own process has: `NetworkServiceInProcess2` and
+/// `RunVideoCaptureServiceInBrowserProcess` (`content_features.cc`),
+/// `UseUnexportableKeyServiceInBrowserProcess` (`services/network/public/cpp/features.cc`).
+/// `WebUIInProcessResourceLoadingV2` is refused with them, which fails closed: the guard never
+/// passes it.
+const ENABLE_WORDS: &[&str] = &["inprocess", "inbrowserprocess"];
+
+/// The switch that makes a GPU sandbox failure end the GPU process on Linux
+/// (`sandbox/policy/switches.cc:40`, read only by `sandbox/policy/linux/sandbox_linux.cc`; without
+/// it the GPU process runs on unsandboxed, printing nothing the guard matches). The guard passes
+/// it bare ([`host_args`]); with a value it is refused, since `=no` turns it off.
+pub(crate) const GPU_FAILURES_FATAL: &str = "gpu-sandbox-failures-fatal";
 
 /// What Chrome prints when its sandbox cannot start, each a fixed part of the message.
 pub(crate) const FAILURES: &[&str] = &[
@@ -129,7 +153,7 @@ pub(crate) fn failure(line: &str) -> Option<&'static str> {
 /// The switch in `arg`, one of Chrome's arguments, that weakens its sandbox, if any.
 pub(crate) fn weakening(arg: &OsStr) -> Option<String> {
     let arg = arg.to_string_lossy();
-    let trimmed = arg.trim_matches(|c: char| c.is_ascii_whitespace());
+    let trimmed = arg.trim_matches(char::is_whitespace);
     let rest = ["--", "-", "/"]
         .iter()
         .find_map(|prefix| trimmed.strip_prefix(prefix))?;
@@ -138,11 +162,16 @@ pub(crate) fn weakening(arg: &OsStr) -> Option<String> {
     if SWITCHES.contains(&name.as_str()) {
         return Some(name);
     }
+    if name == GPU_FAILURES_FATAL && rest.contains('=') {
+        return Some(format!("{name}={value}"));
+    }
     let refused = |feature: &str| match name.as_str() {
         "disable-features" => {
             DISABLE_FEATURES.contains(&feature) || DISABLE_WORDS.iter().any(|w| feature.contains(w))
         }
-        "enable-features" => ENABLE_FEATURES.contains(&feature),
+        "enable-features" => {
+            ENABLE_FEATURES.contains(&feature) || ENABLE_WORDS.iter().any(|w| feature.contains(w))
+        }
         _ => false,
     };
     value
@@ -157,14 +186,23 @@ pub(crate) fn weakening(arg: &OsStr) -> Option<String> {
 /// [`weakening`]: any mention is refused, whatever surrounds it.
 pub(crate) fn weakening_in(text: &OsStr) -> Option<&'static str> {
     let text = text.to_string_lossy().to_ascii_lowercase();
+    if text.contains("gpu-sandbox-failures-fatal=") {
+        return Some("gpu-sandbox-failures-fatal=");
+    }
     let disabled: &[&[&'static str]] = if text.contains("disable-features") {
         &[DISABLE_FEATURES, DISABLE_WORDS]
+    } else {
+        &[]
+    };
+    let enabled: &[&'static str] = if text.contains("enable-features") {
+        ENABLE_WORDS
     } else {
         &[]
     };
     SWITCHES
         .iter()
         .chain(ENABLE_FEATURES)
+        .chain(enabled)
         .chain(disabled.iter().copied().flatten())
         .copied()
         .find(|name| text.contains(name))
@@ -178,15 +216,16 @@ fn feature_name(entry: &str) -> String {
     entry[..end].to_ascii_lowercase()
 }
 
-/// Chrome's arguments for this host beyond the guard's own: on Linux as root or in a container,
-/// `--disable-dev-shm-usage` (shared memory under the temp folder, not a small `/dev/shm`),
-/// which leaves the sandbox as it is. Never `--no-sandbox`: where the sandbox cannot start,
-/// the browser is refused ([`refused_up_front`], [`failure`]).
+/// Chrome's arguments for this host beyond the guard's own: on Linux `--gpu-sandbox-failures-fatal`
+/// ([`GPU_FAILURES_FATAL`]; only Linux and Chrome OS read it, so other hosts get nothing), and on
+/// Linux as root or in a container `--disable-dev-shm-usage` (shared memory under the temp
+/// folder, not a small `/dev/shm`), which leaves the sandbox as it is. Never `--no-sandbox`:
+/// where the sandbox cannot start, the browser is refused ([`refused_up_front`], [`failure`]).
 pub(crate) fn host_args(host: Host) -> &'static [&'static str] {
-    if host.linux && (host.root || host.container) {
-        &["--disable-dev-shm-usage"]
-    } else {
-        &[]
+    match (host.linux, host.root || host.container) {
+        (true, true) => &["--gpu-sandbox-failures-fatal", "--disable-dev-shm-usage"],
+        (true, false) => &["--gpu-sandbox-failures-fatal"],
+        (false, _) => &[],
     }
 }
 
@@ -211,9 +250,9 @@ impl Host {
     pub(crate) fn now() -> Host {
         #[cfg(target_os = "linux")]
         {
-            use std::os::unix::fs::MetadataExt;
             use std::path::Path;
-            let root = std::fs::metadata("/proc/self").is_ok_and(|m| m.uid() == 0);
+            // The effective user, whose rights Chrome runs with.
+            let root = nix::unistd::geteuid().is_root();
             let container = Path::new("/.dockerenv").exists()
                 || Path::new("/run/.containerenv").exists()
                 || std::fs::read_to_string("/proc/1/cgroup").is_ok_and(|cgroup| {
