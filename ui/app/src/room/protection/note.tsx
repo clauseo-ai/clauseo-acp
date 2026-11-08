@@ -2,13 +2,17 @@
 // (components' protection.tsx), its retry through the set-up confirm where Windows' administrator
 // prompt follows (setup.tsx), the waiting line in the button's place and a refusal's words under
 // the body. Design B: a block says its reason's line (blocked.ts), and where the repair is the
-// installer the retry gives way to its line and, on a personal install, "Get the installer". When
-// the matter becomes protected the note closes. The firm's notice (required.tsx) rides in the same
+// installer the retry gives way to its line and, on a personal install, "Get the installer", with
+// "Download and run the installer again" before it where the app can fetch the installer itself
+// (repair.ts). After that installer the note opens by itself once per run: on the copy still
+// missing, or with focus on its Set up once the copy is there. When the matter becomes protected
+// the note closes. The firm's notice (required.tsx) rides in the same
 // chunk.
 import { NotProtectedNote, type NoteWhy } from "@clauseo/components/clauseo/protection.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { blockLine, blockOf, firmInstall, needsInstaller, repairLine } from "./blocked.ts";
 import { openInstallerPage, repairPage } from "./installer.ts";
+import { landingDue, markLanded, repairView } from "./repair.ts";
 import { useEffect, useState } from "react";
 import type { MatterId } from "../../transport/protocol.ts";
 import { explainDue, markExplained } from "./explained.ts";
@@ -76,8 +80,17 @@ export function ProtectionNote({
   useEffect(() => {
     if (auto && group !== null) markExplained(group, matterId);
   }, [auto, group, matterId]);
+  // after a repair's installer, once per run: the card the lawyer comes back to (repair.ts)
+  const land = landingDue(state, cause);
+  // the note opens on it, once: kept here from the render that saw it due, and marked in the store
+  const [landing, setLanding] = useState(false);
+  if (land && !landing) setLanding(true);
+  useEffect(() => {
+    if (landing) markLanded(store);
+  }, [landing, store]);
   const close = () => {
     setAuto(false);
+    setLanding(false);
     onClose();
   };
   const gone = cause === null;
@@ -89,22 +102,26 @@ export function ProtectionNote({
   const retry = !repair && canRetry(cause);
   const block = blockLine(lang, cause);
   const page = repair && !firmInstall(state.view, state.managedBy) ? repairPage(display) : null;
+  const run = repairView(lang, transport, store, state, cause);
   const extra = [
     ...(block === null ? [] : [block]),
     ...(repair ? [repairLine(lang, state.view, state.managedBy)] : []),
+    ...(run.returned === null ? [] : [run.returned]),
   ];
   return (
     <>
       <NotProtectedNote
-        open={open || auto}
+        open={open || auto || landing}
         matter={matter}
         why={noteWhy(cause)}
         {...(cause.group === "pool" ? { pool: poolOf(cause), addRoom: retry } : {})}
         named1385={named1385(cause)}
         waiting={retry ? waitingWords(lang, state, cause) : null}
-        failed={retry ? failedWords(lang, state) : null}
+        failed={retry ? failedWords(lang, state) : run.failed}
         extra={extra}
         onGetInstaller={page === null ? undefined : () => void openInstallerPage(transport, page)}
+        onRepair={run.onRepair}
+        repairWait={run.wait}
         onClose={close}
         onProtect={retry ? press : undefined}
       />

@@ -12,6 +12,8 @@ test("the host's report decides the platform; only a transport with no host gues
     release_date: null,
     test_build: false,
     release_mode: "release",
+    repair_available: false,
+    repair: null,
   });
 });
 
@@ -23,6 +25,8 @@ test("the host's release date comes with its report; a transport with no host ha
     release_date: "2026-11-03",
     test_build: false,
     release_mode: "release",
+    repair_available: false,
+    repair: null,
   });
 });
 

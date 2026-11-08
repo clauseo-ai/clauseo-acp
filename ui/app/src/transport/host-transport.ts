@@ -17,6 +17,7 @@ import type {
   PermissionRequestId,
   PickedFolder,
   QueryResult,
+  RepairStep,
   RevealTarget,
   SettingsSection,
   StreamId,
@@ -68,6 +69,11 @@ export interface HostTransport {
    * `section` when named (R24: the case-law hint and the out-of-credit note open "connectors"). Only a transport whose
    * host has that window carries it: the desktop one; the room draws no Settings button without it. */
   openSettings?: ((section?: SettingsSection | null) => Promise<void>) | undefined;
+  /** Design B's "Download and run the installer again" (desktop's repair_install, the main window's
+   * alone): `onStep` hears `downloading`, then `launching`. Once the installer starts the window is
+   * gone, so it never resolves for the page; it rejects with a `repair.*` code, or
+   * `command.conflict` while one runs. Only a transport whose host has the repair carries it. */
+  repairInstall?: ((onStep: (step: RepairStep) => void) => Promise<void>) | undefined;
   /** Sends the room's start-up marks to host.log, once, in the background (start-marks.ts); only the desktop's. */
   pageMarks?: SendMarks | undefined;
   /**

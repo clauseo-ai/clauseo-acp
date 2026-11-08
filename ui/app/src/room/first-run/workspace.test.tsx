@@ -333,3 +333,73 @@ test("can't or a full pool: no step", async () => {
   expect(reads(t)).toBe(1);
   expect(localStorage.getItem(MARKS_KEY)).not.toBeNull();
 });
+
+test("admin_copy_missing where the app fetches the installer: Download and run the installer again, its wait, a refusal's words, Get the installer kept", async () => {
+  const s = scripted(PROT.missing);
+  let refuse: (e: unknown) => void = () => {};
+  s.host.repair = {
+    available: true,
+    run: (step) =>
+      new Promise<void>((_resolve, reject) => {
+        step("downloading");
+        refuse = reject;
+      }),
+  };
+  const t = await mount(s.host);
+  await signInNow(t);
+  expect(step()?.dataset["state"]).toBe("repair");
+  const again = byId("protection-repair-again") as HTMLButtonElement;
+  expect(again.textContent).toBe(pw("en", "Download and run the installer again"));
+  expect(byId("protection-installer")).not.toBeNull();
+  await press(again);
+  await press(again);
+  await settle();
+  expect(t.only("repair_install")).toHaveLength(1);
+  expect((byId("protection-repair-again") as HTMLButtonElement).disabled).toBe(true);
+  expect(byId("protection-repair-wait")?.textContent).toBe(pw("en", "Downloading the installer…"));
+  await act(async () => refuse({ code: "repair.verify_failed", message: "", retryable: true }));
+  await settle();
+  expect(byId("protection-repair-note")?.textContent).toBe(
+    errorWords("en", "repair.verify_failed"),
+  );
+  expect(byId("protection-installer")).not.toBeNull();
+  expect((byId("protection-repair-again") as HTMLButtonElement).disabled).toBe(false);
+  expect(t.protectionCommands()).toEqual([]);
+});
+
+test("admin_copy_missing with repair_available false: Get the installer as today, and no new button", async () => {
+  const s = scripted(PROT.missing);
+  s.host.repair = { available: false };
+  const t = await mount(s.host);
+  await signInNow(t);
+  expect(step()?.dataset["state"]).toBe("repair");
+  expect(byId("protection-repair-again")).toBeNull();
+  expect(byId("protection-installer")).not.toBeNull();
+  expect(t.only("repair_install")).toEqual([]);
+});
+
+test("returned with the copy still missing: the repair step says the installer didn't finish", async () => {
+  const s = scripted(PROT.missing);
+  s.host.repair = { available: true, note: "returned" };
+  const t = await mount(s.host);
+  await signInNow(t);
+  expect(step()?.dataset["state"]).toBe("repair");
+  expect(byId("protection-repair-note")?.textContent).toBe(
+    pw(
+      "en",
+      "The installer didn't finish setting up the Safe workspace. Try again, or choose Get the installer.",
+    ),
+  );
+});
+
+test("returned with the copy there: the first run lands on the Safe workspace's set-up", async () => {
+  const s = scripted(PROT.needs, { retry_asks_admin: true } as Partial<ProtectionView>);
+  s.host.repair = { available: true, note: "returned" };
+  const t = await mount(s.host);
+  await signInNow(t);
+  expect(step()?.dataset["state"]).toBe("ask");
+  expect(byId("protection-setup")?.textContent).toBe(pw("en", "Set up the Safe workspace"));
+  expect(byId("protection-repair-note")).toBeNull();
+  expect(byId("np-note")).toBeNull();
+  expect(t.only("repair_install")).toEqual([]);
+});

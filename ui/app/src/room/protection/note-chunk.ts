@@ -10,4 +10,5 @@ export { retryProtection } from "./commands.ts";
 export { asksAdmin, computerCause, inProgress } from "./view.ts";
 export { blockLine, blockOf, firmInstall, needsInstaller, repairLine } from "./blocked.ts";
 export { openInstallerPage, repairPage } from "./installer.ts";
+export { markLanded, repairView } from "./repair.ts";
 export { pw } from "@clauseo/components/lib/words-protection.ts";

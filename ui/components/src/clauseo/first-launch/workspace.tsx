@@ -3,6 +3,9 @@
 // workspace up, so a normal install has no step. Where the installer's admin copy is missing, the
 // step is the repair: the cause's line, the repair's line, "Get the installer" on a per-user
 // install (it opens the installed version's release page; the caller's act), and "Not now". Where
+// the app can fetch the installer itself, "Download and run the installer again" takes the act's
+// place (disabled, with its waiting line, while it runs; a refusal's words under the lines), and Get
+// the installer moves beside Not now as the fallback. Where
 // the set-up is due with the copy there (after an in-app Remove) and asks an administrator, it says
 // Windows asks, and the "Unknown publisher" line before Windows' prompt: this screen is the confirm
 // (Ruled, 1). "Set up the Safe workspace" sends the set-up, and the line waits in the act's place
@@ -44,6 +47,8 @@ export type WorkspaceWords = {
   settings: string;
   /** "Get the installer" */
   getInstaller: string;
+  /** "Download and run the installer again" */
+  repairAgain: string;
 };
 
 // the gate's rows, as parts.tsx's Act and Ways draw them (first-launch.css), written here so the step rides in the
@@ -59,12 +64,35 @@ const Act = ({ children, act }: { children: ReactNode; act?: ReactNode }) => (
   </div>
 );
 
+/** "Download and run the installer again": the act's button, disabled and busy while it runs. */
+const RepairAgain = ({
+  words,
+  onRepair,
+  busy,
+}: {
+  words: WorkspaceWords;
+  onRepair: () => void;
+  busy: boolean;
+}) => (
+  <Button
+    kind="tone"
+    className="room-field-ask"
+    onClick={onRepair}
+    disabled={busy}
+    aria-busy={busy}
+    data-testid="protection-repair-again"
+  >
+    <span className="deva-nudge">{words.repairAgain}</span>
+  </Button>
+);
+
 /** The step, in the gate's place: it holds the composer's field until it has an outcome. */
 export function WorkspaceStep({
   state,
   words,
   repair = [],
   onGetInstaller,
+  repairRun = {},
   onSetUp,
   onNotNow,
 }: {
@@ -74,31 +102,52 @@ export function WorkspaceStep({
   repair?: string[];
   /** Opens the installer's page; without it (a firm install, a test build), no button. */
   onGetInstaller?: (() => void) | undefined;
+  /** The in-app repair, for "repair": its press (without it, no button), its waiting line while it
+   * runs, and the lines after the repair's (a refusal's words, the installer that didn't finish). */
+  repairRun?: { onRepair?: (() => void) | undefined; wait?: string | null; notes?: string[] };
   /** Sends the set-up, once. */
   onSetUp: () => void;
   onNotNow: () => void;
 }) {
   const { lang } = useDisplay();
+  const { onRepair, wait = null, notes = [] } = repairRun;
+  const installer =
+    onGetInstaller === undefined ? null : (
+      <Button
+        kind={onRepair === undefined ? "tone" : "quiet"}
+        size={onRepair === undefined ? "default" : "small"}
+        {...(onRepair === undefined ? { className: "room-field-ask" } : {})}
+        onClick={onGetInstaller}
+        data-testid="protection-installer"
+      >
+        <span className="deva-nudge">{words.getInstaller}</span>
+      </Button>
+    );
   const body =
     state === "repair" ? (
       <>
         <Act
           act={
-            onGetInstaller === undefined ? undefined : (
-              <Button
-                kind="tone"
-                className="room-field-ask"
-                onClick={onGetInstaller}
-                data-testid="protection-installer"
-              >
-                <span className="deva-nudge">{words.getInstaller}</span>
-              </Button>
+            onRepair === undefined ? (
+              (installer ?? undefined)
+            ) : (
+              <RepairAgain words={words} onRepair={onRepair} busy={wait !== null} />
             )
           }
         >
           <span data-testid="protection-repair">
             <Say>{repair.join(" ")}</Say>
           </span>
+          {notes.map((line) => (
+            <span key={line} data-testid="protection-repair-note">
+              <Say>{line}</Say>
+            </span>
+          ))}
+          {wait !== null && (
+            <span data-testid="protection-repair-wait">
+              <Say>{wait}</Say>
+            </span>
+          )}
           {onGetInstaller !== undefined && (
             <span data-testid="protection-close-line">
               <Say>{pw(lang, INSTALLER_CLOSE)}</Say>
@@ -106,6 +155,7 @@ export function WorkspaceStep({
           )}
         </Act>
         <div className="fl-gate-ways">
+          {onRepair !== undefined && installer}
           <Button kind="quiet" size="small" onClick={onNotNow} data-testid="workspace-not-now">
             <span className="deva-nudge">{words.notNow}</span>
           </Button>

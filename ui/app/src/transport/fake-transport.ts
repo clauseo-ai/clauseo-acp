@@ -17,7 +17,14 @@ import type {
 } from "../room/host-next.ts";
 import { NO_NEXT, WIRE } from "../room/host-next.ts";
 import { isBlocklistCommand, type FakeBlocklistHost } from "./fake-blocklist.ts";
-import { protectionCommandOf, quietScan, type FakeProtectionHost } from "./fake-protection.ts";
+import {
+  protectionCommandOf,
+  quietScan,
+  repairInfoOf,
+  runFakeRepair,
+  type FakeProtectionHost,
+} from "./fake-protection.ts";
+import type { FakeSetupHost } from "./fake-setup.ts";
 import { isUpdateCommand, type FakeUpdateHost } from "./fake-update.ts";
 import { ChannelReader, streamFailedOf, type ChannelEvent } from "./channel.ts";
 import { chooserOf } from "./chooser.ts";
@@ -48,6 +55,7 @@ import type {
   PickedFolder,
   Protection,
   QueryResult,
+  RepairStep,
   RevealTarget,
   SetupCommand,
   SetupEvent,
@@ -78,6 +86,7 @@ export type FakeCall =
   | FakeChooserCall
   | { call: "open_external"; url: string }
   | { call: "quit_app" }
+  | { call: "repair_install" }
   | { call: "open_file"; file: FileRefId }
   | { call: "reveal"; target: RevealTarget }
   | { call: "open_settings"; section: SettingsSection | null }
@@ -85,15 +94,6 @@ export type FakeCall =
   | { call: "next_command"; command: NextCommand }
   | { call: "setup"; command: SetupCommand }
   | { call: "count_ui"; event: UiCount };
-
-/** The setup wire, scripted (R20's `setup` and S21's `count_ui`; store/setup.ts's SetupSource). */
-export type FakeSetupHost = {
-  /** The events a new listener hears first, as the host replays SetupInfo and each agent's state; none when left
-   * out. */
-  first?: () => readonly SetupEvent[];
-  /** Answers each setup command; throwing refuses it. Its events, if any, are the test's to play (`setupEvent`). */
-  command?: (command: SetupCommand) => void | Promise<void>;
-};
 
 /** Scripted answers to the calls the host doesn't have yet (room/host-next.ts). */
 export type FakeNextHost = {
@@ -550,6 +550,11 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     await this.#answer(() => this.host.quitApp?.());
   }
 
+  async repairInstall(onStep: (step: RepairStep) => void): Promise<void> {
+    this.calls.push({ call: "repair_install" });
+    await this.#answer(() => runFakeRepair(this.host.protection?.repair, onStep));
+  }
+
   async openFile(file: FileRefId): Promise<OpenedFile> {
     this.calls.push({ call: "open_file", file });
     return (await this.#answer(() => this.host.openFile?.(file))) ?? { protected_view: false };
@@ -574,8 +579,7 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
       release_date: this.host.releaseDate ?? null,
       test_build: this.host.testBuild ?? false,
       release_mode: this.host.releaseMode ?? (this.host.testBuild ? "test" : "release"),
-      repair_available: false,
-      repair: null,
+      ...repairInfoOf(this.host.protection?.repair),
     };
   }
 

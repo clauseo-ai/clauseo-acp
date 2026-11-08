@@ -9,14 +9,39 @@
 // followed from the update store, never read twice. One store per
 // transport, for either window. It sends no command: each window's live with it (room/protection/
 // commands.ts, settings/sections/workspace-commands.ts), run through protection-run.ts, which marks
-// `running` here. No timers and no polling: the host publishes, the store hears.
+// `running` here. No timers and no polling: the host publishes, the store hears. Design B's in-app
+// repair (room/protection/repair.ts) keeps its run here too, beside display_info's word on it (read
+// once, when the store is made), so the room's note and the first run's step share one run.
 import { nextHostOf, type AppEvent } from "../room/host-next.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
-import type { ManagedBy, ProtectionView, UpdateView } from "../transport/protocol.ts";
+import type {
+  ManagedBy,
+  ProtectionView,
+  RepairNote,
+  RepairStep,
+  UpdateView,
+} from "../transport/protocol.ts";
 import { updateStoreOf } from "./update.ts";
 
 /** A protection command running from this window: the one-time set-up (`retry_protection`) or its removal. */
 export type ProtectionAct = "set_up" | "remove";
+
+/** Design B's in-app repair, "Download and run the installer again" (room/protection/repair.ts). */
+export type RepairState = {
+  /** display_info's repair_available: a per-user Windows install whose build can fetch its own
+   * installer. False until read, and in a window with no repair (Settings). */
+  available: boolean;
+  /** display_info's repair: this start follows the installer a repair ran, or the installer didn't
+   * start and the window was built again. */
+  note: RepairNote | null;
+  /** The run from this window: "starting" from the press to the channel's first step, then its
+   * steps; null when none runs. */
+  step: "starting" | RepairStep | null;
+  /** The last run's refusal code (launch_failed's after a rebuilt window), until the next starts. */
+  failed: string | null;
+  /** Whether this run has already brought the lawyer to the card or the set-up after `note`. */
+  landed: boolean;
+};
 
 export type ProtectionState = {
   /** This computer's view: undefined until the first answer, null while the query is refused. */
@@ -31,6 +56,7 @@ export type ProtectionState = {
   /** Who manages this install, by the updater's view: undefined until read, null for nobody else (a
    * per-user install) or while the query is refused. */
   managedBy: ManagedBy | null | undefined;
+  repair: RepairState;
 };
 
 export type ProtectionStore = {
@@ -47,7 +73,11 @@ const EMPTY: ProtectionState = {
   failed: null,
   step: null,
   managedBy: undefined,
+  repair: { available: false, note: null, step: null, failed: null, landed: false },
 };
+
+/** The repair's code for an installer that didn't start. */
+const LAUNCH_FAILED = "repair.launch_failed";
 
 /** The updater's `managed.by`, or null when the updater manages itself. */
 const managedOf = (update: UpdateView | undefined): ManagedBy | null => {
@@ -105,9 +135,29 @@ export function createProtectionStore(transport: HostTransport): ProtectionStore
       if (view?.computer !== undefined) set({ view });
     }
   };
+  // display_info's word on the repair, once: a launch that failed leaves its code's words on the card
+  const readRepair = (): void => {
+    transport.displayInfo().then(
+      ({ repair_available, repair }) =>
+        set({
+          repair: {
+            ...state.repair,
+            available: repair_available === true,
+            note: repair ?? null,
+            failed: state.repair.failed ?? (repair === "launch_failed" ? LAUNCH_FAILED : null),
+          },
+        }),
+      () => {},
+    );
+  };
   nextHostOf(transport).app?.subscribeApp(hear);
-  void read();
-  if (wired) followManaged();
+  // display_info's repair_available follows the updater's state once the host has started (desktop never waits for
+  // it there), so it is asked after the first protection read, which the host answers
+  const first = read();
+  if (wired) {
+    followManaged();
+    void first.then(readRepair);
+  }
   return {
     subscribe: (listener) => {
       listeners.add(listener);

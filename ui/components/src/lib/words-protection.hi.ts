@@ -92,6 +92,14 @@ export const HI = {
   // provisional
   "Clauseo will close so the installer can set up the Safe workspace. Run the installer you download, then open Clauseo again.":
     "Clauseo बंद हो जाएगा, ताकि इंस्टॉलर सुरक्षित कार्यक्षेत्र सेट अप कर सके। जो इंस्टॉलर आप डाउनलोड करें, उसे चलाएँ, फिर Clauseo दोबारा खोलें।",
+  // the in-app repair on a personal install (room/protection/repair.ts), provisional: its button,
+  // its two waiting lines (downloading, then Windows' prompt next), and the line after a start that
+  // follows an installer which didn't set the Safe workspace up
+  "Download and run the installer again": "इंस्टॉलर डाउनलोड करके फिर से चलाएँ",
+  "Downloading the installer…": "इंस्टॉलर डाउनलोड हो रहा है…",
+  "Windows will ask for permission. Choose Yes.": "Windows अनुमति माँगेगा। Yes चुनें।",
+  "The installer didn't finish setting up the Safe workspace. Try again, or choose Get the installer.":
+    "इंस्टॉलर ने सुरक्षित कार्यक्षेत्र का सेटअप पूरा नहीं किया। फिर से प्रयास करें, या इंस्टॉलर पाएँ चुनें।",
   "Ask your IT team to install Clauseo again.": "अपनी IT टीम से Clauseo फिर से इंस्टॉल करने को कहें।",
   "Your firm requires the Safe workspace on this computer, so Clauseo can't answer here until it's set up.":
     "आपकी फ़र्म इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र ज़रूरी मानती है, इसलिए जब तक यह तैयार नहीं होता, Clauseo यहाँ उत्तर नहीं दे सकता।",
