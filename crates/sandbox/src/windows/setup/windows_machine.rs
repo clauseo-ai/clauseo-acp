@@ -20,13 +20,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use super::accounts::{self, Kind};
 use super::lock::{Acquired, Held, SETUP_MUTEX, SetupMutex};
 use super::machine::{
-    LogonRight, Machine, MachineError, Password, ProfileDir, ServiceStart, owned,
+    GROUP_COMMENT, GroupFacts, LogonRight, Machine, MachineError, Password, ProfileDir,
+    ServiceStart, owned,
 };
 use super::owner::Owner;
 use super::record_values::CopyOwner;
 use super::record_write::{self, RECORD_KEY};
 use super::registered::registered;
-use super::{ffi, journal, logon, password, preflight, profile};
+use super::{ffi, group_info, journal, logon, password, preflight, profile};
 use crate::SetupError;
 use crate::windows::acl;
 use crate::windows::apply::Surroundings;
@@ -43,9 +44,6 @@ use crate::windows::wfp::{self, Namespace, NetworkReport, NetworkSetup};
 
 /// `BUILTIN\Administrators`, the owner a protected folder is handed to.
 const ADMINISTRATORS: &str = "S-1-5-32-544";
-
-/// The comment the pool group carries in Computer Management.
-const GROUP_COMMENT: &str = "Clauseo's protection runs each matter's agent as one of these users.";
 
 /// The machine-wide names a [`WindowsMachine`] works on, and what it may touch: the real ones
 /// ([`Names::production`]), or a test's, so a test never touches a real pool.
@@ -258,7 +256,15 @@ impl Machine for WindowsMachine {
     }
 
     fn in_group(&mut self, member: &Sid, group: &Sid) -> Result<bool, MachineError> {
-        Ok(accounts::group_member_sids(&self.group_name(group)?)?.contains(member))
+        Ok(group_info::group_member_sids(&self.group_name(group)?)?.contains(member))
+    }
+
+    fn group_facts(&mut self, group: &Sid) -> Result<GroupFacts, MachineError> {
+        let name = self.group_name(group)?;
+        Ok(GroupFacts {
+            comment: group_info::group_comment(&name)?,
+            members: group_info::group_member_sids(&name)?,
+        })
     }
 
     fn delete_group(&mut self, group: &Sid) -> Result<(), MachineError> {

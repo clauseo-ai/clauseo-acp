@@ -90,6 +90,8 @@ pub mod exe;
 pub mod explain;
 #[cfg(windows)]
 mod ffi;
+#[cfg(windows)]
+mod group_info;
 #[cfg(test)]
 #[cfg(windows)]
 mod handback_tests;

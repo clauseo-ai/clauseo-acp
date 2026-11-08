@@ -12,8 +12,12 @@
 //! the owner). An account that fails any part (a stranger's, or one killed before its group
 //! was set) stays skipped. It was never logged on (the logon comes after the record), so it
 //! has no profile to delete.
+//!
+//! A first set-up ended before its record leaves its group with no record, which set-up would
+//! refuse as someone else's for good. [`take_back_group`] reuses it when it is plainly set-up's:
+//! its comment is the one set-up writes and every member is an orphan by the same rule.
 
-use super::machine::Machine;
+use super::machine::{GROUP_COMMENT, Machine, MachineError};
 use super::strays::check_pool_sid;
 use crate::windows::pool::pool_number;
 use crate::windows::sids::Sid;
@@ -91,4 +95,45 @@ pub(super) fn reclaim(
             false
         }
     }
+}
+
+/// Whether `group`, found under the pool group's name while no record exists (a first set-up
+/// ended before its record was written), is one set-up made and may be reused: its comment is
+/// ours ([`GROUP_COMMENT`]) and every member is a killed run's orphan ([`is_orphan`], with no
+/// SID recorded), or it has none. Then each member is deleted and it is `true`; any other
+/// comment or member (an administrator's group) is `false`, refused as before, with nothing
+/// deleted.
+pub(super) fn take_back_group(
+    machine: &mut impl Machine,
+    group: &Sid,
+) -> Result<bool, MachineError> {
+    let facts = machine.group_facts(group)?;
+    if facts.comment != GROUP_COMMENT {
+        tracing::warn!("a group with the pool group's name has another comment; not ours");
+        return Ok(false);
+    }
+    let owner = machine.owner().clone();
+    let own = machine
+        .own_account()
+        .cloned()
+        .unwrap_or_else(|| owner.clone());
+    let mut orphans = Vec::new();
+    for sid in &facts.members {
+        let name = machine.account_name(sid)?;
+        let found = name.as_deref().map(|name| Found {
+            name,
+            sid,
+            in_group: true,
+        });
+        if !found.is_some_and(|found| is_orphan(found, group, &[], &own, &owner)) {
+            tracing::warn!("the pool group's name holds an account set-up didn't make; not ours");
+            return Ok(false);
+        }
+        orphans.extend(name);
+    }
+    for name in &orphans {
+        machine.delete_user(name)?;
+        tracing::info!(%name, "deleted a sandbox user a first set-up made but never recorded");
+    }
+    Ok(true)
 }

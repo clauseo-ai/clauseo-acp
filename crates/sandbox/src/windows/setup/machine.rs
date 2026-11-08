@@ -80,6 +80,19 @@ pub struct ProfileDir {
     pub temporary: bool,
 }
 
+/// The comment set-up gives the pool's group (`ClauseoSandboxUsers`) as it makes it.
+pub(crate) const GROUP_COMMENT: &str =
+    "Clauseo's protection runs each matter's agent as one of these users.";
+
+/// What [`Machine::group_facts`] reads of a local group.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct GroupFacts {
+    /// Its comment; empty for none.
+    pub comment: String,
+    /// Its members, by SID.
+    pub members: Vec<Sid>,
+}
+
 /// Everything the set-up asks of the machine besides the permission writes
 /// ([`AclWriter`](crate::windows::AclWriter)), one method per step of
 /// [`set_up`](super::set_up). Each is one Windows call or one file the owner keeps, so the
@@ -118,6 +131,8 @@ pub trait Machine {
     fn group_members(&mut self, group: &Sid) -> Result<usize, MachineError>;
     /// Whether the account `member` is in the group `group`.
     fn in_group(&mut self, member: &Sid, group: &Sid) -> Result<bool, MachineError>;
+    /// The group `group`'s comment and members, to tell one set-up made from an admin's.
+    fn group_facts(&mut self, group: &Sid) -> Result<GroupFacts, MachineError>;
     /// Deletes the group `group`.
     fn delete_group(&mut self, group: &Sid) -> Result<(), MachineError>;
     /// A new random password for a pool user (`PR4e`'s generator).

@@ -158,6 +158,8 @@ pub(super) struct Account {
 pub(super) struct State {
     pub(super) accounts: BTreeMap<String, Account>,
     pub(super) group: Option<Sid>,
+    /// The group's comment when it isn't set-up's (`GROUP_COMMENT`), as an admin's might be.
+    pub(super) group_comment: Option<String>,
     pub(super) record: Option<MachineRecord>,
     pub(super) profiles: BTreeMap<Sid, PathBuf>,
     pub(super) marker: Option<Marker>,
@@ -195,6 +197,7 @@ pub(super) fn new_machine(test: &str) -> FakeMachine {
         state: State {
             accounts: BTreeMap::from([(OWNER_NAME.to_owned(), owner)]),
             group: None,
+            group_comment: None,
             record: None,
             profiles: BTreeMap::new(),
             marker: None,
@@ -328,5 +331,19 @@ impl FakeMachine {
         }
         self.state.secrets = file;
         Ok(())
+    }
+
+    /// `group_facts`: the group's comment, and the accounts in it.
+    pub(super) fn facts_of(&self, group: &Sid) -> crate::windows::setup::machine::GroupFacts {
+        let comment = self.state.group_comment.as_deref();
+        crate::windows::setup::machine::GroupFacts {
+            comment: comment
+                .unwrap_or(crate::windows::setup::machine::GROUP_COMMENT)
+                .to_owned(),
+            members: (self.state.accounts.values())
+                .filter(|account| account.groups.contains(group))
+                .map(|account| account.sid.clone())
+                .collect(),
+        }
     }
 }

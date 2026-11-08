@@ -37,11 +37,14 @@ build 26100):
   adopted, except a killed run's orphan (made and put in the group, but not yet in `PoolSids`):
   a pool name, in the group, no recorded SID, a local non-built-in account other than the owner
   and the user running set-up. Set-up deletes it when it reaches that name and makes the name
-  again (`setup::orphans`), so ended runs can't use up the 32 names. Each matter is assigned one
-  pool user. The runner logs on as that
-  user with `CreateProcessWithLogonW`, which needs the Secondary Logon service: without it the
-  logon fails with error 1058, and set-up reports `SetUpFailed` with that cause. The agent runs
-  under a restricted token, not write-restricted, so reads are checked too:
+  again (`setup::orphans`), so ended runs can't use up the 32 names. A first set-up ended before
+  its record leaves the group with no record: set-up reuses it when its comment is the one set-up
+  writes and every member is such an orphan (or it has none), deleting them, and otherwise
+  refuses, as for an administrator's group of that name. Each matter is assigned one pool user.
+  The runner logs on as that user with `CreateProcessWithLogonW`, which needs the Secondary
+  Logon service: without it the logon fails with error 1058, and set-up reports `SetUpFailed`
+  with that cause. The agent runs under a restricted token, not write-restricted, so reads are
+  checked too:
   - restricting SIDs: the pool user, `RESTRICTED`, `Users` and `Everyone` (D11), and the
     matter's SID only when a launch asks for it (off by default; spike B found it adds nothing);
   - the logon SID deny-only, and not restricting;

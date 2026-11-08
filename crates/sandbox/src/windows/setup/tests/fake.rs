@@ -20,7 +20,7 @@ use crate::windows::marker::{Marker, MarkerState};
 use crate::windows::pool::MachineRecord;
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::setup::{
-    LogonRight, Machine, MachineError, Password, ProfileDir, ServiceStart,
+    LogonRight, Machine, MachineError, Password, ProfileDir, ServiceStart, machine::GroupFacts,
 };
 use crate::windows::sids::Reserved;
 use crate::windows::wfp::{NetworkReport, NetworkSetup};
@@ -216,6 +216,11 @@ impl Machine for FakeMachine {
             .accounts
             .values()
             .any(|a| a.sid == *member && a.groups.contains(group)))
+    }
+
+    fn group_facts(&mut self, group: &Sid) -> Result<GroupFacts, MachineError> {
+        self.call(format!("group_facts {}", rid(group)))?;
+        Ok(self.facts_of(group))
     }
 
     fn delete_group(&mut self, group: &Sid) -> Result<(), MachineError> {

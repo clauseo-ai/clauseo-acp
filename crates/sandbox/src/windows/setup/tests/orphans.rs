@@ -1,6 +1,7 @@
 //! A killed run's orphan accounts (`orphans.rs`): a pool-named account in the pool's group
 //! that no record names is deleted and its name made again; any other account under a pool
-//! name stays, skipped (D-B5).
+//! name stays, skipped (D-B5). A first set-up killed before its record left a group too: one
+//! with our comment and only such accounts is reused; an administrator's is refused.
 
 use std::collections::BTreeSet;
 
@@ -124,4 +125,97 @@ fn only_a_pool_named_local_account_in_the_group_that_no_record_names_is_an_orpha
     ] {
         assert!(!check("ClauseoSb07", &account, true, &[]), "{account}");
     }
+}
+
+/// `machine` as a first set-up killed before its record left it: the group `sid(1000)`, with
+/// the accounts `members` (name, SID) in it, and no record.
+fn first_run_left(machine: &mut FakeMachine, members: &[(&str, Sid)]) {
+    machine.state.group = Some(sid(1000));
+    machine.next_rid = 1100;
+    for (name, account) in members {
+        let in_group = BTreeSet::from([sid(1000)]);
+        let entry = machine.state.accounts.entry((*name).to_owned());
+        let held = entry.or_insert_with(|| Account {
+            sid: account.clone(),
+            password: "lost".to_owned(),
+            groups: BTreeSet::new(),
+            hidden: true,
+        });
+        held.groups.extend(in_group);
+    }
+}
+
+#[test]
+fn a_first_run_killed_before_its_record_leaves_a_group_the_next_run_reuses() {
+    // Its own users in it, or none (killed before the first was made).
+    for members in [
+        vec![("ClauseoSb01", sid(1001)), ("ClauseoSb02", sid(1002))],
+        Vec::new(),
+    ] {
+        let mut machine = FakeMachine::new("setup-first-run-group");
+        first_run_left(&mut machine, &members);
+        let report = set_up_fresh(&mut machine, &mut FakeAcl::default());
+        assert!(!report.group_made, "reused, not made");
+        let record = machine.state.record.clone().unwrap();
+        assert_eq!(record.group, sid(1000));
+        let calls = &machine.calls;
+        assert!(calls.iter().all(|call| call != "create_group"), "{calls:?}");
+        assert!(calls.contains(&"group_facts 1000".to_owned()), "{calls:?}");
+        for (name, old) in &members {
+            assert!(
+                !record.pool.contains(old),
+                "{name}'s old account isn't kept"
+            );
+            assert_ne!(&machine.state.accounts[*name].sid, old, "{name} made again");
+            let at = |call: String| calls.iter().position(|made| *made == call);
+            let deleted = at(format!("delete_user {name}")).expect("deleted");
+            assert!(
+                Some(deleted) < at(format!("create_user {name}")),
+                "{calls:?}"
+            );
+        }
+        let names: Vec<&str> = report.pool.iter().map(|u| u.name.as_str()).collect();
+        assert_eq!(names.first(), Some(&"ClauseoSb01"));
+    }
+}
+
+#[test]
+fn a_group_with_another_member_or_comment_is_an_admins_and_still_refused() {
+    let refused = |machine: &mut FakeMachine| {
+        let before = machine.state.clone();
+        let req = request(machine, 0, Vec::new());
+        let failure = set_up(machine, &mut FakeAcl::default(), &req).unwrap_err();
+        assert_eq!(failure.step, Step::Group);
+        assert!(
+            failure.cause.contains("that set-up didn't record"),
+            "{}",
+            failure.cause
+        );
+        assert_eq!(machine.state, before, "nothing deleted or made");
+        assert!(
+            !machine
+                .calls
+                .iter()
+                .any(|call| call.starts_with("delete_user"))
+        );
+    };
+    // The owner in it, beside a pool-shaped account: an admin's group.
+    let mut machine = FakeMachine::new("setup-admins-group");
+    let owner = Sid::parse(OWNER).unwrap();
+    first_run_left(
+        &mut machine,
+        &[("ClauseoSb01", sid(1001)), (OWNER_NAME, owner)],
+    );
+    refused(&mut machine);
+    // A pool name on another machine's or a built-in account.
+    for stranger in [Sid::parse("S-1-5-21-7-7-7-1001").unwrap(), sid(500)] {
+        let mut machine = FakeMachine::new("setup-admins-group-stranger");
+        first_run_left(&mut machine, &[("ClauseoSb01", stranger)]);
+        refused(&mut machine);
+    }
+    // Empty, but with a comment set-up never writes.
+    let mut machine = FakeMachine::new("setup-admins-group-comment");
+    first_run_left(&mut machine, &[]);
+    machine.state.group_comment = Some("Lab machines".to_owned());
+    refused(&mut machine);
 }

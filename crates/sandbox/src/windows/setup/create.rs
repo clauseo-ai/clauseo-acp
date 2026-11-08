@@ -337,14 +337,19 @@ fn change(
     })
 }
 
-/// Step 3: the group, adopted only when its SID is the record's, made when missing. A group by
-/// that name that isn't the record's (or with no record) refuses: it is someone else's.
+/// Step 3: the group, adopted when its SID is the record's or a killed first run's
+/// (`orphans::take_back_group`), made when missing; any other refuses: it is someone else's.
 fn group(machine: &mut impl Machine, run: &mut Run) -> Result<Sid, Failed> {
     let failed = |cause: String| (Step::Group, cause);
     let found = machine.group().map_err(|error| failed(cause_of(&error)))?;
     let recorded = run.before.as_ref().map(|record| &record.group);
+    let first_runs = match (&found, recorded) {
+        (Some(sid), None) => super::orphans::take_back_group(machine, sid),
+        _ => Ok(false),
+    }
+    .map_err(|error| failed(cause_of(&error)))?;
     let sid = match found {
-        Some(sid) if Some(&sid) == recorded => sid,
+        Some(sid) if Some(&sid) == recorded || first_runs => sid,
         Some(sid) => {
             return Err(failed(format!(
                 "a group named ClauseoSandboxUsers exists ({sid}) that set-up didn't record"
