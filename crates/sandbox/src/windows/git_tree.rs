@@ -53,6 +53,9 @@ mod discard;
 mod discover;
 #[cfg(test)]
 mod fake;
+#[cfg(test)]
+#[cfg(windows)]
+mod ntfs_tests;
 #[cfg(windows)]
 mod os;
 mod retire;
