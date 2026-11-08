@@ -29,12 +29,6 @@ use windows::core::{HSTRING, PCWSTR, PWSTR};
 use super::{Tree, VENDOR_SDDL};
 use crate::windows::setup::lock::Descriptor;
 
-/// The vendor key by its NT path, opened with no root handle.
-const ROOT: &str = "\\Registry\\Machine\\SOFTWARE\\Clauseo";
-
-/// The vendor key by its Win32 path, for `RegCreateKeyExW` in `HKEY_LOCAL_MACHINE`.
-const VENDOR: &str = "SOFTWARE\\Clauseo";
-
 /// The value a registry link holds, of type `REG_LINK`.
 const LINK_VALUE: &str = "SymbolicLinkValue";
 
@@ -50,13 +44,25 @@ impl Drop for Key {
 }
 
 /// The vendor key's registry, through [`Key`] handles.
-pub(super) struct Registry;
+pub(super) struct Registry {
+    /// The root's path under `HKLM`: [`VENDOR`] for set-up, a test's own key for the tests.
+    path: String,
+}
+
+impl Registry {
+    /// The registry rooted at the key `path` under `HKLM`.
+    pub(super) fn at(path: &str) -> Registry {
+        Registry {
+            path: path.to_owned(),
+        }
+    }
+}
 
 impl Tree for Registry {
     type Key = Key;
 
     fn open_root(&mut self) -> Result<Option<Key>, String> {
-        open(None, ROOT)
+        open(None, &format!("\\Registry\\Machine\\{}", self.path))
     }
 
     fn create_root(&mut self) -> Result<(), String> {
@@ -66,7 +72,7 @@ impl Tree for Registry {
             lpSecurityDescriptor: descriptor.0.0,
             bInheritHandle: false.into(),
         };
-        let subkey = HSTRING::from(VENDOR);
+        let subkey = HSTRING::from(self.path.as_str());
         let mut opened = HKEY::default();
         // SAFETY: the subkey is NUL-terminated and lives for the call; `attributes` and the
         // descriptor it points to live for the call too; `opened` is a live out-pointer, closed

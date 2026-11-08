@@ -10,6 +10,7 @@
 
 #[cfg(windows)]
 use super::MachineError;
+#[cfg(windows)]
 use super::record_key::VENDOR_KEY;
 use super::record_values::RECORD_SDDL;
 #[cfg(windows)]
@@ -120,7 +121,7 @@ fn pinned_child(name: &str) -> Option<String> {
 
 /// Secures the vendor key as the module says, and returns what it changed. Any fault stops it:
 /// set-up must not go on under a key it couldn't secure.
-pub(super) fn ensure<T: Tree>(tree: &mut T) -> Result<Report, VendorFault> {
+pub(super) fn ensure<T: Tree>(tree: &mut T, path: &str) -> Result<Report, VendorFault> {
     let mut report = Report::default();
     let (root, created) = if let Some(root) = tree.open_root().map_err(VendorFault::Open)? {
         (root, false)
@@ -142,7 +143,7 @@ pub(super) fn ensure<T: Tree>(tree: &mut T) -> Result<Report, VendorFault> {
     if !created && !pinned {
         report.weaker_from = Some(before);
     }
-    clean(tree, &root, VENDOR_KEY, 1, &mut report)?;
+    clean(tree, &root, path, 1, &mut report)?;
     Ok(report)
 }
 
@@ -206,7 +207,8 @@ pub(super) fn secure() -> Result<(), MachineError> {
     let fault = |text: String| MachineError::VendorKey(text);
     let _held = Privileges::enable(&RECLAIM)
         .map_err(|error| fault(format!("its privileges weren't enabled: {error}")))?;
-    let report = ensure(&mut os::Registry).map_err(|found| fault(found.to_string()))?;
+    let report = ensure(&mut os::Registry::at(VENDOR_KEY), VENDOR_KEY)
+        .map_err(|found| fault(found.to_string()))?;
     if let Some(from) = &report.weaker_from {
         tracing::warn!(was = %from, "HKLM\\SOFTWARE\\Clauseo was weaker than its pinned security");
     }

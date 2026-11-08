@@ -141,7 +141,7 @@ fn the_pinned_sddl_owns_by_system_and_keeps_others_out() {
 #[test]
 fn a_missing_vendor_key_is_made_with_the_pinned_sddl() {
     let mut tree = FakeTree::with(None, &[]);
-    let report = ensure(&mut tree).unwrap();
+    let report = ensure(&mut tree, VENDOR_KEY).unwrap();
     assert_eq!(report, super::Report::default(), "nothing to log");
     assert_eq!(tree.sddl_of(VENDOR_KEY), VENDOR_SDDL);
 }
@@ -154,7 +154,7 @@ fn a_weak_vendor_key_is_resecured_and_its_planted_subkey_removed() {
         Some(WEAK),
         &[("Planted", WEAK, false), ("Planted\\Nested", WEAK, false)],
     );
-    let report = ensure(&mut tree).unwrap();
+    let report = ensure(&mut tree, VENDOR_KEY).unwrap();
     assert_eq!(report.weaker_from.as_deref(), Some(WEAK));
     assert_eq!(report.removed, [under("Planted")]);
     assert_eq!(tree.sddl_of(VENDOR_KEY), VENDOR_SDDL);
@@ -166,7 +166,7 @@ fn a_weak_vendor_key_is_resecured_and_its_planted_subkey_removed() {
 fn a_linked_vendor_key_is_refused_before_anything_is_written() {
     let mut tree = FakeTree::with(Some(WEAK), &[("Planted", WEAK, false)]);
     tree.keys.get_mut(VENDOR_KEY).unwrap().link = true;
-    assert_eq!(ensure(&mut tree), Err(VendorFault::Link));
+    assert_eq!(ensure(&mut tree, VENDOR_KEY), Err(VendorFault::Link));
     assert!(tree.set.is_empty() && tree.deleted.is_empty());
 }
 
@@ -174,7 +174,7 @@ fn a_linked_vendor_key_is_refused_before_anything_is_written() {
 fn a_failed_resecure_refuses_and_removes_nothing() {
     let mut tree = FakeTree::with(Some(WEAK), &[("Planted", WEAK, false)]);
     tree.fail_set = Some(VENDOR_KEY.to_owned());
-    let result = ensure(&mut tree);
+    let result = ensure(&mut tree, VENDOR_KEY);
     assert!(matches!(result, Err(VendorFault::Secure(_))), "{result:?}");
     assert_eq!(tree.deleted, Vec::<String>::new());
 }
@@ -183,14 +183,14 @@ fn a_failed_resecure_refuses_and_removes_nothing() {
 fn a_failed_clean_up_refuses() {
     let mut tree = FakeTree::with(Some(VENDOR_SDDL), &[("Planted", WEAK, false)]);
     tree.fail_delete = Some(under("Planted"));
-    let result = ensure(&mut tree);
+    let result = ensure(&mut tree, VENDOR_KEY);
     assert!(matches!(result, Err(VendorFault::CleanUp(_))), "{result:?}");
 }
 
 #[test]
 fn a_linked_subkey_is_deleted_whoever_owns_it() {
     let mut tree = FakeTree::with(Some(VENDOR_SDDL), &[("Link", VENDOR_SDDL, true)]);
-    let report = ensure(&mut tree).unwrap();
+    let report = ensure(&mut tree, VENDOR_KEY).unwrap();
     assert_eq!(report.removed, [under("Link")]);
     assert!(!tree.has(&under("Link")));
 }
@@ -199,7 +199,7 @@ fn a_linked_subkey_is_deleted_whoever_owns_it() {
 fn a_drifted_record_key_is_set_back_to_its_pinned_sddl() {
     let drifted = "O:BAD:P(A;CI;KA;;;BU)";
     let mut tree = FakeTree::with(Some(VENDOR_SDDL), &[(RECORD_NAME, drifted, false)]);
-    let report = ensure(&mut tree).unwrap();
+    let report = ensure(&mut tree, VENDOR_KEY).unwrap();
     assert_eq!(report.resecured, [under(RECORD_NAME)]);
     assert_eq!(tree.sddl_of(&under(RECORD_NAME)), RECORD_PINNED);
     assert_eq!(report.removed, Vec::<String>::new());
@@ -208,7 +208,7 @@ fn a_drifted_record_key_is_set_back_to_its_pinned_sddl() {
 #[test]
 fn a_record_key_owned_by_someone_else_is_removed() {
     let mut tree = FakeTree::with(Some(VENDOR_SDDL), &[(RECORD_NAME, WEAK, false)]);
-    let report = ensure(&mut tree).unwrap();
+    let report = ensure(&mut tree, VENDOR_KEY).unwrap();
     assert_eq!(report.removed, [under(RECORD_NAME)]);
     assert!(!tree.has(&under(RECORD_NAME)));
 }
@@ -224,7 +224,7 @@ fn the_keys_that_are_right_are_left_alone() {
             ("Clauseo\\Child", "O:SYD:P(A;;KA;;;SY)", false),
         ],
     );
-    let report = ensure(&mut tree).unwrap();
+    let report = ensure(&mut tree, VENDOR_KEY).unwrap();
     assert_eq!(report, super::Report::default());
     assert!(
         tree.set.iter().all(|(key, _)| key == VENDOR_KEY),
@@ -248,5 +248,5 @@ fn a_subkey_nested_past_the_limit_refuses() {
         .map(|(path, sddl, link)| (path.as_str(), sddl.as_str(), *link))
         .collect();
     let mut tree = FakeTree::with(Some(VENDOR_SDDL), &borrowed);
-    assert_eq!(ensure(&mut tree), Err(VendorFault::TooDeep));
+    assert_eq!(ensure(&mut tree, VENDOR_KEY), Err(VendorFault::TooDeep));
 }
