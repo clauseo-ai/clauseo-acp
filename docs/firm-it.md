@@ -59,9 +59,10 @@ Windows Server 2025 (build 26100) on 2026-11-03, with the 0.0.0 dry-run installe
   `C:\Program Files\Git`), and only when no one but administrators can change any of its
   files; with Git installed for one user only, the agents have no Git Bash. The sandbox never
   holds Git's own files open, so it never blocks a Git update, and a Git update never breaks a
-  running session's copy; the next set-up or `\Clauseo\SandboxRefresh` run builds a new one,
-  and old ones go once that account's session ends. The uninstall deletes them all; a file still
-  in use goes at the next restart.
+  running session's copy; the next set-up or `\Clauseo\SandboxRefresh` run builds a new one.
+  Each account keeps its current copy and the previous one, which stays until the next Git
+  update; older ones go once nothing runs as that account. The uninstall deletes them all; a file
+  still in use goes at the next restart.
 
 **Exit codes** of the installers, besides NSIS's 0 (done), 1 (cancelled) and 2 (stopped by an
 error). Only the last code set is reported, so an install that set several reports one of them.
