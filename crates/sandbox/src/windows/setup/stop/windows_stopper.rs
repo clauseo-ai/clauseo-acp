@@ -10,18 +10,14 @@
 
 use std::collections::BTreeMap;
 use std::ffi::c_void;
-use std::iter::once;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use windows::Wdk::System::Threading::{NtQueryInformationProcess, ProcessImageFileName};
-use windows::Win32::Foundation::{HANDLE, NTSTATUS, UNICODE_STRING, WAIT_OBJECT_0};
-use windows::Win32::Security::OWNER_SECURITY_INFORMATION;
-use windows::Win32::Storage::FileSystem::{
-    BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_ATTRIBUTE_REPARSE_POINT,
-    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE, FILE_SHARE_READ,
-    FILE_SHARE_WRITE, GetFileInformationByHandle, OPEN_EXISTING, READ_CONTROL,
+use windows::Wdk::System::Threading::{
+    NtQueryInformationProcess, ProcessBasicInformation, ProcessImageFileName,
 };
+use windows::Win32::Foundation::{HANDLE, NTSTATUS, UNICODE_STRING, WAIT_OBJECT_0};
+use windows::Win32::Storage::FileSystem::READ_CONTROL;
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
@@ -35,17 +31,13 @@ use windows::Win32::System::Threading::{
     PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SUSPEND_RESUME, PROCESS_SYNCHRONIZE,
     PROCESS_TERMINATE, QueryFullProcessImageNameW, Sleep, TerminateProcess, WaitForSingleObject,
 };
-use windows::Win32::UI::Shell::{
-    FOLDERID_ProgramFiles, FOLDERID_ProgramFilesX86, FOLDERID_Windows,
-};
-use windows::core::{PCWSTR, PWSTR};
+use windows::core::PWSTR;
 
 use windows::Win32::Networking::BackgroundIntelligentTransferService::IBackgroundCopyJob;
 
 use super::windows_bits::{self, Com};
 use super::{Failed, Image, Pool, Process, StopExit, Stopper, stop};
-use crate::windows::acl::object::{Handle, kernel_security};
-use crate::windows::acl_bytes::owner_sid;
+use crate::windows::acl::object::Handle;
 use crate::windows::admin_copy::{self, os};
 use crate::windows::refresh::event_log;
 use crate::windows::setup::lock::{Held, SETUP_MUTEX, SetupMutex};
@@ -151,23 +143,6 @@ impl Stopper for WindowsStopper {
     fn own_pid(&mut self) -> u32 {
         // SAFETY: GetCurrentProcessId only reads this process's id.
         unsafe { GetCurrentProcessId() }
-    }
-
-    fn system_folders(&mut self) -> Vec<String> {
-        let ids = [
-            FOLDERID_Windows,
-            FOLDERID_ProgramFiles,
-            FOLDERID_ProgramFilesX86,
-        ];
-        ids.iter()
-            .filter_map(|id| match os::known_folder(id) {
-                Ok(folder) => Some(folder.to_string_lossy().into_owned()),
-                Err(error) => {
-                    tracing::warn!(%error, "a system folder couldn't be found");
-                    None
-                }
-            })
-            .collect()
     }
 
     fn suspend(&mut self, pid: u32) -> Result<(), Failed> {
@@ -375,9 +350,10 @@ pub(super) fn look_at(pid: u32) -> Option<(Process, Option<Handle>)> {
 }
 
 /// `handle`'s image, through query-limited access, which a protected process grants. The
-/// kernel's own name for it (`ProcessImageFileName`) first: empty for a minimal process, which
-/// has no image file. Then its Win32 path, with its file's owner ([`file_owner`]); a path that
-/// can't be read is [`Image::Failed`].
+/// kernel's own name for it (`ProcessImageFileName`) first: empty for a process with no image
+/// file, which is [`Image::Missing`] only when [`subsystem`] says it isn't a subsystem (pico)
+/// process, which has no image file either. Then its Win32 path; a path that can't be read is
+/// [`Image::Failed`].
 fn image_of(handle: &Handle) -> Image {
     // A UNICODE_STRING, then its text: room for the longest NT path.
     let mut buffer = vec![0u64; 8_200];
@@ -401,7 +377,11 @@ fn image_of(handle: &Handle) -> Image {
     // SAFETY: on success the call wrote a UNICODE_STRING at the buffer's start.
     let name = unsafe { &*buffer.as_ptr().cast::<UNICODE_STRING>() };
     if name.Length == 0 {
-        return Image::Missing;
+        return match subsystem(handle) {
+            Some(false) => Image::Missing,
+            Some(true) => Image::Subsystem,
+            None => Image::Failed,
+        };
     }
     let mut path = vec![0u16; 32_768];
     let mut length = u32::try_from(path.len()).unwrap_or(u32::MAX);
@@ -419,41 +399,60 @@ fn image_of(handle: &Handle) -> Image {
         .ok()
         .and_then(|length| path.get(..length));
     match (read, units) {
-        (Ok(()), Some(units)) if !units.is_empty() => {
-            Image::Path(String::from_utf16_lossy(units), file_owner(units))
-        }
+        (Ok(()), Some(units)) if !units.is_empty() => Image::Path(String::from_utf16_lossy(units)),
         _ => Image::Failed,
     }
 }
 
-/// The owner of the file at `path` (UTF-16, no NUL), opened as itself with `READ_CONTROL`,
-/// sharing everything, so a running image opens; `None` when it can't be opened or its owner
-/// read, or when it is a reparse point, which names another file's owner nothing.
-fn file_owner(path: &[u16]) -> Option<Sid> {
-    let name: Vec<u16> = path.iter().copied().chain(once(0)).collect();
-    // SAFETY: `name` is NUL-terminated and outlives the call; no security attributes or
-    // template are passed. The handle is owned by `Handle` at once.
-    let file = unsafe {
-        CreateFileW(
-            PCWSTR(name.as_ptr()),
-            READ_CONTROL.0,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            None,
-            OPEN_EXISTING,
-            FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS,
-            None,
+/// `PROCESS_EXTENDED_BASIC_INFORMATION`, declared here so the `windows` crate's
+/// `Win32_System_Kernel` and `Wdk_System_SystemServices` aren't needed (as
+/// `owner/process.rs` declares the basic one); the same `repr(C)` layout.
+#[repr(C)]
+#[derive(Default)]
+struct ExtendedBasicInformation {
+    size: usize,
+    exit_status: i32,
+    peb_base_address: usize,
+    affinity_mask: usize,
+    base_priority: i32,
+    unique_process_id: usize,
+    inherited_from_unique_process_id: usize,
+    flags: u32,
+}
+
+/// `PROCESS_EXTENDED_BASIC_INFORMATION`'s `IsSubsystemProcess` bit (after `IsProtectedProcess`,
+/// `IsWow64Process`, `IsProcessDeleting`, `IsCrossSessionCreate`, `IsFrozen`, `IsBackground`,
+/// `IsStronglyNamed` and `IsSecureProcess`): set for a WSL 1 (pico) process.
+const IS_SUBSYSTEM_PROCESS: u32 = 1 << 8;
+
+/// Whether `handle`'s process is a subsystem (pico) process, from
+/// `NtQueryInformationProcess(ProcessBasicInformation)` with the extended struct, which
+/// query-limited access reads; `None` when the query fails or doesn't fill the extended struct.
+fn subsystem(handle: &Handle) -> Option<bool> {
+    let size = size_of::<ExtendedBasicInformation>();
+    let mut info = ExtendedBasicInformation {
+        size,
+        ..ExtendedBasicInformation::default()
+    };
+    let length = u32::try_from(size).ok()?;
+    let mut written = 0u32;
+    // SAFETY: the handle is live with PROCESS_QUERY_LIMITED_INFORMATION; `info` is a live,
+    // writable struct of `length` bytes with PROCESS_EXTENDED_BASIC_INFORMATION's layout, its
+    // `size` set as the call requires; `written` is a live out-pointer.
+    let status = unsafe {
+        NtQueryInformationProcess(
+            handle.0,
+            ProcessBasicInformation,
+            (&raw mut info).cast::<c_void>(),
+            length,
+            &raw mut written,
         )
-    }
-    .ok()?;
-    let file = Handle(file);
-    let mut info = BY_HANDLE_FILE_INFORMATION::default();
-    // SAFETY: the handle is live; `info` is a live, writable struct.
-    unsafe { GetFileInformationByHandle(file.0, &raw mut info) }.ok()?;
-    if info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
+    };
+    // A kernel that filled only the basic struct leaves the flags unset: not an answer.
+    if status.is_err() || written != length || info.size != size {
         return None;
     }
-    let bytes = kernel_security(&file, OWNER_SECURITY_INFORMATION.0).ok()?;
-    owner_sid(&bytes)
+    Some(info.flags & IS_SUBSYSTEM_PROCESS != 0)
 }
 
 /// The kernel's process list (`WTSEnumerateProcessesExW`, level 1, every session): each pid

@@ -26,7 +26,7 @@ use windows::Win32::System::Threading::{
 
 use super::windows_bits::{self, Com};
 use super::windows_stopper::{WindowsStopper, look_at, processes};
-use super::{Passes, Stopper as _, cancel_jobs, pick};
+use super::{Image, Passes, Stopper as _, cancel_jobs, pick};
 use crate::test_support::TempDir;
 use crate::windows::acl::object::{Handle, words};
 use crate::windows::acl_bytes::{build_descriptor, empty_acl};
@@ -131,11 +131,11 @@ fn elevated_a_process_whose_token_shuts_out_system_is_named_by_its_owner_and_pic
 
     // Its owner a pool SID: picked, as that user's. Any other owner: unknown, never stopped.
     let alone = std::slice::from_ref(found);
-    let picked = pick(alone, std::slice::from_ref(&owner), std::process::id(), &[]);
+    let picked = pick(alone, std::slice::from_ref(&owner), std::process::id());
     assert_eq!(picked.stop, [(pid, owner.clone())], "{picked:?}");
     let other = crate::windows::sids::Sid::parse("S-1-5-21-1-2-3-1010").unwrap();
     assert_ne!(other, owner);
-    let picked = pick(alone, std::slice::from_ref(&other), std::process::id(), &[]);
+    let picked = pick(alone, std::slice::from_ref(&other), std::process::id());
     assert!(picked.stop.is_empty() && picked.unknown == 1, "{picked:?}");
     drop(debug);
     drop(child);
@@ -239,27 +239,33 @@ fn elevated_the_stop_cancels_a_pool_users_bits_job() {
 
 #[test]
 #[ignore = "elevated: run by CI's elevated step with CLAUSEO_ELEVATED_TESTS=1"]
-fn elevated_this_machines_unnamed_session_0_processes_are_system_ones() {
-    if !gate("elevated_this_machines_unnamed_session_0_processes_are_system_ones") {
+fn elevated_this_machines_unnamed_session_0_processes_are_minimal_ones() {
+    if !gate("elevated_this_machines_unnamed_session_0_processes_are_minimal_ones") {
         return;
     }
-    // The stop reads under SeDebugPrivilege; with nothing of a pool's running, a session-0
-    // process no source names must have a system image (under the Windows or a Program Files
-    // folder, its file owned by SYSTEM, `TrustedInstaller` or Administrators) or none, or every
-    // run would end at 48.
+    // The stop reads under SeDebugPrivilege; with nothing of a pool's running, every session-0
+    // process no source names and that can't be opened to be terminated must be a minimal one:
+    // no image file, not a subsystem process (`Image::Missing`). Anything else would end every
+    // run at 48; each offender is listed with its image's file name.
     let mut stopper = WindowsStopper::new();
-    let folders = stopper.system_folders();
-    eprintln!("system folders: {folders:?}");
-    assert_eq!(folders.len(), 3, "{folders:?}");
     let seen = stopper.snapshot().unwrap();
     let unnamed: Vec<_> = seen
         .iter()
         .filter(|p| p.listed.is_none() && p.token.is_none() && p.owner.is_none())
-        .filter(|p| !p.can_stop && p.session == Some(0))
+        .filter(|p| !p.can_stop && p.session == Some(0) && ![0, 4].contains(&p.pid))
         .collect();
     for process in &unnamed {
         eprintln!("unnamed in session 0: {} {:?}", process.pid, process.image);
     }
-    let picked = pick(&seen, &[], std::process::id(), &folders);
-    assert_eq!(picked.unknown, 0, "{unnamed:?}");
+    let offenders: Vec<String> = unnamed
+        .iter()
+        .filter(|p| p.image != Image::Missing)
+        .map(|p| format!("{} {}", p.pid, p.image.file_name()))
+        .collect();
+    assert!(
+        offenders.is_empty(),
+        "unnamed, unopenable session-0 processes that aren't minimal: {offenders:?}"
+    );
+    let picked = pick(&seen, &[], std::process::id());
+    assert_eq!(picked.unknown, 0, "{:?}", picked.unknown_images);
 }

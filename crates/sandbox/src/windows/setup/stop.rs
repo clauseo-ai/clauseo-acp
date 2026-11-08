@@ -36,19 +36,17 @@
 //!    is left (48). A process whose user neither the list nor the token gives is unknown (48) and
 //!    never stopped, with two exceptions. Its owner is a pool SID: it is stopped (the owner may
 //!    add a process, never clear one: an owner is its creator, not its user, and an elevated
-//!    administrator's processes are owned by Administrators). Or it can't be opened to be
-//!    terminated, the list put it in session 0, and its image lies under the Windows or a
-//!    Program Files folder in a file owned by SYSTEM, `TrustedInstaller` or Administrators (the
-//!    Windows folder has subfolders users write, such as `Temp`), or it has none (a protected
-//!    system process; [`system_image`]).
-//!    A pool user's process runs in the lawyer's interactive session
-//!    (`CreateProcessWithLogonW` starts it in the caller's), and one it starts protected can't
-//!    be opened with `READ_CONTROL`, so neither the token nor the owner names it, nor the list
-//!    when the token's DACL shuts out SYSTEM: outside session 0 it is unknown. A pool user's
-//!    scheduled task (S4U, or "run whether logged on or not") reaches session 0, but its image
-//!    can't be put under those folders, which only administrators write. A list that couldn't
-//!    be read at all leaves no exemption, so a run where it failed ends at 48 unless each
-//!    process's token, or a pool owner, named it;
+//!    administrator's processes are owned by Administrators). Or it is one of the kernel's
+//!    minimal processes: it can't be opened to be terminated, the list put it in session 0, it
+//!    has no image file and it isn't a subsystem (WSL 1 pico) process ([`kernel_made`]).
+//!    Any image at all makes it unknown, wherever it lies and whoever signed it: a pool user's
+//!    scheduled task (S4U, or "run whether logged on or not") reaches session 0 and can start a
+//!    Windows-signed System32 binary as a protected process (PPL), which SYSTEM can open with
+//!    neither `READ_CONTROL` nor `PROCESS_TERMINATE`, and whose token's DACL can shut SYSTEM
+//!    out of the list. SYSTEM can't kill it, so the answer is 48 and a reset, not a kill. A
+//!    list that couldn't be read at all leaves no exemption, so a run where it failed ends at
+//!    48 unless each process's token, or a pool owner, named it. A run that ends 48 with
+//!    unknown processes lists their image file names in its log line, never a folder or a SID;
 //! 5. cancels every BITS job a pool user owns (`BG_JOB_ENUM_ALL_USERS`, each job's owner), even
 //!    when no process was found: a pool user's job doesn't run, but stays queued until it is
 //!    cancelled. One that can't be cancelled, or whose owner can't be read, is 48; so is a list
@@ -101,7 +99,7 @@ use std::time::Duration;
 use crate::windows::refresh::same_path;
 use crate::windows::sids::Sid;
 
-pub use pick::{Image, Picked, Process, pick, system_image};
+pub use pick::{Image, Picked, Process, image_names, kernel_made, pick};
 
 mod pick;
 mod sequence;
@@ -207,10 +205,6 @@ pub trait Stopper {
     fn snapshot(&mut self) -> Result<Vec<Process>, Failed>;
     /// This process's id.
     fn own_pid(&mut self) -> u32;
-    /// The Windows folder and the Program Files folders, from `SHGetKnownFolderPath`, never
-    /// the environment: where a system process's image lies ([`system_image`]). One that
-    /// can't be found is left out, so a process whose image is there counts as unknown.
-    fn system_folders(&mut self) -> Vec<String>;
     /// Suspends `pid` through the handle the last snapshot read its user through. Nothing
     /// resumes it: it is terminated next.
     fn suspend(&mut self, pid: u32) -> Result<(), Failed>;
@@ -262,6 +256,8 @@ struct Passes {
     left: usize,
     /// Processes whose user the last snapshot couldn't read.
     unknown: usize,
+    /// Their image file names ([`Image::file_name`]).
+    unknown_images: Vec<String>,
     /// A snapshot's process list (`WTSEnumerateProcessesExW`) couldn't be read.
     list_failed: bool,
     /// Every pool user, once a pass found a process of unknown user, which may be any of
@@ -320,6 +316,12 @@ fn run_steps(fs: &mut impl Stopper) -> Result<String, Refusal> {
     } else {
         ""
     };
+    // File names only: the Application log is readable by every local user.
+    let images = if passes.unknown_images.is_empty() {
+        String::new()
+    } else {
+        format!("; unknown images: {}", image_names(&passes.unknown_images))
+    };
     let capped = if passes.jobs_capped {
         format!(" (the BITS job list was longer than {JOBS_CAP})")
     } else {
@@ -327,7 +329,7 @@ fn run_steps(fs: &mut impl Stopper) -> Result<String, Refusal> {
     };
     let counts = format!(
         "{} pool users, {} found running, {} processes stopped in {} passes, {} left, \
-         {} unknown{list}, {} BITS jobs cancelled, {} not{capped}",
+         {} unknown{list}, {} BITS jobs cancelled, {} not{capped}{images}",
         pool.users.len(),
         passes.found.len(),
         passes.stopped,
@@ -392,7 +394,6 @@ fn allowed(fs: &mut impl Stopper) -> Result<(), Refusal> {
 /// snapshot that can't be taken is the error.
 fn run_passes(fs: &mut impl Stopper, pool: &[Sid], passes: &mut Passes) -> Result<(), String> {
     let began = fs.elapsed();
-    let folders = fs.system_folders();
     loop {
         let at = fs.now();
         let seen = fs
@@ -401,8 +402,9 @@ fn run_passes(fs: &mut impl Stopper, pool: &[Sid], passes: &mut Passes) -> Resul
         passes.taken += 1;
         passes.list_failed |= seen.iter().any(|process| process.list_failed);
         let own = fs.own_pid();
-        let picked = pick(&seen, pool, own, &folders);
+        let picked = pick(&seen, pool, own);
         passes.unknown = picked.unknown;
+        passes.unknown_images = picked.unknown_images;
         if picked.unknown > 0 {
             passes.suspects.extend(pool.iter().cloned());
         }
