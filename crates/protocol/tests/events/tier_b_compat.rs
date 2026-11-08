@@ -125,6 +125,46 @@ fn the_view_skips_a_newer_field_and_reads_without_set_up_at() {
     assert!(!serde_json::to_string(&view).unwrap().contains("set_up_at"));
 }
 
+/// R17 PR-D3a: `set_up_state` round-trips beside `computer`'s `not_built`, is left out when
+/// `None`, and an older host's view without it reads as `None`.
+#[test]
+fn the_view_carries_set_up_state_and_reads_without_it() {
+    let mut view = ProtectionView::new(
+        Protection::NotProtected {
+            cause: NotProtectedCause::Unsupported {
+                why: clauseo_protocol::UnsupportedWhy::NotBuilt,
+            },
+        },
+        false,
+        false,
+    );
+    view.set_up_state = Some(Protection::Protected {
+        tier: ProtectionTier::B,
+    });
+    let json = r#"{"tier":"c","computer":{"not_protected":{"cause":{"unsupported":{"why":"not_built"}}}},"required":false,"unprotected_auto_allowed":false,"retry_asks_admin":false,"set_up_state":{"protected":{"tier":"b"}}}"#;
+    assert_eq!(serde_json::to_string(&view).unwrap(), json);
+    decodes_in_both(json, &view);
+    view.set_up_state = Some(Protection::NotProtected {
+        cause: NotProtectedCause::Blocked {
+            reason: "admin_copy_missing".to_owned(),
+        },
+    });
+    decodes_in_both(
+        r#"{"tier":"c","computer":{"not_protected":{"cause":{"unsupported":{"why":"not_built"}}}},"required":false,"unprotected_auto_allowed":false,"set_up_state":{"not_protected":{"cause":{"blocked":{"reason":"admin_copy_missing"}}}}}"#,
+        &view,
+    );
+    view.set_up_state = None;
+    decodes_in_both(
+        r#"{"tier":"c","computer":{"not_protected":{"cause":{"unsupported":{"why":"not_built"}}}},"required":false,"unprotected_auto_allowed":false}"#,
+        &view,
+    );
+    assert!(
+        !serde_json::to_string(&view)
+            .unwrap()
+            .contains("set_up_state")
+    );
+}
+
 /// A newer stop reason is `StopReason::Unknown` inside a known `TurnEnded`.
 #[test]
 fn a_newer_stop_reason_reads_as_unknown() {

@@ -260,6 +260,17 @@ pub struct ProtectionView {
     /// left out when not.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub set_up_at: Option<Timestamp>,
+    /// The sandbox's own state on this computer when this build sets the sandbox up but does
+    /// not start agents in it yet (R17 PR-D3a): `protected { tier }` once set up, else
+    /// `not_protected` with why (`needs_set_up`, `set_up_refused`, `set_up_failed`,
+    /// `blocked { reason }`, `other_account`). `computer` then says `unsupported { why:
+    /// not_built }`, which is how launches go: no agent runs in the Safe workspace yet. It drives
+    /// the set-up screen only: `computer` stays the one input to anything that gates or labels
+    /// protection (auto modes and `unprotected_auto_allowed`, matter badges, launch refusals).
+    /// `None` once agents start in the sandbox, whose state `computer` then carries (one source
+    /// of truth), and when there is nothing to set up. Missing from an older host: `None`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub set_up_state: Option<Protection>,
 }
 
 impl ProtectionView {
@@ -283,6 +294,7 @@ impl ProtectionView {
             in_progress: None,
             retry_asks_admin: false,
             set_up_at: None,
+            set_up_state: None,
         }
     }
 }

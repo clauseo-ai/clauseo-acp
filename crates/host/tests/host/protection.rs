@@ -14,7 +14,8 @@ use clauseo_sandbox::{Detection, NoSandbox, SetupError, SetupState, Tier};
 
 use crate::codex::{Recording, turn_failed};
 use crate::protection_rig::{
-    Gated, Plan, b, c, protection_events, protection_events_to_end, rig, send, subscribe, view,
+    Gated, Plan, b, c, protection_events, protection_events_to_end, rig, send, subscribe, through,
+    view,
 };
 use crate::support::{Dir, FAKE, Running, Scenario, wait};
 
@@ -446,12 +447,11 @@ fn sandbox_required_fails_a_turn_before_its_agent_starts() {
         (1, c(NoSandbox::NeedsSetUp), ErrorCode::SandboxSetupRequired),
         (2, c(NoSandbox::UnsupportedOs), ErrorCode::SandboxRequired),
     ] {
-        let recording = Recording::new(&dir);
+        let recording = Arc::new(Recording::new(&dir));
         let launches = Arc::clone(&recording.envs);
         let sandbox = rig(Plan::new(vec![detection], vec![SetupState::Ready])).sandbox;
-        let host = dir.start_launching(run, Arc::new(recording), move |config| {
-            config.with_sandbox(sandbox)
-        });
+        let sandbox = through(sandbox, Arc::clone(&recording) as _);
+        let host = dir.start_launching(run, recording, move |config| config.with_sandbox(sandbox));
         let mut events = host.events(StreamId::Thread(thread));
         let (turn, _) = host.prompt(thread, "Look at the matter.");
         assert_eq!(events.until_turn_ended(turn).stop, StopReason::Failed);

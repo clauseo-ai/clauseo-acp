@@ -197,8 +197,168 @@ fn no_seam_is_not_built_with_no_retry() {
             }),
             asks_admin: false,
             set_up_at: None,
+            set_up_state: None,
         }
     );
+}
+
+/// Launchers that never launch: their presence alone is what [`gated`] reads.
+struct NoLaunch;
+
+impl crate::config::SandboxLaunchers for NoLaunch {
+    fn launcher(
+        &self,
+        _policy: clauseo_sandbox::Policy,
+        _matter: &clauseo_protocol::MatterId,
+        _session: &crate::config::SessionKey,
+        _running: &[crate::config::SessionKey],
+        _opts: clauseo_process::SpawnOptions,
+        _denials: std::sync::Arc<dyn clauseo_sandbox::DenialSink>,
+    ) -> Result<crate::config::SandboxLaunch, clauseo_sandbox::Error> {
+        Err(clauseo_sandbox::Error::Policy(
+            "no launch in these tests".to_owned(),
+        ))
+    }
+
+    fn after_session(&self, _end: crate::config::SessionEnd) -> Vec<clauseo_sandbox::SetAside> {
+        Vec::new()
+    }
+}
+
+/// A seam detecting `found`, its set-up in `state`, with launchers or not.
+fn seam(found: Detection, state: SetupState, launchers: bool) -> crate::config::Sandbox {
+    struct Fixed(SetupState);
+    impl clauseo_sandbox::SandboxSetup for Fixed {
+        fn state(&self) -> SetupState {
+            self.0.clone()
+        }
+        fn run(&self) -> Result<(), clauseo_sandbox::SetupError> {
+            Ok(())
+        }
+        fn forget_matter(
+            &self,
+            _matter: &clauseo_protocol::MatterId,
+        ) -> Result<(), clauseo_sandbox::SetupError> {
+            Ok(())
+        }
+        fn remove(&self) -> Result<(), clauseo_sandbox::SetupError> {
+            Ok(())
+        }
+    }
+    let sandbox = crate::config::Sandbox::new(
+        std::sync::Arc::new(move || found.clone()),
+        Some(std::sync::Arc::new(Fixed(state))),
+    );
+    if launchers {
+        sandbox.with_launchers(
+            std::sync::Arc::new(NoLaunch),
+            clauseo_process::SpawnOptions::new(),
+        )
+    } else {
+        sandbox
+    }
+}
+
+/// Each detection with its set-up state, and the wire's protection for it.
+fn set_up_rows() -> Vec<(Detection, SetupState, Protection)> {
+    vec![
+        (
+            Detection {
+                tier: Tier::B,
+                reason: None,
+            },
+            SetupState::Ready,
+            Protection::Protected {
+                tier: ProtectionTier::B,
+            },
+        ),
+        (
+            c(NoSandbox::NeedsSetUp),
+            SetupState::Needed,
+            not(NotProtectedCause::NeedsSetUp),
+        ),
+        (
+            c(NoSandbox::SetUpRefused),
+            SetupState::Refused,
+            not(NotProtectedCause::SetUpRefused),
+        ),
+        (
+            c(NoSandbox::SetUpFailed("x".to_owned())),
+            SetupState::Failed("x".to_owned()),
+            not(NotProtectedCause::SetUpFailed),
+        ),
+        (
+            c(NoSandbox::SetUpBlocked(Blocked::AdminCopyMissing)),
+            SetupState::Blocked(Blocked::AdminCopyMissing),
+            not(NotProtectedCause::Blocked {
+                reason: "admin_copy_missing".to_owned(),
+            }),
+        ),
+        (
+            c(NoSandbox::SetUpFailed(SET_UP_BY_OTHER_USER.to_owned())),
+            SetupState::SetUpByOtherUser,
+            not(NotProtectedCause::OtherAccount),
+        ),
+    ]
+}
+
+/// R17 PR-D3a, the orchestrator's condition 2: without launchers the computer is not-built
+/// for every set-up state, which goes to `set_up_state` alone, and `retry_asks_admin` still
+/// follows the set-up.
+#[test]
+fn without_launchers_the_computer_is_not_built_and_set_up_state_is_the_sandbox() {
+    let not_built = not(NotProtectedCause::Unsupported {
+        why: UnsupportedWhy::NotBuilt,
+    });
+    for (detection, state, found) in set_up_rows() {
+        let asks = asks_admin(&state);
+        let observed = observe(
+            Some(&seam(detection, state, false)),
+            std::path::Path::new("data"),
+        );
+        assert_eq!(observed.computer, not_built, "{found:?}");
+        assert_eq!(observed.set_up_state.as_ref(), Some(&found));
+        assert_eq!(observed.asks_admin, asks, "{found:?}");
+        assert_eq!(
+            observed.sandbox_protected(),
+            matches!(found, Protection::Protected { .. })
+        );
+        let view = ProtectionHost::new(None, observed).view(false, false);
+        assert_eq!(view.tier, ProtectionTier::C);
+        assert_eq!(view.set_up_state, Some(found));
+    }
+    // An OS with no jail has nothing to set up: its own cause, gated as not-built.
+    let os = observe(
+        Some(&seam(
+            c(NoSandbox::UnsupportedOs),
+            SetupState::Needed,
+            false,
+        )),
+        std::path::Path::new("data"),
+    );
+    assert!(matches!(
+        os.computer,
+        Protection::NotProtected {
+            cause: NotProtectedCause::Unsupported { .. }
+        }
+    ));
+    assert_eq!(os.set_up_state, None);
+}
+
+/// Condition 3: with launchers the computer carries the sandbox's state and `set_up_state`
+/// is `None`: one source of truth.
+#[test]
+fn with_launchers_the_computer_is_the_sandbox_and_set_up_state_is_none() {
+    for (detection, state, found) in set_up_rows() {
+        let observed = observe(
+            Some(&seam(detection, state, true)),
+            std::path::Path::new("data"),
+        );
+        assert_eq!(observed.computer, found);
+        assert_eq!(observed.set_up_state, None);
+        let view = ProtectionHost::new(None, observed).view(false, false);
+        assert_eq!(view.set_up_state, None);
+    }
 }
 
 #[test]

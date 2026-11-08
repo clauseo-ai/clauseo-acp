@@ -12,7 +12,7 @@
 //! - Shutdown never waits for the thread (the elevated step is a process of its own): the held
 //!   answers get `Closed`, and the thread's late result is dropped.
 
-use clauseo_protocol::{CommandId, CommandOutcome, ErrorCode, Protection, ProtectionWork};
+use clauseo_protocol::{CommandId, CommandOutcome, ErrorCode, ProtectionWork};
 use clauseo_sandbox::{SandboxSetup, SetupError};
 
 use super::{Observed, observe};
@@ -175,8 +175,8 @@ fn run(work: ProtectionWork, setup: Option<&dyn SandboxSetup>) -> Option<Result<
     match work {
         ProtectionWork::SetUp => setup.map(SandboxSetup::run),
         // A removal ends what still runs as a pool user (tier B's sessions). While it runs the
-        // cache still says `Protected { tier: B }`, so launches are refused with
-        // `sandbox.removing` (`protection::refusal`).
+        // cache still says `Protected { tier: B }`, so launches through the sandbox's launchers
+        // are refused with `sandbox.removing` (`protection::refusal`).
         ProtectionWork::Remove => setup.map(SandboxSetup::remove),
         ProtectionWork::Check | ProtectionWork::Unknown => None,
     }
@@ -244,7 +244,7 @@ pub(in crate::actor) fn on_done(actor: &mut Actor, done: Done) {
             if changed {
                 super::matters_changed(actor);
             }
-            let protected = matches!(actor.protection.computer(), Protection::Protected { .. });
+            let protected = actor.protection.observed.sandbox_protected();
             answer(running.work, outcome, protected)
         }
     };

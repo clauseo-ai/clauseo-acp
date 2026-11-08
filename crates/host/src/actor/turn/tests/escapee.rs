@@ -48,6 +48,7 @@ pub(super) fn tier_b(rig: &mut Rig) {
         computer,
         asks_admin: false,
         set_up_at: None,
+        set_up_state: None,
     };
     rig.actor.protection = ProtectionHost::new(None, observed);
 }

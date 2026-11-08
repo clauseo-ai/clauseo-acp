@@ -12,7 +12,7 @@ use clauseo_sandbox::{Blocked, Detection, NoSandbox, SET_UP_BY_OTHER_USER, Setup
 
 use crate::codex::{Recording, turn_failed};
 use crate::protection::dir;
-use crate::protection_rig::{Plan, c, rig, view};
+use crate::protection_rig::{Plan, c, rig, through, view};
 use crate::support::{Dir, FAKE, Scenario};
 
 /// The settings that let an agent run without the sandbox, in an auto mode too.
@@ -100,12 +100,11 @@ fn a_blocked_sandbox_fails_a_turn_and_a_needed_set_up_still_runs_it() {
     );
     let cases = blocked_cases().into_iter().chain([needed]);
     for (run, (detection, state, cause)) in (1u16..).zip(cases) {
-        let recording = Recording::new(&dir);
+        let recording = Arc::new(Recording::new(&dir));
         let launches = Arc::clone(&recording.envs);
         let sandbox = rig(Plan::new(vec![detection], vec![state])).sandbox;
-        let host = dir.start_launching(run, Arc::new(recording), move |config| {
-            config.with_sandbox(sandbox)
-        });
+        let sandbox = through(sandbox, Arc::clone(&recording) as _);
+        let host = dir.start_launching(run, recording, move |config| config.with_sandbox(sandbox));
         let mut events = host.events(StreamId::Thread(thread));
         let (turn, _) = host.prompt(thread, "Look at the matter.");
         let ended = events.until_turn_ended(turn);

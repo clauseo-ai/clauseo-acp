@@ -2,7 +2,9 @@
 //! computer's protection, runs the one-time set-up and (B2) starts each agent in the jail.
 //! Without it, the computer is `Unsupported { why: not_built }` and the two protection
 //! commands are `command.invalid`; the host never calls `clauseo_sandbox::detect` on its own,
-//! since on macOS that would report tier A while nothing jails the agent.
+//! since on macOS that would report tier A while nothing jails the agent. With it but without
+//! launchers (R17 PR-D3a), the set-up and its commands work and the view's `set_up_state` says
+//! the sandbox's state, while launches stay as with no seam (`not_built`).
 
 use std::fmt;
 use std::sync::Arc;
