@@ -56,6 +56,7 @@ use crate::platform::Os;
 use crate::receipt::install_root;
 use crate::state::{InstallState, Installed};
 use crate::write;
+use remove::remove_temp;
 
 /// The longest one npm run may take.
 const NPM_LIMIT: Duration = Duration::from_mins(10);
@@ -226,7 +227,7 @@ pub(super) async fn install<T: Timer + Send + Sync>(
     }
     .await;
     if done.is_err() && !marked.get() {
-        drop(write::remove_dir_all(&tmp));
+        remove_temp(job, &tmp).await;
     }
     done
 }
@@ -577,6 +578,8 @@ pub(super) fn npm_code(line: &str) -> Option<&str> {
     let code = line.strip_prefix("npm error code ")?.trim();
     (!code.is_empty() && !code.contains(char::is_whitespace)).then_some(code)
 }
+
+mod remove;
 
 #[cfg(test)]
 mod tests;
