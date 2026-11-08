@@ -24,7 +24,7 @@ pub(super) fn watched(root: &Path, data: &Path) -> Watched {
 /// `step` at each reading.
 pub(super) struct Calm {
     pub(super) ends: std::cell::RefCell<Vec<Ending>>,
-    clock: std::cell::Cell<std::time::Duration>,
+    pub(super) clock: std::cell::Cell<std::time::Duration>,
     step: std::time::Duration,
 }
 

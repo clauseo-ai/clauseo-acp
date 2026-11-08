@@ -16,7 +16,8 @@
 //! - Kill first: the first item found ends the session (the job ended and emptied, as every
 //!   end path does) before anything moves, so nothing races the moves. So does a scan past
 //!   `set_aside::SCAN_BUDGET`, [`OVERFLOWS`] overflows in a row, or one path reported gone
-//!   [`GONE_LIMIT`] times: an agent that keeps the watch busy ends its own session.
+//!   [`GONE_LIMIT`] times: an agent that keeps the watch busy ends its own session. The
+//!   lawyer is told why in plain words, one line for each cause ([`Cause::notice`]).
 //! - An overflow (`ERROR_NOTIFY_ENUM_DIR`, an empty or unreadable buffer) rescans the whole
 //!   folder and reads on. A watch that breaks, or can't be armed, rescans every
 //!   [`RESCAN_EVERY`] and tries to arm again, saying so once (degraded).
@@ -111,20 +112,90 @@ pub(crate) trait Session {
     fn now(&self) -> Duration;
 }
 
+/// Why the watch ended the session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Cause {
+    /// A git repository, or a link out, appeared while the agent ran.
+    Found,
+    /// A scan ran past `set_aside::SCAN_BUDGET` while the watch was armed.
+    Slow,
+    /// [`OVERFLOWS`] overflows in a row.
+    Overflows,
+    /// One path gone [`GONE_LIMIT`] times before it could be moved.
+    Gone,
+    /// An item found couldn't be moved while the agent ran.
+    Stuck,
+    /// A scan ran past its budget while the watch couldn't be armed (rescans stood in).
+    SlowUnwatched,
+    /// The watch's thread panicked or ended before it was stopped (`outer/watch.rs`).
+    WatchFailed,
+}
+
+impl Cause {
+    /// The lawyer's notice, in plain words: why the session stopped.
+    pub(crate) fn notice(self) -> &'static str {
+        match self {
+            Cause::Found => {
+                "Clauseo stopped this session because the AI tool tried to put a code repository, \
+                 or a link leading outside the matter, in the matter."
+            }
+            Cause::Slow => {
+                "Clauseo stopped this session because the AI tool added more to the matter than \
+                 Clauseo could check in time. Nothing was lost."
+            }
+            Cause::Overflows => {
+                "Clauseo stopped this session because the matter changed faster than Clauseo \
+                 could check it (very many files at once). Nothing was lost."
+            }
+            Cause::Gone => {
+                "Clauseo stopped this session because the AI tool kept moving an item before \
+                 Clauseo could check it. Nothing was lost."
+            }
+            Cause::Stuck => {
+                "Clauseo stopped this session because something the AI tool made in the matter \
+                 couldn't be moved aside while it ran. Clauseo tries again now it has stopped."
+            }
+            Cause::SlowUnwatched => {
+                "Clauseo stopped this session because it couldn't watch the matter for changes, \
+                 and checking it another way took too long. Nothing was lost."
+            }
+            Cause::WatchFailed => {
+                "Clauseo stopped this session because its watch on the matter stopped working. \
+                 Nothing was lost."
+            }
+        }
+    }
+
+    /// The same, for the log: no path.
+    fn log(self) -> &'static str {
+        match self {
+            Cause::Found => "a git repository or a link out appeared while the agent ran",
+            Cause::Slow => "a scan of the folder ran past its time",
+            Cause::Overflows => "overflows in a row",
+            Cause::Gone => "an item kept going before it could be set aside",
+            Cause::Stuck => "an item couldn't be set aside",
+            Cause::SlowUnwatched => "a rescan ran past its time while the watch wasn't armed",
+            Cause::WatchFailed => "the watch failed",
+        }
+    }
+}
+
 /// The watch's own count of what ends the session.
 struct Ender<'a, S: Session> {
     session: &'a S,
     ended: Cell<bool>,
     overflows: Cell<u32>,
     gone: std::cell::RefCell<BTreeMap<PathBuf, u32>>,
+    /// The watch can't be armed, or broke, and rescans stand in.
+    degraded: Cell<bool>,
 }
 
 impl<S: Session> Ender<'_, S> {
-    /// Ends the session the first time, saying why.
-    fn stop(&self, why: &str) {
+    /// Ends the session the first time, telling the lawyer why in plain words.
+    fn stop(&self, cause: Cause) {
         if !self.ended.replace(true) {
-            self.session
-                .say(&format!("{SAID}git watch: {why}; ending the session"));
+            tracing::warn!(cause = cause.log(), "the git watch is ending the session");
+            self.session.say(&format!("{SAID}{}", cause.notice()));
             self.session.end();
         }
     }
@@ -133,8 +204,9 @@ impl<S: Session> Ender<'_, S> {
 impl<S: Session> Hooks for Ender<'_, S> {
     fn end(&self, why: Ending) {
         self.stop(match why {
-            Ending::Found => "a git repository or a link out appeared while the agent ran",
-            Ending::Slow => "a scan of the folder ran past its time",
+            Ending::Found => Cause::Found,
+            Ending::Slow if self.degraded.get() => Cause::SlowUnwatched,
+            Ending::Slow => Cause::Slow,
         });
     }
 
@@ -156,6 +228,7 @@ pub(crate) fn watch<S: Source>(
         ended: Cell::new(false),
         overflows: Cell::new(0),
         gone: std::cell::RefCell::new(BTreeMap::new()),
+        degraded: Cell::new(false),
     };
     keep_watching(first, &mut arm, guard, &ender);
     // The job is empty: one last look, with nothing left to end.
@@ -172,11 +245,11 @@ fn keep_watching<S: Source, T: Session>(
 ) {
     let session = ender.session;
     let mut armed = first;
-    let mut degraded = false;
+    let degraded = &ender.degraded;
     loop {
         match armed {
             Ok(mut source) => {
-                if std::mem::take(&mut degraded) {
+                if degraded.replace(false) {
                     session.say(&format!("{SAID}git watch: armed again"));
                     act(&guard.rescan(ender), guard, ender);
                 }
@@ -188,7 +261,7 @@ fn keep_watching<S: Source, T: Session>(
                         }
                         Next::Overflow => overflowed(guard, ender),
                         Next::Broken(error) => {
-                            degraded = true;
+                            degraded.set(true);
                             session.say(&format!(
                                 "{SAID}git watch: the watch failed ({}); rescanning the folder \
                                  every {} s until it is armed again",
@@ -202,14 +275,14 @@ fn keep_watching<S: Source, T: Session>(
                 }
             }
             Err(error) => {
-                if !degraded {
+                if !degraded.get() {
                     session.say(&format!(
                         "{SAID}git watch: can't watch the folder ({}); rescanning it every {} s \
                          instead",
                         code(&error),
                         RESCAN_EVERY.as_secs()
                     ));
-                    degraded = true;
+                    degraded.set(true);
                 }
             }
         }
@@ -229,7 +302,7 @@ fn overflowed<T: Session>(guard: &impl Guard, ender: &Ender<'_, T>) {
         "{SAID}git watch: too many changes at once; rescanning the folder"
     ));
     if count >= OVERFLOWS {
-        ender.stop(&format!("{count} overflows in a row"));
+        ender.stop(Cause::Overflows);
     }
     act(&guard.rescan(ender), guard, ender);
 }
@@ -251,7 +324,7 @@ fn act<T: Session>(live: &Live, guard: &impl Guard, ender: &Ender<'_, T>) {
             failed.failure
         ));
     }
-    ender.stop("an item couldn't be set aside");
+    ender.stop(Cause::Stuck);
     let mut left = live.failed.clone();
     for _ in 0..RETRIES {
         let again = guard.retry(&left, ender);
@@ -280,7 +353,7 @@ fn count_gone<T: Session>(gone: &[PathBuf], ender: &Ender<'_, T>) {
         }
     }
     if over {
-        ender.stop("an item kept going before it could be set aside");
+        ender.stop(Cause::Gone);
     }
 }
 

@@ -20,6 +20,8 @@ use crate::windows::set_aside::{Ending, Entry, Failed, Hooks, Moved, Reason};
 use crate::windows::test_world::matter_one;
 use crate::{Denial, SetAsideWhat};
 
+mod notices;
+
 /// The paths of what failed.
 fn paths(failed: &[Failed]) -> Vec<PathBuf> {
     failed.iter().map(|each| each.path.clone()).collect()

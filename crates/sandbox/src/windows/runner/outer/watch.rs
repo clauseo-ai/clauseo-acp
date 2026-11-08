@@ -15,7 +15,7 @@ use clauseo_protocol::MatterId;
 
 use super::super::end::EndSignal;
 use super::super::git_watch::os::{DirWatch, Stop};
-use super::super::git_watch::{Changes, Guard, Session, watch};
+use super::super::git_watch::{Cause, Changes, Guard, Session, watch};
 use super::super::{LaunchMessage, RunExit};
 use super::{End, Failure, os, say};
 use crate::windows::set_aside::{Failed, GitGuard, Hooks, Live};
@@ -92,13 +92,13 @@ fn start(
             // folder unwatched while the agent may still run.
             let stopped = stop.wait(Duration::ZERO);
             if ran.is_err() || !stopped {
+                tracing::warn!(
+                    panicked = ran.is_err(),
+                    "the git watch ended before its stop"
+                );
                 say(&format!(
-                    "clauseo-sandbox-run: git watch: the watch {}; ending the session",
-                    if ran.is_err() {
-                        "failed"
-                    } else {
-                        "ended early"
-                    }
+                    "clauseo-sandbox-run: {}",
+                    Cause::WatchFailed.notice()
                 ));
                 end.trigger(EndSignal::Failed);
             }
