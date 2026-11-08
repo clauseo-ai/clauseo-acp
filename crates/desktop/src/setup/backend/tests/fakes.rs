@@ -452,7 +452,7 @@ pub(super) fn rig_with(
         blocked: Mutex::default(),
     });
     let confirm = Arc::new(FakeConfirm {
-        answer: accept,
+        answer: accept.into(),
         asked: Mutex::default(),
     });
     let opener = Arc::new(FakeOpener::default());

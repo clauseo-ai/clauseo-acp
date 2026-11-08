@@ -2,6 +2,7 @@
 
 use std::path::Path;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use clauseo_protocol::HostError;
 
@@ -10,16 +11,16 @@ use crate::dialogs::BoxFuture;
 use crate::open::Opener;
 use crate::setup::confirm::{Ask, SetupConfirm};
 
-/// The confirms, answered `answer`, each ask recorded.
+/// The confirms, answered `answer` (a test may change it between asks), each ask recorded.
 pub(crate) struct FakeConfirm {
-    pub(crate) answer: bool,
+    pub(crate) answer: AtomicBool,
     pub(crate) asked: Mutex<Vec<Ask>>,
 }
 
 impl SetupConfirm for FakeConfirm {
     fn confirm(&self, ask: Ask) -> BoxFuture<'_, bool> {
         lock(&self.asked).push(ask);
-        Box::pin(std::future::ready(self.answer))
+        Box::pin(std::future::ready(self.answer.load(Ordering::SeqCst)))
     }
 }
 
