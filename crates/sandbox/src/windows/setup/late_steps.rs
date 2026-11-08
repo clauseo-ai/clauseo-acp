@@ -1,7 +1,7 @@
 //! Set-up's steps around the denies and the matters: the owners of the folders the shared-write
 //! denies protect (`PR4h`), reading the owner's registered matters after the lock (`PR4h`), step
-//! 8's fence of them against the grown pool, step 9's change journals, and the per-machine
-//! stop task once the owner is recorded.
+//! 8's fence of them against the grown pool, step 8b's WSL deny, step 9's change journals, and
+//! the per-machine stop task once the owner is recorded.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -21,6 +21,7 @@ use crate::windows::pool::MachineRecord;
 use crate::windows::sids::Sid;
 use crate::windows::wfp::{NetworkReport, NetworkSetup};
 use crate::windows::writer::AclWriter;
+use crate::windows::wsl::WslApplied;
 
 /// `SYSTEM`.
 const SYSTEM: &str = "S-1-5-18";
@@ -209,6 +210,23 @@ pub(super) fn network(
     machine
         .network(&setup)
         .map_err(|error| (Step::Network, cause_of(&error)))
+}
+
+/// Step 8b, WSL's deny (`windows::wsl`): the pool group denied in the launch permission of
+/// every WSL class on this machine, after the group exists, elevated, not as the owner. Never
+/// fatal, like step 9: the launch check refuses a tier B launch while a deny is missing, and
+/// the refresh task tries again at the next logon or installer event. What failed is in the
+/// report and the log.
+pub(super) fn wsl_deny(machine: &mut impl Machine, group: &Sid) -> Result<WslApplied, String> {
+    let applied = machine.wsl_deny(group).map_err(|error| cause_of(&error));
+    match &applied {
+        Ok(done) if !done.complete() => {
+            tracing::warn!(failed = ?done.failed, "WSL's deny wasn't written everywhere");
+        }
+        Ok(_) => {}
+        Err(why) => tracing::warn!(%why, "WSL's deny wasn't written"),
+    }
+    applied
 }
 
 /// Step 9: each chosen volume's change journal made [`super::JOURNAL_MAX`] when smaller

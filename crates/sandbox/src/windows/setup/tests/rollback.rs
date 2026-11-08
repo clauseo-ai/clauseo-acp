@@ -45,11 +45,12 @@ fn a_failure_at_each_step_rolls_back_to_the_machine_before() {
         .position(|c| c.starts_with("write_record"))
         .unwrap();
     for (at, call) in calls.iter().enumerate() {
-        // The lock has its own test; the journal never fails the set-up.
+        // The lock has its own test; the journal and WSL's deny never fail the set-up.
         if call == "lock"
             || call == "unlock"
             || call.starts_with("journal")
             || call.starts_with("grow")
+            || call.starts_with("wsl_deny")
         {
             continue;
         }

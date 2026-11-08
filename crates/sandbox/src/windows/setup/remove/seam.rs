@@ -13,6 +13,7 @@ use crate::windows::pool::MachineRecord;
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::setup::{MachineError, ProfileDir};
 use crate::windows::sids::Sid;
+use crate::windows::wsl::WslRemoved;
 
 /// Everything a removal asks of the machine besides the permission writes, one method per
 /// thing it asks Windows (or the owner's files) for.
@@ -49,6 +50,9 @@ pub trait Removal {
     /// (S15 PR7, `wfp::remove`); what is already gone counts as removed. A WFP failure is the
     /// `Err`; `Some` names a firewall failure, which isn't fatal.
     fn remove_network(&mut self, owner: &Sid) -> Result<Option<String>, MachineError>;
+    /// Takes WSL's deny for `group` off every recorded launch permission and forgets the
+    /// targets (`wsl::remove`), elevated, not as the owner; what is gone counts as removed.
+    fn remove_wsl_deny(&mut self, group: &Sid) -> Result<WslRemoved, MachineError>;
     /// The name of the account whose SID is `sid`, if one exists.
     fn account_name(&mut self, sid: &Sid) -> Result<Option<String>, MachineError>;
     /// The profile Windows lists for `sid` (`ProfileList`), if any.

@@ -60,6 +60,7 @@ fn remove_exits_0_when_nothing_was_set_up_and_no_set_up_holds_the_lock() {
         users: SETUP_TEST_PREFIX.to_owned(),
         journals: false,
         wfp: Namespace::numbered_test(1),
+        wsl: false,
     };
     for per_machine in [false, true] {
         assert_eq!(
@@ -136,6 +137,7 @@ fn elevated_set_up_adds_one_user_then_removal_takes_it_all_off() {
         users: users.clone(),
         journals: false,
         wfp: Namespace::numbered_test(1),
+        wsl: false,
     };
     let dir = TempDir::new("setup-exe-elevated");
     let owner = Owner::of_this_process().unwrap();

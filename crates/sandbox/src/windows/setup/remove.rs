@@ -42,7 +42,9 @@
 //!    on them and the firewall rules (S15 PR7, `wfp::remove`): `stop_strays` only logs a
 //!    process that won't stop, which must not run unfiltered while a user's removal fails. A
 //!    firewall failure is not fatal, as at set-up ([`RemoveReport::firewall`]);
-//! 5. `DeviceSync`'s deny;
+//! 5. `DeviceSync`'s deny, then WSL's deny for the group on each recorded launch permission
+//!    (`windows::wsl::remove`: our denies only, a value we made deleted, no old value written
+//!    back), before the group goes, so no deny names a SID that is gone;
 //! 6. the ledger's entries (`ledger_work.rs`), read from the record's `DataDir`, which the owner
 //!    can influence, so it is checked as `--data-dir` is and used only as `ledger_work.rs` says;
 //! 7. the group, when it is the record's and has no members left;
@@ -70,6 +72,7 @@ use crate::windows::shared_writes::{
 };
 use crate::windows::sids::Sid;
 use crate::windows::writer::AclWriter;
+use crate::windows::wsl::WslRemoved;
 
 mod ledger_work;
 mod seam;
@@ -109,6 +112,8 @@ pub struct RemoveReport {
     /// Why the firewall rules couldn't be removed, when they couldn't: not fatal, as at set-up,
     /// since the WFP filters (the enforcing layer) went (S15 PR7).
     pub firewall: Option<String>,
+    /// WSL's deny taken off: how many values, and each left because it can't be parsed.
+    pub wsl: WslRemoved,
 }
 
 /// The step a removal stopped at. Variants are appended from here on.
@@ -142,6 +147,8 @@ pub enum RemoveStep {
     Network,
     /// A per-machine install's stop task, deleted before the record.
     StopTask,
+    /// Taking WSL's deny for the group off its launch permissions (`windows::wsl::remove`).
+    Wsl,
 }
 
 impl std::fmt::Display for RemoveStep {
@@ -161,6 +168,7 @@ impl std::fmt::Display for RemoveStep {
             RemoveStep::Record => "deleting the machine's record",
             RemoveStep::Network => "removing the network filters",
             RemoveStep::StopTask => "deleting the sandbox's stop task",
+            RemoveStep::Wsl => "taking WSL's deny for the sandbox users off",
         })
     }
 }
@@ -394,6 +402,9 @@ fn steps(
             format!("DeviceSync's deny: {cause}"),
         )
     })?;
+    report.wsl = machine
+        .remove_wsl_deny(&record.group)
+        .map_err(|e| (RemoveStep::Wsl, cause_of(&e)))?;
     report.ledger = ledger_work::run(machine, acl, record, acting)?;
     report.group = remove_group(machine, record)?;
     remove_stop_task(machine)?;

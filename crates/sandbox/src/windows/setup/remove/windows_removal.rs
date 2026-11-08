@@ -48,6 +48,7 @@ use crate::windows::refresh::{self, SystemTask};
 use crate::windows::set_aside::forget_bookkeeping;
 use crate::windows::sids::{Reserved, Sid};
 use crate::windows::wfp;
+use crate::windows::wsl::{self, WindowsWsl, WslRemoved};
 use crate::windows::{FolderSupport, folder_support};
 
 /// This Windows machine, as [`remove`](super::remove) drives it.
@@ -259,6 +260,19 @@ impl Removal for WindowsRemoval {
             tracing::warn!(%cause, "the sandbox's firewall rules couldn't be removed");
         }
         Ok(removed.firewall.err())
+    }
+
+    fn remove_wsl_deny(&mut self, group: &Sid) -> Result<WslRemoved, MachineError> {
+        // Elevated, never as the owner: the `AppID` keys are the machine's.
+        if !self.names.wsl {
+            return Ok(WslRemoved::default());
+        }
+        let done = wsl::remove(&mut WindowsWsl::writer(&self.names.record_key), group)
+            .map_err(|error| MachineError::Other(format!("WSL's deny: {error}")))?;
+        if !done.skipped.is_empty() {
+            tracing::warn!(skipped = ?done.skipped, "WSL launch permissions left as they were");
+        }
+        Ok(done)
     }
 
     fn account_name(&mut self, sid: &Sid) -> Result<Option<String>, MachineError> {

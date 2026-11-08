@@ -24,6 +24,7 @@ use crate::windows::setup::{
 };
 use crate::windows::sids::Reserved;
 use crate::windows::wfp::{NetworkReport, NetworkSetup};
+use crate::windows::wsl::WslApplied;
 
 pub(super) use super::fake_acl::FakeAcl;
 pub(super) use super::fake_more::folder_name;
@@ -502,6 +503,12 @@ impl Machine for FakeMachine {
     fn network(&mut self, setup: &NetworkSetup) -> Result<NetworkReport, MachineError> {
         self.call(format!("network {}", rids(setup.pool())))?;
         Ok(self.around.network(setup))
+    }
+
+    fn wsl_deny(&mut self, group: &Sid) -> Result<WslApplied, MachineError> {
+        assert!(!self.acting.get(), "WSL's deny is written as admin");
+        self.call(format!("wsl_deny {}", rid(group)))?;
+        Ok(WslApplied::default())
     }
 
     fn protect_for_owner(
