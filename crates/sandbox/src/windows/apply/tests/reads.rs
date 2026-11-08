@@ -28,9 +28,22 @@ fn volume(w: &World) -> FakeAcl {
 
 /// Matter one's launch reading each of `reads` in matter two's folder, whose fence it applies.
 fn launch(w: &World, ledger: &mut Ledger, acl: &mut FakeAcl, reads: &[(&str, bool)]) -> Applied {
+    launch_with(w, ledger, acl, reads, false)
+}
+
+/// [`launch`], with matter two passed as `fenced` already or not.
+fn launch_with(
+    w: &World,
+    ledger: &mut Ledger,
+    acl: &mut FakeAcl,
+    reads: &[(&str, bool)],
+    fenced: bool,
+) -> Applied {
     let policy = w.reading(reads);
     let ok = |_: &Path| Ok(FolderSupport::Ok);
-    let (data, others) = (w.at("data"), w.neighbour_m2());
+    let mut others = w.neighbour_m2();
+    others.registered[0].fenced = fenced;
+    let data = w.at("data");
     let admitted = admit_with(&policy, &data, &others, ok, &FakeFolders::default()).unwrap();
     let mut plan = plan(&admitted, &sids(), matter_one()).unwrap();
     apply(ledger, &mut plan, acl, &mut around(w)).unwrap()
@@ -103,10 +116,10 @@ fn a_read_of_another_matter_reads_its_tree_and_no_refused_name_at_any_depth() {
     for rel in refused {
         assert!(!reads(&w, &acl, rel), "{rel}");
     }
-    // The fence: its explicit deny on matter two's root comes before any explicit allow there,
-    // so the granted root can't be listed; an allow on a child comes before the deny the child
-    // inherits, so the children can.
-    assert!(!reads(&w, &acl, "other/m2"));
+    // The fence: a read of the whole folder lifts its deny on the folder alone for this pool
+    // user, so the folder lists; its deny for what is below stays, so a child the read doesn't
+    // allow stays closed, and an allow on a child comes before the deny the child inherits.
+    assert!(reads(&w, &acl, "other/m2"));
     // Another pool user reads none of it; matter two's own still reads and writes.
     let other = [OTHER_POOL_SIDS[1], GROUP_SID, USERS];
     let b = w.canonical("other/m2/docs/b.txt");
@@ -331,8 +344,9 @@ fn a_relaunch_with_the_same_reads_keeps_their_entries() {
     let (mut ledger, mut acl) = (ledger(&w), volume(&w));
     launch(&w, &mut ledger, &mut acl, &[("other/m2", false)]);
     let before = read_entries(&w, &ledger);
-    let again = launch(&w, &mut ledger, &mut acl, &[("other/m2", false)]);
+    let again = launch_with(&w, &mut ledger, &mut acl, &[("other/m2", false)], true);
     assert_eq!(again.written, 0);
+    assert!(reads(&w, &acl, "other/m2"));
     assert_eq!(read_entries(&w, &ledger), before);
 }
 

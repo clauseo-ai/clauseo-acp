@@ -128,10 +128,14 @@ impl State {
     /// Whether an entry grants `sid` access: a trusted allow entry whose SID it is, in any
     /// state; or, failing closed, a kept entry or kept hand-back holding it as any string value
     /// (compared without ASCII case), since a kept item's rights are unknown. A trusted deny
-    /// names `sid` but grants nothing.
+    /// names `sid` but grants nothing, unless a session lifted it (R18).
     pub(super) fn grants_sid(&self, sid: &Sid) -> bool {
         let in_entries = self.slots.iter().any(|slot| match slot {
-            Slot::Known(known) => known.entry.sid == *sid && known.entry.rights.is_allow(),
+            // A fence's deny lifted for its session counts too (R18, `lifts.rs`).
+            Slot::Known(known) => {
+                let entry = &known.entry;
+                entry.sid == *sid && (entry.rights.is_allow() || entry.lifted.is_some())
+            }
             Slot::SetAside(value) => holds_text(value, sid.as_str()),
         });
         in_entries

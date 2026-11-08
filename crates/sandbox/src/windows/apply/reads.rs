@@ -26,13 +26,14 @@ use std::path::PathBuf;
 use clauseo_protocol::MatterId;
 
 use super::back::{finish, take_back};
+use super::lifts;
 use super::walk::Refused;
 use super::{Surroundings, refused};
 use crate::windows::acl_plan::{AdmittedPlan, Sid, in_folder};
 use crate::windows::admit::PathKind;
 use crate::windows::ledger::{Entry, Ledger, Take};
 use crate::windows::writer::{AclWriter, ApplyFailure};
-use crate::{Error, Policy};
+use crate::{Error, OtherMatterRead, Policy};
 
 /// What [`narrow_reads`] or [`end_reads`] took back.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -41,6 +42,9 @@ pub struct Narrowed {
     /// subject) was removed, its tree walked again and its ledger entry dropped, in path order.
     /// Empty when there was nothing to take back.
     pub removed: Vec<PathBuf>,
+    /// Each other matter's folder whose fence deny, lifted for a read of the whole folder, is
+    /// back (`lifts.rs`), in the order put back.
+    pub restored: Vec<PathBuf>,
 }
 
 /// When the lawyer forgets a read of another matter mid-session: takes back at once each of
@@ -67,7 +71,16 @@ pub fn narrow_reads(
             .iter()
             .any(|read| in_folder(&entry.path, read.path()) && !read.refuses(&entry.path))
     };
-    take_reads(ledger, matter, sids, held, acl, around)
+    // A lifted deny stays off while the policy still reads that whole folder.
+    let whole = |e: &Entry| {
+        let same = |read: &&OtherMatterRead| same_path(read.path(), &e.path);
+        e.lifted == Some(matter) && sids.contains(&e.sid) && !reads.iter().any(|r| same(&r))
+    };
+    let restored = lifts::restore(ledger, acl, whole);
+    finished(
+        restored,
+        take_reads(ledger, matter, sids, held, acl, around),
+    )
 }
 
 /// At the session's end: takes back every one of `matter`'s reads of other matters naming one
@@ -80,7 +93,22 @@ pub fn end_reads(
     acl: &mut dyn AclWriter,
     around: &mut dyn Surroundings,
 ) -> Result<Narrowed, Error> {
-    take_reads(ledger, matter, sids, |_| false, acl, around)
+    let mine = |e: &Entry| e.lifted == Some(matter) && sids.contains(&e.sid);
+    let restored = lifts::restore(ledger, acl, mine);
+    finished(
+        restored,
+        take_reads(ledger, matter, sids, |_| false, acl, around),
+    )
+}
+
+/// The take-back's result with the restored folders, or the first error: a deny not put back
+/// is an error even when every allow went (its mark stays, for the next call).
+fn finished(
+    restored: Result<Vec<PathBuf>, Error>,
+    taken: Result<Narrowed, Error>,
+) -> Result<Narrowed, Error> {
+    let restored = restored?;
+    Ok(Narrowed { restored, ..taken? })
 }
 
 /// At a launch, before anything is recorded: takes back each of the plan's matter's reads of
@@ -95,7 +123,24 @@ pub(super) fn drop_stale(
     let matter = plan.matter();
     let listed = |entry: &Entry| plan.grants().contains(&entry.grant());
     let sids = plan.assigned_to(matter);
-    take_reads(ledger, matter, &sids, listed, acl, around).map(drop)
+    // A deny lifted for a folder the plan no longer allows itself goes back first.
+    let read = |e: &Entry| {
+        let on = |g: &crate::windows::acl_plan::Grant| {
+            g.kind() == PathKind::OtherMatterRead && same_path(g.path(), &e.path)
+        };
+        e.lifted == Some(matter) && sids.contains(&e.sid) && !plan.grants().iter().any(on)
+    };
+    let restored = lifts::restore(ledger, acl, read);
+    finished(
+        restored,
+        take_reads(ledger, matter, &sids, listed, acl, around),
+    )
+    .map(drop)
+}
+
+/// Whether `a` and `b` are the same path, by [`in_folder`]'s comparison.
+fn same_path(a: &std::path::Path, b: &std::path::Path) -> bool {
+    in_folder(a, b) && in_folder(b, a)
 }
 
 /// Takes back each of `matter`'s read entries naming one of `sids`, in the file as read under
@@ -128,5 +173,6 @@ fn take_reads(
     }
     Ok(Narrowed {
         removed: removed.into_iter().collect(),
+        restored: Vec::new(),
     })
 }

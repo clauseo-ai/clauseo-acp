@@ -28,9 +28,8 @@
 //! files are. Nothing is written unless the entries change: a launch refused by the gate never
 //! reaches the ledger, and a missing ledger stays missing until an entry is recorded.
 //!
-//! Only an [`AdmittedPlan`] is recorded, and a rollback ([`Ledger::drop_entries`]) drops only the
-//! entries its own plan added. A take-back that picks other matters' entries is the one change
-//! that drops them: a sibling deny lifted from a folder that became a matter (S15 PR3, `apply`).
+//! Only an [`AdmittedPlan`] is recorded; a rollback ([`Ledger::drop_entries`]) drops only its
+//! own plan's entries, and only a take-back drops other matters' (S15 PR3, `apply`).
 //!
 //! Entries are not trusted on load. One this version can't read (an older shape, a newer kind),
 //! one whose SID is neither a trusted SID given to [`Ledger::open`] (the pool users and their
@@ -60,6 +59,7 @@ use super::writer::Label;
 mod file;
 mod held;
 mod label;
+mod lifts;
 mod outcome;
 mod owed;
 mod reclaims;
@@ -76,6 +76,7 @@ use held::ByPath;
 use held::Held;
 pub(crate) use held::Shares;
 pub(crate) use label::is_our_label;
+pub(crate) use lifts::{liftable, set_lifted};
 pub use outcome::{Forgotten, MissingEntries, Reconciled, Take, TakenBack};
 pub use owed::HandbackOwed;
 pub use reclaims::{ReclaimOwed, Stuck, clear_taken, owe_taken};
@@ -145,6 +146,10 @@ pub struct Entry {
     /// by then (S15 `PR3b` round 4, L5).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file: Option<RecordedFile>,
+    /// For a fence's deny on a matter folder alone, the matter whose session took it off for
+    /// its pool user to list the folder, owed back (R18, `lifts.rs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifted: Option<MatterId>,
 }
 
 impl Entry {
@@ -216,10 +221,8 @@ impl Ledger {
 
     /// `matter`'s trusted entries, as last read, for removal.
     pub fn matter_entries(&self, matter: MatterId) -> Vec<Entry> {
-        self.entries()
-            .filter(|entry| entry.matter == matter)
-            .cloned()
-            .collect()
+        let mine = self.entries().filter(|entry| entry.matter == matter);
+        mine.cloned().collect()
     }
 
     /// The write-ahead step, under the lock: lists each of `plan`'s grants as `pending`, then
@@ -242,10 +245,8 @@ impl Ledger {
             let mut created = Vec::new();
             let mut revived = false;
             for (grant, &matter) in plan.grants().iter().zip(plan.owners()) {
-                let listed = state
-                    .entries()
-                    .find(|entry| entry.lists(matter, grant))
-                    .map(|entry| entry.id);
+                let lists = |entry: &&Entry| entry.lists(matter, grant);
+                let listed = state.entries().find(lists).map(|entry| entry.id);
                 if let Some(id) = listed {
                     revived |= held::revive(state, id);
                     entries.push(id);
@@ -268,6 +269,7 @@ impl Ledger {
                         kind: grant.kind,
                         prior_label: None,
                         file: None,
+                        lifted: None,
                     },
                     extra: Map::new(),
                 }));
@@ -287,11 +289,8 @@ impl Ledger {
     /// (another process reconciled it away), nothing is marked and the error is `NotFound`
     /// carrying [`MissingEntries`]: the caller must not count that permission entry as listed.
     pub fn mark_applied(&mut self, plan: &AdmittedPlan, ids: &[EntryId]) -> io::Result<()> {
-        let ids: Vec<EntryId> = ids
-            .iter()
-            .copied()
-            .filter(|id| plan.entries.contains(id))
-            .collect();
+        let mine = |id: &EntryId| plan.entries.contains(id);
+        let ids: Vec<EntryId> = ids.iter().copied().filter(mine).collect();
         if ids.is_empty() {
             return Ok(());
         }

@@ -68,6 +68,7 @@ mod back;
 #[cfg(any(windows, test, feature = "test-support"))]
 mod fence;
 mod lift;
+mod lifts;
 mod reads;
 mod roots;
 mod split;
@@ -187,6 +188,8 @@ fn apply_with_pool(
     stuck::settled(ledger, plan);
     // R18: a whole-tree fence entry on a matter folder goes once its split pair is applied.
     split::retire_whole(ledger, plan, acl, around);
+    // R18: a read of another matter's whole folder lifts the fence's deny on the folder alone.
+    lifts::lift(ledger, plan, acl);
     let lifted = lift::lift(ledger, plan, &roots, acl, around);
     Ok(Applied {
         written: run.written.len(),

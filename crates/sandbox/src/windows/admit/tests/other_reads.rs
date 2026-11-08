@@ -152,3 +152,13 @@ fn the_plan_allows_reads_for_the_pool_user_only_and_denies_nothing_for_them() {
         }
     }
 }
+
+#[test]
+fn the_whole_folder_takes_allows_on_its_children_even_with_no_refused_name() {
+    let w = World::new("reads-whole-clean");
+    w.dir.file("other/m2/a.txt", "a");
+    w.dir.file("other/m2/docs/b.txt", "b");
+    let policy = w.reading(&[("other/m2", false)]);
+    let expected = vec![this_only(""), tree("docs"), this_only("a.txt")];
+    assert_eq!(listed(&w, &policy), expected);
+}

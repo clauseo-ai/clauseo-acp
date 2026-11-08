@@ -221,6 +221,11 @@ pub fn forget_matter(
             .map_err(|e| Error::CleanClose(e.kind()))?;
     }
     let failed = |e: io::Error| refused(PathKind::Matter, ApplyFailure::Ledger(e.kind()));
+    // R18: each fence deny its sessions lifted goes back; a failure keeps the mark, and the mark
+    // keeps the pool user from serving another matter until a later try puts it back.
+    if let Err(error) = super::lifts::restore_matter(ledger, acl, matter) {
+        tracing::warn!(%error, "a forgotten matter's lifted fence deny wasn't put back");
+    }
     // Read the file again, so the trees and pool users are the ones listed now.
     ledger.pending().map_err(failed)?;
     let entries = ledger.matter_entries(matter);
@@ -272,8 +277,15 @@ pub fn forget_matter(
 /// its permission entry is gone; one of a matter whose hand-back is owed is kept for the
 /// retried forget, deferred (S15 `PR3b` round 4). So a crash during the rollback of a refused
 /// launch never leaves that launch's grants applied.
+///
+/// First, every fence deny a session lifted for a read of a whole matter folder is put back
+/// (`lifts.rs`, R18): a crash left it off.
 pub fn reconcile(ledger: &mut Ledger, acl: &mut dyn AclWriter) -> Result<Reconciled, Error> {
     let failed = |e: io::Error| refused(PathKind::Matter, ApplyFailure::Ledger(e.kind()));
+    // R18: at start no session runs, so every lifted fence deny goes back.
+    if let Err(error) = super::lifts::restore(ledger, acl, |_| true) {
+        tracing::warn!(%error, "a lifted fence deny wasn't put back at start");
+    }
     let pending = ledger.pending().map_err(failed)?;
     let owed: BTreeSet<MatterId> = ledger
         .handbacks_owed()

@@ -11,7 +11,9 @@
 //! inheritance, and nothing is written in it or walked below it. Left out as well: a junction or
 //! symbolic link (the walk never follows one, and an allow on one would refuse the launch), and a
 //! file with another name elsewhere (an allow on it is refused, as at every grant). A granted
-//! file takes an allow for itself alone, unless it is one of those.
+//! file takes an allow for itself alone, unless it is one of those. The other matter's whole
+//! folder always takes the allows on its children, refused names or not: the fence's deny for
+//! what is below it would beat an allow for its tree (`fence.rs`).
 
 #[cfg(any(windows, test, feature = "test-support"))]
 use std::io;
@@ -20,6 +22,8 @@ use std::path::{Path, PathBuf};
 #[cfg(any(windows, test, feature = "test-support"))]
 use super::{FolderRefusal, FolderSupport, PathKind, refusal, refused};
 use crate::windows::acl_plan::Inherit;
+#[cfg(any(windows, test, feature = "test-support"))]
+use crate::windows::acl_plan::in_folder;
 #[cfg(any(windows, test, feature = "test-support"))]
 use crate::{Error, OtherMatterRead, Policy};
 
@@ -103,13 +107,22 @@ fn shape(read: &OtherMatterRead) -> io::Result<Vec<ReadGrant>> {
             vec![ReadGrant::this_only(path)]
         });
     }
-    Ok(mixed(read, &path)?.unwrap_or_else(|| vec![ReadGrant::tree(path)]))
+    // The other matter's whole folder always takes allows on its children: an allow for its
+    // tree would lose, on every child, to the fence's deny for what is below the folder, which
+    // sits on the same folder and comes first (R18).
+    let whole = in_folder(&path, read.root()) && in_folder(read.root(), &path);
+    Ok(mixed(read, &path, whole)?.unwrap_or_else(|| vec![ReadGrant::tree(path)]))
 }
 
+/// The entries for `folder` when a refused name is somewhere in it (or `always`), `None` when
+/// none is. Its children are taken in name order, so a plan is the same from one launch to the
+/// next.
 #[cfg(any(windows, test, feature = "test-support"))]
-/// The entries for `folder` when a refused name is somewhere in it, `None` when none is. Its
-/// children are taken in name order, so a plan is the same from one launch to the next.
-fn mixed(read: &OtherMatterRead, folder: &Path) -> io::Result<Option<Vec<ReadGrant>>> {
+fn mixed(
+    read: &OtherMatterRead,
+    folder: &Path,
+    always: bool,
+) -> io::Result<Option<Vec<ReadGrant>>> {
     let mut children = Vec::new();
     for entry in std::fs::read_dir(folder)? {
         let entry = entry?;
@@ -128,14 +141,14 @@ fn mixed(read: &OtherMatterRead, folder: &Path) -> io::Result<Option<Vec<ReadGra
             // Left out: see the module's docs.
         } else if !dir {
             files.push(path);
-        } else if let Some(inner) = mixed(read, &path)? {
+        } else if let Some(inner) = mixed(read, &path, false)? {
             found = true;
             grants.extend(inner);
         } else {
             grants.push(ReadGrant::tree(path));
         }
     }
-    if !found {
+    if !found && !always {
         return Ok(None);
     }
     for file in files {

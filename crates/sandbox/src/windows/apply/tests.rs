@@ -18,6 +18,7 @@ use crate::windows::writer::Label;
 mod checked;
 mod child_owners;
 mod fake;
+mod lifts;
 mod owners;
 mod protected_link;
 mod reads;
