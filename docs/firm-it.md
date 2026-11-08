@@ -63,7 +63,7 @@ What a silent (`/S`) install can return:
 | 22 | Per-user install: installed, but Safe workspace is not set up (no prompt under `/S`) |
 | 23 | Per-machine install: installed, but Safe workspace's set-up failed or didn't finish (still running after 10 minutes), a failed copy included |
 | 24 | Per-machine install: installed, but Safe workspace is not set up because Clauseo was running in the session that ran the installer |
-| 25 | Per-machine install: nothing installed, because the installer couldn't make its protected temporary folder under `C:\Program Files\Clauseo\installer-temp` |
+| 25 | Per-machine install: nothing installed, because the installer couldn't make its protected temporary folder in `C:\Program Files\Clauseo` |
 
 A 23 after a 10-minute wait means the set-up may still be running; the Safe workspace section of
 Clauseo's Settings shows whether it finished. A `/S` run as SYSTEM (Intune) runs in session 0,
@@ -88,7 +88,7 @@ unless `/P` or `/UPDATE` too), 27 under `/S` only:
 
 | Code | Meaning |
 |---|---|
-| 25 | Per-machine uninstall: nothing uninstalled, because the uninstaller couldn't make its protected temporary folder under `C:\Program Files\Clauseo\installer-temp` |
+| 25 | Per-machine uninstall: nothing uninstalled, because the uninstaller couldn't make its protected temporary folder in `C:\Program Files\Clauseo` |
 | 26 | Per-machine uninstall: nothing uninstalled, because it wasn't run from its install folder, as when an option was put after `_?=` (see below) |
 | 27 | Per-machine `/S` uninstall: uninstalled, but the protection stays, since the set-up program in `C:\Program Files\Clauseo\Sandbox` failed its check (see [section 10](#10-if-windows-security-removed-clauseos-set-up-program)) |
 
@@ -97,10 +97,11 @@ program was gone (see [section 10](#10-if-windows-security-removed-clauseos-set-
 silent per-user uninstall never returns 27: it skips the protection's removal.
 
 The per-machine installer, and the per-user installer's elevated step, keep their temporary files,
-plug-ins included, in a new folder under `C:\Program Files\Clauseo\installer-temp`, which only
-Administrators and SYSTEM can open, and delete it when they finish. The empty `installer-temp`
-folder stays until a per-machine uninstall removes it, with the install folder, when both are
-empty. The per-machine uninstaller keeps its own plug-ins there too.
+plug-ins included, in a new `ns….tmp` folder in `C:\Program Files\Clauseo`, which only
+Administrators and SYSTEM can open, and delete it when they finish. The per-machine uninstaller
+keeps its own plug-ins there too. Earlier versions put these folders in
+`C:\Program Files\Clauseo\installer-temp`, which stayed behind empty; the installer and the
+uninstaller remove an empty leftover `installer-temp`.
 
 A per-machine uninstall runs `uninstall.exe` where it is installed (the `_?=` in its registry
 commands), not from a copy in `%TEMP%`. `_?=` takes the rest of the line as the install folder, so
@@ -141,6 +142,12 @@ registered by an earlier version keep their old `UninstallString` until reinstal
   removed `clauseo-sandbox-setup.exe`, see [section 10](#10-if-windows-security-removed-clauseos-set-up-program).
   If it was deleted with the install folder, see
   [Clearing a leftover Windows sandbox by hand](#clearing-a-leftover-windows-sandbox-by-hand).
+- After an uninstall, `C:\Program Files\Clauseo\Sandbox` or the scheduled tasks
+  `\Clauseo\SandboxRefresh` and `\Clauseo\SandboxStop` may occasionally stay behind; the
+  Windows Application event log names the step that couldn't finish. An administrator can delete
+  them by hand (see
+  [Clearing a leftover Windows sandbox by hand](#clearing-a-leftover-windows-sandbox-by-hand)), or
+  reinstall Clauseo and then uninstall it.
 
 ### Intune (Win32 app)
 

@@ -215,9 +215,10 @@ fn a_path_with_a_cmd_metacharacter_builds_no_command_line() {
 }
 
 /// The whole cmd line, as NSIS builds it: cmd without `AutoRun` or delayed expansion, PING by
-/// full path, uninstall.exe deleted only while no main exe is back, then both folders removed
-/// only when empty.
-const COMMAND: &str = r#"StrCpy $ClauseoSelfDelete '/d /v:off /c ""$SYSDIR\PING.EXE" -n 4 127.0.0.1 >nul & (if not exist "$INSTDIR\${MAINBINARYNAME}.exe" del /f /q "$INSTDIR\uninstall.exe") & rmdir "$INSTDIR\installer-temp" & rmdir "$INSTDIR""'"#;
+/// full path, uninstall.exe deleted only while no main exe is back, then the folder removed only
+/// when empty. No `installer-temp`: the plug-in folder has no parent of its own
+/// (`safe_temp.nsh`).
+const COMMAND: &str = r#"StrCpy $ClauseoSelfDelete '/d /v:off /c ""$SYSDIR\PING.EXE" -n 4 127.0.0.1 >nul & (if not exist "$INSTDIR\${MAINBINARYNAME}.exe" del /f /q "$INSTDIR\uninstall.exe") & rmdir "$INSTDIR""'"#;
 
 #[test]
 fn the_line_is_checked_then_built_to_delete_the_image_only_while_no_main_exe_is_back() {

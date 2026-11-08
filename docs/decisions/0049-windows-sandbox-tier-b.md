@@ -605,12 +605,13 @@ started elevated, by the app or by the uninstall hook.
   (`safe_temp.nsh`, `CLAUSEO_SAFE_PLUGINSDIR`): the per-machine installer at the top of `.onInit`
   (template block `admin-section`, before `SetContext`'s `${RunningX64}`, the language picker and
   `SemverCompare`), and the per-user elevated step once it has its switch, though it loads no
-  plug-in. It makes a folder named by `GetTempFileName` under
-  `%ProgramFiles%\Clauseo\installer-temp` (`$PROGRAMFILES64`, from HKLM), sets owner
+  plug-in. It makes a folder named by `GetTempFileName` directly in `%ProgramFiles%\Clauseo`
+  (`$PROGRAMFILES64`, from HKLM; no parent of its own, so nothing outlives the run), sets owner
   Administrators and a protected DACL (Administrators and SYSTEM full) with `icacls`, checking
   both exit codes, then sets `$PLUGINSDIR` and `$TEMP` to it. NSIS skips its own plug-in folder
   when `$PLUGINSDIR` is set (makensis `build.cpp:3806-3807`) and deletes `$PLUGINSDIR`, and only
-  it, at exit (`Main.c:470-489`). The per-machine installer also points the environment's `TEMP`
+  it, at exit (`Main.c:470-489`). Earlier builds used a parent `installer-temp`, which stayed
+  empty after every run; each run now removes it first, only when empty. The per-machine installer also points the environment's `TEMP`
   and `TMP` there, so what it starts elevated (the WebView2 bootstrapper, `--adopt`, the old
   uninstaller its reinstall page runs in place) uses it too. The folder can't be checked as ours
   without a plug-in; it is ours because only administrators can create anything under Program
@@ -642,8 +643,7 @@ started elevated, by the app or by the uninstall hook.
   the end of the section (`uninstall_in_place.nsh`, block `uninstall-self-delete`) it starts,
   once (from `un.onGUIEnd` when it has a window, from the section under `/S`; in `$SYSDIR`), a
   hidden `"$SYSDIR\cmd.exe" /d /v:off /c` that waits about 3 s on `$SYSDIR\PING.EXE`, deletes
-  `uninstall.exe` only if the main exe isn't there, and removes `installer-temp` and the install
-  folder only if empty. An install writes the main exe before `WriteUninstaller`, so the guard
+  `uninstall.exe` only if the main exe isn't there, and removes the install folder only if empty. An install writes the main exe before `WriteUninstaller`, so the guard
   keeps a new install's `uninstall.exe` unless both land in the instant between `if` and `del`.
   `/d` keeps out HKCU's `AutoRun`, which an elevated cmd would otherwise run from the user's
   hive. It builds no line, and leaves the file, when the paths hold one of `% ^ & | < > " !`.
