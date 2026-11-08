@@ -123,7 +123,15 @@ impl Stopper for WindowsStopper {
     }
 
     fn check_pool(&mut self, pool: &Pool) -> Result<(), Failed> {
-        check_pool(&pool.users, &pool.owner).map_err(|error| error.to_string())
+        // The check's own refusal names the SID; the Application log is readable by every
+        // local user, so the line says only that one failed.
+        check_pool(&pool.users, &pool.owner).map_err(|error| match error {
+            MachineError::Other(_) => "a SID PoolSids lists failed the pool-user check".to_owned(),
+            error @ (MachineError::Os { .. }
+            | MachineError::LockHeld
+            | MachineError::Unsupported(_)
+            | MachineError::ProfileChanged(_)) => error.to_string(),
+        })
     }
 
     fn snapshot(&mut self) -> Result<Vec<Process>, Failed> {

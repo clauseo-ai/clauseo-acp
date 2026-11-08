@@ -159,9 +159,8 @@ pub(super) fn secure_dir(path: &Path, sddl: &str) -> Result<(), Failed> {
     let found = sddl_of(&folder)?;
     let expected = as_read_back(sddl)?;
     if !super::sddl_matches(&found, &expected) {
-        return Err(format!(
-            "the staging folder reads back as {found}, not {expected}"
-        ));
+        // Neither descriptor is logged: either may name a SID.
+        return Err("the staging folder's security reads back changed".to_owned());
     }
     Ok(())
 }

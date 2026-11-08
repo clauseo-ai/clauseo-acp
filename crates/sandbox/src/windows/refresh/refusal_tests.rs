@@ -82,10 +82,11 @@ fn a_refused_source_file_stages_nothing() {
             assert_eq!(run_fake(&mut fake, &key), RefreshExit::SourceRefused);
             assert!(!fake.calls.contains(&"stage"), "{error:?}");
             assert_eq!(fake.admin_file, Some(old()));
-            // The line names the file, the install folder and why; no other path.
+            // The line names the file and why, never the install folder's path: the
+            // Application log is readable by every local user.
             let (_, line) = fake.logs.last().unwrap();
             assert!(
-                line.contains(INSTALL) && line.contains(&error.to_string()),
+                !line.contains(INSTALL) && line.contains(&error.to_string()),
                 "{line}"
             );
         }
@@ -331,6 +332,9 @@ fn an_install_folder_outside_the_owners_profile_reads_nothing() {
             "{dir}"
         );
         assert!(!fake.calls.contains(&"read_source"), "{dir}");
+        // The Application log is readable by every local user: no path, no SID.
+        let (_, line) = fake.logs.last().unwrap();
+        assert!(!line.contains(dir) && !line.contains(OWNER), "{line}");
     }
     for owner in [None, Some("not a sid")] {
         let mut fake = Fake::new(&old(), &new(), &key, &good());

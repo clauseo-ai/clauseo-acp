@@ -378,7 +378,7 @@ fn locked_steps(fs: &mut impl Refresher, trust: &Trust<'_>) -> Result<String, Re
             SourceFile::Exe => "clauseo-sandbox-setup.exe",
             SourceFile::Sig => "clauseo-sandbox-setup.exe.sig",
         };
-        let line = format!("{name} in {}: {error}", checked.dir.display());
+        let line = format!("{name} in the install folder: {error}");
         (RefreshExit::SourceRefused, line)
     })?;
     let staged = fs
@@ -423,10 +423,9 @@ fn allowed(fs: &mut impl Refresher) -> Result<(), Refusal> {
     let exe = fs.current_exe().map_err(refuse)?;
     let admin = fs.admin_copy().map_err(refuse)?;
     if !same_path(&exe, &admin) {
-        return Err(refuse(format!(
-            "the refresh runs only from {}",
-            admin.display()
-        )));
+        return Err(refuse(
+            "the refresh runs only from the admin copy".to_owned(),
+        ));
     }
     Ok(())
 }
@@ -445,12 +444,9 @@ fn checked(fs: &mut impl Refresher, record: RefreshRecord) -> Result<Checked, Re
         .user_install_dir
         .as_deref()
         .ok_or_else(|| refuse("the record has no UserInstallDir"))?;
-    let dir = crate::windows::setup::args::data_dir_of(Some(dir.into())).map_err(|usage| {
-        (
-            RefreshExit::NoRecord,
-            format!("the record's UserInstallDir: {}", usage.0),
-        )
-    })?;
+    // The refusal quotes the path, so it isn't logged.
+    let dir = crate::windows::setup::args::data_dir_of(Some(dir.into()))
+        .map_err(|_usage| refuse("the record's UserInstallDir isn't a usable path"))?;
     let version = record
         .admin_copy_version
         .ok_or_else(|| refuse("the record has no AdminCopyVersion"))?;
@@ -460,20 +456,19 @@ fn checked(fs: &mut impl Refresher, record: RefreshRecord) -> Result<Checked, Re
             let profile = fs
                 .profile_dir(&owner)
                 .map_err(outside)?
-                .ok_or_else(|| outside(format!("{owner} has no profile")))?;
+                .ok_or_else(|| outside("the owner has no profile".to_owned()))?;
             if !inside_profile(&dir, &profile) {
-                return Err(outside(format!(
-                    "{} isn't inside {owner}'s profile",
-                    dir.display()
-                )));
+                return Err(outside(
+                    "the record's UserInstallDir isn't inside the owner's profile".to_owned(),
+                ));
             }
         }
         CopyOwner::Machine => {
             if !fs.admin_only_dir(&dir).map_err(outside)? {
-                return Err(outside(format!(
-                    "{} isn't a folder only administrators can change",
-                    dir.display()
-                )));
+                return Err(outside(
+                    "the record's UserInstallDir isn't a folder only administrators can change"
+                        .to_owned(),
+                ));
             }
         }
     }
