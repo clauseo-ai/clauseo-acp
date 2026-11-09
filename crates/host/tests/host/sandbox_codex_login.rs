@@ -126,16 +126,32 @@ fn a_linked_file_that_is_the_lawyer_s_own_by_identity_is_refused_as_reused() {
     );
 }
 
+/// Clauseo's own login, jailed: no refusal as reused and no split; the launch goes ahead in
+/// the jailed preset (R17 PR-D2c removed D2a's placeholder refusal of every jailed Codex), its
+/// jail built, and its own login linked into the matter.
 #[test]
 fn clauseo_s_own_login_is_not_refused_as_reused() {
     let dir = codex_dir("sandbox_codex_own", "codex-handshake");
+    dir.set_agents(&[(CODEX, crate::support::Scenario::Local("codex-jailed-new"))]);
     lawyers_login(&dir);
     crate::write::write(&clauseo_login(&dir), b"{\"own\":true}");
-    let (code, _, split) = jailed_turn(&dir, LoginLink::Own, false);
-    // Past the login check: refused only by D2a's placeholder for any jailed Codex (D2c starts
-    // it in the jailed preset), never as a reused login.
-    assert_eq!(code, ErrorCode::AgentLaunchFailed);
-    assert_eq!(split, None);
+    let (fake, _) = Fake::new(&dir, Answer::Launch(Vec::new()));
+    let hook = Hook::new(LoginLink::Own);
+    let home = dir.home().to_owned();
+    let (host, _, _) = start_with(&dir, Some(Arc::clone(&fake)), move |config| {
+        config.with_login_check(hook).with_home_folder(Some(home))
+    });
+    let splits = host.handle.login_splits();
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("a.txt", "x\n")], CODEX);
+    let mut events = host.events(StreamId::Thread(thread));
+    wait("reused", host.handle.set_reused_login(codex(), false)).unwrap();
+    let (turn, _) = host.prompt(thread, "Look at the matter.");
+    let ended = events.until_turn_ended(turn);
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    assert_eq!(failed(&events, turn), None);
+    assert!(splits.try_recv().is_err(), "no split");
+    assert_eq!(fake.reserved(), 1, "its jail reserved");
+    host.shutdown();
     assert_eq!(
         state_logins(&dir).len(),
         1,
