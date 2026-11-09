@@ -103,12 +103,31 @@ fn file_id(path: &Path) -> io::Result<Option<((u64, u64), u64)>> {
 /// `safe_read::read_plain` takes for an absent file. `io::Error::from` would keep the HRESULT
 /// (`0x80070002`), whose kind std does not know, and so failed every Claude launch whose state
 /// folder had no `.claude.json` or `settings.json` yet. The rule of `clauseo_mcp`'s Windows
-/// write.
+/// write, narrowed by [`win32_error`]. An error that is no Win32 error keeps its HRESULT, whose
+/// kind is never `NotFound`.
 #[cfg(windows)]
-fn os_error(error: &windows::core::Error) -> io::Error {
+pub(super) fn os_error(error: &windows::core::Error) -> io::Error {
     use windows::Win32::Foundation::WIN32_ERROR;
-    match WIN32_ERROR::from_error(error).and_then(|code| i32::try_from(code.0).ok()) {
-        Some(code) => io::Error::from_raw_os_error(code),
-        None => io::Error::from(error.clone()),
+    WIN32_ERROR::from_error(error).map_or_else(|| io::Error::from(error.clone()), win32_error)
+}
+
+/// The Win32 error `code` as an io error that reads as `NotFound` only for
+/// `ERROR_FILE_NOT_FOUND` (2) and `ERROR_PATH_NOT_FOUND` (3), so the read of a state file fails
+/// closed: std reads `ERROR_INVALID_DRIVE` (15), `ERROR_BAD_NETPATH` (53) and
+/// `ERROR_BAD_NET_NAME` (67) as `NotFound` too, and those become `Other`, the OS error kept as
+/// the cause. Access denied, a sharing violation, a reparse refusal and every other code keep
+/// std's kind.
+#[cfg(windows)]
+fn win32_error(code: windows::Win32::Foundation::WIN32_ERROR) -> io::Error {
+    use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND};
+    let Ok(raw) = i32::try_from(code.0) else {
+        return io::Error::other(format!("Windows error {}", code.0));
+    };
+    let error = io::Error::from_raw_os_error(raw);
+    let missing = code == ERROR_FILE_NOT_FOUND || code == ERROR_PATH_NOT_FOUND;
+    if error.kind() == io::ErrorKind::NotFound && !missing {
+        io::Error::other(error)
+    } else {
+        error
     }
 }
