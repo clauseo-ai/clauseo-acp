@@ -1,0 +1,326 @@
+//! What a denial's card may offer (R18): one pure function, [`offer`], over canonical paths
+//! pinned by identity ([`identity::Places::pin`]: a respelling of home, a matter or `.ssh` is
+//! judged as that place), run when the card is logged and again (3b) when the lawyer allows it.
+//! A tool call's card is cut down further by [`tool_call_ruling`].
+//!
+//! - Never offered: the home folder or a folder holding it, a root (`/`, a drive), Clauseo's
+//!   data folder, a refused folder or tree (the firm's, the host's), a path with a `.git` or any
+//!   other dot-named component, a credential store, this matter or a folder overlapping it, a
+//!   link target, a path the sandbox classed `ReadOnly`, `Hidden` (unless another matter's) or
+//!   `LinkTarget`, and a site refused for anything but `NotAllowed` (`PrivateAddress` above all).
+//! - Another matter (matched against the registry): the asked path alone, read-only, never its
+//!   root and never anything under its dot folders (`.clauseo`, `.claude`, `.codex`, `.agents`,
+//!   `.git`: [`refused_in_other_matter`]).
+//! - A file whose folder is never offered (one directly in home): a card for that file alone,
+//!   unless the file itself falls under a rule above.
+//! - Never offered whole, by identity (worked out off the actor, [`Refused::Path`]'s
+//!   `holds_protected`): a folder that holds a protected place under any spelling, or a mounted
+//!   volume's root (`/System/Volumes/Data`).
+//!
+//! The folder rules are those of `Policy::check_allowed_folder`
+//! (`crates/sandbox/src/policy/build.rs`), which the host can't call until PR-D builds a
+//! policy per launch; they are repeated here, stricter (refused folders count as trees, dot
+//! names and credential stores are refused).
+
+use std::path::{Component, Path, PathBuf};
+
+use clauseo_protocol::{DenialKind, MatterId, OtherMatter};
+use clauseo_sandbox::{HostRefusal, PathClass};
+
+use crate::network_paths::ascii_fold::{name_folds_to, refused_in_other_matter};
+
+pub(crate) mod identity;
+mod ruling;
+#[cfg(test)]
+mod tests;
+
+pub(crate) use ruling::{Facts, Jail, facts, tool_call_ruling};
+
+/// Folder names that hold keys and passwords where the name has no leading dot: macOS
+/// keychains, the Linux keyrings, Windows' credential, protect and vault stores. Compared
+/// folded ([`fold_name`]), on every system.
+const CREDENTIAL_STORES: [&str; 5] = ["Keychains", "keyrings", "Credentials", "Protect", "Vault"];
+
+/// A matter the registry knows, for matching a refused path to another matter.
+#[derive(Debug, Clone)]
+pub(crate) struct KnownMatter {
+    /// The matter.
+    pub(crate) id: MatterId,
+    /// Its name, for the card (display only).
+    pub(crate) name: String,
+    /// Its folder, canonical.
+    pub(crate) root: PathBuf,
+}
+
+/// What the rules compare a refused path against; every path canonical.
+#[derive(Debug, Clone)]
+pub(crate) struct OfferRules {
+    /// The lawyer's home folder.
+    pub(crate) home: Option<PathBuf>,
+    /// Clauseo's data folder.
+    pub(crate) data_dir: PathBuf,
+    /// The matter whose agent was refused, and its folder.
+    pub(crate) matter: MatterId,
+    pub(crate) matter_root: PathBuf,
+    /// Refused folders and trees: never offered, nor any folder above or inside one. The home
+    /// folder, when listed, is left out here: [`OfferRules::home`] has its own rule.
+    pub(crate) refused: Vec<PathBuf>,
+    /// Every matter the host knows, this one included (it is skipped).
+    pub(crate) matters: Vec<KnownMatter>,
+    /// Whether names compare without case (macOS and Windows volumes).
+    pub(crate) fold_case: bool,
+}
+
+/// One refusal, as the rules read it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Refused<'a> {
+    /// A path: canonical, whether it is a file (or does not exist), and the sandbox's class.
+    /// `holds_protected`: the folder a whole-folder card would name (the path, or a file's
+    /// folder) holds a protected place by identity or is a mounted volume's root
+    /// ([`identity::Places::holds_protected`]); such a folder is never offered whole.
+    Path {
+        path: &'a Path,
+        is_file: bool,
+        class: PathClass,
+        holds_protected: bool,
+    },
+    /// A site the egress proxy refused.
+    Site {
+        host: &'a str,
+        shared_hosting: bool,
+        why: HostRefusal,
+    },
+    /// The upstream proxy wanted a sign-in.
+    UpstreamAuth { upstream: &'a str },
+    /// A path that names a network location (`network.rs`) or could not be resolved, as the
+    /// agent wrote it: never offered.
+    Unchecked { path: &'a str },
+}
+
+/// What the card shows and whether it may widen it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Offer {
+    pub(crate) kind: DenialKind,
+    pub(crate) offered: bool,
+}
+
+/// The card for `refused` under `rules`. Pure: no disk, no clock. A path must already be
+/// resolved (`resolve.rs`); a network or unresolved one comes as [`Refused::Unchecked`].
+/// Another matter is found by matching the registry; once stage C's #735 adds
+/// `PathClass::OtherMatter { matter, refused }` to the sandbox's `classify`, this can take that
+/// class instead and keep the rest.
+pub(crate) fn offer(rules: &OfferRules, refused: Refused<'_>) -> Offer {
+    match refused {
+        Refused::Path {
+            path,
+            is_file,
+            class,
+            holds_protected,
+        } => path_offer(rules, path, is_file, class, holds_protected),
+        Refused::Site {
+            host,
+            shared_hosting,
+            why,
+        } => Offer {
+            kind: DenialKind::Site {
+                host: host.to_owned(),
+                shared_hosting,
+            },
+            offered: why == HostRefusal::NotAllowed,
+        },
+        Refused::Unchecked { path } => Offer {
+            kind: DenialKind::File {
+                path: path.to_owned(),
+                other_matter: None,
+            },
+            offered: false,
+        },
+        Refused::UpstreamAuth { upstream } => Offer {
+            kind: DenialKind::UpstreamAuth {
+                upstream: upstream.to_owned(),
+            },
+            offered: false,
+        },
+    }
+}
+
+fn path_offer(
+    rules: &OfferRules,
+    path: &Path,
+    is_file: bool,
+    class: PathClass,
+    holds_protected: bool,
+) -> Offer {
+    let folder = if is_file {
+        path.parent().unwrap_or(path)
+    } else {
+        path
+    };
+    let shown = |p: &Path| p.display().to_string();
+    if let Some(other) = rules.other_matter(path) {
+        let other_matter = Some(OtherMatter {
+            matter: other.id,
+            name: other.name.clone(),
+        });
+        // Until #735 the sandbox hides other matters, so their refusals come as `Hidden`.
+        let class_ok = matches!(class, PathClass::Outside | PathClass::Hidden);
+        let offered = class_ok
+            && (is_file || !holds_protected)
+            && !rules.same(path, &other.root)
+            && !OfferRules::in_refused_of(path, &other.root)
+            && !rules.never(path)
+            && !rules.overlaps_this_matter(path);
+        let kind = if is_file {
+            DenialKind::File {
+                path: shown(path),
+                other_matter,
+            }
+        } else {
+            DenialKind::Folder {
+                path: shown(path),
+                other_matter,
+            }
+        };
+        return Offer { kind, offered };
+    }
+    let outside = class == PathClass::Outside;
+    if outside && !holds_protected && rules.folder_offerable(folder) {
+        let kind = DenialKind::Folder {
+            path: shown(folder),
+            other_matter: None,
+        };
+        return Offer {
+            kind,
+            offered: true,
+        };
+    }
+    if is_file && outside && !rules.never(path) && !rules.overlaps_this_matter(path) {
+        let kind = DenialKind::File {
+            path: shown(path),
+            other_matter: None,
+        };
+        return Offer {
+            kind,
+            offered: true,
+        };
+    }
+    Offer {
+        kind: DenialKind::Folder {
+            path: shown(folder),
+            other_matter: None,
+        },
+        offered: false,
+    }
+}
+
+impl OfferRules {
+    /// Whether `path` is in one of `root`'s folders never offered in another matter (`.git`,
+    /// `.clauseo`, `.claude`, `.codex`, `.agents`), by name folded.
+    fn in_refused_of(path: &Path, root: &Path) -> bool {
+        let depth = root.components().count();
+        path.components().skip(depth).any(|c| match c {
+            Component::Normal(name) => refused_in_other_matter(name),
+            Component::Prefix(_)
+            | Component::RootDir
+            | Component::CurDir
+            | Component::ParentDir => false,
+        })
+    }
+
+    /// The other matter `path` is in (the innermost, when matters nest), if any.
+    pub(crate) fn other_matter(&self, path: &Path) -> Option<&KnownMatter> {
+        self.matters
+            .iter()
+            .filter(|known| known.id != self.matter && self.under(path, &known.root))
+            .max_by_key(|known| known.root.components().count())
+    }
+
+    /// Whether `folder` may be offered whole: `check_allowed_folder`'s rules, then the host's.
+    fn folder_offerable(&self, folder: &Path) -> bool {
+        !is_root(folder)
+            && !self
+                .home
+                .as_deref()
+                .is_some_and(|home| self.under(home, folder))
+            && !self.overlaps_this_matter(folder)
+            && !self
+                .matters
+                .iter()
+                .any(|known| self.under(&known.root, folder))
+            && !self.refused.iter().any(|r| self.under(r, folder))
+            && !self.never(folder)
+    }
+
+    /// The rules no path passes, whatever it is: a root, the data folder or a refused tree (at
+    /// or inside), a dot-named component (`.git`, `.ssh`, another matter's `.claude`), a
+    /// credential store, or the home folder itself.
+    pub(crate) fn never(&self, path: &Path) -> bool {
+        is_root(path)
+            || self.overlap(path, &self.data_dir)
+            || self.refused.iter().any(|r| self.under(path, r))
+            || self
+                .home
+                .as_deref()
+                .is_some_and(|home| self.same(path, home))
+            || path.components().any(|c| match c {
+                Component::Normal(name) => {
+                    fold_name(&name.to_string_lossy()).starts_with('.')
+                        || CREDENTIAL_STORES
+                            .iter()
+                            .any(|store| name_folds_to(name, store))
+                }
+                Component::Prefix(_)
+                | Component::RootDir
+                | Component::CurDir
+                | Component::ParentDir => false,
+            })
+    }
+
+    pub(crate) fn overlaps_this_matter(&self, path: &Path) -> bool {
+        self.overlap(path, &self.matter_root)
+    }
+
+    /// Whether `a` is `b`, inside it, or holds it.
+    fn overlap(&self, a: &Path, b: &Path) -> bool {
+        self.under(a, b) || self.under(b, a)
+    }
+
+    fn same(&self, a: &Path, b: &Path) -> bool {
+        a.components().count() == b.components().count() && self.under(a, b)
+    }
+
+    pub(crate) fn under(&self, path: &Path, prefix: &Path) -> bool {
+        under(path, prefix, self.fold_case)
+    }
+}
+
+/// Whether `path` is `prefix` or inside it, by whole components; without case when
+/// `fold_case`.
+pub(crate) fn under(path: &Path, prefix: &Path, fold_case: bool) -> bool {
+    if !fold_case {
+        return path.starts_with(prefix);
+    }
+    let mut names = path.components();
+    prefix.components().all(|want| {
+        names.next().is_some_and(|got| {
+            let (got, want) = (got.as_os_str(), want.as_os_str());
+            got == want || fold_name(&got.to_string_lossy()) == fold_name(&want.to_string_lossy())
+        })
+    })
+}
+
+/// A root: `/`, a drive (`C:\`) or a share's root.
+fn is_root(path: &Path) -> bool {
+    path.parent().is_none()
+}
+
+/// `name` folded for comparing names on a path: `crate::network_paths::fold_name` (#766: stage
+/// C's table, then NFD and lower case), one fold for every name and mount compare. Used for
+/// every refused name, on every system: it only ever matches more. Host switches to
+/// `clauseo_sandbox`'s export once #735 lands.
+pub(crate) fn fold_name(name: &str) -> String {
+    crate::network_paths::fold_name(name)
+}
+
+/// Folds the case of names on the volumes that ignore it: macOS and Windows.
+pub(crate) use crate::network_paths::FOLD_CASE;

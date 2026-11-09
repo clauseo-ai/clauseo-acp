@@ -278,7 +278,8 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         | HostCommand::EditQueuedPrompt { .. }
         | HostCommand::RemoveQueuedPrompt { .. }
         | HostCommand::SendQueuedNow { .. }
-        | HostCommand::ResumeQueue { .. }) => to_turn::run_turn_command(actor, ctx, command),
+        | HostCommand::ResumeQueue { .. }
+        | HostCommand::DismissDenial { .. }) => to_turn::run_turn_command(actor, ctx, command),
         HostCommand::RestoreVersion {
             matter,
             checkpoint,
@@ -326,7 +327,6 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         | HostCommand::RequestEscalation { .. }
         | HostCommand::SwitchProtectionOn { .. }
         | HostCommand::ForgetAllowance { .. }
-        | HostCommand::DismissDenial { .. }
         | HostCommand::GoOnInsideMatter { .. } => not_built(actor, ctx),
     }
 }

@@ -270,14 +270,15 @@ fn a_prompt_sent_during_the_stop_stays_starting_and_resumes_from_the_detach() {
 }
 
 /// A snapshot from before the resume cue (10), before R17 PR-E's `TurnFailed.at` and
-/// `LeftSafeWorkspace` (11) or before R18's denials and restarts (12) is refolded from events.
+/// `LeftSafeWorkspace` (11), before R18's denials and restarts (12) or before the replaced-card
+/// fold (13) is refolded from events.
 #[test]
-fn a_schema_10_to_12_snapshot_is_refolded() {
-    assert_eq!(REDUCER_SCHEMA_VERSION, 13);
+fn a_schema_10_to_13_snapshot_is_refolded() {
+    assert_eq!(REDUCER_SCHEMA_VERSION, 14);
     let (mut log, mut state) = created(59);
     idle_stop(&mut log, &mut state);
     send(&mut log, &mut state, "Go.");
-    for found in [10, 11, 12] {
+    for found in [10, 11, 12, 13] {
         let old = SnapshotRef {
             reducer_schema: found,
             state: &state,

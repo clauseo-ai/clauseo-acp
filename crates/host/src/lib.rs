@@ -247,6 +247,14 @@ mod ids;
 pub mod log_file;
 mod matter_marker;
 mod matter_worker;
+// #766's module, ahead of it: on this base R18 3a's denials are its only user, so the data
+// fence's parts (`touchable`, `Disk::resolved`) are not used yet. This drops out when #766 lands.
+#[expect(
+    dead_code,
+    unused_imports,
+    reason = "#766's data fence uses the rest; it lands separately"
+)]
+mod network_paths;
 mod pipeline;
 pub mod pre_write_guard;
 mod principal;

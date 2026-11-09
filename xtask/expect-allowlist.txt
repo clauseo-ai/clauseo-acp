@@ -576,3 +576,15 @@ crates/sandbox/examples/s15_launch_vm/win_ctl.rs - unsafe_code
 crates/sandbox/examples/s15_launch_vm/win_logon.rs - unsafe_code
 crates/sandbox/examples/s15_launch_vm/win_switch.rs - unsafe_code
 crates/sandbox/examples/s15_launch_vm/win_pool.rs - unsafe_code
+# R18 PR 3a: the denial sink R17 PR-D's launch path builds; only the tests build it until then.
+crates/host/src/actor/turn/denials/feed.rs DenialFeed dead_code
+crates/host/src/actor/turn/denials/feed.rs DenialFeed::new dead_code
+crates/host/src/actor/input.rs Input::Denial dead_code
+# R18 PR 3a: the card's target R18 3b pins a grant to; nothing grants in 3a.
+crates/host/src/actor/turn/denials/count.rs Denials::card_target dead_code
+# #766's network_paths ahead of it on R18 3a's branch: its data fence parts are not used yet.
+crates/host/src/lib.rs network_paths dead_code
+crates/host/src/lib.rs network_paths unused_imports
+# A network path is decided from the drive's root and the mount list, never the path.
+crates/host/src/network_paths/mac.rs - unsafe_code
+crates/host/src/network_paths/windows.rs - unsafe_code

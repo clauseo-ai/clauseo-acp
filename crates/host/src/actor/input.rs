@@ -274,6 +274,16 @@ pub(crate) enum Input {
     /// An owed forget's write or walk, the start-up read of those owed, or the stop's wait
     /// (`protection/forget.rs`).
     SandboxForget(Box<super::protection::forget::ForgetInput>),
+    /// A refusal from a launch's sinks (`turn/denials.rs`); the tool-call watch's go straight
+    /// to their check.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "R17 PR-D's sinks post it; only the tests do until then"
+        )
+    )]
+    Denial(Box<super::turn::denials::DenialInput>),
 }
 
 impl std::fmt::Debug for Input {
@@ -311,6 +321,7 @@ impl std::fmt::Debug for Input {
             Self::Abort(_) => "Abort",
             Self::Allowed(_) => "Allowed",
             Self::SandboxForget(_) => "SandboxForget",
+            Self::Denial(_) => "Denial",
         };
         f.write_str(name)
     }

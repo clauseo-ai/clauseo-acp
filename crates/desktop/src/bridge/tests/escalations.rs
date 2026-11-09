@@ -68,14 +68,26 @@ fn the_five_commands_go_by_window() {
             "{window}: {refusal:?}"
         );
     }
-    for body in [card, off, files, on, forget, dismiss, go_on] {
+    // `DismissDenial` runs since R18 PR 3a: the host checks its thread first, and this one is
+    // not there.
+    let not_built = (ErrorCode::CommandInvalid, "not built");
+    let answers = [
+        (card, not_built),
+        (off, not_built),
+        (files, not_built),
+        (on, not_built),
+        (forget, not_built),
+        (dismiss, (ErrorCode::CommandUnknownThread, "")),
+        (go_on, not_built),
+    ];
+    for (body, (code, says)) in answers {
         let envelope = CommandEnvelope {
             command_id: CommandId::new(Uuid::now_v7()).unwrap(),
             command: command(body.clone()),
         };
         let refusal = block_on(bridge.dispatch(MAIN, envelope)).unwrap_err();
-        assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{body}");
-        assert!(refusal.message().contains("not built"), "{refusal:?}");
+        assert_eq!(refusal.code(), code, "{body}");
+        assert!(refusal.message().contains(says), "{refusal:?}");
     }
 }
 

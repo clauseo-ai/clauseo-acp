@@ -13,7 +13,9 @@ use crate::change::{Anomaly, ViewChange};
 use crate::state::ThreadState;
 
 /// A refusal: a new entry, `Pending` when its card may widen it, else `NotOffered`. The same
-/// denial logged again updates its `count` and nothing else.
+/// denial logged again updates its `count`; logged offered while its card is `NotOffered` (a
+/// tool call's claim an OS report then confirmed), its kind and source too, and it is
+/// `Pending`: one card, never two. Any other state is kept.
 pub(super) fn recorded(
     state: &mut ThreadState,
     seq: Seq,
@@ -23,7 +25,12 @@ pub(super) fn recorded(
 ) {
     if state.index.denials.contains_key(&event.denial) {
         with_denial(state, "denial_recorded", event.denial, out, |entry| {
-            set(&mut entry.count, event.count)
+            let offered = event.offered && entry.state == DenialState::NotOffered;
+            let now_offered = offered
+                && (set(&mut entry.kind, event.kind.clone())
+                    | set(&mut entry.source, event.source.clone())
+                    | set(&mut entry.state, DenialState::Pending));
+            set(&mut entry.count, event.count) | now_offered
         });
         return;
     }
