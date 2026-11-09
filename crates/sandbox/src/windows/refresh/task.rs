@@ -455,7 +455,9 @@ fn identity(task: &IRegisteredTask) -> Result<TaskIdentity, TaskError> {
             }
             let logon: ILogonTrigger = trigger.cast().map_err(com("ILogonTrigger"))?;
             let user: BSTR = out("ILogonTrigger::UserId", |at| logon.UserId(at))?;
-            triggers.push(TaskTrigger::Logon(user.to_string()));
+            // By SID, as the principal: Windows may write the user back as `DOMAIN\user`.
+            let lookup = |name: &str| lookup_account(name).ok();
+            triggers.push(TaskTrigger::Logon(principal_sid(&user.to_string(), lookup)));
         }
         let settings = definition.Settings().map_err(com("Settings"))?;
         let flag =

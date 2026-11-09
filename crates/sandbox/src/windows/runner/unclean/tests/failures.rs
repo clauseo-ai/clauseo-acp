@@ -1,7 +1,8 @@
 //! F4 when a marker's file won't change: a clean one that can't be removed refuses nothing,
 //! and one whose sweep before its final stop completed but can't be re-marked refuses with no
 //! stop requested. And a sweep that can't finish because its task is missing: the refusal says
-//! so, in the readiness check's words.
+//! so, in the readiness check's words. And the launch's check of the tasks before the logon:
+//! missing or changed refuses it, and tasks that can't be read are read once more first.
 
 use super::*;
 use crate::windows::refresh::{TASK_CHANGED, TASK_MISSING, TASK_UNCHECKED};
@@ -67,12 +68,17 @@ fn a_swept_marker_whose_re_mark_cant_be_written_refuses_the_logon_without_a_stop
 fn a_sweep_refused_while_its_task_is_missing_or_changed_says_to_repair_clauseo() {
     let awaiting = Some(MarkerState::AwaitingSweep { sweep: 6 });
     for words in [TASK_MISSING, TASK_CHANGED, TASK_UNCHECKED] {
-        // F4's logon refusal, after its 15 s wait.
+        // F4's logon refusal, up front (an unreadable task in the launch's own words).
         let mut fake = Fake::new();
         fake.marker("a1", Some(POOL_A), awaiting);
         fake.task_repair = Some(words);
         let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
-        assert_eq!(refused, Refused::sweep(words.to_owned()));
+        let said = if words == TASK_UNCHECKED {
+            TASKS_UNCHECKED_AT_LAUNCH
+        } else {
+            words
+        };
+        assert_eq!(refused, Refused::sweep(said.to_owned()));
         assert_eq!(fake.asked("stop"), 0);
         // A launch's refusal says the same.
         assert_eq!(await_sweeps(&mut fake), Err(words.to_owned()));
@@ -113,10 +119,35 @@ fn a_missing_or_changed_task_refuses_the_logon_before_it_happens() {
             Vec::<String>::new(),
             "nothing requested or written"
         );
+        assert_eq!(fake.task_reads, 1);
     }
-    // A Task Scheduler that doesn't answer is said, and the logon goes ahead.
+}
+
+#[test]
+fn tasks_that_cant_be_checked_are_read_once_more_then_refuse_the_logon() {
+    assert_eq!(TASK_RETRY, Duration::from_millis(300));
+    // The first read fails, the retry answers: the launch proceeds.
+    let mut fake = Fake::new();
+    fake.queued_task_repairs = vec![Some(TASK_UNCHECKED)];
+    assert_eq!(logon_check(&mut fake, &sid(POOL_A)), Ok(()));
+    assert_eq!(fake.log, ["pause for the tasks"]);
+    assert_eq!(fake.task_reads, 2);
+    // The retry finds a task missing: refused in those words.
+    let mut fake = Fake::new();
+    fake.queued_task_repairs = vec![Some(TASK_UNCHECKED)];
+    fake.task_repair = Some(TASK_MISSING);
+    let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
+    assert_eq!(refused, Refused::sweep(TASK_MISSING.to_owned()));
+    // Both fail: refused before the logon, nothing requested or written.
     let mut fake = Fake::new();
     fake.task_repair = Some(TASK_UNCHECKED);
-    assert_eq!(logon_check(&mut fake, &sid(POOL_A)), Ok(()));
-    assert_eq!(fake.log, [format!("note {TASK_UNCHECKED}")]);
+    let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
+    assert_eq!(refused.exit, RunExit::AwaitingSweep);
+    assert_eq!(
+        refused.why,
+        "Clauseo couldn't check its clean-up task, so it didn't start the AI tool. Try again. \
+         If this keeps happening, restart your computer."
+    );
+    assert_eq!(fake.log, ["pause for the tasks"]);
+    assert_eq!(fake.task_reads, 2);
 }

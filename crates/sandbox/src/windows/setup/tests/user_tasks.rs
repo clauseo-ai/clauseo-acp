@@ -263,12 +263,22 @@ fn the_refresh_task_is_put_back_like_the_others() {
 }
 
 #[test]
-fn a_task_whose_definition_carries_no_descriptor_is_registered_again() {
-    // As the VM read `SandboxStop` back after `\Clauseo` was made again: the same DACL on the
-    // task, but no `<SecurityDescriptor>` in its definition.
+fn an_earlier_adopts_task_without_a_definition_descriptor_is_left_alone() {
+    // A task an earlier --adopt registered, before registration set the definition's own
+    // descriptor: the task's own descriptor is the set-up's, so it is the same and left.
     let mut machine = adopted("user-tasks-no-sd");
     if let Some(Ok(stop)) = machine.state.tasks.get_mut("SandboxStop") {
         stop.definition_descriptor = None;
+    }
+    assert_eq!(readiness(&machine), SetupState::Ready);
+    set_up_fresh(&mut machine, &mut FakeAcl::default());
+    assert!(replaced(&machine, 0).is_empty(), "{:?}", machine.calls);
+    // With its own descriptor wrong too, it is registered again, and what the registration
+    // writes carries the descriptor it was given.
+    let mut machine = adopted("user-tasks-no-sd-wrong");
+    if let Some(Ok(stop)) = machine.state.tasks.get_mut("SandboxStop") {
+        stop.definition_descriptor = None;
+        stop.descriptor = test_descriptor(&Sid::parse(OTHER_OWNER).unwrap());
     }
     assert_eq!(
         readiness(&machine),
@@ -280,7 +290,6 @@ fn a_task_whose_definition_carries_no_descriptor_is_registered_again() {
         replaced(&machine, 0),
         [format!("replace_task SandboxStop {owner_rid}")]
     );
-    // What the registration writes carries the descriptor it was given.
     let registered = machine.state.tasks.get("SandboxStop").cloned();
     let carried = registered
         .and_then(Result::ok)

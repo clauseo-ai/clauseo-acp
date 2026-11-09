@@ -44,8 +44,12 @@ struct Fake {
     sweep_next_fails: bool,
     /// Which of the marker writes and removals fail.
     fails: Fails,
-    /// What the sweep task needs, in the readiness check's words.
+    /// What the tasks need, in the readiness check's words.
     task_repair: Option<&'static str>,
+    /// What the first reads of the tasks give instead, in order, before `task_repair`.
+    queued_task_repairs: Vec<Option<&'static str>>,
+    /// How many times the tasks were read.
+    task_reads: usize,
     log: Vec<String>,
 }
 
@@ -63,6 +67,8 @@ impl Fake {
             sweep_next_fails: false,
             fails: Fails::default(),
             task_repair: None,
+            queued_task_repairs: Vec::new(),
+            task_reads: 0,
             log: Vec::new(),
         }
     }
@@ -160,6 +166,10 @@ impl Markers for Fake {
         Ok(())
     }
     fn pause(&mut self, pause: Duration) {
+        if pause == TASK_RETRY {
+            self.log.push("pause for the tasks".to_owned());
+            return;
+        }
         assert_eq!(pause, SWEEP_POLL);
         self.log.push("pause".to_owned());
         if !self.sweeps.is_empty() {
@@ -170,7 +180,12 @@ impl Markers for Fake {
         self.log.push(format!("note {line}"));
     }
     fn task_repair(&mut self) -> Option<&'static str> {
-        self.task_repair
+        self.task_reads += 1;
+        if self.queued_task_repairs.is_empty() {
+            self.task_repair
+        } else {
+            self.queued_task_repairs.remove(0)
+        }
     }
 }
 

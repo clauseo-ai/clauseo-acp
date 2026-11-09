@@ -45,8 +45,9 @@ pub const POOL_TASKS: [SystemTask; 2] = [SystemTask::Stop, SystemTask::Sweep];
 /// Every task a per-user install needs, the one list its set-up's repair puts back
 /// (`setup::user_tasks`), its readiness check reads (`task_identity::ready_with_tasks`) and a
 /// launch checks before the pool user's logon (`runner::unclean::logon_check`): all of
-/// [`TASKS`], as its `--adopt` registers them.
-pub const USER_TASKS: [SystemTask; 3] = TASKS;
+/// the three its `--adopt` registers. Listed on its own: a task added to [`TASKS`] isn't a
+/// per-user one until it is named here.
+pub const USER_TASKS: [SystemTask; 3] = [SystemTask::Refresh, SystemTask::Stop, SystemTask::Sweep];
 
 impl SystemTask {
     /// Its name in `\Clauseo`.

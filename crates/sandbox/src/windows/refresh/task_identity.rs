@@ -78,7 +78,8 @@ pub enum TaskAction {
 /// One trigger of a registered task.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskTrigger {
-    /// `TASK_TRIGGER_LOGON`, for the user it names (empty: anyone's logon).
+    /// `TASK_TRIGGER_LOGON`, for the user it names (empty: anyone's logon), by SID when the name
+    /// resolves to one ([`principal_sid`]): Windows may write it back as `DOMAIN\user`.
     Logon(String),
     /// Any other trigger, by its `TASK_TRIGGER_TYPE2`.
     Other(i32),
@@ -188,8 +189,8 @@ pub enum Differs {
     Arguments,
     /// Its triggers aren't the task's.
     Triggers,
-    /// Its descriptor, or the one its definition carries, isn't `task_sddl`'s for the owner (a
-    /// definition that carries none included), or this caller may not read it.
+    /// Its descriptor, or the one its definition carries (when it carries one), isn't
+    /// `task_sddl`'s for the owner, or this caller may not read it.
     Descriptor,
     /// It is disabled.
     Disabled,
@@ -303,11 +304,13 @@ fn differs(found: &TaskIdentity, expected: &TaskIdentity) -> Option<Differs> {
             same_descriptor(&found.descriptor, &expected.descriptor),
             Differs::Descriptor,
         ),
+        // A definition that carries none (an earlier `--adopt`'s, from before it set one) rests on
+        // the task's own descriptor, compared just above.
         (
             found
                 .definition_descriptor
                 .as_deref()
-                .is_some_and(|carried| {
+                .is_none_or(|carried| {
                     let want = expected.definition_descriptor.as_deref();
                     same_descriptor(carried, want.unwrap_or(&expected.descriptor))
                 }),
@@ -349,8 +352,9 @@ pub fn canonical_path(path: &str) -> String {
     parts.join("\\").to_lowercase()
 }
 
-/// The principal's SID: `name` itself when it is one, else what `lookup` resolves it to (the
-/// Task Scheduler may write LOCAL SYSTEM by its name, in the computer's language), else `name`.
+/// The principal's SID, or a logon trigger's user's: `name` itself when it is one, else what
+/// `lookup` resolves it to (the Task Scheduler may write LOCAL SYSTEM by its name, in the
+/// computer's language, and a user as `DOMAIN\user`), else `name`.
 pub fn principal_sid(name: &str, lookup: impl FnOnce(&str) -> Option<Sid>) -> String {
     match Sid::parse(name.trim()) {
         Ok(sid) => sid.as_str().to_owned(),
@@ -361,7 +365,8 @@ pub fn principal_sid(name: &str, lookup: impl FnOnce(&str) -> Option<Sid>) -> St
 }
 
 /// Whether the self-relative descriptor `found` is `expected`'s as Windows keeps it: the same
-/// owner, the same group when `expected` names one (a group grants nothing on a task), every
+/// owner, the DACL protected from inheritance (`SE_DACL_PROTECTED`) as `expected`'s is, the same
+/// group when `expected` names one (a group grants nothing on a task), every
 /// DACL entry of `expected` present exactly (type, inheritance flags but inherited or not,
 /// rights with generic ones mapped to the file rights the Task Scheduler checks, and SID), and
 /// nothing else but allow entries for SYSTEM or Administrators. Windows adds those itself: a
@@ -372,6 +377,10 @@ pub fn principal_sid(name: &str, lookup: impl FnOnce(&str) -> Option<Sid>) -> St
 fn same_descriptor(found: &[u8], expected: &[u8]) -> bool {
     let owner = acl_bytes::owner_sid(found);
     if owner.is_none() || owner != acl_bytes::owner_sid(expected) {
+        return false;
+    }
+    let protected = |bytes: &[u8]| Descriptor::parse(bytes).ok().map(|d| d.dacl_protected());
+    if protected(found).is_none() || protected(found) != protected(expected) {
         return false;
     }
     if let Some(group) = group_sid(expected)

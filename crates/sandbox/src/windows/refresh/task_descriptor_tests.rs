@@ -1,9 +1,11 @@
 //! `task_identity.rs`'s descriptor rule, on every OS: every entry the set-up gives must be on
 //! the task exactly, and the only extra entries allowed are allow entries for SYSTEM or
 //! Administrators, as Windows adds at registration (the VM's read-back, Server 2025). The
-//! descriptor the definition carries (the XML's `<SecurityDescriptor>`) is held to the same rule,
-//! and a definition carrying none is changed. And the readiness check's words over every task a
-//! per-user install needs: missing over changed over unchecked, whichever task comes first.
+//! descriptor the definition carries (the XML's `<SecurityDescriptor>`) is held to the same rule;
+//! a definition carrying none rests on the task's own. The DACL must be protected, and the
+//! refresh task's logon trigger names the owner by SID, however Windows writes the user back.
+//! And the readiness check's words over every task a per-user install needs: missing over
+//! changed over unchecked, whichever task comes first.
 
 use super::task_identity::*;
 use super::task_identity_tests::{
@@ -11,7 +13,9 @@ use super::task_identity_tests::{
 };
 use super::{SystemTask, USER_TASKS};
 use crate::SetupState;
+use crate::windows::admin_copy::fake::descriptor;
 use crate::windows::admin_copy::{FULL_ACCESS, READ_EXECUTE};
+use crate::windows::sids::Sid;
 
 /// `FILE_GENERIC_READ` as Windows reads it back for the `(A;;FR;;;SY)` it adds.
 const FILE_READ: u32 = 0x0012_0089;
@@ -116,22 +120,26 @@ fn a_missing_or_different_entry_of_the_set_ups_or_another_owner_is_changed() {
 }
 
 #[test]
-fn a_definition_without_its_descriptor_or_with_another_is_changed() {
+fn a_definition_without_a_descriptor_rests_on_the_tasks_own() {
     let expected = registered(SystemTask::Stop);
     let changed = TaskCheck::Differs(Differs::Descriptor);
-    // As the VM read `SandboxStop` back after `\Clauseo` was made again: no
-    // `<SecurityDescriptor>` in the definition, the task's own DACL the same.
+    // An earlier --adopt's task, from before registration set the definition's descriptor:
+    // none carried, the task's own descriptor the set-up's. The same.
     let mut found = expected.clone();
     found.definition_descriptor = None;
-    assert_eq!(compare(&found, &expected), changed);
-    // One that lets Users in.
-    let mut found = expected.clone();
-    let wider = [
+    assert_eq!(compare(&found, &expected), TaskCheck::Same);
+    // None carried and the task's own descriptor wrong: changed.
+    let users = (0, 0, FULL_ACCESS, "S-1-5-32-545");
+    let set_ups = [
         (0, 0, FULL_ACCESS, SYSTEM),
         (0, 0, FULL_ACCESS, ADMINISTRATORS),
         (0, 0, READ_EXECUTE, LAWYER),
-        (0, 0, FULL_ACCESS, "S-1-5-32-545"),
     ];
+    let wider = [set_ups[0], set_ups[1], set_ups[2], users];
+    found.descriptor = with_entries(ADMINISTRATORS, &wider);
+    assert_eq!(compare(&found, &expected), changed);
+    // One carried that lets Users in: changed, whatever the task's own says.
+    let mut found = expected.clone();
     found.definition_descriptor = Some(with_entries(ADMINISTRATORS, &wider));
     assert_eq!(compare(&found, &expected), changed);
     // The expected task carries the descriptor it is registered with.
@@ -139,6 +147,47 @@ fn a_definition_without_its_descriptor_or_with_another_is_changed() {
         expected.definition_descriptor.as_deref(),
         Some(expected.descriptor.as_slice())
     );
+}
+
+#[test]
+fn a_dacl_that_isnt_protected_is_changed() {
+    let expected = registered(SystemTask::Sweep);
+    let set_ups = [
+        (0, 0, FULL_ACCESS, SYSTEM),
+        (0, 0, FULL_ACCESS, ADMINISTRATORS),
+        (0, 0, READ_EXECUTE, LAWYER),
+    ];
+    let mut found = expected.clone();
+    found.descriptor = descriptor(ADMINISTRATORS, Some(&set_ups), false);
+    assert_eq!(
+        compare(&found, &expected),
+        TaskCheck::Differs(Differs::Descriptor)
+    );
+    found.descriptor = descriptor(ADMINISTRATORS, Some(&set_ups), true);
+    assert_eq!(compare(&found, &expected), TaskCheck::Same);
+}
+
+#[test]
+fn the_refresh_logon_trigger_compares_by_sid_however_windows_writes_the_user() {
+    let expected = registered(SystemTask::Refresh);
+    let lawyer_name = r"CLAUSEO-VM\lawyer";
+    let lookup = |name: &str| (name == lawyer_name).then(|| Sid::parse(LAWYER).unwrap());
+    // The SID as written, and the account's name resolving to the same SID: the same.
+    for written in [LAWYER, lawyer_name] {
+        let mut found = expected.clone();
+        found.triggers = vec![TaskTrigger::Logon(principal_sid(written, lookup))];
+        assert_eq!(compare(&found, &expected), TaskCheck::Same, "{written}");
+    }
+    // Another user, by SID or by a name that resolves to theirs: changed.
+    let other = "S-1-5-21-1-2-3-1002";
+    let other_name = r"CLAUSEO-VM\other";
+    let lookup = |name: &str| (name == other_name).then(|| Sid::parse(other).unwrap());
+    for written in [other, other_name, r"CLAUSEO-VM\nobody"] {
+        let mut found = expected.clone();
+        found.triggers = vec![TaskTrigger::Logon(principal_sid(written, lookup))];
+        let changed = TaskCheck::Differs(Differs::Triggers);
+        assert_eq!(compare(&found, &expected), changed, "{written}");
+    }
 }
 
 #[test]

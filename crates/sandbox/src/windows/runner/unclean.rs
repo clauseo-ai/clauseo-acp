@@ -19,7 +19,9 @@
 //!   escapee of one user still holds the slot group's grants. Before all that, on a per-user
 //!   install, a SYSTEM task it needs (`refresh::USER_TASKS`) that is missing or changed refuses
 //!   the logon up front, in the readiness check's words: its session's end couldn't ask for the
-//!   sweep, so the launch would run and only the next one would be refused.
+//!   sweep, so the launch would run and only the next one would be refused. Tasks that can't be
+//!   read are read once more after [`TASK_RETRY`], then refuse it too
+//!   ([`TASKS_UNCHECKED_AT_LAUNCH`]).
 //! - **A launch** ([`await_sweeps`], `clean_close::check_launch`, inside the host's 180 s): any
 //!   marker awaiting a sweep is clean once `SweepSequence` reaches its number. Otherwise the
 //!   launch requests a sweep and waits for it, up to [`SWEEP_WAIT`], and refuses if it still
@@ -152,17 +154,30 @@ fn unswept(fs: &mut impl Markers, waited: String) -> String {
     fs.task_repair().map_or(waited, str::to_owned)
 }
 
+/// What a launch refused before the pool user's logon says when the tasks still can't be
+/// checked after [`TASK_RETRY`].
+pub const TASKS_UNCHECKED_AT_LAUNCH: &str = "Clauseo couldn't check its clean-up task, so it \
+     didn't start the AI tool. Try again. If this keeps happening, restart your computer.";
+/// How long the launch's check waits before it reads the tasks once more, when the Task
+/// Scheduler didn't answer: long enough for a brief stall to pass, short against the host's 180 s.
+pub const TASK_RETRY: Duration = Duration::from_millis(300);
+
 /// The launch's check of the tasks before the pool user's logon: a task that is missing or
 /// changed refuses it now ([`RunExit::AwaitingSweep`], the readiness check's words), since its
 /// session's end couldn't ask for the sweep (or stop) that the next launch would then wait on.
-/// One that can't be read (the Task Scheduler not answering) is only said: the sweep's own
-/// request at the end says whether it ran.
+/// One that can't be read (the Task Scheduler not answering) is read once more after
+/// [`TASK_RETRY`]; still unreadable, the launch is refused the same way, in
+/// [`TASKS_UNCHECKED_AT_LAUNCH`]'s words, since nothing says its end could sweep.
 fn tasks_ready(fs: &mut impl Markers) -> Result<(), Refused> {
-    match fs.task_repair() {
+    let mut repair = fs.task_repair();
+    if repair == Some(TASK_UNCHECKED) {
+        fs.pause(TASK_RETRY);
+        repair = fs.task_repair();
+    }
+    match repair {
         None => Ok(()),
         Some(words) if words == TASK_UNCHECKED => {
-            fs.note(words);
-            Ok(())
+            Err(Refused::sweep(TASKS_UNCHECKED_AT_LAUNCH.to_owned()))
         }
         Some(words) => Err(Refused::sweep(words.to_owned())),
     }
@@ -276,10 +291,11 @@ fn remark_swept(
 }
 
 /// F4: whether `pool_user` may log on. `Err` says why not: first, a SYSTEM task the install
-/// needs that is missing or changed refuses it, in the readiness check's words, before any
-/// marker is read ([`Markers::task_repair`]). Then the stop task was requested when a
-/// marker awaits a stop, first or final; a marker awaiting a sweep (a re-mark's, or any other)
-/// is waited for instead, up to [`SWEEP_WAIT`], with no stop requested, since a stop ends every
+/// needs that is missing or changed, or that can't be read even once more after [`TASK_RETRY`],
+/// refuses it before any marker is read ([`Markers::task_repair`], `tasks_ready`). Then the
+/// stop task was requested when a marker awaits a stop, first or final; a marker awaiting a
+/// sweep (a re-mark's, or any other) is waited for instead, up to [`SWEEP_WAIT`], with no stop
+/// requested, since a stop ends every
 /// session. One whose sweep before its final stop completed (now or earlier) is re-marked to
 /// await that stop, which is requested, and refuses the logon. One whose stop or sweep completed
 /// but couldn't be re-marked refuses the logon with no stop requested. One whose final stop
