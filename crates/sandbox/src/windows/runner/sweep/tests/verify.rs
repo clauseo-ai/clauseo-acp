@@ -127,7 +127,7 @@ fn a_killed_process_still_listed_is_not_killed_again_and_doesnt_keep_the_rounds_
     // rounds" a sweep.
     for point in [Point::Tick, Point::End, Point::Sweeper] {
         let mut fake = machine();
-        fake.lists_the_dead = true;
+        fake.ends = Ends::Listed;
         fake.procs.insert(1628, pool_proc(CHROME));
         let (got, lines) = run(&mut fake, &[], point);
         assert_eq!(got, Ok(vec![1628]), "{point}");
@@ -353,7 +353,7 @@ fn a_sweep_whose_kills_keep_it_going_past_its_deadline_stops_there() {
     let mut fake = machine();
     fake.procs.insert(12, pool_proc("hydra.exe"));
     fake.forever = Some(12);
-    fake.slow_kills = true;
+    fake.ends = Ends::Slowly;
     let mut lines = Vec::new();
     let got = end_sweep(&mut fake, &sid(POOL), &[30], &mut |l| {
         lines.push(l.to_owned());

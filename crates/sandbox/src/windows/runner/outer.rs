@@ -28,6 +28,7 @@ use steps::Start;
 
 mod end;
 mod steps;
+mod verify;
 
 /// The end sweeper's guard, shared with the stdin relay's thread.
 type End = Arc<EndSweep<OsSweeper>>;
@@ -105,9 +106,7 @@ fn marked_outer(
     let logon = own_token()
         .and_then(|token| logon_sid(&token))
         .map_err(|e| Failure::new(RunExit::Token, os("logon SID", &e)))?;
-    // From here every end path first ends the job, waits for it to empty, and starts the
-    // detached end sweeper (`end.rs`).
-    let end: End = Arc::new(EndSweep::new(OsSweeper {
+    let sweeper = OsSweeper {
         data_dir,
         pool_user: message.pool_user.clone(),
         pool_name: message.pool_name.clone(),
@@ -118,13 +117,18 @@ fn marked_outer(
         kept: Mutex::new(None),
         job: OnceLock::new(),
         marker,
-    }));
+    };
+    // An unclean slot is verified before anything names the pool user (`quarantine.rs`).
+    verify::admitted(&mut verify::OsSlot(&sweeper))?;
+    // From here every end path first ends the job, waits for it to empty, and starts the
+    // detached end sweeper (`end.rs`).
+    let end: End = Arc::new(EndSweep::new(sweeper));
     let result = session(message, &end);
     if result.is_err() {
         end.trigger(EndSignal::Failed);
         end.wait();
     }
-    match result {
+    let result = match result {
         // An escapee found at a tick, at the end or by the end sweeper is the run's outcome;
         // the failure is said first.
         Err(Failure(exit, what)) if end.escaped() && exit != RunExit::Escapee => {
@@ -132,7 +136,10 @@ fn marked_outer(
             Err(Failure::new(RunExit::Escapee, ESCAPED))
         }
         other => other,
-    }
+    };
+    let code = result.as_ref().map_or_else(|f| f.0.code(), |code| *code);
+    verify::leave_mark(end.steps(), code);
+    result
 }
 
 /// The launch once read: the checks, the pipes, the job, the desktop, the start of the inner
@@ -435,7 +442,7 @@ fn relay(
             "clauseo-sandbox-run: {ESCAPED}; the run would have exited 0x{code:08X}"
         ));
     }
-    exit_now(end.outcome(code))
+    exit_now(verify::leave_mark(end.steps(), end.outcome(code)))
 }
 
 /// The agent's stdin pipe, owned, so that closing it is dropping it.

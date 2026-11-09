@@ -12,6 +12,9 @@
 //! at the session's end, from the outer, outside every job of the outer's:
 //!     --CreateProcessWithLogonW(LOGON_WITH_PROFILE, suspended, shut, resumed)-->
 //!   clauseo-sandbox-run --sweep   (the end sweeper: the pool user, Medium, detached)
+//!
+//! before a launch on a slot marked unclean, from the outer, before anything is granted:
+//!   clauseo-sandbox-run --verify  (the verify-only pass: the pool user, Medium, waited for)
 //! ```
 //!
 //! - The host writes a [`LaunchMessage`] ([`write_launch`]) into the protected run folder and
@@ -90,6 +93,7 @@ pub mod marker;
 mod outer;
 pub mod paths;
 mod policy;
+pub mod quarantine;
 #[cfg(windows)]
 mod spawn;
 #[cfg(any(windows, test))]
@@ -113,7 +117,7 @@ pub use paths::{WinPath, codex_reuse};
 pub use policy::codex_link_in_policy;
 pub use policy::{codex_reuse_in_policy, granted_paths};
 #[cfg(windows)]
-pub use sweeper::run_sweep;
+pub use sweeper::{run_sweep, run_verify};
 
 /// The runner's file name in the install folder. Kept stable: per-user installs grant it to the
 /// pool users (S15 `PR8`).
@@ -343,6 +347,9 @@ pub enum Mode {
     Inner(String),
     /// `--sweep`: the end sweeper, which takes nothing else.
     Sweep,
+    /// `--verify`: the verify-only pass on a slot marked unclean (`quarantine.rs`), which takes
+    /// nothing else.
+    Verify,
 }
 
 /// The mode `args` (the arguments after the program) name; `None` for any other command line.
@@ -351,6 +358,7 @@ pub fn mode(args: &[std::ffi::OsString]) -> Option<Mode> {
         [flag, file] if flag == "--launch" => Some(Mode::Launch(PathBuf::from(file))),
         [flag, base] if flag == "--inner" => base.to_str().map(|base| Mode::Inner(base.to_owned())),
         [flag] if flag == "--sweep" => Some(Mode::Sweep),
+        [flag] if flag == "--verify" => Some(Mode::Verify),
         _ => None,
     }
 }
@@ -442,10 +450,15 @@ pub enum RunExit {
     /// it no id (`marker::marked`): the outer refuses the launch before any logon, so no session
     /// runs that no marker names.
     MarkerUnwritable,
+    /// The pool user was marked unclean by an earlier session whose outcome was
+    /// [`RunExit::Escapee`], and the verify-only pass this launch ran before granting it
+    /// anything found a process of it still left, or failed (`quarantine.rs`): the launch is
+    /// refused, the mark stays, and the lawyer is told to restart the computer.
+    Quarantined,
 }
 
 impl RunExit {
-    const ALL: [RunExit; 18] = [
+    const ALL: [RunExit; 19] = [
         RunExit::Usage,
         RunExit::BadLaunch,
         RunExit::NoSecret,
@@ -464,6 +477,7 @@ impl RunExit {
         RunExit::Escapee,
         RunExit::PoolStop,
         RunExit::MarkerUnwritable,
+        RunExit::Quarantined,
     ];
 
     /// The exit code.
@@ -505,7 +519,8 @@ impl RunExit {
             | RunExit::DllSearch
             | RunExit::Escapee
             | RunExit::PoolStop
-            | RunExit::MarkerUnwritable => None,
+            | RunExit::MarkerUnwritable
+            | RunExit::Quarantined => None,
         }
     }
 }

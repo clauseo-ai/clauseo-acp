@@ -156,11 +156,13 @@ impl MatterSids {
             .filter(|user| !resets.contains(user));
         let needs_reset: BTreeSet<Sid> = marks.cloned().collect();
         let set_aside = set_aside::set_aside_owners(&self.data_dir, self.owner_of);
+        let unclean = unclean_or_all(&self.data_dir, pool);
         let held = assign::Holds {
             ledger: &ledger,
             set_aside: &set_aside,
             open: &open,
             needs_reset: &needs_reset,
+            unclean: &unclean,
         };
         assign::held_back(pool, &self.rows, &held)
     }
@@ -282,11 +284,13 @@ impl MatterSids {
             let ledger =
                 ledger().map_err(|error| SetupError::Failed(format!("the ACL ledger: {error}")))?;
             let set_aside = set_aside::set_aside_owners(&data_dir, owner_of);
+            let unclean = unclean_or_all(&data_dir, pool);
             let held = assign::Holds {
                 ledger: &ledger,
                 set_aside: &set_aside,
                 open,
                 needs_reset,
+                unclean: &unclean,
             };
             match assign::decide(matter, rows, pool, &held)? {
                 Pick::Kept(user) => Ok((user, false)),
@@ -383,6 +387,13 @@ impl MatterSids {
         }
         Ok(value)
     }
+}
+
+/// The pool users marked unclean (`runner::quarantine`); every user of `pool` when the run folder
+/// can't be read (failing closed).
+fn unclean_or_all(data_dir: &Path, pool: &[Sid]) -> BTreeSet<Sid> {
+    super::runner::quarantine::unclean_users(data_dir)
+        .unwrap_or_else(|_| pool.iter().cloned().collect())
 }
 
 /// Whether a session of `matter` is open, read under its set-aside lock; an unreadable record

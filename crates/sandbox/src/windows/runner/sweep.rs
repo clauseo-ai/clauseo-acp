@@ -91,11 +91,13 @@ use std::time::Duration;
 
 use crate::windows::sids::Sid;
 
+mod failures;
 mod kill;
 #[cfg(windows)]
 pub(super) mod os;
 mod refused;
 
+use failures::Failures;
 use kill::{Done, Killed};
 
 /// How often the inner sweeps while the agent runs.
@@ -495,76 +497,6 @@ fn spared<T>(
     } else {
         Spared::No(Some(started))
     })
-}
-
-/// A round's failures: the first act's first ends the sweep; past it, each is logged once a
-/// sweep and counted for the round, escapees apart.
-struct Failures {
-    point: Point,
-    logged: BTreeSet<u32>,
-    count: usize,
-    /// How many of this round's couldn't be opened or ended.
-    unkillable: usize,
-    /// Their image names, each once, at most [`IMAGES_CAP`].
-    images: Vec<String>,
-}
-
-impl Failures {
-    /// The verdict of a sweep cut short (out of rounds or time): [`SweepError::Left`] when the
-    /// last round counted an escapee (a survivor among them), so the slot is quarantined; else
-    /// `otherwise`.
-    fn verdict(&mut self, otherwise: SweepError) -> SweepError {
-        if self.unkillable == 0 {
-            return otherwise;
-        }
-        self.left()
-    }
-
-    /// The round's failures as [`SweepError::Left`].
-    fn left(&mut self) -> SweepError {
-        SweepError::Left {
-            count: self.count,
-            unkillable: self.unkillable,
-            images: std::mem::take(&mut self.images),
-        }
-    }
-
-    fn add(&mut self, error: SweepError, log: &mut dyn FnMut(&str)) -> Result<(), SweepError> {
-        if self.point == Point::Start {
-            return Err(error);
-        }
-        self.count += 1;
-        if let Some(escapees) = error.escapees() {
-            self.unkillable += escapees.count;
-            for image in escapees.images {
-                if self.images.len() < IMAGES_CAP && !self.images.contains(&image) {
-                    self.images.push(image);
-                }
-            }
-        }
-        if self.logged.insert(pid_of(&error)) {
-            log(&format!(
-                "clauseo-sandbox-run: sweep ({}): {error}",
-                self.point
-            ));
-        }
-        Ok(())
-    }
-}
-
-fn pid_of(error: &SweepError) -> u32 {
-    match error {
-        SweepError::Open { pid, .. }
-        | SweepError::Kill { pid, .. }
-        | SweepError::Survived { pid, .. }
-        | SweepError::Started { pid, .. } => *pid,
-        SweepError::List(_)
-        | SweepError::JobList(_)
-        | SweepError::StillRunning
-        | SweepError::Deadline
-        | SweepError::Left { .. }
-        | SweepError::OwnStart { .. } => 0,
-    }
 }
 
 /// Both lists as one: a pid either gives a user has that user, the opening list's first. A list

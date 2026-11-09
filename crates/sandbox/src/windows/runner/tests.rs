@@ -444,7 +444,9 @@ fn exit_codes_are_stable_and_map_to_set_up_causes() {
     assert_eq!(RunExit::PoolStop.no_sandbox(), None);
     assert_eq!(RunExit::MarkerUnwritable.code(), 0xE0C1_5011);
     assert_eq!(RunExit::MarkerUnwritable.no_sandbox(), None);
-    assert_eq!(RunExit::from_code(RUN_EXIT_BASE + 18), None);
+    assert_eq!(RunExit::Quarantined.code(), 0xE0C1_5012);
+    assert_eq!(RunExit::Quarantined.no_sandbox(), None);
+    assert_eq!(RunExit::from_code(RUN_EXIT_BASE + 19), None);
     assert_eq!(RunExit::DllSearch.no_sandbox(), None);
     assert_eq!(RunExit::AgentReserved.no_sandbox(), None);
     assert_eq!(RunExit::Sweep.no_sandbox(), None);
@@ -522,6 +524,7 @@ fn the_command_line_names_one_mode_and_sweep_takes_nothing_else() {
         list.iter().map(std::ffi::OsString::from).collect()
     };
     assert_eq!(mode(&args(&["--sweep"])), Some(Mode::Sweep));
+    assert_eq!(mode(&args(&["--verify"])), Some(Mode::Verify));
     assert_eq!(
         mode(&args(&[
             "--launch",
@@ -538,6 +541,8 @@ fn the_command_line_names_one_mode_and_sweep_takes_nothing_else() {
     for wrong in [
         &[][..],
         &["--sweep", "x"],
+        &["--verify", "x"],
+        &["--verify", "--sweep"],
         &["--sweep", "--inner", "b"],
         &["--Sweep"],
         &["sweep"],

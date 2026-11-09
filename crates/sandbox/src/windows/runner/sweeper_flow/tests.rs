@@ -174,3 +174,39 @@ fn a_clean_run_exits_0_never_pool_stop() {
     assert_ne!(code, RunExit::PoolStop.code());
     assert!(lines.iter().all(|l| !l.contains("BITS")), "{lines:?}");
 }
+
+#[test]
+fn the_verify_pass_sweeps_and_removes_nothing() {
+    // Clean: 0, and nothing but the shut and the sweep.
+    let mut fake = Fake::default();
+    let code = verify(&mut fake, &mut |_| {});
+    assert_eq!(code, 0);
+    assert_eq!(fake.events, ["shut", "sweep"]);
+    // A survivor: RunExit::Escapee; any other failure: RunExit::Sweep. Neither widens or
+    // removes.
+    let survivor = SweepError::Left {
+        count: 1,
+        unkillable: 1,
+        images: vec!["chrome-headless-shell.exe".to_owned()],
+    };
+    for (failure, exit) in [
+        (survivor, RunExit::Escapee),
+        (SweepError::Deadline, RunExit::Sweep),
+    ] {
+        let mut fake = Fake {
+            sweep: Some(failure.clone()),
+            ..Fake::default()
+        };
+        let mut lines = Vec::new();
+        let code = verify(&mut fake, &mut |l| lines.push(l.to_owned()));
+        assert_eq!(code, exit.code(), "{failure:?}");
+        assert_eq!(fake.events, ["shut", "sweep"], "{failure:?}");
+        assert_eq!(lines.len(), 1, "{lines:?}");
+    }
+    let mut fake = Fake {
+        shut_fails: true,
+        ..Fake::default()
+    };
+    assert_eq!(verify(&mut fake, &mut |_| {}), RunExit::Sweep.code());
+    assert_eq!(fake.events, ["shut"]);
+}

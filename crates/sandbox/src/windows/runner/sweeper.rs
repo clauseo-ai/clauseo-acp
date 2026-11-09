@@ -35,7 +35,7 @@ use super::leftovers::{Kind, remove_all};
 use super::spawn::{quiet_errors, restrict_dll_search};
 use super::sweep::SweepError;
 use super::sweep::os::end_sweep_own;
-use super::sweeper_flow::{SweeperActs, run};
+use super::sweeper_flow::{SweeperActs, run, verify};
 use crate::windows::acl::object::Handle;
 use crate::windows::sids::Sid;
 use crate::windows::token::os::{
@@ -47,13 +47,24 @@ const SWEEP_LIMIT: Duration = Duration::from_secs(60);
 
 /// The sweeper's whole run; its exit code.
 pub fn run_sweep() -> u32 {
+    run_limited(sweep_all)
+}
+
+/// The verify-only pass's whole run (`--verify`, `quarantine.rs`): the end sweeper's shut and
+/// two passes, nothing removed; its exit code (`sweeper_flow::verify`).
+pub fn run_verify() -> u32 {
+    run_limited(verify_all)
+}
+
+/// Runs `work` on a thread of its own for up to [`SWEEP_LIMIT`]; its exit code.
+fn run_limited(work: fn() -> u32) -> u32 {
     if restrict_dll_search().is_err() {
         return RunExit::DllSearch.code();
     }
     quiet_errors();
     let (done, finished) = mpsc::channel();
     let worker = thread::Builder::new().spawn(move || {
-        let _sent = done.send(sweep_all());
+        let _sent = done.send(work());
     });
     if let Err(error) = worker {
         say(&format!(
@@ -116,6 +127,17 @@ impl OsActs {
 
 /// Opens its token, then runs the acts in order (`sweeper_flow::run`); the exit code.
 fn sweep_all() -> u32 {
+    with_acts(|acts| run(acts, &mut |line| say(line)))
+}
+
+/// Opens its token, then shuts and sweeps (`sweeper_flow::verify`); the exit code.
+fn verify_all() -> u32 {
+    with_acts(|acts| verify(acts, &mut |line| say(line)))
+}
+
+/// Opens its token and gives `flow` the acts on it; a token that can't be opened exits
+/// `RunExit::Sweep`.
+fn with_acts(flow: impl FnOnce(&mut OsActs) -> u32) -> u32 {
     let token = match own_token() {
         Ok(token) => token,
         Err(error) => {
@@ -129,7 +151,7 @@ fn sweep_all() -> u32 {
         }
     };
     let mut acts = OsActs { token, me: None };
-    run(&mut acts, &mut |line| say(line))
+    flow(&mut acts)
 }
 
 /// One line on stderr, the pipe the outer reads while it lives.

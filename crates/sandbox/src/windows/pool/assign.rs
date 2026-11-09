@@ -13,7 +13,10 @@
 //!   ([`OpenSessions`]);
 //! - it isn't owed a profile reset (`needs_reset` in `matters.json`): a release marks its user,
 //!   whose profile and hive may hold what the old matter's agent wrote, and the elevated set-up
-//!   clears the mark once it has deleted and remade the profile. A never-used user owes none.
+//!   clears the mark once it has deleted and remade the profile. A never-used user owes none;
+//! - it isn't marked unclean (`runner::quarantine`): a session left a process of it that
+//!   outlived its sweep, and only a verify-only pass on the next launch of the matter holding it
+//!   clears the mark. A matter never gets a slot such a process might still run on.
 //!
 //! So a pool user is never shared between live sessions of different matters (D-B5), and carries
 //! nothing of one matter to the next. Nor between two live sessions of one matter: a pool user
@@ -90,6 +93,9 @@ pub enum Why {
     /// It was released from a matter and its profile and hive haven't been reset since: the
     /// elevated set-up (an extend or a re-run) resets it.
     NeedsReset,
+    /// It is marked unclean: a process of it outlived a sweep, and no verify-only pass has found
+    /// it clean since (`runner::quarantine`).
+    Unclean,
 }
 
 /// What can hold a pool user back besides the rows: the ledger, the set-aside owners, the
@@ -104,6 +110,8 @@ pub(crate) struct Holds<'a> {
     pub(crate) open: &'a OpenSessions,
     /// The users owed a profile reset (`matters.json`'s `needs_reset`).
     pub(crate) needs_reset: &'a BTreeSet<Sid>,
+    /// The users marked unclean (`runner::quarantine::unclean_users`).
+    pub(crate) unclean: &'a BTreeSet<Sid>,
 }
 
 /// The owners of the items set aside and still on disk, from every matter's manifest; or all
@@ -164,7 +172,7 @@ impl SetAsideOwners {
 }
 
 /// A pool user held back, and why: the first reason found, checked in the order `Held`, `Owed`,
-/// `Entries`, `SetAside`, `Open`, `NeedsReset`.
+/// `Entries`, `SetAside`, `Open`, `NeedsReset`, `Unclean`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeldBack {
     /// The pool user's SID.
@@ -289,7 +297,10 @@ fn held_back_why(user: &Sid, rows: &Rows, held: &Holds<'_>) -> Option<Why> {
     if held_by_open {
         return Some(Why::Open);
     }
-    held.needs_reset.contains(user).then_some(Why::NeedsReset)
+    if held.needs_reset.contains(user) {
+        return Some(Why::NeedsReset);
+    }
+    held.unclean.contains(user).then_some(Why::Unclean)
 }
 
 /// When `user` was last released, or `None` when no row names it: never used. A user only in
@@ -349,7 +360,40 @@ mod tests {
             set_aside: &NO_SET_ASIDE,
             open,
             needs_reset: &NO_RESETS,
+            unclean: &NO_RESETS,
         }
+    }
+
+    #[test]
+    fn a_user_marked_unclean_goes_to_no_other_matter_and_a_clean_one_is_taken() {
+        let temp = TempDir::new("assign-unclean");
+        let ledger = empty_ledger(&temp);
+        let open = OpenSessions::default();
+        let pool = [sid(1001), sid(1002)];
+        let unclean = BTreeSet::from([sid(1001)]);
+        let held = Holds {
+            unclean: &unclean,
+            ..holds(&ledger, &open)
+        };
+        let matter = matter(9);
+        // 1001 would go first (pool order); it is marked, so the clean 1002 is taken.
+        assert_eq!(
+            decide(&matter, &Rows::new(), &pool, &held),
+            Ok(Pick::New(sid(1002)))
+        );
+        // With only the marked one, the pool is full and says why.
+        let got = decide(&matter, &Rows::new(), &pool[..1], &held);
+        assert_eq!(
+            got,
+            Err(Assign::PoolFull {
+                size: 1,
+                held_back: vec![HeldBack {
+                    pool: sid(1001),
+                    why: Why::Unclean,
+                }],
+            })
+        );
+        assert_eq!(held_back(&pool, &Rows::new(), &held), [sid(1001)]);
     }
 
     #[test]

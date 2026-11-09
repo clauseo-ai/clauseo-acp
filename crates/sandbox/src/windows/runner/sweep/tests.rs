@@ -45,6 +45,18 @@ fn pool_proc(image: &'static str) -> Proc {
     proc(Owner::User(sid(POOL)), image)
 }
 
+/// What a kill that works does to the fake's process.
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+enum Ends {
+    /// It is gone at once, from the lists too.
+    #[default]
+    Gone,
+    /// It has exited, but stays listed (`dead`) while the sweep holds it open.
+    Listed,
+    /// It ends only once a wait on it has run its whole length: its kill takes time.
+    Slowly,
+}
+
 /// A machine of processes; each call is recorded.
 #[derive(Default)]
 struct Fake {
@@ -84,8 +96,8 @@ struct Fake {
     /// These pids have exited but are still listed and can be opened: another process holds
     /// them open. Their kill is refused (5), as Windows refuses one for an exited process.
     dead: BTreeSet<u32>,
-    /// A process killed stays listed, exited (`dead`), while the sweep holds it open.
-    lists_the_dead: bool,
+    /// What a kill that works does to the process.
+    ends: Ends,
     /// Every kill asked for, in order, whether or not it ended the process.
     asked: Vec<u32>,
     /// Every wait longer than none on a process's end, in order.
@@ -94,10 +106,7 @@ struct Fake {
     clock: Duration,
     /// Once asked to end, this pid is in neither list, whether or not it ended.
     vanish: BTreeSet<u32>,
-    /// A killed process ends only once a wait on it has run its whole length: its kill takes
-    /// time.
-    slow_kills: bool,
-    /// Killed processes not yet ended (`slow_kills`).
+    /// Killed processes not yet ended (`Ends::Slowly`).
     ending: BTreeSet<u32>,
 }
 
@@ -214,12 +223,16 @@ impl Processes for Fake {
             *left -= 1;
             return Err(io::Error::from_raw_os_error(5));
         }
-        if self.slow_kills {
-            self.ending.insert(*pid);
-        } else if self.lists_the_dead {
-            self.dead.insert(*pid);
-        } else {
-            self.procs.remove(pid);
+        match self.ends {
+            Ends::Slowly => {
+                self.ending.insert(*pid);
+            }
+            Ends::Listed => {
+                self.dead.insert(*pid);
+            }
+            Ends::Gone => {
+                self.procs.remove(pid);
+            }
         }
         self.killed.push(*pid);
         if let Some((child, proc)) = self.spawns.remove(pid) {
