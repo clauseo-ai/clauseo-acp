@@ -13,18 +13,32 @@ use std::process::ExitCode;
 
 #[cfg(windows)]
 fn main() -> ExitCode {
-    use clauseo_sandbox::windows::runner::{Mode, RunExit, mode, run_inner, run_outer};
+    use clauseo_sandbox::windows::runner::stderr::{RunnerKind, install_panic_hook};
+    use clauseo_sandbox::windows::runner::{Mode, mode, run_inner, run_outer};
 
+    // Before anything can panic: a panic says only its kind (`stderr::install_panic_hook`).
+    // `run_outer` and `run_inner` install it again, for any other caller.
+    install_panic_hook();
     let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
     let code = match mode(&args) {
         Some(Mode::Launch(file)) => match std::env::current_exe() {
             Ok(exe) => run_outer(&file, &exe),
-            Err(_) => RunExit::Usage.code(),
+            Err(_) => refused(RunnerKind::Internal),
         },
         Some(Mode::Inner(base)) => run_inner(&base),
-        None => RunExit::Usage.code(),
+        None => refused(RunnerKind::Usage),
     };
     exit_with(code)
+}
+
+/// Writes the refusal of `kind`; its exit code is the kind's `RunExit`, so the host takes the
+/// kind (it does only when the two agree).
+#[cfg(windows)]
+fn refused(kind: clauseo_sandbox::windows::runner::stderr::RunnerKind) -> u32 {
+    use clauseo_sandbox::windows::runner::RunExit;
+    use clauseo_sandbox::windows::runner::stderr::{Detail, refuse};
+    refuse(kind, Detail::none());
+    kind.exit().unwrap_or(RunExit::Usage).code()
 }
 
 /// Windows exit codes are 32 bits; `ExitCode` takes only a `u8`, so a code above 255 (an
@@ -43,7 +57,10 @@ fn exit_with(code: u32) -> ExitCode {
 
 #[cfg(not(windows))]
 fn main() -> ExitCode {
-    use clauseo_sandbox::windows::runner::stderr::{Detail, RunnerKind, refuse};
+    use clauseo_sandbox::windows::runner::stderr::{
+        Detail, RunnerKind, install_panic_hook, refuse,
+    };
+    install_panic_hook();
     refuse(RunnerKind::NotWindows, Detail::none());
     ExitCode::from(2)
 }

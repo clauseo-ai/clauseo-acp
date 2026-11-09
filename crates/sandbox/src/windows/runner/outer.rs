@@ -50,6 +50,8 @@ const LOG_CAP: usize = 100_000;
 /// The outer runner's whole run; its exit code. `exe` is this program's own path, which the
 /// inner runner runs as the pool user.
 pub fn run_outer(launch_file: &Path, exe: &Path) -> u32 {
+    // First of all: a panic says only its kind, never std's `panicked at <path>`.
+    stderr::install_panic_hook();
     if let Err(error) = restrict_dll_search() {
         let why = Detail::new(|| os("SetDefaultDllDirectories", &error));
         return Failure::new(RunExit::DllSearch, why).refuse();

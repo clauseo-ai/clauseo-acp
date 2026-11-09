@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::windows::runner::RunExit;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// A detail that names a path, as an error's text can.
 const PATH: &str = r"D:\Clients\Acme v Beta\matter\.git";
@@ -10,7 +11,8 @@ const PATH: &str = r"D:\Clients\Acme v Beta\matter\.git";
 /// The lines `write_line` writes for `kind` with a detail naming [`PATH`].
 fn written(tag: &str, kind: RunnerKind) -> Vec<String> {
     let mut out = Vec::new();
-    write_line(&mut out, tag, kind, Detail::new(|| PATH.to_owned())).expect("write");
+    let fresh = AtomicBool::new(false);
+    write_line(&mut out, &fresh, tag, kind, Detail::new(|| PATH.to_owned())).expect("write");
     String::from_utf8(out)
         .expect("utf-8")
         .lines()
@@ -148,6 +150,68 @@ fn a_refusal_whose_error_holds_a_path_prints_no_path() {
     assert_eq!(Detail::new(|| PATH.to_owned()).to_send(), None);
 }
 
+/// The agent's output that ends mid-line, then a refusal: the kind line still starts a line, and
+/// the agent's bytes are all there before it.
+#[test]
+fn a_refusal_after_agent_output_without_a_newline_starts_a_line() {
+    let mid_line = AtomicBool::new(false);
+    let mut out = Vec::new();
+    let agent = b"agent output with no newline";
+    assert_eq!(
+        relay(&mut out, &mid_line, agent).expect("relay"),
+        agent.len()
+    );
+    write_line(
+        &mut out,
+        &mid_line,
+        REFUSAL,
+        RunnerKind::Escapee,
+        Detail::none(),
+    )
+    .expect("write");
+    let text = String::from_utf8(out).expect("utf-8");
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines.len(), 2, "{text:?}");
+    assert_eq!(lines[0], "agent output with no newline");
+    assert!(
+        lines[1].starts_with("ERR clauseo-sandbox-run kind=escapee: "),
+        "{text:?}"
+    );
+    assert!(!mid_line.load(Ordering::Relaxed));
+}
+
+/// Agent output that ends with a newline gets no blank line before the runner's, and a second
+/// runner line none either.
+#[test]
+fn a_refusal_after_a_whole_agent_line_adds_no_blank_line() {
+    let mid_line = AtomicBool::new(false);
+    let mut out = Vec::new();
+    relay(&mut out, &mid_line, b"half").expect("relay");
+    relay(&mut out, &mid_line, b" a line\n").expect("relay");
+    write_line(
+        &mut out,
+        &mid_line,
+        NOTICE,
+        RunnerKind::LaunchFileKept,
+        Detail::none(),
+    )
+    .expect("write");
+    write_line(
+        &mut out,
+        &mid_line,
+        REFUSAL,
+        RunnerKind::Escapee,
+        Detail::none(),
+    )
+    .expect("write");
+    let text = String::from_utf8(out).expect("utf-8");
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines.len(), 3, "{text:?}");
+    assert_eq!(lines[0], "half a line");
+    assert!(lines[1].starts_with("NOTE "), "{text:?}");
+    assert!(lines[2].starts_with("ERR "), "{text:?}");
+}
+
 /// A harness build writes the detail after the kind line, each line prefixed.
 #[cfg(feature = "vm-harness-detail")]
 #[test]
@@ -178,6 +242,52 @@ fn child_writes_a_refusal_and_a_notice() {
         Detail::new(|| PATH.to_owned()),
     );
     notice(RunnerKind::LaunchFileKept, Detail::new(|| PATH.to_owned()));
+}
+
+/// A panic under the runner's hook, its message naming a path: the child half of
+/// [`a_panic_prints_one_kind_line_and_no_path`], which alone runs it.
+#[test]
+#[ignore = "panics on purpose: a_panic_prints_one_kind_line_and_no_path runs it in a child"]
+fn child_panics_under_the_hook() {
+    install_panic_hook();
+    panic!("forced at {PATH}");
+}
+
+/// A panic, with `RUST_BACKTRACE=1`, writes exactly one line on stderr: the `internal` kind's.
+/// No `panicked at`, no source path, no message, no backtrace.
+#[cfg(not(feature = "vm-harness-detail"))]
+#[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test runs its own binary once, to read the real stderr of a panic"
+)]
+fn a_panic_prints_one_kind_line_and_no_path() {
+    let exe = std::env::current_exe().expect("this test binary");
+    let out = std::process::Command::new(exe)
+        .args([
+            "--exact",
+            "windows::runner::stderr::tests::child_panics_under_the_hook",
+            "--ignored",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env("RUST_BACKTRACE", "1")
+        .output()
+        .expect("the child run");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "the child didn't panic: {stderr}");
+    let lines: Vec<&str> = stderr.lines().collect();
+    assert_eq!(
+        lines,
+        [format!(
+            "ERR clauseo-sandbox-run kind=internal: {}",
+            RunnerKind::Internal.sentence()
+        )],
+        "{stderr}"
+    );
+    for bad in ["panicked", ".rs", "Acme", "forced", "backtrace"] {
+        assert!(!stderr.contains(bad), "{bad} in {stderr}");
+    }
 }
 
 /// The variables a reader might try, each set for a child run of this test binary that refuses

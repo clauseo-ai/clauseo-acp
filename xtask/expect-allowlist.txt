@@ -582,6 +582,8 @@ crates/sandbox/src/windows/refresh/last_run.rs ole_date_text clippy::cast_possib
 crates/sandbox/src/bin/clauseo-sandbox-run.rs exit_with clippy::exit
 # The runner's stderr test runs its own test binary under set variables (src/windows/runner/stderr).
 crates/sandbox/src/windows/runner/stderr/tests.rs no_environment_variable_turns_the_detail_on clippy::disallowed_methods
+# And under RUST_BACKTRACE=1, to read the real stderr of a panic under the runner's hook.
+crates/sandbox/src/windows/runner/stderr/tests.rs a_panic_prints_one_kind_line_and_no_path clippy::disallowed_methods
 # Outside a vm-harness-detail build the runner's stderr drops each detail unwritten.
 crates/sandbox/src/windows/runner/stderr.rs write_line unused_variables
 crates/sandbox/src/windows/runner/stderr.rs write_line clippy::needless_pass_by_value

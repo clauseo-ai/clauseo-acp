@@ -74,7 +74,10 @@ pub(super) fn build<W>(file: W) -> Dispatch
 where
     W: for<'a> MakeWriter<'a> + Send + Sync + 'static,
 {
+    // `log_internal_errors(false)`: a line that fails to format is dropped, not reported with
+    // `eprintln!` (its event's name, which holds its source path, on the runner's stderr).
     let layer = tracing_subscriber::fmt::layer()
+        .log_internal_errors(false)
         .with_writer(file)
         .fmt_fields(Redacted)
         .with_filter(filter_fn(kept));

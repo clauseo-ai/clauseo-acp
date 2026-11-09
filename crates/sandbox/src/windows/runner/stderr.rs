@@ -14,7 +14,13 @@
 //! the second (something went wrong but refuses nothing). The kind is a [`RunnerKind`], whose
 //! `snake_case` name the host maps to its own error codes, so a name, once given, never changes;
 //! the sentence is the kind's own, fixed, plain English. The agent's own stderr, relayed byte for
-//! byte, goes through [`agent_stream`].
+//! byte, goes through [`agent_stream`]. It shares the stream, so the runner's own line always
+//! starts on a fresh line: when the agent's last relayed byte isn't a newline, [`refuse`] and
+//! [`notice`] write one first.
+//!
+//! A panic says nothing but its kind either: [`install_panic_hook`], which each of the binary's
+//! modes calls first, replaces std's hook (its `panicked at <source path>:<line>`, its message and
+//! any backtrace) with one [`RunnerKind::Internal`] refusal.
 //!
 //! What failed in detail (a call and its code, an error's text, a pid) is a [`Detail`]: a closure
 //! the caller hands over. A build with the `vm-harness-detail` feature, which only the s15 VM
@@ -24,9 +30,15 @@
 //! files, and any formatting of an error outside a [`Detail::new`] closure.
 
 use std::io::{self, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 
-// The detail lines are the VM harness's, in its debug builds: never a release's.
-#[cfg(all(feature = "vm-harness-detail", not(debug_assertions)))]
+// The detail lines are the VM harness's, in its debug builds: never a release's. The build script
+// sets `clauseo_release_profile` when cargo's `PROFILE` is `release` (the release profile, or one
+// that inherits it), whatever its `debug-assertions`; a build without debug assertions fails too.
+#[cfg(all(
+    feature = "vm-harness-detail",
+    any(clauseo_release_profile, not(debug_assertions))
+))]
 compile_error!("vm-harness-detail is for the s15 VM harness's debug builds, never a release");
 
 #[cfg(doc)]
@@ -52,6 +64,10 @@ const NOTICE: &str = "NOTE";
 /// The tag of each detail line, in a `vm-harness-detail` build alone.
 #[cfg(feature = "vm-harness-detail")]
 const DETAIL: &str = "DETAIL";
+
+/// True while the last byte written to this process's stderr is the agent's and not a newline:
+/// the runner's next line then starts with one. Read and set only with stderr's lock held.
+static MID_LINE: AtomicBool = AtomicBool::new(false);
 
 /// What failed, in detail, for a `vm-harness-detail` build's `DETAIL` lines: an error's text, a
 /// call and its code, a pid. Made from a closure that only such a build (and this crate's unit
@@ -164,7 +180,13 @@ impl From<&'static str> for Detail {
 /// `detail`'s lines.
 pub fn refuse(kind: RunnerKind, detail: Detail) {
     debug_assert!(!kind.is_notice(), "{} is a notice's kind", kind.name());
-    drop(write_line(&mut io::stderr().lock(), REFUSAL, kind, detail));
+    drop(write_line(
+        &mut io::stderr().lock(),
+        &MID_LINE,
+        REFUSAL,
+        kind,
+        detail,
+    ));
 }
 
 /// Writes a notice of `kind` on this process's stderr: one line,
@@ -172,18 +194,65 @@ pub fn refuse(kind: RunnerKind, detail: Detail) {
 /// alone, `detail`'s lines.
 pub fn notice(kind: RunnerKind, detail: Detail) {
     debug_assert!(kind.is_notice(), "{} is a refusal's kind", kind.name());
-    drop(write_line(&mut io::stderr().lock(), NOTICE, kind, detail));
+    drop(write_line(
+        &mut io::stderr().lock(),
+        &MID_LINE,
+        NOTICE,
+        kind,
+        detail,
+    ));
 }
 
-/// This process's stderr, for the agent's own stderr the outer relays byte for byte (its
-/// `copy` takes the unlocked handle, so no write waits on a copy blocked in a read).
+/// Replaces std's panic hook with one that writes a [`RunnerKind::Internal`] refusal and
+/// nothing else: no `panicked at`, no source path, no message, no backtrace, whatever
+/// `RUST_BACKTRACE` says. (A `vm-harness-detail` build adds the panic's text as the detail.) In a
+/// release build the process then aborts. Each of the binary's modes calls it first. What std
+/// writes itself on a failed allocation (`memory allocation of <n> bytes failed`) is not a panic
+/// and stays.
+pub fn install_panic_hook() {
+    std::panic::set_hook(Box::new(|info| {
+        refuse(RunnerKind::Internal, Detail::new(|| info.to_string()));
+    }));
+}
+
+/// This process's stderr, for the agent's own stderr the outer relays byte for byte. Each write
+/// takes stderr's lock alone (its `copy` holds none, so no write waits on a copy blocked in a
+/// read), and notes whether the agent's output ended mid-line.
 #[cfg(windows)]
-pub(super) fn agent_stream() -> io::Stderr {
-    io::stderr()
+pub(super) fn agent_stream() -> AgentStream {
+    AgentStream
+}
+
+/// See [`agent_stream`].
+#[cfg(windows)]
+pub(super) struct AgentStream;
+
+#[cfg(windows)]
+impl Write for AgentStream {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        relay(&mut io::stderr().lock(), &MID_LINE, buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        io::stderr().lock().flush()
+    }
+}
+
+/// Writes what it can of the agent's `buf` to `out`, and sets `mid_line` when the last byte
+/// written isn't a newline (clears it when it is).
+#[cfg(any(windows, test))]
+fn relay(out: &mut impl Write, mid_line: &AtomicBool, buf: &[u8]) -> io::Result<usize> {
+    let written = out.write(buf)?;
+    if let Some(&last) = buf.get(..written).and_then(<[u8]>::last) {
+        mid_line.store(last != b'\n', Ordering::Relaxed);
+    }
+    Ok(written)
 }
 
 /// The line `tag` (`ERR` or `NOTE`) of `kind`, then `detail`'s, flushed: what [`refuse`] and
-/// [`notice`] write. It takes the detail whole: only a `vm-harness-detail` build writes it.
+/// [`notice`] write. A newline goes first when `mid_line` says the agent's output ended mid-line,
+/// so the kind line starts a line. It takes the detail whole: only a `vm-harness-detail` build
+/// writes it.
 #[cfg_attr(
     not(feature = "vm-harness-detail"),
     expect(
@@ -192,7 +261,16 @@ pub(super) fn agent_stream() -> io::Stderr {
         reason = "the detail is dropped unwritten outside a vm-harness-detail build"
     )
 )]
-fn write_line(out: &mut impl Write, tag: &str, kind: RunnerKind, detail: Detail) -> io::Result<()> {
+fn write_line(
+    out: &mut impl Write,
+    mid_line: &AtomicBool,
+    tag: &str,
+    kind: RunnerKind,
+    detail: Detail,
+) -> io::Result<()> {
+    if mid_line.swap(false, Ordering::Relaxed) {
+        writeln!(out)?;
+    }
     writeln!(
         out,
         "{tag} {PROGRAM} kind={}: {}",

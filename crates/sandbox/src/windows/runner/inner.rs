@@ -27,6 +27,9 @@ use crate::windows::write;
 
 /// The inner runner's whole run; its exit code: the agent's, or a [`RunExit`] code.
 pub fn run_inner(base: &str) -> u32 {
+    // First of all, as in the outer: a panic says only its kind. The inner has no std handles, so
+    // nothing it writes reaches the host; the hook keeps std's text from it all the same.
+    super::stderr::install_panic_hook();
     if restrict_dll_search().is_err() {
         return RunExit::DllSearch.code();
     }
