@@ -241,7 +241,9 @@ fn sweep(tmp: &Path, started: Timestamp) -> usize {
         if earlier && crate::write::is_real_dir(&path) {
             match crate::write::remove_tree(&path) {
                 Ok(()) => removed += 1,
-                Err(error) => tracing::warn!(%error, "a leftover blackline folder stayed"),
+                Err(error) => {
+                    tracing::warn!(kind = ?error.kind(), "a leftover blackline folder stayed");
+                }
             }
         }
     }

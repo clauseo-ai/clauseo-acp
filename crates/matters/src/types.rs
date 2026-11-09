@@ -63,7 +63,7 @@ impl Limits {
 
     /// The cap every walk, read and undo applies: [`Limits::file_cap_bytes`], at most
     /// `u32::MAX` bytes. The one place the clamp is written.
-    pub(crate) fn effective_cap(&self) -> u64 {
+    pub fn effective_cap(&self) -> u64 {
         self.file_cap_bytes.min(u64::from(u32::MAX))
     }
 }

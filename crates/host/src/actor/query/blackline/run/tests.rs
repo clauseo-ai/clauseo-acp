@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::Path;
 
-use super::stetdoc_env;
+use super::{author_arg, stetdoc_env};
 
 /// A lookup over `pairs`, the name matched in any case.
 fn host(pairs: &'static [(&'static str, &'static str)]) -> impl Fn(&str) -> Option<OsString> {
@@ -75,4 +75,10 @@ fn stetdoc_env_without_a_windows_directory_still_sets_temp() {
             ("TMP".to_owned(), dir.display().to_string()),
         ]
     );
+}
+
+#[test]
+fn an_author_that_starts_with_a_dash_stays_one_argument() {
+    assert_eq!(author_arg("-x"), OsString::from("--author=-x"));
+    assert_eq!(author_arg("A. Mehta"), OsString::from("--author=A. Mehta"));
 }

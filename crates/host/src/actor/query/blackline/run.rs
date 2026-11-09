@@ -68,8 +68,7 @@ pub(crate) async fn blackline<T: Timer>(
     let compare = vec![
         "compare".into(),
         "--json".into(),
-        "--author".into(),
-        OsString::from(&stetdoc.author),
+        author_arg(&stetdoc.author),
         "-o".into(),
         path(REDLINE),
         path(OLD),
@@ -96,6 +95,11 @@ pub(crate) async fn blackline<T: Timer>(
         step: "view",
         why: failure.to_string(),
     })
+}
+
+/// `--author=<name>` as one argument, so a name that starts with `-` is never read as a flag.
+fn author_arg(author: &str) -> OsString {
+    OsString::from(format!("--author={author}"))
 }
 
 /// The value of `name` in `env`, the name matched in any case (Windows' rule).
@@ -156,7 +160,7 @@ async fn run<T: Timer>(
         dir,
     );
     let spec = LaunchSpec::new(stetdoc.program.clone(), args, env, dir.to_owned())
-        .map_err(|err| failed(format!("it could not be started: {err}")))?;
+        .map_err(|err| failed(format!("it could not be started: {}", launch_why(&err))))?;
     let Launched {
         stdin,
         stdout,
@@ -165,7 +169,7 @@ async fn run<T: Timer>(
         ..
     } = launcher
         .launch(&spec)
-        .map_err(|err| failed(format!("it could not be started: {err}")))?;
+        .map_err(|err| failed(format!("it could not be started: {}", launch_why(&err))))?;
     drop(stdin);
     let mut out = Vec::new();
     let ran = {
@@ -194,13 +198,23 @@ async fn run<T: Timer>(
             Either::Right(((), _)) => None,
         }
     };
-    // Dropping the handle kills the tree, if anything of it is left: a run past the cap or the
-    // deadline is still writing.
+    let stopped = match ran {
+        Some(Some((read, exit))) => Ok((read, exit)),
+        None => Err(format!("it took longer than {} s", limit.as_secs())),
+        Some(None) => Err("its stdout ran past 8 MiB; it was killed".to_owned()),
+    };
+    let (read, exit) = match stopped {
+        Ok(ran) => ran,
+        Err(why) => {
+            // Past the deadline or the cap stetdoc is still running: stop its tree and wait for
+            // it to exit, so the folder's guard never removes files it holds open (Windows
+            // refuses that).
+            let _outcome = handle.shutdown(timer, None).await;
+            return Err(failed(why));
+        }
+    };
     drop(handle);
-    let (read, exit) = ran
-        .ok_or_else(|| failed(format!("it took longer than {} s", limit.as_secs())))?
-        .ok_or_else(|| failed("its stdout ran past 8 MiB; it was killed".to_owned()))?;
-    read.map_err(|err| failed(format!("its stdout failed: {err}")))?;
+    read.map_err(|err| failed(format!("its stdout failed: {:?}", err.kind())))?;
     if exit.code() != Some(0) {
         return Err(failed(format!(
             "it exited with {:?} (error code {})",
@@ -209,6 +223,18 @@ async fn run<T: Timer>(
         )));
     }
     String::from_utf8(out).map_err(|_bad| failed("its stdout is not UTF-8".to_owned()))
+}
+
+/// Why a launch failed, for the log (ADR 0047): the step and the OS's `io::ErrorKind`, never
+/// the OS's text or a path.
+fn launch_why(error: &clauseo_process::Error) -> String {
+    match error {
+        clauseo_process::Error::InvalidSpec(_) => "invalid launch spec".to_owned(),
+        clauseo_process::Error::NoWorkingFolder => "no working folder".to_owned(),
+        clauseo_process::Error::Spawn { source, .. } => format!("spawn: {:?}", source.kind()),
+        clauseo_process::Error::Os { what, source } => format!("{what}: {:?}", source.kind()),
+        clauseo_process::Error::Closing => "the app is exiting".to_owned(),
+    }
 }
 
 /// The `error.code` of stetdoc's JSON error on `stdout`, such as `malformed_input`, or `none`:

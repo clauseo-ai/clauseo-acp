@@ -1,9 +1,10 @@
 //! The Word blackline (`HostQuery::WordBlackline`) through the host, with a stand-in stetdoc
-//! (`examples/stetdoc_fake.rs`) that answers the fixture's view (`tests/fixtures/blackline/`):
-//! the answer, the refusals (`blackline.not_word`, `blackline.no_word_tool`), the failures
-//! (`blackline.failed`: compare exits 1, the view takes too long, the view prints too much), and
-//! after every case `<data>/tmp` holds nothing and the matter folder is as it was. One test runs
-//! the real stetdoc when one is on `PATH`, to a version and to the folder now.
+//! (`examples/stetdoc_compare_fake.rs`) that answers the fixture's view
+//! (`tests/fixtures/blackline/`): the answer, the refusals (`blackline.not_word`,
+//! `blackline.no_word_tool`), the failures (`blackline.failed`: compare exits 1, the view takes
+//! too long, the view prints too much), and after every case `<data>/tmp` holds nothing and the
+//! matter folder is as it was. One test runs the real stetdoc when one is on `PATH`, to a
+//! version and to the folder now.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -37,7 +38,7 @@ const DOC: &str = "Lease.docx";
 fn fake_stetdoc(dir: &Dir) -> PathBuf {
     let exe = std::env::current_exe().unwrap();
     let examples = exe.parent().unwrap().parent().unwrap().join("examples");
-    let name = format!("stetdoc_fake{}", std::env::consts::EXE_SUFFIX);
+    let name = format!("stetdoc_compare_fake{}", std::env::consts::EXE_SUFFIX);
     let folder = dir.home().join("fake-stetdoc");
     write::create_dir_all(&folder);
     let target = folder.join(&name);
@@ -176,12 +177,9 @@ fn a_blackline_answers_the_paragraphs_and_leaves_nothing_behind() {
     );
     let args = std::fs::read_to_string(fake.join("args-compare.txt")).unwrap();
     let args: Vec<&str> = args.lines().collect();
-    assert_eq!(
-        args[..5],
-        ["compare", "--json", "--author", "Clauseo", "-o"]
-    );
+    assert_eq!(args[..4], ["compare", "--json", "--author=Clauseo", "-o"]);
     let tmp = dir.data().join("tmp");
-    for (arg, name) in args[5..]
+    for (arg, name) in args[4..]
         .iter()
         .zip(["redline.docx", "old.docx", "new.docx"])
     {

@@ -143,15 +143,13 @@ pub(crate) fn remove_tree(path: &Path) -> io::Result<()> {
     }
 }
 
-/// Writes `bytes` to the new file `path`; anything already there, a link included, fails with
+/// The new file `path`, opened to write; anything already there, a link included, fails with
 /// `AlreadyExists` and is never followed. A Word blackline's copies (`matter_worker/sides.rs`).
-pub(crate) fn create_new_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    use std::io::Write;
-    let mut file = std::fs::OpenOptions::new()
+pub(crate) fn create_new_file(path: &Path) -> io::Result<std::fs::File> {
+    std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(path)?;
-    file.write_all(bytes)
+        .open(path)
 }
 
 /// Removes the link or file `path` itself, never what a link points to: a leftover download's
