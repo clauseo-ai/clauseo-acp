@@ -115,6 +115,12 @@ impl Cancel {
     /// [`Cancel::stop`]: a stop that comes meanwhile waits for `start` to return, so it is
     /// either seen here (`None`, nothing started) or comes after `start`, whose run then sees it.
     /// `start` must not block for long (a process spawn) and must not touch this `Cancel`.
+    ///
+    /// So a caller of [`Cancel::cancel`] or [`Cancel::stop`] waits out a spawn in progress
+    /// while it holds whatever lock it holds: the sign-in hub's (`worker/signin.rs`'s `cancel`,
+    /// `reserve`, `stop_all`) and the worker's shared one (`worker.rs`'s `close_installs`,
+    /// `worker/shared.rs`'s `stop_current`, which stop install jobs, never in a spawn here). A
+    /// spawn takes neither lock, so the wait always ends.
     pub(crate) fn unless_stopped<R>(&self, start: impl FnOnce() -> R) -> Option<R> {
         let _gate = self.lock_gate();
         if self.stopped.is_set() {

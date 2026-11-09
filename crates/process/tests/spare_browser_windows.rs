@@ -2,14 +2,12 @@
 //! process of the job but one named like a browser, which keeps running after the handle drops
 //! and the job's handle closes, as the lawyer's Edge must after a sign-in's Cancel or the quit.
 //! The browser stand-in is a copy of `fake_agent` named `msedge.exe`, holding (`--hold`); its
-//! sibling, `fake_agent` under its own name, must die. Waits poll with a bound, never sleep as
-//! a sync.
+//! sibling, `fake_agent` under its own name, must die. `cmd` makes and removes the copy and
+//! its folder, so no file call of the test's own changes a file. Waits poll with a bound, never
+//! sleep as a sync. The cases of a process that cannot be ended, a run named like a browser,
+//! and a process joining after the last listing are `os/windows/spare/tests.rs`.
 
 #![cfg(windows)]
-#![expect(
-    clippy::disallowed_methods,
-    reason = "the browser stand-in: a copy of fake_agent in the test's own temp folder"
-)]
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -47,14 +45,26 @@ fn find(pids: &[u32], name: &str) -> Option<u32> {
     })
 }
 
-/// A folder of the test's own under the system's temp folder, with no space in its path (the
-/// command line below is not quoted).
+/// A folder name of the test's own under the system's temp folder, with no space in its path
+/// (the command lines below are not quoted). `cmd` makes it.
 #[cfg(test)]
 fn folder(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("clauseo-{tag}-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
     assert!(!dir.to_string_lossy().contains(' '), "{}", dir.display());
     dir
+}
+
+/// Runs `cmd /d /c line` and waits for it.
+#[cfg(test)]
+fn cmd(line: &str) {
+    let shell = std::env::var_os("ComSpec").expect("ComSpec");
+    let mut child = async_process::Command::new(shell)
+        .args(["/d", "/c", line])
+        .stdout(async_process::Stdio::null())
+        .stderr(async_process::Stdio::null())
+        .spawn()
+        .expect("start cmd");
+    block_on(child.status()).expect("cmd ran");
 }
 
 #[test]
@@ -65,15 +75,20 @@ fn the_kill_spares_a_browser_and_ends_the_rest() {
     assert!(!bin.to_string_lossy().contains(' '), "{}", bin.display());
     let dir = folder("spare-browser");
     let edge = dir.join("msedge.exe");
-    std::fs::copy(&bin, &edge).unwrap();
-    let cmd: PathBuf = std::env::var_os("ComSpec").expect("ComSpec").into();
+    cmd(&format!(
+        "mkdir {} & copy /y {} {} >nul",
+        dir.display(),
+        bin.display(),
+        edge.display()
+    ));
+    let shell: PathBuf = std::env::var_os("ComSpec").expect("ComSpec").into();
     let line = format!(
         "start /b {} --hold & {} --hold",
         edge.display(),
         bin.display()
     );
     let spec = LaunchSpec::new(
-        cmd,
+        shell,
         vec!["/d".into(), "/c".into(), line.into()],
         BTreeMap::new(),
         env!("CARGO_MANIFEST_DIR").into(),
@@ -100,7 +115,7 @@ fn the_kill_spares_a_browser_and_ends_the_rest() {
     let browser_runs = running(browser);
     kill(browser);
     within_bound(|| !running(browser));
-    drop(std::fs::remove_dir_all(&dir));
+    cmd(&format!("rd /s /q {}", dir.display()));
     assert!(rest_gone, "the tree's other processes still run");
     assert!(browser_runs, "the browser was ended with the tree");
 }

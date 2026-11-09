@@ -73,9 +73,11 @@ pub(crate) struct Tree {
     held: Held,
     /// Whether the kill spares a browser and its children (`LaunchSpec::spare_browsers`).
     spare: bool,
-    /// The pids the kill spared, left running in a job that no longer kills on close: shared
-    /// with every [`watch::Watch`], which does not wait for them.
-    spared: Arc<Mutex<Vec<u32>>>,
+    /// The run's own process, which is never spared.
+    root: u32,
+    /// The processes the kill spared, left running in a job that no longer kills on close:
+    /// shared with every [`watch::Watch`], which does not wait for them or their children.
+    spared: Arc<Mutex<Vec<crate::browser::Key>>>,
 }
 
 impl Tree {
@@ -159,14 +161,16 @@ impl Tree {
             job,
             held: Held::default(),
             spare: false,
+            root: 0,
             spared: Arc::default(),
         }
     }
 
     /// From now on the tree's kill, and so its handle's drop, spares a browser it holds and that
-    /// browser's children (`LaunchSpec::spare_browsers`).
-    pub(crate) fn spare_browsers(&mut self) {
+    /// browser's children (`LaunchSpec::spare_browsers`); never `root`, the run's own process.
+    pub(crate) fn spare_browsers(&mut self, root: u32) {
         self.spare = true;
+        self.root = root;
     }
 
     /// The job handle, borrowed for a Win32 call.
@@ -187,6 +191,7 @@ impl Tree {
             job,
             held: Held::default(),
             spare: false,
+            root: 0,
             spared: Arc::default(),
         };
         set_limits(&tree.job, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE).map_err(|source| Error::Os {
@@ -362,11 +367,11 @@ fn each_process(mut visit: impl FnMut(&PROCESSENTRY32W)) -> bool {
 /// with. The handle opened for the check is the one the kill goes through, so a reused pid is
 /// never ended. Returns that handle when it is the listed process's, ended or not: while it is
 /// open, Windows gives the pid to no other process, so a process listed later with it as parent
-/// was started by the listed one.
+/// was started by the listed one. The handle can also wait for the end (`spare.rs`).
 pub(crate) fn terminate(process: &Proc) -> Option<OwnedHandle> {
     let handle = open(
         process.pid,
-        PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION,
+        PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
     )?;
     if created(&handle) != Some(process.start) {
         return None;

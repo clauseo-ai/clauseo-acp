@@ -184,8 +184,10 @@ impl Handle {
 }
 
 impl Drop for Handle {
-    /// Kills the group or the job, without waiting and without listing (a listing blocks):
-    /// a descendant outside the group outlives a handle dropped without a shutdown.
+    /// Kills the group or the job, without listing (a listing blocks): a descendant outside the
+    /// group outlives a handle dropped without a shutdown. A Windows tree that spares a browser
+    /// (`LaunchSpec::spare_browsers`) is the exception: its kill looks up the default browser in
+    /// the registry, lists the job and waits up to 1.5 s for the processes it ends.
     fn drop(&mut self) {
         self.kill_tree();
     }
