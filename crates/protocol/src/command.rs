@@ -512,6 +512,14 @@ pub enum HostCommand {
     /// leaves no folder. With none running it does nothing. Answers `Done`, with no receipt.
     /// JSON: `{"cancel_browser_install": {}}`.
     CancelBrowserInstall {},
+    /// Read the firm's browser policy again now, after the lawyer's "Try again" on a browser
+    /// whose policy could not be read (`BrowserPolicyUnreadable`). Answers `Done` at once and
+    /// logs nothing; every app subscriber gets `HostEvent::BrowserPolicy` with `Checking`, then
+    /// what the read found. One read at a time: while one runs it answers `Done` and the running
+    /// read's event answers both. No session restarts: the next session started reads the policy
+    /// again, as every launch does. Only the main window sends it. JSON:
+    /// `{"recheck_browser_policy": {}}`.
+    RecheckBrowserPolicy {},
     /// Check for a newer version now, from `idle` or `failed` (decision record 0037). Answers
     /// `Done`; the state reaches app subscribers as `HostEvent::UpdateChanged`. In a state that
     /// does not take it, `command.invalid`. JSON: `{"check_for_update": {}}`, an object like every

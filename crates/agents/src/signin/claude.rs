@@ -252,7 +252,8 @@ pub(crate) async fn status_run<T: Timer + Send + Sync>(
     kind: RunKind<'_>,
     cwd: &Path,
 ) -> Option<(Option<i32>, Option<ClaudeStatus>)> {
-    let mut spec = job.spec(STATUS, job.env(kind, None), STATUS_LIMIT);
+    let limit = job.status_limit(STATUS_LIMIT);
+    let mut spec = job.spec(STATUS, job.env(kind, None), limit);
     spec.cwd = cwd.to_path_buf();
     let ran = run(
         &*job.launcher,

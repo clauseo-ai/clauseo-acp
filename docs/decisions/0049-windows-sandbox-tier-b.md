@@ -1746,7 +1746,7 @@ folder of it through a junction at any time, or re-run `--adopt` with another fo
    Administrators alone, read back; "The staging folder's DACL" below),
    and verifies the staged bytes, never the user's file, so a swap after the check changes nothing;
 6. requires the staged image's CPU type (its PE `Machine`) to be the running copy's, so a signed
-   exe for another CPU never replaces it;
+   exe for another CPU never replaces it, save one move ("The one move across CPU types");
 7. checks the versions ("Versions" below), so an older signed exe can't roll the copy back;
 8. stops when the staged SHA-256 is already recorded;
 9. otherwise opens `Sandbox\` for adding a file (`FILE_WRITE_DATA | FILE_ADD_FILE`), sharing
@@ -1812,6 +1812,19 @@ checked.
 - An older version is refused. So is an equal version whose bytes differ from the copy in place.
 - A leading `v` is dropped. A record's `X.Y.Z.0` reads as the release `X.Y.Z`. Anything
   unreadable, a non-zero fourth part included, refuses the run.
+
+**The one move across CPU types.** Windows ARM64 is tier 1, so an x64 install on an ARM64 machine
+moves to the native build through the normal update, and nobody is told to reinstall. Step 6
+allows that one move and no other (`refresh/machine.rs`). The running copy must be x64, and so
+must the copy on disk it replaces, its PE `Machine` read by handle as its hash is. The staged
+image must be plain ARM64, not ARM64EC or ARM64X (a load config naming CHPE metadata marks a
+hybrid). The machine must be natively ARM64 (`IsWow64Process2`'s native machine, which
+detection reads). The signed version must be strictly newer than `AdminCopyVersion`: the equal
+version a same-CPU run repairs with never moves the copy. The signature, its `file:`, the
+`FILEVERSION` binding, the hash record, the set-up lock and staging apply as before. Anything
+else across CPU types exits 42, ARM64 to x64 included: it would put a native copy back under
+emulation, a downgrade of the platform match. `--adopt` checks no CPU type, so the per-machine
+installer already moves an x64 copy to ARM64 on the version rule alone.
 
 **The key.** `crates/sandbox/build.rs` builds the key in: `CLAUSEO_UPDATER_PUBKEY`, else
 `plugins.updater.pubkey` from `tauri.conf.json`, else the placeholder `AC986E7C6BA67AB9`. The
@@ -2088,6 +2101,91 @@ pub struct Progress { pub walked: u64, pub done: bool, pub failed: Option<Arc<Er
   second concurrent session of a prepared matter starting on the fast path. Changing a local
   group's members needs an administrator, so the design (for example static slot groups made at
   set-up) comes to the orchestrator before that PR.
+
+### Crash reporting (WER)
+
+Found on the VM: when a process in the agent's job crashes (msys bash and
+`chrome-headless-shell` both did), Windows Error Reporting starts `WerFault` as the desktop's
+owner, the lawyer, at Medium integrity, and it opens the crashed sandbox process from the
+lawyer's side to read its memory. That crosses the boundary: a crash the agent crafts makes a
+process with the lawyer's rights read memory the agent controls. Two controls close it.
+
+- **The job.** The launch's one job (`runner/spawn.rs`, `JOB_LIMITS`, set by
+  `kill_on_close_job`) carries `JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION` next to
+  `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. A process in it whose exception reaches
+  `UnhandledExceptionFilter` just ends, and Windows never asks WER. The inner runner, the agent and
+  everything the agent starts are in this job, and it is the only job the runner makes.
+  `job_tests.rs` reads the flag back from a real job. The flag doesn't reach three cases:
+  - a fastfail (`__fastfail`, `RaiseFailFastException`, `[Environment]::FailFast`, a CFG or
+    stack-cookie failure), which skips every exception handler, `UnhandledExceptionFilter`
+    included, and goes straight to WER;
+  - a process in a nested job the agent makes, whose own limits it sets;
+  - the end sweeper, which runs as the pool user outside any job ("The runner" above).
+- **The pool user's WER.** This covers those three cases. Before the agent starts, the inner
+  runner, as the pool user, sets `Disabled`, `DontShowUI`, `DontSendAdditionalData` and
+  `LoggingDisabled` to 1 (DWORDs) under `Software\Microsoft\Windows\Windows Error Reporting` in
+  the pool user's own hive (`runner/wer_flow.rs`, step 4 of `inner_flow.rs`; the calls are
+  `runner/wer.rs`):
+  - **Its own hive, by SID.** It opens `HKEY_USERS\<pool SID>` (the SID its token holds, checked
+    against the launch's), never `HKEY_CURRENT_USER`, which falls back to `.DEFAULT` when the
+    hive isn't loaded. A hive that isn't loaded, or a SID that isn't a user account's, refuses.
+  - **No links.** It walks down one part at a time, each part opened with `REG_OPTION_OPEN_LINK`,
+    and refuses a part that is a registry link (one holding a `SymbolicLinkValue`). The writes and
+    the first read-back go through the checked handle, so nothing changes between check and use.
+  - **Nothing below Medium may write it.** It refuses a WER key labelled below Medium, a label
+    without no-write-up, a missing DACL, or an allow entry giving a write right (set a value, make
+    a subkey or link, delete, change the DACL or owner, or a generic right holding one) to anyone
+    but the pool user, `SYSTEM` and the administrators. A Medium process of the pool user's left
+    over from before the start sweep could otherwise label the key Low for the agent to turn WER
+    back on. The agent's token is Low and restricted (`RESTRICTED`, `Users` and `Everyone` are
+    among its restricting SIDs), so the Medium label is what keeps it out.
+  - **Read back twice.** Every value is read back through the checked handle and again through a
+    plain open of the whole path, as WER opens it, which also catches a link the first check
+    can't see (a link key with no target).
+  - **Fails closed, to set-up's repair.** Any failure refuses the launch with
+    `RunExit::PoolProfile` (`0xE0C15017`, value 0x17, reserved). It means the pool user's hive is broken or was
+    changed, which a retry doesn't fix, so tier detection takes it as a set-up fault, as it takes
+    a lost password: `SetUpFailed` with "the sandbox user's Windows profile is damaged or was
+    changed: run the set-up again".
+  - **The repair.** Set-up's logon of each pool user, with the profile loaded (`setup/logon.rs`),
+    deletes a link on the way to the WER key, or a WER key that is a link or fails the security
+    check (`wer_flow::repair`). It deletes a link as itself (`NtDeleteKey` on the handle opened
+    with `REG_OPTION_OPEN_LINK`) and never deletes through one, since set-up runs elevated. A WER key
+    whose DACL shuts the administrators out is made theirs and then always deleted:
+    `SeTakeOwnershipPrivilege`, enabled for that call only, makes them its owner, and its DACL
+    becomes administrators and `SYSTEM` with full control. A parent on the way (`Software`,
+    `Microsoft`, `Windows`) is never taken or changed. If set-up can't open one, it fails and names
+    the key. The next launch makes the key again. Without this, a planted link
+    would refuse every later launch with no way out.
+  - **Temporary profiles.** A temporary profile (the `ProfileList` `State` flag
+    `PROFILE_TEMP_ASSIGNED`, or a `TEMP` or `TEMP.*` folder, as set-up's own check reads them)
+    refuses with the same repair message. Windows throws such a hive away at logoff, so the end
+    sweeper's separate logon could get a fresh one without the values.
+  - **Policy.** A WER policy (`HKLM` or the pool user's
+    `Software\Policies\Microsoft\Windows\Windows Error Reporting`) wins over these values. One
+    with `Disabled` = 0, keeping WER on, doesn't refuse the launch: the inner logs it on `ctl`,
+    and the job's limit and the sweeps (#819's verified kills) are what remain. `docs/firm-it.md`
+    tells IT.
+
+  Setting the values again changes nothing. Windows reads `LocalDumps` only from `HKLM`, so there
+  is no per-user `LocalDumps` key to set. The inner runner does this on every launch, not only in
+  set-up, so pools made before this change get it, and so does a profile that was reset or
+  rebuilt. Another key or value is one more row in `WER_SETTINGS`.
+
+Two VM rows check both controls: a null-write crash in the agent (the job flag) and a fastfail
+(the `HKCU` setting). Each must show no `WerFault` running as the lawyer and no report or dump
+under the lawyer's profile. Whether WER reads the crashing user's `HKCU` while `WerFault` runs
+as the lawyer is what the fastfail row settles. If `WerFault` still runs, the fastfail case needs
+another mechanism.
+
+WER for the lawyer's own apps is unchanged: neither control touches the lawyer's `HKCU`, `HKLM`
+or any process outside the launch's job. In the other direction, a machine-wide WER setting still
+applies to the pool users. `LocalDumps` under `HKLM\SOFTWARE\Microsoft\Windows\Windows Error
+Reporting`, which an IT department may set to collect crash dumps, still makes WER write a memory
+dump of a crashed sandbox process (for a fastfail, or outside the job), by default under a
+`%LOCALAPPDATA%\CrashDumps` (the pool user's, or the lawyer's when `WerFault` runs as the lawyer).
+Neither control here turns that off, and Clauseo doesn't change machine-wide WER settings.
+`docs/firm-it.md` ("Crash dumps of the Windows sandbox") tells IT.
 
 ## Consequences
 

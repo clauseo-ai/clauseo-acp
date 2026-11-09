@@ -1,12 +1,13 @@
 //! The git dir: create and open, commits, publish and the timeline.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::{file, git_id, new_store, replace_file, write_file};
 use crate::Error;
-use crate::history::{GixStore, HistoryStore, TIMELINE_REF};
+use crate::history::{GixStore, HistoryStore, TIMELINE_REF, recorded_worktree};
 use crate::stat::StatCache;
 use crate::test_dir::TestDir;
+use crate::write;
 
 #[test]
 fn create_writes_only_head_config_objects_and_refs() {
@@ -101,6 +102,72 @@ fn open_does_not_follow_config_includes() {
     // Were the include read, core.worktree would differ and open would rewrite the config.
     GixStore::open(&git_dir, &dir.path().join("folder")).unwrap();
     assert_eq!(std::fs::read(&config_path).unwrap(), config);
+}
+
+/// A `history.git` in `dir` whose own `config` is `config`, as a bare-style git dir.
+fn git_dir_with_config(dir: &TestDir, config: &str) -> PathBuf {
+    let git_dir = dir.path().join("history.git");
+    write::create_dir_all(&git_dir.join("objects")).unwrap();
+    write::create_dir_all(&git_dir.join("refs")).unwrap();
+    write_file(&git_dir.join("HEAD"), b"ref: refs/heads/clauseo\n");
+    write_file(&git_dir.join("config"), config.as_bytes());
+    git_dir
+}
+
+/// Points git's configuration at files under `dir`: `HOME` at `home` (its `.gitconfig`), the
+/// global file at `global`, the system file at `system`, and the system file switched on. These
+/// are what gix reads when its permissions allow, so a repository that reads them returns their
+/// `core.worktree`.
+///
+/// Edition 2024 makes `set_var` unsafe. Nothing else in the process reads or writes the
+/// environment while it runs: nextest runs each test in its own process, and the harness's main
+/// thread only waits for the test.
+#[expect(
+    unsafe_code,
+    reason = "set_var is unsafe in edition 2024; nextest runs each test in its own process"
+)]
+fn point_git_config_at(home: &Path, global: &Path, system: &Path) {
+    // SAFETY: see the function's doc: no other thread of this process reads the environment.
+    unsafe {
+        std::env::set_var("HOME", home);
+        std::env::set_var("GIT_CONFIG_GLOBAL", global);
+        std::env::set_var("GIT_CONFIG_SYSTEM", system);
+        std::env::set_var("GIT_CONFIG_NOSYSTEM", "0");
+    }
+}
+
+/// Writes `core.worktree = <value>` to the global, system and user config files under `dir`, and
+/// points git at them.
+fn point_every_config_at(dir: &TestDir, value: &str) {
+    let home = dir.path().join("home");
+    write::create_dir_all(&home).unwrap();
+    let text = format!("[core]\n\tworktree = {value}\n");
+    let global = dir.path().join("global.config");
+    let system = dir.path().join("system.config");
+    write_file(&global, text.as_bytes());
+    write_file(&system, text.as_bytes());
+    write_file(&home.join(".gitconfig"), text.as_bytes());
+    point_git_config_at(&home, &global, &system);
+}
+
+#[test]
+fn recorded_worktree_ignores_the_global_system_and_user_config() {
+    // gix's isolated options read the repository's own config and none of these.
+    let dir = TestDir::new("history-recorded-isolated");
+    let git_dir = git_dir_with_config(&dir, "[core]\n\tbare = false\n");
+    point_every_config_at(&dir, "/somewhere/else");
+    assert_eq!(recorded_worktree(&git_dir).unwrap(), None);
+}
+
+#[test]
+fn recorded_worktree_reads_the_repository_config_over_the_environment() {
+    let dir = TestDir::new("history-recorded-repo");
+    let git_dir = git_dir_with_config(&dir, "[core]\n\tworktree = /repo/folder\n");
+    point_every_config_at(&dir, "/somewhere/else");
+    assert_eq!(
+        recorded_worktree(&git_dir).unwrap(),
+        Some(PathBuf::from("/repo/folder"))
+    );
 }
 
 #[test]

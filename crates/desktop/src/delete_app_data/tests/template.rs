@@ -1,8 +1,9 @@
 //! The repo's NSIS template (`windows/nsis/installer.nsi`, `bundle.windows.nsis.template`) is
 //! tauri-cli 2.12.2's own plus a known list of named blocks: `no-solid` (no /SOLID, so nothing is
-//! unpacked into %TEMP%), `finish-show` and `finish-show-function` (the finish page hides "Run
-//! Clauseo" after a wait that timed out) and `admin-section` (first in `.onInit`), which runs the
-//! elevated branch of `admin_elevated.nsh` and the per-machine installer's start
+//! unpacked into %TEMP%), `version-info` (the installer's full VERSIONINFO, tested in
+//! `installer_version_info.rs`), `finish-show` and `finish-show-function` (the finish page hides
+//! "Run Clauseo" after a wait that timed out) and `admin-section` (first in `.onInit`), which runs
+//! the elevated branch of `admin_elevated.nsh` and the per-machine installer's start
 //! (`safe_temp.nsh`, tested in `safe_temp.rs`); that branch loads no plug-in, calls no function
 //! and reads nothing the lawyer can write before it extracts. Clauseo's main window class is the
 //! one the branch looks for. `ui-language`, later in `.onInit`, sets the installer's language
@@ -31,58 +32,70 @@ const UPSTREAM_SHA256: &str = "166f9677d42e81c7f712a1bf80d9d8c089c21d2967d839847
 struct Block {
     name: &'static str,
     after: &'static str,
-    replaces: Option<&'static str>,
+    replaces: &'static [&'static str],
 }
 
 /// The blocks, in the template's order. A new block is one more row here (and its lines in the
 /// template).
-const BLOCKS: [Block; 9] = [
+const BLOCKS: [Block; 10] = [
     Block {
         name: "no-solid",
         after: "  ; Set the compression algorithm. We default to LZMA.",
-        replaces: Some("  SetCompressor /SOLID \"{{compression}}\""),
+        replaces: &["  SetCompressor /SOLID \"{{compression}}\""],
+    },
+    Block {
+        name: "version-info",
+        after: "",
+        replaces: &[
+            "VIProductVersion \"${VERSIONWITHBUILD}\"",
+            "VIAddVersionKey \"ProductName\" \"${PRODUCTNAME}\"",
+            "VIAddVersionKey \"FileDescription\" \"${PRODUCTNAME}\"",
+            "VIAddVersionKey \"LegalCopyright\" \"${COPYRIGHT}\"",
+            "VIAddVersionKey \"FileVersion\" \"${VERSION}\"",
+            "VIAddVersionKey \"ProductVersion\" \"${VERSION}\"",
+        ],
     },
     Block {
         name: "finish-show",
         after: "!define MUI_FINISHPAGE_RUN_FUNCTION RunMainBinary",
-        replaces: None,
+        replaces: &[],
     },
     Block {
         name: "finish-show-function",
         after: "!insertmacro MUI_PAGE_FINISH",
-        replaces: None,
+        replaces: &[],
     },
     Block {
         name: "admin-section",
         after: "Function .onInit",
-        replaces: None,
+        replaces: &[],
     },
     Block {
         name: "ui-language",
         after: "  ${EndIf}",
-        replaces: None,
+        replaces: &[],
     },
     Block {
         name: "uninstall-string",
         after: "  WriteRegStr SHCTX \"${UNINSTKEY}\" \"InstallLocation\" \"$\\\"$INSTDIR$\\\"\"",
-        replaces: Some(
+        replaces: &[
             "  WriteRegStr SHCTX \"${UNINSTKEY}\" \"UninstallString\" \"$\\\"$INSTDIR\\uninstall.exe$\\\"\"",
-        ),
+        ],
     },
     Block {
         name: "un-admin-section",
         after: "Function un.onInit",
-        replaces: None,
+        replaces: &[],
     },
     Block {
         name: "uninstall-self-delete",
         after: "  !endif",
-        replaces: None,
+        replaces: &[],
     },
     Block {
         name: "un-gui-end",
         after: "SectionEnd",
-        replaces: None,
+        replaces: &[],
     },
 ];
 
@@ -158,8 +171,8 @@ fn the_template_is_tauri_cli_2_12_2s_plus_the_named_blocks() {
             "{} follows the wrong line",
             block.name
         );
-        if let Some(line) = block.replaces {
-            upstream.insert(found.at, line.to_owned());
+        for (offset, line) in block.replaces.iter().enumerate() {
+            upstream.insert(found.at + offset, (*line).to_owned());
         }
         // A line ending in a backslash would join the next one in NSIS.
         for line in &found.lines {

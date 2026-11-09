@@ -121,7 +121,7 @@ export function Failed({
             )}
           </Say>{" "}
           <span className="fl-gate-why">
-            <Say>{w("Ask your IT team.")}</Say>
+            <Say>{w("Your firm manages these settings.")}</Say>
           </span>
         </Act>
       );

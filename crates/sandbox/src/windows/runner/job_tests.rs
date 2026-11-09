@@ -1,6 +1,7 @@
 //! The launch's kill-on-close job on Windows: a process in it that reads its own job's pid list
 //! with no job handle, as the inner runner's sweeps do, holds no handle to the job, so it dies
-//! when the job's creator closes the job's one handle.
+//! when the job's creator closes the job's one handle. The job's limit flags, as the job holds
+//! them.
 
 use std::io::{BufRead as _, BufReader, Write as _};
 use std::os::windows::io::AsRawHandle as _;
@@ -9,8 +10,14 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use windows::Win32::Foundation::HANDLE;
+use windows::Win32::System::JobObjects::{
+    JOB_OBJECT_LIMIT_BREAKAWAY_OK, JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION,
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK,
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+    QueryInformationJobObject,
+};
 
-use super::spawn::{assign, kill_on_close_job, logon_startup};
+use super::spawn::{JOB_LIMITS, assign, kill_on_close_job, logon_startup};
 use super::station::StationDesktop;
 use super::sweep::os::own_job_pids;
 
@@ -119,4 +126,37 @@ fn every_logon_starts_on_the_agents_station_desktop() {
     }
     let text = String::from_utf16(wide.split_last().unwrap().1).unwrap();
     assert_eq!(text, r"Service-0x0-3e7$\Default");
+}
+
+#[test]
+fn the_job_limits_kill_on_close_and_die_on_a_crash_with_no_breakaway() {
+    assert_eq!(
+        JOB_LIMITS.0,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE.0 | JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION.0
+    );
+    assert_eq!(JOB_LIMITS.0 & JOB_OBJECT_LIMIT_BREAKAWAY_OK.0, 0);
+    assert_eq!(JOB_LIMITS.0 & JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK.0, 0);
+}
+
+#[test]
+#[expect(
+    unsafe_code,
+    reason = "QueryInformationJobObject of the test's own job"
+)]
+fn the_kill_on_close_job_holds_the_die_on_unhandled_exception_limit() {
+    let job = kill_on_close_job().unwrap();
+    let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+    // SAFETY: the job is live with every right (this process made it); `limits` is the structure
+    // the class names, writable for its size; the returned length isn't needed.
+    unsafe {
+        QueryInformationJobObject(
+            Some(job.0),
+            JobObjectExtendedLimitInformation,
+            (&raw mut limits).cast::<std::ffi::c_void>(),
+            u32::try_from(size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>()).unwrap(),
+            None,
+        )
+    }
+    .unwrap();
+    assert_eq!(limits.BasicLimitInformation.LimitFlags, JOB_LIMITS);
 }

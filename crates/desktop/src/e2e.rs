@@ -21,6 +21,12 @@
 //!   `setup/fake_install.rs`, wrapping the seam over S18 below the scripted sign-in): each starts
 //!   `Missing` (50 MB), and its install plays `Downloading`, `Installing`, then `Ready`, 1 s a
 //!   state, with no network and no entry written, so a sign-in pressed before it runs at `Ready`.
+//! - Setup starts the agents `E2E_FAKE_INSTALLED` names (`claude-acp`; `setup/fake_install.rs`)
+//!   installed, `Ready` with no install run, and their status check answers by
+//!   `E2E_FAKE_STATUS` (`setup/fake_signin.rs`): `signed_out` (default) at once, or `slow` /
+//!   `hang`, which show `Checking` for 1.5 or 7 times `E2E_FAKE_STATUS_LIMIT_MS` (default 15000,
+//!   the start-up check's first limit) before `SignedOut`: `slow` is answered by the retry, and
+//!   `hang` goes past it too. Name the agent in `E2E_FAKE_SIGNIN` too for a scripted press.
 //! - The speed scoreboard's measures (docs/decisions/0012-desktop-bridge.md):
 //!   - each channel event that fits one message wrapped goes as
 //!     `{"timed":{"received_ms":<f64>,"event":<event>}}`, the time the bridge received it from

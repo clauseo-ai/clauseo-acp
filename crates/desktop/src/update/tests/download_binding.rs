@@ -123,12 +123,22 @@ fn fetched(ran: &Ran) -> bool {
         .any(|request| request.tunnelled && request.path == ARTIFACT)
 }
 
-/// The sandbox tool, validly signed by the release key at this version, is downloaded and then
-/// refused as the host's signature failure (the host's `failed` state, stage `download`), and
-/// nothing lands where an accepted download is saved: no version folder, no temporary file.
+/// The other Windows architecture's installer, relative to the host running the test: x64's on
+/// an arm64 host, arm64's otherwise. On a Windows arm64 runner arm64's is this platform's own.
+const OTHER_ARCH_INSTALLER: &str = if cfg!(target_arch = "aarch64") {
+    "Clauseo_0.4.1_x64-setup.exe"
+} else {
+    "Clauseo_0.4.1_arm64-setup.exe"
+};
+
+/// The sandbox tool and the other architecture's installer, each validly signed by the release
+/// key at this version, are downloaded and then refused as the host's signature failure (the
+/// host's `failed` state, stage `download`), and nothing lands where an accepted download is
+/// saved: no version folder, no temporary file.
 #[test]
 fn a_download_signed_as_another_file_is_refused_and_never_written() {
-    for other in ["clauseo-sandbox-setup.exe", "Clauseo_0.4.1_arm64-setup.exe"] {
+    for other in ["clauseo-sandbox-setup.exe", OTHER_ARCH_INSTALLER] {
+        assert_ne!(expected_update_file(VERSION).as_deref(), Some(other));
         let ran = download_signed_as("update-binding-refused", other);
         assert!(
             fetched(&ran),

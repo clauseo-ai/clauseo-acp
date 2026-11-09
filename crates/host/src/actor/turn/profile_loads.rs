@@ -167,10 +167,15 @@ pub(super) fn session_loads(
         proxy_set: actor.wiring.proxy.is_some(),
         // Only a proxy that opened for this session gives a port (`launch_checks::egress`).
         port: run.egress.as_ref().and_then(|egress| egress.port()),
+        blocked_by_policy: run.browser_blocked,
         executable: run.chrome.as_deref(),
         browser_dir: &run.browser,
         claims: run.browser_session.as_deref().map(Claims::of),
     };
+    if run.browser_policy_read {
+        // What the app heard from a "Try again" follows this newer read.
+        super::super::browser_policy::on_launch_read(actor, run.browser_blocked);
+    }
     let mut servers = loads::mcp_servers(&actor.effective, control);
     let (hook_servers, browser_state) = browser::hook_servers(hook, &inputs);
     servers.extend(hook_servers);

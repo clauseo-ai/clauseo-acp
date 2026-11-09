@@ -507,13 +507,17 @@ fn an_unanswered_account_read_is_never_login_found_without_an_email() {
     for _ in 0..20 {
         crate::support::pause();
     }
+    // Only the status check's `Checking` is sent while it asks again.
     let sent: Vec<_> = events
         .drain()
         .into_iter()
-        .filter(|event| matches!(event, clauseo_agents::AgentsEvent::Signin { .. }))
+        .filter(|event| {
+            matches!(event, clauseo_agents::AgentsEvent::Signin { state, .. }
+                if *state != SigninState::Checking)
+        })
         .collect();
     assert_eq!(sent, []);
-    assert_eq!(agents.signin_state(&codex()), None);
+    assert_eq!(agents.signin_state(&codex()), Some(SigninState::Checking));
 }
 
 /// S18 security review, Low 2: the guard refuses when the home's login file is a symbolic link

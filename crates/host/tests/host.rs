@@ -38,6 +38,9 @@ mod browser;
 #[path = "host/browser_install.rs"]
 mod browser_install;
 #[cfg(test)]
+#[path = "host/browser_policy.rs"]
+mod browser_policy;
+#[cfg(test)]
 #[path = "host/came_back.rs"]
 mod came_back;
 #[cfg(test)]

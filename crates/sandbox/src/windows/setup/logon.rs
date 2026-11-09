@@ -1,6 +1,9 @@
 //! The set-up's one logon per pool user on Windows (S15 `PR4f`, step 6): `LogonUserW`
 //! (`LOGON32_LOGON_INTERACTIVE`), then `LoadUserProfileW`, which makes the profile from Default
-//! the first time (`AppData\LocalLow` included), then `UnloadUserProfile`. A temporary profile
+//! the first time (`AppData\LocalLow` included), then, while the profile is loaded, the repair of
+//! its Windows Error Reporting key (`runner::wer::repair_hive`: a registry link on the way, or a
+//! WER key that is a link or that the agent could write, is deleted, so the next launch makes it
+//! again; decision 0049), then `UnloadUserProfile`. A temporary profile
 //! is reported ([`ProfileDir::temporary`]), so the engine fails rather than close the wrong
 //! `LocalLow` (K5).
 //!
@@ -80,14 +83,22 @@ pub fn log_on_once(name: &str, password: &Password) -> Result<ProfileDir, Machin
         Some(sid) => reg_dword(&format!(r"{PROFILE_LIST}\{}", sid.as_str()), "State")?,
         None => None,
     };
+    if let Some(sid) = &sid {
+        match crate::windows::runner::wer::repair_hive(sid) {
+            Ok(true) => tracing::info!(%name, "deleted the sandbox user's unsafe WER key"),
+            Ok(false) => {}
+            Err(cause) => return Err(MachineError::Other(cause)),
+        }
+    }
     drop(loaded);
     drop(token);
     let temporary = is_temporary(state, &path);
     Ok(ProfileDir { path, temporary })
 }
 
-/// The profile folder of `token`'s user (`GetUserProfileDirectoryW`).
-fn profile_directory(token: HANDLE) -> Result<PathBuf, MachineError> {
+/// The profile folder of `token`'s user (`GetUserProfileDirectoryW`); also the inner runner's
+/// check that its own profile isn't temporary (`runner/wer_flow.rs`).
+pub(crate) fn profile_directory(token: HANDLE) -> Result<PathBuf, MachineError> {
     let mut size = 0u32;
     // SAFETY: no buffer asks only for the size, written to `size`.
     match unsafe { GetUserProfileDirectoryW(token, None, &raw mut size) } {
