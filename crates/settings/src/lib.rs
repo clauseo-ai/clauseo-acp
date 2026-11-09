@@ -150,7 +150,7 @@ pub use locations::{
 pub use lock_reason::{LockCause, LockReason, SourceKind};
 pub use plans::{
     PLAN_ENV_NAMES, PLAN_PROXY_NAMES, SECRET_NAMES, SECRET_PARTS, SECRET_SUFFIXES, secret_shaped,
-    secret_words, web_address_ok,
+    secret_value, secret_words, web_address_ok,
 };
 pub use policy::{
     FilePolicy, PolicyRead, PolicySource, PolicyStatus, PolicyValues, SourceError,

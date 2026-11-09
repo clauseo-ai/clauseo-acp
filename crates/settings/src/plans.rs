@@ -67,7 +67,10 @@ pub const SECRET_PARTS: [&str; 9] = [
 ];
 
 /// Secrets by name, whatever the parts say (the parts catch most of them too).
-pub const SECRET_NAMES: [&str; 5] = [
+pub const SECRET_NAMES: [&str; 6] = [
+    // OpenTelemetry's export headers carry the collector's key; its per-signal
+    // `OTEL_EXPORTER_OTLP_<SIGNAL>_HEADERS` too (`otel_headers`).
+    "OTEL_EXPORTER_OTLP_HEADERS",
     "MYSQL_PWD",
     "PGPASSWORD",
     "SNOWSQL_PWD",
@@ -75,8 +78,9 @@ pub const SECRET_NAMES: [&str; 5] = [
     "ANTHROPIC_CUSTOM_HEADERS",
 ];
 
-/// The names the endings would catch that are no secret: the shell's working folders.
-const NOT_SECRET: [&str; 2] = ["PWD", "OLDPWD"];
+/// The names the endings would catch that are no secret: the shell's working folders, and
+/// Claude Code's key helper's cache time (milliseconds), each by its exact name.
+const NOT_SECRET: [&str; 3] = ["PWD", "OLDPWD", "CLAUDE_CODE_API_KEY_HELPER_TTL_MS"];
 
 /// Every word that is secret as a whole name or part: [`SECRET_SUFFIXES`] and
 /// [`SECRET_PARTS`], without the bare [`NOT_SECRET`] names (the tests' list).
@@ -91,7 +95,8 @@ pub fn secret_words() -> Vec<&'static str> {
 
 /// Why a secret-shaped variable name is refused.
 const SECRET_NAME: &str = "a variable name that looks like a secret (a part ending in KEY, TOKEN, \
-                           SECRET or PASSWORD, and the like) is refused: keys go in the OS keychain";
+                           SECRET or PASSWORD, and the like) is refused: keys go in the OS \
+                           keychain";
 
 /// Why a variable name that is not one is refused.
 const BAD_NAME: &str = "a variable name is ASCII letters, digits and _, not starting with a digit";
@@ -108,10 +113,14 @@ const NOT_ALLOWED: &str = "a plan may set only AWS_REGION, AWS_PROFILE, CLOUD_ML
 const PROXY_LOGIN: &str =
     "a proxy address may not hold a user name or password (@): keys go in the OS keychain";
 
+/// Why a variable whose value is a web address with a password is refused.
+const PASSWORD_URL: &str = "a variable whose value is a web address with a password \
+                            (user:password@) is refused: keys go in the OS keychain";
+
 /// Why a launch variable with a secret-shaped name and a value is refused.
-const SECRET_VALUE: &str = "a variable whose name looks like a secret (a part ending in KEY, TOKEN, \
-                            SECRET or PASSWORD, and the like) must be empty here: keys go in the \
-                            OS keychain";
+const SECRET_VALUE: &str = "a variable whose name looks like a secret (a part ending in KEY, \
+                            TOKEN, SECRET or PASSWORD, and the like) must be empty here: keys go \
+                            in the OS keychain";
 
 /// Why a plan id that is not an agent id is refused.
 pub(crate) const BAD_ID: &str = "a plan's agent id is 1 to 64 characters of [a-z0-9-]";
@@ -153,11 +162,36 @@ pub fn secret_shaped(name: &str) -> bool {
         return false;
     }
     SECRET_NAMES.contains(&upper.as_str())
+        || otel_headers(&upper)
         || format!("_{upper}_").contains("_CONNECTION_STRING_")
         || upper.split('_').any(|part| {
             SECRET_SUFFIXES.iter().any(|suffix| part.ends_with(suffix))
                 || SECRET_PARTS.contains(&part)
         })
+}
+
+/// Whether the upper-case `upper` is one of OpenTelemetry's per-signal export headers,
+/// `OTEL_EXPORTER_OTLP_<SIGNAL>_HEADERS` (`TRACES`, `METRICS`, `LOGS`).
+fn otel_headers(upper: &str) -> bool {
+    upper
+        .strip_prefix("OTEL_EXPORTER_OTLP_")
+        .and_then(|rest| rest.strip_suffix("_HEADERS"))
+        .is_some_and(|signal| !signal.is_empty() && !signal.contains('_'))
+}
+
+/// Whether a variable's `value` is secret whatever its name: a web address with a password
+/// (`scheme://user:password@host`, as `DATABASE_URL` or `REDIS_URL` often hold). A bare
+/// `scheme://host` or `scheme://user@host` is not. Used wherever [`secret_shaped`] is; a
+/// message names the variable, never the value.
+pub fn secret_value(value: &str) -> bool {
+    let Some((_, rest)) = value.split_once("://") else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    authority
+        .rsplit_once('@')
+        .and_then(|(userinfo, _)| userinfo.split_once(':'))
+        .is_some_and(|(_, password)| !password.is_empty())
 }
 
 /// Whether `name` is a variable name: ASCII letters, digits and `_`, not starting with a digit.
@@ -212,6 +246,8 @@ fn refused_variable(name: &str, value: &str) -> Option<&'static str> {
     let upper = name.to_ascii_uppercase();
     if !name_shaped(name) {
         Some(BAD_NAME)
+    } else if secret_value(value) {
+        Some(PASSWORD_URL)
     } else if PLAN_ENV_NAMES.contains(&name) {
         None
     } else if proxy_name(name) {
@@ -382,7 +418,11 @@ pub(crate) fn check_plan(id: &str, plan: &Plan) -> Result<(), Error> {
 /// the value.
 pub(crate) fn check_launch_env(id: &str, launch: &AgentLaunch) -> Result<(), Error> {
     let refused = |name: &str, value: &str| {
-        (secret_shaped(name) && !value.is_empty()).then_some(SECRET_VALUE)
+        if secret_value(value) {
+            Some(PASSWORD_URL)
+        } else {
+            (secret_shaped(name) && !value.is_empty()).then_some(SECRET_VALUE)
+        }
     };
     match first_refused(&format!("agents.{id}"), &launch.env, refused) {
         Some((key, reason)) => Err(Error::Refused { key, reason }),

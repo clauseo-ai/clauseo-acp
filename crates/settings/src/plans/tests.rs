@@ -1,6 +1,7 @@
 use super::{
     PLAN_ENV_NAMES, PLAN_PROXY_NAMES, bundle, check_launch_env, check_plan, entry_is_clauseos,
-    id_ok, launch_is_clauseos, plan, registry, secret_shaped, secret_words, web_address_ok,
+    id_ok, launch_is_clauseos, plan, registry, secret_shaped, secret_value, secret_words,
+    web_address_ok,
 };
 use crate::error::Error;
 use crate::schema::{AgentLaunch, Plan, PlanProvider};
@@ -481,4 +482,68 @@ fn a_plan_id_is_an_agent_id() {
     ] {
         assert!(!id_ok(id), "{id}");
     }
+}
+
+/// Headers carry keys; a key helper's cache time does not.
+#[test]
+fn otel_export_headers_are_secret_and_the_key_helper_s_ttl_is_not() {
+    for name in [
+        "OTEL_EXPORTER_OTLP_HEADERS",
+        "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
+        "OTEL_EXPORTER_OTLP_METRICS_HEADERS",
+        "otel_exporter_otlp_logs_headers",
+    ] {
+        assert!(secret_shaped(name), "{name}");
+    }
+    for name in [
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "OTEL_EXPORTER_OTLP__HEADERS_X",
+        "CLAUDE_CODE_API_KEY_HELPER_TTL_MS",
+        "claude_code_api_key_helper_ttl_ms",
+    ] {
+        assert!(!secret_shaped(name), "{name}");
+    }
+    // Only that exact name: the suffix rule still catches its neighbours.
+    assert!(secret_shaped("CLAUDE_CODE_API_KEY"));
+    assert!(secret_shaped("CLAUDE_CODE_API_KEY_HELPER"));
+}
+
+/// A web address with a password is secret whatever the name; one without is not.
+#[test]
+fn a_web_address_with_a_password_is_a_secret_value() {
+    for value in [
+        "postgres://u:p@h/db",
+        "redis://:hunter2@cache:6379",
+        "https://user:pass@example.com/path?q=1",
+    ] {
+        assert!(secret_value(value), "{value}");
+    }
+    for value in [
+        "https://example.com",
+        "https://user@example.com",
+        "https://example.com/a:b@c",
+        "https://example.com?u=a:b@c",
+        "user:pass@host",
+        "",
+        "postgres://u:@h/db",
+    ] {
+        assert!(!secret_value(value), "{value}");
+    }
+    // The launch check refuses it by its key and quotes no value.
+    let launch = AgentLaunch {
+        command: abs_str("data/agents/runtime/node/bin/node"),
+        args: Vec::new(),
+        env: BTreeMap::from([("DATABASE_URL".to_owned(), "postgres://u:p@h/db".to_owned())]),
+    };
+    let error = check_launch_env("claude-acp", &launch).unwrap_err();
+    let Error::Refused { key, .. } = &error else {
+        panic!("{error:?}");
+    };
+    assert_eq!(key, "agents.claude-acp.env.DATABASE_URL");
+    assert!(!format!("{error} {error:?}").contains("u:p@h"));
+    let plain = AgentLaunch {
+        env: BTreeMap::from([("SITE_URL".to_owned(), "https://user@example.com".to_owned())]),
+        ..launch
+    };
+    assert!(check_launch_env("claude-acp", &plain).is_ok());
 }

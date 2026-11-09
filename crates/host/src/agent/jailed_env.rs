@@ -33,7 +33,7 @@ use std::path::PathBuf;
 use clauseo_settings::AgentLaunch;
 
 mod filters;
-use filters::{ascii, hook_keeps, is_blocked, is_credential, route_names};
+use filters::{ascii, hook_keeps, is_blocked, is_credential, is_secret_value, route_names};
 
 /// Where an allowed name's value comes from in a jailed launch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -216,12 +216,15 @@ fn starts_with(bytes: &[u8], prefix: &str) -> bool {
 }
 
 /// The credential names in an agent's settings `env` a jailed launch leaves out
-/// ([`is_credential`]), sorted: the settings view's note, whose words say credential. The
-/// blocked and non-ASCII names it also drops are not listed there (`pr-d2a.md`'s follow-up).
+/// ([`is_credential`], or a value with a password in a web address), sorted: the settings
+/// view's note, whose words say credential. The blocked and non-ASCII names it also drops are
+/// not listed there (`pr-d2a.md`'s follow-up).
 pub(crate) fn ignored(env: &BTreeMap<String, String>) -> Vec<String> {
-    env.keys()
-        .filter(|name| is_credential(OsStr::new(name)))
-        .cloned()
+    env.iter()
+        .filter(|(name, value)| {
+            is_credential(OsStr::new(name.as_str())) || is_secret_value(OsStr::new(value.as_str()))
+        })
+        .map(|(name, _)| name.clone())
         .collect()
 }
 
@@ -257,11 +260,11 @@ pub(crate) fn sources(
     hook.retain(|name, _| ascii(name) && !is_blocked(name));
     let blocked = before - settings.env.len() - hook.len();
     let before = settings.env.len() + hook.len();
-    settings
-        .env
-        .retain(|name, _| !is_credential(OsStr::new(name)));
+    settings.env.retain(|name, value| {
+        !is_credential(OsStr::new(name)) && !is_secret_value(OsStr::new(value))
+    });
     let routed = route_names(&hook);
-    hook.retain(|name, _| hook_keeps(name, &routed));
+    hook.retain(|name, value| hook_keeps(name, &routed) && !is_secret_value(value));
     let credentials = before - settings.env.len() - hook.len();
     let before = settings.env.len() + hook.len();
     settings.env.retain(|name, _| !host_sets(OsStr::new(name)));

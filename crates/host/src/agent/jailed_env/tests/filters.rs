@@ -210,3 +210,40 @@ fn a_non_ascii_name_is_dropped_from_every_source() {
     assert!(env.keys().all(|name| name.is_ascii()), "{:?}", env.keys());
     assert_eq!(env["LC_ALL"], "en_GB.UTF-8");
 }
+
+/// Round 3d: a value with a password in a web address is dropped from the settings and the
+/// hook, whatever the name; one without passes; the key helper's cache time and the OpenTelemetry
+/// headers follow the settings' rule.
+#[test]
+fn a_password_web_address_is_dropped_and_the_settings_rule_s_names_agree() {
+    let secret = [("DATABASE_URL", "postgres://u:p@h/db")];
+    let plain = [("SITE_URL", "https://user@example.com")];
+    let settings = launch(&[
+        secret[0],
+        plain[0],
+        ("CLAUDE_CODE_API_KEY_HELPER_TTL_MS", "60000"),
+    ]);
+    let env = jailed(
+        Kind::Claude,
+        Vec::new(),
+        &settings,
+        hook(&[("REDIS_URL", "redis://:pw@cache:6379")]),
+    );
+    assert!(!has(&env, "DATABASE_URL"));
+    assert!(!has(&env, "REDIS_URL"));
+    assert_eq!(env["SITE_URL"], "https://user@example.com");
+    assert_eq!(env["CLAUDE_CODE_API_KEY_HELPER_TTL_MS"], "60000");
+    assert_eq!(
+        crate::agent::jailed_env::ignored(&settings.env),
+        ["DATABASE_URL"]
+    );
+    for name in [
+        "OTEL_EXPORTER_OTLP_HEADERS",
+        "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
+    ] {
+        assert!(is_credential(OsStr::new(name)), "{name}");
+    }
+    assert!(!is_credential(OsStr::new(
+        "CLAUDE_CODE_API_KEY_HELPER_TTL_MS"
+    )));
+}

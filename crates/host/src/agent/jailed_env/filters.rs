@@ -27,9 +27,10 @@ impl Pattern {
 
 /// The names that carry or choose an agent's credentials, beside every secret-shaped name
 /// (`clauseo_settings::secret_shaped`, the firm plan's own rule: a `_`-separated part ending in
-/// `KEY`, `TOKEN` …, a part `AUTH`, `PAT` …). No jailed agent takes one from the lawyer's environment (none passes
-/// `JAILED_ENV`) nor from its settings `env`; the setup hook passes only its route's
-/// ([`ROUTES`]). Clauseo's own sign-in, the hook's stored key and the firm plan set them instead.
+/// `KEY`, `TOKEN` …, a part `AUTH`, `PAT` …). No jailed agent takes one from the lawyer's
+/// environment (none passes `JAILED_ENV`) nor from its settings `env`; the setup hook passes
+/// only its route's ([`ROUTES`]). Clauseo's own sign-in, the hook's stored key and the firm plan
+/// set them instead.
 pub(crate) const CREDENTIALS: [Pattern; 35] = [
     // Anthropic's keys, tokens and endpoint.
     Pattern::Name("ANTHROPIC_API_KEY"),
@@ -188,6 +189,12 @@ pub(crate) fn route_names(hook: &BTreeMap<OsString, OsString>) -> Vec<&'static s
         .filter(|route| route.switch.is_none_or(selected))
         .flat_map(|route| route.needs.iter().copied())
         .collect()
+}
+
+/// Whether a variable's `value` is secret whatever its name: a web address with a password
+/// (`clauseo_settings::secret_value`, the settings' own rule).
+pub(crate) fn is_secret_value(value: &OsStr) -> bool {
+    value.to_str().is_some_and(clauseo_settings::secret_value)
 }
 
 /// Whether the hook's `name` passes: not a credential, or one of its route's `names`.
