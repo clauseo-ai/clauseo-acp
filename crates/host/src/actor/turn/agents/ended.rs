@@ -30,16 +30,6 @@ pub(super) enum StopCause {
     Closed,
 }
 
-/// When a stopped agent's successor (its `after_stop` work) launches.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Relaunch {
-    /// As soon as it has ended.
-    AtOnce,
-    /// It was stopped to start again (a mode switch, a moved matter): only once its tree is
-    /// gone (`launch_checks::relaunch`), so no launch runs beside the old tree.
-    AfterTree,
-}
-
 /// Stops an agent whose connection is gone; `waiting` goes to the agent started after its
 /// `Ended`. The stop ends a process that outlived its pipes, and it can beat the owner's
 /// exit report (Windows reports an exit late): `on_ended` then logs the report's exit.
@@ -74,8 +64,8 @@ pub(in super::super) fn stop(actor: &mut Actor, thread: ThreadId) {
 /// Stops `thread`'s attached agent for its pending mode switch (`forced_mode::switch`), at a
 /// turn boundary: the switch, then any work waiting, go to the agent started after its `Ended`,
 /// which launches under the new mode's policy and resumes the session (the matter move's
-/// restart, `restart_if_moved`) once the old tree is gone (`launch_checks::relaunch`); its
-/// detach logs `Restarting`. A launch's policy never widens in place.
+/// restart, `restart_if_moved`) once the old tree is gone (the launch gate,
+/// `launch_checks::gate`); its detach logs `Restarting`. A launch's policy never widens in place.
 pub(in super::super) fn restart_for_switch(actor: &mut Actor, thread: ThreadId) {
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
@@ -84,7 +74,6 @@ pub(in super::super) fn restart_for_switch(actor: &mut Actor, thread: ThreadId) 
         return;
     };
     agent.after_stop.push(switch);
-    agent.relaunch = Relaunch::AfterTree;
     if agent.stage == Stage::Stopping {
         return;
     }
@@ -138,14 +127,17 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
     // Its pending questions went with it.
     super::super::super::limits::asking_changed(actor);
     let tree = agent.link.tree_watch();
-    let key = state(actor, thread).and_then(|state| state.run.as_ref().map(|run| run.key));
-    launch_checks::remove_run(actor, thread, tree.clone());
+    let run = state(actor, thread).and_then(|state| state.run.as_ref());
+    let key = run.map(|run| run.key);
+    let browser = run.and_then(|run| run.browser_session.clone());
+    // Kept until its processes are gone: no launch of the thread runs beside them.
+    launch_checks::remember(actor, thread, key, tree.clone(), browser);
+    launch_checks::remove_run(actor, thread, tree);
     let Agent {
         session,
         mut waiting,
         after_stop,
         switch,
-        relaunch,
         stop_cause,
         denied_data_folder,
         ..
@@ -229,10 +221,8 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
         (_, Some(reason)) => log_detach(actor, thread, reason),
         (_, None) => {}
     }
-    if relaunch == Relaunch::AfterTree && !after_stop.is_empty() {
-        // Never beside the old tree: a running process keeps its launch's policy.
-        launch_checks::after_tree(actor, thread, key, tree, after_stop);
-    } else if !after_stop.is_empty() {
+    if !after_stop.is_empty() {
+        // Through the launch gate: never beside the old tree, which keeps its launch's policy.
         start(actor, thread, after_stop);
     }
     super::super::sign_in::agent_ended(actor, thread, unresponsive);

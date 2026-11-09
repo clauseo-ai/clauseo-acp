@@ -157,12 +157,21 @@ fn claude(dir: &Dir, servers: &serde_json::Value) {
 
 /// [`claude`] with `then` played after the prompt's answer.
 pub(crate) fn claude_then(dir: &Dir, servers: &serde_json::Value, then: &[serde_json::Value]) {
-    let mut lines = agent_lines(
-        "claude",
-        "session/new",
-        &json!({"mcpServers": servers}),
-        &[],
-    );
+    claude_with(dir, "session/new", servers, then);
+}
+
+/// [`claude_then`] with `method`, `session/new` or `session/load` (of `sess-1`).
+pub(crate) fn claude_with(
+    dir: &Dir,
+    method: &str,
+    servers: &serde_json::Value,
+    then: &[serde_json::Value],
+) {
+    let mut params = json!({"mcpServers": servers});
+    if method == "session/load" {
+        params["sessionId"] = json!("sess-1");
+    }
+    let mut lines = agent_lines("claude", method, &params, &[]);
     for line in then {
         lines = format!("{lines}\n{line}");
     }

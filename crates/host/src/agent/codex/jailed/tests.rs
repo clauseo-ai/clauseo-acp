@@ -1,6 +1,6 @@
-//! A jailed Codex's modes (R17 PR-D2c): exactly two, both run in the preset, a launch's policy
-//! from the switch it carries or the saved mode, a saved asking mode that starts read-only, and
-//! the refusals' code.
+//! A jailed Codex's modes (R17 PR-D2c): two (one on Windows until PR6), both run in the preset,
+//! a launch's policy from the switch it carries or the saved mode, a saved asking mode that
+//! starts in `SAVED_ASK_FALLBACK`, and the refusals' code and words.
 
 use clauseo_acp::{SessionMode, SessionModes};
 use clauseo_protocol::{
@@ -8,8 +8,8 @@ use clauseo_protocol::{
 };
 
 use super::{
-    MODES, READ_ONLY, allowed, check, check_launch, is_mode_option, keep_modes, keep_options,
-    launch_policy, start_mode,
+    MODES, READ_ONLY, READ_ONLY_ENFORCED, SAVED_ASK_FALLBACK, allowed, check, check_launch,
+    is_mode_option, keep_modes, keep_options, launch_policy, start_mode,
 };
 use crate::agent::codex::{ASK_MODE, JAILED_MODE, launch_mode};
 
@@ -27,11 +27,33 @@ fn code(result: Result<(), crate::error::Error>) -> Option<ErrorCode> {
 fn the_jailed_preset_is_pinned_and_a_jailed_launch_starts_in_it() {
     assert_eq!(JAILED_MODE, "agent-full-access");
     assert_eq!(READ_ONLY, "read-only");
-    assert_eq!(MODES, ["read-only", "agent-full-access"]);
     assert_eq!(launch_mode(true), JAILED_MODE);
     // Tier C is unchanged.
     assert_eq!(launch_mode(false), ASK_MODE);
     assert_eq!(ASK_MODE, "workspace-write");
+}
+
+/// macOS and Linux offer both modes.
+#[cfg(not(windows))]
+#[test]
+fn read_only_is_offered_where_the_jail_enforces_it() {
+    const { assert!(READ_ONLY_ENFORCED) };
+    assert_eq!(MODES, ["read-only", "agent-full-access"]);
+    assert!(allowed(READ_ONLY));
+    assert_eq!(code(check(READ_ONLY)), None);
+}
+
+/// Windows offers no Read-only until stage C's PR6 enforces it (TODO(PR6)): the mode list leaves
+/// it out, a set is refused with `command.invalid`, and no launch picks it.
+#[cfg(windows)]
+#[test]
+fn read_only_is_not_offered_on_windows_yet() {
+    const { assert!(!READ_ONLY_ENFORCED) };
+    assert_eq!(MODES, ["agent-full-access"]);
+    assert!(!allowed(READ_ONLY));
+    assert_eq!(code(check(READ_ONLY)), Some(ErrorCode::CommandInvalid));
+    assert_eq!(launch_policy(Some(READ_ONLY), None), JAILED_MODE);
+    assert_eq!(start_mode(Some(READ_ONLY)), JAILED_MODE);
 }
 
 /// No launcher for a jailed Codex in any mode but the preset (`policy::grants`).
@@ -48,7 +70,7 @@ fn a_jailed_launch_in_any_other_mode_is_refused() {
 }
 
 #[test]
-fn only_the_two_modes_are_allowed_and_every_other_is_refused_with_its_code() {
+fn only_the_offered_modes_are_allowed_and_every_other_is_refused_with_its_code() {
     for mode in MODES {
         assert!(allowed(mode));
         assert_eq!(code(check(mode)), None, "{mode}");
@@ -66,8 +88,23 @@ fn only_the_two_modes_are_allowed_and_every_other_is_refused_with_its_code() {
     assert!(!allowed("agent-full-access "));
 }
 
-/// A launch's policy: the lawyer's switch it carries, when one of the two; else the saved mode
-/// as `start_mode` reads it. An asking switch never picks the normal policy.
+/// The refusals' words name no mode id (the orchestrator review's L4).
+#[test]
+fn the_refusals_name_no_mode_id() {
+    for mode in ASKING.into_iter().chain([READ_ONLY]) {
+        let Err(error) = check(mode) else {
+            continue;
+        };
+        let words = error.to_string();
+        for id in CODEX_MODES.into_iter().chain(ASKING) {
+            assert!(!words.contains(id), "{mode}: {words}");
+        }
+        assert!(words.contains("stayed as it was"), "{words}");
+    }
+}
+
+/// A launch's policy: the lawyer's switch it carries, when offered; else the saved mode as
+/// `start_mode` reads it. An asking switch never picks a policy of its own.
 #[test]
 fn a_launch_takes_the_switch_it_carries_else_the_saved_mode() {
     for saved in [
@@ -76,41 +113,37 @@ fn a_launch_takes_the_switch_it_carries_else_the_saved_mode() {
         Some(JAILED_MODE),
         Some("workspace-write"),
     ] {
-        for had_session in [true, false] {
-            for mode in MODES {
-                assert_eq!(launch_policy(Some(mode), saved, had_session), mode);
-            }
-            let fallback = start_mode(saved, had_session);
-            for asked in ASKING.into_iter().map(Some).chain([None]) {
-                assert_eq!(
-                    launch_policy(asked, saved, had_session),
-                    fallback,
-                    "{asked:?}"
-                );
-            }
+        for mode in MODES {
+            assert_eq!(launch_policy(Some(mode), saved), *mode);
+        }
+        let fallback = start_mode(saved);
+        for asked in ASKING.into_iter().map(Some).chain([None]) {
+            assert_eq!(launch_policy(asked, saved), fallback, "{asked:?}");
         }
     }
     assert_eq!(
-        launch_policy(Some("workspace-write"), Some("agent"), true),
-        READ_ONLY
+        launch_policy(Some("workspace-write"), Some("agent")),
+        SAVED_ASK_FALLBACK
     );
 }
 
+/// A saved asking mode starts in [`SAVED_ASK_FALLBACK`], today the jailed preset (Rohan's ruling,
+/// 2026-11-09: no Codex mode switch at launch); nothing saved starts in the preset, as a new
+/// thread does, whether or not the thread had a session.
 #[test]
-fn a_saved_asking_mode_starts_read_only_never_in_the_preset() {
+fn a_saved_asking_mode_starts_in_the_fallback_and_nothing_saved_in_the_preset() {
+    assert_eq!(SAVED_ASK_FALLBACK, JAILED_MODE);
     for saved in ASKING {
-        for had_session in [true, false] {
-            assert_eq!(start_mode(Some(saved), had_session), READ_ONLY, "{saved}");
-        }
+        assert_eq!(start_mode(Some(saved)), SAVED_ASK_FALLBACK, "{saved}");
     }
-    assert_eq!(start_mode(Some(READ_ONLY), true), READ_ONLY);
-    assert_eq!(start_mode(Some(JAILED_MODE), true), JAILED_MODE);
-    // Nothing saved: a new thread starts in the preset; one whose mode can't be read, read-only.
-    assert_eq!(start_mode(None, false), JAILED_MODE);
-    assert_eq!(start_mode(None, true), READ_ONLY);
+    if READ_ONLY_ENFORCED {
+        assert_eq!(start_mode(Some(READ_ONLY)), READ_ONLY);
+    }
+    assert_eq!(start_mode(Some(JAILED_MODE)), JAILED_MODE);
+    assert_eq!(start_mode(None), JAILED_MODE);
 }
 
-/// Whatever is saved, the start is one of the two.
+/// Whatever is saved, the start is one of the offered modes.
 #[test]
 fn a_jailed_start_is_never_an_asking_mode() {
     let saved = CODEX_MODES
@@ -119,10 +152,8 @@ fn a_jailed_start_is_never_an_asking_mode() {
         .map(Some)
         .chain([None]);
     for saved in saved {
-        for had_session in [true, false] {
-            let mode = start_mode(saved, had_session);
-            assert_eq!(code(check(mode)), None, "{saved:?} gave {mode}");
-        }
+        let mode = start_mode(saved);
+        assert_eq!(code(check(mode)), None, "{saved:?} gave {mode}");
     }
 }
 
@@ -167,7 +198,7 @@ fn values(option: &ConfigOption) -> (String, Vec<String>) {
 }
 
 #[test]
-fn the_mode_list_and_the_mode_options_are_exactly_the_two() {
+fn the_mode_list_and_the_mode_options_are_exactly_the_offered_ones() {
     let mut modes = SessionModes {
         current: CompactString::from("agent"),
         available: CODEX_MODES
@@ -192,11 +223,14 @@ fn the_mode_list_and_the_mode_options_are_exactly_the_two() {
         select("approvals", ConfigCategory::Mode, "agent", &CODEX_MODES),
         select("model", ConfigCategory::Model, "gpt", &["gpt", "agent"]),
     ];
-    keep_options(&mut options, Some(READ_ONLY));
+    keep_options(&mut options, Some(JAILED_MODE));
     for option in &options[..2] {
         assert_eq!(
             values(option),
-            (READ_ONLY.to_owned(), MODES.map(str::to_owned).to_vec()),
+            (
+                JAILED_MODE.to_owned(),
+                MODES.iter().map(|mode| (*mode).to_owned()).collect()
+            ),
             "{}",
             option.id
         );

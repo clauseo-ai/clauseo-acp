@@ -71,7 +71,8 @@ impl Prepared {
 }
 
 impl Sandboxed {
-    /// A jailed Codex's mode, as its policy is: read-only exactly when the matter is.
+    /// A jailed Codex's mode, as its policy is: read-only exactly when the matter is, which
+    /// `policy::grants` never makes where the jail does not enforce it (Windows until PR6).
     pub(crate) fn mode(&self) -> &'static str {
         if self.policy.matter_read_only() {
             crate::agent::codex::jailed::READ_ONLY
@@ -125,7 +126,7 @@ pub(super) fn start(
     seam: (Arc<dyn SandboxLaunchers>, SpawnOptions),
 ) {
     let (launchers, opts) = seam;
-    let grants = match policy::grants(actor, thread, &waiting) {
+    let grants = match policy::grants(actor, thread, &waiting, prepared.reused) {
         Ok(grants) => grants,
         Err(error) => {
             discard(actor, thread, prepared.run, None);

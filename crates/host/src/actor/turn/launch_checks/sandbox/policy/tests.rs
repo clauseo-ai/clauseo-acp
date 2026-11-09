@@ -157,6 +157,7 @@ impl Fixture {
             skills_written: None,
             packs_skipped: Vec::new(),
             sandbox: None,
+            reused: false,
         }
     }
 

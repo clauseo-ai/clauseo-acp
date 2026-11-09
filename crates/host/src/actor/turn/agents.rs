@@ -32,7 +32,7 @@ use crate::sent::SentView;
 mod ended;
 mod forced;
 
-use ended::{Relaunch, StopCause, stop_closed};
+use ended::{StopCause, stop_closed};
 pub(super) use ended::{hold_stop, idle_stop, log_detach, on_ended, restart_for_switch, stop};
 
 /// Work that waits for the agent's session.
@@ -75,8 +75,6 @@ pub(super) struct Agent {
     pub(super) after_stop: Vec<Waiting>,
     /// A jailed Codex's mode switch held to the turn boundary (`forced_mode::switch`).
     pub(super) switch: Option<Waiting>,
-    /// When its successor launches: after its tree is gone when it was stopped to start again.
-    relaunch: Relaunch,
     /// The matter folder it was started in, its working directory.
     pub(super) folder: PathBuf,
     /// Why it is being stopped, which picks the detach a stop logs.
@@ -166,7 +164,9 @@ pub(super) fn ensure(actor: &mut Actor, thread: ThreadId, waiting: Waiting) {
 /// Launches `thread`'s agent and sends `initialize`, its folder checks (and a Codex agent's
 /// writes) off the actor first (`launch_checks.rs`). A launch the sign-in refuses fails what
 /// waits for it (`sign_in::launch_refusal`), but one refused while the keys load waits for
-/// them first (`sign_in::keys_wait`), and its checks look at the refusals again after.
+/// them first (`sign_in::keys_wait`), and its checks look at the refusals again after. Every
+/// launch comes here, and waits at the launch gate (`launch_checks::gate`) until the thread's
+/// ended sessions' processes are gone.
 pub(super) fn start(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>) {
     if host_stopping(actor) {
         fail_all(actor, thread, waiting, &Error::Closed);
@@ -179,6 +179,10 @@ pub(super) fn start(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>) 
         fail_all(actor, thread, waiting, &refused);
         return;
     }
+    // Never beside an ended session's processes: they keep their launch's policy.
+    let Some(waiting) = launch_checks::gate(actor, thread, waiting) else {
+        return;
+    };
     // A new session attaches after the old one's detach, which a waiting turn still holds.
     let held = current(actor, thread).and_then(|current| current.detach.take());
     if let Some(reason) = held {
@@ -236,7 +240,6 @@ pub(super) fn launch_now(
         waiting,
         after_stop: Vec::new(),
         switch: None,
-        relaunch: Relaunch::AtOnce,
         folder,
         stop_cause: StopCause::Asked,
         session: None,
@@ -298,11 +301,10 @@ fn launch(
     let folder = prepared.stored;
     let (mut forced, codex) = forced::of(
         actor,
-        &row.agent,
         &settings.env,
         (prepared.codex, jail),
         &prepared.run,
-        prepared.claude_home.as_deref(),
+        (prepared.claude_home.as_deref(), prepared.reused),
     );
     let (settings, hook, inherited, path_prepend) =
         forced::sources(actor, &row.agent, settings, prepared.sandbox.is_some());
@@ -379,7 +381,6 @@ pub(super) fn restart_if_moved(actor: &mut Actor, thread: ThreadId, turn: TurnId
     agent.link.stop();
     agent.stage = Stage::Stopping;
     agent.stop_cause = StopCause::Restarting;
-    agent.relaunch = Relaunch::AfterTree;
     let waiting = std::mem::take(&mut agent.waiting);
     agent.after_stop.extend(waiting);
     agent.after_stop.push(Waiting::Turn(turn));

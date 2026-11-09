@@ -274,8 +274,8 @@ error_codes! {
     SandboxAskModeUnavailable = "sandbox.ask_mode_unavailable", retryable: false, meaning: "A \
         jailed Codex was asked to start or switch into a mode that asks before changes, which it \
         cannot do in the sandbox (it runs with no asks there), so the mode was refused and the \
-        session kept its mode; a saved asking mode starts read-only instead. Trying again cannot \
-        succeed: choose Read-only or the mode that works on its own.";
+        session kept its mode; a saved asking mode starts in the mode that works on its own \
+        instead. Trying again cannot succeed: choose a mode the session offers.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

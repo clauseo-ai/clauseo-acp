@@ -279,8 +279,9 @@ impl Policy {
         self.keychain
     }
 
-    /// Whether the matter is read-only (the host's read-only mode): no write anywhere in it,
-    /// on either OS; the state, temp and notes folders keep theirs.
+    /// Whether the matter is read-only (the host's read-only mode): no write anywhere in it on
+    /// macOS; on Windows only once stage C's PR6 enforces it, and the host offers no read-only
+    /// mode there until then (TODO(PR6)). The state, temp and notes folders keep their writes.
     pub fn matter_read_only(&self) -> bool {
         self.matter_read_only
     }

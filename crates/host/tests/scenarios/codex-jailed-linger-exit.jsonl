@@ -1,0 +1,10 @@
+{"scenario":"codex-jailed-linger-exit","description":"A jailed Codex's first session whose turn leaves a helper in its process group, then exits by itself, as a crash (R17 PR-D2c review H1): the helper outlives the agent, so the next launch waits until it is gone.","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":false,"promptCapabilities":{"image":true,"embeddedContext":true},"mcpCapabilities":{"http":true,"sse":false},"sessionCapabilities":{"list":{},"delete":{},"additionalDirectories":{},"resume":{},"close":{}}},"authMethods":[],"agentInfo":{"name":"@agentclientprotocol/codex-acp","title":"Codex","version":"2.2.2"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"agent-full-access","availableModes":[{"id":"read-only","name":"Read-only"},{"id":"workspace-write","name":"Workspace access"},{"id":"agent","name":"Auto review"},{"id":"agent-full-access","name":"Full access"}]},"configOptions":[{"id":"mode","name":"Mode","category":"mode","type":"select","currentValue":"agent-full-access","options":[{"value":"read-only","name":"Read-only"},{"value":"workspace-write","name":"Workspace access"},{"value":"agent","name":"Auto review"},{"value":"agent-full-access","name":"Full access"}]}]}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"spawn_child":{"pid_file":"helper.pid","own_group":false}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Left a helper."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
+{"exit":{"code":1}}

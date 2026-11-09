@@ -1708,7 +1708,7 @@ export type ErrorCode =
 "blocklist.revoke_not_saved" | 
 /** A reused Codex login could not be linked into a matter's state folder because Clauseo's data folder is on a different volume from the login file; a link across volumes is impossible and the login is never copied, so no agent was started. Trying again cannot succeed until the data folder moves or Codex is signed in to in Clauseo. */
 "signin.reuse_other_volume" | 
-/** A jailed Codex was asked to start or switch into a mode that asks before changes, which it cannot do in the sandbox (it runs with no asks there), so the mode was refused and the session kept its mode; a saved asking mode starts read-only instead. Trying again cannot succeed: choose Read-only or the mode that works on its own. */
+/** A jailed Codex was asked to start or switch into a mode that asks before changes, which it cannot do in the sandbox (it runs with no asks there), so the mode was refused and the session kept its mode; a saved asking mode starts in the mode that works on its own instead. Trying again cannot succeed: choose a mode the session offers. */
 "sandbox.ask_mode_unavailable" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";

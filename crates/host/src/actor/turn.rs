@@ -95,18 +95,18 @@ pub(crate) struct TurnState {
     preparing: Option<Box<launch_checks::Preparing>>,
     /// The folders of the launched agent's session, from its launch until it ends.
     run: Option<launch_checks::RunFolders>,
+    /// Its sessions that ended but may still run: no launch until they are gone (`gate`).
+    ended: Vec<launch_checks::EndedSession>,
     /// The skill packs its launches skipped, each pack and reason told once for the host's run.
     packs: launch_checks::PackNotices,
     /// The thread's current turn: accepted and not ended.
     current: Option<Box<Current>>,
-    /// The thread's sources in progress: the browser's opens and the agents' web calls that have
-    /// not finished. Kept past a turn's end, so a completion that comes late or in a replay finds
-    /// its call and is still not recorded (`updates.rs` drops it by its origin).
+    /// The browser's opens and the agents' web calls not finished, kept past a turn's end so a
+    /// late or replayed completion finds its call and stays unrecorded (`updates.rs`).
     sources: crate::sources::Sources,
     /// Text not durable yet.
     text: ThreadText,
-    /// The files put back since the last `TurnStarted`; `None` until first needed, then
-    /// read from the loaded state.
+    /// The files put back since the last `TurnStarted`; `None` until read from the state.
     note: Option<Vec<MatterPath>>,
     /// The files restores of the thread's matter wrote since the last `TurnStarted`, held in
     /// memory only (`restore.rs`); the next prompt's note adds them.

@@ -3,7 +3,7 @@
 //! modes are the jail's policies. `SetMode` or `SetConfigOption` naming another mode is refused
 //! with `sandbox.ask_mode_unavailable` and never reaches the agent; a switch relaunches it at the
 //! turn boundary under the new policy, its `ModeChanged` logged only once the new agent runs; a
-//! thread whose saved mode asks launches read-only; the agent's own mode changes are ignored.
+//! thread whose saved mode asks launches in the fallback; the agent's own mode changes are ignored.
 
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -21,7 +21,7 @@ use crate::observe::Events;
 use crate::sandbox_rig::{Answer, Env, Fake, start_run};
 use crate::support::{Running, Scenario, command_id, matter_with_thread, wait};
 
-fn set_mode(thread: ThreadId, mode: &str) -> HostCommand {
+pub(crate) fn set_mode(thread: ThreadId, mode: &str) -> HostCommand {
     HostCommand::SetMode {
         thread,
         mode_id: AgentChoiceId::new(mode).unwrap(),
@@ -37,7 +37,7 @@ fn set_config_mode(thread: ThreadId, mode: &str) -> HostCommand {
 }
 
 /// Every `ModeChanged`'s mode, in order.
-fn modes(events: &Events) -> Vec<String> {
+pub(crate) fn modes(events: &Events) -> Vec<String> {
     events
         .events()
         .filter_map(|event| match event {
@@ -160,10 +160,11 @@ fn a_jailed_codex_moving_itself_is_ignored_and_put_back_in_the_preset() {
     host.shutdown();
 }
 
-/// Run 0 at tier C saves `workspace-write`; run 1 is jailed and launches under the read-only
-/// policy. The agent then asks for full access by itself: nothing changes.
+/// Run 0 at tier C saves `workspace-write`; run 1 is jailed and launches in
+/// `jailed::SAVED_ASK_FALLBACK`, today the normal jailed policy (Rohan's ruling, 2026-11-09: no
+/// Codex mode switch at launch). The agent's own mode updates change nothing.
 #[test]
-fn a_saved_asking_mode_starts_read_only_and_the_agent_cannot_leave_it() {
+fn a_saved_asking_mode_starts_in_the_fallback_and_the_agent_cannot_leave_it() {
     let dir = codex_dir("codex_jailed_saved_ask", "codex-handshake");
     let host = dir.start(0);
     let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("a.txt", "x\n")], CODEX);
@@ -182,21 +183,21 @@ fn a_saved_asking_mode_starts_read_only_and_the_agent_cannot_leave_it() {
     events.until_caught_up();
     let turn = run_turn(&host, &mut events, thread);
     events.assert_no_mismatch();
-    assert_eq!(events.turn_text(turn), "Read-only.", "{}", events.dump());
-    // Read-only is the jail's policy; Codex runs the preset.
+    assert_eq!(events.turn_text(turn), "On its own.", "{}", events.dump());
+    // The fallback is the normal jailed policy; Codex runs the preset.
     assert_eq!(
         mode_var(&fake.envs()[0]).as_deref(),
         Some("agent-full-access")
     );
-    assert!(fake.calls()[0].policy.matter_read_only());
+    assert!(!fake.calls()[0].policy.matter_read_only());
     // The effective mode, logged once, and the options cut to the two at it. The agent's own
-    // request for full access mid-turn changed nothing: no event, no relaunch.
-    assert_eq!(modes(&events), ["read-only"]);
+    // mode updates mid-turn changed nothing: no event, no relaunch.
+    assert_eq!(modes(&events), ["agent-full-access"]);
     assert_eq!(fake.calls().len(), 1);
     assert_eq!(
         mode_option(&events),
         Some((
-            "read-only".to_owned(),
+            "agent-full-access".to_owned(),
             vec!["read-only".to_owned(), "agent-full-access".to_owned()]
         ))
     );
@@ -234,7 +235,10 @@ fn a_saved_preset_stays_after_a_restart() {
 }
 
 /// Sends `command` from a thread of its own, so the test goes on while it waits.
-fn send(host: &Running, command: HostCommand) -> JoinHandle<Result<CommandOutcome, HostError>> {
+pub(crate) fn send(
+    host: &Running,
+    command: HostCommand,
+) -> JoinHandle<Result<CommandOutcome, HostError>> {
     let handle = host.handle.clone();
     std::thread::spawn(move || {
         let envelope = CommandEnvelope {
@@ -353,12 +357,21 @@ fn a_failed_relaunch_logs_no_mode_and_keeps_the_mode() {
 /// A jailed host whose seam plays `plays`, with the tree wait's cap `cap`.
 #[cfg(target_os = "linux")]
 fn lingering(dir: &crate::support::Dir, plays: [&'static str; 2], cap: Duration) -> Linger {
+    lingering_with(dir, plays, |config| config.with_tree_wait(cap))
+}
+
+/// A jailed host whose seam plays `plays`, its config adjusted by `adjust`, after one turn
+/// that left a helper in the agent's group (`plays[0]`): with the helper's pid.
+#[cfg(target_os = "linux")]
+pub(crate) fn lingering_with(
+    dir: &crate::support::Dir,
+    plays: [&'static str; 2],
+    adjust: impl FnOnce(clauseo_host::HostConfig) -> clauseo_host::HostConfig,
+) -> Linger {
     use crate::egress_wait::group;
     group::become_reaper();
     let (fake, _) = Fake::new(dir, Answer::Launch(Vec::new()));
-    let (host, _, _) = start_run(dir, 0, Some(Arc::clone(&fake)), |config| {
-        config.with_tree_wait(cap)
-    });
+    let (host, _, _) = start_run(dir, 0, Some(Arc::clone(&fake)), adjust);
     fake.play(&plays.map(Scenario::Local));
     let (_, thread, folder) = matter_with_thread(dir, &host, "m", &[("a.txt", "x\n")], CODEX);
     let mut events = host.events(StreamId::Thread(thread));
@@ -368,7 +381,7 @@ fn lingering(dir: &crate::support::Dir, plays: [&'static str; 2], cap: Duration)
 }
 
 #[cfg(target_os = "linux")]
-type Linger = (Running, Arc<Fake>, ThreadId, Events, nix::unistd::Pid);
+pub(crate) type Linger = (Running, Arc<Fake>, ThreadId, Events, nix::unistd::Pid);
 
 /// A switch to Read-only while a helper of the read-write session's tree lingers: neither the
 /// relaunch nor `ModeChanged` comes until the helper is gone (`launch_checks::relaunch`).

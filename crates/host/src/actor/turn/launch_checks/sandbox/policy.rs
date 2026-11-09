@@ -161,11 +161,14 @@ pub(crate) fn jail(prepared: &Prepared, grants: &Grants, reserved: &[u16]) -> Re
 /// What `thread`'s jailed launch's policy takes, read on the actor (`policy::Grants`): paths
 /// and flags only. Refuses a Codex agent unless it starts in the jailed preset, before anything
 /// is reserved or asked of the seam (`codex::jailed::check_launch`, R17 PR-D2c); its policy is
-/// read-only in the read-only mode, from the switch `waiting` carries or the saved mode.
+/// read-only in the read-only mode, from the switch `waiting` carries or the saved mode, and
+/// never where the jail does not enforce it (`codex::jailed::check`, TODO(PR6)). `reused`:
+/// desktop's reused-login flag, read once at the launch's checks (`Prepared::reused`).
 pub(super) fn grants(
     actor: &Actor,
     thread: ThreadId,
     waiting: &[Waiting],
+    reused: bool,
 ) -> Result<Grants, Error> {
     let row = &actor.check_thread(thread)?.row;
     let agent = &row.agent;
@@ -174,6 +177,7 @@ pub(super) fn grants(
     if kind == Some(AgentKind::Codex) {
         codex::jailed::check_launch(codex::launch_mode(true))?;
         let mode = super::super::super::forced_mode::launch_mode(actor, thread, waiting);
+        codex::jailed::check(mode)?;
         read_only = mode == codex::jailed::READ_ONLY;
     }
     let sandbox = actor.protection.sandbox();
@@ -199,7 +203,7 @@ pub(super) fn grants(
         others,
         skills,
         sidecars: super::super::browser::sidecars(actor, agent).unwrap_or_default(),
-        reused: actor.wiring.sign_in.reused.contains(agent),
+        reused,
         read_only,
         ca_cert: actor
             .effective

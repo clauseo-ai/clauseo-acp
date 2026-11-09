@@ -70,13 +70,11 @@ pub(super) fn refusal(
         }
     };
     if agent.forced_ask && !mode.is_some_and(forced_ask::mode_allowed) {
+        tracing::info!(mode = mode.unwrap_or("(none)"), "forced ask refused a mode");
         let error = Error::refused(
             ErrorCode::CommandInvalid,
-            format!(
-                "mode {} would approve changes without asking, and this matter's folder is \
-                 unprotected: only \"default\" and \"plan\" may be set",
-                mode.unwrap_or("(none)")
-            ),
+            "That mode would approve changes without asking, and this matter's folder isn't \
+             protected, so the mode stayed as it was.",
         );
         return Some((ctx.id, error));
     }
@@ -118,18 +116,14 @@ fn asked_mode<'a>(actor: &Actor, thread: ThreadId, waiting: &'a Waiting) -> Opti
 
 /// The mode, so the policy, of `thread`'s jailed Codex launch that `waiting` waits for: the last
 /// switch to one of `jailed::MODES` among them, else the thread's saved mode as
-/// `jailed::start_mode` reads it (an asking or unreadable one is read-only).
+/// `jailed::start_mode` reads it (an asking one is `jailed::SAVED_ASK_FALLBACK`).
 pub(super) fn launch_mode(actor: &Actor, thread: ThreadId, waiting: &[Waiting]) -> &'static str {
     let asked = waiting
         .iter()
         .rev()
         .find_map(|item| asked_mode(actor, thread, item).filter(|mode| jailed::allowed(mode)));
     let saved = header_of(actor, thread).and_then(|header| header.mode_id.as_deref());
-    let had_session = actor
-        .threads
-        .get(&thread)
-        .is_some_and(|entry| entry.row.acp_session_id.is_some());
-    jailed::launch_policy(asked, saved, had_session)
+    jailed::launch_policy(asked, saved)
 }
 
 /// A Codex session's start: the mode the agent must run in, and whether it must be switched
@@ -155,11 +149,10 @@ pub(super) fn codex_start(
         .as_ref()
         .is_some_and(|modes| modes.available.iter().any(|offered| offered.id == mode));
     if !offered {
+        tracing::warn!(mode, "Codex did not offer the mode Clauseo runs it in");
         return Err(Error::refused(
             ErrorCode::AgentProtocolError,
-            format!(
-                "Codex offered no \"{mode}\" mode, which Clauseo runs it in, so no message was sent"
-            ),
+            "Codex didn't offer the mode Clauseo runs it in, so no message was sent.",
         ));
     }
     let id = AgentChoiceId::new(mode).map_err(|error| Error::Internal(error.to_string()))?;

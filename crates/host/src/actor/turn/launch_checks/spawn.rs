@@ -34,7 +34,12 @@ pub(super) fn launch_prepared(
         if let Some(state) = state(actor, thread) {
             state.run = None;
         }
-        // A process that was started and then failed is waited for like any other.
+        // A process that was started and then failed is waited for like any other, by the
+        // removal and by the thread's next launch.
+        if let Some(tree) = failed_tree.clone() {
+            let browser = run.browser_session.clone();
+            super::remember(actor, thread, Some(run.key), tree, browser);
+        }
         discard(actor, thread, run, failed_tree);
     }
 }
