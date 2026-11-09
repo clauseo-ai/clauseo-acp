@@ -1311,12 +1311,22 @@ leaves that profile, both naming the part.
     launch go on with the slot marked again for the session. Any other result refuses with
     `RunExit::Quarantined` (`0xE0C15012`) and "the sandbox user still has a process from an
     earlier session that couldn't be ended; restart the computer, then try again".
-  - **The forged exit 0 (interim).** The verify pass runs as the pool user, so its exit code is
-    the pool user's word. A Medium survivor that opens the pass between
-    `CreateProcessWithLogonW` and the shut of its process DACL holds full rights to it, and can
-    end it with exit code 0. The mark is then lifted for a slot that still has a process. A Low
-    survivor can't do this, because the (B) token's processes can't open a Medium process. Only an
-    observer the pool user can't reach closes the gap; see C5 (b).
+  - **The forged exit 0 (interim).** Two exit codes clear the mark today: the verify pass's
+    exit 0 admits a marked slot, and the end sweeper's exit 0 is part of the clean end that
+    removes the mark. Both run as the pool user, so each code is the pool user's word, and either
+    can be forged:
+    - A Medium survivor that opens the pass or the sweeper between `CreateProcessWithLogonW` and
+      the shut of its process DACL holds full rights to it, and can end it with exit code 0.
+    - After the shut, `token::runner_process_sddl` still grants the desktop user's logon SID
+      `PROCESS_TERMINATE`, so it can be forged for the whole pass too. Any process holding that
+      SID can end a verify pass or the end sweeper with exit code 0 at any time while it runs.
+      That covers the runners and every process of the pool user's logons through
+      `CreateProcessWithLogonW`, which carry the caller's logon SID.
+
+    Either way the mark is lifted for a slot that still has a process. The second channel closes
+    when #786's next head drops that entry from `runner_process_sddl` (no runner opens another
+    runner, and the label is `ME` with `NWNRNX`). The first closes only with an observer the
+    pool user can't reach: C5 (b).
   - **C5, launch-blocking before tier B serves lawyers' agents (PR6):**
     - **(a) Verify before any grant.** A matter's grants are written by the host
       (`set_aside::before_launch`, `apply`) before the launch file, so even for the matter that
@@ -1324,10 +1334,12 @@ leaves that profile, both naming the part.
       this launch's grants are a subset of the earlier session's, which the survivor already had.
       A grant added since reaches the survivor until the pass refuses. The launcher must verify a
       marked slot before it writes any grant for it.
-    - **(b) A SYSTEM verdict clears the mark.** Clear a marked slot only when
-      `\Clauseo\SandboxStop` (SYSTEM, which reads every process's SID) confirms no process of
-      the pool SID with a result newer than the request; never on the verify pass's exit code
-      alone. A missing or stale result, a timeout or a non-zero count keeps the slot quarantined.
+    - **(b) A SYSTEM verdict clears the mark.** Both clears count: the verify pass's exit 0,
+      which admits a marked slot, and the end sweeper's exit 0, which is part of the clean end
+      that removes the mark. Only a per-slot verdict from `\Clauseo\SandboxStop` (SYSTEM,
+      which reads every process's SID) may clear either: no process of the pool SID, in a result
+      newer than the request. Neither exit code alone clears anything. A missing or stale result,
+      a timeout or a non-zero count keeps the slot quarantined.
       Today the task takes no argument (`args.rs`: `--stop` alone). Its only result is the
       pool-wide `StopSequence` in `HKLM\SOFTWARE\Clauseo\Sandbox`, written only on a clean,
       completed run, which the outer can read. It stops every pool user's processes, including
@@ -1336,8 +1348,8 @@ leaves that profile, both naming the part.
     - **(c) Persistence.** Pool-user scheduled tasks and other persistence. The verify pass removes
       nothing and keeps what starts after it, such as a task firing. The fix: the `SYSTEM`
       refresh deletes every task a pool user registered, and (b)'s check covers the processes
-      that started during the pass. Meanwhile the inner's start sweep is the backstop: it kills every
-      pool-user process outside the job before the launch is read.
+      that started during the pass. Meanwhile the inner's start sweep is the backstop: it kills
+      every pool-user process outside the job before the launch is read.
     - The logon refusal (F4, `setup/stop.rs`) doesn't read the mark yet, so a marked user can
       still log on outside a launch.
     - A marked user whose matter was released waits for a verify pass that only the launcher,
