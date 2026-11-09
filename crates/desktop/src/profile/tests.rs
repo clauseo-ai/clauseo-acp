@@ -17,6 +17,8 @@ use super::{DesktopProfile, agent_browser_path, paths_for};
 use super::first_on_path;
 use crate::test_support::Scratch;
 
+mod bundled;
+
 const CLAUDE: &str = "claude-acp";
 const CODEX: &str = "codex-acp";
 
@@ -360,7 +362,7 @@ fn no_profile_leaves_the_host_without_a_hook() {
 fn build_puts_the_profile_under_the_data_folder() {
     let scratch = Scratch::new("profile-build", &[]);
     let locations = Locations::under_root(scratch.path());
-    let hook = DesktopProfile::build(&locations).unwrap();
+    let hook = DesktopProfile::build(&locations, None).unwrap();
     let meta = Value::Object(hook.session_meta(&agent(CLAUDE), None).unwrap());
     let plugin = scratch.path().join("profile").join("claude-plugin");
     assert_eq!(
@@ -385,7 +387,7 @@ printf -- '---\\nname: stetdoc\\ndescription: Edits Word files.\\n---\\nUse it.\
     scratch.executable("tools/stetdoc/stetdoc");
     let folder = scratch.dir("tools/stetdoc");
     let locations = Locations::under_root(&scratch.dir("data"));
-    let hook = DesktopProfile::build_with(&locations, Some(folder.as_os_str())).unwrap();
+    let hook = DesktopProfile::build_with(&locations, None, Some(folder.as_os_str())).unwrap();
     assert_eq!(hook.path_prepend(), Some(folder));
     let token = write_skills(&hook.launch_writes(&agent(CODEX))[0]).unwrap();
     let keys = hook.codex_config(&agent(CODEX), Some(&token), None);
@@ -414,7 +416,7 @@ fn a_shared_path_folder_is_not_prepended() {
     scratch.executable("shared/git");
     let path = std::env::join_paths([PathBuf::from("/usr/bin"), scratch.dir("shared")]).unwrap();
     let locations = Locations::under_root(&scratch.dir("data"));
-    let hook = DesktopProfile::build_with(&locations, Some(&path)).unwrap();
+    let hook = DesktopProfile::build_with(&locations, None, Some(&path)).unwrap();
     assert_eq!(hook.path_prepend(), None);
     let token = write_skills(&hook.launch_writes(&agent(CODEX))[0]).unwrap();
     assert!(token.root().join("stetdoc").join("SKILL.md").is_file());
@@ -432,7 +434,7 @@ fn a_non_executable_stetdoc_does_not_shadow_the_real_one() {
     let path = std::env::join_paths([scratch.dir("a"), scratch.dir("b")]).unwrap();
     assert_eq!(first_on_path("stetdoc", &path), Some(real));
     let locations = Locations::under_root(&scratch.dir("data"));
-    let hook = DesktopProfile::build_with(&locations, Some(&path)).unwrap();
+    let hook = DesktopProfile::build_with(&locations, None, Some(&path)).unwrap();
     assert_eq!(hook.path_prepend(), Some(scratch.dir("b")));
 }
 
@@ -451,7 +453,7 @@ fn a_slow_stetdoc_is_stopped_and_treated_as_absent() {
     let locations = Locations::under_root(&scratch.dir("data"));
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let _sent = tx.send(DesktopProfile::build_with(&locations, Some(&path)));
+        let _sent = tx.send(DesktopProfile::build_with(&locations, None, Some(&path)));
     });
     let hook = rx
         .recv_timeout(std::time::Duration::from_secs(7))
