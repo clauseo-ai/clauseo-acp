@@ -23,6 +23,10 @@
     overflow: hidden;
     background: var(--ground);
   }
+  /* the first screen not yet known (the app's deciding.ts): laid out, unseen, under the page's mark */
+  .room-window[data-deciding] {
+    visibility: hidden;
+  }
 
   /* ---------- toolbar: the matter as the header, then search, History and Undo, the plan ---------- */
   .room-top {

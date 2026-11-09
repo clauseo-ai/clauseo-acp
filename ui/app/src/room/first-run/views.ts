@@ -50,6 +50,7 @@ export function gateView(
   const signIn = setup?.signIn;
   if (signIn === undefined || isSignedIn(signIn)) return null;
   if (state.keyOpen) return { kind: "key" };
+  if (signIn === "checking") return { kind: "checking" };
   if (signIn === "queued") {
     const install = setup?.install;
     const offline =

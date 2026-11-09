@@ -26,8 +26,8 @@ pub(crate) fn os_facts() -> OsFacts {
 }
 
 /// The machine's own architecture from `IsWow64Process2`, so an x64 build running under ARM64's
-/// emulation sees ARM64, not the x64 it was built for.
-fn native_machine() -> windows::core::Result<IMAGE_FILE_MACHINE> {
+/// emulation sees ARM64, not the x64 it was built for. The refresh's move to ARM64 reads it too.
+pub(crate) fn native_machine() -> windows::core::Result<IMAGE_FILE_MACHINE> {
     let mut process = IMAGE_FILE_MACHINE::default();
     let mut native = IMAGE_FILE_MACHINE::default();
     // SAFETY: GetCurrentProcess returns a pseudo-handle that needs no close; both out-pointers

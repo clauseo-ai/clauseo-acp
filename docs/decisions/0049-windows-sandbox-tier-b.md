@@ -764,6 +764,75 @@ below the root stay (no walk runs for an absent owner), as do labels on folders 
 check: there a Low-integrity process of the owner's may still write where the owner can. The
 owner's own uninstall first, or the per-user install, avoids it.
 
+### Logon rights
+
+The pool accounts are started with an interactive logon, which needs "Allow log on locally"
+(`SeInteractiveLogonRight`); refused, the logon fails with 1385, which is
+`Blocked::LogonRight`. They are in `Users` (`windows_machine.rs`), which CIS L1, the STIG and a
+default Windows include, so most computers need nothing. Set-up checks the rest
+(`setup/rights_policy.rs`, `setup/logon_grant.rs`).
+
+- **Detection.** A right is *defined by policy* when a source lists it: first the Group Policy
+  template cache, `%windir%\security\templates\policies\gpt*.inf` and `gpt*.dom` (each applied
+  GPO's `[Privilege Rights]`, UTF-16 or UTF-8), then Intune's UserRights CSP under
+  `HKLM\SOFTWARE\Microsoft\PolicyManager\current\device\UserRights` (`AllowLocalLogOn`,
+  `DenyLocalLogOn`, `LogOnAsBatchJob`, `DenyLogOnAsBatchJob`, `LogOnAsService`,
+  `DenyLogOnAsService`; entries split on U+F000). The answer is `Defined { includes_pool }`,
+  `NotDefined` or `Unknown`. `includes_pool` holds when every list that defines the right
+  names a principal the pool's token holds for that logon type (`answers::pool_sids_for`:
+  Everyone, LOCAL, the logon type's SID, Authenticated Users, Local account, Users), the group,
+  or a pool account. Entries are SIDs (`*S-1-…`) or names, resolved by `LookupAccountNameW`;
+  a name that doesn't resolve is compared by its last part (`ClauseoSandboxUsers`, `Users`,
+  `Everyone`, `Authenticated Users`, `ClauseoSbNN`). Every list must include the pool because
+  the files don't say which GPO wins. RSoP (`RSOP_UserPrivilegeRight`) is not read: the cache
+  holds the same lists without WMI.
+- **`Unknown`.** Any read that fails (a folder or key a standard user can't open, a file that
+  can't be read, a template or its folder that is a link, read without following it through
+  `refresh::source::read_capped`) is `Unknown`, and so is a file that isn't a template (UTF-16
+  with no byte-order mark, no `[section]`, a line in `[Privilege Rights]` that isn't a right):
+  never `NotDefined`. Nothing treats it as granted: set-up grants nothing and lets the
+  logon decide, and the next run checks again.
+- **The cache.** For a launch's check, `rights_source::cached` keeps the parsed lists in one
+  process-wide `PolicyCache`, keyed by each template's last-write time and the `PolicyManager`
+  key's (`RegQueryInfoKey`). It re-reads when one changes, a template appears or goes, or after
+  10 minutes. An `Unknown` is never cached. Set-up reads afresh (`read_now`).
+- **What a launch's 1385 says.** The outer runner runs as the desktop user, who can't read the
+  template cache. So set-up (step 3a) and the SYSTEM refresh task (`--refresh`, before its
+  refresh; only into a record that is there and not being removed) write what they found into
+  the record, which Users can read: `LogonPolicy` (`defined_with_pool`, `defined_without_pool`,
+  `not_defined`, `unknown`) and `LogonPolicyAt` (seconds since 1970). On a 1385 only, the runner
+  reads it (`steps::logon_failure`, `runner::logon_refusal`). `defined_without_pool` exits
+  `RunExit::LogonPolicy` with `Blocked::LogonPolicy`'s words. `not_defined` and
+  `defined_with_pool` keep `RunExit::LogonRight` (setting up again grants the right). For
+  `unknown`, or no value, the cache decides the same way, and an unreadable cache keeps
+  `LogonRight`.
+- **The grant.** Step 3a, once the group exists and before any pool user logs on: when policy
+  doesn't define "Allow log on locally" and `LsaEnumerateAccountsWithUserRight` lists none of the
+  group, Users, Everyone or Authenticated Users, set-up writes `LogonRightAdded` (the group's
+  SID) to the record, then `LsaAddAccountRights` adds the right to the group. A fresh run writes
+  its record (the group, no users yet) before the value, so the value never sits in a key
+  `--remove` reads as no record. A crash right after it leaves a record with no pool user: the
+  set-up state is `Needed` (`marker::state_of`), so launches get the ordinary set-up words, and
+  the next set-up adopts the recorded group and makes the pool. If the add fails, the value is cleared. A failed run's rollback
+  takes the right off again; when that fails, it keeps the record naming the group, so
+  `--remove` still finds the grant. A policy that defines
+  the right without the pool gets no grant (the next refresh would undo it): set-up fails at
+  `Step::LogonRight` with `LOGON_POLICY_EXCLUDES`, which is `Blocked::LogonPolicy`
+  (`logon_policy`; `Blocked::LogonRight` stays the local 1385, which setting up again fixes). Like
+  every `Blocked` today it refuses and rolls the run back: the set-up's own logon (step 6) is
+  interactive and would get 1385 anyway, so the run can't finish. **Once the batch fallback (PR6
+  C7a) exists, `LogonPolicy` stops blocking set-up:** set-up then makes the profiles through a
+  batch logon, records the state and finishes, and launches take the batch path. Only `SeInteractiveLogonRight` can be
+  granted: the right's name is fixed in `preflight.rs`, and a test checks that no source names
+  the Remote Desktop right.
+- **Removal.** `--remove`, before the group goes, takes the right off the SID
+  `LogonRightAdded` names, only when it is the record's group (anything else is logged and
+  left) (`LsaRemoveAccountRights`, the SID's other rights kept), then clears
+  the value (`RemoveStep::LogonRight`). A right IT granted stays.
+- **Deny rights per logon type.** `preflight::deny_check(kind, pool)` reads the deny right of an
+  interactive, batch or service logon and compares it with the SIDs that logon's token holds.
+  "Deny log on locally" naming INTERACTIVE refuses only the interactive logon.
+
 ### Shared writable places
 
 A spike probed 62,145 folders under a Low-integrity sandbox token and found two it could write:
@@ -1738,7 +1807,7 @@ folder of it through a junction at any time, or re-run `--adopt` with another fo
    Administrators alone, read back; "The staging folder's DACL" below),
    and verifies the staged bytes, never the user's file, so a swap after the check changes nothing;
 6. requires the staged image's CPU type (its PE `Machine`) to be the running copy's, so a signed
-   exe for another CPU never replaces it;
+   exe for another CPU never replaces it, save one move ("The one move across CPU types");
 7. checks the versions ("Versions" below), so an older signed exe can't roll the copy back;
 8. stops when the staged SHA-256 is already recorded;
 9. otherwise opens `Sandbox\` for adding a file (`FILE_WRITE_DATA | FILE_ADD_FILE`), sharing
@@ -1804,6 +1873,19 @@ checked.
 - An older version is refused. So is an equal version whose bytes differ from the copy in place.
 - A leading `v` is dropped. A record's `X.Y.Z.0` reads as the release `X.Y.Z`. Anything
   unreadable, a non-zero fourth part included, refuses the run.
+
+**The one move across CPU types.** Windows ARM64 is tier 1, so an x64 install on an ARM64 machine
+moves to the native build through the normal update, and nobody is told to reinstall. Step 6
+allows that one move and no other (`refresh/machine.rs`). The running copy must be x64, and so
+must the copy on disk it replaces, its PE `Machine` read by handle as its hash is. The staged
+image must be plain ARM64, not ARM64EC or ARM64X (a load config naming CHPE metadata marks a
+hybrid). The machine must be natively ARM64 (`IsWow64Process2`'s native machine, which
+detection reads). The signed version must be strictly newer than `AdminCopyVersion`: the equal
+version a same-CPU run repairs with never moves the copy. The signature, its `file:`, the
+`FILEVERSION` binding, the hash record, the set-up lock and staging apply as before. Anything
+else across CPU types exits 42, ARM64 to x64 included: it would put a native copy back under
+emulation, a downgrade of the platform match. `--adopt` checks no CPU type, so the per-machine
+installer already moves an x64 copy to ARM64 on the version rule alone.
 
 **The key.** `crates/sandbox/build.rs` builds the key in: `CLAUSEO_UPDATER_PUBKEY`, else
 `plugins.updater.pubkey` from `tauri.conf.json`, else the placeholder `AC986E7C6BA67AB9`. The

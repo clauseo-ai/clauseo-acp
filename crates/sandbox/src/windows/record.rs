@@ -84,6 +84,13 @@ pub fn sandbox_group_sid() -> Result<Option<String>, RecordError> {
     read_string(RECORD_KEY, w!("GroupSid"))
 }
 
+/// What set-up or the SYSTEM refresh last found policy says of "Allow log on locally": value
+/// `LogonPolicy` (`REG_SZ`, `setup::rights_policy::PolicyState::text`, 64-bit view), which the
+/// desktop user can read where the policy itself it can't. `Ok(None)` when missing. Unchecked.
+pub(crate) fn sandbox_logon_policy() -> Result<Option<String>, RecordError> {
+    read_string(RECORD_KEY, w!("LogonPolicy"))
+}
+
 /// The owner's data folder, which holds `sandbox\`: value `DataDir` (`REG_SZ`, read
 /// unexpanded, 64-bit view). `Ok(None)` when missing. Unchecked.
 pub fn sandbox_data_dir() -> Result<Option<PathBuf>, RecordError> {

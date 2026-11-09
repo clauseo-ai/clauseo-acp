@@ -133,19 +133,23 @@ test.each([
   [
     "tool_missing",
     { not_protected: { cause: { blocked: { reason: "tool_missing" } } } } as Protection,
-    "The program that sets up the Safe workspace is missing, or security software blocked it. Ask your IT team to look into it.",
+    "The program that sets up the Safe workspace is missing, or security software blocked it. Your firm manages the security software on this computer.",
   ],
   [
     "other_account",
     PROT.otherAccount,
-    "The Safe workspace on this computer belongs to another Windows account. Ask your IT team.",
+    "The Safe workspace on this computer belongs to another Windows account. Your firm manages this computer's Windows accounts.",
   ],
   [
     "policy",
     PROT.policy,
-    "A Windows policy on this computer blocks the program that sets up the Safe workspace. Ask your IT team to allow it.",
+    "A Windows policy on this computer blocks the program that sets up the Safe workspace. Your firm manages this policy on this computer.",
   ],
-  ["a reason from a newer Clauseo", PROT.blockedNewer, "Ask your IT team to look into it."],
+  [
+    "a reason from a newer Clauseo",
+    PROT.blockedNewer,
+    "Something on this computer stops the Safe workspace. Your firm manages this computer's settings.",
+  ],
 ] as const)(
   "a block, %s: the note says what stops it and its line, with no retry",
   async (_c, p, line) => {
@@ -180,7 +184,7 @@ test.each([
     expect(note?.textContent).toContain(
       pw(
         "en",
-        "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this. If it doesn't, ask whoever looks after this computer to add ClauseoSandboxUsers to the Allow log on locally policy.",
+        "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this.",
       ),
     );
     expect(inBody("protection-installer")).toBeNull();
@@ -403,7 +407,7 @@ test("the notice's Set up the Safe workspace, with no prompt, sends at once", as
 test("the notice behind the prompt asks IT to install Clauseo again (a firm install), with no button", async () => {
   await mount(PROT.missing, PROT.missing, { required: true });
   expect(h!.one("protection-repair")?.textContent).toBe(
-    pw("en", "Ask your IT team to install Clauseo again."),
+    pw("en", "Your firm manages how Clauseo is installed on this computer."),
   );
   expect(h!.one("protection-setup")).toBeNull();
   expect(h!.one("protection-installer")).toBeNull();

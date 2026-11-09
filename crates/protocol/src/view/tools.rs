@@ -74,6 +74,16 @@ open_unit_enum! {
         TooManyBrowsers,
         /// Case law only: the host could not open the session's loopback relay.
         NoRelay,
+        /// The browser only: the firm turned off Chrome's or Edge's remote debugging
+        /// (`RemoteDebuggingAllowed` false), which Clauseo's browser needs, and its Clauseo
+        /// policy does not allow Clauseo's browser anyway
+        /// (`browser.allow_when_remote_debugging_disabled`).
+        BrowserBlockedByPolicy,
+        /// The browser only: a place the firm's Chrome, Edge or Chromium `RemoteDebuggingAllowed`
+        /// can be set could not be read (not missing: denied or failed), so Clauseo does not know
+        /// whether remote debugging is allowed; none says false, and the firm's Clauseo policy does
+        /// not allow Clauseo's browser anyway. Checked again at the next launch.
+        BrowserPolicyUnreadable,
     }
     test mod tools_unavailable_reason;
 }

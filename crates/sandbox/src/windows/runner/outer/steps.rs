@@ -4,15 +4,19 @@
 
 use zeroize::Zeroizing;
 
-use super::super::RunExit;
 use super::super::frame::{InnerGo, write_frame};
 use super::super::inner_user::{READY_WAIT, TokenSeen, check_full, check_inner_user, ready_within};
 use super::super::spawn::{Process, assign, log_on, resume, telemetry_user};
 use super::super::start::Steps;
 use super::super::station::StationDesktop;
-use super::{FIRST_CONNECT, Failure, accept, inner_exit, logon_failure, os};
+use super::super::{RunExit, logon_refusal};
+use super::end::since_start;
+use super::{FIRST_CONNECT, Failure, accept, inner_exit, os};
 use crate::windows::acl::object::Handle;
 use crate::windows::pipe::os::{ServerPipe, Until};
+use crate::windows::record::{sandbox_group_sid, sandbox_logon_policy};
+use crate::windows::setup::rights_policy::{INTERACTIVE_RIGHT, PolicyState, Pool, RightPolicy};
+use crate::windows::setup::rights_source;
 use crate::windows::sids::Sid;
 use crate::windows::token::os::shut_object;
 use crate::windows::token::{runner_process_sddl, runner_thread_sddl};
@@ -57,7 +61,7 @@ impl Steps for Start<'_> {
             self.station_desktop,
             None,
         )
-        .map_err(logon_failure)
+        .map_err(|code| logon_failure(code, self.pool_user))
     }
 
     /// Its token's user, read now, while it is suspended (the first stage, `start.rs`). On the
@@ -121,4 +125,42 @@ impl Steps for Start<'_> {
     fn kill(&mut self, inner: &Process, error: &Failure) {
         inner.kill(error.0.code());
     }
+}
+
+/// Maps a `CreateProcessWithLogonW` code to its failure. A 1385 reads the record's
+/// `LogonPolicy`, then the cached policy read, to learn whether a policy leaves the pool out of
+/// "Allow log on locally" ([`logon_refusal`]), so the words say whether setting up again helps;
+/// read only on a 1385, never on a launch that works.
+pub(super) fn logon_failure(code: u32, pool_user: &Sid) -> Failure {
+    match code {
+        1058 => Failure::new(RunExit::SecondaryLogon, super::super::SECLOGON_DISABLED),
+        1385 => {
+            let recorded = sandbox_logon_policy()
+                .ok()
+                .flatten()
+                .and_then(|text| PolicyState::parse(&text));
+            let (exit, blocked) = logon_refusal(recorded, || launch_policy(pool_user));
+            Failure::new(exit, blocked.to_string())
+        }
+        1326 => Failure::new(RunExit::Password, super::super::PASSWORD_LOST),
+        other => Failure::new(
+            RunExit::Logon,
+            format!("CreateProcessWithLogonW failed ({other})"),
+        ),
+    }
+}
+
+/// What the cached policy read (`rights_source::cached`) says of "Allow log on locally" for the
+/// record's group and `pool_user`. As the desktop user the template cache may not be readable;
+/// that is [`RightPolicy::Unknown`], which keeps the words of a local 1385.
+fn launch_policy(pool_user: &Sid) -> RightPolicy {
+    let group = sandbox_group_sid()
+        .ok()
+        .flatten()
+        .and_then(|text| Sid::parse(&text).ok());
+    let pool = Pool {
+        group: group.as_ref(),
+        users: std::slice::from_ref(pool_user),
+    };
+    rights_source::cached(INTERACTIVE_RIGHT, pool, since_start())
 }

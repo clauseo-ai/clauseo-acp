@@ -86,12 +86,20 @@ import { useWindowFrame } from "../window/use-window-frame.ts";
 import { ToolLineContext } from "./tool-line-context.ts";
 import { hasSetup } from "./first-run/hold.ts";
 import { FirstRun } from "./first-run/first-run.tsx";
+import { useDeciding } from "./deciding.ts";
+import { FirstMark } from "./first-mark.tsx";
 import { ProtectionContext } from "./protection/context.ts";
 import { useRoomProtection } from "./protection/use-room-protection.tsx";
+import { useSacNote } from "./sac/use-sac-note.ts";
 
 /** H13's line atop a retried conversation, loaded only when one opens. */
 const RetriedLine = lazy(() =>
   late(import("./retried-line.tsx")).then((m) => ({ default: m.RetriedLine })),
+);
+
+/** The one-time Smart App Control note on Windows (sac/), loaded only when it shows. */
+const SacNote = lazy(() =>
+  late(import("./sac/sac-note.tsx")).then((m) => ({ default: m.SacNote })),
 );
 
 /** New matter's dialog, loaded the first time it opens, or before that when its button is hovered or focused. */
@@ -266,6 +274,8 @@ function RoomFrame({
     view.phase === "ready" &&
     open === null &&
     view.matters.every((m) => m.kind === "scratch");
+  // until the list says welcome or room, the room is unseen and the page's mark stands (deciding.ts)
+  const deciding = useDeciding(setup, view.phase);
   const listed = usePapers(matters.next.papers, open?.matter ?? null);
   const papers = listed?.papers ?? null;
   const answers = useAnswerHost(transport, open?.matter ?? null, listed, matters.refusals);
@@ -277,6 +287,7 @@ function RoomFrame({
   const locate = open === null ? null : () => void matters.locate(open.matter, locating.track);
   const word = useWordOpeners(transport, listed, w.lang);
   const ownStandIns = useTransportStandIns(transport);
+  const sac = useSacNote(transport);
   const { platform } = useDisplay();
   // Versions, for the open matter: the timeline in the rail's place while open, the band over the work
   const versions = useVersions({
@@ -402,8 +413,11 @@ function RoomFrame({
     <div
       className="room-window"
       data-panel={versions.open ? "" : undefined}
+      data-deciding={deciding ? "" : undefined}
       ref={nodes.slot("window")}
     >
+      {/* index.html's own #first-mark style keeps it seen in the unseen window: visibility: visible, fixed */}
+      {deciding && <FirstMark />}
       <RoomToolbar
         chrome="own"
         caption={caption}
@@ -507,6 +521,11 @@ function RoomFrame({
           ) : (
             <StoreContext value={store}>
               {versions.centre}
+              {sac.show && (
+                <Suspense fallback={null}>
+                  <SacNote transport={transport} onGotIt={sac.dismiss} />
+                </Suspense>
+              )}
               {scratch && <ScratchLine />}
               {retried !== null && (
                 <Suspense fallback={null}>

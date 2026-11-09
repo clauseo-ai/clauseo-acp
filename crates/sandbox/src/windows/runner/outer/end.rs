@@ -84,6 +84,13 @@ fn clock() -> Instant {
     Instant::now()
 }
 
+/// The monotonic time since this process's first reading: [`SweeperSteps::now`], and the
+/// policy cache's clock (`steps::logon_failure`).
+pub(super) fn since_start() -> Duration {
+    let origin = *ORIGIN.get_or_init(clock);
+    clock().saturating_duration_since(origin)
+}
+
 /// [`SweeperSteps::now`]'s origin: its first reading.
 static ORIGIN: OnceLock<Instant> = OnceLock::new();
 /// When the sweeper's logon began: one sweeper a process.
@@ -193,8 +200,7 @@ impl SweeperSteps for OsSweeper {
     }
 
     fn now(&self) -> Duration {
-        let origin = *ORIGIN.get_or_init(clock);
-        clock().saturating_duration_since(origin)
+        since_start()
     }
 
     /// At the outer's end, if it lives that long: waits up to [`SWEEP_WAIT`] for the sweeper and

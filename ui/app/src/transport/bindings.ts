@@ -1262,6 +1262,11 @@ export type DisplayInfo = {
 	 *  shows no button.
 	 */
 	release_mode: ReleaseMode,
+	/**
+	 *  Windows' Smart App Control state, read once per run (`smart_app_control.rs`): the page
+	 *  shows a one-time note in `evaluation`. `None` on macOS and Linux, or when unreadable.
+	 */
+	smart_app_control: SmartAppControl | null,
 };
 
 /**
@@ -4909,6 +4914,12 @@ export type SignIn =
 	found?: FoundLogin,
 } }) & { device_code?: never; failed?: never; login_found?: never; signed_in?: never; switching?: never; waiting?: never } | 
 /**
+ *  The sign-in status check is running and nothing was shown before it (at start, and
+ *  through its retries after a check that timed out): the card says it is checking. Ends
+ *  in the check's state, or `SignedOut` once its retries time out too.
+ */
+"checking" | 
+/**
  *  Waiting for the install to finish or the network to return; the sign-in then starts by
  *  itself.
  */
@@ -5022,6 +5033,15 @@ export type SkippedFileReason =
 "cloud_only" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
+
+/**  Smart App Control's state, as `display_info` reports it; `None` there when unknown. */
+export type SmartAppControl = 
+/**  On: it blocks apps it doesn't trust, unsigned Clauseo among them. */
+"on" | 
+/**  Evaluation: it blocks nothing yet, and later turns itself On or Off. */
+"evaluation" | 
+/**  Off. */
+"off";
 
 /**  A run of a hit's snippet. */
 export type SnippetPart = {
@@ -5817,6 +5837,20 @@ export type ToolsUnavailableReason =
 "too_many_browsers" | 
 /**  Case law only: the host could not open the session's loopback relay. */
 "no_relay" | 
+/**
+ *  The browser only: the firm turned off Chrome's or Edge's remote debugging
+ *  (`RemoteDebuggingAllowed` false), which Clauseo's browser needs, and its Clauseo
+ *  policy does not allow Clauseo's browser anyway
+ *  (`browser.allow_when_remote_debugging_disabled`).
+ */
+"browser_blocked_by_policy" | 
+/**
+ *  The browser only: a place the firm's Chrome, Edge or Chromium `RemoteDebuggingAllowed`
+ *  can be set could not be read (not missing: denied or failed), so Clauseo does not know
+ *  whether remote debugging is allowed; none says false, and the firm's Clauseo policy does
+ *  not allow Clauseo's browser anyway. Checked again at the next launch.
+ */
+"browser_policy_unreadable" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
 

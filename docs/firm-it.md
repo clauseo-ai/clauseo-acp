@@ -123,7 +123,8 @@ registered by an earlier version keep their old `UninstallString` until reinstal
   delete by hand when something could not be deleted and nothing was kept.
 - Where Clauseo's Windows protection was set up (task S15), uninstalling first removes it, elevated
   (`clauseo-sandbox-setup.exe --remove`): the local sandbox users `ClauseoSb01` to `ClauseoSb32`,
-  their profiles, the group `ClauseoSandboxUsers`, the key `HKLM\SOFTWARE\Clauseo\Sandbox` and the
+  their profiles, the group `ClauseoSandboxUsers`, the "Allow log on locally" right set-up granted
+  it (only when set-up added it, see section 11), the key `HKLM\SOFTWARE\Clauseo\Sandbox` and the
   access rules Clauseo put on the lawyer's folders. A per-user uninstall asks for one UAC prompt
   and removes it only for the Windows user who set it up; anyone else's uninstall leaves it. A
   silent per-user uninstall (`/S`) asks for nothing, so it leaves the protection in place and
@@ -428,6 +429,34 @@ do when `clauseo-sandbox-setup.exe` is gone, and how to get it back and check it
   (task S15). A policy that forbids local accounts leaves agents running without it, shown in the
   app as "Not protected".
 
+### Windows in S mode
+
+- **A device in S mode can't run Clauseo.** S mode runs only Microsoft Store apps; anything else
+  gets "this mode of Windows only runs Microsoft-verified apps". That blocks Clauseo's installer,
+  and the Node runtime and agent tools Clauseo downloads and runs, so a Store build would not help
+  either. Intune's S mode supplemental policy for Win32 apps needs a signed app catalog, which
+  unsigned Clauseo and its downloaded tools can't have
+  ([Enable Win32 apps on S mode devices](https://learn.microsoft.com/en-us/intune/app-management/deployment/enable-win32-s-mode)).
+- **The user can switch out alone, unless your policy blocks it.** Settings > System > Activation
+  (Windows 11), then the Store's "Switch out of S mode" page; [the lawyer's
+  guide](install/windows-s-mode.md) has the clicks. Microsoft: "Your organization can choose to keep
+  all devices in S mode"
+  ([S mode FAQ](https://support.microsoft.com/en-us/windows/experience/platform-variants/windows-10-and-windows-11-in-s-mode-faq)).
+  That is the WindowsLicensing CSP's `SMode/SwitchingPolicy` set to `1`, "User Blocked", or Intune's
+  **Switch out of S mode** set to **Keep in S mode**. The switch also goes through the Microsoft
+  Store, so a policy that turns the Store off can stop it too.
+- **To switch managed devices with Intune:** Devices > Manage devices > Configuration > Create >
+  New policy, platform **Windows 10 and later**, profile type **Templates > Edition upgrade and mode
+  switch**; under Mode switch, set **Switch out of S mode** to **Switch**
+  ([Upgrade Windows editions or switch out of S mode](https://learn.microsoft.com/en-us/intune/device-configuration/templates/configure-edition-upgrade-windows),
+  [the settings](https://learn.microsoft.com/en-us/intune/device-configuration/templates/ref-edition-upgrade-settings-windows)).
+  It applies at the next check-in. Other MDMs can run the CSP node
+  `./Vendor/MSFT/WindowsLicensing/SMode/SwitchFromSMode` (Exec; it does not reboot), which works
+  even when `SwitchingPolicy` blocks the user
+  ([WindowsLicensing CSP](https://learn.microsoft.com/en-us/windows/client-management/mdm/windowslicensing-csp)).
+- **Switching is one-way.** The device can't go back to S mode, and removing the Intune assignment
+  later doesn't revert it (both pages above).
+
 ## 4. WebView2
 
 Clauseo draws its window with Microsoft Edge WebView2, Evergreen.
@@ -659,6 +688,7 @@ Clauseo's readers with no warning, and fails when this table misses a key.
 | `skills.allow_scripts` | boolean | false | `REG_DWORD` 0 or 1 | 0: a pack holding a script or program is not loaded. With 1 such files are copied, never run by Clauseo, though the agent can run them. **Security key**: `false` if a source is unreadable or the value does not type |
 | `skills.enabled` | object: pack id to `sha256:<64 lowercase hex>`, the hash the pack had when turned on | empty | `REG_SZ`, JSON | `{"nda-kit": "sha256:a1b2…"}` (all 64 digits). A pack whose files no longer hash to its value is not loaded. Replaces the user's whole map and locks it. Until turning a pack on from the app ships (0040, PR-E), this is the map in the user's `settings.json` |
 | `update.mode` | `auto`, `notify`, `none` | `auto` | `REG_SZ` | `none`: Clauseo never checks for an update or installs one, and shows that your organisation manages updates. `auto` installs a downloaded update when Clauseo next opens; `notify` waits for the user. **Security key**: locks at `none` if a source is unreadable or the value does not type. A policy name this version doesn't know turns updates off until Clauseo is updated by hand; add new update.* policies only after the matching version is rolled out. Per-machine installs, and Macs where the user cannot write the `.app` itself or the folder it sits in, never update themselves anyway. Updates run only once release builds carry the update endpoint (R23 PR 6); until then every build shows updates as managed |
+| `browser.allow_when_remote_debugging_disabled` | boolean | false | `REG_DWORD` 0 or 1 | 1: Clauseo's browser may start on a computer where your firm turned off Chrome's, Edge's or Chromium's remote debugging, or where Clauseo can't read that policy ([below](#browser-automation-and-remotedebuggingallowed)). Policy only: a `settings.json` value is ignored with a warning. **Security key**: false if a source is unreadable |
 
 Sources: the key list and kinds are `KEYS` in `crates/settings/src/leaf.rs`; the values and
 defaults are in [`crates/settings/src/schema.rs`](../crates/settings/src/schema.rs).
@@ -690,6 +720,71 @@ pull request that makes Clauseo act on it. Same formats as above ([decision
 | `network.allowed_domains` | R17 | List of host names (`*.firm.example` for every name under it), added to every matter's allowlist. Default empty. `REG_MULTI_SZ`. Policy only: a `settings.json` value is ignored with a warning; a bad entry is left out with a warning. **Security key**: empty if a source is unreadable |
 | `network.allow_unsafe_site_override` | R17 | Boolean, default true, `REG_DWORD` 0 or 1. 0: the lawyer can't allow a site the block list names, and sites already allowed stop being honoured (they are kept) (decision 0053); the lawyer may also switch it off for themselves. A change in the policy file takes effect when Clauseo next starts. **Security key**: false if a source is unreadable or a policy value does not type |
 | `network.unsafe_site_list_updates` | R17 | Boolean, default true, `REG_DWORD` 0 or 1. 0: Clauseo never fetches block list updates and keeps the stored or bundled list (decision 0053). A change in the policy file takes effect when Clauseo next starts. Policy only: a `settings.json` value is ignored with a warning. **Security key**, locked at true (its default) if a source is unreadable or a policy value does not type: an unreadable policy must not stop protection updates |
+
+### Browser automation and RemoteDebuggingAllowed
+
+Clauseo's browser drives Chrome (or Chrome for Testing, which Clauseo can download) through
+Chrome's remote debugging. Chrome's, Edge's and Chromium's `RemoteDebuggingAllowed` policy turns
+that off. Chrome for Testing reads its own policy location rather than Chrome's, so Clauseo checks
+your Chrome, Edge and Chromium policy itself. It does this before it starts any browser, whichever browser it
+would pick.
+
+**What Clauseo reads.** The value `RemoteDebuggingAllowed`, for both the computer and the user,
+in Chrome's, Edge's and Chromium's policy locations. It takes the same values Chrome does:
+
+- **Windows:** `SOFTWARE\Policies\Google\Chrome`, `SOFTWARE\Policies\Microsoft\Edge` and
+  `SOFTWARE\Policies\Chromium`, each under both `HKLM` and `HKCU`. A `REG_DWORD` of 0 is false
+  and any other number true; a `REG_SZ` holding a whole number counts the same way, so `"0"`
+  (spaces around it allowed) is false too.
+- **macOS:** the managed preferences files `/Library/Managed Preferences/com.google.Chrome.plist`,
+  `com.microsoft.Edge.plist` and `org.chromium.Chromium.plist`, plus the same files under
+  `/Library/Managed Preferences/<user>/` for the signed-in user. The value is a boolean, or the
+  integer 0 (false) or 1 (true).
+- **Linux:** every `*.json` file in `/etc/opt/chrome/policies/managed/`,
+  `/etc/opt/edge/policies/managed/` and `/etc/chromium/policies/managed/`; other files are
+  skipped, as Chrome skips them. The value is a boolean, or the integer 0 (false) or 1 (true).
+  Clauseo reads at most 256 `.json` files in each folder and 16 MiB in each file; a folder or
+  file past either limit counts as one it can't read (below). Clauseo skips `recommended/`,
+  because Chrome doesn't take this policy as a recommendation either.
+
+**What Clauseo doesn't read.** Brave's policy, and Chrome or Edge policy pushed from the cloud
+(Chrome Browser Cloud Management, Edge management service) that is not written to the registry,
+a managed preferences file or a policy folder. To have Clauseo honour such a policy, deploy
+`RemoteDebuggingAllowed` through one of the places above too.
+
+**The rule.** Each place says one of four things:
+
+- **False:** Clauseo's browser doesn't start, and the app tells the lawyer that your firm doesn't
+  allow apps to control a browser on this computer.
+- **True, or nothing set** (the key, value, file or folder doesn't exist): no block.
+- **A value Chrome wouldn't accept** (a `REG_BINARY`, a string that isn't a whole number, a
+  plist or JSON file that doesn't parse, any other number than 0 or 1 in a plist or JSON file):
+  ignored, as Chrome ignores it. No block.
+- **A place Clauseo can't read** (permission denied or any other read failure, or past a limit
+  above): Clauseo doesn't know what it says, so its browser doesn't start, and the app tells the
+  lawyer Clauseo couldn't check this computer's browser settings. A false elsewhere still wins:
+  the lawyer then hears that your firm doesn't allow it.
+
+Clauseo writes one line to the host log for each place it couldn't read and each value it
+ignored, naming the browser and scope (never a path), once each time Clauseo starts. It reads
+this policy again each time a session starts its browser, so a change there, or a place that
+reads again, applies to the next session; its own key below, like every Clauseo policy key,
+applies on the next start.
+
+**Allowing Clauseo specifically.** Set Clauseo's policy key
+`browser.allow_when_remote_debugging_disabled` to true. Clauseo's browser then starts despite
+`RemoteDebuggingAllowed` false, or a place Clauseo can't read, and Chrome, Edge and Chromium
+themselves stay as your policy sets them. A
+user's `settings.json` can't set this key; only policy can. Set it the same way as any Clauseo
+policy key (above):
+
+- **Windows:** `REG_DWORD` value `browser.allow_when_remote_debugging_disabled` = 1 under
+  `HKLM\SOFTWARE\Policies\Clauseo\Clauseo`, or `{"browser": {"allow_when_remote_debugging_disabled":
+  true}}` in `C:\ProgramData\Clauseo\policy.json`.
+- **macOS:** the key `browser.allow_when_remote_debugging_disabled`, boolean true, in the
+  `ai.clauseo.desktop` profile, or the same JSON in
+  `/Library/Application Support/Clauseo/policy.json`.
+- **Linux:** the same JSON in `/etc/clauseo/policy.json`.
 
 ## 7. Hosts Clauseo reaches
 
@@ -888,6 +983,51 @@ listed (shown as a bare `S-1-5-21-…` once the account is gone) grants nothing;
 `sandbox\set-aside`: those are files set aside from a matter.
 
 Clauseo adds no firewall rules. Network filters (WFP) come later, with how to remove them here.
+
+## 11. Windows protection: the sandbox accounts' logon rights
+
+Clauseo's Windows protection runs each matter's agent as one of the local accounts `ClauseoSb01` to
+`ClauseoSb32`. They are members of the local group `ClauseoSandboxUsers` and of `Users`. Windows
+has to let these accounts sign in, through one of three user rights:
+
+| Right | Constant | Used for |
+|---|---|---|
+| Allow log on locally | `SeInteractiveLogonRight` | today's launch (an interactive logon) |
+| Log on as a batch job | `SeBatchLogonRight` | a later fallback launch, from Clauseo's service |
+| Log on as a service | `SeServiceLogonRight` | a second fallback |
+
+The matching deny rights (`SeDenyInteractiveLogonRight`, `SeDenyBatchLogonRight`,
+`SeDenyServiceLogonRight`) must not name `ClauseoSandboxUsers`, `Users`, `Everyone`,
+`Authenticated Users`, `Local account` or `LOCAL`. CIS's denies (Guests) are fine.
+
+**What set-up does.** Set-up checks whether a Group Policy (the templates in
+`%windir%\security\templates\policies`) or Intune (the UserRights CSP, under
+`HKLM\SOFTWARE\Microsoft\PolicyManager\current\device\UserRights`) sets "Allow log on locally":
+
+- No policy sets it: set-up grants it to `ClauseoSandboxUsers` when the local setting doesn't
+  already include that group, `Users`, `Everyone` or `Authenticated Users`, and records that in
+  the value `LogonRightAdded` of `HKLM\SOFTWARE\Clauseo\Sandbox`. A default Windows already
+  includes `Users`, so most computers get no grant.
+- A policy sets it and includes `ClauseoSandboxUsers`, `Users`, `Everyone` or `Authenticated
+  Users` (CIS L1 and the STIG set *Administrators, Users*): nothing to do.
+- A policy sets it without any of them: set-up grants nothing, since the next policy refresh
+  would undo it, and stops with "This computer's settings don't let Clauseo's sandbox accounts
+  sign in yet". Add `ClauseoSandboxUsers` (or `Users`) to the policy's "Allow log on locally",
+  then run set-up again.
+- The policy can't be read: set-up grants nothing and checks again next time.
+
+Set-up never grants "Allow log on through Remote Desktop Services".
+
+Set-up, and Clauseo's SYSTEM refresh task, also record what they found in the values
+`LogonPolicy` and `LogonPolicyAt` of `HKLM\SOFTWARE\Clauseo\Sandbox`, so a launch can tell
+the lawyer whether a policy is the cause.
+
+**Removal.** Uninstalling takes "Allow log on locally" off `ClauseoSandboxUsers` only when
+`LogonRightAdded` says set-up added it. A right you granted yourself stays.
+
+To check by hand, from an elevated prompt:
+`secedit /export /areas USER_RIGHTS /cfg "$env:TEMP\rights.inf"`, then look for
+`SeInteractiveLogonRight` in that file (delete it when done). `gpresult /h` shows which GPO sets the right.
 
 ## Later
 

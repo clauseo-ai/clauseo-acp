@@ -777,14 +777,14 @@
     "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
   "U3-err-sandbox.setup_failed": {
-    "en": "The Safe workspace couldn't be set up on this computer. Try again. If it keeps failing, ask whoever looks after this computer to look into it.",
-    "hi": "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका। फिर से कोशिश करें। अगर यह बार-बार विफल हो, तो इस कंप्यूटर की देखरेख करने वाले व्यक्ति से इसकी जाँच करने को कहें।",
+    "en": "The Safe workspace couldn't be set up on this computer. Try again.",
+    "hi": "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र तैयार नहीं हो सका। फिर से कोशिश करें।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (no IT endings)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-08",
+    "by": "app track (no IT endings)"
   },
   "U3-err-sandbox.setup_required": {
     "en": "Clauseo can't answer here until the Safe workspace is set up on this computer. Your question is kept.",
@@ -797,14 +797,14 @@
     "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
   "U3-err-sandbox.required": {
-    "en": "Your firm requires the Safe workspace, and this computer can't provide it, so Clauseo can't answer here. Ask whoever looks after this computer.",
-    "hi": "आपकी फ़र्म सुरक्षित कार्यक्षेत्र ज़रूरी मानती है, और यह कंप्यूटर इसे नहीं दे सकता, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। इस कंप्यूटर की देखरेख करने वाले व्यक्ति से पूछें।",
+    "en": "Your firm requires the Safe workspace, and this computer can't provide it, so Clauseo can't answer here.",
+    "hi": "आपकी फ़र्म सुरक्षित कार्यक्षेत्र ज़रूरी मानती है, और यह कंप्यूटर इसे नहीं दे सकता, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (no IT endings)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-08",
+    "by": "app track (no IT endings)"
   },
   "U3-err-sandbox.blocked": {
     "en": "Clauseo can't use the Safe workspace on this computer: a Windows setting or security software is blocking it, so nothing was started. Settings › Safe workspace says what to do.",
@@ -817,14 +817,14 @@
     "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
   },
   "U3-err-blocklist.override_off": {
-    "en": "Your firm has turned off allowing sites on Clauseo's unsafe-site list, so this site stays blocked. Ask your IT team if you need it.",
-    "hi": "आपकी फ़र्म ने Clauseo की असुरक्षित वेबसाइटों की सूची में से किसी वेबसाइट को अनुमति देना बंद कर रखा है, इसलिए यह वेबसाइट अवरुद्ध रहेगी। अगर आपको इसकी ज़रूरत है, तो अपनी IT टीम से पूछें।",
+    "en": "Your firm has turned off allowing sites on Clauseo's unsafe-site list, so this site stays blocked.",
+    "hi": "आपकी फ़र्म ने Clauseo की असुरक्षित वेबसाइटों की सूची में से किसी वेबसाइट को अनुमति देना बंद कर रखा है, इसलिए यह वेबसाइट अवरुद्ध रहेगी।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
-    "hi_by": "stage E (provisional; Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (no IT endings)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "stage E (provisional; Rohan batch review)",
+    "at": "2026-11-08",
+    "by": "app track (no IT endings)",
     "note": "The \"Allow this site\" refusal when the firm's policy forbids overriding the unsafe-site list (ADR 0053)"
   },
   "U3-err-blocklist.notice_expired": {

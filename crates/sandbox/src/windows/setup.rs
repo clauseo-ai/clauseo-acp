@@ -102,6 +102,9 @@ pub(crate) mod lock;
 mod lock_tests;
 #[cfg(windows)]
 pub mod logon;
+pub mod logon_grant;
+#[cfg(windows)]
+mod lsa_rights;
 mod machine;
 mod outcome;
 #[cfg(any(windows, test))]
@@ -127,6 +130,9 @@ pub mod registered;
 pub mod remove;
 mod resets;
 pub mod result_file;
+pub mod rights_policy;
+#[cfg(windows)]
+pub mod rights_source;
 mod rollback;
 #[cfg(any(windows, test))]
 mod shared;
@@ -143,8 +149,8 @@ pub use machine::{LogonRight, Machine, MachineError, Password, ProfileDir, Servi
 pub use outcome::{
     APPROVER_LOGON_REFUSED, DATA_DIR_NOT_OWNED, ERROR_ACCESS_DISABLED_BY_POLICY, ERROR_CANCELLED,
     ERROR_LOGON_TYPE_NOT_GRANTED, ERROR_VIRUS_DELETED, ERROR_VIRUS_INFECTED, JournalOutcome,
-    LOGON_NOT_GRANTED, LOGON_REFUSED, SECLOGON_DISABLED, SetupExit, SetupFailure, SetupReport,
-    Step, TopUp, launch_code, launch_error,
+    LOGON_NOT_GRANTED, LOGON_POLICY_EXCLUDES, LOGON_REFUSED, SECLOGON_DISABLED, SetupExit,
+    SetupFailure, SetupReport, Step, TopUp, launch_code, launch_error,
 };
 // `remove::Removal` stays at its path: the set-up's fake implements both seams, and a glob
 // import of both would make their shared method names ambiguous in the set-up's tests.

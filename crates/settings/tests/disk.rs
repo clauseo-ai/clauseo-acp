@@ -6,6 +6,8 @@ use clauseo_settings::{Effective, Files as _, FontSize, Locations, SystemFiles, 
 use std::path::PathBuf;
 use std::process;
 
+#[path = "disk/chromium.rs"]
+mod chromium;
 #[path = "disk/trust.rs"]
 mod trust;
 #[cfg(unix)]

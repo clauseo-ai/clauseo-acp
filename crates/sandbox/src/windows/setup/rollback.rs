@@ -3,7 +3,8 @@
 //! and it is empty. Then the record is written to what really remains: every SID it held before,
 //! each made user still there (or gone but named by a ledger entry), and a group this run made
 //! that is still there, so no account or group is left that the record doesn't name. Every other
-//! deny stays (D12). Nothing that existed before the run is removed.
+//! deny stays (D12). Nothing that existed before the run is removed. "Allow log on locally",
+//! when this run granted it (`logon_grant.rs`), is taken off the group before the group goes.
 //!
 //! A re-run's new passwords for the recorded users can't be undone, so the rollback writes them
 //! to `secrets.bin` (keeping the blobs of the users not reset), and the pool still works. The
@@ -13,8 +14,10 @@ use std::path::{Path, PathBuf};
 
 use super::SetupRequest;
 use super::create::write_record;
+use super::logon_grant::undo_grant;
 use super::machine::{Machine, Password, owned};
 use super::outcome::cause_of;
+use super::rights_policy::PolicyState;
 use crate::windows::acl_plan::Grant;
 use crate::windows::ledger::Ledger;
 use crate::windows::pool::{MachineRecord, PoolUser};
@@ -53,6 +56,11 @@ pub(super) struct Run {
     pub(super) kept: Vec<Sid>,
     /// The new passwords this run gave kept users (a re-run), as each was set.
     pub(super) reset: Vec<(Sid, Password)>,
+    /// The SID this run granted "Allow log on locally" to (step 3a), and recorded.
+    pub(super) logon_added: Option<Sid>,
+    /// What step 3a found policy says, until it is written to the record's `LogonPolicy`
+    /// (`late_steps::flush_policy`), once the record exists.
+    pub(super) policy: Option<PolicyState>,
 }
 
 impl Run {
@@ -68,6 +76,8 @@ impl Run {
             ledger: None,
             kept: Vec::new(),
             reset: Vec::new(),
+            logon_added: None,
+            policy: None,
         }
     }
 
@@ -113,8 +123,20 @@ pub(super) fn roll_back(
         }
     }
     survivors.reverse();
+    // A grant that won't come off keeps the record naming its group, so `--remove` finds it.
+    let mut grant_left = false;
+    if let Some(sid) = &run.logon_added
+        && let Err(what) = undo_grant(machine.logon_rights(), sid)
+    {
+        left.push(what);
+        grant_left = true;
+    }
     let group_gone = run.group_made && alive == 0 && delete_group(machine, run, &mut left);
-    rewrite_record(machine, req, run, &survivors, group_gone, &mut left);
+    let kept = Kept {
+        group_gone,
+        grant_left,
+    };
+    rewrite_record(machine, req, run, &survivors, kept, &mut left);
     if !run.reset.is_empty()
         && let Err(error) = owned(machine, |m| m.protect_for_owner(&run.reset, &run.kept))
     {
@@ -193,19 +215,29 @@ fn delete_group(machine: &mut impl Machine, run: &Run, left: &mut Vec<String>) -
     }
 }
 
+/// What the rollback left that the record must still name.
+#[derive(Debug, Clone, Copy)]
+struct Kept {
+    /// The group this run made is gone.
+    group_gone: bool,
+    /// The "Allow log on locally" grant this run made couldn't be taken off.
+    grant_left: bool,
+}
+
 /// The record written to what remains, after the users and the group: every SID the record
 /// held before the run (so nothing recorded before is dropped) plus `survivors`, with this run's
-/// group while it is still there, else the group before. No record at all when there was none
-/// before and nothing remains. Written only when it differs from what the machine holds.
+/// group while it is still there or its grant is left, else the group before. No record at all
+/// when there was none before and nothing remains. Written only when it differs from what the
+/// machine holds.
 fn rewrite_record(
     machine: &mut impl Machine,
     req: &SetupRequest,
     run: &Run,
     survivors: &[Sid],
-    group_gone: bool,
+    kept: Kept,
     left: &mut Vec<String>,
 ) {
-    let made_group_left = run.group_made && !group_gone;
+    let made_group_left = (run.group_made && !kept.group_gone) || kept.grant_left;
     let before = run.before.as_ref();
     let result = if before.is_none() && survivors.is_empty() && !made_group_left {
         match run.recorded {

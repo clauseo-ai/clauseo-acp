@@ -10,7 +10,9 @@
 //! of a [`PrivacyPatch`]; and the policy
 //! layer a firm's IT pushes: the Windows registry, macOS managed preferences and a
 //! `policy.json`. Decision record `docs/decisions/0009-policy-layer.md` fixes the policy
-//! sources, paths, formats and the merge rule.
+//! sources, paths, formats and the merge rule. It also reads one value of Chrome's, Edge's
+//! and Chromium's own policy, `RemoteDebuggingAllowed` ([`chromium_policy`]), for the host's
+//! browser.
 //!
 //! # Interface
 //!
@@ -112,6 +114,7 @@
 //! `effective.rs` (`Effective::load`), then `leaf.rs` (how a key's value is typed), then
 //! `policy.rs`.
 
+pub mod chromium_policy;
 mod dirs;
 mod effective;
 mod error;
@@ -152,10 +155,10 @@ pub use policy::{
 };
 pub use privacy::PrivacyPatch;
 pub use schema::{
-    AgentLaunch, Density, FontSize, InstallSettings, Language, Lite, MattersSettings,
-    McpServerLaunch, McpSettings, Motion, NetworkSettings, Plan, PlanProvider, PrivacySettings,
-    SandboxSettings, Settings, SkillsExtra, SkillsSettings, Theme, ToolsSettings, UiSettings,
-    UpdateMode, UpdateSettings, json_schema,
+    AgentLaunch, BrowserSettings, Density, FontSize, InstallSettings, Language, Lite,
+    MattersSettings, McpServerLaunch, McpSettings, Motion, NetworkSettings, Plan, PlanProvider,
+    PrivacySettings, SandboxSettings, Settings, SkillsExtra, SkillsSettings, Theme, ToolsSettings,
+    UiSettings, UpdateMode, UpdateSettings, json_schema,
 };
 pub use system::{SystemDirs, SystemEnv};
 pub use tools::ToolsPatch;

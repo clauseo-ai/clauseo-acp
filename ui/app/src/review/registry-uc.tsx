@@ -47,6 +47,7 @@ const P = {
   // design B (R17 PR-E's causes, not in bindings.ts yet)
   missing: np({ blocked: { reason: "admin_copy_missing" } }),
   logon: np({ blocked: { reason: "logon_right" } }),
+  logonPolicy: np({ blocked: { reason: "logon_policy" } }),
   policy: np({ blocked: { reason: "policy" } }),
   tool: np({ blocked: { reason: "tool_missing" } }),
   changed: np({ blocked: { reason: "admin_copy_changed" } }),
@@ -183,7 +184,7 @@ const REFUSED_INVALID: FakeProtectionHost = {
   },
 };
 
-/** UC's entries, UC-01 to UC-96, each id written as it is; ids missing are unused. */
+/** UC's entries, UC-01 to UC-97, each id written as it is; ids missing are unused. */
 export const UC: Entry[] = [
   room(
     "UC-01",
@@ -314,10 +315,18 @@ export const UC: Entry[] = [
   room(
     "UC-33",
     pw(
-      "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this. If it doesn't, ask whoever looks after this computer to add ClauseoSandboxUsers to the Allow log on locally policy.",
+      "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this.",
     ),
     "room/np-note",
     note(P.logon),
+  ),
+  room(
+    "UC-97",
+    pw(
+      "This computer's settings don't let the Safe workspace's accounts sign in yet. Your firm manages these settings on this computer.",
+    ),
+    "room/np-note",
+    note(P.logonPolicy),
   ),
   room(
     "UC-34",
@@ -485,14 +494,14 @@ export const UC: Entry[] = [
   settings(
     "UC-82",
     pw(
-      "A Windows policy on this computer blocks the program that sets up the Safe workspace. Ask your IT team to allow it.",
+      "A Windows policy on this computer blocks the program that sets up the Safe workspace. Your firm manages this policy on this computer.",
     ),
     held(P.policy),
   ),
   room(
     "UC-83",
     pw(
-      "The program that sets up the Safe workspace is missing, or security software blocked it. Ask your IT team to look into it.",
+      "The program that sets up the Safe workspace is missing, or security software blocked it. Your firm manages the security software on this computer.",
     ),
     "room/np-note",
     note(P.tool),
@@ -514,30 +523,38 @@ export const UC: Entry[] = [
   first("UC-86", pw("Get the installer"), undefined, {}, P.missing),
   settings(
     "UC-87",
-    pw("Ask your IT team to install Clauseo again."),
+    pw("Your firm manages how Clauseo is installed on this computer."),
     held(P.missing, { required: true }),
   ),
   settings(
     "UC-88",
     pw(
-      "The program that sets up the Safe workspace has changed since Clauseo was installed. Ask your IT team, or install Clauseo again.",
+      "The program that sets up the Safe workspace has changed since Clauseo was installed. Install Clauseo again to restore it.",
     ),
     held(P.changed),
   ),
   settings(
     "UC-89",
     pw(
-      "The folder that holds the Safe workspace's set-up program isn't limited to administrators, or holds files it shouldn't. Ask your IT team to look into it.",
+      "The folder that holds the Safe workspace's set-up program isn't limited to administrators, or holds files it shouldn't. Your firm manages this folder on this computer.",
     ),
     held(P.unsafe),
   ),
   room(
     "UC-90",
-    pw("The Safe workspace on this computer belongs to another Windows account. Ask your IT team."),
+    pw(
+      "The Safe workspace on this computer belongs to another Windows account. Your firm manages this computer's Windows accounts.",
+    ),
     "room/np-note",
     note(P.other),
   ),
-  settings("UC-91", pw("Ask your IT team to look into it."), held(P.newer)),
+  settings(
+    "UC-91",
+    pw(
+      "Something on this computer stops the Safe workspace. Your firm manages this computer's settings.",
+    ),
+    held(P.newer),
+  ),
   room(
     "UC-92",
     pw(
@@ -549,7 +566,7 @@ export const UC: Entry[] = [
   settings(
     "UC-93",
     pw(
-      "Something on this computer stops the Safe workspace, so Clauseo can't answer here. Ask your IT team to look into it.",
+      "Something on this computer stops the Safe workspace, so Clauseo can't answer here. Your firm manages this computer's settings.",
     ),
     {
       view: () => viewOf(P.failed, NO_PROMPT),

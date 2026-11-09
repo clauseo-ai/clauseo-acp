@@ -214,6 +214,7 @@ fn no_command_with_a_secret_shows_it() {
 fn every_sign_in() -> Vec<SignIn> {
     let mut states = vec![
         SignIn::SignedOut { found: None },
+        SignIn::Checking,
         SignIn::Queued,
         SignIn::Waiting {
             since: at(1_700_000_000_000),
@@ -348,6 +349,13 @@ fn setup_events_have_their_json_form() {
                 state: SignIn::Queued,
             },
             r#"{"sign_in_changed":{"agent":"claude-acp","state":"queued"}}"#,
+        ),
+        (
+            SetupEvent::SignInChanged {
+                agent: claude(),
+                state: SignIn::Checking,
+            },
+            r#"{"sign_in_changed":{"agent":"claude-acp","state":"checking"}}"#,
         ),
         (
             SetupEvent::SignInChanged {

@@ -22,5 +22,6 @@ expression: SECURITY_KEYS
   "network.ca_certs",
   "network.allowed_domains",
   "network.allow_unsafe_site_override",
-  "network.unsafe_site_list_updates"
+  "network.unsafe_site_list_updates",
+  "browser.allow_when_remote_debugging_disabled"
 ]

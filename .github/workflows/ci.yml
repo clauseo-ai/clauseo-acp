@@ -236,6 +236,11 @@ jobs:
       - name: Test windows-pr-failures.sh
         run: bash .github/scripts/windows-pr-failures-test.sh
 
+      # gate-prior.sh, and the mode steps of windows-pr-tests.yml and e2e-windows.yml that call it,
+      # against a fake gh: a wait stop is not a result, a real failure is (#732).
+      - name: Test the gates' reading of a commit's last result
+        run: bash .github/scripts/gate-prior-test.sh
+
       # How reducer-bench reads the label bench-ok at run time, against a fake gh.
       - name: Test reducer-bench's bench-ok read
         run: bash .github/scripts/bench-ok-test.sh

@@ -2,8 +2,9 @@
 // appends two causes to #570's NotProtectedCause: `blocked { reason }`, whose reason is an open set
 // of snake_case names, and `other_account` (another Windows account on this computer owns the Safe
 // workspace). The words are picked from the protection state's cause, never from a refused turn's
-// `sandbox.blocked`. Each reason has its own line; an unknown one, from a newer Clauseo, says to
-// ask IT. Outside the room's first load: the note's chunk and Settings import it. TODO(R17 PR-E):
+// `sandbox.blocked`. Each reason has its own line; an unknown one, from a newer Clauseo, says
+// the firm manages this computer's settings. Outside the room's first load: the note's chunk and
+// Settings import it. TODO(R17 PR-E):
 // bindings.ts lacks both causes on this base, so the reason is read loosely; once PR-E lands, read
 // the generated type and keep this table keyed on the same names.
 import type { Lang } from "@clauseo/components/lib/display.ts";
@@ -14,6 +15,7 @@ import type { Cause } from "./causes.ts";
 /** A reason the lawyer is told something specific about, and `other_account`. */
 export type BlockReason =
   | "logon_right"
+  | "logon_policy"
   | "policy"
   | "tool_missing"
   | "admin_copy_missing"
@@ -21,25 +23,30 @@ export type BlockReason =
   | "admin_copy_unsafe"
   | "other_account";
 
-/** Each reason's line: ask IT, except a missing admin copy, whose repair (repairLine) follows. */
+/** Each reason's line: the lawyer's own step where one exists (set up again, install again), else
+ * that the firm manages it; a missing admin copy's repair (repairLine) follows its line. */
 const REASON_WORDS: Record<BlockReason, ProtectionKey> = {
   logon_right:
-    "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this. If it doesn't, ask whoever looks after this computer to add ClauseoSandboxUsers to the Allow log on locally policy.",
+    "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this.",
+  // A Group Policy or Intune setting leaves the accounts out: setting up again doesn't fix it.
+  logon_policy:
+    "This computer's settings don't let the Safe workspace's accounts sign in yet. Your firm manages these settings on this computer.",
   policy:
-    "A Windows policy on this computer blocks the program that sets up the Safe workspace. Ask your IT team to allow it.",
+    "A Windows policy on this computer blocks the program that sets up the Safe workspace. Your firm manages this policy on this computer.",
   tool_missing:
-    "The program that sets up the Safe workspace is missing, or security software blocked it. Ask your IT team to look into it.",
+    "The program that sets up the Safe workspace is missing, or security software blocked it. Your firm manages the security software on this computer.",
   admin_copy_missing: "The Safe workspace wasn't set up when Clauseo was installed.",
   admin_copy_changed:
-    "The program that sets up the Safe workspace has changed since Clauseo was installed. Ask your IT team, or install Clauseo again.",
+    "The program that sets up the Safe workspace has changed since Clauseo was installed. Install Clauseo again to restore it.",
   admin_copy_unsafe:
-    "The folder that holds the Safe workspace's set-up program isn't limited to administrators, or holds files it shouldn't. Ask your IT team to look into it.",
+    "The folder that holds the Safe workspace's set-up program isn't limited to administrators, or holds files it shouldn't. Your firm manages this folder on this computer.",
   other_account:
-    "The Safe workspace on this computer belongs to another Windows account. Ask your IT team.",
+    "The Safe workspace on this computer belongs to another Windows account. Your firm manages this computer's Windows accounts.",
 };
 
 /** A reason this version doesn't know. */
-const UNKNOWN_WORDS: ProtectionKey = "Ask your IT team to look into it.";
+const UNKNOWN_WORDS: ProtectionKey =
+  "Something on this computer stops the Safe workspace. Your firm manages this computer's settings.";
 
 /** The block a cause names: its reason, "unknown" for a reason (or a shape) this version doesn't
  * know, or null when the cause is neither `blocked` nor `other_account`. */
@@ -74,7 +81,9 @@ export const needsInstaller = (cause: Cause | null): boolean =>
 
 /** Whether setting up again usually fixes the block, so it offers the same set-up as `needs_set_up`
  * (the same button, `retry_protection`, and the confirm where Windows' prompt follows): only
- * `logon_right`, since stage C's set-up grants "Allow log on locally" itself. Every other block
+ * `logon_right`, since set-up grants "Allow log on locally" to ClauseoSandboxUsers itself when no
+ * Group Policy or Intune setting defines that right. Where one defines it without the group, set-up
+ * grants nothing and the block is `logon_policy`, which a set-up doesn't fix. Every other block
  * offers no set-up (a missing admin copy has the installer instead). */
 export const setUpFixes = (cause: Cause | null): boolean => blockOf(cause) === "logon_right";
 
@@ -94,7 +103,7 @@ export const firmInstall = (
   managedBy === "policy" ||
   (view !== null && view !== undefined && (view.required || !view.unprotected_auto_allowed));
 
-/** The repair's line: run the installer again (a per-user install), or ask IT to (a firm's). */
+/** The repair's line: run the installer again (a per-user install), or that the firm manages the install (a firm's). */
 export const repairLine = (
   lang: Lang,
   view: ProtectionView | null | undefined,
@@ -103,6 +112,6 @@ export const repairLine = (
   pw(
     lang,
     firmInstall(view, managedBy)
-      ? "Ask your IT team to install Clauseo again."
+      ? "Your firm manages how Clauseo is installed on this computer."
       : "Run the Clauseo installer again to set up the Safe workspace.",
   );

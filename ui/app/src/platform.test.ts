@@ -12,6 +12,7 @@ test("the host's report decides the platform; only a transport with no host gues
     release_date: null,
     test_build: false,
     release_mode: "release",
+    smart_app_control: null,
   });
 });
 
@@ -23,7 +24,15 @@ test("the host's release date comes with its report; a transport with no host ha
     release_date: "2026-11-03",
     test_build: false,
     release_mode: "release",
+    smart_app_control: null,
   });
+});
+
+test("the host's Smart App Control state comes with its report; unknown when it says none", async () => {
+  expect(
+    (await hostDisplayInfo(new FakeTransport({ smartAppControl: "evaluation" }))).smart_app_control,
+  ).toBe("evaluation");
+  expect((await hostDisplayInfo(new FakeTransport({}))).smart_app_control).toBeNull();
 });
 
 test("the host's test-build word comes with its report", async () => {

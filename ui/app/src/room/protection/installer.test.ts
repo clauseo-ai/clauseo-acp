@@ -58,24 +58,28 @@ const cause = (c: unknown) => causeOf(c as NotProtectedCause);
 test.each([
   [
     "logon_right",
-    "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this. If it doesn't, ask whoever looks after this computer to add ClauseoSandboxUsers to the Allow log on locally policy.",
+    "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this.",
+  ],
+  [
+    "logon_policy",
+    "This computer's settings don't let the Safe workspace's accounts sign in yet. Your firm manages these settings on this computer.",
   ],
   [
     "policy",
-    "A Windows policy on this computer blocks the program that sets up the Safe workspace. Ask your IT team to allow it.",
+    "A Windows policy on this computer blocks the program that sets up the Safe workspace. Your firm manages this policy on this computer.",
   ],
   [
     "tool_missing",
-    "The program that sets up the Safe workspace is missing, or security software blocked it. Ask your IT team to look into it.",
+    "The program that sets up the Safe workspace is missing, or security software blocked it. Your firm manages the security software on this computer.",
   ],
   ["admin_copy_missing", "The Safe workspace wasn't set up when Clauseo was installed."],
   [
     "admin_copy_changed",
-    "The program that sets up the Safe workspace has changed since Clauseo was installed. Ask your IT team, or install Clauseo again.",
+    "The program that sets up the Safe workspace has changed since Clauseo was installed. Install Clauseo again to restore it.",
   ],
   [
     "admin_copy_unsafe",
-    "The folder that holds the Safe workspace's set-up program isn't limited to administrators, or holds files it shouldn't. Ask your IT team to look into it.",
+    "The folder that holds the Safe workspace's set-up program isn't limited to administrators, or holds files it shouldn't. Your firm manages this folder on this computer.",
   ],
 ] as const)("blocked { reason: %s } has its own line", (reason, line) => {
   const c = cause({ blocked: { reason } });
@@ -88,11 +92,16 @@ test("other_account has its own line; an unknown reason, or none, asks IT", () =
   expect(blockLine("en", cause("other_account"))).toBe(
     pw(
       "en",
-      "The Safe workspace on this computer belongs to another Windows account. Ask your IT team.",
+      "The Safe workspace on this computer belongs to another Windows account. Your firm manages this computer's Windows accounts.",
     ),
   );
   for (const c of [{ blocked: { reason: "something_new" } }, { blocked: {} }, "blocked"])
-    expect(blockLine("en", cause(c))).toBe(pw("en", "Ask your IT team to look into it."));
+    expect(blockLine("en", cause(c))).toBe(
+      pw(
+        "en",
+        "Something on this computer stops the Safe workspace. Your firm manages this computer's settings.",
+      ),
+    );
   expect(blockLine("en", cause("needs_set_up"))).toBeNull();
 });
 
@@ -111,6 +120,7 @@ test("setting up again is offered for logon_right only; every other block keeps 
   expect(setUpFixes(cause({ blocked: { reason: "logon_right" } }))).toBe(true);
   expect(canRetry(cause({ blocked: { reason: "logon_right" } }))).toBe(true);
   for (const reason of [
+    "logon_policy",
     "policy",
     "tool_missing",
     "admin_copy_missing",

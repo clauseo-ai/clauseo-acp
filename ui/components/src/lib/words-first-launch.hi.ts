@@ -25,7 +25,7 @@ export const HI = {
   "Getting {name} ready…": "{name} तैयार हो रहा है…",
   "{name} is ready": "{name} तैयार है",
   "Use the system proxy": "सिस्टम की प्रॉक्सी इस्तेमाल करें",
-  "Ask your IT team": "अपनी IT टीम से कहें",
+  "Copy details for IT": "IT के लिए विवरण कॉपी करें",
   "Message copied": "संदेश कॉपी हो गया",
   "Clauseo needs to download {name} to work. Please allow these addresses on the firm's network: {list}.":
     "काम करने के लिए Clauseo को {name} डाउनलोड करना है। कृपया फ़र्म के नेटवर्क पर ये पते अनुमत करें: {list}।",
@@ -129,7 +129,13 @@ export const HI = {
   "Sign-in didn't finish.": "साइन इन पूरा नहीं हुआ।",
   "Clauseo can't read your firm's settings for {name}, so it won't sign in until they can be read.":
     "Clauseo {name} के लिए आपकी फ़र्म की सेटिंग्स नहीं पढ़ पा रहा, इसलिए उनके पढ़े जाने तक साइन इन नहीं करेगा।",
-  "Ask your IT team.": "अपनी IT टीम से कहें।",
+  "Your firm manages these settings.": "ये सेटिंग्स आपकी फ़र्म प्रबंधित करती है।",
+  // the running page's signin-expired card, a firm's account that refused the question
+  "Your firm manages this account.": "यह खाता आपकी फ़र्म प्रबंधित करती है।",
+
+  // the sign-in status check still running, at start and through its retries (new; provisional)
+  "Checking whether you're signed in to {name}…":
+    "जाँच हो रही है कि आपने {name} में साइन इन किया है या नहीं…",
 
   // switching accounts: Clauseo still stopping a login it may no longer use (new, 0048)
   "Switching accounts.": "खाता बदला जा रहा है।",
