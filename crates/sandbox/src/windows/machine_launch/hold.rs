@@ -10,8 +10,9 @@
 //! [`SETTLE_MS`]: the guard counts only when the deny is still first at each read.
 //!
 //! The removal deletes the access value only while it is still exactly the bytes Clauseo wrote
-//! and no launch value is left that DCOM would then move, and takes Clauseo's bytes out of
-//! `MachineLaunchRestrictionOld` when they landed there. Pure; tested on every OS.
+//! and no launch value is left that DCOM would then move, and takes any value Clauseo wrote (the
+//! last [`HISTORY_MAX`]) out of `MachineLaunchRestrictionOld`. A Group Policy access value set
+//! means nothing is copied: COM's descriptor may then be the policy's. Pure; tested on every OS.
 
 use super::seam::{Backup, LaunchStore, Raw, StoreError};
 use super::{Guard, LaunchSd};
@@ -20,12 +21,31 @@ use crate::windows::sids::Sid;
 /// The waits before each read-back: 250 ms, then up to 1 s after the write.
 pub const SETTLE_MS: [u64; 2] = [250, 750];
 
+/// How many of the values Clauseo wrote the backup keeps ([`Backup::history`]).
+pub const HISTORY_MAX: usize = 8;
+
+/// The backup's history once `bytes` is written over `before`: `bytes` last, each value once,
+/// the oldest dropped past [`HISTORY_MAX`].
+pub(super) fn history(before: Option<&Backup>, bytes: &[u8]) -> Vec<Vec<u8>> {
+    let mut history: Vec<Vec<u8>> = before.map(|kept| kept.history.clone()).unwrap_or_default();
+    history.retain(|old| old != bytes);
+    history.push(bytes.to_vec());
+    let excess = history.len().saturating_sub(HISTORY_MAX);
+    history.drain(..excess);
+    history
+}
+
 /// The access value to write before the launch value: COM's effective descriptor when there is
 /// no value; `None` when there is one (of any type), which is never touched.
 pub(super) fn access_to_add(
     store: &mut impl LaunchStore,
 ) -> Result<Option<Vec<u8>>, (Guard, String)> {
     match store.access() {
+        // COM's descriptor may then be the policy's, which must not become the local value.
+        Ok(Raw::Absent) if store.access_policy().map_err(|why| (Guard::Failed, why))? => {
+            let why = "a Group Policy MachineAccessRestriction is set, so nothing was copied";
+            Err((Guard::PolicyOverrides, why.to_owned()))
+        }
         Ok(Raw::Absent) => store.effective_access().map(Some).map_err(|why| {
             let why = format!("COM's machine access can't be read, so nothing was written: {why}");
             (Guard::AccessUnknown, why)
@@ -66,7 +86,7 @@ pub(super) fn verify(
     Ok(())
 }
 
-/// The removal's last part, before the backup goes: Clauseo's bytes taken out of
+/// The removal's last part, before the backup goes: any value Clauseo wrote taken out of
 /// `MachineLaunchRestrictionOld`, and the access value Clauseo added deleted, each only when
 /// byte-identical to what Clauseo wrote; anything else is left and logged.
 pub(super) fn remove_extras(
@@ -76,7 +96,8 @@ pub(super) fn remove_extras(
     let Some(backup) = backup else {
         return Ok(());
     };
-    if matches!(store.old()?, Raw::Binary(old) if old == backup.written) {
+    let ours = |old: &[u8]| backup.written == old || backup.history.iter().any(|w| w == old);
+    if matches!(store.old()?, Raw::Binary(old) if ours(&old)) {
         store.delete_old()?;
         tracing::info!("Clauseo's value was taken out of MachineLaunchRestrictionOld");
     }
@@ -103,4 +124,31 @@ pub(super) fn remove_extras(
         }
     }
     Ok(())
+}
+
+/// `History`'s bytes: each value as its length (`u32`, little-endian), then its bytes.
+#[cfg(any(windows, test))]
+pub(super) fn pack(values: &[Vec<u8>]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for value in values {
+        out.extend_from_slice(&u32::try_from(value.len()).unwrap_or(0).to_le_bytes());
+        out.extend_from_slice(value);
+    }
+    out
+}
+
+/// The values in `History`'s bytes; a cut-short tail is dropped (it only means less of `…Old`
+/// is recognised as Clauseo's).
+#[cfg(any(windows, test))]
+pub(super) fn unpack(mut bytes: &[u8]) -> Vec<Vec<u8>> {
+    let mut values = Vec::new();
+    while let Some((len, rest)) = bytes.split_first_chunk::<4>() {
+        let len = usize::try_from(u32::from_le_bytes(*len)).unwrap_or(usize::MAX);
+        let Some((value, rest)) = rest.split_at_checked(len) else {
+            break;
+        };
+        values.push(value.to_vec());
+        bytes = rest;
+    }
+    values
 }

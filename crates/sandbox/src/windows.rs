@@ -140,7 +140,8 @@ pub use folder::{folder_support, label_support};
 pub use marker::setup_state;
 #[cfg(windows)]
 pub use record::{
-    RecordError, sandbox_data_dir, sandbox_group_sid, sandbox_owner_sid, sandbox_pool_sids,
+    RecordError, sandbox_data_dir, sandbox_group_sid, sandbox_launch_deny, sandbox_owner_sid,
+    sandbox_pool_sids,
 };
 pub use set_aside::{
     Checked as SetAsideChecked, Entry as SetAsideEntry, Reason as SetAsideReason,

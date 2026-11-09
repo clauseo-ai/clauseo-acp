@@ -18,6 +18,8 @@ pub(super) struct FakeStore {
     pub(super) state: Option<String>,
     /// `MachineAccessRestriction`; present by default.
     pub(super) access: Raw,
+    /// Whether Group Policy's `MachineAccessRestriction` is set.
+    pub(super) access_policy: bool,
     /// What COM gives as its effective machine access descriptor.
     pub(super) effective: Result<Vec<u8>, String>,
     /// `MachineLaunchRestrictionOld`.
@@ -39,6 +41,7 @@ impl FakeStore {
             backup: None,
             state: None,
             access: Raw::Binary(machine_access()),
+            access_policy: false,
             effective: Ok(machine_access()),
             old: Raw::Absent,
             moves: false,
@@ -123,6 +126,11 @@ impl LaunchStore for FakeStore {
     fn access(&mut self) -> Result<Raw, StoreError> {
         self.call("access")?;
         Ok(self.access.clone())
+    }
+
+    fn access_policy(&mut self) -> Result<bool, StoreError> {
+        self.call("access_policy")?;
+        Ok(self.access_policy)
     }
 
     fn effective_access(&mut self) -> Result<Vec<u8>, StoreError> {

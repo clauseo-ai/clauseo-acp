@@ -2,14 +2,15 @@
 //! `MachineLaunchRestriction`, `MachineAccessRestriction` and `MachineLaunchRestrictionOld`,
 //! COM's effective access descriptor (`super::effective`), Group Policy's
 //! `HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DCOM` value of the same name (its SDDL
-//! converted by Windows), the backup in the record's subkey `MachineLaunch` (protected DACL:
-//! SYSTEM and Administrators only, so the pool, which reads the record, can't read or change
-//! it), and the state in the record itself, which this never makes: a missing record fails the
-//! state's write.
+//! converted by Windows) and whether its `MachineAccessRestriction` is set, the backup in the
+//! record's subkey `MachineLaunch` (protected DACL: SYSTEM and Administrators only, so the pool,
+//! which reads the record, can't read or change it), and the state in the record itself, which
+//! this never makes: a missing record fails the state's write.
 //!
 //! The backup's values: `Written` (`REG_BINARY`), the bytes last written, set first;
 //! `PutBack` (`REG_DWORD`, 1 once a run has put the deny back since the first write);
 //! `AccessAdded` (`REG_BINARY`, only when Clauseo wrote `MachineAccessRestriction`: those
+//! bytes); `History` (`REG_BINARY`, the last values Clauseo wrote, each as a `u32` length and its
 //! bytes); then `Original` (`REG_BINARY`), the value before Clauseo's first change, empty when
 //! there was none. A backup counts only once `Original` is there, so a write cut short between
 //! the two leaves none, and the value, not yet changed, is taken as the original again.
@@ -41,6 +42,7 @@ use windows::Win32::System::Registry::{
 use windows::core::{HSTRING, PCWSTR};
 
 use super::STATE_VALUE;
+use super::hold::{pack, unpack};
 use super::seam::{Backup, LaunchStore, Raw, StoreError};
 
 /// The key COM reads the value from.
@@ -65,6 +67,8 @@ const WRITTEN: &str = "Written";
 const PUT_BACK: &str = "PutBack";
 /// The backup's value holding the access value Clauseo wrote (`Backup::access`).
 const ACCESS_ADDED: &str = "AccessAdded";
+/// The backup's value holding every value Clauseo wrote (`Backup::history`).
+const HISTORY: &str = "History";
 /// `WRITE_DAC`.
 const WRITE_DAC: REG_SAM_FLAGS = REG_SAM_FLAGS(0x0004_0000);
 /// `WRITE_OWNER`.
@@ -129,11 +133,13 @@ impl LaunchStore for WindowsLaunchStore {
             Some(_) => true,
         };
         let access = binary(get(&key, ACCESS_ADDED)?, ACCESS_ADDED)?;
+        let history = binary(get(&key, HISTORY)?, HISTORY)?.map_or_else(Vec::new, |b| unpack(&b));
         Ok(Some(Backup {
             original: (!original.is_empty()).then_some(original),
             written,
             put_back,
             access,
+            history,
         }))
     }
 
@@ -144,6 +150,7 @@ impl LaunchStore for WindowsLaunchStore {
         set(&key, WRITTEN, REG_BINARY, &backup.written)?;
         let put_back = u32::from(backup.put_back).to_le_bytes();
         set(&key, PUT_BACK, REG_DWORD, &put_back)?;
+        set(&key, HISTORY, REG_BINARY, &pack(&backup.history))?;
         match &backup.access {
             Some(access) => set(&key, ACCESS_ADDED, REG_BINARY, access)?,
             None => delete_value(&self.backup_key(), ACCESS_ADDED)?,
@@ -185,6 +192,10 @@ impl LaunchStore for WindowsLaunchStore {
 
     fn access(&mut self) -> Result<Raw, StoreError> {
         ole(ACCESS)
+    }
+
+    fn access_policy(&mut self) -> Result<bool, StoreError> {
+        Ok(get(POLICY_KEY, ACCESS)?.is_some())
     }
 
     fn effective_access(&mut self) -> Result<Vec<u8>, StoreError> {

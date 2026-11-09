@@ -20,11 +20,13 @@
 //! What the guard achieved goes to the record as [`Guard::text`] (`MachineLaunchDeny`,
 //! `REG_SZ`, readable by Users, so the app and firm IT can read it): `applied`, `policy`, or
 //! `degraded: ...`. A degraded guard never fails the set-up: WSL's other layers stay. It is
-//! never recorded as `applied`: the guard fails closed to `degraded`.
+//! never recorded as `applied`: the guard fails closed to `degraded`. The app reads the state
+//! typed ([`state`]), for Settings.
 //!
 //! [`remove`] takes off only our exact deny. When the value is exactly what Clauseo's first
 //! write left, with no put-back since, it puts the backup back byte for byte instead, deleting
-//! the value when there was none. Then the access value and `MachineLaunchRestrictionOld` are
+//! the value when there was none; when the value is gone (DCOM moved it), the original still
+//! goes back. Then the access value and `MachineLaunchRestrictionOld` are
 //! cleaned of what Clauseo wrote ([`hold`]). Pure; tested on every OS.
 
 use crate::windows::sids::Sid;
@@ -32,6 +34,7 @@ use crate::windows::sids::Sid;
 pub mod hold;
 pub mod sd;
 pub mod seam;
+pub mod state;
 
 #[cfg(windows)]
 mod effective;
@@ -48,6 +51,7 @@ mod tests_hold;
 
 pub use sd::{DENY_MASK, LaunchSd, SdError};
 pub use seam::{Backup, LaunchStore, Raw, StoreError};
+pub use state::{DegradedReason, LaunchDenyState};
 
 /// The record's value holding the guard's state, [`Guard::text`].
 pub const STATE_VALUE: &str = "MachineLaunchDeny";
@@ -74,6 +78,17 @@ pub enum Guard {
 }
 
 impl Guard {
+    /// Every state, in declaration order.
+    pub const ALL: [Guard; 7] = [
+        Guard::Applied,
+        Guard::ByPolicy,
+        Guard::PolicyOverrides,
+        Guard::Unparsable,
+        Guard::Failed,
+        Guard::Moved,
+        Guard::AccessUnknown,
+    ];
+
     /// The record's text for this state.
     pub fn text(self) -> &'static str {
         match self {
@@ -250,6 +265,7 @@ fn apply_value(store: &mut impl LaunchStore, group: &Sid) -> Result<Change, (Gua
         access: access
             .clone()
             .or_else(|| before.as_ref().and_then(|kept| kept.access.clone())),
+        history: hold::history(before.as_ref(), &bytes),
         original: before.map_or(original, |kept| kept.original),
         written: bytes.clone(),
     };
@@ -264,8 +280,9 @@ fn apply_value(store: &mut impl LaunchStore, group: &Sid) -> Result<Change, (Gua
 
 /// Takes the guard for `group` off as the module says, cleans the access value and
 /// `MachineLaunchRestrictionOld` of Clauseo's bytes, then deletes the backup and the state.
-/// The backup goes back byte for byte only when the value is what the first write left and no
-/// put-back has happened since; otherwise only our exact deny comes off. A failed read or write
+/// The backup goes back byte for byte when the value is what the first write left and no
+/// put-back has happened since, or when the value is gone (DCOM moved it); otherwise only our
+/// exact deny comes off. A failed read or write
 /// is the error, the backup kept for the next run.
 pub fn remove(store: &mut impl LaunchStore, group: &Sid) -> Result<LaunchRemoved, StoreError> {
     let backup = store.backup()?;
@@ -284,7 +301,14 @@ pub fn remove(store: &mut impl LaunchStore, group: &Sid) -> Result<LaunchRemoved
                 LaunchRemoved::Deleted
             }
         }
-        Raw::Absent => LaunchRemoved::Nothing,
+        // Gone (DCOM moved it, or it was deleted): the original still goes back.
+        Raw::Absent => match backup.as_ref().and_then(|kept| kept.original.as_ref()) {
+            Some(original) => {
+                store.write(original)?;
+                LaunchRemoved::Restored
+            }
+            None => LaunchRemoved::Nothing,
+        },
         Raw::OtherType => {
             LaunchRemoved::Left("MachineLaunchRestriction isn't REG_BINARY".to_owned())
         }

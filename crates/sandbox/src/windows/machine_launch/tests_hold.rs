@@ -4,8 +4,8 @@
 //! removal deletes only the access value Clauseo added, byte-identical, and cleans `…Old`.
 
 use super::fake::{FakeStore, machine_access};
-use super::hold::SETTLE_MS;
-use super::test_sd::{A, GROUP, ace, descriptor, sid, windows_11};
+use super::hold::{HISTORY_MAX, SETTLE_MS, pack, unpack};
+use super::test_sd::{A, GROUP, OTHER_GROUP, ace, descriptor, sid, windows_11, windows_11_aces};
 use super::{Change, Guard, LaunchRemoved, LaunchSd, Raw, apply, remove};
 
 /// A machine with no launch value and no access value.
@@ -168,7 +168,8 @@ fn removal_takes_clauseos_bytes_out_of_old_and_leaves_anyone_elses() {
         panic!("not moved")
     };
     assert_eq!(store.backup.as_ref().map(|b| b.written.clone()), Some(ours));
-    assert_eq!(remove(&mut store, &sid(GROUP)), Ok(LaunchRemoved::Nothing));
+    assert_eq!(remove(&mut store, &sid(GROUP)), Ok(LaunchRemoved::Restored));
+    assert_eq!(store.value, Raw::Binary(windows_11()));
     assert_eq!(store.old, Raw::Absent);
     assert!(store.calls.contains(&"delete_old"));
     assert_eq!((store.backup.clone(), store.state.clone()), (None, None));
@@ -179,4 +180,99 @@ fn removal_takes_clauseos_bytes_out_of_old_and_leaves_anyone_elses() {
     remove(&mut store, &sid(GROUP)).unwrap();
     assert_eq!(store.old, Raw::Binary(windows_11()));
     assert!(!store.calls.contains(&"delete_old"));
+}
+
+#[test]
+fn a_group_policy_access_value_means_nothing_is_copied() {
+    let mut store = bare();
+    store.access_policy = true;
+    let applied = apply(&mut store, &sid(GROUP));
+    assert_eq!(
+        (applied.guard, applied.change),
+        (Guard::PolicyOverrides, Change::Unchanged)
+    );
+    assert!(
+        applied
+            .why
+            .unwrap()
+            .contains("Group Policy MachineAccessRestriction")
+    );
+    assert!(!store.calls.contains(&"effective_access"));
+    assert_eq!(store.writes(), ["write_state"]);
+    assert_eq!(
+        (store.value.clone(), store.access.clone()),
+        (Raw::Absent, Raw::Absent)
+    );
+    assert_eq!(store.state.as_deref(), Some("degraded: group policy"));
+    // A local access value already there: the policy changes nothing, nothing is copied.
+    let mut store = FakeStore::new(Raw::Binary(windows_11()));
+    store.access_policy = true;
+    assert_eq!(apply(&mut store, &sid(GROUP)).guard, Guard::Applied);
+}
+
+#[test]
+fn removal_takes_any_earlier_write_out_of_old() {
+    // Three writes: the first, then two put-backs after drift, each a different value.
+    let mut store = FakeStore::new(Raw::Binary(windows_11()));
+    apply(&mut store, &sid(GROUP));
+    let Raw::Binary(first) = store.value.clone() else {
+        panic!("not written")
+    };
+    for extra in [0xB, 0x3] {
+        let mut aces = windows_11_aces();
+        aces.push(ace(A, 0, extra, OTHER_GROUP));
+        store.value = Raw::Binary(descriptor(&aces, false));
+        assert_eq!(apply(&mut store, &sid(GROUP)).change, Change::PutBack);
+    }
+    let history = store.backup.clone().unwrap().history;
+    assert_eq!(history.len(), 3);
+    assert_eq!(history.first(), Some(&first));
+    assert_ne!(
+        store.backup.as_ref().map(|b| b.written.clone()),
+        Some(first.clone())
+    );
+    // DCOM moved the first write to `…Old`: still Clauseo's, so it goes.
+    store.old = Raw::Binary(first);
+    remove(&mut store, &sid(GROUP)).unwrap();
+    assert_eq!(store.old, Raw::Absent);
+    // The history keeps the last few, each once, and survives the registry's packing.
+    let mut store = FakeStore::new(Raw::Binary(windows_11()));
+    apply(&mut store, &sid(GROUP));
+    let masks = [0x1, 0x3, 0x5, 0x7, 0x9, 0xB, 0xD, 0xF, 0x11, 0x13];
+    assert_eq!(masks.len(), HISTORY_MAX + 2);
+    for mask in masks {
+        let mut aces = windows_11_aces();
+        aces.push(ace(A, 0, mask, OTHER_GROUP));
+        store.value = Raw::Binary(descriptor(&aces, false));
+        apply(&mut store, &sid(GROUP));
+    }
+    let backup = store.backup.clone().unwrap();
+    assert_eq!(backup.history.len(), HISTORY_MAX);
+    assert_eq!(backup.history.last(), Some(&backup.written));
+    assert_eq!(unpack(&pack(&backup.history)), backup.history);
+    let mut cut = pack(&backup.history);
+    cut.truncate(cut.len() - 1);
+    assert_eq!(unpack(&cut).len(), HISTORY_MAX - 1);
+}
+
+#[test]
+fn removal_restores_the_original_when_the_value_is_gone() {
+    let mut store = FakeStore::new(Raw::Binary(windows_11()));
+    store.moves = true;
+    apply(&mut store, &sid(GROUP));
+    assert_eq!(store.value, Raw::Absent);
+    assert_eq!(remove(&mut store, &sid(GROUP)), Ok(LaunchRemoved::Restored));
+    assert_eq!(store.value, Raw::Binary(windows_11()));
+    // Deleted since (no move): the original goes back too.
+    let mut store = FakeStore::new(Raw::Binary(windows_11()));
+    apply(&mut store, &sid(GROUP));
+    store.value = Raw::Absent;
+    assert_eq!(remove(&mut store, &sid(GROUP)), Ok(LaunchRemoved::Restored));
+    assert_eq!(store.value, Raw::Binary(windows_11()));
+    // No original: nothing to put back.
+    let mut store = bare();
+    store.moves = true;
+    apply(&mut store, &sid(GROUP));
+    assert_eq!(remove(&mut store, &sid(GROUP)), Ok(LaunchRemoved::Nothing));
+    assert_eq!(store.value, Raw::Absent);
 }

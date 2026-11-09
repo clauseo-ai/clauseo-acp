@@ -30,6 +30,9 @@ pub struct Backup {
     /// effective access descriptor, so nothing changes in effect); `None` when it wrote none.
     /// [`super::remove`] deletes the value only while it is still exactly these bytes.
     pub access: Option<Vec<u8>>,
+    /// Every value Clauseo wrote, oldest first, at most [`super::hold::HISTORY_MAX`], the
+    /// last one `written`: the removal takes any of them out of `MachineLaunchRestrictionOld`.
+    pub history: Vec<Vec<u8>>,
 }
 
 /// A failed registry call, in words naming the call and its Windows error code; never a path
@@ -65,6 +68,10 @@ pub trait LaunchStore {
     /// only while this one is there too: without it, it moves a new launch value to
     /// `MachineLaunchRestrictionOld` within milliseconds.
     fn access(&mut self) -> Result<Raw, StoreError>;
+    /// Whether Group Policy's
+    /// `HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DCOM\MachineAccessRestriction` is set (the
+    /// "DCOM: Machine Access Restrictions in SDDL syntax" policy), in any type.
+    fn access_policy(&mut self) -> Result<bool, StoreError>;
     /// The machine access descriptor COM uses now, self-relative
     /// (`CoGetSystemSecurityPermissions(SD_ACCESSRESTRICTIONS)`): Windows' built-in one when
     /// there is no value.
