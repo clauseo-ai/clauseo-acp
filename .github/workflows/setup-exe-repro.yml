@@ -28,7 +28,9 @@ env:
   # release.yml's.
   CARGO_PROFILE_RELEASE_DEBUG: line-tables-only
   CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: packed
-  RUSTFLAGS: "-C force-frame-pointers=yes"
+  # release.yml's Windows rows' rustflags, byte for byte and in order: cargo hashes rustflags into
+  # symbol names. pe-crt-imports.test.mjs fails when the two differ.
+  RUSTFLAGS: "-C force-frame-pointers=yes -C target-feature=+crt-static"
 
 jobs:
   repro:

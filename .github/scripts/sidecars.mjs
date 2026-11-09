@@ -146,7 +146,7 @@ export const SIDECARS = [
   { name: "clauseo-agent-browser", targets: RELEASE_TARGETS, macosHelper: true, place: pinnedAgentBrowser },
   // Parked (host thread, 2026-11-03): the guard's start time was not the cost. If it returns:
   // { name: "clauseo-guard", targets: RELEASE_TARGETS, place: cargoBin("clauseo-guard") },
-  // with -C target-feature=+crt-static on Windows (S20-sidecars.md, "Release flags").
+  // which gets -C target-feature=+crt-static on Windows from the job's flags, as every row.
   // S15's set-up tool, a [[bin]] of the clauseo-sandbox package. Tauri bundles it beside
   // Clauseo.exe as clauseo-sandbox-setup.exe; hooks.nsh runs it in NSIS_HOOK_PREUNINSTALL, and
   // the NSIS template deletes it after that hook.
