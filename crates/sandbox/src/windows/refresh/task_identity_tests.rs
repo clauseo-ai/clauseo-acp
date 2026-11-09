@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use super::task_identity::*;
-use super::{POOL_TASKS, SystemTask, TASKS};
+use super::{SystemTask, TASKS, USER_TASKS};
 use crate::windows::acl_bytes;
 use crate::windows::admin_copy::fake::{Fake, descriptor, locked_dacl};
 use crate::windows::admin_copy::{FULL_ACCESS, Found, READ_EXECUTE};
@@ -15,25 +15,25 @@ use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::sids::Sid;
 use crate::{Blocked, SetupState};
 
-const LAWYER: &str = "S-1-5-21-1-2-3-1001";
+pub(super) const LAWYER: &str = "S-1-5-21-1-2-3-1001";
 const OTHER: &str = "S-1-5-21-1-2-3-1002";
 const EXE: &str = r"C:\Program Files\Clauseo\Sandbox\clauseo-sandbox-setup.exe";
-const SYSTEM: &str = "S-1-5-18";
-const ADMINISTRATORS: &str = "S-1-5-32-544";
+pub(super) const SYSTEM: &str = "S-1-5-18";
+pub(super) const ADMINISTRATORS: &str = "S-1-5-32-544";
 /// LOCAL SYSTEM's name as a German Windows writes it back.
 const GERMAN_SYSTEM: &str = "NT-AUTORITÄT\\SYSTEM";
 
-fn lawyer() -> Sid {
+pub(super) fn lawyer() -> Sid {
     Sid::parse(LAWYER).unwrap()
 }
 
 /// What `register_task` registers as `task` for the lawyer.
-fn registered(task: SystemTask) -> TaskIdentity {
+pub(super) fn registered(task: SystemTask) -> TaskIdentity {
     TaskIdentity::expected(task, &lawyer(), Path::new(EXE), test_descriptor(&lawyer()))
 }
 
 /// `found` against `expected`, read without error.
-fn compare(found: &TaskIdentity, expected: &TaskIdentity) -> TaskCheck {
+pub(super) fn compare(found: &TaskIdentity, expected: &TaskIdentity) -> TaskCheck {
     check(Ok(Some(found)), expected).unwrap()
 }
 
@@ -46,7 +46,7 @@ fn exec(path: &str, arguments: &str) -> TaskAction {
 }
 
 /// The task descriptor with `entries` in place of its DACL, owned by `owner`.
-fn with_entries(owner: &str, entries: &[(u8, u8, u32, &str)]) -> Vec<u8> {
+pub(super) fn with_entries(owner: &str, entries: &[(u8, u8, u32, &str)]) -> Vec<u8> {
     descriptor(owner, Some(entries), true)
 }
 
@@ -205,7 +205,7 @@ fn a_disabled_sweep_task_is_changed() {
         TaskCheck::Differs(Differs::Disabled)
     );
     let mut reader = Reader::adopted();
-    reader.tasks[1].1 = Ok(found);
+    reader.tasks[2].1 = Ok(found);
     assert_eq!(
         repair_reason(&mut reader, SystemTask::Sweep),
         Some(TASK_CHANGED)
@@ -374,22 +374,23 @@ fn the_action_program_must_pass_the_whole_admin_copy_check() {
 }
 
 /// The readiness check's reads, as the lawyer.
-struct Reader {
-    copy: Result<Option<CopyOwner>, String>,
-    tasks: Vec<(SystemTask, Result<TaskIdentity, ReadError>)>,
+pub(super) struct Reader {
+    pub(super) copy: Result<Option<CopyOwner>, String>,
+    pub(super) tasks: Vec<(SystemTask, Result<TaskIdentity, ReadError>)>,
 }
 
 impl Reader {
-    /// A per-user install the lawyer placed, with both tasks registered.
-    fn adopted() -> Reader {
-        let tasks = POOL_TASKS.map(|task| (task, Ok(registered(task))));
+    /// A per-user install the lawyer placed, with its three tasks registered (`USER_TASKS`:
+    /// refresh, stop, sweep).
+    pub(super) fn adopted() -> Reader {
+        let tasks = USER_TASKS.map(|task| (task, Ok(registered(task))));
         Reader {
             copy: Ok(Some(CopyOwner::User(lawyer()))),
             tasks: tasks.to_vec(),
         }
     }
 
-    fn without(mut self, task: SystemTask) -> Reader {
+    pub(super) fn without(mut self, task: SystemTask) -> Reader {
         self.tasks.retain(|(held, _)| *held != task);
         self
     }
@@ -432,14 +433,14 @@ fn readiness_says_missing_changed_or_unchecked_on_a_per_user_install() {
         failed(TASK_MISSING)
     );
     let mut tampered = Reader::adopted();
-    if let Ok(task) = &mut tampered.tasks[1].1 {
+    if let Ok(task) = &mut tampered.tasks[2].1 {
         task.actions = vec![exec(r"C:\Users\lawyer\evil.exe", "--sweep-tasks")];
     }
     assert_eq!(ready(tampered), failed(TASK_CHANGED));
     // A read the Task Scheduler refuses is a changed descriptor; one it can't answer is
     // unchecked, never Ready.
     let mut refused = Reader::adopted();
-    refused.tasks[1].1 = Err(ReadError::Refused);
+    refused.tasks[2].1 = Err(ReadError::Refused);
     assert_eq!(ready(refused), failed(TASK_CHANGED));
     let mut down = Reader::adopted();
     down.tasks[0].1 = Err(ReadError::Failed("CoCreateInstance failed".to_owned()));

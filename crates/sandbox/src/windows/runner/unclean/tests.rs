@@ -169,7 +169,7 @@ impl Markers for Fake {
     fn note(&mut self, line: &str) {
         self.log.push(format!("note {line}"));
     }
-    fn sweep_task_repair(&mut self) -> Option<&'static str> {
+    fn task_repair(&mut self) -> Option<&'static str> {
         self.task_repair
     }
 }

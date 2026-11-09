@@ -62,6 +62,16 @@ fn the_stop_and_sweep_tasks_are_the_refresh_task_but_for_name_argument_limit_and
 }
 
 #[test]
+fn registration_creates_or_updates_and_adds_no_entry_for_the_principal() {
+    // `TASK_CREATE_OR_UPDATE` (0x6) and `TASK_DONT_ADD_PRINCIPAL_ACE` (0x10), nothing else:
+    // the descriptor read back is `task_sddl`'s as given. `task.rs` holds the value to the
+    // `windows` crate's constants at compile time.
+    assert_eq!(REGISTER_FLAGS, 0x16);
+    assert_eq!(REGISTER_FLAGS & 0x10, 0x10, "TASK_DONT_ADD_PRINCIPAL_ACE");
+    assert_eq!(REGISTER_FLAGS & 0x6, 0x6, "TASK_CREATE_OR_UPDATE");
+}
+
+#[test]
 fn both_tasks_take_the_one_descriptor_the_owner_may_read_and_execute() {
     // `register_task` passes `task_sddl(owner)` to the folder and to every task alike: no task
     // takes a descriptor of its own. The owner reads and executes (FRFX): starting a task needs

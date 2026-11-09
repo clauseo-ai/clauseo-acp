@@ -41,7 +41,7 @@ pub const DATA_DIR_NOT_OWNED: &str = "this computer's Clauseo data folder isn't 
 /// back a missing or changed stop or sweep task (`SetupReport::tasks`): its result is
 /// [`SetupExit::Failed`] at [`Step::StopTask`] in these words, and the reason is in the log.
 pub const TASKS_NOT_PUT_BACK: &str = "Clauseo couldn't put back its clean-up task. Repair \
-     Clauseo again, or ask whoever looks after this computer.";
+     Clauseo again.";
 /// The cause when the Secondary Logon service is disabled.
 pub const SECLOGON_DISABLED: &str = "the Secondary Logon service (seclogon) is disabled: IT can \
      set it to start manually";

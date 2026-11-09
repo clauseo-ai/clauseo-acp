@@ -1,8 +1,9 @@
-//! A per-user install's SYSTEM tasks `\Clauseo\SandboxStop` and `\Clauseo\SandboxSweep`, as
-//! the set-up keeps them (`late_steps::stop_task`). `--adopt` registers them when the installer
-//! runs; nothing else did, so a task deleted or changed later stayed so, and every second launch
-//! was refused for `AwaitingSweep` while Settings said ready. The app's repair runs this
-//! set-up, elevated through the admin copy, which now puts them back:
+//! A per-user install's SYSTEM tasks `\Clauseo\SandboxRefresh`, `\Clauseo\SandboxStop` and
+//! `\Clauseo\SandboxSweep` (`refresh::USER_TASKS`), as the set-up keeps them
+//! (`late_steps::stop_task`). `--adopt` registers them when the installer runs; nothing else
+//! did, so a task deleted or changed later stayed so, and every second launch was refused for
+//! `AwaitingSweep` while Settings said ready. The app's repair runs this set-up, elevated
+//! through the admin copy, which now puts them back:
 //!
 //! 1. the program they run, the admin copy, must pass the whole of `admin_copy::check`
 //!    (`Machine::task_exe`): its folders up to the volume root, its folder's entries and its
@@ -15,31 +16,31 @@
 //!    path step 1 checked (`Machine::replace_task`, `refresh::register_task_at`).
 //!
 //! None of this rolls the pool back: a task that can't be put back is logged and named in the
-//! report (`SetupReport::tasks`), and the other task is still tried. The run's result then isn't
+//! report (`SetupReport::tasks`), and the other tasks are still tried. The run's result then isn't
 //! a success (`outcome::exit_of`: exit 3 at `Step::StopTask`, in `TASKS_NOT_PUT_BACK`'s words),
 //! and the readiness check says not ready, so the next repair tries again. A per-machine install's
 //! set-up replaces both tasks on every run instead, as before (`Machine::register_stop_task`).
 
 use super::machine::Machine;
 use super::outcome::cause_of;
-use crate::windows::refresh::POOL_TASKS;
+use crate::windows::refresh::USER_TASKS;
 use crate::windows::refresh::task_identity::{TaskCheck, check};
 use crate::windows::sids::Sid;
 
-/// Puts back each of the per-user install's stop and sweep tasks for the owner `owner` that is
+/// Puts back each of the per-user install's tasks ([`USER_TASKS`]) for the owner `owner` that is
 /// missing or changed, as the module says: `Err` names what couldn't be put back, and why.
 pub(super) fn ensure(machine: &mut impl Machine, owner: &Sid) -> Result<(), String> {
     let exe = machine.task_exe().map_err(|error| {
         let why = format!(
-            "the tasks SandboxStop and SandboxSweep weren't registered, since the program they \
-             would run as SYSTEM failed its check ({})",
+            "the tasks SandboxRefresh, SandboxStop and SandboxSweep weren't registered, since \
+             the program they would run as SYSTEM failed its check ({})",
             cause_of(&error)
         );
         tracing::error!(%why, "the set-up left the sandbox's tasks as they were");
         why
     })?;
     let mut failed = Vec::new();
-    for task in POOL_TASKS {
+    for task in USER_TASKS {
         let name = task.name();
         let checked = machine
             .task_expected(task, owner, &exe)

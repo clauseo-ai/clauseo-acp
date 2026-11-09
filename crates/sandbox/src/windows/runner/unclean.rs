@@ -16,7 +16,10 @@
 //!   ran. One whose sweep completed but owes its final stop is re-marked to await that stop,
 //!   which is requested, and the logon refused. TODO: once slot groups land (two pool users
 //!   share a slot's grants on a matter), the scope becomes the pool user's slot, since an
-//!   escapee of one user still holds the slot group's grants.
+//!   escapee of one user still holds the slot group's grants. Before all that, on a per-user
+//!   install, a SYSTEM task it needs (`refresh::USER_TASKS`) that is missing or changed refuses
+//!   the logon up front, in the readiness check's words: its session's end couldn't ask for the
+//!   sweep, so the launch would run and only the next one would be refused.
 //! - **A launch** ([`await_sweeps`], `clean_close::check_launch`, inside the host's 180 s): any
 //!   marker awaiting a sweep is clean once `SweepSequence` reaches its number. Otherwise the
 //!   launch requests a sweep and waits for it, up to [`SWEEP_WAIT`], and refuses if it still
@@ -56,6 +59,7 @@ use std::time::Duration;
 
 use super::RunExit;
 use super::marker::{MarkerState, Sequences, UncleanSession};
+use crate::windows::refresh::TASK_UNCHECKED;
 use crate::windows::setup::record_values::{STOP_NEXT, SWEEP_NEXT};
 use crate::windows::sids::Sid;
 
@@ -135,16 +139,33 @@ pub trait Markers {
     fn pause(&mut self, pause: Duration);
     /// Says `line` on the outer's stderr: what went wrong but refuses nothing.
     fn note(&mut self, line: &str);
-    /// What the app's repair would mend in `\Clauseo\SandboxSweep` on a per-user install, in
-    /// the readiness check's words (`refresh::sweep_task_repair`: missing, changed, or
-    /// unreadable); `None` while it is the set-up's.
-    fn sweep_task_repair(&mut self) -> Option<&'static str>;
+    /// What the app's repair would mend in the SYSTEM tasks a per-user install needs
+    /// (`refresh::USER_TASKS`), in the readiness check's words (`refresh::tasks_repair`:
+    /// missing, changed, or unreadable); `None` while each is the set-up's, or on a
+    /// per-machine install.
+    fn task_repair(&mut self) -> Option<&'static str>;
 }
 
-/// Why a sweep a marker awaits didn't complete: `waited`, unless the sweep task is missing,
-/// changed or can't be read, which no wait mends: then the readiness check's words for it.
+/// Why a sweep a marker awaits didn't complete: `waited`, unless a task is missing, changed
+/// or can't be read, which no wait mends: then the readiness check's words for it.
 fn unswept(fs: &mut impl Markers, waited: String) -> String {
-    fs.sweep_task_repair().map_or(waited, str::to_owned)
+    fs.task_repair().map_or(waited, str::to_owned)
+}
+
+/// The launch's check of the tasks before the pool user's logon: a task that is missing or
+/// changed refuses it now ([`RunExit::AwaitingSweep`], the readiness check's words), since its
+/// session's end couldn't ask for the sweep (or stop) that the next launch would then wait on.
+/// One that can't be read (the Task Scheduler not answering) is only said: the sweep's own
+/// request at the end says whether it ran.
+fn tasks_ready(fs: &mut impl Markers) -> Result<(), Refused> {
+    match fs.task_repair() {
+        None => Ok(()),
+        Some(words) if words == TASK_UNCHECKED => {
+            fs.note(words);
+            Ok(())
+        }
+        Some(words) => Err(Refused::sweep(words.to_owned())),
+    }
 }
 
 /// The markers, the stale ones removed: those of a pool user the record no longer lists, and
@@ -254,7 +275,9 @@ fn remark_swept(
     sessions
 }
 
-/// F4: whether `pool_user` may log on. `Err` says why not: the stop task was requested when a
+/// F4: whether `pool_user` may log on. `Err` says why not: first, a SYSTEM task the install
+/// needs that is missing or changed refuses it, in the readiness check's words, before any
+/// marker is read ([`Markers::task_repair`]). Then the stop task was requested when a
 /// marker awaits a stop, first or final; a marker awaiting a sweep (a re-mark's, or any other)
 /// is waited for instead, up to [`SWEEP_WAIT`], with no stop requested, since a stop ends every
 /// session. One whose sweep before its final stop completed (now or earlier) is re-marked to
@@ -263,6 +286,7 @@ fn remark_swept(
 /// completed is clean. A clean one that can't be removed refuses nothing: it is noted
 /// ([`Markers::note`]).
 pub fn logon_check(fs: &mut impl Markers, pool_user: &Sid) -> Result<(), Refused> {
+    tasks_ready(fs)?;
     let (sessions, known) = current(fs)
         .map_err(|e| Refused::stop(format!("the session markers can't be read ({e})")))?;
     let ours: Vec<UncleanSession> = sessions

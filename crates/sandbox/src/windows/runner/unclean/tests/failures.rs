@@ -97,3 +97,26 @@ fn a_sweep_refused_while_its_task_is_missing_or_changed_says_to_repair_clauseo()
     let refused = await_sweeps(&mut fake).unwrap_err();
     assert!(refused.contains("didn't finish within 15 s"), "{refused}");
 }
+
+#[test]
+fn a_missing_or_changed_task_refuses_the_logon_before_it_happens() {
+    // The first launch after the sweep task is deleted: no marker awaits anything yet, and
+    // the logon is refused up front rather than at the next launch.
+    for words in [TASK_MISSING, TASK_CHANGED] {
+        let mut fake = Fake::new();
+        fake.task_repair = Some(words);
+        let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
+        assert_eq!(refused, Refused::sweep(words.to_owned()));
+        assert_eq!(refused.exit, RunExit::AwaitingSweep);
+        assert_eq!(
+            fake.log,
+            Vec::<String>::new(),
+            "nothing requested or written"
+        );
+    }
+    // A Task Scheduler that doesn't answer is said, and the logon goes ahead.
+    let mut fake = Fake::new();
+    fake.task_repair = Some(TASK_UNCHECKED);
+    assert_eq!(logon_check(&mut fake, &sid(POOL_A)), Ok(()));
+    assert_eq!(fake.log, [format!("note {TASK_UNCHECKED}")]);
+}

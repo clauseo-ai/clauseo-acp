@@ -83,7 +83,7 @@ fn per_user_and_copyless_set_ups_register_no_per_machine_task() {
     set_up_fresh(&mut machine, &mut FakeAcl::default());
     assert_eq!(machine.calls, fresh_calls());
     assert_eq!(machine.state.stop_task, None);
-    // Per user, the set-up puts back `--adopt`'s tasks instead, here both missing
+    // Per user, the set-up puts back `--adopt`'s tasks instead, here all three missing
     // (`user_tasks.rs`), where the per-machine one registers its own.
     let mut machine = installed("setup-stop-task-user", Some(CopyOwner::User(owner())));
     set_up_fresh(&mut machine, &mut FakeAcl::default());
@@ -95,6 +95,7 @@ fn per_user_and_copyless_set_ups_register_no_per_machine_task() {
     let mut expected = fresh_calls();
     let ensured = [
         "task_exe".to_owned(),
+        format!("replace_task SandboxRefresh {owner}"),
         format!("replace_task SandboxStop {owner}"),
         format!("replace_task SandboxSweep {owner}"),
     ];

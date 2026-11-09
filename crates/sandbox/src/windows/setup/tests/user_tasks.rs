@@ -14,16 +14,17 @@ use crate::windows::refresh::task_identity::{
     INSTANCES_IGNORE_NEW, OnBattery, ReadError, TASK_CHANGED, TASK_MISSING, TASK_UNCHECKED,
     TaskAction, TaskIdentity, TaskReader, TaskTrigger, ready_with_tasks, test_descriptor,
 };
-use crate::windows::refresh::{POOL_TASKS, SystemTask};
+use crate::windows::refresh::{SystemTask, USER_TASKS};
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::setup::result_file::{self, SetupResult};
 use crate::{SetupError, SetupState};
 
-/// A per-user install whose admin copy the owner placed, with both tasks as `--adopt` left them.
+/// A per-user install whose admin copy the owner placed, with its three tasks as `--adopt` left
+/// them.
 fn adopted(test: &str) -> FakeMachine {
     let mut machine = FakeMachine::new(test);
     machine.state.copy_owner = Some(CopyOwner::User(owner()));
-    for task in POOL_TASKS {
+    for task in USER_TASKS {
         let found = Ok(registered_task(task, &owner()));
         machine.state.tasks.insert(task.name().to_owned(), found);
     }
@@ -84,13 +85,16 @@ fn a_missing_task_is_registered_again_by_the_set_up() {
     assert_eq!(
         replaced(&machine, 0),
         [
+            format!("replace_task SandboxRefresh {owner_rid}"),
             format!("replace_task SandboxStop {owner_rid}"),
             format!("replace_task SandboxSweep {owner_rid}")
         ]
     );
-    assert!(holds(&machine, SystemTask::Sweep));
+    for task in USER_TASKS {
+        assert!(holds(&machine, task), "{task:?}");
+    }
     assert_eq!(readiness(&machine), SetupState::Ready);
-    // Idempotent: a re-run finds both tasks the same and touches neither.
+    // Idempotent: a re-run finds every task the same and touches none.
     let from = machine.calls.len();
     let req = request(&mut machine, 0, Vec::new());
     set_up(&mut machine, &mut acl, &req).unwrap();
@@ -183,10 +187,20 @@ fn one_task_that_cant_be_read_or_registered_spares_the_pool_and_the_other_task()
         .tasks
         .insert("SandboxStop".to_owned(), Err(down));
     machine.state.tasks.remove("SandboxSweep");
+    // Every task is checked, and the missing one said over the unreadable one.
+    assert_eq!(
+        readiness(&machine),
+        SetupState::Failed(TASK_MISSING.to_owned())
+    );
+    machine.state.tasks.insert(
+        "SandboxSweep".to_owned(),
+        Ok(registered_task(SystemTask::Sweep, &owner())),
+    );
     assert_eq!(
         readiness(&machine),
         SetupState::Failed(TASK_UNCHECKED.to_owned())
     );
+    machine.state.tasks.remove("SandboxSweep");
     let report = set_up_fresh(&mut machine, &mut FakeAcl::default());
     let why = report.tasks.unwrap_err();
     assert!(why.contains("SandboxStop can't be read"), "{why}");
@@ -208,6 +222,71 @@ fn one_task_that_cant_be_read_or_registered_spares_the_pool_and_the_other_task()
         readiness(&machine),
         SetupState::Failed(TASK_MISSING.to_owned())
     );
+}
+
+#[test]
+fn readiness_says_missing_over_changed_whichever_task_comes_first() {
+    // The VM's case: the stop task, checked first, read as changed, while the sweep task was
+    // gone. The repair puts both back either way; the words say the most it can do.
+    let mut machine = adopted("user-tasks-order");
+    if let Some(Ok(stop)) = machine.state.tasks.get_mut("SandboxStop") {
+        stop.settings.enabled = false;
+    }
+    machine.state.tasks.remove("SandboxSweep");
+    assert_eq!(
+        readiness(&machine),
+        SetupState::Failed(TASK_MISSING.to_owned())
+    );
+    set_up_fresh(&mut machine, &mut FakeAcl::default());
+    assert_eq!(readiness(&machine), SetupState::Ready);
+}
+
+#[test]
+fn the_refresh_task_is_put_back_like_the_others() {
+    // A deleted `\Clauseo` folder takes the refresh task too: the repair registers it again,
+    // for the owner's logon, and readiness waits for it.
+    let mut machine = adopted("user-tasks-refresh");
+    machine.state.tasks.remove("SandboxRefresh");
+    assert_eq!(
+        readiness(&machine),
+        SetupState::Failed(TASK_MISSING.to_owned())
+    );
+    let report = set_up_fresh(&mut machine, &mut FakeAcl::default());
+    assert_eq!(report.tasks, Ok(()));
+    let owner_rid = rid(&owner());
+    assert_eq!(
+        replaced(&machine, 0),
+        [format!("replace_task SandboxRefresh {owner_rid}")]
+    );
+    assert!(holds(&machine, SystemTask::Refresh));
+    assert_eq!(readiness(&machine), SetupState::Ready);
+}
+
+#[test]
+fn a_task_whose_definition_carries_no_descriptor_is_registered_again() {
+    // As the VM read `SandboxStop` back after `\Clauseo` was made again: the same DACL on the
+    // task, but no `<SecurityDescriptor>` in its definition.
+    let mut machine = adopted("user-tasks-no-sd");
+    if let Some(Ok(stop)) = machine.state.tasks.get_mut("SandboxStop") {
+        stop.definition_descriptor = None;
+    }
+    assert_eq!(
+        readiness(&machine),
+        SetupState::Failed(TASK_CHANGED.to_owned())
+    );
+    set_up_fresh(&mut machine, &mut FakeAcl::default());
+    let owner_rid = rid(&owner());
+    assert_eq!(
+        replaced(&machine, 0),
+        [format!("replace_task SandboxStop {owner_rid}")]
+    );
+    // What the registration writes carries the descriptor it was given.
+    let registered = machine.state.tasks.get("SandboxStop").cloned();
+    let carried = registered
+        .and_then(Result::ok)
+        .and_then(|t| t.definition_descriptor);
+    assert_eq!(carried, Some(test_descriptor(&owner())));
+    assert_eq!(readiness(&machine), SetupState::Ready);
 }
 
 #[test]
@@ -279,7 +358,7 @@ fn a_repair_that_cant_put_a_task_back_isnt_a_success_but_keeps_the_pool() {
 }
 
 #[test]
-fn a_repair_that_puts_both_tasks_back_is_a_success() {
+fn a_repair_that_puts_every_task_back_is_a_success() {
     let mut machine = adopted("user-tasks-repair-both");
     machine.state.tasks.clear();
     let report = set_up_fresh(&mut machine, &mut FakeAcl::default());

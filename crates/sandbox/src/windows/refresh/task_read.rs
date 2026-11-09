@@ -4,17 +4,19 @@
 //!   by `--adopt`'s own registration (`register_task_at`, which creates or updates it in one
 //!   call, descriptor included), running the admin copy at the path the set-up checked;
 //! - [`OsTasks`]: the readiness check's reader, as the lawyer, behind
-//!   [`ready_with_pool_tasks`] (`UserSetup::state`) and [`sweep_task_repair`] (a launch refused
-//!   for `AwaitingSweep`). It reads both pool tasks over one connection ([`read_tasks`]), once
-//!   per check: a COM connection to the Task Scheduler service, then for each task a `GetTask`,
-//!   its definition and its descriptor, a few RPCs each (reasoned, not measured: no Windows here).
+//!   [`ready_with_user_tasks`] (`UserSetup::state`) and [`tasks_repair`] (a launch's check
+//!   before the pool user's logon, and its refusal for `AwaitingSweep`). It reads the three
+//!   [`USER_TASKS`] over one connection ([`read_tasks`]), once per check: a COM connection to
+//!   the Task Scheduler service, then for each task a `GetTask`, its definition and its
+//!   descriptor, a few RPCs each (reasoned, not measured: no Windows here).
 
 use std::path::{Path, PathBuf};
 
 use super::staging::sddl_bytes;
-use super::task::{TaskError, TaskRead, read_task, read_tasks, register_task_at};
-use super::task_identity::{ReadError, TaskIdentity, TaskReader, ready_with_tasks, repair_reason};
-use super::{POOL_TASKS, SystemTask, task_sddl};
+use super::task::{TaskError, TaskRead, read_task, read_tasks};
+use super::task_identity::{self, ReadError, TaskIdentity, TaskReader, ready_with_tasks};
+use super::task_register::register_task_at;
+use super::{SystemTask, USER_TASKS, task_sddl};
 use crate::SetupState;
 use crate::windows::admin_copy::{AdminCopyFs, admin_exe, os::WindowsAdminCopy};
 use crate::windows::record::{admin_copy_owner, current_user_sid};
@@ -42,11 +44,11 @@ pub fn read_error(error: TaskError) -> ReadError {
     }
 }
 
-/// The readiness check's reader, as the lawyer: the pool tasks read once, together.
+/// The readiness check's reader, as the lawyer: [`USER_TASKS`] read once, together.
 #[derive(Default)]
 pub struct OsTasks {
-    /// [`POOL_TASKS`] as [`read_tasks`] read them, once asked for.
-    pool: Option<Result<Vec<TaskRead>, TaskError>>,
+    /// [`USER_TASKS`] as [`read_tasks`] read them, once asked for.
+    tasks: Option<Result<Vec<TaskRead>, TaskError>>,
 }
 
 impl TaskReader for OsTasks {
@@ -70,11 +72,11 @@ impl TaskReader for OsTasks {
     }
 
     fn found(&mut self, task: SystemTask) -> Result<Option<TaskIdentity>, ReadError> {
-        let Some(at) = POOL_TASKS.iter().position(|pool| *pool == task) else {
+        let Some(at) = USER_TASKS.iter().position(|known| *known == task) else {
             return read_task(task).map_err(read_error);
         };
-        let pool = self.pool.get_or_insert_with(|| read_tasks(&POOL_TASKS));
-        match pool {
+        let tasks = self.tasks.get_or_insert_with(|| read_tasks(&USER_TASKS));
+        match tasks {
             Ok(read) => read
                 .get(at)
                 .cloned()
@@ -90,12 +92,13 @@ impl TaskReader for OsTasks {
 }
 
 /// `UserSetup::state`'s last step (`task_identity::ready_with_tasks`) on this machine.
-pub fn ready_with_pool_tasks(state: SetupState) -> SetupState {
+pub fn ready_with_user_tasks(state: SetupState) -> SetupState {
     ready_with_tasks(state, &mut OsTasks::default())
 }
 
-/// What a launch refused for `AwaitingSweep` says about `\Clauseo\SandboxSweep`, as the
-/// lawyer reads it (`task_identity::repair_reason`): `None` while it is the set-up's.
-pub fn sweep_task_repair() -> Option<&'static str> {
-    repair_reason(&mut OsTasks::default(), SystemTask::Sweep)
+/// What a launch says about [`USER_TASKS`] before the pool user's logon, and when it is
+/// refused for `AwaitingSweep`, as the lawyer reads them (`task_identity::tasks_repair`):
+/// `None` while each is the set-up's.
+pub fn tasks_repair() -> Option<&'static str> {
+    task_identity::tasks_repair(&mut OsTasks::default())
 }

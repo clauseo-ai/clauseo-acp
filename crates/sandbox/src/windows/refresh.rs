@@ -88,6 +88,8 @@ mod sources;
 mod staging;
 #[cfg(windows)]
 pub mod task;
+#[cfg(test)]
+mod task_descriptor_tests;
 #[cfg(any(windows, test))]
 mod task_folder;
 pub mod task_identity;
@@ -95,6 +97,8 @@ pub mod task_identity;
 mod task_identity_tests;
 #[cfg(windows)]
 pub mod task_read;
+#[cfg(windows)]
+mod task_register;
 #[cfg(test)]
 mod task_tests;
 #[cfg(test)]
@@ -111,24 +115,25 @@ pub(crate) mod windows_tests;
 #[cfg(windows)]
 pub use installed::{installed_setup_sha256, recorded_admin_copy_sha256};
 pub use rules::{
-    EXECUTION_LIMIT, POOL_TASKS, REFRESH_ARG, STAGING_SDDL, STOP_ARG, STOP_EXECUTION_LIMIT,
-    SWEEP_ARG, SWEEP_EXECUTION_LIMIT, SystemTask, TASKS, TEARDOWN, Teardown, action_path, hex,
-    inside_profile, same_path, sddl_matches, task_sddl,
+    EXECUTION_LIMIT, POOL_TASKS, REFRESH_ARG, REGISTER_FLAGS, STAGING_SDDL, STOP_ARG,
+    STOP_EXECUTION_LIMIT, SWEEP_ARG, SWEEP_EXECUTION_LIMIT, SystemTask, TASKS, TEARDOWN, Teardown,
+    USER_TASKS, action_path, hex, inside_profile, same_path, sddl_matches, task_sddl,
 };
 pub use sources::{SourceError, SourceFile, Sources};
 #[cfg(windows)]
 pub use task::{
-    TASK_FOLDER, TaskError, last_refresh_run, read_task, read_tasks, register_task,
-    register_task_at, request_admin_refresh, request_pool_stop, request_pool_sweep,
-    unregister_task,
+    TASK_FOLDER, TaskError, last_refresh_run, read_task, read_tasks, request_admin_refresh,
+    request_pool_stop, request_pool_sweep, unregister_task,
 };
 pub use task_identity::{
     ReadError, TASK_CHANGED, TASK_MISSING, TASK_UNCHECKED, TaskCheck, TaskIdentity,
 };
 #[cfg(windows)]
 pub use task_read::{
-    read_error, ready_with_pool_tasks, replace_task, sweep_task_repair, task_descriptor,
+    read_error, ready_with_user_tasks, replace_task, task_descriptor, tasks_repair,
 };
+#[cfg(windows)]
+pub use task_register::{register_task, register_task_at};
 pub use version::version_not_older;
 #[cfg(windows)]
 pub use windows_refresher::{WindowsRefresher, event_log, run};

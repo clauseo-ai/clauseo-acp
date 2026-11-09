@@ -1824,27 +1824,58 @@ the delete, and so the registration, with that error: a user who could make the 
 the install, but not take it over. A folder an administrator made, owned by that administrator's
 own SID rather than Administrators, is deleted and made again, which loses nothing.
 
-**Per user, after install.** Nothing but `--adopt` registered the per-user tasks, so a stop or
-sweep task deleted or changed later stayed that way: every second launch was refused for
-`AwaitingSweep` while Settings said ready. Now the per-user set-up (the app's repair, run
-through the admin copy) reads both back and compares them by meaning with what `register_task`
-makes (`refresh::task_identity`). The fields compared: the principal's SID and run level, the
-program (canonical path) and argument, the triggers, enabled, start on demand, battery
-behaviour, the instance policy, and the descriptor's owner, group and set of entries. A missing
-task, one that differs, or one the set-up may not read is registered again, or updated in
-place, by `register_task`. It runs the path the set-up checked, and only once the copy passes
-the whole of `admin_copy::check`. A failure here never rolls the pool back: it is named in the
-report (`SetupReport::tasks`), and the other task is still tried. The run still isn't a
-success: the setup exe exits 3 (`SetupExit::Failed`, `outcome::exit_of`), and
-`setup-result.json` has the step "registering the sandbox's stop and sweep tasks" and the cause
-"Clauseo couldn't put back its clean-up task. Repair Clauseo again, or ask whoever looks after
-this computer." (`TASKS_NOT_PUT_BACK`). The repair (`UserSetup`'s `SandboxSetup::run`)
-returns `SetupError::Failed` with those words alone. The readiness check (`UserSetup::state`) reads the same two
-tasks as the lawyer. A `Ready` with either task missing, changed or unreadable becomes
-`Failed`, in these words: "Clauseo's clean-up task is missing. Repair Clauseo to put it back.",
-"Clauseo's clean-up task has been changed. Repair Clauseo to put it back.", or "Clauseo couldn't
-check its clean-up task because Windows Task Scheduler didn't respond. Restart the computer; if
-this message stays, repair Clauseo." A launch refused for `AwaitingSweep` gives the same words
+**Per user, after install.** Nothing but `--adopt` registered the per-user tasks, so a task
+deleted or changed later stayed that way: every second launch was refused for `AwaitingSweep`
+while Settings said ready. Now one list, `refresh::USER_TASKS` (the refresh, stop and sweep
+tasks, all that `--adopt` registers per user), is what the per-user set-up puts back, what the
+readiness check reads and what a launch checks. The per-user set-up (the app's repair, run
+elevated through the admin copy) reads each back and compares it by meaning with what
+`register_task` makes (`refresh::task_identity`). The fields compared: the principal's SID and
+run level, the program (canonical path) and argument, the triggers (the refresh task's logon
+trigger for the owner included), enabled, start on demand, battery behaviour, the instance
+policy, and two descriptors: the task's, and the one its definition carries (the XML's
+`<SecurityDescriptor>`). A definition that carries none counts as changed. For each
+descriptor: the owner must match; every entry the set-up gives must be there with exactly its
+type, mask and SID; and extra entries are allowed only when they are allow entries for SYSTEM or
+Administrators, who already have full control. Any other extra entry (Users, Everyone, a pool
+user, a second or wider one for the lawyer, any deny entry) counts as changed
+(`task_identity::same_descriptor`).
+
+Measured on the VM (Server 2025): the standard lawyer can read every task back (`GetFolder`,
+`GetTask`, `.Xml`, `.Definition`, `GetSecurityDescriptor`). The read-back DACL was
+`SY FA, BA FA, <lawyer> 0x1200a9, SY FR`. Registering without `TASK_DONT_ADD_PRINCIPAL_ACE`
+makes Windows add `(A;;FR;;;SY)` for the principal, and the old exact compare called every
+freshly registered task changed, so a repair never reached Ready. The tasks are now registered
+with that flag (`refresh::REGISTER_FLAGS`, create or update plus 0x10). Microsoft documents
+that the flag only stops the principal's entry being added; it doesn't change who runs the
+task or who may start it. The compare still accepts tasks registered before the flag. After
+`\Clauseo` was deleted and made again, the VM read `SandboxStop`'s XML back without its
+`<SecurityDescriptor>`, so registration now also sets the definition's own descriptor
+(`IRegistrationInfo::SecurityDescriptor`) to the same `task_sddl`. A deleted `\Clauseo`
+read as `0x80070002` (`ERROR_FILE_NOT_FOUND`); it and `0x80070003` both count as missing.
+
+A missing task, one that differs, or one the set-up may not read is registered again, or
+updated in place, by `register_task`: the one registration `--adopt` uses too
+(`refresh::task_register`), so the definition written is the same. It runs the path the set-up
+checked, and only once the copy passes the whole of `admin_copy::check`. A failure here never
+rolls the pool back: it is named in the report (`SetupReport::tasks`), and the other tasks are
+still tried. The run still isn't a success: the setup exe exits 3 (`SetupExit::Failed`,
+`outcome::exit_of`), and `setup-result.json` has the step "registering the sandbox's stop and
+sweep tasks" and the cause "Clauseo couldn't put back its clean-up task. Repair Clauseo again."
+(`TASKS_NOT_PUT_BACK`). The repair (`UserSetup`'s `SandboxSetup::run`) returns
+`SetupError::Failed` with those words alone.
+
+The readiness check (`UserSetup::state`) reads the same tasks as the lawyer, checks every one,
+and says the most a repair can do: missing over changed over couldn't-check
+(`task_identity::tasks_repair`). A `Ready` with any task missing, changed or unreadable becomes
+`Failed`, in these words: "Clauseo's clean-up task is missing. Repair Clauseo to put it
+back.", "Clauseo's clean-up task has been changed. Repair Clauseo to put it back.", or
+"Clauseo couldn't check its clean-up task because Windows Task Scheduler didn't respond.
+Restart the computer; if this message stays, repair Clauseo." The outer runner reads them too,
+before the pool user's logon (`runner::unclean::logon_check`): a missing or changed task
+refuses the launch up front with `RunExit::AwaitingSweep` and those words, rather than letting
+it run with no sweep to ask for at its end and refusing the next one. A Task Scheduler that
+doesn't answer is only noted there. A launch refused for `AwaitingSweep` gives the same words
 instead of "didn't finish". The host doesn't carry the words to Settings yet (R17 PR-E).
 
 **Per machine.** A per-machine `--adopt` has no owner to name in the descriptor, so it registers

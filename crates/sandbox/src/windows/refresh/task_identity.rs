@@ -3,14 +3,17 @@
 //! name Windows reads back) and run level, the one action's program (its path canonicalised) and
 //! argument, the triggers, the settings that decide whether the task runs at all (enabled, start
 //! on demand, start and keep running on battery, what a second start does), and the descriptor
-//! by its owner, group and set of entries. A task of the right name that differs in any of them
-//! is changed, and a per-user set-up registers it again (`setup::user_tasks`).
+//! by its owner, group and entries (every one the set-up gives, exactly, and nothing more
+//! but what Windows adds for SYSTEM or Administrators), on the task and in its definition. A
+//! task of the right name that differs in any of them is changed, and a per-user set-up
+//! registers it again (`setup::user_tasks`).
 //!
 //! The same comparison is the readiness check's (`UserSetup::state`, [`ready_with_tasks`]) and
-//! the `AwaitingSweep` refusal's ([`repair_reason`]): on a per-user install, a stop or sweep task
-//! that is missing, changed or can't be read makes the set-up not ready, in [`TASK_MISSING`]'s,
-//! [`TASK_CHANGED`]'s or [`TASK_UNCHECKED`]'s words, so the app's repair runs the set-up, which
-//! puts it back. A per-machine install is left as it was: its set-up replaces both tasks on every
+//! the launch's ([`tasks_repair`]): on a per-user install, any of [`USER_TASKS`] (the refresh,
+//! stop and sweep tasks) that is missing, changed or can't be read makes the set-up not ready,
+//! in [`TASK_MISSING`]'s, [`TASK_CHANGED`]'s or [`TASK_UNCHECKED`]'s words (every task checked,
+//! the first of those that applies said), so the app's repair runs the set-up, which puts it
+//! back. A per-machine install is left as it was: its set-up replaces both tasks on every
 //! run (`late_steps::stop_task`).
 //!
 //! Before a per-user set-up registers anything, the action's program is held to the whole of
@@ -25,7 +28,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use super::rules::action_path;
-use super::{POOL_TASKS, SystemTask};
+use super::{SystemTask, USER_TASKS};
 use crate::windows::acl_bytes::{self, Acl, Descriptor};
 use crate::windows::admin_copy::{self, AdminCopyFs};
 use crate::windows::setup::record_values::CopyOwner;
@@ -44,6 +47,8 @@ pub const TASK_UNCHECKED: &str = "Clauseo couldn't check its clean-up task becau
 
 /// LOCAL SYSTEM, as `register_task` names the principal.
 const SYSTEM: &str = "S-1-5-18";
+/// BUILTIN\Administrators.
+const ADMINISTRATORS: &str = "S-1-5-32-544";
 /// `TASK_RUNLEVEL_HIGHEST`.
 pub const RUN_LEVEL_HIGHEST: i32 = 1;
 /// `TASK_INSTANCES_QUEUE`: a start while one runs waits for it.
@@ -130,6 +135,10 @@ pub struct TaskIdentity {
     pub settings: TaskSettings,
     /// The task's owner and DACL, as a self-relative descriptor.
     pub descriptor: Vec<u8>,
+    /// The descriptor its definition carries (`IRegistrationInfo::SecurityDescriptor`, the
+    /// XML's `<SecurityDescriptor>`) as a self-relative descriptor: `None` when it carries
+    /// none, or one that can't be read.
+    pub definition_descriptor: Option<Vec<u8>>,
 }
 
 impl TaskIdentity {
@@ -162,6 +171,7 @@ impl TaskIdentity {
                     INSTANCES_IGNORE_NEW
                 },
             },
+            definition_descriptor: Some(descriptor.clone()),
             descriptor,
         }
     }
@@ -178,7 +188,8 @@ pub enum Differs {
     Arguments,
     /// Its triggers aren't the task's.
     Triggers,
-    /// Its descriptor isn't `task_sddl`'s for the owner, or this caller may not read it.
+    /// Its descriptor, or the one its definition carries, isn't `task_sddl`'s for the owner (a
+    /// definition that carries none included), or this caller may not read it.
     Descriptor,
     /// It is disabled.
     Disabled,
@@ -292,6 +303,16 @@ fn differs(found: &TaskIdentity, expected: &TaskIdentity) -> Option<Differs> {
             same_descriptor(&found.descriptor, &expected.descriptor),
             Differs::Descriptor,
         ),
+        (
+            found
+                .definition_descriptor
+                .as_deref()
+                .is_some_and(|carried| {
+                    let want = expected.definition_descriptor.as_deref();
+                    same_descriptor(carried, want.unwrap_or(&expected.descriptor))
+                }),
+            Differs::Descriptor,
+        ),
     ];
     parts
         .into_iter()
@@ -339,10 +360,15 @@ pub fn principal_sid(name: &str, lookup: impl FnOnce(&str) -> Option<Sid>) -> St
     }
 }
 
-/// Whether the self-relative descriptors `found` and `expected` mean the same: the same owner,
-/// the same group when `expected` names one (a group grants nothing on a task), and the same set
-/// of DACL entries, each by type, inheritance flags (inherited or not), rights (generic ones
-/// mapped to the file rights the Task Scheduler checks) and SID, in any order.
+/// Whether the self-relative descriptor `found` is `expected`'s as Windows keeps it: the same
+/// owner, the same group when `expected` names one (a group grants nothing on a task), every
+/// DACL entry of `expected` present exactly (type, inheritance flags but inherited or not,
+/// rights with generic ones mapped to the file rights the Task Scheduler checks, and SID), and
+/// nothing else but allow entries for SYSTEM or Administrators. Windows adds those itself: a
+/// registration names its principal, LOCAL SYSTEM, read access (`(A;;FR;;;SY)`, read back on
+/// Server 2025) unless `TASK_DONT_ADD_PRINCIPAL_ACE` is passed. They grant nothing to anyone
+/// who doesn't already hold full control. Any other entry (Users, Everyone, a pool user, a wider
+/// or second entry for the owner, any deny entry) is a change.
 fn same_descriptor(found: &[u8], expected: &[u8]) -> bool {
     let owner = acl_bytes::owner_sid(found);
     if owner.is_none() || owner != acl_bytes::owner_sid(expected) {
@@ -353,8 +379,19 @@ fn same_descriptor(found: &[u8], expected: &[u8]) -> bool {
     {
         return false;
     }
-    let entries = entries(found);
-    entries.is_some() && entries == self::entries(expected)
+    let (Some(found), Some(expected)) = (entries(found), entries(expected)) else {
+        return false;
+    };
+    expected.is_subset(&found)
+        && found
+            .difference(&expected)
+            .all(|(kind, _, _, sid)| *kind == acl_bytes::ALLOWED && windows_adds_for(sid))
+}
+
+/// Whether `sid` (as bytes) is LOCAL SYSTEM or Administrators, who hold full control of the
+/// task already and may be given more entries by Windows.
+fn windows_adds_for(sid: &[u8]) -> bool {
+    acl_bytes::sid_text(sid).is_some_and(|sid| [SYSTEM, ADMINISTRATORS].contains(&sid.as_str()))
 }
 
 /// The group of the self-relative descriptor `bytes`, when it holds one: its offset is the
@@ -468,17 +505,29 @@ pub fn repair_reason(reader: &mut dyn TaskReader, task: SystemTask) -> Option<&'
     }
 }
 
+/// What the set-up's repair would mend in any of [`USER_TASKS`], each checked
+/// ([`repair_reason`]), in the words that say the most a repair can do: [`TASK_MISSING`] over
+/// [`TASK_CHANGED`] over [`TASK_UNCHECKED`]. `None` when every one is the set-up's.
+pub fn tasks_repair(reader: &mut dyn TaskReader) -> Option<&'static str> {
+    let rank = |words: &&str| {
+        [TASK_MISSING, TASK_CHANGED, TASK_UNCHECKED]
+            .iter()
+            .position(|known| known == words)
+    };
+    USER_TASKS
+        .into_iter()
+        .filter_map(|task| repair_reason(reader, task))
+        .min_by_key(rank)
+}
+
 /// The readiness check's last step: `state` as it is unless it is [`SetupState::Ready`] and a
-/// stop or sweep task needs a repair ([`repair_reason`]), which is [`SetupState::Failed`] in its
-/// words: not ready, and the app's "Set up again" runs the repair.
+/// task needs a repair ([`tasks_repair`]), which is [`SetupState::Failed`] in its words: not
+/// ready, and the app's "Set up again" runs the repair.
 pub fn ready_with_tasks(state: SetupState, reader: &mut dyn TaskReader) -> SetupState {
     if state != SetupState::Ready {
         return state;
     }
-    POOL_TASKS
-        .into_iter()
-        .find_map(|task| repair_reason(reader, task))
-        .map_or(state, |words| SetupState::Failed(words.to_owned()))
+    tasks_repair(reader).map_or(state, |words| SetupState::Failed(words.to_owned()))
 }
 
 /// `task_sddl(owner)`'s meaning as bytes, as Windows would make them, for the tests on every OS:
@@ -488,7 +537,6 @@ pub fn ready_with_tasks(state: SetupState, reader: &mut dyn TaskReader) -> Setup
 pub(crate) fn test_descriptor(owner: &Sid) -> Vec<u8> {
     use crate::windows::admin_copy::fake::descriptor;
     use crate::windows::admin_copy::{FULL_ACCESS, READ_EXECUTE};
-    const ADMINISTRATORS: &str = "S-1-5-32-544";
     let entries = [
         (0, 0, FULL_ACCESS, SYSTEM),
         (0, 0, FULL_ACCESS, ADMINISTRATORS),

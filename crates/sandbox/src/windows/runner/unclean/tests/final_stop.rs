@@ -89,8 +89,8 @@ impl Markers for World {
     fn note(&mut self, line: &str) {
         self.fake.note(line);
     }
-    fn sweep_task_repair(&mut self) -> Option<&'static str> {
-        self.fake.sweep_task_repair()
+    fn task_repair(&mut self) -> Option<&'static str> {
+        self.fake.task_repair()
     }
 }
 
