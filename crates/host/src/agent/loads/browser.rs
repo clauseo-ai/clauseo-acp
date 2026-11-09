@@ -241,10 +241,11 @@ fn browser_entry(
 /// `{}`, so the lawyer's `~/.agent-browser/config.json` is never read), the session's own
 /// downloads folder and Chrome profile (`AGENT_BROWSER_DOWNLOAD_PATH`, `AGENT_BROWSER_PROFILE`,
 /// both under its run folder, so never the lawyer's own profile) and the Chrome the launch prep
-/// found (`AGENT_BROWSER_EXECUTABLE_PATH`). No proxy, stream port or socket folder: the shell
-/// tool has none of the guard's claims.
+/// found (`AGENT_BROWSER_EXECUTABLE_PATH`), and [`IDLE_TIMEOUT_MS`]. No proxy, stream port or
+/// socket folder: the shell tool has none of the guard's claims.
 pub(crate) fn shell_env(inputs: &ShellInputs<'_>) -> BTreeMap<OsString, OsString> {
     [
+        ("AGENT_BROWSER_IDLE_TIMEOUT_MS", OsStr::new(IDLE_TIMEOUT_MS)),
         ("AGENT_BROWSER_SESSION", OsStr::new(inputs.session)),
         ("AGENT_BROWSER_CONFIG", inputs.config.as_os_str()),
         ("AGENT_BROWSER_DOWNLOAD_PATH", inputs.downloads.as_os_str()),
@@ -258,6 +259,15 @@ pub(crate) fn shell_env(inputs: &ShellInputs<'_>) -> BTreeMap<OsString, OsString
     .map(|(name, value)| (OsString::from(name), value.to_owned()))
     .collect()
 }
+
+/// `AGENT_BROWSER_IDLE_TIMEOUT_MS`, in milliseconds: 10 minutes. agent-browser's daemon leaves
+/// the agent's process tree and outlives the session; with no value it closes its Chrome after
+/// an hour idle (`DEFAULT_IDLE_TIMEOUT_MS`, `cli/src/native/daemon.rs:165-173` at v0.41.1). An
+/// explicit value is read as whole milliseconds (`resolve_idle_timeout`, :184-203), and it also
+/// closes a headed browser, which the instructions forbid anyway. The host runs no
+/// `agent-browser close` at the session's end: the timeout is the backstop, and the
+/// instructions ask the agent to close the browser when done.
+pub(crate) const IDLE_TIMEOUT_MS: &str = "600000";
 
 /// What [`shell_env`] fills: plain values, so it is tested without a launch.
 #[derive(Debug, Clone, Copy)]
@@ -309,8 +319,8 @@ mod shell_tests {
 
     use super::*;
 
-    /// The five variables, each exactly once, with the values given: nothing about a proxy, a
-    /// stream port or a socket folder.
+    /// The six variables, each exactly once, with the values given (the idle timeout 10 minutes,
+    /// in milliseconds): nothing about a proxy, a stream port or a socket folder.
     #[test]
     fn shell_env_is_the_session_config_folders_and_chrome() {
         let run = PathBuf::from("/data/run/t-1");
@@ -332,6 +342,7 @@ mod shell_tests {
                 ("AGENT_BROWSER_CONFIG", "/data/browser/agent-browser.json"),
                 ("AGENT_BROWSER_DOWNLOAD_PATH", "/data/run/t-1/downloads"),
                 ("AGENT_BROWSER_EXECUTABLE_PATH", "/opt/chrome"),
+                ("AGENT_BROWSER_IDLE_TIMEOUT_MS", "600000"),
                 ("AGENT_BROWSER_PROFILE", "/data/run/t-1/browser-profile"),
                 ("AGENT_BROWSER_SESSION", "t-1"),
             ]
