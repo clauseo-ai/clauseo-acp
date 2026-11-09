@@ -213,6 +213,9 @@ pub(super) async fn install<T: Timer + Send + Sync>(
             let detail = format!("npm left a link in the install folder: {}", link.display());
             return Err(TryError::retry(&detail, config));
         }
+        // Codex's ARM64 rg.exe gets the VC++ runtime DLL it imports beside it (Windows ARM64;
+        // never fails), before the marker, so its manifest and the receipt include the copy.
+        crate::vcruntime::place(config, &tmp, agent);
         // Codex's unsigned rg.exe moves off PATH under Smart App Control (Windows; never fails),
         // before the marker, so a kept tree's manifest is the settled tree.
         crate::sac::settle(config, &tmp, agent);

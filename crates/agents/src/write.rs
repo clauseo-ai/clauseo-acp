@@ -260,6 +260,17 @@ pub(crate) fn rename(from: &Path, to: &Path) -> io::Result<()> {
     std::fs::rename(from, to)
 }
 
+/// Copies the file `from` to `to`: a new file with the same bytes, never a link to `from`,
+/// synced before this returns. Neither path is followed through a link, and `to` is replaced
+/// when it exists. Codex's VC++ runtime DLL beside its `rg.exe` (`vcruntime`).
+pub(crate) fn copy_file(from: &Path, to: &Path) -> io::Result<u64> {
+    let mut source = open_read(from)?;
+    let mut target = open_truncate(to)?;
+    let copied = io::copy(&mut source, &mut target)?;
+    target.sync_all()?;
+    Ok(copied)
+}
+
 /// Removes the file at `path`; a missing file is fine.
 pub(crate) fn remove_file(path: &Path) -> io::Result<()> {
     match std::fs::remove_file(path) {

@@ -117,8 +117,10 @@
 //! `flate2`, `tar`, `zip`, `thiserror`, `dunce`, `zeroize` (the pasted code and the API
 //! keys); `keyring` on macOS and Windows only (the keychain; none
 //! on Linux); `nix` on Unix and `windows` on Windows (free disk space, the Windows proxy setting,
-//! file ids); `rcgen` with `test-support` only. Never `sandbox`, `tauri` or `tokio`; `settings`
-//! only in tests and the example (the caller passes the data folder and the agent homes in).
+//! file ids, and the signer and version of the VC++ runtime DLL placed beside Codex's ARM64
+//! `rg.exe`: `vcruntime.rs`); `rcgen` with `test-support` only. Never `sandbox`, `tauri` or
+//! `tokio`; `settings` only in tests and the example (the caller passes the data folder and the
+//! agent homes in).
 //!
 //! # Start reading
 //!
@@ -150,6 +152,7 @@ mod snapshot;
 mod state;
 mod status;
 mod sysproxy;
+mod vcruntime;
 mod worker;
 mod write;
 
