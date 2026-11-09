@@ -67,6 +67,50 @@ fn another_process_cannot_be_inspected() {
     async_io::block_on(sleeper.handle.exited());
 }
 
+/// The process-listing sysctls (`KERN_PROC`): outside the jail they name every process with its
+/// owner and parent. In the jail each is refused, for root's processes, the user's and a
+/// `sleep` the test starts outside (by pid and by its own process group), while the jail's own
+/// child still reads. The sandbox checks them as `sysctl-read`, not `process-info-listpids`.
+#[test]
+fn process_listing_sysctls_are_refused() {
+    let j = Jail::new();
+    let spec = LaunchSpec::new(
+        "/bin/sleep".into(),
+        vec!["60".into()],
+        BTreeMap::new(),
+        j.m1(),
+    );
+    let mut sleeper = PassthroughLauncher::new(SpawnOptions::new())
+        .launch(&spec.unwrap())
+        .unwrap();
+    let pid = sleeper.handle.pid().to_string();
+    let pgid = run_outside("/bin/ps", &["-o", "pgid=", "-p", &pid], &j.m1());
+    let pgid = pgid.assert_ok().stdout.trim().to_owned();
+    let uid = run_outside("/usr/bin/id", &["-u"], &j.m1());
+    let uid = uid.assert_ok().stdout.trim().to_owned();
+    let pgid_of_1 = run_outside("/bin/ps", &["-o", "pgid=", "-p", "1"], &j.m1());
+    let pgid_of_1 = pgid_of_1.assert_ok().stdout.trim().to_owned();
+    for (kind, arg) in [
+        ("ALL", "0"),
+        ("UID", "0"),
+        ("UID", uid.as_str()),
+        ("RUID", "0"),
+        ("PGRP", pgid_of_1.as_str()),
+        ("PGRP", pgid.as_str()),
+        ("PID", "1"),
+        ("PID", pid.as_str()),
+    ] {
+        j.probe_outside(&["kproc", kind, arg]).assert_ok();
+        let inside = j.probe(&["kproc", kind, arg]);
+        assert_refused_with(&inside, "Operation not permitted");
+    }
+    let own = r#"/bin/sleep 5 & "$1" kproc PID $!"#;
+    let out = j.sh(own, &[j.w.at("tools/probe").to_str().unwrap()]);
+    assert!(out.stdout.contains("ALLOWED kproc"), "{out:#?}");
+    run_outside("/bin/kill", &["-TERM", &pid], &j.m1()).assert_ok();
+    async_io::block_on(sleeper.handle.exited());
+}
+
 /// Item 2: IPv6 and UDP to outside addresses, and a listener on every address, with a proxy
 /// port in the policy. Each works outside the jail but for the network itself, which fails
 /// otherwise than EPERM.

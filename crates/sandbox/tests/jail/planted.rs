@@ -12,23 +12,37 @@ use crate::support::{Output, World, launcher, run_outside, sh};
 
 /// Tries each write on the folder `$1`, with the matter file `$2` to rename, link and clone in,
 /// and the existing file `$3` (or empty) to open for writing and, when `$4` is `swap`, to swap
-/// with `$2` (`renameatx_np`, syscall 488, `AT_FDCWD` -2, `RENAME_SWAP` 2). Prints
-/// `<step>: <error>` for each refusal and `<step> DONE` for each write that went through.
+/// with `$2` (`renameatx_np`, syscall 488, `AT_FDCWD` -2, `RENAME_SWAP` 2). Each step prints
+/// `<step> DONE` on stdout when the write went through, or one line `<step>: <errors>` on
+/// stderr when it failed, so each refusal is counted against its own step.
 const WRITES: &str = r#"
-    printf x > "$1/clauseo-jail-probe" && echo "create DONE"
-    mkdir "$1/clauseo-jail-probe-dir" && echo "mkdir DONE"
-    /usr/bin/perl -e 'rename($ARGV[0], $ARGV[1]) or die "rename: $!\n"; print "rename DONE\n"' \
+    step() { name=$1; shift
+        if said=$("$@" 2>&1); then echo "$name DONE"; else echo "$name: $(echo $said)" >&2; fi; }
+    step create /bin/sh -c 'printf x > "$1"' sh "$1/clauseo-jail-probe"
+    step mkdir mkdir "$1/clauseo-jail-probe-dir"
+    step rename /usr/bin/perl -e 'rename($ARGV[0], $ARGV[1]) or die "$!\n"' \
         "$2" "$1/clauseo-jail-probe-moved"
-    ln "$2" "$1/clauseo-jail-probe-link" && echo "link DONE"
-    cp -c "$2" "$1/clauseo-jail-probe-clone" && echo "clone DONE"
-    ln -s /bin/sh "$1/clauseo-jail-probe-symlink" && echo "symlink DONE"
+    step link ln "$2" "$1/clauseo-jail-probe-link"
+    step clone cp -c "$2" "$1/clauseo-jail-probe-clone"
+    step symlink ln -s /bin/sh "$1/clauseo-jail-probe-symlink"
     if [ "$4" = swap ]; then
-        /usr/bin/perl -e 'syscall(488, -2, $ARGV[0], -2, $ARGV[1], 2) == 0 or die "swap: $!\n";
-            print "swap DONE\n"' "$2" "$3"
+        step swap /usr/bin/perl -e \
+            'syscall(488, -2, $ARGV[0], -2, $ARGV[1], 2) == 0 or die "$!\n"' "$2" "$3"
     fi
-    if [ -n "$3" ]; then exec 3<>"$3" && echo "overwrite DONE"; fi
+    if [ -n "$3" ]; then step overwrite /bin/sh -c 'exec 3<>"$1"' sh "$3"; fi
     exit 0
 "#;
+
+/// Opens `file` for writing outside the jail, writing nothing: whether the user, and macOS's App
+/// Management, let this process do what the jail's overwrite step tries.
+fn opens_for_writing_outside(file: &Path) -> bool {
+    let open = run_outside(
+        "/bin/sh",
+        &["-c", r#"exec 3<>"$1""#, "sh", file.to_str().unwrap()],
+        file.parent().unwrap(),
+    );
+    open.code == Some(0)
+}
 
 /// The names [`WRITES`] makes in a folder.
 const MADE: [&str; 6] = [
@@ -78,16 +92,14 @@ fn assert_writes_refused(
     if !existing.is_empty() {
         steps.push("overwrite");
     }
-    let refusals = out.stderr.matches("Operation not permitted").count();
-    assert_eq!(
-        refusals,
-        steps.len(),
-        "expected EPERM for {steps:?}: {out:#?}"
-    );
-    assert!(
-        out.stderr.contains("rename: Operation not permitted"),
-        "{out:#?}"
-    );
+    for step in &steps {
+        let line = out
+            .stderr
+            .lines()
+            .find(|l| l.starts_with(&format!("{step}: ")));
+        let refused = line.is_some_and(|l| l.contains("Operation not permitted"));
+        assert!(refused, "{step} was not refused with EPERM: {out:#?}");
+    }
     for name in MADE {
         assert!(
             !folder.join(name).exists(),
@@ -103,18 +115,31 @@ fn assert_writes_refused(
     out
 }
 
-/// A file in `folder` (at most two levels down) the user may write outside the jail, to open
-/// for writing in it.
-fn writable_file_in(folder: &Path) -> Option<PathBuf> {
-    let script =
-        r#"find "$1" -maxdepth 3 -type f -perm -u+w -user "$(id -u)" 2>/dev/null | head -1"#;
+/// The files in `folder`, at most three levels down, that this user owns and may write.
+fn user_files_in(folder: &Path) -> Vec<PathBuf> {
+    let script = r#"find "$1" -maxdepth 3 -type f -perm -u+w -user "$(id -u)" 2>/dev/null"#;
     let out = run_outside(
         "/bin/sh",
         &["-c", script, "sh", folder.to_str().unwrap()],
         folder,
     );
-    let found = out.stdout.trim();
-    (!found.is_empty()).then(|| PathBuf::from(found))
+    out.stdout.lines().map(PathBuf::from).collect()
+}
+
+/// The first of `folder`'s user files that opens for writing outside the jail, for the
+/// overwrite step. `None` when the user owns no file there. When the user owns some but none
+/// opens outside (App Management), the step would prove nothing and the test fails.
+#[track_caller]
+fn writable_file_in(folder: &Path) -> Option<PathBuf> {
+    let owned = user_files_in(folder);
+    if owned.is_empty() {
+        return None;
+    }
+    let opens = owned.iter().take(20).find(|f| opens_for_writing_outside(f));
+    let file = opens.unwrap_or_else(|| {
+        panic!("none of {owned:?} opens for writing outside the jail, for the overwrite step")
+    });
+    Some(file.clone())
 }
 
 #[test]
@@ -122,11 +147,13 @@ fn nothing_can_be_planted_in_applications() {
     let w = World::new();
     let (launcher, _) = launcher(w.builder().build().unwrap());
     let applications = Path::new("/Applications");
-    // An existing app's file this user may write outside the jail: without one the overwrite
-    // step would prove nothing, so the test fails rather than skip it.
-    let existing = writable_file_in(applications)
-        .expect("no file in /Applications this user may write, for the overwrite step");
-    assert_writes_refused(&launcher, &w, applications, Some(&existing), Swap::Skip);
+    // An existing app's file this user opens for writing outside the jail. With no user-owned
+    // file in /Applications the overwrite step is skipped, and says so.
+    let existing = writable_file_in(applications);
+    if existing.is_none() {
+        eprintln!("SKIPPED the overwrite step: this user owns no file in /Applications");
+    }
+    assert_writes_refused(&launcher, &w, applications, existing.as_deref(), Swap::Skip);
 }
 
 #[test]

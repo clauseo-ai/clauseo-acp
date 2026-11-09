@@ -133,6 +133,15 @@ int main(int argc, char **argv) {
         int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, atoi(a)};
         return sys("kinfo", sysctl(mib, 4, &info, &size, NULL, 0) == 0 && size > 0);
     }
+    if (!strcmp(op, "kproc")) {
+        int kinds[] = {KERN_PROC_ALL, KERN_PROC_UID, KERN_PROC_RUID, KERN_PROC_PGRP, KERN_PROC_PID};
+        const char *names[] = {"ALL", "UID", "RUID", "PGRP", "PID"};
+        int mib[4] = {CTL_KERN, KERN_PROC, -1, atoi(b)};
+        for (int i = 0; i < 5; i++) if (!strcmp(a, names[i])) mib[2] = kinds[i];
+        size_t size = 0;
+        int n = mib[2] == KERN_PROC_ALL ? 3 : 4;
+        return sys("kproc", sysctl(mib, n, NULL, &size, NULL, 0) == 0 && size > 0);
+    }
     if (!strcmp(op, "listall")) {
         static pid_t pids[65536];
         return sys("listall", proc_listallpids(pids, sizeof pids) > 0);
