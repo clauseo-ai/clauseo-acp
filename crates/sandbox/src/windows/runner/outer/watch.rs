@@ -26,7 +26,8 @@ use clauseo_protocol::MatterId;
 use super::super::end::EndSignal;
 use super::super::git_watch::os::{DirWatch, Notify, Stop};
 use super::super::git_watch::{
-    Cause, Changes, Dog, Guard, Paired, Pairs, Pulse, Session, feed, lose_pairing, watch, watchdog,
+    Cause, Changes, Dog, Guard, Paired, Pairs, Pulse, Session, Tell, feed, pairing_started,
+    run_pairing, watch, watchdog,
 };
 use super::super::{LaunchMessage, RunExit};
 use super::{End, Failure, os, say};
@@ -172,7 +173,8 @@ fn start(
 /// folder that can't be watched or gets only the plain records (no file IDs), a thread that
 /// can't start or one that panics never refuses the launch, since the matter stays watched, but
 /// fails closed: the pairing is lost for the session (`git_watch::lose_pairing`), so every
-/// folder made just now and gone counts, and the lawyer is told once on the denial pipe.
+/// folder made just now and gone counts, and the lawyer is told once, on the denial pipe and on
+/// stderr.
 fn pairing(
     message: &LaunchMessage,
     stop: &Arc<Stop>,
@@ -200,33 +202,31 @@ fn pairing(
                     pairs: thread_pairs,
                     root,
                 };
-                let record = |record: &Record| {
-                    thread_records.send(record);
-                };
-                let ran = catch_unwind(AssertUnwindSafe(|| {
+                let tell = Telling(&thread_records);
+                run_pairing(&paired.pairs, &tell, || {
                     let armed = DirWatch::arm(&paired.root, &stop, Notify::Names);
-                    feed(armed, &paired, monotonic, record);
-                }));
-                if ran.is_err() {
-                    tracing::warn!("a pairing watch panicked; the pairing is lost for the session");
-                    lose_pairing(&paired.pairs, &record);
-                }
+                    feed(armed, &paired, monotonic, &tell);
+                });
                 let _sent = finished.send(());
             });
-        match started {
-            Ok(_) => done.push(ended),
-            Err(error) => {
-                tracing::warn!(
-                    %error,
-                    "a pairing watch's thread couldn't start; the pairing is lost for the session"
-                );
-                lose_pairing(pairs, &|record: &Record| {
-                    records.send(record);
-                });
-            }
+        if pairing_started(started, pairs, &Telling(records)).is_some() {
+            done.push(ended);
         }
     }
     done
+}
+
+/// A pairing watch's [`Tell`]: the denial pipe, and the outer's stderr.
+struct Telling<'a>(&'a RecordSink);
+
+impl Tell for Telling<'_> {
+    fn record(&self, record: &Record) {
+        self.0.send(record);
+    }
+
+    fn say(&self, line: &str) {
+        say(line);
+    }
 }
 
 /// The watchdog's side of the session: the outer's end path, the denial pipe and the stop.

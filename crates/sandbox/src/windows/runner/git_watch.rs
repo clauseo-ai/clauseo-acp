@@ -43,6 +43,7 @@
 
 use std::cell::Cell;
 use std::io;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -224,12 +225,52 @@ pub(crate) const PAIRING_LOST: &str = "Clauseo can't follow folders the AI tool 
      session, so it will stop the session if the AI tool keeps moving or removing new folders in \
      the matter before Clauseo can check them.";
 
+/// Where a pairing watch tells of the pairing's loss: the host's denial pipe, and the outer's
+/// stderr, whose tail the host keeps (nothing reads the denial pipe yet).
+pub(crate) trait Tell {
+    /// One record for the host, on its denial pipe.
+    fn record(&self, record: &Record);
+    /// One line on the outer's stderr.
+    fn say(&self, line: &str);
+}
+
 /// Loses the pairing for the session (`Pairs::lose_for_good`): a pairing watch couldn't be
 /// armed, got the plain records, broke, panicked or couldn't start its thread. The first loss of
-/// the session tells the lawyer ([`PAIRING_LOST`]) through `record`; later ones say nothing.
-pub(crate) fn lose_pairing(pairs: &Pairs, record: &impl Fn(&Record)) {
+/// the session tells the lawyer ([`PAIRING_LOST`]) on both of `tell`'s ways; later ones say
+/// nothing.
+pub(crate) fn lose_pairing(pairs: &Pairs, tell: &impl Tell) {
     if pairs.lose_for_good() {
-        record(&Record::notice(PAIRING_LOST));
+        tell.record(&Record::notice(PAIRING_LOST));
+        tell.say(&format!("{SAID}{PAIRING_LOST}"));
+    }
+}
+
+/// Runs one pairing watch (`run`: arm it and [`feed`] it) on its own thread; one that panics
+/// loses the pairing for the session.
+pub(crate) fn run_pairing(pairs: &Pairs, tell: &impl Tell, run: impl FnOnce()) {
+    if catch_unwind(AssertUnwindSafe(run)).is_err() {
+        tracing::warn!("a pairing watch panicked; the pairing is lost for the session");
+        lose_pairing(pairs, tell);
+    }
+}
+
+/// A pairing watch's thread, `started`; one that couldn't start loses the pairing for the
+/// session.
+pub(crate) fn pairing_started<T>(
+    started: io::Result<T>,
+    pairs: &Pairs,
+    tell: &impl Tell,
+) -> Option<T> {
+    match started {
+        Ok(thread) => Some(thread),
+        Err(error) => {
+            tracing::warn!(
+                code = code(&error),
+                "a pairing watch's thread couldn't start; the pairing is lost for the session"
+            );
+            lose_pairing(pairs, tell);
+            None
+        }
     }
 }
 
@@ -359,12 +400,12 @@ fn take_paired<T: Session>(ender: &Ender<'_, T>) {
 /// It fails closed: an overflow loses the pairing for its window, and a watch that couldn't be
 /// armed, was armed for the plain records (a network share: no file IDs, so it notes nothing)
 /// or broke loses it for the session, so every fresh folder gone and unpaired counts, and the
-/// lawyer is told once a session through `record` ([`lose_pairing`]).
+/// lawyer is told once a session through `tell` ([`lose_pairing`]).
 pub(crate) fn feed(
     armed: io::Result<impl Source>,
     paired: &Paired,
     now: impl Fn() -> Duration,
-    record: impl Fn(&Record),
+    tell: &impl Tell,
 ) {
     let mut source = match armed {
         Ok(source) => source,
@@ -373,7 +414,7 @@ pub(crate) fn feed(
                 code = code(&error),
                 "a pairing watch couldn't be armed; the pairing is lost for the session"
             );
-            lose_pairing(&paired.pairs, &record);
+            lose_pairing(&paired.pairs, tell);
             return;
         }
     };
@@ -381,7 +422,7 @@ pub(crate) fn feed(
         tracing::warn!(
             "a pairing watch got the plain records; the pairing is lost for the session"
         );
-        lose_pairing(&paired.pairs, &record);
+        lose_pairing(&paired.pairs, tell);
         return;
     }
     loop {
@@ -393,7 +434,7 @@ pub(crate) fn feed(
                     code = code(&error),
                     "a pairing watch broke; the pairing is lost for the session"
                 );
-                lose_pairing(&paired.pairs, &record);
+                lose_pairing(&paired.pairs, tell);
                 return;
             }
             Next::Idle => {}
