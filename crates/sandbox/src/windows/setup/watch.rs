@@ -54,6 +54,7 @@ pub mod losses;
 pub mod paths;
 pub mod protocol;
 mod serve;
+pub mod teardown;
 #[cfg(test)]
 mod tests;
 #[cfg(windows)]

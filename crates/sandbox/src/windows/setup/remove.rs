@@ -54,7 +54,8 @@
 //!    readers drop each as stale, since it names a pool SID the record no longer lists
 //!    (`runner::unclean`);
 //! 9. wherever an admin copy is installed, the watch task set-up registered (disabled, a
-//!    running watcher ended and its session stopped, then deleted); on a per-machine install,
+//!    running watcher ended, its session stopped and its key deleted, taken first when it is
+//!    SYSTEM's, then deleted: `watch/teardown.rs`); on a per-machine install,
 //!    the stop and sweep tasks set-up registered for the owner; then the record key, which takes
 //!    the set-up's values with it (`SETUP_VALUES`: the stop's and the sweep's `…Next`,
 //!    `…Sequence` and `…Completed` among them);

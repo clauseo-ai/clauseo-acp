@@ -2282,7 +2282,10 @@ reporter is a diagnostic with a fallback, and the next set-up tries again. `--re
 it first in step 9, before the stop and sweep tasks and the record. `--remove --uninstall` deletes it in
 `refresh::TEARDOWN` after the stop task. Both go through `unregister_task`, which for this task
 disables it, ends a running watcher (`IRegisteredTask::Stop`), stops the session by name,
-deletes the published name (`HKLM\SOFTWARE\Clauseo\SandboxWatch`), and then deletes it. The
+deletes the published name (`HKLM\SOFTWARE\Clauseo\SandboxWatch`), and then deletes it. A
+killed watcher's key is SYSTEM's, which administrators only read: a refused delete takes it for
+Administrators (`SeTakeOwnershipPrivilege`) and deletes it, the task goes even if that fails,
+and the next `--remove` finishes whatever is left (`watch/teardown.rs`). The
 runner starts it with `refresh::request_watch` (as the lawyer, through
 `FRFX`).
 

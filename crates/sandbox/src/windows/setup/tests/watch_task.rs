@@ -8,6 +8,14 @@ use super::remove_fake::Remover;
 use super::*;
 use crate::windows::setup::record_values::CopyOwner;
 
+/// The watch task's removal's lines when no watcher runs and none left its key.
+pub(super) const WATCH_TEARDOWN: [&str; 4] = [
+    "end_watch_task",
+    "stop_watch_session",
+    "delete_watch_key",
+    "delete_watch_task",
+];
+
 /// A machine whose admin copy `copy` placed, with nothing set up yet.
 fn installed(test: &str, copy: Option<CopyOwner>) -> FakeMachine {
     let mut machine = FakeMachine::new(test);
@@ -85,7 +93,10 @@ fn a_failed_watch_registration_still_sets_up() {
 }
 
 /// A pool set up on a machine whose admin copy `copy` placed, for a removal by its owner.
-fn pool(test: &str, copy: Option<CopyOwner>) -> (Remover, super::remove_fake::RemoveAcl) {
+pub(super) fn pool(
+    test: &str,
+    copy: Option<CopyOwner>,
+) -> (Remover, super::remove_fake::RemoveAcl) {
     let mut machine = installed(test, copy);
     let mut acl = FakeAcl::default();
     set_up_fresh(&mut machine, &mut acl);
@@ -102,8 +113,10 @@ fn the_removal_deletes_the_watch_task_before_the_stop_task_and_the_record() {
     let lines = machine.lines();
     let at = lines.iter().position(|l| l == "unregister_watch_task");
     let at = at.unwrap_or_else(|| panic!("{lines:?}"));
-    assert_eq!(lines[at + 1], "unregister_stop_task");
-    assert_eq!(lines[at + 2], "delete_record");
+    // A watcher that ended on its own left no session and no key (`watch_remove.rs`).
+    assert_eq!(lines[at + 1..at + 5], WATCH_TEARDOWN);
+    assert_eq!(lines[at + 5], "unregister_stop_task");
+    assert_eq!(lines[at + 6], "delete_record");
     assert_eq!(machine.m.state.watch_task, None);
     // A deletion that fails stops the removal there, the record kept for the next run.
     let (mut machine, mut acl) = pool("remove-watch-task-fail", Some(CopyOwner::Machine));

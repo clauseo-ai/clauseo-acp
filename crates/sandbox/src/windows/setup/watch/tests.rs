@@ -18,6 +18,7 @@ mod breaker;
 mod consumer;
 mod instances;
 mod run;
+mod teardown;
 
 /// Pool users and an outsider (the lawyer), all of one machine.
 const POOL_1: &str = "S-1-5-21-1-2-3-1003";

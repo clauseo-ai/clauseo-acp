@@ -170,6 +170,47 @@ pub(super) struct State {
     pub(super) remote_denied: BTreeSet<Sid>,
     /// The owner the task `\Clauseo\SandboxWatch`'s descriptor names, while it is registered.
     pub(super) watch_task: Option<Sid>,
+    /// What a watcher has outside its task.
+    pub(super) watcher: Watcher,
+}
+
+/// A watcher's process, session and published key (`setup::watch`), as its removal sees them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct Watcher {
+    /// Its process runs.
+    pub(super) running: bool,
+    /// Its trace session runs.
+    pub(super) session: bool,
+    /// Its key's owner, while it is there.
+    pub(super) key: Option<KeyOwner>,
+}
+
+/// Who owns the watcher's key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum KeyOwner {
+    /// SYSTEM, as the watcher makes it: administrators may only read it.
+    System,
+    /// Administrators, once the removal took it: they may delete it.
+    Administrators,
+}
+
+impl Watcher {
+    /// A watcher serving now: its process, session and SYSTEM's key.
+    pub(super) fn running() -> Watcher {
+        Watcher {
+            running: true,
+            session: true,
+            key: Some(KeyOwner::System),
+        }
+    }
+
+    /// What a killed watcher leaves: its session and SYSTEM's key, with no process.
+    pub(super) fn killed() -> Watcher {
+        Watcher {
+            running: false,
+            ..Watcher::running()
+        }
+    }
 }
 
 /// [`FakeMachine::new`]: a machine with only the owner's account, `DeviceSync`, an empty data
@@ -200,6 +241,7 @@ pub(super) fn new_machine(test: &str) -> FakeMachine {
             stop_task: None,
             remote_denied: BTreeSet::new(),
             watch_task: None,
+            watcher: Watcher::default(),
         },
         written: Vec::new(),
         temporary: BTreeSet::new(),
