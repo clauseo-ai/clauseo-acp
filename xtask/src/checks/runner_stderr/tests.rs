@@ -161,7 +161,11 @@ fn a_macro_rules_body_that_writes_to_the_console_or_names_stderr_is_judged() {
 #[test]
 fn a_file_that_renames_detail_or_stderr_or_writes_to_the_console_has_a_violation_each() {
     let text = "use super::stderr::Detail as D;\nfn f() { println!(\"x\"); }\n";
-    let found = inspect("crates/sandbox/src/windows/runner/x.rs", text);
+    let found = inspect(
+        "crates/sandbox/src/windows/runner/x.rs",
+        text,
+        Scope::Runner,
+    );
     assert_eq!(found.len(), 2);
 }
 
@@ -171,7 +175,12 @@ fn a_cfg_test_module_is_skipped_and_other_cfgs_are_read() {
     for attr in ["#[cfg(test)]", "#[cfg(test)] #[allow(dead_code)]"] {
         let text = format!("{attr}\nmod tests {{\n{formatted}}}\n");
         assert!(
-            inspect("crates/sandbox/src/windows/runner/x.rs", &text).is_empty(),
+            inspect(
+                "crates/sandbox/src/windows/runner/x.rs",
+                &text,
+                Scope::Runner
+            )
+            .is_empty(),
             "{attr}"
         );
     }
@@ -182,7 +191,12 @@ fn a_cfg_test_module_is_skipped_and_other_cfgs_are_read() {
     ] {
         let text = format!("{attr}\nmod m {{\n{formatted}}}\n");
         assert_eq!(
-            inspect("crates/sandbox/src/windows/runner/x.rs", &text).len(),
+            inspect(
+                "crates/sandbox/src/windows/runner/x.rs",
+                &text,
+                Scope::Runner
+            )
+            .len(),
             1,
             "{attr}"
         );
@@ -190,14 +204,23 @@ fn a_cfg_test_module_is_skipped_and_other_cfgs_are_read() {
 }
 
 #[test]
-fn runner_files_are_read_but_the_api_and_tests_are_not() {
+fn runner_files_and_their_helpers_are_read_but_the_api_and_tests_are_not() {
     for file in [
         "crates/sandbox/src/windows/runner.rs",
         "crates/sandbox/src/windows/runner/outer.rs",
         "crates/sandbox/src/windows/runner/outer/x.rs",
         "crates/sandbox/src/bin/clauseo-sandbox-run.rs",
     ] {
-        assert!(is_read(file), "{file}");
+        assert_eq!(scope_of(file), Some(Scope::Runner), "{file}");
+    }
+    for file in [
+        "crates/sandbox/src/windows.rs",
+        "crates/sandbox/src/windows/acl.rs",
+        "crates/sandbox/src/windows/token/os.rs",
+        "crates/sandbox/src/denial.rs",
+        "crates/sandbox/src/detect.rs",
+    ] {
+        assert_eq!(scope_of(file), Some(Scope::Helper), "{file}");
     }
     for file in [
         "crates/sandbox/src/windows/runner/stderr.rs",
@@ -205,10 +228,106 @@ fn runner_files_are_read_but_the_api_and_tests_are_not() {
         "crates/sandbox/src/windows/runner/tests.rs",
         "crates/sandbox/src/windows/runner/x_tests.rs",
         "crates/sandbox/src/windows/runner/tests/y.rs",
-        "crates/sandbox/src/windows/acl.rs",
+        "crates/sandbox/src/windows/set_aside/ntfs_tests.rs",
+        "crates/sandbox/src/bin/clauseo-sandbox-setup.rs",
         "crates/sandbox/src/bin/other.rs",
+        "crates/sandbox/src/macos/watch.rs",
+        "crates/sandbox/src/lib.rs",
+        "crates/sandbox/src/detection.rs",
         "crates/sandbox/src/windows/runner/notes.md",
     ] {
-        assert!(!is_read(file), "{file}");
+        assert_eq!(scope_of(file), None, "{file}");
     }
+}
+
+/// A helper's error formatting and `Detail` rename pass; its stderr writes don't.
+#[test]
+fn a_helper_is_judged_for_its_stderr_writes_alone() {
+    let path = "crates/sandbox/src/windows/acl.rs";
+    let quiet = "use super::Detail as D;\nuse crate::ports::x;\nfn f(e: E) -> String {\n    \
+                 format!(\"{e}\") + &e.to_string()\n}\n";
+    let found = inspect(path, quiet, Scope::Helper);
+    assert!(found.is_empty(), "{found:?}");
+    let loud = "use std::io::stderr as s;\nfn f() {\n    eprintln!(\"x\");\n    \
+                copy(r, std::io::stderr);\n}\n";
+    // The import, the rename of `stderr`, the `eprintln!` and the value.
+    let found = inspect(path, loud, Scope::Helper);
+    assert_eq!(found.len(), 4, "{found:?}");
+}
+
+#[test]
+fn stderr_as_a_value_is_judged_but_a_local_or_the_api_module_is_not() {
+    let judged = [
+        "fn f() { copy(r, io::stderr); }",
+        "fn f() { let s = std::io::stderr; }",
+        "use std::io::stderr;",
+        "use std::io::{self, stderr};",
+        "use std::io::*;",
+        "fn f() { g(format!(\"{:?}\", io::stderr)); }",
+    ];
+    for text in judged {
+        let found = inspect(
+            "crates/sandbox/src/windows/runner/x.rs",
+            text,
+            Scope::Runner,
+        );
+        assert_eq!(found.len(), 1, "{text}: {found:?}");
+    }
+    let passed = [
+        "fn f(stderr: Pipe) { copy(stderr, out); }",
+        "use super::stderr::{self, Detail};",
+        "fn f() { stderr::refuse(K, Detail::none()); }",
+        "fn f() { format!(\"{}\", stderr::NAME); }",
+        "use std::io::{self, Write};",
+    ];
+    for text in passed {
+        let found = inspect(
+            "crates/sandbox/src/windows/runner/x.rs",
+            text,
+            Scope::Runner,
+        );
+        assert!(found.is_empty(), "{text}: {found:?}");
+    }
+}
+
+#[test]
+fn the_runner_imports_only_from_crate_windows() {
+    for text in [
+        "use crate::ports::Port;",
+        "use crate::{windows::pipe, test_support::x};",
+        "use clauseo_sandbox::proxy;",
+        "use crate::NoSandbox;",
+        "use crate::*;",
+    ] {
+        let found = inspect(
+            "crates/sandbox/src/windows/runner/x.rs",
+            text,
+            Scope::Runner,
+        );
+        assert_eq!(found.len(), 1, "{text}: {found:?}");
+    }
+    for text in [
+        "use crate::windows::pipe::PipeSet;",
+        "use crate::windows;",
+        "use crate::detect::probe;",
+        "use crate::denial::Denial;",
+        "use clauseo_sandbox::windows::runner::run_outer;",
+        "use super::super::x;",
+    ] {
+        let found = inspect(
+            "crates/sandbox/src/windows/runner/x.rs",
+            text,
+            Scope::Runner,
+        );
+        assert!(found.is_empty(), "{text}: {found:?}");
+    }
+}
+
+#[test]
+fn the_root_exports_are_the_pub_use_leaves_of_helper_modules() {
+    let lib = "pub use denial::{Access, Denial, SetAsideWhat as What};\npub use detect::{probe, \
+               NoSandbox};\npub use ports::Port;\nuse windows::Private;\npub mod windows;\n";
+    let names: Vec<String> = root_exports(lib).into_iter().collect();
+    assert_eq!(names, ["Access", "Denial", "NoSandbox", "What", "probe"]);
+    assert!(root_exports("pub use {").is_empty());
 }

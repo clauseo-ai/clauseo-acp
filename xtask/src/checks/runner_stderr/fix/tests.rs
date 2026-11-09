@@ -21,6 +21,16 @@ fix_texts! {
              stderr::agent_stream) instead of opening stderr: runner-stderr fails each call that \
              opens it"
         },
+        Fix::StderrValue => {
+            "take the stream from runner::stderr (stderr::refuse, stderr::notice or \
+             stderr::agent_stream) instead of naming io::stderr: runner-stderr fails io::stderr \
+             passed, stored or imported, not only called"
+        },
+        Fix::OutsideHelpers => {
+            "import from crate::windows, crate::denial or crate::detect (or a name lib.rs \
+             re-exports from one), or add the module to runner-stderr's helpers: it reads only \
+             those for stderr writes"
+        },
         Fix::ErrorText => {
             "format the error inside a Detail::new(|| ...) argument, which only the \
              vm-harness-detail builds call: error text can hold a path, and the host copies the \
@@ -46,6 +56,8 @@ fn every_fix_prints_its_pinned_text() {
         Fix::Console,
         Fix::WriteStderr,
         Fix::StderrCall,
+        Fix::StderrValue,
+        Fix::OutsideHelpers,
         Fix::ErrorText,
         Fix::Alias,
         Fix::Wrapper,

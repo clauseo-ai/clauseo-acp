@@ -12,6 +12,10 @@ pub(crate) enum Fix {
     WriteStderr,
     /// A call of a path ending in `stderr`, such as `io::stderr()`.
     StderrCall,
+    /// `io::stderr` named but not called (passed or stored), or imported under a bare name.
+    StderrValue,
+    /// A `use crate::` in the runner of a name outside the helper modules.
+    OutsideHelpers,
     /// An error's Display or Debug, or its `to_string()`, formatted outside `Detail::new`.
     ErrorText,
     /// A `use` that renames `Detail` or `stderr`.
@@ -42,6 +46,18 @@ impl fmt::Display for Fix {
                 "take the stream from runner::stderr (stderr::refuse, stderr::notice or \
                  stderr::agent_stream) instead of opening stderr: runner-stderr fails each call \
                  that opens it"
+            ),
+            Fix::StderrValue => write!(
+                f,
+                "take the stream from runner::stderr (stderr::refuse, stderr::notice or \
+                 stderr::agent_stream) instead of naming io::stderr: runner-stderr fails \
+                 io::stderr passed, stored or imported, not only called"
+            ),
+            Fix::OutsideHelpers => write!(
+                f,
+                "import from crate::windows, crate::denial or crate::detect (or a name lib.rs \
+                 re-exports from one), or add the module to runner-stderr's helpers: it reads only \
+                 those for stderr writes"
             ),
             Fix::ErrorText => write!(
                 f,

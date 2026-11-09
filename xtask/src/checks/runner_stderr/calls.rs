@@ -1,16 +1,21 @@
 //! What `runner-stderr` judges in one file: each macro that writes to the console or to a stderr
-//! handle, each call of a path ending in `stderr`, each error formatted outside `Detail::new`
-//! (in a format macro's arguments or as `.to_string()`), each `use` that renames `Detail` or
-//! `stderr`, and each `macro_rules!` whose body calls a console macro or names `stderr`.
+//! handle, each call of a path ending in `stderr`, each `io::stderr` taken as a value, each
+//! error formatted outside `Detail::new` (in a format macro's arguments or as `.to_string()`),
+//! each `use` that renames `Detail` or `stderr`, and each `macro_rules!` whose body calls a
+//! console macro or names `stderr`; its `use` items go to `imports.rs`. A helper's file
+//! (`Scope::Helper`) is judged for the stderr writes alone: it starts as if inside a
+//! `Detail::new`, and may rename `Detail` or import anything.
 //!
 //! A macro's arguments are tokens to syn, so they are judged by scanning them: a call inside
 //! `format!(...)` is not an `ExprCall`. The scan finds `stderr(` and `error.to_string()` in them,
 //! and it reads the macros nested in them the same way, so a call in a nested macro counts too.
 
-use super::Fix;
+use super::imports::{outside_imports, stderr_imports};
+use super::{Fix, Scope};
 use crate::checks;
 use crate::violation::Violation;
 use proc_macro2::{Delimiter, Group, Ident, Span, TokenStream, TokenTree};
+use std::collections::BTreeSet;
 use syn::visit::Visit;
 
 /// The macros that write to the console.
@@ -36,6 +41,9 @@ const RENAMED: [&str; 2] = ["Detail", "stderr"];
 /// The message for a call that opens stderr.
 const STDERR_CALL: &str =
     "stderr() opens stderr; the runner says things only through runner::stderr";
+/// The message for `io::stderr` named but not called: passed or stored.
+const STDERR_VALUE: &str = "`stderr` taken as a value is stderr's handle; the runner says things \
+                            only through runner::stderr";
 
 /// One violation before its file is known: where it is, what it says and its fix.
 #[derive(Debug)]
@@ -48,6 +56,9 @@ pub(super) struct Hit {
 /// The calls of one file, and the violations among them.
 pub(super) struct Calls<'a> {
     path: &'a str,
+    scope: Scope,
+    /// The names the runner may import from the crate root: its re-exports from a helper.
+    exports: &'a BTreeSet<String>,
     /// How many `Detail::new(...)` argument lists the visit is inside: an error may be formatted
     /// in one.
     detail: usize,
@@ -55,10 +66,14 @@ pub(super) struct Calls<'a> {
 }
 
 impl<'a> Calls<'a> {
-    pub(super) fn new(path: &'a str) -> Calls<'a> {
+    pub(super) fn new(path: &'a str, scope: Scope, exports: &'a BTreeSet<String>) -> Calls<'a> {
         Calls {
             path,
-            detail: 0,
+            scope,
+            exports,
+            // A helper may format an error: only the runner's stderr says it, under the runner's
+            // rules.
+            detail: usize::from(scope == Scope::Helper),
             found: Vec::new(),
         }
     }
@@ -111,10 +126,38 @@ impl<'ast> Visit<'ast> for Calls<'_> {
                 message: STDERR_CALL.to_owned(),
                 fix: Fix::StderrCall,
             });
+            // The callee is judged as the call, not again as a value.
+            for argument in &i.args {
+                self.visit_expr(argument);
+            }
+            return;
         }
         self.detail += usize::from(is_detail);
         syn::visit::visit_expr_call(self, i);
         self.detail -= usize::from(is_detail);
+    }
+
+    fn visit_expr_path(&mut self, i: &'ast syn::ExprPath) {
+        if let Some(at) = stderr_value(&i.path) {
+            self.push(Hit {
+                at,
+                message: STDERR_VALUE.to_owned(),
+                fix: Fix::StderrValue,
+            });
+        }
+        syn::visit::visit_expr_path(self, i);
+    }
+
+    fn visit_item_use(&mut self, i: &'ast syn::ItemUse) {
+        let mut hits = Vec::new();
+        stderr_imports(&i.tree, None, &mut hits);
+        if self.scope == Scope::Runner {
+            outside_imports(&i.tree, self.exports, &mut hits);
+        }
+        for hit in hits {
+            self.push(hit);
+        }
+        syn::visit::visit_item_use(self, i);
     }
 
     fn visit_expr_method_call(&mut self, i: &'ast syn::ExprMethodCall) {
@@ -142,7 +185,8 @@ impl<'ast> Visit<'ast> for Calls<'_> {
 
     fn visit_use_rename(&mut self, i: &'ast syn::UseRename) {
         let name = i.ident.to_string();
-        if RENAMED.contains(&name.as_str()) {
+        let followed = self.scope == Scope::Runner || name == "stderr";
+        if followed && RENAMED.contains(&name.as_str()) {
             let message = format!(
                 "`{name}` is renamed `{}`, which runner-stderr can't follow",
                 i.rename
@@ -242,11 +286,20 @@ fn scan_ident(
         );
         return 3;
     }
+    let after_path = at.checked_sub(2).is_some_and(|two_back| {
+        punct_is(trees.get(two_back), ':') && punct_is(trees.get(two_back + 1), ':')
+    });
     if ident == "stderr" && is_call_group(trees.get(at + 1)) {
         hits.push(Hit {
             at: ident.span(),
             message: STDERR_CALL.to_owned(),
             fix: Fix::StderrCall,
+        });
+    } else if ident == "stderr" && after_path && !punct_is(trees.get(at + 1), ':') {
+        hits.push(Hit {
+            at: ident.span(),
+            message: STDERR_VALUE.to_owned(),
+            fix: Fix::StderrValue,
         });
     } else if !exempt
         && is_errorish(&ident.to_string())
@@ -361,6 +414,14 @@ pub(super) fn placeholders(text: &str) -> Vec<&str> {
 /// True for an error's name: `e`, `err`, `error`, or one ending in `_err` or `_error`.
 pub(super) fn is_errorish(name: &str) -> bool {
     matches!(name, "e" | "err" | "error") || name.ends_with("_err") || name.ends_with("_error")
+}
+
+/// Where `path` names `stderr` as a value: two or more segments, the last `stderr`
+/// (`io::stderr`, `std::io::stderr`). A bare `stderr` is a local's name; a module path such as
+/// `super::stderr` is never an expression.
+fn stderr_value(path: &syn::Path) -> Option<Span> {
+    let last = path.segments.last()?;
+    (path.segments.len() >= 2 && last.ident == "stderr").then(|| last.ident.span())
 }
 
 /// True when the attributes include exactly `#[cfg(test)]`: not `cfg(any(test, ..))` nor

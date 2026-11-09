@@ -38,7 +38,9 @@ pub(super) fn skipped_files() -> Repo {
             ("crates/sandbox/src/windows/runner/tests.rs", loud),
             ("crates/sandbox/src/windows/runner/x_tests.rs", loud),
             ("crates/sandbox/src/windows/runner/tests/y.rs", loud),
-            ("crates/sandbox/src/windows/acl.rs", loud),
+            ("crates/sandbox/src/bin/clauseo-sandbox-setup.rs", loud),
+            ("crates/sandbox/src/macos/watch.rs", loud),
+            ("crates/sandbox/src/test_support.rs", loud),
         ],
     )
 }
@@ -137,6 +139,87 @@ pub(super) fn wrapping_macro() -> Repo {
     outer(
         "wrapping-macro",
         "macro_rules! say {\n    ($($t:tt)*) => { eprintln!($($t)*) };\n}\n",
+    )
+}
+
+pub(super) fn stderr_as_value() -> Repo {
+    outer(
+        "stderr-as-value",
+        "fn f(from: Pipe) {\n    copy(&from, io::stderr);\n}\n",
+    )
+}
+
+pub(super) fn stderr_stored() -> Repo {
+    outer(
+        "stderr-stored",
+        "fn f() {\n    let open: fn() -> io::Stderr = std::io::stderr;\n}\n",
+    )
+}
+
+pub(super) fn stderr_imported() -> Repo {
+    outer("stderr-imported", "use std::io::{self, stderr};\n")
+}
+
+pub(super) fn helper_console() -> Repo {
+    git_repo(
+        "helper-console",
+        &[(
+            "crates/sandbox/src/windows/pipe.rs",
+            "fn f(error: E) -> String {\n    eprintln!(\"x\");\n    format!(\"{error}\")\n}\n",
+        )],
+    )
+}
+
+pub(super) fn helper_stderr_value() -> Repo {
+    git_repo(
+        "helper-stderr-value",
+        &[(
+            "crates/sandbox/src/windows/token/os.rs",
+            "fn f(from: Pipe) {\n    copy(&from, std::io::stderr);\n}\n",
+        )],
+    )
+}
+
+pub(super) fn test_gated_helpers() -> Repo {
+    let loud = "fn f() {\n    eprintln!(\"x\");\n}\n";
+    git_repo(
+        "test-gated-helpers",
+        &[
+            (
+                "crates/sandbox/src/windows.rs",
+                "#[cfg(test)]\nmod test_pool;\npub mod clean_close;\n",
+            ),
+            ("crates/sandbox/src/windows/test_pool.rs", loud),
+            ("crates/sandbox/src/windows/test_pool/more.rs", loud),
+            (
+                "crates/sandbox/src/windows/clean_close.rs",
+                "#[cfg(test)]\n#[cfg(windows)]\nmod ntfs_timing;\n",
+            ),
+            (
+                "crates/sandbox/src/windows/clean_close/ntfs_timing.rs",
+                loud,
+            ),
+        ],
+    )
+}
+
+pub(super) fn outside_import() -> Repo {
+    outer("outside-import", "use crate::ports::Port;\n")
+}
+
+pub(super) fn root_reexport() -> Repo {
+    git_repo(
+        "root-reexport",
+        &[
+            (
+                "crates/sandbox/src/lib.rs",
+                "pub use denial::{Denial, SetAsideWhat as What};\npub use ports::Port;\n",
+            ),
+            (
+                "crates/sandbox/src/windows/runner/outer.rs",
+                "use crate::{Denial, What};\nuse crate::Port;\n",
+            ),
+        ],
     )
 }
 
