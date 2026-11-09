@@ -30,6 +30,7 @@ use crate::rate::{RateCap, RatedUpdate};
 use crate::sent::SentView;
 
 mod ended;
+mod path;
 
 use ended::{StopCause, stop_closed};
 pub(super) use ended::{hold_stop, idle_stop, log_detach, on_ended, stop};
@@ -310,33 +311,17 @@ fn launch(
         codex.key_retry = KeyRetry::at_launch(&hook, login);
         codex
     });
-    // Stetdoc's folder, then the hook's (Clauseo's Python runtime), then the user's `PATH`;
-    // with the hook's on it, an inherited Python's variables go.
-    let (path, hook_path) = agent::session_path(
-        actor.wiring.path_prepend.as_deref(),
-        actor.profile.agent_path(&row.agent),
-    );
-    let mut dropped: Vec<&str> = Vec::new();
-    if codex.is_some() {
-        dropped.extend(agent::codex::DROPPED_VARS);
-    }
-    if hook_path {
-        dropped.extend(agent::PYTHON_VARS);
-    }
-    let inherited: Vec<_> = match &actor.wiring.inherited_env {
-        Some(env) => env.clone(),
-        None => std::env::vars_os().collect(),
-    };
+    let parts = path::launch_parts(actor, &row.agent, codex.is_some());
     // Tier C (no jail) leaves the agent's environment alone: no session proxy variables here
     // (`ProxyHandle::env`); only the browser entry reaches the proxy, advisory without a jail.
     let spec = agent::launch_spec(
         settings,
         hook,
         forced,
-        &dropped,
-        inherited.into_iter(),
+        &parts.dropped,
+        parts.inherited.into_iter(),
         agent::session_folder(&folder),
-        &path,
+        &parts.path,
     )
     .map_err(super::launch_checks::folder::gone_at_spawn)?
     .with_redacted(redacted);
