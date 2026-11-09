@@ -28,7 +28,7 @@ use super::PackRequest;
 ///   and the host's own (`web_search`, `hooks`) leave room.
 /// - `launch_writes` are written on the launch-prep thread before the agent starts; the first
 ///   write's [`SkillsWritten`] goes to that launch's `codex_config` and to no other launch.
-/// - `agent_path` folders go on the session's `PATH` after stetdoc's.
+/// - `agent_path` folders go on the session's `PATH` after stetdoc's and the shell browser's.
 /// - `pack_write` turns the launch's [`PackRequest`] (decision record 0040) into the packs the
 ///   launch-prep thread loads and writes into `run/<session id>/skill-packs/`; the
 ///   [`PacksWritten`] it gets goes to that launch's `session_meta` and `codex_config` only.
@@ -83,13 +83,23 @@ pub trait ProfileHook: Send {
         None
     }
     /// Folders for `agent`'s session `PATH`, in order (default: none): after stetdoc's folder
-    /// and before the user's `PATH`. Desktop gives Clauseo's Python runtime here, for Claude and
-    /// Codex once it is installed (decision record 0048). Only absolute folders go on; a
-    /// relative one is skipped. When any go on, the session drops `PYTHONHOME` and
-    /// `PYTHONPATH`. Sessions only: no sign-in, status or limits run takes them. No I/O: it
-    /// hands back folders the adapter already holds, looked up off this thread.
+    /// and the shell browser's ([`Self::browser_tool`]), before the user's `PATH`. Desktop gives
+    /// Clauseo's Python runtime here, for Claude and Codex once it is installed (decision record
+    /// 0048). Only absolute folders go on; a relative one is skipped. When any go on, the
+    /// session drops `PYTHONHOME` and `PYTHONPATH`. Sessions only: no sign-in, status or limits
+    /// run takes them. No I/O: it hands back folders the adapter already holds, looked up off
+    /// this thread.
     fn agent_path(&self, _agent: &AgentId) -> Vec<PathBuf> {
         Vec::new()
+    }
+    /// The browser as a shell tool (default: none): the folder holding the `agent-browser`
+    /// command alone (`clauseo_profile::ProfilePaths::tools`). A session whose launch prep finds
+    /// a Chrome (`tools.browser` on, the firm's browser policy allowing it) gets it first on its
+    /// agent's `PATH` after stetdoc's (before [`Self::agent_path`]'s), agent-browser's variables
+    /// (`agent::loads::browser::shell_env`) and the instructions' browser part; any other session
+    /// gets none of them.
+    fn browser_tool(&self) -> Option<PathBuf> {
+        None
     }
 }
 

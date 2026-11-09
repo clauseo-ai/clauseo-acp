@@ -555,7 +555,7 @@ fn stetdoc_is_found_on_path_only_in_an_absolute_folder() {
     assert_eq!(first_on_path("stetdoc", &relative), None);
 }
 
-/// The shell browser's folder reaches the host's config only when its copy is there.
+/// The shell browser's folder reaches the host through the hook, only when its copy is there.
 #[test]
 fn the_host_config_gets_the_browser_folder_only_with_its_copy() {
     let scratch = Scratch::new("profile-browser-tool", &[]);
@@ -563,10 +563,10 @@ fn the_host_config_gets_the_browser_folder_only_with_its_copy() {
     let hook =
         DesktopProfile::new(profile(&scratch), false).with_browser_tool(Some(folder.clone()));
     let config = super::with_profile(scratch.config(Vec::new()), Some(hook), setup_hook());
-    assert_eq!(config.browser_tool(), Some(folder.as_path()));
+    assert_eq!(config.profile_hook().browser_tool(), Some(folder));
     let without = DesktopProfile::new(profile(&scratch), false);
     let config = super::with_profile(scratch.config(Vec::new()), Some(without), setup_hook());
-    assert_eq!(config.browser_tool(), None);
+    assert_eq!(config.profile_hook().browser_tool(), None);
 }
 
 /// A debug build with no bundled sidecar copies the first `agent-browser` on `PATH` into
@@ -586,7 +586,7 @@ fn build_copies_agent_browser_from_path_in_a_debug_build() {
     let locations = Locations::under_root(&scratch.dir("data"));
     let hook = DesktopProfile::build_with(&locations, None, Some(folder.as_os_str())).unwrap();
     let tools = locations.data_dir().join("tools");
-    assert_eq!(hook.browser_tool(), Some(tools.as_path()));
+    assert_eq!(hook.browser_tool(), Some(tools.clone()));
     assert_eq!(
         std::fs::read(tools.join("agent-browser")).unwrap(),
         std::fs::read(folder.join("agent-browser")).unwrap()

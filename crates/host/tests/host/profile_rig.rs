@@ -190,6 +190,8 @@ pub(crate) struct Hook {
     pub(crate) skills: Vec<SkillWrite>,
     pub(crate) profile: Option<Arc<ClauseoProfile>>,
     pub(crate) tokens: Arc<Mutex<Vec<Option<SkillsWritten>>>>,
+    /// The shell browser's folder (`ProfileHook::browser_tool`).
+    pub(crate) browser_tool: Option<PathBuf>,
 }
 
 impl ProfileHook for Hook {
@@ -213,6 +215,10 @@ impl ProfileHook for Hook {
 
     fn launch_writes(&self, _agent: &AgentId) -> Vec<SkillWrite> {
         self.skills.clone()
+    }
+
+    fn browser_tool(&self) -> Option<PathBuf> {
+        self.browser_tool.clone()
     }
 
     fn codex_config(

@@ -7,7 +7,8 @@ use clauseo_settings::Locations;
 
 use crate::error::ProfileError;
 
-/// The folder under the data folder that holds the agents' shell commands ([`ProfilePaths::tools`]).
+/// The folder under the data folder that holds the agents' shell commands
+/// ([`ProfilePaths::tools`]).
 pub const TOOLS_DIR: &str = "tools";
 
 /// The name the agents run agent-browser by, without the OS's suffix.

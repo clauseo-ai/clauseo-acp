@@ -70,7 +70,7 @@ pub(super) struct BrowserPrep {
     /// Where the socket folder goes; `None` is `/tmp`.
     #[cfg(unix)]
     socket_root: Option<PathBuf>,
-    /// The browser as a shell tool (`HostConfig::with_browser_tool`): no MCP entry, no proxy,
+    /// The browser as a shell tool (`ProfileHook::browser_tool`): no MCP entry, no proxy,
     /// no slot and no claims; the Chrome found is the session's `AGENT_BROWSER_EXECUTABLE_PATH`.
     shell: bool,
 }
@@ -83,7 +83,7 @@ impl BrowserPrep {
         !matches!(self.chrome, ChromeSearch::Skip)
     }
 
-    /// Whether this is the shell tool's prep (`HostConfig::with_browser_tool`).
+    /// Whether this is the shell tool's prep (`ProfileHook::browser_tool`).
     pub(super) fn shell(&self) -> bool {
         self.shell
     }
@@ -246,7 +246,7 @@ pub(super) fn warn_if_still_full(actor: &Actor, run: &super::RunFolders) {
 }
 
 /// What the launch prep does for `agent`'s session `key`, from the actor's state. With the shell
-/// tool wired (`HostConfig::with_browser_tool`): its `agent-browser` command and a Chrome search
+/// tool wired (`ProfileHook::browser_tool`): its `agent-browser` command and a Chrome search
 /// when `tools.browser` is on, else nothing. Otherwise, for the guarded entry: nothing when no
 /// browser can go to it (`tools.browser` off, no proxy, no `browser` entry from the profile
 /// hook, or no slot and none coming free).
@@ -265,7 +265,7 @@ pub(super) fn browser_prep(
         socket_root: None,
         shell: false,
     };
-    if let Some(tools) = &actor.wiring.browser_tool {
+    if let Some(tools) = actor.profile.browser_tool() {
         if !settings.tools.browser {
             return skip;
         }

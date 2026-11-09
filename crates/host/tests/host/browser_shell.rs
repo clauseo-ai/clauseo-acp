@@ -1,4 +1,4 @@
-//! The browser as a shell tool (`HostConfig::with_browser_tool`): a session whose launch prep
+//! The browser as a shell tool (`ProfileHook::browser_tool`): a session whose launch prep
 //! finds a Chrome gets agent-browser's variables, the tools folder on its agent's `PATH`, the
 //! instructions' browser part and `Available` in its header; a session with no Chrome, or with
 //! `tools.browser` off, gets none of them, a no-browser line and the reason in its header.
@@ -64,6 +64,7 @@ fn launch(
     write::write(&tools.join(command), b"stand-in");
     let hook = Hook {
         profile: Some(Arc::new(profile(dir.data()))),
+        browser_tool: Some(tools),
         ..Hook::default()
     };
     let empty = ChromeRoots {
@@ -81,7 +82,6 @@ fn launch(
         config
             .with_profile_hook(Box::new(hook))
             .with_agent_path_prepend(stetdoc.clone())
-            .with_browser_tool(tools.clone())
             .with_browser_executable(chrome.map(Path::to_path_buf))
             .with_chrome_roots(empty)
     });
