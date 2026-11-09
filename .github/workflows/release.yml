@@ -989,7 +989,21 @@ jobs:
           Run $Matches[1] $Matches[2]
           for ($i = 0; $i -lt 30 -and (Test-Path $dir); $i++) { Start-Sleep 2 }
           $left = @()
-          if (Test-Path $dir) { $left += "${dir}: " + ((Get-ChildItem -Recurse -Force $dir).FullName -join ', ') }
+          # What a restart deletes: PendingFileRenameOperations holds source, target pairs, and an
+          # empty target means delete at the next restart. A source reads \??\C:\... (stripped here).
+          $pending = @()
+          $pairs = @((Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -ErrorAction SilentlyContinue).PendingFileRenameOperations)
+          for ($p = 0; $p + 1 -lt $pairs.Count; $p += 2) {
+            if ($pairs[$p + 1] -eq '') { $pending += $pairs[$p] -replace '^\\\?\?\\', '' }
+          }
+          $pendingHere = @($pending | Where-Object { $_.StartsWith("$dir\", [StringComparison]::OrdinalIgnoreCase) } | Sort-Object -Unique)
+          foreach ($path in $pendingHere) { Write-Host "::notice::pending delete at the next restart: $path" }
+          # Each leftover under the folder, the folder too: a notice if that path is itself pending.
+          if (Test-Path $dir) {
+            foreach ($entry in @(Get-Item -Force $dir) + @(Get-ChildItem -Recurse -Force $dir)) {
+              if ($pending -contains $entry.FullName) { Write-Host "::notice::removed at the next restart: $($entry.FullName)" } else { $left += $entry.FullName }
+            }
+          }
           if (Test-Path $uninstKey) { $left += $uninstKey }
           # HKLM\SOFTWARE\Clauseo\Clauseo (and the then-empty HKLM\SOFTWARE\Clauseo) goes only with
           # #769's NSIS_HOOK_POSTUNINSTALL; before it lands, a notice instead of a failure.
