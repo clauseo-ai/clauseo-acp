@@ -55,7 +55,7 @@ use std::sync::Arc;
 
 use clauseo_process::TreeWatch;
 use clauseo_profile::{PacksWritten, SkillWrite, SkillsWritten};
-use clauseo_protocol::{AgentId, AgentKind, ThreadId};
+use clauseo_protocol::ThreadId;
 
 use super::super::Actor;
 use super::super::input::Input;
@@ -64,7 +64,7 @@ use super::{TurnInput, host_stopping, state};
 
 use crate::agent::data_fence::LaunchDeny;
 use crate::agent::folder_support::{Answer, FolderCheck};
-use crate::agent::login_link::{self, Checked, LoginCheck};
+use crate::agent::login_link::Checked;
 use crate::agent::{codex, data_folder};
 use crate::browser::session::BrowserSession;
 use crate::config::SessionKey;
@@ -274,7 +274,7 @@ pub(super) fn prepare(
     let id = agents::next_agent_id();
     let paths = launch_paths(actor, thread, id);
     let sweep = actor.turn_path.run_sweep.clone();
-    let login = login_hook(actor, thread);
+    let login = login::hook(actor, thread);
     let launch_gate = gate::of(actor, thread);
     let LaunchPaths {
         stored,
@@ -390,17 +390,7 @@ pub(super) fn prepare(
             Ok(Found::Prepared(prepared)) => Ok(*prepared),
             Err(error) => Err(error),
         };
-        let result = match (result, login) {
-            (Ok(mut prepared), Some((hook, agent))) => {
-                if let Some(codex) = prepared.codex.as_mut() {
-                    let home = codex.home.clone();
-                    let checked = login_link::check(check_clock, matter, hook, agent, home).await;
-                    codex.login = Some(checked);
-                }
-                Ok(prepared)
-            }
-            (result, _) => result,
-        };
+        let result = login::with_login(result, login, check_clock, matter).await;
         let result = result.map(Box::new);
         Input::Turn(TurnInput::Prepared { thread, id, result })
     });
@@ -445,16 +435,6 @@ fn undo_late(late: Found) {
     run.remove();
     // Its claims, relay and proxy go now, after the folder.
     drop(run);
-}
-
-/// The sign-in hook and the agent it asks about, for a Codex thread when a hook is set.
-fn login_hook(
-    actor: &Actor,
-    thread: ThreadId,
-) -> Option<(Arc<dyn LoginCheck + Send + Sync>, AgentId)> {
-    let hook = actor.wiring.sign_in.check.clone()?;
-    let agent = actor.threads.get(&thread)?.row.agent.clone();
-    (AgentKind::of(&agent) == Some(AgentKind::Codex)).then_some((hook, agent))
 }
 
 /// A launch's folder check answered (`agent/folder_support.rs`, a Codex or a Claude agent):
@@ -580,6 +560,7 @@ use paths::Claims;
 pub(super) mod folder;
 pub(super) mod gate;
 use gate::Found;
+mod login;
 pub(super) mod relay;
 mod straggler;
 pub(crate) use straggler::HeldRuns;
