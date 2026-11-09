@@ -1872,24 +1872,24 @@ each of `refresh::TASKS`), the same way: LOCAL SYSTEM, the same descriptor (the 
 and execute it, which starts and ends it), one instance at a time (the sweep queues the next).
 The stop's action is the admin copy with `--stop` and no other argument. It runs only on demand
 and stops after 2 minutes. A failed registration fails `--adopt` before the record's admin-copy
-values are written, as for the refresh task. `--remove --uninstall` deletes all three tasks,
-after the values and before the admin folder (`refresh::TEARDOWN`), with the WSL deny task. The folder rule above has
-two accepted outcomes. A user-made `\Clauseo` holding a task administrators can't delete fails
+values are written, as for the refresh task. `--remove --uninstall` deletes every task, the WSL
+tasks ("WSL" below) included, after the values and before the admin folder
+(`refresh::TEARDOWN`). The folder rule above has two accepted outcomes. A user-made `\Clauseo` holding a task administrators can't delete fails
 the delete, and so the registration, with that error: a user who could make the folder can block
 the install, but not take it over. A folder an administrator made, owned by that administrator's
 own SID rather than Administrators, is deleted and made again, which loses nothing.
 
 **Per machine.** A per-machine `--adopt` has no owner to name in the descriptor, so it registers
-none of the four. The refresh task stays per-user only: IT updates a per-machine install. The
+none of them. The refresh task stays per-user only: IT updates a per-machine install. The
 stop and sweep tasks are registered by the elevated set-up instead, once it has written the
 record with the owner as `OwnerSid`, when the record's `AdminCopyOwner` is `machine`
 (`late_steps::machine_tasks`, each of `refresh::MACHINE_TASKS`, with `\Clauseo\SandboxWslDeny`
-right after them, "WSL" below). It is the same registration as `--adopt`'s: same principal,
+and `\Clauseo\SandboxWslUpgrade` right after them, "WSL" below). It is the same registration as `--adopt`'s: same principal,
 arguments, limits and descriptor, with `OwnerSid` as the owner who may read and execute, and so
 start and end, them. Every set-up of the owner registers them again, replacing the ones there. A
 new owner's set-up, after a removal, replaces the previous owner's tasks, so only the new owner
 can start them. A failed registration fails the set-up at the step "registering the sandbox's
-stop, sweep and WSL tasks", rolled back like any other step. `--remove` deletes all three just
+stop, sweep and WSL tasks", rolled back like any other step. `--remove` deletes them all just
 before the record (`RemoveStep::StopTask`); a failed deletion is a partial removal, with the
 record kept for the next run. `--remove --uninstall` also deletes them with the admin copy.
 
@@ -2065,10 +2065,9 @@ logon of its own at every session's end (the runner's end sweeper, now gone), an
 refused a logged-off pool user's BITS job anyway. `SYSTEM` deletes them instead.
 
 **The task.** `\Clauseo\SandboxSweep` is registered and removed alongside
-`\Clauseo\SandboxStop` (above): `--adopt` registers all four of `refresh::TASKS`, a
-per-machine set-up registers `refresh::MACHINE_TASKS` (stop, sweep and WSL deny,
-`late_steps::machine_tasks`),
-and `--remove` and `--remove --uninstall` delete it. It has the same folder, principal (LOCAL
+`\Clauseo\SandboxStop` (above): `--adopt` registers all five of `refresh::TASKS`, a
+per-machine set-up registers `refresh::MACHINE_TASKS` (stop, sweep and the two WSL tasks,
+`late_steps::machine_tasks`), and `--remove` and `--remove --uninstall` delete it. It has the same folder, principal (LOCAL
 SYSTEM) and descriptor (`refresh::task_sddl`, the owner with `FRFX`). Its action is the admin
 copy with `--sweep-tasks` and no other argument. It runs only on demand and stops after 2
 minutes. Unlike the stop, it queues: a run asked for while one runs begins after it, so the run a
@@ -2461,27 +2460,40 @@ INTERACTIVE or a `BUILTIN` group there would deny the lawyer too.
 (`rules::msi_event_query`), with no delay: a delay would only keep the deny off longer. Its action
 is the admin copy with the fixed argument `--wsl-deny` and nothing else; the trigger has no value
 queries, so nothing from the event reaches the run. The run (`wsl_phase::wsl_deny`) is refused
-unless it is LOCAL SYSTEM from the admin copy's path, as the refresh's step 1, then installs WSL's
-pending MSI upgrade when one is owed (below, "Self-healing"), runs the WSL phase once, and does
-nothing else: no admin-copy step, no record read beyond the phase's own and the removal and group
-values the upgrade step reads first. The
-event trigger is on this task alone because anyone who can log on can fire it: INTERACTIVE may
-write to the Application log, so the lawyer or a pool user can forge an `MsiInstaller` event, and
-on the refresh that started the admin copy's steps as SYSTEM. Here a forged event gains no more
-than a re-applied deny and WSL's own pending upgrade installed, and a forged burst gives one run at a time, each holding the set-up lock
-for a moment (a set-up that meets it then fails at once and can be run again). The task ignores
-a start while it runs (`TASK_INSTANCES_IGNORE_NEW`): the phase is quick and idempotent, so an
-installer's burst of events gives one run, and an event after it ends gives another. It shares
-the other tasks' principal, descriptor (owned by Administrators, the owner `FRFX`) and folder,
-stops after 5 minutes (`PT5M`: msiexec is waited for up to 4, then the phase), and is registered
-and removed with them: `--adopt` registers it per user
-after `\Clauseo\SandboxStop` (`refresh::TASKS`), a per-machine install's set-up after the stop
-task (`refresh::MACHINE_TASKS`), a per-machine `--remove` deletes it with the stop task, and
-`--remove --uninstall` with the admin copy (`refresh::TEARDOWN`). Its exits (`WslDenyExit`, from
-51, after the stop's 50): 0 when the run was allowed, whatever the phase gave, 51
-(`NotAllowed`) when it isn't LOCAL SYSTEM from the admin copy, and 52 (`UpgradeFailed`, "upgrade
-failed, deny applied") when WSL's pending upgrade was owed and failed or couldn't be tried, WSL is
-as it was, and the phase ran after it. The phase's outcome never changes
+unless it is LOCAL SYSTEM from the admin copy's path, as the refresh's step 1, then runs the WSL
+phase once and does nothing else: no admin-copy step, no record read beyond the phase's own, and
+never WSL's upgrade. The event trigger is on this task alone because anyone who can log on can
+fire it: INTERACTIVE may write to the Application log, so the lawyer or a pool user can forge an
+`MsiInstaller` event, and on the refresh that started the admin copy's steps as SYSTEM. Here a
+forged event gains no more than a re-applied deny, and a forged burst gives one run at a time,
+each holding the set-up lock for a moment (a set-up that meets it then fails at once and can be
+run again). The task ignores a start while it runs (`TASK_INSTANCES_IGNORE_NEW`): the phase is
+quick and idempotent, so an installer's burst of events gives one run, and an event after it ends
+gives another. It shares the other tasks' principal, descriptor (owned by Administrators, the
+owner `FRFX`) and folder, stops after 2 minutes (`PT2M`), and is registered and removed with
+them: `--adopt` registers it per user after `\Clauseo\SandboxStop` and `\Clauseo\SandboxSweep`
+(`refresh::TASKS`), a per-machine install's set-up after the stop and sweep tasks
+(`refresh::MACHINE_TASKS`), a per-machine `--remove` deletes it with the stop and sweep tasks, and `--remove --uninstall` with the admin copy
+(`refresh::TEARDOWN`). Its exits (`WslDenyExit`, from 51, after the stop's 50): 0 when the run
+was allowed, whatever the phase gave, and 51 (`NotAllowed`) when it isn't LOCAL SYSTEM from the
+admin copy; 52 (`UpgradeFailed`) was its "upgrade failed, deny applied" before the upgrade moved
+to the task below, and is kept so the number keeps that meaning. 53 to 59 are kept for #717's
+sweep.
+
+**The WSL upgrade task.** `\Clauseo\SandboxWslUpgrade` (`SystemTask::WslUpgrade`, fixed argument
+`--wsl-upgrade`, `wsl_phase::wsl_upgrade`) installs WSL's pending MSI upgrade, then runs the WSL
+phase (below, "Self-healing"). It has no trigger: only the launch check asks for it, on demand, as
+the lawyer, so a forged installer event can't pick the moment SYSTEM's msiexec runs. It shares the
+other tasks' principal, descriptor and folder, stops after 5 minutes (`PT5M`: msiexec is waited
+for up to 4, then the phase), and is registered and removed alongside the WSL deny task (last in
+`TASKS`, `MACHINE_TASKS` and `TEARDOWN`). Once allowed, it first reads the processes as the
+stop task does (`stop::windows_stopper::processes`, each process's user against `PoolSids`): while
+any pool user has a live process, or when the processes can't be listed, it doesn't start the MSI,
+whose rewrite would drop the deny under that user; it runs the phase and exits "deferred". Its
+exits (`WslUpgradeExit`): 0 (`Done`, installed or none owed, then the phase), 60 (`NotAllowed`),
+61 (`Deferred`) and 62 (`UpgradeFailed`, "upgrade failed, deny applied": owed and failed, or
+couldn't be tried, the MSI's checks refusing it included; WSL is as it was, and the phase ran
+after it). The phase's outcome never changes
 an exit, the refresh's or this task's: a failure is one Event Log error line (AppIDs and Windows
 error codes, never a path or a SID), and a run that changed nothing writes no line. The launch
 check enforces the deny, so an exit code would tell no one more.
@@ -2601,8 +2613,10 @@ check (`check_launch_in`) passes WSL's check through `wsl_heal::heal`:
   and the task's last result (`last_wsl_deny_run`, read as `last_refresh_run` reads the refresh's,
   named through `WslDenyExit`: `NotAllowed (51)`, `running`, `never run`, or the code).
   `WslDenyUnverifiable` is refused at once, as before: no run makes an unreadable value readable.
-- **A pending upgrade** (`Found::UpgradePending`): the same request, and the run installs it. The
-  `--wsl-deny` SYSTEM run first mirrors `WslInstaller`'s `Install()` (microsoft/WSL @19cd15ea):
+- **A pending upgrade** (`Found::UpgradePending`): the check asks `\Clauseo\SandboxWslUpgrade`
+  instead (`refresh::task::request_wsl_upgrade`), and the run installs it. The `--wsl-upgrade`
+  SYSTEM run, once no pool user has a process (above), mirrors `WslInstaller`'s `Install()`
+  (microsoft/WSL @19cd15ea):
   when the package's version is newer than the MSI's `Version`, compared as the check compares
   them (`upgrade::msi_behind`, `IsUpdateNeeded` at `WslInstaller.cpp:142-165`), it runs
   `<System32>\msiexec.exe /i <package folder>\wsl.msi /qn SKIPMSIX=1 REBOOT=ReallySuppress`: the
@@ -2617,7 +2631,7 @@ check (`check_launch_in`) passes WSL's check through `wsl_heal::heal`:
   the phase re-applies the deny the MSI's rewrite dropped. A failure (an exit code, no service
   image, an image elsewhere, no `wsl.msi`, msiexec not ended within 240 s, which is left running
   rather than cut off mid-install) leaves WSL as it was, since Windows Installer rolls a failed
-  install back; the phase still runs, and the run exits 52. The step does nothing while the record
+  install back; the phase still runs, and the run exits 62. The step does nothing while the record
   says a removal is under way or names no group. An installed upgrade is one information line in
   the Event Log ("WSL's pending update was installed: <old> to <new>"), a failed one an error line
   with its code.
@@ -2635,10 +2649,10 @@ check (`check_launch_in`) passes WSL's check through `wsl_heal::heal`:
   revocation not checked and URL retrieval cache-only, so an offline machine verifies as an
   online one does, and the signer's chain must pass
   `CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_MICROSOFT_ROOT)`: it ends in one of
-  Microsoft's own roots, so a root added to the machine's store can't stand in for one. The handle stays open,
-  shared for reading only, and the two folders without delete sharing, until msiexec has ended,
-  so nothing is swapped between the checks and the install; msiexec gets the path that was
-  opened. A failed check is a failed upgrade (its reason names no path): the run still re-applies
+  Microsoft's own roots, so a root added to the machine's store can't stand in for one. The
+  handle stays open, shared for reading only, and the two folders without delete sharing, until
+  msiexec has ended, so nothing is swapped between the checks and the install; msiexec gets the
+  path that was opened. A failed check is a failed upgrade (its reason names no path): the run still re-applies
   the deny, as after any other failed upgrade.
 - **The launch's wait for it**: the host hears `LaunchProgress::UpdatingWindowsComponent` once,
   when the wait begins (the `progress` argument of `clean_close::check_launch`, a
@@ -2647,8 +2661,9 @@ check (`check_launch_in`) passes WSL's check through `wsl_heal::heal`:
   meanwhile waited for too. No launch starts while the task's run is still going, since msiexec
   rewrites the launch permissions mid-install. It launches once the package is no longer newer,
   the deny is in place and no run is going on (`WslHealed::Upgraded`); once a run of the task
-  that began after the request has ended while the upgrade is still pending, with 52
-  (`WslHealed::UpgradeFailed`) or any other code (`WslHealed::UpgradeUnfinished`); at the end of
+  that began after the request has ended while the upgrade is still pending, with 62
+  (`WslHealed::UpgradeFailed`), 61 ("deferred": a pool user's process, `WslHealed::UpgradeDeferred`)
+  or any other code (`WslHealed::UpgradeUnfinished`); at the end of
   the wait with no run going on (`UpgradeUnfinished`); and when the request fails
   (`UpgradeUnfinished`): in each case the check has just verified every deny. A run still going
   at 120 s is waited for up to 270 s (`wsl_heal::UPGRADE_RUNNING_WAIT`: msiexec's 240 s limit
@@ -2664,10 +2679,11 @@ check (`check_launch_in`) passes WSL's check through `wsl_heal::heal`:
   `UpgradeFailed`, which say WSL changed (or was tried) on the lawyer's behalf. The SYSTEM run's
   Event Log line names the versions.
 
-What remains, an accepted residual: after `UpgradeFailed` or `UpgradeUnfinished` the upgrade is
-still pending, and where the package's `WslInstaller` class is registered a pool user could start
-it during the session; its rewrite drops the deny until the run its `MsiInstaller` events start.
-The same upgrade just failed for SYSTEM, so it most likely fails again; and on the VM's WSL 3.0.3.0
+What remains, an accepted residual: after `UpgradeFailed`, `UpgradeDeferred` or
+`UpgradeUnfinished` the upgrade is still pending, and where the package's `WslInstaller` class is
+registered a pool user could start it during the session; its rewrite drops the deny until the
+run its `MsiInstaller` events start. After `UpgradeFailed` the same upgrade just failed for
+SYSTEM, so it most likely fails again; and on the VM's WSL 3.0.3.0
 the class isn't registered at all (F1). Not verified on a VM: the upgrade itself (no Store package
 newer than its MSI was at hand), that a packaged service's `ImagePath` names its package's folder
 under `WindowsApps`, and that the owner may run the task from a non-elevated launch (the refresh's

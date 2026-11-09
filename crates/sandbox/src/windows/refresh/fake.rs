@@ -58,6 +58,8 @@ pub(super) struct Fake {
     pub(super) wsl: Result<Option<String>, Failed>,
     /// What `upgrade_wsl` gives.
     pub(super) upgrade: WslUpgraded,
+    /// What `pool_busy` gives.
+    pub(super) pool_busy: Result<bool, Failed>,
     /// The staging folder's state.
     pub(super) staging: Staging,
 }
@@ -107,6 +109,7 @@ impl Fake {
             staging: Staging::Absent,
             wsl: Ok(None),
             upgrade: WslUpgraded::NotPending,
+            pool_busy: Ok(false),
         }
     }
 
@@ -300,6 +303,11 @@ impl Refresher for Fake {
 }
 
 impl WslUpgrade for Fake {
+    fn pool_busy(&mut self) -> Result<bool, Failed> {
+        self.calls.push("pool_busy");
+        self.pool_busy.clone()
+    }
+
     fn upgrade_wsl(&mut self) -> WslUpgraded {
         self.calls.push("upgrade_wsl");
         self.upgrade.clone()

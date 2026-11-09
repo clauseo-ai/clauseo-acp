@@ -1,10 +1,10 @@
-//! A fake WSL deny task with a clock that moves only when the launch check sleeps, and checks
-//! scripted against that clock.
+//! Fake WSL deny and upgrade tasks with a clock that moves only when the launch check sleeps, and
+//! checks scripted against that clock.
 
 use std::cell::Cell;
 use std::time::Duration;
 
-use super::DenyTask;
+use super::{DenyTask, Which};
 use crate::Blocked;
 use crate::windows::refresh::last_run::LastRun;
 use crate::windows::wsl::Found;
@@ -27,10 +27,14 @@ fn due<T: Clone>(script: &Script<T>, at: Duration) -> T {
 pub(crate) struct FakeTask {
     /// What a request gives.
     pub(crate) request: Result<(), String>,
-    /// The task's last run over time.
+    /// The deny task's last run over time.
     pub(crate) last: Script<Result<LastRun, String>>,
-    /// How many requests were made.
+    /// The upgrade task's last run over time.
+    pub(crate) upgrade_last: Script<Result<LastRun, String>>,
+    /// How many requests were made of the deny task.
     pub(crate) requests: Cell<usize>,
+    /// How many requests were made of the upgrade task.
+    pub(crate) upgrade_requests: Cell<usize>,
     clock: Cell<Duration>,
 }
 
@@ -40,7 +44,9 @@ impl FakeTask {
         FakeTask {
             request: Ok(()),
             last: vec![(Duration::ZERO, Ok(LastRun::NeverRun))],
+            upgrade_last: vec![(Duration::ZERO, Ok(LastRun::NeverRun))],
             requests: Cell::new(0),
+            upgrade_requests: Cell::new(0),
             clock: Cell::new(Duration::ZERO),
         }
     }
@@ -50,6 +56,7 @@ impl FakeTask {
         let mut task = FakeTask::new();
         task.request = Err("the task isn't registered in \\Clauseo".to_owned());
         task.last = vec![(Duration::ZERO, Err("not registered".to_owned()))];
+        task.upgrade_last.clone_from(&task.last);
         task
     }
 
@@ -68,13 +75,21 @@ impl FakeTask {
 }
 
 impl DenyTask for FakeTask {
-    fn request(&self) -> Result<(), String> {
-        self.requests.set(self.requests.get() + 1);
+    fn request(&self, which: Which) -> Result<(), String> {
+        let count = match which {
+            Which::Deny => &self.requests,
+            Which::Upgrade => &self.upgrade_requests,
+        };
+        count.set(count.get() + 1);
         self.request.clone()
     }
 
-    fn last_run(&self) -> Result<LastRun, String> {
-        due(&self.last, self.clock.get())
+    fn last_run(&self, which: Which) -> Result<LastRun, String> {
+        let script = match which {
+            Which::Deny => &self.last,
+            Which::Upgrade => &self.upgrade_last,
+        };
+        due(script, self.clock.get())
     }
 
     fn sleep(&self, time: Duration) {

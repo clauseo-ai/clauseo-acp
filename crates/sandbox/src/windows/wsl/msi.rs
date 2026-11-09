@@ -1,6 +1,6 @@
 //! WSL's pending MSI upgrade, installed as WSL's own installer installs it (ADR 0049, "WSL",
-//! "Self-healing"), by the WSL deny task's SYSTEM run (`--wsl-deny`), before it re-applies the
-//! deny. The mirror, at microsoft/WSL @19cd15ea:
+//! "Self-healing"), by the WSL upgrade task's SYSTEM run (`--wsl-upgrade`), before it re-applies
+//! the deny. The mirror, at microsoft/WSL @19cd15ea:
 //!
 //! - **When**: the package's version newer than the MSI's `Version`, as `IsUpdateNeeded`
 //!   compares them (`WslInstaller.cpp:142-165`) and as the launch check does

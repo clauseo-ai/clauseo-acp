@@ -215,8 +215,9 @@ pub enum Step {
     ResetProfile,
     /// 8a: the network filters, the owner's grants on them and the firewall rules (S15 PR7).
     Network,
-    /// 5: on a per-machine install, registering the SYSTEM tasks `\Clauseo\SandboxStop` and
-    /// `\Clauseo\SandboxSweep` and `\Clauseo\SandboxWslDeny` for the owner just recorded
+    /// 5: on a per-machine install, registering the SYSTEM tasks `\Clauseo\SandboxStop`,
+    /// `\Clauseo\SandboxSweep`, `\Clauseo\SandboxWslDeny` and `\Clauseo\SandboxWslUpgrade` for
+    /// the owner just recorded
     /// (`late_steps::machine_tasks`).
     StopTask,
     /// 3: denying the group "log on through Remote Desktop Services"

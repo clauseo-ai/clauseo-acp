@@ -18,7 +18,8 @@
 //! - **Apply** ([`apply`], elevated): the set-up after the group exists, the SYSTEM task
 //!   `\Clauseo\SandboxRefresh` on every run (at logon), and the SYSTEM task
 //!   `\Clauseo\SandboxWslDeny`, which does nothing else, on Windows Installer's events in the
-//!   Application log (which a WSL update writes). Each new value is checked before it is
+//!   Application log (which a WSL update writes), and `\Clauseo\SandboxWslUpgrade` after the
+//!   upgrade it installs. Each new value is checked before it is
 //!   written, written with `SeRestorePrivilege` through a backup-restore open (the key's owner
 //!   and DACL are never touched), then read back and checked again. The targets are recorded
 //!   first ([`WslRecord`], `WslDenyAppIds` and `WslDenyAbsent` in the machine record).
@@ -27,9 +28,9 @@
 //!   that can't be read or parsed, a class with no `AppID`, or a packaged-COM registration of
 //!   WSL's class (which would bypass the `AppID`) refuses with `Blocked::WslDenyUnverifiable`,
 //!   the inbox WSL's too: from Windows 10 2004 on it runs WSL2's VMs as well. With no WSL at all
-//!   nothing is refused. The launch heals first (`clean_close::wsl_heal`): a missing deny, or a
-//!   pending upgrade ([`inspect`]), has the WSL deny task run, which installs the upgrade
-//!   ([`msi`]) and re-applies the deny, and the launch waits for it.
+//!   nothing is refused. The launch heals first (`clean_close::wsl_heal`): a missing deny has
+//!   the WSL deny task run, and a pending upgrade ([`inspect`]) the WSL upgrade task, which
+//!   installs it ([`msi`]) and re-applies the deny; the launch waits for either.
 //! - **Removal** ([`remove`], `--remove`): only our denies come off each recorded target, and a
 //!   value we made goes once what is left is the default it was made from. No old value is ever
 //!   written back: it may be older than a WSL update since.

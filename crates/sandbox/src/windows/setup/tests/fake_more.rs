@@ -172,6 +172,8 @@ pub(super) struct State {
     pub(super) sweep_task: Option<Sid>,
     /// The owner the task `\Clauseo\SandboxWslDeny`'s descriptor names, while it is registered.
     pub(super) wsl_task: Option<Sid>,
+    /// The owner the task `\Clauseo\SandboxWslUpgrade`'s descriptor names, while it is registered.
+    pub(super) wsl_upgrade_task: Option<Sid>,
     /// The group WSL's launch permissions deny, while they do.
     pub(super) wsl: Option<Sid>,
 }
@@ -205,6 +207,7 @@ pub(super) fn new_machine(test: &str) -> FakeMachine {
             remote_denied: BTreeSet::new(),
             sweep_task: None,
             wsl_task: None,
+            wsl_upgrade_task: None,
             wsl: None,
         },
         written: Vec::new(),

@@ -5,7 +5,7 @@
 //! user may start that upgrade: the package's packaged COM class `WslInstaller` grants launch to
 //! Authenticated Users (`AppxManifest.in:74-77`), and the MSI rewrites WSL's launch permissions,
 //! dropping the deny until the WSL deny task puts it back. So a tier B launch doesn't start while
-//! one is pending ([`Blocked::WslUpgradePending`]): it has the WSL deny task install it first,
+//! one is pending ([`Blocked::WslUpgradePending`]): it has the WSL upgrade task install it first,
 //! then re-apply the deny (`clean_close::wsl_heal`, `msi.rs`), and starts once the deny is
 //! verified.
 //!

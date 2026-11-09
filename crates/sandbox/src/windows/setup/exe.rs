@@ -39,9 +39,10 @@
 //!
 //! `--refresh` (`crate::windows::refresh`) is the SYSTEM task's: it exits with its own codes
 //! (`RefreshExit`, from 32), which is why [`main`] returns the process's exit code. So do
-//! `--stop` (`stop.rs`, `StopExit`, from 45), `--wsl-deny` (`refresh::WslDenyExit`, from 51)
-//! and `--sweep-tasks` (`sweep.rs`, `SweepExit`, from 53, after the WSL deny task's 51 and 52),
-//! the other SYSTEM tasks'.
+//! `--stop` (`stop.rs`, `StopExit`, from 45), `--wsl-deny` (`refresh::WslDenyExit`, 51 and
+//! 52), `--sweep-tasks` (`sweep.rs`, `SweepExit`, from 53, after the WSL deny task's 51 and 52)
+//! and `--wsl-upgrade` (`refresh::WslUpgradeExit`, from 60, after the sweep's 59), the other
+//! SYSTEM tasks'.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -73,7 +74,7 @@ use crate::windows::sids::{Sid, data_dir_owner_allowed};
 /// Runs the exe on `args` (those after its name) and returns its process exit code: a
 /// [`SetupExit`]'s, for `--refresh` a [`refresh::RefreshExit`]'s, for `--stop` a
 /// [`stop::StopExit`]'s, for `--sweep-tasks` a [`sweep::SweepExit`]'s, for `--wsl-deny` a
-/// [`refresh::WslDenyExit`]'s.
+/// [`refresh::WslDenyExit`]'s, for `--wsl-upgrade` a [`refresh::WslUpgradeExit`]'s.
 pub fn main(args: impl IntoIterator<Item = OsString>) -> u8 {
     // First: no DLL from beside the exe (a folder a standard user may write) loads from here on.
     if let Err(error) = restrict_dll_search() {
@@ -104,11 +105,15 @@ pub fn main(args: impl IntoIterator<Item = OsString>) -> u8 {
     if mode == Mode::WslDeny {
         return refresh::run_wsl_deny().as_code();
     }
+    if mode == Mode::WslUpgrade {
+        return refresh::run_wsl_upgrade().as_code();
+    }
     super::event_trace::install();
     run_mode(mode).as_code()
 }
 
-/// Every mode but `--refresh`, `--stop`, `--sweep-tasks` and `--wsl-deny`, which [`main`] runs.
+/// Every mode but `--refresh`, `--stop`, `--sweep-tasks`, `--wsl-deny` and `--wsl-upgrade`,
+/// which [`main`] runs.
 fn run_mode(mode: Mode) -> SetupExit {
     match mode {
         Mode::SetUp {
@@ -155,7 +160,9 @@ fn run_mode(mode: Mode) -> SetupExit {
                 .ok();
             run_remove(Names::production(), invoker, per_machine, uninstall)
         }
-        Mode::Refresh | Mode::Stop | Mode::SweepTasks | Mode::WslDeny => SetupExit::Usage,
+        Mode::Refresh | Mode::Stop | Mode::SweepTasks | Mode::WslDeny | Mode::WslUpgrade => {
+            SetupExit::Usage
+        }
     }
 }
 

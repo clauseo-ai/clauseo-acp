@@ -176,6 +176,7 @@ impl AdoptStep {
             AdoptStep::Task(SystemTask::Stop) => "stop_task",
             AdoptStep::Task(SystemTask::Sweep) => "sweep_task",
             AdoptStep::Task(SystemTask::WslDeny) => "wsl_deny_task",
+            AdoptStep::Task(SystemTask::WslUpgrade) => "wsl_upgrade_task",
             AdoptStep::Values => "admin_values",
             AdoptStep::SetUpUser => "set_up_user",
         }

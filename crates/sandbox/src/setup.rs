@@ -125,7 +125,7 @@ pub enum Blocked {
     /// packaged `WslInstaller` class lets any user start the upgrade, which rewrites the launch
     /// permissions and drops the deny until the refresh puts it back. A package with no MSI
     /// installed isn't this (`WslDenyUnverifiable` where WSL 2 can run, else nothing). Transient
-    /// at launch: the launch check has the WSL deny task install the upgrade and waits, and
+    /// at launch: the launch check has the WSL upgrade task install the upgrade and waits, and
     /// starts once the deny is verified (`clean_close::wsl_heal`); the launch check gives it only
     /// when the task's run is still going after its wait (msiexec may still be installing).
     WslUpgradePending,

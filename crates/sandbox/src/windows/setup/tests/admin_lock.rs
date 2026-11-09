@@ -45,7 +45,12 @@ fn set_up_locks_the_admin_copy_with_the_group_right_after_recording_it() {
         assert!(made < at && last_write.is_some_and(|w| w < at), "{calls:?}");
         let mut expected = fresh_calls();
         if copy == Some(CopyOwner::Machine) {
-            for task in ["SandboxWslDeny", "SandboxSweep", "SandboxStop"] {
+            for task in [
+                "SandboxWslUpgrade",
+                "SandboxWslDeny",
+                "SandboxSweep",
+                "SandboxStop",
+            ] {
                 expected.insert(at, format!("register_task {task} 1001"));
             }
         }

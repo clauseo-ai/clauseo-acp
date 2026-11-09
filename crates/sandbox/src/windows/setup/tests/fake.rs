@@ -476,6 +476,7 @@ impl Machine for FakeMachine {
             SystemTask::Stop => &mut self.state.stop_task,
             SystemTask::Sweep => &mut self.state.sweep_task,
             SystemTask::WslDeny => &mut self.state.wsl_task,
+            SystemTask::WslUpgrade => &mut self.state.wsl_upgrade_task,
             SystemTask::Refresh => panic!("the set-up never registers the refresh"),
         };
         *slot = Some(owner.clone());

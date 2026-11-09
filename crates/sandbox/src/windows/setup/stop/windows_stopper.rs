@@ -217,7 +217,7 @@ impl Record for WindowsStopper {
 }
 
 /// The handles that can suspend and terminate a process, by pid.
-pub(super) type Opened = Vec<(u32, Handle)>;
+pub(in crate::windows) type Opened = Vec<(u32, Handle)>;
 
 /// Every running process, as [`Process`] says, with the handles that can terminate one, by pid.
 ///
@@ -230,7 +230,7 @@ pub(super) type Opened = Vec<(u32, Handle)>;
 /// user's keeps the passes going. A list that can't be read marks every process
 /// `list_failed`: the token then says whose each is, and one it can't read is unknown, unless
 /// its owner is a pool user (`pick::user_of`).
-pub(super) fn processes() -> Result<(Vec<Process>, Opened), Failed> {
+pub(in crate::windows) fn processes() -> Result<(Vec<Process>, Opened), Failed> {
     let mut seen = Vec::new();
     // Every handle stays open until the list is read, the query-only ones too.
     let mut held = Vec::new();

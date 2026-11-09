@@ -29,15 +29,16 @@ use crate::windows::wsl::{self, WslRead};
 /// (`wsl::check`), or the launch is refused with `WslDenyMissing` or `WslDenyUnverifiable`,
 /// and no WSL upgrade may be pending (`WslUpgradePending`): a pool user who can start WSL gets a
 /// Linux the network filters don't see. Both are healed first (`wsl_heal`): the WSL deny task
-/// is asked to run, as the lawyer, and the check waits for it, up to 10 s for a missing deny and
-/// up to 120 s for a pending upgrade, which its SYSTEM run installs before it re-applies the
-/// deny; `progress` hears [`LaunchProgress::UpdatingWindowsComponent`] when that wait begins, so
-/// the host can say so. A pending upgrade refuses nothing once the deny is verified; what the
-/// healing did is [`LaunchCheck::wsl_healed`], for the host's log. Then every unclean-session marker awaiting a sweep must be clean, or
-/// become clean within 15 s of a sweep this asks for (`runner::unclean::await_sweeps`), or the
-/// launch is refused with [`Error::UncleanSession`], nothing else read or removed. Then, under the
-/// matter's set-aside lock, it reads the matter's clean-close record and removes it, whatever
-/// comes next: a failed removal refuses the launch
+/// (a missing deny) or the WSL upgrade task (a pending upgrade, which its SYSTEM run installs
+/// before it re-applies the deny) is asked to run, as the lawyer, and the check waits for it, up
+/// to 10 s for a missing deny and up to 120 s for a pending upgrade (270 s while its run goes on);
+/// `progress` hears [`LaunchProgress::UpdatingWindowsComponent`] when that wait begins, so the host
+/// can say so. A pending upgrade refuses nothing once the deny is verified; what the healing did is
+/// [`LaunchCheck::wsl_healed`], for the host's log. Then every unclean-session marker awaiting a
+/// sweep must be clean, or become clean within 15 s of a sweep this asks for
+/// (`runner::unclean::await_sweeps`), or the launch is refused with [`Error::UncleanSession`],
+/// nothing else read or removed. Then, under the matter's set-aside lock, it reads the matter's
+/// clean-close record and removes it, whatever comes next: a failed removal refuses the launch
 /// ([`Error::CleanClose`]), and a lock that can't be taken too ([`Error::SetAside`]). Then it
 /// decides ([`LaunchCheck::path`]): see the module's docs and 0049. `ledger` is read as the
 /// caller opened it, just before.

@@ -55,9 +55,9 @@
 //!    removal leaves them (it deletes nothing in the owner's folders, K1), and the next set-up's
 //!    readers drop each as stale, since it names a pool SID the record no longer lists
 //!    (`runner::unclean`);
-//! 9. on a per-machine install, the stop, sweep and WSL deny tasks set-up registered for the
-//!    owner, then the record key, which takes the set-up's values with it (`SETUP_VALUES`: the stop's and
-//!    the sweep's `…Next`, `…Sequence` and `…Completed` among them);
+//! 9. on a per-machine install, the stop, sweep and WSL tasks set-up registered for the owner,
+//!    then the record key, which takes the set-up's values with it (`SETUP_VALUES`: the stop's
+//!    and the sweep's `…Next`, `…Sequence` and `…Completed` among them);
 //! 10. for the uninstaller only, the admin copy's teardown (`admin_remove.rs`, run through
 //!     [`remove_then`]), with the lock still held, so a refresh skips instead of racing it.
 //!
@@ -157,7 +157,7 @@ pub enum RemoveStep {
     Record,
     /// Removing the network filters and firewall rules (S15 PR7).
     Network,
-    /// A per-machine install's stop, sweep and WSL deny tasks, deleted before the record.
+    /// A per-machine install's stop, sweep and WSL tasks, deleted before the record.
     StopTask,
     /// Taking the group's "Deny log on through Remote Desktop Services" off, before the group.
     RemoteLogon,
@@ -551,7 +551,8 @@ fn clear_markers(machine: &mut impl Removal) -> Result<(), Failed> {
 
 /// Step 8, before the record goes: on a per-machine install (`AdminCopyOwner` is `machine`),
 /// each of [`MACHINE_TASKS`] set-up registered for the record's owner (`\Clauseo\SandboxStop`,
-/// `\Clauseo\SandboxSweep`, `\Clauseo\SandboxWslDeny`) is deleted, so the owner keeps no start
+/// `\Clauseo\SandboxSweep`, `\Clauseo\SandboxWslDeny`, `\Clauseo\SandboxWslUpgrade`) is
+/// deleted, so the owner keeps no start
 /// right once their pool is gone. A per-user install's tasks stay (`--adopt` registered them;
 /// `--remove --uninstall` deletes them with the admin copy).
 fn remove_machine_tasks(machine: &mut impl Removal) -> Result<(), Failed> {

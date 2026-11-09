@@ -222,6 +222,7 @@ impl Removal for Remover {
             SystemTask::Stop => self.m.state.stop_task = None,
             SystemTask::Sweep => self.m.state.sweep_task = None,
             SystemTask::WslDeny => self.m.state.wsl_task = None,
+            SystemTask::WslUpgrade => self.m.state.wsl_upgrade_task = None,
             SystemTask::Refresh => panic!("the removal never deletes the refresh alone"),
         }
         Ok(())
