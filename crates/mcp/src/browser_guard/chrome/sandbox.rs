@@ -275,5 +275,24 @@ impl Host {
     }
 }
 
+/// Tests only, and only in a `test-support` build (never a shipped one, where this function and
+/// its variable do not exist): with [`UNSANDBOXED_FOR_TESTS`] at `1` in the guard's environment,
+/// Chrome gets `--no-sandbox` after the check that refuses it, so a real Chrome's children run
+/// unsandboxed and the check after the start can be shown to refuse them (the pair the pull
+/// request's body describes, for the Windows machine, the Mac and Linux).
+#[cfg(feature = "test-support")]
+pub(crate) fn unsandboxed_for_tests(mut args: Vec<std::ffi::OsString>) -> Vec<std::ffi::OsString> {
+    if std::env::var_os(UNSANDBOXED_FOR_TESTS).is_some_and(|value| value == "1") {
+        // Before the URL, the last argument.
+        let at = args.len().saturating_sub(1);
+        args.insert(at, "--no-sandbox".into());
+    }
+    args
+}
+
+/// [`unsandboxed_for_tests`]'s variable.
+#[cfg(feature = "test-support")]
+pub(crate) const UNSANDBOXED_FOR_TESTS: &str = "CLAUSEO_TEST_GUARD_CHROME_UNSANDBOXED";
+
 #[cfg(test)]
 mod tests;

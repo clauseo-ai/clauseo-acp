@@ -296,7 +296,11 @@ fn launch_as_root_on_linux_is_refused_before_anything_starts() {
             container,
         };
         let refused = super::launch_on(&spec, host).err();
-        assert_eq!(refused, Some(super::StartError::Sandbox(None)), "{host:?}");
+        assert_eq!(
+            refused,
+            Some(super::StartError::Sandbox(super::Refused::Root)),
+            "{host:?}"
+        );
         assert!(!dir.exists(), "{host:?}: something was made");
     }
 }

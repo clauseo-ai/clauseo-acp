@@ -172,6 +172,12 @@ pub(crate) fn port_args() -> Vec<&'static str> {
     args
 }
 
+/// The guard's check after Chrome's start, for the Chrome stand-in (a `test-support` build only,
+/// `src/browser_guard/chrome/postcheck.rs`): its children count as sandboxed when their
+/// arguments hold `--stub-sandboxed`, as the stand-in's renderer's do but in mode
+/// `unsandboxed-renderer` (`examples/chrome_stub.rs`). The guard passes it to no child.
+pub(crate) const STUB_SANDBOX: (&str, &str) = ("CLAUSEO_TEST_GUARD_SANDBOX", "stub");
+
 /// `clauseo-mcp browser-guard --agent-browser <stub> --cwd <cwd> --cdp-port <port> -- <child_args>`
 /// (with `--daemon-port` on Windows), with the host's variables on top of the test's own
 /// environment.
@@ -179,7 +185,8 @@ pub(crate) fn guard_command(scratch: &Scratch, stub: &Path, child_args: &[&OsStr
     let mut command = Command::new(GUARD);
     command
         .args(guard_args(scratch, stub, child_args))
-        .envs(host_env(scratch));
+        .envs(host_env(scratch))
+        .env(STUB_SANDBOX.0, STUB_SANDBOX.1);
     command
 }
 

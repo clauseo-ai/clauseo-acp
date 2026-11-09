@@ -57,11 +57,38 @@ pub(crate) const PORT_WAIT: Duration = Duration::from_secs(15);
 /// gets [`chrome::sandbox::REFUSAL`] and the host can tell it apart later.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum StartError {
-    /// Chrome's sandbox could not start; what Chrome printed (the fixed part, no path), or
-    /// `None` when the guard refused before starting it (Linux, as root).
-    Sandbox(Option<&'static str>),
+    /// Chrome's sandbox could not start, or did not hold in a child Chrome started.
+    Sandbox(Refused),
     /// Anything else; the reason.
     Other(String),
+}
+
+/// Why the guard refused Chrome for its sandbox. Each names only fixed text: no path, no command
+/// line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Refused {
+    /// Chrome printed one of its sandbox failures; the fixed part (`chrome/sandbox.rs`).
+    Said(&'static str),
+    /// Linux as root: refused before Chrome starts.
+    Root,
+    /// The check after Chrome's start (`chrome/postcheck.rs`) found a child without its sandbox:
+    /// the child's kind and why.
+    Unsandboxed {
+        kind: &'static str,
+        why: &'static str,
+    },
+    /// Windows: before reporting its endpoint, Chrome exited with a crash's code, or a child of
+    /// it seen sandboxed did (`chrome/postcheck/crashed.rs`).
+    #[cfg(windows)]
+    Crashed,
+    /// macOS: `sandbox_check` is missing from this system's libraries, so nothing can tell
+    /// whether Chrome's children are sandboxed (`chrome/postcheck/macos.rs`).
+    #[cfg(any(target_os = "macos", test))]
+    NoSandboxCheck,
+    /// Windows: a job the guard runs in has UI restrictions, below which Chrome's sandbox cannot
+    /// nest its own UI-restricted jobs (`job/probe.rs`); refused before Chrome starts.
+    #[cfg(any(windows, test))]
+    JobLimitsWindows,
 }
 
 impl From<String> for StartError {
@@ -73,13 +100,33 @@ impl From<String> for StartError {
 impl std::fmt::Display for StartError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Sandbox(Some(said)) => write!(
+            Self::Sandbox(Refused::Said(said)) => write!(
                 f,
                 "Chrome's sandbox could not start (Chrome said \"{said}\"); the guard never runs \
                  Chrome without it"
             ),
-            Self::Sandbox(None) => f.write_str(
+            Self::Sandbox(Refused::Root) => f.write_str(
                 "Chrome's sandbox cannot start as root; the guard never runs Chrome without it",
+            ),
+            #[cfg(windows)]
+            Self::Sandbox(Refused::Crashed) => f.write_str(
+                "Chrome's sandbox could not start: Chrome or a sandboxed child of it crashed \
+                 before Chrome reported its debugging port; the guard never runs Chrome without it",
+            ),
+            #[cfg(any(target_os = "macos", test))]
+            Self::Sandbox(Refused::NoSandboxCheck) => f.write_str(
+                "Chrome's sandbox cannot be checked: this macOS has no sandbox_check; the guard \
+                 never runs Chrome unchecked",
+            ),
+            #[cfg(any(windows, test))]
+            Self::Sandbox(Refused::JobLimitsWindows) => f.write_str(
+                "The browser can't start its own protection here: the job it runs in limits its \
+                 windows; the guard never runs Chrome without it",
+            ),
+            Self::Sandbox(Refused::Unsandboxed { kind, why }) => write!(
+                f,
+                "Chrome's sandbox did not hold: its {kind} {why}; the guard never runs Chrome \
+                 without it"
             ),
             Self::Other(reason) => f.write_str(reason),
         }
@@ -330,11 +377,34 @@ fn start_both(
         start_wait(),
         parent,
         Arc::clone(&shared.held),
-    )?;
+        #[cfg(windows)]
+        &launcher.job,
+    );
+    // Windows: a failed wait ends the job too, so Chrome's children (a hung tree, a broker left
+    // running after its sandbox failed) go with Chrome.
+    #[cfg(windows)]
+    if endpoint.is_err() && !launcher.job.kill() {
+        note("Windows refused to end the guard's job; ending Chrome alone");
+    }
+    let endpoint = endpoint?;
     note(&format!(
         "Chrome is listening on the claimed debugging port {}",
         launcher.cdp_port
     ));
+    // Its children really sandboxed (`chrome/postcheck.rs`); on a refusal Chrome is dropped,
+    // which kills it, and on Windows the job ends too, Chrome's children with it.
+    let checked = chrome::postcheck::check_sandbox(
+        &chrome,
+        parent,
+        &launcher.profile,
+        #[cfg(windows)]
+        &launcher.job,
+    );
+    #[cfg(windows)]
+    if checked.is_err() && !launcher.job.kill() {
+        note("Windows refused to end the guard's job; ending Chrome alone");
+    }
+    let watch = checked?;
     let mut env = launcher.env.clone();
     env::set_cdp(&mut env, &endpoint);
     let cannot_run =
@@ -361,6 +431,17 @@ fn start_both(
         chrome.watch(move || send(&events, Event::ChromeExited(generation)));
     }
     {
+        let (owner, events) = (Arc::clone(shared), events.clone());
+        chrome::postcheck::sentinel::start(
+            &mut chrome,
+            watch,
+            Arc::clone(shared),
+            move |refused| {
+                sandbox_broke(&owner, generation, refused, &events);
+            },
+        );
+    }
+    {
         let (shared, events) = (Arc::clone(shared), events.clone());
         // Never joined: it sends its end as an event, and a grandchild of agent-browser's could
         // still hold the pipe open.
@@ -376,6 +457,30 @@ fn start_both(
     });
     state.idle_since = now();
     Ok(())
+}
+
+/// The sentinel found a child of Chrome unsandboxed (`chrome/postcheck/sentinel.rs`). If that
+/// Chrome, of start `generation`, still runs, the browser is refused as a start refuses it (the
+/// relay ends the guard, answering what is in flight with the refusal) and Chrome is killed at
+/// once, on Windows with the whole job. Under the state's lock, so no stop or start comes between
+/// the generation's test and the kill; the refusal goes out before the kill, so the relay reads
+/// it before Chrome's exit and never starts Chrome again.
+fn sandbox_broke(shared: &Shared, generation: u64, refused: Refused, events: &mpsc::Sender<Event>) {
+    let state = shared
+        .state
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if state.generation != generation {
+        return;
+    }
+    send(events, Event::StartFailed(StartError::Sandbox(refused)));
+    #[cfg(windows)]
+    if !shared.launcher.job.kill() {
+        note("Windows refused to end the guard's job; ending Chrome alone");
+    }
+    if let Some(live) = state.live.as_ref() {
+        live.chrome.kill();
+    }
 }
 
 /// Ends the running Chrome and agent-browser, if any, as the guard's exit does. The generation

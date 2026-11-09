@@ -49,11 +49,14 @@ libc = { workspace = true }
 # move that never replaces a file (src/write/windows.rs), and `CreateFileW`, a child's `NUL`.
 # `Win32_System_SystemInformation` is for `GetWindowsDirectoryW` and `GetSystemDirectoryW`, the
 # folders a child's `SystemRoot`, `windir` and `ComSpec` default to
-# (src/browser_guard/job/spawn.rs).
+# (src/browser_guard/job/spawn.rs). `Wdk_System_Threading` is for `NtQueryInformationProcess`, a
+# Chrome child's command line, in the check of Chrome's sandbox after its start
+# (src/browser_guard/chrome/postcheck/windows.rs).
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
   "Win32_Storage_FileSystem",
   "Win32_System_SystemInformation",
+  "Wdk_System_Threading",
 ] }
 
 # Itself with test-support, so the guard the tests run reads the test's idle stop.

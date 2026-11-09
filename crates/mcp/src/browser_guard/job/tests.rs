@@ -23,14 +23,20 @@ use windows::Win32::Foundation::{
     CloseHandle, CompareObjectHandles, DUPLICATE_SAME_ACCESS, DuplicateHandle, HANDLE,
 };
 use windows::Win32::Security::SECURITY_ATTRIBUTES;
-use windows::Win32::System::JobObjects::IsProcessInJob;
+use windows::Win32::System::JobObjects::{
+    IsProcessInJob, JOB_OBJECT_LIMIT_BREAKAWAY_OK, JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION,
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK,
+    JOB_OBJECT_UILIMIT_HANDLES, JOBOBJECT_BASIC_UI_RESTRICTIONS,
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectBasicUIRestrictions,
+    JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
+};
 use windows::Win32::System::Threading::{
     CreateEventW, GetCurrentProcess, INFINITE, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
     PROCESS_SYNCHRONIZE, WaitForSingleObject,
 };
 use windows::core::{BOOL, PCWSTR};
 
-use super::{Child, Io, Job, Launch};
+use super::{Child, Io, Job, Launch, Nesting, ui_jobs_nest};
 use crate::write;
 
 /// A built example, found from the test binary (`target/<profile>/deps/`) as
@@ -388,5 +394,109 @@ fn closing_the_agents_job_ends_the_child_made_in_the_guards_job() {
     assert_eq!(waited, WAIT_OBJECT_0);
     agent.wait().unwrap();
     drop(held);
+    write::remove_dir_all(&dir).unwrap();
+}
+
+/// The job's limits, read back: it ends its processes when its last handle closes (0x2000), ends
+/// a process at once when it crashes (0x400; its exit code the exception's, which the guard
+/// reads, `chrome/postcheck/crashed.rs`), and lets none break away. The crash limit must be on
+/// this job itself: the agent's job's does not reach a process in this nested one. It sets no UI
+/// restrictions (`job/probe.rs`).
+#[test]
+fn the_job_kills_on_close_ends_a_crashing_process_and_allows_no_breakaway() {
+    let job = Job::new().unwrap();
+    let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+    let size = u32::try_from(size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>()).unwrap();
+    // SAFETY: `limits` is a live JOBOBJECT_EXTENDED_LIMIT_INFORMATION of `size` bytes, the struct
+    // this information class writes, and `job.handle()` the handle `job` owns.
+    unsafe {
+        QueryInformationJobObject(
+            Some(job.handle()),
+            JobObjectExtendedLimitInformation,
+            (&raw mut limits).cast(),
+            size,
+            None,
+        )
+    }
+    .unwrap();
+    let flags = limits.BasicLimitInformation.LimitFlags;
+    assert!(
+        flags.contains(JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE),
+        "{flags:?}"
+    );
+    assert!(
+        flags.contains(JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION),
+        "{flags:?}"
+    );
+    assert!(!flags.contains(JOB_OBJECT_LIMIT_BREAKAWAY_OK), "{flags:?}");
+    assert!(
+        !flags.contains(JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK),
+        "{flags:?}"
+    );
+    // No UI restrictions: Chrome's sandbox nests UI-restricted jobs in this one, which Windows
+    // refuses below a job with UI restrictions of its own (error 50).
+    assert_eq!(job.ui_restrictions(), Some(0));
+}
+
+/// The probe (`job/probe.rs`) where the tests run, under no job with UI restrictions: a
+/// UI-restricted job nests, so the guard would start Chrome.
+#[test]
+fn a_ui_restricted_job_nests_where_the_tests_run() {
+    assert_eq!(ui_jobs_nest(), Nesting::Nests);
+}
+
+/// Set in the child [`the_probe_refuses_below_a_ui_restricted_job`] starts.
+const PROBE_BELOW_UI_JOB: &str = "CLAUSEO_TEST_PROBE_BELOW_UI_JOB";
+
+/// Below a job with UI restrictions the probe refuses (error 50): this test's own binary, started
+/// in a job with `JOB_OBJECT_UILIMIT_HANDLES` with [`PROBE_BELOW_UI_JOB`] set, runs this test
+/// alone, which there runs the probe and expects the refusal.
+#[test]
+fn the_probe_refuses_below_a_ui_restricted_job() {
+    if std::env::var_os(PROBE_BELOW_UI_JOB).is_some() {
+        assert_eq!(ui_jobs_nest(), Nesting::Refused);
+        return;
+    }
+    let job = Job::new().unwrap();
+    let limits = JOBOBJECT_BASIC_UI_RESTRICTIONS {
+        UIRestrictionsClass: JOB_OBJECT_UILIMIT_HANDLES,
+    };
+    let size = u32::try_from(size_of::<JOBOBJECT_BASIC_UI_RESTRICTIONS>()).unwrap();
+    // SAFETY: `limits` is a live JOBOBJECT_BASIC_UI_RESTRICTIONS of `size` bytes, the struct this
+    // class takes, and `job.handle()` the handle `job` owns.
+    unsafe {
+        SetInformationJobObject(
+            job.handle(),
+            JobObjectBasicUIRestrictions,
+            (&raw const limits).cast(),
+            size,
+        )
+    }
+    .unwrap();
+    let dir = scratch("probe_below_ui_job");
+    let exe = std::env::current_exe().unwrap();
+    let args = [
+        "--exact",
+        "browser_guard::job::tests::the_probe_refuses_below_a_ui_restricted_job",
+        "--nocapture",
+    ]
+    .map(OsString::from);
+    let env = BTreeMap::from([(PROBE_BELOW_UI_JOB.to_owned(), OsString::from("1"))]);
+    let mut child = job
+        .spawn(&Launch {
+            program: &exe,
+            args: &args,
+            cwd: &dir,
+            env: &env,
+            stdin: Io::Null,
+            stdout: Io::Inherit,
+            stderr: Io::Inherit,
+        })
+        .unwrap();
+    let status = child.wait().unwrap();
+    assert!(
+        status.success(),
+        "the probe below a UI-restricted job: {status:?}"
+    );
     write::remove_dir_all(&dir).unwrap();
 }

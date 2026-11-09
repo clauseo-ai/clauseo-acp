@@ -18,7 +18,7 @@
 //! Only this run's guard puts the run's own profile on a command line (`runs.rs`).
 
 #[cfg(target_vendor = "apple")]
-mod macos;
+pub(crate) mod macos;
 #[cfg(any(target_vendor = "apple", test))]
 mod procargs;
 
