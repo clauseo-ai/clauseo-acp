@@ -101,7 +101,7 @@ test("a network drive: Not protected, and its notice says Claude asks and ChatGP
   expect(info()).toBe(
     fr(
       "en",
-      "Clauseo can't keep Claude and ChatGPT inside this folder. To work in the Safe workspace, move the matter to a folder on this computer.",
+      "Move the matter to a folder on this computer to use ChatGPT here and let Claude work without asking before every change. Clauseo can't keep them inside a folder on a network drive.",
     ),
   );
   expect(h.one("folder-it")).toBeNull();
@@ -115,7 +115,7 @@ test("a drive without file permissions: Not protected, and its notice", async ()
   );
   expect(text()).toContain(fr("en", "No file permissions."));
   expect(text()).toContain(fr("en", "Claude asks before every change. ChatGPT can't work here."));
-  expect(info()).toContain("USB drives often don't keep permissions.");
+  expect(info()).toContain("USB drives often don't keep file permissions.");
   expect(unprotected()?.textContent).toBe(tbt("en", "Not protected"));
 });
 

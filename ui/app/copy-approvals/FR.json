@@ -115,14 +115,14 @@
     "note": "Rohan, on the folder-rights copy page"
   },
   "FR-12": {
-    "en": "On a network drive. / Claude asks before every change. ChatGPT can't work here. / This matter's folder is on a network drive / Clauseo can't keep Claude and ChatGPT inside this folder. To work in the Safe workspace, move the matter to a folder on this computer.",
-    "hi": "नेटवर्क ड्राइव पर। / Claude हर बदलाव से पहले पूछता है। ChatGPT यहाँ काम नहीं कर सकता। / इस मामले का फ़ोल्डर नेटवर्क ड्राइव पर है / Clauseo, Claude और ChatGPT को इस फ़ोल्डर के भीतर नहीं रख सकता। सुरक्षित कार्यक्षेत्र में काम करने के लिए मामले को इस कंप्यूटर के किसी फ़ोल्डर में ले जाएँ।",
+    "en": "On a network drive. / Claude asks before every change. ChatGPT can't work here. / This matter's folder is on a network drive / Move the matter to a folder on this computer to use ChatGPT here and let Claude work without asking before every change. Clauseo can't keep them inside a folder on a network drive.",
+    "hi": "नेटवर्क ड्राइव पर। / Claude हर बदलाव से पहले पूछता है। ChatGPT यहाँ काम नहीं कर सकता। / इस मामले का फ़ोल्डर नेटवर्क ड्राइव पर है / मामले को इस कंप्यूटर के किसी फ़ोल्डर में ले जाएँ, ताकि आप यहाँ ChatGPT का उपयोग कर सकें और Claude हर बदलाव से पहले पूछे बिना काम कर सके। Clauseo उन्हें नेटवर्क ड्राइव के फ़ोल्डर के भीतर नहीं रख सकता।",
     "hi_status": "provisional",
     "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-09",
-    "by": "app track (codex-to-chatgpt: Codex → ChatGPT; Rohan batch review)"
+    "by": "app track (no Safe workspace at launch; info line settled by the orchestrator)"
   },
   "FR-13": {
     "en": "No file permissions / This drive doesn't keep file permissions",
@@ -147,14 +147,14 @@
     "note": "Rohan's approved line with 'an agent' replaced by 'Claude and ChatGPT' (word list: no 'agent'); Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "FR-15": {
-    "en": "No file permissions. / Claude asks before every change. ChatGPT can't work here. / This matter's folder is on a drive that doesn't keep file permissions / Clauseo can't keep Claude and ChatGPT inside this folder. USB drives often don't keep permissions. To work in the Safe workspace, move the matter to a folder on this computer.",
-    "hi": "फ़ाइल अनुमतियाँ नहीं। / Claude हर बदलाव से पहले पूछता है। ChatGPT यहाँ काम नहीं कर सकता। / इस मामले का फ़ोल्डर ऐसी ड्राइव पर है जो फ़ाइल अनुमतियाँ नहीं रखती / Clauseo, Claude और ChatGPT को इस फ़ोल्डर के भीतर नहीं रख सकता। USB ड्राइव अक्सर अनुमतियाँ नहीं रखतीं। सुरक्षित कार्यक्षेत्र में काम करने के लिए मामले को इस कंप्यूटर के किसी फ़ोल्डर में ले जाएँ।",
+    "en": "No file permissions. / Claude asks before every change. ChatGPT can't work here. / This matter's folder is on a drive that doesn't keep file permissions / Move the matter to a folder on this computer to use ChatGPT here and let Claude work without asking before every change. Clauseo can't keep them inside this folder, and USB drives often don't keep file permissions.",
+    "hi": "फ़ाइल अनुमतियाँ नहीं। / Claude हर बदलाव से पहले पूछता है। ChatGPT यहाँ काम नहीं कर सकता। / इस मामले का फ़ोल्डर ऐसी ड्राइव पर है जो फ़ाइल अनुमतियाँ नहीं रखती / मामले को इस कंप्यूटर के किसी फ़ोल्डर में ले जाएँ, ताकि आप यहाँ ChatGPT का उपयोग कर सकें और Claude हर बदलाव से पहले पूछे बिना काम कर सके। Clauseo उन्हें इस फ़ोल्डर के भीतर नहीं रख सकता, और USB ड्राइव अक्सर फ़ाइल अनुमतियाँ नहीं रखतीं।",
     "hi_status": "provisional",
     "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
     "at": "2026-11-09",
-    "by": "app track (codex-to-chatgpt: Codex → ChatGPT; Rohan batch review)"
+    "by": "app track (no Safe workspace at launch; info line settled by the orchestrator)"
   },
   "FR-20": {
     "en": "Clauseo couldn't check this folder, so Claude asks before every change.",

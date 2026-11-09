@@ -39,13 +39,13 @@ const SAYS: Readonly<
     name: "This matter's folder is on a network drive",
     head: "On a network drive.",
     rest: "Claude asks before every change. ChatGPT can't work here.",
-    info: "Clauseo can't keep Claude and ChatGPT inside this folder. To work in the Safe workspace, move the matter to a folder on this computer.",
+    info: "Move the matter to a folder on this computer to use ChatGPT here and let Claude work without asking before every change. Clauseo can't keep them inside a folder on a network drive.",
   },
   no_permissions: {
     name: "This matter's folder is on a drive that doesn't keep file permissions",
     head: "No file permissions.",
     rest: "Claude asks before every change. ChatGPT can't work here.",
-    info: "Clauseo can't keep Claude and ChatGPT inside this folder. USB drives often don't keep permissions. To work in the Safe workspace, move the matter to a folder on this computer.",
+    info: "Move the matter to a folder on this computer to use ChatGPT here and let Claude work without asking before every change. Clauseo can't keep them inside this folder, and USB drives often don't keep file permissions.",
   },
   check_failed: {
     name: "Clauseo couldn't check this folder, so Claude asks before every change.",
