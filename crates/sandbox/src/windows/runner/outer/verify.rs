@@ -9,7 +9,9 @@ use std::thread;
 use std::time::Duration;
 
 use super::super::RunExit;
-use super::super::quarantine::{RESTART, Slot, admit, clear_unclean, is_unclean, mark_unclean};
+use super::super::quarantine::{
+    RESTART, Refused, Slot, admit, clear_unclean, ended, is_unclean, mark_unclean,
+};
 use super::super::spawn::{log_on, output_pipe, resume};
 use super::end::OsSweeper;
 use super::{Failure, os, say};
@@ -84,31 +86,32 @@ impl Slot for OsSlot<'_> {
         }
     }
 
+    fn mark(&mut self) -> std::io::Result<()> {
+        mark_unclean(&self.0.data_dir, &self.0.pool_user).map(drop)
+    }
+
     fn clear(&mut self) -> std::io::Result<()> {
         clear_unclean(&self.0.data_dir, &self.0.pool_user)
     }
 }
 
-/// Runs the slot's verify-only pass if it is marked (`quarantine::admit`); a pass that failed
-/// refuses the launch with `RunExit::Quarantined` and the lawyer's first action ([`RESTART`]).
+/// Verifies the slot if it is marked, then marks it (`quarantine::admit`): a pass that failed
+/// refuses the launch with `RunExit::Quarantined` and the lawyer's first action ([`RESTART`]); a
+/// mark that can't be written, with `RunExit::MarkerUnwritable`.
 pub(super) fn admitted(slot: &mut OsSlot<'_>) -> Result<(), Failure> {
-    admit(slot, &mut |line| say(line), || ()).map_err(|refused| {
-        say(&format!("clauseo-sandbox-run: {}", refused.why));
-        Failure::new(RunExit::Quarantined, RESTART)
+    admit(slot, &mut |line| say(line), || ()).map_err(|refused| match refused {
+        Refused::Quarantined(why) => {
+            say(&format!("clauseo-sandbox-run: {why}"));
+            Failure::new(RunExit::Quarantined, RESTART)
+        }
+        Refused::Unmarked(why) => Failure::new(
+            RunExit::MarkerUnwritable,
+            format!("the unclean mark failed ({why})"),
+        ),
     })
 }
 
-/// Marks the slot unclean (`quarantine.rs`) when the run's outcome is `code`
-/// [`RunExit::Escapee`]: a process of the pool user's outlived a sweep, so the next launch on it
-/// verifies it first. A mark that can't be written is said. `code`, as it was.
-pub(super) fn leave_mark(sweeper: &OsSweeper, code: u32) -> u32 {
-    if code == RunExit::Escapee.code()
-        && let Err(error) = mark_unclean(&sweeper.data_dir, &sweeper.pool_user)
-    {
-        say(&format!(
-            "clauseo-sandbox-run: {}",
-            os("the unclean mark", &error)
-        ));
-    }
-    code
+/// The session's end for its slot: a `clean` one removes the mark (`quarantine::ended`).
+pub(super) fn ended_slot(sweeper: &OsSweeper, clean: bool) {
+    ended(&mut OsSlot(sweeper), clean, &mut |line| say(line));
 }

@@ -446,14 +446,16 @@ pub enum RunExit {
     /// (`leftovers.rs`), and the outer takes this code as any failed sweeper's. Kept, with its
     /// number, since the codes are explicit and may be read downstream.
     PoolStop,
-    /// The session's unclean-session marker couldn't be written, or the launch file's name gives
-    /// it no id (`marker::marked`): the outer refuses the launch before any logon, so no session
-    /// runs that no marker names.
+    /// The session's unclean-session marker, or its slot's unclean mark (`quarantine.rs`),
+    /// couldn't be written, or the launch file's name gives it no id (`marker::marked`): the
+    /// outer refuses the launch before any session of the pool user, so no session runs that no
+    /// marker names.
     MarkerUnwritable,
-    /// The pool user was marked unclean by an earlier session whose outcome was
-    /// [`RunExit::Escapee`], and the verify-only pass this launch ran before granting it
-    /// anything found a process of it still left, or failed (`quarantine.rs`): the launch is
-    /// refused, the mark stays, and the lawyer is told to restart the computer.
+    /// The pool user was left marked unclean by an earlier session that didn't end clean, and the
+    /// verify-only pass this launch ran before granting it anything found a process of it still
+    /// left, or failed (`quarantine.rs`): the launch is refused, the mark stays, and the lawyer is
+    /// told to restart the computer. Its reserved value is `0x18` (`RUN_EXIT_BASE + 0x18`): kept
+    /// appended here until the explicit table (#809) lands, then set to it.
     Quarantined,
 }
 

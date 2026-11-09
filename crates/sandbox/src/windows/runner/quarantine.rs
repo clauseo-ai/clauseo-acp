@@ -1,15 +1,23 @@
-//! The unclean-slot mark: `<data_dir>\sandbox\run\<pool user's SID>.unclean`. A session whose
-//! outcome is `RunExit::Escapee` (a sweep found a process of the pool user's it couldn't end, a
-//! survivor of its kill among them) leaves its pool user marked, and the mark holds the slot
-//! until a fresh sweep verifies it clean:
+//! The unclean-slot mark: `<data_dir>\sandbox\run\<pool user's SID>.unclean`. It is written
+//! first and removed last: the outer writes it before anything of a session runs as the pool user
+//! ([`admit`]; a mark that can't be written refuses the launch), and removes it only at a clean
+//! end ([`ended`]: the inner exited clean, the end sweeper exited 0 while the outer waited, and no
+//! sweep found an escapee). Any other end leaves it: a sweep that ran out of rounds or time, an
+//! escapee or a survivor, a failure, a cancel, an outer that was killed, an end sweeper still
+//! running when the outer stopped waiting. The mark holds the slot until a fresh sweep verifies
+//! it clean:
 //!
 //! - **The next launch on the slot** ([`admit`]): before anything of the new run is granted to
 //!   the pool user (its pipes, its window station and desktop, which name the pool user and the
 //!   matter), the outer runs a verify-only pass: `--verify`, the end sweeper's two passes as the
-//!   pool user with no job, nothing kept but itself and no removal (`sweeper_flow::verify`). Only
-//!   its exit 0 clears the mark, and only then does the launch go on. Any other outcome refuses
-//!   the launch with `RunExit::Quarantined` and the lawyer's first action, to restart the
-//!   computer ([`RESTART`]); the mark stays. A mark that can't be read counts as one.
+//!   pool user with no job, nothing kept but itself and no removal (`sweeper_flow::verify`),
+//!   started suspended and shut as the end sweeper is (`token::runner_process_sddl`). Only its
+//!   exit 0 lets the launch go on, the mark kept for this session. Any other outcome refuses the
+//!   launch with `RunExit::Quarantined` and the lawyer's first action, to restart the computer
+//!   ([`RESTART`]); the mark stays. A mark that can't be read counts as one. The pass runs as the
+//!   pool user, so its exit code is the pool user's word: a Medium survivor that opened it before
+//!   its shut could end it with 0. Only a check from `SYSTEM`, which reads every process's SID,
+//!   closes that (0049, C5).
 //! - **Another matter** (`pool::assign`): a marked pool user is held back (`Why::Unclean`), so a
 //!   matter never gets a slot with a process that outlived its sweep; only the matter that holds
 //!   it launches on it, and its next launch's verify-only pass clears it.
@@ -105,43 +113,55 @@ pub(crate) trait Slot {
     /// The verify-only pass: `Ok` once a fresh sweep of the pool user's processes found none
     /// left, else what went wrong.
     fn verify(&mut self) -> Result<(), String>;
+    /// Writes the mark.
+    fn mark(&mut self) -> io::Result<()>;
     /// Removes the mark.
     fn clear(&mut self) -> io::Result<()>;
 }
 
-/// Why [`admit`] refused: the verify-only pass on a marked slot failed.
+/// Why [`admit`] refused.
 #[cfg(any(windows, test))]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Quarantined {
-    /// What the pass said went wrong.
-    pub(crate) why: String,
+pub(crate) enum Refused {
+    /// The verify-only pass on a marked slot failed: what it said went wrong.
+    Quarantined(String),
+    /// The mark couldn't be written: why.
+    Unmarked(String),
 }
 
-/// Runs `launch` (everything that grants the new run anything) only once the slot is clean: a
-/// slot that isn't marked at once; a marked one only after its verify-only pass passed, which
-/// clears the mark. A pass that failed refuses: `launch` never runs, and the mark stays. A mark
-/// that can't be removed after a pass that passed is logged; the launch goes on, and the next
-/// launch verifies again.
+/// Runs `launch` (everything of the session: what grants the pool user anything, and the agent)
+/// only once the slot is clean and marked: a marked slot only after its verify-only pass passed;
+/// then the mark is written (again), so any end but a clean one ([`ended`]) leaves it, a killed
+/// outer's too. A pass that failed, or a mark that can't be written, refuses: `launch` never
+/// runs.
 #[cfg(any(windows, test))]
 pub(crate) fn admit<S: Slot, T>(
     slot: &mut S,
     log: &mut dyn FnMut(&str),
     launch: impl FnOnce() -> T,
-) -> Result<T, Quarantined> {
+) -> Result<T, Refused> {
     if slot.unclean() {
         log(
             "clauseo-sandbox-run: the sandbox user was left unclean by an earlier session: \
              verifying no process of it is left before the launch",
         );
-        slot.verify().map_err(|why| Quarantined { why })?;
-        if let Err(error) = slot.clear() {
-            log(&format!(
-                "clauseo-sandbox-run: the unclean mark's removal failed ({error})"
-            ));
-        }
-        log("clauseo-sandbox-run: the sandbox user is clean again");
+        slot.verify().map_err(Refused::Quarantined)?;
+        log("clauseo-sandbox-run: the verify pass found no process of the sandbox user");
     }
+    slot.mark()
+        .map_err(|error| Refused::Unmarked(error.to_string()))?;
     Ok(launch())
+}
+
+/// The session's end: a `clean` one removes the mark (one that can't be removed is logged, and
+/// the next launch verifies); any other leaves it.
+#[cfg(any(windows, test))]
+pub(crate) fn ended<S: Slot>(slot: &mut S, clean: bool, log: &mut dyn FnMut(&str)) {
+    if clean && let Err(error) = slot.clear() {
+        log(&format!(
+            "clauseo-sandbox-run: the unclean mark's removal failed ({error})"
+        ));
+    }
 }
 
 #[cfg(test)]

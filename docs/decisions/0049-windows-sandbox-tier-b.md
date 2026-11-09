@@ -1293,27 +1293,55 @@ leaves that profile, both naming the part.
     listing never means a process is alive: WER's zero-thread clone of a crashed process stays
     listed, already signalled, while that process holds it. A process still running after the
     5 s is a survivor, an escapee (`RunExit::Escapee`). The verdict comes from the held handles:
-    each survivor is checked at every round's end, whether it is listed again or not. One 60 s
-    deadline caps a sweep's waits (40 s for the end sweeper's two passes). A session whose
-    outcome is `RunExit::Escapee` marks its pool user unclean: `<data_dir>\sandbox\run\<SID>.unclean`,
-    protected as the marker is (`runner::quarantine`). `pool::assign` gives a marked user to no
-    other matter (`Why::Unclean`). The next launch of the matter that holds it runs a
-    verify-only pass first (`--verify`: the end sweeper's two passes as the pool user, no
-    removal). That pass comes before any pipe, job, window station or desktop names the pool
-    user. Only its exit 0 clears the mark and lets the launch go on. Otherwise the outer refuses
-    with `RunExit::Quarantined` (`0xE0C15012`) and "the sandbox user still has a process from an
-    earlier session that couldn't be ended; restart the computer, then try again". Tracked
-    follow-ups:
+    each survivor is checked at every round's end, whether it is listed again or not. A process
+    that couldn't be opened, or whose kill was refused and which still runs, counts every round
+    the same way, however it is listed. One 60 s deadline caps a sweep's waits (40 s for the end
+    sweeper's two passes).
+  - **The unclean mark: first written, last removed** (`runner::quarantine`). Before anything of
+    a session runs as the pool user, the outer writes `<data_dir>\sandbox\run\<SID>.unclean`,
+    protected as the session marker is. A mark that can't be written refuses the launch
+    (`RunExit::MarkerUnwritable`). Only a clean end removes it: the inner exited clean, the end
+    sweeper exited 0 while the outer waited, and no sweep found an escapee. Every other end leaves
+    it: a sweep out of rounds or time, a survivor, a failure, a cancel, a killed outer, an end
+    sweeper still running after the outer's 20 s. `pool::assign` gives a marked user to no other
+    matter (`Why::Unclean`). The next launch of the matter that holds it runs a verify-only pass
+    first (`--verify`: the end sweeper's two passes as the pool user, no removal, started
+    suspended and shut with `token::runner_process_sddl` as the end sweeper is). That pass comes
+    before any pipe, job, window station or desktop names the pool user. Its exit 0 lets the
+    launch go on with the slot marked again for the session. Any other result refuses with
+    `RunExit::Quarantined` (`0xE0C15012`) and "the sandbox user still has a process from an
+    earlier session that couldn't be ended; restart the computer, then try again".
+  - **The forged exit 0 (interim).** The verify pass runs as the pool user, so its exit code is
+    the pool user's word. A Medium survivor that opens the pass between
+    `CreateProcessWithLogonW` and the shut of its process DACL holds full rights to it, and can
+    end it with exit code 0. The mark is then lifted for a slot that still has a process. A Low
+    survivor can't do this, because the (B) token's processes can't open a Medium process. Only an
+    observer the pool user can't reach closes the gap; see C5 (b).
+  - **C5, launch-blocking before tier B serves lawyers' agents (PR6):**
+    - **(a) Verify before any grant.** A matter's grants are written by the host
+      (`set_aside::before_launch`, `apply`) before the launch file, so even for the matter that
+      holds a marked user they come before the verify pass. "No new exposure" holds only while
+      this launch's grants are a subset of the earlier session's, which the survivor already had.
+      A grant added since reaches the survivor until the pass refuses. The launcher must verify a
+      marked slot before it writes any grant for it.
+    - **(b) A SYSTEM verdict clears the mark.** Clear a marked slot only when
+      `\Clauseo\SandboxStop` (SYSTEM, which reads every process's SID) confirms no process of
+      the pool SID with a result newer than the request; never on the verify pass's exit code
+      alone. A missing or stale result, a timeout or a non-zero count keeps the slot quarantined.
+      Today the task takes no argument (`args.rs`: `--stop` alone). Its only result is the
+      pool-wide `StopSequence` in `HKLM\SOFTWARE\Clauseo\Sandbox`, written only on a clean,
+      completed run, which the outer can read. It stops every pool user's processes, including
+      other matters' live sessions, and nothing in the runner starts it yet. Scoping it to one slot
+      changes its registration, which set-up must redo.
+    - **(c) Persistence.** Pool-user scheduled tasks and other persistence. The verify pass removes
+      nothing and keeps what starts after it, such as a task firing. The fix: the `SYSTEM`
+      refresh deletes every task a pool user registered, and (b)'s check covers the processes
+      that started during the pass. Meanwhile the inner's start sweep is the backstop: it kills every
+      pool-user process outside the job before the launch is read.
     - The logon refusal (F4, `setup/stop.rs`) doesn't read the mark yet, so a marked user can
       still log on outside a launch.
-    - A matter's own grants are written by the host before the launch file, so for the holding
-      matter they come before the verify-only pass. The survivor already had that matter's
-      grants, so no other matter's reach it; the launcher (PR6) must also verify before it writes
-      grants for a marked user.
-    - The end sweeper's `RunExit::Escapee` after the outer stopped waiting for it (20 s) marks
-      nothing, because the sweeper can't write the run folder.
-    - A marked user whose matter was released waits until a verify-only pass that only the
-      launcher, the stop task or an extend can run.
+    - A marked user whose matter was released waits for a verify pass that only the launcher,
+      the stop task or an extend can run.
   - **Why "just after resume" holds.** Nothing the pool user left behind can start at its next
     logon: the end sweeper removed it, and if it didn't run, the first act removes the classes,
     `Run` values and Startup entries before the launch is read. A task stays until an end

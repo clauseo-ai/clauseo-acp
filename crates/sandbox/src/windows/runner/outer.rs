@@ -118,7 +118,8 @@ fn marked_outer(
         job: OnceLock::new(),
         marker,
     };
-    // An unclean slot is verified before anything names the pool user (`quarantine.rs`).
+    // An unclean slot is verified, then marked, before anything names the pool user
+    // (`quarantine.rs`); only a clean end, in `relay`, removes the mark.
     verify::admitted(&mut verify::OsSlot(&sweeper))?;
     // From here every end path first ends the job, waits for it to empty, and starts the
     // detached end sweeper (`end.rs`).
@@ -128,7 +129,7 @@ fn marked_outer(
         end.trigger(EndSignal::Failed);
         end.wait();
     }
-    let result = match result {
+    match result {
         // An escapee found at a tick, at the end or by the end sweeper is the run's outcome;
         // the failure is said first.
         Err(Failure(exit, what)) if end.escaped() && exit != RunExit::Escapee => {
@@ -136,10 +137,7 @@ fn marked_outer(
             Err(Failure::new(RunExit::Escapee, ESCAPED))
         }
         other => other,
-    };
-    let code = result.as_ref().map_or_else(|f| f.0.code(), |code| *code);
-    verify::leave_mark(end.steps(), code);
-    result
+    }
 }
 
 /// The launch once read: the checks, the pipes, the job, the desktop, the start of the inner
@@ -429,9 +427,9 @@ fn relay(
     });
     tell_status(last.as_ref(), code);
     let swept = end.wait();
-    if end.clean(swept, reported.is_some())
-        && let Err(error) = remove_marker(&end.steps().marker)
-    {
+    let clean = end.clean(swept, reported.is_some());
+    verify::ended_slot(end.steps(), clean);
+    if clean && let Err(error) = remove_marker(&end.steps().marker) {
         say(&format!(
             "clauseo-sandbox-run: {}",
             os("the session marker's removal", &error)
@@ -442,7 +440,7 @@ fn relay(
             "clauseo-sandbox-run: {ESCAPED}; the run would have exited 0x{code:08X}"
         ));
     }
-    exit_now(verify::leave_mark(end.steps(), end.outcome(code)))
+    exit_now(end.outcome(code))
 }
 
 /// The agent's stdin pipe, owned, so that closing it is dropping it.
