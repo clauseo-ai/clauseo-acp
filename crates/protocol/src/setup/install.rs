@@ -69,6 +69,67 @@ pub enum InstallProgress {
     Managed,
 }
 
+/// Where the Python runtime the agents use is: `agents`' `PythonState`. One for the computer,
+/// installed after an agent's install in the same job; its failure never changes an agent's
+/// [`InstallProgress`]. Rides on [`crate::SetupEvent::SetupInfo`]'s optional `python`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub enum PythonProgress {
+    /// This build has no Python for this computer: nothing is fetched.
+    Unavailable,
+    /// Not installed, and no install of it running.
+    Missing {
+        /// Bytes its install would download (already in each agent's `Missing`).
+        download_bytes: Count,
+    },
+    /// Offline: its install waits and tries again by itself.
+    Waiting {
+        /// The log so far, for "Details".
+        log: InstallLog,
+    },
+    /// Downloading.
+    Downloading {
+        /// Bytes received so far.
+        received: Count,
+        /// Bytes in all.
+        total: Count,
+    },
+    /// Unpacking and checking that it runs.
+    Installing,
+    /// Installed.
+    Ready {
+        /// Python's version.
+        version: String,
+    },
+    /// Stopped with a failure; [`crate::SetupCommand::RetryAgentInstall`] for a ready agent
+    /// tries again.
+    Failed {
+        /// Why.
+        cause: PythonFailureCause,
+        /// The log, for "Details".
+        log: InstallLog,
+    },
+}
+
+/// Why the Python runtime's install stopped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub enum PythonFailureCause {
+    /// A proxy or TLS refused the download.
+    Blocked,
+    /// Too little free space.
+    DiskFull,
+    /// The download, the offline bundle's copy or the unpack failed after its tries.
+    Failed,
+    /// This computer refused to start Python or load its libraries (a policy, or access
+    /// denied).
+    RunBlocked,
+    /// Python started but its check failed or did not answer.
+    RunFailed,
+}
+
 /// An install's log as "Details" shows it: English lines, already free of user names,
 /// passwords and paths outside the data folder (`agents` redacts them). At most
 /// [`MAX_INSTALL_LOG_LINES`] lines of at most [`MAX_INSTALL_LOG_LINE_BYTES`] bytes each; decoding

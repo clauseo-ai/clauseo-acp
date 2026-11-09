@@ -29,6 +29,34 @@ pub fn npm_tarball(name: &str, version: &str, files: &[(&str, &[u8])]) -> io::Re
     gz.finish()
 }
 
+/// A gzip'd tar of a runtime archive: everything under the top folder `top`, each of `entries`
+/// a `/`-separated path (a folder when it ends in `/`), its Unix mode and its bytes, in order.
+/// The fake Python archives of the install tests.
+pub fn runtime_tar_gz(top: &str, entries: &[(&str, u32, &[u8])]) -> io::Result<Vec<u8>> {
+    let mut tar = tar::Builder::new(GzEncoder::new(Vec::new(), Compression::default()));
+    let mut header = tar::Header::new_gnu();
+    header.set_entry_type(tar::EntryType::Directory);
+    header.set_size(0);
+    header.set_mode(0o755);
+    header.set_mtime(0);
+    tar.append_data(&mut header, format!("{top}/"), io::empty())?;
+    for (path, mode, bytes) in entries {
+        let mut header = tar::Header::new_gnu();
+        if path.ends_with('/') {
+            header.set_entry_type(tar::EntryType::Directory);
+            header.set_size(0);
+        } else {
+            header.set_size(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
+        }
+        header.set_mode(*mode);
+        header.set_mtime(0);
+        tar.append_data(&mut header, format!("{top}/{path}"), *bytes)?;
+    }
+    let mut gz = tar.into_inner()?;
+    gz.flush()?;
+    gz.finish()
+}
+
 /// `sha512-<base64>` of `bytes`, as a lock's `integrity` holds it.
 pub fn sha512_integrity(bytes: &[u8]) -> String {
     let digest = Sha512::digest(bytes);

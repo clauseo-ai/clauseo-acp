@@ -134,7 +134,7 @@ pub(crate) fn start(fx: &Fixture, plan: &[Fake], ci_runs: &Arc<AtomicUsize>) -> 
         pids: pid_dir(fx),
     });
     let (agents, events) = Agents::start(fx.config.clone(), launcher, fx.timer.clone());
-    let events = Events(events);
+    let events = Events::new(events);
     events.first_states();
     (agents, events)
 }

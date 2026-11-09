@@ -2,8 +2,9 @@
 
 use clauseo_protocol::{
     AgentId, Count, ErrorCode, FoundLogin, HostError, InstallLog, InstallProgress, LoginFrom,
-    MAX_INSTALL_LOG_LINE_BYTES, MAX_INSTALL_LOG_LINES, MAX_SECRET_BYTES, PlanLabel, Secret,
-    SetupAction, SetupCommand, SetupEvent, SignIn, SignInMethod, SignInSource, Timestamp,
+    MAX_INSTALL_LOG_LINE_BYTES, MAX_INSTALL_LOG_LINES, MAX_SECRET_BYTES, PlanLabel,
+    PythonFailureCause, PythonProgress, Secret, SetupAction, SetupCommand, SetupEvent, SignIn,
+    SignInMethod, SignInSource, Timestamp,
 };
 use zeroize::Zeroizing;
 
@@ -315,10 +316,65 @@ fn every_install() -> Vec<InstallProgress> {
     ]
 }
 
+/// Every Python state, each failure cause once.
+fn every_python() -> Vec<PythonProgress> {
+    let log = InstallLog::new(["Clauseo download log".to_owned()]);
+    let mut all = vec![
+        PythonProgress::Unavailable,
+        PythonProgress::Missing {
+            download_bytes: Count::from(70_000_000_u32),
+        },
+        PythonProgress::Waiting { log: log.clone() },
+        PythonProgress::Downloading {
+            received: Count::from(1_u32),
+            total: Count::from(2_u32),
+        },
+        PythonProgress::Installing,
+        PythonProgress::Ready {
+            version: "3.13.18".to_owned(),
+        },
+    ];
+    for cause in [
+        PythonFailureCause::Blocked,
+        PythonFailureCause::DiskFull,
+        PythonFailureCause::Failed,
+        PythonFailureCause::RunBlocked,
+        PythonFailureCause::RunFailed,
+    ] {
+        all.push(PythonProgress::Failed {
+            cause,
+            log: log.clone(),
+        });
+    }
+    all
+}
+
+/// An older window's decoder ignores `python`, and an older host's `SetupInfo` (no `python`)
+/// decodes with none.
+#[test]
+fn setup_info_s_python_is_optional_both_ways() {
+    let old: SetupEvent =
+        serde_json::from_str(r#"{"setup_info":{"keys_available":true}}"#).unwrap();
+    assert_eq!(
+        old,
+        SetupEvent::SetupInfo {
+            keys_available: true,
+            python: None,
+        }
+    );
+}
+
 #[test]
 fn every_setup_event_round_trips() {
+    for python in every_python() {
+        round_trips(&SetupEvent::SetupInfo {
+            keys_available: true,
+            python: Some(python),
+        });
+    }
     round_trips(&SetupEvent::SetupInfo {
         keys_available: false,
+        python: None,
     });
     for state in every_install() {
         round_trips(&SetupEvent::AgentInstallProgress {
@@ -340,8 +396,28 @@ fn setup_events_have_their_json_form() {
         (
             SetupEvent::SetupInfo {
                 keys_available: true,
+                python: None,
             },
             r#"{"setup_info":{"keys_available":true}}"#,
+        ),
+        (
+            SetupEvent::SetupInfo {
+                keys_available: true,
+                python: Some(PythonProgress::Missing {
+                    download_bytes: Count::from(70_000_000_u32),
+                }),
+            },
+            r#"{"setup_info":{"keys_available":true,"python":{"missing":{"download_bytes":70000000}}}}"#,
+        ),
+        (
+            SetupEvent::SetupInfo {
+                keys_available: false,
+                python: Some(PythonProgress::Failed {
+                    cause: PythonFailureCause::RunBlocked,
+                    log: InstallLog::new(["x".to_owned()]),
+                }),
+            },
+            r#"{"setup_info":{"keys_available":false,"python":{"failed":{"cause":"run_blocked","log":["x"]}}}}"#,
         ),
         (
             SetupEvent::SignInChanged {

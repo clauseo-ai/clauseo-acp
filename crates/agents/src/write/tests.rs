@@ -101,3 +101,30 @@ fn an_existing_folder_is_made_private() {
         & 0o777;
     assert_eq!(mode, 0o700);
 }
+
+/// A read-only tree (folders `0o555`, as Python's runtime is unpacked) goes with
+/// `remove_dir_all`, made writable first; a link inside it is removed, never followed, and the
+/// folder it points to keeps its mode.
+#[cfg(unix)]
+#[test]
+fn a_read_only_tree_is_removed_without_following_a_link() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    use super::{make_read_only, remove_dir_all, seal_below, set_mode, symlink};
+    let dir = TestDir::new("read-only-tree");
+    let outside = dir.0.join("outside");
+    dir.file("outside/kept", b"x");
+    set_mode(&outside, 0o555).unwrap();
+    let tree = dir.0.join("tree");
+    dir.file("tree/a/b/file", b"y");
+    symlink(&outside, &tree.join("a").join("link")).unwrap();
+    seal_below(&tree).unwrap();
+    make_read_only(&tree).unwrap();
+    assert!(std::fs::remove_dir_all(&tree).is_err(), "std alone refuses");
+    remove_dir_all(&tree).unwrap();
+    assert!(!tree.exists());
+    assert!(outside.join("kept").exists());
+    let mode = std::fs::metadata(&outside).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o555);
+    set_mode(&outside, 0o755).unwrap();
+}

@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 pub use self::install::{
     InstallLog, InstallProgress, MAX_INSTALL_LOG_LINE_BYTES, MAX_INSTALL_LOG_LINES,
+    PythonFailureCause, PythonProgress,
 };
 pub use self::secret::{MAX_SECRET_BYTES, Secret};
 use crate::{AgentId, ErrorCode, PlanLabel, Timestamp};
@@ -240,6 +241,10 @@ pub enum SetupEvent {
         /// Whether the OS keychain can hold an API key: false where Linux has no Secret
         /// Service, and the key screens are hidden.
         keys_available: bool,
+        /// The Python runtime's state, sent again with each change; missing from older hosts
+        /// and before it is known.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        python: Option<PythonProgress>,
     },
     /// An agent's install state changed, or its download made progress.
     AgentInstallProgress {

@@ -52,6 +52,8 @@ pub(crate) enum BundleEntry<'a> {
     Npm,
     /// `node/<archive name>`.
     Node(&'a str),
+    /// `python/<archive name>`.
+    Python(&'a str),
 }
 
 /// The path of `entry` in the offline bundle at `bundle`, once it is there: no network. A
@@ -67,13 +69,18 @@ pub(crate) fn bundle_path(
     let fail = |detail: &str| FetchError::new(FetchKind::Failed, None, None, detail, data_dir);
     let path = match entry {
         BundleEntry::Npm => bundle.join("npm").join(format!("{}.tgz", expected.hex())),
-        BundleEntry::Node(name) => {
+        BundleEntry::Node(name) | BundleEntry::Python(name) => {
             if name.is_empty() || name.contains(['/', '\\']) || name.contains("..") {
                 return Err(fail(&format!(
                     "{label}: not a file name the bundle can hold"
                 )));
             }
-            bundle.join("node").join(name)
+            let folder = if matches!(entry, BundleEntry::Node(_)) {
+                "node"
+            } else {
+                "python"
+            };
+            bundle.join(folder).join(name)
         }
     };
     if !path.is_file() {
@@ -111,13 +118,13 @@ pub(crate) fn bundle_file(
     Ok(path)
 }
 
-/// Copies `from` (Node's archive, or an npm tarball on a Windows share, in the offline bundle)
-/// to `job.dest` in `agents/downloads/`, hashing the bytes as they are written, through the same
-/// path as a download: the magic, the size cap, the digest, then the rename. Only the copy is
-/// unpacked or handed to npm, so a share that hands different bytes to a second read cannot
-/// change what runs. A copy already there with the right digest is kept. Each failure's detail
-/// names `label` (the archive's or the package's file name, such as `sdk-0.1.0.tgz`), never the
-/// bundle's `<hex>.tgz`.
+/// Copies `from` (Node's or Python's archive, or an npm tarball on a Windows share, in the
+/// offline bundle) to `job.dest` in `agents/downloads/`, hashing the bytes as they are written,
+/// through the same path as a download: the magic, the size cap, the digest, then the rename.
+/// Only the copy is unpacked or handed to npm, so a share that hands different bytes to a
+/// second read cannot change what runs. A copy already there with the right digest is kept.
+/// Each failure's detail names `label` (the archive's or the package's file name, such as
+/// `sdk-0.1.0.tgz`), never the bundle's `<hex>.tgz`.
 pub(crate) fn copy_from_bundle(
     from: &Path,
     label: &str,

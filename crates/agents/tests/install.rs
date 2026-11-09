@@ -17,6 +17,16 @@ mod write;
 mod support;
 
 #[cfg(test)]
+#[path = "install/events.rs"]
+mod events;
+
+// A fake runtime's `bin/python3` is a shell script.
+#[cfg(test)]
+#[cfg(unix)]
+#[path = "install/python.rs"]
+mod python;
+
+#[cfg(test)]
 #[path = "install/downloads.rs"]
 mod downloads;
 

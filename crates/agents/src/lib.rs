@@ -15,6 +15,12 @@
 //!   `clauseo-receipt.json`), `downloads/` (files named by digest), `npm-cache/`, `npmrc`,
 //!   `npmrc-global` and `.lock`. `<id>/home/` and `signin/` are S18's. `limits` writes
 //!   `clauseo-claude-usage.mjs` into Claude's install folder; nothing here touches it.
+//! - The pinned Python runtime (`python.rs`): Clauseo's archive for this platform (none on
+//!   Linux, and none anywhere until the archives are published), checked by SHA-256 and
+//!   unpacked read-only on Unix under `runtime/<archive stem>/` with a manifest and a receipt,
+//!   run once before its receipt, as the second step of an agent's install job. Its own
+//!   [`PythonState`]; a failure never blocks the agent's `Ready`. [`python_command_dir`] is the
+//!   folder for the agent's `PATH`.
 //! - Node: the user's when it is a regular file, reports v22 or later and has `npm-cli.js`
 //!   beside it; otherwise the pinned download, checked by SHA-256.
 //! - Downloads (Rust's): each tarball the derived lock lists for this platform, with `Range`
@@ -55,7 +61,8 @@
 //!   [`Agents::set_network`] with a [`Network`] (the proxies and CA files, for the next job), and
 //!   [`ca_cert_var`], the CA variable of each agent's CLI.
 //! - [`InstallState`], [`Failure`], [`FailureKind`] (with its error code), [`InstallLog`] and
-//!   [`Installed`].
+//!   [`Installed`]; [`PythonState`] ([`AgentsEvent::Python`], [`Agents::python_state`]),
+//!   [`PythonFailure`], [`PythonFailureKind`] and [`python_command_dir`].
 //! - [`SigninState`], [`Found`], [`LoginFrom`], [`Source`], [`SigninCode`] (with its error
 //!   code), [`Method`], [`SigninError`], [`PasteCode`] and [`SigninConfig`];
 //!   [`SigninNote`]; [`AgentsEvent::Signin`], [`AgentsEvent::OpenUrl`] and
@@ -67,10 +74,11 @@
 //!
 //! # Invariants
 //!
-//! - Only `nodejs.org` and `registry.npmjs.org` are contacted, over https alone, or the firm's
-//!   https mirror for tarballs; an IT runtime and an offline bundle contact nothing. Sign-in's
-//!   own network use is one name lookup before a login run (the agent's first sign-in host, or
-//!   the proxy's); the vendors' CLIs make the sign-in's connections themselves.
+//! - Only `nodejs.org` and `registry.npmjs.org` are contacted (and, once its archives are
+//!   published, Python's release asset on `github.com` and its redirect), over https alone, or
+//!   the firm's https mirror for tarballs; an IT runtime and an offline bundle contact nothing.
+//!   Sign-in's own network use is one name lookup before a login run (the agent's first sign-in
+//!   host, or the proxy's); the vendors' CLIs make the sign-in's connections themselves.
 //! - Every downloaded byte is checked: SHA-512 from the lock, SHA-256 from the snapshot. A
 //!   mismatch deletes the file. A mirror cannot change a byte.
 //! - No install script runs, and no install folder holds a symbolic link or junction.
@@ -128,6 +136,7 @@ mod log;
 mod node;
 mod pins;
 mod platform;
+mod python;
 mod receipt;
 mod signin;
 mod snapshot;
@@ -150,6 +159,7 @@ pub use fileid::same_file;
 pub use log::InstallLog;
 pub use pins::{AgentPins, PinsError};
 pub use platform::{Arch, Libc, Os, Platform};
+pub use python::{python_command_dir, python_contents_match};
 pub use receipt::{install_folder, install_root, script_path};
 pub use signin::reuse::{CodexLink, codex_link_holds, codex_login_shared, unlink_reused_login};
 pub use signin::{
@@ -157,9 +167,13 @@ pub use signin::{
     Unconfirmed,
 };
 pub use snapshot::{
-    AgentEntry, AgentSizes, NPM_REGISTRY, NodeArchive, NodeEntry, Snapshot, SnapshotError,
+    AgentEntry, AgentSizes, NPM_REGISTRY, NodeArchive, NodeEntry, PythonArchive, PythonEntry,
+    Snapshot, SnapshotError,
 };
-pub use state::{AgentsEvent, Failure, FailureKind, InstallState, Installed};
+pub use state::{
+    AgentsEvent, Failure, FailureKind, InstallState, Installed, PythonFailure, PythonFailureKind,
+    PythonState,
+};
 pub use status::is_sign_in_again;
 pub use worker::{Agents, OwnLogin};
 

@@ -7,13 +7,13 @@ use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use clauseo_process::{Launcher, Timer};
 use clauseo_protocol::AgentId;
 
-use super::{Command, Inner, Shared, Ticket, signin};
+use super::{Command, Inner, Shared, Ticket, first, signin};
 use crate::cancel::Cancel;
 use crate::config::{AgentsConfig, Network};
 use crate::install::{self, Job};
 use crate::log::{InstallLog, redact};
-use crate::state::{Failure, FailureKind, InstallState};
-use crate::{node, receipt, sysproxy};
+use crate::state::{Failure, FailureKind, InstallState, PythonState};
+use crate::sysproxy;
 
 /// The worker thread's state.
 pub(super) struct Worker<T> {
@@ -32,7 +32,7 @@ pub(super) struct Worker<T> {
 
 impl<T: Timer + Send + Sync + 'static> Worker<T> {
     pub(super) fn run(mut self, inbox: &mpsc::Receiver<Command>) {
-        futures::executor::block_on(self.first_states());
+        futures::executor::block_on(first::first_states(&self));
         while let Ok(command) = inbox.recv() {
             match command {
                 Command::Install(agent) => self.install(&agent),
@@ -41,69 +41,6 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
                 Command::SetNetwork(network) => self.set_network(*network),
                 Command::Signin(start) => signin::start_job(&self, *start),
             }
-        }
-    }
-
-    /// Each snapshot agent's state at start.
-    async fn first_states(&self) {
-        let config = &self.config;
-        let search =
-            node::search_user_node(&config.node_search, &*self.launcher, &*self.timer).await;
-        let agents: Vec<AgentId> = config.snapshot.agents().map(|e| e.id.clone()).collect();
-        // The clean-up below runs only with `agents/.lock` held: another Clauseo installing now
-        // may own the temp folders it would remove. A relative data folder is never touched.
-        let paths_ok = install::check_paths(config).is_ok();
-        let lock = paths_ok
-            .then(|| {
-                crate::write::try_lock_agents(&config.data_dir)
-                    .ok()
-                    .flatten()
-            })
-            .flatten();
-        if lock.is_some() {
-            // What a try cut short by the last quit left in the npm cache.
-            install::empty_npm_cache(&config.data_dir);
-        }
-        for agent in agents {
-            if config.managed.contains(&agent) {
-                self.shared.emit(&agent, InstallState::Managed, None);
-                continue;
-            }
-            #[cfg(feature = "test-support")]
-            if let Some(installed) = config.ready_for_tests.get(&agent) {
-                let version = installed.version.clone();
-                self.shared.emit(
-                    &agent,
-                    InstallState::Ready { version },
-                    Some(installed.clone()),
-                );
-                continue;
-            }
-            if lock.is_some()
-                && let Some(hash) = config.snapshot.install_hash(&agent, config.platform)
-            {
-                let scan = receipt::scan(&config.data_dir, &agent, &hash, config.platform);
-                // A folder that will not go now goes at the next start, or under the install's
-                // own rename.
-                drop(scan.and_then(|scan| receipt::remove_stale(&scan)));
-            }
-            if paths_ok
-                && let Some(installed) =
-                    install::ready_install(config, &*self.launcher, &*self.timer, &agent, &search)
-                        .await
-            {
-                let version = installed.version.clone();
-                self.shared
-                    .emit(&agent, InstallState::Ready { version }, Some(installed));
-                continue;
-            }
-            let node_needed = search.found.is_none() && !install::runtime_ready(config);
-            let download_bytes = config
-                .snapshot
-                .download_bytes(&agent, config.platform, node_needed)
-                .unwrap_or(0);
-            self.shared
-                .emit(&agent, InstallState::Missing { download_bytes }, None);
         }
     }
 
@@ -118,9 +55,14 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
         {
             let mut inner = self.shared.lock();
             if let Some(ready @ InstallState::Ready { .. }) = inner.states.get(agent).cloned() {
-                let installed = inner.installed.get(agent).cloned();
-                Inner::set(&mut inner, &self.shared.events, agent, ready, installed);
-                return;
+                // A Ready agent's job installs Python when it is missing and no job runs (a
+                // failed one waits for a retry); otherwise `Ready` again.
+                let missing = matches!(inner.python, PythonState::Missing { .. });
+                if inner.current.is_some() || !missing {
+                    let installed = inner.installed.get(agent).cloned();
+                    Inner::set(&mut inner, &self.shared.events, agent, ready, installed);
+                    return;
+                }
             }
             if inner
                 .current
@@ -157,10 +99,20 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
             self.shared.emit(agent, InstallState::Managed, None);
             return;
         }
-        let restartable = matches!(
-            self.shared.lock().states.get(agent),
-            Some(InstallState::Failed(_) | InstallState::Waiting { .. } | InstallState::Paused)
-        );
+        let restartable = {
+            let inner = self.shared.lock();
+            match inner.states.get(agent) {
+                Some(
+                    InstallState::Failed(_) | InstallState::Waiting { .. } | InstallState::Paused,
+                ) => true,
+                // Python's retry: a job for a Ready agent installs only Python.
+                Some(InstallState::Ready { .. }) => {
+                    python_wanted(&inner.python)
+                        || matches!(inner.python, PythonState::Waiting { .. })
+                }
+                _ => false,
+            }
+        };
         if !restartable {
             return;
         }
@@ -223,4 +175,9 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
                 .emit_job(&ticket, InstallState::Failed(failure), None, true);
         }
     }
+}
+
+/// Whether Python's state asks for an install: `Missing` or `Failed`.
+fn python_wanted(python: &PythonState) -> bool {
+    matches!(python, PythonState::Missing { .. } | PythonState::Failed(_))
 }

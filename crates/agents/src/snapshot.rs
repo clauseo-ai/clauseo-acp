@@ -1,5 +1,6 @@
 //! The snapshot: the agents and the Node this build installs, with G16's pins embedded, each
-//! agent's derived pair, the sizes measured for each platform and Node's archives.
+//! agent's derived pair, the sizes measured for each platform, Node's archives and the Python
+//! runtime's.
 
 use std::fmt;
 use std::sync::{Arc, OnceLock};
@@ -11,10 +12,13 @@ use crate::pins::{self, AgentPins, LockedPackage, PinsError};
 use crate::platform::{Arch, Os, Platform};
 
 mod embedded;
+mod python;
+
+pub use python::{PythonArchive, PythonEntry};
 
 #[cfg(test)]
 use embedded::SIZES_STAMP;
-use embedded::{PINS_LOCK, PINS_PACKAGE_JSON, build_embedded, embedded_node};
+use embedded::{PINS_LOCK, PINS_PACKAGE_JSON, build_embedded, embedded_node, embedded_python};
 
 /// npm's registry: every embedded `resolved` URL starts with it.
 pub const NPM_REGISTRY: &str = "https://registry.npmjs.org/";
@@ -208,13 +212,14 @@ pub struct Snapshot {
     inner: Arc<Inner>,
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 struct Inner {
     package_json: String,
     lock: String,
     registry: String,
     agents: Vec<(AgentEntry, AgentPins)>,
     node: NodeEntry,
+    python: PythonEntry,
 }
 
 impl PartialEq for Snapshot {
@@ -250,6 +255,7 @@ impl Snapshot {
                         registry: NPM_REGISTRY.to_owned(),
                         agents: Vec::new(),
                         node: embedded_node(),
+                        python: embedded_python(),
                     }),
                 })
             })
@@ -286,8 +292,20 @@ impl Snapshot {
                 registry: registry.to_owned(),
                 agents: derived,
                 node,
+                python: PythonEntry::none(),
             }),
         })
+    }
+
+    /// This snapshot with `python` as its Python runtime (a fixture's; [`Snapshot::new`] gives
+    /// none).
+    #[must_use]
+    pub fn with_python(self, python: PythonEntry) -> Snapshot {
+        let mut inner = Arc::unwrap_or_clone(self.inner);
+        inner.python = python;
+        Snapshot {
+            inner: Arc::new(inner),
+        }
     }
 
     /// The pins' `package.json` text.
@@ -334,23 +352,32 @@ impl Snapshot {
     }
 
     /// Bytes an install of `id` on `platform` downloads: the agent's packages (its sizes row;
-    /// none for a platform with no row) plus Node's archive when `node_needed`.
+    /// none for a platform with no row) plus Node's archive when `node_needed`, plus Python's
+    /// archive when `python_needed` (none for a platform with no Python).
     pub fn download_bytes(
         &self,
         id: &AgentId,
         platform: Platform,
         node_needed: bool,
+        python_needed: bool,
     ) -> Option<u64> {
         let row = self.agent(id)?.sizes_for(platform);
         let agent = row.map_or(0, |row| row.download_bytes);
         let node = self.node_part(platform, node_needed, |archive| archive.size);
-        Some(agent.saturating_add(node))
+        let python = self.python_part(platform, python_needed, PythonArchive::size);
+        Some(agent.saturating_add(node).saturating_add(python))
     }
 
     /// The free space an install needs: twice the download (the tarballs and the npm cache)
     /// plus the unpacked size, plus Node's archive and unpacked size when `node_needed`, plus
-    /// 10 % (rounded up).
-    pub fn need_bytes(&self, id: &AgentId, platform: Platform, node_needed: bool) -> Option<u64> {
+    /// Python's when `python_needed`, plus 10 % (rounded up).
+    pub fn need_bytes(
+        &self,
+        id: &AgentId,
+        platform: Platform,
+        node_needed: bool,
+        python_needed: bool,
+    ) -> Option<u64> {
         let row = self.agent(id)?.sizes_for(platform);
         let agent = row.map_or(0, |row| {
             row.download_bytes
@@ -360,7 +387,10 @@ impl Snapshot {
         let node = self.node_part(platform, node_needed, |archive| {
             archive.size.saturating_add(archive.unpacked)
         });
-        let base = agent.saturating_add(node);
+        let python = self.python_part(platform, python_needed, |archive| {
+            archive.size().saturating_add(archive.unpacked_bytes())
+        });
+        let base = agent.saturating_add(node).saturating_add(python);
         Some(base.saturating_add(base.div_ceil(10)))
     }
 
@@ -374,6 +404,16 @@ impl Snapshot {
         self.inner.node.archive(platform)
     }
 
+    /// The Python runtime's entry.
+    pub fn python(&self) -> &PythonEntry {
+        &self.inner.python
+    }
+
+    /// Python's archive for `platform`; `None` where this build has no Python.
+    pub fn python_archive(&self, platform: Platform) -> Option<&PythonArchive> {
+        self.inner.python.archive(platform)
+    }
+
     /// The derived lock's entries npm installs for `id` on `platform`.
     pub(crate) fn packages(&self, id: &AgentId, platform: Platform) -> Vec<&LockedPackage> {
         self.pins(id)
@@ -383,6 +423,19 @@ impl Snapshot {
 
     fn find(&self, id: &AgentId) -> Option<&(AgentEntry, AgentPins)> {
         self.inner.agents.iter().find(|(entry, _)| entry.id == *id)
+    }
+
+    fn python_part(
+        &self,
+        platform: Platform,
+        needed: bool,
+        f: impl Fn(&PythonArchive) -> u64,
+    ) -> u64 {
+        if needed {
+            self.python_archive(platform).map_or(0, f)
+        } else {
+            0
+        }
     }
 
     fn node_part(&self, platform: Platform, needed: bool, f: impl Fn(&NodeArchive) -> u64) -> u64 {

@@ -31,8 +31,9 @@ use clauseo_protocol::AgentId;
 use crate::cancel::Cancel;
 use crate::config::{AgentsConfig, Network};
 use crate::signin::{Found, Method, PasteCode, SigninError, SigninState};
-use crate::state::{AgentsEvent, InstallState, Installed};
+use crate::state::{AgentsEvent, InstallState, Installed, PythonState};
 
+mod first;
 mod shared;
 mod signin;
 mod stop;
@@ -81,9 +82,13 @@ pub(crate) struct Shared {
     pub(crate) signin: SigninHub,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct Inner {
     states: BTreeMap<AgentId, InstallState>,
+    /// The Python runtime's state, one for every agent.
+    python: PythonState,
+    /// The size of Python's archive: a paused Python download's `Missing`.
+    python_bytes: u64,
     installed: BTreeMap<AgentId, Installed>,
     /// The job that may emit now, if any.
     current: Option<Ticket>,
@@ -155,8 +160,9 @@ impl Agents {
         (Agents { commands, shared }, receiver)
     }
 
-    /// Installs `agent`: `Managed` again for IT's runtime, `Ready` again when installed,
-    /// nothing when it is installing already. Otherwise any other agent's running install is
+    /// Installs `agent`: `Managed` again for IT's runtime, `Ready` again when installed (and
+    /// Python's install started when it is `Missing` and no job runs), nothing when
+    /// it is installing already. Otherwise any other agent's running install is
     /// paused (its partial files kept) and this one starts, or resumes from its files.
     pub fn install(&self, agent: &AgentId) {
         self.send(Command::Install(agent.clone()));
@@ -167,7 +173,8 @@ impl Agents {
         self.send(Command::Pause(agent.clone()));
     }
 
-    /// Starts a `Failed`, `Waiting` or `Paused` install again with a fresh count of tries. With
+    /// Starts a `Failed`, `Waiting` or `Paused` install again with a fresh count of tries, or,
+    /// for a `Ready` agent, Python's install when it is `Missing`, `Waiting` or `Failed`. With
     /// `use_system_proxy`, the OS's static proxy setting is read now and kept for later
     /// installs (a proxy set in the install settings still wins).
     pub fn retry(&self, agent: &AgentId, use_system_proxy: bool) {
@@ -184,6 +191,12 @@ impl Agents {
     /// `agent`'s last state, or `None` for an unknown agent or before the worker set it.
     pub fn state(&self, agent: &AgentId) -> Option<InstallState> {
         self.shared.lock().states.get(agent).cloned()
+    }
+
+    /// The Python runtime's last state: `Unavailable` where this build has no Python, and
+    /// before the worker set it.
+    pub fn python_state(&self) -> PythonState {
+        self.shared.python_state()
     }
 
     /// `agent`'s finished install, when it is `Ready`.

@@ -88,6 +88,8 @@ fn assert_exported(types: &Types, ts: &str) {
         "Secret",
         "InstallProgress",
         "InstallLog",
+        "PythonProgress",
+        "PythonFailureCause",
         "SignIn",
         "FoundLogin",
         "LoginFrom",

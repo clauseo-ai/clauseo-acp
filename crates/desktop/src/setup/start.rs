@@ -380,6 +380,7 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
         let (agents, source) = super::fake_install::scripted(agents, source, Arc::clone(&clock));
         parts.events.publish(SetupEvent::SetupInfo {
             keys_available: keys.available(),
+            python: None,
         });
         let compose = Arc::new(Compose::new(Arc::clone(&parts.events), clock));
         let facts = &read.settings;
