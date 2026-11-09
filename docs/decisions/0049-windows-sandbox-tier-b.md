@@ -1941,9 +1941,17 @@ does. The guard on that privilege boundary:
   parameters, and the refresh reads no environment.
 
 A launch that finds the stop or sweep task missing or changed asks for a refresh run, reads the
-tasks every 500 ms for up to 15 s (asking again every 3 s: a run asked for while one runs is
-dropped, and the first run after an update is the old copy's), and refuses only if they are
-still missing or changed (`unclean::healed`). The readiness check asks for a run the same way,
+tasks every 500 ms for up to 20 s in all, and refuses only if they are still missing or changed
+(`unclean::healed`). The first run after an update is the old copy's, which only swaps the new
+copy in: once the record's `AdminCopySha256` differs from before the first ask, the run is
+asked for once more at once, and that run is the new copy's. It also asks again every 3 s, since
+a run asked for while one runs is dropped. The desktop already asks for a refresh at start when
+the installed set-up program's hash isn't the record's (`crates/desktop/src/admin_refresh.rs`),
+so by the first launch the swap has usually happened and one run heals; the second run covers a
+launch made before it finished. The host can run the same heal before it starts the runner
+(`runner::heal_before_launch`), showing "Clauseo is finishing an update before it starts the AI
+tool." (`runner::HEALING`) from its callback until the call returns; the runner's own check
+stays the final gate. The readiness check asks for a run the same way,
 waiting for nothing; its next check reads the result. No UAC prompt is involved.
 
 **Per machine.** A per-machine `--adopt` has no owner to name in the descriptor, so it registers

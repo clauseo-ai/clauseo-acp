@@ -11,10 +11,11 @@ use super::super::marker::{
     MarkerState, Sequences, UncleanSession, marker_path, remove_marker, unclean_sessions,
     write_marker_at,
 };
-use super::{Markers, Refused, StartUp, await_sweeps, logon_check, start_up};
+use super::{Markers, Refused, StartUp, await_sweeps, heal_first, logon_check, start_up};
 use crate::windows::record::sandbox_pool_sids;
 use crate::windows::refresh::{
     launch_admin_refresh, launch_pool_stop, launch_pool_sweep, launch_tasks_repair,
+    recorded_admin_copy_sha256,
 };
 use crate::windows::setup::record_values::{STOP_SEQUENCE, SWEEP_SEQUENCE};
 use crate::windows::setup::{read_record_install_id, read_record_value};
@@ -106,11 +107,23 @@ impl Markers for OsMarkers {
     fn heal_tasks(&mut self) -> bool {
         launch_admin_refresh()
     }
+
+    fn admin_copy_stamp(&mut self) -> Option<String> {
+        recorded_admin_copy_sha256().ok().flatten()
+    }
 }
 
 /// F4, for the outer before it writes its own marker (`unclean::logon_check`).
 pub(crate) fn check_logon(data_dir: &Path, pool_user: &Sid) -> Result<(), Refused> {
     logon_check(&mut OsMarkers::new(data_dir), pool_user)
+}
+
+/// The host's call before it starts the outer runner for a tier-B launch, off the UI thread
+/// (COM calls, up to 20 s): heals a missing or changed stop or sweep task through the refresh
+/// task, calling `on_waiting` once when it does, so the host can show `unclean::HEALING`
+/// until this returns (`unclean::heal_first`). What the tasks still need, `None` when nothing.
+pub fn heal_before_launch(data_dir: &Path, on_waiting: impl FnOnce()) -> Option<&'static str> {
+    heal_first(&mut OsMarkers::new(data_dir), on_waiting)
 }
 
 /// A launch's check, for `clean_close::check_launch` (`unclean::await_sweeps`).

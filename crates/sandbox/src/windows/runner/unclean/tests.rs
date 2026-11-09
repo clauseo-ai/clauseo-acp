@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use super::*;
 
 mod failures;
+use failures::HealRun;
 mod final_stop;
 mod install;
 
@@ -50,9 +51,12 @@ struct Fake {
     queued_task_repairs: Vec<Option<&'static str>>,
     /// How many times the tasks were read.
     task_reads: usize,
-    /// Whether the refresh task can be started, and what its run leaves the tasks needing.
+    /// Whether the refresh task can be started, and what each run asked for does, in turn; a
+    /// run asked for past them changes nothing.
     heal_starts: bool,
-    heal_leaves: Option<&'static str>,
+    heal_runs: Vec<HealRun>,
+    /// The record's `AdminCopySha256`, as a count of the swaps so far.
+    swaps: u32,
     log: Vec<String>,
 }
 
@@ -73,7 +77,8 @@ impl Fake {
             queued_task_repairs: Vec::new(),
             task_reads: 0,
             heal_starts: false,
-            heal_leaves: None,
+            heal_runs: Vec::new(),
+            swaps: 0,
             log: Vec::new(),
         }
     }
@@ -190,10 +195,15 @@ impl Markers for Fake {
     }
     fn heal_tasks(&mut self) -> bool {
         self.log.push("heal".to_owned());
-        if self.heal_starts {
-            self.task_repair = self.heal_leaves;
+        if self.heal_starts && !self.heal_runs.is_empty() {
+            let run = self.heal_runs.remove(0);
+            self.swaps += u32::from(run.swaps);
+            self.task_repair = run.leaves;
         }
         self.heal_starts
+    }
+    fn admin_copy_stamp(&mut self) -> Option<String> {
+        Some(self.swaps.to_string())
     }
     fn task_repair(&mut self) -> Option<&'static str> {
         self.task_reads += 1;

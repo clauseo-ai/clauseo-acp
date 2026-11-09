@@ -64,7 +64,9 @@ use super::marker::{MarkerState, Sequences, UncleanSession};
 use crate::windows::setup::record_values::{STOP_NEXT, SWEEP_NEXT};
 use crate::windows::sids::Sid;
 use launch_tasks::tasks_ready;
-pub use launch_tasks::{HEAL_POLL, HEAL_WAIT, TASK_RETRY, TASKS_UNCHECKED_AT_LAUNCH};
+pub use launch_tasks::{
+    HEAL_POLL, HEAL_WAIT, HEALING, TASK_RETRY, TASKS_UNCHECKED_AT_LAUNCH, heal_first,
+};
 
 mod launch_tasks;
 #[cfg(windows)]
@@ -151,6 +153,9 @@ pub trait Markers {
     /// Asks for a run of the refresh task, which puts the tasks back as SYSTEM: whether it
     /// was asked for (`refresh::launch_admin_refresh`, bounded).
     fn heal_tasks(&mut self) -> bool;
+    /// The record's `AdminCopySha256` as the lawyer reads it, `None` when it can't be read: it
+    /// changes when a refresh run swaps a new admin copy in.
+    fn admin_copy_stamp(&mut self) -> Option<String>;
 }
 
 /// Why a sweep a marker awaits didn't complete: `waited`, unless a task is missing, changed

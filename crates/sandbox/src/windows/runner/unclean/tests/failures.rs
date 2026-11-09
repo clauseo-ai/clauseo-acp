@@ -9,6 +9,13 @@ use crate::windows::refresh::{TASK_CHANGED, TASK_MISSING, TASK_UNCHECKED};
 
 const SWEPT: MarkerState = MarkerState::AwaitingSweep { sweep: 7 };
 
+/// One run of the refresh task: whether it swaps a new admin copy in, and what it leaves the
+/// tasks needing.
+pub(super) struct HealRun {
+    pub(super) swaps: bool,
+    pub(super) leaves: Option<&'static str>,
+}
+
 #[test]
 fn a_clean_marker_that_cant_be_removed_lets_the_logon_go_without_a_stop() {
     // Its sweep had completed: another program holds the file open.
@@ -188,36 +195,88 @@ fn a_task_scheduler_that_never_answers_refuses_the_launch_without_hanging() {
 fn a_missing_task_is_put_back_by_the_refresh_task_before_the_launch_refuses() {
     assert_eq!(
         (HEAL_WAIT, HEAL_POLL),
-        (Duration::from_secs(15), Duration::from_millis(500))
+        (Duration::from_secs(20), Duration::from_millis(500))
     );
+    let run = |swaps: bool, leaves: Option<&'static str>| HealRun { swaps, leaves };
     // After an update from the shipped release: no sweep task. The refresh task puts it back,
     // and the launch goes ahead.
     let mut fake = Fake::new();
     fake.task_repair = Some(TASK_MISSING);
     fake.heal_starts = true;
+    fake.heal_runs = vec![run(false, None)];
     assert_eq!(logon_check(&mut fake, &sid(POOL_A)), Ok(()));
     assert_eq!(fake.log, ["heal", "pause for the heal"]);
+    // The first run is the old copy's and only swaps the new one in; the run asked for once
+    // more at once is the new copy's, which registers the sweep task.
+    let mut fake = Fake::new();
+    fake.task_repair = Some(TASK_MISSING);
+    fake.heal_starts = true;
+    fake.heal_runs = vec![run(true, Some(TASK_MISSING)), run(false, None)];
+    assert_eq!(logon_check(&mut fake, &sid(POOL_A)), Ok(()));
+    let heal = ["heal", "pause for the heal"];
+    assert_eq!(fake.log, [heal, heal].concat());
+    // Neither run registers it: refused after 20 s in all, in the missing words.
+    let mut fake = Fake::new();
+    fake.task_repair = Some(TASK_MISSING);
+    fake.heal_starts = true;
+    fake.heal_runs = vec![
+        run(true, Some(TASK_MISSING)),
+        run(false, Some(TASK_MISSING)),
+    ];
+    let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
+    assert_eq!(refused, Refused::sweep(TASK_MISSING.to_owned()));
+    assert_eq!(fake.asked("pause for the heal"), 40);
+    // The first ask, once more after the swap, and again every 3 s.
+    assert_eq!(fake.asked("heal"), 1 + 1 + 6);
     // A heal that doesn't start: refused in the missing words at once.
     let mut fake = Fake::new();
     fake.task_repair = Some(TASK_MISSING);
     let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
     assert_eq!(refused, Refused::sweep(TASK_MISSING.to_owned()));
     assert_eq!(fake.log, ["heal"]);
-    // A heal that never lands: refused after 15 s of reads, asking again every 3 s.
-    let mut fake = Fake::new();
-    fake.task_repair = Some(TASK_MISSING);
-    fake.heal_starts = true;
-    fake.heal_leaves = Some(TASK_MISSING);
-    let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
-    assert_eq!(refused, Refused::sweep(TASK_MISSING.to_owned()));
-    assert_eq!(fake.asked("pause for the heal"), 30);
-    assert_eq!(fake.asked("heal"), 1 + 5);
-    // A Task Scheduler that stops answering while it waits: refused in the missing words.
+    // A Task Scheduler that stops answering while it waits: refused in the changed words.
     let mut fake = Fake::new();
     fake.task_repair = Some(TASK_CHANGED);
     fake.heal_starts = true;
-    fake.heal_leaves = Some(TASK_UNCHECKED);
+    fake.heal_runs = vec![run(false, Some(TASK_UNCHECKED))];
     let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
     assert_eq!(refused, Refused::sweep(TASK_CHANGED.to_owned()));
     assert_eq!(fake.asked("pause for the heal"), 1);
+}
+
+#[test]
+fn the_host_is_told_once_while_a_heal_runs_and_never_otherwise() {
+    assert_eq!(
+        HEALING,
+        "Clauseo is finishing an update before it starts the AI tool."
+    );
+    let run = |swaps: bool, leaves: Option<&'static str>| HealRun { swaps, leaves };
+    // A heal that runs, even across the old copy's swap and a second run: told once.
+    let mut fake = Fake::new();
+    fake.task_repair = Some(TASK_MISSING);
+    fake.heal_starts = true;
+    fake.heal_runs = vec![run(true, Some(TASK_MISSING)), run(false, None)];
+    let mut told = 0;
+    assert_eq!(heal_first(&mut fake, || told += 1), None);
+    assert_eq!(told, 1);
+    // One that fails is told once too, and says what is still missing.
+    let mut fake = Fake::new();
+    fake.task_repair = Some(TASK_MISSING);
+    fake.heal_starts = true;
+    let mut told = 0;
+    assert_eq!(heal_first(&mut fake, || told += 1), Some(TASK_MISSING));
+    assert_eq!(told, 1);
+    // Tasks that are fine, can't be read, or a refresh task that can't start: never told.
+    for (repair, starts) in [
+        (None, true),
+        (Some(TASK_UNCHECKED), true),
+        (Some(TASK_MISSING), false),
+    ] {
+        let mut fake = Fake::new();
+        fake.task_repair = repair;
+        fake.heal_starts = starts;
+        let mut told = 0;
+        assert_eq!(heal_first(&mut fake, || told += 1), repair);
+        assert_eq!(told, 0, "{repair:?}");
+    }
 }

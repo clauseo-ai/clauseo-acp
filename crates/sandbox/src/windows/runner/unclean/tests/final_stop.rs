@@ -95,6 +95,9 @@ impl Markers for World {
     fn heal_tasks(&mut self) -> bool {
         self.fake.heal_tasks()
     }
+    fn admin_copy_stamp(&mut self) -> Option<String> {
+        self.fake.admin_copy_stamp()
+    }
 }
 
 #[test]
