@@ -85,9 +85,7 @@ impl Busy {
     }
 
     /// The check now running made progress (a walk listed a folder): its budget starts again.
-    /// Between checks, nothing. Returns whether a check runs. Test-only until
-    /// `Watch::on_progress` calls it (W3's merge).
-    #[cfg(test)]
+    /// Between checks, nothing. Returns whether a check runs. `Watch::on_progress` calls it.
     pub(crate) fn beat(&self) -> bool {
         let now = self.millis();
         self.since

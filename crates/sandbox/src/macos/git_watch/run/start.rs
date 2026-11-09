@@ -278,7 +278,11 @@ where
         runner = runner.with_canary(canary, now);
     }
     let busy = Arc::clone(runner.busy());
-    // At W3's merge: `runner.watch.on_progress(...)` calling `busy.beat()` per folder listed.
+    // Each folder a walk lists is progress: the watchdog's budget counts from the last one.
+    let beat = Arc::clone(&busy);
+    runner.watch.on_progress(Arc::new(move || {
+        beat.beat();
+    }));
     let (marks, marked) = (store.clone(), session.clone());
     busy.on_stuck(move || state::outlived(&marks, &marked, &[]));
     let refuse = |error: std::io::Error| {
