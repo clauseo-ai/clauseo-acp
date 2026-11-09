@@ -19,14 +19,14 @@ export const HI = {
   "Claude asks before every change. ChatGPT can't work here.":
     "Claude हर बदलाव से पहले पूछता है। ChatGPT यहाँ काम नहीं कर सकता।",
   "This matter's folder is on a network drive": "इस मामले का फ़ोल्डर नेटवर्क ड्राइव पर है",
-  "Clauseo can't keep Claude and ChatGPT inside this folder. To work in the Safe workspace, move the matter to a folder on this computer.":
-    "Clauseo, Claude और ChatGPT को इस फ़ोल्डर के भीतर नहीं रख सकता। सुरक्षित कार्यक्षेत्र में काम करने के लिए मामले को इस कंप्यूटर के किसी फ़ोल्डर में ले जाएँ।",
+  "Move the matter to a folder on this computer to use ChatGPT here and let Claude work without asking before every change. Clauseo can't keep them inside a folder on a network drive.":
+    "मामले को इस कंप्यूटर के किसी फ़ोल्डर में ले जाएँ, ताकि आप यहाँ ChatGPT का उपयोग कर सकें और Claude हर बदलाव से पहले पूछे बिना काम कर सके। Clauseo उन्हें नेटवर्क ड्राइव के फ़ोल्डर के भीतर नहीं रख सकता।",
   // FR15: a drive without file permissions, as FR12
   "No file permissions.": "फ़ाइल अनुमतियाँ नहीं।",
   "This matter's folder is on a drive that doesn't keep file permissions":
     "इस मामले का फ़ोल्डर ऐसी ड्राइव पर है जो फ़ाइल अनुमतियाँ नहीं रखती",
-  "Clauseo can't keep Claude and ChatGPT inside this folder. USB drives often don't keep permissions. To work in the Safe workspace, move the matter to a folder on this computer.":
-    "Clauseo, Claude और ChatGPT को इस फ़ोल्डर के भीतर नहीं रख सकता। USB ड्राइव अक्सर अनुमतियाँ नहीं रखतीं। सुरक्षित कार्यक्षेत्र में काम करने के लिए मामले को इस कंप्यूटर के किसी फ़ोल्डर में ले जाएँ।",
+  "Move the matter to a folder on this computer to use ChatGPT here and let Claude work without asking before every change. Clauseo can't keep them inside this folder, and USB drives often don't keep file permissions.":
+    "मामले को इस कंप्यूटर के किसी फ़ोल्डर में ले जाएँ, ताकि आप यहाँ ChatGPT का उपयोग कर सकें और Claude हर बदलाव से पहले पूछे बिना काम कर सके। Clauseo उन्हें इस फ़ोल्डर के भीतर नहीं रख सकता, और USB ड्राइव अक्सर फ़ाइल अनुमतियाँ नहीं रखतीं।",
   // FR7: New matter's warning for a folder picked on a network drive, then its tooltip and accessible name
   "On a network drive": "नेटवर्क ड्राइव पर",
   "This folder is on a network drive": "यह फ़ोल्डर नेटवर्क ड्राइव पर है",

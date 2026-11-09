@@ -164,7 +164,7 @@ export const FOLDER_RIGHTS: Entry[] = [
       w("Claude asks before every change. ChatGPT can't work here."),
       w("This matter's folder is on a network drive"),
       w(
-        "Clauseo can't keep Claude and ChatGPT inside this folder. To work in the Safe workspace, move the matter to a folder on this computer.",
+        "Move the matter to a folder on this computer to use ChatGPT here and let Claude work without asking before every change. Clauseo can't keep them inside a folder on a network drive.",
       ),
     ]),
     () => <RoomFocusing host={room("network")} focus={INFO} />,
@@ -177,7 +177,7 @@ export const FOLDER_RIGHTS: Entry[] = [
       w("Claude asks before every change. ChatGPT can't work here."),
       w("This matter's folder is on a drive that doesn't keep file permissions"),
       w(
-        "Clauseo can't keep Claude and ChatGPT inside this folder. USB drives often don't keep permissions. To work in the Safe workspace, move the matter to a folder on this computer.",
+        "Move the matter to a folder on this computer to use ChatGPT here and let Claude work without asking before every change. Clauseo can't keep them inside this folder, and USB drives often don't keep file permissions.",
       ),
     ]),
     () => <RoomFocusing host={room("no_permissions")} focus={INFO} />,
