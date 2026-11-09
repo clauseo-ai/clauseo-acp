@@ -45,32 +45,38 @@ const WRITE_DAC: REG_SAM_FLAGS = REG_SAM_FLAGS(0x0004_0000);
 /// `WRITE_OWNER`, which `RegSetKeySecurity` needs for the owner.
 const WRITE_OWNER: REG_SAM_FLAGS = REG_SAM_FLAGS(0x0008_0000);
 
-/// The record under `HKLM\<key>`; `None` when the key is missing or holds none of its values.
+/// The record under `HKLM\<key>`; `None` when the key is missing, holds none of its values,
+/// or holds a partial record (`record_values::decode`, `intent.rs`).
 pub(super) fn read(key: &str) -> Result<Option<MachineRecord>, MachineError> {
+    record_values::decode(read_raw(key)?).map_err(|error| MachineError::Other(error.to_string()))
+}
+
+/// The record's five values under `HKLM\<key>` as they are, each `None` when missing.
+pub(super) fn read_raw(key: &str) -> Result<RawRecord, MachineError> {
     let subkey = HSTRING::from(key);
     let at = PCWSTR(subkey.as_ptr());
     let names = [OWNER_SID, GROUP_SID, POOL_SIDS, DATA_DIR, REMOVING].map(HSTRING::from);
     let [owner, group, pool, data_dir, removing] =
         names.each_ref().map(|name| PCWSTR(name.as_ptr()));
-    let raw = RawRecord {
+    Ok(RawRecord {
         owner: read_string(at, owner).map_err(reading)?,
         group: read_string(at, group).map_err(reading)?,
         pool: read_units(at, pool, RRF_RT_REG_MULTI_SZ).map_err(reading)?,
         data_dir: read_string(at, data_dir).map_err(reading)?,
         removing: read_dword(at, removing).map_err(reading)?,
-    };
-    record_values::decode(raw).map_err(|error| MachineError::Other(error.to_string()))
+    })
 }
 
 /// Writes `record` as `HKLM\<key>`'s values, making the key when it is missing, and sets the
 /// key's owner to Administrators and its DACL to [`RECORD_SDDL`]. A record whose pool holds its
-/// owner is refused before any write. The first record of an install (no `OwnerSid` or
-/// `InstallId` before) gets a new `InstallId` too ([`record_values::INSTALL_ID`]); a record
-/// written over one, or an install from before the id, keeps what it has.
+/// owner is refused before any write. The first record of an install (no `GroupSid` or
+/// `InstallId` before: the intent's `OwnerSid` may be there already) gets a new `InstallId`
+/// too ([`record_values::INSTALL_ID`]); a record written over one, or an install from before the
+/// id, keeps what it has.
 pub(super) fn write(key: &str, record: &MachineRecord) -> Result<(), MachineError> {
     let values =
         record_values::encode(record).map_err(|error| MachineError::Other(error.to_string()))?;
-    let first = read_texts(key, &[OWNER_SID, INSTALL_ID])?
+    let first = read_texts(key, &[GROUP_SID, INSTALL_ID])?
         .iter()
         .all(Option::is_none);
     let opened = open_secured(key)?;
@@ -242,7 +248,7 @@ pub(crate) fn remove_reset_sids(key: &str, done: &[Sid]) -> Result<(), MachineEr
 
 /// `HKLM\<key>` opened to set values, made when missing, with its owner (Administrators) and
 /// DACL ([`RECORD_SDDL`]) set again before any value.
-fn open_secured(key: &str) -> Result<Key, MachineError> {
+pub(super) fn open_secured(key: &str) -> Result<Key, MachineError> {
     let descriptor = Descriptor::from_sddl(&format!("{RECORD_OWNER}{RECORD_SDDL}"))?;
     let attributes = windows::Win32::Security::SECURITY_ATTRIBUTES {
         nLength: u32::try_from(size_of::<windows::Win32::Security::SECURITY_ATTRIBUTES>())
@@ -330,7 +336,7 @@ pub(crate) fn delete_admin_values(key: &str) -> Result<(), MachineError> {
 
 /// Deletes `names` from `HKLM\<key>`, then the key when nothing is left in it, and the
 /// vendor key above it when that is left empty too ([`record_key::delete_emptied`]).
-fn delete_values(key: &str, names: &[&str]) -> Result<(), MachineError> {
+pub(super) fn delete_values(key: &str, names: &[&str]) -> Result<(), MachineError> {
     let subkey = HSTRING::from(key);
     let mut opened = HKEY::default();
     // SAFETY: the subkey is NUL-terminated; `opened` is a live out-pointer, closed by `Key`.
