@@ -811,12 +811,14 @@ default Windows include, so most computers need nothing. Set-up checks the rest
   SYSTEM and path checks, under the set-up lock; only into a record key that is there and not
   being removed, never made; an unreadable policy keeps the last known state and its time,
   `rights_policy::update_launch_record`; its backstop: when the LSA's holders of the right no
-  longer admit the pool, it records `defined_without_pool` whatever the read says) write what
+  longer admit the pool, it records `grant_removed` where no policy defines the right, a local
+  admin having taken it off, else `defined_without_pool` whatever the read says) write what
   they found into the record, which Users can read: `LogonPolicy` (`defined_with_pool`, `defined_without_pool`,
-  `not_defined`, `unknown`) and `LogonPolicyAt` (seconds since 1970). On a 1385 only, the runner
+  `not_defined`, `unknown`, `grant_removed`) and `LogonPolicyAt` (seconds since 1970). On a 1385 only, the runner
   reads it (`steps::logon_failure`, `runner::logon_refusal`). `defined_without_pool` exits
-  `RunExit::LogonPolicy` with `Blocked::LogonPolicy`'s words. `not_defined` and
-  `defined_with_pool` keep `RunExit::LogonRight` (setting up again grants the right). For
+  `RunExit::LogonPolicy` with `Blocked::LogonPolicy`'s words. `not_defined`,
+  `defined_with_pool` and `grant_removed` keep `RunExit::LogonRight` (setting up again grants the
+  right); `grant_removed`'s words say so first (`logon_refusal::GRANT_REMOVED`), not "ask IT". For
   `unknown`, or no value, the cache decides the same way, and an unreadable cache keeps
   `LogonRight`.
 - **The grant.** Step 3a, once the group exists and before any pool user logs on: when policy

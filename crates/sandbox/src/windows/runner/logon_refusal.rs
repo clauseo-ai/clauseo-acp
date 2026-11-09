@@ -16,7 +16,8 @@ pub fn recorded_state<E>(read: Result<Option<String>, E>) -> Option<PolicyState>
 /// and the SYSTEM refresh write it, since the desktop user can't read the policy): a policy that
 /// defines "Allow log on locally" without the pool is [`RunExit::LogonPolicy`], with
 /// [`Blocked::LogonPolicy`](crate::Blocked::LogonPolicy)'s words; none, or with the pool, is
-/// [`RunExit::LogonRight`] (setting up again grants it). When the record says nothing or
+/// [`RunExit::LogonRight`] (setting up again grants it), and so is `grant_removed`, a grant a
+/// local admin took off (with [`refusal_words`]' own words). When the record says nothing or
 /// `unknown`, `cached` (`setup::rights_source::cached`, readable on some machines) decides the
 /// same way, and anything it can't read stays [`RunExit::LogonRight`].
 pub fn logon_refusal(
@@ -29,9 +30,24 @@ pub fn logon_refusal(
     };
     match state {
         PolicyState::DefinedWithoutPool => (RunExit::LogonPolicy, crate::Blocked::LogonPolicy),
-        PolicyState::DefinedWithPool | PolicyState::NotDefined | PolicyState::Unknown => {
-            (RunExit::LogonRight, crate::Blocked::LogonRight)
-        }
+        PolicyState::DefinedWithPool
+        | PolicyState::NotDefined
+        | PolicyState::Unknown
+        | PolicyState::GrantRemoved => (RunExit::LogonRight, crate::Blocked::LogonRight),
+    }
+}
+
+/// A 1385's words where the record says a local admin took the right off the pool, with no
+/// policy defining it: the lawyer's own step first.
+pub(super) const GRANT_REMOVED: &str = "Windows' \"Allow log on locally\" right no longer includes the \
+     group ClauseoSandboxUsers. Running Clauseo's set-up again grants it back";
+
+/// The words of a 1385 that [`logon_refusal`] made `blocked`: [`GRANT_REMOVED`] when the record
+/// says `grant_removed`, else `blocked`'s own.
+pub fn refusal_words(recorded: Option<PolicyState>, blocked: crate::Blocked) -> String {
+    match (recorded, blocked) {
+        (Some(PolicyState::GrantRemoved), crate::Blocked::LogonRight) => GRANT_REMOVED.to_owned(),
+        _ => blocked.to_string(),
     }
 }
 
@@ -70,6 +86,31 @@ mod tests {
             assert_eq!(logon_refusal(recorded, without), policy, "{recorded:?}");
             assert_eq!(logon_refusal(recorded, || RightPolicy::NotDefined), local);
         }
+    }
+
+    #[test]
+    fn a_grant_a_local_admin_took_off_says_setting_up_again_fixes_it() {
+        let without = || RightPolicy::Defined {
+            includes_pool: false,
+        };
+        let recorded = recorded_state::<()>(Ok(Some("grant_removed".to_owned())));
+        assert_eq!(recorded, Some(PolicyState::GrantRemoved));
+        let (exit, blocked) = logon_refusal(recorded, without);
+        assert_eq!(
+            (exit, blocked),
+            (RunExit::LogonRight, crate::Blocked::LogonRight)
+        );
+        let words = refusal_words(recorded, blocked);
+        assert_eq!(words, GRANT_REMOVED);
+        assert!(
+            words.contains("set-up again") && !words.contains("whoever"),
+            "{words}"
+        );
+        // A policy without the pool keeps the words naming whoever manages it.
+        let recorded = Some(PolicyState::DefinedWithoutPool);
+        let (_, blocked) = logon_refusal(recorded, without);
+        let words = refusal_words(recorded, blocked);
+        assert!(words.contains("whoever manages that policy"), "{words}");
     }
 
     /// The record's value as the registry read gives it, through [`recorded_state`].

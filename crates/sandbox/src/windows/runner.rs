@@ -109,7 +109,7 @@ pub use exit::RunExit;
 #[cfg(windows)]
 pub use inner::run_inner;
 #[cfg(any(windows, test, feature = "test-support"))]
-pub use logon_refusal::{logon_refusal, recorded_state};
+pub use logon_refusal::{logon_refusal, recorded_state, refusal_words};
 #[cfg(any(windows, test))]
 pub use marker::{UncleanSession, unclean_sessions};
 #[cfg(windows)]

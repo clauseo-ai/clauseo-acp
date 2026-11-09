@@ -119,8 +119,14 @@ fn an_unreadable_policy_keeps_the_last_known_state_and_its_time() {
 #[test]
 fn the_refresh_records_a_policy_when_the_group_has_lost_the_right_in_effect() {
     let group = sid(GROUP);
-    // Set-up granted the group; a policy the read can't see replaced the list since.
-    for read in [RightPolicy::NotDefined, RightPolicy::Unknown] {
+    // A policy (perhaps one the read can't see) replaced the list set-up left.
+    let without = RightPolicy::Defined {
+        includes_pool: false,
+    };
+    let with = RightPolicy::Defined {
+        includes_pool: true,
+    };
+    for read in [without, with, RightPolicy::Unknown] {
         let mut record = FakeRecord {
             record: Some(a_record(false)),
             policy: read,
@@ -164,4 +170,20 @@ fn the_refresh_records_a_policy_when_the_group_has_lost_the_right_in_effect() {
     assert_eq!(written, LaunchUpdate::Written(PolicyState::NotDefined));
     assert!(admits_pool(std::slice::from_ref(&group), &group));
     assert!(!admits_pool(&[sid("S-1-5-32-544")], &group));
+}
+
+#[test]
+fn the_refresh_records_a_grant_a_local_admin_took_off_where_no_policy_defines_it() {
+    // Set-up granted the group, no policy defines the right, and the group is off it now.
+    let mut record = FakeRecord {
+        record: Some(a_record(false)),
+        policy: RightPolicy::NotDefined,
+        value: Some((PolicyState::NotDefined, 10)),
+        holders: Some(vec![sid("S-1-5-32-544")]),
+        reads: 0,
+    };
+    let written = update_launch_record(&mut record, 20).unwrap();
+    assert_eq!(written, LaunchUpdate::Written(PolicyState::GrantRemoved));
+    assert_eq!(record.value, Some((PolicyState::GrantRemoved, 20)));
+    assert_eq!(PolicyState::GrantRemoved.text(), "grant_removed");
 }

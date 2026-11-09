@@ -5,7 +5,7 @@ use zeroize::Zeroizing;
 
 use super::super::spawn::{Process, assign, log_on, resume};
 use super::super::start::Steps;
-use super::super::{RunExit, logon_refusal, recorded_state};
+use super::super::{RunExit, logon_refusal, recorded_state, refusal_words};
 use super::end::since_start;
 use super::{Failure, os};
 use crate::windows::acl::object::Handle;
@@ -96,7 +96,7 @@ pub(super) fn logon_failure(code: u32, pool_user: &Sid) -> Failure {
         1385 => {
             let recorded = recorded_state(sandbox_logon_policy());
             let (exit, blocked) = logon_refusal(recorded, || launch_policy(pool_user));
-            Failure::new(exit, blocked.to_string())
+            Failure::new(exit, refusal_words(recorded, blocked))
         }
         1326 => Failure::new(RunExit::Password, super::super::PASSWORD_LOST),
         other => Failure::new(

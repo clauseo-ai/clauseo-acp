@@ -93,15 +93,20 @@ pub enum PolicyState {
     NotDefined,
     /// The policy couldn't be read.
     Unknown,
+    /// No policy defines it, yet the right in effect no longer admits the pool: someone took
+    /// set-up's grant (or Users) off locally, so setting up again fixes a 1385. Only the SYSTEM
+    /// refresh's backstop writes it.
+    GrantRemoved,
 }
 
 impl PolicyState {
     /// Every state, in order.
-    pub const ALL: [PolicyState; 4] = [
+    pub const ALL: [PolicyState; 5] = [
         PolicyState::DefinedWithPool,
         PolicyState::DefinedWithoutPool,
         PolicyState::NotDefined,
         PolicyState::Unknown,
+        PolicyState::GrantRemoved,
     ];
 
     /// The state of what was read.
@@ -125,6 +130,7 @@ impl PolicyState {
             PolicyState::DefinedWithoutPool => "defined_without_pool",
             PolicyState::NotDefined => "not_defined",
             PolicyState::Unknown => "unknown",
+            PolicyState::GrantRemoved => "grant_removed",
         }
     }
 
@@ -519,8 +525,10 @@ pub enum LaunchUpdate {
 /// now for the record's group and pool, written only into a record that is there and not being
 /// removed, and never `unknown` over what set-up or an earlier refresh found. The backstop: when
 /// the right in effect (the LSA's holders) no longer admits the pool (none of the group,
-/// `Users`, `Everyone` or `Authenticated Users`), something replaced the list set-up left, a
-/// policy this read can't see among them, so it is `defined_without_pool` whatever the read says.
+/// `Users`, `Everyone` or `Authenticated Users`), something replaced the list set-up left. With
+/// no definition anywhere that was a local admin, and setting up again grants it back:
+/// `grant_removed`. Otherwise it is a policy (perhaps one this read can't see):
+/// `defined_without_pool`, whatever the read says.
 pub fn update_launch_record(
     record: &mut dyn LaunchRecord,
     at: u64,
@@ -532,10 +540,15 @@ pub fn update_launch_record(
         group: Some(&found.group),
         users: &found.pool,
     };
-    let mut state = PolicyState::of(record.policy(pool));
+    let read = record.policy(pool);
+    let mut state = PolicyState::of(read);
     match record.holders() {
         Ok(holders) if !admits_pool(&holders, &found.group) => {
-            state = PolicyState::DefinedWithoutPool;
+            state = if read == RightPolicy::NotDefined {
+                PolicyState::GrantRemoved
+            } else {
+                PolicyState::DefinedWithoutPool
+            };
         }
         Ok(_) => {}
         Err(error) => tracing::warn!(%error, "who holds \"Allow log on locally\" couldn't be read"),
