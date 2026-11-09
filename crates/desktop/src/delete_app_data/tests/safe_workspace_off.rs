@@ -77,7 +77,7 @@ fn has_macro(code: &[String], name: &str) -> bool {
 }
 
 /// Every line the template's inserts reach in `code`, through each `!insertmacro` of a macro
-/// `code` defines (the template's own, such as CheckIfAppIsRunning, are not the hooks').
+/// `code` defines (the template's own, such as `CheckIfAppIsRunning`, are not the hooks').
 fn reached(code: &[String]) -> Vec<String> {
     let mut seen = BTreeSet::new();
     let mut todo: Vec<String> = INSERTED.iter().map(|name| (*name).to_owned()).collect();
