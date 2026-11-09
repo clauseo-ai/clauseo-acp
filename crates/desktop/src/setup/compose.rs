@@ -19,7 +19,11 @@
 //! 4. Otherwise `SignedIn { method: Firm }` while the agent has an endpoint or a provider
 //!    (`plans.<id>`, the lawyer's or the firm's policy's);
 //! 5. else `SignedIn { method: ApiKey }` while a key is in memory (read, or just stored);
-//! 6. else S18's state, with `method: Plan` and the plan in words (`limits`' `claude_plan` and
+//! 6. else, once the plan login's account changed (R17, `setup/identity.rs`), `Failed { code:
+//!    signin.account_changed }`, until a sign-in records an account again; else, while Codex's
+//!    refresh-on-check left the login unconfirmed (a refused login, or two refreshes that wrote
+//!    nothing), `Failed { code: signin.unconfirmed }`, which says sign in again;
+//! 7. else S18's state, with `method: Plan` and the plan in words (`limits`' `claude_plan` and
 //!    `codex_plan`, so the line matches `AccountLimits.plan`).
 //!
 //! Rule 1 is pending the orchestrator's confirmation (the plan's "Disagreements" 7); it is here
@@ -34,10 +38,9 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use clauseo_agents::{Clock, Found, LoginFrom, SigninCode, SigninState, Source};
+use clauseo_agents::{Clock, SigninCode, SigninState, Source};
 use clauseo_protocol::{
-    AgentId, AgentKind, ErrorCode, FoundLogin, PlanLabel, SetupEvent, SignIn, SignInMethod,
-    SignInSource, Timestamp,
+    AgentId, ErrorCode, SetupEvent, SignIn, SignInMethod, SignInSource, Timestamp,
 };
 
 use super::SetupEvents;
@@ -62,6 +65,10 @@ pub(crate) struct Facts {
     pub(crate) switching: Option<SystemTime>,
     /// Whether that leave has been trying for 2 minutes (`leave::hold::STUCK_AFTER`).
     pub(crate) stuck: bool,
+    /// Since when the plan login's account is not the recorded one, if it is not (R17).
+    pub(crate) account_changed: Option<SystemTime>,
+    /// Since when refresh-on-check could not confirm the plan login (R17), if it cannot.
+    pub(crate) unconfirmed: Option<SystemTime>,
 }
 
 /// The rule: what the windows are told of `agent`'s sign-in, from S18's latest state (`None`
@@ -84,16 +91,10 @@ pub(crate) fn compose(agent: &AgentId, s18: Option<&SigninState>, facts: Facts) 
         return wire(agent, state);
     }
     if let Some(since) = facts.blocked {
-        return Some(SignIn::Failed {
-            code: ErrorCode::SigninPolicyUnreadable,
-            at: timestamp(since),
-        });
+        return Some(failed(ErrorCode::SigninPolicyUnreadable, since, false));
     }
     if let Some(since) = facts.unreadable {
-        return Some(SignIn::Failed {
-            code: ErrorCode::AgentKeyUnreadable,
-            at: timestamp(since),
-        });
+        return Some(failed(ErrorCode::AgentKeyUnreadable, since, false));
     }
     if let Some(since) = facts.managed.or(facts.firm) {
         return Some(signed_in_by(SignInMethod::Firm, since));
@@ -101,7 +102,29 @@ pub(crate) fn compose(agent: &AgentId, s18: Option<&SigninState>, facts: Facts) 
     if let Some(since) = facts.key {
         return Some(signed_in_by(SignInMethod::ApiKey, since));
     }
+    let reused = matches!(
+        s18,
+        Some(SigninState::SignedIn {
+            source: Source::Reused,
+            ..
+        })
+    );
+    if let Some(since) = facts.account_changed {
+        return Some(failed(ErrorCode::SigninAccountChanged, since, reused));
+    }
+    if let Some(since) = facts.unconfirmed {
+        return Some(failed(ErrorCode::SigninUnconfirmed, since, reused));
+    }
     s18.and_then(|state| wire(agent, state))
+}
+
+/// `Failed`: `code` since `since`; `reused`, a reused login, takes no sign-in (`refuse_reused`).
+fn failed(code: ErrorCode, since: SystemTime, reused: bool) -> SignIn {
+    SignIn::Failed {
+        code,
+        at: timestamp(since),
+        reused,
+    }
 }
 
 /// A fixed word for `state`'s kind, for the log: never an email, a plan, a code or an address.
@@ -187,51 +210,9 @@ pub(crate) fn wire(agent: &AgentId, state: &SigninState) -> Option<SignIn> {
             source: sign_in_source(*source)?,
             at: timestamp(*at),
         },
-        SigninState::Failed { code, at } => SignIn::Failed {
-            code: ErrorCode::from_str_lossy(code.code()),
-            at: timestamp(*at),
-        },
-        _ => return None,
-    })
-}
-
-/// The plan's words for `agent`'s raw plan string, as `limits` names it; `None` for a plan or
-/// an agent it does not know.
-fn plan_words(agent: &AgentId, plan: &str) -> Option<PlanLabel> {
-    let words = match AgentKind::of(agent)? {
-        AgentKind::Claude => clauseo_limits::claude_plan(plan),
-        AgentKind::Codex => clauseo_limits::codex_plan(plan),
-    };
-    words.map(|words| PlanLabel(words.to_owned()))
-}
-
-fn found_login(found: Found) -> Option<FoundLogin> {
-    Some(match found {
-        Found::ClaudeSettings => FoundLogin::ClaudeSettings,
-        Found::ClaudeWindowsSandbox => FoundLogin::ClaudeWindowsSandbox,
-        Found::CodexKeyring => FoundLogin::CodexKeyring,
-        Found::ReusedFailed => FoundLogin::ReusedFailed,
-        Found::ReusedSignedOut => FoundLogin::ReusedSignedOut,
-        Found::ReusedChanged => FoundLogin::ReusedChanged,
-        Found::CodexLinkSplit => FoundLogin::CodexLinkSplit,
-        Found::NoLogin => FoundLogin::NoneFound,
-        Found::ReuseOff => FoundLogin::ReuseOff,
-        _ => return None,
-    })
-}
-
-fn login_from(from: LoginFrom) -> Option<clauseo_protocol::LoginFrom> {
-    Some(match from {
-        LoginFrom::ClaudeCode => clauseo_protocol::LoginFrom::ClaudeCode,
-        LoginFrom::Codex => clauseo_protocol::LoginFrom::Codex,
-        _ => return None,
-    })
-}
-
-fn sign_in_source(source: Source) -> Option<SignInSource> {
-    Some(match source {
-        Source::Reused => SignInSource::Reused,
-        Source::Own => SignInSource::Own,
+        SigninState::Failed { code, at } => {
+            failed(ErrorCode::from_str_lossy(code.code()), *at, false)
+        }
         _ => return None,
     })
 }
@@ -467,6 +448,22 @@ impl Compose {
         });
     }
 
+    /// Whether `agent`'s plan login's account changed (R17): the card says sign in again.
+    pub(crate) fn set_account_changed(&self, agent: &AgentId, changed: bool) {
+        self.change(agent, |known, now| {
+            known.facts.account_changed =
+                changed.then(|| known.facts.account_changed.unwrap_or(now));
+        });
+    }
+
+    /// Whether refresh-on-check could not confirm `agent`'s plan login (R17): the card says sign
+    /// in again (`signin.unconfirmed`).
+    pub(crate) fn set_unconfirmed(&self, agent: &AgentId, unconfirmed: bool) {
+        self.change(agent, |known, now| {
+            known.facts.unconfirmed = unconfirmed.then(|| known.facts.unconfirmed.unwrap_or(now));
+        });
+    }
+
     /// Whether `agent`'s sign-in is refused for an unreadable policy (`firm_policy.rs`).
     pub(crate) fn set_blocked(&self, agent: &AgentId, blocked: bool) {
         self.change(agent, |known, now| {
@@ -558,6 +555,9 @@ fn keep_signed_in_at(previous: Option<&SigninState>, state: &mut SigninState) {
         *at = *was_at;
     }
 }
+
+mod words;
+use words::{found_login, login_from, plan_words, sign_in_source};
 
 #[cfg(test)]
 mod tests;

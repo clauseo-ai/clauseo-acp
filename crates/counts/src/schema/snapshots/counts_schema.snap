@@ -1518,7 +1518,11 @@ expression: counts_schema()
         "blocklist.allow_not_saved",
         "blocklist.revoke_not_saved",
         "sandbox.cleaning_up",
-        "agent.install_setup_failed"
+        "agent.install_setup_failed",
+        "agent.identity_checking",
+        "agent.identity_unknown",
+        "signin.account_changed",
+        "signin.unconfirmed"
       ],
       "type": "string"
     },

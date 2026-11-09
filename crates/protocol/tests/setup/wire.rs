@@ -236,10 +236,17 @@ fn every_sign_in() -> Vec<SignIn> {
         SignIn::Failed {
             code: ErrorCode::SigninPortBusy,
             at: at(5),
+            reused: false,
         },
         SignIn::Failed {
             code: ErrorCode::AgentAuthRequired,
             at: at(6),
+            reused: false,
+        },
+        SignIn::Failed {
+            code: ErrorCode::SigninUnconfirmed,
+            at: at(7),
+            reused: true,
         },
         SignIn::Switching {
             since: at(1_700_000_000_000),
@@ -390,9 +397,21 @@ fn setup_events_have_their_json_form() {
                 state: SignIn::Failed {
                     code: ErrorCode::SigninLinkExpired,
                     at: at(9),
+                    reused: false,
                 },
             },
             r#"{"sign_in_changed":{"agent":"claude-acp","state":{"failed":{"code":"signin.link_expired","at":9}}}}"#,
+        ),
+        (
+            SetupEvent::SignInChanged {
+                agent: claude(),
+                state: SignIn::Failed {
+                    code: ErrorCode::SigninAccountChanged,
+                    at: at(9),
+                    reused: true,
+                },
+            },
+            r#"{"sign_in_changed":{"agent":"claude-acp","state":{"failed":{"code":"signin.account_changed","at":9,"reused":true}}}}"#,
         ),
         (
             SetupEvent::SignInChanged {

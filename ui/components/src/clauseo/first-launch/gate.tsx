@@ -39,7 +39,7 @@ export type GateView =
   | { kind: "waiting"; nudge: boolean; pasting: boolean }
   | { kind: "device"; code: string; until: string }
   | { kind: "login-found"; email?: string | undefined }
-  | { kind: "failed"; code: string; at: string }
+  | { kind: "failed"; code: string; at: string; reused?: boolean | undefined }
   | { kind: "switching"; stuck: boolean }
   | { kind: "key" };
 

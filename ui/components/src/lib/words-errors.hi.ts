@@ -157,6 +157,18 @@ export const HI = {
     "{name} डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें।",
   "The AI was downloaded, but setting it up didn't finish. Try again.":
     "AI डाउनलोड हो गया, लेकिन उसका सेटअप पूरा नहीं हुआ। फिर से प्रयास करें।",
+  // hi: provisional
+  "Clauseo is still checking which account your sign-in belongs to. Try again in a moment.":
+    "Clauseo अभी जाँच रहा है कि आपका साइन इन किस खाते का है। थोड़ी देर में फिर से प्रयास करें।",
+  // hi: provisional
+  "Clauseo couldn't confirm which account your sign-in belongs to. Try again.":
+    "Clauseo पुष्टि नहीं कर सका कि आपका साइन इन किस खाते का है। फिर से प्रयास करें।",
+  // hi: provisional
+  "Your sign-in now belongs to a different account from the one you chose in Clauseo. Clauseo stopped, so that work on your matters doesn't go to the wrong account. Sign in again. Your questions are kept and run once you do.":
+    "आपका साइन इन अब उस खाते से अलग किसी दूसरे खाते का है, जिसे आपने Clauseo में चुना था। Clauseo रुक गया है, ताकि आपके मामलों का काम गलत खाते में न जाए। फिर से साइन इन करें। आपके प्रश्न रखे गए हैं और साइन इन करते ही चलेंगे।",
+  // hi: provisional
+  "Clauseo couldn't confirm your Codex sign-in. Sign in again to carry on.":
+    "Clauseo आपके Codex साइन इन की पुष्टि नहीं कर सका। जारी रखने के लिए फिर से साइन इन करें।",
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

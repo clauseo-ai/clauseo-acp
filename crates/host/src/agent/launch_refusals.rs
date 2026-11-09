@@ -8,14 +8,21 @@
 //! - A refusal applies to new launches; a running session ends normally.
 //!   `agent.key_unreadable` once this agent's stored key was tried and its read failed or did
 //!   not answer in time.
-//! - `agent.keys_loading` and `agent.key_unreadable` are waited out: a launch either meets
-//!   waits at most [`KEYS_WAIT`] on the host's clock ([`LaunchRefusals::wait`]) and is woken as
-//!   soon as the refusal is lifted or changed, then the launch checks the refusals again.
-//!   Desktop holds the facts and sends the one in force: a policy refusal is never lifted by
-//!   the keys' load.
-//! - A launch meeting `agent.key_unreadable` asks desktop to read that key again
-//!   ([`LaunchRefusals::retry_key`], `HostConfig::with_key_retry`) before its wait: a read
-//!   that succeeds lifts the refusal, so the launch, or the next, goes on with the key.
+//! - `agent.identity_checking` while desktop confirms which account the agent's login belongs
+//!   to, `agent.identity_unknown` once that check failed or gave no account, and
+//!   `signin.account_changed` once the login belongs to another account than the one signed
+//!   in through Clauseo, so its agents were stopped (decision record 0048, R17).
+//! - `agent.keys_loading`, `agent.key_unreadable` and `agent.identity_checking` are waited out:
+//!   a launch either meets waits at most [`KEYS_WAIT`] on the host's clock
+//!   ([`LaunchRefusals::wait`]) and is woken as soon as the refusal is lifted or changed, then
+//!   the launch checks the refusals again. Desktop holds the facts and sends the one in force:
+//!   a policy refusal is never lifted by the keys' load.
+//! - A launch meeting a refusal desktop can act on asks it to, with the code
+//!   ([`LaunchRefusals::retry`], `HostConfig::with_launch_retry`), before its wait (R17
+//!   generalised it): `agent.key_unreadable`, and desktop reads that key again; a read that
+//!   succeeds lifts the refusal, so the launch, or the next, goes on with the key.
+//!   `agent.identity_checking`, and desktop runs the identity check when it is due (a
+//!   Keychain-only login whose last check is stale, say); the same account lifts it.
 //! - `agent.keys_loading` has a bound ([`KEYS_LOAD_BOUND`] from the host's start): past it,
 //!   one still in place counts as `agent.key_unreadable`, so a setup thread that never loads
 //!   the keys (it did not start, or died) never leaves launches "still starting" for good.
@@ -34,24 +41,37 @@ use crate::error::Error;
 
 /// The codes `HostHandle::set_launch_refused` takes: the refusals desktop may put on new
 /// launches.
-pub(crate) const LAUNCH_REFUSALS: [ErrorCode; 3] = [
+pub(crate) const LAUNCH_REFUSALS: [ErrorCode; 6] = [
     ErrorCode::SigninPolicyUnreadable,
     ErrorCode::AgentKeysLoading,
     ErrorCode::AgentKeyUnreadable,
+    ErrorCode::AgentIdentityChecking,
+    ErrorCode::AgentIdentityUnknown,
+    ErrorCode::SigninAccountChanged,
 ];
 
 /// The refusals a launch waits out, at most [`KEYS_WAIT`], before it fails with them.
-pub(crate) const WAITED_OUT: [ErrorCode; 2] =
-    [ErrorCode::AgentKeysLoading, ErrorCode::AgentKeyUnreadable];
+pub(crate) const WAITED_OUT: [ErrorCode; 3] = [
+    ErrorCode::AgentKeysLoading,
+    ErrorCode::AgentKeyUnreadable,
+    ErrorCode::AgentIdentityChecking,
+];
 
 /// How long `agent.keys_loading` may stand from the host's start before it counts as
 /// `agent.key_unreadable`: desktop's own 10 s bound on the first load, and a margin, since
 /// desktop's setup thread starts a little after the host.
 pub(crate) const KEYS_LOAD_BOUND: Duration = Duration::from_secs(12);
 
-/// Desktop's hook for a launch that met `agent.key_unreadable`: read that agent's key again.
-/// Called on the host's actor, so it must not block.
-pub(crate) type KeyRetry = Arc<dyn Fn(&AgentId) + Send + Sync>;
+/// Desktop's hook for a launch that met one of [`RETRIED`], with the agent and the code:
+/// read that agent's key again, or run its identity check. Called on the host's actor, so it
+/// must not block.
+pub(crate) type LaunchRetry = Arc<dyn Fn(&AgentId, ErrorCode) + Send + Sync>;
+
+/// The waited-out refusals a launch asks desktop to act on before its wait.
+pub(crate) const RETRIED: [ErrorCode; 2] = [
+    ErrorCode::AgentKeyUnreadable,
+    ErrorCode::AgentIdentityChecking,
+];
 
 /// How long a launch waits for an `agent.keys_loading` refusal to be lifted.
 pub(crate) const KEYS_WAIT: Duration = Duration::from_secs(2);
@@ -67,7 +87,7 @@ pub(crate) fn taken(code: ErrorCode) -> bool {
 pub(crate) struct LaunchRefusals {
     codes: BTreeMap<AgentId, ErrorCode>,
     waiting: BTreeMap<AgentId, Vec<oneshot::Sender<()>>>,
-    key_retry: Option<KeyRetry>,
+    retry: Option<LaunchRetry>,
     /// The host clock's monotonic time past which `agent.keys_loading` counts as
     /// `agent.key_unreadable`; none before the host starts.
     loading_until: Option<Duration>,
@@ -79,7 +99,7 @@ impl Clone for LaunchRefusals {
         Self {
             codes: self.codes.clone(),
             waiting: BTreeMap::new(),
-            key_retry: self.key_retry.clone(),
+            retry: self.retry.clone(),
             loading_until: self.loading_until,
         }
     }
@@ -90,7 +110,7 @@ impl std::fmt::Debug for LaunchRefusals {
         f.debug_struct("LaunchRefusals")
             .field("codes", &self.codes)
             .field("waiting", &self.waiting.keys().collect::<Vec<_>>())
-            .field("key_retry", &self.key_retry.is_some())
+            .field("retry", &self.retry.is_some())
             .field("loading_until", &self.loading_until)
             .finish()
     }
@@ -119,15 +139,16 @@ impl LaunchRefusals {
         self.loading_until = Some(now.saturating_add(KEYS_LOAD_BOUND));
     }
 
-    /// Desktop's key retry, set before the host starts.
-    pub(crate) fn set_key_retry(&mut self, retry: KeyRetry) {
-        self.key_retry = Some(retry);
+    /// Desktop's launch retry, set before the host starts.
+    pub(crate) fn set_retry(&mut self, retry: LaunchRetry) {
+        self.retry = Some(retry);
     }
 
-    /// Asks desktop to read `agent`'s key again, if it gave a retry.
-    pub(crate) fn retry_key(&self, agent: &AgentId) {
-        if let Some(retry) = &self.key_retry {
-            retry(agent);
+    /// Asks desktop to act on `agent`'s refusal `code`, if it gave a retry and `code` is one
+    /// of [`RETRIED`]; any other code asks nothing.
+    pub(crate) fn retry(&self, agent: &AgentId, code: ErrorCode) {
+        if let Some(retry) = self.retry.as_ref().filter(|_| RETRIED.contains(&code)) {
+            retry(agent, code);
         }
     }
 
@@ -232,6 +253,53 @@ mod tests {
     }
 
     #[test]
+    fn identity_codes_are_taken_and_an_unlisted_code_is_still_command_invalid() {
+        let mut refusals = LaunchRefusals::default();
+        for code in [
+            ErrorCode::AgentIdentityChecking,
+            ErrorCode::AgentIdentityUnknown,
+            ErrorCode::SigninAccountChanged,
+        ] {
+            refusals.set(fake(), Some(code)).unwrap();
+            assert_eq!(refusals.get(&fake()), Some(code));
+        }
+        let error = refusals
+            .set(fake(), Some(ErrorCode::AgentLaunchFailed))
+            .unwrap_err();
+        assert_eq!(error.code(), ErrorCode::CommandInvalid);
+        assert_eq!(refusals.get(&fake()), Some(ErrorCode::SigninAccountChanged));
+    }
+
+    #[test]
+    fn the_launch_retry_is_asked_with_its_code_for_key_unreadable_and_identity_checking_alone() {
+        let mut refusals = LaunchRefusals::default();
+        // No retry given: nothing to ask, and nothing breaks.
+        refusals.retry(&fake(), ErrorCode::AgentKeyUnreadable);
+        let asked: Arc<std::sync::Mutex<Vec<(AgentId, ErrorCode)>>> = Arc::default();
+        let into = Arc::clone(&asked);
+        refusals.set_retry(Arc::new(move |agent: &AgentId, code: ErrorCode| {
+            into.lock().unwrap().push((agent.clone(), code));
+        }));
+        for code in [
+            ErrorCode::AgentKeyUnreadable,
+            ErrorCode::AgentIdentityChecking,
+            ErrorCode::AgentKeysLoading,
+            ErrorCode::AgentIdentityUnknown,
+            ErrorCode::SigninAccountChanged,
+            ErrorCode::SigninPolicyUnreadable,
+        ] {
+            refusals.retry(&fake(), code);
+        }
+        assert_eq!(
+            *asked.lock().unwrap(),
+            [
+                (fake(), ErrorCode::AgentKeyUnreadable),
+                (fake(), ErrorCode::AgentIdentityChecking),
+            ]
+        );
+    }
+
+    #[test]
     fn keys_loading_counts_as_key_unreadable_past_the_load_bound() {
         let mut refusals = LaunchRefusals::default();
         refusals
@@ -303,6 +371,24 @@ mod tests {
         // Set again to the same code: still waiting.
         refusals
             .set(fake(), Some(ErrorCode::AgentKeysLoading))
+            .unwrap();
+        assert_eq!(poll_once(&mut waiting), Poll::Pending);
+        refusals.set(fake(), None).unwrap();
+        assert_eq!(poll_once(&mut waiting), Poll::Ready(()));
+    }
+
+    #[test]
+    fn a_waiting_launch_wakes_when_the_identity_checking_refusal_lifts_and_not_before() {
+        let mut refusals = LaunchRefusals::default();
+        refusals
+            .set(fake(), Some(ErrorCode::AgentIdentityChecking))
+            .unwrap();
+        let mut waiting: Pin<Box<dyn Future<Output = ()> + Send>> =
+            Box::pin(refusals.wait(&fake(), Box::pin(futures::future::pending())));
+        assert_eq!(poll_once(&mut waiting), Poll::Pending);
+        // Set again to the same code: still waiting.
+        refusals
+            .set(fake(), Some(ErrorCode::AgentIdentityChecking))
             .unwrap();
         assert_eq!(poll_once(&mut waiting), Poll::Pending);
         refusals.set(fake(), None).unwrap();

@@ -101,6 +101,22 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::SandboxCleaningUp,
             "the sandbox's clean-up after an earlier session isn't finished",
         ),
+        failed(
+            ErrorCode::AgentIdentityChecking,
+            "the login's account is being confirmed",
+        ),
+        failed(
+            ErrorCode::AgentIdentityUnknown,
+            "the login's account could not be confirmed",
+        ),
+        failed(
+            ErrorCode::SigninAccountChanged,
+            "the login's account changed from the one signed in",
+        ),
+        failed(
+            ErrorCode::SigninUnconfirmed,
+            "the login's token refresh could not be confirmed",
+        ),
     ]
 }
 

@@ -11,6 +11,8 @@ use clauseo_process::Launcher;
 use clauseo_protocol::{AgentId, ErrorCode};
 use clauseo_settings::{Effective, PlatformDirs as _, SystemDirs};
 
+use crate::agent::launch_gate::LaunchGate;
+use crate::agent::launch_refusals::LaunchRetry;
 use crate::agent::login_link::{LoginCheck, SignInAgain};
 use crate::agent::login_splits::LoginSplits;
 use crate::browser::chrome::ChromeRoots;
@@ -46,34 +48,8 @@ pub(crate) use wiring::{LaunchWiring, PackReadHook};
 
 pub use crate::actor::turn::PackRequest;
 
-/// How to start a host. The data folder is `Effective::data_dir()`.
-#[non_exhaustive]
-pub struct HostConfig {
-    pub(crate) effective: Effective,
-    launcher: Arc<dyn Launcher>,
-    profile: Box<dyn ProfileHook>,
-    refused_folders: Vec<PathBuf>,
-    documents: Option<crate::actor::documents::Later>,
-    home_folder: Option<PathBuf>,
-    pub(crate) clock: Arc<dyn Clock>,
-    ids: Box<dyn IdSource>,
-    patch_window_bytes: usize,
-    managed_mcp: PathBuf,
-    app_capacity: usize,
-    codex_hooks: Option<serde_json::Map<String, serde_json::Value>>,
-    folder_check: crate::agent::folder_support::CheckSource,
-    pre_write_guard: Option<PathBuf>,
-    limits_reader: Option<Arc<dyn ReadLimits>>,
-    pub(crate) wiring: LaunchWiring,
-    scan_walk: crate::actor::scan::Walk,
-    scratch: crate::actor::scratch::Seams,
-    folder_probes: crate::actor::FolderProbes,
-    counts: Option<Counts>,
-    search: SearchSeams,
-    update: UpdateSeams,
-    idle: IdleStop,
-    sandbox: Option<Sandbox>,
-}
+mod host_config;
+pub use host_config::HostConfig;
 
 impl HostConfig {
     /// A config with the settings, the launcher that starts agents, and every default: no
@@ -523,12 +499,11 @@ impl HostConfig {
         self
     }
 
-    /// Refuses `agent`'s new launches with `code` from the host's start, before any launch
-    /// can come (decision record 0048): `signin.policy_unreadable` for an agent an unreadable
-    /// policy blocks, `agent.keys_loading` until desktop has loaded the stored API keys (and
-    /// counted as `agent.key_unreadable` past its bound). As
-    /// `HostHandle::set_launch_refused` takes it, which changes or lifts it later. Another code
-    /// is a bug: debug builds assert, and release builds log it and set nothing.
+    /// Refuses `agent`'s new launches with `code` from the host's start, before any launch can
+    /// come (decision record 0048), as `HostHandle::set_launch_refused` takes it, which changes
+    /// or lifts it later: `signin.policy_unreadable`, `agent.keys_loading` (counted as
+    /// `agent.key_unreadable` past its bound), and R17's identity codes. Another code is a bug:
+    /// debug builds assert, and release builds log it and set nothing.
     #[must_use]
     pub fn with_launch_refused(mut self, agent: AgentId, code: ErrorCode) -> Self {
         debug_assert!(
@@ -541,13 +516,20 @@ impl HostConfig {
         self
     }
 
-    /// Desktop's key retry (decision record 0048): called, on the host's actor, with the agent
-    /// of each launch that meets `agent.key_unreadable`, before the launch waits for the
-    /// refusal to lift; desktop reads that key again and lifts the refusal when it reads. It
-    /// must not block.
+    /// Desktop's launch retry (`LaunchRetry`, decision record 0048): called on the host's
+    /// actor for each launch that meets `agent.key_unreadable` or `agent.identity_checking`,
+    /// before it waits for the refusal to lift. It must not block.
     #[must_use]
-    pub fn with_key_retry(mut self, retry: Arc<dyn Fn(&AgentId) + Send + Sync>) -> Self {
-        self.wiring.sign_in.refused.set_key_retry(retry);
+    pub fn with_launch_retry(mut self, retry: LaunchRetry) -> Self {
+        self.wiring.sign_in.refused.set_retry(retry);
+        self
+    }
+
+    /// Desktop's launch gate (R17 M3; [`LaunchGate`] says what it must and must not do and what
+    /// its answers do), asked before each launch on the prepare thread. Unset: no gate.
+    #[must_use]
+    pub fn with_launch_gate(mut self, gate: LaunchGate) -> Self {
+        self.wiring.launch_gate = Some(gate);
         self
     }
 

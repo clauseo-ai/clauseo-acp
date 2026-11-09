@@ -120,6 +120,10 @@ as `yes` or `no`. The meaning is also each variant's doc comment in `error_code.
 | `blocklist.revoke_not_saved` | The site is blocked again until Clauseo closes, but Clauseo couldn't save that or void the saved allows, so the site may be allowed again after a restart. | no | host (`RevokeAllowedSite`, decision record 0053); not retryable because the run keeps changes in memory only from then on |
 | `sandbox.cleaning_up` | An earlier Safe workspace session's clean-up (its unclean-session marker's stop or sweep) wasn't finished after Clauseo waited for it, so no agent was started; trying again in a moment can succeed. | yes | sandbox (`Error::UncleanSession`: tier B's launch check found an earlier session's unclean-session marker whose stop or sweep didn't complete within 15 s, decision record 0049); retryable because a later launch checks again once the clean-up is done |
 | `agent.install_setup_failed` | The agent's files all downloaded and checked, but setting them up on this computer failed after three tries (unpacking, `npm ci`, the move into place or its receipt), often because security software held the fresh files. Trying again may work. | yes | agents (`FailureKind::SetupFailed` on `Failed`), desktop (0048) |
+| `agent.identity_checking` | Clauseo is confirming which account this agent's login belongs to; no agent was started. | yes | host (a launch while desktop confirms the login's account, decision record 0048 R17) |
+| `agent.identity_unknown` | Clauseo could not confirm which account this agent's login belongs to (its status check failed or gave no account); no agent was started. Trying again can succeed. | yes | host (a launch after desktop could not confirm the login's account, decision record 0048 R17) |
+| `signin.account_changed` | The agent's login now belongs to a different account than the one signed in through Clauseo, so its agents were stopped. Sign in again. | no | desktop (the login's account changed from the one signed in, decision record 0048 R17) |
+| `signin.unconfirmed` | Clauseo could not confirm the agent's plan login: its token refresh was refused, or twice wrote nothing. Sign in again. | no | desktop (Codex's refresh-on-check could not confirm the login, decision record 0048 R17) |
 | `unknown` | A code from a newer Clauseo that this version does not know. Never produced here. | no | decoding only |
 
 Judgement calls on retryable: `agent.launch_failed` and `agent.exited` are retryable because a new
@@ -148,6 +152,17 @@ the agent "couldn't be downloaded". A failure after every file is fetched and ch
 code, so the words can say the download worked. It is retryable, as `agent.install_failed` is: the
 antivirus that holds the fresh files lets go, and the next try's set-up may work. `agent.install_failed`
 keeps its meaning, now only for failures before the files are all fetched.
+
+R17's four identity codes (decision record 0048), judged on retryable: `agent.identity_unknown` is
+retryable above all. Its usual causes pass by themselves: a status run that failed or timed out, a
+network that was down, a status that named no account this once. Desktop checks again on its own
+timer, and the same launch then works, with nothing for the lawyer to do; marking it not retryable
+would send the lawyer to sign in again over a login that is fine. `agent.identity_checking` is
+retryable because the check it waits for takes seconds and the host already waits for it once.
+`signin.account_changed` is not: the login now belongs to another account, which no retry changes;
+only a new sign-in through Clauseo does. `signin.unconfirmed` is not either: it is the sign-in
+state's outcome once Codex refused the refresh or twice wrote nothing, a state that sticks until a
+sign-in or a forced read confirms the login, so a plain retry would only meet it again.
 
 ## Consequences
 

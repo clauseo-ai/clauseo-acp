@@ -12,12 +12,17 @@ use clauseo_protocol::AgentId;
 use super::{Ticket, Worker};
 use crate::cancel::Cancel;
 use crate::config::AgentsConfig;
+use crate::signin::account::ForcedRuns;
 use crate::signin::env::Vendor;
 use crate::signin::job::{self, SigninJob, Task};
 use crate::signin::{
     Found, Method, PasteCode, SigninCode, SigninError, SigninNote, SigninState, Source, vendor_of,
 };
 use crate::state::{AgentsEvent, Installed};
+
+mod account;
+
+pub(super) use self::account::{answer_of, read_order, reserve_read, start_account};
 
 /// Every agent's sign-in: what the handle, the worker and the sign-in jobs share.
 #[derive(Debug)]
@@ -32,6 +37,8 @@ pub(crate) struct SigninHub {
     /// replaced either finished (and undid) its link before that job's guard looks, or sees it
     /// was replaced and links nothing; and no link is made while a replaced login still runs.
     codex_files: futures::lock::Mutex<()>,
+    /// The Codex homes with a forced account read's app-server alive (`signin/account.rs`).
+    forced_runs: Arc<ForcedRuns>,
 }
 
 /// An agent the snapshot has and Clauseo signs in to.
@@ -49,6 +56,8 @@ struct Inner {
     /// Each agent's running job.
     jobs: BTreeMap<AgentId, Slot>,
     next_job: u64,
+    /// The cancels of the account reads that may still run (`account.rs`).
+    reads: Vec<std::sync::Weak<Cancel>>,
 }
 
 /// An agent's running job: its ticket, its task, where pasted codes go, and, for a task that
@@ -94,6 +103,7 @@ impl SigninHub {
             inner: Mutex::new(Inner::default()),
             events,
             codex_files: futures::lock::Mutex::new(()),
+            forced_runs: Arc::default(),
         }
     }
 
@@ -437,6 +447,7 @@ impl SigninHub {
         for slot in jobs.into_values() {
             slot.ticket.cancel.cancel();
         }
+        account::stop_reads(self);
     }
 }
 

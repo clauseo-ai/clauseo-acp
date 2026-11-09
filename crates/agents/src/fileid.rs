@@ -7,6 +7,7 @@
 
 use std::io;
 use std::path::Path;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Whether `a` and `b` are one file: the same device and inode on Unix, the same volume serial
 /// number and file index on Windows. False when either is a symbolic link, a junction or any
@@ -24,37 +25,105 @@ pub fn same_file(a: &Path, b: &Path) -> io::Result<bool> {
     let (Some(a), Some(b)) = (file_id(a)?, file_id(b)?) else {
         return Ok(false);
     };
-    Ok(a == b)
+    Ok(a.id == b.id)
 }
 
-/// The file's id: (device, inode). `None` for a symbolic link.
+/// A file's id, last write, last status change and size, read as [`same_file`] reads ids, from
+/// metadata alone (never the contents). R17's identity check caches its verdict on a login file
+/// by this, and checks again once it changes (another file under the name, or the same file
+/// written, even with its last write put back).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileStamp {
+    /// (device, inode) on Unix; (volume serial number, file index) on Windows.
+    id: (u64, u64),
+    /// The last write: seconds and nanoseconds since the epoch on Unix; 100 ns ticks since
+    /// 1601 on Windows.
+    modified: (i64, i64),
+    /// The last status change, in the same units as `modified`: ctime on Unix, which every
+    /// write moves whatever the last write says; `ChangeTime` on Windows.
+    changed: (i64, i64),
+    /// The length in bytes.
+    size: u64,
+}
+
+impl FileStamp {
+    /// The later of its last write and last status change, as a wall time (`None` outside
+    /// `SystemTime`'s range). R17's refresh-on-check confirms a login file only when this is no
+    /// later than its forced read's reply. On Unix the status change (ctime) cannot be set back;
+    /// Windows' `ChangeTime` can (`SetFileInformationByHandle`), a gap 0048 accepts.
+    pub fn last_change(&self) -> Option<SystemTime> {
+        wall(self.modified.max(self.changed))
+    }
+}
+
+/// A stamp's time as a wall time: seconds and nanoseconds since the epoch.
 #[cfg(unix)]
-fn file_id(path: &Path) -> io::Result<Option<(u64, u64)>> {
+fn wall((secs, nanos): (i64, i64)) -> Option<SystemTime> {
+    since_epoch(i128::from(secs) * 1_000_000_000 + i128::from(nanos))
+}
+
+/// A stamp's time as a wall time: 100 ns ticks since 1601.
+#[cfg(windows)]
+fn wall((ticks, _): (i64, i64)) -> Option<SystemTime> {
+    /// 1601 to 1970 in 100 ns ticks.
+    const TO_EPOCH: i128 = 116_444_736_000_000_000;
+    since_epoch((i128::from(ticks) - TO_EPOCH) * 100)
+}
+
+/// `nanos` nanoseconds after the epoch (before it when negative).
+fn since_epoch(nanos: i128) -> Option<SystemTime> {
+    let span = Duration::from_nanos(u64::try_from(nanos.unsigned_abs()).ok()?);
+    if nanos >= 0 {
+        UNIX_EPOCH.checked_add(span)
+    } else {
+        UNIX_EPOCH.checked_sub(span)
+    }
+}
+
+/// `path`'s [`FileStamp`], never following a link; `None` for a symbolic link, a junction or
+/// any other reparse point. Err when it cannot be read (a missing file included). It reads the
+/// id, last write, last status change and size from metadata, never the contents: no digest or
+/// hash of the bytes. Opens nothing on Unix; on Windows the same access-0 handle as
+/// [`same_file`].
+pub fn file_stamp(path: &Path) -> io::Result<Option<FileStamp>> {
+    file_id(path)
+}
+
+/// The file's [`FileStamp`]: id (device, inode), last write, last status change (ctime) and
+/// size. `None` for a symbolic link.
+#[cfg(unix)]
+fn file_id(path: &Path) -> io::Result<Option<FileStamp>> {
     use std::os::unix::fs::MetadataExt as _;
 
     let meta = std::fs::symlink_metadata(path)?;
     if meta.file_type().is_symlink() {
         return Ok(None);
     }
-    Ok(Some((meta.dev(), meta.ino())))
+    Ok(Some(FileStamp {
+        id: (meta.dev(), meta.ino()),
+        modified: (meta.mtime(), meta.mtime_nsec()),
+        changed: (meta.ctime(), meta.ctime_nsec()),
+        size: meta.len(),
+    }))
 }
 
-/// The file's id: (volume serial number, file index). `None` for a reparse point (a symbolic
-/// link, a junction, or any other).
+/// The file's [`FileStamp`]: id (volume serial number, file index), last write, `ChangeTime` and
+/// size. `None` for a reparse point (a symbolic link, a junction, or any other).
 #[cfg(windows)]
 #[expect(
     unsafe_code,
     reason = "CreateFileW and GetFileInformationByHandle are the OS's file-id calls; std has no stable one"
 )]
-fn file_id(path: &Path) -> io::Result<Option<(u64, u64)>> {
+fn file_id(path: &Path) -> io::Result<Option<FileStamp>> {
     use std::os::windows::ffi::OsStrExt as _;
     use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
 
     use windows::Win32::Foundation::HANDLE;
     use windows::Win32::Storage::FileSystem::{
-        BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_ATTRIBUTE_REPARSE_POINT,
+        BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_ATTRIBUTE_REPARSE_POINT, FILE_BASIC_INFO,
         FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE,
-        FILE_SHARE_READ, FILE_SHARE_WRITE, GetFileInformationByHandle, OPEN_EXISTING,
+        FILE_SHARE_READ, FILE_SHARE_WRITE, FileBasicInfo, GetFileInformationByHandle,
+        GetFileInformationByHandleEx, OPEN_EXISTING,
     };
     use windows::core::PCWSTR;
 
@@ -86,12 +155,37 @@ fn file_id(path: &Path) -> io::Result<Option<(u64, u64)>> {
     // BY_HANDLE_FILE_INFORMATION.
     unsafe { GetFileInformationByHandle(HANDLE(handle.as_raw_handle()), &raw mut info) }
         .map_err(io::Error::from)?;
+    // ChangeTime can itself be set through SetFileInformationByHandle (FileBasicInfo), so a
+    // write that restores all of its times can go unseen here. The size still catches a write
+    // that changes the length.
+    let mut basic = FILE_BASIC_INFO::default();
+    let basic_len =
+        u32::try_from(std::mem::size_of::<FILE_BASIC_INFO>()).map_err(io::Error::other)?;
+    // SAFETY: `handle` is open for the call's duration, and `basic` is a valid, writable
+    // FILE_BASIC_INFO of `basic_len` bytes, the size of the class FileBasicInfo returns.
+    unsafe {
+        GetFileInformationByHandleEx(
+            HANDLE(handle.as_raw_handle()),
+            FileBasicInfo,
+            (&raw mut basic).cast(),
+            basic_len,
+        )
+    }
+    .map_err(io::Error::from)?;
     drop(handle);
     if info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
         return Ok(None);
     }
     let index = (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow);
-    Ok(Some((u64::from(info.dwVolumeSerialNumber), index)))
+    let written = info.ftLastWriteTime;
+    let ticks = (u64::from(written.dwHighDateTime) << 32) | u64::from(written.dwLowDateTime);
+    let size = (u64::from(info.nFileSizeHigh) << 32) | u64::from(info.nFileSizeLow);
+    Ok(Some(FileStamp {
+        id: (u64::from(info.dwVolumeSerialNumber), index),
+        modified: (i64::try_from(ticks).unwrap_or(i64::MAX), 0),
+        changed: (basic.ChangeTime, 0),
+        size,
+    }))
 }
 
 #[cfg(test)]

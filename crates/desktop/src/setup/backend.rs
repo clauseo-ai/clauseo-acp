@@ -56,7 +56,7 @@ use self::count::Tally;
 use self::entry::log_published;
 pub(crate) use self::entry::{launch, progress};
 pub(crate) use self::parts::signin_error;
-use self::parts::{checked_endpoint, invalid, network_first, plan_method, retry};
+use self::parts::{checked_endpoint, invalid, network_first, plan_method, retry, signs_in};
 use self::pending::Press;
 pub(crate) use self::seam::SetupAgents;
 use self::write::write_entry;
@@ -168,9 +168,8 @@ impl AgentsBackend {
                     return Ok(());
                 }
                 if !pending::keep_press(self, &agent, Press::SignIn(method)) {
-                    agents
-                        .sign_in(&agent, method)
-                        .map_err(|error| signin_error(&error))?;
+                    let start = || agents.sign_in(&agent, method);
+                    signs_in(self, &agent, start)?;
                     tracing::info!(%agent, method = ?method, "sign-in started");
                     self.replaced(&agent);
                 }
@@ -197,9 +196,8 @@ impl AgentsBackend {
                 self.refuse_reused(&agent)?;
                 self.refuse_start(&agent)?;
                 if !pending::keep_press(self, &agent, Press::SignIn(Method::DeviceCode)) {
-                    agents
-                        .sign_in(&agent, Method::DeviceCode)
-                        .map_err(|error| signin_error(&error))?;
+                    let device = || agents.sign_in(&agent, Method::DeviceCode);
+                    signs_in(self, &agent, device)?;
                     tracing::info!(%agent, method = ?Method::DeviceCode, "sign-in started");
                     self.replaced(&agent);
                 }
@@ -222,9 +220,8 @@ impl AgentsBackend {
                 let _gate = lock(&self.signin_gate);
                 self.refuse_start(&agent)?;
                 if !pending::keep_press(self, &agent, Press::DifferentAccount) {
-                    agents
-                        .use_different_account(&agent)
-                        .map_err(|error| signin_error(&error))?;
+                    let different = || agents.use_different_account(&agent);
+                    signs_in(self, &agent, different)?;
                     self.replaced(&agent);
                 }
             }
@@ -434,11 +431,12 @@ impl AgentsBackend {
             )?),
             None => None,
         };
-        if let Err(error) = self.agents.use_found_login(agent) {
+        let used = || self.agents.use_found_login(agent);
+        if let Err(error) = signs_in(self, agent, used) {
             if let Some(token) = token {
                 drop(self.wiring.waiters.take(agent, token));
             }
-            return Err(signin_error(&error));
+            return Err(error);
         }
         self.replaced(agent);
         Ok(())

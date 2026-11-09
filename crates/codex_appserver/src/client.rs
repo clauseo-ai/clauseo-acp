@@ -70,6 +70,15 @@ impl Client {
             .await
     }
 
+    /// `account/read` with `refreshToken: true`: Codex refreshes the login's tokens with
+    /// `OpenAI` before it answers, in the same request (R17's identity check).
+    pub async fn account_refreshed(&self) -> Result<GetAccountResponse, Error> {
+        let params = GetAccountParams {
+            refresh_token: Some(true),
+        };
+        self.call(method::ACCOUNT_READ, &params).await
+    }
+
     /// `account/rateLimits/read` with `params`.
     pub async fn rate_limits(
         &self,

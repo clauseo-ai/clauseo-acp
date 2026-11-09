@@ -33,7 +33,7 @@ use clauseo_settings::{Effective, Plan, PlanProvider};
 use serde_json::{Map, Value};
 use zeroize::Zeroizing;
 
-use super::keys::KeySlot;
+use super::keys::{KeyCache, KeySlot};
 use super::network::{NetworkSlot, with_loopback};
 
 /// Each agent's firm plan, by agent id, as the settings last read gave it.
@@ -76,7 +76,8 @@ impl SetupHook {
 
     /// What this hook adds for `agent` of `kind` ([`setup_vars`]), as the host takes it.
     fn setup_env(&self, agent: &AgentId, kind: AgentKind) -> BTreeMap<OsString, OsString> {
-        let (vars, routed) = setup_parts(&self.keys, &self.plans, &self.network, agent, kind);
+        let keys = self.keys.get().map(Arc::as_ref);
+        let (vars, routed) = setup_parts(keys, &self.plans, &self.network, agent, kind);
         let vars = vars
             .iter()
             .map(|(name, value)| (OsString::from(name), OsString::from(value.as_str())));
@@ -99,7 +100,7 @@ pub(crate) fn setup_vars(
     agent: &AgentId,
     kind: AgentKind,
 ) -> BTreeMap<String, Zeroizing<String>> {
-    let (mut vars, routed) = setup_parts(keys, plans, network, agent, kind);
+    let (mut vars, routed) = setup_parts(keys.get().map(Arc::as_ref), plans, network, agent, kind);
     for (name, value) in routed {
         if let Ok(value) = value.into_string() {
             vars.insert(name, Zeroizing::new(value));
@@ -111,24 +112,17 @@ pub(crate) fn setup_vars(
 /// The plan's and the key's variables, and the network route's beside them.
 type SetupParts = (BTreeMap<String, Zeroizing<String>>, Vec<(String, OsString)>);
 
-/// [`setup_vars`]' parts: the plan's and the key's variables, and the network route's beside
-/// them (none a plan variable takes), whose CA path stays an `OsString`.
+/// [`setup_vars`]' parts over `keys` itself (none while they load): the plan's and the key's
+/// variables ([`setup_vars_with`]), and the network route's beside them (none a plan variable
+/// takes), whose CA path stays an `OsString`.
 fn setup_parts(
-    keys: &KeySlot,
+    keys: Option<&KeyCache>,
     plans: &Plans,
     network: &NetworkSlot,
     agent: &AgentId,
     kind: AgentKind,
 ) -> SetupParts {
-    let mut vars = BTreeMap::new();
-    let plan = plans
-        .read()
-        .unwrap_or_else(PoisonError::into_inner)
-        .get(agent)
-        .cloned();
-    if let Some(plan) = plan {
-        plan_env(kind, &plan, &mut vars);
-    }
+    let mut vars = setup_vars_with(keys, plans, agent, kind);
     let route = network.read().unwrap_or_else(PoisonError::into_inner);
     let planned = |name: &str| {
         vars.keys()
@@ -145,11 +139,51 @@ fn setup_parts(
             }
         }
     }
-    let key = keys.get().and_then(|keys| keys.get(agent));
+    (vars, routed)
+}
+
+/// The plan's and the key's variables of [`setup_vars`], without the network route's, over
+/// `keys` itself (none while they load): the identity check's exemption reads the launch env
+/// through this (`setup/identity/check.rs`); no route variable replaces the login.
+pub(crate) fn setup_vars_with(
+    keys: Option<&KeyCache>,
+    plans: &Plans,
+    agent: &AgentId,
+    kind: AgentKind,
+) -> BTreeMap<String, Zeroizing<String>> {
+    let mut vars = BTreeMap::new();
+    let plan = plans
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(agent)
+        .cloned();
+    if let Some(plan) = plan {
+        plan_env(kind, &plan, &mut vars);
+    }
+    let key = keys.and_then(|keys| keys.get(agent));
     if let Some(key) = key.filter(|key| !key.is_empty()) {
         vars.insert(key_var(kind).to_owned(), key);
     }
-    (vars, routed)
+    vars
+}
+
+/// The provider switches that send Claude to a cloud provider's own credentials (AWS, Google
+/// Cloud, Azure), never to the OAuth login in Claude's store.
+const PROVIDER_VARS: [&str; 3] = [
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_FOUNDRY",
+];
+
+/// Whether the launch env `vars` ([`setup_vars`]) carries a credential that replaces the shared
+/// login for `kind` (R17, the security review's H3): the API key variable the hook sets, or,
+/// for Claude, a provider switch, which reads no OAuth file. An endpoint alone
+/// (`ANTHROPIC_BASE_URL`, or a Codex endpoint, which adds no variable) still launches on the
+/// shared login, so it is not one.
+pub(crate) fn replaces_login(kind: AgentKind, vars: &BTreeMap<String, Zeroizing<String>>) -> bool {
+    let set = |name: &str| vars.get(name).is_some_and(|value| !value.is_empty());
+    let provider = kind == AgentKind::Claude && PROVIDER_VARS.iter().any(|name| set(name));
+    set(key_var(kind)) || provider
 }
 
 /// The variable `kind`'s key goes in.

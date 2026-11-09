@@ -377,7 +377,7 @@ fn a_late_prep_frees_its_claims() {
         },
     );
     let root = run.root.clone();
-    super::undo_late(super::Prepared {
+    super::undo_late(super::Found::Prepared(Box::new(super::Prepared {
         stored: data.clone(),
         codex: None,
         claude_home: None,
@@ -385,7 +385,7 @@ fn a_late_prep_frees_its_claims() {
         run,
         skills_written: None,
         packs_skipped: Vec::new(),
-    });
+    })));
     assert!(alive.upgrade().is_none(), "its claims were freed");
     assert_eq!(held.count(), 0, "nothing is held");
     assert!(!root.exists(), "its run folder is gone");

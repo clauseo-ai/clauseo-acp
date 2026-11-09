@@ -23,6 +23,13 @@ pub(crate) enum TurnInput {
         id: u64,
         result: Result<Box<super::launch_checks::Prepared>, crate::error::Error>,
     },
+    /// Desktop's launch gate refused the launch whose checks are `id` with `code`
+    /// (`launch_checks/gate.rs`).
+    Gated {
+        thread: ThreadId,
+        id: u64,
+        code: clauseo_protocol::ErrorCode,
+    },
     /// A whole-log read of `thread`'s stream for `why`.
     Log {
         thread: ThreadId,

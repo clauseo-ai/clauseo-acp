@@ -34,6 +34,10 @@
 //! that did not read, or a read past the bound of an agent the "key stored" marker marks) on
 //! the thread that then follows the settings and the keys' notes, so they never cross; a
 //! policy refusal stays until the settings lift it.
+//!
+//! R17's identity check (`setup/identity.rs`) reads its record from the data folder before
+//! `Agents` start, and its follower (the login files' stats and the checks launches ask for)
+//! runs on the `clauseo-setup-host` thread with the others.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -44,8 +48,9 @@ use clauseo_agents::keys::Keychain;
 use clauseo_agents::{Agents, AgentsConfig, Clock, Found, Platform, Snapshot, SystemClock};
 use clauseo_process::{AsyncIoTimer, Launcher, PassthroughLauncher, SpawnOptions};
 use clauseo_protocol::{AgentId, CommandOutcome, ErrorCode, HostError, SetupCommand, SetupEvent};
-use clauseo_settings::{Effective, Locations};
+use clauseo_settings::{Effective, Locations, SystemFiles};
 use futures::StreamExt as _;
+use futures::channel::mpsc::UnboundedReceiver;
 use futures::channel::oneshot;
 use futures::future::{FutureExt as _, Shared, join};
 
@@ -54,7 +59,10 @@ use super::compose::Compose;
 use super::confirm::SetupConfirm;
 use super::hook::Plans;
 use super::host_calls::SetupHost;
-use super::keys::{FirstLoad, KEYS_LOAD_BOUND, KeyCache, KeyMarker, KeyNotes, KeySlot, KeysLoaded};
+use super::identity::{GateSlot, Identities};
+use super::keys::{
+    FirstLoad, KEYS_LOAD_BOUND, KeyCache, KeyMarker, KeyNote, KeyNotes, KeySlot, KeysLoaded,
+};
 use super::login_check::ReusedLogins;
 use super::network::FIRST_ROUTE_WAIT;
 use super::network::{
@@ -246,12 +254,9 @@ impl SetupStart {
                 (entry.id.clone(), info)
             })
             .collect();
-        let managed = known
-            .keys()
-            .filter(|agent| effective.is_locked(&format!("agents.{agent}")) || e2e_managed(agent))
-            .cloned()
-            .collect();
         let settings = SettingsRead::read(effective, known.keys());
+        // The firm-managed agents, as setup reads them (`SettingsRead::managed`).
+        let managed = settings.managed.clone();
         Self {
             data_dir: effective.data_dir().to_path_buf(),
             known,
@@ -308,6 +313,8 @@ pub(crate) struct HostSide {
     pub(crate) reread: Box<dyn Fn() -> Effective + Send>,
     /// The keys' notes; the host was given its retry hook.
     pub(crate) notes: Arc<KeyNotes>,
+    /// Where the backend goes once up, for the host's launch gate (R17, `identity/gate.rs`).
+    pub(crate) gate: GateSlot,
 }
 
 /// Starts the `clauseo-setup` thread: keys, `Agents`, the first states, the cell, the pump.
@@ -352,6 +359,12 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     // The settings' and the environment's route; the OS's follows from the network thread.
     let at_start = read.network_at_start().agents_network();
+    let identity = Identities::load(
+        &read.data_dir,
+        Arc::new(SystemFiles),
+        parts.home.clone(),
+        read.known.keys(),
+    );
     let mut config = AgentsConfig::new(read.data_dir, platform);
     config.signin.homes = read
         .known
@@ -367,6 +380,7 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
     // Each install try asks for a fresh route first (one past 60 s is resolved again).
     config.install.refresh = Some(Arc::new(network.refresher()));
     config.clock = Arc::clone(&clock);
+    let gate = Arc::clone(&side.gate);
     // The quit may close the cell first: then `Agents` never starts (`BackendStart::start_with`).
     let started = parts.start.start_with(|| {
         let (install, signin) = launchers(parts.home, |options| {
@@ -397,7 +411,8 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
             read.settings,
             refused_at_start,
         )
-        .with_network(network);
+        .with_network(network)
+        .with_identity(identity);
         let backend = Arc::new(AgentsBackend {
             agents,
             keys: Arc::clone(&keys),
@@ -429,29 +444,49 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
         backend.compose.show_key(agent, &keys);
     }
     load_done.finish();
-    let follower = Arc::clone(&backend);
-    let reread = side.reread;
-    let notes = side.notes.take();
+    // Set once, here: the host's launch gate checks from now on.
+    let _set = gate.set(Arc::clone(&backend));
+    follow_host(&backend, side.reread, side.notes.take());
+    futures::executor::block_on(backend.pump(source));
+}
+
+/// The `clauseo-setup-host` thread: the start's lift, then the follows of the settings, the keys'
+/// notes, the identity asks, the splits and the leaves, started again after a panic. With no
+/// thread, the lift runs here and nothing is followed.
+fn follow_host(
+    backend: &Arc<AgentsBackend>,
+    reread: Box<dyn Fn() -> Effective + Send>,
+    mut notes: Option<UnboundedReceiver<KeyNote>>,
+) {
+    let follower = Arc::clone(backend);
+    let mut asks = backend.wiring.identity.take_asks();
     let host_thread = std::thread::Builder::new()
         .name("clauseo-setup-host".to_owned())
         .spawn(move || {
             futures::executor::block_on(lift_at_start(&follower, FIRST_ROUTE_WAIT));
-            let settings = follow_settings(&follower, &*reread);
-            let leaves = super::leave::follow_auto_leaves(&follower);
-            let keys = async {
-                if let Some(notes) = notes {
-                    follow_keys(&follower, notes).await;
-                }
-            };
-            let splits = join(follow_splits(&follower), follow_sign_in_holds(&follower));
-            let follows = join(join(settings, keys), join(splits, leaves));
-            futures::executor::block_on(follows);
+            // Started again after a panic, the identity check failing closed first.
+            super::supervise::supervise(&follower, || {
+                let settings = follow_settings(&follower, &*reread);
+                let leaves = super::leave::follow_auto_leaves(&follower);
+                let keys = async {
+                    if let Some(notes) = notes.as_mut() {
+                        follow_keys(&follower, notes).await;
+                    }
+                };
+                let identity = async {
+                    if let Some(asks) = asks.as_mut() {
+                        super::identity::follow_identity(&follower, asks).await;
+                    }
+                };
+                let splits = join(follow_splits(&follower), follow_sign_in_holds(&follower));
+                let follows = join(join(settings, keys), join(join(splits, leaves), identity));
+                futures::executor::block_on(follows);
+            });
         });
     if let Err(err) = host_thread {
         tracing::warn!(%err, "no thread follows the host: settings and splits are not followed");
-        futures::executor::block_on(lift_at_start(&backend, FIRST_ROUTE_WAIT));
+        futures::executor::block_on(lift_at_start(backend, FIRST_ROUTE_WAIT));
     }
-    futures::executor::block_on(backend.pump(source));
 }
 
 /// Waits for the keys' first load, at most [`KEYS_LOAD_BOUND`], and logs how long it took and

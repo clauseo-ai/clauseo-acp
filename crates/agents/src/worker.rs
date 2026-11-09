@@ -24,15 +24,17 @@ use std::time::Duration;
 
 use clauseo_process::{Launcher, Timer};
 use clauseo_protocol::AgentId;
+use futures::channel::oneshot;
 
 use crate::cancel::Cancel;
 use crate::config::{AgentsConfig, Network};
-use crate::install::{self, Job};
-use crate::log::{InstallLog, redact};
+use crate::install;
+use crate::signin::account::{AccountFuture, AccountRead, ReadOrder};
 use crate::signin::{Found, Method, PasteCode, SigninError, SigninState};
-use crate::state::{AgentsEvent, Failure, FailureKind, InstallState, Installed};
+use crate::state::{AgentsEvent, InstallState, Installed};
 use crate::{node, receipt, sysproxy};
 
+mod install_job;
 mod shared;
 mod signin;
 
@@ -56,6 +58,8 @@ enum Command {
     SetNetwork(Box<Network>),
     /// Start a reserved sign-in, sign-out or status job.
     Signin(Box<SigninStart>),
+    /// Start an account read, answering on its sender.
+    Account(Box<SigninStart>, ReadOrder, oneshot::Sender<AccountRead>),
 }
 
 /// What the handle, the worker and the jobs share.
@@ -214,6 +218,8 @@ impl Agents {
     /// test can see what a queued sign-in does when an install finishes.
     #[cfg(feature = "test-support")]
     pub fn finish_install_for_tests(&self, agent: &AgentId, installed: Option<Installed>) {
+        use crate::log::InstallLog;
+        use crate::state::{Failure, FailureKind};
         let state = match &installed {
             Some(installed) => InstallState::Ready {
                 version: installed.version.clone(),
@@ -351,6 +357,30 @@ impl Agents {
         self.shared.signin.going(agent)
     }
 
+    /// R17's identity check: the account `agent`'s login names now, from one status run under
+    /// the environment its sessions see (`signin/account.rs`), hashed, beside any sign-in job,
+    /// changing no state. `Failed` when it could not tell or start (an unknown agent, no home or
+    /// install, the handle shut down). Dropping the future first lets the read go (see below).
+    pub fn read_account(&self, agent: &AgentId) -> AccountFuture {
+        self.start_read(agent, false)
+    }
+
+    /// [`Agents::read_account`] with Codex's `account/read` sending `refreshToken: true` (the
+    /// same request), so Codex refreshes the login with `OpenAI` first. For Claude it is that.
+    /// Dropped before its answer, its app-server gets its stdin closed, and is not killed.
+    pub fn read_account_refreshed(&self, agent: &AgentId) -> AccountFuture {
+        self.start_read(agent, true)
+    }
+
+    fn start_read(&self, agent: &AgentId, refresh: bool) -> AccountFuture {
+        let (reply, answer) = oneshot::channel();
+        let (order, let_go) = signin::read_order(&self.shared.signin, refresh);
+        if let Ok(start) = signin::reserve_read(&self.shared.signin, agent, self.installed(agent)) {
+            self.send(Command::Account(Box::new(start), order, reply));
+        }
+        signin::answer_of(answer, let_go)
+    }
+
     /// `agent`'s last sign-in state, or `None` before any.
     pub fn signin_state(&self, agent: &AgentId) -> Option<SigninState> {
         self.shared.signin.state(agent)
@@ -407,6 +437,9 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
                 Command::Retry(agent, use_system_proxy) => self.retry(&agent, use_system_proxy),
                 Command::SetNetwork(network) => self.set_network(*network),
                 Command::Signin(start) => signin::start_job(&self, *start),
+                Command::Account(start, order, reply) => {
+                    signin::start_account(&self, *start, order, reply);
+                }
             }
         }
     }
@@ -497,7 +530,7 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
                 return;
             }
         }
-        self.start_job(agent);
+        install_job::start(self, agent);
     }
 
     fn pause(&self, agent: &AgentId) {
@@ -535,59 +568,6 @@ impl<T: Timer + Send + Sync + 'static> Worker<T> {
             self.system_proxy =
                 futures::executor::block_on(sysproxy::system_proxy(&*self.launcher, &*self.timer));
         }
-        self.start_job(agent);
-    }
-
-    /// Stops the running job (pausing another agent's), then starts `agent`'s on its own
-    /// thread; that thread waits for the job lock before it works.
-    fn start_job(&self, agent: &AgentId) {
-        let ticket = {
-            let mut inner = self.shared.lock();
-            if inner.closed {
-                return;
-            }
-            inner.stop_current(&self.shared.events, Some(agent));
-            inner.next_job += 1;
-            let ticket = Ticket {
-                job: inner.next_job,
-                agent: agent.clone(),
-                cancel: Arc::new(Cancel::new()),
-            };
-            inner.current = Some(ticket.clone());
-            ticket
-        };
-        let job = Job {
-            ticket: ticket.clone(),
-            config: self.config.clone(),
-            network: Arc::clone(&self.network),
-            launcher: Arc::clone(&self.launcher),
-            timer: Arc::clone(&self.timer),
-            shared: Arc::clone(&self.shared),
-            turn: Arc::clone(&self.job_lock),
-            system_proxy: self.system_proxy.clone(),
-            data_lock: Mutex::new(None),
-        };
-        let spawned = self
-            .shared
-            .spawn_job(format!("clauseo-install-{agent}"), move || {
-                install::run(&job);
-            });
-        if let Err(err) = spawned {
-            let mut log = InstallLog::new(agent);
-            let detail = format!("the install could not start: {err}");
-            log.push(redact(&detail, &self.config.data_dir));
-            log.push(format!(
-                "result: {} after 0 tries",
-                FailureKind::Failed.word()
-            ));
-            let failure = Failure {
-                kind: FailureKind::Failed,
-                need_mb: None,
-                free_mb: None,
-                log,
-            };
-            self.shared
-                .emit_job(&ticket, InstallState::Failed(failure), None, true);
-        }
+        install_job::start(self, agent);
     }
 }

@@ -6,7 +6,10 @@ use std::path::Path;
 
 use serde_json::{Value, json};
 
-use super::{API_KEY_METHOD, EMAIL, NO_ACCOUNT_METHOD, NO_EMAIL_METHOD, marker_method, say};
+use super::{
+    ACCOUNT_READ_LOG, API_KEY_METHOD, Marker, NO_ACCOUNT_METHOD, NO_EMAIL_METHOD,
+    REFRESH_REFUSED_METHOD, REFRESH_SILENT_METHOD, marker, marker_path, say, write,
+};
 use crate::EXIT_OK;
 
 /// [`super::Mode::CodexAdapter`]: each JSON-RPC request on stdin gets an error, -32602 for
@@ -34,34 +37,97 @@ pub(super) fn adapter() -> io::Result<i32> {
     Ok(EXIT_OK)
 }
 
+/// The marker `authMethod` for which a forced refresh never gets its answer while stdin stays
+/// open (a stalled network); once stdin ends, the app-server writes [`DRAINED_LOG`] and exits
+/// 0, as Codex drains a started request and exits.
+const REFRESH_HANG_METHOD: &str = "refresh-hang";
+/// The file in Codex's home [`REFRESH_HANG_METHOD`]'s app-server writes as it exits on stdin's
+/// end, so a test can tell it ended on its own from a kill.
+const DRAINED_LOG: &str = "fake-app-server-drained";
+
 /// `app-server`: answers each JSON-RPC line on stdin with one line on stdout, until stdin closes.
 pub(super) fn app_server(folder: &Path) -> io::Result<i32> {
+    let mut hung = false;
     for line in io::stdin().lock().lines() {
         let line = line?;
         if line.trim().is_empty() {
             continue;
         }
-        if let Some(reply) = reply(&line, folder) {
-            say(&reply)?;
+        match reply(&line, folder) {
+            Reply::Line(reply) => say(&reply)?,
+            Reply::Nothing => {}
+            Reply::Hang => hung = true,
+            // Closes before answering: the client reads no answer.
+            Reply::Close => return Ok(EXIT_OK),
         }
+    }
+    if hung {
+        drop(write::write(folder.join(DRAINED_LOG), b"stdin ended\n"));
     }
     Ok(EXIT_OK)
 }
 
-/// The reply to one client line, as JSON text, or `None` for a notification (a message with no
-/// `id`). `initialize` and `account/read` answer as Codex's schema says; any other method is an
-/// error.
-fn reply(line: &str, folder: &Path) -> Option<String> {
+/// What the app-server does with one line.
+enum Reply {
+    /// Answers this JSON text.
+    Line(String),
+    /// Answers nothing (a notification).
+    Nothing,
+    /// Closes without answering ([`REFRESH_SILENT_METHOD`]'s forced refresh).
+    Close,
+    /// Answers nothing and waits for stdin's end ([`REFRESH_HANG_METHOD`]'s forced refresh).
+    Hang,
+}
+
+/// `account/read` with `params`: they are appended to [`ACCOUNT_READ_LOG`]; with
+/// `refreshToken: true`, the marker's [`REFRESH_REFUSED_METHOD`] refuses it and
+/// [`REFRESH_SILENT_METHOD`] closes, else the marker file is rewritten in place (same file,
+/// same content, a new last write), as Codex's refresh rewrites `auth.json`, then the read
+/// answers as without it.
+fn account_read_reply(id: &Value, params: &Value, folder: &Path) -> Reply {
+    let mut log = params.to_string();
+    log.push('\n');
+    drop(write::append(folder.join(ACCOUNT_READ_LOG), &log));
+    if params["refreshToken"] == Value::Bool(true) {
+        let method = marker(folder).map(|marker| marker.method);
+        if method.as_deref() == Some(REFRESH_SILENT_METHOD) {
+            return Reply::Close;
+        }
+        if method.as_deref() == Some(REFRESH_HANG_METHOD) {
+            return Reply::Hang;
+        }
+        if method.as_deref() == Some(REFRESH_REFUSED_METHOD) {
+            return Reply::Line(
+                json!({"jsonrpc": "2.0", "id": id, "error": {
+                    "code": -32603, "message": "refresh_token_reused",
+                }})
+                .to_string(),
+            );
+        }
+        if let Some(path) = marker_path(folder) {
+            let text = std::fs::read(&path).unwrap_or_default();
+            drop(write::write_in_place(&path, &text));
+        }
+    }
+    Reply::Line(json!({"jsonrpc": "2.0", "id": id, "result": account_read(folder)}).to_string())
+}
+
+/// The reply to one client line: JSON text, nothing for a notification (a message with no
+/// `id`), or a close. `initialize` and `account/read` answer as Codex's schema says; any other
+/// method is an error.
+fn reply(line: &str, folder: &Path) -> Reply {
     let request: Value = match serde_json::from_str(line) {
         Ok(request) => request,
         Err(error) => {
-            return Some(
+            return Reply::Line(
                 json!({"jsonrpc": "2.0", "id": null, "error": {"code": -32700, "message": format!("parse error: {error}")}})
                     .to_string(),
             );
         }
     };
-    let id = request.get("id")?.clone();
+    let Some(id) = request.get("id").cloned() else {
+        return Reply::Nothing;
+    };
     let method = request["method"].as_str().unwrap_or_default();
     let reply = match method {
         "initialize" => json!({"jsonrpc": "2.0", "id": id, "result": {
@@ -70,33 +136,35 @@ fn reply(line: &str, folder: &Path) -> Option<String> {
             "platformOs": std::env::consts::OS,
             "userAgent": "fake_agent codex-cli",
         }}),
-        "account/read" => json!({"jsonrpc": "2.0", "id": id, "result": account_read(folder)}),
+        "account/read" => return account_read_reply(&id, &request["params"], folder),
         _ => json!({"jsonrpc": "2.0", "id": id, "error": {
             "code": -32601, "message": format!("method not found: {method}"),
         }}),
     };
-    Some(reply.to_string())
+    Reply::Line(reply.to_string())
 }
 
 /// `account/read`'s result. With the marker in `folder`, the `ChatGPT` account
-/// `test@example.com` on `plus`; when the marker's `authMethod` is `apikey`, an API-key
+/// named by the marker's email (`test@example.com` unless a test planted another, as R17's swap
+/// tests do) on `plus`; when the marker's `authMethod` is `apikey`, an API-key
 /// account, which names no email; when it is `chatgpt-no-email`, a `ChatGPT` account whose email
 /// is `null`. Without it, or when the marker's `authMethod` is `no-account` (`login status` then
 /// still says signed in), the signed-out reply: `account` null and `requiresOpenaiAuth` true.
 fn account_read(folder: &Path) -> Value {
-    let method = marker_method(folder);
-    if method.as_deref() == Some(NO_ACCOUNT_METHOD) {
+    let marker = marker(folder);
+    let method = marker.as_ref().map(|marker| marker.method.as_str());
+    if method == Some(NO_ACCOUNT_METHOD) {
         json!({"account": null, "requiresOpenaiAuth": true})
-    } else if method.as_deref() == Some(API_KEY_METHOD) {
+    } else if method == Some(API_KEY_METHOD) {
         json!({"account": {"type": "apiKey"}, "requiresOpenaiAuth": true})
-    } else if method.as_deref() == Some(NO_EMAIL_METHOD) {
+    } else if method == Some(NO_EMAIL_METHOD) {
         json!({
             "account": {"type": "chatgpt", "email": null, "planType": "plus"},
             "requiresOpenaiAuth": false,
         })
-    } else if method.is_some() {
+    } else if let Some(Marker { email, .. }) = &marker {
         json!({
-            "account": {"type": "chatgpt", "email": EMAIL, "planType": "plus"},
+            "account": {"type": "chatgpt", "email": email, "planType": "plus"},
             "requiresOpenaiAuth": false,
         })
     } else {

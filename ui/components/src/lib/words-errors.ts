@@ -88,6 +88,10 @@ export type ErrorCode =
   | "blocklist.allow_not_saved"
   | "blocklist.revoke_not_saved"
   | "sandbox.cleaning_up"
+  | "agent.identity_checking"
+  | "agent.identity_unknown"
+  | "signin.account_changed"
+  | "signin.unconfirmed"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -215,6 +219,13 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   // session's clean-up is still running (decision record 0049); retryable
   "sandbox.cleaning_up":
     "Clauseo is still tidying up the Safe workspace after it last closed. Try again in a moment. Your question is kept.",
+  "agent.identity_checking":
+    "Clauseo is still checking which account your sign-in belongs to. Try again in a moment.",
+  "agent.identity_unknown":
+    "Clauseo couldn't confirm which account your sign-in belongs to. Try again.",
+  "signin.account_changed":
+    "Your sign-in now belongs to a different account from the one you chose in Clauseo. Clauseo stopped, so that work on your matters doesn't go to the wrong account. Sign in again. Your questions are kept and run once you do.",
+  "signin.unconfirmed": "Clauseo couldn't confirm your Codex sign-in. Sign in again to carry on.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };

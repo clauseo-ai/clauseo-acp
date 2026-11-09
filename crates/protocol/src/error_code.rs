@@ -269,6 +269,17 @@ error_codes! {
         agent's files all downloaded and checked, but setting them up on this computer failed \
         after three tries (unpacking, `npm ci`, the move into place or its receipt), often \
         because security software held the fresh files. Trying again may work.";
+    AgentIdentityChecking = "agent.identity_checking", retryable: true, meaning: "Clauseo is \
+        confirming which account this agent's login belongs to; no agent was started.";
+    AgentIdentityUnknown = "agent.identity_unknown", retryable: true, meaning: "Clauseo could \
+        not confirm which account this agent's login belongs to (its status check failed or \
+        gave no account); no agent was started. Trying again can succeed.";
+    SigninAccountChanged = "signin.account_changed", retryable: false, meaning: "The agent's \
+        login now belongs to a different account than the one signed in through Clauseo, so \
+        its agents were stopped. Sign in again.";
+    SigninUnconfirmed = "signin.unconfirmed", retryable: false, meaning: "Clauseo could not \
+        confirm the agent's plan login: its token refresh was refused, or twice wrote nothing. \
+        Sign in again.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

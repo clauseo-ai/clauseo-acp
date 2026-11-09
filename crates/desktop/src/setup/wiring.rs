@@ -5,10 +5,11 @@
 //! route is resolved.
 
 use clauseo_protocol::{AgentId, ErrorCode};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
 use super::hook::Plans;
+use super::identity::Identities;
 use clauseo_process::AsyncIoTimer;
 
 use super::leave::{LeaveTimer, Leaves, Waiters};
@@ -32,11 +33,16 @@ pub(crate) struct Wiring {
     /// The code the host was last told to refuse each agent's new launches with; an agent not
     /// here may launch (`setup/refusal.rs`).
     pub(crate) refused: Mutex<BTreeMap<AgentId, ErrorCode>>,
+    /// The agents whose refusal the host could not be told (two calls failed): told again at
+    /// the identity follower's next look, until a call succeeds (`setup/refusal.rs`).
+    pub(crate) unsynced: Mutex<BTreeSet<AgentId>>,
     /// Held across each change of a refusal, so the host's and [`Self::refused`] keep step.
     pub(crate) refusal_gate: futures::lock::Mutex<()>,
     /// Where each settings read's network facts go (`setup/network.rs`): none until the setup
     /// thread sets it.
     pub(crate) network: NetworkFollow,
+    /// Each agent's login's account and its check (R17, `setup/identity.rs`).
+    pub(crate) identity: Identities,
 }
 
 impl Wiring {
@@ -58,9 +64,11 @@ impl Wiring {
             timer: Arc::new(AsyncIoTimer),
             plans,
             refused: Mutex::new(refused.into_iter().collect()),
+            unsynced: Mutex::default(),
             refusal_gate: futures::lock::Mutex::new(()),
             applied: Mutex::new(start),
             network: NetworkFollow::default(),
+            identity: Identities::in_memory(),
         }
     }
 
@@ -68,6 +76,12 @@ impl Wiring {
     #[must_use]
     pub(crate) fn with_network(mut self, network: NetworkFollow) -> Self {
         self.network = network;
+        self
+    }
+
+    /// The identity check over `identity` (its record read from the data folder).
+    pub(crate) fn with_identity(mut self, identity: Identities) -> Self {
+        self.identity = identity;
         self
     }
 

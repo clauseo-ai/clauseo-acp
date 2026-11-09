@@ -323,6 +323,11 @@ pub enum SignIn {
         code: ErrorCode,
         /// When.
         at: Timestamp,
+        /// The agent's login is the lawyer's own, reused (with `signin.account_changed` and
+        /// `signin.unconfirmed`): Clauseo starts no sign-in over it, so the way out is
+        /// `UseDifferentAccount`. Absent, and false, otherwise.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reused: bool,
     },
     /// Clauseo is leaving a login it may no longer use (a split Codex link, or a reused login
     /// the agent's own CLI ended) and the leave did not finish: it tries again by itself, and

@@ -24,6 +24,7 @@ mod inputs;
 mod key_retry;
 mod known;
 mod launch_checks;
+mod loaded;
 mod logout;
 mod out;
 mod profile_loads;
@@ -70,6 +71,7 @@ pub(crate) use idle::{on_due as idle_due, relay_call as idle_relay_call, tick as
 pub(crate) use inputs::{AgentReply, LogFor, TurnInput};
 pub(crate) use launch_checks::HeldRuns;
 pub use launch_checks::PackRequest;
+pub(crate) use loaded::{keeps_loaded, keeps_matter_loaded, running_turn, turn_running};
 pub(crate) use out::flush_text;
 pub(crate) use queue::{any_active, any_running, cancel_all, queue_hold, release, sync_all_held};
 pub(crate) use restore::{
@@ -371,6 +373,9 @@ pub(crate) fn turn_input(actor: &mut Actor, input: TurnInput) {
         TurnInput::Prepared { thread, id, result } => {
             launch_checks::on_prepared(actor, thread, id, result);
         }
+        TurnInput::Gated { thread, id, code } => {
+            launch_checks::gate::on_gated(actor, thread, id, code);
+        }
         TurnInput::RunRemoved { key, freed } => launch_checks::on_run_removed(actor, key, freed),
         TurnInput::CameBack(check) => came_back::on_due(actor, check),
         TurnInput::Log {
@@ -519,46 +524,6 @@ pub(crate) fn shutdown(actor: &mut Actor) {
     came_back::shutdown(actor);
     cancel::shutdown(actor);
     super::limits::decide_stops_now(actor);
-}
-
-/// Whether `thread` has a current turn, a last turn whose end is not durable yet, or queued
-/// turns (`thread.turn_running` for `ArchiveThread`).
-pub(crate) fn turn_running(actor: &Actor, thread: ThreadId) -> bool {
-    actor.threads.get(&thread).is_some_and(|entry| {
-        let state = &entry.turn;
-        state.current.is_some() || state.closing.is_some() || !state.queue.is_empty()
-    })
-}
-
-/// The turn running on `thread` now, if any (`blocked.rs` attributes a blocked site to it).
-pub(crate) fn running_turn(actor: &Actor, thread: ThreadId) -> Option<TurnId> {
-    let current = actor.threads.get(&thread)?.turn.current.as_deref()?;
-    Some(current.turn)
-}
-
-/// Whether `thread`'s stream stays loaded: an agent, open turn, repair, retriable end, limit stop.
-pub(crate) fn keeps_loaded(actor: &Actor, thread: ThreadId) -> bool {
-    actor.threads.get(&thread).is_some_and(|entry| {
-        let state = &entry.turn;
-        state.agent.is_some()
-            || state.preparing.is_some()
-            || state.current.is_some()
-            || state.reconciling
-            || state
-                .closing
-                .as_ref()
-                .is_some_and(|closing| !closing.retried)
-    }) || super::limits::holds_stop(actor, thread)
-}
-
-/// Whether `matter`'s stream, once loaded to check a reused checkpoint, stays loaded: while a
-/// turn, an undo or a restore holds its writer, so the turn's next checkpoint reads it without
-/// a reload.
-pub(crate) fn keeps_matter_loaded(actor: &Actor, matter: MatterId) -> bool {
-    actor
-        .matters
-        .get(&matter)
-        .is_some_and(|entry| entry.turns.holder.is_some())
 }
 
 /// Whether the host is shutting down.

@@ -45,6 +45,11 @@ pub(crate) struct SettingsRead {
     pub(crate) plans: BTreeMap<AgentId, Plan>,
     /// What the network route is resolved from (`setup/network.rs`).
     pub(crate) network: NetworkFacts,
+    /// The firm-managed agents: a policy locks `agents.<id>` (or the e2e build's
+    /// `E2E_AGENTS_MANAGED` names it). There is no Clauseo install, so no status read can run:
+    /// R17's identity check does not apply to them (a documented gap: they still launch on
+    /// Clauseo's login home). The lawyer's own `agents.<id>` never counts.
+    pub(crate) managed: BTreeSet<AgentId>,
 }
 
 impl SettingsRead {
@@ -69,6 +74,14 @@ impl SettingsRead {
             .cloned()
             .collect();
         let network = NetworkFacts::read(effective, known.clone());
+        let managed = known
+            .clone()
+            .into_iter()
+            .filter(|agent| {
+                effective.is_locked(&format!("agents.{agent}")) || super::start::e2e_managed(agent)
+            })
+            .cloned()
+            .collect();
         let blocked = firm_policy(effective, &SystemFiles, known);
         Self {
             firm,
@@ -76,6 +89,7 @@ impl SettingsRead {
             blocked,
             plans: plans_of(effective),
             network,
+            managed,
         }
     }
 }
@@ -108,6 +122,10 @@ pub(crate) async fn apply_settings(backend: &AgentsBackend, read: SettingsRead) 
         if now(&before.firm_policy) != now(&read.firm_policy) {
             backend.set_firm_policy(agent, now(&read.firm_policy));
         }
+    }
+    // A plan's provider in or out changes the launch env's exemption (R17), before any restart.
+    for agent in backend.known.keys() {
+        super::identity::exemption_changed(backend, agent).await;
     }
     super::refusal::sync_all(backend).await;
     for agent in arrived {

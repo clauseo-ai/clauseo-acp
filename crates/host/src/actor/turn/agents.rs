@@ -4,13 +4,11 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::rc::Rc;
-use std::sync::Arc;
 
 use clauseo_acp::{AcpEvent, AgentInfo, MessageRole, PendingKey};
 use clauseo_protocol::{
-    AgentChoiceId, AgentKind, AgentSessionId, CompactString, ConfigValue, ElicitationId, ErrorCode,
-    MessageId, PermissionRequestId, ThreadId, TurnId,
+    AgentChoiceId, AgentSessionId, CompactString, ConfigValue, ElicitationId, ErrorCode, MessageId,
+    PermissionRequestId, ThreadId, TurnId,
 };
 
 use clauseo_process::TreeWatch;
@@ -30,9 +28,11 @@ use crate::rate::{RateCap, RatedUpdate};
 use crate::sent::SentView;
 
 mod ended;
+mod launch;
 
 use ended::{StopCause, stop_closed};
 pub(super) use ended::{hold_stop, idle_stop, log_detach, on_ended, stop};
+use launch::launch;
 
 /// Work that waits for the agent's session.
 #[derive(Debug)]
@@ -160,6 +160,19 @@ pub(super) fn ensure(actor: &mut Actor, thread: ThreadId, waiting: Waiting) {
 /// waits for it (`sign_in::launch_refusal`), but one refused while the keys load waits for
 /// them first (`sign_in::keys_wait`), and its checks look at the refusals again after.
 fn start(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>) {
+    start_with(actor, thread, waiting, false);
+}
+
+/// [`start`] again for a launch the launch gate refused with a waited-out code
+/// (`launch_checks/gate.rs`): the same wait for the refusal to lift, then phase one again,
+/// marked so a second such answer fails it.
+pub(super) fn start_after_gate(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>) {
+    start_with(actor, thread, waiting, true);
+}
+
+/// [`start`]; `gate_waited` once the launch gate's refusal was waited for. A launch that waits
+/// for `sign_in::keys_wait` here counts as waited too, so no launch waits twice.
+fn start_with(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>, gate_waited: bool) {
     if host_stopping(actor) {
         fail_all(actor, thread, waiting, &Error::Closed);
         return;
@@ -177,7 +190,9 @@ fn start(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>) {
         log_detach(actor, thread, reason);
     }
     super::idle::make_room(actor, thread);
-    launch_checks::prepare(actor, thread, waiting, keys_wait);
+    // A launch that waits out a refusal here has had its one wait (`launch_checks/gate.rs`).
+    let gate_waited = gate_waited || keys_wait.is_some();
+    launch_checks::prepare(actor, thread, waiting, keys_wait, gate_waited);
 }
 
 /// The launch on the actor, with what its checks found (`prepared`), and `initialize`. When
@@ -259,119 +274,6 @@ pub(super) fn launch_now(
 pub(super) fn next_agent_id() -> u64 {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-}
-
-/// What a launch gives: the link, the folder it runs in, what a Codex launch recorded, and a
-/// Claude launch's plans folder.
-type Launched = (AgentLink, PathBuf, Option<CodexAgent>, Option<PathBuf>);
-
-/// The launch itself: the spec from the settings (inherited environment, the agent's
-/// variables, then the profile hook's with the host's switches over them, then what the host
-/// forces for the agent's kind), in the matter folder that was checked (`prepared`). A Codex
-/// agent's `.codex` refusal (#184), its home and its `config.toml` are done by then.
-fn launch(
-    actor: &Actor,
-    thread: ThreadId,
-    prepared: Prepared,
-    tree: &mut Option<TreeWatch>,
-) -> Result<Launched, Error> {
-    let row = &actor.check_thread(thread)?.row;
-    let settings = actor.effective.agent(row.agent.as_str()).ok_or_else(|| {
-        Error::refused(
-            ErrorCode::AgentLaunchFailed,
-            format!("no agent {} in the settings", row.agent),
-        )
-    })?;
-    // The relay token reaches the agent in a file; its stderr tail hides it all the same.
-    let redacted = super::launch_checks::relay::redacted(&prepared.run);
-    let folder = prepared.stored;
-    let (forced, codex) = if let Some(prepared) = prepared.codex {
-        let hooks = codex_hooks(actor);
-        let guard = hooks.is_some();
-        let forced = agent::codex::launch_env(&prepared.home, &settings.env, prepared.keys, hooks);
-        let codex = CodexAgent {
-            folder: prepared.folder,
-            guard,
-            key_retry: KeyRetry::default(),
-        };
-        (forced, Some((codex, prepared.login)))
-    } else {
-        // A Claude agent's home goes in before `plans_folder` reads the merged map below.
-        let forced = prepared
-            .claude_home
-            .as_deref()
-            .map(agent::home::claude_launch_env);
-        (forced.unwrap_or_default(), None)
-    };
-    let hook = agent::loads::launch_env(actor.profile.launch_env(&row.agent));
-    // The key retry is armed by the hook's key and the launch's sign-in check.
-    let codex = codex.map(|(mut codex, login)| {
-        codex.key_retry = KeyRetry::at_launch(&hook, login);
-        codex
-    });
-    let dropped: &[&str] = if codex.is_some() {
-        &agent::codex::DROPPED_VARS
-    } else {
-        &[]
-    };
-    let inherited: Vec<_> = match &actor.wiring.inherited_env {
-        Some(env) => env.clone(),
-        None => std::env::vars_os().collect(),
-    };
-    // Tier C (no jail) leaves the agent's environment alone: no session proxy variables here
-    // (`ProxyHandle::env`); only the browser entry reaches the proxy, advisory without a jail.
-    let spec = agent::launch_spec(
-        settings,
-        hook,
-        forced,
-        dropped,
-        inherited.into_iter(),
-        agent::session_folder(&folder),
-        actor.wiring.path_prepend.as_deref(),
-    )
-    .map_err(super::launch_checks::folder::gone_at_spawn)?
-    .with_redacted(redacted);
-    let claude = AgentKind::of(&row.agent) == Some(AgentKind::Claude);
-    let plan_notes = claude
-        .then(|| agent::plan_note::plans_folder(spec.env(), cfg!(windows)))
-        .flatten();
-    let post = actor.post.clone();
-    let post: Rc<dyn Fn(agent::AgentInput)> = Rc::new(move |input| {
-        // The actor may be gone by then.
-        let _gone = post.try_send(Input::Agent { thread, input });
-    });
-    let link = agent::start(
-        &actor.spawner,
-        actor.launcher.as_ref(),
-        &spec,
-        Arc::clone(&actor.clock),
-        post,
-        tree,
-    )?;
-    Ok((link, folder, codex, plan_notes))
-}
-
-/// THE CODEX HOOKS SEAM: the `hooks` object a Codex agent's `CODEX_CONFIG` carries, with its
-/// `state` trust entry and `trusted_hash`: the one a test set (`HostConfig::with_codex_hooks`),
-/// else [`codex_hook_config`](agent::loads::codex_hook_config) for the guard program the
-/// Claude Code entry runs (`HostConfig::with_pre_write_guard`), so its `PreToolUse` holds one
-/// group, the guard's. `None` with no guard program, or (with a warning) one that
-/// `codex_hook_config` cannot quote. It is read once per launch, which records on the agent
-/// whether one went in (`Agent::guard`); with none the session start skips the guard's trust
-/// check.
-fn codex_hooks(actor: &Actor) -> Option<serde_json::Map<String, serde_json::Value>> {
-    if let Some(hooks) = &actor.codex_hooks {
-        return Some(hooks.clone());
-    }
-    let program = actor.pre_write_guard.as_deref()?;
-    let Some(serde_json::Value::Object(hooks)) = agent::loads::codex_hook_config(program) else {
-        tracing::warn!(
-            "the pre-write guard's path cannot go in Codex's hook command, so Codex runs without \
-             the guard"
-        );
-        return None;
-    };
-    Some(hooks)
 }
 
 /// Step 4 for a turn whose agent was started in another folder than its matter's row now names
