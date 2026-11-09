@@ -26,6 +26,7 @@ use crate::windows::sids::Reserved;
 use crate::windows::writer::{
     AclWriter, Added, ApplyFailure, FileId, Label, Reach, Strict, Walked,
 };
+use crate::windows::wsl::WslRemoved;
 
 /// The lines, shared by the machine and the writer.
 pub(super) type Log = Rc<RefCell<Vec<String>>>;
@@ -246,6 +247,11 @@ impl Removal for Remover {
         );
         self.call("remove_network".to_owned())?;
         Ok(self.firewall_failure.map(str::to_owned))
+    }
+
+    fn remove_wsl_deny(&mut self, group: &Sid) -> Result<WslRemoved, MachineError> {
+        self.call(format!("remove_wsl_deny {}", rid(group)))?;
+        Ok(WslRemoved::default())
     }
 
     fn account_name(&mut self, sid: &Sid) -> Result<Option<String>, MachineError> {

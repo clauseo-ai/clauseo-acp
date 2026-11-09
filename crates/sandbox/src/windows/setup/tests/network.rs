@@ -1,7 +1,8 @@
 //! Set-up's network step (S15 PR7): every live pool user covered, an extend covering the new
 //! one, a WFP failure failing and rolling back the set-up, and a firewall that Group Policy
 //! ignores, or that fails in any other way, leaving the set-up done on WFP's filters alone; WFP
-//! failing (the Base Filtering Engine down included) fails the set-up.
+//! failing (the Base Filtering Engine down included) fails the set-up. WSL's deny (step 8b)
+//! comes after it, as admin, and its failure is only reported.
 
 use super::*;
 use crate::windows::wfp::spec::FIREWALL_UNDER_POLICY;
@@ -35,6 +36,23 @@ fn a_set_up_covers_every_pool_user_before_its_marker() {
     assert!(at("owner_of DeviceSync") < at("network"));
     assert!(at("network") < at("protect_for_owner"));
     assert!(at("network") < at("write_marker"));
+}
+
+#[test]
+fn wsls_deny_follows_the_network_as_admin_and_its_failure_is_only_reported() {
+    let mut machine = FakeMachine::new("wsl-deny");
+    let mut acl = FakeAcl::default();
+    let report = set_up_fresh(&mut machine, &mut acl);
+    assert_eq!(report.wsl, Ok(crate::windows::wsl::WslApplied::default()));
+    let at = |line: &str| machine.calls.iter().position(|c| c == line).unwrap();
+    assert!(at("wsl_deny 1000") > at("network 1001,1002,1003,1004,1005,1006,1007,1008"));
+    assert!(at("wsl_deny 1000") < at("write_marker"));
+    // A failure leaves the set-up done: the launch check refuses while a deny is missing.
+    machine.fail("wsl_deny 1000");
+    let req = request(&mut machine, 0, Vec::new());
+    let report = set_up(&mut machine, &mut acl, &req).unwrap();
+    assert!(report.wsl.is_err(), "{:?}", report.wsl);
+    assert!(machine.state.marker.is_some());
 }
 
 #[test]

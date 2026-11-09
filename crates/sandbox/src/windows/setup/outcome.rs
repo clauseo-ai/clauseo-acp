@@ -13,6 +13,7 @@ use crate::windows::pool::PoolUser;
 use crate::windows::shared_writes::SharedWrites;
 use crate::windows::sids::Sid;
 use crate::windows::wfp::NetworkReport;
+use crate::windows::wsl::WslApplied;
 use crate::{Blocked, SetupError};
 
 /// `ERROR_VIRUS_INFECTED`: Windows security blocked the setup exe as infected.
@@ -366,6 +367,10 @@ pub struct SetupReport {
     /// effect: under Group Policy they may not, which leaves WFP's filters enforcing alone
     /// ([`FirewallOutcome::Ineffective`](crate::windows::wfp::FirewallOutcome::Ineffective)).
     pub network: NetworkReport,
+    /// WSL's deny for the pool group (step 8b, `windows::wsl`): what it found and wrote, and
+    /// each target it couldn't; `Err` when the targets couldn't be found, and why. Never a
+    /// failure of the set-up: the launch check refuses while a deny is missing.
+    pub wsl: Result<WslApplied, String>,
 }
 
 /// What a run did to leave at least [`MIN_FREE_AFTER_RUN`](super::MIN_FREE_AFTER_RUN) free pool

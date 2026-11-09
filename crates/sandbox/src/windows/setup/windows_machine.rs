@@ -42,6 +42,7 @@ use crate::windows::refresh;
 use crate::windows::secrets;
 use crate::windows::sids::{Reserved, Sid};
 use crate::windows::wfp::{self, Namespace, NetworkReport, NetworkSetup};
+use crate::windows::wsl::{self, WindowsWsl, WslApplied};
 
 /// `BUILTIN\Administrators`, the owner a protected folder is handed to.
 const ADMINISTRATORS: &str = "S-1-5-32-544";
@@ -66,6 +67,9 @@ pub struct Names {
     pub journals: bool,
     /// Where the network filters and firewall rules go (S15 PR7): Clauseo's, or a test's.
     pub wfp: Namespace,
+    /// Whether WSL's launch permissions may be changed (`windows::wsl`); a test's machine leaves
+    /// them as they are (the WSL test makes its own `AppID`).
+    pub wsl: bool,
 }
 
 impl Names {
@@ -78,6 +82,7 @@ impl Names {
             users: POOL_PREFIX.to_owned(),
             journals: true,
             wfp: Namespace::production(),
+            wsl: true,
         }
     }
 
@@ -497,6 +502,15 @@ impl Machine for WindowsMachine {
         // so does a machine whose dynamic or excluded port ranges overlap tier B's ports.
         wfp::check_ports(false).map_err(|gap| MachineError::Other(gap.to_string()))?;
         wfp::install(&self.names.wfp, setup).map_err(|error| MachineError::Other(error.cause()))
+    }
+
+    fn wsl_deny(&mut self, group: &Sid) -> Result<WslApplied, MachineError> {
+        // Elevated, never as the owner: the `AppID` keys are the machine's.
+        if !self.names.wsl {
+            return Ok(WslApplied::default());
+        }
+        wsl::apply(&mut WindowsWsl::writer(&self.names.record_key), group)
+            .map_err(|error| MachineError::Other(format!("WSL's deny: {error}")))
     }
 
     fn protect_for_owner(

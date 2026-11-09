@@ -7,6 +7,7 @@ use std::path::PathBuf;
 
 use super::late_steps::{
     admin_lock, fence, journals, network, own_protected, refuse_pool_owner, registered, stop_task,
+    wsl_deny,
 };
 use super::machine::{LogonRight, Machine, Password, ServiceStart, owned};
 use super::outcome::{
@@ -304,6 +305,7 @@ fn change(
         None => (None, Vec::new()),
     };
     let network = network(machine, &req.owner, &group, &live)?;
+    let wsl = wsl_deny(machine, &group);
     let journals = journals(machine, &plan.matters);
     owned(machine, |machine| {
         machine.protect_for_owner(&users.secrets, &live)
@@ -335,6 +337,7 @@ fn change(
         journals,
         top_up: plan.top_up.clone(),
         network,
+        wsl,
     })
 }
 
