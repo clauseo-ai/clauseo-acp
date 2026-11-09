@@ -22,33 +22,36 @@ fn data_spellings(data: &Path) -> Vec<PathBuf> {
 
 /// Claude's data folder deny rules for this launch: every entry of `data` that is not the
 /// session's own ([`own_folders`]), nor, for Claude, a `tool-results` folder in its project for
-/// the matter folder (`stored`, and the real path the agent works in).
+/// the matter folder (`stored`, and the real path the agent works in) in its state folder
+/// (`claude_state`, its `CLAUDE_CONFIG_DIR`).
 pub(super) fn launch_deny(
     run: &RunFolders,
     stored: &Path,
     data: &Path,
-    claude_home: Option<&Path>,
+    claude_state: Option<&Path>,
 ) -> data_fence::LaunchDeny {
-    let own = own_folders(run, stored, claude_home);
+    let own = own_folders(run, stored);
     let cwd = crate::agent::session_folder(stored);
-    let projects = claude_home.map_or_else(Vec::new, |home| {
-        data_fence::claude_projects(home, &[&cwd, stored])
+    let projects = claude_state.map_or_else(Vec::new, |state| {
+        data_fence::claude_projects(state, &[&cwd, stored])
     });
     data_fence::launch_deny(data_spellings(data), data, &own, &projects)
 }
 
 /// The session's own folders, which Claude's deny rules leave out: its run folder, this
-/// matter's notes, the matter folder (`agent::session_folder` of `stored`) and, for Claude,
-/// the plans folder in its home.
-fn own_folders(run: &RunFolders, stored: &Path, claude_home: Option<&Path>) -> Vec<PathBuf> {
-    let plans = claude_home.map(|home| home.join("plans"));
+/// matter's notes, the matter folder (`agent::session_folder` of `stored`) and the plans folder
+/// in the agent's state folder for this matter (R17 PR-C), where Claude Code writes its plan
+/// note. The rest of that state folder that exists is denied entry by entry, but the session's
+/// own `tool-results` ([`launch_deny`]'s projects); [`data_fence::DENIED`] names the config
+/// surfaces made later. Every other matter's state folder that exists is denied whole.
+fn own_folders(run: &RunFolders, stored: &Path) -> Vec<PathBuf> {
     [
         run.root.clone(),
         run.notes.clone(),
         crate::agent::session_folder(stored),
     ]
     .into_iter()
-    .chain(plans)
+    .chain(run.state.as_ref().map(|state| state.join("plans")))
     .collect()
 }
 

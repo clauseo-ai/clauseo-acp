@@ -1,14 +1,15 @@
-//! Each agent with a kind launches with Clauseo's own home (`agent/home.rs`, decision record
-//! 0048): Claude Code gets `<data>/agents/claude-acp/home` as `CLAUDE_CONFIG_DIR`, Codex
-//! `<data>/agents/codex-acp/home` as `CODEX_HOME`, over what the host inherited, both made at the
-//! launch. The profile's Codex skills go in that same Codex home, and Codex's `CODEX_CONFIG`
-//! carries the two overrides `limits` reads with, from the one shared list.
+//! Each agent with a kind launches with Clauseo's own folders (`agent/home.rs`, decision record
+//! 0048), never the lawyer's: since R17 PR-C its config folder is the matter's state folder
+//! (`<data>/agent-state/<matter>/<agent>`, `state_folders.rs`) as `CLAUDE_CONFIG_DIR` or
+//! `CODEX_HOME`, over what the host inherited, and the login homes
+//! (`<data>/agents/<agent>/home`) are made at the launch and keep the login. Codex's
+//! `CODEX_CONFIG` carries the two overrides `limits` reads with, from the one shared list.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use clauseo_protocol::{AgentKind, StreamId};
+use clauseo_protocol::{AgentKind, MatterId, StreamId};
 use clauseo_settings::Locations;
 use serde_json::json;
 
@@ -21,8 +22,8 @@ const LAWYERS_CLAUDE: &str = "/elsewhere/lawyer/.claude";
 const LAWYERS_CODEX: &str = "/elsewhere/lawyer/.codex";
 
 /// Runs one turn on a Claude, a Codex and a `fake-agent` thread, with the host's environment
-/// naming the lawyer's own folders; returns what each launch got, in that order.
-fn launches(dir: &Dir) -> Vec<Seen> {
+/// naming the lawyer's own folders; returns the matter and what each launch got, in that order.
+fn launches(dir: &Dir) -> (MatterId, Vec<Seen>) {
     let wired = Wired::new(dir);
     let mut env: Vec<(OsString, OsString)> = std::env::vars_os()
         .filter(|(name, _)| {
@@ -46,7 +47,7 @@ fn launches(dir: &Dir) -> Vec<Seen> {
         events.assert_no_mismatch();
     }
     host.shutdown();
-    wired.seen()
+    (matter, wired.seen())
 }
 
 /// `name` in `seen`'s environment, as text.
@@ -73,9 +74,9 @@ fn three_agents(test: &str) -> Dir {
 }
 
 #[test]
-fn claude_and_codex_launch_with_clauseos_homes_not_the_lawyers() {
+fn claude_and_codex_launch_with_clauseos_folders_not_the_lawyers() {
     let dir = three_agents("agent_homes");
-    let seen = launches(&dir);
+    let (matter, seen) = launches(&dir);
     let [claude, codex, fake] = seen.as_slice() else {
         panic!("three launches, not {}", seen.len());
     };
@@ -85,53 +86,71 @@ fn claude_and_codex_launch_with_clauseos_homes_not_the_lawyers() {
         claude_home,
         dir.data().join("agents").join(CLAUDE).join("home")
     );
+    let claude_state = crate::profile_rig::state_folder(&dir, matter, CLAUDE);
+    let codex_state = crate::profile_rig::state_folder(&dir, matter, CODEX);
     assert_eq!(
         var(claude, "CLAUDE_CONFIG_DIR"),
+        Some(claude_state.display().to_string())
+    );
+    // Claude's login store is its login home (Clauseo's own sign-in).
+    assert_eq!(
+        var(claude, "CLAUDE_SECURESTORAGE_CONFIG_DIR"),
         Some(claude_home.display().to_string())
     );
     assert_eq!(
         var(codex, "CODEX_HOME"),
-        Some(codex_home.display().to_string())
+        Some(codex_state.display().to_string())
     );
-    // Both homes were made, real folders under the data folder.
-    for home in [&claude_home, &codex_home] {
+    // The login homes and the state folders were made, real folders under the data folder.
+    for home in [&claude_home, &codex_home, &claude_state, &codex_state] {
         let meta = std::fs::symlink_metadata(home).unwrap();
         assert!(meta.is_dir(), "{}", home.display());
     }
-    // Claude Code's user settings there turn off the account's synced claude.ai skills (G11).
-    let settings = std::fs::read(claude_home.join("settings.json")).unwrap();
-    let settings: serde_json::Value = serde_json::from_slice(&settings).unwrap();
-    assert_eq!(
-        settings["syncClaudeAiSkills"],
-        serde_json::json!(false),
-        "{settings}"
-    );
-    assert!(!codex_home.join("settings.json").exists());
+    // Claude Code's user settings turn off the account's synced claude.ai skills (G11), in the
+    // state folder and, for the readers that run there, the login home.
+    for folder in [&claude_home, &claude_state] {
+        let settings = std::fs::read(folder.join("settings.json")).unwrap();
+        let settings: serde_json::Value = serde_json::from_slice(&settings).unwrap();
+        assert_eq!(
+            settings["syncClaudeAiSkills"],
+            serde_json::json!(false),
+            "{settings}"
+        );
+    }
+    assert!(codex_state.join("config.toml").is_file());
+    assert!(!codex_state.join("settings.json").exists());
     // An agent of no kind reads neither variable, and the host forces neither on it.
     assert_eq!(
         var(fake, "CLAUDE_CONFIG_DIR").as_deref(),
         Some(LAWYERS_CLAUDE)
     );
     assert_eq!(var(fake, "CODEX_HOME").as_deref(), Some(LAWYERS_CODEX));
+    assert_eq!(var(fake, "CLAUDE_SECURESTORAGE_CONFIG_DIR"), None);
 }
 
-/// The profile writes Codex's skills into `skills` of the very folder Codex is launched with as
-/// `CODEX_HOME`; Claude's skills are in Clauseo's plugin, outside both homes, and passed by path.
+/// The profile's Codex skills folder is the login home's (written only once
+/// `clauseo_profile::CODEX_SKILLS` is on), never the matter's state folder, whose `skills` each
+/// launch cleans; Claude's skills are in Clauseo's plugin, outside every home and state folder,
+/// and passed by path.
 #[test]
-fn the_profiles_codex_skills_are_in_the_home_codex_launches_with() {
+fn the_profiles_skills_are_outside_the_state_folders() {
     let dir = three_agents("agent_homes_profile");
-    let seen = launches(&dir);
+    let (matter, seen) = launches(&dir);
     let codex = seen.get(1).expect("a Codex launch");
     let locations = Locations::under_home(dir.home());
     let skills = clauseo_profile::paths::codex_skills(&locations);
-    assert_eq!(skills.file_name().unwrap(), "skills");
     assert_eq!(
+        skills.parent(),
+        Some(home_of(&dir, AgentKind::Codex).as_path())
+    );
+    assert_ne!(
         var(codex, "CODEX_HOME").map(PathBuf::from).as_deref(),
         skills.parent()
     );
     let plugin = locations.data_dir().join("profile").join("claude-plugin");
     for kind in [AgentKind::Claude, AgentKind::Codex] {
         assert!(!plugin.starts_with(home_of(&dir, kind)));
+        assert!(!plugin.starts_with(crate::profile_rig::state_folder(&dir, matter, kind.id())));
     }
 }
 
@@ -147,7 +166,7 @@ fn codex_launches_with_the_file_login_store_and_the_default_excludes() {
         assert!(clauseo_limits::CODEX_OVERRIDES.contains(&set), "{set}");
     }
     let dir = three_agents("agent_homes_overrides");
-    let seen = launches(&dir);
+    let (_, seen) = launches(&dir);
     let config = seen
         .get(1)
         .and_then(Seen::codex_config)

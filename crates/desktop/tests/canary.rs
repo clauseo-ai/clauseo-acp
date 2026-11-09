@@ -414,6 +414,8 @@ fn session_in_a_planted_environment() {
 
     let launcher = PassthroughLauncher::new(SpawnOptions::new().home(home.clone()));
     let config = HostConfig::new(effective, Arc::new(launcher))
+        // A pass-through launch gate: fake_agent plays Claude Code, with no shared login.
+        .with_launch_gate(Arc::new(|_| None))
         .with_counts(counts.clone())
         .with_limits_reader(Arc::new(NoReader))
         .with_home_folder(Some(home))

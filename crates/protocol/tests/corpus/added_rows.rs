@@ -485,4 +485,11 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (353, 0x425a_63f5_b282_5767),
         (254, 0x3ee9_b135_98a3_b977),
     ),
+    (
+        "added/turn_failed-SigninReuseOtherVolume",
+        include_bytes!("added/turn_failed-SigninReuseOtherVolume.jsonl"),
+        include_bytes!("added/turn_failed-SigninReuseOtherVolume.msgpack"),
+        (360, 0x2f7f_2e65_40a0_ae9d),
+        (262, 0x1258_dd03_4d59_b473),
+    ),
 ];

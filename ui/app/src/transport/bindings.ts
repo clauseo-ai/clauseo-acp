@@ -1704,6 +1704,8 @@ export type ErrorCode =
 "blocklist.allow_not_saved" | 
 /** The site is blocked again until Clauseo closes, but Clauseo couldn't save that or void the saved allows, so the site may be allowed again after a restart. */
 "blocklist.revoke_not_saved" | 
+/** A reused Codex login could not be linked into a matter's state folder because Clauseo's data folder is on a different volume from the login file; a link across volumes is impossible and the login is never copied, so no agent was started. Trying again cannot succeed until the data folder moves or Codex is signed in to in Clauseo. */
+"signin.reuse_other_volume" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 

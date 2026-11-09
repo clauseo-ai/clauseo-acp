@@ -30,6 +30,7 @@ use crate::rate::{RateCap, RatedUpdate};
 use crate::sent::SentView;
 
 mod ended;
+mod forced;
 
 use ended::{StopCause, stop_closed};
 pub(super) use ended::{hold_stop, idle_stop, log_detach, on_ended, stop};
@@ -285,24 +286,14 @@ fn launch(
     // The relay token reaches the agent in a file; its stderr tail hides it all the same.
     let redacted = super::launch_checks::relay::redacted(&prepared.run);
     let folder = prepared.stored;
-    let (forced, codex) = if let Some(prepared) = prepared.codex {
-        let hooks = codex_hooks(actor);
-        let guard = hooks.is_some();
-        let forced = agent::codex::launch_env(&prepared.home, &settings.env, prepared.keys, hooks);
-        let codex = CodexAgent {
-            folder: prepared.folder,
-            guard,
-            key_retry: KeyRetry::default(),
-        };
-        (forced, Some((codex, prepared.login)))
-    } else {
-        // A Claude agent's home goes in before `plans_folder` reads the merged map below.
-        let forced = prepared
-            .claude_home
-            .as_deref()
-            .map(agent::home::claude_launch_env);
-        (forced.unwrap_or_default(), None)
-    };
+    let (forced, codex) = forced::of(
+        actor,
+        &row.agent,
+        &settings.env,
+        prepared.codex,
+        &prepared.run,
+        prepared.claude_home.as_deref(),
+    );
     let hook = agent::loads::launch_env(actor.profile.launch_env(&row.agent));
     // The key retry is armed by the hook's key and the launch's sign-in check.
     let codex = codex.map(|(mut codex, login)| {

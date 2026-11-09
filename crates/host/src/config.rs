@@ -12,7 +12,6 @@ use clauseo_protocol::{AgentId, ErrorCode};
 use clauseo_settings::{Effective, PlatformDirs as _, SystemDirs};
 
 use crate::agent::login_link::{LoginCheck, SignInAgain};
-use crate::agent::login_splits::LoginSplits;
 use crate::browser::chrome::ChromeRoots;
 #[cfg(feature = "test-support")]
 use crate::browser::install::InstallTools;
@@ -497,6 +496,14 @@ impl HostConfig {
         self
     }
 
+    /// Desktop's launch gate (#554, [`crate::LaunchGate`]); unset, every launch of an agent with a
+    /// kind is refused with `agent.launch_failed`, failing closed (R17 PR-C).
+    #[must_use]
+    pub fn with_launch_gate(mut self, gate: crate::LaunchGate) -> Self {
+        self.wiring.launch_gate = Some(gate);
+        self
+    }
+
     /// The case-law connector's relays (R24): each agent launch whose profile offers a
     /// `case-law` entry, with `tools.connectors` on, no firm `managed-mcp.json` and the
     /// connector signed in, gets a relay of its own and the entry. Unset (the default), no session
@@ -586,11 +593,6 @@ impl HostConfig {
     /// The seam set, for the first detection in `Host::start`.
     pub(crate) fn sandbox(&self) -> Option<&Sandbox> {
         self.sandbox.as_ref()
-    }
-
-    /// The receiving end of the login splits, for `HostHandle::login_splits`.
-    pub(crate) fn login_splits(&self) -> LoginSplits {
-        self.wiring.sign_in.receiver()
     }
 }
 

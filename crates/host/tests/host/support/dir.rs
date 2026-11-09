@@ -152,6 +152,19 @@ impl Dir {
         clock: &ManualClock,
         launcher: Arc<dyn Launcher>,
     ) -> HostConfig {
+        // A pass-through launch gate: no shared login to check.
+        self.config_ungated(locations, run, clock, launcher)
+            .with_launch_gate(Arc::new(|_| None))
+    }
+
+    /// As [`Dir::config_at`], with no launch gate: a host given none.
+    fn config_ungated(
+        &self,
+        locations: &Locations,
+        run: u16,
+        clock: &ManualClock,
+        launcher: Arc<dyn Launcher>,
+    ) -> HostConfig {
         let policy = FilePolicy::new(self.root.join("policy.json"), SystemFiles);
         let effective = Effective::load(locations, &SystemFiles, &[&policy]);
         crate::idle_stop::off(HostConfig::new(effective, launcher))
@@ -267,6 +280,21 @@ impl Dir {
         let clock = Self::clock(run);
         let (handle, join) = Host::start(adjust(self.config_launching(run, &clock, launcher)))
             .unwrap_or_else(|e| panic!("Host::start (run {run}): {e}"));
+        Running {
+            handle,
+            join: Some(join),
+            clock,
+        }
+    }
+
+    /// As [`Dir::start_launching`] with no launch gate, as a host given none (the fail-closed
+    /// refusal's test).
+    pub(crate) fn start_ungated(&self, run: u16, launcher: Arc<dyn Launcher>) -> Running {
+        let clock = Self::clock(run);
+        let locations = Locations::under_home(&self.root);
+        let config = self.config_ungated(&locations, run, &clock, launcher);
+        let (handle, join) =
+            Host::start(config).unwrap_or_else(|e| panic!("Host::start (run {run}): {e}"));
         Running {
             handle,
             join: Some(join),

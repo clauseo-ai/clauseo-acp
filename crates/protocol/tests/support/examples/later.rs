@@ -97,6 +97,10 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::BlocklistRevokeNotSaved,
             "the data folder is read-only",
         ),
+        failed(
+            ErrorCode::SigninReuseOtherVolume,
+            "the Codex login is on another volume",
+        ),
     ]
 }
 

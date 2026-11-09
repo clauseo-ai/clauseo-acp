@@ -210,9 +210,9 @@ fn skill_shell_off() {
     }
 }
 
-/// Codex gets its run folder and the matter's notes as ACP `additionalDirectories`, the roots
-/// codex-acp makes each turn's `workspaceWrite` policy from (`agent::codex_fence`), on
-/// `session/new` and again on `session/load`; Claude gets none there.
+/// Codex gets its run folder (its `TMPDIR` inside) and the matter's notes as ACP
+/// `additionalDirectories`, the roots codex-acp makes each turn's `workspaceWrite` policy from
+/// (`agent::codex_fence`), on `session/new` and again on `session/load`; Claude gets none there.
 #[test]
 fn codex_gets_its_folders_as_additional_directories_on_new_and_load() {
     let dir = Dir::new("profile_codex_roots", &[]);
@@ -227,6 +227,7 @@ fn codex_gets_its_folders_as_additional_directories_on_new_and_load() {
     let host = dir.start_launching(0, Arc::<Wired>::clone(&launcher), |config| config);
     let matter = host.create_matter("m", &dir.folder("m", &[]));
     let notes = path_text(&notes(&dir, matter));
+    // Nothing of the matter's Codex state folder (its `CODEX_HOME`, R17 PR-C) is a root.
     let roots = json!({"additionalDirectories": ["@RUN@", notes]});
     template(&dir, "cr-codex", &codex_lines("cr-codex", &roots));
     let off = ["/additionalDirectories"];

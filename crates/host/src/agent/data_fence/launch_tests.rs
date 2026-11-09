@@ -1,7 +1,7 @@
-//! Claude's deny rules enumerated per launch (`launch.rs`) and the host's auto-deny agree: a
-//! launch for matter `m1` in a data folder that holds another matter's notes, other run folders
-//! and the search index denies each, and leaves the session's own run folder, notes and plans
-//! alone. And every data folder entry `Locations` names is denied or allowed for a reason.
+//! Claude's deny rules enumerated per launch (`launch.rs`) and the host's auto-deny agree: a launch
+//! for matter `m1` in a data folder that holds another matter's notes, other run folders and the
+//! search index denies each, and leaves the session's own run folder, notes and state folder (R17
+//! PR-C) alone. And every data folder entry `Locations` names is denied or allowed for a reason.
 
 use serde_json::json;
 
@@ -41,15 +41,17 @@ fn launch(root: &std::path::Path) -> LaunchDeny {
     let own = [
         data.join("run").join("s1"),
         data.join("agent-state").join("m1").join("notes"),
-        data.join("agents")
+        // The plans folder of the matter's Claude state folder (R17 PR-C), as
+        // `launch_checks/folders.rs` gives it.
+        data.join("agent-state")
+            .join("m1")
             .join("claude-acp")
-            .join("home")
             .join("plans"),
         root.join("matter"),
     ];
-    let home = data.join("agents/claude-acp/home");
+    let state = data.join("agent-state/m1/claude-acp");
     let matter = dunce::canonicalize(root.join("matter")).unwrap();
-    let projects = claude_projects(&home, &[&matter]);
+    let projects = claude_projects(&state, &[&matter]);
     launch_deny(vec![data.clone()], &data, &own, &projects)
 }
 
@@ -68,7 +70,7 @@ fn a_launch_denies_what_exists_and_is_not_the_sessions_own() {
         "search.sqlite",
         "search.sqlite-wal",
         "search.sqlite-shm",
-        "agents/claude-acp/home/statsig/**",
+        "agents/**",
         r"made-later\[1\].txt",
     ] {
         assert!(
@@ -76,7 +78,11 @@ fn a_launch_denies_what_exists_and_is_not_the_sessions_own() {
             "{target}: {deny:?}"
         );
     }
-    for own in ["run/s1", "agent-state/m1/notes", "home/plans"] {
+    for own in [
+        "run/s1",
+        "agent-state/m1/notes",
+        "agent-state/m1/claude-acp/plans",
+    ] {
         assert!(
             !deny.targets.iter().any(|t| t.contains(own)),
             "{own}: {deny:?}"
@@ -110,7 +116,7 @@ fn the_auto_deny_agrees_with_the_launch_rules() {
     for own in [
         "run/s1/work/out.docx",
         "agent-state/m1/notes/n.md",
-        "agents/claude-acp/home/plans/plan.md",
+        "agent-state/m1/claude-acp/plans/plan.md",
     ] {
         let path = text(&data.join(own));
         assert!(!check(root, &[&path], None).touches_data(), "Read {path}");
@@ -208,41 +214,43 @@ fn claudes_project_key_is_computed_as_claude_code_does() {
     assert_eq!(claude_project_key(&long), want);
 }
 
-/// The large tool results Claude Code saves in this session's project folder and has the model
-/// Read back stay readable: no launch rule covers `<project>/<session>/tool-results`. Every
-/// transcript (this project's too), subagent transcript and memory file is denied, by a fixed
-/// pattern as well as by name, and so is every other project's folder, whole.
+/// R17 PR-C: the large tool results Claude Code saves in this session's project folder, in the
+/// matter's own state folder, and its plans stay readable; every transcript (this matter's too),
+/// subagent transcript and memory file is denied by a fixed pattern, and so is another matter's
+/// state folder, whole when it exists at the launch and its transcripts when made later.
 #[test]
 fn the_sessions_own_tool_results_stay_readable_and_the_rest_of_projects_does_not() {
     let dir = layout("projects");
     let root = dir.path();
-    let projects = root.join("data/agents/claude-acp/home/projects");
     let matter = dunce::canonicalize(root.join("matter")).unwrap();
     let own = claude_project_key(matter.to_str().unwrap());
-    let place = |rest: &str| format!("agents/claude-acp/home/projects/{rest}");
-    let readable = place(&format!("{own}/s-1/tool-results/toolu_1.txt"));
-    let denied = [
-        place(&format!("{own}/s-1.jsonl")),
-        place(&format!("{own}/s-1/subagents/agent-a.jsonl")),
-        place(&format!("{own}/s-1/other.bin")),
-        place(&format!("{own}/memory/MEMORY.md")),
-        place(&format!("{own}/notes.txt")),
-        place("-other-matter/s-2.jsonl"),
-        place("-other-matter/s-2/tool-results/toolu_2.txt"),
+    let place = |m: &str, rest: &str| format!("agent-state/{m}/claude-acp/projects/{rest}");
+    let readable = [
+        place("m1", &format!("{own}/s-1/tool-results/toolu_1.txt")),
+        "agent-state/m1/claude-acp/plans/plan.md".to_owned(),
     ];
-    for file in denied.iter().chain([&readable]) {
+    let denied = [
+        place("m1", &format!("{own}/s-1.jsonl")),
+        place("m1", &format!("{own}/s-1/subagents/agent-a.jsonl")),
+        place("m1", &format!("{own}/memory/MEMORY.md")),
+        "agent-state/m1/claude-acp/settings.json".to_owned(),
+        "agent-state/m1/claude-acp/todos/t.json".to_owned(),
+        place("m2", "-other-matter/s-2.jsonl"),
+        place("m2", "-other-matter/s-2/tool-results/toolu_2.txt"),
+        "agent-state/m2/claude-acp/plans/plan.md".to_owned(),
+        "agent-state/m2/codex-acp/sessions/r.jsonl".to_owned(),
+        "agent-state/m1/codex-acp/sessions/r.jsonl".to_owned(),
+    ];
+    for file in denied.iter().chain(&readable) {
         let file = root.join("data").join(file);
         write::create_dir_all(file.parent().unwrap()).unwrap();
         write::write_file(&file, b"x").unwrap();
     }
-    assert!(projects.join(&own).is_dir());
     let deny = launch(root);
-    let covering: Vec<&String> = deny
-        .targets
-        .iter()
-        .filter(|t| covers(t, &readable))
-        .collect();
-    assert!(covering.is_empty(), "{readable} is covered by {covering:?}");
+    for file in &readable {
+        let covering: Vec<&String> = deny.targets.iter().filter(|t| covers(t, file)).collect();
+        assert!(covering.is_empty(), "{file} is covered by {covering:?}");
+    }
     for file in &denied {
         assert!(
             deny.targets.iter().any(|t| covers(t, file)),
@@ -250,13 +258,14 @@ fn the_sessions_own_tool_results_stay_readable_and_the_rest_of_projects_does_not
         );
     }
     assert!(
-        deny.targets.iter().any(|t| t == &place("-other-matter/**")),
+        deny.targets.iter().any(|t| t == "agent-state/m2/**"),
         "{deny:?}"
     );
     let later = [
-        place("-made-later/s-3.jsonl"),
-        place("-made-later/s-3/subagents/agent-b.jsonl"),
-        place("-made-later/memory/MEMORY.md"),
+        place("m3", "-made-later/s-3.jsonl"),
+        place("m3", "-made-later/s-3/subagents/agent-b.jsonl"),
+        place("m3", "-made-later/memory/MEMORY.md"),
+        "agent-state/m3/codex-acp/sessions/r.jsonl".to_owned(),
     ];
     for file in later {
         assert!(DENIED.iter().any(|t| covers(t, &file)), "{file}");

@@ -268,7 +268,10 @@ impl Scratch {
     pub(crate) fn config(&self, refused: Vec<PathBuf>) -> HostConfig {
         let effective = Effective::load(&Locations::under_home(&self.root), &SystemFiles, &[]);
         let launcher = crate::host_launcher(None);
-        HostConfig::new(effective, Arc::new(launcher)).with_refused_folders(refused)
+        HostConfig::new(effective, Arc::new(launcher))
+            .with_refused_folders(refused)
+            // A pass-through launch gate for the tests' hosts; the app wires the real one.
+            .with_launch_gate(Arc::new(|_| None))
     }
 
     /// Starts a host on the folder, refusing `refused` as a matter.

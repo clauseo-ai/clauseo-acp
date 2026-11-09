@@ -27,6 +27,10 @@ pub(crate) const MODE_VAR: &str = "INITIAL_AGENT_MODE";
 pub(crate) const ASK_MODE: &str = "workspace-write";
 /// The variable the Codex app-server takes its home from.
 pub(crate) const HOME_VAR: &str = "CODEX_HOME";
+/// The temp folder variable: a Codex session's is its run folder's `tmp` (`RunFolders::tmp`).
+pub(crate) const TMPDIR_VAR: &str = "TMPDIR";
+/// The user's home folder on macOS and Linux, set to the state folder for Codex.
+pub(crate) const USER_HOME_VAR: &str = "HOME";
 /// The variable codex-acp reads its config from.
 pub(crate) const CONFIG_VAR: &str = "CODEX_CONFIG";
 /// Set to `true`, codex-acp passes the session's MCP servers as they are, without dropping those
@@ -52,21 +56,38 @@ pub(crate) const DROPPED_VARS: [&str; 4] = [
 pub(crate) const MODEL_KEYS: [&str; 2] = ["model", "model_reasoning_effort"];
 
 /// The variables a Codex agent is launched with, over any settings or profile value of the same
-/// name: the ask mode, `home` as `CODEX_HOME`, [`config`] as `CODEX_CONFIG`, and no MCP
-/// filtering.
+/// name: the ask mode, `home` (the matter's state folder, `agent/state_folder.rs`) as
+/// `CODEX_HOME`, and on macOS and Linux as `HOME` too, so Codex's `~/.agents/skills` and the
+/// shell's start-up files are the state folder's, which each launch cleans, never the lawyer's
+/// (research 43:61; Windows: S15's runner); [`config`] as `CODEX_CONFIG`, and no MCP filtering.
 pub(crate) fn launch_env(
     home: &Path,
     settings_env: &BTreeMap<String, String>,
     profile: Map<String, Value>,
     hooks: Option<Map<String, Value>>,
 ) -> BTreeMap<OsString, OsString> {
+    launch_env_on(home, settings_env, profile, hooks, cfg!(unix))
+}
+
+/// [`launch_env`], with `HOME` set when `unix`.
+pub(crate) fn launch_env_on(
+    home: &Path,
+    settings_env: &BTreeMap<String, String>,
+    profile: Map<String, Value>,
+    hooks: Option<Map<String, Value>>,
+    unix: bool,
+) -> BTreeMap<OsString, OsString> {
     let config = Value::Object(config(settings_env, profile, hooks)).to_string();
-    BTreeMap::from([
+    let mut env = BTreeMap::from([
         (OsString::from(MODE_VAR), OsString::from(ASK_MODE)),
         (OsString::from(HOME_VAR), home.as_os_str().to_owned()),
         (OsString::from(CONFIG_VAR), OsString::from(config)),
         (OsString::from(MCP_FILTER_VAR), OsString::from("true")),
-    ])
+    ]);
+    if unix {
+        env.insert(OsString::from(USER_HOME_VAR), home.as_os_str().to_owned());
+    }
+    env
 }
 
 /// The top-level keys `config` takes from the launch profile's side
@@ -233,12 +254,20 @@ const HOME_CONFIG_HEADER: &str = "# Clauseo manages this file. It is written aga
      Clauseo starts Codex, and any edit is replaced.\n# The switches Clauseo turns off for Codex's \
      app-server at start-up (clauseo_limits::CODEX_OVERRIDES).\n";
 
+/// The switches only the homes' `config.toml` pins, beside `clauseo_limits::CODEX_OVERRIDES`:
+/// Codex's memories off (`features.memories`, research 43 §2), so nothing a session writes
+/// there is read into the matter's later sessions (R17 PR-C).
+pub(crate) const HOME_ONLY_OVERRIDES: [&str; 1] = ["features.memories=false"];
+
 /// The `config.toml` text for a Codex agent's home: [`HOME_CONFIG_HEADER`], then each of
-/// `clauseo_limits::CODEX_OVERRIDES` as a TOML dotted key (each override is already TOML:
-/// `key=value` as Codex's `-c` takes it).
+/// `clauseo_limits::CODEX_OVERRIDES` and [`HOME_ONLY_OVERRIDES`] as a TOML dotted key (each
+/// override is already TOML: `key=value` as Codex's `-c` takes it).
 pub(crate) fn home_config() -> String {
     let mut text = HOME_CONFIG_HEADER.to_owned();
-    for set in clauseo_limits::CODEX_OVERRIDES {
+    for set in clauseo_limits::CODEX_OVERRIDES
+        .iter()
+        .chain(&HOME_ONLY_OVERRIDES)
+    {
         if let Some((key, value)) = set.split_once('=') {
             text.push_str(key);
             text.push_str(" = ");
@@ -290,10 +319,15 @@ fn holds(path: &Path, bytes: &[u8]) -> bool {
     };
     #[cfg(not(unix))]
     let private = true;
+    // Read only as a plain file with one name: in a state folder the agent can plant it, as a
+    // link or a hard link to a credential (`state_folder::safe_read`).
     meta.is_file()
         && private
         && usize::try_from(meta.len()).is_ok_and(|len| len == bytes.len())
-        && std::fs::read(path).is_ok_and(|held| held == bytes)
+        && matches!(
+            crate::agent::state_folder::safe_read::read_plain(path),
+            Ok(crate::agent::state_folder::safe_read::Found::Bytes(held)) if held == bytes
+        )
 }
 
 /// The failure of a Codex launch whose home or `config.toml` could not be made: the error's
