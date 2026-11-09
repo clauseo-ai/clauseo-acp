@@ -7,7 +7,10 @@
 //! session when one check stays busy past the budget: a call blocked on an agent's oplock never
 //! leaves the matter unwatched while the agent runs. The watches' records (the lawyer's notices
 //! and the set-asides) go to the host's denial pipe (`denial_pipe`), connected just before
-//! (`start.rs`), or only to the log when the launch names none.
+//! (`start.rs`), or only to the log when the launch names none. The agent's state and temp
+//! folders get watches that only note which file IDs left them, so a folder moved from there
+//! into the matter counts gone by its check whatever its creation time says (`git_watch::pairs`);
+//! one that can't be armed is passed over.
 
 use std::io;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -20,7 +23,9 @@ use clauseo_protocol::MatterId;
 
 use super::super::end::EndSignal;
 use super::super::git_watch::os::{DirWatch, Stop};
-use super::super::git_watch::{Cause, Changes, Dog, Guard, Pulse, Session, watch, watchdog};
+use super::super::git_watch::{
+    Cause, Changes, Dog, Guard, Paired, Pairs, Pulse, Session, feed, watch, watchdog,
+};
 use super::super::{LaunchMessage, RunExit};
 use super::{End, Failure, os, say};
 use crate::windows::denial_pipe::Record;
@@ -80,8 +85,9 @@ fn start(
     data_dir: &Path,
     matter: MatterId,
     end: &End,
-    (stop, records): (&Arc<Stop>, &Arc<RecordSink>),
+    (stop, records, pairs): (&Arc<Stop>, &Arc<RecordSink>, &Arc<Pairs>),
 ) -> Result<mpsc::Receiver<()>, NotStarted> {
+    let pairs = Arc::clone(pairs);
     let (armed, first_armed) = mpsc::channel();
     let (finished, done) = mpsc::channel();
     let pulse = Arc::new(Pulse::default());
@@ -107,6 +113,10 @@ fn start(
                     stop: &stop,
                     pulse: &pulse,
                     records: &records,
+                    paired: Paired {
+                        pairs,
+                        root: guard.0.root().to_owned(),
+                    },
                 };
                 match DirWatch::arm(guard.0.root(), &stop) {
                     Ok(source) => {
@@ -155,6 +165,51 @@ fn start(
     Ok(done)
 }
 
+/// Starts the watches that only feed the pairing (`git_watch::feed`): on the agent's state
+/// folder, and on its temp folder when that isn't inside the state folder. A folder that can't
+/// be watched (or a thread that can't start) is logged and passed over, never refusing the
+/// launch: the pairing only adds to the creation-time rule, and the matter stays watched.
+fn pairing(
+    message: &LaunchMessage,
+    stop: &Arc<Stop>,
+    pairs: &Arc<Pairs>,
+) -> Vec<mpsc::Receiver<()>> {
+    let state = PathBuf::from(&message.state);
+    let mut roots = vec![state.clone()];
+    roots.extend(
+        message
+            .tmpdir
+            .as_ref()
+            .map(PathBuf::from)
+            .filter(|tmp| !tmp.starts_with(&state)),
+    );
+    let mut done = Vec::new();
+    for root in roots {
+        let (stop, pairs) = (Arc::clone(stop), Arc::clone(pairs));
+        let (finished, ended) = mpsc::channel();
+        let started = thread::Builder::new()
+            .name("git-pairing".to_owned())
+            .spawn(move || {
+                let ran = catch_unwind(AssertUnwindSafe(|| match DirWatch::arm(&root, &stop) {
+                    Ok(source) => feed(source, &Paired { pairs, root }, monotonic),
+                    Err(error) => tracing::warn!(
+                        code = error.raw_os_error(),
+                        "a pairing watch couldn't be armed; passed over"
+                    ),
+                }));
+                if ran.is_err() {
+                    tracing::warn!("a pairing watch panicked; it notes no more");
+                }
+                let _sent = finished.send(());
+            });
+        match started {
+            Ok(_) => done.push(ended),
+            Err(error) => tracing::warn!(%error, "a pairing watch's thread couldn't start"),
+        }
+    }
+    done
+}
+
 /// The watchdog's side of the session: the outer's end path, the denial pipe and the stop.
 struct OsDog {
     end: End,
@@ -185,9 +240,13 @@ struct OsGuard(GitGuard);
 
 impl Guard for OsGuard {
     fn changed(&self, changes: &Changes, hooks: &impl Hooks) -> Live {
-        let mut live = self
-            .0
-            .changed(&changes.added, &changes.moved_folders, now(), hooks);
+        let fresh = changes.fresh_paths();
+        let mut live = self.0.changed(
+            &changes.added,
+            (&changes.moved_folders, &fresh),
+            now(),
+            hooks,
+        );
         let relinked = self.0.relinked(&changes.relinked, now(), hooks);
         live.moved.extend(relinked.moved);
         live.failed.extend(relinked.failed);
@@ -211,6 +270,7 @@ struct OsSession<'a> {
     stop: &'a Stop,
     pulse: &'a Pulse,
     records: &'a RecordSink,
+    paired: Paired,
 }
 
 impl Session for OsSession<'_> {
@@ -242,6 +302,10 @@ impl Session for OsSession<'_> {
 
     fn pulse(&self) -> &Pulse {
         self.pulse
+    }
+
+    fn paired(&self) -> Option<&Paired> {
+        Some(&self.paired)
     }
 }
 
@@ -299,14 +363,15 @@ pub(super) fn keep(
             .as_ref()
             .map(|notes| (PathBuf::from(notes), Folder::Other)),
     );
-    let mut done = Vec::new();
+    let pairs = Arc::new(Pairs::default());
+    let mut done = pairing(message, &stop, &pairs);
     for (root, folder) in &folders {
         let started = start(
             (root, *folder),
             &end.steps().data_dir,
             message.matter,
             end,
-            (&stop, &records),
+            (&stop, &records, &pairs),
         );
         match started {
             Ok(finished) => done.push(finished),

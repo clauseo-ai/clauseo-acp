@@ -265,7 +265,8 @@ fn a_folder_reported_and_gone_by_its_check_counts_as_gone() {
     let paths = reported(&["came-and-went", "tmp~1.md", "kept", "kept/gone-too"]);
     let folders = reported(&["came-and-went", "kept", "kept/gone-too"]);
     let hooks = calm();
-    let live = watch.changed_with_folders(&Posix::new(true), &paths, &folders, exit(), &hooks);
+    let live =
+        watch.changed_with_folders(&Posix::new(true), &paths, (&folders, &[]), exit(), &hooks);
     assert_eq!(
         live.gone,
         ["came-and-went", "kept/gone-too"].map(PathBuf::from)

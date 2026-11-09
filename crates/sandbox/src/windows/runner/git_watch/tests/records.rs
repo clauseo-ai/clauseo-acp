@@ -20,7 +20,12 @@ fn before(ticks: u64) -> i64 {
 
 /// One record: its action, name, attributes and creation time, padded to a `u32` boundary, in
 /// `layout`.
-fn record(layout: Layout, (action, name, attributes, created): Item<'_>, last: bool) -> Vec<u8> {
+fn record(
+    layout: Layout,
+    (action, name, attributes, created): Item<'_>,
+    id: u64,
+    last: bool,
+) -> Vec<u8> {
     let units: Vec<u8> = name.encode_utf16().flat_map(u16::to_le_bytes).collect();
     let header = if layout == Layout::Plain { 12 } else { 84 };
     let size = (header + units.len()).next_multiple_of(4);
@@ -38,6 +43,7 @@ fn record(layout: Layout, (action, name, attributes, created): Item<'_>, last: b
     } else {
         bytes[8..16].copy_from_slice(&created.to_le_bytes());
         bytes[56..60].copy_from_slice(&attributes.to_le_bytes());
+        bytes[64..72].copy_from_slice(&id.to_le_bytes());
         bytes[80..84].copy_from_slice(&length);
     }
     bytes.extend(units);
@@ -55,9 +61,15 @@ fn buffer(layout: Layout, records: &[(u32, &str, u32)]) -> Vec<u8> {
 }
 
 fn buffer_at(layout: Layout, records: &[Item<'_>]) -> Vec<u8> {
+    let items: Vec<(Item<'_>, u64)> = records.iter().map(|each| (*each, 0)).collect();
+    buffer_ids(layout, &items)
+}
+
+/// Records with their file IDs.
+fn buffer_ids(layout: Layout, records: &[(Item<'_>, u64)]) -> Vec<u8> {
     let mut buffer = Vec::new();
-    for (at, each) in records.iter().enumerate() {
-        buffer.extend(record(layout, *each, at + 1 == records.len()));
+    for (at, (each, id)) in records.iter().enumerate() {
+        buffer.extend(record(layout, *each, *id, at + 1 == records.len()));
     }
     buffer
 }
@@ -105,13 +117,13 @@ fn a_folder_just_made_is_never_listed_to_count_gone_and_one_renamed_in_is() {
 #[test]
 fn a_buffer_that_doesnt_read_as_records_is_an_overflow() {
     for layout in [Layout::Plain, Layout::Extended] {
-        let whole = record(layout, (1, ".git", 0, 0), true);
+        let whole = record(layout, (1, ".git", 0, 0), 0, true);
         assert_eq!(changes(&whole[..10], layout, NOW), None);
         let mut long = whole.clone();
         let at = if layout == Layout::Plain { 8 } else { 80 };
         long[at] = 200;
         assert_eq!(changes(&long, layout, NOW), None);
-        let mut loops = record(layout, (1, "a", 0, 0), false);
+        let mut loops = record(layout, (1, "a", 0, 0), 0, false);
         loops[0..4].copy_from_slice(&256_u32.to_le_bytes());
         assert_eq!(changes(&loops, layout, NOW), None);
     }
@@ -189,4 +201,34 @@ fn the_wall_clock_reads_as_a_filetime() {
     let later = UNIX_EPOCH + Duration::from_secs(1) + Duration::from_nanos(250);
     assert_eq!(filetime(later), 116_444_736_010_000_002);
     assert_eq!(filetime(UNIX_EPOCH - Duration::from_secs(1)), 0);
+}
+
+/// The ruling's pairing: a folder made just now is listed fresh with its file ID (an ADDED one
+/// with no file ID isn't), and each item removed or renamed away is listed with its own.
+#[test]
+fn fresh_folders_and_what_left_are_read_with_their_file_ids() {
+    let records = [
+        ((1, "made", 0x10, before(0)), 7),
+        ((1, "no-id", 0x10, before(0)), 0),
+        ((1, "file", 0x20, before(0)), 8),
+        ((1, "old", 0x10, before(MOVED_IN_AGE + 1)), 9),
+        ((2, "rm", 0x10, 0), 10),
+        ((4, "away", 0x20, 0), 11),
+        ((2, "no-id-gone", 0x10, 0), 0),
+    ];
+    let read = changes(
+        &buffer_ids(Layout::Extended, &records),
+        Layout::Extended,
+        NOW,
+    )
+    .unwrap();
+    assert_eq!(read.fresh_folders, [(PathBuf::from("made"), 7)]);
+    assert_eq!(read.moved_folders, [PathBuf::from("old")]);
+    assert_eq!(
+        read.left,
+        [(PathBuf::from("rm"), 10), (PathBuf::from("away"), 11)]
+    );
+    let read = changes(&buffer_ids(Layout::Plain, &records), Layout::Plain, NOW).unwrap();
+    assert_eq!(read.fresh_folders, Vec::<(PathBuf, u64)>::new());
+    assert_eq!(read.left, Vec::<(PathBuf, u64)>::new());
 }
