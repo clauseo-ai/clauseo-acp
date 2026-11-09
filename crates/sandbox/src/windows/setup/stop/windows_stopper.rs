@@ -33,7 +33,7 @@ use windows::Win32::System::Threading::{
 };
 use windows::core::PWSTR;
 
-use super::{Failed, Image, Pool, Process, StopExit, Stopper, stop};
+use super::{Failed, Image, Pool, Process, StopExit, Stopper, stop, wsl_image};
 use crate::windows::acl::object::Handle;
 use crate::windows::refresh::event_log;
 use crate::windows::setup::pool_steps::windows_bits::WindowsBits;
@@ -217,7 +217,7 @@ impl Record for WindowsStopper {
 }
 
 /// The handles that can suspend and terminate a process, by pid.
-pub(super) type Opened = Vec<(u32, Handle)>;
+pub(in crate::windows) type Opened = Vec<(u32, Handle)>;
 
 /// Every running process, as [`Process`] says, with the handles that can terminate one, by pid.
 ///
@@ -230,7 +230,7 @@ pub(super) type Opened = Vec<(u32, Handle)>;
 /// user's keeps the passes going. A list that can't be read marks every process
 /// `list_failed`: the token then says whose each is, and one it can't read is unknown, unless
 /// its owner is a pool user (`pick::user_of`).
-pub(super) fn processes() -> Result<(Vec<Process>, Opened), Failed> {
+pub(in crate::windows) fn processes() -> Result<(Vec<Process>, Opened), Failed> {
     let mut seen = Vec::new();
     // Every handle stays open until the list is read, the query-only ones too.
     let mut held = Vec::new();
@@ -311,8 +311,11 @@ pub(super) fn look_at(pid: u32) -> Option<(Process, Option<Handle>)> {
     } else {
         None
     };
+    // Read for every process: whether it is WSL's is the WSL step's evidence (`vms.rs`).
+    let read = image_of(&handle);
+    let wsl = wsl_image(&read);
     let image = if token.is_none() && owner.is_none() {
-        image_of(&handle)
+        read
     } else {
         Image::Unread
     };
@@ -322,6 +325,7 @@ pub(super) fn look_at(pid: u32) -> Option<(Process, Option<Handle>)> {
         owner,
         can_stop,
         image,
+        wsl,
         ..Process::default()
     };
     Some((process, Some(handle)))

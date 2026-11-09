@@ -264,11 +264,13 @@ fn every_other_check_still_holds_for_the_move() {
         assert_eq!(exit, RefreshExit::SignatureRefused, "{case}");
         assert_eq!(fake.admin_file, Some(old()), "{case}");
     }
-    // The placeholder key refuses before anything is read.
+    // The placeholder key refuses before anything is read; WSL's deny phases still run, first
+    // and last (ADR 0049 "WSL").
     let mut fake = moving(&exe, &key);
     let exit = run_on(&mut fake, key::PLACEHOLDER_KEY, X64);
     assert_eq!(exit, RefreshExit::PlaceholderKey);
-    assert_eq!(fake.calls, ["is_system"]);
+    let wsl = ["lock_waiting", "reapply_wsl", "unlock"];
+    assert_eq!(fake.calls, [&["is_system"][..], &wsl, &wsl].concat());
 }
 
 #[test]

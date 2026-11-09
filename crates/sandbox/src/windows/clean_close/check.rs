@@ -7,12 +7,16 @@ use std::path::Path;
 use super::changes::{Live, most_touched, read_volume, reduce, resolve};
 use super::journal::Journal;
 use super::record::{self, CleanRecord, Unusable};
+#[cfg(windows)]
+use super::wsl_heal::WindowsDenyTask;
+use super::wsl_heal::{self, DenyTask, LaunchProgress};
 use super::{FullReason, LaunchCheck, WalkInputs};
 use crate::Error;
 use crate::windows::acl_plan::{AdmittedPlan, in_folder};
 use crate::windows::admin_copy::{self, AdminCopyFs};
 use crate::windows::ledger::{EntryState, Ledger};
 use crate::windows::set_aside;
+use crate::windows::wsl::{self, WslRead};
 
 /// The launch check, on the host at the lawyer's token, before the set-aside's launch pass and
 /// `apply`. First the pool is this user's and the set-up program's admin copy passes
@@ -20,12 +24,21 @@ use crate::windows::set_aside;
 /// (`OtherAccount`, `AdminCopyMissing`, `AdminCopyChanged`, `AdminCopyUnsafe`, or `ToolMissing`
 /// for a copy gone after Windows security blocked it) and nothing
 /// is read or removed: without a copy only administrators can
-/// change, tier B can't top up, reclaim or be removed safely, so it doesn't run. Then every
-/// unclean-session marker awaiting a sweep must be clean, or become clean within 15 s of a sweep
-/// this asks for (`runner::unclean::await_sweeps`), or the launch is refused with
-/// [`Error::UncleanSession`], nothing else read or removed. Then, under the
-/// matter's set-aside lock, it reads the matter's clean-close record and removes it, whatever
-/// comes next: a failed removal refuses the launch
+/// change, tier B can't top up, reclaim or be removed safely, so it doesn't run. Next, with WSL
+/// on the machine, its classes' launch permissions must deny the pool group first
+/// (`wsl::check`), or the launch is refused with `WslDenyMissing` or `WslDenyUnverifiable`,
+/// and no WSL upgrade may be pending (`WslUpgradePending`): a pool user who can start WSL gets a
+/// Linux the network filters don't see. Both are healed first (`wsl_heal`): the WSL deny task
+/// (a missing deny) or the WSL upgrade task (a pending upgrade, which its SYSTEM run installs
+/// before it re-applies the deny) is asked to run, as the lawyer, and the check waits for it, up
+/// to 10 s for a missing deny and up to 120 s for a pending upgrade (270 s while its run goes on);
+/// `progress` hears [`LaunchProgress::UpdatingWindowsComponent`] when that wait begins, so the host
+/// can say so. A pending upgrade refuses nothing once the deny is verified; what the healing did is
+/// [`LaunchCheck::wsl_healed`], for the host's log. Then every unclean-session marker awaiting a
+/// sweep must be clean, or become clean within 15 s of a sweep this asks for
+/// (`runner::unclean::await_sweeps`), or the launch is refused with [`Error::UncleanSession`],
+/// nothing else read or removed. Then, under the matter's set-aside lock, it reads the matter's
+/// clean-close record and removes it, whatever comes next: a failed removal refuses the launch
 /// ([`Error::CleanClose`]), and a lock that can't be taken too ([`Error::SetAside`]). Then it
 /// decides ([`LaunchCheck::path`]): see the module's docs and 0049. `ledger` is read as the
 /// caller opened it, just before.
@@ -35,40 +48,98 @@ pub fn check_launch(
     ledger: &Ledger,
     plan: &AdmittedPlan,
     journal: &dyn Journal,
+    progress: &dyn Fn(LaunchProgress),
 ) -> Result<LaunchCheck, Error> {
-    let admin = admin_copy::os::WindowsAdminCopy;
+    let seams = Seams {
+        admin: &admin_copy::os::WindowsAdminCopy,
+        wsl: &wsl::WindowsWsl::reader(),
+        task: &WindowsDenyTask::new(),
+        progress,
+    };
     let mut sweeps = || crate::windows::runner::unclean::os::check_sweeps(data_dir);
-    check_launch_awaiting(&admin, &mut sweeps, data_dir, ledger, plan, journal)
+    check_launch_in(&seams, &mut sweeps, data_dir, ledger, plan, journal)
 }
 
-/// [`check_launch`] with the admin copy read through `admin`, and no marker awaiting a sweep:
-/// the tests'.
+/// What the launch check reads through: the machine on Windows, fakes in the tests.
+pub(crate) struct Seams<'a> {
+    /// The admin copy.
+    pub(crate) admin: &'a dyn AdminCopyFs,
+    /// WSL's registration.
+    pub(crate) wsl: &'a dyn WslRead,
+    /// The WSL deny task, and the clock its waits use.
+    pub(crate) task: &'a dyn DenyTask,
+    /// Told when the wait for a WSL upgrade begins.
+    pub(crate) progress: &'a dyn Fn(LaunchProgress),
+}
+
+/// [`check_launch`] with no WSL deny task (a request fails, as where it isn't registered) and
+/// no marker awaiting a sweep: the tests'.
 #[cfg(test)]
 pub(crate) fn check_launch_with(
     admin: &dyn AdminCopyFs,
+    wsl: &dyn WslRead,
     data_dir: &Path,
     ledger: &Ledger,
     plan: &AdmittedPlan,
     journal: &dyn Journal,
 ) -> Result<LaunchCheck, Error> {
-    check_launch_awaiting(admin, &mut || Ok(()), data_dir, ledger, plan, journal)
+    check_launch_awaiting(admin, wsl, &mut || Ok(()), data_dir, ledger, plan, journal)
 }
 
-/// [`check_launch`] with the admin copy read through `admin` and the markers' sweep checked by
-/// `sweeps`: the machine on Windows, fakes in the tests.
+/// [`check_launch`] with the admin copy read through `admin`, WSL's registration through
+/// `wsl`, no WSL deny task, and the markers' sweep checked by `sweeps`: the tests'.
+#[cfg(test)]
 pub(crate) fn check_launch_awaiting(
     admin: &dyn AdminCopyFs,
+    wsl: &dyn WslRead,
     sweeps: &mut dyn FnMut() -> Result<(), String>,
     data_dir: &Path,
     ledger: &Ledger,
     plan: &AdmittedPlan,
     journal: &dyn Journal,
 ) -> Result<LaunchCheck, Error> {
-    admin_copy::check_launchable(admin).map_err(Error::Blocked)?;
+    let task = super::wsl_heal::fake::FakeTask::absent();
+    let seams = Seams {
+        admin,
+        wsl,
+        task: &task,
+        progress: &|_| {},
+    };
+    check_launch_in(&seams, sweeps, data_dir, ledger, plan, journal)
+}
+
+/// [`check_launch`] through `seams`, the markers' sweep checked by `sweeps`.
+pub(crate) fn check_launch_in(
+    seams: &Seams<'_>,
+    sweeps: &mut dyn FnMut() -> Result<(), String>,
+    data_dir: &Path,
+    ledger: &Ledger,
+    plan: &AdmittedPlan,
+    journal: &dyn Journal,
+) -> Result<LaunchCheck, Error> {
+    admin_copy::check_launchable(seams.admin).map_err(Error::Blocked)?;
+    let healed = wsl_heal::heal(&mut || wsl::inspect(seams.wsl), seams.task, seams.progress);
+    let (found, healed) = healed.map_err(|refused| {
+        let (blocked, why) = (refused.blocked, refused.why);
+        tracing::warn!(?blocked, %why, "WSL's check refused the launch");
+        Error::Blocked(blocked)
+    })?;
+    tracing::info!(?found, ?healed, "WSL's deny for the pool");
     sweeps().map_err(|why| {
         tracing::warn!(%why, "an earlier session's marker still awaits a sweep");
         Error::UncleanSession(why)
     })?;
+    let check = record_check(data_dir, ledger, plan, journal)?;
+    Ok(check.with_wsl(healed))
+}
+
+/// The clean-close record read and removed under the matter's lock, then the decision.
+fn record_check(
+    data_dir: &Path,
+    ledger: &Ledger,
+    plan: &AdmittedPlan,
+    journal: &dyn Journal,
+) -> Result<LaunchCheck, Error> {
     let matter = plan.matter();
     let held = set_aside::under_lock(data_dir, &matter, |open| {
         let found = record::read(data_dir, &matter);

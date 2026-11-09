@@ -42,7 +42,9 @@
 //!    on them and the firewall rules (S15 PR7, `wfp::remove`): `stop_strays` only logs a
 //!    process that won't stop, which must not run unfiltered while a user's removal fails. A
 //!    firewall failure is not fatal, as at set-up ([`RemoveReport::firewall`]);
-//! 5. `DeviceSync`'s deny;
+//! 5. `DeviceSync`'s deny, then WSL's deny for the group on each recorded launch permission
+//!    (`windows::wsl::remove`: our denies only, a value we made deleted, no old value written
+//!    back), before the group goes, so no deny names a SID that is gone;
 //! 6. the ledger's entries (`ledger_work.rs`), read from the record's `DataDir`, which the owner
 //!    can influence, so it is checked as `--data-dir` is and used only as `ledger_work.rs` says;
 //! 7. the group, when it is the record's and has no members left, its "Deny log on through
@@ -53,9 +55,9 @@
 //!    removal leaves them (it deletes nothing in the owner's folders, K1), and the next set-up's
 //!    readers drop each as stale, since it names a pool SID the record no longer lists
 //!    (`runner::unclean`);
-//! 9. on a per-machine install, the stop and sweep tasks set-up registered for the owner, then
-//!    the record key, which takes the set-up's values with it (`SETUP_VALUES`: the stop's and
-//!    the sweep's `…Next`, `…Sequence` and `…Completed` among them);
+//! 9. on a per-machine install, the stop, sweep and WSL tasks set-up registered for the owner,
+//!    then the record key, which takes the set-up's values with it (`SETUP_VALUES`: the stop's
+//!    and the sweep's `…Next`, `…Sequence` and `…Completed` among them);
 //! 10. for the uninstaller only, the admin copy's teardown (`admin_remove.rs`, run through
 //!     [`remove_then`]), with the lock still held, so a refresh skips instead of racing it.
 //!
@@ -73,11 +75,14 @@ use super::machine::{MachineError, ProfileDir};
 use super::outcome::{SetupExit, cause_of};
 use super::record_values::CopyOwner;
 use crate::windows::pool::{MachineRecord, pool_number};
+#[cfg(any(windows, test))]
+use crate::windows::refresh::MACHINE_TASKS;
 use crate::windows::shared_writes::{
     plan_shared_write_denies, remove_shared_write_denies, shared_write_targets,
 };
 use crate::windows::sids::Sid;
 use crate::windows::writer::AclWriter;
+use crate::windows::wsl::WslRemoved;
 
 mod ledger_work;
 pub mod owners;
@@ -119,6 +124,8 @@ pub struct RemoveReport {
     /// Why the firewall rules couldn't be removed, when they couldn't: not fatal, as at set-up,
     /// since the WFP filters (the enforcing layer) went (S15 PR7).
     pub firewall: Option<String>,
+    /// WSL's deny taken off: how many values, and each left because it can't be parsed.
+    pub wsl: WslRemoved,
 }
 
 /// The step a removal stopped at. Variants are appended from here on.
@@ -150,12 +157,14 @@ pub enum RemoveStep {
     Record,
     /// Removing the network filters and firewall rules (S15 PR7).
     Network,
-    /// A per-machine install's stop and sweep tasks, deleted before the record.
+    /// A per-machine install's stop, sweep and WSL tasks, deleted before the record.
     StopTask,
     /// Taking the group's "Deny log on through Remote Desktop Services" off, before the group.
     RemoteLogon,
     /// Removing the owner's unclean-session markers, as the owner, before the record.
     Markers,
+    /// Taking WSL's deny for the group off its launch permissions (`windows::wsl::remove`).
+    Wsl,
 }
 
 impl std::fmt::Display for RemoveStep {
@@ -174,9 +183,10 @@ impl std::fmt::Display for RemoveStep {
             RemoveStep::Group => "deleting the sandbox group",
             RemoveStep::Record => "deleting the machine's record",
             RemoveStep::Network => "removing the network filters",
-            RemoveStep::StopTask => "deleting the sandbox's stop and sweep tasks",
+            RemoveStep::StopTask => "deleting the sandbox's stop, sweep and WSL tasks",
             RemoveStep::RemoteLogon => "taking the sandbox group's Remote Desktop deny off",
             RemoveStep::Markers => "removing the sandbox's unclean-session markers",
+            RemoveStep::Wsl => "taking WSL's deny for the sandbox users off",
         })
     }
 }
@@ -410,12 +420,15 @@ fn steps(
             format!("DeviceSync's deny: {cause}"),
         )
     })?;
+    report.wsl = machine
+        .remove_wsl_deny(&record.group)
+        .map_err(|e| (RemoveStep::Wsl, cause_of(&e)))?;
     report.ledger = ledger_work::run(machine, acl, record, acting)?;
     report.group = remove_group(machine, record)?;
     if acting == Acting::Owner {
         clear_markers(machine)?;
     }
-    remove_stop_task(machine)?;
+    remove_machine_tasks(machine)?;
     machine
         .delete_record()
         .map_err(|e| (RemoveStep::Record, cause_of(&e)))?;
@@ -537,14 +550,21 @@ fn clear_markers(machine: &mut impl Removal) -> Result<(), Failed> {
 }
 
 /// Step 8, before the record goes: on a per-machine install (`AdminCopyOwner` is `machine`),
-/// the tasks `\Clauseo\SandboxStop` and `\Clauseo\SandboxSweep` set-up registered for the
-/// record's owner are deleted, so the owner keeps no start right once their pool is gone. A
-/// per-user install's tasks stay (`--adopt` registered them; `--remove --uninstall` deletes
-/// them with the admin copy).
-fn remove_stop_task(machine: &mut impl Removal) -> Result<(), Failed> {
+/// each of [`MACHINE_TASKS`] set-up registered for the record's owner (`\Clauseo\SandboxStop`,
+/// `\Clauseo\SandboxSweep`, `\Clauseo\SandboxWslDeny`, `\Clauseo\SandboxWslUpgrade`) is
+/// deleted, so the owner keeps no start
+/// right once their pool is gone. A per-user install's tasks stay (`--adopt` registered them;
+/// `--remove --uninstall` deletes them with the admin copy).
+fn remove_machine_tasks(machine: &mut impl Removal) -> Result<(), Failed> {
     let failed = |e: MachineError| (RemoveStep::StopTask, cause_of(&e));
     match machine.copy_owner().map_err(failed)? {
-        Some(CopyOwner::Machine) => machine.unregister_stop_task().map_err(failed),
+        Some(CopyOwner::Machine) => {
+            #[cfg(any(windows, test))]
+            for task in MACHINE_TASKS {
+                machine.unregister_task(task).map_err(failed)?;
+            }
+            Ok(())
+        }
         Some(CopyOwner::User(_)) | None => Ok(()),
     }
 }

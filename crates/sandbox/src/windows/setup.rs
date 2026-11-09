@@ -31,7 +31,11 @@
 //! Between steps 8 and 9, step 8a (S15 PR7, `wfp`) writes the network filters: WFP block filters
 //! naming every live pool user, the owner's grants that let a launch add its own permit, and the
 //! firewall rules. A WFP failure fails the set-up; a firewall Group Policy ignores is only
-//! reported.
+//! reported. WSL's deny (`wsl`) denies the group in WSL's COM launch permissions twice: as soon
+//! as the group and the record exist (after step 5's record write), and again after the marker.
+//! Like step 9 it never fails the set-up (the launch check refuses while a deny is missing), its
+//! targets are recorded in the record's `WslDenyAppIds` and `WslDenyAbsent`, and a rollback
+//! takes it off before the group goes.
 //!
 //! A re-run on a pool this owner set up (D-B6) keeps the recorded accounts that exist, resets
 //! their passwords, logs each on again and re-applies the shared writes; it makes again each
@@ -149,6 +153,9 @@ pub mod taken_file;
 mod top_up;
 #[cfg(windows)]
 mod windows_machine;
+#[cfg(test)]
+#[cfg(windows)]
+mod wsl_tests;
 
 pub use machine::{LogonRight, Machine, MachineError, Password, ProfileDir, ServiceStart};
 pub use outcome::{
@@ -157,6 +164,10 @@ pub use outcome::{
     LOGON_NOT_GRANTED, LOGON_REFUSED, SECLOGON_DISABLED, SetupExit, SetupFailure, SetupReport,
     Step, TopUp, launch_code, launch_error,
 };
+// The record's WSL targets, for `windows::wsl`'s registry seam.
+#[cfg(windows)]
+pub(crate) use record_write::{delete_wsl, read_wsl, write_wsl};
+
 // `remove::Removal` stays at its path: the set-up's fake implements both seams, and a glob
 // import of both would make their shared method names ambiguous in the set-up's tests.
 pub use remove::{

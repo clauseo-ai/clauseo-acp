@@ -46,11 +46,12 @@ fn a_failure_at_each_step_rolls_back_to_the_machine_before() {
         .position(|c| c.starts_with("write_record"))
         .unwrap();
     for (at, call) in calls.iter().enumerate() {
-        // The lock has its own test; the journal never fails the set-up.
+        // The lock has its own test; the journal and WSL's deny never fail the set-up.
         if call == "lock"
             || call == "unlock"
             || call.starts_with("journal")
             || call.starts_with("grow")
+            || call.starts_with("wsl_deny")
         {
             continue;
         }
@@ -276,4 +277,43 @@ fn a_failed_re_run_keeps_every_account_that_was_there() {
         &sid(1000),
         Rights::DenyWrite
     ));
+}
+
+#[test]
+fn a_rollback_takes_wsls_deny_off_before_the_group_and_keeps_the_group_if_it_cant() {
+    // The marker fails after WSL's deny: the deny comes off, then the group goes.
+    let (failure, machine, _, before) = failing_at("setup-wsl-rollback", "write_marker");
+    assert!(failure.rolled_back, "{}", failure.cause);
+    assert_eq!(machine.state.wsl, None);
+    assert_eq!(before.wsl, None);
+    let at = |line: &str| machine.calls.iter().position(|c| c == line);
+    assert!(at("wsl_remove 1000").unwrap() < at("delete_group 1000").unwrap());
+    // A failure before the deny was tried asks nothing of WSL.
+    let (_, machine, _, _) = failing_at("setup-wsl-rollback-early", "log_on_once ClauseoSb08");
+    assert_eq!(at_in(&machine, "wsl_remove 1000"), None);
+    // A removal that fails keeps the group, recorded, so the deny names a group that is there.
+    let mut machine = FakeMachine::new("setup-wsl-rollback-kept");
+    machine.fail("write_marker");
+    machine.fail("wsl_remove 1000");
+    let mut acl = FakeAcl::default();
+    let req = request(&mut machine, 0, Vec::new());
+    let failure = set_up(&mut machine, &mut acl, &req).unwrap_err();
+    assert!(!failure.rolled_back, "{}", failure.cause);
+    assert!(
+        failure.cause.contains("ClauseoSandboxUsers"),
+        "{}",
+        failure.cause
+    );
+    assert_eq!(at_in(&machine, "delete_group 1000"), None);
+    assert_eq!(machine.state.wsl, Some(sid(1000)));
+    assert_eq!(machine.state.group, Some(sid(1000)));
+    assert_eq!(
+        machine.state.record.as_ref().map(|r| r.group.clone()),
+        Some(sid(1000))
+    );
+}
+
+/// Where `line` is in `machine`'s calls.
+fn at_in(machine: &FakeMachine, line: &str) -> Option<usize> {
+    machine.calls.iter().position(|c| c == line)
 }

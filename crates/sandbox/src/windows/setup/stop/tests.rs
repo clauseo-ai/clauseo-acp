@@ -16,6 +16,7 @@ mod owed;
 mod record;
 mod sequence;
 mod users;
+mod vms;
 
 const OWNER: &str = "S-1-5-21-1-2-3-1001";
 const ADMIN_EXE: &str = r"C:\Program Files\Clauseo\Sandbox\clauseo-sandbox-setup.exe";
@@ -92,11 +93,12 @@ struct Fake {
     pool_from: Option<(usize, Result<Option<Pool>, Failed>)>,
     /// The `Stop*` value whose reads fail.
     read_fails: Option<&'static str>,
-    /// The task's end: terminating this pid kills the run there, as the Task Scheduler's end
-    /// (or its time limit) kills the process.
+    /// Terminating this pid kills the run there, as the Task Scheduler's end (or limit) does.
     end_at: Option<u32>,
     /// The sweep task's requests, each with how many snapshots were taken by then.
     sweeps: Vec<usize>,
+    /// HCS's compute systems and the pool's VM folders (`tests/vms.rs`).
+    vms: vms::FakeVms,
     done: Vec<String>,
     logged: Vec<(bool, String)>,
 }
@@ -133,6 +135,7 @@ impl Fake {
             read_fails: None,
             end_at: None,
             sweeps: Vec::new(),
+            vms: vms::FakeVms::default(),
             done: Vec::new(),
             logged: Vec::new(),
         }
@@ -373,8 +376,8 @@ fn only_the_records_pool_users_processes_are_stopped_and_those_users_marked() {
     assert_eq!(
         line,
         "the sandbox's stop: 3 pool users, 2 found running, 3 processes stopped in 2 passes, \
-         0 left, 0 unknown, 0 BITS jobs cancelled, 0 not; the sweep task was requested; 2 \
-         users marked for a profile reset (0 retried)"
+         0 left, 0 unknown, 0 BITS jobs cancelled, 0 not, WSL VM step skipped: no pool WSL \
+         evidence; the sweep task was requested; 2 users marked for a profile reset (0 retried)"
     );
     // The sweep is asked for once, after the last pass.
     assert_eq!(fake.sweeps, [2]);

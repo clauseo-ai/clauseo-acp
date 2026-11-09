@@ -31,12 +31,13 @@
 //!    set-up locks again once it records one;
 //! 6. per user, the SYSTEM tasks (`refresh::register_task`, PR 3) are registered for the
 //!    lawyer, in `refresh::TASKS`' order: `\Clauseo\SandboxRefresh`, `\Clauseo\SandboxStop`,
-//!    then `\Clauseo\SandboxSweep`. Any failing is `Failed` with no value written, so the
-//!    launcher's check finds the copy missing rather than running it with no task to refresh
-//!    it, to stop the pool's processes or to sweep its tasks (a refresh before the values exist
-//!    exits 33, changing nothing). A per-machine install doesn't update itself and has no owner
-//!    yet, so it gets none here; its set-up registers the stop and sweep tasks for the owner it
-//!    records (`late_steps::stop_task`);
+//!    then `\Clauseo\SandboxSweep`, `\Clauseo\SandboxWslDeny` and `\Clauseo\SandboxWslUpgrade`.
+//!    Any failing is `Failed` with no value written, so the launcher's check finds the copy
+//!    missing rather than running it with no task to refresh it, to stop the pool's processes, to
+//!    sweep its tasks or to put WSL's deny back (a refresh before the values exist exits 33,
+//!    changing nothing). A per-machine install doesn't update itself and has no owner yet, so it
+//!    gets none here; its set-up registers the stop, sweep and WSL tasks for the owner it records
+//!    (`late_steps::machine_tasks`);
 //! 7. the copy's SHA-256, read from its file in the admin folder (a reparse point refused), the
 //!    install folder, this build's version and the owner (the SID, or `machine`) are written as
 //!    the record's `AdminCopySha256`, `UserInstallDir`, `AdminCopyVersion` and

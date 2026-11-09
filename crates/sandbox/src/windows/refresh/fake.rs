@@ -54,6 +54,16 @@ pub(super) struct Fake {
     pub(super) denies: Option<Sid>,
     pub(super) denied_for: Vec<Sid>,
     pub(super) logs: Vec<(bool, String)>,
+    /// What `reapply_wsl` gives.
+    pub(super) wsl: Result<Option<String>, Failed>,
+    /// What each `reapply_wsl` gives in turn, before `wsl` once it is empty.
+    pub(super) wsl_passes: Vec<Result<Option<String>, Failed>>,
+    /// The waits `pause` was asked for.
+    pub(super) paused: Vec<std::time::Duration>,
+    /// What `upgrade_wsl` gives.
+    pub(super) upgrade: WslUpgraded,
+    /// What `pool_busy` gives.
+    pub(super) pool_busy: Result<bool, Failed>,
     /// The staging folder's state.
     pub(super) staging: Staging,
 }
@@ -101,6 +111,11 @@ impl Fake {
             denied_for: Vec::new(),
             logs: Vec::new(),
             staging: Staging::Absent,
+            wsl: Ok(None),
+            wsl_passes: Vec::new(),
+            paused: Vec::new(),
+            upgrade: WslUpgraded::NotPending,
+            pool_busy: Ok(false),
         }
     }
 
@@ -157,6 +172,11 @@ impl Refresher for Fake {
         // `fail: Some("lock")` is another holder.
         self.calls.push("lock");
         Ok(self.fail != Some("lock"))
+    }
+    fn lock_waiting(&mut self) -> Result<bool, Failed> {
+        // `fail: Some("lock_waiting")` is another holder past the wait.
+        self.calls.push("lock_waiting");
+        Ok(self.fail != Some("lock_waiting"))
     }
     fn unlock(&mut self) {
         self.calls.push("unlock");
@@ -281,6 +301,30 @@ impl Refresher for Fake {
     }
     fn log(&mut self, error: bool, line: &str) {
         self.logs.push((error, line.to_owned()));
+    }
+    fn reapply_wsl(&mut self) -> Result<Option<String>, Failed> {
+        self.calls.push("reapply_wsl");
+        if self.wsl_passes.is_empty() {
+            self.wsl.clone()
+        } else {
+            self.wsl_passes.remove(0)
+        }
+    }
+    fn pause(&mut self, time: std::time::Duration) {
+        self.calls.push("pause");
+        self.paused.push(time);
+    }
+}
+
+impl WslUpgrade for Fake {
+    fn pool_busy(&mut self) -> Result<bool, Failed> {
+        self.calls.push("pool_busy");
+        self.pool_busy.clone()
+    }
+
+    fn upgrade_wsl(&mut self) -> WslUpgraded {
+        self.calls.push("upgrade_wsl");
+        self.upgrade.clone()
     }
 }
 

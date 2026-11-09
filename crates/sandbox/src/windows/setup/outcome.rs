@@ -13,6 +13,7 @@ use crate::windows::pool::PoolUser;
 use crate::windows::shared_writes::SharedWrites;
 use crate::windows::sids::Sid;
 use crate::windows::wfp::NetworkReport;
+use crate::windows::wsl::WslApplied;
 use crate::{Blocked, SetupError};
 
 /// `ERROR_VIRUS_INFECTED`: Windows security blocked the setup exe as infected.
@@ -214,8 +215,10 @@ pub enum Step {
     ResetProfile,
     /// 8a: the network filters, the owner's grants on them and the firewall rules (S15 PR7).
     Network,
-    /// 5: on a per-machine install, registering the SYSTEM tasks `\Clauseo\SandboxStop` and
-    /// `\Clauseo\SandboxSweep` for the owner just recorded (`late_steps::stop_task`).
+    /// 5: on a per-machine install, registering the SYSTEM tasks `\Clauseo\SandboxStop`,
+    /// `\Clauseo\SandboxSweep`, `\Clauseo\SandboxWslDeny` and `\Clauseo\SandboxWslUpgrade` for
+    /// the owner just recorded
+    /// (`late_steps::machine_tasks`).
     StopTask,
     /// 3: denying the group "log on through Remote Desktop Services"
     /// (`SeDenyRemoteInteractiveLogonRight`).
@@ -251,7 +254,7 @@ impl fmt::Display for Step {
             Step::Owners => "making sure no sandbox user owns a protected folder",
             Step::ResetProfile => "resetting a sandbox user's profile",
             Step::Network => "setting up the network filters",
-            Step::StopTask => "registering the sandbox's stop and sweep tasks",
+            Step::StopTask => "registering the sandbox's stop, sweep and WSL tasks",
             Step::RemoteLogon => "denying the sandbox users Remote Desktop logon",
             Step::AdminLock => "locking the set-up program's admin copy",
         })
@@ -366,6 +369,10 @@ pub struct SetupReport {
     /// effect: under Group Policy they may not, which leaves WFP's filters enforcing alone
     /// ([`FirewallOutcome::Ineffective`](crate::windows::wfp::FirewallOutcome::Ineffective)).
     pub network: NetworkReport,
+    /// WSL's deny for the pool group (its last pass, after the marker, `windows::wsl`): what it
+    /// found and wrote, and each target it couldn't; `Err` when the targets couldn't be found,
+    /// and why. Never a failure of the set-up: the launch check refuses while a deny is missing.
+    pub wsl: Result<WslApplied, String>,
 }
 
 /// What a run did to leave at least [`MIN_FREE_AFTER_RUN`](super::MIN_FREE_AFTER_RUN) free pool

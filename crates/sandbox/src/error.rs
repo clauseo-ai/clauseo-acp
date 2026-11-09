@@ -108,7 +108,11 @@ pub enum Error {
     /// Windows tier B refuses to launch for a cause only whoever looks after the computer can
     /// fix (D-B4): the set-up program's admin copy is missing, changed or in a folder others
     /// can change (`Blocked::AdminCopy*`, from `windows::clean_close::check_launch`), or gone
-    /// after Windows security blocked it (`Blocked::ToolMissing`). Nothing was planned or
+    /// after Windows security blocked it (`Blocked::ToolMissing`), or WSL's deny for the pool is
+    /// missing or can't be checked (`Blocked::WslDenyMissing`, `WslDenyUnverifiable`, from
+    /// `windows::wsl::check`, once the launch check's self-healing couldn't repair it), or a WSL
+    /// update is pending (`WslUpgradePending`, from `wsl::check` alone: the launch check has it
+    /// installed and refuses only a deny it can't verify after). Nothing was planned or
     /// written, and the caller shows the cause rather than run on a weaker tier in silence.
     #[error("the sandbox can't run: {0}")]
     Blocked(crate::Blocked),
@@ -194,6 +198,10 @@ mod tests {
                 "admin_copy_unsafe",
                 "other_account",
                 "tool_missing",
+                "wsl_deny_missing",
+                "wsl_deny_unverifiable",
+                "wsl_pool_residue",
+                "wsl_upgrade_pending",
             ]
         );
         for blocked in crate::Blocked::ALL {

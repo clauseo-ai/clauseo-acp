@@ -38,10 +38,11 @@ use crate::windows::marker::{self, Marker, MarkerState};
 use crate::windows::matters::MatterSids;
 use crate::windows::pool::{MachineRecord, POOL_GROUP, POOL_PREFIX, pool_number};
 use crate::windows::record::current_user_sid;
-use crate::windows::refresh;
+use crate::windows::refresh::{self, SystemTask};
 use crate::windows::secrets;
 use crate::windows::sids::{Reserved, Sid};
 use crate::windows::wfp::{self, Namespace, NetworkReport, NetworkSetup};
+use crate::windows::wsl::{self, WindowsWsl, WslApplied, WslRemoved};
 
 /// `BUILTIN\Administrators`, the owner a protected folder is handed to.
 const ADMINISTRATORS: &str = "S-1-5-32-544";
@@ -66,6 +67,9 @@ pub struct Names {
     pub journals: bool,
     /// Where the network filters and firewall rules go (S15 PR7): Clauseo's, or a test's.
     pub wfp: Namespace,
+    /// Whether WSL's launch permissions may be changed (`windows::wsl`); a test's machine leaves
+    /// them as they are (the WSL test makes its own `AppID`).
+    pub wsl: bool,
 }
 
 impl Names {
@@ -78,6 +82,7 @@ impl Names {
             users: POOL_PREFIX.to_owned(),
             journals: true,
             wfp: Namespace::production(),
+            wsl: true,
         }
     }
 
@@ -424,12 +429,8 @@ impl Machine for WindowsMachine {
         record_write::read_admin(&self.names.record_key).map(|(owner, _version)| owner)
     }
 
-    fn register_stop_task(&mut self, owner: &Sid) -> Result<(), MachineError> {
-        for task in refresh::POOL_TASKS {
-            refresh::register_task(task, owner)
-                .map_err(|error| MachineError::Other(format!("{}: {error}", task.name())))?;
-        }
-        Ok(())
+    fn register_task(&mut self, task: SystemTask, owner: &Sid) -> Result<(), MachineError> {
+        refresh::register_task(task, owner).map_err(|error| MachineError::Other(error.to_string()))
     }
 
     fn lock_admin_copy(&mut self, group: &Sid) -> Result<(), MachineError> {
@@ -497,6 +498,24 @@ impl Machine for WindowsMachine {
         // so does a machine whose dynamic or excluded port ranges overlap tier B's ports.
         wfp::check_ports(false).map_err(|gap| MachineError::Other(gap.to_string()))?;
         wfp::install(&self.names.wfp, setup).map_err(|error| MachineError::Other(error.cause()))
+    }
+
+    fn wsl_deny(&mut self, group: &Sid) -> Result<WslApplied, MachineError> {
+        // Elevated, never as the owner: the `AppID` keys are the machine's.
+        if !self.names.wsl {
+            return Ok(WslApplied::default());
+        }
+        wsl::apply(&mut WindowsWsl::writer(&self.names.record_key), group)
+            .map_err(|error| MachineError::Other(format!("WSL's deny: {error}")))
+    }
+
+    fn wsl_remove(&mut self, group: &Sid) -> Result<WslRemoved, MachineError> {
+        // Elevated, never as the owner, as the step that wrote it.
+        if !self.names.wsl {
+            return Ok(WslRemoved::default());
+        }
+        wsl::remove(&mut WindowsWsl::writer(&self.names.record_key), group)
+            .map_err(|error| MachineError::Other(format!("WSL's deny: {error}")))
     }
 
     fn protect_for_owner(

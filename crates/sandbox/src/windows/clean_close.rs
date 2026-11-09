@@ -52,6 +52,9 @@ mod ntfs_tests;
 mod ntfs_timing;
 #[cfg(any(windows, test))]
 mod record;
+#[cfg(any(windows, test))]
+pub mod wsl_heal;
+mod wsl_healed;
 
 #[cfg(any(windows, test))]
 #[cfg(windows)]
@@ -71,6 +74,7 @@ pub use ntfs::NtfsJournal;
 pub(crate) use record::record_path as fake_record_path;
 #[cfg(any(windows, test))]
 pub(crate) use record::remove as remove_record;
+pub use wsl_healed::{LaunchProgress, WslHealed};
 
 /// The most changed items a targeted launch handles; see [`changes`]' docs for the choice.
 pub const MOST_TOUCHED: usize = 2_000;
@@ -166,6 +170,7 @@ pub struct LaunchCheck {
     path: LaunchPath,
     targets: Vec<Target>,
     inputs: Option<WalkInputs>,
+    wsl: wsl_healed::WslHealed,
 }
 
 impl LaunchCheck {
@@ -175,6 +180,7 @@ impl LaunchCheck {
             path: LaunchPath::Full(reason),
             targets: Vec::new(),
             inputs: None,
+            wsl: wsl_healed::WslHealed::Nothing,
         }
     }
 
@@ -189,7 +195,21 @@ impl LaunchCheck {
             path,
             targets,
             inputs: Some(inputs),
+            wsl: wsl_healed::WslHealed::Nothing,
         }
+    }
+
+    /// The check with what WSL's self-healing did.
+    #[cfg(any(windows, test))]
+    pub(crate) fn with_wsl(mut self, healed: wsl_healed::WslHealed) -> LaunchCheck {
+        self.wsl = healed;
+        self
+    }
+
+    /// What WSL's self-healing did before the launch (`wsl_heal`): the host logs
+    /// [`WslHealed::log_line`](wsl_healed::WslHealed::log_line) when it isn't `Nothing`.
+    pub fn wsl_healed(&self) -> wsl_healed::WslHealed {
+        self.wsl
     }
 
     /// Which path the launch takes.

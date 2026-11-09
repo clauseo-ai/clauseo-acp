@@ -15,6 +15,7 @@ use crate::windows::acl_plan::{Grant, Sid};
 use crate::windows::apply::Surroundings;
 use crate::windows::ledger::{Ledger, RecordedFile, ledger_path};
 use crate::windows::pool::MachineRecord;
+use crate::windows::refresh::SystemTask;
 use crate::windows::runner::marker::{marker_path, remove_marker, unclean_sessions};
 use crate::windows::set_aside::forget_bookkeeping;
 use crate::windows::setup::record_values::CopyOwner;
@@ -26,6 +27,7 @@ use crate::windows::sids::Reserved;
 use crate::windows::writer::{
     AclWriter, Added, ApplyFailure, FileId, Label, Reach, Strict, Walked,
 };
+use crate::windows::wsl::WslRemoved;
 
 /// The lines, shared by the machine and the writer.
 pub(super) type Log = Rc<RefCell<Vec<String>>>;
@@ -214,9 +216,15 @@ impl Removal for Remover {
         Machine::copy_owner(&mut self.m)
     }
 
-    fn unregister_stop_task(&mut self) -> Result<(), MachineError> {
-        self.call("unregister_stop_task")?;
-        self.m.state.stop_task = None;
+    fn unregister_task(&mut self, task: SystemTask) -> Result<(), MachineError> {
+        self.call(format!("unregister_task {}", task.name()))?;
+        match task {
+            SystemTask::Stop => self.m.state.stop_task = None,
+            SystemTask::Sweep => self.m.state.sweep_task = None,
+            SystemTask::WslDeny => self.m.state.wsl_task = None,
+            SystemTask::WslUpgrade => self.m.state.wsl_upgrade_task = None,
+            SystemTask::Refresh => panic!("the removal never deletes the refresh alone"),
+        }
         Ok(())
     }
 
@@ -246,6 +254,11 @@ impl Removal for Remover {
         );
         self.call("remove_network".to_owned())?;
         Ok(self.firewall_failure.map(str::to_owned))
+    }
+
+    fn remove_wsl_deny(&mut self, group: &Sid) -> Result<WslRemoved, MachineError> {
+        self.call(format!("remove_wsl_deny {}", rid(group)))?;
+        Ok(WslRemoved::default())
     }
 
     fn account_name(&mut self, sid: &Sid) -> Result<Option<String>, MachineError> {

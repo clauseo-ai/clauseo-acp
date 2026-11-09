@@ -6,7 +6,8 @@ use std::io;
 use std::path::PathBuf;
 
 use super::late_steps::{
-    admin_lock, fence, journals, network, own_protected, refuse_pool_owner, registered, stop_task,
+    admin_lock, fence, journals, machine_tasks, network, own_protected, refuse_pool_owner,
+    registered, wsl_deny,
 };
 use super::machine::{LogonRight, Machine, Password, ServiceStart, owned};
 use super::outcome::{
@@ -33,8 +34,7 @@ pub(super) type Failed = (Step, String);
 struct Plan {
     /// The recorded users whose accounts exist, in record order.
     kept: Vec<PoolUser>,
-    /// The record's SIDs that stay in it, in record order: the kept users' and the dead ones a
-    /// ledger entry names.
+    /// The record's SIDs that stay, in record order: kept users' and dead ones a ledger names.
     base: Vec<Sid>,
     /// Recorded SIDs whose accounts are gone and which a ledger entry names.
     kept_dead: Vec<Sid>,
@@ -264,8 +264,7 @@ fn plan_pool(
     Ok(plan)
 }
 
-/// Steps 3 to 11: everything that changes the machine. The first failure returns at once; the
-/// caller rolls back what `run` lists.
+/// Steps 3 to 11, the changes. The first failure returns at once; the caller rolls back `run`.
 fn change(
     machine: &mut impl Machine,
     acl: &mut impl AclWriter,
@@ -285,12 +284,12 @@ fn change(
         write_record(machine, &record).map_err(|cause| (Step::WriteRecord, cause))?;
         run.recorded = Some(record);
     }
+    // WSL's deny, first, once the group and the record (its targets' record) exist; again last.
+    run.wsl_tried = true;
+    let first_wsl = wsl_deny(machine, &group);
     admin_lock(machine, &group)?;
-    // A failure after this leaves the task registered, naming this run's owner: the rollback has
-    // no step for it. It still stops only what the record names: after a first set-up's rollback
-    // there is no record (`--stop` then does nothing) or only the users the rollback couldn't
-    // remove; after a re-run's, the pool as before.
-    stop_task(machine, &req.owner)?;
+    // A later failure keeps the tasks (no rollback step); they act only on the record's pool.
+    machine_tasks(machine, &req.owner)?;
     let local_lows: Vec<(PathBuf, PathBuf)> = users
         .profiles
         .iter()
@@ -319,6 +318,11 @@ fn change(
     };
     owned(machine, |machine| machine.write_marker(&marker))
         .map_err(|error| (Step::Marker, cause_of(&error)))?;
+    // Last: it writes only what a WSL install or update changed since; the report's outcome.
+    if let Err(why) = &first_wsl {
+        tracing::warn!(%why, "WSL's first deny pass failed; the last pass is the report's");
+    }
+    let wsl = wsl_deny(machine, &group);
     Ok(SetupReport {
         pool: users.profiles.into_iter().map(|(user, _)| user).collect(),
         made: run.made.iter().map(|made| made.user.clone()).collect(),
@@ -335,6 +339,7 @@ fn change(
         journals,
         top_up: plan.top_up.clone(),
         network,
+        wsl,
     })
 }
 

@@ -104,13 +104,38 @@ pub enum Blocked {
     /// started it: `ShellExecuteExW` gave `ERROR_VIRUS_INFECTED` (225) or `ERROR_VIRUS_DELETED`
     /// (226). A copy that isn't there before the start is [`Blocked::AdminCopyMissing`].
     ToolMissing,
+    /// WSL is on this computer and the deny that keeps the sandbox users out of it
+    /// (`windows::wsl`) is missing from one of its classes' COM launch permissions, or comes
+    /// after an allow there: a WSL update or repair rewrote it, say. The SYSTEM tasks put it
+    /// back: `\Clauseo\SandboxWslDeny` on a Windows Installer event, `\Clauseo\SandboxRefresh`
+    /// at the next logon.
+    WslDenyMissing,
+    /// WSL (`WSLService` or the inbox `LxssManager`, both of which can run WSL2's VMs) is on
+    /// this computer and the deny can't be checked: a launch permission can't be read or parsed,
+    /// a WSL class names no `AppID`, or WSL's class is registered as packaged COM, whose
+    /// permission Clauseo can't change.
+    WslDenyUnverifiable,
+    /// Reserved: a WSL instance a sandbox user started that couldn't be ended. Nothing gives it:
+    /// the stop (`--stop`) ends a pool user's WSL 2 VM, and one it can't end ends the stop at
+    /// 48, which writes no `StopSequence`, so what waits for a completed stop (the
+    /// unclean-session marker and its logon refusal, F4) clears only after a later one.
+    WslPoolResidue,
+    /// A WSL update is pending: the Store package
+    /// (`MicrosoftCorporationII.WindowsSubsystemForLinux`) is newer than the installed MSI. Its
+    /// packaged `WslInstaller` class lets any user start the upgrade, which rewrites the launch
+    /// permissions and drops the deny until the refresh puts it back. A package with no MSI
+    /// installed isn't this (`WslDenyUnverifiable` where WSL 2 can run, else nothing). Transient
+    /// at launch: the launch check has the WSL upgrade task install the upgrade and waits, and
+    /// starts once the deny is verified (`clean_close::wsl_heal`); the launch check gives it only
+    /// when the task's run is still going after its wait (msiexec may still be installing).
+    WslUpgradePending,
 }
 
 impl Blocked {
     /// Every variant, in order. Appended with each new one: [`Blocked::name`]'s match is
     /// exhaustive, the test of the names lists this, and a
     /// compile-time match below fails the build until a new variant has its place here.
-    pub const ALL: [Blocked; 7] = [
+    pub const ALL: [Blocked; 11] = [
         Blocked::LogonRight,
         Blocked::Policy,
         Blocked::AdminCopyMissing,
@@ -118,6 +143,10 @@ impl Blocked {
         Blocked::AdminCopyUnsafe,
         Blocked::OtherAccount,
         Blocked::ToolMissing,
+        Blocked::WslDenyMissing,
+        Blocked::WslDenyUnverifiable,
+        Blocked::WslPoolResidue,
+        Blocked::WslUpgradePending,
     ];
 
     /// Its serde name (`snake_case`, as `setup-result.json` writes it): path-free and stable,
@@ -131,6 +160,10 @@ impl Blocked {
             Blocked::AdminCopyUnsafe => "admin_copy_unsafe",
             Blocked::OtherAccount => "other_account",
             Blocked::ToolMissing => "tool_missing",
+            Blocked::WslDenyMissing => "wsl_deny_missing",
+            Blocked::WslDenyUnverifiable => "wsl_deny_unverifiable",
+            Blocked::WslPoolResidue => "wsl_pool_residue",
+            Blocked::WslUpgradePending => "wsl_upgrade_pending",
         }
     }
 }
@@ -148,9 +181,25 @@ const _: () = {
             Blocked::AdminCopyUnsafe => 4,
             Blocked::OtherAccount => 5,
             Blocked::ToolMissing => 6,
+            Blocked::WslDenyMissing => 7,
+            Blocked::WslDenyUnverifiable => 8,
+            Blocked::WslPoolResidue => 9,
+            Blocked::WslUpgradePending => 10,
         }
     }
-    let [first, second, third, fourth, fifth, sixth, seventh] = Blocked::ALL;
+    let [
+        first,
+        second,
+        third,
+        fourth,
+        fifth,
+        sixth,
+        seventh,
+        eighth,
+        ninth,
+        tenth,
+        eleventh,
+    ] = Blocked::ALL;
     assert!(
         place(first) == 0
             && place(second) == 1
@@ -158,7 +207,11 @@ const _: () = {
             && place(fourth) == 3
             && place(fifth) == 4
             && place(sixth) == 5
-            && place(seventh) == 6,
+            && place(seventh) == 6
+            && place(eighth) == 7
+            && place(ninth) == 8
+            && place(tenth) == 9
+            && place(eleventh) == 10,
         "Blocked::ALL is out of order"
     );
 };
@@ -195,6 +248,24 @@ impl std::fmt::Display for Blocked {
                 "Windows security blocked or removed clauseo-sandbox-setup.exe, Clauseo's set-up \
                  program, when Clauseo started it; whoever looks after this computer can allow it \
                  and re-run the Clauseo installer"
+            }
+            Blocked::WslDenyMissing => {
+                "WSL is on this computer and Clauseo's setting that keeps its sandbox users out of \
+                 it is missing, after a WSL update say; signing out and in again restores it, or \
+                 whoever looks after this computer can"
+            }
+            Blocked::WslDenyUnverifiable => {
+                "WSL is on this computer and Clauseo can't check the setting that keeps its \
+                 sandbox users out of it; whoever looks after this computer can repair or update \
+                 WSL"
+            }
+            Blocked::WslUpgradePending => {
+                "a WSL update is under way on this computer; finish or let the WSL update \
+                 complete, then try again"
+            }
+            Blocked::WslPoolResidue => {
+                "a WSL instance one of Clauseo's sandbox users started is still running; \
+                 restarting the computer ends it"
             }
         })
     }

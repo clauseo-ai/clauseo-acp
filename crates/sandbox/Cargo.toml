@@ -120,6 +120,9 @@ rustix = { workspace = true, features = ["fs", "process"] }
 # tier B's port check (src/windows/wfp/os_ports.rs): the dynamic range from WMI (System_Wmi,
 # System_Ole, System_Variant) and the listeners from GetExtendedTcpTable
 # (NetworkManagement_IpHelper).
+# WSL's MSI checked before the SYSTEM run installs it (src/windows/wsl/msi_files.rs):
+# WinVerifyTrust (Security_WinTrust) and its WTHelper* calls (which also need Cryptography's
+# Catalog and Sip), and the chain's Microsoft-root policy (Cryptography).
 # The admin copy's refresh (src/windows/refresh): its SYSTEM task through ITaskService
 # (System_TaskScheduler, with the BSTR and VARIANT types of System_Ole and System_Variant), and its
 # log lines in the Event Log (System_EventLog). The stop task's process snapshot
@@ -159,6 +162,9 @@ windows = { workspace = true, features = [
   "Win32_Security_Authentication_Identity",
   "Win32_Security_Authorization",
   "Win32_Security_Cryptography",
+  "Win32_Security_Cryptography_Catalog",
+  "Win32_Security_Cryptography_Sip",
+  "Win32_Security_WinTrust",
   "Win32_Storage_FileSystem",
   "Win32_System_IO",
   "Win32_System_JobObjects",

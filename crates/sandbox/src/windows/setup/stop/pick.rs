@@ -38,6 +38,8 @@ pub struct Process {
     pub session: Option<u32>,
     /// Its image, read when neither the token nor the owner could be.
     pub image: Image,
+    /// It is one of WSL's ([`wsl_image`]): read for every process opened, whoever its user.
+    pub wsl: bool,
 }
 
 /// A process's image, as `windows_stopper.rs` read it through a query-limited handle.
@@ -74,6 +76,22 @@ impl Image {
             Image::Subsystem => "subsystem".to_owned(),
             Image::Unread | Image::Failed => "unread".to_owned(),
         }
+    }
+}
+
+/// WSL's processes' file names: what a pool user who started WSL runs as itself.
+const WSL_IMAGES: [&str; 4] = ["wsl.exe", "wslhost.exe", "wslrelay.exe", "wslg.exe"];
+
+/// Whether `image` is one of WSL's: a file named as one of [`WSL_IMAGES`] (any case, any
+/// folder), or a subsystem (WSL 1 pico) process.
+pub fn wsl_image(image: &Image) -> bool {
+    match image {
+        Image::Subsystem => true,
+        Image::Path(_) => {
+            let name = image.file_name();
+            WSL_IMAGES.iter().any(|wsl| wsl.eq_ignore_ascii_case(&name))
+        }
+        Image::Unread | Image::Missing | Image::Failed => false,
     }
 }
 

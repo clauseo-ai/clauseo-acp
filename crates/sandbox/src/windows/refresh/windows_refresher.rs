@@ -20,25 +20,30 @@ use windows::Win32::System::Registry::{
     HKEY, HKEY_LOCAL_MACHINE, KEY_SET_VALUE, KEY_WOW64_64KEY, REG_SZ, RegCloseKey, RegFlushKey,
     RegOpenKeyExW, RegSetValueExW,
 };
+use windows::Win32::System::Threading::GetCurrentProcessId;
 use windows::Win32::UI::Shell::{FOLDERID_ProgramFiles, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
 use windows::core::{HSTRING, PCWSTR, w};
 
 use super::source::{Handle, read_capped};
 use super::{
     EXE_CAP, Failed, OWN_MACHINE, RefreshExit, RefreshRecord, Refresher, STAGING_SDDL, SourceError,
-    SourceFile, Sources, Trust, UPDATER_KEY, pe_version, refresh, staging, walk,
+    SourceFile, Sources, Trust, UPDATER_KEY, WslDenyExit, WslUpgrade, WslUpgradeExit, WslUpgraded,
+    pe_version, refresh, staging, walk, wsl_deny, wsl_upgrade,
 };
 use crate::windows::admin_copy::{self, Found, level_safe, locked_file_sddl, os};
 pub(crate) use crate::windows::admin_copy::{SETUP_EXE as EXE_NAME, SETUP_SIG as SIG_NAME};
 use crate::windows::detect::native_machine;
-use crate::windows::record::read_string;
+use crate::windows::record::{read_string, sandbox_group_sid, sandbox_pool_sids, sandbox_removing};
 use crate::windows::setup::adopt::windows_adopter::own_profile;
-use crate::windows::setup::lock::{Held, SETUP_MUTEX, try_lock};
+use crate::windows::setup::lock::{Held, SETUP_MUTEX, lock_within, try_lock};
 use crate::windows::setup::owner::this_process;
+use crate::windows::setup::processes::DebugPrivilege;
 use crate::windows::setup::record_values::{
     ADMIN_COPY_OWNER, ADMIN_COPY_SHA256, ADMIN_COPY_VERSION, GROUP_SID, USER_INSTALL_DIR,
 };
+use crate::windows::setup::stop;
 use crate::windows::sids::Sid;
+use crate::windows::wsl;
 
 /// The record's key under `HKLM`.
 const RECORD_KEY: &str = "SOFTWARE\\Clauseo\\Sandbox";
@@ -57,6 +62,17 @@ pub fn run() -> RefreshExit {
         machine: OWN_MACHINE,
     };
     refresh(&mut fs, &trust)
+}
+
+/// `--wsl-deny`: [`wsl_deny`] over a [`WindowsRefresher`]: WSL's deny re-applied, nothing else.
+pub fn run_wsl_deny() -> WslDenyExit {
+    wsl_deny(&mut WindowsRefresher::new())
+}
+
+/// `--wsl-upgrade`: [`wsl_upgrade`] over a [`WindowsRefresher`]: WSL's pending upgrade unless a
+/// pool user has a process, then WSL's deny re-applied.
+pub fn run_wsl_upgrade() -> WslUpgradeExit {
+    wsl_upgrade(&mut WindowsRefresher::new())
 }
 
 /// The real machine. Its paths are found once, from `FOLDERID_ProgramFiles`.
@@ -110,7 +126,7 @@ pub(crate) fn sandbox_dir() -> Result<PathBuf, Failed> {
 }
 
 /// `%ProgramFiles%` as Windows knows it (`FOLDERID_ProgramFiles`), never from the environment.
-fn program_files() -> Result<PathBuf, Failed> {
+pub(crate) fn program_files() -> Result<PathBuf, Failed> {
     let folder = FOLDERID_ProgramFiles;
     // SAFETY: `folder` is a live GUID for the call; no token is passed. The string returned is
     // copied, then freed with CoTaskMemFree, once.
@@ -143,6 +159,13 @@ impl Refresher for WindowsRefresher {
 
     fn lock(&mut self) -> Result<bool, Failed> {
         self.lock = try_lock(SETUP_MUTEX).map_err(|error| format!("the set-up lock: {error}"))?;
+        Ok(self.lock.is_some())
+    }
+
+    fn lock_waiting(&mut self) -> Result<bool, Failed> {
+        let wait_ms = u32::try_from(super::WSL_LOCK_WAIT.as_millis()).unwrap_or(u32::MAX);
+        self.lock = lock_within(SETUP_MUTEX, wait_ms)
+            .map_err(|error| format!("the set-up lock: {error}"))?;
         Ok(self.lock.is_some())
     }
 
@@ -287,6 +310,75 @@ impl Refresher for WindowsRefresher {
 
     fn log(&mut self, error: bool, line: &str) {
         event_log(error, line);
+    }
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "--wsl-deny's re-check waits, in the SYSTEM task's own process"
+    )]
+    fn pause(&mut self, time: std::time::Duration) {
+        std::thread::sleep(time);
+    }
+
+    fn reapply_wsl(&mut self) -> Result<Option<String>, Failed> {
+        // No group, or a removal under way: nothing is owed, and nothing is put back that a
+        // removal is taking off.
+        if sandbox_removing().map_err(|error| error.to_string())? {
+            return Ok(None);
+        }
+        let group = sandbox_group_sid().map_err(|error| error.to_string())?;
+        let Some(group) = group.as_deref().and_then(|text| Sid::parse(text).ok()) else {
+            return Ok(None);
+        };
+        let applied = wsl::apply(&mut wsl::WindowsWsl::writer(RECORD_KEY), &group)
+            .map_err(|error| error.to_string())?;
+        applied.outcome()
+    }
+}
+
+impl WslUpgrade for WindowsRefresher {
+    fn pool_busy(&mut self) -> Result<bool, Failed> {
+        let pool = sandbox_pool_sids().map_err(|error| format!("the record: {error}"))?;
+        if pool.is_empty() {
+            return Ok(false);
+        }
+        // As the stop reads them: SeDebugPrivilege for the run, each process's user from its
+        // token and the kernel's list. A process whose user can't be read isn't counted: the
+        // stop task stops what it can't rule out, and protected system processes are such.
+        let _debug = DebugPrivilege::enable();
+        let (seen, _opened) = stop::windows_stopper::processes()?;
+        // SAFETY: GetCurrentProcessId only reads this process's id.
+        let own = unsafe { GetCurrentProcessId() };
+        Ok(!stop::pick(&seen, &pool, own).stop.is_empty())
+    }
+
+    fn upgrade_wsl(&mut self) -> WslUpgraded {
+        // Nothing while a removal is under way, or with no group: no deny is owed then, and the
+        // launch check that asked has nothing to launch.
+        match (sandbox_removing(), sandbox_group_sid()) {
+            (Ok(false), Ok(Some(_))) => {}
+            (Ok(_), Ok(_)) => return WslUpgraded::NotPending,
+            (Err(error), _) | (_, Err(error)) => {
+                return WslUpgraded::Failed(format!("the record: {error}"));
+            }
+        }
+        let program_files = match program_files() {
+            Ok(folder) => folder,
+            Err(why) => return WslUpgraded::Failed(why),
+        };
+        match wsl::msi::upgrade_pending(&program_files) {
+            wsl::msi::MsiUpgrade::NotPending => WslUpgraded::NotPending,
+            wsl::msi::MsiUpgrade::Upgraded {
+                from,
+                to: (major, minor, revision),
+            } => {
+                let to = format!("{major}.{minor}.{revision}");
+                let line = format!("WSL's pending update was installed: {from} to {to}");
+                WslUpgraded::Installed(line)
+            }
+            wsl::msi::MsiUpgrade::Failed(why) => WslUpgraded::Failed(why),
+            wsl::msi::MsiUpgrade::StillInstalling(why) => WslUpgraded::StillInstalling(why),
+        }
     }
 }
 

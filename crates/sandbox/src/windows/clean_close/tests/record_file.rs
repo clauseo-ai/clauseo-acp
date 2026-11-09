@@ -1,4 +1,5 @@
-//! The record's file: what is written reads back, and anything else is refused.
+//! The record's file: what is written reads back, and anything else is refused; and a launch
+//! WSL's deny refuses leaves it unread and in place.
 
 use super::*;
 
@@ -46,4 +47,24 @@ fn another_version_a_short_file_or_another_matters_record_walks_in_full() {
 
     crate::windows::write::write_atomic(&path, &other).unwrap();
     assert_eq!(s.launch_path(), LaunchPath::Full(FullReason::Version));
+}
+
+#[test]
+fn a_missing_wsl_deny_refuses_the_launch_and_leaves_the_record() {
+    let s = Scene::new("clean-file-wsl");
+    assert_eq!(s.close(), Closed::Written);
+    let admin = crate::windows::admin_copy::fake::Fake::ready();
+    let wsl = crate::windows::wsl::FakeWsl::lifted();
+    let refused = check_launch_with(&admin, &wsl, &s.data, &s.ledger, &s.plan, &s.journal);
+    assert!(
+        matches!(
+            refused,
+            Err(crate::Error::Blocked(crate::Blocked::WslDenyMissing))
+        ),
+        "{refused:?}"
+    );
+    assert!(
+        record::record_path(&s.data, &s.matter).exists(),
+        "nothing read or removed"
+    );
 }

@@ -1,7 +1,8 @@
 //! Set-up's steps around the denies and the matters: the owners of the folders the shared-write
 //! denies protect (`PR4h`), reading the owner's registered matters after the lock (`PR4h`), step
-//! 8's fence of them against the grown pool, step 9's change journals, and the per-machine
-//! stop and sweep tasks once the owner is recorded.
+//! 8's fence of them against the grown pool, WSL's deny (after the record, and again after the
+//! marker), step 9's change journals, and the per-machine stop, sweep and WSL tasks once the
+//! owner is recorded.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -18,9 +19,12 @@ use crate::Error;
 use crate::windows::apply::{Applied, fence_each};
 use crate::windows::fence::RegisteredMatter;
 use crate::windows::pool::MachineRecord;
+#[cfg(any(windows, test))]
+use crate::windows::refresh::MACHINE_TASKS;
 use crate::windows::sids::Sid;
 use crate::windows::wfp::{NetworkReport, NetworkSetup};
 use crate::windows::writer::AclWriter;
+use crate::windows::wsl::WslApplied;
 
 /// `SYSTEM`.
 const SYSTEM: &str = "S-1-5-18";
@@ -28,29 +32,36 @@ const SYSTEM: &str = "S-1-5-18";
 const ADMINISTRATORS: &str = "S-1-5-32-544";
 
 /// After step 5, once the record names `owner` as `OwnerSid`: on a per-machine install (the
-/// record's `AdminCopyOwner` is `machine`), the SYSTEM tasks `\Clauseo\SandboxStop` and
-/// `\Clauseo\SandboxSweep` are registered for `owner`, or replaced when they are there, by the
-/// same registration `--adopt` makes per user (`refresh::register_task`). Their descriptor then
-/// names `owner` alone, so a previous owner's start right goes with the replaced ones. A
-/// per-user install's tasks are `--adopt`'s, and an install with no admin copy has none, so
-/// neither is touched here. A record that can't be read or a registration that fails is
-/// [`Step::StopTask`], rolled back.
-pub(super) fn stop_task(machine: &mut impl Machine, owner: &Sid) -> Result<(), Failed> {
-    let failed = |why: String| {
-        (
-            Step::StopTask,
-            format!("the tasks SandboxStop and SandboxSweep: {why}"),
-        )
-    };
+/// record's `AdminCopyOwner` is `machine`), each of [`MACHINE_TASKS`] (`\Clauseo\SandboxStop`,
+/// `\Clauseo\SandboxSweep`, `\Clauseo\SandboxWslDeny`, then `\Clauseo\SandboxWslUpgrade`) is
+/// registered for `owner`, or replaced when it is there, by the same registration `--adopt`
+/// makes per user (`refresh::register_task`). Its descriptor then names `owner` alone, so a
+/// previous owner's start right goes with the replaced one. A per-user install's tasks are
+/// `--adopt`'s, and an install with no admin copy has none, so neither is touched here. A record
+/// that can't be read or a registration that fails is [`Step::StopTask`], rolled back.
+pub(super) fn machine_tasks(machine: &mut impl Machine, owner: &Sid) -> Result<(), Failed> {
+    let failed = |name: &str, why: String| (Step::StopTask, format!("the task {name}: {why}"));
     match machine.copy_owner() {
-        Ok(Some(CopyOwner::Machine)) => machine
-            .register_stop_task(owner)
-            .map_err(|error| failed(cause_of(&error))),
+        Ok(Some(CopyOwner::Machine)) => {
+            // The task definitions build on Windows and in the tests only.
+            #[cfg(not(any(windows, test)))]
+            let _ = owner;
+            #[cfg(any(windows, test))]
+            for task in MACHINE_TASKS {
+                machine
+                    .register_task(task, owner)
+                    .map_err(|error| failed(task.name(), cause_of(&error)))?;
+            }
+            Ok(())
+        }
         Ok(Some(CopyOwner::User(_)) | None) => Ok(()),
-        Err(error) => Err(failed(format!(
-            "the record's AdminCopyOwner can't be read ({})",
-            cause_of(&error)
-        ))),
+        Err(error) => Err(failed(
+            "SandboxStop",
+            format!(
+                "the record's AdminCopyOwner can't be read ({})",
+                cause_of(&error)
+            ),
+        )),
     }
 }
 
@@ -236,6 +247,24 @@ pub(super) fn network(
     machine
         .network(&setup)
         .map_err(|error| (Step::Network, cause_of(&error)))
+}
+
+/// WSL's deny (`windows::wsl`): the pool group denied in the launch permission of every WSL
+/// class on this machine, elevated, not as the owner, twice: right after the record is written
+/// (the group and the record both exist), and again after the marker. Never fatal, like step 9:
+/// the launch check refuses a tier B launch while a deny is missing, and the SYSTEM tasks try
+/// again (the refresh at the next logon, the WSL deny task at the next installer event). What
+/// failed is in the report and the log.
+pub(super) fn wsl_deny(machine: &mut impl Machine, group: &Sid) -> Result<WslApplied, String> {
+    let applied = machine.wsl_deny(group).map_err(|error| cause_of(&error));
+    match &applied {
+        Ok(done) if !done.complete() => {
+            tracing::warn!(failed = ?done.failed, "WSL's deny wasn't written everywhere");
+        }
+        Ok(_) => {}
+        Err(why) => tracing::warn!(%why, "WSL's deny wasn't written"),
+    }
+    applied
 }
 
 /// Step 9: each chosen volume's change journal made [`super::JOURNAL_MAX`] when smaller

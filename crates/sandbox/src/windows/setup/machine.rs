@@ -12,9 +12,12 @@ use crate::windows::fence::RegisteredMatter;
 use crate::windows::ledger::Ledger;
 use crate::windows::marker::{Marker, MarkerState};
 use crate::windows::pool::MachineRecord;
+#[cfg(any(windows, test))]
+use crate::windows::refresh::SystemTask;
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::sids::Sid;
 use crate::windows::wfp::{NetworkReport, NetworkSetup};
+use crate::windows::wsl::{WslApplied, WslRemoved};
 
 /// A pool user's password: wiped from memory when dropped.
 pub type Password = Zeroizing<String>;
@@ -210,10 +213,13 @@ pub trait Machine {
     /// The record's `AdminCopyOwner`: who placed the admin copy, `None` when there is none.
     /// Read as this process.
     fn copy_owner(&mut self) -> Result<Option<CopyOwner>, MachineError>;
-    /// Registers, or replaces, the SYSTEM tasks `\Clauseo\SandboxStop` and
-    /// `\Clauseo\SandboxSweep` (`refresh::POOL_TASKS`) for the pool owner `owner`
-    /// (`refresh::register_task`, as `--adopt` does per user), as this process.
-    fn register_stop_task(&mut self, owner: &Sid) -> Result<(), MachineError>;
+    /// Registers, or replaces, the SYSTEM task `task` (one of `refresh::MACHINE_TASKS`:
+    /// `\Clauseo\SandboxStop`, `\Clauseo\SandboxSweep`, `\Clauseo\SandboxWslDeny`,
+    /// `\Clauseo\SandboxWslUpgrade`) for the pool owner `owner` (`refresh::register_task`, as
+    /// `--adopt` does per user), as this process.
+    /// The task definitions build on Windows and in the tests only (`windows::refresh`).
+    #[cfg(any(windows, test))]
+    fn register_task(&mut self, task: SystemTask, owner: &Sid) -> Result<(), MachineError>;
     /// Locks the admin copy's folder and everything in it again, as `--adopt` does
     /// (`admin_copy::os::lock_down_tree`), denying the pool's group `group`, as this process.
     fn lock_admin_copy(&mut self, group: &Sid) -> Result<(), MachineError>;
@@ -244,6 +250,15 @@ pub trait Machine {
     /// provider, sublayer and block filters covering `setup`'s whole pool, the owner's grants,
     /// and the firewall rules. A WFP failure is the error; the firewall's is in the report.
     fn network(&mut self, setup: &NetworkSetup) -> Result<NetworkReport, MachineError>;
+    /// Set-up's WSL step (`wsl::apply`), elevated, not as the owner: the deny for `group` on
+    /// every WSL class's launch permission, each target recorded in the record. A failure to
+    /// find the targets or read the record is the error; each target that failed is in the
+    /// report.
+    fn wsl_deny(&mut self, group: &Sid) -> Result<WslApplied, MachineError>;
+    /// The rollback's WSL step (`wsl::remove`), elevated, not as the owner: `group`'s denies
+    /// off every recorded and present target, and the record's WSL values deleted, before the
+    /// group this run made goes, so no deny names a group that is gone.
+    fn wsl_remove(&mut self, group: &Sid) -> Result<WslRemoved, MachineError>;
     /// Writes `<data_dir>\sandbox\secrets.bin` as the owner, protected for the owner: each of
     /// `secrets`, and for every other SID of `pool` the blob the file holds now (an extend
     /// leaves the existing users' passwords as they are).

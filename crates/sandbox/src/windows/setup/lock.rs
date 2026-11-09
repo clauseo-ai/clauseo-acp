@@ -165,7 +165,14 @@ impl SetupMutex {
 /// which share it with the set-up so neither changes the copy or its record while the other
 /// is between reading and writing them: `Ok(None)` while another thread or process holds it.
 pub(crate) fn try_lock(name: &str) -> Result<Option<Held>, MachineError> {
-    match SetupMutex::open(name)?.acquire(0) {
+    lock_within(name, 0)
+}
+
+/// The set-up lock `name`, waited for up to `wait_ms`: `Ok(None)` while another still holds
+/// it then. The refresh's WSL phase waits a little, so a burst of runs doesn't leave the deny
+/// to the next one.
+pub(crate) fn lock_within(name: &str, wait_ms: u32) -> Result<Option<Held>, MachineError> {
+    match SetupMutex::open(name)?.acquire(wait_ms) {
         Ok((held, acquired)) => {
             if acquired == Acquired::Abandoned {
                 tracing::warn!("an earlier holder ended without giving the set-up lock back");

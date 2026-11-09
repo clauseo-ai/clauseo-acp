@@ -18,12 +18,14 @@ use crate::windows::fence::RegisteredMatter;
 use crate::windows::ledger::{Ledger, ledger_path};
 use crate::windows::marker::{Marker, MarkerState};
 use crate::windows::pool::MachineRecord;
+use crate::windows::refresh::SystemTask;
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::setup::{
     LogonRight, Machine, MachineError, Password, ProfileDir, ServiceStart,
 };
 use crate::windows::sids::Reserved;
 use crate::windows::wfp::{NetworkReport, NetworkSetup};
+use crate::windows::wsl::{WslApplied, WslRemoved};
 
 pub(super) use super::fake_acl::FakeAcl;
 pub(super) use super::fake_more::folder_name;
@@ -467,10 +469,17 @@ impl Machine for FakeMachine {
         Ok(self.state.copy_owner.clone())
     }
 
-    fn register_stop_task(&mut self, owner: &Sid) -> Result<(), MachineError> {
+    fn register_task(&mut self, task: SystemTask, owner: &Sid) -> Result<(), MachineError> {
         assert!(!self.acting.get(), "the task is registered as admin");
-        self.call(format!("register_stop_task {}", rid(owner)))?;
-        self.state.stop_task = Some(owner.clone());
+        self.call(format!("register_task {} {}", task.name(), rid(owner)))?;
+        let slot = match task {
+            SystemTask::Stop => &mut self.state.stop_task,
+            SystemTask::Sweep => &mut self.state.sweep_task,
+            SystemTask::WslDeny => &mut self.state.wsl_task,
+            SystemTask::WslUpgrade => &mut self.state.wsl_upgrade_task,
+            SystemTask::Refresh => panic!("the set-up never registers the refresh"),
+        };
+        *slot = Some(owner.clone());
         Ok(())
     }
 
@@ -519,6 +528,22 @@ impl Machine for FakeMachine {
     fn network(&mut self, setup: &NetworkSetup) -> Result<NetworkReport, MachineError> {
         self.call(format!("network {}", rids(setup.pool())))?;
         Ok(self.around.network(setup))
+    }
+
+    fn wsl_deny(&mut self, group: &Sid) -> Result<WslApplied, MachineError> {
+        assert!(!self.acting.get(), "WSL's deny is written as admin");
+        self.call(format!("wsl_deny {}", rid(group)))?;
+        self.state.wsl = Some(group.clone());
+        Ok(WslApplied::default())
+    }
+
+    fn wsl_remove(&mut self, group: &Sid) -> Result<WslRemoved, MachineError> {
+        assert!(!self.acting.get(), "WSL's deny is taken off as admin");
+        self.call(format!("wsl_remove {}", rid(group)))?;
+        if self.state.wsl.as_ref() == Some(group) {
+            self.state.wsl = None;
+        }
+        Ok(WslRemoved::default())
     }
 
     fn protect_for_owner(

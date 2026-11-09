@@ -519,10 +519,12 @@ crates/sandbox/src/windows/setup/processes.rs - unsafe_code
 crates/sandbox/src/windows/setup/profile.rs - unsafe_code
 crates/sandbox/src/windows/setup/profile.rs wait clippy::disallowed_methods
 # The stop task's process snapshot, the WTS process list, OpenProcess, NtSuspendProcess and
-# TerminateProcess; the BITS jobs it cancels; its Windows test's token DACL and the benign process
-# it starts.
+# TerminateProcess; the BITS jobs it cancels; the WSL VMs it ends through computecore.dll; its
+# Windows test's token DACL and the benign process it starts.
 crates/sandbox/src/windows/setup/stop/windows_stopper.rs - unsafe_code
 crates/sandbox/src/windows/setup/pool_steps/windows_bits.rs - unsafe_code
+crates/sandbox/src/windows/setup/stop/windows_hcs.rs - unsafe_code
+crates/sandbox/src/windows/setup/stop/windows_profiles.rs - unsafe_code
 # S15 W2: the pool tasks' wall clock (GetSystemTimeAsFileTime), shared by the stop and the sweep.
 crates/sandbox/src/windows/setup/pool_steps/windows_record.rs - unsafe_code
 # S15 W2: a launch's bounded wait (15 s, 100 ms at a time) for a sweep an unclean-session marker
@@ -615,3 +617,11 @@ crates/sandbox/examples/s15_launch_vm/win_switch.rs - unsafe_code
 crates/sandbox/examples/s15_launch_vm/win_pool.rs - unsafe_code
 # The cancel row's thread states: NtQuerySystemInformation against ntdll, and a pid's token user.
 crates/sandbox/examples/s15_launch_vm/win_suspend.rs - unsafe_code
+crates/sandbox/src/windows/wsl/os.rs - unsafe_code
+crates/sandbox/src/windows/wsl/msi.rs - unsafe_code
+crates/sandbox/src/windows/wsl/msi.rs install clippy::disallowed_methods
+crates/sandbox/src/windows/wsl/msi_files.rs - unsafe_code
+crates/sandbox/src/windows/clean_close/wsl_heal.rs WindowsDenyTask::new clippy::disallowed_methods
+crates/sandbox/src/windows/clean_close/wsl_heal.rs WindowsDenyTask::sleep clippy::disallowed_methods
+crates/sandbox/src/windows/refresh/windows_refresher.rs WindowsRefresher::pause clippy::disallowed_methods
+crates/sandbox/src/windows/setup/wsl_tests.rs - unsafe_code

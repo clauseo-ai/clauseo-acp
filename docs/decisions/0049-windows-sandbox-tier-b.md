@@ -1872,26 +1872,26 @@ each of `refresh::TASKS`), the same way: LOCAL SYSTEM, the same descriptor (the 
 and execute it, which starts and ends it), one instance at a time (the sweep queues the next).
 The stop's action is the admin copy with `--stop` and no other argument. It runs only on demand
 and stops after 2 minutes. A failed registration fails `--adopt` before the record's admin-copy
-values are written, as for the refresh task. `--remove --uninstall` deletes all three tasks,
-after the values and before the admin folder (`refresh::TEARDOWN`). The folder rule above has
-two accepted outcomes. A user-made `\Clauseo` holding a task administrators can't delete fails
+values are written, as for the refresh task. `--remove --uninstall` deletes every task, the WSL
+tasks ("WSL" below) included, after the values and before the admin folder
+(`refresh::TEARDOWN`). The folder rule above has two accepted outcomes. A user-made `\Clauseo` holding a task administrators can't delete fails
 the delete, and so the registration, with that error: a user who could make the folder can block
 the install, but not take it over. A folder an administrator made, owned by that administrator's
 own SID rather than Administrators, is deleted and made again, which loses nothing.
 
 **Per machine.** A per-machine `--adopt` has no owner to name in the descriptor, so it registers
-none of the three. The refresh task stays per-user only: IT updates a per-machine install. The
-stop and sweep tasks (`refresh::POOL_TASKS`) are registered by the elevated set-up instead, once
-it has written the record with the owner as `OwnerSid`, when the record's `AdminCopyOwner` is
-`machine` (`late_steps::stop_task`). It is the same registration as `--adopt`'s: same
-principal, arguments, limits and descriptor, with `OwnerSid` as the owner who may read and
-execute, and so start and end, them. Every set-up of the owner registers them again, replacing
-the ones there. A new owner's set-up, after a removal, replaces the previous owner's tasks, so
-only the new owner can start them. A failed registration fails the set-up at the step
-"registering the sandbox's stop and sweep tasks", rolled back like any other step. `--remove`
-deletes both just before the record (`RemoveStep::StopTask`); a failed deletion is a partial
-removal, with the record kept for the next run. `--remove --uninstall` also deletes them with
-the admin copy.
+none of them. The refresh task stays per-user only: IT updates a per-machine install. The
+stop and sweep tasks are registered by the elevated set-up instead, once it has written the
+record with the owner as `OwnerSid`, when the record's `AdminCopyOwner` is `machine`
+(`late_steps::machine_tasks`, each of `refresh::MACHINE_TASKS`, with `\Clauseo\SandboxWslDeny`
+and `\Clauseo\SandboxWslUpgrade` right after them, "WSL" below). It is the same registration as `--adopt`'s: same principal,
+arguments, limits and descriptor, with `OwnerSid` as the owner who may read and execute, and so
+start and end, them. Every set-up of the owner registers them again, replacing the ones there. A
+new owner's set-up, after a removal, replaces the previous owner's tasks, so only the new owner
+can start them. A failed registration fails the set-up at the step "registering the sandbox's
+stop, sweep and WSL tasks", rolled back like any other step. `--remove` deletes them all just
+before the record (`RemoveStep::StopTask`); a failed deletion is a partial removal, with the
+record kept for the next run. `--remove --uninstall` also deletes them with the admin copy.
 
 **The run.** `--stop` (`setup/stop.rs`):
 
@@ -2030,7 +2030,7 @@ cancelled and not), and says so when a pass couldn't read the process list. Its 
 | 45 | not LOCAL SYSTEM, or not run from the admin copy; nothing stopped |
 | 46 | the record can't be read, or its `PoolSids`, `OwnerSid` or `StopNext` is malformed; nothing stopped |
 | 47 | a SID in `PoolSids` isn't a pool user; nothing stopped |
-| 48 | a pool user's process or job was left, a user or owner couldn't be read, or a list failed |
+| 48 | a pool user's process, job or WSL VM was left, a user, owner or VM's user couldn't be read, or a list failed |
 | 49 | the processes were stopped, but their users couldn't be added to `ResetSids` (write failed, record gone or pool changed) nor owed in `ResetOwed`, or the lock stayed held at a mark (the users owed in `ResetOwed`), or `ResetOwed` couldn't be folded, or `StopCompleted` and `StopSequence` couldn't be written (lock held, write failed, record gone or pool changed, sequence past `n`) |
 | 50 | `StopNext` couldn't be reserved: the record was gone or its pool changed, or the write failed (nothing stopped), or the lock stayed held (the processes were still stopped, the jobs cancelled and the users owed in `ResetOwed`, nothing else written to the record) |
 
@@ -2065,9 +2065,9 @@ logon of its own at every session's end (the runner's end sweeper, now gone), an
 refused a logged-off pool user's BITS job anyway. `SYSTEM` deletes them instead.
 
 **The task.** `\Clauseo\SandboxSweep` is registered and removed alongside
-`\Clauseo\SandboxStop` (above): `--adopt` registers all three of `refresh::TASKS`, a
-per-machine set-up registers `refresh::POOL_TASKS` (stop and sweep, `late_steps::stop_task`),
-and `--remove` and `--remove --uninstall` delete it. It has the same folder, principal (LOCAL
+`\Clauseo\SandboxStop` (above): `--adopt` registers all five of `refresh::TASKS`, a
+per-machine set-up registers `refresh::MACHINE_TASKS` (stop, sweep and the two WSL tasks,
+`late_steps::machine_tasks`), and `--remove` and `--remove --uninstall` delete it. It has the same folder, principal (LOCAL
 SYSTEM) and descriptor (`refresh::task_sddl`, the owner with `FRFX`). Its action is the admin
 copy with `--sweep-tasks` and no other argument. It runs only on demand and stops after 2
 minutes. Unlike the stop, it queues: a run asked for while one runs begins after it, so the run a
@@ -2307,7 +2307,9 @@ pub struct Progress { pub walked: u64, pub done: bool, pub failed: Option<Arc<Er
 
 - **What `launch` does**, in order:
   1. the launch check (the admin copy, the WSL deny, an earlier session's marker awaiting a
-     sweep, the clean-close record);
+     sweep, the clean-close record). WSL's self-healing may wait up to 120 s for a WSL upgrade;
+     `Launchers` passes the check's `LaunchProgress::UpdatingWindowsComponent` on to the host as
+     `Preparing`'s progress is;
   2. marks the session open;
   3. assigns the pool user;
   4. the gate and the plan;
@@ -2365,6 +2367,467 @@ pub struct Progress { pub walked: u64, pub done: bool, pub failed: Option<Arc<Er
   group's members needs an administrator, so the design (for example static slot groups made at
   set-up) comes to the orchestrator before that PR.
 
+### WSL
+
+**Why.** WSL is open to every user who can log on, the pool users included. Its service,
+`wslservice.exe`, runs as LOCAL SYSTEM, takes its COM access check from its own descriptor
+(`O:BAG:BAD:(A;;0xB;;;AU)(A;;0xB;;;PS)(A;;0xB;;;SY)`, so the AppID's `AccessPermission` is
+ignored), refuses only LOCAL SYSTEM as a caller, and has no per-user or per-group policy
+(`AllowWSL` is machine-wide). A pool user who starts WSL2 gets a VM whose traffic WFP's
+per-user filters don't see, and files the service writes on its behalf. Every route in goes
+through one COM activation: `wsl.exe`, `wslg.exe`, `bash.exe`, `wslconfig.exe`, `wslhost.exe`,
+the inbox stubs and `wslapi.dll`, `\\wsl$` (p9rdr calls the service as the user), and a direct
+`CoCreateInstance` from PowerShell. WSL1 and WSL2 share that entry point; WSL's containers
+(`WSLCSessionManager`, which makes its own VM) have a class and AppID of their own.
+
+**What the VM showed** (R5c, Server 2025 26100.33650, WSL 3.0.3.0). Both lifted classes,
+`LxssUserSession` and `WSLCSessionManager`, carry the MSI's stock `LaunchPermission` (120 bytes,
+`O:BAG:BAD:(A;;CCDCSW;;;AU)(A;;CCDCSW;;;PS)(A;;CCDCSW;;;SY)`), in keys owned by SYSTEM that
+Administrators can write and `Users` can read. A deny for `ClauseoSandboxUsers` (mask `0x1F`) at
+DACL index 0 of `LxssUserSession`'s value refused every pool-user route: `wsl -l`, `--import`,
+`-d` and `bash.exe` with `E_ACCESSDENIED`, `CreateInstance` with 0x80070005, a DCOM 10016 in
+the System log, with the service stopped (T1) and with the owner's distro running (T2: RPCSS
+checks activation against a running server too). The owner's WSL kept working (T1o). An
+`msiexec /fa` repair left the deny in place (it reinstalls files only) and logged `MsiInstaller`
+1040, 11728, 1035 and 1042; an upgrade is untested and is expected to rewrite the values.
+`\\wsl.localhost\` was inconclusive: in that form it fails for the owner too.
+
+**Per-user registrations don't reach it** (R5d, the same VM: Server 2025 26100.33650, WSL 3.0.3.0).
+COM merges `HKCU\Software\Classes` into a caller's view, and a pool user can write its own
+`HKCU`, so a per-user `AppID` or `CLSID` with no `LaunchPermission` might have bypassed the
+machine's deny. It doesn't for this `LocalService` class: with
+`HKCU\Software\Classes\AppID\{370121D2-AA7E-4608-A86D-0BBAB9DA1A60}` holding only
+`LocalService`, and again with `HKCU\Software\Classes\CLSID\{a9b7a1b9-…ce7e}` pointing at a fresh
+`AppID` with its own `LocalService`, the pool user's `wsl -l` and `CreateInstance(ce7e)` were
+still denied, and all 8 DCOM 10016 events named the machine's `AppID` `{370121D2-…}`, never the
+per-user one. So the deny isn't extended to the pool users' hives, and the check reads only
+`HKLM`. R5d covered only Windows Server 2025 and the lifted `AppID` (`{370121D2-…}`): the inbox
+`LxssUserSessionInBox`'s `AppID`, and Windows 10 and 11, weren't tried, and stay VM rows.
+
+**The deny** (`windows::wsl`). The targets are found at each run, never hard-coded: every AppID
+whose `LocalService` is `WSLService` or `LxssManager` (listing `HKLM\SOFTWARE\Classes\AppID`
+finds every class on such an AppID, so a future WSL class is caught; a key there that can't be
+read, or whose `LocalService` isn't a `REG_SZ`, is logged and passed over, so another program's
+key can't refuse every launch), and the AppID of each of
+`LxssUserSession` (`{a9b7a1b9-…ce7e}`), `WSLCSessionManager` (`…ce8f`) and the inbox
+`LxssUserSessionInBox` (`{4F476546-…}`) that is registered, read from the class's `AppID` value
+in the 64-bit view. Two more get the deny too, as hardening, when their keys are there:
+`{1FAB86C3-…}` (`wslcsession.exe`, the per-user WSLC session server) and `{17696EAC-…}`
+(`wsldevicehost.dll`'s DllSurrogate), which WSL's MSI registers with the same Authenticated Users
+grant but no `LocalService` (microsoft/WSL `msipackage/package.wix.in:189-196,326-335`). Each
+target's `LaunchPermission` is parsed strictly (`sd.rs`: revision 1,
+self-relative, an owner and a group, a DACL that isn't NULL, every size and SID inside its
+bounds; anything else is refused and never written) and gets `(D;;CCDCLCSWRP;;;G)` at DACL index
+0, with the owner, the group, every other entry and any SACL kept, and the parts laid out in the
+order they had, so taking the deny off gives back the same bytes. Nothing is written when a
+deny for the group holding all of `0x1F` already comes before every allow (a weaker one, say
+without the remote rights, gets ours put before it). The header's resource-manager control byte
+is kept as read, and an ACL may be revision 2 or 4 (`ACL_REVISION_DS`); any other is refused. A missing value is built from
+`HKLM\SOFTWARE\Microsoft\Ole\DefaultLaunchPermission`, or, without one, from COM's built-in
+default (`O:BAG:BAD:(A;;CCDCLCSWRP;;;BA)(A;;CCDCLCSWRP;;;IU)(A;;CCDCLCSWRP;;;SY)`, which grants
+INTERACTIVE, and a seclogon pool token is INTERACTIVE), then denied. The new bytes are parsed
+again and checked to be the old with the deny added, then Windows checks them too
+(`IsValidSecurityDescriptor`, and `GetSecurityDescriptorLength` equal to the byte count); the write
+opens the key with `NtOpenKeyEx` and `REG_OPTION_BACKUP_RESTORE`, `SeBackupPrivilege` and
+`SeRestorePrivilege` enabled, so a key `TrustedInstaller` owns is written without taking its
+ownership or touching its DACL. That open never makes a key: a missing one is a failure, so a
+write can't race an MSI that is making the key (an earlier create-then-delete could). The value
+is read again just before the write: one that changed since the merge's read (an installer
+writing it meanwhile) is merged again from what it is now, at most 3 times (`MERGE_TRIES`), then
+the target is listed as failed, so the write never puts back a value another writer just
+replaced; after the write the value read back must be the bytes written. `AccessPermission`
+is left alone: the service ignores it.
+
+**When.** The elevated set-up writes it as admin twice: first as soon as the group and the record
+both exist (right after the record is written, since each target is recorded before its write,
+before the profiles, the fence and the network), and again after the marker, so a WSL installed or
+updated during the set-up is covered; the report holds the last pass's outcome. It never
+fails the set-up: the launch check refuses while a deny is missing, and the SYSTEM tasks try
+again. The SYSTEM task `\Clauseo\SandboxRefresh` re-applies it twice in every run that is allowed
+(LOCAL SYSTEM, from the admin copy; at the owner's logon or on demand): first, before the admin copy's steps, so the deny doesn't wait
+for them, and last, whatever they gave, so a run that began before an installer finished
+re-applies after it (`refresh/wsl_phase.rs`, both idempotent). Each waits up to 10 s for the set-up
+lock (`WSL_LOCK_WAIT`), so a brief holder doesn't push the deny to the next run; one still held then
+is logged (a set-up or removal holding it does its own WSL step). No WSL phase runs while the record
+says a removal is under way, nor with no `GroupSid`. A `GroupSid` that isn't a local group's
+(`S-1-5-21-<a>-<b>-<c>-<rid>` with a relative id from 1000 up) is refused before anything is
+written, and logged without the SID (`wsl::local_group`): Everyone, Authenticated Users,
+INTERACTIVE or a `BUILTIN` group there would deny the lawyer too.
+
+**The WSL deny task.** Windows Installer's events start a SYSTEM task of their own,
+`\Clauseo\SandboxWslDeny` (`SystemTask::WslDeny`): the Application log, provider
+`MsiInstaller`, IDs 1022, 1033, 1035, 1040, 1042, 11707, 11724 and 11728
+(`rules::msi_event_query`), with no delay: a delay would only keep the deny off longer. Its action
+is the admin copy with the fixed argument `--wsl-deny` and nothing else; the trigger has no value
+queries, so nothing from the event reaches the run. The run (`wsl_phase::wsl_deny`) is refused
+unless it is LOCAL SYSTEM from the admin copy's path, as the refresh's step 1, then runs the WSL
+phase, then four more passes 5 s apart (`WSL_RECHECKS`, `WSL_RECHECK_PAUSE`): an installer may
+write the launch permissions in more than one pass, and each pass re-reads them and re-applies
+what changed, writing nothing otherwise (at most 70 s with every lock wait, inside `PT2M`). It
+does nothing else: no admin-copy step, no record read beyond the phase's own, and
+never WSL's upgrade. The event trigger is on this task alone because anyone who can log on can
+fire it: INTERACTIVE may write to the Application log, so the lawyer or a pool user can forge an
+`MsiInstaller` event, and on the refresh that started the admin copy's steps as SYSTEM. Here a
+forged event gains no more than a re-applied deny, and a forged burst gives one run at a time,
+each holding the set-up lock for a moment (a set-up that meets it then fails at once and can be
+run again). The task ignores a start while it runs (`TASK_INSTANCES_IGNORE_NEW`): the phase is
+quick and idempotent, so an installer's burst of events gives one run, and an event after it ends
+gives another. It shares the other tasks' principal, descriptor (owned by Administrators, the
+owner `FRFX`) and folder, stops after 2 minutes (`PT2M`), and is registered and removed with
+them: `--adopt` registers it per user after `\Clauseo\SandboxStop` and `\Clauseo\SandboxSweep`
+(`refresh::TASKS`), a per-machine install's set-up after the stop and sweep tasks
+(`refresh::MACHINE_TASKS`), a per-machine `--remove` deletes it with the stop and sweep tasks, and `--remove --uninstall` with the admin copy
+(`refresh::TEARDOWN`). Its exits (`WslDenyExit`, from 51, after the stop's 50): 0 when the run
+was allowed, whatever the phase gave, and 51 (`NotAllowed`) when it isn't LOCAL SYSTEM from the
+admin copy; 52 (`UpgradeFailed`) was its "upgrade failed, deny applied" before the upgrade moved
+to the task below, and is kept so the number keeps that meaning. 53 to 59 are kept for #717's
+sweep.
+
+**The WSL upgrade task.** `\Clauseo\SandboxWslUpgrade` (`SystemTask::WslUpgrade`, fixed argument
+`--wsl-upgrade`, `wsl_phase::wsl_upgrade`) installs WSL's pending MSI upgrade, then runs the WSL
+phase (below, "Self-healing"). It has no trigger: only the launch check asks for it, on demand, as
+the lawyer, so a forged installer event can't pick the moment SYSTEM's msiexec runs. It shares the
+other tasks' principal, descriptor and folder, stops after 5 minutes (`PT5M`: msiexec is waited
+for up to 4, then the phase), and is registered and removed alongside the WSL deny task (last in
+`TASKS`, `MACHINE_TASKS` and `TEARDOWN`). Once allowed, it first reads the processes as the
+stop task does (`stop::windows_stopper::processes`, each process's user against `PoolSids`): while
+any pool user has a live process, or when the processes can't be listed, it doesn't start the MSI,
+whose rewrite would drop the deny under that user; it runs the phase and exits "deferred". Its
+exits (`WslUpgradeExit`): 0 (`Done`, installed or none owed, then the phase), 60 (`NotAllowed`),
+61 (`Deferred`) and 62 (`UpgradeFailed`, "upgrade failed, deny applied": owed and failed, or
+couldn't be tried, the MSI's checks refusing it included; WSL is as it was, and the phase ran
+after it), and 67 (`StillInstalling`: msiexec still running at the end of its 240 s wait, left
+running rather than ended mid-write; 63 is `SetupExit`'s, so 67 is this task's), which the launch
+refuses as `WslUpgradePending`. The pool-process check is one snapshot, taken before msiexec
+starts: a pool process started after it isn't seen, and a process whose user can't be read (its
+token and the kernel's list both unreadable, as for some protected processes) isn't counted, as
+the stop's own pick leaves it out. The follow-up that closes both is the kernel process list PR
+(`SystemFullProcessInformation`, each process's user from the kernel's own list). The phase's outcome never changes
+an exit, the refresh's or this task's: a failure is one Event Log error line (AppIDs and Windows
+error codes, never a path or a SID), and a run that changed nothing writes no line. The launch
+check enforces the deny, so an exit code would tell no one more.
+
+**The record.** Each target is recorded before its value is written, in two values appended to
+the set-up's (`SETUP_VALUES`, now 11): `WslDenyAppIds` (`REG_MULTI_SZ`, every AppID given the
+deny or found with it, braced and upper-case) and `WslDenyAbsent` (those whose value was made
+from the default). A list holding anything but braced GUIDs is refused whole, so no record text
+becomes a key path. The writes never make the record's key, so a refresh after `--remove` can't
+bring it back. A rollback after the deny was tried takes it off (`wsl::remove`, with the record's
+two values) before it deletes the group this run made; a removal that fails keeps the group and the
+record naming it, so no deny is left naming a group that is gone (unlike D12's other denies, this
+one sits in machine-wide keys whose record would go with the group's).
+
+**The launch check** (`wsl::check`, unelevated, in `clean_close::check_launch` right after the
+admin copy's check, before the clean-close record is read; healed first, below, "Self-healing").
+WSL is present when `WSLService` or
+`LxssManager` is installed or any of the three classes is registered; a read that fails counts
+as present. With WSL present, a target whose value (or key) is missing, or whose deny for the
+record's `GroupSid` is missing or comes after an allow, refuses the launch with
+`Blocked::WslDenyMissing` (`wsl_deny_missing`). Otherwise a target that can't be read or
+parsed, a class with no `AppID`, targets that can't be listed, or
+`HKLM\SOFTWARE\Classes\PackagedCom\ClassIndex\<CLSID>`, or the lawyer's
+`HKCU\Software\Classes\PackagedCom\ClassIndex\<CLSID>` (a package registered for the lawyer
+alone), for any of the three classes (a packaged
+registration, such as the pre-2.0 Store WSL's, whose launch permission is the package's and
+overrides the AppID's) refuses with
+`Blocked::WslDenyUnverifiable` (`wsl_deny_unverifiable`), whichever WSL is present: the inbox one
+(`LxssManager`) runs WSL2's VMs too from Windows 10 2004 on, so an unreadable inbox value refuses
+like a lifted one. With no WSL nothing is refused.
+
+**A pending WSL upgrade** (`wsl/upgrade.rs`, `Blocked::WslUpgradePending`,
+`wsl_upgrade_pending`, transient at launch: "Self-healing" below installs it). The Store package's
+`WslInstaller` service has a packaged COM class that
+grants launch to Authenticated Users (microsoft/WSL @19cd15ea `msixinstaller/AppxManifest.in:74-77`,
+the commit this section cites from here on), and its `Install()` upgrades
+through the MSI whenever `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss\MSI`'s `Version`
+is empty or older than the package's own version, compared as (major, minor, revision)
+(`src/windows/wslinstaller/exe/WslInstaller.cpp:142-165`, `IsUpdateNeeded`). So a pool user could start an upgrade whenever the
+package is newer than the MSI, and the MSI's rewrite drops the deny until the WSL deny task's run,
+which the installer's first event starts. The check mirrors that test: the package's version comes from its
+packaged-COM registration, a subkey of `HKLM\SOFTWARE\Classes\PackagedCom\Package` named
+`MicrosoftCorporationII.WindowsSubsystemForLinux_<major>.<minor>.<revision>.0_...` (the newest
+listed), which `Users` can read; the MSI's from `Version`, as WSL reads it. A package listed is WSL present, even before
+its MSI is in. A package registered for one user only may be missing there, its packaged-COM registration
+being that user's (`HKCU\Software\Classes\PackagedCom\Package`), so with none in `HKLM` the check
+(running as the lawyer) reads the lawyer's own before it decides there is no package. A package
+registered only for the lawyer is WSL present and is still compared, its version taken from the
+lawyer's registration: a pool user's hive has none, so a pool user shouldn't be able to activate
+`WslInstaller`'s class, but that isn't verified, and a pending upgrade refuses whoever could start
+it. Its registrations unreadable is `WslDenyUnverifiable`; its version (or the MSI's) unreadable
+is `WslDenyUnverifiable` where `WSLService` or `LxssManager` is installed (WSL 2 can run), and
+refuses nothing where neither is. The MSI's version older is `WslUpgradePending`. No MSI version (missing or empty) isn't an
+upgrade under way: WSL's installer would install the MSI rather than upgrade it, and a package whose
+MSI was never run may stay that way for good, so "let the update complete" would never end. With
+`WSLService` or `LxssManager` installed, WSL 2 can run beside an MSI WSL doesn't record, which
+can't be judged: `WslDenyUnverifiable`. With neither, no WSL VM can run until the MSI is in, and
+its install's `MsiInstaller` events start the WSL deny task, which writes the deny: nothing is refused. A version that can't be
+read or parsed (three or four dotted numbers) is `WslDenyUnverifiable`; a missing deny is still
+shown first. `wsl::check` alone gives `WslUpgradePending`; the launch reads `wsl::inspect`,
+which gives `Found::UpgradePending` with every deny in place, and has the upgrade installed
+rather than refuse. Not verified on the VM: that the packaged-COM key lists the package for a
+machine where only another
+user installed it, and its key's readability by `Users` (`HKLM\SOFTWARE\Classes` is). Both are
+`sandbox.blocked`, a refused turn the app words generically ("Something on this computer stops
+the Safe workspace, …"); the check is the launch's, not the protection state's, so no reason
+line of `blocked.ts` is shown for it, and none is added here. `Blocked::WslPoolResidue`
+(`wsl_pool_residue`) stays reserved: a pool VM the stop can't end ends the stop at 48 (below), and
+a stop that ends 48 writes no `StopSequence`, so what waits for a completed stop (the
+unclean-session marker and its refusal, F4) clears only after a later one, as for any process a
+stop left. One cause, one exit: no second refusal says the same.
+
+**`WslInstaller` can't be denied as the `AppID`s are** (microsoft/WSL @19cd15ea). Its class
+`{B5AEB4C3-9541-492F-AD4D-505951F6ADA4}` (`src/windows/wslinstaller/exe/WslInstaller.h:19`) is
+packaged COM only: the package's manifest declares it in a `com3:ServiceServer` of the packaged
+service `WslInstaller`, its launch permission the manifest's own `LaunchAndActivationPermission`
+(`O:BAG:BAD:(A;;11;;;AU)(A;;11;;;PS)(A;;11;;;SY)`, `msixinstaller/AppxManifest.in:74-77`), and
+the MSI registers no class, `AppID` or `LaunchPermission` for it (`msipackage/package.wix.in`
+names `B5AEB4C3` nowhere; its `AppID` keys are `LxssUserSession`'s and `WSLCSessionManager`'s,
+whose `LocalService` is `WSLService`, and those of `wsldevicehost.dll`'s surrogate and
+`WSLCSessionFactory`'s `wslcsession.exe`, servers that run as whoever starts them). Windows'
+deployment service builds the packaged-COM catalog from the signed manifest: there is no `AppID`
+whose `LaunchPermission` Clauseo could edit, and an edit of the catalog would be undone by the
+package's next deployment. So the pool can't be kept from activating it, and the launch check
+repairs a pending upgrade instead of refusing (below, "Self-healing"). The service upgrades by
+itself too: it starts with Windows (`AppxManifest.in:50`, `StartupType="auto"`), and each start
+runs `LaunchInstall()` (`src/windows/wslinstaller/exe/ServiceMain.cpp:91-108`) unless
+`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss\MSI`'s `AutoUpgradeViaMsix` is 0
+(`ServiceMain.cpp:52-61`), so a pending upgrade also completes at the next boot with no user.
+
+On the VM (F1, Server 2025, WSL 3.0.3.0) the installed package's `AppxManifest.xml` has no
+`desktop6:Service` and no COM server at all, only `windows.appExecutionAlias` and
+`windows.appExtension`; the package is registered for the owner only, and the service comes from
+the MSI (`C:\Program Files\WSL\`). `PackagedCom\ClassIndex` holds none of WSL's CLSIDs in `HKCU`
+or `HKLM` (F5). So there `WslInstaller` isn't registered and no one can activate it: this
+settles, for 3.0.3.0, the hypothesis above that a pool user can't start the lawyer-only package's
+upgrade. The manifest at @19cd15ea (newer) has the service again, so the check keeps comparing.
+F6 confirms the target resolution: the `AppID` `{E9B79997-57E3-4201-AECC-6A464E530DD2}`
+(`LocalService` `WSLService`) also holds `WSLCProcess` (`{AFBEA6D6-…}`) and `WSLCContainer`
+(`{B1F1C4E3-…}`), and `WindowsWsl::service_app_ids` (`wsl/os.rs`) takes every `AppID` whose
+`LocalService` is `WSLService` or `LxssManager`, so that `AppID` is a target by its service
+(and by `WSLCSessionManager`'s class, `package.wix.in:322-323`), and its three classes share its
+deny. F2 confirms that a pool token holds INTERACTIVE, which may write the Application log: the
+reason the `MsiInstaller` trigger is on the WSL deny task alone (above).
+
+**Self-healing** (`clean_close/wsl_heal.rs`, its outcome types in `wsl_healed.rs`, `wsl/msi.rs`).
+The product rule, from the project
+owner: a lawyer is never refused the Safe workspace for a state Clauseo can realistically repair;
+a launch is refused only when the repair really failed, and the log says why. So the launch
+check (`check_launch_in`) passes WSL's check through `wsl_heal::heal`:
+
+- **A missing deny** (`WslDenyMissing`): the check asks `\Clauseo\SandboxWslDeny` to run now, as
+  the lawyer (`refresh::task::request_wsl_deny`, `IRegisteredTask::Run`; the task's descriptor
+  gives the owner `FRFX`, which starts it, CI run 42416074600), then checks again every 250 ms
+  for up to 10 s, and launches once the deny is in place (`WslHealed::DenyRestored`). Still missing
+  then, or a request that failed, refuses with `WslDenyMissing`, and the warning line gives why
+  and the task's last result (`last_wsl_deny_run`, read as `last_refresh_run` reads the refresh's,
+  named through `WslDenyExit`: `NotAllowed (51)`, `running`, `never run`, or the code).
+  `WslDenyUnverifiable` is refused at once, as before: no run makes an unreadable value readable.
+- **A pending upgrade** (`Found::UpgradePending`): the check asks `\Clauseo\SandboxWslUpgrade`
+  instead (`refresh::task::request_wsl_upgrade`), and the run installs it. The `--wsl-upgrade`
+  SYSTEM run, once no pool user has a process (above), mirrors `WslInstaller`'s `Install()`
+  (microsoft/WSL @19cd15ea):
+  when the package's version is newer than the MSI's `Version`, compared as the check compares
+  them (`upgrade::msi_behind`, `IsUpdateNeeded` at `WslInstaller.cpp:142-165`), it runs
+  `<System32>\msiexec.exe /i <package folder>\wsl.msi /qn SKIPMSIX=1 REBOOT=ReallySuppress`: the
+  MSI `GetMsiPackagePath` takes from the folder of the service's own image
+  (`WslInstaller.cpp:21-32`), here the folder of the `WslInstaller` service's `ImagePath`
+  (writable by administrators only), accepted only when it is a WSL package's folder directly
+  under `%ProgramFiles%\WindowsApps` (`TrustedInstaller`'s; `upgrade::installer_package`); the
+  properties `UpgradeViaMsi` passes (`SKIPMSIX=1` at `WslInstaller.cpp:97-98`, then
+  `REBOOT=ReallySuppress`, `install.cpp:385-406`); and no UI, as its `MsiSetInternalUI(
+  INSTALLUILEVEL_NONE…)` (`install.cpp:238`). msiexec's exit is `MsiInstallProduct`'s; 0 and
+  3010 are success, as there (`WslInstaller.cpp:100-108`). WSL's verbose MSI log isn't kept. Then
+  the phase re-applies the deny the MSI's rewrite dropped. A failure (an exit code, no service
+  image, an image elsewhere, no `wsl.msi`, msiexec not ended within 240 s, which is left running
+  rather than cut off mid-install) leaves WSL as it was, since Windows Installer rolls a failed
+  install back; the phase still runs, and the run exits 62. The step does nothing while the record
+  says a removal is under way or names no group. An installed upgrade is one information line in
+  the Event Log ("WSL's pending update was installed: <old> to <new>"), a failed one an error line
+  with its code.
+- **The MSI is verified before SYSTEM installs it** (`wsl/msi_verify.rs`, `wsl/msi_files.rs`).
+  msiexec runs as SYSTEM, so nothing a non-admin lawyer (or a pool user) can place, link or
+  change may reach it; otherwise the self-healing would be an elevation path. The package folder's
+  name must be WSL's family,
+  `MicrosoftCorporationII.WindowsSubsystemForLinux_<version>_<arch>__8wekyb3d8bbwe`, name and
+  publisher hash compared exactly, ASCII case ignored
+  (`upgrade::package_folder_version`). `WindowsApps`, the package folder and `wsl.msi` are each
+  opened without following a reparse point (the folder and the file relative to their parent's
+  handle, with `OBJ_DONT_REPARSE`) and refused if any is one; `wsl.msi` must be a regular disk
+  file with one link. Its owner, read on its handle, must be `TrustedInstaller` or SYSTEM.
+  `WinVerifyTrust` (`WINTRUST_ACTION_GENERIC_VERIFY_V2`, no UI) must trust its signature, with
+  revocation not checked and URL retrieval cache-only, so an offline machine verifies as an
+  online one does, and the signer's chain must pass
+  `CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_MICROSOFT_ROOT)` with
+  `MICROSOFT_ROOT_CERT_CHAIN_POLICY_CHECK_APPLICATION_ROOT_FLAG` (never the test-root flag): it
+  ends in Microsoft's application root, so a root added to the machine's store can't stand in for
+  it. The flag checks Microsoft Root Certificate Authority 2011, where `wsl.msi` chains (through
+  Microsoft Code Signing PCA 2024), instead of the product roots; with no flags the policy refused
+  it on the VM (`0x800B0109`, `CERT_E_UNTRUSTEDROOT`), so no upgrade could install. A chain to
+  Root 2010 fails with the flag: `kernel32.dll`'s embedded signature on CI's Windows runner did
+  (run 42520974059). And the leaf certificate must list the
+  code-signing EKU (`szOID_PKIX_KP_CODE_SIGNING`). The handle stays open, shared for reading only,
+  and the two folders without delete sharing, until msiexec has ended, so nothing is swapped between
+  the checks and the install; msiexec gets the path that was opened. A failed check is a failed
+  upgrade (its reason names no path): the run still re-applies the deny, as after any other failed
+  upgrade.
+- **The launch's wait for it**: the host hears `LaunchProgress::UpdatingWindowsComponent` once,
+  when the wait begins (the `progress` argument of `clean_close::check_launch`, a
+  `&dyn Fn(LaunchProgress)`; the app owns the words, "Updating a Windows component before
+  starting…"), then the check is made every 250 ms for up to 120 s, a deny the MSI dropped
+  meanwhile waited for too. No launch starts while the task's run is still going, since msiexec
+  rewrites the launch permissions mid-install. It launches once the package is no longer newer,
+  the deny is in place and no run is going on (`WslHealed::Upgraded`); once a run of the task
+  that began after the request has ended while the upgrade is still pending, with 62
+  (`WslHealed::UpgradeFailed`), 61 ("deferred": a pool user's process, `WslHealed::UpgradeDeferred`)
+  or any other code (`WslHealed::UpgradeUnfinished`); at the end of
+  the wait with no run going on (`UpgradeUnfinished`); and when the request fails
+  (`UpgradeUnfinished`): in each case the check has just verified every deny. A run still going
+  at 120 s is waited for up to 270 s (`wsl_heal::UPGRADE_RUNNING_WAIT`: msiexec's 240 s limit
+  and 30 s for the deny after it), and one still going then refuses the launch with
+  `WslUpgradePending`. A run counts as after the request when its last run time differs from the
+  one read before it, or a run was going on then (the request was dropped for it). It also
+  refuses when the deny can't be verified at the end: `WslDenyMissing` or `WslDenyUnverifiable`,
+  with why and the task's last result.
+- **What the host logs**: `LaunchCheck::wsl_healed()` gives the `WslHealed`, and
+  `WslHealed::log_line()` its host.log line, `None` for `Nothing`. The host logs it at info for
+  each launch where it isn't `Nothing`: above all `Upgraded` ("WSL's pending update was installed
+  on the lawyer's behalf before the launch, and WSL's deny for the sandbox users re-applied") and
+  `UpgradeFailed`, which say WSL changed (or was tried) on the lawyer's behalf. The SYSTEM run's
+  Event Log line names the versions.
+
+What remains, an accepted residual: after `UpgradeFailed`, `UpgradeDeferred` or
+`UpgradeUnfinished` the upgrade is still pending, and where the package's `WslInstaller` class is
+registered a pool user could start it during the session; its rewrite drops the deny until the
+run its `MsiInstaller` events start. After `UpgradeFailed` the same upgrade just failed for
+SYSTEM, so it most likely fails again; and on the VM's WSL 3.0.3.0
+the class isn't registered at all (F1). Not verified on a VM: the upgrade itself (no Store package
+newer than its MSI was at hand), that a packaged service's `ImagePath` names its package's folder
+under `WindowsApps`, and that the owner may run the task from a non-elevated launch (the refresh's
+start was, CI run 42416074600).
+
+Another accepted residual: a WSL self-update not started by our task (Windows' own updater
+starts one within about a second of a pending Store update) rewrites the AppIDs, and the deny is
+off until the `MsiInstaller`-event task re-applies it: about 1.2 s measured on the VM. The task's
+re-checks put back a later pass's rewrite. An external `msiexec` install of WSL measured the same
+way at 07f03807a (run 42470456515, three trials): the deny was off 1.06, 1.09 and 1.05 s. WSL's
+installer deletes the AppID keys about 5 s in and writes them again about 21 s in; the task's
+five passes ended just before that rewrite, and the install-complete event's run restored the
+deny. **Not measured:** the roughly 16 s while the AppID keys don't exist at all, when COM's
+default launch permissions apply to WSL's servers instead of the deny; we don't probe it. The
+mid-session WSL watcher (the next wiring PR) stops a session if a pool-owned WSL process or an
+`LxssUserSession` activation appears, and carries the VM row for the key-absent window and a pass
+schedule that reaches past the rewrite.
+
+**The stop ends a pool user's WSL** (`setup/stop/vms.rs`, step 5b of `--stop`, SYSTEM, after
+the process passes and the BITS step). WSL 1 needs nothing more: its pico processes and the pool
+user's `wslhost.exe` and `wslrelay.exe` carry the pool user's token, and the passes stop them.
+WSL 2's VM (and a WSL container's) is a Hyper-V compute system that `wslservice.exe` runs as
+SYSTEM, which the passes don't see. HCS names a system by id, and WSL's owner string is `"WSL"`
+for every user, so the step lists every compute system (`HcsEnumerateComputeSystems`, a 3 s wait),
+keeps those whose `Owner` is `WSL` (Docker's and other owners' are left alone), and reads the user
+from the profile: the service makes `%LOCALAPPDATA%\temp\<VM id>` (upper case, no braces) as the
+user for each VM it starts and deletes it when the VM ends (WSL `WslCoreVm.cpp:135,148`).
+
+That folder can't show a pool user's VM is absent. WSL finds `%LOCALAPPDATA%` with
+`SHGetKnownFolderPath(FOLDERID_LocalAppData, userToken)` (`filesystem.cpp`), which follows the
+user's own `HKCU\...\User Shell Folders`, and a folder it fails to make only logs and starts the
+VM anyway (`WslCoreVm.cpp:145-152`), so a pool user could redirect its folder, or deny itself the
+right to make it, and keep its VM out of a walk of its profile.
+
+**The step runs only on evidence** that a pool user started WSL (`vms::evidence`, recorded in the
+stop's state before any process is stopped): a pool user's profile holds
+`AppData\Local\temp\<GUID>` (read from the profile down without following a link), its loaded
+hive holds a WSL distribution registration (a subkey of
+`HKU\<poolSID>\Software\Microsoft\Windows\CurrentVersion\Lxss`), or a pass's snapshot saw a
+process of a pool SID that is WSL's (`wsl.exe`, `wslhost.exe`, `wslrelay.exe`, `wslg.exe`, or a
+WSL 1 pico process; each process's image is read for this, and the pass records it before it
+stops anything, as the process is gone after). A read of the profile or the hive that fails
+counts as evidence (a pool user may make its own profile unreadable). With none, the step is
+skipped whole: HCS is asked nothing (`computecore.dll` isn't loaded), nothing is ended, and the
+log line says "WSL VM step skipped: no pool WSL evidence". An accepted residual: the WSL 2/HCS
+termination is verified only by the fake tests and review, as the GCP VMs have no Hyper-V. The
+gate keeps it from running on a real machine unless a pool user demonstrably started WSL, which
+the deny should prevent, so in the normal case a mapping mistake can never end the lawyer's VMs.
+
+With evidence, the profiles no pool user can write are read first, the lawyer's first
+(`setup/stop/vms.rs`, `stop_vms`):
+
+- **the lawyer's, or another non-pool account's**: the lawyer's (`OwnerSid`) profile, then every
+  other profile `ProfileList` lists that isn't a pool user's (`windows_profiles.rs`), holds
+  `AppData\Local\temp\<id>`, or `temp\<id>` under the `Local AppData` its hive names
+  (`Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders`, read from
+  `HKU\<SID>` when the hive is loaded, else from the profile's `NTUSER.DAT` loaded read-only for
+  the read as a private app hive (`RegLoadAppKeyW` with `REG_APP_HIVE_OPEN_READ_ONLY`);
+  `%USERPROFILE%` expanded against that profile; an absolute path as it is; any other variable
+  can't be expanded and counts as unread). It is left alone, and a pool user whose profile holds
+  that folder too planted it and is marked: a pool user that learned another account's VM id
+  can't have the stop end it. A profile with no `NTUSER.DAT` has no redirect;
+- **a pool user's**: its profile (`ProfileList`) holds `AppData\Local\temp\<id>`, read from the
+  profile folder down without following a link (a junction could point the check at the lawyer's
+  folders). Its user is marked for a reset first (under the set-up lock, so a run the task's
+  limit ends during the termination has marked it), whose profile delete takes the user's distro
+  registrations (in its hive) with it; then it is opened (`HcsOpenComputeSystem`) and terminated
+  (`HcsTerminateComputeSystem`, at most 5 s each and 10 s in all, through an operation waited
+  for, cancelled if the wait runs out (`HcsCancelOperation`, where `computecore.dll` has it),
+  and closed). A system already gone is ended;
+- **in no profile**: every pool user is marked first, then it is terminated as a pool user's is.
+  A WSL system whose folder no profile holds, once each non-pool profile was read, is most likely
+  a pool user's VM that hid its folder (a redirect, or a `temp` it denied itself);
+- **unmapped**, left running, every pool user marked, the stop ending at 48: one whose lawyer's
+  folder can't be read (even with a pool user's folder: that pool user may have planted it), one
+  whose id isn't a GUID, and every one in no profile when any non-pool profile's folder or
+  redirect, or `ProfileList` itself, couldn't be read anywhere in the step: it may be that
+  account's VM, and the stop never ends a real user's VM it can't rule out. Another account's
+  profile that can't be read is otherwise passed over: a VM a pool user's profile holds is still
+  ended.
+
+So on a machine where another Windows account also runs WSL, that account's VM is found in its
+profile and left alone, whether its hive is loaded or not; a stop ends at 48 only while some
+non-pool profile can't be read. Not verified on a VM: that `RegLoadAppKeyW` takes
+`REG_APP_HIVE_OPEN_READ_ONLY` (a load it refuses is a profile that can't be read, so the stop
+ends at 48 rather than end a VM in no profile), and that a logon racing the read-only load gets
+its own hive.
+
+`computecore.dll` is loaded at run time from System32 (`LoadLibraryExW`, `GetProcAddress`),
+never imported, so the exe starts where it is missing; with it missing, or no `vmcompute`
+service, there is nothing to do and the log line says nothing of VMs. The stop ends at 48 when a
+VM it tried to end isn't ended (a failure, a wait that ran out, or none tried once the 10 s are
+spent), when a WSL system is unmapped, or when the list fails while `WSLService` or `LxssManager` is
+installed (either runs WSL 2); a list that fails with neither is logged and passed over. A pool
+user whose folder couldn't be read (a link on the way, or a read that failed) is marked. The log
+line adds counts only: VMs ended, not, unmapped, and in no profile, never an id, a path or a SID. Not done:
+restarting `WSLService` as a fallback (it would end the lawyer's sessions too). Not verified on a
+VM: that SYSTEM's list shows WSL's VMs with `Owner` `WSL` and the folder's name as the id
+(an `Owner` of `WSL` is known for the Store WSL's VMs only; WSL's containers' and the inbox
+WSL's are unconfirmed, a VM row), and
+that a termination from outside the service leaves it consistent (the elevated test checks only
+the calls, where HCS is).
+
+**No mid-session watcher yet.** A WSL update during a tier B session can drop the deny until the
+WSL deny task's run re-applies it, which the installer's first event starts; the next launch
+checks it again (and heals it), and a pending upgrade is installed only before a new launch. A
+watcher on the AppID keys
+(`RegNotifyChangeKeyValue`) that acts on a session while the deny is off follows in the next PR.
+
+**Drift.** A WSL update (Store, WinGet, `wsl --update`, its own updater), an MSI repair or a
+reinstall may rewrite `LaunchPermission` and drop the deny; a reinstall may bring a new AppID,
+which the next run finds from the class. An OS update may reset the inbox AppID. Each is closed
+by the WSL deny task's run or the next logon's refresh; a launch before then asks for that run
+and waits for it ("Self-healing"), and is refused only if it doesn't come. Nothing ever
+blocks the MSI's writes (an ACL on the AppID key, say): a WSL update that couldn't write its
+keys would fail and roll back for the lawyer.
+
+**Removal.** `--remove` takes the deny off before the group goes (`RemoveStep::Wsl`, after
+`DeviceSync`'s deny), elevated, as admin: for each recorded target, and each target found now,
+only the entries `(D;…;;;G)` come off (every deny naming the group, whatever its flags and
+mask: `ClauseoSandboxUsers` is Clauseo's own group, so no one else's deny names it), and the
+result is checked, written and read back. A value
+we made is deleted instead once what is left is the default it was made from. No saved value is
+ever written back: it may be older than a WSL update since. A value that can't be parsed is left
+as it is and logged. A read or write that fails stops the removal there (`RemovedPartly`), with
+the record kept for the next run. Then the record's two values go. The WSL deny task goes with
+the other tasks (above).
+
 ## Consequences
 
 - A finished set-up moves the machine to tier B at the next tier query; R17's
@@ -2377,8 +2840,8 @@ pub struct Progress { pub walked: u64, pub done: bool, pub failed: Option<Arc<Er
   machine stays on tier C. Firms often lock admin rights down, so this is common. A "B-minus"
   tier (the lawyer's own token at Low integrity, no accounts, no prompt) may follow v1.
 - Uninstall (S15 PR4j, "Removal" above) removes, for each pool user, its `LocalLow` deny, its
-  profile and then its account, then `DeviceSync`'s deny, the ledger's entries, the group and the
-  record. Deleting the account first would leave its profile folder and `ProfileList` key behind.
+  profile and then its account, then `DeviceSync`'s deny, WSL's deny ("WSL" above), the ledger's
+  entries, the group and the record. Deleting the account first would leave its profile folder and `ProfileList` key behind.
 - The token, the default DACL and the desktop come from spikes on Windows Server 2025; Windows 11
   and Windows 10 22H2 are unmeasured.
 

@@ -62,6 +62,10 @@
 //! name, so repair can restore it too. The gap is two write-through renames with nothing
 //! between them.
 //!
+//! Right after step 1, and again at the end of every allowed run whatever the steps gave, WSL's
+//! deny is re-applied (`wsl_phase.rs`, ADR 0049 "WSL"); `--wsl-deny` does that alone, and
+//! `--wsl-upgrade` after WSL's pending upgrade.
+//!
 //! Any refusal keeps the old copy, writes one log line (the Event Log on Windows) naming no user
 //! path beyond the install folder, and exits with its own code ([`RefreshExit`]).
 
@@ -73,6 +77,7 @@ use sha2::{Digest, Sha256};
 mod deny;
 #[cfg(test)]
 mod deny_tests;
+mod exit;
 #[cfg(test)]
 mod fake;
 #[cfg(windows)]
@@ -108,13 +113,15 @@ mod windows_refresher;
 #[cfg(test)]
 #[cfg(windows)]
 pub(crate) mod windows_tests;
+mod wsl_phase;
 
+pub use exit::RefreshExit;
 #[cfg(windows)]
 pub use installed::{installed_setup_sha256, recorded_admin_copy_sha256};
 pub use rules::{
-    EXECUTION_LIMIT, POOL_TASKS, REFRESH_ARG, STAGING_SDDL, STOP_ARG, STOP_EXECUTION_LIMIT,
-    SWEEP_ARG, SWEEP_EXECUTION_LIMIT, SystemTask, TASKS, TEARDOWN, Teardown, action_path, hex,
-    inside_profile, same_path, sddl_matches, task_sddl,
+    EXECUTION_LIMIT, MACHINE_TASKS, REFRESH_ARG, STAGING_SDDL, STOP_ARG, STOP_EXECUTION_LIMIT,
+    SWEEP_ARG, SWEEP_EXECUTION_LIMIT, SystemTask, TASKS, TEARDOWN, Teardown, WSL_DENY_ARG,
+    WSL_DENY_EXECUTION_LIMIT, action_path, hex, inside_profile, same_path, sddl_matches, task_sddl,
 };
 pub use sources::{SourceError, SourceFile, Sources};
 #[cfg(windows)]
@@ -124,11 +131,15 @@ pub use task::{
 };
 pub use version::version_not_older;
 #[cfg(windows)]
-pub use windows_refresher::{WindowsRefresher, event_log, run};
+pub use windows_refresher::{WindowsRefresher, event_log, run, run_wsl_deny, run_wsl_upgrade};
+pub use wsl_phase::{WslDenyExit, WslUpgrade, WslUpgradeExit, WslUpgraded, wsl_deny, wsl_upgrade};
 
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::sids::Sid;
 use signature::{SignatureError, verify};
+
+/// How long the WSL phase waits for the set-up lock (`wsl_phase.rs`).
+pub const WSL_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// The most bytes the refresh reads of the user folder's exe: 16 MiB.
 pub const EXE_CAP: u64 = 16 * 1024 * 1024;
@@ -155,71 +166,6 @@ pub struct Trust<'a> {
     pub key: &'a str,
     /// The COFF `Machine` the staged image must have, but for the move to ARM64.
     pub machine: u16,
-}
-
-/// The refresh's exit codes. They start at 32, clear of [`SetupExit`]'s, so the two never share
-/// a number whatever either appends; codes are appended from here on, never renumbered.
-///
-/// [`SetupExit`]: crate::windows::setup::SetupExit
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RefreshExit {
-    /// 0: the admin copy is current (refreshed, already current, or its record written).
-    Done,
-    /// 32: not LOCAL SYSTEM, or not run from the admin copy's path.
-    NotAllowed,
-    /// 33: the record can't be read, or lacks a usable `AdminCopyOwner`, `UserInstallDir` or
-    /// `AdminCopyVersion`.
-    NoRecord,
-    /// 34: the user folder's exe or `.sig` was refused: missing, a reparse point on the way or
-    /// at the file, not a regular file, more than one link, over its cap, or unreadable.
-    SourceRefused,
-    /// 35: the staged exe's signature was refused (`SignatureError`).
-    SignatureRefused,
-    /// 36: this build's updater key is the placeholder; nothing was read.
-    PlaceholderKey,
-    /// 37: the staging folder or the staged copy couldn't be made, read back or secured.
-    StagingFailed,
-    /// 38: the admin copy couldn't be replaced; the old copy is in place.
-    ReplaceFailed,
-    /// 39: the new copy is in place, but the record's version or hash couldn't be written; the
-    /// launcher refuses the copy until the next run writes them.
-    RecordNotWritten,
-    /// 40: the signed version is older than the record's `AdminCopyVersion` (or the same, with
-    /// other bytes), or a version or the `FILEVERSION` can't be read.
-    Downgrade,
-    /// 41: `UserInstallDir` isn't inside the owner's profile, or the owner has none; for a
-    /// `machine` owner, it isn't a folder only administrators can change.
-    OutsideProfile,
-    /// 42: the staged exe is for another CPU type than this copy, and isn't the one allowed move
-    /// (`machine.rs`: x64 to a newer ARM64 build on an ARM64 machine).
-    WrongMachine,
-    /// 43: the admin folder couldn't be held for the renames (someone holds it); nothing moved.
-    FolderBusy,
-    /// 44: the set-up lock is held (an `--adopt`, set-up or removal is running), or can't be
-    /// taken; nothing was read or changed.
-    LockHeld,
-}
-
-impl RefreshExit {
-    /// The process exit code.
-    pub fn as_code(self) -> u8 {
-        match self {
-            RefreshExit::Done => 0,
-            RefreshExit::NotAllowed => 32,
-            RefreshExit::NoRecord => 33,
-            RefreshExit::SourceRefused => 34,
-            RefreshExit::SignatureRefused => 35,
-            RefreshExit::PlaceholderKey => 36,
-            RefreshExit::StagingFailed => 37,
-            RefreshExit::ReplaceFailed => 38,
-            RefreshExit::RecordNotWritten => 39,
-            RefreshExit::Downgrade => 40,
-            RefreshExit::OutsideProfile => 41,
-            RefreshExit::WrongMachine => 42,
-            RefreshExit::FolderBusy => 43,
-            RefreshExit::LockHeld => 44,
-        }
-    }
 }
 
 /// The values of the record the refresh reads.
@@ -253,6 +199,8 @@ pub trait Refresher {
     /// Tries the set-up lock without waiting and keeps it until [`Refresher::unlock`]:
     /// `Ok(false)` while another holds it.
     fn lock(&mut self) -> Result<bool, Failed>;
+    /// As [`Refresher::lock`], waiting up to [`WSL_LOCK_WAIT`] (the WSL phase's).
+    fn lock_waiting(&mut self) -> Result<bool, Failed>;
     /// Gives the set-up lock back, if held.
     fn unlock(&mut self);
     /// The record's values; a missing key or value is `None`.
@@ -307,11 +255,20 @@ pub trait Refresher {
     fn leave_staging(&mut self, swapped: bool);
     /// Writes one line to the log: `error` for a refusal or a failure.
     fn log(&mut self, error: bool, line: &str);
+    /// Re-applies WSL's deny under the set-up lock (`wsl_phase.rs`); a line when it changed any.
+    fn reapply_wsl(&mut self) -> Result<Option<String>, Failed>;
+    /// Waits `time` (`--wsl-deny`'s re-checks); the fake only notes it.
+    fn pause(&mut self, time: std::time::Duration);
 }
 
-/// Runs the refresh as the module says, checking the staged exe against `trust`.
+/// Runs the refresh as the module says: once the run is allowed, WSL's deny, then the admin
+/// copy's steps (checking the staged exe against `trust`), then WSL's deny again.
 pub fn refresh(fs: &mut impl Refresher, trust: &Trust<'_>) -> RefreshExit {
-    match run_steps(fs, trust) {
+    let steps = allowed(fs).and_then(|()| {
+        wsl_phase::run(fs);
+        run_steps(fs, trust)
+    });
+    let exit = match steps {
         Ok(line) => {
             fs.log(false, &line);
             RefreshExit::Done
@@ -320,7 +277,11 @@ pub fn refresh(fs: &mut impl Refresher, trust: &Trust<'_>) -> RefreshExit {
             fs.log(true, &format!("the sandbox's admin copy was kept: {line}"));
             exit
         }
+    };
+    if exit != RefreshExit::NotAllowed {
+        wsl_phase::run(fs);
     }
+    exit
 }
 
 /// A refusal: its exit and its log line.
@@ -334,9 +295,9 @@ struct Checked {
     group: Option<Sid>,
 }
 
-/// The steps; `Ok` carries the log line of a run that left the admin copy current.
+/// The steps after [`allowed`]; `Ok` carries the log line of a run that left the admin copy
+/// current.
 fn run_steps(fs: &mut impl Refresher, trust: &Trust<'_>) -> Result<String, Refusal> {
-    allowed(fs)?;
     let placeholder = key::key_id(trust.key).is_ok_and(|id| id == key::PLACEHOLDER_KEY_ID);
     if placeholder {
         return Err((

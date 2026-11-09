@@ -26,8 +26,8 @@ use super::record_key::{self, Counts, Keys};
 use super::record_values::{
     self, ADMIN_COPY_OWNER, ADMIN_COPY_SHA256, ADMIN_COPY_VERSION, ADMIN_VALUES, AdminValues,
     CopyOwner, DATA_DIR, GROUP_SID, INSTALL_ID, OWNER_SID, POOL_SIDS, RECORD_SDDL, REMOVING,
-    RESET_OWED, RESET_SIDS, RawRecord, RegValue, SETUP_VALUES, USER_INSTALL_DIR, resets_with,
-    resets_without, sids_value,
+    RESET_OWED, RESET_SIDS, RawRecord, RegValue, SETUP_VALUES, USER_INSTALL_DIR, WSL_DENY_ABSENT,
+    WSL_DENY_APP_IDS, resets_with, resets_without, sids_value,
 };
 use crate::windows::pool::{MachineRecord, pool_sids_from_multi_sz};
 use crate::windows::record::{RecordError, read_dword, read_qword, read_string, read_units};
@@ -238,6 +238,41 @@ pub(crate) fn remove_reset_sids(key: &str, done: &[Sid]) -> Result<(), MachineEr
         return delete_values(key, &[RESET_SIDS]);
     }
     set_value(&open_secured(key)?, RESET_SIDS, &sids_value(&left))
+}
+
+/// The record's WSL targets, `WslDenyAppIds` then `WslDenyAbsent`: each `REG_MULTI_SZ`'s units,
+/// `None` when it (or the key) is missing. `windows::wsl` decodes them.
+pub(crate) fn read_wsl(key: &str) -> Result<[Option<Vec<u16>>; 2], MachineError> {
+    let subkey = HSTRING::from(key);
+    let read = |name: &str| {
+        let name = HSTRING::from(name);
+        read_units(
+            PCWSTR(subkey.as_ptr()),
+            PCWSTR(name.as_ptr()),
+            RRF_RT_REG_MULTI_SZ,
+        )
+        .map_err(reading)
+    };
+    Ok([read(WSL_DENY_APP_IDS)?, read(WSL_DENY_ABSENT)?])
+}
+
+/// Writes the record's WSL targets (`REG_MULTI_SZ` data, `windows::wsl` encodes them) into the
+/// key as it is: never made ([`open_existing`]), so a refresh after `--remove` can't bring it
+/// back. The set-up and the refresh call it under the set-up lock.
+pub(crate) fn write_wsl(
+    key: &str,
+    app_ids: Vec<u16>,
+    absent: Vec<u16>,
+) -> Result<(), MachineError> {
+    let opened = open_existing(key)?;
+    set_value(&opened, WSL_DENY_APP_IDS, &RegValue::MultiSz(app_ids))?;
+    set_value(&opened, WSL_DENY_ABSENT, &RegValue::MultiSz(absent))
+}
+
+/// Deletes the record's WSL targets; missing already is `Ok`. The key goes when nothing is
+/// left in it, as [`delete`] does.
+pub(crate) fn delete_wsl(key: &str) -> Result<(), MachineError> {
+    delete_values(key, &[WSL_DENY_APP_IDS, WSL_DENY_ABSENT])
 }
 
 /// `HKLM\<key>` opened to set values, made when missing, with its owner (Administrators) and

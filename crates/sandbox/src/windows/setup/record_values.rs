@@ -147,10 +147,19 @@ pub const SWEEP_SEQUENCE: &str = "SweepSequence";
 /// (without the lock, `pool_steps::sequence` says why) as the marker's `M`; the marker is
 /// clean once [`SWEEP_SEQUENCE`] `>= M`.
 pub const SWEEP_NEXT: &str = "SweepNext";
+/// `WslDenyAppIds` (`REG_MULTI_SZ`): every `AppID` of WSL's classes whose `LaunchPermission` the
+/// set-up or the refresh task gave the pool group's deny, or found it on (`windows::wsl`), each
+/// braced and upper-case; `--remove` takes the deny off each before the group goes. Outside
+/// [`MachineRecord`].
+pub const WSL_DENY_APP_IDS: &str = "WslDenyAppIds";
+/// `WslDenyAbsent` (`REG_MULTI_SZ`): those of [`WSL_DENY_APP_IDS`] whose `LaunchPermission` was
+/// missing, so the run made it from the default; `--remove` deletes it again once what is left
+/// is that default. Outside [`MachineRecord`].
+pub const WSL_DENY_ABSENT: &str = "WslDenyAbsent";
 /// The values the set-up owns, which a rollback or `--remove` deletes; the ones `--adopt`
 /// writes stay until `--remove` takes the admin copy away. Each `…Sequence` comes before its
 /// `…Next`, so a marker read during a removal can only wait longer (`pool_steps::sequence`).
-pub const SETUP_VALUES: [&str; 14] = [
+pub const SETUP_VALUES: [&str; 16] = [
     OWNER_SID,
     GROUP_SID,
     POOL_SIDS,
@@ -165,6 +174,8 @@ pub const SETUP_VALUES: [&str; 14] = [
     SWEEP_COMPLETED,
     SWEEP_SEQUENCE,
     SWEEP_NEXT,
+    WSL_DENY_APP_IDS,
+    WSL_DENY_ABSENT,
 ];
 
 /// `listed` (`ResetSids` as read) with each of `add` it lacks appended, in order.
@@ -537,6 +548,18 @@ mod tests {
         assert!(at(STOP_SEQUENCE) < at(STOP_NEXT));
         assert!(at(SWEEP_COMPLETED) < at(SWEEP_SEQUENCE));
         assert!(at(SWEEP_SEQUENCE) < at(SWEEP_NEXT));
+        // And the WSL deny's targets, appended after the sweep's, as `windows::wsl` names them.
+        assert_eq!(
+            SETUP_VALUES[14..],
+            [
+                crate::windows::wsl::RECORD_APP_IDS,
+                crate::windows::wsl::RECORD_ABSENT
+            ]
+        );
+        assert_eq!(
+            (WSL_DENY_APP_IDS, WSL_DENY_ABSENT),
+            ("WslDenyAppIds", "WslDenyAbsent")
+        );
     }
 
     #[test]

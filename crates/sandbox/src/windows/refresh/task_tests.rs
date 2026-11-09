@@ -1,17 +1,20 @@
-//! The SYSTEM tasks' definitions (`rules.rs`), on every OS: the stop and sweep tasks are the
-//! refresh task with their own names, arguments and limits, the same principal and descriptor,
-//! and no logon start; the uninstaller's removal takes them all down before the copy they run,
-//! and a per-machine install's set-up registers and removes the stop and sweep tasks.
+//! The SYSTEM tasks' definitions (`rules.rs`), on every OS: the stop, sweep, WSL deny and WSL
+//! upgrade tasks are the refresh task with their own names, arguments, limits and triggers, the
+//! same principal and descriptor; only the WSL deny task starts on Windows Installer's events; the
+//! uninstaller's removal takes every task down before the copy they run, and a per-machine
+//! install's set-up registers and removes every task but the refresh.
 
+use super::rules::{
+    MSI_EVENT_IDS, Trigger, WSL_UPGRADE_ARG, WSL_UPGRADE_EXECUTION_LIMIT, msi_event_query,
+};
 use super::*;
 use crate::windows::setup::args::{Mode, parse};
 
 #[test]
-fn the_stop_and_sweep_tasks_are_the_refresh_task_but_for_name_argument_limit_and_trigger() {
-    assert_eq!(
-        TASKS,
-        [SystemTask::Refresh, SystemTask::Stop, SystemTask::Sweep]
-    );
+fn the_stop_sweep_and_wsl_tasks_are_the_refresh_task_but_for_name_argument_limit_and_trigger() {
+    use SystemTask::{Refresh, Stop, Sweep, WslDeny, WslUpgrade};
+    assert_eq!(TASKS, [Refresh, Stop, Sweep, WslDeny, WslUpgrade]);
+    assert_eq!(MACHINE_TASKS, [Stop, Sweep, WslDeny, WslUpgrade]);
     let refresh = SystemTask::Refresh;
     let stop = SystemTask::Stop;
     let sweep = SystemTask::Sweep;
@@ -36,6 +39,15 @@ fn the_stop_and_sweep_tasks_are_the_refresh_task_but_for_name_argument_limit_and
         (SWEEP_ARG, SWEEP_EXECUTION_LIMIT),
         ("--sweep-tasks", "PT2M")
     );
+    let wsl = SystemTask::WslDeny;
+    assert_eq!(
+        (wsl.name(), wsl.argument(), wsl.execution_limit()),
+        ("SandboxWslDeny", "--wsl-deny", "PT2M")
+    );
+    assert_eq!(
+        (WSL_DENY_ARG, WSL_DENY_EXECUTION_LIMIT),
+        ("--wsl-deny", "PT2M")
+    );
     // One fixed argument each, with no value and nothing to quote: the action passes nothing
     // a caller chose.
     for task in TASKS {
@@ -44,14 +56,16 @@ fn the_stop_and_sweep_tasks_are_the_refresh_task_but_for_name_argument_limit_and
         assert!(!argument.contains([' ', '=', '"', '\t']), "{argument}");
         assert_ne!(task.description(), "");
     }
-    // The refresh also starts at the owner's logon; the stop and the sweep only when asked. A
-    // sweep asked for while one runs is queued after it; the others' second runs are dropped.
+    // The refresh also starts at the owner's logon; the stop and the sweep only when asked; the
+    // WSL deny task on installer events, not at logon. A sweep asked for while one runs is queued
+    // after it; the others' second runs are dropped.
     assert!(refresh.at_logon());
     assert!(!stop.at_logon());
     assert!(!sweep.at_logon());
+    assert!(!wsl.at_logon());
     assert_eq!(
         TASKS.map(SystemTask::queues),
-        [false, false, true],
+        [false, false, true, false, false],
         "only the sweep queues"
     );
     // The argument each task passes is the one the exe parses as its mode, and alone.
@@ -59,10 +73,76 @@ fn the_stop_and_sweep_tasks_are_the_refresh_task_but_for_name_argument_limit_and
     assert_eq!(mode(refresh), Ok(Mode::Refresh));
     assert_eq!(mode(stop), Ok(Mode::Stop));
     assert_eq!(mode(sweep), Ok(Mode::SweepTasks));
+    assert_eq!(mode(wsl), Ok(Mode::WslDeny));
 }
 
 #[test]
-fn both_tasks_take_the_one_descriptor_the_owner_may_read_and_execute() {
+fn the_triggers_pass_nothing_but_the_fixed_argument() {
+    // The refresh starts at the owner's logon only: an installer event, which anyone who can
+    // log on may forge, no longer starts it. The WSL deny task starts on Windows Installer's
+    // events alone (WSL's deny comes back after a WSL update); the stop and the sweep only on
+    // demand.
+    assert_eq!(SystemTask::Refresh.triggers(), [Trigger::Logon]);
+    assert_eq!(SystemTask::Stop.triggers(), []);
+    assert_eq!(SystemTask::Sweep.triggers(), []);
+    assert_eq!(SystemTask::WslDeny.triggers(), [Trigger::MsiEvents]);
+    for task in TASKS {
+        let events = task.triggers().contains(&Trigger::MsiEvents);
+        assert_eq!(events, task == SystemTask::WslDeny, "{task:?}");
+    }
+    assert_eq!(
+        MSI_EVENT_IDS,
+        [1022, 1033, 1035, 1040, 1042, 11707, 11724, 11728]
+    );
+    // The subscription is fixed text: the Application log, the MsiInstaller provider, those
+    // IDs, and nothing else. `register_task` sets it alone: no value queries, so no event data
+    // reaches the action.
+    let query = msi_event_query();
+    assert_eq!(
+        query,
+        "<QueryList><Query Id=\"0\" Path=\"Application\"><Select Path=\"Application\">\
+         *[System[Provider[@Name='MsiInstaller'] and (EventID=1022 or EventID=1033 or \
+         EventID=1035 or EventID=1040 or EventID=1042 or EventID=11707 or EventID=11724 or \
+         EventID=11728)]]</Select></Query></QueryList>"
+    );
+    assert!(!query.contains("$("), "{query}");
+    // Whatever starts it, the action's argument is the one fixed argument, with no event value
+    // to substitute (the Task Scheduler's `$(name)`).
+    for task in TASKS {
+        assert!(!task.argument().contains('$'), "{task:?}");
+    }
+    assert_eq!(SystemTask::Refresh.argument(), REFRESH_ARG);
+    // The event's task passes its one fixed argument, which re-applies the deny alone.
+    assert_eq!(SystemTask::WslDeny.argument(), WSL_DENY_ARG);
+    assert_eq!(WSL_DENY_ARG, "--wsl-deny");
+}
+
+#[test]
+fn the_wsl_upgrade_task_runs_on_demand_only_with_its_own_argument_and_limit() {
+    let upgrade = SystemTask::WslUpgrade;
+    assert_eq!(
+        (
+            upgrade.name(),
+            upgrade.argument(),
+            upgrade.execution_limit()
+        ),
+        ("SandboxWslUpgrade", "--wsl-upgrade", "PT5M")
+    );
+    assert_eq!(
+        (WSL_UPGRADE_ARG, WSL_UPGRADE_EXECUTION_LIMIT),
+        ("--wsl-upgrade", "PT5M")
+    );
+    // No trigger: no forged installer event, nor a logon, starts SYSTEM's msiexec.
+    assert_eq!(upgrade.triggers(), []);
+    assert!(!upgrade.at_logon());
+    let mode = parse([std::ffi::OsString::from(upgrade.argument())]);
+    assert_eq!(mode, Ok(Mode::WslUpgrade));
+    let extra = ["--wsl-upgrade", "x"].map(std::ffi::OsString::from);
+    assert!(parse(extra).is_err());
+}
+
+#[test]
+fn every_task_takes_the_one_descriptor_the_owner_may_read_and_execute() {
     // `register_task` passes `task_sddl(owner)` to the folder and to every task alike: no task
     // takes a descriptor of its own. The owner reads and executes (FRFX): starting a task needs
     // execute (CI run 42416074600), which also ends one. It can't write, delete or change the
@@ -90,6 +170,8 @@ fn the_removal_takes_every_task_down_after_the_values_and_before_the_copy() {
             Teardown::Task(SystemTask::Refresh),
             Teardown::Task(SystemTask::Stop),
             Teardown::Task(SystemTask::Sweep),
+            Teardown::Task(SystemTask::WslDeny),
+            Teardown::Task(SystemTask::WslUpgrade),
             Teardown::Staging,
             Teardown::AdminFolder,
         ]
@@ -108,11 +190,19 @@ fn the_removal_takes_every_task_down_after_the_values_and_before_the_copy() {
 }
 
 #[test]
-fn a_per_machine_set_up_registers_and_removes_the_stop_and_sweep_tasks() {
-    // `register_stop_task` and `unregister_stop_task` (`windows_machine.rs`,
-    // `remove/windows_removal.rs`) go over these; the refresh is `--adopt`'s alone.
-    assert_eq!(POOL_TASKS, [SystemTask::Stop, SystemTask::Sweep]);
-    for task in POOL_TASKS {
+fn a_per_machine_set_up_registers_and_removes_the_stop_sweep_and_wsl_tasks() {
+    // `late_steps::machine_tasks` and `remove::remove_machine_tasks` go over these; the
+    // refresh is `--adopt`'s alone.
+    assert_eq!(
+        MACHINE_TASKS,
+        [
+            SystemTask::Stop,
+            SystemTask::Sweep,
+            SystemTask::WslDeny,
+            SystemTask::WslUpgrade
+        ]
+    );
+    for task in MACHINE_TASKS {
         assert!(TASKS.contains(&task), "{task:?}");
         assert!(TEARDOWN.contains(&Teardown::Task(task)), "{task:?}");
     }
