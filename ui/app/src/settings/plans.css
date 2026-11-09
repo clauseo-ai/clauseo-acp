@@ -67,6 +67,15 @@
   .set-plan-sub {
     @apply text-small text-muted font-ui;
   }
+  /* the Safe workspace's note on settings it leaves out: its lines, then the names for IT in code type */
+  .set-plan-unused {
+    display: grid;
+    gap: var(--s1);
+    margin-top: var(--s2);
+  }
+  .set-plan-names {
+    font-family: var(--font-code);
+  }
   .set-plan-endpoint {
     display: grid;
     gap: var(--s1);

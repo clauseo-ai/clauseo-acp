@@ -13,6 +13,8 @@ export type LiveSettings = {
   tools?: ToolsSettingsView | undefined;
   /** Each agent's firm plan (SettingsView.plans), when the host sends one: Plans' firm address (UD2). */
   plans?: Settings["plans"];
+  /** The credential names the Safe workspace leaves out, per agent (SettingsView.safe_workspace_unused_env). */
+  safe_workspace_unused_env?: Settings["safe_workspace_unused_env"];
 };
 
 const KEYS = ["theme", "font_size", "language", "lite", "motion"] as const;
@@ -23,6 +25,7 @@ const sameSettings = (a: LiveSettings, b: LiveSettings) =>
   a.tools?.browser === b.tools?.browser &&
   (a.tools === undefined) === (b.tools === undefined) &&
   JSON.stringify(a.plans) === JSON.stringify(b.plans) &&
+  JSON.stringify(a.safe_workspace_unused_env) === JSON.stringify(b.safe_workspace_unused_env) &&
   a.locked.length === b.locked.length &&
   a.locked.every((key, i) => key === b.locked[i]);
 
@@ -36,6 +39,7 @@ export function useSettings(store: DisplayStore): LiveSettings {
       locked: store.locked(),
       tools: store.tools(),
       plans: store.plans(),
+      safe_workspace_unused_env: store.unusedEnv(),
     };
     if (last.current !== null && sameSettings(last.current, next)) return last.current;
     last.current = next;

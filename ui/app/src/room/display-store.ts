@@ -115,6 +115,8 @@ export interface DisplayStore {
   tools(): ToolsSettingsView | undefined;
   /** Each agent's firm plan as the host last said (SettingsView.plans): Plans' firm address (UD2); undefined with none. */
   plans(): Settings["plans"];
+  /** The credential names the Safe workspace leaves out, per agent, as the host last said: Plans' note. */
+  unusedEnv(): Settings["safe_workspace_unused_env"];
   /** The lawyer's change to a tool's switch, sent to the host as a patch; nothing without a host that takes one. */
   setTools(patch: ToolsPatch): void;
   display(): Display;
@@ -205,6 +207,7 @@ export function createDisplayStore(env: DisplayEnv): DisplayStore {
   let locked: readonly string[] = [];
   let tools: ToolsSettingsView | undefined;
   let plans: Settings["plans"];
+  let unusedEnv: Settings["safe_workspace_unused_env"];
   let stopHost = () => {};
   /** The settings_changed events heard: a read that one overtook is older than it, and dropped. */
   let heard = 0;
@@ -213,6 +216,7 @@ export function createDisplayStore(env: DisplayEnv): DisplayStore {
     locked = settings.locked;
     tools = settings.tools;
     plans = settings.plans;
+    unusedEnv = settings.safe_workspace_unused_env;
     try {
       env.storage?.setItem(DISPLAY_KEY, JSON.stringify(stored));
     } catch {
@@ -255,6 +259,7 @@ export function createDisplayStore(env: DisplayEnv): DisplayStore {
     locked: () => locked,
     tools: () => tools,
     plans: () => plans,
+    unusedEnv: () => unusedEnv,
     setTools(patch) {
       if (host === null || tools === undefined) return;
       tools = { ...tools, ...patch };

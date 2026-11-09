@@ -32,6 +32,7 @@ import { Managed } from "./parts.tsx";
 import { PlansEndpoint } from "./plans-endpoint.tsx";
 import { PlansKey } from "./plans-key.tsx";
 import { Confirm, Refused } from "./plans-parts.tsx";
+import { UnusedEnvNote } from "./plans-unused.tsx";
 
 /** What a search for the CLI's login can answer, read so both wires compile: today's FoundLogin, and stage D's with
  * `none_found` (the search found nothing) and `reuse_off` (reuse is off here, as after "Stop using it here"). */
@@ -99,6 +100,7 @@ export function PlanBlock({
   transport,
   locked,
   endpoint,
+  unusedEnv,
   onOther,
   blockRef,
 }: {
@@ -110,6 +112,8 @@ export function PlanBlock({
   transport: HostTransport;
   locked: boolean;
   endpoint: string | undefined;
+  /** The credential names in the plan's settings variables the Safe workspace leaves out (names only). */
+  unusedEnv: readonly string[] | undefined;
   onOther: () => void;
   blockRef: (el: HTMLElement | null) => void;
 }) {
@@ -414,6 +418,12 @@ export function PlanBlock({
       </Heading>
       {body}
       <Refused refused={refusalView(setup)} />
+      <UnusedEnvNote
+        name={name}
+        names={unusedEnv}
+        // a plan the firm's policy holds has no sign-in to offer (signin.firm_managed)
+        offerSignIn={!locked && !(stand.kind === "signed" && stand.signed.source === "own")}
+      />
       {ways && (
         <section className="set-plan-ways" aria-label={s("Other ways in")}>
           <Heading level={4} className="set-plan-sub">

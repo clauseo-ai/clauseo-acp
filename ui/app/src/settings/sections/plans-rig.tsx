@@ -61,6 +61,8 @@ export type PlansRig = {
   keys?: boolean;
   locked?: string[];
   plans?: SettingsView["plans"];
+  /** The credential names the Safe workspace leaves out, per plan (SettingsView.safe_workspace_unused_env). */
+  unusedEnv?: SettingsView["safe_workspace_unused_env"];
   /** Answers each setup command; throwing refuses it. */
   command?: (command: SetupCommand) => void;
 };
@@ -84,6 +86,7 @@ export async function mountPlans(o: PlansRig = {}): Promise<FakeTransport> {
             privacy: { counts: true, crash_reports: false, counts_started: true },
             locked: o.locked ?? [],
             ...(o.plans === undefined ? {} : { plans: o.plans }),
+            ...(o.unusedEnv === undefined ? {} : { safe_workspace_unused_env: o.unusedEnv }),
           } as SettingsView,
         };
       throw new Error(`not scripted: ${JSON.stringify(query)}`);
@@ -97,6 +100,7 @@ export async function mountPlans(o: PlansRig = {}): Promise<FakeTransport> {
               ui: DEFAULT_UI,
               locked: o.locked ?? [],
               ...(o.plans === undefined ? {} : { plans: o.plans }),
+              ...(o.unusedEnv === undefined ? {} : { safe_workspace_unused_env: o.unusedEnv }),
             },
           };
         throw new Error("not scripted");
