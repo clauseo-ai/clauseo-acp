@@ -12,8 +12,8 @@
 //! `WTD_CACHE_ONLY_URL_RETRIEVAL` keeps chain building off the network, so an offline machine
 //! verifies as an online one does. The signer's chain must then pass
 //! `CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_MICROSOFT_ROOT)` with the application-root
-//! flag ([`policy_para`]): it ends in one of Microsoft's own roots, Root 2011 included, which a
-//! root an administrator (or anyone) added can't stand in for; and its leaf certificate must
+//! flag ([`policy_para`]): it ends in Microsoft's application root, Root 2011, which a root an
+//! administrator (or anyone) added can't stand in for; and its leaf certificate must
 //! list the code-signing EKU (`szOID_PKIX_KP_CODE_SIGNING`).
 #![expect(
     unsafe_code,
@@ -306,10 +306,11 @@ pub(super) fn signature(file: &OwnedHandle, path: &str) -> Result<Signature, Str
     verdict
 }
 
-/// The `CERT_CHAIN_POLICY_MICROSOFT_ROOT` parameters: Microsoft's product roots and its
-/// application root, never the test root. `wsl.msi` chains Microsoft Corporation, Microsoft Code
-/// Signing PCA 2024, then Microsoft Root Certificate Authority 2011, which flag 0 doesn't accept
-/// (`0x800B0109`, `CERT_E_UNTRUSTEDROOT`, on the VM); `kernel32.dll`'s Root 2010 passes either way.
+/// The `CERT_CHAIN_POLICY_MICROSOFT_ROOT` parameters: Microsoft's application root, Microsoft
+/// Root Certificate Authority 2011, which the flag checks instead of the product roots; never the
+/// test root. `wsl.msi` chains Microsoft Corporation, Microsoft Code Signing PCA 2024, then Root
+/// 2011, which flag 0 doesn't accept (`0x800B0109`, `CERT_E_UNTRUSTEDROOT`, on the VM); a chain
+/// to Root 2010, as `kernel32.dll`'s embedded signature, fails with the flag (CI run 42520974059).
 pub(super) fn policy_para() -> CERT_CHAIN_POLICY_PARA {
     CERT_CHAIN_POLICY_PARA {
         cbSize: u32::try_from(size_of::<CERT_CHAIN_POLICY_PARA>()).unwrap_or(0),

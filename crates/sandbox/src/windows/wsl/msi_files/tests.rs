@@ -1,6 +1,7 @@
 //! The chain check on real files, unelevated: the policy's flags, a Microsoft file chaining to
-//! Root 2011 (Edge), one chaining to Root 2010 (`kernel32.dll`), and a binary signed by
-//! someone else (Git for Windows), each skipped with a message where the file is absent.
+//! Root 2011 (Edge), passed; one chaining to Root 2010 (`kernel32.dll`), refused, as the flag
+//! checks the application root instead of the product roots; and a binary signed by someone else
+//! (Git for Windows), refused; each skipped with a message where the file is absent.
 
 use std::os::windows::io::{FromRawHandle, OwnedHandle};
 use std::path::Path;
@@ -79,13 +80,18 @@ fn a_microsoft_file_chaining_to_root_2011_passes() {
     assert_eq!(signed, Ok(expected));
 }
 
+/// With the application-root flag the policy checks Root 2011 *instead of* the product roots
+/// (Learn, `CertVerifyCertificateChainPolicy`): `kernel32.dll`'s embedded signature, through
+/// Microsoft Windows Production PCA 2011 to Root 2010, fails it (CI run 42520974059 read
+/// `microsoft_root: false, code_signing: true` on the Windows runner). `wsl.msi` chains to Root
+/// 2011, which Edge's test covers.
 #[test]
-fn kernel32_chaining_to_root_2010_passes_the_root_check() {
+fn kernel32_chaining_to_root_2010_is_refused_by_the_application_root_check() {
     let windows = std::env::var("SystemRoot").unwrap_or_else(|_unset| r"C:\Windows".to_owned());
     let path = format!(r"{windows}\System32\kernel32.dll");
     let Some(file) = open(&path) else { return };
     match signature(&file, &path) {
-        Ok(signed) => assert!(signed.microsoft_root, "{signed:?}"),
+        Ok(signed) => assert!(!signed.microsoft_root, "{signed:?}"),
         // A catalog-signed build has no embedded signature for the file mode to read.
         Err(why) => eprintln!("skipped: {path} has no embedded signature here: {why}"),
     }

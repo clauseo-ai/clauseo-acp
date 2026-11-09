@@ -2659,10 +2659,12 @@ check (`check_launch_in`) passes WSL's check through `wsl_heal::heal`:
   online one does, and the signer's chain must pass
   `CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_MICROSOFT_ROOT)` with
   `MICROSOFT_ROOT_CERT_CHAIN_POLICY_CHECK_APPLICATION_ROOT_FLAG` (never the test-root flag): it
-  ends in one of Microsoft's own roots, so a root added to the machine's store can't stand in for
-  one. The flag admits Microsoft Root Certificate Authority 2011, where `wsl.msi` chains (through
-  Microsoft Code Signing PCA 2024); with no flags the policy refused it on the VM (`0x800B0109`,
-  `CERT_E_UNTRUSTEDROOT`), so no upgrade could install. And the leaf certificate must list the
+  ends in Microsoft's application root, so a root added to the machine's store can't stand in for
+  it. The flag checks Microsoft Root Certificate Authority 2011, where `wsl.msi` chains (through
+  Microsoft Code Signing PCA 2024), instead of the product roots; with no flags the policy refused
+  it on the VM (`0x800B0109`, `CERT_E_UNTRUSTEDROOT`), so no upgrade could install. A chain to
+  Root 2010 fails with the flag: `kernel32.dll`'s embedded signature on CI's Windows runner did
+  (run 42520974059). And the leaf certificate must list the
   code-signing EKU (`szOID_PKIX_KP_CODE_SIGNING`). The handle stays open, shared for reading only,
   and the two folders without delete sharing, until msiexec has ended, so nothing is swapped between
   the checks and the install; msiexec gets the path that was opened. A failed check is a failed
