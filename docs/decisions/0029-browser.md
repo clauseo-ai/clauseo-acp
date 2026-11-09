@@ -688,31 +688,53 @@ platform. The host cannot tell the refusal apart yet: no protocol change.
 tell every failure: Windows prints its broker's launch errors in debug builds only
 (`sandbox_win.cc`). So once Chrome has printed its endpoint, and before agent-browser starts,
 the guard looks at Chrome's descendants every 100 ms for at most 5 s, until it has seen at least
-one renderer and every child of a required kind (its last `--type=`) sandboxed. A child of a
-required kind that is not sandboxed when the 5 s end, or whose state cannot be read, refuses the
-browser exactly as above (`StartError::Sandbox`, the same sentence, Chrome killed, no second
-start; on Windows the job ends too). No renderer in that time is the ordinary failed start, never
-a pass; Chrome exiting during the check is one too. The check runs once per start. The guard's
-last stderr line names the child's kind and the reason ("Chrome's sandbox did not hold: its
-renderer runs above Low integrity"), never a path or command line.
-- Windows: the processes in the guard's job (`QueryInformationJobObject`,
-  `JobObjectBasicProcessIdList`, which counts Chrome's nested sandbox jobs) whose parent, from a
-  Toolhelp snapshot, leads back to Chrome; the kind from the command line
-  (`NtQueryInformationProcess`, `ProcessCommandLineInformation`); the primary token
-  (`OpenProcessToken`, `TOKEN_QUERY`) must be at Low integrity or below and restricted
-  (`IsTokenRestricted`) or an AppContainer's (`TokenIsAppContainer`). Required: renderers
-  (`sandbox/policy/win/sandbox_win.cc`, `AddDefaultConfigForSandboxedProcess`:
-  `USER_RESTRICTED_SAME_ACCESS` then `USER_LOCKDOWN`, Low, lowered to Untrusted) and the GPU
-  process (`content/browser/gpu/gpu_process_host.cc`, `GpuSandboxedProcessLauncherDelegate`:
-  `USER_LIMITED`, Low; Medium until it lowers itself where Low cannot reach the desktop, which
-  the 5 s of looks covers); both levels add restricting SIDs
-  (`sandbox/win/src/restricted_token_utils.cc`). Utility processes are not required: their
-  sandbox depends on the service and some run unsandboxed by design.
-- Linux: from `/proc`, each renderer must have `Seccomp: 2` in `status` (a seccomp-BPF filter)
-  and another PID or user namespace than Chrome (`ns/pid`, `ns/user`: the namespace sandbox, or
-  the setuid sandbox's PID namespace).
-- macOS: children walked with `proc_listchildpids`, arguments from `KERN_PROCARGS2`; each
-  renderer must get 1 from `sandbox_check(pid, NULL, SANDBOX_FILTER_NONE)`.
+one renderer and every child of a required kind (its last `--type=`) sandboxed. Then, for
+Chrome's whole life, a sentinel thread looks again every 250 ms (`postcheck/sentinel.rs`) and
+judges each child that has appeared since (a later renderer, the GPU process whenever it comes);
+a child already judged, with the same start time, is not read again, and a reused pid is judged
+afresh. A child of a required kind that is not sandboxed (at the start when the 5 s end; later
+once it has failed for 2 s, the time a just-forked renderer takes to install its filter), or
+whose state cannot be read, refuses the browser exactly as above (`StartError::Sandbox`, the
+same sentence, Chrome killed, on Windows with the job, no second start; a call in flight gets the
+sentence too). A child that has gone between the listing and its reads is skipped, never taken
+for a failure. No renderer at the start is the ordinary failed start, never a pass; Chrome
+exiting during the check is one too. The guard's last stderr line names the child's kind and the
+reason ("Chrome's sandbox did not hold: its renderer has no seccomp filter"), never a path or
+command line. Polling, not Windows' job notifications (`JOB_OBJECT_MSG_NEW_PROCESS`): their
+delivery is not guaranteed, so a check on them would still have to poll.
+
+Each child is judged against Chrome's own browser process, never against fixed marks: Chrome
+under `--no-sandbox` inside a sandbox of the host's (an AppContainer on Windows, a Seatbelt
+profile on macOS, the coming designs) hands that confinement to its children unchanged, and such
+a child must still fail.
+- Windows: every other process in the guard's job (`QueryInformationJobObject`,
+  `JobObjectBasicProcessIdList`, which counts Chrome's nested sandbox jobs; the job holds only
+  what the guard started); the kind from the command line (`NtQueryInformationProcess`,
+  `ProcessCommandLineInformation`); the start time from `GetProcessTimes`. A child passes when
+  its primary token (`OpenProcessToken`, `TOKEN_QUERY`) runs at an integrity level strictly
+  below Chrome's, or is restricted (`IsTokenRestricted`: restricting SIDs present) while
+  Chrome's is not. Required: renderers (`sandbox/policy/win/sandbox_win.cc`,
+  `AddDefaultConfigForSandboxedProcess`: a `USER_LOCKDOWN` primary token, Low, lowered to
+  Untrusted) and the GPU process (`content/browser/gpu/gpu_process_host.cc`,
+  `GpuSandboxedProcessLauncherDelegate`: `USER_LIMITED`); both levels add restricting SIDs
+  (`sandbox/win/src/restricted_token_utils.cc`). Only a renderer must exist; a GPU process is
+  judged whenever it appears. Utility processes are not required: their sandbox depends on the
+  service and some run unsandboxed by design.
+- Linux: from `/proc` (the tree from each process's parent in its `stat`, read once per pid
+  while it is listed; zombies skipped), each renderer must have `Seccomp: 2` in `status` (a
+  seccomp-BPF filter) and another PID or user namespace than Chrome (`ns/pid`, `ns/user`: the
+  namespace sandbox, or the setuid sandbox's PID namespace).
+- macOS: children walked with `proc_listchildpids`, start time and state from
+  `proc_pidinfo(PROC_PIDTBSDINFO)`, arguments from `KERN_PROCARGS2`. Each renderer must be denied
+  `file-read-data` of `<profile>/Default/Preferences` (the profile's real path) that Chrome is
+  allowed: `sandbox_check(pid, "file-read-data", SANDBOX_FILTER_PATH, path)` answers 1 for the
+  child and 0 for Chrome. Chromium's renderer profile starts from `(deny default)`
+  (`sandbox/policy/mac/common.sb`) and never grants the user data directory (`renderer.sb`); the
+  browser process must read its profile to run. A Chrome denied it cannot be told from its
+  children, and refuses. `sandbox_check` is found at run time (`dlsym`); a macOS without it
+  refuses the browser with its own kind (`Refused::NoSandboxCheck`). The rule is one of a
+  `Mode`: the coming macOS design runs Chrome `--no-sandbox` inside the host's own browser
+  profile, and a later change adds the mode where a child passes when it is in that profile.
 - Elsewhere the children cannot be listed, so the check refuses.
 
 **A silent start failure on Windows** (`chrome/postcheck/crashed.rs`). A start can fail with no
@@ -727,23 +749,44 @@ the agent's sandbox job, and the innermost job's limit is the one that applies. 
 Windows 11, with the limit on the agent's job only, the guard's job read `0x2000` (kill on close
 alone), the crash went to Windows Error Reporting, and Chrome hung until the 15 s timeout. Stage C
 also turns Windows Error Reporting off for the pool profile (#817), which the guard does not rely
-on. The exit code is what the guard reads: a Chrome that exits before its endpoint with an error
-NTSTATUS (both high bits, `0xC0000005`, `0xC0000022`) or `0x80000003` (a breakpoint) is the
-sandbox's refusal (`Refused::Crashed`, the same sentence). The exit can trail the end of stderr,
+on. The exit code is what the guard reads: a Chrome that exits before its endpoint with
+`0x80000003` (a breakpoint), `0xC0000005` (an access violation) or one of the sandbox's own
+termination codes (`SBOX_FATAL_INTEGRITY` 7006 to `SBOX_FATAL_MITIGATION` 7011, and
+`SBOX_FATAL_WARMUP` 7013, `sandbox/win/src/sandbox_types.h`) is the sandbox's refusal (`Refused::Crashed`, the same sentence). The exit can trail the end of stderr,
 so the guard waits up to 1 s for it. A child counts too: while it waits for the endpoint the guard
 looks at Chrome's children in the job at every poll (250 ms), holds each open so its exit code
 stays readable, and notes those whose token passes the rule above; one of those exiting with such
 a code during the start, whether the wait then ends early or times out, is the refusal as well. A
 child that starts and exits within one poll is not seen. Anything else, a timeout or an exit with
-an ordinary code, stays the ordinary failed start: a slow first start (an antivirus scanning a
+another code, stays the ordinary failed start, the loader's codes among them (`0xC0000135`,
+`0xC0000142`, `0xC000007B`: a broken or half-unpacked Chrome, sandbox or not): a slow first start (an antivirus scanning a
 fresh unzip) never claims the protection failed, and without the job flag the 15 s timeout still
 refuses the browser, as the ordinary failure. Either way the job ends, killing the tree, and
 Chrome is never started again.
 
+**A job above the guard that limits windows** (`job/probe.rs`). Chromium puts each renderer in a
+job of its own with UI restrictions, and Windows refuses to nest such a job below any job, however
+far up, with UI restrictions of its own (`AssignProcessToJobObject` fails with error 50); measured
+on stage C's Windows VM with every UI bit on both jobs, and with a UI-limited ancestor above a job
+without them. Sandboxed Chrome then crashes at its start (`0x80000003`, no child), even inside a
+job without UI restrictions nested in that one, which is the guard's job's shape.
+`QueryInformationJobObject` with no job reads the innermost job only and cannot see an ancestor.
+So before each start the guard tries what Chrome needs: it starts its own program suspended, makes
+a throwaway job with `JOB_OBJECT_UILIMIT_HANDLES`, and assigns the child to it; error 50 refuses
+the browser before Chrome starts, with its own kind (`Refused::JobLimitsWindows`, "the job it runs
+in limits its windows"), and any other failure goes on (a crash at the start is still refused).
+The child is always terminated. The guard's own job never sets UI restrictions (`job/tests.rs`
+reads them back as 0). Sandboxed Chrome started from a folder its restricted children cannot
+read (a matter folder) fails even outside any job (sandbox error 18), so Chrome lives in the
+pinned `<data>\browsers` folder, which #853 enforces.
+
 The tests' Chrome stand-in starts a renderer that the check counts as sandboxed under
 `CLAUSEO_TEST_GUARD_SANDBOX=stub`, read only in a `test-support` build; CI's real-Chrome tests,
 whose Chrome runs with `--no-sandbox` (below), set it to `trusted`, so their children are still
-listed and their kinds read, but taken as sandboxed.
+listed and their kinds read, but taken as sandboxed. `CLAUSEO_TEST_GUARD_CHROME_UNSANDBOXED=1`,
+also `test-support` only (`#[cfg]`, absent from a shipped build), gives Chrome `--no-sandbox`
+after the check that refuses it, so a real Chrome's run can show the check refusing it
+(`real_chrome.rs` `an_unsandboxed_real_chrome_is_refused`, and by hand on Windows and macOS).
 
 CI's real-Chrome tests run under `no_new_privs`, where the setuid sandbox cannot start, so a
 wrapper script there adds `--no-sandbox` (`tests/guard/real_chrome.rs`). That is the test
@@ -763,7 +806,8 @@ refuses; no renderer within the bound fails) and each OS's rule on plain values,
 agent-browser; a stand-in that exits at once with `0xC0000005` (the refusal on Windows) or 1
 (the ordinary failed start), that never prints its endpoint (the ordinary failed start at the
 timeout), and that never prints it after a sandboxed child exited with `0xC0000005` (the refusal
-on Windows). `chrome/postcheck/tests.rs` covers the crash rule, `job/tests.rs` reads the job's
+on Windows), a stand-in that starts an unsandboxed renderer after agent-browser runs (the
+sentinel's refusal, one launch), and the tests' hook refused. `chrome/postcheck/tests.rs` covers the crash rule, `job/tests.rs` reads the job's
 limits back.
 
 ### Lazy start and the idle stop (`browser_guard/session.rs`, the S27 release blocker)
@@ -1743,9 +1787,10 @@ The download (part 3):
 - The check after the start ran on Linux only, against the stand-in's renderer and the `/proc`
   reader on plain children; the Windows token and job reads and the macOS `sandbox_check` were
   compiled (`cargo clippy --target x86_64-pc-windows-gnu`, `--target aarch64-apple-darwin`),
-  never run. Children started after the check (later renderers) are not checked. The crash
+  never run; nor were the relative rules against a Chrome inside a sandbox of the host's. A child
+  that starts and exits between two of the sentinel's looks is never seen. The crash
   rule's exit-code reads, `JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION` and its test are Windows
-  only and never ran; the real exception code of stage C's crash is not known yet.
+  only and never ran.
 
 - Windows: compiled with `cargo clippy --target x86_64-pc-windows-gnu`, never run.
   `CREATE_NO_WINDOW`, the case-insensitive pass-through on a real environment block, and the

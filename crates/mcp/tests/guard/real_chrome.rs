@@ -311,6 +311,40 @@ fn a_page_opens_through_the_guard_with_real_chrome() {
     session.assert_gone(&scratch);
 }
 
+/// The refused half of the pair for the check of Chrome's sandbox
+/// (`src/browser_guard/chrome/postcheck.rs`) with a real Chrome: through the tests' hook
+/// (`CLAUSEO_TEST_GUARD_CHROME_UNSANDBOXED`, a `test-support` build only) the guard gives Chrome
+/// `--no-sandbox`, with the check for real (never `trusted`), and the check refuses it: the call
+/// gets the refusal, the guard exits 1, Chrome started once. The sandboxed half is every other
+/// test here when run off `CI` (where the check runs for real and passes).
+#[test]
+fn an_unsandboxed_real_chrome_is_refused() {
+    let Some(binaries) = binaries() else { return };
+    let scratch = Scratch::new("real_unsandboxed");
+    let proxy = PageProxy::start();
+    let mut guard_command = command(&scratch, &binaries, &proxy);
+    guard_command
+        .env_remove("CLAUSEO_TEST_GUARD_SANDBOX")
+        .env("CLAUSEO_TEST_GUARD_CHROME_UNSANDBOXED", "1");
+    let mut guard = Guard::start(guard_command);
+    let open = json!({"name": "agent_browser_open", "arguments": {"url": "http://page.test/"}});
+    guard.send(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": open}));
+    let reply = loop {
+        let reply = guard.read();
+        if reply["id"] == json!(1) {
+            break reply;
+        }
+    };
+    assert_eq!(
+        reply["error"]["message"],
+        "The browser couldn't start its own protection on this computer, so Clauseo won't use it.",
+        "{reply}"
+    );
+    let (status, (_, stderr)) = guard.finish_with_stderr();
+    assert_eq!(status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("Chrome's sandbox did not hold"), "{stderr}");
+}
+
 /// The agent (`parent_stub`) is killed with SIGKILL while the test still holds the guard's stdin:
 /// the guard notices its parent is gone and leaves no process of the session.
 #[test]

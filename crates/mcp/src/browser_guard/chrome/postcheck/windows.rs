@@ -1,38 +1,38 @@
-//! Windows: Chrome's children in the guard's job (`postcheck.rs`). The processes are the job's
-//! ([`Job::process_ids`]) whose parent, from a Toolhelp snapshot, leads back to Chrome; a
-//! child's arguments are its command line (`NtQueryInformationProcess`,
+//! Windows: Chrome's children in the guard's job (`postcheck.rs`). The processes are every
+//! process in the job ([`Job::process_ids`]) but Chrome: the job holds only what the guard
+//! started, so a renderer or GPU process in it is judged whoever started it, and no system-wide
+//! snapshot is taken at each look. A process's start time is its creation time
+//! (`GetProcessTimes`); its arguments are its command line (`NtQueryInformationProcess`,
 //! `ProcessCommandLineInformation`, which needs only `PROCESS_QUERY_LIMITED_INFORMATION`); and
-//! its sandbox is read from its primary token (`OpenProcessToken` with `TOKEN_QUERY`): the
-//! integrity level, `TokenIsAppContainer` and `IsTokenRestricted`, judged in `judge.rs`. Every
+//! its sandbox is read from its primary token and Chrome's (`OpenProcessToken` with
+//! `TOKEN_QUERY`): the integrity level and `IsTokenRestricted`, compared in `judge.rs`. Every
 //! failed call reads as unknown, which the check refuses. Each call has one wrapper here, with
 //! its `unsafe` block and why it is sound. Compiled for Windows, never run there yet (decision
 //! record 0029, "Not verified").
 #![expect(
     unsafe_code,
-    reason = "FFI to Toolhelp, the process and token APIs and NtQueryInformationProcess, for \
-              the check of Chrome's sandbox"
+    reason = "FFI to the process and token APIs and NtQueryInformationProcess, for the check \
+              of Chrome's sandbox"
 )]
 
 use std::collections::BTreeMap;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 
 use windows::Wdk::System::Threading::{NtQueryInformationProcess, ProcessCommandLineInformation};
-use windows::Win32::Foundation::{CloseHandle, HANDLE, UNICODE_STRING};
+use windows::Win32::Foundation::{HANDLE, UNICODE_STRING};
 use windows::Win32::Security::{
     GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, IsTokenRestricted,
-    IsValidSid, TOKEN_MANDATORY_LABEL, TOKEN_QUERY, TokenIntegrityLevel, TokenIsAppContainer,
-};
-use windows::Win32::System::Diagnostics::ToolHelp::{
-    CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
+    IsValidSid, TOKEN_MANDATORY_LABEL, TOKEN_QUERY, TokenIntegrityLevel,
 };
 use windows::Win32::System::Threading::{
     GetExitCodeProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 
 use super::super::super::job::Job;
+use super::super::super::parent::windows::started;
+use super::Source;
 use super::crashed::Exits;
 use super::judge::{self, Token};
-use super::{Source, descendants};
 
 /// The longest command line read, in bytes; Windows' own limit is 32 767 UTF-16 units.
 const MAX_COMMAND_LINE: usize = 1 << 17;
@@ -48,20 +48,24 @@ pub(super) struct InJob<'a> {
 
 impl Source for InJob<'_> {
     fn below(&mut self, chrome: u32) -> Option<Vec<u32>> {
-        let in_job = self.job.process_ids()?;
-        let pairs: Vec<(u32, u32)> = snapshot()?
-            .into_iter()
-            .filter(|(pid, _)| in_job.contains(pid))
-            .collect();
-        Some(descendants(chrome, &pairs))
+        let mut in_job = self.job.process_ids()?;
+        in_job.retain(|&pid| pid != chrome);
+        Some(in_job)
+    }
+
+    fn stamp(&mut self, pid: u32) -> Option<u64> {
+        started(HANDLE(open(pid)?.as_raw_handle()))
     }
 
     fn args(&mut self, pid: u32) -> Option<Vec<u8>> {
         command_line(&open(pid)?).map(String::into_bytes)
     }
 
-    fn sandboxed(&mut self, _chrome: u32, pid: u32) -> Result<(), &'static str> {
-        judge::windows(open(pid).as_ref().and_then(token))
+    fn sandboxed(&mut self, chrome: u32, pid: u32) -> Result<(), &'static str> {
+        judge::windows(
+            open(chrome).as_ref().and_then(token),
+            open(pid).as_ref().and_then(token),
+        )
     }
 }
 
@@ -96,29 +100,6 @@ fn open(pid: u32) -> Option<OwnedHandle> {
     // SAFETY: `raw` is the open handle OpenProcess just returned, which nothing else owns; the
     // `OwnedHandle` closes it once, on drop.
     Some(unsafe { OwnedHandle::from_raw_handle(raw.0) })
-}
-
-/// Every process's pid and parent pid, from a process snapshot.
-fn snapshot() -> Option<Vec<(u32, u32)>> {
-    let mut entry = PROCESSENTRY32W {
-        dwSize: u32::try_from(size_of::<PROCESSENTRY32W>()).ok()?,
-        ..PROCESSENTRY32W::default()
-    };
-    // SAFETY: a process snapshot takes no pointer; its handle is closed below, and nothing
-    // between here and there returns early.
-    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }.ok()?;
-    let mut pairs = Vec::new();
-    // SAFETY: `snapshot` is the live snapshot handle and `entry` a PROCESSENTRY32W whose
-    // `dwSize` is set, as Process32FirstW and Process32NextW require.
-    let mut next = unsafe { Process32FirstW(snapshot, &raw mut entry) };
-    while next.is_ok() {
-        pairs.push((entry.th32ProcessID, entry.th32ParentProcessID));
-        // SAFETY: as for Process32FirstW above.
-        next = unsafe { Process32NextW(snapshot, &raw mut entry) };
-    }
-    // SAFETY: `snapshot` is a handle this function owns and closes only here.
-    drop(unsafe { CloseHandle(snapshot) });
-    Some(pairs)
 }
 
 /// `process`'s command line. Windows writes a `UNICODE_STRING` into the buffer with the text
@@ -189,25 +170,10 @@ fn token(process: &OwnedHandle) -> Option<Token> {
     // owns; the `OwnedHandle` closes it once, on drop.
     let token = unsafe { OwnedHandle::from_raw_handle(raw.0) };
     let handle = HANDLE(token.as_raw_handle());
-    let mut app_container = 0_u32;
-    let mut needed = 0_u32;
-    // SAFETY: `app_container` is a live u32 of the 4 bytes passed, the DWORD this class
-    // writes; `needed` is a live u32.
-    unsafe {
-        GetTokenInformation(
-            handle,
-            TokenIsAppContainer,
-            Some((&raw mut app_container).cast()),
-            4,
-            &raw mut needed,
-        )
-    }
-    .ok()?;
     // SAFETY: `handle` is the live token handle `token` owns, opened with TOKEN_QUERY.
     let restricted = unsafe { IsTokenRestricted(handle) }.is_ok();
     Some(Token {
         integrity: integrity(handle)?,
-        app_container: app_container != 0,
         restricted,
     })
 }

@@ -5,7 +5,9 @@
 //! `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` (and no breakaway allowed, so nothing in it can start a
 //! process outside it), plus `JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION` (a process that crashes
 //! ends at once, its exit code the exception's, rather than hanging on Windows Error Reporting:
-//! `chrome/postcheck/crashed.rs` reads that code, decision record 0029), and creates Chrome
+//! `chrome/postcheck/crashed.rs` reads that code, decision record 0029), and no UI restrictions
+//! (Chrome's sandbox nests UI-restricted jobs of its own in it: `job/probe.rs`), and
+//! creates Chrome
 //! (`chrome.rs`), agent-browser and each one-shot agent-browser (`relay/`) in it ([`Job::spawn`],
 //! `job/spawn.rs`): each is in the job from its creation, so a guard killed at any moment leaves
 //! none outside it. Ending the job ends Chrome, agent-browser and its daemon; so does the job's
@@ -20,6 +22,7 @@
 )]
 
 mod child;
+mod probe;
 mod spawn;
 
 use std::io;
@@ -36,6 +39,7 @@ use windows::Win32::System::JobObjects::{
 use windows::core::PCWSTR;
 
 pub(crate) use child::{Child, ChildStderr, ChildStdin};
+pub(crate) use probe::{Nesting, ui_jobs_nest};
 pub(crate) use spawn::{Io, Launch, windows_dirs};
 
 /// The exit code the job's end gives its processes.
@@ -124,6 +128,13 @@ impl Job {
         HANDLE(self.job.as_raw_handle())
     }
 
+    /// This job's UI restrictions (`JOBOBJECT_BASIC_UI_RESTRICTIONS`): always 0, since the guard
+    /// never sets any (`job/probe.rs`); `None` when Windows refuses the call.
+    #[cfg(test)]
+    pub(crate) fn ui_restrictions(&self) -> Option<u32> {
+        ui_restrictions(Some(self.handle()))
+    }
+
     /// A new job that ends its processes when its last handle closes, and a process of it at
     /// once when it crashes (no Windows Error Reporting dialog or hang). No breakaway flag is
     /// set, so a process in it cannot start one outside it.
@@ -159,6 +170,29 @@ impl Job {
         .map_err(|error| io::Error::other(format!("could not set the job's limit: {error}")))?;
         Ok(job)
     }
+}
+
+/// `job`'s UI restrictions.
+#[cfg(test)]
+fn ui_restrictions(job: Option<HANDLE>) -> Option<u32> {
+    use windows::Win32::System::JobObjects::{
+        JOBOBJECT_BASIC_UI_RESTRICTIONS, JobObjectBasicUIRestrictions,
+    };
+    let mut limits = JOBOBJECT_BASIC_UI_RESTRICTIONS::default();
+    let size = u32::try_from(size_of::<JOBOBJECT_BASIC_UI_RESTRICTIONS>()).ok()?;
+    // SAFETY: `limits` is a live JOBOBJECT_BASIC_UI_RESTRICTIONS of `size` bytes, the struct
+    // this information class writes; `job` is a job handle its owner keeps open.
+    unsafe {
+        QueryInformationJobObject(
+            job,
+            JobObjectBasicUIRestrictions,
+            (&raw mut limits).cast(),
+            size,
+            None,
+        )
+    }
+    .ok()?;
+    Some(limits.UIRestrictionsClass.0)
 }
 
 #[cfg(test)]

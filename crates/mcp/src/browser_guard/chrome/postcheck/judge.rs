@@ -1,42 +1,43 @@
 //! What each OS's answers about a child of Chrome mean (`postcheck.rs`): plain values in, a
 //! verdict out, so every OS's rule is tested on every OS. Each refusal names a fixed reason,
-//! read after the child's kind in the guard's log ("its renderer runs above Low integrity").
+//! read after the child's kind in the guard's log ("its renderer runs at Chrome's own
+//! integrity, unrestricted"). Each rule compares the child with Chrome's own browser process, so a
+//! child that merely inherits the browser's confinement (Chrome under `--no-sandbox` inside a
+//! sandbox of the host's own) never passes.
 
-/// Windows: what a child's process token says (`postcheck/windows.rs`).
+/// Windows: what a process token says (`postcheck/windows.rs`).
 #[cfg(any(windows, test))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Token {
     /// The last sub-authority of `TokenIntegrityLevel`'s SID: its mandatory level's RID.
     pub(crate) integrity: u32,
-    /// `TokenIsAppContainer`.
-    pub(crate) app_container: bool,
-    /// `IsTokenRestricted`: the token has restricting SIDs.
+    /// `IsTokenRestricted`: the token has restricting SIDs (`TokenRestrictedSids` is not
+    /// empty; the call is documented as exactly that test).
     pub(crate) restricted: bool,
 }
 
-/// `SECURITY_MANDATORY_LOW_RID`; Untrusted (0) is below it.
+/// Windows: a child is sandboxed when its token is restricted and Chrome's own is not, or when
+/// it runs at an integrity level strictly below Chrome's. Chromium's renderer runs on a
+/// `USER_LOCKDOWN` primary token, whose restricting SID list holds the null SID, at Low lowered
+/// to Untrusted (`sandbox/policy/win/sandbox_win.cc`, `AddDefaultConfigForSandboxedProcess`;
+/// `sandbox/win/src/restricted_token_utils.cc`); its GPU process on `USER_LIMITED`, restricted
+/// too (`content/browser/gpu/gpu_process_host.cc`). A child under `--no-sandbox` inherits
+/// Chrome's token as it is: the same integrity, restricted only if Chrome's is, and fails both
+/// tests even when Chrome itself runs in a sandbox of the host's (Low, an `AppContainer`).
+/// Restriction counts only when Chrome's token has none, since a restricted Chrome hands its
+/// restriction down unchanged. A token that cannot be read, Chrome's or the child's, refuses.
 #[cfg(any(windows, test))]
-pub(crate) const LOW_RID: u32 = 0x1000;
-
-/// Windows: sandboxed when the token is at Low integrity or below, and restricted or an
-/// `AppContainer`'s. Chromium's renderer token is `USER_LOCKDOWN`, restricted, at Low, lowered to
-/// Untrusted (`sandbox/policy/win/sandbox_win.cc`, `AddDefaultConfigForSandboxedProcess`); its
-/// GPU process token `USER_LIMITED`, restricted, at Low (`gpu_process_host.cc`); both restricted
-/// levels add restricting SIDs (`sandbox/win/src/restricted_token_utils.cc`). An `AppContainer`
-/// token (the renderer's under `RendererAppContainer`, off by default) runs at Low and has no
-/// restricting SIDs. A token that cannot be read (`None`) is not sandboxed.
-#[cfg(any(windows, test))]
-pub(crate) fn windows(token: Option<Token>) -> Result<(), &'static str> {
-    let Some(token) = token else {
+pub(crate) fn windows(chrome: Option<Token>, child: Option<Token>) -> Result<(), &'static str> {
+    let Some(chrome) = chrome else {
+        return Err("cannot be compared with Chrome, whose token the guard could not read");
+    };
+    let Some(child) = child else {
         return Err("has a token the guard could not read");
     };
-    if token.integrity > LOW_RID {
-        return Err("runs above Low integrity");
+    if child.integrity < chrome.integrity || (child.restricted && !chrome.restricted) {
+        return Ok(());
     }
-    if !token.restricted && !token.app_container {
-        return Err("has neither a restricted nor an AppContainer token");
-    }
-    Ok(())
+    Err("runs at Chrome's own integrity level, with no restriction Chrome lacks")
 }
 
 /// Linux: a child's namespaces, each `readlink /proc/<pid>/ns/<name>` (`pid:[4026531836]`), or
@@ -80,13 +81,36 @@ pub(crate) fn linux(
     Ok(())
 }
 
-/// macOS: sandboxed when `sandbox_check(pid, NULL, SANDBOX_FILTER_NONE)` answers 1 (it answers 0
-/// for a process with no Seatbelt profile and -1 on an error, which is not sandboxed either).
+/// macOS: what the check expects of Chrome's children (`postcheck/macos.rs`). One mode now;
+/// the browser profile of the coming macOS design adds a second, `BrowserProfile` (Chrome runs
+/// `--no-sandbox` inside the host's own Seatbelt profile, and a child passes when it is in that
+/// profile), which a later change switches on once the guard has proved it runs there. Until
+/// then nothing builds it, and each match on [`Mode`] must handle it when it comes.
 #[cfg(any(target_os = "macos", test))]
-pub(crate) fn macos(answer: i32) -> Result<(), &'static str> {
-    match answer {
-        1 => Ok(()),
-        0 => Err("runs without a Seatbelt profile"),
-        _ => Err("could not be asked about its Seatbelt profile"),
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Mode {
+    /// Chrome's own sandbox: each child under its own Seatbelt profile, Chrome under none that
+    /// keeps it from its profile folder.
+    ChromeSandbox,
+}
+
+/// macOS: `sandbox_check(pid, "file-read-data", SANDBOX_FILTER_PATH, <profile>/Default/
+/// Preferences)` for Chrome and for the child: 0 allowed, 1 denied, -1 not answered. In
+/// [`Mode::ChromeSandbox`] the child must be denied what Chrome is allowed. Chromium's renderer
+/// profile starts from `(deny default)` (`sandbox/policy/mac/common.sb`) and grants reads of
+/// the bundle, system paths and a few named preference files, never the user data directory,
+/// whose parameter it defines and leaves unused (`common.sb`, `renderer.sb`); Chrome's browser
+/// process must read its own profile to run. A child that inherits Chrome's state answers as
+/// Chrome does and fails. A Chrome that is denied its own profile, or either answer missing,
+/// cannot tell them apart, and refuses.
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn macos(mode: Mode, chrome: i32, child: i32) -> Result<(), &'static str> {
+    match mode {
+        Mode::ChromeSandbox => match (chrome, child) {
+            (0, 1) => Ok(()),
+            (0, 0) => Err("may read Chrome's profile, as Chrome does"),
+            (1, _) => Err("cannot be told apart from Chrome, which is itself denied its profile"),
+            _ => Err("could not be asked about its Seatbelt profile"),
+        },
     }
 }

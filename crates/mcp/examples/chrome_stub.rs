@@ -21,7 +21,11 @@
 //! `exit:0xC0000005` is Windows' crash at start in the agent's job. In `listen-exit` the
 //! stand-in exits once agent-browser (the echo stub) has made its log `received.jsonl` beside
 //! it, at most 10 s after the endpoint, so the guard's check sees it alive first; it writes
-//! `chrome-exiting` beside it just before.
+//! `chrome-exiting` beside it just before. In `late-unsandboxed` it listens with its sandboxed
+//! renderer, and once agent-browser has made its log it starts a second renderer without
+//! `--stub-sandboxed` (a child that turns up unsandboxed after the check at the start). A stand-in
+//! started with `--no-sandbox` (the guard's `CLAUSEO_TEST_GUARD_CHROME_UNSANDBOXED` hook, a
+//! `test-support` build only) starts its renderer unsandboxed, as Chrome would.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -78,9 +82,11 @@ fn main() -> std::io::Result<()> {
         _ => Some(port),
     };
     let exit_after = mode.trim() == "listen-exit";
+    let unsandboxed =
+        mode.trim() == "unsandboxed-renderer" || std::env::args().any(|arg| arg == "--no-sandbox");
     // Held until the stand-in exits, when the renderer's stdin closes.
     let _renderer = match port {
-        Some(_) if mode.trim() == "unsandboxed-renderer" => Some(renderer(&exe, &[])?),
+        Some(_) if unsandboxed => Some(renderer(&exe, &[])?),
         Some(_) => Some(renderer(&exe, &["--stub-sandboxed"])?),
         None => None,
     };
@@ -96,6 +102,11 @@ fn main() -> std::io::Result<()> {
     if exit_after {
         wait_for_agent(&dir);
         std::process::exit(3);
+    }
+    if mode.trim() == "late-unsandboxed" {
+        wait_for_agent(&dir);
+        let _late = renderer(&exe, &[])?;
+        wait_forever();
     }
     wait_forever();
 }

@@ -1,15 +1,17 @@
 //! The check after Chrome's start over a fake [`Source`], and each OS's rule (`judge.rs`) on
-//! plain values: a sandboxed renderer passes, an unsandboxed one refuses, an unreadable state
-//! refuses, and no renderer within the bound fails the start. Also the watch during the wait for
-//! Chrome's endpoint (`crashed.rs`): a failed start reads as the sandbox's failure only after a
-//! child seen sandboxed crashed, and the crash codes.
+//! plain values: a sandboxed renderer passes, an unsandboxed one refuses, a child whose state is
+//! exactly Chrome's own (`--no-sandbox`) refuses on every OS, an unreadable state refuses, and no
+//! renderer within the bound fails the start. The sentinel (`sentinel.rs`) catches a child that
+//! turns up unsandboxed later. Also the watch during the wait for Chrome's endpoint
+//! (`crashed.rs`): a failed start reads as the sandbox's failure only after a child seen
+//! sandboxed crashed, and the crash codes.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
 
 use super::crashed::{Crashes, Exits, crash};
-use super::judge::{self, LOW_RID, Namespaces, Token};
-use super::{Kind, Look, Source, check, descendants, kind_of, look};
+use super::sentinel::keep_looking;
+use super::{Kind, Look, Source, Watch, check, descendants, kind_of};
 use crate::browser_guard::session::{Refused, StartError};
 
 const CHROME: u32 = 100;
@@ -24,12 +26,21 @@ type Verdict = Result<(), &'static str>;
 
 /// Chrome's children as a test sets them: each pid's arguments (`None`: unreadable) and its
 /// sandbox verdict. `looks` counts the listings; `appear` hides every child until that many.
+/// A child's start time is `born`'s entry, else its pid; `asked` counts the sandbox questions,
+/// and `vanish` drops that child from the listing once it has been asked about.
 #[derive(Default)]
 struct Fake {
     children: BTreeMap<u32, (Option<&'static [u8]>, Verdict)>,
     listable: bool,
     looks: u32,
     appear: u32,
+    born: BTreeMap<u32, u64>,
+    asked: u32,
+    vanish: Option<u32>,
+    /// A child that has gone once its command line was asked for.
+    unlisted_after_args: Option<u32>,
+    /// A child, unsandboxed, that is listed from look `.0` on: its pid and arguments.
+    late: Option<(u32, u32, &'static [u8])>,
 }
 
 impl Fake {
@@ -55,16 +66,37 @@ impl Source for Fake {
         if self.looks <= self.appear {
             return Some(Vec::new());
         }
+        if let Some((from, pid, args)) = self.late
+            && self.looks >= from
+        {
+            let why = "runs at Chrome's own integrity level, with no restriction Chrome lacks";
+            self.children.entry(pid).or_insert((Some(args), Err(why)));
+        }
         Some(self.children.keys().copied().collect())
     }
 
+    fn stamp(&mut self, pid: u32) -> Option<u64> {
+        self.children
+            .contains_key(&pid)
+            .then(|| self.born.get(&pid).copied().unwrap_or(u64::from(pid)))
+    }
+
     fn args(&mut self, pid: u32) -> Option<Vec<u8>> {
-        self.children[&pid].0.map(<[u8]>::to_vec)
+        let args = self.children[&pid].0.map(<[u8]>::to_vec);
+        if self.unlisted_after_args == Some(pid) {
+            self.children.remove(&pid);
+        }
+        args
     }
 
     fn sandboxed(&mut self, chrome: u32, pid: u32) -> Result<(), &'static str> {
         assert_eq!(chrome, CHROME);
-        self.children[&pid].1
+        self.asked += 1;
+        let verdict = self.children[&pid].1;
+        if self.vanish == Some(pid) {
+            self.children.remove(&pid);
+        }
+        verdict
     }
 }
 
@@ -72,7 +104,19 @@ const BOTH: &[Kind] = &[Kind::Renderer, Kind::Gpu];
 
 /// [`check`] with `looks` looks and no pause between them.
 fn run(fake: &mut Fake, required: &[Kind], looks: u32) -> Result<(), StartError> {
-    check(fake, CHROME, required, (looks, Duration::ZERO), || Ok(()))
+    let mut watch = Watch::default();
+    check(
+        fake,
+        &mut watch,
+        (CHROME, required),
+        (looks, Duration::ZERO),
+        || Ok(()),
+    )
+}
+
+/// One look with no grace and nothing learnt before.
+fn look(fake: &mut Fake, required: &[Kind]) -> Look {
+    Watch::default().look(fake, CHROME, required, 0)
 }
 
 #[test]
@@ -82,7 +126,7 @@ fn a_sandboxed_renderer_passes_and_other_kinds_are_not_asked() {
         (2, Some(UTILITY), Err("never asked")),
         (3, Some(b"crashpad_handler"), Err("never asked")),
     ]);
-    assert_eq!(look(&mut fake, CHROME, BOTH), Look::Sandboxed);
+    assert_eq!(look(&mut fake, BOTH), Look::Sandboxed);
     assert_eq!(run(&mut fake, BOTH, 3), Ok(()));
 }
 
@@ -100,8 +144,9 @@ fn an_unsandboxed_renderer_or_gpu_process_refuses_the_browser() {
                 why: "runs above Low integrity"
             }))
         );
-        // Looked again until the bound, in case the child was still lowering its token.
-        assert_eq!(fake.looks, 3);
+        // Looked again until the bound, in case the child was still lowering its token: three
+        // looks, each failure listing the children once more (to tell a child that has gone).
+        assert_eq!(fake.looks, 6);
     }
     // Linux and macOS require renderers only: an unsandboxed GPU process is not asked.
     let mut fake = Fake::new(&[(1, Some(RENDERER), Ok(())), (2, Some(GPU), Err("x"))]);
@@ -165,9 +210,13 @@ fn a_renderer_that_appears_within_the_bound_passes() {
 #[test]
 fn the_check_ends_when_chrome_exits_or_the_parent_goes() {
     let mut fake = Fake::new(&[(1, Some(RENDERER), Ok(()))]);
-    let ended = check(&mut fake, CHROME, BOTH, (3, Duration::ZERO), || {
-        Err(StartError::Other("Chrome exited".to_owned()))
-    });
+    let ended = check(
+        &mut fake,
+        &mut Watch::default(),
+        (CHROME, BOTH),
+        (3, Duration::ZERO),
+        || Err(StartError::Other("Chrome exited".to_owned())),
+    );
     assert_eq!(ended, Err(StartError::Other("Chrome exited".to_owned())));
     assert_eq!(fake.looks, 0);
 }
@@ -215,117 +264,51 @@ fn descendants_are_the_whole_tree_below_chrome_and_nothing_else() {
     assert_eq!(found, vec![7]);
 }
 
-fn token(integrity: u32, app_container: bool, restricted: bool) -> Token {
-    Token {
-        integrity,
-        app_container,
-        restricted,
-    }
-}
-
-#[test]
-fn windows_wants_low_integrity_and_a_restricted_or_app_container_token() {
-    const UNTRUSTED: u32 = 0;
-    const MEDIUM: u32 = 0x2000;
-    // Chromium's renderer (Low, then Untrusted) and GPU process (Low), restricted; an
-    // AppContainer renderer.
-    assert_eq!(judge::windows(Some(token(LOW_RID, false, true))), Ok(()));
-    assert_eq!(judge::windows(Some(token(UNTRUSTED, false, true))), Ok(()));
-    assert_eq!(judge::windows(Some(token(LOW_RID, true, false))), Ok(()));
-    // `--no-sandbox`: the user's own token, Medium, unrestricted.
-    assert_eq!(
-        judge::windows(Some(token(MEDIUM, false, false))),
-        Err("runs above Low integrity")
-    );
-    // Restricted but Medium (a GPU process not lowered yet).
-    assert_eq!(
-        judge::windows(Some(token(MEDIUM, false, true))),
-        Err("runs above Low integrity")
-    );
-    assert_eq!(
-        judge::windows(Some(token(LOW_RID, false, false))),
-        Err("has neither a restricted nor an AppContainer token")
-    );
-    assert_eq!(
-        judge::windows(None),
-        Err("has a token the guard could not read")
-    );
-}
-
-fn ns(pid: Option<&str>, user: Option<&str>) -> Namespaces {
-    Namespaces {
-        pid: pid.map(str::to_owned),
-        user: user.map(str::to_owned),
-    }
-}
-
-#[test]
-fn linux_wants_a_seccomp_filter_and_another_pid_or_user_namespace() {
-    let chrome = ns(Some("pid:[1]"), Some("user:[1]"));
-    let sandboxed = ns(Some("pid:[2]"), Some("user:[2]"));
-    let filtered = "Name:\tchrome\nNoNewPrivs:\t1\nSeccomp:\t2\nSeccomp_filters:\t1\n";
-    assert_eq!(judge::linux(Some(filtered), &chrome, &sandboxed), Ok(()));
-    // The setuid sandbox: a new PID namespace, the same user namespace.
-    let setuid = ns(Some("pid:[2]"), Some("user:[1]"));
-    assert_eq!(judge::linux(Some(filtered), &chrome, &setuid), Ok(()));
-    for status in [
-        "Name:\tchrome\nSeccomp:\t0\n",
-        "Seccomp:\t1\n",
-        "Name:\tchrome\n",
-    ] {
-        assert_eq!(
-            judge::linux(Some(status), &chrome, &sandboxed),
-            Err("has no seccomp filter"),
-            "{status}"
-        );
-    }
-    let shares = Err("shares Chrome's PID and user namespaces, or they could not be read");
-    assert_eq!(judge::linux(Some(filtered), &chrome, &chrome), shares);
-    assert_eq!(
-        judge::linux(Some(filtered), &chrome, &ns(None, None)),
-        shares
-    );
-    assert_eq!(
-        judge::linux(Some(filtered), &ns(None, None), &sandboxed),
-        shares
-    );
-    assert_eq!(
-        judge::linux(None, &chrome, &sandboxed),
-        Err("has a status the guard could not read")
-    );
-}
-
-#[test]
-fn macos_wants_sandbox_check_to_answer_one() {
-    assert_eq!(judge::macos(1), Ok(()));
-    assert_eq!(judge::macos(0), Err("runs without a Seatbelt profile"));
-    assert_eq!(
-        judge::macos(-1),
-        Err("could not be asked about its Seatbelt profile")
-    );
-}
-
 /// The real `/proc` reader on this machine: the test's own child, a `sleep`, is below it with
 /// its arguments, and it shares the test's namespaces, so it is not sandboxed.
 #[cfg(target_os = "linux")]
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a plain child for the /proc reader to find, waited for until it has run exec"
+)]
 fn linux_procfs_lists_a_child_and_judges_it_unsandboxed() {
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "a plain child for the /proc reader to find"
-    )]
     let mut child = std::process::Command::new("sleep")
         .arg("30")
         .spawn()
         .unwrap();
     let own = std::process::id();
-    let mut procfs = super::linux::Procfs;
+    let mut procfs = super::linux::Procfs::new();
+    // Until the child has run `exec`, its command line is still the test's own: wait for it, at
+    // most 10 s.
+    let mut args = Vec::new();
+    for _ in 0..1_000 {
+        args = procfs.args(child.id()).unwrap_or_default();
+        if args == b"sleep\x0030\x00" {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(args, b"sleep\x0030\x00");
     let below = procfs.below(own).unwrap();
     assert!(below.contains(&child.id()), "{below:?}");
-    let args = procfs.args(child.id()).unwrap();
-    assert_eq!(args, b"sleep\x0030\x00");
+    assert!(procfs.stamp(child.id()).is_some());
     assert!(procfs.sandboxed(own, child.id()).is_err());
-    assert_eq!(super::linux::parent_in("12 (a) b) c) S 34 12"), Some(34));
+    assert_eq!(
+        super::linux::parse_stat(
+            "12 (a) b) c) S 34 12 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 99 x"
+        ),
+        Some(super::linux::Stat {
+            parent: 34,
+            started: 99,
+            zombie: false
+        })
+    );
+    assert!(
+        super::linux::parse_stat("12 (a) Z 34 12 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 99")
+            .unwrap()
+            .zombie
+    );
     child.kill().unwrap();
     child.wait().unwrap();
 }
@@ -369,7 +352,7 @@ fn failed_start(children: &[Given], codes: &[(u32, u32)]) -> bool {
 #[test]
 fn a_sandboxed_child_that_crashed_during_the_start_is_the_sandboxs_refusal() {
     let sandboxed = [(1, Some(RENDERER), Ok(()))];
-    for code in [0xC000_0005, 0xC000_0022, 0x8000_0003, 0xC000_0409] {
+    for code in [0xC000_0005, 0x8000_0003, 7006, 7013] {
         assert!(failed_start(&sandboxed, &[(1, code)]), "{code:#x}");
     }
     // Any child kind: only its token counts.
@@ -394,17 +377,147 @@ fn any_other_failed_start_stays_the_ordinary_one() {
 }
 
 #[test]
-fn a_crash_code_is_an_error_ntstatus_or_a_breakpoint() {
+fn a_crash_code_is_a_breakpoint_an_access_violation_or_the_sandboxs_own() {
     for code in [
-        0xC000_0005,
-        0xC000_0022,
-        0xC000_0409,
-        0xFFFF_FFFF,
         0x8000_0003,
+        0xC000_0005,
+        7006,
+        7007,
+        7008,
+        7009,
+        7010,
+        7011,
+        7013,
     ] {
         assert!(crash(code), "{code:#x}");
     }
-    for code in [0, 1, 3, 259, 0x7FFF_FFFF, 0x8000_0005, 0x4000_0015] {
+    // The loader's codes (a DLL not found, a DLL's start failed, a bad image), other errors,
+    // the job's memory limit and the broker's shutdown, and Chrome's own small codes.
+    for code in [
+        0xC000_0135,
+        0xC000_0142,
+        0xC000_007B,
+        0xC000_0022,
+        0xC000_0409,
+        0xFFFF_FFFF,
+        7012,
+        7014,
+        0,
+        1,
+        3,
+        259,
+        0x7FFF_FFFF,
+        0x8000_0005,
+        0x4000_0015,
+    ] {
         assert!(!crash(code), "{code:#x}");
     }
 }
+
+/// A failed start whose sandboxed child died of a loader error is the ordinary one.
+#[test]
+fn a_child_that_died_of_a_loader_error_stays_the_ordinary_failed_start() {
+    let sandboxed = [(1, Some(RENDERER), Ok(()))];
+    for code in [0xC000_0135, 0xC000_0142, 0xC000_007B] {
+        assert!(!failed_start(&sandboxed, &[(1, code)]), "{code:#x}");
+    }
+}
+
+#[test]
+fn a_child_judged_once_is_not_read_again_until_its_pid_is_reused() {
+    let mut fake = Fake::new(&[(1, Some(RENDERER), Ok(())), (2, Some(GPU), Ok(()))]);
+    let mut watch = Watch::default();
+    for _ in 0..3 {
+        assert_eq!(watch.look(&mut fake, CHROME, BOTH, 0), Look::Sandboxed);
+    }
+    assert_eq!(fake.asked, 2, "each child asked about once");
+    // Pid 2 now names another process, unsandboxed: judged afresh, and refused.
+    fake.born.insert(2, 7);
+    fake.children.insert(2, (Some(GPU), Err("x")));
+    assert_eq!(
+        watch.look(&mut fake, CHROME, BOTH, 0),
+        Look::Unsandboxed {
+            kind: "GPU process",
+            why: "x"
+        }
+    );
+}
+
+#[test]
+fn a_child_that_vanishes_mid_check_is_skipped_not_refused() {
+    let mut fake = Fake::new(&[(1, Some(RENDERER), Ok(())), (2, Some(RENDERER), Err("x"))]);
+    fake.vanish = Some(2);
+    assert_eq!(look(&mut fake, BOTH), Look::Sandboxed);
+    // One whose command line can no longer be read because it has gone.
+    let mut fake = Fake::new(&[(1, Some(RENDERER), Ok(())), (2, None, Ok(()))]);
+    fake.unlisted_after_args = Some(2);
+    assert_eq!(look(&mut fake, BOTH), Look::Sandboxed);
+    // A child that is still listed after it failed is refused.
+    let mut fake = Fake::new(&[(1, Some(RENDERER), Ok(())), (2, Some(RENDERER), Err("x"))]);
+    assert!(matches!(look(&mut fake, BOTH), Look::Unsandboxed { .. }));
+}
+
+#[test]
+fn a_failing_child_is_refused_only_after_the_grace() {
+    let mut fake = Fake::new(&[(1, Some(RENDERER), Ok(())), (2, Some(RENDERER), Err("x"))]);
+    let mut watch = Watch::default();
+    for _ in 0..3 {
+        assert_eq!(watch.look(&mut fake, CHROME, BOTH, 3), Look::Sandboxed);
+    }
+    assert!(matches!(
+        watch.look(&mut fake, CHROME, BOTH, 3),
+        Look::Unsandboxed { .. }
+    ));
+    // A child that passes within the grace (the seccomp filter came) is never refused.
+    let mut fake = Fake::new(&[(1, Some(RENDERER), Ok(())), (2, Some(RENDERER), Err("x"))]);
+    let mut watch = Watch::default();
+    assert_eq!(watch.look(&mut fake, CHROME, BOTH, 3), Look::Sandboxed);
+    fake.children.insert(2, (Some(RENDERER), Ok(())));
+    for _ in 0..5 {
+        assert_eq!(watch.look(&mut fake, CHROME, BOTH, 3), Look::Sandboxed);
+    }
+}
+
+/// The sentinel: a child that turns up unsandboxed after the start (a renderer, or a GPU
+/// process, which Windows requires) is caught, after the grace; while Chrome runs with only
+/// sandboxed children it goes on, and Chrome's end stops it quietly.
+#[test]
+fn the_sentinel_catches_a_child_that_turns_up_unsandboxed_after_the_start() {
+    for (args, kind) in [(RENDERER, "renderer"), (GPU, "GPU process")] {
+        let mut fake = Fake::new(&[(1, Some(RENDERER), Ok(()))]);
+        let mut watch = Watch::default();
+        assert_eq!(run_on(&mut fake, &mut watch), Ok(()));
+        // It appears at the sentinel's fourth look, with Chrome's own state (each failure also
+        // lists the children again, to tell a child that has gone).
+        fake.late = Some((fake.looks + 4, 9, args));
+        let mut waits = 0;
+        let refused = keep_looking(&mut fake, watch, (CHROME, BOTH, 2), || {
+            waits += 1;
+            waits < 50
+        });
+        assert_eq!(
+            refused,
+            Some(Refused::Unsandboxed {
+                kind,
+                why: "runs at Chrome's own integrity level, with no restriction Chrome lacks"
+            })
+        );
+        // Seen at the fourth look, failing there and at the fifth (a grace of two looks), and
+        // refused at its third failure: six looks.
+        assert_eq!(waits, 6);
+    }
+    let mut fake = Fake::new(&[(1, Some(RENDERER), Ok(()))]);
+    let mut waits = 0;
+    let ended = keep_looking(&mut fake, Watch::default(), (CHROME, BOTH, 2), || {
+        waits += 1;
+        waits <= 20
+    });
+    assert_eq!(ended, None);
+    assert_eq!(fake.looks, 20);
+}
+
+fn run_on(fake: &mut Fake, watch: &mut Watch) -> Result<(), StartError> {
+    check(fake, watch, (CHROME, BOTH), (3, Duration::ZERO), || Ok(()))
+}
+
+mod judge;

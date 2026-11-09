@@ -47,6 +47,7 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::Duration;
 
+use super::chrome::sandbox::REFUSAL;
 use super::parent::Parent;
 use super::session::{self, Shared, StartError, Stopped};
 use super::{Child, note};
@@ -171,7 +172,12 @@ pub(crate) fn run(shared: &Arc<Shared>, parent: &Parent) -> Outcome {
         (stopped, state.take_in_flight())
     };
     drop(oneshot::end(shared));
-    answer_all(&shared.out, &in_flight, ENDED);
+    // The sentinel's refusal (`chrome/postcheck/sentinel.rs`): what is in flight gets it too.
+    let reason = match &end {
+        End::StartFailed(StartError::Sandbox(_)) => REFUSAL,
+        _ => ENDED,
+    };
+    answer_all(&shared.out, &in_flight, reason);
     outcome(end, stopped)
 }
 

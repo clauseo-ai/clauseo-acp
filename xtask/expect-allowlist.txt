@@ -400,6 +400,7 @@ crates/mcp/src/browser_guard/job.rs - unsafe_code
 # type std's Child cannot be made into, and the tests' IsProcessInJob.
 crates/mcp/src/browser_guard/job/spawn.rs - unsafe_code
 crates/mcp/src/browser_guard/job/child.rs - unsafe_code
+crates/mcp/src/browser_guard/job/probe.rs - unsafe_code
 crates/mcp/src/browser_guard/job/tests.rs - unsafe_code
 crates/mcp/src/browser_guard/job/tests.rs an_inheritable_handle_outside_the_list_stays_out_of_the_child clippy::disallowed_methods
 crates/mcp/tests/guard/write.rs - clippy::disallowed_methods
@@ -421,7 +422,10 @@ crates/mcp/src/browser_guard/reaper.rs Reaper::start clippy::disallowed_methods
 crates/mcp/src/browser_guard/parent/windows.rs - unsafe_code
 crates/mcp/src/browser_guard/chrome/postcheck/windows.rs - unsafe_code
 crates/mcp/src/browser_guard/chrome/postcheck/macos.rs - unsafe_code
+crates/mcp/src/browser_guard/chrome/postcheck/macos.rs Libproc::new clippy::disallowed_methods
 crates/mcp/src/browser_guard/chrome/postcheck/tests.rs linux_procfs_lists_a_child_and_judges_it_unsandboxed clippy::disallowed_methods
+crates/mcp/src/browser_guard/chrome/postcheck.rs source unused_variables
+crates/mcp/src/browser_guard/chrome/postcheck.rs source clippy::unnecessary_wraps
 crates/mcp/src/write/windows.rs - unsafe_code
 crates/mcp/src/write/mac.rs - unsafe_code
 crates/mcp/examples/chrome_stub.rs record clippy::disallowed_methods

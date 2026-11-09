@@ -108,8 +108,8 @@ pub(crate) struct Chrome {
     /// What Chrome's stderr reader saw first, until [`Chrome::endpoint`] reads it.
     starting: Option<mpsc::Receiver<Seen>>,
     mover: Option<Mover>,
-    /// Dropped to stop the exit watcher.
-    stop_watch: Option<mpsc::Sender<()>>,
+    /// Dropped to stop the exit watcher and the sandbox's sentinel (`postcheck/sentinel.rs`).
+    stops: Vec<mpsc::Sender<()>>,
 }
 
 /// Chrome's process, and what to call once it is reaped here.
@@ -149,8 +149,9 @@ enum Seen {
 /// Starts Chrome, with its stderr reader, and returns it at once, before it listens: the
 /// caller hands its pid to the reaper (Unix) before [`Chrome::endpoint`] waits, so a guard
 /// killed during the wait leaves no Chrome. On Windows Chrome is in the job before it runs.
-/// Refuses, starting nothing, on Linux as root (where Chrome's sandbox cannot start) and when an
-/// argument would weaken Chrome's sandbox (`sandbox.rs`).
+/// Refuses, starting nothing, on Linux as root (where Chrome's sandbox cannot start), on Windows
+/// in a job that limits windows, and when an argument would weaken Chrome's sandbox
+/// (`sandbox.rs`).
 pub(crate) fn launch(
     spec: &Spec<'_>,
     #[cfg(windows)] job: &super::job::Job,
@@ -172,6 +173,12 @@ fn launch_on(
     if sandbox::refused_up_front(host) {
         return Err(StartError::Sandbox(Refused::Root));
     }
+    // Chrome's sandbox nests UI-restricted jobs, which Windows refuses below any job with UI
+    // restrictions (`job/probe.rs`).
+    #[cfg(windows)]
+    if super::job::ui_jobs_nest() == super::job::Nesting::Refused {
+        return Err(StartError::Sandbox(Refused::JobLimitsWindows));
+    }
     let profile = spec.profile.to_owned();
     let staging = profile.join(STAGING);
     let downloads = spec.cwd.join("downloads");
@@ -184,6 +191,8 @@ fn launch_on(
              passes it"
         )));
     }
+    #[cfg(feature = "test-support")]
+    let args = sandbox::unsandboxed_for_tests(args);
     let mut child = spawn(
         spec,
         &args,
@@ -206,7 +215,7 @@ fn launch_on(
         downloads,
         starting: Some(inbox),
         mover: None,
-        stop_watch: None,
+        stops: Vec::new(),
     })
 }
 
@@ -332,7 +341,7 @@ impl Chrome {
     /// Calls `on_exit` once if Chrome exits before this value drops.
     pub(crate) fn watch(&mut self, on_exit: impl FnOnce() + Send + 'static) {
         let (stop, stopped) = mpsc::channel::<()>();
-        self.stop_watch = Some(stop);
+        self.stops.push(stop);
         let child = Arc::clone(&self.child);
         drop(thread::spawn(move || {
             loop {
@@ -346,6 +355,11 @@ impl Chrome {
                 }
             }
         }));
+    }
+
+    /// Kills Chrome's tree now, as its drop will (the sentinel's refusal, `session.rs`).
+    pub(crate) fn kill(&self) {
+        self.kill_tree();
     }
 
     /// Kills Chrome's tree, if Chrome still runs, and reaps Chrome. The process group is
@@ -366,7 +380,7 @@ impl Chrome {
 
 impl Drop for Chrome {
     fn drop(&mut self) {
-        drop(self.stop_watch.take());
+        self.stops.clear();
         self.kill_tree();
         if let Some(mover) = self.mover.take() {
             mover.finish();

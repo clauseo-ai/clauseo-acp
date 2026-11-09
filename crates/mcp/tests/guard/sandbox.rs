@@ -84,14 +84,17 @@ fn launches(scratch: &Scratch) -> usize {
 /// Two tool calls at once with Chrome in `mode`: the first is refused with the plain sentence,
 /// the guard exits 1 saying why, and Chrome started once, never again.
 fn refused(name: &str, mode: &str) -> String {
+    refused_with(name, mode, &[])
+}
+
+/// [`refused`], with `env` added to the guard's environment.
+fn refused_with(name: &str, mode: &str, env: &[(&str, &str)]) -> String {
     let scratch = Scratch::new(&format!("sandbox_{name}"));
     scratch.chrome_mode(mode);
     let log = scratch.log();
-    let mut guard = Guard::start(guard_command(
-        &scratch,
-        &example("echo_stub"),
-        &[log.as_os_str()],
-    ));
+    let mut command = guard_command(&scratch, &example("echo_stub"), &[log.as_os_str()]);
+    command.envs(env.iter().copied());
+    let mut guard = Guard::start(command);
     guard.send_call("open");
     guard.send_call("again");
     let answer = guard.read();
@@ -152,6 +155,105 @@ fn chrome_whose_renderer_runs_unsandboxed_is_refused_and_never_started_again() {
     assert!(
         stderr.contains("Chrome is listening on the claimed debugging port"),
         "the check ran after the endpoint: {stderr}"
+    );
+}
+
+/// The check for Chrome's whole life (`src/browser_guard/chrome/postcheck/sentinel.rs`): a
+/// renderer that turns up unsandboxed after the check at the start, once agent-browser runs, is
+/// caught within the sentinel's grace; the guard kills Chrome, exits 1 with the refusal, and
+/// never starts Chrome again.
+#[test]
+fn a_renderer_that_turns_up_unsandboxed_later_is_refused_and_chrome_never_started_again() {
+    let scratch = Scratch::new("sandbox_late");
+    scratch.chrome_mode("late-unsandboxed");
+    let log = scratch.log();
+    let mut guard = Guard::start(guard_command(
+        &scratch,
+        &example("echo_stub"),
+        &[log.as_os_str()],
+    ));
+    let answer = guard.call("open");
+    assert!(answer.get("error").is_none(), "{answer}");
+    // The guard ends by itself, stdin still open.
+    let rest = guard.read_rest();
+    let status = guard.wait();
+    let stderr = guard.stderr_text();
+    assert_eq!(status.code(), Some(1), "{stderr}");
+    assert!(!rest.contains(REFUSAL), "nothing was in flight: {rest}");
+    let last = stderr.trim_end().lines().last().unwrap_or_default();
+    assert_eq!(
+        last,
+        "clauseo-mcp browser-guard: Chrome's sandbox did not hold: its renderer is a stand-in \
+         without its sandbox; the guard never runs Chrome without it",
+        "{stderr}"
+    );
+    assert_eq!(launches(&scratch), 1, "Chrome started again: {stderr}");
+}
+
+/// The tests' hook (`CLAUSEO_TEST_GUARD_CHROME_UNSANDBOXED`, a `test-support` build only): the
+/// guard passes `--no-sandbox` to Chrome, whose renderer then runs unsandboxed (the stand-in does
+/// as Chrome does), and the check refuses it.
+#[test]
+fn the_unsandboxed_hook_gives_chrome_no_sandbox_and_the_check_refuses_it() {
+    let stderr = refused_with(
+        "hook",
+        "",
+        &[("CLAUSEO_TEST_GUARD_CHROME_UNSANDBOXED", "1")],
+    );
+    assert!(
+        stderr.contains("its renderer is a stand-in without its sandbox"),
+        "{stderr}"
+    );
+}
+
+/// The hook exists only with the `test-support` feature (`#[cfg]`, so a build without it has
+/// neither the code nor the variable's name), and no shipped build turns the feature on: it is
+/// not a default feature, only this crate's own dev-dependency names it, and the release builds
+/// `clauseo-mcp` with plain `cargo build --release -p clauseo-mcp` (`sidecars.mjs`'s
+/// `cargoBin`), with no feature flag.
+#[test]
+fn no_shipped_build_has_the_unsandboxed_hook() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let read = |path: &str| std::fs::read_to_string(root.join(path)).unwrap();
+    let manifest = read("Cargo.toml");
+    let features = manifest.split("[features]").nth(1).unwrap();
+    let features = features.split("\n[").next().unwrap();
+    assert!(!features.contains("default"), "{features}");
+    let dev = manifest.split("[dev-dependencies]").nth(1).unwrap();
+    assert_eq!(
+        manifest.matches("\"test-support\"").count(),
+        1,
+        "{manifest}"
+    );
+    assert!(dev.contains("\"test-support\""), "{dev}");
+    let sidecars = read("../../.github/scripts/sidecars.mjs");
+    assert!(
+        sidecars.contains(
+            r#"{ name: "clauseo-mcp", targets: RELEASE_TARGETS, place: cargoBin("clauseo-mcp") }"#
+        ),
+        "the release's clauseo-mcp line changed"
+    );
+    let cargo_bin = sidecars.split("const cargoBin").nth(1).unwrap();
+    let cargo_bin = cargo_bin.split("};").next().unwrap();
+    assert!(!cargo_bin.contains("feature"), "{cargo_bin}");
+    let hook = read("src/browser_guard/chrome/sandbox.rs");
+    for item in [
+        "pub(crate) fn unsandboxed_for_tests(",
+        "pub(crate) const UNSANDBOXED_FOR_TESTS:",
+    ] {
+        let at = hook.find(item).unwrap();
+        assert!(
+            hook[..at].ends_with("#[cfg(feature = \"test-support\")]\n"),
+            "{item} is not behind the feature"
+        );
+    }
+    let chrome = read("src/browser_guard/chrome.rs");
+    let call = chrome.find("sandbox::unsandboxed_for_tests").unwrap();
+    assert!(
+        chrome[..call]
+            .trim_end()
+            .ends_with("#[cfg(feature = \"test-support\")]\n    let args ="),
+        "the hook's call is not behind the feature"
     );
 }
 

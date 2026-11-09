@@ -1,15 +1,21 @@
-//! The check after each start that Chrome's children really run sandboxed (decision record 0029,
-//! "Chrome's sandbox, never weakened", "The check after the start"). Chrome's stderr
-//! (`sandbox.rs`) tells only some failures: Windows prints its broker's launch errors in debug
-//! builds only (`sandbox/policy/win/sandbox_win.cc`). So once Chrome has printed its endpoint,
-//! [`check_sandbox`] looks at the processes below it, at most [`CHECK_WAIT`], until it has
-//! seen a renderer and every child of a [`REQUIRED`] kind sandboxed; a child that is not, or
-//! whose state cannot be read, refuses the browser ([`Refused::Unsandboxed`]), and no renderer in
-//! that time is a failed start. It runs once per start.
+//! The check that Chrome's children really run sandboxed (decision record 0029, "Chrome's
+//! sandbox, never weakened", "The check after the start"). Chrome's stderr (`sandbox.rs`) tells
+//! only some failures: Windows prints its broker's launch errors in debug builds only
+//! (`sandbox/policy/win/sandbox_win.cc`). So once Chrome has printed its endpoint,
+//! [`check_sandbox`] looks at the processes below it, at most [`CHECK_WAIT`], until it has seen a
+//! renderer and every child of a [`REQUIRED`] kind sandboxed; and then, for Chrome's whole life,
+//! the sentinel (`postcheck/sentinel.rs`) looks again every [`sentinel::EVERY`] at each child that
+//! has appeared since. A child that is not sandboxed, or whose state cannot be read, refuses the
+//! browser ([`Refused::Unsandboxed`]): Chrome is killed and never started again. No renderer at
+//! the start is a failed start.
 //!
-//! The OS parts read the processes (`postcheck/linux.rs`, `postcheck/windows.rs`,
-//! `postcheck/macos.rs`) behind [`Source`]; what each answer means is in `postcheck/judge.rs`,
-//! plain values in and out, tested on every OS.
+//! Each child is judged against Chrome's own browser process, never against fixed marks: a child
+//! that only inherits a confinement Chrome itself runs in (Chrome under `--no-sandbox` inside a
+//! sandbox of the host's) is no sandboxed child. The OS parts read the processes
+//! (`postcheck/linux.rs`, `postcheck/windows.rs`, `postcheck/macos.rs`) behind [`Source`]; what
+//! each answer means is in `postcheck/judge.rs`, plain values in and out, tested on every OS.
+//! [`Watch`] remembers each child judged sandboxed by its pid and start time, so a look reads
+//! only what is new, and a reused pid is judged afresh.
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -21,7 +27,10 @@ mod windows;
 #[cfg(any(windows, test))]
 pub(crate) mod crashed;
 pub(crate) mod judge;
+pub(crate) mod sentinel;
 
+use std::collections::BTreeMap;
+use std::path::Path;
 use std::time::Duration;
 
 use super::super::parent::Parent;
@@ -32,7 +41,7 @@ use super::{Chrome, lock};
 /// How long the check waits for Chrome's first renderer and for its children's sandbox.
 pub(crate) const CHECK_WAIT: Duration = Duration::from_secs(5);
 /// How often it looks again meanwhile.
-const LOOK_EVERY: Duration = Duration::from_millis(100);
+pub(crate) const LOOK_EVERY: Duration = Duration::from_millis(100);
 
 /// What a child of Chrome is, from its `--type=` switch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,7 +68,9 @@ impl Kind {
 /// `GpuSandboxedProcessLauncherDelegate`: `USER_LIMITED`, restricted, at Low, or Medium until it
 /// lowers itself where Low cannot reach the desktop). Utility processes are not required: their
 /// sandbox type varies by service, and some are unsandboxed by design (`kNoSandbox`, the
-/// storage service). Linux and macOS: renderers, whose sandbox does not vary.
+/// storage service). Linux and macOS: renderers, whose sandbox does not vary. Only a renderer
+/// must exist (at the start); a GPU process is judged whenever one appears, at the start or
+/// later, and a GPU process that has not appeared yet is no failure.
 pub(crate) const REQUIRED: &[Kind] = if cfg!(windows) {
     &[Kind::Renderer, Kind::Gpu]
 } else {
@@ -68,8 +79,13 @@ pub(crate) const REQUIRED: &[Kind] = if cfg!(windows) {
 
 /// Where the check reads Chrome's children.
 pub(crate) trait Source {
-    /// The processes below `chrome`, its descendants; `None` when they cannot be listed.
+    /// The live processes below `chrome`, its descendants (on Windows every other process in
+    /// the guard's job, which holds only the guard's own children), never a zombie; `None` when
+    /// they cannot be listed.
     fn below(&mut self, chrome: u32) -> Option<Vec<u32>>;
+    /// A value fixed for `pid`'s life, its start time, so a reused pid reads as another
+    /// process; `None` when it cannot be read (the child is then judged at every look).
+    fn stamp(&mut self, pid: u32) -> Option<u64>;
     /// `pid`'s command line, its arguments split by NULs or whitespace; `None` when unreadable.
     fn args(&mut self, pid: u32) -> Option<Vec<u8>>;
     /// Whether `pid`, below `chrome`, runs sandboxed: why not, if it does not or cannot be told.
@@ -90,50 +106,118 @@ pub(crate) enum Look {
     },
 }
 
-/// One look at the processes below `chrome`.
-pub(crate) fn look(source: &mut dyn Source, chrome: u32, required: &[Kind]) -> Look {
-    let Some(pids) = source.below(chrome) else {
-        return Look::Unsandboxed {
-            kind: "child processes",
-            why: "could not be listed",
-        };
-    };
-    let mut renderers = 0_usize;
-    for pid in pids {
-        let Some(args) = source.args(pid) else {
+/// What the looks have learnt of Chrome's children: each judged sandboxed (or of a kind not
+/// required) with its start time and kind, and each failing one with its start time and how many
+/// looks in a row it has failed.
+#[derive(Debug, Default)]
+pub(crate) struct Watch {
+    passed: BTreeMap<u32, (u64, Kind)>,
+    failing: BTreeMap<u32, (Option<u64>, u32)>,
+}
+
+impl Watch {
+    /// One look at the processes below `chrome`. A child seen before with the same start time
+    /// is not read again. A child that fails is a refusal once it has failed on more than
+    /// `grace` looks in a row (a renderer the zygote has just forked has no seccomp filter yet);
+    /// one that has gone meanwhile (no longer listed, or its start time changed) is skipped.
+    pub(crate) fn look(
+        &mut self,
+        source: &mut dyn Source,
+        chrome: u32,
+        required: &[Kind],
+        grace: u32,
+    ) -> Look {
+        let Some(pids) = source.below(chrome) else {
             return Look::Unsandboxed {
-                kind: Kind::Other.name(),
-                why: "has a command line the guard could not read",
+                kind: "child processes",
+                why: "could not be listed",
             };
         };
-        let kind = kind_of(&args);
-        if kind == Kind::Other || !required.contains(&kind) {
-            continue;
+        self.passed.retain(|pid, _| pids.contains(pid));
+        self.failing.retain(|pid, _| pids.contains(pid));
+        let mut renderers = 0_usize;
+        for pid in pids {
+            let stamp = source.stamp(pid);
+            if let (Some(stamp), Some(&(seen, kind))) = (stamp, self.passed.get(&pid))
+                && seen == stamp
+            {
+                renderers += usize::from(kind == Kind::Renderer);
+                continue;
+            }
+            match judge_child(source, chrome, pid, required) {
+                Ok(kind) => {
+                    self.failing.remove(&pid);
+                    if let Some(stamp) = stamp {
+                        self.passed.insert(pid, (stamp, kind));
+                    }
+                    renderers += usize::from(kind == Kind::Renderer);
+                }
+                Err(_) if gone(source, chrome, pid, stamp) => {
+                    self.failing.remove(&pid);
+                }
+                Err(refused) => {
+                    let failed = self.failing.entry(pid).or_insert((stamp, 0));
+                    if failed.0 != stamp {
+                        *failed = (stamp, 0);
+                    }
+                    failed.1 += 1;
+                    if failed.1 > grace {
+                        return refused;
+                    }
+                }
+            }
         }
-        if kind == Kind::Renderer {
-            renderers += 1;
-        }
-        if let Err(why) = source.sandboxed(chrome, pid) {
-            return Look::Unsandboxed {
-                kind: kind.name(),
-                why,
-            };
+        if renderers == 0 {
+            Look::NoRenderer
+        } else {
+            Look::Sandboxed
         }
     }
-    if renderers == 0 {
-        Look::NoRenderer
-    } else {
-        Look::Sandboxed
+}
+
+/// `pid`'s kind once judged sandboxed, or not of a required kind; the failure otherwise.
+fn judge_child(
+    source: &mut dyn Source,
+    chrome: u32,
+    pid: u32,
+    required: &[Kind],
+) -> Result<Kind, Look> {
+    let Some(args) = source.args(pid) else {
+        return Err(Look::Unsandboxed {
+            kind: Kind::Other.name(),
+            why: "has a command line the guard could not read",
+        });
+    };
+    let kind = kind_of(&args);
+    if kind == Kind::Other || !required.contains(&kind) {
+        return Ok(kind);
+    }
+    source
+        .sandboxed(chrome, pid)
+        .map(|()| kind)
+        .map_err(|why| Look::Unsandboxed {
+            kind: kind.name(),
+            why,
+        })
+}
+
+/// Whether `pid`, which just failed, has gone since it was listed with `stamp`: no longer
+/// below Chrome, or another process under the same pid. A listing that fails now is no proof.
+fn gone(source: &mut dyn Source, chrome: u32, pid: u32, stamp: Option<u64>) -> bool {
+    match source.below(chrome) {
+        Some(now) => !now.contains(&pid) || source.stamp(pid) != stamp,
+        None => false,
     }
 }
 
 /// Looks up to `looks` times, `every` apart, until a look finds [`Look::Sandboxed`]. Before each
 /// look `between` may end the check (Chrome exited, the guard's parent went). The last look
-/// decides: a child not sandboxed refuses the browser, no renderer fails the start.
+/// decides: a child not sandboxed refuses the browser, no renderer fails the start. `watch`
+/// keeps what the looks learnt, for the sentinel after the start.
 pub(crate) fn check(
     source: &mut dyn Source,
-    chrome: u32,
-    required: &[Kind],
+    watch: &mut Watch,
+    (chrome, required): (u32, &[Kind]),
     (looks, every): (u32, Duration),
     mut between: impl FnMut() -> Result<(), StartError>,
 ) -> Result<(), StartError> {
@@ -143,7 +227,7 @@ pub(crate) fn check(
             pause(every);
         }
         between()?;
-        last = look(source, chrome, required);
+        last = watch.look(source, chrome, required, 0);
         if last == Look::Sandboxed {
             return Ok(());
         }
@@ -176,7 +260,7 @@ pub(crate) fn kind_of(args: &[u8]) -> Kind {
     }
 }
 
-#[cfg(any(target_os = "linux", windows, test))]
+#[cfg(any(target_os = "linux", test))]
 /// The descendants of `root` among `(pid, parent pid)` pairs, each once, `root` not among them.
 pub(crate) fn descendants(root: u32, pairs: &[(u32, u32)]) -> Vec<u32> {
     use std::collections::{BTreeMap, BTreeSet};
@@ -200,61 +284,89 @@ pub(crate) fn descendants(root: u32, pairs: &[(u32, u32)]) -> Vec<u32> {
     found
 }
 
-/// The check, once `chrome` has printed its endpoint: `Ok` once a renderer and every child of
-/// a [`REQUIRED`] kind run sandboxed, within [`CHECK_WAIT`]. The caller drops Chrome on an
-/// error, which kills it, and the failed start ends the guard: Chrome is never started again.
-/// Ends early when Chrome exits or the guard's parent goes.
+/// The check, once `chrome` has printed its endpoint: what it learnt, once a renderer and every
+/// child of a [`REQUIRED`] kind run sandboxed, within [`CHECK_WAIT`]. The caller drops Chrome
+/// on an error, which kills it, and the failed start ends the guard: Chrome is never started
+/// again. Ends early when Chrome exits or the guard's parent goes.
 pub(crate) fn check_sandbox(
     chrome: &Chrome,
     parent: &Parent,
+    profile: &Path,
     #[cfg(windows)] job: &super::super::job::Job,
-) -> Result<(), StartError> {
+) -> Result<Watch, StartError> {
     let pid = lock(&chrome.child).child.id();
     let mut source = source(
+        profile,
         #[cfg(windows)]
         job,
-    );
+    )
+    .map_err(StartError::Sandbox)?;
     let looks = u32::try_from(CHECK_WAIT.as_millis() / LOOK_EVERY.as_millis())
         .unwrap_or(1)
         .saturating_add(1);
-    check(&mut *source, pid, REQUIRED, (looks, LOOK_EVERY), || {
-        if parent.gone() {
-            return Err(PARENT_GONE.to_owned().into());
-        }
-        if chrome.exited() {
-            return Err("Chrome exited before its sandbox could be checked"
-                .to_owned()
-                .into());
-        }
-        Ok(())
-    })
+    let mut watch = Watch::default();
+    check(
+        &mut *source,
+        &mut watch,
+        (pid, REQUIRED),
+        (looks, LOOK_EVERY),
+        || {
+            if parent.gone() {
+                return Err(PARENT_GONE.to_owned().into());
+            }
+            if chrome.exited() {
+                return Err("Chrome exited before its sandbox could be checked"
+                    .to_owned()
+                    .into());
+            }
+            Ok(())
+        },
+    )?;
+    Ok(watch)
 }
 
-/// This OS's [`Source`], or in a `test-support` build the tests' ([`SANDBOX_FOR_TESTS`]).
-fn source<'a>(#[cfg(windows)] job: &'a super::super::job::Job) -> Box<dyn Source + 'a> {
+/// This OS's [`Source`] for a Chrome whose profile is `profile`, or in a `test-support` build the
+/// tests' ([`SANDBOX_FOR_TESTS`]); the refusal when this OS gives no way to check.
+#[cfg_attr(
+    not(target_os = "macos"),
+    expect(
+        clippy::unnecessary_wraps,
+        reason = "only macOS can lack a way to check (no sandbox_check)"
+    )
+)]
+pub(crate) fn source<'a>(
+    #[cfg_attr(
+        not(target_os = "macos"),
+        expect(unused_variables, reason = "only macOS asks about the profile")
+    )]
+    profile: &Path,
+    #[cfg(windows)] job: &'a super::super::job::Job,
+) -> Result<Box<dyn Source + 'a>, Refused> {
     #[cfg(target_os = "linux")]
-    let real: Box<dyn Source + 'a> = Box::new(linux::Procfs);
+    let real: Box<dyn Source + 'a> = Box::new(linux::Procfs::new());
     #[cfg(target_os = "macos")]
-    let real: Box<dyn Source + 'a> = Box::new(macos::Libproc::default());
+    let real: Box<dyn Source + 'a> =
+        Box::new(macos::Libproc::new(profile, judge::Mode::ChromeSandbox)?);
     #[cfg(windows)]
     let real: Box<dyn Source + 'a> = Box::new(windows::InJob { job });
     #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     let real: Box<dyn Source + 'a> = Box::new(Unknown);
     #[cfg(feature = "test-support")]
     if let Some(mode) = std::env::var_os(SANDBOX_FOR_TESTS) {
-        return Box::new(ForTests {
+        return Ok(Box::new(ForTests {
             real,
             trusted: mode == "trusted",
-        });
+        }));
     }
-    real
+    Ok(real)
 }
 
 /// Windows: the watch over Chrome's children while the guard waits for its endpoint
 /// (`crashed.rs`), which says whether a failed start reads as the sandbox's failure.
 #[cfg(windows)]
 pub(crate) struct WaitWatch<'a> {
-    source: Box<dyn Source + 'a>,
+    /// Never `None` on Windows, whose source needs no more than the job.
+    source: Option<Box<dyn Source + 'a>>,
     exits: windows::Held,
     crashes: crashed::Crashes,
     chrome: u32,
@@ -265,7 +377,7 @@ impl<'a> WaitWatch<'a> {
     /// A watch over the children of Chrome, process `chrome` in `job`.
     pub(crate) fn new(job: &'a super::super::job::Job, chrome: u32) -> WaitWatch<'a> {
         WaitWatch {
-            source: source(job),
+            source: source(Path::new(""), job).ok(),
             exits: windows::Held::default(),
             crashes: crashed::Crashes::default(),
             chrome,
@@ -274,8 +386,10 @@ impl<'a> WaitWatch<'a> {
 
     /// One look, at each poll of the wait.
     pub(crate) fn sample(&mut self) {
-        self.crashes
-            .sample(&mut *self.source, &mut self.exits, self.chrome);
+        if let Some(source) = self.source.as_mut() {
+            self.crashes
+                .sample(&mut **source, &mut self.exits, self.chrome);
+        }
     }
 
     /// Whether a child seen sandboxed crashed during the wait (`crashed.rs`).
@@ -324,6 +438,10 @@ impl Source for Unknown {
         None
     }
 
+    fn stamp(&mut self, _pid: u32) -> Option<u64> {
+        None
+    }
+
     fn args(&mut self, _pid: u32) -> Option<Vec<u8>> {
         None
     }
@@ -356,6 +474,10 @@ struct ForTests<'a> {
 impl Source for ForTests<'_> {
     fn below(&mut self, chrome: u32) -> Option<Vec<u32>> {
         self.real.below(chrome)
+    }
+
+    fn stamp(&mut self, pid: u32) -> Option<u64> {
+        self.real.stamp(pid)
     }
 
     fn args(&mut self, pid: u32) -> Option<Vec<u8>> {

@@ -54,9 +54,17 @@ impl Crashes {
     }
 }
 
-/// Whether `code` is a crash's exit code: an NTSTATUS of error severity (both high bits,
-/// `0xC0000005` access violation, `0xC0000022` access denied, `0xC0000409` fast fail), or
-/// `0x80000003`, a breakpoint (Chromium's `CHECK` failures). Chrome's own exit codes are small.
+/// Whether `code` reads as the sandbox's failure: `0x80000003`, a breakpoint (Chromium's
+/// `CHECK` and `IMMEDIATE_CRASH`, the code stage C measured for Chrome's crash at start under
+/// the agent's token); `0xC0000005`, an access violation (a sandboxed process touching what its
+/// token no longer reaches); and the sandbox's own termination codes, `SBOX_FATAL_INTEGRITY`
+/// (7006) to `SBOX_FATAL_MITIGATION` (7011) and `SBOX_FATAL_WARMUP` (7013), with which a target
+/// that cannot lock itself down ends (`sandbox/win/src/sandbox_types.h`, `TerminationCodes`).
+/// Not `SBOX_FATAL_MEMORY_EXCEEDED` (7012, a job memory limit) or
+/// `SBOX_FATAL_BROKER_SHUTDOWN_HUNG` (7014, at shutdown), and not the loader's codes
+/// (`0xC0000135` a DLL not found, `0xC0000142` a DLL's start failed, `0xC000007B` a bad image),
+/// which a broken or half-unpacked Chrome gives with any sandbox: every other code is the
+/// ordinary failed start.
 pub(crate) fn crash(code: u32) -> bool {
-    code & 0xC000_0000 == 0xC000_0000 || code == 0x8000_0003
+    matches!(code, 0x8000_0003 | 0xC000_0005 | 7006..=7011 | 7013)
 }
