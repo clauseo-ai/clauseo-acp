@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
 import {
+  MACOS_HELPER,
   PREFIX,
   RELEASE_TARGETS,
   SIDECARS,
@@ -78,18 +79,22 @@ async function setup(pinOptions) {
 
 const WINDOWS = ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"];
 const isWindows = (triple) => triple.includes("-windows-");
+const isDarwin = (triple) => triple.endsWith("-apple-darwin");
+/** A darwin overlay's bundle.macOS: the helper at Contents/Helpers/clauseo-agent-browser. */
+const HELPER = (triple) => ({ files: { "Helpers/clauseo-agent-browser": `binaries/clauseo-agent-browser-${triple}` } });
 const SETUP_CARGO = (triple) =>
   ["build", "--release", "--locked", "-p", "clauseo-sandbox", "--bin", "clauseo-sandbox-setup", "--target", triple];
 
 test("the table ships clauseo-mcp and clauseo-agent-browser on every release target, guard parked", () => {
   assert.deepEqual(
-    SIDECARS.map((s) => [s.name, s.targets]),
+    SIDECARS.map((s) => [s.name, s.targets, s.macosHelper === true]),
     [
-      ["clauseo-mcp", RELEASE_TARGETS],
-      ["clauseo-agent-browser", RELEASE_TARGETS],
-      ["clauseo-sandbox-setup", WINDOWS],
+      ["clauseo-mcp", RELEASE_TARGETS, false],
+      ["clauseo-agent-browser", RELEASE_TARGETS, true],
+      ["clauseo-sandbox-setup", WINDOWS, false],
     ],
   );
+  assert.equal(MACOS_HELPER, "clauseo-agent-browser");
 });
 
 test("the table lists clauseo-sandbox-setup on the Windows targets only, built from clauseo-sandbox", async () => {
@@ -114,7 +119,7 @@ test("every overlay entry starts with binaries/clauseo-, on every target", async
     const { externalBin } = (await env.overlay()).bundle;
     assert.ok(externalBin.length > 0, triple);
     for (const entry of externalBin) assert.match(entry, /^binaries\/clauseo-/, `${triple}: ${entry}`);
-    assert.equal(overlayProblem(await env.overlay()), null, triple);
+    assert.equal(overlayProblem(await env.overlay(), triple), null, triple);
     for (const file of await env.binaries()) assert.match(file, /^clauseo-/, `${triple}: ${file}`);
   }
 });
@@ -131,12 +136,15 @@ test("a sidecar named without the clauseo- prefix fails before anything is place
 
 for (const triple of RELEASE_TARGETS) {
   const win = isWindows(triple);
+  const mac = isDarwin(triple);
   test(`${triple}: the overlay lists every sidecar for the target, and the copies are named for it`, async () => {
     const env = await setup();
     const names = ["clauseo-mcp", "clauseo-agent-browser", ...(win ? ["clauseo-sandbox-setup"] : [])];
-    const externalBin = names.map((name) => `binaries/${name}`);
+    // On macOS agent-browser goes to Contents/Helpers (bundle.macOS.files), not externalBin.
+    const externalBin = names.filter((name) => !(mac && name === "clauseo-agent-browser")).map((name) => `binaries/${name}`);
     assert.deepEqual(await env.run(triple), externalBin);
-    assert.deepEqual(await env.overlay(), { bundle: { externalBin } });
+    assert.deepEqual(await env.overlay(), { bundle: mac ? { externalBin, macOS: HELPER(triple) } : { externalBin } });
+    assert.equal(overlayProblem(await env.overlay(), triple), null);
     const ext = win ? ".exe" : "";
     assert.deepEqual(await env.binaries(), names.map((name) => `${name}-${triple}${ext}`).sort());
     assert.deepEqual(env.cargoCalls, [
@@ -164,6 +172,19 @@ test("a triple the pin marks none leaves agent-browser out of the overlay", asyn
     "clauseo-sandbox-setup-aarch64-pc-windows-msvc.exe",
   ]);
   assert.deepEqual(env.fetchCalls, []);
+});
+
+test("a darwin triple the pin marks none has no bundle.macOS, and the check allows that", async () => {
+  const env = await setup({ none: ["aarch64-apple-darwin"] });
+  assert.deepEqual(await env.run("aarch64-apple-darwin"), ["binaries/clauseo-mcp"]);
+  assert.deepEqual(await env.overlay(), { bundle: { externalBin: ["binaries/clauseo-mcp"] } });
+  assert.equal(overlayProblem(await env.overlay(), "aarch64-apple-darwin"), null);
+});
+
+test("only clauseo-agent-browser may be a macOS helper", async () => {
+  const env = await setup();
+  const sidecars = [{ name: "clauseo-mcp", targets: RELEASE_TARGETS, macosHelper: true, place: async () => null }];
+  await assert.rejects(placeSidecars("aarch64-apple-darwin", { root: env.root, sidecars }), /only clauseo-agent-browser/);
 });
 
 test("a triple missing from the pin fails, and leaves no overlay", async () => {
@@ -209,8 +230,11 @@ test("this target's copies from an earlier run are removed first, other targets'
 
 test("the overlay check refuses any other key, a non-list, and a name without the prefix", () => {
   const ok = { bundle: { externalBin: ["binaries/clauseo-mcp", "binaries/clauseo-agent-browser"] } };
-  assert.equal(overlayProblem(ok), null);
-  assert.equal(overlayProblem({ bundle: { externalBin: [] } }), null);
+  const linux = "x86_64-unknown-linux-gnu";
+  assert.equal(overlayProblem(ok, linux), null);
+  assert.equal(overlayProblem({ bundle: { externalBin: [] } }, linux), null);
+  assert.match(overlayProblem(ok, "riscv64gc-unknown-linux-gnu"), /not a release target/);
+  assert.match(overlayProblem(ok), /not a release target/);
   for (const bad of [
     null,
     [],
@@ -219,10 +243,43 @@ test("the overlay check refuses any other key, a non-list, and a name without th
     { bundle: { externalBin: [], resources: [] } },
     { bundle: { externalBin: "binaries/clauseo-mcp" } },
   ]) {
-    assert.equal(overlayProblem(bad), "it may hold only bundle.externalBin, a list", JSON.stringify(bad));
+    assert.equal(overlayProblem(bad, linux), "it may hold only bundle.externalBin, a list", JSON.stringify(bad));
   }
-  assert.match(overlayProblem({ bundle: { externalBin: ["binaries/agent-browser"] } }), /binaries\/clauseo-/);
-  assert.match(overlayProblem({ bundle: { externalBin: ["../clauseo-mcp"] } }), /binaries\/clauseo-/);
+  assert.match(overlayProblem({ bundle: { externalBin: ["binaries/agent-browser"] } }, linux), /binaries\/clauseo-/);
+  assert.match(overlayProblem({ bundle: { externalBin: ["../clauseo-mcp"] } }, linux), /binaries\/clauseo-/);
+});
+
+test("the overlay check allows bundle.macOS.files on darwin only, holding exactly the helper", () => {
+  const externalBin = ["binaries/clauseo-mcp"];
+  for (const triple of RELEASE_TARGETS) {
+    const withHelper = { bundle: { externalBin, macOS: HELPER(triple) } };
+    if (isDarwin(triple)) {
+      assert.equal(overlayProblem(withHelper, triple), null, triple);
+    } else {
+      assert.equal(overlayProblem(withHelper, triple), "it may hold only bundle.externalBin, a list", triple);
+    }
+  }
+  const mac = "aarch64-apple-darwin";
+  const shape = "it may hold only bundle.externalBin, a list, and bundle.macOS.files";
+  assert.equal(overlayProblem({ bundle: { macOS: HELPER(mac) } }, mac), shape);
+  assert.equal(overlayProblem({ bundle: { externalBin, macOS: HELPER(mac), resources: [] } }, mac), shape);
+  assert.equal(overlayProblem({ bundle: { externalBin: "binaries/clauseo-mcp", macOS: HELPER(mac) } }, mac), shape);
+  for (const macOS of [
+    HELPER("x86_64-apple-darwin"),
+    { files: {} },
+    {},
+    { files: { "MacOS/clauseo-agent-browser": "binaries/clauseo-agent-browser-aarch64-apple-darwin" } },
+    { files: { "Resources/clauseo-agent-browser": "binaries/clauseo-agent-browser-aarch64-apple-darwin" } },
+    { files: { "Helpers/clauseo-agent-browser": "../clauseo-agent-browser-aarch64-apple-darwin" } },
+    { files: { "Helpers/clauseo-mcp": "binaries/clauseo-mcp-aarch64-apple-darwin" } },
+    { ...HELPER(mac), minimumSystemVersion: "10.0" },
+    { files: { ...HELPER(mac).files, "Helpers/other": "binaries/clauseo-mcp-aarch64-apple-darwin" } },
+  ]) {
+    assert.match(overlayProblem({ bundle: { externalBin, macOS } }, mac), /bundle\.macOS may hold only/, JSON.stringify(macOS));
+  }
+  const both = { bundle: { externalBin: [...externalBin, "binaries/clauseo-agent-browser"], macOS: HELPER(mac) } };
+  assert.match(overlayProblem(both, mac), /may not be in externalBin/);
+  assert.match(overlayProblem({ bundle: { externalBin: ["binaries/x"], macOS: HELPER(mac) } }, mac), /binaries\/clauseo-/);
 });
 
 test("only the setup exe's build gets the path remaps, after the job's rustflags", async () => {

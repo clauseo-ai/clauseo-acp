@@ -196,8 +196,9 @@ fn is_program(path: &Path) -> bool {
 
 /// The profile's paths: the browser's sidecars beside `exe` (where Tauri's `externalBin` puts
 /// them; S27 bundles them, and until stage C's proxy the host drops the `browser` entry
-/// anyway), and stetdoc at `stetdoc`, or, when it was not found, where U13 will put it
-/// (`<exe folder>/stetdoc/stetdoc`), which is then neither run nor put on `PATH`.
+/// anyway), except agent-browser on macOS ([`agent_browser_path`]), and stetdoc at `stetdoc`,
+/// or, when it was not found, where U13 will put it (`<exe folder>/stetdoc/stetdoc`), which is
+/// then neither run nor put on `PATH`.
 pub(crate) fn paths_for(
     locations: &Locations,
     exe: PathBuf,
@@ -208,9 +209,29 @@ pub(crate) fn paths_for(
     let stetdoc = stetdoc.unwrap_or_else(|| dir.join(STETDOC).join(program(STETDOC)));
     let browser = BrowserSidecars {
         clauseo_mcp: dir.join(program("clauseo-mcp")),
-        agent_browser: dir.join(program("clauseo-agent-browser")),
+        agent_browser: agent_browser_path(&dir, cfg!(target_os = "macos"), Path::is_file),
     };
     ProfilePaths::new(locations, exe, stetdoc, browser).map_err(BuildError::Paths)
+}
+
+/// The agent-browser sidecar for an app whose exe is in `dir`. On macOS (`macos`) the release
+/// puts it in `Clauseo.app/Contents/Helpers`, out of `Contents/MacOS`, which the agent's sandbox
+/// can reach (.github/scripts/sidecars.mjs, decision record 0035): `<dir>/../Helpers/` is used
+/// when `exists` finds the file there. Elsewhere, and on macOS when it is not there, beside the
+/// exe, where Tauri's `externalBin` puts it.
+///
+/// The macOS fallback beside the exe is transitional, for an app bundled before the move. It is
+/// removed in the same change as stage C's J3, the sandbox deny on `Contents/Helpers`, so that no
+/// release ever has the helper where the agent can run it.
+fn agent_browser_path(dir: &Path, macos: bool, exists: impl Fn(&Path) -> bool) -> PathBuf {
+    let name = format!("clauseo-agent-browser{}", std::env::consts::EXE_SUFFIX);
+    if macos && let Some(contents) = dir.parent() {
+        let helper = contents.join("Helpers").join(&name);
+        if exists(&helper) {
+            return helper;
+        }
+    }
+    dir.join(name)
 }
 
 /// The stetdoc to run. U13's bundled sidecar does not exist yet, so: in a debug build, the

@@ -2,7 +2,7 @@
 // release-only overlay that bundles them (ADR 0035, "Sidecars").
 //
 //   node .github/scripts/sidecars.mjs <target-triple>
-//   node .github/scripts/sidecars.mjs --check   (the overlay is only bundle.externalBin, clauseo- names)
+//   node .github/scripts/sidecars.mjs --check <target-triple>   (the overlay holds only its allowed shape)
 //   node .github/scripts/sidecars.mjs --setup-exe <target-triple>   (that exe only; prints its path)
 //
 // release.yml's sidecar seam runs it in each `build` leg, after the installs and before any
@@ -12,7 +12,11 @@
 //     Every name starts with clauseo-: the .deb and .rpm install sidecars into /usr/bin, beside
 //     other programs (agent-browser itself, from a global npm install, for one);
 //   - writes crates/desktop/release/sidecars.generated.json, holding only
-//     {"bundle":{"externalBin":[...]}} for the sidecars it placed.
+//     {"bundle":{"externalBin":[...]}} for the sidecars it placed, and on a darwin target
+//     {"macOS":{"files":{"Helpers/clauseo-agent-browser": ...}}} in bundle beside it: the helper
+//     lives in Clauseo.app/Contents/Helpers, Apple's folder for nested helper code, not in
+//     Contents/MacOS beside the app (which the agent's sandbox can reach). Tauri copies
+//     macOS.files without signing them, so release.yml signs the helper before `tauri bundle`.
 // The legs pass that file last with --config to every `tauri build` and `tauri bundle`. A JSON
 // merge patch replaces arrays, so this one list is the target's whole externalBin. Both outputs
 // are gitignored. The base tauri.conf.json has no externalBin: tauri-build checks that every
@@ -45,6 +49,7 @@ export const RELEASE_TARGETS = [
 ];
 
 const isWindows = (triple) => triple.includes("-windows-");
+const isDarwin = (triple) => triple.endsWith("-apple-darwin");
 const exe = (triple) => (isWindows(triple) ? ".exe" : "");
 
 /**
@@ -127,7 +132,9 @@ const pinnedAgentBrowser = async (triple, ctx, dest) =>
   ctx.fetchAgentBrowser(triple, dest, ctx.agentBrowserOptions);
 
 /**
- * Every sidecar, in bundle order. `targets` is the triples it ships on; `place` returns the
+ * Every sidecar, in bundle order. `targets` is the triples it ships on; `macosHelper`, that on a
+ * darwin target it goes to Contents/Helpers/<name> (bundle.macOS.files) instead of
+ * bundle.externalBin (Contents/MacOS). `place` returns the
  * path of the built binary (copied to the destination), the destination itself (already
  * written), or null (no build for this target: left out of the list, not an error). A throw
  * fails the job.
@@ -135,7 +142,8 @@ const pinnedAgentBrowser = async (triple, ctx, dest) =>
 export const SIDECARS = [
   { name: "clauseo-mcp", targets: RELEASE_TARGETS, place: cargoBin("clauseo-mcp") },
   // Throws on a triple missing from crates/desktop/agent-browser.toml; null for `none = true`.
-  { name: "clauseo-agent-browser", targets: RELEASE_TARGETS, place: pinnedAgentBrowser },
+  // On macOS in Contents/Helpers, out of the agent's reach (MACOS_HELPER).
+  { name: "clauseo-agent-browser", targets: RELEASE_TARGETS, macosHelper: true, place: pinnedAgentBrowser },
   // Parked (host thread, 2026-11-03): the guard's start time was not the cost. If it returns:
   // { name: "clauseo-guard", targets: RELEASE_TARGETS, place: cargoBin("clauseo-guard") },
   // with -C target-feature=+crt-static on Windows (S20-sidecars.md, "Release flags").
@@ -153,20 +161,42 @@ export const SIDECARS = [
 /** Every sidecar's name starts with this (ADR 0035, "Sidecars"). */
 export const PREFIX = "clauseo-";
 
+/**
+ * The one sidecar a darwin overlay puts in bundle.macOS.files, at Contents/Helpers/<name>. A
+ * second helper means changing this, overlayProblem and release.yml's .app checks together.
+ */
+export const MACOS_HELPER = "clauseo-agent-browser";
+
 const OVERLAY = join(ROOT, "crates", "desktop", "release", "sidecars.generated.json");
 
 /**
- * Why a parsed overlay is not one this script writes, or null when it is: only
- * bundle.externalBin, a list of binaries/clauseo-* strings. release.yml checks it with --check
- * after the seam and again in sign-windows, before any bundle reads it.
+ * Why a parsed overlay is not one this script writes for `triple`, or null when it is: only
+ * bundle.externalBin, a list of binaries/clauseo-* strings, and on a darwin target, optionally,
+ * bundle.macOS.files holding exactly {"Helpers/clauseo-agent-browser":
+ * "binaries/clauseo-agent-browser-<triple>"}, with that sidecar then absent from externalBin.
+ * release.yml checks it with --check after the seam and again in sign-windows, before any
+ * bundle reads it.
  */
-export function overlayProblem(overlay) {
-  const keys = (v) => (v !== null && typeof v === "object" && !Array.isArray(v) ? Object.keys(v).join(" ") : null);
-  if (keys(overlay) !== "bundle" || keys(overlay.bundle) !== "externalBin" || !Array.isArray(overlay.bundle.externalBin)) {
-    return "it may hold only bundle.externalBin, a list";
+export function overlayProblem(overlay, triple) {
+  if (!RELEASE_TARGETS.includes(triple)) return `${triple} is not a release target`;
+  const keys = (v) => (v !== null && typeof v === "object" && !Array.isArray(v) ? Object.keys(v).sort().join(" ") : null);
+  const helper = isDarwin(triple) && keys(overlay?.bundle) === "externalBin macOS";
+  if (keys(overlay) !== "bundle" || (keys(overlay.bundle) !== "externalBin" && !helper) || !Array.isArray(overlay.bundle.externalBin)) {
+    return isDarwin(triple)
+      ? "it may hold only bundle.externalBin, a list, and bundle.macOS.files"
+      : "it may hold only bundle.externalBin, a list";
   }
   const bad = overlay.bundle.externalBin.filter((entry) => typeof entry !== "string" || !entry.startsWith(`binaries/${PREFIX}`));
-  return bad.length > 0 ? `each entry must start with binaries/${PREFIX}: ${JSON.stringify(bad)}` : null;
+  if (bad.length > 0) return `each entry must start with binaries/${PREFIX}: ${JSON.stringify(bad)}`;
+  if (!helper) return null;
+  const want = { files: { [`Helpers/${MACOS_HELPER}`]: `binaries/${MACOS_HELPER}-${triple}` } };
+  if (JSON.stringify(overlay.bundle.macOS) !== JSON.stringify(want)) {
+    return `bundle.macOS may hold only ${JSON.stringify(want)}: ${JSON.stringify(overlay.bundle.macOS)}`;
+  }
+  if (overlay.bundle.externalBin.includes(`binaries/${MACOS_HELPER}`)) {
+    return `binaries/${MACOS_HELPER} is in bundle.macOS.files, so it may not be in externalBin`;
+  }
+  return null;
 }
 
 /** Runs cargo in the repo root with the inherited environment and `extra`; throws on failure. */
@@ -178,7 +208,8 @@ function runCargo(args, extra = {}) {
 }
 
 /**
- * Places every sidecar for `triple` and writes the overlay. Returns the overlay's externalBin.
+ * Places every sidecar for `triple` and writes the overlay. Returns the overlay's externalBin
+ * (without a darwin target's helper, which is in bundle.macOS.files).
  *
  * @param {string} triple a target in RELEASE_TARGETS
  * @param {{ root?: string, cargo?: (args: string[], extra?: object) => void, targetDir?: string,
@@ -192,8 +223,9 @@ export async function placeSidecars(triple, options = {}) {
     throw new Error(`sidecars: ${triple} is not a release target (${RELEASE_TARGETS.join(", ")})`);
   }
   const sidecars = options.sidecars ?? SIDECARS;
-  for (const { name } of sidecars) {
+  for (const { name, macosHelper } of sidecars) {
     if (!name.startsWith(PREFIX)) throw new Error(`sidecars: ${name} does not start with ${PREFIX}`);
+    if (macosHelper && name !== MACOS_HELPER) throw new Error(`sidecars: only ${MACOS_HELPER} may be a macOS helper, not ${name}`);
   }
   const root = options.root ?? ROOT;
   const ctx = {
@@ -218,6 +250,7 @@ export async function placeSidecars(triple, options = {}) {
   }
 
   const externalBin = [];
+  const files = {};
   for (const sidecar of sidecars) {
     if (!sidecar.targets.includes(triple)) continue;
     const dest = join(binaries, `${sidecar.name}-${triple}${exe(triple)}`);
@@ -231,11 +264,16 @@ export async function placeSidecars(triple, options = {}) {
       if (!isWindows(triple)) await chmod(dest, 0o755);
     }
     console.log(`${sidecar.name}: ${dest} (${(await stat(dest)).size} bytes)`);
-    externalBin.push(`binaries/${sidecar.name}`);
+    if (sidecar.macosHelper && isDarwin(triple)) {
+      files[`Helpers/${sidecar.name}`] = `binaries/${sidecar.name}-${triple}`;
+    } else {
+      externalBin.push(`binaries/${sidecar.name}`);
+    }
   }
 
-  await writeFile(overlay, `${JSON.stringify({ bundle: { externalBin } })}\n`);
-  console.log(`${overlay}: ${JSON.stringify(externalBin)}`);
+  const bundle = Object.keys(files).length > 0 ? { externalBin, macOS: { files } } : { externalBin };
+  await writeFile(overlay, `${JSON.stringify({ bundle })}\n`);
+  console.log(`${overlay}: ${JSON.stringify(bundle)}`);
   return externalBin;
 }
 
@@ -258,12 +296,13 @@ export async function buildSetupExe(triple, options = {}) {
   return setupExe(triple, { root, targetDir, commitTime: options.commitTime, cargo: options.cargo ?? runCargo });
 }
 
-const USAGE = "usage: node .github/scripts/sidecars.mjs <target-triple> | --check | --setup-exe <target-triple>";
+const USAGE = "usage: node .github/scripts/sidecars.mjs <target-triple> | --check <target-triple> | --setup-exe <target-triple>";
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const [first, ...rest] = process.argv.slice(2);
+  const flag = first === "--setup-exe" || first === "--check";
   const setup = first === "--setup-exe";
-  if (!first || rest.length !== (setup ? 1 : 0)) {
+  if (!first || rest.length !== (flag ? 1 : 0)) {
     console.error(USAGE);
     process.exit(2);
   }
@@ -271,9 +310,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     if (setup) {
       console.log(await buildSetupExe(rest[0]));
     } else if (first === "--check") {
-      const problem = overlayProblem(JSON.parse(await readFile(OVERLAY, "utf8")));
+      const problem = overlayProblem(JSON.parse(await readFile(OVERLAY, "utf8")), rest[0]);
       if (problem !== null) throw new Error(`crates/desktop/release/sidecars.generated.json: ${problem}`);
-      console.log("crates/desktop/release/sidecars.generated.json holds only bundle.externalBin, clauseo- names");
+      console.log(`crates/desktop/release/sidecars.generated.json holds only its allowed shape for ${rest[0]}`);
     } else {
       await placeSidecars(first);
     }
