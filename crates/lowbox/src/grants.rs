@@ -1,7 +1,7 @@
 //! The file-system grants the browser's package needs, named and never applied: the owner
 //! applies them where it applies the browser account's (set-up), and removes them there.
 
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, Path, PathBuf, Prefix};
 
 use crate::error::Error;
 use crate::package::{PackageName, Sid, package_sid};
@@ -55,9 +55,15 @@ pub struct Grant {
 /// write on the profile, the staging folder and the temp folder. Nothing else: the browser
 /// account's own folders, `browser-pins` and every other path stay closed to the package.
 ///
-/// `pins` is the `browser-pins` folder; a folder that is it, holds it or sits inside it is
-/// refused, since the inherited ACE would reach it. Paths compare by their parts, ASCII letters
-/// in either case, as given: the caller passes the paths it will apply the ACEs to.
+/// `pins` is the `browser-pins` folder. The paths are compared by what they are, not how they
+/// are written: each of the five must exist as a folder and is opened (`fs::canonicalize`, which
+/// on Windows is `GetFinalPathNameByHandleW`), and its final path must be the path given, letter
+/// case aside. So a path through a junction, a symbolic link, a short (8.3) name or a
+/// substituted drive is refused, as is one with `..`, a `\\?\`, `\??\`, `\\.\` or network
+/// prefix: the caller passes the plain final paths it will apply the ACEs to. No two of the
+/// four folders may be one folder or hold one another (a profile holding the shell would get
+/// write access to it), and none may be, hold or sit in `pins`, since the inherited ACE would
+/// reach it.
 pub fn grants(
     package: &PackageName,
     folders: &BrowserFolders,
@@ -70,20 +76,22 @@ pub fn grants(
         (&folders.staging, Rights::ReadWrite),
         (&folders.tmp, Rights::ReadWrite),
     ];
-    let pins = parts(pins);
+    let pins = final_parts(pins)?;
+    let mut seen: Vec<Vec<String>> = Vec::with_capacity(named.len());
     let mut out = Vec::with_capacity(named.len());
     for (path, rights) in named {
-        if !path.is_absolute() {
-            return Err(Error::Grant {
-                reason: "a browser folder is not an absolute path",
-            });
-        }
-        let folder = parts(path);
-        if folder.starts_with(&pins) || pins.starts_with(&folder) {
+        let folder = final_parts(path)?;
+        if overlap(&folder, &pins) {
             return Err(Error::Grant {
                 reason: "a browser folder is, holds or sits in browser-pins",
             });
         }
+        if seen.iter().any(|other| overlap(&folder, other)) {
+            return Err(Error::Grant {
+                reason: "two browser folders are one folder, or one holds the other",
+            });
+        }
+        seen.push(folder);
         out.push(Grant {
             path: path.clone(),
             rights,
@@ -93,94 +101,86 @@ pub fn grants(
     Ok(out)
 }
 
-/// The path's parts, ASCII-lowercased, without `.` parts and trailing separators.
+/// Whether one of two paths' parts is the other's or starts it.
+fn overlap(a: &[String], b: &[String]) -> bool {
+    a.starts_with(b) || b.starts_with(a)
+}
+
+/// The parts of `path`'s final path, after the checks [`grants`] lists.
+fn final_parts(path: &Path) -> Result<Vec<String>, Error> {
+    let refuse = |reason| Err(Error::Grant { reason });
+    let text = path.as_os_str().to_string_lossy();
+    if [r"\\?\", r"\??\", r"\\.\", "//?/", "//./"]
+        .iter()
+        .any(|p| text.starts_with(p))
+    {
+        return refuse("a browser folder has a verbatim, NT or device prefix");
+    }
+    if !path.is_absolute() {
+        return refuse("a browser folder is not an absolute path");
+    }
+    if path.components().any(|c| matches!(c, Component::ParentDir)) {
+        return refuse("a browser folder has a .. part");
+    }
+    if let Some(Component::Prefix(prefix)) = path.components().next()
+        && !matches!(prefix.kind(), Prefix::Disk(_))
+    {
+        return refuse("a browser folder is not on a local drive");
+    }
+    let Ok(opened) = opened(path) else {
+        return refuse("a browser folder or browser-pins cannot be opened");
+    };
+    if !opened.is_dir() {
+        return refuse("a browser folder or browser-pins is not a folder");
+    }
+    let Some(shown) = without_verbatim(&opened) else {
+        return refuse("a browser folder's final path is not on a local drive");
+    };
+    let (given, found) = (parts(path), parts(&shown));
+    if given != found {
+        return refuse(
+            "a browser folder is reached through a junction, a link, a short (8.3) name or a \
+             substituted drive; give its final path",
+        );
+    }
+    Ok(found)
+}
+
+/// The final path of `path`: `fs::canonicalize`, which opens it and asks the OS
+/// (`GetFinalPathNameByHandleW` on Windows, `realpath` elsewhere).
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the verbatim form is wanted: without_verbatim reads and strips it"
+)]
+pub(crate) fn opened(path: &Path) -> std::io::Result<PathBuf> {
+    std::fs::canonicalize(path)
+}
+
+/// `fs::canonicalize`'s result as a plain path: on Windows `\\?\C:\…` becomes `C:\…`, and
+/// anything else verbatim (`\\?\UNC\…`, a volume GUID) is `None`. Unchanged elsewhere.
+pub(crate) fn without_verbatim(path: &Path) -> Option<PathBuf> {
+    match path.components().next() {
+        Some(Component::Prefix(prefix)) => match prefix.kind() {
+            Prefix::VerbatimDisk(letter) => {
+                let rest: PathBuf = path.components().skip(1).collect();
+                let drive = format!("{}:\\", char::from(letter));
+                Some(Path::new(&drive).join(rest.strip_prefix(r"\").unwrap_or(&rest)))
+            }
+            Prefix::Disk(_) => Some(path.to_owned()),
+            _ => None,
+        },
+        _ => Some(path.to_owned()),
+    }
+}
+
+/// The path's parts, lowercased (Unicode, as NTFS compares names), without `.` parts and
+/// trailing separators.
 fn parts(path: &Path) -> Vec<String> {
     path.components()
         .filter(|c| !matches!(c, Component::CurDir))
-        .map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase())
+        .map(|c| c.as_os_str().to_string_lossy().to_lowercase())
         .collect()
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A root that is absolute on the OS running the test.
-    fn root() -> PathBuf {
-        if cfg!(windows) {
-            PathBuf::from(r"C:\ProgramData\Clauseo")
-        } else {
-            PathBuf::from("/var/clauseo")
-        }
-    }
-
-    fn folders() -> BrowserFolders {
-        let r = root();
-        BrowserFolders {
-            profile: r.join("browser").join("profile"),
-            staging: r.join("browser").join("staging"),
-            tmp: r.join("browser").join("tmp"),
-            shell: r.join("shells").join("157"),
-        }
-    }
-
-    fn package() -> PackageName {
-        PackageName::new("Clauseo.Browser.B01").unwrap()
-    }
-
-    #[test]
-    fn the_four_folders_get_their_rights_for_the_package() {
-        let f = folders();
-        let list = grants(&package(), &f, &root().join("browser-pins")).unwrap();
-        let sid = package_sid(&package());
-        let got: Vec<(&Path, Rights)> = list.iter().map(|g| (g.path.as_path(), g.rights)).collect();
-        assert_eq!(
-            got,
-            [
-                (f.shell.as_path(), Rights::ReadExecute),
-                (f.profile.as_path(), Rights::ReadWrite),
-                (f.staging.as_path(), Rights::ReadWrite),
-                (f.tmp.as_path(), Rights::ReadWrite),
-            ]
-        );
-        assert!(list.iter().all(|g| g.sid == sid));
-    }
-
-    #[test]
-    fn the_masks_are_icacls_m_and_rx() {
-        assert_eq!(Rights::ReadWrite.mask(), 0x0013_01BF);
-        assert_eq!(Rights::ReadExecute.mask(), 0x0012_00A9);
-    }
-
-    #[test]
-    fn a_folder_over_under_or_at_the_pins_is_refused() {
-        let pins = root().join("browser").join("Browser-Pins");
-        let mut over = folders();
-        over.profile = root().join("browser");
-        let mut under = folders();
-        under.staging = pins.join("x");
-        let mut at = folders();
-        at.tmp = root().join("browser").join("browser-pins").join(".");
-        for (f, what) in [(over, "holds"), (under, "inside"), (at, "same")] {
-            let refused = grants(&package(), &f, &pins);
-            assert!(
-                matches!(refused, Err(Error::Grant { .. })),
-                "{what}: {refused:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_sibling_named_like_the_pins_is_allowed() {
-        let mut f = folders();
-        f.tmp = root().join("browser").join("browser-pins-tmp");
-        assert!(grants(&package(), &f, &root().join("browser").join("browser-pins")).is_ok());
-    }
-
-    #[test]
-    fn a_relative_folder_is_refused() {
-        let mut f = folders();
-        f.tmp = PathBuf::from("tmp");
-        assert!(grants(&package(), &f, &root().join("browser-pins")).is_err());
-    }
-}
+mod tests;
