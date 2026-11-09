@@ -82,6 +82,8 @@ struct Fake {
     appear: BTreeMap<usize, Vec<(u32, Proc)>>,
     /// The opening list's nth call (from 1) no longer finds these pids.
     gone_at: BTreeMap<usize, Vec<u32>>,
+    /// From the opening list's nth call (from 1), neither list names these pids' user.
+    unnamed_at: BTreeMap<usize, Vec<u32>>,
     /// How many times the opening list was read.
     lists: usize,
     /// This pid exits by itself after this many pauses.
@@ -133,6 +135,11 @@ impl Processes for Fake {
         }
         for pid in self.gone_at.remove(&self.lists).unwrap_or_default() {
             self.procs.remove(&pid);
+        }
+        for pid in self.unnamed_at.remove(&self.lists).unwrap_or_default() {
+            if let Some(p) = self.procs.get_mut(&pid) {
+                p.owner = Owner::None;
+            }
         }
         Ok(self
             .procs

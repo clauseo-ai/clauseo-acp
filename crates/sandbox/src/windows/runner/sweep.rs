@@ -304,6 +304,7 @@ pub(crate) fn sweep<P: Processes>(
             return Err(failures.verdict(SweepError::Deadline));
         }
         let seen = list(calls)?;
+        killed.gone(&seen);
         let mut opened = Vec::new();
         for found in seen
             .iter()
@@ -313,7 +314,7 @@ pub(crate) fn sweep<P: Processes>(
                 Ok(Some(process)) => opened.push((found, process)),
                 Ok(None) => {}
                 Err(error) => {
-                    // No handle: counted every round from now on, however it is listed.
+                    // No handle: counted every round from now on, while a list has its pid.
                     let error = failed(found, &error, Step::Open);
                     failures.add(error.clone(), log)?;
                     killed.unopened(error);
@@ -403,6 +404,13 @@ fn spared(found: &Seen, created: io::Result<u64>, rule: &Rule) -> io::Result<boo
         return Ok(false);
     }
     Ok(job_kept(&rule.job, found.pid, created?, rule.own))
+}
+
+/// `wait` in whole milliseconds for `WaitForSingleObject`, saturating below `INFINITE`
+/// (`u32::MAX`): a wait too long for a `u32` waits the longest finite time instead of forever.
+/// Every caller passes what is left of the sweep's deadline, at most [`KILL_WAIT`].
+pub(crate) fn wait_millis(wait: Duration) -> u32 {
+    u32::try_from(wait.as_millis()).map_or(u32::MAX - 1, |millis| millis.min(u32::MAX - 1))
 }
 
 /// Both lists as one: a pid either gives a user has that user, the opening list's first. A list

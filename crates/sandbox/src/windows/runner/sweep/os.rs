@@ -52,7 +52,7 @@ use windows::Win32::System::Threading::{
     PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
 };
 
-use super::{Owner, Point, Processes, SWEPT, Seen, SweepError, sweep};
+use super::{Owner, Point, Processes, SWEPT, Seen, SweepError, sweep, wait_millis};
 use crate::windows::acl::object::{Handle, os_error};
 use crate::windows::sids::Sid;
 use crate::windows::token::os::{shut_object, sid_text};
@@ -268,8 +268,15 @@ pub(in crate::windows::runner) fn own_job_pids() -> io::Result<Vec<u32>> {
                 "the job's pid list doesn't fit its buffer",
             ));
         }
-        // SAFETY: `count` pids follow in `ProcessIdList`, inside `buffer` (`count <= room`).
-        let pids = unsafe { std::slice::from_raw_parts(list.ProcessIdList.as_ptr(), count) };
+        // The pids' pointer comes from `buffer` itself, not from the struct's one-element
+        // `ProcessIdList`, whose provenance covers that one pid only.
+        let offset = std::mem::offset_of!(JOBOBJECT_BASIC_PROCESS_ID_LIST, ProcessIdList);
+        // SAFETY: `ProcessIdList` starts `offset` bytes into the aligned buffer (a multiple of
+        // `usize`'s size, as the array is `usize`-aligned), and `count` pids follow inside it
+        // (`count <= room`, and `buffer` holds `head + room` words from its start).
+        let pids = unsafe {
+            std::slice::from_raw_parts(buffer.as_ptr().byte_add(offset).cast::<usize>(), count)
+        };
         return pids
             .iter()
             .map(|pid| u32::try_from(*pid).map_err(io::Error::other))
@@ -353,9 +360,10 @@ fn owner(pid: u32) -> Owner {
     crate::windows::token::os::user(&Handle(token)).map_or(Owner::None, Owner::User)
 }
 
-/// Whether `process` has ended within `wait`.
+/// Whether `process` has ended within `wait`: what is left of the sweep's deadline, at most
+/// `KILL_WAIT`, and never `INFINITE` ([`wait_millis`]).
 fn exited(process: HANDLE, wait: Duration) -> bool {
-    let millis = u32::try_from(wait.as_millis()).unwrap_or(u32::MAX);
+    let millis = wait_millis(wait);
     // SAFETY: the handle is live with SYNCHRONIZE.
     unsafe { WaitForSingleObject(process, millis) == WAIT_OBJECT_0 }
 }

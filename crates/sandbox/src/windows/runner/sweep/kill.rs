@@ -66,8 +66,8 @@ pub(crate) struct Killed<T> {
     held: Vec<Held<T>>,
     survivors: Vec<Survivor<T>>,
     /// The ones that couldn't be opened ([`SweepError::Open`]): with no handle to look at, each
-    /// is counted every round, however it is listed (failing closed), unless a later open of its
-    /// pid ends it.
+    /// is counted every round, under any owner a list gives its pid (failing closed), until a
+    /// later open of its pid ends it or a fresh listing has its pid no more ([`Killed::gone`]).
     unopened: Vec<SweepError>,
 }
 
@@ -90,6 +90,16 @@ impl<T> Killed<T> {
         {
             self.unopened.push(error);
         }
+    }
+
+    /// Forgets each process that couldn't be opened whose pid no entry of `seen`, a fresh
+    /// listing, has: it exited by itself. The Toolhelp snapshot lists every process whatever its
+    /// DACL, so a live one can't drop out of it; one listed under any owner, none or another
+    /// user's, still counts.
+    pub(super) fn gone(&mut self, seen: &[Seen]) {
+        self.unopened.retain(|known| {
+            !matches!(known, SweepError::Open { pid, .. } if !seen.iter().any(|s| s.pid == *pid))
+        });
     }
 
     /// Keeps `process` (`found`, created at `created`), whose kill was refused and which still

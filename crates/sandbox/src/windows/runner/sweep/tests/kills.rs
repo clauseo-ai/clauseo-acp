@@ -311,13 +311,14 @@ fn a_sweep_whose_kills_keep_it_going_past_its_deadline_stops_there() {
 
 #[test]
 fn a_process_that_couldnt_be_opened_or_ended_counts_however_it_is_listed() {
-    // 12 can't be opened, and the next round's list no longer has it: with no handle to say it
-    // ended, it is still counted. 13's kill is refused and it then drops out of the lists while
-    // still running: its held handle says so. 14's kill lets 40 appear, for a second round.
+    // 12 can't be opened, and the next round lists it with no owner (its DACL shut both lists
+    // out): with no handle to say it ended, it is still counted. 13's kill is refused and it then
+    // drops out of the lists while still running: its held handle says so. 14's kill lets 40
+    // appear, for a second round.
     let mut fake = machine();
     fake.procs.insert(12, pool_proc("shut.exe"));
     fake.deny_open.insert(12);
-    fake.gone_at.insert(3, vec![12]);
+    fake.unnamed_at.insert(3, vec![12]);
     fake.procs.insert(13, pool_proc("refusing.exe"));
     fake.deny_kill.insert(13, u32::MAX);
     fake.vanish.insert(13);
@@ -334,4 +335,42 @@ fn a_process_that_couldnt_be_opened_or_ended_counts_however_it_is_listed() {
     );
     assert_eq!(fake.killed, [14, 40]);
     assert!(fake.procs.contains_key(&13));
+}
+
+#[test]
+fn a_wait_is_whole_milliseconds_and_never_infinite() {
+    assert_eq!(wait_millis(Duration::ZERO), 0);
+    assert_eq!(wait_millis(KILL_WAIT), 5_000);
+    assert_eq!(wait_millis(Duration::from_micros(1_999)), 1);
+    // INFINITE is u32::MAX: a wait past it, or exactly it, saturates one below.
+    let longest = u32::MAX - 1;
+    assert_eq!(
+        wait_millis(Duration::from_millis(u64::from(u32::MAX))),
+        longest
+    );
+    assert_eq!(wait_millis(Duration::MAX), longest);
+    assert_eq!(wait_millis(SWEEP_DEADLINE * 1_000_000), longest);
+}
+
+#[test]
+fn a_process_that_couldnt_be_opened_stops_counting_once_no_list_has_its_pid() {
+    // 12 can't be opened, then exits by itself: the next round's listing has no pid 12 at all,
+    // so it no longer counts, and the sweep passes. 14's kill lets 40 appear, for that round.
+    let mut fake = machine();
+    fake.procs.insert(12, pool_proc("shut.exe"));
+    fake.deny_open.insert(12);
+    fake.gone_at.insert(3, vec![12]);
+    fake.procs.insert(14, pool_proc("stray.exe"));
+    fake.spawns.insert(14, (40, pool_proc("child.exe")));
+    let (got, lines) = run(&mut fake, &[], Point::Tick);
+    assert_eq!(got, Ok(vec![14, 40]));
+    // Its failure was logged once, in the round that met it.
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|l| l.contains("(shut.exe) can't be opened"))
+            .count(),
+        1,
+        "{lines:?}"
+    );
 }
