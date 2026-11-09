@@ -242,7 +242,7 @@ pub(crate) fn remove_reset_sids(key: &str, done: &[Sid]) -> Result<(), MachineEr
 
 /// `HKLM\<key>` opened to set values, made when missing, with its owner (Administrators) and
 /// DACL ([`RECORD_SDDL`]) set again before any value.
-fn open_secured(key: &str) -> Result<Key, MachineError> {
+pub(super) fn open_secured(key: &str) -> Result<Key, MachineError> {
     let descriptor = Descriptor::from_sddl(&format!("{RECORD_OWNER}{RECORD_SDDL}"))?;
     let attributes = windows::Win32::Security::SECURITY_ATTRIBUTES {
         nLength: u32::try_from(size_of::<windows::Win32::Security::SECURITY_ATTRIBUTES>())
@@ -274,7 +274,7 @@ fn open_secured(key: &str) -> Result<Key, MachineError> {
 
 /// `HKLM\<key>` opened to set values only when it is there, secured as [`open_secured`] does;
 /// a missing key is an error, and is never made. The stop's writes go through it.
-fn open_existing(key: &str) -> Result<Key, MachineError> {
+pub(super) fn open_existing(key: &str) -> Result<Key, MachineError> {
     let descriptor = Descriptor::from_sddl(&format!("{RECORD_OWNER}{RECORD_SDDL}"))?;
     let subkey = HSTRING::from(key);
     let mut opened = HKEY::default();
@@ -330,7 +330,7 @@ pub(crate) fn delete_admin_values(key: &str) -> Result<(), MachineError> {
 
 /// Deletes `names` from `HKLM\<key>`, then the key when nothing is left in it, and the
 /// vendor key above it when that is left empty too ([`record_key::delete_emptied`]).
-fn delete_values(key: &str, names: &[&str]) -> Result<(), MachineError> {
+pub(super) fn delete_values(key: &str, names: &[&str]) -> Result<(), MachineError> {
     let subkey = HSTRING::from(key);
     let mut opened = HKEY::default();
     // SAFETY: the subkey is NUL-terminated; `opened` is a live out-pointer, closed by `Key`.

@@ -1,18 +1,23 @@
 //! Set-up's steps around the denies and the matters: the owners of the folders the shared-write
 //! denies protect (`PR4h`), reading the owner's registered matters after the lock (`PR4h`), step
-//! 8's fence of them against the grown pool, step 9's change journals, and the per-machine
-//! stop and sweep tasks once the owner is recorded.
+//! 8's fence of them against the grown pool, step 9's change journals, the per-machine stop and
+//! sweep tasks once the owner is recorded, and step 3a's grant of "Allow log on locally"
+//! (`logon_grant.rs`).
 
 use std::io;
 use std::path::{Path, PathBuf};
 
 use clauseo_protocol::MatterId;
 
+use super::SetupRequest;
 use super::create::Failed;
+use super::create::write_record;
 use super::journal_plan::{JournalAction, journal_plan};
-use super::machine::{Machine, owned};
-use super::outcome::{JournalOutcome, SetupFailure, Step, cause_of};
+use super::logon_grant::{GrantError, Granted, add_recorded, plan_grant};
+use super::machine::{Machine, MachineError, owned};
+use super::outcome::{JournalOutcome, LOGON_POLICY_EXCLUDES, SetupFailure, Step, cause_of};
 use super::record_values::CopyOwner;
+use super::rights_policy::PolicyState;
 use super::rollback::Run;
 use crate::Error;
 use crate::windows::apply::{Applied, fence_each};
@@ -26,6 +31,93 @@ use crate::windows::writer::AclWriter;
 const SYSTEM: &str = "S-1-5-18";
 /// `BUILTIN\Administrators`.
 const ADMINISTRATORS: &str = "S-1-5-32-544";
+
+/// Step 3a, once the group exists and before any pool user logs on: "Allow log on locally"
+/// granted to `group` where no policy defines it and no local holder admits the pool
+/// (`logon_grant.rs`); `users` are the recorded pool SIDs. A fresh run writes its record first
+/// (the group, no users yet), so `LogonRightAdded` never stands in a key `--remove` reads as no
+/// record. A grant made is in `run`, for the rollback. A policy that defines the right without
+/// the pool is [`LOGON_POLICY_EXCLUDES`] (`Blocked::LogonPolicy`) when no local holder admits the
+/// pool either, and grants nothing but goes on when one does; a policy that can't be read
+/// grants nothing, and the logon decides.
+pub(super) fn logon_right(
+    machine: &mut impl Machine,
+    req: &SetupRequest,
+    group: &Sid,
+    users: &[Sid],
+    run: &mut Run,
+) -> Result<(), Failed> {
+    let failed = |error: &MachineError| (Step::LogonRight, cause_of(error));
+    let planned = plan_grant(machine.logon_rights(), group, users);
+    record_policy(machine, &planned, run);
+    match planned {
+        Ok(Granted::Added) => {}
+        Ok(Granted::Unknown) => {
+            tracing::warn!(
+                "whether a policy sets \"Allow log on locally\" couldn't be read; nothing granted"
+            );
+            return Ok(());
+        }
+        Ok(Granted::Covered | Granted::PolicyIncludes) => return Ok(()),
+        Ok(Granted::PolicyNotInEffect) => {
+            tracing::warn!(
+                "a policy defines \"Allow log on locally\" without the pool, yet the pool holds it \
+                 in effect; nothing granted"
+            );
+            return Ok(());
+        }
+        Err(GrantError::Excluded) => {
+            return Err((Step::LogonRight, LOGON_POLICY_EXCLUDES.to_owned()));
+        }
+        Err(GrantError::Failed(error)) => return Err(failed(&error)),
+    }
+    if run.recorded().is_none() {
+        let record = MachineRecord {
+            owner: req.owner.clone(),
+            group: group.clone(),
+            pool: Vec::new(),
+            data_dir: req.data_dir.clone(),
+            removing: false,
+        };
+        write_record(machine, &record).map_err(|cause| (Step::WriteRecord, cause))?;
+        run.recorded = Some(record);
+    }
+    add_recorded(machine.logon_rights(), group).map_err(|error| failed(&error))?;
+    run.logon_added = Some(group.clone());
+    Ok(())
+}
+
+/// What `planned` says of policy, kept in `run` for the record's `LogonPolicy` (a launch's
+/// 1385 reads it; the desktop user can't read the policy itself), and written at once when the
+/// record exists. A call that failed says nothing of policy.
+fn record_policy(machine: &mut impl Machine, planned: &Result<Granted, GrantError>, run: &mut Run) {
+    run.policy = match planned {
+        Ok(Granted::PolicyIncludes) => Some(PolicyState::DefinedWithPool),
+        // What policy says, though the right works now: a 1385 later means it took effect.
+        Err(GrantError::Excluded) | Ok(Granted::PolicyNotInEffect) => {
+            Some(PolicyState::DefinedWithoutPool)
+        }
+        Ok(Granted::Added | Granted::Covered) => Some(PolicyState::NotDefined),
+        Ok(Granted::Unknown) => Some(PolicyState::Unknown),
+        Err(GrantError::Failed(_)) => None,
+    };
+    if run.recorded().is_some() {
+        flush_policy(machine, run);
+    }
+}
+
+/// Writes the policy step 3a found to the record's `LogonPolicy`, once the record exists (so it
+/// never stands in a key that holds no record). A failed write is logged: it only costs a
+/// launch's words.
+pub(super) fn flush_policy(machine: &mut impl Machine, run: &mut Run) {
+    let Some(state) = run.policy.take() else {
+        return;
+    };
+    let at = machine.now();
+    if let Err(error) = machine.logon_rights().record_policy(state, at) {
+        tracing::warn!(%error, "LogonPolicy couldn't be recorded");
+    }
+}
 
 /// After step 5, once the record names `owner` as `OwnerSid`: on a per-machine install (the
 /// record's `AdminCopyOwner` is `machine`), the SYSTEM tasks `\Clauseo\SandboxStop` and

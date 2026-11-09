@@ -11,18 +11,22 @@ use std::os::windows::ffi::OsStringExt;
 use std::path::PathBuf;
 
 use windows::Win32::Foundation::{
-    ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS, HANDLE, WIN32_ERROR,
+    ERROR_FILE_NOT_FOUND, ERROR_NO_MORE_ITEMS, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS, FILETIME,
+    HANDLE, WIN32_ERROR,
 };
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::System::LibraryLoader::{
     LOAD_LIBRARY_SEARCH_SYSTEM32, SetDefaultDllDirectories,
 };
 use windows::Win32::System::Registry::{
-    HKEY_LOCAL_MACHINE, REG_ROUTINE_FLAGS, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RRF_SUBKEY_WOW6464KEY,
-    RegGetValueW,
+    HKEY, HKEY_LOCAL_MACHINE, KEY_ENUMERATE_SUB_KEYS, KEY_QUERY_VALUE, KEY_WOW64_64KEY,
+    REG_ROUTINE_FLAGS, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RRF_SUBKEY_WOW6464KEY, RegCloseKey,
+    RegEnumKeyExW, RegGetValueW, RegOpenKeyExW, RegQueryInfoKeyW,
 };
-use windows::Win32::UI::Shell::{FOLDERID_ProgramData, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
-use windows::core::{PCWSTR, PWSTR};
+use windows::Win32::UI::Shell::{
+    FOLDERID_ProgramData, FOLDERID_Windows, KF_FLAG_DEFAULT, SHGetKnownFolderPath,
+};
+use windows::core::{GUID, PCWSTR, PWSTR};
 
 use super::machine::MachineError;
 use crate::windows::record::user_of;
@@ -119,6 +123,122 @@ pub(super) fn reg_dword(subkey: &str, value: &str) -> Result<Option<u32>, Machin
     Ok(present(read)?.then_some(answer))
 }
 
+/// `HKLM\<subkey>`'s last-write time (`RegQueryInfoKeyW`, a `FILETIME` as one number), in the
+/// 64-bit view; `None` when the key is missing.
+pub(super) fn reg_last_write(subkey: &str) -> Result<Option<u64>, MachineError> {
+    let subkey = wide(subkey);
+    let mut key = HKEY::default();
+    // SAFETY: the subkey is NUL-terminated and outlives the call; `key` is a live out-pointer,
+    // closed by `OpenKey`.
+    let opened = unsafe {
+        RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            PCWSTR(subkey.as_ptr()),
+            None,
+            KEY_QUERY_VALUE | KEY_WOW64_64KEY,
+            &raw mut key,
+        )
+    };
+    if !present(opened)? {
+        return Ok(None);
+    }
+    let key = OpenKey(key);
+    let mut written = FILETIME::default();
+    // SAFETY: the key is open with KEY_QUERY_VALUE; only the last-write time is asked for,
+    // into a live FILETIME.
+    let queried = unsafe {
+        RegQueryInfoKeyW(
+            key.0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(&raw mut written),
+        )
+    };
+    if queried != ERROR_SUCCESS {
+        return Err(os_code("RegQueryInfoKeyW", queried));
+    }
+    drop(key);
+    Ok(Some(
+        (u64::from(written.dwHighDateTime) << 32) | u64::from(written.dwLowDateTime),
+    ))
+}
+
+/// The names of `HKLM\<subkey>`'s subkeys, in the 64-bit view; `None` when the key is missing.
+pub(super) fn reg_subkeys(subkey: &str) -> Result<Option<Vec<String>>, MachineError> {
+    let subkey = wide(subkey);
+    let mut key = HKEY::default();
+    // SAFETY: the subkey is NUL-terminated and outlives the call; `key` is a live out-pointer,
+    // closed by `OpenKey`.
+    let opened = unsafe {
+        RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            PCWSTR(subkey.as_ptr()),
+            None,
+            KEY_ENUMERATE_SUB_KEYS | KEY_WOW64_64KEY,
+            &raw mut key,
+        )
+    };
+    if !present(opened)? {
+        return Ok(None);
+    }
+    let key = OpenKey(key);
+    let mut names = Vec::new();
+    for index in 0u32.. {
+        // A key name is at most 255 characters.
+        let mut name = [0u16; 256];
+        let mut length = u32::try_from(name.len()).unwrap_or(u32::MAX);
+        // SAFETY: the key is open with KEY_ENUMERATE_SUB_KEYS; `name` is writable for `length`
+        // characters; no class or time is asked for.
+        let read = unsafe {
+            RegEnumKeyExW(
+                key.0,
+                index,
+                Some(PWSTR(name.as_mut_ptr())),
+                &raw mut length,
+                None,
+                None,
+                None,
+                None,
+            )
+        };
+        if read == ERROR_NO_MORE_ITEMS {
+            break;
+        }
+        if read != ERROR_SUCCESS {
+            return Err(os_code("RegEnumKeyExW", read));
+        }
+        let units = name
+            .get(..usize::try_from(length).unwrap_or(0))
+            .unwrap_or_default();
+        names.push(String::from_utf16(units).map_err(|_not_utf16| {
+            MachineError::Other("a registry key's name is not text".to_owned())
+        })?);
+    }
+    drop(key);
+    Ok(Some(names))
+}
+
+/// A registry key `RegOpenKeyExW` opened, closed on drop.
+struct OpenKey(HKEY);
+
+impl Drop for OpenKey {
+    fn drop(&mut self) {
+        // SAFETY: the key came from RegOpenKeyExW and is closed once, here.
+        let closed = unsafe { RegCloseKey(self.0) };
+        if closed != ERROR_SUCCESS {
+            tracing::debug!(code = closed.0, "RegCloseKey failed");
+        }
+    }
+}
+
 /// `RegGetValueW` on `HKLM\<subkey>` `value` in the 64-bit view, restricted to `kind`.
 ///
 /// # Safety
@@ -169,19 +289,29 @@ impl Drop for TaskString {
 /// `%ProgramData%` as Windows knows it (`FOLDERID_ProgramData`), never from the environment,
 /// which the process that started the set-up could have set.
 pub(super) fn program_data() -> Result<PathBuf, MachineError> {
-    let folder = FOLDERID_ProgramData;
+    known_folder(FOLDERID_ProgramData, "ProgramData")
+}
+
+/// `%windir%` as Windows knows it (`FOLDERID_Windows`), never from the environment: the
+/// logon-right policy's template cache is below it (`rights_source.rs`).
+pub(super) fn windows_dir() -> Result<PathBuf, MachineError> {
+    known_folder(FOLDERID_Windows, "Windows")
+}
+
+/// The known folder `folder`, named `label` in an error.
+fn known_folder(folder: GUID, label: &str) -> Result<PathBuf, MachineError> {
     // SAFETY: `folder` is a live GUID for the call; no token is passed (this user's view,
-    // which for ProgramData is the machine's). The string returned is owned by `TaskString`
-    // at once.
+    // which for these folders is the machine's). The string returned is owned by
+    // `TaskString` at once.
     let path = unsafe { SHGetKnownFolderPath(&raw const folder, KF_FLAG_DEFAULT, None) }
         .map_err(|error| os("SHGetKnownFolderPath", &error))?;
     let path = TaskString(path);
     // SAFETY: on success the call wrote a NUL-terminated string, alive until `path` drops.
     let units = unsafe { path.0.as_wide() };
     if units.is_empty() {
-        return Err(MachineError::Other(
-            "Windows gave no ProgramData folder".to_owned(),
-        ));
+        return Err(MachineError::Other(format!(
+            "Windows gave no {label} folder"
+        )));
     }
     Ok(PathBuf::from(OsString::from_wide(units)))
 }

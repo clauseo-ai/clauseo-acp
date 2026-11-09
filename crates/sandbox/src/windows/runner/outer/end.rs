@@ -69,6 +69,13 @@ fn clock() -> Instant {
     Instant::now()
 }
 
+/// The monotonic time since this process's first reading: [`EndSteps::now`], and the
+/// policy cache's clock (`steps::logon_failure`).
+pub(super) fn since_start() -> Duration {
+    let origin = *ORIGIN.get_or_init(clock);
+    clock().saturating_duration_since(origin)
+}
+
 /// [`EndSteps::now`]'s origin: its first reading.
 static ORIGIN: OnceLock<Instant> = OnceLock::new();
 
@@ -111,7 +118,6 @@ impl EndSteps for OsEnd {
     }
 
     fn now(&self) -> Duration {
-        let origin = *ORIGIN.get_or_init(clock);
-        clock().saturating_duration_since(origin)
+        since_start()
     }
 }

@@ -15,6 +15,7 @@ import type { Cause } from "./causes.ts";
 /** A reason the lawyer is told something specific about, and `other_account`. */
 export type BlockReason =
   | "logon_right"
+  | "logon_policy"
   | "policy"
   | "tool_missing"
   | "admin_copy_missing"
@@ -27,6 +28,9 @@ export type BlockReason =
 const REASON_WORDS: Record<BlockReason, ProtectionKey> = {
   logon_right:
     "Windows isn't letting the Safe workspace's accounts sign in. Setting up the Safe workspace again usually fixes this.",
+  // A Group Policy or Intune setting leaves the accounts out: setting up again doesn't fix it.
+  logon_policy:
+    "This computer's settings don't let the Safe workspace's accounts sign in yet. Your firm manages these settings on this computer.",
   policy:
     "A Windows policy on this computer blocks the program that sets up the Safe workspace. Your firm manages this policy on this computer.",
   tool_missing:
@@ -77,7 +81,9 @@ export const needsInstaller = (cause: Cause | null): boolean =>
 
 /** Whether setting up again usually fixes the block, so it offers the same set-up as `needs_set_up`
  * (the same button, `retry_protection`, and the confirm where Windows' prompt follows): only
- * `logon_right`, since stage C's set-up grants "Allow log on locally" itself. Every other block
+ * `logon_right`, since set-up grants "Allow log on locally" to ClauseoSandboxUsers itself when no
+ * Group Policy or Intune setting defines that right. Where one defines it without the group, set-up
+ * grants nothing and the block is `logon_policy`, which a set-up doesn't fix. Every other block
  * offers no set-up (a missing admin copy has the installer instead). */
 export const setUpFixes = (cause: Cause | null): boolean => blockOf(cause) === "logon_right";
 

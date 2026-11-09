@@ -211,3 +211,25 @@ fn every_run_past_the_clear_leaves_no_staging_folder() {
     assert!(fake.calls.contains(&"leave_staging"));
     assert_eq!(fake.staging, Staging::Absent);
 }
+
+#[test]
+fn the_logon_policy_is_updated_under_the_lock_after_the_checks_only() {
+    let key = key();
+    let mut fake = Fake::new(&old(), &new(), &key, &good());
+    run_fake(&mut fake, &key);
+    let at = |name: &str| fake.calls.iter().position(|call| *call == name).unwrap();
+    let [update] = fake.policy_updates[..] else {
+        panic!("{:?}", fake.policy_updates)
+    };
+    assert!(
+        at("lock") < update && update <= at("unlock"),
+        "{:?}",
+        fake.calls
+    );
+    assert!(at("record") < update);
+    // Not SYSTEM: refused before the lock, and nothing updated.
+    let mut fake = Fake::new(&old(), &new(), &key, &good());
+    fake.system = false;
+    run_fake(&mut fake, &key);
+    assert_eq!(fake.policy_updates, Vec::<usize>::new());
+}

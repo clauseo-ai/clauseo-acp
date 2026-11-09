@@ -47,6 +47,7 @@ const P = {
   // design B (R17 PR-E's causes, not in bindings.ts yet)
   missing: np({ blocked: { reason: "admin_copy_missing" } }),
   logon: np({ blocked: { reason: "logon_right" } }),
+  logonPolicy: np({ blocked: { reason: "logon_policy" } }),
   policy: np({ blocked: { reason: "policy" } }),
   tool: np({ blocked: { reason: "tool_missing" } }),
   changed: np({ blocked: { reason: "admin_copy_changed" } }),
@@ -183,7 +184,7 @@ const REFUSED_INVALID: FakeProtectionHost = {
   },
 };
 
-/** UC's entries, UC-01 to UC-96, each id written as it is; ids missing are unused. */
+/** UC's entries, UC-01 to UC-97, each id written as it is; ids missing are unused. */
 export const UC: Entry[] = [
   room(
     "UC-01",
@@ -318,6 +319,14 @@ export const UC: Entry[] = [
     ),
     "room/np-note",
     note(P.logon),
+  ),
+  room(
+    "UC-97",
+    pw(
+      "This computer's settings don't let the Safe workspace's accounts sign in yet. Your firm manages these settings on this computer.",
+    ),
+    "room/np-note",
+    note(P.logonPolicy),
   ),
   room(
     "UC-34",

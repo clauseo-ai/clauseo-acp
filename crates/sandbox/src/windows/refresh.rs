@@ -82,7 +82,7 @@ mod refusal_tests;
 mod rules;
 pub mod signature;
 #[cfg(windows)]
-mod source;
+pub(crate) mod source;
 mod sources;
 #[cfg(windows)]
 mod staging;
@@ -249,6 +249,11 @@ pub trait Refresher {
     fn unlock(&mut self);
     /// The record's values; a missing key or value is `None`.
     fn record(&mut self) -> Result<RefreshRecord, Failed>;
+    /// Updates the record's `LogonPolicy` with what SYSTEM reads of the policy now
+    /// (`setup::rights_source::record_for_launches`), under the set-up lock, into a record key
+    /// that is there (never made), and never over a known state with `unknown`. Logged, never
+    /// fatal.
+    fn record_logon_policy(&mut self);
     /// `owner`'s profile folder (`ProfileList`'s `ProfileImagePath`); `None` when it has none.
     fn profile_dir(&mut self, owner: &Sid) -> Result<Option<PathBuf>, Failed>;
     /// Whether `dir` is a folder, no link, that only SYSTEM, Administrators or
@@ -346,6 +351,8 @@ fn run_steps(fs: &mut impl Refresher, trust: &Trust<'_>) -> Result<String, Refus
 fn locked_steps(fs: &mut impl Refresher, trust: &Trust<'_>) -> Result<String, Refusal> {
     let record = fs.record().map_err(|why| (RefreshExit::NoRecord, why))?;
     let checked = checked(fs, record)?;
+    // After the SYSTEM and path checks, under the lock, so no `--remove` runs between.
+    fs.record_logon_policy();
     if let Err(why) = fs.clear_leftovers() {
         fs.log(true, &format!("an earlier refresh's leftovers stay: {why}"));
     }

@@ -147,10 +147,20 @@ pub const SWEEP_SEQUENCE: &str = "SweepSequence";
 /// (without the lock, `pool_steps::sequence` says why) as the marker's `M`; the marker is
 /// clean once [`SWEEP_SEQUENCE`] `>= M`.
 pub const SWEEP_NEXT: &str = "SweepNext";
+/// `LogonRightAdded` (`REG_SZ`, a SID): the SID set-up added "Allow log on locally" to, the
+/// pool group's, written before the grant (`logon_grant.rs`). `--remove` takes the right off
+/// that SID alone, then deletes the value with the set-up's. Outside [`MachineRecord`].
+pub const LOGON_RIGHT_ADDED: &str = "LogonRightAdded";
+/// `LogonPolicy` (`REG_SZ`, `rights_policy::PolicyState::text`): what set-up or the SYSTEM
+/// refresh last found policy says of "Allow log on locally", for a launch's 1385, which runs as
+/// the desktop user and can't read the policy itself. Outside [`MachineRecord`].
+pub const LOGON_POLICY: &str = "LogonPolicy";
+/// `LogonPolicyAt` (`REG_QWORD`, seconds since 1970): when [`LOGON_POLICY`] was found.
+pub const LOGON_POLICY_AT: &str = "LogonPolicyAt";
 /// The values the set-up owns, which a rollback or `--remove` deletes; the ones `--adopt`
 /// writes stay until `--remove` takes the admin copy away. Each `…Sequence` comes before its
 /// `…Next`, so a marker read during a removal can only wait longer (`pool_steps::sequence`).
-pub const SETUP_VALUES: [&str; 14] = [
+pub const SETUP_VALUES: [&str; 17] = [
     OWNER_SID,
     GROUP_SID,
     POOL_SIDS,
@@ -165,6 +175,9 @@ pub const SETUP_VALUES: [&str; 14] = [
     SWEEP_COMPLETED,
     SWEEP_SEQUENCE,
     SWEEP_NEXT,
+    LOGON_RIGHT_ADDED,
+    LOGON_POLICY,
+    LOGON_POLICY_AT,
 ];
 
 /// `listed` (`ResetSids` as read) with each of `add` it lacks appended, in order.
@@ -537,6 +550,14 @@ mod tests {
         assert!(at(STOP_SEQUENCE) < at(STOP_NEXT));
         assert!(at(SWEEP_COMPLETED) < at(SWEEP_SEQUENCE));
         assert!(at(SWEEP_SEQUENCE) < at(SWEEP_NEXT));
+        // And the logon-right grant's record, which `--remove` reads before it goes.
+        assert_eq!(LOGON_RIGHT_ADDED, "LogonRightAdded");
+        assert!(SETUP_VALUES.contains(&LOGON_RIGHT_ADDED));
+        assert_eq!(
+            (LOGON_POLICY, LOGON_POLICY_AT),
+            ("LogonPolicy", "LogonPolicyAt")
+        );
+        assert!(SETUP_VALUES.contains(&LOGON_POLICY) && SETUP_VALUES.contains(&LOGON_POLICY_AT));
     }
 
     #[test]
