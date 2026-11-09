@@ -246,6 +246,9 @@ pub(crate) trait Checker {
     fn sandboxed(&self, pid: u32) -> Answer;
     /// Whether `pid` may `file-write-data` the canonical, existing `path`.
     fn may_write(&self, pid: u32, path: &CStr) -> Answer;
+    /// Whether process `id` still runs with its start (asked again before drift is raised: an
+    /// agent that exited during the scan answers as no process of the launch).
+    fn still_runs(&self, id: ProcId) -> bool;
 }
 
 /// Whether sandboxed process `pid` belongs to `mark`: the mark allowed and the canary denied.
@@ -291,7 +294,8 @@ impl Scan {
 /// listed was killed ([`SweepError::SentinelGone`]); one missing or not matching, or a call that
 /// failed for any process but one gone since the listing, is [`SweepError::Unknown`]. Each
 /// mark's live agent is checked whatever its start; one that started more than [`ROOT_GRACE`]
-/// before `now` and does not match its own mark is [`SweepError::Drift`]. Each of these is the
+/// before `now`, does not match its own mark and still runs when asked again (one that exited
+/// mid-scan is no drift) is [`SweepError::Drift`]. Each of these is the
 /// scan's doubt: what it found stands. A mark whose files are unusable fails the scan.
 pub(crate) fn scan(
     check: &dyn Checker,
@@ -359,6 +363,7 @@ pub(crate) fn scan(
         let settled = process.start.saturating_add(grace) <= now;
         if drift.is_none()
             && let Some(i) = own.filter(|i| settled && !hits.contains(i))
+            && check.still_runs(id)
         {
             let tag = marks.get(i).map(|m| m.tag().to_owned()).unwrap_or_default();
             drift = Some(SweepError::Drift {

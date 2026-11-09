@@ -13,7 +13,7 @@ use std::ffi::{CStr, c_char, c_int, c_void};
 use std::io;
 use std::sync::OnceLock;
 
-use super::{Answer, CheckFailed, Checker, SweepError};
+use super::{Answer, CheckFailed, Checker, ProcId, SweepError, start_of};
 
 /// `int sandbox_check(pid_t pid, const char *operation, enum sandbox_filter_type type, ...)`:
 /// 0 allowed, 1 denied, -1 failed (`errno`). With `SANDBOX_FILTER_PATH` the variadic argument is
@@ -109,6 +109,10 @@ impl Checker for Seatbelt {
             1 => Ok(false),
             _ => Err(failure()),
         }
+    }
+
+    fn still_runs(&self, id: ProcId) -> bool {
+        start_of(id.pid()) == Some(id.start)
     }
 }
 

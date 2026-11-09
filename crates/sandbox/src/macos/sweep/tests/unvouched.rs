@@ -20,6 +20,10 @@ impl Checker for FailsFor {
         }
         self.0.may_write(pid, path)
     }
+
+    fn still_runs(&self, id: ProcId) -> bool {
+        self.0.still_runs(id)
+    }
 }
 
 #[test]

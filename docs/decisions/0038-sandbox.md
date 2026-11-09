@@ -631,7 +631,9 @@ be the filter either. What a jailed process cannot change is its Seatbelt profil
   during the end), and by the watchdog. Since the agent cannot signal it, a sentinel killed
   mid-session means tampering from outside the jail, and the watchdog ends the session.
 - **The drift check.** Each scan also checks the launch's live agent (pid and start) once it has
-  run for more than 1 s: an agent that does not match its own mark is `SweepError::Drift`.
+  run for more than 1 s: an agent that does not match its own mark is `SweepError::Drift`. It is
+  asked again first whether it still runs with its start: an agent that exited mid-scan answers
+  as a zombie does (sandboxed, every path denied), which is no drift.
 - **The end.** `end_session_processes(marks, deadline) -> Result<Gone, Survivors>`:
   `killpg(SIGSTOP)` on each live agent's group, then rounds of scan, `SIGSTOP` on each new
   process (its start checked first) until a round finds none new (a stopped process cannot

@@ -13,13 +13,22 @@ mod unvouched;
 
 /// The fake kernel: each sandboxed pid with the paths it may write; a pid not listed is
 /// unsandboxed, and may write any path (as the real check answers for an unsandboxed process).
+/// A pid in its second set has exited since the listing.
 #[derive(Default)]
-struct Fake(HashMap<u32, HashSet<CString>>);
+struct Fake(HashMap<u32, HashSet<CString>>, HashSet<u32>);
 
 impl Fake {
     fn jailed(mut self, pid: u32, writable: &[&CStr]) -> Fake {
         self.0
             .insert(pid, writable.iter().map(|p| (*p).to_owned()).collect());
+        self
+    }
+
+    /// `pid` exits after the listing: the kernel answers for it as for a zombie (sandboxed,
+    /// every path denied, measured), and it no longer runs when asked again.
+    fn exited(mut self, pid: u32) -> Fake {
+        self.0.insert(pid, HashSet::new());
+        self.1.insert(pid);
         self
     }
 }
@@ -31,6 +40,10 @@ impl Checker for Fake {
 
     fn may_write(&self, pid: u32, path: &CStr) -> Answer {
         Ok(self.0.get(&pid).is_none_or(|paths| paths.contains(path)))
+    }
+
+    fn still_runs(&self, id: ProcId) -> bool {
+        !self.1.contains(&id.pid)
     }
 }
 
@@ -45,6 +58,10 @@ impl Checker for Failing {
     fn may_write(&self, _: u32, _: &CStr) -> Answer {
         Err(CheckFailed::Failed)
     }
+
+    fn still_runs(&self, _: ProcId) -> bool {
+        true
+    }
 }
 
 /// A kernel that reads the path filter wrongly (a renumbered `SANDBOX_FILTER_PATH`): every
@@ -58,6 +75,10 @@ impl Checker for WrongFilter {
 
     fn may_write(&self, _: u32, _: &CStr) -> Answer {
         Ok(false)
+    }
+
+    fn still_runs(&self, _: ProcId) -> bool {
+        true
     }
 }
 
@@ -261,6 +282,10 @@ fn an_agent_that_does_not_match_its_own_mark_is_drift() {
         scanned(&unjailed, &[&young], 0, NOW, UID, &all).unwrap(),
         []
     );
+    // An agent that exits between the listing and its check (a zombie by then) is no drift.
+    let (gone, sentinels_s) = vouched(Fake::default().exited(10), &[&s]);
+    let listed = [sentinels_s, vec![proc(10, 50_000_000)]].concat();
+    assert_eq!(scanned(&gone, &[&s], 0, NOW, UID, &listed).unwrap(), []);
     // An agent that has exited (not listed) is not checked.
     assert_eq!(
         scanned(&unjailed, &[&young], 0, NOW, UID, &sentinels).unwrap(),

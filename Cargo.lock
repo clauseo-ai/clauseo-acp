@@ -1274,6 +1274,7 @@ dependencies = [
  "clauseo-fake_agent",
  "clauseo-process",
  "clauseo-protocol",
+ "clauseo-sandbox",
  "dunce",
  "embed-resource",
  "futures",

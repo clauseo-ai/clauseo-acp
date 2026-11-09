@@ -296,8 +296,21 @@ impl SessionMark {
 
     /// Kills and reaps the sentinel, if any, for good: it is not restarted, and every later
     /// scan of the mark is unknown ([`SweepError::Unknown`]), never "nothing runs". Session end
-    /// calls it after [`Gone`](super::Gone); otherwise only a test should.
+    /// calls it after [`Gone`](super::Gone), and so does the end of a crashed host's leftovers.
+    /// Public only with the `jail-tests` feature, which only the jail tests' build turns on.
+    #[cfg(not(feature = "jail-tests"))]
+    pub(crate) fn end_sentinel(&self) {
+        self.retire_sentinel();
+    }
+
+    /// [`SessionMark::end_sentinel`], public for the jail tests (`jail-tests` feature).
+    #[cfg(feature = "jail-tests")]
     pub fn end_sentinel(&self) {
+        self.retire_sentinel();
+    }
+
+    /// Kills and reaps the sentinel for good ([`SessionMark::end_sentinel`]).
+    fn retire_sentinel(&self) {
         let sentinel = {
             let mut slot = self.slot();
             slot.retired = true;

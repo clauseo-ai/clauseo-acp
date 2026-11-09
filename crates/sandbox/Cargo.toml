@@ -22,6 +22,9 @@ path = "src/bin/clauseo-sandbox-run.rs"
 [features]
 # Exports `windows::test_dacl`, a tests' folder with a protected DACL, for the host's tests.
 test-support = []
+# Exports `SessionMark::end_sentinel` (macOS), which ends a launch's sentinel for good, for the
+# jail tests alone: the dev-dependency on this crate below turns it on for test builds only.
+jail-tests = []
 
 [dependencies]
 clauseo-protocol = { path = "../protocol" }
@@ -199,6 +202,8 @@ embed-resource = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
+# This crate with `jail-tests`, so the jail tests can end a sentinel; never in a release build.
+clauseo-sandbox = { path = ".", features = ["jail-tests"] }
 # The Seatbelt profile snapshots.
 insta = { workspace = true }
 # The jail tests run fake_agent through the launcher.

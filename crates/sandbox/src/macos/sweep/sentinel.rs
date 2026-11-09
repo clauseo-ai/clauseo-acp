@@ -90,9 +90,13 @@ impl Drop for Sentinel {
     }
 }
 
-/// Kills `child` and reaps it: until it is reaped its pid names it alone.
+/// Kills `child` and reaps it: until it is reaped its pid names it alone. It is reaped even when
+/// the kill fails (it exited already, say), so no zombie is left.
 fn end(child: &mut Child) {
-    if let Err(error) = child.kill().and_then(|()| child.wait().map(drop)) {
-        tracing::warn!(%error, "the session sweep's sentinel could not be ended");
+    if let Err(error) = child.kill() {
+        tracing::warn!(%error, "the session sweep's sentinel could not be killed");
+    }
+    if let Err(error) = child.wait() {
+        tracing::warn!(%error, "the session sweep's sentinel could not be reaped");
     }
 }
