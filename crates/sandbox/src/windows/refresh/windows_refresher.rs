@@ -32,6 +32,7 @@ use super::{
 };
 use crate::windows::admin_copy::{self, Found, level_safe, locked_file_sddl, os};
 pub(crate) use crate::windows::admin_copy::{SETUP_EXE as EXE_NAME, SETUP_SIG as SIG_NAME};
+use crate::windows::detect::native_machine;
 use crate::windows::record::{read_string, sandbox_group_sid, sandbox_pool_sids, sandbox_removing};
 use crate::windows::setup::adopt::windows_adopter::own_profile;
 use crate::windows::setup::lock::{Held, SETUP_MUTEX, lock_within, try_lock};
