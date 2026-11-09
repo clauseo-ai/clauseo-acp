@@ -231,8 +231,6 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-    env:
-      BASE: https://github.com/clauseo-ai/blocklist/releases/download/current
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -246,11 +244,32 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y minisign
 
+      # The fetch goes through the API with the job's token and is retried: during GitHub's
+      # incidents of 2026-11-08 and 2026-11-09 anonymous downloads got HTTP 504 (a dry run failed
+      # here), and the publisher replaces the two assets one after the other every 6 hours, so a
+      # fetch can also meet a missing asset or a new file with the old signature. The pair is
+      # fetched again until it verifies, five times at most, 30 s apart; the next step verifies it
+      # again and names the failure if it still does not.
       - name: Download the snapshot and its signature
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          for file in blocklist-v1.txt.gz blocklist-v1.txt.gz.minisig; do
-            curl --fail --retry 3 --location --silent --show-error -o "$file" "$BASE/$file"
+          for attempt in 1 2 3 4 5; do
+            if gh release download current --repo clauseo-ai/blocklist --clobber \
+              --pattern blocklist-v1.txt.gz --pattern blocklist-v1.txt.gz.minisig; then
+              if minisign -V -q -p crates/blocklist/keys/stage-f.pub -m blocklist-v1.txt.gz \
+                -x blocklist-v1.txt.gz.minisig; then
+                break
+              fi
+              echo "The pair does not verify (attempt $attempt of 5)."
+            elif [ "$attempt" -eq 5 ]; then
+              echo "::error::could not download the snapshot from clauseo-ai/blocklist (5 attempts)"
+              exit 1
+            fi
+            if [ "$attempt" -lt 5 ]; then
+              sleep 30
+            fi
           done
 
       # minisign checks the file's signature and the signature over the trusted comment, so the
