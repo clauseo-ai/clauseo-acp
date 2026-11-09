@@ -36,8 +36,9 @@ pub enum DegradedReason {
     Moved,
     /// No access value, and COM's own couldn't be read (`degraded: machine access unknown`).
     AccessUnknown,
-    /// A state this build doesn't know (a newer Clauseo's, or an edit); the text as found.
-    Other(String),
+    /// A state this build doesn't know (a newer Clauseo's, or an edit). The text is logged where
+    /// it is read, never carried.
+    Other,
 }
 
 impl LaunchDenyState {
@@ -53,7 +54,13 @@ impl LaunchDenyState {
             Some(Guard::Failed) => DegradedReason::Failed,
             Some(Guard::Moved) => DegradedReason::Moved,
             Some(Guard::AccessUnknown) => DegradedReason::AccessUnknown,
-            None => DegradedReason::Other(text.to_owned()),
+            None => {
+                tracing::warn!(
+                    state = text,
+                    "the COM launch guard's recorded state is unknown"
+                );
+                DegradedReason::Other
+            }
         };
         LaunchDenyState::Degraded { reason }
     }
@@ -93,10 +100,7 @@ mod tests {
                 "degraded: machine access unknown",
                 degraded(DegradedReason::AccessUnknown),
             ),
-            (
-                "degraded: something new",
-                degraded(DegradedReason::Other("degraded: something new".to_owned())),
-            ),
+            ("degraded: something new", degraded(DegradedReason::Other)),
         ];
         for (text, state) in cases {
             assert_eq!(LaunchDenyState::from_record(Some(text)), state, "{text}");
