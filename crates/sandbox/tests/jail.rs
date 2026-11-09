@@ -80,3 +80,8 @@ mod browser;
 #[cfg(target_os = "macos")]
 #[path = "jail/bridge.rs"]
 mod bridge;
+
+#[cfg(test)]
+#[cfg(target_os = "macos")]
+#[path = "jail/chrome.rs"]
+mod chrome;

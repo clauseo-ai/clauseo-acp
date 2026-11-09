@@ -27,8 +27,10 @@ pub struct BrowserBridge {
     /// Folders the agent may not write: the browser pins (`<data>/browser-pins`: the signed
     /// list, the host's install record, the floor). None may lie under an agent-writable path.
     pub write_denied: Vec<PathBuf>,
-    /// The browser's own loopback ports, `DevTools` and stream: the agent's loopback and proxy
-    /// ports may not include them, so the agent cannot drive Chrome around the guard.
+    /// The browser's own loopback ports, the host bridge's `DevTools` port
+    /// ([`BrowserPaths::bridge_port`](crate::macos::browser::BrowserPaths::bridge_port)): the
+    /// agent's loopback and proxy ports may not include them, so the agent cannot drive Chrome
+    /// around the guard.
     pub ports: Vec<u16>,
 }
 

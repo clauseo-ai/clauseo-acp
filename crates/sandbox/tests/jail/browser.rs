@@ -18,27 +18,31 @@ const CAT: &str = "/bin/cat";
 const NC: &str = "/usr/bin/nc";
 const SLEEP: &str = "/bin/sleep";
 
-/// The world, its run folder, the profile's launcher and the loopback listeners it may reach.
-struct Browser {
-    w: World,
-    run: PathBuf,
-    launcher: BrowserLauncher,
+/// The world, its run folder, the profile's launcher and the loopback listeners it may reach
+/// (the proxy's and the host bridge's) and may not (`other`).
+pub(crate) struct Browser {
+    pub(crate) w: World,
+    pub(crate) run: PathBuf,
+    pub(crate) launcher: BrowserLauncher,
     probe: PathBuf,
     proxy: TcpListener,
-    cdp: TcpListener,
+    pub(crate) bridge: TcpListener,
     other: TcpListener,
-    /// The stream port, left free for the bind tests.
-    stream_port: u16,
 }
 
-fn port(listener: &TcpListener) -> u16 {
+pub(crate) fn port(listener: &TcpListener) -> u16 {
     listener.local_addr().unwrap().port()
 }
 
 impl Browser {
     /// The world with a run folder, the probe copied to `bin/probe`, and a launcher whose
     /// Chrome is `bundle` (a stand-in headless shell's folder when `None`).
-    fn new(bundle: Option<&Path>) -> Browser {
+    pub(crate) fn new(bundle: Option<&Path>) -> Browser {
+        Browser::with(bundle, &[])
+    }
+
+    /// [`Browser::new`] with `more` binaries the profile may run.
+    pub(crate) fn with(bundle: Option<&Path>, more: &[PathBuf]) -> Browser {
         let w = World::new();
         for sub in RUN_SUBFOLDERS {
             w.dir(&format!("data/browser-runs/r1/{sub}"));
@@ -47,7 +51,7 @@ impl Browser {
         w.file("home/.ssh/id_ed25519", "private key\n");
         w.file("m1/brief.txt", "this matter\n");
         let probe = probe::copy_to(&w.dir("bin").join("probe"));
-        let (proxy, cdp, stream, other) = (listen(), listen(), listen(), listen());
+        let (proxy, bridge, other) = (listen(), listen(), listen());
         let paths = BrowserPaths {
             run_dir: w.at("data/browser-runs/r1"),
             chrome_bundle: bundle.map_or_else(|| w.at("chrome/chs"), Path::to_owned),
@@ -55,10 +59,10 @@ impl Browser {
                 .map(PathBuf::from)
                 .into_iter()
                 .chain([probe.clone()])
+                .chain(more.iter().cloned())
                 .collect(),
             proxy_port: port(&proxy),
-            cdp_port: port(&cdp),
-            stream_port: port(&stream),
+            bridge_port: port(&bridge),
             deny_roots: [
                 "m1",
                 "m2",
@@ -73,21 +77,18 @@ impl Browser {
         };
         let launcher = BrowserLauncher::new(&paths, SpawnOptions::new()).unwrap();
         let run = launcher.run_dir().to_owned();
-        let stream_port = port(&stream);
-        drop(stream);
         Browser {
             w,
             run,
             launcher,
             probe,
             proxy,
-            cdp,
+            bridge,
             other,
-            stream_port,
         }
     }
 
-    fn bash(&self, script: &str, args: &[&str]) -> Output {
+    pub(crate) fn bash(&self, script: &str, args: &[&str]) -> Output {
         let mut all = vec!["-c", script, "bash"];
         all.extend_from_slice(args);
         run(&self.launcher, BASH, &all, &self.run, &[])
@@ -105,11 +106,11 @@ impl Browser {
     }
 }
 
-fn listen() -> TcpListener {
+pub(crate) fn listen() -> TcpListener {
     TcpListener::bind("127.0.0.1:0").unwrap()
 }
 
-fn s(path: &Path) -> &str {
+pub(crate) fn s(path: &Path) -> &str {
     path.to_str().unwrap()
 }
 
@@ -168,7 +169,7 @@ fn the_keychain_is_refused() {
 }
 
 #[test]
-fn tcp_reaches_only_the_proxy_devtools_and_stream_ports() {
+fn tcp_reaches_only_the_proxy_and_bridge_ports() {
     let b = Browser::new(None);
     let nc = |port: u16| {
         let port = port.to_string();
@@ -181,7 +182,7 @@ fn tcp_reaches_only_the_proxy_devtools_and_stream_ports() {
         )
     };
     nc(port(&b.proxy)).assert_ok();
-    nc(port(&b.cdp)).assert_ok();
+    nc(port(&b.bridge)).assert_ok();
     nc(port(&b.other)).assert_refused();
 }
 
@@ -259,18 +260,6 @@ fn the_marker_tells_the_browser_profile_from_the_agent_jail() {
 fn the_browser_launcher_refuses_to_start_inside_a_sandbox() {
     let b = Browser::new(None);
     assert_eq!(b.probe("nest", &[]), "nest=Some(AlreadySandboxed)");
-}
-
-/// chrome-headless-shell, the one browser the profile supports on macOS, takes a screenshot of
-/// a page in the run folder with `--no-sandbox`, the one place that flag is allowed. Skipped
-/// when none is found (`CLAUSEO_TEST_HEADLESS_SHELL`, agent-browser's or Playwright's).
-#[test]
-fn the_headless_shell_screenshots_a_local_page() {
-    let Some(shell) = crate::bridge::headless_shell() else {
-        eprintln!("skipped: no chrome-headless-shell (set CLAUSEO_TEST_HEADLESS_SHELL)");
-        return;
-    };
-    screenshot(shell.parent().unwrap(), &shell, "--headless");
 }
 
 /// Only Chrome's port broker name may be looked up. The window server, `LaunchServices`'
@@ -362,50 +351,37 @@ fn the_run_folder_s_ancestors_stat_but_do_not_list() {
     }
 }
 
-/// TCP binds: IPv6 (loopback or every address) and any other port are refused. On the
-/// profile's own ports a bind on every IPv4 address passes too: Seatbelt's `localhost` matches
-/// any of the Mac's addresses for a bind, and it checks `network-inbound` at `listen` by the
-/// local address only (measured on macOS 27.2), so no rule keeps a listener on loopback. Pinned
-/// here so a change shows; 0038 records it as a residual risk.
+/// No inet bind at all, TCP or UDP, IPv4 or IPv6, on loopback or every address, on port 0
+/// (agent-browser's fallback for its stream server) or a fixed one (its first try, and the
+/// host bridge's port): each fails with EPERM. Seatbelt checks a bind by its port alone (its
+/// `localhost` matches any address of the Mac), so the profile allows none (0038).
 #[test]
-fn binds_are_ipv4_on_the_profile_s_ports_only() {
+fn every_inet_bind_is_refused() {
     let b = Browser::new(None);
     let free = port(&listen());
-    let stream = b.stream_port;
-    let refused = "tcp-bind=Operation not permitted (os error 1)";
-    for addr in [
-        format!("[::1]:{stream}"),
-        format!("[::]:{stream}"),
-        format!("127.0.0.1:{free}"),
-        format!("0.0.0.0:{free}"),
-    ] {
-        assert_eq!(b.probe("tcp-bind", &[&addr]), refused, "{addr}");
-    }
-    for addr in [format!("127.0.0.1:{stream}"), format!("0.0.0.0:{stream}")] {
-        assert_eq!(b.probe("tcp-bind", &[&addr]), "tcp-bind=ok", "{addr}");
+    let bridge = port(&b.bridge);
+    for kind in ["tcp-bind", "udp-bind"] {
+        let refused = format!("{kind}=Operation not permitted (os error 1)");
+        for addr in [
+            "127.0.0.1:0".to_owned(),
+            "0.0.0.0:0".to_owned(),
+            "[::]:0".to_owned(),
+            "[::1]:0".to_owned(),
+            format!("127.0.0.1:{free}"),
+            format!("0.0.0.0:{free}"),
+            format!("[::]:{free}"),
+            format!("0.0.0.0:{bridge}"),
+        ] {
+            assert_eq!(b.probe(kind, &[&addr]), refused, "{addr}");
+        }
     }
 }
 
-/// Runs `chrome` of `bundle` under the profile and checks the screenshot it wrote.
-fn screenshot(bundle: &Path, chrome: &Path, headless: &str) {
-    let b = Browser::new(Some(bundle));
-    let page = b.w.file(
-        "data/browser-runs/r1/staging/page.html",
-        "<html><body><h1>browser profile</h1></body></html>\n",
-    );
-    let shot = b.run.join("staging/s.png");
-    let profile = format!("--user-data-dir={}", s(&b.run.join("profile")));
-    let screenshot = format!("--screenshot={}", s(&shot));
-    let url = format!("file://{}", s(&page));
-    let flags = [
-        headless,
-        "--no-sandbox",
-        "--disable-gpu",
-        &profile,
-        &screenshot,
-        &url,
-    ];
-    let out = run(&b.launcher, s(chrome), &flags, &b.run, &[]);
-    let png = std::fs::read(&shot).unwrap_or_default();
-    assert!(png.starts_with(b"\x89PNG"), "no screenshot: {out:#?}");
+/// agent-browser's other listener, a Unix socket in `ab/`, still binds, takes a connection
+/// and carries a byte both ways inside the profile.
+#[test]
+fn a_unix_listener_in_ab_binds_accepts_and_connects() {
+    let b = Browser::new(None);
+    let sock = b.run.join("ab/daemon.sock");
+    assert_eq!(b.probe("unix-loop", &[s(&sock)]), "unix-loop=ok");
 }

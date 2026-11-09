@@ -6,8 +6,10 @@
 //!
 //! The profile gives read and run of the Chrome bundle and the stack's binaries, read of the
 //! system paths Chrome needs, read and write of one run folder
-//! (`<data>/browser-runs/<run>/`), the guard's socket and Unix sockets in `ab/`, and TCP to three
-//! loopback ports. The browser is chrome-headless-shell, the only one supported on macOS: a
+//! (`<data>/browser-runs/<run>/`), the guard's socket and Unix sockets in `ab/`, and TCP out to
+//! two loopback ports. No inet bind of any kind: Chrome speaks `DevTools` over
+//! `--remote-debugging-pipe` ([`pipe`]), which stage E's host bridge serves outside every jail.
+//! The browser is chrome-headless-shell, the only one supported on macOS: a
 //! Chrome app bundle needs `LaunchServices`, the window server and more. Every allow was measured
 //! (0038 lists the failure seen without each). It compiles on every target, so its tests run on
 //! every CI target.
@@ -18,11 +20,12 @@ use std::path::{Path, PathBuf};
 mod check;
 #[cfg(target_os = "macos")]
 mod launcher;
+pub mod pipe;
 
 #[cfg(target_os = "macos")]
 pub use check::{path_allowed, pid_sandboxed, sandboxed};
 #[cfg(target_os = "macos")]
-pub use launcher::{BrowserLauncher, refuse_nesting};
+pub use launcher::{BrowserLauncher, ChromeLaunch, chrome_args, refuse_nesting};
 
 /// The allow rules that name no path of the run: system reads, sysctls, the Mach services.
 const BASE: &str = include_str!("browser.sb");
@@ -66,12 +69,12 @@ pub struct BrowserPaths {
     pub chrome_bundle: PathBuf,
     /// The guard's and agent-browser's binaries (or their folders): read, run and mapped.
     pub exec_bins: Vec<PathBuf>,
-    /// The egress proxy's loopback port: outbound only.
+    /// The egress proxy's browser listener, on `127.0.0.1`: outbound only.
     pub proxy_port: u16,
-    /// Chrome's `DevTools` port: bound by Chrome on loopback, reached by agent-browser.
-    pub cdp_port: u16,
-    /// agent-browser's stream port: bound and reached on loopback.
-    pub stream_port: u16,
+    /// The host bridge's `DevTools` port, on `127.0.0.1`: outbound only. The bridge (stage E's
+    /// J4) runs outside every jail, serves Chrome's pipe there, and agent-browser, in this
+    /// profile, connects to it. Nothing in the profile listens on it or on any inet port.
+    pub bridge_port: u16,
     /// Folders the profile must never open for writing: the matters, the home's sensitive
     /// folders, the data dir's other folders. A writable path equal to one, inside one or
     /// holding one is refused; so is a run path inside one.
@@ -168,8 +171,7 @@ pub fn profile(paths: &BrowserPaths) -> Result<String, BrowserProfileError> {
 fn check(paths: &BrowserPaths) -> Result<Checked, BrowserProfileError> {
     for (what, port) in [
         ("proxy port", paths.proxy_port),
-        ("DevTools port", paths.cdp_port),
-        ("stream port", paths.stream_port),
+        ("bridge port", paths.bridge_port),
     ] {
         if port == 0 {
             return Err(BrowserProfileError::ZeroPort(what));
@@ -265,36 +267,7 @@ fn write(c: &Checked, paths: &BrowserPaths) -> String {
         &[format!("(subpath {run})")],
     ));
 
-    let guard = quoted(&c.run_dir.join("sock").join(GUARD_SOCKET));
-    let ab = format!("(subpath {})", quoted(&c.run_dir.join("ab")));
-    t.push_str(
-        "\n; Unix sockets: the guard's `sock/guard.sock`, and in ab/ agent-browser's daemon\n",
-    );
-    t.push_str(
-        "; socket and Chrome's singleton socket. No other name in sock/, nothing elsewhere.\n",
-    );
-    let sockets = [format!("(path-literal {guard})"), ab];
-    let bound: Vec<String> = sockets
-        .iter()
-        .map(|s| format!("(local unix-socket {s})"))
-        .collect();
-    t.push_str(&rule("allow", "network-bind", &bound));
-    let mut out: Vec<String> = sockets
-        .iter()
-        .map(|s| format!("(remote unix-socket {s})"))
-        .collect();
-    t.push_str("; TCP over IPv4 loopback to the proxy, DevTools and stream ports only.\n");
-    // Seatbelt takes only `*` or `localhost` as a host; tcp4 keeps it to 127.0.0.1.
-    for port in [paths.proxy_port, paths.cdp_port, paths.stream_port] {
-        out.push(format!("(remote tcp4 \"localhost:{port}\")"));
-    }
-    t.push_str(&rule("allow", "network-outbound", &out));
-    t.push_str("; Chrome's DevTools listener and agent-browser's stream listener, exact ports.\n");
-    let listen: Vec<String> = [paths.cdp_port, paths.stream_port]
-        .iter()
-        .map(|port| format!("(local tcp4 \"localhost:{port}\")"))
-        .collect();
-    t.push_str(&rule("allow", "network-bind network-inbound", &listen));
+    network(&mut t, c, paths);
 
     t.push_str("\n; The last rules: denies only, so no allow above can reopen them.\n");
     t.push_str(
@@ -304,6 +277,12 @@ fn write(c: &Checked, paths: &BrowserPaths) -> String {
         "deny",
         "process-exec file-map-executable",
         &[format!("(subpath {run})")],
+    ));
+    t.push_str("; No inet bind or listener, IPv4 or IPv6, TCP or UDP, on any address or port.\n");
+    t.push_str(&rule(
+        "deny",
+        "network-bind network-inbound",
+        &["(local ip \"*:*\")".to_owned()],
     ));
     t.push_str("; No keychain: not its folders, not the services that read it.\n");
     t.push_str(&rule(
@@ -355,6 +334,36 @@ fn write(c: &Checked, paths: &BrowserPaths) -> String {
     ));
     t.push_str("(allow process-info-listpids)\n");
     t
+}
+
+/// The network allows: Unix sockets at the guard's socket and in `ab/`, TCP out to two ports.
+fn network(t: &mut String, c: &Checked, paths: &BrowserPaths) {
+    let guard = quoted(&c.run_dir.join("sock").join(GUARD_SOCKET));
+    let ab = format!("(subpath {})", quoted(&c.run_dir.join("ab")));
+    t.push_str(
+        "\n; Unix sockets: the guard's `sock/guard.sock`, and in ab/ agent-browser's daemon\n",
+    );
+    t.push_str(
+        "; socket and Chrome's singleton socket. No other name in sock/, nothing elsewhere.\n",
+    );
+    let sockets = [format!("(path-literal {guard})"), ab];
+    let bound: Vec<String> = sockets
+        .iter()
+        .map(|s| format!("(local unix-socket {s})"))
+        .collect();
+    t.push_str(&rule("allow", "network-bind", &bound));
+    let mut out: Vec<String> = sockets
+        .iter()
+        .map(|s| format!("(remote unix-socket {s})"))
+        .collect();
+    t.push_str("; TCP over IPv4, out to the proxy's and the host bridge's ports only. Seatbelt\n");
+    t.push_str("; takes only `*` or `localhost` as a host, and `localhost` means any address of\n");
+    t.push_str("; this Mac (measured): the port is what holds. No UDP, no IPv6.\n");
+    for port in [paths.proxy_port, paths.bridge_port] {
+        out.push(format!("(remote tcp4 \"localhost:{port}\")"));
+    }
+    t.push_str(&rule("allow", "network-outbound", &out));
+    t.push_str("; No inet bind and no listener: DevTools leaves Chrome over its pipe.\n");
 }
 
 /// One rule, a filter per line; denies carry the tag.

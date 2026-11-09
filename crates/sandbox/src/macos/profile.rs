@@ -462,14 +462,18 @@ impl Writer {
         self.rule("allow", "file-read-metadata", &[ancestors(&dir)]);
     }
 
+    /// TCP out only: no inet bind or listener, whatever the policy. Seatbelt's `localhost`
+    /// means any address of this Mac (measured), so each rule holds by its port and its
+    /// family: `tcp4` and `tcp6` leave out UDP, which the `ip` forms would let through.
     fn network(&mut self, policy: &Policy) {
         self.note(
-            "\n; Network: the proxy's loopback ports and the browser socket folder only; no DNS.",
+            "\n; Network: TCP out to the proxy's ports on 127.0.0.1 and to the browser socket",
         );
+        self.note("; folder only; no DNS, no UDP, and no inet bind or listener at all.");
         let mut out: Vec<String> = policy
             .proxy_ports()
             .iter()
-            .map(|port| format!("(remote ip \"localhost:{port}\")"))
+            .map(|port| format!("(remote tcp4 \"localhost:{port}\")"))
             .collect();
         let sockets = policy
             .browser_socket_dir()
@@ -477,7 +481,7 @@ impl Writer {
         if let Some(dir) = &sockets {
             out.push(format!("(remote unix-socket (subpath {dir}))"));
         }
-        let local: Vec<String> = match policy.loopback() {
+        let reach: Vec<String> = match policy.loopback() {
             Loopback::None => Vec::new(),
             Loopback::Ports(ports) => ports
                 .iter()
@@ -485,7 +489,10 @@ impl Writer {
                 .collect(),
             Loopback::Any => vec!["localhost:*".to_owned()],
         };
-        out.extend(local.iter().map(|at| format!("(remote ip \"{at}\")")));
+        for at in &reach {
+            out.push(format!("(remote tcp4 \"{at}\")"));
+            out.push(format!("(remote tcp6 \"{at}\")"));
+        }
         self.rule("allow", "network-outbound", &out);
         if let Some(dir) = &sockets {
             self.note("; agent-browser's daemon, in the jail, makes its socket in its folder.");
@@ -494,14 +501,6 @@ impl Writer {
                 "network-bind",
                 &[format!("(local unix-socket (subpath {dir}))")],
             );
-        }
-        if !local.is_empty() {
-            self.note("; The browser's loopback listeners.");
-            let filters: Vec<String> = local
-                .iter()
-                .map(|at| format!("(local ip \"{at}\")"))
-                .collect();
-            self.rule("allow", "network-bind network-inbound", &filters);
         }
     }
 
@@ -565,6 +564,8 @@ fn directory_ancestors(param: &str) -> String {
 
 mod bridge;
 mod names;
+#[cfg(test)]
+mod network_tests;
 mod params;
 #[cfg(test)]
 mod tests;

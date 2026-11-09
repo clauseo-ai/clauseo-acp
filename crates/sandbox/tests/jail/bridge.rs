@@ -11,8 +11,9 @@ use clauseo_sandbox::{BrowserBridge, SeatbeltLauncher};
 use crate::probe;
 use crate::support::{Output, World, launcher, run, sh};
 
-/// The arguments each browser binary is started with.
-const FLAGS: &str = "--no-sandbox --headless";
+/// The arguments each browser binary is started with: `DevTools` over the pipe, as the
+/// browser profile's launcher starts Chrome.
+const FLAGS: &str = "--no-sandbox --headless --remote-debugging-pipe";
 
 /// Reaches the Unix socket `$ARGV[0]` with Perl: `CONNECTED`, or dies naming the error.
 const CONNECT_UNIX: &str = r#"use Socket; socket(S, PF_UNIX, SOCK_STREAM, 0) or die "socket: $!\n"; connect(S, pack_sockaddr_un($ARGV[0])) or die "connect: $!\n"; print "CONNECTED\n""#;
@@ -295,9 +296,11 @@ fn without_a_bridge_the_bundles_are_plain_runtime_paths() {
     assert_eq!(b.map(&l, &lib), "map=ok");
 }
 
-/// A headless shell the agent copies into the matter. The matter allows run (the base allows
-/// running any program) but not map, and the agent profile allows no Chromium Mach name, so
-/// the shell's `bootstrap_check_in` of its port broker fails and it dies at start, with no DOM.
+/// A headless shell the agent copies into the matter, started with its `DevTools` pipe on the
+/// shell's own stdin and stdout and a command waiting there. The matter allows run (the base
+/// allows running any program) but not map, and the agent profile allows no Chromium Mach
+/// name, so the shell's `bootstrap_check_in` of its port broker fails and it dies at start:
+/// no reply on the pipe, no DOM.
 /// The residual: a Chromium modified to run without its rendezvous server would get further;
 /// `native_code_deny` (#810) is what would refuse running it at all.
 #[test]
@@ -313,18 +316,14 @@ fn t9_a_headless_shell_in_the_matter_dies_at_start() {
     let (l, _) = launcher(w.builder().build().unwrap());
     let program = w.at("m1/chs").join(shell.file_name().unwrap());
     let url = format!("file://{}", s(&page));
-    let flags = [
-        "--headless",
-        "--no-sandbox",
-        "--disable-gpu",
-        "--dump-dom",
-        &url,
-    ];
-    let out = run(&l, s(&program), &flags, &w.at("m1"), &[]);
+    let script = r#"printf '{"id":1,"method":"Browser.getVersion"}\0' |
+        "$1" --headless --no-sandbox --disable-gpu --remote-debugging-pipe --dump-dom "$2" \
+        3<&0 4>&1"#;
+    let out = sh(&l, &w.at("m1"), script, &[s(&program), &url]);
     assert_ne!(out.code, Some(0), "{out:#?}");
     assert!(
-        !out.stdout.contains("t9-dom"),
-        "the shell rendered the page: {out:#?}"
+        !out.stdout.contains("\"result\"") && !out.stdout.contains("t9-dom"),
+        "the shell answered or rendered: {out:#?}"
     );
 }
 

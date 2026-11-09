@@ -260,9 +260,10 @@ expression: text
 (allow file-read-metadata
   (path-ancestors (param "BROWSER_SOCKETS")))
 
-; Network: the proxy's loopback ports and the browser socket folder only; no DNS.
+; Network: TCP out to the proxy's ports on 127.0.0.1 and to the browser socket
+; folder only; no DNS, no UDP, and no inet bind or listener at all.
 (allow network-outbound
-  (remote ip "localhost:41234")
+  (remote tcp4 "localhost:41234")
   (remote unix-socket (subpath (param "BROWSER_SOCKETS"))))
 ; agent-browser's daemon, in the jail, makes its socket in its folder.
 (allow network-bind

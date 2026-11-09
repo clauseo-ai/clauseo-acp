@@ -2,6 +2,8 @@
 //! one place an agent process starts.
 
 use std::ffi::OsStr;
+#[cfg(unix)]
+use std::os::fd::{OwnedFd, RawFd};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
@@ -66,6 +68,8 @@ pub struct SpawnOptions {
     #[cfg(target_os = "linux")]
     pub(crate) end_with_parent: bool,
     pub(crate) stdin_grace: Option<Duration>,
+    #[cfg(unix)]
+    pub(crate) fds: Vec<(RawFd, Arc<OwnedFd>)>,
 }
 
 impl SpawnOptions {
@@ -102,6 +106,20 @@ impl SpawnOptions {
             opts
         }
         #[cfg(not(target_os = "linux"))]
+        self
+    }
+
+    /// The child gets `fd` as its descriptor `target` (3 or above), open across its exec, as
+    /// Chrome's `--remote-debugging-pipe` wants its fds 3 and 4. Every other descriptor of this
+    /// process stays closed to the child. This process's copy of `fd` closes when the last
+    /// clone of these options drops: pass it on a clone made for one launch and drop the clone
+    /// after the launch, so the child holds the only copy. A `target` below 3 is ignored.
+    #[cfg(unix)]
+    pub fn pass_fd(mut self, target: RawFd, fd: OwnedFd) -> SpawnOptions {
+        if target > 2 {
+            self.fds.retain(|(t, _)| *t != target);
+            self.fds.push((target, Arc::new(fd)));
+        }
         self
     }
 

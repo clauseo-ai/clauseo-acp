@@ -7,6 +7,8 @@
 pub mod browser;
 #[cfg(target_os = "macos")]
 mod launcher;
+#[cfg(test)]
+mod no_bind;
 mod profile;
 #[cfg(target_os = "macos")]
 mod watch;

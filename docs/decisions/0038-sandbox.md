@@ -157,11 +157,13 @@ folders; read and write deny on hidden paths; again the state folder, notes, cre
 Claude store, runtime and read paths, with their ancestors' metadata; unlink- and create-deny on
 the matter, state and notes folders themselves (literal: a subpath rule matches the folder too, so
 an agent could otherwise remove its folder and leave a link for the next launch); write-deny on
-read-only paths in the state folder; the network. Every deny carries the tag. Network: outbound to
-`localhost:<port>` for each proxy port and nothing else (no DNS: the proxy resolves names), Unix
-sockets in the browser socket folder only, when the host gives one (outbound, and bind for
-agent-browser's daemon; amended 2026-11-03, below), and by
-`Loopback` bind, inbound and outbound on the listed ports or `localhost:*`.
+read-only paths in the state folder; the network. Every deny carries the tag. Network: TCP over
+IPv4 out to `localhost:<port>` for each proxy port and nothing else (no DNS: the proxy resolves
+names), Unix sockets in the browser socket folder only, when the host gives one (outbound, and
+bind for agent-browser's daemon; amended 2026-11-03, below), and by `Loopback` TCP out over IPv4
+and IPv6 to the listed ports or `localhost:*`. No inet bind or listener, whatever the options
+(amended 2026-11-09, J3: before, `Loopback` also allowed bind and inbound, as `ip` rules that
+passed UDP too).
 
 The base is adapted from Codex's `seatbelt_base_policy.sbpl` and platform defaults (commit 1a604d58,
 Apache-2.0, notice kept) but lists system reads instead of Codex's full read access: `/`, `/System`,
@@ -344,9 +346,9 @@ app-bundle Chrome needs LaunchServices (`launchservicesd`, `lsd.mapdb`), `config
 profile refuses a Chrome path with a `.app` name (`BrowserProfileError::AppBundle`).
 
 `BrowserPaths` names the run folder (`<data>/browser-runs/<run>/` with `profile/`, `staging/`,
-`sock/`, `ab/` and `tmp/`), the headless shell's folder, the stack's binaries, the proxy,
-DevTools and stream ports, and the deny roots (the matters, the home's sensitive folders). It
-refuses relative paths, a run folder not directly in `browser-runs`, a run folder that equals,
+`sock/`, `ab/` and `tmp/`), the headless shell's folder, the stack's binaries, the proxy's
+browser port and the host bridge's DevTools port, and the deny roots (the matters, the home's
+sensitive folders). It refuses relative paths, a run folder not directly in `browser-runs`, a run folder that equals,
 holds or sits in a deny root, a binary in a deny root or in the run folder, a path holding a
 quote, backslash or control character (paths are written into the text as strings), and port 0.
 `BrowserLauncher` refuses to start when this process is already sandboxed (`sandbox_check` with
@@ -354,7 +356,34 @@ no operation is not 0: `AlreadySandboxed`), clears the environment, and sets `HO
 to `tmp/` and `MAC_CHROMIUM_TMPDIR` to `ab/` (Chrome reads its temp folder from that variable,
 not `TMPDIR`, and binds its singleton socket there; without it Chrome uses `/var/folders` and
 exits). The flags: `--headless --no-sandbox --disable-gpu --user-data-dir=<run>/profile
---proxy-server=http://127.0.0.1:<proxy>`, and `--remote-debugging-port=<cdp>` for agent-browser.
+--proxy-server=http://127.0.0.1:<proxy>`. Chrome starts through `BrowserLauncher::launch_chrome`,
+which puts `--remote-debugging-pipe` first, drops any `remote-debugging-port` or
+`remote-debugging-address` switch, and gives Chrome a fresh pipe pair at fds 3 (commands in) and
+4 (replies and events out), each message one JSON text ended by a NUL (`macos::browser::pipe`).
+`sandbox-exec` passes fds 3 and 4 through (measured), and the fds reach the child by
+`SpawnOptions::pass_fd` in `clauseo-process`. The caller gets its ends as a `CdpPipe` in a
+`ChromeLaunch`. That caller is stage E's host bridge (J4): it runs outside every jail, launches
+Chrome here and serves the pipe on `127.0.0.1:<bridge_port>`, the one DevTools port
+agent-browser, inside this profile, connects to. The headless shell renders a local page and
+screenshots it driven over the pipe alone (measured, chrome-headless-shell 155). agent-browser's
+stream (`AGENT_BROWSER_STREAM_PORT`) is dropped: its daemon tries `127.0.0.1:<port>`, then
+`127.0.0.1:0`, logs "Stream server failed to start: ... Operation not permitted" and carries on,
+its Unix socket in `ab/` made (measured with agent-browser 0.39.1).
+
+What Seatbelt checks on a socket (measured on macOS 27.2, `sandbox-exec` probes run against
+clients on loopback, the LAN address and the Tailscale address):
+- `network-bind` is checked at `bind()` and `network-inbound` at `listen()`, both against the
+  socket's local address only. `accept()` and `recv()` are not checked: no rule on the remote
+  address (`(remote ip ...)`, `(remote tcp ...)`, deny then allow) refused a connection or a
+  datagram once the listener existed.
+- `localhost`, the only host besides `*` a filter takes, matches any local address: a rule
+  `(local ip "localhost:P")` let a listener bind `0.0.0.0:P`, `[::]:P` and the LAN address on
+  P, and every peer that reached P was accepted. A bind or inbound rule is a port filter. Outbound
+  `localhost` is the same: any address of this Mac, though nothing off it.
+- `ip` forms pass UDP; `tcp4` refused a UDP bind.
+So no rule holds a jailed listener to loopback. Neither profile allows an inet bind or listener
+at all: the browser profile allows binds of Unix sockets only, the agent's profile likewise
+(agent-browser's socket folder), and only outbound TCP otherwise.
 
 The profile is `(deny default)`, an explicit `(deny file-map-executable)`, then allows only:
 - run, read and map of the headless shell's folder and the stack's binaries; read and map of
@@ -373,16 +402,13 @@ The profile is `(deny default)`, an explicit `(deny file-map-executable)`, then 
   only, Chrome's port broker (`bootstrap_check_in ... Permission denied` without the register;
   the helpers hang without the lookup). No other Mach service;
 - Unix sockets: bind and connect at `sock/guard.sock` and under `ab/` (agent-browser's daemon,
-  Chrome's singleton); TCP over IPv4 loopback (`tcp4 "localhost:<port>"`: Seatbelt takes only `*`
-  or `localhost` as a host) out to the three ports, and bind and inbound on the DevTools and
-  stream ports. No UDP, no IPv6, no other port. Not loopback only, though: Seatbelt's
-  `localhost` matches every address of the Mac for a bind, and `network-inbound` is checked at
-  `listen` by the local address alone, so a bind of `0.0.0.0` on those two ports passes
-  (measured; a jail test pins it).
+  Chrome's singleton); TCP over IPv4 (`tcp4 "localhost:<port>"`) out to the proxy's and the
+  bridge's ports only. No inet bind or listener, no UDP, no IPv6, no other port.
 The last rules are denies, with no allow after them: no run or map of anything in the run
 folder (the agent writes `staging/`), no keychain (folders and services, as in the jail), no GPU
 or IOSurface user client (Chrome draws with SwiftShader), no window server or `CARenderServer`,
-no `nvram`, no `iokit-get-properties`, and no `process-info*` on a process outside the sandbox
+no `nvram`, no `iokit-get-properties`, no inet bind or inbound on any address or port
+(`(local ip "*:*")`), and no `process-info*` on a process outside the sandbox
 (#811's rule; `(deny default)` does not refuse it, so a renderer exploit could read every
 process's arguments), with `process-info-listpids` allowed back right after, numbers only, as
 #811 does: the guard finds Chrome's children by listing pids and reading each one's parent
@@ -390,11 +416,15 @@ process's arguments), with `process-info-listpids` allowed back right after, num
 The jail tests run under it: matters, the home, `.ssh` and other state refused for read and
 write; the keychain refused; the window server, `lsd.mapdb`, `configd` and an unknown name
 refused, the port broker's name passed; an outside process's arguments and info refused, the
-pid list and a sibling's arguments and parent read; only the three ports reachable; IPv6 and
-other-port binds refused; the ancestors `lstat` but do not list; a binary or library dropped in
-the run folder neither runs nor maps; no socket bound in `sock/` but `guard.sock`; the
-outermost refusal; and the headless shell's screenshot of a local page (skipped when none is on
-the machine).
+pid list and a sibling's arguments and parent read; only the proxy's and bridge's ports reachable;
+every inet bind refused with EPERM (TCP and UDP; `127.0.0.1`, `0.0.0.0`, `[::]` and `[::1]`; port 0
+and fixed ports); a Unix listener in `ab/` binds, accepts and connects; the ancestors `lstat`
+but do not list; a binary or library dropped in the run folder neither runs nor maps; no socket bound in `sock/` but `guard.sock`; the
+outermost refusal; Chrome's pipe at fds 3 and 4 with the pipe flag and no port flag (a
+stand-in); the headless shell's render and screenshot of a local page over the pipe (skipped when
+none is on the machine); and agent-browser's daemon up without its stream server (skipped when it
+is not installed). Unit tests pin the pipe framing, the arguments, and that no allow of either
+profile, under any combination of the builder's options, opens an inet bind or listener.
 
 The guard's marker (D3): `sandbox_check(pid, "file-write-data", SANDBOX_FILTER_PATH |
 SANDBOX_CHECK_NO_REPORT, path)` answers 0 for a write under `<data>/browser-runs/` only under this
@@ -412,7 +442,7 @@ each write-denied folder (`<data>/browser-pins`: the signed list, the install re
 write, run or map anywhere in `<data>/browser-runs/` and no read there but the run's staging, its
 ancestors and the socket (`require-not`, so the exceptions survive with no allow after the
 denies). The builder refuses, while a bridge is set: `Loopback::Any`, a loopback or proxy port
-that is the browser's `DevTools` or stream port, a browser socket folder, a runtime path in a
+that is the bridge's DevTools port, a browser socket folder, a runtime path in a
 bundle, and a bundle or write-denied folder that meets a path the agent writes (planted code
 there would run outside the jail). With a bridge or without, no run or map of an installed browser
 (`INSTALLED_BROWSERS`: Chrome and its channels, Chromium, Edge and its channels, Brave, Vivaldi,
@@ -435,12 +465,11 @@ Residual risks:
 - The profile lets the stack write its whole run folder, downloads included, not only
   `staging/`: the bridge reads only from `staging/`, so nothing else reaches the agent, and no
   downloads-only rule is needed.
-- The `DevTools` and stream ports can be bound on every address, not only loopback (above). A
-  compromised renderer could take one with `SO_REUSEADDR` and listen there for a peer on the
-  local network: an inbound channel to the browser stack, which reads nothing of the lawyer's.
-  The application firewall may block it; no Seatbelt rule can. Closing it means no TCP listener
-  in the stack (DevTools over `--remote-debugging-pipe`, the stream over a Unix socket in
-  `ab/`), stage E's to decide.
+- The bridge's DevTools port is reached by `tcp4 "localhost:<port>"`, which matches any address
+  of this Mac: a listener another program holds on that port on the LAN address would be reached
+  too. Outbound only, and only to this Mac; the bridge binds `127.0.0.1` explicitly.
+- agent-browser's stream (screencast and input) is gone with its listener; nothing in the repo
+  read it.
 - Seatbelt's regex: `#"^[A-Za-z0-9.-]+\.MachPortRendezvousServer\.[0-9]+$"` as a `global-name-regex`
   matched every Mach service on this Mac (logd, SecurityServer). The rule uses the exact name.
 

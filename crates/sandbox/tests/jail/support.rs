@@ -99,6 +99,14 @@ impl World {
         path
     }
 
+    /// A file at `rel` holding `text`, executable.
+    pub(crate) fn executable(&self, rel: &str, text: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path = self.file(rel, text);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
     /// A shell script at `rel` with `body` after its `#!/bin/sh` line, executable.
     pub(crate) fn script(&self, rel: &str, body: &str) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;

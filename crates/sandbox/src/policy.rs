@@ -82,15 +82,21 @@ pub(crate) fn instruction_file(matter: &Path, path: &Path) -> bool {
             .is_some_and(|name| name.eq_ignore_ascii_case(INSTRUCTIONS_AT_ANY_DEPTH))
 }
 
-/// The browser's loopback reach (agent-browser's and Chrome's CDP ports).
+/// The agent's TCP reach to local listeners beyond the proxy ports: connect only, over IPv4
+/// and IPv6. No variant lets the agent bind or listen on an inet socket: Seatbelt checks a bind
+/// and a listen by the local port alone (its `localhost` matches any address of the Mac), so
+/// no rule could hold a jailed listener to loopback (0038). The browser no longer uses it: its
+/// stack runs outside the jail, reached through the guard's socket.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Loopback {
-    /// No loopback beyond the proxy ports.
+    /// No local listener beyond the proxy ports.
     #[default]
     None,
-    /// These loopback ports, with bind and inbound on localhost. Sorted and de-duplicated.
+    /// These ports, connect only. Seatbelt's `localhost` also matches the Mac's other
+    /// addresses, so a listener on one of them on a listed port is reached too. Sorted and
+    /// de-duplicated.
     Ports(Vec<u16>),
-    /// Any loopback port. Also reaches other loopback services and other launches' proxies,
+    /// Any port, connect only. Also reaches other local services and other launches' proxies,
     /// which refuse a request without their token (S16).
     Any,
 }
@@ -479,7 +485,7 @@ impl PolicyBuilder {
         self
     }
 
-    /// The browser's loopback reach; [`Loopback::None`] unless set.
+    /// The agent's connect-only reach to local listeners; [`Loopback::None`] unless set.
     pub fn loopback(mut self, loopback: Loopback) -> PolicyBuilder {
         self.loopback = loopback;
         self

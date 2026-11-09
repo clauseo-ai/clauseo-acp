@@ -284,6 +284,8 @@ crates/reducer_bench/benches/apply.rs linux::fail clippy::panic
 # folder), the tests' Windows exit watch, and the pipe test that launches with SIGTERM ignored.
 crates/process/src/os/windows.rs - unsafe_code
 crates/process/src/os/linux/death.rs - unsafe_code
+# J3: the descriptors a child gets at fixed numbers (Chrome's DevTools pipe), set before exec.
+crates/process/src/os/unix/inherit.rs - unsafe_code
 # Its macOS descendant listing: libproc's proc_listchildpids, proc_pidinfo and proc_pidpath.
 crates/process/src/os/macos.rs - unsafe_code
 crates/process/tests/pipes/shutdown.rs launch_ignoring_sigterm unsafe_code

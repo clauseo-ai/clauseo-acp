@@ -10,6 +10,9 @@
 //!   found; 1100, `BOOTSTRAP_NOT_PRIVILEGED`, when the profile refuses it).
 //! - `bind <path>`: binds a Unix socket there, or names the error.
 //! - `tcp-bind <address>`: binds a TCP listener there, or names the error.
+//! - `udp-bind <address>`: binds a UDP socket there, or names the error.
+//! - `unix-loop <path>`: binds a Unix listener there, connects to it, accepts, and sends a byte
+//!   each way: `ok`, or the step that failed and its error.
 //! - `procargs <pid>`: reads the process's arguments (`KERN_PROCARGS2`), or names the error.
 //! - `listpids`: lists every pid (`proc_listallpids`), or names the error.
 //! - `ppid <pid>`: the process's parent (`proc_pidinfo`, `PROC_PIDTBSDINFO`), or the error.
@@ -64,6 +67,11 @@ fn probe() {
             Ok(_) => println!("PROBE tcp-bind=ok"),
             Err(error) => println!("PROBE tcp-bind={error}"),
         },
+        "udp-bind" => match std::net::UdpSocket::bind(std::env::var(ARG1).unwrap_or_default()) {
+            Ok(_) => println!("PROBE udp-bind=ok"),
+            Err(error) => println!("PROBE udp-bind={error}"),
+        },
+        "unix-loop" => println!("PROBE unix-loop={}", unix_loop(&arg(ARG1))),
         "procargs" | "listpids" | "ppid" => {
             println!("PROBE {mode}={}", inspect(&mode, &arg(ARG1)));
         }
@@ -77,6 +85,36 @@ fn probe() {
             Err(error) => println!("PROBE readdir={error}"),
         },
         other => println!("PROBE unknown mode {other}"),
+    }
+}
+
+/// A Unix listener at `path`, a connect to it, the accept, and a byte each way.
+fn unix_loop(path: &Path) -> String {
+    use std::io::{Read as _, Write as _};
+    use std::os::unix::net::{UnixListener, UnixStream};
+    let step = |what: &str, error: std::io::Error| format!("{what}: {error}");
+    let listener = match UnixListener::bind(path) {
+        Ok(listener) => listener,
+        Err(error) => return step("bind", error),
+    };
+    let mut client = match UnixStream::connect(path) {
+        Ok(client) => client,
+        Err(error) => return step("connect", error),
+    };
+    let mut served = match listener.accept() {
+        Ok((served, _)) => served,
+        Err(error) => return step("accept", error),
+    };
+    let mut byte = [0_u8; 1];
+    let carried = client
+        .write_all(b"a")
+        .and_then(|()| served.read_exact(&mut byte))
+        .and_then(|()| served.write_all(b"b"))
+        .and_then(|()| client.read_exact(&mut byte));
+    match carried {
+        Ok(()) if byte == *b"b" => "ok".to_owned(),
+        Ok(()) => format!("read {byte:?}"),
+        Err(error) => step("io", error),
     }
 }
 

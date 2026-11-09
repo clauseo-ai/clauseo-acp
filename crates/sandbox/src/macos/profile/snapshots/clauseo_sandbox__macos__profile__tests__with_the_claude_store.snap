@@ -277,12 +277,11 @@ expression: w.render(&policy)
   (literal (param "STATE"))
   (with message "clauseo-4242-7"))
 
-; Network: the proxy's loopback ports and the browser socket folder only; no DNS.
+; Network: TCP out to the proxy's ports on 127.0.0.1 and to the browser socket
+; folder only; no DNS, no UDP, and no inet bind or listener at all.
 (allow network-outbound
-  (remote ip "localhost:*"))
-; The browser's loopback listeners.
-(allow network-bind network-inbound
-  (local ip "localhost:*"))
+  (remote tcp4 "localhost:*")
+  (remote tcp6 "localhost:*"))
 
 ; The browser's last rules: denies only.
 ; Installed browsers: not run or mapped as code (read stays; 0038, T9).

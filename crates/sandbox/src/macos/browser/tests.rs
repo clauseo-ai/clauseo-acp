@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use super::*;
+use crate::macos::no_bind::inet_binds;
 use crate::test_support::TempDir;
 
 /// A data dir with one run folder, a stand-in headless shell's folder and Chrome app, a guard
@@ -38,8 +39,7 @@ impl World {
             chrome_bundle: self.at("chs"),
             exec_bins: vec![self.at("bin/guard")],
             proxy_port: 41_001,
-            cdp_port: 41_002,
-            stream_port: 41_003,
+            bridge_port: 41_002,
             deny_roots: vec![self.at("matter"), self.at("home/.ssh"), self.at("other")],
         }
     }
@@ -137,20 +137,29 @@ fn code_runs_only_from_the_bundle_the_binaries_and_the_system() {
 }
 
 #[test]
-fn the_network_is_three_loopback_ports_over_ipv4_the_guard_socket_and_ab() {
+fn the_network_is_two_ports_out_over_ipv4_the_guard_socket_and_ab() {
     let w = World::new("browser-net");
     let text = profile(&w.paths()).unwrap();
-    for port in [41_001, 41_002, 41_003] {
-        assert!(text.contains(&format!("(remote tcp4 \"localhost:{port}\")")));
+    let out = rules(&text)
+        .into_iter()
+        .find(|r| r.starts_with("(allow network-outbound"))
+        .unwrap();
+    for port in [41_001, 41_002] {
+        assert!(
+            out.contains(&format!("(remote tcp4 \"localhost:{port}\")")),
+            "{out}"
+        );
     }
-    assert!(
-        !text.contains("(local tcp4 \"localhost:41001\")"),
-        "binds the proxy port"
-    );
-    for port in [41_002, 41_003] {
-        assert!(text.contains(&format!("(local tcp4 \"localhost:{port}\")")));
-    }
-    for wide in ["localhost:*", "*:", "(remote ip", "(local ip", "udp", "ip6"] {
+    assert_eq!(out.matches("(remote tcp4").count(), 2, "{out}");
+    for wide in [
+        "localhost:*",
+        "(remote ip",
+        "(local ip4",
+        "(local tcp",
+        "udp",
+        "ip6",
+        "tcp6",
+    ] {
         assert!(!text.contains(wide), "{wide}");
     }
     let run = dunce::canonicalize(w.at("data/browser-runs/r1")).unwrap();
@@ -166,6 +175,75 @@ fn the_network_is_three_loopback_ports_over_ipv4_the_guard_socket_and_ab() {
         assert!(line.contains(&sock) || line.contains(&ab), "{line}");
     }
     assert_eq!(sockets.len(), 4, "{sockets:?}");
+}
+
+/// No allow opens an inet bind or listener, whatever the ports and binaries: the only bind
+/// allowed is a Unix socket's, and no `network-inbound` is allowed at all. The profile ends its
+/// denies with an inet bind and inbound deny of every address and port.
+#[test]
+fn no_allow_binds_or_listens_on_an_inet_socket() {
+    let w = World::new("browser-nobind");
+    w.dir.file("bin/agent-browser", "");
+    let mut variants = Vec::new();
+    for (proxy, bridge) in [(41_001, 41_002), (1, 65_535), (9_222, 9_223)] {
+        for bins in [vec![], vec![w.at("bin/guard")], vec![w.at("bin")]] {
+            let mut paths = w.paths();
+            paths.proxy_port = proxy;
+            paths.bridge_port = bridge;
+            paths.exec_bins = bins;
+            variants.push(paths);
+        }
+    }
+    for paths in &variants {
+        let text = profile(paths).unwrap();
+        let all = rules(&text);
+        assert_eq!(inet_binds(&all), Vec::<String>::new());
+        assert!(!text.contains("(allow network-inbound"), "{text}");
+        assert!(
+            text.contains(&format!(
+                "(deny network-bind network-inbound\n  (local ip \"*:*\")\n  \
+                 (with message \"{TAG}\"))"
+            )),
+            "{text}"
+        );
+    }
+}
+
+/// The launcher starts Chrome with `--remote-debugging-pipe`, first, and drops every
+/// `--remote-debugging-port` and `--remote-debugging-address`, in any spelling Chrome takes.
+#[cfg(target_os = "macos")]
+#[test]
+fn chrome_gets_the_pipe_flag_and_no_debugging_port() {
+    use std::ffi::OsString;
+
+    let args: Vec<OsString> = [
+        "--headless",
+        "--remote-debugging-port=9222",
+        "-remote-debugging-port=9223",
+        "--remote-debugging-port",
+        "--remote-debugging-address=0.0.0.0",
+        "--remote-debugging-pipe",
+        "--remote-debugging-pipe=cbor",
+        "--remote-debugging-portal",
+        "about:blank",
+    ]
+    .map(OsString::from)
+    .to_vec();
+    let got = chrome_args(&args);
+    assert_eq!(
+        got,
+        [
+            "--remote-debugging-pipe",
+            "--headless",
+            "--remote-debugging-portal",
+            "about:blank"
+        ]
+        .map(OsString::from)
+    );
+    assert_eq!(
+        chrome_args(&[]),
+        [OsString::from("--remote-debugging-pipe")]
+    );
 }
 
 #[test]
@@ -244,7 +322,9 @@ fn bad_paths_are_refused() {
     assert!(matches!(e, BrowserProfileError::InRunFolder { .. }), "{e}");
     let e = refused(&w, |p| p.run_dir = w.at("data/browser-runs/q\"uote"));
     assert!(matches!(e, BrowserProfileError::Unquotable { .. }), "{e}");
-    let e = refused(&w, |p| p.stream_port = 0);
+    let e = refused(&w, |p| p.bridge_port = 0);
+    assert!(matches!(e, BrowserProfileError::ZeroPort(_)), "{e}");
+    let e = refused(&w, |p| p.proxy_port = 0);
     assert!(matches!(e, BrowserProfileError::ZeroPort(_)), "{e}");
 }
 

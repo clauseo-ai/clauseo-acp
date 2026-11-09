@@ -29,7 +29,8 @@
 //!   variables set on top of the inherited environment, and an absolute working folder.
 //! - [`Launcher`] (`host` holds an `Arc<dyn Launcher>`) and [`PassthroughLauncher`], which calls
 //!   [`spawn_in_tree`] with the spec unchanged and its [`SpawnOptions`] (the home folder for
-//!   redaction, [`SpawnOptions::clear_env`] so the child gets only the spec's variables, and on
+//!   redaction, [`SpawnOptions::clear_env`] so the child gets only the spec's variables, on Unix
+//!   `SpawnOptions::pass_fd` for a descriptor at a fixed number (Chrome's `DevTools` pipe), and on
 //!   Windows extra creation flags). By default the child inherits this process's environment.
 //!   [`SpawnOptions::stdin_grace`] sets the shutdown's first wait (2 s by default).
 //! - [`Launched`]: [`AgentStdin`] (an `AsyncWrite` the handle can close), the agent's stdout, the
@@ -86,7 +87,8 @@
 //!
 //! `protocol` (`ErrorCode`, `DetachReason`), `async-process`, `async-io` (the real timer),
 //! `futures`, `memchr` (line ends in the stderr pump), `thiserror`; `nix` on Unix (`signal`),
-//! `libc` on macOS (libproc) and `windows` on Windows. Never `tauri` or `tokio`.
+//! `libc` on Unix (passed descriptors; libproc on macOS) and `windows` on Windows. Never `tauri`
+//! or `tokio`.
 //!
 //! # Start reading
 //!
