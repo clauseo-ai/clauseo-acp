@@ -168,3 +168,68 @@ fn a_folder_with_no_codex_reads_no_state() {
     let outcomes = apply(&[(vendor, "00")], || panic!("SAC's state was read"));
     assert_eq!(outcomes, []);
 }
+
+/// What a test's subscriber wrote.
+#[derive(Clone, Default)]
+struct Lines(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for Lines {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn the_lifecycle_target_is_one_host_log_keeps() {
+    assert!(LIFECYCLE.starts_with("clauseo_") && LIFECYCLE.ends_with("::lifecycle"));
+}
+
+/// Each run of the step on a folder with Codex's layout writes one line on the lifecycle target
+/// with SAC's kind and the action, and never a path or a hash; a folder with none writes none.
+#[test]
+fn each_step_logs_its_state_and_action_on_the_lifecycle_target() {
+    let (dir, vendor) = install();
+    let pin = sha(RG_BYTES);
+    let other = sha(b"the pinned ripgrep");
+    let agent = AgentId::new("codex-acp").unwrap();
+    let none = TestDir::new("sac-log-none");
+    let runs: [(SacState, &str, &str); 7] = [
+        (SacState::Off, &pin, "sac=off action=kept"),
+        (SacState::On, &other, "sac=on action=left"),
+        (SacState::On, &pin, "sac=on action=moved"),
+        (SacState::On, &pin, "sac=on action=none"),
+        (SacState::Unknown(None), &pin, "sac=unknown action=none"),
+        (SacState::Evaluation, &pin, "sac=evaluation action=restored"),
+        (SacState::Evaluation, &pin, "sac=evaluation action=kept"),
+    ];
+    let lines = Lines::default();
+    let writer = lines.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(move || writer.clone())
+        .with_ansi(false)
+        .finish();
+    tracing::subscriber::with_default(subscriber, || {
+        for (state, pin, _) in &runs {
+            step(&agent, &[(vendor.clone(), *pin)], || *state);
+        }
+        step(&agent, &[(rel(&none.0, VENDOR), &pin)], || SacState::On);
+    });
+    let text = String::from_utf8(lines.0.lock().unwrap().clone()).unwrap();
+    let ours: Vec<&str> = text
+        .lines()
+        .filter(|line| line.contains("clauseo_agents::lifecycle"))
+        .collect();
+    assert_eq!(ours.len(), runs.len(), "{text}");
+    for (line, (_, _, want)) in ours.iter().zip(&runs) {
+        assert!(line.contains(want), "{line} lacks {want}");
+        assert!(line.contains("codex-acp"), "{line}");
+        for secret in [&pin, &other, &dir.0.display().to_string()] {
+            assert!(!line.contains(secret.as_str()), "{line}");
+        }
+        assert!(!line.contains("codex-path"), "{line}");
+    }
+}
