@@ -173,4 +173,14 @@ fn a_slow_quick_check_shows_checking_then_the_sign_in_flow() {
         Some(SigninState::Waiting { .. })
     ));
     agents.cancel_sign_in(&claude()).unwrap();
+    // The login (`never`) parks for good: the test ends only once the cancel has killed it, so
+    // no login child outlives the test process.
+    #[cfg(target_os = "linux")]
+    {
+        let login = fx.runs_of("login").pop().unwrap();
+        assert!(
+            crate::support::gone(login.pid),
+            "the login outlived its cancel"
+        );
+    }
 }

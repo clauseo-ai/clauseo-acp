@@ -13,9 +13,8 @@
 //! - The layout under `<data_dir>/agents`: `runtime/node-v<version>-<os>-<arch>/` (a downloaded
 //!   Node), `<id>/install/<hash>/` (`package.json`, `package-lock.json`, `node_modules/`,
 //!   `clauseo-receipt.json`), `downloads/` (files named by digest), `npm-cache/`, `npmrc`,
-//!   `npmrc-global` and `.lock`. `<id>/home/`, `<id>/detect-scratch/` and `signin/` are S18's.
-//!   `limits` writes `clauseo-claude-usage.mjs` into Claude's install folder; nothing here
-//!   touches it.
+//!   `npmrc-global` and `.lock`. `<id>/home/` and `signin/` are S18's. `limits` writes
+//!   `clauseo-claude-usage.mjs` into Claude's install folder; nothing here touches it.
 //! - The pinned Python runtime (`python.rs`): Clauseo's archive for this platform (none on
 //!   Linux, and none anywhere until the archives are published), checked by SHA-256 and
 //!   unpacked read-only on Unix under `runtime/<archive stem>/` with a manifest and a receipt,
@@ -44,11 +43,12 @@
 //!   macOS and Linux (`signin/shim.rs`); Codex's flow (`signin/codex.rs`: the port 1455 probe
 //!   and "Try again", hidden `login` or `login --device-auth` with the device code read
 //!   strictly from its output, `login status` polled, the account from `app-server`'s
-//!   `account/read`, sign-out); detection of the lawyer's own login (`signin/detect.rs`, Claude's
-//!   run in a throwaway config folder, `signin/scratch.rs`; it never writes the lawyer's), the
+//!   `account/read`, sign-out); detection of the lawyer's own login (`signin/detect.rs`, a stat
+//!   of each agent's login file that starts no CLI and never writes the lawyer's), the
 //!   status check and the lawyer's choices about it (`signin/found.rs`), Clauseo's `login-source`
 //!   and `no-reuse` markers (`signin/marker.rs`), and Codex's hard link, guard and split check
-//!   (`signin/reuse.rs`, the one file that may name Codex's login file, and never opens it).
+//!   (`signin/reuse.rs`, the one file that may name the agents' login files, and never opens
+//!   them).
 //!
 //! # Interface
 //!
@@ -95,8 +95,9 @@
 //!   Installs run one after another, and a paused install sends nothing after its `Paused`.
 //! - Nothing runs while the app is idle once installs are done.
 //! - An API key lives only in the OS keychain: never in a file, a log, a `Debug` or an error.
-//! - Clauseo never opens or reads an agent's credential, and no file under `src` names one
-//!   outside a comment (`tests/credential_names.rs`). Emails and plans come only from the
+//! - Clauseo never opens or reads an agent's credential, and no file under `src` but
+//!   `signin/reuse.rs` (detection's stats) names one outside a comment
+//!   (`tests/credential_names.rs`). Emails and plans come only from the
 //!   vendors' own status output. A pasted code is zeroed once written and never logged.
 //! - No `auth logout` or `codex logout` runs while the source is `Reused`, and no Codex `login`
 //!   or `logout` while the home's login file is the lawyer's (same file id). Reuse starts only

@@ -327,6 +327,11 @@ fn codex_runs_but_detection_get_clauseo_s_home_and_claude_runs_never() {
         br#"{"authMethod":"claude.ai"}"#,
     )
     .unwrap();
+    // Claude's detection stats its stand-in credential file.
+    let claude_login = fx
+        .user_home()
+        .join(concat!(".claude/.credentials", ".json"));
+    write_file(&claude_login, b"{}").unwrap();
     let (agents, events) = start(&fx);
     reuse(&agents, &events);
     drop(agents);

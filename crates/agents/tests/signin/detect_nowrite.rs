@@ -1,12 +1,14 @@
-//! Detection never writes into the lawyer's own Claude or Codex config: every file under
-//! `~/.claude`, `~/.claude.json` and `~/.codex` (path, kind, size, mtime and a SHA-256 of the
-//! contents) is the same after a status check that detects as before it, and nothing appears.
-//! The fake CLIs write what the real ones do on any run (`fake_agent`'s `first_meet`: Claude's
-//! global config and its backup, Codex's `tmp/arg0`), so a detection run on the lawyer's
-//! folders fails this. Each agent is checked signed out and with a stand-in login (the fake's
-//! marker for Claude, a dummy `auth.json` for Codex; never a real credential).
+//! Detection never writes into the lawyer's own Claude or Codex config and starts no CLI: every
+//! entry under `~/.claude`, `~/.claude.json` and `~/.codex` (path, kind, size, mtime and a
+//! SHA-256 of the contents) is the same after a status check that detects as before it, nothing
+//! appears, and no run started with the lawyer's folders (every run of the check is in Clauseo's
+//! own home). The fake CLIs write what the real ones do on any run (`fake_agent`'s
+//! `first_meet`: Claude's global config and its backup, Codex's `tmp/arg0`), so a detection run
+//! on the lawyer's folders fails this. Each agent is checked signed out and with a stand-in
+//! login file (never a real credential).
 
 use std::collections::BTreeMap;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -16,6 +18,11 @@ use clauseo_protocol::AgentId;
 use sha2::{Digest, Sha256};
 
 use crate::support::{Fixture, claude, codex};
+
+/// Claude's stand-in credential file, under the lawyer's home.
+const CLAUDE_LOGIN: &str = concat!(".claude/.credentials", ".json");
+/// Codex's stand-in login file, under the lawyer's home.
+const CODEX_LOGIN: &str = ".codex/auth.json";
 
 /// One entry of a snapshot: kind, size, mtime and, for a file, its contents' SHA-256.
 type Entry = (&'static str, u64, Option<SystemTime>, Option<Vec<u8>>);
@@ -53,8 +60,9 @@ fn snapshot(fx: &Fixture) -> BTreeMap<PathBuf, Entry> {
     all
 }
 
-/// Runs the status check for `agent` (Clauseo signed in to nothing, so it detects) and checks
-/// that the lawyer's config is as it was, then gives the state.
+/// Runs the status check for `agent` (Clauseo signed in to nothing, so it detects), checks that
+/// the lawyer's config is as it was and that every run started had Clauseo's own home (so none
+/// was detection's), then gives the state.
 fn detect_unchanged(fx: &Fixture, agent: &AgentId) -> SigninState {
     let before = snapshot(fx);
     let (agents, events) = fx.start_for(agent.clone());
@@ -70,18 +78,25 @@ fn detect_unchanged(fx: &Fixture, agent: &AgentId) -> SigninState {
         !fx.user_home().join(".codex/tmp").exists(),
         "a Codex run wrote ~/.codex/tmp"
     );
-    // Claude's run's own config folder is gone after it.
-    let scratch = fx.marker(&claude(), "detect-scratch");
-    let left = std::fs::read_dir(&scratch).map_or(0, Iterator::count);
-    assert_eq!(left, 0, "a detection folder was left in {scratch:?}");
+    let home = fx.config.signin.homes[agent].clone().into_os_string();
+    let var = if *agent == claude() {
+        "CLAUDE_CONFIG_DIR"
+    } else {
+        "CODEX_HOME"
+    };
+    let runs = fx.launches();
+    assert!(
+        runs.iter()
+            .all(|run| run.env.get(OsStr::new(var)) == Some(&home)),
+        "a run did not have Clauseo's own home: {runs:?}"
+    );
+    // The one run is Clauseo's own status, signed out (a definite answer, so not asked again).
+    assert_eq!(runs.len(), 1, "{runs:?}");
     state
 }
 
-fn claude_found() -> SigninState {
-    SigninState::LoginFound {
-        from: LoginFrom::ClaudeCode,
-        email: None,
-    }
+fn found(from: LoginFrom) -> SigninState {
+    SigninState::LoginFound { from, email: None }
 }
 
 fn no_login() -> SigninState {
@@ -90,15 +105,8 @@ fn no_login() -> SigninState {
     }
 }
 
-fn codex_found() -> SigninState {
-    SigninState::LoginFound {
-        from: LoginFrom::Codex,
-        email: None,
-    }
-}
-
 #[test]
-fn claude_detection_signed_out_writes_nothing_in_the_lawyer_s_home() {
+fn claude_detection_signed_out_writes_nothing_and_starts_no_run() {
     let fx = Fixture::new("nowrite-claude-out", "ok-after:0");
     assert_eq!(detect_unchanged(&fx, &claude()), no_login());
     assert!(!fx.user_home().join(".claude.json").exists());
@@ -106,9 +114,10 @@ fn claude_detection_signed_out_writes_nothing_in_the_lawyer_s_home() {
 }
 
 #[test]
-fn claude_detection_with_a_login_writes_nothing_in_the_lawyer_s_home() {
+fn claude_detection_with_a_login_writes_nothing_and_starts_no_run() {
     let fx = Fixture::new("nowrite-claude-in", "ok-after:0");
     let home = fx.user_home();
+    write_file(&home.join(CLAUDE_LOGIN), b"{}").unwrap();
     write_file(
         &home.join(".claude/fake-signin-marker"),
         br#"{"authMethod":"claude.ai","email":"lawyer@example.com"}"#,
@@ -116,49 +125,39 @@ fn claude_detection_with_a_login_writes_nothing_in_the_lawyer_s_home() {
     .unwrap();
     write_file(&home.join(".claude.json"), br#"{"numStartups":3}"#).unwrap();
     write_file(&home.join(".claude/settings.json"), br#"{"theme":"dark"}"#).unwrap();
-    assert_eq!(detect_unchanged(&fx, &claude()), claude_found());
+    assert_eq!(
+        detect_unchanged(&fx, &claude()),
+        found(LoginFrom::ClaudeCode)
+    );
 }
 
 #[test]
-fn codex_detection_signed_out_writes_nothing_in_the_lawyer_s_home() {
+fn codex_detection_signed_out_writes_nothing_and_starts_no_run() {
     let fx = Fixture::new("nowrite-codex-out", "ok-after:0");
     assert_eq!(detect_unchanged(&fx, &codex()), no_login());
     assert!(!fx.user_home().join(".codex").exists());
 }
 
 #[test]
-fn codex_detection_with_a_login_file_writes_nothing_in_the_lawyer_s_home() {
+fn codex_detection_with_a_login_file_writes_nothing_and_starts_no_run() {
     let fx = Fixture::new("nowrite-codex-in", "ok-after:0");
-    write_file(&fx.user_home().join(".codex/auth.json"), b"{}").unwrap();
+    write_file(&fx.user_home().join(CODEX_LOGIN), b"{}").unwrap();
     write_file(&fx.user_home().join(".codex/config.toml"), b"").unwrap();
-    assert_eq!(detect_unchanged(&fx, &codex()), codex_found());
-    // No Codex process was started on the lawyer's folder: every run had Clauseo's home.
-    for run in fx.launches() {
-        assert!(
-            run.env.contains_key(std::ffi::OsStr::new("CODEX_HOME")),
-            "{:?}",
-            run.args
-        );
-    }
+    assert_eq!(detect_unchanged(&fx, &codex()), found(LoginFrom::Codex));
 }
 
-/// Detection never opens the lawyer's `~/.claude.json` or `~/.claude/settings.json` (they can
-/// hold a key): with both made unreadable (mode 0), Claude's detection still finds the login,
-/// with no email, and neither file's mode, size or mtime changes. That Clauseo's code never
-/// names either file is `tests/credential_names.rs`'s scan; that the real CLI does not open them
-/// under detection's environment was checked with `strace` (the PR's evidence).
+/// Detection never opens the lawyer's files: with Claude's credential file, its global config
+/// and its settings all unreadable (mode 0), detection still finds the login (a stat needs no
+/// read), and no file's mode, size or mtime changes. That Clauseo's code names none of them but
+/// the credential file, and that only in `reuse.rs`, is `tests/credential_names.rs`'s scan.
 #[cfg(unix)]
 #[test]
-fn claude_detection_opens_neither_the_global_config_nor_the_settings() {
+fn claude_detection_opens_none_of_the_lawyer_s_files() {
     use std::os::unix::fs::PermissionsExt as _;
     let fx = Fixture::new("nowrite-claude-unreadable", "ok-after:0");
     let home = fx.user_home();
-    write_file(
-        &home.join(".claude/fake-signin-marker"),
-        br#"{"authMethod":"claude.ai","email":"lawyer@example.com"}"#,
-    )
-    .unwrap();
     let files = [
+        home.join(CLAUDE_LOGIN),
         home.join(".claude.json"),
         home.join(".claude/settings.json"),
     ];
@@ -177,42 +176,58 @@ fn claude_detection_opens_neither_the_global_config_nor_the_settings() {
         })
     };
     let before = seen();
-    assert_eq!(detect_unchanged(&fx, &claude()), claude_found());
+    assert_eq!(
+        detect_unchanged(&fx, &claude()),
+        found(LoginFrom::ClaudeCode)
+    );
     assert_eq!(seen(), before);
     for file in &files {
         clauseo_agents::testing::set_mode(file, 0o600).unwrap();
     }
 }
 
-/// A link standing at `~/.codex/auth.json` is no login found: only a regular file is.
+/// A link standing at either agent's login file is no login found: only a regular file is.
 #[cfg(unix)]
 #[test]
-fn a_link_at_codex_s_login_file_is_no_login_found() {
-    let fx = Fixture::new("nowrite-codex-link", "ok-after:0");
-    let target = fx.data.path().join("elsewhere.json");
-    write_file(&target, b"{}").unwrap();
-    write_file(&fx.user_home().join(".codex/config.toml"), b"").unwrap();
-    clauseo_agents::testing::symlink(&target, &fx.user_home().join(".codex/auth.json")).unwrap();
-    assert_eq!(detect_unchanged(&fx, &codex()), no_login());
+fn a_link_at_a_login_file_is_no_login_found() {
+    for (agent, login) in [(claude(), CLAUDE_LOGIN), (codex(), CODEX_LOGIN)] {
+        let fx = Fixture::new("nowrite-link", "ok-after:0");
+        let target = fx.data.path().join("elsewhere.json");
+        write_file(&target, b"{}").unwrap();
+        let link = fx.user_home().join(login);
+        write_file(&link.with_file_name("keep"), b"").unwrap();
+        clauseo_agents::testing::symlink(&target, &link).unwrap();
+        assert_eq!(detect_unchanged(&fx, &agent), no_login(), "{login}");
+    }
 }
 
-/// With `CODEX_HOME` set in the lawyer's environment their Codex keeps its login there, and
-/// "Use it" links `~/.codex`'s file only: nothing is found, whichever folder holds a file, and
-/// neither folder changes.
+/// With `CLAUDE_CONFIG_DIR` or `CODEX_HOME` set in the lawyer's environment their CLI keeps its
+/// login there, and "Use it" takes the default one only: nothing is found, whichever folder
+/// holds a file, and neither folder changes.
 #[test]
-fn a_set_codex_home_finds_no_login() {
-    let mut fx = Fixture::new("nowrite-codex-home", "ok-after:0");
-    let moved = fx.data.path().join("lawyer-codex-home");
-    fx.config
-        .signin
-        .base_env
-        .insert("CODEX_HOME".into(), moved.clone().into_os_string());
-    write_file(&moved.join("auth.json"), b"{}").unwrap();
-    write_file(&fx.user_home().join(".codex/auth.json"), b"{}").unwrap();
-    let mut before = BTreeMap::new();
-    walk(&moved, &moved, &mut before);
-    assert_eq!(detect_unchanged(&fx, &codex()), no_login());
-    let mut after = BTreeMap::new();
-    walk(&moved, &moved, &mut after);
-    assert_eq!(after, before);
+fn a_moved_agent_folder_finds_no_login() {
+    for (agent, var, login, file) in [
+        (
+            claude(),
+            "CLAUDE_CONFIG_DIR",
+            CLAUDE_LOGIN,
+            ".credentials.json",
+        ),
+        (codex(), "CODEX_HOME", CODEX_LOGIN, "auth.json"),
+    ] {
+        let mut fx = Fixture::new("nowrite-moved", "ok-after:0");
+        let moved = fx.data.path().join("lawyer-agent-folder");
+        fx.config
+            .signin
+            .base_env
+            .insert(var.into(), moved.clone().into_os_string());
+        write_file(&moved.join(file), b"{}").unwrap();
+        write_file(&fx.user_home().join(login), b"{}").unwrap();
+        let mut before = BTreeMap::new();
+        walk(&moved, &moved, &mut before);
+        assert_eq!(detect_unchanged(&fx, &agent), no_login(), "{var}");
+        let mut after = BTreeMap::new();
+        walk(&moved, &moved, &mut after);
+        assert_eq!(after, before, "{var}");
+    }
 }

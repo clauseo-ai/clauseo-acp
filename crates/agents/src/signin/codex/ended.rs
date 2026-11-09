@@ -200,7 +200,7 @@ pub(super) async fn remove_own_login<T: Timer + Send + Sync>(
     }
     if job.script().is_some() {
         let kind = RunKind::Own { home: &job.home };
-        let mut args = codex_store_args(kind);
+        let mut args = codex_store_args();
         args.push(OsString::from("logout"));
         let mut spec = job.spec(args, job.env(kind, None), LOGOUT_LIMIT);
         spec.on_stop = LOGOUT_STOP;

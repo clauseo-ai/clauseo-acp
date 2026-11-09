@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-/// Claude's credential file, never named.
+/// Claude's credential file, named only by `signin/reuse.rs` (detection's stat), never opened.
 const CLAUDE_FILE: &str = concat!(".credentials", ".json");
 
 /// Codex's login file, named only by `signin/reuse.rs`.
@@ -18,7 +18,7 @@ const CLAUDE_CONFIGS: [&str; 3] = [
     concat!("settings", ".json"),
 ];
 
-/// The one file that may name [`CODEX_FILE`].
+/// The one file that may name [`CODEX_FILE`] and [`CLAUDE_FILE`].
 const REUSE: &str = "signin/reuse.rs";
 
 /// What `reuse.rs` may never call: an open or a read. Matched as text anywhere in a line.
@@ -252,8 +252,10 @@ fn violations(rel: &str, code: &str) -> Vec<String> {
         {
             found.push(format!("{at} builds a file name from \"auth\" in pieces"));
         }
-        if line.contains(CLAUDE_FILE) {
-            found.push(format!("{at} names Claude's credential file"));
+        if rel != REUSE && line.contains(CLAUDE_FILE) {
+            found.push(format!(
+                "{at} names Claude's credential file outside {REUSE}"
+            ));
         }
         for config in CLAUDE_CONFIGS
             .iter()
@@ -441,11 +443,16 @@ fn the_scan_skips_comments_and_reads_literals() {
 }
 
 #[test]
-fn reuse_may_name_the_codex_file_but_never_open_it() {
+fn reuse_may_name_the_login_files_but_never_open_them() {
     let link = format!("write::hard_link(&user.join(\"{CODEX_FILE}\"), &home)?;");
     assert_eq!(violations(REUSE, &code_only(&link)), Vec::<String>::new());
-    let claude = format!("let p = \"{CLAUDE_FILE}\";");
-    assert_eq!(violations(REUSE, &code_only(&claude)).len(), 1);
+    let claude = format!("std::fs::symlink_metadata(home.join(\"{CLAUDE_FILE}\"))");
+    assert_eq!(violations(REUSE, &code_only(&claude)), Vec::<String>::new());
+    let elsewhere = format!("let p = \"{CLAUDE_FILE}\";");
+    assert_eq!(
+        violations("signin/detect.rs", &code_only(&elsewhere)).len(),
+        1
+    );
     for call in [
         "File::open(&p)",
         "std::fs::read(&p)",
@@ -464,7 +471,7 @@ fn reuse_may_name_the_codex_file_but_never_open_it() {
 #[test]
 fn the_scan_catches_claude_s_config_files() {
     for config in CLAUDE_CONFIGS {
-        for rel in ["signin/detect.rs", "signin/scratch.rs", "signin/new.rs"] {
+        for rel in ["signin/detect.rs", "signin/reuse.rs", "signin/new.rs"] {
             let code = format!("fn f(h: &Path) -> PathBuf {{ h.join(\"{config}\") }}");
             assert_eq!(probe(rel, &code).len(), 1, "{rel}: {config}");
             assert_eq!(

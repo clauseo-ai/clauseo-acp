@@ -1,6 +1,7 @@
 //! Reusing the lawyer's Codex login: the hard link, the guard and the split rule (the brief,
-//! "Codex, reused", "The split rule" and "The login source"). The one file under `src` that may
-//! name Codex's login file, and it never opens or reads it (`tests/credential_names.rs`).
+//! "Codex, reused", "The split rule" and "The login source"), and detection's stats of both
+//! agents' login files. The one file under `src` that may name Codex's login file and Claude's
+//! credential file, and it never opens or reads either (`tests/credential_names.rs`).
 //!
 //! Every operation here on a login file's name, for the security review:
 //! - `std::fs::symlink_metadata` to see whether a name is there and is a plain file: an `lstat`
@@ -14,8 +15,9 @@
 //! - `crate::write::remove_file` (`std::fs::remove_file`), which removes the home's name and
 //!   never reads it.
 //!
-//! Claude needs nothing here: its reuse is an environment (`CLAUDE_SECURESTORAGE_CONFIG_DIR=""`
-//! with Clauseo's `CLAUDE_CONFIG_DIR`, `signin/env.rs`), and "Claude needs no link anywhere".
+//! Claude needs only detection's stat here: its reuse is an environment
+//! (`CLAUDE_SECURESTORAGE_CONFIG_DIR=""` with Clauseo's `CLAUDE_CONFIG_DIR`, `signin/env.rs`), and
+//! "Claude needs no link anywhere".
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -32,6 +34,21 @@ const LOGIN_FILE: &str = "auth.json";
 
 /// The lawyer's own Codex folder under their home folder.
 const LAWYER_CODEX: &str = ".codex";
+
+/// Claude Code's login in the lawyer's default store, as a file: `~/.claude/.credentials.json` on
+/// Linux and Windows (`%USERPROFILE%\.claude`, Node's `homedir()`). macOS keeps it in the
+/// Keychain, so there this file is normally absent.
+const CLAUDE_LAWYER_FILE: [&str; 2] = [".claude", ".credentials.json"];
+
+/// Detection's stat of Claude's login: whether `<lawyer_home>/.claude/.credentials.json` is a
+/// regular file (a symbolic link, junction or other reparse point there is no login found).
+/// Never an open: `symlink_metadata` (see the module docs).
+pub(crate) fn claude_login_present(lawyer_home: &Path) -> bool {
+    let file = CLAUDE_LAWYER_FILE
+        .iter()
+        .fold(lawyer_home.to_path_buf(), |path, part| path.join(part));
+    std::fs::symlink_metadata(file).is_ok_and(|meta| plain_file(&meta))
+}
 
 /// The login file in a Codex home (Clauseo's, or a matter's state folder in stage C).
 fn home_file(codex_home: &Path) -> PathBuf {
