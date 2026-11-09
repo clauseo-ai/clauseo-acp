@@ -44,7 +44,8 @@ No `protocol` change: R20 maps the states and codes to the wire.
   `SignedIn { email, plan, source, at }` and `Failed { code, at }`. It is a separate enum from
   `InstallState`, which already has its own `Waiting`.
 - `Found`: `ClaudeSettings`, `ClaudeWindowsSandbox`, `CodexKeyring`, `ReusedFailed`,
-  `ReusedSignedOut`, `ReusedChanged` and `CodexLinkSplit`.
+  `ReusedSignedOut` and `CodexLinkSplit` (`ReusedChanged` was removed on 2026-11-09, see
+  "Detection").
 - `LoginFrom`: `ClaudeCode` and `Codex`. `Source`: `Reused` and `Own`.
 - `SigninCode::code()` gives `signin.cancelled`, `signin.link_expired`, `signin.no_plan`,
   `signin.device_code_off`, `signin.port_busy` or `signin.failed`.
@@ -403,9 +404,8 @@ at start and when a window shows Plans. It runs:
 1. A recorded reuse first. For Codex, a missing `login-source` with a login file in the home
    also counts, per the brief.
    - Claude: detection must still find a login (a stat, see "Detection"). It reports no email,
-     so a recorded email (from before) is compared only with one detection gives, and
-     `ReusedChanged` is no longer produced; no login file gives `ReusedSignedOut`. Then status
-     under the
+     and a login file still there holds whatever account it is now (`ReusedChanged` is no longer
+     produced); no login file gives `ReusedSignedOut`. Then status under the
      session's environment (`CLAUDE_CONFIG_DIR` the home, `CLAUDE_SECURESTORAGE_CONFIG_DIR=""`)
      must say signed in, giving `SignedIn { Reused }`. Otherwise the run-time fallback below.
    - Codex: `codex_link_holds` must say `Holds`, giving `SignedIn { Reused }` with
@@ -460,16 +460,16 @@ by default, never an open, and starts no CLI: no write into the lawyer's config 
   status under the reused environment (Claude: `CLAUDE_CONFIG_DIR` Clauseo's home and
   `CLAUDE_SECURESTORAGE_CONFIG_DIR=""`; Codex: through the new link). That run is the lawyer's
   explicit choice, so a token refresh it writes into their store is legitimate. Nothing ties
-  "Use it" to the account the lawyer saw; R20's session-start identity check (#554) enforces it.
+  "Use it", or a reuse later, to the account the lawyer saw: the agent runs as the lawyer, and
+  switching accounts is their own doing (2026-11-09). `ReusedChanged` is no longer produced.
 
 The lawyer's home folder is `SigninConfig::lawyer_home()` (new, public): the base environment's
 `HOME`, or `USERPROFILE` on Windows.
 
 **"Use it"** runs detection again first. It goes on while detection still finds a login and its
 email equals the one `LoginFound` showed. Detection is a stat and gives no email for either
-vendor, so this compares `None` with `None` and does **not** tie "Use it" to the account the lawyer
-saw. R20's session-start identity check (#554)
-enforces the account; this change lands after it. A login gone in between is not reused: the
+vendor, so this compares `None` with `None` and does not tie "Use it" to the account the lawyer
+saw (see "Detection"). A login gone in between is not reused: the
 new detection is the state. Detection that cannot tell
 ends the job: `signin.cancelled` when it was cancelled or replaced, else `signin.failed`.
 - Claude: status under the session's environment must say signed in. Then, if the job is still

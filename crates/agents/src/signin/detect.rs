@@ -22,8 +22,8 @@
 //!
 //! No email, plan or account comes from detection. "Use it" confirms through the agent's own
 //! status under the reused environment (the lawyer's explicit choice, so a refresh write there is
-//! theirs), which gives the plan and what email it reports; the account itself is enforced by
-//! R20's session-start identity check (#554).
+//! theirs), which gives the plan and what email it reports. Nothing ties a reuse to an account:
+//! the agent runs as the lawyer, and switching accounts is their own doing.
 //!
 //! Detection never starts reuse: it gives `LoginFound`, and only "Use it" reuses.
 

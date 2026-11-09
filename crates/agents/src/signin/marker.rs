@@ -6,7 +6,7 @@
 //!   then the accepted email (the second line is left out when the status reported none).
 //!   Detection is a stat and reports no email (`super::detect`), so a Claude reuse records
 //!   none and a Codex one records what Codex's own confirmation gave; the record ties a reuse
-//!   to no account, and R20's session-start identity check (#554) is what enforces it. For
+//!   to no account (a later change of account is not flagged: the agent runs as the lawyer). For
 //!   Codex "a missing file with a home `auth.json` is `reused`": that rule is `signin/reuse.rs`'s,
 //!   which may name the file.
 //! - `no-reuse`: written by "Sign in with a different account" and "Stop using it here", and

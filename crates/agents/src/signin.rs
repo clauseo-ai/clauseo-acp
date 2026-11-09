@@ -287,8 +287,6 @@ pub enum Found {
     ReusedFailed,
     /// Reuse stopped: the CLI's own status is signed out (for Codex, its file is gone).
     ReusedSignedOut,
-    /// Reuse stopped: Claude's status names another email than the accepted one.
-    ReusedChanged,
     /// Reuse stopped: the two names of Codex's login are no longer one file.
     CodexLinkSplit,
     /// Detection ran and found no login of the lawyer's. Never a reason reuse stopped.

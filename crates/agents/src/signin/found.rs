@@ -6,8 +6,7 @@
 //! - a recorded `reused` (for Codex also "a missing file with a home `auth.json`") is checked
 //!   first: "At a later start, a recorded `reused` whose login still holds is `Reused` with no
 //!   question." Claude holds when detection still finds a login (a stat; else
-//!   `ReusedSignedOut`; a recorded email is compared only with one detection gives, which it
-//!   never does, so `ReusedChanged` is not produced) and the status
+//!   `ReusedSignedOut`) and the status
 //!   under the session's environment is signed in (else the run-time fallback). Codex holds while
 //!   the two names are one file (`reuse::codex_link_holds`; else `CodexLinkSplit`, or
 //!   `ReusedSignedOut` when the lawyer's file is gone) and Codex's own status, through its CLI,
@@ -22,7 +21,8 @@
 //! - otherwise, unless `no-reuse` is there, detection (`super::detect`): `LoginFound`, or
 //!   `SignedOut` with what was seen. Detection is a stat for both agents, so `LoginFound` has
 //!   no email; "Use it" confirms through the agent's own status under the reused environment.
-//!   R20's session-start identity check (#554) enforces the account.
+//!   A reused login that later shows another account is not flagged: the agent runs as the
+//!   lawyer, and switching accounts is their own doing.
 //!
 //! **Reuse stops** ([`stop`]) with the reason in `found`, and never with a logout: "With no
 //! reason … it writes `no-reuse`, so the next start does not reuse again without asking. With a
@@ -126,13 +126,10 @@ async fn check_claude<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<Sign
         marker::read_source(&job.config.data_dir, &job.ticket.agent)
     {
         let found = detect::claude(job, cancel)?;
-        // Detection gives no email (a stat, `detect`'s docs), so a recorded one (from before)
-        // is compared only against an email detection did give; #554 enforces the account.
+        // A login file still there holds, whatever account it is now: the agent runs as the
+        // lawyer, and switching accounts is their own doing.
         return match &found.state {
-            SigninState::LoginFound { email: now, .. } if now.is_none() || *now == email => {
-                claude_session(job, email, found, false).await
-            }
-            SigninState::LoginFound { .. } => Some(stop(job, Some(Found::ReusedChanged)).await),
+            SigninState::LoginFound { .. } => claude_session(job, email, found, false).await,
             _ => Some(stop(job, Some(Found::ReusedSignedOut)).await),
         };
     }
@@ -389,11 +386,10 @@ pub(crate) async fn find_login<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Op
 /// `use_found_login` (the lawyer's "Use it"): "R20 writes Claude's env, or S18 makes Codex's
 /// link; then `login-source` `reused`; then `SignedIn { source: Reused }`." Detection runs
 /// again first, and "Use it" goes on while it still finds a login and its email equals the one
-/// shown. **That does not tie "Use it" to an account:** detection is a stat of each agent's
-/// login file and gives no email, so `None` is compared with `None`, and a different account
-/// signed in between "found" and "Use it" is reused. What enforces the account is R20's
-/// session-start identity check (#554), which compares the session's account with the one the
-/// lawyer accepted. A login gone in between is not reused:
+/// shown. That does not tie "Use it" to an account: detection is a stat of each agent's login
+/// file and gives no email, so `None` is compared with `None`, and a different account signed
+/// in between "found" and "Use it" is reused. That is accepted: the agent runs as the lawyer,
+/// and switching accounts is their own doing. A login gone in between is not reused:
 /// the new detection is the state. Detection that could not tell ends the job:
 /// `signin.cancelled` when it was cancelled (or the job replaced), else `signin.failed`.
 pub(crate) async fn use_found<T: Timer + Send + Sync>(job: &SigninJob<T>) -> SigninState {

@@ -166,10 +166,10 @@ fn use_found_login_reuses_and_the_next_start_reuses_without_asking() {
     assert_eq!(fx.runs_of("login"), []);
 }
 
-/// An account change while reused: detection gives no email, so it does not tell
-/// (`ReusedChanged`); the status under the session's environment shows the new account (R20's
-/// identity check, #554, enforces the account). No login file any more gives
-/// `found: ReusedSignedOut`, which clears the reuse record only.
+/// An account change while reused is not flagged (the agent runs as the lawyer, and switching
+/// accounts is their own doing): the status under the session's environment shows the new
+/// account. No login file any more gives `found: ReusedSignedOut`, which clears the reuse
+/// record only.
 #[test]
 fn a_changed_account_shows_through_and_a_signed_out_status_stops_reuse() {
     let fx = Fixture::new("reuse-claude-stops", "ok-after:0");

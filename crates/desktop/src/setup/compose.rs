@@ -212,7 +212,6 @@ fn found_login(found: Found) -> Option<FoundLogin> {
         Found::CodexKeyring => FoundLogin::CodexKeyring,
         Found::ReusedFailed => FoundLogin::ReusedFailed,
         Found::ReusedSignedOut => FoundLogin::ReusedSignedOut,
-        Found::ReusedChanged => FoundLogin::ReusedChanged,
         Found::CodexLinkSplit => FoundLogin::CodexLinkSplit,
         Found::NoLogin => FoundLogin::NoneFound,
         Found::ReuseOff => FoundLogin::ReuseOff,

@@ -18,7 +18,7 @@
 //! - A reuse that ends with no leave waiting (a `SignedIn { Reused }` followed by any other
 //!   resting state: a leave's late `SignedOut`, or S18 ending the reuse by itself) runs the
 //!   steps after the stop at once (`after_stop`, review H1). When S18 ended it by itself
-//!   (`ReusedFailed`, `ReusedChanged`, `ReusedSignedOut`, or `CodexLinkSplit` from its status
+//!   (`ReusedFailed`, `ReusedSignedOut`, or `CodexLinkSplit` from its status
 //!   check), an automatic leave is queued (ruling 1): it stops the agents, so none goes on with
 //!   the account the agent's own CLI now holds, and runs on its own task, not in the pump.
 //! - A `SignedIn` that is new (none before, or another account or source) ends any automatic
@@ -193,13 +193,7 @@ async fn ended_by_itself(backend: &AgentsBackend, agent: &AgentId, state: &Signi
     // Logged inside; the leave goes on.
     let _first_error = after_stop(backend, agent, kind).await;
     if let SigninState::SignedOut {
-        found:
-            Some(
-                why @ (Found::ReusedFailed
-                | Found::ReusedChanged
-                | Found::ReusedSignedOut
-                | Found::CodexLinkSplit),
-            ),
+        found: Some(why @ (Found::ReusedFailed | Found::ReusedSignedOut | Found::CodexLinkSplit)),
     } = state
     {
         backend.wiring.leaves.submit(agent, Some(*why));
