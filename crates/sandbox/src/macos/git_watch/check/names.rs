@@ -17,9 +17,9 @@ const SHAPE_NAMES: [&str; 2] = ["objects", "refs"];
 /// Whether `event`'s path names a git item in the matter: a `.git` at or above it, a
 /// `HEAD` (unless in a launch folder that held one), a `commondir` that arrived anywhere (git
 /// reads `config` and `hooks` through what it names, and a link there can lead anywhere), or
-/// an `objects` or `refs` that arrived beside a `HEAD`. Not at or below a launch repository the profile makes
-/// read-only, nor in the volume set-aside folder. Reads the file IDs of the launch
-/// repositories on the path and, for a shape name, the `HEAD` beside it; lists nothing.
+/// an `objects` or `refs` that arrived beside a `HEAD`. Not at or below a launch repository
+/// the profile makes read-only, nor in the volume set-aside folder. Reads the file IDs of the
+/// launch repositories on the path and, for a shape name, the `HEAD` beside it; lists nothing.
 pub(super) fn named<F: Fs>(watch: &Watch<F>, event: &Event) -> bool {
     let Ok(rel) = event.path.strip_prefix(&watch.matter) else {
         return false;

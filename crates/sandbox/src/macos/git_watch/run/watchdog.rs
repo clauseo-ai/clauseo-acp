@@ -135,9 +135,10 @@ impl Busy {
     }
 
     /// The watchdog's look: when the check running made no progress for `budget`, or has run
-    /// [`CHECK_DEADLINE`] in all, ends the session. Once it has, the kill goes again on each look while that check runs, and once
-    /// the check it ended in has run `KILL_CAP` past that with a process of the session left,
-    /// the session's record is marked outlived, once. Returns whether a check is judged stuck.
+    /// [`CHECK_DEADLINE`] in all, ends the session. Once it has, the kill goes again on each
+    /// look while that check runs, and once the check it ended in has run `KILL_CAP` past that
+    /// with a process of the session left, the session's record is marked outlived, once.
+    /// Returns whether a check is judged stuck.
     pub(crate) fn look(&self, budget: Duration) -> bool {
         let since = self.since.load(Ordering::SeqCst);
         if since == 0 {
