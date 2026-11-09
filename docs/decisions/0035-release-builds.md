@@ -67,9 +67,12 @@ Developer ID.
   `latest-json.mjs` is the one home of this table.
 - **The base config** (`crates/desktop/tauri.conf.json`) holds what every build shares: the bundle
   targets, `createUpdaterArtifacts: true`, macOS 13 and the hardened runtime, the WebView2 bootstrapper
-  (silent) with `minimumWebview2Version` `155.0.0.0` (Microsoft Edge 155.0.4283.62 on the
-  `windows-2025` image 20261021.299.1, actions/runner-images `Windows2025-Readme.md`; raised only on
-  purpose), NSIS `currentUser` in English, `allowDowngrades: false`.
+  (silent) with `minimumWebview2Version` `152.0.0.0`, the version clean Windows 11 ships (WebView2
+  152.0.4191.66 on the ARM64 VM's `win11-clean`, 2026-11-09). Above it, the per-user installer's
+  bootstrapper updates a per-machine runtime, which asks a standard user for an administrator's
+  credentials, and declining fails the install. It was 155.0.0.0, the `windows-2025` runner's
+  version (image 20261021.299.1), which no feature needed. Raised only on purpose, and only to a
+  version clean Windows ships. NSIS `currentUser` in English, `allowDowngrades: false`.
 - **Release overlays,** in `crates/desktop/release/`, passed with `--config`:
   `release.conf.json` (`mainBinaryName: "Clauseo"`, and no `beforeBuildCommand`, since the legs embed
   the `ui` job's build); `windows.conf.json` (`bundle.windows.nsis.installerHooks`, the uninstall hook

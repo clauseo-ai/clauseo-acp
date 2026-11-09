@@ -41,9 +41,9 @@ fn no_runtime_is_missing() {
 #[test]
 fn an_older_runtime_is_too_old() {
     for older in [
-        "154.0.3485.54",
+        "151.0.3485.54",
         "100",
-        "154.999.999.999",
+        "151.999.999.999",
         "120.0.2210.91 beta",
     ] {
         assert_eq!(verdict(Some(older), minimum()), Verdict::TooOld, "{older}");
@@ -52,8 +52,10 @@ fn an_older_runtime_is_too_old() {
 
 #[test]
 fn the_minimum_itself_starts() {
-    assert_eq!(verdict(Some("155.0.0.0"), minimum()), Verdict::Start);
-    assert_eq!(verdict(Some("155"), minimum()), Verdict::Start);
+    assert_eq!(verdict(Some("152.0.0.0"), minimum()), Verdict::Start);
+    assert_eq!(verdict(Some("152"), minimum()), Verdict::Start);
+    // Clean Windows 11's runtime (the ARM64 VM's win11-clean, 2026-11-09).
+    assert_eq!(verdict(Some("152.0.4191.66"), minimum()), Verdict::Start);
 }
 
 #[test]

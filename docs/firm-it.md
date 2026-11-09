@@ -515,7 +515,7 @@ Clauseo draws its window with Microsoft Edge WebView2, Evergreen.
   tasks `MicrosoftEdgeUpdateTaskUser<SID>Core` and `…UA`), which keeps that runtime updated. On
   non-persistent VDI a per-user runtime is gone at sign-out. Microsoft's guide:
   [WebView2 for enterprises](https://learn.microsoft.com/microsoft-edge/webview2/concepts/enterprise).
-- **Minimum version:** 155.0.0.0 (`minimumWebview2Version` in
+- **Minimum version:** 152.0.0.0, what Windows 11 ships with (`minimumWebview2Version` in
   `crates/desktop/tauri.conf.json`). Below it, or with no runtime, Clauseo shows a dialog
   ("Clauseo needs Microsoft Edge WebView2 to open", "Download WebView2") instead of a window, and
   exits (decision 0035, "PR 2").
