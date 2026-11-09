@@ -92,16 +92,39 @@ fn blocks(ts: &str) -> Vec<&str> {
     out
 }
 
-/// Writes the bindings, checks every type protocol exports appears in them exactly as
-/// `WireFormat` writes it, then fails when writing changed the file.
+/// The bindings as tauri-specta writes them, and whether `bindings.ts` held exactly that.
+///
+/// tauri-specta has no export to a string, so it writes a scratch file beside `bindings.ts`.
+/// When the two match the scratch file is dropped (which removes it) and `bindings.ts` is never
+/// touched; when they differ the scratch file is renamed over it, so a test reading `bindings.ts`
+/// in another process sees the old file or the new one, never a truncated one (#833).
+fn write_on_drift(path: &std::path::Path) -> (String, bool) {
+    let dir = path.parent().expect("bindings.ts has a folder");
+    let scratch = tempfile::Builder::new()
+        .prefix(".bindings.ts.")
+        .suffix(".tmp")
+        .tempfile_in(dir)
+        .unwrap_or_else(|err| panic!("scratch file in {}: {err}", dir.display()));
+    bindings_builder()
+        .export(Typescript::default().header(HEADER), scratch.path())
+        .unwrap_or_else(|err| panic!("export failed: {err}"));
+    let rendered = std::fs::read_to_string(scratch.path())
+        .unwrap_or_else(|err| panic!("reading {}: {err}", scratch.path().display()));
+    let unchanged = std::fs::read_to_string(path).is_ok_and(|before| before == rendered);
+    if !unchanged {
+        scratch
+            .persist(path)
+            .unwrap_or_else(|err| panic!("renaming over {}: {err}", path.display()));
+    }
+    (rendered, unchanged)
+}
+
+/// Renders the bindings, writes `bindings.ts` only when they changed, checks every type protocol
+/// exports appears in them exactly as `WireFormat` writes it, then fails when they had changed.
 #[test]
 fn bindings_ts_is_written_and_fails_on_drift() {
     let path = bindings_path();
-    let before = std::fs::read_to_string(&path).unwrap_or_default();
-    bindings_builder()
-        .export(Typescript::default().header(HEADER), &path)
-        .unwrap_or_else(|err| panic!("export failed: {err}"));
-    let after = std::fs::read_to_string(&path).unwrap_or_default();
+    let (after, unchanged) = write_on_drift(&path);
 
     let wire = Typescript::default()
         .export(
@@ -127,7 +150,7 @@ fn bindings_ts_is_written_and_fails_on_drift() {
     );
 
     assert!(
-        before == after,
+        unchanged,
         "{} was stale and has been written again; review and commit it",
         path.display()
     );
