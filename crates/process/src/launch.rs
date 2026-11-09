@@ -57,21 +57,43 @@ impl Launcher for PassthroughLauncher {
     }
 }
 
+/// The on-or-off choices of a [`SpawnOptions`], one bit each; all off by default.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct Flags(u8);
+
+impl Flags {
+    /// [`SpawnOptions::clear_env`].
+    pub(crate) const CLEAR_ENV: Flags = Flags(1);
+    /// [`SpawnOptions::end_with_parent`], which only Linux records.
+    #[cfg(target_os = "linux")]
+    pub(crate) const END_WITH_PARENT: Flags = Flags(1 << 1);
+    /// [`SpawnOptions::close_other_fds`].
+    #[cfg(unix)]
+    pub(crate) const CLOSE_OTHER_FDS: Flags = Flags(1 << 2);
+
+    /// Whether `flag` is on.
+    pub(crate) fn has(self, flag: Flags) -> bool {
+        self.0 & flag.0 == flag.0
+    }
+
+    /// These flags with `flag` on too.
+    #[must_use]
+    fn with(self, flag: Flags) -> Flags {
+        Flags(self.0 | flag.0)
+    }
+}
+
 /// How [`spawn_in_tree`] starts an agent, beyond its spec.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct SpawnOptions {
     pub(crate) home: Option<PathBuf>,
-    pub(crate) clear_env: bool,
+    pub(crate) flags: Flags,
     #[cfg(windows)]
     pub(crate) creation_flags: u32,
-    #[cfg(target_os = "linux")]
-    pub(crate) end_with_parent: bool,
     pub(crate) stdin_grace: Option<Duration>,
     #[cfg(unix)]
     pub(crate) fds: Vec<(RawFd, Arc<OwnedFd>)>,
-    #[cfg(unix)]
-    pub(crate) close_other_fds: bool,
 }
 
 impl SpawnOptions {
@@ -89,7 +111,7 @@ impl SpawnOptions {
 
     /// The child gets only the spec's variables: none of this process's environment.
     pub fn clear_env(mut self) -> SpawnOptions {
-        self.clear_env = true;
+        self.flags = self.flags.with(Flags::CLEAR_ENV);
         self
     }
 
@@ -104,7 +126,7 @@ impl SpawnOptions {
         #[cfg(target_os = "linux")]
         {
             let mut opts = self;
-            opts.end_with_parent = true;
+            opts.flags = opts.flags.with(Flags::END_WITH_PARENT);
             opts
         }
         #[cfg(not(target_os = "linux"))]
@@ -133,7 +155,7 @@ impl SpawnOptions {
     /// tries each up to `getdtablesize`.
     #[cfg(unix)]
     pub fn close_other_fds(mut self) -> SpawnOptions {
-        self.close_other_fds = true;
+        self.flags = self.flags.with(Flags::CLOSE_OTHER_FDS);
         self
     }
 
@@ -202,7 +224,7 @@ pub fn spawn_in_tree(spec: &LaunchSpec, opts: &SpawnOptions) -> Result<Launched,
     let live = Live::enter()?;
     let mut command = std::process::Command::new(spec.program());
     command.args(spec.args());
-    if opts.clear_env {
+    if opts.flags.has(Flags::CLEAR_ENV) {
         command.env_clear();
     }
     for name in NODE_ENV {

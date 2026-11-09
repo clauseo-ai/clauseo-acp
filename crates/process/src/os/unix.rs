@@ -12,6 +12,7 @@ use nix::sys::signal::{Signal, kill, killpg};
 use nix::unistd::Pid;
 
 use crate::descendants::Proc;
+use crate::launch::Flags;
 use crate::{Error, SpawnOptions};
 
 mod inherit;
@@ -28,9 +29,9 @@ use super::macos as listing;
 /// descriptors and on Linux for [`SpawnOptions::end_with_parent`] (`linux.rs`).
 pub(crate) fn prepare(command: &mut Command, opts: &SpawnOptions) {
     command.process_group(0);
-    inherit::pass(command, &opts.fds, opts.close_other_fds);
+    inherit::pass(command, &opts.fds, opts.flags.has(Flags::CLOSE_OTHER_FDS));
     #[cfg(target_os = "linux")]
-    if opts.end_with_parent {
+    if opts.flags.has(Flags::END_WITH_PARENT) {
         listing::end_with_parent(command);
     }
 }
