@@ -9,13 +9,18 @@ use std::path::PathBuf;
 use super::*;
 use crate::windows::setup::pool_steps::Pool;
 
+mod basics;
 mod exits;
 mod file_owner;
+mod groups;
+mod hardening;
 mod log_path;
 mod principals;
 mod record;
+mod replaced;
 mod running;
 mod sequence;
+mod swapped;
 mod task_file;
 mod unlisted;
 mod walk;
@@ -112,12 +117,37 @@ struct Fake {
     /// The record's reads, and the read (0 the first) from which the key is gone.
     pool_reads: usize,
     gone_from: Option<usize>,
+    /// The record's `GroupSid`; and the local groups, each its members or why they can't be
+    /// read (a SID here, or under `S-1-5-32`, or one of the well-known groups, is a group's).
+    pool_group: Result<Option<Sid>, Failed>,
+    groups: BTreeMap<Sid, Result<Vec<Sid>, Failed>>,
     done: Vec<String>,
     logged: Vec<(bool, String)>,
     /// What the admin-only log was given, and why it fails when `Some`.
     admin_logged: Vec<String>,
     admin_fails: Option<Failed>,
+    /// Each task's whole descriptor by its name, as bytes, `Err` where it can't be read; one
+    /// not here is [`hardening::admin_owned`]'s. The names whose descriptor write fails, and each
+    /// write made (name, descriptor).
+    descriptors: BTreeMap<String, Result<Vec<u8>, Failed>>,
+    secure_refuse: Vec<String>,
+    secured: Vec<(String, Vec<u8>)>,
+    /// Each task's SDDL as the Task Scheduler gives it, by name; one not here is
+    /// [`DEFAULT_SDDL`]. The names whose SACL can't be read, and those whose descriptor a write
+    /// leaves as [`hardening::admin_owned`] (another owner, no SACL) whatever it was given.
+    sddls: BTreeMap<String, String>,
+    sacl_refuse: Vec<String>,
+    secure_mangles: Vec<String>,
+    /// The names whose write is recorded but leaves the descriptor as it was.
+    secure_keeps: Vec<String>,
+    /// SIDs whose kind (`is_group`) can't be read.
+    kinds_unread: Vec<Sid>,
+    /// The tasks' cache `Id`s and the record's `OwnerUntrusted` ([`swapped::Ids`]).
+    ids: swapped::Ids,
 }
+
+/// The SDDL the fake gives a task not in `Fake::sddls`.
+const DEFAULT_SDDL: &str = "O:BAG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;BU)";
 
 impl Fake {
     fn new(users: &[u32]) -> Fake {
@@ -164,10 +194,21 @@ impl Fake {
             write_fails: None,
             pool_reads: 0,
             gone_from: None,
+            pool_group: Ok(None),
+            groups: BTreeMap::new(),
             done: Vec::new(),
             logged: Vec::new(),
             admin_logged: Vec::new(),
             admin_fails: None,
+            descriptors: BTreeMap::new(),
+            secure_refuse: Vec::new(),
+            secured: Vec::new(),
+            sddls: BTreeMap::new(),
+            sacl_refuse: Vec::new(),
+            secure_mangles: Vec::new(),
+            secure_keeps: Vec::new(),
+            kinds_unread: Vec::new(),
+            ids: swapped::Ids::default(),
         }
     }
 
@@ -245,15 +286,15 @@ fn clean() -> FileSecurity {
 fn user(user: &str) -> Principal {
     Principal {
         user_id: user.to_owned(),
-        group_id: String::new(),
+        ..Principal::default()
     }
 }
 
 /// A principal naming `group`, and no user.
 fn group(group: &str) -> Principal {
     Principal {
-        user_id: String::new(),
         group_id: group.to_owned(),
+        ..Principal::default()
     }
 }
 
@@ -307,6 +348,10 @@ impl Sweeper for Fake {
     fn root(&mut self) -> Result<String, Failed> {
         self.done.push("root".to_owned());
         Ok("\\".to_owned())
+    }
+
+    fn folder_at(&mut self, path: &str) -> Result<String, Failed> {
+        swapped::folder_at(self, path)
     }
 
     fn subfolders(&mut self, folder: &String) -> Result<Vec<Result<String, Failed>>, Failed> {
@@ -471,117 +516,82 @@ impl Sweeper for Fake {
         self.admin_logged.push(line.to_owned());
         self.admin_fails.clone().map_or(Ok(()), Err)
     }
-}
 
-#[test]
-fn only_tasks_whose_principal_is_exactly_a_pool_sid_are_deleted() {
-    let mut fake = Fake::new(&[1010, 1011]);
-    fake.accounts.insert("ClauseoSb01".to_owned(), sid(1011));
-    fake.accounts
-        .insert("lawyer".to_owned(), Sid::parse(OWNER).unwrap());
-    fake.accounts.insert("ClauseoSb1".to_owned(), sid(10111));
-    // A pool SID by its text, and one by the account's name.
-    fake.task("\\", "pool-sid", user("S-1-5-21-1-2-3-1010"));
-    fake.task("\\", "pool-name", user("ClauseoSb01"));
-    // A SID a suffix or a prefix away from a pool SID, and a name that resolves to one.
-    fake.task("\\", "longer", user("S-1-5-21-1-2-3-10101"));
-    fake.task("\\", "shorter", user("S-1-5-21-1-2-3-101"));
-    fake.task("\\", "near-name", user("ClauseoSb1"));
-    // The lawyer's, SYSTEM's in each of its spellings, and the Users group's.
-    fake.task("\\", "lawyer", user("lawyer"));
-    fake.task("\\", "system", user("S-1-5-18"));
-    fake.task("\\", "local-system", user("localsystem"));
-    fake.task("\\", "network", user("NETWORKSERVICE"));
-    fake.task("\\", "users", group("S-1-5-32-545"));
-    // A group that is a pool SID; a user that isn't wins over a group that is.
-    fake.task("\\", "pool-group", group("S-1-5-21-1-2-3-1011"));
-    let both = Principal {
-        user_id: "lawyer".to_owned(),
-        group_id: "S-1-5-21-1-2-3-1010".to_owned(),
-    };
-    fake.task("\\", "user-first", both);
-    assert_eq!(sweep(&mut fake), SweepExit::Done);
-    assert_eq!(
-        fake.deleted(),
-        ["\\pool-sid", "\\pool-name", "\\pool-group"]
-    );
-    // A SID's text and the service names never reach the lookup; each name is looked up once.
-    assert_eq!(fake.lookups(), ["ClauseoSb01", "ClauseoSb1", "lawyer"]);
-    let (error, line) = &fake.logged[0];
-    assert!(!error);
-    assert_eq!(
-        line,
-        "the sandbox's task sweep: 2 pool users, 1 folders and 12 tasks read, 3 of the pool's \
-         tasks deleted, 0 unreadable (0 more skipped, not the pool's by their task file), 0 with \
-         no user or group, 0 unresolved (no SID, not another domain's), 0 skipped (another \
-         domain's, no SID), 0 not deleted, 0 not listed (in a task file or the cache only), 0 \
-         running instances stopped, 0 not, 0 BITS jobs cancelled, 0 not"
-    );
-}
-
-#[test]
-fn the_service_names_map_to_their_sids_in_any_case_and_nothing_else_does() {
-    let mut fake = Fake::new(&[1010]);
-    let names = Names::default();
-    for (name, want) in [
-        ("LocalSystem", "S-1-5-18"),
-        ("LOCALSERVICE", "S-1-5-19"),
-        ("networkservice", "S-1-5-20"),
-        ("S-1-5-21-1-2-3-1010", "S-1-5-21-1-2-3-1010"),
-    ] {
-        let sid = Sid::parse(want).unwrap();
-        assert_eq!(resolve(&mut fake, &names, name), Resolved::Sid(sid));
+    fn pool_group(&mut self) -> Result<Option<Sid>, Failed> {
+        self.pool_group.clone()
     }
-    assert_eq!(fake.lookups(), Vec::<&str>::new());
-    // Anything else is looked up, a near spelling or a domain-qualified name too; with no
-    // computer name known, none is another domain's.
-    for name in ["Local System", r"NT AUTHORITY\LocalSystem", "SYSTEM"] {
-        let found = resolve(&mut fake, &names, name);
-        assert!(matches!(found, Resolved::Unresolved(_)), "{name}");
-    }
-    assert_eq!(fake.lookups().len(), 3);
-}
 
-#[test]
-fn an_unreadable_principal_is_56_and_the_pools_other_tasks_still_go() {
-    let mut fake = Fake::new(&[1010]);
-    fake.task("\\", "first", user("S-1-5-21-1-2-3-1010"));
-    fake.unread("\\", "unread");
-    fake.unread("\\", "unread-too");
-    fake.task("\\", "last", group("S-1-5-21-1-2-3-1010"));
-    assert_eq!(sweep(&mut fake), SweepExit::TasksLeft);
-    assert_eq!(SweepExit::TasksLeft.as_code(), 56);
-    assert_eq!(fake.deleted(), ["\\first", "\\last"]);
-    // The BITS step still ran, and then the pool tasks' instances were listed.
-    let tail: Vec<&str> = fake.done.iter().rev().take(2).map(String::as_str).collect();
-    assert_eq!(tail, ["running", "jobs"]);
-    let (error, line) = &fake.logged[0];
-    assert!(error);
-    assert!(
-        line.contains("2 of the pool's tasks deleted, 2 unreadable"),
-        "{line}"
-    );
-}
-
-#[test]
-fn tasks_in_nested_subfolders_are_found_and_deleted() {
-    let mut fake = Fake::new(&[1010]);
-    let mut deep = String::new();
-    for level in 0..40 {
-        write!(deep, "\\F{level}").unwrap();
+    fn is_group(&mut self, sid: &Sid) -> Result<bool, Failed> {
+        if self.kinds_unread.contains(sid) {
+            return Err("LookupAccountSidW failed (1332)".to_owned());
+        }
+        let text = sid.as_str();
+        let known = text.starts_with("S-1-5-32-") || POOL_GROUPS.contains(&text);
+        Ok(known || self.groups.contains_key(sid))
     }
-    fake.task(&deep, "deepest", user("S-1-5-21-1-2-3-1010"));
-    fake.task("\\Microsoft\\Windows", "theirs", user("S-1-5-18"));
-    fake.task("\\A\\B", "pool", user("S-1-5-21-1-2-3-1010"));
-    fake.task("\\A", "other", user("S-1-5-21-1-2-3-1013"));
-    assert_eq!(sweep(&mut fake), SweepExit::Done);
-    let mut deleted = fake.deleted();
-    deleted.sort_unstable();
-    assert_eq!(deleted, ["\\A\\B\\pool", &format!("{deep}\\deepest")]);
-    // The root, 40 deep, \Microsoft, \Microsoft\Windows, \A and \A\B.
-    assert!(
-        fake.logged[0].1.contains("45 folders and 4 tasks read"),
-        "{:?}",
-        fake.logged
-    );
+
+    fn group_members(&mut self, sid: &Sid) -> Result<Vec<Sid>, Failed> {
+        self.done.push(format!("members {}", sid.as_str()));
+        let members = self.groups.get(sid).cloned();
+        members.unwrap_or_else(|| Err("NetLocalGroupGetMembers failed (2220)".to_owned()))
+    }
+
+    fn task_security(
+        &mut self,
+        _folder: &String,
+        name: &str,
+        sacl: bool,
+    ) -> Result<harden::TaskSecurity, Failed> {
+        self.done.push(format!("security {name} {sacl}"));
+        if sacl && self.sacl_refuse.iter().any(|refused| refused == name) {
+            return Err("IRegisteredTask::GetSecurityDescriptor failed (0x80070522)".to_owned());
+        }
+        let found = self.descriptors.get(name).cloned();
+        let mut bytes = found.unwrap_or_else(|| Ok(hardening::admin_owned()))?;
+        if !sacl {
+            hardening::drop_sacl(&mut bytes);
+        }
+        let sddl = self.sddls.get(name).cloned();
+        let sddl = sddl.unwrap_or_else(|| DEFAULT_SDDL.to_owned());
+        Ok(harden::TaskSecurity { bytes, sddl })
+    }
+
+    fn set_task_security(
+        &mut self,
+        _folder: &String,
+        name: &str,
+        descriptor: &[u8],
+    ) -> Result<(), Failed> {
+        if self.secure_refuse.iter().any(|refused| refused == name) {
+            return Err("IRegisteredTask::SetSecurityDescriptor failed (0x80070005)".to_owned());
+        }
+        self.secured.push((name.to_owned(), descriptor.to_vec()));
+        if self.secure_keeps.iter().any(|kept| kept == name) {
+            return Ok(());
+        }
+        let stored = if self.secure_mangles.iter().any(|mangled| mangled == name) {
+            hardening::admin_owned()
+        } else {
+            descriptor.to_vec()
+        };
+        self.descriptors.insert(name.to_owned(), Ok(stored));
+        Ok(())
+    }
+
+    fn task_cache_id(&mut self, path: &str) -> Result<Option<String>, Failed> {
+        swapped::cache_id(self, path)
+    }
+
+    fn owner_untrusted(&mut self) -> Result<Vec<String>, Failed> {
+        Ok(self.ids.record.clone())
+    }
+
+    fn set_owner_untrusted(&mut self, entries: &[String]) -> Result<(), Failed> {
+        self.ids.held.push(self.held == 1);
+        if self.ids.store_fails {
+            return Err("RegSetValueExW failed (5)".to_owned());
+        }
+        self.ids.record = entries.to_vec();
+        Ok(())
+    }
 }

@@ -536,12 +536,18 @@ crates/sandbox/src/windows/setup/stop/windows_tests.rs elevated_a_process_whose_
 crates/sandbox/src/windows/setup/sweep/windows_listing.rs - unsafe_code
 crates/sandbox/src/windows/setup/sweep/windows_sweeper.rs - unsafe_code
 crates/sandbox/src/windows/setup/sweep/windows_sweeper/admin_log.rs - unsafe_code
+# P1: the sweep's group reads for its log (LookupAccountSidW, NetLocalGroupGetMembers).
+crates/sandbox/src/windows/setup/sweep/windows_groups.rs - unsafe_code
+# P1 hardening: a task's descriptor read and written through IRegisteredTask, its SDDL converted.
+crates/sandbox/src/windows/setup/sweep/windows_harden.rs - unsafe_code
 crates/sandbox/src/windows/setup/sweep/windows_tests.rs Made::drop clippy::disallowed_methods
 crates/sandbox/src/windows/setup/sweep/windows_tests.rs elevated_the_sweep_deletes_a_pool_users_task_and_leaves_the_lawyers clippy::disallowed_methods
 crates/sandbox/src/windows/setup/sweep/windows_tests.rs elevated_a_task_whose_descriptor_shuts_system_out_is_deleted_or_56_never_left_at_0 clippy::disallowed_methods
 crates/sandbox/src/windows/setup/sweep/windows_tests.rs elevated_a_standard_user_cant_register_a_task_owned_by_system_or_administrators clippy::disallowed_methods
 crates/sandbox/src/windows/setup/sweep/windows_tests.rs elevated_a_standard_user_cant_register_a_task_for_another_principal clippy::disallowed_methods
 crates/sandbox/src/windows/setup/sweep/windows_tests/admin_log.rs make clippy::disallowed_methods
+crates/sandbox/src/windows/setup/sweep/windows_tests/task_id.rs register clippy::disallowed_methods
+crates/sandbox/src/windows/setup/sweep/windows_tests/task_id.rs delete clippy::disallowed_methods
 # S15 PR4h: UserSetup's ShellExecuteExW and process handle, the setup exe's one line off Windows,
 # and the wall clock of a set-aside's folder and of a forget's release.
 crates/sandbox/src/windows/user_setup.rs - unsafe_code

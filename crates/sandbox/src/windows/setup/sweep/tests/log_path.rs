@@ -7,8 +7,9 @@ use super::file_owner::{Dacl, descriptor};
 use super::*;
 use crate::windows::admin_copy::level_safe;
 use crate::windows::setup::sweep::log_path::{
-    ADMIN_FOLDER_SDDL, ADMIN_LOG_CAP, ADMIN_LOG_FOLDERS, ADMIN_LOG_NAME, ADMIN_LOG_SDDL,
-    CLAUSEO_FOLDER_SDDL, LOGGED_CAP, PATH_CAP, admin_only, clean, listed, rotates,
+    ADMIN_FOLDER_SDDL, ADMIN_LOG_CAP, ADMIN_LOG_FOLDERS, ADMIN_LOG_FOLDERS_AS_ADMIN,
+    ADMIN_LOG_NAME, ADMIN_LOG_SDDL, ADMIN_LOG_SDDL_AS_ADMIN, CLAUSEO_FOLDER_SDDL, LOGGED_CAP,
+    PATH_CAP, admin_only, clean, listed, rotates,
 };
 
 #[test]
@@ -193,6 +194,44 @@ fn the_admin_only_log_is_made_for_system_and_administrators_alone() {
         Some("S-1-5-18"),
         Dacl::Of(deny)
     ))));
+}
+
+#[test]
+fn a_log_set_up_made_owned_by_administrators_passes_the_same_check() {
+    assert_eq!(ADMIN_LOG_SDDL_AS_ADMIN, "O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)");
+    let folders = [
+        ("Clauseo", CLAUSEO_FOLDER_SDDL),
+        ("Sandbox", "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"),
+    ];
+    assert_eq!(ADMIN_LOG_FOLDERS_AS_ADMIN, folders);
+    let protect = |mut bytes: Vec<u8>| {
+        bytes[3] |= 0x10;
+        bytes
+    };
+    let full = 0x001F_01FF;
+    // ADMIN_LOG_SDDL_AS_ADMIN as bytes, its entries in either order: admin-only.
+    let ours: &[(u8, &str, u32)] = &[(0, "S-1-5-18", full), (0, "S-1-5-32-544", full)];
+    let swapped: &[(u8, &str, u32)] = &[(0, "S-1-5-32-544", full), (0, "S-1-5-18", full)];
+    for dacl in [ours, swapped] {
+        let made = protect(descriptor(Some("S-1-5-32-544"), Dacl::Of(dacl)));
+        assert!(admin_only(&made));
+    }
+    // The DACL must be exactly those two, each full control: one alone, one with less, one
+    // twice, or Users read beside them, isn't.
+    let not = [
+        vec![(0, "S-1-5-18", full)],
+        vec![(0, "S-1-5-18", full), (0, "S-1-5-32-544", 0x0012_0089)],
+        vec![(0, "S-1-5-18", full), (0, "S-1-5-18", full)],
+        vec![
+            (0, "S-1-5-18", full),
+            (0, "S-1-5-32-544", full),
+            (0, "S-1-5-32-545", 0x0012_0089),
+        ],
+    ];
+    for dacl in &not {
+        let made = protect(descriptor(Some("S-1-5-32-544"), Dacl::Of(dacl)));
+        assert!(!admin_only(&made), "{dacl:?}");
+    }
 }
 
 #[test]

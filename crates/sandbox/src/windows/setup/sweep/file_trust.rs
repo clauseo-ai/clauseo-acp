@@ -10,7 +10,9 @@
 
 use std::collections::BTreeMap;
 
-use super::{Failed, Found, Names, Resolved, Sweeper, by_name, pool_owned, task_file};
+use super::{
+    Failed, Found, Groups, Names, Principal, Resolved, Sweeper, by_name, pool_owned, task_file,
+};
 use crate::windows::sids::Sid;
 
 /// A task file as [`Sweeper::read_task_file`] reads it.
@@ -110,7 +112,8 @@ pub fn may_be_pool(sid: Option<&Sid>, pool: &[Sid]) -> bool {
 /// ([`pool_owned`]), [`Found::FileSkipped`] when its file is [`trusted`] and its principal
 /// resolves to a SID that isn't the pool's or is another domain's name, and [`Found::Unread`]
 /// for anything else: an owner that can't be read, a file that can't be read or trusted, a
-/// principal that is the pool's or resolves to nothing else.
+/// principal that is the pool's or resolves to nothing else. With it, what the file says of a
+/// group's task (`Groups::group_task`), `None` when it wasn't read.
 pub(super) fn by_file<S: Sweeper>(
     fs: &mut S,
     folder: &S::Folder,
@@ -118,35 +121,42 @@ pub(super) fn by_file<S: Sweeper>(
     pool: &[Sid],
     names: &Names,
     resolved: &mut BTreeMap<String, Resolved>,
-) -> Found {
+    groups: &mut Groups,
+) -> (Found, Option<bool>) {
     match pool_owned(fs, folder, name, pool) {
-        Ok(true) => return Found::Pool,
+        Ok(true) => return (Found::Pool, None),
         Ok(false) => {}
-        Err(why) => return Found::Unread(why),
+        Err(why) => return (Found::Unread(why), None),
     }
     let principal = match from_file(fs, folder, name, pool) {
         Ok(principal) => principal,
-        Err(why) => return Found::Unread(why),
+        Err(why) => return (Found::Unread(why), None),
     };
-    match by_name(fs, pool, names, resolved, &principal) {
+    let found = match principal.name() {
+        Some(named) => by_name(fs, pool, names, resolved, named),
+        None => Found::NoPrincipal,
+    };
+    let group = groups.group_task(fs, &principal, resolved, pool);
+    let found = match found {
         Found::NotPool | Found::Skipped(_) => Found::FileSkipped,
         Found::Pool
         | Found::Unresolved(_)
         | Found::NoPrincipal
         | Found::Unread(_)
         | Found::FileSkipped => Found::Unread(NOT_SKIPPED.to_owned()),
-    }
+    };
+    (found, group)
 }
 
-/// The principal's name the file of the task `name` in `folder` gives ([`task_file`]): its
-/// path's parts checked, the file read, its security [`trusted`] and its XML read. `Err` for
+/// The principal the file of the task `name` in `folder` gives ([`task_file`]): its path's
+/// parts checked, the file read, its security [`trusted`] and its XML read. `Err` for
 /// anything that fails, or a file that names no user or group.
 fn from_file<S: Sweeper>(
     fs: &mut S,
     folder: &S::Folder,
     name: &str,
     pool: &[Sid],
-) -> Result<String, Failed> {
+) -> Result<Principal, Failed> {
     let path = fs.folder_path(folder)?;
     principal_at(fs, &path, name, pool)
 }
@@ -157,15 +167,15 @@ fn principal_at<S: Sweeper>(
     folder: &str,
     name: &str,
     pool: &[Sid],
-) -> Result<String, Failed> {
+) -> Result<Principal, Failed> {
     let parts = task_file::parts(folder, name)?;
     let file = fs.read_task_file(&parts)?;
     trusted(&file.security, pool)?;
     let principal = task_file::principal_of(&file.bytes)?;
-    principal
-        .name()
-        .map(str::to_owned)
-        .ok_or_else(|| "the task file names no user or group".to_owned())
+    if principal.name().is_none() {
+        return Err("the task file names no user or group".to_owned());
+    }
+    Ok(principal)
 }
 
 /// The [`FileSecurity`] of the self-relative security descriptor `descriptor`, as

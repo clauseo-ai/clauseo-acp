@@ -33,7 +33,12 @@
 //!    any other name is looked up (`LookupAccountNameW`, which finds a local account on this
 //!    machine). It deletes the task when that SID is exactly one of the pool's (equal SIDs,
 //!    never a prefix or a domain), or when the owner its security descriptor names is
-//!    ([`sddl_owner`]), whatever its principal. A pool principal is always a local account
+//!    ([`sddl_owner`]), whatever its principal. A group's task (a `GroupId` alone, or a name
+//!    that resolves to a group's SID) is judged the same way and counted apart ([`group`]):
+//!    the sweep doesn't rely on Windows refusing a standard user's group-principal
+//!    registration, so a pool owner deletes it, an owner that can't be read is 56, and only a
+//!    readable other owner leaves it; whether the group may hold a pool user is only counted,
+//!    and its `Author` only logged. A pool principal is always a local account
 //!    (`ClauseoSbNN`) or a SID's text, and both resolve here, so a name that resolves to no SID
 //!    is the pool's when its account part is a pool user's name, without case, with no prefix
 //!    or one of `.\` and this computer's names ([`Names::is_pool_name`]); it is then deleted.
@@ -65,12 +70,21 @@
 //!    `Tasks` and every task in the Task Scheduler's cache (`HKLM\…\Schedule\TaskCache\Tree`),
 //!    read only ([`unlisted`]). When they disagree, all three are read again once, a task new
 //!    to the second walk held to this step's check (the pool's is 56), and only that read is
-//!    judged: a task both hold that the walk didn't list is 56, unless its trusted task file
-//!    names a principal that isn't the pool's; a task file alone is 56 when its own owner is a
-//!    pool SID or can't be read, else ignored; a cache key alone whose task can run is 56
-//!    unless its `SD` reads and names an owner that isn't a pool SID; a folder or key gone
+//!    judged: a task both hold that the walk didn't list is 56, whatever its cache key's `SD`
+//!    or its task file says (a group's task among them); a task file alone is 56 when its own
+//!    owner is a pool SID or can't be read, else ignored; a cache key alone whose task can run
+//!    is 56 unless its `SD` reads and names an owner that isn't a pool SID; a folder or key gone
 //!    while listed and there again is 56. Nothing is deleted through a file or the registry. A
-//!    listing that can't be read is 56 too;
+//!    listing that can't be read is 56 too. The walk's tasks are held by path and
+//!    `TaskCache\Tree` `Id`, the `Id` read before each was judged ([`replaced`]): one whose
+//!    `Id` changed since, replaced under its name, is judged again, and 56 when it can't be.
+//!    A listed task left whose owner is SYSTEM,
+//!    Administrators or `TrustedInstaller` and whose principal may be the lawyer loses every
+//!    write, delete and permission change its DACL gives an account a pool user may be
+//!    ([`harden`]): the owner rule catches a task a pool user registered, this one a task it
+//!    could modify. Never 56, a failure included, except a task whose `Id` changed before the
+//!    write (56, nothing written, the task now under the name judged again) or across it: 56,
+//!    and its owner ignored from then on while its `Id` holds ([`untrusted`]);
 //! 5. cancels every BITS job a pool user owns, whatever step 4 found (`BG_JOB_ENUM_ALL_USERS`,
 //!    each job's owner). One that can't be cancelled, an owner that can't be read, a list that
 //!    can't be read, or one of `JOBS_CAP` jobs is 57; 56 wins when both. Only then, with no
@@ -88,7 +102,9 @@
 //!    unclean-session marker waits for `SweepSequence` to reach the `SweepNext` it read
 //!    (`runner::marker`);
 //! 7. logs one line of counts to the Application log, which every local user can read: no path,
-//!    no SID. The paths of at most five tasks that keep it at 56 go to an admin-only log alone
+//!    no SID. The paths of at most five tasks that keep it at 56, and the `Author` of at most
+//!    five group tasks that do, and each task hardened or not hardened with the rights it lost,
+//!    go to an admin-only log alone
 //!    (`%ProgramData%\Clauseo\Sandbox\sweep-admin.log`, SYSTEM and Administrators; [`log_path`]).
 //!
 //! It marks no profile for a reset, unlike `--stop`.
@@ -102,7 +118,10 @@ use super::pool_steps::{
 use crate::windows::sids::Sid;
 
 mod file_trust;
+mod group;
+pub mod harden;
 pub mod log_path;
+mod replaced;
 mod resolve;
 mod running;
 mod swept;
@@ -110,6 +129,12 @@ pub mod task_file;
 #[cfg(test)]
 mod tests;
 mod unlisted;
+pub mod untrusted;
+mod walk;
+#[cfg(windows)]
+mod windows_groups;
+#[cfg(windows)]
+pub(crate) mod windows_harden;
 #[cfg(windows)]
 mod windows_listing;
 #[cfg(windows)]
@@ -123,12 +148,15 @@ mod windows_tests;
 #[cfg(any(windows, test))]
 pub use file_trust::file_security;
 pub use file_trust::{FileSecurity, TaskFile, WRITE_RIGHTS, may_be_pool, trusted};
+use group::Groups;
+pub use group::POOL_GROUPS;
 use resolve::pool_owned;
 pub use resolve::{Names, Resolved, canonical_sid, resolve, sddl_owner};
 pub use swept::Swept;
 use swept::log_line;
 pub use task_file::TASK_FILE_CAP;
 pub use unlisted::Listing;
+use walk::{Found, Walk, by_name, sweep_task};
 
 /// The sweep's exit codes. They start at 53, after [`StopExit`]'s 50 and the WSL deny task's 51
 /// and 52 (`WslDenyExit`), so the one exe never gives one number two meanings; codes are
@@ -147,14 +175,14 @@ pub enum SweepExit {
     NoRecord,
     /// 55: a SID `PoolSids` lists isn't a pool user's; nothing was touched.
     NotPool,
-    /// 56: a task's principal or owner couldn't be read, or names no one, or a name that
-    /// resolves to no SID and isn't another domain's (a task file read instead whose owner or
-    /// DACL lets a pool user change it counts as unread); a pool user's task couldn't be
-    /// deleted, or a running instance of one couldn't be stopped (or its path read), a folder's
-    /// tasks or subfolders couldn't be listed, or there were more than [`FOLDERS_CAP`] folders;
-    /// or a task file or the Task Scheduler's cache holds a task the listing didn't give, and
-    /// its file doesn't show it isn't the pool's, or either couldn't be listed ([`unlisted`]).
-    /// The BITS step still ran.
+    /// 56: a task's principal or owner couldn't be read (a group's task among them), or names no
+    /// one, or a name resolves to no SID and isn't another domain's (a task file read instead
+    /// whose owner or DACL lets a pool user change it counts as unread); a pool user's task
+    /// couldn't be deleted, or a running instance of one couldn't be stopped (or its path
+    /// read), a folder's tasks or subfolders couldn't be listed, or there were more than
+    /// [`FOLDERS_CAP`] folders; or a task file or the Task Scheduler's cache holds a task the
+    /// listing didn't give, and its file doesn't show it isn't the pool's, or either couldn't
+    /// be listed ([`unlisted`]). The BITS step still ran.
     TasksLeft,
     /// 57: every task was read and the pool's deleted, but a pool user's BITS job wasn't
     /// cancelled, a job's owner couldn't be read, or the BITS list couldn't be read or reached
@@ -192,13 +220,17 @@ pub const FOLDERS_CAP: usize = 10_000;
 /// that listing, 56.
 pub const LISTED_CAP: usize = 100_000;
 
-/// A task's principal as its definition gives it; either may be empty.
+/// A task's principal as its definition gives it, either name possibly empty, and its author.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Principal {
     /// `IPrincipal::UserId`.
     pub user_id: String,
     /// `IPrincipal::GroupId`.
     pub group_id: String,
+    /// `IRegistrationInfo::Author`, empty where it can't be read (and for a task file). The
+    /// registrant writes it, so it is never trusted: logged for a group task left at 56, and
+    /// never part of a judgment.
+    pub author: String,
 }
 
 impl Principal {
@@ -228,6 +260,9 @@ pub trait Sweeper: Gate + Bits + Record {
     type Folder;
     /// The root folder, `\`.
     fn root(&mut self) -> Result<Self::Folder, Failed>;
+    /// The folder at `path` (`\` or `\A\B`, `ITaskService::GetFolder`); `Err` when it can't
+    /// be opened.
+    fn folder_at(&mut self, path: &str) -> Result<Self::Folder, Failed>;
     /// The folders directly below `folder`, each `Err` where it couldn't be read; `Err` when
     /// the list couldn't be.
     fn subfolders(
@@ -298,6 +333,43 @@ pub trait Sweeper: Gate + Bits + Record {
     fn log(&mut self, error: bool, line: &str);
     /// Appends `line` to the admin-only log ([`log_path`]); `Err`, naming no path, if it can't.
     fn admin_log(&mut self, line: &str) -> Result<(), Failed>;
+    /// The SID of the pool's group, `ClauseoSandboxUsers`, as the record's `GroupSid` names it;
+    /// `Ok(None)` when it names none, `Err` when it can't be read or isn't a SID.
+    fn pool_group(&mut self) -> Result<Option<Sid>, Failed>;
+    /// Whether `sid` is a group's (`LookupAccountSidW`: a group, an alias or a well-known
+    /// group); `Err` when that can't be told.
+    fn is_group(&mut self, sid: &Sid) -> Result<bool, Failed>;
+    /// The members of this machine's local group `sid` (`NetLocalGroupGetMembers`, level 0,
+    /// by the name `LookupAccountSidW` gives, which must resolve back to `sid`); `Err` when
+    /// it isn't one or they can't all be read.
+    fn group_members(&mut self, sid: &Sid) -> Result<Vec<Sid>, Failed>;
+    /// The security descriptor of the task `name` in `folder`, self-relative and as SDDL,
+    /// with its owner, group and DACL, and its SACL when `sacl`
+    /// (`IRegisteredTask::GetSecurityDescriptor`, its SDDL converted); `Err` when any part
+    /// asked for can't be read.
+    fn task_security(
+        &mut self,
+        folder: &Self::Folder,
+        name: &str,
+        sacl: bool,
+    ) -> Result<harden::TaskSecurity, Failed>;
+    /// Gives the task `name` in `folder` the self-relative descriptor `descriptor`, its owner,
+    /// group, DACL and SACL (`IRegisteredTask::SetSecurityDescriptor` with
+    /// `TASK_DONT_ADD_PRINCIPAL_ACE`, so no entry is added for its principal).
+    fn set_task_security(
+        &mut self,
+        folder: &Self::Folder,
+        name: &str,
+        descriptor: &[u8],
+    ) -> Result<(), Failed>;
+    /// The `Id` (a GUID in braces) of the task at `path` (`\A\name`) in the Task Scheduler's
+    /// cache (`TaskCache\Tree`); `Ok(None)` when its key is gone.
+    fn task_cache_id(&mut self, path: &str) -> Result<Option<String>, Failed>;
+    /// The record's `OwnerUntrusted` entries ([`untrusted`]), empty when it is missing.
+    fn owner_untrusted(&mut self) -> Result<Vec<String>, Failed>;
+    /// Writes the record's `OwnerUntrusted` as `entries`, deleting it when there are none, in
+    /// the key as it is. Called under the set-up lock.
+    fn set_owner_untrusted(&mut self, entries: &[String]) -> Result<(), Failed>;
 }
 
 /// Runs the sweep as the module says.
@@ -336,7 +408,7 @@ pub fn sweep(fs: &mut impl Sweeper) -> SweepExit {
         }
     };
     let at = fs.now();
-    let mut swept = sweep_tasks(fs, &pool.users);
+    let mut swept = sweep_tasks(fs, &pool.users, Some(&pool.owner));
     let jobs = cancel_pool_jobs(fs, &pool.users);
     // Only now, the pool's tasks deleted and its BITS jobs cancelled, can no trigger or notify
     // command start another instance: the running ones are stopped last.
@@ -353,7 +425,21 @@ pub fn sweep(fs: &mut impl Sweeper) -> SweepExit {
         SweepExit::Done
     };
     let mut line = log_line(pool.users.len(), &swept, &jobs);
-    line.push_str(&log_path::to_admin_log(fs, &swept.left_paths));
+    // The tasks whose owner hardening may have written, those gone or changed cleared
+    // (`untrusted`); a failure only keeps an entry longer.
+    if let Err(why) = untrusted::clear_gone(fs) {
+        line = format!("{line}; the record's OwnerUntrusted couldn't be written: {why}");
+    }
+    line.push_str(&log_path::to_admin_log(
+        fs,
+        &swept.left_paths,
+        &swept.group_authors,
+    ));
+    line.push_str(&harden::to_admin_log(
+        fs,
+        &swept.hardened,
+        "the sandbox's task sweep",
+    ));
     if exit == SweepExit::Done {
         // Step 6, only on a run that ends 0.
         let recorded = reserved
@@ -382,12 +468,29 @@ fn refused(fs: &mut impl Sweeper, exit: SweepExit, why: &str) -> SweepExit {
 }
 
 /// Step 4: every folder from the root, depth first through a stack, at most [`FOLDERS_CAP`];
-/// each task read, resolved and, when the pool's, deleted ([`sweep_task`]). Each name is
-/// resolved once.
-pub fn sweep_tasks<S: Sweeper>(fs: &mut S, pool: &[Sid]) -> Swept {
+/// each task read, resolved and, when the pool's, deleted ([`sweep_task`]), or hardened when
+/// it may run as `lawyer` ([`harden`]; `None`, for the elevated tests on a real machine,
+/// hardens nothing). Each name is resolved once.
+pub fn sweep_tasks<S: Sweeper>(fs: &mut S, pool: &[Sid], lawyer: Option<&Sid>) -> Swept {
     let mut swept = Swept::default();
     let mut resolved = BTreeMap::new();
     let names = Names::of(fs, pool);
+    let mut groups = Groups::of(fs);
+    // Read first, its pending entries settled: a task listed there has its owner ignored
+    // (`untrusted`). A settling not written only settles again next time.
+    match untrusted::read(fs) {
+        Ok(list) => {
+            let (list, written) = untrusted::settle(fs, list);
+            swept.owner_untrusted = list;
+            if let Err(why) = written {
+                swept.note(why);
+            }
+        }
+        Err(why) => {
+            swept.unlisted += 1;
+            swept.note(why);
+        }
+    }
     // Every task the listing gave, by path, for the cross-check (`unlisted`).
     let mut listed = Vec::new();
     let mut stack = match fs.root() {
@@ -422,8 +525,10 @@ pub fn sweep_tasks<S: Sweeper>(fs: &mut S, pool: &[Sid]) -> Swept {
                 for task in tasks {
                     let at = Walk {
                         pool,
+                        lawyer,
                         names: &names,
                         resolved: &mut resolved,
+                        groups: &mut groups,
                         swept: &mut swept,
                     };
                     sweep_task(fs, &folder, task, at);
@@ -455,144 +560,22 @@ pub fn sweep_tasks<S: Sweeper>(fs: &mut S, pool: &[Sid]) -> Swept {
     if !swept.capped {
         let at = Walk {
             pool,
+            lawyer,
             names: &names,
             resolved: &mut resolved,
+            groups: &mut groups,
             swept: &mut swept,
         };
         unlisted::cross_check(fs, &listed, at);
+        let at = Walk {
+            pool,
+            lawyer,
+            names: &names,
+            resolved: &mut resolved,
+            groups: &mut groups,
+            swept: &mut swept,
+        };
+        replaced::recheck(fs, at);
     }
     swept
-}
-
-/// What one task's sweep works with.
-struct Walk<'w> {
-    /// The pool's SIDs.
-    pool: &'w [Sid],
-    /// The pool's names, for a name that resolves to no SID.
-    names: &'w Names,
-    /// Each name's resolution, once a run.
-    resolved: &'w mut BTreeMap<String, Resolved>,
-    /// The counts.
-    swept: &'w mut Swept,
-}
-
-/// What one task's principal or owner makes of it.
-enum Found {
-    /// The pool's: deleted.
-    Pool,
-    /// Not the pool's: left.
-    NotPool,
-    /// Another domain's name that resolves to no SID: skipped.
-    Skipped(Failed),
-    /// A name that resolves to no SID and may be the pool's: 56.
-    Unresolved(Failed),
-    /// No user or group: 56.
-    NoPrincipal,
-    /// The owner couldn't be read, or the task file read instead couldn't be read or trusted,
-    /// or names the pool or no one known: 56.
-    Unread(Failed),
-    /// The Task Scheduler wouldn't give it, and its trusted task file names a principal that
-    /// isn't the pool's: skipped.
-    FileSkipped,
-}
-
-/// One task of `folder`: deleted when its principal is the pool's (a pool SID, or a pool
-/// user's name that resolves to no SID) or its owner is a pool SID, counted in `swept` either
-/// way. A task the Task Scheduler won't give is held to its owner and its file
-/// ([`file_trust::by_file`]).
-fn sweep_task<S: Sweeper>(fs: &mut S, folder: &S::Folder, task: Task, at: Walk<'_>) {
-    let Walk {
-        pool,
-        names,
-        resolved,
-        swept,
-    } = at;
-    swept.tasks += 1;
-    let left_before = swept.left_tasks();
-    let found = match task.principal {
-        Ok(principal) => {
-            let found = match principal.name() {
-                Some(name) => by_name(fs, pool, names, resolved, name),
-                None => Found::NoPrincipal,
-            };
-            if matches!(found, Found::Pool) {
-                found
-            } else {
-                match pool_owned(fs, folder, &task.name, pool) {
-                    Ok(true) => Found::Pool,
-                    Ok(false) => found,
-                    Err(why) => Found::Unread(why),
-                }
-            }
-        }
-        Err(why) => {
-            let found = file_trust::by_file(fs, folder, &task.name, pool, names, resolved);
-            if matches!(found, Found::Unread(_)) {
-                swept.note(why);
-            }
-            found
-        }
-    };
-    match found {
-        Found::Pool => {
-            // Deleted first, so no trigger starts another instance; deleting the task ends
-            // none, so its running instances are stopped once the walk and the BITS step are
-            // done (`running`).
-            let path = fs
-                .folder_path(folder)
-                .map(|folder| running::task_path(&folder, &task.name));
-            match fs.delete_task(folder, &task.name) {
-                Ok(()) => swept.deleted += 1,
-                Err(why) => {
-                    swept.not_deleted += 1;
-                    swept.note(why);
-                }
-            }
-            swept.pool_paths.push(path);
-        }
-        Found::NotPool => {}
-        Found::Skipped(why) => {
-            swept.skipped += 1;
-            swept.note(why);
-        }
-        Found::Unresolved(why) => {
-            swept.unresolved += 1;
-            swept.note(why);
-        }
-        Found::NoPrincipal => swept.no_principal += 1,
-        Found::Unread(why) => {
-            swept.unreadable += 1;
-            swept.note(why);
-        }
-        Found::FileSkipped => swept.file_skipped += 1,
-    }
-    if swept.left_tasks() > left_before
-        && let Ok(folder) = fs.folder_path(folder)
-    {
-        swept
-            .left_paths
-            .push(running::task_path(&folder, &task.name));
-    }
-}
-
-/// What the principal `name` makes of a task, against `pool`; resolved once a run
-/// ([`resolve`]), kept in `resolved`.
-fn by_name(
-    fs: &mut impl Sweeper,
-    pool: &[Sid],
-    names: &Names,
-    resolved: &mut BTreeMap<String, Resolved>,
-    name: &str,
-) -> Found {
-    let found = resolved
-        .entry(name.to_owned())
-        .or_insert_with(|| resolve(fs, names, name))
-        .clone();
-    match found {
-        Resolved::Sid(sid) if pool.contains(&sid) => Found::Pool,
-        Resolved::Sid(_) => Found::NotPool,
-        Resolved::PoolName => Found::Pool,
-        Resolved::Skipped(why) => Found::Skipped(why),
-        Resolved::Unresolved(why) => Found::Unresolved(why),
-    }
 }

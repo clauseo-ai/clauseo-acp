@@ -124,7 +124,7 @@ fn a_hidden_task_with_an_odd_descriptor_is_56_whatever_its_file_says() {
             assert!(line.contains("1 not listed"), "{line}");
             assert!(line.contains("0 more skipped"), "{line}");
             assert!(fake.deleted().is_empty(), "never deleted through a file");
-            let swept = sweep_tasks(&mut fake, &[sid(1010)]);
+            let swept = sweep_tasks(&mut fake, &[sid(1010)], Some(&sid(1001)));
             assert_eq!(swept.hidden_paths, [r"\A\hidden"], "{why}");
         }
     }
@@ -302,7 +302,7 @@ fn a_pool_owned_hidden_task_is_still_56_after_the_second_read() {
     assert!(line.contains("1 not listed"), "{line}");
     let kind = "were read again: 1 tasks in a task file and the cache";
     assert!(line.contains(kind), "{line}");
-    let swept = sweep_tasks(&mut fake, &[sid(1010)]);
+    let swept = sweep_tasks(&mut fake, &[sid(1010)], Some(&sid(1001)));
     assert_eq!(swept.hidden_paths, [r"\A\hidden"]);
 }
 

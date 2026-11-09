@@ -220,6 +220,8 @@ pub(super) fn new_machine(test: &str) -> FakeMachine {
         stop_resets: BTreeSet::new(),
         held: BTreeSet::new(),
         held_for: Vec::new(),
+        hardened_for: Vec::new(),
+        harden_fails: None,
         faults: ProfileFaults::default(),
         next_rid: 1000,
         passwords: 0,

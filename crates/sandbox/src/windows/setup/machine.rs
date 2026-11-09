@@ -217,6 +217,12 @@ pub trait Machine {
     /// Locks the admin copy's folder and everything in it again, as `--adopt` does
     /// (`admin_copy::os::lock_down_tree`), denying the pool's group `group`, as this process.
     fn lock_admin_copy(&mut self, group: &Sid) -> Result<(), MachineError>;
+    /// Hardens every task that runs as the record's owner (`sweep::harden`), as this process:
+    /// the pool from the record this run wrote, what changed named in the admin-only log, which
+    /// set-up makes, owned by Administrators (`O:BA`), when it is missing. The counts for the
+    /// Event Log, `""` when nothing needed it; `Err` when the record can't be read. Never fails
+    /// the set-up.
+    fn harden_tasks(&mut self) -> Result<String, MachineError>;
     /// The users of `pool` the reuse rule would hold back once this run has reset `resets`, for
     /// the top-up's count (`top_up.rs`, `MatterSids::held_after_resets`), the owner's ledger
     /// opened trusting `trusted`; an input that can't be read holds every user. The engine calls

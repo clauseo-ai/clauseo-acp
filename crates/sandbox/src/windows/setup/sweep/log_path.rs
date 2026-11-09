@@ -8,7 +8,9 @@
 //! or characters that disguise it, so each path is still cleaned ([`clean`]): every character
 //! outside printable ASCII is `?`, every SID-shaped run is `<sid>`, the path is quoted, and it
 //! is cut at [`PATH_CAP`] characters. At most [`LOGGED_CAP`] are named a run ([`listed`]).
-//! Pure but for that one call: tested on every OS.
+//! The `Author` a group task left at 56 gives goes there too, cleaned as a path is
+//! ([`authors`]): its registrant writes it, so it is never trusted. Pure but for that one
+//! call: tested on every OS.
 
 use super::Sweeper;
 
@@ -33,6 +35,19 @@ pub const CLAUSEO_FOLDER_SDDL: &str =
 /// What `Clauseo\Sandbox` is made with: SYSTEM and Administrators alone.
 pub const ADMIN_FOLDER_SDDL: &str = "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)";
 
+/// The admin-only log as set-up's elevated administrator makes it when missing
+/// (`harden.rs`): owned by Administrators, since only SYSTEM may make a file SYSTEM owns, and
+/// the same DACL as [`ADMIN_LOG_SDDL`]. [`admin_only`] takes either owner.
+pub const ADMIN_LOG_SDDL_AS_ADMIN: &str = "O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)";
+
+/// [`ADMIN_LOG_FOLDERS`] as set-up's administrator makes them: `Clauseo` as the installer does
+/// (owned by Administrators already), `Sandbox` owned by Administrators with
+/// [`ADMIN_FOLDER_SDDL`]'s DACL.
+pub const ADMIN_LOG_FOLDERS_AS_ADMIN: [(&str, &str); 2] = [
+    ("Clauseo", CLAUSEO_FOLDER_SDDL),
+    ("Sandbox", "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"),
+];
+
 /// The admin-only log's file name; rotated once to `sweep-admin.log.1`.
 pub const ADMIN_LOG_NAME: &str = "sweep-admin.log";
 
@@ -44,14 +59,16 @@ pub fn rotates(size: u64, add: u64) -> bool {
     size > 0 && size.saturating_add(add) > ADMIN_LOG_CAP
 }
 
-/// Writes the paths of the tasks that keep the run at 56 to `fs`'s admin-only log, and returns
-/// what the world-readable line says of them: `""` for none, else their count and whether the
-/// admin-only log holds them, never a path.
-pub(super) fn to_admin_log<S: Sweeper>(fs: &mut S, paths: &[String]) -> String {
+/// Writes the paths of the tasks that keep the run at 56, and the `Author` of each group task
+/// among them that gave one ([`authors`]), to `fs`'s admin-only log, and returns what the
+/// world-readable line says of them: `""` for none, else their count and whether the
+/// admin-only log holds them, never a path or an author.
+pub(super) fn to_admin_log<S: Sweeper>(fs: &mut S, paths: &[String], by: &[String]) -> String {
     let named = listed(paths);
     if named.is_empty() {
         return String::new();
     }
+    let named = format!("{named}{}", authors(by));
     let mut unique: Vec<&String> = paths.iter().collect();
     unique.sort_unstable();
     unique.dedup();
@@ -66,10 +83,15 @@ pub(super) fn to_admin_log<S: Sweeper>(fs: &mut S, paths: &[String]) -> String {
 }
 
 /// Whether the self-relative descriptor `bytes` keeps a file to SYSTEM and Administrators: one
-/// of them its owner, a protected DACL, and only allow entries, each naming one of them.
+/// of them its owner (SYSTEM when the sweep made it, Administrators when set-up did), and a
+/// protected DACL of exactly two allows, full control (`FA`) for SYSTEM and for
+/// Administrators, in either order, and nothing else (none for Users).
 #[cfg(any(windows, test))]
 pub fn admin_only(bytes: &[u8]) -> bool {
-    use crate::windows::acl_bytes::{ALLOWED, Acl, Descriptor, kind, owner_sid, sid, sid_text};
+    use crate::windows::acl_bytes::{
+        ALLOWED, Acl, Descriptor, kind, mask, owner_sid, sid, sid_text,
+    };
+    use crate::windows::sids::Sid;
 
     const ADMINS: [&str; 2] = ["S-1-5-18", "S-1-5-32-544"];
     let owner = owner_sid(bytes);
@@ -85,10 +107,19 @@ pub fn admin_only(bytes: &[u8]) -> bool {
     let Ok(dacl) = Acl::parse(dacl) else {
         return false;
     };
-    dacl.aces().iter().all(|ace| {
-        let named = sid(ace).and_then(sid_text);
-        kind(ace) == ALLOWED && named.is_some_and(|sid| ADMINS.contains(&sid.as_str()))
-    })
+    let mut named = Vec::new();
+    for ace in dacl.aces() {
+        let sid = sid(ace).and_then(sid_text);
+        let Some(sid) = sid.filter(|sid| ADMINS.contains(&sid.as_str())) else {
+            return false;
+        };
+        if kind(ace) != ALLOWED || mask(ace) != Some(0x001F_01FF) {
+            return false;
+        }
+        named.push(sid);
+    }
+    named.sort_unstable_by(|a, b| a.as_str().cmp(b.as_str()));
+    named.iter().map(Sid::as_str).eq(ADMINS)
 }
 
 /// The most paths one run's log line names.
@@ -101,6 +132,21 @@ pub const PATH_CAP: usize = 260;
 /// once): `""` for none, else `; tasks that keep the sweep at 56: "a", "b"` with at most
 /// [`LOGGED_CAP`], then ` (+k more)`.
 pub fn listed(paths: &[String]) -> String {
+    named("tasks that keep the sweep at 56", paths)
+}
+
+/// The admin-only log line's part naming the `Author` each group task left at 56 gave, as
+/// [`listed`] names paths: cleaned, each once, at most [`LOGGED_CAP`]. Each is its registrant's
+/// word, so the line says it isn't trusted.
+pub fn authors(authors: &[String]) -> String {
+    named(
+        "the authors group tasks left at 56 give (their registrant's word, never trusted)",
+        authors,
+    )
+}
+
+/// `; <label>: "a", "b" (+k more)` for `paths`, as [`listed`] says; `""` for none.
+fn named(label: &str, paths: &[String]) -> String {
     let mut unique: Vec<&String> = Vec::new();
     for path in paths {
         if !unique.contains(&path) {
@@ -110,7 +156,7 @@ pub fn listed(paths: &[String]) -> String {
     if unique.is_empty() {
         return String::new();
     }
-    let named: Vec<String> = unique
+    let shown: Vec<String> = unique
         .iter()
         .take(LOGGED_CAP)
         .map(|path| clean(path))
@@ -121,10 +167,7 @@ pub fn listed(paths: &[String]) -> String {
     } else {
         String::new()
     };
-    format!(
-        "; tasks that keep the sweep at 56: {}{more}",
-        named.join(", ")
-    )
+    format!("; {label}: {}{more}", shown.join(", "))
 }
 
 /// `path` as the log line names it: each character outside printable ASCII (U+0020 to U+007E)

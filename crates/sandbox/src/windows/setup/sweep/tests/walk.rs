@@ -109,3 +109,26 @@ fn the_log_line_holds_no_sid_task_name_or_account_name() {
     assert!(line.contains("no SID), 1 not deleted"), "{line}");
     assert!(line.contains("1 BITS jobs cancelled, 1 not"), "{line}");
 }
+
+#[test]
+fn tasks_in_nested_subfolders_are_found_and_deleted() {
+    let mut fake = Fake::new(&[1010]);
+    let mut deep = String::new();
+    for level in 0..40 {
+        write!(deep, "\\F{level}").unwrap();
+    }
+    fake.task(&deep, "deepest", user("S-1-5-21-1-2-3-1010"));
+    fake.task("\\Microsoft\\Windows", "theirs", user("S-1-5-18"));
+    fake.task("\\A\\B", "pool", user("S-1-5-21-1-2-3-1010"));
+    fake.task("\\A", "other", user("S-1-5-21-1-2-3-1013"));
+    assert_eq!(sweep(&mut fake), SweepExit::Done);
+    let mut deleted = fake.deleted();
+    deleted.sort_unstable();
+    assert_eq!(deleted, ["\\A\\B\\pool", &format!("{deep}\\deepest")]);
+    // The root, 40 deep, \Microsoft, \Microsoft\Windows, \A and \A\B.
+    assert!(
+        fake.logged[0].1.contains("45 folders and 4 tasks read"),
+        "{:?}",
+        fake.logged
+    );
+}

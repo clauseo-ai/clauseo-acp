@@ -4,6 +4,8 @@
 
 use std::collections::BTreeMap;
 
+use super::harden::Hardened;
+use super::untrusted::Untrusted;
 use super::{FOLDERS_CAP, Failed, JOBS_CAP, Jobs};
 #[cfg(doc)]
 use super::{log_path, running, unlisted};
@@ -83,13 +85,48 @@ pub struct Swept {
     /// The path of each task that keeps the run at 56, where it was read: written, cleaned and
     /// capped, to the admin-only log alone ([`log_path`]).
     pub left_paths: Vec<String>,
+    /// Group tasks (`group.rs`): the pool-owned ones deleted.
+    pub group_tasks_deleted: usize,
+    /// Group tasks left, a readable owner that isn't a pool SID naming them not the pool's.
+    pub group_tasks_ignored: usize,
+    /// Group tasks that keep the run at 56: a pool owner's not deleted, or an owner that can't
+    /// be read.
+    pub group_tasks_56: usize,
+    /// Of the group tasks, those whose group may hold a pool user (`Groups::can_contain`):
+    /// logged, never part of a judgment.
+    pub group_tasks_open: usize,
+    /// The `Author` of each group task that keeps the run at 56 and gave one: its registrant's
+    /// word, never trusted; logged cleaned and capped ([`log_path`]).
+    pub group_authors: Vec<String>,
+    /// The tasks that run as the lawyer hardened, and those that couldn't be (`harden.rs`):
+    /// counted in the log line, named in the admin-only log alone; 56 only for a task whose
+    /// `Id` changed before the write or across it ([`Hardened::swapped`]).
+    pub hardened: Hardened,
+    /// The record's `OwnerUntrusted` as read at the walk's start (`untrusted.rs`): tasks whose
+    /// owner is ignored while their `Id` holds.
+    pub owner_untrusted: Vec<Untrusted>,
+    /// Each task's `TaskCache\Tree` `Id` as read before it was judged, by path, the last
+    /// judgment's where one was judged again (`replaced.rs`); never logged.
+    pub walked_ids: BTreeMap<String, Result<Option<String>, Failed>>,
+    /// The paths judged again for another task under the name (`replaced.rs`): each at most
+    /// once a run; never logged.
+    pub rejudged: Vec<String>,
+    /// Tasks another task may have replaced under the name that couldn't be judged again: an
+    /// `Id` that couldn't be read, a folder or listing that couldn't be, one the listing hides,
+    /// or replaced again once judged again. 56.
+    pub unjudged: usize,
 }
 
 impl Swept {
     /// How many tasks the walk found that keep the run at 56: unreadable, unresolved, naming no
-    /// one, or the pool's and not deleted.
+    /// one, the pool's and not deleted, or swapped under hardening (before its write or across
+    /// it).
     pub(super) fn left_tasks(&self) -> usize {
-        self.unreadable + self.unresolved + self.no_principal + self.not_deleted
+        self.unreadable
+            + self.unresolved
+            + self.no_principal
+            + self.not_deleted
+            + self.hardened.swapped
     }
 
     /// Whether a task of the pool's may be left: step 4's 56.
@@ -98,6 +135,8 @@ impl Swept {
             || self.no_principal > 0
             || self.unresolved > 0
             || self.not_deleted > 0
+            || self.hardened.swapped > 0
+            || self.unjudged > 0
             || self.instances_not_stopped > 0
             || self.hidden > 0
             || self.arrived_pool > 0
@@ -151,13 +190,25 @@ pub(super) fn log_line(users: usize, swept: &Swept, jobs: &Result<Jobs, Failed>)
     } else {
         String::new()
     };
+    let replaced = if swept.rejudged.is_empty() && swept.unjudged == 0 {
+        String::new()
+    } else {
+        format!(
+            "; {} tasks another task took the name of after they were read were judged again, {} \
+             couldn't be",
+            swept.rejudged.len(),
+            swept.unjudged
+        )
+    };
     format!(
         "the sandbox's task sweep: {users} pool users, {} folders and {} tasks read, {} of the \
          pool's tasks deleted, {} unreadable ({} more skipped, not the pool's by their task \
          file), {} with no user or group, {} unresolved (no SID, not another domain's), {} \
          skipped (another domain's, no SID), {} not deleted, {} not listed (in a task file or \
-         the cache only), {} running instances stopped, {} not, {cancelled} BITS jobs \
-         cancelled, {failed} not{unlisted}{capped}{listed}{relisted}",
+         the cache only), {} group tasks deleted, {} ignored (not owned by a pool user), {} left \
+         ({} naming a group a pool user may be in), {} running instances stopped, {} not, \
+         {cancelled} BITS jobs cancelled, {failed} not{unlisted}{capped}{listed}{relisted}\
+         {replaced}",
         swept.folders,
         swept.tasks,
         swept.deleted,
@@ -168,6 +219,10 @@ pub(super) fn log_line(users: usize, swept: &Swept, jobs: &Result<Jobs, Failed>)
         swept.skipped,
         swept.not_deleted,
         swept.hidden,
+        swept.group_tasks_deleted,
+        swept.group_tasks_ignored,
+        swept.group_tasks_56,
+        swept.group_tasks_open,
         swept.instances_stopped,
         swept.instances_not_stopped
     )

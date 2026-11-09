@@ -27,9 +27,10 @@ use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Shell::{FOLDERID_System, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
 use windows::core::{BSTR, HSTRING, PCWSTR, PWSTR};
 
+use super::harden::TaskSecurity;
 use super::{
     Failed, Listing, Principal, SweepExit, Sweeper, TASK_FILE_CAP, Task, TaskFile, sweep,
-    windows_listing, windows_task_file,
+    windows_groups, windows_harden, windows_listing, windows_task_file,
 };
 use crate::windows::refresh::event_log;
 use crate::windows::setup::accounts::{self, Kind};
@@ -37,6 +38,7 @@ use crate::windows::setup::pool_steps::windows_bits::{Com, WindowsBits};
 use crate::windows::setup::pool_steps::windows_record::{self, RecordLock};
 use crate::windows::setup::pool_steps::{Bits, Gate, Pool, Record, windows_gate};
 use crate::windows::setup::preflight::sid_text;
+use crate::windows::setup::record_write::{self, RECORD_KEY};
 use crate::windows::sids::Sid;
 
 pub(crate) mod admin_log;
@@ -56,6 +58,10 @@ pub(crate) struct WindowsSweeper {
     service: Option<ITaskService>,
     /// The last list of running task instances, `None` where one couldn't be read.
     running: Vec<Option<IRunningTask>>,
+    /// Whether the admin-only log is made, when missing, owned by Administrators: set-up's
+    /// administrator can't make it owned by SYSTEM, as the sweep does
+    /// (`admin_log::append_as_admin`).
+    admin_log_as_admin: bool,
     /// COM on this thread; the last field, so it is uninitialised after every interface above.
     _com: Com,
 }
@@ -68,7 +74,17 @@ impl WindowsSweeper {
             bits: WindowsBits::default(),
             service: None,
             running: Vec::new(),
+            admin_log_as_admin: false,
             _com: Com::new(),
+        }
+    }
+
+    /// The machine for set-up's hardening (`windows_harden::at_set_up`): as [`Self::new`],
+    /// but the admin-only log is made, when missing, owned by Administrators.
+    pub(super) fn for_set_up() -> WindowsSweeper {
+        WindowsSweeper {
+            admin_log_as_admin: true,
+            ..WindowsSweeper::new()
         }
     }
 
@@ -91,7 +107,7 @@ impl WindowsSweeper {
 }
 
 /// `call` failed with an error, as a line for the log: the call and its HRESULT, no name.
-fn failed(call: &'static str) -> impl Fn(windows::core::Error) -> Failed {
+pub(super) fn failed(call: &'static str) -> impl Fn(windows::core::Error) -> Failed {
     move |error| format!("{call} failed ({:#010x})", error.code().0)
 }
 
@@ -156,6 +172,12 @@ impl Sweeper for WindowsSweeper {
         let service = self.service()?;
         // SAFETY: a live service and a BSTR that outlives the call.
         unsafe { service.GetFolder(&BSTR::from("\\")) }.map_err(failed("ITaskService::GetFolder"))
+    }
+
+    fn folder_at(&mut self, path: &str) -> Result<ITaskFolder, Failed> {
+        let service = self.service()?;
+        // SAFETY: a live service and a BSTR that outlives the call.
+        unsafe { service.GetFolder(&BSTR::from(path)) }.map_err(failed("ITaskService::GetFolder"))
     }
 
     fn subfolders(
@@ -315,7 +337,53 @@ impl Sweeper for WindowsSweeper {
     }
 
     fn admin_log(&mut self, line: &str) -> Result<(), Failed> {
-        admin_log::append(line)
+        if self.admin_log_as_admin {
+            admin_log::append_as_admin(line)
+        } else {
+            admin_log::append(line)
+        }
+    }
+
+    fn pool_group(&mut self) -> Result<Option<Sid>, Failed> {
+        windows_groups::pool_group()
+    }
+
+    fn is_group(&mut self, sid: &Sid) -> Result<bool, Failed> {
+        windows_groups::is_group(sid)
+    }
+
+    fn group_members(&mut self, sid: &Sid) -> Result<Vec<Sid>, Failed> {
+        windows_groups::group_members(sid)
+    }
+
+    fn task_security(
+        &mut self,
+        folder: &ITaskFolder,
+        name: &str,
+        sacl: bool,
+    ) -> Result<TaskSecurity, Failed> {
+        windows_harden::task_security(folder, name, sacl)
+    }
+
+    fn set_task_security(
+        &mut self,
+        folder: &ITaskFolder,
+        name: &str,
+        descriptor: &[u8],
+    ) -> Result<(), Failed> {
+        windows_harden::set_task_security(folder, name, descriptor)
+    }
+
+    fn task_cache_id(&mut self, path: &str) -> Result<Option<String>, Failed> {
+        windows_listing::task_cache_id(path)
+    }
+
+    fn owner_untrusted(&mut self) -> Result<Vec<String>, Failed> {
+        record_write::read_owner_untrusted(RECORD_KEY).map_err(|error| error.to_string())
+    }
+
+    fn set_owner_untrusted(&mut self, entries: &[String]) -> Result<(), Failed> {
+        record_write::write_owner_untrusted(RECORD_KEY, entries).map_err(|error| error.to_string())
     }
 }
 
@@ -348,7 +416,7 @@ fn read_task(task: &IRegisteredTask) -> Task {
     }
 }
 
-/// `task`'s principal: its definition's `UserId` and `GroupId`.
+/// `task`'s principal: its definition's `UserId` and `GroupId`, and its `Author`.
 fn principal(task: &IRegisteredTask) -> Result<Principal, Failed> {
     // SAFETY: a live task.
     let definition = unsafe { task.Definition() }.map_err(failed("IRegisteredTask::Definition"))?;
@@ -361,15 +429,29 @@ fn principal(task: &IRegisteredTask) -> Result<Principal, Failed> {
     let mut group = BSTR::new();
     // SAFETY: as above.
     unsafe { principal.GroupId(&raw mut group) }.map_err(failed("IPrincipal::GroupId"))?;
+    // The registrant writes `Author`: read for the log alone, never trusted, and empty where
+    // it can't be read.
+    // SAFETY: a live definition.
+    let author = unsafe { definition.RegistrationInfo() }
+        .ok()
+        .and_then(|info| {
+            let mut author = BSTR::new();
+            // SAFETY: a live registration info; `author` is a live out-pointer, freed with it.
+            unsafe { info.Author(&raw mut author) }
+                .ok()
+                .map(|()| author.to_string())
+        })
+        .unwrap_or_default();
     Ok(Principal {
         user_id: user.to_string(),
         group_id: group.to_string(),
+        author,
     })
 }
 
 /// The SID of the account or group `name`, as `LookupAccountNameW` resolves it on this machine
 /// (a local, built-in, well-known or domain name). The error names the call, never `name`.
-fn lookup_account(name: &str) -> Result<Sid, Failed> {
+pub(super) fn lookup_account(name: &str) -> Result<Sid, Failed> {
     let name = HSTRING::from(name);
     let (mut sid_size, mut domain_size) = (0u32, 0u32);
     let mut kind = SID_NAME_USE::default();

@@ -61,6 +61,22 @@ fn a_new_owners_set_up_replaces_the_previous_owners_task() {
 }
 
 #[test]
+fn every_set_up_hardens_the_lawyers_tasks_once_the_record_names_them_and_a_failure_is_no_failure() {
+    let owner_copy = Some(CopyOwner::User(owner()));
+    for copy in [Some(CopyOwner::Machine), owner_copy, None] {
+        let mut machine = installed("setup-harden", copy.clone());
+        let mut acl = FakeAcl::default();
+        set_up_fresh(&mut machine, &mut acl);
+        assert_eq!(machine.hardened_for, [Some(owner())], "{copy:?}");
+    }
+    let mut machine = installed("setup-harden-fails", Some(CopyOwner::Machine));
+    machine.harden_fails = Some("the record can't be read".to_owned());
+    let mut acl = FakeAcl::default();
+    set_up_fresh(&mut machine, &mut acl);
+    assert_eq!(machine.hardened_for, [Some(owner())]);
+}
+
+#[test]
 fn a_failed_registration_fails_the_set_up_closed() {
     let mut machine = installed("setup-stop-task-fail", Some(CopyOwner::Machine));
     let before = machine.state.clone();
@@ -76,6 +92,11 @@ fn a_failed_registration_fails_the_set_up_closed() {
     // Everything the run made is gone again: no record, no pool user, no task.
     assert_eq!(machine.state, before);
     assert!(acl.aces.is_empty(), "{:?}", acl.aces);
+    assert_eq!(
+        machine.hardened_for,
+        [],
+        "a set-up that failed first hardens nothing"
+    );
 }
 
 #[test]

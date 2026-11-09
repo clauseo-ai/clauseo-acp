@@ -109,6 +109,10 @@ pub(super) struct FakeMachine {
     pub(super) held: BTreeSet<Sid>,
     /// The `resets` each `held_users` call was given.
     pub(super) held_for: Vec<Vec<Sid>>,
+    /// The record's owner each time set-up hardened the tasks that run as the lawyer, and why
+    /// that fails when `Some` (it never fails the set-up).
+    pub(super) hardened_for: Vec<Option<Sid>>,
+    pub(super) harden_fails: Option<String>,
     pub(super) faults: ProfileFaults,
     pub(super) next_rid: u32,
     pub(super) passwords: u32,
@@ -477,6 +481,20 @@ impl Machine for FakeMachine {
     fn lock_admin_copy(&mut self, group: &Sid) -> Result<(), MachineError> {
         assert!(!self.acting.get(), "the admin copy is locked as admin");
         self.call(format!("lock_admin_copy {}", rid(group)))
+    }
+
+    fn harden_tasks(&mut self) -> Result<String, MachineError> {
+        assert!(!self.acting.get(), "the tasks are hardened as admin");
+        let owner = self
+            .state
+            .record
+            .as_ref()
+            .map(|record| record.owner.clone());
+        self.hardened_for.push(owner);
+        self.harden_fails.clone().map_or_else(
+            || Ok("; 1 tasks that run as the lawyer had standard users' write removed".to_owned()),
+            |why| Err(MachineError::Other(why)),
+        )
     }
 
     fn held_users(
