@@ -49,6 +49,17 @@ jobs:
       TEST: ${{ inputs.test }}
       ACCOUNT_PREFIX: ${{ inputs.account_prefix }}
     steps:
+      # The backstop clean-up deletes local accounts by this prefix, so an empty or wide one (`*`, `r`)
+      # could match runneradmin or a built-in account: only a Clauseo-prefixed name is accepted.
+      - name: Check the account prefix
+        shell: bash
+        run: |
+          if [[ ! "$ACCOUNT_PREFIX" =~ ^Clauseo[A-Za-z0-9]{2,}$ ]]; then
+            echo "::error::account_prefix '$ACCOUNT_PREFIX' must match ^Clauseo[A-Za-z0-9]{2,}\$"
+            exit 1
+          fi
+          echo "account prefix: $ACCOUNT_PREFIX"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
@@ -125,6 +136,11 @@ jobs:
         if: ${{ always() }}
         shell: pwsh
         run: |
-          $left = Get-CimInstance Win32_UserAccount -Filter "LocalAccount=True" | Where-Object { $_.Name -like "$env:ACCOUNT_PREFIX*" }
+          # The prefix is checked again here (the first step may not have run), and built-in and runner
+          # accounts are never removed whatever their names.
+          if ($env:ACCOUNT_PREFIX -cnotmatch '^Clauseo[A-Za-z0-9]{2,}$') { "::warning::account prefix '$env:ACCOUNT_PREFIX' is not a Clauseo prefix; nothing removed"; exit 0 }
+          $keep = @('Administrator', 'Guest', 'DefaultAccount', 'WDAGUtilityAccount', 'runneradmin', 'installer', $env:USERNAME)
+          $left = Get-CimInstance Win32_UserAccount -Filter "LocalAccount=True" |
+            Where-Object { $_.Name -like "$env:ACCOUNT_PREFIX*" -and $keep -notcontains $_.Name -and $_.SID -notmatch '-50[0-3]$' }
           if (-not $left) { "no leftover accounts named $env:ACCOUNT_PREFIX*"; exit 0 }
           foreach ($u in $left) { "::warning::leftover test account $($u.Name); removing it"; net user $u.Name /delete | Out-Null }
