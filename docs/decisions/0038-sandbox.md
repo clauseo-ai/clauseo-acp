@@ -165,15 +165,23 @@ notes), and every folder on a volume a scan never enters. Any other volume a lat
 (a disk image or share mounted inside the live matter brings a ready-made tree with no event
 for what is in it) is a find, never a silent skip: while the agent may run it ends the session;
 the final scan keeps it as stuck, and the matter's launches are refused ("... until the disk or
-share mounted at <path> is ejected") while it is still mounted there. From inside the jail
-none can be mounted at all: `hdiutil attach`, `mount_smbfs`, `mount -t smbfs`, `mount -t
-devfs` and `mount -t apfs` all fail and mount nothing (jail test).
+share mounted at <path> is ejected") while it is still mounted there. From inside the jail no
+disk image can be attached: the same 1 MB image attaches outside, while inside `hdiutil attach`
+fails on the Sandbox's refusal of its look-up of `com.apple.system.hdiejectd` (the jail test
+reads that kernel line), and nothing is mounted. A network drive or automount **already** in
+the matter or notes at launch is refused rather than watched ("Disconnect the network drive at
+<path> from this matter's folder, then start the AI tool again. ..."): no scan enters it, and
+the profile, fixed when the launcher is made, can't deny it per launch. Device numbers can be
+reused once a volume is ejected, so a new volume that happens to get a launch volume's number
+passes as that one. A session recorded before volumes were kept judges no volume new in its
+dead-session scan; its matter's next launch records them.
 
 Two backstops cover a stream that loses events without saying so (seen on a disk image mounted
 seconds before, under a full parallel test run: nothing for over 10 s). **The canary:** every
 10 s the watch rewrites its canary, `watch-canary-<16 hex>` with a random part of its own (no
-other session's write can answer it; removed when the watch stops), in the set-aside folder it
-uses, which is on the matter's
+other session's write can answer it; removed when the watch stops, and one unwritten for 2
+minutes, a crashed host's, is removed at each launch and at the host's start), in the set-aside
+folder it uses, which is on the matter's
 volume, denied to the agent and watched by the same stream (one stream, two paths). Its event
 comes about 4 ms after the write on this Mac. When none comes within 5 s, or the canary can't
 be written, the stream is lost and the session ends as for a find: kill first, then the final
@@ -241,7 +249,9 @@ batch, the watchdog) are 5 s each: at 2 s, load averages of 50 and more on the t
 the stream or the watch thread past the window and ended sessions that were fine. The canary's
 wait stays under its 10 s interval, and the other two are defined as it. A rescan of a big
 matter that keeps listing folders is not stuck, but no check runs past 60 s in all
-(`CHECK_DEADLINE`): a listing that never ends still beats on every folder. A session
+(`CHECK_DEADLINE`): a listing that never ends still beats on every folder. Up to that, a
+rescan that keeps making progress holds the watch's thread while the agent runs; the events
+meanwhile queue and are read after it (a batch read 5 s late then ends the session). A session
 attached after the watchdog gave up on a check is ended
 at once.
 

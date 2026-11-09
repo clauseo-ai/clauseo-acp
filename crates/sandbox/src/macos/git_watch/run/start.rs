@@ -4,11 +4,12 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::time::Duration;
 
 use super::super::aside::Aside;
 use super::super::host::{self, LIVE};
 use super::super::state::{self, FileStore, SessionRecord, Store};
-use super::super::{Fs, Launch, Watch, fsevents, os};
+use super::super::{Fs, Kind, Launch, Watch, fsevents, os};
 use super::watchdog::{self, Busy};
 use super::{CANARY, CANARY_NOTES, End, Flow, Mode, Msg, Runner, Session, TICK, queue_clock};
 use crate::macos::jail_procs::{self, Probe};
@@ -138,6 +139,50 @@ struct Root<'a> {
     canary: &'static str,
 }
 
+/// Refuses a launch whose folder holds a network drive or an automount the launch walk met:
+/// no scan enters it, so nothing the agent left there would be found, and the profile can't be
+/// changed per launch to keep the agent out of it. The lawyer's step comes first.
+pub(crate) fn no_unwatched_volume<F: Fs>(watch: &Watch<F>) -> std::io::Result<()> {
+    let Some(drive) = watch.refused_at_launch().into_iter().next() else {
+        return Ok(());
+    };
+    let shown = crate::denial::shown(drive.strip_prefix(watch.matter()).unwrap_or(&drive));
+    Err(std::io::Error::other(format!(
+        "Disconnect the network drive at {shown} from this matter's folder, then start the AI \
+         tool again. Clauseo can't check a network drive inside a matter for Git folders."
+    )))
+}
+
+/// How long since its last write a canary file is left: a running watch rewrites its own every
+/// 10 s, so one older than this is a stopped watch's, its host gone before it could remove it.
+const CANARY_STALE: Duration = Duration::from_secs(120);
+
+/// Removes the canary files in set-aside folder `folder` that no running watch writes, by
+/// their last write; a host that crashed leaves its own.
+pub(crate) fn remove_stale_canaries<F: Fs>(fs: &F, folder: &Path) {
+    let folder = os::resolve(folder).unwrap_or_else(|| folder.to_owned());
+    let Ok(entries) = fs.list(&folder) else {
+        return;
+    };
+    let now = fs.now();
+    for (name, kind) in entries {
+        let ours = name.to_str().is_some_and(|name| name.starts_with(CANARY));
+        if kind != Kind::File || !ours {
+            continue;
+        }
+        let path = folder.join(&name);
+        let written = fs.dated(&path).and_then(|(_, stamp)| {
+            let secs = u64::try_from(stamp[0]).ok()?;
+            Some(std::time::UNIX_EPOCH + Duration::from_secs(secs))
+        });
+        let stale =
+            written.is_some_and(|at| now.duration_since(at).unwrap_or_default() > CANARY_STALE);
+        if stale && let Err(error) = fs.remove_file(&path) {
+            tracing::warn!(%error, path = %path.display(), "a stale canary stays");
+        }
+    }
+}
+
 /// One watch's canary file: `<folder>/<prefix>-<16 hex>`, the hex a random number of its own,
 /// in the folder as it really is (the stream reports real paths).
 pub(crate) fn canary_file<F: Fs>(fs: &F, folder: &Path, prefix: &str) -> PathBuf {
@@ -166,6 +211,7 @@ fn start_root(
     // The folder's own volume, read from it now: an after-only matter's is let in.
     let fs = os::Within::of(dir)?;
     state::begin(&store, &fs, dir, notices, &host::host())?;
+    remove_stale_canaries(&fs, &folder);
     let canary = canary_file(&fs, &folder, canary);
     let aside = Aside::new(
         dir.to_owned(),
@@ -174,6 +220,7 @@ fn start_root(
         Arc::clone(notices),
     );
     let watch = Watch::new(fs, dir.to_owned(), aside, &launch);
+    no_unwatched_volume(&watch)?;
     let kill = probe.clone();
     LIVE.add(
         &session,

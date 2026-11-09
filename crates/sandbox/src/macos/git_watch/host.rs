@@ -153,6 +153,7 @@ pub(crate) fn host() -> Host<'static> {
 /// Returns how many sessions' scans ran; an error only when the state folder can't be listed
 /// (a missing one is none). One matter's error is logged and the rest go on.
 pub fn start_up(git_set_aside: &Path, notices: &Arc<dyn DenialSink>) -> io::Result<usize> {
+    super::run::remove_stale_canaries(&os::Real, git_set_aside);
     let dir = git_set_aside.join("matters");
     let entries = match std::fs::read_dir(&dir) {
         Ok(entries) => entries,

@@ -503,6 +503,15 @@ impl<F: Fs> Watch<F> {
         (outcome::put(self, found, Phase::Running), done)
     }
 
+    /// The folders on volumes a scan never enters (network volumes, automounts) that the launch
+    /// walk met under the folder.
+    pub(crate) fn refused_at_launch(&self) -> Vec<PathBuf> {
+        let volumes = self.base.volumes.as_ref();
+        volumes.map_or_else(Vec::new, |v| {
+            v.refused.iter().map(super::state::Bytes::path).collect()
+        })
+    }
+
     /// Whether a folder on device `dev` is on a volume the launch didn't meet under the folder.
     fn new_volume(&self, dev: u64) -> bool {
         self.volumes

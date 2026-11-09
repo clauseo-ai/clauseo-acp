@@ -1,11 +1,13 @@
 //! Volumes under a watched folder: one that appears while the agent may run ends the session,
 //! by an event's scan, a full scan or the 30 s pass, whether the watch could enter it (a local
 //! disk) or not (a network share); the final scan keeps it as stuck, which refuses the
-//! matter's launches until it is ejected. Volumes that were there at launch are no find.
+//! matter's launches until it is ejected. Volumes that were there at launch are no find; but a
+//! network drive or automount there refuses the launch, as no scan would enter it.
 
 use std::path::Path;
 use std::sync::Arc;
 
+use super::super::super::run::no_unwatched_volume;
 use super::super::super::state::{self, Baseline, Host};
 use super::super::super::{Phase, Watch};
 use super::super::fake::{
@@ -99,4 +101,22 @@ fn a_volume_left_mounted_after_the_session_refuses_launches_until_it_is_ejected(
     assert!(begin().is_err(), "still mounted");
     fs.eject("/m/share");
     begin().unwrap();
+}
+
+#[test]
+fn a_network_drive_in_the_matter_at_launch_refuses_the_launch() {
+    let fs = FakeFs::new();
+    fs.dir("/m/disk");
+    fs.volume("/m/disk", 7);
+    let (watch, _notices) = watch(&fs, &[]);
+    no_unwatched_volume(&watch).unwrap();
+    fs.dir("/m/Shared");
+    fs.network("/m/Shared");
+    let (watch, _notices) = super::super::fake::watch(&fs, &[]);
+    let error = no_unwatched_volume(&watch).unwrap_err().to_string();
+    assert_eq!(
+        error,
+        "Disconnect the network drive at Shared from this matter's folder, then start the AI \
+         tool again. Clauseo can't check a network drive inside a matter for Git folders."
+    );
 }

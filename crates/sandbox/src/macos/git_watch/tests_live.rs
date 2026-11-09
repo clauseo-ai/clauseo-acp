@@ -425,3 +425,41 @@ fn the_walk_at_launch_and_the_watch_count_the_same_dangling_links() {
         "the watch leaves the same folder alone"
     );
 }
+
+#[test]
+fn a_stale_canary_is_removed_and_a_running_watchs_stays() {
+    let dir = Scratch::new("canaries");
+    let folder = dir.0.join("set-aside");
+    for name in [
+        "watch-canary-0000000000000001",
+        "watch-canary-notes-0000000000000002",
+        "keep",
+    ] {
+        std::fs::write(folder.join(name), "canary\n").unwrap();
+    }
+    run(
+        "/usr/bin/touch",
+        &[
+            "-t",
+            "200001010000",
+            folder
+                .join("watch-canary-0000000000000001")
+                .to_str()
+                .unwrap(),
+        ],
+    );
+    run(
+        "/usr/bin/touch",
+        &["-t", "200001010000", folder.join("keep").to_str().unwrap()],
+    );
+    super::run::remove_stale_canaries(&os::Real, &folder);
+    assert!(
+        !folder.join("watch-canary-0000000000000001").exists(),
+        "a crashed host's"
+    );
+    assert!(
+        folder.join("watch-canary-notes-0000000000000002").exists(),
+        "written just now"
+    );
+    assert!(folder.join("keep").exists(), "not a canary");
+}

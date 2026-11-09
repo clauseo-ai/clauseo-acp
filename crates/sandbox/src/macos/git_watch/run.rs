@@ -34,10 +34,10 @@ mod start;
 mod watchdog;
 
 #[cfg(test)]
-pub(crate) use start::canary_file;
-pub(crate) use start::start;
-#[cfg(test)]
 pub(crate) use start::start_with;
+#[cfg(test)]
+pub(crate) use start::{canary_file, no_unwatched_volume};
+pub(crate) use start::{remove_stale_canaries, start};
 #[cfg(test)]
 pub(crate) use watchdog::{BUDGET, Busy, CHECK_DEADLINE};
 
