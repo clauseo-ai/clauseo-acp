@@ -1,7 +1,7 @@
 use super::DOWNLOAD_URL;
-use super::dialog::{APP_ICON, CLOSE, DOWNLOAD, Next, main_icon, message_box_text, next};
+use super::dialog::{APP_ICON, CLOSE, DOWNLOAD, Next, buttons, main_icon, message_box_text, next};
 use super::version::{MINIMUM, Verdict, Version, verdict};
-use super::words::{EN, WIDTH, fits};
+use super::words::{MISSING, TOO_OLD, WIDTH, Words, fits, words};
 use serde_json::Value;
 use std::path::Path;
 
@@ -96,12 +96,85 @@ fn versions_compare_part_by_part() {
     assert_eq!(parse("155.0"), parse("155.0.0.0"));
 }
 
+/// Both sets, for the tests that hold every set to the same thing.
+fn sets() -> [&'static Words; 2] {
+    [&MISSING, &TOO_OLD]
+}
+
+#[test]
+fn each_verdict_picks_its_set() {
+    assert_eq!(
+        words(Verdict::Missing).map(|set| set.instruction),
+        Some(MISSING.instruction)
+    );
+    assert_eq!(
+        words(Verdict::TooOld).map(|set| set.instruction),
+        Some(TOO_OLD.instruction)
+    );
+    assert!(words(Verdict::Start).is_none());
+    // Through the check: a missing runtime and an old one each get their own set.
+    let missing = words(verdict(None, minimum()));
+    let too_old = words(verdict(Some("154.0.3485.54"), minimum()));
+    assert_eq!(
+        missing.map(|set| set.instruction),
+        Some(MISSING.instruction)
+    );
+    assert_eq!(
+        too_old.map(|set| set.instruction),
+        Some(TOO_OLD.instruction)
+    );
+    assert_eq!(
+        MISSING.instruction,
+        "Clauseo needs Microsoft Edge WebView2 to open"
+    );
+    assert_eq!(
+        TOO_OLD.instruction,
+        "Clauseo needs a newer Microsoft Edge WebView2"
+    );
+}
+
 #[test]
 fn every_string_is_there() {
-    for text in EN.all() {
-        assert_ne!(text.trim(), "");
+    for set in sets() {
+        for text in set.all() {
+            assert_ne!(text.trim(), "");
+        }
+        assert_eq!(set.title, "Clauseo");
     }
-    assert_eq!(EN.title, "Clauseo");
+    // Each set has its action: the set with none has one string fewer, and no empty one.
+    assert_eq!(MISSING.all().len(), 6);
+    assert_eq!(TOO_OLD.all().len(), 6);
+    let only_close = Words {
+        action: None,
+        ..TOO_OLD
+    };
+    assert_eq!(only_close.all().len(), 5);
+    assert!(only_close.all().iter().all(|text| !text.trim().is_empty()));
+}
+
+#[test]
+fn the_action_button_downloads_for_both_verdicts() {
+    // Both buttons take the one id, which the one link opens (DOWNLOAD_URL).
+    assert_eq!(
+        buttons(&MISSING),
+        [(DOWNLOAD, "Download WebView2"), (CLOSE, "Close")]
+    );
+    assert_eq!(
+        buttons(&TOO_OLD),
+        [(DOWNLOAD, "Update WebView2"), (CLOSE, "Close")]
+    );
+    assert_eq!(next::<()>(&Ok(DOWNLOAD)), Next::Download);
+}
+
+#[test]
+fn a_set_without_an_action_shows_only_close() {
+    let only_close = Words {
+        action: None,
+        ..TOO_OLD
+    };
+    assert_eq!(buttons(&only_close), [(CLOSE, "Close")]);
+    assert!(buttons(&only_close).iter().all(|(id, _)| *id != DOWNLOAD));
+    assert_eq!(next::<()>(&Ok(CLOSE)), Next::Close);
 }
 
 #[test]
@@ -156,17 +229,25 @@ fn the_icon_is_named_only_when_the_exe_holds_it() {
 
 #[test]
 fn the_message_box_says_the_main_line_then_the_body() {
+    let missing = words(Verdict::Missing).unwrap();
     assert_eq!(
-        message_box_text(&EN),
+        message_box_text(missing),
         "Clauseo needs Microsoft Edge WebView2 to open\n\n\
-         If this computer is your firm's, its IT team may need to allow it."
+         It's free from Microsoft and installs without an administrator."
+    );
+    assert_eq!(
+        message_box_text(words(Verdict::TooOld).unwrap()),
+        "Clauseo needs a newer Microsoft Edge WebView2\n\n\
+         Windows updates it by itself. You can also update it now."
     );
 }
 
 #[test]
 fn the_dialog_is_wide_enough_for_the_main_line_and_no_wider_than_a_small_screen() {
-    assert!(fits(EN.instruction, WIDTH), "{WIDTH}");
-    assert!(!fits(EN.instruction, 200));
+    for set in sets() {
+        assert!(fits(set.instruction, WIDTH), "{}", set.instruction);
+    }
+    assert!(!fits(MISSING.instruction, 200));
     // 150 % on a 1366 px wide screen: about 1.75 px a dialog unit at 100 %.
     assert!(f64::from(WIDTH) * 1.75 * 1.5 < 1366.0);
 }

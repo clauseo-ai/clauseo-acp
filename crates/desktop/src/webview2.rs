@@ -8,8 +8,9 @@
 //!   [`version::MINIMUM`] (`bundle.windows.minimumWebview2Version` in `tauri.conf.json`; a test
 //!   holds the two together), it shows a task dialog and returns `true`, and `run` returns
 //!   without building the app: never a blank window. Elsewhere it does nothing.
-//! - The dialog (`windows.rs`) says the words of `words.rs`, in English only for now. Its two
-//!   buttons: the download button (W6) opens Microsoft's bootstrapper page ([`DOWNLOAD_URL`])
+//! - The dialog (`windows.rs`) says the words of `words.rs` for the verdict, in English only for
+//!   now (the Hindi comes with #753). Its action button (W6, "Download" when the runtime is
+//!   missing, "Update" when it is too old) opens Microsoft's bootstrapper page ([`DOWNLOAD_URL`])
 //!   in the default browser, then the app exits; "Close" (W7) exits.
 //! - If the task dialog fails, a plain message box (`MessageBoxW`) says the title, the main line
 //!   and the body, with OK, and the app exits as after "Close" (`dialog.rs` holds the choices).

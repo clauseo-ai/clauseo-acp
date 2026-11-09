@@ -1,9 +1,12 @@
-//! The dialog's words, English only (Rohan, 2026-11-03: new words ship in English for now). The
-//! copy page's rows are W1, W2 and W4 to W7 of S20 PR 2's word list; W3 waits for QU.8. The app
-//! thread's copy page is their home; they appear nowhere else in the app. A language added later
-//! is a second `Words` and a pick by `ui.language`.
+//! The dialog's words, English only for now: the Hindi comes with #753, the native dialogs Hindi
+//! PR. The copy page's rows are W1, W2 and W4 to W7 of S20 PR 2's word list; W3 waits for QU.8.
+//! The app thread's copy page is their home; they appear nowhere else in the app. The two sets
+//! are one per verdict: [`MISSING`] and [`TOO_OLD`], chosen by [`words`]. A language added later
+//! is a second set of each and a pick by `ui.language`.
 
-/// One language's words for the dialog.
+use super::version::Verdict;
+
+/// One set of words for the dialog, for one verdict.
 #[derive(Debug)]
 pub(super) struct Words {
     /// W1: the title bar.
@@ -14,8 +17,9 @@ pub(super) struct Words {
     pub(super) content: &'static str,
     /// W5: the footer.
     pub(super) footer: &'static str,
-    /// W6: the button that opens Microsoft's download page.
-    pub(super) download: &'static str,
+    /// W6: the button that opens Microsoft's `WebView2` page, "Download" or "Update". `None`: no
+    /// such button, only Close.
+    pub(super) action: Option<&'static str>,
     /// W7: the button that closes the dialog.
     pub(super) close: &'static str,
 }
@@ -23,15 +27,18 @@ pub(super) struct Words {
 impl Words {
     /// Every string, for the test that none is empty.
     #[cfg(test)]
-    pub(super) fn all(&self) -> [&'static str; 6] {
+    pub(super) fn all(&self) -> Vec<&'static str> {
         [
-            self.title,
-            self.instruction,
-            self.content,
-            self.footer,
-            self.download,
-            self.close,
+            Some(self.title),
+            Some(self.instruction),
+            Some(self.content),
+            Some(self.footer),
+            self.action,
+            Some(self.close),
         ]
+        .into_iter()
+        .flatten()
+        .collect()
     }
 }
 
@@ -49,12 +56,35 @@ pub(super) fn fits(instruction: &str, width: u32) -> bool {
         .is_ok_and(|chars| chars.saturating_mul(5).saturating_add(50) <= width)
 }
 
-/// The dialog's words.
-pub(super) const EN: Words = Words {
+/// The words for a verdict that shows the dialog; `None` when the runtime starts and there is no
+/// dialog.
+pub(super) fn words(verdict: Verdict) -> Option<&'static Words> {
+    match verdict {
+        Verdict::Start => None,
+        Verdict::Missing => Some(&MISSING),
+        Verdict::TooOld => Some(&TOO_OLD),
+    }
+}
+
+/// The runtime is missing: the button opens Microsoft's page to download it.
+pub(super) const MISSING: Words = Words {
     title: "Clauseo",
     instruction: "Clauseo needs Microsoft Edge WebView2 to open",
-    content: "If this computer is your firm's, its IT team may need to allow it.",
+    content: "It's free from Microsoft and installs without an administrator.",
     footer: "Open Clauseo again once it's installed.",
-    download: "Download WebView2",
+    action: Some("Download WebView2"),
+    close: "Close",
+};
+
+/// The runtime is older than the minimum. Its action button ("Update `WebView2`", the same
+/// Microsoft page as Download) hangs on the VM's UAC check, which decides whether it stays. To
+/// remove it, change `action` to `None` and the content line, which names the button, to one
+/// without it. Nothing else changes: the dialog then shows only Close.
+pub(super) const TOO_OLD: Words = Words {
+    title: "Clauseo",
+    instruction: "Clauseo needs a newer Microsoft Edge WebView2",
+    content: "Windows updates it by itself. You can also update it now.",
+    footer: "Open Clauseo again once it's updated.",
+    action: Some("Update WebView2"),
     close: "Close",
 };

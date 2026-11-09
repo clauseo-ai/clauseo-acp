@@ -3,12 +3,23 @@
 
 use super::words::Words;
 
-/// The download button's id (W6).
+/// The action button's id (W6), which opens Microsoft's page. Only a set with an action has it.
 pub(super) const DOWNLOAD: i32 = 100;
 
 /// The "Close" button's id. Esc and the title bar's close button answer `IDCANCEL` instead;
 /// both only close.
 pub(super) const CLOSE: i32 = 101;
+
+/// The task dialog's buttons, in order, as (id, label): the action (W6) when the words have one,
+/// then Close. The first is the default button.
+pub(super) fn buttons(words: &Words) -> Vec<(i32, &'static str)> {
+    words
+        .action
+        .map(|action| (DOWNLOAD, action))
+        .into_iter()
+        .chain([(CLOSE, words.close)])
+        .collect()
+}
 
 /// What to do after the task dialog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

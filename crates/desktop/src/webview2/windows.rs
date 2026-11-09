@@ -24,9 +24,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{HSTRING, PCWSTR, w};
 
 use super::DOWNLOAD_URL;
-use super::dialog::{APP_ICON, CLOSE, DOWNLOAD, Next, main_icon, message_box_text, next};
-use super::version::{MINIMUM, Verdict, Version, verdict};
-use super::words::{EN, WIDTH, Words};
+use super::dialog::{APP_ICON, CLOSE, Next, buttons, main_icon, message_box_text, next};
+use super::version::{MINIMUM, Version, verdict};
+use super::words::{WIDTH, Words, words};
 
 /// Reads the runtime's version and, when it is missing or too old, shows the dialog and acts on
 /// its answer. `true` when the app must not start.
@@ -36,17 +36,16 @@ pub(super) fn check() -> bool {
     let Some(minimum) = Version::parse(MINIMUM) else {
         return false;
     };
-    match verdict(installed.as_deref(), minimum) {
-        Verdict::Start => false,
-        Verdict::Missing | Verdict::TooOld => {
-            match next(&show(&EN)) {
-                Next::Download => open_download_page(),
-                Next::Close => {}
-                Next::MessageBox => message_box(&EN),
-            }
-            true
-        }
+    // No words when the runtime starts: no dialog, and the app runs.
+    let Some(words) = words(verdict(installed.as_deref(), minimum)) else {
+        return false;
+    };
+    match next(&show(words)) {
+        Next::Download => open_download_page(),
+        Next::Close => {}
+        Next::MessageBox => message_box(words),
     }
+    true
 }
 
 /// The exe's module handle and the icon resource the dialog names, when the exe holds it.
@@ -70,18 +69,17 @@ fn show(words: &Words) -> windows::core::Result<i32> {
     let instruction = HSTRING::from(words.instruction);
     let content = HSTRING::from(words.content);
     let footer = HSTRING::from(words.footer);
-    let download = HSTRING::from(words.download);
-    let close = HSTRING::from(words.close);
-    let buttons = [
-        TASKDIALOG_BUTTON {
-            nButtonID: DOWNLOAD,
-            pszButtonText: PCWSTR(download.as_ptr()),
-        },
-        TASKDIALOG_BUTTON {
-            nButtonID: CLOSE,
-            pszButtonText: PCWSTR(close.as_ptr()),
-        },
-    ];
+    let labels: Vec<(i32, HSTRING)> = buttons(words)
+        .into_iter()
+        .map(|(id, label)| (id, HSTRING::from(label)))
+        .collect();
+    let task_buttons: Vec<TASKDIALOG_BUTTON> = labels
+        .iter()
+        .map(|(id, label)| TASKDIALOG_BUTTON {
+            nButtonID: *id,
+            pszButtonText: PCWSTR(label.as_ptr()),
+        })
+        .collect();
     // Clauseo's icon as the main and title-bar icon, only when the exe holds it.
     let (module, icon) = match app_icon() {
         Some((module, id)) => (
@@ -102,9 +100,10 @@ fn show(words: &Words) -> windows::core::Result<i32> {
         pszMainInstruction: PCWSTR(instruction.as_ptr()),
         pszContent: PCWSTR(content.as_ptr()),
         pszFooter: PCWSTR(footer.as_ptr()),
-        cButtons: u32::try_from(buttons.len()).unwrap_or(u32::MAX),
-        pButtons: buttons.as_ptr(),
-        nDefaultButton: DOWNLOAD,
+        cButtons: u32::try_from(task_buttons.len()).unwrap_or(u32::MAX),
+        pButtons: task_buttons.as_ptr(),
+        // The first button: the action when there is one, else Close.
+        nDefaultButton: labels.first().map_or(CLOSE, |(id, _)| *id),
         ..TASKDIALOGCONFIG::default()
     };
     let mut pressed = 0_i32;
