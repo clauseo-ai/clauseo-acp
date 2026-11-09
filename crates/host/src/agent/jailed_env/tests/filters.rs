@@ -179,6 +179,8 @@ fn a_blocked_name_is_dropped_from_every_source() {
         ("npm_config_registry", "http://x"),
         ("NODE_OPTIONS", "--require /tmp/x.js"),
         ("NODE_PATH", "/tmp"),
+        ("CLAUDE_CODE_GIT_BASH_PATH", "C:\\Users\\ada\\bash.exe"),
+        ("claude_code_use_powershell_tool", "0"),
     ];
     let mut inherited = lawyers_env();
     inherited.extend(os(&blocked));

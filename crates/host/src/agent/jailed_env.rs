@@ -18,7 +18,8 @@
 //!   view shows.
 //!
 //! From every source, a name that runs code or moves a tool's config (`filters::BLOCKED`:
-//! `BASH_ENV`, `GIT_*`, `LD_PRELOAD` …) and a name that is not ASCII are dropped.
+//! `BASH_ENV`, `GIT_*`, `LD_PRELOAD`, Claude Code's `CLAUDE_CODE_GIT_BASH_PATH` and
+//! `CLAUDE_CODE_USE_POWERSHELL_TOOL` …) and a name that is not ASCII are dropped.
 //!
 //! Neither the hook nor the settings may set a name the host sets for the jail ([`Rule::Host`],
 //! [`Rule::HostElseInherited`]): such a value is dropped. What is dropped is logged as counts,

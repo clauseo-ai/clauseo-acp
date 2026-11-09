@@ -24,12 +24,14 @@ const PROXY_PORT: u16 = 47_002;
 /// The folder the dump goes to.
 const DUMP_DIR_VAR: &str = "CLAUSEO_SPEC_DUMP_DIR";
 
-/// The agent's settings `env`: two credential-shaped names the jail leaves out, one harmless
-/// name it passes.
+/// The agent's settings `env`: two credential-shaped names and Claude Code's two shell names
+/// the jail leaves out, one harmless name it passes.
 fn settings_env() -> Value {
     json!({
         "TEST_API_KEY": "dummy-1",
         "PGPASSWORD": "dummy-2",
+        "CLAUDE_CODE_GIT_BASH_PATH": "C:\\Users\\Public\\bash.exe",
+        "CLAUDE_CODE_USE_POWERSHELL_TOOL": "0",
         "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "1234",
     })
 }
@@ -90,7 +92,12 @@ fn spec_json(agent: &str, spec: &LaunchSpec) -> Value {
 /// The checks the dump doubles as, on any OS.
 fn assert_jailed_env(spec: &LaunchSpec) {
     let has = |name: &str| spec.env().contains_key(&OsString::from(name));
-    for name in ["TEST_API_KEY", "PGPASSWORD"] {
+    for name in [
+        "TEST_API_KEY",
+        "PGPASSWORD",
+        "CLAUDE_CODE_GIT_BASH_PATH",
+        "CLAUDE_CODE_USE_POWERSHELL_TOOL",
+    ] {
         assert!(!has(name), "{name} reached the jailed spec");
     }
     assert_eq!(
@@ -117,6 +124,26 @@ fn assert_jailed_env(spec: &LaunchSpec) {
         ] {
             assert!(has(name), "{name} missing from the jailed spec");
         }
+        // Claude Code's PowerShell tool, its shell without Git Bash, is on the jailed PATH.
+        let root = spec
+            .env()
+            .get(&OsString::from("SystemRoot"))
+            .expect("SystemRoot");
+        let powershell = Path::new(root)
+            .join("System32")
+            .join("WindowsPowerShell")
+            .join("v1.0");
+        let path = spec
+            .env()
+            .get(&OsString::from("PATH"))
+            .and_then(|path| path.to_str())
+            .expect("PATH");
+        // Windows' separator, split as text: the folders hold no `;`.
+        assert!(
+            path.split(';')
+                .any(|folder| Path::new(folder) == powershell),
+            "{path}"
+        );
         // The profile names are host-set (`jailed_env::JAILED_ENV`) but the host gives them no
         // value: the Windows runner sets them at the jailed home whatever the spec says
         // (`clauseo_sandbox::windows::runner::env`). So the spec carries none, and no inherited,
@@ -136,7 +163,9 @@ fn assert_jailed_env(spec: &LaunchSpec) {
 /// Dumps a jailed Claude's launch spec, built by the host through the launcher seam, to
 /// `$CLAUSEO_SPEC_DUMP_DIR/claude.json` for the s15 harness's `exec-spec --spec-json`
 /// (skipped when the variable is unset). Its settings `env` holds `TEST_API_KEY` and
-/// `PGPASSWORD` (left out) and `CLAUDE_CODE_MAX_OUTPUT_TOKENS` (kept), which it asserts.
+/// `PGPASSWORD`, `CLAUDE_CODE_GIT_BASH_PATH` and `CLAUDE_CODE_USE_POWERSHELL_TOOL` (left out)
+/// and `CLAUDE_CODE_MAX_OUTPUT_TOKENS` (kept), which it asserts; on Windows its `PATH` holds
+/// `<SystemRoot>\System32\WindowsPowerShell\v1.0`.
 ///
 /// A jailed Codex is refused before its spec is built until R17 PR-D2c
 /// (`sandbox_policy::a_jailed_codex_is_refused_before_any_reservation_or_launcher`), so there is
