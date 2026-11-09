@@ -14,9 +14,10 @@
 //!    not read, is registered, or updated in place, by `--adopt`'s own registration, with the
 //!    path step 1 checked (`Machine::replace_task`, `refresh::register_task_at`).
 //!
-//! None of this fails the set-up or rolls the pool back: a task that can't be put back is
-//! logged and named in the report (`SetupReport::tasks`), the other task is still tried, and the
-//! readiness check then says not ready, so the next repair tries again. A per-machine install's
+//! None of this rolls the pool back: a task that can't be put back is logged and named in the
+//! report (`SetupReport::tasks`), and the other task is still tried. The run's result then isn't
+//! a success (`outcome::exit_of`: exit 3 at `Step::StopTask`, in `TASKS_NOT_PUT_BACK`'s words),
+//! and the readiness check says not ready, so the next repair tries again. A per-machine install's
 //! set-up replaces both tasks on every run instead, as before (`Machine::register_stop_task`).
 
 use super::machine::Machine;

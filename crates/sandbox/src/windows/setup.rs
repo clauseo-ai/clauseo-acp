@@ -158,7 +158,7 @@ pub use outcome::{
     APPROVER_LOGON_REFUSED, DATA_DIR_NOT_OWNED, ERROR_ACCESS_DISABLED_BY_POLICY, ERROR_CANCELLED,
     ERROR_LOGON_TYPE_NOT_GRANTED, ERROR_VIRUS_DELETED, ERROR_VIRUS_INFECTED, JournalOutcome,
     LOGON_NOT_GRANTED, LOGON_REFUSED, SECLOGON_DISABLED, SetupExit, SetupFailure, SetupReport,
-    Step, TopUp, launch_code, launch_error,
+    Step, TASKS_NOT_PUT_BACK, TopUp, exit_of, launch_code, launch_error,
 };
 // `remove::Removal` stays at its path: the set-up's fake implements both seams, and a glob
 // import of both would make their shared method names ambiguous in the set-up's tests.

@@ -1,21 +1,23 @@
 //! A per-user install's stop and sweep tasks (`user_tasks::ensure`): the set-up the app runs as
 //! its repair registers a missing task and re-registers one that differs in any part `--adopt`
 //! registers, with the path it checked, and leaves the same task alone. A program that fails its
-//! check, a task that can't be read or one that can't be registered never fails the set-up: it
-//! is named in the report, and the readiness check then says not ready.
+//! check, a task that can't be read or one that can't be registered never rolls the pool back:
+//! it is named in the report, the run's result isn't a success (`TASKS_NOT_PUT_BACK`), and the
+//! readiness check then says not ready.
 
 use std::path::PathBuf;
 
 use super::fake::{FakeAcl, FakeMachine, OTHER_OWNER, rid};
 use super::fake_more::{TASK_EXE, registered_task};
 use super::*;
-use crate::SetupState;
 use crate::windows::refresh::task_identity::{
     INSTANCES_IGNORE_NEW, OnBattery, ReadError, TASK_CHANGED, TASK_MISSING, TASK_UNCHECKED,
     TaskAction, TaskIdentity, TaskReader, TaskTrigger, ready_with_tasks, test_descriptor,
 };
 use crate::windows::refresh::{POOL_TASKS, SystemTask};
 use crate::windows::setup::record_values::CopyOwner;
+use crate::windows::setup::result_file::{self, SetupResult};
+use crate::{SetupError, SetupState};
 
 /// A per-user install whose admin copy the owner placed, with both tasks as `--adopt` left them.
 fn adopted(test: &str) -> FakeMachine {
@@ -222,4 +224,69 @@ fn another_users_copy_and_a_machine_install_get_no_per_user_tasks() {
         assert!(!machine.calls.iter().any(|c| c == "task_exe"), "{test}");
         assert!(machine.state.tasks.is_empty(), "{test}");
     }
+}
+
+/// What the app is told about `report`: the exit code, the result file the exe writes, and
+/// what `UserSetup`'s repair returns from them (`result_file::outcome`).
+fn told(report: SetupReport) -> (SetupExit, SetupResult, Result<(), SetupError>) {
+    let outcome = Ok(report);
+    let exit = exit_of(&outcome);
+    let result = SetupResult::of(&outcome);
+    let app = result_file::outcome(u32::from(exit.as_code()), Some(&Ok(Some(result.clone()))));
+    (exit, result, app)
+}
+
+#[test]
+fn a_repair_that_cant_put_a_task_back_isnt_a_success_but_keeps_the_pool() {
+    let owner_rid = rid(&owner());
+    let missing = SetupState::Failed(TASK_MISSING.to_owned());
+    let changed = SetupState::Failed(TASK_CHANGED.to_owned());
+    for (test, tamper, after) in [
+        ("user-tasks-repair-missing", false, missing),
+        ("user-tasks-repair-changed", true, changed),
+    ] {
+        let mut machine = adopted(test);
+        if tamper {
+            if let Some(Ok(stop)) = machine.state.tasks.get_mut("SandboxStop") {
+                stop.settings.enabled = false;
+            }
+        } else {
+            machine.state.tasks.remove("SandboxStop");
+        }
+        machine.fail(&format!("replace_task SandboxStop {owner_rid}"));
+        let report = set_up_fresh(&mut machine, &mut FakeAcl::default());
+        assert!(report.tasks.is_err(), "{test}");
+        // The pool's set-up stays applied: users, record, marker and the other task.
+        assert_eq!(report.pool.len(), MIN_FREE_AFTER_RUN, "{test}");
+        assert!(machine.state.record.is_some(), "{test}");
+        assert!(machine.state.marker.is_some(), "{test}");
+        assert!(holds(&machine, SystemTask::Sweep), "{test}");
+        let (exit, result, app) = told(report);
+        assert_eq!(exit, SetupExit::Failed, "{test}");
+        assert_eq!(result.exit, 3, "{test}");
+        assert_eq!(
+            result.step.as_deref(),
+            Some(Step::StopTask.to_string().as_str())
+        );
+        assert_eq!(result.cause.as_deref(), Some(TASKS_NOT_PUT_BACK), "{test}");
+        assert_eq!(
+            app,
+            Err(SetupError::Failed(TASKS_NOT_PUT_BACK.to_owned())),
+            "{test}"
+        );
+        assert_eq!(readiness(&machine), after, "{test}");
+    }
+}
+
+#[test]
+fn a_repair_that_puts_both_tasks_back_is_a_success() {
+    let mut machine = adopted("user-tasks-repair-both");
+    machine.state.tasks.clear();
+    let report = set_up_fresh(&mut machine, &mut FakeAcl::default());
+    assert_eq!(report.tasks, Ok(()));
+    let (exit, result, app) = told(report);
+    assert_eq!(exit, SetupExit::Done);
+    assert_eq!((result.exit, result.step, result.cause), (0, None, None));
+    assert_eq!(app, Ok(()));
+    assert_eq!(readiness(&machine), SetupState::Ready);
 }

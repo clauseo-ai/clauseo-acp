@@ -1833,8 +1833,13 @@ program (canonical path) and argument, the triggers, enabled, start on demand, b
 behaviour, the instance policy, and the descriptor's owner, group and set of entries. A missing
 task, one that differs, or one the set-up may not read is registered again, or updated in
 place, by `register_task`. It runs the path the set-up checked, and only once the copy passes
-the whole of `admin_copy::check`. A failure here never fails the set-up: it is named in the
-report (`SetupReport::tasks`). The readiness check (`UserSetup::state`) reads the same two
+the whole of `admin_copy::check`. A failure here never rolls the pool back: it is named in the
+report (`SetupReport::tasks`), and the other task is still tried. The run still isn't a
+success: the setup exe exits 3 (`SetupExit::Failed`, `outcome::exit_of`), and
+`setup-result.json` has the step "registering the sandbox's stop and sweep tasks" and the cause
+"Clauseo couldn't put back its clean-up task. Repair Clauseo again, or ask whoever looks after
+this computer." (`TASKS_NOT_PUT_BACK`). The repair (`UserSetup`'s `SandboxSetup::run`)
+returns `SetupError::Failed` with those words alone. The readiness check (`UserSetup::state`) reads the same two
 tasks as the lawyer. A `Ready` with either task missing, changed or unreadable becomes
 `Failed`, in these words: "Clauseo's clean-up task is missing. Repair Clauseo to put it back.",
 "Clauseo's clean-up task has been changed. Repair Clauseo to put it back.", or "Clauseo couldn't

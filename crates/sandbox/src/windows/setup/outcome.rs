@@ -37,6 +37,11 @@ pub const APPROVER_LOGON_REFUSED: &str = "Windows refused the sign-in of the acc
 /// ([`SetupExit::DataDirNotOwned`]).
 pub const DATA_DIR_NOT_OWNED: &str = "this computer's Clauseo data folder isn't owned by you: \
      ask whoever looks after this computer";
+/// The cause when a per-user set-up, the app's repair, left the pool set up but couldn't put
+/// back a missing or changed stop or sweep task (`SetupReport::tasks`): its result is
+/// [`SetupExit::Failed`] at [`Step::StopTask`] in these words, and the reason is in the log.
+pub const TASKS_NOT_PUT_BACK: &str = "Clauseo couldn't put back its clean-up task. Repair \
+     Clauseo again, or ask whoever looks after this computer.";
 /// The cause when the Secondary Logon service is disabled.
 pub const SECLOGON_DISABLED: &str = "the Secondary Logon service (seclogon) is disabled: IT can \
      set it to start manually";
@@ -269,6 +274,18 @@ pub struct SetupFailure {
     pub exit: SetupExit,
 }
 
+/// The exit code for a set-up's `outcome`: [`SetupExit::Done`] only when it succeeded and every
+/// per-user task it had to put back is back. A task it couldn't put back leaves the pool as set
+/// up (no rollback) but is [`SetupExit::Failed`], so a repair never reads as a success while the
+/// readiness check still says the task is missing or changed ([`TASKS_NOT_PUT_BACK`]).
+pub fn exit_of(outcome: &Result<SetupReport, SetupFailure>) -> SetupExit {
+    match outcome {
+        Ok(report) if report.tasks.is_err() => SetupExit::Failed,
+        Ok(_) => SetupExit::Done,
+        Err(failure) => failure.exit,
+    }
+}
+
 impl SetupFailure {
     /// The setting that blocked this failure, when one did (D-B4): a logon refused with 1385
     /// ([`LOGON_NOT_GRANTED`], the cause [`cause_of`] gives it). `None` for any other.
@@ -363,8 +380,9 @@ pub struct SetupReport {
     /// ([`FirewallOutcome::Ineffective`](crate::windows::wfp::FirewallOutcome::Ineffective)).
     pub network: NetworkReport,
     /// On a per-user install, the SYSTEM stop and sweep tasks: `Err` when one that was missing
-    /// or changed couldn't be put back, and why (`user_tasks.rs`). The set-up still succeeds;
-    /// the readiness check says not ready until a repair puts it back.
+    /// or changed couldn't be put back, and why (`user_tasks.rs`). The pool stays set up, but
+    /// the run's exit is [`SetupExit::Failed`] ([`exit_of`], [`TASKS_NOT_PUT_BACK`]), and the
+    /// readiness check says not ready until a repair puts it back.
     pub tasks: Result<(), String>,
 }
 

@@ -53,7 +53,7 @@ use super::around::Around;
 use super::explain::{AdoptFailure, AdoptStep, Cause, CopyLeft, removal_exit};
 use super::ffi::restrict_dll_search;
 use super::machine::{MachineError, owned};
-use super::outcome::{SetupExit, SetupFailure, SetupReport, Step};
+use super::outcome::{SetupExit, SetupFailure, SetupReport, Step, exit_of};
 use super::owner::{Owner, this_process};
 use super::reclaim_run::run_reclaim;
 use super::record_write::RECORD_KEY;
@@ -172,10 +172,7 @@ pub(crate) fn run_set_up(names: Names, owner: Owner, given: &Path, add: u8) -> S
     let around = Box::new(Around::new(data_dir.to_owned()));
     let mut machine = WindowsMachine::new(names, owner, data_dir.to_owned(), around);
     let outcome = request_and_run(&mut machine, &owner_sid, data_dir, add);
-    let exit = match &outcome {
-        Ok(_) => SetupExit::Done,
-        Err(failure) => failure.exit,
-    };
+    let exit = exit_of(&outcome);
     let result = SetupResult::of(&outcome);
     let written = owned(&mut machine, |_| {
         result_file::write(data_dir, &result)

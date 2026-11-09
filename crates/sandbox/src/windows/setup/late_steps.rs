@@ -38,7 +38,8 @@ const ADMINISTRATORS: &str = "S-1-5-32-544";
 ///
 /// On a per-user install whose copy `owner` placed, `--adopt` registered them, and the set-up
 /// puts back one that is missing or changed (`user_tasks::ensure`), so the app's repair heals a
-/// deleted or tampered task. That never fails the set-up: `Ok(Err)` says what wasn't put back.
+/// deleted or tampered task. That never rolls the set-up back: `Ok(Err)` says what wasn't put
+/// back, and the run's exit then says so (`outcome::exit_of`).
 /// An install with no admin copy has none, and one another user placed is left alone.
 pub(super) fn stop_task(
     machine: &mut impl Machine,

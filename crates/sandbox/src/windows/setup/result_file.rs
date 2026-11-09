@@ -12,7 +12,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::outcome::{DATA_DIR_NOT_OWNED, SetupExit, SetupFailure, SetupReport};
+use super::outcome::{
+    DATA_DIR_NOT_OWNED, SetupExit, SetupFailure, SetupReport, Step, TASKS_NOT_PUT_BACK,
+};
 use crate::windows::matters::SANDBOX_DIR;
 use crate::windows::write;
 use crate::{Blocked, SetupError, SetupState};
@@ -54,9 +56,16 @@ pub struct SetupResult {
 }
 
 impl SetupResult {
-    /// The result of a set-up the engine ran.
+    /// The result of a set-up the engine ran. One that succeeded but couldn't put back a
+    /// per-user task (`SetupReport::tasks`) is [`SetupExit::Failed`] at [`Step::StopTask`], in
+    /// [`TASKS_NOT_PUT_BACK`]'s words; the pool it set up stays.
     pub fn of(outcome: &Result<SetupReport, SetupFailure>) -> SetupResult {
         match outcome {
+            Ok(report) if report.tasks.is_err() => SetupResult::failed(
+                SetupExit::Failed,
+                &Step::StopTask.to_string(),
+                TASKS_NOT_PUT_BACK,
+            ),
             Ok(_) => SetupResult {
                 exit: SetupExit::Done.as_code(),
                 step: None,
@@ -166,7 +175,8 @@ pub fn remove(data_dir: &Path) -> io::Result<()> {
 /// What a run of the exe means for the app, from its exit `code` and the result file as
 /// [`read`] gave it after the run (`None` for `--remove`, which writes none). 0 is done,
 /// whatever the file says. Any other code fails; the file's step and cause say why when it
-/// matches the code, else the code's own words do, naming the code.
+/// matches the code, else the code's own words do, naming the code. A repair that couldn't put
+/// back a task fails in [`TASKS_NOT_PUT_BACK`]'s words alone, as the lawyer reads them.
 pub fn outcome(
     code: u32,
     result: Option<&Result<Option<SetupResult>, String>>,
@@ -180,6 +190,12 @@ pub fn outcome(
         && let Some(blocked) = told.blocked
     {
         return Err(SetupError::Blocked(blocked));
+    }
+    if let Some(Ok(Some(told))) = result
+        && u32::from(told.exit) == code
+        && told.cause.as_deref() == Some(TASKS_NOT_PUT_BACK)
+    {
+        return Err(SetupError::Failed(TASKS_NOT_PUT_BACK.to_owned()));
     }
     let told = match result {
         Some(Ok(Some(told))) if u32::from(told.exit) == code => {
