@@ -264,9 +264,20 @@ impl Key {
     }
 
     /// This key's `Id` value: a `REG_SZ` GUID in braces (`{8-4-4-4-12}`, hex digits), checked
-    /// before it names a key; `None` when the key is gone.
+    /// by [`parse_id`] before it names a key; `None` when the key is gone.
     fn id(&self) -> Result<Option<String>, Failed> {
-        let mut text = [0_u16; 64];
+        let Some(units) = self.id_units()? else {
+            return Ok(None);
+        };
+        parse_id(&units).map(Some)
+    }
+
+    /// This key's `Id` value as read, its NULs included: `REG_SZ`, at most a GUID and two
+    /// NULs; `None` when the key is gone. Read as #840's `Key::id` reads it, which the Server
+    /// 2025 VM ran.
+    fn id_units(&self) -> Result<Option<Vec<u16>>, Failed> {
+        // Room for the GUID and two NULs: a longer value fails the read (`ERROR_MORE_DATA`).
+        let mut text = [0_u16; GUID_LEN + 2];
         let mut length = u32::try_from(size_of_val(&text)).unwrap_or(0);
         let mut kind = REG_VALUE_TYPE::default();
         // SAFETY: the key is open and the name a NUL-terminated literal; `text` is writable
@@ -284,34 +295,62 @@ impl Key {
         if read == ERROR_KEY_DELETED {
             return Ok(None);
         }
-        if read != ERROR_SUCCESS || kind != REG_SZ {
+        if read != ERROR_SUCCESS {
             return Err(format!(
                 "a task's Id in the Task Scheduler's cache couldn't be read ({})",
                 read.0
             ));
         }
-        let used = text.get(..length as usize / 2).unwrap_or(&text);
-        let used = used.strip_suffix(&[0]).unwrap_or(used);
-        let id = String::from_utf16(used).unwrap_or_default();
-        if !is_guid(&id) {
-            return Err("a task's Id in the Task Scheduler's cache isn't a GUID".to_owned());
+        if kind != REG_SZ {
+            return Err("a task's Id in the Task Scheduler's cache isn't text".to_owned());
         }
-        Ok(Some(id))
+        Ok(Some(
+            text.get(..length as usize / 2).unwrap_or(&text).to_vec(),
+        ))
     }
 }
 
-/// Whether `id` is a GUID in braces: `{`, then hex digits in groups of 8, 4, 4, 4 and 12
-/// joined by `-`, then `}`.
+/// A GUID in braces, as an `Id` value holds it: 38 characters.
+const GUID_LEN: usize = 38;
+
+/// The GUID an `Id` value's UTF-16 `units` hold, as [`Key::id_units`] read them: every NUL
+/// at the end dropped (a `REG_SZ` may be stored with none, one or more), then refused unless
+/// UTF-16 text and a GUID in braces, since anything else could name another key below
+/// `Tasks` (a `\`, say).
+pub(super) fn parse_id(units: &[u16]) -> Result<String, Failed> {
+    let end = units
+        .iter()
+        .rposition(|unit| *unit != 0)
+        .map_or(0, |at| at + 1);
+    let id = String::from_utf16(units.get(..end).unwrap_or(units))
+        .map_err(|_not_text| "a task's Id in the Task Scheduler's cache isn't UTF-16 text")?;
+    if !is_guid(&id) {
+        return Err("a task's Id in the Task Scheduler's cache isn't a GUID".to_owned());
+    }
+    Ok(id)
+}
+
+/// Whether `id` is a GUID in braces: `{` 8, 4, 4, 4 and 12 hex digits joined by `-`, `}`;
+/// #840's check.
 pub(super) fn is_guid(id: &str) -> bool {
-    let Some(inner) = id.strip_prefix('{').and_then(|rest| rest.strip_suffix('}')) else {
-        return false;
+    let bytes = id.as_bytes();
+    bytes.len() == GUID_LEN
+        && bytes.iter().enumerate().all(|(at, byte)| match at {
+            0 => *byte == b'{',
+            37 => *byte == b'}',
+            9 | 14 | 19 | 24 => *byte == b'-',
+            _ => byte.is_ascii_hexdigit(),
+        })
+}
+
+/// The `Id` value of the key at `path` below `Tree` as read, its NULs included, for the
+/// elevated test to say why one isn't a GUID; `None` when the key or the value is gone.
+#[cfg(test)]
+pub(super) fn task_cache_id_units(path: &str) -> Result<Option<Vec<u16>>, Failed> {
+    let Some(key) = Key::open(HKEY_LOCAL_MACHINE, &HSTRING::from(format!("{TREE}{path}")))? else {
+        return Ok(None);
     };
-    let groups: Vec<&str> = inner.split('-').collect();
-    groups.len() == 5
-        && groups
-            .iter()
-            .zip([8, 4, 4, 4, 12])
-            .all(|(group, len)| group.len() == len && group.chars().all(|c| c.is_ascii_hexdigit()))
+    key.id_units()
 }
 
 /// Whether the task at `path` can run, for [`Sweeper::task_cache_runnable`]: its `Tree` key's

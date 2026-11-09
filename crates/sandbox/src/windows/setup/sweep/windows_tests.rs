@@ -14,7 +14,7 @@ use std::process::Command;
 
 mod admin_log;
 
-use super::windows_listing::is_guid;
+use super::windows_listing::{is_guid, parse_id, task_cache, task_cache_id_units};
 use super::windows_sweeper::WindowsSweeper;
 use super::windows_sweeper::same_task_path;
 use super::{Names, Resolved, Sweeper as _, Task, resolve, sddl_owner, sweep_tasks};
@@ -190,9 +190,35 @@ fn elevated_this_machines_tasks_all_have_a_principal_that_resolves() {
     let other = swept.why.keys().any(|why| !stale.contains(&why.as_str()));
     assert!(
         !other,
-        "tasks or folders that can't be read: {:?}",
-        swept.why
+        "tasks or folders that can't be read: {:?}\nIds that aren't a GUID: {}",
+        swept.why,
+        odd_ids()
     );
+}
+
+/// Up to 5 `Id` values in the Task Scheduler's cache that [`parse_id`] refuses, each by its
+/// length and its last 2 UTF-16 units, never by its task's path.
+fn odd_ids() -> String {
+    let listing = match task_cache() {
+        Ok(listing) => listing,
+        Err(error) => return format!("(the cache can't be listed: {error})"),
+    };
+    let mut odd = Vec::new();
+    let mut count = 0_usize;
+    for path in &listing.paths {
+        let Ok(Some(units)) = task_cache_id_units(path) else {
+            continue;
+        };
+        if parse_id(&units).is_ok() {
+            continue;
+        }
+        count += 1;
+        if odd.len() < 5 {
+            let last = units.get(units.len().saturating_sub(2)..).unwrap_or(&units);
+            odd.push(format!("{} units ending {last:04x?}", units.len()));
+        }
+    }
+    format!("{count}: {}", odd.join("; "))
 }
 
 #[test]
@@ -446,6 +472,40 @@ fn powershell(script: &str) -> String {
     let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
     let exe = format!(r"{}\WindowsPowerShell\v1.0\powershell.exe", system32());
     format!(r#""{exe}" -NoProfile -NonInteractive -EncodedCommand {encoded}"#)
+}
+
+#[test]
+fn an_id_value_is_read_with_its_nuls_at_the_end_dropped_and_its_braces_kept() {
+    let guid = "{0A1B2C3D-4E5F-6789-ABCD-EF0123456789}";
+    let units = |text: &str, nuls: usize| -> Vec<u16> {
+        text.encode_utf16()
+            .chain(std::iter::repeat_n(0, nuls))
+            .collect()
+    };
+    for nuls in [0, 1, 2] {
+        assert_eq!(
+            parse_id(&units(guid, nuls)).as_deref(),
+            Ok(guid),
+            "{nuls} NULs"
+        );
+    }
+    let lower = "{0a1b2c3d-4e5f-6789-abcd-ef0123456789}";
+    assert_eq!(parse_id(&units(lower, 1)).as_deref(), Ok(lower));
+    let not_guid = Err("a task's Id in the Task Scheduler's cache isn't a GUID".to_owned());
+    // No braces, a NUL inside, a `\` after it, nothing at all.
+    for (text, nuls) in [
+        ("0A1B2C3D-4E5F-6789-ABCD-EF0123456789", 1),
+        ("{0A1B2C3D-4E5F-6789-ABCD-EF0123456789}\u{0}x", 1),
+        ("{0A1B2C3D-4E5F-6789-ABCD-EF0123456789}\\x", 1),
+        ("", 2),
+    ] {
+        assert_eq!(parse_id(&units(text, nuls)), not_guid, "{text:?}");
+    }
+    let unpaired = vec![0xd800, 0];
+    assert_eq!(
+        parse_id(&unpaired),
+        Err("a task's Id in the Task Scheduler's cache isn't UTF-16 text".to_owned())
+    );
 }
 
 #[test]
