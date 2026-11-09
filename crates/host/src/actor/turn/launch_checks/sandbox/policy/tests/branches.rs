@@ -13,6 +13,7 @@ use clauseo_sandbox::PathRule;
 use super::super::super::super::egress::EgressGuard;
 use super::super::super::super::relay::tests::rig;
 use super::super::super::super::state_prep::is_lawyers_login;
+use super::super::off_limits::{refuse, within};
 use super::super::{jail, personal_folders, runtime};
 use super::Fixture;
 use crate::agent::state_folder::{self, LOGIN_FILE, StateLink};
@@ -298,6 +299,78 @@ fn a_runtime_folder_in_the_lawyer_s_claude_or_codex_home_refuses_the_launch() {
     write::create_dir_all(&beside).unwrap();
     grants.install = Some(beside);
     assert!(runtime(&grants, &prepared).is_ok());
+}
+
+/// A runtime folder in the lawyer's `~/.ssh`, `~/.aws`, `~/.gnupg` or `~/.config/gcloud`, or in
+/// their custom `CODEX_HOME` or `CLAUDE_CONFIG_DIR` (`Grants::agent_homes`), refuses the
+/// launch naming no path; an unrelated folder, and one whose name only starts the same, do not.
+#[test]
+fn a_runtime_folder_in_a_credential_store_or_custom_agent_home_refuses_the_launch() {
+    let fx = Fixture::new("off_limits");
+    let (prepared, mut grants) = fx.codex();
+    let custom = [fx.root.join("custom-codex"), fx.root.join("custom-claude")];
+    grants.agent_homes = custom.to_vec();
+    let stores = [".ssh", ".aws", ".gnupg", ".config/gcloud"].map(|store| fx.home.join(store));
+    let cases = stores
+        .iter()
+        .map(|store| (store, "SSH, GnuPG or cloud keys"))
+        .chain(
+            custom
+                .iter()
+                .map(|home| (home, "Claude Code's or Codex's own folder")),
+        );
+    for (outer, says) in cases {
+        let install = outer.join("local");
+        write::create_dir_all(&install).unwrap();
+        grants.install = Some(install);
+        let error = runtime(&grants, &prepared).unwrap_err();
+        assert_eq!(error.code(), ErrorCode::AgentLaunchFailed);
+        let text = error.to_string();
+        assert!(text.contains(says), "{text}");
+        assert!(!text.contains(&*fx.root.to_string_lossy()), "{text}");
+    }
+    for beside in [fx.root.join("tools"), fx.home.join(".ssh-tools")] {
+        write::create_dir_all(&beside).unwrap();
+        grants.install = Some(beside);
+        assert!(runtime(&grants, &prepared).is_ok());
+    }
+}
+
+/// With names folding case (Windows at a launch, macOS through `clauseo_sandbox::path_under`;
+/// pinned here on every OS), a runtime folder in a case-different spelling of a credential store
+/// or a custom agent home is refused; without folding on Linux it is not.
+#[test]
+fn a_case_different_spelling_of_an_off_limits_folder_is_refused_where_names_fold() {
+    let fx = Fixture::new("off_limits_case");
+    let (prepared, mut grants) = fx.codex();
+    grants.agent_homes = vec![fx.root.join("Custom-Codex")];
+    for install in [
+        fx.home.join(".SSH").join("local"),
+        fx.root.join("custom-codex").join("bin"),
+    ] {
+        write::create_dir_all(&install).unwrap();
+        let folders = [dunce::canonicalize(&install).unwrap()];
+        assert!(refuse(&grants, &prepared, &folders, true).is_err());
+        if cfg!(target_os = "linux") {
+            assert!(refuse(&grants, &prepared, &folders, false).is_ok());
+        }
+    }
+    let unrelated = [fx.root.join("Tools")];
+    assert!(refuse(&grants, &prepared, &unrelated, true).is_ok());
+}
+
+/// `within` compares whole names: with folding by their lowercase, without it exactly (but on
+/// macOS, where `clauseo_sandbox::path_under` folds).
+#[test]
+fn within_folds_case_only_when_asked_and_compares_whole_names() {
+    let outer = Path::new("/home/l/.ssh");
+    assert!(within(Path::new("/home/l/.ssh/k"), outer, false));
+    assert!(within(Path::new("/HOME/L/.SSH/k"), outer, true));
+    if !cfg!(target_os = "macos") {
+        assert!(!within(Path::new("/home/l/.SSH/k"), outer, false));
+    }
+    assert!(!within(Path::new("/home/l/.ssh-tools"), outer, true));
+    assert!(!within(Path::new("/home/l"), outer, true));
 }
 
 /// Another matter of the registry inside this one (open, or forgotten: `Grants::others` holds

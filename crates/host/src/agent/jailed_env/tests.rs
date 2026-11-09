@@ -7,14 +7,13 @@ use std::path::{Path, PathBuf};
 
 use clauseo_settings::AgentLaunch;
 
-use super::{
-    CREDENTIALS, Credential, JAILED_ENV, OS_PATH, Rule, host_vars, ignored, path, sources,
-};
+use super::filters::{CREDENTIALS, Pattern};
+use super::{JAILED_ENV, OS_PATH, Rule, host_vars, ignored, path, sources};
 use crate::agent::{codex, home, launch_spec, loads};
 
 /// One example per [`CREDENTIALS`] entry and every name the review listed: each set in the
 /// lawyer's environment must be absent from a jailed spec.
-const CREDENTIAL_EXAMPLES: [&str; 36] = [
+const CREDENTIAL_EXAMPLES: [&str; 45] = [
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
     "CLAUDE_CODE_OAUTH_TOKEN",
@@ -49,6 +48,15 @@ const CREDENTIAL_EXAMPLES: [&str; 36] = [
     "CODEX_API_KEY",
     "AZURE_OPENAI_API_KEY",
     "AZURE_OPENAI_ENDPOINT",
+    "AZURE_CLIENT_SECRET",
+    "CLAUDE_CODE_CLIENT_KEY",
+    "CLAUDE_CODE_CLIENT_CERT",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "NPM_TOKEN",
+    "HF_TOKEN",
     // Any case: Windows ignores it.
     "openai_api_key",
     "Anthropic_Api_Key",
@@ -222,6 +230,8 @@ fn lawyers_env() -> Vec<(OsString, OsString)> {
     env
 }
 
+mod filters;
+
 #[test]
 fn every_credential_in_the_lawyer_s_environment_is_absent_from_a_jailed_claude_or_codex_spec() {
     for kind in [Kind::Claude, Kind::Codex] {
@@ -240,8 +250,8 @@ fn every_credentials_entry_has_an_example_and_every_example_is_a_credential() {
     }
     for credential in CREDENTIALS {
         let covered = CREDENTIAL_EXAMPLES.iter().any(|name| match credential {
-            Credential::Name(known) => name.eq_ignore_ascii_case(known),
-            Credential::Prefix(prefix) => name.to_ascii_uppercase().starts_with(prefix),
+            Pattern::Name(known) => name.eq_ignore_ascii_case(known),
+            Pattern::Prefix(prefix) => name.to_ascii_uppercase().starts_with(prefix),
         });
         assert!(covered, "{credential:?}");
     }

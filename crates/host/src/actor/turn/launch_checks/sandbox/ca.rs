@@ -44,11 +44,13 @@ pub(crate) fn native_roots() -> Vec<Vec<u8>> {
 
 /// The PEM certificate blocks of `text`, each from its `BEGIN CERTIFICATE` line to its
 /// `END CERTIFICATE` line, and nothing else: a private key, or any other block or text, in the
-/// same file never reaches the jail. A block with no end is left out.
+/// same file never reaches the jail. A block with no end is left out, and so is one whose body
+/// is not an X.509 certificate ([`is_certificate`]), with one log line naming the count only.
 pub(crate) fn certificates(text: &str) -> Vec<String> {
     const BEGIN: &str = "-----BEGIN CERTIFICATE-----";
     const END: &str = "-----END CERTIFICATE-----";
     let mut blocks = Vec::new();
+    let mut dropped = 0_usize;
     let mut rest = text;
     while let Some((_, opened)) = rest.split_once(BEGIN) {
         let Some((body, after)) = opened.split_once(END) else {
@@ -56,10 +58,33 @@ pub(crate) fn certificates(text: &str) -> Vec<String> {
         };
         // A BEGIN with no END of its own before this one: only the last BEGIN's block counts.
         let body = body.rsplit_once(BEGIN).map_or(body, |(_, last)| last);
-        blocks.push(format!("{BEGIN}{body}{END}"));
+        if is_certificate(body) {
+            blocks.push(format!("{BEGIN}{body}{END}"));
+        } else {
+            dropped += 1;
+        }
         rest = after;
     }
+    if dropped > 0 {
+        tracing::warn!(
+            dropped,
+            "some of the agent's CA file blocks are not certificates; left out"
+        );
+    }
     blocks
+}
+
+/// Whether a PEM block's body (the text between its BEGIN and END lines) is base64 of one
+/// X.509 certificate's DER and nothing after it.
+fn is_certificate(body: &str) -> bool {
+    let text: String = body.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+    let Ok(der) = STANDARD.decode(text) else {
+        return false;
+    };
+    matches!(
+        x509_parser::parse_x509_certificate(&der),
+        Ok((rest, _)) if rest.is_empty()
+    )
 }
 
 /// The bundle's text: each of `roots` (DER) as a PEM certificate, then the `extra` file's

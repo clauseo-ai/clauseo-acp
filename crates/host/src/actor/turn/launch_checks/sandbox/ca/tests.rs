@@ -6,7 +6,10 @@ use std::sync::Arc;
 use super::{CA_FILE, certificates, write};
 use crate::config::sandbox::CaRoots;
 
-const CERT: &str = "-----BEGIN CERTIFICATE-----\nMIIBfirm\n-----END CERTIFICATE-----";
+/// A real self-signed certificate (P-256, `CN=clauseo-test`), made once with
+/// `openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 36500`.
+/// (`test-cert.pem`: base64, which typos skips.)
+const CERT: &str = include_str!("test-cert.pem").trim_ascii_end();
 const KEY: &str = "-----BEGIN PRIVATE KEY-----\nMIIEsecret\n-----END PRIVATE KEY-----";
 
 #[test]
@@ -41,4 +44,20 @@ fn only_whole_certificate_blocks_are_taken() {
         Vec::<String>::new()
     );
     assert_eq!(certificates(KEY), Vec::<String>::new());
+}
+
+#[test]
+fn a_block_that_is_not_a_certificate_is_left_out() {
+    let wrap =
+        |body: &str| format!("-----BEGIN CERTIFICATE-----\n{body}\n-----END CERTIFICATE-----");
+    // Not base64, base64 of a bare DER header, and a certificate with bytes after it.
+    let garbage = wrap("not a certificate at all");
+    let header = wrap("MAEA");
+    let body = CERT
+        .trim_start_matches("-----BEGIN CERTIFICATE-----\n")
+        .trim_end_matches("\n-----END CERTIFICATE-----");
+    let trailing = wrap(&format!("{body}\nAAAA"));
+    let text = format!("{garbage}\n{CERT}\n{header}\n{trailing}\n");
+    assert_eq!(certificates(&text), [CERT]);
+    assert_eq!(certificates(&garbage), Vec::<String>::new());
 }

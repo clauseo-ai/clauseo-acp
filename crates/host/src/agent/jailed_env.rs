@@ -9,11 +9,16 @@
 //!   ([`Rule::Inherited`], [`Rule::InheritedPrefix`], [`Rule::HostElseInherited`]); every other
 //!   name is dropped, however harmless it looks.
 //! - **Desktop's setup hook** (Clauseo's stored key, the firm plan's and the network route's
-//!   variables) and the profile's: they pass, as Clauseo's own sign-in and configuration.
+//!   variables) and the profile's: they pass, as Clauseo's own sign-in and configuration, except
+//!   a credential its selected route does not need (`filters::ROUTES`).
 //! - **The agent's settings `env`** (`agents.<id>.env`, made in Clauseo by the lawyer or the
-//!   firm): it passes, except a credential name ([`CREDENTIALS`]): when jailed, credentials come
-//!   only from Clauseo's sign-in, the setup hook and the firm plan. The names it leaves out are
-//!   [`ignored`], which the settings view shows.
+//!   firm): it passes, except a credential name ([`is_credential`]: `filters::CREDENTIALS` and
+//!   every secret-shaped name): when jailed, credentials come only from Clauseo's sign-in, the
+//!   setup hook and the firm plan. The names it leaves out are [`ignored`], which the settings
+//!   view shows.
+//!
+//! From every source, a name that runs code or moves a tool's config (`filters::BLOCKED`:
+//! `BASH_ENV`, `GIT_*`, `LD_PRELOAD` …) and a name that is not ASCII are dropped.
 //!
 //! Neither the hook nor the settings may set a name the host sets for the jail ([`Rule::Host`],
 //! [`Rule::HostElseInherited`]): such a value is dropped. What is dropped is logged as counts,
@@ -26,6 +31,9 @@ use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 
 use clauseo_settings::AgentLaunch;
+
+mod filters;
+use filters::{ascii, hook_keeps, is_blocked, is_credential, route_names};
 
 /// Where an allowed name's value comes from in a jailed launch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -173,61 +181,6 @@ pub(crate) const OS_PATH: [&str; 4] = [
     "System32\\WindowsPowerShell\\v1.0",
 ];
 
-/// One entry of [`CREDENTIALS`]: a whole name, or every name with a prefix.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum Credential {
-    Name(&'static str),
-    Prefix(&'static str),
-}
-
-/// The names that carry or choose an agent's credentials: no jailed agent takes them from the
-/// lawyer's environment (none passes [`JAILED_ENV`]) nor from its settings `env`. Clauseo's own
-/// sign-in, the setup hook's stored key and the firm plan set them instead.
-pub(crate) const CREDENTIALS: [Credential; 27] = [
-    // Anthropic's keys, tokens and endpoint.
-    Credential::Name("ANTHROPIC_API_KEY"),
-    Credential::Name("ANTHROPIC_AUTH_TOKEN"),
-    Credential::Name("CLAUDE_CODE_OAUTH_TOKEN"),
-    Credential::Name("ANTHROPIC_BASE_URL"),
-    Credential::Name("ANTHROPIC_CUSTOM_HEADERS"),
-    // Bedrock.
-    Credential::Name("CLAUDE_CODE_USE_BEDROCK"),
-    Credential::Name("CLAUDE_CODE_SKIP_BEDROCK_AUTH"),
-    Credential::Name("ANTHROPIC_BEDROCK_BASE_URL"),
-    Credential::Prefix("AWS_"),
-    // Vertex.
-    Credential::Name("CLAUDE_CODE_USE_VERTEX"),
-    Credential::Name("CLAUDE_CODE_SKIP_VERTEX_AUTH"),
-    Credential::Name("ANTHROPIC_VERTEX_PROJECT_ID"),
-    Credential::Name("ANTHROPIC_VERTEX_BASE_URL"),
-    Credential::Name("GOOGLE_APPLICATION_CREDENTIALS"),
-    Credential::Name("GOOGLE_CLOUD_PROJECT"),
-    Credential::Name("CLOUD_ML_REGION"),
-    Credential::Prefix("VERTEX_REGION_"),
-    // Microsoft Foundry.
-    Credential::Name("CLAUDE_CODE_USE_FOUNDRY"),
-    Credential::Name("CLAUDE_CODE_SKIP_FOUNDRY_AUTH"),
-    Credential::Prefix("ANTHROPIC_FOUNDRY_"),
-    // OpenAI and Codex.
-    Credential::Name("OPENAI_API_KEY"),
-    Credential::Name("OPENAI_BASE_URL"),
-    Credential::Name("OPENAI_ORG_ID"),
-    Credential::Name("OPENAI_ORGANIZATION"),
-    Credential::Name("OPENAI_PROJECT"),
-    Credential::Name("CODEX_API_KEY"),
-    // Azure OpenAI.
-    Credential::Prefix("AZURE_OPENAI_"),
-];
-
-/// Whether `name` is in [`CREDENTIALS`], ignoring ASCII case.
-pub(crate) fn is_credential(name: &OsStr) -> bool {
-    let bytes = name.as_encoded_bytes();
-    CREDENTIALS.iter().any(|credential| match credential {
-        Credential::Name(known) => bytes.eq_ignore_ascii_case(known.as_bytes()),
-        Credential::Prefix(prefix) => starts_with(bytes, prefix),
-    })
-}
-
 /// `name`'s entry in [`JAILED_ENV`], ignoring ASCII case; `None` when it is not on the list.
 pub(crate) fn allowed(name: &OsStr) -> Option<Rule> {
     let bytes = name.as_encoded_bytes();
@@ -262,8 +215,9 @@ fn starts_with(bytes: &[u8], prefix: &str) -> bool {
         .is_some_and(|start| start.eq_ignore_ascii_case(prefix.as_bytes()))
 }
 
-/// The names in an agent's settings `env` a jailed launch leaves out ([`CREDENTIALS`]), sorted:
-/// the settings view's note.
+/// The credential names in an agent's settings `env` a jailed launch leaves out
+/// ([`is_credential`]), sorted: the settings view's note, whose words say credential. The
+/// blocked and non-ASCII names it also drops are not listed there (`pr-d2a.md`'s follow-up).
 pub(crate) fn ignored(env: &BTreeMap<String, String>) -> Vec<String> {
     env.keys()
         .filter(|name| is_credential(OsStr::new(name)))
@@ -292,21 +246,30 @@ pub(crate) fn sources(
     let all = inherited.len();
     let inherited: Vec<_> = inherited
         .into_iter()
-        .filter(|(name, _)| passes_inherited(name))
+        .filter(|(name, _)| passes_inherited(name) && ascii(name) && !is_blocked(name))
         .collect();
+    let inherited_dropped = all - inherited.len();
     let mut settings = settings.clone();
-    let before = settings.env.len();
+    let before = settings.env.len() + hook.len();
+    settings
+        .env
+        .retain(|name, _| ascii(OsStr::new(name)) && !is_blocked(OsStr::new(name)));
+    hook.retain(|name, _| ascii(name) && !is_blocked(name));
+    let blocked = before - settings.env.len() - hook.len();
+    let before = settings.env.len() + hook.len();
     settings
         .env
         .retain(|name, _| !is_credential(OsStr::new(name)));
-    let credentials = before - settings.env.len();
+    let routed = route_names(&hook);
+    hook.retain(|name, _| hook_keeps(name, &routed));
+    let credentials = before - settings.env.len() - hook.len();
     let before = settings.env.len() + hook.len();
     settings.env.retain(|name, _| !host_sets(OsStr::new(name)));
     hook.retain(|name, _| !host_sets(name));
     let overrides = before - settings.env.len() - hook.len();
-    let inherited_dropped = all - inherited.len();
     tracing::debug!(
         inherited_dropped,
+        blocked,
         credentials,
         overrides,
         "the jailed agent's environment left variables out"

@@ -38,13 +38,25 @@ pub const PLAN_ENV_NAMES: [&str; 7] = [
 /// user name or password (`@`).
 pub const PLAN_PROXY_NAMES: [&str; 3] = ["HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"];
 
-/// The words a variable name may not hold, in any case, where a name is free (an agent's launch
-/// `env` with a value, [`crate::Effective::set_agent_launch`]).
-pub const SECRET_WORDS: [&str; 4] = ["KEY", "TOKEN", "SECRET", "PASSWORD"];
+/// The words that make a variable name secret-shaped ([`secret_shaped`]): one of them as a
+/// whole `_`-separated part of the name, in any case. Where a name is free (an agent's launch
+/// `env` with a value, [`crate::Effective::set_agent_launch`]) such a name is refused; the host
+/// drops it from a jailed agent's settings and setup variables by the same rule.
+pub const SECRET_WORDS: [&str; 9] = [
+    "KEY",
+    "TOKEN",
+    "SECRET",
+    "PASSWORD",
+    "PASSWD",
+    "CREDENTIAL",
+    "CREDENTIALS",
+    "AUTH",
+    "COOKIE",
+];
 
 /// Why a secret-shaped variable name is refused.
-const SECRET_NAME: &str =
-    "a variable name holding KEY, TOKEN, SECRET or PASSWORD is refused: keys go in the OS keychain";
+const SECRET_NAME: &str = "a variable name with a part KEY, TOKEN, SECRET, PASSWORD or another \
+                           secret word is refused: keys go in the OS keychain";
 
 /// Why a variable name that is not one is refused.
 const BAD_NAME: &str = "a variable name is ASCII letters, digits and _, not starting with a digit";
@@ -62,8 +74,8 @@ const PROXY_LOGIN: &str =
     "a proxy address may not hold a user name or password (@): keys go in the OS keychain";
 
 /// Why a launch variable with a secret-shaped name and a value is refused.
-const SECRET_VALUE: &str = "a variable whose name holds KEY, TOKEN, SECRET or PASSWORD must be \
-                            empty here: keys go in the OS keychain";
+const SECRET_VALUE: &str = "a variable whose name has a part KEY, TOKEN, SECRET, PASSWORD or \
+                            another secret word must be empty here: keys go in the OS keychain";
 
 /// Why a plan id that is not an agent id is refused.
 pub(crate) const BAD_ID: &str = "a plan's agent id is 1 to 64 characters of [a-z0-9-]";
@@ -93,12 +105,17 @@ pub(crate) fn id_ok(id: &str) -> bool {
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
 }
 
-/// Whether a plan variable's `name` is secret-shaped: it holds one of [`SECRET_WORDS`], ignoring
-/// ASCII case. A plan refuses it as it refuses every name not on its list, with this reason;
-/// [`crate::Effective::set_agent_launch`] refuses it with a value.
+/// Whether a variable's `name` is secret-shaped: one of its `_`-separated parts is one of
+/// [`SECRET_WORDS`], ignoring ASCII case. Parts, not text: `MAX_THINKING_TOKENS`' part is
+/// `TOKENS`, a count, so it passes. A plan refuses such a name as it refuses every name not on
+/// its list, with this reason; [`crate::Effective::set_agent_launch`] refuses it with a value; the
+/// host leaves it out of a jailed agent's settings and setup variables (one rule for all three).
 pub fn secret_shaped(name: &str) -> bool {
-    let upper = name.to_ascii_uppercase();
-    SECRET_WORDS.iter().any(|word| upper.contains(word))
+    name.split('_').any(|part| {
+        SECRET_WORDS
+            .iter()
+            .any(|word| part.eq_ignore_ascii_case(word))
+    })
 }
 
 /// Whether `name` is a variable name: ASCII letters, digits and `_`, not starting with a digit.

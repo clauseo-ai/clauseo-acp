@@ -134,6 +134,7 @@ impl Fixture {
             ca_cert: None,
             roots: Some(Arc::new(|| vec![ROOT_DER.to_vec()])),
             home: Some(self.home.clone()),
+            agent_homes: Vec::new(),
             personal: Arc::new(personal_folders),
             file_cap: clauseo_matters::FILE_CAP_BYTES,
             login_home: self.codex_home(),

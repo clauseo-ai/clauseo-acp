@@ -50,7 +50,7 @@ pub const INSTRUCTIONS_AT_ANY_DEPTH: &str = "CLAUDE.md";
 /// case-insensitive volumes (`DATA/x` is under `data`, an NFD name matches its NFC form; the
 /// pairs checked against this Mac's volume are in the tests). Elsewhere the comparison is exact:
 /// NTFS and Linux file systems keep NFC and NFD names as two files.
-pub(crate) fn under(path: &Path, prefix: &Path) -> bool {
+pub fn under(path: &Path, prefix: &Path) -> bool {
     if path.starts_with(prefix) {
         true
     } else if cfg!(target_os = "macos") {

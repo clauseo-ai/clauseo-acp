@@ -20,7 +20,9 @@
 //!   followed), its install folder from its install record, stetdoc's folder (`path_prepend`),
 //!   then with the browser its sidecars' folders and Chrome's. A runtime folder in the lawyer's
 //!   Documents, Desktop or Downloads ([`personal_folders`]: on Windows the known folders,
-//!   wherever `OneDrive` moved them), in the lawyer's `~/.claude` or `~/.codex`, or in any
+//!   wherever `OneDrive` moved them), in the lawyer's `~/.claude` or `~/.codex` or their custom
+//!   `CLAUDE_CONFIG_DIR` or `CODEX_HOME`, in `~/.ssh`, `~/.aws`, `~/.gnupg` or
+//!   `~/.config/gcloud` (`off_limits`), or in any
 //!   matter of the registry refuses the launch. Read paths never go on `PATH`, which is these
 //!   folders then the OS's (`jailed_env::path`).
 //! - **Read only in the matter:** its files over the checkpoint size cap (`over_cap.rs`,
@@ -62,10 +64,6 @@ pub(crate) const NATIVE_CODE_DENY: bool = false;
 /// The lawyer's folders no runtime folder may sit in (`home/<name>`).
 const PERSONAL_FOLDERS: [&str; 3] = ["Documents", "Desktop", "Downloads"];
 
-/// The lawyer's own agent homes (`home/<name>`), holding their Claude Code and Codex logins: no
-/// runtime folder may sit in one, as the jail would let the agent read there.
-const AGENT_HOMES: [&str; 2] = [".claude", ".codex"];
-
 /// Where the lawyer's Documents, Desktop and Downloads are for a home ([`personal_folders`]).
 pub(crate) type PersonalFolders =
     std::sync::Arc<dyn Fn(Option<&Path>) -> Vec<PathBuf> + Send + Sync>;
@@ -98,6 +96,9 @@ pub(crate) struct Grants {
     pub(crate) roots: Option<CaRoots>,
     /// The lawyer's home folder: the policy's, and the base of [`PERSONAL_FOLDERS`].
     pub(crate) home: Option<PathBuf>,
+    /// The lawyer's custom Claude Code and Codex homes ([`lawyers_agent_homes`]): no runtime
+    /// folder may sit in one.
+    pub(crate) agent_homes: Vec<PathBuf>,
     /// The lawyer's Documents, Desktop and Downloads for a home, looked up off the actor:
     /// [`personal_folders`] (tests pass their own).
     pub(crate) personal: PersonalFolders,
@@ -197,10 +198,30 @@ pub(super) fn grants(actor: &Actor, thread: ThreadId) -> Result<Grants, Error> {
             .cloned(),
         roots: sandbox.and_then(|sandbox| sandbox.ca_roots.clone()),
         home: actor.home.clone(),
+        agent_homes: lawyers_agent_homes(actor),
         personal: std::sync::Arc::new(personal_folders),
         file_cap: clauseo_matters::FILE_CAP_BYTES,
         login_home: actor.effective.locations().agent_home(agent.as_str()),
     })
+}
+
+/// The lawyer's own `CLAUDE_CONFIG_DIR` and `CODEX_HOME` from their environment (the inherited
+/// one, as a launch reads it), absolute ones only. Read on the actor, no file system call.
+fn lawyers_agent_homes(actor: &Actor) -> Vec<PathBuf> {
+    let names = [crate::agent::home::CLAUDE_CONFIG_VAR, codex::HOME_VAR];
+    let values: Vec<OsString> = match &actor.wiring.inherited_env {
+        Some(env) => env
+            .iter()
+            .filter(|(name, _)| names.iter().any(|want| name.as_os_str() == *want))
+            .map(|(_, value)| value.clone())
+            .collect(),
+        None => names.iter().filter_map(std::env::var_os).collect(),
+    };
+    values
+        .into_iter()
+        .map(PathBuf::from)
+        .filter(|home| home.is_absolute())
+        .collect()
 }
 
 /// The agent's program (`command`), which must be an absolute path with a folder.
@@ -243,9 +264,10 @@ pub(super) fn install_folder(command: &Path) -> Result<PathBuf, Error> {
 /// The folders the agent reads and runs, in `PATH` order: its program's (Node for an adapter,
 /// links followed), its install record's, stetdoc's, then with the browser its sidecars' and
 /// Chrome's; each once. Refuses the launch when the program's or the install's is missing, or
-/// one sits in the lawyer's Documents, Desktop or Downloads ([`Grants::personal`]) or in a
-/// matter of the registry (this one or another: the sandbox would let the agent read there
-/// again); the message names no path. Compared canonical. File system calls: off the actor.
+/// one sits in the lawyer's Documents, Desktop or Downloads ([`Grants::personal`]), in their
+/// Claude Code or Codex home or a credential store (`off_limits`), or in a matter of the
+/// registry (this one or another: the sandbox would let the agent read there again); the
+/// message names no path. File system calls: off the actor.
 pub(crate) fn runtime(grants: &Grants, prepared: &Prepared) -> Result<Vec<PathBuf>, Error> {
     let run = &prepared.run;
     let mut runtime = vec![install_folder(&grants.command)?];
@@ -267,39 +289,7 @@ pub(crate) fn runtime(grants: &Grants, prepared: &Prepared) -> Result<Vec<PathBu
         }));
         runtime.extend(run.chrome.as_deref().and_then(chrome_folder));
     }
-    let inside = |folders: Vec<PathBuf>| {
-        let folders: Vec<PathBuf> = folders
-            .iter()
-            .filter_map(|folder| dunce::canonicalize(folder).ok())
-            .collect();
-        runtime
-            .iter()
-            .any(|folder| folders.iter().any(|outer| folder.starts_with(outer)))
-    };
-    let homes = grants
-        .home
-        .iter()
-        .flat_map(|home| AGENT_HOMES.map(|name| home.join(name)));
-    if inside(homes.collect()) {
-        return Err(launch_failed(
-            "The sandbox couldn't start the agent: its program is in Claude Code's or Codex's own \
-             folder in your home folder. Install it elsewhere.",
-        ));
-    }
-    if inside((grants.personal)(grants.home.as_deref())) {
-        return Err(launch_failed(
-            "The sandbox couldn't start the agent: its program is in the Documents, Desktop or \
-             Downloads folder. Install it elsewhere.",
-        ));
-    }
-    let mut matters = grants.others.clone();
-    matters.push(prepared.stored.clone());
-    if inside(matters) {
-        return Err(launch_failed(
-            "The sandbox couldn't start the agent: its program is in a matter's folder. Install \
-             it elsewhere.",
-        ));
-    }
+    off_limits::refuse(grants, prepared, &runtime, off_limits::FOLD_CASE)?;
     let mut seen = std::collections::HashSet::new();
     runtime.retain(|folder| seen.insert(folder.clone()));
     Ok(runtime)
@@ -513,6 +503,8 @@ fn network(mut builder: PolicyBuilder, run: &RunFolders, ports: &[u16]) -> Polic
 fn launch_failed(message: &str) -> Error {
     Error::refused(ErrorCode::AgentLaunchFailed, message)
 }
+
+mod off_limits;
 
 #[cfg(test)]
 mod tests;

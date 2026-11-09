@@ -53,6 +53,12 @@ fn each_banned_word_is_secret_shaped_in_any_case() {
         "HTTPS_PROXY",
         "CLAUDE_CODE_USE_BEDROCK",
         "ANTHROPIC_MODEL",
+        // A word's part, not the word: counts and limits pass.
+        "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
+        "MAX_THINKING_TOKENS",
+        "MAX_MCP_OUTPUT_TOKENS",
+        "KEYBOARD_LAYOUT",
+        "AUTHOR_NAME",
     ] {
         assert!(!secret_shaped(name), "{name}");
     }
