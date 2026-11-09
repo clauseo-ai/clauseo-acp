@@ -380,9 +380,12 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignor
             .find_map(|path| clauseo_matters::held_open_resolved(&folder, &path))
             .map(|(path, _)| path)
     };
+    // A held file found by a tool's path, as the matter lists it (the walk keeps the agent's
+    // spelling, [`names::as_listed`]).
+    let listed = |held: Option<MatterPath>| held.map(|path| names::listed_spelling(&folder, path));
     match &targets {
         Targets::Named(paths) | Targets::Patch(paths) => {
-            let held = held_at(paths);
+            let held = listed(held_at(paths));
             timings::mark("resolve");
             Ok(held.map(Refusal::HeldOpen))
         }
@@ -394,7 +397,7 @@ fn refusal(bytes: &[u8], matter: Option<&Path>) -> Result<Option<Refusal>, Ignor
             escape,
             ..
         } => {
-            if let Some(path) = held_at(patch) {
+            if let Some(path) = listed(held_at(patch)) {
                 timings::mark("resolve");
                 return Ok(Some(Refusal::HeldOpen(path)));
             }

@@ -510,12 +510,68 @@ pub(super) fn shell_refusal(
         }
     }
     let path = found.or_else(|| named_in(text, escape, &held).map(|file| file.path.clone()))?;
+    let shown = as_listed(path.clone(), &held);
     let mut names_held = held;
-    match names_held.iter().find(|file| file.path == path) {
-        Some(file) => file.state.set(State::Held),
-        None => names_held.push(Held::new(path.clone())),
+    // The file as found and as listed both count as held: the list read-only checks against
+    // only grows.
+    for path in [&path, &shown] {
+        match names_held.iter().find(|file| file.path == *path) {
+            Some(file) => file.state.set(State::Held),
+            None => names_held.push(Held::new(path.clone())),
+        }
     }
-    (!read_only(line, escape, &names_held, hits, folder, reach)).then_some(Refusal::HeldOpen(path))
+    (!read_only(line, escape, &names_held, hits, folder, reach)).then_some(Refusal::HeldOpen(shown))
+}
+
+/// `path`, a held file a command or tool names by path, spelled as the matter lists it in
+/// `held` ([`held_files`]), so a refusal names the file as the lawyer sees it. The guard's
+/// network-safe walk keeps the agent's spelling of each name it finds (it never canonicalises an
+/// agent's path off Windows, [`super::Reach::walked`]), and APFS finds `CONTRACT.DOCX` or a
+/// decomposed (NFD) `Pétition.docx` as the held `Contract.docx` or composed `Pétition.docx`; NTFS
+/// ignores case too. The listed file with this exact path, else the first whose path this
+/// system's file system takes for the same ([`disk_key`]), else `path` as given. Only the name
+/// shown changes: the write is refused either way.
+pub(super) fn as_listed(path: MatterPath, held: &[Held]) -> MatterPath {
+    as_listed_by(path, held, disk_key)
+}
+
+/// [`as_listed`], names compared by `key`.
+fn as_listed_by(path: MatterPath, held: &[Held], key: fn(&str) -> String) -> MatterPath {
+    if held.iter().any(|file| file.path == path) {
+        return path;
+    }
+    let wanted = key(path.as_str());
+    held.iter()
+        .find(|file| key(file.path.as_str()) == wanted)
+        .map_or(path, |file| file.path.clone())
+}
+
+/// [`as_listed`] for a held file found by a tool's path (`Edit`, `Write`, a patch): the matter
+/// `folder` is listed ([`held_files`]) only on a system whose file system takes two spellings
+/// for one name, and only for a refusal.
+pub(super) fn listed_spelling(folder: &Path, path: MatterPath) -> MatterPath {
+    if cfg!(any(target_os = "macos", windows)) {
+        as_listed(path, &held_files(folder))
+    } else {
+        path
+    }
+}
+
+/// `text` as this system's file system tells names apart: APFS ignores case and Unicode form
+/// ([`apfs_key`]), NTFS case alone; ext4 neither.
+fn disk_key(text: &str) -> String {
+    if cfg!(target_os = "macos") {
+        apfs_key(text)
+    } else if cfg!(windows) {
+        text.to_lowercase()
+    } else {
+        text.to_owned()
+    }
+}
+
+/// `text` as APFS compares names: lower case and composed (NFC).
+fn apfs_key(text: &str) -> String {
+    text.to_lowercase().nfc().collect()
 }
 
 /// A program word's name: its last path part, lower case, without `.exe`.

@@ -1,4 +1,4 @@
-use super::{bounds, held_files_with, holds, named_in, raw_text};
+use super::{Held, apfs_key, as_listed_by, bounds, held_files_with, holds, named_in, raw_text};
 use crate::pre_write_guard::timings;
 use crate::pre_write_guard::words::Escape;
 use crate::write;
@@ -130,5 +130,37 @@ fn the_raw_text_joins_lines_and_decodes_ansi_c_quotes() {
     assert_eq!(
         raw_text("Set-Content Con`\ntract.docx $'a'", Escape::Backtick),
         "Set-Content Contract.docx $'a'"
+    );
+}
+
+/// A held file found by a path the agent spelled in another case or Unicode form is shown as the
+/// matter lists it, on APFS's rules, run on every system: the exact path first, the folded one
+/// next, the agent's spelling when none is listed; with no folding (ext4) nothing is mapped.
+#[test]
+fn a_held_file_found_in_another_spelling_is_shown_as_listed() {
+    let path = |text: &str| {
+        clauseo_protocol::MatterPath::from_relative(std::path::Path::new(text)).unwrap()
+    };
+    let held = [
+        Held::new(path("Drafts/Contract.docx")),
+        Held::new(path("P\u{e9}tition.docx")),
+        Held::new(path("CONTRACT.DOCX")),
+    ];
+    for (typed, shown) in [
+        ("drafts/CONTRACT.docx", "Drafts/Contract.docx"),
+        ("Pe\u{301}tition.docx", "P\u{e9}tition.docx"),
+        ("PE\u{301}TITION.DOCX", "P\u{e9}tition.docx"),
+        ("CONTRACT.DOCX", "CONTRACT.DOCX"),
+        ("Free.docx", "Free.docx"),
+    ] {
+        assert_eq!(
+            as_listed_by(path(typed), &held, apfs_key),
+            path(shown),
+            "{typed}"
+        );
+    }
+    assert_eq!(
+        as_listed_by(path("Pe\u{301}tition.docx"), &held, str::to_owned),
+        path("Pe\u{301}tition.docx")
     );
 }
