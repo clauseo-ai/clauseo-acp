@@ -22,6 +22,9 @@ mod network;
 // rules are tested in network_paths' Windows tests.
 #[cfg(unix)]
 mod ruling;
+// Its Windows twin, on Windows' own `C:\` fixture.
+#[cfg(windows)]
+mod ruling_windows;
 
 /// No real names: each name as written.
 fn as_written(_: &Path) -> Option<PathBuf> {

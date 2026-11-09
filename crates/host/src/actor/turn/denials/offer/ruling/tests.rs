@@ -1,15 +1,15 @@
 //! The ruling on a tool-call-only card, branch by branch: credential places never; another
 //! matter only when an OS report of the same file confirms it; anything else only as one file
-//! the launch would deny; the jail judged on a pinned path.
+//! the launch would deny; the jail judged on a pinned path (on Windows too, with 8.3 names).
 
 use std::path::Path;
 
 use clauseo_protocol::{DenialKind, OtherMatter};
 use clauseo_sandbox::PathClass;
 
-#[cfg(unix)]
-use super::Jail;
-use super::{Facts, LaunchPolicy, facts, tool_call_ruling};
+use super::{Facts, Jail, LaunchPolicy, facts, tool_call_ruling};
+#[cfg(windows)]
+use crate::actor::turn::denials::offer::identity::tests::{FakeIds, windows_places};
 #[cfg(unix)]
 use crate::actor::turn::denials::offer::identity::tests::{aliased, capture};
 use crate::actor::turn::denials::offer::identity::tests::{matter, rules};
@@ -127,4 +127,24 @@ fn the_jail_judges_a_pinned_path_so_a_respelled_matter_is_inside() {
         .pin(Path::new("/home/a/.local/share/CLAUSE~1/run/x"), &ids)
         .unwrap();
     assert!(!jail.would_deny(&alias));
+}
+
+/// Windows' twin: the matter and the data folder by their 8.3 names are inside once pinned.
+#[cfg(windows)]
+#[test]
+fn the_jail_judges_a_pinned_path_so_a_respelled_matter_is_inside_on_windows() {
+    let ids: FakeIds = windows_places::win_ids();
+    let captured = windows_places::win_capture(&ids);
+    let jail = Jail(&captured.rules);
+    assert!(!jail.would_deny(Path::new(r"C:\Users\a\Matters\Acme\brief.docx")));
+    assert!(!jail.would_deny(Path::new(r"C:\Users\a\AppData\Roaming\Clauseo\run\x")));
+    assert!(jail.would_deny(Path::new(r"C:\Users\a\Deals\spa.docx")));
+    assert!(jail.would_deny(Path::new(r"C:\Users\a\Matters\Smith\brief.docx")));
+    for alias in [
+        r"C:\Users\a\Matters\ACME~1\brief.docx",
+        r"C:\Users\a\AppData\Roaming\CLAUSE~1\run\x",
+    ] {
+        let pinned = captured.places.pin(Path::new(alias), &ids).unwrap();
+        assert!(!jail.would_deny(&pinned), "{alias}: {pinned:?}");
+    }
 }

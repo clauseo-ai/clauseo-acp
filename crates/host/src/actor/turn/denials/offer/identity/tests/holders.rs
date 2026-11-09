@@ -15,7 +15,9 @@ use clauseo_protocol::DenialKind;
 
 #[cfg(unix)]
 use super::capture;
-use super::{FakeIds, aliased, capture_on, card, matter, rules};
+use super::{FakeIds, capture_on, card, rules};
+#[cfg(unix)]
+use super::{aliased, matter};
 #[cfg(unix)]
 use crate::actor::turn::denials::check::SessionCache;
 #[cfg(unix)]
@@ -24,7 +26,9 @@ use crate::actor::turn::denials::offer::identity::FileId;
 use crate::actor::turn::denials::offer::{Offer, OfferRules};
 #[cfg(unix)]
 use crate::actor::turn::denials::resolve::Disk;
-use crate::network_paths::resolve::tests::{Fake, FakeFs};
+#[cfg(unix)]
+use crate::network_paths::resolve::tests::Fake;
+use crate::network_paths::resolve::tests::FakeFs;
 #[cfg(unix)]
 use crate::network_paths::tests::mac_net;
 use crate::network_paths::tests::plain_net;
@@ -211,6 +215,9 @@ fn an_identity_that_cant_be_read_refuses() {
     );
 }
 
+// Unix fixture paths aren't absolute on Windows, where the walk refuses them; its Windows twin
+// is in `windows_places.rs`.
+#[cfg(unix)]
 #[test]
 fn a_matter_root_linking_to_a_share_is_captured_by_its_text_never_opened() {
     for target in [r"\\server\share", "/net/server/share"] {

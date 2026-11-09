@@ -19,6 +19,7 @@ use crate::actor::turn::denials::offer::{KnownMatter, Offer, OfferRules, Refused
 use crate::actor::turn::denials::resolve::Disk;
 use crate::network_paths::NetEnv;
 use crate::network_paths::resolve::tests::FakeFs;
+#[cfg(unix)]
 use crate::network_paths::tests::plain_net;
 
 // Unix fixture paths aren't absolute on Windows, where the walk refuses them; Windows' walk
@@ -26,6 +27,9 @@ use crate::network_paths::tests::plain_net;
 #[cfg(unix)]
 mod cost;
 mod holders;
+// Windows' own `C:\` fixture: the walk refuses the Unix one there.
+#[cfg(windows)]
+pub(crate) mod windows_places;
 
 /// Identities in memory: each path's, aliases sharing one; every path asked is kept. Any other
 /// path is missing (`NotFound`), one in `unreadable` can't be read.
@@ -280,50 +284,6 @@ fn a_network_place_is_never_asked_about() {
         ids.asked()
     );
     assert!(captured.places.len() > 5, "{}", captured.places.len());
-}
-
-/// Windows' twin: a matter on a share, written as UNC or as its `\\?\UNC\` device form, is never
-/// asked about, while the local places are.
-#[cfg(windows)]
-#[test]
-fn a_network_place_is_never_asked_about_on_windows() {
-    let known = |n, name: &str, root: &str| KnownMatter {
-        id: matter(n),
-        name: name.into(),
-        root: root.into(),
-    };
-    let ids = FakeIds::with(&[
-        &[r"C:\"],
-        &[r"C:\Users"],
-        &[r"C:\Users\a"],
-        &[r"C:\Users\a\Matters"],
-        &[r"C:\Users\a\Matters\Acme"],
-    ]);
-    let rules = OfferRules {
-        home: Some(r"C:\Users\a".into()),
-        data_dir: r"C:\Users\a\AppData\Roaming\Clauseo".into(),
-        matter_root: r"C:\Users\a\Matters\Acme".into(),
-        matters: vec![
-            known(1, "Acme", r"C:\Users\a\Matters\Acme"),
-            known(3, "Share", r"\\server\share\x"),
-            known(4, "Device", r"\\?\UNC\server\share\y"),
-        ],
-        fold_case: true,
-        ..rules()
-    };
-    let captured = capture_on(rules, &ids, &FakeFs::default(), &plain_net(true));
-    let asked = ids.asked();
-    assert!(
-        asked
-            .iter()
-            .all(|p| !p.to_string_lossy().to_ascii_lowercase().contains("server")),
-        "{asked:?}"
-    );
-    assert!(
-        asked.contains(&PathBuf::from(r"C:\Users\a\Matters\Acme")),
-        "{asked:?}"
-    );
-    assert_ne!(captured.places.len(), 0);
 }
 
 #[test]
