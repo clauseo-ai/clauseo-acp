@@ -186,6 +186,7 @@ fn client_policy(w: &World) -> Policy {
     w.dir.file("Clients/brief.txt", "loose");
     Policy::builder(w.at("Clients/A"), w.at(STATE))
         .home(w.at("home"))
+        .tmpdir(w.at(crate::windows::test_world::TMP))
         .hidden(w.at("data"))
         .build()
         .unwrap()

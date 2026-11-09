@@ -60,11 +60,17 @@ pub(super) fn run_dir(data: &Path) -> PathBuf {
     data.join("run")
 }
 
-/// `<data>/agent-state/<matter>/notes`.
+/// `<data>/notes/<matter>` (R17 PR-D1, `state_folder::layout`).
 pub(super) fn notes_dir(data: &Path, matter: MatterId) -> PathBuf {
-    data.join("agent-state")
-        .join(matter.to_string())
-        .join("notes")
+    crate::agent::state_folder::layout::notes_at(data, &matter.to_string())
+}
+
+/// Makes `folder` under `data` through no link (`write::create_private_dirs_under`); the notes
+/// folder is first moved from its place before R17 PR-D1 if a failed start-up move left it there
+/// (`state_folder::layout::adopt`), so no session starts on new, empty notes. Off the actor.
+pub(super) fn make_under(data: &Path, folder: &Path) -> std::io::Result<()> {
+    crate::agent::state_folder::layout::adopt(data, folder)?;
+    crate::write::create_private_dirs_under(data, folder)
 }
 
 /// Removes `folder` and all it holds, through no link; a failure is a warning.

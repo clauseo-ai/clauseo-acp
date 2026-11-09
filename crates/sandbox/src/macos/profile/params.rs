@@ -29,7 +29,7 @@ impl Params {
             read: numbered("READ", policy.read()),
             allowed: numbered("ALLOWED", policy.allowed_folders()),
             notes: policy.notes().map(Path::to_owned),
-            tmpdir: policy.session_tmpdir().map(Path::to_owned),
+            tmpdir: Some(policy.tmpdir().to_owned()),
             credential_link: policy.credential_link().map(Path::to_owned),
             claude_files: numbered(
                 "CLAUDE_FILE",

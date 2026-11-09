@@ -19,6 +19,7 @@ impl World {
             "data/agent-state/m1/codex",
             "data/agent-state/m1/notes",
             "data/agents/codex-acp",
+            "data/run/s1",
             "home",
             "elsewhere",
         ] {
@@ -35,6 +36,7 @@ impl World {
         Policy::builder(self.at("matter"), self.at("data/agent-state/m1/codex"))
             .home(self.at("home"))
             .hidden(self.at("data"))
+            .tmpdir(self.at("data/run/s1/tmp"))
     }
 
     /// The profile text, then each parameter with its path relative to the temp folder and
@@ -135,8 +137,7 @@ fn the_credential_link_takes_data_writes_but_not_metadata() {
 #[test]
 fn with_a_session_tmpdir() {
     let w = World::new("profile-session-tmpdir");
-    w.dir.dir("data/run/s1");
-    let policy = w.builder().tmpdir(w.at("data/run/s1/tmp")).build().unwrap();
+    let policy = w.builder().build().unwrap();
     let text = w.render(&policy);
     let rw = "(allow file-read* file-write*\n  (subpath (param \"TMPDIR\")))";
     assert_eq!(text.matches(rw).count(), 2, "{text}");

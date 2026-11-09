@@ -52,6 +52,7 @@ fn the_sandbox_records_folder_is_refused_as_a_runtime_path_or_the_claude_store()
     // it; with it hidden, the policy refuses that path itself).
     let data = Policy::builder(w.at("matter"), w.at(STATE))
         .home(w.at("home"))
+        .tmpdir(w.at(crate::windows::test_world::TMP))
         .read(w.at("data"))
         .build()
         .unwrap();
@@ -160,16 +161,51 @@ fn writable_targets_in_the_data_folder_outside_the_allow_list_are_refused() {
     // The updates folder as the state folder.
     let updates = Policy::builder(w.at("matter"), w.at("data/updates"))
         .home(w.at("home"))
+        .tmpdir(w.at(crate::windows::test_world::TMP))
         .hidden(w.at("data"))
         .build()
         .unwrap();
     refused(updates, PathKind::State);
-    // Another matter's notes folder as this matter's.
-    let other = "data/agent-state/01890a5d-ac96-774b-8cce-b302099a8058/notes";
-    refused(
-        w.builder().notes(w.at(other)).build().unwrap(),
-        PathKind::Notes,
-    );
+    // Another matter's notes folder as this matter's, and this matter's notes at their place
+    // before the host's R17 PR-D1 layout.
+    for notes in [
+        "data/notes/01890a5d-ac96-774b-8cce-b302099a8058",
+        "data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/notes",
+    ] {
+        w.dir.dir(notes);
+        refused(
+            w.builder().notes(w.at(notes)).build().unwrap(),
+            PathKind::Notes,
+        );
+    }
+    // A Claude state folder under another matter's id in `claude-state`.
+    let other = "data/claude-state/01890a5d-ac96-774b-8cce-b302099a8058/claude-acp";
+    w.dir.dir(other);
+    let other = Policy::builder(w.at("matter"), w.at(other))
+        .home(w.at("home"))
+        .tmpdir(w.at(crate::windows::test_world::TMP))
+        .hidden(w.at("data"))
+        .build()
+        .unwrap();
+    refused(other, PathKind::State);
+}
+
+/// The host's layout since R17 PR-D1: Claude's state folder in `<data>\claude-state\<matter>`
+/// (Codex's stays in `agent-state`) and the notes in `<data>\notes\<matter>`.
+#[test]
+fn a_claude_state_folder_in_claude_state_is_planned() {
+    let w = World::new("plan-claude-state");
+    let state = "data/claude-state/01890a5d-ac96-774b-bcce-b302099a8057/claude-acp";
+    w.dir.dir(state);
+    let policy = Policy::builder(w.at("matter"), w.at(state))
+        .home(w.at("home"))
+        .tmpdir(w.at(crate::windows::test_world::TMP))
+        .hidden(w.at("data"))
+        .notes(w.at(NOTES))
+        .credential_link(w.at(&format!("{state}/auth.json")))
+        .build()
+        .unwrap();
+    assert_eq!(refusal(&w, &policy), None);
 }
 
 #[test]
@@ -232,6 +268,7 @@ fn a_matter_named_with_a_tilde_and_digit_is_planned() {
     w.dir.dir("Draft~2");
     let policy = Policy::builder(w.at("Draft~2"), w.at(STATE))
         .home(w.at("home"))
+        .tmpdir(w.at(crate::windows::test_world::TMP))
         .hidden(w.at("data"))
         .build()
         .unwrap();

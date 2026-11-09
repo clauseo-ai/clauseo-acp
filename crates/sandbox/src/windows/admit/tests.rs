@@ -231,6 +231,7 @@ fn another_matter_nested_with_this_one_is_refused_whatever_its_dacl() {
 
     let inside = Policy::builder(w.at("matter/B"), w.at("elsewhere"))
         .home(w.at("home"))
+        .tmpdir(w.at(crate::windows::test_world::TMP))
         .build()
         .unwrap();
     let outer = [w.at("matter")];
@@ -275,8 +276,10 @@ fn assert_overlaps(w: &World, policy: &Policy, data_dir: &Path) {
 #[test]
 fn a_matter_that_is_the_data_folder_is_refused() {
     let w = World::new("admit-data-is-matter");
+    w.dir.dir("outside/run/s1");
     let policy = Policy::builder(w.at("data"), w.at("elsewhere"))
         .home(w.at("home"))
+        .tmpdir(w.at("outside/run/s1/tmp"))
         .build()
         .unwrap();
     assert_overlaps(&w, &policy, &w.at("data"));
@@ -296,6 +299,7 @@ fn a_matter_inside_the_data_folder_is_refused() {
     let w = World::new("admit-matter-in-data");
     let policy = Policy::builder(w.at(STORE), w.at("elsewhere"))
         .home(w.at("home"))
+        .tmpdir(w.at(crate::windows::test_world::TMP))
         .build()
         .unwrap();
     assert_overlaps(&w, &policy, &w.at("data"));
@@ -308,6 +312,7 @@ fn a_data_folder_reached_through_another_spelling_still_matches() {
     let w = World::new("admit-data-spelling");
     let policy = Policy::builder(w.at(STORE), w.at("elsewhere"))
         .home(w.at("home"))
+        .tmpdir(w.at(crate::windows::test_world::TMP))
         .build()
         .unwrap();
     assert_overlaps(&w, &policy, &w.at("elsewhere/../data"));

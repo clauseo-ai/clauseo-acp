@@ -175,7 +175,8 @@ pub struct LaunchMessage {
     pub env: Vec<(String, String)>,
     /// The agent's state folder.
     pub state: String,
-    /// The session's temp folder (`Policy::session_tmpdir`), else `<state>\tmp`.
+    /// The session's temp folder (`Policy::tmpdir`), always set by `message` since R17 PR-D1;
+    /// without it, `<state>\tmp`.
     #[serde(default)]
     pub tmpdir: Option<String>,
     /// The policy's runtime paths: `PATH` entries in the lawyer's profile stay only inside these.

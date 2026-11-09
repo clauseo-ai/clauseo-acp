@@ -1,5 +1,7 @@
-//! Each matter's state folder for each agent with a kind (R17 PR-C):
-//! `<data>/agent-state/<matter id>/<agent id>/`, beside the matter's `notes` (R22). Claude Code
+//! Each matter's state folder for each agent with a kind (R17 PR-C): Codex's
+//! `<data>/agent-state/<matter id>/codex-acp/`, Claude's `<data>/claude-state/<matter id>/<agent
+//! id>/`, the matter's notes (R22) in `<data>/notes/<matter id>` (R17 PR-D1, [`layout`], which
+//! moves the older layout at the start). Claude Code
 //! gets it as `CLAUDE_CONFIG_DIR`, Codex as `CODEX_HOME` (and `HOME` on macOS and Linux), so
 //! one matter's transcripts, todos, shell snapshots and `.claude.json` never reach another
 //! matter's session. The login homes (`Locations::agent_home`, `<data>/agents/<id>/home`) stay
@@ -35,6 +37,7 @@ mod claude_json;
 mod file_id;
 #[cfg(unix)]
 mod handle;
+pub(crate) mod layout;
 #[cfg(not(unix))]
 mod projects;
 pub(crate) mod safe_read;
@@ -42,7 +45,8 @@ pub(crate) mod safe_read;
 pub(crate) use claude_json::strip_claude_json;
 pub(crate) use file_id::same_file;
 
-/// The folder under `<data>` that holds every matter's state folders and notes.
+/// The folder under `<data>` that holds every matter's Codex state folder (Claude's and the
+/// notes are elsewhere since R17 PR-D1, [`layout`]).
 pub(crate) const STATE_ROOT: &str = "agent-state";
 
 /// Codex's login file in its home and in each state folder.
@@ -165,9 +169,10 @@ pub(crate) fn state_root(data: &Path) -> PathBuf {
     data.join(STATE_ROOT)
 }
 
-/// `<data>/agent-state/<matter>/<agent>`: the matter's state folder for `agent`.
+/// The matter's state folder for `agent`: `<data>/claude-state/<matter>/<agent>` for Claude,
+/// `<data>/agent-state/<matter>/<agent>` for Codex ([`layout`]).
 pub(crate) fn state_dir(data: &Path, matter: MatterId, agent: &str) -> PathBuf {
-    state_root(data).join(matter.to_string()).join(agent)
+    layout::state_at(data, &matter.to_string(), agent)
 }
 
 /// Makes `state` ([`state_dir`]) one folder at a time below `data`, each private to the user on
@@ -348,6 +353,15 @@ fn prepare_with(data: &Path, state: &Path, kind: AgentKind, cleaned: bool) -> Re
         AgentKind::Claude => "Claude Code",
         AgentKind::Codex => "Codex",
     };
+    if kind == AgentKind::Claude
+        && let Err(error) = layout::adopt(data, state)
+    {
+        tracing::warn!(error = %Cause(&error), "a Claude state folder did not move; refused");
+        return Err(Error::refused(
+            ErrorCode::AgentLaunchFailed,
+            format!("Clauseo couldn't prepare {who}'s folder."),
+        ));
+    }
     make(data, state, who)?;
     let first = clean(state, kind, !cleaned);
     let cleaned = first.and_then(|()| match kind {

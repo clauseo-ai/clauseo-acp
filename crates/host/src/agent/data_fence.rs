@@ -51,11 +51,12 @@ pub(crate) use launch::{LaunchDeny, claude_projects, launch_deny};
 /// Under `agents`: both agents' folders whole (the login homes, where the login store and the
 /// transcripts from before R17 PR-C are, the installs and the sign-in markers), the runtime and
 /// npm folders and the sign-in shim. Under `agent-state` (R17 PR-C), in every matter, the own
-/// one too, so a matter made after the launch is covered: Codex's state folders whole, and in
-/// Claude's its login store if one lands there, its `.claude.json`, its settings and the config
-/// surfaces the launch cleans (`state_folder::clean`), its transcripts (every
-/// project's, with its subagents' and its memory; not the whole of `projects`, which also holds
-/// the large tool results the model must Read back, `launch.rs`), and what it keeps across
+/// one too, so a matter made after the launch is covered, Codex's state folders whole; under
+/// `claude-state` (R17 PR-D1), in every matter's Claude state folder, its login store if one
+/// lands there, its `.claude.json`, its settings and the config surfaces the launch cleans
+/// (`state_folder::clean`), its transcripts (every project's, with its subagents' and its
+/// memory; not the whole of `projects`, which also holds the large tool results the model must
+/// Read back, `launch.rs`), and what it keeps across
 /// sessions: the prompt history, the edited files' copies, the to-do lists and the shell
 /// snapshots. Not Claude's state folder whole: Claude Code writes its plan note to `plans`
 /// there with its own Edit tool, and a deny rule has no exceptions; another matter's state
@@ -83,25 +84,25 @@ pub(crate) const DENIED: [&str; 43] = [
     "agents/codex-acp/**",
     "agents/claude-acp/**",
     "agent-state/*/codex-acp/**",
-    "agent-state/*/claude-acp/.credentials.json",
-    "agent-state/*/claude-acp/.claude.json*",
-    "agent-state/*/claude-acp/settings.json",
-    "agent-state/*/claude-acp/settings.local.json",
-    "agent-state/*/claude-acp/CLAUDE.md",
-    "agent-state/*/claude-acp/rules/**",
-    "agent-state/*/claude-acp/skills/**",
-    "agent-state/*/claude-acp/plugins/**",
-    "agent-state/*/claude-acp/agents/**",
-    "agent-state/*/claude-acp/commands/**",
-    "agent-state/*/claude-acp/output-styles/**",
-    "agent-state/*/claude-acp/hooks/**",
-    "agent-state/*/claude-acp/projects/*/*.jsonl",
-    "agent-state/*/claude-acp/projects/*/*/subagents/**",
-    "agent-state/*/claude-acp/projects/*/memory/**",
-    "agent-state/*/claude-acp/history.jsonl",
-    "agent-state/*/claude-acp/file-history/**",
-    "agent-state/*/claude-acp/todos/**",
-    "agent-state/*/claude-acp/shell-snapshots/**",
+    "claude-state/*/claude-acp/.credentials.json",
+    "claude-state/*/claude-acp/.claude.json*",
+    "claude-state/*/claude-acp/settings.json",
+    "claude-state/*/claude-acp/settings.local.json",
+    "claude-state/*/claude-acp/CLAUDE.md",
+    "claude-state/*/claude-acp/rules/**",
+    "claude-state/*/claude-acp/skills/**",
+    "claude-state/*/claude-acp/plugins/**",
+    "claude-state/*/claude-acp/agents/**",
+    "claude-state/*/claude-acp/commands/**",
+    "claude-state/*/claude-acp/output-styles/**",
+    "claude-state/*/claude-acp/hooks/**",
+    "claude-state/*/claude-acp/projects/*/*.jsonl",
+    "claude-state/*/claude-acp/projects/*/*/subagents/**",
+    "claude-state/*/claude-acp/projects/*/memory/**",
+    "claude-state/*/claude-acp/history.jsonl",
+    "claude-state/*/claude-acp/file-history/**",
+    "claude-state/*/claude-acp/todos/**",
+    "claude-state/*/claude-acp/shell-snapshots/**",
     "agents/runtime/**",
     "agents/downloads/**",
     "agents/npm-cache/**",
@@ -203,8 +204,8 @@ fn escape(text: &str) -> String {
 
 /// Whether `plans` is a plans folder where Claude Code writes its plan note
 /// (`agent/plan_note.rs`) when its config folder is Clauseo's: a matter's state folder's
-/// (`<data>/agent-state/<matter>/<agent id>/plans`, `agent/state_folder.rs`). A login home's
-/// `plans` (before R17 PR-C) no longer counts: no session writes there.
+/// (`<data>/claude-state/<matter>/<agent id>/plans`, `agent/state_folder.rs`, R17 PR-D1). A
+/// login home's `plans` (before R17 PR-C) no longer counts: no session writes there.
 pub(crate) fn is_agent_plans(data: &Path, plans: &Path) -> bool {
     let Ok(place) = plans.strip_prefix(data) else {
         return false;
@@ -213,7 +214,7 @@ pub(crate) fn is_agent_plans(data: &Path, plans: &Path) -> bool {
     matches!(
         names.as_slice(),
         [Component::Normal(root), Component::Normal(_), Component::Normal(_), Component::Normal(folder)]
-            if *root == super::state_folder::STATE_ROOT && *folder == "plans"
+            if *root == super::state_folder::layout::CLAUDE_STATE_ROOT && *folder == "plans"
     )
 }
 

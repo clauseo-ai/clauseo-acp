@@ -37,6 +37,9 @@ pub(super) async fn open(
     write::create_dir_all(&matter_settings(&data_dir).matters_root)
         .map_err(|error| Error::Store(error.into()))?;
     let store = Store::open(StoreOptions::new(data_dir.clone())).await?;
+    // With the store's lock held (no other host serves this data folder) and before the loop
+    // serves (no launch yet): Claude's state and the notes leave `agent-state` (R17 PR-D1).
+    crate::agent::state_folder::layout::migrate(&data_dir);
     // The index opens (or rebuilds) on its own thread: start-up does not wait for it.
     let search = crate::search::Search::start(
         data_dir,

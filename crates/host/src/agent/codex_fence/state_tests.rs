@@ -47,17 +47,19 @@ fn the_shell_reads_but_never_writes_codex_homes_arg0_folder() {
     );
     for path in [
         state().join("auth.json"),
-        data().join("agent-state").join("m2").join("notes"),
+        data().join("notes").join("m2"),
+        data().join("claude-state").join("m1").join("claude-acp"),
     ] {
         assert_eq!(access(&keys, &path), "deny", "{}", path.display());
     }
 }
 
 /// Round 4's ruling, option B: `state_denies` lists, through no link, every other matter's
-/// folder, every entry of this matter's folder but `notes` and `codex-acp`, and every entry of
-/// the state folder but `tmp`, plus the login link, `.env` and `config.toml` by name.
+/// folder, every entry of this matter's folder but `codex-acp` (a `notes` or `claude-acp` an
+/// older layout left there included, R17 PR-D1), and every entry of the state folder but
+/// `tmp`, plus the login link, `.env` and `config.toml` by name.
 #[test]
-fn state_denies_leave_out_tmp_and_notes_only() {
+fn state_denies_leave_out_tmp_only() {
     let dir = crate::pipeline::tests::support::TempDir::new("codex-state-denies");
     let data = dir.path().join("data");
     let state = data.join("agent-state/m1/codex-acp");
@@ -75,6 +77,7 @@ fn state_denies_leave_out_tmp_and_notes_only() {
     for denied in [
         data.join("agent-state/m2"),
         data.join("agent-state/m1/claude-acp"),
+        data.join("agent-state/m1/notes"),
         state.join("sessions"),
         state.join("history.jsonl"),
         state.join("auth.json"),
@@ -89,7 +92,6 @@ fn state_denies_leave_out_tmp_and_notes_only() {
     }
     for kept in [
         state.join("tmp"),
-        data.join("agent-state/m1/notes"),
         state.clone(),
         data.join("agent-state/m1"),
     ] {
@@ -98,11 +100,11 @@ fn state_denies_leave_out_tmp_and_notes_only() {
 }
 
 /// Rounds 5 and 6: a matter made **after** the launch (not in the launch's `state_denies`) keeps
-/// its Codex login link, `.env`, `config.toml`, history and live shell snapshots and Claude's
-/// login store and `.claude.json` unreadable to the shell, by the profile's deny globs, in every
-/// turn. Its transcripts, logs, databases and `notes` are the named residuals (narrow patterns,
-/// for Codex's 8192-match cap); the own state folder's `tmp` stays readable and the own notes
-/// writable.
+/// its Codex login link, `.env`, `config.toml`, history and live shell snapshots unreadable to
+/// the shell, by the profile's deny globs, in every turn, and its notes and Claude state by the
+/// whole `notes` and `claude-state` denies (R17 PR-D1). Its Codex transcripts, logs and
+/// databases are the named residuals (narrow patterns, for Codex's 8192-match cap); the own state
+/// folder's `tmp` stays readable and the own notes writable.
 #[test]
 fn a_matter_made_after_the_launch_keeps_its_logins_and_transcripts_unreadable() {
     let keys = fence();
@@ -113,17 +115,14 @@ fn a_matter_made_after_the_launch_keeps_its_logins_and_transcripts_unreadable() 
         later.join("codex-acp").join("config.toml"),
         later.join("codex-acp").join("history.jsonl"),
         later.join("codex-acp").join("shell_snapshots").join("s.sh"),
-        later.join("claude-acp").join(".credentials.json"),
-        later.join("claude-acp").join(".claude.json"),
+        data().join("claude-state/m-later/claude-acp/.credentials.json"),
+        data().join("claude-state/m-later/claude-acp/.claude.json"),
+        data().join("notes/m-later/n.md"),
     ] {
         assert_eq!(access(&keys, &path), "deny", "{}", path.display());
     }
-    for residual in [
-        later.join("notes").join("n.md"),
-        later.join("codex-acp").join("sessions").join("r.jsonl"),
-    ] {
-        assert_eq!(access(&keys, &residual), "read", "{}", residual.display());
-    }
+    let residual = later.join("codex-acp").join("sessions").join("r.jsonl");
+    assert_eq!(access(&keys, &residual), "read", "{}", residual.display());
     assert_eq!(
         access(&keys, &state().join("tmp").join("arg0").join("x")),
         "read"

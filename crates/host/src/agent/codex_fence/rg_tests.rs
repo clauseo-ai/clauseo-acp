@@ -109,8 +109,9 @@ fn expand(data: &Path, cwd: &Path) -> Option<Vec<PathBuf>> {
 }
 
 /// Every planted login file of a matter made after the launch is matched by the real command,
-/// run from a working folder elsewhere; the own state folder's `tmp` and the matter's notes are
-/// matched by none.
+/// run from a working folder elsewhere; the own state folder's `tmp`, the matters' notes and
+/// Claude's state (outside `agent-state` since R17 PR-D1, denied whole by `rules`) are matched
+/// by none.
 #[test]
 fn the_deny_globs_match_a_later_matters_logins_from_any_working_folder() {
     let dir = TempDir::new("codex-fence-rg");
@@ -122,14 +123,13 @@ fn the_deny_globs_match_a_later_matters_logins_from_any_working_folder() {
         later.join("codex-acp/config.toml"),
         later.join("codex-acp/history.jsonl"),
         later.join("codex-acp/shell_snapshots/s.sh"),
-        later.join("claude-acp/.credentials.json"),
-        later.join("claude-acp/.claude.json"),
     ];
     let own = data.join("agent-state").join("m1");
     let spared = [
         own.join("codex-acp/tmp/arg0/codex-arg0abc/apply_patch"),
-        own.join("notes/n.md"),
-        later.join("notes/n.md"),
+        data.join("notes/m1/n.md"),
+        data.join("notes/m-later/n.md"),
+        data.join("claude-state/m-later/claude-acp/.claude.json"),
     ];
     for file in secrets.iter().chain(&spared) {
         write::create_dir_all(file.parent().unwrap()).unwrap();
@@ -154,19 +154,18 @@ fn the_deny_globs_match_a_later_matters_logins_from_any_working_folder() {
 }
 
 /// The matches a matter's state adds after the clean, with a live session: Codex's login link
-/// and `config.toml`, one live shell snapshot, and Claude's `.claude.json`. `.env` is cleaned,
-/// `history.jsonl` is the TUI's only, and Claude's store is the login home's.
-const MATCHES_PER_MATTER: usize = 4;
+/// and `config.toml`, and one live shell snapshot. `.env` is cleaned and `history.jsonl` is
+/// the TUI's only; Claude's state is outside `agent-state` (R17 PR-D1).
+const MATCHES_PER_MATTER: usize = 3;
 
 /// The names under `agent-state/<matter>` the globs can match within [`GLOB_SCAN_MAX_DEPTH`]
-/// (4), whoever writes them: the 6 login names at depth 3 (`codex-acp/{auth.json,.env,
-/// config.toml,history.jsonl}`, `claude-acp/{.credentials.json,.claude.json}`), and the same 6
-/// one folder down, under each of the matter folder's 3 entries (`codex-acp`, `claude-acp`,
-/// `notes`), which only the host makes (`**/` spans one folder at depth 4). The shell writes
-/// only `notes`, Claude also its `claude-acp`. Plus that matter's live shell snapshots
-/// (`codex-acp/shell_snapshots/*`, depth 4), which Codex's own process writes, one per live
-/// session here.
-const PLANTABLE_PER_MATTER: usize = 6 + 3 * 6 + 1;
+/// (4), whoever writes them: the 4 login names at depth 3 (`codex-acp/{auth.json,.env,
+/// config.toml,history.jsonl}`), and the same 4 one folder down, under the matter folder's one
+/// entry (`codex-acp`), which only the host makes (`**/` spans one folder at depth 4). No
+/// shell and no Claude writes under `agent-state` since R17 PR-D1 (the notes and Claude's state
+/// left it). Plus that matter's live shell snapshots (`codex-acp/shell_snapshots/*`, depth 4),
+/// which Codex's own process writes, one per live session here.
+const PLANTABLE_PER_MATTER: usize = 4 + 4 + 1;
 
 /// Codex fails every sandboxed command past 8192 glob matches (`MAX_UNREADABLE_GLOB_MATCHES`,
 /// bwrap.rs:62).
@@ -175,12 +174,12 @@ const CODEX_GLOB_CAP: usize = 8192;
 /// The 8192-cap headroom and the depth cap, through the real rg with Codex's split mirrored
 /// (rust-v0.162.1, pinned above) and its cap as the constant 8192
 /// (`MAX_UNREADABLE_GLOB_MATCHES`), not through Codex's own code. One matter is heavy
-/// with files that are not logins (hundreds of transcripts, logs, notes, tool results), has
-/// every name the globs can match within the depth cap, and has plants one folder deeper: 300
-/// `notes/x<n>/codex-acp/auth.json` (stage C's cross-matter shutdown) and a snapshot in a
-/// subfolder. Only the [`PLANTABLE_PER_MATTER`] names match, so no matter can push the others
-/// past the cap; a matter with only its own files matches [`MATCHES_PER_MATTER`], so 2,000
-/// matters stay under it.
+/// with files that are not logins (hundreds of transcripts, logs, notes, tool results; the notes
+/// and Claude's outside `agent-state`), has every name the globs can match within the depth cap,
+/// and has plants one folder deeper: 300 `codex-acp/x<n>/codex-acp/auth.json` (stage C's
+/// cross-matter shutdown) and a snapshot in a subfolder. Only the [`PLANTABLE_PER_MATTER`]
+/// names match, so no matter can push the others past the cap; a matter with only its own files
+/// matches [`MATCHES_PER_MATTER`], so 2,000 matters stay under it.
 #[test]
 fn the_deny_globs_stay_under_codexs_match_cap() {
     let dir = TempDir::new("codex-fence-rg-cap");
@@ -192,19 +191,19 @@ fn the_deny_globs_stay_under_codexs_match_cap() {
         "codex-acp/.env",
         "codex-acp/config.toml",
         "codex-acp/history.jsonl",
-        "claude-acp/.credentials.json",
-        "claude-acp/.claude.json",
     ];
     let mut matching: Vec<PathBuf> = logins.iter().map(|name| matter.join(name)).collect();
-    for entry in ["codex-acp", "claude-acp", "notes"] {
-        matching.extend(logins.iter().map(|name| matter.join(entry).join(name)));
-    }
+    // The matter folder's one entry, `codex-acp`, one folder down.
+    matching.extend(
+        logins
+            .iter()
+            .map(|name| matter.join("codex-acp").join(name)),
+    );
     matching.push(matter.join("codex-acp/shell_snapshots/live.sh"));
     let own: Vec<PathBuf> = [
         "codex-acp/auth.json",
         "codex-acp/config.toml",
         "codex-acp/shell_snapshots/live.sh",
-        "claude-acp/.claude.json",
     ]
     .iter()
     .map(|name| quiet.join(name))
@@ -215,11 +214,13 @@ fn the_deny_globs_stay_under_codexs_match_cap() {
         matter.join("codex-acp/logs_2.sqlite"),
     ];
     for n in 0..300 {
-        others.push(matter.join(format!("notes/x{n}/codex-acp/auth.json")));
+        others.push(matter.join(format!("codex-acp/x{n}/codex-acp/auth.json")));
         others.push(matter.join(format!("codex-acp/sessions/2026/11/07/rollout-{n}.jsonl")));
         others.push(matter.join(format!("codex-acp/log/codex-{n}.log")));
-        others.push(matter.join(format!("claude-acp/projects/p/s-{n}.jsonl")));
-        others.push(matter.join(format!("notes/note-{n}.md")));
+        others.push(data.join(format!(
+            "claude-state/m-heavy/claude-acp/projects/p/s-{n}.jsonl"
+        )));
+        others.push(data.join(format!("notes/m-heavy/x{n}/codex-acp/auth.json")));
         others.push(quiet.join(format!("codex-acp/tmp/arg0/codex-arg0{n}/apply_patch")));
     }
     for file in matching.iter().chain(&own).chain(&others) {
@@ -243,7 +244,8 @@ fn the_deny_globs_stay_under_codexs_match_cap() {
 }
 
 /// The cost of the globs at each sandboxed command, timed by hand (ignored): 20 matters, each
-/// with a 5,000-file `tmp`, a 2,000-file `notes` and a few transcripts; all patterns share one
+/// with a 5,000-file `tmp`, a 2,000-file `notes` (outside `agent-state`, so not walked) and a
+/// few transcripts; all patterns share one
 /// search root, so one ripgrep walk. Prints the median of 9 runs.
 ///
 /// ```text
@@ -257,8 +259,8 @@ fn timing_the_deny_globs_ripgrep_walk() {
     let data = dir.path().join("data");
     for matter in 0..20 {
         let root = data.join("agent-state").join(format!("m{matter}"));
-        for (folder, count) in [("codex-acp/tmp", 5_000), ("notes", 2_000)] {
-            let folder = root.join(folder);
+        let notes = data.join("notes").join(format!("m{matter}"));
+        for (folder, count) in [(root.join("codex-acp/tmp"), 5_000), (notes, 2_000)] {
             write::create_dir_all(&folder).unwrap();
             for n in 0..count {
                 write::write_file(&folder.join(format!("f{n}")), b"x").unwrap();

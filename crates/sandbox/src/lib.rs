@@ -51,8 +51,8 @@
 //!   `over_cap`, `links`, `scan` (a [`MatterScan`] the caller already has),
 //!   `home`, and `build`. Accessors carry the builder's names, plus [`Policy::tmpdir`] (the
 //!   session's temp folder the host set, `<data_dir>/run/<session>/tmp`, read-write without
-//!   its run folder; else `<state>/tmp`, deprecated: R17 PR-D passes `run/<s>/tmp`),
-//!   [`Policy::session_tmpdir`], [`Policy::read_only_in_matter`] ([`PathRule`]s),
+//!   its run folder; required since R17 PR-D1: `build` refuses a policy without one),
+//!   [`Policy::read_only_in_matter`] ([`PathRule`]s),
 //!   [`Policy::link_folders`] and
 //!   [`Policy::links_outside_link_folders`]; [`Policy::claude_store`] gives a
 //!   [`ClaudeStore`] with its allowed names ([`CLAUDE_STORE_FILES`],

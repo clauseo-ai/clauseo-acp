@@ -29,8 +29,10 @@ pub(super) const MATTER_SID: &str = "S-1-5-21-2626480971-3383066999-180375651-60
 
 /// This matter's state folder, under its id as the plan expects, relative to the temp folder.
 pub(super) const STATE: &str = "data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/claude";
-/// This matter's notes folder.
-pub(super) const NOTES: &str = "data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/notes";
+/// This matter's notes folder, `<data>\notes\<matter>` (the host's layout since R17 PR-D1).
+pub(super) const NOTES: &str = "data/notes/01890a5d-ac96-774b-bcce-b302099a8057";
+/// The session's temp folder every [`World::builder`] sets (required since R17 PR-D1).
+pub(super) const TMP: &str = "data/run/s1/tmp";
 /// Clauseo's Claude sign-in home, the one Claude store the plan allows in the data folder.
 pub(super) const STORE: &str = "data/agents/claude-acp/home";
 
@@ -87,7 +89,8 @@ impl World {
             STATE,
             NOTES,
             STORE,
-            "data/agent-state/01890a5d-ac96-774b-8cce-b302099a8058/notes",
+            "data/notes/01890a5d-ac96-774b-8cce-b302099a8058",
+            "data/run/s1",
             "data/updates",
             "runtime/node",
             "home/.claude",
@@ -109,11 +112,13 @@ impl World {
         dunce::canonicalize(self.at(rel)).unwrap()
     }
 
-    /// The matter and its state folder, with the home and the data folder hidden.
+    /// The matter and its state folder, with the home and the data folder hidden, and the
+    /// session's temp folder.
     pub(super) fn builder(&self) -> PolicyBuilder {
         Policy::builder(self.at("matter"), self.at(STATE))
             .home(self.at("home"))
             .hidden(self.at("data"))
+            .tmpdir(self.at(TMP))
     }
 
     /// Every kind of path the plan grants on: a repository and an over-cap file in the matter,

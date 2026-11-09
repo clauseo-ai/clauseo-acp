@@ -270,6 +270,9 @@ pub(super) struct StatePlan {
     gated: bool,
     /// The thread's agent, for the refusal's log.
     agent: Option<clauseo_protocol::AgentId>,
+    /// Linux, a Codex launch: the ripgrep guard's inputs (`codex_fence::rg_guard`).
+    #[cfg(target_os = "linux")]
+    rg: Option<crate::agent::codex_fence::rg_guard::Inputs>,
 }
 
 /// An agent's own preparation ([`StatePlan::prepare_agent`]): Codex's preparation, Claude's
@@ -286,11 +289,32 @@ impl StatePlan {
             .get(&thread)
             .map(|entry| entry.row.agent.clone());
         let state_use = state_use(actor, thread)?;
+        #[cfg(target_os = "linux")]
+        let rg = agent
+            .as_ref()
+            .filter(|id| AgentKind::of(id) == Some(AgentKind::Codex))
+            .and_then(|id| Some((actor.effective.agent(id.as_str())?, id)))
+            .map(|(settings, id)| {
+                let hook = crate::agent::loads::launch_env(actor.profile.launch_env(id));
+                let inherited = match &actor.wiring.inherited_env {
+                    Some(env) => env.clone(),
+                    None => std::env::vars_os().collect(),
+                };
+                let prepend = actor.wiring.path_prepend.as_deref();
+                crate::agent::codex_fence::rg_guard::Inputs::of(
+                    settings,
+                    hook,
+                    inherited.into_iter(),
+                    prepend,
+                )
+            });
         Ok(Self {
             reused,
             state_use,
             gated,
             agent,
+            #[cfg(target_os = "linux")]
+            rg,
         })
     }
 
@@ -325,6 +349,13 @@ impl StatePlan {
                     self.state_use,
                 )?;
                 answer = Some(support);
+                // Linux: Codex's `rg` found, and in no folder the session writes or Codex keeps.
+                #[cfg(target_os = "linux")]
+                if let Some(rg) = &self.rg {
+                    let cwd = crate::agent::session_folder(stored);
+                    let writable = [cwd.as_path(), &run.root, &run.notes, &prepared.state];
+                    crate::agent::codex_fence::rg_guard::check(rg, &cwd, &writable)?;
+                }
                 Some(prepared)
             }
             _ => None,

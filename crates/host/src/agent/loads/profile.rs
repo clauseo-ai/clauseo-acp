@@ -105,7 +105,7 @@ impl Login {
 pub(crate) struct Folders<'a> {
     /// `{work_folder}`, `<data>/run/<session id>/work`.
     pub(crate) work: &'a str,
-    /// `{matter_notes}`, `<data>/agent-state/<matter id>/notes`.
+    /// `{matter_notes}`, `<data>/notes/<matter id>`.
     pub(crate) notes: &'a str,
     /// `{connectors}` (R24, decision D6): not a folder, but the session's like them. The
     /// connectors paragraph in a session that got the `case-law` entry

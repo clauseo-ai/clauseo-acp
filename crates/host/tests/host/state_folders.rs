@@ -1,7 +1,8 @@
 //! R17 PR-C: each matter's state folder for each agent (`agent/state_folder.rs`). Claude Code's
-//! `CLAUDE_CONFIG_DIR` and Codex's `CODEX_HOME` are `<data>/agent-state/<matter>/<agent>`, made
-//! at the matter's first launch and cleaned of the config surfaces before every launch; the
-//! login stays in the login home. The orchestrator's conditions, each with a test here: a
+//! `CLAUDE_CONFIG_DIR` and Codex's `CODEX_HOME` are `<data>/{claude,agent}-state/<matter>/<agent>`
+//! (R17 PR-D1), made at the matter's first launch and cleaned of the config surfaces before
+//! every launch; the login stays in the login home. The orchestrator's conditions, each with a
+//! test here: a
 //! second matter's first launch needs no sign-in (Claude reads the one store through
 //! `CLAUDE_SECURESTORAGE_CONFIG_DIR`; Codex gets a hard link to the existing login), and a
 //! sign-out reaches every matter (`remove_login_links` clears every matter's Codex link; Claude

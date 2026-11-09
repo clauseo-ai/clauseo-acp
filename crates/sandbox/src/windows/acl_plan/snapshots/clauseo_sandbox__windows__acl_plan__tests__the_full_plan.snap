@@ -4,7 +4,8 @@ expression: "render(&w, plan.grants())"
 ---
 Matter Modify pool 0x001301bf Tree <root>/matter
 State Modify pool 0x001301bf Tree <root>/data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/claude
-Notes Modify pool 0x001301bf Tree <root>/data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/notes
+Notes Modify pool 0x001301bf Tree <root>/data/notes/01890a5d-ac96-774b-bcce-b302099a8057
+TempFolder Modify pool 0x001301bf Tree <root>/data/run/s1/tmp
 CredentialLink ReadWriteData pool 0x0012008f ThisOnly <root>/data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/claude/auth.json
 ClaudeStore CreateFiles pool 0x00000002 ThisOnly <root>/data/agents/claude-acp/home
 ClaudeStoreFile Modify pool 0x001301bf ThisOnly <root>/data/agents/claude-acp/home/.credentials.json
@@ -14,7 +15,8 @@ Read ReadAndExecute pool 0x001200a9 Tree <root>/elsewhere
 AllowedFolder ReadAndExecute pool 0x001200a9 Tree <root>/elsewhere/Precedents
 Matter LowLabel low 0x00000001 Tree <root>/matter
 State LowLabel low 0x00000001 Tree <root>/data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/claude
-Notes LowLabel low 0x00000001 Tree <root>/data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/notes
+Notes LowLabel low 0x00000001 Tree <root>/data/notes/01890a5d-ac96-774b-bcce-b302099a8057
+TempFolder LowLabel low 0x00000001 Tree <root>/data/run/s1/tmp
 ClaudeStore LowLabel low 0x00000001 Tree <root>/data/agents/claude-acp/home
 CredentialLink LowLabel low 0x00000001 ThisOnly <root>/data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/claude/auth.json
 ReadOnlyInMatter DenyWrite pool 0x000d0156 ThisOnly <root>/matter/big.pdf
@@ -30,8 +32,8 @@ ReadOnlyInMatter DenyWrite pool 0x000d0156 Tree <root>/matter/CLAUDE.md
 ReadOnlyInState DenyWrite pool 0x000d0156 Tree <root>/data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/claude/settings.json
 Matter DenyReadWrite other-pool-1 0x000f01ff Tree <root>/matter
 State DenyReadWrite other-pool-1 0x000f01ff Tree <root>/data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/claude
-Notes DenyReadWrite other-pool-1 0x000f01ff Tree <root>/data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/notes
+Notes DenyReadWrite other-pool-1 0x000f01ff Tree <root>/data/notes/01890a5d-ac96-774b-bcce-b302099a8057
 Matter DenyReadWrite other-pool-2 0x000f01ff Tree <root>/matter
 State DenyReadWrite other-pool-2 0x000f01ff Tree <root>/data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/claude
-Notes DenyReadWrite other-pool-2 0x000f01ff Tree <root>/data/agent-state/01890a5d-ac96-774b-bcce-b302099a8057/notes
+Notes DenyReadWrite other-pool-2 0x000f01ff Tree <root>/data/notes/01890a5d-ac96-774b-bcce-b302099a8057
 Sibling DenyRead group 0x000200a9 Tree <root>/Drafts

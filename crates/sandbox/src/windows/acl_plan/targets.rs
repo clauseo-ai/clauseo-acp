@@ -20,7 +20,8 @@ use crate::windows::matters::SANDBOX_DIR;
 /// - a path that is `<data_dir>` or holds it is refused, and inside it
 ///   ([`FolderRefusal::OverlapsDataFolder`] for anything not listed here):
 ///   - writable: the state folder exactly one level below `<data_dir>\agent-state\<matter>`
-///     (not `notes`), the notes folder exactly `<data_dir>\agent-state\<matter>\notes`, the
+///     (Codex's) or `<data_dir>\claude-state\<matter>` (Claude's), never named `notes`, the
+///     notes folder exactly `<data_dir>\notes\<matter>` (the host's layout since R17 PR-D1), the
 ///     credential link inside that state folder, the session's temp folder exactly
 ///     `<data_dir>\run\<session>\tmp` (never the run folder), and the Claude store exactly
 ///     `<data_dir>\agents\claude-acp\home` and its allowed names, `matter` being this
@@ -49,25 +50,26 @@ pub(super) fn check_target(
         return None;
     }
     let allowed = in_folder(path, data) && !same_path(path, data) && {
-        let mine = data.join(AGENT_STATE_DIR).join(matter.to_string());
+        let mine = |root: &str| data.join(root).join(matter.to_string());
         let store = data
             .join(AGENTS_DIR)
             .join(CLAUDE_AGENT)
             .join(AGENT_HOME_DIR);
         let state_ok = |state: &Path| {
-            state
-                .parent()
-                .is_some_and(|parent| same_path(parent, &mine))
-                && !state
-                    .file_name()
-                    .is_some_and(|name| name.eq_ignore_ascii_case(NOTES_DIR))
+            state.parent().is_some_and(|parent| {
+                [AGENT_STATE_DIR, CLAUDE_STATE_DIR]
+                    .iter()
+                    .any(|root| same_path(parent, &mine(root)))
+            }) && !state
+                .file_name()
+                .is_some_and(|name| name.eq_ignore_ascii_case(NOTES_DIR))
         };
         match grant.rights {
             Rights::ReadAndExecute => same_path(path, &store) || in_agent_install(path, data),
             Rights::Modify | Rights::CreateFiles | Rights::LowLabel | Rights::ReadWriteData => {
                 match grant.kind {
                     PathKind::State => state_ok(path),
-                    PathKind::Notes => same_path(path, &mine.join(NOTES_DIR)),
+                    PathKind::Notes => same_path(path, &mine(NOTES_DIR)),
                     PathKind::CredentialLink => {
                         state_ok(policy.state()) && in_folder(path, policy.state())
                     }
@@ -146,8 +148,11 @@ pub(crate) fn odd_spelling(path: &Path) -> bool {
 /// `<data_dir>\agents`: each agent's install folder, its runtime and its home.
 pub(crate) const AGENTS_DIR: &str = "agents";
 
-/// `<data_dir>\agent-state`: each matter's state and notes folders, by matter id.
+/// `<data_dir>\agent-state`: each matter's Codex state folder, by matter id.
 const AGENT_STATE_DIR: &str = "agent-state";
+
+/// `<data_dir>\claude-state`: each matter's Claude state folder, by matter id.
+const CLAUDE_STATE_DIR: &str = "claude-state";
 
 /// `<data_dir>\run`: each session's folder, holding its token and its temp folder.
 const RUN_DIR: &str = "run";
@@ -155,7 +160,8 @@ const RUN_DIR: &str = "run";
 /// A session's temp folder in `<data_dir>\run\<session>`.
 const TEMP_DIR: &str = "tmp";
 
-/// A matter's notes folder in `<data_dir>\agent-state\<matter>`.
+/// `<data_dir>\notes`: each matter's notes folder, by matter id; also the name a state folder
+/// may never have.
 const NOTES_DIR: &str = "notes";
 
 /// The one agent whose home may be the Claude store: Clauseo's own Claude sign-in.

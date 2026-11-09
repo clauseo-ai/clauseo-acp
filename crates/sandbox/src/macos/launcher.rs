@@ -127,7 +127,7 @@ impl SeatbeltLauncher {
 impl Launcher for SeatbeltLauncher {
     fn launch(&self, spec: &LaunchSpec) -> Result<Launched, clauseo_process::Error> {
         let jailed = self.jailed_spec(spec)?;
-        make_tmpdir(&self.policy.tmpdir()).map_err(|source| clauseo_process::Error::Os {
+        make_tmpdir(self.policy.tmpdir()).map_err(|source| clauseo_process::Error::Os {
             what: "the agent's TMPDIR could not be made",
             source,
         })?;

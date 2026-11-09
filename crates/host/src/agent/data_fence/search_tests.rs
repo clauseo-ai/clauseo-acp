@@ -79,7 +79,7 @@ fn a_search_in_the_matter_or_an_unrelated_folder_is_not_denied() {
     let matter = text(&root.join("matter"));
     let outside = text(&root.join("outside"));
     let run = text(&data.join("run/s1"));
-    let notes = text(&data.join("agent-state/m1/notes"));
+    let notes = text(&data.join("notes/m1"));
     let skills = text(&data.join("profile/claude-plugin/skills"));
     let requests = [
         json!({"pattern": "privileged", "path": matter}),

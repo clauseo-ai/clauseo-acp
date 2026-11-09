@@ -52,9 +52,11 @@ fn loopback_ports_without_the_browser_bind_one_listener() {
     let dir = TempDir::new("proxy-relay-only");
     dir.dir("m");
     dir.dir("s");
+    dir.dir("run/s1");
     let relay = 61_150;
     let policy = Policy::builder(dir.path().join("m"), dir.path().join("s"))
         .home(dir.path().join("home"))
+        .tmpdir(dir.path().join("run/s1/tmp"))
         .proxy_port(handle.port())
         .loopback(Loopback::Ports(vec![relay]))
         .build()

@@ -16,8 +16,8 @@ use crate::write;
 const OTHERS: [&str; 14] = [
     "run/s2/work/a.txt",
     "run.old-1700000000/s9/work/b.txt",
-    "agent-state/m2/notes/n.md",
-    "agent-state/m1/scratch/x",
+    "notes/m2/n.md",
+    "claude-state/m1/scratch/x",
     "search.sqlite",
     "search.sqlite-wal",
     "search.sqlite-shm",
@@ -40,16 +40,16 @@ fn launch(root: &std::path::Path) -> LaunchDeny {
     }
     let own = [
         data.join("run").join("s1"),
-        data.join("agent-state").join("m1").join("notes"),
+        data.join("notes").join("m1"),
         // The plans folder of the matter's Claude state folder (R17 PR-C), as
         // `launch_checks/folders.rs` gives it.
-        data.join("agent-state")
+        data.join("claude-state")
             .join("m1")
             .join("claude-acp")
             .join("plans"),
         root.join("matter"),
     ];
-    let state = data.join("agent-state/m1/claude-acp");
+    let state = data.join("claude-state/m1/claude-acp");
     let matter = dunce::canonicalize(root.join("matter")).unwrap();
     let projects = claude_projects(&state, &[&matter]);
     launch_deny(vec![data.clone()], &data, &own, &projects)
@@ -65,8 +65,8 @@ fn a_launch_denies_what_exists_and_is_not_the_sessions_own() {
     for target in [
         "run/s2/**",
         "run.old-1700000000/**",
-        "agent-state/m2/**",
-        "agent-state/m1/scratch/**",
+        "notes/m2/**",
+        "claude-state/m1/scratch/**",
         "search.sqlite",
         "search.sqlite-wal",
         "search.sqlite-shm",
@@ -78,11 +78,7 @@ fn a_launch_denies_what_exists_and_is_not_the_sessions_own() {
             "{target}: {deny:?}"
         );
     }
-    for own in [
-        "run/s1",
-        "agent-state/m1/notes",
-        "agent-state/m1/claude-acp/plans",
-    ] {
+    for own in ["run/s1", "notes/m1", "claude-state/m1/claude-acp/plans"] {
         assert!(
             !deny.targets.iter().any(|t| t.contains(own)),
             "{own}: {deny:?}"
@@ -90,7 +86,7 @@ fn a_launch_denies_what_exists_and_is_not_the_sessions_own() {
     }
     let data = text(&root.join("data"));
     let rules = claude_deny_rules(&deny);
-    for target in ["agent-state/m2/**", "run/s2/**", "search.sqlite-wal"] {
+    for target in ["notes/m2/**", "run/s2/**", "search.sqlite-wal"] {
         let base = super::rule_path(&data, cfg!(windows));
         for tool in ["Read", "Edit"] {
             let rule = format!("{tool}({base}/{target})");
@@ -115,8 +111,8 @@ fn the_auto_deny_agrees_with_the_launch_rules() {
     }
     for own in [
         "run/s1/work/out.docx",
-        "agent-state/m1/notes/n.md",
-        "agent-state/m1/claude-acp/plans/plan.md",
+        "notes/m1/n.md",
+        "claude-state/m1/claude-acp/plans/plan.md",
     ] {
         let path = text(&data.join(own));
         assert!(!check(root, &[&path], None).touches_data(), "Read {path}");
@@ -224,20 +220,20 @@ fn the_sessions_own_tool_results_stay_readable_and_the_rest_of_projects_does_not
     let root = dir.path();
     let matter = dunce::canonicalize(root.join("matter")).unwrap();
     let own = claude_project_key(matter.to_str().unwrap());
-    let place = |m: &str, rest: &str| format!("agent-state/{m}/claude-acp/projects/{rest}");
+    let place = |m: &str, rest: &str| format!("claude-state/{m}/claude-acp/projects/{rest}");
     let readable = [
         place("m1", &format!("{own}/s-1/tool-results/toolu_1.txt")),
-        "agent-state/m1/claude-acp/plans/plan.md".to_owned(),
+        "claude-state/m1/claude-acp/plans/plan.md".to_owned(),
     ];
     let denied = [
         place("m1", &format!("{own}/s-1.jsonl")),
         place("m1", &format!("{own}/s-1/subagents/agent-a.jsonl")),
         place("m1", &format!("{own}/memory/MEMORY.md")),
-        "agent-state/m1/claude-acp/settings.json".to_owned(),
-        "agent-state/m1/claude-acp/todos/t.json".to_owned(),
+        "claude-state/m1/claude-acp/settings.json".to_owned(),
+        "claude-state/m1/claude-acp/todos/t.json".to_owned(),
         place("m2", "-other-matter/s-2.jsonl"),
         place("m2", "-other-matter/s-2/tool-results/toolu_2.txt"),
-        "agent-state/m2/claude-acp/plans/plan.md".to_owned(),
+        "claude-state/m2/claude-acp/plans/plan.md".to_owned(),
         "agent-state/m2/codex-acp/sessions/r.jsonl".to_owned(),
         "agent-state/m1/codex-acp/sessions/r.jsonl".to_owned(),
     ];
@@ -257,10 +253,10 @@ fn the_sessions_own_tool_results_stay_readable_and_the_rest_of_projects_does_not
             "{file}: {deny:?}"
         );
     }
-    assert!(
-        deny.targets.iter().any(|t| t == "agent-state/m2/**"),
-        "{deny:?}"
-    );
+    // Claude needs nothing of `agent-state` (Codex's homes only since R17 PR-D1): denied whole.
+    for whole in ["claude-state/m2/**", "agent-state/**"] {
+        assert!(deny.targets.iter().any(|t| t == whole), "{whole}: {deny:?}");
+    }
     let later = [
         place("m3", "-made-later/s-3.jsonl"),
         place("m3", "-made-later/s-3/subagents/agent-b.jsonl"),

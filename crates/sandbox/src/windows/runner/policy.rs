@@ -53,10 +53,7 @@ pub(super) fn message_from_policy(
             .map(|(name, value)| Ok((text("env", name)?, text("env", value)?)))
             .collect::<Result<_, LaunchError>>()?,
         state: path("state", policy.state())?,
-        tmpdir: policy
-            .session_tmpdir()
-            .map(|p| path("tmpdir", p))
-            .transpose()?,
+        tmpdir: Some(path("tmpdir", policy.tmpdir())?),
         runtime,
         granted,
         ca_bundle: ca_bundle.map(|p| path("ca_bundle", p)).transpose()?,
@@ -77,7 +74,7 @@ pub(super) fn message_from_policy(
 pub fn granted_paths(policy: &crate::Policy) -> Vec<&Path> {
     let mut paths = vec![policy.matter(), policy.state()];
     paths.extend(policy.notes());
-    paths.extend(policy.session_tmpdir());
+    paths.push(policy.tmpdir());
     paths.extend(policy.runtime().iter().map(PathBuf::as_path));
     paths.extend(policy.read().iter().map(PathBuf::as_path));
     paths.extend(policy.allowed_folders().iter().map(PathBuf::as_path));

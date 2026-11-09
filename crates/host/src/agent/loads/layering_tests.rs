@@ -24,7 +24,7 @@ const OFF: Switch = Switch {
 fn folders() -> Folders<'static> {
     Folders {
         work: "/data/run/t-1/work",
-        notes: "/data/agent-state/m/notes",
+        notes: "/data/notes/m",
         connectors: "",
     }
 }
@@ -46,9 +46,9 @@ fn codex_keys_take_only_the_allowlist_and_add_the_hosts() {
     assert_eq!(
         Value::Object(keys),
         json!({
-            "developer_instructions": "Notes in /data/agent-state/m/notes; work in /data/run/t-1/work.",
+            "developer_instructions": "Notes in /data/notes/m; work in /data/run/t-1/work.",
             "web_search": "disabled",
-            "sandbox_workspace_write": {"writable_roots": ["/data/run/t-1/work", "/data/agent-state/m/notes"]},
+            "sandbox_workspace_write": {"writable_roots": ["/data/run/t-1/work", "/data/notes/m"]},
         })
     );
     let keys = codex_keys(Map::new(), ON, folders()).unwrap();
@@ -121,7 +121,7 @@ fn codex_config_keeps_every_r15_key_and_the_hooks_seam() {
     assert_eq!(built["developer_instructions"], json!("text"));
     assert_eq!(
         built["sandbox_workspace_write"]["writable_roots"],
-        json!(["/data/run/t-1/work", "/data/agent-state/m/notes"])
+        json!(["/data/run/t-1/work", "/data/notes/m"])
     );
     assert_eq!(
         built["hooks"]["PreToolUse"].as_array().map(Vec::len),
@@ -372,13 +372,13 @@ fn every_claude_session_denies_the_data_folders_clauseo_only_subtrees() {
         );
         assert!(
             !rules.iter().any(|rule| {
-                // No run folder (but the relay tokens), and in `agent-state` only every
-                // matter's Codex state folder and the named files of Claude's (R17 PR-C):
-                // never a matter's notes or a Claude state folder whole.
+                // No run folder (but the relay tokens), every matter's Codex state folder and
+                // the named files of Claude's (R17 PR-C, PR-D1): never a matter's notes or a
+                // Claude state folder whole.
                 (rule.contains("/run/") && !rule.ends_with("/run/*/relay-token)"))
                     || rule.ends_with("/agent-state/**)")
                     || rule.contains("/notes")
-                    || (rule.ends_with("/claude-acp/**)") && rule.contains("/agent-state/"))
+                    || (rule.ends_with("/claude-acp/**)") && rule.contains("/claude-state/"))
             }),
             "{rules:?}"
         );

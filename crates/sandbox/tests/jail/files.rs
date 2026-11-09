@@ -295,9 +295,11 @@ fn notes_of_another_matter_cannot_be_read() {
 #[test]
 fn a_linked_tmpdir_stops_the_launch_and_nothing_is_made_outside() {
     let w = World::new();
-    // An earlier agent left `<state>/tmp` as a link to a folder that does not exist.
-    w.symlink("outside/made-by-host", "data/agent-state/m1/codex/tmp");
-    let (launcher, _) = launcher(w.builder().build().unwrap());
+    let policy = w.builder().build().unwrap();
+    // The session's temp folder became a link to a folder that does not exist after the policy
+    // was built (since R17 PR-D1 the only `TMPDIR`; the build refuses a link there).
+    w.symlink("outside/made-by-host", "data/run/s1/tmp");
+    let (launcher, _) = launcher(policy);
     let spec = clauseo_process::LaunchSpec::new(
         "/usr/bin/true".into(),
         Vec::new(),

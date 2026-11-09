@@ -3,7 +3,8 @@
 //!
 //! ```text
 //! cargo run -p clauseo-sandbox --example run_sandboxed -- --matter <dir> --state <dir>
-//!     [--runtime <p>]... [--read <p>]... [--hidden <p>]... [--proxy-port <n>]
+//!     --tmpdir <data>/run/<session>/tmp [--runtime <p>]... [--read <p>]... [--hidden <p>]...
+//!     [--proxy-port <n>]
 //!     [--loopback <port>]... [--browser-sockets] [--env K=V]... [--env-file <p>]
 //!     [--stdin] [--print-spec] -- <cmd> [args]
 //! ```
@@ -87,6 +88,7 @@ mod jail {
     struct Args {
         matter: Option<PathBuf>,
         state: Option<PathBuf>,
+        tmpdir: Option<PathBuf>,
         runtime: Vec<PathBuf>,
         read: Vec<PathBuf>,
         hidden: Vec<PathBuf>,
@@ -100,7 +102,8 @@ mod jail {
         command: Vec<OsString>,
     }
 
-    const USAGE: &str = "usage: run_sandboxed --matter <dir> --state <dir> [--runtime <p>]... \
+    const USAGE: &str = "usage: run_sandboxed --matter <dir> --state <dir> \
+                         --tmpdir <data>/run/<session>/tmp [--runtime <p>]... \
                          [--read <p>]... [--hidden <p>]... [--proxy-port <n>] \
                          [--loopback <port>]... [--browser-sockets] [--env K=V]... \
                          [--env-file <p>] [--stdin] [--print-spec] -- <cmd> [args]";
@@ -187,6 +190,7 @@ mod jail {
             match flag.as_str() {
                 "--matter" => args.matter = Some(value("--matter")?),
                 "--state" => args.state = Some(value("--state")?),
+                "--tmpdir" => args.tmpdir = Some(value("--tmpdir")?),
                 "--runtime" => args.runtime.push(value("--runtime")?),
                 "--read" => args.read.push(value("--read")?),
                 "--hidden" => args.hidden.push(value("--hidden")?),
@@ -274,10 +278,13 @@ mod jail {
             None => Vec::new(),
         };
         let mut env = launch_env(from_file, args.env, args.browser_sockets)?;
-        let (Some(matter), Some(state)) = (args.matter, args.state) else {
-            return Err(format!("--matter and --state are required\n{USAGE}"));
+        let (Some(matter), Some(state), Some(tmpdir)) = (args.matter, args.state, args.tmpdir)
+        else {
+            return Err(format!(
+                "--matter, --state and --tmpdir are required\n{USAGE}"
+            ));
         };
-        let mut builder = Policy::builder(&matter, state);
+        let mut builder = Policy::builder(&matter, state).tmpdir(tmpdir);
         for p in args.runtime {
             builder = builder.runtime(p);
         }

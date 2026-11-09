@@ -166,10 +166,8 @@ fn the_policy_grants_the_matter_the_session_tmp_and_the_install() {
     let real = |path: &Path| dunce::canonicalize(path).unwrap();
     assert_eq!(policy.matter(), real(&matter));
     assert_eq!(policy.state(), real(&run.work));
-    assert_eq!(
-        policy.session_tmpdir(),
-        Some(real(&run.root).join("tmp").as_path())
-    );
+    // The session's `run/<session>/tmp`, required by the sandbox since R17 PR-D1.
+    assert_eq!(policy.tmpdir(), real(&run.root).join("tmp"));
     assert_eq!(policy.runtime(), [real(&install)]);
     assert!(policy.read().is_empty() && policy.allowed_folders().is_empty());
     write::remove_dir_all(&root).unwrap();

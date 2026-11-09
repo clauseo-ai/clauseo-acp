@@ -53,7 +53,7 @@ fn with_launchers_a_launch_asks_once_with_its_policy_and_spawns_through_the_seam
     assert_eq!(policy.matter(), canonical(&folder));
     // TMPDIR is the session's `run/<session>/tmp`, made with the run folder; the run folder
     // itself is not granted.
-    let tmp = policy.session_tmpdir().expect("the session's tmp");
+    let tmp = policy.tmpdir();
     assert_eq!(tmp.file_name().unwrap(), "tmp");
     assert!(tmp.is_dir(), "{tmp:?}");
     assert_eq!(

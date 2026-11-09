@@ -360,7 +360,7 @@ fn managed_mcp_sends_no_hook_server_at_all() {
 fn folders() -> Folders<'static> {
     Folders {
         work: "/data/run/t-1/work",
-        notes: "/data/agent-state/m/notes",
+        notes: "/data/notes/m",
         connectors: "",
     }
 }
@@ -466,11 +466,7 @@ fn skill_shell_is_off_and_the_folders_come_after_the_hooks() {
     let options = options(&hook, &keys(ON, Login::Bedrock));
     assert_eq!(
         strings(&options["additionalDirectories"]),
-        [
-            "/firm/precedents",
-            "/data/run/t-1/work",
-            "/data/agent-state/m/notes"
-        ]
+        ["/firm/precedents", "/data/run/t-1/work", "/data/notes/m"]
     );
     assert_eq!(
         options["settings"],
@@ -540,7 +536,7 @@ fn the_instructions_are_filled_and_escaped_for_json() {
         .unwrap();
     let odd = Folders {
         work: "/data/run/a \"b\"\n\\c/work",
-        notes: "/data/agent-state/m/notes",
+        notes: "/data/notes/m",
         connectors: "",
     };
     fill_meta(&mut meta, odd).unwrap();
@@ -548,9 +544,7 @@ fn the_instructions_are_filled_and_escaped_for_json() {
     let back: Value = serde_json::from_str(&text).unwrap();
     assert_eq!(
         back["systemPrompt"]["append"],
-        json!(
-            "Work in `/data/run/a \"b\"\n\\c/work`; brief at /data/agent-state/m/notes/matter-brief.md."
-        )
+        json!("Work in `/data/run/a \"b\"\n\\c/work`; brief at /data/notes/m/matter-brief.md.")
     );
     assert!(!text.contains("{work_folder}") && !text.contains("{matter_notes}"));
 }

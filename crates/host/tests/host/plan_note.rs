@@ -30,7 +30,7 @@ const GUARD: &str = "/opt/clauseo/clauseo-desktop";
 
 /// `claude-plan-note` written for `dir` with its plan note under `config`: for Claude the
 /// matter's state folder for Claude under `dir`'s data folder (R17 PR-C,
-/// `<data>/agent-state/<matter>/claude-acp`, its `CLAUDE_CONFIG_DIR`), where the scenario file
+/// `<data>/claude-state/<matter>/claude-acp`, its `CLAUDE_CONFIG_DIR`), where the scenario file
 /// has `{{cwd}}/claude-config`. For another agent the same name under `dir`'s home: a request of
 /// its into Clauseo's data folder is rejected unseen (`agent/data_fence.rs`), never logged. The
 /// file is read when the agent starts, so it may be written again once the matter exists.
