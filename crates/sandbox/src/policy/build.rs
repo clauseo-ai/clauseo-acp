@@ -133,7 +133,6 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
             other @ (Loopback::None | Loopback::Any) => other,
         },
         browser_socket_dir: b.browser_socket_dir,
-        keychain: b.keychain,
         native_code_deny: b.native_code_deny,
         over_cap,
         links,

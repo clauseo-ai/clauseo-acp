@@ -259,7 +259,6 @@ fn with_the_claude_store() {
     let policy = w
         .builder()
         .claude_store(w.at("home/.claude"))
-        .keychain(true)
         .loopback(Loopback::Any)
         .build()
         .unwrap();
@@ -465,9 +464,22 @@ fn rules(text: &str) -> Vec<String> {
     rules
 }
 
-/// The switch only appends: off, the text is today's (the other snapshots); on, it is the same
-/// text and then one rule, last, denying `file-map-executable` on every subpath or literal any
-/// write allow of the policy names, process-exec untouched.
+/// Every rule from the first one `is_deny` picks to the end, where no allow may stand: Seatbelt
+/// applies the last match, so an allow after the deny would win over it.
+fn assert_no_allow_after(text: &str, is_deny: impl Fn(&str) -> bool) {
+    let all = rules(text);
+    let at = all.iter().position(|r| is_deny(r)).expect(text);
+    for rule in &all[at..] {
+        assert!(
+            !rule.starts_with("(allow"),
+            "an allow after the deny: {rule}"
+        );
+    }
+}
+
+/// The switch only adds: off, the text is today's (the other snapshots); on, it is the same
+/// text and one rule, after every allow, denying `file-map-executable` on every subpath or
+/// literal any write allow of the policy names, process-exec untouched.
 #[test]
 fn native_code_deny_appends_a_map_deny_on_every_write_allow() {
     let w = World::new("profile-native-code-deny-roots");
@@ -481,15 +493,25 @@ fn native_code_deny_appends_a_map_deny_on_every_write_allow() {
     let (off_text, off_params) = off.split_once("\n;; parameters\n").unwrap();
     let (on_text, on_params) = on.split_once("\n;; parameters\n").unwrap();
     assert_eq!(off_params, on_params);
-    let added = on_text.strip_prefix(off_text).expect(on_text);
-    assert!(!added.contains("process-exec"), "{added}");
-    let last = rules(on_text).pop().unwrap();
-    assert!(last.starts_with("(deny file-map-executable\n"), "{last}");
+    let is_native = |rule: &str| rule.starts_with("(deny file-map-executable\n");
+    let found: Vec<String> = rules(on_text)
+        .into_iter()
+        .filter(|r| is_native(r))
+        .collect();
+    let [last] = found.as_slice() else {
+        panic!("one native code rule: {on_text}")
+    };
     assert!(
         last.ends_with(&format!("(with message \"{TAG}\"))")),
         "{last}"
     );
-    assert!(added.ends_with(&format!("{last}\n")), "{added}");
+    assert_no_allow_after(on_text, is_native);
+    // Its section, a blank line, comments and the rule, is all the switch adds.
+    let (before, section) = on_text.split_once("\n; Native code:").expect(on_text);
+    let (comments, after) = section.split_once(&format!("{last}\n")).expect(on_text);
+    let added = format!("{comments}{last}");
+    assert_eq!(format!("{before}{after}"), off_text);
+    assert!(!added.contains("process-exec"), "{added}");
     let mut roots = 0;
     for rule in rules(off_text) {
         let ops = rule.lines().next().unwrap_or_default();
@@ -524,3 +546,5 @@ fn native_code_deny_appends_a_map_deny_on_every_write_allow() {
     }
     assert!(roots >= 8, "{roots}: {off_text}");
 }
+
+mod keychain;

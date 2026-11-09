@@ -41,9 +41,10 @@ and `docs/threat-model.md` no longer calls it tier A.
 `<state>/tmp`) and notes folder; read-and-run runtime paths; read-only paths and allowed folders;
 the credential link and the Claude store's names read-write; hidden paths denied after every
 allow, with the state folder, notes, credential link, Claude store, runtime and read paths allowed
-again after them; proxy ports; the browser's loopback; the Keychain switch. Every path is
-canonical. `build()` refuses nesting matters, a state folder in the matter, relative paths, and an
-allowed folder that meets a hidden path, the matter, the home folder, `/` or a `.git`.
+again after them; proxy ports; the browser's loopback. No keychain (amended 2026-11-09, below).
+Every path is canonical. `build()` refuses nesting matters, a state folder in the matter,
+relative paths, and an allowed folder that meets a hidden path, the matter, the home folder, `/`
+or a `.git`.
 
 Because the state folder, notes, credential link, runtime and read paths are allowed again after
 the hidden paths (and runtime and read after the matter's read-only rules), `build()` also
@@ -110,8 +111,8 @@ state; read, run and map on runtime; read on read paths and allowed folders; rea
 the credential link (literal) and the Claude store's names (literals, lock folders as subpaths);
 metadata on the ancestors of every allowed path, and a literal read of `$HOME/.CFUserTextEncoding`
 (one parameter: CoreFoundation reads this text-encoding preference at start when
-`__CF_USER_TEXT_ENCODING` is not inherited, and a refusal would be a card on every launch); the
-Keychain rules when on; write-deny on the read-only paths in the matter, and unlink-deny on their
+`__CF_USER_TEXT_ENCODING` is not inherited, and a refusal would be a card on every launch);
+write-deny on the read-only paths in the matter, and unlink-deny on their
 folders; write-deny on `CLAUDE.md` at any depth; read and write deny on link findings and link
 folders; read and write deny on hidden paths; again the state folder, notes, credential link,
 Claude store, runtime and read paths, with their ancestors' metadata; unlink- and create-deny on
@@ -122,8 +123,9 @@ read-only paths in the state folder; the network. Every deny carries the tag. Ne
 sockets in the browser socket folder only, when the host gives one (outbound, and bind for
 agent-browser's daemon; amended 2026-11-03, below), and by
 `Loopback` bind, inbound and outbound on the listed ports or `localhost:*`. With
-`Policy::native_code_deny` on (amended 2026-11-09, below), one rule last of all: deny
-`file-map-executable` on every subpath and literal that a write allow of the profile names.
+`Policy::native_code_deny` on (amended 2026-11-09, below), one rule after every allow: deny
+`file-map-executable` on every subpath and literal that a write allow of the profile names. Last
+of all, the keychain's denies (amended 2026-11-09, below).
 
 The base is adapted from Codex's `seatbelt_base_policy.sbpl` and platform defaults (commit 1a604d58,
 Apache-2.0, notice kept) but lists system reads instead of Codex's full read access: `/`, `/System`,
@@ -209,7 +211,7 @@ launch and keeps it alive for exactly that launch, dropping it when the agent en
   stop at the first failure. `fake_agent` (scenario `sandbox-probe`) runs the handshake and the
   writes that must succeed; system tools (`cat`, `sh`, `ln`, `nc`, `git`, `logger`) run through the
   same launcher for every refusal and for the G8a cell.
-- The Keychain rules are broad until G7 row 17; missing allowances found by G8b become follow-ups.
+- No keychain in the jail (amended 2026-11-09, below).
 
 Amended 2026-11-03 (QD.4): the browser socket folder replaces `<state>/browser/run`. A Unix socket
 path is at most 103 bytes on macOS, and the matter's state path is longer than that, so
@@ -298,9 +300,9 @@ Residual risks:
   mapping: `(deny default)` does not refuse `file-map-executable` of a file the profile lets the
   process read, so a dylib or Python extension in the matter loaded (a matter venv's `import
   lxml` worked). Only an explicit deny refuses it. With `Policy::native_code_deny` on, the
-  profile ends with `(deny file-map-executable ...)` over every subpath and literal any write
-  allow names (matter, state, session temp folder, notes, the Claude store's names and lock
-  folders, the credential link, the browser socket folder), collected as the rules are written
+  profile has `(deny file-map-executable ...)` after every allow, over every subpath and literal
+  any write allow names (matter, state, session temp folder, notes, the Claude store's names and
+  lock folders, the credential link, the browser socket folder), collected as the rules are written
   so a new write allow is covered without a list to keep. The base's device write allows
   (`/dev/null`, ptys) are left out. `process-exec` is unchanged: a child inherits the jail and
   `node_modules/.bin` scripts need it, and a Mach-O built in the matter still runs (measured).
@@ -310,6 +312,38 @@ Residual risks:
   `/usr/bin/python3 -c 'import json'` and the loader run); a Chromium copied into the matter fails
   to load its framework (ignored by default, needing a Chrome for Testing build on the Mac).
   These denials are not reported to the sink: the watcher reports reads and writes only.
+
+Amended 2026-11-09: no keychain in the jail. The Claude jail allowed `mach-lookup` of
+`com.apple.SecurityServer`, `com.apple.securityd.xpc` and `com.apple.trustd.agent` and a read of
+`~/Library/Keychains`. Under it, `security find-generic-password -w` printed a throwaway item's
+secret and `security dump-keychain` listed 66 of the lawyer's items. A keychain item's access list
+names programs, not jails: an item that trusts a program the jail can run (`/usr/bin/security`,
+`git-credential-osxkeychain`), or allows all apps, is readable from inside whatever the profile
+intends. So the keychain cannot be opened to the jail at all. `PolicyBuilder::keychain`,
+`Policy::keychain` and the `KEYCHAINS` read are gone (nothing outside the crate called them). The
+profile's last rules deny `file-read*` and `file-write*` on `<home>/Library/Keychains` (the
+`KEYCHAINS` parameter, from the policy's home) and `/Library/Keychains`, and `mach-lookup` of
+`com.apple.SecurityServer`, `com.apple.securityd.xpc` and `com.apple.securityd` and of every name
+starting `com.apple.security`, `com.apple.secd`, `com.apple.ctkd.`, `com.apple.CoreAuthentication`,
+`com.apple.authd` or `com.apple.keychainsharingmessagingd` (`global-name-prefix`), each with the
+tag. The default deny already refuses them; the explicit denies come after every allow, so an allow
+added above cannot reopen them. `com.apple.trustd.agent` is neither allowed nor named: certificate
+checks do not need it. In the jail through a CONNECT proxy on 2026-11-09, `curl`, `node`'s `fetch`
+(bundled roots and `--use-system-ca`) and `git ls-remote https://...` all succeeded without it. A
+unit test (`no_policy_allows_the_keychain`) checks that no allow rule, in the base or for any policy
+shape, names these services, prefixes or folders, and that no allow rule comes after the denies (the
+native code test checks the same of its deny). The jail tests store a throwaway generic password and
+a `git-credential-osxkeychain` credential outside, check both read back there, then check neither is
+read in the jail and `dump-keychain` lists nothing. Claude Code's own lookup (`security
+find-generic-password -a "$USER" -s 'Claude Code-credentials' -w`) exits 44, "not found", in the
+jail, which Claude Code takes as no item before reading its `.credentials.json`. A jail test mirrors
+stage D's `security` shim (`Clauseo.app/Contents/Resources/keychain-shim/security`, first on `PATH`
+for Claude only): from a `keychain-shim` folder given as a runtime path, `find-*` and
+`dump-keychain`, past any leading options (`-q`, `-v`, `-i`), exit 44 with `security`'s own "not
+found" line, anything else (`add-generic-password`, `security -i` with commands on stdin) exits 1
+with a fixed line within a second without reading stdin, and `/usr/bin/security` by its full path
+still finds nothing. Where Claude's login lives on macOS (a file store or a dedicated keychain) is
+the host's to decide (D2a).
 
 ## Status
 

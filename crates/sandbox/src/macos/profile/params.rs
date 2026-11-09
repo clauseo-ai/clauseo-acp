@@ -18,7 +18,6 @@ pub(super) struct Params {
     pub(super) link_targets: Vec<(String, PathBuf)>,
     pub(super) hidden: Vec<(String, PathBuf)>,
     pub(super) read_only_state: Vec<(String, PathBuf)>,
-    pub(super) keychains: Option<(String, PathBuf)>,
 }
 
 impl Params {
@@ -49,16 +48,6 @@ impl Params {
             link_targets: numbered("LINK_TARGET", policy.link_targets()),
             hidden: numbered("HIDDEN", policy.hidden()),
             read_only_state: numbered("STATE_READ_ONLY", policy.read_only_in_state()),
-            keychains: policy
-                .keychain()
-                .then(|| policy.home())
-                .flatten()
-                .map(|home| {
-                    (
-                        "KEYCHAINS".to_owned(),
-                        home.join("Library").join("Keychains"),
-                    )
-                }),
         }
     }
 }

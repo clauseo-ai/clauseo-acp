@@ -137,7 +137,6 @@ pub struct Policy {
     proxy_ports: Vec<u16>,
     loopback: Loopback,
     browser_socket_dir: Option<PathBuf>,
-    keychain: bool,
     native_code_deny: bool,
     over_cap: Vec<PathBuf>,
     links: Vec<LinkFinding>,
@@ -164,7 +163,6 @@ pub struct PolicyBuilder {
     proxy_ports: Vec<u16>,
     loopback: Loopback,
     browser_socket_dir: Option<PathBuf>,
-    keychain: bool,
     native_code_deny: bool,
     over_cap: Vec<PathBuf>,
     links: Vec<LinkFinding>,
@@ -274,11 +272,6 @@ impl Policy {
         self.browser_socket_dir.as_deref()
     }
 
-    /// Whether Claude's Keychain rules apply (macOS).
-    pub fn keychain(&self) -> bool {
-        self.keychain
-    }
-
     /// Whether native code the agent writes is refused (both OSes): on Windows an inherited deny
     /// of execute on the files of every place the agent may write; on macOS no
     /// `file-map-executable` there, so no library or extension there loads. On macOS exec stays
@@ -303,9 +296,9 @@ impl Policy {
     /// allow rule of the policy covers (runtime, read, allowed folders, state, notes, the Claude
     /// store, the credential link). A target nothing allows is refused by the default deny
     /// already, and one that holds an allowed path gets no rule (it would deny that path).
-    /// Only the policy's own allows count: a target under the profile's base system reads,
-    /// the text-encoding preference or the Keychain folders gets no rule, since the assistant
-    /// may read those files by their own path anyway; the link itself stays denied.
+    /// Only the policy's own allows count: a target under the profile's base system reads or
+    /// the text-encoding preference gets no rule, since the assistant may read those files by
+    /// their own path anyway; the link itself stays denied.
     pub fn link_targets(&self) -> &[PathBuf] {
         &self.link_targets
     }
@@ -500,12 +493,6 @@ impl PolicyBuilder {
     #[cfg(test)]
     pub(crate) fn browser_socket_path(mut self, path: PathBuf) -> PolicyBuilder {
         self.browser_socket_dir = Some(path);
-        self
-    }
-
-    /// Whether Claude's Keychain rules apply (macOS); off unless set.
-    pub fn keychain(mut self, on: bool) -> PolicyBuilder {
-        self.keychain = on;
         self
     }
 

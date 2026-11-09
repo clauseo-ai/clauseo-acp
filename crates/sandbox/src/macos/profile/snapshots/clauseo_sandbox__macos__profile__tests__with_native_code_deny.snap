@@ -320,8 +320,8 @@ expression: w.render(&policy)
 (allow network-bind
   (local unix-socket (subpath (param "BROWSER_SOCKETS"))))
 
-; Native code: nothing in a place the agent may write maps as code. Last, so
-; it wins; (deny default) does not cover file-map-executable on its own.
+; Native code: nothing in a place the agent may write maps as code. After
+; every allow, so it wins; (deny default) does not cover file-map-executable.
 (deny file-map-executable
   (subpath (param "MATTER"))
   (subpath (param "STATE"))
@@ -334,6 +334,23 @@ expression: w.render(&policy)
   (subpath (param "CLAUDE_LOCK_2"))
   (literal (param "CREDENTIAL_LINK"))
   (subpath (param "BROWSER_SOCKETS"))
+  (with message "clauseo-4242-7"))
+
+; No keychain: not its folders, not the services that read it (0038).
+(deny file-read* file-write*
+  (subpath (param "KEYCHAINS"))
+  (subpath "/Library/Keychains")
+  (with message "clauseo-4242-7"))
+(deny mach-lookup
+  (global-name "com.apple.SecurityServer")
+  (global-name "com.apple.securityd.xpc")
+  (global-name "com.apple.securityd")
+  (global-name-prefix "com.apple.security")
+  (global-name-prefix "com.apple.secd")
+  (global-name-prefix "com.apple.ctkd.")
+  (global-name-prefix "com.apple.CoreAuthentication")
+  (global-name-prefix "com.apple.authd")
+  (global-name-prefix "com.apple.keychainsharingmessagingd")
   (with message "clauseo-4242-7"))
 
 ;; parameters
@@ -358,3 +375,4 @@ READ_ONLY_6 = <root>/matter/CLAUDE.local.md
 READ_ONLY_7 = <root>/matter/CLAUDE.md
 HIDDEN_0 = <root>/data
 BROWSER_SOCKETS = <root>/tmp/clauseo-ab-aaaaaaaaaaaaaaaa
+KEYCHAINS = <root>/home/Library/Keychains
