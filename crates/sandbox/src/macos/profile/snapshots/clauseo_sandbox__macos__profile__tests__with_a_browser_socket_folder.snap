@@ -269,7 +269,12 @@ expression: text
 (allow network-bind
   (local unix-socket (subpath (param "BROWSER_SOCKETS"))))
 
-; The browser's last rules: denies only.
+; The last rules: denies only.
+; No inet bind or listener, IPv4 or IPv6, TCP or UDP, on any address or port:
+; Seatbelt checks a bind and a listen by the local port alone (0038).
+(deny network-bind network-inbound
+  (local ip "*:*")
+  (with message "clauseo-4242-7"))
 ; Installed browsers: not run or mapped as code (read stays; 0038, T9).
 (deny process-exec file-map-executable
   (regex #"^/Applications/([gG][oO][oO][gG][lL][eE] [cC][hH][rR][oO][mM][eE]|[gG][oO][oO][gG][lL][eE] [cC][hH][rR][oO][mM][eE] [bB][eE][tT][aA]|[gG][oO][oO][gG][lL][eE] [cC][hH][rR][oO][mM][eE] [dD][eE][vV]|[gG][oO][oO][gG][lL][eE] [cC][hH][rR][oO][mM][eE] [cC][aA][nN][aA][rR][yY]|[cC][hH][rR][oO][mM][iI][uU][mM]|[mM][iI][cC][rR][oO][sS][oO][fF][tT] [eE][dD][gG][eE]|[mM][iI][cC][rR][oO][sS][oO][fF][tT] [eE][dD][gG][eE] [bB][eE][tT][aA]|[mM][iI][cC][rR][oO][sS][oO][fF][tT] [eE][dD][gG][eE] [dD][eE][vV]|[mM][iI][cC][rR][oO][sS][oO][fF][tT] [eE][dD][gG][eE] [cC][aA][nN][aA][rR][yY]|[bB][rR][aA][vV][eE] [bB][rR][oO][wW][sS][eE][rR]|[bB][rR][aA][vV][eE] [bB][rR][oO][wW][sS][eE][rR] [bB][eE][tT][aA]|[bB][rR][aA][vV][eE] [bB][rR][oO][wW][sS][eE][rR] [nN][iI][gG][hH][tT][lL][yY]|[vV][iI][vV][aA][lL][dD][iI]|[oO][pP][eE][rR][aA]|[aA][rR][cC])\.[aA][pP][pP](/|$)")

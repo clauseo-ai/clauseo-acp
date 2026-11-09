@@ -45,7 +45,7 @@ serde_json = { workspace = true }
 
 # The exit watch: a subreaper and waitpid on Linux, kqueue on macOS; and SIGTERM ignored for one test.
 [target.'cfg(unix)'.dev-dependencies]
-nix = { workspace = true, features = ["signal", "process", "event"] }
+nix = { workspace = true, features = ["signal", "process", "event", "fs"] }
 
 # The exit watch on Windows: OpenProcess, WaitForSingleObject and GetExitCodeProcess; and the
 # console a test agent shares (tests/spawn_options.rs).

@@ -49,9 +49,10 @@ impl std::fmt::Debug for SeatbeltLauncher {
 }
 
 impl SeatbeltLauncher {
-    /// A launcher for `policy`, starting agents with `opts` plus [`SpawnOptions::clear_env`],
-    /// always: the jailed process gets the spec's variables plus `TMPDIR` and nothing from this
-    /// process's environment. Its denials reach `denials` through the rate cap
+    /// A launcher for `policy`, starting agents with `opts` plus [`SpawnOptions::clear_env`]
+    /// and [`SpawnOptions::close_other_fds`], always: the jailed process gets the spec's
+    /// variables plus `TMPDIR`, nothing from this process's environment, and no descriptor of
+    /// this process's but its stdio. Its denials reach `denials` through the rate cap
     /// ([`CappedSink`]); the watcher ticks the cap once a second.
     pub fn new(
         policy: Policy,
@@ -65,7 +66,7 @@ impl SeatbeltLauncher {
             policy: Arc::new(policy),
             profile,
             tag,
-            opts: opts.clear_env(),
+            opts: opts.clear_env().close_other_fds(),
             sink: Arc::new(CappedSink::new(denials)),
             registration: Mutex::new(None),
         }

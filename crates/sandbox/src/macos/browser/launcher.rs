@@ -32,8 +32,10 @@ pub struct BrowserLauncher {
 }
 
 impl BrowserLauncher {
-    /// A launcher for `paths`, starting programs with `opts` plus [`SpawnOptions::clear_env`]:
-    /// a launched program gets its spec's variables plus `HOME` and `TMPDIR` (the run's `tmp/`)
+    /// A launcher for `paths`, starting programs with `opts` plus [`SpawnOptions::clear_env`]
+    /// and [`SpawnOptions::close_other_fds`]: a launched program gets no descriptor of this
+    /// process's but its stdio (and Chrome its pipe), and its spec's variables plus `HOME` and
+    /// `TMPDIR` (the run's `tmp/`)
     /// and `MAC_CHROMIUM_TMPDIR` (the run's `ab/`). Chrome takes its temp folder from
     /// `MAC_CHROMIUM_TMPDIR`, not `TMPDIR`, and binds its singleton socket there; without it
     /// Chrome uses the user's `/var/folders/...`, which the profile refuses, and exits (21).
@@ -46,7 +48,7 @@ impl BrowserLauncher {
         Ok(BrowserLauncher {
             profile: write(&checked, paths),
             run_dir: checked.run_dir,
-            opts: opts.clear_env(),
+            opts: opts.clear_env().close_other_fds(),
         })
     }
 
@@ -98,8 +100,10 @@ impl BrowserLauncher {
             what: "the DevTools pipe could not be made",
             source,
         };
-        let (chrome_in, to_chrome) = std::io::pipe().map_err(pipe_error)?;
-        let (from_chrome, chrome_out) = std::io::pipe().map_err(pipe_error)?;
+        // Made under the spawn lock: no child this crate starts meanwhile can catch them before
+        // they are close-on-exec.
+        let (chrome_in, to_chrome) = clauseo_process::cloexec_pipe().map_err(pipe_error)?;
+        let (from_chrome, chrome_out) = clauseo_process::cloexec_pipe().map_err(pipe_error)?;
         let chrome = LaunchSpec::new(
             spec.program().to_owned(),
             chrome_args(spec.args()),

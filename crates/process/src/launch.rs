@@ -6,7 +6,7 @@ use std::ffi::OsStr;
 use std::os::fd::{OwnedFd, RawFd};
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use async_process::ChildStdout;
@@ -70,6 +70,8 @@ pub struct SpawnOptions {
     pub(crate) stdin_grace: Option<Duration>,
     #[cfg(unix)]
     pub(crate) fds: Vec<(RawFd, Arc<OwnedFd>)>,
+    #[cfg(unix)]
+    pub(crate) close_other_fds: bool,
 }
 
 impl SpawnOptions {
@@ -123,6 +125,18 @@ impl SpawnOptions {
         self
     }
 
+    /// The child closes, before it runs, every descriptor of 3 or above that is open across exec
+    /// and was not passed with [`SpawnOptions::pass_fd`]: one this process (or a library in it)
+    /// opened without close-on-exec, or one another thread's start leaked while it was being
+    /// made. The sandbox launchers set it, so a jailed agent or the browser stack never gets a
+    /// descriptor of the host's. The child lists its descriptors (`proc_pidinfo` on macOS) or
+    /// tries each up to `getdtablesize`.
+    #[cfg(unix)]
+    pub fn close_other_fds(mut self) -> SpawnOptions {
+        self.close_other_fds = true;
+        self
+    }
+
     /// Process creation flags added to the crate's own (`CREATE_SUSPENDED`, `CREATE_NO_WINDOW`).
     #[cfg(windows)]
     pub fn creation_flags(mut self, flags: u32) -> SpawnOptions {
@@ -154,6 +168,21 @@ pub struct Launched {
     pub handle: Handle,
 }
 
+/// Held while this crate starts a child and while [`cloexec_pipe`] makes a pipe: on macOS a
+/// pipe is made, then marked close-on-exec in a second call, and a child forked in between
+/// would keep both ends.
+static SPAWNING: Mutex<()> = Mutex::new(());
+
+/// A pipe whose two ends are close-on-exec before any child of this crate can start, for a
+/// descriptor meant for one child alone (Chrome's `DevTools` pipe, given with
+/// [`SpawnOptions::pass_fd`]). It is made under the lock every [`spawn_in_tree`] holds while it
+/// starts its child; a start outside this crate does not take that lock, which is what
+/// [`SpawnOptions::close_other_fds`] is for.
+pub fn cloexec_pipe() -> std::io::Result<(std::io::PipeReader, std::io::PipeWriter)> {
+    let _held = SPAWNING.lock().unwrap_or_else(PoisonError::into_inner);
+    std::io::pipe()
+}
+
 /// Starts `spec` with stdio pipes in a tree of its own: a new process group on Unix, a Job Object
 /// on Windows that it joins before it runs. The child inherits this process's environment, then
 /// `spec`'s variables override it; with [`SpawnOptions::clear_env`] it gets only `spec`'s
@@ -182,7 +211,11 @@ pub fn spawn_in_tree(spec: &LaunchSpec, opts: &SpawnOptions) -> Result<Launched,
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    let mut child = command.spawn().map_err(|source| Error::Spawn {
+    let spawned = {
+        let _held = SPAWNING.lock().unwrap_or_else(PoisonError::into_inner);
+        command.spawn()
+    };
+    let mut child = spawned.map_err(|source| Error::Spawn {
         program: spec.program().to_owned(),
         source,
     })?;

@@ -1,6 +1,7 @@
-//! [`SpawnOptions::pass_fd`] on Unix: the child reads its fd 3 and writes its fd 4, as Chrome's
-//! `--remote-debugging-pipe` does, and gets no other descriptor of this process, whichever
-//! order the two are passed in.
+//! [`SpawnOptions::pass_fd`] and [`SpawnOptions::close_other_fds`] on Unix: the child reads its
+//! fd 3 and writes its fd 4, as Chrome's `--remote-debugging-pipe` does, and gets no other
+//! descriptor of this process, whichever order the two are passed in; a descriptor this process
+//! left open across exec reaches a child only without `close_other_fds`.
 #![cfg(unix)]
 
 use std::collections::BTreeMap;
@@ -60,4 +61,46 @@ fn the_child_reads_fd_3_and_writes_fd_4() {
             "the child got this process's {open:?}: {back}"
         );
     }
+}
+
+#[test]
+fn a_descriptor_open_across_exec_reaches_a_child_only_without_close_other_fds() {
+    use nix::fcntl::{FcntlArg, FdFlag, fcntl};
+    let (leaked, _writer) = std::io::pipe().unwrap();
+    fcntl(&leaked, FcntlArg::F_SETFD(FdFlag::empty())).unwrap();
+    let fd = leaked.as_raw_fd();
+    // Whether descriptor `fd` is open in a child started with `opts`.
+    let open_in_child = |fd: i32, opts: &SpawnOptions| -> bool {
+        let script = r#"if { : <&"$FD"; } 2>/dev/null; then echo open; else echo closed; fi"#;
+        let spec = LaunchSpec::new(
+            PathBuf::from("/bin/sh"),
+            vec!["-c".into(), script.into()],
+            BTreeMap::from([("FD".into(), fd.to_string().into())]),
+            PathBuf::from("/"),
+        )
+        .unwrap();
+        let mut launched = spawn_in_tree(&spec, opts).unwrap();
+        let mut out = String::new();
+        block_on(futures::AsyncReadExt::read_to_string(
+            &mut launched.stdout,
+            &mut out,
+        ))
+        .unwrap();
+        block_on(launched.handle.exited());
+        match out.trim() {
+            "open" => true,
+            "closed" => false,
+            other => panic!("{other}"),
+        }
+    };
+    assert!(open_in_child(fd, &SpawnOptions::new()), "the check sees it");
+    assert!(!open_in_child(fd, &SpawnOptions::new().close_other_fds()));
+    // A target other than the leaked number, which may itself be 3.
+    let target = if fd == 3 { 4 } else { 3 };
+    let (passed, _w) = std::io::pipe().unwrap();
+    let opts = SpawnOptions::new()
+        .close_other_fds()
+        .pass_fd(target, OwnedFd::from(passed));
+    assert!(open_in_child(target, &opts), "a passed descriptor stays");
+    assert!(!open_in_child(fd, &opts));
 }

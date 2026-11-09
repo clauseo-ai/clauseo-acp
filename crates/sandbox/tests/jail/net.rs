@@ -394,3 +394,48 @@ fn loopback_ports_connect_to_the_listed_ports_and_bind_none() {
     let _closed = TcpListener::bind(("127.0.0.1", other)).unwrap();
     nc(other).assert_refused();
 }
+
+/// No inet bind in the agent's jail either, with the widest network options (proxy ports, any
+/// loopback port, a browser socket folder): TCP and UDP, on `127.0.0.1`, `0.0.0.0`, `[::]` and
+/// `[::1]`, on port 0 and a fixed one, each fails with EPERM (0038: Seatbelt checks a bind by
+/// its port alone, so the profile allows none and ends with a deny of them all).
+#[test]
+fn every_inet_bind_is_refused_in_the_agent_jail() {
+    let w = World::new();
+    let free = || {
+        TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port()
+    };
+    let (proxy, fixed) = (free(), free());
+    let sockets = BrowserSocketDir::create().unwrap();
+    let policy = w
+        .builder()
+        .proxy_port(proxy)
+        .loopback(clauseo_sandbox::Loopback::Any)
+        .browser_socket_dir(&sockets)
+        .build()
+        .unwrap();
+    let (launcher, _) = launcher(policy);
+    let probe = crate::probe::copy_to(&w.at("m1/probe"));
+    let m1 = w.at("m1");
+    for kind in ["tcp-bind", "udp-bind"] {
+        let refused = format!("{kind}=Operation not permitted (os error 1)");
+        for host in ["127.0.0.1", "0.0.0.0", "[::]", "[::1]"] {
+            for port in [0, fixed, proxy] {
+                let addr = format!("{host}:{port}");
+                let env = crate::probe::env(kind, &[&addr]);
+                let out = run(
+                    &launcher,
+                    probe.to_str().unwrap(),
+                    &crate::probe::ARGS,
+                    &m1,
+                    &env,
+                );
+                assert_eq!(crate::probe::answer(&out.stdout), refused, "{addr}");
+            }
+        }
+    }
+}

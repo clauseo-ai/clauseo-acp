@@ -1,8 +1,9 @@
 //! The agent profile's rules for the browser stack, which runs outside the jail (0038, "The
 //! browser profile"): with a [`BrowserBridge`](crate::BrowserBridge), a connect to the guard's
-//! socket and a read of the run's staging folder; then, as last rules, no run, read or map of
-//! the bridge's bundles, no write of them or its pins, nothing else in the run folders, and no
-//! run or map of an installed browser, with a bridge or without.
+//! socket and a read of the run's staging folder; then, as last rules, no inet bind or listener
+//! (with a bridge or without), no run, read or map of the bridge's bundles, no write of them or
+//! its pins, nothing else in the run folders, and no run or map of an installed browser, with a
+//! bridge or without.
 
 use super::{Writer, ancestors, literal, subpath};
 use crate::Policy;
@@ -71,9 +72,17 @@ pub(super) fn browser_allows(w: &mut Writer, policy: &Policy) {
     );
 }
 
-/// The browser's last rules, denies only, so no allow above can reopen them.
+/// The last rules, denies only, so no allow above can reopen them: no inet bind or listener,
+/// then the browser's.
 pub(super) fn browser_denies(w: &mut Writer, policy: &Policy) {
-    w.note("\n; The browser's last rules: denies only.");
+    w.note("\n; The last rules: denies only.");
+    w.note("; No inet bind or listener, IPv4 or IPv6, TCP or UDP, on any address or port:");
+    w.note("; Seatbelt checks a bind and a listen by the local port alone (0038).");
+    w.rule(
+        "deny",
+        "network-bind network-inbound",
+        &["(local ip \"*:*\")".to_owned()],
+    );
     if let Some(bridge) = policy.browser() {
         w.note("; The browser binaries: not run, read, mapped as code or written.");
         let bundles: Vec<String> = bridge

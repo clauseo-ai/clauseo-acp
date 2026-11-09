@@ -30,7 +30,8 @@
 //! - [`Launcher`] (`host` holds an `Arc<dyn Launcher>`) and [`PassthroughLauncher`], which calls
 //!   [`spawn_in_tree`] with the spec unchanged and its [`SpawnOptions`] (the home folder for
 //!   redaction, [`SpawnOptions::clear_env`] so the child gets only the spec's variables, on Unix
-//!   `SpawnOptions::pass_fd` for a descriptor at a fixed number (Chrome's `DevTools` pipe), and on
+//!   `SpawnOptions::pass_fd` for a descriptor at a fixed number (Chrome's `DevTools` pipe) and
+//!   `SpawnOptions::close_other_fds` to close every other one, and on
 //!   Windows extra creation flags). By default the child inherits this process's environment.
 //!   [`SpawnOptions::stdin_grace`] sets the shutdown's first wait (2 s by default).
 //! - [`Launched`]: [`AgentStdin`] (an `AsyncWrite` the handle can close), the agent's stdout, the
@@ -114,7 +115,8 @@ pub use descendants::{Cutoff, Descendants, Snapshot, Swept};
 pub use error::Error;
 pub use handle::{ExitReport, Handle, ShutdownOutcome, TreeWatch};
 pub use launch::{
-    Launched, Launcher, NODE_ENV, PassthroughLauncher, SpawnOptions, is_node_env, spawn_in_tree,
+    Launched, Launcher, NODE_ENV, PassthroughLauncher, SpawnOptions, cloexec_pipe, is_node_env,
+    spawn_in_tree,
 };
 pub use live::{close_spawns, live_handles};
 pub use spec::LaunchSpec;

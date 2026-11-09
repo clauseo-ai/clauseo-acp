@@ -285,3 +285,65 @@ fn agent_browser() -> Option<PathBuf> {
     .find(|p| p.is_file())
     .and_then(|p| dunce::canonicalize(p).ok())
 }
+
+/// Whether descriptor `fd` is open in the shell `launcher` starts: a redirect from it.
+const FD_OPEN: &str = r#"if { : <&"$1"; } 2>/dev/null; then echo open; else echo closed; fi"#;
+
+/// A descriptor this process left open across exec reaches a plain child, but neither a jailed
+/// agent nor the browser stack: both launchers close every descriptor they did not pass.
+#[test]
+fn a_descriptor_left_open_across_exec_reaches_no_jailed_child() {
+    use nix::fcntl::{FcntlArg, FdFlag, fcntl};
+    use std::os::fd::AsRawFd as _;
+    let b = Browser::new(None);
+    let (leaked, _writer) = std::io::pipe().unwrap();
+    fcntl(&leaked, FcntlArg::F_SETFD(FdFlag::empty())).unwrap();
+    let fd = leaked.as_raw_fd().to_string();
+    let m1 = b.w.at("m1");
+    let outside = crate::support::run_outside("/bin/sh", &["-c", FD_OPEN, "sh", &fd], &m1);
+    assert_eq!(outside.stdout, "open\n", "the check sees it: {outside:#?}");
+    let (agent, _) = crate::support::launcher(b.w.builder().build().unwrap());
+    let jailed = crate::support::sh(&agent, &m1, FD_OPEN, &[&fd]);
+    assert_eq!(jailed.stdout, "closed\n", "{jailed:#?}");
+    let browser = b.bash(FD_OPEN, &[&fd]);
+    assert_eq!(browser.stdout, "closed\n", "{browser:#?}");
+}
+
+/// Prints each descriptor from 3 to 63 open in the shell; `test -e` on `/dev/fd` opens none.
+const OPEN_FDS: &str =
+    r#"for n in $(seq 3 63); do if [ -e "/dev/fd/$n" ]; then echo "$n"; fi; done"#;
+
+/// Chrome's pipes, made while plain children start on another thread, reach none of them: the
+/// pipes are made under the spawn lock every start takes, and close-on-exec before it is free.
+#[test]
+fn chrome_s_pipe_reaches_no_child_started_meanwhile() {
+    let b = Browser::new(None);
+    let chrome = b.w.executable("chrome/chs/chrome-headless-shell", STAND_IN);
+    let launch = spec(&chrome, &["about:blank"], &b.run);
+    let m1 = b.w.at("m1");
+    let open = || {
+        let out = crate::support::run_outside("/bin/sh", &["-c", OPEN_FDS], &m1);
+        out.stdout.lines().map(str::to_owned).collect::<Vec<_>>()
+    };
+    // What this process already holds open across exec (a jobserver pipe cargo passed down)
+    // reaches every plain child; it is not Chrome's.
+    let before = open();
+    let done = std::sync::atomic::AtomicBool::new(false);
+    let seen = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            while !done.load(std::sync::atomic::Ordering::SeqCst) {
+                let ChromeLaunch { launched, pipe } = b.launcher.launch_chrome(&launch).unwrap();
+                drop(pipe);
+                let mut handle = launched.handle;
+                async_io::block_on(handle.exited());
+            }
+        });
+        let mut seen = Vec::new();
+        for _ in 0..60 {
+            seen.extend(open().into_iter().filter(|n| !before.contains(n)));
+        }
+        done.store(true, std::sync::atomic::Ordering::SeqCst);
+        seen
+    });
+    assert_eq!(seen, Vec::<String>::new(), "a child held Chrome's pipe");
+}

@@ -122,9 +122,17 @@ fn no_combination_allows_an_inet_bind_or_listener() {
     assert!(texts.len() > 50, "{}", texts.len());
     for text in &texts {
         assert_eq!(inet_binds(&rules(text)), Vec::<String>::new(), "{text}");
-        assert!(!text.contains("network-inbound"), "{text}");
+        assert!(!text.contains("(allow network-inbound"), "{text}");
+        assert!(
+            text.contains("(deny network-bind network-inbound\n  (local ip \"*:*\")"),
+            "{text}"
+        );
+        let allows: Vec<String> = rules(text)
+            .into_iter()
+            .filter(|r| r.starts_with("(allow"))
+            .collect();
         for wide in ["(remote ip", "(local ip", "(remote udp", "(local tcp"] {
-            assert!(!text.contains(wide), "{wide}: {text}");
+            assert!(!allows.iter().any(|r| r.contains(wide)), "{wide}: {text}");
         }
     }
 }

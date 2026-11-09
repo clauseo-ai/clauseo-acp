@@ -23,11 +23,12 @@ use super::macos as listing;
 
 /// Puts the agent in a new process group whose id is its own pid, so a signal to the group
 /// reaches every process it starts that stays in the group, and gives it the descriptors of
-/// [`SpawnOptions::pass_fd`] (`unix/inherit.rs`). Safe std, no `pre_exec`, except for those
+/// [`SpawnOptions::pass_fd`] and closes the rest with [`SpawnOptions::close_other_fds`]
+/// (`unix/inherit.rs`). Safe std, no `pre_exec`, except for those
 /// descriptors and on Linux for [`SpawnOptions::end_with_parent`] (`linux.rs`).
 pub(crate) fn prepare(command: &mut Command, opts: &SpawnOptions) {
     command.process_group(0);
-    inherit::pass(command, &opts.fds);
+    inherit::pass(command, &opts.fds, opts.close_other_fds);
     #[cfg(target_os = "linux")]
     if opts.end_with_parent {
         listing::end_with_parent(command);

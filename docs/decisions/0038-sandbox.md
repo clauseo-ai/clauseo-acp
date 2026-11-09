@@ -161,7 +161,8 @@ read-only paths in the state folder; the network. Every deny carries the tag. Ne
 IPv4 out to `localhost:<port>` for each proxy port and nothing else (no DNS: the proxy resolves
 names), Unix sockets in the browser socket folder only, when the host gives one (outbound, and
 bind for agent-browser's daemon; amended 2026-11-03, below), and by `Loopback` TCP out over IPv4
-and IPv6 to the listed ports or `localhost:*`. No inet bind or listener, whatever the options
+and IPv6 to the listed ports or `localhost:*`. No inet bind or listener, whatever the options,
+and a trailing `(deny network-bind network-inbound (local ip "*:*"))` among the last rules
 (amended 2026-11-09, J3: before, `Loopback` also allowed bind and inbound, as `ip` rules that
 passed UDP too).
 
@@ -346,29 +347,39 @@ app-bundle Chrome needs LaunchServices (`launchservicesd`, `lsd.mapdb`), `config
 profile refuses a Chrome path with a `.app` name (`BrowserProfileError::AppBundle`).
 
 `BrowserPaths` names the run folder (`<data>/browser-runs/<run>/` with `profile/`, `staging/`,
-`sock/`, `ab/` and `tmp/`), the headless shell's folder, the stack's binaries, the proxy's
-browser port and the host bridge's DevTools port, and the deny roots (the matters, the home's
-sensitive folders). It refuses relative paths, a run folder not directly in `browser-runs`, a run folder that equals,
-holds or sits in a deny root, a binary in a deny root or in the run folder, a path holding a
+`sock/`, `ab/` and `tmp/`), the headless shell's folder, the stack's binaries, the proxy's browser
+port and the host bridge's DevTools port, and the deny roots (the matters, the home's sensitive
+folders). It refuses relative paths, a run folder not directly in `browser-runs`, a run folder that
+equals, holds or sits in a deny root, a binary in a deny root or in the run folder, a path holding a
 quote, backslash or control character (paths are written into the text as strings), and port 0.
-`BrowserLauncher` refuses to start when this process is already sandboxed (`sandbox_check` with
-no operation is not 0: `AlreadySandboxed`), clears the environment, and sets `HOME` and `TMPDIR`
-to `tmp/` and `MAC_CHROMIUM_TMPDIR` to `ab/` (Chrome reads its temp folder from that variable,
-not `TMPDIR`, and binds its singleton socket there; without it Chrome uses `/var/folders` and
-exits). The flags: `--headless --no-sandbox --disable-gpu --user-data-dir=<run>/profile
+`BrowserLauncher` refuses to start when this process is already sandboxed (`sandbox_check` with no
+operation is not 0: `AlreadySandboxed`), clears the environment, and sets `HOME` and `TMPDIR` to
+`tmp/` and `MAC_CHROMIUM_TMPDIR` to `ab/` (Chrome reads its temp folder from that variable, not
+`TMPDIR`, and binds its singleton socket there; without it Chrome uses `/var/folders` and exits).
+The flags: `--headless --no-sandbox --disable-gpu --user-data-dir=<run>/profile
 --proxy-server=http://127.0.0.1:<proxy>`. Chrome starts through `BrowserLauncher::launch_chrome`,
 which puts `--remote-debugging-pipe` first, drops any `remote-debugging-port` or
-`remote-debugging-address` switch, and gives Chrome a fresh pipe pair at fds 3 (commands in) and
-4 (replies and events out), each message one JSON text ended by a NUL (`macos::browser::pipe`).
+`remote-debugging-address` switch, and gives Chrome a fresh pipe pair at fds 3 (commands in) and 4
+(replies and events out), each message one JSON text ended by a NUL (`macos::browser::pipe`).
 `sandbox-exec` passes fds 3 and 4 through (measured), and the fds reach the child by
 `SpawnOptions::pass_fd` in `clauseo-process`. The caller gets its ends as a `CdpPipe` in a
-`ChromeLaunch`. That caller is stage E's host bridge (J4): it runs outside every jail, launches
-Chrome here and serves the pipe on `127.0.0.1:<bridge_port>`, the one DevTools port
-agent-browser, inside this profile, connects to. The headless shell renders a local page and
-screenshots it driven over the pipe alone (measured, chrome-headless-shell 155). agent-browser's
-stream (`AGENT_BROWSER_STREAM_PORT`) is dropped: its daemon tries `127.0.0.1:<port>`, then
-`127.0.0.1:0`, logs "Stream server failed to start: ... Operation not permitted" and carries on,
-its Unix socket in `ab/` made (measured with agent-browser 0.39.1).
+`ChromeLaunch`. macOS has no `pipe2`: a pipe is made, then marked close-on-exec in a second call,
+and a child forked in between keeps both ends. So the pipes come from
+`clauseo_process::cloexec_pipe`, made under the lock `spawn_in_tree` holds while it starts any
+child. A start outside that crate takes no such lock, so both sandbox launchers (the agent's and the
+browser's) also set `SpawnOptions::close_other_fds`: before exec the child closes every descriptor
+of 3 or above it was not passed and that is not close-on-exec. It lists them with
+`proc_pidinfo(PROC_PIDLISTFDS)` into a stack buffer, or tries each up to `getdtablesize` when the
+list does not fit. Tests: a descriptor left open across exec reaches a plain child but not a jailed
+agent or the browser stack, and no plain child started while Chrome's pipes were being made held one
+of them. In the test runs, cargo's jobserver pipe (fds 10 and 11) reached every plain child: such
+inherited descriptors are what the option closes. The pipe's caller is stage E's host bridge (J4):
+it runs outside every jail, launches Chrome here and serves the pipe on `127.0.0.1:<bridge_port>`,
+the one DevTools port agent-browser, inside this profile, connects to. The headless shell renders a
+local page and screenshots it driven over the pipe alone (measured, chrome-headless-shell 155).
+agent-browser's stream (`AGENT_BROWSER_STREAM_PORT`) is dropped: its daemon tries
+`127.0.0.1:<port>`, then `127.0.0.1:0`, logs "Stream server failed to start: ... Operation not
+permitted" and carries on, its Unix socket in `ab/` made (measured with agent-browser 0.39.1).
 
 What Seatbelt checks on a socket (measured on macOS 27.2, `sandbox-exec` probes run against
 clients on loopback, the LAN address and the Tailscale address):
@@ -412,19 +423,19 @@ no `nvram`, no `iokit-get-properties`, no inet bind or inbound on any address or
 (#811's rule; `(deny default)` does not refuse it, so a renderer exploit could read every
 process's arguments), with `process-info-listpids` allowed back right after, numbers only, as
 #811 does: the guard finds Chrome's children by listing pids and reading each one's parent
-(`proc_pidinfo`), which reads only for the sandbox's own processes.
-The jail tests run under it: matters, the home, `.ssh` and other state refused for read and
-write; the keychain refused; the window server, `lsd.mapdb`, `configd` and an unknown name
-refused, the port broker's name passed; an outside process's arguments and info refused, the
-pid list and a sibling's arguments and parent read; only the proxy's and bridge's ports reachable;
-every inet bind refused with EPERM (TCP and UDP; `127.0.0.1`, `0.0.0.0`, `[::]` and `[::1]`; port 0
-and fixed ports); a Unix listener in `ab/` binds, accepts and connects; the ancestors `lstat`
-but do not list; a binary or library dropped in the run folder neither runs nor maps; no socket bound in `sock/` but `guard.sock`; the
-outermost refusal; Chrome's pipe at fds 3 and 4 with the pipe flag and no port flag (a
-stand-in); the headless shell's render and screenshot of a local page over the pipe (skipped when
-none is on the machine); and agent-browser's daemon up without its stream server (skipped when it
-is not installed). Unit tests pin the pipe framing, the arguments, and that no allow of either
-profile, under any combination of the builder's options, opens an inet bind or listener.
+(`proc_pidinfo`), which reads only for the sandbox's own processes. The jail tests run under it:
+matters, the home, `.ssh` and other state refused for read and write; the keychain refused; the
+window server, `lsd.mapdb`, `configd` and an unknown name refused, the port broker's name passed; an
+outside process's arguments and info refused, the pid list and a sibling's arguments and parent
+read; only the proxy's and bridge's ports reachable; every inet bind refused with EPERM (TCP and
+UDP; `127.0.0.1`, `0.0.0.0`, `[::]` and `[::1]`; port 0 and fixed ports); a Unix listener in `ab/`
+binds, accepts and connects; the ancestors `lstat` but do not list; a binary or library dropped in
+the run folder neither runs nor maps; no socket bound in `sock/` but `guard.sock`; the outermost
+refusal; Chrome's pipe at fds 3 and 4 with the pipe flag and no port flag (a stand-in); the headless
+shell's render and screenshot of a local page over the pipe (skipped when none is on the machine);
+and agent-browser's daemon up without its stream server (skipped when it is not installed). Unit
+tests pin the pipe framing, the arguments, and that no allow of either profile, under any
+combination of the builder's options, opens an inet bind or listener.
 
 The guard's marker (D3): `sandbox_check(pid, "file-write-data", SANDBOX_FILTER_PATH |
 SANDBOX_CHECK_NO_REPORT, path)` answers 0 for a write under `<data>/browser-runs/` only under this
