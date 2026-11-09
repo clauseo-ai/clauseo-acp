@@ -53,10 +53,13 @@ windows = { workspace = true, features = [
 # lines (NtQueryInformationProcess: Wdk_System_Threading) and the machine types
 # (IsWow64Process2, PROCESS_MACHINE_INFORMATION: System_SystemInformation). The cleanup's wait
 # for the account's processes (WTSEnumerateProcessesW, which gives each process's user without
-# opening it: System_RemoteDesktop).
+# opening it: System_RemoteDesktop). The no-listener check: GetExtendedTcpTable
+# (NetworkManagement_IpHelper) over the job's pids (QueryInformationJobObject: System_JobObjects).
+# The helper's CDP client: serde_json for the messages, base64 for the screenshot's data.
 [target.'cfg(windows)'.dev-dependencies]
 windows = { workspace = true, features = [
   "Wdk_System_Threading",
+  "Win32_NetworkManagement_IpHelper",
   "Win32_NetworkManagement_NetManagement",
   "Win32_NetworkManagement_WindowsFirewall",
   "Win32_Security_Authentication_Identity",
@@ -68,3 +71,5 @@ windows = { workspace = true, features = [
   "Win32_System_StationsAndDesktops",
   "Win32_System_SystemInformation",
 ] }
+serde_json = { workspace = true }
+base64 = { workspace = true }

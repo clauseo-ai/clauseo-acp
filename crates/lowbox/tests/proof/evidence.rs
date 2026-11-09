@@ -98,6 +98,8 @@ pub(crate) fn check(lines: &[Line], context: &Context) -> Vec<String> {
     let mut problems = check_station(lines, context);
     problems.extend(check_processes(lines));
     problems.extend(check_exits(lines));
+    problems.extend(check_cdp(lines));
+    problems.extend(check_listeners(lines));
     if context.shot_bytes <= SHOT_MIN {
         problems.push(format!(
             "shot.png is {} bytes, not over {SHOT_MIN}",
@@ -219,7 +221,10 @@ fn check_exits(lines: &[Line]) -> Vec<String> {
         None => problems.push("the helper never reported chrome's exit".to_owned()),
         Some(chrome) => {
             if chrome.get("exited") != "1" {
-                problems.push("chrome did not exit within the helper's 90 s wait".to_owned());
+                problems.push(format!(
+                    "chrome did not exit within the helper's {} s wait after Browser.close",
+                    super::helper::CHROME_EXIT_MS / 1000
+                ));
             }
             if chrome.get("code") == "-" {
                 problems.push("chrome's exit code was not read".to_owned());
@@ -232,6 +237,62 @@ fn check_exits(lines: &[Line]) -> Vec<String> {
                 "the exit code of {} pid {} was not read: still running",
                 exit.get("role"),
                 exit.get("pid")
+            ));
+        }
+    }
+    problems
+}
+
+/// The CDP steps that must each print an `ok` line, as their lines start.
+const CDP_STEPS: [&str; 8] = [
+    "cdp method=Browser.getVersion ok",
+    "cdp method=Target.createTarget ok",
+    "cdp method=Target.attachToTarget ok",
+    "cdp method=Page.enable ok",
+    "cdp method=Page.navigate ok",
+    "cdp event=Page.loadEventFired ok",
+    "cdp method=Page.captureScreenshot ok",
+    "cdp method=Browser.close ok",
+];
+
+/// Every CDP step succeeded; a failed one is reported with its method and CDP's message.
+fn check_cdp(lines: &[Line]) -> Vec<String> {
+    let cdp: Vec<&Line> = lines.iter().filter(|l| l.kind == "cdp").collect();
+    let mut problems: Vec<String> = cdp
+        .iter()
+        .filter(|l| l.text.contains(" failed: "))
+        .map(|l| format!("CDP step failed: {}", l.text))
+        .collect();
+    for step in CDP_STEPS {
+        if !cdp.iter().any(|l| l.text.starts_with(step)) {
+            problems.push(format!("no `{step}` line from the helper"));
+        }
+    }
+    problems
+}
+
+/// No process of chrome's job listened on a TCP port, at either look (`inspect`, `close`).
+fn check_listeners(lines: &[Line]) -> Vec<String> {
+    let listen: Vec<&Line> = lines.iter().filter(|l| l.kind == "listen").collect();
+    let mut problems = Vec::new();
+    for stage in ["inspect", "close"] {
+        let looked = listen
+            .iter()
+            .any(|l| l.get("stage") == stage && l.fields.contains_key("pids"));
+        if !looked {
+            problems.push(format!("no TCP listener count at the {stage} look"));
+        }
+    }
+    for l in &listen {
+        if l.fields.contains_key("error") {
+            problems.push(format!("the listener count failed: {}", l.text));
+        }
+        if l.fields.contains_key("pid") && l.get("listeners") != "0" {
+            problems.push(format!(
+                "chrome pid {} listens on {} TCP port(s) at the {} look",
+                l.get("pid"),
+                l.get("listeners"),
+                l.get("stage")
             ));
         }
     }
@@ -274,6 +335,8 @@ pub(crate) fn summary(lines: &[Line], context: &Context) -> Vec<String> {
                 | "handles"
                 | "snapshots"
                 | "stderr"
+                | "cdp"
+                | "listen"
         ) {
             out.push(format!("evidence: {}", l.text));
         }

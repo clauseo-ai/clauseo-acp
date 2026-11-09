@@ -6,6 +6,17 @@
 //! report is a line starting [`MARK`], which the owner parses. Chrome's standard output is
 //! `NUL` and its standard error goes to [`STDERR_LOG`] in staging, so neither reaches the
 //! report pipe.
+//!
+//! The helper drives chrome over CDP on two anonymous pipes (`cdp.rs`), never a TCP port:
+//! `--remote-debugging-pipe` with `--remote-debugging-io-pipes=<chrome reads>,<chrome writes>`,
+//! the handle values in decimal, both passed with `inherit_handle`. Chromium 157 needs
+//! `--remote-debugging-pipe` for the handler to start at all; `--remote-debugging-io-pipes`
+//! alone only names the handles. The sequence: `Browser.getVersion`, `Target.createTarget`
+//! (`about:blank`), `Target.attachToTarget` (flat), `Page.enable`, `Page.navigate` to the
+//! proxy's page (whose answer the proxy holds while the helper inspects), `Page.loadEventFired`,
+//! `Page.captureScreenshot` into `staging\shot.png`, `Browser.close`. Twice, after the
+//! inspection and before `Browser.close`, it counts the TCP listeners of the job's processes
+//! (`listen.rs`).
 #![expect(
     unsafe_code,
     reason = "FFI to the Job Object, station and desktop name and wait calls"
@@ -14,15 +25,18 @@
 use std::ffi::c_void;
 use std::fmt::Display;
 use std::fs::File;
-use std::os::windows::io::OwnedHandle;
+use std::os::windows::io::{AsRawHandle, OwnedHandle};
 use std::path::Path;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::Duration;
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use clauseo_lowbox::{
     LowBoxCommand, NamespaceHandles, PackageName, Spawned, Stdio, package_sid, parse_handle_arg,
 };
+use serde_json::{Value, json};
 use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0};
 use windows::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
@@ -38,7 +52,9 @@ use windows::Win32::System::Threading::{
 };
 use windows::core::PCWSTR;
 
+use super::cdp::{Cdp, Reply, failure, field};
 use super::inspect;
+use super::listen;
 use super::proxy::URL;
 use super::win::{Res, code, failed, owned, raw, sleep_ms, wide};
 use super::write;
@@ -47,8 +63,12 @@ use super::write;
 pub(crate) const MARK: &str = "LOWBOX|";
 /// The file in staging that gets chrome's standard error.
 pub(crate) const STDERR_LOG: &str = "chrome-stderr.log";
-/// The longest the helper waits for chrome to exit after the inspection.
-const CHROME_EXIT_MS: u32 = 90_000;
+/// The longest the helper waits for chrome to exit after `Browser.close`.
+pub(crate) const CHROME_EXIT_MS: u32 = 30_000;
+/// The longest each CDP step waits for its reply or event.
+const STEP: Duration = Duration::from_secs(20);
+/// The longest `Browser.close` waits for its reply.
+const CLOSE_STEP: Duration = Duration::from_secs(10);
 /// The longest it waits for chrome's standard error to close after the job ends.
 const STDERR_WAIT: Duration = Duration::from_secs(10);
 /// `READ_CONTROL`: enough to open the station by name.
@@ -128,29 +148,36 @@ pub(crate) fn run() {
 
     let shell = Path::new(&config.shell);
     let staging = Path::new(&config.staging);
-    let screenshot = staging.join("shot.png");
+    // Commands go in on one pipe, replies and events come back on the other.
+    let (chrome_reads, helper_writes) = std::io::pipe().expect("the CDP command pipe");
+    let (helper_reads, chrome_writes) = std::io::pipe().expect("the CDP reply pipe");
+    let (r, w) = (chrome_reads.as_raw_handle(), chrome_writes.as_raw_handle());
     let mut command = LowBoxCommand::new(shell);
     command
         .args([
             "--headless".to_owned(),
+            "--remote-debugging-pipe".to_owned(),
+            format!("--remote-debugging-io-pipes={},{}", r as usize, w as usize),
             format!("--proxy-server=127.0.0.1:{}", config.port),
             format!("--user-data-dir={}", config.profile),
-            format!("--screenshot={}", screenshot.display()),
             "--window-size=800,600".to_owned(),
             "--no-first-run".to_owned(),
-            URL.to_owned(),
         ])
         .env("TEMP", &config.tmp)
         .env("TMP", &config.tmp)
         .current_dir(shell.parent().unwrap_or(shell))
         .stdin(Stdio::Null)
         .stdout(Stdio::Null)
-        .stderr(Stdio::Piped);
+        .stderr(Stdio::Piped)
+        .inherit_handle(r)
+        .inherit_handle(w);
     // The job comes first: once chrome exists, every failure before the resume ends it.
     let job = kill_on_close_job().unwrap();
     let mut child = command
         .spawn_suspended(&namespace)
         .unwrap_or_else(|e| panic!("spawn_suspended: {e}"));
+    // Chrome has its own copies now; the helper keeps only its ends, so a dead chrome closes them.
+    drop((chrome_reads, chrome_writes));
     // SAFETY: an open job and the child's open process handle (all access).
     let assigned = unsafe { AssignProcessToJobObject(raw(&job), raw(&child.process)) };
     if let Err(e) = assigned {
@@ -169,10 +196,19 @@ pub(crate) fn run() {
         inspect::machine(raw(&child.process))
     ));
 
+    let mut cdp = Cdp::start(helper_writes, helper_reads);
+    let (session, navigate) = open_page(&mut cdp).unwrap_or_else(|e| panic!("{e}"));
+
     let asked = input.any(|line| line.is_ok_and(|l| l.trim() == "inspect"));
     say(format_args!("inspect asked={}", u8::from(asked)));
     let seen = inspect::inspect(child.pid, &package_sid(&package).to_bytes()).unwrap();
+    let inspected: Vec<u32> = seen.iter().map(|s| s.pid).collect();
+    listen::report("inspect", &job, &inspected);
     say(format_args!("inspected count={}", seen.len()));
+
+    finish_page(&mut cdp, &session, navigate, staging).unwrap_or_else(|e| panic!("{e}"));
+    listen::report("close", &job, &inspected);
+    close_browser(&mut cdp).unwrap_or_else(|e| panic!("{e}"));
 
     // SAFETY: the child's open process handle.
     let waited = unsafe { WaitForSingleObject(raw(&child.process), CHROME_EXIT_MS) };
@@ -189,6 +225,93 @@ pub(crate) fn run() {
     });
     say(format_args!("stderr {stderr}"));
     say("done");
+}
+
+/// Up to the held page: `Browser.getVersion`, a new `about:blank` target, a flat session on
+/// it, `Page.enable`, and `Page.navigate` sent without waiting (its reply needs the page the
+/// proxy holds). The session id and the navigate's command id.
+fn open_page(cdp: &mut Cdp) -> Res<(String, u64)> {
+    let version = cdp.call("Browser.getVersion", json!({}), None, STEP)?;
+    say(format_args!(
+        "cdp method=Browser.getVersion ok product={} protocolVersion={}",
+        field(&version, "product"),
+        field(&version, "protocolVersion")
+    ));
+    let target = cdp.call(
+        "Target.createTarget",
+        json!({ "url": "about:blank" }),
+        None,
+        STEP,
+    )?;
+    let target_id = target
+        .get("targetId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| failure("Target.createTarget", "no targetId"))?
+        .to_owned();
+    say("cdp method=Target.createTarget ok");
+    let attached = cdp.call(
+        "Target.attachToTarget",
+        json!({ "targetId": target_id, "flatten": true }),
+        None,
+        STEP,
+    )?;
+    let session = attached
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| failure("Target.attachToTarget", "no sessionId"))?
+        .to_owned();
+    say("cdp method=Target.attachToTarget ok flatten=1");
+    cdp.call("Page.enable", json!({}), Some(&session), STEP)?;
+    say("cdp method=Page.enable ok");
+    let navigate = cdp.send("Page.navigate", json!({ "url": URL }), Some(&session))?;
+    say(format_args!("cdp method=Page.navigate sent url={URL}"));
+    Ok((session, navigate))
+}
+
+/// After the release: the navigate's reply, `Page.loadEventFired`, and the screenshot, decoded
+/// into `staging\shot.png`.
+fn finish_page(cdp: &mut Cdp, session: &str, navigate: u64, staging: &Path) -> Res<()> {
+    let navigated = match cdp.reply(navigate, "Page.navigate", STEP)? {
+        Reply::Result(result) => result,
+        Reply::Closed => return Err(failure("Page.navigate", "chrome's pipe closed")),
+    };
+    if let Some(error) = navigated.get("errorText").and_then(Value::as_str) {
+        return Err(failure("Page.navigate", error));
+    }
+    say("cdp method=Page.navigate ok");
+    cdp.event("Page.loadEventFired", session, STEP)?;
+    say("cdp event=Page.loadEventFired ok");
+    let shot = cdp.call(
+        "Page.captureScreenshot",
+        json!({ "format": "png" }),
+        Some(session),
+        STEP,
+    )?;
+    let data = shot
+        .get("data")
+        .and_then(Value::as_str)
+        .ok_or_else(|| failure("Page.captureScreenshot", "no data"))?;
+    let png = BASE64
+        .decode(data)
+        .map_err(|e| failure("Page.captureScreenshot", &format!("base64: {e}")))?;
+    write::write(&staging.join("shot.png"), &png)
+        .map_err(|e| failure("Page.captureScreenshot", &format!("writing shot.png: {e}")))?;
+    say(format_args!(
+        "cdp method=Page.captureScreenshot ok bytes={}",
+        png.len()
+    ));
+    Ok(())
+}
+
+/// `Browser.close`: its reply, or chrome's pipe closing first, within [`CLOSE_STEP`].
+fn close_browser(cdp: &mut Cdp) -> Res<()> {
+    let id = cdp.send("Browser.close", json!({}), None)?;
+    let how = match cdp.reply(id, "Browser.close", CLOSE_STEP)? {
+        Reply::Result(_) => "reply",
+        Reply::Closed => "pipe-closed",
+    };
+    say(format_args!("cdp method=Browser.close ok by={how}"));
+    Ok(())
 }
 
 /// `code` in hex.

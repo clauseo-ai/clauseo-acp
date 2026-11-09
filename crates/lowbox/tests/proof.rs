@@ -13,8 +13,10 @@
 //! of chrome's processes while the proxy holds the page. The owner checks the report, the
 //! screenshot and the proxy, then undoes everything, each step checked.
 //!
-//! Chrome runs without `--remote-debugging-port=0`, though the CI brief listed it: the row needs
-//! no `DevTools`, and the flag opens a listener inside the `AppContainer`.
+//! Chrome speaks CDP over two anonymous pipes (`--remote-debugging-pipe`), never a TCP port: no
+//! `--remote-debugging-port`, though the CI brief listed it, since it opens a listener inside the
+//! `AppContainer`. The helper drives the page and the screenshot over CDP (`proof/cdp.rs`) and
+//! the row asserts no chrome process listens on a TCP port (`proof/listen.rs`).
 //!
 //! Inputs: `CLAUSEO_ELEVATED_TESTS=1`, `CLAUSEO_TEST_CHROME_SHELL` (the shell's full path) and
 //! `CLAUSEO_TEST_ARTIFACTS` (a folder CI uploads); a missing one fails the row.
@@ -60,8 +62,16 @@ mod launch;
 mod helper;
 
 #[cfg(test)]
+#[path = "proof/cdp.rs"]
+mod cdp;
+
+#[cfg(test)]
 #[path = "proof/inspect.rs"]
 mod inspect;
+
+#[cfg(test)]
+#[path = "proof/listen.rs"]
+mod listen;
 
 #[cfg(test)]
 #[path = "proof/evidence.rs"]

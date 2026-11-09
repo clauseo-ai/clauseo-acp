@@ -1,8 +1,8 @@
 //! The row's small Win32 helpers, shared by the owner's and the helper's modules: wide strings,
-//! error codes, randomness, descriptors from SDDL and back, SIDs as text, and `Sleep`.
+//! error codes, randomness, descriptors from SDDL and back, SIDs as text, `Sleep` and a tick clock.
 #![expect(
     unsafe_code,
-    reason = "FFI to the SDDL, SID, token, random-number and Sleep calls"
+    reason = "FFI to the SDDL, SID, token, random-number, Sleep and tick-count calls"
 )]
 
 use std::ffi::{OsStr, c_void};
@@ -19,6 +19,7 @@ use windows::Win32::Security::{
     OBJECT_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES, TOKEN_QUERY,
     TOKEN_USER, TokenUser,
 };
+use windows::Win32::System::SystemInformation::GetTickCount64;
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken, Sleep};
 use windows::core::{BOOL, PCWSTR, PWSTR};
 
@@ -100,6 +101,12 @@ pub(crate) fn random_password() -> String {
 pub(crate) fn sleep_ms(ms: u32) {
     // SAFETY: Sleep only blocks this thread.
     unsafe { Sleep(ms) };
+}
+
+/// Milliseconds since boot (`GetTickCount64`): the bounded waits' clock.
+pub(crate) fn tick_ms() -> u64 {
+    // SAFETY: GetTickCount64 only reads the system's tick count.
+    unsafe { GetTickCount64() }
 }
 
 /// Takes ownership of a handle a call just returned.

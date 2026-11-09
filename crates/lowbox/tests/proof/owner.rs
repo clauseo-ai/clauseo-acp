@@ -2,10 +2,12 @@
 //! helper's start, the run, the artifacts and the evidence. The cleanup, which always runs, is in
 //! `teardown.rs`.
 //!
-//! The row's own bounded waits: the page 180 s, the facts 60 s, the helper's exit 120 s, its
-//! last output 10 s, then in the cleanup the helper's kill 10 s, the account's processes 30 s,
-//! the profile's delete 57 s and the root's delete 10 s: 477 s in all, under the 600 s nextest
-//! gives this row (`.config/nextest.toml`).
+//! The row's own bounded waits: the page 180 s (the helper's first four CDP steps, 20 s each,
+//! run inside it), the facts 60 s, the helper's exit 150 s (navigate, load and screenshot 20 s
+//! each, `Browser.close` 10 s, chrome's exit 30 s, the exit codes 15 s, chrome's stderr 10 s:
+//! 125 s), its last output 10 s, then in the cleanup the helper's kill 10 s, the account's
+//! processes 30 s, the profile's delete 57 s and the root's delete 10 s: 507 s in all, under the
+//! 600 s nextest gives this row (`.config/nextest.toml`).
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::RecvTimeoutError;
@@ -29,7 +31,7 @@ const PAGE_WAIT: Duration = Duration::from_secs(180);
 /// How long it waits for the helper's facts after `inspect`.
 const FACTS_WAIT: Duration = Duration::from_secs(60);
 /// How long it waits for the helper to exit after the release.
-const HELPER_EXIT_MS: u32 = 120_000;
+const HELPER_EXIT_MS: u32 = 150_000;
 /// How long it waits for the helper's last output after its exit.
 const DRAIN_WAIT: Duration = Duration::from_secs(10);
 
@@ -319,11 +321,20 @@ impl Run {
         let (Some(helper), Some(proxy)) = (self.helper.as_mut(), self.proxy.as_ref()) else {
             return Err("the run had no helper or proxy".to_owned());
         };
-        if !proxy.wait_seen(PAGE_WAIT) {
+        // One second at a time, so a helper that stopped (a failed CDP step) ends the wait.
+        let mut seen = false;
+        for _ in 0..PAGE_WAIT.as_secs() {
+            seen = proxy.wait_seen(Duration::from_secs(1));
+            if seen || helper.exit_code().is_some() {
+                break;
+            }
+        }
+        if !seen {
             return Err(format!(
-                "the proxy never saw the page request within {} s; no inspection asked (the \
-                 helper's log is above)",
-                PAGE_WAIT.as_secs()
+                "the proxy never saw the page request (waited up to {} s; helper exit {:?}); no \
+                 inspection asked (the helper's log is above)",
+                PAGE_WAIT.as_secs(),
+                helper.exit_code()
             ));
         }
         println!("run: the proxy saw the page request");
@@ -353,7 +364,10 @@ impl Run {
         proxy.release();
         println!("run: page released");
         if !helper.wait(HELPER_EXIT_MS) {
-            println!("run: the helper did not exit within 120 s");
+            println!(
+                "run: the helper did not exit within {} s",
+                HELPER_EXIT_MS / 1000
+            );
         }
         while let Ok(line) = helper.next_line(DRAIN_WAIT) {
             output.push(line);

@@ -1154,6 +1154,8 @@ dependencies = [
 name = "clauseo-lowbox"
 version = "0.0.0"
 dependencies = [
+ "base64 0.22.1",
+ "serde_json",
  "windows",
 ]
 
