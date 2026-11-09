@@ -122,6 +122,13 @@ pub(crate) struct RunFolders {
     pub(crate) browser_blocked: Option<clauseo_protocol::ToolsUnavailableReason>,
     /// Whether the launch prep read that policy (it does whenever the browser could come).
     pub(crate) browser_policy_read: bool,
+    /// The browser as a shell tool (`HostConfig::with_browser_tool`, `tools.browser` on): the
+    /// session has it once [`Self::chrome`] is found and its two folders below are made.
+    pub(crate) browser_shell: bool,
+    /// `<root>/downloads`, `AGENT_BROWSER_DOWNLOAD_PATH`, and `<root>/browser-profile`,
+    /// `AGENT_BROWSER_PROFILE`: made only for the shell tool, gone with the run folder.
+    pub(crate) downloads: PathBuf,
+    pub(crate) browser_profile: PathBuf,
     /// `<root>/skill-packs`: the launch's own plugin of skill packs (decision record 0040),
     /// written by the launch prep only when a pack loaded. R17 passes this to
     /// `PolicyBuilder::read_only_in_state`.
@@ -167,6 +174,8 @@ impl RunFolders {
             key,
             work: root.join("work"),
             browser: root.join("browser"),
+            downloads: root.join("downloads"),
+            browser_profile: root.join("browser-profile"),
             skill_packs: root.join("skill-packs"),
             relay_token: relay::token_file(&root),
             notes: notes_dir(data, key.matter),
@@ -175,6 +184,7 @@ impl RunFolders {
             browser_session: None,
             browser_blocked: None,
             browser_policy_read: false,
+            browser_shell: false,
             packs_written: None,
             data_deny: LaunchDeny::fixed(vec![data.to_owned()]),
             case_law: relay::CaseLaw::Absent,
@@ -383,10 +393,18 @@ fn claim(run: &mut RunFolders, data: &Path, claims: Claims, slot: bool) {
         egress,
         held,
     } = claims;
-    let browser = if slot { browser } else { browser.skipped() };
+    let browser = if slot || browser.shell() {
+        browser
+    } else {
+        browser.skipped()
+    };
+    run.browser_shell = browser.shell();
     let prepared = browser.prepare(data, &run.key.id());
     (run.chrome, run.browser_session) = (prepared.chrome, prepared.session);
     (run.browser_blocked, run.browser_policy_read) = (prepared.policy_block, prepared.policy_read);
+    if run.browser_shell && run.chrome.is_some() {
+        shell_folders(run, data);
+    }
     // The launch offers the browser only once its Chrome was found and claimed.
     let offered = run.chrome.is_some() && run.browser_session.is_some();
     run.egress = egress.open(run.key, offered);
@@ -397,6 +415,22 @@ fn claim(run: &mut RunFolders, data: &Path, claims: Claims, slot: bool) {
         egress: run.egress.clone(),
     };
     run.lease.keep(held, parts);
+}
+
+/// Makes the shell tool's downloads and profile folders, in the launch's own run folder, so the
+/// profile starts empty: no earlier launch's cookies. One that cannot be made leaves the session without the
+/// browser (`BrowserNotInstalled`), with a warning; the launch goes on.
+fn shell_folders(run: &mut RunFolders, data: &Path) {
+    for folder in [&run.downloads, &run.browser_profile] {
+        if let Err(error) = crate::write::create_private_dirs_under(data, folder) {
+            tracing::warn!(
+                error = %crate::log_file::Cause(&error),
+                "a browser folder was not made; the session has no browser"
+            );
+            run.chrome = None;
+            return;
+        }
+    }
 }
 
 /// A prep nobody waits for any more takes back what it made: the relay's token first, then the

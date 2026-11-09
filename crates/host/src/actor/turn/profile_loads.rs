@@ -7,6 +7,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use clauseo_acp::McpServer;
+use clauseo_profile::instructions::BrowserPart;
 use clauseo_protocol::{AgentKind, ErrorCode, ThreadId, ToolAvailability};
 use serde_json::{Map, Value};
 
@@ -55,7 +56,10 @@ pub(super) fn launch_keys(
         // (`ManagedByFirm`, the relay ended) while this paragraph stays: wrong words, but no
         // case law reaches the agent.
         let part = connectors_part(prepared.run.case_law.relay().is_some());
-        let folders = Folders::of(&prepared.run.work, &prepared.run.notes)?.with_connectors(part);
+        let shell = shell_browser(actor, &prepared.run);
+        let folders = Folders::of(&prepared.run.work, &prepared.run.notes)?
+            .with_connectors(part)
+            .with_browser(browser_part(shell.as_ref()));
         let (web_search, _) = switches(actor);
         let packs = prepared.run.packs_written.as_deref();
         let keys = actor
@@ -104,7 +108,10 @@ pub(super) fn session_loads(
     let (hook, case_law_entry, case_law_state) =
         case_law_servers(actor, &run, actor.profile.mcp_servers(&agent_id), control);
     let part = connectors_part(case_law_entry.is_some());
-    let folders = Folders::of(&run.work, &run.notes)?.with_connectors(part);
+    let shell = shell_browser(actor, &run);
+    let folders = Folders::of(&run.work, &run.notes)?
+        .with_connectors(part)
+        .with_browser(browser_part(shell.as_ref()));
     let (web_search, browser_switch) = switches(actor);
     let settings_env = actor
         .effective
@@ -188,6 +195,8 @@ pub(super) fn session_loads(
         // The session holds its slot until it ends (`launch_checks::discard`).
         actor.wiring.browser_slots.take(run.key);
     }
+    // The shell tool's state stands in for the parked entry's (`servers::BROWSER_MCP`).
+    let browser_state = browser_state.or(shell.map(|(state, _)| state));
     let tools = profile::web_search_state(kind, web_search, login)
         .into_iter()
         .chain(browser_state)
@@ -247,6 +256,24 @@ fn case_law_servers(
         relay.end();
     }
     (rest, entry, state)
+}
+
+/// The shell tool's header state and browser part for `run`'s session, or none when the app
+/// wired no shell tool (`HostConfig::with_browser_tool`).
+fn shell_browser(
+    actor: &Actor,
+    run: &RunFolders,
+) -> Option<(clauseo_protocol::ToolState, BrowserPart)> {
+    actor.wiring.browser_tool.as_ref()?;
+    let (_, switch) = switches(actor);
+    let found = run.browser_shell && run.chrome.is_some();
+    Some(browser::shell_state(switch, run.browser_blocked, found))
+}
+
+/// What `{browser}` becomes: the shell tool's part, or the no-browser sentence without it.
+fn browser_part(shell: Option<&(clauseo_protocol::ToolState, BrowserPart)>) -> &'static str {
+    let part = shell.map_or(BrowserPart::Off, |(_, part)| *part);
+    clauseo_profile::instructions::browser_part(part)
 }
 
 /// What `{connectors}` becomes: the paragraph when the session gets the `case-law` entry.

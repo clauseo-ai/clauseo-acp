@@ -248,6 +248,23 @@ impl HostConfig {
         self
     }
 
+    /// The browser as a shell tool: `folder` holds the `agent-browser` command alone (the app's
+    /// copy of the bundled sidecar, `clauseo_profile::ProfilePaths::tools`). A session whose
+    /// launch prep finds a Chrome (`tools.browser` on, the firm's browser policy allowing it)
+    /// gets `folder` first on its agent's `PATH`, agent-browser's variables
+    /// (`agent::loads::browser::shell_env`) and the instructions' browser part; any other
+    /// session gets none of them. Default: none, and no session gets the shell tool.
+    pub fn with_browser_tool(mut self, folder: PathBuf) -> Self {
+        self.wiring.browser_tool = Some(folder);
+        self
+    }
+
+    /// The folder set by [`Self::with_browser_tool`], for tests of a caller's wiring.
+    #[cfg(feature = "test-support")]
+    pub fn browser_tool(&self) -> Option<&std::path::Path> {
+        self.wiring.browser_tool.as_deref()
+    }
+
     /// The environment every agent's spec starts from, in place of the host's own, for tests
     /// that check what reaches the child without changing this process's environment.
     #[cfg(feature = "test-support")]

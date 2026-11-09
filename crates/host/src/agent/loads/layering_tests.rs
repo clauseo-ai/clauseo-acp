@@ -26,6 +26,7 @@ fn folders() -> Folders<'static> {
         work: "/data/run/t-1/work",
         notes: "/data/agent-state/m/notes",
         connectors: "",
+        browser: "",
     }
 }
 

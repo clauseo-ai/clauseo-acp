@@ -22,9 +22,12 @@
 //! pass, so a folder whose name holds a token stays literal; MCP arguments go as a list with no
 //! shell, so nothing more is escaped.
 
+use std::collections::BTreeMap;
+use std::ffi::{OsStr, OsString};
 use std::path::Path;
 
 use clauseo_acp::McpServer;
+use clauseo_profile::instructions::BrowserPart;
 use clauseo_profile::placeholders::{
     self, BROWSER_DIR, BROWSER_EXECUTABLE, CDP_PORT, DAEMON_PORT, IN_SERVERS, PROXY_PORT,
     SESSION_ID, SOCKET_DIR, STREAM_PORT,
@@ -230,4 +233,160 @@ fn browser_entry(
         tracing::error!(%unfilled, "the browser entry has a token the host cannot fill");
         ToolsUnavailableReason::BrowserNotInstalled
     })
+}
+
+/// agent-browser's variables for a session with the browser as a shell tool, which the host
+/// forces into the agent's environment (the hook is session-blind): the session's name
+/// (`AGENT_BROWSER_SESSION`, the session's id), Clauseo's config file (`AGENT_BROWSER_CONFIG`,
+/// `{}`, so the lawyer's `~/.agent-browser/config.json` is never read), the session's own
+/// downloads folder and Chrome profile (`AGENT_BROWSER_DOWNLOAD_PATH`, `AGENT_BROWSER_PROFILE`,
+/// both under its run folder, so never the lawyer's own profile) and the Chrome the launch prep
+/// found (`AGENT_BROWSER_EXECUTABLE_PATH`). No proxy, stream port or socket folder: the shell
+/// tool has none of the guard's claims.
+pub(crate) fn shell_env(inputs: &ShellInputs<'_>) -> BTreeMap<OsString, OsString> {
+    [
+        ("AGENT_BROWSER_SESSION", OsStr::new(inputs.session)),
+        ("AGENT_BROWSER_CONFIG", inputs.config.as_os_str()),
+        ("AGENT_BROWSER_DOWNLOAD_PATH", inputs.downloads.as_os_str()),
+        ("AGENT_BROWSER_PROFILE", inputs.profile.as_os_str()),
+        (
+            "AGENT_BROWSER_EXECUTABLE_PATH",
+            inputs.executable.as_os_str(),
+        ),
+    ]
+    .into_iter()
+    .map(|(name, value)| (OsString::from(name), value.to_owned()))
+    .collect()
+}
+
+/// What [`shell_env`] fills: plain values, so it is tested without a launch.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ShellInputs<'a> {
+    /// The session's id (`SessionKey::id`).
+    pub(crate) session: &'a str,
+    /// `<data>/browser/agent-browser.json` (`browser::write_config`).
+    pub(crate) config: &'a Path,
+    /// `<data>/run/<session id>/downloads`.
+    pub(crate) downloads: &'a Path,
+    /// `<data>/run/<session id>/browser-profile`.
+    pub(crate) profile: &'a Path,
+    /// The Chrome the launch prep found.
+    pub(crate) executable: &'a Path,
+}
+
+/// What a session with the shell tool wired (`HostConfig::with_browser_tool`) shows in its
+/// header and is told in `{browser}`: available once its Chrome was found; else turned off
+/// (`tools.browser`), left out by the firm's browser policy, or not installed.
+pub(crate) fn shell_state(
+    switch: Switch,
+    blocked: Option<ToolsUnavailableReason>,
+    found: bool,
+) -> (ToolState, BrowserPart) {
+    let (availability, part) = if found {
+        (ToolAvailability::Available, BrowserPart::On)
+    } else if !switch.on {
+        let reason = switch.off_reason();
+        (ToolAvailability::Unavailable { reason }, BrowserPart::Off)
+    } else if let Some(reason) = blocked {
+        (ToolAvailability::Unavailable { reason }, BrowserPart::Off)
+    } else {
+        let reason = ToolsUnavailableReason::BrowserNotInstalled;
+        (
+            ToolAvailability::Unavailable { reason },
+            BrowserPart::NotInstalled,
+        )
+    };
+    let state = ToolState {
+        tool: ClauseoTool::Browser,
+        availability,
+    };
+    (state, part)
+}
+
+#[cfg(test)]
+mod shell_tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    /// The five variables, each exactly once, with the values given: nothing about a proxy, a
+    /// stream port or a socket folder.
+    #[test]
+    fn shell_env_is_the_session_config_folders_and_chrome() {
+        let run = PathBuf::from("/data/run/t-1");
+        let inputs = ShellInputs {
+            session: "t-1",
+            config: Path::new("/data/browser/agent-browser.json"),
+            downloads: &run.join("downloads"),
+            profile: &run.join("browser-profile"),
+            executable: Path::new("/opt/chrome"),
+        };
+        let env = shell_env(&inputs);
+        let text: Vec<(&str, &str)> = env
+            .iter()
+            .map(|(name, value)| (name.to_str().unwrap(), value.to_str().unwrap()))
+            .collect();
+        assert_eq!(
+            text,
+            [
+                ("AGENT_BROWSER_CONFIG", "/data/browser/agent-browser.json"),
+                ("AGENT_BROWSER_DOWNLOAD_PATH", "/data/run/t-1/downloads"),
+                ("AGENT_BROWSER_EXECUTABLE_PATH", "/opt/chrome"),
+                ("AGENT_BROWSER_PROFILE", "/data/run/t-1/browser-profile"),
+                ("AGENT_BROWSER_SESSION", "t-1"),
+            ]
+        );
+    }
+
+    #[test]
+    fn shell_state_says_why_there_is_no_browser() {
+        let on = Switch {
+            on: true,
+            locked: false,
+        };
+        let off = Switch { on: false, ..on };
+        let locked = Switch {
+            on: false,
+            locked: true,
+        };
+        let blocked = Some(ToolsUnavailableReason::BrowserBlockedByPolicy);
+        let cases = [
+            (on, None, true, None, BrowserPart::On),
+            (
+                on,
+                None,
+                false,
+                Some(ToolsUnavailableReason::BrowserNotInstalled),
+                BrowserPart::NotInstalled,
+            ),
+            (
+                off,
+                None,
+                false,
+                Some(ToolsUnavailableReason::Off),
+                BrowserPart::Off,
+            ),
+            (
+                locked,
+                None,
+                false,
+                Some(ToolsUnavailableReason::LockedOff),
+                BrowserPart::Off,
+            ),
+            (on, blocked, false, blocked, BrowserPart::Off),
+        ];
+        for (switch, block, found, reason, part) in cases {
+            let (state, got) = shell_state(switch, block, found);
+            assert_eq!(state.tool, ClauseoTool::Browser);
+            let want = match reason {
+                Some(reason) => ToolAvailability::Unavailable { reason },
+                None => ToolAvailability::Available,
+            };
+            assert_eq!(
+                (state.availability, got),
+                (want, part),
+                "{switch:?} {block:?}"
+            );
+        }
+    }
 }

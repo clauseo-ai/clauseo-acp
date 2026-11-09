@@ -362,6 +362,7 @@ fn claude_pre_allows_case_law_only_with_our_entry() {
                 work: "/w",
                 notes: "/n",
                 connectors: "",
+                browser: "",
             },
             seed_sites: &[],
             forced_ask,

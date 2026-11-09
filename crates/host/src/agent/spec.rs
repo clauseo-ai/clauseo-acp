@@ -44,8 +44,8 @@ use crate::error::Error;
 /// holds those secrets.
 ///
 /// `path_prepend` goes first on the merged `PATH`, in its order ([`prepend_path`]): stetdoc's
-/// folder (`HostConfig::with_agent_path_prepend`), then the profile hook's
-/// ([`session_path`]).
+/// folder (`HostConfig::with_agent_path_prepend`), the shell browser's folder for a session
+/// that has it, then the profile hook's ([`session_path`]).
 pub(crate) fn launch_spec(
     agent: &AgentLaunch,
     mut hook_env: BTreeMap<OsString, OsString>,
