@@ -795,9 +795,9 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-09",
-    "by": "app track (provisional; Rohan batch review; #859)"
+    "by": "orchestrator (settled en)"
   },
   "UD1-91": {
     "en": "Install {plan}",
@@ -805,8 +805,8 @@
     "hi_status": "provisional",
     "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "provisional",
+    "status": "approved",
     "at": "2026-11-09",
-    "by": "app track (provisional; Rohan batch review; #859)"
+    "by": "orchestrator (settled en)"
   }
 }
