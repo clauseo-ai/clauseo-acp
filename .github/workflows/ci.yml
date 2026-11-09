@@ -39,7 +39,8 @@
 #   queued changes touch Rust, and so does Windows ARM64, not yet required (2026-11-08). Tier 2
 #   (Intel macOS) runs nightly and on demand only. On a pull request the matrix leaves Intel macOS
 #   and Windows ARM64 out, and jobs skipped by `if` report their checks without taking a runner
-#   (Intel macOS's below, Windows ARM64's in tier2-pr.yml); a pull request runs nothing on ARM64.
+#   (Intel macOS's below, Windows ARM64's in tier2-pr.yml). A pull request runs nothing on ARM64
+#   unless it carries the label `ci:arm64`: then arm64-pr.yml runs this ARM64 entry's tests on it.
 #   The Apple silicon job checks on each run that the workspace still compiles for Intel macOS.
 # - Rust caches are saved on main only (`save-if`), which with no push run but the macOS one means
 #   the nightly run; pull requests and merge groups restore main's and save nothing,

@@ -1,0 +1,78 @@
+# Windows ARM64's tests on a pull request, on request: the label `ci:arm64` runs the merge group's
+# Windows ARM64 entry (ci.yml's build job, test_only) against this pull request before it queues:
+# the workspace nextest and the elevated tests, on windows-11-arm. Without the label nothing runs.
+#
+# Why: Windows ARM64 is tier 1, but its tests run only in the merge group, so a pull request green on
+# x64 Windows could still land ARM64-only failures (#728, #740). The orchestrator asks for this label
+# on anything that touches the updater, CPU-type or target selection, cfg(target_arch), or Windows
+# paths, before approving.
+#
+# Its check is `windows ARM64 tests (ci:arm64)`, not `build (aarch64-pc-windows-msvc)`, so it never
+# doubles the merge group's required check (tier2-pr.yml reports that one on pull requests).
+# Adding the label starts a run; each push while it is on runs again; any other label does not.
+name: windows ARM64 on request
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  arm64-tests:
+    name: windows ARM64 tests (ci:arm64)
+    if: >-
+      contains(github.event.pull_request.labels.*.name, 'ci:arm64')
+      && (github.event.action != 'labeled' || github.event.label.name == 'ci:arm64')
+    runs-on: windows-11-arm
+    timeout-minutes: 60
+    concurrency:
+      group: arm64-pr-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    env:
+      TARGET: aarch64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Put the temp folder on drive D (Windows)
+        shell: pwsh
+        run: |
+          $t = Join-Path $env:RUNNER_TEMP 't'
+          New-Item -ItemType Directory -Force $t | Out-Null
+          "TMP=$t" >> $env:GITHUB_ENV
+          "TEMP=$t" >> $env:GITHUB_ENV
+          "temp folder: $t"
+
+      - name: Install the Rust toolchain from rust-toolchain.toml, and the target
+        shell: bash
+        run: |
+          rustup toolchain install
+          rustup target add "$TARGET"
+
+      - name: Install nextest at its pin
+        uses: ./.github/actions/install-pinned-tools
+        with:
+          tools: cargo-nextest
+
+      # As ci.yml's Test step.
+      - name: Test
+        shell: bash
+        run: cargo nextest run --workspace --profile ci --no-tests=pass
+
+      # As ci.yml's "Elevated tests, one at a time" step on this target (hosted runners' tokens are
+      # elevated). Keep its ARM64 exclusions the same as ci.yml's: a fix that deletes one there
+      # deletes it here too.
+      - name: Elevated tests, one at a time
+        if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          CLAUSEO_ELEVATED_TESTS: "1"
+        run: |
+          set -o pipefail
+          filter='test(/(^|::)elevated_/)'
+          filter="$filter & not (package(clauseo-sandbox) & test(=windows::ca_bundle::ntfs_tests::elevated_a_low_pool_token_reads_the_bundle_and_cannot_write_it))" # #794: remove when fixed
+          filter="$filter & not (package(clauseo-sandbox) & test(=windows::pipe::ntfs_tests::elevated_another_pool_users_low_token_is_refused_every_pipe))" # #795: remove when fixed
+          cargo nextest run --workspace --profile ci --run-ignored only -E "$filter" --test-threads 1 --no-tests=fail
