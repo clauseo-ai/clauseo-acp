@@ -340,6 +340,9 @@ mod sandbox_rig;
 #[path = "host/sandbox_sessions.rs"]
 mod sandbox_sessions;
 #[cfg(test)]
+#[path = "host/sandbox_spec_dump.rs"]
+mod sandbox_spec_dump;
+#[cfg(test)]
 #[path = "host/search.rs"]
 mod search;
 #[cfg(test)]

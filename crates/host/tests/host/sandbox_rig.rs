@@ -22,12 +22,12 @@ pub(crate) const LAUNCH_WAIT: Duration = Duration::from_secs(30);
 /// A launch's environment, as the spawn got it.
 pub(crate) type Env = std::collections::BTreeMap<std::ffi::OsString, std::ffi::OsString>;
 
-/// A launcher that counts its launches, keeps each one's environment and starts each as the
-/// tests' launcher does.
+/// A launcher that counts its launches, keeps each one's spec and starts each as the tests'
+/// launcher does.
 pub(crate) struct Counting {
     inner: PassthroughLauncher,
     launched: Arc<AtomicUsize>,
-    envs: Mutex<Vec<Env>>,
+    specs: Mutex<Vec<LaunchSpec>>,
 }
 
 impl Counting {
@@ -36,21 +36,26 @@ impl Counting {
         let counting = Arc::new(Self {
             inner: dir.launcher(),
             launched: Arc::clone(&launched),
-            envs: Mutex::new(Vec::new()),
+            specs: Mutex::new(Vec::new()),
         });
         (counting, launched)
     }
 
     /// The environments of its launches so far.
     pub(crate) fn envs(&self) -> Vec<Env> {
-        self.envs.lock().unwrap().clone()
+        self.specs().iter().map(|spec| spec.env().clone()).collect()
+    }
+
+    /// The specs of its launches so far.
+    pub(crate) fn specs(&self) -> Vec<LaunchSpec> {
+        self.specs.lock().unwrap().clone()
     }
 }
 
 impl Launcher for Counting {
     fn launch(&self, spec: &LaunchSpec) -> Result<Launched, clauseo_process::Error> {
         self.launched.fetch_add(1, Ordering::SeqCst);
-        self.envs.lock().unwrap().push(spec.env().clone());
+        self.specs.lock().unwrap().push(spec.clone());
         self.inner.launch(spec)
     }
 }
@@ -158,6 +163,11 @@ impl Fake {
     /// The environments its launcher's launches got.
     pub(crate) fn envs(&self) -> Vec<Env> {
         self.launcher.envs()
+    }
+
+    /// The specs its launcher's launches got.
+    pub(crate) fn specs(&self) -> Vec<LaunchSpec> {
+        self.launcher.specs()
     }
 
     /// How many reservations were made.
