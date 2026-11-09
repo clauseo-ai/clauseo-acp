@@ -128,7 +128,7 @@ fn agent(cap: &ProcessCapSession) -> (Fake, Watch) {
     let fake = Fake::default();
     fake.add(AGENT, 1, AGENT, START);
     fake.add(1, 0, 1, 0);
-    let watch = Watch::start(&fake, AGENT, cap.clone()).unwrap();
+    let watch = Watch::start(&fake, AGENT, cap.clone()).unwrap().unwrap();
     (fake, watch)
 }
 
@@ -347,4 +347,31 @@ fn an_agent_whose_start_is_missing_is_not_watched_uncounted() {
     let refused = Watch::start(&fake, AGENT, cap).unwrap_err();
     assert_eq!(refused, "the agent's start could not be read");
     assert_eq!(*told.lock().unwrap(), [ProcessCapNotice::CapFailed]);
+}
+
+#[test]
+fn an_agent_that_exited_at_once_is_a_normal_end() {
+    // D3: gone, or a zombie, with its session empty: no watch, no notice, no error.
+    let (cap, told) = session();
+    let fake = Fake::default();
+    fake.add(1, 0, 1, 0);
+    assert!(Watch::start(&fake, AGENT, cap.clone()).unwrap().is_none());
+    fake.add(AGENT, 1, AGENT, START);
+    fake.set(AGENT, |p| p.zombie = true);
+    assert!(Watch::start(&fake, AGENT, cap).unwrap().is_none());
+    assert!(told.lock().unwrap().is_empty());
+}
+
+#[test]
+fn an_agent_that_exited_at_once_leaving_a_bomb_is_watched_by_session() {
+    let (cap, told) = session();
+    let fake = Fake::default();
+    fake.add(1, 0, 1, 0);
+    fake.many(1_000, 300, 1, AGENT);
+    let mut watch = Watch::start(&fake, AGENT, cap.clone()).unwrap().unwrap();
+    assert_eq!(watch.step(&fake), Step::Watch);
+    assert_eq!(cap.trips(), 1);
+    assert!((1_000..1_300).all(|pid| !fake.running(pid)));
+    assert_eq!(*told.lock().unwrap(), [ProcessCapNotice::TooManyPrograms]);
+    assert_eq!(watch.step(&fake), Step::Done);
 }

@@ -92,10 +92,13 @@ pub(crate) struct Watch {
 }
 
 /// Starts the watchdog of the agent at `pid`, just started; its trips and notices count in
-/// `cap`. The first count runs before this returns. An error when the agent's start cannot be
+/// `cap`. The first count runs before this returns; an agent that has exited already with
+/// nothing of its session left needs no watch. An error when a running agent's start cannot be
 /// read or the thread cannot be made: the caller ends the agent rather than run it uncounted.
 pub(crate) fn watch(pid: u32, cap: ProcessCapSession) -> io::Result<()> {
-    let mut watch = Watch::start(&Libproc, pid, cap).map_err(io::Error::other)?;
+    let Some(mut watch) = Watch::start(&Libproc, pid, cap).map_err(io::Error::other)? else {
+        return Ok(());
+    };
     if watch.step(&Libproc) == Step::Done {
         return Ok(());
     }
@@ -106,32 +109,51 @@ pub(crate) fn watch(pid: u32, cap: ProcessCapSession) -> io::Result<()> {
 }
 
 impl Watch {
-    /// The watch of agent `pid`, read from `system`. Its start must be readable: without it no
-    /// descendant can be told from a reused pid, so a missing one is logged, told and refused.
+    /// The watch of agent `pid`, read from `system`; `None` when there is nothing to watch.
+    ///
+    /// An agent that exited at once (gone, or a zombie: no session answers for it) is a normal
+    /// end. With its session empty there is nothing to watch; with members left, they are
+    /// watched by session alone (start 0): while one lives no other process has the agent's
+    /// pid, so its session id is the agent's. A running agent whose start cannot be read is a
+    /// failure: no descendant could be told from a reused pid, so it is logged, told and
+    /// refused.
     pub(crate) fn start(
         system: &impl System,
         pid: u32,
         cap: ProcessCapSession,
-    ) -> Result<Watch, &'static str> {
-        let Some(agent) = system.info(pid) else {
-            let reason = "the agent's start could not be read";
-            tracing::error!(
-                agent = pid,
-                reason,
-                "the agent's process cap could not start"
-            );
-            cap.tell(ProcessCapNotice::CapFailed);
-            return Err(reason);
-        };
-        Ok(Watch {
-            root: Root {
-                pid,
-                start: agent.start,
+    ) -> Result<Option<Watch>, &'static str> {
+        let start = match system.info(pid) {
+            Some(agent) => agent.start,
+            None if system.session_of(pid).is_none() => match members(system, pid) {
+                Some(members) if members.is_empty() => return Ok(None),
+                Some(_) => 0,
+                None => return Err(Watch::refuse(&cap, pid, "the process listing failed")),
             },
+            None => {
+                return Err(Watch::refuse(
+                    &cap,
+                    pid,
+                    "the agent's start could not be read",
+                ));
+            }
+        };
+        Ok(Some(Watch {
+            root: Root { pid, start },
             cap,
             polls: 0,
             hand_over: hand_over_to_session_sweep,
-        })
+        }))
+    }
+
+    /// Logs and tells why the watch of agent `pid` could not start; returns `reason`.
+    fn refuse(cap: &ProcessCapSession, pid: u32, reason: &'static str) -> &'static str {
+        tracing::error!(
+            agent = pid,
+            reason,
+            "the agent's process cap could not start"
+        );
+        cap.tell(ProcessCapNotice::CapFailed);
+        reason
     }
 
     /// Polls every [`POLL`] until [`Step::Done`].

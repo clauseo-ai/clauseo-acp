@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use clauseo_process::{LaunchSpec, Launched, Launcher, SpawnOptions, spawn_in_tree};
 
-use super::process_cap::{self, ProcessCapNotice, ProcessCapSession, libproc, watchdog};
+use super::process_cap::{self, ProcessCapSession, libproc, watchdog};
 use super::profile::{self, SeatbeltProfile};
 use super::watch::{self, Registration};
 use crate::{CappedSink, DenialSink, Policy};
@@ -57,10 +57,16 @@ impl SeatbeltLauncher {
     /// variables plus `TMPDIR`, nothing from this process's environment, and no descriptor of
     /// this process's but its stdio. Its denials reach `denials` through the rate cap
     /// ([`CappedSink`]); the watcher ticks the cap once a second.
+    ///
+    /// `cap` is the process cap of the lawyer session this launch belongs to: its trips (the
+    /// third ends the agent) and its notices, each once a session. The host makes exactly one
+    /// [`ProcessCapSession`] per lawyer session and gives a clone of it to every launcher of
+    /// that session; one made per launcher would reset both at every launch.
     pub fn new(
         policy: Policy,
         opts: SpawnOptions,
         denials: Arc<dyn DenialSink>,
+        cap: ProcessCapSession,
     ) -> SeatbeltLauncher {
         let n = NEXT_TAG.fetch_add(1, Ordering::Relaxed);
         let tag = format!("{}{}-{n}", profile::TAG_PREFIX, std::process::id());
@@ -72,18 +78,8 @@ impl SeatbeltLauncher {
             opts: opts.clear_env().close_other_fds(),
             sink: Arc::new(CappedSink::new(denials)),
             registration: Mutex::new(None),
-            cap: ProcessCapSession::new(say),
+            cap,
         }
-    }
-
-    /// The lawyer session whose process cap this launcher's agents count in: its trips (the
-    /// third ends the agent) and its notices, each once a session ([`ProcessCapSession`]). The
-    /// host gives every launcher of a session a clone of the session's one. By default each
-    /// launcher has its own, whose notices go to this process's stderr: no host caller builds a
-    /// `SeatbeltLauncher` yet.
-    pub fn process_cap(mut self, session: ProcessCapSession) -> SeatbeltLauncher {
-        self.cap = session;
-        self
     }
 
     /// The profile every launch runs under.
@@ -174,12 +170,6 @@ fn launch_limit() -> Result<u64, clauseo_process::Error> {
         libproc::max_proc().map_err(read)?,
         libproc::hard_limit().map_err(read)?,
     )
-}
-
-/// The default notice: its text, one line on this process's stderr.
-fn say(notice: ProcessCapNotice) {
-    use std::io::Write as _;
-    drop(writeln!(io::stderr().lock(), "{}", notice.text()));
 }
 
 /// Makes the agent's `TMPDIR` ([`Policy::tmpdir`]) if it is missing; the folder it is in exists

@@ -54,9 +54,11 @@ impl ProcessCapNotice {
     }
 }
 
-/// One lawyer session's process cap. The host makes one per session and gives a clone to each
-/// launcher of that session (`SeatbeltLauncher::process_cap`), so the third trip ends the agent
-/// and each notice comes once, however many launches the session makes. Cloning shares it.
+/// One lawyer session's process cap. The host makes exactly one per lawyer session, when the
+/// session starts, and passes a clone to every launcher of that session (`SeatbeltLauncher::new`
+/// requires one), so the third trip ends the agent and each notice comes once, however many
+/// launches the session makes. Cloning shares it; a new one starts the count again, so never
+/// make one per launch. It has no `Default`.
 #[derive(Clone)]
 pub struct ProcessCapSession(Arc<Inner>);
 

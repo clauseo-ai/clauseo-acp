@@ -1,9 +1,10 @@
 //! The process cap (`macos/process_cap.rs`) on a jailed agent: a bounded fork bomb in a command
 //! is stopped near the cap and the agent goes on to report it, the job-control variant (`set -m`,
 //! each job in a group of its own and orphaned) too; an agent that forks itself past the cap is
-//! ended, and so is one whose session trips the cap a third time; zombies never trip it. Each
-//! bomb is bounded on its own (a fixed tree depth or count, and every process a 20 s sleep), so
-//! a cap that failed would leave nothing running for long.
+//! ended, and so is one whose session trips the cap a third time, across launchers; zombies
+//! never trip it, and an agent that exits at once launches cleanly. Each bomb is bounded on its
+//! own (a fixed tree depth or count, and every process a 20 s sleep), so a cap that failed would
+//! leave nothing running for long.
 
 #![expect(
     clippy::disallowed_methods,
@@ -24,7 +25,7 @@ use nix::errno::Errno;
 use nix::sys::signal::kill;
 use nix::unistd::{Pid, getpgid, getsid};
 
-use crate::support::{World, launcher, run_outside};
+use crate::support::{World, launcher, launcher_in, run_outside};
 
 /// A binary tree of shells `$1` levels deep (2,047 processes at 10), each logging its pid to
 /// `$2` and then becoming a 20 s sleep.
@@ -62,8 +63,7 @@ fn session() -> (ProcessCapSession, Told) {
 
 /// A launcher for `w`'s policy in `session`.
 fn capped_in(w: &World, session: &ProcessCapSession) -> SeatbeltLauncher {
-    let (launcher, _) = launcher(w.builder().build().unwrap());
-    launcher.process_cap(session.clone())
+    launcher_in(w.builder().build().unwrap(), session.clone()).0
 }
 
 /// A launcher for `w`'s policy in a session of its own.
@@ -255,22 +255,24 @@ fn an_agent_that_forks_itself_past_the_cap_is_ended() {
 }
 
 #[test]
-fn the_third_trip_in_a_session_ends_the_agent() {
-    // M1: one launch's command bombs twice and the agent reports both; the session's next
-    // launch bombs once more, and that agent is ended.
+fn two_launchers_of_one_session_count_trips_together() {
+    // M1, D2: launcher A's agent bombs once, launcher B's once, and both agents report it; the
+    // third bomb, A's again, ends that agent. The first notice comes once, not once a launcher.
     let w = World::new();
     let tree = w.script("m1/tree.sh", TREE);
     let log = w.file("m1/pids.log", "");
     let (session, told) = session();
+    let (a, b) = (capped_in(&w, &session), capped_in(&w, &session));
     let args = [tree.to_str().unwrap(), log.to_str().unwrap()];
-    let twice = "\"$1\" 10 \"$2\" >/dev/null 2>&1; echo \"first $?\"; \
-                 \"$1\" 10 \"$2\" >/dev/null 2>&1; echo \"second $?\"";
-    let (out, report) = run_agent(&capped_in(&w, &session), &w.at("m1"), twice, &args, || {});
-    assert_eq!(report.code(), Some(0), "{report:?} {out}");
-    assert_eq!(out, "first 137\nsecond 137\n");
-    assert_eq!(session.trips(), 2);
-    let third = "\"$1\" 10 \"$2\" >/dev/null 2>&1; echo \"third $?\"";
-    let (out, report) = run_agent(&capped_in(&w, &session), &w.at("m1"), third, &args, || {});
+    let bomb = "\"$1\" 10 \"$2\" >/dev/null 2>&1; echo \"ended $?\"";
+    for (n, launcher) in [(1, &a), (2, &b)] {
+        let (out, report) = run_agent(launcher, &w.at("m1"), bomb, &args, || {});
+        assert_eq!(report.code(), Some(0), "trip {n}: {report:?} {out}");
+        assert_eq!(out, "ended 137\n", "trip {n}");
+        assert_eq!(session.trips(), n);
+    }
+    assert_eq!(notices_soon(&told, 1), [ProcessCapNotice::TooManyPrograms]);
+    let (out, report) = run_agent(&a, &w.at("m1"), bomb, &args, || {});
     eprintln!("three trips: {} shells started in all", logged(&log).len());
     assert_eq!(report.signal(), Some(9), "{report:?} {out}");
     assert_eq!(out, "");
@@ -286,6 +288,43 @@ fn the_third_trip_in_a_session_ends_the_agent() {
         survivors(&log),
         [] as [i32; 0],
         "the bombs' processes still run"
+    );
+}
+
+#[test]
+fn an_agent_that_exits_at_once_launches_cleanly() {
+    // D3: an empty session at the first count is the agent's normal end: no notice, no error.
+    let w = World::new();
+    let (launcher, cap, told) = capped(&w);
+    for _ in 0..20 {
+        let spec = LaunchSpec::new(
+            PathBuf::from("/bin/sh"),
+            vec![OsString::from("-c"), OsString::from("exit 0")],
+            BTreeMap::new(),
+            w.at("m1"),
+        )
+        .unwrap();
+        let Launched {
+            stdout,
+            stderr,
+            mut handle,
+            ..
+        } = launcher.launch(&spec).unwrap();
+        let report = async_io::block_on(async {
+            let mut lines = BufReader::new(stdout).lines();
+            let (drained, _, report) =
+                futures::join!(stderr.drain(), lines.next(), handle.exited());
+            drained.unwrap();
+            report
+        });
+        assert_eq!(report.code(), Some(0), "{report:?}");
+    }
+    std::thread::park_timeout(Duration::from_millis(200));
+    assert_eq!(cap.trips(), 0);
+    assert!(
+        told.lock().unwrap().is_empty(),
+        "{:?}",
+        told.lock().unwrap()
     );
 }
 
