@@ -165,6 +165,7 @@ fn the_installers_adopt_codes_are_setup_exits() {
         ("NOT_ELEVATED", SetupExit::NotElevated),
         ("NOT_ADMIN_COPY", SetupExit::NotAdminCopy),
         ("DOWNGRADE", SetupExit::Downgrade),
+        ("DEADLINE", SetupExit::DeadlineReached),
     ];
     let wanted: Vec<(String, u8)> = expected
         .iter()
@@ -172,7 +173,7 @@ fn the_installers_adopt_codes_are_setup_exits() {
         .collect();
     assert_eq!(defined, wanted);
     let codes: Vec<u8> = wanted.iter().map(|(_, code)| *code).collect();
-    assert_eq!(codes, [0, 1, 2, 3, 5, 6, 7, 8, 9]);
+    assert_eq!(codes, [0, 1, 2, 3, 5, 6, 7, 8, 9, 11]);
     // Every SetupExit but the removal's own RemovedPartly (4) and AdminCopyLeft (10) is one
     // --adopt may give, so a code added to SetupExit fails here until the installer names it.
     let mut all: Vec<u8> = SetupExit::ALL

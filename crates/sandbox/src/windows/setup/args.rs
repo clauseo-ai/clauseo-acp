@@ -22,6 +22,11 @@
 //! - `--sweep-tasks`: deletes the pool users' scheduled tasks and cancels their BITS jobs
 //!   (`sweep.rs`), which the SYSTEM task `\Clauseo\SandboxSweep` runs. No other argument either.
 //!
+//! `--deadline <seconds>` (taken by `--set-up`, `--adopt` and `--remove`, the modes the installer
+//! or the app run elevated and may not be able to end): a hard ceiling on the run, 1 to
+//! [`DEADLINE_MAX`] seconds, in decimal, taken from this flag alone (`deadline.rs`). Without it,
+//! the run has no deadline, as before. [`invocation`] gives it beside the [`Mode`].
+//!
 //! `--per-machine` (taken by `--remove` and `--adopt`) and `--uninstall` (`--remove` only)
 //! are the flags without a value. Every other flag takes its value as the next argument (never
 //! `--flag=value`). Each flag comes once.
@@ -34,6 +39,7 @@
 
 use std::ffi::OsString;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use crate::windows::pool::POOL_CAP;
 use crate::windows::sids::Sid;
@@ -81,6 +87,18 @@ pub enum Mode {
     SweepTasks,
 }
 
+/// What the exe was asked to do, and by when.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Invocation {
+    /// The mode.
+    pub mode: Mode,
+    /// `--deadline`: the most the run may take; `None` without the flag.
+    pub deadline: Option<Duration>,
+}
+
+/// The longest `--deadline` taken: a day.
+pub const DEADLINE_MAX: u64 = 86_400;
+
 /// The lawyer a per-user `--adopt` sets up, as the unelevated installer named them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdoptUser {
@@ -93,39 +111,31 @@ pub struct AdoptUser {
 /// Why a command line isn't one the exe takes.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error(
-    "usage: clauseo-sandbox-setup --set-up --parent <pid> --data-dir <path> [--add <n>] | \
-         --reclaim --parent <pid> | --adopt --user-install-dir <path> (--owner-sid <sid> \
-         --data-dir <path> | --per-machine) | --remove [--uninstall] [--per-machine] | --refresh | \
-         --stop | --sweep-tasks ({0})"
+    "usage: clauseo-sandbox-setup --set-up --parent <pid> --data-dir <path> [--add <n>] \
+         [--deadline <s>] | --reclaim --parent <pid> | --adopt --user-install-dir <path> \
+         (--owner-sid <sid> --data-dir <path> | --per-machine) [--deadline <s>] | --remove \
+         [--uninstall] [--per-machine] [--deadline <s>] | --refresh | --stop | --sweep-tasks ({0})"
 )]
 pub struct Usage(pub String);
 
-/// Parses the arguments after the program's name.
+/// Parses the arguments after the program's name: the mode alone, as [`invocation`] gives it.
 pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Mode, Usage> {
+    invocation(args).map(|invocation| invocation.mode)
+}
+
+/// Parses the arguments after the program's name: the mode and its `--deadline`.
+pub fn invocation(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, Usage> {
     let mut args = args.into_iter();
     let mode = args.next().ok_or_else(|| Usage("no mode".to_owned()))?;
-    // The SYSTEM tasks' modes take nothing else: what they act on comes from the record.
-    let alone_modes = [
-        ("--refresh", Mode::Refresh),
-        ("--stop", Mode::Stop),
-        ("--sweep-tasks", Mode::SweepTasks),
-    ];
-    for (alone, parsed) in alone_modes {
-        if mode == alone {
-            return match args.next() {
-                None => Ok(parsed),
-                Some(extra) => Err(Usage(format!(
-                    "{alone} takes no {:?}",
-                    extra.to_string_lossy()
-                ))),
-            };
-        }
+    if let Some(alone) = alone_mode(&mode, &mut args) {
+        return alone;
     }
     let mut parent = None;
     let mut data_dir = None;
     let mut add = None;
     let mut install_dir = None;
     let mut owner_sid = None;
+    let mut deadline = None;
     let mut per_machine = false;
     let mut uninstall = false;
     while let Some(flag) = args.next() {
@@ -150,6 +160,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Mode, Usage> {
             "--add" => &mut add,
             "--user-install-dir" => &mut install_dir,
             "--owner-sid" => &mut owner_sid,
+            "--deadline" => &mut deadline,
             other => return Err(Usage(format!("unknown argument {other:?}"))),
         };
         if slot.is_some() {
@@ -179,7 +190,11 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Mode, Usage> {
     if per_machine && !matches!(mode, "--remove" | "--adopt") {
         return Err(Usage(format!("{mode} takes no {PER_MACHINE}")));
     }
-    match mode {
+    if deadline.is_some() && !matches!(mode, "--set-up" | "--adopt" | "--remove") {
+        return Err(Usage(format!("{mode} takes no --deadline")));
+    }
+    let deadline = deadline.as_ref().map(deadline_of).transpose()?;
+    let mode = match mode {
         "--set-up" => Ok(Mode::SetUp {
             parent: parent_of(parent)?,
             data_dir: data_dir_of(data_dir)?,
@@ -222,6 +237,46 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Mode, Usage> {
             })
         }
         other => Err(Usage(format!("unknown mode {other:?}"))),
+    }?;
+    Ok(Invocation { mode, deadline })
+}
+
+/// The SYSTEM tasks' modes, which take nothing else: what they act on comes from the record.
+/// `None` for any other mode, `args` (those after the mode) untouched.
+fn alone_mode(
+    mode: &OsString,
+    args: &mut impl Iterator<Item = OsString>,
+) -> Option<Result<Invocation, Usage>> {
+    let alone_modes = [
+        ("--refresh", Mode::Refresh),
+        ("--stop", Mode::Stop),
+        ("--sweep-tasks", Mode::SweepTasks),
+    ];
+    let (alone, parsed) = alone_modes.into_iter().find(|(alone, _)| mode == alone)?;
+    Some(match args.next() {
+        None => Ok(Invocation {
+            mode: parsed,
+            deadline: None,
+        }),
+        Some(extra) => Err(Usage(format!(
+            "{alone} takes no {:?}",
+            extra.to_string_lossy()
+        ))),
+    })
+}
+
+/// `--deadline`: whole seconds, 1 to [`DEADLINE_MAX`], in decimal.
+fn deadline_of(value: &OsString) -> Result<Duration, Usage> {
+    let text = value.to_str().unwrap_or_default();
+    match text.parse::<u64>() {
+        Ok(secs)
+            if (1..=DEADLINE_MAX).contains(&secs) && text.bytes().all(|b| b.is_ascii_digit()) =>
+        {
+            Ok(Duration::from_secs(secs))
+        }
+        _ => Err(Usage(format!(
+            "--deadline {text:?} isn't 1 to {DEADLINE_MAX} seconds"
+        ))),
     }
 }
 

@@ -33,6 +33,13 @@
 //! written to the Event Log with its step and code, and exits `AdminCopyLeft` (10), which the
 //! uninstall hook counts as removed, as what is left is only administrators' to change.
 //!
+//! `--deadline <seconds>` on `--set-up`, `--adopt` or `--remove` arms the run's own deadline
+//! before the mode runs (`deadline.rs`, `deadline_os::arm`): the process puts itself in a
+//! kill-on-close job, and a watchdog sets the cancel flag the mode checks before each change,
+//! then ends the process at the deadline; either way the exit is `DeadlineReached` (11). A
+//! watchdog that can't be started exits `Failed`, nothing touched. Without the flag, nothing
+//! changes.
+//!
 //! The exe has no log output of its own: `--adopt`'s failures go to the Event Log and the
 //! result file (`explain.rs`), and `tracing` lines at warn and above go to the Event Log as
 //! their message alone (`event_trace.rs`).
@@ -50,6 +57,7 @@ use super::adopt::Target;
 use super::adopt::windows_adopter::run_adopt;
 use super::args::{self, Mode};
 use super::around::Around;
+use super::deadline_os::arm;
 use super::explain::{AdoptFailure, AdoptStep, Cause, CopyLeft, removal_exit};
 use super::ffi::restrict_dll_search;
 use super::machine::{MachineError, owned};
@@ -83,8 +91,8 @@ pub fn main(args: impl IntoIterator<Item = OsString>) -> u8 {
         refresh::event_log(true, &failure.line());
         return SetupExit::Failed.as_code();
     }
-    let mode = match args::parse(args) {
-        Ok(mode) => mode,
+    let (mode, deadline) = match args::invocation(args) {
+        Ok(invocation) => (invocation.mode, invocation.deadline),
         Err(usage) => {
             tracing::error!(%usage, "the set-up was started wrongly");
             return SetupExit::Usage.as_code();
@@ -100,6 +108,15 @@ pub fn main(args: impl IntoIterator<Item = OsString>) -> u8 {
         return sweep::windows_sweeper::run().as_code();
     }
     super::event_trace::install();
+    // Held until the mode's exit code is back, the result file written: dropping it stops the
+    // watchdog, so a run that ended in time is never ended afterwards.
+    let _watchdog = match deadline.map(arm).transpose() {
+        Ok(watchdog) => watchdog,
+        Err(error) => {
+            tracing::error!(%error, "the set-up's deadline couldn't be kept; nothing was changed");
+            return SetupExit::Failed.as_code();
+        }
+    };
     run_mode(mode).as_code()
 }
 

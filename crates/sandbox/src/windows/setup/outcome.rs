@@ -78,6 +78,12 @@ pub enum SetupExit {
     /// (its values, a task, its folder), stays; the step and code are in the Event Log. The
     /// uninstall hook counts it as removed, as only administrators can change what is left.
     AdminCopyLeft,
+    /// 11: the run reached the deadline its `--deadline` set (`deadline.rs`). A set-up stopped
+    /// before its next change and rolled back what it had made, or was ended at the deadline
+    /// itself, leaving what its intent and record name for the next run (D-B7); `--remove`
+    /// stopped between two steps with `Removing` set, for the next run to finish; `--adopt`
+    /// stopped between two of its steps, which running it again repairs.
+    DeadlineReached,
 }
 
 impl SetupExit {
@@ -92,7 +98,7 @@ impl SetupExit {
     pub const Removed: SetupExit = SetupExit::Done;
 
     /// Every exit, in code order.
-    pub const ALL: [SetupExit; 11] = [
+    pub const ALL: [SetupExit; 12] = [
         SetupExit::Done,
         SetupExit::Usage,
         SetupExit::OtherOwner,
@@ -104,6 +110,7 @@ impl SetupExit {
         SetupExit::NotAdminCopy,
         SetupExit::Downgrade,
         SetupExit::AdminCopyLeft,
+        SetupExit::DeadlineReached,
     ];
 
     /// The process exit code.
@@ -120,6 +127,7 @@ impl SetupExit {
             SetupExit::NotAdminCopy => 8,
             SetupExit::Downgrade => 9,
             SetupExit::AdminCopyLeft => 10,
+            SetupExit::DeadlineReached => 11,
         }
     }
 

@@ -82,6 +82,9 @@ pub mod args;
 #[cfg(windows)]
 pub mod around;
 mod create;
+pub mod deadline;
+#[cfg(windows)]
+mod deadline_os;
 #[cfg(windows)]
 mod event_trace;
 #[cfg(windows)]

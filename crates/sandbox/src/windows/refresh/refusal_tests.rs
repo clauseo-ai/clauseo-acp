@@ -424,7 +424,7 @@ fn exit_codes_are_distinct_and_clear_of_the_set_up_codes() {
         .collect();
     // PR 2's set-up codes, as the installer's hooks read them, and the refresh's from 32: the
     // one exe exits with either, and only 0 (done) means the same in both.
-    assert_eq!(setup, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    assert_eq!(setup, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     for code in &codes[1..] {
         assert!(!setup.contains(code), "{code} is a set-up code too");
     }
