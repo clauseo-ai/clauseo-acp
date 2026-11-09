@@ -178,6 +178,8 @@ pub(crate) fn classify(path: &Path, mounts: &Mounts) -> Place {
             .strip_prefix(br"\\?\")
             .or_else(|| bytes.strip_prefix(br"\??\"))
         {
+            // Verbatim: Win32 doesn't normalize a `\\?\` or `\??\` path, so only an exact `..`
+            // climbs; a name with trailing dots or spaces is taken as written.
             if tail.split(sep).any(|name| name == b"..") {
                 return Place::Off(Off::Unknown);
             }
@@ -197,8 +199,14 @@ pub(crate) fn classify(path: &Path, mounts: &Mounts) -> Place {
                 return Place::Off(Off::Network);
             };
             // Win32's root for a device path is `\\.\` itself, so a `..` climbs above the drive
-            // letter (`\\.\D:\..\Z:\m` opens `Z:\m`): unknown, as in a `\\?\` path.
-            if tail.split(sep).any(|name| name == b"..") {
+            // letter (`\\.\D:\..\Z:\m` opens `Z:\m`): unknown, as in a `\\?\` path. Win32 trims
+            // trailing dots and spaces from a name first, so any name of only dots and spaces with
+            // two dots or more (`.. `, `.. .`, `...`, ` ..`) counts as one.
+            let climbs = |name: &[u8]| {
+                name.iter().all(|b| *b == b'.' || *b == b' ')
+                    && name.iter().filter(|b| **b == b'.').nth(1).is_some()
+            };
+            if tail.split(sep).any(climbs) {
                 return Place::Off(Off::Unknown);
             }
             if let [u, n, c, after, ..] = tail

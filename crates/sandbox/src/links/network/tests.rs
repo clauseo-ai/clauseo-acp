@@ -83,7 +83,9 @@ fn a_device_path_on_a_drive_letter_is_its_drive() {
 }
 
 /// A `..` in a `\\.\` device path climbs above its drive letter (Win32's root there is `\\.\`),
-/// so it can reach another drive or a share: unknown in any case or slash, with no file call.
+/// so it can reach another drive or a share: unknown in any case or slash, with no file call. So
+/// is a name Win32 trims to `..` (trailing dots and spaces). A single `.` can't climb, so
+/// `\\.\C:\.\x` stays local.
 #[test]
 fn a_dot_dot_in_a_device_path_is_unknown() {
     let mounts = Mounts::new(Vec::new(), b"Z");
@@ -96,6 +98,10 @@ fn a_dot_dot_in_a_device_path_is_unknown() {
         r"//./D:\../x",
         r"\\.\C:\repo\..\x",
         r"\\.\C:\..",
+        r"\\.\D:\.. \Z:\m",
+        r"\\.\D:\.. .\Z:\m",
+        r"\\.\D:\...\Z:\m",
+        r"\\.\D:\ ..\Z:\m",
     ] {
         assert_eq!(place(path, &mounts), Place::Off(Off::Unknown), "{path}");
         for dots_by_text in [true, false] {
@@ -103,6 +109,10 @@ fn a_dot_dot_in_a_device_path_is_unknown() {
             assert_eq!(got, Some((PathBuf::from(path), Off::Unknown)), "{path}");
         }
     }
+    assert_eq!(
+        place(r"\\.\C:\.\x", &mounts),
+        Place::Local(PathBuf::from(r"C:\.\x"))
+    );
 }
 
 /// A local `subst` drive is its mapping, one level at a time: onto a local disk it is
