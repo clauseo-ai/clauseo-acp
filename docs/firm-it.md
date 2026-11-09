@@ -439,6 +439,34 @@ files the sandbox set aside from a matter.
 See [section 10](#10-if-windows-security-removed-clauseos-set-up-program): what the installers
 do when `clauseo-sandbox-setup.exe` is gone, and how to get it back and check it.
 
+### Crash dumps of the Windows sandbox
+
+Clauseo turns Windows Error Reporting off for its sandbox users and makes their crashed processes
+end without a report ([decision 0049](decisions/0049-windows-sandbox-tier-b.md), "Crash reporting
+(WER)"). A machine-wide `LocalDumps` key (`HKLM\SOFTWARE\Microsoft\Windows\Windows Error
+Reporting\LocalDumps`) still applies to them, because Clauseo doesn't change machine-wide WER
+settings. With it set, a crash that skips the job's limit (a fastfail) can still leave a memory dump
+of the sandboxed agent, which may hold matter text, in the folder the key names (by default a
+`%LOCALAPPDATA%\CrashDumps`: the sandbox user's, or the signed-in user's when WER runs as them). If
+your SIEM or crash collection gathers those dumps, treat a dump from a sandbox user (`ClauseoSb01`
+to `ClauseoSb32`, members of `ClauseoSandboxUsers`) as matter data, or leave those users out of
+`LocalDumps`.
+
+**Crash reporting.** Clauseo turns off Windows Error Reporting for its sandbox accounts. When an AI
+tool's process deliberately fast-fails, Windows still starts its own crash handler briefly (one
+WerFault.exe as SYSTEM and one in the signed-in user's session). Each exits within a fraction of a
+second and sends nothing. Unless your organisation has set a machine-wide `LocalDumps` policy, it
+writes no crash dump; if you have, a dump of the AI tool's process (which can hold matter content)
+lands where that policy says, so treat that folder accordingly. You may see these in
+process-creation audit logs (event 4688). Clauseo doesn't change machine-wide WER settings.
+
+A WER policy wins over Clauseo's per-user setting. If your Group Policy sets "Disable Windows Error
+Reporting" to Disabled (`Disabled` = 0 under `HKLM\SOFTWARE\Policies\Microsoft\Windows\Windows
+Error Reporting`), sandboxed sessions still start, the sandbox runner logs that WER is kept on, and only the
+sandbox job's limit stops WER for a crash it catches. A fastfail crash may then start WER as the
+signed-in user against the sandboxed process. Leave that policy unset, or set it to Enabled, on
+machines that run the sandbox.
+
 ## 2. Signing
 
 - **Windows: unsigned for the beta.** There is no code-signing certificate yet; one comes once

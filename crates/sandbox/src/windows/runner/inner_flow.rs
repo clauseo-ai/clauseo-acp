@@ -10,10 +10,14 @@
 //! 2. it removes what the pool user could have left to start at a logon or to run in a runner
 //!    (`leftovers.rs`, `Kind::LOCAL`): its per-user COM classes (`HKCU\Software\Classes`), its
 //!    `Run` and `RunOnce` values and its Startup entries. Nothing else removes them, and no code
-//!    of the launch's runs before this (the agent starts in 4); the pool user's scheduled tasks
+//!    of the launch's runs before this (the agent starts in 5); the pool user's scheduled tasks
 //!    and BITS jobs are the `SYSTEM` sweep task's (`end.rs`). Its failure is logged;
 //! 3. it opens `ctl`, sends what 1 and 2 logged, and reads the launch;
-//! 4. it starts the agent, then sweeps every [`TICK`] while the agent runs ([`Point::Tick`]) and
+//! 4. it turns Windows Error Reporting off in the pool user's own hive (`wer_flow.rs`, decision
+//!    0049), so a crash of the agent or its children starts no `WerFault` as the lawyer; its
+//!    failure refuses the launch ([`RunExit::PoolProfile`], set-up's repair) and starts no agent,
+//!    and a WER policy that keeps WER on is logged;
+//! 5. it starts the agent, then sweeps every [`TICK`] while the agent runs ([`Point::Tick`]) and
 //!    once more when it exited ([`Point::End`]), both keeping its own job's processes, which it
 //!    asks for by pid list with no handle to the job (`sweep.rs`); a failure there
 //!    is logged, and a tick's is tried again at the next. An escapee there is reported on `ctl`
@@ -43,6 +47,9 @@ pub(crate) trait Inner {
     fn sweep(&mut self, point: Point) -> Result<(), SweepError>;
     /// Removes the leftovers (`leftovers::remove_all`), logging their counts.
     fn clean(&mut self);
+    /// Turns Windows Error Reporting off for this user (`wer_flow::quiet`); the lines to log (a
+    /// WER policy that keeps it on).
+    fn quiet_wer(&mut self) -> Result<Vec<String>, Failure>;
     /// A line for the outer: held until `ctl` is open, then sent on it.
     fn log(&mut self, line: &str);
     /// A report for the outer that may come before `ctl` is open (`Escapee`): held until then,
@@ -82,6 +89,10 @@ pub(crate) fn run<I: Inner>(inner: &mut I) -> u32 {
     }
     if let Err(failure) = inner.read_launch() {
         return failed(inner, failure);
+    }
+    match inner.quiet_wer() {
+        Ok(lines) => lines.iter().for_each(|line| inner.log(line)),
+        Err(failure) => return failed(inner, failure),
     }
     let agent = match inner.start() {
         Ok(agent) => agent,

@@ -2365,6 +2365,130 @@ pub struct Progress { pub walked: u64, pub done: bool, pub failed: Option<Arc<Er
   group's members needs an administrator, so the design (for example static slot groups made at
   set-up) comes to the orchestrator before that PR.
 
+### Crash reporting (WER)
+
+Found on the VM: when a process in the agent's job crashes (msys bash and
+`chrome-headless-shell` both did), Windows Error Reporting starts `WerFault` as the desktop's
+owner, the lawyer, at Medium integrity, and it opens the crashed sandbox process from the
+lawyer's side to read its memory. That crosses the boundary: a crash the agent crafts makes a
+process with the lawyer's rights read memory the agent controls. Two controls close it.
+
+- **The job.** The launch's one job (`runner/spawn.rs`, `JOB_LIMITS`, set by
+  `kill_on_close_job`) carries `JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION` next to
+  `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. A process in it whose exception reaches
+  `UnhandledExceptionFilter` just ends, and Windows never asks WER. The inner runner, the agent and
+  everything the agent starts are in this job, and it is the only job the runner makes.
+  `job_tests.rs` reads the flag back from a real job. The flag doesn't reach three cases:
+  - a fastfail (`__fastfail`, `RaiseFailFastException`, `[Environment]::FailFast`, a CFG or
+    stack-cookie failure), which skips every exception handler, `UnhandledExceptionFilter`
+    included, and goes straight to WER;
+  - a process in a nested job the agent makes, whose own limits it sets;
+  - the end sweeper, which runs as the pool user outside any job ("The runner" above).
+- **The pool user's WER.** This covers those three cases. Before the agent starts, the inner
+  runner, as the pool user, sets `Disabled`, `DontShowUI`, `DontSendAdditionalData` and
+  `LoggingDisabled` to 1 (DWORDs) under `Software\Microsoft\Windows\Windows Error Reporting` in
+  the pool user's own hive (`runner/wer_flow.rs`, step 4 of `inner_flow.rs`; the calls are
+  `runner/wer.rs`):
+  - **Its own hive, by SID.** It opens `HKEY_USERS\<pool SID>` (the SID its token holds, checked
+    against the launch's), never `HKEY_CURRENT_USER`, which falls back to `.DEFAULT` when the
+    hive isn't loaded. A hive that isn't loaded, or a SID that isn't a user account's, refuses.
+  - **No links.** It walks down one part at a time, each part opened with `REG_OPTION_OPEN_LINK`,
+    and refuses a part that is a registry link (one holding a `SymbolicLinkValue`). The writes and
+    the first read-back go through the checked handle, so nothing changes between check and use.
+  - **Nothing below Medium may write it.** It refuses a WER key labelled below Medium, a label
+    without no-write-up, a missing DACL, or an allow entry giving a write right (set a value, make
+    a subkey or link, delete, change the DACL or owner, or a generic right holding one) to anyone
+    but the pool user, `SYSTEM` and the administrators. A Medium process of the pool user's left
+    over from before the start sweep could otherwise label the key Low for the agent to turn WER
+    back on. The agent's token is Low and restricted (`RESTRICTED`, `Users` and `Everyone` are
+    among its restricting SIDs), so the Medium label is what keeps it out.
+  - **Read back twice.** Every value is read back through the checked handle and again through a
+    plain open of the whole path, as WER opens it, which also catches a link the first check
+    can't see (a link key with no target).
+  - **Fails closed, to set-up's repair.** Any failure refuses the launch with
+    `RunExit::PoolProfile` (`0xE0C15017`, value 0x17, reserved). It means the pool user's hive is broken or was
+    changed, which a retry doesn't fix, so tier detection takes it as a set-up fault, as it takes
+    a lost password: `SetUpFailed` with "the sandbox user's Windows profile is damaged or was
+    changed: run the set-up again".
+  - **The repair.** Set-up's logon of each pool user, with the profile loaded (`setup/logon.rs`),
+    deletes a link on the way to the WER key, or a WER key that is a link or fails the security
+    check (`wer_flow::repair`). It deletes a link as itself (`NtDeleteKey` on the handle opened
+    with `REG_OPTION_OPEN_LINK`) and never deletes through one, since set-up runs elevated. A WER key
+    whose DACL shuts the administrators out is made theirs and then always deleted:
+    `SeTakeOwnershipPrivilege`, enabled for that call only, makes them its owner, and its DACL
+    becomes administrators and `SYSTEM` with full control. A parent on the way (`Software`,
+    `Microsoft`, `Windows`) is never taken or changed. If set-up can't open one, it fails and names
+    the key. The next launch makes the key again. Without this, a planted link
+    would refuse every later launch with no way out.
+  - **Temporary profiles.** A temporary profile (the `ProfileList` `State` flag
+    `PROFILE_TEMP_ASSIGNED`, or a `TEMP` or `TEMP.*` folder, as set-up's own check reads them)
+    refuses with the same repair message. Windows throws such a hive away at logoff, so the end
+    sweeper's separate logon could get a fresh one without the values.
+  - **Policy.** A WER policy (`HKLM` or the pool user's
+    `Software\Policies\Microsoft\Windows\Windows Error Reporting`) wins over these values. One
+    with `Disabled` = 0, keeping WER on, doesn't refuse the launch: the inner logs it on `ctl`,
+    and the job's limit and the sweeps (#819's verified kills) are what remain. `docs/firm-it.md`
+    tells IT.
+
+  Setting the values again changes nothing. Windows reads `LocalDumps` only from `HKLM`, so there
+  is no per-user `LocalDumps` key to set. The inner runner does this on every launch, not only in
+  set-up, so pools made before this change get it, and so does a profile that was reset or
+  rebuilt. Another key or value is one more row in `WER_SETTINGS`.
+
+Two VM rows check both controls: a null-write crash in the agent (the job flag) and a fastfail
+(the `HKCU` setting). Each must show no `WerFault` running as the lawyer and no report or dump
+under the lawyer's profile. Whether WER reads the crashing user's `HKCU` while `WerFault` runs
+as the lawyer is what the fastfail row settles. If `WerFault` still runs, the fastfail case needs
+another mechanism.
+
+WER for the lawyer's own apps is unchanged: neither control touches the lawyer's `HKCU`, `HKLM`
+or any process outside the launch's job. In the other direction, a machine-wide WER setting still
+applies to the pool users. `LocalDumps` under `HKLM\SOFTWARE\Microsoft\Windows\Windows Error
+Reporting`, which an IT department may set to collect crash dumps, still makes WER write a memory
+dump of a crashed sandbox process (for a fastfail, or outside the job), by default under a
+`%LOCALAPPDATA%\CrashDumps` (the pool user's, or the lawyer's when `WerFault` runs as the lawyer).
+Neither control here turns that off, and Clauseo doesn't change machine-wide WER settings.
+`docs/firm-it.md` ("Crash dumps of the Windows sandbox") tells IT.
+
+#### Fast-fail crashes (measured, accepted)
+
+The pool hive's WER values (`Disabled`, `DontShowUI` and the rest) stop WER for ordinary crashes,
+measured with a null write: no WerSvc, no WerFault, no dump. They do not stop the fast-fail path
+(`__fastfail`, `[Environment]::FailFast`). There, WerSvc runs as SYSTEM, never reads the pool hive,
+and starts two WerFault processes:
+
+- one as SYSTEM in session 0, which opens the crashed process;
+- one in the lawyer's session with the lawyer's limited token, parented to the crashed agent
+  process.
+
+Measured on the VM, the lawyer-token WerFault:
+
+- is refused when it opens the agent's process;
+- exits within about 27 ms;
+- makes no clone (the FailFast clone comes from the SYSTEM WerFault and is gone at the end);
+- writes no registry values, and nothing under `\Users\`;
+- makes no network connection;
+- shows no window seen at 100 ms sampling.
+
+No dump is written anywhere (measured with no `LocalDumps` policy; if a machine-wide
+`LocalDumps` key is set, Windows writes a dump of the crashed agent process where that policy
+says, as the paragraph above notes), and the end sweep finishes clean.
+
+Three controls were measured and none changes this: the agent's inherited error mode (already
+`SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX`), a LowBox token, and
+HKLM `ExcludedApplications` for the agent's binaries. A machine-wide HKLM `Disabled`, and the
+lawyer's own HKCU `Disabled`, would stop it, but both turn off Windows Error Reporting for the
+lawyer outside Clauseo, so neither is used. This is accepted as a robustness gap, not a breach:
+the agent can make a short-lived WerFault start in the lawyer's session, but that process can't
+open the agent, reads nothing of the matter, and leaves nothing behind.
+
+Residual: for about 27 ms, a WerFault under the lawyer's token handles a crash report that the
+agent can trigger at will, as often as it can crash a process (each fast-fail starts one). Its
+open of the agent is refused, it makes no clone and no dump, and it writes nothing. What remains
+is WerFault's own handling of that report, which is Microsoft's component and outside Clauseo's
+control. IT can see each one as a process-creation event (4688). A LowBox token doesn't change
+this.
+
 ## Consequences
 
 - A finished set-up moves the machine to tier B at the next tier query; R17's

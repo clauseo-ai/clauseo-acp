@@ -17,7 +17,8 @@ use windows::Win32::System::Diagnostics::Debug::{
     SEM_FAILCRITICALERRORS, SEM_NOGPFAULTERRORBOX, SEM_NOOPENFILEERRORBOX, SetErrorMode,
 };
 use windows::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT,
+    JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     JOB_OBJECT_UILIMIT, JOB_OBJECT_UILIMIT_DESKTOP, JOB_OBJECT_UILIMIT_DISPLAYSETTINGS,
     JOB_OBJECT_UILIMIT_EXITWINDOWS, JOB_OBJECT_UILIMIT_GLOBALATOMS, JOB_OBJECT_UILIMIT_HANDLES,
     JOB_OBJECT_UILIMIT_READCLIPBOARD, JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS,
@@ -164,6 +165,15 @@ pub(super) fn log_on(
     }
 }
 
+/// The job's limits. `KILL_ON_JOB_CLOSE`: the outer's one handle closing ends every process in
+/// it. `DIE_ON_UNHANDLED_EXCEPTION`: a process in it that crashes (the agent, msys bash, a
+/// headless Chrome) just ends, with no Windows Error Reporting; otherwise `WerFault` runs as the
+/// desktop's user, the lawyer, and opens the crashed sandbox process from the lawyer's side
+/// (decision 0049). The pool user's own WER is also off (`wer.rs`).
+pub(super) const JOB_LIMITS: JOB_OBJECT_LIMIT = JOB_OBJECT_LIMIT(
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE.0 | JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION.0,
+);
+
 /// The job's UI limits, as Chromium's sandbox sets them. `WinSta0`, not the desktop, owns the
 /// clipboard and the global atom table, so the private desktop alone doesn't keep the agent from
 /// the lawyer's clipboard or atoms. `DESKTOP`: no process in the job makes or switches desktops,
@@ -180,13 +190,14 @@ pub(super) const UI_LIMITS: JOB_OBJECT_UILIMIT = JOB_OBJECT_UILIMIT(
         | JOB_OBJECT_UILIMIT_DESKTOP.0,
 );
 
-/// A job whose last handle closing ends every process in it, with no breakaway allowed and
-/// [`UI_LIMITS`]: the inner runner, the agent and all it starts.
+/// A job with [`JOB_LIMITS`] (its last handle closing ends every process in it; a crash ends
+/// the process without WER), no breakaway allowed and [`UI_LIMITS`]: the inner runner, the
+/// agent and all it starts.
 pub(super) fn kill_on_close_job() -> io::Result<Handle> {
     // SAFETY: no attributes (an unnamed job no other process can open) and no name.
     let job = Handle(unsafe { CreateJobObjectW(None, PCWSTR::null()) }.map_err(|e| os_error(&e))?);
     let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    limits.BasicLimitInformation.LimitFlags = JOB_LIMITS;
     // SAFETY: the job is live; `limits` is the structure the class names, for its size.
     unsafe {
         SetInformationJobObject(

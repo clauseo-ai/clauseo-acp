@@ -449,6 +449,12 @@ fn exit_codes_are_stable_and_map_to_set_up_causes() {
     assert_eq!(RunExit::AwaitingSweep.code(), 0xE0C1_5013);
     assert_eq!(RunExit::AwaitingSweep.no_sandbox(), None);
     assert_eq!(RunExit::from_code(RUN_EXIT_BASE + 20), None);
+    // Reserved, not the next free value.
+    assert_eq!(RunExit::PoolProfile.code(), RUN_EXIT_BASE + 0x17);
+    // Nothing before it moved.
+    for (index, exit) in RunExit::ALL.iter().take(20).enumerate() {
+        assert_eq!(exit.code(), RUN_EXIT_BASE + u32::try_from(index).unwrap());
+    }
     assert_eq!(RunExit::DllSearch.no_sandbox(), None);
     assert_eq!(RunExit::AgentReserved.no_sandbox(), None);
     assert_eq!(RunExit::Sweep.no_sandbox(), None);
@@ -473,6 +479,21 @@ fn exit_codes_are_stable_and_map_to_set_up_causes() {
     );
     assert_eq!(RunExit::Spawn.no_sandbox(), None);
     assert_eq!(SECLOGON_DISABLED, crate::windows::setup::SECLOGON_DISABLED);
+}
+
+/// A pool user's hive that won't take the WER setting is a set-up fault, as a lost password is:
+/// the host shows set-up's repair message, not a one-launch failure.
+#[test]
+fn a_broken_pool_profile_maps_to_set_ups_repair_message() {
+    let code = RunExit::PoolProfile.code();
+    assert_eq!(
+        RunExit::from_code(code).and_then(RunExit::no_sandbox),
+        Some(crate::NoSandbox::SetUpFailed(
+            POOL_PROFILE_BROKEN.to_owned()
+        ))
+    );
+    assert!(POOL_PROFILE_BROKEN.ends_with("run the set-up again"));
+    assert!(PASSWORD_LOST.ends_with("run the set-up again"));
 }
 
 #[test]
