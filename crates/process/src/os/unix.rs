@@ -44,6 +44,12 @@ pub(crate) fn prepare(command: &mut Command, opts: &SpawnOptions) {
     }
 }
 
+/// Has `command`'s child close every other descriptor of 3 or above that is open across exec
+/// before it runs, as [`SpawnOptions::close_other_fds`] does (`unix/inherit.rs`).
+pub(crate) fn close_other_fds(command: &mut Command) {
+    inherit::pass(command, &[], true);
+}
+
 /// The agent's process group.
 #[derive(Debug)]
 pub(crate) struct Tree {

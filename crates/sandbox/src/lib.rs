@@ -76,8 +76,9 @@
 //! - [`SeatbeltProfile::new`]`(policy, tag)` (every target): the profile text and its `-D`
 //!   parameters; every policy path is a parameter, and the text holds only rules, port numbers
 //!   and the tag. Rules: `src/macos/profile.rs` and `src/macos/base.sb`.
-//! - macOS: [`SeatbeltLauncher::new`]`(policy, opts, denials, cap)` is a `process::Launcher`. Each
-//!   launch runs `/usr/bin/sandbox-exec -p <profile> -D NAME=path ... <program> <args>` through
+//! - macOS: [`SeatbeltLauncher::new`]`(policy, opts, denials, cap, marks)` is a
+//!   `process::Launcher`. Each launch runs
+//!   `/usr/bin/sandbox-exec -p <profile> -D NAME=path ... <program> <args>` through
 //!   `spawn_in_tree`, with the agent's variables plus `TMPDIR=`[`Policy::tmpdir`] (made if
 //!   missing) and nothing else: the launcher always adds `SpawnOptions::clear_env` to the
 //!   options it is given, so no variable of the host's environment reaches the jail.
@@ -88,14 +89,29 @@
 //!   ([`ProcessCapNotice`], each once a session) count in `cap`, a [`ProcessCapSession`]: the
 //!   host makes exactly one per lawyer session and clones it into every launcher of that
 //!   session. There is no default and no other way to set it.
-//!   Denials reach `denials` through a [`CappedSink`]. The first launch registers the launcher
+//!   A launcher makes one launch (R17): a second `launch` is refused, and
+//!   [`SeatbeltLauncher::has_launched`] says whether it made it. It makes its session mark in
+//!   `marks` (a folder of this user that only it may write, outside every folder the profile
+//!   lets the agent write) and its profile names it; the launch starts a sentinel under the same
+//!   profile before the agent. So `macos::sweep` finds every process of the launch wherever it
+//!   went: `processes(marks, since)`, `end_session_processes(marks, deadline)` (`Gone` or
+//!   `Survivors`), the mode-switch gate `switch_to_read_only` (`ReadOnly` only from `Gone`),
+//!   `end_session` (ends the sentinels and removes the marks after `Gone`), and the launch's
+//!   session handle `JailedSession` from [`SeatbeltLauncher::launch_jailed`]
+//!   (`processes_gone`, `end`); the process cap's 2 s sweep counts the same scan. A scan the
+//!   sentinel does not vouch for is `SweepError::Unknown` (or `SentinelGone`), never `Gone`,
+//!   yet what it found is still ended; a killed sentinel is restarted, and mid-session the
+//!   watchdog ends the session (`ProcessCapNotice::Tampered`). The launcher ends what a crashed
+//!   earlier host's marks still find before it removes them. A macOS without `sandbox_check`
+//!   refuses the launcher ([`Error::SweepUnavailable`]).
+//!   Denials reach `denials` through a [`CappedSink`]. The launch registers the launcher
 //!   with the one host-wide watcher (`/usr/bin/log stream`, started with the first launcher
 //!   and stopped with the last); dropping the launcher unregisters it. The tag, the sink and the
-//!   registration belong to the launcher, shared by all its launches, so R17 makes one launcher
-//!   per agent launch and keeps it alive for exactly that launch. R17 builds the policy and calls
-//!   `launch` off the host's actor thread: `build` walks the matter, and a host's first launch
-//!   waits up to 3 s for the watcher to start, which it has once it sees a probe denial of its
-//!   own (`log stream` prints its header before the kernel's lines reach it). The watcher
+//!   registration belong to the launcher, so the host keeps it alive for exactly its launch.
+//!   R17 builds the policy and calls `launch` off the host's actor thread: `build` walks the
+//!   matter, and a host's first launch waits up to 3 s for the watcher to start, which it has
+//!   once it sees a probe denial of its own (`log stream` prints its header before the kernel's
+//!   lines reach it). The watcher
 //!   reports file-data reads and writes as [`Denial::Path`], the log's folds of repeats as
 //!   [`Denial::Dropped`], and only logs network and device denials. A watcher that fails to
 //!   start or dies is logged and started again at most once a minute; launches run either way.

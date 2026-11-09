@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use clauseo_process::{ExitReport, LaunchSpec, Launched, Launcher};
-use clauseo_sandbox::{ProcessCapNotice, ProcessCapSession, SeatbeltLauncher};
+use clauseo_sandbox::{ProcessCapNotice, ProcessCapSession};
 use futures::StreamExt;
 use futures::io::{AsyncBufReadExt, BufReader};
 use nix::errno::Errno;
@@ -62,12 +62,12 @@ fn session() -> (ProcessCapSession, Told) {
 }
 
 /// A launcher for `w`'s policy in `session`.
-fn capped_in(w: &World, session: &ProcessCapSession) -> SeatbeltLauncher {
+fn capped_in(w: &World, session: &ProcessCapSession) -> crate::support::Jail {
     launcher_in(w.builder().build().unwrap(), session.clone()).0
 }
 
 /// A launcher for `w`'s policy in a session of its own.
-fn capped(w: &World) -> (SeatbeltLauncher, ProcessCapSession, Told) {
+fn capped(w: &World) -> (crate::support::Jail, ProcessCapSession, Told) {
     let (session, told) = session();
     (capped_in(w, &session), session, told)
 }

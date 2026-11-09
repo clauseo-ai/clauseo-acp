@@ -119,6 +119,12 @@ pub enum Error {
     /// planned or written; a later launch checks again. Its message names no path.
     #[error("the sandbox's clean-up after an earlier session isn't finished: {0}")]
     UncleanSession(String),
+    /// macOS: this Mac's sandbox lacks the private call the session sweep needs
+    /// (`sandbox_check` or `SANDBOX_CHECK_NO_REPORT`, looked up at run time), so no process of
+    /// a jailed launch could be found and ended: no jailed launch runs. A macOS update that
+    /// removed them; the host itself still loads.
+    #[error("the sandbox can't track the AI tool's programs on this version of macOS: {0}")]
+    SweepUnavailable(String),
 }
 
 impl Error {
@@ -140,7 +146,8 @@ impl Error {
             | Error::CleanClose(_)
             | Error::NetworkUnfiltered { .. }
             | Error::ProtectedLink { .. }
-            | Error::UncleanSession(_) => None,
+            | Error::UncleanSession(_)
+            | Error::SweepUnavailable(_) => None,
         }
     }
 
@@ -165,7 +172,8 @@ impl Error {
             | Error::AclApply { .. }
             | Error::SetAside { .. }
             | Error::CleanClose(_)
-            | Error::NetworkUnfiltered { .. } => ErrorCode::AgentLaunchFailed,
+            | Error::NetworkUnfiltered { .. }
+            | Error::SweepUnavailable(_) => ErrorCode::AgentLaunchFailed,
             Error::Blocked(_) => ErrorCode::SandboxBlocked,
             Error::UncleanSession(_) => ErrorCode::SandboxCleaningUp,
             Error::ProtectedLink { .. } => ErrorCode::MatterProtectedLink,

@@ -179,6 +179,7 @@ fn info(pid: u32) -> Option<Proc> {
             .pbi_start_tvsec
             .saturating_mul(1_000_000)
             .saturating_add(bsd.pbi_start_tvusec),
+        uid: bsd.pbi_ruid,
     })
 }
 

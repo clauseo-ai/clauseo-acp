@@ -5,8 +5,8 @@
 
 use std::path::{Path, PathBuf};
 
+use clauseo_sandbox::BrowserBridge;
 use clauseo_sandbox::macos::INSTALLED_BROWSERS;
-use clauseo_sandbox::{BrowserBridge, SeatbeltLauncher};
 
 use crate::probe;
 use crate::support::{Output, World, launcher, run, sh};
@@ -90,7 +90,7 @@ impl Bridged {
     /// The jail with the app and the guard as runtime paths (read, run and map) and the home's
     /// `Applications` readable, so each refusal below is the bridge's, not the default's; with
     /// the bridge when `bridged`.
-    fn launcher(&self, bridged: bool) -> SeatbeltLauncher {
+    fn launcher(&self, bridged: bool) -> crate::support::Jail {
         let mut b = self
             .w
             .builder()
@@ -103,7 +103,7 @@ impl Bridged {
         launcher(b.build().unwrap()).0
     }
 
-    fn start(&self, l: &SeatbeltLauncher, program: &Path) -> Output {
+    fn start(&self, l: &crate::support::Jail, program: &Path) -> Output {
         sh(
             l,
             &self.at("m1"),
@@ -112,7 +112,7 @@ impl Bridged {
         )
     }
 
-    fn map(&self, l: &SeatbeltLauncher, path: &Path) -> String {
+    fn map(&self, l: &crate::support::Jail, path: &Path) -> String {
         let probe = self.at("m1/probe");
         if !probe.exists() {
             probe::copy_to(&probe);

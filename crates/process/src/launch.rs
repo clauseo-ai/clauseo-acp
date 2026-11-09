@@ -256,6 +256,14 @@ pub fn spawn_locked<T>(start: impl FnOnce() -> T) -> T {
     start()
 }
 
+/// Has `command`'s child close, before it runs, every descriptor of 3 or above that is open
+/// across exec, as [`SpawnOptions::close_other_fds`] does for [`spawn_in_tree`]: for a child
+/// started outside this crate, which should also start under [`spawn_locked`].
+#[cfg(unix)]
+pub fn close_other_fds(command: &mut std::process::Command) {
+    os::close_other_fds(command);
+}
+
 /// Starts `spec` with stdio pipes in a tree of its own: a new process group on Unix, a Job Object
 /// on Windows that it joins before it runs. The child inherits this process's environment, then
 /// `spec`'s variables override it; with [`SpawnOptions::clear_env`] it gets only `spec`'s

@@ -394,6 +394,24 @@ crates/sandbox/tests/jail/support.rs - clippy::disallowed_methods
 # The macOS process cap: its system calls, and the bomb tests' timing.
 crates/sandbox/src/macos/process_cap/libproc.rs - unsafe_code
 crates/sandbox/tests/jail/forkcap.rs - clippy::disallowed_methods
+# The macOS session sweep: sandbox_check and getuid, the wall and monotonic clocks, the mark's
+# files; the tests' removed canary is test_support's. Its jail tests: the escaper's fork and
+# setsid, and their timing.
+crates/sandbox/src/macos/sweep/seatbelt.rs - unsafe_code
+crates/sandbox/src/macos/sweep.rs now_wall clippy::disallowed_methods
+crates/sandbox/src/macos/sweep.rs now clippy::disallowed_methods
+crates/sandbox/src/macos/sweep/mark.rs make_folder clippy::disallowed_methods
+crates/sandbox/src/macos/sweep/mark.rs make_file clippy::disallowed_methods
+crates/sandbox/src/macos/sweep/mark.rs remove clippy::disallowed_methods
+crates/sandbox/src/macos/sweep/sentinel.rs Sentinel::start clippy::disallowed_methods
+crates/sandbox/src/macos/sweep/tests.rs the_mark_is_made_as_a_private_immutable_file_beside_its_canary clippy::disallowed_methods
+crates/sandbox/src/macos/profile.rs SeatbeltProfile::writable dead_code
+crates/sandbox/tests/jail/sentinel.rs - clippy::disallowed_methods
+crates/sandbox/tests/jail/sweep.rs - clippy::disallowed_methods
+crates/sandbox/tests/jail/marks.rs - clippy::disallowed_methods
+crates/sandbox/tests/jail/escaper.rs escape unsafe_code
+crates/sandbox/tests/jail/escaper.rs append_pid unsafe_code
+crates/sandbox/tests/jail/escaper.rs append unsafe_code
 # J3 (macOS): the browser profile's sandbox_check, and the jail probe's copies, dlopen,
 # bootstrap_look_up, KERN_PROCARGS2 and proc_listallpids.
 crates/sandbox/src/macos/browser/check.rs - unsafe_code

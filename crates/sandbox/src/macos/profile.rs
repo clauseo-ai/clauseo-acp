@@ -11,6 +11,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 pub use bridge::INSTALLED_BROWSERS;
+use filters::{ancestors, ancestors_of, directory_ancestors, literal, literals, subpath, subpaths};
 use names::{GIT_NAME_REGEX, HEAD_REGEX, INSTRUCTIONS_REGEX};
 use params::Params;
 
@@ -25,6 +26,9 @@ pub(crate) const TAG_PREFIX: &str = "clauseo-";
 /// The parameter naming the browser socket folder.
 const BROWSER_SOCKETS: &str = "BROWSER_SOCKETS";
 
+/// The parameter naming the launch's session mark.
+pub(crate) const SESSION_MARK: &str = "SESSION_MARK";
+
 /// The longest tag the profile takes.
 const TAG_MAX: usize = 64;
 
@@ -35,6 +39,9 @@ const TAG_MAX: usize = 64;
 pub struct SeatbeltProfile {
     text: String,
     params: Vec<(String, PathBuf)>,
+    /// The paths its allow rules with a `file-write` operation name, by parameter
+    /// ([`SeatbeltProfile::writable`]).
+    writable: Vec<PathBuf>,
 }
 
 impl SeatbeltProfile {
@@ -57,6 +64,18 @@ impl SeatbeltProfile {
         &self.params
     }
 
+    /// Every path an allow rule with a `file-write` operation names through a parameter, as a
+    /// `literal` or a `subpath` (the session mark's own rule left out): the folders and files
+    /// the agent may write, read from the rules themselves, so the launcher's check of its marks
+    /// folder cannot drift from them. `base.sb`'s fixed device paths are not parameters.
+    #[cfg_attr(
+        all(not(target_os = "macos"), not(test)),
+        expect(dead_code, reason = "only the macOS launcher and the tests read it")
+    )]
+    pub(crate) fn writable(&self) -> &[PathBuf] {
+        &self.writable
+    }
+
     /// `sandbox-exec`'s arguments before the program: `-p <text>`, then `-D NAME=path` for
     /// each parameter.
     pub fn args(&self) -> Vec<OsString> {
@@ -74,17 +93,26 @@ impl SeatbeltProfile {
 
 /// The profile for `policy` with a tag the caller made and knows to pass [`check_tag`].
 pub(crate) fn build(policy: &Policy, tag: &str) -> SeatbeltProfile {
+    build_marked(policy, tag, None)
+}
+
+/// [`build`], plus the launch's one rule on its session mark when `mark` is set (the
+/// launcher's, `macos/sweep.rs`): `file-write-data` on that file and nothing else, after every
+/// other file rule, so the mark's folder stays under whatever denies it (the data dir's).
+pub(crate) fn build_marked(policy: &Policy, tag: &str, mark: Option<&Path>) -> SeatbeltProfile {
     debug_assert!(check_tag(tag).is_ok(), "{tag}");
     let mut w = Writer::new(tag);
+    w.mark = mark.map(Path::to_owned);
     w.write(policy);
     SeatbeltProfile {
         text: w.text,
         params: w.params,
+        writable: w.writable,
     }
 }
 
 /// Refuses a tag that could break out of its string or miss the watcher's predicate.
-fn check_tag(tag: &str) -> Result<(), Error> {
+pub(crate) fn check_tag(tag: &str) -> Result<(), Error> {
     let rest = tag.strip_prefix(TAG_PREFIX).unwrap_or_default();
     let ok = !rest.is_empty()
         && tag.len() <= TAG_MAX
@@ -106,6 +134,10 @@ struct Writer {
     message: String,
     /// A comment written before the next rule, and dropped if a new comment comes first.
     comment: Option<String>,
+    /// The launch's session mark, if any ([`build_marked`]).
+    mark: Option<PathBuf>,
+    /// What the allow rules with a `file-write` operation name ([`SeatbeltProfile::writable`]).
+    writable: Vec<PathBuf>,
 }
 
 impl Writer {
@@ -115,6 +147,8 @@ impl Writer {
             params: Vec::new(),
             message: format!("(with message \"{tag}\")"),
             comment: None,
+            mark: None,
+            writable: Vec::new(),
         }
     }
 
@@ -142,6 +176,16 @@ impl Writer {
         self.comment = Some(text);
     }
 
+    /// Records the paths `filters` name ([`filters::named_paths`]), but the session mark's.
+    fn record_writable(&mut self, filters: &[String]) {
+        let named: Vec<PathBuf> = filters::named_paths(filters, &self.params, SESSION_MARK);
+        for path in named {
+            if !self.writable.contains(&path) {
+                self.writable.push(path);
+            }
+        }
+    }
+
     fn line(&mut self, line: &str) {
         self.text.push_str(line);
         self.text.push('\n');
@@ -155,6 +199,9 @@ impl Writer {
         }
         if let Some(comment) = self.comment.take() {
             self.text.push_str(&comment);
+        }
+        if action == "allow" && ops.contains("file-write") {
+            self.record_writable(filters);
         }
         let mut rule = format!("({action} {ops}");
         let mut seen: Vec<&String> = Vec::new();
@@ -188,6 +235,7 @@ impl Writer {
         self.fixed_folders(&p);
         self.credential_link_metadata(&p);
         self.read_only_state(&p);
+        self.session_mark();
         self.browser_sockets(policy);
         self.network(policy);
         bridge::browser_allows(self, policy);
@@ -207,7 +255,7 @@ impl Writer {
         self.tmpdir(p);
 
         self.note("\n; Runtime: read, run and map as code.");
-        let runtime = self.subpaths(&p.runtime);
+        let runtime = subpaths(self, &p.runtime);
         self.rule(
             "allow",
             "file-read* process-exec file-map-executable",
@@ -223,8 +271,8 @@ impl Writer {
         }
 
         self.note("\n; Read paths and allowed folders: read only.");
-        let mut read = self.subpaths(&p.read);
-        read.extend(self.subpaths(&p.allowed));
+        let mut read = subpaths(self, &p.read);
+        read.extend(subpaths(self, &p.allowed));
         self.rule("allow", "file-read*", &read);
 
         self.note("\n; Notes and the Claude store's names: read and write.");
@@ -235,7 +283,7 @@ impl Writer {
         self.note("\n; The folders above every allowed path: metadata only, so paths resolve.");
         let mut above: Vec<String> = vec![ancestors(&matter), ancestors(&state)];
         above.extend(self.reallowed_ancestors(p));
-        above.extend(self.ancestors_of(&p.allowed));
+        above.extend(ancestors_of(self, &p.allowed));
         if let Some((name, path)) = &p.keychains {
             let keychains = self.param(name, path);
             above.push(ancestors(&keychains));
@@ -262,8 +310,8 @@ impl Writer {
         if let Some(notes) = &p.notes {
             filters.push(subpath(&self.param("NOTES", notes)));
         }
-        filters.extend(self.literals(&p.claude_files));
-        filters.extend(self.subpaths(&p.claude_locks));
+        filters.extend(literals(self, &p.claude_files));
+        filters.extend(subpaths(self, &p.claude_locks));
         filters
     }
 
@@ -285,16 +333,16 @@ impl Writer {
         if let Some(tmpdir) = &p.tmpdir {
             out.push(ancestors(&self.param("TMPDIR", tmpdir)));
         }
-        out.extend(self.ancestors_of(&p.runtime));
-        out.extend(self.ancestors_of(&p.read));
+        out.extend(ancestors_of(self, &p.runtime));
+        out.extend(ancestors_of(self, &p.read));
         if let Some(notes) = &p.notes {
             out.push(ancestors(&self.param("NOTES", notes)));
         }
         if let Some(link) = &p.credential_link {
             out.push(ancestors(&self.param("CREDENTIAL_LINK", link)));
         }
-        out.extend(self.ancestors_of(&p.claude_files));
-        out.extend(self.ancestors_of(&p.claude_locks));
+        out.extend(ancestors_of(self, &p.claude_files));
+        out.extend(ancestors_of(self, &p.claude_locks));
         out
     }
 
@@ -344,7 +392,7 @@ impl Writer {
         self.note(
             "\n; Hidden paths: the data dir, other matters and state folders, refused folders.",
         );
-        let hidden = self.subpaths(&p.hidden);
+        let hidden = subpaths(self, &p.hidden);
         self.rule("deny", "file-read* file-write*", &hidden);
     }
 
@@ -366,13 +414,13 @@ impl Writer {
         self.rule("allow", "file-read* file-write*", &shared);
         self.tmpdir(p);
         self.credential_link(p);
-        let runtime = self.subpaths(&p.runtime);
+        let runtime = subpaths(self, &p.runtime);
         self.rule(
             "allow",
             "file-read* process-exec file-map-executable",
             &runtime,
         );
-        let read = self.subpaths(&p.read);
+        let read = subpaths(self, &p.read);
         self.rule("allow", "file-read*", &read);
         let above = self.reallowed_ancestors(p);
         self.rule("allow", "file-read-metadata", &above);
@@ -430,6 +478,20 @@ impl Writer {
         }
         self.rule("deny", "file-write*", &filters);
         self.rule("deny", "file-write-unlink", &parents);
+    }
+
+    /// The launch's session mark: `file-write-data` on that one file, which the host's sweep
+    /// asks the kernel about (`sandbox_check`) to find this launch's processes wherever they
+    /// went. Its canary beside it is named by no rule. Last of the file rules, so it wins over
+    /// the hidden data dir's deny around it; nothing else in its folder is allowed.
+    fn session_mark(&mut self) {
+        let Some(mark) = self.mark.clone() else {
+            return;
+        };
+        self.note("\n; The session mark: data writes to this one file, so the host can find every");
+        self.note("; process of this launch, whatever its parent, session or group (0038).");
+        let mark = literal(&self.param(SESSION_MARK, &mark));
+        self.rule("allow", "file-write-data", &[mark]);
     }
 
     /// The browser socket folder the host made: regular files and sockets in it may be made,
@@ -523,46 +585,10 @@ impl Writer {
             self.rule("allow", "file-read*", &[subpath(&keychains)]);
         }
     }
-
-    fn subpaths(&mut self, list: &[(String, PathBuf)]) -> Vec<String> {
-        list.iter()
-            .map(|(name, path)| subpath(&self.param(name, path)))
-            .collect()
-    }
-
-    fn literals(&mut self, list: &[(String, PathBuf)]) -> Vec<String> {
-        list.iter()
-            .map(|(name, path)| literal(&self.param(name, path)))
-            .collect()
-    }
-
-    fn ancestors_of(&mut self, list: &[(String, PathBuf)]) -> Vec<String> {
-        list.iter()
-            .map(|(name, path)| ancestors(&self.param(name, path)))
-            .collect()
-    }
-}
-
-fn subpath(param: &str) -> String {
-    format!("(subpath {param})")
-}
-
-fn literal(param: &str) -> String {
-    format!("(literal {param})")
-}
-
-/// The folders above the path (not the path itself).
-fn ancestors(param: &str) -> String {
-    format!("(path-ancestors {param})")
-}
-
-/// The folders above the path, as folders: renaming one would move the path out of its rule.
-/// Above the matter they are write-denied anyway.
-fn directory_ancestors(param: &str) -> String {
-    format!("(require-all (vnode-type DIRECTORY) (path-ancestors {param}))")
 }
 
 mod bridge;
+mod filters;
 mod names;
 #[cfg(test)]
 mod network_tests;

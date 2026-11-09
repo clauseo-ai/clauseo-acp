@@ -3,13 +3,15 @@
 //!
 //! ```text
 //! cargo run -p clauseo-sandbox --example run_sandboxed -- --matter <dir> --state <dir>
-//!     [--runtime <p>]... [--read <p>]... [--hidden <p>]... [--proxy-port <n>]
+//!     --marks <dir> [--runtime <p>]... [--read <p>]... [--hidden <p>]... [--proxy-port <n>]
 //!     [--loopback <port>]... [--browser-sockets] [--env K=V]... [--env-file <p>]
 //!     [--stdin] [--print-spec] -- <cmd> [args]
 //! ```
 //!
 //! `cmd` is an absolute path and runs in the matter with stdin closed; its stdout and stderr come
-//! through. `--env K=V` (repeatable) adds one variable to `cmd`'s environment; a later `K` wins.
+//! through. `--marks <dir>` is the existing folder the launch's session mark is made in (removed
+//! when the command has exited), outside every folder the jail lets the command write.
+//! `--env K=V` (repeatable) adds one variable to `cmd`'s environment; a later `K` wins.
 //! `--env-file <path>` (once) reads one `K=V` per line from a file only its owner can read, and
 //! removes the file before it parses the lines; `--env` values override the file's. `--stdin` feeds
 //! this process's stdin to `cmd` instead, for a process that speaks JSON-RPC over stdio
@@ -63,6 +65,7 @@ mod jail {
         SOCKET_DIR_VAR, launch_env, parse_env_file_text, parse_env_pair, read_env_file,
     };
     use clauseo_process::{AgentStdin, LaunchSpec, Launched, Launcher, SpawnOptions};
+    use clauseo_sandbox::macos::sweep::processes;
     use clauseo_sandbox::{
         BrowserSocketDir, Denial, DenialSink, Loopback, Policy, ProcessCapSession, SeatbeltLauncher,
     };
@@ -87,6 +90,7 @@ mod jail {
     struct Args {
         matter: Option<PathBuf>,
         state: Option<PathBuf>,
+        marks: Option<PathBuf>,
         runtime: Vec<PathBuf>,
         read: Vec<PathBuf>,
         hidden: Vec<PathBuf>,
@@ -100,7 +104,8 @@ mod jail {
         command: Vec<OsString>,
     }
 
-    const USAGE: &str = "usage: run_sandboxed --matter <dir> --state <dir> [--runtime <p>]... \
+    const USAGE: &str = "usage: run_sandboxed --matter <dir> --state <dir> --marks <dir> \
+                         [--runtime <p>]... \
                          [--read <p>]... [--hidden <p>]... [--proxy-port <n>] \
                          [--loopback <port>]... [--browser-sockets] [--env K=V]... \
                          [--env-file <p>] [--stdin] [--print-spec] -- <cmd> [args]";
@@ -187,6 +192,7 @@ mod jail {
             match flag.as_str() {
                 "--matter" => args.matter = Some(value("--matter")?),
                 "--state" => args.state = Some(value("--state")?),
+                "--marks" => args.marks = Some(value("--marks")?),
                 "--runtime" => args.runtime.push(value("--runtime")?),
                 "--read" => args.read.push(value("--read")?),
                 "--hidden" => args.hidden.push(value("--hidden")?),
@@ -274,8 +280,10 @@ mod jail {
             None => Vec::new(),
         };
         let mut env = launch_env(from_file, args.env, args.browser_sockets)?;
-        let (Some(matter), Some(state)) = (args.matter, args.state) else {
-            return Err(format!("--matter and --state are required\n{USAGE}"));
+        let (Some(matter), Some(state), Some(marks)) = (args.matter, args.state, args.marks) else {
+            return Err(format!(
+                "--matter, --state and --marks are required\n{USAGE}"
+            ));
         };
         let mut builder = Policy::builder(&matter, state);
         for p in args.runtime {
@@ -309,7 +317,14 @@ mod jail {
         let cwd = policy.matter().to_owned();
         // One run is one session: its process cap notices go to stderr.
         let cap = ProcessCapSession::new(|notice| say(&format!("{}\n", notice.text())));
-        let launcher = SeatbeltLauncher::new(policy, SpawnOptions::new(), Arc::new(PrintSink), cap);
+        let launcher = SeatbeltLauncher::new(
+            policy,
+            SpawnOptions::new(),
+            Arc::new(PrintSink),
+            cap,
+            &marks,
+        )
+        .map_err(|e| e.to_string())?;
         let mut command = args.command.into_iter();
         let program = PathBuf::from(command.next().unwrap_or_default());
         if let Some(dir) = &socket_dir {
@@ -331,6 +346,20 @@ mod jail {
         drop(finished);
         // The watcher's lines come a little after the denial itself.
         async_io::block_on(async_io::Timer::after(DENIAL_GRACE));
+        // The mark goes only once nothing of the command runs: without it nothing finds them.
+        let mark = launcher.session_mark();
+        match processes(&[mark], mark.created()) {
+            Ok(left) if left.is_empty() => {
+                if let Err(error) = mark.remove() {
+                    say(&format!("run_sandboxed: the session mark stays: {error}\n"));
+                }
+            }
+            Ok(left) => say(&format!(
+                "run_sandboxed: {} process(es) of the command still run; the mark stays\n",
+                left.len()
+            )),
+            Err(error) => say(&format!("run_sandboxed: the session mark stays: {error}\n")),
+        }
         drop(launcher);
         drop(socket_dir);
         Ok(code)
