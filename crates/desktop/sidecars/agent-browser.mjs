@@ -13,6 +13,12 @@
 // 64 MB (a Content-Length over that, or a body that grows past it, is refused). A 120 s timeout
 // covers the whole download, body included.
 //
+// Retries and the token: the download goes through fetch.mjs, which stetdoc.mjs shares. Each
+// request is tried up to 5 times, 30 s apart, on a network error, a 5xx or a 429; a 404 or other
+// answer and an oversized body fail at once. With GH_TOKEN set (the release job's token) the
+// asset comes through the GitHub API, as `gh release download` fetches it: the release by its
+// tag (`v<version>`), then the asset's API url; without it, the pinned url, anonymously.
+//
 // Tests: `agent-browser.test.mjs` next to this file, run with
 // `node --test 'crates/desktop/sidecars/*.test.mjs'`. CI does not run them: the xtask check is
 // frozen, so they are run by hand, and a change here names that run in its PR.
@@ -20,6 +26,7 @@
 import { createHash } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { fetchGitHubAsset } from './fetch.mjs';
 
 /** The pin, next to this folder: `crates/desktop/agent-browser.toml`. */
 const DEFAULT_PIN = new URL('../agent-browser.toml', import.meta.url);
@@ -38,7 +45,8 @@ const SHA256 = /^[0-9a-f]{64}$/;
  * with `url` and `sha256` strings, or `none = true`. Anything else throws, with the line number.
  *
  * @param {string} text the file's contents
- * @returns {{ version: string, triples: Map<string, { url: string, sha256: string } | { none: true }> }}
+ * @returns {{ version: string,
+ *   triples: Map<string, { url: string, sha256: string } | { none: true }> }}
  */
 export function parsePin(text) {
   let version;
@@ -109,11 +117,6 @@ export function parsePin(text) {
   return { version, triples };
 }
 
-/** The longest a download may take, body included. */
-const TIMEOUT_MS = 120_000;
-/** The largest asset we accept: the pinned binaries are about 18 MB. */
-const MAX_BYTES = 64 * 1024 * 1024;
-
 /** Throws unless `url` is https on github.com under the pinned release's download folder. */
 function checkUrl(url, version) {
   let parsed;
@@ -138,38 +141,6 @@ function checkUrl(url, version) {
 }
 
 /**
- * The response body, at most MAX_BYTES: refused up front when Content-Length says more, and
- * while reading when the body grows past it.
- */
-async function readCapped(response, triple) {
-  const tooBig = `agent-browser: download for ${triple} is over ${MAX_BYTES} bytes; nothing written`;
-  const declared = response.headers?.get('content-length');
-  if (declared !== null && declared !== undefined && Number(declared) > MAX_BYTES) {
-    await response.body?.cancel(); // drop the connection; nothing is read
-    throw new Error(tooBig);
-  }
-  if (!response.body) {
-    const bytes = Buffer.from(await response.arrayBuffer());
-    if (bytes.length > MAX_BYTES) throw new Error(tooBig);
-    return bytes;
-  }
-  const reader = response.body.getReader();
-  const chunks = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > MAX_BYTES) {
-      await reader.cancel();
-      throw new Error(tooBig);
-    }
-    chunks.push(value);
-  }
-  return Buffer.concat(chunks, total);
-}
-
-/**
  * Downloads the pinned agent-browser for `triple` to `destPath`.
  *
  * Returns `destPath`, or `null` when the pin says the triple has no build (`none = true`), in
@@ -178,14 +149,22 @@ async function readCapped(response, triple) {
  * mismatch writes nothing. The bytes go to `destPath + '.partial'` and are renamed into place,
  * mode 0755 on every triple but Windows's.
  *
+ * The download is fetch.mjs's: a network error, a 5xx or a 429 is tried again, up to 5 times,
+ * 30 s apart. With `env.GH_TOKEN` set, the asset comes through the GitHub API (the release by
+ * its tag, then the asset's API url); without it, the pinned url is fetched anonymously.
+ *
  * @param {string} triple a Rust target triple, e.g. `x86_64-unknown-linux-gnu`
  * @param {string} destPath where the binary goes, `.exe` included on Windows
- * @param {{ fetch?: typeof fetch, pinPath?: string | URL }} [options] `fetch` replaces the network
- *   (the tests pass a stub); `pinPath` replaces the pin file (the tests pass fixtures).
+ * @param {{ fetch?: typeof fetch, pinPath?: string | URL, wait?: (ms: number) => Promise<void>,
+ *   log?: (line: string) => void, env?: Record<string, string | undefined> }} [options] `fetch`
+ *   replaces the network (the tests pass a stub); `pinPath` replaces the pin file (the tests
+ *   pass fixtures); `wait` replaces the 30 s between tries and `log` receives the retry lines
+ *   (both for the tests); `env` is the environment GH_TOKEN is read from (default: process.env).
  * @returns {Promise<string | null>}
  */
 export async function fetchAgentBrowser(triple, destPath, options = {}) {
-  const doFetch = options.fetch ?? globalThis.fetch;
+  const log = options.log ?? console.log;
+  const env = options.env ?? process.env;
   const pinText = await readFile(options.pinPath ?? DEFAULT_PIN, 'utf8');
   const pin = parsePin(pinText);
 
@@ -197,14 +176,18 @@ export async function fetchAgentBrowser(triple, destPath, options = {}) {
 
   checkUrl(entry.url, pin.version);
 
-  const response = await doFetch(entry.url, {
-    redirect: 'follow',
-    signal: AbortSignal.timeout(TIMEOUT_MS),
+  const bytes = await fetchGitHubAsset({
+    url: entry.url,
+    owner: 'vercel-labs',
+    repo: 'agent-browser',
+    tag: `v${pin.version}`,
+    assetName: new URL(entry.url).pathname.split('/').pop(),
+    token: env.GH_TOKEN,
+    label: `agent-browser: download for ${triple}`,
+    fetch: options.fetch,
+    wait: options.wait,
+    log,
   });
-  if (response.status !== 200) {
-    throw new Error(`agent-browser: download for ${triple} answered HTTP ${response.status}, not 200`);
-  }
-  const bytes = await readCapped(response, triple);
   const digest = createHash('sha256').update(bytes).digest('hex');
   if (digest !== entry.sha256) {
     throw new Error(
