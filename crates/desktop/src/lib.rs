@@ -139,6 +139,8 @@ mod setup;
 mod smart_app_control;
 mod startup;
 #[cfg(test)]
+mod stetdoc_pin;
+#[cfg(test)]
 mod test_support;
 #[cfg(test)]
 mod tests;
@@ -378,6 +380,8 @@ fn start_host<R: Runtime>(
     setup_parts: setup::SetupParts,
     proxies: Arc<egress::DesktopProxies>,
 ) -> std::io::Result<()> {
+    // Tauri's resource folder, where a Windows or Linux release bundles stetdoc (profile.rs).
+    let resource_dir = app.path().resource_dir().ok();
     let started = host_start::start_on_thread(start, move || {
         let began = open::now();
         // Off this thread: the host starts without Documents and takes it when it answers.
@@ -385,7 +389,7 @@ fn start_host<R: Runtime>(
             at.with_documents(&SystemDirs, &SystemEnv)
         });
         chooser::trace::mark("host start: Documents lookup started", began, "");
-        let profile = DesktopProfile::build(&locations)
+        let profile = DesktopProfile::build(&locations, resource_dir.as_deref())
             .map_err(|err| tracing::warn!(%err, "no launch profile: agents start without it"))
             .ok();
         chooser::trace::mark("host start: launch profile built", began, "");

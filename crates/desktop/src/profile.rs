@@ -64,21 +64,29 @@ pub(crate) struct DesktopProfile {
 
 impl DesktopProfile {
     /// The profile under `locations`: the bundled programs beside the app's executable,
-    /// stetdoc as [`stetdoc_program`] finds it (its skill loaded when it is there), R22's
-    /// built-in skills, and no author (tracked changes carry "Clauseo", 0030). Starts stetdoc and
-    /// reads files: on the host-start thread, never the host's. A skill that fails is left out
-    /// with a warning; only a refused program path fails the whole profile.
-    pub(crate) fn build(locations: &Locations) -> Result<Self, BuildError> {
-        Self::build_with(locations, std::env::var_os("PATH").as_deref())
+    /// stetdoc as [`stetdoc_program`] finds it, in its own folder under `resource_dir` (Tauri's
+    /// resource folder) or on macOS under `Contents/Helpers` (its skill loaded when it is
+    /// there), R22's built-in skills, and no author (tracked changes carry "Clauseo", 0030).
+    /// Starts stetdoc and reads files: on the host-start thread, never the host's. A skill that
+    /// fails is left out with a warning; only a refused program path fails the whole profile.
+    pub(crate) fn build(
+        locations: &Locations,
+        resource_dir: Option<&Path>,
+    ) -> Result<Self, BuildError> {
+        Self::build_with(locations, resource_dir, std::env::var_os("PATH").as_deref())
     }
 
-    /// [`Self::build`] with `path` as the `PATH` value stetdoc is looked up on.
+    /// [`Self::build`] with `path` as the `PATH` value a debug build looks stetdoc up on when
+    /// no bundled copy is there.
     pub(crate) fn build_with(
         locations: &Locations,
+        resource_dir: Option<&Path>,
         path: Option<&OsStr>,
     ) -> Result<Self, BuildError> {
         let exe = std::env::current_exe().map_err(BuildError::Exe)?;
-        let found = stetdoc_program(path);
+        let exe_dir = exe.parent().unwrap_or_else(|| Path::new(""));
+        let bundled = bundled_stetdoc(cfg!(target_os = "macos"), exe_dir, resource_dir);
+        let found = stetdoc_program(bundled.as_deref(), path, !cfg!(debug_assertions));
         let paths = paths_for(locations, exe, found.clone())?;
         let skill = found
             .as_deref()
@@ -197,8 +205,8 @@ fn is_program(path: &Path) -> bool {
 /// The profile's paths: the browser's sidecars beside `exe` (where Tauri's `externalBin` puts
 /// them; S27 bundles them, and until stage C's proxy the host drops the `browser` entry
 /// anyway), except agent-browser on macOS ([`agent_browser_path`]), and stetdoc at `stetdoc`,
-/// or, when it was not found, where U13 will put it (`<exe folder>/stetdoc/stetdoc`), which is
-/// then neither run nor put on `PATH`.
+/// or, when none was found, the placeholder `<exe folder>/stetdoc/stetdoc`, which is then
+/// neither run nor put on `PATH`.
 pub(crate) fn paths_for(
     locations: &Locations,
     exe: PathBuf,
@@ -234,15 +242,46 @@ fn agent_browser_path(dir: &Path, macos: bool, exists: impl Fn(&Path) -> bool) -
     dir.join(name)
 }
 
-/// The stetdoc to run. U13's bundled sidecar does not exist yet, so: in a debug build, the
-/// first `stetdoc` on `path` (the `PATH` value); in a release build, none (R21's brief, "Waits
-/// for U13").
-pub(crate) fn stetdoc_program(path: Option<&OsStr>) -> Option<PathBuf> {
-    if cfg!(debug_assertions) {
-        first_on_path(STETDOC, path?)
+/// Where a release bundles stetdoc, in a folder of its own so that only that folder goes first
+/// on the agents' `PATH` (U13; `.github/scripts/sidecars.mjs`, `crates/desktop/stetdoc.toml`).
+/// On macOS (`macos`), `Clauseo.app/Contents/Helpers/stetdoc/stetdoc`, found from `exe_dir`
+/// (`Contents/MacOS`): notarisation wants no program in `Contents/Resources`. Elsewhere
+/// `<resource_dir>/stetdoc/stetdoc[.exe]`, Tauri's resource folder (on Windows the install
+/// folder, beside `Clauseo.exe`; on Linux `/usr/lib/Clauseo`). None when that folder is not
+/// known.
+pub(crate) fn bundled_stetdoc(
+    macos: bool,
+    exe_dir: &Path,
+    resource_dir: Option<&Path>,
+) -> Option<PathBuf> {
+    let program = format!("{STETDOC}{}", std::env::consts::EXE_SUFFIX);
+    let folder = if macos {
+        exe_dir.parent()?.join("Helpers")
     } else {
-        None
+        resource_dir?.to_path_buf()
+    };
+    Some(folder.join(STETDOC).join(program))
+}
+
+/// The stetdoc to run: `bundled` (from [`bundled_stetdoc`]) when it is a program there. When
+/// it is not, a `release` build runs none and warns (the profile then leaves stetdoc out), and
+/// a debug build takes the first `stetdoc` on `path` (the `PATH` value).
+pub(crate) fn stetdoc_program(
+    bundled: Option<&Path>,
+    path: Option<&OsStr>,
+    release: bool,
+) -> Option<PathBuf> {
+    if let Some(bundled) = bundled.filter(|bundled| is_program(bundled)) {
+        return Some(bundled.to_path_buf());
     }
+    if release {
+        tracing::warn!(
+            expected = ?bundled,
+            "the bundled stetdoc is missing: agents start without it"
+        );
+        return None;
+    }
+    first_on_path(STETDOC, path?)
 }
 
 /// The first program named `name` (with the OS's executable suffix, `.exe` on Windows) in an
@@ -252,7 +291,7 @@ pub(crate) fn stetdoc_program(path: Option<&OsStr>) -> Option<PathBuf> {
 /// since stetdoc is started with no shell.
 #[expect(
     clippy::disallowed_methods,
-    reason = "debug builds look stetdoc up on PATH until U13 bundles it; xtask's first_on_path is not reachable from the app"
+    reason = "debug builds look stetdoc up on PATH when no bundled copy is there; xtask's first_on_path is not reachable from the app"
 )]
 pub(crate) fn first_on_path(name: &str, path: &OsStr) -> Option<PathBuf> {
     let file = format!("{name}{}", std::env::consts::EXE_SUFFIX);

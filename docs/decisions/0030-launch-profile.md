@@ -358,11 +358,14 @@ two dependencies, `profile` and `tracing`.
   path, or `ProfilePaths::new` refuses a path), the app logs a warning and starts with no
   hook (`NoProfile`), as before PR-C. The desktop installs no tracing subscriber yet, so
   these warnings go nowhere until it has a log.
-- **stetdoc.** U13's sidecar is not bundled on this base. A debug build takes the first
-  `stetdoc` (with the OS's suffix) in an absolute folder of `PATH`. A release build treats
-  stetdoc as absent. The lookup matches `which`: a file that is not a program (no execute bit
+- **stetdoc.** A release bundles the pinned stetdoc (`crates/desktop/stetdoc.toml`) in a
+  folder of its own (2026-11-09, U13): `Clauseo.app/Contents/Helpers/stetdoc/stetdoc` on macOS,
+  `<resource folder>/stetdoc/stetdoc[.exe]` elsewhere (on Windows the install folder). Both builds
+  run that copy when it is there. A release build without it treats stetdoc as absent, with a
+  warning; a debug build then takes the first
+  `stetdoc` (with the OS's suffix) in an absolute folder of `PATH`. The lookup matches `which`: a file that is not a program (no execute bit
   on Unix) is skipped and the walk goes on, and on Windows only `stetdoc.exe` counts, since
-  stetdoc starts with no shell. When stetdoc is absent, `ProfilePaths` names U13's future path
+  stetdoc starts with no shell. When stetdoc is absent, `ProfilePaths` names a placeholder
   (`<exe folder>/stetdoc/stetdoc`), which is neither run nor put on `PATH`. When stetdoc is
   found and its skill loaded, `with_agent_path_prepend` takes `ClauseoProfile::path_prepend()`,
   but only when stetdoc is the only program in its folder. A folder found on `PATH` that holds
