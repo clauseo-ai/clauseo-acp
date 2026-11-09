@@ -72,6 +72,7 @@ use serde::{Deserialize, Serialize};
 use super::pool::pool_number;
 use super::sids::Sid;
 
+mod args;
 #[cfg(windows)]
 mod ca;
 #[cfg(windows)]
@@ -94,6 +95,8 @@ pub mod marker;
 mod outer;
 pub mod paths;
 mod policy;
+#[cfg(any(windows, test))]
+mod previous;
 #[cfg(windows)]
 mod spawn;
 #[cfg(any(windows, test))]
@@ -105,6 +108,7 @@ mod sweep;
 #[cfg(any(windows, test))]
 pub mod unclean;
 
+pub use args::{Mode, mode, runner_args};
 pub use env::agent_env;
 #[cfg(windows)]
 pub use inner::run_inner;
@@ -343,33 +347,6 @@ pub fn is_launch_name(name: &str) -> bool {
     })
 }
 
-/// What [`RUNNER_EXE`] was started to do, from its arguments.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Mode {
-    /// `--launch <file>`: the outer runner.
-    Launch(PathBuf),
-    /// `--inner <pipe base> <desktop user's SID>`: the inner runner, which grants that user
-    /// `TOKEN_QUERY` on its token first (`token::runner_token_first_sddl`).
-    Inner(String, Sid),
-}
-
-/// The mode `args` (the arguments after the program) name; `None` for any other command line.
-pub fn mode(args: &[std::ffi::OsString]) -> Option<Mode> {
-    match args {
-        [flag, file] if flag == "--launch" => Some(Mode::Launch(PathBuf::from(file))),
-        [flag, base, user] if flag == "--inner" => {
-            let user = Sid::parse(user.to_str()?).ok()?;
-            base.to_str().map(|base| Mode::Inner(base.to_owned(), user))
-        }
-        _ => None,
-    }
-}
-
-/// The arguments the host starts [`RUNNER_EXE`] with.
-pub fn runner_args(launch_file: &Path) -> Vec<std::ffi::OsString> {
-    vec!["--launch".into(), launch_file.as_os_str().to_owned()]
-}
-
 /// Writes `message` to a new launch file in `<data_dir>\sandbox\run\` (made protected if
 /// missing), atomically, and gives its path for [`runner_args`].
 pub fn write_launch(data_dir: &Path, message: &LaunchMessage) -> std::io::Result<PathBuf> {
@@ -471,8 +448,15 @@ pub enum RunExit {
     TokenGrant,
 }
 
+/// [`RunExit::TokenGrant`]'s reserved number past [`RUN_EXIT_BASE`]: `0x12` and `0x13` are
+/// [`RunExit::AwaitingStop`] and [`RunExit::AwaitingSweep`], and `0x14` is another branch's
+/// code (`LeftoverTask`), none here.
+const TOKEN_GRANT_OFFSET: u32 = 0x15;
+
 impl RunExit {
-    const ALL: [RunExit; 21] = [
+    /// The variants numbered by position, from [`RUN_EXIT_BASE`]; [`RunExit::TokenGrant`] has an
+    /// explicit, reserved number instead ([`TOKEN_GRANT_OFFSET`]).
+    const ALL: [RunExit; 20] = [
         RunExit::Usage,
         RunExit::BadLaunch,
         RunExit::NoSecret,
@@ -493,11 +477,13 @@ impl RunExit {
         RunExit::MarkerUnwritable,
         RunExit::AwaitingStop,
         RunExit::AwaitingSweep,
-        RunExit::TokenGrant,
     ];
 
     /// The exit code.
     pub fn code(self) -> u32 {
+        if self == RunExit::TokenGrant {
+            return RUN_EXIT_BASE + TOKEN_GRANT_OFFSET;
+        }
         let index = RunExit::ALL
             .iter()
             .position(|exit| *exit == self)
@@ -507,8 +493,11 @@ impl RunExit {
 
     /// The failure an exit code names, if it is one.
     pub fn from_code(code: u32) -> Option<RunExit> {
-        let index = usize::try_from(code.checked_sub(RUN_EXIT_BASE)?).ok()?;
-        RunExit::ALL.get(index).copied()
+        let offset = code.checked_sub(RUN_EXIT_BASE)?;
+        if offset == TOKEN_GRANT_OFFSET {
+            return Some(RunExit::TokenGrant);
+        }
+        RunExit::ALL.get(usize::try_from(offset).ok()?).copied()
     }
 
     /// What tier detection makes of it: the set-up's failures, which running the set-up again or

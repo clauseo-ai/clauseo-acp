@@ -7,8 +7,8 @@
 //!
 //! The per-user classes (`HKCU\Software\Classes\{CLSID,Interface,AppID,TypeLib}` and their
 //! `Wow6432Node` twins) go first: a server registered there for a class a runner makes would run
-//! for that runner with the lawyer's logon SID, and a sandbox account has no per-user class of its
-//! own to keep.
+//! in that runner, as the pool user, and a sandbox account has no per-user class of its own to
+//! keep.
 //!
 //! The pool user's scheduled tasks and BITS jobs aren't removed here: the `SYSTEM` task
 //! `\Clauseo\SandboxSweep`, which the outer requests at every session's end, deletes the tasks

@@ -114,8 +114,8 @@ fn marked_outer(
     // The inner runner starts in System32, a folder the Low agent can't write (no DLL planted
     // in its current folder); it gets the agent's folder over `ctl`.
     let cwd = system_folder().map_err(|e| Failure::new(RunExit::Logon, os("system folder", &e)))?;
-    // The desktop user's logon SID, which the runners hold too: their process DACL grants it, so
-    // one runner's sweep can end another's (`token::runner_process_sddl`).
+    // The desktop user's logon SID: the inner's full check refuses a token that holds it
+    // (`inner_user::check_full`); each runner holds its own logon's fresh one.
     let logon = own_token()
         .and_then(|token| logon_sid(&token))
         .map_err(|e| Failure::new(RunExit::Token, os("logon SID", &e)))?;

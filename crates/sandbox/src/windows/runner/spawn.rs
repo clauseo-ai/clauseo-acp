@@ -131,15 +131,17 @@ const TELEMETRY_FIRST: usize = 4096;
 /// The largest telemetry buffer: a header, a SID and four paths and names.
 const TELEMETRY_MAX: usize = 256 * 1024;
 
-/// The suspended inner's user from `ProcessTelemetryIdInformation` (`inner_user.rs`), which
-/// needs only `PROCESS_QUERY_LIMITED_INFORMATION` on the process handle (the logon's has every
-/// right).
+/// The user of the process `handle` (pid `pid`) from `ProcessTelemetryIdInformation`
+/// (`inner_user.rs`), which needs only `PROCESS_QUERY_LIMITED_INFORMATION` on the handle: the
+/// suspended inner's (through the logon's handle), or a previous runner's (`previous.rs`).
 ///
-/// The pid the buffer must name is stable: this process holds the creation handle
-/// `CreateProcessWithLogonW` gave, so the process object, and its pid, can't be freed and
-/// reused while it is held, and the inner is still suspended, so it can't have changed its own
-/// token yet either.
-pub(super) fn telemetry_user(inner: &Process) -> Result<crate::windows::sids::Sid, String> {
+/// The pid the buffer must name is stable: this process holds `handle` (for the inner, the
+/// creation handle `CreateProcessWithLogonW` gave), so the process object, and its pid, can't be
+/// freed and reused while it is held; and a suspended inner can't have changed its token yet.
+pub(super) fn telemetry_user(
+    handle: HANDLE,
+    pid: u32,
+) -> Result<crate::windows::sids::Sid, String> {
     let mut size = TELEMETRY_FIRST;
     loop {
         let mut buffer = vec![0u8; size];
@@ -149,7 +151,7 @@ pub(super) fn telemetry_user(inner: &Process) -> Result<crate::windows::sids::Si
         // `needed` is a live out-pointer.
         let status = unsafe {
             NtQueryInformationProcess(
-                inner.handle.0,
+                handle,
                 PROCESSINFOCLASS(PROCESS_TELEMETRY_ID_INFORMATION),
                 buffer.as_mut_ptr().cast::<c_void>(),
                 len,
@@ -173,7 +175,7 @@ pub(super) fn telemetry_user(inner: &Process) -> Result<crate::windows::sids::Si
         // Only the bytes written are read; a length past the buffer leaves it whole, and the
         // parse checks every offset against what is left.
         buffer.truncate(wanted);
-        let (offset, sid) = telemetry_sid(&buffer, inner.pid)?;
+        let (offset, sid) = telemetry_sid(&buffer, pid)?;
         // `telemetry_sid` checked the SID's bytes lie inside `buffer` from `offset`.
         let at = buffer
             .get(offset..)

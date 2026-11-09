@@ -199,9 +199,9 @@ fn display_names_every_part() {
 
 #[test]
 fn the_inner_runners_own_objects_name_no_pool_user() {
-    let (desktop, logon) = (sid(DESKTOP), sid(LOGON));
+    let desktop = sid(DESKTOP);
     for sddl in [
-        runner_process_sddl(&desktop, &logon),
+        runner_process_sddl(&desktop),
         runner_thread_sddl(&desktop),
         runner_token_sddl(&desktop),
         runner_default_dacl(&desktop),
@@ -211,8 +211,9 @@ fn the_inner_runners_own_objects_name_no_pool_user() {
             assert!(!sddl.contains(absent), "{absent} in {sddl}");
         }
     }
-    // Only the process names the logon SID; the threads and the token don't.
+    // None names a logon SID: each runner's is its own logon's.
     for sddl in [
+        runner_process_sddl(&desktop),
         runner_thread_sddl(&desktop),
         runner_token_sddl(&desktop),
         runner_default_dacl(&desktop),
@@ -235,6 +236,38 @@ fn the_inner_runners_own_objects_name_no_pool_user() {
     );
 }
 
+/// Every descriptor the outer or the inner sets on the inner runner (the one runner the outer
+/// starts as the pool user), pinned whole.
+#[test]
+fn every_runner_descriptor_is_pinned() {
+    let desktop = sid(DESKTOP);
+    let pinned = [
+        (
+            runner_process_sddl(&desktop),
+            format!("D:P(A;;GA;;;SY)(A;;0x101001;;;{DESKTOP})(A;;RC;;;OW)S:(ML;;NWNRNX;;;ME)"),
+        ),
+        (
+            runner_thread_sddl(&desktop),
+            format!("D:P(A;;GA;;;SY)(A;;0x100000;;;{DESKTOP})(A;;RC;;;OW)"),
+        ),
+        (
+            runner_token_first_sddl(&desktop),
+            format!("D:P(A;;GA;;;SY)(A;;RC;;;OW)(A;;0x8;;;{DESKTOP})"),
+        ),
+        (
+            runner_token_sddl(&desktop),
+            format!("D:P(A;;GA;;;SY)(A;;0x8;;;{DESKTOP})(A;;RC;;;OW)"),
+        ),
+        (
+            runner_default_dacl(&desktop),
+            format!("D:(A;;GA;;;SY)(A;;0x100000;;;{DESKTOP})(A;;RC;;;OW)"),
+        ),
+    ];
+    for (sddl, want) in pinned {
+        assert_eq!(sddl, want);
+    }
+}
+
 #[test]
 fn the_agents_own_token_names_the_pool_user() {
     let spec = TokenSpec::for_pool(&sid(POOL), &sid(LOGON), &sid(DESKTOP), None).unwrap();
@@ -255,30 +288,17 @@ fn the_pool_user_cant_change_the_agents_token() {
 }
 
 #[test]
-fn the_runners_process_grants_the_logon_sid_wait_query_and_end_and_the_pool_user_nothing() {
-    // The pool user's sweeps reach an inner runner through the desktop user's logon SID, which
-    // the agent holds deny-only.
-    let (desktop, logon) = (sid(DESKTOP), sid(LOGON));
-    let sddl = runner_process_sddl(&desktop, &logon);
+fn the_runners_process_grants_the_desktop_user_alone_and_carries_a_medium_label() {
+    // No pool user (the agent, and any other process of the pool user's, opens nothing of a
+    // runner, and no runner opens another) and no logon SID (each runner's is its own logon's);
+    // the owner held to READ_CONTROL; a Medium label refusing Low callers write, read and
+    // execute.
+    let sddl = runner_process_sddl(&sid(DESKTOP));
     assert_eq!(
         sddl,
-        format!("D:P(A;;GA;;;SY)(A;;0x101001;;;{DESKTOP})(A;;0x101001;;;{LOGON})(A;;RC;;;OW)")
+        format!("D:P(A;;GA;;;SY)(A;;0x101001;;;{DESKTOP})(A;;RC;;;OW)S:(ML;;NWNRNX;;;ME)")
     );
-    // Every entry, SID by SID: no other SID gains anything, and the pool user isn't one.
-    let entries: Vec<&str> = sddl
-        .trim_start_matches("D:P(")
-        .trim_end_matches(')')
-        .split(")(")
-        .collect();
-    let want = [
-        "A;;GA;;;SY".to_owned(),
-        format!("A;;0x101001;;;{DESKTOP}"),
-        format!("A;;0x{DESKTOP_USER_RIGHTS:x};;;{LOGON}"),
-        "A;;RC;;;OW".to_owned(),
-    ];
-    assert_eq!(entries, want);
-    assert!(!sddl.contains(POOL));
-    // The agent's token holds that logon SID deny-only, so the allow never matches it.
-    let spec = TokenSpec::for_pool(&sid(POOL), &logon, &desktop, None).unwrap();
-    assert_eq!(spec.deny_only, [logon]);
+    for absent in [POOL, LOGON, ";WD)", ";BU)", ";AU)"] {
+        assert!(!sddl.contains(absent), "{absent} in {sddl}");
+    }
 }

@@ -7,14 +7,16 @@ use zeroize::Zeroizing;
 use super::super::RunExit;
 use super::super::frame::{InnerGo, write_frame};
 use super::super::inner_user::{READY_WAIT, TokenSeen, check_full, check_inner_user, ready_within};
+use super::super::previous::clear;
 use super::super::spawn::{Process, assign, log_on, resume, telemetry_user};
 use super::super::start::Steps;
 use super::super::station::StationDesktop;
+use super::super::sweep::os::OsPrevious;
 use super::{FIRST_CONNECT, Failure, accept, inner_exit, logon_failure, os};
 use crate::windows::acl::object::Handle;
 use crate::windows::pipe::os::{ServerPipe, Until};
 use crate::windows::sids::Sid;
-use crate::windows::token::os::shut_object;
+use crate::windows::token::os::{shut_object, shut_process};
 use crate::windows::token::{runner_process_sddl, runner_thread_sddl};
 
 /// What the start needs; the password is spent by the logon.
@@ -22,7 +24,7 @@ pub(super) struct Start<'a> {
     pub(super) pool_name: &'a str,
     pub(super) pool_user: &'a Sid,
     pub(super) desktop: &'a Sid,
-    /// The desktop user's logon SID, which the runners' process DACL grants.
+    /// The desktop user's logon SID, which the inner's token must not hold (`check_full`).
     pub(super) logon: &'a Sid,
     pub(super) password: Option<Zeroizing<String>>,
     pub(super) exe: &'a str,
@@ -38,6 +40,20 @@ pub(super) struct Start<'a> {
 impl Steps for Start<'_> {
     type Inner = Process;
     type Error = Failure;
+
+    /// A previous session's live runners of the pool user (an inner still running) are waited
+    /// for, then ended, before the logon (`previous.rs`).
+    fn clear(&mut self) -> Result<(), Failure> {
+        let image = std::path::Path::new(self.exe)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| Failure::new(RunExit::Usage, "the runner's file name"))?;
+        let mut calls = OsPrevious {
+            pool_user: self.pool_user,
+            image,
+        };
+        clear(&mut calls).map_err(|(exit, message)| Failure::new(exit, message))
+    }
 
     fn log_on(&mut self) -> Result<Process, Failure> {
         let password = self
@@ -63,8 +79,10 @@ impl Steps for Start<'_> {
     /// agent's own station its token refuses this process (5) until its first act grants it
     /// `TOKEN_QUERY`, and the user is read without the token (`inner_user.rs`).
     fn check_user(&mut self, inner: &Process) -> Result<(), Failure> {
-        check_inner_user(self.pool_user, inner.user(), || telemetry_user(inner))
-            .map_err(|(exit, message)| Failure::new(exit, message))
+        check_inner_user(self.pool_user, inner.user(), || {
+            telemetry_user(inner.handle.0, inner.pid)
+        })
+        .map_err(|(exit, message)| Failure::new(exit, message))
     }
 
     fn assign(&mut self, inner: &Process) -> Result<(), Failure> {
@@ -76,12 +94,9 @@ impl Steps for Start<'_> {
     /// while it is still suspended; its first act once resumed kills any process of the pool
     /// user's that opened either, or its token, before this.
     fn shut(&mut self, inner: &Process) -> Result<(), Failure> {
-        shut_object(
-            inner.handle.0,
-            &runner_process_sddl(self.desktop, self.logon),
-        )
-        .and_then(|()| shut_object(inner.thread.0, &runner_thread_sddl(self.desktop)))
-        .map_err(|e| Failure::new(RunExit::Token, os("the inner runner's DACL", &e)))
+        shut_process(inner.handle.0, &runner_process_sddl(self.desktop))
+            .and_then(|()| shut_object(inner.thread.0, &runner_thread_sddl(self.desktop)))
+            .map_err(|e| Failure::new(RunExit::Token, os("the inner runner's DACL", &e)))
     }
 
     fn resume(&mut self, inner: &Process) -> Result<(), Failure> {

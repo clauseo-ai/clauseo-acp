@@ -6,12 +6,12 @@
 //!   `Everyone` stays (D11): without it codex's `bcrypt.dll` can't open `\Device\KsecDD` and
 //!   nsiproxy refuses name lookups (`s15-spikes-everyone.md`). `Users` stays (PR0): System32 DLLs
 //!   outside `KnownDLLs` grant `Users` alone.
-//! - **The logon SID deny-only.** On the agent's own station (`runner/station.rs`)
-//!   `CreateProcessWithLogonW` gives the runner's pool logon a fresh logon SID of its own, made
-//!   per run, rather than the desktop user's; the deny-only entry is that one, read from the
-//!   runner's own token. Deny-only, it opens nothing the runner itself or another run's processes
-//!   hold through it (PR0 (a) and (d)). The runner's token DACL as made names it, not the desktop
-//!   user, so the outer reads the suspended inner's user without the token
+//! - **The logon SID deny-only.** `CreateProcessWithLogonW` gives the runner's pool logon a
+//!   fresh logon SID of its own, made per run, never the desktop user's (measured on the VM, and
+//!   on the agent's own station, `runner/station.rs`); the deny-only entry is that one, read
+//!   from the runner's own token. Deny-only, it opens nothing the runner itself or another run's
+//!   processes hold through it (PR0 (a) and (d)). The runner's token DACL as made names it, not
+//!   the desktop user, so the outer reads the suspended inner's user without the token
 //!   (`runner/inner_user.rs`), and the inner's first act grants the desktop user `TOKEN_QUERY`
 //!   for the outer's full check before its go (`runner/start.rs`).
 //! - **Low integrity** (`S-1-16-4096`): the agent writes nothing labelled higher; the matter,
@@ -91,9 +91,9 @@ pub struct TokenSpec {
 }
 
 impl TokenSpec {
-    /// The spec for an agent running as `pool_user`, whose runner's token holds `logon` (the
-    /// desktop user's logon SID), started for `desktop_user`; `matter` adds the matter's SID as a
-    /// restricting SID.
+    /// The spec for an agent running as `pool_user`, whose runner's token holds `logon` (its
+    /// own logon's fresh logon SID, made per run), started for `desktop_user`; `matter` adds the
+    /// matter's SID as a restricting SID.
     pub fn for_pool(
         pool_user: &Sid,
         logon: &Sid,
@@ -181,24 +181,21 @@ pub fn agent_token_sddl(pool_user: &Sid, desktop_user: &Sid) -> String {
 /// (`0x8`) and `TOKEN_ASSIGN_PRIMARY` (`0x1`).
 pub const AGENT_TOKEN_POOL_RIGHTS: u32 = 0x0002_0009;
 
-/// The inner runner's process DACL (set by the outer while it is suspended, and by the inner
-/// itself): `SYSTEM` full, the desktop user and the desktop user's logon SID wait, query and end,
-/// `OWNER RIGHTS` held to `READ_CONTROL`, and no pool user, so the agent (the same user) opens
-/// nothing of it.
+/// The inner runner's process descriptor (set by the outer while it is suspended, and by the
+/// inner itself): `SYSTEM` full, the desktop user wait, query and end, `OWNER RIGHTS` held to
+/// `READ_CONTROL` (so the pool user, its owner, keeps no implied `WRITE_DAC`), and no pool user,
+/// so the agent (the same user) and any other process of the pool user's open nothing of it; and
+/// a Medium label with no-write-up, no-read-up and no-execute-up, so a Low process gets nothing
+/// of it either, whatever the DACL.
 ///
-/// The logon SID's entry is for the pool user's sweeps (`runner/sweep.rs`):
-/// `CreateProcessWithLogonW` gives the inner runner the desktop user's logon SID, enabled, so a
-/// next inner's first act can end an inner of an earlier session still alive. The agent holds
-/// that SID deny-only (`TokenSpec::deny_only`), so an allow entry never matches it.
-/// A pool-user process a service started outside the job runs in the pool user's own logon
-/// session and doesn't hold it. Other matters' runners started from the same logon do, and can
-/// open this one, but their sweeps only end their own pool user's processes. An inner never
-/// outlives its outer's kill-on-close job, so none from an earlier logon of the desktop user's is
-/// left for a later one's sweep to meet.
-pub fn runner_process_sddl(desktop_user: &Sid, logon: &Sid) -> String {
+/// No runner opens another: a previous session's inner still live when a launch for the same
+/// pool user begins is waited for, then ended, by the outer before its logon
+/// (`runner/previous.rs`). No logon SID is named: each runner holds its own logon's fresh logon
+/// SID (`CreateProcessWithLogonW` gives every child its own, never the desktop user's).
+pub fn runner_process_sddl(desktop_user: &Sid) -> String {
     format!(
-        "D:P(A;;GA;;;SY)(A;;0x{DESKTOP_USER_RIGHTS:x};;;{desktop_user})\
-         (A;;0x{DESKTOP_USER_RIGHTS:x};;;{logon})(A;;RC;;;OW)"
+        "D:P(A;;GA;;;SY)(A;;0x{DESKTOP_USER_RIGHTS:x};;;{desktop_user})(A;;RC;;;OW)\
+         S:(ML;;NWNRNX;;;ME)"
     )
 }
 

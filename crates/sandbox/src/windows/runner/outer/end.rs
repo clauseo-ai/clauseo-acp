@@ -27,7 +27,8 @@ pub(super) struct OsEnd {
     pub(super) data_dir: PathBuf,
     /// The desktop user.
     pub(super) desktop: Sid,
-    /// The desktop user's logon SID, which the runners' process DACL grants.
+    /// The desktop user's logon SID, which the inner's token must not hold
+    /// (`inner_user::check_full`).
     pub(super) logon: Sid,
     /// This program's own path, which the inner runner runs.
     pub(super) exe: String,

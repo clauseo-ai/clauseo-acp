@@ -20,8 +20,8 @@ use windows::Win32::Security::Authorization::{
 use windows::Win32::Security::{
     ACL, CreateRestrictedToken, DACL_SECURITY_INFORMATION, DISABLE_MAX_PRIVILEGE, GetLengthSid,
     GetSecurityDescriptorDacl, GetSecurityDescriptorSacl, GetTokenInformation,
-    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SID_AND_ATTRIBUTES,
-    SetTokenInformation, TOKEN_ALL_ACCESS, TOKEN_DEFAULT_DACL, TOKEN_GROUPS,
+    LABEL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
+    SID_AND_ATTRIBUTES, SetTokenInformation, TOKEN_ALL_ACCESS, TOKEN_DEFAULT_DACL, TOKEN_GROUPS,
     TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_LABEL, TokenDefaultDacl, TokenElevationType,
     TokenGroups, TokenIntegrityLevel,
 };
@@ -291,11 +291,7 @@ pub(in crate::windows) fn make(base: &Handle, spec: &TokenSpec) -> io::Result<Ha
 /// already, while the inner was suspended; this runs first thing after the launch is read, before
 /// the agent's token is made (whose own DACL is set explicitly, `TokenSpec::token_dacl`). The
 /// handles this runner holds keep their access.
-pub(in crate::windows) fn shut_self(
-    token: &Handle,
-    desktop_user: &Sid,
-    logon: &Sid,
-) -> io::Result<()> {
+pub(in crate::windows) fn shut_self(token: &Handle, desktop_user: &Sid) -> io::Result<()> {
     use super::{runner_process_sddl, runner_thread_sddl, runner_token_sddl};
 
     set_kernel_dacl(
@@ -304,10 +300,7 @@ pub(in crate::windows) fn shut_self(
     )?;
     // SAFETY: the pseudo-handle of this process needs no close and carries every right.
     let own_process = unsafe { GetCurrentProcess() };
-    set_kernel_dacl(
-        own_process,
-        &LocalDescriptor::new(&runner_process_sddl(desktop_user, logon))?,
-    )?;
+    shut_process(own_process, &runner_process_sddl(desktop_user))?;
     shut_threads(&runner_thread_sddl(desktop_user))
 }
 
@@ -367,6 +360,35 @@ pub(in crate::windows) fn shut_inner_token_first(
 /// handles to the suspended inner runner's process and thread).
 pub(in crate::windows) fn shut_object(handle: HANDLE, sddl: &str) -> io::Result<()> {
     set_kernel_dacl(handle, &LocalDescriptor::new(sddl)?)
+}
+
+/// Sets the protected DACL and the mandatory label of `sddl` (`token::runner_process_sddl`) on
+/// the process `handle`, which needs `WRITE_DAC` and `WRITE_OWNER` (the logon's handle and this
+/// process's pseudo-handle have both).
+pub(in crate::windows) fn shut_process(handle: HANDLE, sddl: &str) -> io::Result<()> {
+    let descriptor = LocalDescriptor::new(sddl)?;
+    let (dacl, sacl) = (descriptor.dacl()?, descriptor.sacl()?);
+    // SAFETY: the handle is live with `WRITE_DAC` and `WRITE_OWNER`; both ACLs live in
+    // `descriptor`, which outlives the call.
+    let code = unsafe {
+        SetSecurityInfo(
+            handle,
+            SE_KERNEL_OBJECT,
+            DACL_SECURITY_INFORMATION
+                | PROTECTED_DACL_SECURITY_INFORMATION
+                | LABEL_SECURITY_INFORMATION,
+            None,
+            None,
+            Some(dacl.cast_const()),
+            Some(sacl.cast_const()),
+        )
+    };
+    if code.is_err() {
+        return Err(io::Error::from_raw_os_error(
+            i32::try_from(code.0).unwrap_or(i32::MAX),
+        ));
+    }
+    Ok(())
 }
 
 /// The ids of this process's threads, from a Toolhelp snapshot.

@@ -436,7 +436,7 @@ fn exit_codes_are_stable_and_map_to_set_up_causes() {
     assert_eq!(RunExit::Usage.code(), 0xE0C1_5000);
     assert_eq!(RunExit::SecondaryLogon.code(), 0xE0C1_5003);
     assert_eq!(RunExit::Spawn.code(), 0xE0C1_500B);
-    for exit in RunExit::ALL {
+    for exit in RunExit::ALL.into_iter().chain([RunExit::TokenGrant]) {
         assert_eq!(RunExit::from_code(exit.code()), Some(exit));
     }
     assert_eq!(RunExit::from_code(0), None);
@@ -453,9 +453,16 @@ fn exit_codes_are_stable_and_map_to_set_up_causes() {
     assert_eq!(RunExit::AwaitingStop.no_sandbox(), None);
     assert_eq!(RunExit::AwaitingSweep.code(), 0xE0C1_5013);
     assert_eq!(RunExit::AwaitingSweep.no_sandbox(), None);
-    assert_eq!(RunExit::TokenGrant.code(), 0xE0C1_5014);
+    // Reserved at 0x15; 0x14 is another branch's code, none here.
+    assert_eq!(RunExit::TokenGrant.code(), 0xE0C1_5015);
     assert_eq!(RunExit::TokenGrant.no_sandbox(), None);
-    assert_eq!(RunExit::from_code(RUN_EXIT_BASE + 21), None);
+    for unknown in [0x14, 0x16] {
+        assert_eq!(
+            RunExit::from_code(RUN_EXIT_BASE + unknown),
+            None,
+            "0x{unknown:x}"
+        );
+    }
     assert_eq!(RunExit::DllSearch.no_sandbox(), None);
     assert_eq!(RunExit::AgentReserved.no_sandbox(), None);
     assert_eq!(RunExit::Sweep.no_sandbox(), None);
