@@ -1,0 +1,130 @@
+# Windows ARM64 browser proof (run by hand): runs one ignored-by-default test that launches the pinned
+# x64 chrome-headless-shell under Prism as a LowBox child on windows-11-arm, for the orchestrator's
+# ruling that Windows on ARM64 runs Chrome for Testing's win64 shell (there is no win-arm64 build).
+# If the row fails, the browser ships off on Windows ARM64.
+#
+# The shell comes from clauseo-ai/browser-pins' `current` release (public, as the app fetches it):
+# browser-pins-v1.json gives `stable.version` and the win64 chrome-headless-shell size and sha256;
+# the zip is downloaded from Chrome for Testing's template URL and checked against both before it is
+# unpacked.
+#
+# The test reads CLAUSEO_TEST_CHROME_SHELL (the shell's path; it fails, never skips, without it) and
+# writes its screenshot and logs to CLAUSEO_TEST_ARTIFACTS, which are uploaded. It is not an
+# `elevated_` test, so the merge group's elevated step never runs it without the shell.
+#
+# Run: gh workflow run arm64-browser-proof.yml -f ref=<branch or sha> [-f test=<name>]
+name: windows ARM64 browser proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit to test (the one with the test)
+        required: true
+      package:
+        description: Cargo package of the test
+        default: clauseo-lowbox
+      test:
+        description: Test name (a cargo test filter; exactly one test must run and pass)
+        default: lowbox_headless_shell_row
+      account_prefix:
+        description: Local-account name prefix the test uses (the backstop clean-up removes leftovers)
+        default: ClauseoLowbox
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arm64-browser-proof-${{ inputs.ref }}
+  cancel-in-progress: false
+
+jobs:
+  proof:
+    name: windows ARM64 browser proof
+    runs-on: windows-11-arm
+    timeout-minutes: 60
+    env:
+      TARGET: aarch64-pc-windows-msvc
+      PKG: ${{ inputs.package }}
+      TEST: ${{ inputs.test }}
+      ACCOUNT_PREFIX: ${{ inputs.account_prefix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Put the temp folder on drive D (Windows)
+        shell: pwsh
+        run: |
+          $t = Join-Path $env:RUNNER_TEMP 't'
+          New-Item -ItemType Directory -Force $t | Out-Null
+          "TMP=$t" >> $env:GITHUB_ENV
+          "TEMP=$t" >> $env:GITHUB_ENV
+          $a = Join-Path $env:RUNNER_TEMP 'proof-artifacts'
+          New-Item -ItemType Directory -Force $a | Out-Null
+          "CLAUSEO_TEST_ARTIFACTS=$a" >> $env:GITHUB_ENV
+
+      - name: Install the Rust toolchain from rust-toolchain.toml, and the target
+        shell: bash
+        run: |
+          rustup toolchain install
+          rustup target add "$TARGET"
+
+      # The pin, then the zip checked against its size and sha256 before anything unpacks it.
+      - name: Fetch the pinned win64 chrome-headless-shell
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pins = Invoke-RestMethod -Uri 'https://github.com/clauseo-ai/browser-pins/releases/download/current/browser-pins-v1.json'
+          $version = $pins.stable.version
+          $entry = $pins.stable.downloads.'chrome-headless-shell'.win64
+          if (-not $version -or -not $entry.sha256 -or -not $entry.size) { throw "browser-pins-v1.json has no stable win64 chrome-headless-shell entry" }
+          "pin: chrome-headless-shell $version win64, $($entry.size) bytes, sha256 $($entry.sha256) (published $($pins.published))"
+          $zip = Join-Path $env:RUNNER_TEMP 'chrome-headless-shell-win64.zip'
+          Invoke-WebRequest -Uri "https://storage.googleapis.com/chrome-for-testing-public/$version/win64/chrome-headless-shell-win64.zip" -OutFile $zip -UseBasicParsing
+          $size = (Get-Item $zip).Length
+          $sha = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+          if ($size -ne [int64]$entry.size) { throw "size $size, but the pin says $($entry.size)" }
+          if ($sha -ne $entry.sha256.ToLowerInvariant()) { throw "sha256 $sha, but the pin says $($entry.sha256)" }
+          "zip matches the pin: $size bytes, sha256 $sha"
+          $dir = Join-Path $env:RUNNER_TEMP 'shell'
+          Expand-Archive -Path $zip -DestinationPath $dir -Force
+          $exe = (Get-ChildItem -Path $dir -Recurse -Filter 'chrome-headless-shell.exe' | Select-Object -First 1).FullName
+          if (-not $exe) { throw "no chrome-headless-shell.exe in the zip" }
+          "shell: $exe"
+          "CLAUSEO_TEST_CHROME_SHELL=$exe" >> $env:GITHUB_ENV
+
+      # Exactly one test must run and pass: a filter that matches nothing is a failure, not a green run.
+      - name: Run the proof test
+        shell: bash
+        env:
+          CLAUSEO_ELEVATED_TESTS: "1"
+        run: |
+          set -o pipefail
+          cargo test -p "$PKG" -- --ignored "$TEST" --nocapture --test-threads 1 2>&1 | tee "$CLAUSEO_TEST_ARTIFACTS/test-output.txt"
+          ran=$(grep -cE "^test .*${TEST}.* \.\.\. ok$" "$CLAUSEO_TEST_ARTIFACTS/test-output.txt" || true)
+          if [ "$ran" -lt 1 ]; then
+            echo "::error::no test matching '$TEST' ran and passed in package $PKG"
+            exit 1
+          fi
+          echo "proof: $ran test(s) matching '$TEST' passed"
+
+      - name: Upload the screenshot and logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: arm64-browser-proof
+          path: ${{ env.CLAUSEO_TEST_ARTIFACTS }}
+          retention-days: 14
+          if-no-files-found: warn
+
+      # The test removes its own account and checks it; this only lists and removes leftovers, so a
+      # failed run leaves the (throwaway) runner as it found it and says what it found.
+      - name: Backstop clean-up of test accounts
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          $left = Get-CimInstance Win32_UserAccount -Filter "LocalAccount=True" | Where-Object { $_.Name -like "$env:ACCOUNT_PREFIX*" }
+          if (-not $left) { "no leftover accounts named $env:ACCOUNT_PREFIX*"; exit 0 }
+          foreach ($u in $left) { "::warning::leftover test account $($u.Name); removing it"; net user $u.Name /delete | Out-Null }
