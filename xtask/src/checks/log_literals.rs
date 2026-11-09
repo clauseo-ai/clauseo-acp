@@ -87,7 +87,10 @@ fn is_read(file: &str) -> bool {
         || name.ends_with("_tests.rs")
         || rest.split('/').any(|part| part == "tests");
     let setup = file.starts_with(SKIPPED) && !SETUP_READ.contains(&file);
-    name.ends_with(".rs") && !setup && !test
+    let rust = std::path::Path::new(name)
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("rs"));
+    rust && !setup && !test
 }
 
 /// The violations of the file `path` holding `text`.

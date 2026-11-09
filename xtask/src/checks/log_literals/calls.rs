@@ -37,7 +37,8 @@ impl<'a> Calls<'a> {
 }
 
 impl<'ast> Visit<'ast> for Calls<'_> {
-    fn visit_macro(&mut self, mac: &'ast syn::Macro) {
+    fn visit_macro(&mut self, i: &'ast syn::Macro) {
+        let mac = i;
         let at = mac
             .path
             .segments
@@ -64,7 +65,8 @@ impl<'ast> Visit<'ast> for Calls<'_> {
         syn::visit::visit_macro(self, mac);
     }
 
-    fn visit_use_rename(&mut self, rename: &'ast syn::UseRename) {
+    fn visit_use_rename(&mut self, i: &'ast syn::UseRename) {
+        let rename = i;
         let name = rename.ident.to_string();
         if MACROS.contains(&name.as_str()) {
             let message = format!(
