@@ -618,7 +618,8 @@ jobs:
           tarball=Clauseo_${VERSION}_${{ matrix.arch }}.app.tar.gz
           mv "$macos/Clauseo.app.tar.gz" "$macos/$tarball"
           rm "$macos/Clauseo.app.tar.gz.sig"
-          pnpm -C ui tauri signer sign --app-version "$VERSION" "$macos/$tarball"
+          # pnpm -C ui runs the signer in ui/, so the archive's path must be absolute.
+          pnpm -C ui tauri signer sign --app-version "$VERSION" "$PWD/$macos/$tarball"
 
       # The .app as bundled, before anything uploads it. Contents/MacOS, which the agent's sandbox
       # can reach, holds exactly the main executable and the overlay's externalBin sidecars;
