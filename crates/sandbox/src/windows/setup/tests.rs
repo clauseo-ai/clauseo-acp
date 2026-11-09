@@ -90,6 +90,7 @@ fn fresh_calls() -> Vec<String> {
             format!("log_on_once {name}"),
         ]);
     }
+    calls.push("wsl_deny 1000".to_owned());
     for n in 1..=8 {
         calls.extend([
             format!("exists ClauseoSb0{n}"),
@@ -102,12 +103,12 @@ fn fresh_calls() -> Vec<String> {
             "exists DeviceSync",
             "owner_of DeviceSync",
             "network 1001,1002,1003,1004,1005,1006,1007,1008",
-            "wsl_deny 1000",
             "journal_volumes",
             "journal_size C:",
             "grow_journal C:",
             "protect_for_owner 1001,1002,1003,1004,1005,1006,1007,1008",
             "write_marker",
+            "wsl_deny 1000",
             "unlock",
         ]
         .map(str::to_owned),

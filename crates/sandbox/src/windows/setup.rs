@@ -31,9 +31,11 @@
 //! Between steps 8 and 9, step 8a (S15 PR7, `wfp`) writes the network filters: WFP block filters
 //! naming every live pool user, the owner's grants that let a launch add its own permit, and the
 //! firewall rules. A WFP failure fails the set-up; a firewall Group Policy ignores is only
-//! reported. Step 8b (`wsl`) then denies the group in WSL's COM launch permissions; like step
-//! 9 it never fails the set-up (the launch check refuses while a deny is missing), and its
-//! targets are recorded in the record's `WslDenyAppIds` and `WslDenyAbsent`.
+//! reported. WSL's deny (`wsl`) denies the group in WSL's COM launch permissions twice: as soon
+//! as the group and the record exist (after step 5's record write), and again after the marker.
+//! Like step 9 it never fails the set-up (the launch check refuses while a deny is missing), its
+//! targets are recorded in the record's `WslDenyAppIds` and `WslDenyAbsent`, and a rollback
+//! takes it off before the group goes.
 //!
 //! A re-run on a pool this owner set up (D-B6) keeps the recorded accounts that exist, resets
 //! their passwords, logs each on again and re-applies the shared writes; it makes again each

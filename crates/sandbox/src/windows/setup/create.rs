@@ -286,6 +286,10 @@ fn change(
         write_record(machine, &record).map_err(|cause| (Step::WriteRecord, cause))?;
         run.recorded = Some(record);
     }
+    // WSL's deny, first: as soon as the group and the record (which records its targets) both
+    // exist, so no later step runs while a pool user could start WSL. Again at the end.
+    run.wsl_tried = true;
+    let first_wsl = wsl_deny(machine, &group);
     admin_lock(machine, &group)?;
     // A failure after this leaves the task registered, naming this run's owner: the rollback has
     // no step for it. It still stops only what the record names: after a first set-up's rollback
@@ -305,8 +309,6 @@ fn change(
         None => (None, Vec::new()),
     };
     let network = network(machine, &req.owner, &group, &live)?;
-    run.wsl_tried = true;
-    let wsl = wsl_deny(machine, &group);
     let journals = journals(machine, &plan.matters);
     owned(machine, |machine| {
         machine.protect_for_owner(&users.secrets, &live)
@@ -322,6 +324,12 @@ fn change(
     };
     owned(machine, |machine| machine.write_marker(&marker))
         .map_err(|error| (Step::Marker, cause_of(&error)))?;
+    // And last: idempotent, so it only writes what changed since the first (a WSL install or
+    // update during the set-up). Its outcome is the report's; the first's failure is logged.
+    if let Err(why) = &first_wsl {
+        tracing::warn!(%why, "WSL's first deny pass failed; the last pass is the report's");
+    }
+    let wsl = wsl_deny(machine, &group);
     Ok(SetupReport {
         pool: users.profiles.into_iter().map(|(user, _)| user).collect(),
         made: run.made.iter().map(|made| made.user.clone()).collect(),
