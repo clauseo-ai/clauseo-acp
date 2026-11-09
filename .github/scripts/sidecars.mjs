@@ -16,7 +16,13 @@
 //     {"macOS":{"files":{"Helpers/clauseo-agent-browser": ...}}} in bundle beside it: the helper
 //     lives in Clauseo.app/Contents/Helpers, Apple's folder for nested helper code, not in
 //     Contents/MacOS beside the app (which the agent's sandbox can reach). Tauri copies
-//     macOS.files without signing them, so release.yml signs the helper before `tauri bundle`.
+//     macOS.files without signing them, so release.yml signs the helper before `tauri bundle`;
+//   - places stetdoc in a folder of its own (STETDOC below; the private task row U13), so that
+//     only that folder goes first on the agents' PATH: on a darwin target in bundle.macOS.files
+//     as Helpers/stetdoc/stetdoc (signed with the browser helper), elsewhere in bundle.resources
+//     as stetdoc/stetdoc[.exe] (on Windows in the install folder, which is the resource folder,
+//     and signed with the other files of binaries/). The pin is crates/desktop/stetdoc.toml; a
+//     target it marks pending fails here, loudly.
 // The legs pass that file last with --config to every `tauri build` and `tauri bundle`. A JSON
 // merge patch replaces arrays, so this one list is the target's whole externalBin. Both outputs
 // are gitignored. The base tauri.conf.json has no externalBin: tauri-build checks that every
@@ -36,6 +42,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { fetchAgentBrowser } from "../../crates/desktop/sidecars/agent-browser.mjs";
+import { fetchStetdoc } from "../../crates/desktop/sidecars/stetdoc.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -132,6 +139,12 @@ const pinnedAgentBrowser = async (triple, ctx, dest) =>
   ctx.fetchAgentBrowser(triple, dest, ctx.agentBrowserOptions);
 
 /**
+ * Fetches the pinned stetdoc straight to its destination (crates/desktop/stetdoc.toml); throws on
+ * a triple the pin marks pending, so no release of it builds without stetdoc.
+ */
+const pinnedStetdoc = async (triple, ctx, dest) => ctx.fetchStetdoc(triple, dest, ctx.stetdocOptions);
+
+/**
  * Every sidecar, in bundle order. `targets` is the triples it ships on; `macosHelper`, that on a
  * darwin target it goes to Contents/Helpers/<name> (bundle.macOS.files) instead of
  * bundle.externalBin (Contents/MacOS). `place` returns the
@@ -156,46 +169,78 @@ export const SIDECARS = [
     place: setupExe,
   },
   // clauseo-sandbox-run comes later (S15 PR5), Windows targets only.
+  // stetdoc, in its own folder (STETDOC): never in externalBin, so never beside the app.
+  { name: "clauseo-stetdoc", targets: RELEASE_TARGETS, ownFolder: true, place: pinnedStetdoc },
 ];
 
 /** Every sidecar's name starts with this (ADR 0035, "Sidecars"). */
 export const PREFIX = "clauseo-";
 
 /**
- * The one sidecar a darwin overlay puts in bundle.macOS.files, at Contents/Helpers/<name>. A
- * second helper means changing this, overlayProblem and release.yml's .app checks together.
+ * The one sidecar a darwin overlay puts in bundle.macOS.files, at Contents/Helpers/<name>, beside
+ * stetdoc's own folder (STETDOC). A second helper means changing this, overlayProblem and
+ * release.yml's .app checks together.
  */
 export const MACOS_HELPER = "clauseo-agent-browser";
+
+/**
+ * stetdoc, staged as binaries/clauseo-stetdoc-<triple>[.exe] and bundled in a folder of its own:
+ * Contents/Helpers/stetdoc/stetdoc on macOS (bundle.macOS.files), <resources>/stetdoc/stetdoc
+ * elsewhere (bundle.resources; on Windows the resource folder is the install folder).
+ * crates/desktop/src/profile.rs looks for it at the same paths.
+ */
+export const STETDOC = "clauseo-stetdoc";
+const stetdocHelper = "Helpers/stetdoc/stetdoc";
+const stetdocResource = (triple) => `stetdoc/stetdoc${exe(triple)}`;
+const staged = (name, triple) => `binaries/${name}-${triple}${exe(triple)}`;
+
+/** The bundle.macOS.files entries a darwin overlay may hold for `triple`. */
+const macosFiles = (triple) => ({
+  [`Helpers/${MACOS_HELPER}`]: staged(MACOS_HELPER, triple),
+  [stetdocHelper]: staged(STETDOC, triple),
+});
+
+/** The bundle.resources entries any other overlay may hold for `triple`. */
+const resourceFiles = (triple) => ({ [staged(STETDOC, triple)]: stetdocResource(triple) });
 
 const OVERLAY = join(ROOT, "crates", "desktop", "release", "sidecars.generated.json");
 
 /**
  * Why a parsed overlay is not one this script writes for `triple`, or null when it is: only
- * bundle.externalBin, a list of binaries/clauseo-* strings, and on a darwin target, optionally,
- * bundle.macOS.files holding exactly {"Helpers/clauseo-agent-browser":
- * "binaries/clauseo-agent-browser-<triple>"}, with that sidecar then absent from externalBin.
- * release.yml checks it with --check after the seam and again in sign-windows, before any
- * bundle reads it.
+ * bundle.externalBin, a list of binaries/clauseo-* strings, and, optionally, on a darwin target
+ * bundle.macOS.files, elsewhere bundle.resources, each a non-empty object whose every entry is
+ * one this script writes for the triple (macosFiles, resourceFiles); a sidecar there is then
+ * absent from externalBin. release.yml checks it with --check after the seam and again in
+ * sign-windows, before any bundle reads it.
  */
 export function overlayProblem(overlay, triple) {
   if (!RELEASE_TARGETS.includes(triple)) return `${triple} is not a release target`;
   const keys = (v) => (v !== null && typeof v === "object" && !Array.isArray(v) ? Object.keys(v).sort().join(" ") : null);
-  const helper = isDarwin(triple) && keys(overlay?.bundle) === "externalBin macOS";
-  if (keys(overlay) !== "bundle" || (keys(overlay.bundle) !== "externalBin" && !helper) || !Array.isArray(overlay.bundle.externalBin)) {
+  const extra = isDarwin(triple) ? "macOS" : "resources";
+  const shape = keys(overlay?.bundle);
+  const withExtra = shape === `externalBin ${extra}`;
+  if (keys(overlay) !== "bundle" || (shape !== "externalBin" && !withExtra) || !Array.isArray(overlay.bundle.externalBin)) {
     return isDarwin(triple)
       ? "it may hold only bundle.externalBin, a list, and bundle.macOS.files"
-      : "it may hold only bundle.externalBin, a list";
+      : "it may hold only bundle.externalBin, a list, and bundle.resources";
   }
   const bad = overlay.bundle.externalBin.filter((entry) => typeof entry !== "string" || !entry.startsWith(`binaries/${PREFIX}`));
   if (bad.length > 0) return `each entry must start with binaries/${PREFIX}: ${JSON.stringify(bad)}`;
-  if (!helper) return null;
-  const want = { files: { [`Helpers/${MACOS_HELPER}`]: `binaries/${MACOS_HELPER}-${triple}` } };
-  if (JSON.stringify(overlay.bundle.macOS) !== JSON.stringify(want)) {
-    return `bundle.macOS may hold only ${JSON.stringify(want)}: ${JSON.stringify(overlay.bundle.macOS)}`;
-  }
-  if (overlay.bundle.externalBin.includes(`binaries/${MACOS_HELPER}`)) {
-    return `binaries/${MACOS_HELPER} is in bundle.macOS.files, so it may not be in externalBin`;
-  }
+  if (!withExtra) return null;
+  const allowed = isDarwin(triple) ? macosFiles(triple) : resourceFiles(triple);
+  const held = isDarwin(triple) ? overlay.bundle.macOS : overlay.bundle.resources;
+  const entries = isDarwin(triple) ? (keys(held) === "files" ? held.files : null) : held;
+  const what = isDarwin(triple) ? "bundle.macOS" : "bundle.resources";
+  const ok =
+    keys(entries) !== null &&
+    Object.keys(entries).length > 0 &&
+    Object.entries(entries).every(([key, value]) => Object.hasOwn(allowed, key) && allowed[key] === value);
+  if (!ok) return `${what} may hold only entries of ${JSON.stringify(allowed)}: ${JSON.stringify(held)}`;
+  const paths = new Set([...Object.keys(entries), ...Object.values(entries)]);
+  const moved = [MACOS_HELPER, STETDOC].filter(
+    (name) => paths.has(staged(name, triple)) && overlay.bundle.externalBin.includes(`binaries/${name}`),
+  );
+  if (moved.length > 0) return `binaries/${moved[0]} is in ${what}, so it may not be in externalBin`;
   return null;
 }
 
@@ -209,11 +254,12 @@ function runCargo(args, extra = {}) {
 
 /**
  * Places every sidecar for `triple` and writes the overlay. Returns the overlay's externalBin
- * (without a darwin target's helper, which is in bundle.macOS.files).
+ * (without a darwin target's helper, which is in bundle.macOS.files, or stetdoc, in its own folder).
  *
  * @param {string} triple a target in RELEASE_TARGETS
  * @param {{ root?: string, cargo?: (args: string[], extra?: object) => void, targetDir?: string,
  *   fetchAgentBrowser?: typeof fetchAgentBrowser, agentBrowserOptions?: object,
+ *   fetchStetdoc?: typeof fetchStetdoc, stetdocOptions?: object,
  *   sidecars?: typeof SIDECARS, commitTime?: (root: string) => string }} [options] the tests
  *   replace cargo, the fetch, the root and git's commit time
  * @returns {Promise<string[]>}
@@ -227,6 +273,9 @@ export async function placeSidecars(triple, options = {}) {
     if (!name.startsWith(PREFIX)) throw new Error(`sidecars: ${name} does not start with ${PREFIX}`);
     if (macosHelper && name !== MACOS_HELPER) throw new Error(`sidecars: only ${MACOS_HELPER} may be a macOS helper, not ${name}`);
   }
+  for (const { name, ownFolder } of sidecars) {
+    if (ownFolder && name !== STETDOC) throw new Error(`sidecars: only ${STETDOC} has a folder of its own, not ${name}`);
+  }
   const root = options.root ?? ROOT;
   const ctx = {
     root,
@@ -235,6 +284,8 @@ export async function placeSidecars(triple, options = {}) {
     targetDir: resolve(root, options.targetDir ?? process.env.CARGO_TARGET_DIR ?? "target"),
     fetchAgentBrowser: options.fetchAgentBrowser ?? fetchAgentBrowser,
     agentBrowserOptions: options.agentBrowserOptions,
+    fetchStetdoc: options.fetchStetdoc ?? fetchStetdoc,
+    stetdocOptions: options.stetdocOptions,
   };
   const desktop = join(root, "crates", "desktop");
   const binaries = join(desktop, "binaries");
@@ -251,6 +302,7 @@ export async function placeSidecars(triple, options = {}) {
 
   const externalBin = [];
   const files = {};
+  const resources = {};
   for (const sidecar of sidecars) {
     if (!sidecar.targets.includes(triple)) continue;
     const dest = join(binaries, `${sidecar.name}-${triple}${exe(triple)}`);
@@ -264,14 +316,20 @@ export async function placeSidecars(triple, options = {}) {
       if (!isWindows(triple)) await chmod(dest, 0o755);
     }
     console.log(`${sidecar.name}: ${dest} (${(await stat(dest)).size} bytes)`);
-    if (sidecar.macosHelper && isDarwin(triple)) {
+    if (sidecar.ownFolder && isDarwin(triple)) {
+      files[stetdocHelper] = staged(sidecar.name, triple);
+    } else if (sidecar.ownFolder) {
+      resources[staged(sidecar.name, triple)] = stetdocResource(triple);
+    } else if (sidecar.macosHelper && isDarwin(triple)) {
       files[`Helpers/${sidecar.name}`] = `binaries/${sidecar.name}-${triple}`;
     } else {
       externalBin.push(`binaries/${sidecar.name}`);
     }
   }
 
-  const bundle = Object.keys(files).length > 0 ? { externalBin, macOS: { files } } : { externalBin };
+  const bundle = { externalBin };
+  if (Object.keys(files).length > 0) bundle.macOS = { files };
+  if (Object.keys(resources).length > 0) bundle.resources = resources;
   await writeFile(overlay, `${JSON.stringify({ bundle })}\n`);
   console.log(`${overlay}: ${JSON.stringify(bundle)}`);
   return externalBin;
