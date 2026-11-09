@@ -4,9 +4,17 @@
 //!
 //! It sees the transport only through `crate::transport`'s [`Listener`] and [`Connection`]. A
 //! thread accepts each connection. One whose peer runs as another user ([`Connection::same_user`])
-//! is closed at once. One that arrives while a client is connected gets a single
-//! JSON-RPC error line, [`BUSY`], and is closed. Otherwise the connection becomes the client, on a
+//! is closed at once. One that arrives while a client is connected gets a single JSON-RPC error
+//! line, [`BUSY`], and is closed: with the id of its first request, if one arrives within
+//! [`BUSY_WAIT`] (the bridge sends the request that made it connect at once), so that request is
+//! answered once; with a null id otherwise. Otherwise the connection becomes the client, on a
 //! thread of its own.
+//!
+//! Each write to the client may block for at most [`WRITE_WAIT`]. A client that stops reading
+//! for that long, or whose connection fails, is taken as gone: the guard shuts the connection,
+//! which ends the client's reads and so counts as its disconnect, and every later write to it
+//! fails at once. So no write to a jailed agent that stopped reading holds the agent's output
+//! lock for ever, and the guard's end (which answers what is in flight) is never stuck on one.
 //!
 //! When the client disconnects the guard stays up, for the next client: it closes the
 //! connection, sends the agent's lines nowhere until the next one, and stops the browser exactly
@@ -21,7 +29,7 @@
 //! the agent's leaving: the parent's going, a start that fails, agent-browser's own end, Chrome's
 //! second death or a refused port (`relay.rs`).
 
-use std::io::BufReader;
+use std::io::{self, BufReader, Write};
 use std::net::Shutdown;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
@@ -30,17 +38,26 @@ use std::time::Duration;
 
 use super::super::parent::Parent;
 use super::super::session::{self, Shared};
-use super::lines::{error_reply, lock};
+use super::lines::{Line, Overflow, error_reply, lock, read_line};
 use super::pumps::{self, Pumped};
 use super::{Event, oneshot};
+use crate::browser_guard::filter::MAX_LINE_BYTES;
 use crate::browser_guard::{note, pause};
+use crate::connector::head;
 use crate::transport::{Connection, Listener};
 
 /// The error a connection gets while another client is connected.
 pub(crate) const BUSY: &str =
     "The browser is in use by another connection. Close that one first, then connect again.";
-/// How long the guard tries to write [`BUSY`] before closing the connection anyway.
+/// How long the guard waits for a second connection's first request, and then tries to write
+/// [`BUSY`], before closing it anyway.
 const BUSY_WAIT: Duration = Duration::from_secs(1);
+/// The longest one write to the client may block before the guard takes the client as gone.
+pub(crate) const WRITE_WAIT: Duration = Duration::from_secs(10);
+/// Tests only (the `test-support` feature, never in a shipped build): [`WRITE_WAIT`] in
+/// milliseconds, read from the guard's own environment.
+#[cfg(feature = "test-support")]
+const WRITE_WAIT_FOR_TESTS: &str = "CLAUSEO_TEST_GUARD_WRITE_MS";
 /// The pause after an `accept` that failed (out of descriptors, say), before the next.
 const ACCEPT_RETRY: Duration = Duration::from_millis(100);
 
@@ -95,14 +112,82 @@ fn accept(
     }
 }
 
-/// Tells a second connection the browser is in use, then closes it.
+/// [`WRITE_WAIT`], or in a `test-support` build the test's.
+fn write_wait() -> Duration {
+    #[cfg(feature = "test-support")]
+    if let Some(ms) = std::env::var(WRITE_WAIT_FOR_TESTS)
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+    {
+        return Duration::from_millis(ms);
+    }
+    WRITE_WAIT
+}
+
+/// The client's side of [`Out`](super::lines::Out): its connection, shut at the first write
+/// that fails or times out, so its reads end (its disconnect) and later writes fail at once.
+struct ToClient<C: Connection>(C);
+
+impl<C: Connection> ToClient<C> {
+    /// Shuts the connection when `result` is a failure other than an interrupted call.
+    fn checked<T>(&self, result: io::Result<T>) -> io::Result<T> {
+        if let Err(error) = &result
+            && error.kind() != io::ErrorKind::Interrupted
+        {
+            drop(self.0.shutdown(Shutdown::Both));
+        }
+        result
+    }
+}
+
+impl<C: Connection> Write for ToClient<C> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let written = self.0.write(buf);
+        self.checked(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        let flushed = self.0.flush();
+        self.checked(flushed)
+    }
+}
+
+/// Tells a second connection the browser is in use, on a thread of its own (it waits up to
+/// [`BUSY_WAIT`] for the connection's first request), then closes it.
 fn refuse(mut stream: impl Connection) {
     note("refused a second connection while a client is connected");
-    let line = format!("{}\n", error_reply(&serde_json::Value::Null, BUSY));
-    // A peer that does not read, or has gone, gets the close alone.
-    if stream.set_write_timeout(Some(BUSY_WAIT)).is_ok() {
-        drop(stream.write_all(line.as_bytes()));
+    drop(thread::spawn(move || {
+        let id = if stream.set_read_timeout(Some(BUSY_WAIT)).is_ok()
+            && let Ok(reader) = stream.try_clone()
+        {
+            first_request_id(reader)
+        } else {
+            None
+        };
+        let line = format!(
+            "{}\n",
+            error_reply(&id.unwrap_or(serde_json::Value::Null), BUSY)
+        );
+        // A peer that does not read, or has gone, gets the close alone.
+        if stream.set_write_timeout(Some(BUSY_WAIT)).is_ok() {
+            drop(stream.write_all(line.as_bytes()));
+        }
+    }));
+}
+
+/// The id of the first line read from `reader`, if it is a request.
+fn first_request_id(reader: impl Connection) -> Option<serde_json::Value> {
+    let mut line = Vec::new();
+    let read = read_line(
+        &mut BufReader::new(reader),
+        &mut line,
+        MAX_LINE_BYTES,
+        Overflow::Stop,
+    );
+    if !matches!(read, Ok(Line::Whole | Line::Partial)) {
+        return None;
     }
+    head::read(&line).and_then(|head| if head.method { head.id } else { None })
 }
 
 /// Serves one client until it disconnects or the guard is ending. `true` once it has
@@ -118,8 +203,12 @@ fn client(
         note("cannot serve a client: its connection cannot be shared between threads");
         return true;
     };
+    if writer.set_write_timeout(Some(write_wait())).is_err() {
+        note("cannot serve a client: its writes cannot be bounded");
+        return true;
+    }
     let floor = lock(&shared.state).generation;
-    shared.out.attach(Box::new(writer), floor);
+    shared.out.attach(Box::new(ToClient(writer)), floor);
     note("a client connected");
     let mut input = BufReader::new(reader);
     if pumps::pump_lines(&mut input, shared, parent, events) == Pumped::Ending {
@@ -148,3 +237,6 @@ fn client(
     });
     true
 }
+
+#[cfg(test)]
+mod tests;

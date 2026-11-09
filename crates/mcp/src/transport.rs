@@ -18,8 +18,11 @@ pub(crate) trait Connection: Read + Write + Send + Sized + 'static {
     fn shutdown(&self, how: Shutdown) -> io::Result<()>;
     /// Bounds each later write; `None` for no bound.
     fn set_write_timeout(&self, timeout: Option<Duration>) -> io::Result<()>;
-    /// The peer check: whether the process at the other end runs as this process's own user.
-    /// `false` when the OS cannot say.
+    /// Bounds each later read; `None` for no bound.
+    fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()>;
+    /// The peer check, run by both ends: whether the process at the other end runs as this
+    /// process's own user, so neither a stranger posing as the agent nor one posing as the guard
+    /// (a squatter on the path) is served. `false` when the OS cannot say.
     fn same_user(&self) -> bool;
 }
 
@@ -30,5 +33,7 @@ pub(crate) trait Listener: Send + 'static {
     fn accept(&self) -> io::Result<Self::Connection>;
 }
 
+#[cfg(all(test, unix))]
+pub(crate) mod fake;
 #[cfg(unix)]
 pub(crate) mod unix;

@@ -1,11 +1,14 @@
 //! The `browser-bridge` mode (Unix only): `clauseo-mcp browser-bridge --socket <path>`, the MCP
 //! server the agent's harness starts inside the agent's jail when the browser guard runs outside
-//! it, as `clauseo-mcp browser-guard --listen <path>` (`browser_guard/listen.rs`).
+//! it, as `clauseo-mcp browser-guard --listen <path>` (`transport/unix.rs`).
 //!
 //! It relays lines, unchanged: each stdin line to the guard's socket, each socket line to stdout,
 //! with the guard's own caps (`browser_guard::lines`). It parses nothing but a line's `id`, for
 //! the answers it gives itself: a request (a line with `method` and `id`) is pending until a
 //! reply with its id comes back (`link.rs`). The guard checks everything else.
+//!
+//! Each connection must pass the peer check ([`Connection::same_user`]): one whose other end runs
+//! as another user is closed unused, as though the guard were not there.
 //!
 //! When it cannot reach the guard (no socket, refused, or the guard gone mid-session) it answers
 //! each request with [`UNAVAILABLE`] and keeps reading stdin to its end, so the agent's client
@@ -144,8 +147,10 @@ pub(crate) fn serve<C: Connection>(
             link = None;
         }
         if link.is_none() && id.is_some() {
+            // The peer check: a process of another user at the path (a squatter) is no guard.
             link = connect()
                 .ok()
+                .filter(Connection::same_user)
                 .and_then(|socket| Link::start(socket, out, caps.guard).ok());
         }
         let lost = match &mut link {
