@@ -16,6 +16,7 @@ use crate::launch::Flags;
 use crate::{Error, SpawnOptions};
 
 mod inherit;
+mod session;
 
 #[cfg(target_os = "linux")]
 use super::linux as listing;
@@ -25,11 +26,18 @@ use super::macos as listing;
 /// Puts the agent in a new process group whose id is its own pid, so a signal to the group
 /// reaches every process it starts that stays in the group, and gives it the descriptors of
 /// [`SpawnOptions::pass_fd`] and closes the rest with [`SpawnOptions::close_other_fds`]
-/// (`unix/inherit.rs`). Safe std, no `pre_exec`, except for those
-/// descriptors and on Linux for [`SpawnOptions::end_with_parent`] (`linux.rs`).
+/// (`unix/inherit.rs`). Safe std, no `pre_exec`, except for those descriptors, for
+/// [`SpawnOptions::own_session`] and [`SpawnOptions::max_processes`] (`unix/session.rs`), and
+/// on Linux for [`SpawnOptions::end_with_parent`] (`linux.rs`). With its own session the child
+/// gets no `process_group(0)`: std's `setpgid` runs before the `pre_exec` closures, and a group
+/// leader's `setsid` fails; `setsid` makes the group.
 pub(crate) fn prepare(command: &mut Command, opts: &SpawnOptions) {
-    command.process_group(0);
+    let own_session = opts.flags.has(Flags::OWN_SESSION);
+    if !own_session {
+        command.process_group(0);
+    }
     inherit::pass(command, &opts.fds, opts.flags.has(Flags::CLOSE_OTHER_FDS));
+    session::prepare(command, own_session, opts.max_processes);
     #[cfg(target_os = "linux")]
     if opts.flags.has(Flags::END_WITH_PARENT) {
         listing::end_with_parent(command);

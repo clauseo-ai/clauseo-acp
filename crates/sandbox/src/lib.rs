@@ -81,6 +81,10 @@
 //!   `spawn_in_tree`, with the agent's variables plus `TMPDIR=`[`Policy::tmpdir`] (made if
 //!   missing) and nothing else: the launcher always adds `SpawnOptions::clear_env` to the
 //!   options it is given, so no variable of the host's environment reaches the jail.
+//!   The agent leads a session of its own under the process cap (`src/macos/process_cap.rs`):
+//!   `RLIMIT_NPROC` at `kern.maxprocperuid` less 512 (a Mac under 1,024 refuses the launch)
+//!   and a watchdog that stops its descendants past 256, whose notice goes to
+//!   [`SeatbeltLauncher::on_too_many_programs`].
 //!   Denials reach `denials` through a [`CappedSink`]. The first launch registers the launcher
 //!   with the one host-wide watcher (`/usr/bin/log stream`, started with the first launcher
 //!   and stopped with the last); dropping the launcher unregisters it. The tag, the sink and the

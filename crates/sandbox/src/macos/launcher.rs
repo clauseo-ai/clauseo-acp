@@ -1,6 +1,7 @@
 //! [`SeatbeltLauncher`]: runs an agent under its policy's profile through
 //! `/usr/bin/sandbox-exec`, which applies the profile and execs the agent in place, so the pid,
-//! the process group and the tree kill stay `process`'s.
+//! the process group and the tree kill stay `process`'s. The agent leads a session of its own
+//! under the process cap (`process_cap.rs`): its `RLIMIT_NPROC` and a watchdog thread.
 
 use std::ffi::OsString;
 use std::io;
@@ -10,6 +11,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use clauseo_process::{LaunchSpec, Launched, Launcher, SpawnOptions, spawn_in_tree};
 
+use super::process_cap::{self, Notify, libproc, watchdog};
 use super::profile::{self, SeatbeltProfile};
 use super::watch::{self, Registration};
 use crate::{CappedSink, DenialSink, Policy};
@@ -37,6 +39,7 @@ pub struct SeatbeltLauncher {
     opts: SpawnOptions,
     sink: Arc<LaunchSink>,
     registration: Mutex<Option<Registration>>,
+    notify: Notify,
 }
 
 impl std::fmt::Debug for SeatbeltLauncher {
@@ -69,7 +72,20 @@ impl SeatbeltLauncher {
             opts: opts.clear_env().close_other_fds(),
             sink: Arc::new(CappedSink::new(denials)),
             registration: Mutex::new(None),
+            notify: Arc::new(say),
         }
+    }
+
+    /// Where the process cap's notice goes ([`process_cap::TOO_MANY_PROGRAMS`], once per
+    /// launch, at the first time an agent's descendants pass the cap). By default this process's
+    /// stderr: macOS has no session-notice path to the lawyer yet (Windows says it on the outer's
+    /// stderr for the same reason). `notify` must not block: the watchdog calls it.
+    pub fn on_too_many_programs(
+        mut self,
+        notify: impl Fn(&str) + Send + Sync + 'static,
+    ) -> SeatbeltLauncher {
+        self.notify = Arc::new(notify);
+        self
     }
 
     /// The profile every launch runs under.
@@ -132,9 +148,39 @@ impl Launcher for SeatbeltLauncher {
             what: "the agent's TMPDIR could not be made",
             source,
         })?;
+        let limit = launch_limit()?;
         self.register();
-        spawn_in_tree(&jailed, &self.opts)
+        let opts = self.opts.clone().own_session().max_processes(limit);
+        let launched = spawn_in_tree(&jailed, &opts)?;
+        // A watchdog that cannot start ends the agent (`launched` drops, and its tree with it):
+        // it never runs without its cap.
+        watchdog::watch(launched.handle.pid(), Arc::clone(&self.notify)).map_err(|source| {
+            clauseo_process::Error::Os {
+                what: "the agent's process cap could not start",
+                source,
+            }
+        })?;
+        Ok(launched)
     }
+}
+
+/// The agent's `RLIMIT_NPROC` ([`process_cap::process_limit`]), from `kern.maxprocperuid` and
+/// this process's hard limit, read at each launch.
+fn launch_limit() -> Result<u64, clauseo_process::Error> {
+    let read = |source| clauseo_process::Error::Os {
+        what: "this Mac's process limit could not be read",
+        source,
+    };
+    process_cap::process_limit(
+        libproc::per_user().map_err(read)?,
+        libproc::hard_limit().map_err(read)?,
+    )
+}
+
+/// The default notice: one line on this process's stderr.
+fn say(text: &str) {
+    use std::io::Write as _;
+    drop(writeln!(io::stderr().lock(), "{text}"));
 }
 
 /// Makes the agent's `TMPDIR` ([`Policy::tmpdir`]) if it is missing; the folder it is in exists

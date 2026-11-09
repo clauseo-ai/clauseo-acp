@@ -485,6 +485,44 @@ Residual risks:
 - Seatbelt's regex: `#"^[A-Za-z0-9.-]+\.MachPortRendezvousServer\.[0-9]+$"` as a `global-name-regex`
   matched every Mach service on this Mac (logd, SecurityServer). The rule uses the exact name.
 
+### The process cap
+
+Seatbelt cannot count processes: `process-fork` is allow or deny, with no counter, and it has no
+rule for `setsid` or `setpgid`. `RLIMIT_NPROC` is compared with the user's whole process count
+(xnu `fork1`), not one tree's. So the cap is the launcher's (`macos/process_cap.rs`):
+- Launch: the agent leads a session of its own (`setsid` in `pre_exec`,
+  `SpawnOptions::own_session`) with `RLIMIT_NPROC` soft and hard at `kern.maxprocperuid` less
+  512 (3,488 on a Mac at 4,000), read at each launch and never above the launcher's own hard
+  limit (`SpawnOptions::max_processes`). The backstop: whatever the agent does, the lawyer keeps
+  512 process slots for windows, Terminal tabs and apps. Under 1,024 the launch is refused
+  (`clauseo_process::Error::ProcessLimitTooLow`).
+- Watchdog: a thread of the host per agent counts the agent's group (`proc_listpgrppids`)
+  every 50 ms and on each `NOTE_FORK` of the agent (kqueue), and every 2 s walks every process's
+  parent (`proc_listallpids`, `proc_pidinfo`) for descendants that left the group. A descendant
+  is reached by parent pid, each started no earlier than its parent, or is a group member
+  started no earlier than the agent.
+- At `AGENT_PROCESS_CAP` (256 descendants, Windows' job cap): `killpg(SIGSTOP)` freezes the
+  group, each descendant found is stopped too, then each is killed, by pid with its start
+  checked, never by name. The agent gets `SIGCONT` and its turn reports the failed command, as on
+  Windows; it is killed instead when its own children are more than half of the descendants
+  (it is the one forking). The notice, Windows' text, goes once per launch to
+  `SeatbeltLauncher::on_too_many_programs`, by default the host's stderr: macOS has no
+  session-notice path yet.
+
+Measured on a Mac mini (M-series, macOS 27.2): a binary tree of shells 10 levels deep (2,047
+processes at most) was frozen with 145 to 225 of its shells started and about 400 processes in
+all, and process starts outside the jail took at most 72 ms while it ran (the jail test
+`forkcap`). The cap holds after the fact: a bomb runs past 256 for up to one poll.
+
+Residual risks:
+- A descendant that calls `setsid` and is then orphaned (its parent exits, so launchd adopts
+  it) is in neither the group nor the parent walk: the watchdog does not see it or its children.
+  Only the backstop bounds them: they can reach `kern.maxprocperuid` less 512 and no further,
+  and they keep running until the handle's tree kill, which misses them too.
+- The cap counts processes, not threads or memory: 256 large processes can still fill memory.
+- A watchdog that fails to start ends the agent; one whose kqueue fails later stops watching,
+  and the backstop is all that is left for that launch.
+
 ## Status
 
 proposed

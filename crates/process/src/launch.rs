@@ -69,6 +69,9 @@ impl Flags {
     /// [`SpawnOptions::close_other_fds`].
     #[cfg(unix)]
     pub(crate) const CLOSE_OTHER_FDS: Flags = Flags(1 << 2);
+    /// [`SpawnOptions::own_session`].
+    #[cfg(unix)]
+    pub(crate) const OWN_SESSION: Flags = Flags(1 << 3);
 
     /// Whether `flag` is on.
     pub(crate) fn has(self, flag: Flags) -> bool {
@@ -93,6 +96,8 @@ pub struct SpawnOptions {
     pub(crate) stdin_grace: Option<Duration>,
     #[cfg(unix)]
     pub(crate) fds: Vec<(RawFd, Arc<OwnedFd>)>,
+    #[cfg(unix)]
+    pub(crate) max_processes: Option<u64>,
 }
 
 impl SpawnOptions {
@@ -172,6 +177,28 @@ impl SpawnOptions {
     /// option does nothing.
     pub fn ends_with_parent(&self) -> bool {
         self.flags.has(Flags::END_WITH_PARENT)
+    }
+
+    /// The child leads a new session (`setsid` between fork and exec) instead of only a new
+    /// process group. It still leads a group whose id is its pid, so the tree kill is unchanged;
+    /// what changes is that nothing it starts can join a group outside its session, and the
+    /// launching process's group and terminal are out of its reach.
+    #[cfg(unix)]
+    pub fn own_session(mut self) -> SpawnOptions {
+        self.flags = self.flags.with(Flags::OWN_SESSION);
+        self
+    }
+
+    /// The child's `RLIMIT_NPROC`, soft and hard, set between fork and exec: its processes
+    /// cannot start another once the user's process count is past `limit`, and cannot raise the
+    /// limit again. The kernel compares the user's whole count, every process the user runs,
+    /// not the child's tree, with the limit of the process that forks (xnu `fork1`). A
+    /// non-root process cannot raise a hard limit, so a `limit` above this process's own hard
+    /// limit fails the start.
+    #[cfg(unix)]
+    pub fn max_processes(mut self, limit: u64) -> SpawnOptions {
+        self.max_processes = Some(limit);
+        self
     }
 
     /// Process creation flags added to the crate's own (`CREATE_SUSPENDED`, `CREATE_NO_WINDOW`).
