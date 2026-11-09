@@ -4,6 +4,9 @@
 //! walk classifies a named path by its text and the mount table first, and skips a network one
 //! before any file call.
 
+use std::collections::VecDeque;
+use std::ffi::OsString;
+use std::io;
 use std::path::{Component, Path, PathBuf};
 
 use crate::policy::under;
@@ -77,6 +80,88 @@ fn drive_letter(bytes: &[u8]) -> Option<u8> {
     match bytes {
         [letter, b':', ..] if letter.is_ascii_alphabetic() => Some(*letter),
         _ => None,
+    }
+}
+
+/// The most links one chain follows before it counts as a loop, as the kernels' limits do.
+const HOPS_MAX: usize = 40;
+
+/// Where the link at `link` leads, hop by hop, if a hop is a network path: each name is
+/// classified before it is looked at, and each link's target as written before it is followed.
+/// `read` is the one file call, `symlink_metadata` then `read_link` on a local path: its target
+/// if a link, `None` if not. A missing name or a loop ends the chain (not a network path).
+pub(crate) fn link_to_network(
+    link: &Path,
+    mounts: &Mounts,
+    read: impl Fn(&Path) -> io::Result<Option<PathBuf>>,
+) -> Option<PathBuf> {
+    let mut todo: VecDeque<Part> = link.components().map(Part::of).collect();
+    let mut done = PathBuf::new();
+    let mut hops = 0;
+    while let Some(part) = todo.pop_front() {
+        let name = match part {
+            Part::Fixed(fixed) => {
+                done.push(fixed);
+                continue;
+            }
+            Part::Up => {
+                done.pop();
+                continue;
+            }
+            Part::Here => continue,
+            Part::Name(name) => name,
+        };
+        let next = done.join(name);
+        if is_network_path(&next, mounts) {
+            return Some(next);
+        }
+        let target = match read(&next) {
+            Ok(Some(target)) => target,
+            Ok(None) => {
+                done = next;
+                continue;
+            }
+            Err(_) => return None,
+        };
+        if is_network_path(&target, mounts) {
+            return Some(target);
+        }
+        hops += 1;
+        if hops > HOPS_MAX {
+            return None;
+        }
+        for part in target.components().rev() {
+            todo.push_front(Part::of(part));
+        }
+    }
+    None
+}
+
+/// One step of [`link_to_network`]'s path: a prefix or root, kept as it is; `..`; `.`; a name.
+enum Part {
+    Fixed(OsString),
+    Up,
+    Here,
+    Name(OsString),
+}
+
+impl Part {
+    fn of(part: Component<'_>) -> Part {
+        match part {
+            Component::Prefix(_) | Component::RootDir => Part::Fixed(part.as_os_str().to_owned()),
+            Component::CurDir => Part::Here,
+            Component::ParentDir => Part::Up,
+            Component::Normal(name) => Part::Name(name.to_owned()),
+        }
+    }
+}
+
+/// [`link_to_network`]'s file call: the target of the link at `path`, `None` if not a link.
+pub(crate) fn read_if_link(path: &Path) -> io::Result<Option<PathBuf>> {
+    if std::fs::symlink_metadata(path)?.file_type().is_symlink() {
+        std::fs::read_link(path).map(Some)
+    } else {
+        Ok(None)
     }
 }
 

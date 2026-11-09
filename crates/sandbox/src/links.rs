@@ -12,9 +12,9 @@ use serde::Serialize;
 use crate::policy::{opens_as, same, under};
 use crate::{Error, PROTECTED_AT_ANY_DEPTH};
 
-mod network;
+pub(crate) mod network;
 
-use network::{Mounts, is_network_path, lexical};
+use network::{Mounts, is_network_path, lexical, link_to_network, read_if_link};
 
 /// A `.git` file larger than this is not read for its `gitdir:` line; git writes one line.
 const GIT_FILE_MAX: u64 = 64 * 1024;
@@ -262,7 +262,8 @@ impl Walk {
             self.bare_repo(matter, &path);
         }
         if kind.is_symlink() {
-            match symlink_finding(matter, &path, kind) {
+            let found = symlink_finding(matter, &path, link_kind(kind), self.mounts());
+            match found {
                 Some(finding) => self.scan.links.push(finding),
                 // A `.git` link to a folder in the matter: that folder is the repository.
                 None if is_git => {
@@ -377,23 +378,53 @@ impl Walk {
     }
 }
 
-/// The finding for the symbolic link at `path`, if it leads outside `matter` or nowhere.
-fn symlink_finding(matter: &Path, path: &Path, kind: FileType) -> Option<LinkFinding> {
-    let target = match dunce::canonicalize(path) {
-        Ok(target) if under(&target, matter) => return None,
-        Ok(target) => target,
+/// The finding for the symbolic link at `path`, if it leads outside `matter` or nowhere, by
+/// [`symlink_finding_with`] with the file system's calls.
+fn symlink_finding(
+    matter: &Path,
+    path: &Path,
+    kind: LinkKind,
+    mounts: &Mounts,
+) -> Option<LinkFinding> {
+    symlink_finding_with(matter, path, kind, mounts, read_if_link, |link| {
+        dunce::canonicalize(link)
+    })
+}
+
+/// [`symlink_finding`] with `read` and `resolve` in place of reading a link and canonicalize.
+/// A link whose chain reaches a network path ([`link_to_network`]) leads outside, to that path,
+/// and is neither resolved nor followed further.
+fn symlink_finding_with(
+    matter: &Path,
+    path: &Path,
+    kind: LinkKind,
+    mounts: &Mounts,
+    read: impl Fn(&Path) -> io::Result<Option<PathBuf>>,
+    resolve: impl FnOnce(&Path) -> io::Result<PathBuf>,
+) -> Option<LinkFinding> {
+    let finding = |target| {
+        Some(LinkFinding {
+            path: path.to_owned(),
+            kind,
+            target: Some(target),
+        })
+    };
+    if let Some(network) = link_to_network(path, mounts, &read) {
+        tracing::warn!("the matter walk did not follow a link to a network path");
+        return finding(network);
+    }
+    match resolve(path) {
+        Ok(target) if under(&target, matter) => None,
+        Ok(target) => finding(target),
         Err(_) => {
             // Broken (or a loop): outside by rule. Keep where it says it leads.
-            let written = fs::read_link(path).unwrap_or_default();
-            path.parent()
-                .map_or(written.clone(), |folder| folder.join(&written))
+            let written = read(path).ok().flatten().unwrap_or_default();
+            finding(
+                path.parent()
+                    .map_or(written.clone(), |folder| folder.join(&written)),
+            )
         }
-    };
-    Some(LinkFinding {
-        path: path.to_owned(),
-        kind: link_kind(kind),
-        target: Some(target),
-    })
+    }
 }
 
 #[cfg(windows)]

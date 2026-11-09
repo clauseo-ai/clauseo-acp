@@ -15,6 +15,7 @@
 //! folder above one: either would hide the repository and the files beside it. A rule whose
 //! folder is one of those stays where it is. If the count still does not fit, `build` refuses.
 
+use std::cell::OnceCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -22,6 +23,7 @@ use super::build::{beneath_existing, refuse};
 use super::names::{Keys, path_key};
 use super::{PathRule, instruction_file, same, under};
 use crate::links::ScanParts;
+use crate::links::network::{Mounts, is_network_path};
 use crate::{Error, LinkFinding, LinkKind};
 
 /// Refuses a scan with a `commondir` beside a `HEAD` that is a link (git follows it, the walk
@@ -78,6 +80,7 @@ pub(super) fn canonical_findings(
     let mut seen: HashSet<(PathBuf, Option<PathBuf>)> = HashSet::new();
     let mut first_form: HashMap<PathBuf, PathBuf> = HashMap::new();
     let mut keys = Keys::default();
+    let mounts = OnceCell::new();
     for finding in findings {
         let LinkFinding { path, kind, target } = finding;
         if !path.is_absolute() {
@@ -112,7 +115,14 @@ pub(super) fn canonical_findings(
                 canonical.display()
             ));
         }
-        let target = target.map(|t| beneath_existing(&t, "link target").unwrap_or(t));
+        // A network target stays as written: resolving it would connect to the server.
+        let target = target.map(|t| {
+            if is_network_path(&t, mounts.get_or_init(Mounts::current)) {
+                t
+            } else {
+                beneath_existing(&t, "link target").unwrap_or(t)
+            }
+        });
         let key = keys.of(&canonical);
         if seen.insert((key.clone(), target.as_deref().map(|t| keys.of(t)))) {
             let path = first_form.entry(key).or_insert(canonical).clone();

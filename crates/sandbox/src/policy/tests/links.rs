@@ -195,3 +195,27 @@ fn a_hard_link_from_git_to_a_writable_name_is_a_finding() {
         [matter.join(".git/objects-pack"), matter.join("cfg")]
     );
 }
+
+/// A finding whose target is a network path keeps it as written: resolving it as far as it
+/// exists would connect to the server.
+#[test]
+fn a_network_target_stays_as_written() {
+    let w = World::new("findings-unc");
+    let targets = [r"\\host\share\x", "//host/share/x", r"\\?\UNC\host\share"];
+    let policy = w
+        .builder()
+        .scan(MatterScan::default())
+        .links(targets.iter().enumerate().map(|(i, target)| LinkFinding {
+            path: w.at(&format!("matter/l{i}")),
+            kind: LinkKind::Symlink,
+            target: Some(PathBuf::from(target)),
+        }))
+        .build()
+        .unwrap();
+    let got: Vec<&Path> = policy
+        .links()
+        .iter()
+        .filter_map(|f| f.target.as_deref())
+        .collect();
+    assert_eq!(got, targets.map(Path::new));
+}

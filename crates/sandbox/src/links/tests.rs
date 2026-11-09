@@ -2,6 +2,7 @@ use super::*;
 use crate::test_support::TempDir;
 
 mod commondir;
+mod network_links;
 
 fn canon(p: &Path) -> PathBuf {
     dunce::canonicalize(p).unwrap()
