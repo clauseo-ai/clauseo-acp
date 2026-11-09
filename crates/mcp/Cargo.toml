@@ -32,11 +32,13 @@ serde_json = { workspace = true }
 # profile's files written and the folder listed relative to a folder opened once (`fs`: openat,
 # renameat, unlinkat; `dir`: fdopendir; in src/write/unix.rs), and the effective user, whose
 # root refuses the browser on Linux (`user`: geteuid; src/browser_guard/chrome/sandbox.rs), and for
-# the guard's `--listen` socket the umask around its bind (`fs`) and the peer's uid (`socket`:
-# SO_PEERCRED; `user`: getpeereid on macOS; src/transport/unix.rs), through nix's safe wrappers. nix needs only libc, bitflags and cfg-if; no
+# the guard's `--listen` socket the umask, the folder walk by descriptor and the bind inside it
+# (`fs`), the peer's uid and identity (`socket`: SO_PEERCRED, LOCAL_PEERTOKEN; `user`:
+# getpeereid on macOS) and the wait for a connection (`poll`; src/transport/unix.rs), through
+# nix's safe wrappers. nix needs only libc, bitflags and cfg-if; no
 # socket crate.
 [target.'cfg(unix)'.dependencies]
-nix = { workspace = true, features = ["socket", "fs", "dir", "user"] }
+nix = { workspace = true, features = ["socket", "fs", "dir", "user", "poll"] }
 
 # macOS only: `getxattr` and `setxattr` for a download's `com.apple.quarantine` mark
 # (src/browser_guard/downloads/marks.rs, src/write/mac.rs). libc is already nix's dependency.

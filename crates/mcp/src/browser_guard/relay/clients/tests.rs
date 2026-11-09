@@ -31,13 +31,13 @@ impl Listener for Queue {
     }
 }
 
-/// Queues a connection whose peer check says `same_user`; returns the test's end.
-fn connect(queue: &mpsc::Sender<Fake>, same_user: bool) -> UnixStream {
+/// Queues a connection whose peer check answers `passes`; returns the test's end.
+fn connect(queue: &mpsc::Sender<Fake>, passes: bool) -> UnixStream {
     let (ours, theirs) = UnixStream::pair().unwrap();
     queue
         .send(Fake {
             stream: theirs,
-            same_user,
+            passes,
         })
         .unwrap();
     ours

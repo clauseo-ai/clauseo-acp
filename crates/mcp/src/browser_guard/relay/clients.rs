@@ -3,18 +3,20 @@
 //! agent written to it ([`Out::attach`](super::lines::Out::attach)).
 //!
 //! It sees the transport only through `crate::transport`'s [`Listener`] and [`Connection`]. A
-//! thread accepts each connection. One whose peer runs as another user ([`Connection::same_user`])
+//! thread accepts each connection. One whose peer runs as another user ([`Connection::peer_is`])
 //! is closed at once. One that arrives while a client is connected gets a single JSON-RPC error
 //! line, [`BUSY`], and is closed: with the id of its first request, if one arrives within
 //! [`BUSY_WAIT`] (the bridge sends the request that made it connect at once), so that request is
 //! answered once; with a null id otherwise. Otherwise the connection becomes the client, on a
 //! thread of its own.
 //!
-//! Each write to the client may block for at most [`WRITE_WAIT`]. A client that stops reading
-//! for that long, or whose connection fails, is taken as gone: the guard shuts the connection,
-//! which ends the client's reads and so counts as its disconnect, and every later write to it
-//! fails at once. So no write to a jailed agent that stopped reading holds the agent's output
-//! lock for ever, and the guard's end (which answers what is in flight) is never stuck on one.
+//! Each line to the client has at most 10 s to be written, and a new client 10 s to send its
+//! first whole line (`streams.rs`). A client that stops reading for that long, sends nothing, or
+//! whose connection fails, is taken as gone: the guard shuts the connection, which ends the
+//! client's reads and so counts as its disconnect, and every later write to it fails at once. So
+//! no write to a jailed agent that stopped reading holds the agent's output lock past the bound,
+//! the guard's end (which answers what is in flight) is never stuck on one, and a connection
+//! that sends nothing does not hold the one client's place.
 //!
 //! When the client disconnects the guard stays up, for the next client: it closes the
 //! connection, sends the agent's lines nowhere until the next one, and stops the browser exactly
@@ -29,7 +31,7 @@
 //! the agent's leaving: the parent's going, a start that fails, agent-browser's own end, Chrome's
 //! second death or a refused port (`relay.rs`).
 
-use std::io::{self, BufReader, Write};
+use std::io::BufReader;
 use std::net::Shutdown;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
@@ -44,7 +46,10 @@ use super::{Event, oneshot};
 use crate::browser_guard::filter::MAX_LINE_BYTES;
 use crate::browser_guard::{note, pause};
 use crate::connector::head;
-use crate::transport::{Connection, Listener};
+use crate::transport::{Connection, Listener, Peer};
+use streams::{FirstLine, ToClient, first_line_wait, write_wait};
+
+mod streams;
 
 /// The error a connection gets while another client is connected.
 pub(crate) const BUSY: &str =
@@ -52,12 +57,6 @@ pub(crate) const BUSY: &str =
 /// How long the guard waits for a second connection's first request, and then tries to write
 /// [`BUSY`], before closing it anyway.
 const BUSY_WAIT: Duration = Duration::from_secs(1);
-/// The longest one write to the client may block before the guard takes the client as gone.
-pub(crate) const WRITE_WAIT: Duration = Duration::from_secs(10);
-/// Tests only (the `test-support` feature, never in a shipped build): [`WRITE_WAIT`] in
-/// milliseconds, read from the guard's own environment.
-#[cfg(feature = "test-support")]
-const WRITE_WAIT_FOR_TESTS: &str = "CLAUSEO_TEST_GUARD_WRITE_MS";
 /// The pause after an `accept` that failed (out of descriptors, say), before the next.
 const ACCEPT_RETRY: Duration = Duration::from_millis(100);
 
@@ -88,7 +87,7 @@ fn accept(
             pause(ACCEPT_RETRY);
             continue;
         };
-        if !stream.same_user() {
+        if !stream.peer_is(Peer::SameUser) {
             note("closed a connection from another user");
             continue;
         }
@@ -109,46 +108,6 @@ fn accept(
                 connected.store(false, Ordering::SeqCst);
             }
         }));
-    }
-}
-
-/// [`WRITE_WAIT`], or in a `test-support` build the test's.
-fn write_wait() -> Duration {
-    #[cfg(feature = "test-support")]
-    if let Some(ms) = std::env::var(WRITE_WAIT_FOR_TESTS)
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-    {
-        return Duration::from_millis(ms);
-    }
-    WRITE_WAIT
-}
-
-/// The client's side of [`Out`](super::lines::Out): its connection, shut at the first write
-/// that fails or times out, so its reads end (its disconnect) and later writes fail at once.
-struct ToClient<C: Connection>(C);
-
-impl<C: Connection> ToClient<C> {
-    /// Shuts the connection when `result` is a failure other than an interrupted call.
-    fn checked<T>(&self, result: io::Result<T>) -> io::Result<T> {
-        if let Err(error) = &result
-            && error.kind() != io::ErrorKind::Interrupted
-        {
-            drop(self.0.shutdown(Shutdown::Both));
-        }
-        result
-    }
-}
-
-impl<C: Connection> Write for ToClient<C> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let written = self.0.write(buf);
-        self.checked(written)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        let flushed = self.0.flush();
-        self.checked(flushed)
     }
 }
 
@@ -203,14 +162,12 @@ fn client(
         note("cannot serve a client: its connection cannot be shared between threads");
         return true;
     };
-    if writer.set_write_timeout(Some(write_wait())).is_err() {
-        note("cannot serve a client: its writes cannot be bounded");
-        return true;
-    }
     let floor = lock(&shared.state).generation;
-    shared.out.attach(Box::new(ToClient(writer)), floor);
+    shared
+        .out
+        .attach(Box::new(ToClient::new(writer, write_wait())), floor);
     note("a client connected");
-    let mut input = BufReader::new(reader);
+    let mut input = BufReader::new(FirstLine::new(reader, first_line_wait()));
     if pumps::pump_lines(&mut input, shared, parent, events) == Pumped::Ending {
         return false;
     }

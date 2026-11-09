@@ -17,6 +17,9 @@ mod support;
 mod write;
 
 #[cfg(test)]
+#[path = "guard/bridge.rs"]
+mod bridge;
+#[cfg(test)]
 #[path = "guard/deps.rs"]
 mod deps;
 #[cfg(test)]

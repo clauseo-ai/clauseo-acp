@@ -3,8 +3,8 @@
 //! stays) and the guard stays up for the next client, whose calls start them again; a second
 //! client while one is connected is refused; a socket path that exists is refused; the
 //! parent's going ends the guard and removes the socket, also while a client that stopped reading
-//! holds a write. Waits poll as `lifecycle.rs`'s do, or
-//! read the guard's stderr.
+//! holds a write; and a connection that sends nothing loses its place. Waits poll as
+//! `lifecycle.rs`'s do, or read the guard's stderr.
 
 #![cfg(unix)]
 
@@ -27,7 +27,7 @@ use crate::support::{
 const LEFT: &str = "the client disconnected; stopped Chrome and agent-browser";
 
 /// The listen socket the tests give the guard, in the host's socket folder.
-fn socket_of(scratch: &Scratch) -> PathBuf {
+pub(crate) fn socket_of(scratch: &Scratch) -> PathBuf {
     scratch.socket_dir().join("guard.sock")
 }
 
@@ -38,7 +38,7 @@ fn listen_args(scratch: &Scratch, socket: &Path) -> Vec<std::ffi::OsString> {
     args
 }
 
-fn listen_command(scratch: &Scratch, socket: &Path) -> Command {
+pub(crate) fn listen_command(scratch: &Scratch, socket: &Path) -> Command {
     let mut command = Command::new(GUARD);
     command
         .args(listen_args(scratch, socket))
@@ -276,4 +276,23 @@ fn a_client_that_stops_reading_never_holds_up_the_guards_end() {
     assert_nothing_left(&scratch, pids);
     flood.join().unwrap();
     drop((client, parent));
+}
+
+/// A connection that sends nothing is closed once the first-line wait (shortened here) is over,
+/// so it cannot keep the one client's place: the next client is served.
+#[test]
+fn a_connection_that_sends_nothing_loses_its_place() {
+    let scratch = Scratch::new("listen_silent");
+    let socket = socket_of(&scratch);
+    let mut command = listen_command(&scratch, &socket);
+    command.env("CLAUSEO_TEST_GUARD_FIRST_LINE_MS", "300");
+    let mut guard = Guard::start(command);
+    let mut silent = Client::connect(&socket);
+    assert!(silent.next().is_none(), "the silent connection stayed open");
+    guard.stderr_until("closed a client that sent no whole line in time");
+    guard.stderr_until("the client disconnected");
+    let mut client = Client::connect(&socket);
+    client.request(0, "initialize");
+    client.request(1, "tools/list");
+    drop(guard);
 }

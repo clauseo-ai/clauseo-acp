@@ -390,6 +390,9 @@ crates/mcp/src/browser_guard/relay/pumps.rs spawn_child clippy::disallowed_metho
 # The relay's `run` takes the agent's transport by value: Unix moves the listener; on Windows the
 # only variant (stdio) holds nothing, which clippy reads as a needless move.
 crates/mcp/src/browser_guard/relay.rs run clippy::needless_pass_by_value
+# macOS: the guard's own audit token (task_info) and libbsm's pid and pidversion accessors, for
+# the bridge's peer check on the guard's process identity (browser jail J1).
+crates/mcp/src/transport/unix/identity/mac.rs - unsafe_code
 crates/mcp/examples/echo_stub.rs open_log clippy::disallowed_methods
 crates/mcp/examples/tree_stub.rs start_grandchild clippy::disallowed_methods
 crates/mcp/src/browser_guard/job.rs - unsafe_code

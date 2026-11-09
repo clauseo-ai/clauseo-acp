@@ -51,6 +51,8 @@ pub(crate) fn spawn_child(
         .stderr(Stdio::inherit())
         // A group of its own, which `end_group` kills whole.
         .process_group(0);
+    // No accepted client connection is inherited (`transport/unix.rs`).
+    let _accepts = crate::transport::unix::hold_accepts();
     command.spawn()
 }
 
