@@ -835,15 +835,35 @@ so another live session of the matter keeps its access; any other explicit entry
 these alone. Each is written after the roots' hand-back (a pool user's goes to the lawyer first)
 and before anything is recorded; it is never rolled back.
 
-A folder whose DACL changed, but `agent-state` and `run` (each session's launch does its own),
-then gets an owner pass and a walk: what a pool user made in it before (a file or a junction in a
-run folder another matter's agent made first) goes to the lawyer, a junction as itself, never
-followed, and what is in it loses what it inherited from above. In the state, notes and matter
-folders the matter's own agent keeps its items. The data folder's other contents (`agents`,
-with Clauseo's Claude sign-in, walked strictly; the host's files) are walked once: when the data
-folder's DACL changes, and at each launch until one walk has passed (`sandbox\owned-walked`). A
-refused data walk is logged and the launch goes on. A data folder that is a volume's root or holds
-the profile is never protected or walked: its DACL is Windows' or the lawyer's.
+A folder whose DACL changed, or that the hand-back took from a pool user (its DACL may have
+matched already), then gets an owner pass and a walk, but `agent-state` and `run` (each session's
+launch does its own): what a pool user made in it before (a file or a junction in a run folder
+another matter's agent made first) goes to the lawyer, a junction as itself, never followed, and
+what is in it loses what it inherited from above. In the state, notes and matter folders the
+matter's own agent keeps its items.
+
+`<data_dir>\agents` (each agent's install and home, Clauseo's Claude sign-in) is owned too, with
+the data folder's entries, even when the data folder itself is skipped (a volume's root, or one
+holding the profile, keeps the DACL Windows or the lawyer gave it). The data folder's contents are
+walked once: when its or `agents`' DACL changes, and at each launch until one walk has passed
+(`sandbox\owned-walked`). `agents` is walked strictly, watching no SID, so it strips only broad
+allows and another live session's recorded allows in the Claude store stay; if that walk fails the
+launch is refused ("Clauseo couldn't secure its sign-in folder. Restart the computer and try
+again."), so no sign-in stays readable to other accounts across sessions. A failed walk of the
+host's other folders is logged and retried.
+
+**Follow-ups** (not in this change):
+
+- A pool user's junction or symbolic link in a fresh run or temp folder is handed back, so it still
+  points where its planter aimed it; set it aside or delete it instead. That needs a pool process
+  at Medium, since a fresh folder has no Low label.
+- A file created with its own protected security descriptor has no inherited `OWNER RIGHTS`
+  entry, so its owner's implied `WRITE_DAC` comes back until the next strict walk repairs it: the
+  same class as #808's window. Tools that rewrite ACLs on `chmod` (MSYS) under `OWNER RIGHTS` go
+  in the compatibility rows.
+- Keep only allows for SIDs assigned to the folder's matter now, rather than every allow the
+  ledger records.
+- A writable flag on the launch message's `granted` entries.
 
 The lawyer's matter folders are a separate decision, pending the VM walk: they keep what they
 inherit.

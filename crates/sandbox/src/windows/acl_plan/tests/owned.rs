@@ -67,6 +67,11 @@ fn a_sessions_owned_roots_get_protected_dacls_naming_no_broad_group() {
             admins.to_owned(),
         ),
         (
+            OwnedKind::Agents,
+            format!("<root>/data/{}", targets::AGENTS_DIR),
+            admins.to_owned(),
+        ),
+        (
             OwnedKind::DataFolder,
             "<root>/data/agent-state".to_owned(),
             admins.to_owned(),
@@ -148,7 +153,10 @@ fn a_data_folder_that_is_a_volumes_root_or_holds_the_profile_is_skipped_on_purpo
             .map(OwnedRoot::kind)
             .collect()
     };
-    assert!(!kinds(&elsewhere, volume).contains(&OwnedKind::DataRoot));
+    // N2: the sign-ins' folder is owned whatever the data folder is.
+    let at_volume = kinds(&elsewhere, volume);
+    assert!(!at_volume.contains(&OwnedKind::DataRoot), "{at_volume:?}");
+    assert!(at_volume.contains(&OwnedKind::Agents), "{at_volume:?}");
     // The profile inside the data folder, or the data folder the profile itself.
     let data = w.canonical("data");
     for home in [data.join("home"), data.clone()] {
@@ -158,6 +166,7 @@ fn a_data_folder_that_is_a_volumes_root_or_holds_the_profile_is_skipped_on_purpo
             .unwrap();
         let got = kinds(&policy, &data);
         assert!(!got.contains(&OwnedKind::DataRoot), "{home:?}: {got:?}");
+        assert!(got.contains(&OwnedKind::Agents), "{home:?}: {got:?}");
         assert!(
             got.contains(&OwnedKind::State),
             "{home:?}: the state folder still is"
@@ -180,7 +189,7 @@ fn a_state_folder_outside_the_data_folder_is_not_owned() {
     let admitted = admitted(&w, &policy, &[], &FakeFolders::default());
     let plan = plan(&admitted, &sids(), matter_one()).unwrap();
     let kinds: Vec<OwnedKind> = plan.owned_roots().iter().map(OwnedRoot::kind).collect();
-    assert_eq!(kinds, [OwnedKind::DataRoot]);
+    assert_eq!(kinds, [OwnedKind::DataRoot, OwnedKind::Agents]);
     let matter = w.canonical("matter");
     assert!(plan.owned_roots().iter().all(|r| r.path() != matter));
 }

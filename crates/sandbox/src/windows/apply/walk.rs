@@ -34,6 +34,8 @@ pub(super) struct Refused {
     pub(super) kind: PathKind,
     pub(super) failure: ApplyFailure,
     pub(super) at: Option<PathBuf>,
+    /// The strict walk of `<data_dir>\agents` (the sign-ins) failed: [`Error::SignInUnsecured`].
+    pub(super) sign_in: bool,
 }
 
 impl Refused {
@@ -43,11 +45,17 @@ impl Refused {
             kind,
             failure,
             at: None,
+            sign_in: false,
         }
     }
 
     /// The error the caller returns.
     pub(super) fn error(self) -> Error {
+        if self.sign_in {
+            return Error::SignInUnsecured {
+                failure: self.failure,
+            };
+        }
         Error::AclApply {
             path_kind: self.kind,
             failure: self.failure,
@@ -76,9 +84,8 @@ pub(super) fn clearing(
             Err(ApplyFailure::ChildShut) => {
                 let shut = acl.refused_at();
                 let refuse = |at| Refused {
-                    kind,
-                    failure: ApplyFailure::ChildShut,
                     at,
+                    ..Refused::new(kind, ApplyFailure::ChildShut)
                 };
                 let Some(shut) = shut else {
                     return Err(refuse(None));
@@ -106,9 +113,8 @@ pub(super) fn clearing(
             }
             Err(failure) => {
                 return Err(Refused {
-                    kind,
-                    failure,
                     at: acl.refused_at(),
+                    ..Refused::new(kind, failure)
                 });
             }
         }

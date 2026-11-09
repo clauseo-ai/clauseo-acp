@@ -125,7 +125,18 @@ fn owned_roots_are_protected_with_exactly_the_plans_entries_and_nothing_inside_i
         .iter()
         .map(|r| r.path().to_owned())
         .collect();
-    assert_eq!(roots.len(), 8, "{roots:?}");
+    assert_eq!(roots.len(), 9, "{roots:?}");
+    // Another session's recorded allow on a sign-in file stays through the strict walk (N7).
+    let sign_in = w
+        .dir
+        .file("data/agents/claude-acp/home/.credentials.json", "{}");
+    let theirs = grant(
+        &sign_in,
+        OTHER_POOL_SIDS[1],
+        Rights::Modify,
+        Inherit::ThisOnly,
+    );
+    NtfsAcl::new().unwrap().add(&theirs).unwrap();
     launch(&w, &mut plan);
     let me = current_user_sid().unwrap();
     for root in plan.owned_roots() {
@@ -179,6 +190,10 @@ fn owned_roots_are_protected_with_exactly_the_plans_entries_and_nothing_inside_i
         assert_eq!(names_broad(&path), None, "{rel}: {:?}", entries(&path));
     }
     assert!(w.at("data/sandbox/owned-walked").exists());
+    assert!(
+        has(&sign_in, OTHER_POOL_SIDS[1], false),
+        "another session's allow stays"
+    );
     // A second launch finds every root as it left it and writes none again.
     let before_again: Vec<Vec<u8>> = roots
         .iter()

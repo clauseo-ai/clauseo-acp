@@ -12,7 +12,8 @@
 //! files it makes to another matter's agent; then the plan's own entries and every allow the
 //! ledger records there (the pool user's `Modify`, the other pool users' denies). Nothing for
 //! `Users`, `Authenticated Users`, `Everyone` or `CREATOR OWNER`. The Low label is a plan
-//! entry, as before. What the agent makes inside inherits these entries alone.
+//! entry, as before. What the agent makes inside inherits these entries alone. `<data_dir>\agents`
+//! (the sign-ins) gets the data folder's entries, even when the data folder itself is skipped.
 //!
 //! Only folders inside `<data_dir>` are owned; the lawyer's matter folders never are (a separate
 //! decision). A state, notes or temp folder outside the data folder is left as it is, and so is a
@@ -20,7 +21,7 @@
 
 use std::path::{Component, Path, PathBuf};
 
-use super::targets::{AGENT_STATE_DIR, RUN_DIR};
+use super::targets::{AGENT_STATE_DIR, AGENTS_DIR, RUN_DIR};
 use super::{AdmittedPlan, Grant, Inherit, Rights, Sid, in_folder};
 use crate::Policy;
 use crate::windows::admit::PathKind;
@@ -42,6 +43,9 @@ pub enum OwnedKind {
     DataRoot,
     /// `<data_dir>\agent-state` or `<data_dir>\run`: every matter's or session's folders.
     DataFolder,
+    /// `<data_dir>\agents`: each agent's install and home, Clauseo's Claude sign-in among them.
+    /// Owned even when the data folder itself isn't, and walked strictly once (`apply/owned.rs`).
+    Agents,
     /// `<data_dir>\agent-state\<matter>`: the matter's state and notes folders.
     MatterFolder,
     /// The state folder, `<data_dir>\agent-state\<matter>\<agent>`.
@@ -112,6 +116,7 @@ impl OwnedRoot {
         match self.kind {
             OwnedKind::Notes => PathKind::Notes,
             OwnedKind::RunFolder | OwnedKind::TempFolder => PathKind::TempFolder,
+            OwnedKind::Agents => PathKind::ClaudeStore,
             OwnedKind::DataRoot
             | OwnedKind::DataFolder
             | OwnedKind::MatterFolder
@@ -124,7 +129,10 @@ impl OwnedRoot {
     /// folders, which hold every other matter and session (each protected and walked at its own
     /// launch); the data folder's other contents get a walk of their own (`apply/owned.rs`).
     pub fn walked(&self) -> bool {
-        !matches!(self.kind, OwnedKind::DataRoot | OwnedKind::DataFolder)
+        !matches!(
+            self.kind,
+            OwnedKind::DataRoot | OwnedKind::DataFolder | OwnedKind::Agents
+        )
     }
 
     /// Whether what is inside is the agent's own (the state and notes folders, and the folder
@@ -138,10 +146,13 @@ impl OwnedRoot {
     }
 
     /// Its fixed entries, in order, for the desktop user `owner`: full access for `SYSTEM`,
-    /// `Administrators` on the data folder and its shared folders, and `owner`; then, on the
-    /// state, notes and temp folders, `OWNER RIGHTS`' inherit-only `Modify`.
+    /// `Administrators` on the data folder, its shared folders and `agents`, and `owner`;
+    /// then, on the state, notes and temp folders, `OWNER RIGHTS`' inherit-only `Modify`.
     pub fn fixed(&self, owner: &Sid) -> Vec<FixedEntry> {
-        let admins = matches!(self.kind, OwnedKind::DataRoot | OwnedKind::DataFolder);
+        let admins = matches!(
+            self.kind,
+            OwnedKind::DataRoot | OwnedKind::DataFolder | OwnedKind::Agents
+        );
         let mut sids: Vec<Sid> = [SYSTEM_SID]
             .into_iter()
             .chain(admins.then_some(ADMINISTRATORS_SID))
@@ -187,6 +198,8 @@ pub(super) fn owned_roots(policy: &Policy, data: &Path) -> Vec<OwnedRoot> {
     if data_root_owned(policy, data) {
         push(data, OwnedKind::DataRoot);
     }
+    // The sign-ins' folder, whatever the data folder is: a volume's root still hands it `Users`.
+    push(&data.join(AGENTS_DIR), OwnedKind::Agents);
     let agent_state = data.join(AGENT_STATE_DIR);
     let mut matter_folder = |folder: &Path, kind: OwnedKind| {
         let Some(matter) = folder.parent().filter(|m| below(m, &agent_state)) else {

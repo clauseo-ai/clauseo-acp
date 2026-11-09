@@ -236,8 +236,8 @@ fn run_plan(
 ) -> Result<Run, Error> {
     plan.retain_existing(exists);
     check_credentials(plan, acl, &*around)?;
-    roots::hand_back_roots(plan, ledger, acl, pool)?;
-    let owned = owned::protect_owned(plan, ledger, acl, pool)?;
+    let handed = roots::hand_back_roots(plan, ledger, acl, pool)?;
+    let owned = owned::protect_owned(plan, ledger, acl, pool, &handed)?;
     ledger
         .record_pending(plan)
         .map_err(|e| refused(PathKind::Matter, ApplyFailure::Ledger(e.kind())))?;
@@ -428,7 +428,7 @@ fn write_all(
         run.walked.add(seen);
     }
     if let Some(data) = &owned.data {
-        run.walked.add(owned::walk_data(acl, data, &strict.pool));
+        run.walked.add(owned::walk_data(acl, data)?);
     }
     ledger
         .mark_walked(plan.entries())

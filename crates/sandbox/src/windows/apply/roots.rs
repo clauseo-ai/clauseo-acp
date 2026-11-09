@@ -4,7 +4,7 @@
 //! item does ([`AclWriter::hand_back`], S15 `PR4a2`); only a root whose hand-back fails refuses.
 
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::strict_for;
 use crate::Error;
@@ -39,18 +39,19 @@ pub(super) const ROOT_KINDS: [PathKind; 6] = [
 /// `WRITE_OWNER` or `WRITE_DAC`), or that read back still another's or with a pool user's allow
 /// on it ([`ApplyFailure::PoolOwned`]), refuses as `PoolOwned` ([`Owned::Root`]), naming the
 /// root; any other failure refuses as itself. A root another user owns, or a missing one, is
-/// left to the writes that follow.
+/// left to the writes that follow. Returns the roots it handed back.
 pub(super) fn hand_back_roots(
     plan: &AdmittedPlan,
     ledger: &mut Ledger,
     acl: &mut dyn AclWriter,
     extra: &[Sid],
-) -> Result<(), Error> {
+) -> Result<Vec<PathBuf>, Error> {
     let mut pool = strict_for(plan).pool;
     pool.extend(extra.iter().cloned());
     pool.sort();
     pool.dedup();
     let mut seen: BTreeSet<&Path> = BTreeSet::new();
+    let mut handed = Vec::new();
     let granted = plan
         .grants()
         .iter()
@@ -72,6 +73,7 @@ pub(super) fn hand_back_roots(
             Ok(false) => continue,
             Ok(true) => {
                 restore_entries(ledger, acl, path);
+                handed.push(path.to_owned());
                 continue;
             }
             Err(ApplyFailure::ChildShut | ApplyFailure::PoolOwned { .. }) => {
@@ -82,7 +84,7 @@ pub(super) fn hand_back_roots(
         tracing::warn!(%kind, %failure, "a root a sandbox user owns wasn't handed back");
         return Err(refuse(failure));
     }
-    Ok(())
+    Ok(handed)
 }
 
 /// Writes again each entry `ledger` lists, applied or pending, on `path`, a root just handed

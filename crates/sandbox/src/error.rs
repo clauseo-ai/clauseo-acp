@@ -119,6 +119,16 @@ pub enum Error {
     /// planned or written; a later launch checks again. Its message names no path.
     #[error("the sandbox's clean-up after an earlier session isn't finished: {0}")]
     UncleanSession(String),
+    /// Windows tier B couldn't secure Clauseo's sign-in folder, `<data_dir>\agents`: its one
+    /// strict walk, which takes the `Users` entries a data folder under `C:\` handed down off
+    /// the agents' sign-ins, failed (`windows::apply`, owned roots). The launch's new entries
+    /// were rolled back and the next launch walks again, so no sign-in stays readable to other
+    /// accounts across sessions.
+    #[error("Clauseo couldn't secure its sign-in folder. Restart the computer and try again.")]
+    SignInUnsecured {
+        /// What failed.
+        failure: crate::windows::ApplyFailure,
+    },
 }
 
 impl Error {
@@ -139,6 +149,7 @@ impl Error {
             | Error::SetAside { .. }
             | Error::CleanClose(_)
             | Error::NetworkUnfiltered { .. }
+            | Error::SignInUnsecured { .. }
             | Error::ProtectedLink { .. }
             | Error::UncleanSession(_) => None,
         }
@@ -165,6 +176,7 @@ impl Error {
             | Error::AclApply { .. }
             | Error::SetAside { .. }
             | Error::CleanClose(_)
+            | Error::SignInUnsecured { .. }
             | Error::NetworkUnfiltered { .. } => ErrorCode::AgentLaunchFailed,
             Error::Blocked(_) => ErrorCode::SandboxBlocked,
             Error::UncleanSession(_) => ErrorCode::SandboxCleaningUp,
@@ -227,6 +239,14 @@ mod tests {
         );
         assert_eq!(folder.cause(), None);
         assert_eq!(launch.cause(), None);
+        let sign_in = Error::SignInUnsecured {
+            failure: crate::windows::ApplyFailure::ChildShut,
+        };
+        assert_eq!(sign_in.code(), ErrorCode::AgentLaunchFailed);
+        assert_eq!(
+            sign_in.to_string(),
+            "Clauseo couldn't secure its sign-in folder. Restart the computer and try again."
+        );
         let changed = Error::Blocked(crate::Blocked::AdminCopyChanged);
         assert_eq!(changed.cause(), Some("admin_copy_changed"));
         assert_eq!(changed.code(), ErrorCode::SandboxBlocked);

@@ -136,6 +136,16 @@ mod tests {
         assert_eq!(got, acl(&want));
     }
 
+    /// N7: the sign-ins' strict walk watches no SID, so its repair of a pool user's file in the
+    /// Claude store keeps another live session's allow and strips only the broad ones.
+    #[test]
+    fn the_sign_ins_repair_keeps_another_sessions_allow() {
+        let theirs = ace(ALLOWED, 0, MODIFY, OTHER);
+        let now = acl(&[theirs.clone(), ace(ALLOWED, 0, FULL, "S-1-5-32-545")]);
+        let got = super::super::without_broad(&Acl::parse(&now).unwrap(), &[]);
+        assert_eq!(got, acl(&[theirs]));
+    }
+
     #[test]
     fn a_dacl_already_protected_so_comes_back_the_same() {
         let mut aces: Vec<Vec<u8>> = fixed().iter().map(AceSpec::bytes).collect();

@@ -89,6 +89,10 @@ pub(super) struct FakeAcl {
     /// stay; and what a protect reports (`AlreadyThere` when `None`).
     pub(super) protected: Vec<(PathBuf, Vec<Sid>)>,
     pub(super) protect_gives: Option<Added>,
+    /// A plain walk of this root fails (`PermissionDenied`).
+    pub(super) fail_plain: Option<PathBuf>,
+    /// Each strict walk's root and what it held children to.
+    pub(super) stricts: Vec<(PathBuf, Strict)>,
     /// The allows each protect was told to keep, in order.
     pub(super) kept: Vec<(PathBuf, Vec<Grant>)>,
     /// A protect of this root fails, as one the lawyer may not change would.
@@ -258,6 +262,12 @@ impl AclWriter for FakeAcl {
         strict: Option<&Strict>,
     ) -> Result<Walked, ApplyFailure> {
         self.walks.push((root.to_owned(), reach, strict.is_some()));
+        if let Some(strict) = strict {
+            self.stricts.push((root.to_owned(), strict.clone()));
+        }
+        if strict.is_none() && self.fail_plain.as_deref() == Some(root) {
+            return Err(ApplyFailure::Io(io::ErrorKind::PermissionDenied));
+        }
         assert!(
             self.panic_walk.as_deref() != Some(root),
             "a crash during a walk"

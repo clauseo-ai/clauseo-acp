@@ -1,25 +1,30 @@
 //! Step 3b of [`apply`](super::apply): each folder Clauseo owns for the launch
-//! ([`AdmittedPlan::owned_roots`]: the data folder, its `agent-state` and `run` folders, the
-//! matter's, the state, notes, run and temp folders) gets its protected DACL, after the roots'
-//! hand-back and before anything is recorded. Nothing is recorded for it, and a rollback leaves
-//! it: the folder is Clauseo's, and a protected DACL with the lawyer's and `SYSTEM`'s full access
-//! is where it belongs whatever the launch does. Each explicit allow the plan or the ledger has
-//! there stays, so another live session of the matter keeps its access (the review's L3).
+//! ([`AdmittedPlan::owned_roots`]: the data folder, its `agent-state`, `run` and `agents`
+//! folders, the matter's, the state, notes, run and temp folders) gets its protected DACL, after
+//! the roots' hand-back and before anything is recorded. Nothing is recorded for it, and a
+//! rollback leaves it: the folder is Clauseo's, and a protected DACL with the lawyer's and
+//! `SYSTEM`'s full access is where it belongs whatever the launch does. Each explicit allow the
+//! plan or the ledger has there stays, so another live session keeps its access (the review's L3).
 //!
-//! In step 5, each one whose DACL changed, but the data folder's two shared folders, is gone
-//! over again ([`OwnedWork`]): an owner pass first, so an item a pool user made there before
+//! In step 5, each one whose DACL changed, or that the hand-back took from a pool user (its DACL
+//! may have matched already, the review's N6), is gone over again ([`OwnedWork`]), but the data
+//! folder's two shared folders: an owner pass first, so an item a pool user made there before
 //! Clauseo protected it (a planted file or junction in a run folder another matter's agent made
-//! first) goes to the lawyer with its `WRITE_DAC` (the review's L1), then a walk, so what is in
-//! it loses the entries it inherited from above (`C:\`'s `Users` entries). The data folder's
-//! other contents (`agents`, with Clauseo's Claude sign-in, the host's files) are walked once
-//! too, strictly where credentials are (the review's L2): after the data folder's DACL changes,
-//! and at each launch until one such walk has passed (`sandbox\owned-walked`); a refusal there
-//! is logged and the launch goes on.
+//! first) goes to the lawyer with its `WRITE_DAC` (L1), then a walk, so what is in it loses the
+//! entries it inherited from above (`C:\`'s `Users` entries).
+//!
+//! The data folder's contents are walked once ([`walk_data`]): `agents` strictly, even when the
+//! data folder itself is skipped (N2), and a failure there refuses the launch, so no sign-in
+//! stays readable to other accounts (N1, [`Error::SignInUnsecured`]); the host's other folders
+//! plainly, a failure only logged. Once, that is: when the data folder's or `agents`' DACL
+//! changes, and at each launch until one such walk has passed (`sandbox\owned-walked`). The
+//! strict walk watches nothing, so it strips only broad allows (`Users`, `Everyone`) from what a
+//! pool user owns there: another live session's recorded allows in the Claude store stay (N7).
 
 use std::io;
 use std::path::{Path, PathBuf};
 
-use super::walk::Walk;
+use super::walk::{Refused, Walk};
 use super::{exists, strict_for};
 use crate::Error;
 use crate::windows::acl_plan::{AdmittedPlan, Grant, OwnedKind, Sid, in_folder};
@@ -29,13 +34,10 @@ use crate::windows::matters::SANDBOX_DIR;
 use crate::windows::write;
 use crate::windows::writer::{AclWriter, Added, Reach, Strict, Walked};
 
-/// The data folder's children no data walk goes into: every matter's and session's folders
-/// (each protected and walked at its own launch) and the sandbox's records (protected).
-const NOT_WALKED: [&str; 3] = ["agent-state", "run", SANDBOX_DIR];
-
-/// The data folder's child that holds credentials (each agent's install and home, Clauseo's
-/// Claude sign-in among them): walked strictly.
-const CREDENTIALS: &str = "agents";
+/// The data folder's children its plain walk leaves out: every matter's and session's folders
+/// (each protected and walked at its own launch), the sandbox's records (protected) and `agents`
+/// (walked strictly on its own).
+const NOT_WALKED: [&str; 4] = ["agent-state", "run", SANDBOX_DIR, "agents"];
 
 /// The record that a data walk passed, in `<data_dir>\sandbox`.
 const WALKED_MARK: &str = "owned-walked";
@@ -48,18 +50,33 @@ pub(super) struct OwnedWork {
     pub(super) passes: Vec<(PathBuf, PathKind, Vec<Sid>)>,
     /// Walks, with the launch's own (strict for the state and notes folders).
     pub(super) walks: Vec<Walk>,
-    /// The data folder, when its other contents are walked this launch.
-    pub(super) data: Option<PathBuf>,
+    /// The data walk this launch, when one is due.
+    pub(super) data: Option<DataWalk>,
+}
+
+/// The data folder's walk ([`walk_data`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct DataWalk {
+    /// `<data_dir>`, where the record goes.
+    data: PathBuf,
+    /// Whether the data folder is owned, so its own items and other folders are walked too.
+    whole: bool,
+    /// `<data_dir>\agents`, when it is there: walked strictly.
+    agents: Option<PathBuf>,
+    /// The pool SIDs the strict walk holds `agents` to.
+    pool: Vec<Sid>,
 }
 
 /// Protects each of `plan`'s owned roots through `acl`, keeping the explicit denies for the pool
 /// SIDs `plan` names and `pool`, and every allow the plan or `ledger` has there; what step 5 does
-/// for them. The first refusal refuses the launch, naming the root.
+/// for them, `handed` being the roots the hand-back took from a pool user. The first refusal
+/// refuses the launch, naming the root.
 pub(super) fn protect_owned(
     plan: &AdmittedPlan,
     ledger: &Ledger,
     acl: &mut dyn AclWriter,
     pool: &[Sid],
+    handed: &[PathBuf],
 ) -> Result<OwnedWork, Error> {
     let mut sids = strict_for(plan).pool;
     sids.extend(pool.iter().cloned());
@@ -67,6 +84,7 @@ pub(super) fn protect_owned(
     sids.dedup();
     let own = plan.assigned_to(plan.matter());
     let mut work = OwnedWork::default();
+    let (mut data, mut whole, mut agents, mut changed) = (None, false, None, false);
     for root in plan.owned_roots() {
         let keep = kept(plan, ledger, root.path());
         let added = acl
@@ -76,11 +94,25 @@ pub(super) fn protect_owned(
                 failure,
                 at: Some(root.path().to_owned()),
             })?;
-        let data_root = root.kind() == OwnedKind::DataRoot;
-        if data_root && (added == Added::Written || !exists(&mark(root.path()))) {
-            work.data = Some(root.path().to_owned());
+        let fresh = added == Added::Written || handed.iter().any(|h| h == root.path());
+        match root.kind() {
+            OwnedKind::DataRoot => {
+                (data, whole) = (Some(root.path().to_owned()), true);
+                changed |= fresh;
+            }
+            OwnedKind::Agents => {
+                agents = Some(root.path().to_owned());
+                data = data.or_else(|| root.path().parent().map(Path::to_owned));
+                changed |= fresh;
+            }
+            OwnedKind::DataFolder
+            | OwnedKind::MatterFolder
+            | OwnedKind::State
+            | OwnedKind::Notes
+            | OwnedKind::RunFolder
+            | OwnedKind::TempFolder => {}
         }
-        if added == Added::AlreadyThere || !root.walked() {
+        if !fresh || !root.walked() {
             continue;
         }
         let foreign: Vec<Sid> = if root.agents_own() {
@@ -101,6 +133,17 @@ pub(super) fn protect_owned(
             reach: Reach::Tree,
             strict: matches!(root.kind(), OwnedKind::State | OwnedKind::Notes),
             kind: root.path_kind(),
+        });
+    }
+    if let Some(data) = data
+        && (changed || !exists(&mark(&data)))
+    {
+        let pool = sids;
+        work.data = Some(DataWalk {
+            data,
+            whole,
+            agents,
+            pool,
         });
     }
     if !work.walks.is_empty() || work.data.is_some() {
@@ -135,60 +178,70 @@ fn mark(data: &Path) -> PathBuf {
     data.join(SANDBOX_DIR).join(WALKED_MARK)
 }
 
-/// The data folder's walk: each item directly in `data` worked out from it, then each folder in
-/// it but [`NOT_WALKED`] walked down, [`CREDENTIALS`] strictly (held to `pool`, nothing
-/// watched: a pool user's item there is repaired). Then the record that it passed. A refusal is
-/// logged and leaves no record, so the next launch walks again; the launch goes on.
-pub(super) fn walk_data(acl: &mut dyn AclWriter, data: &Path, pool: &[Sid]) -> Walked {
+/// The data walk `walk`: when the data folder is owned, each item directly in it worked out from
+/// it and each folder in it but [`NOT_WALKED`] walked down, a failure only logged; then
+/// `agents` walked strictly (held to the pool SIDs, nothing watched: a pool user's item there is
+/// repaired, other allows stay), a failure refusing the launch as
+/// [`Error::SignInUnsecured`]. Then, when nothing failed, the record that it passed.
+pub(super) fn walk_data(acl: &mut dyn AclWriter, walk: &DataWalk) -> Result<Walked, Refused> {
     let mut seen = Walked::default();
-    let strict = Strict {
-        watched: Vec::new(),
-        pool: pool.to_vec(),
-        assigned: Vec::new(),
-    };
-    let mut passed = match acl.propagate(data, Reach::Children, None) {
-        Ok(walked) => {
-            seen.add(walked);
-            true
-        }
-        Err(failure) => {
-            tracing::warn!(%failure, "the data folder's items weren't worked out again");
-            false
-        }
-    };
-    for (child, credentials) in data_children(data) {
-        let strict = credentials.then_some(&strict);
-        match acl.propagate(&child, Reach::Tree, strict) {
+    let mut passed = true;
+    if walk.whole {
+        let mut walk_one = |root: &Path, reach| match acl.propagate(root, reach, None) {
             Ok(walked) => seen.add(walked),
             Err(failure) => {
-                tracing::warn!(%failure, credentials, "a data folder's tree wasn't walked");
+                tracing::warn!(%failure, "a data folder's item wasn't walked; it runs again");
                 passed = false;
             }
+        };
+        walk_one(&walk.data, Reach::Children);
+        for child in data_children(&walk.data) {
+            walk_one(&child, Reach::Tree);
         }
     }
-    if passed && let Err(error) = record_walked(data) {
+    if let Some(agents) = &walk.agents {
+        let strict = Strict {
+            watched: Vec::new(),
+            pool: walk.pool.clone(),
+            assigned: Vec::new(),
+        };
+        let walked = acl
+            .propagate(agents, Reach::Tree, Some(&strict))
+            .map_err(|failure| {
+                tracing::warn!(%failure, "the sign-ins' folder wasn't secured; launch refused");
+                Refused {
+                    at: acl.refused_at(),
+                    sign_in: true,
+                    ..Refused::new(PathKind::ClaudeStore, failure)
+                }
+            })?;
+        seen.add(walked);
+    }
+    if passed && let Err(error) = record_walked(&walk.data) {
         tracing::warn!(%error, "the data walk's record wasn't written; it runs again");
     }
-    seen
+    Ok(seen)
 }
 
-/// The folders directly in `data` a data walk goes down, each with whether it holds
-/// credentials; none of [`NOT_WALKED`], no link. Sorted, so walks run in one order.
-fn data_children(data: &Path) -> Vec<(PathBuf, bool)> {
+/// The folders directly in `data` its plain walk goes down: none of [`NOT_WALKED`], no link.
+/// Sorted, so walks run in one order.
+fn data_children(data: &Path) -> Vec<PathBuf> {
     let Ok(listing) = std::fs::read_dir(data) else {
         tracing::warn!("the data folder couldn't be listed for its walk");
         return Vec::new();
     };
-    let named = |name: &std::ffi::OsStr, want: &str| name.eq_ignore_ascii_case(want);
-    let mut out: Vec<(PathBuf, bool)> = listing
+    let mut out: Vec<PathBuf> = listing
         .filter_map(Result::ok)
         .filter(|entry| {
             entry
                 .file_type()
                 .is_ok_and(|t| t.is_dir() && !t.is_symlink())
         })
-        .filter(|entry| !NOT_WALKED.iter().any(|n| named(&entry.file_name(), n)))
-        .map(|entry| (entry.path(), named(&entry.file_name(), CREDENTIALS)))
+        .filter(|entry| {
+            let name = entry.file_name();
+            !NOT_WALKED.iter().any(|n| name.eq_ignore_ascii_case(n))
+        })
+        .map(|entry| entry.path())
         .collect();
     out.sort();
     out
