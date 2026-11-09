@@ -258,7 +258,7 @@ source: crates/settings/src/schema/tests.rs
           "additionalProperties": {
             "type": "string"
           },
-          "description": "Extra variables for the agent. A name with a `_`-separated part `KEY`, `TOKEN`, `SECRET`,\n`PASSWORD` or another secret word, in any case, is refused: secrets stay with IT's own\ntools and the OS keychain.",
+          "description": "Extra variables for the agent. A name that looks like a secret (a `_`-separated part\nending in `KEY`, `TOKEN`, `SECRET` or `PASSWORD`, and the like), in any case, is refused:\nsecrets stay with IT's own tools and the OS keychain.",
           "type": "object"
         },
         "provider": {

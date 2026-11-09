@@ -47,7 +47,7 @@ fn a_secret_word_part_drops_a_settings_name_and_a_token_count_passes() {
 /// secret-shaped is a credential here, and the counts pass both.
 #[test]
 fn the_host_and_the_firm_plan_agree_on_secret_shaped_names() {
-    for word in clauseo_settings::SECRET_WORDS {
+    for word in clauseo_settings::secret_words() {
         for name in [
             word.to_owned(),
             format!("ACME_{word}"),
@@ -58,6 +58,25 @@ fn the_host_and_the_firm_plan_agree_on_secret_shaped_names() {
         }
     }
     for name in [
+        "OPENAI_APIKEY",
+        "ACCESSKEY",
+        "PRIVATEKEY",
+        "CLIENTSECRET",
+        "PGPASSWORD",
+        "MYSQL_PWD",
+        "GITHUB_PAT",
+        "SENTRY_DSN",
+        "AZURE_STORAGE_SAS",
+        "DB_CONNECTION_STRING",
+        "FOO_PASSPHRASE",
+    ] {
+        assert!(clauseo_settings::secret_shaped(name), "{name}");
+        assert!(is_credential(OsStr::new(name)), "{name}");
+    }
+    for name in [
+        "PWD",
+        "OLDPWD",
+        "KEYBOARD_LAYOUT",
         "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
         "MAX_THINKING_TOKENS",
         "MAX_MCP_OUTPUT_TOKENS",

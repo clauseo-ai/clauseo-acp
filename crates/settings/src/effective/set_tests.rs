@@ -5,7 +5,7 @@
 use super::{Effective, EntryWrite};
 use crate::error::Error;
 use crate::locations::Locations;
-use crate::plans::SECRET_WORDS;
+use crate::plans::secret_words;
 use crate::policy::PolicyRead;
 use crate::schema::{AgentLaunch, Plan, PlanProvider};
 use crate::testing::{FakeSource, MemFiles, abs, abs_json, abs_str, policy};
@@ -227,7 +227,7 @@ fn set_plan_refuses_a_locked_id_with_settings_locked() {
 fn set_plan_refuses_each_banned_word_and_writes_nothing() {
     let files = user("{}");
     let mut effective = Effective::load(&locations(), &files, &[]);
-    for word in SECRET_WORDS {
+    for word in secret_words() {
         for name in [
             word.to_owned(),
             format!("firm_{}", word.to_ascii_lowercase()),

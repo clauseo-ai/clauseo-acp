@@ -107,9 +107,9 @@ pub struct Plan {
     /// Whose service the plan uses.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider: Option<PlanProvider>,
-    /// Extra variables for the agent. A name with a `_`-separated part `KEY`, `TOKEN`, `SECRET`,
-    /// `PASSWORD` or another secret word, in any case, is refused: secrets stay with IT's own
-    /// tools and the OS keychain.
+    /// Extra variables for the agent. A name that looks like a secret (a `_`-separated part
+    /// ending in `KEY`, `TOKEN`, `SECRET` or `PASSWORD`, and the like), in any case, is refused:
+    /// secrets stay with IT's own tools and the OS keychain.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub env: BTreeMap<String, String>,
 }

@@ -26,8 +26,8 @@ impl Pattern {
 }
 
 /// The names that carry or choose an agent's credentials, beside every secret-shaped name
-/// (`clauseo_settings::secret_shaped`, the firm plan's own rule: a `_`-separated part `KEY`,
-/// `TOKEN`, `AUTH` …). No jailed agent takes one from the lawyer's environment (none passes
+/// (`clauseo_settings::secret_shaped`, the firm plan's own rule: a `_`-separated part ending in
+/// `KEY`, `TOKEN` …, a part `AUTH`, `PAT` …). No jailed agent takes one from the lawyer's environment (none passes
 /// `JAILED_ENV`) nor from its settings `env`; the setup hook passes only its route's
 /// ([`ROUTES`]). Clauseo's own sign-in, the hook's stored key and the firm plan set them instead.
 pub(crate) const CREDENTIALS: [Pattern; 35] = [

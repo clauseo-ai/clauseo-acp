@@ -38,25 +38,60 @@ pub const PLAN_ENV_NAMES: [&str; 7] = [
 /// user name or password (`@`).
 pub const PLAN_PROXY_NAMES: [&str; 3] = ["HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"];
 
-/// The words that make a variable name secret-shaped ([`secret_shaped`]): one of them as a
-/// whole `_`-separated part of the name, in any case. Where a name is free (an agent's launch
-/// `env` with a value, [`crate::Effective::set_agent_launch`]) such a name is refused; the host
-/// drops it from a jailed agent's settings and setup variables by the same rule.
-pub const SECRET_WORDS: [&str; 9] = [
+/// The endings that make a `_`-separated part of a variable name secret ([`secret_shaped`]), in
+/// any case: `OPENAI_APIKEY`, `PRIVATEKEY`, `CLIENTSECRET`, `PGPASSWORD`, `MYSQL_PWD`. A count
+/// such as `MAX_THINKING_TOKENS` ends in `S`, so it passes. Over-catching (`MONKEY`) is
+/// accepted.
+pub const SECRET_SUFFIXES: [&str; 7] = [
     "KEY",
-    "TOKEN",
     "SECRET",
     "PASSWORD",
     "PASSWD",
-    "CREDENTIAL",
-    "CREDENTIALS",
-    "AUTH",
-    "COOKIE",
+    "PWD",
+    "TOKEN",
+    "PASSPHRASE",
 ];
 
+/// The whole `_`-separated parts that make a variable name secret, in any case: `GITHUB_PAT`,
+/// `SENTRY_DSN`, `AZURE_STORAGE_SAS`, `SERVICE_AUTH`.
+pub const SECRET_PARTS: [&str; 9] = [
+    "PAT",
+    "DSN",
+    "BEARER",
+    "SAS",
+    "SIG",
+    "AUTH",
+    "COOKIE",
+    "CREDENTIAL",
+    "CREDENTIALS",
+];
+
+/// Secrets by name, whatever the parts say (the parts catch most of them too).
+pub const SECRET_NAMES: [&str; 5] = [
+    "MYSQL_PWD",
+    "PGPASSWORD",
+    "SNOWSQL_PWD",
+    "REDISCLI_AUTH",
+    "ANTHROPIC_CUSTOM_HEADERS",
+];
+
+/// The names the endings would catch that are no secret: the shell's working folders.
+const NOT_SECRET: [&str; 2] = ["PWD", "OLDPWD"];
+
+/// Every word that is secret as a whole name or part: [`SECRET_SUFFIXES`] and
+/// [`SECRET_PARTS`], without the bare [`NOT_SECRET`] names (the tests' list).
+pub fn secret_words() -> Vec<&'static str> {
+    SECRET_SUFFIXES
+        .iter()
+        .chain(&SECRET_PARTS)
+        .copied()
+        .filter(|word| !NOT_SECRET.contains(word))
+        .collect()
+}
+
 /// Why a secret-shaped variable name is refused.
-const SECRET_NAME: &str = "a variable name with a part KEY, TOKEN, SECRET, PASSWORD or another \
-                           secret word is refused: keys go in the OS keychain";
+const SECRET_NAME: &str = "a variable name that looks like a secret (a part ending in KEY, TOKEN, \
+                           SECRET or PASSWORD, and the like) is refused: keys go in the OS keychain";
 
 /// Why a variable name that is not one is refused.
 const BAD_NAME: &str = "a variable name is ASCII letters, digits and _, not starting with a digit";
@@ -74,8 +109,9 @@ const PROXY_LOGIN: &str =
     "a proxy address may not hold a user name or password (@): keys go in the OS keychain";
 
 /// Why a launch variable with a secret-shaped name and a value is refused.
-const SECRET_VALUE: &str = "a variable whose name has a part KEY, TOKEN, SECRET, PASSWORD or \
-                            another secret word must be empty here: keys go in the OS keychain";
+const SECRET_VALUE: &str = "a variable whose name looks like a secret (a part ending in KEY, TOKEN, \
+                            SECRET or PASSWORD, and the like) must be empty here: keys go in the \
+                            OS keychain";
 
 /// Why a plan id that is not an agent id is refused.
 pub(crate) const BAD_ID: &str = "a plan's agent id is 1 to 64 characters of [a-z0-9-]";
@@ -105,17 +141,23 @@ pub(crate) fn id_ok(id: &str) -> bool {
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
 }
 
-/// Whether a variable's `name` is secret-shaped: one of its `_`-separated parts is one of
-/// [`SECRET_WORDS`], ignoring ASCII case. Parts, not text: `MAX_THINKING_TOKENS`' part is
-/// `TOKENS`, a count, so it passes. A plan refuses such a name as it refuses every name not on
-/// its list, with this reason; [`crate::Effective::set_agent_launch`] refuses it with a value; the
-/// host leaves it out of a jailed agent's settings and setup variables (one rule for all three).
+/// Whether a variable's `name` is secret-shaped, ignoring ASCII case: one of its `_`-separated
+/// parts ends in one of [`SECRET_SUFFIXES`] or is one of [`SECRET_PARTS`], it holds the parts
+/// `CONNECTION_STRING`, or it is one of [`SECRET_NAMES`]; never `PWD` or `OLDPWD`. A plan
+/// refuses such a name as it refuses every name not on its list, with this reason;
+/// [`crate::Effective::set_agent_launch`] refuses it with a value; the host leaves it out of a
+/// jailed agent's settings and setup variables. One rule for all three.
 pub fn secret_shaped(name: &str) -> bool {
-    name.split('_').any(|part| {
-        SECRET_WORDS
-            .iter()
-            .any(|word| part.eq_ignore_ascii_case(word))
-    })
+    let upper = name.to_ascii_uppercase();
+    if NOT_SECRET.contains(&upper.as_str()) {
+        return false;
+    }
+    SECRET_NAMES.contains(&upper.as_str())
+        || format!("_{upper}_").contains("_CONNECTION_STRING_")
+        || upper.split('_').any(|part| {
+            SECRET_SUFFIXES.iter().any(|suffix| part.ends_with(suffix))
+                || SECRET_PARTS.contains(&part)
+        })
 }
 
 /// Whether `name` is a variable name: ASCII letters, digits and `_`, not starting with a digit.

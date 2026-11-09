@@ -1,6 +1,6 @@
 use super::{
-    PLAN_ENV_NAMES, PLAN_PROXY_NAMES, SECRET_WORDS, bundle, check_launch_env, check_plan,
-    entry_is_clauseos, id_ok, launch_is_clauseos, plan, registry, secret_shaped, web_address_ok,
+    PLAN_ENV_NAMES, PLAN_PROXY_NAMES, bundle, check_launch_env, check_plan, entry_is_clauseos,
+    id_ok, launch_is_clauseos, plan, registry, secret_shaped, secret_words, web_address_ok,
 };
 use crate::error::Error;
 use crate::schema::{AgentLaunch, Plan, PlanProvider};
@@ -17,7 +17,7 @@ fn secret() -> String {
 /// Every spelling of each banned word a test tries: as it is, lower case, mixed, and inside a
 /// longer name.
 fn banned_names() -> Vec<String> {
-    SECRET_WORDS
+    secret_words()
         .iter()
         .flat_map(|word| {
             let lower = word.to_ascii_lowercase();
@@ -53,15 +53,47 @@ fn each_banned_word_is_secret_shaped_in_any_case() {
         "HTTPS_PROXY",
         "CLAUDE_CODE_USE_BEDROCK",
         "ANTHROPIC_MODEL",
-        // A word's part, not the word: counts and limits pass.
+        // Counts end in S, the shell's folders are listed, and a part that only starts with a
+        // word is none.
         "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
         "MAX_THINKING_TOKENS",
         "MAX_MCP_OUTPUT_TOKENS",
+        "PWD",
+        "OLDPWD",
+        "pwd",
         "KEYBOARD_LAYOUT",
         "AUTHOR_NAME",
+        "PATH",
+        "SIGNAL_MODE",
     ] {
         assert!(!secret_shaped(name), "{name}");
     }
+}
+
+/// The review's examples: a secret glued into one part, a bare part, the connection string.
+#[test]
+fn secrets_glued_into_a_part_or_named_by_a_bare_part_are_secret_shaped() {
+    for name in [
+        "OPENAI_APIKEY",
+        "ACCESSKEY",
+        "PRIVATEKEY",
+        "CLIENTSECRET",
+        "PGPASSWORD",
+        "MYSQL_PWD",
+        "GITHUB_PAT",
+        "SENTRY_DSN",
+        "AZURE_STORAGE_SAS",
+        "DB_CONNECTION_STRING",
+        "FOO_PASSPHRASE",
+        "connection_string",
+        "API_BEARER",
+        "BLOB_SIG",
+        "ANTHROPIC_CUSTOM_HEADERS",
+    ] {
+        assert!(secret_shaped(name), "{name}");
+        assert!(secret_shaped(&name.to_ascii_lowercase()), "{name}");
+    }
+    assert!(!secret_words().contains(&"PWD"));
 }
 
 #[test]

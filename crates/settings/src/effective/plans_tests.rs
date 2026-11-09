@@ -3,7 +3,7 @@
 
 use super::Effective;
 use crate::error::Error;
-use crate::plans::SECRET_WORDS;
+use crate::plans::secret_words;
 use crate::policy::{PolicyRead, managed_prefs, registry};
 use crate::schema::{InstallSettings, PlanProvider, Settings};
 use crate::testing::{FakeSource, abs, abs_json, locations, policy, user};
@@ -133,7 +133,7 @@ fn a_plans_section_the_policy_misnames_locks_every_plan() {
 /// with each banned word, spelled three ways, beside one allowed name.
 fn banned_env(section_only: bool) -> String {
     let mut env = serde_json::Map::new();
-    for word in SECRET_WORDS {
+    for word in secret_words() {
         for name in [
             word.to_owned(),
             word.to_ascii_lowercase(),
@@ -167,7 +167,7 @@ fn only_the_allowed_name(effective: &Effective, layer: &str) {
                 if key.starts_with("plans.claude-acp.env."))
         })
         .count();
-    assert_eq!(refused, SECRET_WORDS.len() * 3, "{layer}");
+    assert_eq!(refused, secret_words().len() * 3, "{layer}");
     assert!(
         !format!("{:?}", effective.warnings()).contains(&secret()),
         "{layer}"

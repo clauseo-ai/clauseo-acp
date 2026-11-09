@@ -409,38 +409,19 @@ pub(super) fn env_value(
 }
 
 /// Whether `codex`'s state folder `auth.json`, linked (`Same` or `Linked`), is one of the
-/// lawyer's own login files `lawyers` ([`is_lawyers_file`]). File system calls: off the actor.
+/// lawyer's own login files `lawyers` by file identity (device and inode, volume and file id),
+/// wherever its name is: Clauseo's login home may hold a name of the lawyer's file. Never by
+/// link count, which Clauseo's own login legitimately raises (one name per matter), and never by
+/// contents: Clauseo never reads a credential (decision record 0046), so a byte-identical
+/// leftover copy is not caught (0046's residuals). File system calls: off the actor.
 pub(super) fn is_lawyers_login(codex: &CodexPrepared, lawyers: &[PathBuf]) -> bool {
     use state_folder::StateLink;
     let linked = matches!(codex.link, Some(Ok(StateLink::Same | StateLink::Linked)));
-    linked && is_lawyers_file(&codex.state.join(state_folder::LOGIN_FILE), lawyers)
-}
-
-/// Whether `file` is one of the lawyer's own login files `lawyers`: by file identity (device and
-/// inode, volume and file id), wherever its name is, since Clauseo's login home may hold a name
-/// of the lawyer's file; or as a byte-identical copy, a leftover of the lawyer's tokens. Never by
-/// link count, which Clauseo's own login legitimately raises (one name per matter).
-pub(super) fn is_lawyers_file(file: &Path, lawyers: &[PathBuf]) -> bool {
-    lawyers.iter().any(|lawyers| {
-        state_folder::same_file(file, lawyers).unwrap_or(false) || same_bytes(file, lawyers)
-    })
-}
-
-/// The largest login file compared by its bytes; a real `auth.json` is a few kilobytes.
-const MAX_COMPARED: u64 = 1 << 20;
-
-/// Whether `a` and `b` are both readable, non-empty files of at most [`MAX_COMPARED`] bytes
-/// with the same contents. Any read error is "no".
-fn same_bytes(a: &Path, b: &Path) -> bool {
-    let size = |path: &Path| std::fs::metadata(path).ok().map(|meta| meta.len());
-    match (size(a), size(b)) {
-        (Some(left), Some(right)) if left == right && left > 0 && left <= MAX_COMPARED => {}
-        _ => return false,
-    }
-    match (std::fs::read(a), std::fs::read(b)) {
-        (Ok(left), Ok(right)) => left == right,
-        _ => false,
-    }
+    let file = codex.state.join(state_folder::LOGIN_FILE);
+    linked
+        && lawyers
+            .iter()
+            .any(|lawyers| state_folder::same_file(&file, lawyers).unwrap_or(false))
 }
 
 /// A jailed launch's state folder `auth.json` that is the lawyer's own file: its name in the

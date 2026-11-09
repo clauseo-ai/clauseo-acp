@@ -600,6 +600,12 @@ The crate cannot enforce these through its API; R20's desktop wiring must:
     before `OpenUrl`;
   - the file operations on login file paths (listed under "Reuse"), the guard, the split check,
     and the markers' "unreadable reads as reused" rule.
+- Residuals:
+  - A byte-identical leftover copy of the lawyer's tokens inside Clauseo's state (an old
+    `auth.json` copied in, not linked) is not detected, since Clauseo never opens or reads a
+    credential and a hash would need the same full read. The jailed launch's identity check by
+    file id (R17 PR-D2a, `state_prep::is_lawyers_login`) still catches the live file under any
+    name.
 - Open items:
   - `Found::ClaudeWindowsSandbox` is never reported yet: detection should run again when S15's
     tier B set-up finishes, and the crate needs a signal from S15 for it.
