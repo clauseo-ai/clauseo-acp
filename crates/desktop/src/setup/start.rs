@@ -379,19 +379,7 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
     // Each install try asks for a fresh route first (one past 60 s is resolved again).
     config.install.refresh = Some(Arc::new(network.refresher()));
     config.clock = Arc::clone(&clock);
-    // The runtime's folders for the sessions' `PATH`, looked up here (it reads the disk) and on
-    // each Python state, never from the launch hook.
-    let python = {
-        let mut config = config.clone();
-        // Only the data folder, the snapshot and the platform are read; the route's refresher
-        // is not held.
-        config.install.refresh = None;
-        PythonPath::new(
-            side.python,
-            Arc::new(move || clauseo_agents::python_path_dirs(&config)),
-        )
-    };
-    python.fill();
+    let python = python_path(&config, side.python);
     // The quit may close the cell first: then `Agents` never starts (`BackendStart::start_with`).
     let started = parts.start.start_with(|| {
         let (install, signin) = launchers(parts.home, |options| {
@@ -480,6 +468,21 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
         futures::executor::block_on(lift_at_start(&backend, FIRST_ROUTE_WAIT));
     }
     futures::executor::block_on(backend.pump(source));
+}
+
+/// The sessions' Python folders in `slot`, filled now from `config` and later on each Python
+/// state: looked up on this thread (it reads the disk), never from the launch hook.
+fn python_path(config: &AgentsConfig, slot: PythonSlot) -> PythonPath {
+    let mut config = config.clone();
+    // Only the data folder, the snapshot and the platform are read; the route's refresher is
+    // not held.
+    config.install.refresh = None;
+    let python = PythonPath::new(
+        slot,
+        Arc::new(move || clauseo_agents::python_path_dirs(&config)),
+    );
+    python.fill();
+    python
 }
 
 /// Waits for the keys' first load, at most [`KEYS_LOAD_BOUND`], and logs how long it took and

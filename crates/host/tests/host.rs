@@ -304,6 +304,9 @@ mod protection_parked;
 #[path = "host/protection_rig.rs"]
 mod protection_rig;
 #[cfg(test)]
+#[path = "host/python_path.rs"]
+mod python_path;
+#[cfg(test)]
 #[path = "host/queue.rs"]
 mod queue;
 #[cfg(test)]
