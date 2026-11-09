@@ -77,15 +77,27 @@ fn windows_local_app_data_chrome() {
 }
 
 #[test]
-fn edge_is_used_only_when_allowed() {
-    const { assert!(!EDGE_ALLOWED, "Edge waits for G17 item 4") };
+fn edge_is_the_last_place_looked_on_windows_and_only_when_allowed() {
+    const { assert!(EDGE_ALLOWED, "Edge stands in for Chrome for the shell tool") };
     let dir = TempDir::new("chrome-win-edge");
     let edge = touch(&dir.path().join("pf86"), WIN_EDGE);
     touch(&dir.path().join("pf"), WIN_EDGE);
     for platform in [Platform::WindowsX64, Platform::WindowsArm64] {
         let roots = roots(dir.path(), platform);
-        assert_eq!(find(&roots), None, "{platform:?}: Edge while not allowed");
-        assert_eq!(find_with(&roots, true), Some(edge.clone()), "{platform:?}");
+        assert_eq!(
+            find_with(&roots, false),
+            None,
+            "{platform:?}: Edge while not allowed"
+        );
+        assert_eq!(find(&roots), Some(edge.clone()), "{platform:?}");
+        assert_eq!(
+            roots.edge(),
+            [
+                dir.path().join("pf86").join(WIN_EDGE),
+                dir.path().join("pf").join(WIN_EDGE)
+            ],
+            "{platform:?}: Program Files (x86), then Program Files"
+        );
     }
     // Chrome still comes before an allowed Edge.
     let chrome = touch(&dir.path().join("local"), WIN_CHROME);
@@ -215,16 +227,15 @@ fn windows_installed_chrome_beats_chrome_for_testing() {
 }
 
 #[test]
-fn an_allowed_edge_beats_chrome_for_testing() {
+fn chrome_for_testing_beats_edge() {
     let dir = TempDir::new("chrome-win-edge-cft");
-    touch(
+    let cft = touch(
         dir.path(),
         &format!("app/browsers/chrome-131.0.1/{CFT_WIN}"),
     );
-    let edge = touch(&dir.path().join("pf"), WIN_EDGE);
+    touch(&dir.path().join("pf"), WIN_EDGE);
     let roots = roots(dir.path(), Platform::WindowsX64);
-    assert_eq!(find_with(&roots, true), Some(edge));
-    assert_ne!(find(&roots), find_with(&roots, true));
+    assert_eq!(find(&roots), Some(cft));
 }
 
 /// A link in the browsers folder picks nothing: a linked version folder, or a binary linked to a

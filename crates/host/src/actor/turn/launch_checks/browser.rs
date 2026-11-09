@@ -70,14 +70,22 @@ pub(super) struct BrowserPrep {
     /// Where the socket folder goes; `None` is `/tmp`.
     #[cfg(unix)]
     socket_root: Option<PathBuf>,
+    /// The browser as a shell tool (`HostConfig::with_browser_tool`): no MCP entry, no proxy,
+    /// no slot and no claims; the Chrome found is the session's `AGENT_BROWSER_EXECUTABLE_PATH`.
+    shell: bool,
 }
 
 impl BrowserPrep {
     /// Whether the launch prep looks for the session's browser at all: `tools.browser` on, a
-    /// proxy set, a slot free and a `browser` entry from the hook. The session's egress proxy
-    /// opens only then.
+    /// proxy set, a slot free and a `browser` entry from the hook; or, for the shell tool,
+    /// `tools.browser` on. The session's egress proxy opens only for the entry, once claimed.
     pub(super) fn wanted(&self) -> bool {
         !matches!(self.chrome, ChromeSearch::Skip)
+    }
+
+    /// Whether this is the shell tool's prep (`HostConfig::with_browser_tool`).
+    pub(super) fn shell(&self) -> bool {
+        self.shell
     }
 
     /// The prep with no browser: a launch whose slot wait ended with every slot held
@@ -116,6 +124,13 @@ impl BrowserPrep {
         let Some(chrome) = self.chrome.find_with_config(data) else {
             return read;
         };
+        if self.shell {
+            // agent-browser starts its own Chrome: nothing to claim.
+            return Prepared {
+                chrome: Some(chrome),
+                ..read
+            };
+        }
         let claimed = BrowserSession::claim(
             session_id,
             #[cfg(unix)]
@@ -230,8 +245,10 @@ pub(super) fn warn_if_still_full(actor: &Actor, run: &super::RunFolders) {
     }
 }
 
-/// What the launch prep does for `agent`'s session `key`, from the actor's state: nothing when
-/// no browser can go to it (`tools.browser` off, no proxy, no `browser` entry from the profile
+/// What the launch prep does for `agent`'s session `key`, from the actor's state. With the shell
+/// tool wired (`HostConfig::with_browser_tool`): its `agent-browser` command and a Chrome search
+/// when `tools.browser` is on, else nothing. Otherwise, for the guarded entry: nothing when no
+/// browser can go to it (`tools.browser` off, no proxy, no `browser` entry from the profile
 /// hook, or no slot and none coming free).
 pub(super) fn browser_prep(
     actor: &Actor,
@@ -246,7 +263,24 @@ pub(super) fn browser_prep(
         allowed_anyway: settings.browser.allow_when_remote_debugging_disabled,
         #[cfg(unix)]
         socket_root: None,
+        shell: false,
     };
+    if let Some(tools) = &actor.wiring.browser_tool {
+        if !settings.tools.browser {
+            return skip;
+        }
+        let command = tools.join(format!(
+            "{}{}",
+            clauseo_profile::paths::AGENT_BROWSER_COMMAND,
+            std::env::consts::EXE_SUFFIX
+        ));
+        return BrowserPrep {
+            sidecars: vec![command],
+            chrome: chrome_search(actor),
+            shell: true,
+            ..skip
+        };
+    }
     if !settings.tools.browser
         || actor.wiring.proxy.is_none()
         || !(actor.wiring.browser_slots.free_for(key) || actor.wiring.browser_slots.releasing(key))
@@ -267,15 +301,20 @@ pub(super) fn browser_prep(
             .and_then(|at| args.get(at + 1))
             .map(PathBuf::from),
     );
-    let chrome = match &actor.wiring.browser_executable {
-        Some(chrome) => ChromeSearch::Forced(chrome.clone()),
-        None => ChromeSearch::Roots(actor.wiring.chrome_roots.clone()),
-    };
     BrowserPrep {
         sidecars,
-        chrome,
+        chrome: chrome_search(actor),
         #[cfg(unix)]
         socket_root: actor.wiring.browser_socket_root.clone(),
         ..skip
+    }
+}
+
+/// How the session's Chrome is picked: the one the tests forced, else a search of the wiring's
+/// roots (this machine's when none).
+fn chrome_search(actor: &Actor) -> ChromeSearch {
+    match &actor.wiring.browser_executable {
+        Some(chrome) => ChromeSearch::Forced(chrome.clone()),
+        None => ChromeSearch::Roots(actor.wiring.chrome_roots.clone()),
     }
 }

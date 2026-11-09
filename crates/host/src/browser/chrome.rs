@@ -8,11 +8,11 @@
 //!    `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`, then the same under
 //!    `~/Applications`; on Windows `%ProgramFiles%`, `%ProgramFiles(x86)%`, then `%LOCALAPPDATA%`,
 //!    each with `\Google\Chrome\Application\chrome.exe`.
-//! 2. On Windows only, Microsoft Edge (`%ProgramFiles(x86)%`, then `%ProgramFiles%`, with
-//!    `\Microsoft\Edge\Application\msedge.exe`), only while [`EDGE_ALLOWED`] is true.
-//! 3. Chrome for Testing that Clauseo downloaded into `<app data>/browsers/chrome-<version>/`,
+//! 2. Chrome for Testing that Clauseo downloaded into `<app data>/browsers/chrome-<version>/`,
 //!    the highest version first, with the binary where the Chrome for Testing zip puts it.
 //!    Skipped on Windows ARM64, where only a slow emulated x64 build exists.
+//! 3. On Windows only, Microsoft Edge (`%ProgramFiles(x86)%`, then `%ProgramFiles%`, with
+//!    `\Microsoft\Edge\Application\msedge.exe`), last, while [`EDGE_ALLOWED`] is true.
 //! 4. Otherwise none.
 //!
 //! On Linux (development and CI only) the host takes `/usr/bin/google-chrome`, then
@@ -22,9 +22,13 @@
 
 use std::path::{Path, PathBuf};
 
-/// Whether Microsoft Edge may stand in for Chrome on Windows. False until G17 item 4 shows it
-/// works with agent-browser (its issues #177 and #1867; agent-browser does not detect Edge).
-pub const EDGE_ALLOWED: bool = false;
+/// Whether Microsoft Edge may stand in for Chrome on Windows, as the last place looked. It was
+/// false while G17 item 4 had not shown that Edge works with agent-browser (its issues #177 and
+/// #1867). That reason was agent-browser's, not the sandbox's or the guard's: agent-browser's own
+/// search never finds Edge, but it launches any Chromium it is given as
+/// `AGENT_BROWSER_EXECUTABLE_PATH`, which the host passes. On for the shell tool, after launch's
+/// decision; the Windows run of G17 item 4 is still owed (the PR's "Not verified").
+pub const EDGE_ALLOWED: bool = true;
 
 /// The folder under the app data folder that holds Chrome for Testing downloads.
 pub const BROWSERS_DIR: &str = "browsers";
@@ -143,9 +147,8 @@ impl ChromeRoots {
         }
     }
 
-    /// The places to look, in order, before Chrome for Testing; Edge's only when
-    /// `edge_allowed`.
-    fn installed(&self, edge_allowed: bool) -> Vec<PathBuf> {
+    /// The places to look for Chrome, in order, before Chrome for Testing.
+    fn installed(&self) -> Vec<PathBuf> {
         let chrome_app = Path::new("Applications")
             .join("Google Chrome.app")
             .join("Contents")
@@ -155,38 +158,46 @@ impl ChromeRoots {
             .join("Chrome")
             .join("Application")
             .join("chrome.exe");
-        let edge_exe = Path::new("Microsoft")
-            .join("Edge")
-            .join("Application")
-            .join("msedge.exe");
         match self.platform {
             Platform::MacArm64 | Platform::MacX64 => [Some(&self.root), self.home.as_ref()]
                 .into_iter()
                 .flatten()
                 .map(|base| base.join(&chrome_app))
                 .collect(),
-            Platform::WindowsX64 | Platform::WindowsArm64 => {
-                let chrome = [
-                    &self.program_files,
-                    &self.program_files_x86,
-                    &self.local_app_data,
-                ]
-                .into_iter()
-                .flatten()
-                .map(|base| base.join(&chrome_exe));
-                let edge = [&self.program_files_x86, &self.program_files]
-                    .into_iter()
-                    .flatten()
-                    .filter(|_| edge_allowed)
-                    .map(|base| base.join(&edge_exe));
-                chrome.chain(edge).collect()
-            }
+            Platform::WindowsX64 | Platform::WindowsArm64 => [
+                &self.program_files,
+                &self.program_files_x86,
+                &self.local_app_data,
+            ]
+            .into_iter()
+            .flatten()
+            .map(|base| base.join(&chrome_exe))
+            .collect(),
             Platform::Linux => ["google-chrome", "chromium"]
                 .into_iter()
                 .map(|name| self.root.join("usr").join("bin").join(name))
                 .collect(),
             Platform::Other => Vec::new(),
         }
+    }
+}
+
+impl ChromeRoots {
+    /// Windows' places for Microsoft Edge, in order: `%ProgramFiles(x86)%` (where Edge installs
+    /// itself), then `%ProgramFiles%`. None on any other machine.
+    pub fn edge(&self) -> Vec<PathBuf> {
+        if !matches!(self.platform, Platform::WindowsX64 | Platform::WindowsArm64) {
+            return Vec::new();
+        }
+        let edge_exe = Path::new("Microsoft")
+            .join("Edge")
+            .join("Application")
+            .join("msedge.exe");
+        [&self.program_files_x86, &self.program_files]
+            .into_iter()
+            .flatten()
+            .map(|base| base.join(&edge_exe))
+            .collect()
     }
 }
 
@@ -199,10 +210,17 @@ pub fn find(roots: &ChromeRoots) -> Option<PathBuf> {
 /// [`find`] with the Edge switch given, so its test covers both values.
 fn find_with(roots: &ChromeRoots, edge_allowed: bool) -> Option<PathBuf> {
     roots
-        .installed(edge_allowed)
+        .installed()
         .into_iter()
         .find(|path| is_file(path))
         .or_else(|| chrome_for_testing(roots))
+        .or_else(|| {
+            edge_allowed
+                .then(|| roots.edge())
+                .into_iter()
+                .flatten()
+                .find(|path| is_file(path))
+        })
 }
 
 /// The highest-versioned Chrome for Testing under `<app data>/browsers/` whose binary is there.

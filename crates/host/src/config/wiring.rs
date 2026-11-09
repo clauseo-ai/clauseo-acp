@@ -32,6 +32,9 @@ pub(crate) type PackReadHook = Arc<dyn Fn(&str) + Send + Sync>;
 pub(crate) struct LaunchWiring {
     pub(crate) proxy: Option<Arc<dyn EgressProxy>>,
     pub(crate) path_prepend: Option<PathBuf>,
+    /// The folder holding the `agent-browser` command (`HostConfig::with_browser_tool`): the
+    /// browser as a shell tool. None: no session gets the shell tool.
+    pub(crate) browser_tool: Option<PathBuf>,
     /// A Chrome the tests force, in place of the search.
     pub(crate) browser_executable: Option<PathBuf>,
     /// Where the launch prep looks for Chrome; `None` is this machine's roots
@@ -85,6 +88,7 @@ impl Default for LaunchWiring {
         Self {
             proxy: None,
             path_prepend: None,
+            browser_tool: None,
             browser_executable: None,
             chrome_roots: None,
             rd_policy: Arc::new(RdPolicy::wired()),
@@ -112,6 +116,7 @@ impl std::fmt::Debug for LaunchWiring {
         f.debug_struct("LaunchWiring")
             .field("proxy", &self.proxy.is_some())
             .field("path_prepend", &self.path_prepend)
+            .field("browser_tool", &self.browser_tool)
             .field("browser_executable", &self.browser_executable)
             .field("chrome_roots", &self.chrome_roots)
             .field("rd_policy", &self.rd_policy)
