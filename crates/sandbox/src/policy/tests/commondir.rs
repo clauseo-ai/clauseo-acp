@@ -49,6 +49,24 @@ fn commondir_targets_outside_the_read_only_rules_are_denied_there() {
     );
 }
 
+/// A `commondir` that is a symbolic link, dangling or not, refuses the build: git reads
+/// `config` and `hooks` through it, and where it leads can change once the agent runs.
+#[cfg(unix)]
+#[test]
+fn a_commondir_that_is_a_link_refuses_the_build() {
+    for (name, target) in [("dangling", "../nowhere/commondir"), ("inside", "../real")] {
+        let w = World::new(&format!("commondir-link-{name}"));
+        w.dir.file("matter/real", "..\n");
+        w.dir.file("matter/wt/HEAD", "ref: refs/heads/main\n");
+        w.dir.symlink("matter/wt/commondir", Path::new(target));
+        let error = w.builder().build().unwrap_err().to_string();
+        assert!(
+            error.contains("`commondir` may not be a symbolic link"),
+            "{name}: {error}"
+        );
+    }
+}
+
 #[test]
 fn a_matter_on_the_data_dirs_volume_needs_no_volume_set_aside() {
     let w = World::new("same-volume");

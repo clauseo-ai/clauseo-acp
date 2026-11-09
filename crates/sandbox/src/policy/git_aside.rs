@@ -87,7 +87,7 @@ pub(super) fn places(set_aside: Option<&Path>) -> Result<GitPlaces, Error> {
 pub(super) fn finish(policy: Policy) -> Result<Policy, Error> {
     let mut policy = check_git_set_aside(policy)?;
     policy.git.commondir =
-        commondir_targets(&policy.read_only_in_matter, &policy.read_only_in_matter);
+        commondir_targets(&policy.read_only_in_matter, &policy.read_only_in_matter)?;
     #[cfg(target_os = "macos")]
     {
         let reach = reach(&policy);
@@ -98,8 +98,9 @@ pub(super) fn finish(policy: Policy) -> Result<Policy, Error> {
 }
 
 /// The `commondir` targets of `repos` (the matter's `.git`s, `gitdir:` folders and bare
-/// repositories, all read-only) that no read-only rule covers.
-fn commondir_targets(repos: &[PathRule], read_only: &[PathRule]) -> Vec<CommonDir> {
+/// repositories, all read-only) that no read-only rule covers. Refused when a `commondir` is
+/// a symbolic link ([`commondir_of`]).
+fn commondir_targets(repos: &[PathRule], read_only: &[PathRule]) -> Result<Vec<CommonDir>, Error> {
     let covered = |path: &Path| {
         read_only
             .iter()
@@ -107,7 +108,7 @@ fn commondir_targets(repos: &[PathRule], read_only: &[PathRule]) -> Vec<CommonDi
     };
     let mut out: Vec<CommonDir> = Vec::new();
     for repo in repos {
-        let Some(target) = commondir_of(repo.path()) else {
+        let Some(target) = commondir_of(repo.path())? else {
             continue;
         };
         let found = match fs::metadata(&target) {
@@ -129,25 +130,44 @@ fn commondir_targets(repos: &[PathRule], read_only: &[PathRule]) -> Vec<CommonDi
             out.push(found);
         }
     }
-    out
+    Ok(out)
 }
 
 /// Where the `commondir` file in folder `dir` leads, made absolute and with `.` and `..`
-/// taken lexically; `None` without one.
-fn commondir_of(dir: &Path) -> Option<PathBuf> {
-    let entries = fs::read_dir(dir).ok()?;
-    let file = entries
+/// taken lexically; `None` without one. A `commondir` that is a symbolic link, dangling or
+/// not, refuses the build: git reads `config` and `hooks` through what it names, the walk
+/// can't judge where that is once the agent runs, and no repository Clauseo knows needs one.
+fn commondir_of(dir: &Path) -> Result<Option<PathBuf>, Error> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Ok(None);
+    };
+    let Some(file) = entries
         .flatten()
-        .find(|entry| opens_as(&entry.file_name(), "commondir"))?
-        .path();
-    let meta = fs::symlink_metadata(&file).ok()?;
-    if !meta.is_file() || meta.len() > COMMONDIR_MAX {
-        return None;
+        .find(|entry| opens_as(&entry.file_name(), "commondir"))
+        .map(|entry| entry.path())
+    else {
+        return Ok(None);
+    };
+    let Ok(meta) = fs::symlink_metadata(&file) else {
+        return Ok(None);
+    };
+    if meta.file_type().is_symlink() {
+        return refuse(format!(
+            "a git repository's `commondir` may not be a symbolic link: {}",
+            file.display()
+        ));
     }
-    let text = fs::read_to_string(&file).ok()?;
-    let line = text.lines().next()?.trim();
+    if !meta.is_file() || meta.len() > COMMONDIR_MAX {
+        return Ok(None);
+    }
+    let Ok(text) = fs::read_to_string(&file) else {
+        return Ok(None);
+    };
+    let Some(line) = text.lines().next().map(str::trim) else {
+        return Ok(None);
+    };
     if line.is_empty() {
-        return None;
+        return Ok(None);
     }
     let mut out = PathBuf::new();
     for part in dir.join(line).components() {
@@ -161,7 +181,7 @@ fn commondir_of(dir: &Path) -> Option<PathBuf> {
             }
         }
     }
-    Some(out)
+    Ok(Some(out))
 }
 
 #[cfg(target_os = "macos")]
