@@ -18,7 +18,6 @@ ignore = [
   { id = "RUSTSEC-2026-0371", reason = "zbus_names is unmaintained (merged into zbus 6); linux only, via zbus 5 -> tauri-plugin-notification, -opener, -single-instance, revisit by 2027-01-18" },
   { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained, no vulnerability; a build-time macro crate under specta's function feature, which only clauseo-desktop's dev-dependency tauri-specta turns on (the bindings test), revisit by 2027-01-31" },
   { id = "RUSTSEC-2026-0372", reason = "zvariant_derive is unmaintained (merged into zbus 6); linux only, via zvariant 5 -> zbus 5 -> tauri-plugin-notification, -opener, -single-instance, revisit by 2027-01-18" },
-  { id = "RUSTSEC-2026-0459", reason = "SQLite -wal page-size bug (CVE-2026-119375): Clauseo opens only its own databases in its data folder, which jailed agents can't write; an unjailed agent already has the lawyer's own access. Upgrade to rusqlite 0.41 before 2026-11-16." },
 ]
 
 [licenses]
