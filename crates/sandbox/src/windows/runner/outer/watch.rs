@@ -12,7 +12,7 @@
 //! into the matter counts gone by its check whatever its creation time says (`git_watch::pairs`);
 //! one that can't be armed, can't start its thread, panics or breaks doesn't refuse the launch
 //! or end the session, but loses the pairing for the session: every folder made just now and gone
-//! before its check then counts gone.
+//! before its check then counts gone, and the lawyer is told so once on the denial pipe.
 
 use std::io;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -26,7 +26,7 @@ use clauseo_protocol::MatterId;
 use super::super::end::EndSignal;
 use super::super::git_watch::os::{DirWatch, Notify, Stop};
 use super::super::git_watch::{
-    Cause, Changes, Dog, Guard, Paired, Pairs, Pulse, Session, feed, watch, watchdog,
+    Cause, Changes, Dog, Guard, Paired, Pairs, Pulse, Session, feed, lose_pairing, watch, watchdog,
 };
 use super::super::{LaunchMessage, RunExit};
 use super::{End, Failure, os, say};
@@ -171,12 +171,13 @@ fn start(
 /// agent's state folder, and on its temp folder when that isn't inside the state folder. A
 /// folder that can't be watched or gets only the plain records (no file IDs), a thread that
 /// can't start or one that panics never refuses the launch, since the matter stays watched, but
-/// fails closed: the pairing is lost for the session (`Pairs::lose_for_good`), so every folder
-/// made just now and gone counts.
+/// fails closed: the pairing is lost for the session (`git_watch::lose_pairing`), so every
+/// folder made just now and gone counts, and the lawyer is told once on the denial pipe.
 fn pairing(
     message: &LaunchMessage,
     stop: &Arc<Stop>,
     pairs: &Arc<Pairs>,
+    records: &Arc<RecordSink>,
 ) -> Vec<mpsc::Receiver<()>> {
     let state = PathBuf::from(&message.state);
     let mut roots = vec![state.clone()];
@@ -190,6 +191,7 @@ fn pairing(
     let mut done = Vec::new();
     for root in roots {
         let (stop, thread_pairs) = (Arc::clone(stop), Arc::clone(pairs));
+        let thread_records = Arc::clone(records);
         let (finished, ended) = mpsc::channel();
         let started = thread::Builder::new()
             .name("git-pairing".to_owned())
@@ -198,13 +200,16 @@ fn pairing(
                     pairs: thread_pairs,
                     root,
                 };
+                let record = |record: &Record| {
+                    thread_records.send(record);
+                };
                 let ran = catch_unwind(AssertUnwindSafe(|| {
                     let armed = DirWatch::arm(&paired.root, &stop, Notify::Names);
-                    feed(armed, &paired, monotonic);
+                    feed(armed, &paired, monotonic, record);
                 }));
                 if ran.is_err() {
                     tracing::warn!("a pairing watch panicked; the pairing is lost for the session");
-                    paired.lose_for_good();
+                    lose_pairing(&paired.pairs, &record);
                 }
                 let _sent = finished.send(());
             });
@@ -215,7 +220,9 @@ fn pairing(
                     %error,
                     "a pairing watch's thread couldn't start; the pairing is lost for the session"
                 );
-                pairs.lose_for_good();
+                lose_pairing(pairs, &|record: &Record| {
+                    records.send(record);
+                });
             }
         }
     }
@@ -376,7 +383,7 @@ pub(super) fn keep(
             .map(|notes| (PathBuf::from(notes), Folder::Other)),
     );
     let pairs = Arc::new(Pairs::default());
-    let mut done = pairing(message, &stop, &pairs);
+    let mut done = pairing(message, &stop, &pairs, &records);
     for (root, folder) in &folders {
         let started = start(
             (root, *folder),

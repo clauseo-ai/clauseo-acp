@@ -46,9 +46,7 @@ use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
 
-pub(crate) use self::pairs::Paired;
-#[cfg(windows)]
-pub(crate) use self::pairs::Pairs;
+pub(crate) use self::pairs::{Paired, Pairs};
 pub(crate) use self::records::Changes;
 pub(crate) use self::records::Layout;
 #[cfg(windows)]
@@ -220,6 +218,21 @@ impl Cause {
     }
 }
 
+/// The lawyer's notice when the pairing is lost for the session ([`lose_pairing`]): from then on
+/// every new folder that goes before its check counts toward [`GONE_LIMIT`].
+pub(crate) const PAIRING_LOST: &str = "Clauseo can't follow folders the AI tool moves in this \
+     session, so it will stop the session if the AI tool keeps moving or removing new folders in \
+     the matter before Clauseo can check them.";
+
+/// Loses the pairing for the session (`Pairs::lose_for_good`): a pairing watch couldn't be
+/// armed, got the plain records, broke, panicked or couldn't start its thread. The first loss of
+/// the session tells the lawyer ([`PAIRING_LOST`]) through `record`; later ones say nothing.
+pub(crate) fn lose_pairing(pairs: &Pairs, record: &impl Fn(&Record)) {
+    if pairs.lose_for_good() {
+        record(&Record::notice(PAIRING_LOST));
+    }
+}
+
 /// The watch's own count of what ends the session.
 struct Ender<'a, S: Session> {
     session: &'a S,
@@ -345,8 +358,14 @@ fn take_paired<T: Session>(ender: &Ender<'_, T>) {
 /// agent's state and temp folders, `armed` or not. It moves nothing and ends nothing itself.
 /// It fails closed: an overflow loses the pairing for its window, and a watch that couldn't be
 /// armed, was armed for the plain records (a network share: no file IDs, so it notes nothing)
-/// or broke loses it for the session, so every fresh folder gone and unpaired counts.
-pub(crate) fn feed(armed: io::Result<impl Source>, paired: &Paired, now: impl Fn() -> Duration) {
+/// or broke loses it for the session, so every fresh folder gone and unpaired counts, and the
+/// lawyer is told once a session through `record` ([`lose_pairing`]).
+pub(crate) fn feed(
+    armed: io::Result<impl Source>,
+    paired: &Paired,
+    now: impl Fn() -> Duration,
+    record: impl Fn(&Record),
+) {
     let mut source = match armed {
         Ok(source) => source,
         Err(error) => {
@@ -354,7 +373,7 @@ pub(crate) fn feed(armed: io::Result<impl Source>, paired: &Paired, now: impl Fn
                 code = code(&error),
                 "a pairing watch couldn't be armed; the pairing is lost for the session"
             );
-            paired.lose_for_good();
+            lose_pairing(&paired.pairs, &record);
             return;
         }
     };
@@ -362,7 +381,7 @@ pub(crate) fn feed(armed: io::Result<impl Source>, paired: &Paired, now: impl Fn
         tracing::warn!(
             "a pairing watch got the plain records; the pairing is lost for the session"
         );
-        paired.lose_for_good();
+        lose_pairing(&paired.pairs, &record);
         return;
     }
     loop {
@@ -374,7 +393,7 @@ pub(crate) fn feed(armed: io::Result<impl Source>, paired: &Paired, now: impl Fn
                     code = code(&error),
                     "a pairing watch broke; the pairing is lost for the session"
                 );
-                paired.lose_for_good();
+                lose_pairing(&paired.pairs, &record);
                 return;
             }
             Next::Idle => {}

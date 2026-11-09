@@ -187,10 +187,12 @@ impl Pairs {
     }
 
     /// Marks the pairing lost for the session: a pairing watch couldn't start, or broke.
-    pub(crate) fn lose_for_good(&self) {
+    /// Whether this is the session's first such loss, so the lawyer is told once.
+    pub(crate) fn lose_for_good(&self) -> bool {
         let mut kept = self.kept();
-        kept.lost_for_good = true;
+        let first = !std::mem::replace(&mut kept.lost_for_good, true);
         kept.count_held();
+        first
     }
 
     /// Whether the pairing is lost at `now`.
@@ -242,11 +244,6 @@ impl Paired {
     /// See [`Pairs::lose`].
     pub(crate) fn lose(&self, now: Duration) {
         self.pairs.lose(now);
-    }
-
-    /// See [`Pairs::lose_for_good`].
-    pub(crate) fn lose_for_good(&self) {
-        self.pairs.lose_for_good();
     }
 
     /// What counts gone of the fresh folders this watch held ([`Pairs::take`]).

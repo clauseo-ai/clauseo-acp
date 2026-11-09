@@ -13,7 +13,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::super::pairs::{PAIR_MAX, PAIR_WINDOW, Paired, Pairs};
-use super::super::{Changes, GONE_LIMIT, Guard, Layout, Next, Pulse, Session, Source, feed, watch};
+use super::super::{
+    Changes, GONE_LIMIT, Guard, Layout, Next, PAIRING_LOST, Pulse, Session, Source, feed,
+    lose_pairing, watch,
+};
 use super::Log;
 use super::pairs::{NOW, checked, left_temp, matter};
 use crate::windows::denial_pipe::Record;
@@ -264,6 +267,24 @@ impl Source for Script {
     }
 }
 
+/// The notices a pairing watch sent on the denial pipe, by their words.
+#[derive(Default)]
+struct Told(RefCell<Vec<String>>);
+
+impl Told {
+    fn record(&self) -> impl Fn(&Record) + '_ {
+        |record| {
+            if let Record::Notice { text } = record {
+                self.0.borrow_mut().push(text.clone());
+            }
+        }
+    }
+
+    fn said(&self) -> Vec<String> {
+        self.0.borrow().clone()
+    }
+}
+
 fn temp(pairs: &Arc<Pairs>) -> Paired {
     Paired {
         pairs: Arc::clone(pairs),
@@ -283,7 +304,18 @@ fn a_pairing_watchs_overflow_loses_the_pairing_for_the_window() {
         })
     };
     let reports = vec![left("a", 1), Next::Idle, Next::Overflow, left("b", 2)];
-    feed(Ok(Script::new(reports)), &temp(&pairs), || NOW);
+    let told = Told::default();
+    feed(
+        Ok(Script::new(reports)),
+        &temp(&pairs),
+        || NOW,
+        told.record(),
+    );
+    assert_eq!(
+        told.said(),
+        Vec::<String>::new(),
+        "lost for the window only"
+    );
     let made = Path::new("matter").join("x");
     assert!(pairs.paired(NOW, 1, &made) && pairs.paired(NOW, 2, &made));
     assert!(pairs.lost(NOW + PAIR_WINDOW) && !pairs.lost(NOW + PAIR_WINDOW + MS));
@@ -303,7 +335,14 @@ fn a_pairing_watch_that_breaks_or_cant_be_armed_loses_the_pairing_for_the_sessio
             ..Changes::default()
         }),
     ];
-    feed(Ok(Script::new(reports)), &temp(&pairs), || NOW);
+    let told = Told::default();
+    feed(
+        Ok(Script::new(reports)),
+        &temp(&pairs),
+        || NOW,
+        told.record(),
+    );
+    assert_eq!(told.said(), [PAIRING_LOST], "broke");
     assert!(
         !pairs.paired(NOW, 3, &Path::new("matter").join("x")),
         "nothing after it broke"
@@ -313,7 +352,9 @@ fn a_pairing_watch_that_breaks_or_cant_be_armed_loses_the_pairing_for_the_sessio
 
     let pairs = Arc::new(Pairs::default());
     let armed: io::Result<Script> = Err(io::Error::from_raw_os_error(5));
-    feed(armed, &temp(&pairs), || NOW);
+    let told = Told::default();
+    feed(armed, &temp(&pairs), || NOW, told.record());
+    assert_eq!(told.said(), [PAIRING_LOST], "couldn't be armed");
     assert!(pairs.lost(NOW + 1000 * PAIR_WINDOW));
     assert_eq!(checked(&pairs, NOW + 1000 * PAIR_WINDOW), x());
 }
@@ -327,11 +368,55 @@ fn a_pairing_watch_armed_for_the_plain_records_loses_the_pairing_for_the_session
         left: vec![(PathBuf::from("d"), 4)],
         ..Changes::default()
     });
-    feed(Ok(Script::plain(vec![left])), &temp(&pairs), || NOW);
+    let told = Told::default();
+    feed(
+        Ok(Script::plain(vec![left])),
+        &temp(&pairs),
+        || NOW,
+        told.record(),
+    );
+    assert_eq!(told.said(), [PAIRING_LOST], "plain records");
     assert!(
         !pairs.paired(NOW, 4, &Path::new("matter").join("x")),
         "nothing noted"
     );
     assert!(pairs.lost(NOW + 1000 * PAIR_WINDOW));
     assert_eq!(checked(&pairs, NOW + 1000 * PAIR_WINDOW), x());
+}
+
+/// The lawyer hears of the pairing lost for the session once, however many pairing watches lose
+/// it and by whichever path: the state and temp watches share one pairing.
+#[test]
+fn the_pairing_lost_for_the_session_is_told_once_a_session() {
+    let pairs = Arc::new(Pairs::default());
+    let told = Told::default();
+    let state = Paired {
+        pairs: Arc::clone(&pairs),
+        root: PathBuf::from("state"),
+    };
+    let broken = vec![Next::Broken(io::Error::from_raw_os_error(6))];
+    feed(Ok(Script::new(broken)), &state, || NOW, told.record());
+    let armed: io::Result<Script> = Err(io::Error::from_raw_os_error(5));
+    feed(armed, &temp(&pairs), || NOW, told.record());
+    feed(
+        Ok(Script::plain(Vec::new())),
+        &temp(&pairs),
+        || NOW,
+        told.record(),
+    );
+    // A panicked watch, or one whose thread couldn't start (`outer/watch.rs`).
+    lose_pairing(&pairs, &told.record());
+    assert_eq!(told.said(), [PAIRING_LOST]);
+    assert!(pairs.lost(NOW + 1000 * PAIR_WINDOW));
+}
+
+/// The notice's words, as the lawyer reads them.
+#[test]
+fn the_pairing_lost_notice_says_what_happens_next_in_plain_words() {
+    assert_eq!(
+        PAIRING_LOST,
+        "Clauseo can't follow folders the AI tool moves in this session, so it will stop the \
+         session if the AI tool keeps moving or removing new folders in the matter before Clauseo \
+         can check them."
+    );
 }
