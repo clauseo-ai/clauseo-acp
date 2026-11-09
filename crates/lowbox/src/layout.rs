@@ -45,13 +45,27 @@ pub(crate) fn directory_sddl(owner: &Sid, browser: &Sid, package: &Sid) -> Strin
     )
 }
 
-/// The descriptor of the pipe folder (the recipe's F1, with `O:` as [`directory_sddl`]): file
-/// access, and for the package `0x1F0006` (`FILE_ADD_FILE`, `FILE_ADD_SUBDIRECTORY` and the
-/// standard rights): it makes pipes in the folder, never lists or reads it.
+/// What the browser account may do to the pipe folder: all file access (`FILE_ALL_ACCESS`,
+/// `0x1F01FF`) but `DELETE`, `WRITE_DAC` and `WRITE_OWNER`, so no `B_s` process can delete the
+/// folder or change its descriptor after the guard's check. The guard opens it with
+/// `READ_CONTROL | SYNCHRONIZE` only.
+pub(crate) const PIPES_BROWSER_MASK: u32 = 0x0012_01FF;
+
+/// What the package may do in the pipe folder: `FILE_ADD_FILE` (`0x2`) and
+/// `FILE_ADD_SUBDIRECTORY`, which for NPFS is `FILE_CREATE_PIPE_INSTANCE` (`0x4`), to make
+/// pipes in it, with `READ_CONTROL | SYNCHRONIZE`; never list or read it, and no `DELETE`,
+/// `WRITE_DAC` or `WRITE_OWNER` (the recipe's `0x1F0006` had them).
+pub(crate) const PIPES_PACKAGE_MASK: u32 = 0x0012_0006;
+
+/// The descriptor of the pipe folder: the recipe's F1 with `O:` as [`directory_sddl`], and the
+/// browser account's and the package's access trimmed to [`PIPES_BROWSER_MASK`] and
+/// [`PIPES_PACKAGE_MASK`]. The owner makes it with this, and the guard's check compares the
+/// folder's DACL and label with this.
 pub(crate) fn pipe_folder_sddl(owner: &Sid, browser: &Sid, package: &Sid) -> String {
     let (o, b, p) = (owner.as_str(), browser.as_str(), package.as_str());
     format!(
-        "O:{o}D:(A;;FA;;;SY)(A;;FA;;;{o})(A;;FA;;;{b})(A;;0x1f0006;;;{p})\
+        "O:{o}D:(A;;FA;;;SY)(A;;FA;;;{o})(A;;{PIPES_BROWSER_MASK:#x};;;{b})\
+         (A;;{PIPES_PACKAGE_MASK:#x};;;{p})\
          (A;OICIIO;GA;;;SY)(A;OICIIO;GA;;;CO)(A;OICIIO;GA;;;{p})S:(ML;;NW;;;LW)"
     )
 }
@@ -87,6 +101,20 @@ mod tests {
         assert_eq!(directory(1, &p), dir);
     }
 
+    /// Neither the browser account nor the package may delete the pipe folder or change its
+    /// descriptor; the package may make pipes in it and no more.
+    #[test]
+    fn the_pipe_folder_masks_have_no_delete_dac_or_owner_rights() {
+        // DELETE, WRITE_DAC, WRITE_OWNER.
+        let forbidden = 0x0001_0000 | 0x0004_0000 | 0x0008_0000;
+        assert_eq!(PIPES_BROWSER_MASK & forbidden, 0);
+        assert_eq!(PIPES_PACKAGE_MASK & forbidden, 0);
+        // FILE_ALL_ACCESS less the three.
+        assert_eq!(PIPES_BROWSER_MASK, 0x001F_01FF & !forbidden);
+        // FILE_ADD_FILE | FILE_CREATE_PIPE_INSTANCE, READ_CONTROL | SYNCHRONIZE.
+        assert_eq!(PIPES_PACKAGE_MASK, 0x2 | 0x4 | 0x0002_0000 | 0x0010_0000);
+    }
+
     #[test]
     fn the_shadows_are_the_recipes() {
         let shadows: Vec<Option<String>> = Slot::ALL.iter().map(|s| shadow(*s, 3)).collect();
@@ -103,7 +131,8 @@ mod tests {
         );
     }
 
-    /// D1 and F1, copied from the recipe's table, with the VM's SIDs; the crate adds `O:`.
+    /// D1 and F1, copied from the recipe's table, with the VM's SIDs; the crate adds `O:`, and
+    /// trims F1's browser and package ACEs (`0x1201ff` for `FA`, `0x120006` for `0x1f0006`).
     const D1: &str = "D:(A;;GA;;;SY)(A;;GA;;;S-1-5-21-4086760546-1163544284-2580614524-1001)\
         (A;;GA;;;S-1-5-21-4086760546-1163544284-2580614524-1002)\
         (A;;GA;;;S-1-15-2-4291742471-3177126929-1079639061-2360262239-4224205492-3771709147-\
@@ -111,8 +140,8 @@ mod tests {
         (A;OICIIO;GA;;;S-1-15-2-4291742471-3177126929-1079639061-2360262239-4224205492-\
         3771709147-1509459664)S:(ML;;NW;;;LW)";
     const F1: &str = "D:(A;;FA;;;SY)(A;;FA;;;S-1-5-21-4086760546-1163544284-2580614524-1001)\
-        (A;;FA;;;S-1-5-21-4086760546-1163544284-2580614524-1002)\
-        (A;;0x1f0006;;;S-1-15-2-4291742471-3177126929-1079639061-2360262239-4224205492-\
+        (A;;0x1201ff;;;S-1-5-21-4086760546-1163544284-2580614524-1002)\
+        (A;;0x120006;;;S-1-15-2-4291742471-3177126929-1079639061-2360262239-4224205492-\
         3771709147-1509459664)(A;OICIIO;GA;;;SY)(A;OICIIO;GA;;;CO)\
         (A;OICIIO;GA;;;S-1-15-2-4291742471-3177126929-1079639061-2360262239-4224205492-\
         3771709147-1509459664)S:(ML;;NW;;;LW)";

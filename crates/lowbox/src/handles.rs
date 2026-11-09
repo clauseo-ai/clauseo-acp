@@ -5,7 +5,8 @@
 //!
 //! The pipe folder is never handed over: `NtQueryObject` names a handle to an NPFS prefix just
 //! `\Device\NamedPipe` (seen on Server 2025, r842), so a handed-over value could not be told
-//! from any other NPFS handle. The guard opens it by its name instead (`crate::windows`).
+//! from any other NPFS handle. The guard opens it by its name instead; [`pipe_folder`] makes
+//! and checks it.
 
 use crate::error::{Error, HandleProblem};
 use crate::layout;
@@ -263,53 +264,6 @@ pub(crate) fn check(
     Ok(())
 }
 
-/// The pipe folder the guard opened by name, checked through that handle: owned by
-/// `expected.owner` (`found_owner`, the owner's `S-1-…` text or the Win32 error) and with
-/// exactly the ACEs of `expected_dacl` (`found_dacl`, the DACL as SDDL or the Win32 error). Both
-/// texts come from the same conversion (`ConvertSecurityDescriptorToStringSecurityDescriptorW`),
-/// so SID aliases and the access masks are written alike; the DACL's control flags (`P`, `AI`,
-/// `AR`) are not compared, since they grant nothing.
-pub(crate) fn check_pipe_folder(
-    found_owner: Result<String, u32>,
-    found_dacl: Result<String, u32>,
-    expected: &Expected<'_>,
-    expected_dacl: &str,
-) -> Result<(), Error> {
-    let fail = |problem| Error::Handle {
-        slot: Slot::Pipes,
-        problem,
-    };
-    let owner = found_owner.map_err(|code| fail(HandleProblem::OwnerUnreadable { code }))?;
-    if owner != expected.owner.as_str() {
-        return Err(fail(HandleProblem::WrongOwner));
-    }
-    let dacl = found_dacl.map_err(|code| fail(HandleProblem::DaclUnreadable { code }))?;
-    if same_aces(&dacl, expected_dacl) {
-        Ok(())
-    } else {
-        Err(fail(HandleProblem::WrongDacl))
-    }
-}
-
-/// Whether the SDDL DACLs `found` and `wanted` hold exactly the same ACEs, in the same order
-/// (their control flags aside); `false` when either is no DACL with ACEs (see [`aces`]).
-pub(crate) fn same_aces(found: &str, wanted: &str) -> bool {
-    matches!((aces(found), aces(wanted)), (Some(f), Some(w)) if f == w)
-}
-
-/// The ACEs of the SDDL DACL `dacl` (`D:`, optional control flags, then the `(…)` ACEs), or
-/// `None` when it is no DACL with at least one ACE (no `D:`, `D:NO_ACCESS_CONTROL`, an empty
-/// DACL, or text after the DACL such as an `S:` part).
-fn aces(dacl: &str) -> Option<&str> {
-    let rest = dacl.strip_prefix("D:")?;
-    let start = rest.find('(')?;
-    let flags = &rest[..start];
-    let list = &rest[start..];
-    let flags_ok =
-        flags.is_empty() || ["P", "AI", "AR", "PAI", "PAR", "ARAI", "PARAI"].contains(&flags);
-    (flags_ok && list.ends_with(')') && !list.contains(")S:")).then_some(list)
-}
-
 /// The start of an app package SID's text.
 const PACKAGE_SID_PREFIX: &str = "s-1-15-2-";
 
@@ -340,6 +294,8 @@ pub(crate) fn redact(name: &str, package: &Sid) -> String {
     out.push_str(&name[rest..]);
     out
 }
+
+pub(crate) mod pipe_folder;
 
 #[cfg(test)]
 mod tests;

@@ -122,13 +122,16 @@ pub enum HandleProblem {
     },
     /// The object is not owned by the user who built the namespace.
     WrongOwner,
-    /// The pipe folder's DACL could not be read (`GetSecurityInfo` or its conversion failed).
-    DaclUnreadable {
+    /// The pipe folder's DACL or mandatory label could not be read (`GetSecurityInfo` or its
+    /// conversion failed).
+    SecurityUnreadable {
         /// The Win32 error.
         code: u32,
     },
     /// The pipe folder's ACEs are not the ones the owner sets (`crate::layout::pipe_folder_sddl`).
     WrongDacl,
+    /// The pipe folder's mandatory label is not the one the owner sets (Low, no write up).
+    WrongLabel,
 }
 
 impl fmt::Display for Error {
@@ -185,8 +188,11 @@ impl fmt::Display for HandleProblem {
                 write!(f, "owner unreadable (error {code})")
             }
             HandleProblem::WrongOwner => f.write_str("not owned by the namespace's builder"),
-            HandleProblem::DaclUnreadable { code } => write!(f, "DACL unreadable (error {code})"),
+            HandleProblem::SecurityUnreadable { code } => {
+                write!(f, "DACL or label unreadable (error {code})")
+            }
             HandleProblem::WrongDacl => f.write_str("its DACL is not the one the owner sets"),
+            HandleProblem::WrongLabel => f.write_str("its label is not the one the owner sets"),
         }
     }
 }

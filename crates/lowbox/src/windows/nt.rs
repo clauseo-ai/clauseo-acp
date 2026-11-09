@@ -16,7 +16,8 @@ use ::windows::Win32::Security::Authorization::{
     ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
 };
 use ::windows::Win32::Security::{
-    DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SID_AND_ATTRIBUTES,
+    DACL_SECURITY_INFORMATION, LABEL_SECURITY_INFORMATION, OBJECT_SECURITY_INFORMATION,
+    PSECURITY_DESCRIPTOR, PSID, SID_AND_ATTRIBUTES,
 };
 use ::windows::core::{PCWSTR, PWSTR};
 
@@ -133,22 +134,40 @@ impl Descriptor {
         Ok(Descriptor(descriptor))
     }
 
-    /// This descriptor's DACL as SDDL (`D:…`), through [`dacl_sddl`], so it reads exactly as
-    /// a DACL read back from an object does.
-    pub(super) fn dacl_sddl(&self) -> Result<String, Error> {
+    /// This descriptor's DACL (`D:…`) and mandatory label (`S:…`) as SDDL, through
+    /// [`dacl_and_label`], so they read exactly as the ones read back from an object do.
+    pub(super) fn dacl_and_label(&self) -> Result<(String, String), Error> {
         // SAFETY: `self.0` is a valid self-relative descriptor until Drop.
-        unsafe { dacl_sddl(self.0) }.map_err(|code| Error::Win32 {
+        unsafe { dacl_and_label(self.0) }.map_err(|code| Error::Win32 {
             call: "ConvertSecurityDescriptorToStringSecurityDescriptorW",
             code,
         })
     }
 }
 
-/// The DACL of `descriptor` as SDDL (`D:…`), else the Win32 error.
+/// The DACL (`D:…`) and the mandatory label (`S:…`) of `descriptor` as SDDL, each converted
+/// on its own, else the Win32 error.
 ///
 /// # Safety
 /// `descriptor` must point at a valid security descriptor for the call.
-pub(super) unsafe fn dacl_sddl(descriptor: PSECURITY_DESCRIPTOR) -> Result<String, u32> {
+pub(super) unsafe fn dacl_and_label(
+    descriptor: PSECURITY_DESCRIPTOR,
+) -> Result<(String, String), u32> {
+    // SAFETY: the caller's contract, passed on.
+    let dacl = unsafe { sddl_part(descriptor, DACL_SECURITY_INFORMATION) }?;
+    // SAFETY: as above.
+    let label = unsafe { sddl_part(descriptor, LABEL_SECURITY_INFORMATION) }?;
+    Ok((dacl, label))
+}
+
+/// The part `info` of `descriptor` as SDDL, else the Win32 error.
+///
+/// # Safety
+/// `descriptor` must point at a valid security descriptor for the call.
+unsafe fn sddl_part(
+    descriptor: PSECURITY_DESCRIPTOR,
+    info: OBJECT_SECURITY_INFORMATION,
+) -> Result<String, u32> {
     let mut text = PWSTR::null();
     // SAFETY: `descriptor` is valid (the caller's contract); `text` gets a LocalAlloc'd string,
     // freed below.
@@ -156,7 +175,7 @@ pub(super) unsafe fn dacl_sddl(descriptor: PSECURITY_DESCRIPTOR) -> Result<Strin
         ConvertSecurityDescriptorToStringSecurityDescriptorW(
             descriptor,
             SDDL_REVISION_1,
-            DACL_SECURITY_INFORMATION,
+            info,
             &raw mut text,
             None,
         )

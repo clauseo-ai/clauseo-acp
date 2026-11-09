@@ -31,6 +31,7 @@ use super::nt::{Descriptor, NtCreateDirectoryObjectEx, NtCreateSymbolicLinkObjec
 use super::probe::{ThisProcess, handle};
 use super::{nt_ok, token, win32};
 use crate::error::Error;
+use crate::handles::pipe_folder::{self, PipeFs, Security};
 use crate::handles::{
     self, Expected, HANDED_COUNT, HANDLE_COUNT, ObjectKind, Slot, format_handle_arg,
 };
@@ -51,10 +52,11 @@ const LINK_ALL_ACCESS: u32 = 0x000F_0001;
 const LINK_OPEN: u32 = 0x0002_0001;
 /// `FILE_GENERIC_READ` with `FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY`: the owner's pipe folder.
 const PIPES_OWNER: u32 = 0x0012_008F;
-/// `FILE_GENERIC_READ`: the guard's pipe folder.
+/// `FILE_GENERIC_READ`: the recipe's by-name open of the pipe folder ([`NamespaceHandles::open`]).
 const PIPES_OPEN: u32 = 0x0012_0089;
-/// `FILE_CREATED`: `IO_STATUS_BLOCK.Information` when `FILE_OPEN_IF` made the file.
-const FILE_CREATED: usize = 2;
+/// `READ_CONTROL | SYNCHRONIZE`: the guard's own open of the pipe folder, which it only checks
+/// (owner, DACL, label) and hands to the token call.
+const PIPES_GUARD: u32 = 0x0012_0000;
 
 /// The owner's side: builds a package's namespace.
 #[derive(Debug, Clone, Copy)]
@@ -122,7 +124,6 @@ impl Namespace {
         let sid = package_sid(package);
         let owner = token::current_user()?;
         let objects = Descriptor::from_sddl(&layout::directory_sddl(&owner, browser_user, &sid))?;
-        let pipes = Descriptor::from_sddl(&layout::pipe_folder_sddl(&owner, browser_user, &sid))?;
         let target = ObjectName::new(&layout::directory(session, &sid))?;
         let mut made = Vec::with_capacity(HANDLE_COUNT);
         for slot in Slot::ALL {
@@ -133,7 +134,7 @@ impl Namespace {
                     create_directory(&name, &objects, &shadow)?
                 }
                 (ObjectKind::SymbolicLink, _) => create_link(&name, &objects, &target)?,
-                _ => new_pipe_folder(&name, &pipes, &owner)?,
+                _ => pipe_folder::make(&Npfs, session, &owner, browser_user, &sid)?,
             };
             made.push(handle);
         }
@@ -190,12 +191,13 @@ impl NamespaceHandles {
     /// `NtQueryObject` names any NPFS prefix handle just `\Device\NamedPipe`. This process opens
     /// `\Device\NamedPipe\Sessions\<n>\AppContainerNamedObjects\<package SID>` by that name
     /// (`FILE_OPEN` with `FILE_DIRECTORY_FILE`, which NPFS answers from its prefix of exactly
-    /// that name and never creates), as the W2 (j) recipe's browser-account side did, and checks
-    /// through the handle it got that the folder is owned by `owner` and has exactly the ACEs
-    /// the owner sets (`crate::layout`'s F1 for `owner`, this process's user as the browser
-    /// account, and the package). The owner made the folder new ([`Namespace::build`] refuses
-    /// one that was already there) and holds it open until the browser has exited, so the name
-    /// cannot meanwhile pass to a folder of someone else's.
+    /// that name and never creates; `READ_CONTROL | SYNCHRONIZE` only; `OBJ_DONT_REPARSE`), as
+    /// the W2 (j) recipe's browser-account side did, and checks through the handle it got that
+    /// the folder is owned by `owner` and has exactly the ACEs and the mandatory label the owner
+    /// sets (`crate::layout::pipe_folder_sddl` for `owner`, this process's user as the browser
+    /// account, and the package; `crate::handles::pipe_folder`). The owner made the folder new
+    /// ([`Namespace::build`] refuses one that was already there) and holds it open until the
+    /// browser has exited, so the name cannot meanwhile pass to a folder of someone else's.
     ///
     /// The first check that fails fails the whole call, and no value is taken. The handles taken
     /// are made non-inheritable, so only a launch that lists them passes them on.
@@ -212,7 +214,7 @@ impl NamespaceHandles {
             owner,
         };
         handles::check(&ThisProcess, values, &expected)?;
-        let pipes = open_own_pipe_folder(&expected)?;
+        let pipes = pipe_folder::open(&Npfs, &expected, &token::current_user()?)?;
         let mut taken: Vec<OwnedHandle> = values
             .iter()
             // SAFETY: each value was just checked to be an open handle of this process, of the
@@ -392,42 +394,6 @@ fn set_flag(h: HANDLE, on: bool) -> Result<(), Error> {
         .map_err(|e| win32("SetHandleInformation", &e))
 }
 
-/// Makes the pipe folder `name` with `descriptor`, which must not exist yet: `FILE_OPEN_IF`, as
-/// the recipe did, then the folder is refused unless the call reports `FILE_CREATED`, its
-/// owner is `owner` and its ACEs read back as `descriptor`'s. A folder someone made first,
-/// with a descriptor of theirs, is never used.
-fn new_pipe_folder(
-    name: &ObjectName,
-    descriptor: &Descriptor,
-    owner: &Sid,
-) -> Result<OwnedHandle, Error> {
-    let (folder, information) = pipe_folder(name, Some(descriptor), PIPES_OWNER, FILE_OPEN_IF)?;
-    if information != FILE_CREATED {
-        return Err(Error::Namespace {
-            reason: "the pipe folder was already there",
-        });
-    }
-    let found = token::owner_of(HANDLE(folder.as_raw_handle())).map_err(|code| Error::Win32 {
-        call: "GetSecurityInfo (the pipe folder's owner)",
-        code,
-    })?;
-    if found != owner.as_str() {
-        return Err(Error::Namespace {
-            reason: "the new pipe folder is not owned by this process's user",
-        });
-    }
-    let dacl = token::dacl_of(HANDLE(folder.as_raw_handle())).map_err(|code| Error::Win32 {
-        call: "GetSecurityInfo (the pipe folder's DACL)",
-        code,
-    })?;
-    if !handles::same_aces(&dacl, &descriptor.dacl_sddl()?) {
-        return Err(Error::Namespace {
-            reason: "the new pipe folder's DACL is not the one it was made with",
-        });
-    }
-    Ok(folder)
-}
-
 /// Opens (and with `FILE_OPEN_IF` and a descriptor, makes) the pipe folder `name`, following no
 /// object-manager link (`OBJ_DONT_REPARSE`); the second value is `IO_STATUS_BLOCK.Information`
 /// (`FILE_CREATED`, `FILE_OPENED`, …).
@@ -462,34 +428,48 @@ fn pipe_folder(
     Ok((owned(out), status_block.Information))
 }
 
-/// The guard's own handle to the pipe folder of `expected`'s package in its session: opened by
-/// name with [`PIPES_OPEN`] and `FILE_OPEN` (never made), then checked through that handle by
-/// [`handles::check_pipe_folder`] against the owner and the ACEs of F1 for `expected.owner`,
-/// this process's user (the browser account) and the package.
-fn open_own_pipe_folder(expected: &Expected<'_>) -> Result<OwnedHandle, Error> {
-    let name = ObjectName::new(&layout::object_name(
-        Slot::Pipes,
-        expected.session,
-        expected.package,
-    ))?;
-    let (folder, _opened) =
-        pipe_folder(&name, None, PIPES_OPEN, FILE_OPEN).map_err(|e| match e {
-            Error::Nt { status, .. } => Error::Nt {
-                call: "NtCreateFile (the package's pipe folder, by name)",
-                status,
-            },
-            other => other,
-        })?;
-    let browser = token::current_user()?;
-    let wanted = Descriptor::from_sddl(&layout::pipe_folder_sddl(
-        expected.owner,
-        &browser,
-        expected.package,
-    ))?
-    .dacl_sddl()?;
-    let raw = HANDLE(folder.as_raw_handle());
-    handles::check_pipe_folder(token::owner_of(raw), token::dacl_of(raw), expected, &wanted)?;
-    Ok(folder)
+/// The real NPFS for [`pipe_folder`]: `NtCreateFile` with `OBJ_DONT_REPARSE`, and the owner,
+/// DACL and label read through the folder's handle (`GetSecurityInfo`).
+struct Npfs;
+
+impl PipeFs for Npfs {
+    type Folder = OwnedHandle;
+
+    fn create(&self, name: &str, sddl: &str) -> Result<(OwnedHandle, usize), Error> {
+        let descriptor = Descriptor::from_sddl(sddl)?;
+        pipe_folder(
+            &ObjectName::new(name)?,
+            Some(&descriptor),
+            PIPES_OWNER,
+            FILE_OPEN_IF,
+        )
+    }
+
+    fn open(&self, name: &str) -> Result<OwnedHandle, Error> {
+        let (folder, _opened) = pipe_folder(&ObjectName::new(name)?, None, PIPES_GUARD, FILE_OPEN)
+            .map_err(|e| match e {
+                Error::Nt { status, .. } => Error::Nt {
+                    call: "NtCreateFile (the package's pipe folder, by name)",
+                    status,
+                },
+                other => other,
+            })?;
+        Ok(folder)
+    }
+
+    fn owner(&self, folder: &OwnedHandle) -> Result<String, u32> {
+        token::owner_of(HANDLE(folder.as_raw_handle()))
+    }
+
+    fn security(&self, folder: &OwnedHandle) -> Result<Security, u32> {
+        let (dacl, label) = token::dacl_and_label_of(HANDLE(folder.as_raw_handle()))?;
+        Ok(Security { dacl, label })
+    }
+
+    fn security_of(&self, sddl: &str) -> Result<Security, Error> {
+        let (dacl, label) = Descriptor::from_sddl(sddl)?.dacl_and_label()?;
+        Ok(Security { dacl, label })
+    }
 }
 
 /// Takes ownership of a handle a create or open call just returned.
