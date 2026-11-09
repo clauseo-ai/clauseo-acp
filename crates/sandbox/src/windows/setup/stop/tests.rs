@@ -16,6 +16,7 @@ mod owed;
 mod record;
 mod sequence;
 mod users;
+mod vms;
 
 const OWNER: &str = "S-1-5-21-1-2-3-1001";
 const ADMIN_EXE: &str = r"C:\Program Files\Clauseo\Sandbox\clauseo-sandbox-setup.exe";
@@ -97,6 +98,8 @@ struct Fake {
     end_at: Option<u32>,
     /// The sweep task's requests, each with how many snapshots were taken by then.
     sweeps: Vec<usize>,
+    /// HCS's compute systems and the pool's VM folders (`tests/vms.rs`).
+    vms: vms::FakeVms,
     done: Vec<String>,
     logged: Vec<(bool, String)>,
 }
@@ -133,6 +136,7 @@ impl Fake {
             read_fails: None,
             end_at: None,
             sweeps: Vec::new(),
+            vms: vms::FakeVms::default(),
             done: Vec::new(),
             logged: Vec::new(),
         }

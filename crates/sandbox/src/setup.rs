@@ -114,8 +114,10 @@ pub enum Blocked {
     /// a WSL class names no `AppID`, or WSL's class is registered as packaged COM, whose
     /// permission Clauseo can't change.
     WslDenyUnverifiable,
-    /// Reserved for the stop's WSL clean-up (part B of the WSL deny): a WSL instance a sandbox
-    /// user started that couldn't be ended. Nothing gives it yet.
+    /// Reserved: a WSL instance a sandbox user started that couldn't be ended. Nothing gives it:
+    /// the stop (`--stop`) ends a pool user's WSL 2 VM, and one it can't end ends the stop at
+    /// 48, which writes no `StopSequence`, so what waits for a completed stop (the
+    /// unclean-session marker and its logon refusal, F4) clears only after a later one.
     WslPoolResidue,
 }
 

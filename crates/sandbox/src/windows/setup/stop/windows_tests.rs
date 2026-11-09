@@ -25,7 +25,7 @@ use windows::Win32::System::Threading::{
 };
 
 use super::windows_stopper::{WindowsStopper, look_at, processes};
-use super::{Image, Passes, Stopper as _, cancel_jobs, pick};
+use super::{Image, Passes, Stopper as _, VmId, VmStopper as _, cancel_jobs, pick};
 use crate::test_support::TempDir;
 use crate::windows::acl::object::{Handle, words};
 use crate::windows::acl_bytes::{build_descriptor, empty_acl};
@@ -268,4 +268,40 @@ fn elevated_this_machines_unnamed_session_0_processes_are_minimal_ones() {
     );
     let picked = pick(&seen, &[], std::process::id());
     assert_eq!(picked.unknown, 0, "{:?}", picked.unknown_images);
+}
+
+/// `--stop`'s WSL step's calls on the real machine (`windows_hcs.rs`), where HCS is: the list
+/// of compute systems reads, a GUID no system has is "already gone" for the termination, and a
+/// SID with no profile holds no VM folder. Making a pool user's WSL 2 VM needs WSL in the
+/// runner, which CI's doesn't have: that is a VM row. With no HCS (no `computecore.dll` or no
+/// `vmcompute`), the test says so and passes.
+#[test]
+#[ignore = "elevated: run by CI's elevated step with CLAUSEO_ELEVATED_TESTS=1"]
+fn elevated_the_stops_hcs_calls_list_and_treat_a_missing_system_as_gone() {
+    if !gate("elevated_the_stops_hcs_calls_list_and_treat_a_missing_system_as_gone") {
+        return;
+    }
+    let mut stopper = WindowsStopper::new();
+    let listed = stopper.compute_systems();
+    eprintln!("compute systems: {listed:?}");
+    let Some(ids) = listed.unwrap() else {
+        eprintln!("skipped: no HCS on this machine (computecore.dll or vmcompute missing)");
+        return;
+    };
+    let unused = VmId::parse(&format!(
+        "C1A05E00-0000-4000-8000-{:012X}",
+        std::process::id()
+    ))
+    .unwrap();
+    assert!(
+        !ids.iter()
+            .any(|id| VmId::parse(id).as_ref() == Some(&unused))
+    );
+    assert_eq!(
+        stopper.terminate_vm(&unused, super::VM_WAIT),
+        Ok(()),
+        "a system that isn't there is already gone"
+    );
+    let nobody = Sid::parse("S-1-5-21-1-2-3-4000").unwrap();
+    assert_eq!(stopper.vm_folder(&nobody, &unused), Ok(false));
 }
