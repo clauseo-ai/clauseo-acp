@@ -5,7 +5,8 @@
 //! What changes: the skills folders the profile owns (Claude's plugin under
 //! `<data>/profile/claude-plugin`, Codex's `<agent home>/skills`), and in them only the folders
 //! of the skills a render is given, their manifest and the plugin's `plugin.json`; and for the
-//! skill packs (decision record 0040), a launch's own pack plugin, `run/<session id>/skill-packs`.
+//! skill packs (decision record 0040), a launch's own pack plugin, `run/<session id>/skill-packs`;
+//! and the agents' shell commands in `<data>/tools` ([`crate::tools`]).
 
 #![expect(
     clippy::disallowed_methods,
@@ -119,6 +120,64 @@ pub(crate) fn replace_if_differs(target: &Path, bytes: &[u8]) -> Result<bool, Pr
     }
     sync_dir(dir);
     Ok(true)
+}
+
+/// Makes `target` a program holding exactly `bytes` (mode 0755 on Unix), as
+/// [`replace_if_differs`] does: a temp file beside it, written, synced, then renamed over it.
+/// The caller has decided it differs. On Windows a program that is running cannot be renamed
+/// over, but it can be renamed: the old one goes aside as `.<name>.<pid>-<n>.old` first, which a
+/// later call's [`sweep_old`] removes once nothing runs it.
+pub(crate) fn replace_program(target: &Path, bytes: &[u8]) -> Result<(), ProfileError> {
+    let dir = target
+        .parent()
+        .ok_or_else(|| ProfileError::io("replace", target, io::ErrorKind::InvalidInput.into()))?;
+    create_dir_all(dir)?;
+    let name = target.file_name().unwrap_or_default().to_string_lossy();
+    let n = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
+    let temp = dir.join(format!(".{name}.{}-{n}{TEMP_SUFFIX}", std::process::id()));
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o755);
+    let written = options
+        .open(&temp)
+        .and_then(|mut file| file.write_all(bytes).and_then(|()| file.sync_all()))
+        .and_then(|()| match std::fs::rename(&temp, target) {
+            Err(err) if cfg!(windows) && target.exists() => {
+                let old = dir.join(format!(".{name}.{}-{n}{OLD_SUFFIX}", std::process::id()));
+                std::fs::rename(target, &old)
+                    .and_then(|()| std::fs::rename(&temp, target))
+                    .map_err(|_| err)
+            }
+            other => other,
+        });
+    if let Err(err) = written {
+        let _gone = std::fs::remove_file(&temp);
+        return Err(ProfileError::io("write", target, err));
+    }
+    sync_dir(dir);
+    Ok(())
+}
+
+/// The suffix of a program [`replace_program`] set aside on Windows.
+const OLD_SUFFIX: &str = ".old";
+
+/// Removes the programs [`replace_program`] set aside in `dir`, and the temp files a crashed
+/// write left there; one still running stays, quietly, for the next call.
+pub(crate) fn sweep_old(dir: &Path) {
+    sweep_temps(dir, false);
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let old = entry.file_name().to_str().is_some_and(|name| {
+            name.strip_suffix(OLD_SUFFIX)
+                .is_some_and(|stem| is_temp_name(&format!("{stem}{TEMP_SUFFIX}")))
+        });
+        if old && entry.file_type().is_ok_and(|kind| kind.is_file()) {
+            let _still_running = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 /// `fs::create_dir`: a new folder, an error when `path` already exists.

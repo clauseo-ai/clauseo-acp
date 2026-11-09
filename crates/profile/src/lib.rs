@@ -29,6 +29,7 @@ pub mod servers;
 pub mod skills;
 #[cfg(feature = "test-support")]
 pub mod test_support;
+pub mod tools;
 mod write;
 
 use std::collections::BTreeMap;

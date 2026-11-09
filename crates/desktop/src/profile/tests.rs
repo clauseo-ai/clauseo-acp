@@ -137,9 +137,14 @@ fn codex_launch_writes_put_claudes_plugin_first() {
 }
 
 #[test]
-fn every_agent_with_a_kind_gets_the_author_and_the_browser_entry() {
+fn every_agent_with_a_kind_gets_the_author_and_the_case_law_entry() {
     let scratch = Scratch::new("profile-env-servers", &[]);
-    let hook = DesktopProfile::new(profile(&scratch), true);
+    let profile = profile(&scratch);
+    let hook = DesktopProfile::new(profile.clone(), true);
+    let clauseo_mcp = scratch
+        .path()
+        .join("app")
+        .join(format!("clauseo-mcp{}", std::env::consts::EXE_SUFFIX));
     for id in [CLAUDE, CODEX] {
         let env = hook.launch_env(&agent(id));
         assert_eq!(
@@ -147,17 +152,11 @@ fn every_agent_with_a_kind_gets_the_author_and_the_browser_entry() {
             Some(&OsString::from("Clauseo")),
             "{id}"
         );
-        // The hook offers both of Clauseo's entries, `browser` then `case-law` (R24); the host
-        // fills each per session or leaves it out (no relay, the connector not signed in, the
-        // switch off, the firm's managed MCP), so the hook never decides.
+        // The hook offers `case-law` (R24) alone: `browser` is parked
+        // (`clauseo_profile::servers::BROWSER_MCP`). The host fills it per session or leaves it
+        // out (no relay, the connector not signed in, the firm's managed MCP).
         let servers = hook.mcp_servers(&agent(id));
         let [
-            McpServer::Stdio {
-                name,
-                command,
-                args,
-                env,
-            },
             McpServer::Stdio {
                 name: case_law,
                 command: case_law_command,
@@ -166,35 +165,34 @@ fn every_agent_with_a_kind_gets_the_author_and_the_browser_entry() {
             },
         ] = servers.as_slice()
         else {
-            panic!("two stdio servers: {servers:?}");
+            panic!("one stdio server: {servers:?}");
         };
         assert_eq!(case_law, "case-law");
-        assert_eq!(case_law_command, command, "the same clauseo-mcp sidecar");
+        assert_eq!(case_law_command, &clauseo_mcp);
         assert_eq!(case_law_args, &["connector", "case-law"]);
         let names: Vec<&str> = case_law_env.iter().map(|(name, _)| name.as_str()).collect();
         assert_eq!(names, ["CLAUSEO_RELAY", "CLAUSEO_RELAY_TOKEN_FILE"]);
-        assert_eq!(name, "browser");
-        assert_eq!(
-            command,
-            &scratch
-                .path()
-                .join("app")
-                .join(format!("clauseo-mcp{}", std::env::consts::EXE_SUFFIX))
-        );
-        // The release bundles it under the clauseo- prefix (.github/scripts/sidecars.mjs), since
-        // the .deb and .rpm put sidecars in /usr/bin beside other programs.
-        let agent_browser = scratch.path().join("app").join(format!(
-            "clauseo-agent-browser{}",
-            std::env::consts::EXE_SUFFIX
-        ));
-        let at = args
-            .iter()
-            .position(|arg| arg == "--agent-browser")
-            .expect("--agent-browser");
-        assert_eq!(args.get(at + 1).map(String::as_str), agent_browser.to_str());
-        // Five variables, and the socket folder's on macOS and Linux (decision record 0030).
-        assert_eq!(env.len(), if cfg!(windows) { 5 } else { 6 });
     }
+    // The parked entry still names both sidecars where the release bundles them, under the
+    // clauseo- prefix (.github/scripts/sidecars.mjs), since the .deb and .rpm put sidecars in
+    // /usr/bin beside other programs.
+    let browser = clauseo_profile::servers::browser(profile.paths());
+    assert_eq!(browser.command, clauseo_mcp);
+    let agent_browser = scratch.path().join("app").join(format!(
+        "clauseo-agent-browser{}",
+        std::env::consts::EXE_SUFFIX
+    ));
+    let at = browser
+        .args
+        .iter()
+        .position(|arg| arg == "--agent-browser")
+        .expect("--agent-browser");
+    assert_eq!(
+        browser.args.get(at + 1).map(String::as_str),
+        agent_browser.to_str()
+    );
+    // Five variables, and the socket folder's on macOS and Linux (decision record 0030).
+    assert_eq!(browser.env.len(), if cfg!(windows) { 5 } else { 6 });
 }
 
 #[test]
@@ -555,4 +553,58 @@ fn stetdoc_is_found_on_path_only_in_an_absolute_folder() {
     assert_eq!(first_on_path("stetdoc", &path), Some(program));
     let relative = std::env::join_paths([PathBuf::from("bin")]).unwrap();
     assert_eq!(first_on_path("stetdoc", &relative), None);
+}
+
+/// The shell browser's folder reaches the host's config only when its copy is there.
+#[test]
+fn the_host_config_gets_the_browser_folder_only_with_its_copy() {
+    let scratch = Scratch::new("profile-browser-tool", &[]);
+    let folder = scratch.path().join("tools");
+    let hook =
+        DesktopProfile::new(profile(&scratch), false).with_browser_tool(Some(folder.clone()));
+    let config = super::with_profile(scratch.config(Vec::new()), Some(hook), setup_hook());
+    assert_eq!(config.browser_tool(), Some(folder.as_path()));
+    let without = DesktopProfile::new(profile(&scratch), false);
+    let config = super::with_profile(scratch.config(Vec::new()), Some(without), setup_hook());
+    assert_eq!(config.browser_tool(), None);
+}
+
+/// A debug build with no bundled sidecar copies the first `agent-browser` on `PATH` into
+/// `<data>/tools` and wires that folder; the browser's skill comes only with a Chrome on this
+/// machine. With no program anywhere there is no browser and no skill.
+#[cfg(all(unix, not(target_os = "macos"), debug_assertions))]
+#[test]
+fn build_copies_agent_browser_from_path_in_a_debug_build() {
+    use clauseo_host::browser::chrome::{ChromeRoots, find};
+    let scratch = Scratch::new("profile-build-browser", &["data", "bin"]);
+    scratch.file(
+        "bin/agent-browser",
+        b"#!/bin/sh\necho 'agent-browser 0.41.1'\n",
+    );
+    scratch.executable("bin/agent-browser");
+    let folder = scratch.dir("bin");
+    let locations = Locations::under_root(&scratch.dir("data"));
+    let hook = DesktopProfile::build_with(&locations, None, Some(folder.as_os_str())).unwrap();
+    let tools = locations.data_dir().join("tools");
+    assert_eq!(hook.browser_tool(), Some(tools.as_path()));
+    assert_eq!(
+        std::fs::read(tools.join("agent-browser")).unwrap(),
+        std::fs::read(folder.join("agent-browser")).unwrap()
+    );
+    let chrome = find(&ChromeRoots::system(locations.data_dir())).is_some();
+    let token = write_skills(&hook.launch_writes(&agent(CLAUDE))[0]).unwrap();
+    assert_eq!(
+        token
+            .root()
+            .join("agent-browser")
+            .join("SKILL.md")
+            .is_file(),
+        chrome
+    );
+
+    let empty = scratch.dir("data");
+    let none = DesktopProfile::build_with(&locations, None, Some(empty.as_os_str())).unwrap();
+    assert_eq!(none.browser_tool(), None);
+    let token = write_skills(&none.launch_writes(&agent(CLAUDE))[0]).unwrap();
+    assert!(!token.root().join("agent-browser").exists());
 }
