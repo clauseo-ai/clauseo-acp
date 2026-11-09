@@ -71,6 +71,44 @@ fn a_spike_that_breaks_off_doesnt_trip_it() {
 }
 
 #[test]
+fn an_npm_ci_burst_with_a_pool_peak_doesnt_trip_it() {
+    // The VM's `npm ci` as the pool user: about 27,000 a second, one second at 31,500, then idle.
+    let mut breaker = Breaker::new(Duration::ZERO, 0);
+    let mut count = 0;
+    assert_eq!(run(&mut breaker, 0, 3, 27_000, &mut count), []);
+    assert_eq!(run(&mut breaker, 3, 1, 31_500, &mut count), []);
+    assert_eq!(run(&mut breaker, 4, 4, 27_000, &mut count), []);
+    assert_eq!(run(&mut breaker, 8, 5, 0, &mut count), []);
+    assert_eq!(breaker.trips(), 0);
+}
+
+#[test]
+fn sustained_load_trips_at_the_tenth_hot_second() {
+    let mut breaker = Breaker::new(Duration::ZERO, 0);
+    let mut count = 0;
+    let actions = run(&mut breaker, 0, 15, 45_000, &mut count);
+    assert_eq!(actions, [(u64::from(WINDOW_SECONDS), Action::Pause)]);
+    assert_eq!(breaker.trips(), 1);
+}
+
+#[test]
+fn a_second_under_the_rate_resets_the_streak() {
+    let mut breaker = Breaker::new(Duration::ZERO, 0);
+    let mut count = 0;
+    let window = u64::from(WINDOW_SECONDS);
+    assert_eq!(run(&mut breaker, 0, window - 1, 35_000, &mut count), []);
+    assert_eq!(
+        run(&mut breaker, window - 1, 1, PAUSE_RATE - 1, &mut count),
+        []
+    );
+    assert_eq!(
+        run(&mut breaker, window, window - 1, 35_000, &mut count),
+        []
+    );
+    assert_eq!(breaker.trips(), 0);
+}
+
+#[test]
 fn the_rate_is_per_second_whatever_the_tick() {
     let mut breaker = Breaker::new(Duration::ZERO, 0);
     // A quarter-second tick: no bucket ends until a second has passed.

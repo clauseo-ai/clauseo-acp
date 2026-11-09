@@ -2443,30 +2443,34 @@ whole machine's file activity, not the pool's.
   together **−0.14 % of one core** (SE 0.61, 95 % range −1.70 to +1.43), the consumer itself
   0.067 %; idle **+0.48 %** (SE 0.27). About 3,010 events/s during the work and 286 idle; no
   events lost. Neither is distinguishable from zero, so tracing only during tool calls isn't
-  needed. The lawyer's own work, about 3,000 events/s, is well under the breaker's 8,000.
-- **The decision:** ship with the event-rate breaker below (8,000 events/s for 10 s; the final
-  value comes from W12) and an IT off switch, `DenialReporter=0` under
+  needed. The lawyer's own work, about 3,000 events/s, is well under the breaker's 30,000.
+- **The decision:** ship with the event-rate breaker below (30,000 events/s for 10 s, set from
+  VM release run 42512246901) and an IT off switch, `DenialReporter=0` under
   `HKLM\SOFTWARE\Policies\Clauseo\Sandbox` (part B's client reads it before it starts the task).
   The trace runs for the whole session, not only during tool calls (W11).
 
 **The event-rate breaker** (`breaker.rs`, pure, over a fake clock in tests). The callback
 counts every Kernel-File event before the SID check (one relaxed atomic add), and the serving
-loop takes the count once a second as a rate. At or above `PAUSE_RATE`, **8,000 events/s**, for
+loop takes the count once a second as a rate. At or above `PAUSE_RATE`, **30,000 events/s**, for
 10 seconds in a row, it trips: it disables the provider on the session (`EnableTraceEx2` with
 `EVENT_CONTROL_CODE_DISABLE_PROVIDER`), clears the pending Creates, and sends
 `{"v":1,"paused":{"secs":60,"reason":"rate"}}`. After 60 s it enables the provider again and
 sends `{"v":1,"resumed":true}`. Every trip is logged, as counts only. The rate, window and pause
-are constants in code: 8,000 sits between editing (about 3,600/s) and `npm ci` (about 10,900/s
-on average), so it should trip on a long `npm ci` and never on editing. When
+are constants in code. 30,000 comes from VM release run 42512246901: `npm ci` peaks at 25–28k
+events/s for one second (31.5k as the pool user), with 6-s means of 20–25k, and a document save
+peaks at 11k. So 30,000 for 10 seconds in a row spares both, and pausing during `npm ci` would
+lose denial reports when they matter most. A Defender full scan (29–43k sustained, up to 118k)
+trips it. The cost stays at or under about 2.3% of a core up to 30,000/s. When
 `HKLM\SOFTWARE\Policies\Clauseo\Sandbox\WatchRateLog` (a DWORD) is 1, the watcher logs each
-second's rate, a number a line with no path, so W12 can set the final constant from the
+second's rate, a number a line with no path, so W12 can check the constant against the
 distribution. A pause that can't disable or re-enable the provider exits 73.
 
 **The breaker and Defender: reports may pause during Defender full scans and right after
 install.** Defender's first scan was measured at 29,000–42,000 Kernel-File events/s on an idle
-desktop, and tripped the breaker. The count stays machine-wide on purpose: what the breaker
-bounds is the kernel's cost of generating events, and that grows with every account's file
-activity, Defender's included. Only the reports pause; enforcement never does.
+desktop, which a full scan at 30,000 can trip; that's accepted. The count stays machine-wide on
+purpose: what the breaker bounds is the kernel's cost of generating events, and that grows with
+every account's file activity, Defender's included. Only the reports pause; enforcement never
+does.
 
 **During a pause, a cross-matter offer falls back to the picker.** With the trace paused, a
 refusal on Windows may go unreported, and a ToolCall alone isn't evidence of which file was
@@ -2508,7 +2512,7 @@ given in the row.
 | W9 | A killed watcher: `taskkill /f` it while serving; the key and session are left; the next start replaces the key, stops the session and serves, and `--remove` deletes both | open |
 | W10 | After W9 with no consumer, `%SystemRoot%\System32\LogFiles\WMI\RtBackup` holds no `ClauseoSandboxWatch` spill, or the next start removes it | open |
 | W11 | Idle cost: an idle session, then 10 minutes of Word and Explorer, ABBA with the watcher on and off; kernel and consumer CPU. An idle cost reopens running the trace only during tool calls | done (stand-in consumer): no cost distinguishable from zero, above |
-| W12 | The breaker, with `WatchRateLog=1`: `npm ci` logs its per-second rates (the final `PAUSE_RATE` comes from that distribution); a trip pauses after 10 s at the rate, sends `paused`, resumes 60 s later with `resumed`; an editing turn never trips it | open |
+| W12 | The breaker, with `WatchRateLog=1`: `npm ci` logs its per-second rates (checks the `PAUSE_RATE` of 30,000 against that distribution); a trip pauses after 10 s at the rate, sends `paused`, resumes 60 s later with `resumed`; an editing turn never trips it | open |
 
 ### The launcher (PR6 interface)
 

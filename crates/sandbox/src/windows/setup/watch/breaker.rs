@@ -10,14 +10,15 @@
 //!   `{"v":1,"paused":{"secs":60,"reason":"rate"}}`. After [`PAUSE`] the provider is enabled
 //!   again and the clients are told `{"v":1,"resumed":true}`. Each trip is logged, as counts.
 //!
-//! The spike measured 235 events/s idle, about 3,600/s for an editing turn and about 10,850/s
-//! on average during `npm ci`. 8,000/s trips on a long `npm ci` and never on editing; VM row W12
-//! sets the final value from the per-second distribution `WatchRateLog` logs.
+//! VM release run 42512246901: `npm ci` peaks at 25–28k events/s for one second (31.5k as the
+//! pool user) with 6-s means of 20–25k, and a document save peaks at 11k. So 30,000/s for 10 s
+//! in a row spares `npm ci` (pool or owner) and document saves, and trips on a Defender full
+//! scan (29–43k sustained, up to 118k). The cost stays at or under about 2.3% of a core.
 
 use std::time::Duration;
 
 /// The rate, in Kernel-File events a second, at or above which a second counts as hot.
-pub const PAUSE_RATE: u64 = 8000;
+pub const PAUSE_RATE: u64 = 30_000;
 /// How many hot seconds in a row trip the breaker.
 pub const WINDOW_SECONDS: u32 = 10;
 /// How long the provider stays disabled once tripped.
