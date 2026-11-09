@@ -12,7 +12,10 @@ use ::windows::Win32::Foundation::{
     HANDLE_FLAG_INHERIT,
 };
 use ::windows::Win32::Security::SECURITY_ATTRIBUTES;
-use ::windows::Win32::System::Threading::{CreateEventW, GetCurrentProcess, TerminateProcess};
+use ::windows::Win32::System::Console::{GetStdHandle, STD_OUTPUT_HANDLE};
+use ::windows::Win32::System::Threading::{
+    CreateEventW, GetCurrentProcess, GetExitCodeProcess, TerminateProcess, WaitForSingleObject,
+};
 
 use ::windows::Win32::Security::Authorization::ConvertSidToStringSidW;
 use ::windows::Win32::Security::FreeSid;
@@ -20,14 +23,24 @@ use ::windows::Win32::Security::Isolation::DeriveAppContainerSidFromAppContainer
 use ::windows::core::{HSTRING, PWSTR};
 
 use crate::{
-    Error, HandleProblem, LowBoxCommand, NamespaceHandles, PackageName, Slot, Spawned, Stdio,
-    package_sid,
+    Error, HandleProblem, LowBoxCommand, NamespaceHandles, PackageName, Sid, Slot, Spawned, Stdio,
+    UNRESUMED_EXIT, package_sid,
 };
 
-/// The derivation matches `DeriveAppContainerSidFromAppContainerName`, which needs no profile.
+/// The derivation matches `DeriveAppContainerSidFromAppContainerName`, which needs no profile,
+/// from one SHA-256 block to the three a 64-character name takes.
 #[test]
 fn the_package_sid_matches_the_api() {
-    for name in ["Clauseo.Browser.B01", "Clauseo.Browser.B02", "x", "A-b.C"] {
+    let names = [
+        "Clauseo.Browser.B01",
+        "Clauseo.Browser.B02",
+        "x",
+        "A-b.C",
+        // 28 characters: 56 bytes of UTF-16, past one block once padded.
+        "Clauseo.Browser.Matter-00001",
+        crate::package::tests::LONGEST,
+    ];
+    for name in names {
         let package = PackageName::new(name).unwrap();
         // SAFETY: a NUL-terminated name; the SID it returns is freed with FreeSid below.
         let sid =
@@ -47,6 +60,11 @@ fn b01() -> PackageName {
     PackageName::new("Clauseo.Browser.B01").unwrap()
 }
 
+/// This process's user, as the namespace's builder.
+fn me() -> Sid {
+    super::token::current_user().unwrap()
+}
+
 #[test]
 fn a_value_that_is_no_handle_fails_closed() {
     // Handle values are multiples of 4; this one is far past any table this test makes.
@@ -58,7 +76,7 @@ fn a_value_that_is_no_handle_fails_closed() {
         0x00ff_ffe0,
         0x00ff_ffe4,
     ];
-    let error = NamespaceHandles::from_inherited(&b01(), &values).unwrap_err();
+    let error = NamespaceHandles::from_inherited(&b01(), &me(), &values).unwrap_err();
     assert!(
         matches!(
             error,
@@ -80,7 +98,7 @@ fn a_file_in_the_directory_slot_fails_closed() {
         .iter()
         .map(|f| f.as_raw_handle().expose_provenance())
         .collect();
-    let error = NamespaceHandles::from_inherited(&b01(), &values).unwrap_err();
+    let error = NamespaceHandles::from_inherited(&b01(), &me(), &values).unwrap_err();
     assert_eq!(
         error,
         Error::Handle {
@@ -215,4 +233,127 @@ fn the_environment_is_only_what_the_command_sets() {
     let block = String::from_utf16(&command.environment().unwrap()).unwrap();
     assert_eq!(block, "SystemRoot=C:\\Windows\0temp=C:\\u\0\0");
     assert!(!block.to_ascii_uppercase().contains("PATH="));
+}
+
+/// A value equal to this process's standard output is refused before anything else is asked
+/// of it, though it is an open handle.
+#[test]
+fn a_standard_handle_is_never_taken_over() {
+    // SAFETY: GetStdHandle only reads this process's parameters.
+    let Ok(out) = (unsafe { GetStdHandle(STD_OUTPUT_HANDLE) }) else {
+        return;
+    };
+    if out.is_invalid() || out.0.is_null() {
+        // No standard output to take: nothing to check.
+        return;
+    }
+    let events: Vec<OwnedHandle> = (0..5).map(|_| event(false)).collect();
+    let mut values = vec![out.0.expose_provenance()];
+    values.extend(events.iter().map(|e| e.as_raw_handle().expose_provenance()));
+    let error = NamespaceHandles::from_inherited(&b01(), &me(), &values).unwrap_err();
+    assert_eq!(
+        error,
+        Error::Handle {
+            slot: Slot::Directory,
+            problem: HandleProblem::StandardHandle
+        }
+    );
+}
+
+/// The owner side's inheritable guard turns the flag on for every handle and off again when
+/// dropped (six events stand in for the namespace's objects).
+#[test]
+fn the_inheritable_guard_resets_every_flag() {
+    let events: Vec<OwnedHandle> = (0..6).map(|_| event(false)).collect();
+    let raw: Vec<RawHandle> = events.iter().map(AsRawHandle::as_raw_handle).collect();
+    let copies: Vec<OwnedHandle> = raw
+        .iter()
+        .map(|h| {
+            let mut copy = HANDLE::default();
+            // SAFETY: `h` is open in this process; the copy is owned below.
+            unsafe {
+                DuplicateHandle(
+                    GetCurrentProcess(),
+                    HANDLE(*h),
+                    GetCurrentProcess(),
+                    &raw mut copy,
+                    0,
+                    false,
+                    DUPLICATE_SAME_ACCESS,
+                )
+            }
+            .unwrap();
+            // SAFETY: DuplicateHandle succeeded, so `copy` is open and ours alone.
+            unsafe { OwnedHandle::from_raw_handle(copy.0) }
+        })
+        .collect();
+    let handles = super::namespace::NamespaceHandles::new(package_sid(&b01()), copies).unwrap();
+    let lock = clauseo_process::spawn_lock();
+    let guard = handles.inheritable(&lock).unwrap();
+    let flags = |h: &NamespaceHandles| -> Vec<bool> {
+        h.handles()
+            .iter()
+            .map(|raw| {
+                let mut flags = 0_u32;
+                // SAFETY: an open handle of `h`; the call only reads its flags.
+                unsafe { GetHandleInformation(*raw, &raw mut flags) }.unwrap();
+                flags & HANDLE_FLAG_INHERIT.0 != 0
+            })
+            .collect()
+    };
+    assert_eq!(flags(&handles), [true; 6]);
+    drop(guard);
+    assert_eq!(flags(&handles), [false; 6]);
+    drop(lock);
+}
+
+/// The drop seam: the end runs once for a child never resumed, and not after a resume.
+#[test]
+fn the_drop_ends_only_an_unresumed_child() {
+    let mut child = spawn_listing(&[]);
+    let mut ends = 0;
+    child.end_if_unresumed(|_| ends += 1);
+    assert_eq!(ends, 1, "a suspended child must be ended");
+    end(&child);
+    // SAFETY: the child's process handle has SYNCHRONIZE.
+    unsafe { WaitForSingleObject(HANDLE(child.process.as_raw_handle()), 10_000) };
+    // A resume of an ended process's thread still succeeds; what matters is the flag after.
+    let resumed = child.resume();
+    let mut after = 0;
+    child.end_if_unresumed(|_| after += 1);
+    if resumed.is_ok() {
+        assert_eq!(after, 0, "a resumed child must not be ended");
+    } else {
+        assert_eq!(after, 1, "a failed resume must leave the child to be ended");
+    }
+}
+
+/// Dropped before resume, the real child is ended with `UNRESUMED_EXIT`.
+#[test]
+fn a_dropped_suspended_child_is_terminated() {
+    let child = spawn_listing(&[]);
+    let mut process = HANDLE::default();
+    // SAFETY: the child's process handle is open; the copy is owned below and outlives the drop.
+    unsafe {
+        DuplicateHandle(
+            GetCurrentProcess(),
+            HANDLE(child.process.as_raw_handle()),
+            GetCurrentProcess(),
+            &raw mut process,
+            0,
+            false,
+            DUPLICATE_SAME_ACCESS,
+        )
+    }
+    .unwrap();
+    // SAFETY: DuplicateHandle succeeded, so `process` is open and ours alone.
+    let process = unsafe { OwnedHandle::from_raw_handle(process.0) };
+    drop(child);
+    // SAFETY: an open process handle with SYNCHRONIZE.
+    let waited = unsafe { WaitForSingleObject(HANDLE(process.as_raw_handle()), 10_000) };
+    assert_eq!(waited.0, 0, "the dropped child did not exit");
+    let mut code = 0_u32;
+    // SAFETY: an open process handle with PROCESS_QUERY_INFORMATION; `code` gets its code.
+    unsafe { GetExitCodeProcess(HANDLE(process.as_raw_handle()), &raw mut code) }.unwrap();
+    assert_eq!(code, UNRESUMED_EXIT);
 }

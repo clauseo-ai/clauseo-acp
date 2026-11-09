@@ -4,7 +4,11 @@
 //! this process's primary token with the package SID, no capabilities and the namespace's six
 //! handles, then `CreateProcessAsUserW` with that token on this process's station and desktop
 //! (`lpDesktop` null), only the environment the command sets, and only the listed handles
-//! inherited.
+//! inherited. Beyond the recipe: the guard's token is checked first (not elevated, not an
+//! administrator, not an `AppContainer`), the new token loses every privilege but
+//! `SeChangeNotifyPrivilege` and is checked before use (this package, Low, no capability), the
+//! spawn holds `clauseo_process`'s spawn lock while handles are inheritable, and a child never
+//! resumed is ended when its [`Spawned`] drops.
 #![expect(
     unsafe_code,
     reason = "FFI to the token, environment, attribute list and process calls"
@@ -22,6 +26,7 @@ use ::windows::Win32::System::Threading::{
     CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW,
     CreateProcessW, EXTENDED_STARTUPINFO_PRESENT, GetCurrentProcess, OpenProcessToken,
     PROCESS_INFORMATION, ResumeThread, STARTF_USESTDHANDLES, STARTUPINFOEXW, STARTUPINFOW,
+    TerminateProcess,
 };
 use ::windows::core::{PCWSTR, PWSTR};
 
@@ -29,13 +34,16 @@ use super::inherit::{HandleList, Marked};
 use super::namespace::NamespaceHandles;
 use super::nt::NtCreateLowBoxToken;
 use super::stdio::{Stdio, Which};
-use super::{last_error, nt_ok, wide_nul, win32};
+use super::{last_error, nt_ok, token, wide_nul, win32};
 use crate::envblock;
 use crate::error::Error;
 use crate::quote::command_line;
+use crate::token_check;
 
 /// `TOKEN_ALL_ACCESS`, as the recipe opened its token and asked for the `LowBox` one.
 const TOKEN_ALL_ACCESS: u32 = 0x000F_01FF;
+/// The exit code of a child ended because it was dropped before [`Spawned::resume`] ran.
+pub const UNRESUMED_EXIT: u32 = 0xC000_013A;
 
 /// A program to start in a `LowBox` token, suspended. Built like `std::process::Command`.
 #[derive(Debug, Clone)]
@@ -58,7 +66,9 @@ pub struct LowBoxCommand {
     inherit: Vec<RawHandle>,
 }
 
-/// A started, still suspended child.
+/// A started, still suspended child. Dropped before [`Spawned::resume`] succeeds (an error, a
+/// panic, a failed job assignment or resume), the child is ended with `TerminateProcess`
+/// ([`UNRESUMED_EXIT`]), so a suspended child never outlives its guard's interest in it.
 #[derive(Debug)]
 pub struct Spawned {
     /// Its process id.
@@ -66,7 +76,8 @@ pub struct Spawned {
     /// Its process handle (all access), closed on drop: for the Job Object, the wait, the exit
     /// code and `TerminateProcess`.
     pub process: OwnedHandle,
-    /// Its first thread, suspended; [`Spawned::resume`] takes and closes it.
+    /// Its first thread, suspended; [`Spawned::resume`] takes and closes it. While it is here,
+    /// dropping the `Spawned` ends the child.
     pub thread: Option<OwnedHandle>,
     /// The guard's end of the child's input, with [`Stdio::Piped`].
     pub stdin: Option<File>,
@@ -201,6 +212,11 @@ impl LowBoxCommand {
         let program = wide_nul(&self.program);
         let cwd = self.cwd.as_deref().map(|d| wide_nul(d.as_os_str()));
         let environment = self.environment()?;
+        // Held from the first handle made inheritable (the listed ones, then the child's
+        // standard ends) until every one is reset or closed below. Declared first, so on every
+        // path, an early `?` included, it is released last: no other start in this process
+        // (`clauseo_process::spawn_in_tree`, another launch) inherits them meanwhile.
+        let lock = clauseo_process::spawn_lock();
         let marked = Marked::new(&self.inherit)?;
 
         let stdin = self.stdin.ends(Which::Input)?;
@@ -272,6 +288,11 @@ impl LowBoxCommand {
         };
         drop(attributes);
         drop(marked);
+        // The child's ends (inheritable) close here; the guard keeps only its own.
+        let (stdin_parent, stdout_parent, stderr_parent) =
+            (stdin.parent, stdout.parent, stderr.parent);
+        drop((stdin.child, stdout.child, stderr.child));
+        drop(lock);
         created?;
         Ok(Spawned {
             pid: info.dwProcessId,
@@ -279,9 +300,9 @@ impl LowBoxCommand {
             process: unsafe { OwnedHandle::from_raw_handle(info.hProcess.0) },
             // SAFETY: as above.
             thread: Some(unsafe { OwnedHandle::from_raw_handle(info.hThread.0) }),
-            stdin: stdin.parent,
-            stdout: stdout.parent,
-            stderr: stderr.parent,
+            stdin: stdin_parent,
+            stdout: stdout_parent,
+            stderr: stderr_parent,
         })
     }
 
@@ -294,9 +315,10 @@ impl LowBoxCommand {
 
 impl Spawned {
     /// Lets the child's first thread run, and closes the thread handle. A second call fails
-    /// with `ERROR_INVALID_HANDLE` (6).
+    /// with `ERROR_INVALID_HANDLE` (6). On failure the thread handle stays, so dropping the
+    /// `Spawned` still ends the child.
     pub fn resume(&mut self) -> Result<(), Error> {
-        let thread = self.thread.take().ok_or(Error::Win32 {
+        let thread = self.thread.as_ref().ok_or(Error::Win32 {
             call: "ResumeThread (already resumed)",
             code: 6,
         })?;
@@ -305,7 +327,27 @@ impl Spawned {
         if previous == u32::MAX {
             return Err(last_error("ResumeThread"));
         }
+        self.thread = None;
         Ok(())
+    }
+
+    /// What `Drop` does, with the way to end the child given: `end` runs once when the child
+    /// was never resumed, and not at all when it was. The seam the tests drive.
+    pub(super) fn end_if_unresumed(&self, end: impl FnOnce(&OwnedHandle)) {
+        if self.thread.is_some() {
+            end(&self.process);
+        }
+    }
+}
+
+impl Drop for Spawned {
+    fn drop(&mut self) {
+        self.end_if_unresumed(|process| {
+            // SAFETY: `process` is the child's open handle, with PROCESS_TERMINATE (all access).
+            // A failure means it is already gone; the thread and process handles close after.
+            let _gone: ::windows::core::Result<()> =
+                unsafe { TerminateProcess(HANDLE(process.as_raw_handle()), UNRESUMED_EXIT) };
+        });
     }
 }
 
@@ -315,7 +357,9 @@ fn units(text: &OsStr) -> Vec<u16> {
 }
 
 /// The `LowBox` token of `namespace`'s package over this process's primary token: no
-/// capabilities, the namespace's six handles.
+/// capabilities, the namespace's six handles, every privilege but `SeChangeNotifyPrivilege`
+/// removed. The guard's token is checked first and the new one after
+/// (`crate::token_check`); either failing fails the launch with [`Error::Token`].
 fn lowbox_token(namespace: &NamespaceHandles) -> Result<OwnedHandle, Error> {
     let mut own = HANDLE::default();
     // SAFETY: the pseudo handle of this process; `own` gets a new handle, owned below.
@@ -329,7 +373,9 @@ fn lowbox_token(namespace: &NamespaceHandles) -> Result<OwnedHandle, Error> {
     .map_err(|e| win32("OpenProcessToken", &e))?;
     // SAFETY: OpenProcessToken succeeded, so `own` is open and ours alone.
     let own = unsafe { OwnedHandle::from_raw_handle(own.0) };
-    let mut sid = namespace.package_sid().to_bytes();
+    token_check::check_base(&token::facts(&own)?)?;
+    // u32 words: the kernel probes the SID for 4-byte alignment.
+    let mut sid = namespace.package_sid().to_aligned();
     let handles = namespace.handles();
     let count = u32::try_from(handles.len()).unwrap_or(u32::MAX);
     let mut token = HANDLE::default();
@@ -351,5 +397,8 @@ fn lowbox_token(namespace: &NamespaceHandles) -> Result<OwnedHandle, Error> {
     };
     nt_ok("NtCreateLowBoxToken", status)?;
     // SAFETY: the call succeeded, so `token` is open and ours alone.
-    Ok(unsafe { OwnedHandle::from_raw_handle(token.0) })
+    let token = unsafe { OwnedHandle::from_raw_handle(token.0) };
+    token::drop_privileges(&token)?;
+    token_check::check_lowbox(&token::facts(&token)?, namespace.package_sid().as_str())?;
+    Ok(token)
 }

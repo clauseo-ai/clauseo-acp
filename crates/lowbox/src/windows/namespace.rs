@@ -9,7 +9,6 @@
     reason = "FFI to the Nt object calls, the token and handle calls"
 )]
 
-use std::ffi::c_void;
 use std::os::windows::io::{AsRawHandle, BorrowedHandle, FromRawHandle, OwnedHandle};
 
 use ::windows::Wdk::Storage::FileSystem::{
@@ -17,26 +16,22 @@ use ::windows::Wdk::Storage::FileSystem::{
     NtOpenDirectoryObject, NtOpenSymbolicLinkObject,
 };
 use ::windows::Win32::Foundation::{
-    DUPLICATE_SAME_ACCESS, DuplicateHandle, HANDLE, HANDLE_FLAG_INHERIT, HANDLE_FLAGS, HLOCAL,
-    LocalFree, SetHandleInformation,
+    DUPLICATE_HANDLE_OPTIONS, DuplicateHandle, HANDLE, HANDLE_FLAG_INHERIT, HANDLE_FLAGS,
+    SetHandleInformation,
 };
-use ::windows::Win32::Security::Authorization::ConvertSidToStringSidW;
-use ::windows::Win32::Security::{GetTokenInformation, TOKEN_QUERY, TOKEN_USER, TokenUser};
 use ::windows::Win32::Storage::FileSystem::{
     FILE_ACCESS_RIGHTS, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE,
 };
 use ::windows::Win32::System::IO::IO_STATUS_BLOCK;
 use ::windows::Win32::System::RemoteDesktop::ProcessIdToSessionId;
-use ::windows::Win32::System::Threading::{
-    GetCurrentProcess, GetCurrentProcessId, OpenProcessToken,
-};
-use ::windows::core::PWSTR;
+use ::windows::Win32::System::Threading::{GetCurrentProcess, GetCurrentProcessId};
+use clauseo_process::SpawnLock;
 
 use super::nt::{Descriptor, NtCreateDirectoryObjectEx, NtCreateSymbolicLinkObject, ObjectName};
 use super::probe::{ThisProcess, handle};
-use super::{nt_ok, win32};
+use super::{nt_ok, token, win32};
 use crate::error::Error;
-use crate::handles::{self, HANDLE_COUNT, ObjectKind, Slot, format_handle_arg};
+use crate::handles::{self, Expected, HANDLE_COUNT, ObjectKind, Slot, format_handle_arg};
 use crate::layout;
 use crate::package::{PackageName, Sid, package_sid};
 
@@ -44,6 +39,10 @@ use crate::package::{PackageName, Sid, package_sid};
 const DIRECTORY_ALL_ACCESS: u32 = 0x000F_000F;
 /// `DIRECTORY_QUERY | DIRECTORY_TRAVERSE`: enough to shadow a directory.
 const DIRECTORY_SHADOW: u32 = 0x0000_0003;
+/// `READ_CONTROL | DIRECTORY_QUERY | DIRECTORY_TRAVERSE`: the guard's copy of a directory, which
+/// it only checks (type, name, owner) and hands to the token call; no create, delete or DACL
+/// rights. Narrower than the recipe's (all access): the proof row checks the token call takes it.
+const DIRECTORY_GUARD: u32 = 0x0002_0003;
 /// `SYMBOLIC_LINK_ALL_ACCESS`: what the owner holds its links with.
 const LINK_ALL_ACCESS: u32 = 0x000F_0001;
 /// `READ_CONTROL | SYMBOLIC_LINK_QUERY`: what the guard opens a link with.
@@ -52,8 +51,8 @@ const LINK_OPEN: u32 = 0x0002_0001;
 const PIPES_OWNER: u32 = 0x0012_008F;
 /// `FILE_GENERIC_READ`: the guard's pipe folder.
 const PIPES_OPEN: u32 = 0x0012_0089;
-/// `TOKEN_USER` with its SID: room to spare.
-const TOKEN_USER_BYTES: usize = 256;
+/// `FILE_CREATED`: `IO_STATUS_BLOCK.Information` when `FILE_OPEN_IF` made the file.
+const FILE_CREATED: usize = 2;
 
 /// The owner's side: builds a package's namespace.
 #[derive(Debug, Clone, Copy)]
@@ -68,20 +67,54 @@ pub struct NamespaceHandles {
     handles: [OwnedHandle; HANDLE_COUNT],
 }
 
+/// The namespace's handles made inheritable for one launch; dropped, they are not any more.
+/// Holds a borrow of the spawn lock, so it cannot outlive it.
+#[derive(Debug)]
+#[must_use = "the handles stop being inheritable when this is dropped"]
+pub struct Inheritable<'a> {
+    /// The handles.
+    handles: &'a NamespaceHandles,
+    /// How many of them, from the first, are on.
+    on: usize,
+    /// The spawn lock the caller holds.
+    _lock: &'a SpawnLock,
+}
+
+impl Drop for Inheritable<'_> {
+    fn drop(&mut self) {
+        for h in self.handles.handles().into_iter().take(self.on) {
+            // A failure leaves the flag on, which only a start without a handle list would
+            // notice, and every start in this process takes the lock; nothing to undo here.
+            let _left_on = set_flag(h, false);
+        }
+    }
+}
+
 impl Namespace {
     /// Makes the namespace of `package` in session `session` for the browser account
     /// `browser_user`: the package directory shadowing the session's `BaseNamedObjects`, its
     /// `RPC Control`, `Global`, `Local` and `Session`, and the package's pipe folder, each with
     /// the recipe's descriptor naming SYSTEM, this process's user (the owner), the browser
-    /// account and the package. Fails with `STATUS_OBJECT_NAME_COLLISION` (`0xC0000035`) while
-    /// an earlier namespace of the package is still alive.
+    /// account and the package, and this process's user as the owner (`O:`), which the guard's
+    /// [`NamespaceHandles::from_inherited`] checks.
+    ///
+    /// Every object must be new: the directories and links fail with
+    /// `STATUS_OBJECT_NAME_COLLISION` (`0xC0000035`) while an earlier namespace of the package is
+    /// alive, and a pipe folder that was already there (anyone's, with any descriptor) fails with
+    /// [`Error::Namespace`], as does one whose owner is not this process's user. `session` must
+    /// be this process's own ([`Namespace::current_session`]).
     pub fn build(
         package: &PackageName,
         session: u32,
         browser_user: &Sid,
     ) -> Result<NamespaceHandles, Error> {
+        if session != Namespace::current_session()? {
+            return Err(Error::Namespace {
+                reason: "the session is not this process's own",
+            });
+        }
         let sid = package_sid(package);
-        let owner = token_user()?;
+        let owner = token::current_user()?;
         let objects = Descriptor::from_sddl(&layout::directory_sddl(&owner, browser_user, &sid))?;
         let pipes = Descriptor::from_sddl(&layout::pipe_folder_sddl(&owner, browser_user, &sid))?;
         let target = ObjectName::new(&layout::directory(session, &sid))?;
@@ -94,7 +127,7 @@ impl Namespace {
                     create_directory(&name, &objects, &shadow)?
                 }
                 (ObjectKind::SymbolicLink, _) => create_link(&name, &objects, &target)?,
-                _ => pipe_folder(&name, Some(&pipes), PIPES_OWNER, FILE_OPEN_IF)?,
+                _ => new_pipe_folder(&name, &pipes, &owner)?,
             };
             made.push(handle);
         }
@@ -113,7 +146,7 @@ impl Namespace {
 
 impl NamespaceHandles {
     /// The handles from `made`, which holds one per slot.
-    fn new(package: Sid, made: Vec<OwnedHandle>) -> Result<NamespaceHandles, Error> {
+    pub(super) fn new(package: Sid, made: Vec<OwnedHandle>) -> Result<NamespaceHandles, Error> {
         let handles = <[OwnedHandle; HANDLE_COUNT]>::try_from(made).map_err(|_wrong_count| {
             Error::HandleList {
                 reason: "not exactly six values",
@@ -132,7 +165,7 @@ impl NamespaceHandles {
             opened.push(match slot.kind() {
                 ObjectKind::Directory => open_directory(&name, DIRECTORY_ALL_ACCESS)?,
                 ObjectKind::SymbolicLink => open_link(&name)?,
-                ObjectKind::File => pipe_folder(&name, None, PIPES_OPEN, FILE_OPEN)?,
+                ObjectKind::File => pipe_folder(&name, None, PIPES_OPEN, FILE_OPEN)?.0,
             });
         }
         NamespaceHandles::new(sid, opened)
@@ -140,16 +173,24 @@ impl NamespaceHandles {
 
     /// The guard's side: takes over the handle `values` (from `--lowbox-handles`, see
     /// [`crate::parse_handle_arg`]) that the owner gave this process for `package`. Each value
-    /// must be an open handle of its slot's type and, but for the pipe folder, name its slot's
-    /// object in `package`'s namespace; the first that does not fails the whole call, and no
-    /// value is taken. The handles taken are made non-inheritable, so only a launch that lists
-    /// them passes them on.
+    /// must be an open handle of its slot's type, name its slot's object in `package`'s
+    /// namespace in this process's own session, and be owned by `owner`, the user who built it
+    /// (told apart from the values, like the package name); none may be this process's standard
+    /// input, output or error. The first that does not pass fails the whole call, and no value
+    /// is taken. The handles taken are made non-inheritable, so only a launch that lists them
+    /// passes them on.
     pub fn from_inherited(
         package: &PackageName,
+        owner: &Sid,
         values: &[usize],
     ) -> Result<NamespaceHandles, Error> {
         let sid = package_sid(package);
-        handles::check(&ThisProcess, values, sid.as_str())?;
+        let expected = Expected {
+            package: &sid,
+            session: Namespace::current_session()?,
+            owner,
+        };
+        handles::check(&ThisProcess, values, &expected)?;
         let taken: Vec<OwnedHandle> = values
             .iter()
             // SAFETY: each value was just checked to be an open handle of this process, of the
@@ -158,7 +199,7 @@ impl NamespaceHandles {
             .map(|v| unsafe { OwnedHandle::from_raw_handle(handle(*v).0) })
             .collect();
         let handles = NamespaceHandles::new(sid, taken)?;
-        handles.set_inheritable(false)?;
+        handles.set_inherit(false)?;
         Ok(handles)
     }
 
@@ -170,37 +211,54 @@ impl NamespaceHandles {
     }
 
     /// The `--lowbox-handles` text of [`NamespaceHandles::raw`], for a child that inherits the
-    /// handles (`PROC_THREAD_ATTRIBUTE_HANDLE_LIST` with [`NamespaceHandles::set_inheritable`]).
+    /// handles (`PROC_THREAD_ATTRIBUTE_HANDLE_LIST` with [`NamespaceHandles::inheritable`]).
     pub fn to_arg(&self) -> String {
         format_handle_arg(&self.raw())
     }
 
-    /// Turns `HANDLE_FLAG_INHERIT` on or off on every handle.
-    pub fn set_inheritable(&self, inheritable: bool) -> Result<(), Error> {
-        let flags = if inheritable {
-            HANDLE_FLAG_INHERIT
-        } else {
-            HANDLE_FLAGS(0)
+    /// Makes every handle inheritable until the returned guard drops, for a launch that lists
+    /// them in `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`. The caller holds `clauseo_process`'s spawn
+    /// lock (`lock`) from before this call until the guard is gone, so no other start in this
+    /// process inherits them meanwhile. The guard turns the flag off again on every path, and a
+    /// failure part way turns off the ones already on.
+    pub fn inheritable<'a>(&'a self, lock: &'a SpawnLock) -> Result<Inheritable<'a>, Error> {
+        let mut guard = Inheritable {
+            handles: self,
+            on: 0,
+            _lock: lock,
         };
         for h in self.handles() {
-            // SAFETY: `h` is one of this struct's open handles; the call changes only its flag.
-            unsafe { SetHandleInformation(h, HANDLE_FLAG_INHERIT.0, flags) }
-                .map_err(|e| win32("SetHandleInformation", &e))?;
+            set_flag(h, true)?;
+            guard.on += 1;
+        }
+        Ok(guard)
+    }
+
+    /// Turns `HANDLE_FLAG_INHERIT` on or off on every handle.
+    fn set_inherit(&self, inheritable: bool) -> Result<(), Error> {
+        for h in self.handles() {
+            set_flag(h, inheritable)?;
         }
         Ok(())
     }
 
     /// Copies every handle into `process` (opened with `PROCESS_DUP_HANDLE`), not inheritable,
-    /// with the same access, and returns the values there, in [`Slot::ALL`]'s order. For a guard
-    /// started without inheritance (`CreateProcessWithLogonW`), which then gets the values some
-    /// other way. A failure part way leaves the earlier copies in `process`.
+    /// with only the access the guard needs (`READ_CONTROL` and query: it checks each object
+    /// and hands it to the token call), and returns the values there, in [`Slot::ALL`]'s order.
+    /// For a guard started without inheritance (`CreateProcessWithLogonW`), which then gets the
+    /// values some other way. A failure part way leaves the earlier copies in `process`.
     pub fn duplicate_into(
         &self,
         process: BorrowedHandle<'_>,
     ) -> Result<[usize; HANDLE_COUNT], Error> {
         let target = HANDLE(process.as_raw_handle());
         let mut out = [0_usize; HANDLE_COUNT];
-        for (h, slot) in self.handles().into_iter().zip(&mut out) {
+        for ((h, slot), out) in self.handles().into_iter().zip(Slot::ALL).zip(&mut out) {
+            let access = match slot.kind() {
+                ObjectKind::Directory => DIRECTORY_GUARD,
+                ObjectKind::SymbolicLink => LINK_OPEN,
+                ObjectKind::File => PIPES_OPEN,
+            };
             let mut copy = HANDLE::default();
             // SAFETY: `h` is open in this process and `target` is a process handle the caller
             // holds; the copy lives in that process, so nothing here owns or closes it.
@@ -210,13 +268,13 @@ impl NamespaceHandles {
                     h,
                     target,
                     &raw mut copy,
-                    0,
+                    access,
                     false,
-                    DUPLICATE_SAME_ACCESS,
+                    DUPLICATE_HANDLE_OPTIONS(0),
                 )
             }
             .map_err(|e| win32("DuplicateHandle", &e))?;
-            *slot = copy.0.expose_provenance();
+            *out = copy.0.expose_provenance();
         }
         Ok(out)
     }
@@ -298,13 +356,52 @@ fn create_link(
     Ok(owned(out))
 }
 
-/// Opens (and with `FILE_OPEN_IF` and a descriptor, makes) the pipe folder `name`.
+/// Turns `HANDLE_FLAG_INHERIT` on or off on `h`.
+fn set_flag(h: HANDLE, on: bool) -> Result<(), Error> {
+    let flags = if on {
+        HANDLE_FLAG_INHERIT
+    } else {
+        HANDLE_FLAGS(0)
+    };
+    // SAFETY: `h` is an open handle of this process (the caller's); only its flag changes.
+    unsafe { SetHandleInformation(h, HANDLE_FLAG_INHERIT.0, flags) }
+        .map_err(|e| win32("SetHandleInformation", &e))
+}
+
+/// Makes the pipe folder `name` with `descriptor`, which must not exist yet: `FILE_OPEN_IF`, as
+/// the recipe did, then the folder is refused unless the call reports `FILE_CREATED` and its
+/// owner is `owner`. A folder someone made first, with a descriptor of theirs, is never used.
+fn new_pipe_folder(
+    name: &ObjectName,
+    descriptor: &Descriptor,
+    owner: &Sid,
+) -> Result<OwnedHandle, Error> {
+    let (folder, information) = pipe_folder(name, Some(descriptor), PIPES_OWNER, FILE_OPEN_IF)?;
+    if information != FILE_CREATED {
+        return Err(Error::Namespace {
+            reason: "the pipe folder was already there",
+        });
+    }
+    let found = token::owner_of(HANDLE(folder.as_raw_handle())).map_err(|code| Error::Win32 {
+        call: "GetSecurityInfo (the pipe folder's owner)",
+        code,
+    })?;
+    if found != owner.as_str() {
+        return Err(Error::Namespace {
+            reason: "the new pipe folder is not owned by this process's user",
+        });
+    }
+    Ok(folder)
+}
+
+/// Opens (and with `FILE_OPEN_IF` and a descriptor, makes) the pipe folder `name`; the second
+/// value is `IO_STATUS_BLOCK.Information` (`FILE_CREATED`, `FILE_OPENED`, …).
 fn pipe_folder(
     name: &ObjectName,
     descriptor: Option<&Descriptor>,
     access: u32,
     disposition: NTCREATEFILE_CREATE_DISPOSITION,
-) -> Result<OwnedHandle, Error> {
+) -> Result<(OwnedHandle, usize), Error> {
     let attributes = name.attributes(descriptor);
     let mut out = HANDLE::default();
     let mut status_block = IO_STATUS_BLOCK::default();
@@ -326,50 +423,11 @@ fn pipe_folder(
         )
     };
     nt_ok("NtCreateFile", status)?;
-    Ok(owned(out))
+    Ok((owned(out), status_block.Information))
 }
 
 /// Takes ownership of a handle a create or open call just returned.
 fn owned(handle: HANDLE) -> OwnedHandle {
     // SAFETY: the call succeeded, so `handle` is open, and nothing else holds it.
     unsafe { OwnedHandle::from_raw_handle(handle.0) }
-}
-
-/// This process's user.
-fn token_user() -> Result<Sid, Error> {
-    let mut token = HANDLE::default();
-    // SAFETY: the pseudo handle of this process; `token` gets a new handle, owned below.
-    unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &raw mut token) }
-        .map_err(|e| win32("OpenProcessToken", &e))?;
-    let token = owned(token);
-    let mut buffer = vec![0_u64; TOKEN_USER_BYTES / 8];
-    let mut needed = 0_u32;
-    // SAFETY: `buffer` is writable and 8-byte aligned for TOKEN_USER_BYTES bytes, and outlives
-    // the call.
-    unsafe {
-        GetTokenInformation(
-            HANDLE(token.as_raw_handle()),
-            TokenUser,
-            Some(buffer.as_mut_ptr().cast::<c_void>()),
-            u32::try_from(TOKEN_USER_BYTES).unwrap_or(u32::MAX),
-            &raw mut needed,
-        )
-    }
-    .map_err(|e| win32("GetTokenInformation", &e))?;
-    // SAFETY: the call succeeded, so the buffer starts with a TOKEN_USER whose SID points into
-    // the same buffer, which is still alive.
-    let sid = unsafe { buffer.as_ptr().cast::<TOKEN_USER>().read() }
-        .User
-        .Sid;
-    let mut text = PWSTR::null();
-    // SAFETY: `sid` is valid (above); `text` gets a LocalAlloc'd string, freed below.
-    unsafe { ConvertSidToStringSidW(sid, &raw mut text) }
-        .map_err(|e| win32("ConvertSidToStringSidW", &e))?;
-    // SAFETY: the call succeeded, so `text` is a NUL-terminated string.
-    let string = unsafe { text.to_string() };
-    // SAFETY: `text` came from ConvertSidToStringSidW (LocalAlloc) and is freed once, here; a
-    // failure to free leaks a few bytes, nothing to undo.
-    let _leak_on_failure: HLOCAL = unsafe { LocalFree(Some(HLOCAL(text.0.cast::<c_void>()))) };
-    let string = string.map_err(|_not_utf16| Error::SidText)?;
-    Sid::parse(&string)
 }

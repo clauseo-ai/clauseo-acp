@@ -21,8 +21,15 @@ workspace = true
 # (src/windows/probe.rs): GetHandleInformation and NtQueryObject with
 # PUBLIC_OBJECT_TYPE_INFORMATION (System_WindowsProgramming). The launch (src/windows/spawn.rs):
 # CreateProcessAsUserW and the attribute list (System_Threading), CreatePipe (System_Pipes),
-# CreateFileW for NUL (Storage_FileSystem) and GetStdHandle (System_Console).
+# CreateFileW for NUL (Storage_FileSystem) and GetStdHandle (System_Console). The tokens
+# (src/windows/token.rs): GetTokenInformation and AdjustTokenPrivileges (Security), the owner
+# (GetSecurityInfo: Security_Authorization).
+#
+# clauseo-process for its process-wide spawn lock (`spawn_lock`): the launch holds it while
+# handles are inheritable, as every start through clauseo-process does, so no other start in
+# the process inherits them. Windows only, where the lock is needed.
 [target.'cfg(windows)'.dependencies]
+clauseo-process = { path = "../process" }
 windows = { workspace = true, features = [
   "Wdk_Foundation",
   "Wdk_Storage_FileSystem",
