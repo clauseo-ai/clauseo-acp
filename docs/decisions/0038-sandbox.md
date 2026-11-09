@@ -508,16 +508,17 @@ rule for `setsid` or `setpgid`. `RLIMIT_NPROC` is compared with the user's whole
   descendants that called `setsid` while their parent lives. One listing runs per poll; there
   is no kqueue. The session's id is the agent's pid, and xnu gives no new process a pid that
   names a live session or group (`kern_fork.c`), so a member is the agent's while one lives.
-  The watchdog goes on after the agent exits, until the session is empty.
+  The watchdog goes on after the agent exits, until the session is empty, and then while the
+  launch's mark still finds a process (the session sweep below), until session end.
 - At `AGENT_PROCESS_CAP` (256 descendants, Windows' job cap): `killpg(SIGSTOP)` freezes the
   agent's group, each descendant found is stopped too, then each is killed, by pid with its start
   checked, never by name. The agent gets `SIGCONT` and its turn reports the failed command, as on
   Windows. It is killed instead when its own children are more than half of the descendants (it
   is the one forking), or at the lawyer session's third trip. What the bounded kill rounds leave
-  goes to `hand_over_to_session_sweep`.
-- Failing closed: a failed listing, an agent that runs but cannot be read, or one whose start is
-  missing at launch is logged, and the agent and its session are killed (at launch, the launch
-  fails).
+  goes to the session sweep (the launch's `LaunchSweep`).
+- Failing closed: a failed listing, an agent that runs but cannot be read, a failed session
+  sweep scan, or an agent whose start is missing at launch is logged, and the agent and its
+  session are killed (at launch, the launch fails).
 - Notices (`ProcessCapNotice`, `process_cap/session.rs`). They are not Windows' sentence, since
   here the cap ends programs:
   - a trip: "The AI tool started too many programs at once, so Clauseo ended the extra ones. It
@@ -569,14 +570,24 @@ launchd: no parent, group or session link leads back to the agent, and a jailed 
 disclaim its responsible pid (`responsibility_spawnattrs_setdisclaim`, measured), so that cannot
 be the filter either. What a jailed process cannot change is its Seatbelt profile. The route
 (`macos/sweep.rs`):
+- **One launch per launcher.** R17 makes one `SeatbeltLauncher` per agent launch, and the
+  launcher enforces it: a second `launch` is refused (`has_launched` says whether it made its
+  one). So the mark, its sentinel and the process cap's view of them belong to one launch: the
+  watchdog gets a `LaunchSweep` holding that launch's mark and no other, so neither its sweep nor
+  its hand-over can reach another launch's agent or tree. The mark records one agent.
 - **The mark.** `SeatbeltLauncher::new` takes the host's marks folder and makes
-  `SessionMark::create(dir, tag)`: `<dir>/<tag>/mark` and `<dir>/<tag>/canary`, regular
-  files at 0600 in a folder at 0700, made before any launch. The profile adds one rule,
+  `SessionMark::create(dir, tag)`: `<dir>/<tag>/mark` and `<dir>/<tag>/canary`, new regular
+  files at 0600 in a new folder at 0700, made before the launch. The tag is
+  `clauseo-<host pid>-<n>-<random nonce>`, so a later host whose pid repeats an earlier one's
+  never shares a tag, and an existing launch folder is refused. The profile adds one rule,
   `(allow file-write-data (literal (param "SESSION_MARK")))`, after every other file rule; no rule
-  names the canary. The folder must sit outside every folder the policy lets the agent write
-  (the launcher refuses the matter, state, notes, temp and browser socket folders, the Claude
-  store and the credential link); the host's is under its hidden data dir. Under the profile the
-  agent can truncate the mark (harmless: nothing reads it) but not remove, rename or link it.
+  names the canary. The marks folder must belong to the lawyer's user, with no group or other
+  write, and sit outside every path the profile lets the agent write: the launcher reads those
+  from the profile's own allow rules with a `file-write` operation, not from a list kept beside
+  them. The host's is under its hidden data dir. The mark is immutable (`UF_IMMUTABLE`) while
+  in use, so the one write the profile allows writes no byte, and the agent cannot grow a file
+  outside the matter; the kernel's answer to the scan's question is still "allowed" (measured).
+  Under the profile the agent cannot remove, rename, link or unlock it.
 - **The scan.** `processes(marks, since)` lists this user's processes (`proc_listallpids`,
   `proc_pidinfo`) that started at or after `since`, and asks the kernel about each:
   `sandbox_check(pid, NULL)` (is it sandboxed), then `sandbox_check(pid, "file-write-data",
@@ -589,42 +600,67 @@ be the filter either. What a jailed process cannot change is its Seatbelt profil
   among them) may write a `/private/tmp` run folder's files, so "the mark is allowed" alone would
   have the sweep kill cfprefsd; all of them allow the canary too. A missing mark is an error, not
   an empty list: the kernel answers "denied" for a path that does not exist, for every process.
-- **The drift check.** Each scan checks every live agent of the marks (registered at launch,
-  pid and start) that has run for more than 1 s: one that does not match its own mark is
-  `SweepError::Drift`, never an empty list.
+  `sandbox_check` and `SANDBOX_CHECK_NO_REPORT` are looked up at run time (`dlsym`), not
+  linked: a macOS without them still loads the host, and `SeatbeltLauncher::new` refuses with
+  `Error::SweepUnavailable`, so no jailed launch runs without its sweep.
+- **The sentinel.** The positive control every scan needs, agent or no agent. Before the agent,
+  the launch starts `sandbox-exec <the launch's profile> /bin/cat`, its standard input a pipe
+  only the host holds, and waits (up to 2 s) until the kernel answers that it matches the mark;
+  if it never does, the launch is refused. It runs for the session's life and dies with the host
+  (the pipe's writer goes). Every scan must find it, by pid and start, matching its mark; if not
+  (gone, a call answering -1 or `EPERM`, a renumbered filter, nothing sandboxed any longer) the
+  scan is `SweepError::Unknown`, never an empty list, so the gate and session end refuse
+  rather than answer `Gone`. It is never among what a scan finds, so it is never counted,
+  stopped or killed by the cap, the gate or the end; `end_session` ends it after `Gone`. The
+  agent cannot signal it: it is another sandbox, and `signal (target same-sandbox)` does not
+  reach it (measured).
+- **The drift check.** Each scan also checks the launch's live agent (pid and start) once it has
+  run for more than 1 s: an agent that does not match its own mark is `SweepError::Drift`.
 - **The end.** `end_session_processes(marks, deadline) -> Result<Gone, Survivors>`:
   `killpg(SIGSTOP)` on each live agent's group, then rounds of scan, `SIGSTOP` on each new
   process (its start checked first) until a round finds none new (a stopped process cannot
   fork), then `SIGKILL` on each, its start checked again, until a scan finds nothing (`Gone`) or
-  the deadline passes (`Survivors`, everything found killed on the way out). A failed scan, drift
-  above all, kills the known agents and answers `Survivors`: it never answers `Gone` on a scan
-  it cannot trust. Its scans, and the session handle's, have no start filter: starts are
-  wall-clock stamps, and a clock set back must not hide a process from the gate.
+  the deadline passes (`Survivors`, everything found killed on the way out). A failed scan, an
+  unvouched one or drift above all, kills the known agents and answers `Survivors`: it never
+  answers `Gone` on a scan it cannot trust. Its scans, and the session handle's, have no start
+  filter: starts are wall-clock stamps, and a clock set back must not hide a process.
 - **Three callers, one scan.** The process cap's 2 s sweep adds the mark's processes that left
   the agent's session (a `setsid` orphan, the one escape from its count) to the count, so they
   trip the cap and are killed by the same rule (descendants killed, the agent spared unless the
-  verdict says otherwise); a scan error there is logged once per mark. What a trip's kill rounds
-  leave goes to `hand_over_to_session_sweep`, which stops and kills it with everything the mark
-  still finds but the agent, for up to 20 rounds. The mode-switch gate, `switch_to_read_only(marks, deadline)`, answers
-  `ReadOnly` only from `Gone`; on `Survivors` the switch fails closed. Session end,
-  `end_session(marks, deadline)`, removes the marks only after `Gone`. A launch's session
-  handle, `JailedSession` (from `SeatbeltLauncher::launch_jailed`), holds the agent's
-  `TreeWatch` and the launcher's mark; `processes_gone` is the tree gone and an empty scan with
-  the drift check passing.
-- **Leftover marks.** A mark goes when its last holder (the launcher and every `JailedSession`
-  of its launches) drops it, if a scan finds no process of it; nothing is killed on drop, so a
-  mark a process still matches stays findable. `SeatbeltLauncher::new` removes the marks of an
-  earlier host (its pid, in the tag, no longer runs) that no process matches; a mark a process
-  matches, one whose scan fails, and one of a host that still runs are never touched.
+  verdict says otherwise). It has no start filter either. It fails closed as the cap's own
+  listing does: a scan that fails (unvouched, drift, a missing mark) ends the agent with the
+  `CapFailed` notice. When the agent's session empties (`setsid <bomb> &`, then the agent
+  killed), the watchdog goes on: it reads what the mark finds at once and then at each sweep,
+  trips past the cap with no group signal (the agent's pid may name another process by then),
+  and stops only when the mark finds nothing or session end ended the mark. What a trip's kill
+  rounds leave goes to the launch's `LaunchSweep`, which stops and kills it with everything the
+  mark still finds but the agent, for up to 20 rounds. The mode-switch gate,
+  `switch_to_read_only(marks, deadline)`, answers `ReadOnly` only from `Gone`; on `Survivors`
+  the switch fails closed. Session end, `end_session(marks, deadline)`, ends the sentinels and
+  removes the marks only after `Gone`. A launch's session handle, `JailedSession` (from
+  `SeatbeltLauncher::launch_jailed`), holds the agent's `TreeWatch` and the launch's mark;
+  `processes_gone` is the tree gone and an empty, vouched scan.
+- **Leftover marks.** A mark goes when its last holder (the launcher, the launch's
+  `JailedSession` and the watchdog) drops it, if a scan vouched by its sentinel finds no process
+  of it; then the sentinel goes. Nothing is killed on drop, so a mark a process still matches
+  stays findable. A mark no process ever ran under goes without a scan. `SeatbeltLauncher::new`
+  removes the marks of an earlier host (its pid, in the tag, no longer runs) that no process
+  matches, each scanned with a control of its own: `sandbox-exec` under a profile that allows
+  every write but the canary's, started and ended for that scan. A mark a process matches, one
+  whose scan fails, and one of a host that still runs are never touched.
 
 Measured on a Mac mini (M-series, macOS 27.2): the escaped child (setsid, double fork, every
 descriptor closed, adopted by launchd) matched its launch and nothing else, and was ended; a
 second launch with its own mark was never stopped; an unsandboxed process, one under a profile
 that allows everything, launchd and the host never matched; 3 scans gave the watcher no denial;
 300 sleepers started by a launchd orphan in its own session tripped the cap at the next sweep and
-were killed with the agent spared (the jail tests `sweep`). A scan with one agent running took
-1.3 to 1.4 ms (mean of 200) with no start filter and about 0.2 ms counting from the mark's making,
-about 0.1 % of a core at the 2 s sweep.
+were killed with the agent spared, and so did 300 left behind by an agent killed at once (the
+jail tests `sweep`); the sentinel matched, was never found, survived the gate and went at
+session end; with it killed, the gate refused with `Unknown` and ended the agent; the agent's
+own `kill -9` on it was refused; a second launch on one launcher was refused; the agent's
+append to the immutable mark failed while the scan still found it. A scan with one agent and its
+sentinel running took 1.6 to 2.3 ms (mean of 200) with no start filter, as every caller now
+scans, and 0.3 to 0.4 ms counting from the mark's making: about 0.1 % of a core at the 2 s sweep.
 
 Residual risks:
 - Work system services do on the session's behalf runs under their sandbox, not the launch's,
@@ -634,13 +670,17 @@ Residual risks:
 - Writes made before the stop, or one system call in flight when `SIGSTOP` lands, are not
   undone: `Gone` means no process of the session runs, not that nothing was written.
 - Private API drift: `sandbox_check` is undocumented and `SANDBOX_FILTER_PATH` (1) is not
-  exported. The drift check runs on every scan and turns a change into a loud failure and a
-  failed switch, never a silent miss; it needs a live agent that has run 1 s, so a scan with
-  every agent exited has no check. A small pid-reuse window remains between the last start check
-  and `SIGKILL`: the target is stopped, so its pid can only be reused if something else ends it
-  and the pids wrap in between. The process cap's sweep counts from the agent's start, a
-  wall-clock stamp: a clock set back can hide an escaped process from that count (not from the
-  gate or session end).
+  exported. The sentinel vouches for every scan, with or without a live agent, and the drift
+  check adds the agent while it runs: a change in the answers becomes `Unknown` or `Drift`, a
+  loud failure and a failed switch, never a silent miss. A removed call refuses jailed launches.
+  What remains is a change that answers correctly for the sentinel and the agent and wrongly
+  for other processes of the same profile, which no measured change has done. A sentinel that
+  is gone (killed from outside the jail) makes every scan `Unknown`: the gate and session end
+  refuse until the host ends the session another way, which fails closed. A small pid-reuse
+  window remains between the last start check and `SIGKILL`: the target is stopped, so its pid
+  can only be reused if something else ends it and the pids wrap in between.
+- The immutable mark: a mark left by a crash (until the next launcher's clean-up removes it)
+  is locked, so removing the data dir by hand asks to unlock it.
 
 ## Status
 
