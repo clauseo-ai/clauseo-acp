@@ -2032,25 +2032,45 @@ owner, the lawyer, at Medium integrity, and it opens the crashed sandbox process
 lawyer's side to read its memory. That crosses the boundary: a crash the agent crafts makes a
 process with the lawyer's rights read memory the agent controls. Two controls close it.
 
-- **The job (main control).** The launch's one job (`runner/spawn.rs`, `JOB_LIMITS`, set by
+- **The job.** The launch's one job (`runner/spawn.rs`, `JOB_LIMITS`, set by
   `kill_on_close_job`) carries `JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION` next to
-  `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. A process in it with an unhandled exception just ends,
-  and Windows never asks WER. The inner runner, the agent and everything the agent starts are in
-  this job, and it is the only job the runner makes: the end sweeper runs outside any job
-  ("The runner" above). `job_tests.rs` reads the flag back from a real job.
-- **The pool user's WER (backstop).** Before the agent starts, the inner runner, as the pool user
-  and so owning its `HKCU`, sets `Disabled` = 1 and `DontShowUI` = 1 (DWORDs) under
-  `HKCU\Software\Microsoft\Windows\Windows Error Reporting` (`runner/wer.rs`, step 2 of
-  `inner_flow.rs`). This also covers the end sweeper, which runs as the pool user outside the
-  job. Setting the values again changes nothing, and a failure is logged on `ctl` and the run goes
-  on. Windows reads `LocalDumps` only from `HKLM`, so there is no per-user `LocalDumps` key to set.
-  The inner runner does this, not the set-up's one logon per pool user (`setup/logon.rs`), because
-  each launch then sets it again: pools made before this change get it, and so does a profile
-  that was reset or rebuilt. The agent runs at Low integrity and can't write this Medium key, so
-  it can't turn WER back on.
+  `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. A process in it whose exception reaches
+  `UnhandledExceptionFilter` just ends, and Windows never asks WER. The inner runner, the agent and
+  everything the agent starts are in this job, and it is the only job the runner makes.
+  `job_tests.rs` reads the flag back from a real job. The flag doesn't reach three cases:
+  - a fastfail (`__fastfail`, `RaiseFailFastException`, `[Environment]::FailFast`, a CFG or
+    stack-cookie failure), which skips every exception handler, `UnhandledExceptionFilter`
+    included, and goes straight to WER;
+  - a process in a nested job the agent makes, whose own limits it sets;
+  - the end sweeper, which runs as the pool user outside any job ("The runner" above).
+- **The pool user's WER.** This covers those three cases. Before the agent starts, the inner
+  runner, as the pool user and so owning its `HKCU`, sets `Disabled` = 1 and `DontShowUI` = 1
+  (DWORDs) under `HKCU\Software\Microsoft\Windows\Windows Error Reporting` (`runner/wer_flow.rs`,
+  step 4 of `inner_flow.rs`). It opens the key with `REG_OPTION_OPEN_LINK`, refuses a key that
+  is a registry link (one with a `SymbolicLinkValue`), and reads every value back after writing
+  it. Any failure refuses the launch (`RunExit::Token`, which fails this launch only, like any
+  other failure making the inner's token or folders), because for those three cases this setting
+  is the only control. Setting the values again changes nothing. Windows reads `LocalDumps` only
+  from `HKLM`, so there is no per-user `LocalDumps` key to set. The inner runner does this, not
+  the set-up's one logon per pool user (`setup/logon.rs`), because each launch then sets it
+  again: pools made before this change get it, and so does a profile that was reset or rebuilt.
+  The agent runs at Low integrity and can't write this Medium key, so it can't turn WER back on.
+  Another key or value is one more row in `WER_SETTINGS`.
+
+Two VM rows check both controls: a null-write crash in the agent (the job flag) and a fastfail
+(the `HKCU` setting). Each must show no `WerFault` running as the lawyer and no report or dump
+under the lawyer's profile. Whether WER reads the crashing user's `HKCU` while `WerFault` runs
+as the lawyer is what the fastfail row settles. If `WerFault` still runs, the fastfail case needs
+another mechanism.
 
 WER for the lawyer's own apps is unchanged: neither control touches the lawyer's `HKCU`, `HKLM`
-or any process outside the launch's job.
+or any process outside the launch's job. In the other direction, a machine-wide WER setting still
+applies to the pool users. `LocalDumps` under `HKLM\SOFTWARE\Microsoft\Windows\Windows Error
+Reporting`, which an IT department may set to collect crash dumps, still makes WER write a memory
+dump of a crashed sandbox process (for a fastfail, or outside the job), by default under a
+`%LOCALAPPDATA%\CrashDumps` (the pool user's, or the lawyer's when `WerFault` runs as the lawyer).
+Neither control here turns that off, and Clauseo doesn't change machine-wide WER settings.
+`docs/firm-it.md` ("Crash dumps of the Windows sandbox") tells IT.
 
 ## Consequences
 
