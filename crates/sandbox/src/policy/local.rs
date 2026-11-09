@@ -36,7 +36,8 @@ pub(super) fn mounts(b: &PolicyBuilder) -> Result<Mounts, Error> {
 
 /// Refuses a matter off the local disks with [`Error::MatterOnNetwork`], and any other folder
 /// or file the agent is given (state, home, temp, notes, credential link, Claude store, runtime,
-/// read and allowed paths) that is on a network drive or a device the launch can't check.
+/// read and allowed paths, read-only paths in the state folder, over-cap files) that is on a
+/// network drive or a device the launch can't check.
 /// Returns the hidden paths split by [`Hidden`]. Before this, nothing in `b` was touched.
 pub(super) fn check(b: &PolicyBuilder, mounts: &Mounts) -> Result<Hidden, Error> {
     if let Some((_, off)) = off_local(&b.matter, mounts) {
@@ -55,6 +56,8 @@ pub(super) fn check(b: &PolicyBuilder, mounts: &Mounts) -> Result<Hidden, Error>
         (&b.runtime, "runtime path"),
         (&b.read, "read path"),
         (&b.allowed_folders, "allowed folder"),
+        (&b.read_only_in_state, "read-only path in the state folder"),
+        (&b.over_cap, "over-cap file"),
     ];
     let each = single
         .into_iter()

@@ -156,11 +156,13 @@ pub(crate) enum Place {
 }
 
 /// Where `path` is by its text and `mounts`, with no file call. `\\?\` and `\??\` are read
-/// alike: `UNC\…` after either is network, a drive letter goes on to the drive check, anything
-/// else (a volume or device name) is unknown. Other paths starting with two separators
-/// (`\\host\share`, `//host/share`) are network, `\\.\…` unknown. A drive letter is what
-/// its device is, a `subst` drive one mapping at a time (up to [`SUBST_MAX`], past which it is
-/// unknown). Any other path is network if its longest mount-point prefix is.
+/// alike, and a `..` in either is unknown (the kernel takes it as written, after any link before
+/// it, so it can't be taken off by text): `UNC\…` after either is network, a drive letter goes
+/// on to the drive check, anything else (a volume or device name) is unknown. Other paths
+/// starting with two separators (`\\host\share`, `//host/share`) are network, `\\.\…`
+/// unknown. A drive letter is what its device is, a `subst` drive one mapping at a time (up to
+/// [`SUBST_MAX`], past which it is unknown). Any other path is network if its longest
+/// mount-point prefix is.
 pub(crate) fn classify(path: &Path, mounts: &Mounts) -> Place {
     let mut current = path.to_owned();
     for _ in 0..=SUBST_MAX {
@@ -171,6 +173,9 @@ pub(crate) fn classify(path: &Path, mounts: &Mounts) -> Place {
             .strip_prefix(br"\\?\")
             .or_else(|| bytes.strip_prefix(br"\??\"))
         {
+            if tail.split(sep).any(|name| name == b"..") {
+                return Place::Off(Off::Unknown);
+            }
             if tail
                 .get(..4)
                 .is_some_and(|head| head.eq_ignore_ascii_case(br"UNC\"))
@@ -265,6 +270,10 @@ pub(crate) fn link_to_network_as(
     read: impl Fn(&Path) -> io::Result<Option<PathBuf>>,
     dots_by_text: bool,
 ) -> Option<(PathBuf, Off)> {
+    // As written first: a `..` in a `\\?\` or `\??\` path is unknown before `lexical` drops it.
+    if let Place::Off(off) = classify(path, mounts) {
+        return Some((path.to_owned(), off));
+    }
     let path = if dots_by_text {
         lexical(path)
     } else {

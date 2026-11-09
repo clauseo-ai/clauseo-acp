@@ -325,3 +325,24 @@ fn lexical_keeps_leading_dots_of_a_relative_path() {
     assert_eq!(lexical(Path::new("../a/../../b")), Path::new("../../b"));
     assert_eq!(lexical(Path::new("a/../..")), Path::new(".."));
 }
+
+/// Win32 hands `\\?\` and `\??\` paths to the kernel with `..` as written, after any link
+/// before it, so a `..` there is unknown, never taken off by text. A plain path's is.
+#[test]
+fn dots_in_a_verbatim_path_are_unknown() {
+    let mounts = Mounts::default().with_drive(b'C', Drive::Local);
+    for path in [
+        r"\\?\C:\m\N\..\x",
+        r"\??\C:\m\N\..\x",
+        r"\\?\C:/m/N/../x",
+        r"\??\UNC\h\..\s",
+    ] {
+        assert_eq!(place(path, &mounts), Place::Off(Off::Unknown), "{path}");
+        let read = reader(&[], &[]);
+        for dots_by_text in [false, true] {
+            let got = link_to_network_as(Path::new(path), &mounts, &read, dots_by_text);
+            assert_eq!(got, Some((PathBuf::from(path), Off::Unknown)), "{path}");
+        }
+    }
+    assert!(matches!(place(r"\\?\C:\m\x", &mounts), Place::Local(_)));
+}

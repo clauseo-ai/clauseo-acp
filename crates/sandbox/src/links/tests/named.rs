@@ -28,6 +28,8 @@ fn a_network_path_is_unknown_before_any_file_call() {
         r"\??\Z:\repo",
         "/Volumes/share/repo",
         "../../../../Volumes/share/repo",
+        r"\\?\C:\m\N\..\x",
+        r"\??\C:\m\N\..\x",
     ] {
         let got = named_with(matter, base, line, &mounts(), &read, never);
         assert!(matches!(got, Some(Named::Unknown(_))), "{line}: {got:?}");

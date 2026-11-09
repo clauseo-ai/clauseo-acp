@@ -108,7 +108,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
     let mut seen = HashSet::new();
     read_only_in_matter
         .retain(|rule| seen.insert((matches!(rule, PathRule::Literal(_)), path_key(rule.path()))));
-    let (mut links, found) = canonical_findings(parts.links, &matter)?;
+    let (mut links, found) = canonical_findings(parts.links, &matter, &mounts)?;
     let linked = split_linked(parts.linked, &matter, &read_only_in_matter);
     add_new(&mut links, &found, linked);
     let allowed_exactly = |p: &Path| {

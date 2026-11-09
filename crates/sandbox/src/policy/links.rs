@@ -15,7 +15,6 @@
 //! folder above one: either would hide the repository and the files beside it. A rule whose
 //! folder is one of those stays where it is. If the count still does not fit, `build` refuses.
 
-use std::cell::OnceCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -23,7 +22,7 @@ use super::build::{beneath_existing, refuse};
 use super::names::{Keys, path_key};
 use super::{ClaudeStore, PathRule, instruction_file, same, under};
 use crate::links::ScanParts;
-use crate::links::network::{Mounts, is_network_path};
+use crate::links::network::{Mounts, off_local};
 use crate::{Error, LinkFinding, LinkKind};
 
 /// The places the agent can write besides the state, temp and notes folders, for
@@ -94,9 +93,13 @@ pub const LINK_RULES_MAX: usize = 256;
 /// reached while that part is missing. Findings are kept once by [`path_key`] of path and
 /// target, and a path written in two forms keeps its first form (the walk's, which comes first),
 /// so the later sets compare plain bytes. Returns the findings and the keys of their paths.
+/// Each folder and target is classified by `mounts` before it is touched ([`off_local`]): a
+/// folder off the local disks refuses (it can't be in the matter), a target there stays as
+/// written.
 pub(super) fn canonical_findings(
     findings: Vec<LinkFinding>,
     matter: &Path,
+    mounts: &Mounts,
 ) -> Result<(Vec<LinkFinding>, HashSet<PathBuf>), Error> {
     // The walk's findings share folders; each folder is resolved once.
     let mut folders: BTreeMap<PathBuf, PathBuf> = BTreeMap::new();
@@ -104,7 +107,6 @@ pub(super) fn canonical_findings(
     let mut seen: HashSet<(PathBuf, Option<PathBuf>)> = HashSet::new();
     let mut first_form: HashMap<PathBuf, PathBuf> = HashMap::new();
     let mut keys = Keys::default();
-    let mounts = OnceCell::new();
     for finding in findings {
         let LinkFinding { path, kind, target } = finding;
         if !path.is_absolute() {
@@ -122,6 +124,13 @@ pub(super) fn canonical_findings(
         let folder = if let Some(canonical) = folders.get(folder) {
             canonical.clone()
         } else {
+            if off_local(folder, mounts).is_some() {
+                return refuse(format!(
+                    "a link finding must be inside the matter {}: {}",
+                    matter.display(),
+                    path.display()
+                ));
+            }
             let canonical = dunce::canonicalize(folder).map_err(|error| {
                 Error::Policy(format!(
                     "a link finding's folder must exist: {}: {error}",
@@ -139,11 +148,9 @@ pub(super) fn canonical_findings(
                 canonical.display()
             ));
         }
-        // A network target stays as written: resolving it would connect to the server. So does
-        // every target when the mount table can't be read.
+        // A target off the local disks stays as written: resolving it would connect to the server.
         let target = target.map(|t| {
-            let table = mounts.get_or_init(Mounts::current);
-            if table.unread || is_network_path(&t, table) {
+            if off_local(&t, mounts).is_some() {
                 t
             } else {
                 beneath_existing(&t, "link target").unwrap_or(t)

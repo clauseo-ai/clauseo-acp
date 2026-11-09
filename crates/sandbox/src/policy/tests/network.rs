@@ -50,7 +50,7 @@ fn a_settings_path_on_a_share_refuses() {
     let w = World::new("net-settings");
     w.dir.symlink("net", Path::new("/Volumes/share"));
     let net = |name: &str| w.at("net").join(name);
-    let cases: [(&str, PolicyBuilder); 8] = [
+    let cases: [(&str, PolicyBuilder); 11] = [
         (
             "state folder",
             Policy::builder(w.at("matter"), net("state")),
@@ -59,12 +59,21 @@ fn a_settings_path_on_a_share_refuses() {
         ("temp folder", w.builder().tmpdir(net("run/s/tmp"))),
         ("notes folder", w.builder().notes(net("notes"))),
         (
+            "credential link",
+            w.builder().credential_link(net("credentials.json")),
+        ),
+        (
             "Claude store folder",
             w.builder().claude_store(net("claude")),
         ),
         ("runtime path", w.builder().runtime(net("node"))),
         ("read path", w.builder().read(net("ca.pem"))),
         ("allowed folder", w.builder().allowed_folder(net("docs"))),
+        (
+            "read-only path in the state folder",
+            w.builder().read_only_in_state(net("state/keep")),
+        ),
+        ("over-cap file", w.builder().over_cap([net("big.bin")])),
     ];
     for (what, builder) in cases {
         let built = builder.mounts(share()).build();
@@ -90,4 +99,44 @@ fn a_hidden_path_on_a_share_is_kept_as_written() {
         .build()
         .unwrap();
     assert!(policy.hidden().contains(&other), "{:?}", policy.hidden());
+}
+
+/// A link finding the host passes is classified before it is touched: a target through a link
+/// to a share stays as written (unresolved), and a finding whose folder is there refuses.
+#[cfg(unix)]
+#[test]
+fn a_host_link_finding_on_a_share_is_never_resolved() {
+    let w = World::new("net-findings");
+    w.dir.symlink("net", Path::new("/Volumes/share"));
+    let finding = |path: PathBuf, target: PathBuf| LinkFinding {
+        path,
+        kind: crate::LinkKind::Symlink,
+        target: Some(target),
+    };
+    let target = w.at("net/x");
+    let policy = w
+        .builder()
+        .scan(crate::MatterScan::default())
+        .links([finding(w.at("matter/l"), target.clone())])
+        .mounts(share())
+        .build()
+        .unwrap();
+    let got: Vec<&Path> = policy
+        .links()
+        .iter()
+        .filter_map(|f| f.target.as_deref())
+        .collect();
+    assert_eq!(got, [target.as_path()]);
+
+    let built = w
+        .builder()
+        .scan(crate::MatterScan::default())
+        .links([finding(w.at("net/l"), w.at("elsewhere"))])
+        .mounts(share())
+        .build();
+    refused(
+        built,
+        "a link finding must be inside the matter",
+        &w.at("net/l"),
+    );
 }

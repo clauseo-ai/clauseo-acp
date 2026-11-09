@@ -32,6 +32,10 @@ use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use windows::core::{BOOL, PCWSTR};
 
 use super::FolderSupport;
+// The walk's classifier: each drive letter's DOS device read with `QueryDosDeviceW`, which asks no
+// file system or server. Not `GetDriveTypeW`, which may try to reconnect a disconnected mapped
+// drive.
+use crate::links::network::{Mounts, is_network_path};
 
 /// Asks whether the folder at `path` can take the agent's permission entries, in five steps (the
 /// first that answers wins):
@@ -55,7 +59,7 @@ use super::FolderSupport;
 /// `SetNamedSecurityInfoW` will meet them. Backup and restore privileges don't affect it, so a
 /// token that holds them gets the same answer as one that doesn't.
 pub fn folder_support(path: &Path) -> io::Result<FolderSupport> {
-    support(path, false)
+    support(path, false, &Mounts::current())
 }
 
 /// [`folder_support`] for a folder tier B also gives the Low label (the matter, state, notes
@@ -64,13 +68,13 @@ pub fn folder_support(path: &Path) -> io::Result<FolderSupport> {
 /// implicitly (only `READ_CONTROL | WRITE_DAC`). A folder that already has the label is still
 /// asked: the gate refuses rather than read the label it would leave alone.
 pub fn label_support(path: &Path) -> io::Result<FolderSupport> {
-    support(path, true)
+    support(path, true, &Mounts::current())
 }
 
 /// [`folder_support`]'s steps, with [`label_support`]'s last one when `label`.
-fn support(path: &Path, label: bool) -> io::Result<FolderSupport> {
+fn support(path: &Path, label: bool, mounts: &Mounts) -> io::Result<FolderSupport> {
     let wide = verbatim_wide(path)?;
-    if is_share_path(&wide) || off_local_drive(path) {
+    if is_share_path(&wide) || is_network_path(path, mounts) {
         return Ok(FolderSupport::Network);
     }
     let folder = open(&wide, FILE_READ_ATTRIBUTES.0).map_err(|error| os_error(&error))?;
@@ -184,15 +188,6 @@ fn is_share_path(wide: &[u16]) -> bool {
 /// `unit` upper-cased when it is an ASCII letter.
 fn ascii_upper(unit: u16) -> u16 {
     u8::try_from(unit).map_or(unit, |byte| u16::from(byte.to_ascii_uppercase()))
-}
-
-/// Whether `path`'s drive letter is not a local disk by the walk's classifier
-/// (`links::network::classify`), which reads each letter's DOS device with `QueryDosDeviceW`
-/// and asks no file system or server: a redirector, a `subst` onto a share, or a device it
-/// doesn't know. Not `GetDriveTypeW`, which may try to reconnect a disconnected mapped drive.
-fn off_local_drive(path: &Path) -> bool {
-    use crate::links::network::{Mounts, is_network_path};
-    is_network_path(path, &Mounts::current())
 }
 
 /// The volume's file-system flags.
@@ -385,4 +380,25 @@ const DESCRIPTOR_READS: usize = 4;
 /// `HRESULT_FROM_WIN32(code)`, which keeps the code in its low 16 bits.
 fn os_error(error: &windows::core::Error) -> io::Error {
     io::Error::from_raw_os_error(error.code().0 & 0xFFFF)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A path on a mapped network drive, a `subst` onto a share, or an unknown device is
+    /// `Network` before the folder is opened: none of these drives exists, so an open would fail.
+    #[test]
+    fn a_network_or_unknown_drive_answers_before_any_open() {
+        use crate::links::network::Drive;
+        let mounts = Mounts::new(Vec::new(), b"Z")
+            .with_drive(b'Y', Drive::Subst(r"\\host\share".to_owned()))
+            .with_drive(b'V', Drive::Unknown);
+        for path in [r"Z:\m", r"Y:\m", r"V:\m", r"\\host\share\m"] {
+            for label in [false, true] {
+                let got = support(Path::new(path), label, &mounts).unwrap();
+                assert_eq!(got, FolderSupport::Network, "{path}");
+            }
+        }
+    }
 }

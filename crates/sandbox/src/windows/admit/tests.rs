@@ -351,6 +351,9 @@ mod siblings;
 /// The registered matters' fences, resolved and checked.
 mod fences;
 
+/// Paths off the local disks: classified before any file call.
+mod network;
+
 /// Links where the gate reads names unresolved: the agents' folder, the credential link, the
 /// Claude store's files.
 mod links;

@@ -30,6 +30,7 @@ fn a_link_to_a_network_path_leads_outside_unresolved() {
         ("/m/sub", "/Volumes/share"),
         ("/m/nt", r"\??\UNC\host\share"),
         ("/m/vera", r"V:\x"),
+        ("/m/junction", r"\??\C:\m\N\..\x"),
     ]);
     for (link, target) in [
         ("/m/unc", r"\\host\share"),
@@ -42,6 +43,7 @@ fn a_link_to_a_network_path_leads_outside_unresolved() {
         ("/m/up", "/Volumes/share"),
         ("/m/nt", r"\??\UNC\host\share"),
         ("/m/vera", r"V:\x"),
+        ("/m/junction", r"\??\C:\m\N\..\x"),
     ] {
         let got = symlink_finding_with(
             matter,
