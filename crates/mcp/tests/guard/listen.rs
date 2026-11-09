@@ -1,8 +1,9 @@
 //! Listen mode (`browser-guard --listen <socket>`, Unix only), with the stubs: a client connects,
 //! its tool call starts the stub Chrome, its disconnect stops Chrome and the daemon (the profile
 //! stays) and the guard stays up for the next client, whose calls start them again; a second
-//! client while one is connected is refused; a socket path that exists is refused; and the
-//! parent's going ends the guard and removes the socket. Waits poll as `lifecycle.rs`'s do, or
+//! client while one is connected is refused; a socket path that exists is refused; the
+//! parent's going ends the guard and removes the socket, also while a client that stopped reading
+//! holds a write. Waits poll as `lifecycle.rs`'s do, or
 //! read the guard's stderr.
 
 #![cfg(unix)]
@@ -16,7 +17,7 @@ use std::process::Command;
 use serde_json::{Value, json};
 
 use crate::lifecycle::{
-    alive, assert_nothing_left, no_args, pid_in, session_pids, sigkill, within,
+    alive, assert_nothing_left, no_args, pid_in, session_pids, sigkill, throughout, within,
 };
 use crate::support::{
     GUARD, Guard, Scratch, example, guard_args, host_env, open_call, profiles, run, run_files,
@@ -150,15 +151,22 @@ fn a_second_client_is_refused_while_one_is_connected() {
     let mut first = Client::connect(&socket);
     first.request(0, "initialize");
     let mut second = Client::connect(&socket);
+    second.send(&json!({"jsonrpc": "2.0", "id": 5, "method": "initialize"}));
     let refusal = second.read();
-    assert_eq!(refusal["id"], Value::Null, "{refusal}");
+    assert_eq!(
+        refusal["id"], 5,
+        "the refusal answers the request: {refusal}"
+    );
     let message = refusal["error"]["message"].as_str().unwrap_or_default();
     assert!(
         message.contains("in use by another connection"),
         "{refusal}"
     );
     assert!(!message.contains('/'), "a path in {message:?}");
-    assert!(second.next().is_none(), "the second connection stayed open");
+    assert!(
+        second.next().is_none(),
+        "a second answer, or the connection stayed open"
+    );
     first.request(1, "tools/list");
     guard.stderr_until("refused a second connection");
     drop(guard);
@@ -185,19 +193,24 @@ fn a_socket_path_that_exists_is_refused_and_left_alone() {
     );
 }
 
+/// The guard under `parent_stub`, which writes the guard's pid to `guard_pid_file`.
+fn under_parent(scratch: &Scratch, socket: &Path, guard_pid_file: &Path) -> Command {
+    let mut command = Command::new(example("parent_stub"));
+    command
+        .arg(GUARD)
+        .args(listen_args(scratch, socket))
+        .envs(host_env(scratch))
+        .env("PARENT_STUB_CHILD_PID", guard_pid_file);
+    command
+}
+
 /// The test holds the guard's stdin and a client, so only the parent check can end it.
 #[test]
 fn the_parents_going_ends_the_guard_and_removes_the_socket() {
     let scratch = Scratch::new("listen_parent");
     let socket = socket_of(&scratch);
     let guard_pid_file = scratch.path().join("guard.pid");
-    let mut command = Command::new(example("parent_stub"));
-    command
-        .arg(GUARD)
-        .args(listen_args(&scratch, &socket))
-        .envs(host_env(&scratch))
-        .env("PARENT_STUB_CHILD_PID", &guard_pid_file);
-    let parent = Guard::start(command);
+    let parent = Guard::start(under_parent(&scratch, &socket, &guard_pid_file));
     let mut client = Client::connect(&socket);
     client.call("open");
     let guard = pid_in(&guard_pid_file);
@@ -211,4 +224,56 @@ fn the_parents_going_ends_the_guard_and_removes_the_socket() {
     assert_nothing_left(&scratch, pids);
     assert!(client.next().is_none(), "the connection stayed open");
     drop(parent);
+}
+
+/// A client with a call in flight floods lines and never reads, until the guard's write to it
+/// blocks and so does the flood. The parent goes then: the guard's end, which answers the call
+/// in flight, waits at most the write wait (shortened here) on that client, then exits and
+/// removes the socket.
+#[test]
+fn a_client_that_stops_reading_never_holds_up_the_guards_end() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let scratch = Scratch::new("listen_stalled");
+    let socket = socket_of(&scratch);
+    let guard_pid_file = scratch.path().join("guard.pid");
+    let mut command = under_parent(&scratch, &socket, &guard_pid_file);
+    command.env("CLAUSEO_TEST_GUARD_WRITE_MS", "3000");
+    let parent = Guard::start(command);
+    let mut client = Client::connect(&socket);
+    client.call("open");
+    let guard = pid_in(&guard_pid_file);
+    let pids = session_pids(&scratch);
+    // `daemon_stub` never answers it: in flight until the guard's end answers it.
+    client.send(
+        &json!({"jsonrpc": "2.0", "id": "held", "method": "tools/call",
+        "params": {"name": "stub_hold", "arguments": {}}}),
+    );
+    // Each line gets the guard's parse error, which the test never reads.
+    let lines = Arc::new(AtomicUsize::new(0));
+    let flood = {
+        let (stream, lines) = (client.writer.try_clone().unwrap(), Arc::clone(&lines));
+        std::thread::spawn(move || {
+            while (&stream).write_all(b"x\n").is_ok() {
+                lines.fetch_add(1, Ordering::SeqCst);
+            }
+        })
+    };
+    let count = || lines.load(Ordering::SeqCst);
+    assert!(
+        within(|| {
+            let before = count();
+            before > 0 && throughout(std::time::Duration::from_millis(100), || count() == before)
+        }),
+        "the guard never stopped reading"
+    );
+    sigkill(i32::try_from(parent.pid()).unwrap());
+    assert!(within(|| !alive(guard)), "the guard {guard} is held up");
+    assert!(
+        within(|| std::fs::symlink_metadata(&socket).is_err()),
+        "the socket is left"
+    );
+    assert_nothing_left(&scratch, pids);
+    flood.join().unwrap();
+    drop((client, parent));
 }

@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use super::super::ChildStdin;
 
 /// Where every thread that writes to the agent writes: the guard's stdout, or in listen mode
-/// (`listen.rs`) the connected client, swapped for a sink while none is connected.
+/// (`clients.rs`) the connected client, swapped for a sink while none is connected.
 ///
 /// Each client comes with a floor: the browser's generation (`session.rs`) when it connected.
 /// A line from agent-browser goes through [`emit_from`] with the generation of the start that

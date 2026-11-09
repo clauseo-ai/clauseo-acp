@@ -110,7 +110,7 @@ pub(crate) enum Pumped {
 }
 
 /// Agent to child: every line through the filter, then [`route`], until the input ends or the
-/// guard is ending. Over stdio and, in listen mode, for each client (`listen.rs`).
+/// guard is ending. Over stdio and, in listen mode, for each client (`clients.rs`).
 pub(crate) fn pump_lines(
     input: &mut impl BufRead,
     shared: &Arc<Shared>,

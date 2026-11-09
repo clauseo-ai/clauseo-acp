@@ -12,6 +12,7 @@ use std::thread::{self, JoinHandle};
 use serde_json::{Value, json};
 
 use super::{CONNECT_WAIT, Caps, Out, UNAVAILABLE, connect_within, serve};
+use crate::transport::fake::Fake;
 
 /// A folder for the stand-in guard's socket, removed on drop.
 struct Dir(PathBuf);
@@ -275,4 +276,29 @@ fn a_guard_gone_mid_session_answers_what_was_pending_and_the_next_request_reconn
     bridge.send(r#"{"jsonrpc":"2.0","id":"after","method":"tools/call"}"#);
     unavailable(&bridge.read(), &json!("after"));
     bridge.finish();
+}
+
+/// A peer of another user at the socket (a squatter posing as the guard): the bridge sends it
+/// nothing and answers the request itself, as though no guard were there.
+#[test]
+fn a_peer_of_another_user_is_no_guard() {
+    use std::io::Read;
+    let (theirs, ours) = UnixStream::pair().unwrap();
+    let squatter = Mutex::new(Some(ours));
+    let connect = || {
+        let stream = squatter.lock().unwrap().take().unwrap();
+        Ok(Fake {
+            stream,
+            same_user: false,
+        })
+    };
+    let stdin = concat!(r#"{"jsonrpc":"2.0","id":1,"method":"tools/call"}"#, "\n");
+    let written = Arc::new(Mutex::new(Vec::<u8>::new()));
+    let out: Out = Arc::<Mutex<Vec<u8>>>::clone(&written);
+    serve(Cursor::new(stdin), &out, &connect, Caps::GUARD).unwrap();
+    let text = String::from_utf8(written.lock().unwrap().clone()).unwrap();
+    unavailable(&serde_json::from_str(text.trim_end()).unwrap(), &json!(1));
+    let mut sent = Vec::new();
+    (&theirs).read_to_end(&mut sent).unwrap();
+    assert!(sent.is_empty(), "the squatter got {sent:?}");
 }
