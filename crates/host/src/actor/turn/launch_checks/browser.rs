@@ -118,8 +118,8 @@ impl BrowserPrep {
     /// `BrowserBlockedByPolicy` or `BrowserPolicyUnreadable`. A downloaded Chrome for Testing
     /// the pins refuse leaves both out too, with `BrowserOutOfDate`, `BrowserListUnavailable` or
     /// `BrowserListExpired`; one they take carries [`ToolNotice::BrowserListOld`] when they are
-    /// over 14 days old. A missing sidecar leaves both out, with a warning (a development build has no
-    /// agent-browser); a failed claim leaves the claims out. Either way the entry drops with
+    /// over 14 days old. A missing sidecar leaves both out, with a warning (a development build has
+    /// no agent-browser); a failed claim leaves the claims out. Either way the entry drops with
     /// `BrowserNotInstalled`. Registry, file system and socket calls: off the actor.
     pub(super) fn prepare(self, data: &Path, session_id: &str) -> Prepared {
         if matches!(self.chrome, ChromeSearch::Skip) {
