@@ -365,8 +365,10 @@ build 26100):
     watches, and as many held), or any watch's overflow, loses it for 10 s, and a state or temp
     watch that can't be armed, gets only the plain records (a network share, such as AppData
     redirected to a server: no file IDs, so it notes nothing), can't start its thread, panics or
-    breaks loses it for the session; while lost, every folder that looks just made and is gone
-    before its scan counts, those held when it was lost too. The state and temp folders get watches
+    breaks loses it for the session, and the first loss of a session tells the lawyer once, on the
+    denial pipe and on the outer's stderr (`git_watch::PAIRING_LOST`); while lost, every folder
+    that looks just made and is gone before its scan counts, those held when it was lost too. The
+    state and temp folders get watches
     of their own (recursive, extended records, names only: `FILE_NOTIFY_CHANGE_FILE_NAME` and
     `FILE_NOTIFY_CHANGE_DIR_NAME`, so the agent's writes there don't overflow them) that only note
     file IDs: they move nothing and end nothing, and one that fails doesn't refuse the launch.
@@ -1711,6 +1713,24 @@ leaves that profile, both naming the part.
   same matter can't open one by name either. Before it sends a byte it checks each client is
   the inner runner's process, and that process's token user the pool user. The launch goes over
   `ctl`, never the command line, which `CreateProcessWithLogonW` caps at 1024 characters.
+- **The runner's log.** The outer runner, as the lawyer, writes its `tracing` warnings and errors
+  from Clauseo's own crates to `<data_dir>\sandbox\run\runner.log`
+  (`windows/runner/log_file.rs`), one line each with the time, level, target and the runner's
+  process ID. The run folder's protected DACL (the lawyer, `SYSTEM` and `Administrators` only,
+  nothing inherited) keeps the agent out: the pool user can neither read nor write it. The inner
+  runner keeps no file; its lines reach the outer over `ctl`. The file is checked as the run
+  folder's other files are (`write::check_owned_file`: another owner's file taken back; a link
+  or second hard link left there is removed, the name alone) and opened as itself
+  (`FILE_FLAG_OPEN_REPARSE_POINT`). It rotates into `runner.1.log` before it would pass 1 MB,
+  so the two hold 2 MB at most, and a line is cut at 8 KB; a rotation that fails (a viewer
+  holding `runner.1.log`) empties `runner.log` and tries again at the next rotation. It never
+  holds matter content, a path in the matter, a name the agent chose or a secret: a message is
+  kept only as a literal, and the `log-literals` xtask check fails any `warn!` or `error!`
+  under `crates/sandbox/src/windows/` (but `windows/setup/` and tests) whose message is
+  formatted, since the formatter can't tell a literal from a formatted message; one holding `\`
+  or `/` is withheld too. Numbers and `bool`s are kept; a string field only when its name is
+  `cause`, `code`, `kind` or `what` (the code's own words) and it holds no path separator;
+  any other field, an error's text among them, is written `name=<dropped>`.
 - **The environment.** `USERPROFILE`, `HOME`, `HOMEDRIVE`/`HOMEPATH`, `APPDATA`, `LOCALAPPDATA`
   and `TEMP`/`TMP` point under the state folder (the session's temp folder when the policy has
   one). A variable that points into the lawyer's profile outside the paths the launch grants is
