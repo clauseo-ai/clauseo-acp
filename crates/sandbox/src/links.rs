@@ -1,7 +1,6 @@
 //! The one walk of the matter per launch: links that lead outside it, and every `.git`, other
 //! [`PROTECTED_AT_ANY_DEPTH`] name and repository-shaped folder in it.
 
-use std::cell::OnceCell;
 use std::collections::BTreeMap;
 use std::fs::{self, FileType};
 use std::io;
@@ -14,7 +13,11 @@ use crate::{Error, PROTECTED_AT_ANY_DEPTH};
 
 pub(crate) mod network;
 
-use network::{Mounts, is_network_path, lexical, link_to_network, read_if_link};
+use network::{Mounts, Off, classify, link_to_network, read_if_link};
+
+/// The most git dirs (folders holding a `HEAD`) one walk reads a `commondir` in; past it the
+/// launch is refused, so a matter can't make the launch read without end.
+pub(crate) const GIT_DIRS_MAX: usize = 10_000;
 
 /// A `.git` file larger than this is not read for its `gitdir:` line; git writes one line.
 const GIT_FILE_MAX: u64 = 64 * 1024;
@@ -61,6 +64,9 @@ pub struct MatterScan {
     /// The `commondir` names beside a `HEAD` that are links, sorted: git follows one, the walk
     /// does not, so the policy refuses the launch.
     commondir_links: Vec<PathBuf>,
+    /// The paths those name on a device the launch doesn't know (neither a local disk nor a
+    /// network one), sorted: never touched, and the policy refuses the launch.
+    git_dirs_unknown: Vec<PathBuf>,
     bare: Vec<PathBuf>,
     nested: Vec<PathBuf>,
     /// Files with more than one name, every name of which is in the matter: each group's
@@ -76,6 +82,7 @@ pub(crate) struct ScanParts {
     pub(crate) git_dirs: Vec<PathBuf>,
     pub(crate) git_dirs_outside: Vec<PathBuf>,
     pub(crate) commondir_links: Vec<PathBuf>,
+    pub(crate) git_dirs_unknown: Vec<PathBuf>,
     pub(crate) bare: Vec<PathBuf>,
     pub(crate) nested: Vec<PathBuf>,
     pub(crate) linked: Vec<Vec<PathBuf>>,
@@ -133,6 +140,7 @@ impl MatterScan {
             git_dirs: self.git_dirs,
             git_dirs_outside: self.git_dirs_outside,
             commondir_links: self.commondir_links,
+            git_dirs_unknown: self.git_dirs_unknown,
             bare: self.bare,
             nested: self.nested,
             linked: self.linked,
@@ -171,23 +179,53 @@ struct Walk {
     folders: Vec<(PathBuf, bool)>,
     /// Files with a link count above 1, by (device, inode).
     hard: BTreeMap<(u64, u64), Names>,
-    /// The mount table, read the first time a `gitdir:` or `commondir` line is.
-    mounts: OnceCell<Mounts>,
+    /// The mount table, the matter's own mount counted local ([`Mounts::trusting`]).
+    mounts: Mounts,
+    /// The network mount points inside the matter: folders the walk never enters.
+    network_inside: Vec<PathBuf>,
+    /// How many more git dirs' `commondir` the walk may read.
+    git_dirs_left: usize,
+    /// Whether a git dir past [`GIT_DIRS_MAX`] was met.
+    over_cap: bool,
 }
 
 /// The one walk of `matter`: [`scan_links`]'s findings and every `.git`, with the folders the
 /// `.git` files name, and every other [`PROTECTED_AT_ANY_DEPTH`] name. A sub-folder that
 /// cannot be read is skipped with a warning: the agent runs as the same user, so it cannot read
 /// it either (and a file whose other name is in it counts as linked outside). Fails if `matter`
-/// cannot be resolved or listed.
+/// cannot be resolved or listed, or the mount table can't be read, and refuses past
+/// [`GIT_DIRS_MAX`] git dirs. A network mount inside the matter is never entered.
 pub fn scan_matter(matter: &Path) -> Result<MatterScan, Error> {
+    let mounts = Mounts::current();
+    if mounts.unread {
+        return Err(Error::Probe(io::Error::other(
+            "the mount list could not be read",
+        )));
+    }
+    scan_matter_with(matter, mounts, GIT_DIRS_MAX)
+}
+
+/// [`scan_matter`] with this mount table and cap.
+fn scan_matter_with(matter: &Path, mounts: Mounts, cap: usize) -> Result<MatterScan, Error> {
     let matter = dunce::canonicalize(matter).map_err(Error::Probe)?;
+    let mounts = mounts.trusting(&matter);
     let mut walk = Walk {
         folders: vec![(matter.clone(), false)],
-        ..Walk::default()
+        network_inside: mounts.network_inside(&matter),
+        mounts,
+        git_dirs_left: cap,
+        scan: MatterScan::default(),
+        hard: BTreeMap::new(),
+        over_cap: false,
     };
     let mut first = true;
     while let Some((folder, in_git)) = walk.folders.pop() {
+        if walk.over_cap {
+            return Err(Error::Policy(format!(
+                "the matter holds more than {cap} git folders: {}",
+                matter.display()
+            )));
+        }
         let entries = match fs::read_dir(&folder) {
             Ok(entries) => entries,
             Err(error) if first => return Err(Error::Probe(error)),
@@ -215,6 +253,12 @@ pub fn scan_matter(matter: &Path) -> Result<MatterScan, Error> {
             }
         }
     }
+    if walk.over_cap {
+        return Err(Error::Policy(format!(
+            "the matter holds more than {cap} git folders: {}",
+            matter.display()
+        )));
+    }
     let Walk { mut scan, hard, .. } = walk;
     let mut outside = Vec::new();
     for (_, mut file) in hard {
@@ -239,6 +283,7 @@ pub fn scan_matter(matter: &Path) -> Result<MatterScan, Error> {
     scan.git_dirs_outside.sort();
     scan.git_dirs_outside.dedup();
     scan.commondir_links.sort();
+    scan.git_dirs_unknown.sort();
     scan.bare.sort();
     scan.bare.dedup();
     scan.nested.sort();
@@ -262,7 +307,7 @@ impl Walk {
             self.bare_repo(matter, &path);
         }
         if kind.is_symlink() {
-            let found = symlink_finding(matter, &path, link_kind(kind), self.mounts());
+            let found = symlink_finding(matter, &path, link_kind(kind), &self.mounts);
             match found {
                 Some(finding) => self.scan.links.push(finding),
                 // A `.git` link to a folder in the matter: that folder is the repository.
@@ -280,11 +325,11 @@ impl Walk {
             if is_git {
                 self.scan.git.push(path.clone());
             }
-            self.folders.push((path, is_git));
+            self.enter(path, is_git);
         } else if kind.is_file() {
             if is_git {
                 self.scan.git.push(path.clone());
-                let named = git_dir_named(matter, &path, self.mounts());
+                let named = git_dir_named(matter, &path, &self.mounts);
                 self.note(named);
             }
             self.hard_link(path, entry);
@@ -308,6 +353,11 @@ impl Walk {
     /// `config` from the folder it names. A `commondir` that is a link is noted for the policy
     /// to refuse, unread. Names compare by [`opens_as`]: one listing of the folder per `HEAD`.
     fn commondir(&mut self, matter: &Path, folder: &Path) {
+        let Some(left) = self.git_dirs_left.checked_sub(1) else {
+            self.over_cap = true;
+            return;
+        };
+        self.git_dirs_left = left;
         let Ok(entries) = fs::read_dir(folder) else {
             return;
         };
@@ -324,7 +374,7 @@ impl Walk {
                     else {
                         continue;
                     };
-                    let named = dir_named(matter, folder, &line, self.mounts());
+                    let named = dir_named(matter, folder, &line, &self.mounts);
                     self.note(named);
                 }
                 _ => {}
@@ -343,15 +393,19 @@ impl Walk {
             self.commondir(matter, folder);
         }
         if kind.is_dir() {
-            self.folders.push((path, true));
+            self.enter(path, true);
         } else if kind.is_file() {
             self.hard_link(path, entry);
         }
     }
 
-    /// The mount table, read once per walk.
-    fn mounts(&self) -> &Mounts {
-        self.mounts.get_or_init(Mounts::current)
+    /// Lists the folder `path` later, unless it is a network mount point.
+    fn enter(&mut self, path: PathBuf, in_git: bool) {
+        if self.network_inside.iter().any(|point| same(point, &path)) {
+            tracing::warn!("the matter walk did not enter a network mount in the matter");
+            return;
+        }
+        self.folders.push((path, in_git));
     }
 
     /// Adds where a `gitdir:` or `commondir` line leads to the scan.
@@ -359,6 +413,7 @@ impl Walk {
         match named {
             Some(Named::Inside(dir)) => self.scan.git_dirs.push(dir),
             Some(Named::Outside(dir)) => self.scan.git_dirs_outside.push(dir),
+            Some(Named::Unknown(path)) => self.scan.git_dirs_unknown.push(path),
             None => {}
         }
     }
@@ -409,7 +464,7 @@ fn symlink_finding_with(
             target: Some(target),
         })
     };
-    if let Some(network) = link_to_network(path, mounts, &read) {
+    if let Some((network, _)) = link_to_network(path, mounts, &read) {
         tracing::warn!("the matter walk did not follow a link to a network path");
         return finding(network);
     }
@@ -464,6 +519,8 @@ enum Named {
     Inside(PathBuf),
     /// A folder outside the matter.
     Outside(PathBuf),
+    /// A path on a device the launch doesn't know, as far as it was read: never touched.
+    Unknown(PathBuf),
 }
 
 /// Where a `.git` file's `gitdir:` line leads, by [`dir_named`].
@@ -474,36 +531,53 @@ fn git_dir_named(matter: &Path, git_file: &Path, mounts: &Mounts) -> Option<Name
 }
 
 /// Where the folder `line` names (absolute, or relative to `base`) leads, canonical, if it
-/// exists: a `gitdir:` line or a `commondir` file's. By [`named_with`] and canonicalize.
+/// exists: a `gitdir:` line or a `commondir` file's. By [`named_with`] and the file system.
 fn dir_named(matter: &Path, base: &Path, line: &str, mounts: &Mounts) -> Option<Named> {
-    named_with(matter, base, line, mounts, |path| dunce::canonicalize(path))
+    named_with(matter, base, line, mounts, read_if_link, |path| {
+        dunce::canonicalize(path)
+    })
 }
 
-/// [`dir_named`] with `resolve` in place of canonicalize, its one file call. A network path
-/// ([`is_network_path`]) is skipped before `resolve` runs, with a warning that leaves the path
-/// out: as written, or where it leads by text once joined to `base`, unless that is in the
-/// matter (whose own volume the walk reads anyway). The matter itself is left out too: naming
-/// it would make the whole matter read-only.
+/// [`dir_named`] with `read` and `resolve` in place of reading a link and canonicalize. The
+/// path is classified as written, then name by name and link by link ([`link_to_network`]),
+/// and `resolve` runs only once every name and link on the way is local. A network path is
+/// skipped with a warning that leaves the path out; an unknown one is [`Named::Unknown`]. The
+/// matter itself is left out too: naming it would make the whole matter read-only.
 fn named_with(
     matter: &Path,
     base: &Path,
     line: &str,
     mounts: &Mounts,
+    read: impl Fn(&Path) -> io::Result<Option<PathBuf>>,
     resolve: impl FnOnce(&Path) -> io::Result<PathBuf>,
 ) -> Option<Named> {
-    let named = Path::new(line.trim());
-    let joined = if named.is_absolute() {
-        named.to_owned()
-    } else {
-        base.join(named)
+    let written = Path::new(line.trim());
+    let off = match classify(written, mounts) {
+        network::Place::Local(named) => {
+            // A `subst` drive's mapping is a whole path, whatever this platform calls absolute.
+            let joined = if named.is_absolute() || named != written {
+                named
+            } else {
+                base.join(named)
+            };
+            match link_to_network(&joined, mounts, read) {
+                None => return resolved(matter, resolve(&joined).ok()?),
+                Some(stop) => stop,
+            }
+        }
+        network::Place::Off(off) => (written.to_owned(), off),
     };
-    let plain = lexical(&joined);
-    if is_network_path(named, mounts) || (!under(&plain, matter) && is_network_path(&plain, mounts))
-    {
-        tracing::warn!("the matter walk skipped a git folder named on a network path");
-        return None;
+    match off {
+        (_, Off::Network) => {
+            tracing::warn!("the matter walk skipped a git folder named on a network path");
+            None
+        }
+        (path, Off::Unknown) => Some(Named::Unknown(path)),
     }
-    let dir = resolve(&joined).ok()?;
+}
+
+/// [`Named`] for the canonical `dir`; the matter itself is `None`.
+fn resolved(matter: &Path, dir: PathBuf) -> Option<Named> {
     if same(&dir, matter) {
         None
     } else if under(&dir, matter) {

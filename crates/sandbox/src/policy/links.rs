@@ -21,21 +21,32 @@ use std::path::{Path, PathBuf};
 
 use super::build::{beneath_existing, refuse};
 use super::names::{Keys, path_key};
-use super::{PathRule, instruction_file, same, under};
+use super::{ClaudeStore, PathRule, instruction_file, same, under};
 use crate::links::ScanParts;
 use crate::links::network::{Mounts, is_network_path};
 use crate::{Error, LinkFinding, LinkKind};
 
+/// The places the agent can write besides the state, temp, notes and allowed folders, for
+/// [`check_git_dirs`]: the browser socket folder, the hidden paths (they hold the other matters'
+/// folders, which the agent can create in on Windows; the rest are counted too, which can only
+/// refuse more), and the Claude store's lock folders, which the agent can create.
+pub(super) struct Writable<'a> {
+    pub(super) socket: Option<&'a Path>,
+    pub(super) hidden: &'a [PathBuf],
+    pub(super) claude_store: Option<&'a ClaudeStore>,
+}
+
 /// Refuses a scan with a `commondir` beside a `HEAD` that is a link (git follows it, the walk
-/// doesn't, so the folder it names would get no deny), or a `gitdir:` or `commondir` naming a
-/// folder outside the matter inside one the agent can write (`writable`, and the browser socket
-/// folder `socket`), where it could write the repository's `config` and the plan has no
-/// read-only rule to stop it. A folder outside the matter that the agent can't write needs
-/// nothing: the jail denies it.
+/// doesn't, so the folder it names would get no deny); with a `gitdir:` or `commondir` path on
+/// a device the launch doesn't know (it may be one the agent can write); or with one naming a
+/// folder outside the matter that is inside a place the agent can write (`writable` and
+/// `others`) or holds one (git reads `config`, `hooks/` and `info/` beneath it), where the
+/// agent could write what git reads and the plan has no read-only rule to stop it. A folder
+/// outside the matter that the agent can't write needs nothing: the jail denies it.
 pub(super) fn check_git_dirs(
     parts: &ScanParts,
     writable: &[&Path],
-    socket: Option<&Path>,
+    others: &Writable<'_>,
 ) -> Result<(), Error> {
     if let Some(link) = parts.commondir_links.first() {
         return refuse(format!(
@@ -43,16 +54,28 @@ pub(super) fn check_git_dirs(
             link.display()
         ));
     }
+    if let Some(path) = parts.git_dirs_unknown.first() {
+        return refuse(format!(
+            "a git folder's commondir or gitdir: names a drive the launch can't check: {}",
+            path.display()
+        ));
+    }
+    let locks = others
+        .claude_store
+        .map(ClaudeStore::lock_folders)
+        .unwrap_or_default();
+    let places: Vec<&Path> = writable
+        .iter()
+        .copied()
+        .chain(others.socket)
+        .chain(others.hidden.iter().map(PathBuf::as_path))
+        .chain(locks.iter().map(PathBuf::as_path))
+        .collect();
     for dir in &parts.git_dirs_outside {
-        if let Some(place) = writable
-            .iter()
-            .copied()
-            .chain(socket)
-            .find(|p| under(dir, p))
-        {
+        if let Some(place) = places.iter().find(|p| under(dir, p) || under(p, dir)) {
             return refuse(format!(
-                "a git folder's commondir or gitdir: may not name a folder the agent can write: \
-                 {} in {}",
+                "a git folder's commondir or gitdir: may not name a folder the agent can write \
+                 in or under: {} and {}",
                 dir.display(),
                 place.display()
             ));
@@ -115,9 +138,11 @@ pub(super) fn canonical_findings(
                 canonical.display()
             ));
         }
-        // A network target stays as written: resolving it would connect to the server.
+        // A network target stays as written: resolving it would connect to the server. So does
+        // every target when the mount table can't be read.
         let target = target.map(|t| {
-            if is_network_path(&t, mounts.get_or_init(Mounts::current)) {
+            let table = mounts.get_or_init(Mounts::current);
+            if table.unread || is_network_path(&t, table) {
                 t
             } else {
                 beneath_existing(&t, "link target").unwrap_or(t)

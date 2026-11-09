@@ -136,58 +136,6 @@ fn a_junctioned_worktrees_folder_in_a_git_dir_is_not_read() {
     nothing_read_through(&dir);
 }
 
-/// A resolver that fails the test: the walk must not reach the file system for the path.
-fn never(path: &Path) -> io::Result<PathBuf> {
-    panic!("a network path was resolved: {}", path.display())
-}
-
-/// A server, device or remote-drive path as written, or one under a network mount once joined
-/// to its folder, is skipped before the walk's one file call on it.
-#[test]
-fn a_network_path_is_skipped_before_any_file_call() {
-    let matter = Path::new("/m");
-    let base = Path::new("/m/.git/worktrees/wt");
-    let mounts = Mounts::new(vec![(PathBuf::from("/Volumes/share"), true)], b"Z");
-    for line in [
-        r"\\host\share\repo",
-        "//host/share/repo",
-        r"\\?\UNC\host\share",
-        r"\\.\pipe\x",
-        r"Z:\repo\.git",
-        "/Volumes/share/repo",
-        "../../../../Volumes/share/repo",
-    ] {
-        assert_eq!(
-            named_with(matter, base, line, &mounts, never),
-            None,
-            "{line}"
-        );
-    }
-}
-
-/// A local path goes to the resolver, as does one in a matter that is itself on a network
-/// mount (the walk reads that volume anyway).
-#[test]
-fn a_local_path_is_resolved() {
-    let matter = Path::new("/m");
-    let base = Path::new("/m/.git/worktrees/wt");
-    let echo = |path: &Path| Ok(lexical(path));
-    let none = Mounts::default();
-    assert_eq!(
-        named_with(matter, base, "../../../shared", &none, echo),
-        Some(Named::Inside(PathBuf::from("/m/shared")))
-    );
-    assert_eq!(
-        named_with(matter, base, "../../../../elsewhere", &none, echo),
-        Some(Named::Outside(PathBuf::from("/elsewhere")))
-    );
-    let matter_on_share = Mounts::new(vec![(PathBuf::from("/m"), true)], &[]);
-    assert_eq!(
-        named_with(matter, base, "../../../shared", &matter_on_share, echo),
-        Some(Named::Inside(PathBuf::from("/m/shared")))
-    );
-}
-
 /// The walk skips a network `gitdir:` and network `commondir` files unread, in a `.git` or
 /// beside a `HEAD` outside one.
 #[test]

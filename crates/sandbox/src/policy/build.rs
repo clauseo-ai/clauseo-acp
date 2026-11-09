@@ -6,7 +6,9 @@ use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
-use super::links::{canonical_findings, check_git_dirs, covered_targets, fit_budget, split_linked};
+use super::links::{
+    Writable, canonical_findings, check_git_dirs, covered_targets, fit_budget, split_linked,
+};
 use super::names::{Keys, path_key};
 use super::{
     ClaudeStore, Loopback, PROTECTED_AT_ANY_DEPTH, PROTECTED_NAMES, PathRule, Policy,
@@ -37,20 +39,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
     if let Some(notes) = &notes {
         check_notes(notes, &matter, &hidden)?;
     }
-    let credential_link = b
-        .credential_link
-        .as_deref()
-        .map(|p| folder_and_name(p, "credential link"))
-        .transpose()?;
-    if let Some(link) = &credential_link
-        && (!under(link, &state) || same(link, &state))
-    {
-        return refuse(format!(
-            "the credential link must be inside the state folder {}: {}",
-            state.display(),
-            link.display()
-        ));
-    }
+    let credential_link = credential_link(b.credential_link.as_deref(), &state)?;
     let claude_store = b
         .claude_store
         .as_deref()
@@ -88,7 +77,12 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
     allowed.extend(tmpdir.as_deref());
     allowed.extend(allowed_folders.iter().map(PathBuf::as_path));
     allowed.extend(notes.as_deref());
-    check_git_dirs(&parts, &allowed, b.browser_socket_dir.as_deref())?;
+    let others = Writable {
+        socket: b.browser_socket_dir.as_deref(),
+        hidden: &hidden,
+        claude_store: claude_store.as_ref(),
+    };
+    check_git_dirs(&parts, &allowed, &others)?;
     allowed.extend(runtime.iter().map(PathBuf::as_path));
     allowed.extend(read.iter().map(PathBuf::as_path));
     let working_trees = working_trees(&parts.git);
@@ -143,6 +137,23 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
         link_folders,
         read_only_in_matter,
     })
+}
+
+/// The credential link, by [`folder_and_name`], which must be inside the state folder.
+fn credential_link(p: Option<&Path>, state: &Path) -> Result<Option<PathBuf>, Error> {
+    let link = p
+        .map(|p| folder_and_name(p, "credential link"))
+        .transpose()?;
+    if let Some(link) = &link
+        && (!under(link, state) || same(link, state))
+    {
+        return refuse(format!(
+            "the credential link must be inside the state folder {}: {}",
+            state.display(),
+            link.display()
+        ));
+    }
+    Ok(link)
 }
 
 /// `extra` added to `links`, each unless a finding already there names its path: `found` holds

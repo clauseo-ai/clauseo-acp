@@ -2,31 +2,6 @@
 
 use super::*;
 
-/// A fake file system of `links` (link, target as written); any other path is not a link. It
-/// fails the test when asked about a network path.
-fn fake(links: &[(&str, &str)]) -> impl Fn(&Path) -> io::Result<Option<PathBuf>> {
-    let links: Vec<(PathBuf, PathBuf)> = links
-        .iter()
-        .map(|(link, target)| (PathBuf::from(link), PathBuf::from(target)))
-        .collect();
-    move |path: &Path| {
-        let text = path.to_string_lossy();
-        assert!(
-            !text.starts_with(r"\\") && !text.starts_with("//") && !text.starts_with("/Volumes"),
-            "a network path was looked at: {text}"
-        );
-        Ok(links
-            .iter()
-            .find(|(link, _)| link == path)
-            .map(|(_, target)| target.clone()))
-    }
-}
-
-/// A resolver that fails the test: canonicalize must not run on a link to the network.
-fn never(path: &Path) -> io::Result<PathBuf> {
-    panic!("a link to a network path was resolved: {}", path.display())
-}
-
 fn found(link: &str, target: &str) -> LinkFinding {
     LinkFinding {
         path: PathBuf::from(link),
@@ -41,7 +16,8 @@ fn found(link: &str, target: &str) -> LinkFinding {
 #[test]
 fn a_link_to_a_network_path_leads_outside_unresolved() {
     let matter = Path::new("/m");
-    let mounts = Mounts::new(vec![(PathBuf::from("/Volumes/share"), true)], b"Z");
+    let mounts = Mounts::new(vec![(PathBuf::from("/Volumes/share"), true)], b"Z")
+        .with_drive(b'V', network::Drive::Unknown);
     let read = fake(&[
         ("/m/unc", r"\\host\share"),
         ("/m/slashes", "//host/share"),
@@ -52,6 +28,8 @@ fn a_link_to_a_network_path_leads_outside_unresolved() {
         ("/m/hop", "slashes"),
         ("/m/up", "../m/sub/x"),
         ("/m/sub", "/Volumes/share"),
+        ("/m/nt", r"\??\UNC\host\share"),
+        ("/m/vera", r"V:\x"),
     ]);
     for (link, target) in [
         ("/m/unc", r"\\host\share"),
@@ -62,6 +40,8 @@ fn a_link_to_a_network_path_leads_outside_unresolved() {
         ("/m/mount", "/Volumes/share/repo"),
         ("/m/hop", "//host/share"),
         ("/m/up", "/Volumes/share"),
+        ("/m/nt", r"\??\UNC\host\share"),
+        ("/m/vera", r"V:\x"),
     ] {
         let got = symlink_finding_with(
             matter,

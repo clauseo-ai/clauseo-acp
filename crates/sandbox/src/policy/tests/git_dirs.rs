@@ -85,3 +85,70 @@ fn a_commondir_link_is_refused() {
     let link = canon(&w.at("matter")).join(".git/commondir");
     refused(w.builder().build(), "commondir may not be a link", &link);
 }
+
+/// A target that holds a place the agent can write refuses too: git reads `hooks/` and `info/`
+/// beneath it. So do a target in a hidden path (other matters' folders) and one in the Claude
+/// store's lock folders.
+#[test]
+fn a_target_holding_or_in_another_writable_place_is_refused() {
+    let rule = "may not name a folder the agent can write";
+    let (w, target) = naming("commondir-holds", "other");
+    w.dir.dir("other/sub");
+    let built = w.builder().allowed_folder(w.at("other/sub")).build();
+    refused(built, rule, &target);
+
+    let (w, target) = naming("commondir-hidden", "data/agent-state/m2");
+    refused(w.builder().hidden(w.at("data")).build(), rule, &target);
+
+    let (w, target) = naming("commondir-lock", "home/.claude/.oauth_refresh.lock");
+    let built = w.builder().claude_store(w.at("home/.claude")).build();
+    refused(built, rule, &target);
+}
+
+/// The parts of a scan with only these git-dir findings.
+fn parts(outside: &[&str], unknown: &[&str]) -> crate::links::ScanParts {
+    let paths = |list: &[&str]| list.iter().map(PathBuf::from).collect();
+    crate::links::ScanParts {
+        links: Vec::new(),
+        git: Vec::new(),
+        git_dirs: Vec::new(),
+        git_dirs_outside: paths(outside),
+        commondir_links: Vec::new(),
+        git_dirs_unknown: paths(unknown),
+        bare: Vec::new(),
+        nested: Vec::new(),
+        linked: Vec::new(),
+    }
+}
+
+/// A `subst` drive onto the session's temp folder is caught as agent-writable: the walk
+/// gives its mapped path (`links::tests::named::a_subst_drive_leads_where_it_maps`), and a
+/// path on an unknown device refuses the launch.
+#[test]
+fn a_subst_onto_the_temp_folder_and_an_unknown_device_are_refused() {
+    let others = crate::policy::links::Writable {
+        socket: None,
+        hidden: &[],
+        claude_store: None,
+    };
+    let tmp = [Path::new("C:/data/run/s1/tmp")];
+    let found = crate::policy::links::check_git_dirs(
+        &parts(&["C:/data/run/s1/tmp/repo"], &[]),
+        &tmp,
+        &others,
+    );
+    refused(
+        found,
+        "may not name a folder the agent can write",
+        Path::new("repo"),
+    );
+    let found =
+        crate::policy::links::check_git_dirs(&parts(&["C:/other/repo"], &[]), &tmp, &others);
+    assert!(found.is_ok(), "{found:?}");
+    let found = crate::policy::links::check_git_dirs(&parts(&[], &[r"V:\repo"]), &tmp, &others);
+    refused(
+        found,
+        "names a drive the launch can't check",
+        Path::new(r"V:\repo"),
+    );
+}
