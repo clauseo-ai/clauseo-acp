@@ -275,9 +275,9 @@ pub use clock::{Clock, Now, SystemClock};
 #[cfg(feature = "test-support")]
 pub use config::TestProxy;
 pub use config::{
-    CAP_MIN_IDLE, DEFAULT_TREE_WAIT, Detect, EgressProxy, HostConfig, IDLE_LIMIT, LIVE_AGENTS,
-    NoProfile, PackRequest, ProfileHook, Sandbox, SandboxLaunch, SandboxLaunchers, SessionEnd,
-    SessionKey,
+    CAP_MIN_IDLE, DEFAULT_TREE_WAIT, Detect, DetectBounds, EgressProxy, HostConfig, IDLE_LIMIT,
+    LIVE_AGENTS, NoProfile, PackRequest, ProfileHook, Sandbox, SandboxLaunch, SandboxLaunchers,
+    SessionEnd, SessionKey,
 };
 pub use encode::EncodedEvent;
 pub use error::Error;

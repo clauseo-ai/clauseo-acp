@@ -200,6 +200,7 @@ fn no_seam_is_not_built_with_no_retry() {
             asks_admin: false,
             set_up_at: None,
             set_up_state: None,
+            no_answer: false,
         }
     );
 }
@@ -492,5 +493,70 @@ fn a_detection_past_its_wait_is_a_failed_probe() {
         Protection::Protected {
             tier: ProtectionTier::B,
         }
+    );
+}
+
+/// #813's second review, 1 and 2: a `state()` that hangs is inside the one bounded snapshot,
+/// so the caller gets a failed probe in time; a second request while it hangs joins its thread.
+#[test]
+fn a_hung_state_is_one_bounded_snapshot_thread() {
+    struct Hangs(std::sync::Mutex<std::sync::mpsc::Receiver<()>>);
+    impl clauseo_sandbox::SandboxSetup for Hangs {
+        fn state(&self) -> SetupState {
+            let _released = self.0.lock().map(|held| held.recv());
+            SetupState::Ready
+        }
+        fn run(&self) -> Result<(), clauseo_sandbox::SetupError> {
+            Ok(())
+        }
+        fn forget_matter(
+            &self,
+            _matter: &clauseo_protocol::MatterId,
+        ) -> Result<(), clauseo_sandbox::SetupError> {
+            Ok(())
+        }
+        fn remove(&self) -> Result<(), clauseo_sandbox::SetupError> {
+            Ok(())
+        }
+    }
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    let tier_b = Detection {
+        tier: Tier::B,
+        reason: None,
+    };
+    let sandbox = crate::config::Sandbox::new(
+        std::sync::Arc::new(move || tier_b.clone()),
+        Some(std::sync::Arc::new(Hangs(std::sync::Mutex::new(held)))),
+    );
+    let wait = std::time::Duration::from_millis(50);
+    for _ in 0..2 {
+        let observed = observe_within(Some(&sandbox), std::path::Path::new("data"), wait);
+        assert!(observed.no_answer);
+        assert_eq!(
+            observed.set_up_state,
+            Some(not(NotProtectedCause::SetUpFailed))
+        );
+        assert!(!observed.asks_admin);
+    }
+    let started = || {
+        sandbox
+            .bounds
+            .slot
+            .started
+            .load(std::sync::atomic::Ordering::SeqCst)
+    };
+    assert_eq!(started(), 1, "the second request joined the first's thread");
+    drop(release);
+    let observed = observe_within(
+        Some(&sandbox),
+        std::path::Path::new("data"),
+        std::time::Duration::from_secs(5),
+    );
+    assert!(!observed.no_answer);
+    assert_eq!(
+        observed.set_up_state,
+        Some(Protection::Protected {
+            tier: ProtectionTier::B,
+        })
     );
 }

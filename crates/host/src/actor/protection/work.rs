@@ -7,18 +7,24 @@
 //! - A second `RetryProtection` while a set-up or a check runs joins it: the same answer, and no
 //!   second run. A second `RemoveSandboxSetup` joins a removal the same way. One kind while the
 //!   other runs is `command.invalid` at once.
-//! - After the work the thread detects again and reads the set-up's state; the actor takes both
-//!   into its cache, sends the view and the matters' `ProtectionChanged`, then answers.
+//! - After the work the thread takes one bounded snapshot (`snapshot.rs`: the detection, the
+//!   set-up's state and its time, joining a snapshot thread still out); the actor takes it into
+//!   its cache, sends the view and the matters' `ProtectionChanged`, then answers.
+//! - With launchers, a first snapshot that gave no answer gets one automatic check
+//!   ([`recheck`]), which no command waits on and a `RetryProtection` joins.
 //! - Shutdown never waits for the thread (the elevated step is a process of its own): the held
 //!   answers get `Closed`, and the thread's late result is dropped.
 
 use clauseo_protocol::{CommandId, CommandOutcome, ErrorCode, ProtectionWork};
 use clauseo_sandbox::{SandboxSetup, SetupError};
 
-use super::{Observed, observe};
+use std::time::Duration;
+
+use super::{Observed, observe_within};
 use crate::actor::Actor;
 use crate::actor::commands::CommandCtx;
 use crate::actor::input::Input;
+use crate::config::Sandbox;
 use crate::error::Error;
 
 /// The thread's name.
@@ -120,10 +126,39 @@ fn begin(actor: &mut Actor, id: CommandId, asked: Asked) -> Result<(), Error> {
         Asked::Retry => ProtectionWork::Check,
         Asked::Remove => ProtectionWork::Remove,
     };
-    let setup = sandbox.setup.clone();
-    if work == ProtectionWork::Remove && setup.is_none() {
+    if work == ProtectionWork::Remove && sandbox.setup.is_none() {
         return Err(invalid("this computer's sandbox has no set-up to remove"));
     }
+    let wait = sandbox.bounds.detect_wait;
+    start(actor, sandbox, work, vec![id], wait)
+}
+
+/// The one automatic check after a first snapshot that gave no answer (`protection::start`,
+/// with launchers): no command waits on it, and its snapshot waits `retry_wait`, joining the
+/// first one's thread if it is still out. A `RetryProtection` meanwhile joins it.
+pub(super) fn recheck(actor: &mut Actor) {
+    let Some(sandbox) = actor.protection.sandbox.clone() else {
+        return;
+    };
+    if actor.protection.running.is_some() {
+        return;
+    }
+    let wait = sandbox.bounds.retry_wait;
+    if let Err(error) = start(actor, sandbox, ProtectionWork::Check, Vec::new(), wait) {
+        tracing::warn!(code = ?error.code(), "the sandbox's automatic check did not start");
+    }
+}
+
+/// Starts `work` on its thread for `waiters`, its snapshot afterwards waiting at most `wait`.
+fn start(
+    actor: &mut Actor,
+    sandbox: Sandbox,
+    work: ProtectionWork,
+    waiters: Vec<CommandId>,
+    wait: Duration,
+) -> Result<(), Error> {
+    let host = &mut actor.protection;
+    let setup = sandbox.setup.clone();
     let work_id = host.next_work;
     host.next_work += 1;
     let post = actor.post.clone();
@@ -138,7 +173,7 @@ fn begin(actor: &mut Actor, id: CommandId, asked: Asked) -> Result<(), Error> {
     let data_dir = actor.effective.data_dir().to_path_buf();
     let spawned = spawn(fail, move || {
         let outcome = run(work, setup.as_deref());
-        let observed = observe(Some(&sandbox), &data_dir);
+        let observed = observe_within(Some(&sandbox), &data_dir, wait);
         report.send(Ended::Ran { outcome, observed });
     });
     if let Err(error) = spawned {
@@ -151,7 +186,7 @@ fn begin(actor: &mut Actor, id: CommandId, asked: Asked) -> Result<(), Error> {
     actor.protection.running = Some(Running {
         id: work_id,
         work,
-        waiters: vec![id],
+        waiters,
     });
     tracing::info!(work = work_name(work), "the sandbox work started");
     super::publish_view(actor);
@@ -213,10 +248,11 @@ impl Drop for Report {
 }
 
 /// The thread's end: the cache, the view, the matters' rows, then the held answers. A result
-/// of work no longer running (shutdown answered it) is dropped.
+/// of work no longer running (shutdown answered it) is dropped, as is any while stopping. One
+/// that ends while the host still starts (the automatic check, [`recheck`]) is taken.
 pub(in crate::actor) fn on_done(actor: &mut Actor, done: Done) {
     let Done { id, ended } = done;
-    let serving = matches!(actor.phase, crate::actor::HostPhase::Serving);
+    let serving = !matches!(actor.phase, crate::actor::HostPhase::Stopping(_));
     let current = actor
         .protection
         .running

@@ -301,6 +301,9 @@ mod protection_edges;
 #[path = "host/protection_forget.rs"]
 mod protection_forget;
 #[cfg(test)]
+#[path = "host/protection_hung.rs"]
+mod protection_hung;
+#[cfg(test)]
 #[path = "host/protection_removing.rs"]
 mod protection_removing;
 #[cfg(test)]

@@ -36,6 +36,8 @@ use crate::error::Error;
 
 pub(super) mod forget;
 mod set_up_at;
+mod snapshot;
+pub(crate) use snapshot::Slot;
 pub(super) mod work;
 
 /// What one detection found: the computer's protection, whether a retry would run the set-up
@@ -47,6 +49,9 @@ pub(crate) struct Observed {
     pub(crate) asks_admin: bool,
     pub(crate) set_up_at: Option<Timestamp>,
     pub(crate) set_up_state: Option<Protection>,
+    /// The snapshot gave no answer in time (a failed probe stands in): with launchers, the
+    /// host's start checks once more ([`start`]).
+    pub(crate) no_answer: bool,
 }
 
 impl Observed {
@@ -145,20 +150,23 @@ impl ProtectionHost {
     }
 }
 
-/// How long a detection may take before it counts as a failed probe (#813's security review):
-/// macOS' first one starts `sandbox-exec`, and the app's quit waits for the host's start.
-const DETECT_WAIT: Duration = Duration::from_secs(5);
-
 /// Detects this computer's protection through `sandbox`, from the calling thread: never the
-/// actor's. No seam: `Unsupported { why: not_built }`, with no retry to offer. A set-up that is
-/// done gives its time from its marker in `data_dir` (`set_up_at`). The detection itself runs
-/// on a thread of its own, bounded by [`DETECT_WAIT`] ([`detect_within`]).
+/// actor's, waiting at most the seam's `detect_wait` (5 s). No seam: `Unsupported { why:
+/// not_built }`, with no retry to offer.
 pub(crate) fn observe(sandbox: Option<&Sandbox>, data_dir: &Path) -> Observed {
-    observe_within(sandbox, data_dir, DETECT_WAIT)
+    let wait = sandbox.map_or(Duration::ZERO, |sandbox| sandbox.bounds.detect_wait);
+    observe_within(sandbox, data_dir, wait)
 }
 
-/// [`observe`], the detection bounded by `wait`.
-fn observe_within(sandbox: Option<&Sandbox>, data_dir: &Path, wait: Duration) -> Observed {
+/// [`observe`], waiting at most `wait`: one snapshot (`snapshot.rs`) gives the detection, the
+/// set-up's state and a finished set-up's time from its marker in `data_dir` (`set_up_at`),
+/// and everything here is derived from it alone. No answer within `wait` is a failed probe
+/// (`SetUpFailed`, fail closed) with no retry asking for an administrator.
+pub(crate) fn observe_within(
+    sandbox: Option<&Sandbox>,
+    data_dir: &Path,
+    wait: Duration,
+) -> Observed {
     let Some(sandbox) = sandbox else {
         return Observed {
             computer: Protection::NotProtected {
@@ -169,51 +177,36 @@ fn observe_within(sandbox: Option<&Sandbox>, data_dir: &Path, wait: Duration) ->
             asks_admin: false,
             set_up_at: None,
             set_up_state: None,
+            no_answer: false,
         };
     };
-    let detection = detect_within(&sandbox.detect, wait);
-    let state = sandbox.setup.as_ref().map(|setup| setup.state());
-    let set_up_at = match state {
-        Some(SetupState::Ready) => set_up_at::read(data_dir),
-        _ => None,
+    let (snapshot, no_answer) = match snapshot::take(sandbox, data_dir, wait) {
+        Ok(snapshot) => (snapshot, false),
+        Err(snapshot::NoAnswer(kind)) => {
+            tracing::warn!(kind, "the sandbox check gave no answer");
+            let detection = Detection {
+                tier: Tier::C,
+                reason: Some(NoSandbox::ProbeFailed(kind.to_owned())),
+            };
+            let snapshot = snapshot::Snapshot {
+                detection,
+                state: None,
+                set_up_at: None,
+            };
+            (snapshot, true)
+        }
     };
-    let found = protection_of(&detection);
+    let found = protection_of(&snapshot.detection);
     // No jail on this computer (an OS without one, Windows on ARM, an older build): a set-up
     // can't help, so a retry only checks again (#813's security review).
     let no_jail = is_unsupported(&found);
     let (computer, set_up_state) = gated(sandbox, found);
     Observed {
         computer,
-        asks_admin: !no_jail && state.as_ref().is_some_and(asks_admin),
-        set_up_at,
+        asks_admin: !no_jail && snapshot.state.as_ref().is_some_and(asks_admin),
+        set_up_at: snapshot.set_up_at,
         set_up_state,
-    }
-}
-
-/// Runs `detect` on a thread of its own and waits at most `wait` for it. Past the wait, or
-/// with no thread or one that ended without an answer, the detection is a failed probe
-/// (`SetUpFailed`, fail closed), logged by its kind; a late answer is dropped.
-fn detect_within(detect: &crate::config::Detect, wait: Duration) -> Detection {
-    let (answer, answered) = std::sync::mpsc::sync_channel(1);
-    let detect = std::sync::Arc::clone(detect);
-    let spawned = std::thread::Builder::new()
-        .name("clauseo-sandbox-detect".to_owned())
-        .spawn(move || {
-            // The waiter may have given up; nobody is left to tell.
-            let _gone = answer.send(detect());
-        });
-    let kind = match spawned {
-        Err(_) => "no_thread",
-        Ok(_thread) => match answered.recv_timeout(wait) {
-            Ok(detection) => return detection,
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => "timed_out",
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => "ended",
-        },
-    };
-    tracing::warn!(kind, "the sandbox check gave no answer");
-    Detection {
-        tier: Tier::C,
-        reason: Some(NoSandbox::ProbeFailed(kind.to_owned())),
+        no_answer,
     }
 }
 
@@ -325,10 +318,16 @@ pub(crate) fn view(actor: &Actor) -> ProtectionView {
     actor.protection.view(required, auto)
 }
 
-/// The start's view, as the one sent: a later change is what goes out.
+/// The start's view, as the one sent: a later change is what goes out. With launchers, a first
+/// snapshot that gave no answer is checked once more, waiting the seam's `retry_wait` (30 s),
+/// before its failed probe stands (#813's review); launches stay refused meanwhile, the view
+/// showing the check.
 pub(super) fn start(actor: &mut Actor) {
     let (required, auto) = settings(actor);
     let _first = actor.protection.take_changed(required, auto);
+    if actor.protection.observed.no_answer && actor.protection.launchers().is_some() {
+        work::recheck(actor);
+    }
 }
 
 /// Sends `ProtectionViewChanged` to every app subscriber when the view changed, and stops the

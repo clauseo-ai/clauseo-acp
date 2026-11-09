@@ -11,6 +11,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use clauseo_host::{
     AppSubscription, HostHandle, Sandbox, SandboxLaunch, SandboxLaunchers, SessionEnd, SessionKey,
@@ -81,6 +82,10 @@ pub(crate) enum Gated {
     Forget,
     /// Every detection after the first (start-up's).
     Detect,
+    /// Every detection, start-up's too.
+    Hang,
+    /// Every `state()`.
+    State,
 }
 
 /// Waits at `gate`: says it started, then waits for a release (a dropped sender, at the test's
@@ -106,6 +111,11 @@ impl FakeSetup {
 impl SandboxSetup for FakeSetup {
     fn state(&self) -> SetupState {
         self.note_thread();
+        if self.gated == Gated::State
+            && let Some(gate) = &self.gate
+        {
+            pass(gate);
+        }
         self.states.next()
     }
 
@@ -182,6 +192,8 @@ pub(crate) struct Plan {
     pub(crate) panics: bool,
     /// The seam has launchers ([`Through`], the default); `false` for a set-up-only seam.
     pub(crate) launchers: bool,
+    /// The snapshot's wait and the automatic re-check's, when shortened.
+    pub(crate) waits: Option<(Duration, Duration)>,
 }
 
 impl Plan {
@@ -197,6 +209,7 @@ impl Plan {
             gated: Gated::No,
             panics: false,
             launchers: true,
+            waits: None,
         }
     }
 
@@ -244,10 +257,13 @@ pub(crate) fn rig(plan: Plan) -> Rig {
     let script = Arc::new(Script::new(plan.detections));
     let detections = Arc::new(AtomicUsize::new(0));
     let counted = Arc::clone(&detections);
-    let detect_gate = (plan.gated == Gated::Detect).then_some(gate).flatten();
+    let hang = plan.gated == Gated::Hang;
+    let detect_gate = matches!(plan.gated, Gated::Detect | Gated::Hang)
+        .then_some(gate)
+        .flatten();
     let detect = Arc::new(move || {
         let calls = counted.fetch_add(1, Ordering::SeqCst);
-        if calls > 0
+        if (calls > 0 || hang)
             && let Some(gate) = &detect_gate
         {
             pass(gate);
@@ -256,6 +272,10 @@ pub(crate) fn rig(plan: Plan) -> Rig {
     });
     let shared: Arc<dyn SandboxSetup> = Arc::<FakeSetup>::clone(&setup);
     let sandbox = Sandbox::new(detect, Some(shared));
+    let sandbox = match plan.waits {
+        Some((detect, retry)) => sandbox.with_detect_waits(detect, retry),
+        None => sandbox,
+    };
     let sandbox = if plan.launchers {
         let plain = PassthroughLauncher::new(SpawnOptions::new().clear_env());
         through(sandbox, Arc::new(plain))

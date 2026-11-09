@@ -49,6 +49,7 @@ pub(super) fn tier_b(rig: &mut Rig) {
         asks_admin: false,
         set_up_at: None,
         set_up_state: None,
+        no_answer: false,
     };
     rig.actor.protection = ProtectionHost::new(None, observed);
 }
