@@ -357,3 +357,19 @@ fn a_dropped_suspended_child_is_terminated() {
     unsafe { GetExitCodeProcess(HANDLE(process.as_raw_handle()), &raw mut code) }.unwrap();
     assert_eq!(code, UNRESUMED_EXIT);
 }
+
+/// The facts of this process's own token are read: `TokenElevation`, a fixed-size class, answers
+/// a larger buffer with `ERROR_BAD_LENGTH` and its exact size, which `query` retries with (the
+/// VM's guard stopped there before the `LowBox` token call).
+#[test]
+fn this_process_tokens_facts_are_read() {
+    use ::windows::Win32::Security::TOKEN_QUERY;
+    use ::windows::Win32::System::Threading::OpenProcessToken;
+    use std::os::windows::io::FromRawHandle as _;
+    let mut token = HANDLE::default();
+    // SAFETY: the pseudo handle of this process; `token` gets a new handle, owned below.
+    unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &raw mut token) }.unwrap();
+    // SAFETY: OpenProcessToken succeeded, so `token` is open and ours alone.
+    let token = unsafe { OwnedHandle::from_raw_handle(token.0) };
+    super::token::facts(&token).unwrap();
+}

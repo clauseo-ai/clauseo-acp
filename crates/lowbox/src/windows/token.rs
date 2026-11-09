@@ -34,7 +34,8 @@ use crate::token_check::{CHANGE_NOTIFY, Facts};
 
 /// `SE_GROUP_ENABLED`.
 const GROUP_ENABLED: u32 = 0x4;
-/// The first token information buffer: room for every class this module asks for.
+/// The first token information buffer: room for every variable-size class this module asks for
+/// (a fixed-size class answers with its exact size, and `query` retries with it).
 const FIRST_BYTES: u32 = 1024;
 /// The largest token information buffer tried (64 KiB).
 const MAX_BYTES: u32 = 0x1_0000;
@@ -251,7 +252,10 @@ fn query(token: &OwnedHandle, class: TOKEN_INFORMATION_CLASS) -> Result<Vec<u64>
         let short = [ERROR_INSUFFICIENT_BUFFER, ERROR_BAD_LENGTH]
             .iter()
             .any(|c| error.code() == c.to_hresult());
-        if !short || needed <= bytes || needed > MAX_BYTES {
+        // A fixed-size class (TokenElevation) wants exactly its size and answers BAD_LENGTH with
+        // a smaller `needed` (4 for 1024 on the VM), so retry with `needed` either way; the
+        // same size again would loop, so that, nothing, or too much fails.
+        if !short || needed == 0 || needed == bytes || needed > MAX_BYTES {
             return Err(win32("GetTokenInformation", &error));
         }
         bytes = needed;
