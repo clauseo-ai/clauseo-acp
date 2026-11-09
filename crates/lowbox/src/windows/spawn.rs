@@ -15,18 +15,17 @@ use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
 use std::path::{Path, PathBuf};
 
-use ::windows::Win32::Foundation::{HANDLE, HANDLE_FLAG_INHERIT, SetHandleInformation};
+use ::windows::Win32::Foundation::HANDLE;
 use ::windows::Win32::Security::{PSID, TOKEN_ACCESS_MASK};
 use ::windows::Win32::System::Environment::{CreateEnvironmentBlock, DestroyEnvironmentBlock};
 use ::windows::Win32::System::Threading::{
     CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW,
-    DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetCurrentProcess,
-    InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST, OpenProcessToken,
-    PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROCESS_INFORMATION, ResumeThread, STARTF_USESTDHANDLES,
-    STARTUPINFOEXW, STARTUPINFOW, UpdateProcThreadAttribute,
+    CreateProcessW, EXTENDED_STARTUPINFO_PRESENT, GetCurrentProcess, OpenProcessToken,
+    PROCESS_INFORMATION, ResumeThread, STARTF_USESTDHANDLES, STARTUPINFOEXW, STARTUPINFOW,
 };
 use ::windows::core::{PCWSTR, PWSTR};
 
+use super::inherit::{HandleList, Marked};
 use super::namespace::NamespaceHandles;
 use super::nt::NtCreateLowBoxToken;
 use super::stdio::{Stdio, Which};
@@ -156,8 +155,11 @@ impl LowBoxCommand {
         self
     }
 
-    /// Passes `handle` to the child at the same value. The spawn turns its `HANDLE_FLAG_INHERIT`
-    /// on and leaves it on; only children that list it (as this one does) get it.
+    /// Passes `handle` to the child at the same value, for a value the child is told on its
+    /// command line (`--remote-debugging-io-pipes`, for one). The child inherits exactly these
+    /// handles and its three standard ones, through `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`, and no
+    /// other inheritable handle of this process. Each is made inheritable for the spawn only and
+    /// put back as it was. The spawn refuses a null or pseudo handle, or one listed twice.
     pub fn inherit_handle(&mut self, handle: RawHandle) -> &mut LowBoxCommand {
         self.inherit.push(handle);
         self
@@ -166,30 +168,62 @@ impl LowBoxCommand {
     /// Makes the `LowBox` token of `namespace`'s package over this process's token and starts the
     /// program in it, suspended, on this process's station and desktop. The caller puts the
     /// child in its Job Object, then calls [`Spawned::resume`].
+    ///
+    /// The browser's `DevTools` over two anonymous pipes, with no TCP listener in the `LowBox`
+    /// (Chromium reads `--remote-debugging-io-pipes=<in>,<out>` with `--remote-debugging-pipe`;
+    /// the values are the handles, in decimal):
+    ///
+    /// ```no_run
+    /// use std::os::windows::io::AsRawHandle;
+    ///
+    /// use clauseo_lowbox::{LowBoxCommand, NamespaceHandles, PackageName, Stdio};
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let (package, values) = (PackageName::new("Clauseo.Browser.B01")?, [0_usize; 6]);
+    /// let namespace = NamespaceHandles::from_inherited(&package, &values)?;
+    /// // Commands go in on one pipe, replies and events come back on the other.
+    /// let (chrome_reads, guard_writes) = std::io::pipe()?;
+    /// let (guard_reads, chrome_writes) = std::io::pipe()?;
+    /// let (r, w) = (chrome_reads.as_raw_handle(), chrome_writes.as_raw_handle());
+    /// let child = LowBoxCommand::new(r"C:\shell\chrome-headless-shell.exe")
+    ///     .args(["--headless", "--remote-debugging-pipe"])
+    ///     .arg(format!("--remote-debugging-io-pipes={},{}", r as usize, w as usize))
+    ///     .stdout(Stdio::Null)
+    ///     .inherit_handle(r)
+    ///     .inherit_handle(w)
+    ///     .spawn_suspended(&namespace)?;
+    /// // The child has its own copies now; the guard keeps only its ends.
+    /// drop((chrome_reads, chrome_writes));
+    /// child.resume()?;
+    /// // Write NUL-terminated JSON commands to `guard_writes`, read replies from `guard_reads`.
+    /// # drop((guard_writes, guard_reads));
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn spawn_suspended(&self, namespace: &NamespaceHandles) -> Result<Spawned, Error> {
+        let token = lowbox_token(namespace)?;
+        self.spawn_as(Some(&token))
+    }
+
+    /// Starts the program suspended with `token` (`CreateProcessAsUserW`), or with this process's
+    /// own token when `None` (`CreateProcessW`, for the tests of the handle list), inheriting
+    /// only the standard handles and the listed ones.
+    pub(super) fn spawn_as(&self, token: Option<&OwnedHandle>) -> Result<Spawned, Error> {
         let mut line = command_line(&self.program, &self.args)?;
         line.push(0);
         let program = wide_nul(&self.program);
         let cwd = self.cwd.as_deref().map(|d| wide_nul(d.as_os_str()));
-        let token = lowbox_token(namespace)?;
-        let environment = self.environment(&token)?;
+        let environment = self.environment(token)?;
+        let marked = Marked::new(&self.inherit)?;
 
         let stdin = self.stdin.ends(Which::Input)?;
         let stdout = self.stdout.ends(Which::Output)?;
         let stderr = self.stderr.ends(Which::Error)?;
-        let mut listed: Vec<HANDLE> = [&stdin.child, &stdout.child, &stderr.child]
+        let listed: Vec<HANDLE> = [&stdin.child, &stdout.child, &stderr.child]
             .iter()
             .map(|h| HANDLE(h.as_raw_handle()))
+            .chain(marked.handles())
             .collect();
-        for &extra in &self.inherit {
-            // SAFETY: a handle the caller passed to be inherited; the call only sets its flag,
-            // and fails on a value that is no handle.
-            unsafe {
-                SetHandleInformation(HANDLE(extra), HANDLE_FLAG_INHERIT.0, HANDLE_FLAG_INHERIT)
-            }
-            .map_err(|e| win32("SetHandleInformation", &e))?;
-            listed.push(HANDLE(extra));
-        }
         let mut attributes = HandleList::new(&listed)?;
 
         let startup = STARTUPINFOEXW {
@@ -203,34 +237,58 @@ impl LowBoxCommand {
             },
             lpAttributeList: attributes.list(),
         };
+        let flags = CREATE_SUSPENDED
+            | CREATE_UNICODE_ENVIRONMENT
+            | CREATE_NO_WINDOW
+            | EXTENDED_STARTUPINFO_PRESENT;
+        let block = Some(environment.as_ptr().cast::<c_void>());
+        let folder = cwd.as_ref().map_or(PCWSTR::null(), |c| PCWSTR(c.as_ptr()));
         let mut info = PROCESS_INFORMATION::default();
-        // SAFETY: every pointer is to a live buffer that outlives the call: the NUL-terminated
-        // program, command line (writable, as the call requires) and folder, the environment
+        // Both calls: every pointer is to a live buffer that outlives the call: the NUL-terminated
+        // program, command line (writable, as the calls require) and folder, the environment
         // block (UTF-16, double-NUL-terminated), and the extended startup info whose attribute
-        // list names only open, inheritable handles. `info` gets two new handles, owned below.
-        unsafe {
-            CreateProcessAsUserW(
-                Some(HANDLE(token.as_raw_handle())),
-                PCWSTR(program.as_ptr()),
-                Some(PWSTR(line.as_mut_ptr())),
-                None,
-                None,
-                true,
-                CREATE_SUSPENDED
-                    | CREATE_UNICODE_ENVIRONMENT
-                    | CREATE_NO_WINDOW
-                    | EXTENDED_STARTUPINFO_PRESENT,
-                Some(environment.as_ptr().cast::<c_void>()),
-                cwd.as_ref().map_or(PCWSTR::null(), |c| PCWSTR(c.as_ptr())),
-                &raw const startup.StartupInfo,
-                &raw mut info,
-            )
-        }
-        .map_err(|e| win32("CreateProcessAsUserW", &e))?;
+        // list names only open handles marked inheritable. `info` gets two new handles.
+        let created = match token {
+            // SAFETY: as above, and `token` is an open primary token.
+            Some(token) => unsafe {
+                CreateProcessAsUserW(
+                    Some(HANDLE(token.as_raw_handle())),
+                    PCWSTR(program.as_ptr()),
+                    Some(PWSTR(line.as_mut_ptr())),
+                    None,
+                    None,
+                    true,
+                    flags,
+                    block,
+                    folder,
+                    &raw const startup.StartupInfo,
+                    &raw mut info,
+                )
+            }
+            .map_err(|e| win32("CreateProcessAsUserW", &e)),
+            // SAFETY: as above.
+            None => unsafe {
+                CreateProcessW(
+                    PCWSTR(program.as_ptr()),
+                    Some(PWSTR(line.as_mut_ptr())),
+                    None,
+                    None,
+                    true,
+                    flags,
+                    block,
+                    folder,
+                    &raw const startup.StartupInfo,
+                    &raw mut info,
+                )
+            }
+            .map_err(|e| win32("CreateProcessW", &e)),
+        };
         drop(attributes);
+        drop(marked);
+        created?;
         Ok(Spawned {
             pid: info.dwProcessId,
-            // SAFETY: CreateProcessAsUserW succeeded, so both handles are open and ours alone.
+            // SAFETY: the create call succeeded, so both handles are open and ours alone.
             process: unsafe { OwnedHandle::from_raw_handle(info.hProcess.0) },
             // SAFETY: as above.
             thread: unsafe { OwnedHandle::from_raw_handle(info.hThread.0) },
@@ -240,12 +298,20 @@ impl LowBoxCommand {
         })
     }
 
-    /// The child's environment block: the token's (unless cleared) with the changes on top.
-    fn environment(&self, token: &OwnedHandle) -> Result<Vec<u16>, Error> {
-        let base = if self.env_clear {
-            Vec::new()
-        } else {
-            token_environment(token)?
+    /// The child's environment block: the token's, or this process's without a token (unless
+    /// cleared), with the changes on top.
+    fn environment(&self, token: Option<&OwnedHandle>) -> Result<Vec<u16>, Error> {
+        let base = match (self.env_clear, token) {
+            (true, _) => Vec::new(),
+            (false, Some(token)) => token_environment(token)?,
+            (false, None) => std::env::vars_os()
+                .map(|(name, value)| {
+                    let mut entry = units(&name);
+                    entry.push(u16::from(b'='));
+                    entry.extend(units(&value));
+                    entry
+                })
+                .collect(),
         };
         envblock::block(base, &self.env)
     }
@@ -327,57 +393,4 @@ fn token_environment(token: &OwnedHandle) -> Result<Vec<Vec<u16>>, Error> {
     // SAFETY: the block came from CreateEnvironmentBlock and is freed once, here.
     unsafe { DestroyEnvironmentBlock(block) }.map_err(|e| win32("DestroyEnvironmentBlock", &e))?;
     Ok(entries)
-}
-
-/// A one-attribute list: `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` over handles that outlive it.
-struct HandleList {
-    /// The list's storage, 8-byte aligned.
-    storage: Vec<u64>,
-}
-
-impl HandleList {
-    /// The list naming `handles`, which must outlive it and stay put.
-    fn new(handles: &[HANDLE]) -> Result<HandleList, Error> {
-        let mut size = 0_usize;
-        // SAFETY: the size query: no list, `size` gets the bytes needed. It reports
-        // ERROR_INSUFFICIENT_BUFFER by design, so its result is not an error here.
-        let _sized: ::windows::core::Result<()> =
-            unsafe { InitializeProcThreadAttributeList(None, 1, None, &raw mut size) };
-        let mut storage = vec![0_u64; size.div_ceil(8)];
-        let raw = LPPROC_THREAD_ATTRIBUTE_LIST(storage.as_mut_ptr().cast::<c_void>());
-        // SAFETY: `storage` holds at least `size` bytes, 8-byte aligned.
-        unsafe { InitializeProcThreadAttributeList(Some(raw), 1, None, &raw mut size) }
-            .map_err(|e| win32("InitializeProcThreadAttributeList", &e))?;
-        // From here Drop deletes the initialised list, on success and on failure alike.
-        let mut list = HandleList { storage };
-        // SAFETY: the list is initialised; `handles` outlives it (the caller's contract) and
-        // the size is the slice's.
-        let updated = unsafe {
-            UpdateProcThreadAttribute(
-                list.list(),
-                0,
-                PROC_THREAD_ATTRIBUTE_HANDLE_LIST as usize,
-                Some(handles.as_ptr().cast::<c_void>()),
-                size_of_val(handles),
-                None,
-                None,
-            )
-        };
-        // On failure `list` drops and deletes the initialised list.
-        updated.map_err(|e| win32("UpdateProcThreadAttribute", &e))?;
-        Ok(list)
-    }
-
-    /// The list's pointer.
-    fn list(&mut self) -> LPPROC_THREAD_ATTRIBUTE_LIST {
-        LPPROC_THREAD_ATTRIBUTE_LIST(self.storage.as_mut_ptr().cast::<c_void>())
-    }
-}
-
-impl Drop for HandleList {
-    fn drop(&mut self) {
-        // SAFETY: the list was initialised in `new` (a HandleList exists only after that) and
-        // is deleted once, here.
-        unsafe { DeleteProcThreadAttributeList(self.list()) };
-    }
 }

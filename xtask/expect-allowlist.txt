@@ -621,6 +621,7 @@ crates/lowbox/src/lib.rs envblock dead_code
 crates/lowbox/src/lib.rs handles dead_code
 crates/lowbox/src/lib.rs layout dead_code
 crates/lowbox/src/package/sha256.rs compress clippy::many_single_char_names
+crates/lowbox/src/windows/inherit.rs - unsafe_code
 crates/lowbox/src/windows/namespace.rs - unsafe_code
 crates/lowbox/src/windows/nt.rs - unsafe_code
 crates/lowbox/src/windows/probe.rs - unsafe_code

@@ -1,6 +1,7 @@
 //! The Windows side: the owner's namespace, the guard's handle checks and the `LowBox` launch.
 //! The native calls the `windows` crate does not declare are declared in `nt`.
 
+mod inherit;
 mod namespace;
 mod nt;
 mod probe;

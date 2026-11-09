@@ -231,3 +231,20 @@ fn the_slots_say_their_types() {
         ]
     );
 }
+
+#[test]
+fn the_inherit_list_refuses_null_pseudo_and_repeated_handles() {
+    assert_eq!(check_inherit_list(&[]), Ok(()));
+    assert_eq!(check_inherit_list(&[0x10, 0x14]), Ok(()));
+    for bad in [
+        vec![0x10, 0],
+        vec![usize::MAX],
+        vec![usize::MAX - 1],
+        vec![0x10, 0x14, 0x10],
+    ] {
+        assert!(
+            matches!(check_inherit_list(&bad), Err(Error::InheritList { .. })),
+            "{bad:x?}"
+        );
+    }
+}

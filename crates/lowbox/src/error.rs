@@ -38,6 +38,11 @@ pub enum Error {
         /// What is wrong with it.
         reason: &'static str,
     },
+    /// The handles a launch passes on are not distinct, open, real handles.
+    InheritList {
+        /// What is wrong with them.
+        reason: &'static str,
+    },
     /// A handle value given for a slot of the namespace failed its check.
     Handle {
         /// The slot it was given for.
@@ -99,6 +104,7 @@ impl fmt::Display for Error {
             Error::Environment { reason } => write!(f, "environment: {reason}"),
             Error::Grant { reason } => write!(f, "grant: {reason}"),
             Error::HandleList { reason } => write!(f, "handle list: {reason}"),
+            Error::InheritList { reason } => write!(f, "inherited handles: {reason}"),
             Error::Handle { slot, problem } => write!(f, "handle for {}: {problem}", slot.name()),
             Error::Nt { call, status } => {
                 // Hex of the bits, as Windows writes an NTSTATUS (0xC0000022).

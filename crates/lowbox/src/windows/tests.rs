@@ -5,14 +5,24 @@
     reason = "FFI to DeriveAppContainerSidFromAppContainerName and FreeSid"
 )]
 
-use std::os::windows::io::AsRawHandle;
+use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
+
+use ::windows::Win32::Foundation::{
+    CompareObjectHandles, DUPLICATE_SAME_ACCESS, DuplicateHandle, GetHandleInformation, HANDLE,
+    HANDLE_FLAG_INHERIT,
+};
+use ::windows::Win32::Security::SECURITY_ATTRIBUTES;
+use ::windows::Win32::System::Threading::{CreateEventW, GetCurrentProcess, TerminateProcess};
 
 use ::windows::Win32::Security::Authorization::ConvertSidToStringSidW;
 use ::windows::Win32::Security::FreeSid;
 use ::windows::Win32::Security::Isolation::DeriveAppContainerSidFromAppContainerName;
 use ::windows::core::{HSTRING, PWSTR};
 
-use crate::{Error, HandleProblem, NamespaceHandles, PackageName, Slot, package_sid};
+use crate::{
+    Error, HandleProblem, LowBoxCommand, NamespaceHandles, PackageName, Slot, Spawned, Stdio,
+    package_sid,
+};
 
 /// The derivation matches `DeriveAppContainerSidFromAppContainerName`, which needs no profile.
 #[test]
@@ -80,4 +90,111 @@ fn a_file_in_the_directory_slot_fails_closed() {
             }
         }
     );
+}
+
+/// A new unnamed event, inheritable or not.
+fn event(inheritable: bool) -> OwnedHandle {
+    let attributes = SECURITY_ATTRIBUTES {
+        nLength: u32::try_from(size_of::<SECURITY_ATTRIBUTES>()).unwrap(),
+        lpSecurityDescriptor: std::ptr::null_mut(),
+        bInheritHandle: inheritable.into(),
+    };
+    // SAFETY: the attributes outlive the call; the event is owned below.
+    let handle = unsafe { CreateEventW(Some(&raw const attributes), true, false, None) }.unwrap();
+    // SAFETY: CreateEventW succeeded, so the handle is open and ours alone.
+    unsafe { OwnedHandle::from_raw_handle(handle.0) }
+}
+
+/// Whether the suspended `child` holds, at the value of `ours`, the same object.
+fn child_holds(child: &Spawned, ours: &OwnedHandle) -> bool {
+    let mut copy = HANDLE::default();
+    // SAFETY: the child's process handle has all access; the copy is a new handle in this
+    // process, owned below. A value the child does not hold makes the call fail.
+    let copied = unsafe {
+        DuplicateHandle(
+            HANDLE(child.process.as_raw_handle()),
+            HANDLE(ours.as_raw_handle()),
+            GetCurrentProcess(),
+            &raw mut copy,
+            0,
+            false,
+            DUPLICATE_SAME_ACCESS,
+        )
+    };
+    if copied.is_err() {
+        return false;
+    }
+    // SAFETY: DuplicateHandle succeeded, so `copy` is open and ours alone.
+    let copy = unsafe { OwnedHandle::from_raw_handle(copy.0) };
+    // SAFETY: both handles are open in this process.
+    unsafe { CompareObjectHandles(HANDLE(copy.as_raw_handle()), HANDLE(ours.as_raw_handle())) }
+        .as_bool()
+}
+
+/// Whether `handle` has `HANDLE_FLAG_INHERIT`.
+fn inheritable(handle: &OwnedHandle) -> bool {
+    let mut flags = 0_u32;
+    // SAFETY: an open handle; the call only reads its flags.
+    unsafe { GetHandleInformation(HANDLE(handle.as_raw_handle()), &raw mut flags) }.unwrap();
+    flags & HANDLE_FLAG_INHERIT.0 != 0
+}
+
+/// This test binary, started suspended (it never runs) with `listed` passed on, through the
+/// same handle list as a `LowBox` launch but this process's own token.
+fn spawn_listing(listed: &[RawHandle]) -> Spawned {
+    let mut command = LowBoxCommand::new(std::env::current_exe().unwrap());
+    command
+        .env_clear()
+        .stdin(Stdio::Null)
+        .stdout(Stdio::Null)
+        .stderr(Stdio::Null);
+    for h in listed {
+        command.inherit_handle(*h);
+    }
+    command.spawn_as(None).unwrap()
+}
+
+fn end(child: &Spawned) {
+    // SAFETY: the child's process handle has all access.
+    unsafe { TerminateProcess(HANDLE(child.process.as_raw_handle()), 1) }.unwrap();
+}
+
+#[test]
+fn only_the_listed_handles_reach_the_child() {
+    let listed = event(false);
+    let stray = event(true);
+    let child = spawn_listing(&[listed.as_raw_handle()]);
+    let (got_listed, got_stray) = (child_holds(&child, &listed), child_holds(&child, &stray));
+    end(&child);
+    assert!(got_listed, "the listed handle did not reach the child");
+    assert!(
+        !got_stray,
+        "an inheritable handle outside the list reached the child"
+    );
+    assert!(
+        !inheritable(&listed),
+        "the listed handle stayed inheritable after the spawn"
+    );
+    assert!(inheritable(&stray), "the stray handle's own flag changed");
+}
+
+#[test]
+fn a_repeated_or_null_handle_is_refused() {
+    let listed = event(false);
+    let mut command = LowBoxCommand::new(std::env::current_exe().unwrap());
+    command
+        .env_clear()
+        .inherit_handle(listed.as_raw_handle())
+        .inherit_handle(listed.as_raw_handle());
+    assert!(matches!(
+        command.spawn_as(None),
+        Err(Error::InheritList { .. })
+    ));
+    let mut command = LowBoxCommand::new(std::env::current_exe().unwrap());
+    command.env_clear().inherit_handle(std::ptr::null_mut());
+    assert!(matches!(
+        command.spawn_as(None),
+        Err(Error::InheritList { .. })
+    ));
+    assert!(!inheritable(&listed));
 }

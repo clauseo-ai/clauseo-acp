@@ -154,6 +154,24 @@ fn check_values(values: &[usize]) -> Result<(), Error> {
     Ok(())
 }
 
+/// The handles a launch passes on by value (`LowBoxCommand::inherit_handle`): none null or a
+/// pseudo handle (`GetCurrentProcess` and the like, negative as a signed value), none twice.
+pub(crate) fn check_inherit_list(values: &[usize]) -> Result<(), Error> {
+    for (i, v) in values.iter().enumerate() {
+        if *v == 0 || v.cast_signed() < 0 {
+            return Err(Error::InheritList {
+                reason: "a null or pseudo handle",
+            });
+        }
+        if values[..i].contains(v) {
+            return Err(Error::InheritList {
+                reason: "a handle listed twice",
+            });
+        }
+    }
+    Ok(())
+}
+
 /// What the checks ask of a handle value in this process.
 pub(crate) trait Probe {
     /// `Ok` when `value` is an open handle, else `GetLastError()`.
