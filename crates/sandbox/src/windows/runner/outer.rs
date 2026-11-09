@@ -66,6 +66,10 @@ pub fn run_outer(launch_file: &Path, exe: &Path) -> u32 {
         ));
         return RunExit::DllSearch.code();
     }
+    // The runner's log file (`log_file.rs`), before anything logs.
+    if let Ok(data_dir) = data_dir_of(launch_file) {
+        super::log_file::install(&data_dir);
+    }
     match outer(launch_file, exe) {
         Ok(code) => code,
         Err(Failure(exit, what)) => {

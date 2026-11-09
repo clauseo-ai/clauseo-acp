@@ -94,6 +94,8 @@ mod launch_debug;
 #[cfg(any(windows, test))]
 mod leftovers;
 #[cfg(any(windows, test))]
+mod log_file;
+#[cfg(any(windows, test))]
 pub mod marker;
 #[cfg(windows)]
 mod outer;

@@ -348,9 +348,45 @@ pub(crate) fn write_atomic_with(
     written
 }
 
+/// Adds `bytes` to the end of the log file `path`, made if missing. When that would take it past
+/// `cap` bytes, the file is first renamed over `rotated` (one older file kept), so each file
+/// stays at or below `cap` unless `bytes` alone is bigger. Opened for each write and closed
+/// after, so runners writing the same file at once each append whole lines and none keeps it
+/// open (std opens with every share mode, so another's rename goes through).
+#[cfg(any(windows, test))]
+pub(crate) fn append_capped(path: &Path, rotated: &Path, bytes: &[u8], cap: u64) -> io::Result<()> {
+    let open = || OpenOptions::new().create(true).append(true).open(path);
+    let mut file = open()?;
+    let len = file.metadata()?.len();
+    let adding = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+    if len > 0 && len.saturating_add(adding) > cap {
+        drop(file);
+        std::fs::rename(path, rotated)?;
+        file = open()?;
+    }
+    file.write_all(bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_capped_log_rotates_before_it_passes_its_cap() {
+        use crate::test_support::TempDir;
+
+        let temp = TempDir::new("append-capped");
+        let (log, old) = (temp.path().join("r.log"), temp.path().join("r.1.log"));
+        for line in [&b"0123456789\n"[..], b"abcdefghij\n", b"ABCDEFGHIJ\n"] {
+            append_capped(&log, &old, line, 25).unwrap();
+        }
+        assert_eq!(std::fs::read(&log).unwrap(), b"ABCDEFGHIJ\n");
+        assert_eq!(std::fs::read(&old).unwrap(), b"0123456789\nabcdefghij\n");
+        append_capped(&log, &old, b"klmnopqrst\n", 25).unwrap();
+        append_capped(&log, &old, b"KLMNOPQRST\n", 25).unwrap();
+        assert_eq!(std::fs::read(&log).unwrap(), b"KLMNOPQRST\n");
+        assert_eq!(std::fs::read(&old).unwrap(), b"ABCDEFGHIJ\nklmnopqrst\n");
+    }
 
     const PLAIN: Found = Found {
         reparse: false,
