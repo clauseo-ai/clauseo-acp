@@ -966,6 +966,26 @@ jobs:
           cp "crates/desktop/$sig" "$OUT/$asset.sig"
           ls -l "$OUT"
 
+      # Whatever the installers ship, not a list (ADR 0035, "The C runtime"): 7-Zip reads NSIS, so
+      # each installer is extracted into a folder of its own and every .exe, .dll and .node in it
+      # is checked, with the installer itself, whose stub is also the uninstaller it writes. No
+      # exceptions: NSIS's x86 plug-ins import msvcrt.dll, which CRT_RULES allows. Both images list
+      # 7-Zip (runner-images' Windows2025-Readme.md, partner-runner-images'
+      # arm-windows-11-image.md) at its install path; 7z on PATH is the fallback.
+      - name: Check every PE inside both installers for the VC++ runtime
+        run: |
+          set -euo pipefail
+          sevenzip="/c/Program Files/7-Zip/7z.exe"
+          [ -x "$sevenzip" ] || sevenzip=$(command -v 7z) ||
+            { echo "::error::no 7-Zip in C:\\Program Files\\7-Zip or on PATH"; exit 1; }
+          for installer in "$OUT/Clauseo_${VERSION}_${{ matrix.arch }}-setup.exe" \
+            "$OUT/Clauseo_${VERSION}_${{ matrix.arch }}-machine-setup.exe"; do
+            dir=$RUNNER_TEMP/extracted-$(basename "$installer" .exe)
+            rm -rf "$dir"
+            "$sevenzip" x -y "-o$dir" "$installer" > /dev/null
+            node .github/scripts/pe-crt-imports.mjs "$installer" "$dir"
+          done
+
       - name: SignPath, the installers (S20a)
         if: needs.check.outputs.mode == 'release' && vars.SIGNPATH_ENABLED == 'true'
         run: |
