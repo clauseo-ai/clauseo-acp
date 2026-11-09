@@ -306,3 +306,30 @@ fn a_sweep_whose_kills_keep_it_going_past_its_deadline_stops_there() {
     assert_eq!(fake.clock, SWEEP_DEADLINE);
     assert_eq!(fake.killed.len(), 12);
 }
+
+#[test]
+fn a_process_that_couldnt_be_opened_or_ended_counts_however_it_is_listed() {
+    // 12 can't be opened, and the next round's list no longer has it: with no handle to say it
+    // ended, it is still counted. 13's kill is refused and it then drops out of the lists while
+    // still running: its held handle says so. 14's kill lets 40 appear, for a second round.
+    let mut fake = machine();
+    fake.procs.insert(12, pool_proc("shut.exe"));
+    fake.deny_open.insert(12);
+    fake.gone_at.insert(3, vec![12]);
+    fake.procs.insert(13, pool_proc("refusing.exe"));
+    fake.deny_kill.insert(13, u32::MAX);
+    fake.vanish.insert(13);
+    fake.procs.insert(14, pool_proc("stray.exe"));
+    fake.spawns.insert(14, (40, pool_proc("child.exe")));
+    let (got, _) = run(&mut fake, &[], Point::Tick);
+    assert_eq!(
+        got,
+        Err(SweepError::Left {
+            count: 2,
+            unkillable: 2,
+            images: vec!["refusing.exe".to_owned(), "shut.exe".to_owned()],
+        })
+    );
+    assert_eq!(fake.killed, [14, 40]);
+    assert!(fake.procs.contains_key(&13));
+}

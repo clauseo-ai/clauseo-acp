@@ -68,11 +68,13 @@ use std::time::Duration;
 
 use crate::windows::sids::Sid;
 
+mod failures;
 mod kill;
 #[cfg(windows)]
 pub(super) mod os;
 mod refused;
 
+use failures::Failures;
 use kill::{Done, Killed};
 
 /// How often the inner sweeps while the agent runs.
@@ -285,11 +287,10 @@ pub(crate) fn sweep<P: Processes>(
         count: 0,
         unkillable: 0,
         images: Vec::new(),
+        this_round: BTreeSet::new(),
     };
     for _ in 0..ROUNDS {
-        failures.count = 0;
-        failures.unkillable = 0;
-        failures.images.clear();
+        failures.next_round();
         // Out of time: the held handles are the verdict, each survivor's looked at once more.
         if calls.now() >= deadline {
             kill::settle(calls, &mut killed, point, &mut failures, log)?;
@@ -304,7 +305,12 @@ pub(crate) fn sweep<P: Processes>(
             match calls.open(found.pid) {
                 Ok(Some(process)) => opened.push((found, process)),
                 Ok(None) => {}
-                Err(error) => failures.add(failed(found, &error, Step::Open), log)?,
+                Err(error) => {
+                    // No handle: counted every round from now on, however it is listed.
+                    let error = failed(found, &error, Step::Open);
+                    failures.add(error.clone(), log)?;
+                    killed.unopened(error);
+                }
             }
         }
         // Each pid is pinned now: one the lists still give `user` is the process opened.
@@ -348,7 +354,10 @@ pub(crate) fn sweep<P: Processes>(
             round += 1;
         }
         for still in left {
-            failures.add(failed(still.found, &still.error, Step::Kill), log)?;
+            // Held: its handle is looked at every round from now on, listed or not.
+            let error = failed(still.found, &still.error, Step::Kill);
+            failures.add(error.clone(), log)?;
+            killed.survivor(still.found, still.started, still.process, error);
         }
         round += kill::settle(calls, &mut killed, point, &mut failures, log)?;
         if round == 0 {
@@ -387,76 +396,6 @@ fn spared(found: &Seen, created: io::Result<u64>, rule: &Rule) -> io::Result<boo
         return Ok(false);
     }
     Ok(job_kept(&rule.job, found.pid, created?, rule.own))
-}
-
-/// A round's failures: the first act's first ends the sweep; past it, each is logged once a
-/// sweep and counted for the round, escapees apart.
-struct Failures {
-    point: Point,
-    logged: BTreeSet<u32>,
-    count: usize,
-    /// How many of this round's couldn't be opened or ended.
-    unkillable: usize,
-    /// Their image names, each once, at most [`IMAGES_CAP`].
-    images: Vec<String>,
-}
-
-impl Failures {
-    /// The verdict of a sweep cut short (out of rounds or time): [`SweepError::Left`] when the
-    /// last round counted an escapee (a survivor among them), which the inner reports; else
-    /// `otherwise`.
-    fn verdict(&mut self, otherwise: SweepError) -> SweepError {
-        if self.unkillable == 0 {
-            return otherwise;
-        }
-        self.left()
-    }
-
-    /// The round's failures as [`SweepError::Left`].
-    fn left(&mut self) -> SweepError {
-        SweepError::Left {
-            count: self.count,
-            unkillable: self.unkillable,
-            images: std::mem::take(&mut self.images),
-        }
-    }
-
-    fn add(&mut self, error: SweepError, log: &mut dyn FnMut(&str)) -> Result<(), SweepError> {
-        if self.point == Point::Start {
-            return Err(error);
-        }
-        self.count += 1;
-        if let Some(escapees) = error.escapees() {
-            self.unkillable += escapees.count;
-            for image in escapees.images {
-                if self.images.len() < IMAGES_CAP && !self.images.contains(&image) {
-                    self.images.push(image);
-                }
-            }
-        }
-        if self.logged.insert(pid_of(&error)) {
-            log(&format!(
-                "clauseo-sandbox-run: sweep ({}): {error}",
-                self.point
-            ));
-        }
-        Ok(())
-    }
-}
-
-fn pid_of(error: &SweepError) -> u32 {
-    match error {
-        SweepError::Open { pid, .. }
-        | SweepError::Kill { pid, .. }
-        | SweepError::Survived { pid, .. }
-        | SweepError::Started { pid, .. } => *pid,
-        SweepError::List(_)
-        | SweepError::JobList(_)
-        | SweepError::StillRunning
-        | SweepError::Deadline
-        | SweepError::Left { .. }
-        | SweepError::OwnStart { .. } => 0,
-    }
 }
 
 /// Both lists as one: a pid either gives a user has that user, the opening list's first. A list
