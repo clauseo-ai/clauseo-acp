@@ -7,8 +7,9 @@
 //! own station the inner's token doesn't grant the outer `TOKEN_QUERY`, and the user is read
 //! from the process instead (`inner_user.rs`). After the resume the inner's one act is to grant
 //! the desktop user `TOKEN_QUERY` on its token, say it is ready on `ctl`, and wait; the outer
-//! then opens the token and checks it whole (`confirm`: the user again, and a logon SID of the
-//! run's own, not the desktop user's) before it sends the go. Until the go the inner has done
+//! then opens the token and checks it (`confirm`: the user again, a logon SID of the run's own,
+//! not the desktop user's, Medium integrity, no full elevation; not its groups or restricting
+//! SIDs) before it sends the go. Until the go the inner has done
 //! nothing but the grant (`inner_flow.rs`).
 //!
 //! No step gives the inner a handle to its job: the job kills on close, which happens only when
@@ -35,7 +36,7 @@ pub(crate) trait Steps {
     fn shut(&mut self, inner: &Self::Inner) -> Result<(), Self::Error>;
     /// Lets it run.
     fn resume(&mut self, inner: &Self::Inner) -> Result<(), Self::Error>;
-    /// Waits for its ready, checks its token whole, and sends it the go.
+    /// Waits for its ready, checks its token (`inner_user::check_full`), and sends it the go.
     fn confirm(&mut self, inner: &Self::Inner) -> Result<(), Self::Error>;
     /// Ends it after `error`.
     fn kill(&mut self, inner: &Self::Inner, error: &Self::Error);

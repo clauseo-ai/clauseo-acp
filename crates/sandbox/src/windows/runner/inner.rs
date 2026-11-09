@@ -4,8 +4,6 @@
 
 use std::fs::File;
 use std::path::Path;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use super::RunExit;
@@ -13,12 +11,12 @@ use super::frame::{InnerGo, InnerLaunch, InnerReady, InnerReport, read_frame, wr
 use super::inner_flow::{Failure, Inner, run};
 use super::leftovers::os::OsLeftovers;
 use super::leftovers::{Kind, remove_all};
-use super::spawn::{Agent, Process, exit_unless, quiet_errors, restrict_dll_search, start_agent};
+use super::spawn::{Agent, Process, quiet_errors, restrict_dll_search, start_agent};
 use super::station::StationDesktop;
 use super::sweep::os::sweep_own;
 use super::sweep::{Point, SweepError};
 use crate::windows::acl::object::Handle;
-use crate::windows::pipe::os::{into_file, open_client};
+use crate::windows::pipe::os::{into_file, open_client, wait_readable};
 use crate::windows::pipe::{PipeSet, Role};
 use crate::windows::sids::Sid;
 use crate::windows::token::TokenSpec;
@@ -133,12 +131,10 @@ impl Inner for Calls {
         )
         .map_err(|_e| RunExit::Pipe)?;
         // Waits for the outer's full check; a failed one kills this process. Bounded by
-        // [`GO_WAIT`]: past it this process exits `RunExit::Pipe` from a watchdog thread.
-        let got = Arc::new(AtomicBool::new(false));
-        exit_unless(Arc::clone(&got), GO_WAIT, RunExit::Pipe.code()).map_err(|_e| RunExit::Pipe)?;
-        let go = read_frame::<InnerGo>(&ctl);
-        got.store(true, Ordering::SeqCst);
-        match go {
+        // [`GO_WAIT`], on this thread alone (`wait_readable`): no thread is made before the
+        // sweep, and every thread this runner has is shut at the launch (`shut_self`).
+        wait_readable(&ctl, GO_WAIT).map_err(|_e| RunExit::Pipe)?;
+        match read_frame::<InnerGo>(&ctl) {
             Ok(InnerGo { go: true }) => {}
             Ok(InnerGo { go: false }) | Err(_) => return Err(RunExit::Pipe),
         }

@@ -93,22 +93,40 @@ pub(super) fn ready_within(from: impl Read) -> Result<InnerReady, (RunExit, Stri
     })
 }
 
-/// The inner runner's token as the outer reads it after the inner's grant.
+/// What the outer reads of the inner runner's token after the inner's grant.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct TokenSeen {
-    /// The pid the inner said it has (`InnerReady`).
-    pub(super) ready_pid: u32,
+pub(super) struct TokenParts {
     /// The token's user.
     pub(super) user: Sid,
     /// The token's logon SID.
     pub(super) logon: Sid,
+    /// The token's integrity level's SID.
+    pub(super) integrity: Sid,
+    /// Its `TOKEN_ELEVATION_TYPE`.
+    pub(super) elevation_type: u32,
 }
+
+/// The inner's ready and its token, as the full check sees them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct TokenSeen {
+    /// The pid the inner said it has (`InnerReady`).
+    pub(super) ready_pid: u32,
+    /// Its token.
+    pub(super) token: TokenParts,
+}
+
+/// Medium integrity (`S-1-16-8192`): an unelevated interactive logon's.
+const MEDIUM: &str = "S-1-16-8192";
+/// `TokenElevationTypeFull`: an elevated token.
+const ELEVATION_FULL: u32 = 2;
 
 /// The full check, after the resume and before the go (`start.rs`): the ready came from the
 /// process the outer started (`inner_pid`), the token's user is `pool_user` (as before the
-/// resume, now from the token itself), and its logon SID is the run's own: not
-/// `desktop_logon`, the desktop user's, which a token started on the desktop user's own station
-/// would hold. Any failure is [`RunExit::Logon`], naming the step.
+/// resume, now from the token itself), its logon SID has a logon SID's form and isn't
+/// `desktop_logon`, the desktop user's (which a token started on the desktop user's own station
+/// would hold), its integrity is Medium, and it isn't elevated (`TokenElevationTypeFull`).
+/// Groups and restricting SIDs aren't checked. Any failure is [`RunExit::Logon`], naming the
+/// step.
 pub(super) fn check_full(
     seen: &TokenSeen,
     inner_pid: u32,
@@ -124,14 +142,21 @@ pub(super) fn check_full(
     if seen.ready_pid != inner_pid {
         return failed("another process said ready");
     }
-    if seen.user != *pool_user {
+    let token = &seen.token;
+    if token.user != *pool_user {
         return failed("its token's user isn't the pool user");
     }
-    if seen.logon == *desktop_logon {
+    if token.logon == *desktop_logon {
         return failed("its token holds the desktop user's logon SID, not one of its own");
     }
-    if !is_logon_sid(&seen.logon) {
+    if !is_logon_sid(&token.logon) {
         return failed("its token's logon SID isn't one");
+    }
+    if token.integrity.as_str() != MEDIUM {
+        return failed("its token's integrity isn't Medium");
+    }
+    if token.elevation_type == ELEVATION_FULL {
+        return failed("its token is elevated");
     }
     Ok(())
 }
@@ -363,12 +388,24 @@ mod tests {
         );
     }
 
+    fn parts() -> TokenParts {
+        TokenParts {
+            user: sid(POOL),
+            logon: sid("S-1-5-5-0-777"),
+            integrity: sid(MEDIUM),
+            elevation_type: 3,
+        }
+    }
+
     fn seen() -> TokenSeen {
         TokenSeen {
             ready_pid: 41,
-            user: sid(POOL),
-            logon: sid("S-1-5-5-0-777"),
+            token: parts(),
         }
+    }
+
+    fn with(token: TokenParts) -> TokenSeen {
+        TokenSeen { token, ..seen() }
     }
 
     const DESKTOP_LOGON: &str = "S-1-5-5-0-123";
@@ -379,6 +416,15 @@ mod tests {
             check_full(&seen(), 41, &sid(POOL), &sid(DESKTOP_LOGON)),
             Ok(())
         );
+        // The default elevation type (no split token) passes too.
+        let default = with(TokenParts {
+            elevation_type: 1,
+            ..parts()
+        });
+        assert_eq!(
+            check_full(&default, 41, &sid(POOL), &sid(DESKTOP_LOGON)),
+            Ok(())
+        );
     }
 
     #[test]
@@ -387,18 +433,30 @@ mod tests {
             ready_pid: 42,
             ..seen()
         };
-        let other_user = TokenSeen {
+        let other_user = with(TokenParts {
             user: sid("S-1-5-18"),
-            ..seen()
-        };
-        let desktops = TokenSeen {
+            ..parts()
+        });
+        let desktops = with(TokenParts {
             logon: sid(DESKTOP_LOGON),
-            ..seen()
-        };
-        let no_logon = TokenSeen {
+            ..parts()
+        });
+        let no_logon = with(TokenParts {
             logon: sid("S-1-5-21-1-2-3-500"),
-            ..seen()
-        };
+            ..parts()
+        });
+        let high = with(TokenParts {
+            integrity: sid("S-1-16-12288"),
+            ..parts()
+        });
+        let system = with(TokenParts {
+            integrity: sid("S-1-16-16384"),
+            ..parts()
+        });
+        let elevated = with(TokenParts {
+            elevation_type: 2,
+            ..parts()
+        });
         for (case, what) in [
             (other_pid, "another process said ready"),
             (other_user, "its token's user isn't the pool user"),
@@ -407,6 +465,9 @@ mod tests {
                 "its token holds the desktop user's logon SID, not one of its own",
             ),
             (no_logon, "its token's logon SID isn't one"),
+            (high, "its token's integrity isn't Medium"),
+            (system, "its token's integrity isn't Medium"),
+            (elevated, "its token is elevated"),
         ] {
             assert_eq!(
                 check_full(&case, 41, &sid(POOL), &sid(DESKTOP_LOGON)),

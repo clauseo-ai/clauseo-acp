@@ -116,6 +116,9 @@ pub use paths::{WinPath, codex_reuse};
 #[cfg(windows)]
 pub use policy::codex_link_in_policy;
 pub use policy::{codex_reuse_in_policy, granted_paths};
+/// The s15 harness's control stations read their names the way the outer does.
+#[cfg(any(windows, test))]
+pub use station::station_name_of_path;
 #[cfg(windows)]
 pub use sweeper::run_sweep;
 

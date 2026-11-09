@@ -22,8 +22,8 @@ use windows::Win32::Security::{
     GetSecurityDescriptorDacl, GetSecurityDescriptorSacl, GetTokenInformation,
     PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SID_AND_ATTRIBUTES,
     SetTokenInformation, TOKEN_ALL_ACCESS, TOKEN_DEFAULT_DACL, TOKEN_GROUPS,
-    TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_LABEL, TokenDefaultDacl, TokenGroups,
-    TokenIntegrityLevel,
+    TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_LABEL, TokenDefaultDacl, TokenElevationType,
+    TokenGroups, TokenIntegrityLevel,
 };
 use windows::Win32::Storage::FileSystem::WRITE_DAC;
 use windows::Win32::System::Diagnostics::ToolHelp::{
@@ -171,6 +171,28 @@ pub(in crate::windows) fn profile_folder(token: &Handle) -> io::Result<String> {
 pub(in crate::windows) fn user(token: &Handle) -> io::Result<Sid> {
     let text = user_of(token.0)?;
     Sid::parse(&text).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+}
+
+/// `token`'s integrity level, as its label's SID (`S-1-16-<level>`).
+pub(in crate::windows) fn integrity(token: &Handle) -> io::Result<Sid> {
+    let buffer = information(token, TokenIntegrityLevel)?;
+    if size_of_val(buffer.as_slice()) < size_of::<TOKEN_MANDATORY_LABEL>() {
+        return Err(io::Error::other("the token's label is too short"));
+    }
+    // SAFETY: `buffer` holds at least a TOKEN_MANDATORY_LABEL, aligned (u64 words), as
+    // GetTokenInformation wrote it; its SID points into `buffer`, live for the call.
+    let label = unsafe { &*buffer.as_ptr().cast::<TOKEN_MANDATORY_LABEL>() };
+    sid_text(label.Label.Sid)
+}
+
+/// `token`'s `TOKEN_ELEVATION_TYPE`: 1 default, 2 full (elevated), 3 limited.
+pub(in crate::windows) fn elevation_type(token: &Handle) -> io::Result<u32> {
+    let buffer = information(token, TokenElevationType)?;
+    let word = buffer
+        .first()
+        .ok_or_else(|| io::Error::other("the token gave no elevation type"))?;
+    // The enum's 4 bytes, first in the buffer, little-endian.
+    u32::try_from(word & 0xFFFF_FFFF).map_err(io::Error::other)
 }
 
 /// `token`'s logon SID: the group marked `SE_GROUP_LOGON_ID`. Exactly one, or an error.

@@ -1094,13 +1094,18 @@ leaves that profile, both naming the part.
   `DISABLE_MAX_PRIVILEGE`: `SeChangeNotifyPrivilege` is the one privilege left, and it must stay
   (bypass traverse, §3 of the plan). The inner runner sets `SetErrorMode`; the agent inherits
   only its three pipes. The agent runs as the inner runner's own user, so the inner runner is
-  shut to it: the outer reads the inner's token user and gives its process and first thread a
+  shut to it: the outer reads the inner's user (from its token, or, on the agent's own station
+  where the token refuses the lawyer, from `ProcessTelemetryIdInformation`) and gives its process
+  and first thread a
   protected DACL naming `SYSTEM` and the lawyer alone, with `OWNER RIGHTS` held to
   `READ_CONTROL` (the process's also grants the lawyer's logon SID wait, query and end, for the
   sweeps below), while the inner is still suspended (`CreateProcessWithLogonW` takes no
   descriptor, so the pid exists with the logon's default DACL from its return until then, before
-  any of the inner's code runs). The inner's first act shuts its primary token to `SYSTEM` alone;
-  after reading the launch it adds the lawyer's query and shuts every thread it has; once the
+  any of the inner's code runs). The inner's first act shuts its primary token to `SYSTEM` and the
+  lawyer's `TOKEN_QUERY` alone, says ready on `ctl` and waits (60 s at most, on its one thread);
+  the outer, within 30 s, checks the token's user, a logon SID of the run's own (not the
+  lawyer's), Medium integrity and no full elevation (not its groups or restricting SIDs), and
+  only then sends the go, or kills it. After reading the launch it adds the lawyer's query and shuts every thread it has; once the
   agent's token is made (`CreateRestrictedToken` builds its descriptor from the default DACL), it
   gives its default DACL the threads' entries so a thread the system starts in it later is shut
   too, and shuts every thread again. Once the inner runs, its own agent can't open its Medium,

@@ -14,6 +14,7 @@
 
 use std::ffi::c_void;
 
+use clauseo_sandbox::windows::runner::station_name_of_path;
 use windows::Wdk::Foundation::{NtQueryObject, OBJECT_INFORMATION_CLASS, OBJECT_NAME_INFORMATION};
 use windows::Win32::Foundation::{HANDLE, HLOCAL, LocalFree};
 use windows::Win32::Security::Authorization::{
@@ -199,8 +200,8 @@ impl Drop for Reverting {
 }
 
 /// The station's name: its object path's last component, from `NtQueryObject` (`UOI_NAME` needs
-/// `WINSTA_READATTRIBUTES`, which `MAKE_RIGHTS` leaves out). The same as the runner's
-/// (`src/windows/runner/desktop.rs`).
+/// `WINSTA_READATTRIBUTES`, which `MAKE_RIGHTS` leaves out), parsed by the runner's own
+/// `station_name_of_path`.
 fn name_of(station: HWINSTA) -> Result<String, Failed> {
     let call = "NtQueryObject";
     let mut buffer = vec![0u64; 1024];
@@ -229,13 +230,9 @@ fn name_of(station: HWINSTA) -> Result<String, Failed> {
     // SAFETY: `Length` bytes of UTF-16 at `Buffer`, inside `buffer`, which is still live.
     let wide = unsafe { std::slice::from_raw_parts(info.Name.Buffer.0, units) };
     let path = String::from_utf16_lossy(wide);
-    let after = path
-        .rsplit_once(r"\WindowStations\")
-        .map(|(_, name)| name)
-        .filter(|name| !name.is_empty() && !name.contains('\\'));
-    after
+    station_name_of_path(&path)
         .map(str::to_owned)
-        .ok_or(("NtQueryObject", INVALID_DATA))
+        .map_err(|_why| ("NtQueryObject", INVALID_DATA))
 }
 
 /// Makes the desktop `Default` on `station` with `descriptor`, this process switched to it for
