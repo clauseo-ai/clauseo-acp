@@ -14,7 +14,8 @@ use super::leftovers::{Kind, remove_all};
 use super::spawn::{Agent, Process, quiet_errors, restrict_dll_search, start_agent};
 use super::sweep::os::sweep_own;
 use super::sweep::{Point, SweepError};
-use super::wer;
+use super::wer::OsRegistry;
+use super::wer_flow;
 use crate::windows::acl::object::Handle;
 use crate::windows::pipe::os::{into_file, open_client};
 use crate::windows::pipe::{PipeSet, Role};
@@ -95,10 +96,8 @@ impl Inner for Calls {
         }
     }
 
-    fn quiet_wer(&mut self) {
-        if let Err(error) = wer::quiet(wer::WER_KEY) {
-            self.log(&wer::failed_line(&error));
-        }
+    fn quiet_wer(&mut self) -> Result<(), Failure> {
+        wer_flow::quiet(&mut OsRegistry).map_err(|error| (RunExit::Token, error.to_string()))
     }
 
     fn log(&mut self, line: &str) {

@@ -1,84 +1,105 @@
-//! Windows Error Reporting off for the pool user (decision 0049, "WER"): the inner runner, as
-//! the pool user and so owning its `HKCU`, sets `Disabled` and `DontShowUI` to 1 under
-//! `HKCU\Software\Microsoft\Windows\Windows Error Reporting` before the agent starts. The
-//! second of two controls: the job's `JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION`
-//! (`spawn::JOB_LIMITS`) is the first, ending a crashed process before WER is asked. Per-user
-//! `LocalDumps` settings don't exist (Windows reads `LocalDumps` from `HKLM` only), so none is
-//! set. Setting the values again is a no-op; a failure is logged and the run goes on.
+//! The registry calls of turning WER off for the pool user on Windows (`wer_flow.rs` holds the
+//! order and decision 0049, "Crash reporting (WER)", the why): keys under the pool user's own
+//! `HKEY_CURRENT_USER`, opened with `REG_OPTION_OPEN_LINK` so a link opens as itself, and a link
+//! told by its `SymbolicLinkValue`.
 #![expect(unsafe_code, reason = "FFI to the registry calls")]
 
-use std::io;
-
-use windows::Win32::Foundation::{ERROR_SUCCESS, WIN32_ERROR};
+use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA, ERROR_SUCCESS};
 use windows::Win32::System::Registry::{
-    HKEY, HKEY_CURRENT_USER, KEY_SET_VALUE, REG_DWORD, REG_OPTION_NON_VOLATILE, RegCloseKey,
-    RegCreateKeyExW, RegSetValueExW,
+    HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_DWORD, REG_OPTION_NON_VOLATILE,
+    REG_OPTION_OPEN_LINK, REG_VALUE_TYPE, RegCloseKey, RegCreateKeyExW, RegQueryValueExW,
+    RegSetValueExW,
 };
-use windows::core::{HSTRING, PCWSTR};
+use windows::core::{HSTRING, PCWSTR, w};
 
-/// The per-user WER key, under `HKEY_CURRENT_USER`.
-pub(super) const WER_KEY: &str = r"Software\Microsoft\Windows\Windows Error Reporting";
+use super::wer_flow::Registry;
 
-/// The DWORD values set under [`WER_KEY`]: no reporting, and no crash dialog.
-pub(super) const WER_VALUES: [(&str, u32); 2] = [("Disabled", 1), ("DontShowUI", 1)];
+/// The value a registry link holds its target in.
+const LINK_VALUE: PCWSTR = w!("SymbolicLinkValue");
 
-/// Sets [`WER_VALUES`] under `HKEY_CURRENT_USER\<key>`, making the key if it is missing.
-pub(super) fn quiet(key: &str) -> io::Result<()> {
-    let subkey = HSTRING::from(key);
-    let mut opened = HKEY::default();
-    // SAFETY: `subkey` is a live NUL-terminated string; no class, attributes or disposition;
-    // `opened` is a live out-pointer, owned by `Key` once written.
-    let code = unsafe {
-        RegCreateKeyExW(
-            HKEY_CURRENT_USER,
-            &subkey,
-            None,
-            PCWSTR::null(),
-            REG_OPTION_NON_VOLATILE,
-            KEY_SET_VALUE,
-            None,
-            &raw mut opened,
-            None,
-        )
-    };
-    check(code)?;
-    let opened = Key(opened);
-    for (name, value) in WER_VALUES {
-        let name = HSTRING::from(name);
-        // SAFETY: the key is open for setting values; the data is the DWORD's four bytes.
-        let code =
-            unsafe { RegSetValueExW(opened.0, &name, None, REG_DWORD, Some(&value.to_le_bytes())) };
-        check(code)?;
-    }
-    Ok(())
-}
-
-/// The log line for a failed [`quiet`].
-pub(super) fn failed_line(error: &io::Error) -> String {
-    let code = error
-        .raw_os_error()
-        .map_or_else(|| error.kind().to_string(), |c| c.to_string());
-    format!(
-        "clauseo-sandbox-run: turning off Windows Error Reporting for the sandbox user failed ({code})"
-    )
-}
-
-fn check(code: WIN32_ERROR) -> io::Result<()> {
-    if code == ERROR_SUCCESS {
-        return Ok(());
-    }
-    Err(io::Error::from_raw_os_error(
-        i32::try_from(code.0).unwrap_or(i32::MAX),
-    ))
-}
+/// This user's `HKEY_CURRENT_USER`.
+pub(super) struct OsRegistry;
 
 /// An open registry key, closed on drop.
-struct Key(HKEY);
+pub(super) struct Key(HKEY);
 
 impl Drop for Key {
     fn drop(&mut self) {
         // SAFETY: made by RegCreateKeyExW and closed once, here.
         let _closed = unsafe { RegCloseKey(self.0) };
+    }
+}
+
+impl Registry for OsRegistry {
+    type Key = Key;
+
+    fn open(&mut self, path: &str) -> Result<Key, u32> {
+        let subkey = HSTRING::from(path);
+        let mut opened = HKEY::default();
+        // SAFETY: `subkey` is a live NUL-terminated string; no class, attributes or
+        // disposition; `opened` is a live out-pointer, owned by `Key` once written.
+        let code = unsafe {
+            RegCreateKeyExW(
+                HKEY_CURRENT_USER,
+                &subkey,
+                None,
+                PCWSTR::null(),
+                REG_OPTION_NON_VOLATILE | REG_OPTION_OPEN_LINK,
+                KEY_SET_VALUE | KEY_QUERY_VALUE,
+                None,
+                &raw mut opened,
+                None,
+            )
+        };
+        if code != ERROR_SUCCESS {
+            return Err(code.0);
+        }
+        Ok(Key(opened))
+    }
+
+    fn is_link(&mut self, key: &Key) -> Result<bool, u32> {
+        // SAFETY: the key is open for queries; only whether the value exists is asked.
+        let code = unsafe { RegQueryValueExW(key.0, LINK_VALUE, None, None, None, None) };
+        match code {
+            ERROR_SUCCESS => Ok(true),
+            ERROR_FILE_NOT_FOUND => Ok(false),
+            other => Err(other.0),
+        }
+    }
+
+    fn set_dword(&mut self, key: &Key, name: &str, value: u32) -> Result<(), u32> {
+        let name = HSTRING::from(name);
+        // SAFETY: the key is open for setting values; the data is the DWORD's four bytes.
+        let code =
+            unsafe { RegSetValueExW(key.0, &name, None, REG_DWORD, Some(&value.to_le_bytes())) };
+        if code != ERROR_SUCCESS {
+            return Err(code.0);
+        }
+        Ok(())
+    }
+
+    fn dword(&mut self, key: &Key, name: &str) -> Result<Option<u32>, u32> {
+        let name = HSTRING::from(name);
+        let mut kind = REG_VALUE_TYPE::default();
+        let mut data = [0u8; 4];
+        let mut size = u32::try_from(data.len()).unwrap_or(0);
+        // SAFETY: the key is open for queries; `data` is writable for `size` bytes, and `kind`
+        // and `size` are live out-pointers.
+        let code = unsafe {
+            RegQueryValueExW(
+                key.0,
+                &name,
+                None,
+                Some(&raw mut kind),
+                Some(data.as_mut_ptr()),
+                Some(&raw mut size),
+            )
+        };
+        match code {
+            ERROR_SUCCESS if kind == REG_DWORD && size == 4 => Ok(Some(u32::from_le_bytes(data))),
+            ERROR_SUCCESS | ERROR_FILE_NOT_FOUND | ERROR_MORE_DATA => Ok(None),
+            other => Err(other.0),
+        }
     }
 }
 
