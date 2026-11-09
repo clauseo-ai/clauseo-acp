@@ -323,7 +323,7 @@ fn a_jailed_codex_launches_only_in_the_jailed_preset() {
     );
     assert_eq!((fake.reserved(), fake.calls().len()), (1, 1));
     let envs = fake.envs();
-    assert!(!envs.is_empty());
+    assert_eq!(envs.len(), 1);
     for env in &envs {
         assert_eq!(var(env, "INITIAL_AGENT_MODE"), Some("agent-full-access"));
     }

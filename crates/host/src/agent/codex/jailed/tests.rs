@@ -129,7 +129,9 @@ fn values(option: &ConfigOption) -> (String, Vec<String>) {
                 .map(|choice| choice.value.to_string())
                 .collect(),
         ),
-        other => panic!("not a select: {other:?}"),
+        other @ (ConfigOptionKind::Boolean { .. } | ConfigOptionKind::Unknown { .. }) => {
+            panic!("not a select: {other:?}")
+        }
     }
 }
 
