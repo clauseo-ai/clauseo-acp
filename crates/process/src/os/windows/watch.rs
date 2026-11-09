@@ -16,8 +16,10 @@
 use std::os::windows::io::OwnedHandle;
 use std::sync::{Arc, PoisonError};
 
+use windows::Win32::System::Threading::PROCESS_SYNCHRONIZE;
+
 use super::job::accounting;
-use super::{Held, Tree, alive, hold_listed};
+use super::{Held, Tree, alive, hold_listed, job_pids, open};
 
 /// Asks whether the agent's job is empty. Holds the job open (see `TreeWatch`).
 ///
@@ -30,6 +32,8 @@ pub(crate) struct Watch {
     /// The job's processes, held until each has exited; shared with the tree, whose kill adds
     /// the processes it ends.
     held: Held,
+    /// The pids a kill spared (a browser, `spare.rs`): left running, not waited for.
+    spared: Arc<std::sync::Mutex<Vec<u32>>>,
 }
 
 /// A [`Watch`] on `tree`'s job, holding the job's processes now, before any kill.
@@ -37,6 +41,7 @@ pub(crate) fn watch(tree: &Tree) -> Watch {
     let watch = Watch {
         job: Arc::clone(&tree.job),
         held: Arc::clone(&tree.held),
+        spared: Arc::clone(&tree.spared),
     };
     hold_listed(&watch.job, &watch.held);
     watch
@@ -47,15 +52,38 @@ impl Watch {
     /// process held (as the watch was made, by the kill, and from the job's list now, read only
     /// once the count is 0) has exited. False when the count cannot be read, so a caller's wait
     /// fails closed; never true while a held process of the job still holds its handles.
+    ///
+    /// After a kill that spared a browser, the browser and its children are left out: the tree
+    /// is gone once every other process of the job has exited.
     pub(crate) fn gone(&self) -> bool {
-        if active(&self.job) != Some(0) {
+        let spared = self
+            .spared
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        if spared.is_empty() {
+            if active(&self.job) != Some(0) {
+                return false;
+            }
+        } else if !only_spared(&self.job, &spared) {
             return false;
         }
         hold_listed(&self.job, &self.held);
         let mut held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
-        held.retain(|(_, process)| alive(process));
+        held.retain(|(pid, process)| !spared.contains(pid) && alive(process));
         held.is_empty()
     }
+}
+
+/// Whether every process `job` lists that still runs is one of `spared`; false when the list
+/// cannot be read.
+fn only_spared(job: &OwnedHandle, spared: &[u32]) -> bool {
+    job_pids(job).is_some_and(|pids| {
+        pids.iter().all(|pid| {
+            spared.contains(pid)
+                || !open(*pid, PROCESS_SYNCHRONIZE).is_some_and(|process| alive(&process))
+        })
+    })
 }
 
 /// The job's running processes, or `None` when the query fails.

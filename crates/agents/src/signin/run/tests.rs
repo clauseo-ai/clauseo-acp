@@ -389,3 +389,75 @@ fn a_stopped_job_starts_no_run() {
     assert_eq!(ran.ended, Ended::Cancelled);
     assert!(!marker.exists());
 }
+
+/// A launcher that, as it is asked to start a run, has another thread stop the job (the
+/// lawyer's Cancel landing during the spawn), then starts the run.
+struct CancelDuringSpawn {
+    inner: PassthroughLauncher,
+    cancel: Arc<Cancel>,
+    stopper: Mutex<Option<std::thread::JoinHandle<()>>>,
+    /// Whether the stop had already returned when the spawn went ahead.
+    stop_done_first: Mutex<Option<bool>>,
+}
+
+impl clauseo_process::Launcher for CancelDuringSpawn {
+    fn launch(
+        &self,
+        spec: &clauseo_process::LaunchSpec,
+    ) -> Result<clauseo_process::Launched, clauseo_process::Error> {
+        let (done, stopped) = std::sync::mpsc::channel();
+        let cancel = Arc::clone(&self.cancel);
+        let stopper = std::thread::spawn(move || {
+            cancel.stop(Stop::Lawyer(GRACE));
+            done.send(()).unwrap_or_default();
+        });
+        *self.stopper.lock().unwrap() = Some(stopper);
+        // The stop must wait for the spawn: a bounded look, an assertion, never a sync.
+        let first = stopped.recv_timeout(Duration::from_millis(200)).is_ok();
+        *self.stop_done_first.lock().unwrap() = Some(first);
+        self.inner.launch(spec)
+    }
+}
+
+/// A Cancel that lands while the run is being spawned is never lost and never lands between
+/// the last look and the spawn: it waits for the spawn, and the run then sees it and stops,
+/// as a Cancel during the run does. Its spec spares a browser the run opens.
+#[test]
+fn a_cancel_during_the_spawn_waits_for_it_and_then_stops_the_run() {
+    let dir = TestDir::new("run-cancel-during-spawn");
+    let mut spec = spec(&dir, "echo started\nexec cat\n");
+    spec.limit = Duration::from_secs(600);
+    let cancel = Arc::new(Cancel::new());
+    let launcher = CancelDuringSpawn {
+        inner: launcher(),
+        cancel: Arc::clone(&cancel),
+        stopper: Mutex::new(None),
+        stop_done_first: Mutex::new(None),
+    };
+    let (codes, paste) = async_channel::bounded::<PasteCode>(1);
+    let ran = block_on(run(
+        &launcher,
+        &ManualTimer::new(),
+        spec,
+        &cancel,
+        Some(paste),
+        |_| {},
+    ))
+    .unwrap();
+    drop(codes);
+    launcher
+        .stopper
+        .lock()
+        .unwrap()
+        .take()
+        .unwrap()
+        .join()
+        .unwrap();
+    assert_eq!(
+        *launcher.stop_done_first.lock().unwrap(),
+        Some(false),
+        "the stop went through during the spawn"
+    );
+    assert!(ran.started);
+    assert_eq!(ran.ended, Ended::Cancelled);
+}

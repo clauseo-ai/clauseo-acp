@@ -9,7 +9,9 @@
 //! ([`OnStop`], `super::stopping`): it is awaited (a status, a logout), or Codex's browser login
 //! is sent `GET /cancel` when it owns the callback port and is then awaited; it is killed only
 //! when the stop at once follows (the quit's bound) or the lawyer's grace passes. A run whose
-//! job is already stopped is not started at all.
+//! job is already stopped is not started at all: the last look at the stop and the spawn are one
+//! step against the stop ([`Cancel::unless_stopped`]). A browser the run opens is spared by every
+//! stop and kill of its tree (`LaunchSpec::spare_browsers`).
 //!
 //! stdout and stderr go into a 64 KB ring in memory ([`Ring`]) that is never shown or logged,
 //! and each line is offered to a callback as it arrives (the flows look for a device code, a
@@ -196,13 +198,6 @@ pub(crate) async fn run<T: Timer>(
     paste: Option<async_channel::Receiver<PasteCode>>,
     on_line: impl FnMut(&str) + Send,
 ) -> Result<Ran, clauseo_process::Error> {
-    if cancel.is_cancelled() {
-        return Ok(Ran {
-            ended: Ended::Cancelled,
-            output: Ring::default(),
-            started: false,
-        });
-    }
     let on_stop = spec.on_stop;
     let agent = spec.agent;
     let lawyer_home = spec.lawyer_home;
@@ -210,14 +205,25 @@ pub(crate) async fn run<T: Timer>(
     let mut argv = Vec::with_capacity(spec.args.len().saturating_add(1));
     argv.push(spec.script.into_os_string());
     argv.extend(spec.args);
-    let launch = LaunchSpec::new(spec.node, argv, spec.env, spec.cwd)?;
+    // A browser a login opens is the lawyer's: a stop ends the run's tree but spares it.
+    let launch = LaunchSpec::new(spec.node, argv, spec.env, spec.cwd)?.spare_browsers();
+    // The last look at the stop and the spawn are one step (`Cancel::unless_stopped`), with no
+    // await between them: a Cancel before it starts nothing, and one during it waits for the
+    // child, whose stop below then sees it.
+    let Some(launched) = cancel.unless_stopped(|| launcher.launch(&launch)) else {
+        return Ok(Ran {
+            ended: Ended::Cancelled,
+            output: Ring::default(),
+            started: false,
+        });
+    };
     let Launched {
         mut stdin,
         mut stdout,
         stderr,
         mut handle,
         ..
-    } = launcher.launch(&launch)?;
+    } = launched?;
     let root = handle.pid();
     let tree = handle.descendants();
     let ring = Mutex::new(Ring::default());

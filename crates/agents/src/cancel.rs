@@ -93,6 +93,9 @@ pub(crate) struct Cancel {
     quit: AtomicBool,
     /// The graceful stop's kind, when [`Cancel::stop`] set it first.
     how: Mutex<Option<Stop>>,
+    /// Held while a stop is set and while [`Cancel::unless_stopped`] checks and starts, so a
+    /// stop comes either before the check or after the start, never between them.
+    gate: Mutex<()>,
 }
 
 impl Cancel {
@@ -104,12 +107,32 @@ impl Cancel {
             again: Level::new(),
             quit: AtomicBool::new(false),
             how: Mutex::new(None),
+            gate: Mutex::new(()),
         }
+    }
+
+    /// Runs `start` unless a stop is set, as one step against [`Cancel::cancel`] and
+    /// [`Cancel::stop`]: a stop that comes meanwhile waits for `start` to return, so it is
+    /// either seen here (`None`, nothing started) or comes after `start`, whose run then sees it.
+    /// `start` must not block for long (a process spawn) and must not touch this `Cancel`.
+    pub(crate) fn unless_stopped<R>(&self, start: impl FnOnce() -> R) -> Option<R> {
+        let _gate = self.lock_gate();
+        if self.stopped.is_set() {
+            return None;
+        }
+        Some(start())
+    }
+
+    fn lock_gate(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Stops at once: sets both levels, and ends every [`Cancel::cancelled`] and
     /// [`Cancel::killed`] future.
     pub(crate) fn cancel(&self) {
+        let _gate = self.lock_gate();
         self.killed.set();
         self.stopped.set();
     }
@@ -118,6 +141,7 @@ impl Cancel {
     /// [`Cancel::is_killed`]. A later stop does not change the first one's kind; it ends
     /// [`Cancel::stopped_again`].
     pub(crate) fn stop(&self, how: Stop) {
+        let _gate = self.lock_gate();
         if how == Stop::Quit {
             self.quit.store(true, Ordering::SeqCst);
         }
@@ -211,6 +235,20 @@ mod tests {
         futures::executor::block_on(cancel.stopped_again());
         cancel.cancel();
         assert!(cancel.is_killed());
+    }
+
+    /// `unless_stopped` starts nothing once a stop is set, and starts while none is.
+    #[test]
+    fn nothing_starts_once_stopped() {
+        let cancel = Cancel::new();
+        assert_eq!(cancel.unless_stopped(|| 1), Some(1));
+        cancel.stop(Stop::Lawyer(Duration::from_secs(2)));
+        let mut started = false;
+        assert_eq!(cancel.unless_stopped(|| started = true), None);
+        assert!(!started);
+        let killed = Cancel::new();
+        killed.cancel();
+        assert_eq!(killed.unless_stopped(|| 1), None);
     }
 
     #[test]

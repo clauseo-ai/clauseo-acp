@@ -30,7 +30,8 @@
 //! - `FAKE_CODEX_PORT` makes Codex's browser login listen on `127.0.0.1:<port>` as Codex does,
 //!   answering one request at a time: `GET /cancel` prints `Login cancelled` and exits 1 with
 //!   no write (see [`codex_browser_login`]). `FAKE_CODEX_BIND_GATE` names a file it waits for
-//!   before it binds, so a test can stop it before it listens.
+//!   before it binds, so a test can stop it before it listens; `FAKE_STATUS_GATE` one Codex's
+//!   `login status` waits for before it answers.
 //! - File changes go through [`crate::write`], as the rest of the crate's do.
 //!
 //! # Depends on
@@ -106,6 +107,9 @@ const CODEX_STATUS_OUT: &str = "Not logged in";
 /// The variable that makes Codex's `login status` pause this many milliseconds, then write
 /// [`STATUS_FINISHED`] in its home before it answers.
 const STATUS_PAUSE_VAR: &str = "FAKE_STATUS_PAUSE_MS";
+/// The variable naming a file Codex's `login status` waits for before it answers (polled, as
+/// `FAKE_CODEX_BIND_GATE`): a test holds the sign-in's quick check open while it cancels.
+const STATUS_GATE_VAR: &str = "FAKE_STATUS_GATE";
 /// The file a paused status leaves in its home once it finished.
 const STATUS_FINISHED: &str = "fake-status-finished";
 /// The line `codex logout` prints.
@@ -476,6 +480,7 @@ fn codex_status(folder: &Path) -> i32 {
     let pause = std::env::var(STATUS_PAUSE_VAR)
         .ok()
         .and_then(|ms| ms.parse::<u64>().ok());
+    codex_login::wait_for_gate(STATUS_GATE_VAR);
     if let Some(ms) = pause {
         crate::run::effects::pause(std::time::Duration::from_millis(ms));
         write::write(folder.join(STATUS_FINISHED), b"").unwrap_or_default();
