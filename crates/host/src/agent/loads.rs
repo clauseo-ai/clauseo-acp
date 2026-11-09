@@ -17,6 +17,8 @@ pub(crate) mod browser;
 pub(crate) mod case_law;
 mod codex;
 #[cfg(test)]
+mod fence_meta_dump;
+#[cfg(test)]
 mod layering_tests;
 pub(crate) mod profile;
 #[cfg(test)]
@@ -55,8 +57,10 @@ pub(crate) const CLAUDE_SETTING_SOURCES: &[&str] = &["user"];
 /// live). claude.ai connectors stay off too, since [`CLAUDE_AI_MCP_VAR`] is still `false`.
 pub(crate) const CLAUDE_MANAGED_SETTING_SOURCES: &[&str] = &["user"];
 
-/// The permission mode Clauseo runs every Claude session in: Claude Code's `default` ("Manual":
-/// ask before each change). The window cannot pick another mode yet (the desktop bridge refuses
+/// The permission mode Clauseo runs an unjailed or forced-ask Claude session in: Claude Code's
+/// `default` ("Manual": ask before each change). A jailed one that is not forced ask runs in
+/// auto (R17 PR-D2d, [`claude_mode::launch_mode`](crate::agent::claude_mode::launch_mode), the one
+/// place that picks). The window cannot pick another mode yet (the desktop bridge refuses
 /// `SetMode`), so this is Clauseo's choice at every session start. Its cost: a mode the
 /// lawyer reached inside a session (accept edits, from a plan-exit option) goes back to
 /// `default` when the session is next loaded, the safer side. Re-applying the thread's last
@@ -71,7 +75,7 @@ pub(crate) const CLAUDE_MANAGED_SETTING_SOURCES: &[&str] = &["user"];
 /// `permissionMode` over `_meta.claudeCode.options` (`acp-agent.js:7338`; `:388` lists the key
 /// as the adapter's own). So neither `_meta` route can set it: the host sends
 /// `session/set_mode` with this mode before the first prompt when the session started in
-/// another (`actor/turn/session.rs`), and [`session_meta`] takes bypass off the table.
+/// another (`actor/turn/session/claude.rs`), and [`session_meta`] takes bypass off the table.
 pub(crate) const CLAUDE_MODE: &str = "default";
 
 /// The variable that, set to `false`, keeps claude.ai's connectors out of a Claude Code session.

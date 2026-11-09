@@ -168,3 +168,27 @@ fn a_skill_pack_notice_keeps_its_pack_and_reason() {
         serde_json::json!({"skill_pack_not_loaded": {"pack": "nda-kit", "reason": "changed"}})
     );
 }
+
+/// A jailed Claude launch's notice keeps its unit kind into the view and the snapshot, as the
+/// data kinds do: no field is folded, so the snapshot schema stays.
+#[test]
+fn a_claude_auto_notice_keeps_its_kind() {
+    let mut log = Log::thread(47).unwrap();
+    log.push(thread_created().unwrap()).unwrap();
+    let kind = NoticeKind::ClaudeAutoTurnedOff;
+    log.push(Notice {
+        level: NoticeLevel::Info,
+        text: "Claude asks before each change here, because auto mode is turned off on this \
+               computer."
+            .to_owned(),
+        kind: Some(kind.clone()),
+    })
+    .unwrap();
+    let state = fold(log.events());
+    let found = notices(&state);
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].kind, Some(kind));
+    assert_eq!(round_trip(&state), state);
+    let json = serde_json::to_value(found[0]).unwrap();
+    assert_eq!(json["kind"], "claude_auto_turned_off");
+}

@@ -520,4 +520,18 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (431, 0x164b_a10d_5190_e4f3),
         (352, 0xea9a_c835_3682_21be),
     ),
+    (
+        "added/notice-ClaudeAutoUnavailable",
+        include_bytes!("added/notice-ClaudeAutoUnavailable.jsonl"),
+        include_bytes!("added/notice-ClaudeAutoUnavailable.msgpack"),
+        (434, 0x3448_a329_3761_2f82),
+        (355, 0x62c4_1b54_55c6_bdae),
+    ),
+    (
+        "added/notice-ClaudeAutoTurnedOff",
+        include_bytes!("added/notice-ClaudeAutoTurnedOff.jsonl"),
+        include_bytes!("added/notice-ClaudeAutoTurnedOff.msgpack"),
+        (369, 0x9e2f_42bb_9c81_b68f),
+        (290, 0xfebf_6590_600d_d9c4),
+    ),
 ];

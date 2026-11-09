@@ -220,6 +220,50 @@ fn frame_tap_keeps_what_fits_and_counts_the_rest() {
     assert_eq!(kept[1], not_json);
 }
 
+/// An error's `data.details` string (the ACP TypeScript SDK's home for a thrown error's message,
+/// claude-agent-acp 0.89.1's refused `session/set_mode`) is kept, out of the error's text; any
+/// other `data` gives none.
+#[test]
+fn an_error_keeps_its_data_details_out_of_its_text() {
+    let (client, _events, driver, mut agent) = pipes();
+    let calls = async move {
+        client.initialize().await.unwrap();
+        let refused = client.authenticate("browser").await;
+        let details = "Cannot set permission mode to auto: auto mode disabled by settings";
+        let expected = Error::Rpc {
+            code: -32603,
+            message: "Internal error".to_owned(),
+            details: Some(details.to_owned()),
+        };
+        assert_eq!(refused, Err(expected.clone()));
+        assert!(!expected.to_string().contains("auto"), "{expected}");
+        let other = client.authenticate("browser").await;
+        assert!(
+            matches!(other, Err(Error::Rpc { details: None, .. })),
+            "{other:?}"
+        );
+    };
+    let script = async {
+        let init = agent.read().await;
+        agent.respond(&init, &json!({"protocolVersion": 1}));
+        let auth = agent.read().await;
+        agent.send(
+            &json!({"jsonrpc": "2.0", "id": auth["id"], "error": {"code": -32603,
+            "message": "Internal error", "data": {"details":
+            "Cannot set permission mode to auto: auto mode disabled by settings"}}}),
+        );
+        let again = agent.read().await;
+        agent.send(
+            &json!({"jsonrpc": "2.0", "id": again["id"], "error": {"code": -32603,
+            "message": "Internal error", "data": {"details": 7}}}),
+        );
+        assert!(agent.written.next().await.is_none());
+    };
+    let (driver, (), ()) =
+        futures::executor::block_on(async { futures::join!(driver, calls, script) });
+    assert_eq!(driver, Ok(()));
+}
+
 #[test]
 fn terminal_auth_method_sends_nothing() {
     let (client, _events, driver, mut agent) = pipes();

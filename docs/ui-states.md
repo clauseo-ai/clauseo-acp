@@ -105,6 +105,8 @@ entries page in on scroll through `HostQuery::PageEntries`, which returns `Query
 | Host notice: an unjailed ChatGPT switched itself to working without asking, the switch back failed, and Clauseo stopped it | `NoticeKind::ModeSetBackFailed` | none; the app's own words (the host's English `text` until it renders the kind) |
 | Host notice of a kind from a newer Clauseo | `NoticeKind::Unknown` | text, the host's English fallback |
 | Host notice: a skill pack the launch left out | `NoticeKind::SkillPackNotLoaded`, with `pack` (the pack's id) and `reason` (`PackSkipReason`) | the pack and the reason in the app's own words (the host's English `text` until the app renders the kind) |
+| Host notice: a jailed Claude launch runs without auto mode, unavailable for this sign-in (acceptEdits: edits without asking, programs ask) | `NoticeKind::ClaudeAutoUnavailable` | none; the app's own words (the host's English `text` until the app renders the kind) |
+| Host notice: a jailed Claude launch runs without auto mode, turned off on this computer by a `disableAutoMode` setting (default: asks before each change) | `NoticeKind::ClaudeAutoTurnedOff` | none; the app's own words (the host's English `text` until the app renders the kind) |
 | Compaction started and completed | `ViewEntry::Marker` with `MarkerKind::Compaction`: `CompactionStatus::Started`, `CompactionStatus::Completed` | summary (inline or blob) when completed |
 | Undo marker | `ViewEntry::Marker` with `MarkerKind::StepUndone` | the step's turn, the new checkpoint, restored paths, kept paths |
 | Restore marker | `ViewEntry::Marker` with `MarkerKind::VersionRestored` | the version restored from, the new checkpoint, scope |

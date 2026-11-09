@@ -315,6 +315,7 @@ fn error_codes_map() {
             Error::Rpc {
                 code: -32603,
                 message: String::new(),
+                details: None,
             },
             ErrorCode::AgentProtocolError,
         ),

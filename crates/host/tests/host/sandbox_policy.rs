@@ -200,7 +200,7 @@ impl ProfileHook for KeyHook {
 fn a_jailed_claude_s_spec_carries_every_variable_it_needs_with_nothing_inherited() {
     let dir = Dir::new(
         "sandbox_policy_claude_env",
-        &[(CLAUDE, Scenario::Bundled("claude-prompt-stream"))],
+        &[(CLAUDE, Scenario::Local("claude-jailed-prompt-stream"))],
     );
     let (fake, _) = Fake::new(&dir, Answer::Launch(Vec::new()));
     let (host, _, _) = start_with(&dir, Some(Arc::clone(&fake)), |config| {
@@ -245,7 +245,7 @@ fn a_jailed_claude_s_spec_carries_every_variable_it_needs_with_nothing_inherited
 fn a_jailed_claude_gets_no_inherited_credential_and_the_runtime_s_path() {
     let dir = Dir::new(
         "sandbox_policy_claude_allow_list",
-        &[(CLAUDE, Scenario::Bundled("claude-prompt-stream"))],
+        &[(CLAUDE, Scenario::Local("claude-jailed-prompt-stream"))],
     );
     let (fake, _) = Fake::new(&dir, Answer::Launch(Vec::new()));
     let inherited: Vec<(OsString, OsString)> = [

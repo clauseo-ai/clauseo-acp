@@ -266,6 +266,53 @@ The orchestrator's conditions, which the later pull requests must meet:
   Codex's alike, sees only its own matter's state folder, never another matter's;
 - a state folder is made in under 50 ms at launch (PR-C).
 
+### R17 PR-D2d: jailed Claude works on its own in Claude Code's auto mode
+
+**Decision** (Rohan, 2026-11-09, via the orchestrator; the design's "A/B auto, C ask": research
+24 §2.4 and §6.2 `mode = "auto"`, 22 §3.3 step 4 "auto mode inside the OS sandbox"). A Claude
+launch through the sandbox's launchers (tiers A and B) that is not forced ask runs in Claude
+Code's `auto`: no prompt for an edit or a command, a classifier model reviewing each action.
+Every other Claude launch (tier C, forced ask) keeps `default`, with forced ask's set-back on
+drift. `agent::claude_mode::launch_mode(jailed, forced_ask)` is the one place that picks; the
+launch records `jailed` on its agent, and `session/claude.rs` switches the session before its
+first prompt. It is decided at each launch, never stored: a restart and a `session/load` are
+launches, so a thread loaded once jailed and once unjailed gets each launch's mode, whatever the
+resumed transcript says. Claude's own moves (plan and back) are logged and left alone. Jailed
+Codex is unchanged. R17 PR-D2f's "protection switched off" (auto without the jail) is the one
+planned unjailed exception; it adds its row to the tests that pin "no unjailed auto"
+(`agent/claude_mode/tests.rs`, `tests/host/claude_auto.rs`).
+
+**The fences hold in auto** (measured 2026-11-09 with the pinned claude-agent-acp 0.89.1, Agent
+SDK 0.3.293 and CLI 2.1.293 against a local fake Messages API, with the `_meta` the host really
+generates and the real guard program; `crates/host/tests/live/claude_fences/`, run by hand since
+CI has neither node nor the pinned packages). In `auto`, `acceptEdits` and `default` alike: the
+data folder's deny rules refuse Read, Write and Edit and the Bash forms Claude Code parses
+(`cat`, `echo >`, `cp`), with no classifier call; the pre-write guard's hook runs and its block
+holds; `disallowedTools` and the web rules refuse WebSearch and WebFetch; the proxy's variables
+reach every command. One difference: a shell form the deny rules do not parse
+(`python3 -c "open(…)"`) goes to auto's classifier instead of a permission request, so the host's
+auto-deny (the tier-C stand-in, `agent/data_fence.rs`) never sees it. Accepted, since auto runs
+only jailed, and the jail hides the data folder whole (`launch_checks/sandbox/policy.rs`, the
+`hidden` list).
+
+**A refused auto never fails the launch** (the orchestrator's ruling). A `disableAutoMode`
+setting, the firm's managed policy or the lawyer's own (the CLI refuses `session/set_mode` with
+"auto mode disabled by settings" in the error's `data.details`, the same for both; `clauseo_acp`
+now keeps `data.details`), falls back to `default`. Any other refusal (the plan, a server switch)
+and an adapter offering no auto fall back to `acceptEdits`, fenced by the jail; so does the
+adapter's own fallback for a model without auto, which it answers with `current_mode_update
+acceptEdits`. The cause is logged by kind; the thread gets one notice per fallback for the host's
+run (`NoticeKind::ClaudeAutoTurnedOff`, `ClaudeAutoUnavailable`; no view field changes, so
+`REDUCER_SCHEMA_VERSION` stays).
+
+**Known gaps.** Auto's pause (3 refusals in a row, 20 in all) reaches the host as an ordinary
+permission request, asked as any other; the design's "Clauseo stopped to ask you" card is R18's.
+When the API rejects auto's beta header, `session/set_mode` succeeds, the CLI trips its own
+breaker (a later `session/set_mode auto` is refused, "unavailable for your plan") and tells the
+client nothing (measured: no update, no notice, no log line the host reads), so the host cannot
+tell. Claude then behaves as the CLI's own fallback decides; in the measurement it kept sending
+each action to the classifier, as auto does.
+
 ## Consequences
 
 - The window can build its Protected and Not protected states against a fixed wire before the

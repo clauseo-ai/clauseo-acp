@@ -1,0 +1,10 @@
+{"scenario":"claude-auto-turned-off-load","description":"The relaunch after claude-auto-turned-off: session/load in default, set_mode auto refused the same way, one prompt","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/load","as":"load","params":{"sessionId":"sess-1","cwd":"{{any}}","_meta":{"claudeCode":{"options":{"allowDangerouslySkipPermissions":false}}}}}}
+{"respond":{"to":"load","result":{"modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Manual"},{"id":"acceptEdits","name":"Accept edits"},{"id":"plan","name":"Plan"},{"id":"auto","name":"Auto"}]}}}}
+{"expect":{"method":"session/set_mode","as":"to-auto","params":{"sessionId":"sess-1","modeId":"auto"}}}
+{"respond":{"to":"to-auto","error":{"code":-32603,"message":"Internal error","data":{"details":"Cannot set permission mode to auto: auto mode disabled by settings"}}}}
+{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-2","content":{"type":"text","text":"Answer 2."}}}}
+{"respond":{"to":"p2","result":{"stopReason":"end_turn"}}}

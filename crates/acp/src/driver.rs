@@ -492,9 +492,16 @@ fn rpc_error(shared: &Shared, error: agent_client_protocol::Error) -> Error {
         let methods = shared.state().auth_methods.clone();
         return Error::AuthRequired { methods };
     }
+    let details = error
+        .data
+        .as_ref()
+        .and_then(|data| data.get("details"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
     Error::Rpc {
         code: error.code.into(),
         message: error.message,
+        details,
     }
 }
 

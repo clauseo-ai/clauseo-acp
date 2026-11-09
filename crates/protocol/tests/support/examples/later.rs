@@ -156,6 +156,20 @@ pub(super) fn notices() -> Vec<DomainEvent> {
                 .to_owned(),
             kind: Some(NoticeKind::ModeSetBackFailed),
         },
+        Notice {
+            level: NoticeLevel::Info,
+            text: "Claude's auto mode isn't available for this sign-in, so Claude will ask before \
+                   running programs. It still changes files in this matter without asking."
+                .to_owned(),
+            kind: Some(NoticeKind::ClaudeAutoUnavailable),
+        },
+        Notice {
+            level: NoticeLevel::Info,
+            text: "Claude asks before each change here, because auto mode is turned off on this \
+                   computer."
+                .to_owned(),
+            kind: Some(NoticeKind::ClaudeAutoTurnedOff),
+        },
     ];
     notices.extend(
         [

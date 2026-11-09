@@ -30,6 +30,11 @@ pub enum Error {
         code: i32,
         /// Its message.
         message: String,
+        /// The string at its `data.details`, if any: the ACP TypeScript SDK puts the message of an
+        /// error a handler threw there, under the message "Internal error" (claude-agent-acp
+        /// 0.89.1's refused `session/set_mode`, R17 PR-D2d). Not in the error's text: it is the
+        /// agent's own words and may name a path.
+        details: Option<String>,
     },
     /// The agent broke the protocol: a line over 8 MiB, or an answer the driver cannot use.
     #[error("the agent broke the protocol: {0}")]

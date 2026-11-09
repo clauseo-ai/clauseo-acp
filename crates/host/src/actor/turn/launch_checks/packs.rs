@@ -255,11 +255,13 @@ pub(crate) fn skipped_text(skipped: &[(String, PackSkip)]) -> String {
 
 /// A thread's notices of skipped skill packs: what its last launch skipped, until its session
 /// attaches, and what the thread was already told, by pack and reason, for the host's run. It
-/// lives with the thread's turn state, so a relaunch keeps it.
+/// lives with the thread's turn state, so a relaunch keeps it. It also keeps which of Claude's
+/// auto-mode fallbacks the thread was told of (R17 PR-D2d, `session/claude.rs`), on the same rule.
 #[derive(Debug, Default)]
 pub(crate) struct PackNotices {
     pending: Vec<(String, PackSkip)>,
     shown: HashSet<(PackId, PackSkipReason)>,
+    claude: HashSet<crate::agent::claude_mode::Fallback>,
 }
 
 /// Holds `skipped` (the launch `thread` just started) for its session's notice.
@@ -277,6 +279,15 @@ pub(crate) fn pack_notices(actor: &mut Actor, thread: ThreadId) -> Vec<Notice> {
 }
 
 impl PackNotices {
+    /// Whether the thread is to be told of Claude's auto-mode `fallback` now: the first time
+    /// for the host's run.
+    pub(in crate::actor::turn) fn told_claude(
+        &mut self,
+        fallback: crate::agent::claude_mode::Fallback,
+    ) -> bool {
+        self.claude.insert(fallback)
+    }
+
     /// The notices for what is pending that the thread was not told of yet, keyed by pack and
     /// the reason, so two refusal kinds that read the same are told once.
     fn untold(&mut self) -> Vec<Notice> {

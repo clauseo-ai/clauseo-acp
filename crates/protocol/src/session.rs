@@ -316,6 +316,14 @@ open_data_enum! {
         /// works without asking, the host's switch back to the ask mode failed or went
         /// unanswered, so the host stopped the agent.
         ModeSetBackFailed = "mode_set_back_failed",
+        /// A jailed Claude launch could not run in Claude Code's auto mode for a reason nobody at
+        /// the firm chose (the plan, a server switch, the model): it changes files in the matter
+        /// without asking and asks before running programs (`acceptEdits`).
+        ClaudeAutoUnavailable = "claude_auto_unavailable",
+        /// A jailed Claude launch could not run in Claude Code's auto mode because a
+        /// `disableAutoMode` setting (the firm's policy or the lawyer's own Claude settings)
+        /// turned it off: it asks before each change (`default`).
+        ClaudeAutoTurnedOff = "claude_auto_turned_off",
         _ =>
         /// A kind from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
@@ -332,6 +340,8 @@ open_data_enum! {
         },
         NoticeKind::ReadOnlyUnavailable,
         NoticeKind::ModeSetBackFailed,
+        NoticeKind::ClaudeAutoUnavailable,
+        NoticeKind::ClaudeAutoTurnedOff,
     ];
 }
 

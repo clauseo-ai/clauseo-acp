@@ -165,6 +165,14 @@ fn notice_kind() {
         &NoticeKind::ReadOnlyUnavailable,
     );
     decodes_in_both(r#""mode_set_back_failed""#, &NoticeKind::ModeSetBackFailed);
+    decodes_in_both(
+        r#""claude_auto_unavailable""#,
+        &NoticeKind::ClaudeAutoUnavailable,
+    );
+    decodes_in_both(
+        r#""claude_auto_turned_off""#,
+        &NoticeKind::ClaudeAutoTurnedOff,
+    );
     let pack = PackId::new("nda-kit").unwrap();
     let skipped = NoticeKind::SkillPackNotLoaded {
         pack,

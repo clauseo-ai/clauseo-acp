@@ -55,6 +55,11 @@ impl Counting {
     pub(crate) fn specs(&self) -> Vec<LaunchSpec> {
         self.specs.lock().unwrap().clone()
     }
+
+    /// Each next launch plays these scenarios, in order, the last one again ([`Fake::play`]).
+    pub(crate) fn play(&self, scenarios: &[Scenario]) {
+        *self.plays.lock().unwrap() = scenarios.to_vec();
+    }
 }
 
 impl Launcher for Counting {

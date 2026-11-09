@@ -110,6 +110,9 @@ pub(super) struct Agent {
     /// A Claude agent whose launch's folder check found a network drive or a drive without
     /// permissions: it runs in forced ask (`agent/forced_ask.rs`).
     pub(super) forced_ask: bool,
+    /// The mode a Claude agent's launch asks for (`agent/claude_mode.rs`): auto when it went
+    /// through the sandbox's launchers and is not forced ask. Decided at each launch, never stored.
+    pub(super) launch_mode: &'static str,
     /// A Claude agent's plans folder, `<config folder>/plans`, from its launch's environment
     /// (`agent/plan_note.rs`); `None` for any other agent.
     pub(super) plan_notes: Option<PathBuf>,
@@ -211,6 +214,7 @@ pub(super) fn launch_now(
         let matter = prepared.run.key.matter;
         tracing::info!(%matter, forced_ask, "Claude runs in forced ask: the matter folder is unprotected");
     }
+    let launch_mode = agent::claude_mode::launch_mode(prepared.sandbox.is_some(), forced_ask);
     let mut tree = None;
     let (link, folder, codex, plan_notes) = match launch(actor, thread, prepared, &mut tree) {
         Ok(launched) => launched,
@@ -260,6 +264,7 @@ pub(super) fn launch_now(
         codex,
         mcp_commands: Vec::new(),
         forced_ask,
+        launch_mode,
         plan_notes,
         denied_data_folder: 0,
         idle: super::idle::Mark::default(),

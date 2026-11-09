@@ -256,7 +256,10 @@ fn option_mode(options: &[ConfigOption]) -> Option<CompactString> {
 /// `mode` came from the agent (`current_mode_update`). A jailed Codex's is ignored, and its
 /// session put back in the preset if it left it, unlogged; any other is logged, and switched
 /// back when forced ask's set does not hold it, or when an unjailed Codex moved itself to a mode
-/// that approves without asking which the lawyer did not send it (`unjailed::moved`).
+/// that approves without asking which the lawyer did not send it (`unjailed::moved`). A jailed
+/// Claude's that is not forced ask (in auto, R17 PR-D2d) is logged and left alone, as an
+/// unjailed one's always was: Claude moving to plan and back is Claude's to do, and none of its
+/// own moves leaves the jail.
 pub(super) fn agent_moved(
     actor: &mut Actor,
     thread: ThreadId,
