@@ -121,7 +121,7 @@ fn a_killed_process_still_listed_is_not_killed_again_and_doesnt_keep_the_rounds_
     // rounds" a sweep.
     for point in [Point::Tick, Point::End] {
         let mut fake = machine();
-        fake.lists_the_dead = true;
+        fake.ends = Ends::Listed;
         fake.procs.insert(1628, pool_proc(CHROME));
         let (got, lines) = run(&mut fake, &[], point);
         assert_eq!(got, Ok(vec![1628]), "{point}");
@@ -197,10 +197,10 @@ fn a_process_in_a_job_of_its_own_is_found_by_its_user_and_killed() {
 
 #[test]
 fn a_pid_reused_with_another_creation_time_isnt_taken_for_the_survivor_and_isnt_killed() {
-    // The inner started at 1000. 1628 survives its kill; by the next round it has gone and a
+    // The inner started at 1000. 1628 survives its kill; by the next round it has ended and a
     // process of the job (created at 1500) has its pid. Known by pid alone it would be the
-    // survivor, asked to end again and reported; by pid and creation time it is a new process,
-    // kept as the job's.
+    // survivor; by pid and creation time it is a new process, kept as the job's. The
+    // survivor's own handle, asked again, is signalled: it is killed.
     let mut fake = machine();
     fake.procs.insert(
         1628,
@@ -225,14 +225,84 @@ fn a_pid_reused_with_another_creation_time_isnt_taken_for_the_survivor_and_isnt_
         )],
     );
     let (got, _) = run(&mut fake, &[10], Point::Tick);
-    assert_eq!(got, Ok(vec![13]));
-    assert_eq!(
-        fake.asked,
-        [13, 1628],
-        "the job's process isn't asked to end"
-    );
+    assert_eq!(got, Ok(vec![13, 1628]));
+    // The second ask is the survivor's handle's, which the job's process isn't.
+    assert_eq!(fake.asked, [13, 1628, 1628]);
+    assert_eq!(fake.killed, [13]);
     assert_eq!(
         fake.procs.get(&1628).map(|p| p.image),
         Some("agent-child.exe")
     );
+}
+
+#[test]
+fn a_survivor_that_drops_out_of_the_lists_is_still_a_survivor() {
+    // The verdict is the held handle's: once asked to end, 1628 is in neither list, yet still
+    // runs. Each round's end looks at its handle, listed or not.
+    for spawns in [false, true] {
+        let mut fake = machine();
+        fake.procs.insert(1628, pool_proc(CHROME));
+        fake.stays.insert(1628, u32::MAX);
+        fake.vanish.insert(1628);
+        if spawns {
+            // A second round, which lists no 1628.
+            fake.procs.insert(13, pool_proc("stray.exe"));
+            fake.spawns.insert(13, (40, pool_proc("child.exe")));
+        }
+        let (got, _) = run(&mut fake, &[], Point::Tick);
+        assert_eq!(
+            got,
+            Err(SweepError::Left {
+                count: 1,
+                unkillable: 1,
+                images: vec![CHROME.to_owned()],
+            }),
+            "{spawns}"
+        );
+        assert!(fake.procs.contains_key(&1628));
+    }
+}
+
+#[test]
+fn one_deadline_caps_every_wait_of_a_sweep() {
+    // 15 survivors: the first 12 kills wait KILL_WAIT each, the deadline's whole 60 s; the rest
+    // wait for nothing, and all 15 are survivors.
+    let mut fake = machine();
+    for pid in 100..115 {
+        fake.procs.insert(pid, pool_proc(CHROME));
+        fake.stays.insert(pid, u32::MAX);
+    }
+    let (got, _) = run(&mut fake, &[], Point::Tick);
+    assert!(
+        matches!(
+            got,
+            Err(SweepError::Left {
+                count: 15,
+                unkillable: 15,
+                ..
+            })
+        ),
+        "{got:?}"
+    );
+    let full = usize::try_from(SWEEP_DEADLINE.as_secs() / KILL_WAIT.as_secs()).unwrap();
+    assert_eq!(fake.waits, vec![KILL_WAIT; full]);
+    assert_eq!(fake.clock, SWEEP_DEADLINE);
+}
+
+#[test]
+fn a_sweep_whose_kills_keep_it_going_past_its_deadline_stops_there() {
+    // A process that starts another each time it is killed, beside five strays, each kill taking
+    // KILL_WAIT: the first round's six kills take 30 s and each later round's one 5 s, so the
+    // eighth round would begin at the deadline, and doesn't.
+    let mut fake = machine();
+    fake.procs.insert(12, pool_proc("hydra.exe"));
+    for pid in 100..105 {
+        fake.procs.insert(pid, pool_proc("stray.exe"));
+    }
+    fake.forever = Some(12);
+    fake.ends = Ends::Slowly;
+    let (got, _) = run(&mut fake, &[], Point::Tick);
+    assert_eq!(got, Err(SweepError::Deadline));
+    assert_eq!(fake.clock, SWEEP_DEADLINE);
+    assert_eq!(fake.killed.len(), 12);
 }

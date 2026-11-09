@@ -82,6 +82,9 @@ pub(crate) const TICK: Duration = Duration::from_secs(30);
 const ROUNDS: usize = 8;
 /// How long a killed process has to be gone (its handle signalled) before it is a survivor.
 pub(crate) const KILL_WAIT: Duration = Duration::from_secs(5);
+/// The most one sweep waits on processes' ends, every kill's and refusal's together: past it, no
+/// wait is longer than none, and the sweep ends with what its held handles say.
+pub(crate) const SWEEP_DEADLINE: Duration = Duration::from_secs(60);
 /// The exit code a swept process ends with: the runner's `RunExit` range's last code.
 pub(crate) const SWEPT: u32 = super::RUN_EXIT_BASE + 0xff;
 /// The most image names an escapee report carries.
@@ -157,6 +160,8 @@ pub(crate) trait Processes {
     fn exited(&mut self, process: &Self::Process, wait: Duration) -> bool;
     /// Waits `pause` before the next look at a refused process.
     fn pause(&mut self, pause: Duration);
+    /// A monotonic clock's reading, from any origin: the sweep's deadline is on it.
+    fn now(&mut self) -> Duration;
 }
 
 /// Why a sweep failed. Its text names a pid, an image name and an OS code, nothing else.
@@ -191,6 +196,9 @@ pub(crate) enum SweepError {
     /// The pool user still had new processes after every round.
     #[error("the sandbox user still started processes after {ROUNDS} rounds")]
     StillRunning,
+    /// The sweep's waits reached its deadline with processes still to look at.
+    #[error("the sweep ran out of its time with the sandbox user's processes still to end")]
+    Deadline,
     /// The creation time of one of them couldn't be read.
     #[error("the sandbox user's process {pid} ({image}) has no start time ({code})")]
     Started {
@@ -241,6 +249,7 @@ impl SweepError {
             SweepError::List(_)
             | SweepError::JobList(_)
             | SweepError::StillRunning
+            | SweepError::Deadline
             | SweepError::Started { .. }
             | SweepError::Left { .. }
             | SweepError::OwnStart { .. } => None,
@@ -259,6 +268,7 @@ pub(crate) fn sweep<P: Processes>(
     log: &mut dyn FnMut(&str),
 ) -> Result<Vec<u32>, SweepError> {
     let mut killed = Killed::new();
+    let deadline = calls.now().saturating_add(SWEEP_DEADLINE);
     let own = calls
         .own_start()
         .map_err(|e| SweepError::OwnStart { code: code(&e) })?;
@@ -280,6 +290,11 @@ pub(crate) fn sweep<P: Processes>(
         failures.count = 0;
         failures.unkillable = 0;
         failures.images.clear();
+        // Out of time: the held handles are the verdict, each survivor's looked at once more.
+        if calls.now() >= deadline {
+            kill::settle(calls, &mut killed, point, &mut failures, log)?;
+            return Err(failures.verdict(SweepError::Deadline));
+        }
         let seen = list(calls)?;
         let mut opened = Vec::new();
         for found in seen
@@ -306,7 +321,12 @@ pub(crate) fn sweep<P: Processes>(
                 .map_err(|e| SweepError::JobList(code(&e)))?,
             Point::Start | Point::Tick | Point::End => Vec::new(),
         };
-        let rule = Rule { point, own, job };
+        let rule = Rule {
+            point,
+            own,
+            job,
+            deadline,
+        };
         let mut round = 0usize;
         let mut refused = Vec::new();
         for (found, process) in opened {
@@ -320,29 +340,25 @@ pub(crate) fn sweep<P: Processes>(
                 Done::Failed(error) => failures.add(error, log)?,
             }
         }
-        let (ended, left) = refused::wait_out(calls, refused);
+        let budget = deadline.saturating_sub(calls.now());
+        let (ended, left) = refused::wait_out(calls, refused, budget);
         for gone in ended {
             log(&gone.exited_line(point));
-            killed
-                .entries
-                .push((gone.found.pid, gone.started, gone.process));
+            killed.ended(gone.found.pid, gone.started, gone.process);
             round += 1;
         }
         for still in left {
             failures.add(failed(still.found, &still.error, Step::Kill), log)?;
         }
+        round += kill::settle(calls, &mut killed, point, &mut failures, log)?;
         if round == 0 {
             return match failures.count {
                 0 => Ok(killed.pids()),
-                count => Err(SweepError::Left {
-                    count,
-                    unkillable: failures.unkillable,
-                    images: failures.images,
-                }),
+                _ => Err(failures.left()),
             };
         }
     }
-    Err(SweepError::StillRunning)
+    Err(failures.verdict(SweepError::StillRunning))
 }
 
 /// What a round keeps besides `keep`.
@@ -352,6 +368,8 @@ struct Rule {
     own: u64,
     /// The pids of its job's processes, read this round; empty where none is kept.
     job: Vec<u32>,
+    /// When the sweep's waits end ([`Processes::now`]).
+    deadline: Duration,
 }
 
 /// Whether the process `pid`, created at `started`, is kept as one of the inner's job: `job`,
@@ -384,6 +402,25 @@ struct Failures {
 }
 
 impl Failures {
+    /// The verdict of a sweep cut short (out of rounds or time): [`SweepError::Left`] when the
+    /// last round counted an escapee (a survivor among them), which the inner reports; else
+    /// `otherwise`.
+    fn verdict(&mut self, otherwise: SweepError) -> SweepError {
+        if self.unkillable == 0 {
+            return otherwise;
+        }
+        self.left()
+    }
+
+    /// The round's failures as [`SweepError::Left`].
+    fn left(&mut self) -> SweepError {
+        SweepError::Left {
+            count: self.count,
+            unkillable: self.unkillable,
+            images: std::mem::take(&mut self.images),
+        }
+    }
+
     fn add(&mut self, error: SweepError, log: &mut dyn FnMut(&str)) -> Result<(), SweepError> {
         if self.point == Point::Start {
             return Err(error);
@@ -416,6 +453,7 @@ fn pid_of(error: &SweepError) -> u32 {
         SweepError::List(_)
         | SweepError::JobList(_)
         | SweepError::StillRunning
+        | SweepError::Deadline
         | SweepError::Left { .. }
         | SweepError::OwnStart { .. } => 0,
     }
