@@ -172,7 +172,8 @@ impl Launcher {
 pub(crate) struct Shared {
     pub(crate) launcher: Launcher,
     pub(crate) state: Mutex<State>,
-    /// Where the agent's lines go: the guard's stdout, or the connected client (`relay/clients.rs`).
+    /// Where the agent's lines go: the guard's stdout, or the connected client
+    /// (`relay/clients.rs`).
     pub(crate) out: Out,
     /// Set once the agent has closed stdin and the close request is going out.
     pub(crate) closing: AtomicBool,
