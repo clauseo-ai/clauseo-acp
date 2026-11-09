@@ -1,7 +1,7 @@
 // The updater's manifest, latest.json, and the table of a release's assets. release.yml's
 // `assemble` job runs this file; latest-json.test.mjs tests it and lints release.yml.
 //
-//   node .github/scripts/latest-json.mjs <dir> <version> <base-url> <pub-date> <sandbox-exe>
+//   node .github/scripts/latest-json.mjs <dir> <version> <base-url> <pub-date> [<sandbox-exe>]
 //   node .github/scripts/latest-json.mjs --verify <file> <public-key-file> [<signed-name> <version>]
 //   node .github/scripts/latest-json.mjs --key-id <exe> <mode>
 //
@@ -16,7 +16,8 @@
 // prints one line per missing tier 2 asset, `missing <name>`, for the release notes.
 // <sandbox-exe> is release.yml's SANDBOX_EXE, the name S15's set-up tool has in the install folder;
 // it is published per architecture as <name>-<arch>.exe with its updater-key `.sig`, so that IT can
-// check a copy against the release. Exit status: 0 when latest.json is written, 1 when an asset or
+// check a copy against the release. It is given only with release.yml's SAFE_WORKSPACE switch on;
+// the Safe workspace is off for launch, so without it the release has no sandbox tool rows. Exit status: 0 when latest.json is written, 1 when an asset or
 // a signature is wrong, 2 on a usage error.
 // --verify checks <file>.sig (tauri signer's format: base64 of minisign's text) against <file>
 // and the base64 public key in <public-key-file>, trusted comment included, and with <signed-name>
@@ -529,15 +530,19 @@ function main(argv) {
     }
     return problems.length === 0 ? 0 : 1;
   }
-  if (argv.length !== 5 || !SANDBOX_EXE.test(argv[4])) {
+  if (
+    argv[0]?.startsWith("--") ||
+    (argv.length !== 4 && argv.length !== 5) ||
+    (argv.length === 5 && !SANDBOX_EXE.test(argv[4]))
+  ) {
     process.stderr.write(
-      "usage: node latest-json.mjs <dir> <version> <base-url> <pub-date> <sandbox-exe>\n" +
+      "usage: node latest-json.mjs <dir> <version> <base-url> <pub-date> [<sandbox-exe>]\n" +
         "       node latest-json.mjs --verify <file> <public-key-file> [<signed-name> <version>]\n" +
         "       node latest-json.mjs --key-id <exe> <mode>\n",
     );
     return 2;
   }
-  const [dir, version, baseUrl, pubDate, sandboxExe] = argv;
+  const [dir, version, baseUrl, pubDate, sandboxExe = null] = argv;
   const { manifest, missing, problems } = buildManifest(dir, version, baseUrl, pubDate, sandboxExe);
   if (problems.length > 0) {
     for (const problem of problems) {

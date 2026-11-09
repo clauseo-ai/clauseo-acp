@@ -28,14 +28,17 @@ fn the_per_user_installer_asks_once_by_starting_itself_elevated_and_never_in_upd
     let code = hook_code();
     let post = macro_body(&code, "NSIS_HOOK_POSTINSTALL");
     // The mode block's last lines: the ask, then repair mode's relaunch (repair.rs); only the
-    // set-up program check (setup_exe_missing.rs) follows.
+    // set-up program check (setup_exe_missing.rs) follows. The ask only with the Safe workspace on
+    // (safe_workspace_off.rs).
     let end = post.iter().rposition(|line| line == "!endif").unwrap() + 1;
-    let tail: Vec<&str> = post[end - 4..end].iter().map(String::as_str).collect();
+    let tail: Vec<&str> = post[end - 6..end].iter().map(String::as_str).collect();
     assert_eq!(
         tail,
         [
             "!else",
+            "!ifdef CLAUSEO_SAFE_WORKSPACE",
             &format!("!insertmacro {ASK}"),
+            "!endif",
             "!insertmacro CLAUSEO_REPAIR_RELAUNCH",
             "!endif"
         ],

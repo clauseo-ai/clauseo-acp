@@ -1,9 +1,11 @@
 # Release builds: one commit becomes every installer, the updater's files, latest.json and
 # SHA256SUMS.txt. docs/decisions/0035-release-builds.md records why it is built this way.
-# SHA256SUMS.txt covers every asset. Those include S15's sandbox tool (SANDBOX_EXE below) per
-# Windows architecture with its updater-key .sig: the same exe and .sig both installers place in
-# the install folder, which assemble checks, and the release notes repeat its SHA-256 for IT to
-# compare a copy Defender restored from quarantine.
+# SHA256SUMS.txt covers every asset. With SAFE_WORKSPACE (below) "true", those include S15's
+# sandbox tool (SANDBOX_EXE below) per Windows architecture with its updater-key .sig: the same exe
+# and .sig both installers place in the install folder, which assemble checks, and the release
+# notes repeat its SHA-256 for IT to compare a copy Defender restored from quarantine. The Safe
+# workspace is off for launch (SAFE_WORKSPACE "false"): no sandbox exe is built, signed, bundled
+# or published, and assemble checks that neither Windows installer holds one.
 #
 # Three modes, which `check` decides from what started the run:
 # - release: a pushed tag v<X.Y.Z> on a commit on main. Builds under the environment `release`
@@ -79,6 +81,12 @@ env:
   # it as crates/desktop/binaries/<name>-<target>.exe). The one place its name is written here and
   # in latest-json.test.mjs.
   SANDBOX_EXE: clauseo-sandbox-setup.exe
+  # The Safe workspace switch (decision 0035, "Safe workspace off for launch"), "false" for launch.
+  # "true" turns it all back on in this one place: sidecars.mjs builds and lists the sandbox tool
+  # (--safe-workspace), sign-windows signs it and bundles with windows/hooks_safe_workspace.nsh,
+  # which defines CLAUSEO_SAFE_WORKSPACE for hooks.nsh (the elevated set-up and removal), and
+  # assemble publishes and checks it. Exactly "true" or "false"; sidecars.mjs refuses anything else.
+  SAFE_WORKSPACE: "false"
 
 jobs:
   # What started the run, and whether it may: the mode, the version, the environment of the jobs
@@ -495,7 +503,7 @@ jobs:
       - name: Sidecars for this target
         run: |
           set -euo pipefail
-          node .github/scripts/sidecars.mjs "$TARGET"
+          node .github/scripts/sidecars.mjs --safe-workspace="$SAFE_WORKSPACE" "$TARGET"
           node .github/scripts/sidecars.mjs --check "$TARGET"
 
       # CLAUSEO_RELEASE_DATE is set only for a tag (release and test); unset, the app has none.
@@ -905,8 +913,10 @@ jobs:
 
       # S15's sandbox tool, with the updater key the currentUser installer is signed with below,
       # after SignPath (which changes its bytes) and before NSIS: its .sig is over the bytes that
-      # ship. tauri signer writes <exe>.sig beside it, for both installers and the Release.
+      # ship. tauri signer writes <exe>.sig beside it, for both installers and the Release. Only
+      # with the Safe workspace on: off, sidecars.mjs built no sandbox tool.
       - name: Sign the sandbox tool for the updater
+        if: env.SAFE_WORKSPACE == 'true'
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ needs.check.outputs.mode == 'release' && secrets.TAURI_SIGNING_PRIVATE_KEY || needs.check.outputs.mode == 'test' && secrets.TAURI_SIGNING_PRIVATE_KEY_TEST || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ needs.check.outputs.mode == 'release' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || needs.check.outputs.mode == 'test' && secrets.TAURI_SIGNING_PRIVATE_KEY_TEST_PASSWORD || '' }}
@@ -937,15 +947,23 @@ jobs:
       # resources and externalBin alike under $INSTDIR, each at its target name. That exe and .sig
       # also go on the Release as <name>-<arch>.exe and .exe.sig. A merge patch merges objects, so
       # its bundle.resources entry joins blocklist.conf.json's two rather than replacing them.
+      # The same overlay names windows/hooks_safe_workspace.nsh as the installer hooks, after
+      # windows.conf.json's hooks.nsh: it defines CLAUSEO_SAFE_WORKSPACE, which turns on the
+      # elevated set-up and removal. All of that only with the Safe workspace on; off, the overlay
+      # is empty, so the installers take hooks.nsh alone and ship no sandbox tool and no .sig.
       - name: Bundle the currentUser and perMachine installers
         run: |
           set -euo pipefail
           mkdir -p "$OUT"
           nsis=$RELEASE_DIR/bundle/nsis
           sig=binaries/${SANDBOX_EXE%.exe}-$TARGET.exe.sig
-          [ -f "crates/desktop/$sig" ] || { echo "::error::no crates/desktop/$sig"; exit 1; }
-          node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ bundle: { resources: { [process.argv[2]]: process.argv[3] } } }))' \
-            "$RUNNER_TEMP/sandbox-sig.conf.json" "$sig" "$SANDBOX_EXE.sig"
+          if [ "$SAFE_WORKSPACE" = true ]; then
+            [ -f "crates/desktop/$sig" ] || { echo "::error::no crates/desktop/$sig"; exit 1; }
+            node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ bundle: { resources: { [process.argv[2]]: process.argv[3] }, windows: { nsis: { installerHooks: process.argv[4] } } } }))' \
+              "$RUNNER_TEMP/safe-workspace.conf.json" "$sig" "$SANDBOX_EXE.sig" windows/hooks_safe_workspace.nsh
+          else
+            echo '{}' > "$RUNNER_TEMP/safe-workspace.conf.json"
+          fi
           # makensis's warnings (an unused LangString, a macro left out, a jump to nowhere) don't fail its
           # compile, and the bundler hides makensis's output unless --verbose. So both bundles run verbose
           # into one log (each call piped to tee; pipefail keeps tauri's own exit code), which must hold
@@ -957,7 +975,7 @@ jobs:
             pnpm -C ui tauri bundle --ci --verbose --target "$TARGET" ${FEATURES:+--features "$FEATURES"} --bundles nsis \
               --no-binary-patching --no-sign --config release/release.conf.json --config release/blocklist.conf.json \
               --config release/windows.conf.json "$@" \
-              --config "$RUNNER_TEMP/sandbox-sig.conf.json" --config release/sidecars.generated.json
+              --config "$RUNNER_TEMP/safe-workspace.conf.json" --config release/sidecars.generated.json
           }
           bundle 2>&1 | tee -a "$log"
           mv "$nsis/Clauseo_${VERSION}_${{ matrix.arch }}-setup.exe" "$OUT/"
@@ -973,9 +991,11 @@ jobs:
             grep -E -A40 '(^|[^0-9])[0-9]+ warnings?:' "$log"
             exit 1
           fi
-          asset=${SANDBOX_EXE%.exe}-${{ matrix.arch }}.exe
-          cp "crates/desktop/${sig%.sig}" "$OUT/$asset"
-          cp "crates/desktop/$sig" "$OUT/$asset.sig"
+          if [ "$SAFE_WORKSPACE" = true ]; then
+            asset=${SANDBOX_EXE%.exe}-${{ matrix.arch }}.exe
+            cp "crates/desktop/${sig%.sig}" "$OUT/$asset"
+            cp "crates/desktop/$sig" "$OUT/$asset.sig"
+          fi
           ls -l "$OUT"
 
       # Whatever the installers ship, not a list (ADR 0035, "The C runtime"): 7-Zip reads NSIS, so
@@ -1210,12 +1230,20 @@ jobs:
           done
           # A dry run publishes nothing; its URLs point at a tag that does not exist.
           base="https://github.com/$GITHUB_REPOSITORY/releases/download/${TAG:-dry-run}"
-          node .github/scripts/latest-json.mjs dist "$VERSION" "$base" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SANDBOX_EXE" > missing.txt
+          # The sandbox tool's rows only with the Safe workspace on (SAFE_WORKSPACE).
+          pub_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          if [ "$SAFE_WORKSPACE" = true ]; then
+            node .github/scripts/latest-json.mjs dist "$VERSION" "$base" "$pub_date" "$SANDBOX_EXE" > missing.txt
+            sandbox_exe=$SANDBOX_EXE
+          else
+            node .github/scripts/latest-json.mjs dist "$VERSION" "$base" "$pub_date" > missing.txt
+            sandbox_exe=""
+          fi
           # Nothing but the table's assets, their .sig and latest.json.
           known=$(node --input-type=module -e "
             import { assets } from './.github/scripts/latest-json.mjs';
-            for (const a of assets(process.argv[1], process.argv[2])) console.log(a.platforms || a.signed ? a.name + '\n' + a.name + '.sig' : a.name);
-          " "$VERSION" "$SANDBOX_EXE")
+            for (const a of assets(process.argv[1], process.argv[2] || null)) console.log(a.platforms || a.signed ? a.name + '\n' + a.name + '.sig' : a.name);
+          " "$VERSION" "$sandbox_exe")
           for file in dist/*; do
             name=$(basename "$file")
             [ "$name" = latest.json ] || grep -qxF "$name" <<< "$known" ||
@@ -1223,10 +1251,12 @@ jobs:
           done
           (cd dist && sha256sum -- * > ../SHA256SUMS.txt) && mv SHA256SUMS.txt dist/
           (cd dist && sha256sum -c SHA256SUMS.txt)
-          # S15's sandbox tool: per architecture, both installers must place exactly the published
-          # exe and its .sig at the install folder's root, and the .sig (and the currentUser
-          # installer's) must hold under this mode's updater public key. Both architectures are tier
-          # 1, so all four files of each must be here (latest-json.mjs has already required them).
+          # S15's sandbox tool, with the Safe workspace on: per architecture, both installers must
+          # place exactly the published exe and its .sig at the install folder's root, and the .sig
+          # must hold under this mode's updater public key. Off, neither installer may hold any
+          # file of the sandbox's. Either way the currentUser installer's .sig must hold. Both
+          # architectures are tier 1, so all of each one's files must be here (latest-json.mjs has
+          # already required them).
           updater_pub() {
             case "$MODE" in
               dry) cat "$RUNNER_TEMP/pub/dry-updater-pub-$1/dry-updater.key.pub" ;;
@@ -1241,19 +1271,29 @@ jobs:
               arm64) target=aarch64-pc-windows-msvc label="Windows ARM64" ;;
             esac
             exe=dist/${SANDBOX_EXE%.exe}-$arch.exe
-            files=("dist/Clauseo_${VERSION}_${arch}-setup.exe" "dist/Clauseo_${VERSION}_${arch}-machine-setup.exe" "$exe" "$exe.sig")
+            files=("dist/Clauseo_${VERSION}_${arch}-setup.exe" "dist/Clauseo_${VERSION}_${arch}-machine-setup.exe")
+            [ "$SAFE_WORKSPACE" != true ] || files+=("$exe" "$exe.sig")
             present=0
             for file in "${files[@]}"; do [ ! -f "$file" ] || present=$((present + 1)); done
-            [ "$present" = 4 ] || { echo "::error::the $arch leg left $present of ${files[*]}"; exit 1; }
+            [ "$present" = "${#files[@]}" ] || { echo "::error::the $arch leg left $present of ${files[*]}"; exit 1; }
             pub=$RUNNER_TEMP/updater-$arch.pub
             updater_pub "$target" > "$pub" || true
             [ -n "$(tr -d '[:space:]' < "$pub")" ] || { echo "::error::no updater public key for $arch in a $MODE run"; exit 1; }
             # Each signed for this version, under the name it was signed as (the trusted comment's
-            # file:): the sandbox tool as installed, the installer as published.
-            node .github/scripts/latest-json.mjs --verify "$exe" "$pub" "$SANDBOX_EXE" "$VERSION" ||
-              { echo "::error::$(basename "$exe").sig does not hold under the $MODE updater key for file:$SANDBOX_EXE, version:$VERSION"; exit 1; }
+            # file:): the installer as published and, with the Safe workspace on, the sandbox tool
+            # as installed.
             node .github/scripts/latest-json.mjs --verify "${files[0]}" "$pub" "$(basename "${files[0]}")" "$VERSION" ||
               { echo "::error::$(basename "${files[0]}").sig does not hold under the $MODE updater key"; exit 1; }
+            if [ "$SAFE_WORKSPACE" != true ]; then
+              for installer in "${files[0]}" "${files[1]}"; do
+                listing=$(7z l -slt -ba "$installer" | sed -n 's/^Path = //p')
+                ! grep -qiF "${SANDBOX_EXE%-*}" <<< "$listing" ||
+                  { echo "::error::$(basename "$installer") holds a sandbox file with the Safe workspace off"; exit 1; }
+              done
+              continue
+            fi
+            node .github/scripts/latest-json.mjs --verify "$exe" "$pub" "$SANDBOX_EXE" "$VERSION" ||
+              { echo "::error::$(basename "$exe").sig does not hold under the $MODE updater key for file:$SANDBOX_EXE, version:$VERSION"; exit 1; }
             # The updater key ID the tool was built with (its VERSIONINFO string UpdaterKeyId, stage
             # C) must be this mode's: test's updater-test.pub, release's tauri.conf.json pubkey, dry's
             # the same when set, else build.rs's placeholder (latest-json.mjs, expectedKeyId). A tool
@@ -1328,14 +1368,17 @@ jobs:
               echo "Not in this release (a tier 2 build failed):"
               sed 's/^missing /- /' missing.txt
             fi
-            echo
-            echo "## Inside the Windows installers"
-            echo
-            echo "Both Windows installers of an architecture, per-user and per-machine, place the same \`$SANDBOX_EXE\`, Clauseo's sandbox tool, and its signature \`$SANDBOX_EXE.sig\` in the install folder. Both are on this release too, under the asset name below. IT can compare a copy restored from quarantine with this SHA-256 (\`Get-FileHash\` in PowerShell)."
-            echo
-            echo "| architecture | asset | SHA-256 of $SANDBOX_EXE |"
-            echo "|---|---|---|"
-            printf '%s\n' "${inside[@]}"
+            # The sandbox tool's hashes, only with the Safe workspace on.
+            if [ "$SAFE_WORKSPACE" = true ]; then
+              echo
+              echo "## Inside the Windows installers"
+              echo
+              echo "Both Windows installers of an architecture, per-user and per-machine, place the same \`$SANDBOX_EXE\`, Clauseo's sandbox tool, and its signature \`$SANDBOX_EXE.sig\` in the install folder. Both are on this release too, under the asset name below. IT can compare a copy restored from quarantine with this SHA-256 (\`Get-FileHash\` in PowerShell)."
+              echo
+              echo "| architecture | asset | SHA-256 of $SANDBOX_EXE |"
+              echo "|---|---|---|"
+              printf '%s\n' "${inside[@]}"
+            fi
           } > notes.md
           {
             echo "### Release assets, $MODE"

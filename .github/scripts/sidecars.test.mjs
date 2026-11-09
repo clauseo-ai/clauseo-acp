@@ -8,12 +8,14 @@
 // ci.yml's fast lane runs it beside latest-json.test.mjs.
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   MACOS_HELPER,
   PREFIX,
@@ -24,6 +26,7 @@ import {
   overlayProblem,
   placeSidecars,
   reproducibleEnv,
+  safeWorkspaceOption,
 } from "./sidecars.mjs";
 
 const scratch = await mkdtemp(join(tmpdir(), "sidecars-test-"));
@@ -46,8 +49,11 @@ async function pin(dir, { none = [], missing = [] } = {}) {
   return path;
 }
 
-/** A fresh repo root, with a cargo stub (synchronous, as cargo runs) and a fetch stub that record their calls. */
-async function setup(pinOptions) {
+/**
+ * A fresh repo root, with a cargo stub (synchronous, as cargo runs) and a fetch stub that record
+ * their calls. `safeWorkspace` is release.yml's switch, off (left out) unless given.
+ */
+async function setup(pinOptions, { safeWorkspace } = {}) {
   const root = await mkdtemp(join(scratch, "root-"));
   const cargoCalls = [];
   const cargoEnvs = [];
@@ -56,6 +62,7 @@ async function setup(pinOptions) {
   const options = {
     root,
     targetDir: "target",
+    safeWorkspace,
     commitTime: () => "1700000000",
     cargo: (args, extra) => {
       cargoCalls.push(args);
@@ -115,14 +122,19 @@ test("the table ships clauseo-mcp and clauseo-agent-browser on every release tar
   );
   assert.equal(MACOS_HELPER, "clauseo-agent-browser");
   assert.equal(STETDOC, "clauseo-stetdoc");
+  // Only the sandbox's set-up tool is the Safe workspace's.
+  assert.deepEqual(
+    SIDECARS.filter((s) => s.safeWorkspace).map((s) => s.name),
+    ["clauseo-sandbox-setup"],
+  );
 });
 
-test("the table lists clauseo-sandbox-setup on the Windows targets only, built from clauseo-sandbox", async () => {
+test("with the Safe workspace on, clauseo-sandbox-setup ships on the Windows targets only, built from clauseo-sandbox", async () => {
   const setupRow = SIDECARS.find((s) => s.name === "clauseo-sandbox-setup");
   assert.deepEqual(setupRow.targets, RELEASE_TARGETS.filter(isWindows));
   for (const triple of RELEASE_TARGETS) assert.equal(setupRow.targets.includes(triple), isWindows(triple), triple);
   for (const triple of RELEASE_TARGETS) {
-    const env = await setup();
+    const env = await setup(undefined, { safeWorkspace: true });
     const externalBin = await env.run(triple);
     assert.equal(externalBin.includes("binaries/clauseo-sandbox-setup"), isWindows(triple), triple);
     const setupCalls = env.cargoCalls.filter((args) => args.includes("clauseo-sandbox"));
@@ -154,11 +166,50 @@ test("a sidecar named without the clauseo- prefix fails before anything is place
   await assert.rejects(env.overlay(), { code: "ENOENT" });
 });
 
+test("with the Safe workspace off, the default, no target builds, places or lists a sandbox exe", async () => {
+  for (const safeWorkspace of [undefined, false]) {
+    for (const triple of RELEASE_TARGETS) {
+      const env = await setup(undefined, { safeWorkspace });
+      const mac = isDarwin(triple);
+      // On macOS agent-browser goes to Contents/Helpers (bundle.macOS.files), not externalBin.
+      const externalBin = mac ? ["binaries/clauseo-mcp"] : ["binaries/clauseo-mcp", "binaries/clauseo-agent-browser"];
+      assert.deepEqual(await env.run(triple), externalBin, triple);
+      assert.deepEqual(
+        await env.overlay(),
+        { bundle: mac ? { externalBin, macOS: MAC_FILES(triple) } : { externalBin, resources: STETDOC_RES(triple) } },
+        triple,
+      );
+      assert.equal(overlayProblem(await env.overlay(), triple), null, triple);
+      for (const file of await env.binaries()) assert.doesNotMatch(file, /sandbox/, `${triple}: ${file}`);
+      assert.deepEqual(env.cargoCalls.filter((args) => args.includes("clauseo-sandbox")), [], triple);
+    }
+  }
+});
+
+test("the switch's option is exactly --safe-workspace=true or =false, and the CLI refuses any other", () => {
+  assert.equal(safeWorkspaceOption("--safe-workspace=true"), true);
+  assert.equal(safeWorkspaceOption("--safe-workspace=false"), false);
+  for (const bad of ["--safe-workspace", "--safe-workspace=", "--safe-workspace=1", "--safe-workspace=True"]) {
+    assert.equal(safeWorkspaceOption(bad), null, bad);
+  }
+  const script = join(dirname(fileURLToPath(import.meta.url)), "sidecars.mjs");
+  for (const args of [
+    ["--safe-workspace=yes", "x86_64-pc-windows-msvc"],
+    ["--safe-workspace=true"],
+    ["--safe-workspace=true", "--check"],
+    ["--safe-workspace=true", "--setup-exe", "x86_64-pc-windows-msvc"],
+  ]) {
+    const result = spawnSync(process.execPath, [script, ...args], { encoding: "utf8" });
+    assert.equal(result.status, 2, `${args.join(" ")}: ${result.stderr}`);
+    assert.match(result.stderr, /^usage: /, args.join(" "));
+  }
+});
+
 for (const triple of RELEASE_TARGETS) {
   const win = isWindows(triple);
   const mac = isDarwin(triple);
-  test(`${triple}: the overlay lists every sidecar for the target, and the copies are named for it`, async () => {
-    const env = await setup();
+  test(`${triple}: with the Safe workspace on, the overlay lists every sidecar for the target, and the copies are named for it`, async () => {
+    const env = await setup(undefined, { safeWorkspace: true });
     const names = ["clauseo-mcp", "clauseo-agent-browser", ...(win ? ["clauseo-sandbox-setup"] : []), "clauseo-stetdoc"];
     // On macOS agent-browser goes to Contents/Helpers (bundle.macOS.files), not externalBin;
     // stetdoc is never in externalBin, but in a folder of its own.
@@ -191,7 +242,7 @@ for (const triple of RELEASE_TARGETS) {
 }
 
 test("a triple the pin marks none leaves agent-browser out of the overlay", async () => {
-  const env = await setup({ none: ["aarch64-pc-windows-msvc"] });
+  const env = await setup({ none: ["aarch64-pc-windows-msvc"] }, { safeWorkspace: true });
   const externalBin = ["binaries/clauseo-mcp", "binaries/clauseo-sandbox-setup"];
   assert.deepEqual(await env.run("aarch64-pc-windows-msvc"), externalBin);
   assert.deepEqual(await env.overlay(), { bundle: { externalBin, resources: STETDOC_RES("aarch64-pc-windows-msvc") } });
@@ -362,7 +413,7 @@ test("a target stetdoc's pin marks pending fails the seam and leaves no overlay"
 });
 
 test("only the setup exe's build gets the path remaps, after the job's rustflags", async () => {
-  const env = await setup();
+  const env = await setup(undefined, { safeWorkspace: true });
   await env.run("x86_64-pc-windows-msvc");
   const at = env.cargoCalls.findIndex((args) => args.includes("clauseo-sandbox"));
   const flags = env.cargoEnvs[at].CARGO_ENCODED_RUSTFLAGS.split("\x1f");

@@ -118,10 +118,24 @@
 ; source test the_installer_scripts_use_only_known_nsis_variables checks the names as well.
 !pragma warning error 6000 ; an unknown variable name is an error, not a silent literal (the COMMONAPPDATA bug)
 
+; The Safe workspace's elevated set-up is off for launch (decision 0035, "Safe workspace off for
+; launch"): with CLAUSEO_SAFE_WORKSPACE undefined, the release default, the installers never start
+; themselves elevated, never write or run the set-up program, never write the machine's Sandbox
+; record, and the uninstaller never starts the elevated removal. Defining it turns all of it back
+; on: hooks_safe_workspace.nsh does, and release.yml's SAFE_WORKSPACE switch names that file as
+; the hooks and has sidecars.mjs build the set-up program. The per-machine temporary folder and
+; the in-place uninstall stay either way.
+;
 ; The admin copy of the sandbox's set-up program (S15 tier B) is in admin_copy.nsh, included
 ; here: the elevated instance's branch, which the template's .onInit block inserts
-; (admin_elevated.nsh), and the macros NSIS_HOOK_POSTINSTALL ends with.
+; (admin_elevated.nsh), and the macros NSIS_HOOK_POSTINSTALL ends with. It includes
+; safe_temp.nsh and uninstall_in_place.nsh itself; with the Safe workspace off those two come here.
+!ifdef CLAUSEO_SAFE_WORKSPACE
 !include "${__FILEDIR__}\admin_copy.nsh"
+!else
+!include "${__FILEDIR__}\safe_temp.nsh"
+!include "${__FILEDIR__}\uninstall_in_place.nsh"
+!endif
 
 ; Repair mode (the paragraph "Repair" above): the switch, how long the installer waits for
 ; Clauseo to go and how often it looks, and 1 when the per-user installer was given the switch.
@@ -495,6 +509,10 @@ Var ClauseoRepair
         !error "hooks.nsh supports only the currentUser and perMachine install modes"
       !endif
     !endif
+    ; With the Safe workspace off (CLAUSEO_SAFE_WORKSPACE undefined, the release default) the
+    ; removal and the missing-tool line are left out: nothing elevated starts, $R5 stays 0 and
+    ; the app keeps any `sandbox\` folder.
+    !ifdef CLAUSEO_SAFE_WORKSPACE
     !ifndef CLAUSEO_REMOVE
       !if "${INSTALLMODE}" == "perMachine"
         !define CLAUSEO_REMOVE "--remove --uninstall --per-machine"
@@ -615,6 +633,7 @@ Var ClauseoRepair
         ${EndIf}
       ${EndIf}
     ${EndIf}
+    !endif
 
     ; 2. The data folders, deleted by the app.
     ${If} $DeleteAppDataCheckboxState = 1
@@ -945,15 +964,21 @@ Var ClauseoRepair
     ${EndIf}
     ; The x64 installer on an ARM64 computer names the native one (a details line only).
     !insertmacro CLAUSEO_NATIVE_ARM64_NOTICE
-    ; The admin copy, every run (admin_copy.nsh).
-    !insertmacro CLAUSEO_ADMIN_COPY_MACHINE
+    ; The admin copy, every run (admin_copy.nsh), only with the Safe workspace on.
+    !ifdef CLAUSEO_SAFE_WORKSPACE
+      !insertmacro CLAUSEO_ADMIN_COPY_MACHINE
+    !endif
     Pop $R9
     Pop $R8
     Pop $R7
     Pop $R6
     Pop $R5
   !else
-    !insertmacro CLAUSEO_ASK_FOR_THE_ADMIN_SECTION
+    ; The per-user installer's ask (admin_copy.nsh), only with the Safe workspace on: off, it
+    ; never starts itself elevated, so no UAC prompt.
+    !ifdef CLAUSEO_SAFE_WORKSPACE
+      !insertmacro CLAUSEO_ASK_FOR_THE_ADMIN_SECTION
+    !endif
     !insertmacro CLAUSEO_REPAIR_RELAUNCH
   !endif
 !macroend
