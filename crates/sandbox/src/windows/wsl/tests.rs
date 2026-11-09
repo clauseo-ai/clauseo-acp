@@ -477,7 +477,7 @@ fn a_package_with_no_msi_is_unverifiable_where_wsl_2_can_run_and_refuses_nothing
     fake.packages = vec![package("3.0.3.0")];
     assert_eq!(check(&fake), Err(Blocked::WslDenyUnverifiable));
     // The package alone, before its MSI is in (no service, no class): WSL is present, but no VM
-    // can run until the MSI's install, whose events start the refresh; nothing is refused.
+    // can run until the MSI's install, whose events start the WSL deny task; nothing is refused.
     let mut fake = FakeWsl {
         group: Some(group()),
         record: Some(WslRecord::default()),

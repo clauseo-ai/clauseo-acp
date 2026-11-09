@@ -11,6 +11,8 @@ use super::FolderOwner;
 use crate::windows::apply::Surroundings;
 use crate::windows::ledger::Ledger;
 use crate::windows::pool::MachineRecord;
+#[cfg(any(windows, test))]
+use crate::windows::refresh::SystemTask;
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::setup::{MachineError, ProfileDir};
 use crate::windows::sids::Sid;
@@ -32,9 +34,10 @@ pub trait Removal {
     fn delete_record(&mut self) -> Result<(), MachineError>;
     /// The record's `AdminCopyOwner`: who placed the admin copy, `None` when there is none.
     fn copy_owner(&mut self) -> Result<Option<CopyOwner>, MachineError>;
-    /// Deletes the SYSTEM tasks `\Clauseo\SandboxStop` and `\Clauseo\SandboxSweep`
-    /// (`refresh::POOL_TASKS`, `refresh::unregister_task`); one already gone is `Ok`.
-    fn unregister_stop_task(&mut self) -> Result<(), MachineError>;
+    /// Deletes the SYSTEM task `task` (one of `refresh::MACHINE_TASKS`,
+    /// `refresh::unregister_task`); one already gone is `Ok`.
+    #[cfg(any(windows, test))]
+    fn unregister_task(&mut self, task: SystemTask) -> Result<(), MachineError>;
     /// The user who asked: the token user of the parent Windows recorded for this process,
     /// checked against ID reuse (`Owner::of_parent`, D-B2). `None` when it can't be found.
     fn invoker(&self) -> Option<&Sid>;

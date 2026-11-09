@@ -72,7 +72,7 @@ pub enum Found {
 ///   so for good (the Store package installed, its MSI never run), so "let the update complete"
 ///   would never end. With either service installed, WSL 2 can run beside an MSI WSL doesn't
 ///   record: [`Blocked::WslDenyUnverifiable`]. With neither, no WSL VM can run until the MSI
-///   is in, and its install's events start the refresh, which writes the deny: nothing is
+///   is in, and its install's events start the WSL deny task, which writes the deny: nothing is
 ///   refused.
 ///
 /// With no WSL nothing is refused. A record with no group names no deny, so every target is

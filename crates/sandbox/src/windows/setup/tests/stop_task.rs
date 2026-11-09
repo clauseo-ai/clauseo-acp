@@ -1,6 +1,6 @@
-//! The per-machine stop and sweep tasks (`late_steps::stop_task`, `remove::remove_stop_task`): on
-//! a per-machine install the set-up registers `\Clauseo\SandboxStop` and `\Clauseo\SandboxSweep`
-//! for the owner it records (one `Machine` call, `refresh::POOL_TASKS` on Windows), a new
+//! The per-machine tasks (`late_steps::machine_tasks`, `remove::remove_machine_tasks`): on a
+//! per-machine install the set-up registers `\Clauseo\SandboxStop`, `\Clauseo\SandboxSweep`
+//! and `\Clauseo\SandboxWslDeny` for the owner it records (`refresh::MACHINE_TASKS`), a new
 //! owner's set-up replaces a previous owner's, the removal deletes them before the record, and a
 //! failed registration fails the set-up closed. A per-user install is left to `--adopt`.
 
@@ -16,10 +16,17 @@ fn installed(test: &str, copy: Option<CopyOwner>) -> FakeMachine {
     machine
 }
 
-/// The owner the stop task names, as its relative id.
+/// The owner the stop task names, as its relative id, once the sweep and WSL deny tasks name
+/// the same.
 fn task_owner(machine: &FakeMachine) -> Option<String> {
+    assert_eq!(machine.state.stop_task, machine.state.sweep_task);
+    assert_eq!(machine.state.stop_task, machine.state.wsl_task);
     machine.state.stop_task.as_ref().map(rid)
 }
+
+const STOP_1001: &str = "register_task SandboxStop 1001";
+const SWEEP_1001: &str = "register_task SandboxSweep 1001";
+const WSL_1001: &str = "register_task SandboxWslDeny 1001";
 
 #[test]
 fn per_machine_set_up_registers_the_stop_task_for_the_recorded_owner() {
@@ -29,21 +36,27 @@ fn per_machine_set_up_registers_the_stop_task_for_the_recorded_owner() {
     assert_eq!(task_owner(&machine).as_deref(), Some("1001"));
     // Registered once the record names the owner, before anything after the users' steps.
     let calls = machine.calls_since(0);
-    let at = calls.iter().position(|c| *c == "register_stop_task 1001");
+    let at = calls.iter().position(|c| *c == STOP_1001);
     let at = at.unwrap_or_else(|| panic!("{calls:?}"));
+    assert_eq!(calls[at + 1], SWEEP_1001);
+    assert_eq!(calls[at + 2], WSL_1001);
     let last_write = calls.iter().rposition(|c| c.starts_with("write_record"));
     assert!(last_write.is_some_and(|write| write < at), "{calls:?}");
     let mut expected = fresh_calls();
-    expected.insert(at - 1, "register_stop_task 1001".to_owned());
-    // The admin copy's lock (`admin_lock.rs`) comes just before it.
+    // The admin copy's lock (`admin_lock.rs`) comes just before the tasks.
     expected.insert(at - 1, "lock_admin_copy 1000".to_owned());
+    expected.insert(at, STOP_1001.to_owned());
+    expected.insert(at + 1, SWEEP_1001.to_owned());
+    expected.insert(at + 2, WSL_1001.to_owned());
     assert_eq!(calls, expected);
     // A re-run registers it again, over the one there.
     let from = machine.calls.len();
     let req = request(&mut machine, 0, Vec::new());
     set_up(&mut machine, &mut acl, &req).unwrap();
     let again = machine.calls_since(from);
-    assert!(again.contains(&"register_stop_task 1001"), "{again:?}");
+    assert!(again.contains(&STOP_1001), "{again:?}");
+    assert!(again.contains(&SWEEP_1001), "{again:?}");
+    assert!(again.contains(&WSL_1001), "{again:?}");
     assert_eq!(task_owner(&machine).as_deref(), Some("1001"));
 }
 
@@ -53,6 +66,8 @@ fn a_new_owners_set_up_replaces_the_previous_owners_task() {
     // delete it): the new owner's set-up names the new owner alone.
     let mut machine = installed("setup-stop-task-owner", Some(CopyOwner::Machine));
     machine.state.stop_task = Some(Sid::parse(OTHER_OWNER).unwrap());
+    machine.state.sweep_task = Some(Sid::parse(OTHER_OWNER).unwrap());
+    machine.state.wsl_task = Some(Sid::parse(OTHER_OWNER).unwrap());
     let mut acl = FakeAcl::default();
     set_up_fresh(&mut machine, &mut acl);
     assert_eq!(task_owner(&machine).as_deref(), Some("1001"));
@@ -64,7 +79,7 @@ fn a_new_owners_set_up_replaces_the_previous_owners_task() {
 fn a_failed_registration_fails_the_set_up_closed() {
     let mut machine = installed("setup-stop-task-fail", Some(CopyOwner::Machine));
     let before = machine.state.clone();
-    machine.fail("register_stop_task 1001");
+    machine.fail(STOP_1001);
     let mut acl = FakeAcl::default();
     let req = request(&mut machine, 0, Vec::new());
     let failure = set_up(&mut machine, &mut acl, &req).unwrap_err();
@@ -76,6 +91,36 @@ fn a_failed_registration_fails_the_set_up_closed() {
     // Everything the run made is gone again: no record, no pool user, no task.
     assert_eq!(machine.state, before);
     assert!(acl.aces.is_empty(), "{:?}", acl.aces);
+    // The sweep's or the WSL deny task's registration failing fails it the same way, naming
+    // that task.
+    let sweep_failed = |machine: &FakeMachine| machine.state.sweep_task.clone();
+    let wsl_failed = |machine: &FakeMachine| machine.state.wsl_task.clone();
+    let cases: [(_, _, _, fn(&FakeMachine) -> Option<Sid>); 2] = [
+        (
+            "setup-sweep-task-fail",
+            SWEEP_1001,
+            "SandboxSweep",
+            sweep_failed,
+        ),
+        (
+            "setup-wsl-task-fail",
+            WSL_1001,
+            "SandboxWslDeny",
+            wsl_failed,
+        ),
+    ];
+    for (test, call, name, failed_task) in cases {
+        let mut machine = installed(test, Some(CopyOwner::Machine));
+        machine.fail(call);
+        let mut acl = FakeAcl::default();
+        let req = request(&mut machine, 0, Vec::new());
+        let failure = set_up(&mut machine, &mut acl, &req).unwrap_err();
+        assert_eq!(failure.step, Step::StopTask, "{test}");
+        assert!(failure.rolled_back, "{failure:?}");
+        assert!(failure.cause.contains(name), "{}", failure.cause);
+        assert_eq!(machine.state.record, None, "{test}");
+        assert_eq!(failed_task(&machine), None, "{test}");
+    }
 }
 
 #[test]
@@ -98,6 +143,8 @@ fn per_user_and_copyless_set_ups_register_nothing() {
             .collect();
         assert_eq!(calls, fresh_calls(), "{test}");
         assert_eq!(machine.state.stop_task, None, "{test}");
+        assert_eq!(machine.state.sweep_task, None, "{test}");
+        assert_eq!(machine.state.wsl_task, None, "{test}");
     }
 }
 
@@ -109,37 +156,60 @@ fn pool(test: &str, copy: Option<CopyOwner>) -> (Remover, super::remove_fake::Re
     set_up_fresh(&mut machine, &mut acl);
     // Per user, `--adopt` registered it; the fake set-up didn't.
     machine.state.stop_task = Some(owner());
+    machine.state.sweep_task = Some(owner());
+    machine.state.wsl_task = Some(owner());
     let remover = Remover::new(machine, Some(owner()));
     let acl = remover.acl(acl);
     (remover, acl)
 }
 
 #[test]
-fn removing_a_per_machine_pool_deletes_the_stop_task_before_the_record() {
+fn removing_a_per_machine_pool_deletes_its_tasks_before_the_record() {
     let (mut machine, mut acl) = pool("remove-stop-task", Some(CopyOwner::Machine));
     remove(&mut machine, &mut acl, true).unwrap();
     let lines = machine.lines();
-    let at = lines.iter().position(|l| l == "unregister_stop_task");
+    let at = lines
+        .iter()
+        .position(|l| l == "unregister_task SandboxStop");
     let at = at.unwrap_or_else(|| panic!("{lines:?}"));
-    assert_eq!(lines[at + 1], "delete_record");
+    assert_eq!(lines[at + 1], "unregister_task SandboxSweep");
+    assert_eq!(lines[at + 2], "unregister_task SandboxWslDeny");
+    assert_eq!(lines[at + 3], "delete_record");
     assert_eq!(machine.m.state.stop_task, None);
+    assert_eq!(machine.m.state.sweep_task, None);
+    assert_eq!(machine.m.state.wsl_task, None);
     assert_eq!(machine.m.state.record, None);
     // A deletion that fails stops the removal there, the record kept for the next run.
-    let (mut machine, mut acl) = pool("remove-stop-task-fail", Some(CopyOwner::Machine));
-    machine.fail_at.set(Some(at));
-    let failure = remove(&mut machine, &mut acl, true).unwrap_err();
-    assert_eq!(failure.step, RemoveStep::StopTask);
-    assert_eq!(failure.exit, SetupExit::RemovedPartly);
-    assert!(machine.m.state.record.as_ref().is_some_and(|r| r.removing));
-    assert!(machine.m.state.stop_task.is_some());
-    remove(&mut machine, &mut acl, true).unwrap();
-    assert_eq!(machine.m.state.stop_task, None);
+    for (test, fail) in [
+        ("remove-stop-task-fail", at),
+        ("remove-sweep-task-fail", at + 1),
+        ("remove-wsl-task-fail", at + 2),
+    ] {
+        let (mut machine, mut acl) = pool(test, Some(CopyOwner::Machine));
+        machine.fail_at.set(Some(fail));
+        let failure = remove(&mut machine, &mut acl, true).unwrap_err();
+        assert_eq!(failure.step, RemoveStep::StopTask);
+        assert_eq!(failure.exit, SetupExit::RemovedPartly);
+        assert!(machine.m.state.record.as_ref().is_some_and(|r| r.removing));
+        assert!(machine.m.state.wsl_task.is_some(), "{test}");
+        remove(&mut machine, &mut acl, true).unwrap();
+        assert_eq!(machine.m.state.stop_task, None);
+        assert_eq!(machine.m.state.sweep_task, None);
+        assert_eq!(machine.m.state.wsl_task, None);
+    }
 }
 
 #[test]
 fn removing_a_per_user_pool_leaves_adopts_task() {
     let (mut machine, mut acl) = pool("remove-stop-task-user", Some(CopyOwner::User(owner())));
     remove(&mut machine, &mut acl, false).unwrap();
-    assert!(!machine.lines().iter().any(|l| l == "unregister_stop_task"));
+    assert!(
+        !machine
+            .lines()
+            .iter()
+            .any(|l| l.starts_with("unregister_task"))
+    );
     assert_eq!(machine.m.state.stop_task.as_ref(), Some(&owner()));
+    assert_eq!(machine.m.state.sweep_task.as_ref(), Some(&owner()));
+    assert_eq!(machine.m.state.wsl_task.as_ref(), Some(&owner()));
 }

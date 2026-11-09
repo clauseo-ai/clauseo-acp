@@ -216,7 +216,8 @@ pub enum Step {
     /// 8a: the network filters, the owner's grants on them and the firewall rules (S15 PR7).
     Network,
     /// 5: on a per-machine install, registering the SYSTEM tasks `\Clauseo\SandboxStop` and
-    /// `\Clauseo\SandboxSweep` for the owner just recorded (`late_steps::stop_task`).
+    /// `\Clauseo\SandboxSweep` and `\Clauseo\SandboxWslDeny` for the owner just recorded
+    /// (`late_steps::machine_tasks`).
     StopTask,
     /// 3: denying the group "log on through Remote Desktop Services"
     /// (`SeDenyRemoteInteractiveLogonRight`).
@@ -252,7 +253,7 @@ impl fmt::Display for Step {
             Step::Owners => "making sure no sandbox user owns a protected folder",
             Step::ResetProfile => "resetting a sandbox user's profile",
             Step::Network => "setting up the network filters",
-            Step::StopTask => "registering the sandbox's stop and sweep tasks",
+            Step::StopTask => "registering the sandbox's stop, sweep and WSL tasks",
             Step::RemoteLogon => "denying the sandbox users Remote Desktop logon",
             Step::AdminLock => "locking the set-up program's admin copy",
         })

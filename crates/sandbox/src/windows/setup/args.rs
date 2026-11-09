@@ -21,6 +21,8 @@
 //!   `\Clauseo\SandboxStop` runs. No other argument either: the pool comes from the record.
 //! - `--sweep-tasks`: deletes the pool users' scheduled tasks and cancels their BITS jobs
 //!   (`sweep.rs`), which the SYSTEM task `\Clauseo\SandboxSweep` runs. No other argument either.
+//! - `--wsl-deny`: re-applies WSL's deny and nothing else (`refresh::wsl_deny`), which the
+//!   SYSTEM task `\Clauseo\SandboxWslDeny` runs on Windows Installer's events. No other argument.
 //!
 //! `--per-machine` (taken by `--remove` and `--adopt`) and `--uninstall` (`--remove` only)
 //! are the flags without a value. Every other flag takes its value as the next argument (never
@@ -69,8 +71,8 @@ pub enum Mode {
         /// whoever asked (D-B9 as ruled). Without it, only the record's owner removes anything.
         per_machine: bool,
         /// `--uninstall`: the uninstaller's removal, which also deletes the admin copy, its
-        /// record values and the SYSTEM tasks (refresh and stop), last. Without it (the app's),
-        /// they stay.
+        /// record values and the SYSTEM tasks (refresh, stop and WSL deny), last. Without it
+        /// (the app's), they stay.
         uninstall: bool,
     },
     /// `--refresh`.
@@ -79,6 +81,8 @@ pub enum Mode {
     Stop,
     /// `--sweep-tasks`.
     SweepTasks,
+    /// `--wsl-deny`.
+    WslDeny,
 }
 
 /// The lawyer a per-user `--adopt` sets up, as the unelevated installer named them.
@@ -96,7 +100,7 @@ pub struct AdoptUser {
     "usage: clauseo-sandbox-setup --set-up --parent <pid> --data-dir <path> [--add <n>] | \
          --reclaim --parent <pid> | --adopt --user-install-dir <path> (--owner-sid <sid> \
          --data-dir <path> | --per-machine) | --remove [--uninstall] [--per-machine] | --refresh | \
-         --stop | --sweep-tasks ({0})"
+         --stop | --sweep-tasks | --wsl-deny ({0})"
 )]
 pub struct Usage(pub String);
 
@@ -109,6 +113,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Mode, Usage> {
         ("--refresh", Mode::Refresh),
         ("--stop", Mode::Stop),
         ("--sweep-tasks", Mode::SweepTasks),
+        ("--wsl-deny", Mode::WslDeny),
     ];
     for (alone, parsed) in alone_modes {
         if mode == alone {

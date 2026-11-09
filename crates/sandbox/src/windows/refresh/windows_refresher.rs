@@ -26,7 +26,8 @@ use windows::core::{HSTRING, PCWSTR, w};
 use super::source::{Handle, read_capped};
 use super::{
     EXE_CAP, Failed, OWN_MACHINE, RefreshExit, RefreshRecord, Refresher, STAGING_SDDL, SourceError,
-    SourceFile, Sources, Trust, UPDATER_KEY, pe_version, refresh, staging, walk,
+    SourceFile, Sources, Trust, UPDATER_KEY, WslDenyExit, pe_version, refresh, staging, walk,
+    wsl_deny,
 };
 use crate::windows::admin_copy::{self, Found, level_safe, locked_file_sddl, os};
 pub(crate) use crate::windows::admin_copy::{SETUP_EXE as EXE_NAME, SETUP_SIG as SIG_NAME};
@@ -58,6 +59,11 @@ pub fn run() -> RefreshExit {
         machine: OWN_MACHINE,
     };
     refresh(&mut fs, &trust)
+}
+
+/// `--wsl-deny`: [`wsl_deny`] over a [`WindowsRefresher`]: WSL's deny re-applied, nothing else.
+pub fn run_wsl_deny() -> WslDenyExit {
+    wsl_deny(&mut WindowsRefresher::new())
 }
 
 /// The real machine. Its paths are found once, from `FOLDERID_ProgramFiles`.

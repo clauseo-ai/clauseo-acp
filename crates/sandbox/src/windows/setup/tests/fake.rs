@@ -18,6 +18,7 @@ use crate::windows::fence::RegisteredMatter;
 use crate::windows::ledger::{Ledger, ledger_path};
 use crate::windows::marker::{Marker, MarkerState};
 use crate::windows::pool::MachineRecord;
+use crate::windows::refresh::SystemTask;
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::setup::{
     LogonRight, Machine, MachineError, Password, ProfileDir, ServiceStart,
@@ -468,10 +469,16 @@ impl Machine for FakeMachine {
         Ok(self.state.copy_owner.clone())
     }
 
-    fn register_stop_task(&mut self, owner: &Sid) -> Result<(), MachineError> {
+    fn register_task(&mut self, task: SystemTask, owner: &Sid) -> Result<(), MachineError> {
         assert!(!self.acting.get(), "the task is registered as admin");
-        self.call(format!("register_stop_task {}", rid(owner)))?;
-        self.state.stop_task = Some(owner.clone());
+        self.call(format!("register_task {} {}", task.name(), rid(owner)))?;
+        let slot = match task {
+            SystemTask::Stop => &mut self.state.stop_task,
+            SystemTask::Sweep => &mut self.state.sweep_task,
+            SystemTask::WslDeny => &mut self.state.wsl_task,
+            SystemTask::Refresh => panic!("the set-up never registers the refresh"),
+        };
+        *slot = Some(owner.clone());
         Ok(())
     }
 

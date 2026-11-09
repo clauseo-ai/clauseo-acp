@@ -20,9 +20,14 @@ pub const STOP_EXECUTION_LIMIT: &str = "PT2M";
 pub const SWEEP_ARG: &str = "--sweep-tasks";
 /// The sweep task's execution limit: 2 minutes.
 pub const SWEEP_EXECUTION_LIMIT: &str = "PT2M";
+/// The WSL deny task's one argument (`wsl_phase::wsl_deny`): it re-applies WSL's deny and
+/// does nothing else.
+pub const WSL_DENY_ARG: &str = "--wsl-deny";
+/// The WSL deny task's execution limit: 1 minute (its one phase waits 10 s for the lock).
+pub const WSL_DENY_EXECUTION_LIMIT: &str = "PT1M";
 
-/// The Windows Installer events (`MsiInstaller` in the Application log) that start the refresh
-/// task, so WSL's deny comes back within seconds of a WSL update, repair or removal: product
+/// The Windows Installer events (`MsiInstaller` in the Application log) that start the WSL
+/// deny task, so WSL's deny comes back within seconds of a WSL update, repair or removal: product
 /// updated (1022), installed (1033), reconfigured (1035), a transaction begun and ended (1040,
 /// 1042), and an install, removal or configuration completed (11707, 11724, 11728). The VM saw
 /// 1040, 11728, 1035 and 1042 for a WSL repair (R5c, T3b).
@@ -35,7 +40,9 @@ pub enum Trigger {
     Logon,
     /// A Windows Installer event ([`MSI_EVENT_IDS`]), matched by [`msi_event_query`]. It
     /// passes the task nothing from the event: no value queries, and the action keeps its one
-    /// fixed argument.
+    /// fixed argument. Anyone who can log on can write such an event (INTERACTIVE may write to
+    /// the Application log), so only [`SystemTask::WslDeny`] has it: a forged event re-applies
+    /// the deny and does nothing else.
     MsiEvents,
 }
 
@@ -67,13 +74,25 @@ pub enum SystemTask {
     /// jobs, killing nothing (`--sweep-tasks`); the outer runner asks for it at every session's
     /// end.
     Sweep,
+    /// `\Clauseo\SandboxWslDeny`: re-applies WSL's deny and nothing else (`--wsl-deny`), on
+    /// Windows Installer's events.
+    WslDeny,
 }
 
 /// Every task, in the order `--adopt` registers them.
-pub const TASKS: [SystemTask; 3] = [SystemTask::Refresh, SystemTask::Stop, SystemTask::Sweep];
-/// The tasks a per-machine install's set-up registers for the pool's owner and its `--remove`
-/// deletes (`late_steps::stop_task`, `remove::remove_stop_task`): the two that act on the pool.
-pub const POOL_TASKS: [SystemTask; 2] = [SystemTask::Stop, SystemTask::Sweep];
+pub const TASKS: [SystemTask; 4] = [
+    SystemTask::Refresh,
+    SystemTask::Stop,
+    SystemTask::Sweep,
+    SystemTask::WslDeny,
+];
+
+/// The tasks a per-machine install's set-up registers for the owner it records, and its
+/// `--remove` deletes (`late_steps::machine_tasks`, `remove::remove_machine_tasks`): the two
+/// that act on the pool, then the WSL deny task. The refresh is `--adopt`'s per user only: a
+/// per-machine copy doesn't update itself.
+pub const MACHINE_TASKS: [SystemTask; 3] =
+    [SystemTask::Stop, SystemTask::Sweep, SystemTask::WslDeny];
 
 impl SystemTask {
     /// Its name in `\Clauseo`.
@@ -82,6 +101,7 @@ impl SystemTask {
             SystemTask::Refresh => "SandboxRefresh",
             SystemTask::Stop => "SandboxStop",
             SystemTask::Sweep => "SandboxSweep",
+            SystemTask::WslDeny => "SandboxWslDeny",
         }
     }
 
@@ -91,6 +111,7 @@ impl SystemTask {
             SystemTask::Refresh => REFRESH_ARG,
             SystemTask::Stop => STOP_ARG,
             SystemTask::Sweep => SWEEP_ARG,
+            SystemTask::WslDeny => WSL_DENY_ARG,
         }
     }
 
@@ -100,6 +121,7 @@ impl SystemTask {
             SystemTask::Refresh => EXECUTION_LIMIT,
             SystemTask::Stop => STOP_EXECUTION_LIMIT,
             SystemTask::Sweep => SWEEP_EXECUTION_LIMIT,
+            SystemTask::WslDeny => WSL_DENY_EXECUTION_LIMIT,
         }
     }
 
@@ -108,22 +130,23 @@ impl SystemTask {
         self.triggers().contains(&Trigger::Logon)
     }
 
-    /// What starts it besides a demand: the refresh at the owner's logon and on Windows
-    /// Installer's events (WSL's deny, `wsl_phase.rs`); the stop and the sweep only on demand.
+    /// What starts it besides a demand: the refresh at the owner's logon; the WSL deny task on
+    /// Windows Installer's events (`wsl_phase.rs`); the stop and the sweep only on demand.
     pub fn triggers(self) -> &'static [Trigger] {
         match self {
-            SystemTask::Refresh => &[Trigger::Logon, Trigger::MsiEvents],
+            SystemTask::Refresh => &[Trigger::Logon],
             SystemTask::Stop | SystemTask::Sweep => &[],
+            SystemTask::WslDeny => &[Trigger::MsiEvents],
         }
     }
 
     /// Whether a run asked for while one is running is queued to run after it
     /// (`TASK_INSTANCES_QUEUE`), rather than dropped (`TASK_INSTANCES_IGNORE_NEW`): the sweep's,
-    /// so every session's end gets a whole run that began after it. The refresh drops it (its
-    /// last WSL phase covers a start during a run) and so does the stop.
+    /// so every session's end gets a whole run that began after it. The others drop it: the WSL
+    /// deny task's phase is quick and idempotent, so a burst of installer events gives one run.
     pub fn queues(self) -> bool {
         match self {
-            SystemTask::Refresh | SystemTask::Stop => false,
+            SystemTask::Refresh | SystemTask::Stop | SystemTask::WslDeny => false,
             SystemTask::Sweep => true,
         }
     }
@@ -138,6 +161,7 @@ impl SystemTask {
             SystemTask::Sweep => {
                 "Deletes the scheduled tasks and BITS jobs of Clauseo's sandbox users."
             }
+            SystemTask::WslDeny => "Keeps WSL closed to Clauseo's sandbox users.",
         }
     }
 }
@@ -156,11 +180,12 @@ pub enum Teardown {
 }
 
 /// The removal's steps, in order: every task in [`TASKS`] goes before the copy they run.
-pub const TEARDOWN: [Teardown; 6] = [
+pub const TEARDOWN: [Teardown; 7] = [
     Teardown::AdminValues,
     Teardown::Task(SystemTask::Refresh),
     Teardown::Task(SystemTask::Stop),
     Teardown::Task(SystemTask::Sweep),
+    Teardown::Task(SystemTask::WslDeny),
     Teardown::Staging,
     Teardown::AdminFolder,
 ];
@@ -169,10 +194,11 @@ pub const TEARDOWN: [Teardown; 6] = [
 /// protected; SYSTEM and Administrators full control; the record owner `owner` read and execute
 /// (`FRFX`). Starting a task needs execute access: as the owner, `schtasks /run` with `FR`
 /// alone was refused (CI run 42416074600). Execute also ends a running task, so the owner can
-/// end a stop, a sweep or a refresh: denial of service only, which code running as the owner
-/// could do to its own sessions anyway. An ended stop never writes `StopCompleted`
+/// end a stop, a sweep, a refresh or a WSL deny run: denial of service only, which code running
+/// as the owner could do to its own sessions anyway. An ended stop never writes `StopCompleted`
 /// (`setup::stop`), an ended sweep gives the outer runner no 0, so its session's marker stays,
-/// and an ended refresh keeps the old copy. The owner can't change or delete a task.
+/// an ended refresh keeps the old copy, and a deny left off refuses the launch. The owner can't
+/// change or delete a task.
 pub fn task_sddl(owner: &Sid) -> String {
     format!("O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FRFX;;;{owner})")
 }

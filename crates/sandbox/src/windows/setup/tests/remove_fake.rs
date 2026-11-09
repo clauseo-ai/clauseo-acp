@@ -15,6 +15,7 @@ use crate::windows::acl_plan::{Grant, Sid};
 use crate::windows::apply::Surroundings;
 use crate::windows::ledger::{Ledger, RecordedFile, ledger_path};
 use crate::windows::pool::MachineRecord;
+use crate::windows::refresh::SystemTask;
 use crate::windows::runner::marker::{marker_path, remove_marker, unclean_sessions};
 use crate::windows::set_aside::forget_bookkeeping;
 use crate::windows::setup::record_values::CopyOwner;
@@ -215,9 +216,14 @@ impl Removal for Remover {
         Machine::copy_owner(&mut self.m)
     }
 
-    fn unregister_stop_task(&mut self) -> Result<(), MachineError> {
-        self.call("unregister_stop_task")?;
-        self.m.state.stop_task = None;
+    fn unregister_task(&mut self, task: SystemTask) -> Result<(), MachineError> {
+        self.call(format!("unregister_task {}", task.name()))?;
+        match task {
+            SystemTask::Stop => self.m.state.stop_task = None,
+            SystemTask::Sweep => self.m.state.sweep_task = None,
+            SystemTask::WslDeny => self.m.state.wsl_task = None,
+            SystemTask::Refresh => panic!("the removal never deletes the refresh alone"),
+        }
         Ok(())
     }
 

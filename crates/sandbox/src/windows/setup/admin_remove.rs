@@ -1,7 +1,8 @@
 //! `--remove`'s last step (S15 tier B, "Admin copy" in 0049): once no tier-B owner is left on
 //! the machine, the admin copy goes too. In `refresh::TEARDOWN`'s order: the record's four
 //! admin-copy values (`ADMIN_VALUES`, so no launcher trusts the copy from here on), then the
-//! SYSTEM tasks `\Clauseo\SandboxRefresh`, `\Clauseo\SandboxStop` and `\Clauseo\SandboxSweep`
+//! SYSTEM tasks `\Clauseo\SandboxRefresh`, `\Clauseo\SandboxStop`, `\Clauseo\SandboxSweep` and
+//! `\Clauseo\SandboxWslDeny`
 //! ([`unregister_task`]), then the refresh's staging ([`remove_staging`], taken back if it
 //! shuts Administrators out), then everything in
 //! `%ProgramFiles%\Clauseo\Sandbox\`, then the folder. Only the uninstaller's
@@ -74,6 +75,7 @@ pub(super) fn teardown_name(step: Teardown) -> &'static str {
         Teardown::Task(SystemTask::Refresh) => "refresh_task",
         Teardown::Task(SystemTask::Stop) => "stop_task",
         Teardown::Task(SystemTask::Sweep) => "sweep_task",
+        Teardown::Task(SystemTask::WslDeny) => "wsl_deny_task",
         Teardown::Staging => "staging",
         Teardown::AdminFolder => "admin_folder",
     }

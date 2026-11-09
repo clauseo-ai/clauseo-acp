@@ -63,7 +63,7 @@
 //! between them.
 //!
 //! Right after step 1, and again at the end of every allowed run whatever the steps gave, WSL's
-//! deny is re-applied (`wsl_phase.rs`, ADR 0049 "WSL").
+//! deny is re-applied (`wsl_phase.rs`, ADR 0049 "WSL"); `--wsl-deny` does that alone.
 //!
 //! Any refusal keeps the old copy, writes one log line (the Event Log on Windows) naming no user
 //! path beyond the install folder, and exits with its own code ([`RefreshExit`]).
@@ -116,9 +116,9 @@ mod wsl_phase;
 #[cfg(windows)]
 pub use installed::{installed_setup_sha256, recorded_admin_copy_sha256};
 pub use rules::{
-    EXECUTION_LIMIT, POOL_TASKS, REFRESH_ARG, STAGING_SDDL, STOP_ARG, STOP_EXECUTION_LIMIT,
-    SWEEP_ARG, SWEEP_EXECUTION_LIMIT, SystemTask, TASKS, TEARDOWN, Teardown, action_path, hex,
-    inside_profile, same_path, sddl_matches, task_sddl,
+    EXECUTION_LIMIT, MACHINE_TASKS, REFRESH_ARG, STAGING_SDDL, STOP_ARG, STOP_EXECUTION_LIMIT,
+    SWEEP_ARG, SWEEP_EXECUTION_LIMIT, SystemTask, TASKS, TEARDOWN, Teardown, WSL_DENY_ARG,
+    WSL_DENY_EXECUTION_LIMIT, action_path, hex, inside_profile, same_path, sddl_matches, task_sddl,
 };
 pub use sources::{SourceError, SourceFile, Sources};
 #[cfg(windows)]
@@ -128,7 +128,8 @@ pub use task::{
 };
 pub use version::version_not_older;
 #[cfg(windows)]
-pub use windows_refresher::{WindowsRefresher, event_log, run};
+pub use windows_refresher::{WindowsRefresher, event_log, run, run_wsl_deny};
+pub use wsl_phase::{WslDenyExit, wsl_deny};
 
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::sids::Sid;

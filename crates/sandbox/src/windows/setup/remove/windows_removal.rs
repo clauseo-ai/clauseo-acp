@@ -51,7 +51,7 @@ use crate::windows::ledger::{self, LEDGER_FILE, Ledger, ledger_path};
 use crate::windows::matters::SANDBOX_DIR;
 use crate::windows::pool::MachineRecord;
 use crate::windows::private_dir::resolve_folder;
-use crate::windows::refresh;
+use crate::windows::refresh::{self, SystemTask};
 use crate::windows::set_aside::forget_bookkeeping;
 use crate::windows::sids::{Reserved, Sid};
 use crate::windows::wfp;
@@ -221,12 +221,8 @@ impl Removal for WindowsRemoval {
         record_write::read_admin(&self.names.record_key).map(|(owner, _version)| owner)
     }
 
-    fn unregister_stop_task(&mut self) -> Result<(), MachineError> {
-        for task in refresh::POOL_TASKS {
-            refresh::unregister_task(task)
-                .map_err(|error| MachineError::Other(format!("{}: {error}", task.name())))?;
-        }
-        Ok(())
+    fn unregister_task(&mut self, task: SystemTask) -> Result<(), MachineError> {
+        refresh::unregister_task(task).map_err(|error| MachineError::Other(error.to_string()))
     }
 
     fn invoker(&self) -> Option<&Sid> {

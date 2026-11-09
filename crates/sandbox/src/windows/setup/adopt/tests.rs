@@ -246,17 +246,18 @@ fn a_per_user_adopt_locks_registers_every_task_records_then_sets_up_in_that_orde
         adopt(&mut fake, Path::new(INSTALL), &user()),
         SetupExit::Done
     );
-    assert_eq!(fake.changes.len(), 6, "{:?}", fake.changes);
+    assert_eq!(fake.changes.len(), 7, "{:?}", fake.changes);
     assert!(fake.changes[0].starts_with("lock "), "{:?}", fake.changes);
     let version = admin_copy::APP_VERSION;
     assert_eq!(fake.changes[1], format!("task SandboxRefresh {LAWYER}"));
     assert_eq!(fake.changes[2], format!("task SandboxStop {LAWYER}"));
     assert_eq!(fake.changes[3], format!("task SandboxSweep {LAWYER}"));
+    assert_eq!(fake.changes[4], format!("task SandboxWslDeny {LAWYER}"));
     assert_eq!(
-        fake.changes[4],
+        fake.changes[5],
         format!("record {HASH} {INSTALL} {version} {LAWYER}")
     );
-    assert_eq!(fake.changes[5], format!("set-up {DATA}"));
+    assert_eq!(fake.changes[6], format!("set-up {DATA}"));
 }
 
 #[test]
@@ -265,6 +266,7 @@ fn a_task_that_cant_be_registered_leaves_no_record_so_the_check_fails() {
         (SystemTask::Refresh, 1),
         (SystemTask::Stop, 2),
         (SystemTask::Sweep, 3),
+        (SystemTask::WslDeny, 4),
     ];
     for (failing, before) in tasks {
         let mut fake = Fake::new();

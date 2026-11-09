@@ -168,6 +168,10 @@ pub(super) struct State {
     pub(super) stop_task: Option<Sid>,
     /// The SIDs local policy denies "log on through Remote Desktop Services".
     pub(super) remote_denied: BTreeSet<Sid>,
+    /// The owner the task `\Clauseo\SandboxSweep`'s descriptor names, while it is registered.
+    pub(super) sweep_task: Option<Sid>,
+    /// The owner the task `\Clauseo\SandboxWslDeny`'s descriptor names, while it is registered.
+    pub(super) wsl_task: Option<Sid>,
     /// The group WSL's launch permissions deny, while they do.
     pub(super) wsl: Option<Sid>,
 }
@@ -199,6 +203,8 @@ pub(super) fn new_machine(test: &str) -> FakeMachine {
             copy_owner: None,
             stop_task: None,
             remote_denied: BTreeSet::new(),
+            sweep_task: None,
+            wsl_task: None,
             wsl: None,
         },
         written: Vec::new(),

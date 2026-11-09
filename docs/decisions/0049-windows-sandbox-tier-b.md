@@ -1873,25 +1873,25 @@ and execute it, which starts and ends it), one instance at a time (the sweep que
 The stop's action is the admin copy with `--stop` and no other argument. It runs only on demand
 and stops after 2 minutes. A failed registration fails `--adopt` before the record's admin-copy
 values are written, as for the refresh task. `--remove --uninstall` deletes all three tasks,
-after the values and before the admin folder (`refresh::TEARDOWN`). The folder rule above has
+after the values and before the admin folder (`refresh::TEARDOWN`), with the WSL deny task. The folder rule above has
 two accepted outcomes. A user-made `\Clauseo` holding a task administrators can't delete fails
 the delete, and so the registration, with that error: a user who could make the folder can block
 the install, but not take it over. A folder an administrator made, owned by that administrator's
 own SID rather than Administrators, is deleted and made again, which loses nothing.
 
 **Per machine.** A per-machine `--adopt` has no owner to name in the descriptor, so it registers
-none of the three. The refresh task stays per-user only: IT updates a per-machine install. The
-stop and sweep tasks (`refresh::POOL_TASKS`) are registered by the elevated set-up instead, once
-it has written the record with the owner as `OwnerSid`, when the record's `AdminCopyOwner` is
-`machine` (`late_steps::stop_task`). It is the same registration as `--adopt`'s: same
-principal, arguments, limits and descriptor, with `OwnerSid` as the owner who may read and
-execute, and so start and end, them. Every set-up of the owner registers them again, replacing
-the ones there. A new owner's set-up, after a removal, replaces the previous owner's tasks, so
-only the new owner can start them. A failed registration fails the set-up at the step
-"registering the sandbox's stop and sweep tasks", rolled back like any other step. `--remove`
-deletes both just before the record (`RemoveStep::StopTask`); a failed deletion is a partial
-removal, with the record kept for the next run. `--remove --uninstall` also deletes them with
-the admin copy.
+none of the four. The refresh task stays per-user only: IT updates a per-machine install. The
+stop and sweep tasks are registered by the elevated set-up instead, once it has written the
+record with the owner as `OwnerSid`, when the record's `AdminCopyOwner` is `machine`
+(`late_steps::machine_tasks`, each of `refresh::MACHINE_TASKS`, with `\Clauseo\SandboxWslDeny`
+right after them, "WSL" below). It is the same registration as `--adopt`'s: same principal,
+arguments, limits and descriptor, with `OwnerSid` as the owner who may read and execute, and so
+start and end, them. Every set-up of the owner registers them again, replacing the ones there. A
+new owner's set-up, after a removal, replaces the previous owner's tasks, so only the new owner
+can start them. A failed registration fails the set-up at the step "registering the sandbox's
+stop, sweep and WSL tasks", rolled back like any other step. `--remove` deletes all three just
+before the record (`RemoveStep::StopTask`); a failed deletion is a partial removal, with the
+record kept for the next run. `--remove --uninstall` also deletes them with the admin copy.
 
 **The run.** `--stop` (`setup/stop.rs`):
 
@@ -2065,8 +2065,9 @@ logon of its own at every session's end (the runner's end sweeper, now gone), an
 refused a logged-off pool user's BITS job anyway. `SYSTEM` deletes them instead.
 
 **The task.** `\Clauseo\SandboxSweep` is registered and removed alongside
-`\Clauseo\SandboxStop` (above): `--adopt` registers all three of `refresh::TASKS`, a
-per-machine set-up registers `refresh::POOL_TASKS` (stop and sweep, `late_steps::stop_task`),
+`\Clauseo\SandboxStop` (above): `--adopt` registers all four of `refresh::TASKS`, a
+per-machine set-up registers `refresh::MACHINE_TASKS` (stop, sweep and WSL deny,
+`late_steps::machine_tasks`),
 and `--remove` and `--remove --uninstall` delete it. It has the same folder, principal (LOCAL
 SYSTEM) and descriptor (`refresh::task_sddl`, the owner with `FRFX`). Its action is the admin
 copy with `--sweep-tasks` and no other argument. It runs only on demand and stops after 2
@@ -2433,31 +2434,43 @@ is left alone: the service ignores it.
 both exist (right after the record is written, since each target is recorded before its write,
 before the profiles, the fence and the network), and again after the marker, so a WSL installed or
 updated during the set-up is covered; the report holds the last pass's outcome. It never
-fails the set-up: the launch check refuses while a deny is missing, and the refresh task tries
+fails the set-up: the launch check refuses while a deny is missing, and the SYSTEM tasks try
 again. The SYSTEM task `\Clauseo\SandboxRefresh` re-applies it twice in every run that is allowed
-(LOCAL SYSTEM, from the admin copy): first, before the admin copy's steps, so the deny doesn't wait
+(LOCAL SYSTEM, from the admin copy; at the owner's logon or on demand): first, before the admin copy's steps, so the deny doesn't wait
 for them, and last, whatever they gave, so a run that began before an installer finished
 re-applies after it (`refresh/wsl_phase.rs`, both idempotent). Each waits up to 10 s for the set-up
 lock (`WSL_LOCK_WAIT`), so a brief holder doesn't push the deny to the next run; one still held then
-is logged (a set-up or removal holding it does its own WSL step). Neither runs while the record
+is logged (a set-up or removal holding it does its own WSL step). No WSL phase runs while the record
 says a removal is under way, nor with no `GroupSid`. A `GroupSid` that isn't a local group's
 (`S-1-5-21-<a>-<b>-<c>-<rid>` with a relative id from 1000 up) is refused before anything is
 written, and logged without the SID (`wsl::local_group`): Everyone, Authenticated Users,
-INTERACTIVE or a `BUILTIN` group there would deny the lawyer too. The task also starts on an event trigger:
-the Application log, provider `MsiInstaller`, IDs 1022, 1033, 1035, 1040, 1042, 11707, 11724 and
-11728 (`rules::msi_event_query`), with no delay: a delay would only keep the deny off longer. The
-task ignores a start while it runs (`TASK_INSTANCES_IGNORE_NEW`), so an installer's burst of
-events gives one run, not a queue of them, and the run's first WSL phase re-applies at once while
-its last comes after the admin copy's steps, covering what the installer wrote meanwhile. The
-trigger has no value queries, so nothing from the event reaches the run, whose argument stays the
-fixed `--refresh`. Anyone who can log on can fire it: INTERACTIVE may write to the Application
-log, so the lawyer or a pool user can forge an `MsiInstaller` event. That gains nothing: the run
-is SYSTEM's own fixed refresh, which re-applies the deny and may refresh the admin copy, and a
-forged burst gives one run at a time, each holding the set-up lock for a moment (a set-up that
-meets it then fails at once and can be run again). Its outcome never changes the refresh's exit: a
-failure is one Event Log error line (AppIDs and Windows error codes, never a path or a SID), and
-a run that changed nothing writes no line. No new exit: the launch check enforces the deny, so an
-exit code would tell no one more.
+INTERACTIVE or a `BUILTIN` group there would deny the lawyer too.
+
+**The WSL deny task.** Windows Installer's events start a SYSTEM task of their own,
+`\Clauseo\SandboxWslDeny` (`SystemTask::WslDeny`): the Application log, provider
+`MsiInstaller`, IDs 1022, 1033, 1035, 1040, 1042, 11707, 11724 and 11728
+(`rules::msi_event_query`), with no delay: a delay would only keep the deny off longer. Its action
+is the admin copy with the fixed argument `--wsl-deny` and nothing else; the trigger has no value
+queries, so nothing from the event reaches the run. The run (`wsl_phase::wsl_deny`) is refused
+unless it is LOCAL SYSTEM from the admin copy's path, as the refresh's step 1, then runs the WSL
+phase once and does nothing else: no admin-copy step, no record read beyond the phase's own. The
+event trigger is on this task alone because anyone who can log on can fire it: INTERACTIVE may
+write to the Application log, so the lawyer or a pool user can forge an `MsiInstaller` event, and
+on the refresh that started the admin copy's steps as SYSTEM. Here a forged event gains no more
+than a re-applied deny, and a forged burst gives one run at a time, each holding the set-up lock
+for a moment (a set-up that meets it then fails at once and can be run again). The task ignores
+a start while it runs (`TASK_INSTANCES_IGNORE_NEW`): the phase is quick and idempotent, so an
+installer's burst of events gives one run, and an event after it ends gives another. It shares
+the other tasks' principal, descriptor (owned by Administrators, the owner `FRFX`) and folder,
+stops after 1 minute, and is registered and removed with them: `--adopt` registers it per user
+after `\Clauseo\SandboxStop` (`refresh::TASKS`), a per-machine install's set-up after the stop
+task (`refresh::MACHINE_TASKS`), a per-machine `--remove` deletes it with the stop task, and
+`--remove --uninstall` with the admin copy (`refresh::TEARDOWN`). Its exits (`WslDenyExit`, from
+51, after the stop's 50): 0 when the run was allowed, whatever the phase gave, and 51
+(`NotAllowed`) when it isn't LOCAL SYSTEM from the admin copy. The phase's outcome never changes
+an exit, the refresh's or this task's: a failure is one Event Log error line (AppIDs and Windows
+error codes, never a path or a SID), and a run that changed nothing writes no line. The launch
+check enforces the deny, so an exit code would tell no one more.
 
 **The record.** Each target is recorded before its value is written, in two values appended to
 the set-up's (`SETUP_VALUES`, now 11): `WslDenyAppIds` (`REG_MULTI_SZ`, every AppID given the
@@ -2489,7 +2502,7 @@ grants launch to Authenticated Users (WSL `AppxManifest.in:74-78`), and its `Ins
 through the MSI whenever `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss\MSI`'s `Version`
 is empty or older than the package's own version, compared as (major, minor, revision)
 (`WslInstaller.cpp:114-133`, `IsUpdateNeeded`). So a pool user could start an upgrade whenever the
-package is newer than the MSI, and the MSI's rewrite drops the deny until the refresh's run,
+package is newer than the MSI, and the MSI's rewrite drops the deny until the WSL deny task's run,
 which the installer's first event starts. The check mirrors that test: the package's version comes from its
 packaged-COM registration, a subkey of `HKLM\SOFTWARE\Classes\PackagedCom\Package` named
 `MicrosoftCorporationII.WindowsSubsystemForLinux_<major>.<minor>.<revision>.0_...` (the newest
@@ -2507,7 +2520,7 @@ upgrade under way: WSL's installer would install the MSI rather than upgrade it,
 MSI was never run may stay that way for good, so "let the update complete" would never end. With
 `WSLService` or `LxssManager` installed, WSL 2 can run beside an MSI WSL doesn't record, which
 can't be judged: `WslDenyUnverifiable`. With neither, no WSL VM can run until the MSI is in, and
-its install's `MsiInstaller` events start the refresh, which writes the deny: nothing is refused. A version that can't be
+its install's `MsiInstaller` events start the WSL deny task, which writes the deny: nothing is refused. A version that can't be
 read or parsed (three or four dotted numbers) is `WslDenyUnverifiable`; a missing deny is still
 shown first. The lawyer's words: "finish or let the WSL update complete, then try again". Not
 verified on the VM: that the packaged-COM key lists the package for a machine where only another
@@ -2577,14 +2590,14 @@ that a termination from outside the service leaves it consistent (the elevated t
 the calls, where HCS is).
 
 **No mid-session watcher yet.** A WSL update during a tier B session can drop the deny until the
-event trigger's run re-applies it, which the installer's first event starts; the next launch
+WSL deny task's run re-applies it, which the installer's first event starts; the next launch
 checks it again, and `WslUpgradePending` only blocks new launches. A watcher on the AppID keys
 (`RegNotifyChangeKeyValue`) that acts on a session while the deny is off follows in the next PR.
 
 **Drift.** A WSL update (Store, WinGet, `wsl --update`, its own updater), an MSI repair or a
 reinstall may rewrite `LaunchPermission` and drop the deny; a reinstall may bring a new AppID,
 which the next run finds from the class. An OS update may reset the inbox AppID. Each is closed
-by the event trigger or the next logon's run, and refused at launch until then. Nothing ever
+by the WSL deny task's run or the next logon's refresh, and refused at launch until then. Nothing ever
 blocks the MSI's writes (an ACL on the AppID key, say): a WSL update that couldn't write its
 keys would fail and roll back for the lawyer.
 
@@ -2594,8 +2607,8 @@ only the entries `(D;…;;;G)` come off, and the result is checked, written and 
 we made is deleted instead once what is left is the default it was made from. No saved value is
 ever written back: it may be older than a WSL update since. A value that can't be parsed is left
 as it is and logged. A read or write that fails stops the removal there (`RemovedPartly`), with
-the record kept for the next run. Then the record's two values go. The event trigger goes with
-the refresh task, which `--remove --uninstall` deletes.
+the record kept for the next run. Then the record's two values go. The WSL deny task goes with
+the other tasks (above).
 
 ## Consequences
 

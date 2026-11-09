@@ -38,7 +38,7 @@ use crate::windows::marker::{self, Marker, MarkerState};
 use crate::windows::matters::MatterSids;
 use crate::windows::pool::{MachineRecord, POOL_GROUP, POOL_PREFIX, pool_number};
 use crate::windows::record::current_user_sid;
-use crate::windows::refresh;
+use crate::windows::refresh::{self, SystemTask};
 use crate::windows::secrets;
 use crate::windows::sids::{Reserved, Sid};
 use crate::windows::wfp::{self, Namespace, NetworkReport, NetworkSetup};
@@ -429,12 +429,8 @@ impl Machine for WindowsMachine {
         record_write::read_admin(&self.names.record_key).map(|(owner, _version)| owner)
     }
 
-    fn register_stop_task(&mut self, owner: &Sid) -> Result<(), MachineError> {
-        for task in refresh::POOL_TASKS {
-            refresh::register_task(task, owner)
-                .map_err(|error| MachineError::Other(format!("{}: {error}", task.name())))?;
-        }
-        Ok(())
+    fn register_task(&mut self, task: SystemTask, owner: &Sid) -> Result<(), MachineError> {
+        refresh::register_task(task, owner).map_err(|error| MachineError::Other(error.to_string()))
     }
 
     fn lock_admin_copy(&mut self, group: &Sid) -> Result<(), MachineError> {
