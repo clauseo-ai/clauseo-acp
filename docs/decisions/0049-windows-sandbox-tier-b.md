@@ -2395,6 +2395,45 @@ dump of a crashed sandbox process (for a fastfail, or outside the job), by defau
 Neither control here turns that off, and Clauseo doesn't change machine-wide WER settings.
 `docs/firm-it.md` ("Crash dumps of the Windows sandbox") tells IT.
 
+#### Fast-fail crashes (measured, accepted)
+
+The pool hive's WER values (`Disabled`, `DontShowUI` and the rest) stop WER for ordinary crashes,
+measured with a null write: no WerSvc, no WerFault, no dump. They do not stop the fast-fail path
+(`__fastfail`, `[Environment]::FailFast`). There, WerSvc runs as SYSTEM, never reads the pool hive,
+and starts two WerFault processes:
+
+- one as SYSTEM in session 0, which opens the crashed process;
+- one in the lawyer's session with the lawyer's limited token, parented to the crashed agent
+  process.
+
+Measured on the VM, the lawyer-token WerFault:
+
+- is refused when it opens the agent's process;
+- exits within about 27 ms;
+- makes no clone (the FailFast clone comes from the SYSTEM WerFault and is gone at the end);
+- writes no registry values, and nothing under `\Users\`;
+- makes no network connection;
+- shows no window seen at 100 ms sampling.
+
+No dump is written anywhere (measured with no `LocalDumps` policy; if a machine-wide
+`LocalDumps` key is set, Windows writes a dump of the crashed agent process where that policy
+says, as the paragraph above notes), and the end sweep finishes clean.
+
+Three controls were measured and none changes this: the agent's inherited error mode (already
+`SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX`), a LowBox token, and
+HKLM `ExcludedApplications` for the agent's binaries. A machine-wide HKLM `Disabled`, and the
+lawyer's own HKCU `Disabled`, would stop it, but both turn off Windows Error Reporting for the
+lawyer outside Clauseo, so neither is used. This is accepted as a robustness gap, not a breach:
+the agent can make a short-lived WerFault start in the lawyer's session, but that process can't
+open the agent, reads nothing of the matter, and leaves nothing behind.
+
+Residual: for about 27 ms, a WerFault under the lawyer's token handles a crash report that the
+agent can trigger at will, as often as it can crash a process (each fast-fail starts one). Its
+open of the agent is refused, it makes no clone and no dump, and it writes nothing. What remains
+is WerFault's own handling of that report, which is Microsoft's component and outside Clauseo's
+control. IT can see each one as a process-creation event (4688). A LowBox token doesn't change
+this.
+
 ## Consequences
 
 - A finished set-up moves the machine to tier B at the next tier query; R17's

@@ -416,6 +416,14 @@ your SIEM or crash collection gathers those dumps, treat a dump from a sandbox u
 to `ClauseoSb32`, members of `ClauseoSandboxUsers`) as matter data, or leave those users out of
 `LocalDumps`.
 
+**Crash reporting.** Clauseo turns off Windows Error Reporting for its sandbox accounts. When an AI
+tool's process deliberately fast-fails, Windows still starts its own crash handler briefly (one
+WerFault.exe as SYSTEM and one in the signed-in user's session). Each exits within a fraction of a
+second and sends nothing. Unless your organisation has set a machine-wide `LocalDumps` policy, it
+writes no crash dump; if you have, a dump of the AI tool's process (which can hold matter content)
+lands where that policy says, so treat that folder accordingly. You may see these in
+process-creation audit logs (event 4688). Clauseo doesn't change machine-wide WER settings.
+
 A WER policy wins over Clauseo's per-user setting. If your Group Policy sets "Disable Windows Error
 Reporting" to Disabled (`Disabled` = 0 under `HKLM\SOFTWARE\Policies\Microsoft\Windows\Windows
 Error Reporting`), sandboxed sessions still start, the sandbox runner logs that WER is kept on, and only the
