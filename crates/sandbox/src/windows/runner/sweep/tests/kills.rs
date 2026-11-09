@@ -305,6 +305,8 @@ fn a_sweep_whose_kills_keep_it_going_past_its_deadline_stops_there() {
     assert_eq!(got, Err(SweepError::Deadline));
     assert_eq!(fake.clock, SWEEP_DEADLINE);
     assert_eq!(fake.killed.len(), 12);
+    // A tree that outran the sweep: an escapee, so the marker awaits the SYSTEM stop.
+    assert_eq!(got.unwrap_err().escapees().map(|e| e.count), Some(0));
 }
 
 #[test]

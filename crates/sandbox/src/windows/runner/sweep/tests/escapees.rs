@@ -82,7 +82,6 @@ fn a_process_that_cant_be_opened_or_ended_is_an_escapee_and_one_that_cant_be_che
         job,
         started,
         SweepError::List("5".to_owned()),
-        SweepError::StillRunning,
         SweepError::Left {
             count: 2,
             unkillable: 0,
@@ -125,5 +124,25 @@ fn a_later_sweep_counts_its_escapees_and_names_each_image_once_up_to_the_cap() {
         assert_eq!(escapees.count, 11, "{point}");
         assert_eq!(escapees.images.len(), IMAGES_CAP, "{point}");
         assert_eq!(escapees.images[..2], ["same.exe", "a.exe"], "{point}");
+    }
+}
+
+#[test]
+fn a_tree_that_outruns_the_sweep_is_an_escapee_with_no_count_or_name() {
+    let tree = Some(Escapees {
+        count: 0,
+        images: Vec::new(),
+    });
+    for error in [SweepError::StillRunning, SweepError::Deadline] {
+        assert_eq!(error.escapees(), tree, "{error:?}");
+    }
+    // A process that starts another each time it is killed outruns every point's rounds.
+    for point in [Point::Start, Point::Tick, Point::End] {
+        let mut fake = machine();
+        fake.procs.insert(12, pool_proc("hydra.exe"));
+        fake.forever = Some(12);
+        let got = run(&mut fake, &[10], point).0;
+        assert_eq!(got, Err(SweepError::StillRunning), "{point}");
+        assert_eq!(got.unwrap_err().escapees(), tree, "{point}");
     }
 }

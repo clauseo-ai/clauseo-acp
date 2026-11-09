@@ -39,7 +39,11 @@
 //! `WRITE_DAC` reopen, below) or can't be ended is an escapee ([`SweepError::escapees`]): it
 //! lives on outside every job, and no sweep of the pool user's can end it. The inner reports it on
 //! `ctl` (`InnerReport::Escapee`), and the first act exits `RunExit::Escapee` rather than
-//! `RunExit::Sweep`. One that only can't be checked (its start time) is a plain failure.
+//! `RunExit::Sweep`. One that only can't be checked (its start time) is a plain failure. A
+//! tree of processes that outran the sweep, which kept killing until it ran out of rounds
+//! ([`SweepError::StillRunning`]) or time ([`SweepError::Deadline`]), is an escapee with no
+//! count or name: no sweep of the pool user's could end it either. Every escapee makes the
+//! session's marker await the `SYSTEM` stop (`end.rs`), never the sweep task alone.
 //!
 //! **Two listings.** [`Processes::list`] reads each process's user by opening it, which fails
 //! for a process whose DACL shuts the pool user out (one that set its own, with an `OWNER
@@ -232,8 +236,9 @@ pub(crate) struct Escapees {
 
 impl SweepError {
     /// The escapees this failure names: a process that couldn't be opened or ended, or that
-    /// survived its kill, or the ones [`SweepError::Left`] counts so; `None` for any other
-    /// failure.
+    /// survived its kill, or the ones [`SweepError::Left`] counts so; a tree that outran the
+    /// sweep ([`SweepError::StillRunning`], [`SweepError::Deadline`]) with a count of 0 and no
+    /// name; `None` for any other failure.
     pub(crate) fn escapees(&self) -> Option<Escapees> {
         match self {
             SweepError::Open { image, .. }
@@ -248,10 +253,12 @@ impl SweepError {
                 count: *unkillable,
                 images: images.clone(),
             }),
+            SweepError::StillRunning | SweepError::Deadline => Some(Escapees {
+                count: 0,
+                images: Vec::new(),
+            }),
             SweepError::List(_)
             | SweepError::JobList(_)
-            | SweepError::StillRunning
-            | SweepError::Deadline
             | SweepError::Started { .. }
             | SweepError::Left { .. }
             | SweepError::OwnStart { .. } => None,

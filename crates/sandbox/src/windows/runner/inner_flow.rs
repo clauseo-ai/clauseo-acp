@@ -5,8 +5,8 @@
 //!    the pool user's that opened this runner's process, thread or token between the logon and
 //!    the outer's shut, or one this logon set off (a task, a BITS job), is killed before any code
 //!    of the launch's runs. Its failure fails the launch closed and starts no agent:
-//!    [`RunExit::Escapee`] when a process couldn't be opened or ended (reported on `ctl` too,
-//!    held until it opens), else [`RunExit::Sweep`];
+//!    [`RunExit::Escapee`] when a process couldn't be opened or ended, or a tree of them
+//!    outran the sweep (reported on `ctl` too, held until it opens), else [`RunExit::Sweep`];
 //! 2. it removes what the pool user could have left to start at a logon or to run in a runner
 //!    (`leftovers.rs`, `Kind::LOCAL`): its per-user COM classes (`HKCU\Software\Classes`), its
 //!    `Run` and `RunOnce` values and its Startup entries. Nothing else removes them, and no code
@@ -119,7 +119,7 @@ fn failed<I: Inner>(inner: &mut I, (exit, what): Failure) -> u32 {
 }
 
 /// The first act's exit code for its sweep's `error`: [`RunExit::Escapee`] when it names a
-/// process that couldn't be opened or ended, else [`RunExit::Sweep`].
+/// process that couldn't be opened or ended, or a tree that outran it, else [`RunExit::Sweep`].
 fn start_exit(error: &SweepError) -> RunExit {
     if error.escapees().is_some() {
         RunExit::Escapee
