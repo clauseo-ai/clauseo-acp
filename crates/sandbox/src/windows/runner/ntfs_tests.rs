@@ -11,6 +11,9 @@ use crate::windows::pool::PoolUser;
 use crate::windows::test_acl::Place;
 use crate::windows::write::make_agent_folder;
 
+/// The session's temp folder every policy here sets (required since R17 PR-D1).
+const TMP: &str = r"data\run\s1\tmp";
+
 const POOL: &str = "S-1-5-21-1111111111-2222222222-3333333333-1005";
 
 fn pool() -> PoolUser {
@@ -41,9 +44,10 @@ fn spec(cwd: &Path) -> clauseo_process::LaunchSpec {
 #[test]
 fn a_written_launch_file_is_one_the_outer_runner_reads() {
     let place = Place::new("runner-launch-file");
-    folders(&place, &["data", "matter", "state"]);
+    folders(&place, &["data", "matter", "state", TMP]);
     let policy = Policy::builder(place.at("matter"), place.at("state"))
         .home(place.at("home"))
+        .tmpdir(place.at(TMP))
         .build()
         .unwrap();
     let message =
@@ -100,15 +104,17 @@ fn the_message_carries_the_spec_and_the_policy() {
 #[test]
 fn m3_refuses_a_policy_in_the_lawyers_codex_folder() {
     let place = Place::new("runner-m3");
-    folders(&place, &["matter", r"profile\.codex\state", "state"]);
+    folders(&place, &["matter", r"profile\.codex\state", "state", TMP]);
     let profile = WinPath::parse(place.at("profile").to_str().unwrap()).unwrap();
     let clean = Policy::builder(place.at("matter"), place.at("state"))
         .home(place.at("home"))
+        .tmpdir(place.at(TMP))
         .build()
         .unwrap();
     assert_eq!(codex_reuse_in_policy(&clean, &profile), Ok(()));
     let reused = Policy::builder(place.at("matter"), place.at(r"profile\.codex\state"))
         .home(place.at("home"))
+        .tmpdir(place.at(TMP))
         .build()
         .unwrap();
     assert_eq!(
@@ -120,7 +126,7 @@ fn m3_refuses_a_policy_in_the_lawyers_codex_folder() {
 #[test]
 fn m3_refuses_a_credential_link_hard_linked_to_the_lawyers_codex_login() {
     let place = Place::new("runner-m3-link");
-    folders(&place, &["matter", "state", r"profile\.codex"]);
+    folders(&place, &["matter", "state", r"profile\.codex", TMP]);
     let auth = place.dir.file(r"profile\.codex\auth.json", "{}");
     let linked = place.dir.hard_link(r"state\auth.json", &auth);
     let own = place.dir.file(r"state\own.json", "{}");
@@ -128,6 +134,7 @@ fn m3_refuses_a_credential_link_hard_linked_to_the_lawyers_codex_login() {
     let policy = |link: &Path| {
         Policy::builder(place.at("matter"), place.at("state"))
             .home(place.at("home"))
+            .tmpdir(place.at(TMP))
             .credential_link(link)
             .build()
             .unwrap()

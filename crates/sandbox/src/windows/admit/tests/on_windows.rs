@@ -95,6 +95,7 @@ fn a_matter_on_a_share_is_refused() {
     }
     let policy = Policy::builder(admin_share_path(&w.at("matter")), w.at(STATE))
         .home(w.at("home"))
+        .tmpdir(w.at(crate::windows::test_world::TMP))
         .build()
         .unwrap();
     let want = FolderRefusal::Support(FolderSupport::Network);
@@ -111,6 +112,7 @@ fn a_state_folder_on_a_share_refuses_the_whole_launch() {
     }
     let policy = Policy::builder(w.at("matter"), admin_share_path(&w.at(STATE)))
         .home(w.at("home"))
+        .tmpdir(w.at(crate::windows::test_world::TMP))
         .build()
         .unwrap();
     assert_eq!(folder_support(policy.matter()).unwrap(), FolderSupport::Ok);
@@ -236,6 +238,7 @@ fn a_neighbour_under_a_junction_is_fenced_at_its_target_and_one_that_is_a_juncti
     let under = w.at("Linked/B");
     let own = Policy::builder(&under, w.at("other/m3"))
         .home(w.at("home"))
+        .tmpdir(w.at(crate::windows::test_world::TMP))
         .build();
     assert!(own.is_ok(), "{own:?}");
     let admitted = admit(
@@ -254,6 +257,7 @@ fn a_neighbour_under_a_junction_is_fenced_at_its_target_and_one_that_is_a_juncti
     // The root itself a junction: its own policy refuses it, and so does the neighbour check.
     let own = Policy::builder(w.at("Linked"), w.at("other/m3"))
         .home(w.at("home"))
+        .tmpdir(w.at(crate::windows::test_world::TMP))
         .build();
     assert!(own.is_err(), "{own:?}");
     let refused = admit(
