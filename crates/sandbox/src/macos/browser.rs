@@ -11,8 +11,8 @@
 //! `--remote-debugging-pipe` ([`pipe`]), which stage E's host bridge serves outside every jail.
 //! The browser is chrome-headless-shell, the only one supported on macOS: a
 //! Chrome app bundle needs `LaunchServices`, the window server and more. Every allow was measured
-//! (0038 lists the failure seen without each). It compiles on every target, so its tests run on
-//! every CI target.
+//! (0038 lists the failure seen without each). It compiles on every target; its tests, which
+//! build real folders, run on the Unix ones (macOS and Linux CI).
 
 use std::path::{Path, PathBuf};
 
@@ -464,5 +464,8 @@ fn under(path: &Path, prefix: &Path) -> bool {
     crate::policy::under(path, prefix)
 }
 
+// Unix only: the tests build real folders and resolve them, and a Windows path (a drive, `\`
+// separators) is one the profile rightly refuses to quote.
 #[cfg(test)]
+#[cfg(unix)]
 mod tests;
