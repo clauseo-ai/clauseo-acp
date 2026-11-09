@@ -81,40 +81,62 @@ pub enum RunExit {
     LogonPolicy = 0x16,
 }
 
-impl RunExit {
-    /// Every variant.
-    pub(crate) const ALL: [RunExit; 21] = [
-        RunExit::Usage,
-        RunExit::BadLaunch,
-        RunExit::NoSecret,
-        RunExit::SecondaryLogon,
-        RunExit::LogonRight,
-        RunExit::Password,
-        RunExit::Logon,
-        RunExit::CodexReuse,
-        RunExit::Pipe,
-        RunExit::Job,
-        RunExit::Token,
-        RunExit::Spawn,
-        RunExit::AgentReserved,
-        RunExit::Sweep,
-        RunExit::DllSearch,
-        RunExit::Escapee,
-        RunExit::PoolStop,
-        RunExit::MarkerUnwritable,
-        RunExit::AwaitingStop,
-        RunExit::AwaitingSweep,
-        RunExit::LogonPolicy,
-    ];
+/// [`RunExit::ALL`] and an exhaustive `match` (no `_` arm) made from one list, so a new variant
+/// doesn't build until it is listed, and being listed puts it in `ALL`. A variant listed twice is
+/// an unreachable pattern, which `-D warnings` refuses.
+macro_rules! every_run_exit {
+    ($($variant:ident),+ $(,)?) => {
+        impl RunExit {
+            /// Every variant, in the order of the list below.
+            pub(crate) const ALL: [RunExit; [$(RunExit::$variant),+].len()] =
+                [$(RunExit::$variant),+];
+        }
 
+        const _: () = {
+            const fn listed(exit: RunExit) {
+                match exit {
+                    $(RunExit::$variant)|+ => {}
+                }
+            }
+            listed(RunExit::Usage);
+        };
+    };
+}
+
+every_run_exit!(
+    Usage,
+    BadLaunch,
+    NoSecret,
+    SecondaryLogon,
+    LogonRight,
+    Password,
+    Logon,
+    CodexReuse,
+    Pipe,
+    Job,
+    Token,
+    Spawn,
+    AgentReserved,
+    Sweep,
+    DllSearch,
+    Escapee,
+    PoolStop,
+    MarkerUnwritable,
+    AwaitingStop,
+    AwaitingSweep,
+    LogonPolicy,
+);
+
+impl RunExit {
     /// The values other open PRs have taken for their exits, held so no two PRs give the same
     /// code two meanings. Each later PR moves its row into the enum at its reserved value (and
-    /// adds it to [`RunExit::ALL`] and the shipped list its tests pin); no row is ever reused.
+    /// lists it in `every_run_exit!`, which builds [`RunExit::ALL`], and in the shipped list its
+    /// tests pin); no row is ever reused.
     pub const RESERVED: &[(u32, &str)] = &[
         (0x14, "LeftoverTask #755"),
         (0x15, "TokenGrant #786"),
         (0x17, "PoolProfile #817"),
-        (0x18, "Quarantined #819"),
+        (0x18, "retired, never shipped (was Quarantined, #819)"),
         (0x19, "GitBashUnsafe #792"),
         (0x1A, "PR6, unassigned"),
         (0x1B, "PR6, unassigned"),
