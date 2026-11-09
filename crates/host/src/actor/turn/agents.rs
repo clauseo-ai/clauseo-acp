@@ -342,7 +342,7 @@ fn launch(
     });
     let link = agent::start(
         &actor.spawner,
-        actor.launcher.as_ref(),
+        super::launch_checks::launcher(prepared.sandbox.as_ref(), actor.launcher.as_ref()),
         &spec,
         Arc::clone(&actor.clock),
         post,

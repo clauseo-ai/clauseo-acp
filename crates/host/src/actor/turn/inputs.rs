@@ -23,6 +23,8 @@ pub(crate) enum TurnInput {
         id: u64,
         result: Result<Box<super::launch_checks::Prepared>, crate::error::Error>,
     },
+    /// The sandbox's launchers' work off the actor ended (`launch_checks/sandbox.rs`, R17 PR-B2).
+    Sandbox(super::launch_checks::SandboxInput),
     /// A whole-log read of `thread`'s stream for `why`.
     Log {
         thread: ThreadId,

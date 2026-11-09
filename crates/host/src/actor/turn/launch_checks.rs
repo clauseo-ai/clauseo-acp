@@ -34,6 +34,10 @@
 //! and ride the same way, and so does its egress proxy ([`egress`]), opened there once Chrome
 //! is found and closed as the run drops.
 //!
+//! With the sandbox's launchers (`Sandbox::with_launchers`, R17 PR-B2), a launch whose checks
+//! passed on the actor asks the seam for its launcher off the actor first ([`sandbox`]), and
+//! the agent spawns through it; the seam's `after_session` follows the agent's exit.
+//!
 //! At the first launch, before any folder is made, `<data>/run` from an earlier run is set
 //! aside in one rename and deleted on a thread of its own ([`RunSweep`]). Nothing is made or
 //! swept through a link at `<data>/run` or `<data>/agent-state`.
@@ -64,6 +68,9 @@ use crate::log_file::Cause;
 pub(super) struct Preparing {
     /// Its id: an answer for an earlier launch's checks is dropped.
     id: u64,
+    /// The session it launches: one of its matter's running sessions for the sandbox's
+    /// launchers from the checks' start (`sandbox::running`).
+    pub(super) key: SessionKey,
     /// The work that waits for the agent's session.
     pub(super) waiting: Vec<Waiting>,
 }
@@ -88,6 +95,8 @@ pub(crate) struct Prepared {
     pub(super) skills_written: Option<SkillsWritten>,
     /// The skill packs this launch left out, by id, with the reason, for its notice.
     pub(super) packs_skipped: Vec<(String, PackSkip)>,
+    /// What the sandbox's launchers gave this launch ([`sandbox`]); `None` without them.
+    pub(super) sandbox: Option<sandbox::Sandboxed>,
 }
 
 /// The folders a session gets, all under the data folder, and its browser claims.
@@ -144,6 +153,10 @@ pub(crate) struct RunFolders {
     /// before that, when the agent is stopped and again before the run folder is removed.
     /// Stage C's R17 adds its port to the session's `Loopback::Ports`.
     pub(crate) case_law: relay::CaseLaw,
+    /// The spawned agent's jail ([`sandbox::SandboxSession`]), set on the thread's run folder
+    /// only once the agent spawned through the sandbox's launcher: its removal calls the seam's
+    /// `after_session`. `None` without the seam and on every other clone.
+    pub(crate) sandbox: Option<sandbox::SandboxSession>,
     /// The session's egress proxy ([`egress`]), opened on the launch-prep thread when the
     /// session can get the browser and its Chrome and claims were found; none otherwise, or
     /// when it did not open (`NoProxy`). It closes when the last clone drops, normally in
@@ -178,6 +191,7 @@ impl RunFolders {
             packs_written: None,
             data_deny: LaunchDeny::fixed(vec![data.to_owned()]),
             case_law: relay::CaseLaw::Absent,
+            sandbox: None,
             egress: None,
             lease: Arc::default(),
             slot_waited: false,
@@ -189,7 +203,8 @@ impl RunFolders {
     /// run folder is taken back. File system calls: off the actor.
     pub(crate) fn make(&self, data: &Path, sweep: &RunSweep) -> Result<(), Error> {
         sweep.once(data);
-        for folder in [&self.work, &self.browser, &self.notes] {
+        let tmp = self.tmp();
+        for folder in [&self.work, &self.browser, &self.notes, &tmp] {
             if let Err(error) = crate::write::create_private_dirs_under(data, folder) {
                 self.remove();
                 return Err(Error::refused(
@@ -211,6 +226,11 @@ impl RunFolders {
             ));
         }
         Ok(())
+    }
+
+    /// The session's own temporary folder, `<run>/tmp`: a jailed agent's `TMPDIR`.
+    pub(crate) fn tmp(&self) -> PathBuf {
+        self.root.join("tmp")
     }
 
     /// Removes this launch's run folder and all it holds, when it is a real folder; the notes
@@ -281,7 +301,11 @@ pub(super) fn prepare(
     let Some(state) = state(actor, thread) else {
         return;
     };
-    state.preparing = Some(Box::new(Preparing { id, waiting }));
+    state.preparing = Some(Box::new(Preparing {
+        id,
+        key: run.key,
+        waiting,
+    }));
     let check = FolderCheck {
         matter: Some(run.key.matter),
         source: actor.folder_check,
@@ -356,6 +380,7 @@ pub(super) fn prepare(
                     run,
                     skills_written,
                     packs_skipped,
+                    sandbox: None,
                 })
             },
             undo_late,
@@ -515,22 +540,12 @@ pub(super) fn on_prepared(
         agents::fail_all(actor, thread, waiting, &error);
         return;
     }
-    let run = prepared.run.clone();
-    let packs_skipped = std::mem::take(&mut prepared.packs_skipped);
-    if let Some(state) = state(actor, thread) {
-        state.run = Some(run.clone());
+    // With the sandbox's launchers, the launch's launcher comes from them first, off the actor.
+    if let Some(seam) = actor.protection.launchers() {
+        sandbox::start(actor, thread, id, waiting, prepared, seam);
+        return;
     }
-    let failed_tree = agents::launch_now(actor, thread, waiting, *prepared);
-    let launched = state(actor, thread).is_some_and(|state| state.agent.is_some());
-    if launched {
-        packs::hold_notice(actor, thread, packs_skipped);
-    } else {
-        if let Some(state) = state(actor, thread) {
-            state.run = None;
-        }
-        // A process that was started and then failed is waited for like any other.
-        discard(actor, thread, run, failed_tree);
-    }
+    launch_prepared(actor, thread, waiting, prepared, None);
 }
 
 /// Removes `thread`'s run folder off the actor, once its agent (whose tree `tree` watches)
@@ -551,6 +566,10 @@ pub(crate) use straggler::HeldRuns;
 mod removal;
 use removal::discard;
 pub(super) use removal::on_run_removed;
+mod sandbox;
+pub(super) use sandbox::{SandboxInput, launcher, on_sandbox_input};
+mod spawn;
+use spawn::launch_prepared;
 mod sweep;
 pub(crate) use sweep::RunSweep;
 mod packs;

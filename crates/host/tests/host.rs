@@ -319,6 +319,15 @@ mod relocate;
 #[path = "host/restart.rs"]
 mod restart;
 #[cfg(test)]
+#[path = "host/sandbox_launch.rs"]
+mod sandbox_launch;
+#[cfg(test)]
+#[path = "host/sandbox_rig.rs"]
+mod sandbox_rig;
+#[cfg(test)]
+#[path = "host/sandbox_sessions.rs"]
+mod sandbox_sessions;
+#[cfg(test)]
 #[path = "host/search.rs"]
 mod search;
 #[cfg(test)]
