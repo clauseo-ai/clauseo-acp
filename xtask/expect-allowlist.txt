@@ -318,6 +318,9 @@ crates/host/src/clock.rs SystemClock::now clippy::disallowed_methods
 crates/host/src/write.rs - clippy::disallowed_methods
 # R23 PR 4 (#456): `sync_dir` is Ok on every OS but Unix, where only the folder sync can fail.
 crates/host/src/write.rs sync_dir clippy::unnecessary_wraps
+# R17 PR-D1 round 2: the agent state's move renames with Windows' MoveFileExW and no flag, the
+# OS's no-replace rename (std's rename always replaces).
+crates/host/src/write.rs rename_no_replace unsafe_code
 crates/host/tests/host/write.rs - clippy::disallowed_methods
 crates/host/tests/host/packs_timing.rs now clippy::disallowed_methods
 # R17 PR-C: a matter's Codex login link compared by Windows file id (CreateFileW with access 0,

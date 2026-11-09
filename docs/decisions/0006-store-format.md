@@ -130,6 +130,26 @@ copy too); decision record 0040 gives the reasons:
 ALTER TABLE matters ADD COLUMN skill_packs TEXT /* JSON array of pack ids, at most 32, none twice; NULL = the global skills.enabled list */;
 ```
 
+### Schema version 6
+
+`crates/store/src/migrations/0006_agent_layout.sql`, verbatim (the same test checks this copy
+too). It changes no table: it only moves `user_version` to 6. The host moves Claude's state
+folders and the matters' notes out of `<data>/agent-state` (R17 PR-D1) right after the store
+opens. A build before that layout knows schema 5 at most, so it refuses the moved data folder
+with `store.newer_version` instead of running with notes its Codex fence does not deny. The
+store opens, and so moves to 6, before any folder moves, so a start cut short leaves a store
+at 6 with some folders not moved yet, which an older build still refuses and the next start
+finishes.
+
+```sql
+-- Schema version 6: a marker, no data (R17 PR-D1). Claude's state folders and the matters' notes
+-- move out of <data>/agent-state at the host's start (crates/host agent/state_folder/layout.rs),
+-- right after this migration. A build that knows only schema 5 then refuses the data folder with
+-- store.newer_version, so it never runs with notes its Codex fence does not deny.
+-- docs/decisions/0006-store-format.md gives the reason.
+-- Frozen: a later change is a new numbered file in this folder, never an edit here.
+```
+
 In the table columns, ids are stored as lowercase hyphenated UUID text and times as milliseconds
 since the Unix epoch. Inside `events.envelope`, the envelope's own encoding applies: ids are
 16-byte MessagePack bin, as `docs/decisions/0002-event-schema.md` says, and `stream` is its text.

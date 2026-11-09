@@ -42,6 +42,7 @@
 //! - `write_file`, `delete_file` and `move_file` change files only under the current session's
 //!   `cwd`, with relative paths and no `..`. `spawn_child` writes its `pid_file` relative to the
 //!   process folder (the agent's working directory), not the session `cwd`, also with no `..`.
+//!   `expect_env_file` only reads, under the folder an environment variable names.
 //! - Only `main` exits the process.
 //!
 //! # Depends on

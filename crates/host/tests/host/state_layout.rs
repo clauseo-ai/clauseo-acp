@@ -91,3 +91,71 @@ fn an_old_layout_moves_at_the_start_and_its_claude_thread_resumes() {
     host.shutdown();
     assert!(in_new_layout(&dir, matter), "a second start moves nothing");
 }
+
+/// The store's `user_version`, read with SQLite itself while no host runs.
+fn store_version(dir: &Dir) -> i64 {
+    let conn = rusqlite::Connection::open(dir.data().join(clauseo_store::DB_FILE)).unwrap();
+    conn.query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap()
+}
+
+/// The newest store schema a build before R17 PR-D1 knows (test-v0.0.4's `open.rs`): a store
+/// past it is refused (`store.newer_version`), as `clauseo_store`'s own test
+/// `open::tests::a_build_knowing_schema_5_refuses_a_file_at_6` checks with that build's five
+/// migrations.
+const OLDER_BUILD_SCHEMA: i64 = 5;
+
+/// The order of the move (R17 PR-D1): the store moves to schema 6 (`0006_agent_layout.sql`)
+/// before any folder moves, so a start cut short (here Claude's move fails: `claude-state` is a
+/// file) leaves a store an older build refuses while the notes are moved and Claude's state is
+/// not; the next start finishes the move. At no point after the first start could an older
+/// build open the data folder.
+#[test]
+fn the_store_moves_to_schema_6_first_and_a_start_cut_short_is_finished() {
+    let dir = two_agents("state_layout_order");
+    let wired = Wired::new(&dir);
+    let host = dir.start_launching(0, Arc::<Wired>::clone(&wired), |config| config);
+    let (matter, _, _) = matter_with_thread(&dir, &host, "a", &[("brief.txt", "x\n")], CLAUDE);
+    host.shutdown();
+
+    // An older app's data folder: its store at schema 5 and its old layout.
+    let conn = rusqlite::Connection::open(dir.data().join(clauseo_store::DB_FILE)).unwrap();
+    conn.execute_batch("PRAGMA user_version = 5").unwrap();
+    drop(conn);
+    let old = old_matter(&dir, matter);
+    crate::write::create_dir_all(&old.join(CLAUDE).join("projects/-matter"));
+    crate::write::write(&old.join(CLAUDE).join(TRANSCRIPT), b"{}\n");
+    crate::write::create_dir_all(&old.join("notes"));
+    crate::write::write(&old.join("notes/brief.md"), b"note");
+    crate::write::write(&old.join(CODEX).join("config.toml"), b"");
+    let blocker = dir.data().join("claude-state");
+    crate::write::write(&blocker, b"not a folder");
+
+    let host = dir.start_launching(1, Arc::<Wired>::clone(&wired), |config| config);
+    host.shutdown();
+    assert_eq!(store_version(&dir), 6, "the store moved first");
+    assert!(
+        store_version(&dir) > OLDER_BUILD_SCHEMA,
+        "an older build is refused"
+    );
+    let notes = notes(&dir, matter);
+    assert_eq!(std::fs::read(notes.join("brief.md")).unwrap(), b"note");
+    assert!(
+        old.join(CLAUDE).join(TRANSCRIPT).is_file(),
+        "Claude's move was cut short"
+    );
+    assert!(!in_new_layout(&dir, matter));
+
+    crate::write::remove_file(&blocker);
+    let host = dir.start_launching(2, Arc::<Wired>::clone(&wired), |config| config);
+    host.shutdown();
+    assert!(
+        in_new_layout(&dir, matter),
+        "the next start finished the move"
+    );
+    assert_eq!(store_version(&dir), 6);
+    assert!(
+        store_version(&dir) > OLDER_BUILD_SCHEMA,
+        "an older build is still refused"
+    );
+}

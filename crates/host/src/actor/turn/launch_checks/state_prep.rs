@@ -270,7 +270,8 @@ pub(super) struct StatePlan {
     gated: bool,
     /// The thread's agent, for the refusal's log.
     agent: Option<clauseo_protocol::AgentId>,
-    /// Linux, a Codex launch: the ripgrep guard's inputs (`codex_fence::rg_guard`).
+    /// Linux, a Codex launch: the ripgrep guard's inputs (`codex_fence::rg_guard`); `None`
+    /// for another agent, or with the guard turned off by a test host's seam.
     #[cfg(target_os = "linux")]
     rg: Option<crate::agent::codex_fence::rg_guard::Inputs>,
 }
@@ -293,20 +294,10 @@ impl StatePlan {
         let rg = agent
             .as_ref()
             .filter(|id| AgentKind::of(id) == Some(AgentKind::Codex))
-            .and_then(|id| Some((actor.effective.agent(id.as_str())?, id)))
-            .map(|(settings, id)| {
-                let hook = crate::agent::loads::launch_env(actor.profile.launch_env(id));
-                let inherited = match &actor.wiring.inherited_env {
-                    Some(env) => env.clone(),
-                    None => std::env::vars_os().collect(),
-                };
-                let prepend = actor.wiring.path_prepend.as_deref();
-                crate::agent::codex_fence::rg_guard::Inputs::of(
-                    settings,
-                    hook,
-                    inherited.into_iter(),
-                    prepend,
-                )
+            .and_then(|id| actor.effective.agent(id.as_str()))
+            .filter(|_| crate::agent::codex_fence::rg_guard::runs(&actor.wiring))
+            .map(|settings| {
+                crate::agent::codex_fence::rg_guard::Inputs::of(settings, &actor.wiring)
             });
         Ok(Self {
             reused,
@@ -349,7 +340,8 @@ impl StatePlan {
                     self.state_use,
                 )?;
                 answer = Some(support);
-                // Linux: Codex's `rg` found, and in no folder the session writes or Codex keeps.
+                // Linux: Codex's bundled `rg` pinned, and in no folder the session writes or
+                // Codex keeps.
                 #[cfg(target_os = "linux")]
                 if let Some(rg) = &self.rg {
                     let cwd = crate::agent::session_folder(stored);

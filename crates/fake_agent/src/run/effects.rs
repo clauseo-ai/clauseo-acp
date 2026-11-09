@@ -67,6 +67,22 @@ pub(super) fn file_step(cwd: &str, op: &FileOp) -> Result<(), String> {
     }
 }
 
+/// Runs an `expect_env_file` step: the file `path` under the folder the environment variable
+/// `var` names must hold `content` exactly (a host test's check that the agent reads its
+/// moved state). `path` was checked to be relative at load.
+pub(super) fn expect_env_file(var: &str, path: &str, content: &str) -> Result<(), String> {
+    let folder = std::env::var_os(var).ok_or_else(|| format!("expect_env_file: no {var}"))?;
+    let found = std::fs::read(Path::new(&folder).join(path))
+        .map_err(|e| format!("expect_env_file: {var}/{path}: {e}"))?;
+    if found != content.as_bytes() {
+        return Err(format!(
+            "expect_env_file: {var}/{path} holds {:?}, not {content:?}",
+            String::from_utf8_lossy(&found)
+        ));
+    }
+    Ok(())
+}
+
 fn make_parent(path: &Path) -> std::io::Result<()> {
     match path.parent() {
         Some(parent) => crate::write::create_dir_all(parent),

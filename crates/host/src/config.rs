@@ -1,15 +1,18 @@
 //! What `Host::start` needs: the settings, the launcher, and the parts tests swap out.
 
-#[cfg(feature = "test-support")]
-use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
+#[cfg(feature = "test-support")]
+use std::{ffi::OsString, path::Path};
 
 use clauseo_counts::Counts;
 use clauseo_limits::ReadLimits;
 use clauseo_process::Launcher;
+#[cfg(feature = "test-support")]
+use clauseo_protocol::FolderSupportKind;
 use clauseo_protocol::{AgentId, ErrorCode};
-use clauseo_settings::{Effective, PlatformDirs as _, SystemDirs};
+use clauseo_settings::{Effective, Locations, PlatformDirs as _, SystemDirs};
+use futures::channel::oneshot;
 
 use crate::agent::login_link::{LoginCheck, SignInAgain};
 use crate::browser::chrome::ChromeRoots;
@@ -18,11 +21,10 @@ use crate::browser::install::InstallTools;
 use crate::browser::limits::BrowserSlots;
 use crate::browser::{BrowserLaunch, UnsupportedLaunch};
 use crate::clock::{Clock, SystemClock};
+use crate::handle::SUBSCRIPTION_CAPACITY;
 use crate::ids::{IdSource, RandomV7};
 use crate::search::SearchSeams;
 use crate::update::{NoUpdater, Updater};
-
-use crate::handle::SUBSCRIPTION_CAPACITY;
 use crate::window::PATCH_WINDOW_BYTES;
 
 mod idle;
@@ -170,10 +172,7 @@ impl HostConfig {
     /// (`Locations::with_documents`). Until then `GetDefaultLocation`, a create or check in the
     /// default location and the Scratch matter wait for them, at most 5 s on the host clock,
     /// then are refused as retryable; a dropped sender leaves no default matters folder.
-    pub fn with_documents_later(
-        mut self,
-        later: futures::channel::oneshot::Receiver<clauseo_settings::Locations>,
-    ) -> Self {
+    pub fn with_documents_later(mut self, later: oneshot::Receiver<Locations>) -> Self {
         self.documents = Some(later);
         self
     }
@@ -244,6 +243,13 @@ impl HostConfig {
     /// hooks run the desktop executable by its absolute path, never through `PATH`.
     pub fn with_agent_path_prepend(mut self, folder: PathBuf) -> Self {
         self.wiring.path_prepend = Some(folder);
+        self
+    }
+
+    /// Linux: the ripgrep guard's pins for a fake install ([`crate::CodexPins`]); `None`: no guard.
+    #[cfg(all(target_os = "linux", feature = "test-support"))]
+    pub fn with_codex_pins(mut self, pins: Option<crate::CodexPins>) -> Self {
+        self.wiring.codex_pins = pins.into();
         self
     }
 
@@ -401,10 +407,7 @@ impl HostConfig {
     /// run on every OS. `None` is a fine folder. `HostQuery::FolderSupport` answers from it
     /// too; matter creation still runs the real check.
     #[cfg(feature = "test-support")]
-    pub fn with_folder_support(
-        mut self,
-        kind: Option<clauseo_protocol::FolderSupportKind>,
-    ) -> Self {
+    pub fn with_folder_support(mut self, kind: Option<FolderSupportKind>) -> Self {
         self.folder_check = crate::agent::folder_support::CheckSource::Fixed(
             crate::agent::folder_support::Answer::Known(kind),
         );
@@ -430,7 +433,7 @@ impl HostConfig {
 
     /// The folder set by [`Self::with_agent_path_prepend`], for tests of a caller's wiring.
     #[cfg(feature = "test-support")]
-    pub fn agent_path_prepend(&self) -> Option<&std::path::Path> {
+    pub fn agent_path_prepend(&self) -> Option<&Path> {
         self.wiring.path_prepend.as_deref()
     }
 
@@ -571,10 +574,7 @@ impl HostConfig {
     /// (its case-law token revoked) and just before the folder is removed: a test checks what
     /// the session left at that moment.
     #[cfg(feature = "test-support")]
-    pub fn with_run_removal_hook(
-        mut self,
-        hook: Arc<dyn Fn(&std::path::Path) + Send + Sync>,
-    ) -> Self {
+    pub fn with_run_removal_hook(mut self, hook: Arc<dyn Fn(&Path) + Send + Sync>) -> Self {
         self.wiring.run_removal_hook = Some(hook);
         self
     }

@@ -75,6 +75,90 @@ pub(crate) fn rename_folder(from: &Path, to: &Path) -> io::Result<()> {
     std::fs::rename(from, to)
 }
 
+/// Renames `from` (a folder or a file) to `to` in one call that never replaces anything at `to`:
+/// a name there, even an empty folder, fails with `AlreadyExists`, so no check before the rename
+/// is needed and nothing made at `to` in between is lost. Linux `renameat2(RENAME_NOREPLACE)`,
+/// macOS `renameatx_np(RENAME_EXCL)` (both through rustix, which needs no unsafe here),
+/// Windows `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING` or `MOVEFILE_COPY_ALLOWED` (so a
+/// move across volumes fails, `ERROR_NOT_SAME_DEVICE`, and nothing is copied). Where the file
+/// system takes no such flag (`EINVAL`, `ENOSYS`, `ENOTSUP`: NFS, some FUSE file systems), it
+/// checks that `to` is free, then renames: there alone a name made at `to` between the two would
+/// be replaced. The agent state's move to its new layout (`agent/state_folder/layout/moves.rs`).
+#[cfg(unix)]
+pub(crate) fn rename_no_replace(from: &Path, to: &Path) -> io::Result<()> {
+    use rustix::fs::{CWD, RenameFlags, renameat_with};
+    match renameat_with(CWD, from, CWD, to, RenameFlags::NOREPLACE) {
+        Ok(()) => Ok(()),
+        Err(errno)
+            if [
+                rustix::io::Errno::INVAL,
+                rustix::io::Errno::NOSYS,
+                rustix::io::Errno::NOTSUP,
+            ]
+            .contains(&errno) =>
+        {
+            if to.symlink_metadata().is_ok() {
+                return Err(io::Error::from(io::ErrorKind::AlreadyExists));
+            }
+            std::fs::rename(from, to)
+        }
+        Err(errno) => Err(io::Error::from(errno)),
+    }
+}
+
+/// [`rename_no_replace`] on Windows: `MoveFileExW` with no flag.
+#[cfg(windows)]
+#[expect(
+    unsafe_code,
+    reason = "MoveFileExW without MOVEFILE_REPLACE_EXISTING is the OS's no-replace rename; std's always replaces"
+)]
+pub(crate) fn rename_no_replace(from: &Path, to: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt as _;
+
+    use windows::Win32::Foundation::WIN32_ERROR;
+    use windows::Win32::Storage::FileSystem::{MOVE_FILE_FLAGS, MoveFileExW};
+    use windows::core::PCWSTR;
+
+    let wide = |path: &Path| -> Vec<u16> {
+        path.as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    };
+    let (from, to) = (wide(from), wide(to));
+    // SAFETY: `from` and `to` are NUL-terminated UTF-16 strings that outlive the call, and no
+    // flag is set, which the function allows: it renames, or fails, and never replaces or copies.
+    unsafe {
+        MoveFileExW(
+            PCWSTR(from.as_ptr()),
+            PCWSTR(to.as_ptr()),
+            MOVE_FILE_FLAGS(0),
+        )
+    }
+    .map_err(|error| {
+        // std's own OS error, so `kind()` is right (`ERROR_ALREADY_EXISTS` reads as
+        // `AlreadyExists`), as `agent/state_folder/file_id.rs` maps it.
+        match WIN32_ERROR::from_error(&error).and_then(|code| i32::try_from(code.0).ok()) {
+            Some(code) => io::Error::from_raw_os_error(code),
+            None => io::Error::other(error),
+        }
+    })
+}
+
+/// Windows tests: opens the file `path` for reading, shared for reading only, so no other
+/// handle may write, delete or rename it (or the folder holding it) while this one is open: a
+/// file another program holds open (`agent/state_folder/layout/move_tests.rs`).
+#[cfg(all(test, windows))]
+pub(crate) fn open_unshared(path: &Path) -> io::Result<std::fs::File> {
+    use std::os::windows::fs::OpenOptionsExt as _;
+    /// `FILE_SHARE_READ`.
+    const SHARE_READ: u32 = 1;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(SHARE_READ)
+        .open(path)
+}
+
 /// Opens the file `path` for appending, creating it (0600 on Unix): the host's log file
 /// (`log_file.rs`, decision record 0047).
 pub(crate) fn open_append(path: &Path) -> io::Result<std::fs::File> {

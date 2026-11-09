@@ -62,6 +62,7 @@ enum StepBody {
     WriteFile(WriteFileBody),
     DeleteFile(PathBody),
     MoveFile(MoveFileBody),
+    ExpectEnvFile(ExpectEnvFileBody),
     Stderr(StderrBody),
     SpawnChild(SpawnChildBody),
     Exit(ExitBody),
@@ -155,6 +156,14 @@ struct MoveFileBody {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct ExpectEnvFileBody {
+    var: String,
+    path: String,
+    content: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct StderrBody {
     line: String,
     #[serde(default = "one")]
@@ -224,6 +233,10 @@ pub(super) fn step(value: Value) -> Result<Body, String> {
         StepBody::MoveFile(b) => {
             let (from, to) = (b.from, b.to);
             (StepKind::File(FileOp::Move { from, to }), false)
+        }
+        StepBody::ExpectEnvFile(b) => {
+            let (var, path, content) = (b.var, b.path, b.content);
+            (StepKind::ExpectEnvFile { var, path, content }, false)
         }
         StepBody::Stderr(b) => (stderr(b)?, false),
         StepBody::SpawnChild(b) => (

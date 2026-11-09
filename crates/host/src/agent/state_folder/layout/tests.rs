@@ -12,20 +12,37 @@ use crate::agent::state_folder::tests::{data, matter};
 use crate::write;
 
 thread_local! {
-    /// The seam [`super::rename`] reads: the kind every rename on this thread fails with.
-    pub(crate) static FAIL_RENAMES: Cell<Option<io::ErrorKind>> = const { Cell::new(None) };
+    /// The seam `moves::rename` reads: how many renames on this thread still succeed, and the
+    /// kind every rename after them fails with.
+    static FAIL_RENAMES: Cell<Option<(usize, io::ErrorKind)>> = const { Cell::new(None) };
+}
+
+/// The kind this rename fails with, when the seam is set and its successes are used up.
+pub(super) fn next_rename_fails() -> Option<io::ErrorKind> {
+    FAIL_RENAMES.with(|fail| match fail.get()? {
+        (0, kind) => Some(kind),
+        (left, kind) => {
+            fail.set(Some((left - 1, kind)));
+            None
+        }
+    })
 }
 
 /// Makes every move's rename on this thread fail with `kind` until the guard drops: a move
 /// across volumes (`CrossesDevices`, `EXDEV` or `ERROR_NOT_SAME_DEVICE`).
 pub(crate) fn fail_renames_with(kind: io::ErrorKind) -> impl Drop {
+    fail_renames_after(0, kind)
+}
+
+/// As [`fail_renames_with`], after `renames` renames succeed: a start cut short mid-way.
+pub(crate) fn fail_renames_after(renames: usize, kind: io::ErrorKind) -> impl Drop {
     struct Reset;
     impl Drop for Reset {
         fn drop(&mut self) {
             FAIL_RENAMES.with(|fail| fail.set(None));
         }
     }
-    FAIL_RENAMES.with(|fail| fail.set(Some(kind)));
+    FAIL_RENAMES.with(|fail| fail.set(Some((renames, kind))));
     Reset
 }
 
@@ -243,8 +260,9 @@ fn a_move_across_volumes_refuses_the_launch_saying_so() {
     assert!(!claude.exists() && !notes.exists());
 }
 
-/// A link in the old place, at a matter's folder or at `agent-state`, is never moved or
-/// followed; a link at the new root refuses the move and leaves the old folder.
+/// A link in the old place, at a matter's folder or at the old folder itself, is never moved or
+/// followed, and the launch that needs it is refused, saying so, with nothing made in its place;
+/// a link at the new root refuses the move and leaves the old folder.
 #[cfg(unix)]
 #[test]
 fn links_are_never_moved_or_followed() {
@@ -262,11 +280,27 @@ fn links_are_never_moved_or_followed() {
     write::create_dir_all(&old(&data, 2, "")).unwrap();
     write::symlink(&elsewhere, &old(&data, 2, "notes")).unwrap();
     let counts = migrate(&data);
-    assert_eq!((counts.moved, counts.left, counts.failed), (0, 1, 0));
+    assert_eq!(
+        (counts.moved, counts.left, counts.unmovable, counts.failed),
+        (0, 0, 1, 0)
+    );
     let claude = state_dir(&data, matter(1), "claude-acp");
-    assert_eq!(adopt(&data, &claude).unwrap(), Adopted::Left);
+    let error = crate::agent::state_folder::prepare(&data, &claude, AgentKind::Claude).unwrap_err();
+    assert_eq!(error.code(), ErrorCode::AgentLaunchFailed);
+    assert!(error.to_string().contains("shortcut"), "{error}");
+    assert!(
+        !error.to_string().contains(&data.display().to_string()),
+        "{error}"
+    );
     assert!(write::is_real_dir(&elsewhere.join("claude-acp")));
-    assert!(!claude.exists());
+    assert!(!claude.exists(), "no empty folder is made in its place");
+    let notes = notes_at(&data, &matter(2).to_string());
+    let error = super::refusal(&adopt(&data, &notes).unwrap_err(), "the matter's notes");
+    assert!(error.to_string().contains("shortcut"), "{error}");
+    assert!(!notes.exists(), "no empty notes are made in their place");
+    // With a new folder there already, the new one is used and the link is left.
+    write::create_dir_all(&notes).unwrap();
+    assert_eq!(adopt(&data, &notes).unwrap(), Adopted::Left);
 
     let (data, _home) = self::data("layout_link_root");
     plant_old(&data, 1);
@@ -309,3 +343,6 @@ fn a_claude_launch_finishes_a_failed_move_or_is_refused() {
     );
     assert!(old(&data, 1, "claude-acp/projects/-m/s1.jsonl").exists());
 }
+
+#[path = "move_tests.rs"]
+mod move_tests;

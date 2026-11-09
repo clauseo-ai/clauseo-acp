@@ -169,6 +169,10 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
                     .ok_or_else(|| Stop::Fail(at.clone(), NO_CWD.to_owned()))?;
                 effects::file_step(cwd, op).map_err(|m| Stop::Fail(at.clone(), m))?;
             }
+            StepKind::ExpectEnvFile { var, path, content } => {
+                effects::expect_env_file(var, path, content)
+                    .map_err(|m| Stop::Fail(at.clone(), m))?;
+            }
             StepKind::Stderr { line, repeat } => effects::stderr_step(line, *repeat)
                 .map_err(|e| Stop::Fail(at.clone(), format!("write to stderr failed: {e}")))?,
             StepKind::SpawnChild {

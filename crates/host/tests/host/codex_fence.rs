@@ -61,39 +61,93 @@ pub(crate) fn checked_keys(
     ]
 }
 
-/// Linux, R17 PR-D1's ripgrep guard (`agent::codex_fence::rg_guard`): with no `rg` on the
-/// `PATH` Codex would get, a Codex launch is refused with `agent.launch_failed` before anything
-/// starts; with one in a system folder (here a folder outside every session folder) it runs.
+/// The fake `rg` of [`fake_install`] and its SHA-256 (`sha256sum`), the pin the guard checks.
+#[cfg(target_os = "linux")]
+const RG: (&[u8], [u8; 32]) = (
+    b"#!/bin/sh\n",
+    [
+        0xa8, 0x07, 0x6d, 0x3d, 0x28, 0xd2, 0x1e, 0x02, 0x01, 0x2b, 0x20, 0xea, 0xf7, 0xdb, 0xf7,
+        0x54, 0x09, 0xa6, 0x27, 0x71, 0x34, 0x43, 0x90, 0x25, 0xf2, 0x82, 0xe3, 0x68, 0xe3, 0x30,
+        0x5a, 0xbf,
+    ],
+);
+
+/// A fake Codex install under `install`, as `npm ci` of the app's pins lays it out, at the test
+/// versions `9.0.0-test` (the adapter) and `1.2.3-test` (`@openai/codex`): the adapter's
+/// package and script, `@openai/codex`, and this machine's platform package with its vendored
+/// executable `rg`. Returns the adapter's script.
+#[cfg(target_os = "linux")]
+fn fake_install(install: &Path) -> std::path::PathBuf {
+    let (npm, triple) = match std::env::consts::ARCH {
+        "x86_64" => ("linux-x64", "x86_64-unknown-linux-musl"),
+        "aarch64" => ("linux-arm64", "aarch64-unknown-linux-musl"),
+        other => panic!("no Codex build for {other}"),
+    };
+    let modules = install.join("node_modules");
+    let adapter = modules.join("@agentclientprotocol/codex-acp");
+    let build = modules.join(format!("@openai/codex-{npm}"));
+    for (folder, name, version) in [
+        (
+            &adapter,
+            "@agentclientprotocol/codex-acp",
+            "9.0.0-test".to_owned(),
+        ),
+        (
+            &modules.join("@openai/codex"),
+            "@openai/codex",
+            "1.2.3-test".to_owned(),
+        ),
+        (&build, "@openai/codex", format!("1.2.3-test-{npm}")),
+    ] {
+        let manifest = json!({ "name": name, "version": version }).to_string();
+        crate::write::write(&folder.join("package.json"), manifest.as_bytes());
+    }
+    crate::write::write(&adapter.join("dist/index.js"), b"");
+    let rg = build.join("vendor").join(triple).join("codex-path/rg");
+    crate::write::write(&rg, RG.0);
+    crate::write::make_executable(&rg);
+    adapter.join("dist/index.js")
+}
+
+/// Linux, R17 PR-D1's ripgrep guard (`agent::codex_fence::rg_guard`), turned on with a fake
+/// install's pins (`HostConfig::with_codex_pins`; `Dir` turns it off): with no install at the
+/// adapter's script, a Codex launch is refused with `agent.launch_failed` before anything starts,
+/// whatever `rg` is on the `PATH`; with the fake pinned install it runs to `EndTurn`.
 #[cfg(target_os = "linux")]
 #[test]
-fn a_codex_launch_with_no_ripgrep_on_its_path_is_refused() {
-    use std::ffi::OsString;
+fn a_codex_launch_without_its_pinned_ripgrep_is_refused() {
     use std::sync::Arc;
 
+    use clauseo_host::CodexPins;
     use clauseo_protocol::{DomainEvent, ErrorCode, StopReason, StreamId};
 
     use crate::codex::{CODEX, Recording, codex_dir};
     use crate::support::matter_with_thread;
 
-    for (test, with_rg) in [("codex_fence_no_rg", false), ("codex_fence_rg", true)] {
+    for (test, installed) in [("codex_fence_no_rg", false), ("codex_fence_rg", true)] {
         let dir = codex_dir(test, "codex-handshake");
-        let bin = dir.work().join("system-bin");
-        crate::write::create_dir_all(&bin);
-        if with_rg {
-            crate::write::write(&bin.join("rg"), b"#!/bin/sh\n");
-            crate::write::make_executable(&bin.join("rg"));
-        }
-        let base = vec![(OsString::from("PATH"), bin.into_os_string())];
+        let install = dir.work().join("codex-install");
+        let script = if installed {
+            fake_install(&install)
+        } else {
+            install.join("node_modules/@agentclientprotocol/codex-acp/dist/index.js")
+        };
+        let pins = CodexPins {
+            codex_acp: "9.0.0-test",
+            codex: "1.2.3-test",
+            rg_sha256: RG.1,
+            script,
+        };
         let recording = Recording::new(&dir);
         let launches = Arc::clone(&recording.envs);
         let host = dir.start_launching(0, Arc::new(recording), |config| {
-            config.with_inherited_env(base)
+            config.with_codex_pins(Some(pins))
         });
         let (_, thread, _) = matter_with_thread(&dir, &host, "a", &[("brief.txt", "x\n")], CODEX);
         let mut events = host.events(StreamId::Thread(thread));
         let (turn, _) = host.prompt(thread, "Look at the matter.");
         let ended = events.until_turn_ended(turn).stop;
-        if with_rg {
+        if installed {
             assert_eq!(ended, StopReason::EndTurn);
             assert_eq!(launches.lock().unwrap().len(), 1);
         } else {

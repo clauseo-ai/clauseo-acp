@@ -264,6 +264,8 @@ mod view;
 mod window;
 mod write;
 
+#[cfg(all(target_os = "linux", feature = "test-support"))]
+pub use agent::codex_fence::rg_guard::CodexPins;
 pub use agent::launch_gate::LaunchGate;
 pub use agent::loads::codex_hook_config;
 pub use agent::login_link::{

@@ -109,6 +109,14 @@ fn path_outside_cwd_is_load_error() {
             "path `/x` is absolute; it must be relative to the session cwd",
         ),
         (r#"{"delete_file":{"path":""}}"#, "the path is empty"),
+        (
+            r#"{"expect_env_file":{"var":"V","path":"/x","content":""}}"#,
+            "path `/x` is absolute; it must be relative to the folder its variable names",
+        ),
+        (
+            r#"{"expect_env_file":{"var":"","path":"x","content":""}}"#,
+            "expect_env_file: `var` is empty",
+        ),
     ] {
         let error = load_error(&[step], &[]);
         assert!(error.starts_with("t.jsonl:2: "), "{error}");
@@ -192,8 +200,8 @@ fn static_checks_name_file_and_line() {
 
 /// Every step key, in the order `body.rs` declares them.
 const KEYS: &str = "expect, expect_response, all, one_of, respond, update, notify, request, \
-                    send_line, write_file, delete_file, move_file, stderr, spawn_child, exit, \
-                    include";
+                    send_line, write_file, delete_file, move_file, expect_env_file, stderr, \
+                    spawn_child, exit, include";
 
 #[test]
 fn a_wrong_step_key_lists_every_key() {

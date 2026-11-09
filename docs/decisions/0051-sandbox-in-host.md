@@ -22,7 +22,9 @@ settings, no change to any launch).
   (`Locations::agent_home`). Threads from before R17 get a new agent session: `session/load`
   fails in the new home and the host falls back, as it does today. The host never follows a link
   when it reads files the agent can write there (`browser/`, `DevToolsActivePort`, downloads).
-  The matter's notes folder is `<data_dir>/agent-state/<matter_id>/notes/`.
+  The matter's notes folder is `<data_dir>/agent-state/<matter_id>/notes/`. R17 PR-D1 moves
+  Claude's state folders to `<data_dir>/claude-state/<matter_id>/<agent_id>/` and the notes to
+  `<data_dir>/notes/<matter_id>/`; Codex's state folders stay (below).
 - **Logins.** No credential is copied or read. Codex: each state folder is `CODEX_HOME`, with
   `auth.json` hard-linked from the login home; a reused login whose file id changed, or whose
   source is missing, refuses the launch with no re-link; Clauseo's own login is re-linked;
@@ -302,6 +304,23 @@ The orchestrator's conditions, which the later pull requests must meet:
 
   Follow-up, a must-do: PR-D must move Codex's home (or at least `tmp/arg0`) out of
   `agent-state`, with a migration for existing installs, so `agent-state` is denied whole.
+- R17 PR-D1, the layout for the jail: Claude's state and the notes leave `agent-state`, moved at
+  the host's start (`agent/state_folder/layout.rs`), so the jail can deny `agent-state` but the
+  session's own Codex home and grant the rest exactly. Codex's homes stay, since Codex's SQLite
+  stores absolute paths into them.
+  - **Downgrades.** The store's schema 6 (`0006_agent_layout.sql`, a marker with no data) lands
+    before any folder moves, so a build from before the move, whose Codex fence does not deny
+    `<data_dir>/notes`, refuses the data folder (`store.newer_version`) instead of running.
+  - **Known limit of test builds:** Claude threads created while a test build from before the
+    move ran stay in the old `agent-state/<matter>/claude-acp`, inside the fences; the new
+    folder is used and the old one is never merged. Their notes are merged at the next start,
+    but for clashes and links.
+  - **Links.** An old folder that is a link is never moved, and its agent's launch is refused.
+    Old notes that hold a link move entry by entry, the links left behind, since a relative link
+    would name another place one level up.
+  - **ripgrep.** On Linux, a Codex launch runs only with the `rg` of the pinned `@openai/codex`
+    package, found by absolute path in Node's lookup order and checked by SHA-256; `PATH` is
+    never searched. The residual above about a missing `codex-path/rg` is closed.
 
 ## Status
 

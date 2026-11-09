@@ -19,10 +19,11 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0003_thread_seen.sql"),
     include_str!("migrations/0004_thread_title_source.sql"),
     include_str!("migrations/0005_matter_skill_packs.sql"),
+    include_str!("migrations/0006_agent_layout.sql"),
 ];
 
 /// The schema version this build writes, the number of the last migration.
-pub const SCHEMA: u32 = 5;
+pub const SCHEMA: u32 = 6;
 
 /// Statements each connection keeps prepared; the writer uses about twenty.
 const STATEMENT_CACHE: usize = 32;
@@ -87,16 +88,19 @@ pub(crate) fn open_reader(path: &Path) -> Result<Connection, Error> {
 /// Runs each migration past the file's `user_version`, each in one transaction that also sets
 /// `user_version`. A file newer than this build is refused.
 fn migrate(conn: &Connection) -> Result<(), Error> {
+    migrate_with(conn, MIGRATIONS, SCHEMA)
+}
+
+/// [`migrate`] for a build whose migrations are `migrations`, the last one `supported`: a
+/// build that knows fewer refuses a file one of more made (the test of schema 6's marker).
+fn migrate_with(conn: &Connection, migrations: &[&str], supported: u32) -> Result<(), Error> {
     let found: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     let found = u32::try_from(found)
         .map_err(|error| Error::corrupt(format!("user_version {found}: {error}")))?;
-    if found > SCHEMA {
-        return Err(Error::NewerSchema {
-            found,
-            supported: SCHEMA,
-        });
+    if found > supported {
+        return Err(Error::NewerSchema { found, supported });
     }
-    for (version, sql) in (1..).zip(MIGRATIONS).skip(found as usize) {
+    for (version, sql) in (1..).zip(migrations).skip(found as usize) {
         conn.execute_batch(&format!(
             "BEGIN IMMEDIATE;\n{sql}\nPRAGMA user_version = {version};\nCOMMIT;"
         ))
@@ -107,4 +111,49 @@ fn migrate(conn: &Connection) -> Result<(), Error> {
         })?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use rusqlite::Connection;
+
+    use super::{MIGRATIONS, SCHEMA, migrate, migrate_with};
+    use crate::Error;
+
+    fn user_version(conn: &Connection) -> u32 {
+        conn.query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap()
+    }
+
+    /// Schema 6 (`0006_agent_layout.sql`, R17 PR-D1) is a marker: a fresh file migrates to 6,
+    /// and a build that knows only the first five migrations (test-v0.0.4 and every build before
+    /// the agent-state layout) refuses it with `store.newer_version`, changing nothing.
+    #[test]
+    fn a_build_knowing_schema_5_refuses_a_file_at_6() {
+        assert_eq!(SCHEMA, 6);
+        assert_eq!(MIGRATIONS.len(), 6);
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        assert_eq!(user_version(&conn), 6);
+
+        let error = migrate_with(&conn, &MIGRATIONS[..5], 5).unwrap_err();
+        assert!(
+            matches!(
+                error,
+                Error::NewerSchema {
+                    found: 6,
+                    supported: 5
+                }
+            ),
+            "{error:?}"
+        );
+        assert_eq!(user_version(&conn), 6);
+
+        // The same build opens a file at 5, as before.
+        let older = Connection::open_in_memory().unwrap();
+        migrate_with(&older, &MIGRATIONS[..5], 5).unwrap();
+        assert_eq!(user_version(&older), 5);
+        migrate(&older).unwrap();
+        assert_eq!(user_version(&older), 6);
+    }
 }

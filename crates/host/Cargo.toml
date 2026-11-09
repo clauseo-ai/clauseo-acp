@@ -11,7 +11,9 @@ publish.workspace = true
 # Exports `ManualClock`, `SequentialIds`, `HostConfig::with_patch_window_bytes`,
 # `HostHandle::abort_for_test`, `TestProxy`, `HostConfig::with_browser_executable`,
 # `HostConfig::profile_hook` and `HostConfig::agent_path_prepend` for this crate's tests and its
-# dependents' tests.
+# dependents' tests, and on Linux `HostConfig::with_codex_pins` and `CodexPins`: the Codex
+# ripgrep guard checked against a fake install's pins, or off (`None`) for a fake agent with no
+# install. Without this feature the guard always checks the pinned install.
 test-support = []
 
 [dependencies]
