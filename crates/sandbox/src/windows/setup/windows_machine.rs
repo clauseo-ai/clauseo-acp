@@ -24,6 +24,7 @@ use super::machine::{
     LogonRight, Machine, MachineError, Password, ProfileDir, ServiceStart, owned,
 };
 use super::owner::Owner;
+use super::record_key;
 use super::record_values::CopyOwner;
 use super::record_write::{self, RECORD_KEY};
 use super::registered::registered;
@@ -207,7 +208,7 @@ impl Machine for WindowsMachine {
     }
 
     fn read_record(&mut self) -> Result<Option<MachineRecord>, MachineError> {
-        vendor_key::secure()?;
+        vendor_key::secure(record_key::vendor_of(&self.names.record_key))?;
         record_write::read(&self.names.record_key)
     }
 

@@ -26,8 +26,17 @@ pub(super) trait Keys {
     fn delete(&mut self, key: &str) -> Result<(), MachineError>;
 }
 
+/// The vendor key the record's key `record_key` sits directly in, which set-up secures before
+/// it uses the record: [`VENDOR_KEY`] for set-up's record, a scratch root for the tests'.
+#[cfg(any(windows, test))]
+pub(super) fn vendor_of(record_key: &str) -> &str {
+    record_key
+        .rsplit_once('\\')
+        .map_or(VENDOR_KEY, |(parent, _)| parent)
+}
+
 /// Deletes `key` when it holds nothing; whether it is gone.
-fn delete_if_empty(keys: &mut dyn Keys, key: &str) -> Result<bool, MachineError> {
+pub(super) fn delete_if_empty(keys: &mut dyn Keys, key: &str) -> Result<bool, MachineError> {
     match keys.counts(key)? {
         None => Ok(true),
         Some(Counts {

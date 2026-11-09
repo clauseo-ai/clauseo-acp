@@ -136,3 +136,13 @@ fn a_refused_vendor_key_delete_is_not_a_failure() {
     assert_eq!(keys.0.deleted, [RECORD]);
     assert!(keys.0.has(VENDOR_KEY));
 }
+
+#[test]
+fn the_vendor_key_a_record_sits_in_is_its_parent() {
+    assert_eq!(super::vendor_of(RECORD), VENDOR_KEY);
+    assert_eq!(
+        super::vendor_of("SOFTWARE\\ClauseoTestAcct\\Sandbox"),
+        "SOFTWARE\\ClauseoTestAcct"
+    );
+    assert_eq!(super::vendor_of("Sandbox"), VENDOR_KEY);
+}

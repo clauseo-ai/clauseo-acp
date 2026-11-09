@@ -28,8 +28,12 @@ use crate::windows::record::current_user_sid;
 use crate::windows::sids::Sid;
 use crate::windows::test_acl::elevated_tests_enabled;
 
-/// This test family's record key.
-const TEST_KEY: &str = "SOFTWARE\\Clauseo\\SandboxTestAcct";
+/// This test family's scratch vendor key, outside `SOFTWARE\Clauseo`: the record's walk runs on it,
+/// never on the real one.
+const TEST_ROOT: &str = "SOFTWARE\\ClauseoTestAcct";
+
+/// This test family's record key: the pinned `Sandbox` under [`TEST_ROOT`].
+const TEST_KEY: &str = "SOFTWARE\\ClauseoTestAcct\\Sandbox";
 
 /// The start of every account and group name this test family makes, and only this family:
 /// `ClauseoAcct`, then `U` (user) or `G` (group), then six hex digits: 18 characters.
@@ -75,6 +79,7 @@ fn sweep() {
         }
     }
     drop(record_write::delete(TEST_KEY));
+    drop(record_write::delete_scratch_root(TEST_ROOT));
 }
 
 /// Sweeps when dropped, so a failed assertion still cleans up.
@@ -88,12 +93,11 @@ impl Drop for Sweep {
 
 #[test]
 fn the_record_reader_answers_on_a_machine_with_no_key() {
-    let missing = format!("SOFTWARE\\Clauseo\\NoSuchKey{}", suffix());
+    let missing = format!("{TEST_ROOT}{}\\NoSuchKey", suffix());
     assert_eq!(record_write::read(&missing), Ok(None));
     assert_eq!(record_write::delete(&missing), Ok(()));
-    // The real key: absent on a runner. Read only.
-    let mut real = read_only_machine();
-    assert!(real.read_record().is_ok());
+    // The real key: absent on a runner. Read only, without the walk set-up's read runs.
+    assert!(record_write::read(record_write::RECORD_KEY).is_ok());
     assert_eq!(crate::windows::sandbox_pool_sids().ok(), Some(vec![]));
 }
 
@@ -251,13 +255,17 @@ fn elevated_accounts_group_hidden_user_and_record() {
         data_dir: PathBuf::from(r"C:\ClauseoAcct\data"),
         removing: false,
     };
-    // The SD is read before `read_record`: its vendor-key walk resets this key, which is not
-    // the pinned `Sandbox`, to the inherited SD, as it does any key it keeps.
     machine.write_record(&record).unwrap();
     let taken = key_sddl(TEST_KEY).unwrap();
     assert!(taken.starts_with("O:BAD:P"), "{taken}");
     assert!(!taken.contains(";;;WD)"), "{taken}");
+    // The read runs the vendor-key walk on the scratch root; the pinned record keeps its SD.
     assert_eq!(machine.read_record(), Ok(Some(record.clone())));
+    assert_eq!(
+        key_sddl(TEST_KEY).unwrap(),
+        taken,
+        "the walk keeps the record's SD"
+    );
 
     // The user: made once, never adopted.
     let password = machine.new_password();

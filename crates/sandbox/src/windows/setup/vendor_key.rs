@@ -37,8 +37,6 @@
 
 #[cfg(windows)]
 use super::MachineError;
-#[cfg(windows)]
-use super::record_key::VENDOR_KEY;
 use super::record_values::RECORD_SDDL;
 #[cfg(windows)]
 use crate::windows::acl::privilege::Privileges;
@@ -206,9 +204,9 @@ fn pinned(relative: &str) -> Option<String> {
         .then(|| format!("O:BA{RECORD_SDDL}"))
 }
 
-/// Secures the vendor key at `path` (set-up's is [`VENDOR_KEY`]) as the module says, and returns
-/// what it changed. Any fault stops it: set-up must not go on under a root it couldn't secure. A
-/// root deleted under the walk is walked once more from the start.
+/// Secures the vendor key at `path` (set-up's is `record_key::VENDOR_KEY`) as the module says,
+/// and returns what it changed. Any fault stops it: set-up must not go on under a root it
+/// couldn't secure. A root deleted under the walk is walked once more from the start.
 pub(super) fn ensure<T: Tree>(tree: &mut T, path: &str) -> Result<Report, VendorFault> {
     match ensure_once(tree, path)? {
         Some(report) => Ok(report),
@@ -293,16 +291,17 @@ fn unless_gone<V>(
     }
 }
 
-/// Secures `HKLM\SOFTWARE\Clauseo` (set-up's entry): [`ensure`] on the registry, with
-/// `SeBackupPrivilege` held for the walk and one log line per kind of change. A fault is
-/// [`MachineError::VendorKey`]; nothing after it runs.
+/// Secures the vendor key `root` (set-up's entry): [`ensure`] on the registry, with
+/// `SeBackupPrivilege` held for the walk and one log line per kind of change. Set-up's root is
+/// always `record_key::VENDOR_KEY`, `record_key::vendor_of` its record key; only the tests'
+/// scratch records give another. A fault is [`MachineError::VendorKey`]; nothing after it runs.
 #[cfg(windows)]
-pub(super) fn secure() -> Result<(), MachineError> {
+pub(super) fn secure(root: &str) -> Result<(), MachineError> {
     let fault = |text: String| MachineError::VendorKey(text);
     let _held = Privileges::enable(&WALK_PRIVILEGES)
         .map_err(|error| fault(format!("its privileges weren't enabled: {error}")))?;
-    let report = ensure(&mut os::Registry::at(VENDOR_KEY), VENDOR_KEY)
-        .map_err(|found| fault(found.to_string()))?;
+    let report =
+        ensure(&mut os::Registry::at(root), root).map_err(|found| fault(found.to_string()))?;
     log(&report);
     Ok(())
 }

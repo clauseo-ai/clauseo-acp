@@ -244,7 +244,7 @@ pub(crate) fn remove_reset_sids(key: &str, done: &[Sid]) -> Result<(), MachineEr
 /// `HKLM\<key>` opened to set values, made when missing, with its owner (Administrators) and
 /// DACL ([`RECORD_SDDL`]) set again before any value.
 fn open_secured(key: &str) -> Result<Key, MachineError> {
-    vendor_key::secure()?;
+    vendor_key::secure(record_key::vendor_of(key))?;
     let descriptor = Descriptor::from_sddl(&format!("{RECORD_OWNER}{RECORD_SDDL}"))?;
     let attributes = windows::Win32::Security::SECURITY_ATTRIBUTES {
         nLength: u32::try_from(size_of::<windows::Win32::Security::SECURITY_ATTRIBUTES>())
@@ -528,6 +528,12 @@ pub(crate) fn key_sddl(key: &str) -> Result<String, MachineError> {
     // SAFETY: allocated by the conversion with LocalAlloc, freed once.
     unsafe { LocalFree(Some(HLOCAL(text.0.cast()))) };
     sddl
+}
+
+/// Deletes the tests' scratch vendor key `HKLM\<root>` once it holds nothing.
+#[cfg(test)]
+pub(crate) fn delete_scratch_root(root: &str) -> Result<(), MachineError> {
+    record_key::delete_if_empty(&mut Hklm, root).map(|_gone| ())
 }
 
 /// Makes `HKLM\<key>` (64-bit view) with the descriptor `sddl`, as someone other than the
