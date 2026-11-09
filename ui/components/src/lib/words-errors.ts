@@ -208,7 +208,7 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   "blocklist.revoke_not_saved":
     "This site is blocked again until Clauseo closes. Clauseo couldn't save the change, so it may be allowed again next time Clauseo opens.",
   "signin.reuse_other_volume":
-    "Clauseo can't use the Codex sign-in already on this computer, because Clauseo's data folder is on a different drive from your home folder. Sign in to Codex in Clauseo instead.",
+    "Sign in to ChatGPT in Clauseo. Clauseo can't use the sign-in Codex already has on this computer, because Clauseo's data folder is on a different drive from your home folder.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };

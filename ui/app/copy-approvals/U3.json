@@ -861,13 +861,13 @@
     "note": "The removal of an allow that lasts until Clauseo closes, because Clauseo couldn't save it (ADR 0053)"
   },
   "U3-err-signin.reuse_other_volume": {
-    "en": "Clauseo can't use the Codex sign-in already on this computer, because Clauseo's data folder is on a different drive from your home folder. Sign in to Codex in Clauseo instead.",
-    "hi": "Clauseo इस कंप्यूटर पर पहले से मौजूद Codex साइन इन का उपयोग नहीं कर सकता, क्योंकि Clauseo का डेटा फ़ोल्डर आपके होम फ़ोल्डर से अलग ड्राइव पर है। इसके बजाय Clauseo में Codex में साइन इन करें।",
+    "en": "Sign in to ChatGPT in Clauseo. Clauseo can't use the sign-in Codex already has on this computer, because Clauseo's data folder is on a different drive from your home folder.",
+    "hi": "Clauseo में ChatGPT से साइन इन करें। Clauseo इस कंप्यूटर पर Codex के पहले से मौजूद साइन-इन का उपयोग नहीं कर सकता, क्योंकि Clauseo का डेटा फ़ोल्डर आपके होम फ़ोल्डर से अलग ड्राइव पर है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
+    "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-07",
+    "at": "2026-11-09",
     "by": "app track (provisional; Rohan batch review)"
   }
 }
