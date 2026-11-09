@@ -261,10 +261,6 @@ expression: text
 ; The folders above it: metadata only, so its path resolves.
 (allow file-read-metadata
   (path-ancestors (param "BROWSER_SOCKETS")))
-; chrome-headless-shell's port rendezvous: the browser registers the name and its
-; children look it up; without it the browser stops at start.
-(allow mach-register mach-lookup
-  (global-name-prefix "org.chromium.Chromium.MachPortRendezvousServer."))
 
 ; Network: the proxy's loopback ports and the browser socket folder only; no DNS.
 (allow network-outbound

@@ -112,6 +112,24 @@ fn the_ssh_agent_cannot_be_reached() {
     assert!(out.stderr.contains("Error connecting to agent"), "{out:#?}");
 }
 
+/// Chrome's port rendezvous: Chrome runs outside the agent's jail in a profile of its own, so
+/// the jail, browser socket folder and all, neither looks up nor registers its names. Refused
+/// by the sandbox (`BOOTSTRAP_NOT_PRIVILEGED`), not unknown to launchd.
+#[test]
+fn chromes_rendezvous_names_are_refused() {
+    let sockets = clauseo_sandbox::BrowserSocketDir::create().unwrap();
+    let j = Jail::with(|b| b.browser_socket_dir(&sockets));
+    for prefix in [
+        "org.chromium.Chromium.MachPortRendezvousServer",
+        "com.google.Chrome.MachPortRendezvousServer",
+    ] {
+        let name = format!("{prefix}.{}", std::process::id());
+        let refused = "BOOTSTRAP_NOT_PRIVILEGED";
+        assert_refused_with(&j.probe(&["lookup", &name]), refused);
+        assert_refused_with(&j.probe(&["checkin", &name]), refused);
+    }
+}
+
 /// Item 4: an Apple Event to Finder. Not tried outside: it would ask the user for Automation.
 #[test]
 fn apple_events_are_refused() {
