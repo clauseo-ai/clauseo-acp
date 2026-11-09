@@ -4,8 +4,8 @@
 
 use std::collections::BTreeMap;
 
-use super::super::Value;
 use super::super::walk::parses;
+use super::super::{RECORD_LOCKED_SDDL, Value};
 use super::{ADMIN_KEY, FakeTree, USER_KEY, record_pinned, under};
 use crate::windows::setup::record_key::VENDOR_KEY;
 use crate::windows::setup::vendor_key::{VENDOR_SDDL, ensure};
@@ -94,6 +94,8 @@ fn a_crash_after_the_copy_is_written_keeps_the_old_record_and_the_next_walk_redo
     ] {
         let mut tree = crashed(crash);
         assert!(tree.has(&under("Sandbox")) && tree.has(&under("Sandbox.new")));
+        // Taken over, the old record still lets Users read it: no reader is denied.
+        assert_eq!(tree.sddl_of(&under("Sandbox")), RECORD_LOCKED_SDDL);
         let report = ensure(&mut tree, VENDOR_KEY).unwrap();
         assert_eq!(report.dropped_copies, [under("Sandbox.new")]);
         assert_eq!(report.recreated, [under("Sandbox")]);

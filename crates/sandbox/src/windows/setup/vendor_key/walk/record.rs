@@ -6,7 +6,7 @@
 
 use super::super::security::{Security, TRUSTED_OWNERS};
 use super::super::{
-    LOCKED_SDDL, RECORD_NAME, RECORD_TEMP_NAME, Report, Tree, Value, VendorFault, pinned,
+    RECORD_LOCKED_SDDL, RECORD_NAME, RECORD_TEMP_NAME, Report, Tree, Value, VendorFault, pinned,
     unless_gone,
 };
 use super::drain;
@@ -75,7 +75,7 @@ pub(super) fn recover<T: Tree>(
     };
     let name = names.remove(at);
     let path = format!("{root_path}\\{name}");
-    let taken = tree.take_over_child(root, &name, LOCKED_SDDL);
+    let taken = tree.take_over_child(root, &name, RECORD_LOCKED_SDDL);
     let Some((copy, before)) = unless_gone(taken, VendorFault::Secure)? else {
         return Ok(());
     };

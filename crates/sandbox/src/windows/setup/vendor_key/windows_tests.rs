@@ -22,9 +22,9 @@ use windows::Win32::System::Registry::{
 };
 use windows::core::{HSTRING, PCWSTR};
 
-use super::os::{AFTER_OWNER_WRITE, FAIL_RENAME, Key, Registry};
+use super::os::{AFTER_OWNER_WRITE, FAIL_FLUSH, FAIL_RENAME, Key, Registry};
 use super::security::Security;
-use super::{Report, Tree, VENDOR_SDDL, VendorFault, ensure};
+use super::{RECORD_LOCKED_SDDL, Report, Tree, VENDOR_SDDL, VendorFault, ensure};
 use crate::windows::acl::privilege::{Privileges, RECLAIM};
 use crate::windows::setup::lock::Descriptor;
 use crate::windows::setup::record_values::RECORD_SDDL;
@@ -487,6 +487,30 @@ fn elevated_a_crash_mid_remake_recovers_the_record_and_a_weak_copy_is_deleted() 
     create_key_with(&record, &pinned).unwrap();
     set_record(&record, owner).unwrap();
     let wanted = read_texts(&record, &names).unwrap();
+
+    // A crash before the old record is deleted leaves it taken over with Users' read kept.
+    FAIL_FLUSH.set(true);
+    let crashed = ensure(&mut Registry::at(&path), &path);
+    FAIL_FLUSH.set(false);
+    assert!(crashed.is_err(), "{crashed:?}");
+    let locked = Security::parse(&key_sddl(&record).unwrap());
+    assert_eq!(locked, Security::parse(RECORD_LOCKED_SDDL));
+    assert!(
+        !locked.others_may_write(),
+        "no one but SYSTEM and Administrators writes"
+    );
+    let users_read = locked
+        .aces
+        .iter()
+        .any(|ace| ace.kind == "A" && ace.rights == "KR" && ace.sid == "S-1-5-32-545");
+    assert!(
+        users_read && locked.aces.iter().all(|ace| ace.kind == "A"),
+        "{locked:?}"
+    );
+    assert_eq!(read_texts(&record, &names).unwrap(), wanted);
+    let report = ensure(&mut Registry::at(&path), &path).unwrap();
+    assert_eq!(report.dropped_copies, std::slice::from_ref(&copy));
+    assert_eq!(read_texts(&record, &names).unwrap(), wanted);
 
     // A crash before the rename: the old record deleted, the copy left whole.
     FAIL_RENAME.set(true);

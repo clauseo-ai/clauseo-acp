@@ -312,7 +312,10 @@ build 26100):
     leaves the old record, the new one or both. The next walk deletes a `Sandbox.new` beside
     `Sandbox`, and renames one found alone into place only when its SD is the pinned one, owned
     by SYSTEM or Administrators, with no link value, no subkey and values that parse; any other
-    is deleted. Readers that hold no set-up lock read again, for up to half a second, when the
+    is deleted. Both keys are taken over with Users' read kept
+    (`O:SYD:P(A;;KA;;;SY)(A;;KA;;;BA)(A;;KR;;;BU)`), so a walk that stops before the delete never
+    leaves a normal user denied, which the desktop's check would read as a jail. Readers that
+    hold no set-up lock read again, for up to half a second, when the
     record is denied, unparsable or missing while `Sandbox.new` is there (`record_settle.rs`).
     `Clauseo\Clauseo` is made again with the folder from the
     uninstall key's `InstallLocation`, or none. The rest

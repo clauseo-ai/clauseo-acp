@@ -89,6 +89,12 @@ pub(super) fn write(key: &Key, values: &[Value]) -> Result<(), Miss> {
 
 /// Writes the key `key` is open on, and its values, to disk (`RegFlushKey`).
 pub(super) fn flush(key: &Key) -> Result<(), Miss> {
+    #[cfg(test)]
+    if super::FAIL_FLUSH.get() {
+        return Err(Miss::Failed(
+            "RegFlushKey failed (the test's crash)".to_owned(),
+        ));
+    }
     // SAFETY: the key is open; `RegFlushKey` takes no other pointer.
     let flushed = unsafe { RegFlushKey(key.0) };
     check("RegFlushKey", flushed)

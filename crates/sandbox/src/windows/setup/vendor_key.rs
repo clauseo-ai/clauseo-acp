@@ -20,12 +20,14 @@
 //!      opened while its DACL was weak outlives any DACL written later, and made again under the
 //!      locked root with its own SD. Its values are copied through only when SYSTEM,
 //!      Administrators or a local account in Administrators owned it and no one else could write
-//!      it (a NULL DACL lets everyone); otherwise it comes back empty. The new key is written
-//!      whole as `Sandbox.new` and flushed, the old one deleted, and the new one renamed, so a
-//!      crash leaves the old record, the new one, or both. The walk first settles what an earlier
-//!      run left: a `Sandbox.new` beside `Sandbox` is deleted; one alone is renamed into place
-//!      when its SD is the pinned one, owned by SYSTEM or Administrators, with no link value, no
-//!      subkey and values that parse, else deleted. The name is never kept as a stranger's key;
+//!      it (a NULL DACL lets everyone); otherwise it comes back empty. It and its copy are taken
+//!      over with Users' read kept ([`RECORD_LOCKED_SDDL`]), so no reader is denied. The new key
+//!      is written whole as `Sandbox.new` and flushed, the old one deleted, and the new one
+//!      renamed, so a crash leaves the old record, the new one, or both. The walk first settles
+//!      what an earlier run left: a `Sandbox.new` beside `Sandbox` is deleted; one alone is
+//!      renamed into place when its SD is the pinned one, owned by SYSTEM or Administrators, with
+//!      no link value, no subkey and values that parse, else deleted. The name is never kept as a
+//!      stranger's key;
 //!    - the installer's `Clauseo\Clauseo`, whose install folder the uninstaller deletes, is
 //!      always deleted for the same reason, and made again with the folder from the trusted
 //!      `InstallLocation` of the uninstall key, or none when there is none;
@@ -68,6 +70,12 @@ pub(super) const INHERITED_SDDL: &str =
 /// What each subkey gets first, before anything under it is read: owner SYSTEM and a protected
 /// DACL that lets only SYSTEM and Administrators in.
 pub(super) const LOCKED_SDDL: &str = "O:SYD:P(A;;KA;;;SY)(A;;KA;;;BA)";
+
+/// What the record (`Sandbox`) and its copy get instead of [`LOCKED_SDDL`]: the same, with Users'
+/// read kept. A take-over still ends every writer's say, and a reader that holds no set-up lock
+/// is never denied, even when a walk stops before the old record is deleted: a denial would
+/// read as a jail to the desktop's check.
+pub(super) const RECORD_LOCKED_SDDL: &str = "O:SYD:P(A;;KA;;;SY)(A;;KA;;;BA)(A;;KR;;;BU)";
 
 /// The record's subkey under the vendor key (`record_write.rs`).
 const RECORD_NAME: &str = "Sandbox";

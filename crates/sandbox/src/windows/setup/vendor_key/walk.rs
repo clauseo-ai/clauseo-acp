@@ -7,8 +7,8 @@ use std::collections::VecDeque;
 
 use super::security::{self, Security};
 use super::{
-    INHERITED_SDDL, INSTALLER_NAME, LOCKED_SDDL, Report, Tree, Value, VendorFault, pinned,
-    unless_gone,
+    INHERITED_SDDL, INSTALLER_NAME, LOCKED_SDDL, RECORD_LOCKED_SDDL, Report, Tree, Value,
+    VendorFault, pinned, unless_gone,
 };
 
 mod record;
@@ -177,7 +177,11 @@ fn visit<T: Tree>(
     let pinned = judged.pinned;
     // What the child was before the take-over, read on the take-over's own handle.
     let Some((key, before)) = unless_gone(
-        tree.take_over_child(parent, name, LOCKED_SDDL),
+        tree.take_over_child(
+            parent,
+            name,
+            pinned.map_or(LOCKED_SDDL, |_| RECORD_LOCKED_SDDL),
+        ),
         VendorFault::Secure,
     )?
     else {

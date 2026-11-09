@@ -474,6 +474,8 @@ thread_local! {
         std::cell::RefCell::new(None);
     /// Set, a rename fails: the elevated tests' crash after the old record is deleted.
     pub(super) static FAIL_RENAME: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Set, a flush fails: the elevated tests' crash before the old record is deleted.
+    pub(super) static FAIL_FLUSH: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// `name` taken over with `sddl` ([`take_over_steps`]), opened for writing, with its owner and
