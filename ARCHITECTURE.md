@@ -96,7 +96,8 @@ to write instead.
 | `legal` | Case-law and regulator data clients and parsers | protocol | tauri | planned |
 | `citations` | Deterministic citation parsing and checks | protocol, legal | tauri | planned |
 | `skills` | Skill format, built-in skills, validation, install through `profile` | protocol, profile | tauri | planned |
-| `mcp` | The `clauseo-mcp` sidecar: the browser guard in front of agent-browser's MCP server, and the connector relay client (0050) | serde, serde_json; nix (Unix only); windows (Windows only) | tauri, tokio, reqwest, hyper, ureq, curl, rustls, native-tls | exists |
+| `mcp` | The `clauseo-mcp` sidecar: the browser guard in front of agent-browser's MCP server, and the connector relay client (0050) | serde, serde_json; nix (Unix only); windows (Windows only) | tauri, tokio, reqwest, hyper, ureq, curl, rustls, native-tls, sandbox | exists |
+| `lowbox` | `AppContainer` (`LowBox`) launches on Windows, for the browser: the package SID, the object namespace the owner builds, the guard's check of the handles it is given, the `LowBox` token and the suspended child, and the folder grants the package needs (named, applied by set-up) | windows (Windows only) | tauri, tokio, host, sandbox, mcp | exists |
 
 The broker (keys, cache and limits for outside services, plus the socket the sandboxed sidecar
 reaches) is a module of `host`, not a crate. Frontend packages: `ui/app` (exists), `ui/components`

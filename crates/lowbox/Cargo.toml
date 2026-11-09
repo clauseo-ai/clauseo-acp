@@ -1,0 +1,46 @@
+[package]
+name = "clauseo-lowbox"
+version = "0.0.0"
+description = "Launches a program in an AppContainer (LowBox) token on Windows."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+# The package SID, the argument quoting, the handle list's parse and checks and the grants are
+# plain Rust on every OS, so their unit tests run anywhere; the rest is Windows only.
+#
+# The namespace (src/windows/namespace.rs): NtCreateFile, NtOpenDirectoryObject and
+# NtOpenSymbolicLinkObject (Wdk_Storage_FileSystem) with OBJECT_ATTRIBUTES (Wdk_Foundation) and
+# IO_STATUS_BLOCK (System_IO); the SDDL conversion and ConvertSidToStringSidW
+# (Security_Authorization), the token's user (Security, System_Threading's OpenProcessToken) and
+# the session (ProcessIdToSessionId: System_RemoteDesktop). The handle checks
+# (src/windows/probe.rs): GetHandleInformation and NtQueryObject with
+# PUBLIC_OBJECT_TYPE_INFORMATION (System_WindowsProgramming). The launch (src/windows/spawn.rs):
+# CreateProcessAsUserW and the attribute list (System_Threading), CreateEnvironmentBlock
+# (System_Environment), CreatePipe (System_Pipes), CreateFileW for NUL (Storage_FileSystem) and
+# GetStdHandle (System_Console).
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+  "Wdk_Foundation",
+  "Wdk_Storage_FileSystem",
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Console",
+  "Win32_System_Environment",
+  "Win32_System_IO",
+  "Win32_System_Pipes",
+  "Win32_System_RemoteDesktop",
+  "Win32_System_Threading",
+  "Win32_System_WindowsProgramming",
+] }
+
+# The unit tests' cross-check of the package SID: DeriveAppContainerSidFromAppContainerName
+# (Security_Isolation).
+[target.'cfg(windows)'.dev-dependencies]
+windows = { workspace = true, features = ["Win32_Security_Isolation"] }

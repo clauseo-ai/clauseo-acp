@@ -615,3 +615,15 @@ crates/sandbox/examples/s15_launch_vm/win_switch.rs - unsafe_code
 crates/sandbox/examples/s15_launch_vm/win_pool.rs - unsafe_code
 # The cancel row's thread states: NtQuerySystemInformation against ntdll, and a pid's token user.
 crates/sandbox/examples/s15_launch_vm/win_suspend.rs - unsafe_code
+# clauseo-lowbox: the Windows FFI modules, the SHA-256 round's FIPS names, and the modules only
+# the Windows build uses (their tests run on every OS).
+crates/lowbox/src/lib.rs envblock dead_code
+crates/lowbox/src/lib.rs handles dead_code
+crates/lowbox/src/lib.rs layout dead_code
+crates/lowbox/src/package/sha256.rs compress clippy::many_single_char_names
+crates/lowbox/src/windows/namespace.rs - unsafe_code
+crates/lowbox/src/windows/nt.rs - unsafe_code
+crates/lowbox/src/windows/probe.rs - unsafe_code
+crates/lowbox/src/windows/spawn.rs - unsafe_code
+crates/lowbox/src/windows/stdio.rs - unsafe_code
+crates/lowbox/src/windows/tests.rs - unsafe_code
