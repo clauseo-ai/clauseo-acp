@@ -39,10 +39,10 @@ use windows::Win32::System::SystemInformation::GetSystemDirectoryW;
 use windows::Win32::System::Threading::{
     CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW,
     CreateProcessWithLogonW, DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT,
-    GetCurrentProcess, GetExitCodeProcess, InitializeProcThreadAttributeList, LOGON_WITH_PROFILE,
+    GetExitCodeProcess, InitializeProcThreadAttributeList, LOGON_WITH_PROFILE,
     LPPROC_THREAD_ATTRIBUTE_LIST, OpenProcessToken, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
     PROCESS_INFORMATION, ResumeThread, STARTF_USESHOWWINDOW, STARTF_USESTDHANDLES, STARTUPINFOEXW,
-    STARTUPINFOW, Sleep, TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
+    STARTUPINFOW, TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
 };
 use windows::core::{HSTRING, PCWSTR, PWSTR};
 use zeroize::Zeroizing;
@@ -99,21 +99,21 @@ impl Process {
         crate::windows::token::os::user(&Handle(token))
     }
 
-    /// The user and logon SID of its token, for the outer's full check once the inner granted it
-    /// `TOKEN_QUERY`.
-    pub(super) fn user_and_logon(
-        &self,
-    ) -> io::Result<(crate::windows::sids::Sid, crate::windows::sids::Sid)> {
+    /// Its token's user, logon SID, integrity and elevation type, for the outer's full check
+    /// once the inner granted it `TOKEN_QUERY`.
+    pub(super) fn token_parts(&self) -> io::Result<super::inner_user::TokenParts> {
         let mut token = HANDLE::default();
         // SAFETY: the process handle has every right (it came from the logon call); `token` is
         // a live out-pointer, owned by `Handle` once written.
         unsafe { OpenProcessToken(self.handle.0, TOKEN_QUERY, &raw mut token) }
             .map_err(|e| os_error(&e))?;
         let token = Handle(token);
-        Ok((
-            crate::windows::token::os::user(&token)?,
-            crate::windows::token::os::logon_sid(&token)?,
-        ))
+        Ok(super::inner_user::TokenParts {
+            user: crate::windows::token::os::user(&token)?,
+            logon: crate::windows::token::os::logon_sid(&token)?,
+            integrity: crate::windows::token::os::integrity(&token)?,
+            elevation_type: crate::windows::token::os::elevation_type(&token)?,
+        })
     }
 
     /// Ends it with `code`; one already gone is fine.
@@ -187,26 +187,6 @@ pub(super) fn telemetry_user(inner: &Process) -> Result<crate::windows::sids::Si
         }
         return Ok(sid);
     }
-}
-
-/// A watchdog: a thread that, once `after` passed, exits this process with `code` unless `done`
-/// was set meanwhile. The inner's bound on its wait for the outer's go (`inner.rs`).
-pub(super) fn exit_unless(
-    done: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    after: Duration,
-    code: u32,
-) -> io::Result<()> {
-    let millis = u32::try_from(after.as_millis()).unwrap_or(u32::MAX - 1);
-    std::thread::Builder::new()
-        .spawn(move || {
-            // SAFETY: Sleep only waits.
-            unsafe { Sleep(millis) };
-            if !done.load(std::sync::atomic::Ordering::SeqCst) {
-                // SAFETY: the current process's pseudo-handle; ending this process is the point.
-                drop(unsafe { TerminateProcess(GetCurrentProcess(), code) });
-            }
-        })
-        .map(drop)
 }
 
 // SAFETY: the handles are kernel handles any thread may use.

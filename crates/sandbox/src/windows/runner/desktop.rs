@@ -35,7 +35,8 @@ use windows::core::{HSTRING, PCWSTR, w};
 use zeroize::Zeroizing;
 
 use super::station::{
-    Made, StationDesktop, StationSids, StationSteps, made_fresh, make_station, station_name_of_path,
+    Made, StationDesktop, StationSids, StationSteps, made_fresh, make_station, name_span,
+    station_name_of_path,
 };
 use crate::windows::acl::object::{Handle, os_error};
 use crate::windows::sids::Sid;
@@ -229,15 +230,22 @@ impl StationSteps for OsStation<'_> {
                 io::Error::other(format!("NTSTATUS {:#010x}", status.0.cast_unsigned())),
             ));
         }
-        // SAFETY: the call wrote an OBJECT_NAME_INFORMATION at the start of `buffer`; its string
-        // points into `buffer` (or is empty).
+        // SAFETY: the call wrote an OBJECT_NAME_INFORMATION at the start of `buffer`.
         let info = unsafe { &*buffer.as_ptr().cast::<OBJECT_NAME_INFORMATION>() };
-        let units = usize::from(info.Name.Length) / 2;
-        if units == 0 || info.Name.Buffer.is_null() {
-            return Err((call, io::Error::other("the station has no object name")));
-        }
-        // SAFETY: `Length` bytes of UTF-16 at `Buffer`, inside `buffer`, which is still live.
-        let wide = unsafe { std::slice::from_raw_parts(info.Name.Buffer.0, units) };
+        let bytes = size_of_val(buffer.as_slice());
+        // The name must lie wholly inside `buffer`; anything else fails closed.
+        let (offset, units) = name_span(
+            buffer.as_ptr().addr(),
+            bytes,
+            info.Name.Buffer.0.addr(),
+            info.Name.Length,
+        )
+        .map_err(|why| (call, io::Error::other(why)))?;
+        // SAFETY: `buffer` is live, aligned for u16 and `bytes` long; read as UTF-16 units.
+        let all = unsafe { std::slice::from_raw_parts(buffer.as_ptr().cast::<u16>(), bytes / 2) };
+        let wide = all
+            .get(offset..offset + units)
+            .ok_or_else(|| (call, io::Error::other("the name runs past the buffer")))?;
         let path = String::from_utf16(wide).map_err(|e| (call, io::Error::other(e)))?;
         let name = station_name_of_path(&path).map_err(|why| (call, io::Error::other(why)))?;
         if StationDesktop::of(name).is_none() {

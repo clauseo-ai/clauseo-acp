@@ -89,7 +89,7 @@ impl Steps for Start<'_> {
     }
 
     /// The second stage of the check (`start.rs`): the inner's ready on `ctl`, once its token
-    /// grants this user `TOKEN_QUERY`, then its token whole (`inner_user::check_full`), then the
+    /// grants this user `TOKEN_QUERY`, then its token (`inner_user::check_full`), then the
     /// go. An inner that exited first (a failed grant: `RunExit::TokenGrant`) says why in its
     /// exit code.
     fn confirm(&mut self, inner: &Process) -> Result<(), Failure> {
@@ -100,7 +100,7 @@ impl Steps for Start<'_> {
         let ready = ready_within(Until::new(self.ctl, READY_WAIT)).map_err(|(exit, message)| {
             inner_exit(inner).unwrap_or_else(|| Failure::new(exit, message))
         })?;
-        let (user, logon) = inner.user_and_logon().map_err(|e| {
+        let token = inner.token_parts().map_err(|e| {
             Failure::new(
                 RunExit::Logon,
                 os("the inner runner's full check: its token", &e),
@@ -108,8 +108,7 @@ impl Steps for Start<'_> {
         })?;
         let seen = TokenSeen {
             ready_pid: ready.pid,
-            user,
-            logon,
+            token,
         };
         check_full(&seen, inner.pid, self.pool_user, self.logon)
             .map_err(|(exit, message)| Failure::new(exit, message))?;

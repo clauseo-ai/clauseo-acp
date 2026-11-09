@@ -19,10 +19,10 @@ use windows::Win32::Storage::FileSystem::{
 use windows::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
 use windows::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, PIPE_READMODE_BYTE,
-    PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT,
+    PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT, PeekNamedPipe,
 };
 use windows::Win32::System::SystemInformation::GetTickCount64;
-use windows::Win32::System::Threading::{CreateEventW, WaitForMultipleObjects};
+use windows::Win32::System::Threading::{CreateEventW, Sleep, WaitForMultipleObjects};
 use windows::core::HSTRING;
 
 use super::Role;
@@ -300,6 +300,44 @@ impl Overlapped {
         drop(self.result(handle));
     }
 }
+
+/// Waits until `pipe` (a client end, read without overlapped I/O) has bytes to read, for
+/// `within` at most, polling `PeekNamedPipe` on this thread: no other thread is made, so
+/// nothing runs in the process but this thread while it waits. `TimedOut` past `within`; the
+/// other end gone is `BrokenPipe`. The inner's bound on its wait for the outer's go.
+pub(in crate::windows) fn wait_readable(pipe: &std::fs::File, within: Duration) -> io::Result<()> {
+    use std::os::windows::io::AsRawHandle;
+    let handle = HANDLE(pipe.as_raw_handle());
+    let within = u64::try_from(within.as_millis()).unwrap_or(u64::MAX);
+    // SAFETY: GetTickCount64 only reads the clock.
+    let deadline = unsafe { GetTickCount64() }.saturating_add(within);
+    loop {
+        let mut available = 0u32;
+        // SAFETY: the pipe handle is live; only the count is asked for, into a live out-pointer.
+        let peeked =
+            unsafe { PeekNamedPipe(handle, None, 0, None, Some(&raw mut available), None) };
+        match peeked {
+            Ok(()) if available > 0 => return Ok(()),
+            Ok(()) => {}
+            Err(error) if ended(&error) => {
+                return Err(io::Error::new(io::ErrorKind::BrokenPipe, "the pipe closed"));
+            }
+            Err(error) => return Err(os_error(&error)),
+        }
+        // SAFETY: GetTickCount64 only reads the clock.
+        if unsafe { GetTickCount64() } >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "nothing came in time",
+            ));
+        }
+        // SAFETY: Sleep only waits.
+        unsafe { Sleep(POLL_MS) };
+    }
+}
+
+/// How often [`wait_readable`] looks, in milliseconds.
+const POLL_MS: u32 = 20;
 
 /// `handle` as a `File`, which owns and closes it from now on.
 pub(in crate::windows) fn into_file(handle: Handle) -> std::fs::File {

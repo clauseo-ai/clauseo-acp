@@ -334,3 +334,26 @@ fn a_station_name_path_with_no_name_or_a_deeper_one_is_refused() {
         assert!(station_name_of_path(not).is_err(), "{not}");
     }
 }
+
+#[test]
+fn an_object_name_must_lie_wholly_inside_the_buffer() {
+    // An 8 KiB buffer at 0x1000; the header is 16 bytes, the name right after it.
+    let (base, size) = (0x1000, 8192);
+    assert_eq!(name_span(base, size, base + 16, 40), Ok((8, 20)));
+    // The very end of the buffer is fine; one unit past it isn't.
+    assert_eq!(
+        name_span(base, size, base + size - 40, 40),
+        Ok(((size - 40) / 2, 20))
+    );
+    for (at, bytes) in [
+        (base + size - 38, 40), // runs past the end
+        (base - 2, 40),         // starts before the buffer
+        (base + size, 2),       // starts at the end
+        (base + 16, 0),         // empty
+        (base + 16, 41),        // odd length
+        (base + 17, 40),        // odd offset
+        (usize::MAX - 1, 40),   // wraps
+    ] {
+        assert!(name_span(base, size, at, bytes).is_err(), "{at:#x} {bytes}");
+    }
+}

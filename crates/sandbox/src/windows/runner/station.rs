@@ -106,7 +106,7 @@ impl StationDesktop {
 /// The station's name from its object path, as `NtQueryObject(ObjectNameInformation)` gives it:
 /// `\Sessions\<n>\Windows\WindowStations\<name>`, the last component. `Err` for a path without
 /// `\WindowStations\`, or with no name or a deeper one after it.
-pub(crate) fn station_name_of_path(path: &str) -> Result<&str, &'static str> {
+pub fn station_name_of_path(path: &str) -> Result<&str, &'static str> {
     let (_, name) = path
         .rsplit_once(r"\WindowStations\")
         .ok_or("the object's name has no \\WindowStations\\ part")?;
@@ -117,6 +117,32 @@ pub(crate) fn station_name_of_path(path: &str) -> Result<&str, &'static str> {
         return Err("the station's object name has more than one component after WindowStations");
     }
     Ok(name)
+}
+
+/// Where an `OBJECT_NAME_INFORMATION`'s name lies in the buffer `NtQueryObject` wrote:
+/// `buffer` the buffer's address and `size` its bytes, `at` the name's address and `bytes` its
+/// `Length`. Its offset and length in UTF-16 units, or `Err` (fail closed) for an empty name,
+/// an odd length or offset, or one not wholly inside the buffer.
+pub(crate) fn name_span(
+    buffer: usize,
+    size: usize,
+    at: usize,
+    bytes: u16,
+) -> Result<(usize, usize), &'static str> {
+    let bytes = usize::from(bytes);
+    let offset = at
+        .checked_sub(buffer)
+        .ok_or("the name lies before the buffer")?;
+    if bytes == 0 {
+        return Err("the station has no object name");
+    }
+    if bytes % 2 != 0 || offset % 2 != 0 {
+        return Err("the name isn't whole UTF-16");
+    }
+    if offset.checked_add(bytes).is_none_or(|end| end > size) {
+        return Err("the name runs past the buffer");
+    }
+    Ok((offset / 2, bytes / 2))
 }
 
 /// Who the descriptors name.
