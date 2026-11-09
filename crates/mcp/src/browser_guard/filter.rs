@@ -11,7 +11,11 @@
 //! 2. An array (a batch): `-32600`, nothing forwarded. A scalar: `-32600`, nothing forwarded.
 //! 3. Any message whose `id` is [`RESERVED_ID`], the guard's own close request's: `-32600`
 //!    with that id, nothing forwarded.
-//! 4. An object whose `method` is exactly `tools/call`, with `params.arguments` an object:
+//! 4. An object whose `method` is exactly `tools/call` naming a tool outside [`ALLOWED_TOOLS`]
+//!    (a missing or non-string name included): a live view of [`LIVE_VIEW_TOOLS`] gets
+//!    [`UNAVAILABLE`], any other [`UNKNOWN_TOOL`]; nothing forwarded. `agent_browser_batch` is
+//!    not on the list, so no command inside one ever needs checking.
+//! 5. An object whose `method` is exactly `tools/call`, with `params.arguments` an object:
 //!    a. any key of [`REFUSED_KEYS`];
 //!    b. a key of [`MUST_BE_FALSE`] whose value is anything but `false`;
 //!    c. a `timeoutMs` that is not a whole number up to [`MAX_TIMEOUT_MS`];
@@ -20,8 +24,10 @@
 //!    `about:blank`, or names a local or private host (`host.rs`);
 //!    f. an `extraArgs` that is not an array of strings each in [`EXTRA_ARGS_ALLOWED`];
 //!    g. any other string, at any depth, shaped like a command-line flag (`-x`, `--x`,
-//!    `--x=y`, see [`looks_like_flag`]): agent-browser's MCP server puts typed values into the
-//!    CLI's argv, and the CLI reads global flags anywhere in argv (`mcp.rs:2659-2661`).
+//!    `--x=y`, see [`looks_like_flag`]), or holding one in any piece split on commas and
+//!    whitespace, or naming a switch that weakens Chrome's sandbox anywhere in it:
+//!    agent-browser's MCP server puts typed values into the CLI's argv, and the CLI reads
+//!    global flags anywhere in argv (`mcp.rs:2659-2661`).
 //!    `agent_browser_eval`'s `script` is exempt: it travels on stdin (`mcp.rs:3950-3957`).
 //!
 //!    A refused request gets an `isError` tool result with its id; a refused notification is
@@ -29,7 +35,11 @@
 
 mod host;
 
+use std::ffi::OsStr;
+
 use serde_json::{Map, Value, json};
+
+use super::chrome::sandbox;
 
 /// The longest agent line the guard reads, in bytes without the newline. A longer one is
 /// refused as a parse error and never forwarded.
@@ -87,6 +97,64 @@ pub(crate) const EXTRA_ARGS_ALLOWED: &[&str] =
 /// The text of a refused batch.
 pub(crate) const BATCH_MESSAGE: &str = "Clauseo does not allow batched requests in the browser.";
 
+/// The only tools that reach agent-browser: exactly agent-browser v0.41.1's `core` profile
+/// (`CORE_PROFILE_TOOLS`, `cli/src/mcp.rs:340-370` at tag v0.41.1), the profile the host starts
+/// it with (`mcp --tools core`, `crates/profile/src/servers.rs:61`). An agent that starts the
+/// guard itself with `--tools all` gains nothing: every other tool, a new or renamed one
+/// included, is refused here. `agent_browser_tools_profiles` only prints the profiles
+/// (`call_tools_profiles`, `mcp.rs:2539-2560`); it changes none.
+pub(crate) const ALLOWED_TOOLS: &[&str] = &[
+    "agent_browser_tools_profiles",
+    "agent_browser_open",
+    "agent_browser_read",
+    "agent_browser_snapshot",
+    "agent_browser_back",
+    "agent_browser_forward",
+    "agent_browser_reload",
+    "agent_browser_click",
+    "agent_browser_fill",
+    "agent_browser_type",
+    "agent_browser_press",
+    "agent_browser_check",
+    "agent_browser_uncheck",
+    "agent_browser_select",
+    "agent_browser_scroll",
+    "agent_browser_wait_ms",
+    "agent_browser_wait_for_selector",
+    "agent_browser_wait_for_text",
+    "agent_browser_wait_for_load",
+    "agent_browser_screenshot",
+    "agent_browser_get_text",
+    "agent_browser_get_url",
+    "agent_browser_get_title",
+    "agent_browser_tab_new",
+    "agent_browser_tab_list",
+    "agent_browser_tab_switch",
+    "agent_browser_tab_close",
+    "agent_browser_eval",
+    "agent_browser_close",
+];
+
+/// agent-browser's live views, none of them on [`ALLOWED_TOOLS`], named only so their refusal
+/// reads as a feature Clauseo leaves out: each serves the browser on a loopback port, the stream
+/// server (`stream_enable`, `actions.rs:9772-9785` at v0.41.1, with its `disable` and
+/// `status`), the dashboard that shows its streams, and the developer tools page of `inspect`
+/// (`native/inspect_server.rs`). The macOS browser profile denies every inet bind anyway.
+pub(crate) const LIVE_VIEW_TOOLS: &[&str] = &[
+    "agent_browser_stream_enable",
+    "agent_browser_stream_disable",
+    "agent_browser_stream_status",
+    "agent_browser_dashboard_start",
+    "agent_browser_dashboard_stop",
+    "agent_browser_inspect",
+];
+
+/// What a live-view request gets: no path, no port.
+pub(crate) const UNAVAILABLE: &str = "That browser feature isn't available in Clauseo.";
+
+/// What a call to any other tool off [`ALLOWED_TOOLS`] gets, its name not repeated.
+pub(crate) const UNKNOWN_TOOL: &str = "That browser tool isn't one Clauseo offers.";
+
 /// The longest name a refusal repeats; a longer one is cut and ends in `...`.
 const NAME_MAX_CHARS: usize = 64;
 
@@ -121,9 +189,9 @@ pub(crate) fn check(line: &[u8]) -> Verdict {
         let text = format!("Clauseo reserves the id {RESERVED_ID} for itself.");
         return Verdict::Answer(error_line(id, -32600, &text));
     }
-    if let Err(name) = check_object(object) {
+    if let Err(text) = check_object(object) {
         return match object.get("id") {
-            Some(id) => Verdict::Answer(refusal_line(id, &name)),
+            Some(id) => Verdict::Answer(refusal_line(id, &text)),
             None => Verdict::Drop,
         };
     }
@@ -138,25 +206,33 @@ pub(crate) fn parse_error() -> Verdict {
     Verdict::Answer(error_line(&Value::Null, -32700, "Parse error"))
 }
 
-/// `Err` with the name a refusal shows.
+/// `Err` with the refusal's text.
 fn check_object(object: &Map<String, Value>) -> Result<(), String> {
     if object.get("method").and_then(Value::as_str) != Some("tools/call") {
         return Ok(());
     }
+    let params = object.get("params");
+    let tool = params
+        .and_then(|params| params.get("name"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if !ALLOWED_TOOLS.contains(&tool) {
+        let text = if LIVE_VIEW_TOOLS.contains(&tool) {
+            UNAVAILABLE
+        } else {
+            UNKNOWN_TOOL
+        };
+        return Err(text.to_owned());
+    }
     // Not an object (or absent): agent-browser refuses it before running anything
     // (`validate_arguments_object`, mcp.rs:3967-3975, reached from every tool's argument reads).
-    let params = object.get("params");
     let Some(arguments) = params
         .and_then(|params| params.get("arguments"))
         .and_then(Value::as_object)
     else {
         return Ok(());
     };
-    let tool = params
-        .and_then(|params| params.get("name"))
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    check_arguments(tool, arguments)
+    check_arguments(tool, arguments).map_err(|name| refusal_text(&name))
 }
 
 fn check_arguments(tool: &str, arguments: &Map<String, Value>) -> Result<(), String> {
@@ -254,13 +330,33 @@ fn check_extra_args(extra: &Value) -> Result<(), String> {
     Ok(())
 }
 
-/// Every string in `value`, at any depth, that the CLI could read as a flag.
+/// Every string in `value`, at any depth, that the CLI could read as a flag, or that holds one:
+/// each piece of it split on commas and whitespace is checked, since a value may be split again
+/// downstream (`AGENT_BROWSER_ARGS` is split on both), and any mention of a switch or feature
+/// that weakens Chrome's sandbox ([`sandbox::weakening_in`]) is refused wherever it stands. The
+/// cost: typed text that happens to name one (`single-process`) is refused too.
 fn check_no_flags(value: &Value) -> Result<(), String> {
     match value {
-        Value::String(text) if looks_like_flag(text) => Err(flag_name(text)),
+        Value::String(text) => check_text(text),
         Value::Array(items) => items.iter().try_for_each(check_no_flags),
         Value::Object(map) => map.values().try_for_each(check_no_flags),
         _ => Ok(()),
+    }
+}
+
+fn check_text(text: &str) -> Result<(), String> {
+    if let Some(piece) = text
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .find(|piece| looks_like_flag(piece))
+    {
+        return Err(flag_name(piece));
+    }
+    match sandbox::weakening_in(OsStr::new(text)) {
+        Some(name) => Err(format!(
+            "the browser setting {}",
+            name.trim_end_matches('=')
+        )),
+        None => Ok(()),
     }
 }
 
@@ -298,12 +394,12 @@ pub(crate) fn refusal_text(name: &str) -> String {
     format!("Clauseo does not allow {name} in the browser.")
 }
 
-fn refusal_line(id: &Value, name: &str) -> String {
+fn refusal_line(id: &Value, text: &str) -> String {
     json!({
         "jsonrpc": "2.0",
         "id": id,
         "result": {
-            "content": [{"type": "text", "text": refusal_text(name)}],
+            "content": [{"type": "text", "text": text}],
             "isError": true,
         },
     })

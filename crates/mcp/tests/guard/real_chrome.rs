@@ -128,6 +128,7 @@ fn command_on(
     let args = guard_args(scratch, &binaries.0, &mcp)
         .into_iter()
         .map(|arg| if arg == CDP_PORT { cdp.into() } else { arg });
+    let chrome = chrome_for(scratch, &binaries.1, quiet);
     let mut command = Command::new(GUARD);
     command
         .args(args)
@@ -137,10 +138,13 @@ fn command_on(
             "AGENT_BROWSER_PROXY",
             format!("http://127.0.0.1:{}", proxy.port),
         )
-        .env(
-            "AGENT_BROWSER_EXECUTABLE_PATH",
-            chrome_for(scratch, &binaries.1, quiet),
-        );
+        .env("AGENT_BROWSER_EXECUTABLE_PATH", &chrome);
+    // Chrome itself, not the scratch folder's wrapper: its own folder is the trusted one.
+    if !chrome.starts_with(scratch.path())
+        && let Some(folder) = chrome.parent()
+    {
+        command.env(crate::support::TRUSTED_KNOB, folder);
+    }
     // The guard ends a Chrome that has not printed its endpoint after 15 s (`START_WAIT`). On the
     // loaded CI runner that once ended the first start of
     // a_killed_guards_reaper_leaves_the_next_run_alone (run 42316209734, job 128229376708: its

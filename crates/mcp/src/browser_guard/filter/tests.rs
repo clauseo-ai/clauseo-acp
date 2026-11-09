@@ -5,6 +5,8 @@ use super::{
     Verdict, check, refusal_text,
 };
 
+mod tools;
+
 fn call_tool(tool: &str, arguments: &Value) -> Value {
     json!({
         "jsonrpc": "2.0",
@@ -207,7 +209,6 @@ fn typed_strings_that_read_as_flags_are_refused() {
         "---",
         "---x",
         "- item",
-        "a --headed",
         "",
         "−−headed",
         "--Select--",
@@ -231,6 +232,49 @@ fn typed_strings_that_read_as_flags_are_refused() {
             Some(name),
             "{bad}"
         );
+    }
+}
+
+#[test]
+fn a_flag_inside_a_longer_string_is_refused() {
+    for (text, name) in [
+        ("x,--no-sandbox", "--no-sandbox"),
+        ("a --headed", "--headed"),
+        ("ok\t-p", "-p"),
+        ("a,b --proxy=http://evil:1", "--proxy"),
+        ("x--NO-SANDBOX", "the browser setting no-sandbox"),
+        (
+            "please run single-process",
+            "the browser setting single-process",
+        ),
+        (
+            "x=disable-features=NetworkServiceSandbox",
+            "the browser setting networkservicesandbox",
+        ),
+    ] {
+        assert_eq!(
+            refused(&json!({ "text": text })).as_deref(),
+            Some(name),
+            "{text}"
+        );
+        assert_eq!(
+            refused(&json!({ "values": ["ok", text] })).as_deref(),
+            Some(name),
+            "{text}"
+        );
+    }
+    assert_eq!(
+        refused_on("agent_browser_eval", &json!({ "script": "x,--no-sandbox" })),
+        None,
+        "eval's script stays exempt"
+    );
+    for fine in [
+        "Smith, J., 2019 - see p. 4",
+        "a,b,c",
+        "Section 138 -- cheque, -5",
+        "well-known, read-only",
+    ] {
+        assert_eq!(refused(&json!({ "text": fine })), None, "{fine:?}");
     }
 }
 
@@ -388,7 +432,8 @@ fn arguments_that_are_not_an_object_pass_on() {
     for arguments in [json!(null), json!("--headed"), json!(["--headed"])] {
         assert_eq!(refused(&arguments), None, "{arguments}");
     }
-    let no_arguments = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {}});
+    let no_arguments = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": {"name": "agent_browser_open"}});
     assert!(matches!(verdict(&no_arguments), Verdict::Forward(_)));
 }
 
@@ -412,7 +457,7 @@ fn a_refused_notification_is_dropped() {
 fn an_id_of_null_or_a_string_comes_back_as_given() {
     for id in [json!(null), json!("abc"), json!(1.5)] {
         let message = json!({"jsonrpc": "2.0", "id": id, "method": "tools/call",
-            "params": {"name": "x", "arguments": {"headed": true}}});
+            "params": {"name": "agent_browser_open", "arguments": {"headed": true}}});
         let Verdict::Answer(text) = verdict(&message) else {
             panic!()
         };

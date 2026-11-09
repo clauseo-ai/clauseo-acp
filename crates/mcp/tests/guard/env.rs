@@ -41,6 +41,8 @@ fn expected(scratch: &Scratch) -> BTreeMap<String, String> {
     let cwd = scratch.cwd();
     let under = |name: &str| cwd.join(name).to_str().unwrap().to_owned();
     let mut map: BTreeMap<String, String> = host_env(scratch).into_iter().collect();
+    // The guard's own test knob, never the child's.
+    map.remove(crate::support::TRUSTED_KNOB);
     let fixed = [
         ("AGENT_BROWSER_PROXY_BYPASS", "<-loopback>"),
         ("AGENT_BROWSER_IDLE_TIMEOUT_MS", "600000"),

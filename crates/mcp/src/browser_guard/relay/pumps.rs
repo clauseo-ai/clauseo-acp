@@ -12,6 +12,7 @@ use std::sync::{Arc, mpsc};
 use serde_json::Value;
 
 use super::super::Child;
+use super::super::chrome::pinned;
 use super::super::chrome::sandbox::REFUSAL;
 use super::super::filter::{self, MAX_LINE_BYTES, RESERVED_ID as CLOSE_ID, Verdict};
 use super::super::parent::Parent;
@@ -141,6 +142,7 @@ fn route(shared: &Arc<Shared>, parent: &Parent, events: &mpsc::Sender<Event>, te
             drop(state);
             let message = match reason {
                 StartError::Sandbox(_) => REFUSAL,
+                StartError::Untrusted => pinned::REFUSAL,
                 StartError::Other(_) => NOT_STARTED,
             };
             answer_all(&shared.out, &id.into_iter().collect::<Vec<_>>(), message);

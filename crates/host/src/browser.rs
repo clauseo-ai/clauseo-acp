@@ -41,11 +41,13 @@ pub(crate) fn write_config(data: &std::path::Path) -> std::io::Result<std::path:
 /// Where the browser runs, a switch for stage C.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum BrowserLaunch {
-    /// agent-browser starts Chrome itself, inside the session's jail: the only one built.
+    /// The guard (`clauseo-mcp browser-guard`) starts Chrome inside the session's jail, as the
+    /// agent's child: the only one built.
     #[default]
     InJail,
-    /// Chrome runs outside the jail and the entry carries `AGENT_BROWSER_CDP` with this port
-    /// instead of starting one. Not built: [`HostConfig::with_browser_launch`] refuses it.
+    /// Chrome runs outside the agent's jail, in a jail of its own (never in none), and the entry
+    /// carries `AGENT_BROWSER_CDP` with this port instead of starting one. Not built:
+    /// [`HostConfig::with_browser_launch`] refuses it.
     ///
     /// [`HostConfig::with_browser_launch`]: crate::HostConfig::with_browser_launch
     OutsideJail {

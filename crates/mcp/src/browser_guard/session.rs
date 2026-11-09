@@ -60,6 +60,8 @@ pub(crate) enum StartError {
     /// Chrome's sandbox could not start; what Chrome printed (the fixed part, no path), or
     /// `None` when the guard refused before starting it (Linux, as root).
     Sandbox(Option<&'static str>),
+    /// The Chrome named is not one the guard trusts (`chrome::pinned`), so it never started.
+    Untrusted,
     /// Anything else; the reason.
     Other(String),
 }
@@ -80,6 +82,10 @@ impl std::fmt::Display for StartError {
             ),
             Self::Sandbox(None) => f.write_str(
                 "Chrome's sandbox cannot start as root; the guard never runs Chrome without it",
+            ),
+            Self::Untrusted => f.write_str(
+                "the Chrome the host named is not one Clauseo installed or trusts; the guard \
+                 never starts it",
             ),
             Self::Other(reason) => f.write_str(reason),
         }
@@ -113,8 +119,9 @@ fn start_wait() -> Duration {
 
 /// Everything a start needs, fixed for the guard's life.
 pub(crate) struct Launcher {
-    /// `AGENT_BROWSER_EXECUTABLE_PATH`.
-    pub(crate) executable: PathBuf,
+    /// The real path of `AGENT_BROWSER_EXECUTABLE_PATH`, or `None` when it is not a Chrome the
+    /// guard trusts (`chrome::pinned`): every start then fails with [`StartError::Untrusted`].
+    pub(crate) executable: Option<PathBuf>,
     pub(crate) cwd: PathBuf,
     /// The run's id and profile (`runs.rs`), kept from one start to the next.
     pub(crate) run: String,
@@ -149,7 +156,7 @@ impl Launcher {
     /// A launcher for the Unix unit tests that drive the pumps: nothing in it is ever started.
     pub(crate) fn for_tests(dir: &std::path::Path, port_checks: Vec<Expected>) -> Launcher {
         Launcher {
-            executable: dir.join("chrome"),
+            executable: Some(dir.join("chrome")),
             cwd: dir.to_owned(),
             run: "1-0000abcd".to_owned(),
             profile: dir.join("chrome-profile-1-0000abcd"),
@@ -297,9 +304,10 @@ fn start_both(
     events: &mpsc::Sender<Event>,
 ) -> Result<(), StartError> {
     let launcher = &shared.launcher;
+    let executable = launcher.executable.as_ref().ok_or(StartError::Untrusted)?;
     wait_for_port(launcher.cdp_port, parent)?;
     let spec = Spec {
-        executable: &launcher.executable,
+        executable,
         cwd: &launcher.cwd,
         profile: &launcher.profile,
         cdp_port: launcher.cdp_port,

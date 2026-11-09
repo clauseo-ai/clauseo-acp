@@ -47,7 +47,7 @@ fn profile_of(scratch: &Scratch, guard: &Guard) -> PathBuf {
 #[cfg(unix)]
 fn held_call(id: &str) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "method": "tools/call",
-        "params": {"name": "stub_hold", "arguments": {}}})
+        "params": {"name": "agent_browser_wait_for_text", "arguments": {"text": "stub_hold"}}})
 }
 
 /// The handshake and `tools/list` start nothing: no Chrome, no profile, no daemon, and on

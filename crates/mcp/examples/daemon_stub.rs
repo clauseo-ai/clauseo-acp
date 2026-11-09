@@ -13,8 +13,9 @@
 //! starts no daemon at once but `daemon_stub --late` in a process group of its own: a daemon that
 //! has left agent-browser's group but not yet bound its socket. That process writes its pid to
 //! `late.pid` in the socket folder, waits until a file `late-go` appears there, then serves as
-//! the daemon does. A tool call named `stub_hold` is never answered (a call in flight). Cargo
-//! builds it for the tests; it is never shipped.
+//! the daemon does. An `agent_browser_wait_for_text` call for the text `stub_hold` is never
+//! answered (a call in flight; a core tool, so the guard's allowlist passes it). Cargo builds it
+//! for the tests; it is never shipped.
 
 use std::io::{BufRead, Write};
 
@@ -166,7 +167,13 @@ fn main() -> std::io::Result<()> {
             first_call()?;
         }
         // A call held unanswered, for the tests of a call in flight when Chrome dies.
-        if message.pointer("/params/name").and_then(Value::as_str) == Some("stub_hold") {
+        if message.pointer("/params/name").and_then(Value::as_str)
+            == Some("agent_browser_wait_for_text")
+            && message
+                .pointer("/params/arguments/text")
+                .and_then(Value::as_str)
+                == Some("stub_hold")
+        {
             continue;
         }
         if let Some(id) = message.get("id") {

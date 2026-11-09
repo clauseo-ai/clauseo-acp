@@ -393,6 +393,7 @@ crates/sandbox/tests/jail/support.rs - clippy::disallowed_methods
 crates/mcp/src/main.rs main clippy::print_stderr
 crates/mcp/src/write.rs - clippy::disallowed_methods
 crates/mcp/src/browser_guard/relay/pumps.rs spawn_child clippy::disallowed_methods
+crates/mcp/src/browser_guard/chrome/pinned.rs real_path clippy::disallowed_methods
 crates/mcp/examples/echo_stub.rs open_log clippy::disallowed_methods
 crates/mcp/examples/tree_stub.rs start_grandchild clippy::disallowed_methods
 crates/mcp/src/browser_guard/job.rs - unsafe_code
@@ -419,6 +420,7 @@ crates/mcp/src/browser_guard/record/tests.rs group clippy::disallowed_methods
 crates/mcp/src/browser_guard/chrome.rs spawn clippy::disallowed_methods
 crates/mcp/src/browser_guard/reaper.rs Reaper::start clippy::disallowed_methods
 crates/mcp/src/browser_guard/parent/windows.rs - unsafe_code
+crates/mcp/src/browser_guard/chrome/pinned/authz.rs - unsafe_code
 crates/mcp/src/write/windows.rs - unsafe_code
 crates/mcp/src/write/mac.rs - unsafe_code
 crates/mcp/examples/chrome_stub.rs record clippy::disallowed_methods

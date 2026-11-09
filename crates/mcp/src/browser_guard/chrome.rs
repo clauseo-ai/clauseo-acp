@@ -82,7 +82,7 @@ const HEADLESS_ARGS: &[&str] = &[
 
 /// What [`launch`] needs.
 pub(crate) struct Spec<'a> {
-    /// `AGENT_BROWSER_EXECUTABLE_PATH`, checked by `env.rs`.
+    /// The real path of `AGENT_BROWSER_EXECUTABLE_PATH`, checked by [`pinned`].
     pub(crate) executable: &'a Path,
     pub(crate) cwd: &'a Path,
     /// The run's profile (`runs.rs`), which [`launch`] makes.
@@ -522,6 +522,7 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+pub(crate) mod pinned;
 mod profile;
 pub(crate) mod sandbox;
 
