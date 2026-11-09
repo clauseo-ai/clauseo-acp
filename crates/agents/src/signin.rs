@@ -42,6 +42,7 @@ pub(crate) mod queue;
 pub(crate) mod reuse;
 pub(crate) mod run;
 pub(crate) mod shim;
+pub(crate) mod timing;
 
 /// How to sign in. Each agent takes its own two: Claude `ClaudeAi` and `Console`, Codex
 /// `Browser` and `DeviceCode`.

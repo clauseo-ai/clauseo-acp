@@ -126,3 +126,25 @@ fn named_secrets_ride_on_the_spec_and_debug_prints_only_their_count() {
     assert!(!debug.contains(&token), "{debug}");
     assert!(debug.contains("[1 redacted]"), "{debug}");
 }
+
+/// A spec given a priority class adds it as its Windows creation flags; a plain one adds
+/// nothing.
+#[test]
+fn a_priority_class_is_the_spec_s_creation_flags_and_a_plain_spec_adds_none() {
+    let plain = spec(absolute("node"), std::env::temp_dir()).unwrap();
+    assert_eq!(plain.priority_class(), None);
+    assert_eq!(plain.creation_flags(), 0);
+    let low = plain.with_priority_class(BELOW_NORMAL_PRIORITY_CLASS);
+    assert_eq!(low.priority_class(), Some(0x0000_4000));
+    assert_eq!(low.creation_flags(), 0x0000_4000);
+}
+
+/// The flag is Windows' own `BELOW_NORMAL_PRIORITY_CLASS`.
+#[cfg(windows)]
+#[test]
+fn the_background_flag_is_windows_below_normal_priority_class() {
+    assert_eq!(
+        BELOW_NORMAL_PRIORITY_CLASS,
+        windows::Win32::System::Threading::BELOW_NORMAL_PRIORITY_CLASS.0
+    );
+}

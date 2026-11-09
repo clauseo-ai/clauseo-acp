@@ -6,9 +6,11 @@
 //! `Agents` with its two launchers and the network route of the settings and the environment
 //! (`network.rs`: `network.upstream_proxy`, else `HTTPS_PROXY`; the OS's proxy, which may
 //! wait on WPAD, comes from the `clauseo-setup-network` thread it starts, through
-//! `Agents::set_network`), publishes `setup_info`, fills the cell, waits for the keys (only the
-//! commands that read them wait too, `keys/loaded.rs`), tells `Compose` each agent's key, then
-//! runs the pump until `Agents` ends.
+//! `Agents::set_network`), publishes `setup_info`, fills the cell, starts the pump on a
+//! `clauseo-setup-pump` thread (so an install's `Ready` asks for the status check while the
+//! keychain is still read; the sign-in states wait in the pump until the load is over), waits
+//! for the keys (only the commands that read them wait too, `keys/loaded.rs`), tells `Compose`
+//! each agent's key, then waits until the pump ends with `Agents`.
 //!
 //! The two launchers ([`launchers`]): the sign-in launcher is the host's
 //! (`host_spawn_options`: the environment cleared, since S18's built environment is a sign-in
@@ -49,6 +51,7 @@ use futures::StreamExt as _;
 use futures::channel::oneshot;
 use futures::future::{FutureExt as _, Shared, join};
 
+use self::pump::start_pump;
 use super::backend::{AgentInfo, AgentsBackend, SetupCounts};
 use super::compose::Compose;
 use super::confirm::SetupConfirm;
@@ -419,9 +422,11 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
         }
         (backend, source)
     });
+    // The pump starts now, beside the keys' load (`start/pump.rs`).
+    let pump = started.map(|(backend, source)| (start_pump(&backend, source), backend));
     // Only the commands that read the keys wait for this (`AgentsBackend::answer`).
     wait_for_keys(load, &keys, load_began, &side.keys);
-    let Some((backend, source)) = started else {
+    let Some((pump, backend)) = pump else {
         tracing::info!("the quit came first: no agents start");
         return;
     };
@@ -451,7 +456,7 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
         tracing::warn!(%err, "no thread follows the host: settings and splits are not followed");
         futures::executor::block_on(lift_at_start(&backend, FIRST_ROUTE_WAIT));
     }
-    futures::executor::block_on(backend.pump(source));
+    pump.finish(&backend);
 }
 
 /// Waits for the keys' first load, at most [`KEYS_LOAD_BOUND`], and logs how long it took and
@@ -549,3 +554,5 @@ pub(crate) async fn follow_sign_in_holds(backend: &AgentsBackend) {
         backend.recheck_sign_in(&agent);
     }
 }
+
+mod pump;

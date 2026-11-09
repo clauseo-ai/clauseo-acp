@@ -24,11 +24,12 @@ use serde_json::{Value, json};
 use crate::write;
 
 /// The variables the sign-in modes read, which a test sets itself or leaves unset.
-const SIGNIN_VARS: [&str; 6] = [
+const SIGNIN_VARS: [&str; 7] = [
     "BROWSER",
     "CLAUDE_CONFIG_DIR",
     "CLAUDE_SECURESTORAGE_CONFIG_DIR",
     "CODEX_HOME",
+    "FAKE_CLAUDE_STATUS_WRITES",
     "FAKE_SIGNIN",
     "FAKE_SIGNIN_ENV_OUT",
 ];

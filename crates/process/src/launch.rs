@@ -145,7 +145,7 @@ pub fn spawn_in_tree(spec: &LaunchSpec, opts: &SpawnOptions) -> Result<Launched,
     command
         .envs(spec.env().iter().filter(|(name, _)| !is_node_env(name)))
         .current_dir(spec.cwd());
-    os::prepare(&mut command, opts);
+    os::prepare(&mut command, opts, spec.creation_flags());
     let mut command = async_process::Command::from(command);
     // Set here, not on the std command: async-process's `spawn` resets to inherit every stream
     // its own setters did not set.

@@ -53,9 +53,9 @@ use crate::{Error, SpawnOptions};
 /// sees that the job ended the agent.
 const TERMINATED: u32 = 0xC1A0;
 
-/// Makes the agent start suspended and with no console window, plus any flags `opts` adds.
-pub(crate) fn prepare(command: &mut Command, opts: &SpawnOptions) {
-    command.creation_flags(CREATE_SUSPENDED.0 | CREATE_NO_WINDOW.0 | opts.creation_flags);
+/// Makes the agent start suspended and with no console window, plus `opts`' and `flags`.
+pub(crate) fn prepare(command: &mut Command, opts: &SpawnOptions, flags: u32) {
+    command.creation_flags(CREATE_SUSPENDED.0 | CREATE_NO_WINDOW.0 | opts.creation_flags | flags);
 }
 
 /// The agent's Job Object. Dropping it closes the handle, which ends what is left of the tree.

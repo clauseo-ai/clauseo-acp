@@ -414,6 +414,11 @@ Unset, empty and any other value mean `ok-after:0`.
 `FAKE_SIGNIN_ENV_OUT=<path>` makes either mode write the names of its own environment variables,
 sorted and one per line, to `<path>` before it does anything else. Names only, never values.
 
+`FAKE_CLAUDE_STATUS_WRITES=1` makes `claude-cli auth status` write `fake-status-config.json`
+(`{}`) in Claude's home folder when it is not there, making the folder if needed, as Claude Code's
+own status writes `.claude.json` the first time a CLI version meets a home. Unset or empty, the
+status writes nothing.
+
 The tests that run these modes are in `crates/fake_agent/tests/stdio/signin.rs` (the shared
 helpers and the env-names and usage tests), `signin/claude_cli.rs` and `signin/codex_cli.rs`. They set `HOME`
 to a temp folder, and remove the sign-in variables a host may have set before they set their own.

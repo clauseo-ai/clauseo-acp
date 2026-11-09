@@ -312,6 +312,19 @@ fn reuse_plants_the_claude_marker_for_any_subcommand() {
 }
 
 /// Status prints the marker's email, so a test can stand another account in the lawyer's home.
+/// `FAKE_CLAUDE_STATUS_WRITES=1`: the status writes its config file in the Claude home, as
+/// Claude Code's does at a CLI version's first run; unset, it writes nothing.
+#[test]
+fn claude_status_writes_its_config_file_only_when_asked() {
+    let scratch = Scratch::new("claude_status_writes");
+    let home = home(&scratch);
+    let config = claude_dir(&home).join("fake-status-config.json");
+    claude_status(&scratch, &home, &[]);
+    assert!(!config.exists());
+    claude_status(&scratch, &home, &[("FAKE_CLAUDE_STATUS_WRITES", "1")]);
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), "{}\n");
+}
+
 #[test]
 fn claude_status_prints_the_marker_s_email() {
     let scratch = Scratch::new("claude_status_email");

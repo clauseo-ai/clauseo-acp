@@ -66,6 +66,7 @@ impl Shared {
         let ready = matches!(state, InstallState::Ready { .. });
         Inner::set(&mut self.lock(), &self.events, agent, state, installed);
         if ready {
+            crate::signin::timing::ready_sent(agent);
             self.signin.install_ready(agent);
         }
     }
@@ -97,6 +98,7 @@ impl Shared {
         drop(inner);
         // After the lock: a queued sign-in reads the install again once kicked.
         if ready {
+            crate::signin::timing::ready_sent(&ticket.agent);
             self.signin.install_ready(&ticket.agent);
         }
         true

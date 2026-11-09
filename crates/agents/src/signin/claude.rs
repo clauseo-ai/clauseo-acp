@@ -35,6 +35,7 @@ use crate::signin::env::{RunKind, Shim};
 use crate::signin::job::SigninJob;
 use crate::signin::run::{Ended, Ran, run};
 use crate::signin::shim::UrlFile;
+use crate::signin::timing;
 use crate::signin::{PasteCode, SigninCode, SigninNote, SigninState, Source, Unconfirmed};
 use crate::status::{ClaudeStatus, Identity, claude_signed_in, parse_claude_status};
 
@@ -255,6 +256,7 @@ pub(crate) async fn status_run<T: Timer + Send + Sync>(
     let limit = job.status_limit(STATUS_LIMIT);
     let mut spec = job.spec(STATUS, job.env(kind, None), limit);
     spec.cwd = cwd.to_path_buf();
+    let began = timing::run_started(&job.ticket.agent, kind, &*job.config.clock);
     let ran = run(
         &*job.launcher,
         &*job.timer,
@@ -263,8 +265,10 @@ pub(crate) async fn status_run<T: Timer + Send + Sync>(
         None,
         |_: &str| {},
     )
-    .await
-    .ok()?;
+    .await;
+    let ended = ran.as_ref().map_or("not_started", |ran| ran.ended.word());
+    timing::run_ended(&job.ticket.agent, kind, &*job.config.clock, began, ended);
+    let ran = ran.ok()?;
     let Ended::Exited(code) = ran.ended else {
         return None;
     };

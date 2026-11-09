@@ -9,7 +9,8 @@
 //!   `<node> <script> <args>`, as in production. The script is never read, so a test may make it
 //!   an empty file.
 //! - The commands each mode takes, the lines it prints, its exit codes and its marker file.
-//! - `FAKE_SIGNIN`, which scripts a sign-in (see [`Script`]), and `FAKE_SIGNIN_ENV_OUT`.
+//! - `FAKE_SIGNIN`, which scripts a sign-in (see [`Script`]), `FAKE_SIGNIN_ENV_OUT`, and
+//!   `FAKE_CLAUDE_STATUS_WRITES`, under which Claude's status writes a config file in its home.
 //!
 //! # Invariants
 //!
@@ -367,6 +368,15 @@ fn open_browser(browser: &OsStr, url: &str) {
 /// Both are printed exactly as the brief has them, with the keys in that order. The email is the
 /// marker's, `test@example.com` unless a test planted another.
 fn claude_status(folder: &Path) -> io::Result<i32> {
+    if std::env::var_os("FAKE_CLAUDE_STATUS_WRITES").is_some_and(|on| !on.is_empty()) {
+        // As Claude Code's own status does the first time a CLI version meets a home: it
+        // writes its config file there, making the folder when missing.
+        let config = folder.join(STATUS_CONFIG);
+        if !config.exists() {
+            write::create_dir_all(folder)?;
+            write::write(config, "{}\n")?;
+        }
+    }
     let line = match marker(folder) {
         Some((method, email)) => format!(
             r#"{{"loggedIn":true,"authMethod":{},"apiProvider":"firstParty","email":{},"subscriptionType":"max"}}"#,
@@ -529,6 +539,9 @@ fn marker(folder: &Path) -> Option<(String, String)> {
 }
 
 /// Writes the marker in `folder` for `auth_method`, creating the folder first.
+/// The file Claude's status writes in its home under `FAKE_CLAUDE_STATUS_WRITES`.
+const STATUS_CONFIG: &str = "fake-status-config.json";
+
 fn plant(folder: &Path, auth_method: &str) -> io::Result<()> {
     write::create_dir_all(folder)?;
     let marker = json!({"authMethod": auth_method, "email": EMAIL});

@@ -44,6 +44,9 @@ pub(crate) fn under(root: &Path, parts: &str) -> PathBuf {
 /// The waits of a Claude sign-in.
 pub(crate) const POLL: Duration = Duration::from_millis(1500);
 pub(crate) const STATUS_LIMIT: Duration = Duration::from_secs(5);
+/// The status runs Claude's start-up check makes at once with nothing recorded: the own status
+/// and, alongside it, detection (`found::detect_alongside`); one on macOS, which stays serial.
+pub(crate) const STATUS_RUNS: usize = if cfg!(target_os = "macos") { 1 } else { 2 };
 pub(crate) const NUDGE: Duration = Duration::from_secs(30);
 pub(crate) const LOGIN_LIMIT: Duration = Duration::from_secs(600);
 /// Codex's own limits: one `login status`, and the app-server's `account/read`. Only the
@@ -188,6 +191,8 @@ pub(crate) struct Launch {
     pub(crate) args: Vec<String>,
     pub(crate) env: BTreeMap<OsString, OsString>,
     pub(crate) pid: u32,
+    /// The Windows priority class the spec asked for, if any.
+    pub(crate) priority: Option<u32>,
 }
 
 impl Launch {
@@ -241,6 +246,7 @@ impl Launcher for Recording {
                 .collect(),
             env: spec.env().clone(),
             pid: launched.handle.pid(),
+            priority: spec.priority_class(),
         });
         Ok(launched)
     }

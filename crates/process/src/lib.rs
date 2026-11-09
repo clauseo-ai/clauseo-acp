@@ -113,7 +113,7 @@ pub use launch::{
     Launched, Launcher, NODE_ENV, PassthroughLauncher, SpawnOptions, is_node_env, spawn_in_tree,
 };
 pub use live::{close_spawns, live_handles};
-pub use spec::LaunchSpec;
+pub use spec::{BELOW_NORMAL_PRIORITY_CLASS, LaunchSpec};
 pub use stderr::StderrPump;
 pub use stdin::AgentStdin;
 #[cfg(feature = "test-support")]

@@ -72,6 +72,9 @@ fn claude_detection_runs_without_the_home_variables() {
             .insert(name.into(), fx.data.path().join("stray").into_os_string());
     }
     plant_lawyer(&fx, "claude.ai", EMAIL);
+    // A login of Clauseo's own recorded (and gone): detection runs after the own status, not
+    // beside it, so it is the last run to write the names.
+    write_file(&fx.marker(&claude(), "login-source"), b"own\n").unwrap();
     let (agents, events) = fx.start();
     agents.check_status(&claude()).unwrap();
     assert_eq!(events.state(), found(EMAIL));
@@ -382,7 +385,10 @@ fn a_find_login_that_cannot_tell_ends_failed() {
     assert_eq!(events.state(), signed_out(Some(Found::NoLogin)));
     fx.stall(Some("status"));
     agents.find_login(&claude()).unwrap();
-    fx.timer.fire(std::time::Duration::from_secs(5));
+    // The own status and detection beside it (macOS: one after the other) both time out.
+    for _ in 0..crate::support::STATUS_RUNS {
+        fx.timer.fire(std::time::Duration::from_secs(5));
+    }
     assert_eq!(
         events.state(),
         SigninState::Failed {

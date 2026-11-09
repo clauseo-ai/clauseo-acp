@@ -473,6 +473,7 @@ pub(crate) async fn status_run<T: Timer + Send + Sync>(
     let mut spec = job.spec(args, job.env(kind, None), limit);
     spec.cwd = cwd.to_path_buf();
     let said_in = AtomicBool::new(false);
+    let began = super::timing::run_started(&job.ticket.agent, kind, &*job.config.clock);
     let ran = run(
         &*job.launcher,
         &*job.timer,
@@ -486,6 +487,8 @@ pub(crate) async fn status_run<T: Timer + Send + Sync>(
         },
     )
     .await;
+    let ended = ran.as_ref().map_or("not_started", |ran| ran.ended.word());
+    super::timing::run_ended(&job.ticket.agent, kind, &*job.config.clock, began, ended);
     match ran.map(|ran| ran.ended) {
         Ok(Ended::Exited(code)) if codex_logged_in(code, said_in.load(Ordering::SeqCst)) => {
             StatusSaid::LoggedIn

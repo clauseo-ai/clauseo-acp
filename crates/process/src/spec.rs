@@ -20,7 +20,11 @@ pub struct LaunchSpec {
     env: BTreeMap<OsString, OsString>,
     cwd: PathBuf,
     redacted: Redacted,
+    priority_class: Option<u32>,
 }
+
+/// Windows' `BELOW_NORMAL_PRIORITY_CLASS` process creation flag.
+pub const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
 
 /// Secrets the stderr tail hides beyond the env's: `Debug` prints only how many.
 #[derive(Clone, Default, PartialEq, Eq)]
@@ -67,6 +71,7 @@ impl LaunchSpec {
             env,
             cwd,
             redacted: Redacted::default(),
+            priority_class: None,
         })
     }
 
@@ -105,6 +110,26 @@ impl LaunchSpec {
     pub fn cwd(&self) -> &Path {
         &self.cwd
     }
+
+    /// The same spec started in Windows' priority class `class` (a `*_PRIORITY_CLASS` creation
+    /// flag, such as [`BELOW_NORMAL_PRIORITY_CLASS`] for a background run nobody waits on). No
+    /// other OS changes anything.
+    #[must_use]
+    pub fn with_priority_class(mut self, class: u32) -> LaunchSpec {
+        self.priority_class = Some(class);
+        self
+    }
+
+    /// The priority class [`Self::with_priority_class`] set, if any.
+    pub fn priority_class(&self) -> Option<u32> {
+        self.priority_class
+    }
+
+    /// The process creation flags the spec adds on Windows to its launcher's: its priority
+    /// class, else none.
+    pub fn creation_flags(&self) -> u32 {
+        self.priority_class.unwrap_or(0)
+    }
 }
 
 impl std::fmt::Debug for LaunchSpec {
@@ -115,6 +140,7 @@ impl std::fmt::Debug for LaunchSpec {
             .field("env", &RedactedEnv(&self.env))
             .field("cwd", &self.cwd)
             .field("redacted", &self.redacted)
+            .field("priority_class", &self.priority_class)
             .finish()
     }
 }

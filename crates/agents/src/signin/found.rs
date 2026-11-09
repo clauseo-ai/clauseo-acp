@@ -30,7 +30,7 @@ use std::pin::pin;
 use std::time::Duration;
 
 use clauseo_process::Timer;
-use futures::future::{Either, select};
+use futures::future::{Either, join, select};
 
 use crate::signin::codex::Confirmation;
 use crate::signin::detect::{self, Detected};
@@ -41,6 +41,8 @@ use crate::signin::{
     Found, Method, PasteCode, SigninCode, SigninNote, SigninState, Source, Unconfirmed, claude,
     codex, reuse,
 };
+
+use self::alongside::{detect_alongside, pick_claude};
 
 /// Whether the agent's login is the lawyer's, reused, by Clauseo's record: `login-source` says
 /// `reused`, or for Codex there is no marker and the home holds a login file. No logout runs
@@ -130,15 +132,17 @@ async fn check_claude<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<Sign
             _ => Some(stop(job, Some(Found::ReusedSignedOut)).await),
         };
     }
-    if let Some(identity) = claude::status(job, cancel).await? {
-        return Some(claude::signed_in(job, identity));
+    if detect_alongside(
+        marker::read_source(&job.config.data_dir, &job.ticket.agent).as_ref(),
+        marker::no_reuse(&job.config.data_dir, &job.ticket.agent),
+    ) {
+        // Both runs go to their end: the lawyer's CLI is never killed part-way, as it may be
+        // writing its own config file.
+        let (own, found) = join(claude::status(job, cancel), detect::claude(job, cancel)).await;
+        return pick_claude(job, own?, || async { found }).await;
     }
-    if marker::no_reuse(&job.config.data_dir, &job.ticket.agent) {
-        return Some(SigninState::SignedOut {
-            found: Some(Found::ReuseOff),
-        });
-    }
-    Some(detect::claude(job, cancel).await?.state)
+    let own = claude::status(job, cancel).await?;
+    pick_claude(job, own, || detect::claude(job, cancel)).await
 }
 
 /// Claude's status under the session's environment (`CLAUDE_CONFIG_DIR` Clauseo's folder,
@@ -252,6 +256,7 @@ pub(crate) async fn start_check<T: Timer + Send + Sync>(job: &SigninJob<T>) -> O
         hub.state(&job.ticket.agent),
         None | Some(SigninState::Checking)
     );
+    super::timing::check_started(&job.ticket.agent);
     if blank {
         job.report(SigninState::Checking);
     }
@@ -558,3 +563,5 @@ pub(crate) async fn stop_using<T: Timer + Send + Sync>(
     }
     Some(stop(job, why).await)
 }
+
+mod alongside;

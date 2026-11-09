@@ -22,7 +22,9 @@ use super::macos as listing;
 /// Puts the agent in a new process group whose id is its own pid, so a signal to the group
 /// reaches every process it starts that stays in the group. Safe std, no `pre_exec`, except on
 /// Linux for [`SpawnOptions::end_with_parent`] (`linux.rs`).
-pub(crate) fn prepare(command: &mut Command, opts: &SpawnOptions) {
+pub(crate) fn prepare(command: &mut Command, opts: &SpawnOptions, flags: u32) {
+    // The spec's creation flags (its priority class) are Windows' alone.
+    let _ = flags;
     command.process_group(0);
     #[cfg(target_os = "linux")]
     if opts.end_with_parent {

@@ -37,7 +37,7 @@ use clauseo_agents::{
     AgentsEvent, InstallState, Method, PasteCode, SigninError, SigninState, Source,
 };
 use clauseo_protocol::{AgentId, CommandOutcome, ErrorCode, HostError, SetupCommand, SetupEvent};
-use futures::{Stream, StreamExt as _};
+use futures::Stream;
 
 use super::admit::{key_stored, sign_in_barred};
 use super::compose::Compose;
@@ -46,13 +46,12 @@ use super::host_calls::SetupHost;
 use super::keys::{KeyCache, KeysLoaded, needs_keys};
 use super::leave::{self, Waiter};
 use super::wiring::Wiring;
-use super::{KeyWrite, SetupBackend, SetupEvents, events};
+use super::{KeyWrite, SetupBackend, SetupEvents};
 use crate::bridge::lock;
 use crate::dialogs::BoxFuture;
 use crate::open::{Opener, open_url_unconfirmed};
 
 pub(crate) use self::count::SetupCounts;
-use self::count::Tally;
 pub(crate) use self::entry::{launch, progress};
 pub(crate) use self::parts::signin_error;
 use self::parts::{checked_endpoint, invalid, network_first, plan_method, retry};
@@ -495,46 +494,16 @@ impl AgentsBackend {
         )
     }
 
-    /// Follows `Agents`' events until they end: installs out as `AgentInstallProgress` (and the
-    /// entry written on `Ready`), sign-ins through [`Compose`], `OpenUrl` opened, notes logged.
+    /// Follows `Agents`' events until they end (`pump.rs`): installs out as
+    /// `AgentInstallProgress`, sign-ins through [`Compose`] once the keys' first load is over.
     pub(crate) async fn pump(&self, source: impl Stream<Item = AgentsEvent>) {
-        let mut source = std::pin::pin!(source);
-        let mut checked = BTreeSet::new();
-        let mut tally = Tally::default();
-        while let Some(event) = source.next().await {
-            match event {
-                AgentsEvent::Install { agent, state } => {
-                    let now = self.compose.monotonic();
-                    let tries = || self.agents.install_tries(&agent);
-                    tally.install(&*self.counts, &agent, &state, now, tries);
-                    self.install_event(&agent, &state, &mut checked).await;
-                    pending::follow_press(self, &agent, &state);
-                }
-                AgentsEvent::Signin { agent, state } => {
-                    lock(&self.rechecks).remove(&agent);
-                    tally.signin(&*self.counts, &self.compose, &agent, &state);
-                    leave::signin_event(self, &agent, state).await;
-                }
-                AgentsEvent::OpenUrl { agent, url } => {
-                    if let Err(error) = open_url_unconfirmed(&*self.opener, &url) {
-                        tracing::warn!(%agent, code = error.code().as_str(), "a sign-in page did not open");
-                    }
-                }
-                AgentsEvent::SigninNote { agent, note } => events::note(&agent, note),
-                // A job that ended with no state (a status check that could not tell): an
-                // `auth_required` re-check of it is over, so the next hold may ask again.
-                AgentsEvent::SigninUnchanged { agent } => {
-                    lock(&self.rechecks).remove(&agent);
-                }
-                _ => {}
-            }
-        }
+        pump::pump(self, source).await;
     }
 
     /// One install state: sent to the windows; on `Ready` the entry written, then a pending
     /// sign-in run (`pending.rs`) or else the status checked (once per agent); an agent with no
     /// sign-in state yet shown signed out.
-    async fn install_event(
+    pub(super) async fn install_event(
         &self,
         agent: &AgentId,
         state: &InstallState,
@@ -592,6 +561,7 @@ mod count;
 mod entry;
 mod parts;
 mod pending;
+mod pump;
 mod seam;
 #[cfg(test)]
 mod tests;

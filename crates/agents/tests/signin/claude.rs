@@ -256,7 +256,17 @@ fn check_status_reports_a_login_already_there() {
     agents.check_status(&claude()).unwrap();
     assert_eq!(events.until_end().1, signed_in());
     assert_eq!(fx.runs_of("login"), []);
-    assert_eq!(fx.runs_of("status").len(), 1);
+    // One own status; with nothing recorded, detection ran beside it and its answer was dropped.
+    let status = fx.runs_of("status");
+    assert_eq!(status.len(), crate::support::STATUS_RUNS);
+    let own = status
+        .iter()
+        .filter(|run| {
+            run.env
+                .contains_key(std::ffi::OsStr::new("CLAUDE_CONFIG_DIR"))
+        })
+        .count();
+    assert_eq!(own, 1);
 }
 
 #[test]
@@ -382,10 +392,15 @@ fn a_status_run_that_never_answers_holds_no_caller() {
     let mut runs = 0;
     for _ in 0..3000 {
         runs = fx.runs_of("status").len();
-        if runs > 0 {
+        if runs >= crate::support::STATUS_RUNS {
             break;
         }
         crate::support::pause();
     }
-    assert_eq!(runs, 1, "one status run, still going");
+    // The own status, and detection beside it (macOS: the own status alone), still going.
+    assert_eq!(
+        runs,
+        crate::support::STATUS_RUNS,
+        "the check's status runs, still going"
+    );
 }

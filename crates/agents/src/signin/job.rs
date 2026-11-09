@@ -16,7 +16,7 @@
 //! Reuse (piece 5) adds the lawyer's choices about a login they already have as tasks
 //! ([`super::found`]), and the status check becomes the start check: reuse first, then
 //! Clauseo's own login, then detection. A sign-in of Clauseo's own that ends signed in records
-//! `login-source` `own`.
+//! `login-source` `own`; a sign-out that ends signed out clears that record.
 //! - A task that starts a login run ([`Task::queues`]) first waits in [`super::queue`] until
 //!   the install is `Ready` and the sign-in host resolves, reporting `Queued` meanwhile; the
 //!   call took the slot at once, so a cancel or a new sign-in reaches the queued job as it
@@ -37,6 +37,7 @@ use crate::signin::queue::{self, Gate, Queue};
 use crate::signin::run::RunSpec;
 use crate::signin::{
     Found, Method, PasteCode, SigninCode, SigninNote, SigninState, Source, claude, codex, found,
+    reuse,
 };
 use crate::state::Installed;
 use crate::worker::{Shared, Ticket};
@@ -152,6 +153,21 @@ pub(crate) fn run<T: Timer + Send + Sync>(
             &job.config.data_dir,
             &job.ticket.agent,
             &LoginSource::Own,
+        ));
+    }
+    if job.task == Task::SignOut
+        && matches!(last, Some(SigninState::SignedOut { .. }))
+        && job.shared.signin.is_job(&job.ticket)
+        && marker::read_source(&job.config.data_dir, &job.ticket.agent) == Some(LoginSource::Own)
+        && (job.vendor == Vendor::Claude || !reuse::codex_reused(None, &job.home))
+    {
+        // Clauseo's own login is gone: its record goes too, so no later start reads a login
+        // of Clauseo's own that is not there (a reuse's record is never touched here). A Codex
+        // home that still holds a login file keeps it: with no record that file would read as
+        // the lawyer's.
+        drop(marker::clear_source(
+            &job.config.data_dir,
+            &job.ticket.agent,
         ));
     }
     match last {
@@ -336,6 +352,8 @@ impl<T: Timer + Send + Sync> SigninJob<T> {
             env,
             cwd: self.home.clone(),
             limit,
+            // The start-up status check runs only status and detection, in the background.
+            background: self.task == Task::Status,
         }
     }
 }

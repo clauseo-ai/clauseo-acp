@@ -36,6 +36,7 @@ fn spec(dir: &TestDir, script: &str) -> RunSpec {
         env,
         cwd: dir.0.clone(),
         limit: Duration::from_secs(5),
+        background: false,
     }
 }
 
@@ -182,4 +183,15 @@ fn run_spec_debug_prints_names_never_values() {
     let printed = format!("{spec:?}");
     assert!(!printed.contains("hunter2"), "{printed}");
     assert!(printed.contains("HTTPS_PROXY"), "{printed}");
+}
+
+/// A priority class goes only to a background run (the start-up status check's), never to a
+/// login or a turn, whatever `STATUS_RUN_PRIORITY_CLASS` is set to.
+#[test]
+fn a_priority_class_goes_to_background_runs_only() {
+    let low = Some(clauseo_process::BELOW_NORMAL_PRIORITY_CLASS);
+    assert_eq!(super::priority_for(true, low), low);
+    assert_eq!(super::priority_for(false, low), None);
+    assert_eq!(super::priority_for(true, None), None);
+    assert_eq!(super::priority_for(false, None), None);
 }

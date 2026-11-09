@@ -9,10 +9,13 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use clauseo_agents::keys::Keychain;
-use clauseo_protocol::{CommandOutcome, ErrorCode, HostError, HostQuery, QueryResult};
+use clauseo_agents::{AgentsEvent, InstallState, SigninState};
+use clauseo_protocol::{
+    CommandOutcome, ErrorCode, HostError, HostQuery, QueryResult, SetupEvent, SignIn,
+};
 use serde_json::{Value, json};
 
-use super::fakes::{Rig, command, rig_loading};
+use super::fakes::{Rig, command, rig_loading, setup_events};
 use super::key_reads::{KEY, Never, stored};
 use super::{MAIN, SETTINGS, claude};
 use crate::bridge::Bridge;
@@ -215,4 +218,84 @@ fn a_sign_out_while_the_keys_load_answers_at_once_and_leaves_the_stored_key() {
     // A sign-out ends the CLI's login, never the stored key: the same as after the load.
     let key = Some(KEY.to_owned());
     assert_eq!(claude_key(&rig), (key.clone(), key));
+}
+
+/// Claude's sign-in states sent on `feed` so far.
+fn claude_sign_ins(feed: &mut futures::channel::mpsc::UnboundedReceiver<Arc<str>>) -> Vec<SignIn> {
+    setup_events(feed)
+        .into_iter()
+        .filter_map(|event| match event {
+            SetupEvent::SignInChanged { agent, state } if agent == claude() => Some(state),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The pump runs beside the keys' load (`start.rs` starts it first): an install's `Ready` asks
+/// for the status check while the keychain still hangs, and the sign-in state that check sends
+/// waits in the pump until the load is over, so Claude, whose key is stored, never shows Sign in.
+#[test]
+fn the_pump_asks_for_the_status_check_while_the_keys_load_and_holds_its_state() {
+    let (rig, load, done) = loading();
+    let mut feed = rig.events.follow();
+    let (events, source) = futures::channel::mpsc::unbounded();
+    let backend = Arc::clone(&rig.backend);
+    let pump = std::thread::spawn(move || block_on(backend.pump(source)));
+    let ready = InstallState::Ready {
+        version: "1.0.0".to_owned(),
+    };
+    events
+        .unbounded_send(AgentsEvent::Install {
+            agent: claude(),
+            state: ready,
+        })
+        .unwrap();
+    let asked = || rig.calls().iter().any(|(call, _)| *call == "check_status");
+    let (_never, tick) = mpsc::channel::<()>();
+    for _ in 0..500 {
+        if asked() {
+            break;
+        }
+        let _waited = tick.recv_timeout(Duration::from_millis(10));
+    }
+    assert!(asked(), "no status check while the keys load");
+    events
+        .unbounded_send(AgentsEvent::Signin {
+            agent: claude(),
+            state: SigninState::SignedOut { found: None },
+        })
+        .unwrap();
+    let _waited = tick.recv_timeout(Duration::from_millis(300));
+    assert_eq!(
+        claude_sign_ins(&mut feed),
+        [],
+        "a sign-in state before the keys"
+    );
+    finish_load(&rig, load, done);
+    // The held state is composed once the load is over: the key's line, never Sign in.
+    let mut shown = Vec::new();
+    for _ in 0..500 {
+        shown.extend(claude_sign_ins(&mut feed));
+        if rig.backend.compose.s18(&claude()).is_some() {
+            break;
+        }
+        let _waited = tick.recv_timeout(Duration::from_millis(10));
+    }
+    assert!(
+        rig.backend.compose.s18(&claude()).is_some(),
+        "the held state never came"
+    );
+    drop(events);
+    pump.join().unwrap();
+    shown.extend(claude_sign_ins(&mut feed));
+    assert!(
+        matches!(shown.last(), Some(SignIn::SignedIn { .. })),
+        "{shown:?}"
+    );
+    assert!(
+        !shown
+            .iter()
+            .any(|state| matches!(state, SignIn::SignedOut { .. })),
+        "{shown:?}"
+    );
 }

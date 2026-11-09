@@ -25,6 +25,19 @@ use futures::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use crate::cancel::Cancel;
 use crate::signin::PasteCode;
 
+/// The Windows priority class of a background run ([`RunSpec::background`]: the start-up
+/// status check's status and detection runs), or `None` for normal priority, the launcher's own.
+/// Normal for now. `BelowNormal` (`Some(clauseo_process::BELOW_NORMAL_PRIORITY_CLASS)`) only if
+/// the VM A/B shows it doesn't cost more time-to-Sign-in than it gains in first paint: under
+/// contention (inherited `BelowNormal` beside `WebView2`'s cold start) a post-reboot check took
+/// ~10.9 s.
+pub const STATUS_RUN_PRIORITY_CLASS: Option<u32> = None;
+
+/// The priority class a run starts in: `class` for a background run, never for any other.
+fn priority_for(background: bool, class: Option<u32>) -> Option<u32> {
+    class.filter(|_| background)
+}
+
 /// The ring's size: the last 64 KB of output.
 pub(crate) const RING_BYTES: usize = 64 * 1024;
 
@@ -49,6 +62,10 @@ pub(crate) struct RunSpec {
     pub(crate) cwd: PathBuf,
     /// Past this the run is killed: 5 s for a status, 10 minutes for a login.
     pub(crate) limit: Duration,
+    /// A background run nobody waits on interactively: the start-up status check's status and
+    /// detection runs, never a login, a sign-in's polls or a turn. On Windows it starts in
+    /// [`STATUS_RUN_PRIORITY_CLASS`] (`LaunchSpec::with_priority_class`).
+    pub(crate) background: bool,
 }
 
 impl std::fmt::Debug for RunSpec {
@@ -60,6 +77,7 @@ impl std::fmt::Debug for RunSpec {
             .field("env", &self.env.keys().collect::<Vec<_>>())
             .field("cwd", &self.cwd)
             .field("limit", &self.limit)
+            .field("background", &self.background)
             .finish()
     }
 }
@@ -73,6 +91,17 @@ pub(crate) enum Ended {
     TimedOut,
     /// The cancel signal was set; it was killed.
     Cancelled,
+}
+
+impl Ended {
+    /// The word for the timing log (`super::timing`).
+    pub(crate) fn word(self) -> &'static str {
+        match self {
+            Ended::Exited(_) => "exited",
+            Ended::TimedOut => "timed_out",
+            Ended::Cancelled => "cancelled",
+        }
+    }
 }
 
 /// A finished run.
@@ -178,7 +207,10 @@ pub(crate) async fn run<T: Timer>(
     let mut argv = Vec::with_capacity(spec.args.len().saturating_add(1));
     argv.push(spec.script.into_os_string());
     argv.extend(spec.args);
-    let launch = LaunchSpec::new(spec.node, argv, spec.env, spec.cwd)?;
+    let mut launch = LaunchSpec::new(spec.node, argv, spec.env, spec.cwd)?;
+    if let Some(class) = priority_for(spec.background, STATUS_RUN_PRIORITY_CLASS) {
+        launch = launch.with_priority_class(class);
+    }
     let Launched {
         mut stdin,
         mut stdout,

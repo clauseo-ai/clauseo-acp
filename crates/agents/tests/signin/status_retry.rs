@@ -11,7 +11,7 @@ use clauseo_agents::{Method, SigninState, Source};
 
 use crate::support::{Fixture, Seen, claude, now};
 #[cfg(unix)]
-use crate::support::{STATUS_LIMIT, eventually};
+use crate::support::{STATUS_LIMIT, STATUS_RUNS, eventually};
 
 #[cfg(unix)]
 const RETRY: Duration = Duration::from_secs(10);
@@ -39,11 +39,16 @@ fn plant_login(fx: &Fixture) {
     .unwrap();
 }
 
-/// Waits for the `n`th `auth status` run, then ends it at `limit`.
+/// Waits for the `n`th check's `auth status` runs (the own status and detection beside it,
+/// [`STATUS_RUNS`]), then ends them at `limit`.
 #[cfg(unix)]
 fn time_out_status(fx: &Fixture, n: usize, limit: Duration) {
-    eventually("the status ran", || fx.runs_of("status").len() >= n);
-    fx.timer.fire(limit);
+    eventually("the status ran", || {
+        fx.runs_of("status").len() >= n * STATUS_RUNS
+    });
+    for _ in 0..STATUS_RUNS {
+        fx.timer.fire(limit);
+    }
 }
 
 /// (a), (d): a status that never answers shows `Checking`, is asked again with a 10 s limit,
@@ -66,7 +71,7 @@ fn a_status_that_times_out_thrice_shows_checking_then_sign_in() {
         events.next(),
         Seen::State(SigninState::SignedOut { found: None })
     );
-    assert_eq!(fx.runs_of("status").len(), 3);
+    assert_eq!(fx.runs_of("status").len(), 3 * STATUS_RUNS);
     let armed = fx.timer.armed();
     for limit in [STATUS_LIMIT, RETRY, LAST_RETRY] {
         assert!(armed.contains(&limit), "{limit:?} in {armed:?}");
@@ -85,13 +90,17 @@ fn a_retry_that_answers_signs_in() {
     let (agents, events) = fx.start();
     fx.stall(Some("status"));
     agents.check_status(&claude()).unwrap();
-    eventually("the status ran", || fx.runs_of("status").len() == 1);
+    eventually("the status ran", || {
+        fx.runs_of("status").len() == STATUS_RUNS
+    });
     fx.stall(None);
-    fx.timer.fire(STATUS_LIMIT);
+    for _ in 0..STATUS_RUNS {
+        fx.timer.fire(STATUS_LIMIT);
+    }
     let (seen, last) = events.until_end();
     assert_eq!(last, signed_in());
     assert_eq!(seen.first(), Some(&Seen::State(SigninState::Checking)));
-    assert_eq!(fx.runs_of("status").len(), 2);
+    assert_eq!(fx.runs_of("status").len(), 2 * STATUS_RUNS);
     assert!(fx.timer.armed().contains(&RETRY));
 }
 

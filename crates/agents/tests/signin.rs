@@ -47,6 +47,10 @@ mod reuse_codex;
 #[path = "signin/shim.rs"]
 mod shim;
 
+#[cfg(test)]
+#[path = "signin/start_fast.rs"]
+mod start_fast;
+
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::Path;
