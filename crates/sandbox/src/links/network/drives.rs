@@ -12,21 +12,28 @@ use std::io;
     expect(dead_code, reason = "drive letters are read on Windows only")
 )]
 pub(crate) enum Drive {
-    /// A local disk volume, or a letter with no device (nothing there to touch).
+    /// A local disk volume, a known local virtual disk (`VeraCrypt`, `ImDisk` and its RAM disks),
+    /// or a letter with no device (nothing there to touch).
     Local,
     /// A redirector: SMB, `WebDAV`, offline files, Remote Desktop, a `subst` onto a UNC path.
     Network,
-    /// A device not known to be either (`VeraCrypt`, `ImDisk`, a CD drive): never touched, and a
-    /// git dir named on one refuses the launch, since nothing proves the agent can't write it.
+    /// A device not known to be either (rclone or another `WinFsp` drive, Google Drive, Box, a
+    /// CD drive): never touched. A matter, a settings path or a git dir on one refuses the
+    /// launch, since it may reach a server and nothing proves the agent can't write it.
     Unknown,
     /// A `subst` onto this path, as the device names it after `\??\` (`C:\work`): a local name
     /// for another path, which decides.
     Subst(String),
 }
 
-/// The device prefixes of local disk volumes, compared without case.
+/// The device prefixes of local disk volumes and known local virtual disks, compared without
+/// case. A VHD mounted from a share is a `HarddiskVolume` too (a known limit, 0049).
 #[cfg(any(windows, test))]
-const LOCAL_DEVICES: [&str; 1] = [r"\Device\HarddiskVolume"];
+const LOCAL_DEVICES: [&str; 3] = [
+    r"\Device\HarddiskVolume",
+    r"\Device\VeraCryptVolume",
+    r"\Device\ImDisk",
+];
 
 /// The device prefixes of redirectors, compared without case.
 #[cfg(any(windows, test))]
@@ -123,7 +130,12 @@ mod tests {
 
     #[test]
     fn a_drive_device_is_local_only_when_a_disk_volume() {
-        for target in [r"\Device\HarddiskVolume3", r"\device\harddiskvolume1"] {
+        for target in [
+            r"\Device\HarddiskVolume3",
+            r"\device\harddiskvolume1",
+            r"\Device\VeraCryptVolumeV",
+            r"\Device\ImDisk0",
+        ] {
             assert_eq!(drive(target), Drive::Local, "{target}");
         }
         for target in [
@@ -138,8 +150,8 @@ mod tests {
             assert_eq!(drive(target), Drive::Network, "{target}");
         }
         for target in [
-            r"\Device\VeraCryptVolumeV",
-            r"\Device\ImDisk0",
+            r"\Device\Volume{d6cc17c5-1734-4085-bce7-964f1e9f5de9}",
+            r"\Device\WinFsp.Disk",
             r"\Device\CdRom0",
             r"\Device\Floppy0",
             r"\??\Volume{0}",
@@ -157,7 +169,7 @@ mod tests {
     fn the_table_lists_letters_with_a_device_and_fails_closed() {
         let table = drive_table(|letter| match letter {
             b'C' => Ok(Some(r"\Device\HarddiskVolume3".to_owned())),
-            b'V' => Ok(Some(r"\Device\VeraCryptVolumeV".to_owned())),
+            b'V' => Ok(Some(r"\Device\Volume{0}".to_owned())),
             b'X' => Ok(Some(r"\??\C:\work".to_owned())),
             b'Q' => Err(io::Error::other("refused")),
             _ => Ok(None),
