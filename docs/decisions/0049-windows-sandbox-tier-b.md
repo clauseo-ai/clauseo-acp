@@ -339,13 +339,21 @@ build 26100):
 
     An agent can't stretch the window: a scan past 2 s, 3 overflows in a row, or 3 items found
     gone, counted across all paths (short-lived `.git`s renamed in and out, and folders renamed
-    in, `FILE_ACTION_RENAMED_NEW_NAME` with `FILE_ATTRIBUTE_DIRECTORY` in the extended record,
-    that are gone before their scan), ends the session too. A folder made (`FILE_ACTION_ADDED`)
-    doesn't count: what goes in it is reported on its own, so a script's `mkdir tmp` then
-    `rm -r tmp` ends nothing. Known limit: the plain records (a network share) carry no
-    attributes, so a folder renamed in and back out there isn't counted; counting every name
-    renamed in would end sessions over an editor's backup renames. The 2 s budget doesn't
-    depend on the check returning: a watchdog thread
+    in or moved in that are gone before their scan), ends the session too. A folder renamed in
+    within its folder is `FILE_ACTION_RENAMED_NEW_NAME` with `FILE_ATTRIBUTE_DIRECTORY` in the
+    extended record. A folder moved in from another folder (the agent's temp, or elsewhere in the
+    matter) comes as `FILE_ACTION_ADDED`, as `mkdir` does, so the two are told apart by the
+    record's `CreationTime`: one created more than 5 s (`records.rs` `MOVED_IN_AGE`) before the
+    watch received the buffer (the wall clock, read once per buffer as it arrives) was moved in
+    and counts; a folder just made doesn't, since what goes in it is reported on its own, so a
+    script's `mkdir tmp` then `rm -r tmp` ends nothing. A creation time in the future (clock
+    skew, or forged) or unreadable counts as moved in: the count fails toward ending the
+    session. A VM (Windows Server 2025, NTFS) confirmed the records: a cross-folder move gives
+    `FILE_ACTION_ADDED` with the folder's original creation time, `mkdir` one within about
+    4 ms, and a rename within a folder `FILE_ACTION_RENAMED_NEW_NAME`. Known limit: the plain
+    records (a network share) carry no attributes or times, so a folder renamed or moved in and
+    back out there isn't counted; counting every name renamed in would end sessions over an
+    editor's backup renames. The 2 s budget doesn't depend on the check returning: a watchdog thread
     (`runner/git_watch/watchdog.rs`) wakes every 250 ms and ends the session (`Cause::Stalled`)
     once one check has been busy past 2 s, while that check is still blocked. A scan of a folder
     made or moved in stops at the 2 s mark instead of walking on (a million empty folders with a
@@ -355,8 +363,9 @@ build 26100):
     check can't pass. Anyone else's (a lawyer dragging a big client folder in), or one whose
     owner can't be read (a FAT or exFAT volume, a third party's folder that denies the lawyer
     `READ_CONTROL`), is refused before the rename (`SetAsideFailure::NotTheAgents`) and stays for
-    the after-session pass; the session still ends with the budget notice. Full rescans walk on, with the job already ended. Each
-    cause gives the lawyer its own plain line, e.g. "Clauseo stopped this session because the
+    the after-session pass; the session still ends with the budget notice. Full rescans walk
+    on, with the job already ended. Each cause gives the lawyer its own plain line, e.g.
+    "Clauseo stopped this session because the
     matter changed faster than Clauseo could check it (very many files at once). Nothing was
     lost." or "Clauseo stopped this session because checking the matter got stuck. Nothing was
     lost." An overflow
@@ -380,10 +389,11 @@ build 26100):
     `\u{XXXX}` (C0, DEL, C1, U+00AD, U+061C, U+200B to U+200F, U+2028, U+2029, U+202A to
     U+202E, U+2060 to U+2064, U+2066 to U+2069, U+FEFF, U+E0000 to U+E007F), cut to 512
     characters with `…` (`denial/shown.rs`); so do `Error::ProtectedLink`'s message and
-    `Error::shown_at` (the item `Error::SetAside`, `AclApply` or `ProtectedLink` names). Each item moved goes to the host as two
-    records on its denial pipe, the lawyer's notice and the set-aside; the session's end notice
-    goes there too. Nothing on the outer's stderr, which carries the agent's stderr too, is read
-    back: a valid record line the agent writes there is relayed as plain bytes. The pipe
+    `Error::shown_at` (the item `Error::SetAside`, `AclApply` or `ProtectedLink` names). Each
+    item moved goes to the host as two records on its denial pipe, the lawyer's notice and the
+    set-aside; the session's end notice goes there too. Nothing on the outer's stderr, which
+    carries the agent's stderr too, is read back: a valid record line the agent writes there is
+    relayed as plain bytes. The pipe
     (`crates/sandbox/src/windows/denial_pipe.rs`) is one of the launcher's run pipes,
     `\\.\pipe\clauseo-run-<32 hex>-denials` (C4's `Role::Denials`), named in the launch message
     (`denial_pipe`, refused unless it has that shape). The host makes it before it spawns the
@@ -643,8 +653,8 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
   `commondir` names, whole-tree read-only in the Windows plan (M1). A test pins that every git
   folder the set-aside's launch scan knows is one of those (`repo_shapes.rs`
   `every_git_folder_the_watch_knows_at_launch_is_one_the_plan_denies`). A `commondir` naming a
-  folder outside the matter isn't watched. The uninstaller and forget know only the data folder's set-aside, not the
-  drive folders (a follow-up).
+  folder outside the matter isn't watched. The uninstaller and forget know only the data
+  folder's set-aside, not the drive folders (a follow-up).
 - **A nested `CLAUDE.local.md` or `AGENTS.override.md`** the agent makes below the matter's
   root is not set aside: the two extra opens per folder cost 6.0% of the scan on average (4.8% to
   6.8% over three runs) on 50,000 files ten to a folder (macOS stand-in), past the 5% allowed for
