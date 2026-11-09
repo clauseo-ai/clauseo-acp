@@ -20,7 +20,7 @@ use crate::profile_rig::{
 use crate::support::Dir;
 use crate::write;
 
-/// `tools.browser` on: the default on macOS only.
+/// `tools.browser` on: the default on macOS and Windows, not on Linux.
 const ON: &str = r#"{"tools": {"browser": true}}"#;
 
 /// The variables the shell tool sets, by name.
