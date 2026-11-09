@@ -357,6 +357,11 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
 - **A drive letter with no DOS device counts as local** (Low): the walk reads drive letters with
   `QueryDosDeviceW` and refuses a matter on a network drive. Whether Windows lazily reconnects a
   persistent mapping on the first open of such a letter is unverified. Owner: S15 close-out.
+- **A VHD mounted from a share** shows as a local `HarddiskVolume`, so a matter on it is walked
+  and admitted; its reads reach the server (known limit). Owner: S15 close-out.
+- **Links inside `.git` and `include.path` in a repository's `config`** are not checked by the
+  launch walk: a `hooks` link to a writable folder, or an include of a file the agent can write.
+  Owner: the #788/#789 follow-ups.
 - **A neighbour on a network share** gets no fence: the restricted token fails network logon
   (measured over `\\localhost`). Accepted risk: a share name that aliases a local folder. Owner:
   PR7's VM rows (`s15_wfp_vm`: the (B) token against `\\localhost\C$` and a guest share).
