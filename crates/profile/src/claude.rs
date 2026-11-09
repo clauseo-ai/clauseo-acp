@@ -4,12 +4,75 @@ use std::path::PathBuf;
 
 use serde_json::{Map, Value};
 
-use crate::servers::BROWSER;
-
 /// stetdoc's read-only subcommands at v0.9.1, the ones with no output or write flag
 /// (`docs/reference/cli.md`: `view` :117-147, `inspect` :229-241, `check` :579-594, `lookup`
 /// :612-624, `capabilities` :696-707), allowed without asking.
 pub const STETDOC_READ_ONLY: [&str; 5] = ["view", "inspect", "check", "lookup", "capabilities"];
+
+/// agent-browser's subcommands at v0.41.1 allowed without asking (`cli/src/commands.rs` at the
+/// tag: `open` :399, `snapshot` :974, `click` :448, `dblclick` :467, `fill` :474, `type` :481,
+/// `press` :603, `hover` :524, `focus` :531, `select` :552, `check` :538, `uncheck` :545,
+/// `scroll` :660, `scrollintoview` :704, `wait` :713, `get` :1459, `is` :1462, `find` :1465,
+/// `screenshot` :872, `pdf` :965, `tab` :1650, `back` :441, `forward` :442, `reload` :443,
+/// `close` :1063, `frame` :1717, `dialog` :1730, `download` :590). Every other one (`upload`,
+/// `eval`, `state`, `cookies`, `storage`, `network`, `set`, `install`, ...) asks.
+pub const AGENT_BROWSER_ALLOWED: [&str; 28] = [
+    "open",
+    "snapshot",
+    "click",
+    "dblclick",
+    "fill",
+    "type",
+    "press",
+    "hover",
+    "focus",
+    "select",
+    "check",
+    "uncheck",
+    "scroll",
+    "scrollintoview",
+    "wait",
+    "get",
+    "is",
+    "find",
+    "screenshot",
+    "pdf",
+    "tab",
+    "back",
+    "forward",
+    "reload",
+    "close",
+    "frame",
+    "dialog",
+    "download",
+];
+
+/// agent-browser's options and subcommands Claude may never run, whatever the lawyer answers:
+/// each attaches the browser to the lawyer's own Chrome or profile, shows a window, swaps
+/// Clauseo's config or session, or loads or saves browser state. Claude Code matches `*`
+/// anywhere in a rule, spaces included, since 2.1.0, checks deny rules before allow rules, and
+/// refuses a denied command without asking (code.claude.com/docs/en/permissions). So
+/// `Bash(agent-browser *--profile*)` also catches `--profile=x`, a flag after the subcommand,
+/// and the command inside `cd x && …`. A deny list is not a fence: the same options have
+/// `AGENT_BROWSER_*` twins that these rules do not see (decision noted in the PR).
+pub const AGENT_BROWSER_DENIED: [&str; 9] = [
+    "--profile",
+    "--auto-connect",
+    "--cdp",
+    "--executable-path",
+    "--headed",
+    "--config",
+    "--session",
+    "--state",
+    "--extension",
+];
+
+/// agent-browser's subcommands Claude may never run, as the first word after the command
+/// (`Bash(agent-browser state*)`): loading or saving browser state, and attaching to a running
+/// browser. Not matched anywhere, so a page's text that holds the word (`fill @e1 "state bank"`)
+/// is not refused; behind a global flag (`agent-browser --json state load`) the command is in no
+/// allow rule, so Claude asks.
+pub const AGENT_BROWSER_DENIED_SUBCOMMANDS: [&str; 2] = ["state", "connect"];
 
 /// The keys [`ClaudeOptions::meta_fragment`] may put under `claudeCode.options`. Everything the
 /// host forces (`strictMcpConfig`, `settingSources`, `mcpServers`, `env`, `extraArgs`) and the
@@ -31,9 +94,10 @@ pub const SETTINGS_KEYS: [&str; 1] = ["disableSkillShellExecution"];
 pub struct ClaudeOptions {
     /// The instructions; still holds `{work_folder}` and `{matter_notes}`.
     system_prompt_append: String,
-    /// `mcp__browser`, then `Bash(stetdoc <sub>:*)` for each of [`STETDOC_READ_ONLY`].
+    /// `Bash(stetdoc <sub>:*)` for each of [`STETDOC_READ_ONLY`], then, with the browser,
+    /// `Bash(agent-browser <sub>:*)` for each of [`AGENT_BROWSER_ALLOWED`].
     allowed_tools: Vec<String>,
-    /// None from the profile: the web tools are the host's, from `tools.web_search`.
+    /// With the browser, the agent-browser denials ([`Self::with_browser`]); otherwise none: the web tools are the host's, from `tools.web_search`.
     disallowed_tools: Vec<String>,
     /// The local plugin holding the skills.
     plugin_dir: Option<PathBuf>,
@@ -46,12 +110,10 @@ pub struct ClaudeOptions {
 impl ClaudeOptions {
     /// The options for `instructions` and the plugin at `plugin_dir`.
     pub fn new(instructions: String, plugin_dir: Option<PathBuf>) -> Self {
-        let mut allowed_tools = vec![format!("mcp__{BROWSER}")];
-        allowed_tools.extend(
-            STETDOC_READ_ONLY
-                .iter()
-                .map(|sub| format!("Bash(stetdoc {sub}:*)")),
-        );
+        let allowed_tools = STETDOC_READ_ONLY
+            .iter()
+            .map(|sub| format!("Bash(stetdoc {sub}:*)"))
+            .collect();
         let mut settings = Map::new();
         settings.insert("disableSkillShellExecution".to_owned(), Value::Bool(true));
         Self {
@@ -62,6 +124,30 @@ impl ClaudeOptions {
             pack_plugin: None,
             settings,
         }
+    }
+
+    /// The same options with `Bash(agent-browser <sub>:*)` allowed for each of
+    /// [`AGENT_BROWSER_ALLOWED`], and denied: `Bash(agent-browser *<flag>*)` for each of
+    /// [`AGENT_BROWSER_DENIED`] and `Bash(agent-browser <sub>*)` for each of
+    /// [`AGENT_BROWSER_DENIED_SUBCOMMANDS`]: for a profile whose app put the command on the agents' `PATH`.
+    #[must_use]
+    pub fn with_browser(mut self) -> Self {
+        self.allowed_tools.extend(
+            AGENT_BROWSER_ALLOWED
+                .iter()
+                .map(|sub| format!("Bash(agent-browser {sub}:*)")),
+        );
+        self.disallowed_tools.extend(
+            AGENT_BROWSER_DENIED
+                .iter()
+                .map(|flag| format!("Bash(agent-browser *{flag}*)"))
+                .chain(
+                    AGENT_BROWSER_DENIED_SUBCOMMANDS
+                        .iter()
+                        .map(|sub| format!("Bash(agent-browser {sub}*)")),
+                ),
+        );
+        self
     }
 
     /// The same options with the launch's pack plugin at `dir`, as a second `plugins` entry

@@ -45,8 +45,19 @@ pub const ASSETS: [(&str, &str, &str); 4] = [
     ),
 ];
 
-/// The one-line use the Codex index gives each skill Clauseo renders: the three and stetdoc's.
-const USES: [(&str, &str); 4] = [
+/// The browser's skill: agent-browser v0.41.1's `skill-data/core/SKILL.md`, trimmed for legal
+/// work (Apache-2.0, `LICENSES/Apache-2.0-agent-browser.txt`). Rendered only when the app put
+/// the `agent-browser` command on the agents' `PATH` ([`with_tools`]), so a Clauseo without the
+/// browser never names it. It is not one of [`BUILTIN`]: like stetdoc's, its folder is left alone
+/// by a write that does not carry it.
+pub const AGENT_BROWSER: &str = "agent-browser";
+
+/// The browser skill's source text, `assets/skills/agent-browser/SKILL.md`.
+pub const AGENT_BROWSER_SKILL: &str = include_str!("../../assets/skills/agent-browser/SKILL.md");
+
+/// The one-line use the Codex index gives each skill Clauseo renders: the three, stetdoc's and
+/// the browser's.
+const USES: [(&str, &str); 5] = [
     (
         "legal-drafting",
         "drafting or revising a legal document, or marking up a draft",
@@ -60,6 +71,10 @@ const USES: [(&str, &str); 4] = [
         "reading and updating the matter brief when work starts and before a turn ends",
     ),
     (STETDOC, "reading and editing Word files as tracked changes"),
+    (
+        AGENT_BROWSER,
+        "reading or using a web page that needs a real browser",
+    ),
 ];
 
 /// The index's heading and its one rule.
@@ -89,21 +104,51 @@ pub fn sources() -> Result<Vec<SkillSource>, ProfileError> {
         .collect()
 }
 
+/// The browser's skill as a source, rendered as the three are. Pure; an error is a bug in the
+/// shipped text, which the tests catch.
+pub fn agent_browser_source() -> Result<SkillSource, ProfileError> {
+    SkillSource::builtin(
+        AGENT_BROWSER,
+        vec![SkillFile {
+            path: SKILL_MD.to_owned(),
+            bytes: AGENT_BROWSER_SKILL.as_bytes().to_vec(),
+        }],
+    )
+}
+
 /// stetdoc's skill (when it loaded), then the three: the list `ClauseoProfile::with_skills`
 /// renders. The three's error, if any, comes back beside the list, which then holds stetdoc's
 /// alone.
 pub fn with_stetdoc(stetdoc: Option<SkillSource>) -> (Vec<SkillSource>, Vec<ProfileError>) {
+    with_tools(stetdoc, false)
+}
+
+/// [`with_stetdoc`], then the browser's skill when `agent_browser` says the app put the
+/// `agent-browser` command on the agents' `PATH`. Each error comes back beside the list, which
+/// then holds the rest.
+pub fn with_tools(
+    stetdoc: Option<SkillSource>,
+    agent_browser: bool,
+) -> (Vec<SkillSource>, Vec<ProfileError>) {
     let mut skills: Vec<SkillSource> = stetdoc.into_iter().collect();
+    let mut refused = Vec::new();
     match sources() {
-        Ok(builtin) => {
-            skills.extend(builtin);
-            (skills, Vec::new())
-        }
+        Ok(builtin) => skills.extend(builtin),
         Err(error) => {
             tracing::warn!(error = %error.log_text(), "the built-in legal skills are left out");
-            (skills, vec![error])
+            refused.push(error);
         }
     }
+    if agent_browser {
+        match agent_browser_source() {
+            Ok(skill) => skills.push(skill),
+            Err(error) => {
+                tracing::warn!(error = %error.log_text(), "the browser's skill is left out");
+                refused.push(error);
+            }
+        }
+    }
+    (skills, refused)
 }
 
 /// The one-line use the index gives `name`, if it has one.
@@ -238,7 +283,7 @@ mod tests {
 
     #[test]
     fn every_builtin_has_a_use_line_and_sources() {
-        for name in BUILTIN.iter().chain([&STETDOC]) {
+        for name in BUILTIN.iter().chain([&STETDOC, &AGENT_BROWSER]) {
             assert!(use_of(name).is_some(), "{name}");
         }
         for name in BUILTIN {
