@@ -149,3 +149,45 @@ fn an_identical_deny_there_before_is_kept() {
     assert_eq!(remove(&mut store, &sid(GROUP)), Ok(LaunchRemoved::Nothing));
     assert_eq!(store.value, Raw::Binary(descriptor(&first, false)));
 }
+
+#[test]
+fn a_group_policy_launch_value_with_no_local_value_copies_nothing() {
+    // The policy without the deny: nothing written, degraded.
+    let mut store = bare();
+    store.policy = Some(Ok(windows_11()));
+    store.effective_launch = Ok(windows_11());
+    let applied = apply(&mut store, &sid(GROUP));
+    assert_eq!(applied.guard, Guard::PolicyOverrides);
+    assert!(
+        applied
+            .why
+            .unwrap()
+            .contains("Group Policy MachineLaunchRestriction is set")
+    );
+    assert!(!store.calls.contains(&"effective_launch"));
+    assert_eq!(store.writes(), ["write_state"]);
+    assert_eq!(
+        (store.value.clone(), store.access.clone()),
+        (Raw::Absent, Raw::Absent)
+    );
+    assert_eq!(store.backup, None);
+    assert_eq!(store.state.as_deref(), Some("degraded: group policy"));
+    // A policy that can't be read: nothing copied either.
+    let mut store = bare();
+    store.fail = Some("policy");
+    assert_eq!(apply(&mut store, &sid(GROUP)).guard, Guard::Failed);
+    assert_eq!(store.writes(), ["write_state"]);
+    // A policy holding the deny: still nothing copied, and the guard holds through the policy.
+    let mut first = vec![ace(D, 0, DENY_MASK, GROUP)];
+    first.extend(windows_11_aces());
+    let mut store = bare();
+    store.policy = Some(Ok(descriptor(&first, false)));
+    assert_eq!(apply(&mut store, &sid(GROUP)).guard, Guard::ByPolicy);
+    assert_eq!(store.value, Raw::Absent);
+    // A local value there: it still gets the deny, for when the policy goes.
+    let mut store = FakeStore::new(Raw::Binary(windows_11()));
+    store.policy = Some(Ok(windows_11()));
+    assert_eq!(apply(&mut store, &sid(GROUP)).guard, Guard::PolicyOverrides);
+    let value = LaunchSd::parse(&bytes(&store.value)).unwrap();
+    assert!(value.denies_first(&sid(GROUP)));
+}

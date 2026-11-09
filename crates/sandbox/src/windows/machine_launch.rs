@@ -212,8 +212,9 @@ pub fn apply(store: &mut impl LaunchStore, group: &Sid) -> LaunchApplied {
             Some(Guard::Failed)
         }
     };
-    // The value is kept denying even under a policy, so the guard holds once the policy goes.
-    let (value, change) = match apply_value(store, group) {
+    // An existing value is kept denying even under a policy, so the guard holds once the policy
+    // goes; an absent one stays absent (COM's descriptor would be the policy's).
+    let (value, change) = match apply_value(store, group, policy.is_some()) {
         Ok(change) => (Guard::Applied, change),
         Err((guard, why)) => {
             whys.push(why);
@@ -238,11 +239,21 @@ pub fn apply(store: &mut impl LaunchStore, group: &Sid) -> LaunchApplied {
 }
 
 /// The value made to deny `group` first; the guard's state and why when it can't be.
-fn apply_value(store: &mut impl LaunchStore, group: &Sid) -> Result<Change, (Guard, String)> {
+/// `policy` says a Group Policy value is set (or couldn't be read): an absent value is then
+/// left absent, since COM's descriptor would be the policy's and would outlive it.
+fn apply_value(
+    store: &mut impl LaunchStore,
+    group: &Sid,
+    policy: bool,
+) -> Result<Change, (Guard, String)> {
     let failed = |why: String| (Guard::Failed, why);
     let unparsable = |why: String| (Guard::Unparsable, why);
     let (current, original) = match store.read().map_err(failed)? {
         // Windows' default applies: COM's own descriptor is the base, never a guessed one.
+        Raw::Absent if policy => {
+            let why = "a Group Policy MachineLaunchRestriction is set, so nothing was copied";
+            return Err((Guard::PolicyOverrides, why.to_owned()));
+        }
         Raw::Absent => {
             let default = store.effective_launch().map_err(|why| {
                 let why =
