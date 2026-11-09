@@ -545,7 +545,7 @@ Var ClauseoRepair
         ${If} $R3 != ""
           DetailPrint "$(removeAdminCopyRefused)"
           ${IfNot} ${Silent}
-            MessageBox MB_OK|MB_ICONEXCLAMATION "$(removeAdminCopyRefused)"
+            MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(removeAdminCopyRefused)"
           ${EndIf}
         ${ElseIf} $R4 = 0
           DetailPrint "the sandbox tool in Program Files failed its check, so it wasn't started"
@@ -611,7 +611,7 @@ Var ClauseoRepair
         ${If} ${Silent}
           SetErrorLevel ${CLAUSEO_EXIT_REMOVE_EXE_MISSING}
         ${Else}
-          MessageBox MB_OK|MB_ICONEXCLAMATION "$(removeExeMissing)"
+          MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(removeExeMissing)"
         ${EndIf}
       ${EndIf}
     ${EndIf}
@@ -704,14 +704,14 @@ Var ClauseoRepair
       ${AndIf} $R7 <> ${CLAUSEO_DELETED}
       ${AndIf} $R6 <> 0
         ${If} $R6 = 2
-          MessageBox MB_OK|MB_ICONEXCLAMATION "$(deleteAppDataFailedUnnamed)"
+          MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(deleteAppDataFailedUnnamed)"
         ${ElseIf} $R8 == ""
-          MessageBox MB_OK|MB_ICONEXCLAMATION "$(deleteAppDataFailed)"
+          MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(deleteAppDataFailed)"
         ${ElseIf} $R7 = ${CLAUSEO_KEPT_SANDBOX}
         ${OrIf} $R7 = ${CLAUSEO_KEPT_SET_ASIDE}
-          MessageBox MB_OK|MB_ICONEXCLAMATION "$(deleteAppDataKept)"
+          MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(deleteAppDataKept)"
         ${Else}
-          MessageBox MB_OK|MB_ICONEXCLAMATION "$(deleteAppDataKeptFailed)"
+          MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(deleteAppDataKeptFailed)"
         ${EndIf}
       ${EndIf}
     ${EndIf}

@@ -123,7 +123,7 @@ fn the_uninstaller_makes_its_plug_in_folder_first_in_un_on_init() {
         macro_body(&start, "CLAUSEO_SAFE_PLUGINSDIR"),
         &[
             "!ifdef __UNINSTALL__",
-            "MessageBox MB_OK|MB_ICONSTOP \"$(uninstallTempFailed)\" /SD IDOK",
+            "MessageBox MB_OK|MB_ICONSTOP|MB_SETFOREGROUND|MB_TOPMOST \"$(uninstallTempFailed)\" /SD IDOK",
             "!else",
         ],
     );
@@ -293,7 +293,7 @@ fn the_uninstaller_refuses_to_run_anywhere_but_its_own_folder_with_26() {
             "${EndIf}",
             // StrCmp, so without case.
             "${If} $0 != $1",
-            r#"MessageBox MB_OK|MB_ICONSTOP "$(uninstallNotInPlace)" /SD IDOK"#,
+            r#"MessageBox MB_OK|MB_ICONSTOP|MB_SETFOREGROUND|MB_TOPMOST "$(uninstallNotInPlace)" /SD IDOK"#,
             "SetErrorLevel ${CLAUSEO_EXIT_NOT_IN_PLACE}",
             "Quit",
             "${EndIf}",

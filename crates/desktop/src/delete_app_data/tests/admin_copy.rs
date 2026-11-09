@@ -207,7 +207,7 @@ fn the_per_machine_installer_writes_the_admin_copy_and_adopts_it_every_time() {
         "${IfNot} ${Silent}",
         "${AndIf} $PassiveMode <> 1",
         "${AndIf} $UpdateMode <> 1",
-        "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(adminCopyAppRunning)\"",
+        "MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST \"$(adminCopyAppRunning)\"",
         "${EndIf}",
         "${Else}",
         "!insertmacro CLAUSEO_RECORD_CHECK \"\"",
@@ -256,7 +256,7 @@ fn the_per_machine_installer_writes_the_admin_copy_and_adopts_it_every_time() {
         "${IfNot} ${Silent}",
         "${AndIf} $PassiveMode <> 1",
         "${AndIf} $UpdateMode <> 1",
-        "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(setupExeRemoved)\"",
+        "MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST \"$(setupExeRemoved)\"",
         "${EndIf}",
         "${Else}",
         "DetailPrint \"$(adminCopyMachineFailed)\"",
@@ -264,7 +264,7 @@ fn the_per_machine_installer_writes_the_admin_copy_and_adopts_it_every_time() {
         "SetErrorLevel ${CLAUSEO_EXIT_ADMIN_COPY_FAILED}",
         "${ElseIf} $PassiveMode <> 1",
         "${AndIf} $UpdateMode <> 1",
-        "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(adminCopyMachineFailed)\"",
+        "MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST \"$(adminCopyMachineFailed)\"",
         "${EndIf}",
         "${EndIf}",
     ];
@@ -445,7 +445,7 @@ fn the_installers_exit_codes_are_the_ones_firm_it_lists_by_mode() {
     assert_run(
         temp,
         &[
-            "MessageBox MB_OK|MB_ICONSTOP \"$(installTempFailed)\" /SD IDOK",
+            "MessageBox MB_OK|MB_ICONSTOP|MB_SETFOREGROUND|MB_TOPMOST \"$(installTempFailed)\" /SD IDOK",
             "!endif",
             "${EndIf}",
             "SetErrorLevel ${CLAUSEO_EXIT_TEMP_FAILED}",

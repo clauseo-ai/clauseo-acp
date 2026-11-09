@@ -109,9 +109,9 @@
       !insertmacro CLAUSEO_PASSIVE_OR_UPDATE $1
       ${If} $1 = 0
         !ifdef __UNINSTALL__
-          MessageBox MB_OK|MB_ICONSTOP "$(uninstallTempFailed)" /SD IDOK
+          MessageBox MB_OK|MB_ICONSTOP|MB_SETFOREGROUND|MB_TOPMOST "$(uninstallTempFailed)" /SD IDOK
         !else
-          MessageBox MB_OK|MB_ICONSTOP "$(installTempFailed)" /SD IDOK
+          MessageBox MB_OK|MB_ICONSTOP|MB_SETFOREGROUND|MB_TOPMOST "$(installTempFailed)" /SD IDOK
         !endif
       ${EndIf}
       SetErrorLevel ${CLAUSEO_EXIT_TEMP_FAILED}

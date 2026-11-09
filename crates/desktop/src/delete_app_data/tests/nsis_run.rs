@@ -222,8 +222,8 @@ pub(super) fn lines(nodes: &[Node]) -> Vec<&str> {
 /// The machine: the defines, variables, error flag and stack, the record under
 /// `HKLM\SOFTWARE\Clauseo\Sandbox` and the lawyer's key under `HKCU\Software\Clauseo`, whether
 /// the run is silent, the user's SID for `CLAUSEO_OWN_SID`, the macros it runs inline (and the
-/// record each leaves), what it said (`DetailPrint`, `MessageBox`, `SetErrorLevel`), and which
-/// stubbed macros it reached.
+/// record each leaves), what it said (`DetailPrint`, `MessageBox`, `SetErrorLevel`, `ExecWait`,
+/// `Quit`, `Abort`), and which stubbed macros it reached.
 pub(super) struct Machine {
     pub(super) defines: HashMap<String, String>,
     pub(super) vars: HashMap<String, String>,
@@ -232,6 +232,10 @@ pub(super) struct Machine {
     pub(super) record: Record,
     /// The lawyer's key, `HKCU\Software\Clauseo`, where the app writes `UiLanguage`.
     pub(super) user: Record,
+    /// Any other key a step reads, as `ROOT\key`, `None` for no key; one not listed fails.
+    pub(super) keys: HashMap<String, Record>,
+    /// The exit code every `ExecWait` leaves.
+    pub(super) exit_code: &'static str,
     pub(super) silent: bool,
     pub(super) own_sid: &'static str,
     pub(super) inline: HashMap<String, Vec<Node>>,
@@ -250,6 +254,8 @@ impl Machine {
             stack: Vec::new(),
             record,
             user: None,
+            keys: HashMap::new(),
+            exit_code: "0",
             silent: false,
             own_sid: "",
             inline: HashMap::new(),
@@ -308,6 +314,7 @@ impl Machine {
         match cond {
             "${Errors}" => return self.error,
             "${Silent}" => return self.silent,
+            "${RunningX64}" => return true,
             _ => {}
         }
         let parts = words(cond);
@@ -332,7 +339,11 @@ impl Machine {
         match (root, self.expand(key).as_str()) {
             ("HKLM", "SOFTWARE\\Clauseo\\Sandbox") => self.record.as_ref(),
             ("HKCU", "Software\\Clauseo") => self.user.as_ref(),
-            (root, key) => panic!("a key this interpreter doesn't know: {root}\\{key}"),
+            (root, key) => self
+                .keys
+                .get(&format!("{root}\\{key}"))
+                .unwrap_or_else(|| panic!("a key this interpreter doesn't know: {root}\\{key}"))
+                .as_ref(),
         }
     }
 
@@ -346,6 +357,16 @@ impl Machine {
     }
 
     fn line(&mut self, line: &str) {
+        // A command in backquotes, then the variable for its exit code.
+        if let Some(rest) = line.strip_prefix("ExecWait `") {
+            let (command, var) = rest
+                .split_once("` ")
+                .expect("an ExecWait without its variable");
+            let command = self.expand(command);
+            self.said.push(format!("ExecWait {command}"));
+            self.set(var, self.exit_code.to_owned());
+            return;
+        }
         let parts = words(line);
         let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
         match parts.as_slice() {
@@ -400,6 +421,21 @@ impl Machine {
                 let text = self.expand(text);
                 self.said.push(format!("MessageBox {text}"));
             }
+            // WordFunc's: 0 for equal versions, 1 when the first is newer, 2 when the second is.
+            ["${VersionCompare}", a, b, var] => {
+                let parse = |text: String| -> Vec<u64> {
+                    text.split('.').map(|part| part.parse().unwrap()).collect()
+                };
+                let (a, b) = (parse(self.expand(a)), parse(self.expand(b)));
+                let order = match a.cmp(&b) {
+                    std::cmp::Ordering::Equal => "0",
+                    std::cmp::Ordering::Greater => "1",
+                    std::cmp::Ordering::Less => "2",
+                };
+                self.set(var, order.to_owned());
+            }
+            ["Quit"] => self.said.push("Quit".to_owned()),
+            ["Abort", ..] => self.said.push(line.to_owned()),
             ["SetErrorLevel", code] => {
                 let code = self.expand(code);
                 self.said.push(format!("SetErrorLevel {code}"));

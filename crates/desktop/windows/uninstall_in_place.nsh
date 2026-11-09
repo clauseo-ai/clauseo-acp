@@ -113,7 +113,7 @@ Var ClauseoSelfDelete
       StrCpy $1 $1 -1
     ${EndIf}
     ${If} $0 != $1
-      MessageBox MB_OK|MB_ICONSTOP "$(uninstallNotInPlace)" /SD IDOK
+      MessageBox MB_OK|MB_ICONSTOP|MB_SETFOREGROUND|MB_TOPMOST "$(uninstallNotInPlace)" /SD IDOK
       SetErrorLevel ${CLAUSEO_EXIT_NOT_IN_PLACE}
       Quit
     ${EndIf}

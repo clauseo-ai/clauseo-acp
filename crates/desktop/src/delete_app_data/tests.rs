@@ -11,6 +11,7 @@ mod admin_copy_record;
 mod installer_language;
 mod installer_version_info;
 mod make;
+mod message_front;
 mod native_arm64;
 mod nsis_names;
 mod nsis_run;
@@ -22,6 +23,7 @@ mod setup_exe_missing;
 mod sources;
 mod template;
 mod uninstall_in_place;
+mod webview2_floor;
 mod window_reach;
 #[cfg(windows)]
 mod windows;
