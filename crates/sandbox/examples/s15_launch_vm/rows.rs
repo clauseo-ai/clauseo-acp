@@ -12,7 +12,7 @@ use super::manifest::Manifest;
 use super::sys::{now, say};
 
 /// Every row, in the order `rows` and `--unattended` run them.
-pub(crate) const ROWS: [&str; 28] = [
+pub(crate) const ROWS: [&str; 29] = [
     "whoami",
     "node-pipes",
     "open-process",
@@ -21,6 +21,7 @@ pub(crate) const ROWS: [&str; 28] = [
     "stdio",
     "exit-code",
     "codex",
+    "claude-mock",
     "ca-bundle",
     "clipboard",
     "atoms",
@@ -161,6 +162,7 @@ fn body(ctx: &Ctx<'_>) -> Outcome {
         "stdio" => checks::stdio(ctx),
         "exit-code" => checks::exit_code(ctx),
         "codex" => return super::codex::row(ctx),
+        "claude-mock" => return super::claude::row(ctx),
         "ca-bundle" => checks::ca_bundle(ctx),
         "clipboard" => {
             return match super::checks_ui::clipboard(ctx) {

@@ -1,7 +1,7 @@
 //! `prepare` and `cleanup`.
 //!
-//! Prepare makes the harness root with `bin\` (the runner, this exe, and node and codex when
-//! given), `logs\`, matters `A` and `B` (each a matter and a state folder), and a data folder
+//! Prepare makes the harness root with `bin\` (the runner, this exe, and node, codex and Claude
+//! Code when given), `logs\`, matters `A` and `B` (each a matter and a state folder), and a data folder
 //! unless one is given or the machine's pool record names one; runs the set-up when no pool is
 //! set up for that data folder; picks three pool users (matter A's, matter B's and matter A's
 //! second, `A2`); grants each `(OI)(CI)M` on its matter folder and its own state folder with the
@@ -29,6 +29,10 @@ use super::win;
 const MOCK: &str = include_str!("mock-responses.mjs");
 /// Its file name in the harness root.
 pub(crate) const MOCK_FILE: &str = "mock-responses.mjs";
+/// The mock Anthropic Messages server, for the claude-mock row.
+const MOCK_ANTHROPIC: &str = include_str!("mock-anthropic.mjs");
+/// Its file name in the harness root.
+pub(crate) const MOCK_ANTHROPIC_FILE: &str = "mock-anthropic.mjs";
 
 /// Runs prepare; `Err` with why it stopped. What was made so far is in the manifest.
 pub(crate) fn prepare(opts: &Opts) -> Result<Manifest, String> {
@@ -75,10 +79,12 @@ pub(crate) fn prepare(opts: &Opts) -> Result<Manifest, String> {
     for dir in [m.matter(SECOND_A), state] {
         grant(SECOND_A, &dir, &second)?;
     }
-    let mock = root.join(MOCK_FILE);
-    write_file(&mock, MOCK.as_bytes()).map_err(|e| format!("writing the mock: {e}"))?;
-    m.files.push(mock);
-    m.save().map_err(|e| format!("writing the manifest: {e}"))?;
+    for (name, body) in [(MOCK_FILE, MOCK), (MOCK_ANTHROPIC_FILE, MOCK_ANTHROPIC)] {
+        let mock = root.join(name);
+        write_file(&mock, body.as_bytes()).map_err(|e| format!("writing {name}: {e}"))?;
+        m.files.push(mock);
+        m.save().map_err(|e| format!("writing the manifest: {e}"))?;
+    }
     say(&format!(
         "prepare: done; manifest {}",
         Manifest::path_in(root).display()
@@ -175,6 +181,9 @@ fn copy_programs(opts: &Opts, m: &mut Manifest) -> Result<(), String> {
     }
     if let Some(codex) = &opts.codex {
         super::codex::copy_codex(codex, m)?;
+    }
+    if let Some(claude) = &opts.claude {
+        super::claude::copy_claude(claude, m)?;
     }
     Ok(())
 }

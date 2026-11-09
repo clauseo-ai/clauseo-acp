@@ -243,7 +243,7 @@ fn job_ui(ctx: &Ctx<'_>, job_file: &Path, atom: &str) -> Result<String, String> 
 
 /// A free port in `TIER_B_PORTS`, found by binding it, then left for the mock to bind: tier B's
 /// WFP filters let A reach no other loopback port.
-fn tier_b_port() -> Result<u16, String> {
+pub(crate) fn tier_b_port() -> Result<u16, String> {
     let free = bind_loopback(ListenerFor::TierB).map_err(|e| format!("no tier-B port: {e}"))?;
     let port = free
         .local_addr()
@@ -254,7 +254,7 @@ fn tier_b_port() -> Result<u16, String> {
 }
 
 /// The port in the mock's `listening` line.
-fn port_of(line: &str) -> Option<u16> {
+pub(crate) fn port_of(line: &str) -> Option<u16> {
     let after = line.split("\"port\":").nth(1)?;
     let digits: String = after.chars().take_while(char::is_ascii_digit).collect();
     digits.parse().ok()

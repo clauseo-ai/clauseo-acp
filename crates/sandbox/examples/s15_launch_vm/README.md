@@ -56,12 +56,13 @@ only when prepare ran the set-up.
 ## The rows
 
 Rows: `whoami`, `node-pipes`, `open-process`, `pipes-5`, `job`, `stdio`, `exit-code`, `codex`,
-`ca-bundle`, `clipboard`, `atoms`, `runners`, `lawyer-processes`, `breakaway`, `handles`, `desktop`,
+`claude-mock`, `ca-bundle`, `clipboard`, `atoms`, `runners`, `lawyer-processes`, `breakaway`, `handles`, `desktop`,
 `pipes-same-matter`, `m3-hardlink`, `pool-processes-at-start`, `pool-processes-at-end`,
 `sweep-before-logon`, `sweep-mid-session`, `agent-token-config`, `child-token-default-dacl`,
 `wts-visibility`, `end-cleanup`, `cancel`, `stdin-unread-cancel`.
 `clipboard` skips in a session with no clipboard the harness can use. `node-pipes` needs `--node`;
-`codex` needs `--node` and `--codex`, both given to prepare, which copies them into `bin\`. Each row
+`codex` needs `--node` and `--codex`, both given to prepare, which copies them into `bin\`;
+`claude-mock` needs `--node` and `--claude` the same way. Each row
 has a limit (`--row-timeout`, 120 s by default). A row past it fails, and the harness ends every
 process it started.
 
@@ -82,6 +83,27 @@ closes stdin only to end a session, and the runner ends the job 1 s after that. 
 that end at their stdin's end have it closed (`Running::end`: `probe hold`, and `stdio`'s `probe
 echo`). `codex` runs under `probe stdin-null`, since `codex exec` reads its stdin to the end before
 it starts.
+
+`claude-mock` (`claude.rs`, `mock-anthropic.mjs`) runs one real Claude Code turn as A's pool user
+with no credentials, to see which shell tool Claude Code offers and uses there. The harness
+starts `mock-anthropic.mjs` (a scripted Anthropic Messages server, streamed as SSE) on a tier-B
+loopback port, as `codex` does, and runs Claude Code under `probe stdin-null` with
+`ANTHROPIC_BASE_URL` at the mock, `ANTHROPIC_API_KEY=dummy-not-a-secret`, `CLAUDE_CONFIG_DIR`
+at `<state A>\claude-home`, and `-p "run the echo" --dangerously-skip-permissions
+--allowedTools Bash,PowerShell`. The mock calls `Bash` when the request offers it, else
+`PowerShell`, with `echo clauseo-mock-ok`, then quotes the result back. The row prints the
+exit code, whether stdout holds `clauseo-mock-ok`, the shell tool names offered and the tool
+called (the mock's log is `logs\claude-mock.jsonl`); it passes when stdout holds the marker and
+the exit code is 0. `--claude` takes `claude.exe`, Claude Code's `cli.js`, or a folder holding
+one. A `CLAUDE_CODE_GIT_BASH_PATH` in the harness's environment is passed on.
+
+```text
+C:\s15\s15_launch_vm.exe prepare --node C:\node\node.exe
+    --claude C:\claude\node_modules\@anthropic-ai\claude-code
+C:\s15\s15_launch_vm.exe row claude-mock
+```
+
+(the prepare line is one line).
 
 Prepare picks three pool users: matter A's, matter B's and matter A's second (`A2`), which is
 granted matter A's folder too and has a state folder of its own (`matters\A2\state`). The runner

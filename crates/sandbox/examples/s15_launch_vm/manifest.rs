@@ -41,6 +41,8 @@ pub(crate) struct Manifest {
     pub(crate) codex: Option<PathBuf>,
     /// Codex's `path` folder (its `rg.exe`) in the bin folder, when the package has one.
     pub(crate) codex_path: Option<PathBuf>,
+    /// Claude Code's entry in the bin folder: `claude.exe`, or `cli.js` (run under node).
+    pub(crate) claude: Option<PathBuf>,
     /// Folders made, in the order made.
     pub(crate) dirs: Vec<PathBuf>,
     /// Files made outside those folders, in the order made.
@@ -110,6 +112,7 @@ impl Manifest {
                 "node" => manifest.node = Some(path),
                 "codex" => manifest.codex = Some(path),
                 "codex-path" => manifest.codex_path = Some(path),
+                "claude" => manifest.claude = Some(path),
                 "dir" => manifest.dirs.push(path),
                 "file" => manifest.files.push(path),
                 "atom" => manifest.atoms.push(value.to_owned()),
@@ -143,6 +146,7 @@ impl Manifest {
             ("node", &self.node),
             ("codex", &self.codex),
             ("codex-path", &self.codex_path),
+            ("claude", &self.claude),
         ] {
             if let Some(value) = value {
                 put(key, &value.display().to_string());

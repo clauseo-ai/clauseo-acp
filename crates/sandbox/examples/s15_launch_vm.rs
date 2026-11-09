@@ -61,6 +61,9 @@ mod checks_sec;
 #[path = "s15_launch_vm/checks_ui.rs"]
 mod checks_ui;
 #[cfg(windows)]
+#[path = "s15_launch_vm/claude.rs"]
+mod claude;
+#[cfg(windows)]
 #[path = "s15_launch_vm/cleanup_verdict.rs"]
 mod cleanup_verdict;
 #[cfg(windows)]
