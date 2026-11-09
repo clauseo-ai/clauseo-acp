@@ -1,6 +1,7 @@
 //! `clauseo-mcp`: the sidecar binary the agents start as an MCP server. Two modes:
-//! `browser-guard` and `connector`; on Unix a third, `browser-reaper`, which only the guard
-//! starts (`browser_guard/reaper.rs`).
+//! `browser-guard` and `connector`; on Unix two more: `browser-reaper`, which only the guard
+//! starts (`browser_guard/reaper.rs`), and `browser-bridge`, the agent's side of a guard the host
+//! runs outside the agent's jail (`browser_bridge.rs`).
 //!
 //! # Owns
 //!
@@ -10,22 +11,29 @@
 //!   from scratch; relays stdio both ways; refuses tool calls whose arguments would undo
 //!   Clauseo's isolation; and leaves no Chrome or agent-browser daemon behind when it ends.
 //!   `docs/decisions/0029-browser.md` is the record.
+//! - The browser bridge ([`browser_bridge`], Unix only): `clauseo-mcp browser-bridge --socket
+//!   <path>`, which relays each JSON-RPC line, unchanged, between the agent's stdio and a guard
+//!   started with `--listen <path>`, and answers each request itself while the guard cannot be
+//!   reached.
 //! - The connector relay client ([`connector`]): `clauseo-mcp connector <name>`, the stdio MCP
 //!   server for a connector. It relays each JSON-RPC line, unchanged, over loopback TCP to the
 //!   host's per-launch relay, and answers "not reachable" itself when there is no relay. It reads
 //!   the relay address from `CLAUSEO_RELAY` and the token from the file `CLAUSEO_RELAY_TOKEN_FILE`
 //!   names; it never puts the token on stdout, stderr or argv.
-//! - The one place the crate creates folders (`write.rs`; the Unix socket folder under `/tmp`
-//!   is made with mode 0700 and checked in `browser_guard/socket.rs`), and the three places it
-//!   starts a process (`browser_guard/relay/pumps.rs` `spawn_child`, `chrome.rs` `spawn`, both
-//!   through `job/spawn.rs` on Windows, and on Unix `reaper.rs` `Reaper::start`).
+//! - The one place the crate creates folders and the guard's `--listen` socket (`write.rs`; the
+//!   Unix socket folder under `/tmp` is made by the host with mode 0700 and checked in
+//!   `browser_guard/socket.rs`; the listen socket is made fresh in `transport/unix.rs`), and the
+//!   three places it starts a process (`browser_guard/relay/pumps.rs` `spawn_child`, `chrome.rs`
+//!   `spawn`, both through `job/spawn.rs` on Windows, and on Unix `reaper.rs` `Reaper::start`).
 //!
 //! # Interface
 //!
 //! - [`browser_guard::run`]: the mode, given the arguments after `browser-guard`. It returns the
 //!   exit code, or a [`Failure`] for `main` to print. `main.rs` holds the table of modes.
 //! - The command line: `clauseo-mcp browser-guard --agent-browser <file> --cwd <folder>
-//!   --cdp-port <port> -- <agent-browser args...>`, with `--daemon-port <port>` on Windows.
+//!   --cdp-port <port> -- <agent-browser args...>`, with `--daemon-port <port>` on Windows, and
+//!   on Unix optionally `--listen <socket>` first, which serves a Unix socket instead of stdio
+//!   and exits 1 if the path exists.
 //!   Exit 2 for a bad command line or a missing or invalid variable; 1 when a folder cannot be
 //!   made or Chrome or agent-browser cannot start, when Chrome does not listen on the claimed
 //!   port within 15 s, when Chrome exits or the guard's parent goes, when agent-browser was
@@ -52,8 +60,12 @@
 //! `browser_guard.rs`, then `browser_guard/filter.rs` (the rules), `env.rs`, `chrome.rs`,
 //! `relay.rs`.
 
+#[cfg(unix)]
+pub mod browser_bridge;
 pub mod browser_guard;
 pub mod connector;
+#[cfg(unix)]
+mod transport;
 mod write;
 
 /// A mode's failure: the exit code and the message `main` prints on stderr.

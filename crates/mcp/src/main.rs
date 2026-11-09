@@ -9,6 +9,9 @@ type Run = fn(&[OsString]) -> Result<i32, Failure>;
 
 /// Every mode, by the exact name argv[1] must hold. The usage line is built from this table.
 const MODES: &[(&str, Run)] = &[
+    // Unix: the agent's side of a guard that listens on a socket (`browser_bridge.rs`).
+    #[cfg(unix)]
+    ("browser-bridge", clauseo_mcp::browser_bridge::run),
     ("browser-guard", browser_guard::run),
     // Unix: started by the guard itself, never by the agent (`browser_guard/reaper.rs`).
     #[cfg(unix)]

@@ -17,7 +17,7 @@ use super::super::filter::{self, MAX_LINE_BYTES, RESERVED_ID as CLOSE_ID, Verdic
 use super::super::parent::Parent;
 use super::super::port_file::{Expected, Status};
 use super::super::session::{self, Shared, StartError};
-use super::lines::{Line, Overflow, answer_all, emit, lock, read_line, write_child};
+use super::lines::{Line, Overflow, answer_all, emit, emit_from, lock, read_line, write_child};
 use super::{CHILD_MAX_LINE_BYTES, CLOSE_REQUEST, ENDED, Event, oneshot, send};
 use crate::browser_guard::note;
 use crate::connector::head;
@@ -75,32 +75,16 @@ pub(crate) fn spawn_child(
     })
 }
 
-/// Agent to child: every line through the filter, then [`route`]. On EOF, sends the close
-/// request to a running agent-browser.
+/// Agent to child over stdio: [`pump_lines`], then on EOF the close request to a running
+/// agent-browser.
 pub(crate) fn pump_agent(
     stdin: &mut impl BufRead,
     shared: &Arc<Shared>,
     parent: &Parent,
     events: &mpsc::Sender<Event>,
 ) {
-    let mut line = Vec::new();
-    loop {
-        let verdict = match read_line(stdin, &mut line, MAX_LINE_BYTES, Overflow::Skip) {
-            Ok(Line::Eof) | Err(_) => break,
-            Ok(Line::Oversize) => filter::parse_error(),
-            // The agent's last line may lack its newline; it is checked like any other.
-            Ok(Line::Whole | Line::Partial) => filter::check(&line),
-        };
-        match verdict {
-            Verdict::Forward(text) => {
-                if !route(shared, parent, events, &text) {
-                    return;
-                }
-            }
-            // The agent has gone if its stdout fails; its stdin EOF follows.
-            Verdict::Answer(text) => drop(emit(&shared.out, format!("{text}\n").as_bytes())),
-            Verdict::Drop => {}
-        }
+    if pump_lines(stdin, shared, parent, events) == Pumped::Ending {
+        return;
     }
     shared.closing.store(true, Ordering::SeqCst);
     let to_child = {
@@ -113,6 +97,44 @@ pub(crate) fn pump_agent(
         && write_child(&to_child, CLOSE_REQUEST).is_err()
     {
         send(events, Event::CloseAnswered);
+    }
+}
+
+/// How [`pump_lines`] ended.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Pumped {
+    /// The agent's input ended (or could not be read).
+    Eof,
+    /// The guard is ending: [`route`] sent the event that ends it.
+    Ending,
+}
+
+/// Agent to child: every line through the filter, then [`route`], until the input ends or the
+/// guard is ending. Over stdio and, in listen mode, for each client (`listen.rs`).
+pub(crate) fn pump_lines(
+    input: &mut impl BufRead,
+    shared: &Arc<Shared>,
+    parent: &Parent,
+    events: &mpsc::Sender<Event>,
+) -> Pumped {
+    let mut line = Vec::new();
+    loop {
+        let verdict = match read_line(input, &mut line, MAX_LINE_BYTES, Overflow::Skip) {
+            Ok(Line::Eof) | Err(_) => return Pumped::Eof,
+            Ok(Line::Oversize) => filter::parse_error(),
+            // The agent's last line may lack its newline; it is checked like any other.
+            Ok(Line::Whole | Line::Partial) => filter::check(&line),
+        };
+        match verdict {
+            Verdict::Forward(text) => {
+                if !route(shared, parent, events, &text) {
+                    return Pumped::Ending;
+                }
+            }
+            // The agent has gone if its output fails; its input's end follows.
+            Verdict::Answer(text) => drop(emit(&shared.out, format!("{text}\n").as_bytes())),
+            Verdict::Drop => {}
+        }
     }
 }
 
@@ -209,7 +231,7 @@ pub(crate) fn pump_child(
             line = noted;
         }
         line.push(b'\n');
-        if agent_reads && emit(&shared.out, &line).is_err() {
+        if agent_reads && emit_from(&shared.out, generation, &line).is_err() {
             agent_reads = false;
         }
         if let Some(reason) = refusal(&shared.launcher.port_checks) {
