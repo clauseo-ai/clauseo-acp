@@ -3,7 +3,8 @@
 //! As the W2 (j) recipe did (`/tmp/stagec/w2-j-recipe.md`, step 2): `NtCreateLowBoxToken` over
 //! this process's primary token with the package SID, no capabilities and the namespace's six
 //! handles, then `CreateProcessAsUserW` with that token on this process's station and desktop
-//! (`lpDesktop` null), the token's own environment, and only the listed handles inherited.
+//! (`lpDesktop` null), only the environment the command sets, and only the listed handles
+//! inherited.
 #![expect(
     unsafe_code,
     reason = "FFI to the token, environment, attribute list and process calls"
@@ -17,7 +18,6 @@ use std::path::{Path, PathBuf};
 
 use ::windows::Win32::Foundation::HANDLE;
 use ::windows::Win32::Security::{PSID, TOKEN_ACCESS_MASK};
-use ::windows::Win32::System::Environment::{CreateEnvironmentBlock, DestroyEnvironmentBlock};
 use ::windows::Win32::System::Threading::{
     CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW,
     CreateProcessW, EXTENDED_STARTUPINFO_PRESENT, GetCurrentProcess, OpenProcessToken,
@@ -30,7 +30,7 @@ use super::namespace::NamespaceHandles;
 use super::nt::NtCreateLowBoxToken;
 use super::stdio::{Stdio, Which};
 use super::{last_error, nt_ok, wide_nul, win32};
-use crate::envblock::{self, Change};
+use crate::envblock;
 use crate::error::Error;
 use crate::quote::command_line;
 
@@ -44,10 +44,8 @@ pub struct LowBoxCommand {
     program: OsString,
     /// Its arguments, quoted by std's rules.
     args: Vec<OsString>,
-    /// Changes to the token's environment, in order.
-    env: Vec<Change>,
-    /// Start from an empty environment instead of the token's.
-    env_clear: bool,
+    /// The child's whole environment, in order: nothing else is inherited.
+    env: Vec<(Vec<u16>, Vec<u16>)>,
     /// The working folder; the guard's when `None`.
     cwd: Option<PathBuf>,
     /// Standard input.
@@ -65,10 +63,11 @@ pub struct LowBoxCommand {
 pub struct Spawned {
     /// Its process id.
     pub pid: u32,
-    /// Its process handle (all access): for the Job Object, the wait and the exit code.
+    /// Its process handle (all access), closed on drop: for the Job Object, the wait, the exit
+    /// code and `TerminateProcess`.
     pub process: OwnedHandle,
-    /// Its first thread, suspended until [`Spawned::resume`].
-    pub thread: OwnedHandle,
+    /// Its first thread, suspended; [`Spawned::resume`] takes and closes it.
+    pub thread: Option<OwnedHandle>,
     /// The guard's end of the child's input, with [`Stdio::Piped`].
     pub stdin: Option<File>,
     /// The guard's end of the child's output, with [`Stdio::Piped`].
@@ -78,14 +77,13 @@ pub struct Spawned {
 }
 
 impl LowBoxCommand {
-    /// `program`, with no arguments, the token's environment, the guard's folder and standard
+    /// `program`, with no arguments, an empty environment, the guard's folder and standard
     /// handles.
     pub fn new(program: impl AsRef<OsStr>) -> LowBoxCommand {
         LowBoxCommand {
             program: program.as_ref().to_owned(),
             args: Vec::new(),
             env: Vec::new(),
-            env_clear: false,
             cwd: None,
             stdin: Stdio::Inherit,
             stdout: Stdio::Inherit,
@@ -111,23 +109,11 @@ impl LowBoxCommand {
         self
     }
 
-    /// Sets a variable over the token's environment.
+    /// Sets a variable in the child's environment, which holds only the variables set here:
+    /// nothing comes from the guard or the token's profile, and none set is an empty block. A
+    /// later value for the same name, in any letter case, replaces the earlier one.
     pub fn env(&mut self, name: impl AsRef<OsStr>, value: impl AsRef<OsStr>) -> &mut LowBoxCommand {
-        self.env
-            .push(Change::Set(units(name.as_ref()), units(value.as_ref())));
-        self
-    }
-
-    /// Removes a variable from the token's environment.
-    pub fn env_remove(&mut self, name: impl AsRef<OsStr>) -> &mut LowBoxCommand {
-        self.env.push(Change::Remove(units(name.as_ref())));
-        self
-    }
-
-    /// Starts from an empty environment: only the variables set after this.
-    pub fn env_clear(&mut self) -> &mut LowBoxCommand {
-        self.env_clear = true;
-        self.env.clear();
+        self.env.push((units(name.as_ref()), units(value.as_ref())));
         self
     }
 
@@ -185,9 +171,10 @@ impl LowBoxCommand {
     /// let (chrome_reads, guard_writes) = std::io::pipe()?;
     /// let (guard_reads, chrome_writes) = std::io::pipe()?;
     /// let (r, w) = (chrome_reads.as_raw_handle(), chrome_writes.as_raw_handle());
-    /// let child = LowBoxCommand::new(r"C:\shell\chrome-headless-shell.exe")
+    /// let mut child = LowBoxCommand::new(r"C:\shell\chrome-headless-shell.exe")
     ///     .args(["--headless", "--remote-debugging-pipe"])
     ///     .arg(format!("--remote-debugging-io-pipes={},{}", r as usize, w as usize))
+    ///     .env("SystemRoot", r"C:\Windows")
     ///     .stdout(Stdio::Null)
     ///     .inherit_handle(r)
     ///     .inherit_handle(w)
@@ -213,7 +200,7 @@ impl LowBoxCommand {
         line.push(0);
         let program = wide_nul(&self.program);
         let cwd = self.cwd.as_deref().map(|d| wide_nul(d.as_os_str()));
-        let environment = self.environment(token)?;
+        let environment = self.environment()?;
         let marked = Marked::new(&self.inherit)?;
 
         let stdin = self.stdin.ends(Which::Input)?;
@@ -291,37 +278,30 @@ impl LowBoxCommand {
             // SAFETY: the create call succeeded, so both handles are open and ours alone.
             process: unsafe { OwnedHandle::from_raw_handle(info.hProcess.0) },
             // SAFETY: as above.
-            thread: unsafe { OwnedHandle::from_raw_handle(info.hThread.0) },
+            thread: Some(unsafe { OwnedHandle::from_raw_handle(info.hThread.0) }),
             stdin: stdin.parent,
             stdout: stdout.parent,
             stderr: stderr.parent,
         })
     }
 
-    /// The child's environment block: the token's, or this process's without a token (unless
-    /// cleared), with the changes on top.
-    fn environment(&self, token: Option<&OwnedHandle>) -> Result<Vec<u16>, Error> {
-        let base = match (self.env_clear, token) {
-            (true, _) => Vec::new(),
-            (false, Some(token)) => token_environment(token)?,
-            (false, None) => std::env::vars_os()
-                .map(|(name, value)| {
-                    let mut entry = units(&name);
-                    entry.push(u16::from(b'='));
-                    entry.extend(units(&value));
-                    entry
-                })
-                .collect(),
-        };
-        envblock::block(base, &self.env)
+    /// The child's environment block: exactly the variables set (`CREATE_UNICODE_ENVIRONMENT`
+    /// with this block, so the child inherits none of the guard's).
+    pub(super) fn environment(&self) -> Result<Vec<u16>, Error> {
+        envblock::block(&self.env)
     }
 }
 
 impl Spawned {
-    /// Lets the child's first thread run.
-    pub fn resume(&self) -> Result<(), Error> {
+    /// Lets the child's first thread run, and closes the thread handle. A second call fails
+    /// with `ERROR_INVALID_HANDLE` (6).
+    pub fn resume(&mut self) -> Result<(), Error> {
+        let thread = self.thread.take().ok_or(Error::Win32 {
+            call: "ResumeThread (already resumed)",
+            code: 6,
+        })?;
         // SAFETY: `thread` is the child's open thread handle, with THREAD_SUSPEND_RESUME.
-        let previous = unsafe { ResumeThread(HANDLE(self.thread.as_raw_handle())) };
+        let previous = unsafe { ResumeThread(HANDLE(thread.as_raw_handle())) };
         if previous == u32::MAX {
             return Err(last_error("ResumeThread"));
         }
@@ -372,25 +352,4 @@ fn lowbox_token(namespace: &NamespaceHandles) -> Result<OwnedHandle, Error> {
     nt_ok("NtCreateLowBoxToken", status)?;
     // SAFETY: the call succeeded, so `token` is open and ours alone.
     Ok(unsafe { OwnedHandle::from_raw_handle(token.0) })
-}
-
-/// The token's own environment (`CreateEnvironmentBlock` with no inheritance), as entries.
-fn token_environment(token: &OwnedHandle) -> Result<Vec<Vec<u16>>, Error> {
-    let mut block: *mut c_void = std::ptr::null_mut();
-    // SAFETY: `token` is an open token with TOKEN_QUERY; `block` gets a block freed below.
-    unsafe { CreateEnvironmentBlock(&raw mut block, Some(HANDLE(token.as_raw_handle())), false) }
-        .map_err(|e| win32("CreateEnvironmentBlock", &e))?;
-    let mut len = 0_usize;
-    // SAFETY: the block is a run of NUL-terminated UTF-16 strings ended by an empty one; the
-    // walk stops at the first double NUL, inside the block.
-    let entries = unsafe {
-        let start = block.cast::<u16>().cast_const();
-        while *start.add(len) != 0 || *start.add(len + 1) != 0 {
-            len += 1;
-        }
-        envblock::entries(std::slice::from_raw_parts(start, len + 2))
-    };
-    // SAFETY: the block came from CreateEnvironmentBlock and is freed once, here.
-    unsafe { DestroyEnvironmentBlock(block) }.map_err(|e| win32("DestroyEnvironmentBlock", &e))?;
-    Ok(entries)
 }

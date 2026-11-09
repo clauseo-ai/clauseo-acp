@@ -144,7 +144,6 @@ fn inheritable(handle: &OwnedHandle) -> bool {
 fn spawn_listing(listed: &[RawHandle]) -> Spawned {
     let mut command = LowBoxCommand::new(std::env::current_exe().unwrap());
     command
-        .env_clear()
         .stdin(Stdio::Null)
         .stdout(Stdio::Null)
         .stderr(Stdio::Null);
@@ -183,7 +182,6 @@ fn a_repeated_or_null_handle_is_refused() {
     let listed = event(false);
     let mut command = LowBoxCommand::new(std::env::current_exe().unwrap());
     command
-        .env_clear()
         .inherit_handle(listed.as_raw_handle())
         .inherit_handle(listed.as_raw_handle());
     assert!(matches!(
@@ -191,10 +189,30 @@ fn a_repeated_or_null_handle_is_refused() {
         Err(Error::InheritList { .. })
     ));
     let mut command = LowBoxCommand::new(std::env::current_exe().unwrap());
-    command.env_clear().inherit_handle(std::ptr::null_mut());
+    command.inherit_handle(std::ptr::null_mut());
     assert!(matches!(
         command.spawn_as(None),
         Err(Error::InheritList { .. })
     ));
     assert!(!inheritable(&listed));
+}
+
+#[test]
+fn the_environment_is_only_what_the_command_sets() {
+    // The test process has PATH and SystemRoot; neither may reach a child that did not set it.
+    assert!(std::env::var_os("PATH").is_some());
+    let empty = LowBoxCommand::new("x.exe");
+    assert_eq!(
+        empty.environment().unwrap(),
+        [0, 0],
+        "an empty env must be an empty block"
+    );
+    let mut command = LowBoxCommand::new("x.exe");
+    command
+        .env("TEMP", r"C:\t")
+        .env("SystemRoot", r"C:\Windows")
+        .env("temp", r"C:\u");
+    let block = String::from_utf16(&command.environment().unwrap()).unwrap();
+    assert_eq!(block, "SystemRoot=C:\\Windows\0temp=C:\\u\0\0");
+    assert!(!block.to_ascii_uppercase().contains("PATH="));
 }

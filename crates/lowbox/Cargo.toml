@@ -20,9 +20,8 @@ workspace = true
 # the session (ProcessIdToSessionId: System_RemoteDesktop). The handle checks
 # (src/windows/probe.rs): GetHandleInformation and NtQueryObject with
 # PUBLIC_OBJECT_TYPE_INFORMATION (System_WindowsProgramming). The launch (src/windows/spawn.rs):
-# CreateProcessAsUserW and the attribute list (System_Threading), CreateEnvironmentBlock
-# (System_Environment), CreatePipe (System_Pipes), CreateFileW for NUL (Storage_FileSystem) and
-# GetStdHandle (System_Console).
+# CreateProcessAsUserW and the attribute list (System_Threading), CreatePipe (System_Pipes),
+# CreateFileW for NUL (Storage_FileSystem) and GetStdHandle (System_Console).
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
   "Wdk_Foundation",
@@ -32,7 +31,6 @@ windows = { workspace = true, features = [
   "Win32_Security_Authorization",
   "Win32_Storage_FileSystem",
   "Win32_System_Console",
-  "Win32_System_Environment",
   "Win32_System_IO",
   "Win32_System_Pipes",
   "Win32_System_RemoteDesktop",

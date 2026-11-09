@@ -248,3 +248,27 @@ fn the_inherit_list_refuses_null_pseudo_and_repeated_handles() {
         );
     }
 }
+
+/// `--lowbox-handles` carries handle values and nothing else: no SID, no name, no path. The
+/// guard re-derives the package SID and every name from the package name it is given apart.
+#[test]
+fn the_arg_carries_only_handle_values() {
+    let values = [
+        0x10,
+        0x14,
+        0x1_0000,
+        0x7fff_fffc,
+        0xab_cdef,
+        usize::MAX >> 4,
+    ];
+    let text = format_handle_arg(&values);
+    assert!(
+        text.split(',').all(|v| v.starts_with("0x")
+            && v.len() > 2
+            && v[2..].bytes().all(|b| b.is_ascii_hexdigit())),
+        "{text}"
+    );
+    assert_eq!(text.split(',').count(), HANDLE_COUNT);
+    assert!(!text.contains("S-1-") && !text.contains('\\'));
+    assert_eq!(parse_handle_arg(&text).unwrap(), values);
+}

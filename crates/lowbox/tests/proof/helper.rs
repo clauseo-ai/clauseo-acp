@@ -163,6 +163,11 @@ pub(crate) fn run() {
             "--window-size=800,600".to_owned(),
             "--no-first-run".to_owned(),
         ])
+        // The child's environment is only what is set here (nothing from the helper): the
+        // system folders chrome and Winsock need, and its own temp folder.
+        .env("SystemRoot", system_var("SystemRoot", r"C:\Windows"))
+        .env("windir", system_var("windir", r"C:\Windows"))
+        .env("SystemDrive", system_var("SystemDrive", "C:"))
         .env("TEMP", &config.tmp)
         .env("TMP", &config.tmp)
         .current_dir(shell.parent().unwrap_or(shell))
@@ -446,4 +451,9 @@ fn desktop_name() -> Res<String> {
     let desktop = unsafe { GetThreadDesktop(GetCurrentThreadId()) }
         .map_err(|e| failed("GetThreadDesktop", &e))?;
     object_name(HANDLE(desktop.0))
+}
+
+/// The helper's own value of a system variable, or `fallback`.
+fn system_var(name: &str, fallback: &str) -> String {
+    std::env::var(name).unwrap_or_else(|_unset| fallback.to_owned())
 }

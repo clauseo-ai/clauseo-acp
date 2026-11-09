@@ -33,7 +33,9 @@ pub enum Stdio {
     Inherit,
     /// `NUL`.
     Null,
-    /// A new anonymous pipe; the guard keeps the other end ([`crate::Spawned`]).
+    /// A new anonymous pipe; the guard keeps the other end ([`crate::Spawned`]) and reads or
+    /// writes it on a thread of its own. The spawn never touches the pipe, so it cannot block on
+    /// one; a child that fills a pipe nobody drains blocks only itself.
     Piped,
 }
 
