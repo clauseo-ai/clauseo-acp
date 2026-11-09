@@ -1,5 +1,6 @@
-//! The watchdog's loop on a fake [`System`]: what each poll counts, when it trips, what it does
-//! to the agent, and how it fails closed.
+//! The watchdog's loop on a fake [`System`] and a fake session sweep: what each poll counts,
+//! when it trips, what it does to the agent, how it fails closed, and how it counts what the
+//! launch's mark finds once the agent's session is empty.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashSet};
@@ -116,6 +117,47 @@ impl System for Fake {
 const AGENT: u32 = 100;
 const START: u64 = 10;
 
+/// The launch's session sweep, faked: the pids its mark finds, whether its scan fails, whether
+/// session end ended it, and what trips handed to it.
+#[derive(Clone, Default)]
+struct Sweep(Arc<Mutex<Swept>>);
+
+#[derive(Default)]
+struct Swept {
+    marked: HashSet<u32>,
+    fails: bool,
+    ended: bool,
+    handed: Vec<u32>,
+}
+
+impl Sweep {
+    fn mark(&self, pids: std::ops::Range<u32>) {
+        self.0.lock().unwrap().marked.extend(pids);
+    }
+}
+
+impl Escapes for Sweep {
+    fn escaped(&self, rest: &[Proc]) -> Result<Option<Vec<Proc>>, SweepError> {
+        let swept = self.0.lock().unwrap();
+        if swept.ended {
+            return Ok(None);
+        }
+        if swept.fails {
+            return Err(SweepError::Unknown {
+                tag: "clauseo-1-0".to_owned(),
+            });
+        }
+        let found = rest.iter().filter(|p| swept.marked.contains(&p.pid));
+        Ok(Some(found.copied().collect()))
+    }
+
+    fn take_over(&self, left: &[Proc]) -> usize {
+        let mut swept = self.0.lock().unwrap();
+        swept.handed.extend(left.iter().map(|p| p.pid));
+        0
+    }
+}
+
 /// A session whose notices land in the returned list.
 fn session() -> (ProcessCapSession, Arc<Mutex<Vec<ProcessCapNotice>>>) {
     let told = Arc::new(Mutex::new(Vec::new()));
@@ -124,13 +166,33 @@ fn session() -> (ProcessCapSession, Arc<Mutex<Vec<ProcessCapNotice>>>) {
     (session, told)
 }
 
-/// A fake with the agent running, and its watch.
+/// A fake with the agent running, and its watch, whose mark finds nothing.
 fn agent(cap: &ProcessCapSession) -> (Fake, Watch) {
+    let (fake, watch, _) = agent_swept(cap);
+    (fake, watch)
+}
+
+/// A fake with the agent running, its watch, and the watch's session sweep.
+fn agent_swept(cap: &ProcessCapSession) -> (Fake, Watch, Sweep) {
     let fake = Fake::default();
     fake.add(AGENT, 1, AGENT, START);
     fake.add(1, 0, 1, 0);
-    let watch = Watch::start(&fake, AGENT, cap.clone()).unwrap().unwrap();
-    (fake, watch)
+    let sweep = Sweep::default();
+    let watch = Watch::start(&fake, AGENT, cap.clone(), Box::new(sweep.clone()))
+        .unwrap()
+        .unwrap();
+    (fake, watch, sweep)
+}
+
+/// The steps up to and including the next sweep's; each but the last only counts.
+fn to_the_sweep(watch: &mut Watch, fake: &Fake) -> Step {
+    loop {
+        let sweep = (watch.polls + 1).is_multiple_of(SWEEP_EVERY);
+        let step = watch.step(fake);
+        if sweep || step == Step::Done {
+            return step;
+        }
+    }
 }
 
 #[test]
@@ -273,28 +335,19 @@ fn a_zombie_agent_is_an_exit_not_a_failure() {
     assert!(told.lock().unwrap().is_empty());
 }
 
-thread_local! {
-    static HANDED: RefCell<Vec<u32>> = const { RefCell::new(Vec::new()) };
-}
-
-fn record_hand_over(_: u32, left: &[Proc]) {
-    HANDED.with(|handed| handed.borrow_mut().extend(left.iter().map(|p| p.pid)));
-}
-
 #[test]
 fn what_the_kill_rounds_leave_goes_to_the_session_sweep() {
     // L6: a descendant survives every kill round; the watch hands it over and goes on.
     let (cap, _) = session();
-    let (fake, mut watch) = agent(&cap);
-    watch.hand_over = record_hand_over;
+    let (fake, mut watch, sweep) = agent_swept(&cap);
     bomb(&fake, AGENT, 101);
     fake.set(101_010, |p| p.immortal = true);
-    let trip = watch.trip(&fake, true);
+    let trip = watch.trip(&fake, true, true);
     assert_eq!(
         trip.left.iter().map(|p| p.pid).collect::<Vec<_>>(),
         [101_010]
     );
-    assert_eq!(HANDED.with(|handed| handed.borrow().clone()), [101_010]);
+    assert_eq!(sweep.0.lock().unwrap().handed, [101_010]);
     assert_eq!(watch.step(&fake), Step::Watch);
 }
 
@@ -345,7 +398,7 @@ fn an_agent_whose_start_is_missing_is_not_watched_uncounted() {
     let fake = Fake::default();
     fake.add(AGENT, 1, AGENT, START);
     fake.unreadable.borrow_mut().insert(AGENT);
-    let refused = Watch::start(&fake, AGENT, cap).unwrap_err();
+    let refused = Watch::start(&fake, AGENT, cap, Box::new(Sweep::default())).unwrap_err();
     assert_eq!(refused, "the agent's start could not be read");
     assert_eq!(*told.lock().unwrap(), [ProcessCapNotice::CapFailed]);
 }
@@ -356,10 +409,18 @@ fn an_agent_that_exited_at_once_is_a_normal_end() {
     let (cap, told) = session();
     let fake = Fake::default();
     fake.add(1, 0, 1, 0);
-    assert!(Watch::start(&fake, AGENT, cap.clone()).unwrap().is_none());
+    assert!(
+        Watch::start(&fake, AGENT, cap.clone(), Box::new(Sweep::default()))
+            .unwrap()
+            .is_none()
+    );
     fake.add(AGENT, 1, AGENT, START);
     fake.set(AGENT, |p| p.zombie = true);
-    assert!(Watch::start(&fake, AGENT, cap).unwrap().is_none());
+    assert!(
+        Watch::start(&fake, AGENT, cap, Box::new(Sweep::default()))
+            .unwrap()
+            .is_none()
+    );
     assert!(told.lock().unwrap().is_empty());
 }
 
@@ -369,10 +430,87 @@ fn an_agent_that_exited_at_once_leaving_a_bomb_is_watched_by_session() {
     let fake = Fake::default();
     fake.add(1, 0, 1, 0);
     fake.many(1_000, 300, 1, AGENT);
-    let mut watch = Watch::start(&fake, AGENT, cap.clone()).unwrap().unwrap();
+    let mut watch = Watch::start(&fake, AGENT, cap.clone(), Box::new(Sweep::default()))
+        .unwrap()
+        .unwrap();
     assert_eq!(watch.step(&fake), Step::Watch);
     assert_eq!(cap.trips(), 1);
     assert!((1_000..1_300).all(|pid| !fake.running(pid)));
     assert_eq!(*told.lock().unwrap(), [ProcessCapNotice::TooManyPrograms]);
     assert_eq!(watch.step(&fake), Step::Done);
+}
+
+#[test]
+fn what_the_mark_finds_is_counted_after_the_session_empties() {
+    // M1: `setsid <bomb> &`, then the agent is killed: its session is empty, but the launch's
+    // mark still finds the bomb, so the watch goes on counting it until it finds nothing.
+    let (cap, told) = session();
+    let (fake, mut watch, sweep) = agent_swept(&cap);
+    fake.procs.borrow_mut().remove(&AGENT);
+    fake.many(2_000, 10, 1, 2_000);
+    sweep.mark(2_000..2_010);
+    assert_eq!(
+        watch.step(&fake),
+        Step::Watch,
+        "the escapees went uncounted"
+    );
+    assert_eq!(cap.trips(), 0);
+    // The bomb grows; between sweeps only the session is listed, at the sweep the mark counts.
+    fake.many(3_000, 300, 2_000, 2_000);
+    sweep.mark(3_000..3_300);
+    assert_eq!(to_the_sweep(&mut watch, &fake), Step::Watch);
+    assert_eq!(cap.trips(), 1);
+    assert!(
+        (2_000..2_010)
+            .chain(3_000..3_300)
+            .all(|pid| !fake.running(pid))
+    );
+    assert_eq!(*told.lock().unwrap(), [ProcessCapNotice::TooManyPrograms]);
+    // The session is gone: neither its group nor the agent's pid is ever signalled.
+    assert!(fake.groups.borrow().is_empty());
+    assert!(
+        fake.signals_to(AGENT).is_empty(),
+        "the gone agent was signalled"
+    );
+    // Nothing left: the next sweep ends the watch.
+    assert_eq!(to_the_sweep(&mut watch, &fake), Step::Done);
+}
+
+#[test]
+fn session_end_ends_the_watch_of_what_the_mark_found() {
+    let (cap, told) = session();
+    let (fake, mut watch, sweep) = agent_swept(&cap);
+    fake.procs.borrow_mut().remove(&AGENT);
+    fake.many(2_000, 10, 1, 2_000);
+    sweep.mark(2_000..2_010);
+    assert_eq!(watch.step(&fake), Step::Watch);
+    sweep.0.lock().unwrap().ended = true;
+    assert_eq!(to_the_sweep(&mut watch, &fake), Step::Done);
+    assert!(told.lock().unwrap().is_empty());
+}
+
+#[test]
+fn a_failed_session_sweep_ends_the_agent() {
+    // M3: the mark's scan fails (an unvouched scan, drift, a missing mark): the cap cannot
+    // count what left the session, so it fails closed as for a failed listing.
+    let (cap, told) = session();
+    let (fake, mut watch, sweep) = agent_swept(&cap);
+    fake.add(101, AGENT, AGENT, 20);
+    sweep.0.lock().unwrap().fails = true;
+    assert_eq!(to_the_sweep(&mut watch, &fake), Step::Done);
+    assert_eq!(fake.signals_to(AGENT), [libc::SIGKILL]);
+    assert_eq!(fake.signals_to(101), [libc::SIGKILL]);
+    failed_closed(&fake, &told);
+}
+
+#[test]
+fn a_failed_session_sweep_after_the_session_emptied_is_told() {
+    let (cap, told) = session();
+    let (fake, mut watch, sweep) = agent_swept(&cap);
+    fake.procs.borrow_mut().remove(&AGENT);
+    sweep.0.lock().unwrap().fails = true;
+    assert_eq!(watch.step(&fake), Step::Done);
+    assert_eq!(*told.lock().unwrap(), [ProcessCapNotice::CapFailed]);
+    // No group of the agent's pid exists any longer: none is signalled.
+    assert!(fake.groups.borrow().is_empty());
 }

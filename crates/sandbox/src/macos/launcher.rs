@@ -1,14 +1,15 @@
 //! [`SeatbeltLauncher`]: runs an agent under its policy's profile through
 //! `/usr/bin/sandbox-exec`, which applies the profile and execs the agent in place, so the pid,
 //! the process group and the tree kill stay `process`'s. The agent leads a session of its own
-//! under the process cap (`process_cap.rs`): its `RLIMIT_NPROC` and a watchdog thread. Each
-//! launcher makes a session mark before its first launch (`sweep.rs`), which its profile names,
-//! so every process of its launches can be found and ended wherever it went.
+//! under the process cap (`process_cap.rs`): its `RLIMIT_NPROC` and a watchdog thread. A
+//! launcher makes exactly one launch (R17). It makes a session mark before it (`sweep.rs`),
+//! which its profile names, and starts the launch's sentinel under that profile, so every
+//! process of the launch can be found and ended wherever it went.
 
 use std::ffi::OsString;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use clauseo_process::{LaunchSpec, Launched, Launcher, SpawnOptions, spawn_in_tree};
@@ -17,7 +18,7 @@ use super::process_cap::libproc::Libproc;
 use super::process_cap::watchdog::System as _;
 use super::process_cap::{self, ProcessCapSession, libproc, watchdog};
 use super::profile::{self, SeatbeltProfile};
-use super::sweep::{self, JailedSession, ProcId, SessionMark};
+use super::sweep::{self, JailedSession, LaunchSweep, ProcId, SessionMark, SweepError};
 use super::watch::{self, Registration};
 use crate::policy::under;
 use crate::{CappedSink, DenialSink, Error, Policy};
@@ -31,13 +32,14 @@ static NEXT_TAG: AtomicU64 = AtomicU64::new(0);
 /// The capped sink one launcher's denials go through.
 pub(crate) type LaunchSink = CappedSink<Arc<dyn DenialSink>>;
 
-/// Starts agents in a Seatbelt jail. The policy, and so the profile, is fixed when the
-/// launcher is made; every launch uses it.
+/// Starts one agent in a Seatbelt jail. The policy, and so the profile, is fixed when the
+/// launcher is made. A launcher makes one launch (R17: one launcher per launch); a second is
+/// refused, so its tag, its mark and its sentinel belong to that launch alone.
 ///
-/// On its first launch the launcher registers its tag, policy and sink with the host-wide
-/// denial watcher, which starts `log stream` if it is the first; dropping the launcher
-/// unregisters it, and the last one stops the watcher. So the host keeps the launcher alive
-/// while its agent runs: denials of an agent whose launcher is gone are not reported.
+/// On its launch the launcher registers its tag, policy and sink with the host-wide denial
+/// watcher, which starts `log stream` if it is the first; dropping the launcher unregisters
+/// it, and the last one stops the watcher. So the host keeps the launcher alive while its agent
+/// runs: denials of an agent whose launcher is gone are not reported.
 pub struct SeatbeltLauncher {
     policy: Arc<Policy>,
     profile: SeatbeltProfile,
@@ -47,6 +49,8 @@ pub struct SeatbeltLauncher {
     registration: Mutex<Option<Registration>>,
     cap: ProcessCapSession,
     mark: Arc<SessionMark>,
+    /// Whether the one launch was made (or tried).
+    launched: AtomicBool,
 }
 
 impl std::fmt::Debug for SeatbeltLauncher {
@@ -70,13 +74,16 @@ impl SeatbeltLauncher {
     /// [`ProcessCapSession`] per lawyer session and gives a clone of it to every launcher of
     /// that session; one made per launcher would reset both at every launch.
     ///
-    /// The launcher's [`SessionMark`] is made here, in `marks` (the host's own folder for
+    /// The launch's [`SessionMark`] is made here, in `marks` (the host's own folder for
     /// them, under its data dir), and its profile lets the agent write that one file's data.
-    /// [`Error::Policy`] when `marks` does not exist or sits in a folder the policy lets the
-    /// agent write (the matter, the state, notes, temp or browser socket folder, the Claude
-    /// store, the credential link): an agent could move the mark away and blind the sweep.
-    /// [`Error::Launch`] when the mark cannot be made. Before it, the stale marks of an earlier
-    /// host's launchers in `marks` are removed: those no process matches any longer.
+    /// [`Error::Policy`] when `marks` does not exist, is not this user's, may be written by
+    /// its group or others, or sits in a folder the profile lets the agent write (every
+    /// parameter path of an allow rule with a `file-write` operation: the matter, the state,
+    /// notes, temp or browser socket folder, the Claude store, the credential link): an agent
+    /// could move the mark away and blind the sweep. [`Error::SweepUnavailable`] when this
+    /// macOS lacks the private call the sweep needs. [`Error::Launch`] when the mark cannot be
+    /// made. Before it, the stale marks of an earlier host's launchers in `marks` are removed:
+    /// those no process matches any longer.
     pub fn new(
         policy: Policy,
         opts: SpawnOptions,
@@ -84,9 +91,16 @@ impl SeatbeltLauncher {
         cap: ProcessCapSession,
         marks: &Path,
     ) -> Result<SeatbeltLauncher, Error> {
+        require_sweep(sweep::api().map(drop))?;
         let n = NEXT_TAG.fetch_add(1, Ordering::Relaxed);
-        let tag = format!("{}{}-{n}", profile::TAG_PREFIX, std::process::id());
-        let marks = check_marks(&policy, marks)?;
+        let tag = format!(
+            "{}{}-{n}-{:016x}",
+            profile::TAG_PREFIX,
+            std::process::id(),
+            nonce()?
+        );
+        let writable = profile::build(&policy, &tag);
+        let marks = check_marks(writable.writable(), marks)?;
         // Marks a crashed earlier host left, which no process matches any longer.
         let stale = sweep::clean_stale(&marks);
         if stale > 0 {
@@ -107,21 +121,33 @@ impl SeatbeltLauncher {
             registration: Mutex::new(None),
             cap,
             mark: Arc::new(mark),
+            launched: AtomicBool::new(false),
         })
     }
 
-    /// The launcher's session mark, shared by all its launches: what the mode-switch gate and
-    /// session end pass to [`sweep::switch_to_read_only`] and [`sweep::end_session`].
+    /// The launch's session mark: what the mode-switch gate and session end pass to
+    /// [`sweep::switch_to_read_only`] and [`sweep::end_session`].
     pub fn session_mark(&self) -> &Arc<SessionMark> {
         &self.mark
     }
 
     /// [`Launcher::launch`], with the launch's session handle: the agent's tree and the
-    /// launcher's mark ([`JailedSession`]).
+    /// launch's mark ([`JailedSession`]). Once per launcher: a second call, whatever became of
+    /// the first, is refused (R17), so no launch shares another's mark, sentinel or cap.
+    ///
+    /// Before the agent, the launch's sentinel starts under the same profile and must match the
+    /// mark within 2 s: a Mac whose `sandbox_check` no longer answers as the sweep needs runs no
+    /// launch.
     pub fn launch_jailed(
         &self,
         spec: &LaunchSpec,
     ) -> Result<(Launched, JailedSession), clauseo_process::Error> {
+        if self.launched.swap(true, Ordering::Relaxed) {
+            return Err(clauseo_process::Error::Os {
+                what: "this Seatbelt launcher has made its one launch: make a new launcher for each launch (R17)",
+                source: io::Error::from(io::ErrorKind::AlreadyExists),
+            });
+        }
         let jailed = self.jailed_spec(spec)?;
         make_tmpdir(&self.policy.tmpdir()).map_err(|source| clauseo_process::Error::Os {
             what: "the agent's TMPDIR could not be made",
@@ -136,26 +162,52 @@ impl SeatbeltLauncher {
                 source: io::Error::other(error),
             })?;
         let limit = launch_limit()?;
+        let sweep_error = |what| {
+            move |error: SweepError| clauseo_process::Error::Os {
+                what,
+                source: io::Error::other(error),
+            }
+        };
+        let api = sweep::api().map_err(sweep_error("the session sweep cannot run on this Mac"))?;
         self.register();
+        self.mark
+            .start_sentinel(api, &self.profile.args())
+            .map_err(sweep_error(
+                "the session sweep's sentinel did not match its mark",
+            ))?;
         let opts = self.opts.clone().own_session().max_processes(limit);
         let launched = spawn_in_tree(&jailed, &opts)?;
         let pid = launched.handle.pid();
         // Read while the agent is this process's unreaped child; an agent gone already has
         // nothing to find.
         let root = ProcId::new(pid, Libproc.info(pid).map_or(0, |agent| agent.start));
-        sweep::register(&self.mark, root);
+        if !self.mark.claim(root) {
+            return Err(clauseo_process::Error::Os {
+                what: "the launch's session mark has an agent already",
+                source: io::Error::from(io::ErrorKind::AlreadyExists),
+            });
+        }
         // A watchdog that cannot start ends the agent (`launched` drops, and its tree with it):
-        // it never runs without its cap.
-        watchdog::watch(pid, self.cap.clone()).map_err(|source| clauseo_process::Error::Os {
-            what: "the agent's process cap could not start",
-            source,
+        // it never runs without its cap. It holds this launch's mark, and no other.
+        let escapes = Box::new(LaunchSweep::new(Arc::clone(&self.mark)));
+        watchdog::watch(pid, self.cap.clone(), escapes).map_err(|source| {
+            clauseo_process::Error::Os {
+                what: "the agent's process cap could not start",
+                source,
+            }
         })?;
         let session =
             JailedSession::new(launched.handle.tree_watch(), Arc::clone(&self.mark), root);
         Ok((launched, session))
     }
 
-    /// The profile every launch runs under.
+    /// Whether the launcher made (or tried) its one launch: a new launcher is needed for the
+    /// next (R17).
+    pub fn has_launched(&self) -> bool {
+        self.launched.load(Ordering::Relaxed)
+    }
+
+    /// The profile the launch runs under.
     pub fn profile(&self) -> &SeatbeltProfile {
         &self.profile
     }
@@ -192,7 +244,7 @@ impl SeatbeltLauncher {
         .map(|jailed| jailed.with_redacted(spec.redacted().iter().cloned()))
     }
 
-    /// Registers with the watcher once, on the first launch.
+    /// Registers with the watcher once, at the launch.
     fn register(&self) {
         let mut registration = self
             .registration
@@ -230,25 +282,37 @@ fn launch_limit() -> Result<u64, clauseo_process::Error> {
     )
 }
 
-/// `marks`, canonical, unless it does not exist or sits in a folder `policy` lets the agent
-/// write.
-fn check_marks(policy: &Policy, marks: &Path) -> Result<PathBuf, Error> {
+/// [`Error::SweepUnavailable`] when the sweep's private call could not be found (`found`).
+pub(crate) fn require_sweep(found: Result<(), SweepError>) -> Result<(), Error> {
+    found.map_err(|error| Error::SweepUnavailable(error.to_string()))
+}
+
+/// A random nonce for the tag, so no two hosts' launches share one even when a host's pid is
+/// reused: an earlier host's leftovers never match a new launch's mark.
+fn nonce() -> Result<u64, Error> {
+    let mut bytes = [0u8; 8];
+    getrandom::fill(&mut bytes).map_err(|error| {
+        Error::Launch(clauseo_process::Error::Os {
+            what: "the launch tag's nonce could not be made",
+            source: io::Error::other(error.to_string()),
+        })
+    })?;
+    Ok(u64::from_le_bytes(bytes))
+}
+
+/// `marks`, canonical, unless it does not exist, is not a folder of this user that neither its
+/// group nor others may write (`sweep::check_folder`), or sits in a folder the profile lets the
+/// agent write: `writable`, the parameter paths of its allow rules with a `file-write`
+/// operation ([`SeatbeltProfile::writable`]).
+fn check_marks(writable: &[PathBuf], marks: &Path) -> Result<PathBuf, Error> {
     let marks = dunce::canonicalize(marks).map_err(|error| {
         Error::Policy(format!(
             "the session marks folder {}: {error}",
             marks.display()
         ))
     })?;
-    let tmpdir = policy.tmpdir();
-    let mut writable: Vec<&Path> = vec![policy.matter(), policy.state(), &tmpdir];
-    writable.extend(policy.notes());
-    writable.extend(policy.browser_socket_dir());
-    writable.extend(policy.credential_link());
-    let store: Vec<PathBuf> = policy
-        .claude_store()
-        .map(|store| [store.files(), store.lock_folders()].concat())
-        .unwrap_or_default();
-    writable.extend(store.iter().map(PathBuf::as_path));
+    sweep::check_folder(&marks)
+        .map_err(|error| Error::Policy(format!("the session marks folder: {error}")))?;
     if writable.iter().any(|folder| under(&marks, folder)) {
         return Err(Error::Policy(format!(
             "the session marks folder {} is in a folder the agent may write",

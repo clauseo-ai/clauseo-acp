@@ -105,3 +105,8 @@ mod escaper;
 #[cfg(target_os = "macos")]
 #[path = "jail/marks.rs"]
 mod marks;
+
+#[cfg(test)]
+#[cfg(target_os = "macos")]
+#[path = "jail/sentinel.rs"]
+mod sentinel;

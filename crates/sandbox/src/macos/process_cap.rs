@@ -106,7 +106,7 @@ pub(crate) struct Proc {
 /// tree can join it (it leads its own). Its id stays the agent's while one member lives, as xnu
 /// gives no new process a pid that names a live session (`kern_fork.c`, `forkproc`). The parent
 /// walk finds a `setsid` descendant while its parent lives; an orphan that called `setsid` is
-/// found by neither (the session sweep's, a later change).
+/// found by neither: the session sweep finds it by the launch's mark (`sweep::LaunchSweep`).
 pub(crate) fn descendants(root: u32, root_start: u64, all: &[Proc]) -> Vec<Proc> {
     let mut children: HashMap<u32, Vec<&Proc>> = HashMap::new();
     for process in all.iter().filter(|p| p.pid != root) {
@@ -153,22 +153,6 @@ pub(crate) fn verdict(trip: u32, root: u32, found: &[Proc]) -> Verdict {
         Verdict::KillAgent
     } else {
         Verdict::SpareAgent
-    }
-}
-
-/// Where the watchdog leaves the descendants its bounded kill rounds did not end (a process
-/// still forking, or one it could not read): the session sweep takes them over
-/// (`sweep::take_over`), with every process the launch's mark still finds, the agent left out.
-/// What still runs after it is logged, and the watchdog goes on: its next poll counts them
-/// again, and its next sweep finds them by session, parent and mark.
-pub(crate) fn hand_over_to_session_sweep(root: u32, left: &[Proc]) {
-    let running = crate::macos::sweep::take_over(root, left);
-    if running > 0 {
-        tracing::warn!(
-            agent = root,
-            left = running,
-            "the agent's process cap could not end every descendant; it keeps sweeping"
-        );
     }
 }
 

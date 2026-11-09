@@ -403,6 +403,10 @@ crates/sandbox/src/macos/sweep.rs now clippy::disallowed_methods
 crates/sandbox/src/macos/sweep/mark.rs make_folder clippy::disallowed_methods
 crates/sandbox/src/macos/sweep/mark.rs make_file clippy::disallowed_methods
 crates/sandbox/src/macos/sweep/mark.rs remove clippy::disallowed_methods
+crates/sandbox/src/macos/sweep/sentinel.rs Sentinel::start clippy::disallowed_methods
+crates/sandbox/src/macos/sweep/tests.rs the_mark_is_made_as_a_private_immutable_file_beside_its_canary clippy::disallowed_methods
+crates/sandbox/src/macos/profile.rs SeatbeltProfile::writable dead_code
+crates/sandbox/tests/jail/sentinel.rs - clippy::disallowed_methods
 crates/sandbox/tests/jail/sweep.rs - clippy::disallowed_methods
 crates/sandbox/tests/jail/marks.rs - clippy::disallowed_methods
 crates/sandbox/tests/jail/escaper.rs escape unsafe_code

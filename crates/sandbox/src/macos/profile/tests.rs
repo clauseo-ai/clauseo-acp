@@ -80,52 +80,6 @@ fn matter_only() {
     insta::assert_snapshot!(w.render(&policy));
 }
 
-/// The session mark (`macos/sweep.rs`): one rule, `file-write-data` on the mark alone, after
-/// the hidden data dir's deny that covers it, and no rule naming its canary or its folder.
-#[test]
-fn with_a_session_mark() {
-    let w = World::new("profile-session-mark");
-    let policy = w.builder().build().unwrap();
-    let marks = dunce::canonicalize(w.dir.dir("data/marks/clauseo-4242-7")).unwrap();
-    let mark = marks.join("mark");
-    let profile = build_marked(&policy, TAG, Some(&mark));
-    let plain = build(&policy, TAG);
-    let added: Vec<&str> = profile
-        .text()
-        .lines()
-        .filter(|line| !plain.text().lines().any(|p| p == *line))
-        .collect();
-    assert_eq!(
-        added,
-        [
-            "; The session mark: data writes to this one file, so the host can find every",
-            "; process of this launch, whatever its parent, session or group (0038).",
-            "(allow file-write-data",
-            "  (literal (param \"SESSION_MARK\")))",
-        ]
-    );
-    let text = profile.text();
-    let hidden = text.find("(subpath (param \"HIDDEN_0\"))").unwrap();
-    let rule = text.find("(literal (param \"SESSION_MARK\"))").unwrap();
-    assert!(
-        hidden < rule,
-        "the mark's rule must come after the data dir's deny"
-    );
-    assert_eq!(text.matches("SESSION_MARK").count(), 1);
-    let named: Vec<&(String, PathBuf)> = profile
-        .params()
-        .iter()
-        .filter(|(name, _)| name == "SESSION_MARK")
-        .collect();
-    assert_eq!(named, [&("SESSION_MARK".to_owned(), mark)]);
-    assert!(
-        !profile
-            .params()
-            .iter()
-            .any(|(_, path)| path.ends_with("canary"))
-    );
-}
-
 #[test]
 fn with_a_credential_link() {
     let w = World::new("profile-credential-link");
@@ -578,3 +532,5 @@ fn the_head_regex_matches_only_a_last_name_head() {
     ];
     check_regex(HEAD_REGEX, &matter, &refused, &allowed);
 }
+
+mod session_mark;

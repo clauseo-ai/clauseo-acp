@@ -2,7 +2,8 @@
 //! double-forked, closed every descriptor and was adopted by launchd is found and ended; another
 //! launch with its own mark is never touched; an unsandboxed process, a process under another
 //! profile and launchd never match; the scan logs no denial the watcher would report; the
-//! process cap counts and kills escaped descendants. Every escaped process is bounded on its own
+//! process cap counts and kills escaped descendants, after the agent is killed too. Every
+//! escaped process is bounded on its own
 //! (a 60 s tick loop or a 20 s sleep), and the guard kills those still running at a test's end.
 //!
 //! The escaper is this test binary itself, run in the jail (`escaper.rs`).
@@ -33,7 +34,7 @@ use nix::sys::signal::{Signal, kill};
 use nix::unistd::{Pid, getpgid, getsid};
 
 use crate::escaper::{ESCAPE_DIR, ESCAPE_FANOUT};
-use crate::support::{World, launcher, launcher_in, marks_of, run, run_outside};
+use crate::support::{Jail, World, launcher, launcher_in, marks_of, run, run_outside};
 
 /// Kills, at the end of a test, each pid it was given that still runs: the escaped processes,
 /// started by this test, in case an assertion failed before the sweep ended them.
@@ -66,19 +67,19 @@ pub(crate) struct Agent {
 }
 
 impl Agent {
-    fn pid(&self) -> u32 {
+    pub(crate) fn pid(&self) -> u32 {
         self.handle.pid()
     }
 
     /// The next stdout line.
-    fn line(&mut self) -> String {
+    pub(crate) fn line(&mut self) -> String {
         async_io::block_on(self.lines.next()).unwrap().unwrap()
     }
 }
 
 /// `/bin/sh -c script sh args...` through `launcher` in `cwd` with `env` plus a `PATH`, its
 /// first line read (`script` prints one once it is ready).
-fn start(
+pub(crate) fn start(
     launcher: &SeatbeltLauncher,
     cwd: &Path,
     script: &str,
@@ -131,7 +132,7 @@ pub(crate) fn sleeper(launcher: &SeatbeltLauncher, w: &World) -> Agent {
 
 /// A launcher for `w` whose policy runs this test binary (the escaper), and its process cap's
 /// notices.
-fn escaping(w: &World) -> (SeatbeltLauncher, Arc<Mutex<Vec<ProcessCapNotice>>>) {
+fn escaping(w: &World) -> (Jail, Arc<Mutex<Vec<ProcessCapNotice>>>) {
     let exe = dunce::canonicalize(std::env::current_exe().unwrap()).unwrap();
     let policy = w.builder().runtime(exe.parent().unwrap()).build().unwrap();
     let notices = Arc::new(Mutex::new(Vec::new()));
@@ -169,7 +170,7 @@ fn lines_in(file: &Path) -> usize {
 }
 
 /// Whether `pid` still exists (a zombie counts until launchd reaps it).
-fn alive(pid: i32) -> bool {
+pub(crate) fn alive(pid: i32) -> bool {
     kill(Pid::from_raw(pid), None) != Err(Errno::ESRCH)
 }
 
@@ -189,7 +190,7 @@ pub(crate) fn deadline(seconds: u64) -> Instant {
     Instant::now() + Duration::from_secs(seconds)
 }
 
-fn ids(found: &[ProcId]) -> Vec<u32> {
+pub(crate) fn ids(found: &[ProcId]) -> Vec<u32> {
     let mut pids: Vec<u32> = found.iter().map(ProcId::pid).collect();
     pids.sort_unstable();
     pids
@@ -365,13 +366,15 @@ fn the_scan_logs_no_denial_the_watcher_reports() {
     let (s, denials) = launcher(w.builder().build().unwrap());
     let (t, _) = launcher(w.builder().build().unwrap());
     let agent = sleeper(&s, &w);
+    let t_agent = sleeper(&t, &w);
     let (s_mark, t_mark) = (s.session_mark(), t.session_mark());
     // Each scan asks about S's agent: T's mark and both canaries are denied to it, which the
     // kernel would log under S's tag without NO_REPORT (about 700 lines for 3 scans, measured).
     for _ in 0..3 {
         processes(&[s_mark, t_mark], s_mark.created()).unwrap();
     }
-    // The control: a real denial of S, reading its own canary, is reported.
+    // The control: a real denial, reading S's canary, is reported (by a launcher of its own:
+    // S's has made its launch).
     run(
         &s,
         "/bin/cat",
@@ -408,6 +411,7 @@ fn the_scan_logs_no_denial_the_watcher_reports() {
         .collect();
     assert_eq!(from_scan, [] as [&Denial; 0]);
     let _gone = agent.session.end(deadline(5)).unwrap();
+    let _gone = t_agent.session.end(deadline(5)).unwrap();
 }
 
 #[test]
@@ -503,6 +507,47 @@ fn a_marks_folder_the_agent_may_write_is_refused() {
         )
         .is_ok()
     );
+}
+
+#[test]
+fn escapees_are_counted_after_the_agent_is_killed() {
+    // M1: `setsid <bomb> &`, then the agent killed: its session is empty at once, and the
+    // launch's mark alone still finds the bomb, which the watchdog keeps counting.
+    let w = World::new();
+    let guard = Guard::default();
+    let (launcher, notices) = escaping(&w);
+    let exe = std::env::current_exe().unwrap();
+    let dir = w.dir("m1/escape");
+    let (mut agent, first) = start(
+        &launcher,
+        &w.at("m1"),
+        ESCAPE,
+        &[exe.to_str().unwrap()],
+        &[(ESCAPE_DIR, dir.to_str().unwrap()), (ESCAPE_FANOUT, "300")],
+    );
+    assert_eq!(first, "escaped");
+    let root = Pid::from_raw(i32::try_from(agent.pid()).unwrap());
+    kill(root, Signal::SIGKILL).unwrap();
+    let report = async_io::block_on(agent.handle.exited());
+    assert_eq!(report.signal(), Some(9));
+    assert_eq!(
+        getsid(Some(root)),
+        Err(Errno::ESRCH),
+        "the session is not empty"
+    );
+    let pids = pids_in(&dir.join("pids"), 301);
+    guard.keep(&pids);
+    assert_eq!(pids.len(), 301);
+    let start = Instant::now();
+    while notices.lock().unwrap().is_empty() && start.elapsed() < Duration::from_secs(6) {
+        std::thread::park_timeout(Duration::from_millis(50));
+    }
+    assert_eq!(
+        *notices.lock().unwrap(),
+        [ProcessCapNotice::TooManyPrograms]
+    );
+    assert_eq!(left_after(&pids), [] as [i32; 0]);
+    let _gone = end_session(&[agent.session.mark()], deadline(5)).unwrap();
 }
 
 /// A sink that drops every denial.

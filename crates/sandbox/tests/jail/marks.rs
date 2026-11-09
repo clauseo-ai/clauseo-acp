@@ -13,7 +13,6 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use clauseo_process::{LaunchSpec, Launcher, PassthroughLauncher, SpawnOptions};
-use clauseo_sandbox::macos::sweep::SessionMark;
 use nix::errno::Errno;
 use nix::sys::signal::{Signal, kill};
 use nix::unistd::Pid;
@@ -34,7 +33,18 @@ fn a_mark_goes_with_its_last_holder_once_nothing_runs() {
     assert_eq!(gone.ended, 1);
     async_io::block_on(agent.handle.exited());
     drop(agent);
-    assert!(!mark.exists() && !mark.parent().unwrap().exists());
+    // The watchdog holds it too, until its next poll finds the session empty.
+    assert!(gone_within(&mark), "the unused mark stayed");
+    assert!(!mark.parent().unwrap().exists());
+}
+
+/// Whether `path` is gone within 3 s.
+fn gone_within(path: &std::path::Path) -> bool {
+    let start = std::time::Instant::now();
+    while path.exists() && start.elapsed() < Duration::from_secs(3) {
+        std::thread::park_timeout(Duration::from_millis(20));
+    }
+    !path.exists()
 }
 
 #[test]
@@ -98,7 +108,8 @@ fn a_mark_a_live_process_matches_survives_its_drop_and_the_clean_up() {
     let (_next, _) = launcher(policy);
     assert!(!left.exists(), "the stale mark stayed");
 
-    // The running agent's own mark is still there, and goes with a scan once it is ended.
+    // The running agent's own mark is still there (its watchdog, the last holder, keeps it),
+    // and goes with a scan, its sentinel vouching, once the agent is ended.
     assert!(ours.exists());
     kill(
         Pid::from_raw(i32::try_from(handle.pid()).unwrap()),
@@ -106,15 +117,5 @@ fn a_mark_a_live_process_matches_survives_its_drop_and_the_clean_up() {
     )
     .unwrap();
     async_io::block_on(handle.exited());
-    let mark = SessionMark::create(
-        &marks,
-        ours.parent()
-            .unwrap()
-            .file_name()
-            .unwrap()
-            .to_str()
-            .unwrap(),
-    )
-    .unwrap();
-    assert!(mark.remove_if_unused());
+    assert!(gone_within(&ours), "the mark stayed after its last process");
 }

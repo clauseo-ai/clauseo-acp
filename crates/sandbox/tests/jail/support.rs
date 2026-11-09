@@ -10,6 +10,7 @@
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
@@ -188,7 +189,16 @@ pub(crate) fn listen_unix_at(path: PathBuf) -> PathBuf {
 
 impl Drop for World {
     fn drop(&mut self) {
-        if let Err(error) = std::fs::remove_dir_all(&self.root) {
+        if std::fs::remove_dir_all(&self.root).is_ok() {
+            return;
+        }
+        // A session mark a failed test left is immutable (`UF_IMMUTABLE`): clear the flags it
+        // set in this world, and try again.
+        let cleared = std::process::Command::new("/usr/bin/chflags")
+            .args(["-R", "nouchg"])
+            .arg(&self.root)
+            .status();
+        if let Err(error) = cleared.and_then(|_| std::fs::remove_dir_all(&self.root)) {
             eprintln!("removing {}: {error}", self.root.display());
         }
     }
@@ -207,7 +217,7 @@ impl DenialSink for Collect {
 /// session of its own (each test is one lawyer session); its notices are dropped.
 /// Its session mark is in `marks/` of the policy's first hidden path (the world's data dir,
 /// as the host's marks sit in its own).
-pub(crate) fn launcher(policy: Policy) -> (SeatbeltLauncher, mpsc::Receiver<Denial>) {
+pub(crate) fn launcher(policy: Policy) -> (Jail, mpsc::Receiver<Denial>) {
     launcher_in(policy, ProcessCapSession::new(|_| {}))
 }
 
@@ -216,12 +226,74 @@ pub(crate) fn launcher(policy: Policy) -> (SeatbeltLauncher, mpsc::Receiver<Deni
 pub(crate) fn launcher_in(
     policy: Policy,
     cap: ProcessCapSession,
-) -> (SeatbeltLauncher, mpsc::Receiver<Denial>) {
+) -> (Jail, mpsc::Receiver<Denial>) {
     let (tx, rx) = mpsc::channel();
-    let sink = Arc::new(Collect(Mutex::new(tx)));
+    let sink: Arc<dyn DenialSink> = Arc::new(Collect(Mutex::new(tx)));
     let marks = marks_of(&policy);
-    let launcher = SeatbeltLauncher::new(policy, SpawnOptions::new(), sink, cap, &marks).unwrap();
-    (launcher, rx)
+    let first = SeatbeltLauncher::new(
+        policy.clone(),
+        SpawnOptions::new(),
+        Arc::clone(&sink),
+        cap.clone(),
+        &marks,
+    )
+    .unwrap();
+    let jail = Jail {
+        first,
+        more: Mutex::new(Vec::new()),
+        policy,
+        sink,
+        cap,
+        marks,
+    };
+    (jail, rx)
+}
+
+/// One test's launchers (R17: a `SeatbeltLauncher` makes one launch): the first, which
+/// `Deref` gives, and through [`Launcher::launch`] a new one for each later launch, all with
+/// the same policy, denial sink, process cap and marks folder. Every launcher lives as long as
+/// this, so a watcher line that comes after its agent exited still reaches the sink.
+pub(crate) struct Jail {
+    first: SeatbeltLauncher,
+    more: Mutex<Vec<SeatbeltLauncher>>,
+    policy: Policy,
+    sink: Arc<dyn DenialSink>,
+    cap: ProcessCapSession,
+    marks: PathBuf,
+}
+
+impl Deref for Jail {
+    type Target = SeatbeltLauncher;
+
+    fn deref(&self) -> &SeatbeltLauncher {
+        &self.first
+    }
+}
+
+impl Launcher for Jail {
+    /// The first launcher's launch if it has made none yet, else a new launcher's.
+    fn launch(&self, spec: &LaunchSpec) -> Result<Launched, clauseo_process::Error> {
+        if !self.first.has_launched() {
+            return self.first.launch(spec);
+        }
+        let next = SeatbeltLauncher::new(
+            self.policy.clone(),
+            SpawnOptions::new(),
+            Arc::clone(&self.sink),
+            self.cap.clone(),
+            &self.marks,
+        )
+        .map_err(|error| match error {
+            clauseo_sandbox::Error::Launch(error) => error,
+            other => clauseo_process::Error::Os {
+                what: "the test's next launcher could not be made",
+                source: std::io::Error::other(other.to_string()),
+            },
+        })?;
+        let launched = next.launch(spec);
+        self.more.lock().unwrap().push(next);
+        launched
+    }
 }
 
 /// The session marks folder of `policy`: `marks/` in its first hidden path, the world's data
