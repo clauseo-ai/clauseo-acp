@@ -75,7 +75,7 @@ export function noticeLine(kind: NoticeKind | undefined, w: NoticeWords): string
       );
     return kind === "read_only_unavailable"
       ? w.th(
-          "Read-only isn't available for ChatGPT in the Safe workspace on this computer yet, so ChatGPT works on its own here.",
+          "ChatGPT now changes files in this matter without asking. Read-only isn't available for ChatGPT in the Safe workspace on this computer yet.",
         )
       : null;
   }

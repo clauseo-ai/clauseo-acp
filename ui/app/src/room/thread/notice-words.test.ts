@@ -25,10 +25,10 @@ test("a known kind gives the app's line, in the page's words", () => {
 
 test("Read-only not available here gives its line, in English and Hindi", () => {
   expect(noticeLine("read_only_unavailable", en)).toBe(
-    "Read-only isn't available for ChatGPT in the Safe workspace on this computer yet, so ChatGPT works on its own here.",
+    "ChatGPT now changes files in this matter without asking. Read-only isn't available for ChatGPT in the Safe workspace on this computer yet.",
   );
   expect(noticeLine("read_only_unavailable", words("hi"))).toBe(
-    "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र में ChatGPT के लिए केवल-पढ़ने वाला मोड अभी उपलब्ध नहीं है, इसलिए यहाँ ChatGPT अपने आप काम करता है।",
+    "ChatGPT अब बिना पूछे इस मामले की फ़ाइलें बदलता है। इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र में ChatGPT के लिए केवल-पढ़ने वाला मोड अभी उपलब्ध नहीं है।",
   );
 });
 
