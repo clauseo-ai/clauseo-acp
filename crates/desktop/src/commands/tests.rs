@@ -308,24 +308,30 @@ fn open_and_reveal_are_granted_to_main_only() {
 }
 
 /// The opener with no confirm (`open::open_url_unconfirmed`, for Rust's own callers) is no
-/// command: no list of commands, no capability, no handler and no binding names it.
+/// command: no list of commands, no capability, no handler and no binding names it, while the
+/// bindings do name `open_external`, so an empty or truncated bindings.ts can't pass.
 #[test]
 fn the_unconfirmed_opener_is_not_reachable_from_the_webview() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let name = "open_url_unconfirmed";
     assert!(!COMMANDS.contains(&name));
     assert!(!E2E_COMMANDS.contains(&name) && !MARKS_COMMANDS.contains(&name));
-    for file in [
-        "build.rs",
-        "capabilities/main.json",
-        "capabilities/frame.json",
-        "capabilities/e2e.json",
-        "capabilities/marks.json",
-        "capabilities/settings.json",
-        "src/lib.rs",
-        "../../ui/app/src/transport/bindings.ts",
+    for (file, expected) in [
+        ("build.rs", ""),
+        ("capabilities/main.json", ""),
+        ("capabilities/frame.json", ""),
+        ("capabilities/e2e.json", ""),
+        ("capabilities/marks.json", ""),
+        ("capabilities/settings.json", ""),
+        ("src/lib.rs", ""),
+        (
+            "../../ui/app/src/transport/bindings.ts",
+            "__TAURI_INVOKE(\"open_external\"",
+        ),
     ] {
         let text = std::fs::read_to_string(dir.join(file)).unwrap();
+        assert!(!text.trim().is_empty(), "{file} is empty");
+        assert!(text.contains(expected), "{file} lacks {expected}");
         assert!(!text.contains(name), "{file} names {name}");
         assert!(!text.contains("open-url-unconfirmed"), "{file} grants it");
     }
@@ -468,6 +474,7 @@ fn every_list_of_commands_agrees() {
 
     let bindings =
         std::fs::read_to_string(dir.join("../../ui/app/src/transport/bindings.ts")).unwrap();
+    assert!(!bindings.trim().is_empty(), "bindings.ts is empty");
     let invoked: BTreeSet<&str> = bindings
         .split("__TAURI_INVOKE(\"")
         .skip(1)

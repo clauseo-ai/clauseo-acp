@@ -211,14 +211,16 @@ tauri-plugin-updater.workspace = true
 minisign-verify = { workspace = true }
 base64 = { workspace = true }
 ring = { workspace = true }
+# Scratch files, removed when dropped (already in the tree, through tauri): the bindings test's
+# render beside bindings.ts, renamed over it on drift (src/commands/bindings.rs), and the
+# quit-on-signal test's scratch folder (tests/quit_on_signal.rs).
+tempfile = "3"
 
-# The quit-on-signal test (tests/quit_on_signal.rs) sends the signals, drives the ladder with
-# clauseo-process's ManualTimer, and keeps its scratch folder in a tempfile folder (already in the
-# tree, through tauri), removed when the test ends.
+# The quit-on-signal test (tests/quit_on_signal.rs) sends the signals and drives the ladder with
+# clauseo-process's ManualTimer.
 [target.'cfg(unix)'.dev-dependencies]
 nix = { workspace = true }
 clauseo-process = { path = "../process", features = ["test-support"] }
-tempfile = "3"
 
 # The deletion's Windows tests (src/delete_app_data/tests/make.rs) set a reparse point that is no
 # link with DeviceIoControl (System_IO), to see it kept.
