@@ -113,9 +113,11 @@ enum Commands {
         /// `os` and `arch` are as in Rust's `std::env::consts`, `sha256` is lowercase hex, and
         /// `url` is the asset's download URL, whose last part is its file name.
         ///
-        /// `--list=json` prints one JSON object: `{"tools": [{"name", "version"}, ...],
-        /// "binaries": [{"name", "version", "os", "arch", "sha256", "asset", "url"}, ...]}`, the
-        /// same pins in the same order, with `asset` the file name.
+        /// `--list=json` prints one JSON object: `{"tools": [{"name", "version", "bin_sha256":
+        /// [{"os", "arch", "sha256"}, ...]}, ...], "binaries": [{"name", "version", "os", "arch",
+        /// "sha256", "asset", "url"}, ...]}`, the same pins in the same order, with `asset` the
+        /// file name. A tool's `bin_sha256` holds the sha256 of the prebuilt binary
+        /// taiki-e/install-action installs, per OS and arch; the text leaves it out.
         ///
         /// Scripts read `--list=json`: its keys are only ever added, never renamed, moved or
         /// removed, so a reader ignores keys it does not know. The text is for people and may

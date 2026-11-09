@@ -571,6 +571,7 @@ crates/sandbox/src/bin/clauseo-sandbox-run.rs main clippy::print_stderr
 crates/sandbox/src/windows/token/os.rs - unsafe_code
 crates/sandbox/src/windows/pipe/os.rs - unsafe_code
 crates/sandbox/src/windows/runner/spawn.rs - unsafe_code
+crates/sandbox/src/windows/runner/job_port/os.rs - unsafe_code
 crates/sandbox/src/windows/runner/desktop.rs - unsafe_code
 crates/sandbox/src/windows/runner/desktop.rs refuse_now clippy::exit
 crates/sandbox/src/windows/runner/outer.rs exit_now clippy::exit
@@ -582,11 +583,12 @@ crates/sandbox/src/windows/runner/outer/end.rs clock clippy::disallowed_methods
 crates/sandbox/src/windows/runner/end/stdin_tests.rs clock clippy::disallowed_methods
 crates/sandbox/src/windows/runner/sweep/os.rs sleep clippy::disallowed_methods
 crates/sandbox/src/windows/runner/job_tests.rs start_child clippy::disallowed_methods
+crates/sandbox/src/windows/runner/job_cap_tests.rs cmd clippy::disallowed_methods
 crates/sandbox/src/windows/ca_bundle/store.rs - unsafe_code
 crates/sandbox/src/windows/ca_bundle/store.rs timed clippy::disallowed_methods
 crates/sandbox/src/windows/ca_bundle/ntfs_tests.rs - unsafe_code
 crates/sandbox/src/windows/test_pool.rs - unsafe_code
-crates/sandbox/src/windows/test_pool.rs run_powershell clippy::disallowed_methods
+crates/sandbox/src/windows/test_pool.rs clock clippy::disallowed_methods
 crates/sandbox/src/windows/token/ntfs_tests.rs - unsafe_code
 crates/sandbox/src/windows/pipe/ntfs_tests.rs - unsafe_code
 # S15 PR5: the VM and CI harness for tier B's runner (examples/s15_launch_vm).

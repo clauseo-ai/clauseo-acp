@@ -1,6 +1,6 @@
 //! The launch's kill-on-close job on Windows: a process in it that reads its own job's pid list
 //! with no job handle, as the inner runner's sweeps do, holds no handle to the job, so it dies
-//! when the job's creator closes the job's one handle.
+//! when the job's creator closes the job's one handle. The job's limits hold its process cap.
 
 use std::io::{BufRead as _, BufReader, Write as _};
 use std::os::windows::io::AsRawHandle as _;
@@ -9,8 +9,11 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use windows::Win32::Foundation::HANDLE;
+use windows::Win32::System::JobObjects::{
+    JOB_OBJECT_LIMIT_ACTIVE_PROCESS, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+};
 
-use super::spawn::{assign, kill_on_close_job, logon_startup};
+use super::spawn::{assign, kill_on_close_job, limits_of, logon_startup};
 use super::station::StationDesktop;
 use super::sweep::os::own_job_pids;
 
@@ -117,4 +120,20 @@ fn every_logon_starts_on_the_agents_station_desktop() {
     assert_eq!(startup.lpDesktop.0, wide.as_mut_ptr());
     let text = String::from_utf16(wide.split_last().unwrap().1).unwrap();
     assert_eq!(text, r"Service-0x0-3e7$\Default");
+}
+
+/// The launch's job holds at most 256 processes, and still ends them all when its handle
+/// closes: its limits as Windows reads them back.
+#[test]
+fn the_job_caps_its_processes_at_256() {
+    let limits = limits_of(&kill_on_close_job().unwrap())
+        .unwrap()
+        .BasicLimitInformation;
+    assert!(limits.LimitFlags.contains(JOB_OBJECT_LIMIT_ACTIVE_PROCESS));
+    assert!(
+        limits
+            .LimitFlags
+            .contains(JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE)
+    );
+    assert_eq!(limits.ActiveProcessLimit, 256);
 }

@@ -383,8 +383,14 @@ jobs:
         if: env.RUN == 'true'
         with:
           node-version-file: ui/package.json
-          cache: pnpm
-          cache-dependency-path: ui/pnpm-lock.yaml
+          package-manager-cache: false
+
+      # The pnpm store from main's cache, under setup-node's old key; saved at the end of the
+      # job, from main only.
+      - name: Restore the pnpm store
+        id: pnpm-store
+        if: env.RUN == 'true'
+        uses: ./.github/actions/pnpm-store
 
       # x64 only, saved by the nightly run only: the key pull requests restore. A full-LTO build on
       # demand saves nothing (its CARGO_* values give it another key, and it would only push a
@@ -480,6 +486,14 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      # The pnpm store, saved from main's scheduled and on-demand runs only, after a miss.
+      - name: Save the pnpm store (main)
+        if: success() && env.RUN == 'true' && steps.pnpm-store.outputs.hit != 'true'
+        uses: ./.github/actions/cache-save-main
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ steps.pnpm-store.outputs.key }}
+
   # The speed scoreboard (R13): one warm-up and three measured plays of fake_agent's scoreboard
   # session, each a fresh launch, normal mode (ui/e2e/app-windows/scoreboard.spec.ts). Start-up is
   # a warm start: the warm-up makes one WebView2 profile and the measured plays reuse it (#173);
@@ -527,8 +541,13 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: ui/package.json
-          cache: pnpm
-          cache-dependency-path: ui/pnpm-lock.yaml
+          package-manager-cache: false
+
+      # The pnpm store from main's cache, under setup-node's old key; saved at the end of the
+      # job, from main only.
+      - name: Restore the pnpm store
+        id: pnpm-store
+        uses: ./.github/actions/pnpm-store
 
       - name: Install the ui workspace
         run: pnpm -C ui install --frozen-lockfile
@@ -557,3 +576,38 @@ jobs:
           name: scoreboard-windows-runs
           path: ${{ github.workspace }}/scoreboard-out/runs
           if-no-files-found: warn
+
+      # The pnpm store, saved from main's scheduled and on-demand runs only, after a miss.
+      - name: Save the pnpm store (main)
+        if: success() && steps.pnpm-store.outputs.hit != 'true'
+        uses: ./.github/actions/cache-save-main
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ steps.pnpm-store.outputs.key }}
+
+  # This workflow's own cache families on main, after its saves: smoke's Rust entry and the pnpm
+  # store (.github/scripts/cache-entries.sh prune --families). Each family keeps its newest entry,
+  # the one runs restore; older ones go, logged with their sizes. ci.yml's nightly cache-prune does
+  # the same for every family. Main's scheduled and on-demand runs only: the one job here with
+  # actions: write, and no pull request or merge group runs it.
+  e2e-cache-prune:
+    name: e2e cache prune
+    needs: [smoke, scoreboard-windows]
+    if: >-
+      ${{ always() && github.ref == 'refs/heads/main'
+      && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - name: Prune this workflow's cache families
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/cache-entries.sh prune --families rust-e2e-x86_64-pc-windows-msvc,node-cache
