@@ -1,7 +1,7 @@
 // pe-crt-imports.mjs: fails when a Windows exe or DLL we ship imports the VC++ runtime
 // (ADR 0035, "Sidecars", "The C runtime").
 //
-//   node .github/scripts/pe-crt-imports.mjs <file-or-directory>...
+//   node .github/scripts/pe-crt-imports.mjs [--app-local-ok[=<dir>]]... <file-or-directory>...
 //
 // A directory is searched, with its subdirectories, for *.exe, *.dll and *.node (a Node addon
 // is a DLL); a file is checked whatever its name. A clean Windows has no VC++ Redistributable,
@@ -16,6 +16,17 @@
 // machine) and fails, naming the file and the DLL, on a DLL CRT_RULES forbids. A file that is
 // not a PE, or whose tables can't be read, fails too.
 //
+// --app-local-ok, repeatable, lets a forbidden import pass when the DLL it names ships with the
+// app: a file of that name (any case) directly in the importer's folder, or directly in a folder
+// given as --app-local-ok=<dir> (each must exist; none is searched recursively). The first match
+// wins, and it must itself be a PE. Python needs it: CPython ships vcruntime140.dll and
+// vcruntime140_1.dll in its top folder beside python.exe; the .pyd files in its DLLs/ folder
+// import VCRUNTIME140.dll and load into a process that already has it; Python wheels ship a
+// hashed msvcp140-<hash>.dll in their <pkg>.libs/ folder. Those imports resolve on a clean
+// Windows because the app ships the DLL. The DLL found is checked by the same rules, its own
+// forbidden imports resolved from its own folder, and each app-local resolution prints a note
+// line. release.yml never passes the option: its own shipped files must be clean.
+//
 // Why the Universal CRT (api-ms-win-crt-*, ucrtbase.dll) is allowed: it is an OS component on
 // Windows 10 and later, so those imports resolve on a clean machine; only the VC++ runtime
 // (VCRUNTIME, MSVCP and the rest below) needs the Redistributable. No doc names a minimum
@@ -29,7 +40,7 @@
 // Node built-ins only. Tests: pe-crt-imports.test.mjs next to this file (ci.yml's fast lane).
 
 import { readFile, readdir, stat } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 /**
@@ -157,6 +168,14 @@ export function peImports(buf) {
   };
 }
 
+const WHY = "which needs the VC++ Redistributable";
+
+/** The line of a file that passes: its format, machine, DLL count and the runtime's state. */
+function passLine(label, parsed, runtime) {
+  const count = parsed.imports.length + parsed.delayImports.length;
+  return `${label}: ${parsed.format} ${parsed.machine}, ${count} DLLs, ${runtime}`;
+}
+
 /**
  * The problems of one file: a VC++ runtime import each, or the reason its tables can't be read.
  * @param {string} label the file's name in the messages
@@ -170,14 +189,98 @@ export function checkPe(label, buf) {
   } catch (error) {
     return { ok: false, lines: [`${label}: can't read its imports: ${error.message}`] };
   }
-  const why = "which needs the VC++ Redistributable";
   const bad = [
-    ...parsed.imports.filter(isForbidden).map((dll) => `${label} imports ${dll}, ${why}`),
-    ...parsed.delayImports.filter(isForbidden).map((dll) => `${label} delay-imports ${dll}, ${why}`),
+    ...parsed.imports.filter(isForbidden).map((dll) => `${label} imports ${dll}, ${WHY}`),
+    ...parsed.delayImports.filter(isForbidden).map((dll) => `${label} delay-imports ${dll}, ${WHY}`),
   ];
   if (bad.length > 0) return { ok: false, lines: bad };
-  const count = parsed.imports.length + parsed.delayImports.length;
-  return { ok: true, lines: [`${label}: ${parsed.format} ${parsed.machine}, ${count} DLLs, no VC++ runtime`] };
+  return { ok: true, lines: [passLine(label, parsed, "no VC++ runtime")] };
+}
+
+/**
+ * One file on disk, checked. Without `appLocalDirs` this is checkPe on its bytes. With it (an
+ * array, empty for the importer's folder alone), a forbidden import passes when its DLL is found
+ * app-local, and that DLL passes the same check; see the header.
+ * @param {string} path the file
+ * @param {{ appLocalDirs?: string[] }} [options] undefined turns app-local resolution off
+ * @returns {Promise<{ ok: boolean, lines: string[], notes: string[] }>} the failure lines, or
+ *   the verdict line when ok; notes name each app-local resolution, for printing as notes
+ */
+export async function checkFile(path, { appLocalDirs } = {}) {
+  const buf = await readFile(path);
+  if (appLocalDirs === undefined) return { ...checkPe(path, buf), notes: [] };
+  return checkAppLocal(path, buf, appLocalDirs, [resolve(path)]);
+}
+
+/**
+ * checkPe with app-local resolution. `stack` holds the absolute paths on the chain being checked,
+ * so a cycle ends at a file already in progress: its own result is reported at its own level.
+ */
+async function checkAppLocal(label, buf, appLocalDirs, stack) {
+  let parsed;
+  try {
+    parsed = peImports(buf);
+  } catch (error) {
+    return { ok: false, lines: [`${label}: can't read its imports: ${error.message}`], notes: [] };
+  }
+  const searched = [dirname(label), ...appLocalDirs];
+  const bad = [];
+  const notes = [];
+  let resolved = 0;
+  for (const [verb, dlls] of [["imports", parsed.imports], ["delay-imports", parsed.delayImports]]) {
+    for (const dll of dlls.filter(isForbidden)) {
+      const found = await findAppLocal(dll, searched);
+      if (found === undefined) {
+        bad.push(`${label} ${verb} ${dll}, ${WHY}`);
+        continue;
+      }
+      const foundBuf = await readFile(found).catch(() => Buffer.alloc(0));
+      try {
+        peImports(foundBuf);
+      } catch {
+        bad.push(`${label} ${verb} ${dll}; ${found} is not a readable PE`);
+        continue;
+      }
+      const note = `${label} ${verb} ${dll}, found at ${found}`;
+      const key = resolve(found);
+      if (stack.includes(key)) {
+        notes.push(note);
+        resolved++;
+        continue;
+      }
+      const sub = await checkAppLocal(found, foundBuf, appLocalDirs, [...stack, key]);
+      if (sub.ok) {
+        notes.push(note, ...sub.notes);
+        resolved++;
+      } else {
+        notes.push(...sub.notes);
+        bad.push(`${label} ${verb} ${dll}, found at ${found}, which fails: ${sub.lines.join("; ")}`);
+      }
+    }
+  }
+  if (bad.length > 0) return { ok: false, lines: bad, notes };
+  const runtime = resolved > 0 ? "VC++ runtime app-local" : "no VC++ runtime";
+  return { ok: true, lines: [passLine(label, parsed, runtime)], notes };
+}
+
+/**
+ * The file named `dll` (any case) in the first of `dirs` that holds one, each folder searched
+ * directly, not recursively; undefined when none does.
+ * @param {string} dll the DLL's name as imported
+ * @param {string[]} dirs the folders, in search order
+ * @returns {Promise<string | undefined>}
+ */
+async function findAppLocal(dll, dirs) {
+  const wanted = dll.toLowerCase();
+  for (const dir of dirs) {
+    const names = await readdir(dir).catch(() => []);
+    for (const name of names.sort()) {
+      if (name.toLowerCase() !== wanted) continue;
+      const path = join(dir, name);
+      if (await stat(path).then((s) => s.isFile(), () => false)) return path;
+    }
+  }
+  return undefined;
 }
 
 /** The file names a directory's search picks up, any case. */
@@ -208,10 +311,28 @@ export async function expandPaths(args) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  const args = process.argv.slice(2);
+  const usage = "usage: node .github/scripts/pe-crt-imports.mjs " +
+    "[--app-local-ok[=<dir>]]... <file-or-directory>...";
+  const args = [];
+  let appLocalDirs; // undefined: app-local resolution off
+  for (const arg of process.argv.slice(2)) {
+    if (arg === "--app-local-ok") {
+      appLocalDirs ??= [];
+    } else if (arg.startsWith("--app-local-ok=")) {
+      (appLocalDirs ??= []).push(arg.slice("--app-local-ok=".length));
+    } else {
+      args.push(arg);
+    }
+  }
   if (args.length === 0) {
-    console.error("usage: node .github/scripts/pe-crt-imports.mjs <file-or-directory>...");
+    console.error(usage);
     process.exit(2);
+  }
+  for (const dir of appLocalDirs ?? []) {
+    if (!(await stat(dir).then((s) => s.isDirectory(), () => false))) {
+      console.log(`::error::--app-local-ok=${dir}: not an existing folder`);
+      process.exit(1);
+    }
   }
   let files;
   try {
@@ -221,14 +342,17 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     process.exit(1);
   }
   let failed = 0;
+  let resolved = 0;
   for (const file of files) {
     let result;
     try {
-      result = checkPe(file, await readFile(file));
+      result = await checkFile(file, { appLocalDirs });
     } catch (error) {
-      result = { ok: false, lines: [`${file}: can't read it: ${error.message}`] };
+      result = { ok: false, lines: [`${file}: can't read it: ${error.message}`], notes: [] };
     }
+    for (const note of result.notes) console.log(`note: ${note}`);
     for (const line of result.lines) console.log(result.ok ? `ok ${line}` : `::error::${line}`);
+    resolved += result.notes.length;
     if (!result.ok) failed++;
   }
   const dlls = files.filter((file) => /\.(dll|node)$/i.test(file)).length;
@@ -242,5 +366,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       "link with -C target-feature=+crt-static");
     process.exit(1);
   }
-  console.log(`${summary}: none imports the VC++ runtime`);
+  if (resolved > 0) {
+    console.log(`${summary}: none imports the VC++ runtime unresolved; ${resolved} app-local (see the notes)`);
+  } else {
+    console.log(`${summary}: none imports the VC++ runtime`);
+  }
 }
