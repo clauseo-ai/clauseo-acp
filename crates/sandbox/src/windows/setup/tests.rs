@@ -13,10 +13,13 @@ use crate::windows::fence::{MatterFolders, RegisteredMatter};
 
 mod admin_lock;
 mod create;
+mod deadline;
 mod extend;
 mod fake;
 mod fake_acl;
+mod fake_intent;
 mod fake_more;
+mod intent;
 mod local_low;
 mod network;
 mod owner;

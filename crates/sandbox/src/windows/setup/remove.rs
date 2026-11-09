@@ -59,6 +59,15 @@
 //! 10. for the uninstaller only, the admin copy's teardown (`admin_remove.rs`, run through
 //!     [`remove_then`]), with the lock still held, so a refresh skips instead of racing it.
 //!
+//! An interrupted set-up's leftovers (`intent.rs`) go too: with no whole record, under the lock,
+//! a per-machine removal, or the owner the intent names, undoes what it names and deletes the
+//! partial record (`last_steps::partial`); with one, after the pool users and before the
+//! group, the accounts and the group the intent names and the record doesn't.
+//!
+//! With `--deadline`, each step first checks the run's cancel flag (`deadline.rs`); once it is
+//! set, the run stops there and exits [`SetupExit::DeadlineReached`], `Removing` set (from step
+//! 2 on), for the next run to finish as it would a partial removal.
+//!
 //! The first failure stops the run there: [`SetupExit::RemovedPartly`], the record kept with
 //! `Removing = 1` and every pool SID (so a later run still trusts the ledger's entries), and the
 //! ledger kept. Each step leaves a state the next run starts from, so the hook may stop waiting
@@ -71,7 +80,6 @@ use std::path::PathBuf;
 
 use super::machine::{MachineError, ProfileDir};
 use super::outcome::{SetupExit, cause_of};
-use super::record_values::CopyOwner;
 use crate::windows::pool::{MachineRecord, pool_number};
 use crate::windows::shared_writes::{
     plan_shared_write_denies, remove_shared_write_denies, shared_write_targets,
@@ -79,6 +87,7 @@ use crate::windows::shared_writes::{
 use crate::windows::sids::Sid;
 use crate::windows::writer::AclWriter;
 
+mod last_steps;
 mod ledger_work;
 pub mod owners;
 mod seam;
@@ -93,6 +102,10 @@ pub use windows_removal::WindowsRemoval;
 
 /// How long `--remove` waits for another set-up's lock: 60 s, half the hook's 120 s bound.
 pub const REMOVE_LOCK_WAIT_MS: u32 = 60_000;
+
+/// The cause of a removal stopped by its deadline ([`SetupExit::DeadlineReached`]).
+pub const REMOVE_DEADLINE: &str = "the removal ran out of the time it was given, so it stopped \
+     before this step: run it again to finish";
 
 /// What a removal did. Its `Debug` holds counts and causes, never a SID or a path.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -156,6 +169,8 @@ pub enum RemoveStep {
     RemoteLogon,
     /// Removing the owner's unclean-session markers, as the owner, before the record.
     Markers,
+    /// What an interrupted set-up left that no record names (`intent.rs`).
+    Pending,
 }
 
 impl std::fmt::Display for RemoveStep {
@@ -177,6 +192,7 @@ impl std::fmt::Display for RemoveStep {
             RemoveStep::StopTask => "deleting the sandbox's stop and sweep tasks",
             RemoveStep::RemoteLogon => "taking the sandbox group's Remote Desktop deny off",
             RemoveStep::Markers => "removing the sandbox's unclean-session markers",
+            RemoveStep::Pending => "removing what an interrupted set-up left",
         })
     }
 }
@@ -236,11 +252,13 @@ pub fn remove_then(
     // someone else, ends at once and never waits for a set-up's lock.
     let before = read(machine)?;
     if before.is_none() {
-        // No record, unless a set-up holding the lock is about to write it.
+        // No record, unless a set-up holding the lock is about to write it; or only a partial
+        // one, an interrupted set-up's, which goes under the lock.
         lock(machine, 0)?;
-        let _locked = Locked(machine);
-        while_locked(&Removed::NothingSetUp);
-        return Ok(Removed::NothingSetUp);
+        let locked = Locked(machine);
+        let removed = last_steps::partial(&mut *locked.0, per_machine)?;
+        while_locked(&removed);
+        return Ok(removed);
     }
     if let Decision::Stop(removed) = decide(machine, before.as_ref(), per_machine)? {
         return Ok(removed);
@@ -262,10 +280,13 @@ pub fn remove_then(
     };
     let removed = steps(machine, acl, &record, acting)
         .map(Removed::All)
-        .map_err(|(step, cause)| RemoveFailure {
-            step,
-            cause,
-            exit: SetupExit::RemovedPartly,
+        .map_err(|(step, cause)| {
+            let exit = if cause == REMOVE_DEADLINE {
+                SetupExit::DeadlineReached
+            } else {
+                SetupExit::RemovedPartly
+            };
+            RemoveFailure { step, cause, exit }
         })?;
     while_locked(&removed);
     Ok(removed)
@@ -366,6 +387,7 @@ fn steps(
     acting: Acting,
 ) -> Result<RemoveReport, Failed> {
     let mut report = RemoveReport::default();
+    go_on(machine, RemoveStep::Flag)?;
     if !record.removing {
         let flagged = MachineRecord {
             removing: true,
@@ -376,15 +398,20 @@ fn steps(
             .map_err(|e| (RemoveStep::Flag, cause_of(&e)))?;
     }
     // A process left running here is logged; deleting its profile or account fails if it matters.
+    go_on(machine, RemoveStep::Strays)?;
     machine
         .stop_strays(&record.pool, &record.owner)
         .map_err(|e| (RemoveStep::Strays, cause_of(&e)))?;
     for (at, sid) in record.pool.iter().enumerate() {
+        go_on(machine, RemoveStep::Account)?;
         remove_user(machine, acl, record, at, sid, &mut report)?;
     }
+    go_on(machine, RemoveStep::Pending)?;
+    last_steps::leftovers(machine, record, &mut report)?;
     // Anything still running as a pool SID (one that started since the first sweep, or one the
     // first couldn't stop) is stopped again, elevated, before the network goes. One that won't
     // stop keeps the network on: the run ends here, RemovedPartly, and a re-run retries.
+    go_on(machine, RemoveStep::Strays)?;
     let left = machine
         .stop_strays(&record.pool, &record.owner)
         .map_err(|e| (RemoveStep::Strays, cause_of(&e)))?;
@@ -397,6 +424,7 @@ fn steps(
             ),
         ));
     }
+    go_on(machine, RemoveStep::Network)?;
     report.firewall = machine
         .remove_network(&record.owner)
         .map_err(|e| (RemoveStep::Network, cause_of(&e)))?;
@@ -404,22 +432,38 @@ fn steps(
         .program_data()
         .map_err(|e| (RemoveStep::DeviceSync, cause_of(&e)))?;
     let device_sync = shared_write_targets(&program_data, &[]);
+    go_on(machine, RemoveStep::DeviceSync)?;
     remove_denies(acl, &record.group, &device_sync).map_err(|cause| {
         (
             RemoveStep::DeviceSync,
             format!("DeviceSync's deny: {cause}"),
         )
     })?;
+    go_on(machine, RemoveStep::Ledger)?;
     report.ledger = ledger_work::run(machine, acl, record, acting)?;
-    report.group = remove_group(machine, record)?;
+    go_on(machine, RemoveStep::Group)?;
+    report.group = last_steps::remove_group(machine, record)?;
     if acting == Acting::Owner {
-        clear_markers(machine)?;
+        go_on(machine, RemoveStep::Markers)?;
+        last_steps::clear_markers(machine)?;
     }
-    remove_stop_task(machine)?;
+    go_on(machine, RemoveStep::StopTask)?;
+    last_steps::remove_stop_task(machine)?;
+    go_on(machine, RemoveStep::Record)?;
     machine
         .delete_record()
         .map_err(|e| (RemoveStep::Record, cause_of(&e)))?;
     Ok(report)
+}
+
+/// Before each step: once the run's deadline is near (`Removal::cancelled`), the run stops here,
+/// at `step`, with [`REMOVE_DEADLINE`].
+fn go_on(machine: &impl Removal, step: RemoveStep) -> Result<(), Failed> {
+    if machine.cancelled() {
+        tracing::warn!(%step, "the removal stopped for its deadline");
+        return Err((step, REMOVE_DEADLINE.to_owned()));
+    }
+    Ok(())
 }
 
 /// One pool user, the `at`th in the record: its `LocalLow` denies, its profile, its account.
@@ -492,61 +536,6 @@ fn remove_user(
 fn remove_denies(acl: &mut impl AclWriter, group: &Sid, targets: &[PathBuf]) -> Result<(), String> {
     let grants = plan_shared_write_denies(group, targets).map_err(|e| e.to_string())?;
     remove_shared_write_denies(acl, &grants).map_err(|failure| failure.to_string())
-}
-
-/// The group, when it is the record's and empty; whether it was deleted. Gone already is
-/// `false`; another group under the name, or one with members, stops the run. Its Remote
-/// Desktop deny comes off just before the delete ([`RemoveStep::RemoteLogon`] when it won't):
-/// a user right is keyed by SID, and would outlive the group. With the group gone already,
-/// the deny still comes off by the record's `GroupSid`, as an earlier run may have left it.
-fn remove_group(machine: &mut impl Removal, record: &MachineRecord) -> Result<bool, Failed> {
-    let failed = |e: MachineError| (RemoveStep::Group, cause_of(&e));
-    let Some(group) = machine.group().map_err(failed)? else {
-        machine
-            .remove_remote_logon_deny(&record.group)
-            .map_err(|e| (RemoveStep::RemoteLogon, cause_of(&e)))?;
-        return Ok(false);
-    };
-    if group != record.group {
-        return Err((
-            RemoveStep::Group,
-            "the group ClauseoSandboxUsers isn't the one the record names, so it is left alone"
-                .to_owned(),
-        ));
-    }
-    match machine.group_members(&group).map_err(failed)? {
-        0 => {
-            machine
-                .remove_remote_logon_deny(&group)
-                .map_err(|e| (RemoveStep::RemoteLogon, cause_of(&e)))?;
-            machine.delete_group(&group).map_err(failed).map(|()| true)
-        }
-        members => Err((
-            RemoveStep::Group,
-            format!("the group ClauseoSandboxUsers still has {members} members"),
-        )),
-    }
-}
-
-/// Step 8, as the owner: the unclean-session markers in the data folder `owners_ledger` checked.
-fn clear_markers(machine: &mut impl Removal) -> Result<(), Failed> {
-    match machine.as_owner(Removal::clear_markers) {
-        Ok(Ok(_cleared)) => Ok(()),
-        Ok(Err(error)) | Err(error) => Err((RemoveStep::Markers, cause_of(&error))),
-    }
-}
-
-/// Step 8, before the record goes: on a per-machine install (`AdminCopyOwner` is `machine`),
-/// the tasks `\Clauseo\SandboxStop` and `\Clauseo\SandboxSweep` set-up registered for the
-/// record's owner are deleted, so the owner keeps no start right once their pool is gone. A
-/// per-user install's tasks stay (`--adopt` registered them; `--remove --uninstall` deletes
-/// them with the admin copy).
-fn remove_stop_task(machine: &mut impl Removal) -> Result<(), Failed> {
-    let failed = |e: MachineError| (RemoveStep::StopTask, cause_of(&e));
-    match machine.copy_owner().map_err(failed)? {
-        Some(CopyOwner::Machine) => machine.unregister_stop_task().map_err(failed),
-        Some(CopyOwner::User(_)) | None => Ok(()),
-    }
 }
 
 /// The machine while the removal holds its lock: dropping it gives the lock back.

@@ -226,6 +226,12 @@ fn the_admin_copy_values_keep_their_names_and_forms() {
     assert!(at(STOP_SEQUENCE) < at(STOP_NEXT));
     assert!(at(SWEEP_COMPLETED) < at(SWEEP_SEQUENCE));
     assert!(at(SWEEP_SEQUENCE) < at(SWEEP_NEXT));
+    // And the intent's pending values, so a rollback or a removal takes them too.
+    assert_eq!(
+        (PENDING_GROUP, PENDING_USERS),
+        ("PendingGroup", "PendingUsers")
+    );
+    assert!(SETUP_VALUES.contains(&PENDING_GROUP) && SETUP_VALUES.contains(&PENDING_USERS));
 }
 
 #[test]

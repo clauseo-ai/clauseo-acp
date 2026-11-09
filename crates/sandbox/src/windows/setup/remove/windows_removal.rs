@@ -36,12 +36,14 @@ use clauseo_protocol::MatterId;
 use super::super::accounts::{self, Kind};
 use super::super::answers::DENY_REMOTE_INTERACTIVE_RIGHT;
 use super::super::around::Around;
+use super::super::intent::Intent;
 use super::super::lock::{Acquired, Held, SetupMutex};
 use super::super::machine::{MachineError, ProfileDir};
 use super::super::outcome::cause_of;
 use super::super::owner::Owner;
 use super::super::record_values::CopyOwner;
 use super::super::windows_machine::{Acting, Names};
+use super::super::{accounts_marked, deadline, record_intent};
 use super::super::{admin_member, args, ffi, preflight, processes, profile, record_write};
 use super::{FolderOwner, Removal, acting_token, owners};
 use crate::windows::acl::object::Object;
@@ -214,6 +216,26 @@ impl Removal for WindowsRemoval {
 
     fn delete_record(&mut self) -> Result<(), MachineError> {
         record_write::delete(&self.names.record_key)
+    }
+
+    fn read_intent(&mut self) -> Result<Intent, MachineError> {
+        record_intent::read_intent(&self.names.record_key)
+    }
+
+    fn clear_intent(&mut self) -> Result<(), MachineError> {
+        record_intent::clear_intent(&self.names.record_key)
+    }
+
+    fn marked_user(&mut self, name: &str) -> Result<Option<Sid>, MachineError> {
+        accounts_marked::marked_user(&self.names, name)
+    }
+
+    fn marked_group(&mut self) -> Result<Option<Sid>, MachineError> {
+        accounts_marked::marked_group(&self.names)
+    }
+
+    fn cancelled(&self) -> bool {
+        deadline::cancelled()
     }
 
     fn copy_owner(&mut self) -> Result<Option<CopyOwner>, MachineError> {

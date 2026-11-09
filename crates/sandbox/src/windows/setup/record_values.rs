@@ -8,6 +8,7 @@
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
+use super::intent::{PENDING_GROUP, PENDING_USERS};
 use crate::windows::pool::{MachineRecord, pool_sids_from_multi_sz};
 use crate::windows::sids::Sid;
 
@@ -150,7 +151,7 @@ pub const SWEEP_NEXT: &str = "SweepNext";
 /// The values the set-up owns, which a rollback or `--remove` deletes; the ones `--adopt`
 /// writes stay until `--remove` takes the admin copy away. Each `…Sequence` comes before its
 /// `…Next`, so a marker read during a removal can only wait longer (`pool_steps::sequence`).
-pub const SETUP_VALUES: [&str; 14] = [
+pub const SETUP_VALUES: [&str; 16] = [
     OWNER_SID,
     GROUP_SID,
     POOL_SIDS,
@@ -165,6 +166,8 @@ pub const SETUP_VALUES: [&str; 14] = [
     SWEEP_COMPLETED,
     SWEEP_SEQUENCE,
     SWEEP_NEXT,
+    PENDING_GROUP,
+    PENDING_USERS,
 ];
 
 /// `listed` (`ResetSids` as read) with each of `add` it lacks appended, in order.

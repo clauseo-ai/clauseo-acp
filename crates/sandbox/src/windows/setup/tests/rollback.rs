@@ -83,8 +83,9 @@ fn a_failure_at_each_step_rolls_back_to_the_machine_before() {
         );
         let rest = machine.calls_since(at + 1);
         if at < first_record {
+            // Only the intent's values go (`intent.rs`): no record is written.
             assert!(
-                !rest.iter().any(|c| c.contains("record")),
+                !rest.iter().any(|c| c.starts_with("write_record")),
                 "{call}: no record written before step 5: {rest:?}"
             );
         }
@@ -130,6 +131,8 @@ fn a_record_write_failure_deletes_exactly_that_user() {
             "group_members 1000",
             "remove_remote_logon_deny 1000",
             "delete_group 1000",
+            // The intent's `OwnerSid` and pending values, which no record write cleared.
+            "delete_record",
             "unlock"
         ]
     );

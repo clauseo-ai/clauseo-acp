@@ -1,7 +1,7 @@
 //! More of the set-up's fakes (split from `fake.rs`): the surroundings the fence's walks get,
 //! how the call lines name a folder, the profile faults the reset tests inject, the
-//! [`FakeMachine`] helpers outside its trait impl (the call recording, the accounts, and
-//! [`FakeMachine::new`] (`new_machine`)).
+//! [`FakeMachine`] helpers outside its trait impl (the call recording, the accounts, the logon,
+//! and [`FakeMachine::new`] (`new_machine`)).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
@@ -10,14 +10,14 @@ use std::path::{Path, PathBuf};
 use crate::windows::acl_plan::Sid;
 use crate::windows::marker::Marker;
 use crate::windows::pool::MachineRecord;
-use crate::windows::setup::record_values::CopyOwner;
+use crate::windows::setup::record_values::{CopyOwner, RawRecord};
 
 use std::cell::Cell;
 use std::rc::Rc;
 
 use super::fake::{FakeMachine, OWNER, OWNER_NAME, VOLUME, sid};
 use crate::test_support::TempDir;
-use crate::windows::setup::{LogonRight, MachineError, ServiceStart};
+use crate::windows::setup::{LogonRight, MachineError, Password, ProfileDir, ServiceStart};
 
 use crate::windows::FolderSupport;
 use crate::windows::admit::{FolderList, ReadDir};
@@ -151,6 +151,8 @@ pub(super) struct Account {
     pub(super) password: String,
     pub(super) groups: BTreeSet<Sid>,
     pub(super) hidden: bool,
+    /// It carries Clauseo's comment (`create_user` makes every account with it).
+    pub(super) marked: bool,
 }
 
 /// What the machine holds, for comparing before and after.
@@ -168,6 +170,13 @@ pub(super) struct State {
     pub(super) stop_task: Option<Sid>,
     /// The SIDs local policy denies "log on through Remote Desktop Services".
     pub(super) remote_denied: BTreeSet<Sid>,
+    /// The group carries Clauseo's comment (`create_group` makes it with it).
+    pub(super) group_marked: bool,
+    /// A partial record's values, while there is no whole one (`intent.rs`).
+    pub(super) partial: Option<RawRecord>,
+    /// The intent's `PendingGroup` and `PendingUsers`.
+    pub(super) pending_group: bool,
+    pub(super) pending_users: Vec<String>,
 }
 
 /// [`FakeMachine::new`]: a machine with only the owner's account, `DeviceSync`, an empty data
@@ -181,6 +190,7 @@ pub(super) fn new_machine(test: &str) -> FakeMachine {
         password: "the owner's".to_owned(),
         groups: BTreeSet::new(),
         hidden: false,
+        marked: false,
     };
     FakeMachine {
         dir,
@@ -197,6 +207,10 @@ pub(super) fn new_machine(test: &str) -> FakeMachine {
             copy_owner: None,
             stop_task: None,
             remote_denied: BTreeSet::new(),
+            group_marked: false,
+            partial: None,
+            pending_group: false,
+            pending_users: Vec::new(),
         },
         written: Vec::new(),
         temporary: BTreeSet::new(),
@@ -224,10 +238,58 @@ pub(super) fn new_machine(test: &str) -> FakeMachine {
         next_rid: 1000,
         passwords: 0,
         around: Around::default(),
+        life: super::fake_intent::Life::default(),
     }
 }
 
 impl FakeMachine {
+    /// `Machine::log_on_once`, as the fake makes a profile.
+    pub(super) fn fake_log_on_once(
+        &mut self,
+        name: &str,
+        password: &Password,
+    ) -> Result<ProfileDir, MachineError> {
+        self.call(format!("log_on_once {name}"))?;
+        let account = self.account(name)?;
+        if account.password != password.as_str() {
+            return Err(MachineError::Os {
+                call: "LogonUserW",
+                code: 1326,
+            });
+        }
+        let sid = account.sid.clone();
+        if self.temporary.contains(name) {
+            let path = self.dir.dir("Users/TEMP/AppData/LocalLow");
+            let path = path.parent().unwrap().parent().unwrap().to_owned();
+            return Ok(ProfileDir {
+                path,
+                temporary: true,
+            });
+        }
+        let listed = self.state.profiles.get(&sid).cloned();
+        let path = self
+            .faults
+            .logon_path(&self.dir.path().join("Users"), name, listed);
+        let folder = path.file_name().unwrap().to_string_lossy().into_owned();
+        if self.no_local_low.contains(name) {
+            self.dir.dir(&format!("Users/{folder}/AppData"));
+            self.state.profiles.insert(sid, path.clone());
+            return Ok(ProfileDir {
+                path,
+                temporary: false,
+            });
+        }
+        let local_low = self.dir.dir(&format!("Users/{folder}/AppData/LocalLow"));
+        if self.self_owned_local_low.contains(name) {
+            self.owners.insert(local_low, sid.clone());
+        }
+        self.state.profiles.insert(sid, path.clone());
+        Ok(ProfileDir {
+            path,
+            temporary: false,
+        })
+    }
+
     /// A machine with only the owner's account, `DeviceSync`, an empty data folder and a 32 MiB
     /// journal on [`VOLUME`].
     pub(super) fn new(test: &str) -> FakeMachine {
@@ -272,6 +334,7 @@ impl FakeMachine {
     pub(super) fn call(&mut self, line: impl Into<String>) -> Result<(), MachineError> {
         let line = line.into();
         self.calls.push(line.clone());
+        self.life.on_call(&line);
         assert!(self.panic_on.as_ref() != Some(&line), "a crash in {line}");
         match self.fails.iter().position(|(text, _)| *text == line) {
             Some(at) => Err(self.fails.remove(at).1),

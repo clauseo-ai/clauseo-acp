@@ -12,6 +12,7 @@ use crate::windows::fence::RegisteredMatter;
 use crate::windows::ledger::Ledger;
 use crate::windows::marker::{Marker, MarkerState};
 use crate::windows::pool::MachineRecord;
+use crate::windows::setup::intent::Intent;
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::sids::Sid;
 use crate::windows::wfp::{NetworkReport, NetworkSetup};
@@ -100,8 +101,29 @@ pub trait Machine {
     fn read_record(&mut self) -> Result<Option<MachineRecord>, MachineError>;
     /// Writes `record` as the whole key, replacing every value.
     fn write_record(&mut self, record: &MachineRecord) -> Result<(), MachineError>;
-    /// Deletes the key: only when a fresh set-up rolls back to nothing.
+    /// Deletes the key: only when a fresh set-up rolls back to nothing, or a partial record goes
+    /// (`intent.rs`). It takes the intent's pending values with it.
     fn delete_record(&mut self) -> Result<(), MachineError>;
+    /// The record key's intent (`intent.rs`): `OwnerSid` as read, the pending group and
+    /// accounts, and whether the key holds a partial record.
+    fn read_intent(&mut self) -> Result<Intent, MachineError>;
+    /// Writes the intent before a change: `OwnerSid` as `owner` first when the key has none,
+    /// then `PendingGroup` when `group` and `PendingUsers` as `users`, each deleted when
+    /// `false` or empty (so `false` and no users clear the intent).
+    fn write_intent(
+        &mut self,
+        owner: &Sid,
+        group: bool,
+        users: &[String],
+    ) -> Result<(), MachineError>;
+    /// The SID of the account `name` when it is there and ours: it carries Clauseo's comment
+    /// (`accounts::USER_COMMENT`), or is a member of `ClauseoSandboxUsers`. `None` otherwise.
+    fn marked_user(&mut self, name: &str) -> Result<Option<Sid>, MachineError>;
+    /// The SID of the group `ClauseoSandboxUsers` when it is there and carries its comment.
+    fn marked_group(&mut self) -> Result<Option<Sid>, MachineError>;
+    /// Whether the run's deadline is near (`deadline.rs`): it makes no further change, but
+    /// rolls back. Always `false` in a run with no `--deadline`.
+    fn cancelled(&self) -> bool;
     /// How the Secondary Logon service starts.
     fn seclogon(&mut self) -> Result<ServiceStart, MachineError>;
     /// Whether local policy refuses the interactive logon right to `Users`.

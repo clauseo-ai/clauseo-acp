@@ -39,6 +39,7 @@ use windows::core::{HRESULT, HSTRING, PCWSTR, PWSTR};
 use zeroize::Zeroizing;
 
 use super::MachineError;
+use super::accounts_marked::USER_COMMENT;
 use super::lock::os;
 use super::password::is_strong;
 use super::record_values::RegValue;
@@ -135,7 +136,8 @@ pub(super) fn name_of(sid: &Sid, kind: Kind) -> Result<Option<String>, MachineEr
 }
 
 /// Makes the local account `name` with `password`: `NetUserAdd` level 1, a standard user,
-/// `UF_SCRIPT | UF_DONT_EXPIRE_PASSWD | UF_PASSWD_CANT_CHANGE`. An account by that name is
+/// `UF_SCRIPT | UF_DONT_EXPIRE_PASSWD | UF_PASSWD_CANT_CHANGE`, with Clauseo's comment
+/// (`accounts_marked::USER_COMMENT`), so it can be told apart later. An account by that name is
 /// `NERR_UserExists` (2224), never adopted (D-B5). Its SID; when the SID can't be read the
 /// account is deleted again, so a failure leaves none behind.
 pub(crate) fn create_user(name: &str, password: &str) -> Result<Sid, MachineError> {
@@ -143,13 +145,14 @@ pub(crate) fn create_user(name: &str, password: &str) -> Result<Sid, MachineErro
     checked_password(password)?;
     let mut name_units = wide(name);
     let mut secret = secret_units(password);
+    let mut comment = wide(USER_COMMENT);
     let info = USER_INFO_1 {
         usri1_name: PWSTR(name_units.as_mut_ptr()),
         usri1_password: PWSTR(secret.as_mut_ptr()),
         usri1_password_age: 0,
         usri1_priv: USER_PRIV_USER,
         usri1_home_dir: PWSTR::null(),
-        usri1_comment: PWSTR::null(),
+        usri1_comment: PWSTR(comment.as_mut_ptr()),
         usri1_flags: UF_SCRIPT | UF_DONT_EXPIRE_PASSWD | UF_PASSWD_CANT_CHANGE,
         usri1_script_path: PWSTR::null(),
     };

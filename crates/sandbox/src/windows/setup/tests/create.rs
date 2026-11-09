@@ -236,6 +236,7 @@ fn a_recorded_sid_that_is_no_pool_account_refuses() {
             password: "admin".to_owned(),
             groups: std::collections::BTreeSet::default(),
             hidden: false,
+            marked: false,
         },
     );
     machine.state.record = Some(MachineRecord {
@@ -264,6 +265,7 @@ fn an_account_with_a_free_pool_name_is_skipped_never_adopted() {
             password: "someone's".to_owned(),
             groups: std::collections::BTreeSet::default(),
             hidden: false,
+            marked: false,
         },
     );
     let report = set_up_fresh(&mut machine, &mut FakeAcl::default());

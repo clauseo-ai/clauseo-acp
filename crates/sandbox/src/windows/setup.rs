@@ -50,6 +50,11 @@
 //! A failure rolls back what this run made (`rollback.rs`, D-B7) and reports the step
 //! ([`SetupFailure`]). No record write ever puts the owner's SID in `PoolSids`.
 //!
+//! Before the group and before each account, the run writes its intent into the record key, and
+//! a run that finds one left (a kill, a crash, power loss) first undoes what it names and no
+//! record does (`intent.rs`). With `--deadline`, the run checks its cancel flag before each
+//! change and, once it is set, stops, rolls back and exits `DeadlineReached` (`deadline.rs`).
+//!
 //! The uninstall's `--remove` (`PR4j`) is [`remove()`], over its own seam
 //! ([`remove::Removal`], `remove.rs`).
 //!
@@ -65,6 +70,8 @@ use crate::windows::writer::AclWriter;
 pub(crate) mod account_list;
 #[cfg(windows)]
 pub(crate) mod accounts;
+#[cfg(windows)]
+mod accounts_marked;
 #[cfg(test)]
 #[cfg(windows)]
 mod accounts_tests;
@@ -85,6 +92,7 @@ mod create;
 pub mod deadline;
 #[cfg(windows)]
 mod deadline_os;
+mod early_steps;
 #[cfg(windows)]
 mod event_trace;
 #[cfg(windows)]
@@ -96,6 +104,7 @@ mod ffi;
 #[cfg(test)]
 #[cfg(windows)]
 mod handback_tests;
+pub mod intent;
 #[cfg(windows)]
 pub mod journal;
 pub mod journal_plan;
@@ -125,6 +134,11 @@ mod reclaim_run;
 #[cfg(test)]
 #[cfg(windows)]
 mod reclaim_tests;
+#[cfg(windows)]
+mod record_intent;
+#[cfg(test)]
+#[cfg(windows)]
+mod record_intent_tests;
 #[cfg(any(windows, test))]
 mod record_key;
 pub mod record_values;
