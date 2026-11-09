@@ -75,12 +75,8 @@ fn corrupt(error: RecordError) -> MachineError {
 /// form), as `stranded.rs` sorts them.
 pub(super) fn pool_accounts(names: &Names) -> Result<PoolAccounts, MachineError> {
     let group = accounts::sid_of(&names.group, Kind::Group)?;
-    let marker_version = record_write::read_pool_value(&names.record_key, MARKER_VERSION)
-        .unwrap_or_else(|error| {
-            tracing::warn!(%error, "the record's MarkerVersion can't be read");
-            None
-        })
-        .map(|version| u32::try_from(version).unwrap_or(u32::MAX));
+    let read = record_write::read_pool_value(&names.record_key, MARKER_VERSION);
+    let marker_version = stranded::marker_version_of(read);
     let mut found = PoolAccounts {
         group: group.clone(),
         machine: preflight::machine_domain()?,

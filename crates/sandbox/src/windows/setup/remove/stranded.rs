@@ -93,11 +93,12 @@ pub(super) fn decide_corrupt(
 }
 
 /// `record` with every proven account it doesn't list added to its pool, written with
-/// `Removing` set when any was, and the doubtful accounts' names.
+/// `Removing` set when any was, the doubtful accounts' names, and this machine's account
+/// domain (the only one whose SIDs lose their rights, `remove.rs` step 4).
 pub(super) fn widen(
     machine: &mut impl Removal,
     record: MachineRecord,
-) -> Result<(MachineRecord, Vec<String>), RemoveFailure> {
+) -> Result<(MachineRecord, Vec<String>, [u32; 3]), RemoveFailure> {
     let accounts = machine.pool_accounts().map_err(|error| RemoveFailure {
         step: RemoveStep::ReadRecord,
         cause: cause_of(&error),
@@ -112,7 +113,7 @@ pub(super) fn widen(
     log_doubtful(&sorted.doubtful, &accounts.foreign);
     let left = sorted.doubtful.iter().map(ToString::to_string).collect();
     if sorted.proven.is_empty() {
-        return Ok((record, left));
+        return Ok((record, left, accounts.machine));
     }
     for user in &sorted.proven {
         tracing::warn!(account = %user.name, "a sandbox user the record lost is removed too");
@@ -129,7 +130,7 @@ pub(super) fn widen(
             cause: cause_of(&error),
             exit: SetupExit::RemovedPartly,
         })?;
-    Ok((widened, left))
+    Ok((widened, left, accounts.machine))
 }
 
 /// With no record to trust, as the module says. `corrupt` is who acts for a corrupt record,
@@ -183,9 +184,10 @@ pub(super) fn sweep(
     let mut remaining = Vec::new();
     for user in &sorted.proven {
         tracing::warn!(account = %user.name, "a sandbox user no record lists is removed");
-        if let Err(cause) = remove_user(machine, user, &owner, &mut report) {
+        if let Err(left) = remove_user(machine, user, &owner, &mut report) {
+            let cause = &left.cause;
             tracing::warn!(account = %user.name, %cause, "a sandbox user couldn't be removed");
-            remaining.push(format!("{}: {cause}", user.name));
+            remaining.push(left.to_string());
         }
     }
     if !pool.is_empty()
@@ -200,8 +202,7 @@ pub(super) fn sweep(
         return Err(RemoveFailure {
             step: RemoveStep::Account,
             cause: format!(
-                "sandbox users Clauseo set up couldn't be removed, and were disabled: {}; \
-                 uninstall again to finish",
+                "sandbox users Clauseo set up couldn't be removed: {}; uninstall again to finish",
                 remaining.join("; ")
             ),
             exit: SetupExit::RemovedPartly,
@@ -282,20 +283,45 @@ fn around_the_pool(
     Ok(())
 }
 
+/// A proven account left, why, and whether it was disabled.
+struct Left<'a> {
+    /// The account's name.
+    name: &'a str,
+    /// Why it is still there.
+    cause: String,
+    /// Why it couldn't be disabled, or `None` when it was.
+    not_disabled: Option<String>,
+}
+
+impl std::fmt::Display for Left<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.not_disabled {
+            None => write!(f, "{} (disabled): {}", self.name, self.cause),
+            Some(why) => write!(f, "{} (not disabled: {why}): {}", self.name, self.cause),
+        }
+    }
+}
+
 /// One proven account as a recorded one goes: disabled first, then its profile
 /// (`DeleteProfileW`, its folder and `ProfileList` entry; its `LocalLow` deny with it), the
 /// account with its sign-in screen value, then every user right its SID still holds. `Err`
-/// when the account is left; a right that won't come off is named in `left` only.
-fn remove_user(
+/// when the account is left, saying whether it was disabled; a right that won't come off is
+/// named in `left` only.
+fn remove_user<'a>(
     machine: &mut impl Removal,
-    user: &PoolUser,
+    user: &'a PoolUser,
     owner: &Sid,
     report: &mut RemoveReport,
-) -> Result<(), String> {
-    let failed = |error: MachineError| cause_of(&error);
-    if let Err(error) = machine.disable(&user.name) {
+) -> Result<(), Left<'a>> {
+    let not_disabled = machine.disable(&user.name).err().map(|error| {
         tracing::warn!(account = %user.name, %error, "a sandbox user couldn't be disabled");
-    }
+        cause_of(&error)
+    });
+    let failed = |error: MachineError| Left {
+        name: &user.name,
+        cause: cause_of(&error),
+        not_disabled: not_disabled.clone(),
+    };
     if machine.profile_of(&user.sid).map_err(failed)?.is_some() {
         machine.delete_profile(&user.sid, owner).map_err(failed)?;
         report.profiles += 1;

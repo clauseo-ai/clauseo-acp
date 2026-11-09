@@ -20,6 +20,7 @@ use crate::windows::marker::{Marker, MarkerState};
 use crate::windows::pool::MachineRecord;
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::setup::stranded::PoolAccounts;
+use crate::windows::setup::top_up::HeldUser;
 use crate::windows::setup::{
     LogonRight, Machine, MachineError, Password, ProfileDir, ServiceStart,
 };
@@ -519,10 +520,10 @@ impl Machine for FakeMachine {
         _pool: &[Sid],
         _trusted: &[Sid],
         resets: &[Sid],
-    ) -> Result<Vec<Sid>, MachineError> {
+    ) -> Result<Vec<HeldUser>, MachineError> {
         self.owner_call("held_users")?;
         self.held_for.push(resets.to_vec());
-        Ok(self.held.iter().cloned().collect())
+        Ok(self.fake_held())
     }
 
     fn ledger(&mut self, trusted: &[Sid]) -> io::Result<Ledger> {

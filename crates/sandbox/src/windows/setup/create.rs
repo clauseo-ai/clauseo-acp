@@ -164,7 +164,7 @@ fn plan_pool(
     before: Option<&MachineRecord>,
     req: &SetupRequest,
     resets: Vec<Sid>,
-    held: &[Sid],
+    held: &[top_up::HeldUser],
 ) -> Result<Plan, SetupFailure> {
     let pool_failure = |cause: String| SetupFailure::early(Step::Pool, cause);
     let mut plan = Plan {

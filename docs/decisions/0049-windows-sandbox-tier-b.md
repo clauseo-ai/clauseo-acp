@@ -827,7 +827,8 @@ takes the user who asked from its recorded parent (D-B2), never from an argument
     account it makes or keeps. Or it carries the older mark (a standard user with
     `UF_DONT_EXPIRE_PASSWD | UF_PASSWD_CANT_CHANGE`, hidden by its `SpecialAccounts\UserList`
     value 0), and then only while no member of the group carries the comment and the record's
-    `MarkerVersion` (2 once set-up marks its users) is absent or older. A name alone never
+    `MarkerVersion` (2 once set-up marks its users) is absent or older; one that can't be read
+    counts as newer. A name alone never
     counts (D-B5). A malformed `PoolSids` reads as an empty pool, never trusted for a SID, and
     a malformed `Removing` counts as set.
   - **A trusted record** (`OwnerSid`, `GroupSid` and `DataDir` read): set-up adopts each proven
@@ -840,14 +841,19 @@ takes the user who asked from its recorded parent (D-B2), never from an argument
     user goes: profile and `ProfileList` entry, sign-in screen value (before the account),
     account, every user right its SID holds, scheduled tasks. Then the group and its Remote
     Desktop deny go once it is empty. A proven account that won't go fails set-up, or makes
-    `--remove` exit 4, disabled; the next run finds it by the same proof. For a corrupt record,
+    `--remove` exit 4, disabled; its sign-in value is put back, so the next run proves it again.
+    A right is revoked only from a SID of this machine's account domain. For a corrupt record,
     `--remove` decides from `OwnerSid` when it reads (D-B9: a per-user removal by anyone else
-    touches nothing). It takes off the network filters, `DeviceSync`'s deny, the ledger's
+    touches nothing), then reads the record again once it holds the lock, as for any record. It takes off the network filters, `DeviceSync`'s deny, the ledger's
     entries (with `OwnerSid` and `DataDir`), the owner's markers and the stop and sweep tasks,
     then the record's values.
   - **Left alone:** an account short of the proof is named in the log (warn, so the Event Log)
     and in `RemoveReport::left`, as is a group that still has members. Set-up's refusal names
     exactly the group's unprovable members, foreign ones included.
+  - **The top-up** to 8 free users counts held users too, so one held by a matter or set-aside
+    records makes a ninth. The pool's ceiling is `POOL_CAP` (32, D-B5), free and held alike;
+    at it the top-up reports the shortfall and the run goes on. Every run logs one line: free,
+    held by matters, by set-aside records, for a reset or unread, added, short, the ceiling.
   - ACEs that name a deleted SID stay as unresolvable entries until the ledger's or the strict
     walks drop them; harmless, since Windows never reuses a SID. VM row: blank the record on a
     live pool; set-up adopts; `--remove` exits 0 and leaves no accounts.

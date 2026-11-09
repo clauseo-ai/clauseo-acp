@@ -176,7 +176,11 @@ fn a_stranded_user_whose_delete_fails_is_left_disabled_and_the_removal_exits_4()
     machine.m.fail("delete_user ClauseoSb03");
     let failure = remove(&mut machine, &mut acl, false).unwrap_err();
     assert_eq!(failure.exit, SetupExit::RemovedPartly);
-    assert!(failure.cause.contains("ClauseoSb03"), "{}", failure.cause);
+    assert!(
+        failure.cause.contains("ClauseoSb03 (disabled)"),
+        "{}",
+        failure.cause
+    );
     assert!(machine.m.state.accounts.contains_key("ClauseoSb03"));
     assert!(machine.m.stranded.disabled.contains("ClauseoSb03"));
     let lines = machine.lines();
@@ -303,4 +307,125 @@ fn set_ups_refusal_names_exactly_the_groups_unprovable_members() {
         failure.cause
     );
     assert!(!failure.cause.contains("ClauseoSb10"), "{}", failure.cause);
+}
+
+#[test]
+fn re_running_set_up_twice_on_an_all_free_pool_keeps_the_same_eight_users_with_either_mark() {
+    for older in [false, true] {
+        let mut machine = FakeMachine::new("stranded-rerun-fixed");
+        let mut acl = FakeAcl::default();
+        set_up_fresh(&mut machine, &mut acl);
+        if older {
+            machine.stranded.commented.clear();
+            machine.stranded.marker_version = None;
+        }
+        let users = |machine: &FakeMachine| -> Vec<(String, Sid)> {
+            let names = pool_names(machine).into_iter();
+            names
+                .map(|name| (name.clone(), machine.state.accounts[&name].sid.clone()))
+                .collect()
+        };
+        let before = users(&machine);
+        assert_eq!(before.len(), 8);
+        for run in 0..2 {
+            let from = machine.calls.len();
+            let report = set_up_fresh(&mut machine, &mut acl);
+            assert_eq!(report.made, [], "older {older}, run {run}");
+            let calls = machine.calls_since(from);
+            let changed = |c: &&str| c.starts_with("create_user") || c.starts_with("delete_user");
+            assert!(
+                !calls.iter().any(changed),
+                "older {older}, run {run}: {calls:?}"
+            );
+            assert_eq!(machine.state.record.clone().unwrap().pool, eight());
+            assert_eq!(users(&machine), before, "older {older}, run {run}");
+        }
+        for (name, _) in &before {
+            assert!(machine.stranded.commented.contains(name), "{name}");
+        }
+        assert_eq!(machine.stranded.marker_version, Some(MARKER_VERSION));
+    }
+}
+
+#[test]
+fn a_corrupt_record_rebuilt_while_waiting_for_the_lock_is_read_again_and_not_swept() {
+    let (mut machine, mut acl) = corrupt("stranded-corrupt-rebuilt", PartialRecord::default());
+    // Another Windows user's set-up rebuilds the record while this removal waits.
+    let mut rebuilt = machine.m.state.record.clone().unwrap();
+    rebuilt.owner = Sid::parse(super::fake::OTHER_OWNER).unwrap();
+    machine.after_lock = Some(super::remove_fake::Change::Write(rebuilt));
+    let state_accounts = machine.m.state.accounts.clone();
+    let removed = remove(&mut machine, &mut acl, false).unwrap();
+    assert_eq!(removed, Removed::NotOwner);
+    assert_eq!(machine.m.state.accounts, state_accounts);
+    assert_eq!(
+        machine.lines(),
+        ["read_record", "lock 60000", "read_record", "unlock"]
+    );
+}
+
+#[test]
+fn a_record_sid_outside_this_machines_domain_never_loses_its_rights() {
+    let (mut machine, mut acl) = pool("stranded-rights-domain", Some(owner()));
+    let users = Sid::parse("S-1-5-32-545").unwrap();
+    machine
+        .m
+        .state
+        .record
+        .as_mut()
+        .unwrap()
+        .pool
+        .push(users.clone());
+    machine.m.stranded.rights.insert(users.clone());
+    assert!(matches!(
+        remove(&mut machine, &mut acl, false),
+        Ok(Removed::All(_))
+    ));
+    assert!(machine.m.stranded.rights.contains(&users));
+    assert!(
+        !machine
+            .lines()
+            .iter()
+            .any(|l| l.starts_with("revoke_rights 545"))
+    );
+    assert!(machine.lines().contains(&"revoke_rights 1001".to_owned()));
+}
+
+#[test]
+fn a_failed_delete_leaves_an_older_marked_user_provable_for_the_next_run() {
+    let (mut machine, mut acl) = no_record("stranded-delete-older");
+    machine.m.stranded.commented.clear();
+    machine.m.stranded.marker_version = None;
+    machine.m.fail("delete_user ClauseoSb03");
+    let failure = remove(&mut machine, &mut acl, false).unwrap_err();
+    assert_eq!(failure.exit, SetupExit::RemovedPartly);
+    assert!(
+        machine.m.state.accounts["ClauseoSb03"].hidden,
+        "the sign-in value stays"
+    );
+    let Removed::All(report) = remove(&mut machine, &mut acl, false).unwrap() else {
+        panic!("not removed");
+    };
+    assert_eq!(report.accounts, 1);
+}
+
+#[test]
+fn a_user_that_wont_disable_is_named_so_in_the_exit_4_message() {
+    let (mut machine, mut acl) = no_record("stranded-disable-fails");
+    machine.m.fail("disable ClauseoSb04");
+    machine.m.fail("delete_user ClauseoSb04");
+    machine.m.fail("delete_user ClauseoSb05");
+    let failure = remove(&mut machine, &mut acl, false).unwrap_err();
+    assert_eq!(failure.exit, SetupExit::RemovedPartly);
+    assert!(
+        failure.cause.contains("ClauseoSb04 (not disabled: "),
+        "{}",
+        failure.cause
+    );
+    assert!(
+        failure.cause.contains("ClauseoSb05 (disabled)"),
+        "{}",
+        failure.cause
+    );
+    assert!(!machine.m.stranded.disabled.contains("ClauseoSb04"));
 }

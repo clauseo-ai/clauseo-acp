@@ -28,6 +28,7 @@ use super::record_values::CopyOwner;
 use super::record_write::{self, RECORD_KEY};
 use super::registered::registered;
 use super::stranded::PoolAccounts;
+use super::top_up::HeldUser;
 use super::{ffi, journal, logon, password, preflight, profile, stranded_os};
 use crate::SetupError;
 use crate::windows::acl;
@@ -473,14 +474,14 @@ impl Machine for WindowsMachine {
         pool: &[Sid],
         trusted: &[Sid],
         resets: &[Sid],
-    ) -> Result<Vec<Sid>, MachineError> {
+    ) -> Result<Vec<HeldUser>, MachineError> {
         owned(self, |m| {
             let matters = MatterSids::load(&m.data_dir).map_err(from_setup)?;
             let ledger = m.ledger(trusted);
             if let Err(error) = &ledger {
                 tracing::warn!(%error, "the ledger can't be read; every sandbox user is in use");
             }
-            Ok(matters.held_after_resets(pool, ledger, resets))
+            Ok(matters.held_after_resets_each(pool, ledger, resets))
         })
     }
 

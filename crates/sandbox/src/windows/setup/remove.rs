@@ -246,23 +246,25 @@ pub fn remove_then(
     // Read once before the lock, so a machine with nothing set up, or a per-user uninstall by
     // someone else, ends at once and never waits for a set-up's lock.
     let before = stranded::read(machine)?;
-    if before.record.is_none() {
-        // No record, unless a set-up holding the lock is about to write it; a corrupt one is
-        // decided by its `OwnerSid` when that reads (D-B9). Then `stranded::sweep`.
-        let corrupt = match stranded::decide_corrupt(machine, before.corrupt, per_machine)? {
-            Ok(acting) => acting,
+    if let Some(record) = &before.record {
+        if let Decision::Stop(removed) = decide(machine, Some(&record.owner), per_machine)? {
+            return Ok(removed);
+        }
+    } else {
+        // No record, unless a set-up holding the lock is about to write it. A corrupt one is
+        // decided by its `OwnerSid` when that reads (D-B9), then read again below once the
+        // lock is held, as a record is: a set-up may rebuild the pool while this waits.
+        match stranded::decide_corrupt(machine, before.corrupt, per_machine)? {
             Err(removed) => return Ok(removed),
-        };
-        let wait = corrupt.map_or(0, |_| REMOVE_LOCK_WAIT_MS);
-        lock(machine, wait)?;
-        let locked = Locked(machine);
-        let removed = stranded::sweep(&mut *locked.0, acl, corrupt)?;
-        while_locked(&removed);
-        return Ok(removed);
-    }
-    let owner = before.record.as_ref().map(|record| &record.owner);
-    if let Decision::Stop(removed) = decide(machine, owner, per_machine)? {
-        return Ok(removed);
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                lock(machine, 0)?;
+                let locked = Locked(machine);
+                let removed = stranded::sweep(&mut *locked.0, acl, None)?;
+                while_locked(&removed);
+                return Ok(removed);
+            }
+        }
     }
     lock(machine, REMOVE_LOCK_WAIT_MS)?;
     let locked = Locked(machine);
@@ -283,8 +285,8 @@ pub fn remove_then(
         }
         Decision::Act(acting) => acting,
     };
-    let (record, left) = stranded::widen(machine, record)?;
-    let removed = steps(machine, acl, &record, acting, left)
+    let (record, left, domain) = stranded::widen(machine, record)?;
+    let removed = steps(machine, acl, &record, acting, (left, domain))
         .map(Removed::All)
         .map_err(|(step, cause)| RemoveFailure {
             step,
@@ -377,7 +379,7 @@ fn steps(
     acl: &mut impl AclWriter,
     record: &MachineRecord,
     acting: Acting,
-    left: Vec<String>,
+    (left, domain): (Vec<String>, [u32; 3]),
 ) -> Result<RemoveReport, Failed> {
     let mut report = RemoveReport {
         left,
@@ -397,7 +399,7 @@ fn steps(
         .stop_strays(&record.pool, &record.owner)
         .map_err(|e| (RemoveStep::Strays, cause_of(&e)))?;
     for (at, sid) in record.pool.iter().enumerate() {
-        remove_user(machine, acl, record, at, sid, &mut report)?;
+        remove_user(machine, acl, record, (at, domain), sid, &mut report)?;
     }
     machine
         .sweep_tasks(&record.pool)
@@ -449,7 +451,7 @@ fn remove_user(
     machine: &mut impl Removal,
     acl: &mut impl AclWriter,
     record: &MachineRecord,
-    at: usize,
+    (at, domain): (usize, [u32; 3]),
     sid: &Sid,
     report: &mut RemoveReport,
 ) -> Result<(), Failed> {
@@ -504,8 +506,11 @@ fn remove_user(
             .map_err(|e| (RemoveStep::Account, format!("{label}: {}", cause_of(&e))))?;
         report.accounts += 1;
     }
-    let rights = |e: MachineError| (RemoveStep::Account, format!("{label}: {}", cause_of(&e)));
-    machine.revoke_rights(sid).map_err(rights)?;
+    // Only a SID of this machine's account domain: never a built-in one a record names.
+    if sid.domain() == Some(domain) {
+        let rights = |e: MachineError| (RemoveStep::Account, format!("{label}: {}", cause_of(&e)));
+        machine.revoke_rights(sid).map_err(rights)?;
+    }
     Ok(())
 }
 

@@ -152,7 +152,7 @@ pub mod strays;
 pub mod sweep;
 #[cfg(any(windows, test))]
 pub mod taken_file;
-mod top_up;
+pub mod top_up;
 #[cfg(windows)]
 mod windows_machine;
 

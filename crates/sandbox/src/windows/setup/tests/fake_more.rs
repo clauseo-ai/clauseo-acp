@@ -9,9 +9,11 @@ use std::path::{Path, PathBuf};
 
 use crate::windows::acl_plan::Sid;
 use crate::windows::marker::Marker;
+use crate::windows::pool::assign::Why;
 use crate::windows::pool::{MachineRecord, pool_number};
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::setup::stranded::{MARKER_VERSION, PartialRecord, PoolAccounts, Seen};
+use crate::windows::setup::top_up::HeldUser;
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -328,6 +330,13 @@ impl FakeMachine {
             foreign: self.stranded.foreign.clone(),
             marker_version: self.stranded.marker_version,
         }
+    }
+
+    /// `Machine::held_users`' answer: each user in `held`, held by a ledger grant.
+    pub(super) fn fake_held(&self) -> Vec<HeldUser> {
+        let held = self.held.iter();
+        held.map(|user| (user.clone(), Some(Why::Entries)))
+            .collect()
     }
 
     /// `Machine::mark`, with no call line.

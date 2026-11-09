@@ -310,11 +310,9 @@ impl Removal for WindowsRemoval {
     }
 
     fn delete_user(&mut self, name: &str) -> Result<(), MachineError> {
-        let real = self.names.real(name);
-        // The sign-in screen value first: once the account is gone, its name can't be found
-        // from the record's SID, so a value left after it would be left for good.
-        accounts::unhide(&real)?;
-        accounts::delete_user(&real)
+        // The sign-in screen value goes first and comes back if the delete fails
+        // (`accounts::delete_user`): a value left after the account would be left for good.
+        accounts::delete_user(&self.names.real(name))
     }
 
     fn program_data(&mut self) -> Result<PathBuf, MachineError> {

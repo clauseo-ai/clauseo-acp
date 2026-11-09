@@ -43,7 +43,7 @@ use super::lock::os;
 use super::password::is_strong;
 use super::record_values::RegValue;
 use super::record_write::{Key, check, set_value};
-use super::stranded::POOL_COMMENT;
+use super::stranded::{POOL_COMMENT, delete_keeping_hide};
 use crate::windows::sids::Sid;
 
 /// The key whose `DWORD` value 0 under an account's name hides it from the sign-in screen.
@@ -196,19 +196,21 @@ pub(super) fn set_password(name: &str, password: &str) -> Result<(), MachineErro
     net("NetUserSetInfo", status)
 }
 
-/// Deletes the local account `name`'s sign-in screen value, then the account (`NetUserDel`):
-/// in that order, so a value is never left to pre-mark a later account of that name. An
-/// account or value already gone is `Ok`.
+/// Deletes the local account `name` (`NetUserDel`) as `stranded::delete_keeping_hide` orders
+/// it: its sign-in screen value off first, put back when the delete fails. An account or value
+/// already gone is `Ok`.
 pub(crate) fn delete_user(name: &str) -> Result<(), MachineError> {
     checked_name(name)?;
-    unhide(name)?;
-    let account = HSTRING::from(name);
-    // SAFETY: the name is a NUL-terminated HSTRING that lives for the call.
-    let status = unsafe { NetUserDel(PCWSTR::null(), &account) };
-    if status != NERR_UserNotFound {
-        net("NetUserDel", status)?;
-    }
-    Ok(())
+    let delete = || {
+        let account = HSTRING::from(name);
+        // SAFETY: the name is a NUL-terminated HSTRING that lives for the call.
+        let status = unsafe { NetUserDel(PCWSTR::null(), &account) };
+        if status == NERR_UserNotFound {
+            return Ok(());
+        }
+        net("NetUserDel", status)
+    };
+    delete_keeping_hide(|| unhide(name), delete, || hide(name))
 }
 
 /// Makes the local group `name` (`NetLocalGroupAdd` level 1); its SID. A group by that name is

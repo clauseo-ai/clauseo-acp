@@ -187,6 +187,7 @@ impl Removal for Remover {
                 Change::Delete => None,
                 Change::Write(record) => Some(record),
             };
+            self.m.stranded.corrupt = None;
         }
         Ok(())
     }

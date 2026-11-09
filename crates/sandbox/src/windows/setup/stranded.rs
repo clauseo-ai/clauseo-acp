@@ -78,7 +78,8 @@ pub struct PoolAccounts {
     /// group), each by `DOMAIN\name`, or `an account Windows can't name`: never proven,
     /// never removed.
     pub foreign: Vec<String>,
-    /// The record's `MarkerVersion`, when it can be read.
+    /// The record's `MarkerVersion` ([`marker_version_of`]): `None` when absent; one that
+    /// can't be read is `u32::MAX`, so the older mark proves nothing.
     pub marker_version: Option<u32>,
 }
 
@@ -199,6 +200,36 @@ pub fn sort(accounts: &PoolAccounts, skip: &[Sid]) -> Sorted {
     sorted
 }
 
+/// The record's `MarkerVersion` as `sort` takes it, from its read: absent is `None`; one that
+/// can't be read, or past `u32`, is `u32::MAX`, never absent, so an account with the older mark
+/// alone is never proven on the strength of a value no one could read.
+pub fn marker_version_of<E: fmt::Display>(read: Result<Option<u64>, E>) -> Option<u32> {
+    match read {
+        Ok(version) => version.map(|version| u32::try_from(version).unwrap_or(u32::MAX)),
+        Err(error) => {
+            tracing::warn!(%error, "the record's MarkerVersion can't be read");
+            Some(u32::MAX)
+        }
+    }
+}
+
+/// An account's delete as `accounts::delete_user` makes it: its sign-in screen value off first
+/// (`unhide`), so no value outlives the account to pre-mark a later one of its name; then the
+/// account (`delete`); and when that fails, the value put back (`hide`), so the account keeps
+/// its mark and the next run still proves it. The delete's error is the one given back.
+pub fn delete_keeping_hide<E>(
+    unhide: impl FnOnce() -> Result<(), E>,
+    delete: impl FnOnce() -> Result<(), E>,
+    hide: impl FnOnce() -> Result<(), E>,
+) -> Result<(), E> {
+    unhide()?;
+    delete().inspect_err(|_| {
+        if hide().is_err() {
+            tracing::warn!("a sandbox user's sign-in screen value couldn't be put back");
+        }
+    })
+}
+
 /// Names each doubtful account, and each of the group's foreign members, in the log.
 pub fn log_doubtful(doubtful: &[Doubt], foreign: &[String]) {
     for doubt in doubtful {
@@ -309,6 +340,48 @@ mod tests {
             doubtful(&sort(&accounts(bare, None), &[])),
             [("ClauseoSb01", Why::Unmarked)]
         );
+    }
+
+    #[test]
+    fn an_unreadable_marker_version_never_lets_the_older_mark_prove() {
+        assert_eq!(marker_version_of::<String>(Ok(None)), None);
+        assert_eq!(marker_version_of::<String>(Ok(Some(2))), Some(2));
+        assert_eq!(
+            marker_version_of::<String>(Ok(Some(u64::MAX))),
+            Some(u32::MAX)
+        );
+        let unreadable = marker_version_of(Err("the value has the wrong type"));
+        assert_eq!(unreadable, Some(u32::MAX));
+        let older = vec![seen("ClauseoSb01", 1001, true, false, true)];
+        let sorted = sort(&accounts(older, unreadable), &[]);
+        assert_eq!(doubtful(&sorted), [("ClauseoSb01", Why::OlderMark)]);
+    }
+
+    #[test]
+    fn a_failed_delete_puts_the_sign_in_value_back() {
+        let steps = std::cell::RefCell::new(Vec::new());
+        let step = |name: &'static str, ok: bool| {
+            let steps = &steps;
+            move || {
+                steps.borrow_mut().push(name);
+                if ok { Ok(()) } else { Err(name) }
+            }
+        };
+        let failed = delete_keeping_hide(
+            step("unhide", true),
+            step("delete", false),
+            step("hide", true),
+        );
+        assert_eq!(failed, Err("delete"));
+        assert_eq!(*steps.borrow(), ["unhide", "delete", "hide"]);
+        steps.borrow_mut().clear();
+        let done = delete_keeping_hide(
+            step("unhide", true),
+            step("delete", true),
+            step("hide", true),
+        );
+        assert_eq!(done, Ok(()));
+        assert_eq!(*steps.borrow(), ["unhide", "delete"]);
     }
 
     #[test]
