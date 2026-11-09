@@ -6,7 +6,7 @@ export const HI = {
   // each tool's name
   "Web search": "वेब खोज",
   Browser: "ब्राउज़र",
-  // the tool line's name and tooltip, one sentence per tool: "Web search: on. Browser: off, needs Chrome."
+  // the tool line's name and tooltip, one sentence per tool: "Web search: on. Browser: off, install Chrome."
   "{tool}: {state}.": "{tool}: {state}।",
   on: "चालू",
   // {reason} is one of the reasons below, its first letter in lower case
@@ -15,9 +15,10 @@ export const HI = {
   "In Settings": "सेटिंग्स में",
   "Managed by firm": "फ़र्म द्वारा प्रबंधित",
   "Can't search on this login": "इस लॉगिन पर खोज नहीं हो सकती",
-  "Not available yet": "अभी उपलब्ध नहीं",
-  "Too many browsers open": "बहुत सारे ब्राउज़र खुले हैं",
-  "Needs Chrome": "Chrome चाहिए",
+  // no browser on this computer: the lawyer's step, by the computer's OS (Chrome on a Mac, Chrome or Edge on Windows)
+  // (provisional Hindi, app track final)
+  "Install Chrome": "Chrome इंस्टॉल करें",
+  "Install Chrome or Edge": "Chrome या Edge इंस्टॉल करें",
   // the firm's Chrome or Edge policy turns off remote debugging, so no browser starts
   // (provisional Hindi, app track final)
   "Blocked by your firm": "आपकी फ़र्म ने रोका है",

@@ -1,29 +1,14 @@
 // Each row of the tool line's popover, in the fewest words (DESIGN.md §Icons): the tool's glyph and name, an On or
-// Off chip, the reason in a few words only when off, and under the browser with no Chrome, the
-// download; under the browser the firm's policy blocks, or whose policy Clauseo couldn't check, the
-// reason in full, and for the policy not checked, Try again (browser-policy.ts). Pure, so the tests can read every state; loaded with the popover only.
-import type { Lang } from "@clauseo/components/lib/display.ts";
+// Off chip, the reason in a few words only when off; under the browser with no Chrome (or Edge, on Windows), what to
+// install and that Clauseo then needs reopening; under the browser the firm's policy blocks, or whose policy Clauseo
+// couldn't check, the reason in full, and for the policy not checked, Try again (browser-policy.ts). Pure, so the
+// tests can read every state; loaded with the popover only.
+import type { Lang, Platform } from "@clauseo/components/lib/display.ts";
 import { tw, type ToolsKey } from "@clauseo/components/lib/words-tools.ts";
 import { toolsLine } from "@clauseo/components/lib/words-tools-line.ts";
 import type { ToolGlyphState } from "@clauseo/components/icons/tool-glyph.tsx";
-import type { BrowserInstall, InstallFailCode } from "./browser-install.ts";
 import type { BrowserPolicy } from "./browser-policy.ts";
 import { glyphState, reasonOf, toolName, type BrowserState, type KnownTool } from "./tools.ts";
-
-/** The Chrome download as the browser row shows it, its words resolved. */
-export type DownloadPart =
-  /** [download] Download Chrome, its size muted beside it, its tooltip and description `tip`. */
-  | { kind: "offer"; button: string; size: string; tip: string }
-  /** This computer can't download it: a muted line. */
-  | { kind: "none"; line: string }
-  /** [download] the bar, and how far in words, which say it for screen readers too. */
-  | { kind: "progress"; value: number; max: number; text: string; name: string }
-  /** [download] Unpacking, with no bar: DESIGN's bars are determinate only, and nothing spins. */
-  | { kind: "unpacking"; text: string }
-  /** Chrome is in: the row's reason says so (ToolRowWords.reason), so nothing more under it. */
-  | { kind: "done" }
-  /** [break] the cause in a few words, and Try again. */
-  | { kind: "failed"; cause: string };
 
 /** Try again under the browser whose policy Clauseo couldn't check: its words, and whether the read it asked for runs. */
 export type RecheckPart = { button: string; waiting: boolean };
@@ -35,18 +20,18 @@ export type ToolRowWords = {
   on: boolean;
   /** The chip's word: On or Off. */
   chip: string;
-  /** Why it's off, a few words; null while on. Once Chrome is in (download.kind "done"), what it is ready for. */
+  /** Why it's off, a few words; null while on. Once a policy read found nothing blocking, what it is ready for. */
   reason: string | null;
   /** The reason sits in the chip's row, after it (In Settings), not on a line of its own. */
   beside: boolean;
-  /** The reason's tooltip and description: once Chrome is in, when the browser comes; else null. */
+  /** The reason's tooltip and description: once a policy read found nothing blocking, when the browser comes; else
+   * null. */
   reasonTip: string | null;
-  /** A muted line under the reason saying it in full: the firm's policy blocks the browser, or
-   * Clauseo couldn't check it; else null. */
+  /** A muted line under the reason saying it in full: what to install and that Clauseo then needs reopening, the
+   * firm's policy blocks the browser, or Clauseo couldn't check it; else null. */
   note: string | null;
   /** Off in Settings, with the settings window to turn it on: the popover's foot offers Open Settings. */
   settings: boolean;
-  download: DownloadPart | null;
   /** Under the browser whose policy Clauseo couldn't check, Try again; else null. */
   recheck: RecheckPart | null;
 };
@@ -54,74 +39,34 @@ export type ToolRowWords = {
 export type ToolRowRoom = {
   /** Whether the host has the settings window, for Open Settings. */
   settings: boolean;
-  /** The app's Chrome download; null when the window has no app feed to hear it on. */
-  install: BrowserInstall | null;
+  /** The computer's OS: what to install for the browser (Chrome, or Chrome or Edge on Windows). */
+  platform: Platform;
   /** The re-read of the firm's browser policy; null when the window has no app feed to hear it on. */
   policy?: BrowserPolicy | null;
 };
-
-const mb = (bytes: number) => Math.round(bytes / 1e6);
-
-/** What a failed download says, by the host's code; never the host's own message. `unsupported` is no failure line
- * (the computer can't download it: a muted line), and `cancelled` is no failure at all (the offer again). */
-export const FAILED: Record<Exclude<InstallFailCode, "unsupported" | "cancelled">, ToolsKey> = {
-  network: "Connection dropped",
-  size_mismatch: "File didn't match",
-  signature: "File didn't match",
-  disk_space: "Needs 1\u00a0GB free",
-  host_refused: "Network blocked it",
-  unpack: "Couldn't unpack",
-  unknown: "Download failed",
-};
-
-/** The download under the browser row with no Chrome, by its state: the offer until a download starts or after a
- * cancel; null only without an app feed to hear the state on. */
-export function downloadPart(lang: Lang, install: BrowserInstall | null): DownloadPart | null {
-  if (install === null) return null;
-  const p = install.progress;
-  const name = tw(lang, "Download Chrome");
-  if (p === null)
-    return {
-      kind: "offer",
-      button: name,
-      size: tw(lang, "200\u00a0MB"),
-      tip: tw(lang, "From Google, once. Needs 1\u00a0GB free."),
-    };
-  if (p === "unpacking") return { kind: "unpacking", text: tw(lang, "Unpacking") };
-  if (p === "done") return { kind: "done" };
-  if ("downloading" in p) {
-    const { bytes, total } = p.downloading;
-    return {
-      kind: "progress",
-      value: Math.min(bytes, total),
-      // the first Downloading brings the total: until then the bar has no words
-      max: Math.max(total, 1),
-      text:
-        total > 0
-          ? tw(lang, "{done} of {total}\u00a0MB", { done: mb(bytes), total: mb(total) })
-          : "",
-      name,
-    };
-  }
-  if (p.failed.code === "unsupported")
-    return { kind: "none", line: tw(lang, "Install Chrome to use it") };
-  return { kind: "failed", cause: tw(lang, FAILED[p.failed.code]) };
-}
 
 const POLICY: ToolsKey =
   "Your firm doesn't allow apps to control a browser on this computer, so Clauseo can't use one for you.";
 const UNREADABLE: ToolsKey =
   "Clauseo couldn't check this computer's browser settings, so it won't use a browser for now. It checks again the next time it needs one.";
 
-/** The browser's reason in full when its policy keeps it off; else null. */
-function policyNote(lang: Lang, state: BrowserState): string | null {
+/** What to install, in full: the browser's skill loads as Clauseo starts, so a browser installed later needs Clauseo
+ * reopened. Windows takes Edge too. */
+const INSTALL_MAC: ToolsKey = "Install Google Chrome, then close and reopen Clauseo.";
+const INSTALL_WINDOWS: ToolsKey =
+  "Install Google Chrome or Microsoft Edge, then close and reopen Clauseo.";
+
+/** The browser's reason in full: what to install with none on the computer, or its policy keeping it off; else null. */
+function browserNote(lang: Lang, platform: Platform, state: BrowserState): string | null {
+  if (state === "browser_not_installed")
+    return tw(lang, platform === "windows" ? INSTALL_WINDOWS : INSTALL_MAC);
   if (state === "browser_blocked_by_policy") return tw(lang, POLICY);
   if (state === "browser_policy_unreadable") return tw(lang, UNREADABLE);
   return null;
 }
 
 /** Try again under the browser whose policy Clauseo couldn't check, by the last read's state: waiting while one runs;
- * null once a read found it clear (the row then says the browser is ready, as after a download), or with no app feed
+ * null once a read found it clear (the row then says the browser is ready), or with no app feed
  * to hear the read on. */
 function recheckPart(lang: Lang, policy: BrowserPolicy | null | undefined): RecheckPart | null {
   if (policy == null || policy.state === "clear") return null;
@@ -131,21 +76,17 @@ function recheckPart(lang: Lang, policy: BrowserPolicy | null | undefined): Rech
 /** One row, for a tool the line speaks for. */
 export function toolRow(lang: Lang, tool: KnownTool, room: ToolRowRoom): ToolRowWords {
   const on = tool.state === "available";
-  const reason = reasonOf(tool);
-  const download =
-    tool.tool === "browser" && tool.state === "browser_not_installed"
-      ? downloadPart(lang, room.install)
-      : null;
+  const reason = reasonOf(tool, room.platform);
   const unread = tool.tool === "browser" && tool.state === "browser_policy_unreadable";
-  // a read since found nothing blocking: the next conversation gets the browser, as once Chrome is in
-  const ready = download?.kind === "done" || (unread && room.policy?.state === "clear");
+  // a read since found nothing blocking: the next conversation gets the browser
+  const ready = unread && room.policy?.state === "clear";
   return {
     tool: tool.tool,
     glyph: glyphState(tool),
     name: toolsLine(lang, toolName(tool)),
     on,
     chip: tw(lang, on ? "On" : "Off"),
-    // once Chrome is in, needing it is no longer so: the reason says what it is ready for
+    // once nothing blocks it, the reason says what it is ready for
     reason:
       reason === null
         ? null
@@ -154,10 +95,8 @@ export function toolRow(lang: Lang, tool: KnownTool, room: ToolRowRoom): ToolRow
           : toolsLine(lang, reason),
     beside: tool.state === "off",
     reasonTip: ready ? tw(lang, "The browser comes with your next conversation.") : null,
-    // a download can't help here: the firm's block (or a policy not read) holds for every browser
-    note: tool.tool === "browser" && !ready ? policyNote(lang, tool.state) : null,
+    note: tool.tool === "browser" && !ready ? browserNote(lang, room.platform, tool.state) : null,
     settings: tool.state === "off" && room.settings,
-    download,
     recheck: unread ? recheckPart(lang, room.policy) : null,
   };
 }

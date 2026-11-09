@@ -728,7 +728,7 @@ Clauseo's readers with no warning, and fails when this table misses a key.
 | `ui.lite` | `automatic`, `on`, `off` | `automatic` | `REG_SZ` | `on` (RDS hosts without a GPU) |
 | `ui.motion` | `system`, `reduce`, `full` | `system` | `REG_SZ` | `reduce` |
 | `tools.web_search` | boolean | true | `REG_DWORD` 0 or 1 | 0: agents may not search the web or read web pages. **Security key** |
-| `tools.browser` | boolean | true on macOS; false on Windows and Linux | `REG_DWORD` 0 or 1 | 0: agents do not get Clauseo's browser. **Security key** |
+| `tools.browser` | boolean | true on macOS and Windows; false on Linux | `REG_DWORD` 0 or 1 | 0: agents do not get Clauseo's browser. **Security key** |
 | `tools.connectors` | boolean | true | `REG_DWORD` 0 or 1 | 0: no data connector runs (the paid Indian case-law connector): it is not offered, and agents do not get it. On, nothing runs until a lawyer adds a connector. Amounts the app shows for it include GST; the GST breakdown is on the connector's receipt. **Security key** |
 | `privacy.counts` | boolean | true | `REG_DWORD` 0 or 1 | 0: Clauseo keeps and sends no anonymous usage counts, and deletes what it kept. Policy can only turn it off (1 is ignored with a warning). **Security key** |
 | `privacy.crash_reports` | boolean | false | `REG_DWORD` 0 or 1 | 0: Clauseo sends no crash reports. Policy can only turn it off (1 is ignored with a warning). **Security key** |
@@ -775,11 +775,17 @@ pull request that makes Clauseo act on it. Same formats as above ([decision
 
 ### Browser automation and RemoteDebuggingAllowed
 
-Clauseo's browser drives Chrome (or Chrome for Testing, which Clauseo can download) through
-Chrome's remote debugging. Chrome's, Edge's and Chromium's `RemoteDebuggingAllowed` policy turns
-that off. Chrome for Testing reads its own policy location rather than Chrome's, so Clauseo checks
-your Chrome, Edge and Chromium policy itself. It does this before it starts any browser, whichever browser it
-would pick.
+Clauseo's browser is agent-browser, a command the agents run, which drives the computer's installed
+Google Chrome (on Windows, Microsoft Edge when no Chrome is installed) through Chrome's remote
+debugging, in a fresh profile for each session. With neither installed, the agents get no browser
+and the app tells the lawyer what to install; a browser installed later reaches the agents once
+Clauseo is reopened. The browser doesn't go through Clauseo's egress proxy, so
+`network.allowed_domains` and the unsafe-site list don't apply to it; Chrome or Edge uses its own
+network settings.
+
+Chrome's, Edge's and Chromium's `RemoteDebuggingAllowed` policy turns remote debugging off.
+Clauseo checks your Chrome, Edge and Chromium policy itself, before it starts any browser,
+whichever browser it would pick.
 
 **What Clauseo reads.** The value `RemoteDebuggingAllowed`, for both the computer and the user,
 in Chrome's, Edge's and Chromium's policy locations. It takes the same values Chrome does:

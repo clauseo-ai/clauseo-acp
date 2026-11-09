@@ -60,7 +60,7 @@ export function ToolLinePopover({
   const layer = useLayer();
   const trigger = useId();
   // the popup itself takes the focus on open, by pointer or by key: no button stands focused or ringed (DESIGN.md's
-  // Quiet Start), and an Enter right after opening presses nothing, Download Chrome above all; Tab reaches the buttons
+  // Quiet Start), and an Enter right after opening presses nothing, Try again above all; Tab reaches the buttons
   const popup = useRef<HTMLDivElement>(null);
   return (
     <BasePopover.Root>

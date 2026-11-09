@@ -2,7 +2,7 @@
 // each glyph shows, and the words that say it, as the line's accessible name and tooltip. A tool this version
 // doesn't know, an availability it can't read, or a reason it has no words for says nothing: it is left out, and with
 // nothing left the line has no tool segment.
-import type { Lang } from "@clauseo/components/lib/display.ts";
+import type { Lang, Platform } from "@clauseo/components/lib/display.ts";
 import { toolsLine, type ToolsLineKey } from "@clauseo/components/lib/words-tools-line.ts";
 import type { ToolGlyphState } from "@clauseo/components/icons/tool-glyph.tsx";
 import type { ToolState } from "../transport/protocol.ts";
@@ -10,14 +10,13 @@ import type { ToolState } from "../transport/protocol.ts";
 /** Where web search stands, in the words the popover has. */
 export type WebState = "available" | "off" | "locked_off" | "no_search_on_this_login";
 
-/** Where the browser stands, in the words the popover has. */
+/** Where the browser stands, in the words the popover has. The browser is agent-browser driving the computer's own
+ * Chrome (or Edge, on Windows), so the guarded browser's reasons (managed_by_firm, no_proxy, too_many_browsers) never
+ * come for it and say nothing. */
 export type BrowserState =
   | "available"
   | "off"
   | "locked_off"
-  | "managed_by_firm"
-  | "no_proxy"
-  | "too_many_browsers"
   | "browser_not_installed"
   | "browser_blocked_by_policy"
   | "browser_policy_unreadable";
@@ -35,9 +34,6 @@ const WEB: ReadonlySet<string> = new Set<WebState>([
 const BROWSER: ReadonlySet<string> = new Set<BrowserState>([
   "off",
   "locked_off",
-  "managed_by_firm",
-  "no_proxy",
-  "too_many_browsers",
   "browser_not_installed",
   "browser_blocked_by_policy",
   "browser_policy_unreadable",
@@ -76,28 +72,28 @@ export function knownTools(tools: readonly ToolState[] | undefined): KnownTool[]
  * it can't search here; a browser policy Clauseo couldn't read is no firm's lock). */
 export function glyphState(t: KnownTool): ToolGlyphState {
   if (t.state === "available") return "on";
-  return t.state === "locked_off" ||
-    t.state === "managed_by_firm" ||
-    t.state === "browser_blocked_by_policy"
-    ? "locked"
-    : "off";
+  return t.state === "locked_off" || t.state === "browser_blocked_by_policy" ? "locked" : "off";
 }
 
-const REASON: Record<Exclude<WebState | BrowserState, "available">, ToolsLineKey> = {
+const REASON: Record<
+  Exclude<WebState | BrowserState, "available" | "browser_not_installed">,
+  ToolsLineKey
+> = {
   off: "In Settings",
   locked_off: "Managed by firm",
-  managed_by_firm: "Managed by firm",
   no_search_on_this_login: "Can't search on this login",
-  no_proxy: "Not available yet",
-  too_many_browsers: "Too many browsers open",
-  browser_not_installed: "Needs Chrome",
   browser_blocked_by_policy: "Blocked by your firm",
   browser_policy_unreadable: "Couldn't check browser settings",
 };
 
-/** Why a tool is off, in a few words; null while it's on. */
-export const reasonOf = (t: KnownTool): ToolsLineKey | null =>
-  t.state === "available" ? null : REASON[t.state];
+/** Why a tool is off, in a few words; null while it's on. With no browser on the computer, the lawyer's step: what to
+ * install there, Chrome or Edge on Windows (the host takes Edge there when it finds no Chrome), else Chrome. */
+export function reasonOf(t: KnownTool, platform: Platform): ToolsLineKey | null {
+  if (t.state === "available") return null;
+  if (t.state === "browser_not_installed")
+    return platform === "windows" ? "Install Chrome or Edge" : "Install Chrome";
+  return REASON[t.state];
+}
 
 /** A tool's name. */
 export const toolName = (t: KnownTool): ToolsLineKey =>
@@ -108,13 +104,17 @@ export const toolName = (t: KnownTool): ToolsLineKey =>
 const midSentence = (lang: Lang, s: string) =>
   lang === "en" && /^\p{Lu}\p{Ll}/u.test(s) ? s.charAt(0).toLocaleLowerCase("en") + s.slice(1) : s;
 
-/** The tool line's accessible name and tooltip: one sentence per tool, "Web search: on. Browser: off, needs
+/** The tool line's accessible name and tooltip: one sentence per tool, "Web search: on. Browser: off, install
  * Chrome."; null with no tools to speak for. Off in Settings: "Web search: off, in Settings." */
-export function toolsLabel(lang: Lang, tools: readonly KnownTool[]): string | null {
+export function toolsLabel(
+  lang: Lang,
+  platform: Platform,
+  tools: readonly KnownTool[],
+): string | null {
   if (tools.length === 0) return null;
   return tools
     .map((t) => {
-      const reason = reasonOf(t);
+      const reason = reasonOf(t, platform);
       const state =
         reason === null
           ? toolsLine(lang, "on")

@@ -1,9 +1,8 @@
 // The re-read of the firm's browser policy the browser row offers when Clauseo couldn't check it, app-wide: the one call
 // that asks for it (`recheck_browser_policy`, sent through dispatch) and the host's `browser_policy` events, which say
-// what the read found. It follows the Chrome download (browser-install.ts): the host answers `done` at once, its
-// `checking` and then `unreadable`, `blocked` or `clear` reach every window, and the latest is in every catch-up. A
-// running conversation keeps the browser it started with: after `clear` the next conversation gets it, and the row
-// says so in the download's words. On `blocked` the host re-words the header itself (`browser_blocked_by_policy`).
+// what the read found: the host answers `done` at once, its `checking` and then `unreadable`, `blocked` or `clear`
+// reach every window, and the latest is in every catch-up. A running conversation keeps the browser it started with:
+// after `clear` the next conversation gets it, and the row says so (Ready for new conversations). On `blocked` the host re-words the header itself (`browser_blocked_by_policy`).
 // A second ask while a read runs is joined by the host, so the row asks once and waits.
 import type { BrowserPolicyState } from "../transport/protocol.ts";
 import type { HostTransport } from "../transport/host-transport.ts";

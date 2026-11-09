@@ -1,8 +1,9 @@
 // UET's copy review entries, the web and browser brief, for the tool line (room/tool-line.tsx), apart from registry.tsx to
 // keep that file under the size limit: each string in the real room over FakeTransport, its thread's header carrying
 // the tools in the state that shows it, the tool line pressed so its popover stands open. A string that is only a
-// tooltip and an accessible name shows with its tooltip open, its control focused from the keyboard. The Chrome
-// download is faked: the host plays its `browser_install` reports (room/browser-install.ts) once the thread's view is in.
+// tooltip and an accessible name shows with its tooltip open, its control focused from the keyboard. The firm's
+// browser policy re-read is faked: the host plays its `browser_policy` reports (room/browser-policy.ts) once the
+// thread's view is in. What to install for the browser follows the host's OS: a Mac unless the entry says Windows.
 import { Composer } from "@clauseo/components/clauseo/composer.tsx";
 import { RoomScopeProvider } from "@clauseo/components/clauseo/room-scope-provider.tsx";
 import type { Lang } from "@clauseo/components/lib/display.ts";
@@ -10,11 +11,7 @@ import { toolsLine, type ToolsLineKey } from "@clauseo/components/lib/words-tool
 import { tw, type ToolsKey } from "@clauseo/components/lib/words-tools.ts";
 import { batch, event, header, reset, THREAD } from "../testing/stream-script.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
-import type {
-  BrowserInstallFailure,
-  BrowserInstallState,
-  ToolState,
-} from "../transport/protocol.ts";
+import type { BrowserPolicyState, ToolState } from "../transport/protocol.ts";
 import { toolsSegment } from "../room/tool-line-room.ts";
 import { knownTools } from "../room/tools.ts";
 import type { Entry } from "./entry.ts";
@@ -45,15 +42,16 @@ const browser = (reason?: string): ToolState => ({
   availability: reason === undefined ? "available" : ({ unavailable: { reason } } as never),
 });
 
+/** What an entry's host does beyond its header: the policy reports it plays, and its OS. */
+type HostPlay = { policy?: readonly BrowserPolicyState[]; platform?: "mac" | "windows" };
+
 /** A host with one matter and its one thread, whose header carries `tools`, with Settings, and the app feed that
- * plays `install`'s reports once the view is in. */
-function toolsHost(
-  tools: ToolState[],
-  install: readonly BrowserInstallState[] = [],
-): FakeTransport {
+ * plays `play.policy`'s reports once the view is in. */
+function toolsHost(tools: ToolState[], play: HostPlay = {}): FakeTransport {
   const head = header();
   head.header!.tools = tools;
   const transport: FakeTransport = new FakeTransport({
+    platform: play.platform ?? "mac",
     query: (query) => {
       if (query === "list_matters") return { matters: [MATTER] };
       if (typeof query === "object" && query.list_threads !== undefined)
@@ -67,7 +65,7 @@ function toolsHost(
     subscribe: (stream) =>
       queueMicrotask(() => {
         transport.deliver(event(batch(1, [reset([], head)], undefined, stream)));
-        for (const state of install) transport.appEvent({ browser_install: { state } });
+        for (const state of play.policy ?? []) transport.appEvent({ browser_policy: { state } });
       }),
   });
   return transport;
@@ -79,14 +77,14 @@ const entry = (
   id: string,
   words: WordsRef,
   tools: ToolState[],
-  install?: readonly BrowserInstallState[],
+  play?: HostPlay,
   show: Show = "popover",
 ): Entry => ({
   id,
   words,
   screen: "room/status",
   render: () => {
-    const host = () => toolsHost(tools, install);
+    const host = () => toolsHost(tools, play);
     if (show === "popover") return <RoomPressing host={host} press="tool-line" />;
     if (show === "tip") return <RoomFocusing host={host} focus='[data-testid="tool-line"]' />;
     return <RoomPressFocusing host={host} press="tool-line" focus={show.tip} />;
@@ -108,40 +106,39 @@ const statusFit = (lang: Lang) => (
           state: "ready",
           onTurn: () => {},
         }}
-        tools={toolsSegment(lang, knownTools([web(), browser()]))}
+        tools={toolsSegment(lang, "mac", knownTools([web(), browser()]))}
       />
     </div>
   </RoomScopeProvider>
 );
 
 const NONE = [browser("browser_not_installed")];
-const DOWNLOADING: BrowserInstallState = {
-  downloading: { bytes: 64_400_000, total: 200_000_000 },
-};
-/** A failed download by the host's code; its message is the log's, and never shows. */
-const failed = (code: string): BrowserInstallState[] => [
-  { failed: { code: code as BrowserInstallFailure, message: `review: ${code}` } },
-];
+const WINDOWS: HostPlay = { platform: "windows" };
+const UNREAD = [browser("browser_policy_unreadable")];
+/** A policy read that found nothing blocking: the row is ready for new conversations. */
+const CLEAR: HostPlay = { policy: ["clear"] };
 
 /** UET's tool line entries, each id written as it is: an id never moves when an entry is added or taken out. Retired
  * in round 3 (icons first, DESIGN.md §Icons): UET-02 to UET-08, UET-16, UET-17, UET-32 and UET-36. UET-37 (Download
  * stopped) is retired too: a cancelled download goes back to the offer with no line. UET-26's words
- * were Chrome ready, UET-13's Off in Settings and UET-21's longer; each keeps its id for its new words. */
+ * were Chrome ready, UET-13's Off in Settings and UET-20's Needs Chrome; each keeps its id for its new words. Retired
+ * after #870's shell browser (the computer's own Chrome or Edge, no proxy, no slots, no download): UET-18, UET-19,
+ * UET-21 to UET-25, UET-27 to UET-30, UET-34, UET-35 and UET-42. */
 export const UET: Entry[] = [
   // the line's name and tooltip
   entry(
     "UET-01",
     lineWords("{tool}: {state}."),
     [web(), browser("browser_not_installed")],
-    [],
+    {},
     "tip",
   ),
-  entry("UET-39", lineWords("on"), [web(), browser()], [], "tip"),
+  entry("UET-39", lineWords("on"), [web(), browser()], {}, "tip"),
   entry(
     "UET-40",
     lineWords("off, {reason}"),
-    [web("locked_off"), browser("too_many_browsers")],
-    [],
+    [web("locked_off"), browser("browser_not_installed")],
+    {},
     "tip",
   ),
   // the rows: names, chips and reasons
@@ -152,12 +149,18 @@ export const UET: Entry[] = [
   entry("UET-12", lineWords("Can't search on this login"), [web("no_search_on_this_login")]),
   // beside the Off chip, in its row
   entry("UET-13", lineWords("In Settings"), [web("off"), browser("off")]),
-  entry("UET-14", lineWords("Managed by firm"), [web("locked_off"), browser("managed_by_firm")]),
-  entry("UET-18", lineWords("Not available yet"), [browser("no_proxy")]),
-  entry("UET-19", lineWords("Too many browsers open"), [browser("too_many_browsers")]),
-  entry("UET-20", lineWords("Needs Chrome"), NONE),
-  // the firm's Chrome or Edge policy blocks every browser: the reason, then in full under it,
-  // no download
+  entry("UET-14", lineWords("Managed by firm"), [web("locked_off"), browser("locked_off")]),
+  // no browser on the computer: what to install, by the OS, then in full under it
+  entry("UET-20", lineWords("Install Chrome"), NONE),
+  entry("UET-48", lineWords("Install Chrome or Edge"), NONE, WINDOWS),
+  entry("UET-49", popWords("Install Google Chrome, then close and reopen Clauseo."), NONE),
+  entry(
+    "UET-50",
+    popWords("Install Google Chrome or Microsoft Edge, then close and reopen Clauseo."),
+    NONE,
+    WINDOWS,
+  ),
+  // the firm's Chrome or Edge policy blocks every browser: the reason, then in full under it
   entry("UET-44", lineWords("Blocked by your firm"), [browser("browser_blocked_by_policy")]),
   entry(
     "UET-45",
@@ -166,7 +169,7 @@ export const UET: Entry[] = [
     ),
     [browser("browser_blocked_by_policy")],
   ),
-  // the firm's browser policy couldn't be read: the reason, then in full under it, no download
+  // the firm's browser policy couldn't be read: the reason, then in full under it, and Try again
   entry("UET-46", lineWords("Couldn't check browser settings"), [
     browser("browser_policy_unreadable"),
   ]),
@@ -175,7 +178,7 @@ export const UET: Entry[] = [
     popWords(
       "Clauseo couldn't check this computer's browser settings, so it won't use a browser for now. It checks again the next time it needs one.",
     ),
-    [browser("browser_policy_unreadable")],
+    UNREAD,
   ),
   // the foot
   entry("UET-15", popWords("Open Settings"), [web("off")]),
@@ -183,34 +186,17 @@ export const UET: Entry[] = [
     "UET-33",
     popWords("Changes apply to new conversations."),
     [web("off"), browser("off")],
-    [],
+    {},
     {
       tip: "tool-settings",
     },
   ),
-  // the download
-  // no state from the host yet: the offer, which is what a machine before any download shows
-  entry("UET-22", popWords("Download Chrome"), NONE),
-  entry("UET-42", popWords("200\u00a0MB"), NONE),
-  entry("UET-21", popWords("From Google, once. Needs 1\u00a0GB free."), NONE, [], {
-    tip: "tool-download",
-  }),
-  entry("UET-23", popWords("Install Chrome to use it"), NONE, failed("unsupported")),
-  entry("UET-24", popWords("{done} of {total}\u00a0MB"), NONE, [DOWNLOADING]),
-  entry("UET-25", popWords("Unpacking"), NONE, ["unpacking"]),
-  // Chrome is in: the reason it keeps, then its tooltip shown from the keyboard
-  entry("UET-26", popWords("Ready for new conversations"), NONE, ["done"]),
-  entry("UET-43", popWords("The browser comes with your next conversation."), NONE, ["done"], {
+  entry("UET-31", popWords("Try again"), UNREAD),
+  // a read since found nothing blocking: the reason it keeps, then its tooltip shown from the keyboard
+  entry("UET-26", popWords("Ready for new conversations"), UNREAD, CLEAR),
+  entry("UET-43", popWords("The browser comes with your next conversation."), UNREAD, CLEAR, {
     tip: "tool-row-reason",
   }),
-  entry("UET-34", popWords("Connection dropped"), NONE, failed("network")),
-  entry("UET-29", popWords("File didn't match"), NONE, failed("signature")),
-  entry("UET-27", popWords("Needs 1\u00a0GB free"), NONE, failed("disk_space")),
-  entry("UET-28", popWords("Network blocked it"), NONE, failed("host_refused")),
-  entry("UET-35", popWords("Couldn't unpack"), NONE, failed("unpack")),
-  // a code this version doesn't know reads as unknown
-  entry("UET-30", popWords("Download failed"), NONE, failed("a_newer_code")),
-  entry("UET-31", popWords("Try again"), NONE, failed("host_refused"), { tip: "tool-retry" }),
   {
     id: "UET-38",
     words: lineWords("{tool}: {state}."),

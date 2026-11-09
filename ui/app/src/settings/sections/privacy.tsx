@@ -4,8 +4,9 @@
 // Anthropic lists for its web search behind an info icon. Then a row for the websites Clauseo visits, its explanation behind an info
 // icon, unless the host's switches have both tools off. Then the tools' switches, web search and the browser, each led
 // by its glyph with the state on it, one helper line each, each flip one patch. A locked switch shows the host's value,
-// its glyph locked, and the room's lock reason, "Managed by firm", in its helper's place. While the Browser switch is on and the app has no
-// website check, the room's reason, "Not available yet", stands in its helper's place.
+// its glyph locked, and the room's lock reason, "Managed by firm", in its helper's place. Whether a conversation gets the
+// browser once it's on (a Chrome, or Edge on Windows, on the computer; the firm's browser policy) is the tool line's to
+// say, per conversation.
 // Left out until something stands behind them: a case-law source's row, the row for Clauseo's anonymous counts, and the
 // anonymous counts and crash report switches.
 //
@@ -52,10 +53,6 @@ function Dest({ kind }: { kind: AgentKind }) {
   );
 }
 
-/** Whether the app can check each website the browser opens. Nothing can yet, so every conversation's browser is off
- * (the room's no_proxy). Stage C's proxy flips it. */
-const websiteCheck = false;
-
 /** The websites Clauseo visits: the pages it reads, and those its browser opens, go to them from this computer. */
 function WebsitesDest() {
   const w = useSettingsWords();
@@ -77,15 +74,12 @@ function ToolRow({
   tool,
   label,
   note,
-  reason,
 }: {
   ctx: SectionContext;
   tools: ToolsSettingsView;
   tool: keyof ToolsSettingsView;
   label: string;
   note: string;
-  /** Optional: why the tool can't run yet, in the helper's place (one line at most). */
-  reason?: string | undefined;
 }) {
   const w = useSettingsWords();
   const locked = ctx.toolLocked(tool);
@@ -103,7 +97,7 @@ function ToolRow({
           />
         }
         label={label}
-        note={locked ? toolsLine(w.lang, "Managed by firm") : (reason ?? note)}
+        note={locked ? toolsLine(w.lang, "Managed by firm") : note}
         checked={on}
         disabled={locked}
         onCheckedChange={(next) => ctx.chooseTool(tool, next)}
@@ -143,9 +137,6 @@ export function Privacy({ ctx }: { ctx: SectionContext }) {
             tool="browser"
             label={w.s("Browser")}
             note={w.s("Runs on this computer.")}
-            reason={
-              tools.browser && !websiteCheck ? toolsLine(w.lang, "Not available yet") : undefined
-            }
           />
         </Group>
       )}
