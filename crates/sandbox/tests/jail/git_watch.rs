@@ -259,53 +259,97 @@ fn mounts_below(at: &Path) -> Vec<String> {
         .collect()
 }
 
-/// No volume can be mounted in the matter from inside the jail: a disk image in the matter
-/// attached with `hdiutil`, an SMB share with `mount_smbfs` or `mount -t smbfs`, and `mount
-/// -t` of a local file system all fail, and nothing is mounted. A volume that appeared in a
-/// live matter would hold a repository no event announced.
+/// The kernel's Sandbox lines (`log stream`, outside the jail) while `during` runs: the stream
+/// starts first (it prints its header before the kernel's lines reach it), and stops 3 s after
+/// `during` returns.
+fn sandbox_lines<T>(w: &World, during: impl FnOnce() -> T) -> (T, String) {
+    let script = "/usr/bin/log stream --style compact --predicate 'sender == \"Sandbox\"' & \
+                  p=$!; sleep 3; : > ready; while [ ! -e stop ]; do sleep 0.2; done; sleep 3; \
+                  kill $p";
+    let dir = w.dir("log");
+    let at = dir.clone();
+    let stream = std::thread::spawn(move || run_outside("/bin/sh", &["-c", script], &at));
+    let clock = SystemClock::new();
+    while !dir.join("ready").exists() && clock.now() < Duration::from_secs(10) {
+        async_io::block_on(async_io::Timer::after(Duration::from_millis(100)));
+    }
+    let out = during();
+    w.file("log/stop", "");
+    (out, stream.join().unwrap().stdout)
+}
+
+/// No disk image can be attached in the matter from inside the jail. The same image attaches
+/// outside it; inside, `hdiutil attach` fails because the sandbox refuses its look-up of the
+/// disk images helper (the kernel's Sandbox line says so), and nothing is mounted. (Other
+/// mounts fail too, but for reasons of their own, so they are no evidence: `mount_smbfs` with
+/// no server, `mount -t apfs` of a device that doesn't exist.)
 #[test]
-fn no_volume_can_be_mounted_in_the_matter_from_inside() {
+fn no_disk_image_can_be_attached_from_inside_the_jail() {
     let w = World::new();
     let m1 = w.at("m1");
-    dir_at(&m1.join("sub"));
     let image = m1.join("x.dmg");
+    let image = image.to_str().unwrap();
     let made = [
         "create",
         "-quiet",
         "-size",
-        "4m",
+        "1m",
         "-fs",
-        "APFS",
+        "HFS+",
         "-volname",
         "cgw-mount",
-        image.to_str().unwrap(),
+        image,
     ];
     run_outside("/usr/bin/hdiutil", &made, &w.at("")).assert_ok();
+    // Outside the jail, it attaches.
+    let point = dir_at(&w.at("outside-mount"));
+    let point = point.to_str().unwrap();
+    let attach = [
+        "attach",
+        "-nobrowse",
+        "-noverify",
+        "-mountpoint",
+        point,
+        image,
+    ];
+    run_outside("/usr/bin/hdiutil", &attach, &w.at("")).assert_ok();
+    assert_eq!(mounts_below(Path::new(point)).len(), 1, "attached outside");
+    run_outside(
+        "/usr/bin/hdiutil",
+        &["detach", "-force", point],
+        Path::new("/"),
+    )
+    .assert_ok();
+    // Inside, the sandbox refuses it.
     let (launcher, _) = launcher(w.builder().build().unwrap());
-    for script in [
-        "exec /usr/bin/hdiutil attach -nobrowse -mountpoint sub x.dmg",
-        "exec /usr/bin/hdiutil attach -nobrowse x.dmg",
-        "exec /sbin/mount_smbfs -N //guest@127.0.0.1/share sub",
-        "exec /sbin/mount -t smbfs //guest@127.0.0.1/share sub",
-        "exec /sbin/mount -t devfs devfs sub",
-        "exec /sbin/mount -t apfs /dev/disk99s1 sub",
-    ] {
-        let out = sh(&launcher, &m1, script, &[]);
-        let mounted = mounts_below(&m1);
-        for line in &mounted {
-            if let Some(at) = line.split(" on ").nth(1).and_then(|r| r.split(" (").next()) {
-                drop(run_outside(
-                    "/usr/bin/hdiutil",
-                    &["detach", "-force", at],
-                    Path::new("/"),
-                ));
-            }
+    let script = "echo $$; exec /usr/bin/hdiutil attach -nobrowse -noverify x.dmg";
+    let (out, log) = sandbox_lines(&w, || sh(&launcher, &m1, script, &[]));
+    let mounted = mounts_below(&m1);
+    for line in &mounted {
+        if let Some(at) = line.split(" on ").nth(1).and_then(|r| r.split(" (").next()) {
+            drop(run_outside(
+                "/usr/bin/hdiutil",
+                &["detach", "-force", at],
+                Path::new("/"),
+            ));
         }
-        assert_eq!(
-            mounted,
-            Vec::<String>::new(),
-            "{script} mounted a volume: {out:#?}"
-        );
-        assert_ne!(out.code, Some(0), "{script}: {out:#?}");
     }
+    assert_eq!(
+        mounted,
+        Vec::<String>::new(),
+        "attached in the jail: {out:#?}"
+    );
+    assert_ne!(out.code, Some(0), "{out:#?}");
+    let pid = out
+        .stdout
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_owned();
+    let want = format!("hdiutil({pid}) deny(1) mach-lookup com.apple.system.hdiejectd");
+    assert!(
+        log.contains(&want),
+        "no Sandbox refusal {want:?}: {out:#?}\n{log}"
+    );
 }
