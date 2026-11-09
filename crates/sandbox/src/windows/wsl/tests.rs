@@ -396,3 +396,87 @@ fn a_group_sid_that_isnt_a_local_groups_is_refused_and_nothing_written() {
         assert!(fake.writes.is_empty(), "{text}: {:?}", fake.writes);
     }
 }
+
+/// The WSL package's packaged-COM full name at `version`.
+fn package(version: &str) -> String {
+    format!("{PACKAGE_NAME}_{version}_x64__8wekyb3d8bbwe")
+}
+
+#[test]
+fn a_pending_wsl_upgrade_refuses_the_launch_as_wsls_installer_judges_it() {
+    let applied = |packages: &[&str], msi: Option<&str>| {
+        let mut fake = FakeWsl::lifted();
+        apply(&mut fake, &group()).unwrap();
+        fake.packages = packages.iter().map(|v| package(v)).collect();
+        fake.msi_version = msi.map(str::to_owned);
+        fake
+    };
+    // No package: nothing to upgrade through; the MSI's version isn't asked.
+    assert_eq!(check(&applied(&[], None)), Ok(Found::Denied(2)));
+    // The MSI as new as the package (its fourth part left out, as WSL does), or newer.
+    for msi in ["3.0.3", "3.0.3.0", "3.0.4", "3.1.0"] {
+        assert_eq!(
+            check(&applied(&["3.0.3.0"], Some(msi))),
+            Ok(Found::Denied(2)),
+            "{msi}"
+        );
+    }
+    // Older, missing or empty: an upgrade is pending. The newest package listed counts.
+    for (packages, msi) in [
+        (&["3.0.3.0"][..], Some("3.0.2")),
+        (&["3.0.3.0"], Some("2.9.9.0")),
+        (&["3.0.3.0"], None),
+        (&["3.0.3.0"], Some(" ")),
+        (&["2.0.0.0", "3.0.3.0"], Some("2.5.0")),
+    ] {
+        let fake = applied(packages, msi);
+        assert_eq!(
+            check(&fake),
+            Err(Blocked::WslUpgradePending),
+            "{packages:?} {msi:?}"
+        );
+    }
+    // A version that can't be read or parsed can't be compared.
+    for (packages, msi) in [
+        (&["3.0.3.0"][..], Some("3.0")),
+        (&["3.0.3.0"], Some("3.0.3-preview")),
+        (&["3.0.x.0"], Some("3.0.3")),
+        (&["3.0.3.0", "junk"], Some("3.0.3")),
+    ] {
+        let fake = applied(packages, msi);
+        assert_eq!(
+            check(&fake),
+            Err(Blocked::WslDenyUnverifiable),
+            "{packages:?} {msi:?}"
+        );
+    }
+    let mut fake = applied(&["3.0.3.0"], Some("3.0.3"));
+    fake.fail.push("msi version".to_owned());
+    assert_eq!(check(&fake), Err(Blocked::WslDenyUnverifiable));
+    let mut fake = applied(&[], None);
+    fake.fail.push("packages".to_owned());
+    assert_eq!(check(&fake), Err(Blocked::WslDenyUnverifiable));
+    // A missing deny is still the cause shown first.
+    let mut fake = applied(&["3.0.3.0"], None);
+    fake.keys.get_mut(&app(WSLC_APP)).unwrap().value = Some(stock());
+    assert_eq!(check(&fake), Err(Blocked::WslDenyMissing));
+    // The package alone, before its MSI is in (no service, no class): WSL is present, and the
+    // install is pending.
+    let mut fake = FakeWsl {
+        group: Some(group()),
+        record: Some(WslRecord::default()),
+        ..FakeWsl::default()
+    };
+    assert_eq!(check(&fake), Ok(Found::NoWsl));
+    fake.packages = vec![package("3.0.3.0")];
+    assert_eq!(check(&fake), Err(Blocked::WslUpgradePending));
+}
+
+#[test]
+fn a_version_is_three_or_four_numbers_and_compares_on_the_first_three() {
+    assert_eq!(version("2.6.1"), Some((2, 6, 1)));
+    assert_eq!(version("2.6.1.0"), Some((2, 6, 1)));
+    for bad in ["", "2", "2.6", "2.6.1.0.0", "2.6.a", "-1.0.0", "2..1"] {
+        assert_eq!(version(bad), None, "{bad}");
+    }
+}

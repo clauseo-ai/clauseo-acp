@@ -119,13 +119,18 @@ pub enum Blocked {
     /// 48, which writes no `StopSequence`, so what waits for a completed stop (the
     /// unclean-session marker and its logon refusal, F4) clears only after a later one.
     WslPoolResidue,
+    /// A WSL update is pending: the Store package
+    /// (`MicrosoftCorporationII.WindowsSubsystemForLinux`) is newer than the installed MSI, or the MSI isn't installed yet. Its packaged
+    /// `WslInstaller` class lets any user start the upgrade, which rewrites the launch
+    /// permissions and drops the deny until the refresh puts it back.
+    WslUpgradePending,
 }
 
 impl Blocked {
     /// Every variant, in order. Appended with each new one: [`Blocked::name`]'s match is
     /// exhaustive, the test of the names lists this, and a
     /// compile-time match below fails the build until a new variant has its place here.
-    pub const ALL: [Blocked; 10] = [
+    pub const ALL: [Blocked; 11] = [
         Blocked::LogonRight,
         Blocked::Policy,
         Blocked::AdminCopyMissing,
@@ -136,6 +141,7 @@ impl Blocked {
         Blocked::WslDenyMissing,
         Blocked::WslDenyUnverifiable,
         Blocked::WslPoolResidue,
+        Blocked::WslUpgradePending,
     ];
 
     /// Its serde name (`snake_case`, as `setup-result.json` writes it): path-free and stable,
@@ -152,6 +158,7 @@ impl Blocked {
             Blocked::WslDenyMissing => "wsl_deny_missing",
             Blocked::WslDenyUnverifiable => "wsl_deny_unverifiable",
             Blocked::WslPoolResidue => "wsl_pool_residue",
+            Blocked::WslUpgradePending => "wsl_upgrade_pending",
         }
     }
 }
@@ -172,6 +179,7 @@ const _: () = {
             Blocked::WslDenyMissing => 7,
             Blocked::WslDenyUnverifiable => 8,
             Blocked::WslPoolResidue => 9,
+            Blocked::WslUpgradePending => 10,
         }
     }
     let [
@@ -185,6 +193,7 @@ const _: () = {
         eighth,
         ninth,
         tenth,
+        eleventh,
     ] = Blocked::ALL;
     assert!(
         place(first) == 0
@@ -196,7 +205,8 @@ const _: () = {
             && place(seventh) == 6
             && place(eighth) == 7
             && place(ninth) == 8
-            && place(tenth) == 9,
+            && place(tenth) == 9
+            && place(eleventh) == 10,
         "Blocked::ALL is out of order"
     );
 };
@@ -243,6 +253,10 @@ impl std::fmt::Display for Blocked {
                 "WSL is on this computer and Clauseo can't check the setting that keeps its \
                  sandbox users out of it; whoever looks after this computer can repair or update \
                  WSL"
+            }
+            Blocked::WslUpgradePending => {
+                "a WSL update is under way on this computer; finish or let the WSL update \
+                 complete, then try again"
             }
             Blocked::WslPoolResidue => {
                 "a WSL instance one of Clauseo's sandbox users started is still running; \

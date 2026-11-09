@@ -50,6 +50,14 @@ pub trait WslRead {
     ///
     /// [`CLASSES`]: super::CLASSES
     fn packaged_class(&self) -> Result<bool, WslError>;
+    /// `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss\MSI`'s `Version` (`REG_SZ`), the
+    /// installed MSI's version as WSL records it; `None` when it or the key is missing.
+    fn msi_version(&self) -> Result<Option<String>, WslError>;
+    /// The full names under `HKLM\SOFTWARE\Classes\PackagedCom\Package` that start with
+    /// [`PACKAGE_NAME`] and `_`: the WSL package's packaged-COM registrations.
+    ///
+    /// [`PACKAGE_NAME`]: super::PACKAGE_NAME
+    fn wsl_packages(&self) -> Result<Vec<String>, WslError>;
     /// The pool group's SID, as the machine's record names it (`GroupSid`); `None` when it is
     /// missing or isn't a SID.
     fn group(&self) -> Option<Sid>;

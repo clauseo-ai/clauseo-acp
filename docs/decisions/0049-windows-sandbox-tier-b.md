@@ -2464,7 +2464,24 @@ registration, such as the pre-2.0 Store WSL's, whose launch permission is the pa
 overrides the AppID's) refuses with
 `Blocked::WslDenyUnverifiable` (`wsl_deny_unverifiable`), whichever WSL is present: the inbox one
 (`LxssManager`) runs WSL2's VMs too from Windows 10 2004 on, so an unreadable inbox value refuses
-like a lifted one. With no WSL nothing is refused. Both are
+like a lifted one. With no WSL nothing is refused.
+
+**A pending WSL upgrade refuses the launch** (`wsl/upgrade.rs`, `Blocked::WslUpgradePending`,
+`wsl_upgrade_pending`). The Store package's `WslInstaller` service has a packaged COM class that
+grants launch to Authenticated Users (WSL `AppxManifest.in:74-78`), and its `Install()` upgrades
+through the MSI whenever `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss\MSI`'s `Version`
+is empty or older than the package's own version, compared as (major, minor, revision)
+(`WslInstaller.cpp:114-133`, `IsUpdateNeeded`). So a pool user could start an upgrade whenever the
+package is newer than the MSI, and the MSI's rewrite drops the deny until the refresh's run 15 s
+after the installer's events. The check mirrors that test: the package's version comes from its
+packaged-COM registration, a subkey of `HKLM\SOFTWARE\Classes\PackagedCom\Package` named
+`MicrosoftCorporationII.WindowsSubsystemForLinux_<major>.<minor>.<revision>.0_...` (the newest
+listed), which `Users` can read; the MSI's from `Version`, as WSL reads it. A package listed is WSL present, even before
+its MSI is in. The MSI's version missing or older is `WslUpgradePending`; a version that can't be
+read or parsed (three or four dotted numbers) is `WslDenyUnverifiable`; a missing deny is still
+shown first. The lawyer's words: "finish or let the WSL update complete, then try again". Not
+verified on the VM: that the packaged-COM key lists the package for a machine where only another
+user installed it, and its key's readability by `Users` (`HKLM\SOFTWARE\Classes` is). Both are
 `sandbox.blocked`, a refused turn the app words generically ("Something on this computer stops
 the Safe workspace, …"); the check is the launch's, not the protection state's, so no reason
 line of `blocked.ts` is shown for it, and none is added here. `Blocked::WslPoolResidue`

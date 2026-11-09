@@ -65,8 +65,8 @@ pub struct WslRemoved {
 /// again and checked to be the old with the deny added before they are written; the target
 /// recorded before its write, so a crash between the two leaves nothing unrecorded; the value
 /// read back and checked after. A target whose key isn't there (a class names an `AppID` with
-/// no key) is listed as failed, so the log says why the launch check refuses. One that fails is listed
-/// in [`WslApplied::failed`] and the rest go on; a failure to find the targets or read the record
+/// no key) is listed as failed, so the log says why the launch check refuses. One that fails is
+/// listed in [`WslApplied::failed`] and the rest go on; a failure to find the targets or read the record
 /// is the error. So is a `group` that isn't a local group's ([`local_group`]): nothing is
 /// written for it.
 pub fn apply(reg: &mut impl WslWrite, group: &Sid) -> Result<WslApplied, WslError> {

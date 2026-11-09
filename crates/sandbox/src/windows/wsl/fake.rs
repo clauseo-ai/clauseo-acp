@@ -56,6 +56,10 @@ pub(crate) struct FakeWsl {
     pub(super) keys: BTreeMap<AppId, Key>,
     pub(super) default: Option<Vec<u8>>,
     pub(super) packaged: bool,
+    /// The WSL package's packaged-COM full names (`wsl_packages`).
+    pub(super) packages: Vec<String>,
+    /// The MSI's recorded `Version`.
+    pub(super) msi_version: Option<String>,
     pub(super) group: Option<Sid>,
     /// The machine record's two values; `None` when the record's key is gone.
     pub(super) record: Option<WslRecord>,
@@ -156,6 +160,16 @@ impl WslRead for FakeWsl {
         Ok(self.packaged)
     }
 
+    fn msi_version(&self) -> Result<Option<String>, WslError> {
+        self.failing("msi version")?;
+        Ok(self.msi_version.clone())
+    }
+
+    fn wsl_packages(&self) -> Result<Vec<String>, WslError> {
+        self.failing("packages")?;
+        Ok(self.packages.clone())
+    }
+
     fn group(&self) -> Option<Sid> {
         self.group.clone()
     }
@@ -237,6 +251,14 @@ impl WslRead for NoWsl {
 
     fn packaged_class(&self) -> Result<bool, WslError> {
         Ok(false)
+    }
+
+    fn msi_version(&self) -> Result<Option<String>, WslError> {
+        Ok(None)
+    }
+
+    fn wsl_packages(&self) -> Result<Vec<String>, WslError> {
+        Ok(Vec::new())
     }
 
     fn group(&self) -> Option<Sid> {

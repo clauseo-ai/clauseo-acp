@@ -23,11 +23,12 @@ use crate::windows::wsl::{self, WslRead};
 /// is read or removed: without a copy only administrators can
 /// change, tier B can't top up, reclaim or be removed safely, so it doesn't run. Next, with WSL
 /// on the machine, its classes' launch permissions must deny the pool group first
-/// (`wsl::check`), or the launch is refused with `WslDenyMissing` or `WslDenyUnverifiable`:
-/// a pool user who can start WSL gets a Linux the network filters don't see. Then every
-/// unclean-session marker awaiting a sweep must be clean, or become clean within 15 s of a sweep
-/// this asks for (`runner::unclean::await_sweeps`), or the launch is refused with
-/// [`Error::UncleanSession`], nothing else read or removed. Then, under the
+/// (`wsl::check`), or the launch is refused with `WslDenyMissing` or `WslDenyUnverifiable`,
+/// and no WSL upgrade may be pending (`WslUpgradePending`): a pool user who can start WSL gets a
+/// Linux the network filters don't see. Then every unclean-session marker awaiting a sweep must
+/// be clean, or become clean within 15 s of a sweep this asks for
+/// (`runner::unclean::await_sweeps`), or the launch is refused with [`Error::UncleanSession`],
+/// nothing else read or removed. Then, under the
 /// matter's set-aside lock, it reads the matter's clean-close record and removes it, whatever
 /// comes next: a failed removal refuses the launch
 /// ([`Error::CleanClose`]), and a lock that can't be taken too ([`Error::SetAside`]). Then it
