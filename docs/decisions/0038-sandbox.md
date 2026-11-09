@@ -150,6 +150,10 @@ process with its owner, parent and start time. The jail tests (`tests/jail/deny.
 limit:** `proc_listpids` with its filters (by uid, parent, process group or tty) still answers
 pid numbers for processes outside the jail, so the agent can map the outside process tree and
 who owns each process, but not their names, paths or arguments.
+**Pending compatibility row:** pandoc is not bundled or pinned yet, and the jail does not see
+Homebrew, so the tool sweep that cleared the removal of `kern.proc.pid.` and `kern.proc.pgrp.`
+(Node, Python, git, Perl, Claude Code, Codex) did not include it. Re-run that sweep with pandoc
+once stage D's pinned pandoc is in the bundle.
 
 **`SeatbeltLauncher::new(policy, opts, denials)`** implements `process::Launcher`. A launch runs
 `/usr/bin/sandbox-exec -p <profile> -D ... <program> <args>` through `spawn_in_tree`, with the
