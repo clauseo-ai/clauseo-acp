@@ -181,6 +181,9 @@ pub struct Job {
     pub app_data: PathBuf,
     /// The working folder's random part, `.partial-<version>-<random>`.
     pub random: String,
+    /// The host clock's time when the download was asked for: pins over 45 days older are
+    /// refused (`list_unavailable`).
+    pub now: clauseo_protocol::Timestamp,
 }
 
 /// Runs the download of the version `pins` gives (the newest verified browser pins, read by the
@@ -220,7 +223,7 @@ pub fn run(
         }
     }
     cancel.check()?;
-    let download = manifest::pinned_download(pins, platform)?;
+    let download = manifest::pinned_download(pins, platform, job.now)?;
     tracing::info!(
         version = download.version.as_str(),
         "downloading the pinned Chrome for Testing"

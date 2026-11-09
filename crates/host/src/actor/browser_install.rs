@@ -127,15 +127,16 @@ fn begin(actor: &mut Actor) -> Result<(), Error> {
         return Ok(());
     }
     let (platform, app_data) = place(actor);
+    // The pins are read on the thread, off the actor; the time is the host clock's now.
+    let now = actor.clock.now().wall;
     let job = Job {
         platform,
         app_data,
         random: uuid::Uuid::now_v7().simple().to_string(),
+        now,
     };
     let cancel = Cancel::new();
-    // The pins are read on the thread, off the actor; the time is the host clock's now.
     let pins = actor.wiring.browser_pins.source(actor.effective.data_dir());
-    let now = actor.clock.now().wall;
     let tools = Arc::clone(&actor.browser_install.tools);
     let sweep = actor.browser_install.sweep.take();
     let post = actor.post.clone();

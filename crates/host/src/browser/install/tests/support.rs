@@ -248,7 +248,7 @@ impl InstallTools for Fake {
         self.call("unpack");
         if self.unzip {
             let args = vec!["-q".into(), zip.into(), "-d".into(), into.into()];
-            let ran = run_tool(Path::new(UNZIP), args, into, cancel, 0, &mut || {})
+            let ran = run_tool(Path::new(UNZIP), args, into, cancel, 0, &mut || Ok(()))
                 .map_err(|_stop| Failure::cancelled())
                 .unwrap();
             assert_eq!(ran.code, Some(0), "unzip: {}", ran.stderr);

@@ -97,6 +97,11 @@ open_unit_enum! {
         /// signed browser list verifies (neither the bundled one nor a fetched one), so its
         /// version cannot be checked.
         BrowserListUnavailable,
+        /// The browser only: a Chrome for Testing Clauseo downloaded is the browser, and the
+        /// newest signed browser list Clauseo has was published over 45 days ago, so its copy
+        /// of Chrome is too old to use, and Clauseo can't update it right now. Chrome
+        /// installed on the machine is never judged so.
+        BrowserListExpired,
     }
     test mod tools_unavailable_reason;
 }

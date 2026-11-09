@@ -10,7 +10,7 @@ use clauseo_protocol::{Timestamp, ToolNotice};
 
 use super::{
     MANIFEST_FILE, PINS_KEY_CURRENT, PINS_KEY_NEXT, PINS_PUBLIC_KEYS, Pin, Pins, PinsError,
-    PinsSource, SIGNATURE_FILE, accept, notice,
+    PinsSource, SIGNATURE_FILE, accept, expired, notice,
 };
 use crate::pipeline::tests::support::TempDir;
 use crate::write;
@@ -200,7 +200,15 @@ fn unknown_fields_are_ignored() {
             .unwrap()
             .contains("\"note\"")
     );
-    assert_eq!(with, without);
+    assert_eq!(with.published(), without.published());
+    assert_eq!(with.version(), without.version());
+    assert_eq!(with.pin("chrome", "win64"), without.pin("chrome", "win64"));
+    assert_eq!(
+        with.pin("chrome-headless-shell", "linux64"),
+        without.pin("chrome-headless-shell", "linux64")
+    );
+    // Not the same bytes, though: one does not replace the other.
+    assert!(!accept(&without, Some(&with)));
 }
 
 #[test]
@@ -232,6 +240,7 @@ fn no_rollback_takes_only_a_later_manifest_with_no_lower_version() {
     let older = check("pins-older").unwrap();
     let lower = check("pins-lower").unwrap();
     let equal = check("pins-equal").unwrap();
+    let other_bytes = check("pins-no-extra").unwrap();
     assert!(accept(&pins, None));
     assert!(accept(&newer, Some(&pins)));
     assert!(!accept(&older, Some(&pins)), "published earlier");
@@ -239,8 +248,18 @@ fn no_rollback_takes_only_a_later_manifest_with_no_lower_version() {
         !accept(&lower, Some(&pins)),
         "a lower version, though later"
     );
-    assert!(!accept(&equal, Some(&pins)), "equal is not newer");
+    assert!(
+        !accept(&other_bytes, Some(&pins)),
+        "equally dated, other bytes: not newer, not the same"
+    );
+    assert!(
+        accept(&equal, Some(&pins)),
+        "the same manifest bytes under another signature"
+    );
     assert!(!accept(&pins, Some(&newer)));
+    // The same bytes are taken; a heartbeat (same version, published later) too.
+    assert!(accept(&check("pins").unwrap(), Some(&pins)));
+    assert!(accept(&check("pins-heartbeat").unwrap(), Some(&pins)));
 }
 
 /// A source over `dir`'s `bundled` and `stored` folders, test key A.
@@ -301,6 +320,26 @@ fn a_copy_dated_over_a_day_ahead_is_set_aside() {
     assert_eq!(pins.version(), "157.0.8103.38");
     let pins = source.newest(at("2026-11-19T00:00:00Z")).unwrap();
     assert_eq!(pins.version(), "157.0.8103.60");
+    // Set aside for use on the 18th, but the no-rollback floor whatever the date.
+    let floor = source.floor().unwrap();
+    assert_eq!(floor.version(), "157.0.8103.60");
+    assert!(!accept(&check("pins-newer").unwrap(), Some(&floor)));
+}
+
+#[test]
+fn the_list_expires_after_45_days() {
+    let published = Generated::parse("2026-11-07T06:00:00Z").unwrap();
+    assert!(
+        !expired(published, at("2026-12-22T06:00:00Z")),
+        "45 days exactly"
+    );
+    assert!(expired(published, at("2026-12-22T06:00:01Z")));
+    // From 14 to 45 days: old, not expired.
+    assert_eq!(
+        notice(published, at("2026-12-21T06:00:00Z")),
+        Some(ToolNotice::BrowserListOld)
+    );
+    assert!(!expired(published, at("2026-12-21T06:00:00Z")));
 }
 
 #[test]
@@ -329,14 +368,13 @@ fn stored_pairs_are_written_body_first_and_read_back() {
 
 #[test]
 fn a_signature_that_does_not_verify_is_read_once_more() {
-    let now = at("2026-11-09T00:00:00Z");
     let dir = TempDir::new("pins-reread");
     let source = source(&dir);
     let (newer, newer_signature) = fixture("pins-newer");
     let (_, old_signature) = fixture("pins");
     // The torn window: the new manifest beside the old signature, then the finished pair.
     let mut reads = 0;
-    let pins = source.read_with("stored", now, &mut || {
+    let pins = source.read_with("stored", &mut || {
         reads += 1;
         let signature = if reads == 1 {
             &old_signature
@@ -349,7 +387,7 @@ fn a_signature_that_does_not_verify_is_read_once_more() {
     assert_eq!(reads, 2);
     // Still torn on the second read: refused, and not read a third time.
     let mut reads = 0;
-    let pins = source.read_with("stored", now, &mut || {
+    let pins = source.read_with("stored", &mut || {
         reads += 1;
         Ok((newer.clone(), old_signature.clone()))
     });
@@ -358,7 +396,7 @@ fn a_signature_that_does_not_verify_is_read_once_more() {
     // Any other refusal is final at once.
     let mut reads = 0;
     let (body, signature) = fixture("pins-schema-2");
-    let pins = source.read_with("stored", now, &mut || {
+    let pins = source.read_with("stored", &mut || {
         reads += 1;
         Ok((body.clone(), signature.clone()))
     });

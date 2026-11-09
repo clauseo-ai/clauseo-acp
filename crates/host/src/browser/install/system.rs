@@ -89,23 +89,18 @@ impl InstallTools for SystemTools {
         let work = zip.parent().unwrap_or(zip);
         let headers = work.join("headers.txt");
         let args = download_args(url, &headers, zip, max_bytes);
-        let mut last = None;
-        let mut tick = || {
-            let total = std::fs::read_to_string(&headers)
-                .ok()
-                .and_then(|text| content_length(&text));
-            let bytes = std::fs::symlink_metadata(zip).map_or(0, |meta| meta.len());
-            if let Some(total) = total
-                && last != Some((bytes, total))
-            {
-                last = Some((bytes, total));
-                progress(bytes, total);
-            }
+        let mut poll = Poll {
+            headers: &headers,
+            zip,
+            max_bytes,
+            last: None,
         };
+        let mut tick = || poll.tick(progress);
         let ran = run_tool(&curl, args, work, cancel, 0, &mut tick)
             .map_err(|stop| stop.failure(BrowserInstallFailure::Network))?;
         curl_result(&ran)?;
-        tick();
+        poll.tick(progress)
+            .map_err(|stop| stop.failure(BrowserInstallFailure::Network))?;
         Ok(std::fs::read_to_string(&headers)
             .ok()
             .and_then(|text| content_length(&text)))
@@ -123,7 +118,7 @@ impl InstallTools for SystemTools {
                 vec!["-x".into(), "-k".into(), zip.into(), into.into()],
             )
         };
-        let ran = run_tool(&program, args, into, cancel, 0, &mut || {})
+        let ran = run_tool(&program, args, into, cancel, 0, &mut || Ok(()))
             .map_err(|stop| stop.failure(BrowserInstallFailure::Unpack))?;
         if ran.code == Some(0) {
             Ok(())
@@ -172,7 +167,7 @@ fn codesign(app: &Path, cancel: &Cancel) -> Result<(), String> {
         let mut args: Vec<OsString> = args.iter().map(OsString::from).collect();
         args.push(app.into());
         let cwd = app.parent().unwrap_or(app);
-        run_tool(&codesign, args, cwd, cancel, 0, &mut || {})
+        run_tool(&codesign, args, cwd, cancel, 0, &mut || Ok(()))
             .map_err(|stop| stop.failure(BrowserInstallFailure::Signature).message)
     };
     let verified = run(&["--verify", "--deep", "--strict"])?;
@@ -319,26 +314,68 @@ pub(super) enum Stop {
     Cancelled,
     /// It did not start, or wrote more than its cap to stdout.
     Failed(String),
+    /// The download grew past its pinned size: `size_mismatch` whatever the caller's code.
+    TooLarge(String),
 }
 
 impl Stop {
-    fn failure(self, code: BrowserInstallFailure) -> Failure {
+    pub(super) fn failure(self, code: BrowserInstallFailure) -> Failure {
         match self {
             Self::Cancelled => Failure::cancelled(),
             Self::Failed(message) => Failure::new(code, message),
+            Self::TooLarge(message) => Failure::new(BrowserInstallFailure::SizeMismatch, message),
         }
     }
 }
 
-/// Runs `program` with `args` in `cwd` to its exit, calling `tick` every 250 ms. A cancel, or
-/// more than `stdout_cap` bytes on stdout, ends its tree. The tests unpack with it too.
+/// The zip download's poll, every tick: the progress from the file's size against the
+/// response's `Content-Length`, and the size cap in process. curl before 8.4 ignores
+/// `--max-filesize` when the response has no `Content-Length`, so once the file is larger than
+/// the pin's size the poll stops curl (its tree killed, as a cancel does): `size_mismatch`.
+pub(super) struct Poll<'a> {
+    /// The response headers curl writes.
+    pub(super) headers: &'a Path,
+    /// The zip curl writes.
+    pub(super) zip: &'a Path,
+    /// The pin's size.
+    pub(super) max_bytes: u64,
+    /// The last progress reported.
+    pub(super) last: Option<(u64, u64)>,
+}
+
+impl Poll<'_> {
+    /// One look: reports progress when it changed, and fails once the file is over the cap.
+    pub(super) fn tick(&mut self, progress: &mut dyn FnMut(u64, u64)) -> Result<(), Stop> {
+        let bytes = std::fs::symlink_metadata(self.zip).map_or(0, |meta| meta.len());
+        if bytes > self.max_bytes {
+            return Err(Stop::TooLarge(format!(
+                "the download passed its pinned size of {} bytes",
+                self.max_bytes
+            )));
+        }
+        let total = std::fs::read_to_string(self.headers)
+            .ok()
+            .and_then(|text| content_length(&text));
+        if let Some(total) = total
+            && self.last != Some((bytes, total))
+        {
+            self.last = Some((bytes, total));
+            progress(bytes, total);
+        }
+        Ok(())
+    }
+}
+
+/// Runs `program` with `args` in `cwd` to its exit, calling `tick` every 250 ms. A cancel,
+/// more than `stdout_cap` bytes on stdout, or a `tick` that fails ends its tree. The tests
+/// unpack with it too.
 pub(super) fn run_tool(
     program: &Path,
     args: Vec<OsString>,
     cwd: &Path,
     cancel: &Cancel,
     stdout_cap: usize,
-    tick: &mut dyn FnMut(),
+    tick: &mut dyn FnMut() -> Result<(), Stop>,
 ) -> Result<Ran, Stop> {
     let spec = LaunchSpec::new(program.to_owned(), args, BTreeMap::new(), cwd.to_owned())
         .map_err(|error| Stop::Failed(error.to_string()))?;
@@ -352,7 +389,7 @@ async fn supervise(
     launched: Launched,
     cancel: &Cancel,
     cap: usize,
-    tick: &mut dyn FnMut(),
+    tick: &mut dyn FnMut() -> Result<(), Stop>,
 ) -> Result<Ran, Stop> {
     let Launched {
         stdin,
@@ -390,7 +427,7 @@ async fn supervise(
                 match future::select(exited, timer).await {
                     Either::Left((report, _)) => return Ok(report),
                     Either::Right(_) if cancel.is_cancelled() => return Err(Stop::Cancelled),
-                    Either::Right(_) => tick(),
+                    Either::Right(_) => tick()?,
                 }
             }
         });

@@ -37,6 +37,7 @@ const BROWSER: BrowserState[] = [
   "browser_policy_unreadable",
   "browser_out_of_date",
   "browser_list_unavailable",
+  "browser_list_expired",
 ];
 const avail = (state: string): ToolState["availability"] =>
   state === "available" ? "available" : ({ unavailable: { reason: state } } as never);
@@ -105,6 +106,7 @@ test("each glyph's state: on as drawn, the firm's lock for locked off, managed b
     browser_policy_unreadable: "off",
     browser_out_of_date: "off",
     browser_list_unavailable: "off",
+    browser_list_expired: "off",
   };
   for (const w of WEB) expect(glyphState({ tool: "web_search", state: w })).toBe(web[w]);
   for (const b of BROWSER) expect(glyphState({ tool: "browser", state: b })).toBe(browser[b]);
@@ -137,6 +139,7 @@ test("the line's name and tooltip: one sentence per tool, web search first, its 
   expect(label(null, "browser_list_unavailable")).toBe(
     "Browser: off, couldn't check Chrome's version.",
   );
+  expect(label(null, "browser_list_expired")).toBe("Browser: off, can't update Chrome right now.");
   // a notice is the popover's alone: the line says only on
   expect(
     toolsLabel("en", [{ tool: "browser", state: "available", notice: "browser_list_old" }]),
@@ -187,6 +190,9 @@ const UNREADABLE =
 const NO_LIST =
   "Clauseo couldn't confirm that its copy of Chrome is up to date, so it isn't using the browser for " +
   "now. It keeps checking on its own.";
+const LIST_EXPIRED =
+  "Clauseo's copy of Chrome is too old to use, and Clauseo can't update it right now. " +
+  "It keeps trying on its own.";
 const LIST_OLD = "Clauseo hasn't checked for a newer Chrome in a while. The browser still works.";
 
 const ROOM: ToolRowRoom = { settings: true, install: null };
@@ -207,11 +213,13 @@ test("each row: its glyph, name, an On or Off chip, and the reason in a few word
     browser_policy_unreadable: "Couldn't check browser settings",
     browser_out_of_date: "Needs a newer Chrome",
     browser_list_unavailable: "Couldn't check Chrome's version",
+    browser_list_expired: "Can't update Chrome right now",
   };
   const notes: Record<string, string> = {
     browser_blocked_by_policy: POLICY,
     browser_policy_unreadable: UNREADABLE,
     browser_list_unavailable: NO_LIST,
+    browser_list_expired: LIST_EXPIRED,
   };
   const rows: KnownTool[] = [
     ...WEB.map((state): KnownTool => ({ tool: "web_search", state })),
@@ -230,7 +238,8 @@ test("each row: its glyph, name, an On or Off chip, and the reason in a few word
       // In Settings sits in the chip's row
       beside: tool.state === "off",
       reasonTip: null,
-      // the firm's policy, a policy not read, or a version not checked, says it in full
+      // the firm's policy, a policy not read, a version not checked, or a Chrome too old that can't be
+      // updated yet, says it in full
       note: notes[tool.state] ?? null,
       settings: tool.state === "off",
       download: null,
@@ -553,6 +562,25 @@ test("with no list of Chrome versions, no download in any download state, and th
     note:
       "Clauseo यह पक्का नहीं कर सका कि उसका Chrome अप-टू-डेट है, इसलिए वह अभी ब्राउज़र का उपयोग नहीं कर रहा। " +
       "वह अपने आप जाँच करता रहेगा।",
+  });
+});
+
+test("with a list of Chrome versions too old, no download in any download state, and the reason in full", () => {
+  const expired: KnownTool = { tool: "browser", state: "browser_list_expired" };
+  for (const install of [null, offer, { progress: "done" }] as (BrowserInstall | null)[])
+    expect(words(expired, { install })).toMatchObject({
+      glyph: "off",
+      reason: "Can't update Chrome right now",
+      reasonTip: null,
+      note: LIST_EXPIRED,
+      settings: false,
+      download: null,
+    });
+  expect(toolRow("hi", expired, ROOM)).toMatchObject({
+    reason: "Chrome अभी अपडेट नहीं हो सकता",
+    note:
+      "Clauseo का Chrome इतना पुराना है कि उसका उपयोग नहीं हो सकता, और Clauseo अभी उसे अपडेट नहीं कर सकता। " +
+      "वह अपने आप कोशिश करता रहेगा।",
   });
 });
 

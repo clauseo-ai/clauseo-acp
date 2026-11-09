@@ -14,7 +14,8 @@
 //!    not allow Clauseo's browser anyway (`browser::rd_policy`): `BrowserBlockedByPolicy`; or,
 //!    with no false, a place of that policy could not be read: `BrowserPolicyUnreadable`. Or the
 //!    Chrome found is a Chrome for Testing Clauseo downloaded that the signed browser pins refuse
-//!    (`browser::chrome::find_checked`): `BrowserOutOfDate` or `BrowserListUnavailable`.
+//!    (`browser::chrome::find_checked`): `BrowserOutOfDate`, `BrowserListUnavailable` or
+//!    `BrowserListExpired`.
 //! 6. No Chrome picked, a sidecar (`clauseo-mcp` or agent-browser) missing, or the session's
 //!    ports or socket folder not claimed (`browser::session`): `BrowserNotInstalled`.
 //! 7. The session's proxy did not open, so it has no port: `NoProxy`. The proxy opens only

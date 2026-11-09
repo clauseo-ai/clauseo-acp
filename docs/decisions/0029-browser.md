@@ -1050,12 +1050,18 @@ pins"), which the prep reads from disk at each launch:
   version into its own folder; the next launch picks it as the highest.
 - No verified pins at all, bundled or cached: the entry drops with `BrowserListUnavailable`. The
   Chrome for Testing on disk is not trusted unjudged.
-- Taken, but the newest verified pins' `published` is more than 14 days before now: the browser
-  stays available, and the session's header `ToolState` carries `notice: BrowserListOld`
-  (`ToolNotice`, an open enum `{ BrowserListOld, Unknown }` in `protocol/src/view/tools.rs`;
-  `ToolState::notice` is optional, serde default, skipped when `None`).
+- The newest verified pins' signed `published` is more than 45 days before the host clock's
+  now: the entry drops with `BrowserListExpired` (amended 2026-11-08, review of #806), whatever
+  the version. The bundled pair counts by its own `published`; a stage F heartbeat (the same
+  version, published again daily) keeps the pins fresh. The download refuses too
+  (`list_unavailable`, its log message saying the list expired).
+- Taken, but the newest verified pins' `published` is more than 14 days (and at most 45) before
+  now: the browser stays available, and the session's header `ToolState` carries
+  `notice: BrowserListOld` (`ToolNotice`, an open enum `{ BrowserListOld, Unknown }` in
+  `protocol/src/view/tools.rs`; `ToolState::notice` is optional, serde default, skipped when
+  `None`).
 
-Both reasons are `ToolsUnavailableReason` variants and ride the prep's existing block path
+All three reasons are `ToolsUnavailableReason` variants and ride the prep's existing block path
 (`Prepared::policy_block`, then `run.browser_blocked`, then `blocked_by_policy` in
 `agent/loads/browser.rs`), as `BrowserBlockedByPolicy` does.
 
@@ -1226,11 +1232,17 @@ once stage F publishes the first signed manifest. Until then a fresh install nee
 fetch from `github.com` before the download, or a downloaded Chrome for Testing, works, and fails
 closed otherwise. The cached pair is `<data_dir>/browser-pins/browser-pins-v1.json`
 and `.minisig`, written as the block list's pair (`write::replace_private_file`, the body first,
-the signature last, then the folder synced). A candidate, fetched, cached or bundled, is taken only
-if it verifies, its `published` is not older and its `stable.version` is not lower than the newest
-verified pins the app has; one dated more than a day ahead of the host's clock is set aside, as
-for the block list. The app uses the newer verified of the bundled and the cached pair, and fails
-closed (`list_unavailable` at download, `BrowserListUnavailable` at launch) only when neither
+the signature last, then the folder synced; a pair whose signature fails is read once more, for
+a read between the two writes). The floor is the newer (by version, then `published`) of the
+bundled and the cached pair that verify, whatever their dates. A fetched candidate is stored only
+if it verifies and is either byte-identical to the floor (taken, nothing written) or has a
+`published` strictly newer and a `stable.version` not lower than the floor's (amended
+2026-11-08, review of #806). So a heartbeat is taken and resets freshness, and a replay of an
+older or equally dated manifest is refused. A pair dated more than a day ahead of the host's
+clock is not used, as for the block list, but still counts as the floor: with the clock set
+back, a replayed genuinely signed older manifest cannot replace a newer one dated "ahead". The app
+uses the newer verified of the bundled and the cached pair not dated ahead, and fails closed
+(`list_unavailable` at download, `BrowserListUnavailable` at launch) only when neither
 verifies.
 
 **Refresh.** Each round of the `clauseo-blocklist` thread (decision 0053: at start, then every 6
@@ -1278,7 +1290,10 @@ feed carries the event (0012, 0028).
    with the pins' `stable.version` and `name` `chrome` (the code takes the name as a parameter,
    for the later `chrome-headless-shell` caller).
 4. The zip goes into `browsers/.partial-<version>-<random>/chrome.zip`, with curl's
-   `--max-filesize` set to the pin's `size`. Its size must equal both the final response's
+   `--max-filesize` set to the pin's `size`. curl before 8.4 ignores that flag when the
+   response has no `Content-Length`, so the progress poll caps it in process too: once the
+   file passes the pin's size, curl's tree is killed (as a cancel does) and the download fails
+   `size_mismatch`. Its size must equal both the final response's
    `Content-Length` and the pin's `size`; a response without `Content-Length` fails too
    (`size_mismatch`). Then its sha256 must equal the pin's `sha256`, else `hash_mismatch`.
    Like every failure, either removes the working folder, so a zip that does not match is
@@ -1291,7 +1306,12 @@ feed carries the event (0012, 0028).
    entry under a link entry), a name twice
    (ignoring ASCII case), a Unicode-path extra field naming another file, and any entry under a
    link entry (made on Unix or OS X), compared segment by segment, so every path has one
-   spelling. Then `ditto -x -k` (macOS) or `tar -xf` (Windows) unpacks into `.partial-…/chrome/`.
+   spelling. On Windows any link entry at all is refused, so no reparse point is made from the
+   zip. The local headers are then walked in order from the zip's first byte to its central
+   directory (header, data, data descriptor, next): each must be one the directory names, every
+   one it names must be met in that walk, and the walk must end exactly at the directory, so an
+   orphan local entry, or a directory entry pointing at a header hidden in another entry's
+   data, refuses the zip. Then `ditto -x -k` (macOS) or `tar -xf` (Windows) unpacks into `.partial-…/chrome/`.
    Then the result is walked without following links: a link must be relative, must never
    climb above the unpack folder at any step when read as text from its own folder (so it
    cannot leave and come back by that folder's name, which changes at the rename), and must

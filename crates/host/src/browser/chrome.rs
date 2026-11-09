@@ -18,8 +18,9 @@
 //! The launch prep asks [`find_checked`], which judges a Chrome for Testing Clauseo downloaded
 //! (only that: Chrome and Edge installed on the machine never are) by the newest verified
 //! browser pins (`super::pins`): more than one major version behind the pinned one is
-//! `BrowserOutOfDate` (pins of 157: 156 is fine, 155 refused), and no pins that verify is
-//! `BrowserListUnavailable`. The pins are read only when such a browser is the one found.
+//! `BrowserOutOfDate` (pins of 157: 156 is fine, 155 refused), pins over 45 days old are
+//! `BrowserListExpired`, and no pins that verify is `BrowserListUnavailable`. The pins are read
+//! only when such a browser is the one found.
 //!
 //! On Linux (development and CI only) the host takes `/usr/bin/google-chrome`, then
 //! `/usr/bin/chromium`.
@@ -29,7 +30,7 @@
 use std::path::{Path, PathBuf};
 
 use clauseo_blocklist::Generated;
-use clauseo_protocol::ToolsUnavailableReason;
+use clauseo_protocol::{Timestamp, ToolsUnavailableReason};
 
 use super::pins::Pins;
 
@@ -220,11 +221,12 @@ pub struct Picked {
 
 /// The Chrome this machine offers, judged: Chrome or Edge installed on the machine as found;
 /// a Chrome for Testing Clauseo downloaded only when `pins()` (called then, and only then)
-/// gives verified pins whose major version is at most one above the browser's. Else why not:
-/// `BrowserNotInstalled`, `BrowserOutOfDate` or `BrowserListUnavailable`. File system calls:
-/// off the actor.
+/// gives verified pins at most 45 days older than `now` whose major version is at most one
+/// above the browser's. Else why not: `BrowserNotInstalled`, `BrowserListUnavailable`,
+/// `BrowserListExpired` or `BrowserOutOfDate`. File system calls: off the actor.
 pub fn find_checked(
     roots: &ChromeRoots,
+    now: Timestamp,
     pins: impl FnOnce() -> Option<Pins>,
 ) -> Result<Picked, ToolsUnavailableReason> {
     let found = locate(roots, EDGE_ALLOWED).ok_or(ToolsUnavailableReason::BrowserNotInstalled)?;
@@ -235,6 +237,13 @@ pub fn find_checked(
         });
     };
     let pins = pins().ok_or(ToolsUnavailableReason::BrowserListUnavailable)?;
+    if super::pins::expired(pins.published(), now) {
+        tracing::info!(
+            published = pins.published().as_str(),
+            "the browser list is over 45 days old; the downloaded Chrome for Testing is refused"
+        );
+        return Err(ToolsUnavailableReason::BrowserListExpired);
+    }
     let installed = version.first().copied().unwrap_or_default();
     if installed.saturating_add(1) < pins.major() {
         tracing::info!(

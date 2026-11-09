@@ -32,6 +32,11 @@ fn fails_pinned(
     failure
 }
 
+/// Two days after the test pins' date.
+fn now() -> clauseo_protocol::Timestamp {
+    crate::browser::pins::tests::at("2026-11-09T06:00:00Z")
+}
+
 #[test]
 fn no_pins_is_list_unavailable_and_downloads_nothing() {
     let tools = Fake::working();
@@ -166,13 +171,37 @@ fn the_pinned_download_takes_the_chrome_pin_for_the_platform() {
         sha256: "a".repeat(64),
         size: 5,
     };
-    let download = manifest::pinned_download(Some(&pins_with(&pin)), "win64").unwrap();
+    let download = manifest::pinned_download(Some(&pins_with(&pin)), "win64", now()).unwrap();
     assert_eq!(download.version, VERSION);
     assert_eq!(download.sha256, pin.sha256);
     assert_eq!(download.size, 5);
     assert_eq!(download.url, manifest::zip_url(VERSION, "win64", "chrome"));
     assert_eq!(
-        manifest::pinned_download(None, "win64").unwrap_err().code,
+        manifest::pinned_download(None, "win64", now())
+            .unwrap_err()
+            .code,
         BrowserInstallFailure::ListUnavailable
     );
+}
+
+#[test]
+fn pins_over_45_days_old_are_list_unavailable_and_download_nothing() {
+    let tools = Fake::working();
+    let dir = TempDir::new("cft-expired");
+    let mut late = job(dir.path(), Platform::MacArm64);
+    // The test pins are dated 2026-11-07T06:00:00Z: 45 days and a second later.
+    late.now = crate::browser::pins::tests::at("2026-12-22T06:00:01Z");
+    let (result, _) = run_pinned(&late, Some(&tools.pins()), &tools, &Cancel::new());
+    let failure = result.unwrap_err();
+    assert_eq!(failure.code, BrowserInstallFailure::ListUnavailable);
+    assert!(failure.message.contains("expired"), "{}", failure.message);
+    assert_eq!(tools.calls(), Vec::<&str>::new());
+    assert_eq!(browsers(dir.path()), Vec::<String>::new());
+    // 45 days exactly: still taken.
+    let tools = Fake::working();
+    let dir = TempDir::new("cft-45-days");
+    let mut edge = job(dir.path(), Platform::MacArm64);
+    edge.now = crate::browser::pins::tests::at("2026-12-22T06:00:00Z");
+    let (result, _) = run_pinned(&edge, Some(&tools.pins()), &tools, &Cancel::new());
+    result.unwrap();
 }

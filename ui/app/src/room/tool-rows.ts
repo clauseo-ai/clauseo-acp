@@ -1,7 +1,8 @@
 // Each row of the tool line's popover, in the fewest words (DESIGN.md §Icons): the tool's glyph and name, an On or
 // Off chip, the reason in a few words only when off, and under the browser with no Chrome or an
 // out-of-date one, the download; under the browser the firm's policy blocks, whose policy Clauseo
-// couldn't check, or whose Chrome version it couldn't check, the reason in full; under a browser
+// couldn't check, whose Chrome version it couldn't check, or whose Chrome is too old and can't be
+// updated yet, the reason in full; under a browser
 // that is on with a notice, the notice. Pure, so the tests can read every state; loaded with the
 // popover only.
 import type { Lang } from "@clauseo/components/lib/display.ts";
@@ -47,7 +48,8 @@ export type ToolRowWords = {
   /** The reason's tooltip and description: once Chrome is in, when the browser comes; else null. */
   reasonTip: string | null;
   /** A muted line under the reason saying it in full: the firm's policy blocks the browser,
-   * Clauseo couldn't check that policy, or couldn't check Chrome's version; on a browser that is
+   * Clauseo couldn't check that policy, couldn't check Chrome's version, or can't update a Chrome
+   * too old to use; on a browser that is
    * on, its notice (a newer Chrome may be out); else null. */
   note: string | null;
   /** Off in Settings, with the settings window to turn it on: the popover's foot offers Open Settings. */
@@ -118,15 +120,18 @@ const UNREADABLE: ToolsKey =
   "Clauseo couldn't check this computer's browser settings, so it won't use a browser for now. It checks again the next time it needs one.";
 const NO_LIST: ToolsKey =
   "Clauseo couldn't confirm that its copy of Chrome is up to date, so it isn't using the browser for now. It keeps checking on its own.";
+const LIST_EXPIRED: ToolsKey =
+  "Clauseo's copy of Chrome is too old to use, and Clauseo can't update it right now. It keeps trying on its own.";
 const LIST_OLD: ToolsKey =
   "Clauseo hasn't checked for a newer Chrome in a while. The browser still works.";
 
-/** The browser's reason in full when no download can help (its policy keeps it off, or Clauseo can't check its
- * Chrome's version); else null. */
+/** The browser's reason in full when no download can help (its policy keeps it off, Clauseo can't check its
+ * Chrome's version, or its list of versions is too old to trust a Chrome by); else null. */
 function fullNote(lang: Lang, state: BrowserState): string | null {
   if (state === "browser_blocked_by_policy") return tw(lang, POLICY);
   if (state === "browser_policy_unreadable") return tw(lang, UNREADABLE);
   if (state === "browser_list_unavailable") return tw(lang, NO_LIST);
+  if (state === "browser_list_expired") return tw(lang, LIST_EXPIRED);
   return null;
 }
 
@@ -157,7 +162,7 @@ export function toolRow(lang: Lang, tool: KnownTool, room: ToolRowRoom): ToolRow
     reasonTip:
       download?.kind === "done" ? tw(lang, "The browser comes with your next conversation.") : null,
     // a download can't help here: the firm's block (or a policy not read) holds for every browser, and with no
-    // list of versions a download would fail the same way; a browser that is on says its notice, if any
+    // list of versions (or one too old) a download would fail the same way; a browser that is on says its notice, if any
     note:
       tool.tool !== "browser"
         ? null

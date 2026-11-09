@@ -5,7 +5,8 @@
 //! allows Clauseo's browser anyway; a policy that says nothing, or holds a bad value, leaves the
 //! browser on. With the policy on, a Chrome for Testing Clauseo downloaded is judged by the
 //! signed browser pins: none that verify, `BrowserListUnavailable`; two majors behind,
-//! `BrowserOutOfDate`; else offered, with `BrowserListOld` when the pins are over 14 days old.
+//! `BrowserOutOfDate`; pins over 45 days old, `BrowserListExpired`; else offered, with
+//! `BrowserListOld` when the pins are over 14 days old.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -281,7 +282,7 @@ fn chrome_for_testing_two_majors_behind_the_pins_is_out_of_date() {
 
 #[test]
 fn chrome_for_testing_at_the_pinned_version_is_offered_with_the_old_list_notice() {
-    // The pins were published 2026-01-01; the host clock starts in September 2026.
+    // The pins were published 20 days before the host clock's start.
     let state = states(
         "cft_pinned",
         Arc::new(Says(Found::Allowed)),
@@ -293,4 +294,32 @@ fn chrome_for_testing_at_the_pinned_version_is_offered_with_the_old_list_notice(
     .unwrap();
     assert_eq!(state.availability, ToolAvailability::Available);
     assert_eq!(state.notice, Some(ToolNotice::BrowserListOld));
+}
+
+#[test]
+fn a_list_44_days_old_still_offers_chrome_for_testing_with_the_notice() {
+    let state = states(
+        "cft_44_days",
+        Arc::new(Says(Found::Allowed)),
+        None,
+        Chrome::Pinned("pins-131-44d"),
+        1,
+    )
+    .pop()
+    .unwrap();
+    assert_eq!(state.availability, ToolAvailability::Available);
+    assert_eq!(state.notice, Some(ToolNotice::BrowserListOld));
+}
+
+#[test]
+fn a_list_46_days_old_refuses_chrome_for_testing_as_expired() {
+    assert_eq!(
+        reason(
+            "cft_46_days",
+            Found::Allowed,
+            None,
+            Chrome::Pinned("pins-131-46d")
+        ),
+        Some(ToolsUnavailableReason::BrowserListExpired)
+    );
 }

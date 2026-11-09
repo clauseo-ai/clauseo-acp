@@ -126,16 +126,26 @@ fixture("pins-lower", body("2026-11-08T12:00:00Z", "156.0.7000.1"),
         comment("2026-11-08T12:00:00Z", "156.0.7000.1"))
 fixture("pins-ahead", body("2026-11-20T00:00:00Z", "157.0.8103.60"),
         comment("2026-11-20T00:00:00Z", "157.0.8103.60"))
-# For the host's integration tests (their clock starts in September 2026): Chrome 131 on Apple
-# silicon pinned to the empty zip, published long before.
+# For the host's integration tests, whose clock starts at 2026-09-21T14:13:20Z: Chrome 131 on
+# Apple silicon pinned to the empty zip, published 20 days before (old, not expired), about 44
+# days before (still not expired) and about 46 days before (expired).
 EMPTY = {"sha256": hashlib.sha256(EMPTY_ZIP).hexdigest(), "size": len(EMPTY_ZIP)}
-fixture("pins-131", body("2026-01-01T00:00:00Z", "131.0.6778.85",
-                         chrome={**CHROME, "mac-arm64": EMPTY}),
-        comment("2026-01-01T00:00:00Z", "131.0.6778.85", run="7"))
-# Chrome 157 pinned early in 2026, so the integration tests' clock finds it neither ahead nor
-# fresh: a downloaded 131 is out of date against it.
-fixture("pins-157-early", body("2026-01-02T00:00:00Z", V),
-        comment("2026-01-02T00:00:00Z", V, run="8"))
+for name, published, run in [
+    ("pins-131", "2026-09-01T00:00:00Z", "7"),
+    ("pins-131-44d", "2026-08-08T20:00:00Z", "9"),
+    ("pins-131-46d", "2026-08-06T00:00:00Z", "10"),
+]:
+    fixture(name, body(published, "131.0.6778.85", chrome={**CHROME, "mac-arm64": EMPTY}),
+            comment(published, "131.0.6778.85", run=run))
+# Chrome 157 pinned 20 days before that clock: a downloaded 131 is out of date against it.
+fixture("pins-157-early", body("2026-09-01T00:00:00Z", V),
+        comment("2026-09-01T00:00:00Z", V, run="8"))
+# Chrome 158, dated far ahead (a clock set back sees it as "ahead"), and a heartbeat: the same
+# version as "pins", published a day later.
+fixture("pins-158-ahead", body("2026-12-20T00:00:00Z", "158.0.8200.1"),
+        comment("2026-12-20T00:00:00Z", "158.0.8200.1"))
+fixture("pins-heartbeat", body("2026-11-08T06:00:00Z", V),
+        comment("2026-11-08T06:00:00Z", V, run="1300"))
 
 with open("fixtures.json", "w") as out:
     json.dump(FIXTURES, out, indent=1, sort_keys=True)

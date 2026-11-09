@@ -192,6 +192,16 @@ export const UET: Entry[] = [
     ),
     [browser("browser_list_unavailable")],
   ),
+  // the newest list of Chrome versions is too old, so Clauseo's Chrome is too: the reason, then in full under it, no
+  // download (it would be refused the same way)
+  entry("UET-53", lineWords("Can't update Chrome right now"), [browser("browser_list_expired")]),
+  entry(
+    "UET-54",
+    popWords(
+      "Clauseo's copy of Chrome is too old to use, and Clauseo can't update it right now. It keeps trying on its own.",
+    ),
+    [browser("browser_list_expired")],
+  ),
   // the browser is on, and the newest list of Chrome versions is old: a muted line, nothing off
   entry(
     "UET-52",

@@ -7,6 +7,7 @@ use std::fmt;
 
 use clauseo_blocklist::Generated;
 use serde::Deserialize;
+use sha2::Digest as _;
 
 use super::{MAX_MANIFEST, MAX_ZIP_BYTES, Pin, Pins};
 use crate::browser::install::manifest::check_version;
@@ -132,6 +133,7 @@ pub(super) fn verify(body: &[u8], minisig: &[u8], keys: &[&str]) -> Result<Pins,
         numbers,
         run: comment.run.to_owned(),
         downloads,
+        digest: sha2::Sha256::digest(body).into(),
     })
 }
 

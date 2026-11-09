@@ -191,6 +191,7 @@ const ROWS: [ToolState, string | null][] = [
   [browser(off("browser_policy_unreadable")), "Couldn't check browser settings"],
   [browser(off("browser_out_of_date")), "Needs a newer Chrome"],
   [browser(off("browser_list_unavailable")), "Couldn't check Chrome's version"],
+  [browser(off("browser_list_expired")), "Can't update Chrome right now"],
 ];
 
 test.each(ROWS)(
@@ -216,7 +217,8 @@ test.each(ROWS)(
       );
     // nothing else in words: the name, the chip and the reason; with no Chrome, the offer's words under it (the
     // button, its hidden tooltip and the size), and with a Chrome too old the same; blocked by the firm's policy, a
-    // policy Clauseo couldn't check, or a Chrome version it couldn't check, the reason in full and no offer
+    // policy Clauseo couldn't check, a Chrome version it couldn't check, or a Chrome too old it can't update yet,
+    // the reason in full and no offer
     const offer =
       reason === "Needs Chrome" || reason === "Needs a newer Chrome"
         ? "Download Chrome" + "From Google, once. Needs 1\u00a0GB free." + "200\u00a0MB"
@@ -229,7 +231,10 @@ test.each(ROWS)(
             : reason === "Couldn't check Chrome's version"
               ? "Clauseo couldn't confirm that its copy of Chrome is up to date, so it isn't using the " +
                 "browser for now. It keeps checking on its own."
-              : "";
+              : reason === "Can't update Chrome right now"
+                ? "Clauseo's copy of Chrome is too old to use, and Clauseo can't update it right now. " +
+                  "It keeps trying on its own."
+                : "";
     expect(r.textContent).toBe(
       (tool.tool === "web_search" ? "Web search" : "Browser") +
         (reason === null ? "On" : "Off") +

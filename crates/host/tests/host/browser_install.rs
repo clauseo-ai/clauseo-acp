@@ -450,6 +450,33 @@ fn no_verified_pins_fail_the_download_before_any_fetch() {
     host.shutdown();
 }
 
+/// With signed pins over 45 days old (`pins-131-46d`), the download fails as
+/// `list_unavailable`, saying they expired, before anything is fetched.
+#[test]
+fn expired_pins_fail_the_download_before_any_fetch() {
+    let dir = Dir::new("browser_install_expired", &[]);
+    let (tools, _handles) = Fake::new(false);
+    let found = roots(&dir);
+    let pins = pins(&dir);
+    put_pins(pins.bundled.as_deref().unwrap(), "pins-131-46d");
+    let fake = Arc::clone(&tools);
+    let host = dir.start_with(0, move |config: HostConfig| {
+        pins.apply(config)
+            .with_browser_install_tools(fake)
+            .with_chrome_roots(found)
+    });
+    let mut sub = subscribe(&host);
+    host.ok(HostCommand::InstallBrowser {});
+    let last = states(&mut sub).pop().unwrap();
+    let BrowserInstallState::Failed { code, message } = last else {
+        panic!("{last:?}");
+    };
+    assert_eq!(code, BrowserInstallFailure::ListUnavailable);
+    assert!(message.contains("expired"), "{message}");
+    assert_eq!(tools.downloads.load(Ordering::SeqCst), 0);
+    host.shutdown();
+}
+
 /// `CancelBrowserInstall` with no download running answers `Done` and sends nothing.
 #[test]
 fn a_cancel_with_nothing_running_does_nothing() {

@@ -5871,6 +5871,13 @@ export type ToolsUnavailableReason =
  *  version cannot be checked.
  */
 "browser_list_unavailable" | 
+/**
+ *  The browser only: a Chrome for Testing Clauseo downloaded is the browser, and the
+ *  newest signed browser list Clauseo has was published over 45 days ago, so its copy
+ *  of Chrome is too old to use, and Clauseo can't update it right now. Chrome
+ *  installed on the machine is never judged so.
+ */
+"browser_list_expired" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
 

@@ -42,6 +42,10 @@ export const HI = {
   // (provisional Hindi, app track final)
   "Clauseo couldn't confirm that its copy of Chrome is up to date, so it isn't using the browser for now. It keeps checking on its own.":
     "Clauseo यह पक्का नहीं कर सका कि उसका Chrome अप-टू-डेट है, इसलिए वह अभी ब्राउज़र का उपयोग नहीं कर रहा। वह अपने आप जाँच करता रहेगा।",
+  // under the browser's reason when Clauseo's newest list of Chrome versions is too old, in full: no download helps
+  // (provisional Hindi, app track final)
+  "Clauseo's copy of Chrome is too old to use, and Clauseo can't update it right now. It keeps trying on its own.":
+    "Clauseo का Chrome इतना पुराना है कि उसका उपयोग नहीं हो सकता, और Clauseo अभी उसे अपडेट नहीं कर सकता। वह अपने आप कोशिश करता रहेगा।",
   // under a browser that is on, when Clauseo's newest list of Chrome versions is old: a note, nothing is wrong
   // (provisional Hindi, app track final)
   "Clauseo hasn't checked for a newer Chrome in a while. The browser still works.":

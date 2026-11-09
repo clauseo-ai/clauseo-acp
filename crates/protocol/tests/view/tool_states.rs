@@ -56,6 +56,7 @@ fn tool_states_round_trip_in_a_header_with_every_reason() {
             "browser_policy_unreadable",
             "browser_out_of_date",
             "browser_list_unavailable",
+            "browser_list_expired",
         ]
     );
 }

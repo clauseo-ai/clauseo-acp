@@ -23,7 +23,8 @@ export type BrowserState =
   | "browser_blocked_by_policy"
   | "browser_policy_unreadable"
   | "browser_out_of_date"
-  | "browser_list_unavailable";
+  | "browser_list_unavailable"
+  | "browser_list_expired";
 
 /** A note on a tool that is on, which takes nothing away from it: the newest list of Chrome versions Clauseo has is
  * old, so a newer Chrome may be out. */
@@ -50,6 +51,7 @@ const BROWSER: ReadonlySet<string> = new Set<BrowserState>([
   "browser_policy_unreadable",
   "browser_out_of_date",
   "browser_list_unavailable",
+  "browser_list_expired",
 ]);
 const BROWSER_NOTICES: ReadonlySet<string> = new Set<BrowserNotice>(["browser_list_old"]);
 
@@ -120,6 +122,7 @@ const REASON: Record<Exclude<WebState | BrowserState, "available">, ToolsLineKey
   browser_policy_unreadable: "Couldn't check browser settings",
   browser_out_of_date: "Needs a newer Chrome",
   browser_list_unavailable: "Couldn't check Chrome's version",
+  browser_list_expired: "Can't update Chrome right now",
 };
 
 /** Why a tool is off, in a few words; null while it's on. */

@@ -30,6 +30,9 @@ export const HI = {
   // Clauseo has no verified list of Chrome versions, so it can't check its Chrome; no download helps
   // (provisional Hindi, app track final)
   "Couldn't check Chrome's version": "Chrome के संस्करण की जाँच नहीं हो सकी",
+  // Clauseo's newest list of Chrome versions is too old, so its Chrome is too, and it can't update it yet; no
+  // download helps (provisional Hindi, app track final)
+  "Can't update Chrome right now": "Chrome अभी अपडेट नहीं हो सकता",
 } as const;
 
 /** Every string, English and Hindi, for the tests that hold the voice. */

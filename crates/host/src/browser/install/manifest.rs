@@ -10,11 +10,11 @@
 //! `&'static str` from the code, never a key of the manifest. The pin gives the zip's sha256 and
 //! size, which the download is checked against.
 
-use clauseo_protocol::BrowserInstallFailure;
+use clauseo_protocol::{BrowserInstallFailure, Timestamp};
 
 use super::Failure;
 use crate::browser::chrome;
-use crate::browser::pins::{DOWNLOAD_CHROME, Pins};
+use crate::browser::pins::{self, DOWNLOAD_CHROME, Pins};
 
 /// The zips' scheme, host and first path segment.
 const ZIP_ORIGIN: &str = "https://storage.googleapis.com/chrome-for-testing-public/";
@@ -36,15 +36,29 @@ pub struct Download {
 }
 
 /// The `chrome` download for `platform` (`mac-arm64`, `mac-x64` or `win64`, from
-/// `Platform::cft_name`) from `pins`: `list_unavailable` without pins, `unsupported` when they
-/// pin no `chrome` zip for `platform`, `host_refused` for a version that is not dotted digits.
-pub fn pinned_download(pins: Option<&Pins>, platform: &'static str) -> Result<Download, Failure> {
+/// `Platform::cft_name`) from `pins`: `list_unavailable` without pins or with pins over 45
+/// days older than `now`, `unsupported` when they pin no `chrome` zip for `platform`,
+/// `host_refused` for a version that is not dotted digits.
+pub fn pinned_download(
+    pins: Option<&Pins>,
+    platform: &'static str,
+    now: Timestamp,
+) -> Result<Download, Failure> {
     let pins = pins.ok_or_else(|| {
         Failure::new(
             BrowserInstallFailure::ListUnavailable,
             "no signed browser list verifies",
         )
     })?;
+    if pins::expired(pins.published(), now) {
+        return Err(Failure::new(
+            BrowserInstallFailure::ListUnavailable,
+            format!(
+                "the signed browser list expired: published {}, over 45 days ago",
+                pins.published().as_str()
+            ),
+        ));
+    }
     let version = pins.version();
     check_version(version)?;
     let pin = pins.pin(DOWNLOAD_CHROME, platform).ok_or_else(|| {

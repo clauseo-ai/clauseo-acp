@@ -8,6 +8,10 @@
 //! separator), a control character, a name that is not ASCII, a name twice (ignoring ASCII
 //! case, as macOS and Windows do), a Unicode-path extra field naming something else, and any
 //! entry under an entry that is a symbolic link (writing through it would leave the folder).
+//! The local headers are then walked in order from the zip's first byte to its central
+//! directory (`archive/sequence.rs`): each must be one the directory names, every one it names
+//! must be met, and nothing may sit between them, so no tool can find an entry the check never
+//! saw.
 //! On Windows (`links_allowed` false, [`links_allowed`]) any symbolic link entry at all is
 //! refused before `tar.exe` runs, so no reparse point is ever made from a zip entry: Chrome for
 //! Testing's Windows zips hold none. On macOS links are allowed, as the app bundle needs them
@@ -27,6 +31,8 @@ use clauseo_protocol::BrowserInstallFailure;
 use super::{Failure, PARTIAL_PREFIX};
 use crate::browser::chrome::Platform;
 use crate::write;
+
+mod sequence;
 
 /// The most entries a zip may hold: Chrome for Testing's hold a few hundred.
 const MAX_ENTRIES: u64 = 100_000;
@@ -242,6 +248,7 @@ pub fn check_zip(path: &Path, links_allowed: bool) -> Result<(), Failure> {
     let central = read_at(&mut file, dir.offset, dir.size)?;
     let mut names: BTreeSet<Vec<String>> = BTreeSet::new();
     let mut links = Vec::new();
+    let mut spans = sequence::Spans::new();
     let mut at = 0;
     for _ in 0..dir.entries {
         if u32_at(&central, at)? != CENTRAL_SIG {
@@ -251,6 +258,7 @@ pub fn check_zip(path: &Path, links_allowed: bool) -> Result<(), Failure> {
         let name_len = usize::from(u16_at(&central, at + 28)?);
         let extra_len = usize::from(u16_at(&central, at + 30)?);
         let comment_len = usize::from(u16_at(&central, at + 32)?);
+        let flags = u16_at(&central, at + 8)?;
         let compressed = u32_at(&central, at + 20)?;
         let uncompressed = u32_at(&central, at + 24)?;
         let external = u32_at(&central, at + 38)?;
@@ -283,8 +291,16 @@ pub fn check_zip(path: &Path, links_allowed: bool) -> Result<(), Failure> {
             local.into()
         };
         check_local(&mut file, local, name_bytes)?;
+        let packed = if compressed == u32::MAX {
+            zip64_compressed(extra, uncompressed)?
+        } else {
+            compressed.into()
+        };
+        let zip64 = compressed == u32::MAX || uncompressed == u32::MAX;
+        spans.add(local, packed, flags, zip64)?;
         at += 46 + name_len + extra_len + comment_len;
     }
+    spans.check(&mut file, dir.offset)?;
     for link in &links {
         let under = |name: &&Vec<String>| name.len() > link.len() && name.starts_with(link);
         if let Some(name) = names.iter().find(under) {
@@ -293,6 +309,13 @@ pub fn check_zip(path: &Path, links_allowed: bool) -> Result<(), Failure> {
         }
     }
     Ok(())
+}
+
+/// The compressed size from the zip64 extra field: after the uncompressed size when that is
+/// full too (APPNOTE 4.5.3).
+fn zip64_compressed(extra: &[u8], uncompressed: u32) -> Result<u64, Failure> {
+    let data = extra_field(extra, ZIP64_EXTRA)?.ok_or_else(|| bad("a zip64 size is missing"))?;
+    u64_at(data, if uncompressed == u32::MAX { 8 } else { 0 })
 }
 
 /// The local header offset from the zip64 extra field: after the uncompressed and compressed

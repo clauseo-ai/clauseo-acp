@@ -256,6 +256,11 @@ fn a_link_in_the_browsers_folder_is_passed_over() {
     assert_eq!(find(&roots(dir.path(), Platform::WindowsX64)), Some(real));
 }
 
+/// Two days after [`pins`]' date.
+fn now() -> clauseo_protocol::Timestamp {
+    crate::browser::pins::tests::at("2026-11-09T06:00:00Z")
+}
+
 /// Pins of `version` with no download in them: only their version and date are read here.
 fn pins(version: &str) -> Pins {
     Pins::for_tests("2026-11-07T06:00:00Z", version, &[])
@@ -270,7 +275,7 @@ fn a_downloaded_chrome_one_major_behind_the_pins_is_taken_two_behind_refused() {
         &format!("app/browsers/chrome-156.0.7000.1/{CFT_WIN}"),
     );
     assert_eq!(
-        find_checked(&roots, || Some(pins("157.0.8103.38"))),
+        find_checked(&roots, now(), || Some(pins("157.0.8103.38"))),
         Ok(Picked {
             path: cft.clone(),
             pins_published: Some(
@@ -279,11 +284,11 @@ fn a_downloaded_chrome_one_major_behind_the_pins_is_taken_two_behind_refused() {
         })
     );
     assert_eq!(
-        find_checked(&roots, || Some(pins("156.0.1.1"))).map(|picked| picked.path),
+        find_checked(&roots, now(), || Some(pins("156.0.1.1"))).map(|picked| picked.path),
         Ok(cft)
     );
     assert_eq!(
-        find_checked(&roots, || Some(pins("158.0.1.1"))),
+        find_checked(&roots, now(), || Some(pins("158.0.1.1"))),
         Err(ToolsUnavailableReason::BrowserOutOfDate)
     );
     let dir = TempDir::new("chrome-checked-old");
@@ -293,7 +298,7 @@ fn a_downloaded_chrome_one_major_behind_the_pins_is_taken_two_behind_refused() {
         &format!("app/browsers/chrome-155.0.1.1/{CFT_MAC_ARM}"),
     );
     assert_eq!(
-        find_checked(&roots, || Some(pins("157.0.8103.38"))),
+        find_checked(&roots, now(), || Some(pins("157.0.8103.38"))),
         Err(ToolsUnavailableReason::BrowserOutOfDate)
     );
     // The highest version folder is the one judged.
@@ -301,7 +306,7 @@ fn a_downloaded_chrome_one_major_behind_the_pins_is_taken_two_behind_refused() {
         dir.path(),
         &format!("app/browsers/chrome-157.0.8103.38/{CFT_MAC_ARM}"),
     );
-    assert!(find_checked(&roots, || Some(pins("157.0.8103.38"))).is_ok());
+    assert!(find_checked(&roots, now(), || Some(pins("157.0.8103.38"))).is_ok());
 }
 
 #[test]
@@ -313,7 +318,7 @@ fn a_downloaded_chrome_without_verified_pins_is_list_unavailable() {
         &format!("app/browsers/chrome-157.0.8103.38/{CFT_WIN}"),
     );
     assert_eq!(
-        find_checked(&roots, || None),
+        find_checked(&roots, now(), || None),
         Err(ToolsUnavailableReason::BrowserListUnavailable)
     );
 }
@@ -327,7 +332,7 @@ fn installed_chrome_is_never_judged_by_the_pins() {
         &format!("app/browsers/chrome-100.0.1.1/{CFT_WIN}"),
     );
     let system = touch(&dir.path().join("pf"), WIN_CHROME);
-    let picked = |pins: Option<Pins>| find_checked(&roots, move || pins);
+    let picked = |pins: Option<Pins>| find_checked(&roots, now(), move || pins);
     let never = Picked {
         path: system,
         pins_published: None,
@@ -335,7 +340,7 @@ fn installed_chrome_is_never_judged_by_the_pins() {
     assert_eq!(picked(None), Ok(never.clone()));
     assert_eq!(picked(Some(pins("157.0.8103.38"))), Ok(never));
     // And the pins are not even read.
-    assert!(find_checked(&roots, || panic!("read the pins")).is_ok());
+    assert!(find_checked(&roots, now(), || panic!("read the pins")).is_ok());
 }
 
 #[test]
@@ -343,7 +348,39 @@ fn nothing_found_is_not_installed_whatever_the_pins() {
     let dir = TempDir::new("chrome-checked-none");
     let roots = roots(dir.path(), Platform::MacArm64);
     assert_eq!(
-        find_checked(&roots, || Some(pins("157.0.8103.38"))),
+        find_checked(&roots, now(), || Some(pins("157.0.8103.38"))),
         Err(ToolsUnavailableReason::BrowserNotInstalled)
+    );
+}
+
+#[test]
+fn a_downloaded_chrome_under_a_list_over_45_days_old_is_expired() {
+    use crate::browser::pins::tests::at;
+    let dir = TempDir::new("chrome-checked-expired");
+    let roots = roots(dir.path(), Platform::WindowsX64);
+    touch(
+        dir.path(),
+        &format!("app/browsers/chrome-157.0.8103.38/{CFT_WIN}"),
+    );
+    // The pins are dated 2026-11-07T06:00:00Z. 44 days: offered, with the old list's date.
+    let picked = find_checked(&roots, at("2026-12-21T06:00:00Z"), || {
+        Some(pins("157.0.8103.38"))
+    });
+    assert!(picked.unwrap().pins_published.is_some());
+    // 46 days: refused, even at the pinned version.
+    assert_eq!(
+        find_checked(&roots, at("2026-12-23T06:00:00Z"), || Some(pins(
+            "157.0.8103.38"
+        ))),
+        Err(ToolsUnavailableReason::BrowserListExpired)
+    );
+    // Installed Chrome is never judged, however old the list.
+    let system = touch(&dir.path().join("pf"), WIN_CHROME);
+    assert_eq!(
+        find_checked(&roots, at("2027-06-01T00:00:00Z"), || Some(pins(
+            "157.0.8103.38"
+        )))
+        .map(|picked| picked.path),
+        Ok(system)
     );
 }

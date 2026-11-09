@@ -44,7 +44,7 @@ impl ChromeSearch {
             }),
             Self::Roots(roots) => {
                 let roots = roots.unwrap_or_else(|| ChromeRoots::system(data));
-                crate::browser::chrome::find_checked(&roots, || pins.newest(now))
+                crate::browser::chrome::find_checked(&roots, now, || pins.newest(now))
             }
         }
     }
@@ -116,9 +116,9 @@ impl BrowserPrep {
     /// before any Chrome is picked, forced or found (`browser::rd_policy`), read again at each
     /// launch: when it blocks, both are left out and the entry drops with
     /// `BrowserBlockedByPolicy` or `BrowserPolicyUnreadable`. A downloaded Chrome for Testing
-    /// the pins refuse leaves both out too, with `BrowserOutOfDate` or `BrowserListUnavailable`;
-    /// one they take carries [`ToolNotice::BrowserListOld`] when they are over 14 days old. A
-    /// missing sidecar leaves both out, with a warning (a development build has no
+    /// the pins refuse leaves both out too, with `BrowserOutOfDate`, `BrowserListUnavailable` or
+    /// `BrowserListExpired`; one they take carries [`ToolNotice::BrowserListOld`] when they are
+    /// over 14 days old. A missing sidecar leaves both out, with a warning (a development build has no
     /// agent-browser); a failed claim leaves the claims out. Either way the entry drops with
     /// `BrowserNotInstalled`. Registry, file system and socket calls: off the actor.
     pub(super) fn prepare(self, data: &Path, session_id: &str) -> Prepared {

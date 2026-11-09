@@ -1,8 +1,10 @@
 //! The download engine with fake tools, and its checks one by one.
 
+mod cap;
 mod links;
 mod pinned;
 mod review;
+mod sequence;
 mod support;
 
 use std::path::{Path, PathBuf};
@@ -23,6 +25,8 @@ fn job(dir: &Path, platform: Platform) -> Job {
         platform,
         app_data: dir.join("app"),
         random: "r".to_owned(),
+        // Two days after the test pins' date (`support::pins_with`).
+        now: crate::browser::pins::tests::at("2026-11-09T06:00:00Z"),
     }
 }
 
@@ -403,17 +407,17 @@ fn curl_exits_map_to_codes() {
 #[ignore = "downloads about 200 MB from Google; run by hand on macOS or Windows"]
 fn real_download() {
     let dir = TempDir::new("cft-real");
+    let now = crate::clock::Clock::now(&crate::clock::SystemClock).wall;
     let job = Job {
         platform: Platform::current(),
         app_data: dir.path().to_owned(),
         random: "real".to_owned(),
+        now,
     };
     let mut states = Vec::new();
     // The real pins: the bundled copy in a release's resource folder, given by hand.
     let folder = std::env::var_os("CLAUSEO_BROWSER_PINS").map(PathBuf::from);
     let source = crate::browser::pins::BrowserPins::release(folder).source(dir.path());
-    // 2100: no copy is set aside as dated ahead.
-    let now = clauseo_protocol::Timestamp::new(4_102_444_800_000).unwrap();
     let pins = source.newest(now);
     let result = run(
         &job,

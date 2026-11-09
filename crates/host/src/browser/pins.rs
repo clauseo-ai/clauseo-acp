@@ -17,9 +17,15 @@
 //!   download's thread) read both from disk each time ([`PinsSource::newest`]) and use the
 //!   newer that verifies; with neither, the downloaded Chrome for Testing is refused
 //!   (`BrowserListUnavailable`) and the download too (`list_unavailable`).
-//! - No rollback ([`accept`]): a fetched manifest is stored only when it is published later
-//!   than the newest the app has and pins no lower version. One dated over a day ahead of the
-//!   host clock is set aside, as the block list's is.
+//! - Freshness: the used copy's signed `published` against the host clock. Over 14 days the
+//!   downloaded browser carries `BrowserListOld`; over 45 days it is refused
+//!   (`BrowserListExpired`) and the download too (`list_unavailable`). The bundled copy counts
+//!   by its own date. A daily heartbeat (same version, newer date) keeps it fresh.
+//! - No rollback ([`accept`]): a fetched manifest is stored only when it is the same bytes as
+//!   the newest verified copy the app has, at any date ([`PinsSource::floor`]), or is published
+//!   strictly later and pins no lower version. A copy dated over a day ahead of the host clock
+//!   is not used, as the block list's is not, but still counts as the floor: setting the clock
+//!   back lowers nothing.
 
 use std::collections::BTreeMap;
 use std::io::{self, Read as _};
@@ -73,6 +79,10 @@ pub const DOWNLOAD_CHROME: &str = "chrome";
 /// [`ToolNotice::BrowserListOld`].
 pub const LIST_OLD_AFTER_SECONDS: i64 = 14 * DAY;
 
+/// How old the newest manifest may be before the downloaded browser is refused
+/// (`BrowserListExpired`) and the download too (`list_unavailable`).
+pub const LIST_EXPIRED_AFTER_SECONDS: i64 = 45 * DAY;
+
 /// One zip's pin.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pin {
@@ -91,6 +101,8 @@ pub struct Pins {
     numbers: Vec<u64>,
     run: String,
     downloads: BTreeMap<String, BTreeMap<String, Pin>>,
+    /// The sha256 of the manifest's exact bytes: the floor rule takes the same bytes again.
+    digest: [u8; 32],
 }
 
 impl Pins {
@@ -147,17 +159,26 @@ impl Pins {
             numbers: crate::browser::chrome::version(version).unwrap(),
             run: "1".to_owned(),
             downloads,
+            digest: [0; 32],
         }
     }
 }
 
-/// The no-rollback rule: may `candidate` replace `best`, the newest verified manifest the app
-/// has (`None`: none)? Only when it is published later and pins no lower version. An equal
-/// time is the same manifest: no change.
-pub fn accept(candidate: &Pins, best: Option<&Pins>) -> bool {
-    best.is_none_or(|best| {
-        candidate.published > best.published && candidate.numbers >= best.numbers
+/// The floor rule: may `candidate` stand against `floor`, the newest verified manifest the
+/// app has at any date (`PinsSource::floor`; `None`: none)? Only when it is the same bytes,
+/// or is published strictly later and pins no lower version. So a heartbeat (the same version,
+/// published later) is taken and resets freshness, and a replay of an older or equally dated
+/// manifest is refused.
+pub fn accept(candidate: &Pins, floor: Option<&Pins>) -> bool {
+    floor.is_none_or(|floor| {
+        candidate.digest == floor.digest
+            || (candidate.published > floor.published && candidate.numbers >= floor.numbers)
     })
+}
+
+/// Whether `candidate` is the same bytes as `other`.
+pub fn same_bytes(candidate: &Pins, other: &Pins) -> bool {
+    candidate.digest == other.digest
 }
 
 /// The newer of two verified manifests: the higher version, then the later date. So the
@@ -170,12 +191,26 @@ fn newer(a: Pins, b: Pins) -> Pins {
     }
 }
 
+/// [`newer`] of whichever of the two there are.
+fn newer_of(a: Option<Pins>, b: Option<Pins>) -> Option<Pins> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(newer(a, b)),
+        (a, b) => a.or(b),
+    }
+}
+
 /// The notice of a browser that is a Chrome for Testing Clauseo downloaded, judged by the
 /// newest manifest's `published`: [`ToolNotice::BrowserListOld`] when that is over 14 days
 /// before `now`.
 pub fn notice(published: Generated, now: Timestamp) -> Option<ToolNotice> {
     (seconds(now) - published.unix_seconds() > LIST_OLD_AFTER_SECONDS)
         .then_some(ToolNotice::BrowserListOld)
+}
+
+/// Whether the newest manifest, published at `published`, is over 45 days before `now`: then a
+/// downloaded Chrome for Testing is refused and no download starts.
+pub fn expired(published: Generated, now: Timestamp) -> bool {
+    seconds(now) - published.unix_seconds() > LIST_EXPIRED_AFTER_SECONDS
 }
 
 /// `now` in Unix seconds.
@@ -250,23 +285,49 @@ pub struct PinsSource {
 }
 
 impl PinsSource {
-    /// The newer verified of the bundled and the stored copy, each set aside when dated over a
-    /// day ahead of `now`; `None` when neither verifies. A refused copy is logged.
+    /// The copy to use: the newer verified of the bundled and the stored copy, each set aside
+    /// when dated over a day ahead of `now`; `None` when neither verifies. A refused copy is
+    /// logged.
     pub fn newest(&self, now: Timestamp) -> Option<Pins> {
+        let ahead = |which: &'static str, pins: Pins| {
+            if !pins.is_ahead_of(now) {
+                return Some(pins);
+            }
+            tracing::warn!(
+                which,
+                published = pins.published.as_str(),
+                "a browser pins copy is dated over a day ahead of this computer's clock; set aside"
+            );
+            None
+        };
+        let (bundled, stored) = self.verified();
+        newer_of(
+            bundled.and_then(|pins| ahead("bundled", pins)),
+            stored.and_then(|pins| ahead("stored", pins)),
+        )
+    }
+
+    /// The floor: the newer verified of the bundled and the stored copy WHATEVER
+    /// their dates. The date only chooses which copy is used ([`Self::newest`]); it never lowers
+    /// the floor, so with the clock set back a replayed older manifest cannot replace a stored
+    /// one dated "ahead".
+    pub fn floor(&self) -> Option<Pins> {
+        let (bundled, stored) = self.verified();
+        newer_of(bundled, stored)
+    }
+
+    /// The bundled and the stored copy, each if it verifies, at any date.
+    fn verified(&self) -> (Option<Pins>, Option<Pins>) {
         let bundled = self
             .bundled
             .as_deref()
-            .and_then(|folder| self.read(folder, "bundled", now));
-        let stored = self.read(&self.stored, "stored", now);
-        match (bundled, stored) {
-            (Some(bundled), Some(stored)) => Some(newer(bundled, stored)),
-            (bundled, stored) => bundled.or(stored),
-        }
+            .and_then(|folder| self.read(folder, "bundled"));
+        (bundled, self.read(&self.stored, "stored"))
     }
 
     /// The verified copy in `folder`, or `None` (logged when its files are there but refused).
-    fn read(&self, folder: &Path, which: &'static str, now: Timestamp) -> Option<Pins> {
-        self.read_with(which, now, &mut || read_pair(folder))
+    fn read(&self, folder: &Path, which: &'static str) -> Option<Pins> {
+        self.read_with(which, &mut || read_pair(folder))
     }
 
     /// [`Self::read`] with the pair read by `load`. A signature that does not verify is read
@@ -275,7 +336,6 @@ impl PinsSource {
     fn read_with(
         &self,
         which: &'static str,
-        now: Timestamp,
         load: &mut dyn FnMut() -> io::Result<(Vec<u8>, Vec<u8>)>,
     ) -> Option<Pins> {
         let mut verified = self.verify_pair(which, load())?;
@@ -286,15 +346,6 @@ impl PinsSource {
             verified = self.verify_pair(which, load())?;
         }
         match verified {
-            Ok(pins) if pins.is_ahead_of(now) => {
-                tracing::warn!(
-                    which,
-                    published = pins.published.as_str(),
-                    "a browser pins copy is dated over a day ahead of this computer's clock; set \
-                     aside"
-                );
-                None
-            }
             Ok(pins) => Some(pins),
             Err(error) => {
                 tracing::warn!(which, %error, "a browser pins copy was refused");
