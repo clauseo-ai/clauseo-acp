@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 
 use super::{Disk, Resolved, resolve};
 use crate::network_paths::NetEnv;
-use crate::network_paths::resolve::tests::{Fake, FakeFs};
+#[cfg(unix)]
+use crate::network_paths::resolve::tests::Fake;
+use crate::network_paths::resolve::tests::FakeFs;
 use crate::network_paths::tests::plain_net;
 
 fn as_written(_: &Path) -> Option<PathBuf> {
@@ -22,6 +24,7 @@ fn on(path: &str, fs: &FakeFs, net: &NetEnv) -> Resolved {
     resolve(Path::new(path), &disk)
 }
 
+#[cfg(unix)]
 fn local(path: &str, is_file: bool) -> Resolved {
     Resolved::Local {
         path: path.into(),
@@ -29,6 +32,9 @@ fn local(path: &str, is_file: bool) -> Resolved {
     }
 }
 
+// Unix fixture paths aren't absolute on Windows, where the walk refuses them; Windows' walk
+// rules are tested in network_paths' Windows tests.
+#[cfg(unix)]
 #[test]
 fn a_file_a_folder_and_a_missing_tail() {
     let fs = FakeFs::with(&[("/srv/a/x.docx", Fake::File)]);
@@ -41,6 +47,9 @@ fn a_file_a_folder_and_a_missing_tail() {
     );
 }
 
+// Unix fixture paths aren't absolute on Windows, where the walk refuses them; Windows' walk
+// rules are tested in network_paths' Windows tests.
+#[cfg(unix)]
 #[test]
 fn a_refusal_says_why() {
     let fs = FakeFs::with(&[

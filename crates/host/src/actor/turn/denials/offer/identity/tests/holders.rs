@@ -5,20 +5,32 @@
 //! own paths (a matter root linking to a share is never opened), and a place made after the
 //! capture makes it stale.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(unix)]
+use std::path::PathBuf;
+#[cfg(unix)]
 use std::sync::Arc;
 
 use clauseo_protocol::DenialKind;
 
-use super::{FakeIds, aliased, capture, capture_on, card, matter, rules};
+#[cfg(unix)]
+use super::capture;
+use super::{FakeIds, aliased, capture_on, card, matter, rules};
+#[cfg(unix)]
 use crate::actor::turn::denials::check::SessionCache;
+#[cfg(unix)]
+use crate::actor::turn::denials::offer::KnownMatter;
 use crate::actor::turn::denials::offer::identity::FileId;
-use crate::actor::turn::denials::offer::{KnownMatter, Offer, OfferRules};
+use crate::actor::turn::denials::offer::{Offer, OfferRules};
+#[cfg(unix)]
 use crate::actor::turn::denials::resolve::Disk;
 use crate::network_paths::resolve::tests::{Fake, FakeFs};
-use crate::network_paths::tests::{mac_net, plain_net};
+#[cfg(unix)]
+use crate::network_paths::tests::mac_net;
+use crate::network_paths::tests::plain_net;
 
 /// A Mac: home on the data volume (2), firmlinked; matter `Smith` on a USB volume (3).
+#[cfg(unix)]
 fn mac_rules() -> OfferRules {
     OfferRules {
         home: Some("/Users/a".into()),
@@ -83,6 +95,9 @@ fn whole(path: &str, offered: bool) -> Offer {
     }
 }
 
+// Unix fixture paths aren't absolute on Windows, where the walk refuses them; Windows' walk
+// rules are tested in network_paths' Windows tests.
+#[cfg(unix)]
 #[test]
 fn a_folder_holding_a_protected_place_or_a_volume_root_is_never_offered_whole() {
     let ids = mac_ids();
@@ -175,6 +190,9 @@ fn windows_users_and_a_drive_root_are_never_offered_whole() {
     );
 }
 
+// Unix fixture paths aren't absolute on Windows, where the walk refuses them; Windows' walk
+// rules are tested in network_paths' Windows tests.
+#[cfg(unix)]
 #[test]
 fn an_identity_that_cant_be_read_refuses() {
     let mut ids = aliased();
@@ -226,6 +244,9 @@ fn a_matter_root_linking_to_a_share_is_captured_by_its_text_never_opened() {
     }
 }
 
+// Unix fixture paths aren't absolute on Windows, where the walk refuses them; Windows' walk
+// rules are tested in network_paths' Windows tests.
+#[cfg(unix)]
 #[test]
 fn a_place_made_after_the_capture_makes_it_stale() {
     let late = aliased();

@@ -7,8 +7,12 @@ use std::path::Path;
 use clauseo_protocol::{DenialKind, OtherMatter};
 use clauseo_sandbox::PathClass;
 
-use super::{Facts, Jail, LaunchPolicy, facts, tool_call_ruling};
-use crate::actor::turn::denials::offer::identity::tests::{aliased, capture, matter, rules};
+#[cfg(unix)]
+use super::Jail;
+use super::{Facts, LaunchPolicy, facts, tool_call_ruling};
+#[cfg(unix)]
+use crate::actor::turn::denials::offer::identity::tests::{aliased, capture};
+use crate::actor::turn::denials::offer::identity::tests::{matter, rules};
 use crate::actor::turn::denials::offer::{Offer, Refused, offer};
 
 /// Denies everything, or nothing.
@@ -106,6 +110,9 @@ fn anything_else_is_one_file_the_launch_would_deny() {
     assert!(!tool_call_ruling(base, &facts, true).offered);
 }
 
+// Unix fixture paths aren't absolute on Windows, where the walk refuses them; Windows' walk
+// rules are tested in network_paths' Windows tests.
+#[cfg(unix)]
 #[test]
 fn the_jail_judges_a_pinned_path_so_a_respelled_matter_is_inside() {
     let ids = aliased();

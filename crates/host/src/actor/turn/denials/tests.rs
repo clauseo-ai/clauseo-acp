@@ -18,6 +18,9 @@ use crate::network_paths::tests::plain_net;
 use crate::pipeline::tests::support::TempDir;
 
 mod network;
+// Unix fixture paths aren't absolute on Windows, where the walk refuses them; Windows' walk
+// rules are tested in network_paths' Windows tests.
+#[cfg(unix)]
 mod ruling;
 
 /// No real names: each name as written.

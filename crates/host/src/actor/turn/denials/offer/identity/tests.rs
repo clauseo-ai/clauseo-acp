@@ -8,7 +8,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use clauseo_protocol::{DenialKind, MatterId, OtherMatter};
+use clauseo_protocol::MatterId;
+#[cfg(unix)]
+use clauseo_protocol::{DenialKind, OtherMatter};
 use clauseo_sandbox::PathClass;
 use uuid::Uuid;
 
@@ -19,6 +21,9 @@ use crate::network_paths::NetEnv;
 use crate::network_paths::resolve::tests::FakeFs;
 use crate::network_paths::tests::plain_net;
 
+// Unix fixture paths aren't absolute on Windows, where the walk refuses them; Windows' walk
+// rules are tested in network_paths' Windows tests.
+#[cfg(unix)]
 mod cost;
 mod holders;
 
@@ -77,6 +82,7 @@ pub(crate) fn capture_on(rules: OfferRules, ids: &FakeIds, fs: &FakeFs, net: &Ne
 }
 
 /// `rules` captured on an empty disk (every path walks to itself), identities from `ids`.
+#[cfg(unix)]
 pub(crate) fn capture(rules: OfferRules, ids: &FakeIds) -> Captured {
     capture_on(rules, ids, &FakeFs::default(), &plain_net(false))
 }
@@ -141,6 +147,7 @@ pub(crate) fn aliased() -> FakeIds {
     ])
 }
 
+#[cfg(unix)]
 fn smith() -> OtherMatter {
     OtherMatter {
         matter: matter(2),
@@ -169,6 +176,7 @@ pub(crate) fn card(captured: &Captured, ids: &FakeIds, path: &str, is_file: bool
     )
 }
 
+#[cfg(unix)]
 fn folder(path: &str, other_matter: Option<OtherMatter>) -> DenialKind {
     DenialKind::Folder {
         path: path.into(),
@@ -176,6 +184,9 @@ fn folder(path: &str, other_matter: Option<OtherMatter>) -> DenialKind {
     }
 }
 
+// Unix fixture paths aren't absolute on Windows, where the walk refuses them; Windows' walk
+// rules are tested in network_paths' Windows tests.
+#[cfg(unix)]
 #[test]
 fn every_spelling_of_a_known_place_is_judged_as_that_place() {
     let ids = aliased();
@@ -250,6 +261,9 @@ fn by_its_text_alone_a_spelling_would_have_been_offered() {
     assert!(got.offered, "{got:?}");
 }
 
+// Unix fixture paths aren't absolute on Windows, where the walk refuses them; Windows' walk
+// rules are tested in network_paths' Windows tests.
+#[cfg(unix)]
 #[test]
 fn a_network_place_is_never_asked_about() {
     let mut rules = rules();
@@ -266,6 +280,50 @@ fn a_network_place_is_never_asked_about() {
         ids.asked()
     );
     assert!(captured.places.len() > 5, "{}", captured.places.len());
+}
+
+/// Windows' twin: a matter on a share, written as UNC or as its `\\?\UNC\` device form, is never
+/// asked about, while the local places are.
+#[cfg(windows)]
+#[test]
+fn a_network_place_is_never_asked_about_on_windows() {
+    let known = |n, name: &str, root: &str| KnownMatter {
+        id: matter(n),
+        name: name.into(),
+        root: root.into(),
+    };
+    let ids = FakeIds::with(&[
+        &[r"C:\"],
+        &[r"C:\Users"],
+        &[r"C:\Users\a"],
+        &[r"C:\Users\a\Matters"],
+        &[r"C:\Users\a\Matters\Acme"],
+    ]);
+    let rules = OfferRules {
+        home: Some(r"C:\Users\a".into()),
+        data_dir: r"C:\Users\a\AppData\Roaming\Clauseo".into(),
+        matter_root: r"C:\Users\a\Matters\Acme".into(),
+        matters: vec![
+            known(1, "Acme", r"C:\Users\a\Matters\Acme"),
+            known(3, "Share", r"\\server\share\x"),
+            known(4, "Device", r"\\?\UNC\server\share\y"),
+        ],
+        fold_case: true,
+        ..rules()
+    };
+    let captured = capture_on(rules, &ids, &FakeFs::default(), &plain_net(true));
+    let asked = ids.asked();
+    assert!(
+        asked
+            .iter()
+            .all(|p| !p.to_string_lossy().to_ascii_lowercase().contains("server")),
+        "{asked:?}"
+    );
+    assert!(
+        asked.contains(&PathBuf::from(r"C:\Users\a\Matters\Acme")),
+        "{asked:?}"
+    );
+    assert_ne!(captured.places.len(), 0);
 }
 
 #[test]

@@ -15,6 +15,7 @@ use super::super::check::{Unchecked, decide, outside_jail};
 use super::super::network::NetEnv;
 use super::super::offer::Offer;
 use super::super::offer::identity::tests::FakeIds;
+#[cfg(unix)]
 use super::super::offer::identity::{Captured, Places};
 use super::{bare, disk, rules};
 use crate::network_paths::resolve::tests::{Fake, FakeFs};
@@ -159,6 +160,9 @@ fn a_local_link_to_each_network_form_stops_at_the_link() {
     }
 }
 
+// Unix fixture paths aren't absolute on Windows, where the walk refuses them; Windows' walk
+// rules are tested in network_paths' Windows tests.
+#[cfg(unix)]
 #[test]
 fn macos_firmlinked_home_is_home() {
     let rules = super::super::offer::OfferRules {
@@ -207,6 +211,9 @@ fn macos_firmlinked_home_is_home() {
     );
 }
 
+// Unix fixture paths aren't absolute on Windows, where the walk refuses them; Windows' walk
+// rules are tested in network_paths' Windows tests.
+#[cfg(unix)]
 #[test]
 fn a_dot_dot_after_a_missing_name_still_reaches_the_link_and_its_ssh() {
     let fs = FakeFs::with(&[
