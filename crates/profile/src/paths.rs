@@ -105,8 +105,9 @@ impl ProfilePaths {
     /// The folder for `HostConfig::with_agent_path_prepend`: stetdoc's own (U13's `stetdoc/`
     /// resource folder). Everything in it becomes a bare command for the agents, so it must hold
     /// stetdoc alone. None, with a warning, when it is the folder of a browser sidecar or of the
-    /// app itself (Tauri's `externalBin` puts every sidecar beside the app), or a root: the
-    /// host then prepends nothing, and stetdoc is not on the agents' `PATH`.
+    /// app itself (Tauri's `externalBin` puts every sidecar beside the app, except agent-browser
+    /// on macOS, in `Contents/Helpers`), or a root: the host then prepends nothing, and stetdoc
+    /// is not on the agents' `PATH`.
     pub fn path_prepend(&self) -> Option<&Path> {
         let dir = self.stetdoc.parent()?;
         dir.parent()?;

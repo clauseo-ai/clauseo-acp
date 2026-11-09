@@ -1354,6 +1354,10 @@ the release fetches the pinned asset, checks its hash and writes it into the des
   (`connection.rs:198`, `is_agent_browser_process`, which wants the name to start with
   `agent-browser`) then skips its stale-daemon kill. On Windows the guard's Job Object (#329) covers
   that; on Unix the guard ends the daemon itself ("Chrome on the claimed port").
+- **Where it lives on macOS** (2026-11-09): `Clauseo.app/Contents/Helpers/clauseo-agent-browser`,
+  Apple's folder for nested helper code, not `Contents/MacOS`, which the agent's sandbox can reach
+  (0035, "Sidecars"). The desktop looks there first and, transitionally, beside the exe; the
+  fallback goes in the same change as stage C's J3 deny on `Contents/Helpers`.
 - **Windows ARM64** has no upstream build. `aarch64-pc-windows-msvc` takes the x64 asset, which
   Windows on ARM runs under x64 emulation; the pin says so in a comment.
 - **The license**: `LICENSES/Apache-2.0-agent-browser.txt`, a copy of upstream's `LICENSE` (upstream

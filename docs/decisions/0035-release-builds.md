@@ -252,7 +252,7 @@ S15's tools sat in `windows.conf.json` and S27's in `tauri.conf.json`.
     `clauseo-sandbox-setup` and `clauseo-sandbox-run` (Windows targets) as rows of their own.
 - **The overlay goes last.** Every `tauri build` and `tauri bundle` of a shipped leg passes
   `--config release/sidecars.generated.json` after every other `--config`. A JSON merge patch
-  replaces arrays, so one generated list per target is the only safe shape. `sidecars.mjs --check`,
+  replaces arrays, so one generated list per target is the only safe shape. `sidecars.mjs --check <triple>`,
   after the seam and again in `sign-windows` after the download, fails if the file holds anything
   but `bundle.externalBin` or an entry not under `binaries/clauseo-`; `check` now allows only
   `bundle.windows.nsis.installerHooks` in `windows.conf.json`. `latest-json.test.mjs` fails when a
@@ -267,6 +267,16 @@ S15's tools sat in `windows.conf.json` and S27's in `tauri.conf.json`.
 - **Where they land:** beside the app's exe in every bundle: `Clauseo.app/Contents/MacOS/`,
   `/usr/bin/` in the `.deb` and `.rpm` (hence the `clauseo-` prefix), and the install folder of
   both NSIS installers, which install and remove each `externalBin` with `Clauseo.exe`.
+- **The macOS browser helper (2026-11-09).** `Contents/MacOS` is within the agent's sandbox, so on
+  the darwin targets `clauseo-agent-browser` leaves `externalBin` and the overlay puts it in
+  `bundle.macOS.files` as `Helpers/clauseo-agent-browser` (Apple's folder for nested helpers;
+  notarisation refuses Mach-O in `Contents/Resources`). `--check <triple>` allows that one entry
+  on darwin and nothing else. The bundler copies `macOS.files` unsigned, so the macOS bundle step
+  signs the helper first, as the bundler signs the app (`--options runtime`, no entitlements,
+  `--timestamp` with a real identity), and a check after it fails the leg unless `Contents/MacOS`
+  holds exactly `Clauseo` and the overlay's `externalBin`, `Contents/Helpers` holds only the
+  signed helper, and `codesign --verify --deep --strict` passes on the `.app`. Stage C's J3 adds
+  the sandbox deny on `Contents/Helpers`.
 - **Sizes.** The size table lists each sidecar on its own row beside the app's exe; none counts
   towards `release_binary_size`. On Linux each has its own budget row (`agent_browser_size`,
   `clauseo_mcp_size`), `deb_total_size` is the .deb as shipped, and `deb_size` stays the app's own

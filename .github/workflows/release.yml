@@ -38,7 +38,8 @@
 #   windows.conf.json (the uninstall hook), machine.conf.json (the perMachine installer) and
 #   blocklist.conf.json (bundle.resources: the block-list snapshot, blocklist/ in the app's
 #   resources). `check` fails on any other key in them. The sidecar seam writes a fourth,
-#   sidecars.generated.json (bundle.externalBin only, gitignored), which every `tauri build` and
+#   sidecars.generated.json (bundle.externalBin only, plus on macOS one bundle.macOS.files entry
+#   putting clauseo-agent-browser in Contents/Helpers; gitignored), which every `tauri build` and
 #   `tauri bundle` of a shipped build passes last.
 # - The block-list snapshot: the `blocklist` job downloads clauseo-ai/blocklist's `current`
 #   release, fails unless minisign verifies it with crates/blocklist/keys/stage-f.pub (the key the
@@ -452,7 +453,8 @@ jobs:
       # checks both). sidecars.mjs builds or fetches each sidecar for $TARGET (clauseo-mcp with
       # this job's RUSTFLAGS and profile, clauseo-agent-browser from agent-browser's pin) as
       # crates/desktop/binaries/<name>-$TARGET (.exe on Windows), and writes
-      # release/sidecars.generated.json: bundle.externalBin for exactly those. Every tauri build
+      # release/sidecars.generated.json: bundle.externalBin for exactly those (on macOS,
+      # clauseo-agent-browser in bundle.macOS.files instead, for Contents/Helpers). Every tauri build
       # and tauri bundle below passes it last (a merge patch replaces arrays, so it is the
       # target's whole list). S15 adds its rows to the script's table.
       # The updater public key the sandbox's build.rs builds in (stage C), before sidecars.mjs
@@ -486,7 +488,7 @@ jobs:
         run: |
           set -euo pipefail
           node .github/scripts/sidecars.mjs "$TARGET"
-          node .github/scripts/sidecars.mjs --check
+          node .github/scripts/sidecars.mjs --check "$TARGET"
 
       # CLAUSEO_RELEASE_DATE is set only for a tag (release and test); unset, the app has none.
       - name: Build the app
@@ -573,7 +575,12 @@ jobs:
           jq -n --arg key "$pub" '{plugins: {updater: {pubkey: $key}}}' > "$RUNNER_TEMP/updater-key.conf.json"
 
       # The bundler signs the .app ad hoc (APPLE_SIGNING_IDENTITY "-") until S20a's Developer ID,
-      # then the updater archive with the mode's key, which only this step holds.
+      # then the updater archive with the mode's key, which only this step holds. First this step
+      # signs the browser helper, which the overlay's bundle.macOS.files puts in Contents/Helpers:
+      # the bundler copies those files without signing them, and the .app's seal needs nested code
+      # signed before it. The same identity and options as the bundler's own codesign (--force,
+      # the hardened runtime of tauri.conf.json, no entitlements); a real identity adds a secure
+      # timestamp, which an ad hoc signature cannot take.
       - name: Bundle the .app and the DMG, and sign the updater archive
         if: runner.os == 'macOS'
         env:
@@ -588,9 +595,50 @@ jobs:
             export TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
           fi
           [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || { echo "::error::no updater key for a $MODE run"; exit 1; }
+          rel=$(jq -er '.bundle.macOS.files["Helpers/clauseo-agent-browser"]' crates/desktop/release/sidecars.generated.json) ||
+            { echo "::error::sidecars.generated.json puts no clauseo-agent-browser in Contents/Helpers"; exit 1; }
+          helper=crates/desktop/$rel
+          [ -f "$helper" ] || { echo "::error::no browser helper at $helper"; exit 1; }
+          [ -n "$APPLE_SIGNING_IDENTITY" ] || { echo "::error::APPLE_SIGNING_IDENTITY is empty"; exit 1; }
+          if [ "$APPLE_SIGNING_IDENTITY" = - ]; then
+            codesign --force -s "$APPLE_SIGNING_IDENTITY" --options runtime "$helper"
+          else
+            codesign --force -s "$APPLE_SIGNING_IDENTITY" --options runtime --timestamp "$helper"
+          fi
+          codesign --verify --strict --verbose=2 "$helper" || { echo "::error::$helper does not verify after signing"; exit 1; }
           pnpm -C ui tauri bundle --ci --target "$TARGET" ${FEATURES:+--features "$FEATURES"} --bundles app,dmg \
             --config release/release.conf.json --config release/blocklist.conf.json \
             --config "$RUNNER_TEMP/updater-key.conf.json" --config release/sidecars.generated.json
+
+      # The .app as bundled, before anything uploads it. Contents/MacOS, which the agent's sandbox
+      # can reach, holds exactly the main executable and the overlay's externalBin sidecars;
+      # Contents/Helpers holds exactly clauseo-agent-browser, executable and signed; and the whole
+      # bundle verifies, strictly and deep. Each check fails the leg.
+      - name: The .app keeps the browser helper in Contents/Helpers, and verifies
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          app=$RELEASE_DIR/bundle/macos/Clauseo.app
+          [ -d "$app" ] || { echo "::error::no .app at $app"; exit 1; }
+          main=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")
+          [ "$main" = Clauseo ] || { echo "::error::$app's CFBundleExecutable is $main, not Clauseo"; exit 1; }
+          want=$({ echo "$main"; jq -r '.bundle.externalBin[] | ltrimstr("binaries/")' crates/desktop/release/sidecars.generated.json; } |
+            LC_ALL=C sort | tr '\n' ' ')
+          have=$(ls -A "$app/Contents/MacOS" | LC_ALL=C sort | tr '\n' ' ')
+          [ "$have" = "$want" ] ||
+            { echo "::error::$app/Contents/MacOS holds $have; it may hold only $want"; exit 1; }
+          [ -d "$app/Contents/Helpers" ] || { echo "::error::$app has no Contents/Helpers"; exit 1; }
+          helpers=$(ls -A "$app/Contents/Helpers" | LC_ALL=C sort | tr '\n' ' ')
+          [ "$helpers" = "clauseo-agent-browser " ] ||
+            { echo "::error::$app/Contents/Helpers holds $helpers; it must hold only clauseo-agent-browser"; exit 1; }
+          helper=$app/Contents/Helpers/clauseo-agent-browser
+          [ -f "$helper" ] && [ -x "$helper" ] || { echo "::error::$helper is not an executable file"; exit 1; }
+          codesign --verify --strict --verbose=2 "$helper" ||
+            { echo "::error::codesign --verify --strict fails on $helper"; exit 1; }
+          codesign --verify --deep --strict --verbose=2 "$app" ||
+            { echo "::error::codesign --verify --deep --strict fails on $app"; exit 1; }
+          echo "- $TARGET Clauseo.app: Contents/MacOS holds $have; Contents/Helpers holds $helpers(signed); the .app verifies --deep --strict" |
+            tee -a "$GITHUB_STEP_SUMMARY"
 
       # Each leg's assets, under the names latest-json.mjs lists (assemble renames the macOS
       # archive, which both macOS legs call Clauseo.app.tar.gz).
@@ -780,7 +828,7 @@ jobs:
           name: windows-exe-${{ matrix.target }}
 
       - name: The downloaded overlay holds only bundle.externalBin
-        run: node .github/scripts/sidecars.mjs --check
+        run: node .github/scripts/sidecars.mjs --check "$TARGET"
 
       # The same verified snapshot the build leg compiled with, for both installers.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
