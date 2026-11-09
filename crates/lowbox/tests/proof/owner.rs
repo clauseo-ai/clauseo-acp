@@ -1,6 +1,11 @@
 //! The owner's side of the row: the set-up (recipe steps 1, 3 and 4 and the test account), the
-//! helper's start, the run, the artifacts, the evidence, and a cleanup that always runs, in a
-//! fixed order, each step checked and printed.
+//! helper's start, the run, the artifacts and the evidence. The cleanup, which always runs, is in
+//! `teardown.rs`.
+//!
+//! The row's own bounded waits: the page 180 s, the facts 60 s, the helper's exit 120 s, its
+//! last output 10 s, then in the cleanup the helper's kill 10 s, the account's processes 30 s,
+//! the profile's delete 57 s and the root's delete 10 s: 477 s in all, under the 600 s nextest
+//! gives this row (`.config/nextest.toml`).
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::RecvTimeoutError;
@@ -11,16 +16,16 @@ use clauseo_lowbox::{
 };
 
 use super::acl::{self, DriveRoot, NullDevice};
-use super::evidence::{self, Context};
-use super::helper::Config;
+use super::evidence::{self, Context, PNG_SIGNATURE, redact};
+use super::helper::{Config, STDERR_LOG};
 use super::launch::{self, Helper};
 use super::proxy::Proxy;
 use super::station::Station;
 use super::win::{self, Res};
-use super::{account, loopback, write};
+use super::{account, loopback, teardown, write};
 
 /// How long the owner waits for chrome's page request.
-const PAGE_WAIT: Duration = Duration::from_secs(60);
+const PAGE_WAIT: Duration = Duration::from_secs(180);
 /// How long it waits for the helper's facts after `inspect`.
 const FACTS_WAIT: Duration = Duration::from_secs(60);
 /// How long it waits for the helper to exit after the release.
@@ -68,39 +73,51 @@ impl Inputs {
 }
 
 /// The test account.
-struct User {
+pub(crate) struct User {
     /// Its name.
-    name: String,
+    pub(crate) name: String,
     /// Its SID text, once looked up.
-    sid: Option<String>,
+    pub(crate) sid: Option<String>,
+    /// `%SystemDrive%\Users\<name>`: its profile folder when `ProfileImagePath` is gone.
+    pub(crate) profile_fallback: PathBuf,
+}
+
+/// The namespace's handles and what opens it again by name.
+pub(crate) struct Built {
+    /// The handles `Namespace::build` returned.
+    pub(crate) handles: NamespaceHandles,
+    /// Its package.
+    pub(crate) package: PackageName,
+    /// Its session.
+    pub(crate) session: u32,
 }
 
 /// Everything the row made, each field set as soon as the thing exists, so the cleanup undoes
 /// exactly what was done.
 #[derive(Default)]
-struct Run {
+pub(crate) struct Run {
     /// The helper process.
-    helper: Option<Helper>,
+    pub(crate) helper: Option<Helper>,
     /// The proxy.
-    proxy: Option<Proxy>,
-    /// The namespace's handles.
-    namespace: Option<NamespaceHandles>,
+    pub(crate) proxy: Option<Proxy>,
+    /// The namespace.
+    pub(crate) namespace: Option<Built>,
     /// The drive root's saved DACL.
-    drive_root: Option<DriveRoot>,
+    pub(crate) drive_root: Option<DriveRoot>,
     /// `\Device\Null`'s saved DACL.
-    null_device: Option<NullDevice>,
+    pub(crate) null_device: Option<NullDevice>,
     /// The loopback list as it was.
-    loopback: Option<Vec<Vec<u8>>>,
+    pub(crate) loopback: Option<Vec<Vec<u8>>>,
     /// The SID that holds the granted logon right.
-    logon_right: Option<String>,
+    pub(crate) logon_right: Option<String>,
     /// The station and desktop.
-    station: Option<Station>,
+    pub(crate) station: Option<Station>,
     /// The test account.
-    user: Option<User>,
+    pub(crate) user: Option<User>,
     /// The test root.
-    root: Option<PathBuf>,
+    pub(crate) root: Option<PathBuf>,
     /// Whether the cleanup ran.
-    cleaned: bool,
+    pub(crate) cleaned: bool,
 }
 
 /// The whole row: set up, prove, clean up, then fail with every problem found.
@@ -108,7 +125,7 @@ pub(crate) fn row() {
     let inputs = Inputs::from_env();
     let mut run = Run::default();
     let outcome = run.prove(&inputs);
-    let cleanup = run.cleanup();
+    let cleanup = teardown::cleanup(&mut run);
     let mut problems = match outcome {
         Ok(problems) => problems,
         Err(e) => vec![format!("the row stopped: {e}")],
@@ -140,13 +157,14 @@ impl Run {
         let package = PackageName::new(&format!("Clauseo.Browser.Proof{tag}"))
             .map_err(because("the package name"))?;
         let package_text = package_sid(&package).as_str().to_owned();
-        println!("setup: test account {user}, package {}", package.as_str());
+        println!("setup: test account {user} and a fresh package (its name is not printed)");
 
         let password = win::random_password();
         account::add(&user, &password)?;
         self.user = Some(User {
             name: user.clone(),
             sid: None,
+            profile_fallback: PathBuf::from(format!(r"{}\Users\{user}", inputs.system_drive)),
         });
         let user_sid = account::lookup_sid(&user)?;
         if let Some(made) = self.user.as_mut() {
@@ -197,9 +215,21 @@ impl Run {
             .port();
         let browser = Sid::parse(&user_sid).map_err(because("the account's SID"))?;
         let session = Namespace::current_session().map_err(because("the session"))?;
-        let namespace = self.namespace.insert(
-            Namespace::build(&package, session, &browser).map_err(because("Namespace::build"))?,
+        assert_ne!(
+            session, 0,
+            "the row runs in session 0, which has no \\Sessions\\0\\BaseNamedObjects for the \
+             namespace: run it from a logged-on session"
         );
+        let handles =
+            Namespace::build(&package, session, &browser).map_err(because("Namespace::build"))?;
+        let namespace = &self
+            .namespace
+            .insert(Built {
+                handles,
+                package: package.clone(),
+                session,
+            })
+            .handles;
         println!("setup: namespace built in session {session}; proxy on 127.0.0.1:{port}");
 
         let helper = self
@@ -228,8 +258,15 @@ impl Run {
             helper.pid()
         );
 
-        let output = self.watch();
-        self.finish(inputs, &folders, &station_name, &output)
+        match self.watch() {
+            Ok(output) => self.finish(inputs, &folders, &station_name, &output),
+            Err(e) => {
+                if let Err(log) = self.save_logs(inputs, &folders, &[]) {
+                    println!("run: {log}");
+                }
+                Err(e)
+            }
+        }
     }
 
     /// Makes the test root's folders, applies the package's grants, then copies the shell and
@@ -276,16 +313,20 @@ impl Run {
     }
 
     /// The run itself: waits for the page request, asks for the inspection, collects the facts,
-    /// releases the page and waits for the helper. Returns the helper's output lines.
-    fn watch(&mut self) -> Vec<String> {
+    /// releases the page and waits for the helper. Returns the helper's output lines; without a
+    /// page request it fails without asking for the inspection.
+    fn watch(&mut self) -> Res<Vec<String>> {
         let (Some(helper), Some(proxy)) = (self.helper.as_mut(), self.proxy.as_ref()) else {
-            return Vec::new();
+            return Err("the run had no helper or proxy".to_owned());
         };
-        let seen = proxy.wait_seen(PAGE_WAIT);
-        println!(
-            "run: the proxy {} the page request",
-            if seen { "saw" } else { "never saw (60 s)" }
-        );
+        if !proxy.wait_seen(PAGE_WAIT) {
+            return Err(format!(
+                "the proxy never saw the page request within {} s; no inspection asked (the \
+                 helper's log is above)",
+                PAGE_WAIT.as_secs()
+            ));
+        }
+        println!("run: the proxy saw the page request");
         if let Err(e) = helper.send("inspect") {
             println!("run: {e}");
         }
@@ -300,7 +341,10 @@ impl Run {
                     }
                 }
                 Err(RecvTimeoutError::Timeout) => {
-                    println!("run: no inspection report within 60 s");
+                    println!(
+                        "run: no inspection report within {} s",
+                        FACTS_WAIT.as_secs()
+                    );
                     break;
                 }
                 Err(RecvTimeoutError::Disconnected) => break,
@@ -314,7 +358,7 @@ impl Run {
         while let Ok(line) = helper.next_line(DRAIN_WAIT) {
             output.push(line);
         }
-        output
+        Ok(output)
     }
 
     /// Copies the artifacts, prints the evidence and checks it.
@@ -326,30 +370,47 @@ impl Run {
         output: &[String],
     ) -> Res<Vec<String>> {
         let shot = folders.staging.join("shot.png");
-        let shot_bytes = std::fs::metadata(&shot).map_or(0, |m| m.len());
+        let shot_data = std::fs::read(&shot).unwrap_or_default();
+        let shot_bytes = u64::try_from(shot_data.len()).unwrap_or(u64::MAX);
         write::create_dir_all(&inputs.artifacts)
             .map_err(|e| format!("making the artifacts folder: {e}"))?;
         if shot_bytes > 0 {
             write::copy(&shot, &inputs.artifacts.join("lowbox-shot.png"))
                 .map_err(|e| format!("copying shot.png: {e}"))?;
         }
-        let log = self.helper.as_ref().map(Helper::log).unwrap_or_default();
         let lines = evidence::parse(output);
         let context = Context {
             station: station_name.to_owned(),
-            station_exists: self.station.as_ref().is_some_and(Station::exists),
             shot_bytes,
-            proxy_seen: self.proxy.as_ref().map_or(0, Proxy::seen),
+            shot_png: shot_data.starts_with(&PNG_SIGNATURE),
+            proxy_delivered: self.proxy.as_ref().map_or(0, Proxy::delivered),
             helper_exit: self.helper.as_ref().and_then(Helper::exit_code),
         };
         let mut summary = evidence::summary(&lines, &context);
         if let Some(proxy) = self.proxy.as_ref() {
             let (refused, errors) = proxy.refused_and_errors();
             summary.push(format!(
-                "evidence: proxy refused {refused:?}, errors {errors:?}"
+                "evidence: proxy page requests {}, refused {refused:?}, errors {errors:?}",
+                proxy.seen()
             ));
         }
         let problems = evidence::check(&lines, &context);
+        self.save_logs(inputs, folders, &summary)?;
+        Ok(problems)
+    }
+
+    /// Prints the helper's log and `summary`, writes both to the artifacts and copies chrome's
+    /// standard error there, each with the package SIDs cut out (`redact`).
+    fn save_logs(&self, inputs: &Inputs, folders: &BrowserFolders, summary: &[String]) -> Res<()> {
+        let log: Vec<String> = self
+            .helper
+            .as_ref()
+            .map(Helper::log)
+            .unwrap_or_default()
+            .iter()
+            .map(|line| redact(line))
+            .collect();
+        let summary: Vec<String> = summary.iter().map(|line| redact(line)).collect();
         println!("--- the helper's log ---");
         for line in &log {
             println!("{line}");
@@ -358,78 +419,22 @@ impl Run {
         for line in &summary {
             println!("{line}");
         }
+        write::create_dir_all(&inputs.artifacts)
+            .map_err(|e| format!("making the artifacts folder: {e}"))?;
         let mut file = log.join("\n");
         file.push_str("\n\n");
         file.push_str(&summary.join("\n"));
         write::write(&inputs.artifacts.join("lowbox-helper-log.txt"), file)
             .map_err(|e| format!("writing the helper's log: {e}"))?;
-        Ok(problems)
-    }
-
-    /// Undoes what the row did, in the brief's order, printing each step; the failures.
-    fn cleanup(&mut self) -> Vec<String> {
-        let mut failures = Vec::new();
-        let mut step = |name: &str, result: Res<String>| match result {
-            Ok(done) => println!("cleanup: {name}: {done}"),
-            Err(e) => {
-                println!("cleanup: {name}: FAILED: {e}");
-                failures.push(format!("{name}: {e}"));
+        match std::fs::read(folders.staging.join(STDERR_LOG)) {
+            Ok(bytes) => {
+                let text = redact(&String::from_utf8_lossy(&bytes));
+                write::write(&inputs.artifacts.join("lowbox-chrome-stderr.log"), &text)
+                    .map_err(|e| format!("writing chrome's standard error: {e}"))?;
+                println!("artifacts: chrome's standard error, {} bytes", bytes.len());
             }
-        };
-        if let Some(helper) = self.helper.take() {
-            step("kill leftovers", helper.kill());
+            Err(e) => println!("artifacts: no chrome standard error log ({e})"),
         }
-        if let Some(mut proxy) = self.proxy.take() {
-            step("stop the proxy", Ok(proxy.stop()));
-        }
-        if let Some(namespace) = self.namespace.take() {
-            drop(namespace);
-            step(
-                "delete the namespace handles",
-                Ok("closed all six".to_owned()),
-            );
-        }
-        if let Some(drive_root) = self.drive_root.take() {
-            step("restore the drive root's DACL", drive_root.restore());
-        }
-        if let Some(null_device) = self.null_device.take() {
-            step(r"restore \Device\Null's DACL", null_device.restore());
-        }
-        if let Some(original) = self.loopback.take() {
-            step("restore the loopback list", loopback::restore(&original));
-        }
-        if let Some(sid) = self.logon_right.take() {
-            step(
-                "remove SeInteractiveLogonRight",
-                account::remove_logon(&sid),
-            );
-        }
-        if let Some(mut station) = self.station.take() {
-            step("close the station and desktop", station.close());
-        }
-        if let Some(user) = self.user.take() {
-            step("NetUserDel", account::delete(&user.name));
-            if let Some(sid) = user.sid {
-                step("DeleteProfileW", account::delete_profile(&sid));
-            }
-        }
-        if let Some(root) = self.root.take() {
-            let removed = write::remove_dir_all(&root)
-                .map(|()| format!("deleted {}", root.display()))
-                .map_err(|e| format!("{}: {e}", root.display()));
-            step("delete the test root", removed);
-        }
-        self.cleaned = true;
-        failures
-    }
-}
-
-impl Drop for Run {
-    fn drop(&mut self) {
-        if !self.cleaned {
-            println!("cleanup after a panic:");
-            let failures = self.cleanup();
-            println!("cleanup after a panic: {} step(s) failed", failures.len());
-        }
+        Ok(())
     }
 }

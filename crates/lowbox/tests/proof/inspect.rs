@@ -1,8 +1,10 @@
 //! The helper's look at chrome and its descendants, as the guard (`B_s`) would look: which it
 //! can open (`PROCESS_QUERY_LIMITED_INFORMATION`, then the token with `TOKEN_QUERY`), each one's
 //! role from its command line, its token's integrity, `AppContainer` package and restriction,
-//! and chrome's machine type. One `fact` line per process; the package SID is never printed,
-//! only whether a token's package is this one.
+//! and its machine type. It snapshots every 500 ms for up to 20 s until a renderer, the GPU
+//! process and the network service are all there and open. One `fact` line per process of the
+//! last snapshot; one that ended before or during the look is `open=gone`. The package SID is
+//! never printed, only whether a token's package is this one.
 #![expect(
     unsafe_code,
     reason = "FFI to the Toolhelp snapshot, OpenProcess, the token queries and \
@@ -31,7 +33,16 @@ use windows::Win32::System::Threading::{
 };
 
 use super::helper::say;
-use super::win::{Res, code, failed, owned, raw};
+use super::win::{Res, code, failed, owned, raw, sleep_ms};
+
+/// How many snapshots the helper takes at most (20 s at [`SNAPSHOT_PAUSE_MS`]).
+const SNAPSHOTS: u32 = 40;
+/// The pause between them.
+const SNAPSHOT_PAUSE_MS: u32 = 500;
+/// The roles the row needs, each with a live process the helper opened.
+const NEEDED: [&str; 3] = ["renderer", "gpu", "network"];
+/// `ERROR_INVALID_PARAMETER`: `OpenProcess` on an id whose process has ended.
+const GONE: u32 = 87;
 
 /// One process of the snapshot.
 #[derive(Debug, Clone)]
@@ -121,47 +132,112 @@ fn role_of(is_root: bool, line: Option<&str>) -> String {
     }
 }
 
-/// Looks at `root` (chrome) and its descendants, printing one fact line each, and keeps the
-/// handles. `package` is the binary package SID.
-pub(crate) fn inspect(root: u32, package: &[u8]) -> Res<Vec<Seen>> {
-    let all = snapshot()?;
-    let mut seen = Vec::new();
-    for entry in tree(&all, root) {
-        // SAFETY: a process id; the handle, when there is one, is owned below.
-        let opened = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, entry.pid) }
-            .map(owned)
-            .map_err(|e| code(&e));
-        let line = opened.as_ref().ok().map(command_line);
-        let role = role_of(
-            entry.pid == root,
-            line.as_ref()
-                .and_then(|l| l.as_ref().ok())
-                .map(String::as_str),
-        );
-        let open = match &opened {
-            Ok(_) => "ok".to_owned(),
-            Err(code) => format!("err{code}"),
-        };
-        let cmdline = match &line {
-            None => "-".to_owned(),
-            Some(Ok(_)) => "ok".to_owned(),
-            Some(Err(status)) => format!("nt{:#010x}", status.cast_unsigned()),
-        };
-        let token = match &opened {
-            Ok(process) => token_facts(process, package),
-            Err(_) => "token=- integrity=- appcontainer=- this_package=- restricted=-".to_owned(),
-        };
-        say(format_args!(
-            "fact role={role} pid={} parent={} exe={} open={open} cmdline={cmdline} {token}",
-            entry.pid, entry.parent, entry.exe
-        ));
-        seen.push(Seen {
-            pid: entry.pid,
-            role,
-            handle: opened.ok(),
-        });
+/// One process of chrome's tree, opened and classified.
+struct Probe {
+    /// Its snapshot entry.
+    entry: Entry,
+    /// The `PROCESS_QUERY_LIMITED_INFORMATION` handle, or the open's error code.
+    opened: Result<OwnedHandle, u32>,
+    /// Its command line (`None` when the open failed), or the NTSTATUS.
+    line: Option<Result<String, i32>>,
+    /// Its role.
+    role: String,
+}
+
+impl Probe {
+    /// Whether it was opened and has not exited.
+    fn live(&self) -> bool {
+        self.opened.as_ref().is_ok_and(|h| exit_code(h).is_none())
     }
-    Ok(seen)
+}
+
+/// `root` and its descendants now, each opened and given its role.
+fn probe(root: u32) -> Res<Vec<Probe>> {
+    let all = snapshot()?;
+    Ok(tree(&all, root)
+        .into_iter()
+        .map(|entry| {
+            // SAFETY: a process id; the handle, when there is one, is owned below.
+            let opened =
+                unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, entry.pid) }
+                    .map(owned)
+                    .map_err(|e| code(&e));
+            let line = opened.as_ref().ok().map(command_line);
+            let role = role_of(
+                entry.pid == root,
+                line.as_ref()
+                    .and_then(|l| l.as_ref().ok())
+                    .map(String::as_str),
+            );
+            Probe {
+                entry,
+                opened,
+                line,
+                role,
+            }
+        })
+        .collect())
+}
+
+/// Looks at `root` (chrome) and its descendants, snapshotting until every [`NEEDED`] role has a
+/// live process (at most [`SNAPSHOTS`] times), then prints one fact line for each process of
+/// the last snapshot and keeps the handles. `package` is the binary package SID.
+pub(crate) fn inspect(root: u32, package: &[u8]) -> Res<Vec<Seen>> {
+    let mut taken = 0;
+    let probes = loop {
+        let probes = probe(root)?;
+        taken += 1;
+        let complete = NEEDED
+            .iter()
+            .all(|role| probes.iter().any(|p| p.role == *role && p.live()));
+        if complete || taken >= SNAPSHOTS {
+            say(format_args!(
+                "snapshots taken={taken} complete={}",
+                u8::from(complete)
+            ));
+            break probes;
+        }
+        sleep_ms(SNAPSHOT_PAUSE_MS);
+    };
+    Ok(probes.into_iter().map(|p| report(p, package)).collect())
+}
+
+/// Prints the fact line of `probe` and keeps its handle.
+fn report(probe: Probe, package: &[u8]) -> Seen {
+    let Probe {
+        entry,
+        opened,
+        line,
+        role,
+    } = probe;
+    let cmdline = match &line {
+        None => "-".to_owned(),
+        Some(Ok(_)) => "ok".to_owned(),
+        Some(Err(status)) => format!("nt{:#010x}", status.cast_unsigned()),
+    };
+    let (token, machine) = match &opened {
+        Ok(process) => (token_facts(process, package), machine(raw(process))),
+        Err(_) => (
+            "token=- integrity=- appcontainer=- this_package=- restricted=-".to_owned(),
+            "machine=- wow=- native=-".to_owned(),
+        ),
+    };
+    // Read last, so a process that ended during the look shows as gone.
+    let open = match &opened {
+        Ok(process) if exit_code(process).is_some() => "gone".to_owned(),
+        Ok(_) => "ok".to_owned(),
+        Err(code) if *code == GONE => "gone".to_owned(),
+        Err(code) => format!("err{code}"),
+    };
+    say(format_args!(
+        "fact role={role} pid={} parent={} exe={} open={open} cmdline={cmdline} {token} {machine}",
+        entry.pid, entry.parent, entry.exe
+    ));
+    Seen {
+        pid: entry.pid,
+        role,
+        handle: opened.ok(),
+    }
 }
 
 /// The token's facts as `token=… integrity=… appcontainer=… this_package=… restricted=…`.
@@ -299,7 +375,7 @@ fn command_line(process: &OwnedHandle) -> Result<String, i32> {
 }
 
 /// The process's machine (`ProcessMachineTypeInfo`) and `IsWow64Process2`'s two answers, as
-/// `process=… wow=… native=…` (0x8664 x64, 0xaa64 ARM64, 0x0000 none).
+/// `machine=… wow=… native=…` (0x8664 x64, 0xaa64 ARM64, 0x0000 none).
 pub(crate) fn machine(process: HANDLE) -> String {
     let mut info = PROCESS_MACHINE_INFORMATION::default();
     // SAFETY: an open process handle with query access and a local of the class's size.
@@ -322,7 +398,7 @@ pub(crate) fn machine(process: HANDLE) -> String {
             |e| format!("wow=err{} native=-", code(&e)),
             |()| format!("wow={:#06x} native={:#06x}", wow.0, native.0),
         );
-    format!("process={process_machine} {wow64}")
+    format!("machine={process_machine} {wow64}")
 }
 
 /// The process's exit code, or `None` while it runs or when it cannot be read.

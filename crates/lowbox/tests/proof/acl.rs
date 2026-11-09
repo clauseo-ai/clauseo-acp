@@ -2,7 +2,8 @@
 //! grants on its folders, the traverse ACE on the system drive's root and the package's ACE on
 //! `\Device\Null` (recipe step 3). The two machine-wide ones are saved first, written without
 //! tree propagation (`SetFileSecurityW`, `SetKernelObjectSecurity`), put back from the saved
-//! bytes, then read again and compared. SDDL here holds SIDs, so it is compared, never printed.
+//! bytes, then read again and their ACE lists compared (not the DACL's flags, which NTFS may
+//! normalise, such as `AI`). SDDL here holds SIDs, so it is compared, never printed.
 #![expect(
     unsafe_code,
     reason = "FFI to CreateDirectoryW, CreateFileW and the file and object security calls"
@@ -88,6 +89,29 @@ fn with_ace(sddl: &str, ace: &str, first: bool) -> Res<String> {
         sddl.len()
     };
     Ok(format!("{}{ace}{}", &sddl[..at], &sddl[at..]))
+}
+
+/// The ACE list of a DACL's SDDL (`D:<flags>(ace)…`): everything from the first ACE on.
+fn aces(sddl: &str) -> &str {
+    sddl.find('(').map_or("", |at| &sddl[at..])
+}
+
+/// The flags of a DACL's SDDL (such as `PAI`), which hold no SID.
+fn flags(sddl: &str) -> &str {
+    let rest = sddl.strip_prefix("D:").unwrap_or(sddl);
+    &rest[..rest.find('(').unwrap_or(rest.len())]
+}
+
+/// Compares the re-read DACL's ACE list with the saved one's; the sentence for the log.
+fn compare(saved: &str, now: &str) -> Res<String> {
+    if aces(now) != aces(saved) {
+        return Err("the re-read DACL's ACE list differs from the saved one".to_owned());
+    }
+    Ok(format!(
+        "restored; the re-read DACL's ACE list equals the saved one (flags saved {:?}, now {:?})",
+        flags(saved),
+        flags(now)
+    ))
 }
 
 /// Whether the re-read `now` holds `sid` while the saved `before` did not.
@@ -190,13 +214,10 @@ impl DriveRoot {
         set_file_dacl(&self.name, self.saved.read_ptr())?;
         let now = file_dacl(&self.name)?;
         let now_sddl = sddl_of(now.read_ptr(), DACL_SECURITY_INFORMATION)?;
-        if now_sddl != self.saved_sddl {
-            return Err("the re-read DACL differs from the saved one".to_owned());
-        }
+        let same = compare(&self.saved_sddl, &now_sddl)?;
         let same_bytes = now.bytes() == self.saved.bytes();
         Ok(format!(
-            "restored; the re-read DACL's SDDL equals the saved one (bytes equal: {same_bytes}, \
-             {} bytes)",
+            "{same}; bytes equal: {same_bytes}, {} bytes",
             self.saved.len()
         ))
     }
@@ -265,13 +286,9 @@ impl NullDevice {
         set_object_dacl(&self.handle, self.saved.read_ptr())?;
         let now = object_dacl(&self.handle)?;
         let now_sddl = sddl_of(now.read_ptr(), DACL_SECURITY_INFORMATION)?;
-        if now_sddl != self.saved_sddl {
-            return Err("the re-read DACL differs from the saved one".to_owned());
-        }
+        let same = compare(&self.saved_sddl, &now_sddl)?;
         let same_bytes = now.bytes() == self.saved.bytes();
-        Ok(format!(
-            "restored; the re-read DACL's SDDL equals the saved one (bytes equal: {same_bytes})"
-        ))
+        Ok(format!("{same}; bytes equal: {same_bytes}"))
     }
 }
 

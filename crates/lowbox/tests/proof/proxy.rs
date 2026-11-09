@@ -24,6 +24,8 @@ const HEAD_LIMIT: usize = 64 * 1024;
 struct State {
     /// How many page requests arrived.
     seen: u32,
+    /// How many page answers were written in full (write, flush and shutdown all worked).
+    delivered: u32,
     /// Whether the owner released the page.
     released: bool,
     /// The requests answered 403, as `METHOD target`.
@@ -86,6 +88,11 @@ impl Proxy {
         self.shared.0.lock().unwrap().seen
     }
 
+    /// How many page answers it wrote in full.
+    pub(crate) fn delivered(&self) -> u32 {
+        self.shared.0.lock().unwrap().delivered
+    }
+
     /// The requests it refused and the connection errors, for the evidence.
     pub(crate) fn refused_and_errors(&self) -> (Vec<String>, Vec<String>) {
         let state = self.shared.0.lock().unwrap();
@@ -146,7 +153,8 @@ fn serve(mut conn: TcpStream, shared: &Shared) -> io::Result<()> {
     let first = head.lines().next().unwrap_or("");
     let mut parts = first.split_whitespace();
     let (method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
-    let reply = if method == "GET" && target == URL {
+    let is_page = method == "GET" && target == URL;
+    let reply = if is_page {
         hold(shared);
         page()
     } else {
@@ -156,7 +164,11 @@ fn serve(mut conn: TcpStream, shared: &Shared) -> io::Result<()> {
     };
     conn.write_all(reply.as_bytes())?;
     conn.flush()?;
-    conn.shutdown(Shutdown::Write)
+    conn.shutdown(Shutdown::Write)?;
+    if is_page {
+        shared.0.lock().unwrap().delivered += 1;
+    }
+    Ok(())
 }
 
 /// Counts a page request and waits for the release (at most [`HOLD_LIMIT`]).

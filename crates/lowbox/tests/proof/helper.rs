@@ -3,7 +3,9 @@
 //! the paths), takes the handles with `from_inherited`, starts chrome-headless-shell in the
 //! `LowBox` token inside a Job Object of its own, waits for the owner's `inspect`, reports what
 //! it can see of chrome's processes, waits for chrome to exit and reports the exit codes. Each
-//! report is a line starting [`MARK`], which the owner parses.
+//! report is a line starting [`MARK`], which the owner parses. Chrome's standard output is
+//! `NUL` and its standard error goes to [`STDERR_LOG`] in staging, so neither reaches the
+//! report pipe.
 #![expect(
     unsafe_code,
     reason = "FFI to the Job Object, station and desktop name and wait calls"
@@ -11,11 +13,15 @@
 
 use std::ffi::c_void;
 use std::fmt::Display;
+use std::fs::File;
 use std::os::windows::io::OwnedHandle;
 use std::path::Path;
+use std::sync::mpsc::{self, Receiver};
+use std::thread;
+use std::time::Duration;
 
 use clauseo_lowbox::{
-    LowBoxCommand, NamespaceHandles, PackageName, Stdio, package_sid, parse_handle_arg,
+    LowBoxCommand, NamespaceHandles, PackageName, Spawned, Stdio, package_sid, parse_handle_arg,
 };
 use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0};
 use windows::Win32::System::JobObjects::{
@@ -24,7 +30,8 @@ use windows::Win32::System::JobObjects::{
     SetInformationJobObject,
 };
 use windows::Win32::System::StationsAndDesktops::{
-    GetProcessWindowStation, GetThreadDesktop, GetUserObjectInformationW, UOI_NAME,
+    CloseWindowStation, GetProcessWindowStation, GetThreadDesktop, GetUserObjectInformationW,
+    OpenWindowStationW, UOI_NAME,
 };
 use windows::Win32::System::Threading::{
     GetCurrentThreadId, TerminateProcess, WaitForSingleObject,
@@ -33,12 +40,19 @@ use windows::core::PCWSTR;
 
 use super::inspect;
 use super::proxy::URL;
-use super::win::{Res, failed, owned, raw, sleep_ms};
+use super::win::{Res, code, failed, owned, raw, sleep_ms, wide};
+use super::write;
 
 /// The start of every report line.
 pub(crate) const MARK: &str = "LOWBOX|";
+/// The file in staging that gets chrome's standard error.
+pub(crate) const STDERR_LOG: &str = "chrome-stderr.log";
 /// The longest the helper waits for chrome to exit after the inspection.
 const CHROME_EXIT_MS: u32 = 90_000;
+/// The longest it waits for chrome's standard error to close after the job ends.
+const STDERR_WAIT: Duration = Duration::from_secs(10);
+/// `READ_CONTROL`: enough to open the station by name.
+const READ_CONTROL: u32 = 0x0002_0000;
 
 /// Prints one report line.
 pub(crate) fn say(line: impl Display) {
@@ -109,16 +123,16 @@ pub(crate) fn run() {
     let namespace = NamespaceHandles::from_inherited(&package, &values)
         .unwrap_or_else(|e| panic!("from_inherited: {e}"));
     say("handles taken=6");
-    say(format_args!("station {}", named(station_name())));
+    say(format_args!("station {}", station_report()));
     say(format_args!("desktop {}", named(desktop_name())));
 
     let shell = Path::new(&config.shell);
-    let screenshot = Path::new(&config.staging).join("shot.png");
+    let staging = Path::new(&config.staging);
+    let screenshot = staging.join("shot.png");
     let mut command = LowBoxCommand::new(shell);
     command
         .args([
             "--headless".to_owned(),
-            "--remote-debugging-port=0".to_owned(),
             format!("--proxy-server=127.0.0.1:{}", config.port),
             format!("--user-data-dir={}", config.profile),
             format!("--screenshot={}", screenshot.display()),
@@ -129,23 +143,26 @@ pub(crate) fn run() {
         .env("TEMP", &config.tmp)
         .env("TMP", &config.tmp)
         .current_dir(shell.parent().unwrap_or(shell))
-        .stdin(Stdio::Null);
-    let child = command
+        .stdin(Stdio::Null)
+        .stdout(Stdio::Null)
+        .stderr(Stdio::Piped);
+    // The job comes first: once chrome exists, every failure before the resume ends it.
+    let job = kill_on_close_job().unwrap();
+    let mut child = command
         .spawn_suspended(&namespace)
         .unwrap_or_else(|e| panic!("spawn_suspended: {e}"));
-    let job = kill_on_close_job().unwrap();
     // SAFETY: an open job and the child's open process handle (all access).
     let assigned = unsafe { AssignProcessToJobObject(raw(&job), raw(&child.process)) };
     if let Err(e) = assigned {
-        // Outside the job nothing would end the suspended child, so end it here.
-        // SAFETY: the child's open process handle (all access).
-        let ended = unsafe { TerminateProcess(raw(&child.process), 1) }.is_ok();
-        panic!(
-            "{} (the child was ended: {ended})",
-            failed("AssignProcessToJobObject", &e)
-        );
+        end_and_panic(&child, &failed("AssignProcessToJobObject", &e));
     }
-    child.resume().unwrap_or_else(|e| panic!("resume: {e}"));
+    if let Err(e) = child.resume() {
+        end_and_panic(&child, &format!("resume: {e}"));
+    }
+    let stderr = child
+        .stderr
+        .take()
+        .map(|pipe| drain(pipe, &staging.join(STDERR_LOG)));
     say(format_args!("started pid={}", child.pid));
     say(format_args!(
         "machine {}",
@@ -159,13 +176,48 @@ pub(crate) fn run() {
 
     // SAFETY: the child's open process handle.
     let waited = unsafe { WaitForSingleObject(raw(&child.process), CHROME_EXIT_MS) };
+    let chrome_code = inspect::exit_code(&child.process).map_or("-".to_owned(), hex);
     say(format_args!(
-        "chrome exited={}",
+        "chrome exited={} code={chrome_code}",
         u8::from(waited == WAIT_OBJECT_0)
     ));
     report_exits(&seen);
-    say("done");
     drop(job);
+    let stderr = stderr.map_or("pipe=none".to_owned(), |done| {
+        done.recv_timeout(STDERR_WAIT)
+            .unwrap_or_else(|_| "pipe=open-after-10s".to_owned())
+    });
+    say(format_args!("stderr {stderr}"));
+    say("done");
+}
+
+/// `code` in hex.
+fn hex(code: u32) -> String {
+    format!("{code:#x}")
+}
+
+/// Ends the suspended `child` (nothing else would: it may be outside the job), then fails.
+fn end_and_panic(child: &Spawned, why: &str) -> ! {
+    // SAFETY: the child's open process handle (all access).
+    let ended = unsafe { TerminateProcess(raw(&child.process), 1) }.is_ok();
+    panic!("{why} (the child was ended: {ended})");
+}
+
+/// Copies chrome's standard error into `path` on a thread of its own; the receiver gets
+/// `bytes=<n>` or `error=<why>` once the pipe closes.
+fn drain(pipe: File, path: &Path) -> Receiver<String> {
+    let (done, outcome) = mpsc::channel();
+    let path = path.to_owned();
+    thread::spawn(move || {
+        let mut pipe = pipe;
+        let copied = write::create(&path).and_then(|mut file| std::io::copy(&mut pipe, &mut file));
+        let text = match copied {
+            Ok(bytes) => format!("bytes={bytes}"),
+            Err(e) => format!("error={}", e.to_string().replace(' ', "_")),
+        };
+        let _owner_gone = done.send(text);
+    });
+    outcome
 }
 
 /// Prints each kept process's exit code, waiting up to 15 s for the stragglers.
@@ -183,7 +235,7 @@ fn report_exits(seen: &[inspect::Seen]) {
     for one in seen {
         let code = match &one.handle {
             None => "-".to_owned(),
-            Some(h) => inspect::exit_code(h).map_or("running".to_owned(), |c| format!("{c:#x}")),
+            Some(h) => inspect::exit_code(h).map_or("running".to_owned(), hex),
         };
         say(format_args!(
             "exit role={} pid={} code={code}",
@@ -235,6 +287,26 @@ fn object_name(object: HANDLE) -> Res<String> {
 /// `name=<name>`, or `name=? <why>` when it could not be read.
 fn named(name: Res<String>) -> String {
     name.map_or_else(|e| format!("name=? {e}"), |n| format!("name={n}"))
+}
+
+/// `name=<name> opens=<1 or err…>`: this process's station's name, and whether the station of
+/// that name opens by name from here (`READ_CONTROL`).
+fn station_report() -> String {
+    let name = match station_name() {
+        Ok(name) => name,
+        Err(e) => return format!("name=? opens=- {e}"),
+    };
+    let text = wide(&name);
+    // SAFETY: a NUL-terminated name; the handle is closed below.
+    let opens = match unsafe { OpenWindowStationW(PCWSTR(text.as_ptr()), false, READ_CONTROL) } {
+        Ok(opened) => {
+            // SAFETY: the station was just opened and is closed once, here.
+            let _leak_on_failure = unsafe { CloseWindowStation(opened) }.is_ok();
+            "1".to_owned()
+        }
+        Err(e) => format!("err{}", code(&e)),
+    };
+    format!("name={name} opens={opens}")
 }
 
 /// This process's window station's name.

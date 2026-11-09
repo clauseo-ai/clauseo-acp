@@ -106,7 +106,7 @@ impl Station {
     }
 
     /// Whether a station of this name opens by name now.
-    pub(crate) fn exists(&self) -> bool {
+    fn exists(&self) -> bool {
         let text = wide(&self.name);
         // SAFETY: a NUL-terminated name; the handle is closed below.
         match unsafe { OpenWindowStationW(PCWSTR(text.as_ptr()), false, READ_CONTROL) } {
@@ -119,7 +119,8 @@ impl Station {
         }
     }
 
-    /// Closes the desktop, then the station.
+    /// Closes the desktop, then the station, then checks the station no longer opens by name
+    /// (with no process left on it, the last close deletes it).
     pub(crate) fn close(&mut self) -> Res<String> {
         if !self.desktop.is_invalid() {
             // SAFETY: the desktop was made by `create` and is closed once (then forgotten).
@@ -133,7 +134,10 @@ impl Station {
             self.winsta = HWINSTA::default();
             closed.map_err(|e| failed("CloseWindowStation", &e))?;
         }
-        Ok("closed the desktop and the station".to_owned())
+        if self.exists() {
+            return Err("closed both, but the station still opens by name".to_owned());
+        }
+        Ok("closed the desktop and the station; OpenWindowStationW by name now fails".to_owned())
     }
 }
 

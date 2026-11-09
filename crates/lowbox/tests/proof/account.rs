@@ -1,12 +1,13 @@
 //! The test account: made with `NetUserAdd`, given `SeInteractiveLogonRight` for the run (the
-//! logon `CreateProcessWithLogonW` makes is interactive), then its right, the account and its
-//! profile removed, each checked gone.
+//! logon `CreateProcessWithLogonW` makes is interactive), then, once its processes are gone,
+//! its rights, the account and its profile removed, each checked gone.
 #![expect(
     unsafe_code,
-    reason = "FFI to the NetUser, LookupAccountNameW, LSA, DeleteProfileW and registry calls"
+    reason = "FFI to the NetUser, LookupAccountNameW, LSA, DeleteProfileW, registry and WTS calls"
 )]
 
 use std::ffi::c_void;
+use std::path::{Path, PathBuf};
 
 use clauseo_lowbox::Sid;
 use windows::Win32::Foundation::{
@@ -23,7 +24,10 @@ use windows::Win32::Security::Authentication::Identity::{
 };
 use windows::Win32::Security::{LookupAccountNameW, PSID, SID_NAME_USE, SidTypeUser};
 use windows::Win32::System::Registry::{
-    HKEY, HKEY_LOCAL_MACHINE, KEY_READ, RegCloseKey, RegOpenKeyExW,
+    HKEY, HKEY_LOCAL_MACHINE, KEY_READ, RRF_RT_REG_SZ, RegCloseKey, RegGetValueW, RegOpenKeyExW,
+};
+use windows::Win32::System::RemoteDesktop::{
+    WTS_CURRENT_SERVER_HANDLE, WTS_PROCESS_INFOW, WTSEnumerateProcessesW, WTSFreeMemory,
 };
 use windows::core::{BOOL, PCWSTR, PWSTR};
 
@@ -41,6 +45,12 @@ const LOGON_RIGHT: &str = "SeInteractiveLogonRight";
 const PROFILE_TRIES: u32 = 20;
 /// The pause between those tries.
 const PROFILE_PAUSE_MS: u32 = 3_000;
+/// How many times the account's processes are looked for (30 s at [`GONE_PAUSE_MS`]).
+const GONE_TRIES: u32 = 60;
+/// The pause between those looks.
+const GONE_PAUSE_MS: u32 = 500;
+/// The `ProfileList` key, below `HKLM`.
+const PROFILE_LIST: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList";
 
 /// Makes the standard user `name` with `password` (never printed).
 pub(crate) fn add(name: &str, password: &str) -> Res<()> {
@@ -201,8 +211,9 @@ pub(crate) fn grant_logon(sid: &str) -> Res<()> {
     lsa_ok("LsaAddAccountRights", status)
 }
 
-/// The rights the account `sid` holds itself (not through its groups).
-fn rights_of(policy: &Policy, sid: &mut [u8]) -> Res<Vec<String>> {
+/// The rights the account `sid` holds itself (not through its groups); `None` when LSA has no
+/// account record for it (`STATUS_OBJECT_NAME_NOT_FOUND`).
+fn rights_of(policy: &Policy, sid: &mut [u8]) -> Res<Option<Vec<String>>> {
     let mut list: *mut LSA_UNICODE_STRING = std::ptr::null_mut();
     let mut count = 0_u32;
     // SAFETY: an open policy and a binary SID; `list` gets an LSA buffer, freed below.
@@ -215,7 +226,7 @@ fn rights_of(policy: &Policy, sid: &mut [u8]) -> Res<Vec<String>> {
         )
     };
     if status == STATUS_OBJECT_NAME_NOT_FOUND {
-        return Ok(Vec::new());
+        return Ok(None);
     }
     lsa_ok("LsaEnumerateAccountRights", status)?;
     let count = usize::try_from(count).unwrap_or(0);
@@ -235,43 +246,91 @@ fn rights_of(policy: &Policy, sid: &mut [u8]) -> Res<Vec<String>> {
     // SAFETY: the buffer came from LsaEnumerateAccountRights and is freed once, here.
     let _leak_on_failure: NTSTATUS =
         unsafe { LsaFreeMemory(Some(list.cast::<c_void>().cast_const())) };
-    Ok(names)
+    Ok(Some(names))
 }
 
-/// Takes `SeInteractiveLogonRight` back from the account `sid`, then checks
-/// `LsaEnumerateAccountRights` no longer lists it.
+/// Takes every right back from the account `sid` (`AllRights`, which also deletes its LSA
+/// account record), then checks `LsaEnumerateAccountRights` finds no record or an empty list.
 pub(crate) fn remove_logon(sid: &str) -> Res<String> {
     let policy = Policy::open()?;
     let mut sid = sid_bytes(sid)?;
-    let mut units: Vec<u16> = LOGON_RIGHT.encode_utf16().collect();
-    let rights = [right(&mut units)];
-    // SAFETY: as in `grant_logon`.
+    // SAFETY: an open policy and a binary SID that outlives the call; no list with AllRights.
     let status = unsafe {
         LsaRemoveAccountRights(
             policy.0,
             PSID(sid.as_mut_ptr().cast::<c_void>()),
-            false,
-            Some(&rights),
+            true,
+            None,
         )
     };
     if status != STATUS_OBJECT_NAME_NOT_FOUND {
-        lsa_ok("LsaRemoveAccountRights", status)?;
+        lsa_ok("LsaRemoveAccountRights(AllRights)", status)?;
     }
-    let left = rights_of(&policy, &mut sid)?;
-    if left.iter().any(|r| r == LOGON_RIGHT) {
-        return Err("LsaEnumerateAccountRights still lists SeInteractiveLogonRight".to_owned());
+    match rights_of(&policy, &mut sid)? {
+        None => Ok("removed all rights; LsaEnumerateAccountRights reports \
+                    STATUS_OBJECT_NAME_NOT_FOUND"
+            .to_owned()),
+        Some(left) if left.is_empty() => {
+            Ok("removed all rights; LsaEnumerateAccountRights lists none".to_owned())
+        }
+        Some(left) => Err(format!(
+            "LsaEnumerateAccountRights still lists {}",
+            left.join(", ")
+        )),
     }
-    Ok(format!(
-        "removed; LsaEnumerateAccountRights lists {} right(s), not {LOGON_RIGHT}",
+}
+
+/// The ids of the running processes whose token user is `sid` (`WTSEnumerateProcessesW`, which
+/// gives each process's user without opening it).
+fn processes_of(sid: &str) -> Res<Vec<u32>> {
+    let mut list: *mut WTS_PROCESS_INFOW = std::ptr::null_mut();
+    let mut count = 0_u32;
+    // SAFETY: the local server, version 1; `list` gets a WTS buffer, freed below.
+    unsafe {
+        WTSEnumerateProcessesW(
+            Some(WTS_CURRENT_SERVER_HANDLE),
+            0,
+            1,
+            &raw mut list,
+            &raw mut count,
+        )
+    }
+    .map_err(|e| failed("WTSEnumerateProcessesW", &e))?;
+    let mut pids = Vec::new();
+    for i in 0..usize::try_from(count).unwrap_or(0) {
+        // SAFETY: the call succeeded, so `list` holds `count` entries, alive until the free.
+        let one = unsafe { &*list.add(i) };
+        if one.pUserSid.0.is_null() {
+            continue;
+        }
+        if sid_text(one.pUserSid).is_ok_and(|user| user.eq_ignore_ascii_case(sid)) {
+            pids.push(one.ProcessId);
+        }
+    }
+    // SAFETY: the buffer came from WTSEnumerateProcessesW and is freed once, here.
+    unsafe { WTSFreeMemory(list.cast::<c_void>()) };
+    Ok(pids)
+}
+
+/// Waits (at most 30 s) until no process of the account `sid` runs.
+pub(crate) fn wait_processes_gone(sid: &str) -> Res<String> {
+    let mut left = Vec::new();
+    for look in 1..=GONE_TRIES {
+        left = processes_of(sid)?;
+        if left.is_empty() {
+            return Ok(format!("none left (look {look})"));
+        }
+        sleep_ms(GONE_PAUSE_MS);
+    }
+    Err(format!(
+        "{} process(es) of the account still run after 30 s: pids {left:?}",
         left.len()
     ))
 }
 
 /// Whether `HKLM\...\ProfileList\<sid>` exists.
 fn profile_key_exists(sid: &str) -> Res<bool> {
-    let path = wide(format!(
-        r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\{sid}"
-    ));
+    let path = wide(format!(r"{PROFILE_LIST}\{sid}"));
     let mut key = HKEY::default();
     // SAFETY: a NUL-terminated path; `key` gets a key handle, closed below.
     let rc = unsafe {
@@ -294,32 +353,77 @@ fn profile_key_exists(sid: &str) -> Res<bool> {
     Err(format!("RegOpenKeyExW(ProfileList) failed with {}", rc.0))
 }
 
-/// Deletes the profile of the account `sid` (retrying while it unloads), then checks its
-/// `ProfileList` key is gone.
-pub(crate) fn delete_profile(sid: &str) -> Res<String> {
+/// The account's profile folder from its `ProfileImagePath`, or `None` without a key.
+fn profile_folder(sid: &str) -> Res<Option<PathBuf>> {
+    let key = wide(format!(r"{PROFILE_LIST}\{sid}"));
+    let value = wide("ProfileImagePath");
+    let mut data = vec![0_u16; 1024];
+    let mut bytes = u32::try_from(data.len() * 2).unwrap_or(u32::MAX);
+    // SAFETY: NUL-terminated names and a writable buffer of `bytes` bytes; REG_EXPAND_SZ comes
+    // back expanded under RRF_RT_REG_SZ.
+    let rc = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            PCWSTR(key.as_ptr()),
+            PCWSTR(value.as_ptr()),
+            RRF_RT_REG_SZ,
+            None,
+            Some(data.as_mut_ptr().cast::<c_void>()),
+            Some(&raw mut bytes),
+        )
+    };
+    if rc == ERROR_FILE_NOT_FOUND {
+        return Ok(None);
+    }
+    if rc != ERROR_SUCCESS {
+        return Err(format!(
+            "RegGetValueW(ProfileImagePath) failed with {}",
+            rc.0
+        ));
+    }
+    let len = data.iter().position(|&u| u == 0).unwrap_or(data.len());
+    Ok(Some(PathBuf::from(String::from_utf16_lossy(&data[..len]))))
+}
+
+/// Deletes the profile of the account `sid` (retrying while it unloads), then checks both its
+/// `ProfileList` key and its folder are gone. The folder is read from `ProfileImagePath`
+/// first, else `fallback` (`%SystemDrive%\Users\<name>`).
+pub(crate) fn delete_profile(sid: &str, fallback: &Path) -> Res<String> {
+    let (folder, from) = match profile_folder(sid)? {
+        Some(folder) => (folder, "ProfileImagePath"),
+        None => (fallback.to_owned(), "the fallback"),
+    };
     let text = wide(sid);
-    let mut last = 0_u32;
+    let mut outcome = String::new();
     for attempt in 1..=PROFILE_TRIES {
         // SAFETY: a NUL-terminated SID string; no path and no computer name.
         let ok = unsafe { DeleteProfileW(PCWSTR(text.as_ptr()), PCWSTR::null(), PCWSTR::null()) };
         if ok.as_bool() {
-            if profile_key_exists(sid)? {
-                return Err("DeleteProfileW succeeded but the ProfileList key remains".to_owned());
-            }
-            return Ok(format!(
-                "deleted on try {attempt}; the ProfileList key is gone"
-            ));
+            outcome = format!("deleted on try {attempt}");
+            break;
         }
-        last = last_error();
+        outcome = format!("DeleteProfileW error {} on try {attempt}", last_error());
         if !profile_key_exists(sid)? {
-            return Ok(format!(
-                "DeleteProfileW error {last} on try {attempt}, and the ProfileList key is gone"
-            ));
+            break;
         }
-        sleep_ms(PROFILE_PAUSE_MS);
+        if attempt < PROFILE_TRIES {
+            sleep_ms(PROFILE_PAUSE_MS);
+        }
     }
-    Err(format!(
-        "DeleteProfileW still failing after {PROFILE_TRIES} tries (last error {last}); the \
-         ProfileList key remains"
-    ))
+    let key = profile_key_exists(sid)?;
+    let folder_left = folder
+        .try_exists()
+        .map_err(|e| format!("{outcome}; checking the profile folder: {e}"))?;
+    match (key, folder_left) {
+        (false, false) => Ok(format!(
+            "{outcome}; the ProfileList key and the profile folder (from {from}) are gone"
+        )),
+        (true, _) => Err(format!(
+            "{outcome}; the ProfileList key remains (folder remains: {folder_left})"
+        )),
+        (false, true) => Err(format!(
+            "{outcome}; the ProfileList key is gone but the profile folder {} remains",
+            folder.display()
+        )),
+    }
 }

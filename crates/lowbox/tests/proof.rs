@@ -13,6 +13,9 @@
 //! of chrome's processes while the proxy holds the page. The owner checks the report, the
 //! screenshot and the proxy, then undoes everything, each step checked.
 //!
+//! Chrome runs without `--remote-debugging-port=0`, though the CI brief listed it: the row needs
+//! no `DevTools`, and the flag opens a listener inside the `AppContainer`.
+//!
 //! Inputs: `CLAUSEO_ELEVATED_TESTS=1`, `CLAUSEO_TEST_CHROME_SHELL` (the shell's full path) and
 //! `CLAUSEO_TEST_ARTIFACTS` (a folder CI uploads); a missing one fails the row.
 //!
@@ -67,6 +70,10 @@ mod evidence;
 #[cfg(test)]
 #[path = "proof/owner.rs"]
 mod owner;
+
+#[cfg(test)]
+#[path = "proof/teardown.rs"]
+mod teardown;
 
 /// The row: set-up, run, assertions and cleanup (see the module's doc).
 #[test]

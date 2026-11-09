@@ -51,7 +51,9 @@ windows = { workspace = true, features = [
 # needs Graphics_Gdi) and the profile check (RegOpenKeyExW: System_Registry). As the helper: the
 # Job Object (System_JobObjects), the process snapshot (System_Diagnostics_ToolHelp), the command
 # lines (NtQueryInformationProcess: Wdk_System_Threading) and the machine types
-# (IsWow64Process2, PROCESS_MACHINE_INFORMATION: System_SystemInformation).
+# (IsWow64Process2, PROCESS_MACHINE_INFORMATION: System_SystemInformation). The cleanup's wait
+# for the account's processes (WTSEnumerateProcessesW, which gives each process's user without
+# opening it: System_RemoteDesktop).
 [target.'cfg(windows)'.dev-dependencies]
 windows = { workspace = true, features = [
   "Wdk_System_Threading",
@@ -62,6 +64,7 @@ windows = { workspace = true, features = [
   "Win32_System_Diagnostics_ToolHelp",
   "Win32_System_JobObjects",
   "Win32_System_Registry",
+  "Win32_System_RemoteDesktop",
   "Win32_System_StationsAndDesktops",
   "Win32_System_SystemInformation",
 ] }

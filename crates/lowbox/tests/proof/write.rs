@@ -1,5 +1,6 @@
 //! The std calls that change files, as thin wrappers and nothing else: the one place the row
-//! copies the shell and the helper into its test root, writes the artifacts and deletes the root.
+//! copies the shell and the helper into its test root, writes the artifacts and chrome's
+//! standard error log, and deletes the root.
 //! Workspace `clippy.toml` bans them, tests included, and the expect below covers only this file.
 
 #![expect(
@@ -23,6 +24,11 @@ pub(crate) fn copy(from: &Path, to: &Path) -> io::Result<u64> {
 /// `fs::write`.
 pub(crate) fn write(path: &Path, contents: impl AsRef<[u8]>) -> io::Result<()> {
     std::fs::write(path, contents)
+}
+
+/// `File::create`: the helper's file for chrome's standard error.
+pub(crate) fn create(path: &Path) -> io::Result<std::fs::File> {
+    std::fs::File::create(path)
 }
 
 /// `fs::remove_dir_all`.
