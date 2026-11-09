@@ -1,7 +1,14 @@
 //! The job's process cap on Windows, for real: a job capped at [`CAP`], with the outer's
-//! completion port, counts a nested job's processes towards its cap, refuses a process assigned
-//! past it and the next one of its own starts, holds exactly [`CAP`] after a refusal, and posts
-//! `JOB_OBJECT_MSG_ACTIVE_PROCESS_LIMIT` to its port each time.
+//! completion port and UI limits, takes no nested job (so none of its processes leaves its
+//! count), refuses a process assigned past its cap and the next one of its own starts, holds
+//! exactly [`CAP`] after a refusal, and posts `JOB_OBJECT_MSG_ACTIVE_PROCESS_LIMIT` to its port
+//! each time.
+//!
+//! Microsoft's "Nested Jobs": a process already in a job that is added to another nests the jobs
+//! "if the system can form a valid job hierarchy and neither job sets UI limits". The capped job
+//! sets them (`UI_LIMITS`), so assigning one of its processes to another job, even one with no
+//! limits, fails with error 50 (`ERROR_NOT_SUPPORTED`): the hosted runner's run 42575462912 gave
+//! that for the first version of this test, which nested a job under it.
 
 use std::io::{Read as _, Write as _};
 use std::os::windows::io::AsRawHandle as _;
@@ -12,7 +19,7 @@ use windows::Win32::Foundation::HANDLE;
 
 use super::job_port::ACTIVE_PROCESS_LIMIT;
 use super::job_port::os::associate;
-use super::spawn::{active_processes, assign, capped_job, kill_on_close_job, limits_of};
+use super::spawn::{active_processes, assign, capped_job, limits_of, plain_job};
 
 /// The test job's cap.
 const CAP: u32 = 4;
@@ -20,6 +27,8 @@ const CAP: u32 = 4;
 const DETACHED_PROCESS: u32 = 0x0000_0008;
 /// `CREATE_SUSPENDED`: the refused process never runs a line.
 const CREATE_SUSPENDED: u32 = 0x0000_0004;
+/// `ERROR_NOT_SUPPORTED`: the jobs can't nest.
+const NOT_SUPPORTED: i32 = 50;
 /// How long the port may stay silent before the test gives up on its message, in ms.
 const PORT_WAIT: u32 = 10_000;
 
@@ -59,25 +68,31 @@ fn handle(child: &Child) -> HANDLE {
 }
 
 #[test]
-fn a_capped_job_counts_a_nested_jobs_processes_refuses_the_next_and_tells_its_port() {
+fn a_capped_job_takes_no_nested_job_refuses_the_next_and_tells_its_port() {
     let job = capped_job(CAP).unwrap();
     let limits = limits_of(&job).unwrap().BasicLimitInformation;
     assert_eq!(limits.ActiveProcessLimit, CAP);
     let mut port = associate(&job).unwrap().waiting(PORT_WAIT);
-    let nested = kill_on_close_job().unwrap();
-    // The first goes in the capped job, then in `nested`, which so nests in the capped job; the
-    // second goes straight into `nested`, and so into the capped job too.
+    // The first goes in the capped job; moving it on into a job of its own is refused (the
+    // capped job's UI limits forbid nesting), so it stays in the capped job's count.
+    let nested = plain_job().unwrap();
     let first = waiter();
     assign(&job, handle(&first)).unwrap();
-    assign(&nested, handle(&first)).unwrap();
+    let moved = assign(&nested, handle(&first));
+    assert_eq!(
+        moved.as_ref().map_err(std::io::Error::raw_os_error),
+        Err(Some(NOT_SUPPORTED)),
+        "{moved:?}"
+    );
+    assert_eq!(active_processes(&nested).unwrap(), 0);
+    assert_eq!(active_processes(&job).unwrap(), 1);
     let second = waiter();
-    assign(&nested, handle(&second)).unwrap();
+    assign(&job, handle(&second)).unwrap();
     let third = waiter();
     assign(&job, handle(&third)).unwrap();
     // The fourth fills the cap; once told, it tries to start one more.
     let mut fourth = cmd("set /p x= & cmd /d /c echo spawned");
     assign(&job, handle(&fourth)).unwrap();
-    assert_eq!(active_processes(&nested).unwrap(), 2);
     assert_eq!(active_processes(&job).unwrap(), CAP);
     // A fifth, assigned straight in, is refused and ended: Windows counts a newcomer and refuses
     // it when the count passes the limit, so the job admits at most CAP. These are detached, so
@@ -121,7 +136,7 @@ fn a_capped_job_counts_a_nested_jobs_processes_refuses_the_next_and_tells_its_po
         limited,
         "no ACTIVE_PROCESS_LIMIT on the port; it said {seen:?}"
     );
-    // Closing both jobs' only handles ends what is left in them.
+    // Closing the capped job's only handle ends what is left in it.
     drop((job, nested));
     for mut child in [first, second, third, fourth] {
         drop(child.wait());

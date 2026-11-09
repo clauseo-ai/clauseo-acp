@@ -258,6 +258,15 @@ pub(super) fn active_processes(job: &Handle) -> io::Result<u32> {
     Ok(info.ActiveProcesses)
 }
 
+/// A job with no limits at all: the tests' would-be nested job.
+#[cfg(test)]
+pub(super) fn plain_job() -> io::Result<Handle> {
+    // SAFETY: no attributes (an unnamed job no other process can open) and no name.
+    Ok(Handle(
+        unsafe { CreateJobObjectW(None, PCWSTR::null()) }.map_err(|e| os_error(&e))?,
+    ))
+}
+
 /// The extended limits `job` holds, as Windows reads them back.
 #[cfg(test)]
 pub(super) fn limits_of(job: &Handle) -> io::Result<JOBOBJECT_EXTENDED_LIMIT_INFORMATION> {

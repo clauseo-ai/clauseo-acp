@@ -1434,7 +1434,11 @@ leaves that profile, both naming the part.
   members at refusal, one of them the agent's console host, which appears to join the job outside
   the limit check. Not confirmed in source. The cap on the agent's own programs isn't loosened.
   The Windows CI test `job_cap_tests` checks the count with a cap of 4 and detached processes
-  (no console hosts): a fifth is refused, and once it has gone the job holds exactly 4.
+  (no console hosts): a fifth is refused, and once it has gone the job holds exactly 4. The
+  job's UI limits also keep it from taking a nested job (Microsoft's "Nested Jobs": jobs nest
+  only when neither sets UI limits), so a process in it that is assigned to another job gets
+  error 50 and stays in the count. The same test checks that on the hosted runner. A tool the
+  agent runs that puts its children in a job of its own gets that error too.
   The outer reads the job's completion port (`job_port.rs`), and the first
   `JOB_OBJECT_MSG_ACTIVE_PROCESS_LIMIT` gives one notice per session: "The AI tool tried to run
   too many programs at once, so Clauseo didn't start the extra ones. It keeps going. If it seems
