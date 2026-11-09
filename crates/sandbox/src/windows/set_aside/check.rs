@@ -4,11 +4,12 @@
 use std::io;
 use std::time::SystemTime;
 
-use super::files::{FileId, Place, Record, Snapshot};
+use super::files::{FileId, HEADS_RECORDED, Place, Record, Snapshot};
 use super::moves::set_aside;
 use super::names::Key;
-use super::run::{Refused, Volume};
-use super::scan::{Item, Kept, Now, Scan, inside, same_key};
+use super::repo_names::is_git;
+use super::run::{Need, Refused, Volume};
+use super::scan::{COMMON_KEY, Item, Kept, Now, Scan, inside, same_key};
 
 /// An item this pass set aside, or found gone: its key, and its file ID when the scan read
 /// one.
@@ -55,7 +56,9 @@ fn recorded(record: &Record, item: &Item) -> Option<FileId> {
         })
     }
     match item.kept {
-        Kept::Root | Kept::Nested => find(&record.names, &item.key).flatten(),
+        Kept::Root | Kept::Nested | Kept::Head | Kept::Common => {
+            find(&record.names, &item.key).flatten()
+        }
         Kept::Link => find(&record.links, &item.key),
     }
 }
@@ -77,8 +80,19 @@ pub(super) fn check(
 ) -> Result<Vec<Aside>, Refused> {
     let mut first = None;
     let mut aside: Vec<Aside> = Vec::new();
+    let heads = record.holds_heads();
+    // A `HEAD` in a launch `.git` the lawyer renamed is that `.git`'s, still denied.
+    let gits: Vec<FileId> = record
+        .names
+        .iter()
+        .filter(|(key, _)| key.last().is_some_and(|name| is_git(name)))
+        .filter_map(|(_, id)| *id)
+        .collect();
+    let in_git = |item: &Item| item.through.last().is_some_and(|id| gits.contains(id));
     for item in &scan.items {
-        if gone_with(item, &aside) {
+        let head_left = (item.kept == Kept::Head && (!heads || in_git(item)))
+            || (item.kept == Kept::Common && !heads);
+        if gone_with(item, &aside) || head_left {
             continue;
         }
         let was = recorded(record, item);
@@ -93,7 +107,15 @@ pub(super) fn check(
                 continue;
             }
         };
-        match set_aside(volume, place, &item.path, &item.within, reason, now) {
+        match set_aside(
+            volume,
+            place,
+            &item.path,
+            &item.within,
+            reason,
+            now,
+            Need::Anyone,
+        ) {
             Ok(entry) => {
                 aside.push(Aside::of(item));
                 moved.push(entry);
@@ -123,6 +145,11 @@ pub(super) fn check(
 /// naming it.
 pub(super) fn snapshot(scan: &Scan, aside: &[Aside]) -> Result<Snapshot, Refused> {
     let mut seen = Snapshot::default();
+    seen.names.insert(vec![HEADS_RECORDED.into()], None);
+    for common in &scan.common {
+        let key = std::iter::once(COMMON_KEY.into()).chain(common.iter().cloned());
+        seen.names.insert(key.collect(), None);
+    }
     for item in &scan.items {
         let gone = gone_with(item, aside);
         match (item.kept, gone, item.now) {
@@ -130,7 +157,7 @@ pub(super) fn snapshot(scan: &Scan, aside: &[Aside]) -> Result<Snapshot, Refused
                 seen.names.insert(item.key.clone(), None);
             }
             (_, true, _) | (_, false, Now::Absent) => {}
-            (Kept::Root | Kept::Nested, false, Now::At(id)) => {
+            (Kept::Root | Kept::Nested | Kept::Head | Kept::Common, false, Now::At(id)) => {
                 seen.names.insert(item.key.clone(), Some(id));
             }
             (Kept::Link, false, Now::At(id)) => {

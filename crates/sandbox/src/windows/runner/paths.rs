@@ -184,3 +184,11 @@ fn same(a: Option<&str>, b: Option<&str>) -> bool {
 fn fold(part: &str) -> String {
     part.chars().flat_map(char::to_uppercase).collect()
 }
+
+/// Whether `program` names a batch file: `.cmd` or `.bat`, in any case, trailing dots and
+/// spaces dropped as Windows drops them.
+pub(super) fn is_batch(program: &str) -> bool {
+    let trimmed = program.trim_end_matches(['.', ' ']);
+    let extension = trimmed.rsplit_once('.').map(|(_, extension)| extension);
+    extension.is_some_and(|ext| ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat"))
+}

@@ -7,7 +7,7 @@
 //! running. No process of the pool user's is started here.
 
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -40,6 +40,8 @@ pub(super) struct OsEnd {
     pub(super) marker: PathBuf,
     /// The session's pool user, whom the marker names.
     pub(super) pool_user: Sid,
+    /// The git watch, once `session` started it (`watch.rs`).
+    pub(super) watch: Mutex<Option<super::watch::Running>>,
 }
 
 impl OsEnd {
@@ -47,6 +49,21 @@ impl OsEnd {
     /// session uses. It closes when this process exits.
     pub(super) fn hold_job(&self, job: Handle) -> &Handle {
         &self.job.get_or_init(move || Job(job)).0
+    }
+
+    /// Keeps the git watch `session` started, for [`OsEnd::stop_watch`].
+    pub(super) fn keep_watch(&self, watch: super::watch::Running) {
+        if let Ok(mut kept) = self.watch.lock() {
+            *kept = Some(watch);
+        }
+    }
+
+    /// Stops the git watch, once the job is ended: nothing of the agent's is left to watch.
+    pub(super) fn stop_watch(&self) {
+        let running = self.watch.lock().ok().and_then(|mut kept| kept.take());
+        if let Some(running) = running {
+            running.stop();
+        }
     }
 }
 

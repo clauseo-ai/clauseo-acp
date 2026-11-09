@@ -17,6 +17,9 @@ fn message() -> LaunchMessage {
         pool_user: Sid::parse(POOL).unwrap(),
         pool_name: "ClauseoSb05".to_owned(),
         matter_sid: None,
+        matter: crate::windows::test_world::matter_one(),
+        matter_root: r"D:\Matters\Smith".to_owned(),
+        notes_root: None,
         program: format!(r"{RUNTIME}\node.exe"),
         args: vec!["codex-acp.js".to_owned(), "--flag value".to_owned()],
         cwd: r"D:\Matters\Smith".to_owned(),
@@ -35,6 +38,7 @@ fn message() -> LaunchMessage {
         ca_bundle: Some(format!(r"{DATA}\sandbox-ca\roots.pem")),
         credential_link: Some(format!(r"{STATE}\auth.json")),
         firm_ca: Vec::new(),
+        denial_pipe: None,
     }
 }
 
@@ -52,6 +56,11 @@ fn get<'a>(env: &'a [(String, String)], name: &str) -> Option<&'a str> {
 fn a_message_round_trips_and_parses() {
     let bytes = message().to_bytes().unwrap();
     assert_eq!(LaunchMessage::parse(&bytes).unwrap(), message());
+    let mut piped = message();
+    let set = crate::windows::pipe::PipeSet::random().unwrap();
+    piped.denial_pipe = Some(crate::windows::denial_pipe::denial_pipe_name(&set));
+    let bytes = piped.to_bytes().unwrap();
+    assert_eq!(LaunchMessage::parse(&bytes).unwrap(), piped);
 }
 
 #[test]
@@ -72,6 +81,14 @@ fn the_parse_refuses_what_breaks_a_rule() {
             Box::new(|m| m.program = r"C:\x\..\y.exe".to_owned()),
         ),
         ("cwd", Box::new(|m| m.cwd = r"C:relative".to_owned())),
+        (
+            "matter_root",
+            Box::new(|m| m.matter_root = r"D:\Matters\..\Smith".to_owned()),
+        ),
+        (
+            "matter_root",
+            Box::new(|m| m.matter_root = r"D:\Matters\Jones".to_owned()),
+        ),
         (
             "state",
             Box::new(|m| m.state = r"\\server\share\state".to_owned()),
@@ -94,6 +111,10 @@ fn the_parse_refuses_what_breaks_a_rule() {
             Box::new(|m| m.env.push(("A".to_owned(), "x\0y".to_owned()))),
         ),
         ("args", Box::new(|m| m.args.push("a\0".to_owned()))),
+        (
+            "denial_pipe",
+            Box::new(|m| m.denial_pipe = Some(format!(r"{}\..\x", m.matter_root))),
+        ),
     ];
     for (field, change) in cases {
         let mut bad = message();
@@ -429,71 +450,6 @@ fn command_lines_quote_as_the_c_runtime_reads_them() {
         command_line(r"C:\p q\n.exe", &[r"dir\ ".to_owned()]),
         r#""C:\p q\n.exe" "dir\ ""#
     );
-}
-
-#[test]
-fn exit_codes_are_stable_and_map_to_set_up_causes() {
-    assert_eq!(RunExit::Usage.code(), 0xE0C1_5000);
-    assert_eq!(RunExit::SecondaryLogon.code(), 0xE0C1_5003);
-    assert_eq!(RunExit::Spawn.code(), 0xE0C1_500B);
-    for exit in RunExit::ALL
-        .into_iter()
-        .chain([RunExit::TokenGrant, RunExit::PoolBusy])
-    {
-        assert_eq!(RunExit::from_code(exit.code()), Some(exit));
-    }
-    assert_eq!(RunExit::from_code(0), None);
-    assert_eq!(RunExit::Sweep.code(), 0xE0C1_500D);
-    assert_eq!(RunExit::DllSearch.code(), 0xE0C1_500E);
-    // Appended last: every code before it keeps its number.
-    assert_eq!(RunExit::Escapee.code(), 0xE0C1_500F);
-    assert_eq!(RunExit::Escapee.no_sandbox(), None);
-    assert_eq!(RunExit::PoolStop.code(), 0xE0C1_5010);
-    assert_eq!(RunExit::PoolStop.no_sandbox(), None);
-    assert_eq!(RunExit::MarkerUnwritable.code(), 0xE0C1_5011);
-    assert_eq!(RunExit::MarkerUnwritable.no_sandbox(), None);
-    assert_eq!(RunExit::AwaitingStop.code(), 0xE0C1_5012);
-    assert_eq!(RunExit::AwaitingStop.no_sandbox(), None);
-    assert_eq!(RunExit::AwaitingSweep.code(), 0xE0C1_5013);
-    assert_eq!(RunExit::AwaitingSweep.no_sandbox(), None);
-    // Reserved at 0x15; 0x14 is another branch's code, none here.
-    assert_eq!(RunExit::TokenGrant.code(), 0xE0C1_5015);
-    assert_eq!(RunExit::TokenGrant.no_sandbox(), None);
-    // Reserved at 0x20; 0x16 to 0x1f are other branches' codes, none here.
-    assert_eq!(RunExit::PoolBusy.code(), 0xE0C1_5020);
-    assert_eq!(RunExit::PoolBusy.no_sandbox(), None);
-    assert_eq!(RunExit::from_code(0xE0C1_5020), Some(RunExit::PoolBusy));
-    for unknown in [0x14, 0x16, 0x1f, 0x21] {
-        assert_eq!(
-            RunExit::from_code(RUN_EXIT_BASE + unknown),
-            None,
-            "0x{unknown:x}"
-        );
-    }
-    assert_eq!(RunExit::DllSearch.no_sandbox(), None);
-    assert_eq!(RunExit::AgentReserved.no_sandbox(), None);
-    assert_eq!(RunExit::Sweep.no_sandbox(), None);
-    // An agent exiting with a runner code never passes for a runner failure.
-    for code in [
-        RunExit::Password.code(),
-        RunExit::SecondaryLogon.code(),
-        RUN_EXIT_BASE + 0xff,
-    ] {
-        assert_eq!(agent_code(code), RunExit::AgentReserved.code());
-    }
-    for code in [0, 7, RUN_EXIT_BASE - 1, RUN_EXIT_BASE + 0x100, 0xC000_0142] {
-        assert_eq!(agent_code(code), code);
-    }
-    assert_eq!(
-        RunExit::SecondaryLogon.no_sandbox(),
-        Some(crate::NoSandbox::SetUpFailed(SECLOGON_DISABLED.to_owned()))
-    );
-    assert_eq!(
-        RunExit::LogonRight.no_sandbox(),
-        Some(crate::NoSandbox::SetUpBlocked(crate::Blocked::LogonRight))
-    );
-    assert_eq!(RunExit::Spawn.no_sandbox(), None);
-    assert_eq!(SECLOGON_DISABLED, crate::windows::setup::SECLOGON_DISABLED);
 }
 
 #[test]

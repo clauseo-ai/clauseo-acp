@@ -63,6 +63,7 @@ pub mod admit;
 pub mod apply;
 pub mod ca_bundle;
 pub mod clean_close;
+pub mod denial_pipe;
 #[cfg(windows)]
 mod detect;
 pub mod fence;
@@ -139,7 +140,7 @@ pub use record::{
     RecordError, sandbox_data_dir, sandbox_group_sid, sandbox_owner_sid, sandbox_pool_sids,
 };
 pub use set_aside::{
-    Checked as SetAsideChecked, Entry as SetAsideEntry, Reason as SetAsideReason,
+    Checked as SetAsideChecked, Entry as SetAsideEntry, ITEMS_ROOT, Reason as SetAsideReason,
     SET_ASIDE_BOOKKEEPING, SET_ASIDE_DIR, SetAsideFailure,
 };
 #[cfg(any(windows, test, feature = "test-support"))]

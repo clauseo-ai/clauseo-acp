@@ -45,6 +45,8 @@
 //!   outer leaves it running. A request that fails is logged and changes no exit code; the outer,
 //!   if it lives, waits up to 20 s for the run's result. No process of the pool user's is
 //!   started at the end.
+//! - The outer watches the matter's folder for a new `.git` while the agent runs, and sets one
+//!   aside at once, ending the session first when it can't (`git_watch.rs`, `outer/watch.rs`).
 //! - The outer writes an unclean-session marker in the run folder once it has read the launch and
 //!   removes it only at a clean end (`marker.rs`); `unclean_sessions` lists those left.
 //! - The four pipes (`pipe.rs`) are the outer's, with the explicit DACL. The outer sends the
@@ -67,8 +69,10 @@
 
 use std::path::{Path, PathBuf};
 
+use clauseo_protocol::MatterId;
 use serde::{Deserialize, Serialize};
 
+use super::denial_pipe::check_pipe_name;
 use super::pool::pool_number;
 use super::sids::Sid;
 
@@ -78,17 +82,22 @@ mod ca;
 #[cfg(windows)]
 mod desktop;
 #[cfg(any(windows, test))]
-mod end;
+pub(in crate::windows) mod end;
 pub mod env;
 pub mod frame;
+#[cfg(any(windows, test))]
+pub(crate) mod git_watch;
 #[cfg(windows)]
 mod inner;
 #[cfg(any(windows, test))]
 mod inner_flow;
 #[cfg(any(windows, test))]
 mod inner_user;
+mod launch_debug;
 #[cfg(any(windows, test))]
 mod leftovers;
+#[cfg(any(windows, test))]
+mod log_file;
 #[cfg(any(windows, test))]
 pub mod marker;
 #[cfg(windows)]
@@ -97,6 +106,7 @@ pub mod paths;
 mod policy;
 #[cfg(any(windows, test))]
 mod previous;
+mod run_exit;
 #[cfg(windows)]
 mod spawn;
 #[cfg(any(windows, test))]
@@ -116,10 +126,12 @@ pub use inner::run_inner;
 pub use marker::{UncleanSession, unclean_sessions};
 #[cfg(windows)]
 pub use outer::run_outer;
+use paths::is_batch;
 pub use paths::{WinPath, codex_reuse};
 #[cfg(windows)]
 pub use policy::codex_link_in_policy;
 pub use policy::{codex_reuse_in_policy, granted_paths};
+pub use run_exit::{RunExit, agent_code};
 /// The s15 harness's control stations read their names the way the outer does.
 #[cfg(any(windows, test))]
 pub use station::station_name_of_path;
@@ -178,6 +190,15 @@ pub struct LaunchMessage {
     /// The matter's SID, added as a restricting SID when set (0049: off by default).
     #[serde(default)]
     pub matter_sid: Option<Sid>,
+    /// The matter's ID: the set-aside the outer's git watch moves a new `.git` into.
+    pub matter: MatterId,
+    /// The matter's folder, the run's one writable matter root, which the outer watches for a
+    /// new `.git` (`git_watch.rs`); a granted path, never a read-only one.
+    pub matter_root: String,
+    /// The matter's notes folder, when the run can write one: watched as the matter's folder is.
+    /// A granted path.
+    #[serde(default)]
+    pub notes_root: Option<String>,
     /// The agent's program, absolute; never a batch file.
     pub program: String,
     /// Its arguments.
@@ -210,40 +231,26 @@ pub struct LaunchMessage {
     /// `SSL_CERT_FILE` is merged the same way.
     #[serde(default)]
     pub firm_ca: Vec<String>,
-}
-
-impl std::fmt::Debug for LaunchMessage {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // The environment's values (the proxy's token among them) are never printed.
-        let names: Vec<&str> = self.env.iter().map(|(name, _)| name.as_str()).collect();
-        f.debug_struct("LaunchMessage")
-            .field("version", &self.version)
-            .field("pool_user", &self.pool_user)
-            .field("pool_name", &self.pool_name)
-            .field("matter_sid", &self.matter_sid)
-            .field("program", &self.program)
-            .field("args", &self.args.len())
-            .field("cwd", &self.cwd)
-            .field("env", &names)
-            .field("state", &self.state)
-            .field("tmpdir", &self.tmpdir)
-            .field("firm_ca", &self.firm_ca)
-            .finish_non_exhaustive()
-    }
+    /// The host's denial pipe (`denial_pipe`), which the git watch's records go to; with none,
+    /// or one that can't be opened, they are only logged, never said on stderr.
+    #[serde(default)]
+    pub denial_pipe: Option<String>,
 }
 
 impl LaunchMessage {
-    /// The message for `spec` run as `pool` under `policy`, with the CA bundle `ca_bundle`:
-    /// the spec's program, arguments, folder and whole environment; the policy's state folder,
-    /// session temp folder, runtime paths, the paths it grants and its credential link. Refused
-    /// when a path or variable isn't UTF-8 or breaks [`LaunchMessage::check`]'s rules.
+    /// The message for `spec` run as `pool` under `policy` for `matter`, with the CA bundle
+    /// `ca_bundle`: the spec's program, arguments, folder and whole environment; the policy's
+    /// matter folder, state folder, session temp folder, runtime paths, the paths it grants and
+    /// its credential link. Refused when a path or variable isn't UTF-8 or breaks
+    /// [`LaunchMessage::check`]'s rules.
     pub fn from_policy(
         policy: &crate::Policy,
+        matter: MatterId,
         pool: &super::pool::PoolUser,
         spec: &clauseo_process::LaunchSpec,
         ca_bundle: Option<&Path>,
     ) -> Result<LaunchMessage, LaunchError> {
-        policy::message_from_policy(policy, pool, spec, ca_bundle)
+        policy::message_from_policy(policy, matter, pool, spec, ca_bundle)
     }
 
     /// Reads and checks a launch message: [`LaunchMessage::check`]'s rules.
@@ -275,7 +282,7 @@ impl LaunchMessage {
     /// The rules: this version; a pool name `ClauseoSbNN`; the program, folders and paths full
     /// local paths with no `.` or `..` part and no NUL; the program no batch file; variable names
     /// non-empty with no NUL and no `=` but a leading one, values with no NUL; at most 4096
-    /// arguments and variables.
+    /// arguments and variables; a denial pipe's name as `denial_pipe::check_pipe_name` makes it.
     pub fn check(&self) -> Result<(), LaunchError> {
         if self.version != LAUNCH_VERSION {
             return Err(LaunchError::Version(self.version));
@@ -288,6 +295,16 @@ impl LaunchMessage {
             return Err(field("program", "is a batch file"));
         }
         local("cwd", &self.cwd)?;
+        local("matter_root", &self.matter_root)?;
+        if !self.granted.contains(&self.matter_root) {
+            return Err(field("matter_root", "is not a granted path"));
+        }
+        if let Some(notes) = &self.notes_root {
+            local("notes_root", notes)?;
+            if !self.granted.contains(notes) {
+                return Err(field("notes_root", "is not a granted path"));
+            }
+        }
         local("state", &self.state)?;
         if WinPath::parse(&self.state).is_none_or(|state| state.drive().is_none()) {
             return Err(field("state", "is not on a drive letter"));
@@ -309,6 +326,10 @@ impl LaunchMessage {
         }
         for path in &self.firm_ca {
             local("firm_ca", path)?;
+        }
+        if let Some(pipe) = &self.denial_pipe {
+            check_pipe_name(pipe)
+                .map_err(|_bad| field("denial_pipe", "is not a denial pipe's name"))?;
         }
         if self.args.len() > ITEMS_CAP || self.env.len() > ITEMS_CAP {
             return Err(field("args or env", "has more than 4096 items"));
@@ -371,183 +392,6 @@ pub fn write_launch(data_dir: &Path, message: &LaunchMessage) -> std::io::Result
     Ok(path)
 }
 
-/// The runner's own failures, as its exit code (`RUN_EXIT_BASE + n`). Appended, never
-/// renumbered: the host reads them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RunExit {
-    /// The command line isn't `--launch <file>` or `--inner <base>`.
-    Usage,
-    /// The launch file is missing, isn't the desktop user's alone, or breaks a rule.
-    BadLaunch,
-    /// `secrets.bin` has no password for the pool user: set-up must run again.
-    NoSecret,
-    /// The Secondary Logon service is disabled (1058).
-    SecondaryLogon,
-    /// "Allow log on locally" doesn't include the pool user (1385).
-    LogonRight,
-    /// The pool user's password was refused (1326): set-up must run again.
-    Password,
-    /// Another logon failure, or what the outer needs before its logon failed to be read: the
-    /// pool user's secret, System32's path. A marker that can't be written is
-    /// [`RunExit::MarkerUnwritable`].
-    Logon,
-    /// M3: the launch would reuse the lawyer's `~\.codex`.
-    CodexReuse,
-    /// A runner pipe couldn't be made, connected or checked.
-    Pipe,
-    /// The inner runner couldn't be put in the job, or the job made.
-    Job,
-    /// The inner runner's token, desktop or folders couldn't be made, or the outer's window
-    /// station and desktop for the agent (`desktop.rs`): any of their calls but a refused
-    /// `LogonUserW` password or right, which are [`RunExit::Password`] and
-    /// [`RunExit::LogonRight`] as the inner's logon's are.
-    Token,
-    /// The agent couldn't be started.
-    Spawn,
-    /// The agent exited with a code in the runner's own range, which the outer runner never
-    /// passes on as it is ([`RUN_EXIT_BASE`] to `+0xff`).
-    AgentReserved,
-    /// The inner runner's first-act sweep of the pool user's processes failed (`sweep.rs`): the
-    /// process list couldn't be read, or a process of the pool user's couldn't be checked, or it
-    /// kept starting processes. A process that couldn't be opened or ended is
-    /// [`RunExit::Escapee`].
-    Sweep,
-    /// The runner's DLL search couldn't be kept to System32.
-    DllSearch,
-    /// A sweep found a process of the pool user's it couldn't end, even after the owner's
-    /// `WRITE_DAC` reopen: one that shut its DACL to its own user, alive outside every job (M2).
-    /// The inner's first act exits with it and starts no agent. The outer exits with it whenever
-    /// any sweep of its session found one: the first act's, or the inner's ticks and end
-    /// (reported on `ctl`). It wins over the agent's own code, even 0, which the outer then says
-    /// on stderr: the run's output came through, but the pool user has a process no sweep of its
-    /// own can end, and only the host can act on that (0049).
-    Escapee,
-    /// Reserved, no longer produced: a pool user's BITS jobs are cancelled by the `SYSTEM` tasks
-    /// alone (`SandboxSweep` at each session's end, `SandboxStop`). Kept, with its number, since
-    /// the codes are explicit and may be read downstream.
-    PoolStop,
-    /// The session's unclean-session marker couldn't be written, or the launch file's name gives
-    /// it no id (`marker::marked`): the outer refuses the launch before any logon, so no session
-    /// runs that no marker names.
-    MarkerUnwritable,
-    /// F4: a marker of this pool user's (or one that names none, or can't be read) awaits a stop
-    /// that hasn't completed: a session a sweep found an escapee in, or one whose outer died
-    /// (`unclean::logon_check`), or one whose sweep after that stop completed and which now
-    /// awaits its final stop. The outer requested `\Clauseo\SandboxStop` and refuses the
-    /// launch before its own marker or any logon; a launch once the stop completed goes ahead.
-    AwaitingStop,
-    /// F4: a marker of this pool user's awaits a sweep that didn't complete within 15 s of the
-    /// outer's wait, or its stop (or the sweep after it) completed but it couldn't be re-marked
-    /// to await the sweep (or the final stop) (`unclean::logon_check`). No stop is awaited, so
-    /// none was requested; the outer refuses the launch before its own marker or any logon, and
-    /// a later launch checks again.
-    AwaitingSweep,
-    /// The inner runner couldn't grant the desktop user `TOKEN_QUERY` on its own token, its
-    /// first act (`token::runner_token_first_sddl`), so the outer can't make its full check: the
-    /// launch is refused before the inner does anything else.
-    TokenGrant,
-    /// F4: an open marker of this pool user's names an outer that still runs, a live session's
-    /// (`unclean::outer_alive`). The outer refuses the launch before its own marker or any
-    /// logon, requests no stop and ends nothing; a launch once that session ended goes ahead.
-    PoolBusy,
-}
-
-/// The variants with an explicit, reserved number past [`RUN_EXIT_BASE`] instead of their
-/// position: [`RunExit::TokenGrant`] `0x15` and [`RunExit::PoolBusy`] `0x20`. The numbers
-/// between are other branches' codes (`0x14` `LeftoverTask`, `0x16` to `0x1f`), none here.
-const RESERVED: [(RunExit, u32); 2] = [(RunExit::TokenGrant, 0x15), (RunExit::PoolBusy, 0x20)];
-
-impl RunExit {
-    /// The variants numbered by position, from [`RUN_EXIT_BASE`]; the rest have an explicit,
-    /// reserved number instead ([`RESERVED`]).
-    const ALL: [RunExit; 20] = [
-        RunExit::Usage,
-        RunExit::BadLaunch,
-        RunExit::NoSecret,
-        RunExit::SecondaryLogon,
-        RunExit::LogonRight,
-        RunExit::Password,
-        RunExit::Logon,
-        RunExit::CodexReuse,
-        RunExit::Pipe,
-        RunExit::Job,
-        RunExit::Token,
-        RunExit::Spawn,
-        RunExit::AgentReserved,
-        RunExit::Sweep,
-        RunExit::DllSearch,
-        RunExit::Escapee,
-        RunExit::PoolStop,
-        RunExit::MarkerUnwritable,
-        RunExit::AwaitingStop,
-        RunExit::AwaitingSweep,
-    ];
-
-    /// The exit code.
-    pub fn code(self) -> u32 {
-        if let Some((_, offset)) = RESERVED.iter().find(|(exit, _)| *exit == self) {
-            return RUN_EXIT_BASE + offset;
-        }
-        let index = RunExit::ALL
-            .iter()
-            .position(|exit| *exit == self)
-            .unwrap_or(0);
-        RUN_EXIT_BASE + u32::try_from(index).unwrap_or(0)
-    }
-
-    /// The failure an exit code names, if it is one.
-    pub fn from_code(code: u32) -> Option<RunExit> {
-        let offset = code.checked_sub(RUN_EXIT_BASE)?;
-        if let Some((exit, _)) = RESERVED.iter().find(|(_, reserved)| *reserved == offset) {
-            return Some(*exit);
-        }
-        RunExit::ALL.get(usize::try_from(offset).ok()?).copied()
-    }
-
-    /// What tier detection makes of it: the set-up's failures, which running the set-up again or
-    /// IT fixes, as `SetUpFailed` or `SetUpBlocked` with a named cause; `None` for the rest,
-    /// which fail this launch only.
-    pub fn no_sandbox(self) -> Option<crate::NoSandbox> {
-        use crate::NoSandbox;
-        match self {
-            RunExit::SecondaryLogon => Some(NoSandbox::SetUpFailed(SECLOGON_DISABLED.to_owned())),
-            RunExit::LogonRight => Some(NoSandbox::SetUpBlocked(crate::Blocked::LogonRight)),
-            RunExit::NoSecret | RunExit::Password => {
-                Some(NoSandbox::SetUpFailed(PASSWORD_LOST.to_owned()))
-            }
-            RunExit::Usage
-            | RunExit::BadLaunch
-            | RunExit::Logon
-            | RunExit::CodexReuse
-            | RunExit::Pipe
-            | RunExit::Job
-            | RunExit::Token
-            | RunExit::Spawn
-            | RunExit::AgentReserved
-            | RunExit::Sweep
-            | RunExit::DllSearch
-            | RunExit::Escapee
-            | RunExit::PoolStop
-            | RunExit::MarkerUnwritable
-            | RunExit::AwaitingStop
-            | RunExit::AwaitingSweep
-            | RunExit::TokenGrant
-            | RunExit::PoolBusy => None,
-        }
-    }
-}
-
-/// The agent's exit code as the runner passes it on: one in the runner's own range
-/// (`RUN_EXIT_BASE` to `+0xff`) becomes [`RunExit::AgentReserved`], so an agent can never pass
-/// for a runner failure (a set-up one among them) in the host's eyes.
-pub fn agent_code(code: u32) -> u32 {
-    if (RUN_EXIT_BASE..=RUN_EXIT_BASE + 0xff).contains(&code) {
-        RunExit::AgentReserved.code()
-    } else {
-        code
-    }
-}
-
 /// The UI limits the launch's job carries: every `JOB_OBJECT_UILIMIT_*` flag (`HANDLES` `0x1`,
 /// `READCLIPBOARD` `0x2`, `WRITECLIPBOARD` `0x4`, `SYSTEMPARAMETERS` `0x8`, `DISPLAYSETTINGS`
 /// `0x10`, `GLOBALATOMS` `0x20`, `DESKTOP` `0x40`, `EXITWINDOWS` `0x80`), behind the agent's own
@@ -574,14 +418,6 @@ fn local(name: &'static str, value: &str) -> Result<(), LaunchError> {
             "is not a full local path without . or .. parts",
         )),
     }
-}
-
-/// Whether `program` names a batch file: `.cmd` or `.bat`, in any case, trailing dots and
-/// spaces dropped as Windows drops them.
-fn is_batch(program: &str) -> bool {
-    let trimmed = program.trim_end_matches(['.', ' ']);
-    let extension = trimmed.rsplit_once('.').map(|(_, extension)| extension);
-    extension.is_some_and(|ext| ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat"))
 }
 
 #[cfg(test)]

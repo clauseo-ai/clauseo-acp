@@ -14,11 +14,16 @@
 //!   item's own DACL says, as itself (`FILE_OPEN_REPARSE_POINT`) and with `OBJ_CASE_INSENSITIVE`,
 //!   as git and Claude open names. Its file ID is read from that handle.
 //! - Names are compared as NTFS compares them: `CompareStringOrdinal` with case ignored.
+//! - The live watch's reads go the same way: an item is looked at relative to its folder's
+//!   handle as a probe opens it, with what it is read from that handle; a folder's own name is
+//!   read from its normalized final path (its long name, however it was opened); and a walk
+//!   down from a volume's top opens only a drive's root by its path (`C:\`), never a share.
+//! - A final path is compared with the planned one part by part, as names are compared.
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::io;
 use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use windows::Wdk::Storage::FileSystem::{
     FILE_DIRECTORY_FILE, FILE_OPEN, FILE_SYNCHRONOUS_IO_NONALERT, NTCREATEFILE_CREATE_OPTIONS,
@@ -26,14 +31,17 @@ use windows::Wdk::Storage::FileSystem::{
 use windows::Win32::Foundation::ERROR_NO_MORE_FILES;
 use windows::Win32::Globalization::{CSTR_EQUAL, CompareStringOrdinal};
 use windows::Win32::Storage::FileSystem::{
-    FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ID_BOTH_DIR_INFO,
-    FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_TRAVERSE, FileIdBothDirectoryInfo,
-    FileIdBothDirectoryRestartInfo, GetFileInformationByHandleEx, SYNCHRONIZE,
+    FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO,
+    FILE_ID_BOTH_DIR_INFO, FILE_LIST_DIRECTORY, FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES,
+    FILE_TRAVERSE, FileAttributeTagInfo, FileIdBothDirectoryInfo, FileIdBothDirectoryRestartInfo,
+    GETFINALPATHNAMEBYHANDLE_FLAGS, GetFileInformationByHandleEx, GetFinalPathNameByHandleW,
+    SYNCHRONIZE, VOLUME_NAME_DOS,
 };
 
 use super::super::files::FileId;
 use super::super::scan::{Kind, Listed};
-use super::{Handle, id_of, open_at, open_path, os_error, same_path, tag};
+use super::{Handle, id_of, open_at, open_path, os_error, tag, wide_os};
+use crate::windows::acl_plan::verbatim;
 
 /// `IsReparseTagNameSurrogate`: the tag's name-surrogate bit (junctions, symbolic links).
 const NAME_SURROGATE: u32 = 0x2000_0000;
@@ -85,6 +93,67 @@ pub(super) fn probe(folder: &Handle, name: &OsStr) -> io::Result<Option<FileId>>
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error),
     }
+}
+
+/// See [`Volume::open_top`](super::super::run::Volume::open_top): a drive's root (`C:\`) alone,
+/// checked by its words before anything is opened, so no share or device is ever opened here.
+pub(super) fn open_top(top: &Path) -> io::Result<Handle> {
+    let drive = matches!(
+        top.as_os_str().as_encoded_bytes(),
+        [letter, b':', b'\\'] if letter.is_ascii_alphabetic()
+    );
+    if !drive {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "not a drive's root",
+        ));
+    }
+    open_root(top)
+}
+
+/// See [`Volume::look`](super::super::run::Volume::look): opened as [`probe`] opens it, with
+/// what it is read from that handle.
+pub(super) fn look(folder: &Handle, name: &OsStr) -> io::Result<Option<(FileId, Kind)>> {
+    let name: Vec<u16> = name.encode_wide().collect();
+    let options = NTCREATEFILE_CREATE_OPTIONS(0);
+    match open_at(folder, &name, PROBE, FILE_OPEN, options) {
+        Ok(item) => Ok(Some((id_of(&item)?, kind_of(&item)?))),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+/// What the handle's file, folder or link is, as a listing says it ([`listed`]): a name
+/// surrogate is a link, else a folder by its attribute, else anything else.
+fn kind_of(handle: &Handle) -> io::Result<Kind> {
+    let mut info = FILE_ATTRIBUTE_TAG_INFO::default();
+    // SAFETY: the handle is open and `info` is valid and writable for its size.
+    unsafe {
+        GetFileInformationByHandleEx(
+            handle.0,
+            FileAttributeTagInfo,
+            (&raw mut info).cast(),
+            u32::try_from(size_of::<FILE_ATTRIBUTE_TAG_INFO>()).unwrap_or(0),
+        )
+    }
+    .map_err(|e| os_error(&e))?;
+    let reparse = info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0;
+    Ok(if reparse && surrogate(Some(info.ReparseTag)) {
+        Kind::Link
+    } else if info.FileAttributes & FILE_ATTRIBUTE_DIRECTORY.0 != 0 {
+        Kind::Folder
+    } else {
+        Kind::Other
+    })
+}
+
+/// See [`Volume::folder_name`](super::super::run::Volume::folder_name): the last part of its
+/// normalized final path, which holds each folder's long name.
+pub(super) fn folder_name(folder: &Handle) -> io::Result<OsString> {
+    let path = PathBuf::from(OsString::from_wide(&final_path(folder)?));
+    path.file_name()
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| io::Error::other("a volume's root has no name"))
 }
 
 /// See [`Volume::list`](super::super::run::Volume::list).
@@ -171,4 +240,39 @@ pub(in crate::windows::set_aside) fn same_name(a: &OsStr, b: &OsStr) -> bool {
 pub(super) fn same_wide(a: &[u16], b: &[u16]) -> bool {
     // SAFETY: both slices are valid for their lengths, and the call only reads them.
     unsafe { CompareStringOrdinal(a, b, true) == CSTR_EQUAL }
+}
+
+/// Whether the handle's final path (normalized, with its drive letter) is `planned`, compared
+/// part by part as NTFS compares names ([`same_name`]), both sides in the verbatim form
+/// ([`verbatim`]): `dunce`'s plain form kept a final path past `MAX_PATH`, or with a name that
+/// isn't Unicode, verbatim while the planned path was plain (round 7, VM run 3).
+pub(super) fn same_path(handle: &Handle, planned: &Path) -> io::Result<bool> {
+    let found = verbatim(&PathBuf::from(OsString::from_wide(&final_path(handle)?)));
+    let planned = verbatim(&std::path::absolute(planned)?);
+    let (mut a, mut b) = (found.components(), planned.components());
+    loop {
+        match (a.next(), b.next()) {
+            (None, None) => return Ok(true),
+            (Some(x), Some(y)) if same_wide(&wide_os(x.as_os_str()), &wide_os(y.as_os_str())) => {}
+            _ => return Ok(false),
+        }
+    }
+}
+
+/// The handle's final path, normalized, with its drive letter (`\\?\C:\...`).
+fn final_path(handle: &Handle) -> io::Result<Vec<u16>> {
+    let flags = GETFINALPATHNAMEBYHANDLE_FLAGS(FILE_NAME_NORMALIZED.0 | VOLUME_NAME_DOS.0);
+    let mut buffer = vec![0u16; 512];
+    loop {
+        // SAFETY: the handle is open and `buffer` is a writable slice of its length.
+        let length = unsafe { GetFinalPathNameByHandleW(handle.0, &mut buffer, flags) };
+        match usize::try_from(length).map_err(io::Error::other)? {
+            0 => return Err(io::Error::last_os_error()),
+            n if n < buffer.len() => {
+                buffer.truncate(n);
+                return Ok(buffer);
+            }
+            n => buffer.resize(n + 1, 0),
+        }
+    }
 }

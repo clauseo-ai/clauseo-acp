@@ -3,6 +3,9 @@
 //! never follows a symbolic link. A name opened by path (a probe, an ID, an owner, a move's
 //! source) that isn't there exactly is matched ignoring ASCII case, as NTFS would open it, so
 //! a case-sensitive volume behaves as a case-insensitive one does; listings keep names as given.
+//! A test can give a folder a short name, as NTFS's 8.3 names ([`Posix::aliases`]), and read
+//! back what was opened through handles ([`Posix::opened`]) and what was read by path
+//! ([`Posix::by_path`]).
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -11,10 +14,10 @@ use std::io;
 use std::os::unix::fs::MetadataExt as _;
 use std::path::{Path, PathBuf};
 
-use super::super::SetAsideFailure;
 use super::super::files::FileId;
-use super::super::run::Volume;
+use super::super::run::{Need, Volume};
 use super::super::scan::{Kind, Listed};
+use super::super::{SetAsideFailure, drive_folder_name, not_yours};
 use crate::windows::write::{make_sandbox_dir, rename_new};
 
 pub(super) struct Posix {
@@ -29,7 +32,37 @@ pub(super) struct Posix {
     /// The machine record's pool, as [`Volume::pool`] reads it: `None` is a record that can't
     /// be read. [`POOL_USER`] alone unless a test says otherwise.
     pub(super) pool: RefCell<Option<Vec<String>>>,
+    /// Another volume, as a test sets it ([`Posix::other_volume`]): every path under the first
+    /// folder is on it, and the second is its root, where [`Posix::lawyer`]'s set-aside folder
+    /// is ([`Volume::items_root`]).
+    pub(super) other: RefCell<Option<(PathBuf, PathBuf)>>,
+    /// The lawyer's SID, as the thread's user on NTFS: it names the drive folder
+    /// ([`drive_folder_name`]). [`LAWYER`] unless a test says otherwise.
+    pub(super) lawyer: RefCell<String>,
+    /// Each file [`Volume::read_small`] read, in order.
+    pub(super) reads: RefCell<Vec<PathBuf>>,
+    /// Files whose read finds an oplock's break under way, as NTFS's open with
+    /// `FILE_COMPLETE_IF_OPLOCKED` would: refused as unreadable.
+    pub(super) oplocked: RefCell<Vec<PathBuf>>,
+    /// Owners [`Volume::move_into`] reads on the item it renames instead of the true one, by
+    /// path: an item swapped between a read by path and the move.
+    pub(super) swapped: RefCell<BTreeMap<PathBuf, String>>,
+    /// Items whose owner [`Volume::move_into`] can't read on the handle it renames, by path: an
+    /// item whose DACL denies the lawyer `READ_CONTROL`.
+    pub(super) unreadable: RefCell<Vec<PathBuf>>,
+    /// Short names, as NTFS's 8.3 ones: a name not there that is a key here opens the name it
+    /// maps to in the same folder.
+    pub(super) aliases: RefCell<BTreeMap<OsString, OsString>>,
+    /// Each path opened through a folder's handle, or as a root or a volume's top, in order: what
+    /// [`Volume::open_root`], [`Volume::open_top`], [`Volume::open_folder`], [`Volume::look`],
+    /// [`Volume::link_target`] and [`Volume::owner_at`] opened.
+    pub(super) opened: RefCell<Vec<PathBuf>>,
+    /// Each path [`Volume::file_id`] or [`Volume::owner`] read by path, in order.
+    pub(super) by_path: RefCell<Vec<PathBuf>>,
 }
+
+/// The lawyer [`Posix::lawyer`] starts as.
+pub(super) const LAWYER: &str = "S-1-5-21-1-2-3-1001";
 
 /// The owner [`Posix::foreign`] gives an item: a pool user the record names.
 pub(super) const POOL_USER: &str = "uid other";
@@ -41,7 +74,22 @@ impl Posix {
             foreign: RefCell::default(),
             owned: RefCell::default(),
             pool: RefCell::new(Some(vec![POOL_USER.to_owned()])),
+            other: RefCell::default(),
+            lawyer: RefCell::new(LAWYER.to_owned()),
+            reads: RefCell::default(),
+            oplocked: RefCell::default(),
+            swapped: RefCell::default(),
+            unreadable: RefCell::default(),
+            aliases: RefCell::default(),
+            opened: RefCell::default(),
+            by_path: RefCell::default(),
         }
+    }
+
+    /// Says every path under `under` is on another volume than the data folder, whose root is
+    /// `root`.
+    pub(super) fn other_volume(&self, under: &Path, root: &Path) {
+        *self.other.borrow_mut() = Some((under.to_owned(), root.to_owned()));
     }
 
     /// Marks the item at `path` as a pool user's ([`POOL_USER`]).
@@ -62,6 +110,40 @@ impl Posix {
         } else {
             path.to_owned()
         }
+    }
+
+    /// The owner of `path` itself: [`Posix::foreign`]'s, else its uid's.
+    fn owner_of(&self, path: &Path) -> io::Result<String> {
+        let meta = std::fs::symlink_metadata(path)?;
+        if let Some(owner) = self.foreign.borrow().get(&meta.ino()) {
+            return Ok(owner.clone());
+        }
+        Ok(format!("uid {}", meta.uid()))
+    }
+
+    /// `name` in the folder `folder` as this volume opens it relative to the folder: itself
+    /// when there, else the name its short name ([`Posix::aliases`]) maps to, else as [`Posix::at`]
+    /// opens it; noted in [`Posix::opened`].
+    fn child(&self, folder: &Path, name: &OsStr) -> PathBuf {
+        let path = folder.join(name);
+        let path = match self.aliases.borrow().get(name) {
+            Some(long) if std::fs::symlink_metadata(&path).is_err() => folder.join(long),
+            Some(_) | None => self.at(&path),
+        };
+        self.opened.borrow_mut().push(path.clone());
+        path
+    }
+}
+
+/// The file ID of `path` itself; `None` when nothing is there.
+fn id_of(path: &Path) -> io::Result<Option<FileId>> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) => Ok(Some(FileId {
+            volume: meta.dev(),
+            id: u128::from(meta.ino()).to_le_bytes(),
+        })),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
     }
 }
 
@@ -102,16 +184,61 @@ impl Volume for Posix {
     type Folder = PathBuf;
 
     fn open_root(&self, root: &Path) -> io::Result<PathBuf> {
+        self.opened.borrow_mut().push(root.to_owned());
         listable(root.to_owned())
     }
 
     fn open_folder(&self, folder: &PathBuf, name: &OsStr) -> io::Result<PathBuf> {
-        listable(folder.join(name))
+        listable(self.child(folder, name))
     }
 
     fn folder_id(&self, folder: &PathBuf) -> io::Result<FileId> {
-        self.file_id(folder)?
-            .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
+        id_of(folder)?.ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
+    }
+
+    fn open_top(&self, top: &Path) -> io::Result<PathBuf> {
+        self.opened.borrow_mut().push(top.to_owned());
+        listable(top.to_owned())
+    }
+
+    fn look(&self, folder: &PathBuf, name: &OsStr) -> io::Result<Option<(FileId, Kind)>> {
+        let path = self.child(folder, name);
+        let Some(id) = id_of(&path)? else {
+            return Ok(None);
+        };
+        let meta = std::fs::symlink_metadata(&path)?;
+        let kind = if meta.file_type().is_symlink() {
+            Kind::Link
+        } else if meta.is_dir() {
+            Kind::Folder
+        } else {
+            Kind::Other
+        };
+        Ok(Some((id, kind)))
+    }
+
+    fn link_target(&self, folder: &PathBuf, name: &OsStr) -> io::Result<PathBuf> {
+        std::fs::read_link(self.child(folder, name))
+    }
+
+    fn owner_at(&self, folder: &PathBuf, name: &OsStr) -> io::Result<String> {
+        self.owner_of(&self.child(folder, name))
+    }
+
+    /// The name the folder's own parent lists for it, matched by inode, so the case and the
+    /// long name are the volume's.
+    fn folder_name(&self, folder: &PathBuf) -> io::Result<OsString> {
+        let ino = std::fs::symlink_metadata(folder)?.ino();
+        let parent = folder
+            .parent()
+            .ok_or_else(|| io::Error::other("no parent"))?;
+        for entry in std::fs::read_dir(parent)? {
+            let entry = entry?;
+            if entry.metadata().is_ok_and(|meta| meta.ino() == ino) {
+                return Ok(entry.file_name());
+            }
+        }
+        Err(io::Error::from(io::ErrorKind::NotFound))
     }
 
     fn list(&self, folder: &PathBuf) -> io::Result<Vec<Listed>> {
@@ -133,26 +260,35 @@ impl Volume for Posix {
     }
 
     fn probe(&self, folder: &PathBuf, name: &OsStr) -> io::Result<Option<FileId>> {
-        self.file_id(&folder.join(name))
+        id_of(&self.at(&folder.join(name)))
+    }
+
+    fn read_small(&self, folder: &PathBuf, name: &OsStr, max: u64) -> io::Result<Vec<u8>> {
+        use std::io::Read as _;
+        let path = self.at(&folder.join(name));
+        self.reads.borrow_mut().push(path.clone());
+        if self.oplocked.borrow().contains(&path) {
+            return Err(io::Error::from(io::ErrorKind::WouldBlock));
+        }
+        let meta = std::fs::symlink_metadata(&path)?;
+        if meta.file_type().is_symlink() || meta.is_dir() {
+            return Err(io::Error::other("a link or a folder"));
+        }
+        let mut bytes = Vec::new();
+        std::fs::File::open(&path)?
+            .take(max)
+            .read_to_end(&mut bytes)?;
+        Ok(bytes)
     }
 
     fn file_id(&self, path: &Path) -> io::Result<Option<FileId>> {
-        match std::fs::symlink_metadata(self.at(path)) {
-            Ok(meta) => Ok(Some(FileId {
-                volume: meta.dev(),
-                id: u128::from(meta.ino()).to_le_bytes(),
-            })),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-            Err(error) => Err(error),
-        }
+        self.by_path.borrow_mut().push(path.to_owned());
+        id_of(&self.at(path))
     }
 
     fn owner(&self, path: &Path) -> io::Result<String> {
-        let meta = std::fs::symlink_metadata(self.at(path))?;
-        if let Some(owner) = self.foreign.borrow().get(&meta.ino()) {
-            return Ok(owner.clone());
-        }
-        Ok(format!("uid {}", meta.uid()))
+        self.by_path.borrow_mut().push(path.to_owned());
+        self.owner_of(&self.at(path))
     }
 
     fn pool(&self) -> io::Result<Vec<String>> {
@@ -186,13 +322,40 @@ impl Volume for Posix {
         Ok(())
     }
 
+    fn items_root(&self, sandbox: &Path, folder: &Path) -> io::Result<PathBuf> {
+        Ok(match &*self.other.borrow() {
+            Some((under, root)) if folder.starts_with(under) => {
+                root.join(drive_folder_name(&self.lawyer.borrow()))
+            }
+            Some(_) | None => sandbox.to_owned(),
+        })
+    }
+
+    /// Each folder made, or refused if a link or not a folder (`make_sandbox_dir`); `root`
+    /// refused with [`not_yours`] when [`Posix::foreign`] says another account owns it.
+    fn secure_items_root(&self, root: &Path, parts: &[OsString]) -> io::Result<()> {
+        if let Ok(meta) = std::fs::symlink_metadata(root)
+            && self.foreign.borrow().contains_key(&meta.ino())
+        {
+            return Err(not_yours());
+        }
+        make_sandbox_dir(root)?;
+        let mut folder = root.to_owned();
+        for part in parts {
+            folder.push(part);
+            make_sandbox_dir(&folder)?;
+        }
+        Ok(())
+    }
+
     fn move_into(
         &self,
         from: &Path,
         sandbox: &Path,
         parts: &[OsString],
         name: &OsStr,
-    ) -> Result<(), SetAsideFailure> {
+        need: Need<'_>,
+    ) -> Result<Option<String>, SetAsideFailure> {
         let mut folder = sandbox.to_owned();
         for part in parts {
             folder.push(part);
@@ -201,7 +364,19 @@ impl Volume for Posix {
             }
             make_sandbox_dir(&folder).map_err(|e| SetAsideFailure::Io(e.kind()))?;
         }
-        moved(&self.at(from), &folder.join(name))
+        // The owner of the item about to be renamed, as NTFS reads it from that handle.
+        let at = self.at(from);
+        let swapped = self.swapped.borrow().get(&at).cloned();
+        let owner = if self.unreadable.borrow().contains(&at) {
+            None
+        } else {
+            swapped.or_else(|| self.owner_of(&at).ok())
+        };
+        if std::fs::symlink_metadata(&at).is_ok() && !need.allows(owner.as_deref()) {
+            return Err(SetAsideFailure::NotTheAgents);
+        }
+        moved(&at, &folder.join(name))?;
+        Ok(owner)
     }
 
     fn move_back(

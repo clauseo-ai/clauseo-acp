@@ -36,6 +36,7 @@ pub(crate) mod file_size;
 mod fix;
 pub(crate) mod graph;
 mod json_text;
+pub(crate) mod log_literals;
 pub(crate) mod pins;
 pub(crate) mod planted;
 pub(crate) mod plugins;
@@ -260,6 +261,7 @@ pub(crate) const ALL: &[StaticCheck] = &[
     file_size::CHECK,
     expect_allowlist::CHECK,
     pins::CHECK,
+    log_literals::CHECK,
 ];
 
 /// The package name of the desktop crate. The checks find its directory through `Context::members`,

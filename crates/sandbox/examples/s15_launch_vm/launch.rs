@@ -101,6 +101,17 @@ pub(crate) fn pool_of<'a>(manifest: &'a Manifest, which: &str) -> Result<&'a Poo
     Ok(if which == "A" { a } else { b })
 }
 
+/// Matter `which`'s ID, fixed for the harness: the outer's git watch sets a new `.git` aside into
+/// its set-aside. `SECOND_A` is matter A's second session.
+fn matter_id(which: &str) -> Result<clauseo_protocol::MatterId, String> {
+    let id = if which == "B" {
+        "01890a5d-ac96-774b-bcce-b302099a8b02"
+    } else {
+        "01890a5d-ac96-774b-bcce-b302099a8a01"
+    };
+    id.parse().map_err(|_bad| format!("bad matter id {id}"))
+}
+
 /// The launch message for `spec` as matter `which`'s pool user.
 pub(crate) fn message(
     manifest: &Manifest,
@@ -148,6 +159,9 @@ pub(crate) fn message(
         pool_user: Sid::parse(&pool.sid).map_err(|e| format!("pool SID: {e}"))?,
         pool_name: pool.name.clone(),
         matter_sid: None,
+        matter: matter_id(which)?,
+        matter_root: matter.clone(),
+        notes_root: None,
         program: spec.program.clone(),
         args: spec.args.clone(),
         cwd: matter.clone(),
@@ -164,6 +178,7 @@ pub(crate) fn message(
         ca_bundle: spec.ca_bundle.as_deref().map(text),
         credential_link: link,
         firm_ca: Vec::new(),
+        denial_pipe: None,
     };
     message.check().map_err(|e| e.to_string())?;
     Ok(message)

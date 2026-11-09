@@ -10,6 +10,7 @@ use super::{LAUNCH_VERSION, LaunchError, LaunchMessage};
 /// [`LaunchMessage::from_policy`]'s work.
 pub(super) fn message_from_policy(
     policy: &crate::Policy,
+    matter: clauseo_protocol::MatterId,
     pool: &crate::windows::pool::PoolUser,
     spec: &clauseo_process::LaunchSpec,
     ca_bundle: Option<&Path>,
@@ -40,6 +41,9 @@ pub(super) fn message_from_policy(
         pool_user: pool.sid.clone(),
         pool_name: pool.name.clone(),
         matter_sid: None,
+        matter,
+        matter_root: path("matter_root", policy.matter())?,
+        notes_root: policy.notes().map(|n| path("notes_root", n)).transpose()?,
         program: path("program", spec.program())?,
         args: spec
             .args()
@@ -66,6 +70,7 @@ pub(super) fn message_from_policy(
             .transpose()?,
         // R17 PR-E: the agent's `network.ca_certs` file goes here.
         firm_ca: Vec::new(),
+        denial_pipe: None,
     };
     message.check()?;
     Ok(message)

@@ -11,7 +11,7 @@ use crate::windows::write::rename_new;
 
 /// Makes `rel` in `w` a link to the folder `target`: a junction on Windows, a symbolic link
 /// elsewhere.
-fn link(w: &World, rel: &str, target: &Path) {
+pub(super) fn link(w: &World, rel: &str, target: &Path) {
     #[cfg(windows)]
     crate::windows::test_junction::junction(&w.at(rel), target).unwrap();
     #[cfg(unix)]

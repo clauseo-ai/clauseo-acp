@@ -260,14 +260,15 @@ fn ended_code(code: i32) -> bool {
         .any(|known| i32::try_from(known.0).is_ok_and(|known| known == code))
 }
 
-/// One overlapped operation's state and its manual-reset event.
-struct Overlapped {
+/// One overlapped operation's state and its manual-reset event; the git watch's reads use it too
+/// (`runner/git_watch/os.rs`).
+pub(in crate::windows) struct Overlapped {
     overlapped: Box<OVERLAPPED>,
-    event: Handle,
+    pub(in crate::windows) event: Handle,
 }
 
 impl Overlapped {
-    fn new() -> io::Result<Overlapped> {
+    pub(in crate::windows) fn new() -> io::Result<Overlapped> {
         // SAFETY: no attributes and no name; the event is owned by `Handle`.
         let event = unsafe { CreateEventW(None, true, false, None) }.map_err(|e| os_error(&e))?;
         let event = Handle(event);
@@ -278,12 +279,12 @@ impl Overlapped {
         Ok(Overlapped { overlapped, event })
     }
 
-    fn as_mut_ptr(&mut self) -> *mut OVERLAPPED {
+    pub(in crate::windows) fn as_mut_ptr(&mut self) -> *mut OVERLAPPED {
         &raw mut *self.overlapped
     }
 
     /// Waits for the operation on `handle` and gives the bytes it moved.
-    fn result(&self, handle: &Handle) -> io::Result<usize> {
+    pub(in crate::windows) fn result(&self, handle: &Handle) -> io::Result<usize> {
         let mut moved = 0u32;
         // SAFETY: the operation was started with this OVERLAPPED on `handle`; waiting is
         // allowed, and `moved` is a live out-pointer.
@@ -294,7 +295,7 @@ impl Overlapped {
 
     /// Cancels the operation on `handle` and waits for it to finish, so nothing writes into
     /// this state after it drops.
-    fn cancel(&self, handle: &Handle) {
+    pub(in crate::windows) fn cancel(&self, handle: &Handle) {
         // SAFETY: the operation was started with this OVERLAPPED on `handle`.
         drop(unsafe { CancelIoEx(handle.0, Some(&raw const *self.overlapped)) });
         drop(self.result(handle));

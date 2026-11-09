@@ -13,6 +13,18 @@ pub(super) fn timestamp(now: SystemTime) -> String {
     )
 }
 
+/// `now` in UTC to the second as `YYYYMMDDTHHMMSSZ`: when a squatted drive folder was set aside
+/// (`heal.rs`).
+pub(super) fn second_stamp(now: SystemTime) -> String {
+    let (year, month, day, secs, _millis) = utc(now);
+    format!(
+        "{year:04}{month:02}{day:02}T{:02}{:02}{:02}Z",
+        secs / 3600,
+        secs % 3600 / 60,
+        secs % 60,
+    )
+}
+
 /// `now` in UTC as RFC 3339 to the millisecond: `YYYY-MM-DDTHH:MM:SS.mmmZ`.
 pub(super) fn rfc3339(now: SystemTime) -> String {
     let (year, month, day, secs, millis) = utc(now);

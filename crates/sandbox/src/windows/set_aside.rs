@@ -43,6 +43,13 @@
 //!
 //! A protected name the lawyer changes during a session is set aside too, which is accepted.
 //!
+//! The matter's notes folder (`Policy::notes`), which the agent can write too, gets the same
+//! passes at launch and after the session, with its own record (`notes-record.json`, its keys
+//! below the notes folder) beside the matter's, under the matter's lock; what they move goes to
+//! the matter's set-aside and manifest. Its live watch starts from that record, as the matter's
+//! does, so what is in notes at launch counts as known only once a launch pass checked it. The
+//! launch check's fast path covers the matter alone: the notes folder always gets its full pass.
+//!
 //! Everything lives in `<data_dir>\sandbox\set-aside\<matter>\`, under the sandbox folder's
 //! protected DACL, never in the state folder, which the agent can write: `record.json` (the
 //! names and links at the last pass, and the open sessions), `manifest.json` (each item set
@@ -60,11 +67,27 @@
 //! (its pass folder, the folders within it) go, by handle and only if empty
 //! (`Volume::remove_emptied`), so a matter whose items were all restored holds only bookkeeping.
 //!
+//! A rename can't cross volumes, so an item whose folder is on another volume than the data
+//! folder goes to that volume's own set-aside folder instead, one per lawyer
+//! (`<volume root>\.clauseo-set-aside-<lawyer's SID>`, [`drive_folder_name`]), holding
+//! `set-aside\<matter>\<pass>\...` as the sandbox folder does (`Volume::items_root`). It is made
+//! with its own protected DACL (the lawyer and `SYSTEM`, and a deny for the pool group) and
+//! secured by the sandbox folder's mechanics (`private_dir::make_drive_folder`), except that one
+//! already there the lawyer doesn't own is never taken back: a launch that finds one is refused
+//! ([`SetAsideFailure::DriveFolderNotYours`]) until `SYSTEM` sets it aside by its handle,
+//! contents unopened (`heal.rs`, from the refresh task). Another lawyer's folder on the same
+//! volume has another name, so it never refuses this lawyer. It is made at each launch for the
+//! matter's own folder and checked again before each move into it; a launch that can't make it
+//! (a read-only drive, one that keeps no permissions, a link there) is refused
+//! ([`SetAsideFailure::DriveFolder`]). The record, the manifest and the lock stay in the data
+//! folder. The uninstaller and forget (`bookkeeping.rs`, `ntfs/forget.rs`) know only the data
+//! folder's set-aside, not these.
+//!
 //! A set-aside that can't happen refuses the launch with [`crate::Error::SetAside`], whose
-//! `at` names the item for the running page: an item on another volume than the data folder
-//! ([`SetAsideFailure::OtherVolume`]: nothing is copied), or one whose folder doesn't give the
-//! lawyer `FILE_DELETE_CHILD` (`Io(PermissionDenied)`). The name must then be moved or removed
-//! by hand.
+//! `at` names the item for the running page: an item a rename still can't move across volumes
+//! (a volume mounted on a folder inside the matter: [`SetAsideFailure::OtherVolume`], nothing
+//! is copied), or one whose folder doesn't give the lawyer `FILE_DELETE_CHILD`
+//! (`Io(PermissionDenied)`). The name must then be moved or removed by hand.
 //!
 //! Known limits:
 //! - The check compares file IDs only, so a nested protected item is caught when it is
@@ -100,11 +123,32 @@ use serde::{Deserialize, Serialize};
 /// so the uninstaller keeps it by this name, not by a copy of the string.
 pub const SET_ASIDE_DIR: &str = "set-aside";
 /// The set-aside's own bookkeeping in each matter's folder (`files.rs`): the record and the lock,
-/// which every launch leaves, and the manifest, which a pass that set something aside leaves and
+/// which every launch leaves, the notes folder's record, which a launch with a notes folder
+/// leaves, and the manifest, which a pass that set something aside leaves and
 /// a restore of every item empties. Public so the uninstaller counts a matter's folder holding
 /// only these as empty; `--remove` deletes them once the matter is forgotten (`bookkeeping.rs`),
 /// each only when its contents allow (a closed record, a manifest with nothing outstanding).
-pub const SET_ASIDE_BOOKKEEPING: [&str; 3] = ["record.json", "set-aside.lock", "manifest.json"];
+pub const SET_ASIDE_BOOKKEEPING: [&str; 4] = [
+    "record.json",
+    "set-aside.lock",
+    "manifest.json",
+    "notes-record.json",
+];
+/// The start of the name of a lawyer's set-aside folder at the root of a volume other than the
+/// data folder's ([`drive_folder_name`]): what is set aside from a matter on that volume goes
+/// there, since a rename can't cross volumes.
+pub const ITEMS_ROOT: &str = ".clauseo-set-aside";
+/// What follows a drive folder's own name once `SYSTEM` set it aside because another account
+/// made it (`heal.rs`): `<name>.squatted-<UTC second>-<8 random hex digits>`.
+#[cfg(any(windows, test))]
+pub(crate) const SQUATTED: &str = ".squatted-";
+
+/// The name of the set-aside folder the lawyer whose SID is `user` (its string form) has at the
+/// root of a volume other than the data folder's: `.clauseo-set-aside-<user>` ([`ITEMS_ROOT`]).
+#[cfg(any(windows, test))]
+pub(crate) fn drive_folder_name(user: &str) -> String {
+    format!("{ITEMS_ROOT}-{user}")
+}
 
 #[cfg(any(windows, test))]
 pub(crate) use bookkeeping::forget_bookkeeping;
@@ -124,14 +168,26 @@ mod fast;
 #[cfg(any(windows, test, feature = "test-support"))]
 mod files;
 #[cfg(any(windows, test))]
+pub(crate) mod heal;
+#[cfg(any(windows, test))]
+mod live;
+#[cfg(test)]
+pub(in crate::windows) use live::Moved;
+#[cfg(any(windows, test))]
+pub(in crate::windows) use live::{Ending, Failed, Hooks, Live, SCAN_BUDGET};
+#[cfg(any(windows, test))]
 mod moves;
 mod names;
 #[cfg(windows)]
 mod ntfs;
+#[cfg(any(windows, test))]
+mod repo_names;
 #[cfg(windows)]
 pub(in crate::windows) use ntfs::make_folders;
 #[cfg(any(windows, test))]
 mod run;
+#[cfg(any(windows, test))]
+pub(crate) use run::not_yours;
 #[cfg(any(windows, test))]
 mod scan;
 #[cfg(any(windows, test))]
@@ -163,7 +219,9 @@ pub struct Entry {
     /// Where it was, in the matter.
     #[serde(with = "names::path")]
     pub from: PathBuf,
-    /// Where it is now: `<data_dir>\sandbox\set-aside\<matter>\<folder>\<within...>\<name>`.
+    /// Where it is now: `<data_dir>\sandbox\set-aside\<matter>\<folder>\<within...>\<name>`, or
+    /// the same below the lawyer's set-aside folder on the item's own volume
+    /// ([`drive_folder_name`]) when the matter is on another volume than the data folder.
     #[serde(with = "names::path")]
     pub to: PathBuf,
     /// The pass's folder, named for its UTC time.
@@ -210,8 +268,10 @@ pub enum SetAsideFailure {
     /// The item isn't there any more, or the manifest no longer lists it.
     #[error("the item is gone")]
     Gone,
-    /// The matter is on another volume than the data folder, and an item can't be renamed
-    /// across volumes (`ERROR_NOT_SAME_DEVICE`); nothing is copied.
+    /// The item and the folder it would move to are on different volumes, and an item can't be
+    /// renamed across volumes (`ERROR_NOT_SAME_DEVICE`); nothing is copied. A matter on another
+    /// drive than the data folder has its own set-aside folder there, so this is a volume
+    /// mounted on a folder inside the matter, or one the volume roots don't tell apart.
     #[error("the matter is on another drive than Clauseo's data folder")]
     OtherVolume,
     /// A folder on the way is a link (a reparse point), or the item's final path isn't the one
@@ -224,7 +284,51 @@ pub enum SetAsideFailure {
     /// A file-system call failed, of this kind.
     #[error("a file-system call failed ({0})")]
     Io(io::ErrorKind),
+    /// A restore of a `.git`, of an item inside one, or of anything holding a `HEAD` or a
+    /// `commondir` (a bare repository's or a worktree's git folder) is refused: put back, it would
+    /// be the lawyer's, and git trusts a lawyer's git folder, so its hooks or `core.fsmonitor`
+    /// would run as the lawyer.
+    #[error("{}", GIT_REFUSAL)]
+    GitFolder,
+    /// The lawyer's set-aside folder on the matter's own volume ([`drive_folder_name`]) can't be
+    /// made or secured: the volume is read-only or keeps no ACLs, the folder is a link or not a
+    /// folder, or the volume's root can't be read.
+    #[error(
+        "Clauseo can't make a private folder on the matter's drive for what it moves out of \
+             the matter"
+    )]
+    DriveFolder,
+    /// The lawyer's set-aside folder on the matter's own volume ([`drive_folder_name`]) is there
+    /// and another account owns it (one that made it first, a pool user before the launch). It
+    /// is never taken back: `SYSTEM` sets it aside by its handle, unopened, and makes the
+    /// lawyer's afresh (`heal.rs`, run by the refresh task, [`crate::windows::refresh`]), and
+    /// the next launch goes on.
+    #[error(
+        "Clauseo's private folder on the matter's drive belongs to another account, so Clauseo \
+         won't use it until its system task moves it aside"
+    )]
+    DriveFolderNotYours,
+    /// The live watch moves a folder whole unchecked only when a pool user (the agent) owns it,
+    /// read from the handle the move renames (`run::Need::Pool`; an owner that can't be read
+    /// counts as the agent's); this one's owner is someone else's, so it stays where it is for
+    /// the check after the session.
+    #[error("the item isn't the agent's, so it stays where it is")]
+    NotTheAgents,
+    /// A restore of a link (a junction or a symbolic link), or of a folder holding one at any
+    /// depth, whose target, told by identity, leads outside the folder it was set aside from, or
+    /// can't be read, is refused: put back, it would lead git, or the lawyer's own tools,
+    /// outside the matter.
+    #[error("{}", LINK_REFUSAL)]
+    LinkOut,
 }
+
+/// [`SetAsideFailure::LinkOut`]'s words, for the lawyer.
+const LINK_REFUSAL: &str = "Clauseo won't put back a link that leads outside the matter: your \
+                            own tools would follow it out of the matter";
+
+/// [`SetAsideFailure::GitFolder`]'s words, for the lawyer.
+const GIT_REFUSAL: &str = "Clauseo won't put back a git folder or repository an agent made: your \
+                           own git tools would run code from it as you";
 
 /// The launch-time call, before `apply`. Scans the matter; when any session of the matter is
 /// open (running, or ended with no [`after_session`]), sets aside each protected name and link
@@ -244,7 +348,13 @@ pub fn before_launch(
     now: SystemTime,
 ) -> Result<Checked, crate::Error> {
     let root = policy.matter();
-    run::before_launch(&ntfs::Ntfs, root, data_dir, matter, session, running, now)
+    let checked = run::before_launch(&ntfs::Ntfs, root, data_dir, matter, session, running, now)
+        .map_err(run::Refused::into_error)?;
+    let Some(notes) = policy.notes() else {
+        return Ok(checked);
+    };
+    run::notes_before_launch(&ntfs::Ntfs, notes, data_dir, matter, session, running, now)
+        .map(|more| run::both(checked, more))
         .map_err(run::Refused::into_error)
 }
 
@@ -267,7 +377,21 @@ pub fn before_launch_checked(
         let fast = fast::before_launch_fast(&ntfs::Ntfs, root, data_dir, matter, session, &touched)
             .map_err(run::Refused::into_error)?;
         if let Some(checked) = fast {
-            return Ok(checked);
+            // The launch check covers the matter alone: the notes folder gets its full pass.
+            let Some(notes) = policy.notes() else {
+                return Ok(checked);
+            };
+            return run::notes_before_launch(
+                &ntfs::Ntfs,
+                notes,
+                data_dir,
+                matter,
+                session,
+                running,
+                now,
+            )
+            .map(|more| run::both(checked, more))
+            .map_err(run::Refused::into_error);
         }
     }
     before_launch(policy, data_dir, matter, session, running, now)
@@ -289,8 +413,16 @@ pub fn after_session(
     now: SystemTime,
 ) -> Result<Checked, crate::Error> {
     let root = policy.matter();
-    run::after_session(&ntfs::Ntfs, root, data_dir, matter, session, now)
-        .map_err(run::Refused::into_error)
+    let checked = run::after_session(&ntfs::Ntfs, root, data_dir, matter, session, now);
+    // The notes folder's pass runs whatever the matter's did.
+    let notes = policy
+        .notes()
+        .map(|notes| run::notes_after_session(&ntfs::Ntfs, notes, data_dir, matter, session, now))
+        .transpose();
+    match (checked, notes) {
+        (Ok(checked), Ok(notes)) => Ok(run::both(checked, notes.unwrap_or_default())),
+        (Err(refused), _) | (_, Err(refused)) => Err(refused.into_error()),
+    }
 }
 
 /// Moves the one item at `path` (the strict walk's child the lawyer can't open: the `DELETE`
@@ -327,10 +459,82 @@ pub fn list_set_aside(data_dir: &Path, matter: &MatterId) -> Result<Vec<Entry>, 
 /// then handed to the desktop user when a pool user the machine's record names owns it, as
 /// forget hands back a pool user's item, so a restored agent's `CLAUDE.md` comes back the
 /// lawyer's (S15 `PR4a2`); a hand-back that fails, or a record unreadable or empty, is logged,
-/// and the next launch hands it back before its deny.
+/// and the next launch hands it back before its deny. A `.git`, or an item inside one, is never
+/// put back ([`SetAsideFailure::GitFolder`]): handed back it would be the lawyer's, and git
+/// trusts a lawyer's `.git`. Nor is a `config` or `hooks` set aside from a folder a launch
+/// `commondir` named, nor a link leading out of the matter ([`SetAsideFailure::LinkOut`]).
 #[cfg(windows)]
 pub fn restore_set_aside(data_dir: &Path, entry: &Entry) -> Result<(), SetAsideFailure> {
     run::restore(&ntfs::Ntfs, data_dir, entry).map_err(|refused| refused.failure)
+}
+
+/// The outer runner's live watch over one watched folder (`runner/git_watch.rs`): each git
+/// repository or outbound link made during the session moved aside at once, by the
+/// after-session pass's own move (`live.rs`).
+#[cfg(windows)]
+pub(in crate::windows) struct GitGuard(live::Watched);
+
+#[cfg(windows)]
+impl GitGuard {
+    /// The watch over `matter`'s folder `root`, knowing the git parts its record holds.
+    pub(in crate::windows) fn new(root: &Path, data_dir: &Path, matter: &MatterId) -> GitGuard {
+        GitGuard(live::Watched::new(&ntfs::Ntfs, root, data_dir, matter))
+    }
+
+    /// The watch over `matter`'s notes folder `root`, knowing the git parts the notes record
+    /// holds (the launch pass's, [`before_launch`]); what it moves goes to `matter`'s set-aside.
+    pub(in crate::windows) fn notes(root: &Path, data_dir: &Path, matter: &MatterId) -> GitGuard {
+        GitGuard(live::Watched::new_notes(
+            &ntfs::Ntfs,
+            root,
+            data_dir,
+            matter,
+        ))
+    }
+
+    /// The folder watched.
+    pub(in crate::windows) fn root(&self) -> &Path {
+        self.0.root()
+    }
+
+    /// Checks the paths the watch reported made or renamed, relative to the root; `folders`
+    /// are those reported as folders renamed or moved in, each counted gone when gone by the
+    /// check; `fresh`, those made just now, each listed unpaired when gone by the check.
+    pub(in crate::windows) fn changed(
+        &self,
+        paths: &[PathBuf],
+        (folders, fresh): (&[PathBuf], &[PathBuf]),
+        now: SystemTime,
+        hooks: &impl Hooks,
+    ) -> Live {
+        self.0
+            .changed_with_folders(&ntfs::Ntfs, paths, (folders, fresh), now, hooks)
+    }
+
+    /// Checks the paths the watch reported turned into reparse points, relative to the root.
+    pub(in crate::windows) fn relinked(
+        &self,
+        paths: &[PathBuf],
+        now: SystemTime,
+        hooks: &impl Hooks,
+    ) -> Live {
+        self.0.relinked(&ntfs::Ntfs, paths, now, hooks)
+    }
+
+    /// Scans the whole folder for what the watch moves.
+    pub(in crate::windows) fn rescan(&self, now: SystemTime, hooks: &impl Hooks) -> Live {
+        self.0.rescan(&ntfs::Ntfs, now, hooks)
+    }
+
+    /// Tries again what a check couldn't move.
+    pub(in crate::windows) fn retry(
+        &self,
+        failed: &[Failed],
+        now: SystemTime,
+        hooks: &impl Hooks,
+    ) -> Live {
+        self.0.retry(&ntfs::Ntfs, failed, now, hooks)
+    }
 }
 
 #[cfg(test)]
