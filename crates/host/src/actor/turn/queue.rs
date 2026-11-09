@@ -14,6 +14,8 @@
 //! ([`restore`]).
 
 mod commands;
+#[cfg(feature = "test-support")]
+pub(in crate::actor::turn) mod dump;
 mod held;
 mod hold;
 mod install;

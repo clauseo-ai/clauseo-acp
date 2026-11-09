@@ -32,7 +32,12 @@ use crate::agent::launch_refusals::{KEYS_WAIT, WAITED_OUT};
 use crate::agent::login_link::{LoginLink, LoginSplit, Seen, StopFor};
 use crate::error::Error;
 
+#[cfg(feature = "test-support")]
+mod state_dump;
 mod stops;
+
+#[cfg(feature = "test-support")]
+pub(crate) use state_dump::state_for_test;
 
 pub(super) use stops::{StopWaits, agent_ended, on_timer as stop_timer};
 
