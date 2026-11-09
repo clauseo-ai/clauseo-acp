@@ -572,6 +572,12 @@ pub fn hard_link(original: &Path, link: &Path) -> io::Result<()> {
     crate::write::hard_link(original, link)
 }
 
+/// Sets `path`'s mode bits (Unix): a test's unreadable file.
+#[cfg(unix)]
+pub fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
+    crate::write::set_mode(path, mode)
+}
+
 /// Makes a symbolic link at `link` to `target` (Unix).
 #[cfg(unix)]
 pub fn symlink(target: &Path, link: &Path) -> io::Result<()> {

@@ -35,8 +35,11 @@ fn walk(root: &Path, at: &Path, into: &mut BTreeMap<PathBuf, Entry>) {
             walk(root, &entry.unwrap().path(), into);
         }
     } else {
-        let hash = Sha256::digest(std::fs::read(at).unwrap()).to_vec();
-        into.insert(rel, ("file", meta.len(), modified, Some(hash)));
+        // An unreadable file (a test's mode 0) keeps its kind, size and mtime only.
+        let hash = std::fs::read(at)
+            .ok()
+            .map(|bytes| Sha256::digest(bytes).to_vec());
+        into.insert(rel, ("file", meta.len(), modified, hash));
     }
 }
 
@@ -77,7 +80,7 @@ fn detect_unchanged(fx: &Fixture, agent: &AgentId) -> SigninState {
 fn claude_found() -> SigninState {
     SigninState::LoginFound {
         from: LoginFrom::ClaudeCode,
-        email: Some("lawyer@example.com".to_owned()),
+        email: None,
     }
 }
 
@@ -136,6 +139,48 @@ fn codex_detection_with_a_login_file_writes_nothing_in_the_lawyer_s_home() {
             "{:?}",
             run.args
         );
+    }
+}
+
+/// Detection never opens the lawyer's `~/.claude.json` or `~/.claude/settings.json` (they can
+/// hold a key): with both made unreadable (mode 0), Claude's detection still finds the login,
+/// with no email, and neither file's mode, size or mtime changes. That Clauseo's code never
+/// names either file is `tests/credential_names.rs`'s scan; that the real CLI does not open them
+/// under detection's environment was checked with `strace` (the PR's evidence).
+#[cfg(unix)]
+#[test]
+fn claude_detection_opens_neither_the_global_config_nor_the_settings() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let fx = Fixture::new("nowrite-claude-unreadable", "ok-after:0");
+    let home = fx.user_home();
+    write_file(
+        &home.join(".claude/fake-signin-marker"),
+        br#"{"authMethod":"claude.ai","email":"lawyer@example.com"}"#,
+    )
+    .unwrap();
+    let files = [
+        home.join(".claude.json"),
+        home.join(".claude/settings.json"),
+    ];
+    for file in &files {
+        write_file(file, br#"{"primaryApiKey":"not-a-key"}"#).unwrap();
+        clauseo_agents::testing::set_mode(file, 0).unwrap();
+    }
+    let seen = || {
+        files.clone().map(|file| {
+            let meta = std::fs::symlink_metadata(file).unwrap();
+            (
+                meta.permissions().mode() & 0o7777,
+                meta.len(),
+                meta.modified().ok(),
+            )
+        })
+    };
+    let before = seen();
+    assert_eq!(detect_unchanged(&fx, &claude()), claude_found());
+    assert_eq!(seen(), before);
+    for file in &files {
+        clauseo_agents::testing::set_mode(file, 0o600).unwrap();
     }
 }
 

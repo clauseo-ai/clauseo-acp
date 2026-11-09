@@ -5,8 +5,9 @@
 //! **The status check** (`check_status`, at start and when R20 asks):
 //! - a recorded `reused` (for Codex also "a missing file with a home `auth.json`") is checked
 //!   first: "At a later start, a recorded `reused` whose login still holds is `Reused` with no
-//!   question." Claude holds when detection still finds a `claude.ai` login with the accepted
-//!   email (else `ReusedChanged`, or `ReusedSignedOut` when it is signed out) and the status
+//!   question." Claude holds when detection still finds a `claude.ai` login (with the accepted
+//!   email when detection gives one, which it no longer does; else `ReusedChanged`, or
+//!   `ReusedSignedOut` when it is signed out) and the status
 //!   under the session's environment is signed in (else the run-time fallback). Codex holds while
 //!   the two names are one file (`reuse::codex_link_holds`; else `CodexLinkSplit`, or
 //!   `ReusedSignedOut` when the lawyer's file is gone) and Codex's own status, through its CLI,
@@ -124,8 +125,10 @@ async fn check_claude<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<Sign
         marker::read_source(&job.config.data_dir, &job.ticket.agent)
     {
         let found = detect::claude(job, cancel).await?;
+        // Detection gives no email now (`detect`'s docs), so a recorded one (from before) is
+        // compared only against an email detection did give.
         return match &found.state {
-            SigninState::LoginFound { email: now, .. } if *now == email => {
+            SigninState::LoginFound { email: now, .. } if now.is_none() || *now == email => {
                 claude_session(job, email, found, false).await
             }
             SigninState::LoginFound { .. } => Some(stop(job, Some(Found::ReusedChanged)).await),
@@ -173,7 +176,7 @@ async fn claude_session<T: Timer + Send + Sync>(
         }
     }
     let plan = session.plan.or(found.identity.plan);
-    Some(reused_signed_in(job, email, plan))
+    Some(reused_signed_in(job, session.email.or(email), plan))
 }
 
 async fn check_codex<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Option<SigninState> {

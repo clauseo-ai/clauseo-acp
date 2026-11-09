@@ -1,11 +1,14 @@
 //! Detection (the brief, "Detection"): whether the lawyer already has a Claude Code or Codex
 //! login. It never writes into the lawyer's own Claude or Codex config.
 //!
-//! - Claude: `--cli auth status --json`, with `RunKind::Detect`'s environment: the run's own
-//!   config folder (`super::scratch`, `CLAUDE_CONFIG_DIR`, seeded with copies of the lawyer's
-//!   global config and settings) and `CLAUDE_SECURESTORAGE_CONFIG_DIR=""`, so the login is read
-//!   from the lawyer's default store and everything the CLI writes lands in that folder, which
-//!   goes after the run. `HOME` is the lawyer's; cwd is an empty Clauseo folder, so no project
+//! - Claude: `--cli auth status --json`, with `RunKind::Detect`'s environment: the run's own,
+//!   empty config folder (`super::scratch`, `CLAUDE_CONFIG_DIR`) and
+//!   `CLAUDE_SECURESTORAGE_CONFIG_DIR=""`, so the login is read from the lawyer's default store
+//!   and everything the CLI writes lands in that folder, which goes after the run. Clauseo never
+//!   opens the lawyer's global config or settings (they can hold a key), so the CLI does not see
+//!   them either: `LoginFound` has no email (the email lives in the global config; "Use it"'s
+//!   status under the reused environment gives what it can), and a login set up in the settings
+//!   is not seen. `HOME` is the lawyer's; cwd is an empty Clauseo folder, so no project
 //!   settings apply: `<data_dir>/agents/signin/detect`. "Exit 0 with `authMethod` `claude.ai` is
 //!   reusable. Any other signed-in `authMethod` … is a login set up in the lawyer's
 //!   `~/.claude/settings.json`: not reusable, `found: ClaudeSettings`"
@@ -39,7 +42,8 @@ use crate::status::{Identity, claude_detection, codex_detection};
 pub(crate) struct Detected {
     /// `LoginFound`, or `SignedOut` with what was seen.
     pub(crate) state: SigninState,
-    /// The account behind a reusable login (empty otherwise, and always for Codex).
+    /// The plan behind a reusable Claude login (empty otherwise, and always for Codex); never an
+    /// email.
     pub(crate) identity: Identity,
 }
 
@@ -65,18 +69,21 @@ pub(crate) async fn claude<T: Timer + Send + Sync>(
     // Dropped at the end of this function, or with its future on a timeout or cancel: the
     // folder goes then.
     let scratch = Scratch::create(&job.config.data_dir, &job.ticket.agent, job.now()).ok()?;
-    if let Some(lawyer) = job.config.signin.lawyer_home() {
-        scratch.seed(&lawyer);
-    }
     let kind = RunKind::Detect {
         config: scratch.path(),
     };
     let (code, parsed) = claude::status_run(job, cancel, kind, &folder).await?;
     drop(scratch);
+    let parsed = parsed.map(|mut parsed| {
+        // Never an email: the CLI keeps it in the lawyer's global config, which this run does
+        // not see; whatever a CLI printed here would come from somewhere else.
+        parsed.email = None;
+        parsed
+    });
     let state = claude_detection(code, parsed.as_ref());
     let identity = match (&state, parsed) {
         (SigninState::LoginFound { .. }, Some(parsed)) => Identity {
-            email: parsed.email,
+            email: None,
             plan: parsed.subscription_type,
         },
         _ => Identity::default(),

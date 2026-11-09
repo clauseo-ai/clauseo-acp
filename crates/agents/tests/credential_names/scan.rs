@@ -8,6 +8,16 @@ const CLAUDE_FILE: &str = concat!(".credentials", ".json");
 /// Codex's login file, named only by `signin/reuse.rs`.
 const CODEX_FILE: &str = concat!("auth", ".json");
 
+/// Claude Code's own config files in the lawyer's home, never named: the global config
+/// (`~/.claude.json`, and the legacy `~/.claude/.config.json`) and the user settings
+/// (`~/.claude/settings.json`). They can hold an API key or a key helper, and detection runs the
+/// CLI with its own empty config folder so that neither Clauseo nor the CLI opens them.
+const CLAUDE_CONFIGS: [&str; 3] = [
+    concat!(".claude", ".json"),
+    concat!(".config", ".json"),
+    concat!("settings", ".json"),
+];
+
 /// The one file that may name [`CODEX_FILE`].
 const REUSE: &str = "signin/reuse.rs";
 
@@ -245,6 +255,12 @@ fn violations(rel: &str, code: &str) -> Vec<String> {
         if line.contains(CLAUDE_FILE) {
             found.push(format!("{at} names Claude's credential file"));
         }
+        for config in CLAUDE_CONFIGS
+            .iter()
+            .filter(|config| line.contains(*config))
+        {
+            found.push(format!("{at} names Claude's config file {config}"));
+        }
         if rel != REUSE && line.contains(CODEX_FILE) {
             found.push(format!("{at} names Codex's login file outside {REUSE}"));
         }
@@ -443,4 +459,18 @@ fn reuse_may_name_the_codex_file_but_never_open_it() {
         violations(REUSE, &code_only("// File::open is never called")),
         Vec::<String>::new()
     );
+}
+
+#[test]
+fn the_scan_catches_claude_s_config_files() {
+    for config in CLAUDE_CONFIGS {
+        for rel in ["signin/detect.rs", "signin/scratch.rs", "signin/new.rs"] {
+            let code = format!("fn f(h: &Path) -> PathBuf {{ h.join(\"{config}\") }}");
+            assert_eq!(probe(rel, &code).len(), 1, "{rel}: {config}");
+            assert_eq!(
+                probe(rel, &format!("/// see {config}\nfn f() {{}}")),
+                [] as [String; 0]
+            );
+        }
+    }
 }

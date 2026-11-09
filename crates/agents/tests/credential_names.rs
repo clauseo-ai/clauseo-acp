@@ -1,6 +1,8 @@
 //! Done-when 2 of S18: Clauseo never names an agent's credential file in its code.
 //!
-//! The test fails if any file under `crates/agents/src` names Claude's credential file, or names
+//! The test fails if any file under `crates/agents/src` names Claude's credential file or one of
+//! Claude Code's config files in the lawyer's home (`.claude.json`, `.config.json`,
+//! `settings.json`, which can hold a key), or names
 //! Codex's login file outside `src/signin/reuse.rs`, anywhere but in a comment (string literals
 //! count); if a literal spells a dot with an escape, or an `"auth"` literal or a `format!`
 //! holding `auth` has `json` or `with_extension` beside it (the name built in pieces); and if
