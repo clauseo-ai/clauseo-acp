@@ -64,7 +64,8 @@ pub(in super::super) fn stop(actor: &mut Actor, thread: ThreadId) {
 /// Stops `thread`'s attached agent for its pending mode switch (`forced_mode::switch`), at a
 /// turn boundary: the switch, then any work waiting, go to the agent started after its `Ended`,
 /// which launches under the new mode's policy and resumes the session (the matter move's
-/// restart, `restart_if_moved`); its detach logs `Restarting`. A launch's policy never widens in place.
+/// restart, `restart_if_moved`); its detach logs `Restarting`. A launch's policy never widens
+/// in place.
 pub(in super::super) fn restart_for_switch(actor: &mut Actor, thread: ThreadId) {
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
