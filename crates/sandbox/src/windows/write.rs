@@ -353,9 +353,19 @@ pub(crate) fn write_atomic_with(
 /// stays at or below `cap` unless `bytes` alone is bigger. Opened for each write and closed
 /// after, so runners writing the same file at once each append whole lines and none keeps it
 /// open (std opens with every share mode, so another's rename goes through).
+///
+/// `path` is checked first as the run folder's other files are ([`check_owned_file`]: another
+/// owner's file taken back). What it refuses (a link or a second hard link left from before the
+/// folder was secured; a folder stays) is removed, the name alone, never what it leads to;
+/// then the file is opened as itself ([`open_log`]), never through a link.
 #[cfg(any(windows, test))]
 pub(crate) fn append_capped(path: &Path, rotated: &Path, bytes: &[u8], cap: u64) -> io::Result<()> {
-    let open = || OpenOptions::new().create(true).append(true).open(path);
+    let open = || {
+        if check_owned_file(path).is_err() && !std::fs::symlink_metadata(path)?.is_dir() {
+            std::fs::remove_file(path)?;
+        }
+        open_log(path)
+    };
     let mut file = open()?;
     let len = file.metadata()?.len();
     let adding = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
@@ -365,6 +375,43 @@ pub(crate) fn append_capped(path: &Path, rotated: &Path, bytes: &[u8], cap: u64)
         file = open()?;
     }
     file.write_all(bytes)
+}
+
+/// The log file `path` opened to append, made if missing, as itself
+/// (`FILE_FLAG_OPEN_REPARSE_POINT` on Windows, `O_NOFOLLOW` elsewhere, where only tests run),
+/// and refused unless it is a file and no reparse point.
+#[cfg(any(windows, test))]
+fn open_log(path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        options.custom_flags(windows::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT.0);
+    }
+    #[cfg(not(windows))]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        let nofollow = rustix::fs::OFlags::NOFOLLOW.bits();
+        options.custom_flags(i32::try_from(nofollow).unwrap_or(i32::MAX));
+    }
+    let file = options.open(path)?;
+    let meta = file.metadata()?;
+    #[cfg(windows)]
+    let reparse = {
+        use std::os::windows::fs::MetadataExt as _;
+        let flag = windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT.0;
+        meta.file_attributes() & flag != 0
+    };
+    #[cfg(not(windows))]
+    let reparse = false;
+    if reparse || !meta.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "the log file is a link or not a file",
+        ));
+    }
+    Ok(file)
 }
 
 #[cfg(test)]

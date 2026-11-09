@@ -85,3 +85,23 @@ fn a_long_line_is_cut_at_a_char_boundary() {
     long.push(b'b');
     assert_eq!(line_end(&long), LINE_MAX - 1);
 }
+
+/// A link or a second hard link left at `runner.log` is removed, the name alone: what it leads
+/// to is never written, and the line goes to a new file of the runner's own.
+#[test]
+fn a_planted_link_at_the_log_is_removed_never_followed() {
+    let temp = TempDir::new("runner-log-planted");
+    let elsewhere = temp.file("elsewhere.txt", "untouched");
+    temp.hard_link(LOG_FILE, &elsewhere);
+    let text = logged(&temp, || tracing::warn!("a warning"));
+    assert!(text.ends_with("a warning\n"), "{text}");
+    assert_eq!(std::fs::read_to_string(&elsewhere).unwrap(), "untouched");
+    #[cfg(unix)]
+    {
+        crate::test_support::remove(&temp.path().join(LOG_FILE));
+        temp.symlink(LOG_FILE, &elsewhere);
+        let text = logged(&temp, || tracing::warn!("a second warning"));
+        assert!(text.ends_with("a second warning\n"), "{text}");
+        assert_eq!(std::fs::read_to_string(&elsewhere).unwrap(), "untouched");
+    }
+}
