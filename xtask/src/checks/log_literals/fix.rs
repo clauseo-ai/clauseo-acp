@@ -10,6 +10,10 @@ pub(crate) enum Fix {
     Literal,
     /// A `.rs` file syn cannot parse.
     Unparsable,
+    /// A `use` that renames `warn`, `error` or `event`.
+    Alias,
+    /// A `macro_rules!` whose body calls `warn!`, `error!` or `event!`.
+    Wrapper,
 }
 
 impl fmt::Display for Fix {
@@ -25,6 +29,16 @@ impl fmt::Display for Fix {
                 f,
                 "make the file valid Rust: log-literals parses it to find its warn! and error! \
                  calls"
+            ),
+            Fix::Alias => write!(
+                f,
+                "import the macro by its own name: log-literals finds warn!, error! and event! by \
+                 name and can't follow a rename"
+            ),
+            Fix::Wrapper => write!(
+                f,
+                "call warn!, error! or event! directly: log-literals reads each call's message \
+                 and can't follow one a macro builds"
             ),
         }
     }

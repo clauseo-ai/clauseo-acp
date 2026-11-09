@@ -71,3 +71,45 @@ pub(super) fn unparsable() -> Repo {
         )],
     )
 }
+
+/// A repo whose `runner/outer.rs` is `text`.
+fn outer(case: &str, text: &str) -> Repo {
+    git_repo(
+        case,
+        &[("crates/sandbox/src/windows/runner/outer.rs", text)],
+    )
+}
+
+pub(super) fn event_at_warn() -> Repo {
+    let text =
+        "fn f(name: &str) {\n    tracing::event!(tracing::Level::WARN, \"{name} went\");\n}\n";
+    outer("event-at-warn", text)
+}
+
+pub(super) fn message_field() -> Repo {
+    let text = "fn f(name: &str) {\n    tracing::error!(code = 5, message = name);\n}\n";
+    outer("message-field", text)
+}
+
+pub(super) fn renamed_macro() -> Repo {
+    outer("renamed-macro", "use tracing::{info, warn as say};\n")
+}
+
+pub(super) fn wrapping_macro() -> Repo {
+    let text = "macro_rules! loud {\n    ($($t:tt)*) => { tracing::error!($($t)*) };\n}\n";
+    outer("wrapping-macro", text)
+}
+
+pub(super) fn setup_record_files() -> Repo {
+    let formatted = "fn f(name: &str) {\n    tracing::warn!(\"{name}\");\n}\n";
+    git_repo(
+        "setup-record-files",
+        &[
+            (
+                "crates/sandbox/src/windows/setup/record_write.rs",
+                formatted,
+            ),
+            ("crates/sandbox/src/windows/setup/adopt.rs", formatted),
+        ],
+    )
+}

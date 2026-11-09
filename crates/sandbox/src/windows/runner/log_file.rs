@@ -22,8 +22,9 @@
 //!   (`%error`, `?reason`, a string field by any other name) is written as `name=<dropped>`: an
 //!   error's text can hold a path. A message is written as it is: `tracing` hands a literal and
 //!   a formatted message over alike, so the `log-literals` xtask check keeps every `warn!` and
-//!   `error!` under `windows/` (but `windows/setup/`) a literal with no format argument. One
-//!   holding `\` or `/` is withheld too, as it might be a path.
+//!   `error!` under `windows/` (of `windows/setup/`, the record files the outer reads) a literal
+//!   with no format argument or `message` field, and fails a rename or wrapping macro of them.
+//!   One holding `\` or `/` is withheld too, as it might be a path.
 
 use std::fmt;
 use std::io;

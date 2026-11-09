@@ -1725,9 +1725,11 @@ leaves that profile, both naming the part.
   so the two hold 2 MB at most, and a line is cut at 8 KB; a rotation that fails (a viewer
   holding `runner.1.log`) empties `runner.log` and tries again at the next rotation. It never
   holds matter content, a path in the matter, a name the agent chose or a secret: a message is
-  kept only as a literal, and the `log-literals` xtask check fails any `warn!` or `error!`
-  under `crates/sandbox/src/windows/` (but `windows/setup/` and tests) whose message is
-  formatted, since the formatter can't tell a literal from a formatted message; one holding `\`
+  kept only as a literal, and the `log-literals` xtask check fails any `warn!`, `error!` or
+  `event!` at those levels under `crates/sandbox/src/windows/` (of `windows/setup/`, only the
+  record files the outer reads; tests aside) whose message is formatted or a `message` field,
+  and any `use` renaming those macros or `macro_rules!` calling them, since the formatter can't
+  tell a literal from a formatted message; one holding `\`
   or `/` is withheld too. Numbers and `bool`s are kept; a string field only when its name is
   `cause`, `code`, `kind` or `what` (the code's own words) and it holds no path separator;
   any other field, an error's text among them, is written `name=<dropped>`.

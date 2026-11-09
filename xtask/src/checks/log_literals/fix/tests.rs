@@ -14,11 +14,19 @@ fix_texts! {
         Fix::Unparsable => {
             "make the file valid Rust: log-literals parses it to find its warn! and error! calls"
         },
+        Fix::Alias => {
+            "import the macro by its own name: log-literals finds warn!, error! and event! by \
+             name and can't follow a rename"
+        },
+        Fix::Wrapper => {
+            "call warn!, error! or event! directly: log-literals reads each call's message and \
+             can't follow one a macro builds"
+        },
     }
 }
 
 #[test]
 fn every_fix_prints_its_pinned_text() {
-    let samples = [Fix::Literal, Fix::Unparsable];
+    let samples = [Fix::Literal, Fix::Unparsable, Fix::Alias, Fix::Wrapper];
     assert_texts(&samples, pinned, ARMS);
 }

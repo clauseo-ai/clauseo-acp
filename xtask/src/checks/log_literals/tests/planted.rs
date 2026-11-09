@@ -34,4 +34,34 @@ crate::checks::planted::cases! {
         "syn cannot parse this file: expected an expression",
         Fix::Unparsable,
     )], inspects 1 => super::repos::unparsable,
+    /// An `event!` at a level runner.log keeps is read as `warn!` is.
+    event_at_warn: Fails[fails(
+        "crates/sandbox/src/windows/runner/outer.rs:2",
+        "event! formats its message; runner.log keeps only literals",
+        Fix::Literal,
+    )], inspects 1 => super::repos::event_at_warn,
+    /// A `message = ...` field is the message too.
+    message_field: Fails[fails(
+        "crates/sandbox/src/windows/runner/outer.rs:2",
+        "error! sets its message as a field; runner.log keeps only literals",
+        Fix::Literal,
+    )], inspects 1 => super::repos::message_field,
+    /// A `use` renaming `warn` fails where it is written.
+    renamed_macro: Fails[fails(
+        "crates/sandbox/src/windows/runner/outer.rs:1",
+        "`warn` is renamed `say`, which log-literals can't follow",
+        Fix::Alias,
+    )], inspects 1 => super::repos::renamed_macro,
+    /// A `macro_rules!` wrapping `error!` fails where it is written.
+    wrapping_macro: Fails[fails(
+        "crates/sandbox/src/windows/runner/outer.rs:1",
+        "a macro_rules! body calls error!, which log-literals can't follow",
+        Fix::Wrapper,
+    )], inspects 1 => super::repos::wrapping_macro,
+    /// The setup files the outer calls are read; the rest of `windows/setup/` is not.
+    setup_record_files: Fails[fails(
+        "crates/sandbox/src/windows/setup/record_write.rs:2",
+        "warn! formats its message; runner.log keeps only literals",
+        Fix::Literal,
+    )], inspects 1 => super::repos::setup_record_files,
 }
