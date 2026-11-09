@@ -25,6 +25,8 @@ pub(crate) use unix::{Ask, Root, Tree, Watch, now, prepare, signal, watch};
 pub(crate) use unix::{kill_pid, running, started_before_now};
 
 #[cfg(windows)]
+mod win32;
+#[cfg(windows)]
 mod windows;
 #[cfg(windows)]
 pub(crate) use windows::watch::{Watch, watch};

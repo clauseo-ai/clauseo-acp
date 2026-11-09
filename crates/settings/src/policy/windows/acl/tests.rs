@@ -282,3 +282,20 @@ fn the_folder_the_installer_creates_is_trusted_and_its_files_inherit_a_trusted_a
         None
     );
 }
+
+#[test]
+fn a_win32_error_keeps_its_win32_code_and_others_keep_their_hresult() {
+    use windows::core::{Error, HRESULT};
+
+    let denied = super::win32_io_error(Error::from_hresult(HRESULT::from_win32(5)));
+    assert_eq!(denied.raw_os_error(), Some(5));
+    assert_eq!(denied.kind(), std::io::ErrorKind::PermissionDenied);
+
+    let missing = super::win32_io_error(Error::from_hresult(HRESULT::from_win32(2)));
+    assert_eq!(missing.raw_os_error(), Some(2));
+    assert_eq!(missing.kind(), std::io::ErrorKind::NotFound);
+
+    let e_fail = HRESULT(0x8000_4005_u32.cast_signed());
+    let other = super::win32_io_error(Error::from_hresult(e_fail));
+    assert_eq!(other.raw_os_error(), Some(e_fail.0));
+}
