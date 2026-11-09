@@ -403,6 +403,19 @@ set-up held its lock; the next launch asks again.
 See [section 10](#10-if-windows-security-removed-clauseos-set-up-program): what the installers
 do when `clauseo-sandbox-setup.exe` is gone, and how to get it back and check it.
 
+### Crash dumps of the Windows sandbox
+
+Clauseo turns Windows Error Reporting off for its sandbox users and makes their crashed processes
+end without a report ([decision 0049](decisions/0049-windows-sandbox-tier-b.md), "Crash reporting
+(WER)"). A machine-wide `LocalDumps` key (`HKLM\SOFTWARE\Microsoft\Windows\Windows Error
+Reporting\LocalDumps`) still applies to them, because Clauseo doesn't change machine-wide WER
+settings. With it set, a crash that skips the job's limit (a fastfail) can still leave a memory dump
+of the sandboxed agent, which may hold matter text, in the folder the key names (by default a
+`%LOCALAPPDATA%\CrashDumps`: the sandbox user's, or the signed-in user's when WER runs as them). If
+your SIEM or crash collection gathers those dumps, treat a dump from a sandbox user (`ClauseoSb01`
+to `ClauseoSb32`, members of `ClauseoSandboxUsers`) as matter data, or leave those users out of
+`LocalDumps`.
+
 ## 2. Signing
 
 - **Windows: unsigned for the beta.** There is no code-signing certificate yet; one comes once
