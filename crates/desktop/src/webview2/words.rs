@@ -76,15 +76,14 @@ pub(super) const MISSING: Words = Words {
     close: "Close",
 };
 
-/// The runtime is older than the minimum. Its action button ("Update `WebView2`", the same
-/// Microsoft page as Download) hangs on the VM's UAC check, which decides whether it stays. To
-/// remove it, change `action` to `None` and the content line, which names the button, to one
-/// without it. Nothing else changes: the dialog then shows only Close.
+/// The runtime is older than the minimum. No action button, only Close: on a machine-wide
+/// runtime, Microsoft's bootstrapper updates nothing for a standard user ("already installed for
+/// the system", 0x80040828, the Windows 11 VM, 2026-11-09), and Windows updates it by itself.
 pub(super) const TOO_OLD: Words = Words {
     title: "Clauseo",
     instruction: "Clauseo needs a newer Microsoft Edge WebView2",
-    content: "Windows updates it by itself. You can also update it now.",
+    content: "Windows updates it by itself.",
     footer: "Open Clauseo again once it's updated.",
-    action: Some("Update WebView2"),
+    action: None,
     close: "Close",
 };
