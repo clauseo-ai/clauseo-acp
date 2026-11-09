@@ -10,6 +10,7 @@ use clauseo_protocol::MatterId;
 use super::FolderOwner;
 use crate::windows::apply::Surroundings;
 use crate::windows::ledger::Ledger;
+use crate::windows::machine_launch::LaunchRemoved;
 use crate::windows::pool::MachineRecord;
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::setup::{MachineError, ProfileDir};
@@ -50,6 +51,10 @@ pub trait Removal {
     /// (S15 PR7, `wfp::remove`); what is already gone counts as removed. A WFP failure is the
     /// `Err`; `Some` names a firewall failure, which isn't fatal.
     fn remove_network(&mut self, owner: &Sid) -> Result<Option<String>, MachineError>;
+    /// Takes the COM launch deny for `group` off `MachineLaunchRestriction`, putting the
+    /// backup back when the value is what Clauseo wrote (`machine_launch::remove`), elevated,
+    /// not as the owner; what is gone counts as removed.
+    fn remove_launch_deny(&mut self, group: &Sid) -> Result<LaunchRemoved, MachineError>;
     /// The name of the account whose SID is `sid`, if one exists.
     fn account_name(&mut self, sid: &Sid) -> Result<Option<String>, MachineError>;
     /// The profile Windows lists for `sid` (`ProfileList`), if any.

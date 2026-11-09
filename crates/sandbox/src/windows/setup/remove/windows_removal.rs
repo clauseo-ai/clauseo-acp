@@ -48,6 +48,7 @@ use crate::windows::acl::object::Object;
 use crate::windows::acl_plan::in_folder;
 use crate::windows::apply::Surroundings;
 use crate::windows::ledger::{self, LEDGER_FILE, Ledger, ledger_path};
+use crate::windows::machine_launch::{self, LaunchRemoved, os::WindowsLaunchStore};
 use crate::windows::matters::SANDBOX_DIR;
 use crate::windows::pool::MachineRecord;
 use crate::windows::private_dir::resolve_folder;
@@ -267,6 +268,16 @@ impl Removal for WindowsRemoval {
             tracing::warn!(%cause, "the sandbox's firewall rules couldn't be removed");
         }
         Ok(removed.firewall.err())
+    }
+
+    fn remove_launch_deny(&mut self, group: &Sid) -> Result<LaunchRemoved, MachineError> {
+        // Elevated, never as the owner: the value is the machine's.
+        if !self.names.launch_deny {
+            return Ok(LaunchRemoved::Nothing);
+        }
+        let mut store = WindowsLaunchStore::new(&self.names.record_key);
+        machine_launch::remove(&mut store, group)
+            .map_err(|why| MachineError::Other(format!("the COM launch deny: {why}")))
     }
 
     fn account_name(&mut self, sid: &Sid) -> Result<Option<String>, MachineError> {

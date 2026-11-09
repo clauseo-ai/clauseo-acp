@@ -46,11 +46,12 @@ fn a_failure_at_each_step_rolls_back_to_the_machine_before() {
         .position(|c| c.starts_with("write_record"))
         .unwrap();
     for (at, call) in calls.iter().enumerate() {
-        // The lock has its own test; the journal never fails the set-up.
+        // The lock has its own test; the journal and the COM launch deny never fail the set-up.
         if call == "lock"
             || call == "unlock"
             || call.starts_with("journal")
             || call.starts_with("grow")
+            || call.starts_with("launch_deny")
         {
             continue;
         }
@@ -103,6 +104,13 @@ fn a_failure_at_each_step_rolls_back_to_the_machine_before() {
         // deny is left.
         if calls[..at].iter().any(|c| c == "create_group") {
             assert!(rest.contains(&"delete_group 1000"), "{call}: {rest:?}");
+        }
+        // The COM launch deny, once applied, comes off just before the group goes.
+        let denied = calls[..at].iter().any(|c| c == "launch_deny 1000");
+        let removed = rest.iter().position(|c| *c == "launch_deny_remove 1000");
+        assert_eq!(removed.is_some(), denied, "{call}: {rest:?}");
+        if let Some(removed) = removed {
+            assert_eq!(rest.get(removed + 1), Some(&"delete_group 1000"), "{call}");
         }
         assert!(
             acl.aces

@@ -2365,6 +2365,119 @@ pub struct Progress { pub walked: u64, pub done: bool, pub failed: Option<Arc<Er
   group's members needs an administrator, so the design (for example static slot groups made at
   set-up) comes to the orchestrator before that PR.
 
+### COM launch restriction
+
+Pool users reach WSL through out-of-process COM: `wsl.exe`, `wslapi.dll`, `\\wsl$` and a direct
+`CoCreateInstance` all activate a class served by `WSLService` (or the inbox `LxssManager`). The
+per-`AppID` `LaunchPermission` deny (the WSL deny, PR #710) depends on WSL's `AppID` keys, and
+an `msiexec` repair deletes and rewrites those keys over about 15 s. So set-up also denies the pool
+group in the machine-wide limit, `HKLM\SOFTWARE\Microsoft\Ole\MachineLaunchRestriction`
+(`windows::machine_launch`). COM checks that value on every launch and activation of an
+out-of-process server, and a principal it refuses can't get the right from any server's own
+permission ([MachineLaunchRestriction](https://learn.microsoft.com/en-us/windows/win32/com/machinelaunchrestriction)).
+The value is independent of WSL's keys, so a repair doesn't touch it. A VM inventory found that
+the agent's tools and `chrome-headless-shell` make no out-of-process activation, so denying the
+group machine-wide takes nothing from them.
+
+- **The deny.** `(D;;CCDCLCSWRP;;;<ClauseoSandboxUsers>)`, mask `0x1F`: `COM_RIGHTS_EXECUTE` (1),
+  `COM_RIGHTS_EXECUTE_LOCAL` (2), `COM_RIGHTS_EXECUTE_REMOTE` (4), `COM_RIGHTS_ACTIVATE_LOCAL`
+  (8) and `COM_RIGHTS_ACTIVATE_REMOTE` (16), the five rights of
+  [Access Control Lists for COM](https://learn.microsoft.com/en-us/windows/win32/com/access-control-lists-for-com).
+  In SDDL the letters are the directory-service ones with the same bits
+  ([ADS_RIGHTS_ENUM](https://learn.microsoft.com/en-us/windows/win32/api/iads/ne-iads-ads_rights_enum)):
+  `CC` 0x1, `DC` 0x2, `LC` 0x4, `SW` 0x8, `RP` 0x10. The group SID comes from the record's
+  `GroupSid`; the refresh refuses one that isn't `S-1-5-21-<machine>-<rid>`.
+- **Read, merge, write.** The value is parsed strictly (`machine_launch/sd.rs`). Every entry is
+  kept byte for byte, and only the deny is added, at DACL index 0, so explicit denies come first.
+  A run that finds a full deny for the group ahead of every allow writes nothing. A value that
+  won't parse is never written: not `REG_BINARY`, not a valid self-relative descriptor, no owner
+  or group, a DACL that is absent or NULL, an entry without `COM_RIGHTS_EXECUTE`, or an entry in
+  COM's old form (`COM_RIGHTS_EXECUTE` alone), which the new-form deny would mix with. COM
+  rejects a mixed ACL. Before the write, the new bytes are read back through the same parser and
+  `IsValidSecurityDescriptor`.
+- **No value.** Windows' default applies. Microsoft's page documents only Administrators and
+  Everyone, but a VM run found COM's default also grants Distributed COM Users, Performance Log
+  Users, ALL APPLICATION PACKAGES and a capability SID. So the guard reads the descriptor COM
+  uses with `CoGetSystemSecurityPermissions(SD_LAUNCHRESTRICTIONS)` and writes it with the deny
+  in front, every entry kept. If that call fails, nothing is written and the state is
+  `degraded: machine launch unknown`. The descriptor goes to the backup (`Default`).
+- **`MachineAccessRestriction` beside it** (`machine_launch/hold.rs`). DCOM's launcher service
+  keeps `MachineLaunchRestriction` only while `MachineAccessRestriction` is there too. Without
+  it, a VM run (row 4, no access value) saw it move the new value to
+  `MachineLaunchRestrictionOld` within 10 ms, so no deny held. Before writing the launch value,
+  the guard writes a missing access value as exactly the descriptor COM uses now, read with
+  `CoGetSystemSecurityPermissions(SD_ACCESSRESTRICTIONS)`, so nothing changes in effect. No
+  default is guessed: if that call fails, nothing is written and the state is
+  `degraded: machine access unknown`. If Group Policy's
+  `HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DCOM\MachineAccessRestriction` is set, COM's
+  descriptor may be the policy's, so nothing is copied and the state is
+  `degraded: group policy`. The bytes go to the backup (`AccessAdded`). After the
+  write, both values are read back at 250 ms and at 1 s. DCOM rewrites both within a
+  millisecond (a VM run): it merges Windows' default entries into the launch value and
+  re-serialises the access value with padding. What the last read-back found becomes
+  `Written` and `AccessAdded`, so the removal looks for what DCOM made of Clauseo's write. The state is `applied` only when the
+  deny is still first at both reads; otherwise it is `degraded: dcom moved the value`. The
+  refresh's put-back is checked the same way, so each refresh run tries the write and the
+  read-back again. The app reads the state typed (`windows::sandbox_launch_deny`, `NotSet`,
+  `Applied` or `Degraded` with its reason) for Settings; launches go ahead either way.
+- **Backup.** Before the first change, the original value is stored under the record's
+  subkey `HKLM\SOFTWARE\Clauseo\Sandbox\MachineLaunch` (`Original`, empty when there was no
+  value). The subkey has a protected DACL that grants only SYSTEM and Administrators, so the
+  pool, which reads the record, can't read or change the backup. The guard also stores the bytes
+  it last wrote (`Written`), set before each write, and the last 8 values it wrote
+  (`History`). `DenyExisted` is 1 when the value held the same deny before Clauseo's first
+  write. A later re-apply (a put-back after drift)
+  keeps the first `Original` and sets `PutBack` to 1: from then on the value holds someone
+  else's edit, which no restore may undo.
+- **Where.** Set-up step 8c applies the guard elevated, after the network and once the group and
+  the record exist (`late_steps::launch_deny`). Every run of `\Clauseo\SandboxRefresh` applies
+  it again as SYSTEM, after the admin copy's steps, under the set-up lock
+  (`refresh/launch_phase.rs`). A run that wasn't allowed, found the lock held or carries the
+  placeholder signing key skips it. The refresh skips a record with no `GroupSid` or with
+  `Removing` set. A run that finds a deny Clauseo wrote has gone (drift) puts it back and logs an
+  information line. The step never fails the set-up.
+- **Removal.** `--remove` (after `DeviceSync`'s deny, before the group goes) compares values by
+  meaning (`machine_launch/meaning.rs`): the owner, the group and the set of DACL entries, each
+  as type, flags, mask and SID. Order, layout and padding don't count, since DCOM rewrites
+  them. The backup goes back byte for byte when the value means what Clauseo wrote and there
+  has been no put-back since the first write, and a backup of "no value" then deletes the
+  value. It also goes back when the value is gone (DCOM moved it, or someone deleted it).
+  Otherwise only the deny Clauseo added comes off: a plain deny, no flags, mask `0x1F`, the
+  group's SID. A deny that was there before Clauseo's (`DenyExisted`) is never taken off.
+  Every other entry stays, a deny for the group with another mask or flags included. A value
+  Clauseo made (none before) is deleted only when what is left means COM's default it was built
+  from (`Default`); otherwise it is kept and logged. A value that won't parse is left and
+  logged. `MachineLaunchRestrictionOld` is deleted when it means one of the values in
+  `History`. An access value Clauseo added is deleted only while it means what Clauseo wrote
+  (COM's `SD_ACCESSRESTRICTIONS` descriptor) and no launch value is left (DCOM would move it);
+  otherwise it is left and logged. Then the
+  backup subkey and the state go. A set-up rollback that deletes a group it made removes the
+  deny first, and keeps the group if it can't.
+- **Group Policy.** `HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DCOM\MachineLaunchRestriction`
+  (an SDDL string, written by the "DCOM: Machine Launch Restrictions in Security Descriptor
+  Definition Language (SDDL) syntax" policy, and common on Entra- or Intune-managed machines)
+  takes the place of the value, so our write doesn't count while the policy is set. The guard
+  converts the policy's SDDL with Windows and checks it for the same deny. That check reads only
+  the header and the DACL, so SDDL with no `O:`/`G:` part still counts. A DACL that mixes COM's
+  old form (`COM_RIGHTS_EXECUTE` alone) with the deny doesn't, since COM may reject it. Nothing
+  read so is ever written. If the deny is there, the state is `policy`. If not, the state is `degraded: group policy`. The value is still
+  written either way when there is one, so the guard holds once the policy goes. With no local
+  value, nothing is written: COM's launch descriptor is then the policy's, and a copy would
+  outlive the policy. Firm IT adds the ACE to the GPO
+  (`docs/firm-it.md`).
+- **Degraded.** The record's `MachineLaunchDeny` (`REG_SZ`, readable by Users) holds the state:
+  `applied`, `policy`, `degraded: group policy`, `degraded: unparsable`, `degraded: failed`,
+  `degraded: dcom moved the value`, `degraded: machine access unknown` or
+  `degraded: machine launch unknown`.
+  The value is written only when the state changes. A degraded guard is logged (the set-up log,
+  and an Event Log error line from the refresh) and is in `SetupReport::launch_deny`. The WSL
+  deny and the network filters stay on.
+- **Not measured on a VM yet:** that a pool user can't activate WSL with the deny in place and
+  the `AppID` deny gone; that the lawyer's own out-of-process COM still works; that `--remove`
+  restores the original bytes on a real machine; that a GPO value overrides ours and the state
+  reads `degraded: group policy`; and that the `Ole` key accepts the write from an elevated admin
+  and from SYSTEM without `REG_OPTION_BACKUP_RESTORE`.
+
 ## Consequences
 
 - A finished set-up moves the machine to tier B at the next tier query; R17's

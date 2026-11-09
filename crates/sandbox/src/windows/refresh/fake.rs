@@ -6,6 +6,7 @@ use sha2::{Digest, Sha256};
 
 use super::test_signer::{TestKey, comment, image};
 use super::*;
+use crate::windows::machine_launch::{Change, Guard};
 
 pub(super) const OWN: &str = "1.4.0";
 pub(super) const ADMIN: &str = r"C:\Program Files\Clauseo\Sandbox\clauseo-sandbox-setup.exe";
@@ -56,6 +57,8 @@ pub(super) struct Fake {
     pub(super) logs: Vec<(bool, String)>,
     /// The staging folder's state.
     pub(super) staging: Staging,
+    /// What `reapply_launch_deny` answers.
+    pub(super) launch: Result<Option<LaunchApplied>, Failed>,
 }
 
 /// The fake's staging folder.
@@ -101,6 +104,11 @@ impl Fake {
             denied_for: Vec::new(),
             logs: Vec::new(),
             staging: Staging::Absent,
+            launch: Ok(Some(LaunchApplied {
+                guard: Guard::Applied,
+                change: Change::Unchanged,
+                why: None,
+            })),
         }
     }
 
@@ -281,6 +289,10 @@ impl Refresher for Fake {
     }
     fn log(&mut self, error: bool, line: &str) {
         self.logs.push((error, line.to_owned()));
+    }
+    fn reapply_launch_deny(&mut self) -> Result<Option<LaunchApplied>, Failed> {
+        self.calls.push("reapply_launch_deny");
+        self.launch.clone()
     }
 }
 

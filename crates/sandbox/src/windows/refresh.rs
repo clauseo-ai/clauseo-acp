@@ -64,6 +64,9 @@
 //!
 //! Any refusal keeps the old copy, writes one log line (the Event Log on Windows) naming no user
 //! path beyond the install folder, and exits with its own code ([`RefreshExit`]).
+//!
+//! Every allowed run then re-applies the COM launch deny (`launch_phase.rs`, ADR 0049 "COM
+//! launch restriction"), whatever the steps gave, and logs drift or a degraded guard.
 
 use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
@@ -81,6 +84,7 @@ pub mod key;
 #[cfg(test)]
 mod key_tests;
 pub mod last_run;
+mod launch_phase;
 mod machine;
 pub mod pe_version;
 #[cfg(test)]
@@ -126,6 +130,7 @@ pub use version::version_not_older;
 #[cfg(windows)]
 pub use windows_refresher::{WindowsRefresher, event_log, run};
 
+use crate::windows::machine_launch::LaunchApplied;
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::sids::Sid;
 use signature::{SignatureError, verify};
@@ -307,11 +312,15 @@ pub trait Refresher {
     fn leave_staging(&mut self, swapped: bool);
     /// Writes one line to the log: `error` for a refusal or a failure.
     fn log(&mut self, error: bool, line: &str);
+    /// Re-applies the COM launch deny for the record's `GroupSid` (`machine_launch::apply`);
+    /// `Ok(None)` when there is no pool to guard or a removal is under way.
+    fn reapply_launch_deny(&mut self) -> Result<Option<LaunchApplied>, Failed>;
 }
 
-/// Runs the refresh as the module says, checking the staged exe against `trust`.
+/// Runs the refresh as the module says, checking the staged exe against `trust`, then the COM
+/// launch deny.
 pub fn refresh(fs: &mut impl Refresher, trust: &Trust<'_>) -> RefreshExit {
-    match run_steps(fs, trust) {
+    let exit = match run_steps(fs, trust) {
         Ok(line) => {
             fs.log(false, &line);
             RefreshExit::Done
@@ -320,7 +329,8 @@ pub fn refresh(fs: &mut impl Refresher, trust: &Trust<'_>) -> RefreshExit {
             fs.log(true, &format!("the sandbox's admin copy was kept: {line}"));
             exit
         }
-    }
+    };
+    launch_phase::after(fs, exit)
 }
 
 /// A refusal: its exit and its log line.

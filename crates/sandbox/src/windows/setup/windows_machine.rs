@@ -34,6 +34,9 @@ use crate::windows::admin_copy;
 use crate::windows::apply::Surroundings;
 use crate::windows::fence::RegisteredMatter;
 use crate::windows::ledger::{Ledger, ledger_path};
+use crate::windows::machine_launch::{
+    self, Change, Guard, LaunchApplied, LaunchRemoved, os::WindowsLaunchStore,
+};
 use crate::windows::marker::{self, Marker, MarkerState};
 use crate::windows::matters::MatterSids;
 use crate::windows::pool::{MachineRecord, POOL_GROUP, POOL_PREFIX, pool_number};
@@ -66,6 +69,9 @@ pub struct Names {
     pub journals: bool,
     /// Where the network filters and firewall rules go (S15 PR7): Clauseo's, or a test's.
     pub wfp: Namespace,
+    /// Whether `MachineLaunchRestriction` may be changed (`windows::machine_launch`); a test's
+    /// machine leaves it as it is: it is machine-wide, and no test name can scope it.
+    pub launch_deny: bool,
 }
 
 impl Names {
@@ -78,6 +84,7 @@ impl Names {
             users: POOL_PREFIX.to_owned(),
             journals: true,
             wfp: Namespace::production(),
+            launch_deny: true,
         }
     }
 
@@ -497,6 +504,28 @@ impl Machine for WindowsMachine {
         // so does a machine whose dynamic or excluded port ranges overlap tier B's ports.
         wfp::check_ports(false).map_err(|gap| MachineError::Other(gap.to_string()))?;
         wfp::install(&self.names.wfp, setup).map_err(|error| MachineError::Other(error.cause()))
+    }
+
+    fn launch_deny(&mut self, group: &Sid) -> Result<LaunchApplied, MachineError> {
+        // Elevated, never as the owner: the value is the machine's.
+        if !self.names.launch_deny {
+            return Ok(LaunchApplied {
+                guard: Guard::Applied,
+                change: Change::Unchanged,
+                why: None,
+            });
+        }
+        let mut store = WindowsLaunchStore::new(&self.names.record_key);
+        Ok(machine_launch::apply(&mut store, group))
+    }
+
+    fn launch_deny_remove(&mut self, group: &Sid) -> Result<LaunchRemoved, MachineError> {
+        if !self.names.launch_deny {
+            return Ok(LaunchRemoved::Nothing);
+        }
+        let mut store = WindowsLaunchStore::new(&self.names.record_key);
+        machine_launch::remove(&mut store, group)
+            .map_err(|why| MachineError::Other(format!("the COM launch deny: {why}")))
     }
 
     fn protect_for_owner(

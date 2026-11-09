@@ -216,6 +216,9 @@ They remove what the set-up makes:
   `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList`, which
   hides it from the sign-in screen;
 - the group's deny entry on `C:\ProgramData\Microsoft\DeviceSync`;
+- the group's deny entry in COM's machine-wide launch limit,
+  `HKLM\SOFTWARE\Microsoft\Ole\MachineLaunchRestriction`
+  ([section 11](#11-com-launch-restriction-and-group-policy));
 - the group `ClauseoSandboxUsers`, once it has no members. Set-up also gives the group the user
   right "Deny log on through Remote Desktop Services", so no sandbox user can sign in over Remote
   Desktop; `--remove` takes it off before deleting the group. These commands leave it: once the
@@ -264,13 +267,25 @@ $deviceSync = Join-Path $env:ProgramData 'Microsoft\DeviceSync'
 if (Test-Path $deviceSync) {
     foreach ($sid in $groupSids) { icacls $deviceSync /remove:d "*$sid" }
 }
+# 4b. The group's deny in COM's launch limit, every other entry kept.
+$ole = 'HKLM:\SOFTWARE\Microsoft\Ole'
+$limit = (Get-ItemProperty -Path $ole -ErrorAction SilentlyContinue).MachineLaunchRestriction
+if ($limit) {
+    $helper = [wmiclass]'Win32_SecurityDescriptorHelper'
+    $sddl = $helper.BinarySDToSDDL($limit).SDDL
+    $kept = $sddl
+    foreach ($sid in $groupSids) { $kept = $kept.Replace("(D;;CCDCLCSWRP;;;$sid)", '') }
+    if ($kept -ne $sddl) {
+        Set-ItemProperty -Path $ole -Name MachineLaunchRestriction -Type Binary -Value $helper.SDDLToBinarySD($kept).BinarySD
+    }
+}
 # 5. The group, only if it is the one the key names and is empty.
 if ($group -and (-not $record.GroupSid -or $group.SID.Value -eq $record.GroupSid) -and
     @(Get-LocalGroupMember -Group $group).Count -eq 0) {
     Remove-LocalGroup -SID $group.SID
 }
-# 6. The key, last.
-Remove-Item -Path $key -ErrorAction SilentlyContinue
+# 6. The key, last, with the backup subkey MachineLaunch in it.
+Remove-Item -Path $key -Recurse -ErrorAction SilentlyContinue
 ```
 
 Then check, in the same window, that each item is gone. Every number is 0 and both other values
@@ -280,6 +295,13 @@ its entry and keep its folder:
 
 ```powershell
 [pscustomobject]@{ Users = @(Get-LocalUser | Where-Object { $_.Name -cmatch $pool }).Count; Profiles = @(Get-CimInstance Win32_UserProfile | Where-Object { $sids -contains $_.SID }).Count; Hidden = @((Get-Item $hide -ErrorAction SilentlyContinue).Property | Where-Object { $_ -cmatch $pool }).Count; DeviceSync = @(icacls $deviceSync | Select-String -SimpleMatch -Pattern (@($groupSids) + 'ClauseoSandboxUsers')).Count; Group = [bool](Get-LocalGroup -Name 'ClauseoSandboxUsers' -ErrorAction SilentlyContinue); Folders = @(Get-ChildItem -Path 'C:\Users' -Directory -Force | Where-Object { $_.Name -cmatch '^ClauseoSb(0[1-9]|[12][0-9]|3[0-2])(\.[^\\]+)?$' }).Count; Key = Test-Path $key }
+```
+
+To check COM's launch limit, this should name none of the SIDs in `$groupSids`:
+
+```powershell
+$helper = [wmiclass]'Win32_SecurityDescriptorHelper'
+$helper.BinarySDToSDDL((Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Ole').MachineLaunchRestriction).SDDL
 ```
 
 A `ClauseoSbNN` entry that remains is a link: check where it points, then remove just the link with `rmdir C:\Users\ClauseoSbNN` (cmd), which doesn't touch its target.
@@ -997,6 +1019,119 @@ listed (shown as a bare `S-1-5-21-…` once the account is gone) grants nothing;
 `sandbox\set-aside`: those are files set aside from a matter.
 
 Clauseo adds no firewall rules. Network filters (WFP) come later, with how to remove them here.
+
+## 11. COM launch restriction and Group Policy
+
+Clauseo's Windows protection denies the sandbox accounts the right to start or activate
+out-of-process COM servers. Those servers are how a program reaches WSL (the WSL service, or
+`LxssManager` on older Windows), and the sandboxed agents use no others. The deny is one entry,
+for the local group `ClauseoSandboxUsers`, in the computer-wide launch limit
+`HKLM\SOFTWARE\Microsoft\Ole\MachineLaunchRestriction`
+([MachineLaunchRestriction](https://learn.microsoft.com/en-us/windows/win32/com/machinelaunchrestriction)).
+It is computer-wide because COM checks that value before any server's own permission, and a
+WSL update or repair rewrites WSL's own permissions but never this value. Clauseo's deny for each
+WSL class stays as well
+([decision 0049](decisions/0049-windows-sandbox-tier-b.md), "COM launch restriction").
+
+What set-up changes:
+
+- Every entry already in the value stays as it is. Clauseo adds one deny in front of them:
+  `(D;;CCDCLCSWRP;;;<SID of ClauseoSandboxUsers>)`, which covers local and remote launch and
+  activation (COM's rights 1, 2, 4, 8 and 16; in SDDL `CC`, `DC`, `LC`, `SW` and `RP`).
+  No other account loses anything.
+- With no value (Windows' default applies), set-up asks COM for the launch limit it uses and
+  writes exactly that, with the deny in front. That default grants more than Microsoft's page
+  lists: Administrators, Everyone, Distributed COM Users, Performance Log Users, ALL APPLICATION
+  PACKAGES and a capability SID. If COM can't be asked, set-up writes nothing and the state reads
+  `degraded: machine launch unknown`. If the Group Policy launch value (below) is set, COM's
+  limit is the policy's, so set-up writes nothing and the state reads `degraded: group policy`,
+  or `policy` when the policy holds the deny.
+- Windows keeps that value only while `MachineAccessRestriction`, in the same key, is set too.
+  If it isn't, set-up first writes it as exactly the access limit COM already uses, so no
+  account's access changes. If the policy "DCOM: Machine Access Restrictions in SDDL syntax" is
+  set (`HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DCOM\MachineAccessRestriction`), set-up
+  copies nothing and the state reads `degraded: group policy`. Uninstalling deletes the access
+  value again if it still means the same and the launch value is gone.
+- If a launch value stays after uninstalling (someone else's entries, or the value as it was
+  before Clauseo), the access value Clauseo added stays too, since Windows would move the launch
+  value without it. It equals the access limit Windows used when set-up wrote it, and Clauseo
+  doesn't track it once uninstalled. To remove it, check that `MachineLaunchRestriction` is gone
+  or no longer needed, then, in an elevated PowerShell:
+  `Remove-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Ole' -Name MachineAccessRestriction`.
+  Leave it if your organisation set it on purpose.
+- The value as it was before is kept in `HKLM\SOFTWARE\Clauseo\Sandbox\MachineLaunch`, a key only
+  SYSTEM and Administrators can open: `Original` holds the old bytes (empty when there was no
+  value), `Written` holds what Clauseo last wrote, and `PutBack` is 1 once Clauseo has had to put
+  its deny back after something else rewrote the value. `DenyExisted` is 1 when the same deny was
+  there before, and `Default` holds the launch limit COM used, when set-up created the value.
+  `AccessAdded` holds the
+  `MachineAccessRestriction` bytes set-up wrote, when it wrote one, and `History` the last 8
+  values Clauseo wrote.
+- Clauseo's SYSTEM task `\Clauseo\SandboxRefresh` puts the deny back at each run if something
+  removed it, and writes an Event Log line (source "Clauseo Sandbox") when it does.
+- A value Clauseo can't read as a valid COM security descriptor is never changed. Neither is a
+  value whose entries use COM's old form, `COM_RIGHTS_EXECUTE` alone, since COM refuses a list
+  that mixes the two forms.
+- Windows rewrites both values within a millisecond of a write: it adds its default entries to
+  the launch value and re-pads the access value. So uninstalling compares values by meaning:
+  the same owner, group and set of entries (type, flags, rights, SID), in any order and with
+  any padding. The order of entries in the value, and an entry listed twice, are accepted as
+  they are: Clauseo neither sorts the value nor removes duplicates, and two values that differ
+  only in order or repeats count as the same.
+- Set-up waits 1 second after its write, then takes what it reads back as its own write,
+  because Windows rewrites the values in that time. An edit of yours that lands inside that
+  second is taken as Clauseo's too. If your edit keeps the deny in front, the state reads
+  `applied`, and uninstalling treats the value as untouched: it puts the old bytes back, or
+  deletes a value Clauseo created, and your edit goes with it. An access value you edit in that
+  second is deleted the same way when the launch value goes. If your edit removes the deny, the
+  state reads `degraded: dcom moved the value`, and the next Clauseo refresh puts the deny back.
+  Make such edits before set-up or after it has finished.
+- Uninstalling takes the deny off. If the value still means what set-up first wrote, the old
+  bytes go back unchanged, and a value that wasn't there before is deleted. If Windows moved the
+  value away, the old bytes go back too, and any value Clauseo wrote is deleted from
+  `MachineLaunchRestrictionOld`. If anything rewrote the value since, even when Clauseo then
+  put its deny back, only the entry Clauseo added comes off and everything else stays. A value
+  Clauseo created is deleted only if what is left means Windows' default; otherwise it stays.
+- If the same deny entry was already in the value before set-up (your organisation added it),
+  uninstalling leaves it.
+
+The guard's state is in `HKLM\SOFTWARE\Clauseo\Sandbox`, value `MachineLaunchDeny`:
+
+| Value | Meaning |
+|---|---|
+| `applied` | The deny is in place. |
+| `policy` | A Group Policy sets the limit, and its SDDL holds the deny. |
+| `degraded: group policy` | A Group Policy sets the limit without the deny (the setting below fixes it), or sets the machine access limit while `MachineAccessRestriction` is missing, so Clauseo copied nothing. |
+| `degraded: unparsable` | The value isn't a security descriptor Clauseo can safely change, so it was left as it is. |
+| `degraded: failed` | Reading or writing the registry failed; the Event Log line names the Windows error. |
+| `degraded: dcom moved the value` | Windows moved the value to `MachineLaunchRestrictionOld` after Clauseo wrote it, so the deny isn't in effect. |
+| `degraded: machine access unknown` | `MachineAccessRestriction` isn't set and COM's own access limit couldn't be read, so Clauseo wrote nothing. |
+| `degraded: machine launch unknown` | `MachineLaunchRestriction` isn't set and COM's own launch limit couldn't be read, so Clauseo wrote nothing. |
+
+A degraded state doesn't stop the set-up. The sandbox's other protections against WSL stay on,
+but the computer-wide layer is missing until it is fixed.
+
+**Group Policy.** The setting "DCOM: Machine Launch Restrictions in Security Descriptor
+Definition Language (SDDL) syntax" (Security Options) writes
+`HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DCOM\MachineLaunchRestriction`, which COM uses in
+place of the value above. Entra- and Intune-managed computers often have it. While it is set,
+Clauseo's change has no effect, and the state reads `degraded: group policy`. To fix it, add this
+entry at the front of the policy's SDDL, after `D:`:
+
+```text
+(D;;CCDCLCSWRP;;;<SID of ClauseoSandboxUsers>)
+```
+
+Use the SDDL rights letters for every entry in that policy, as above. Don't mix in entries in
+COM's old form, which grant `COM_RIGHTS_EXECUTE` alone (`CC`, or `0x1`, on its own): COM may
+reject a list that mixes the two forms, so Clauseo counts such a policy as
+`degraded: group policy` even when it holds the deny.
+
+The SID belongs to a local group, so it differs on every computer. Look it up on the computer with
+`(Get-LocalGroup -Name 'ClauseoSandboxUsers').SID.Value`, or read `GroupSid` in
+`HKLM\SOFTWARE\Clauseo\Sandbox`. A policy that applies one SDDL to many computers can't name
+it, so the entry has to be added per computer. After the next policy refresh and the next
+Clauseo refresh (at the lawyer's next sign-in), the state reads `policy`.
 
 ## Later
 

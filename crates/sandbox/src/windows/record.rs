@@ -13,6 +13,7 @@
 use std::io;
 use std::path::PathBuf;
 
+use crate::windows::machine_launch::LaunchDenyState;
 use windows::Win32::Foundation::{
     CloseHandle, ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND, ERROR_INSUFFICIENT_BUFFER,
     ERROR_NO_TOKEN, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS, ERROR_UNSUPPORTED_TYPE, HANDLE, HLOCAL,
@@ -82,6 +83,14 @@ pub fn sandbox_owner_sid() -> Result<Option<String>, RecordError> {
 /// `Ok(None)` when missing. Unchecked text, as [`sandbox_owner_sid`].
 pub fn sandbox_group_sid() -> Result<Option<String>, RecordError> {
     read_string(RECORD_KEY, w!("GroupSid"))
+}
+
+/// The COM launch deny's state (ADR 0049, "COM launch restriction"): value
+/// `MachineLaunchDeny` (`REG_SZ`, 64-bit view, readable by Users), typed. Missing is
+/// [`LaunchDenyState::NotSet`]. For Settings: a degraded guard never fails the set-up.
+pub fn sandbox_launch_deny() -> Result<LaunchDenyState, RecordError> {
+    let text = read_string(RECORD_KEY, w!("MachineLaunchDeny"))?;
+    Ok(LaunchDenyState::from_record(text.as_deref()))
 }
 
 /// The owner's data folder, which holds `sandbox\`: value `DataDir` (`REG_SZ`, read

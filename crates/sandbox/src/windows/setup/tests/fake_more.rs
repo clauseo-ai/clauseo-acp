@@ -224,6 +224,7 @@ pub(super) fn new_machine(test: &str) -> FakeMachine {
         next_rid: 1000,
         passwords: 0,
         around: Around::default(),
+        launch: None,
     }
 }
 

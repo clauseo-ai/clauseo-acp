@@ -1,7 +1,7 @@
 //! Set-up's steps around the denies and the matters: the owners of the folders the shared-write
 //! denies protect (`PR4h`), reading the owner's registered matters after the lock (`PR4h`), step
-//! 8's fence of them against the grown pool, step 9's change journals, and the per-machine
-//! stop and sweep tasks once the owner is recorded.
+//! 8's fence of them against the grown pool, step 8c's COM launch deny, step 9's change
+//! journals, and the per-machine stop and sweep tasks once the owner is recorded.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -17,6 +17,7 @@ use super::rollback::Run;
 use crate::Error;
 use crate::windows::apply::{Applied, fence_each};
 use crate::windows::fence::RegisteredMatter;
+use crate::windows::machine_launch::LaunchApplied;
 use crate::windows::pool::MachineRecord;
 use crate::windows::sids::Sid;
 use crate::windows::wfp::{NetworkReport, NetworkSetup};
@@ -236,6 +237,24 @@ pub(super) fn network(
     machine
         .network(&setup)
         .map_err(|error| (Step::Network, cause_of(&error)))
+}
+
+/// Step 8c, the COM launch deny (`windows::machine_launch`, ADR 0049 "COM launch
+/// restriction"): the pool group denied launch and activation in `MachineLaunchRestriction`,
+/// once the group and the record exist, elevated, not as the owner. Never fatal, like step 9:
+/// a degraded guard (a Group Policy value, a value that won't parse, a failed write) leaves
+/// WSL's other layers on and is recorded for the app and firm IT; the refresh task tries again
+/// at each run. What it found is in the report and the log.
+pub(super) fn launch_deny(
+    machine: &mut impl Machine,
+    group: &Sid,
+) -> Result<LaunchApplied, String> {
+    // `machine_launch::apply` logs a degraded guard itself.
+    let applied = machine.launch_deny(group).map_err(|error| cause_of(&error));
+    if let Err(why) = &applied {
+        tracing::warn!(%why, "the COM launch deny wasn't applied");
+    }
+    applied
 }
 
 /// Step 9: each chosen volume's change journal made [`super::JOURNAL_MAX`] when smaller

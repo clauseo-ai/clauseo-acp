@@ -24,6 +24,8 @@
 //!   copy ever started elevated, and the checks it passes first (missing, changed, unsafe).
 //! - [`reclaim`] (S15 `PR4i`): the elevated clean-up's targets, picked from the ledger, its
 //!   owner-only walk over a seam (`acl/take.rs` on Windows), and the lawyer's hand-back after.
+//! - [`machine_launch`]: the pool group denied COM launch and activation machine-wide, in
+//!   `MachineLaunchRestriction`, with its backup, its removal and its degraded states.
 //!
 //! - [`apply`](mod@apply): the plan applied through the write-ahead ledger, the walk that carries
 //!   inherited entries down each tree (repairing what an agent made), the rollback, the sibling
@@ -69,6 +71,8 @@ pub mod fence;
 #[cfg(windows)]
 mod folder;
 pub mod ledger;
+#[cfg(any(windows, test, feature = "test-support"))]
+pub mod machine_launch;
 pub mod marker;
 pub mod matters;
 pub mod pipe;
@@ -136,7 +140,8 @@ pub use folder::{folder_support, label_support};
 pub use marker::setup_state;
 #[cfg(windows)]
 pub use record::{
-    RecordError, sandbox_data_dir, sandbox_group_sid, sandbox_owner_sid, sandbox_pool_sids,
+    RecordError, sandbox_data_dir, sandbox_group_sid, sandbox_launch_deny, sandbox_owner_sid,
+    sandbox_pool_sids,
 };
 pub use set_aside::{
     Checked as SetAsideChecked, Entry as SetAsideEntry, Reason as SetAsideReason,

@@ -10,6 +10,7 @@ use zeroize::Zeroizing;
 use crate::windows::apply::Surroundings;
 use crate::windows::fence::RegisteredMatter;
 use crate::windows::ledger::Ledger;
+use crate::windows::machine_launch::{LaunchApplied, LaunchRemoved};
 use crate::windows::marker::{Marker, MarkerState};
 use crate::windows::pool::MachineRecord;
 use crate::windows::setup::record_values::CopyOwner;
@@ -244,6 +245,13 @@ pub trait Machine {
     /// provider, sublayer and block filters covering `setup`'s whole pool, the owner's grants,
     /// and the firewall rules. A WFP failure is the error; the firewall's is in the report.
     fn network(&mut self, setup: &NetworkSetup) -> Result<NetworkReport, MachineError>;
+    /// Set-up's COM launch step (`machine_launch::apply`), elevated, not as the owner: the
+    /// deny for `group` in `MachineLaunchRestriction`, its backup and its state in the record.
+    /// A degraded guard is in the report, never the error.
+    fn launch_deny(&mut self, group: &Sid) -> Result<LaunchApplied, MachineError>;
+    /// The rollback's undoing of [`Machine::launch_deny`] (`machine_launch::remove`), before
+    /// the group this run made goes, so no deny names a SID that is gone.
+    fn launch_deny_remove(&mut self, group: &Sid) -> Result<LaunchRemoved, MachineError>;
     /// Writes `<data_dir>\sandbox\secrets.bin` as the owner, protected for the owner: each of
     /// `secrets`, and for every other SID of `pool` the blob the file holds now (an extend
     /// leaves the existing users' passwords as they are).
