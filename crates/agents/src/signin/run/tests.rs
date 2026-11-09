@@ -307,8 +307,17 @@ fn no_cancel_goes_to_a_listener_another_process_holds() {
         &[],
         async |timer, cancel, _| {
             cancel.stop(Stop::Lawyer(GRACE));
-            // Armed after the owner check and the send it would have made.
-            assert_eq!(timer.next_armed().await, GRACE);
+            // Armed after the owner check and the send it would have made. Where the check runs
+            // `lsof` (macOS), its 500 ms limit is armed first: passed over, never fired.
+            let mut armed = timer.next_armed().await;
+            while armed != GRACE {
+                assert_eq!(
+                    armed,
+                    Duration::from_millis(500),
+                    "only lsof's limit comes first"
+                );
+                armed = timer.next_armed().await;
+            }
             assert!(timer.fire());
         },
     );
