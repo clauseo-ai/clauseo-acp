@@ -220,6 +220,7 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
         folder_base: WinPath::parse(&message.state)
             .map(|state| state.display())
             .unwrap_or_default(),
+        native_code_deny: message.native_code_deny,
     };
     let result = serve(&inner, pipes, &launch, end);
     // `serve` returns only on a failure (`relay` exits the process): the job ends and empties,

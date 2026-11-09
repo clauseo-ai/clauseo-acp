@@ -86,6 +86,8 @@ mod inner_flow;
 mod leftovers;
 #[cfg(any(windows, test))]
 pub mod marker;
+#[cfg(any(windows, test))]
+mod mitigation;
 #[cfg(windows)]
 mod outer;
 pub mod paths;
@@ -197,6 +199,10 @@ pub struct LaunchMessage {
     /// `SSL_CERT_FILE` is merged the same way.
     #[serde(default)]
     pub firm_ca: Vec<String>,
+    /// `Policy::native_code_deny`: the agent starts with `NoLowMandatoryLabelImages`
+    /// ([`mitigation`]). From the product's policy, never the launch spec.
+    #[serde(default)]
+    pub native_code_deny: bool,
 }
 
 impl std::fmt::Debug for LaunchMessage {
@@ -215,6 +221,7 @@ impl std::fmt::Debug for LaunchMessage {
             .field("state", &self.state)
             .field("tmpdir", &self.tmpdir)
             .field("firm_ca", &self.firm_ca)
+            .field("native_code_deny", &self.native_code_deny)
             .finish_non_exhaustive()
     }
 }

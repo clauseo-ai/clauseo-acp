@@ -66,6 +66,7 @@ pub(super) fn message_from_policy(
             .transpose()?,
         // R17 PR-E: the agent's `network.ca_certs` file goes here.
         firm_ca: Vec::new(),
+        native_code_deny: policy.native_code_deny(),
     };
     message.check()?;
     Ok(message)

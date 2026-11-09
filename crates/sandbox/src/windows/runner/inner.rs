@@ -209,6 +209,7 @@ fn start(set: &PipeSet, launch: &InnerLaunch, token: &Handle) -> Result<Process,
         cwd: &launch.cwd,
         env: &launch.env,
         stdio: [stdin.0, stdout.0, stderr.0],
+        mitigation: super::mitigation::agent_mitigation(launch.native_code_deny),
     })
     .map_err(|e| fail(RunExit::Spawn, "CreateProcessAsUserW", &e))?;
     // This runner's copies of the pipes close here, so the agent's exit ends the streams.

@@ -11,7 +11,7 @@ const DATA: &str = r"C:\Users\Lawyer\AppData\Local\Clauseo";
 const STATE: &str = r"C:\Users\Lawyer\AppData\Local\Clauseo\agent-state\m1\codex-acp";
 const RUNTIME: &str = r"C:\Users\Lawyer\AppData\Local\Clauseo\runtime\node";
 
-fn message() -> LaunchMessage {
+pub(super) fn message() -> LaunchMessage {
     LaunchMessage {
         version: LAUNCH_VERSION,
         pool_user: Sid::parse(POOL).unwrap(),
@@ -35,6 +35,7 @@ fn message() -> LaunchMessage {
         ca_bundle: Some(format!(r"{DATA}\sandbox-ca\roots.pem")),
         credential_link: Some(format!(r"{STATE}\auth.json")),
         firm_ca: Vec::new(),
+        native_code_deny: false,
     }
 }
 

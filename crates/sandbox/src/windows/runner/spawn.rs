@@ -39,8 +39,9 @@ use windows::Win32::System::Threading::{
     CreateProcessWithLogonW, DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT,
     GetExitCodeProcess, InitializeProcThreadAttributeList, LOGON_WITH_PROFILE,
     LPPROC_THREAD_ATTRIBUTE_LIST, OpenProcessToken, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-    PROCESS_INFORMATION, ResumeThread, STARTF_USESHOWWINDOW, STARTF_USESTDHANDLES, STARTUPINFOEXW,
-    STARTUPINFOW, TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
+    PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY, PROCESS_INFORMATION, ResumeThread,
+    STARTF_USESHOWWINDOW, STARTF_USESTDHANDLES, STARTUPINFOEXW, STARTUPINFOW, TerminateProcess,
+    UpdateProcThreadAttribute, WaitForSingleObject,
 };
 use windows::core::{HSTRING, PCWSTR, PWSTR};
 use zeroize::Zeroizing;
@@ -336,15 +337,19 @@ pub(super) struct Agent<'a> {
     pub(super) env: &'a [(String, String)],
     /// Its stdin, stdout and stderr, inheritable; the only handles it inherits.
     pub(super) stdio: [HANDLE; 3],
+    /// Its `PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY` value, when it has one
+    /// ([`agent_mitigation`](super::mitigation::agent_mitigation)).
+    pub(super) mitigation: Option<u64>,
 }
 
 /// The inner's call: starts the agent under its token, on the private desktop, with only its
 /// three pipe handles inherited (`PROC_THREAD_ATTRIBUTE_HANDLE_LIST`), no window, and its own
 /// environment block.
 pub(super) fn start_agent(agent: &Agent<'_>) -> io::Result<Process> {
-    // Declared before the list, so it outlives the list's use and its deletion.
+    // Declared before the list, so they outlive the list's use and its deletion.
     let handles = agent.stdio;
-    let mut list = AttributeList::new(1)?;
+    let mitigation = agent.mitigation;
+    let mut list = AttributeList::new(1 + u32::from(mitigation.is_some()))?;
     // SAFETY: the list was initialised for one attribute; `handles` outlives the list's use in
     // CreateProcessAsUserW below.
     unsafe {
@@ -359,6 +364,22 @@ pub(super) fn start_agent(agent: &Agent<'_>) -> io::Result<Process> {
         )
     }
     .map_err(|e| os_error(&e))?;
+    if let Some(policy) = mitigation.as_ref() {
+        // SAFETY: the list was initialised for two attributes when `mitigation` is set; `policy`
+        // is the `DWORD64` the attribute takes and outlives the list's use below.
+        unsafe {
+            UpdateProcThreadAttribute(
+                list.as_list(),
+                0,
+                PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY as usize,
+                Some(std::ptr::from_ref(policy).cast::<c_void>()),
+                size_of::<u64>(),
+                None,
+                None,
+            )
+        }
+        .map_err(|e| os_error(&e))?;
+    }
     let mut desktop: Vec<u16> = agent.desktop.encode_utf16().chain([0]).collect();
     let mut line: Vec<u16> = agent.command_line.encode_utf16().chain([0]).collect();
     let block = env_block(agent.env);

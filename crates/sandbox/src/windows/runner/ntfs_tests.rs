@@ -141,3 +141,18 @@ fn m3_refuses_a_credential_link_hard_linked_to_the_lawyers_codex_login() {
     let elsewhere = WinPath::parse(place.at("home").to_str().unwrap()).unwrap();
     assert_eq!(credential_link_check(&linked, &elsewhere), Ok(()));
 }
+
+/// The launch message carries the policy's `native_code_deny` (0049), off unless the product set
+/// it, for the inner runner's image-load policy on the agent.
+#[test]
+fn the_message_carries_the_native_code_switch_from_the_policy() {
+    let place = Place::new("runner-native-code");
+    folders(&place, &["matter", "state"]);
+    let builder = Policy::builder(place.at("matter"), place.at("state")).home(place.at("home"));
+    let off = builder.clone().build().unwrap();
+    let on = builder.native_code_deny(true).build().unwrap();
+    let spec = spec(&place.at("matter"));
+    let message = |policy: &Policy| LaunchMessage::from_policy(policy, &pool(), &spec, None);
+    assert!(!message(&off).unwrap().native_code_deny);
+    assert!(message(&on).unwrap().native_code_deny);
+}

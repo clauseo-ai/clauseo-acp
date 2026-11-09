@@ -37,6 +37,10 @@ pub struct InnerLaunch {
     pub folder_base: String,
     /// The private desktop the outer runner made for the agent, `WinSta0\<name>`.
     pub desktop: String,
+    /// [`LaunchMessage::native_code_deny`](super::LaunchMessage::native_code_deny): the agent
+    /// starts with `NoLowMandatoryLabelImages`.
+    #[serde(default)]
+    pub native_code_deny: bool,
 }
 
 impl std::fmt::Debug for InnerLaunch {

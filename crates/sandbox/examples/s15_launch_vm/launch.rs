@@ -68,6 +68,9 @@ pub(crate) struct Spec {
     /// The credential link, when the row names one (the `m3-hardlink` row); granted too, as
     /// `granted_paths` grants a policy's.
     pub(crate) credential_link: Option<PathBuf>,
+    /// `Policy::native_code_deny`'s image-load policy on the agent (0049's D), for a row that
+    /// sets it; off otherwise.
+    pub(crate) native_code_deny: bool,
 }
 
 impl Spec {
@@ -164,6 +167,7 @@ pub(crate) fn message(
         ca_bundle: spec.ca_bundle.as_deref().map(text),
         credential_link: link,
         firm_ca: Vec::new(),
+        native_code_deny: spec.native_code_deny,
     };
     message.check().map_err(|e| e.to_string())?;
     Ok(message)
