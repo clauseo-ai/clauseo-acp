@@ -10,7 +10,7 @@
 //! from the app's (`hooks.nsh`, tested in `installer_language.rs`). The per-machine
 //! uninstaller's blocks (`uninstall-string`, `un-admin-section`, `uninstall-self-delete` and
 //! `un-gui-end`) are tested in `uninstall_in_place.rs`. `webview2-no-elevation` keeps a per-user
-//! install from asking for an administrator over an old WebView2 (`webview2_floor.rs`);
+//! install from asking for an administrator over an old `WebView2` (`webview2_floor.rs`);
 //! `unable-to-uninstall-front` and `silent-downgrades-front` bring Tauri's own boxes to the front
 //! (`message_front.rs`).
 

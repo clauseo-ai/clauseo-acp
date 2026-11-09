@@ -1,4 +1,4 @@
-//! The template's Section WebView2 with a runtime older than `minimumWebview2Version`, run on a
+//! The template's `Section WebView2` with a runtime older than `minimumWebview2Version`, run on a
 //! fake registry (`nsis_run.rs`): per user it never runs Edge Update's `needsadmin=true` update,
 //! which for a standard user is a UAC credential prompt, and only says so in the details list
 //! (block `webview2-no-elevation`); per machine, elevated already, it updates, and a failed
@@ -47,7 +47,7 @@ fn clients_key() -> String {
     format!(r"HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{GUID}")
 }
 
-/// Section WebView2's code lines as the bundler renders them for `mode`, with the repo's floor
+/// `Section WebView2`'s code lines as the bundler renders them for `mode`, with the repo's floor
 /// and its bootstrapper mode, kept as `!if` selects them.
 fn section(mode: &str) -> (HashMap<String, String>, Vec<String>) {
     let text = read(TEMPLATE);
@@ -99,15 +99,15 @@ fn run(mode: &str, version: &'static str, path: Record, exit_code: &'static str)
     machine.said
 }
 
-fn edge_update() -> Record {
-    Some(vec![("path", Value::Text(EDGE_UPDATE))])
+fn edge_update() -> Vec<(&'static str, Value)> {
+    vec![("path", Value::Text(EDGE_UPDATE))]
 }
 
 #[test]
 fn per_user_a_runtime_below_the_floor_is_left_to_windows_with_one_details_line() {
-    // The floor is 152.0.0.0: an older runtime, even one just below.
-    for version in ["120.0.2210.91", "151.9.9.9"] {
-        let said = run("currentUser", version, edge_update(), "0");
+    // The floor is 89.0.774.44: an older runtime, even one just below.
+    for version in ["88.0.705.81", "89.0.774.43"] {
+        let said = run("currentUser", version, Some(edge_update()), "0");
         assert_eq!(said, ["DetailPrint $(webview2TooOld)"], "{version}");
     }
     // No line of the per-user section can start Edge Update's elevated update.
@@ -121,9 +121,10 @@ fn per_user_a_runtime_below_the_floor_is_left_to_windows_with_one_details_line()
 
 #[test]
 fn per_user_a_runtime_at_or_above_the_floor_needs_nothing() {
-    for version in ["152.0.0.0", "152.0.3000.1", "160.0.0.0"] {
-        assert!(
-            run("currentUser", version, edge_update(), "0").is_empty(),
+    for version in ["89.0.774.44", "120.0.2210.91", "160.0.0.0"] {
+        assert_eq!(
+            run("currentUser", version, Some(edge_update()), "0"),
+            Vec::<String>::new(),
             "{version}"
         );
     }
@@ -132,7 +133,7 @@ fn per_user_a_runtime_at_or_above_the_floor_needs_nothing() {
 #[test]
 fn per_machine_a_runtime_below_the_floor_is_updated_and_a_failed_update_goes_on() {
     let update = format!("ExecWait \"{EDGE_UPDATE}\" /install appguid={GUID}&needsadmin=true");
-    let said = run("perMachine", "120.0.2210.91", edge_update(), "0");
+    let said = run("perMachine", "88.0.705.81", Some(edge_update()), "0");
     assert_eq!(
         said,
         [
@@ -142,7 +143,12 @@ fn per_machine_a_runtime_below_the_floor_is_updated_and_a_failed_update_goes_on(
         ]
     );
     // Failed (the VM's -2147219689): two details lines, no box, no Quit; the install goes on.
-    let said = run("perMachine", "120.0.2210.91", edge_update(), "-2147219689");
+    let said = run(
+        "perMachine",
+        "88.0.705.81",
+        Some(edge_update()),
+        "-2147219689",
+    );
     assert_eq!(
         said,
         [
@@ -153,7 +159,10 @@ fn per_machine_a_runtime_below_the_floor_is_updated_and_a_failed_update_goes_on(
         ]
     );
     // At the floor, nothing.
-    assert!(run("perMachine", "152.0.0.0", edge_update(), "0").is_empty());
+    assert_eq!(
+        run("perMachine", "89.0.774.44", Some(edge_update()), "0"),
+        Vec::<String>::new()
+    );
 }
 
 #[test]
@@ -169,7 +178,7 @@ fn the_no_elevation_block_holds_the_per_user_branch_first() {
         ]
     );
     assert!(!code.iter().any(|line| line.starts_with("MessageBox")));
-    assert!(!code.iter().any(|line| *line == "Quit"));
+    assert!(!code.contains(&"Quit"));
 }
 
 #[test]
