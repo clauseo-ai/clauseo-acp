@@ -50,6 +50,7 @@ pub(crate) use self::pairs::Paired;
 #[cfg(windows)]
 pub(crate) use self::pairs::Pairs;
 pub(crate) use self::records::Changes;
+pub(crate) use self::records::Layout;
 #[cfg(windows)]
 pub(crate) use self::records::changes;
 pub(crate) use self::watchdog::{Dog, Pulse, watchdog};
@@ -105,6 +106,9 @@ pub(crate) enum Next {
 pub(crate) trait Source {
     /// Blocks until something changed or the watch is stopped.
     fn next(&mut self) -> Next;
+    /// The records it was armed for: [`Layout::Plain`] carries no attributes or file IDs, so a
+    /// pairing watch armed so notes nothing ([`feed`]).
+    fn layout(&self) -> Layout;
 }
 
 /// The set-aside's live check (`set_aside::GitGuard` on Windows).
@@ -340,7 +344,8 @@ fn take_paired<T: Session>(ender: &Ender<'_, T>) {
 /// A watch on a folder the agent can write that only feeds the pairing (`pairs.rs`): the
 /// agent's state and temp folders, `armed` or not. It moves nothing and ends nothing itself.
 /// It fails closed: an overflow loses the pairing for its window, and a watch that couldn't be
-/// armed or broke loses it for the session, so every fresh folder gone and unpaired counts.
+/// armed, was armed for the plain records (a network share: no file IDs, so it notes nothing)
+/// or broke loses it for the session, so every fresh folder gone and unpaired counts.
 pub(crate) fn feed(armed: io::Result<impl Source>, paired: &Paired, now: impl Fn() -> Duration) {
     let mut source = match armed {
         Ok(source) => source,
@@ -353,6 +358,13 @@ pub(crate) fn feed(armed: io::Result<impl Source>, paired: &Paired, now: impl Fn
             return;
         }
     };
+    if source.layout() == Layout::Plain {
+        tracing::warn!(
+            "a pairing watch got the plain records; the pairing is lost for the session"
+        );
+        paired.lose_for_good();
+        return;
+    }
     loop {
         match source.next() {
             Next::Changed(changes) => paired.note(now(), &changes.left),

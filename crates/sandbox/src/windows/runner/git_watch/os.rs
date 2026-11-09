@@ -2,7 +2,8 @@
 //! wait can also watch the stop event (as the runner pipes' waits do, `pipe/os.rs`). It asks
 //! for `ReadDirectoryNotifyExtendedInformation`, whose records carry each item's attributes,
 //! into a 1 MiB buffer; a volume that refuses either (a network share takes at most 64 KiB, and
-//! may not give the extended records) gets 64 KiB, then `ReadDirectoryChangesW`'s own records.
+//! may not give the extended records) gets 64 KiB, then `ReadDirectoryChangesW`'s own records,
+//! which [`Source::layout`] tells, so a pairing watch armed for them loses the pairing.
 //! The matter's and notes' watches ask for names, attributes and writes ([`Notify::All`]); the
 //! pairing's on the agent's state and temp folders for names only ([`Notify::Names`]), so the
 //! agent's writes there don't fill the buffer. A wait with nothing read for [`IDLE_TICK`]
@@ -200,6 +201,10 @@ impl<'a> DirWatch<'a> {
 }
 
 impl Source for DirWatch<'_> {
+    fn layout(&self) -> Layout {
+        self.layout
+    }
+
     fn next(&mut self) -> Next {
         if self.pending.is_none()
             && let Err(error) = self.read()

@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::super::pairs::{PAIR_MAX, PAIR_WINDOW, Paired, Pairs};
-use super::super::{Changes, GONE_LIMIT, Guard, Next, Pulse, Session, Source, feed, watch};
+use super::super::{Changes, GONE_LIMIT, Guard, Layout, Next, Pulse, Session, Source, feed, watch};
 use super::Log;
 use super::pairs::{NOW, checked, left_temp, matter};
 use crate::windows::denial_pipe::Record;
@@ -155,6 +155,9 @@ impl Source for &Steps<'_> {
         let step = self.0.borrow_mut().pop_front();
         step.map_or(Next::Stopped, |step| step())
     }
+    fn layout(&self) -> Layout {
+        Layout::Extended
+    }
 }
 
 fn fresh(name: &str, id: u64) -> Next {
@@ -239,12 +242,25 @@ fn a_matter_overflow_loses_the_pairing_in_the_loop() {
     assert!(ended(steps, &pairs, &clock));
 }
 
-/// Reports given in turn, then the stop.
-struct Script(VecDeque<Next>);
+/// Reports given in turn, then the stop, as read with the extended records, or the plain ones
+/// with `Script::plain`.
+struct Script(VecDeque<Next>, Layout);
+
+impl Script {
+    fn new(reports: Vec<Next>) -> Script {
+        Script(reports.into(), Layout::Extended)
+    }
+    fn plain(reports: Vec<Next>) -> Script {
+        Script(reports.into(), Layout::Plain)
+    }
+}
 
 impl Source for Script {
     fn next(&mut self) -> Next {
         self.0.pop_front().unwrap_or(Next::Stopped)
+    }
+    fn layout(&self) -> Layout {
+        self.1
     }
 }
 
@@ -267,7 +283,7 @@ fn a_pairing_watchs_overflow_loses_the_pairing_for_the_window() {
         })
     };
     let reports = vec![left("a", 1), Next::Idle, Next::Overflow, left("b", 2)];
-    feed(Ok(Script(reports.into())), &temp(&pairs), || NOW);
+    feed(Ok(Script::new(reports)), &temp(&pairs), || NOW);
     let made = Path::new("matter").join("x");
     assert!(pairs.paired(NOW, 1, &made) && pairs.paired(NOW, 2, &made));
     assert!(pairs.lost(NOW + PAIR_WINDOW) && !pairs.lost(NOW + PAIR_WINDOW + MS));
@@ -287,7 +303,7 @@ fn a_pairing_watch_that_breaks_or_cant_be_armed_loses_the_pairing_for_the_sessio
             ..Changes::default()
         }),
     ];
-    feed(Ok(Script(reports.into())), &temp(&pairs), || NOW);
+    feed(Ok(Script::new(reports)), &temp(&pairs), || NOW);
     assert!(
         !pairs.paired(NOW, 3, &Path::new("matter").join("x")),
         "nothing after it broke"
@@ -298,6 +314,24 @@ fn a_pairing_watch_that_breaks_or_cant_be_armed_loses_the_pairing_for_the_sessio
     let pairs = Arc::new(Pairs::default());
     let armed: io::Result<Script> = Err(io::Error::from_raw_os_error(5));
     feed(armed, &temp(&pairs), || NOW);
+    assert!(pairs.lost(NOW + 1000 * PAIR_WINDOW));
+    assert_eq!(checked(&pairs, NOW + 1000 * PAIR_WINDOW), x());
+}
+
+/// A state or temp watch armed for the plain records (a network share: no attributes or file
+/// IDs) notes nothing, so it loses the pairing for the session, as one that couldn't be armed.
+#[test]
+fn a_pairing_watch_armed_for_the_plain_records_loses_the_pairing_for_the_session() {
+    let pairs = Arc::new(Pairs::default());
+    let left = Next::Changed(Changes {
+        left: vec![(PathBuf::from("d"), 4)],
+        ..Changes::default()
+    });
+    feed(Ok(Script::plain(vec![left])), &temp(&pairs), || NOW);
+    assert!(
+        !pairs.paired(NOW, 4, &Path::new("matter").join("x")),
+        "nothing noted"
+    );
     assert!(pairs.lost(NOW + 1000 * PAIR_WINDOW));
     assert_eq!(checked(&pairs, NOW + 1000 * PAIR_WINDOW), x());
 }
