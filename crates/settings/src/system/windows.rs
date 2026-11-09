@@ -10,9 +10,10 @@ use std::sync::OnceLock;
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::UI::Shell::{
     FOLDERID_Desktop, FOLDERID_Documents, FOLDERID_Downloads, FOLDERID_LocalAppData,
-    FOLDERID_ProgramData, FOLDERID_ProgramFiles, FOLDERID_ProgramFilesX86, FOLDERID_Public,
-    FOLDERID_RoamingAppData, FOLDERID_Windows, KF_FLAG_DEFAULT, KF_FLAG_DONT_VERIFY,
-    KNOWN_FOLDER_FLAG, SHGetKnownFolderPath,
+    FOLDERID_ProgramData, FOLDERID_ProgramFiles, FOLDERID_ProgramFilesCommon,
+    FOLDERID_ProgramFilesCommonX64, FOLDERID_ProgramFilesCommonX86, FOLDERID_ProgramFilesX64,
+    FOLDERID_ProgramFilesX86, FOLDERID_Public, FOLDERID_RoamingAppData, FOLDERID_Windows,
+    KF_FLAG_DEFAULT, KF_FLAG_DONT_VERIFY, KNOWN_FOLDER_FLAG, SHGetKnownFolderPath,
 };
 use windows::core::GUID;
 
@@ -39,6 +40,10 @@ pub(super) fn folder(folder: KnownFolder) -> Option<PathBuf> {
         KnownFolder::Windows => FOLDERID_Windows,
         KnownFolder::ProgramFiles => FOLDERID_ProgramFiles,
         KnownFolder::ProgramFilesX86 => FOLDERID_ProgramFilesX86,
+        KnownFolder::ProgramFilesX64 => FOLDERID_ProgramFilesX64,
+        KnownFolder::ProgramFilesCommon => FOLDERID_ProgramFilesCommon,
+        KnownFolder::ProgramFilesCommonX86 => FOLDERID_ProgramFilesCommonX86,
+        KnownFolder::ProgramFilesCommonX64 => FOLDERID_ProgramFilesCommonX64,
         KnownFolder::ProgramData => FOLDERID_ProgramData,
         KnownFolder::Public => FOLDERID_Public,
         // No known folder names it: it sits beside `Program Files` on ARM64 Windows.

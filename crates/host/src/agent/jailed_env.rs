@@ -58,7 +58,7 @@ const fn allow(name: &'static str, rule: Rule) -> Allowed {
 /// The jailed launch's allow-list: every name its environment may hold, beside what the hook and
 /// the settings add. Compared ignoring ASCII case (Windows does), so `https_proxy` is
 /// `HTTPS_PROXY`'s entry.
-pub(crate) const JAILED_ENV: [Allowed; 24] = [
+pub(crate) const JAILED_ENV: [Allowed; 41] = [
     // The agent's program search: the policy's runtime folders, then the fixed OS folders
     // (`path`). Never the lawyer's own `PATH`.
     allow("PATH", Rule::Host),
@@ -101,6 +101,47 @@ pub(crate) const JAILED_ENV: [Allowed; 24] = [
     allow("SystemRoot", Rule::Host),
     // Its older name, which some programs still read.
     allow("windir", Rule::Host),
+    // Windows' own system names (round 3b), each from the OS on Windows only ([`system`]),
+    // never inherited, hooked or set: a name the OS gives no value for stays unset.
+    // cmd, which Node's `child_process` and npm's scripts run:
+    // `<real SystemRoot>\System32\cmd.exe`.
+    allow("ComSpec", Rule::Host),
+    // The Windows folder's drive (`C:`), from the real SystemRoot: some installers' scripts use it.
+    allow("SystemDrive", Rule::Host),
+    // `FOLDERID_ProgramData`: where tools look for machine-wide settings.
+    allow("ProgramData", Rule::Host),
+    // `FOLDERID_ProgramFiles`: where programs look for installed tools (Git, Node).
+    allow("ProgramFiles", Rule::Host),
+    // `FOLDERID_ProgramFilesX86`: the 32-bit programs' folder.
+    allow("ProgramFiles(x86)", Rule::Host),
+    // `FOLDERID_ProgramFilesX64`: the 64-bit programs' folder, whatever this process's bitness.
+    allow("ProgramW6432", Rule::Host),
+    // `FOLDERID_ProgramFilesCommon`: shared program files.
+    allow("CommonProgramFiles", Rule::Host),
+    // `FOLDERID_ProgramFilesCommonX86`: the 32-bit shared program files.
+    allow("CommonProgramFiles(x86)", Rule::Host),
+    // `FOLDERID_ProgramFilesCommonX64`: the 64-bit shared program files.
+    allow("CommonProgramW6432", Rule::Host),
+    // `GetNativeSystemInfo`'s architecture (`AMD64`, `ARM64`): Node and Python pick a native
+    // build with it.
+    allow("PROCESSOR_ARCHITECTURE", Rule::Host),
+    // `GetNativeSystemInfo`'s processor count: build tools size their workers by it.
+    allow("NUMBER_OF_PROCESSORS", Rule::Host),
+    // `Windows_NT`, fixed: scripts tell Windows from Unix by it.
+    allow("OS", Rule::Host),
+    // The profile names, at the jailed home: the Windows runner sets them to the state folder
+    // whatever the spec says (`clauseo_sandbox::windows::runner::env`, `set_by_runner`), so
+    // Node's `os.homedir()` and Claude Code read the jail's home. Host-set, so no hook, setting
+    // or inherited value reaches the spec. `USERPROFILE` = the state folder.
+    allow("USERPROFILE", Rule::Host),
+    // `<state>\AppData\Roaming`.
+    allow("APPDATA", Rule::Host),
+    // `<state>\AppData\Local`.
+    allow("LOCALAPPDATA", Rule::Host),
+    // The state folder's drive (git and ssh read it before `USERPROFILE`).
+    allow("HOMEDRIVE", Rule::Host),
+    // The state folder below its drive.
+    allow("HOMEPATH", Rule::Host),
     // The locale: the agent's messages and its tools' sorting and encoding.
     allow("LANG", Rule::Inherited),
     // The locale's parts (`LC_ALL`, `LC_CTYPE` …).
@@ -325,7 +366,8 @@ pub(crate) fn system_root() -> Option<PathBuf> {
 
 /// The variables the host sets for the jail besides the proxy's and the CA bundle's: `PATH`
 /// ([`path`]) from the policy's `runtime`, and on Windows `SystemRoot` and `windir`
-/// ([`system_root`]).
+/// ([`system_root`]) and Windows' system names ([`system::native`]; the ones the OS gives no
+/// value for are counted in the log, never inherited).
 pub(crate) fn host_vars(runtime: &[PathBuf]) -> Vec<(OsString, Option<OsString>)> {
     let mut vars: Vec<(OsString, Option<OsString>)> = path(runtime)
         .map(|path| (OsString::from("PATH"), Some(path)))
@@ -336,8 +378,22 @@ pub(crate) fn host_vars(runtime: &[PathBuf]) -> Vec<(OsString, Option<OsString>)
             vars.push((OsString::from(name), Some(root.as_os_str().to_owned())));
         }
     }
+    #[cfg(windows)]
+    {
+        let (system, unset) = system::native();
+        if unset > 0 {
+            tracing::debug!(
+                unset,
+                "Windows gave no value for some of the jail's system names"
+            );
+        }
+        vars.extend(system.into_iter().map(|(name, value)| (name, Some(value))));
+    }
     vars
 }
 
+// Read only on Windows; its rules are tested on every OS.
+#[cfg(any(windows, test))]
+pub(crate) mod system;
 #[cfg(test)]
 mod tests;

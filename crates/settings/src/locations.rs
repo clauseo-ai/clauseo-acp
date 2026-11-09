@@ -85,6 +85,14 @@ pub enum KnownFolder {
     ProgramFiles,
     /// `Program Files (x86)`.
     ProgramFilesX86,
+    /// The 64-bit `Program Files` (`%ProgramW6432%`); none in a 32-bit process.
+    ProgramFilesX64,
+    /// `Program Files\Common Files` (`%CommonProgramFiles%`).
+    ProgramFilesCommon,
+    /// `Program Files (x86)\Common Files` (`%CommonProgramFiles(x86)%`).
+    ProgramFilesCommonX86,
+    /// The 64-bit `Common Files` (`%CommonProgramW6432%`); none in a 32-bit process.
+    ProgramFilesCommonX64,
     /// `Program Files (Arm)`, beside `Program Files`, on the machines that have it.
     ProgramFilesArm,
     /// `ProgramData`.

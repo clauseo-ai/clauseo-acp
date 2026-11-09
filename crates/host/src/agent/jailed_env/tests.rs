@@ -279,6 +279,7 @@ fn a_jailed_spec_holds_exactly_the_allow_listed_names() {
     ]);
     if cfg!(windows) {
         common.extend(["TEMP", "TMP", "PATHEXT", "SystemRoot", "windir"]);
+        common.extend(super::system::SYSTEM_NAMES);
     }
     let claude = ["CLAUDE_CONFIG_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR"];
     let codex = [
@@ -447,5 +448,63 @@ fn the_jailed_path_is_the_runtime_then_the_fixed_os_folders() {
     assert_eq!(joined, want);
     for os in OS_PATH {
         assert!(!os.contains("homebrew") && !os.contains("local"), "{os}");
+    }
+}
+
+/// Windows' system names (round 3b): the host's values on Windows, absent elsewhere, and never
+/// the lawyer's, the hook's or the settings'.
+#[test]
+fn windows_system_names_are_the_host_s_and_no_other_source_s() {
+    let evil = [
+        ("ProgramFiles", "C:\\evil"),
+        ("ComSpec", "C:\\evil\\cmd.exe"),
+        ("NUMBER_OF_PROCESSORS", "999"),
+        ("OS", "Evil_OS"),
+    ];
+    let mut inherited = lawyers_env();
+    inherited.extend(os(&evil));
+    let hook: BTreeMap<OsString, OsString> = os(&evil).into_iter().collect();
+    let host: BTreeMap<String, String> = host_vars(&runtime())
+        .into_iter()
+        .filter_map(|(name, value)| Some((name.into_string().ok()?, value?.into_string().ok()?)))
+        .collect();
+    for kind in [Kind::Claude, Kind::Codex] {
+        let env = jailed(kind, inherited.clone(), &launch(&evil), hook.clone());
+        for name in super::system::SYSTEM_NAMES {
+            if cfg!(windows) {
+                assert_eq!(env.get(name), host.get(name), "{kind:?}: {name}");
+                assert!(env.contains_key(name), "{kind:?}: {name}");
+            } else {
+                assert!(!has(&env, name), "{kind:?}: {name}");
+            }
+        }
+        assert!(
+            !env.values().any(|value| value.contains("evil")),
+            "{kind:?}"
+        );
+        assert!(!env.values().any(|value| value == "999"), "{kind:?}");
+    }
+}
+
+/// The profile names are host-set: the Windows runner puts them at the jailed home
+/// (`set_by_runner`), and no inherited, hook or settings value reaches the spec before it.
+#[test]
+fn the_profile_names_come_from_no_source_but_the_runner() {
+    let profile = [
+        ("USERPROFILE", "C:\\Users\\ada"),
+        ("APPDATA", "C:\\Users\\ada\\AppData\\Roaming"),
+        ("LOCALAPPDATA", "C:\\Users\\ada\\AppData\\Local"),
+        ("HOMEDRIVE", "C:"),
+        ("HOMEPATH", "\\Users\\ada"),
+    ];
+    let mut inherited = lawyers_env();
+    inherited.extend(os(&profile));
+    let hook: BTreeMap<OsString, OsString> = os(&profile).into_iter().collect();
+    for kind in [Kind::Claude, Kind::Codex] {
+        let env = jailed(kind, inherited.clone(), &launch(&profile), hook.clone());
+        for (name, _) in profile {
+            assert_eq!(super::allowed(OsStr::new(name)), Some(Rule::Host), "{name}");
+            assert!(!has(&env, name), "{kind:?}: {name}");
+        }
     }
 }
