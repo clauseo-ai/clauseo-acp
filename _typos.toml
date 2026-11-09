@@ -7,6 +7,8 @@
 # generated: its chunks cut words at random, and its prose is checked where it is written,
 # crates/fake_agent/tests/stdio/scoreboard_prose.rs. The fuzz seeds are inputs libFuzzer mutated:
 # their words are cut and changed on purpose. The block list's keys and test signatures are base64.
+# The Python runtime's notices are third-party licence texts, written by `cargo xtask
+# python-runtime bump` word for word.
 extend-exclude = [
   "Cargo.lock",
   "ui/pnpm-lock.yaml",
@@ -16,6 +18,7 @@ extend-exclude = [
   "crates/blocklist/keys/*.pub",
   "crates/blocklist/tests/data/*.pub",
   "crates/blocklist/tests/data/*.minisig",
+  "python-runtime/THIRD-PARTY-NOTICES.txt",
 ]
 
 [default]

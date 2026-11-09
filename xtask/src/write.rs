@@ -6,7 +6,8 @@
 //! write through `Scratch` (`scratch.rs`).
 //!
 //! - `write_file_in`, `remove_in`: write one file directly in a folder, remove one entry directly
-//!   in a folder.
+//!   in a folder. `make_dirs`: make a folder and its missing parents. `copy_file_in`: copy one
+//!   file, with its permissions, to a new name directly in a folder.
 //! - `LockFile::open`: a lock file directly in a folder, whose exclusive lock keeps a second run
 //!   of a tool out.
 //! - `Guard`, `Backups`: the tracked-file guard. Any tool that edits a tracked file saves its
@@ -38,6 +39,28 @@ pub(crate) fn write_file_in(dir: &Path, name: &str, bytes: &[u8]) -> io::Result<
     plain_name(name, "file name")?;
     sys::create_dir_all(dir)?;
     sys::write(&dir.join(name), bytes)
+}
+
+/// Makes `dir` and its missing parents; a folder already there is fine.
+pub(crate) fn make_dirs(dir: &Path) -> io::Result<()> {
+    sys::create_dir_all(dir)
+}
+
+/// Copies the file `from` (followed if it is a symlink) to `<dir>/<name>`, with its permissions.
+/// Refuses a `name` that is not one plain file name, and a `<dir>/<name>` already there.
+pub(crate) fn copy_file_in(dir: &Path, name: &str, from: &Path) -> io::Result<()> {
+    plain_name(name, "file name")?;
+    let to = dir.join(name);
+    if std::fs::symlink_metadata(&to).is_ok() {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!(
+                "{} is already there, so nothing is copied over it",
+                to.display()
+            ),
+        ));
+    }
+    sys::copy(from, &to).map(drop)
 }
 
 /// Removes `<dir>/<name>`: the folder and everything in it, or the file. A symlink is removed,
