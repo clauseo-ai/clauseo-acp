@@ -1,8 +1,9 @@
 //! `cargo xtask python-runtime check --online`: the nightly re-check. Every pinned wheel must still
 //! be on `PyPI` with the lock's sha256 and size and not yanked, every PBS asset must still have the
-//! lock's sha256 in its release's `SHA256SUMS`, and OSV is asked for advisories against each
-//! pinned package version. Advisories are reported (and written as JSON for the workflow's
-//! issue job); they do not fail the check, a changed hash does.
+//! lock's sha256 in its release's `SHA256SUMS`, pandoc's release must still give each archive the
+//! lock's sha256 and size (and its source tarball still hash the same), and OSV is asked for
+//! advisories against each pinned package version. Advisories are reported (and written as JSON
+//! for the workflow's issue job); they do not fail the check, a changed hash does.
 
 use super::Failure;
 use super::lock::Lock;
@@ -82,6 +83,7 @@ pub(crate) fn run<W: Write>(
             }
         }
     }
+    super::pandoc::online(&lock.pandoc, work, &mut problems)?;
     let found = osv(lock, work)?;
     for advisory in &found {
         out.note(format!(
@@ -100,9 +102,10 @@ pub(crate) fn run<W: Write>(
     }
     if problems.is_empty() {
         out.note(format!(
-            "check --online: {} packages and {} PBS assets still match the lock",
+            "check --online: {} packages, {} PBS assets and pandoc {} still match the lock",
             lock.packages.len(),
-            lock.pbs.len()
+            lock.pbs.len(),
+            lock.pandoc.version
         ));
         Ok(())
     } else {

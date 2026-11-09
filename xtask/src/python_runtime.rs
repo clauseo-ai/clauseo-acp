@@ -19,6 +19,7 @@ mod lock;
 mod net;
 mod notices;
 mod online;
+mod pandoc;
 mod rules;
 mod target;
 mod tree;

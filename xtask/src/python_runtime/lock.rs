@@ -19,6 +19,40 @@ pub(crate) struct Lock {
     pub pbs: BTreeMap<String, PbsAsset>,
     #[serde(rename = "package", default)]
     pub packages: Vec<Package>,
+    /// pandoc, which rides in the same archives (`pandoc.rs`).
+    pub pandoc: Pandoc,
+}
+
+/// pandoc from jgm/pandoc's GitHub release: `version` is edited by hand, `bump` writes the rest.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Pandoc {
+    /// The release tag, `3.13`.
+    pub version: String,
+    /// The commit the release's tag points at, as GitHub's API gives it.
+    #[serde(default)]
+    pub commit: String,
+    /// The sha256 and size of the tag's source tarball (`pandoc::source_url`): the GPL's source
+    /// pointer, and where `bump` and `build` read pandoc's licence texts.
+    #[serde(default)]
+    pub source_sha256: String,
+    #[serde(default)]
+    pub source_size: u64,
+    /// The release archive of each target, keyed by triple.
+    #[serde(default)]
+    pub archives: BTreeMap<String, PandocArchive>,
+}
+
+/// One target's pandoc release archive.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PandocArchive {
+    pub asset: String,
+    /// Its sha256, which must be the `digest` GitHub's API gives the asset.
+    pub sha256: String,
+    pub size: u64,
+    /// The path of the pandoc binary inside the archive, the one file `build` takes from it.
+    pub binary: String,
 }
 
 /// What the archive is: the `CPython`, the PBS release it comes from, and Clauseo's build number.
@@ -173,9 +207,33 @@ impl Lock {
             }
         }
         lines.push(String::new());
+        lines.extend(PANDOC_NOTE.lines().map(str::to_owned));
+        lines.push("[pandoc]".to_owned());
+        lines.push(format!("version = {}", quote(&self.pandoc.version)));
+        lines.push(format!("commit = {}", quote(&self.pandoc.commit)));
+        lines.push(format!(
+            "source_sha256 = {}",
+            quote(&self.pandoc.source_sha256)
+        ));
+        lines.push(format!("source_size = {}", self.pandoc.source_size));
+        for (triple, archive) in &self.pandoc.archives {
+            lines.push(String::new());
+            lines.push(format!("[pandoc.archives.{}]", key(triple)));
+            lines.push(format!("asset = {}", quote(&archive.asset)));
+            lines.push(format!("sha256 = {}", quote(&archive.sha256)));
+            lines.push(format!("size = {}", archive.size));
+            lines.push(format!("binary = {}", quote(&archive.binary)));
+        }
+        lines.push(String::new());
         lines.join("\n")
     }
 }
+
+/// The comment above `[pandoc]`.
+const PANDOC_NOTE: &str = "\
+# pandoc, from jgm/pandoc's immutable GitHub release: edit only `version` by hand; bump writes the
+# rest. Windows on arm64 takes the x86_64 build, which runs there under Prism.
+";
 
 /// The comment at the top of the lock.
 const HEADER: &str = "\
