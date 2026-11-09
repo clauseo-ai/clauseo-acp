@@ -161,8 +161,9 @@ pub(crate) enum Place {
 /// alike, and a `..` in either is unknown (the kernel takes it as written, after any link before
 /// it, so it can't be taken off by text): `UNC\…` after either is network, a drive letter goes
 /// on to the drive check, anything else (a volume or device name) is unknown. A `\\.\` device
-/// path is `UNC\…` (network), a drive letter (`\\.\D:\x` is `D:\x`: Win32 takes `..` off a
-/// device path by text, as it does a plain one), or another device (unknown). Other paths
+/// path with a `..` is unknown too (Win32 takes it off above the drive letter, whose root is
+/// `\\.\`); without one it is `UNC\…` (network), a drive letter (`\\.\D:\x` is `D:\x`), or
+/// another device (unknown). Other paths
 /// starting with two separators (`\\host\share`, `//host/share`) are network. A drive letter
 /// is what its device is ([`Drive`]), a `subst` drive one mapping at a time (up to
 /// [`SUBST_MAX`], past which it is unknown). Any other path is network if its longest
@@ -195,6 +196,11 @@ pub(crate) fn classify(path: &Path, mounts: &Mounts) -> Place {
             let Some(tail) = bytes.get(4..).filter(|_| device) else {
                 return Place::Off(Off::Network);
             };
+            // Win32's root for a device path is `\\.\` itself, so a `..` climbs above the drive
+            // letter (`\\.\D:\..\Z:\m` opens `Z:\m`): unknown, as in a `\\?\` path.
+            if tail.split(sep).any(|name| name == b"..") {
+                return Place::Off(Off::Unknown);
+            }
             if let [u, n, c, after, ..] = tail
                 && [*u, *n, *c].eq_ignore_ascii_case(b"UNC")
                 && sep(after)

@@ -85,8 +85,11 @@ fn support_with(
     mounts: &Mounts,
     open: impl Fn(&[u16], u32) -> windows::core::Result<Handle>,
 ) -> io::Result<FolderSupport> {
-    let wide = verbatim_wide(path)?;
-    if is_share_path(&wide) || is_network_path(path, mounts) {
+    // The path classified is the one opened: absolute, as `verbatim_wide` makes it (Win32 takes
+    // `..` off a plain or `\\.\` path here, so `\\.\D:\..\Z:\m` is classified as `\\.\Z:\m`).
+    let absolute = std::path::absolute(path)?;
+    let wide = verbatim_wide(&absolute)?;
+    if is_share_path(&wide) || is_network_path(&absolute, mounts) {
         return Ok(FolderSupport::Network);
     }
     let folder = open(&wide, FILE_READ_ATTRIBUTES.0).map_err(|error| os_error(&error))?;
@@ -442,6 +445,7 @@ mod tests {
             r"\\?\Volume{0}\m".to_owned(),
             r"R:\m".to_owned(),
             r"\\.\R:\m".to_owned(),
+            r"\\.\D:\..\R:\m".to_owned(),
             r"Y:\m".to_owned(),
         ];
         let letters = (b'E'..).take(REDIRECTORS.len());

@@ -72,14 +72,37 @@ fn a_drive_letter_is_what_its_device_is_in_any_case_and_form() {
 fn a_device_path_on_a_drive_letter_is_its_drive() {
     let mounts = Mounts::new(Vec::new(), b"Z");
     assert_eq!(
-        place(r"\\.\C:\repo\..\x", &mounts),
-        Place::Local(PathBuf::from(r"C:\repo\..\x"))
+        place(r"\\.\C:\repo\x", &mounts),
+        Place::Local(PathBuf::from(r"C:\repo\x"))
     );
     assert_eq!(
         place("//./c:/x", &mounts),
         Place::Local(PathBuf::from("c:/x"))
     );
     assert_eq!(place(r"\\.\Z:\x", &mounts), Place::Off(Off::Network));
+}
+
+/// A `..` in a `\\.\` device path climbs above its drive letter (Win32's root there is `\\.\`),
+/// so it can reach another drive or a share: unknown in any case or slash, with no file call.
+#[test]
+fn a_dot_dot_in_a_device_path_is_unknown() {
+    let mounts = Mounts::new(Vec::new(), b"Z");
+    let never =
+        |path: &Path| -> io::Result<Option<PathBuf>> { panic!("{} was looked at", path.display()) };
+    for path in [
+        r"\\.\D:\..\Z:\m",
+        "//./D:/../UNC/h/s",
+        r"\\.\d:\..\x",
+        r"//./D:\../x",
+        r"\\.\C:\repo\..\x",
+        r"\\.\C:\..",
+    ] {
+        assert_eq!(place(path, &mounts), Place::Off(Off::Unknown), "{path}");
+        for dots_by_text in [true, false] {
+            let got = link_to_network_as(Path::new(path), &mounts, never, dots_by_text);
+            assert_eq!(got, Some((PathBuf::from(path), Off::Unknown)), "{path}");
+        }
+    }
 }
 
 /// A local `subst` drive is its mapping, one level at a time: onto a local disk it is
