@@ -38,6 +38,7 @@ fn the_cdp_port_is_required_and_parsed() {
             cwd: cwd.clone().into(),
             cdp_port: 61_101,
             daemon_port: None,
+            listen: None,
             child_args: args(&["mcp"]),
         }
     );
@@ -46,6 +47,45 @@ fn the_cdp_port_is_required_and_parsed() {
         Os::Unix,
     );
     assert!(without.unwrap_err().starts_with("expected --agent-browser"));
+}
+
+/// `--listen <socket>` may come first on Unix, as an absolute path that need not exist; it is
+/// refused when relative, anywhere else in the line, and on Windows.
+#[test]
+fn listen_comes_first_on_unix_only() {
+    let (program, cwd) = program_and_cwd();
+    let rest = [
+        "--agent-browser",
+        program.as_str(),
+        "--cwd",
+        cwd.as_str(),
+        "--cdp-port",
+        "61101",
+        "--",
+        "mcp",
+    ];
+    let with = |first: &[&str]| args(&[first, &rest[..]].concat());
+    let parsed = parse(
+        &with(&["--listen", "/tmp/clauseo-ab-x/guard.sock"]),
+        Os::Unix,
+    )
+    .unwrap();
+    assert_eq!(
+        parsed.listen.as_deref(),
+        Some(std::path::Path::new("/tmp/clauseo-ab-x/guard.sock"))
+    );
+    assert_eq!(parsed.child_args, args(&["mcp"]));
+    assert_eq!(
+        parse(&with(&["--listen", "guard.sock"]), Os::Unix),
+        Err("--listen must be an absolute path")
+    );
+    assert_eq!(
+        parse(&with(&["--listen", "C:\\guard.sock"]), Os::Windows),
+        Err("--listen is for macOS and Linux only")
+    );
+    assert!(parse(&with(&["--listen"]), Os::Unix).is_err());
+    let late = args(&[&rest[..6], &["--listen", "/tmp/g.sock"], &rest[6..]].concat());
+    assert!(parse(&late, Os::Unix).is_err(), "--listen after the ports");
 }
 
 #[test]

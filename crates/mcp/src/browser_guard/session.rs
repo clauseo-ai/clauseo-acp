@@ -172,7 +172,7 @@ impl Launcher {
 pub(crate) struct Shared {
     pub(crate) launcher: Launcher,
     pub(crate) state: Mutex<State>,
-    /// The guard's stdout.
+    /// Where the agent's lines go: the guard's stdout, or the connected client (`relay/listen.rs`).
     pub(crate) out: Out,
     /// Set once the agent has closed stdin and the close request is going out.
     pub(crate) closing: AtomicBool,
@@ -197,7 +197,7 @@ impl Shared {
                 closing: false,
                 ended: false,
             }),
-            out: Mutex::new(io::stdout()),
+            out: Out::stdout(),
             closing: AtomicBool::new(false),
             oneshot: Mutex::new(None),
             held: Arc::default(),
