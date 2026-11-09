@@ -42,6 +42,7 @@
 //! outer is still starting is never resumed past it ([`SessionEnd::began`], `start.rs`).
 
 use std::io::{self, Read, Write};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError, mpsc};
 use std::thread;
@@ -198,6 +199,10 @@ pub(crate) struct SessionEnd<S: EndSteps> {
     begun_changed: Condvar,
 }
 
+/// What the outer says when the end on the git watch's `session-end` thread panicked.
+pub(crate) const END_PANICKED: &str =
+    "clauseo-sandbox-run: the session's end panicked on its own thread; the exit ends it again";
+
 impl<S: EndSteps> SessionEnd<S> {
     pub(crate) fn new(steps: S) -> SessionEnd<S> {
         SessionEnd {
@@ -241,7 +246,14 @@ impl<S: EndSteps> SessionEnd<S> {
         let end = Arc::clone(self);
         let later = thread::Builder::new()
             .name("session-end".to_owned())
-            .spawn(move || end.start_once());
+            .spawn(move || {
+                // A panic here would leave the end silent until the exit path ran it again:
+                // said, by its kind alone (its text could name anything). A release build
+                // aborts on panic instead, so the outer is gone and its marker stays open.
+                if catch_unwind(AssertUnwindSafe(|| end.start_once())).is_err() {
+                    end.steps.log(END_PANICKED);
+                }
+            });
         if later.is_err() {
             self.start_once();
         }

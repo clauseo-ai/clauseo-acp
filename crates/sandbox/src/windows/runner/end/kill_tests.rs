@@ -24,6 +24,10 @@ struct Fake {
     request_fails: bool,
     /// When set, the job's end says it began, then waits for a word.
     end_gate: Mutex<Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>>,
+    /// How many of the sweep task's requests panic, the first ones.
+    request_panics: Mutex<u32>,
+    /// When set, each logged line is sent on it too.
+    logged: Mutex<Option<mpsc::Sender<String>>>,
 }
 
 impl Fake {
@@ -75,6 +79,13 @@ impl EndSteps for Fake {
         Ok(SWEEP_AT)
     }
     fn request_sweep(&self) -> Result<(), String> {
+        let panics = {
+            let mut left = self.request_panics.lock().unwrap();
+            let panics = *left > 0;
+            *left = left.saturating_sub(1);
+            panics
+        };
+        assert!(!panics, "the fake's request panics");
         let gate = self.request_gate.lock().unwrap().take();
         if let Some(go) = gate {
             go.recv_timeout(GATE).unwrap();
@@ -95,6 +106,9 @@ impl EndSteps for Fake {
     }
     fn log(&self, line: &str) {
         self.push(format!("log {line}"));
+        if let Some(logged) = &*self.logged.lock().unwrap() {
+            drop(logged.send(line.to_owned()));
+        }
     }
     fn now(&self) -> Duration {
         Duration::ZERO
@@ -269,4 +283,23 @@ fn a_session_ended_before_its_start_exits_as_the_ends_own_outcome() {
         ended_before_start(EndSignal::Failed),
         RunExit::AgentReserved.code()
     );
+}
+
+/// A panic in the end on the watch's `session-end` thread is said, by its kind alone, and the
+/// exit's trigger runs the end again: the sweep task is still requested.
+#[test]
+fn a_panic_in_the_ends_own_thread_is_logged_and_the_exit_ends_again() {
+    let (logged, lines) = mpsc::channel();
+    let end = Arc::new(SessionEnd::new(Fake {
+        request_panics: Mutex::new(1),
+        logged: Mutex::new(Some(logged)),
+        ..Fake::counting(&[0])
+    }));
+    assert!(end.kill_now(EndSignal::Failed));
+    let said =
+        std::iter::from_fn(|| lines.recv_timeout(GATE).ok()).find(|line| line == END_PANICKED);
+    assert_eq!(said.as_deref(), Some(END_PANICKED));
+    assert!(!end.trigger(EndSignal::InnerExited));
+    let done = end.steps().done();
+    assert_eq!(times(&done, "request sweep"), 1);
 }
