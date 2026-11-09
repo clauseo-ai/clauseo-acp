@@ -4,7 +4,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use super::{LOCAL_SYSTEM, MsiFiles, MsiUpgrade, TRUSTED_INSTALLER, upgrade_with};
+use super::{InstallError, LOCAL_SYSTEM, MsiFiles, MsiUpgrade, TRUSTED_INSTALLER, upgrade_with};
 use crate::windows::wsl::FakeWsl;
 
 const APPS: &str = r"C:\Program Files\WindowsApps";
@@ -183,7 +183,7 @@ fn nothing_is_opened_when_no_upgrade_is_owed_or_the_folder_isn_t_wsl_s() {
         ..FakeWsl::default()
     };
     let image = format!(r"{APPS}\{PACKAGE}\wslinstaller.exe");
-    let never = |_: &str, _: &Held| -> Result<(), String> { panic!("installed") };
+    let never = |_: &str, _: &Held| -> Result<(), InstallError> { panic!("installed") };
     assert_eq!(
         upgrade_with(&files, &reg, &image, APPS, never),
         MsiUpgrade::NotPending
@@ -205,7 +205,7 @@ fn a_failed_install_is_failed_and_the_handle_is_still_closed_after_it() {
     let image = format!(r"{APPS}\{PACKAGE}\wslinstaller.exe");
     let upgraded = upgrade_with(&files, &reg, &image, APPS, |_, _| {
         files.log("install".to_owned());
-        Err("msiexec ended with 1603".to_owned())
+        Err(InstallError::Failed("msiexec ended with 1603".to_owned()))
     });
     assert_eq!(
         upgraded,
@@ -215,4 +215,19 @@ fn a_failed_install_is_failed_and_the_handle_is_still_closed_after_it() {
         files.events.borrow().last().map(String::as_str),
         Some("closed")
     );
+}
+
+#[test]
+fn msiexec_still_running_at_its_limit_is_its_own_outcome() {
+    let files = Fake::passing();
+    let reg = FakeWsl {
+        msi_version: Some("2.6.1.0".to_owned()),
+        ..FakeWsl::default()
+    };
+    let image = format!(r"{APPS}\{PACKAGE}\wslinstaller.exe");
+    let why = "msiexec didn't end within 240 s; it was left running";
+    let upgraded = upgrade_with(&files, &reg, &image, APPS, |_, _| {
+        Err(InstallError::StillInstalling(why.to_owned()))
+    });
+    assert_eq!(upgraded, MsiUpgrade::StillInstalling(why.to_owned()));
 }

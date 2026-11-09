@@ -368,6 +368,7 @@ impl WslUpgrade for WindowsRefresher {
                 WslUpgraded::Installed(line)
             }
             wsl::msi::MsiUpgrade::Failed(why) => WslUpgraded::Failed(why),
+            wsl::msi::MsiUpgrade::StillInstalling(why) => WslUpgraded::StillInstalling(why),
         }
     }
 }

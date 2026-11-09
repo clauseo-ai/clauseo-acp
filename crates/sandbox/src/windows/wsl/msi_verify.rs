@@ -41,6 +41,18 @@ pub enum MsiUpgrade {
     },
     /// The upgrade was owed and failed, or couldn't be tried: why, with codes, never a path.
     Failed(String),
+    /// msiexec was started and hadn't ended at its wait's end (`MSI_WAIT`): it was left running,
+    /// as ending an installer mid-write could leave WSL half-changed. Why, never a path.
+    StillInstalling(String),
+}
+
+/// Why an install didn't end in success.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InstallError {
+    /// msiexec didn't start, or ended with a failure: why, with codes.
+    Failed(String),
+    /// msiexec was still running at the end of its wait, and was left running.
+    StillInstalling(String),
 }
 
 /// The file system's part of the checks. Every error is words and codes, never a path.
@@ -67,7 +79,7 @@ pub(super) fn upgrade_with<F: MsiFiles>(
     reg: &dyn WslRead,
     image: &str,
     apps: &str,
-    install: impl FnOnce(&str, &F::Held) -> Result<(), String>,
+    install: impl FnOnce(&str, &F::Held) -> Result<(), InstallError>,
 ) -> MsiUpgrade {
     let Some((folder, package)) = installer_package(image, apps) else {
         let why = "the installer service's image isn't in a WSL package's folder";
@@ -94,7 +106,8 @@ pub(super) fn upgrade_with<F: MsiFiles>(
             from: msi.unwrap_or_default(),
             to: package,
         },
-        Err(why) => MsiUpgrade::Failed(why),
+        Err(InstallError::Failed(why)) => MsiUpgrade::Failed(why),
+        Err(InstallError::StillInstalling(why)) => MsiUpgrade::StillInstalling(why),
     }
 }
 

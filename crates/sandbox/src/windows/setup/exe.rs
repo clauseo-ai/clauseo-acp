@@ -41,8 +41,8 @@
 //! (`RefreshExit`, from 32), which is why [`main`] returns the process's exit code. So do
 //! `--stop` (`stop.rs`, `StopExit`, from 45), `--wsl-deny` (`refresh::WslDenyExit`, 51 and
 //! 52), `--sweep-tasks` (`sweep.rs`, `SweepExit`, from 53, after the WSL deny task's 51 and 52)
-//! and `--wsl-upgrade` (`refresh::WslUpgradeExit`, from 60, after the sweep's 59), the other
-//! SYSTEM tasks'.
+//! and `--wsl-upgrade` (`refresh::WslUpgradeExit`: 60 to 62, after the sweep's 59, and 67, as 63
+//! is `SetupExit`'s), the other SYSTEM tasks'.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};

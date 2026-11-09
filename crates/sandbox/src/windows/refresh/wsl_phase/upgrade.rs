@@ -16,9 +16,9 @@
 use super::super::{Failed, Refresher, allowed};
 use super::run;
 
-/// The WSL upgrade task's exit codes, from 60 (the WSL deny task's are 51 and 52, and 53 to 59
-/// are #717's sweep's), so the one exe never gives one number two meanings; appended from here
-/// on, never renumbered.
+/// The WSL upgrade task's exit codes: 0, 60 to 62 and 67 (the WSL deny task's are 51 and 52, 53
+/// to 59 are #717's sweep's, and 63 the set-up's), so the one exe never gives one number two
+/// meanings; appended from here on, never renumbered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WslUpgradeExit {
     /// 0: allowed; the upgrade was installed, or none was owed; then the phase ran.
@@ -31,15 +31,21 @@ pub enum WslUpgradeExit {
     /// 62: "upgrade failed, deny applied": the upgrade was owed and failed (or couldn't be tried,
     /// its MSI refused included), WSL is as it was, and the phase ran after it.
     UpgradeFailed,
+    /// 67 (63 is the set-up's `SetupExit`; 67 is this task's): "still installing": msiexec
+    /// hadn't ended at the end of its wait (`wsl::msi::MSI_WAIT`) and was left running, so it may
+    /// still rewrite the launch permissions; the phase ran, but the launch check refuses until a
+    /// later run.
+    StillInstalling,
 }
 
 impl WslUpgradeExit {
     /// Every exit, in order; appended with each new one.
-    pub const ALL: [WslUpgradeExit; 4] = [
+    pub const ALL: [WslUpgradeExit; 5] = [
         WslUpgradeExit::Done,
         WslUpgradeExit::NotAllowed,
         WslUpgradeExit::Deferred,
         WslUpgradeExit::UpgradeFailed,
+        WslUpgradeExit::StillInstalling,
     ];
 
     /// The exit whose [`as_code`](Self::as_code) is `code` (the task's last result), if any.
@@ -56,6 +62,7 @@ impl WslUpgradeExit {
             WslUpgradeExit::NotAllowed => 60,
             WslUpgradeExit::Deferred => 61,
             WslUpgradeExit::UpgradeFailed => 62,
+            WslUpgradeExit::StillInstalling => 67,
         }
     }
 }
@@ -69,6 +76,8 @@ pub enum WslUpgraded {
     Installed(String),
     /// It was owed and failed, or couldn't be tried: why, with codes, never a path.
     Failed(String),
+    /// msiexec was left running at the end of its wait: why, never a path.
+    StillInstalling(String),
 }
 
 /// The run's machine besides the phase: the machine on Windows, a fake in the tests.
@@ -113,10 +122,17 @@ pub fn wsl_upgrade<F: Refresher + WslUpgrade>(fs: &mut F) -> WslUpgradeExit {
             let line = format!("WSL's pending update wasn't installed; WSL is as it was: {why}");
             fs.log(true, &line);
         }
+        WslUpgraded::StillInstalling(why) => {
+            fs.log(
+                true,
+                &format!("WSL's pending update is still installing: {why}"),
+            );
+        }
     }
     run(fs);
     match upgraded {
         WslUpgraded::Failed(_) => WslUpgradeExit::UpgradeFailed,
+        WslUpgraded::StillInstalling(_) => WslUpgradeExit::StillInstalling,
         WslUpgraded::NotPending | WslUpgraded::Installed(_) => WslUpgradeExit::Done,
     }
 }
@@ -207,6 +223,17 @@ mod tests {
     }
 
     #[test]
+    fn msiexec_left_running_exits_67_after_the_phase() {
+        let mut machine = fake();
+        let why = "msiexec didn't end within 240 s; it was left running";
+        machine.upgrade = WslUpgraded::StillInstalling(why.to_owned());
+        assert_eq!(wsl_upgrade(&mut machine), WslUpgradeExit::StillInstalling);
+        assert!(machine.calls.contains(&"reapply_wsl"));
+        let (error, line) = &machine.logs[0];
+        assert!(*error && line.ends_with(why), "{line}");
+    }
+
+    #[test]
     fn a_run_not_allowed_touches_nothing_and_the_codes_are_their_own() {
         let mut machine = fake();
         machine.system = false;
@@ -214,11 +241,12 @@ mod tests {
         assert_eq!(steps(&machine), Vec::<&str>::new());
         assert_eq!(machine.logs.len(), 1);
         let codes = WslUpgradeExit::ALL.map(WslUpgradeExit::as_code);
-        assert_eq!(codes, [0, 60, 61, 62]);
+        assert_eq!(codes, [0, 60, 61, 62, 67]);
         for exit in WslUpgradeExit::ALL {
             assert_eq!(WslUpgradeExit::from_code(exit.as_code().into()), Some(exit));
         }
-        // None is the deny task's (51, 52) nor in #717's 53 to 59.
-        assert!(codes.iter().all(|code| *code == 0 || *code >= 60));
+        // None is the deny task's (51, 52), in #717's 53 to 59 or the set-up's 63.
+        let theirs = |code: u8| (51..=59).contains(&code) || code == 63;
+        assert!(!codes.into_iter().any(theirs));
     }
 }
