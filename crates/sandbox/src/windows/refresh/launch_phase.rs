@@ -126,6 +126,14 @@ mod tests {
             line,
             "MachineLaunchRestriction: degraded: group policy (a Group Policy value overrides it)"
         );
+        // A put-back DCOM moved again: degraded, an error line.
+        let (mut machine, key) = fake();
+        let why = "dcom moved the value to MachineLaunchRestrictionOld";
+        machine.launch = Ok(Some(applied(Guard::Moved, Change::Unchanged, Some(why))));
+        assert_eq!(run_fake(&mut machine, &key), RefreshExit::Done);
+        let (error, line) = machine.logs.last().unwrap();
+        assert!(*error, "{line}");
+        assert!(line.contains("degraded: dcom moved the value"), "{line}");
         let (mut machine, key) = fake();
         machine.launch = Err("the record: access denied".to_owned());
         assert_eq!(run_fake(&mut machine, &key), RefreshExit::Done);

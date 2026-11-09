@@ -1,15 +1,18 @@
 //! The guard's registry, in the 64-bit view: `HKLM\SOFTWARE\Microsoft\Ole`'s
-//! `MachineLaunchRestriction`, Group Policy's `HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DCOM`
-//! value of the same name (its SDDL converted by Windows), the backup in the record's subkey
-//! `MachineLaunch` (protected DACL: SYSTEM and Administrators only, so the pool, which reads
-//! the record, can't read or change it), and the state in the record itself, which this never
-//! makes: a missing record fails the state's write.
+//! `MachineLaunchRestriction`, `MachineAccessRestriction` and `MachineLaunchRestrictionOld`,
+//! COM's effective access descriptor (`super::effective`), Group Policy's
+//! `HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DCOM` value of the same name (its SDDL
+//! converted by Windows), the backup in the record's subkey `MachineLaunch` (protected DACL:
+//! SYSTEM and Administrators only, so the pool, which reads the record, can't read or change
+//! it), and the state in the record itself, which this never makes: a missing record fails the
+//! state's write.
 //!
 //! The backup's values: `Written` (`REG_BINARY`), the bytes last written, set first;
-//! `PutBack` (`REG_DWORD`, 1 once a run has put the deny back since the first write); then
-//! `Original` (`REG_BINARY`), the value before Clauseo's first change, empty when there was
-//! none. A backup counts only once `Original` is there, so a write cut short between the two
-//! leaves none, and the value, not yet changed, is taken as the original again.
+//! `PutBack` (`REG_DWORD`, 1 once a run has put the deny back since the first write);
+//! `AccessAdded` (`REG_BINARY`, only when Clauseo wrote `MachineAccessRestriction`: those
+//! bytes); then `Original` (`REG_BINARY`), the value before Clauseo's first change, empty when
+//! there was none. A backup counts only once `Original` is there, so a write cut short between
+//! the two leaves none, and the value, not yet changed, is taken as the original again.
 #![expect(
     unsafe_code,
     reason = "FFI to the registry and Windows' SDDL conversion"
@@ -46,6 +49,10 @@ const OLE_KEY: &str = "SOFTWARE\\Microsoft\\Ole";
 const POLICY_KEY: &str = "SOFTWARE\\Policies\\Microsoft\\Windows NT\\DCOM";
 /// The value's name, in both keys.
 const VALUE: &str = "MachineLaunchRestriction";
+/// The machine access value DCOM wants beside the launch value.
+const ACCESS: &str = "MachineAccessRestriction";
+/// Where DCOM moves a launch value it won't keep.
+const OLD: &str = "MachineLaunchRestrictionOld";
 /// The backup's subkey, under the record.
 pub const BACKUP_SUBKEY: &str = "MachineLaunch";
 /// The backup's key: owned by Administrators, a protected DACL of SYSTEM and Administrators.
@@ -56,6 +63,8 @@ const ORIGINAL: &str = "Original";
 const WRITTEN: &str = "Written";
 /// The backup's value set to 1 once a run has put the deny back (`Backup::put_back`).
 const PUT_BACK: &str = "PutBack";
+/// The backup's value holding the access value Clauseo wrote (`Backup::access`).
+const ACCESS_ADDED: &str = "AccessAdded";
 /// `WRITE_DAC`.
 const WRITE_DAC: REG_SAM_FLAGS = REG_SAM_FLAGS(0x0004_0000);
 /// `WRITE_OWNER`.
@@ -91,11 +100,7 @@ impl LaunchStore for WindowsLaunchStore {
     }
 
     fn read(&mut self) -> Result<Raw, StoreError> {
-        Ok(match get(OLE_KEY, VALUE)? {
-            None => Raw::Absent,
-            Some((REG_BINARY, data)) => Raw::Binary(data),
-            Some(_) => Raw::OtherType,
-        })
+        ole(VALUE)
     }
 
     fn write(&mut self, bytes: &[u8]) -> Result<(), StoreError> {
@@ -123,10 +128,12 @@ impl LaunchStore for WindowsLaunchStore {
             Some((REG_DWORD, data)) => data != [0, 0, 0, 0],
             Some(_) => true,
         };
+        let access = binary(get(&key, ACCESS_ADDED)?, ACCESS_ADDED)?;
         Ok(Some(Backup {
             original: (!original.is_empty()).then_some(original),
             written,
             put_back,
+            access,
         }))
     }
 
@@ -137,6 +144,10 @@ impl LaunchStore for WindowsLaunchStore {
         set(&key, WRITTEN, REG_BINARY, &backup.written)?;
         let put_back = u32::from(backup.put_back).to_le_bytes();
         set(&key, PUT_BACK, REG_DWORD, &put_back)?;
+        match &backup.access {
+            Some(access) => set(&key, ACCESS_ADDED, REG_BINARY, access)?,
+            None => delete_value(&self.backup_key(), ACCESS_ADDED)?,
+        }
         let original = backup.original.as_deref().unwrap_or_default();
         set(&key, ORIGINAL, REG_BINARY, original)
     }
@@ -171,6 +182,53 @@ impl LaunchStore for WindowsLaunchStore {
     fn delete_state(&mut self) -> Result<(), StoreError> {
         delete_value(&self.record_key, STATE_VALUE)
     }
+
+    fn access(&mut self) -> Result<Raw, StoreError> {
+        ole(ACCESS)
+    }
+
+    fn effective_access(&mut self) -> Result<Vec<u8>, StoreError> {
+        let bytes = super::effective::machine_access()?;
+        valid_descriptor(&bytes)?;
+        Ok(bytes)
+    }
+
+    fn write_access(&mut self, bytes: &[u8]) -> Result<(), StoreError> {
+        valid_descriptor(bytes)?;
+        let key = open(OLE_KEY, KEY_SET_VALUE)?
+            .ok_or_else(|| "HKLM\\SOFTWARE\\Microsoft\\Ole is missing".to_owned())?;
+        set(&key, ACCESS, REG_BINARY, bytes)
+    }
+
+    fn delete_access(&mut self) -> Result<(), StoreError> {
+        delete_value(OLE_KEY, ACCESS)
+    }
+
+    fn old(&mut self) -> Result<Raw, StoreError> {
+        ole(OLD)
+    }
+
+    fn delete_old(&mut self) -> Result<(), StoreError> {
+        delete_value(OLE_KEY, OLD)
+    }
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the guard's bounded wait (1 s in all) for DCOM to act on its write; the tests \
+                  inject it through the fake store"
+    )]
+    fn settle(&mut self, millis: u64) {
+        std::thread::sleep(std::time::Duration::from_millis(millis));
+    }
+}
+
+/// `name` of the `Ole` key as read.
+fn ole(name: &str) -> Result<Raw, StoreError> {
+    Ok(match get(OLE_KEY, name)? {
+        None => Raw::Absent,
+        Some((REG_BINARY, data)) => Raw::Binary(data),
+        Some(_) => Raw::OtherType,
+    })
 }
 
 /// An open registry key, closed on drop.

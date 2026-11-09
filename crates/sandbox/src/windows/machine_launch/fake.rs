@@ -1,5 +1,7 @@
-//! A fake [`LaunchStore`]: the value, the policy, the backup and the state in memory, every call
-//! logged, and any one call made to fail.
+//! A fake [`LaunchStore`]: the value, the policy, the backup, the state, the access value,
+//! COM's effective access descriptor and `MachineLaunchRestrictionOld` in memory, every call
+//! logged, and any one call made to fail. A settle acts as DCOM does: with no access value (or
+//! [`FakeStore::moves`] set), it moves the launch value to `…Old`.
 
 use super::seam::{Backup, LaunchStore, Raw, StoreError};
 
@@ -14,6 +16,14 @@ pub(super) struct FakeStore {
     pub(super) backup: Option<Backup>,
     /// The record's `MachineLaunchDeny`.
     pub(super) state: Option<String>,
+    /// `MachineAccessRestriction`; present by default.
+    pub(super) access: Raw,
+    /// What COM gives as its effective machine access descriptor.
+    pub(super) effective: Result<Vec<u8>, String>,
+    /// `MachineLaunchRestrictionOld`.
+    pub(super) old: Raw,
+    /// Whether DCOM moves the launch value at each settle even beside an access value.
+    pub(super) moves: bool,
     /// The call that fails, by its name.
     pub(super) fail: Option<&'static str>,
     /// Every call, by its name, in order.
@@ -21,13 +31,17 @@ pub(super) struct FakeStore {
 }
 
 impl FakeStore {
-    /// A machine whose value is `value`, with no policy, backup or state.
+    /// A machine whose value is `value`, with no policy, backup or state, and an access value.
     pub(super) fn new(value: Raw) -> FakeStore {
         FakeStore {
             policy: None,
             value,
             backup: None,
             state: None,
+            access: Raw::Binary(machine_access()),
+            effective: Ok(machine_access()),
+            old: Raw::Absent,
+            moves: false,
             fail: None,
             calls: Vec::new(),
         }
@@ -105,4 +119,54 @@ impl LaunchStore for FakeStore {
         self.state = None;
         Ok(())
     }
+
+    fn access(&mut self) -> Result<Raw, StoreError> {
+        self.call("access")?;
+        Ok(self.access.clone())
+    }
+
+    fn effective_access(&mut self) -> Result<Vec<u8>, StoreError> {
+        self.call("effective_access")?;
+        self.effective.clone()
+    }
+
+    fn write_access(&mut self, bytes: &[u8]) -> Result<(), StoreError> {
+        self.call("write_access")?;
+        self.access = Raw::Binary(bytes.to_vec());
+        Ok(())
+    }
+
+    fn delete_access(&mut self) -> Result<(), StoreError> {
+        self.call("delete_access")?;
+        self.access = Raw::Absent;
+        Ok(())
+    }
+
+    fn old(&mut self) -> Result<Raw, StoreError> {
+        self.call("old")?;
+        Ok(self.old.clone())
+    }
+
+    fn delete_old(&mut self) -> Result<(), StoreError> {
+        self.call("delete_old")?;
+        self.old = Raw::Absent;
+        Ok(())
+    }
+
+    fn settle(&mut self, _millis: u64) {
+        self.calls.push("settle");
+        let dcom_moves = self.moves || self.access == Raw::Absent;
+        if dcom_moves && matches!(self.value, Raw::Binary(_)) {
+            self.old = std::mem::replace(&mut self.value, Raw::Absent);
+        }
+    }
+}
+
+/// A machine access descriptor, as COM gives it: `O:BAG:BAD:(A;;CCDCLC;;;WD)`, in COM's
+/// rights.
+pub(super) fn machine_access() -> Vec<u8> {
+    super::test_sd::descriptor(
+        &[super::test_sd::ace(super::test_sd::A, 0, 0x7, "S-1-1-0")],
+        false,
+    )
 }

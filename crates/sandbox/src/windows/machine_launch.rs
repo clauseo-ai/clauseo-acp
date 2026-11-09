@@ -11,23 +11,30 @@
 //! deny first already writes nothing. A value that won't parse ([`sd`]: an invalid descriptor,
 //! a DACL absent or NULL, an entry breaking COM's rules) is never touched. With no value
 //! (Windows' default applies), the new value is Windows' documented default plus the deny, and
-//! the backup says "absent". A Group Policy value
+//! the backup says "absent". DCOM keeps the value only beside `MachineAccessRestriction`, so a
+//! missing one is first written as the access descriptor COM uses now, and the deny counts only
+//! once read back after a settle ([`hold`]). A Group Policy value
 //! (`HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DCOM\MachineLaunchRestriction`) overrides
 //! ours: the guard then counts only when the policy's own SDDL holds the deny.
 //!
 //! What the guard achieved goes to the record as [`Guard::text`] (`MachineLaunchDeny`,
 //! `REG_SZ`, readable by Users, so the app and firm IT can read it): `applied`, `policy`, or
-//! `degraded: ...`. A degraded guard never fails the set-up: WSL's other layers stay.
+//! `degraded: ...`. A degraded guard never fails the set-up: WSL's other layers stay. It is
+//! never recorded as `applied`: the guard fails closed to `degraded`.
 //!
 //! [`remove`] takes off only our exact deny. When the value is exactly what Clauseo's first
 //! write left, with no put-back since, it puts the backup back byte for byte instead, deleting
-//! the value when there was none. Pure; tested on every OS.
+//! the value when there was none. Then the access value and `MachineLaunchRestrictionOld` are
+//! cleaned of what Clauseo wrote ([`hold`]). Pure; tested on every OS.
 
 use crate::windows::sids::Sid;
 
+pub mod hold;
 pub mod sd;
 pub mod seam;
 
+#[cfg(windows)]
+mod effective;
 #[cfg(test)]
 mod fake;
 #[cfg(windows)]
@@ -36,6 +43,8 @@ pub mod os;
 mod test_sd;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_hold;
 
 pub use sd::{DENY_MASK, LaunchSd, SdError};
 pub use seam::{Backup, LaunchStore, Raw, StoreError};
@@ -56,6 +65,12 @@ pub enum Guard {
     Unparsable,
     /// A registry read or write failed: degraded.
     Failed,
+    /// The value didn't hold the deny when read back after the write (DCOM moved it to
+    /// `MachineLaunchRestrictionOld`): degraded.
+    Moved,
+    /// `MachineAccessRestriction` is missing and COM's own access descriptor can't be read, so
+    /// nothing was written: degraded.
+    AccessUnknown,
 }
 
 impl Guard {
@@ -67,6 +82,8 @@ impl Guard {
             Guard::PolicyOverrides => "degraded: group policy",
             Guard::Unparsable => "degraded: unparsable",
             Guard::Failed => "degraded: failed",
+            Guard::Moved => "degraded: dcom moved the value",
+            Guard::AccessUnknown => "degraded: machine access unknown",
         }
     }
 
@@ -224,19 +241,29 @@ fn apply_value(store: &mut impl LaunchStore, group: &Sid) -> Result<Change, (Gua
     } else {
         Change::Added
     };
+    let access = hold::access_to_add(store)?;
     // A write over an existing backup is a put-back: the value it merged into is someone
-    // else's since, so the removal keeps it rather than restore the first original.
+    // else's since, so the removal keeps it rather than restore the first original. An access
+    // value added before stays recorded until one is added again.
     let backup = Backup {
         put_back: before.is_some(),
+        access: access
+            .clone()
+            .or_else(|| before.as_ref().and_then(|kept| kept.access.clone())),
         original: before.map_or(original, |kept| kept.original),
         written: bytes.clone(),
     };
     store.write_backup(&backup).map_err(failed)?;
+    if let Some(access) = &access {
+        store.write_access(access).map_err(failed)?;
+    }
     store.write(&bytes).map_err(failed)?;
+    hold::verify(store, group, &bytes)?;
     Ok(change)
 }
 
-/// Takes the guard for `group` off as the module says, then deletes the backup and the state.
+/// Takes the guard for `group` off as the module says, cleans the access value and
+/// `MachineLaunchRestrictionOld` of Clauseo's bytes, then deletes the backup and the state.
 /// The backup goes back byte for byte only when the value is what the first write left and no
 /// put-back has happened since; otherwise only our exact deny comes off. A failed read or write
 /// is the error, the backup kept for the next run.
@@ -283,6 +310,7 @@ pub fn remove(store: &mut impl LaunchStore, group: &Sid) -> Result<LaunchRemoved
     if let LaunchRemoved::Left(why) = &removed {
         tracing::warn!(%why, "MachineLaunchRestriction was left as it was");
     }
+    hold::remove_extras(store, backup.as_ref())?;
     store.delete_backup()?;
     store.delete_state()?;
     Ok(removed)

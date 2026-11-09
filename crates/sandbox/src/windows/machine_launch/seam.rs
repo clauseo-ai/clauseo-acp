@@ -1,6 +1,8 @@
 //! What the launch restriction's guard asks of the machine: the value, the Group Policy value
-//! that overrides it, Clauseo's backup of the value, and the guard's state in the record.
-//! `os.rs` is the registry; the tests fake it.
+//! that overrides it, `MachineAccessRestriction` beside it and the access descriptor COM uses,
+//! `MachineLaunchRestrictionOld` (where DCOM moves a value it won't keep), Clauseo's backup of
+//! the value, and the guard's state in the record. `os.rs` is the registry and COM; the tests
+//! fake them.
 
 /// `HKLM\SOFTWARE\Microsoft\Ole\MachineLaunchRestriction` as read.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,6 +26,10 @@ pub struct Backup {
     /// Whether a run has put the deny back since the first write (drift): the value then
     /// holds what someone else wrote, which [`super::remove`] must keep.
     pub put_back: bool,
+    /// The `MachineAccessRestriction` bytes Clauseo wrote where there was none (COM's own
+    /// effective access descriptor, so nothing changes in effect); `None` when it wrote none.
+    /// [`super::remove`] deletes the value only while it is still exactly these bytes.
+    pub access: Option<Vec<u8>>,
 }
 
 /// A failed registry call, in words naming the call and its Windows error code; never a path
@@ -55,4 +61,22 @@ pub trait LaunchStore {
     fn write_state(&mut self, state: &str) -> Result<(), StoreError>;
     /// Deletes the guard's state; one already gone is `Ok`.
     fn delete_state(&mut self) -> Result<(), StoreError>;
+    /// `HKLM\SOFTWARE\Microsoft\Ole\MachineAccessRestriction`. DCOM keeps the launch value
+    /// only while this one is there too: without it, it moves a new launch value to
+    /// `MachineLaunchRestrictionOld` within milliseconds.
+    fn access(&mut self) -> Result<Raw, StoreError>;
+    /// The machine access descriptor COM uses now, self-relative
+    /// (`CoGetSystemSecurityPermissions(SD_ACCESSRESTRICTIONS)`): Windows' built-in one when
+    /// there is no value.
+    fn effective_access(&mut self) -> Result<Vec<u8>, StoreError>;
+    /// Writes `bytes` as the `REG_BINARY` `MachineAccessRestriction`.
+    fn write_access(&mut self, bytes: &[u8]) -> Result<(), StoreError>;
+    /// Deletes `MachineAccessRestriction`; one already gone is `Ok`.
+    fn delete_access(&mut self) -> Result<(), StoreError>;
+    /// `HKLM\SOFTWARE\Microsoft\Ole\MachineLaunchRestrictionOld`.
+    fn old(&mut self) -> Result<Raw, StoreError>;
+    /// Deletes `MachineLaunchRestrictionOld`; one already gone is `Ok`.
+    fn delete_old(&mut self) -> Result<(), StoreError>;
+    /// Waits `millis` milliseconds, for DCOM to act on a write.
+    fn settle(&mut self, millis: u64);
 }
