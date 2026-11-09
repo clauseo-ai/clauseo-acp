@@ -37,7 +37,8 @@ const ADMINISTRATORS: &str = "S-1-5-32-544";
 /// (`logon_grant.rs`); `users` are the recorded pool SIDs. A fresh run writes its record first
 /// (the group, no users yet), so `LogonRightAdded` never stands in a key `--remove` reads as no
 /// record. A grant made is in `run`, for the rollback. A policy that defines the right without
-/// the pool is [`LOGON_POLICY_EXCLUDES`] (`Blocked::LogonPolicy`); a policy that can't be read
+/// the pool is [`LOGON_POLICY_EXCLUDES`] (`Blocked::LogonPolicy`) when no local holder admits the
+/// pool either, and grants nothing but goes on when one does; a policy that can't be read
 /// grants nothing, and the logon decides.
 pub(super) fn logon_right(
     machine: &mut impl Machine,
@@ -58,6 +59,13 @@ pub(super) fn logon_right(
             return Ok(());
         }
         Ok(Granted::Covered | Granted::PolicyIncludes) => return Ok(()),
+        Ok(Granted::PolicyNotInEffect) => {
+            tracing::warn!(
+                "a policy defines \"Allow log on locally\" without the pool, yet the pool holds it \
+                 in effect; nothing granted"
+            );
+            return Ok(());
+        }
         Err(GrantError::Excluded) => {
             return Err((Step::LogonRight, LOGON_POLICY_EXCLUDES.to_owned()));
         }
@@ -85,7 +93,10 @@ pub(super) fn logon_right(
 fn record_policy(machine: &mut impl Machine, planned: &Result<Granted, GrantError>, run: &mut Run) {
     run.policy = match planned {
         Ok(Granted::PolicyIncludes) => Some(PolicyState::DefinedWithPool),
-        Err(GrantError::Excluded) => Some(PolicyState::DefinedWithoutPool),
+        // What policy says, though the right works now: a 1385 later means it took effect.
+        Err(GrantError::Excluded) | Ok(Granted::PolicyNotInEffect) => {
+            Some(PolicyState::DefinedWithoutPool)
+        }
         Ok(Granted::Added | Granted::Covered) => Some(PolicyState::NotDefined),
         Ok(Granted::Unknown) => Some(PolicyState::Unknown),
         Err(GrantError::Failed(_)) => None,

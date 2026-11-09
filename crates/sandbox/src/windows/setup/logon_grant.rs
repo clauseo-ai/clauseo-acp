@@ -5,9 +5,11 @@
 //!
 //! - policy ([`rights_policy`](super::rights_policy)) defines the right and includes the pool:
 //!   nothing to do;
-//! - policy defines it without the pool: no grant (a policy refresh would undo it), and the
-//!   set-up fails with [`LOGON_POLICY_EXCLUDES`](super::LOGON_POLICY_EXCLUDES), which is
-//!   `Blocked::LogonPolicy`;
+//! - policy defines it without the pool: no grant (a policy refresh would undo it). The set-up
+//!   fails with [`LOGON_POLICY_EXCLUDES`](super::LOGON_POLICY_EXCLUDES), which is
+//!   `Blocked::LogonPolicy`, only when the local holders agree: none admits the pool (or they
+//!   can't be read). When one does, the definition is stale or lost to another (an old Intune
+//!   provider key, say), the right works in effect, and the set-up goes on;
 //! - policy can't be read ([`RightPolicy::Unknown`]): no grant; the logon is the test, and the
 //!   next set-up checks again;
 //! - no policy defines it: when the local holders ([`LogonRights::holders`]) already name the
@@ -19,7 +21,7 @@
 //! "Allow log on through Remote Desktop Services".
 
 use super::machine::MachineError;
-use super::rights_policy::{INTERACTIVE_RIGHT, PolicyState, Pool, RightPolicy};
+use super::rights_policy::{INTERACTIVE_RIGHT, PolicyState, Pool, RightPolicy, admits_pool};
 use crate::windows::sids::Sid;
 
 /// Every right set-up may grant: "Allow log on locally" alone.
@@ -60,19 +62,24 @@ pub enum Granted {
     PolicyIncludes,
     /// Policy couldn't be read: nothing was granted.
     Unknown,
+    /// A policy definition leaves the pool out, yet a local holder admits it in effect: the
+    /// definition is stale or another one wins. Nothing granted, and the set-up goes on.
+    PolicyNotInEffect,
 }
 
 /// Why the grant step stopped the set-up.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GrantError {
-    /// Policy defines the right without the pool.
+    /// Policy defines the right without the pool, and no local holder admits it (or the
+    /// holders couldn't be read).
     Excluded,
     /// A call failed; nothing is left granted without its record.
     Failed(MachineError),
 }
 
 /// What the grant would do for the group `group` and the pool accounts `users`, as the module
-/// says, changing nothing: [`Granted::Added`] means a grant is due.
+/// says, changing nothing: [`Granted::Added`] means a grant is due. A definition without the
+/// pool fails only when the right in effect agrees ([`Granted::PolicyNotInEffect`] otherwise).
 pub fn plan_grant(
     rights: &mut dyn LogonRights,
     group: &Sid,
@@ -82,26 +89,28 @@ pub fn plan_grant(
         group: Some(group),
         users,
     };
-    match rights.policy(INTERACTIVE_RIGHT, pool) {
+    let excluded = match rights.policy(INTERACTIVE_RIGHT, pool) {
         RightPolicy::Defined {
             includes_pool: true,
         } => return Ok(Granted::PolicyIncludes),
         RightPolicy::Defined {
             includes_pool: false,
-        } => return Err(GrantError::Excluded),
+        } => true,
         RightPolicy::Unknown => return Ok(Granted::Unknown),
-        RightPolicy::NotDefined => {}
+        RightPolicy::NotDefined => false,
+    };
+    let holders = match rights.holders(INTERACTIVE_RIGHT) {
+        Ok(holders) => holders,
+        // The definition stands when the right in effect can't be read.
+        Err(_) if excluded => return Err(GrantError::Excluded),
+        Err(error) => return Err(GrantError::Failed(error)),
+    };
+    match (excluded, admits_pool(&holders, group)) {
+        (true, true) => Ok(Granted::PolicyNotInEffect),
+        (true, false) => Err(GrantError::Excluded),
+        (false, true) => Ok(Granted::Covered),
+        (false, false) => Ok(Granted::Added),
     }
-    let holders = rights
-        .holders(INTERACTIVE_RIGHT)
-        .map_err(GrantError::Failed)?;
-    if holders
-        .iter()
-        .any(|sid| sid == group || COVERING_HOLDERS.contains(&sid.as_str()))
-    {
-        return Ok(Granted::Covered);
-    }
-    Ok(Granted::Added)
 }
 
 /// The grant itself: `LogonRightAdded` written as `group` first, so no grant is ever left that

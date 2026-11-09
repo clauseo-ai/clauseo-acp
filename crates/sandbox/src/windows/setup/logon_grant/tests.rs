@@ -81,10 +81,55 @@ fn a_policy_that_defines_the_right_is_never_granted_over() {
     );
     assert_eq!(rights.recorded, None);
     assert!(
-        rights.calls.iter().all(|call| call.starts_with("policy")),
+        rights
+            .calls
+            .iter()
+            .all(|call| call.starts_with("policy") || call.starts_with("holders")),
         "{:?}",
         rights.calls
     );
+}
+
+/// A policy definition without the pool, as a stale or losing Intune provider key gives.
+fn excluded(holders: Vec<Sid>) -> FakeRights {
+    FakeRights {
+        policy: RightPolicy::Defined {
+            includes_pool: false,
+        },
+        holders,
+        ..FakeRights::default()
+    }
+}
+
+#[test]
+fn a_definition_the_right_in_effect_overrides_grants_nothing_and_goes_on() {
+    for holder in ["S-1-5-32-545", "S-1-5-21-5-5-5-1000"] {
+        let mut rights = excluded(vec![sid("S-1-5-32-544"), sid(holder)]);
+        assert_eq!(
+            grant_interactive(&mut rights, &group(), &[]),
+            Ok(Granted::PolicyNotInEffect),
+            "{holder}"
+        );
+        assert_eq!(rights.recorded, None);
+        assert!(!rights.calls.iter().any(|call| call.starts_with("add")));
+    }
+}
+
+#[test]
+fn a_definition_the_right_in_effect_agrees_with_blocks() {
+    let mut rights = excluded(vec![sid("S-1-5-32-544")]);
+    assert_eq!(
+        grant_interactive(&mut rights, &group(), &[]),
+        Err(GrantError::Excluded)
+    );
+    // Holders that can't be read leave the definition standing.
+    let mut rights = excluded(vec![sid("S-1-5-32-545")]);
+    rights.fail = Some(format!("holders {INTERACTIVE_RIGHT}"));
+    assert_eq!(
+        grant_interactive(&mut rights, &group(), &[]),
+        Err(GrantError::Excluded)
+    );
+    assert!(!rights.calls.iter().any(|call| call.starts_with("add")));
 }
 
 #[test]

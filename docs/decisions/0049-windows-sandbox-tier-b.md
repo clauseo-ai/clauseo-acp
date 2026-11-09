@@ -829,9 +829,14 @@ default Windows include, so most computers need nothing. Set-up checks the rest
   the next set-up adopts the recorded group and makes the pool. If the add fails, the value is cleared. A failed run's rollback
   takes the right off again; when that fails, it keeps the record naming the group, so
   `--remove` still finds the grant. A policy that defines
-  the right without the pool gets no grant (the next refresh would undo it): set-up fails at
+  the right without the pool gets no grant (the next refresh would undo it). When the LSA's
+  holders agree (none of the group, Users, Everyone or Authenticated Users holds it, or they can't
+  be read), set-up fails at
   `Step::LogonRight` with `LOGON_POLICY_EXCLUDES`, which is `Blocked::LogonPolicy`
-  (`logon_policy`; `Blocked::LogonRight` stays the local 1385, which setting up again fixes). Like
+  (`logon_policy`; `Blocked::LogonRight` stays the local 1385, which setting up again fixes). When
+  one does hold it, the definition is stale or loses to another (an old Intune provider key, say):
+  the right works, so set-up grants nothing, records `defined_without_pool` and goes on
+  (`Granted::PolicyNotInEffect`). Like
   every `Blocked` today it refuses and rolls the run back: the set-up's own logon (step 6) is
   interactive and would get 1385 anyway, so the run can't finish. **Once the batch fallback (PR6
   C7a) exists, `LogonPolicy` stops blocking set-up:** set-up then makes the profiles through a

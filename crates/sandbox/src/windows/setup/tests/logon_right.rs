@@ -78,6 +78,44 @@ fn a_policy_without_the_pool_blocks_and_grants_nothing() {
 }
 
 #[test]
+fn a_stale_policy_key_the_right_in_effect_overrides_lets_set_up_go_on() {
+    // Users holds the right in effect, as on a default Windows: the definition didn't take.
+    let mut machine = FakeMachine::new("logon-policy-stale");
+    machine.rights.policy = RightPolicy::Defined {
+        includes_pool: false,
+    };
+    let report = set_up_fresh(&mut machine, &mut FakeAcl::default());
+    assert_eq!(report.pool.len(), 8);
+    assert_eq!(machine.rights.recorded, None);
+    assert!(
+        !machine
+            .rights
+            .calls
+            .iter()
+            .any(|call| call.starts_with("add"))
+    );
+    // The record keeps what policy says, for a later 1385.
+    let state = machine.rights.policy_state.map(|(state, _)| state.text());
+    assert_eq!(state, Some("defined_without_pool"));
+}
+
+#[test]
+fn a_policy_key_the_right_in_effect_agrees_with_records_defined_without_pool() {
+    // A set-up run once (so the record is there to hold the state), then Users lost the right.
+    let mut machine = FakeMachine::new("logon-policy-agrees");
+    set_up_fresh(&mut machine, &mut FakeAcl::default());
+    machine.rights.holders = vec![Sid::parse("S-1-5-32-544").unwrap()];
+    machine.rights.policy = RightPolicy::Defined {
+        includes_pool: false,
+    };
+    let req = request(&mut machine, 0, Vec::new());
+    let failure = set_up(&mut machine, &mut FakeAcl::default(), &req).unwrap_err();
+    assert_eq!(failure.blocked(), Some(Blocked::LogonPolicy));
+    let state = machine.rights.policy_state.map(|(state, _)| state.text());
+    assert_eq!(state, Some("defined_without_pool"));
+}
+
+#[test]
 fn a_policy_that_cant_be_read_grants_nothing_and_the_logon_decides() {
     let mut machine = admins_only("logon-unknown");
     machine.rights.policy = RightPolicy::Unknown;
@@ -248,6 +286,7 @@ fn set_up_records_what_policy_says_for_a_launch() {
     // A re-run blocked by a policy without the pool keeps that in the record it keeps.
     let mut machine = FakeMachine::new("logon-state-blocked");
     set_up_fresh(&mut machine, &mut FakeAcl::default());
+    machine.rights.holders = vec![Sid::parse("S-1-5-32-544").unwrap()];
     machine.rights.policy = RightPolicy::Defined {
         includes_pool: false,
     };
