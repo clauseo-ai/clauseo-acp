@@ -22,6 +22,7 @@
 use clauseo_agents::{InstallState, Method, SigninState};
 use clauseo_protocol::{AgentId, HostError};
 
+use super::parts::signs_in;
 use super::{AgentsBackend, signin_error};
 use crate::bridge::lock;
 
@@ -143,11 +144,11 @@ pub(super) fn run_press(backend: &AgentsBackend, agent: &AgentId) -> bool {
 fn start_press(backend: &AgentsBackend, agent: &AgentId, press: Press) -> Result<(), HostError> {
     backend.refuse_reused(agent)?;
     backend.refuse_start(agent)?;
-    match press {
+    // The identity check expects it, as a direct press's (R17): its `SignedIn` records.
+    signs_in(backend, agent, || match press {
         Press::SignIn(method) => backend.agents.sign_in(agent, method),
         Press::DifferentAccount => backend.agents.use_different_account(agent),
-    }
-    .map_err(|error| signin_error(&error))
+    })
 }
 
 /// The sign-in state back to S18's latest (signed out when it has none) in place of the

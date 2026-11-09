@@ -13,6 +13,7 @@ mod identity;
 mod identity_gate;
 mod identity_ids;
 mod identity_out;
+mod identity_pending;
 mod identity_refresh;
 mod identity_start;
 mod identity_watch;
