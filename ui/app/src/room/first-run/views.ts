@@ -16,8 +16,13 @@ export function installView(setup: AgentSetup | undefined): InstallView | null {
   // paused: another plan's download goes first; it says where it stands, still
   if (install === "paused")
     return setup?.mb === undefined ? null : { kind: "missing", mb: aboutMb(setup.mb) };
-  if ("missing" in install && install.missing !== undefined)
-    return { kind: "missing", mb: aboutMb(mbOf(install.missing.download_bytes)) };
+  if ("missing" in install && install.missing !== undefined) {
+    const mb = aboutMb(mbOf(install.missing.download_bytes));
+    // Clauseo installed it here before and its folder went (#859): the line offers it again
+    return install.missing.installed_before === true
+      ? { kind: "missing", mb, reinstall: true }
+      : { kind: "missing", mb };
+  }
   if ("downloading" in install && install.downloading !== undefined) {
     const { received, total } = install.downloading;
     // done never above total: the bar and the words agree

@@ -788,5 +788,25 @@
     "status": "provisional",
     "at": "2026-11-08",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-90": {
+    "en": "{plan} isn't installed on this computer any more.",
+    "hi": "{plan} अब इस कंप्यूटर पर इंस्टॉल नहीं है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (provisional; Rohan batch review; #859)"
+  },
+  "UD1-91": {
+    "en": "Install {plan}",
+    "hi": "{plan} इंस्टॉल करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (provisional; Rohan batch review; #859)"
   }
 }

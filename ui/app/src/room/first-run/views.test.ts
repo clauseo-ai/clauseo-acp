@@ -30,6 +30,13 @@ test("missing says the download's size, about, from the bytes the host gives", (
   });
 });
 
+test("missing after Clauseo installed it here (#859) says reinstall; never installed says nothing of it", () => {
+  const gone = { missing: { download_bytes: 160_000_000, installed_before: true } };
+  expect(installView(setup(gone))).toStrictEqual({ kind: "missing", mb: 160, reinstall: true });
+  const never = { missing: { download_bytes: 160_000_000, installed_before: false } };
+  expect(installView(setup(never))).toStrictEqual({ kind: "missing", mb: 160 });
+});
+
 test("downloading carries the bytes for the bar and whole MB for the words: 45 MB of 160 MB", () => {
   expect(installView(setup({ downloading: { received: 45_000_000, total: 160_000_000 } }))).toEqual(
     {

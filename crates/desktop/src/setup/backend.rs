@@ -532,7 +532,8 @@ impl AgentsBackend {
         let Some(info) = self.known.get(agent) else {
             return;
         };
-        if let Some(progress) = progress(state, &info.hosts) {
+        let before = lock(&self.wiring.applied).installed.contains(agent);
+        if let Some(progress) = progress(state, &info.hosts, before) {
             self.events.publish(SetupEvent::AgentInstallProgress {
                 agent: agent.clone(),
                 state: progress,

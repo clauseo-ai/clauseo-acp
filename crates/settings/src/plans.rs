@@ -370,8 +370,9 @@ pub(crate) fn entry_is_clauseos(entry: &Value, data_dir: &Path) -> bool {
     owns(command, script, data_dir)
 }
 
-/// [`entry_is_clauseos`] for a launch about to be written.
-pub(crate) fn launch_is_clauseos(launch: &AgentLaunch, data_dir: &Path) -> bool {
+/// [`entry_is_clauseos`] for a launch about to be written, or one held: desktop reads an
+/// `agents.<id>` entry that is Clauseo's as an install it made here before (#859).
+pub fn launch_is_clauseos(launch: &AgentLaunch, data_dir: &Path) -> bool {
     owns(
         &launch.command,
         launch.args.first().map(String::as_str),

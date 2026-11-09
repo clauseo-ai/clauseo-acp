@@ -25,6 +25,12 @@ pub enum InstallProgress {
         /// [`PythonProgress::Missing`], once for the computer, so a window adds that once to
         /// the missing agents' sizes.
         download_bytes: Count,
+        /// Clauseo installed it here before: the settings still hold the `agents.<id>` entry
+        /// an earlier install's `Ready` wrote, and its install folder is gone. The card offers
+        /// "Install {plan}" (#859). False is written as a missing field, and a missing field
+        /// reads as false.
+        #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+        installed_before: bool,
     },
     /// Offline: the install waits and tries again by itself.
     Waiting {

@@ -282,6 +282,11 @@ fn every_install() -> Vec<InstallProgress> {
     vec![
         InstallProgress::Missing {
             download_bytes: Count::from(61_000_000_u32),
+            installed_before: false,
+        },
+        InstallProgress::Missing {
+            download_bytes: Count::from(61_000_000_u32),
+            installed_before: true,
         },
         InstallProgress::Waiting {
             code: ErrorCode::AgentInstallOffline,
@@ -417,9 +422,20 @@ fn setup_events_have_their_json_form() {
                 agent: claude(),
                 state: InstallProgress::Missing {
                     download_bytes: Count::from(5_u32),
+                    installed_before: false,
                 },
             },
             r#"{"agent_install_progress":{"agent":"claude-acp","state":{"missing":{"download_bytes":5}}}}"#,
+        ),
+        (
+            SetupEvent::AgentInstallProgress {
+                agent: claude(),
+                state: InstallProgress::Missing {
+                    download_bytes: Count::from(5_u32),
+                    installed_before: true,
+                },
+            },
+            r#"{"agent_install_progress":{"agent":"claude-acp","state":{"missing":{"download_bytes":5,"installed_before":true}}}}"#,
         ),
     ];
     for (event, json) in cases {

@@ -16,8 +16,9 @@ import { InstallBar as Bar } from "./parts.tsx";
 /** Where the install is, as the line shows it. The app reads it from the host's `InstallProgress`. */
 export type InstallView =
   /** Not here yet, about to download or paused: the size it will download, about, in MB. 0 when
-   * no size is known, and then the line says nothing. */
-  | { kind: "missing"; mb: number }
+   * no size is known, and then the line says nothing. `reinstall`: Clauseo installed it here before
+   * and its folder went (#859); with `InstallActs.install` the line says so and offers it again. */
+  | { kind: "missing"; mb: number; reinstall?: boolean }
   /** Downloading: the bytes for the bar, and the whole MB the words say (done never above
    * total). */
   | {
@@ -47,10 +48,15 @@ export type InstallActs = {
    * the plan isn't here yet. Desktop starts the download on the press and keeps it, so the sign-in goes on once the
    * plan is ready (0033, "When an install starts"). Left out in a matter, whose gate has the press. */
   signIn?: (() => void) | undefined;
+  /** The plan's install, the normal one (`install_agent`, its size, progress and failures on this line): offered as
+   * "Install {plan}" for a plan whose install went missing after Clauseo installed it (#859). Left out, that plan's
+   * line is the plain missing one. */
+  install?: (() => void) | undefined;
 };
 
 export type InstallTestIds = {
   line?: string;
+  install?: string;
   retry?: string;
   proxy?: string;
   askIt?: string;
@@ -125,6 +131,26 @@ export function installLine(
   );
   switch (view.kind) {
     case "missing":
+      // installed here before and gone (#859): it says so whatever the size, and Install starts the normal install
+      if (view.reinstall === true && acts.install !== undefined)
+        return {
+          kind: "wait",
+          words: w("{plan} isn't installed on this computer any more.", { plan: name }),
+          pill: null,
+          actions: (
+            <span className="fl-install" data-testid={ids.line} data-state="reinstall">
+              <Button
+                kind="tone"
+                size="small"
+                className="working-act"
+                onClick={acts.install}
+                data-testid={ids.install}
+              >
+                {w("Install {plan}", { plan: name })}
+              </Button>
+            </span>
+          ),
+        };
       // no size to say (a download of no bytes): no line at all, so the next state is a change
       // the reader hears
       if (view.mb === 0) return null;

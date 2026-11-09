@@ -71,6 +71,7 @@ const IDS = {
     proxy: "install-proxy",
     askIt: "install-ask-it",
     signIn: "install-sign-in",
+    install: "install-again",
   },
   gate: {
     root: "signin",
@@ -167,6 +168,8 @@ function actsFor(
 /** The install line's buttons for `agent`. */
 const installActs = (store: SetupStore, agent: AgentId, copied: SetupState["copied"]) => ({
   retry: () => store.command({ retry_agent_install: { agent } }),
+  // a plan whose install went missing after Clauseo installed it (#859): the normal install, as choosing its card
+  install: () => store.command({ install_agent: { agent } }),
   proxy: () => store.command({ retry_agent_install: { agent, use_system_proxy: true } }),
   copy: copyText,
   copied,
