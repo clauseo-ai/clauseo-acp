@@ -15,12 +15,20 @@
 //!   ALL APPLICATION PACKAGES may read, so both packages can), listed and its marker read. Each
 //!   must open, so a probe that cannot open anything cannot pass.
 //!
+//! After chrome's processes have started and the helper has inspected them, the helper runs the
+//! probe a second time in B's token, now with one target per chrome pid it holds a handle for
+//! (its handle keeps the process object, so the pid cannot be reused). The probe calls
+//! `OpenProcess` on each pid once per right in [`PROCESS_RIGHTS`]
+//! (`PROCESS_QUERY_LIMITED_INFORMATION`, `PROCESS_VM_READ`, `PROCESS_TERMINATE`,
+//! `PROCESS_DUP_HANDLE`); every one must be refused with `ERROR_ACCESS_DENIED`.
+//!
 //! One `probe target=<label> api=<nt|win32> code=<hex>` line per open; the owner judges them
-//! (`evidence.rs`). The paths travel in the child's environment ([`TARGETS_VAR`]), the only
+//! (`evidence.rs`); the helper's `probe-exit phase=<files|procs>` line follows each run. The paths
+//! and pids travel in the child's environment ([`TARGETS_VAR`]), the only
 //! variables it has besides the system folders.
 #![expect(
     unsafe_code,
-    reason = "FFI to NtOpenDirectoryObject, NtCreateFile, the Job Object and the wait"
+    reason = "FFI to NtOpenDirectoryObject, NtCreateFile, OpenProcess, the Job Object and the wait"
 )]
 
 use std::fs::File;
@@ -42,12 +50,15 @@ use windows::Win32::Storage::FileSystem::{
 };
 use windows::Win32::System::IO::IO_STATUS_BLOCK;
 use windows::Win32::System::JobObjects::AssignProcessToJobObject;
-use windows::Win32::System::Threading::WaitForSingleObject;
+use windows::Win32::System::Threading::{
+    OpenProcess, PROCESS_ACCESS_RIGHTS, PROCESS_DUP_HANDLE, PROCESS_QUERY_LIMITED_INFORMATION,
+    PROCESS_TERMINATE, PROCESS_VM_READ, WaitForSingleObject,
+};
 use windows::core::PWSTR;
 
 use super::helper::{MARK, kill_on_close_job, say, system_var};
 use super::inspect;
-use super::win::{Res, failed, owned, raw};
+use super::win::{Res, code, failed, owned, raw};
 
 /// The probe's file name in its folder: the mark that makes `lowbox_probe` do the probe's work.
 pub(crate) const PROBE_EXE: &str = "clauseo-lowbox-proof-probe.exe";
@@ -65,6 +76,14 @@ const OUTPUT_WAIT: Duration = Duration::from_secs(10);
 const DIRECTORY_PROBE: u32 = 0x0000_0003;
 /// `READ_CONTROL | SYNCHRONIZE`: the pipe-folder opens' access, which B's own folder grants B.
 const PIPES_PROBE: u32 = 0x0012_0000;
+/// The rights the probe asks `OpenProcess` for on each of A's chrome processes, one call each,
+/// with the suffix of its line's label.
+pub(crate) const PROCESS_RIGHTS: [(&str, PROCESS_ACCESS_RIGHTS); 4] = [
+    ("query", PROCESS_QUERY_LIMITED_INFORMATION),
+    ("vm-read", PROCESS_VM_READ),
+    ("terminate", PROCESS_TERMINATE),
+    ("dup-handle", PROCESS_DUP_HANDLE),
+];
 
 /// What a target is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,6 +94,8 @@ pub(crate) enum Kind {
     Pipes,
     /// A disk folder, listed, and its [`MARKER`] read.
     Folder,
+    /// A process id, opened with each of [`PROCESS_RIGHTS`].
+    Process,
 }
 
 impl Kind {
@@ -84,6 +105,7 @@ impl Kind {
             Kind::Directory => "dir",
             Kind::Pipes => "pipes",
             Kind::Folder => "folder",
+            Kind::Process => "process",
         }
     }
 }
@@ -118,7 +140,7 @@ fn decode(text: &str) -> Res<Vec<Target>> {
             else {
                 return Err(format!("a probe target is not label|kind|path: {entry}"));
             };
-            let kind = [Kind::Directory, Kind::Pipes, Kind::Folder]
+            let kind = [Kind::Directory, Kind::Pipes, Kind::Folder, Kind::Process]
                 .into_iter()
                 .find(|k| k.name() == kind)
                 .ok_or_else(|| format!("a probe target has the unknown kind {kind}"))?;
@@ -141,8 +163,14 @@ pub(crate) fn is_probe() -> bool {
 }
 
 /// The helper's side: starts the probe (`exe`) in B's `LowBox` token over `namespace_b`, in a
-/// Job Object of its own, waits for it and repeats its report lines, then a `probe-exit` line.
-pub(crate) fn run_in_b(namespace_b: &NamespaceHandles, exe: &Path, targets: &[Target]) -> Res<()> {
+/// Job Object of its own, waits for it and repeats its report lines, then a
+/// `probe-exit phase=<phase>` line.
+pub(crate) fn run_in_b(
+    namespace_b: &NamespaceHandles,
+    exe: &Path,
+    targets: &[Target],
+    phase: &str,
+) -> Res<()> {
     let mut command = LowBoxCommand::new(exe);
     command
         .args([
@@ -183,7 +211,7 @@ pub(crate) fn run_in_b(namespace_b: &NamespaceHandles, exe: &Path, targets: &[Ta
         }
     }
     say(format_args!(
-        "probe-exit exited={} code={code} lines={}",
+        "probe-exit phase={phase} exited={} code={code} lines={}",
         u8::from(waited == WAIT_OBJECT_0),
         lines.len()
     ));
@@ -224,6 +252,18 @@ pub(crate) fn run() {
                 });
                 win32_line(&format!("{}-read", target.label), read);
             }
+            Kind::Process => match target.path.parse::<u32>() {
+                Ok(pid) => {
+                    for (suffix, rights) in PROCESS_RIGHTS {
+                        let label = format!("{}-{suffix}", target.label);
+                        say(format_args!(
+                            "probe target={label} api=win32 code={:#x}",
+                            open_process(pid, rights)
+                        ));
+                    }
+                }
+                Err(e) => panic!("the probe target {} has no pid: {e}", target.label),
+            },
         }
     }
     say("probe-done");
@@ -334,6 +374,20 @@ fn open_pipes(name: &str) -> i32 {
     status.0
 }
 
+/// Opens process `pid` with `rights`; the Win32 code (0 when it opened). An opened handle is
+/// closed at once.
+fn open_process(pid: u32, rights: PROCESS_ACCESS_RIGHTS) -> u32 {
+    // SAFETY: no pointers; the handle on success is owned and closed here.
+    match unsafe { OpenProcess(rights, false, pid) } {
+        Ok(handle) => {
+            let opened: OwnedHandle = owned(handle);
+            drop(opened);
+            0
+        }
+        Err(e) => code(&e),
+    }
+}
+
 /// Closes `handle` when `status` is a success.
 fn close_if_opened(status: i32, handle: HANDLE) {
     if status >= 0 && !handle.is_invalid() {
@@ -354,6 +408,11 @@ fn targets_round_trip() {
             label: "a-profile".to_owned(),
             kind: Kind::Folder,
             path: r"C:\x y\profile".to_owned(),
+        },
+        Target {
+            label: "a-chrome-4242".to_owned(),
+            kind: Kind::Process,
+            path: "4242".to_owned(),
         },
     ];
     assert_eq!(decode(&encode(&targets)), Ok(targets));

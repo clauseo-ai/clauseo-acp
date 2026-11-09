@@ -178,12 +178,15 @@ pub(crate) fn run() {
     say(format_args!("desktop {}", named(desktop_name())));
     // The negative check runs first, while nothing of chrome's exists yet; its failure is a
     // report line the owner judges, so chrome's evidence is still gathered.
-    let probed = probe_targets(&config, &package, &package_b)
-        .and_then(|targets| probe::run_in_b(&namespace_b, Path::new(&config.probe), &targets));
+    let probed = probe_targets(&config, &package, &package_b).and_then(|targets| {
+        probe::run_in_b(&namespace_b, Path::new(&config.probe), &targets, "files")
+    });
     if let Err(e) = probed {
-        say(format_args!("probe-exit error={}", e.replace(' ', "_")));
+        say(format_args!(
+            "probe-exit phase=files error={}",
+            e.replace(' ', "_")
+        ));
     }
-    drop(namespace_b);
 
     let shell = Path::new(&config.shell);
     let staging = Path::new(&config.staging);
@@ -249,6 +252,10 @@ pub(crate) fn run() {
     let inspected: Vec<u32> = seen.iter().map(|s| s.pid).collect();
     listen::report("inspect", &job, &inspected);
     say(format_args!("inspected count={}", seen.len()));
+    // The second negative check, now chrome's processes exist: B opens each one A's helper holds
+    // a handle for (so its pid stays its own) with each of `probe::PROCESS_RIGHTS`.
+    probe_processes(&namespace_b, Path::new(&config.probe), &seen);
+    drop(namespace_b);
 
     finish_page(&mut cdp, &session, navigate, staging).unwrap_or_else(|e| panic!("{e}"));
     listen::report("close", &job, &inspected);
@@ -452,6 +459,32 @@ fn probe_targets(config: &Config, a: &PackageName, b: &PackageName) -> Res<Vec<T
         ),
         target("shared", Kind::Folder, shared.display().to_string()),
     ])
+}
+
+/// Runs the probe in B's token against every chrome process in `seen` the helper holds a handle
+/// for, after a `probe-procs pids=<a,b,…>` line naming them; a failure is a `probe-exit` line.
+fn probe_processes(namespace_b: &NamespaceHandles, probe: &Path, seen: &[inspect::Seen]) {
+    let pids: Vec<u32> = seen
+        .iter()
+        .filter(|s| s.handle.is_some())
+        .map(|s| s.pid)
+        .collect();
+    let list: Vec<String> = pids.iter().map(u32::to_string).collect();
+    say(format_args!("probe-procs pids={}", list.join(",")));
+    let targets: Vec<Target> = pids
+        .iter()
+        .map(|pid| Target {
+            label: format!("a-chrome-{pid}"),
+            kind: Kind::Process,
+            path: pid.to_string(),
+        })
+        .collect();
+    if let Err(e) = probe::run_in_b(namespace_b, probe, &targets, "procs") {
+        say(format_args!(
+            "probe-exit phase=procs error={}",
+            e.replace(' ', "_")
+        ));
+    }
 }
 
 /// A Job Object that ends its processes when its last handle closes.

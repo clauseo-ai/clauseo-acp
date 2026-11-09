@@ -4,10 +4,11 @@
 //!
 //! The row's own bounded waits: the page 180 s (inside it the helper's probe in package B, 30 s
 //! and its output 10 s, then its first four CDP steps, 20 s each: 120 s), the facts 60 s, the
-//! helper's exit 150 s (navigate, load and screenshot 20 s each, `Browser.close` 10 s, chrome's
-//! exit 30 s, the exit codes 15 s, chrome's stderr 10 s: 125 s), its last output 10 s, then in
-//! the cleanup the helper's kill 10 s, the account's processes 30 s, the profile's delete 57 s
-//! and the root's delete 10 s: 507 s in all, under the 600 s nextest gives this row
+//! helper's exit 190 s (the process probe in package B 30 s and its output 10 s, navigate, load
+//! and screenshot 20 s each, `Browser.close` 10 s, chrome's exit 30 s, the exit codes 15 s,
+//! chrome's stderr 10 s: 165 s), its last output 10 s, then in the cleanup the helper's kill
+//! 10 s, the account's processes 30 s, the profile's delete 57 s and the root's delete 10 s:
+//! 547 s in all, under the 600 s nextest gives this row
 //! (`.config/nextest.toml`).
 
 use std::path::{Path, PathBuf};
@@ -33,7 +34,7 @@ const PAGE_WAIT: Duration = Duration::from_secs(180);
 /// How long it waits for the helper's facts after `inspect`.
 const FACTS_WAIT: Duration = Duration::from_secs(60);
 /// How long it waits for the helper to exit after the release.
-const HELPER_EXIT_MS: u32 = 150_000;
+const HELPER_EXIT_MS: u32 = 190_000;
 /// How long it waits for the helper's last output after its exit.
 const DRAIN_WAIT: Duration = Duration::from_secs(10);
 /// ALL APPLICATION PACKAGES: may read the probe's folder, so both packages can.

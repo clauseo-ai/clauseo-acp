@@ -98,6 +98,7 @@ pub(crate) fn check(lines: &[Line], context: &Context) -> Vec<String> {
     let mut problems = check_station(lines, context);
     problems.extend(check_processes(lines));
     problems.extend(check_probe(lines));
+    problems.extend(check_process_probe(lines));
     problems.extend(check_exits(lines));
     problems.extend(check_cdp(lines));
     problems.extend(check_listeners(lines));
@@ -291,20 +292,27 @@ fn probe_result<'a>(lines: &'a [Line], target: &str) -> Option<(&'a str, Option<
     Some((line.get("api"), code))
 }
 
+/// The problem, if any, with the probe's `phase` run's exit: none reported, or not 0 in time.
+fn check_probe_exit(lines: &[Line], phase: &str) -> Option<String> {
+    match lines
+        .iter()
+        .find(|l| l.kind == "probe-exit" && l.get("phase") == phase)
+    {
+        None => Some(format!(
+            "the helper never reported the {phase} probe's exit"
+        )),
+        Some(exit) if exit.get("exited") != "1" || exit.get("code") != "0x0" => Some(format!(
+            "package B's {phase} probe did not exit 0 in time: {}",
+            exit.text
+        )),
+        Some(_) => None,
+    }
+}
+
 /// The negative check: package B's probe exited 0, every open of A's was refused with access
 /// denied (not some other error, which would prove nothing), and every positive control opened.
 fn check_probe(lines: &[Line]) -> Vec<String> {
-    let mut problems = Vec::new();
-    match lines.iter().find(|l| l.kind == "probe-exit") {
-        None => problems.push("the helper never reported the probe's exit".to_owned()),
-        Some(exit) if exit.get("exited") != "1" || exit.get("code") != "0x0" => {
-            problems.push(format!(
-                "package B's probe did not exit 0 in time: {}",
-                exit.text
-            ));
-        }
-        Some(_) => {}
-    }
+    let mut problems: Vec<String> = check_probe_exit(lines, "files").into_iter().collect();
     for target in DENIED {
         match probe_result(lines, target) {
             None => problems.push(format!("no probe result for {target}")),
@@ -326,6 +334,39 @@ fn check_probe(lines: &[Line]) -> Vec<String> {
                 "the positive control {target} failed with {api} code {code:#x?}: the probe \
                  cannot tell a refusal from a broken open"
             )),
+        }
+    }
+    problems
+}
+
+/// The second negative check: after chrome started, package B's probe exited 0 and every
+/// `OpenProcess` it made on A's chrome pids (`probe-procs`), with each right in
+/// `probe::PROCESS_RIGHTS`, was refused with `ERROR_ACCESS_DENIED`. At least one pid.
+fn check_process_probe(lines: &[Line]) -> Vec<String> {
+    let mut problems: Vec<String> = check_probe_exit(lines, "procs").into_iter().collect();
+    let Some(listed) = first(lines, "probe-procs", "pids") else {
+        problems.push("the helper never listed chrome's pids for the process probe".to_owned());
+        return problems;
+    };
+    let pids: Vec<&str> = listed.split(',').filter(|p| !p.is_empty()).collect();
+    if pids.is_empty() {
+        problems.push("the process probe had no chrome pid to open".to_owned());
+    }
+    for pid in pids {
+        for (right, _) in super::probe::PROCESS_RIGHTS {
+            let target = format!("a-chrome-{pid}-{right}");
+            match probe_result(lines, &target) {
+                None => problems.push(format!("no probe result for {target}")),
+                Some(("win32", Some(WIN32_DENIED))) => {}
+                Some((_, Some(0))) => problems.push(format!(
+                    "package B opened package A's chrome process {pid} with {right}: the \
+                     isolation failed"
+                )),
+                Some((api, code)) => problems.push(format!(
+                    "package B's open of A's chrome process {pid} with {right} failed with {api} \
+                     code {code:#x?}, not access denied"
+                )),
+            }
         }
     }
     problems
@@ -471,6 +512,7 @@ pub(crate) fn summary(lines: &[Line], context: &Context) -> Vec<String> {
                 | "probe"
                 | "probe-done"
                 | "probe-exit"
+                | "probe-procs"
                 | "snapshots"
                 | "stderr"
                 | "cdp"
