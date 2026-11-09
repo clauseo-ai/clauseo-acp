@@ -83,14 +83,21 @@ fn bump<W: Write>(
         reports.insert(target, resolve(options, old, target, cache)?);
     }
     let packages = merge(old, &reports, cache)?;
+    out.note(format!(
+        "bump: taking pandoc {} from {}",
+        old.pandoc.version,
+        super::pandoc::REPO
+    ));
+    let pandoc = super::pandoc::bump(&old.pandoc, &options.resolver, cache)?;
     let mut lock = Lock {
         schema: old.schema,
         runtime: old.runtime.clone(),
         resolve: old.resolve.clone(),
         pbs,
         packages,
+        pandoc,
     };
-    let changed = lock.pbs != old.pbs || lock.packages != old.packages;
+    let changed = lock.pbs != old.pbs || lock.packages != old.packages || lock.pandoc != old.pandoc;
     if changed {
         lock.runtime.build = old.runtime.build + 1;
     }

@@ -6,7 +6,7 @@ schema = 1
 
 [runtime]
 python = "3.13.18"
-build = 1
+build = 2
 pbs_release = "20261026"
 
 # What bump resolves: pip resolves `requirements` for cp313 on each target (binary wheels only),
@@ -546,3 +546,35 @@ file = "xlsxwriter-3.3.1-py3-none-any.whl"
 url = "https://files.pythonhosted.org/packages/88/eb/1e6af9959a567901a7e7c7cef2e75883e487df223ed67f9a8977ff863bd8/xlsxwriter-3.3.1-py3-none-any.whl"
 sha256 = "8e2c89e59d733fe59e112317218c64fbbc276d90a8c144ebd6f7fa15e7ab184a"
 size = 180583
+
+# pandoc, from jgm/pandoc's immutable GitHub release: edit only `version` by hand; bump writes the
+# rest. Windows on arm64 takes the x86_64 build, which runs there under Prism.
+[pandoc]
+version = "3.13"
+commit = "30b135468435dc4fbccfc2694508fa8e3e9ddc33"
+source_sha256 = "fbf6044766b0c9be5ccbf18ffe657124449e8563a177d85662ecb6f031f9c308"
+source_size = 9270164
+
+[pandoc.archives.aarch64-apple-darwin]
+asset = "pandoc-3.13-arm64-macOS.zip"
+sha256 = "f436d18bebbfb3ddd326597686dacab9fac5dc23bd060495020f35a28a43a7c3"
+size = 43148194
+binary = "pandoc-3.13-arm64/bin/pandoc"
+
+[pandoc.archives.aarch64-pc-windows-msvc]
+asset = "pandoc-3.13-windows-x86_64.zip"
+sha256 = "23e1f2e978a3df80db8bf65c9c59534f41a23140480cfb4f783a882ab7dc6a4e"
+size = 42983200
+binary = "pandoc-3.13/pandoc.exe"
+
+[pandoc.archives.x86_64-apple-darwin]
+asset = "pandoc-3.13-x86_64-macOS.zip"
+sha256 = "1823278715aa405aaf21b59cde5dc789346aa8d4fc307467f9a9ee84162bedc5"
+size = 26891866
+binary = "pandoc-3.13-x86_64/bin/pandoc"
+
+[pandoc.archives.x86_64-pc-windows-msvc]
+asset = "pandoc-3.13-windows-x86_64.zip"
+sha256 = "23e1f2e978a3df80db8bf65c9c59534f41a23140480cfb4f783a882ab7dc6a4e"
+size = 42983200
+binary = "pandoc-3.13/pandoc.exe"

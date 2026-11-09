@@ -19,6 +19,7 @@ pub(crate) fn problems(lock: &Lock) -> Vec<String> {
     pbs(lock, &mut found);
     packages(lock, &mut found);
     closure(lock, &mut found);
+    super::pandoc::problems(lock, &mut found);
     found
 }
 

@@ -9,17 +9,22 @@
 #   archives' build provenance and `publish` makes the release python-runtime-<python>-c<build>
 #   (from the lock) with the four archives and SHA256SUMS. A release is never replaced: when the
 #   tag or the release is already there, `publish` fails and changes nothing.
-# - schedule (nightly): `audit` re-checks every pinned hash against PyPI and PBS and asks OSV for
-#   advisories, and `report` opens an issue (once per title) when anything is found.
+# - schedule (nightly): `audit` re-checks every pinned hash against PyPI, PBS and pandoc's GitHub
+#   release, asks OSV for advisories, and `report` opens an issue (once per title) when anything
+#   is found.
 #
 # Security:
 # - Every job's token has only what that job needs (the default is none, below); no job but
 #   `publish` can write to the repository, and only `report` can write issues.
 # - `build` runs the pull request's code, so it has a read-only token, no secret, and no OIDC
-#   token. The token (github.token, contents: read) only lets gh read PBS's public attestation.
+#   token. The token (github.token, contents: read) only lets gh read PBS's public attestation
+#   and pandoc's public release attestation.
 # - `build` checks each input before it reads it: PBS's SHA256SUMS must give the asset the lock's
 #   sha256, every download must have the lock's sha256 and size, and `gh attestation verify` must
-#   prove PBS's own release workflow built the asset; any failure stops the build (fail closed).
+#   prove PBS's own release workflow built the asset; pandoc's archive must have the lock's sha256
+#   and size, and `gh release verify-asset` must find it in jgm/pandoc's immutable release (pandoc
+#   publishes no build provenance; see xtask's python_runtime/pandoc.rs); any failure stops the
+#   build (fail closed).
 #   pip installs the wheels offline with --require-hashes.
 # - `attest` runs no repository code: it only downloads the artifacts and attests them, so the OIDC
 #   token that signs never meets the build's code.
@@ -90,7 +95,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     permissions:
-      contents: read # checkout; gh reads PBS's public attestation with this token
+      contents: read # checkout; gh reads PBS's and pandoc's public attestations with this token
     strategy:
       fail-fast: false
       matrix:
@@ -110,8 +115,9 @@ jobs:
       - name: Install the Rust toolchain from rust-toolchain.toml
         run: rustup toolchain install
 
-      # Checks PBS's SHA256SUMS, every sha256 and size, and PBS's build attestation (gh) before
-      # anything is unpacked; then assembles, smoke-tests and packs the archive.
+      # Checks PBS's SHA256SUMS, every sha256 and size, PBS's build attestation and pandoc's
+      # release attestation (gh) before anything is unpacked; then assembles, smoke-tests and
+      # packs the archive.
       - name: Build the runtime
         env:
           GH_TOKEN: ${{ github.token }}

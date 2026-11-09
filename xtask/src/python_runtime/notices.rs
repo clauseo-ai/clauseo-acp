@@ -1,5 +1,5 @@
 //! `python-runtime/THIRD-PARTY-NOTICES.txt`: every licence text of what the archives ship
-//! (`CPython`, the libraries PBS builds into it, pip, and each package's wheel), written by
+//! (`CPython`, the libraries PBS builds into it, pip, each package's wheel, and pandoc), written by
 //! `bump` from the files themselves and stamped with the lock's sha256, so `check` sees a stale
 //! file offline and `build` checks that every licence file in the runtime is in it before it
 //! ships it.
@@ -110,6 +110,12 @@ pub(crate) fn render(lock: &Lock, lock_text: &str, sections: &[Section]) -> Stri
             .to_owned(),
         "their notices are not included.".to_owned(),
         String::new(),
+        format!(
+            "The runtime also carries the pandoc {} program (GPL-2.0-or-later); its section gives",
+            lock.pandoc.version
+        ),
+        "its licence and where its complete source code is.".to_owned(),
+        String::new(),
         "Contents".to_owned(),
     ];
     parts.extend(
@@ -166,6 +172,17 @@ pub(crate) fn problems(notices: &str, lock: &Lock, lock_text: &str) -> Vec<Strin
         if !notices.lines().any(|l| l == line) {
             found.push(format!("THIRD-PARTY-NOTICES.txt does not list `{line}`"));
         }
+    }
+    let line = format!(
+        "- {} ({})",
+        super::pandoc::title(&lock.pandoc),
+        super::pandoc::LICENCE
+    );
+    if !notices.lines().any(|l| l == line) {
+        found.push(format!("THIRD-PARTY-NOTICES.txt does not list `{line}`"));
+    }
+    if !notices.contains(&super::pandoc::source_url(&lock.pandoc.version)) {
+        found.push("THIRD-PARTY-NOTICES.txt does not give pandoc's source tarball".to_owned());
     }
     found
 }
