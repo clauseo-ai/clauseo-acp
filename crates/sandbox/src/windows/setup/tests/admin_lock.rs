@@ -44,6 +44,8 @@ fn set_up_locks_the_admin_copy_with_the_group_right_after_recording_it() {
         let last_write = calls.iter().rposition(|c| c.starts_with("write_record"));
         assert!(made < at && last_write.is_some_and(|w| w < at), "{calls:?}");
         let mut expected = fresh_calls();
+        // Any admin copy gets the watch task after the lock; per machine, the stop task first.
+        expected.insert(at, "register_watch_task 1001".to_owned());
         if copy == Some(CopyOwner::Machine) {
             expected.insert(at, "register_stop_task 1001".to_owned());
         }

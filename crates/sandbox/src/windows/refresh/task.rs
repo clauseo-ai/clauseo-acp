@@ -17,7 +17,9 @@
 //!   and DACL, made with them, or set again when an administrator made it; one anyone else made
 //!   is deleted with what is in it and made again (`task_folder.rs`).
 //! - [`unregister_task`], which `--remove --uninstall` calls (it deletes staging itself,
-//!   taking it back if need be: `setup::admin_remove`).
+//!   taking it back if need be: `setup::admin_remove`). The watch task, which only set-up
+//!   registers, is disabled, a running instance ended and its trace session stopped before it
+//!   is deleted, so no session outlives it.
 //! - [`request_admin_refresh`], which the app calls as the lawyer, unelevated, after an update,
 //!   [`request_pool_stop`], and [`request_pool_sweep`], which the outer runner calls as the
 //!   lawyer at every session's end: each asks the Task Scheduler to run its task
@@ -73,6 +75,9 @@ pub enum TaskError {
     /// The folder couldn't be made ready (`task_folder::prepare`).
     #[error("the folder {TASK_FOLDER}: {0}")]
     Folder(String),
+    /// The watcher's trace session couldn't be stopped.
+    #[error("the watcher's trace session: {0}")]
+    Session(String),
 }
 
 /// `call` failed with `error`, as a line for the log.
@@ -345,6 +350,9 @@ pub fn unregister_task(task: SystemTask) -> Result<(), TaskError> {
         Err(error) if missing(&error) => return Ok(()),
         Err(error) => return Err(com("ITaskService::GetFolder")(error)),
     };
+    if task.ends_before_delete() {
+        end_before_delete(&folder, task)?;
+    }
     // SAFETY: a live folder and a BSTR; flags 0.
     match unsafe { folder.DeleteTask(&BSTR::from(task.name()), 0) } {
         Ok(()) => {}
@@ -358,6 +366,39 @@ pub fn unregister_task(task: SystemTask) -> Result<(), TaskError> {
     // SAFETY: a live root folder and a BSTR; flags 0.
     let _kept_if_not_empty = unsafe { root.DeleteFolder(&BSTR::from(FOLDER_NAME), 0) };
     Ok(())
+}
+
+/// [`unregister_task`]'s first steps for a task that [`SystemTask::ends_before_delete`]: disable
+/// it, so nothing starts it again, end a running instance (`IRegisteredTask::Stop`), then stop
+/// the watcher's trace session by name, which an ended watcher leaves running. A task that
+/// isn't there is `Ok`; so is a session that isn't.
+fn end_before_delete(folder: &ITaskFolder, task: SystemTask) -> Result<(), TaskError> {
+    // SAFETY: a live folder and a BSTR.
+    let registered = match unsafe { folder.GetTask(&BSTR::from(task.name())) } {
+        Ok(registered) => Some(registered),
+        Err(error) if missing(&error) => None,
+        Err(error) => return Err(com("ITaskFolder::GetTask")(error)),
+    };
+    if let Some(registered) = registered {
+        // SAFETY: a live task; the VARIANT_BOOL is a plain value.
+        unsafe { registered.SetEnabled(VARIANT_BOOL::from(false)) }
+            .map_err(com("IRegisteredTask::SetEnabled"))?;
+        // SAFETY: a live task; flags 0.
+        unsafe { registered.Stop(0) }.map_err(com("IRegisteredTask::Stop"))?;
+    }
+    crate::windows::setup::watch::windows_trace::stop_session().map_err(TaskError::Session)?;
+    Ok(())
+}
+
+/// Asks the Task Scheduler to run `\Clauseo\SandboxWatch` now, as whoever calls it (the
+/// runner, as the lawyer, unelevated), through the owner's `FRFX`. It returns once the run is
+/// queued; the watcher then publishes its pipe's name (`setup::watch::protocol`) and exits
+/// unless a client connects within 30 seconds. One already running isn't started twice
+/// (`TASK_INSTANCES_IGNORE_NEW`). [`TaskError::NotRegistered`] means set-up hasn't
+/// registered it (no admin copy, or an older set-up): the runner falls back to its host-side
+/// source. Blocks on COM calls: call it off the UI thread.
+pub fn request_watch() -> Result<(), TaskError> {
+    run_task(SystemTask::Watch)
 }
 
 /// Asks the Task Scheduler to run `\Clauseo\SandboxRefresh` now, as whoever calls it: the app

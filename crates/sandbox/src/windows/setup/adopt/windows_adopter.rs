@@ -178,8 +178,9 @@ impl Adopter for WindowsAdopter {
 fn task_cause(error: &TaskError) -> Cause {
     match error {
         TaskError::Com { hresult, .. } => Cause::with(error.to_string(), Code::Hresult(*hresult)),
-        TaskError::NotRegistered | TaskError::Path(_) | TaskError::Folder(_) => {
-            Cause::from(error.to_string())
-        }
+        TaskError::NotRegistered
+        | TaskError::Path(_)
+        | TaskError::Folder(_)
+        | TaskError::Session(_) => Cause::from(error.to_string()),
     }
 }

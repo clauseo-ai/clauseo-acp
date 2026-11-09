@@ -38,7 +38,7 @@ use crate::windows::marker::{self, Marker, MarkerState};
 use crate::windows::matters::MatterSids;
 use crate::windows::pool::{MachineRecord, POOL_GROUP, POOL_PREFIX, pool_number};
 use crate::windows::record::current_user_sid;
-use crate::windows::refresh;
+use crate::windows::refresh::{self, SystemTask};
 use crate::windows::secrets;
 use crate::windows::sids::{Reserved, Sid};
 use crate::windows::wfp::{self, Namespace, NetworkReport, NetworkSetup};
@@ -440,6 +440,11 @@ impl Machine for WindowsMachine {
             admin_copy::admin_exe(&program_files),
         );
         admin_copy::os::lock_down_tree(&dir, &exe, Some(group)).map_err(other)
+    }
+
+    fn register_watch_task(&mut self, owner: &Sid) -> Result<(), MachineError> {
+        refresh::register_task(SystemTask::Watch, owner)
+            .map_err(|error| MachineError::Other(error.to_string()))
     }
 
     fn held_users(

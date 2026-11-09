@@ -62,6 +62,30 @@ fn the_stop_and_sweep_tasks_are_the_refresh_task_but_for_name_argument_limit_and
 }
 
 #[test]
+fn the_watch_task_runs_on_demand_with_its_one_argument_and_a_backstop_limit() {
+    let watch = SystemTask::Watch;
+    assert_eq!(
+        (watch.name(), watch.argument(), watch.execution_limit()),
+        ("SandboxWatch", "--watch", "PT12H")
+    );
+    assert_eq!((WATCH_ARG, WATCH_EXECUTION_LIMIT), ("--watch", "PT12H"));
+    assert!(!watch.at_logon());
+    assert_ne!(watch.description(), "");
+    // Never the installer's: `--adopt` registers only TASKS.
+    assert!(!TASKS.contains(&watch));
+    // Its removal ends a running watcher first; the others are deleted as they are.
+    assert!(watch.ends_before_delete());
+    assert!(!TASKS.iter().any(|task| task.ends_before_delete()));
+    let mode = parse([std::ffi::OsString::from(watch.argument())]);
+    assert_eq!(mode, Ok(Mode::Watch));
+    let extra = parse(["--watch", "--data-dir"].map(std::ffi::OsString::from));
+    assert!(extra.is_err(), "{extra:?}");
+    // It ends inside its own limit, so it stops its session itself.
+    let limit = std::time::Duration::from_hours(12);
+    assert!(crate::windows::setup::watch::lifetime::MAX_RUN < limit);
+}
+
+#[test]
 fn both_tasks_take_the_one_descriptor_the_owner_may_read_and_execute() {
     // `register_task` passes `task_sddl(owner)` to the folder and to every task alike: no task
     // takes a descriptor of its own. The owner reads and executes (FRFX): starting a task needs
@@ -90,11 +114,12 @@ fn the_removal_takes_every_task_down_after_the_values_and_before_the_copy() {
             Teardown::Task(SystemTask::Refresh),
             Teardown::Task(SystemTask::Stop),
             Teardown::Task(SystemTask::Sweep),
+            Teardown::Task(SystemTask::Watch),
             Teardown::Staging,
             Teardown::AdminFolder,
         ]
     );
-    for task in TASKS {
+    for task in TASKS.into_iter().chain([SystemTask::Watch]) {
         let at = TEARDOWN
             .iter()
             .position(|step| *step == Teardown::Task(task));

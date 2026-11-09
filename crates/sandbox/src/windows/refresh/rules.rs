@@ -20,11 +20,17 @@ pub const STOP_EXECUTION_LIMIT: &str = "PT2M";
 pub const SWEEP_ARG: &str = "--sweep-tasks";
 /// The sweep task's execution limit: 2 minutes.
 pub const SWEEP_EXECUTION_LIMIT: &str = "PT2M";
+/// The watch task's one argument (`setup::watch`): nothing else.
+pub const WATCH_ARG: &str = "--watch";
+/// The watch task's execution limit, a backstop: 12 hours. The watcher ends itself an hour
+/// sooner (`watch::lifetime::MAX_RUN`), and within seconds of its last client leaving.
+pub const WATCH_EXECUTION_LIMIT: &str = "PT12H";
 
-/// The SYSTEM tasks `--adopt` registers in `\Clauseo`, each running the admin copy with one
-/// fixed argument. They share the principal (LOCAL SYSTEM), the descriptor ([`task_sddl`]),
-/// one instance running at a time and the settings `task.rs` gives every task; they differ
-/// only in what [`SystemTask`]'s methods say.
+/// The SYSTEM tasks in `\Clauseo`, each running the admin copy with one fixed argument:
+/// `--adopt` registers those in [`TASKS`]; only set-up registers [`SystemTask::Watch`], never
+/// the installer (`late_steps::watch_task`). All share the principal (LOCAL SYSTEM), the
+/// descriptor ([`task_sddl`]), one instance at a time and the settings `task.rs` gives every
+/// task; they differ only in what [`SystemTask`]'s methods say.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SystemTask {
     /// `\Clauseo\SandboxRefresh`: the admin copy's refresh (`--refresh`).
@@ -35,6 +41,8 @@ pub enum SystemTask {
     /// jobs, killing nothing (`--sweep-tasks`); the outer runner asks for it at every session's
     /// end.
     Sweep,
+    /// `\Clauseo\SandboxWatch`: reports the files the pool's users were refused (`--watch`).
+    Watch,
 }
 
 /// Every task, in the order `--adopt` registers them.
@@ -50,6 +58,7 @@ impl SystemTask {
             SystemTask::Refresh => "SandboxRefresh",
             SystemTask::Stop => "SandboxStop",
             SystemTask::Sweep => "SandboxSweep",
+            SystemTask::Watch => "SandboxWatch",
         }
     }
 
@@ -59,6 +68,7 @@ impl SystemTask {
             SystemTask::Refresh => REFRESH_ARG,
             SystemTask::Stop => STOP_ARG,
             SystemTask::Sweep => SWEEP_ARG,
+            SystemTask::Watch => WATCH_ARG,
         }
     }
 
@@ -68,6 +78,7 @@ impl SystemTask {
             SystemTask::Refresh => EXECUTION_LIMIT,
             SystemTask::Stop => STOP_EXECUTION_LIMIT,
             SystemTask::Sweep => SWEEP_EXECUTION_LIMIT,
+            SystemTask::Watch => WATCH_EXECUTION_LIMIT,
         }
     }
 
@@ -75,7 +86,7 @@ impl SystemTask {
     pub fn at_logon(self) -> bool {
         match self {
             SystemTask::Refresh => true,
-            SystemTask::Stop | SystemTask::Sweep => false,
+            SystemTask::Stop | SystemTask::Sweep | SystemTask::Watch => false,
         }
     }
 
@@ -83,8 +94,17 @@ impl SystemTask {
     /// dropped: the sweep's, so every session's end gets a whole run that began after it.
     pub fn queues(self) -> bool {
         match self {
-            SystemTask::Refresh | SystemTask::Stop => false,
+            SystemTask::Refresh | SystemTask::Stop | SystemTask::Watch => false,
             SystemTask::Sweep => true,
+        }
+    }
+
+    /// Whether its removal disables it and ends a running instance before deleting it: the
+    /// watcher, whose real-time session would outlive a deleted task's process.
+    pub fn ends_before_delete(self) -> bool {
+        match self {
+            SystemTask::Refresh | SystemTask::Stop | SystemTask::Sweep => false,
+            SystemTask::Watch => true,
         }
     }
 
@@ -97,6 +117,9 @@ impl SystemTask {
             SystemTask::Stop => "Stops the processes of Clauseo's sandbox users.",
             SystemTask::Sweep => {
                 "Deletes the scheduled tasks and BITS jobs of Clauseo's sandbox users."
+            }
+            SystemTask::Watch => {
+                "Reports the files Clauseo's sandbox users were refused, while Clauseo asks."
             }
         }
     }
@@ -115,12 +138,14 @@ pub enum Teardown {
     AdminFolder,
 }
 
-/// The removal's steps, in order: every task in [`TASKS`] goes before the copy they run.
-pub const TEARDOWN: [Teardown; 6] = [
+/// The removal's steps, in order: every task in [`TASKS`], and the watch task set-up
+/// registered, goes before the copy they run.
+pub const TEARDOWN: [Teardown; 7] = [
     Teardown::AdminValues,
     Teardown::Task(SystemTask::Refresh),
     Teardown::Task(SystemTask::Stop),
     Teardown::Task(SystemTask::Sweep),
+    Teardown::Task(SystemTask::Watch),
     Teardown::Staging,
     Teardown::AdminFolder,
 ];
