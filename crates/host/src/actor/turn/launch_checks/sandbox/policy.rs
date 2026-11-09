@@ -35,6 +35,10 @@
 //! - **Network:** only the session proxy's listeners, the relay and the reservation's ports
 //!   (`proxy_ports`); with the browser, its loopback ports and socket folder.
 //!
+//! - **Read-only mode** (a jailed Codex's, `Grants::read_only`): the same, but the matter is read
+//!   only, with no write grant anywhere in it (`Policy::matter_read_only`); the state, temp and
+//!   notes folders keep their writes.
+//!
 //! Allowed folders (R18) are none yet: D2b adds them.
 
 use std::ffi::OsString;
@@ -44,6 +48,7 @@ use clauseo_protocol::{AgentKind, ErrorCode, HostError, MatterPath, ThreadId};
 use clauseo_sandbox::{Loopback, Policy, PolicyBuilder};
 
 use super::super::super::super::Actor;
+use super::super::super::agents::Waiting;
 use super::super::relay::CaseLaw;
 use super::super::{Prepared, RunFolders};
 use crate::agent::state_folder::StateLink;
@@ -90,6 +95,9 @@ pub(crate) struct Grants {
     pub(crate) sidecars: Vec<PathBuf>,
     /// Whether desktop says the agent's login is reused (the lawyer's own store).
     pub(crate) reused: bool,
+    /// The matter read-only: a jailed Codex launched in the read-only mode
+    /// (`forced_mode::launch_mode`). No write grant anywhere in the matter.
+    pub(crate) read_only: bool,
     /// The agent's `network.ca_certs` file.
     pub(crate) ca_cert: Option<PathBuf>,
     /// The OS roots' source (`Sandbox::with_ca_roots`); `None`: `rustls-native-certs`'.
@@ -151,19 +159,26 @@ pub(crate) fn jail(prepared: &Prepared, grants: &Grants, reserved: &[u16]) -> Re
 }
 
 /// What `thread`'s jailed launch's policy takes, read on the actor (`policy::Grants`): paths
-/// and flags only. Refuses a Codex agent while it would start in its ask mode, before anything
-/// is reserved or asked of the seam: a jailed Codex starts only in the jailed preset
-/// (`codex::JAILED_MODE`, R17 PR-D2c).
-pub(super) fn grants(actor: &Actor, thread: ThreadId) -> Result<Grants, Error> {
+/// and flags only. Refuses a Codex agent unless it starts in the jailed preset, before anything
+/// is reserved or asked of the seam (`codex::jailed::check_launch`, R17 PR-D2c); its policy is
+/// read-only in the read-only mode, from the switch `waiting` carries or the saved mode, and
+/// never where the jail does not enforce it (`codex::jailed::check`, TODO(PR6)). `reused`:
+/// desktop's reused-login flag, read once at the launch's checks (`Prepared::reused`).
+pub(super) fn grants(
+    actor: &Actor,
+    thread: ThreadId,
+    waiting: &[Waiting],
+    reused: bool,
+) -> Result<Grants, Error> {
     let row = &actor.check_thread(thread)?.row;
     let agent = &row.agent;
     let kind = AgentKind::of(agent);
-    if kind == Some(AgentKind::Codex) && codex::launch_mode(true) != codex::JAILED_MODE {
-        return Err(Error::refused(
-            ErrorCode::AgentLaunchFailed,
-            "The sandbox couldn't start Codex: it would run in its ask mode, which the sandbox \
-             does not take yet.",
-        ));
+    let mut read_only = false;
+    if kind == Some(AgentKind::Codex) {
+        codex::jailed::check_launch(codex::launch_mode(true))?;
+        let mode = super::super::super::forced_mode::launch_mode(actor, thread, waiting);
+        codex::jailed::check(mode)?;
+        read_only = mode == codex::jailed::READ_ONLY;
     }
     let sandbox = actor.protection.sandbox();
     let matters = actor.matters.iter().chain(&actor.forgotten);
@@ -188,7 +203,8 @@ pub(super) fn grants(actor: &Actor, thread: ThreadId) -> Result<Grants, Error> {
         others,
         skills,
         sidecars: super::super::browser::sidecars(actor, agent).unwrap_or_default(),
-        reused: actor.wiring.sign_in.reused.contains(agent),
+        reused,
+        read_only,
         ca_cert: actor
             .effective
             .settings()
@@ -376,7 +392,8 @@ pub(crate) fn policy(
     let state = run.state.clone().unwrap_or_else(|| run.work.clone());
     let mut builder = Policy::builder(&matter, &state)
         .tmpdir(run.tmp())
-        .notes(&run.notes);
+        .notes(&run.notes)
+        .matter_read_only(grants.read_only);
     if let Some(home) = &grants.home {
         builder = builder.home(home);
     }

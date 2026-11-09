@@ -24,35 +24,40 @@ pub(super) type Forced = (
     Option<(CodexAgent, Option<Checked>)>,
 );
 
-/// The forced variables of `agent`'s launch: Codex's when `codex` (its preparation), else
-/// Claude's, from the session's folders `run` and Claude's login home `claude_home`.
+/// The forced variables of a launch: Codex's when `codex` (its preparation), else
+/// Claude's, from the session's folders `run`, Claude's login home `claude_home` and the
+/// reused-login flag the launch's checks read (`reused`). A Codex
+/// launch in the jail (`jail`, its policy's mode) starts in the jailed preset in either mode
+/// (`codex::launch_mode`).
 pub(super) fn of(
     actor: &Actor,
-    agent: &AgentId,
     settings_env: &BTreeMap<String, String>,
-    codex: Option<CodexPrepared>,
+    (codex, jail): (Option<CodexPrepared>, Option<&'static str>),
     run: &RunFolders,
-    claude_home: Option<&Path>,
+    (claude_home, reused): (Option<&Path>, bool),
 ) -> Forced {
     let Some(prepared) = codex else {
-        return (
-            claude(actor, agent, run.state.as_deref(), claude_home),
-            None,
-        );
+        return (claude(reused, run.state.as_deref(), claude_home), None);
     };
     let hooks = codex_hooks(actor);
     let guard = hooks.is_some();
-    let forced = self::codex(
+    let mut forced = self::codex(
         &prepared.state,
         &run.tmp(),
         settings_env,
         prepared.keys,
         hooks,
     );
+    forced.insert(
+        OsString::from(agent::codex::MODE_VAR),
+        OsString::from(agent::codex::launch_mode(jail.is_some())),
+    );
     let codex = CodexAgent {
         folder: prepared.folder,
         guard,
         key_retry: KeyRetry::default(),
+        jail,
+        modes: super::super::forced_mode::CodexModes::default(),
     };
     (forced, Some((codex, prepared.login)))
 }
@@ -78,19 +83,17 @@ pub(super) fn codex(
 
 /// A Claude launch's forced variables: its state folder (`state`), which goes in before
 /// `plans_folder` reads the merged map; its login store is the login home (`claude_home`),
-/// or the lawyer's default store while desktop says `agent`'s login is reused. None without
-/// a state folder or a login home.
+/// or the lawyer's default store while desktop says the login is reused (`reused`, read once at
+/// the launch's checks). None without a state folder or a login home.
 ///
-/// The reused store `""` is the lawyer's default store (on macOS their Keychain). Right at tier
-/// C, all PR-C has: no jail stands between the agent and that store. The tier A and B rule
-/// (`SignedOut { found: ClaudeSandbox }`, S18) lands with the jail in R17 PR-D.
+/// The reused store `""` is the lawyer's default store (on macOS their Keychain): only at tier
+/// C, where no jail stands between the agent and that store. A jailed launch of a reused login
+/// is refused before this (`sign_in::check_launch`, `SignedOut { found: ClaudeSandbox }`).
 pub(super) fn claude(
-    actor: &Actor,
-    agent: &AgentId,
+    reused: bool,
     state: Option<&Path>,
     claude_home: Option<&Path>,
 ) -> BTreeMap<OsString, OsString> {
-    let reused = actor.wiring.sign_in.reused.contains(agent);
     let store = claude_home.filter(|_| !reused);
     state
         .filter(|_| claude_home.is_some())

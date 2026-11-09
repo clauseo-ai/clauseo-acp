@@ -143,6 +143,7 @@ pub struct Policy {
     link_targets: Vec<PathBuf>,
     link_folders: Vec<PathBuf>,
     read_only_in_matter: Vec<PathRule>,
+    matter_read_only: bool,
 }
 
 /// The policy's inputs, as given. [`PolicyBuilder::build`] checks and canonicalises them.
@@ -167,6 +168,7 @@ pub struct PolicyBuilder {
     over_cap: Vec<PathBuf>,
     links: Vec<LinkFinding>,
     scan: Option<MatterScan>,
+    matter_read_only: bool,
 }
 
 impl Policy {
@@ -275,6 +277,13 @@ impl Policy {
     /// Whether Claude's Keychain rules apply (macOS).
     pub fn keychain(&self) -> bool {
         self.keychain
+    }
+
+    /// Whether the matter is read-only (the host's read-only mode): no write anywhere in it on
+    /// macOS; on Windows only once stage C's PR6 enforces it, and the host offers no read-only
+    /// mode there until then (TODO(PR6)). The state, temp and notes folders keep their writes.
+    pub fn matter_read_only(&self) -> bool {
+        self.matter_read_only
     }
 
     /// Files in the matter over the checkpoint size cap, read-only (literal rules).
@@ -388,9 +397,11 @@ impl Policy {
     /// Whether `path` may be read but not written.
     fn read_only(&self, path: &Path) -> bool {
         let inside = |p: &PathBuf| under(path, p);
-        self.read_only_in_matter
-            .iter()
-            .any(|rule| rule.covers(path))
+        (self.matter_read_only && under(path, &self.matter))
+            || self
+                .read_only_in_matter
+                .iter()
+                .any(|rule| rule.covers(path))
             || instruction_file(&self.matter, path)
             || self.read_only_in_state.iter().any(inside)
             || self.allowed_folders.iter().any(inside)
@@ -495,6 +506,13 @@ impl PolicyBuilder {
     /// Whether Claude's Keychain rules apply (macOS); off unless set.
     pub fn keychain(mut self, on: bool) -> PolicyBuilder {
         self.keychain = on;
+        self
+    }
+
+    /// The matter read-only: no write grant anywhere in it (macOS: no `file-write*` on it;
+    /// Windows: `ReadAndExecute` and no Low label on it). Off (read and write) unless set.
+    pub fn matter_read_only(mut self, on: bool) -> PolicyBuilder {
+        self.matter_read_only = on;
         self
     }
 

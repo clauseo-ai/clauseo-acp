@@ -72,8 +72,23 @@ mod codex_fence;
 #[path = "host/codex_folder.rs"]
 mod codex_folder;
 #[cfg(test)]
+#[path = "host/codex_full_access.rs"]
+mod codex_full_access;
+#[cfg(test)]
+#[path = "host/codex_jailed.rs"]
+mod codex_jailed;
+#[cfg(test)]
+#[path = "host/codex_jailed_gate.rs"]
+mod codex_jailed_gate;
+#[cfg(test)]
 #[path = "host/codex_plans.rs"]
 mod codex_plans;
+#[cfg(test)]
+#[path = "host/codex_saved_read_only.rs"]
+mod codex_saved_read_only;
+#[cfg(test)]
+#[path = "host/codex_set_back.rs"]
+mod codex_set_back;
 #[cfg(test)]
 #[path = "host/commands.rs"]
 mod commands;

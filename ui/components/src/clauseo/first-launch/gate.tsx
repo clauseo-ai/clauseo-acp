@@ -20,7 +20,7 @@ import { APP, FOUND, NAME, other } from "./plan-names.ts";
 /** A login seen but not reusable, or why reuse stopped: the host's `FoundLogin`. */
 export type Found =
   | "claude_settings"
-  | "claude_windows_sandbox"
+  | "claude_sandbox"
   | "codex_sandbox"
   | "codex_keyring"
   | "reused_failed"

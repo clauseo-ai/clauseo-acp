@@ -33,7 +33,7 @@ mod ended;
 mod forced;
 
 use ended::{StopCause, stop_closed};
-pub(super) use ended::{hold_stop, idle_stop, log_detach, on_ended, stop};
+pub(super) use ended::{hold_stop, idle_stop, log_detach, on_ended, restart_for_switch, stop};
 
 /// Work that waits for the agent's session.
 #[derive(Debug)]
@@ -73,6 +73,8 @@ pub(super) struct Agent {
     pub(super) waiting: Vec<Waiting>,
     /// Work that came while it was stopping: a new agent takes it after `Ended`.
     pub(super) after_stop: Vec<Waiting>,
+    /// A jailed Codex's mode switch held to the turn boundary (`forced_mode::switch`).
+    pub(super) switch: Option<Waiting>,
     /// The matter folder it was started in, its working directory.
     pub(super) folder: PathBuf,
     /// Why it is being stopped, which picks the detach a stop logs.
@@ -130,6 +132,12 @@ pub(super) struct CodexAgent {
     pub(super) guard: bool,
     /// Its one `authenticate` with its key (`key_retry.rs`).
     pub(super) key_retry: KeyRetry,
+    /// In the jail, the mode its launch's policy is (one of `codex::jailed::MODES`,
+    /// `forced_mode.rs`); `None` at tier C.
+    pub(super) jail: Option<&'static str>,
+    /// At tier C, the lawyer's mode pick and a switch back in flight; its mode log lines' counts
+    /// (`forced_mode/unjailed.rs`).
+    pub(super) modes: super::forced_mode::CodexModes,
 }
 
 /// Runs `waiting` once `thread`'s agent has a session, launching the agent first.
@@ -159,8 +167,10 @@ pub(super) fn ensure(actor: &mut Actor, thread: ThreadId, waiting: Waiting) {
 /// Launches `thread`'s agent and sends `initialize`, its folder checks (and a Codex agent's
 /// writes) off the actor first (`launch_checks.rs`). A launch the sign-in refuses fails what
 /// waits for it (`sign_in::launch_refusal`), but one refused while the keys load waits for
-/// them first (`sign_in::keys_wait`), and its checks look at the refusals again after.
-fn start(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>) {
+/// them first (`sign_in::keys_wait`), and its checks look at the refusals again after. Every
+/// launch comes here, and waits at the launch gate (`launch_checks::gate`) until the thread's
+/// ended sessions' processes are gone.
+pub(super) fn start(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>) {
     if host_stopping(actor) {
         fail_all(actor, thread, waiting, &Error::Closed);
         return;
@@ -172,6 +182,10 @@ fn start(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>) {
         fail_all(actor, thread, waiting, &refused);
         return;
     }
+    // Never beside an ended session's processes: they keep their launch's policy.
+    let Some(waiting) = launch_checks::gate(actor, thread, waiting) else {
+        return;
+    };
     // A new session attaches after the old one's detach, which a waiting turn still holds.
     let held = current(actor, thread).and_then(|current| current.detach.take());
     if let Some(reason) = held {
@@ -228,6 +242,7 @@ pub(super) fn launch_now(
         info: None,
         waiting,
         after_stop: Vec::new(),
+        switch: None,
         folder,
         stop_cause: StopCause::Asked,
         session: None,
@@ -285,14 +300,14 @@ fn launch(
     })?;
     // The relay token reaches the agent in a file; its stderr tail hides it all the same.
     let redacted = super::launch_checks::relay::redacted(&prepared.run);
+    let jail = prepared.jail_mode();
     let folder = prepared.stored;
     let (mut forced, codex) = forced::of(
         actor,
-        &row.agent,
         &settings.env,
-        prepared.codex,
+        (prepared.codex, jail),
         &prepared.run,
-        prepared.claude_home.as_deref(),
+        (prepared.claude_home.as_deref(), prepared.reused),
     );
     let (settings, hook, inherited, path_prepend) =
         forced::sources(actor, &row.agent, settings, prepared.sandbox.is_some());
@@ -434,8 +449,8 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
             end::on_prompt_refused(actor, thread, turn, &error);
         }
         AgentReply::Steer(steered) => super::queue::on_steered(actor, thread, *steered),
-        AgentReply::ModeReset(result) => {
-            super::forced_mode::on_mode_reset(actor, thread, same, result);
+        AgentReply::ModeReset(mode, result) => {
+            super::forced_mode::on_mode_reset(actor, thread, same, mode, result);
         }
         AgentReply::Initialized(_)
         | AgentReply::Session { .. }
@@ -481,45 +496,37 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
 }
 
 pub(super) fn run_waiting(actor: &mut Actor, thread: ThreadId, waiting: Waiting) {
+    let stopping = state(actor, thread).and_then(|state| state.agent.as_deref_mut());
+    if let Some(agent) = stopping.filter(|agent| agent.stage == Stage::Stopping) {
+        // A relaunch for a mode switch began before it (`forced_mode::switch`).
+        agent.after_stop.push(waiting);
+        return;
+    }
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref()) else {
         fail_waiting(actor, thread, &waiting, &lost("the agent"));
         return;
     };
-    let (id, client, forced) = (agent.id, agent.link.client.clone(), agent.forced_ask);
+    let (id, client) = (agent.id, agent.link.client.clone());
     let Some(session) = agent.session.clone() else {
         fail_waiting(actor, thread, &waiting, &lost("the agent's session"));
         return;
     };
+    // Forced ask's and a jailed Codex's modes (`forced_mode.rs`).
+    if let Some((ctx, error)) = super::forced_mode::refusal(actor, thread, &waiting) {
+        actor.finish_command(ctx, Err(error));
+        return;
+    }
+    let Some(waiting) = super::forced_mode::switch(actor, thread, waiting) else {
+        return;
+    };
     match waiting {
         Waiting::Turn(turn) => steps::on_launched(actor, thread, turn),
-        Waiting::Config(ctx, option, value)
-            if forced && !agent::forced_ask::config_allowed(option.as_str(), select(&value)) =>
-        {
-            let error = Error::refused(
-                ErrorCode::CommandInvalid,
-                format!(
-                    "config option {option} sets the mode, and this matter's folder is \
-                     unprotected: only \"default\" and \"plan\" may be set"
-                ),
-            );
-            actor.finish_command(ctx.id, Err(error));
-        }
         Waiting::Config(ctx, option, value) => {
             super::idle::call_started(actor, thread);
             call(actor, thread, id, async move {
                 let result = client.set_config_option(&session, option, value).await;
                 AgentReply::Config { ctx, result }
             });
-        }
-        Waiting::Mode(ctx, mode) if forced && !agent::forced_ask::mode_allowed(mode.as_str()) => {
-            let error = Error::refused(
-                ErrorCode::CommandInvalid,
-                format!(
-                    "mode {mode} would approve changes without asking, and this matter's folder \
-                     is unprotected: only \"default\" and \"plan\" may be set"
-                ),
-            );
-            actor.finish_command(ctx.id, Err(error));
         }
         Waiting::Mode(ctx, mode) => {
             super::idle::call_started(actor, thread);
@@ -528,14 +535,6 @@ pub(super) fn run_waiting(actor: &mut Actor, thread: ThreadId, waiting: Waiting)
                 AgentReply::Mode { ctx, mode, result }
             });
         }
-    }
-}
-
-/// The choice id `value` names, for a select option; `None` for a boolean.
-fn select(value: &ConfigValue) -> Option<&str> {
-    match value {
-        ConfigValue::Select(choice) => Some(choice.as_str()),
-        ConfigValue::Boolean(_) => None,
     }
 }
 

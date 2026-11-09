@@ -336,14 +336,15 @@ pub(super) fn requeue_of(
 /// could not be made refuses with its own code (`signin.reuse_other_volume` across volumes),
 /// and while reused a matter's `auth.json` that is not the login's file
 /// ([`StateLink::Split`]) is a split, refused with no re-link. A jailed launch of a reused
-/// login is refused first ([`refuse_jailed_reuse`]).
+/// login is refused first ([`refuse_jailed_reuse`]). Any other launch than Codex's takes
+/// [`check_claude`].
 pub(super) fn check_launch(
     actor: &mut Actor,
     thread: ThreadId,
     prepared: &Prepared,
 ) -> Result<(), Error> {
     let Some(codex) = prepared.codex.as_ref() else {
-        return Ok(());
+        return check_claude(actor, thread);
     };
     if let Some(Err(error)) = &codex.link {
         return Err(Error::Refused(error.to_wire()));
@@ -421,4 +422,32 @@ fn refuse_jailed_reuse(sign_in: &mut login_link::SignIn, agent: AgentId, reused:
         "ChatGPT's sign-in on this computer can't be used in the sandbox: sign in to ChatGPT in \
          Clauseo",
     )
+}
+
+/// A jailed launch (the sandbox's launchers set) of a Claude login desktop says is reused: its
+/// store `""` is the lawyer's own default store (on macOS their Keychain), which the jail never
+/// reaches. Refused with `agent.auth_required`, so its turn is held for the sign-in; the reused
+/// flag is set to false and the split sent with [`SplitWhy::ClaudeSandbox`], so desktop's leave
+/// ends the reuse as `SignedOut { found: ClaudeSandbox }`. At tier C nothing changes.
+fn check_claude(actor: &mut Actor, thread: ThreadId) -> Result<(), Error> {
+    let jailed = actor.protection.launchers().is_some();
+    let Some(agent) = actor.threads.get(&thread).map(|entry| &entry.row.agent) else {
+        return Ok(());
+    };
+    let sign_in = &mut actor.wiring.sign_in;
+    let claude = AgentKind::of(agent) == Some(AgentKind::Claude);
+    if !(jailed && claude && sign_in.reused.contains(agent)) {
+        return Ok(());
+    }
+    let agent = agent.clone();
+    tracing::warn!(%agent, "a jailed launch of a reused Claude login is refused");
+    sign_in.reused.remove(&agent);
+    sign_in.send_split(LoginSplit {
+        agent,
+        why: SplitWhy::ClaudeSandbox,
+    });
+    Err(Error::refused(
+        ErrorCode::AgentAuthRequired,
+        "Claude Code's own sign-in on this computer can't be used in the sandbox",
+    ))
 }

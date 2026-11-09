@@ -1518,7 +1518,8 @@ expression: counts_schema()
         "blocklist.notice_expired",
         "blocklist.allow_not_saved",
         "blocklist.revoke_not_saved",
-        "signin.reuse_other_volume"
+        "signin.reuse_other_volume",
+        "sandbox.ask_mode_unavailable"
       ],
       "type": "string"
     },

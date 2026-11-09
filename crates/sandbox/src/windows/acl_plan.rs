@@ -11,7 +11,8 @@
 //!   (`<data_dir>\run\<session>\tmp`, never the run folder above it; nothing sets or makes it
 //!   on Windows yet: PR5's runner sets `TEMP`/`TMP` to it and makes it) and the credential link;
 //!   `ReadAndExecute` on runtime and read paths and allowed folders; on Clauseo's Claude login
-//!   home, `CreateFiles` on the folder and `Modify` on its allowed names.
+//!   home, `CreateFiles` on the folder and `Modify` on its allowed names. A read-only matter
+//!   (`Policy::matter_read_only`) gets `ReadAndExecute` and no Low label instead.
 //! - A Low mandatory label, `S:(ML;OICI;NW;;;LW)` (no-write-up), inherited on the matter, state,
 //!   notes and temp folders and the Claude store folder, and on the credential link file itself
 //!   ([`Rights::LowLabel`]): the Low token writes nothing labelled higher. Side effect, accepted:
@@ -376,10 +377,16 @@ pub fn plan(
         subjects,
         grants: Vec::new(),
     };
-    let mut own = vec![
-        (policy.matter(), PathKind::Matter),
-        (policy.state(), PathKind::State),
-    ];
+    let mut own = vec![(policy.state(), PathKind::State)];
+    if policy.matter_read_only() {
+        // TODO(stage C's PR6, the Windows launcher): the ledger keeps a matter's grants across
+        // launches, so a read-only launch after a read-write one finds the Modify entry and the
+        // Low label (it persists too). PR6 must take both back first, or read-only isn't enforced.
+        let kind = PathKind::Matter;
+        plan.allow(policy.matter(), Rights::ReadAndExecute, Inherit::Tree, kind);
+    } else {
+        own.insert(0, (policy.matter(), PathKind::Matter));
+    }
     if let Some(notes) = policy.notes() {
         own.push((notes, PathKind::Notes));
     }
@@ -501,14 +508,8 @@ impl Plan<'_> {
             self.push(folder, low.clone(), Rights::LowLabel, Inherit::Tree, kind);
         }
         if let Some(store) = policy.claude_store() {
-            let kind = PathKind::ClaudeStore;
-            self.push(
-                store.dir(),
-                low.clone(),
-                Rights::LowLabel,
-                Inherit::Tree,
-                kind,
-            );
+            let (dir, kind) = (store.dir(), PathKind::ClaudeStore);
+            self.push(dir, low.clone(), Rights::LowLabel, Inherit::Tree, kind);
         }
         if let Some(link) = policy.credential_link() {
             let kind = PathKind::CredentialLink;

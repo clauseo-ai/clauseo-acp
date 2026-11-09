@@ -712,7 +712,8 @@ export type CommandId = string;
  *  `MarkSeen`, `ScanFolder`, `CancelScan`, `SnoozeThread`, `MarkThreadDone`, `SweepDone`,
  *  `InstallBrowser`, `CancelBrowserInstall`, the four update commands, the connector commands and
  *  the two allowed-site commands answer `Done`; the last two kinds store no receipt, as the two
- *  browser commands do not.
+ *  browser commands do not. A jailed Codex's `SetMode` or mode `SetConfigOption` that a later
+ *  one replaced answers `Replaced`.
  */
 export type CommandOutcome = 
 /**  Done; nothing new to name. */
@@ -743,7 +744,14 @@ export type CommandOutcome =
 ({ version_restored: {
 	/**  The checkpoint the restore wrote. */
 	checkpoint: CheckpointId,
-} }) & { matter_created?: never; prompt_accepted?: never; step_undone?: never; thread_created?: never };
+} }) & { matter_created?: never; prompt_accepted?: never; step_undone?: never; thread_created?: never } | 
+/**
+ *  Nothing it asked was applied: a later command of the same kind replaced it before it took
+ *  effect (a jailed Codex's mode switch the next one replaced, R17 PR-D2c). Not success: the
+ *  app must not read it as the mode being set. A receipt an older build cannot decode counts
+ *  as missing (`lib.rs`, Depends on), so this closed enum may gain it.
+ */
+"replaced";
 
 /**  The agent's slash commands, replaced whole. */
 export type CommandsAvailable = {
@@ -1708,6 +1716,8 @@ export type ErrorCode =
 "blocklist.revoke_not_saved" | 
 /** A reused Codex login could not be linked into a matter's state folder because Clauseo's data folder is on a different volume from the login file; a link across volumes is impossible and the login is never copied, so no agent was started. Trying again cannot succeed until the data folder moves or Codex is signed in to in Clauseo. */
 "signin.reuse_other_volume" | 
+/** A jailed Codex was asked to start or switch into a mode that asks before changes, which it cannot do in the sandbox (it runs with no asks there), so the mode was refused and the session kept its mode; a saved asking mode starts in the mode that works on its own instead. Trying again cannot succeed: choose a mode the session offers. */
+"sandbox.ask_mode_unavailable" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 
@@ -1906,8 +1916,11 @@ export type FolderSupportKind =
 export type FoundLogin = 
 /**  A Claude login set in the lawyer's own Claude settings (not a `claude.ai` one). */
 "claude_settings" | 
-/**  Windows with the sandbox set up, where Claude's login is not reused. */
-"claude_windows_sandbox" | 
+/**
+ *  Claude runs in the sandbox here (macOS or Windows), where the lawyer's own Claude login
+ *  is not reused.
+ */
+"claude_sandbox" | 
 /**
  *  Codex runs in the sandbox here, where the lawyer's own Codex login is not reused: Clauseo's
  *  own `ChatGPT` sign-in is needed.
@@ -3603,6 +3616,18 @@ export type NoticeKind =
 	/**  Why the launch left it out. */
 	reason: PackSkipReason,
 } }) & { files_came_back?: never } | 
+/**
+ *  A jailed Codex agent (`ChatGPT` to the lawyer) whose thread was last in Read-only
+ *  started in the mode that works on its own, because the sandbox does not enforce
+ *  Read-only on this computer yet (Windows, until stage C's PR6).
+ */
+"read_only_unavailable" | 
+/**
+ *  An unjailed Codex agent (`ChatGPT` to the lawyer) switched itself to a mode that
+ *  works without asking, the host's switch back to the ask mode failed or went
+ *  unanswered, so the host stopped the agent.
+ */
+"mode_set_back_failed" | 
 /**  A kind from a newer Clauseo; written back as the plain string `kind`. */
 string;
 

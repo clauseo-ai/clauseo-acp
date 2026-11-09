@@ -88,6 +88,7 @@ export type ErrorCode =
   | "blocklist.allow_not_saved"
   | "blocklist.revoke_not_saved"
   | "signin.reuse_other_volume"
+  | "sandbox.ask_mode_unavailable"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
@@ -214,6 +215,10 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
     "This site is blocked again until Clauseo closes. Clauseo couldn't save the change, so it may be allowed again next time Clauseo opens.",
   "signin.reuse_other_volume":
     "Clauseo can't use the Codex sign-in already on this computer, because Clauseo's data folder is on a different drive from your home folder. Sign in to Codex in Clauseo instead.",
+  // provisional (app thread, Rohan's batch review): a jailed Codex asked for a mode that asks
+  // before changes (R17 PR-D2c)
+  "sandbox.ask_mode_unavailable":
+    "Use Claude to approve each change. ChatGPT can't ask before each change in the Safe workspace, so its mode didn't change.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };

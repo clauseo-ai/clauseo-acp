@@ -105,6 +105,10 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::SigninReuseOtherVolume,
             "the Codex login is on another volume",
         ),
+        failed(
+            ErrorCode::SandboxAskModeUnavailable,
+            "Codex in the sandbox has no mode that asks",
+        ),
     ]
 }
 
@@ -137,6 +141,20 @@ pub(super) fn notices() -> Vec<DomainEvent> {
                 ],
                 more: 0,
             }),
+        },
+        Notice {
+            level: NoticeLevel::Info,
+            text: "Read-only isn't available for ChatGPT in the Safe workspace on this computer \
+                   yet, so ChatGPT works on its own here."
+                .to_owned(),
+            kind: Some(NoticeKind::ReadOnlyUnavailable),
+        },
+        Notice {
+            level: NoticeLevel::Warning,
+            text: "ChatGPT switched itself to working without asking you, and Clauseo couldn't \
+                   switch it back, so Clauseo stopped it. Start ChatGPT again to carry on."
+                .to_owned(),
+            kind: Some(NoticeKind::ModeSetBackFailed),
         },
     ];
     notices.extend(

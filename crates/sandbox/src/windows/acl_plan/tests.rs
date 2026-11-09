@@ -498,3 +498,57 @@ fn the_session_temp_folder_gets_modify_and_the_low_label_and_its_parents_nothing
 
 /// The profile, the sandbox records and the data folder's allow list.
 mod data;
+
+/// The read-only matter across the builder's options.
+mod read_only;
+
+/// The negative golden of the host's read-only mode (`Policy::matter_read_only`): on and in the
+/// matter only `ReadAndExecute` and the write denies, no allow with a write right and no Low
+/// label; the state and notes folders keep `Modify`. Anything that widens it fails here.
+#[test]
+fn a_read_only_matter_gets_no_write_grant_in_it() {
+    let w = World::new("plan-read-only-matter");
+    let writable = w.full_policy();
+    let policy = w
+        .builder()
+        .notes(w.at(NOTES))
+        .claude_store(w.at(STORE))
+        .read_only_in_state(w.at(&format!("{STATE}/settings.json")))
+        .runtime(w.at("runtime/node"))
+        .read(w.at("elsewhere"))
+        .matter_read_only(true)
+        .build()
+        .unwrap();
+    let matter = w.canonical("matter");
+    // Every allow and label on or in the matter; denies only take rights away.
+    let in_matter = |policy: &Policy| -> Vec<(PathKind, Rights)> {
+        let mut rights: Vec<_> = grants_for(&w, policy, &sids())
+            .into_iter()
+            .filter(|g| in_folder(&g.path, &matter) && !g.rights.is_deny())
+            .map(|g| (g.kind, g.rights))
+            .collect();
+        rights.sort();
+        rights
+    };
+    assert_eq!(
+        in_matter(&policy),
+        [(PathKind::Matter, Rights::ReadAndExecute)]
+    );
+    let grants = grants_for(&w, &policy, &sids());
+    for folder in [w.canonical(STATE), w.canonical(NOTES)] {
+        assert!(
+            grants
+                .iter()
+                .any(|g| g.path == folder && g.rights == Rights::Modify)
+        );
+    }
+    let wide = in_matter(&writable);
+    assert!(
+        wide.contains(&(PathKind::Matter, Rights::Modify)),
+        "{wide:?}"
+    );
+    assert!(
+        wide.contains(&(PathKind::Matter, Rights::LowLabel)),
+        "{wide:?}"
+    );
+}

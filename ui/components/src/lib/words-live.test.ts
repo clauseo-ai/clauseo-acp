@@ -235,9 +235,13 @@ test("an agent's name fills no other code", () => {
   );
 });
 
+// Names Claude as the agent to switch to, never as the one that failed: one sentence on every
+// plan, as only a jailed Codex gets it (R17 PR-D2c).
+const OTHER_AGENT: ErrorCode[] = ["sandbox.ask_mode_unavailable"];
+
 test("only the agent.* codes that name Claude have a sentence per plan", () => {
-  const naming = (Object.keys(ERROR_WORDS) as ErrorCode[]).filter((c) =>
-    ERROR_WORDS[c].includes("Claude"),
+  const naming = (Object.keys(ERROR_WORDS) as ErrorCode[]).filter(
+    (c) => ERROR_WORDS[c].includes("Claude") && !OTHER_AGENT.includes(c),
   );
   expect([...PLANNED_CODES].sort()).toEqual(naming.sort());
 });

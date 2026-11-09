@@ -879,5 +879,15 @@
     "status": "provisional",
     "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "U3-err-sandbox.ask_mode_unavailable": {
+    "en": "Use Claude to approve each change. ChatGPT can't ask before each change in the Safe workspace, so its mode didn't change.",
+    "hi": "हर बदलाव को मंज़ूरी देने के लिए Claude का उपयोग करें। सुरक्षित कार्यक्षेत्र में ChatGPT हर बदलाव से पहले नहीं पूछ सकता, इसलिए उसका मोड नहीं बदला।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (provisional; Rohan batch review)"
   }
 }

@@ -499,4 +499,25 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (352, 0x7a87_c4b4_26dc_a37d),
         (254, 0x54b0_eb79_fae0_c755),
     ),
+    (
+        "added/turn_failed-SandboxAskModeUnavailable",
+        include_bytes!("added/turn_failed-SandboxAskModeUnavailable.jsonl"),
+        include_bytes!("added/turn_failed-SandboxAskModeUnavailable.msgpack"),
+        (369, 0x07fc_4eb3_7b19_670a),
+        (271, 0x067b_3b63_fb66_8a63),
+    ),
+    (
+        "added/notice-ReadOnlyUnavailable",
+        include_bytes!("added/notice-ReadOnlyUnavailable.jsonl"),
+        include_bytes!("added/notice-ReadOnlyUnavailable.msgpack"),
+        (397, 0xa183_c705_a3bb_5276),
+        (318, 0x7e18_60c8_cb34_87df),
+    ),
+    (
+        "added/notice-ModeSetBackFailed",
+        include_bytes!("added/notice-ModeSetBackFailed.jsonl"),
+        include_bytes!("added/notice-ModeSetBackFailed.msgpack"),
+        (431, 0x164b_a10d_5190_e4f3),
+        (352, 0xea9a_c835_3682_21be),
+    ),
 ];

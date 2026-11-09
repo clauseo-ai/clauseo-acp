@@ -128,6 +128,8 @@ pub(super) fn on_closed(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     if let Some(stop) = closed {
         // A stop at the limit decided while this end was not durable is logged now.
         limits::retry_stops(actor, thread, false);
+        // A jailed Codex's mode switch relaunches it first (`forced_mode::at_boundary`).
+        super::forced_mode::at_boundary(actor, thread);
         queue::on_turn_closed(actor, thread, turn, stop);
     }
 }

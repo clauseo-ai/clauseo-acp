@@ -28,8 +28,8 @@
 //!
 //! The policy and the variables the agent gets with it (the session proxy's, the CA bundle's)
 //! are R17 PR-D's ([`policy`]); the variables ride on [`Sandboxed`] to the spawn. A jailed Codex
-//! launch is refused before the seam is asked while Codex would start in its ask mode
-//! (`codex::launch_mode`): R17 PR-D2c starts it in the jailed preset.
+//! starts in the jailed preset (`codex::launch_mode`); a launch in any other mode is refused
+//! before the seam is asked (`codex::jailed::check_launch`).
 
 use std::fmt;
 use std::sync::Arc;
@@ -61,6 +61,25 @@ pub(crate) struct Sandboxed {
     /// The variables the jailed agent gets over its own (the session proxy's, the CA bundle's):
     /// `Some` to set, `None` to remove. The proxy's carry its token: never logged.
     pub(crate) env: Vec<(OsString, Option<OsString>)>,
+}
+
+impl Prepared {
+    /// A jailed Codex launch's mode, as its policy is ([`Sandboxed::mode`]); `None` unjailed.
+    pub(crate) fn jail_mode(&self) -> Option<&'static str> {
+        self.sandbox.as_ref().map(Sandboxed::mode)
+    }
+}
+
+impl Sandboxed {
+    /// A jailed Codex's mode, as its policy is: read-only exactly when the matter is, which
+    /// `policy::grants` never makes where the jail does not enforce it (Windows until PR6).
+    pub(crate) fn mode(&self) -> &'static str {
+        if self.policy.matter_read_only() {
+            crate::agent::codex::jailed::READ_ONLY
+        } else {
+            crate::agent::codex::JAILED_MODE
+        }
+    }
 }
 
 impl fmt::Debug for Sandboxed {
@@ -107,7 +126,7 @@ pub(super) fn start(
     seam: (Arc<dyn SandboxLaunchers>, SpawnOptions),
 ) {
     let (launchers, opts) = seam;
-    let grants = match policy::grants(actor, thread) {
+    let grants = match policy::grants(actor, thread, &waiting, prepared.reused) {
         Ok(grants) => grants,
         Err(error) => {
             discard(actor, thread, prepared.run, None);

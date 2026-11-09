@@ -88,5 +88,25 @@
     "status": "provisional",
     "at": "2026-11-06",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "TN-10": {
+    "en": "Read-only isn't available for ChatGPT in the Safe workspace on this computer, so ChatGPT can change files in this matter without asking first.",
+    "hi": "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र में ChatGPT के लिए केवल-पढ़ने वाला मोड उपलब्ध नहीं है, इसलिए ChatGPT पहले पूछे बिना इस मामले की फ़ाइलें बदल सकता है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (ReadOnlyUnavailable; orchestrator's en)"
+  },
+  "TN-11": {
+    "en": "ChatGPT switched itself to working without asking you, and Clauseo couldn't switch it back, so Clauseo stopped it. Send another message to start ChatGPT again.",
+    "hi": "ChatGPT ने खुद को बिना पूछे काम करने पर बदल लिया, और Clauseo उसे वापस नहीं बदल सका, इसलिए Clauseo ने उसे रोक दिया। ChatGPT को फिर से शुरू करने के लिए एक और संदेश भेजें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-09",
+    "by": "orchestrator (settled en)"
   }
 }

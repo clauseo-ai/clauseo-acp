@@ -1,0 +1,16 @@
+{"scenario":"codex-lawyer-pick-fails","description":"An unjailed Codex (tier C) that reports agent-full-access while the lawyer's set_mode agent-full-access is in flight, then fails that set_mode (R17 PR-D2c round 6): the pick never held, so the host sends set_mode workspace-write before the second prompt. Written from codex-acp 2.2.2 source (src/AgentMode.ts, dist/index.js:34243-34354) until G8a's recordings replace it.","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":false,"promptCapabilities":{"image":true,"embeddedContext":true},"mcpCapabilities":{"http":true,"sse":false},"sessionCapabilities":{"list":{},"delete":{},"additionalDirectories":{},"resume":{},"close":{}}},"authMethods":[],"agentInfo":{"name":"@agentclientprotocol/codex-acp","title":"Codex","version":"2.2.2"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"workspace-write","availableModes":[{"id":"read-only","name":"Read-only"},{"id":"workspace-write","name":"Workspace access"},{"id":"agent","name":"Auto review"},{"id":"agent-full-access","name":"Full access"}]}}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Asking."}},"session":"sess-1"}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
+{"expect":{"method":"session/set_mode","as":"pick","params":{"sessionId":"sess-1","modeId":"agent-full-access"}}}
+{"update":{"update":{"sessionUpdate":"current_mode_update","currentModeId":"agent-full-access"},"session":"sess-1"}}
+{"respond":{"to":"pick","error":{"code":-32603,"message":"Internal error"}}}
+{"expect":{"method":"session/set_mode","as":"set-back","params":{"sessionId":"sess-1","modeId":"workspace-write"}}}
+{"respond":{"to":"set-back","result":{}}}
+{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-2","content":{"type":"text","text":"Asking again."}},"session":"sess-1"}}
+{"respond":{"to":"p2","result":{"stopReason":"end_turn"}}}

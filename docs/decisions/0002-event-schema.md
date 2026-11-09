@@ -121,7 +121,7 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `config_options_replaced` | options | acp | yes | T |
 | `commands_available` | commands | acp | yes | T |
 | `usage_updated` | context_used?, context_size?, cost? | acp | yes | T |
-| `notice` | level, text, kind? (`NoticeKind`: `context_not_restored`, `files_came_back` with files (at most five) and more, `skill_pack_not_loaded` with pack and reason (`PackSkipReason`); host notices only; `text` is the fallback) | acp, host | yes | T |
+| `notice` | level, text, kind? (`NoticeKind`: `context_not_restored`, `files_came_back` with files (at most five) and more, `skill_pack_not_loaded` with pack and reason (`PackSkipReason`), `read_only_unavailable`, `mode_set_back_failed`; host notices only; `text` is the fallback) | acp, host | yes | T |
 | `compaction_changed` | status, summary? | acp | yes | T |
 | `files_changed` | turn, files, skipped | matters, through the host | yes | T |
 | `turn_failed` | turn, code, detail? (never shown) | host, acp | yes | T |

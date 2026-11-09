@@ -269,8 +269,10 @@ pub enum Found {
     /// A Claude login made in the lawyer's `~/.claude/settings.json` (an `authMethod` other
     /// than `claude.ai`): not reusable.
     ClaudeSettings,
-    /// Windows with tier B set up: Claude is not reused there.
-    ClaudeWindowsSandbox,
+    /// Claude's launches run in the sandbox (macOS tier A, Windows tier B): the lawyer's own
+    /// Claude login is not reused there, since the jail never reaches their store. Reported
+    /// when a jailed launch meets a reused login (R17 PR-D2c).
+    ClaudeSandbox,
     /// Codex's launches run in the sandbox; the lawyer's own Codex login is not reused there
     /// since the jail never gets their `auth.json`. Reported when a jailed launch meets a reused
     /// login.

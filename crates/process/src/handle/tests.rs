@@ -36,8 +36,12 @@ fn an_agent_that_never_exits_is_unresponsive() {
         assert_eq!(timer.next_armed().await, KILL_GRACE);
         assert!(timer.fire());
     };
-    let (ended, ()) =
-        block_on(async { join!(ladder(exit, &timer, |step| steps.push(step)), script) });
+    let (ended, ()) = block_on(async {
+        join!(
+            ladder(exit, &timer, Grace::Ladder, |step| steps.push(step)),
+            script
+        )
+    });
     assert!(matches!(ended, Ended::Unresponsive), "{ended:?}");
     assert_eq!(steps, every_step());
     assert_eq!(timer.armed(), timer.fired());
@@ -61,10 +65,33 @@ fn an_exit_after_the_kill_is_killed() {
         // The last wait is armed, and the exit comes before it fires.
         assert_eq!(timer.next_armed().await, KILL_GRACE);
     };
-    let (ended, ()) = block_on(async { join!(ladder(exit, &timer, act), script) });
+    let (ended, ()) = block_on(async { join!(ladder(exit, &timer, Grace::Ladder, act), script) });
     assert!(matches!(ended, Ended::Killed(Ok(9))), "{ended:?}");
     assert_eq!(steps, every_step());
     assert_eq!(timer.fired() + 1, timer.armed());
+}
+
+/// With no grace the kill comes first, before any wait: the only timer is the last 2 s.
+#[test]
+fn a_stop_with_no_grace_kills_at_once() {
+    let timer = ManualTimer::new();
+    let mut steps = Vec::new();
+    let (exited, exit) = oneshot::channel::<i32>();
+    let mut exited = Some(exited);
+    let exit = pin!(exit);
+    let act = |step| {
+        steps.push(step);
+        if step == Step::Kill {
+            exited.take().map(|exited| exited.send(9));
+        }
+    };
+    let script = async {
+        assert_eq!(timer.next_armed().await, KILL_GRACE);
+    };
+    let (ended, ()) = block_on(async { join!(ladder(exit, &timer, Grace::None, act), script) });
+    assert!(matches!(ended, Ended::Killed(Ok(9))), "{ended:?}");
+    assert_eq!(steps, [Step::Kill]);
+    assert_eq!(timer.fired(), 0);
 }
 
 #[cfg(windows)]

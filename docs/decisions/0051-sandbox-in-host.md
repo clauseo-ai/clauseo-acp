@@ -314,6 +314,22 @@ The orchestrator's conditions, which the later pull requests must meet:
 
   Follow-up, a must-do: PR-D must move Codex's home (or at least `tmp/arg0`) out of
   `agent-state`, with a migration for existing installs, so `agent-state` is denied whole.
+- Known gap of the read-only switch (R17 PR-D2c): every launch of a thread waits at one gate
+  (`launch_checks::gate`, from `agents::start`) until the thread's ended sessions' processes
+  and their Chrome are gone (`clauseo_sandbox::session_processes_gone`), but that
+  check sees only the agent's process group (Job Object on Windows). A process that called
+  `setsid` (macOS, Linux), or was reparented to launchd or init, escapes it: it keeps its old
+  read-write policy and could write after `ModeChanged` says Read-only. Stage C owns the macOS
+  fix (find and end every process of a macOS session, setsid escapees and orphans included),
+  which fills in that one check and blocks the launch.
+- Dependency of the read-only switch: #672 (the crash-survivor sweep, a release blocker). The
+  gate's record of a thread's ended sessions (`TurnState::ended`) lives in memory only, so
+  after Clauseo quits or crashes, a surviving process tree with the old read-write policy is
+  not waited for, and could write after the next launch's `ModeChanged` says Read-only. The
+  record holds live OS handles (a Job Object on Windows; a process group on macOS and Linux,
+  whose id the OS can reuse), so it is not persisted here; #672's sweep ends such survivors
+  before any launch. Read-only stays unreachable from the app (no Codex mode switch, Rohan's
+  ruling of 2026-11-09) until #672 lands.
 
 ## Status
 

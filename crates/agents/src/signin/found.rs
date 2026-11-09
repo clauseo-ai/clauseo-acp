@@ -67,9 +67,10 @@ fn reused_signed_in<T: Timer + Send + Sync>(
 /// (or one that is no stop reason, [`Found::is_stop_reason`]): `no-reuse` is written, and the
 /// state is `SignedOut { found: ReuseOff }`. `CodexSandbox` writes `no-reuse` too, so detection
 /// does not offer the same login again, and its state is `SignedOut { found: CodexSandbox }`.
-/// For Codex, a reused home's link is removed. Then the reuse record is cleared.
-/// `signin.failed` when a marker cannot be written, since the next start could then reuse again
-/// without asking.
+/// `ClaudeSandbox` writes `no-reuse` too: in the jail detection would offer the same login,
+/// refused again, in a loop (R17 PR-D2c). For Codex, a reused home's link is removed. Then the
+/// reuse record is cleared. `signin.failed` when a marker cannot be written, since the next start
+/// could then reuse again without asking.
 pub(crate) async fn stop<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     why: Option<Found>,
@@ -77,7 +78,7 @@ pub(crate) async fn stop<T: Timer + Send + Sync>(
     let why = why.filter(|why| why.is_stop_reason());
     let data = &job.config.data_dir;
     let agent = &job.ticket.agent;
-    let no_reuse = matches!(why, None | Some(Found::CodexSandbox));
+    let no_reuse = matches!(why, None | Some(Found::CodexSandbox | Found::ClaudeSandbox));
     if no_reuse && marker::write_no_reuse(data, agent).is_err() {
         return job.failed(SigninCode::Failed);
     }

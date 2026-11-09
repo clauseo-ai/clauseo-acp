@@ -17,7 +17,7 @@ use clauseo_host::SessionKey;
 use clauseo_protocol::{AgentId, StopReason, StreamId, ThreadId};
 use serde_json::{Value, json};
 
-use crate::egress::{Recording, calls, claude_then, wired};
+use crate::egress::{Recording, calls, claude_then, claude_with, wired};
 use crate::profile_rig::{CLAUDE, Wired, turn};
 use crate::support::{Dir, Running, wait};
 
@@ -27,8 +27,7 @@ fn exit() -> Value {
 }
 
 /// Waits `wait` with nothing to do.
-#[cfg(target_os = "linux")]
-fn pause(wait: Duration) {
+pub(crate) fn pause(wait: Duration) {
     let (_keep, never) = channel::<()>();
     let _timed_out = never.recv_timeout(wait);
 }
@@ -42,7 +41,7 @@ fn no_close_within(closes: &Receiver<SessionKey>, wait: Duration) {
 }
 
 #[cfg(target_os = "linux")]
-mod group {
+pub(crate) mod group {
     //! The agent's helper as a straggler in its group.
 
     use std::path::Path;
@@ -55,21 +54,21 @@ mod group {
     use super::pause;
 
     /// The file, in the matter folder (the agent's working folder), the helper's pid goes in.
-    pub(super) const PID_FILE: &str = "helper.pid";
+    pub(crate) const PID_FILE: &str = "helper.pid";
 
     /// The scenario step that starts the helper in the agent's group, its pid in [`PID_FILE`].
-    pub(super) fn helper() -> Value {
+    pub(crate) fn helper() -> Value {
         json!({"spawn_child": {"pid_file": PID_FILE, "own_group": false}})
     }
 
     /// Makes this test process the reaper of its orphans, so the agent's helper, orphaned when
     /// the agent exits, stays a zombie in the agent's group until [`reap`].
-    pub(super) fn become_reaper() {
+    pub(crate) fn become_reaper() {
         nix::sys::prctl::set_child_subreaper(true).unwrap();
     }
 
     /// The helper's pid, once the matter folder `folder` holds its file.
-    pub(super) fn pid(folder: &Path) -> Pid {
+    pub(crate) fn pid(folder: &Path) -> Pid {
         let pid_file = folder.join(PID_FILE);
         for _ in 0..600 {
             if let Ok(text) = std::fs::read_to_string(&pid_file)
@@ -83,7 +82,7 @@ mod group {
     }
 
     /// Waits until `pid` is a zombie: the agent has exited and its tree's kill reached it.
-    pub(super) fn until_zombie(pid: Pid) {
+    pub(crate) fn until_zombie(pid: Pid) {
         let stat = format!("/proc/{pid}/stat");
         for _ in 0..600 {
             let text = std::fs::read_to_string(&stat).unwrap_or_default();
@@ -101,7 +100,7 @@ mod group {
     }
 
     /// Reaps `pid`: the agent's group is gone.
-    pub(super) fn reap(pid: Pid) {
+    pub(crate) fn reap(pid: Pid) {
         waitpid(pid, None).unwrap();
     }
 }
@@ -265,6 +264,52 @@ fn a_listener_on_the_chrome_port_holds_the_proxy_past_the_agents_exit() {
         .recv_timeout(Duration::from_secs(30))
         .expect("the proxy closed once Chrome's port refused");
     assert_eq!(calls(&log), ["open 1", "removal", "close 1"]);
+    host.shutdown();
+}
+
+/// Something listening on the session's Chrome port after the agent has exited holds the
+/// thread's next launch too (the launch gate, R17 PR-D2c review L2): Chrome runs under the ended
+/// session's policy, so the agent starts again only once its port refuses.
+#[test]
+fn the_next_launch_waits_for_the_ended_sessions_chrome() {
+    let dir = Dir::new("egress_cdp_launch", &[]);
+    claude_then(&dir, &json!([{"name": "browser"}]), &[exit()]);
+    let (proxy, log, _closes) = Recording::new(false);
+    let removals = Arc::clone(&log);
+    let (bound, listener) = channel::<TcpListener>();
+    let bound = Mutex::new(bound);
+    let launcher = Wired::new(&dir);
+    let host = dir.start_launching(0, Arc::<Wired>::clone(&launcher), move |config| {
+        wired(config, proxy, removals).with_tree_wait_hook(Arc::new(move |cdp| {
+            // Only the first session's: a later bind or send has nobody to hold it.
+            if let Some(chrome) =
+                cdp.and_then(|port| TcpListener::bind((Ipv4Addr::LOCALHOST, port)).ok())
+            {
+                let _gone = bound.lock().unwrap().send(chrome);
+            }
+        }))
+    });
+    let matter = host.create_matter("m", &dir.folder("m", &[]));
+    let thread = host.create_thread(matter, CLAUDE);
+    turn(&host, thread);
+    let chrome = listener
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the removal began its wait");
+    drop(listener);
+    claude_with(&dir, "session/load", &json!([{"name": "browser"}]), &[]);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (second, _) = host.prompt(thread, "Again.");
+    pause(Duration::from_secs(1));
+    host.settle();
+    assert_eq!(
+        launcher.seen().len(),
+        1,
+        "launched beside the ended session's Chrome"
+    );
+    drop(chrome);
+    let ended = events.until_turn_ended(second);
+    assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    assert_eq!(launcher.seen().len(), 2);
     host.shutdown();
 }
 

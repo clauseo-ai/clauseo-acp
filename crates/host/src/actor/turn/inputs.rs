@@ -2,7 +2,9 @@
 //! reads.
 
 use clauseo_acp::{AgentInfo, PromptEnd, SessionStart};
-use clauseo_protocol::{AgentChoiceId, ConfigOption, Envelope, QueryResult, ThreadId, TurnId};
+use clauseo_protocol::{
+    AgentChoiceId, CompactString, ConfigOption, Envelope, QueryResult, ThreadId, TurnId,
+};
 
 use super::super::commands::CommandCtx;
 use super::super::input::Reply;
@@ -38,6 +40,8 @@ pub(crate) enum TurnInput {
         /// Whether the run was freed (its slot goes back), or held.
         freed: bool,
     },
+    /// A restarted agent's old tree is gone, or outlived the wait (`launch_checks::relaunch`).
+    Relaunch(super::launch_checks::TreeWait),
     /// A check for papers an undo removed that came back is due (`came_back.rs`).
     CameBack(super::came_back::Check),
 }
@@ -77,9 +81,9 @@ pub(crate) enum AgentReply {
         mode: AgentChoiceId,
         result: Result<(), clauseo_acp::Error>,
     },
-    /// The switch back to `default` after a forced-ask agent moved itself to another mode
-    /// (`updates.rs`) answered.
-    ModeReset(Result<(), clauseo_acp::Error>),
+    /// The switch back to this mode after an agent whose modes are forced moved itself to
+    /// another (`forced_mode.rs`) answered.
+    ModeReset(CompactString, Result<(), clauseo_acp::Error>),
     /// A steer into the running turn answered (`queue/steer.rs`).
     Steer(Box<super::queue::Steered>),
 }

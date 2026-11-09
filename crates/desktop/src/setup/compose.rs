@@ -206,7 +206,7 @@ fn plan_words(agent: &AgentId, plan: &str) -> Option<PlanLabel> {
 fn found_login(found: Found) -> Option<FoundLogin> {
     Some(match found {
         Found::ClaudeSettings => FoundLogin::ClaudeSettings,
-        Found::ClaudeWindowsSandbox => FoundLogin::ClaudeWindowsSandbox,
+        Found::ClaudeSandbox => FoundLogin::ClaudeSandbox,
         Found::CodexSandbox => FoundLogin::CodexSandbox,
         Found::CodexKeyring => FoundLogin::CodexKeyring,
         Found::ReusedFailed => FoundLogin::ReusedFailed,

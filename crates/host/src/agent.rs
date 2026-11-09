@@ -165,7 +165,8 @@ pub(crate) struct AgentLink {
     /// The agent's descendants, which a cancelled turn's sweep lists and ends
     /// ([`leftovers`]); it keeps nothing alive.
     descendants: Descendants,
-    stop: Option<oneshot::Sender<()>>,
+    /// The stop's ask: `true` for [`Self::stop_now`], with no graces.
+    stop: Option<oneshot::Sender<bool>>,
     /// The connection's event channel, read only to see whether it is empty ([`Self::fence`]).
     events: async_channel::Receiver<AcpEvent>,
     /// The fenced calls in flight, which the owner waits for before it posts [`Ended`].
@@ -218,8 +219,19 @@ impl AgentLink {
     /// [`Ended::Stopped`] when done, or [`Ended::Exited`] if the agent exited first. A second
     /// call does nothing.
     pub(crate) fn stop(&mut self) {
+        self.ask_stop(false);
+    }
+
+    /// Asks the owner task to stop the agent at once: its tree is killed with no graces
+    /// (`Handle::kill_now`), for an agent that switched itself to working without asking.
+    /// As [`Self::stop`] otherwise; a stop already asked stays as it was.
+    pub(crate) fn stop_now(&mut self) {
+        self.ask_stop(true);
+    }
+
+    fn ask_stop(&mut self, now: bool) {
         if let Some(stop) = self.stop.take()
-            && stop.send(()).is_err()
+            && stop.send(now).is_err()
         {
             tracing::debug!(
                 pid = self.pid,
@@ -266,7 +278,7 @@ pub(crate) fn start(
     // Each sender is dropped when its task ends, which wakes its receiver.
     let (pump_done, pump_end) = oneshot::channel::<()>();
     let (events_done, events_end) = oneshot::channel::<()>();
-    let (stop, stop_asked) = oneshot::channel::<()>();
+    let (stop, stop_asked) = oneshot::channel::<bool>();
 
     spawn(spawner, async move {
         if let Err(err) = stderr.drain().await {
@@ -401,7 +413,7 @@ fn spawn(spawner: &LocalSpawner, task: impl Future<Output = ()> + 'static) -> Re
 /// The owner task: exit or stop, then the bounded wait for the pipes, then the report.
 async fn own(
     mut handle: Handle,
-    stop_asked: oneshot::Receiver<()>,
+    stop_asked: oneshot::Receiver<bool>,
     ends: impl Future<Output = ()>,
     output: Output,
     clock: Arc<dyn Clock>,
@@ -412,38 +424,44 @@ async fn own(
         let exit = pin!(handle.exited());
         // A dropped `AgentLink` (Canceled) asks for a stop too.
         match select(exit, stop_asked).await {
-            Either::Left((report, _)) => Some(report),
-            Either::Right(_) => None,
+            Either::Left((report, _)) => Ok(report),
+            Either::Right((now, _)) => Err(now.unwrap_or(false)),
         }
     };
-    let ended = if let Some(report) = exited {
-        // The agent is gone: all it wrote is in its stdout or already read.
-        let mark = output.progress.mark();
-        settle(ends, || output.posted_since(mark), &*clock).await;
-        Ended::Exited(report.detach_reason())
-    } else {
-        // Listed off the actor first (Unix only: Windows ends the whole job): the tree kill
-        // ends a descendant that left the agent's group, as a Codex command does.
-        let listed = if cfg!(unix) {
-            leftovers::snapshot(handle.descendants(), Arc::clone(&clock)).await
-        } else {
-            None
-        };
-        let outcome = handle
-            .shutdown(&ProcessTimer(Arc::clone(&clock)), listed)
-            .await;
-        let step = StopStep::of(&outcome);
-        if step == StopStep::Unresponsive {
-            tracing::warn!(
-                pid,
-                "the agent did not exit after its kill; it is reaped later"
-            );
+    let ended = match exited {
+        Ok(report) => {
+            // The agent is gone: all it wrote is in its stdout or already read.
+            let mark = output.progress.mark();
+            settle(ends, || output.posted_since(mark), &*clock).await;
+            Ended::Exited(report.detach_reason())
         }
-        let mark = output.progress.mark();
-        settle(ends, || output.posted_since(mark), &*clock).await;
-        Ended::Stopped {
-            step,
-            report: outcome.report().detach_reason(),
+        Err(now) => {
+            // Listed off the actor first (Unix only: Windows ends the whole job): the tree kill
+            // ends a descendant that left the agent's group, as a Codex command does.
+            let listed = if cfg!(unix) {
+                leftovers::snapshot(handle.descendants(), Arc::clone(&clock)).await
+            } else {
+                None
+            };
+            let timer = ProcessTimer(Arc::clone(&clock));
+            let outcome = if now {
+                handle.kill_now(&timer, listed).await
+            } else {
+                handle.shutdown(&timer, listed).await
+            };
+            let step = StopStep::of(&outcome);
+            if step == StopStep::Unresponsive {
+                tracing::warn!(
+                    pid,
+                    "the agent did not exit after its kill; it is reaped later"
+                );
+            }
+            let mark = output.progress.mark();
+            settle(ends, || output.posted_since(mark), &*clock).await;
+            Ended::Stopped {
+                step,
+                report: outcome.report().detach_reason(),
+            }
         }
     };
     post(AgentInput::Ended(ended));

@@ -1,0 +1,9 @@
+{"scenario":"codex-saves-read-only","description":"An unjailed Codex (tier C) that moves itself to read-only mid-turn (R17 PR-D2c round 4): the host logs the mode as it came, so the thread's saved mode is read-only. session/new reports workspace-write, so no set_mode before the prompt; written from codex-acp 2.2.2 source (src/AgentMode.ts, dist/index.js:34243-34354) until G8a's recordings replace it; answered 'Read only now.'","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":false,"promptCapabilities":{"image":true,"embeddedContext":true},"mcpCapabilities":{"http":true,"sse":false},"sessionCapabilities":{"list":{},"delete":{},"additionalDirectories":{},"resume":{},"close":{}}},"authMethods":[],"agentInfo":{"name":"@agentclientprotocol/codex-acp","title":"Codex","version":"2.2.2"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"workspace-write","availableModes":[{"id":"read-only","name":"Read-only"},{"id":"workspace-write","name":"Workspace access"},{"id":"agent","name":"Auto review"},{"id":"agent-full-access","name":"Full access"}]}}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"current_mode_update","currentModeId":"read-only"},"session":"sess-1"}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Read only now."}},"session":"sess-1"}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

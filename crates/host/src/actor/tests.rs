@@ -100,7 +100,8 @@ fn create_thread(host: &HostHandle, n: u128, matter: MatterId) -> ThreadId {
         | CommandOutcome::MatterCreated { .. }
         | CommandOutcome::PromptAccepted { .. }
         | CommandOutcome::StepUndone { .. }
-        | CommandOutcome::VersionRestored { .. }) => panic!("not a thread: {other:?}"),
+        | CommandOutcome::VersionRestored { .. }
+        | CommandOutcome::Replaced) => panic!("not a thread: {other:?}"),
     }
 }
 

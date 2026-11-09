@@ -5,10 +5,9 @@
 
 use clauseo_acp::{AcpEvent, AgentUpdate, MessageRole, Origin};
 use clauseo_protocol::{
-    AgentId, AgentSessionId, CommandsAvailable, CompactString, CompactionStatus,
-    ConfigOptionsReplaced, ContentBlock, DomainEvent, MessageId, ModeChanged, Notice, PlanReplaced,
-    RenameSource, StreamId, TextKind, ThreadId, ThreadRenamed, Title, ToolCallPatch, TurnId,
-    UsageUpdated,
+    AgentId, AgentSessionId, CommandsAvailable, CompactString, CompactionStatus, ContentBlock,
+    DomainEvent, MessageId, Notice, PlanReplaced, RenameSource, StreamId, TextKind, ThreadId,
+    ThreadRenamed, Title, ToolCallPatch, TurnId, UsageUpdated,
 };
 use clauseo_store::BlobIn;
 
@@ -370,8 +369,7 @@ fn tool_call(
     )
 }
 
-/// What a tool call adds to the thread's sources (`sources.rs`), asked of the thread's state
-/// with the thread's agent.
+/// What a tool call adds to the thread's sources (`sources.rs`), asked of its state and agent.
 fn source_of<T>(
     actor: &mut Actor,
     thread: ThreadId,
@@ -483,10 +481,11 @@ fn plain(actor: &mut Actor, thread: ThreadId, update: AgentUpdate) -> Result<(),
         }
         .into(),
         AgentUpdate::CurrentMode { mode_id } => {
-            super::forced_mode::reset_if_forced(actor, thread, &mode_id);
-            ModeChanged { mode_id }.into()
+            return super::forced_mode::agent_moved(actor, thread, mode_id);
         }
-        AgentUpdate::ConfigOptions(options) => ConfigOptionsReplaced { options }.into(),
+        AgentUpdate::ConfigOptions(options) => {
+            super::forced_mode::kept(actor, thread, options).into()
+        }
         AgentUpdate::Usage { used, size, cost } => UsageUpdated {
             context_used: Some(used),
             context_size: Some(size),

@@ -101,6 +101,8 @@ entries page in on scroll through `HostQuery::PageEntries`, which returns `Query
 | Notice from the agent | `ViewEntry::Notice` with no `kind` | text, the agent's own words |
 | Host notice: the agent no longer remembers the earlier turns | `NoticeKind::ContextNotRestored` | none; the app's own words (the host's English `text` until it renders the kind) |
 | Host notice: papers an undo removed came back (a sync client put them back) and stay | `NoticeKind::FilesCameBack` | files (at most five, sorted by path), more (how many beyond them); the app's own words (the host's English `text`, a count only, until it renders the kind) |
+| Host notice: a jailed ChatGPT last in Read-only starts on its own, where the sandbox doesn't enforce Read-only yet (Windows until PR6) | `NoticeKind::ReadOnlyUnavailable` | none; the app's own words (the host's English `text` until it renders the kind) |
+| Host notice: an unjailed ChatGPT switched itself to working without asking, the switch back failed, and Clauseo stopped it | `NoticeKind::ModeSetBackFailed` | none; the app's own words (the host's English `text` until it renders the kind) |
 | Host notice of a kind from a newer Clauseo | `NoticeKind::Unknown` | text, the host's English fallback |
 | Host notice: a skill pack the launch left out | `NoticeKind::SkillPackNotLoaded`, with `pack` (the pack's id) and `reason` (`PackSkipReason`) | the pack and the reason in the app's own words (the host's English `text` until the app renders the kind) |
 | Compaction started and completed | `ViewEntry::Marker` with `MarkerKind::Compaction`: `CompactionStatus::Started`, `CompactionStatus::Completed` | summary (inline or blob) when completed |
@@ -349,6 +351,7 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | "Allow this site" that lasts until Clauseo closes, because Clauseo couldn't save it (0053) | `ErrorCode::BlocklistAllowNotSaved` | no |
 | Removing an allowed site that is blocked again until Clauseo closes, because Clauseo couldn't save that (0053) | `ErrorCode::BlocklistRevokeNotSaved` | no |
 | Codex login on another volume (R17) | `ErrorCode::SigninReuseOtherVolume` | no |
+| A mode that asks before changes, for Codex in the sandbox (R17) | `ErrorCode::SandboxAskModeUnavailable` | no |
 | A code from a newer Clauseo | `ErrorCode::Unknown` | no |
 
 A failed turn shows its code from `turn_failed` on the step card (section 3).

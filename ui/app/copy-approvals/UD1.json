@@ -529,14 +529,14 @@
     "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-65": {
-    "en": "Clauseo's Safe workspace can't share Claude Code's sign-in on Windows yet.",
-    "hi": "Clauseo का सुरक्षित कार्यक्षेत्र अभी Windows पर Claude Code का साइन-इन साझा नहीं कर सकता।",
+    "en": "Sign in to Claude in Clauseo. The Safe workspace can't use the sign-in Claude Code already has on this computer.",
+    "hi": "Clauseo में Claude से साइन इन करें। सुरक्षित कार्यक्षेत्र इस कंप्यूटर पर Claude Code के पहले से मौजूद साइन-इन का उपयोग नहीं कर सकता।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-07",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "hi_at": "2026-11-09",
+    "hi_by": "app thread (provisional; Hindi-speaking lawyer to review)",
     "status": "provisional",
-    "at": "2026-11-07",
-    "by": "app track (provisional; Rohan batch review; design B, safe-workspace-installer-setup)"
+    "at": "2026-11-09",
+    "by": "app thread (provisional)"
   },
   "UD1-66": {
     "en": "{app} on this computer is signed out, so Clauseo stopped using its sign-in.",

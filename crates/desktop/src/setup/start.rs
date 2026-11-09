@@ -532,13 +532,15 @@ async fn follow_splits(backend: &AgentsBackend) {
     }
 }
 
-/// S18's reason for a split's automatic leave, which its `SignedOut` shows. `CodexSandbox`'s
-/// leave writes `no-reuse` too (`clauseo_agents`), so detection does not offer that login again.
+/// S18's reason for a split's automatic leave, which its `SignedOut` shows. `CodexSandbox`'s and
+/// `ClaudeSandbox`'s leaves write `no-reuse` too (`clauseo_agents`), so detection does not offer
+/// that login again.
 pub(crate) const fn leave_reason(why: SplitWhy) -> Found {
     match why {
         SplitWhy::LinkSplit => Found::CodexLinkSplit,
         SplitWhy::LawyersFileGone => Found::ReusedSignedOut,
         SplitWhy::CodexSandbox => Found::CodexSandbox,
+        SplitWhy::ClaudeSandbox => Found::ClaudeSandbox,
     }
 }
 

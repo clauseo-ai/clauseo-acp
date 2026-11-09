@@ -23,6 +23,24 @@ test("a known kind gives the app's line, in the page's words", () => {
   expect(noticeLine("context_not_restored", en)).toBe(CONTEXT);
 });
 
+test("Read-only not available here gives its line, in English and Hindi", () => {
+  expect(noticeLine("read_only_unavailable", en)).toBe(
+    "Read-only isn't available for ChatGPT in the Safe workspace on this computer, so ChatGPT can change files in this matter without asking first.",
+  );
+  expect(noticeLine("read_only_unavailable", words("hi"))).toBe(
+    "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र में ChatGPT के लिए केवल-पढ़ने वाला मोड उपलब्ध नहीं है, इसलिए ChatGPT पहले पूछे बिना इस मामले की फ़ाइलें बदल सकता है।",
+  );
+});
+
+test("a failed switch back gives its line, in English and Hindi", () => {
+  expect(noticeLine("mode_set_back_failed", en)).toBe(
+    "ChatGPT switched itself to working without asking you, and Clauseo couldn't switch it back, so Clauseo stopped it. Send another message to start ChatGPT again.",
+  );
+  expect(noticeLine("mode_set_back_failed", words("hi"))).toBe(
+    "ChatGPT ने खुद को बिना पूछे काम करने पर बदल लिया, और Clauseo उसे वापस नहीं बदल सका, इसलिए Clauseo ने उसे रोक दिया। ChatGPT को फिर से शुरू करने के लिए एक और संदेश भेजें।",
+  );
+});
+
 test("no kind (an agent's notice) gives null, so the row shows its own text", () => {
   expect(noticeLine(undefined, en)).toBeNull();
 });

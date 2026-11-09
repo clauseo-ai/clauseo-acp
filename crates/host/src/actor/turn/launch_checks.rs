@@ -86,11 +86,10 @@ pub(crate) struct Prepared {
     pub(super) stored: PathBuf,
     /// A Codex agent's preparation; `None` for any other agent.
     pub(super) codex: Option<CodexPrepared>,
-    /// A Claude agent's home, `Locations::agent_home` of its id, made: its `CLAUDE_CONFIG_DIR`
-    /// (`agent/home.rs`). `None` for any other agent.
+    /// A Claude agent's home, made: its `CLAUDE_CONFIG_DIR` (`agent/home.rs`); else `None`.
     pub(super) claude_home: Option<PathBuf>,
-    /// The folder check's answer at this launch (`agent/folder_support.rs`), when it ran: for a
-    /// Codex or a Claude agent. A Claude agent's decides its forced ask (`agent/forced_ask.rs`).
+    /// The folder check's answer (`agent/folder_support.rs`), when it ran; Claude's decides its
+    /// forced ask (`agent/forced_ask.rs`).
     pub(super) folder: Option<Answer>,
     /// The session's folders, made.
     pub(super) run: RunFolders,
@@ -101,6 +100,8 @@ pub(crate) struct Prepared {
     pub(super) packs_skipped: Vec<(String, PackSkip)>,
     /// What the sandbox's launchers gave this launch ([`sandbox`]); `None` without them.
     pub(super) sandbox: Option<sandbox::Sandboxed>,
+    /// Desktop's reused-login flag, read once after the sign-in checks: the policy's and env's.
+    pub(super) reused: bool,
 }
 
 /// The folders a session gets, all under the data folder, and its browser claims.
@@ -123,8 +124,7 @@ pub(crate) struct RunFolders {
     /// agents, kept when a session ends.
     pub(crate) notes: PathBuf,
     /// `{browser_executable}`: the Chrome the launch prep found for this session
-    /// (`browser::chrome::find`), or none (`BrowserNotInstalled`). Not a folder, but the
-    /// session's like them, and found on the same thread.
+    /// (`browser::chrome::find`), or none (`BrowserNotInstalled`).
     pub(crate) chrome: Option<PathBuf>,
     /// The session's browser ports, socket folder and agent-browser name
     /// ([`BrowserSession`]), claimed on the launch-prep thread; none when the session cannot
@@ -390,6 +390,7 @@ pub(super) fn prepare(
                     skills_written,
                     packs_skipped,
                     sandbox: None,
+                    reused: false,
                 })
             },
             undo_late,
@@ -547,6 +548,7 @@ pub(super) fn on_prepared(
         agents::fail_all(actor, thread, waiting, &error);
         return;
     }
+    prepared.reused = state_prep::reused_login(actor, thread);
     if let Err(error) = super::profile_loads::launch_keys(actor, thread, &mut prepared) {
         discard(actor, thread, prepared.run, None);
         agents::fail_all(actor, thread, waiting, &error);
@@ -575,6 +577,8 @@ pub(super) mod folder;
 pub(super) mod relay;
 mod straggler;
 pub(crate) use straggler::HeldRuns;
+mod relaunch;
+pub(super) use relaunch::{EndedSession, TreeWait, gate, on_gone, remember};
 mod removal;
 use removal::discard;
 pub(super) use removal::on_run_removed;
