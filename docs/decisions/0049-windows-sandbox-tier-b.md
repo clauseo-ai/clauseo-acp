@@ -2406,31 +2406,39 @@ group machine-wide takes nothing from them.
   the guard writes a missing access value as exactly the descriptor COM uses now, read with
   `CoGetSystemSecurityPermissions(SD_ACCESSRESTRICTIONS)`, so nothing changes in effect. No
   default is guessed: if that call fails, nothing is written and the state is
-  `degraded: machine access unknown`. The bytes go to the backup (`AccessAdded`). After the
+  `degraded: machine access unknown`. If Group Policy's
+  `HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DCOM\MachineAccessRestriction` is set, COM's
+  descriptor may be the policy's, so nothing is copied and the state is
+  `degraded: group policy`. The bytes go to the backup (`AccessAdded`). After the
   write, both values are read back at 250 ms and at 1 s. The state is `applied` only when the
   deny is still first at both reads; otherwise it is `degraded: dcom moved the value`. The
-  refresh's put-back is checked the same way.
+  refresh's put-back is checked the same way, so each refresh run tries the write and the
+  read-back again. The app reads the state typed (`windows::sandbox_launch_deny`, `NotSet`,
+  `Applied` or `Degraded` with its reason) for Settings; launches go ahead either way.
 - **Backup.** Before the first change, the original value is stored under the record's
   subkey `HKLM\SOFTWARE\Clauseo\Sandbox\MachineLaunch` (`Original`, empty when there was no
   value). The subkey has a protected DACL that grants only SYSTEM and Administrators, so the
   pool, which reads the record, can't read or change the backup. The guard also stores the bytes
-  it last wrote (`Written`), set before each write. A later re-apply (a put-back after drift)
+  it last wrote (`Written`), set before each write, and the last 8 values it wrote
+  (`History`). A later re-apply (a put-back after drift)
   keeps the first `Original` and sets `PutBack` to 1: from then on the value holds someone
   else's edit, which no restore may undo.
 - **Where.** Set-up step 8c applies the guard elevated, after the network and once the group and
   the record exist (`late_steps::launch_deny`). Every run of `\Clauseo\SandboxRefresh` applies
   it again as SYSTEM, after the admin copy's steps, under the set-up lock
-  (`refresh/launch_phase.rs`). The refresh skips a record with no `GroupSid` or with
+  (`refresh/launch_phase.rs`). A run that wasn't allowed, found the lock held or carries the
+  placeholder signing key skips it. The refresh skips a record with no `GroupSid` or with
   `Removing` set. A run that finds a deny Clauseo wrote has gone (drift) puts it back and logs an
   information line. The step never fails the set-up.
 - **Removal.** `--remove` (after `DeviceSync`'s deny, before the group goes) checks the value
-  first. The backup goes back byte for byte only when the value is exactly the bytes Clauseo
+  first. The backup goes back byte for byte when the value is exactly the bytes Clauseo
   wrote and there has been no put-back since the first write, and a backup of "no value" then
-  deletes the value. Otherwise only our exact deny comes off: a plain deny, no flags, mask
+  deletes the value. It also goes back when the value is gone (DCOM moved it, or someone
+  deleted it). Otherwise only our exact deny comes off: a plain deny, no flags, mask
   `0x1F`, the group's SID. Every other entry stays, a deny for the group with another mask or
   flags included. A value that holds nothing but Windows' default after that, on a machine that
   had no value and saw no put-back, is deleted. A value that won't parse is left and logged.
-  Bytes in `MachineLaunchRestrictionOld` that are exactly what Clauseo last wrote are deleted.
+  `MachineLaunchRestrictionOld` is deleted when it is exactly one of the values in `History`.
   An access value Clauseo added is deleted only while it is byte for byte what Clauseo wrote and
   no launch value is left (DCOM would move it); otherwise it is left and logged. Then the
   backup subkey and the state go. A set-up rollback that deletes a group it made removes the

@@ -1043,20 +1043,32 @@ What set-up changes:
   `O:BAG:BAD:(A;;CCDCLCSWRP;;;BA)(A;;CCDCSW;;;WD)`, with the deny in front.
 - Windows keeps that value only while `MachineAccessRestriction`, in the same key, is set too.
   If it isn't, set-up first writes it as exactly the access limit COM already uses, so no
-  account's access changes. Uninstalling deletes it again if it is still exactly those bytes and
-  the launch value is gone.
+  account's access changes. If the policy "DCOM: Machine Access Restrictions in SDDL syntax" is
+  set (`HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DCOM\MachineAccessRestriction`), set-up
+  copies nothing and the state reads `degraded: group policy`. Uninstalling deletes the access
+  value again if it is still exactly those bytes and the launch value is gone.
+- If a launch value stays after uninstalling (someone else's entries, or the value as it was
+  before Clauseo), the access value Clauseo added stays too, since Windows would move the launch
+  value without it. It equals the access limit Windows used when set-up wrote it, and Clauseo
+  doesn't track it once uninstalled. To remove it, check that `MachineLaunchRestriction` is gone
+  or no longer needed, then, in an elevated PowerShell:
+  `Remove-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Ole' -Name MachineAccessRestriction`.
+  Leave it if your organisation set it on purpose.
 - The value as it was before is kept in `HKLM\SOFTWARE\Clauseo\Sandbox\MachineLaunch`, a key only
   SYSTEM and Administrators can open: `Original` holds the old bytes (empty when there was no
   value), `Written` holds what Clauseo last wrote, and `PutBack` is 1 once Clauseo has had to put
   its deny back after something else rewrote the value. `AccessAdded` holds the
-  `MachineAccessRestriction` bytes set-up wrote, when it wrote one.
+  `MachineAccessRestriction` bytes set-up wrote, when it wrote one, and `History` the last 8
+  values Clauseo wrote.
 - Clauseo's SYSTEM task `\Clauseo\SandboxRefresh` puts the deny back at each run if something
   removed it, and writes an Event Log line (source "Clauseo Sandbox") when it does.
 - A value Clauseo can't read as a valid COM security descriptor is never changed. Neither is a
   value whose entries use COM's old form, `COM_RIGHTS_EXECUTE` alone, since COM refuses a list
   that mixes the two forms.
 - Uninstalling takes the deny off. If the value is still exactly what set-up first wrote, the old
-  bytes go back unchanged, and a value that wasn't there before is deleted. If anything rewrote
+  bytes go back unchanged, and a value that wasn't there before is deleted. If Windows moved the
+  value away, the old bytes go back too, and any value Clauseo wrote is deleted from
+  `MachineLaunchRestrictionOld`. If anything rewrote
   the value since, even when Clauseo then put its deny back, only Clauseo's exact entry comes
   off and everything else stays.
 
@@ -1066,7 +1078,7 @@ The guard's state is in `HKLM\SOFTWARE\Clauseo\Sandbox`, value `MachineLaunchDen
 |---|---|
 | `applied` | The deny is in place. |
 | `policy` | A Group Policy sets the limit, and its SDDL holds the deny. |
-| `degraded: group policy` | A Group Policy sets the limit without the deny. The setting below fixes it. |
+| `degraded: group policy` | A Group Policy sets the limit without the deny (the setting below fixes it), or sets the machine access limit while `MachineAccessRestriction` is missing, so Clauseo copied nothing. |
 | `degraded: unparsable` | The value isn't a security descriptor Clauseo can safely change, so it was left as it is. |
 | `degraded: failed` | Reading or writing the registry failed; the Event Log line names the Windows error. |
 | `degraded: dcom moved the value` | Windows moved the value to `MachineLaunchRestrictionOld` after Clauseo wrote it, so the deny isn't in effect. |
