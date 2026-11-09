@@ -566,10 +566,18 @@ jobs:
         if: env.BUILD == 'true' && matrix.native && runner.os != 'Linux' && env.PR_LINT_ONLY != 'true'
         run: cargo nextest run --workspace --profile ci --no-tests=pass
 
+      # The LowBox proof row (clauseo-lowbox's elevated_lowbox_headless_shell_row, below) needs the
+      # pinned x64 chrome-headless-shell, on windows-11-arm too (under Prism), and a folder for its
+      # screenshot and logs; it fails, never skips, without them.
+      - name: Fetch the pinned chrome-headless-shell for the LowBox proof row
+        if: env.BUILD == 'true' && matrix.native && env.PR_LINT_ONLY != 'true' && runner.os == 'Windows'
+        uses: ./.github/actions/fetch-headless-shell
+
       # The `elevated_` tests (D-B16), as windows-pr-tests.yml's step: ignored everywhere else,
       # and each skips unless the token is elevated and CLAUSEO_ELEVATED_TESTS=1. Hosted Windows
       # runners' tokens are elevated (probe #509). One at a time: they make and delete local
-      # accounts, a group and an HKLM key.
+      # accounts, a group and an HKLM key. The LowBox proof row is one of them: chrome-headless-shell
+      # as a LowBox child of a test account (.config/nextest.toml gives it 600 s and no retry).
       - name: Elevated tests, one at a time
         if: env.BUILD == 'true' && matrix.native && env.PR_LINT_ONLY != 'true' && runner.os == 'Windows'
         env:
@@ -578,6 +586,16 @@ jobs:
           set -o pipefail
           filter='test(/(^|::)elevated_/)'
           cargo nextest run --workspace --profile ci --run-ignored only -E "$filter" --test-threads 1 --no-tests=fail
+
+      # The proof row's screenshot, chrome's standard error and its report, pass or fail.
+      - name: Upload the LowBox proof row's artifacts
+        if: ${{ always() && env.BUILD == 'true' && matrix.native && env.PR_LINT_ONLY != 'true' && runner.os == 'Windows' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lowbox-proof-${{ matrix.target }}
+          path: ${{ env.CLAUSEO_TEST_ARTIFACTS }}
+          retention-days: 14
+          if-no-files-found: warn
 
       # The OS keychain for real: clauseo-connectors' ignored keychain_smoke test writes, reads and
       # deletes a 2,000-byte item (Keychain Services on macOS, Credential Manager on Windows) under

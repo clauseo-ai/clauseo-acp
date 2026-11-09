@@ -1,0 +1,45 @@
+# Fetches the pinned win64 chrome-headless-shell for the LowBox proof row
+# (crates/lowbox/tests/proof.rs, `elevated_lowbox_headless_shell_row`), on Windows x64 and on
+# windows-11-arm, where Prism runs the x64 build (Chrome for Testing has no win-arm64 shell).
+#
+# The pin is clauseo-ai/browser-pins' `current` release as published 2026-11-08T22:29:53Z
+# (browser-pins-v1.json: stable.version and downloads.chrome-headless-shell.win64), copied here so
+# a run is reproducible and never follows a newer release by itself. The zip is checked against
+# its size and SHA-256 before anything unpacks it; a mismatch fails the job.
+#
+# Sets CLAUSEO_TEST_CHROME_SHELL (the shell's full path) and CLAUSEO_TEST_ARTIFACTS (an empty
+# folder the row writes its screenshot and logs to, which the workflow uploads). The row fails,
+# never skips, without either.
+
+name: Fetch the pinned chrome-headless-shell
+description: Downloads and checks the pinned win64 chrome-headless-shell for the LowBox proof row.
+
+runs:
+  using: composite
+  steps:
+    - name: Fetch and check the pinned win64 chrome-headless-shell
+      shell: pwsh
+      env:
+        SHELL_VERSION: "157.0.8103.38"
+        SHELL_SIZE: "126513060"
+        SHELL_SHA256: "1ff4540855478ba0848e03f1ef8d455f77d058b38285df91bc34273788a73446"
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $zip = Join-Path $env:RUNNER_TEMP 'chrome-headless-shell-win64.zip'
+        $url = "https://storage.googleapis.com/chrome-for-testing-public/$env:SHELL_VERSION/win64/chrome-headless-shell-win64.zip"
+        Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+        $size = (Get-Item $zip).Length
+        $sha = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+        if ($size -ne [int64]$env:SHELL_SIZE) { throw "size $size, but the pin says $env:SHELL_SIZE" }
+        if ($sha -ne $env:SHELL_SHA256) { throw "sha256 $sha, but the pin says $env:SHELL_SHA256" }
+        "zip matches the pin: chrome-headless-shell $env:SHELL_VERSION, $size bytes, sha256 $sha"
+        $dir = Join-Path $env:RUNNER_TEMP 'headless-shell'
+        Expand-Archive -Path $zip -DestinationPath $dir -Force
+        Remove-Item $zip
+        $exe = (Get-ChildItem -Path $dir -Recurse -Filter 'chrome-headless-shell.exe' | Select-Object -First 1).FullName
+        if (-not $exe) { throw "no chrome-headless-shell.exe in the zip" }
+        $artifacts = Join-Path $env:RUNNER_TEMP 'lowbox-proof-artifacts'
+        New-Item -ItemType Directory -Force $artifacts | Out-Null
+        "shell: $exe"
+        "CLAUSEO_TEST_CHROME_SHELL=$exe" >> $env:GITHUB_ENV
+        "CLAUSEO_TEST_ARTIFACTS=$artifacts" >> $env:GITHUB_ENV
