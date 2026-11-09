@@ -265,7 +265,9 @@ pub(super) fn take_back(
 
 /// Sets entry `id`'s [`Entry::found`] to `found`; whether it changed. Found only while it
 /// is pending, an `OWNER RIGHTS` entry, and no other entry of ours (one not found) names the
-/// same permission entry: one of ours there means we wrote it.
+/// same permission entry: one of ours there means we wrote it. Ownership is the permission
+/// entry's, not one matter's: whoever wrote it last owns it, so marking it ours marks every
+/// entry naming it ours, and the last of them forgotten removes it.
 pub(super) fn set_found(state: &mut State, id: EntryId, found: bool) -> bool {
     let Some(entry) = state.entries().find(|e| e.id == id).cloned() else {
         return false;
@@ -280,7 +282,7 @@ pub(super) fn set_found(state: &mut State, id: EntryId, found: bool) -> bool {
     let mut changed = false;
     for slot in &mut state.slots {
         if let Slot::Known(known) = slot
-            && known.entry.id == id
+            && (known.entry.id == id || (!found && same_ace(&known.entry, &entry)))
             && known.entry.found != found
             && may
         {

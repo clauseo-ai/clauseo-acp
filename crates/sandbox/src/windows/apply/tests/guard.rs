@@ -114,3 +114,41 @@ fn an_owner_rights_entry_already_there_is_its_and_stays() {
     forget_matter(&mut ledger, matter_one(), &mut acl, &mut around(&w)).unwrap();
     assert!(acl.aces.is_empty(), "{:?}", acl.aces);
 }
+
+/// #808's M2: ownership is the permission entry's, not one matter's. Matters one and two both
+/// list IT's entry as found; IT takes it off and matter one writes ours: both entries are ours
+/// now, and the last matter forgotten removes it.
+#[test]
+fn an_owner_rights_entry_rewritten_is_ours_for_every_matter_naming_it() {
+    let w = world("apply-guard-found-shared", &[]);
+    let (mut ledger, mut acl) = (ledger(&w), FakeAcl::default());
+    let matter = w.canonical("matter");
+    let mut one = guarded_plan(&w);
+    let ow = one
+        .grants()
+        .iter()
+        .find(|g| g.path() == matter && g.rights() == Rights::OwnerModify)
+        .cloned()
+        .unwrap();
+    acl.aces.insert(key(&ow));
+    apply(&mut ledger, &mut one, &mut acl, &mut around(&w)).unwrap();
+    let mut two = AdmittedPlan::from_grants(matter_two(), vec![ow.clone()]);
+    apply(&mut ledger, &mut two, &mut acl, &mut around(&w)).unwrap();
+    let found = |l: &Ledger| l.entries().filter(|e| e.found).count();
+    assert_eq!(found(&ledger), 2, "both list IT's");
+
+    acl.aces.remove(&key(&ow));
+    let mut again = guarded_plan(&w);
+    apply(&mut ledger, &mut again, &mut acl, &mut around(&w)).unwrap();
+    assert!(acl.aces.contains(&key(&ow)));
+    assert_eq!(found(&ledger), 0, "ours, for both matters");
+
+    forget_matter(&mut ledger, matter_one(), &mut acl, &mut around(&w)).unwrap();
+    assert!(acl.aces.contains(&key(&ow)), "matter two still names it");
+    forget_matter(&mut ledger, matter_two(), &mut acl, &mut around(&w)).unwrap();
+    assert!(
+        !acl.aces.contains(&key(&ow)),
+        "the last one forgotten removes it"
+    );
+    assert_eq!(ledger.entries().count(), 0);
+}
