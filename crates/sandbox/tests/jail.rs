@@ -80,3 +80,8 @@ mod outside;
 #[cfg(target_os = "macos")]
 #[path = "jail/chrome.rs"]
 mod chrome;
+
+#[cfg(test)]
+#[cfg(target_os = "macos")]
+#[path = "jail/planted.rs"]
+mod planted;
