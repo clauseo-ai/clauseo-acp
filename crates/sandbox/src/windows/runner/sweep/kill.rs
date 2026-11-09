@@ -45,12 +45,16 @@ struct Held<T> {
     ended_here: bool,
 }
 
-/// A process asked to end whose handle wasn't signalled.
+/// A process asked to end whose handle wasn't signalled, or whose kill was refused and which was
+/// still running after the refusal's window.
 struct Survivor<T> {
     pid: u32,
     created: Option<u64>,
     image: String,
     process: T,
+    /// What it is counted as: [`SweepError::Survived`], or the refused kill's
+    /// [`SweepError::Kill`].
+    error: SweepError,
     /// Found this round: its kill has just been waited on, and isn't asked again until the next.
     fresh: bool,
 }
@@ -63,6 +67,10 @@ struct Survivor<T> {
 pub(crate) struct Killed<T> {
     held: Vec<Held<T>>,
     survivors: Vec<Survivor<T>>,
+    /// The ones that couldn't be opened ([`SweepError::Open`]): with no handle to look at, each
+    /// is counted every round, however it is listed (failing closed), unless a later open of its
+    /// pid ends it.
+    unopened: Vec<SweepError>,
 }
 
 impl<T> Killed<T> {
@@ -70,11 +78,46 @@ impl<T> Killed<T> {
         Killed {
             held: Vec::new(),
             survivors: Vec::new(),
+            unopened: Vec::new(),
         }
     }
 
-    /// Keeps `process` as one the sweep ended.
+    /// Keeps `error`, a process that couldn't be opened, to be counted every round.
+    pub(super) fn unopened(&mut self, error: SweepError) {
+        if let SweepError::Open { pid, .. } = &error
+            && !self
+                .unopened
+                .iter()
+                .any(|known| matches!(known, SweepError::Open { pid: other, .. } if other == pid))
+        {
+            self.unopened.push(error);
+        }
+    }
+
+    /// Keeps `process` (`found`, created at `created`), whose kill was refused and which still
+    /// runs, as a survivor counted as `error`.
+    pub(super) fn survivor(
+        &mut self,
+        found: &Seen,
+        created: Option<u64>,
+        process: T,
+        error: SweepError,
+    ) {
+        self.survivors.push(Survivor {
+            pid: found.pid,
+            created,
+            image: found.image.clone(),
+            process,
+            error,
+            fresh: true,
+        });
+    }
+
+    /// Keeps `process` as one the sweep ended; a process of its pid that couldn't be opened
+    /// before isn't counted any more.
     pub(super) fn ended(&mut self, pid: u32, created: Option<u64>, process: T) {
+        self.unopened
+            .retain(|known| !matches!(known, SweepError::Open { pid: other, .. } if *other == pid));
         self.held.push(Held {
             pid,
             created,
@@ -182,13 +225,11 @@ pub(super) fn one<'a, P: Processes>(
     }
     let wait = KILL_WAIT.min(rule.deadline.saturating_sub(calls.now()));
     if !calls.exited(&process, wait) {
-        killed.survivors.push(Survivor {
+        let error = SweepError::Survived {
             pid: found.pid,
-            created: started,
             image: found.image.clone(),
-            process,
-            fresh: true,
-        });
+        };
+        killed.survivor(found, started, process, error);
         return Done::Nothing;
     }
     log(&killed_line(point, found.pid, &found.image));
@@ -199,7 +240,8 @@ pub(super) fn one<'a, P: Processes>(
 /// The held handles' verdict on the survivors, at a round's end, listed again or not: one found
 /// this round is counted (its kill was just waited on); an earlier one is asked to end again,
 /// without waiting, and is killed (logged, moved to the ones ended) if its handle is signalled
-/// now, else counted. Each one counted is a [`SweepError::Survived`] failure. How many ended.
+/// now, else counted (once a round: [`Failures::add`]). Then each process that couldn't be
+/// opened is counted again. How many ended.
 pub(super) fn settle<P: Processes>(
     calls: &mut P,
     killed: &mut Killed<P::Process>,
@@ -222,12 +264,11 @@ pub(super) fn settle<P: Processes>(
             }
         }
         survivor.fresh = false;
-        let error = SweepError::Survived {
-            pid: survivor.pid,
-            image: survivor.image.clone(),
-        };
-        failures.add(error, log)?;
+        failures.add(survivor.error.clone(), log)?;
         index += 1;
+    }
+    for error in &killed.unopened {
+        failures.add(error.clone(), log)?;
     }
     Ok(ended)
 }

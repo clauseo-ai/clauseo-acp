@@ -84,6 +84,8 @@ struct Fake {
     regrant: bool,
     /// The opening list's nth call (from 1) finds these processes started meanwhile.
     appear: BTreeMap<usize, Vec<(u32, Proc)>>,
+    /// The opening list's nth call (from 1) no longer finds these pids.
+    gone_at: BTreeMap<usize, Vec<u32>>,
     /// How many times the opening list was read.
     lists: usize,
     /// This pid exits by itself after this many pauses.
@@ -132,6 +134,9 @@ impl Processes for Fake {
         self.lists += 1;
         for (pid, proc) in self.appear.remove(&self.lists).unwrap_or_default() {
             self.procs.insert(pid, proc);
+        }
+        for pid in self.gone_at.remove(&self.lists).unwrap_or_default() {
+            self.procs.remove(&pid);
         }
         Ok(self
             .procs

@@ -15,6 +15,8 @@ pub(super) struct Failures {
     pub(super) unkillable: usize,
     /// Their image names, each once, at most [`IMAGES_CAP`].
     pub(super) images: Vec<String>,
+    /// The pids counted this round: each is counted once a round.
+    pub(super) this_round: BTreeSet<u32>,
 }
 
 impl Failures {
@@ -37,6 +39,14 @@ impl Failures {
         }
     }
 
+    /// Starts a round's count.
+    pub(super) fn next_round(&mut self) {
+        self.count = 0;
+        self.unkillable = 0;
+        self.images.clear();
+        self.this_round.clear();
+    }
+
     pub(super) fn add(
         &mut self,
         error: SweepError,
@@ -44,6 +54,10 @@ impl Failures {
     ) -> Result<(), SweepError> {
         if self.point == Point::Start {
             return Err(error);
+        }
+        let pid = pid_of(&error);
+        if pid != 0 && !self.this_round.insert(pid) {
+            return Ok(());
         }
         self.count += 1;
         if let Some(escapees) = error.escapees() {
@@ -54,7 +68,7 @@ impl Failures {
                 }
             }
         }
-        if self.logged.insert(pid_of(&error)) {
+        if self.logged.insert(pid) {
             log(&format!(
                 "clauseo-sandbox-run: sweep ({}): {error}",
                 self.point

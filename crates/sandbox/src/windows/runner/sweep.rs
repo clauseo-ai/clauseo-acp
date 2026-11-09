@@ -371,11 +371,10 @@ fn sweep_with<P: Processes>(
         count: 0,
         unkillable: 0,
         images: Vec::new(),
+        this_round: BTreeSet::new(),
     };
     for _ in 0..ROUNDS {
-        failures.count = 0;
-        failures.unkillable = 0;
-        failures.images.clear();
+        failures.next_round();
         // Out of time: the held handles are the verdict, each survivor's looked at once more.
         if calls.now() >= deadline {
             kill::settle(calls, killed, point, &mut failures, log)?;
@@ -390,7 +389,12 @@ fn sweep_with<P: Processes>(
             match calls.open(found.pid) {
                 Ok(Some(process)) => opened.push((found, process)),
                 Ok(None) => {}
-                Err(error) => failures.add(failed(found, &error, Step::Open), log)?,
+                Err(error) => {
+                    // No handle: counted every round from now on, however it is listed.
+                    let error = failed(found, &error, Step::Open);
+                    failures.add(error.clone(), log)?;
+                    killed.unopened(error);
+                }
             }
         }
         // Each pid is pinned now: one the lists still give `user` is the process opened.
@@ -434,7 +438,10 @@ fn sweep_with<P: Processes>(
             round += 1;
         }
         for still in left {
-            failures.add(failed(still.found, &still.error, Step::Kill), log)?;
+            // Held: its handle is looked at every round from now on, listed or not.
+            let error = failed(still.found, &still.error, Step::Kill);
+            failures.add(error.clone(), log)?;
+            killed.survivor(still.found, still.started, still.process, error);
         }
         round += kill::settle(calls, killed, point, &mut failures, log)?;
         if round == 0 {
