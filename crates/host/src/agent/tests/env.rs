@@ -61,7 +61,7 @@ fn launch_spec_drops_remote_markers_and_keeps_what_agents_need() {
 }
 
 /// Inherited and settings `AGENT_BROWSER_*` variables never reach an agent; the hook's (the
-/// host's own five, for a session with the browser) do, over them.
+/// host's own six, for a session with the browser) do, over them.
 #[test]
 fn only_the_hosts_agent_browser_variables_reach_the_agent() {
     let agent = AgentLaunch {

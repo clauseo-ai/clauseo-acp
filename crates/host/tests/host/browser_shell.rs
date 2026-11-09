@@ -24,7 +24,8 @@ use crate::write;
 const ON: &str = r#"{"tools": {"browser": true}}"#;
 
 /// The variables the shell tool sets, by name.
-const NAMES: [&str; 5] = [
+const NAMES: [&str; 6] = [
+    "AGENT_BROWSER_IDLE_TIMEOUT_MS",
     "AGENT_BROWSER_SESSION",
     "AGENT_BROWSER_CONFIG",
     "AGENT_BROWSER_DOWNLOAD_PATH",
@@ -154,6 +155,10 @@ fn a_session_with_a_chrome_gets_the_shell_browser() {
         Some(run.join("downloads"))
     );
     assert_eq!(var(&seen, "AGENT_BROWSER_EXECUTABLE_PATH"), Some(chrome));
+    assert_eq!(
+        var(&seen, "AGENT_BROWSER_IDLE_TIMEOUT_MS"),
+        Some(PathBuf::from("600000"))
+    );
     for name in [
         "AGENT_BROWSER_PROXY",
         "AGENT_BROWSER_STREAM_PORT",
