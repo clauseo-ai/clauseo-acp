@@ -3,9 +3,11 @@
 //! [`Listener`] and its [`Connection`]s, so another transport (a named pipe, say) is one more
 //! implementation here and nothing in the relay, the lifecycle or the bridge changes.
 //!
-//! Unix sockets are the one transport today (`unix.rs`): the socket made fresh with mode 0600 and
-//! removed at exit, the peer check ([`Connection::peer_is`]) and the process identity it compares
-//! ([`Identity`]).
+//! Two transports. Unix sockets on macOS and Linux (`unix.rs`): the socket made fresh with mode
+//! 0600 and removed at exit, the peer check ([`Connection::peer_is`]) and the process identity it
+//! compares ([`Identity`]). On Windows a named pipe (`windows.rs`) with a DACL for the agent's
+//! account, a Low label, and a peer check on each end. `checks.rs` holds the pipe options'
+//! checks, which run on every OS.
 
 use std::io::{self, Read, Write};
 use std::net::Shutdown;
@@ -24,7 +26,10 @@ pub(crate) trait Connection: Read + Write + Send + Sized + 'static {
     /// The peer check, run by both ends: whether the process at the other end is `peer`. The
     /// guard takes any process of its own user ([`Peer::SameUser`]); the bridge takes only the
     /// guard the host started ([`Peer::Process`]), so a process of the same user that squats the
-    /// path, or reuses the guard's pid after it, is no guard. `false` when the OS cannot say.
+    /// path, or reuses the guard's pid after it, is no guard. On a pipe each end carries what it
+    /// expects and `peer` is not read: the guard's end asks whether the client runs as the
+    /// `--client-sid` user, the bridge's whether the pipe is owned by the `--server-sid` user (a
+    /// squatted pipe is its squatter's). `false` when the OS cannot say.
     fn peer_is(&self, peer: Peer) -> bool;
 }
 
@@ -61,7 +66,10 @@ pub(crate) trait Listener: Send + 'static {
     fn accept(&self) -> io::Result<Self::Connection>;
 }
 
+pub(crate) mod checks;
 #[cfg(all(test, unix))]
 pub(crate) mod fake;
 #[cfg(unix)]
 pub(crate) mod unix;
+#[cfg(windows)]
+pub(crate) mod windows;

@@ -30,6 +30,16 @@ pub(crate) fn remove_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
     std::fs::remove_dir_all(path)
 }
 
+/// `OpenOptions::open` for reading and writing, on Windows a client's end of a named pipe
+/// (`listen_pipe.rs`).
+#[cfg(windows)]
+pub(crate) fn open_read_write(path: impl AsRef<Path>) -> io::Result<std::fs::File> {
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+}
+
 /// `fs::set_permissions` with a Unix mode.
 #[cfg(unix)]
 pub(crate) fn set_mode(path: impl AsRef<Path>, mode: u32) -> io::Result<()> {
