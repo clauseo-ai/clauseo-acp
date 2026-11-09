@@ -15,6 +15,7 @@
 //! one ACL must not mix the old form (`COM_RIGHTS_EXECUTE` alone) with the new: an ACL that
 //! breaks either rule is refused, since our new-form deny would leave COM an invalid one.
 
+use super::meaning::Meaning;
 use crate::windows::sids::Sid;
 
 /// `COM_RIGHTS_EXECUTE`.
@@ -24,27 +25,30 @@ pub const COM_RIGHTS_EXECUTE: u32 = 0x1;
 pub const DENY_MASK: u32 = 0x1F;
 
 /// `SE_SELF_RELATIVE`.
-const SELF_RELATIVE: u16 = 0x8000;
+pub(super) const SELF_RELATIVE: u16 = 0x8000;
 /// `SE_DACL_PRESENT`.
-const DACL_PRESENT: u16 = 0x0004;
+pub(super) const DACL_PRESENT: u16 = 0x0004;
 /// `SE_SACL_PRESENT`.
 const SACL_PRESENT: u16 = 0x0010;
 /// The header's size.
-const HEADER: usize = 20;
+pub(super) const HEADER: usize = 20;
 /// `ACCESS_ALLOWED_ACE_TYPE`.
 const ALLOWED: u8 = 0;
 /// `ACCESS_DENIED_ACE_TYPE`.
-const DENIED: u8 = 1;
+pub(super) const DENIED: u8 = 1;
 /// `INHERIT_ONLY_ACE`.
 const INHERIT_ONLY: u8 = 0x8;
 /// The most sub-authorities a SID has.
 const MAX_SUBS: usize = 15;
 /// `BUILTIN\Administrators`.
+#[cfg(test)]
 const ADMINISTRATORS: &str = "S-1-5-32-544";
 /// `Everyone`.
+#[cfg(test)]
 const EVERYONE: &str = "S-1-1-0";
 /// `Everyone`'s rights in Windows' default: `COM_RIGHTS_EXECUTE`, `EXECUTE_LOCAL` and
 /// `ACTIVATE_LOCAL`; `CCDCSW` in SDDL.
+#[cfg(test)]
 const EVERYONE_DEFAULT: u32 = 0xB;
 
 /// Why a descriptor was refused. Names no path or SID.
@@ -163,6 +167,7 @@ impl LaunchSd {
     /// ("administrators may obtain local and remote launch and activation permissions, and
     /// members of the Everyone group may obtain local activation and launch permissions"):
     /// `O:BAG:BAD:(A;;CCDCLCSWRP;;;BA)(A;;CCDCSW;;;WD)`.
+    #[cfg(test)]
     pub fn windows_default() -> LaunchSd {
         let administrators = Sid::parse(ADMINISTRATORS).map(|sid| sid_bytes(&sid));
         let everyone = Sid::parse(EVERYONE).map(|sid| sid_bytes(&sid));
@@ -261,16 +266,28 @@ impl LaunchSd {
         Some(merged)
     }
 
-    /// This descriptor without the deny [`LaunchSd::with_deny`] adds, matched exactly
-    /// (`(D;;CCDCLCSWRP;;;group)`: a plain deny, no flags, mask `0x1F`, `group`'s SID), and
-    /// how many went. Every other entry stays, a deny for `group` with another mask or other
-    /// flags included.
+    /// This descriptor without the deny [`LaunchSd::with_deny`] adds, matched by meaning
+    /// (`(D;;CCDCLCSWRP;;;group)`: a plain deny, no flags, mask `0x1F`, `group`'s SID, whatever
+    /// padding follows it), and how many went. Every other entry stays, a deny for `group` with
+    /// another mask or other flags included.
     pub fn without_denies(&self, group: &Sid) -> (LaunchSd, usize) {
-        let ours = ace(DENIED, DENY_MASK, &sid_bytes(group));
+        let group = sid_bytes(group);
         let mut kept = self.clone();
-        kept.aces.retain(|entry| *entry != ours);
+        kept.aces.retain(|entry| !is_our_deny(entry, &group));
         let dropped = self.aces.len() - kept.aces.len();
         (kept, dropped)
+    }
+
+    /// Whether an entry matches the deny [`LaunchSd::with_deny`] adds, by meaning, anywhere
+    /// in the DACL.
+    pub fn holds_deny(&self, group: &Sid) -> bool {
+        let group = sid_bytes(group);
+        self.aces.iter().any(|entry| is_our_deny(entry, &group))
+    }
+
+    /// What the descriptor means: its owner, its group and the set of its DACL's entries.
+    pub fn meaning(&self) -> Meaning {
+        Meaning::from_parts(Some(&self.owner), Some(&self.group), &self.aces)
     }
 
     /// The DACL's entries, each whole, in order.
@@ -318,6 +335,14 @@ fn denies_first(aces: &[Vec<u8>], group: &Sid) -> bool {
         }
     }
     false
+}
+
+/// Whether `entry` is `(D;;CCDCLCSWRP;;;group)` by meaning, `group` as bytes.
+fn is_our_deny(entry: &[u8], group: &[u8]) -> bool {
+    kind(entry) == DENIED
+        && flags(entry) == 0
+        && mask(entry) == Some(DENY_MASK)
+        && sid(entry) == Some(group)
 }
 
 /// Refuses entries that break COM's rules (module doc): a plain allow or deny without
@@ -376,7 +401,7 @@ fn render(revision: u8, aces: &[Vec<u8>]) -> Vec<u8> {
 }
 
 /// The SID at `offset` in `bytes`: revision 1, at most [`MAX_SUBS`] sub-authorities, whole.
-fn sid_at(bytes: &[u8], offset: usize) -> Result<&[u8], SdError> {
+pub(super) fn sid_at(bytes: &[u8], offset: usize) -> Result<&[u8], SdError> {
     let rest = bytes.get(offset..).ok_or(SdError("a SID past the end"))?;
     whole_sid(rest).ok_or(SdError("a SID that runs past the end or isn't one"))
 }
@@ -391,12 +416,12 @@ fn whole_sid(bytes: &[u8]) -> Option<&[u8]> {
 }
 
 /// An ACL's revision, its entries, and its bytes.
-type AclParts<'a> = (u8, Vec<Vec<u8>>, &'a [u8]);
+pub(super) type AclParts<'a> = (u8, Vec<Vec<u8>>, &'a [u8]);
 
 /// The ACL at `offset` in `bytes`: its revision, its entries, and its bytes. Revision 2 or 4,
 /// a size of at least its header, within `bytes` and a multiple of 4, and entries that fill
 /// no more than it, each a multiple of 4 and, for the plain types, holding a whole SID.
-fn acl_at(bytes: &[u8], offset: usize) -> Result<AclParts<'_>, SdError> {
+pub(super) fn acl_at(bytes: &[u8], offset: usize) -> Result<AclParts<'_>, SdError> {
     let rest = bytes.get(offset..).ok_or(SdError("an ACL past the end"))?;
     let revision = *rest.first().ok_or(SdError("an ACL past the end"))?;
     if !matches!(revision, 2 | 4) {
@@ -442,17 +467,17 @@ pub(super) fn sid_bytes(sid: &Sid) -> Vec<u8> {
 }
 
 /// An entry's type.
-fn kind(entry: &[u8]) -> u8 {
+pub(super) fn kind(entry: &[u8]) -> u8 {
     entry.first().copied().unwrap_or(u8::MAX)
 }
 
 /// An entry's flags.
-fn flags(entry: &[u8]) -> u8 {
+pub(super) fn flags(entry: &[u8]) -> u8 {
     entry.get(1).copied().unwrap_or(0)
 }
 
 /// An entry's mask.
-fn mask(entry: &[u8]) -> Option<u32> {
+pub(super) fn mask(entry: &[u8]) -> Option<u32> {
     u32_at(entry, 4)
 }
 
@@ -470,11 +495,11 @@ pub(super) fn is_deny(entry: &[u8]) -> bool {
     kind(entry) == DENIED
 }
 
-fn u16_at(bytes: &[u8], at: usize) -> Option<u16> {
+pub(super) fn u16_at(bytes: &[u8], at: usize) -> Option<u16> {
     Some(u16::from_le_bytes(bytes.get(at..at + 2)?.try_into().ok()?))
 }
 
-fn u32_at(bytes: &[u8], at: usize) -> Option<u32> {
+pub(super) fn u32_at(bytes: &[u8], at: usize) -> Option<u32> {
     Some(u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?))
 }
 

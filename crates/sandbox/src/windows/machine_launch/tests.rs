@@ -66,15 +66,31 @@ fn a_second_run_changes_nothing() {
 }
 
 #[test]
-fn an_absent_value_gets_windows_default_plus_the_deny_and_its_removal_deletes_it() {
+fn an_absent_value_gets_coms_default_plus_the_deny_and_its_removal_deletes_it() {
     let mut store = FakeStore::new(Raw::Absent);
     let applied = apply(&mut store, &sid(GROUP));
     assert_eq!(
         (applied.guard, applied.change),
         (Guard::Applied, Change::Added)
     );
-    let expected = LaunchSd::windows_default().with_deny(&sid(GROUP)).unwrap();
+    // COM's own launch descriptor (Windows 11's, in the fake), every entry kept, the deny first.
+    let expected = LaunchSd::parse(&windows_11())
+        .unwrap()
+        .with_deny(&sid(GROUP))
+        .unwrap();
     assert_eq!(parsed(&store), expected);
+    assert_eq!(
+        parsed(&store).aces().first(),
+        Some(&ace(D, 0, DENY_MASK, GROUP))
+    );
+    assert_eq!(
+        parsed(&store).aces().get(1..),
+        Some(windows_11_aces().as_slice())
+    );
+    assert_eq!(
+        store.backup.as_ref().and_then(|b| b.default.clone()),
+        Some(windows_11())
+    );
     assert_eq!(
         store.backup.as_ref().map(|b| b.original.clone()),
         Some(None)
@@ -227,8 +243,8 @@ fn drift_is_put_back_and_the_first_backup_kept() {
 fn after_a_put_back_on_an_absent_value_uninstall_keeps_the_others_entries() {
     let mut store = FakeStore::new(Raw::Absent);
     apply(&mut store, &sid(GROUP));
-    // Something rewrote the value: Windows' default and one entry more, without our deny.
-    let mut aces = LaunchSd::windows_default().aces().to_vec();
+    // Something rewrote the value: COM's default and one entry more, without our deny.
+    let mut aces = windows_11_aces();
     aces.push(ace(A, 0, 0xB, OTHER_GROUP));
     store.value = Raw::Binary(descriptor(&aces, false));
     assert_eq!(apply(&mut store, &sid(GROUP)).change, Change::PutBack);
@@ -237,8 +253,14 @@ fn after_a_put_back_on_an_absent_value_uninstall_keeps_the_others_entries() {
         Ok(LaunchRemoved::DeniesRemoved(1))
     );
     assert_eq!(parsed(&store).aces(), aces.as_slice());
-    // Even a put-back that left only the default plus ours keeps the value: after a put-back
-    // the value is someone else's, so nothing but our deny is ours to take.
+    // A put-back that left COM's default plus ours: what is left means the default, so the value
+    // Clauseo made is deleted.
+    let mut store = FakeStore::new(Raw::Absent);
+    apply(&mut store, &sid(GROUP));
+    store.value = Raw::Binary(descriptor(&windows_11_aces(), true));
+    apply(&mut store, &sid(GROUP));
+    assert_eq!(remove(&mut store, &sid(GROUP)), Ok(LaunchRemoved::Deleted));
+    // One that left less than the default (an entry taken off) is kept, only our deny off.
     let mut store = FakeStore::new(Raw::Absent);
     apply(&mut store, &sid(GROUP));
     store.value = Raw::Binary(LaunchSd::windows_default().to_bytes());
@@ -349,12 +371,12 @@ fn the_pool_is_denied_and_every_other_sids_rights_are_unchanged() {
             .iter()
             .all(|e| is_deny(e) && entry_sid(e) == Some(group.as_slice()))
     );
-    // The absent case: the default's grants stay for everyone else too.
+    // The absent case: COM's default's grants stay for everyone else too.
     let mut store = FakeStore::new(Raw::Absent);
     apply(&mut store, &sid(GROUP));
-    let default = LaunchSd::windows_default();
+    let default = LaunchSd::parse(&windows_11()).unwrap();
     assert_eq!(parsed(&store).granted(&pool), 0);
-    let lawyer = token(LAWYER, &[]);
-    assert_eq!(parsed(&store).granted(&lawyer), default.granted(&lawyer));
-    assert_eq!(default.granted(&lawyer), 0xB);
+    for others in [token(LAWYER, &[]), token(LAWYER, &["S-1-5-32-562"])] {
+        assert_eq!(parsed(&store).granted(&others), default.granted(&others));
+    }
 }

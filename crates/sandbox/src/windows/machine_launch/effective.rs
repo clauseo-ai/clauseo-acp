@@ -1,9 +1,8 @@
-//! The machine access descriptor COM uses now, from
-//! `CoGetSystemSecurityPermissions(SD_ACCESSRESTRICTIONS)` (ole32; the `COMSD` value for the
-//! machine access limit): `MachineAccessRestriction` when it is set, Windows' built-in
-//! descriptor when it isn't. Returned self-relative, so it can be
-//! written as the value unchanged in effect. COM is entered on this thread for the call when it
-//! isn't already.
+//! The machine-wide descriptors COM uses now, from `CoGetSystemSecurityPermissions` (ole32):
+//! `SD_ACCESSRESTRICTIONS` for the access limit and `SD_LAUNCHRESTRICTIONS` for the launch
+//! limit, each the registry value when it is set and Windows' built-in descriptor when it
+//! isn't. Returned self-relative, so it can be written as the value unchanged in effect. COM is
+//! entered on this thread for the call when it isn't already.
 #![expect(unsafe_code, reason = "FFI to COM's machine-wide security descriptors")]
 
 use std::ptr::null_mut;
@@ -14,8 +13,8 @@ use windows::Win32::Security::{
     PSECURITY_DESCRIPTOR, SE_SELF_RELATIVE,
 };
 use windows::Win32::System::Com::{
-    COINIT_MULTITHREADED, CoGetSystemSecurityPermissions, CoInitializeEx, CoUninitialize,
-    SD_ACCESSRESTRICTIONS,
+    COINIT_MULTITHREADED, COMSD, CoGetSystemSecurityPermissions, CoInitializeEx, CoUninitialize,
+    SD_ACCESSRESTRICTIONS, SD_LAUNCHRESTRICTIONS,
 };
 
 use super::seam::StoreError;
@@ -50,17 +49,25 @@ impl Drop for Apartment {
 
 /// The machine access descriptor COM uses now, as self-relative bytes.
 pub(super) fn machine_access() -> Result<Vec<u8>, StoreError> {
+    machine(SD_ACCESSRESTRICTIONS)
+}
+
+/// The machine launch descriptor COM uses now, as self-relative bytes.
+pub(super) fn machine_launch() -> Result<Vec<u8>, StoreError> {
+    machine(SD_LAUNCHRESTRICTIONS)
+}
+
+/// The machine-wide descriptor `which` COM uses now, as self-relative bytes.
+fn machine(which: COMSD) -> Result<Vec<u8>, StoreError> {
     let _com = Apartment::enter()?;
     let mut descriptor = PSECURITY_DESCRIPTOR(null_mut());
     // SAFETY: `descriptor` is a live out-pointer; what it receives is freed below.
-    unsafe { CoGetSystemSecurityPermissions(SD_ACCESSRESTRICTIONS, &raw mut descriptor) }.map_err(
-        |error| {
-            format!(
-                "CoGetSystemSecurityPermissions failed ({:#010x})",
-                error.code().0
-            )
-        },
-    )?;
+    unsafe { CoGetSystemSecurityPermissions(which, &raw mut descriptor) }.map_err(|error| {
+        format!(
+            "CoGetSystemSecurityPermissions failed ({:#010x})",
+            error.code().0
+        )
+    })?;
     if descriptor.0.is_null() {
         return Err("CoGetSystemSecurityPermissions gave no descriptor".to_owned());
     }

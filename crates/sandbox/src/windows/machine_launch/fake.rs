@@ -4,6 +4,7 @@
 //! [`FakeStore::moves`] set), it moves the launch value to `…Old`.
 
 use super::seam::{Backup, LaunchStore, Raw, StoreError};
+use super::test_sd::{windows_11, windows_11_aces};
 
 /// The machine as the guard sees it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,6 +21,10 @@ pub(super) struct FakeStore {
     pub(super) access: Raw,
     /// Whether Group Policy's `MachineAccessRestriction` is set.
     pub(super) access_policy: bool,
+    /// What COM gives as its effective machine launch descriptor.
+    pub(super) effective_launch: Result<Vec<u8>, String>,
+    /// Whether DCOM rewrites both values at each settle ([`dcom_rewrite`]).
+    pub(super) rewrites: bool,
     /// What COM gives as its effective machine access descriptor.
     pub(super) effective: Result<Vec<u8>, String>,
     /// `MachineLaunchRestrictionOld`.
@@ -42,6 +47,8 @@ impl FakeStore {
             state: None,
             access: Raw::Binary(machine_access()),
             access_policy: false,
+            effective_launch: Ok(windows_11()),
+            rewrites: false,
             effective: Ok(machine_access()),
             old: Raw::Absent,
             moves: false,
@@ -138,6 +145,11 @@ impl LaunchStore for FakeStore {
         self.effective.clone()
     }
 
+    fn effective_launch(&mut self) -> Result<Vec<u8>, StoreError> {
+        self.call("effective_launch")?;
+        self.effective_launch.clone()
+    }
+
     fn write_access(&mut self, bytes: &[u8]) -> Result<(), StoreError> {
         self.call("write_access")?;
         self.access = Raw::Binary(bytes.to_vec());
@@ -167,6 +179,14 @@ impl LaunchStore for FakeStore {
         if dcom_moves && matches!(self.value, Raw::Binary(_)) {
             self.old = std::mem::replace(&mut self.value, Raw::Absent);
         }
+        if self.rewrites {
+            if let Raw::Binary(bytes) = &mut self.value {
+                *bytes = dcom_rewrite(bytes, &windows_11_aces());
+            }
+            if let Raw::Binary(bytes) = &mut self.access {
+                *bytes = dcom_rewrite(bytes, &[]);
+            }
+        }
     }
 }
 
@@ -177,4 +197,37 @@ pub(super) fn machine_access() -> Vec<u8> {
         &[super::test_sd::ace(super::test_sd::A, 0, 0x7, "S-1-1-0")],
         false,
     )
+}
+
+/// `bytes` as DCOM rewrites them: `defaults` merged in (by meaning), the allows reordered
+/// (denies kept first), four bytes of padding after every entry, and the DACL laid out first.
+pub(super) fn dcom_rewrite(bytes: &[u8], defaults: &[Vec<u8>]) -> Vec<u8> {
+    let parsed = super::LaunchSd::parse(bytes).unwrap();
+    let (mut denies, mut allows): (Vec<Vec<u8>>, Vec<Vec<u8>>) = parsed
+        .aces()
+        .iter()
+        .cloned()
+        .partition(|entry| super::sd::is_deny(entry));
+    let key = |entry: &[u8]| {
+        let sid = super::sd::sid(entry).map(<[u8]>::to_vec);
+        (entry[0], entry[1], entry[4..8].to_vec(), sid)
+    };
+    for entry in defaults {
+        if !allows.iter().any(|allow| key(allow) == key(entry)) {
+            allows.push(entry.clone());
+        }
+    }
+    allows.reverse();
+    denies.extend(allows);
+    let padded: Vec<Vec<u8>> = denies.iter().map(|entry| pad(entry)).collect();
+    super::test_sd::descriptor(&padded, true)
+}
+
+/// `entry` with four zero bytes after it, its size saying so.
+pub(super) fn pad(entry: &[u8]) -> Vec<u8> {
+    let mut out = entry.to_vec();
+    out.extend_from_slice(&[0; 4]);
+    let size = u16::try_from(out.len()).unwrap().to_le_bytes();
+    out[2..4].copy_from_slice(&size);
+    out
 }

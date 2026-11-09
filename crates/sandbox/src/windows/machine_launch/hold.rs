@@ -9,13 +9,14 @@
 //! guard is degraded: no default is guessed. After the write, the values are read back after
 //! [`SETTLE_MS`]: the guard counts only when the deny is still first at each read.
 //!
-//! The removal deletes the access value only while it is still exactly the bytes Clauseo wrote
+//! The removal deletes the access value only while it still means what Clauseo wrote (DCOM
+//! re-serialises it with padding, so bytes don't match)
 //! and no launch value is left that DCOM would then move, and takes any value Clauseo wrote (the
 //! last [`HISTORY_MAX`]) out of `MachineLaunchRestrictionOld`. A Group Policy access value set
 //! means nothing is copied: COM's descriptor may then be the policy's. Pure; tested on every OS.
 
 use super::seam::{Backup, LaunchStore, Raw, StoreError};
-use super::{Guard, LaunchSd};
+use super::{Guard, LaunchSd, Meaning};
 use crate::windows::sids::Sid;
 
 /// The waits before each read-back: 250 ms, then up to 1 s after the write.
@@ -55,22 +56,28 @@ pub(super) fn access_to_add(
     }
 }
 
-/// After the launch value was written as `written`: `Ok` only when the deny is still first and
-/// the access value still there at each read-back; otherwise [`Guard::Moved`], with why.
+/// What DCOM made of the write, read back last: the launch value and the access value.
+pub(super) type ReadBack = (Vec<u8>, Raw);
+
+/// After the launch value was written as `written`: what the last read-back found, only when
+/// the deny is still first and the access value still there at each; otherwise
+/// [`Guard::Moved`], with why.
 pub(super) fn verify(
     store: &mut impl LaunchStore,
     group: &Sid,
     written: &[u8],
-) -> Result<(), (Guard, String)> {
+) -> Result<ReadBack, (Guard, String)> {
     let failed = |why: String| (Guard::Failed, why);
+    let mut last = (written.to_vec(), Raw::Absent);
     for millis in SETTLE_MS {
         store.settle(millis);
-        let held = match store.read().map_err(failed)? {
-            Raw::Binary(bytes) => LaunchSd::parse(&bytes).is_ok_and(|sd| sd.denies_first(group)),
+        let read = store.read().map_err(failed)?;
+        let held = match &read {
+            Raw::Binary(bytes) => LaunchSd::parse(bytes).is_ok_and(|sd| sd.denies_first(group)),
             Raw::Absent | Raw::OtherType => false,
         };
         if !held {
-            let moved = matches!(store.old(), Ok(Raw::Binary(old)) if old == written);
+            let moved = matches!(store.old(), Ok(Raw::Binary(old)) if Meaning::same(&old, written));
             let why = if moved {
                 "dcom moved the value to MachineLaunchRestrictionOld"
             } else {
@@ -78,12 +85,33 @@ pub(super) fn verify(
             };
             return Err((Guard::Moved, why.to_owned()));
         }
-        if store.access().map_err(failed)? == Raw::Absent {
+        let access = store.access().map_err(failed)?;
+        if access == Raw::Absent {
             let why = "MachineAccessRestriction is gone, and dcom won't keep the value without it";
             return Err((Guard::Moved, why.to_owned()));
         }
+        if let Raw::Binary(bytes) = read {
+            last = (bytes, access);
+        }
     }
-    Ok(())
+    Ok(last)
+}
+
+/// `backup` with what DCOM made of the write (`read`) as Clauseo's own: DCOM merges Windows'
+/// default entries into the launch value and re-serialises the access value, and nothing else
+/// writes them within the settle. The access value is adopted only when this run wrote it
+/// (`wrote_access`). `None` when the read-back is what was written.
+pub(super) fn adopt(backup: &Backup, read: ReadBack, wrote_access: bool) -> Option<Backup> {
+    let (launch, access) = read;
+    let mut adopted = backup.clone();
+    if launch != backup.written {
+        adopted.history = history(Some(backup), &launch);
+        adopted.written = launch;
+    }
+    if let (true, Raw::Binary(now)) = (wrote_access, access) {
+        adopted.access = Some(now);
+    }
+    (adopted != *backup).then_some(adopted)
 }
 
 /// The removal's last part, before the backup goes: any value Clauseo wrote taken out of
@@ -96,7 +124,9 @@ pub(super) fn remove_extras(
     let Some(backup) = backup else {
         return Ok(());
     };
-    let ours = |old: &[u8]| backup.written == old || backup.history.iter().any(|w| w == old);
+    let ours = |old: &[u8]| {
+        Meaning::same(&backup.written, old) || backup.history.iter().any(|w| Meaning::same(w, old))
+    };
     if matches!(store.old()?, Raw::Binary(old) if ours(&old)) {
         store.delete_old()?;
         tracing::info!("Clauseo's value was taken out of MachineLaunchRestrictionOld");
@@ -106,7 +136,7 @@ pub(super) fn remove_extras(
     };
     match store.access()? {
         Raw::Absent => {}
-        Raw::Binary(now) if now == *added => {
+        Raw::Binary(now) if Meaning::same(&now, added) => {
             if store.read()? == Raw::Absent {
                 store.delete_access()?;
                 tracing::info!("the MachineAccessRestriction Clauseo added was deleted");

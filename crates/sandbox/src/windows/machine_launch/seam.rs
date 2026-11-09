@@ -33,6 +33,13 @@ pub struct Backup {
     /// Every value Clauseo wrote, oldest first, at most [`super::hold::HISTORY_MAX`], the
     /// last one `written`: the removal takes any of them out of `MachineLaunchRestrictionOld`.
     pub history: Vec<Vec<u8>>,
+    /// Whether the value held the deny Clauseo adds (by meaning) before Clauseo's first write:
+    /// someone else's, which [`super::remove`] leaves.
+    pub deny_existed: bool,
+    /// COM's launch descriptor Clauseo built the value from when there was none
+    /// ([`LaunchStore::effective_launch`]): what the value must equal by meaning, its deny off,
+    /// for [`super::remove`] to delete it. `None` when there was a value.
+    pub default: Option<Vec<u8>>,
 }
 
 /// A failed registry call, in words naming the call and its Windows error code; never a path
@@ -76,6 +83,10 @@ pub trait LaunchStore {
     /// (`CoGetSystemSecurityPermissions(SD_ACCESSRESTRICTIONS)`): Windows' built-in one when
     /// there is no value.
     fn effective_access(&mut self) -> Result<Vec<u8>, StoreError>;
+    /// The machine launch descriptor COM uses now, self-relative
+    /// (`CoGetSystemSecurityPermissions(SD_LAUNCHRESTRICTIONS)`): Windows' built-in one when
+    /// there is no value.
+    fn effective_launch(&mut self) -> Result<Vec<u8>, StoreError>;
     /// Writes `bytes` as the `REG_BINARY` `MachineAccessRestriction`.
     fn write_access(&mut self, bytes: &[u8]) -> Result<(), StoreError>;
     /// Deletes `MachineAccessRestriction`; one already gone is `Ok`.

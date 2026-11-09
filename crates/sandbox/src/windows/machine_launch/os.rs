@@ -11,7 +11,9 @@
 //! `PutBack` (`REG_DWORD`, 1 once a run has put the deny back since the first write);
 //! `AccessAdded` (`REG_BINARY`, only when Clauseo wrote `MachineAccessRestriction`: those
 //! bytes); `History` (`REG_BINARY`, the last values Clauseo wrote, each as a `u32` length and its
-//! bytes); then `Original` (`REG_BINARY`), the value before Clauseo's first change, empty when
+//! bytes); `DenyExisted` (`REG_DWORD`, 1 when the value held the deny before); `Default`
+//! (`REG_BINARY`, COM's launch descriptor the value was built from, only when there was none);
+//! then `Original` (`REG_BINARY`), the value before Clauseo's first change, empty when
 //! there was none. A backup counts only once `Original` is there, so a write cut short between
 //! the two leaves none, and the value, not yet changed, is taken as the original again.
 #![expect(
@@ -69,6 +71,11 @@ const PUT_BACK: &str = "PutBack";
 const ACCESS_ADDED: &str = "AccessAdded";
 /// The backup's value holding every value Clauseo wrote (`Backup::history`).
 const HISTORY: &str = "History";
+/// The backup's value set to 1 when the deny was there before (`Backup::deny_existed`).
+const DENY_EXISTED: &str = "DenyExisted";
+/// The backup's value holding COM's launch descriptor the value was built from
+/// (`Backup::default`).
+const DEFAULT: &str = "Default";
 /// `WRITE_DAC`.
 const WRITE_DAC: REG_SAM_FLAGS = REG_SAM_FLAGS(0x0004_0000);
 /// `WRITE_OWNER`.
@@ -134,12 +141,21 @@ impl LaunchStore for WindowsLaunchStore {
         };
         let access = binary(get(&key, ACCESS_ADDED)?, ACCESS_ADDED)?;
         let history = binary(get(&key, HISTORY)?, HISTORY)?.map_or_else(Vec::new, |b| unpack(&b));
+        // A value of another type counts as there: the removal then leaves the denies.
+        let deny_existed = match get(&key, DENY_EXISTED)? {
+            None => false,
+            Some((REG_DWORD, data)) => data != [0, 0, 0, 0],
+            Some(_) => true,
+        };
+        let default = binary(get(&key, DEFAULT)?, DEFAULT)?;
         Ok(Some(Backup {
             original: (!original.is_empty()).then_some(original),
             written,
             put_back,
             access,
             history,
+            deny_existed,
+            default,
         }))
     }
 
@@ -151,6 +167,12 @@ impl LaunchStore for WindowsLaunchStore {
         let put_back = u32::from(backup.put_back).to_le_bytes();
         set(&key, PUT_BACK, REG_DWORD, &put_back)?;
         set(&key, HISTORY, REG_BINARY, &pack(&backup.history))?;
+        let deny_existed = u32::from(backup.deny_existed).to_le_bytes();
+        set(&key, DENY_EXISTED, REG_DWORD, &deny_existed)?;
+        match &backup.default {
+            Some(default) => set(&key, DEFAULT, REG_BINARY, default)?,
+            None => delete_value(&self.backup_key(), DEFAULT)?,
+        }
         match &backup.access {
             Some(access) => set(&key, ACCESS_ADDED, REG_BINARY, access)?,
             None => delete_value(&self.backup_key(), ACCESS_ADDED)?,
@@ -200,6 +222,12 @@ impl LaunchStore for WindowsLaunchStore {
 
     fn effective_access(&mut self) -> Result<Vec<u8>, StoreError> {
         let bytes = super::effective::machine_access()?;
+        valid_descriptor(&bytes)?;
+        Ok(bytes)
+    }
+
+    fn effective_launch(&mut self) -> Result<Vec<u8>, StoreError> {
+        let bytes = super::effective::machine_launch()?;
         valid_descriptor(&bytes)?;
         Ok(bytes)
     }

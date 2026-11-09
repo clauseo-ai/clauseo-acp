@@ -10,10 +10,12 @@
 //! The backup of the value as it was is written before the first change. A run that finds the
 //! deny first already writes nothing. A value that won't parse ([`sd`]: an invalid descriptor,
 //! a DACL absent or NULL, an entry breaking COM's rules) is never touched. With no value
-//! (Windows' default applies), the new value is Windows' documented default plus the deny, and
-//! the backup says "absent". DCOM keeps the value only beside `MachineAccessRestriction`, so a
-//! missing one is first written as the access descriptor COM uses now, and the deny counts only
-//! once read back after a settle ([`hold`]). A Group Policy value
+//! (Windows' default applies), the new value is the launch descriptor COM uses now
+//! (`CoGetSystemSecurityPermissions`) with the deny in front, and the backup says "absent" and
+//! keeps that descriptor; if COM's can't be read, nothing is written. DCOM keeps the value only
+//! beside `MachineAccessRestriction`, so a missing one is first written as the access
+//! descriptor COM uses now, and the deny counts only once read back after a settle ([`hold`]).
+//! A Group Policy value
 //! (`HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DCOM\MachineLaunchRestriction`) overrides
 //! ours: the guard then counts only when the policy's own SDDL holds the deny.
 //!
@@ -23,15 +25,18 @@
 //! never recorded as `applied`: the guard fails closed to `degraded`. The app reads the state
 //! typed ([`state`]), for Settings.
 //!
-//! [`remove`] takes off only our exact deny. When the value is exactly what Clauseo's first
-//! write left, with no put-back since, it puts the backup back byte for byte instead, deleting
-//! the value when there was none; when the value is gone (DCOM moved it), the original still
-//! goes back. Then the access value and `MachineLaunchRestrictionOld` are
-//! cleaned of what Clauseo wrote ([`hold`]). Pure; tested on every OS.
+//! [`remove`] compares by meaning ([`meaning`]: owner, group and the set of entries), since
+//! DCOM rewrites the values within a millisecond. It takes off only the deny Clauseo added,
+//! never one that was there before. When the value means what Clauseo's first write left, with
+//! no put-back since, it puts the backup back byte for byte instead, deleting the value when
+//! there was none; when the value is gone (DCOM moved it), the original still goes back. Then
+//! the access value and `MachineLaunchRestrictionOld` are cleaned of what Clauseo wrote
+//! ([`hold`]). Pure; tested on every OS.
 
 use crate::windows::sids::Sid;
 
 pub mod hold;
+pub mod meaning;
 pub mod sd;
 pub mod seam;
 pub mod state;
@@ -47,8 +52,11 @@ mod test_sd;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod tests_dcom;
+#[cfg(test)]
 mod tests_hold;
 
+pub use meaning::Meaning;
 pub use sd::{DENY_MASK, LaunchSd, SdError};
 pub use seam::{Backup, LaunchStore, Raw, StoreError};
 pub use state::{DegradedReason, LaunchDenyState};
@@ -75,11 +83,14 @@ pub enum Guard {
     /// `MachineAccessRestriction` is missing and COM's own access descriptor can't be read, so
     /// nothing was written: degraded.
     AccessUnknown,
+    /// `MachineLaunchRestriction` is missing and COM's own launch descriptor can't be read, so
+    /// nothing was written: degraded.
+    LaunchUnknown,
 }
 
 impl Guard {
     /// Every state, in declaration order.
-    pub const ALL: [Guard; 7] = [
+    pub const ALL: [Guard; 8] = [
         Guard::Applied,
         Guard::ByPolicy,
         Guard::PolicyOverrides,
@@ -87,6 +98,7 @@ impl Guard {
         Guard::Failed,
         Guard::Moved,
         Guard::AccessUnknown,
+        Guard::LaunchUnknown,
     ];
 
     /// The record's text for this state.
@@ -99,6 +111,7 @@ impl Guard {
             Guard::Failed => "degraded: failed",
             Guard::Moved => "degraded: dcom moved the value",
             Guard::AccessUnknown => "degraded: machine access unknown",
+            Guard::LaunchUnknown => "degraded: machine launch unknown",
         }
     }
 
@@ -229,7 +242,17 @@ fn apply_value(store: &mut impl LaunchStore, group: &Sid) -> Result<Change, (Gua
     let failed = |why: String| (Guard::Failed, why);
     let unparsable = |why: String| (Guard::Unparsable, why);
     let (current, original) = match store.read().map_err(failed)? {
-        Raw::Absent => (LaunchSd::windows_default(), None),
+        // Windows' default applies: COM's own descriptor is the base, never a guessed one.
+        Raw::Absent => {
+            let default = store.effective_launch().map_err(|why| {
+                let why =
+                    format!("COM's machine launch can't be read, so nothing was written: {why}");
+                (Guard::LaunchUnknown, why)
+            })?;
+            let parsed =
+                LaunchSd::parse(&default).map_err(|error| unparsable(error.to_string()))?;
+            (parsed, None)
+        }
         Raw::Binary(bytes) => {
             let parsed = LaunchSd::parse(&bytes).map_err(|error| unparsable(error.to_string()))?;
             (parsed, Some(bytes))
@@ -240,10 +263,12 @@ fn apply_value(store: &mut impl LaunchStore, group: &Sid) -> Result<Change, (Gua
             ));
         }
     };
+    let deny_existed = current.holds_deny(group);
+    let default = original.is_none().then(|| current.to_bytes());
     let merged = match current.with_deny(group) {
         Some(merged) => merged,
         None if original.is_some() => return Ok(Change::Unchanged),
-        // Windows' default never denies the group; `with_deny` always adds to it.
+        // COM's default denying the group already: written as it is.
         None => current,
     };
     let bytes = merged.to_bytes();
@@ -266,6 +291,10 @@ fn apply_value(store: &mut impl LaunchStore, group: &Sid) -> Result<Change, (Gua
             .clone()
             .or_else(|| before.as_ref().and_then(|kept| kept.access.clone())),
         history: hold::history(before.as_ref(), &bytes),
+        deny_existed: before
+            .as_ref()
+            .map_or(deny_existed, |kept| kept.deny_existed),
+        default: before.as_ref().map_or(default, |kept| kept.default.clone()),
         original: before.map_or(original, |kept| kept.original),
         written: bytes.clone(),
     };
@@ -274,61 +303,41 @@ fn apply_value(store: &mut impl LaunchStore, group: &Sid) -> Result<Change, (Gua
         store.write_access(access).map_err(failed)?;
     }
     store.write(&bytes).map_err(failed)?;
-    hold::verify(store, group, &bytes)?;
+    let read = hold::verify(store, group, &bytes)?;
+    // What DCOM made of the write is what the removal must find again.
+    if let Some(adopted) = hold::adopt(&backup, read, access.is_some()) {
+        store.write_backup(&adopted).map_err(failed)?;
+    }
     Ok(change)
 }
 
 /// Takes the guard for `group` off as the module says, cleans the access value and
-/// `MachineLaunchRestrictionOld` of Clauseo's bytes, then deletes the backup and the state.
-/// The backup goes back byte for byte when the value is what the first write left and no
-/// put-back has happened since, or when the value is gone (DCOM moved it); otherwise only our
-/// exact deny comes off. A failed read or write
-/// is the error, the backup kept for the next run.
+/// `MachineLaunchRestrictionOld` of Clauseo's values, then deletes the backup and the state.
+/// Values are compared by meaning ([`meaning`]), since DCOM rewrites them. The backup goes
+/// back byte for byte when the value means what the first write left and no put-back has
+/// happened since, or when the value is gone (DCOM moved it). Otherwise only the deny Clauseo
+/// added comes off, never one that was there before, and a value Clauseo made is deleted only
+/// when what is left means COM's default it was built from. A failed read or write is the
+/// error, the backup kept for the next run.
 pub fn remove(store: &mut impl LaunchStore, group: &Sid) -> Result<LaunchRemoved, StoreError> {
     let backup = store.backup()?;
-    let untouched = |bytes: &[u8]| {
-        backup
-            .as_ref()
-            .is_some_and(|kept| !kept.put_back && kept.written == bytes)
-    };
-    let removed = match store.read()? {
-        Raw::Binary(bytes) if untouched(&bytes) => {
-            if let Some(original) = backup.as_ref().and_then(|kept| kept.original.as_ref()) {
-                store.write(original)?;
-                LaunchRemoved::Restored
-            } else {
-                store.delete()?;
-                LaunchRemoved::Deleted
-            }
-        }
-        // Gone (DCOM moved it, or it was deleted): the original still goes back.
-        Raw::Absent => match backup.as_ref().and_then(|kept| kept.original.as_ref()) {
+    let removed = match (store.read()?, backup.as_ref()) {
+        (Raw::Absent, kept) => match kept.and_then(|kept| kept.original.as_ref()) {
+            // Gone (DCOM moved it, or it was deleted): the original still goes back.
             Some(original) => {
                 store.write(original)?;
                 LaunchRemoved::Restored
             }
             None => LaunchRemoved::Nothing,
         },
-        Raw::OtherType => {
+        (Raw::OtherType, _) => {
             LaunchRemoved::Left("MachineLaunchRestriction isn't REG_BINARY".to_owned())
         }
-        Raw::Binary(bytes) => match LaunchSd::parse(&bytes) {
-            Err(error) => LaunchRemoved::Left(error.to_string()),
-            Ok(current) => {
-                let (kept, dropped) = current.without_denies(group);
-                let was_absent = backup
-                    .as_ref()
-                    .is_some_and(|kept| kept.original.is_none() && !kept.put_back);
-                if dropped == 0 {
-                    LaunchRemoved::Nothing
-                } else if was_absent && kept == LaunchSd::windows_default() {
-                    store.delete()?;
-                    LaunchRemoved::Deleted
-                } else {
-                    store.write(&kept.to_bytes())?;
-                    LaunchRemoved::DeniesRemoved(dropped)
-                }
-            }
+        (Raw::Binary(bytes), kept) => match (LaunchSd::parse(&bytes), kept) {
+            (Err(error), _) => LaunchRemoved::Left(error.to_string()),
+            // Clauseo never wrote it: nothing of it is Clauseo's.
+            (Ok(_), None) => LaunchRemoved::Nothing,
+            (Ok(current), Some(kept)) => remove_from(store, group, &current, kept)?,
         },
     };
     if let LaunchRemoved::Left(why) = &removed {
@@ -338,4 +347,45 @@ pub fn remove(store: &mut impl LaunchStore, group: &Sid) -> Result<LaunchRemoved
     store.delete_backup()?;
     store.delete_state()?;
     Ok(removed)
+}
+
+/// [`remove`] on a value that reads, `current`, with Clauseo's backup `kept`.
+fn remove_from(
+    store: &mut impl LaunchStore,
+    group: &Sid,
+    current: &LaunchSd,
+    kept: &Backup,
+) -> Result<LaunchRemoved, StoreError> {
+    let means = |bytes: &[u8]| Meaning::of(bytes).is_ok_and(|m| m == current.meaning());
+    if !kept.put_back && means(&kept.written) {
+        return Ok(if let Some(original) = &kept.original {
+            store.write(original)?;
+            LaunchRemoved::Restored
+        } else {
+            store.delete()?;
+            LaunchRemoved::Deleted
+        });
+    }
+    if kept.deny_existed {
+        tracing::info!("the COM launch deny was there before Clauseo's, so it was left");
+        return Ok(LaunchRemoved::Nothing);
+    }
+    let (left, dropped) = current.without_denies(group);
+    if dropped == 0 {
+        return Ok(LaunchRemoved::Nothing);
+    }
+    let made = kept.original.is_none();
+    let default = kept.default.as_deref().and_then(|d| Meaning::of(d).ok());
+    if made && default.is_some_and(|default| default == left.meaning()) {
+        store.delete()?;
+        return Ok(LaunchRemoved::Deleted);
+    }
+    if made {
+        tracing::info!(
+            "MachineLaunchRestriction holds more than Windows' default, so it was kept, \
+             only Clauseo's deny taken off"
+        );
+    }
+    store.write(&left.to_bytes())?;
+    Ok(LaunchRemoved::DeniesRemoved(dropped))
 }

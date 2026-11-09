@@ -39,6 +39,8 @@ pub enum DegradedReason {
     /// A state this build doesn't know (a newer Clauseo's, or an edit). The text is logged where
     /// it is read, never carried.
     Other,
+    /// No launch value, and COM's own couldn't be read (`degraded: machine launch unknown`).
+    LaunchUnknown,
 }
 
 impl LaunchDenyState {
@@ -54,6 +56,7 @@ impl LaunchDenyState {
             Some(Guard::Failed) => DegradedReason::Failed,
             Some(Guard::Moved) => DegradedReason::Moved,
             Some(Guard::AccessUnknown) => DegradedReason::AccessUnknown,
+            Some(Guard::LaunchUnknown) => DegradedReason::LaunchUnknown,
             None => {
                 tracing::warn!(
                     state = text,
@@ -99,6 +102,10 @@ mod tests {
             (
                 "degraded: machine access unknown",
                 degraded(DegradedReason::AccessUnknown),
+            ),
+            (
+                "degraded: machine launch unknown",
+                degraded(DegradedReason::LaunchUnknown),
             ),
             ("degraded: something new", degraded(DegradedReason::Other)),
         ];
