@@ -5,24 +5,24 @@
 //! arguments.
 //!
 //! The candidate is resolved to its real path (every link, `..` and junction followed), and the
-//! guard starts that real path, never the name it was given. The real path must be one of:
-//! - a system install of Chrome (or Edge on Windows) at its fixed place ([`Trusted::files`]):
-//!   `/Applications/Google Chrome.app` on macOS, `C:\Program Files` and `C:\Program Files (x86)`
-//!   on Windows, the distribution's folders on Linux;
-//! - a per-user Chrome: on macOS `<home>/Applications/Google Chrome.app`, `<home>` from the user
-//!   database, never from the environment; on Windows `<any folder>\Google\Chrome\Application\
-//!   chrome.exe` (the lawyer's `%LOCALAPPDATA%`), under the same test as below
-//!   ([`Trusted::unmodifiable_ends`]);
-//! - Chrome for Testing as the host installs it, `<data>/browsers/chrome-<version>/<binary>`
-//!   ([`Cft`]). On macOS `<data>` is the default data folder of the guard's user, found from
-//!   the user database and never from the environment. On Windows the guard may run as the
-//!   slot's sandbox user, whose folders are not the lawyer's, so any data folder passes, but
-//!   only where that user can change neither the binary nor any folder above it ([`modifiable`]):
-//!   a file the agent wrote is its own, and an owner may always rewrite its permissions.
+//! guard starts that real path, never the name it was given. The real path must be Clauseo's own
+//! pinned download as the host lays it out, `<data>/browsers/<folder>/<binary>` ([`Layout`]):
+//! Chrome for Testing in `chrome-<version>/chrome-<platform>/…`, or chrome-headless-shell in
+//! `chrome-headless-shell-<version>/chrome-headless-shell-<platform>/chrome-headless-shell`.
+//! An installed Google Chrome or Edge is refused by design, wherever it is: the guarded browser
+//! runs pinned builds only.
 //!
-//! Windows' system installs get the same test. macOS and Linux get none: there the agent is the
-//! same user as the lawyer, and the jail, not the permissions, keeps it out of those folders.
-//! A link from a trusted place to anywhere else resolves to that elsewhere and is refused.
+//! On macOS `<data>` is the default data folder of the guard's user, found from the user database
+//! and never from the environment; the jail, not the permissions, keeps the agent (the same user
+//! as the lawyer) out of it. On Windows the guard may run as the slot's sandbox user, whose
+//! folders are not the lawyer's, so any data folder's `browsers` passes, but only where that user
+//! can change neither the binary nor any folder above it ([`modifiable`]): a file the agent wrote
+//! is its own, and an owner may always rewrite its permissions.
+//!
+//! Linux is not a shipped platform, only development and CI, and there the guard trusts the
+//! distributions' installed Chrome and Chromium at their fixed places ([`Trusted::files`]),
+//! unpinned. A link from a trusted place to anywhere else resolves to that elsewhere and is
+//! refused.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -30,11 +30,15 @@ use std::path::{Component, Path, PathBuf};
 pub(crate) const REFUSAL: &str =
     "The browser Clauseo was asked to use isn't one it installed or trusts, so it won't start it.";
 
-/// The folder under the data folder that holds Chrome for Testing (the host's
+/// The folder under the data folder that holds the downloads (the host's
 /// `browser::chrome::BROWSERS_DIR`).
 const BROWSERS_DIR: &str = "browsers";
-/// The prefix of one download's folder (the host's `browser::chrome::CFT_PREFIX`).
+/// The prefix of a Chrome for Testing download's folder (the host's `browser::chrome::CFT_PREFIX`).
+#[cfg(any(target_os = "macos", windows, test))]
 const CFT_PREFIX: &str = "chrome-";
+/// The prefix of a chrome-headless-shell download's folder.
+#[cfg(any(target_os = "macos", windows, test))]
+const SHELL_PREFIX: &str = "chrome-headless-shell-";
 /// The data folder's name under the OS's per-user folder (`clauseo_settings::IDENTIFIER`).
 #[cfg(any(target_os = "macos", test))]
 const IDENTIFIER: &str = "ai.clauseo.desktop";
@@ -47,108 +51,105 @@ const TRUSTED_FOR_TESTS: &str = "CLAUSEO_TEST_GUARD_TRUSTED_DIR";
 /// Where a trusted Chrome may be.
 #[derive(Debug, Default)]
 pub(crate) struct Trusted {
-    /// System installs, each the exact file.
+    /// Installed browsers, each the exact file (Linux only: development and CI, unpinned).
     pub(crate) files: Vec<PathBuf>,
-    /// Chrome for Testing as the host lays it out.
-    pub(crate) cft: Option<Cft>,
-    /// Any data folder's Chrome for Testing, if the guard's user cannot change it (Windows).
-    pub(crate) any_unmodifiable_cft: bool,
-    /// Ends of a path that pass under any folder, if the guard's user cannot change the file or
-    /// any folder above it (Windows: a per-user Chrome in the lawyer's `%LOCALAPPDATA%`).
-    pub(crate) unmodifiable_ends: Vec<PathBuf>,
+    /// `<data>/browsers` (macOS).
+    pub(crate) browsers: Option<PathBuf>,
+    /// Any data folder's `browsers`, if the guard's user cannot change it (Windows).
+    pub(crate) any_unmodifiable_browsers: bool,
+    /// How a download is laid out inside `browsers`.
+    pub(crate) layouts: Vec<Layout>,
     /// Tests only: folders whose every file is trusted.
     pub(crate) folders: Vec<PathBuf>,
 }
 
-/// Chrome for Testing's place: `<browsers>/chrome-<version>/<binary>`.
+/// One pinned download's layout: `<prefix><version>/<binary>`, the version digits and dots.
 #[derive(Debug)]
-pub(crate) struct Cft {
-    /// `<data>/browsers`; `None` on Windows, where any data folder's may pass.
-    pub(crate) browsers: Option<PathBuf>,
-    /// The binary inside one download's folder, as the zip lays it out.
+pub(crate) struct Layout {
+    /// The download folder's name before its version.
+    pub(crate) prefix: &'static str,
+    /// The binary inside the download's folder, as the zip lays it out.
     pub(crate) binary: PathBuf,
 }
 
 impl Trusted {
     /// This machine's.
     pub(crate) fn here() -> Trusted {
-        #[cfg_attr(
-            not(feature = "test-support"),
-            expect(unused_mut, reason = "tests add one")
-        )]
-        let mut trusted = Trusted::system();
-        #[cfg(feature = "test-support")]
-        if let Some(folder) = std::env::var_os(TRUSTED_FOR_TESTS) {
-            trusted.folders.push(PathBuf::from(folder));
+        Trusted {
+            folders: folders_for_tests(),
+            ..Trusted::system()
         }
-        trusted
     }
 
     #[cfg(target_os = "macos")]
     fn system() -> Trusted {
-        let arch = if cfg!(target_arch = "aarch64") {
-            "chrome-mac-arm64"
+        let platform = if cfg!(target_arch = "aarch64") {
+            "mac-arm64"
         } else {
-            "chrome-mac-x64"
+            "mac-x64"
         };
         // The user database's home, never `HOME`.
         let home = nix::unistd::User::from_uid(nix::unistd::getuid())
             .ok()
             .flatten()
             .map(|user| user.dir);
-        Trusted::mac(home, arch)
+        Trusted::mac(home, platform)
     }
 
-    /// macOS's places with `home` the user's home: Chrome in `/Applications` and in
-    /// `<home>/Applications` (a per-user install, resolved to its real path), and Chrome for
-    /// Testing in `<home>/Library/Application Support/<IDENTIFIER>/browsers`.
+    /// macOS's place with `home` the user's home: the downloads in
+    /// `<home>/Library/Application Support/<IDENTIFIER>/browsers`, `platform` `mac-arm64` or
+    /// `mac-x64`.
     #[cfg(any(target_os = "macos", test))]
-    pub(crate) fn mac(home: Option<PathBuf>, arch: &str) -> Trusted {
-        let app = "Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-        let mut files = vec![Path::new("/").join(app)];
-        if let Some(home) = &home {
-            let mine = home.join(app);
-            files.push(real_path(&mine).unwrap_or(mine));
-        }
+    pub(crate) fn mac(home: Option<PathBuf>, platform: &str) -> Trusted {
+        let cft = Path::new(&format!("{CFT_PREFIX}{platform}"))
+            .join("Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing");
+        let shell = Path::new(&format!("{SHELL_PREFIX}{platform}")).join("chrome-headless-shell");
         Trusted {
-            files,
-            cft: Some(Cft {
-                browsers: home.map(|home| {
-                    home.join("Library/Application Support")
-                        .join(IDENTIFIER)
-                        .join(BROWSERS_DIR)
-                }),
-                binary: Path::new(arch)
-                    .join("Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"),
+            files: Vec::new(),
+            browsers: home.map(|home| {
+                home.join("Library/Application Support")
+                    .join(IDENTIFIER)
+                    .join(BROWSERS_DIR)
             }),
-            any_unmodifiable_cft: false,
-            unmodifiable_ends: Vec::new(),
+            any_unmodifiable_browsers: false,
+            layouts: vec![
+                Layout {
+                    prefix: CFT_PREFIX,
+                    binary: cft,
+                },
+                Layout {
+                    prefix: SHELL_PREFIX,
+                    binary: shell,
+                },
+            ],
             folders: Vec::new(),
         }
     }
 
     #[cfg(windows)]
     fn system() -> Trusted {
-        let chrome = r"Google\Chrome\Application\chrome.exe";
-        let edge = r"Microsoft\Edge\Application\msedge.exe";
-        let files = [r"C:\Program Files", r"C:\Program Files (x86)"]
-            .iter()
-            .flat_map(|base| [Path::new(base).join(chrome), Path::new(base).join(edge)])
-            .collect();
         Trusted {
-            files,
-            cft: Some(Cft {
-                browsers: None,
-                binary: Path::new("chrome-win64").join("chrome.exe"),
-            }),
-            any_unmodifiable_cft: true,
-            unmodifiable_ends: vec![PathBuf::from(chrome)],
+            files: Vec::new(),
+            browsers: None,
+            any_unmodifiable_browsers: true,
+            layouts: vec![
+                Layout {
+                    prefix: CFT_PREFIX,
+                    binary: Path::new("chrome-win64").join("chrome.exe"),
+                },
+                Layout {
+                    prefix: SHELL_PREFIX,
+                    binary: Path::new("chrome-headless-shell-win64")
+                        .join("chrome-headless-shell.exe"),
+                },
+            ],
             folders: Vec::new(),
         }
     }
 
-    /// Linux, for development and CI: the distributions' installs, each root's own.
-    #[cfg(not(any(target_os = "macos", windows)))]
+    /// Linux, never shipped, for development and CI: the distributions' installs, each root's
+    /// own, unpinned.
+    #[cfg(target_os = "linux")]
     fn system() -> Trusted {
         let files = [
             "/opt/google/chrome/google-chrome",
@@ -163,6 +164,27 @@ impl Trusted {
             ..Trusted::default()
         }
     }
+
+    /// Any other system: none but the tests' own.
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
+    fn system() -> Trusted {
+        Trusted::default()
+    }
+}
+
+/// Tests only: the folder [`TRUSTED_FOR_TESTS`] names, if any.
+#[cfg(feature = "test-support")]
+fn folders_for_tests() -> Vec<PathBuf> {
+    std::env::var_os(TRUSTED_FOR_TESTS)
+        .map(PathBuf::from)
+        .into_iter()
+        .collect()
+}
+
+/// A shipped build: none.
+#[cfg(not(feature = "test-support"))]
+fn folders_for_tests() -> Vec<PathBuf> {
+    Vec::new()
 }
 
 /// The real path of `asked` if it is a Chrome the guard trusts, else `None`. `modifiable` says
@@ -185,29 +207,28 @@ pub(crate) fn check(
     if trusted.folders.iter().any(|folder| under(folder).is_some()) {
         return Some(real);
     }
+    let installed = trusted
+        .files
+        .iter()
+        .any(|file| relative(&shown, file).is_some_and(|rest| rest.as_os_str().is_empty()));
+    if installed {
+        return Some(real);
+    }
+    let rest = match &trusted.browsers {
+        Some(browsers) => under(browsers)?,
+        None if trusted.any_unmodifiable_browsers => after_browsers(&shown)?,
+        None => return None,
+    };
+    let download = trusted
+        .layouts
+        .iter()
+        .any(|layout| is_download(&rest, layout));
     let unmodifiable = || {
         real.ancestors()
             .take_while(|path| path.parent().is_some())
             .all(|path| !modifiable(path))
     };
-    let system = trusted
-        .files
-        .iter()
-        .any(|file| relative(&shown, file).is_some_and(|rest| rest.as_os_str().is_empty()));
-    let ends = trusted
-        .unmodifiable_ends
-        .iter()
-        .any(|end| ends_with(&shown, end));
-    if (system || ends) && unmodifiable() {
-        return Some(real);
-    }
-    let cft = trusted.cft.as_ref()?;
-    let rest = match &cft.browsers {
-        Some(browsers) => under(browsers)?,
-        None if trusted.any_unmodifiable_cft => after_browsers(&shown)?,
-        None => return None,
-    };
-    (is_download(&rest, &cft.binary) && unmodifiable()).then_some(real)
+    (download && unmodifiable()).then_some(real)
 }
 
 /// `path` with every link, junction, `.` and `..` resolved. Windows' `\\?\` form stays: the guard
@@ -221,20 +242,20 @@ fn real_path(path: &Path) -> Option<PathBuf> {
     std::fs::canonicalize(path).ok()
 }
 
-/// Whether `rest`, a path under `browsers`, is `chrome-<version>/<binary>`: a version of digits
+/// Whether `rest`, a path under `browsers`, is `<prefix><version>/<binary>`: a version of digits
 /// and dots, as the host names a download's folder.
-fn is_download(rest: &Path, binary: &Path) -> bool {
+fn is_download(rest: &Path, layout: &Layout) -> bool {
     let mut parts = rest.components();
     let Some(Component::Normal(folder)) = parts.next() else {
         return false;
     };
     let version = folder
         .to_str()
-        .and_then(|name| name.strip_prefix(CFT_PREFIX))
+        .and_then(|name| name.strip_prefix(layout.prefix))
         .unwrap_or_default();
     !version.is_empty()
         && version.bytes().all(|b| b.is_ascii_digit() || b == b'.')
-        && same(parts.as_path(), binary)
+        && same(parts.as_path(), &layout.binary)
 }
 
 /// What follows the last `browsers` folder in `real` (Windows: any data folder's).
@@ -244,17 +265,6 @@ fn after_browsers(real: &Path) -> Option<PathBuf> {
         .iter()
         .rposition(|part| matches!(part, Component::Normal(name) if same(Path::new(name), Path::new(BROWSERS_DIR))))?;
     Some(parts[at + 1..].iter().collect())
-}
-
-/// Whether `path`'s last components are `end`'s, comparing as the OS does.
-fn ends_with(path: &Path, end: &Path) -> bool {
-    let have: Vec<Component<'_>> = path.components().collect();
-    let want: Vec<Component<'_>> = end.components().collect();
-    have.len() > want.len()
-        && have[have.len() - want.len()..]
-            .iter()
-            .zip(&want)
-            .all(|(a, b)| same(Path::new(a.as_os_str()), Path::new(b.as_os_str())))
 }
 
 /// `path` relative to `base`, comparing as the OS does (Windows: without ASCII case).

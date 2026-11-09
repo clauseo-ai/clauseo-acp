@@ -11,7 +11,10 @@
 //! 2. An array (a batch): `-32600`, nothing forwarded. A scalar: `-32600`, nothing forwarded.
 //! 3. Any message whose `id` is [`RESERVED_ID`], the guard's own close request's: `-32600`
 //!    with that id, nothing forwarded.
-//! 4. An object whose `method` is exactly `tools/call`, with `params.arguments` an object:
+//! 4. An object whose `method` is exactly `tools/call` naming a live-view tool of
+//!    [`LIVE_VIEW_TOOLS`], or an `agent_browser_batch` with a command of [`LIVE_VIEW_COMMANDS`]:
+//!    [`UNAVAILABLE`], nothing forwarded.
+//! 5. An object whose `method` is exactly `tools/call`, with `params.arguments` an object:
 //!    a. any key of [`REFUSED_KEYS`];
 //!    b. a key of [`MUST_BE_FALSE`] whose value is anything but `false`;
 //!    c. a `timeoutMs` that is not a whole number up to [`MAX_TIMEOUT_MS`];
@@ -93,6 +96,29 @@ pub(crate) const EXTRA_ARGS_ALLOWED: &[&str] =
 /// The text of a refused batch.
 pub(crate) const BATCH_MESSAGE: &str = "Clauseo does not allow batched requests in the browser.";
 
+/// agent-browser's live views, each serving the browser on a loopback port: the stream server
+/// (`stream_enable`, `actions.rs:9772-9785` at v0.41.1, with its `disable` and `status`), the
+/// dashboard that shows its streams, and the developer tools page of `inspect`
+/// (`native/inspect_server.rs`). The macOS browser profile denies every inet bind anyway; the
+/// guard stops the try.
+pub(crate) const LIVE_VIEW_TOOLS: &[&str] = &[
+    "agent_browser_stream_enable",
+    "agent_browser_stream_disable",
+    "agent_browser_stream_status",
+    "agent_browser_dashboard_start",
+    "agent_browser_dashboard_stop",
+    "agent_browser_inspect",
+];
+
+/// The same live views as CLI commands: the first string of one of `agent_browser_batch`'s
+/// `commands`, which the CLI matches exactly (`mcp.rs:3684-3719`, `commands.rs:1066,1403`).
+pub(crate) const LIVE_VIEW_COMMANDS: &[&str] = &["stream", "dashboard", "inspect"];
+
+/// What a live-view request gets: no path, no port.
+pub(crate) const UNAVAILABLE: &str = "That browser feature isn't available in Clauseo.";
+
+const TOOL_BATCH: &str = "agent_browser_batch";
+
 /// The longest name a refusal repeats; a longer one is cut and ends in `...`.
 const NAME_MAX_CHARS: usize = 64;
 
@@ -127,9 +153,9 @@ pub(crate) fn check(line: &[u8]) -> Verdict {
         let text = format!("Clauseo reserves the id {RESERVED_ID} for itself.");
         return Verdict::Answer(error_line(id, -32600, &text));
     }
-    if let Err(name) = check_object(object) {
+    if let Err(text) = check_object(object) {
         return match object.get("id") {
-            Some(id) => Verdict::Answer(refusal_line(id, &name)),
+            Some(id) => Verdict::Answer(refusal_line(id, &text)),
             None => Verdict::Drop,
         };
     }
@@ -144,10 +170,13 @@ pub(crate) fn parse_error() -> Verdict {
     Verdict::Answer(error_line(&Value::Null, -32700, "Parse error"))
 }
 
-/// `Err` with the name a refusal shows.
+/// `Err` with the refusal's text.
 fn check_object(object: &Map<String, Value>) -> Result<(), String> {
     if object.get("method").and_then(Value::as_str) != Some("tools/call") {
         return Ok(());
+    }
+    if is_live_view(object.get("params")) {
+        return Err(UNAVAILABLE.to_owned());
     }
     // Not an object (or absent): agent-browser refuses it before running anything
     // (`validate_arguments_object`, mcp.rs:3967-3975, reached from every tool's argument reads).
@@ -162,7 +191,29 @@ fn check_object(object: &Map<String, Value>) -> Result<(), String> {
         .and_then(|params| params.get("name"))
         .and_then(Value::as_str)
         .unwrap_or_default();
-    check_arguments(tool, arguments)
+    check_arguments(tool, arguments).map_err(|name| refusal_text(&name))
+}
+
+/// Whether a tool call's `params` ask for a live view, whatever else they hold.
+fn is_live_view(params: Option<&Value>) -> bool {
+    let tool = params
+        .and_then(|params| params.get("name"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if LIVE_VIEW_TOOLS.contains(&tool) {
+        return true;
+    }
+    let commands = params
+        .and_then(|params| params.get("arguments"))
+        .and_then(|arguments| arguments.get("commands"))
+        .and_then(Value::as_array);
+    tool == TOOL_BATCH
+        && commands.into_iter().flatten().any(|command| {
+            command
+                .get(0)
+                .and_then(Value::as_str)
+                .is_some_and(|first| LIVE_VIEW_COMMANDS.contains(&first))
+        })
 }
 
 fn check_arguments(tool: &str, arguments: &Map<String, Value>) -> Result<(), String> {
@@ -324,12 +375,12 @@ pub(crate) fn refusal_text(name: &str) -> String {
     format!("Clauseo does not allow {name} in the browser.")
 }
 
-fn refusal_line(id: &Value, name: &str) -> String {
+fn refusal_line(id: &Value, text: &str) -> String {
     json!({
         "jsonrpc": "2.0",
         "id": id,
         "result": {
-            "content": [{"type": "text", "text": refusal_text(name)}],
+            "content": [{"type": "text", "text": text}],
             "isError": true,
         },
     })

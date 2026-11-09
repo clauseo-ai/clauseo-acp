@@ -674,7 +674,10 @@ never reach Chrome; and the filter refuses every flag-shaped string in a tool ca
 with a flag-shaped piece when split on commas and whitespace (`x,--no-sandbox`, `a --headed`),
 every string naming a switch of this section anywhere (`weakening_in`, so typed text holding
 `single-process` is refused too), and every `extraArgs` token but six output flags
-(`filter.rs`; `agent_browser_eval`'s `script` stays exempt). The binary is pinned as well: a
+(`filter.rs`; `agent_browser_eval`'s `script` stays exempt). Every live view (the stream,
+dashboard and `inspect` tools, and those commands in `agent_browser_batch`) gets "That browser
+feature isn't available in Clauseo." and never reaches agent-browser; the macOS browser profile
+denies every inet bind anyway. The binary is pinned as well: a
 wrapper named as Chrome is never started ("The pinned browser", next). This is the guard's path
 only; what the agent can start without the guard is "The residual", below.
 
@@ -684,44 +687,42 @@ only; what the agent can start without the guard is "The residual", below.
 runs `clauseo-mcp browser-guard` itself chooses (P8 of the jail plan): a wrapper there would add
 `--no-sandbox` behind every check on the guard's own arguments. So the variable names only a
 candidate. The guard resolves it (every link, `..` and junction followed) once, at its start, and
-starts that resolved file, never the name given, and only when it is:
-- a system install at its fixed place: `/Applications/Google Chrome.app/Contents/MacOS/Google
-  Chrome` on macOS; `Google\Chrome\Application\chrome.exe` or
-  `Microsoft\Edge\Application\msedge.exe` under `C:\Program Files` or `C:\Program Files (x86)`
-  on Windows; on Linux (development and CI) `/opt/google/chrome/google-chrome` or `chrome`,
-  `/usr/bin/chromium`, `/usr/bin/chromium-browser`, `/usr/lib/chromium/chromium` or
-  `/usr/lib/chromium-browser/chromium-browser`;
-- a per-user Chrome, for lawyers without admin rights who installed Chrome for themselves: on
-  macOS `<home>/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`, `<home>` from the
-  user database, never from the environment, resolved to its real path (the jail, not the
-  permissions, keeps the agent out of `~/Applications`, as for `/Applications`); on Windows
-  `<any folder>\Google\Chrome\Application\chrome.exe`, which covers `%LOCALAPPDATA%` without
-  knowing the lawyer's profile, under the probe below;
-- Chrome for Testing as the host installs it, `<data>/browsers/chrome-<digits and dots>/<the
-  zip's binary>`. On macOS `<data>` is the default data folder of the guard's user, found from
-  the user database, never from the environment, so `CLAUSEO_DATA_DIR` moves nothing here. On
-  Windows the guard may run as the slot's sandbox user, whose folders are not the lawyer's, so
-  any data folder's install passes, but only if that user can change neither the binary nor any
-  folder above it: the guard opens each for `FILE_WRITE_DATA`, `FILE_APPEND_DATA`,
-  `FILE_DELETE_CHILD`, `DELETE`, `WRITE_DAC` and `WRITE_OWNER` in turn, and any open that works
-  refuses. A file the agent wrote is its own, and an owner always gets `WRITE_DAC`. Windows'
-  system and per-user installs get the same test.
+starts that resolved file, never the name given, and only when it is Clauseo's own pinned
+download as the host lays it out under the data folder's `browsers/`:
+- Chrome for Testing, `<data>/browsers/chrome-<digits and dots>/<the zip's binary>`;
+- chrome-headless-shell, `<data>/browsers/chrome-headless-shell-<digits and dots>/
+  chrome-headless-shell-<platform>/chrome-headless-shell` (`.exe` on Windows), for the
+  layout PR B installs.
+
+An installed Google Chrome or Edge is refused by design, wherever it is (`/Applications`,
+`~/Applications`, `C:\Program Files`, `%LOCALAPPDATA%`): the guarded browser runs pinned
+builds only. On macOS `<data>` is the default data folder of the guard's user, found from the
+user database, never from the environment, so `CLAUSEO_DATA_DIR` moves nothing here. On Windows
+the guard may run as the slot's sandbox user, whose folders are not the lawyer's, so any data
+folder's `browsers/` passes, but only if that user can change neither the binary nor any folder
+above it: the guard opens each for `FILE_WRITE_DATA`, `FILE_APPEND_DATA`, `FILE_DELETE_CHILD`,
+`DELETE`, `WRITE_DAC` and `WRITE_OWNER` in turn, and any open that works refuses. A file the
+agent wrote is its own, and an owner always gets `WRITE_DAC`. Linux is not a shipped platform,
+only development and CI, and there the guard also trusts the distributions' installs at their
+fixed places, unpinned: `/opt/google/chrome/google-chrome` or `chrome`, `/usr/bin/chromium`,
+`/usr/bin/chromium-browser`, `/usr/lib/chromium/chromium` or
+`/usr/lib/chromium-browser/chromium-browser`.
 
 A link from a trusted place to anywhere else resolves to that elsewhere and is refused. Anything
 else fails the first tool call with "The browser Clauseo was asked to use isn't one it installed
-or trusts, so it won't start it.", and the guard exits 1 naming no path. Every place the host's
-own pick looks (`host/src/browser/chrome.rs`) passes. Tests: `chrome/pinned/tests.rs` (the pinned install
-passes on a fake data folder; a wrapper, a wrong version folder or binary, and a link from the
-install folder to a temp folder are refused; a per-user macOS Chrome passes under the given home
-and a lookalike elsewhere does not; the Windows rules with a stubbed probe; and, on the Windows
-job, a file the test wrote is modifiable and refused), and
-`tests/guard/sandbox.rs`, `a_chrome_the_guard_does_not_trust_is_never_started`. The tests start
-stubs through `CLAUSEO_TEST_GUARD_TRUSTED_DIR`, read only in a `test-support` build.
+or trusts, so it won't start it.", and the guard exits 1 naming no path. Tests:
+`chrome/pinned/tests.rs` (the pinned download passes on a fake data folder; a wrapper, a wrong
+version folder or binary, and a link from the download folder to a temp folder are refused; on
+macOS both layouts pass under the given home, while an installed Chrome in `~/Applications` and
+a lookalike elsewhere do not; a Linux install passes only at its exact place; the Windows rule
+with a stubbed probe; and, on the Windows job, a file the test wrote is modifiable and refused),
+and `tests/guard/sandbox.rs`, `a_chrome_the_guard_does_not_trust_is_never_started`. The tests
+start stubs through `CLAUSEO_TEST_GUARD_TRUSTED_DIR`, read only in a `test-support` build.
 
 What the check rests on, not verified on a machine: on macOS that the jail keeps the agent from
-writing `/Applications/Google Chrome.app` and the data folder's `browsers/` (the agent is the
-same user, so permissions say nothing there); on Windows that the probe's six opens cover every
-right that lets the sandbox user replace the file (G17's Windows row).
+writing the data folder's `browsers/` (the agent is the same user, so permissions say nothing
+there); on Windows that the probe's six opens cover every right that lets the sandbox user
+replace the file (G17's Windows row).
 
 **The refusal.** Chrome's stderr, read up to its endpoint line, is matched against the messages
 Chromium prints when the sandbox cannot start:

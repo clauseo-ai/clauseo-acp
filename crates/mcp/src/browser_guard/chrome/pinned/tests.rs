@@ -1,10 +1,11 @@
-//! Which Chrome the guard starts: the pinned install passes, a wrapper or a link to one does not.
+//! Which Chrome the guard starts: the pinned download passes; a wrapper, a link to one, or an
+//! installed Chrome does not.
 
 use std::path::{Path, PathBuf};
 
 #[cfg(windows)]
 use super::modifiable;
-use super::{Cft, Trusted, check};
+use super::{CFT_PREFIX, Layout, SHELL_PREFIX, Trusted, check};
 use crate::write;
 
 /// The Chrome for Testing binary inside a download's folder, as the macOS zip lays it out.
@@ -32,11 +33,17 @@ fn file(path: &Path) -> PathBuf {
 /// What the guard trusts with `data` as the data folder.
 fn trusted(data: &Path) -> Trusted {
     Trusted {
-        cft: Some(Cft {
-            browsers: Some(data.join("browsers")),
-            binary: PathBuf::from(BINARY),
-        }),
+        browsers: Some(data.join("browsers")),
+        layouts: vec![layout()],
         ..Trusted::default()
+    }
+}
+
+/// Chrome for Testing's layout with [`BINARY`].
+fn layout() -> Layout {
+    Layout {
+        prefix: CFT_PREFIX,
+        binary: PathBuf::from(BINARY),
     }
 }
 
@@ -104,23 +111,6 @@ fn a_link_from_a_trusted_place_to_anywhere_else_is_refused() {
     write::remove_dir_all(&dir).unwrap();
 }
 
-#[test]
-fn a_system_install_passes_only_at_its_exact_place_and_unchanged() {
-    let dir = scratch("system");
-    let chrome = file(&dir.join("Google/Chrome/Application/chrome.exe"));
-    let trusted = Trusted {
-        files: vec![chrome.clone()],
-        ..Trusted::default()
-    };
-    assert_eq!(check(&chrome, &trusted, never), Some(chrome.clone()));
-    let beside = file(&dir.join("Google/Chrome/Application/other.exe"));
-    assert_eq!(check(&beside, &trusted, never), None);
-    // One folder above it the user can change: refused.
-    let folder = chrome.parent().unwrap().to_owned();
-    assert_eq!(check(&chrome, &trusted, |path| path == folder), None);
-    write::remove_dir_all(&dir).unwrap();
-}
-
 /// Windows: any data folder's Chrome for Testing, if the user can change nothing above it.
 #[test]
 fn any_data_folders_install_passes_only_where_the_user_cannot_change_it() {
@@ -130,11 +120,8 @@ fn any_data_folders_install_passes_only_where_the_user_cannot_change_it() {
             .join(BINARY),
     );
     let trusted = Trusted {
-        cft: Some(Cft {
-            browsers: None,
-            binary: PathBuf::from(BINARY),
-        }),
-        any_unmodifiable_cft: true,
+        any_unmodifiable_browsers: true,
+        layouts: vec![layout()],
         ..Trusted::default()
     };
     assert_eq!(check(&chrome, &trusted, never), Some(chrome.clone()));
@@ -142,10 +129,25 @@ fn any_data_folders_install_passes_only_where_the_user_cannot_change_it() {
     let data = dir.join("lawyer/data");
     assert_eq!(check(&chrome, &trusted, |path| path == data), None);
     let without = Trusted {
-        any_unmodifiable_cft: false,
+        any_unmodifiable_browsers: false,
         ..trusted
     };
     assert_eq!(check(&chrome, &without, never), None);
+    write::remove_dir_all(&dir).unwrap();
+}
+
+/// Linux (development and CI only): an installed browser passes only at its exact place.
+#[test]
+fn a_listed_install_passes_only_at_its_exact_place() {
+    let dir = scratch("listed");
+    let chrome = file(&dir.join("opt/google/chrome/chrome"));
+    let trusted = Trusted {
+        files: vec![chrome.clone()],
+        ..Trusted::default()
+    };
+    assert_eq!(check(&chrome, &trusted, never), Some(chrome.clone()));
+    let beside = file(&dir.join("opt/google/chrome/other"));
+    assert_eq!(check(&beside, &trusted, never), None);
     write::remove_dir_all(&dir).unwrap();
 }
 
@@ -162,43 +164,34 @@ fn the_tests_folder_trusts_its_files() {
     write::remove_dir_all(&dir).unwrap();
 }
 
-/// macOS: Chrome in the user's own `Applications`, the home given (the user database's in
-/// production); the same path under any other folder is a lookalike.
+/// macOS: Chrome for Testing and chrome-headless-shell under the data folder in the home given
+/// (the user database's in production) pass; an installed Chrome, even in the user's own
+/// `Applications`, and the same layout under any other folder are refused.
 #[test]
-fn a_per_user_mac_chrome_passes_only_under_the_users_home() {
+fn on_a_mac_only_the_pinned_downloads_in_the_users_data_folder_pass() {
     let dir = scratch("machome");
-    let app = "Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-    let chrome = file(&dir.join("home").join(app));
-    let lookalike = file(&dir.join("tmp/home").join(app));
-    let trusted = Trusted::mac(Some(dir.join("home")), "chrome-mac-arm64");
-    assert_eq!(check(&chrome, &trusted, never), Some(chrome.clone()));
-    assert_eq!(check(&lookalike, &trusted, never), None);
-    assert_eq!(
-        check(&lookalike, &Trusted::mac(None, "chrome-mac-arm64"), never),
-        None
-    );
-    write::remove_dir_all(&dir).unwrap();
-}
-
-/// Windows: `<any folder>\Google\Chrome\Application\chrome.exe`, only where the user can change
-/// nothing above it.
-#[test]
-fn a_per_user_windows_chrome_passes_only_where_the_user_cannot_change_it() {
-    let dir = scratch("winlocal");
-    let end = Path::new("Google")
-        .join("Chrome")
-        .join("Application")
-        .join("chrome.exe");
-    let chrome = file(&dir.join("lawyer/AppData/Local").join(&end));
-    let trusted = Trusted {
-        unmodifiable_ends: vec![end],
-        ..Trusted::default()
-    };
-    assert_eq!(check(&chrome, &trusted, never), Some(chrome.clone()));
-    let local = dir.join("lawyer/AppData/Local");
-    assert_eq!(check(&chrome, &trusted, |path| path == local), None);
-    let other = file(&dir.join("lawyer/AppData/Local/Google/Chrome/chrome.exe"));
-    assert_eq!(check(&other, &trusted, never), None);
+    let browsers = dir.join("home/Library/Application Support/ai.clauseo.desktop/browsers");
+    let cft = file(&browsers.join(
+        "chrome-131.0.6778.85/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/\
+         Google Chrome for Testing",
+    ));
+    let shell = file(&browsers.join(format!(
+        "{SHELL_PREFIX}131.0.6778.85/chrome-headless-shell-mac-arm64/chrome-headless-shell"
+    )));
+    let trusted = Trusted::mac(Some(dir.join("home")), "mac-arm64");
+    assert_eq!(check(&cft, &trusted, never), Some(cft.clone()));
+    assert_eq!(check(&shell, &trusted, never), Some(shell.clone()));
+    let wrong_folder = file(&browsers.join(
+        "chrome-headless-shell-131.0/chrome-mac-arm64/Google Chrome for Testing.app/Contents/\
+         MacOS/Google Chrome for Testing",
+    ));
+    let installed =
+        file(&dir.join("home/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"));
+    let lookalike = file(&dir.join("tmp/home/Library/Application Support/ai.clauseo.desktop/browsers/chrome-headless-shell-1/chrome-headless-shell-mac-arm64/chrome-headless-shell"));
+    for refused in [&wrong_folder, &installed, &lookalike] {
+        assert_eq!(check(refused, &trusted, never), None, "{refused:?}");
+    }
+    assert_eq!(check(&cft, &Trusted::mac(None, "mac-arm64"), never), None);
     write::remove_dir_all(&dir).unwrap();
 }
 
@@ -209,15 +202,12 @@ fn a_per_user_windows_chrome_passes_only_where_the_user_cannot_change_it() {
 #[test]
 fn a_file_the_user_wrote_is_modifiable_and_refused() {
     let dir = scratch("owner");
-    let end = Path::new("Google")
-        .join("Chrome")
-        .join("Application")
-        .join("chrome.exe");
-    let chrome = file(&dir.join(&end));
+    let chrome = file(&dir.join("data/browsers/chrome-131.0.6778.85").join(BINARY));
     assert!(modifiable(&chrome));
     assert!(modifiable(chrome.parent().unwrap()));
     let trusted = Trusted {
-        unmodifiable_ends: vec![end],
+        any_unmodifiable_browsers: true,
+        layouts: vec![layout()],
         ..Trusted::default()
     };
     assert_eq!(check(&chrome, &trusted, modifiable), None);
