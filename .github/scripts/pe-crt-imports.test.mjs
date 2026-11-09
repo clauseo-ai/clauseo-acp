@@ -140,23 +140,29 @@ test("the rules: the VC++ runtime and debug CRTs fail; the UCRT and Windows' own
   }
 });
 
-test("the command line: directories give their .exe and .dll files; a failure exits 1", async () => {
+test("the command line: directories give their .exe, .dll and .node files, nested; a failure exits 1", async () => {
   const dir = join(scratch, "cli");
   await mkdir(join(dir, "sub"), { recursive: true });
   await writeFile(join(dir, "Clauseo.exe"), makePe({ imports: CLEAN }));
   await writeFile(join(dir, "sub", "helper.DLL"), makePe({ imports: CLEAN }));
+  await mkdir(join(dir, "sub", "deeper"), { recursive: true });
+  await writeFile(join(dir, "sub", "deeper", "addon.node"), makePe({ machine: 0x14c, plus: false, imports: ["msvcrt.dll"] }));
   await writeFile(join(dir, "notes.txt"), "not checked");
-  assert.deepEqual(await expandPaths([dir]), [join(dir, "Clauseo.exe"), join(dir, "sub", "helper.DLL")]);
+  assert.deepEqual(await expandPaths([dir]), [
+    join(dir, "Clauseo.exe"),
+    join(dir, "sub", "deeper", "addon.node"),
+    join(dir, "sub", "helper.DLL"),
+  ]);
 
   const run = (...args) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8" });
   const clean = run(dir);
   assert.equal(clean.status, 0, clean.stdout + clean.stderr);
-  assert.match(clean.stdout, /2 files \(1 DLLs\): none imports the VC\+\+ runtime/);
+  assert.match(clean.stdout, /3 files \(2 DLLs or addons\): none imports the VC\+\+ runtime/);
 
-  await writeFile(join(dir, "sub", "bad.exe"), makePe({ imports: ["VCRUNTIME140.dll"] }));
+  await writeFile(join(dir, "sub", "deeper", "bad.node"), makePe({ imports: ["VCRUNTIME140.dll"] }));
   const bad = run(dir);
   assert.equal(bad.status, 1);
-  assert.match(bad.stdout, /::error::.*bad\.exe imports VCRUNTIME140\.dll/);
+  assert.match(bad.stdout, /::error::.*bad\.node imports VCRUNTIME140\.dll/);
 
   assert.equal(run(join(scratch, "missing.exe")).status, 1);
   assert.equal(run(join(dir, "notes.txt")).status, 1);
@@ -192,6 +198,20 @@ test("crt-static is on every Windows row of release.yml and on no other", async 
     assert.equal(/\+crt-static/.test(row), windows, row.trim());
   }
   assert.match(release, /^ {6}RUSTFLAGS: \$\{\{ matrix\.rustflags \}\}$/m);
+});
+
+test("release.yml checks each extracted installer after bundling, before signing and upload", async () => {
+  const release = await readFile(join(ROOT, ".github/workflows/release.yml"), "utf8");
+  const job = release.slice(release.indexOf("\n  sign-windows:"), release.indexOf("\n  assemble:"));
+  const bundle = job.indexOf("- name: Bundle the currentUser and perMachine installers");
+  const gate = job.indexOf("- name: Check every PE inside both installers");
+  const upload = job.indexOf("name: release-${{ matrix.target }}");
+  assert.ok(bundle > 0 && gate > bundle && upload > gate, "bundle, then the gate, then the upload");
+  const step = job.slice(gate, job.indexOf("\n      - ", gate + 1));
+  assert.match(step, /-setup\.exe/);
+  assert.match(step, /-machine-setup\.exe/);
+  assert.match(step, /7z/);
+  assert.match(step, /node \.github\/scripts\/pe-crt-imports\.mjs/);
 });
 
 test("release.yml checks the VC++ runtime imports right before the windows-exe upload", async () => {

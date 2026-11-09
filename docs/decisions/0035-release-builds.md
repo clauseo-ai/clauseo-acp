@@ -276,6 +276,9 @@ S15's tools sat in `windows.conf.json` and S27's in `tauri.conf.json`.
   (`api-ms-win-crt-*`) stays allowed, being part of Windows 10 and later. Before the
   `windows-exe-<target>` upload, `.github/scripts/pe-crt-imports.mjs` reads each shipped exe's
   import and delay-import tables, agent-browser's included, and fails on a VC++ runtime DLL.
+  `sign-windows` gates what ships rather than a list: it extracts both NSIS installers with 7-Zip
+  and runs the same check, with no exceptions, over each installer and every `.exe`, `.dll` and
+  `.node` inside.
 - **Where they land:** beside the app's exe in every bundle: `Clauseo.app/Contents/MacOS/`,
   `/usr/bin/` in the `.deb` and `.rpm` (hence the `clauseo-` prefix), and the install folder of
   both NSIS installers, which install and remove each `externalBin` with `Clauseo.exe`.
