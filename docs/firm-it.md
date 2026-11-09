@@ -1041,10 +1041,15 @@ What set-up changes:
   No other account loses anything.
 - With no value (Windows' default applies), set-up writes the default Microsoft documents,
   `O:BAG:BAD:(A;;CCDCLCSWRP;;;BA)(A;;CCDCSW;;;WD)`, with the deny in front.
+- Windows keeps that value only while `MachineAccessRestriction`, in the same key, is set too.
+  If it isn't, set-up first writes it as exactly the access limit COM already uses, so no
+  account's access changes. Uninstalling deletes it again if it is still exactly those bytes and
+  the launch value is gone.
 - The value as it was before is kept in `HKLM\SOFTWARE\Clauseo\Sandbox\MachineLaunch`, a key only
   SYSTEM and Administrators can open: `Original` holds the old bytes (empty when there was no
   value), `Written` holds what Clauseo last wrote, and `PutBack` is 1 once Clauseo has had to put
-  its deny back after something else rewrote the value.
+  its deny back after something else rewrote the value. `AccessAdded` holds the
+  `MachineAccessRestriction` bytes set-up wrote, when it wrote one.
 - Clauseo's SYSTEM task `\Clauseo\SandboxRefresh` puts the deny back at each run if something
   removed it, and writes an Event Log line (source "Clauseo Sandbox") when it does.
 - A value Clauseo can't read as a valid COM security descriptor is never changed. Neither is a
@@ -1064,6 +1069,8 @@ The guard's state is in `HKLM\SOFTWARE\Clauseo\Sandbox`, value `MachineLaunchDen
 | `degraded: group policy` | A Group Policy sets the limit without the deny. The setting below fixes it. |
 | `degraded: unparsable` | The value isn't a security descriptor Clauseo can safely change, so it was left as it is. |
 | `degraded: failed` | Reading or writing the registry failed; the Event Log line names the Windows error. |
+| `degraded: dcom moved the value` | Windows moved the value to `MachineLaunchRestrictionOld` after Clauseo wrote it, so the deny isn't in effect. |
+| `degraded: machine access unknown` | `MachineAccessRestriction` isn't set and COM's own access limit couldn't be read, so Clauseo wrote nothing. |
 
 A degraded state doesn't stop the set-up. The sandbox's other protections against WSL stay on,
 but the computer-wide layer is missing until it is fixed.
