@@ -5,6 +5,9 @@
 
 use std::collections::HashMap;
 
+/// The named variables `Machine::expand` reads (the others it knows are `$R0`..`$R9`, `$0`..`$9`).
+const NAMED: [&str; 1] = ["$INSTDIR"];
+
 /// A record value as `ReadRegStr` reads it: text, or a value it can't read (another type).
 #[derive(Clone, Copy)]
 pub(super) enum Value {
@@ -221,9 +224,10 @@ pub(super) fn lines(nodes: &[Node]) -> Vec<&str> {
 
 /// The machine: the defines, variables, error flag and stack, the record under
 /// `HKLM\SOFTWARE\Clauseo\Sandbox` and the lawyer's key under `HKCU\Software\Clauseo`, whether
-/// the run is silent, the user's SID for `CLAUSEO_OWN_SID`, the macros it runs inline (and the
-/// record each leaves), what it said (`DetailPrint`, `MessageBox`, `SetErrorLevel`, `ExecWait`,
-/// `Quit`, `Abort`), and which stubbed macros it reached.
+/// the run is silent, the user's SID for `CLAUSEO_OWN_SID`, the files `${FileExists}` finds, the
+/// macros it runs inline (and the record each leaves), what it said (`DetailPrint`, `MessageBox`,
+/// `SetErrorLevel`, `ExecWait`, `Quit`, `Abort`), whether it aborted, and which stubbed macros it
+/// reached.
 pub(super) struct Machine {
     pub(super) defines: HashMap<String, String>,
     pub(super) vars: HashMap<String, String>,
@@ -238,6 +242,10 @@ pub(super) struct Machine {
     pub(super) exit_code: &'static str,
     pub(super) silent: bool,
     pub(super) own_sid: &'static str,
+    /// The paths that exist, as `${FileExists}` is given them once expanded.
+    pub(super) files: Vec<String>,
+    /// An `Abort` ran: nothing after it does, as the section it ends.
+    pub(super) aborted: bool,
     pub(super) inline: HashMap<String, Vec<Node>>,
     /// The record an inlined macro leaves behind it, as a refresh landing while it runs would.
     pub(super) after: HashMap<String, Record>,
@@ -258,6 +266,8 @@ impl Machine {
             exit_code: "0",
             silent: false,
             own_sid: "",
+            files: Vec::new(),
+            aborted: false,
             inline: HashMap::new(),
             after: HashMap::new(),
             said: Vec::new(),
@@ -265,8 +275,8 @@ impl Machine {
         }
     }
 
-    /// `${NAME}` from the defines, `$R0`..`$R9` and `$0`..`$9` from the variables; `$(name)`, a
-    /// language string, stays as it is.
+    /// `${NAME}` from the defines, `$R0`..`$R9`, `$0`..`$9` and the named ones in `NAMED` from
+    /// the variables; `$(name)`, a language string, stays as it is.
     fn expand(&self, word: &str) -> String {
         let mut out = String::new();
         let mut rest = word;
@@ -285,6 +295,9 @@ impl Machine {
                 let end = rest.find(')').expect("an unclosed $(") + 1;
                 out.push_str(&rest[..end]);
                 rest = &rest[end..];
+            } else if let Some(name) = NAMED.iter().find(|name| rest.starts_with(**name)) {
+                out.push_str(self.vars.get(*name).map_or("", String::as_str));
+                rest = &rest[name.len()..];
             } else {
                 let len = if rest[1..].starts_with('R') { 3 } else { 2 };
                 let name = &rest[..len];
@@ -316,6 +329,10 @@ impl Machine {
             "${Silent}" => return self.silent,
             "${RunningX64}" => return true,
             _ => {}
+        }
+        if let Some(path) = cond.strip_prefix("${FileExists} ") {
+            let [path]: [String; 1] = words(path).try_into().expect("one path for ${FileExists}");
+            return self.files.contains(&self.expand(&path));
         }
         let parts = words(cond);
         let [a, op, b] = parts.as_slice() else {
@@ -435,7 +452,18 @@ impl Machine {
                 self.set(var, order.to_owned());
             }
             ["Quit"] => self.said.push("Quit".to_owned()),
-            ["Abort", ..] => self.said.push(line.to_owned()),
+            // With /SD a silent run shows no box and takes the default answer.
+            ["MessageBox", _, text, "/SD", _] => {
+                if !self.silent {
+                    let text = self.expand(text);
+                    self.said.push(format!("MessageBox {text}"));
+                }
+            }
+            // Abort, with or without a message, ends the run as NSIS ends the section.
+            ["Abort", ..] => {
+                self.said.push(line.to_owned());
+                self.aborted = true;
+            }
             ["SetErrorLevel", code] => {
                 let code = self.expand(code);
                 self.said.push(format!("SetErrorLevel {code}"));
@@ -462,6 +490,9 @@ impl Machine {
     /// Runs `nodes`; true when an `${ExitDo}` leaves them.
     pub(super) fn run(&mut self, nodes: &[Node]) -> bool {
         for node in nodes {
+            if self.aborted {
+                return false;
+            }
             match node {
                 Node::Line(line) if line == "${ExitDo}" => return true,
                 Node::Line(line) => self.line(line),
@@ -477,7 +508,7 @@ impl Machine {
                 }
                 Node::Do(body) => {
                     let mut turns = 0;
-                    while !self.run(body) {
+                    while !self.run(body) && !self.aborted {
                         turns += 1;
                         assert!(turns < 100, "a ${{Do}} that doesn't end");
                     }

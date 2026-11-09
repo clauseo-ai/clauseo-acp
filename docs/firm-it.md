@@ -68,6 +68,7 @@ What a silent (`/S`) install can return:
 | 23 | Per-machine install: installed, but placing the set-up program in `C:\Program Files\Clauseo\Sandbox` failed or didn't finish (still running after 10 minutes) |
 | 24 | Per-machine install: installed, but the set-up program wasn't placed because Clauseo was running in the session that ran the installer |
 | 25 | Per-machine install: nothing installed, because the installer couldn't make its protected temporary folder in `C:\Program Files\Clauseo` |
+| 28 | Install: nothing usable installed, because Windows Security (or another antivirus) removed or blocked `Clauseo.exe` while it was being written; allow Clauseo in Windows Security's Protection history, then install again |
 
 A 23 after a 10-minute wait means the placing may still be running; it finishes on its own. A
 `/S` run as SYSTEM (Intune) runs in session 0, which sees no user's Clauseo window, so it doesn't return 24 for a user's running Clauseo.
@@ -78,13 +79,16 @@ What an interactive install can also return:
 |---|---|
 | 20 | Installed, but Windows security removed the set-up program this install wrote (see [section 10](#10-if-windows-security-removed-clauseos-set-up-program)) |
 | 24 | Per-user install: installed, but Safe workspace is not set up because Clauseo was running |
+| 28 | Install: nothing usable installed, because Windows Security (or another antivirus) removed or blocked `Clauseo.exe` while it was being written; allow Clauseo in Windows Security's Protection history, then install again |
 
 An interactive per-machine install never sets 23: it shows a box when placing the set-up program failed, and a
 line in its details list when it was still running. It shows a box with 24 and 25 too, but not
-with 25 under `/P` or `/UPDATE`.
+with 25 under `/P` or `/UPDATE`. With 28 every mode shows a box except `/S`, and the install
+stops as failed: no finish page, and nothing to start.
 
 A passive (`/P`) install shows no box and sets no exit code for Safe workspace's outcomes, except
-the per-machine installer's 24, which every mode sets.
+the per-machine installer's 24, which every mode sets. Both installers set 28 in every mode,
+`/P` included, with its box.
 
 What a per-machine uninstall can also return: 25 and 26 in any mode (a box unless `/S`; for 25,
 unless `/P` or `/UPDATE` too), 27 under `/S` only:
@@ -988,6 +992,7 @@ positive. Without it the protection can't be set up, or removed by the uninstall
 | 2 | Stopped by an error (NSIS) |
 | 20 | Install: installed, but this run wrote `clauseo-sandbox-setup.exe` to `C:\Program Files\Clauseo\Sandbox` and Windows security removed it (`/S` and interactive; not `/P`) |
 | 21 | `/S` uninstall: uninstalled, but the protection stays, since the set-up program was gone |
+| 28 | Install: nothing usable installed, because Windows Security (or another antivirus) removed or blocked `Clauseo.exe` while it was being written; allow Clauseo in Windows Security's Protection history, then install again |
 
 Intune reports 20 as a failed install unless you add it to the app's return codes. A per-machine
 uninstall runs in place, so its `QuietUninstallString`,

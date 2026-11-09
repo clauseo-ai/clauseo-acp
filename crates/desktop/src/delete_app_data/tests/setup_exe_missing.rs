@@ -481,8 +481,8 @@ fn the_silent_exit_codes_are_distinct_unused_and_listed_for_firm_it() {
             "{code}"
         );
     }
-    // In hooks.nsh only the uninstaller's two set one (21 and 27); admin_copy.nsh sets 20 (the
-    // tests above).
+    // In hooks.nsh only the uninstaller's two set one (21 and 27), and the installers' Clauseo.exe
+    // check 28 (app_exe_missing.rs); admin_copy.nsh sets 20 (the tests above).
     let sets: Vec<&String> = code
         .iter()
         .filter(|line| line.contains("SetErrorLevel"))
@@ -492,6 +492,7 @@ fn the_silent_exit_codes_are_distinct_unused_and_listed_for_firm_it() {
         [
             "SetErrorLevel ${CLAUSEO_EXIT_ADMIN_COPY_REFUSED}",
             "SetErrorLevel ${CLAUSEO_EXIT_REMOVE_EXE_MISSING}",
+            "SetErrorLevel ${CLAUSEO_EXIT_APP_EXE_REMOVED}",
         ],
         "{code:?}"
     );

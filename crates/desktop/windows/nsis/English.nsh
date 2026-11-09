@@ -15,7 +15,9 @@
 ; 2026-11-08), then the one the
 ; per-machine installer shows when it can't make its protected temporary folder
 ; (installTempFailed, 2026-11-07), and its uninstaller's (uninstallTempFailed, 2026-11-07), and
-; the one it shows when it isn't started in place (uninstallNotInPlace, 2026-11-07).
+; the one it shows when it isn't started in place (uninstallNotInPlace, 2026-11-07), then the one
+; both installers show when Windows security removed Clauseo.exe (clauseoAppRemovedByAv,
+; 2026-11-09).
 ; deleteAppData labels the uninstaller's box (unticked) that removes the whole data folder, the
 ; store included; papers stay in their matter folders. The box is one line, 400 x 25 px: keep it
 ; short (a test holds it to 60 characters).
@@ -112,6 +114,11 @@ LangString uninstallNotInPlace ${LANG_ENGLISH} "Clauseo wasn't uninstalled, beca
 ; nativeArm64Notice: the x64 per-machine installer's details line on an ARM64 computer
 ; (windows/hooks.nsh, CLAUSEO_NATIVE_ARM64_NOTICE); details list only. Provisional (2026-11-09).
 LangString nativeArm64Notice ${LANG_ENGLISH} "This computer has an ARM64 processor: Clauseo_${VERSION}_arm64-machine-setup.exe is its native per-machine installer."
+; clauseoAppRemovedByAv: Clauseo.exe wasn't in the install folder once the files were placed,
+; because Windows security removed or blocked it as setup wrote it (windows/hooks.nsh,
+; CLAUSEO_APP_EXE_CHECK); both installers, every mode: a box, skipped by /S, then exit code 28
+; and the install fails. Provisional (2026-11-09).
+LangString clauseoAppRemovedByAv ${LANG_ENGLISH} "Windows Security stopped part of Clauseo while it was installing, so Clauseo can't open. Open Windows Security, choose Protection history, allow Clauseo, then install Clauseo again."
 
 ; webview2TooOld: a per-user install found WebView2 older than Clauseo needs and, so as never to
 ; ask for an administrator, leaves it to Windows to update (installer.nsi block

@@ -8,6 +8,7 @@ mod admin_copy_ask;
 mod admin_copy_contract;
 mod admin_copy_hook;
 mod admin_copy_record;
+mod app_exe_missing;
 mod installer_language;
 mod installer_version_info;
 mod make;

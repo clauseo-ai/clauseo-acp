@@ -61,7 +61,8 @@
 ;
 ; The words are in English.nsh and Hindi.nsh (deleteAppDataFailed, deleteAppDataKept,
 ; removeStillRunning, removeSkippedSilent, removeExeMissing, removeAdminCopyRefused,
-; setupExeRemoved, and admin_copy.nsh's adminCopy* lines); the uninstall-declined line is S15a's.
+; setupExeRemoved, clauseoAppRemovedByAv, and admin_copy.nsh's adminCopy* lines); the
+; uninstall-declined line is S15a's.
 ;
 ; NSIS_HOOK_POSTINSTALL, the template's last step of `Section Install`: the per-machine installer
 ; creates $APPDATA\Clauseo (C:\ProgramData\Clauseo, where a firm's policy.json goes; see
@@ -156,14 +157,17 @@ Var ClauseoRepair
 
 ; The installers' own exit codes (SetErrorLevel), listed in docs/firm-it.md, "If Windows security
 ; removed Clauseo's set-up program": 20 set by admin_copy.nsh's macros (never under /P), 21 by the
-; uninstaller under /S. Tauri's template sets none, and NSIS uses 0, 1
-; (cancelled) and 2 (aborted); these stay clear of those and of the codes Intune and SCCM read as
-; success or retry (1223, 1618, 1641, 1707, 3010).
+; uninstaller under /S, 28 by both installers in every mode. Tauri's template sets none, and
+; NSIS uses 0, 1 (cancelled) and 2 (aborted); these stay clear of those and of the codes Intune
+; and SCCM read as success or retry (1223, 1618, 1641, 1707, 3010).
 !define CLAUSEO_EXIT_SETUP_EXE_REMOVED 20
 !define CLAUSEO_EXIT_REMOVE_EXE_MISSING 21
 ; 22 to 26 are the installers' and the per-machine uninstaller's (admin_copy.nsh, safe_temp.nsh,
 ; uninstall_in_place.nsh).
 !define CLAUSEO_EXIT_ADMIN_COPY_REFUSED 27
+; 28: both installers, every mode, when Clauseo.exe isn't in $INSTDIR after the files are placed
+; (CLAUSEO_APP_EXE_CHECK): Windows security removed or blocked it as setup wrote it.
+!define CLAUSEO_EXIT_APP_EXE_REMOVED 28
 
 ; The setup exe's --remove --uninstall exit 10 (SetupExit::AdminCopyLeft): the protection is
 ; removed, but the admin copy, or part of it, stays; the tool wrote the step and its error code
@@ -892,10 +896,30 @@ Var ClauseoRepair
   !endif
 !macroend
 
+; Clauseo.exe missing from $INSTDIR once the template has placed the files: Windows security
+; (Defender's cloud verdict on a hash it already knows) removed or blocked it as setup wrote it.
+; Without this the installer would say it finished, its "Run Clauseo" would start nothing, and /S
+; would exit 0. So the install fails here, first in NSIS_HOOK_POSTINSTALL, in both installers and
+; every mode: a box (clauseoAppRemovedByAv; none under /S, /SD), exit code 28, then Abort, which
+; ends Section Install as failed: no finish page, no "Run Clauseo", no repair relaunch. Unlike 20
+; (admin_copy.nsh) the box also shows under /P and /UPDATE: the updater's lawyer is there, and
+; nothing else would tell them why Clauseo no longer opens. MB_SETFOREGROUND and MB_TOPMOST put
+; it above the installer's window and anything else open.
+!macro CLAUSEO_APP_EXE_CHECK
+  ${IfNot} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
+    DetailPrint "$(clauseoAppRemovedByAv)"
+    MessageBox MB_OK|MB_ICONSTOP|MB_SETFOREGROUND|MB_TOPMOST "$(clauseoAppRemovedByAv)" /SD IDOK
+    SetErrorLevel ${CLAUSEO_EXIT_APP_EXE_REMOVED}
+    Abort
+  ${EndIf}
+!macroend
+
 ; The firm-policy folder and the admin copy, per-machine installs; the per-user installer asks for
 ; the admin section. The test is inside the macro: the template (installer.nsi) includes this file
 ; at line 36, before `!define INSTALLMODE` at line 46, so a test at file scope would see none.
 !macro NSIS_HOOK_POSTINSTALL
+  ; Clauseo.exe still there, before anything else (CLAUSEO_APP_EXE_CHECK, above); else exit 28.
+  !insertmacro CLAUSEO_APP_EXE_CHECK
   ; The uninstaller's language, both installers. LANG_HINDI and LANG_ENGLISH come from the
   ; template's MUI_LANGUAGE lines (installer.nsi:471), after this file is included but before the
   ; section this macro is inserted in.
