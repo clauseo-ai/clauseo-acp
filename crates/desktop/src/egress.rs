@@ -5,8 +5,9 @@
 //!
 //! Every OS gets it. Tier C (no jail) leaves the agent's own environment alone: only the browser
 //! entry reaches its proxy, through the browser port. A jailed launch (R17 PR-D) gets one too,
-//! with or without the browser, and points the agent at it (`agent_listener`). The quit stops whatever is still open
-//! ([`DesktopProxies::stop_all`]) after the host has stopped, waiting at most [`STOP_WAIT`].
+//! with or without the browser, and points the agent at it (`agent_listener`). The quit stops
+//! whatever is still open ([`DesktopProxies::stop_all`]) after the host has stopped, waiting at
+//! most [`STOP_WAIT`].
 //!
 //! No lock is held while a proxy starts or stops: a start binds two listeners and spawns a
 //! thread, and a stop joins it.

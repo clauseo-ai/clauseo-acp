@@ -318,9 +318,10 @@ fn clauseo_config(kind: AgentKind) -> &'static str {
 /// How the agent's login reaches its jail, chosen here alone so the choice can switch (stage C
 /// checks Claude Code's file fallback under a Keychain denial on macOS): a Codex agent's
 /// `auth.json` link in its state folder, when it is the login home's file (`credential_link`,
-/// only that name); a Claude agent's store in Clauseo's login home (`claude_store`: only the store's files
-/// and lock folders), never the lawyer's own store while the login is reused. No Keychain rule in
-/// any policy (`keychain` stays off, ruling of 2026-11-08). Clauseo never reads the store.
+/// only that name); a Claude agent's store in Clauseo's login home (`claude_store`: only the
+/// store's files and lock folders), never the lawyer's own store while the login is reused. No
+/// Keychain rule in any policy (`keychain` stays off, ruling of 2026-11-08). Clauseo never reads
+/// the store.
 pub(crate) fn login_grant(
     builder: PolicyBuilder,
     grants: &Grants,
