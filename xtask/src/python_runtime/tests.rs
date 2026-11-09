@@ -1,6 +1,6 @@
 use super::lock::Lock;
 use super::target::{TARGETS, Target};
-use super::{LOCK, NOTICES, bump, check, net, notices, online, rules, tree, wheel};
+use super::{LOCK, NOTICES, bump, check, net, notices, online, pandoc, rules, tree, wheel};
 use crate::scratch::Scratch;
 use crate::workspace::workspace_root;
 
@@ -377,5 +377,143 @@ fn a_symlink_out_of_the_runtime_fails() {
         failure.message.contains("not a file inside the runtime"),
         "{}",
         failure.message
+    );
+}
+
+#[test]
+fn pandoc_has_every_target_and_windows_arm64_takes_x64() {
+    let (lock, _) = real_lock();
+    let version = &lock.pandoc.version;
+    for target in TARGETS {
+        let archive = &lock.pandoc.archives[target.triple()];
+        assert_eq!(archive.asset, pandoc::asset_name(version, target));
+    }
+    assert_eq!(
+        lock.pandoc.archives["aarch64-pc-windows-msvc"],
+        lock.pandoc.archives["x86_64-pc-windows-msvc"]
+    );
+    assert_eq!(
+        pandoc::asset_name("3.13", Target::WinArm64),
+        "pandoc-3.13-windows-x86_64.zip"
+    );
+    assert_eq!(
+        pandoc::asset_name("3.13", Target::MacX64),
+        "pandoc-3.13-x86_64-macOS.zip"
+    );
+    assert_eq!(pandoc::dest(Target::MacArm64), "bin/pandoc");
+    assert_eq!(pandoc::dest(Target::WinArm64), "clauseo-bin/pandoc.exe");
+    assert_eq!(
+        pandoc::source_url("3.13"),
+        "https://github.com/jgm/pandoc/archive/refs/tags/3.13.tar.gz"
+    );
+}
+
+#[test]
+fn a_bad_pandoc_entry_fails() {
+    fails_with(
+        |lock| {
+            lock.pandoc.archives.remove("x86_64-apple-darwin");
+        },
+        "[pandoc.archives.x86_64-apple-darwin] is missing",
+    );
+    fails_with(
+        |lock| {
+            if let Some(archive) = lock.pandoc.archives.get_mut("aarch64-pc-windows-msvc") {
+                archive.asset = "pandoc-3.13-windows-arm64.zip".to_owned();
+            }
+        },
+        "Windows arm64 must take the x86_64 archive",
+    );
+    fails_with(
+        |lock| {
+            if let Some(archive) = lock.pandoc.archives.get_mut("aarch64-apple-darwin") {
+                archive.binary = "pandoc/../bin/pandoc".to_owned();
+            }
+        },
+        "binary `pandoc/../bin/pandoc`",
+    );
+    fails_with(
+        |lock| {
+            if let Some(archive) = lock.pandoc.archives.get_mut("aarch64-apple-darwin") {
+                archive.binary = "pandoc-3.13-arm64/bin/pandoc-server".to_owned();
+            }
+        },
+        "is not a `…/bin/pandoc` inside the archive",
+    );
+    fails_with(
+        |lock| lock.pandoc.version = "3.13-rc1".to_owned(),
+        "pandoc.version is `3.13-rc1`",
+    );
+    fails_with(
+        |lock| lock.pandoc.version = "3.12".to_owned(),
+        "but pandoc.version pins `pandoc-3.12-arm64-macOS.zip`",
+    );
+    fails_with(
+        |lock| lock.pandoc.source_sha256.clear(),
+        "pandoc.source_sha256 or source_size is missing",
+    );
+    fails_with(
+        |lock| lock.pandoc.commit = "30b1354".to_owned(),
+        "pandoc.commit is not a 40-digit",
+    );
+}
+
+#[test]
+fn notices_carry_pandoc() {
+    let (lock, text) = real_lock();
+    let file = std::fs::read_to_string(workspace_root().join(NOTICES)).expect("read the notices");
+    let line = format!("- pandoc {} (GPL-2.0-or-later)", lock.pandoc.version);
+    assert!(file.lines().any(|l| l == line), "the notices list {line}");
+    assert!(file.contains(&pandoc::source_url(&lock.pandoc.version)));
+    assert!(file.contains(&lock.pandoc.source_sha256));
+    assert!(file.contains("GNU GENERAL PUBLIC LICENSE"));
+    assert!(file.contains("The modules in the `pandoc-types` repository"));
+    let without = file.replace(&line, "- pandoc (gone)");
+    assert!(
+        notices::problems(&without, &lock, &text)
+            .iter()
+            .any(|problem| problem.contains("does not list `- pandoc"))
+    );
+    let pointer = file.replace(&pandoc::source_url(&lock.pandoc.version), "(none)");
+    assert!(
+        notices::problems(&pointer, &lock, &text)
+            .iter()
+            .any(|problem| problem.contains("pandoc's source tarball"))
+    );
+}
+
+#[test]
+fn the_pandoc_section_keeps_one_copy_of_a_text() {
+    let (lock, _) = real_lock();
+    let texts = vec![
+        (
+            "pandoc-3.13/COPYRIGHT".to_owned(),
+            "Pandoc\nterms\n".to_owned(),
+            Target::MacArm64,
+        ),
+        (
+            "pandoc-3.13/COPYRIGHT".to_owned(),
+            "Pandoc\nterms\n".to_owned(),
+            Target::WinX64,
+        ),
+        (
+            "pandoc-3.13/COPYRIGHT.txt".to_owned(),
+            "Pandoc\r\nterms\r\n".to_owned(),
+            Target::WinX64,
+        ),
+        (
+            "pandoc-3.13/COPYRIGHT.txt".to_owned(),
+            "Other terms".to_owned(),
+            Target::WinArm64,
+        ),
+    ];
+    let section = pandoc::section(&lock.pandoc, &texts);
+    assert_eq!(section.licence, "GPL-2.0-or-later");
+    assert_eq!(section.texts.len(), 2, "{:#?}", section.texts);
+    assert_eq!(section.texts[0].targets.len(), 2);
+    assert!(
+        section
+            .note
+            .contains(&pandoc::source_url(&lock.pandoc.version))
     );
 }

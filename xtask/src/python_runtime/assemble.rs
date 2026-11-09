@@ -1,5 +1,6 @@
-//! The notices `bump` writes: it unpacks PBS's archives and each wheel's `.dist-info` from the
-//! downloads (each checked against the lock's sha256 first) and reads the licence files.
+//! The notices `bump` writes: it unpacks PBS's archives, each wheel's `.dist-info` and pandoc's
+//! licence files from the downloads (each checked against the lock's sha256 first) and reads the
+//! licence files.
 
 use super::Failure;
 use super::bump::Options;
@@ -147,6 +148,13 @@ pub(crate) fn notices<W: Write>(
         }
         sections.push(section);
     }
+    let texts = super::pandoc::licence_texts(
+        &lock.pandoc,
+        &TARGETS,
+        &options.resolver,
+        &cache.join("pandoc"),
+    )?;
+    sections.push(super::pandoc::section(&lock.pandoc, &texts));
     Ok(notices::render(lock, lock_text, &sections))
 }
 

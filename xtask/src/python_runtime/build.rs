@@ -2,10 +2,12 @@
 //! on a machine of that target, from the lock's inputs only, each checked before it is read.
 //!
 //! The steps, in order (`run`):
-//! 1. inputs: PBS's `SHA256SUMS` must give the asset the lock's sha256; the asset and every wheel
-//!    are downloaded to `<out>/downloads` and must have the lock's sha256 and size; PBS's Sigstore
-//!    build attestation is checked with `gh attestation verify` (fails closed). `--download-only`
-//!    stops here, on any machine.
+//! 1. inputs: PBS's `SHA256SUMS` must give the asset the lock's sha256; the asset, every wheel,
+//!    pandoc's release archive and its source tarball are downloaded to `<out>/downloads` and
+//!    must have the lock's sha256 and size; PBS's Sigstore build attestation is checked with `gh
+//!    attestation verify`, and pandoc's archive with GitHub's release attestation (`gh release
+//!    verify-asset`, see `pandoc.rs`), both failing closed. `--download-only` stops here, on any
+//!    machine.
 //! 2. unpack PBS into `<out>/stage/python`; macOS symlinks become copies of their files, and no
 //!    symlink may remain anywhere (Clauseo's extractor skips links).
 //! 3. pip installs the wheels with the runtime's own pip: `--no-index --find-links --require-hashes
@@ -13,11 +15,14 @@
 //!    (absolute paths of this machine) are removed.
 //! 4. trim (`tree::MACOS_TRIM`, `tree::WINDOWS_TRIM`), and numpy's and pandas's own test suites
 //!    (`tree::PACKAGES_WITHOUT_TESTS`).
-//! 5. the overlay: PR 2's hook (`overlay`).
-//! 6. notices: every licence file in the runtime must be in `THIRD-PARTY-NOTICES.txt`, which is
-//!    copied to the runtime's root.
+//! 5. the overlay: PR 2's hook (`overlay`); then pandoc: only its binary, copied out of the
+//!    archive to `bin/pandoc` (macOS) or `clauseo-bin/pandoc.exe` (Windows).
+//! 6. notices: every licence file in the runtime, and pandoc's `COPYING.md` and `COPYRIGHT` from
+//!    its source tarball (and the Windows archive's `COPYRIGHT.txt`), must be in
+//!    `THIRD-PARTY-NOTICES.txt` word for word, which is copied to the runtime's root.
 //! 7. `compileall --invalidation-mode unchecked-hash`, so nothing writes `__pycache__` later.
-//! 8. the smoke test (`python-runtime/smoke/smoke.py`), which must leave the runtime unchanged.
+//! 8. the smoke test (`python-runtime/smoke/smoke.py`), which must leave the runtime unchanged; it
+//!    also runs `pandoc --version` and a .docx to Markdown and back.
 //! 9. pack a deterministic `.tar.gz` (`python-runtime/tools/pack.py`, run by the runtime itself)
 //!    and print its name, sha256, size and unpacked size, also written to `<out>/build.json`.
 
@@ -75,7 +80,7 @@ pub(crate) fn run<W: Write>(
     }
     let out_dir = absolute(&options.out)?;
     let downloads = out_dir.join("downloads");
-    let asset = inputs(lock, options, &downloads, out)?;
+    let (asset, pandoc_archive) = inputs(lock, options, &downloads, out)?;
     if options.download_only {
         out.note("build: --download-only, so it stops with the inputs checked");
         return Ok(());
@@ -138,7 +143,13 @@ pub(crate) fn run<W: Write>(
     )?);
     out.note(format!("build: trimmed {}", removed.join(", ")));
     overlay(&runtime, out);
-    ship_notices(root, &runtime)?;
+    let pandoc = super::pandoc::install(&lock.pandoc, target, &pandoc_archive, &runtime, &python)?;
+    out.note(format!(
+        "build: pandoc {} is {}",
+        lock.pandoc.version,
+        pandoc.display()
+    ));
+    ship_notices(root, lock, target, &runtime, &python, &downloads)?;
     let compile = python_cmd(
         &python,
         &[
@@ -160,7 +171,7 @@ pub(crate) fn run<W: Write>(
         "compiling the runtime's .py files",
         "read compileall's output",
     )?;
-    smoke(root, &runtime, &python, &out_dir, out)?;
+    smoke(root, lock, &runtime, &python, &out_dir, out)?;
     pack(root, lock, target, &runtime, &python, &out_dir, out)
 }
 
@@ -170,13 +181,14 @@ fn absolute(path: &Path) -> Result<PathBuf, Failure> {
         .map_err(|error| Failure::io(&format!("resolving {}", path.display()), &error))
 }
 
-/// Step 1: downloads and checks PBS's asset and the wheels. Returns the asset's file name.
+/// Step 1: downloads and checks PBS's asset, the wheels and pandoc. Returns the PBS asset's file
+/// name and the path of pandoc's archive.
 fn inputs<W: Write>(
     lock: &Lock,
     options: &Options,
     downloads: &Path,
     out: &mut Printer<W>,
-) -> Result<String, Failure> {
+) -> Result<(String, PathBuf), Failure> {
     let triple = options.target.triple();
     let pbs = lock.pbs.get(triple).ok_or_else(|| {
         Failure::new(
@@ -219,7 +231,22 @@ fn inputs<W: Write>(
         }
     }
     out.note(format!("build: every wheel for {triple} matches the lock"));
-    Ok(pbs.asset.clone())
+    let pandoc = super::pandoc::inputs(
+        &lock.pandoc,
+        options.target,
+        downloads,
+        options.no_attestation,
+    )?;
+    out.note(format!(
+        "build: pandoc {}'s archive and source tarball match the lock{}",
+        lock.pandoc.version,
+        if options.no_attestation {
+            "; --no-attestation: GitHub's release attestation was NOT checked"
+        } else {
+            ", and GitHub's release attestation of the archive holds"
+        }
+    ));
+    Ok((pbs.asset.clone(), pandoc))
 }
 
 /// A command that runs the runtime's Python isolated from the environment (`-I`), without
@@ -317,7 +344,8 @@ fn install_wheels<W: Write>(
 /// Step 5, PR 2's hook: the overlay (`sitecustomize.py`, `clauseo_pip`, the site `pip.conf`, and on
 /// Windows the `clauseo-bin` launcher) goes into `runtime` here, after the trim and before the
 /// notices, compileall and the smoke test, so its files are compiled, smoke-tested and packed
-/// like the rest. Nothing yet.
+/// like the rest. Nothing yet. `clauseo-bin` already holds `pandoc.exe` (put there right after
+/// this step), and the folder goes on PATH only inside the agent's environment.
 fn overlay<W: Write>(runtime: &Path, out: &mut Printer<W>) {
     out.note(format!(
         "build: overlay: none yet (PR 2 adds it to {})",
@@ -325,9 +353,16 @@ fn overlay<W: Write>(runtime: &Path, out: &mut Printer<W>) {
     ));
 }
 
-/// Step 6: every licence file under `runtime` must be in the notices; then the notices go to its
-/// root.
-fn ship_notices(root: &Path, runtime: &Path) -> Result<(), Failure> {
+/// Step 6: every licence file under `runtime`, and pandoc's, must be in the notices; then the
+/// notices go to its root.
+fn ship_notices(
+    root: &Path,
+    lock: &Lock,
+    target: Target,
+    runtime: &Path,
+    python: &Path,
+    downloads: &Path,
+) -> Result<(), Failure> {
     let text = std::fs::read_to_string(root.join(NOTICES))
         .map_err(|error| Failure::io(&format!("reading {NOTICES}"), &error))?;
     for (rel, kind, _) in tree::walk(runtime)? {
@@ -343,6 +378,20 @@ fn ship_notices(root: &Path, runtime: &Path) -> Result<(), Failure> {
             }
         }
     }
+    let texts = super::pandoc::licence_texts(
+        &lock.pandoc,
+        &[target],
+        &python.to_string_lossy(),
+        downloads,
+    )?;
+    for (path, body, _) in texts {
+        if !notices::covers(&text, &body) {
+            return Err(Failure::new(
+                format!("{NOTICES} does not hold pandoc's licence file {path}"),
+                "run `cargo xtask python-runtime bump` to write the notices again",
+            ));
+        }
+    }
     write::write_file_in(runtime, "THIRD-PARTY-NOTICES.txt", text.as_bytes())
         .map_err(|error| Failure::io("copying the notices into the runtime", &error))
 }
@@ -350,6 +399,7 @@ fn ship_notices(root: &Path, runtime: &Path) -> Result<(), Failure> {
 /// Step 8: the smoke test, which must not change a file of the runtime.
 fn smoke<W: Write>(
     root: &Path,
+    lock: &Lock,
     runtime: &Path,
     python: &Path,
     out_dir: &Path,
@@ -364,7 +414,13 @@ fn smoke<W: Write>(
     let cmd = python_cmd(
         python,
         &[],
-        &[&root.join(SMOKE), runtime, &root.join(SMOKE_DIR), &work],
+        &[
+            &root.join(SMOKE),
+            runtime,
+            &root.join(SMOKE_DIR),
+            &work,
+            Path::new(&lock.pandoc.version),
+        ],
         SMOKE_TIMEOUT,
     );
     let said = net::run(&cmd, out_dir, "the smoke test", "read its output above")?;

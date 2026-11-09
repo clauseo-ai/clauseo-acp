@@ -1,16 +1,19 @@
 """The smoke test of Clauseo's Python runtime, run by `cargo xtask python-runtime build` with the
 finished runtime, isolated (-I) and without writing bytecode (-B):
 
-    <runtime python> -I -B smoke.py <runtime dir> <fixtures dir> <work dir>
+    <runtime python> -I -B smoke.py <runtime dir> <fixtures dir> <work dir> <pandoc version>
 
 It checks that this is the runtime's own CPython, that every bundled package imports from the
 runtime, that what the trim removed is gone, and that each library does its job: a .docx, .xlsx and
 .pptx written and read back, the fixture PDF read with pypdf and pypdfium2, and a small pandas and
-numpy computation. It writes only into <work dir>. Any failure raises and exits non-zero.
+numpy computation. It also runs the runtime's pandoc (bin/pandoc on macOS, clauseo-bin\\pandoc.exe on
+Windows): `--version` must name <pandoc version>, and the .docx goes to Markdown and back. It
+writes only into <work dir>. Any failure raises and exits non-zero.
 """
 
 import importlib
 import os
+import subprocess
 import sys
 
 EXPECTED_VERSION = (3, 13, 18)
@@ -168,13 +171,40 @@ def numbers():
     check(str(xslt(tree)).strip().endswith("<n>2</n>"), "lxml runs XSLT (libxslt)")
 
 
+def pandoc(root, work, version):
+    import docx
+
+    exe = os.path.join(root, "clauseo-bin", "pandoc.exe") if os.name == "nt" else os.path.join(root, "bin", "pandoc")
+    check(os.path.isfile(exe), f"pandoc is at {exe}")
+
+    def run(*args):
+        done = subprocess.run([exe, *args], cwd=work, capture_output=True, text=True, timeout=120)
+        if done.returncode != 0:
+            raise SystemExit(f"smoke: FAILED: pandoc {' '.join(args)}: {done.stderr.strip()}")
+        return done.stdout
+
+    first = run("--version").splitlines()[0]
+    check(first == f"pandoc {version}", f"{first} (want pandoc {version})")
+    # smoke.docx is the file docx_roundtrip wrote with python-docx.
+    markdown = run("smoke.docx", "--from", "docx", "--to", "gfm")
+    check("The first clause." in markdown and "Acme Ltd" in markdown, "pandoc reads the .docx to Markdown")
+    with open(os.path.join(work, "smoke.md"), "w", encoding="utf-8") as out:
+        out.write(markdown)
+    run("smoke.md", "--from", "gfm", "--to", "docx", "--output", "back.docx")
+    back = docx.Document(os.path.join(work, "back.docx"))
+    texts = [p.text for p in back.paragraphs]
+    check("The first clause." in texts, "pandoc writes the Markdown back to a .docx python-docx reads")
+    check(back.tables and back.tables[0].rows[0].cells[1].text == "Acme Ltd", "the table survives the round trip")
+
+
 def main():
-    if len(sys.argv) != 4:
-        raise SystemExit("usage: smoke.py <runtime dir> <fixtures dir> <work dir>")
-    root, fixtures, work = sys.argv[1:4]
+    if len(sys.argv) != 5:
+        raise SystemExit("usage: smoke.py <runtime dir> <fixtures dir> <work dir> <pandoc version>")
+    root, fixtures, work, version = sys.argv[1:5]
     interpreter(root)
     imports(root)
     docx_roundtrip(work)
+    pandoc(root, work, version)
     xlsx_roundtrip(work)
     pptx_roundtrip(work)
     pdf_read(fixtures)
