@@ -63,7 +63,6 @@ fn a_manifest_signed_by_the_current_test_key_verifies_and_reads() {
     let pins = Pins::verify(&body, &signature, &[&test_key("a")]).unwrap();
     assert_eq!(pins.published().as_str(), "2026-11-07T06:00:00Z");
     assert_eq!(pins.version(), "157.0.8103.38");
-    assert_eq!(pins.major(), 157);
     assert_eq!(pins.run(), "1234");
     assert_eq!(
         pins.pin("chrome", "win64"),
@@ -208,7 +207,7 @@ fn unknown_fields_are_ignored() {
         without.pin("chrome-headless-shell", "linux64")
     );
     // Not the same bytes, though: one does not replace the other.
-    assert!(!accept(&without, Some(&with)));
+    assert!(!accept(&without, Some(&with), None));
 }
 
 #[test]
@@ -241,25 +240,25 @@ fn no_rollback_takes_only_a_later_manifest_with_no_lower_version() {
     let lower = check("pins-lower").unwrap();
     let equal = check("pins-equal").unwrap();
     let other_bytes = check("pins-no-extra").unwrap();
-    assert!(accept(&pins, None));
-    assert!(accept(&newer, Some(&pins)));
-    assert!(!accept(&older, Some(&pins)), "published earlier");
+    assert!(accept(&pins, None, None));
+    assert!(accept(&newer, Some(&pins), None));
+    assert!(!accept(&older, Some(&pins), None), "published earlier");
     assert!(
-        !accept(&lower, Some(&pins)),
+        !accept(&lower, Some(&pins), None),
         "a lower version, though later"
     );
     assert!(
-        !accept(&other_bytes, Some(&pins)),
+        !accept(&other_bytes, Some(&pins), None),
         "equally dated, other bytes: not newer, not the same"
     );
     assert!(
-        accept(&equal, Some(&pins)),
+        accept(&equal, Some(&pins), None),
         "the same manifest bytes under another signature"
     );
-    assert!(!accept(&pins, Some(&newer)));
+    assert!(!accept(&pins, Some(&newer), None));
     // The same bytes are taken; a heartbeat (same version, published later) too.
-    assert!(accept(&check("pins").unwrap(), Some(&pins)));
-    assert!(accept(&check("pins-heartbeat").unwrap(), Some(&pins)));
+    assert!(accept(&check("pins").unwrap(), Some(&pins), None));
+    assert!(accept(&check("pins-heartbeat").unwrap(), Some(&pins), None));
 }
 
 /// A source over `dir`'s `bundled` and `stored` folders, test key A.
@@ -309,21 +308,26 @@ fn a_mismatched_pair_on_disk_is_not_read_as_good() {
     assert_eq!(source.newest(now), None);
 }
 
+/// The clock set back: the newest copy dated over a day ahead makes the list unavailable
+/// (`BrowserListUnavailable`), never the lower bundled copy.
 #[test]
-fn a_copy_dated_over_a_day_ahead_is_set_aside() {
+fn with_the_clock_set_back_a_copy_dated_ahead_leaves_no_list_not_the_lower_one() {
     let dir = TempDir::new("pins-ahead");
     let source = source(&dir);
     put(&dir.path().join("bundled"), "pins");
     put(&dir.path().join("stored"), "pins-ahead");
     // Published 2026-11-20: more than a day ahead of the 18th, not of the 19th.
-    let pins = source.newest(at("2026-11-18T23:59:59Z")).unwrap();
-    assert_eq!(pins.version(), "157.0.8103.38");
+    assert_eq!(source.newest(at("2026-11-18T23:59:59Z")), None);
     let pins = source.newest(at("2026-11-19T00:00:00Z")).unwrap();
     assert_eq!(pins.version(), "157.0.8103.60");
     // Set aside for use on the 18th, but the no-rollback floor whatever the date.
     let floor = source.floor().unwrap();
     assert_eq!(floor.version(), "157.0.8103.60");
-    assert!(!accept(&check("pins-newer").unwrap(), Some(&floor)));
+    assert!(!accept(&check("pins-newer").unwrap(), Some(&floor), None));
+    // The bundled copy alone, dated ahead, leaves no list either.
+    let dir = TempDir::new("pins-ahead-bundled");
+    put(&dir.path().join("bundled"), "pins-ahead");
+    assert_eq!(self::source(&dir).newest(at("2026-11-18T00:00:00Z")), None);
 }
 
 #[test]
@@ -358,7 +362,8 @@ fn stored_pairs_are_written_body_first_and_read_back() {
     let dir = TempDir::new("pins-store");
     let folder = dir.path().join("deep").join("browser-pins");
     let (body, signature) = fixture("pins-newer");
-    super::store(&folder, &body, &signature).unwrap();
+    let pins = check("pins-newer").unwrap();
+    super::store(&folder, &pins, &body, &signature).unwrap();
     assert_eq!(std::fs::read(folder.join(MANIFEST_FILE)).unwrap(), body);
     assert_eq!(
         std::fs::read(folder.join(SIGNATURE_FILE)).unwrap(),
@@ -415,3 +420,5 @@ fn a_legacy_signature_is_refused() {
     assert!(check("pins").is_ok());
     assert_eq!(fixture("pins-legacy").0, fixture("pins").0);
 }
+
+mod floor;

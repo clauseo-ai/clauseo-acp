@@ -1,10 +1,13 @@
-//! Which Chrome, with one fixture folder per case of S27's "Which Chrome" (done when, item 1).
+//! Which Chrome, with one fixture folder per case of S27's "Which Chrome" (done when, item 1)
+//! and of decision record 0029's launch checks: the exact pinned version only, its folder
+//! against its install record, and never a Chrome installed on the machine.
 
 use std::path::{Path, PathBuf};
 
 use clauseo_protocol::ToolsUnavailableReason;
 
-use super::{ChromeRoots, EDGE_ALLOWED, Picked, Platform, find, find_checked, find_with, version};
+use super::{ChromeRoots, Picked, Platform, find_checked, version};
+use crate::browser::install::record;
 use crate::browser::pins::Pins;
 use crate::pipeline::tests::support::TempDir;
 use crate::write;
@@ -14,247 +17,36 @@ fn roots(dir: &Path, platform: Platform) -> ChromeRoots {
     ChromeRoots {
         platform,
         root: dir.join("root"),
-        home: Some(dir.join("home")),
-        program_files: Some(dir.join("pf")),
-        program_files_x86: Some(dir.join("pf86")),
-        local_app_data: Some(dir.join("local")),
         app_data: dir.join("app"),
     }
 }
 
-/// Makes an empty file at `dir/relative` and returns its path.
-fn touch(dir: &Path, relative: &str) -> PathBuf {
+/// Makes a file at `dir/relative` holding `bytes` and returns its path.
+fn put(dir: &Path, relative: &str, bytes: &[u8]) -> PathBuf {
     let path = relative
         .split('/')
         .fold(dir.to_owned(), |path, part| path.join(part));
     write::create_dir_all(path.parent().unwrap()).unwrap();
-    write::write_file(&path, b"").unwrap();
+    write::write_file(&path, bytes).unwrap();
     path
+}
+
+/// Makes an empty file at `dir/relative` and returns its path.
+fn touch(dir: &Path, relative: &str) -> PathBuf {
+    put(dir, relative, b"")
 }
 
 const MAC_CHROME: &str = "Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const WIN_CHROME: &str = "Google/Chrome/Application/chrome.exe";
-const WIN_EDGE: &str = "Microsoft/Edge/Application/msedge.exe";
 const CFT_MAC_ARM: &str =
     "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing";
 const CFT_WIN: &str = "chrome-win64/chrome.exe";
 
-#[test]
-fn installed_chrome_wins_on_mac_over_home_and_chrome_for_testing() {
-    let dir = TempDir::new("chrome-mac-installed");
-    let system = touch(&dir.path().join("root"), MAC_CHROME);
-    touch(&dir.path().join("home"), MAC_CHROME);
-    touch(
-        dir.path(),
-        &format!("app/browsers/chrome-131.0.1/{CFT_MAC_ARM}"),
-    );
-    assert_eq!(find(&roots(dir.path(), Platform::MacArm64)), Some(system));
-}
+/// The version every pin here names.
+const PINNED: &str = "157.0.8103.38";
 
-#[test]
-fn mac_home_applications_comes_second() {
-    let dir = TempDir::new("chrome-mac-home");
-    let home = touch(&dir.path().join("home"), MAC_CHROME);
-    touch(
-        dir.path(),
-        &format!("app/browsers/chrome-131.0.1/{CFT_MAC_ARM}"),
-    );
-    assert_eq!(find(&roots(dir.path(), Platform::MacArm64)), Some(home));
-}
-
-#[test]
-fn windows_chrome_in_program_files_order() {
-    let dir = TempDir::new("chrome-win-order");
-    touch(&dir.path().join("local"), WIN_CHROME);
-    let x86 = touch(&dir.path().join("pf86"), WIN_CHROME);
-    assert_eq!(find(&roots(dir.path(), Platform::WindowsX64)), Some(x86));
-    let pf = touch(&dir.path().join("pf"), WIN_CHROME);
-    assert_eq!(find(&roots(dir.path(), Platform::WindowsX64)), Some(pf));
-}
-
-#[test]
-fn windows_local_app_data_chrome() {
-    let dir = TempDir::new("chrome-win-local");
-    let local = touch(&dir.path().join("local"), WIN_CHROME);
-    assert_eq!(find(&roots(dir.path(), Platform::WindowsX64)), Some(local));
-}
-
-#[test]
-fn edge_is_used_only_when_allowed() {
-    const { assert!(!EDGE_ALLOWED, "Edge waits for G17 item 4") };
-    let dir = TempDir::new("chrome-win-edge");
-    let edge = touch(&dir.path().join("pf86"), WIN_EDGE);
-    touch(&dir.path().join("pf"), WIN_EDGE);
-    for platform in [Platform::WindowsX64, Platform::WindowsArm64] {
-        let roots = roots(dir.path(), platform);
-        assert_eq!(find(&roots), None, "{platform:?}: Edge while not allowed");
-        assert_eq!(find_with(&roots, true), Some(edge.clone()), "{platform:?}");
-    }
-    // Chrome still comes before an allowed Edge.
-    let chrome = touch(&dir.path().join("local"), WIN_CHROME);
-    assert_eq!(
-        find_with(&roots(dir.path(), Platform::WindowsX64), true),
-        Some(chrome)
-    );
-}
-
-#[test]
-fn edge_is_never_looked_for_on_mac() {
-    let dir = TempDir::new("chrome-mac-no-edge");
-    touch(&dir.path().join("pf86"), WIN_EDGE);
-    assert_eq!(find_with(&roots(dir.path(), Platform::MacX64), true), None);
-}
-
-#[test]
-fn chrome_for_testing_highest_version_wins() {
-    let dir = TempDir::new("chrome-cft-version");
-    touch(
-        dir.path(),
-        &format!("app/browsers/chrome-99.0.9999.1/{CFT_WIN}"),
-    );
-    let newest = touch(
-        dir.path(),
-        &format!("app/browsers/chrome-131.0.6778.85/{CFT_WIN}"),
-    );
-    touch(
-        dir.path(),
-        &format!("app/browsers/chrome-130.9.1/{CFT_WIN}"),
-    );
-    // A higher version without its binary, and folders that are no version, are passed over.
-    write::create_dir_all(&dir.path().join("app/browsers/chrome-200.0.0.0")).unwrap();
-    touch(dir.path(), &format!("app/browsers/chrome-latest/{CFT_WIN}"));
-    touch(dir.path(), &format!("app/browsers/other-300.0/{CFT_WIN}"));
-    assert_eq!(find(&roots(dir.path(), Platform::WindowsX64)), Some(newest));
-}
-
-#[test]
-fn chrome_for_testing_layout_per_platform() {
-    let dir = TempDir::new("chrome-cft-layout");
-    let arm = touch(
-        dir.path(),
-        &format!("app/browsers/chrome-131.0.1/{CFT_MAC_ARM}"),
-    );
-    assert_eq!(find(&roots(dir.path(), Platform::MacArm64)), Some(arm));
-    // The arm64 zip's layout is not the x64 one.
-    assert_eq!(find(&roots(dir.path(), Platform::MacX64)), None);
-    let x64 = touch(
-        dir.path(),
-        "app/browsers/chrome-131.0.1/chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
-    );
-    assert_eq!(find(&roots(dir.path(), Platform::MacX64)), Some(x64));
-}
-
-#[test]
-fn windows_arm64_skips_chrome_for_testing() {
-    let dir = TempDir::new("chrome-win-arm64");
-    touch(
-        dir.path(),
-        &format!("app/browsers/chrome-131.0.1/{CFT_WIN}"),
-    );
-    assert_eq!(find(&roots(dir.path(), Platform::WindowsArm64)), None);
-    assert!(find(&roots(dir.path(), Platform::WindowsX64)).is_some());
-    // Installed Chrome still serves ARM64.
-    let chrome = touch(&dir.path().join("pf"), WIN_CHROME);
-    assert_eq!(
-        find(&roots(dir.path(), Platform::WindowsArm64)),
-        Some(chrome)
-    );
-}
-
-#[test]
-fn nothing_found_is_none() {
-    let dir = TempDir::new("chrome-none");
-    for platform in [
-        Platform::MacArm64,
-        Platform::MacX64,
-        Platform::WindowsX64,
-        Platform::WindowsArm64,
-        Platform::Linux,
-        Platform::Other,
-    ] {
-        assert_eq!(find(&roots(dir.path(), platform)), None, "{platform:?}");
-    }
-}
-
-#[test]
-fn linux_google_chrome_then_chromium() {
-    let dir = TempDir::new("chrome-linux");
-    let chromium = touch(&dir.path().join("root"), "usr/bin/chromium");
-    assert_eq!(find(&roots(dir.path(), Platform::Linux)), Some(chromium));
-    let chrome = touch(&dir.path().join("root"), "usr/bin/google-chrome");
-    assert_eq!(find(&roots(dir.path(), Platform::Linux)), Some(chrome));
-}
-
-#[test]
-fn a_folder_where_the_binary_should_be_is_not_chrome() {
-    let dir = TempDir::new("chrome-folder");
-    write::create_dir_all(
-        &dir.path()
-            .join("pf")
-            .join("Google/Chrome/Application/chrome.exe"),
-    )
-    .unwrap();
-    assert_eq!(find(&roots(dir.path(), Platform::WindowsX64)), None);
-}
-
-#[test]
-fn versions_compare_by_number() {
-    assert!(version("131.0.6778.85") > version("99.0.9999.1"));
-    assert_eq!(version("1.2"), Some(vec![1, 2]));
-    for bad in ["", "1..2", "1.x", "v1", "1.2 ", "-1"] {
-        assert_eq!(version(bad), None, "{bad:?}");
-    }
-}
-
-#[test]
-fn windows_installed_chrome_beats_chrome_for_testing() {
-    let dir = TempDir::new("chrome-win-installed-cft");
-    touch(
-        dir.path(),
-        &format!("app/browsers/chrome-131.0.1/{CFT_WIN}"),
-    );
-    let chrome = touch(&dir.path().join("local"), WIN_CHROME);
-    assert_eq!(find(&roots(dir.path(), Platform::WindowsX64)), Some(chrome));
-}
-
-#[test]
-fn an_allowed_edge_beats_chrome_for_testing() {
-    let dir = TempDir::new("chrome-win-edge-cft");
-    touch(
-        dir.path(),
-        &format!("app/browsers/chrome-131.0.1/{CFT_WIN}"),
-    );
-    let edge = touch(&dir.path().join("pf"), WIN_EDGE);
-    let roots = roots(dir.path(), Platform::WindowsX64);
-    assert_eq!(find_with(&roots, true), Some(edge));
-    assert_ne!(find(&roots), find_with(&roots, true));
-}
-
-/// A link in the browsers folder picks nothing: a linked version folder, or a binary linked to a
-/// program outside the folder.
-#[cfg(unix)]
-#[test]
-fn a_link_in_the_browsers_folder_is_passed_over() {
-    let dir = TempDir::new("chrome-cft-links");
-    let real = touch(
-        dir.path(),
-        &format!("app/browsers/chrome-131.0.1/{CFT_WIN}"),
-    );
-    let elsewhere = touch(dir.path(), &format!("outside/chrome-999.0/{CFT_WIN}"));
-    write::symlink(
-        &dir.path().join("outside/chrome-999.0"),
-        &dir.path().join("app/browsers/chrome-999.0"),
-    )
-    .unwrap();
-    write::create_dir_all(&dir.path().join("app/browsers/chrome-500.0/chrome-win64")).unwrap();
-    write::symlink(
-        &elsewhere,
-        &dir.path()
-            .join(format!("app/browsers/chrome-500.0/{CFT_WIN}")),
-    )
-    .unwrap();
-    assert_eq!(find(&roots(dir.path(), Platform::WindowsX64)), Some(real));
-}
+/// The zip sha256 the records here carry: never compared at launch.
+const ZIP_SHA: &str = "ae0deef27d449e1d7529df7705d609bab102de48464da13567ed3dd2ee1a0586";
 
 /// Two days after [`pins`]' date.
 fn now() -> clauseo_protocol::Timestamp {
@@ -266,90 +58,180 @@ fn pins(version: &str) -> Pins {
     Pins::for_tests("2026-11-07T06:00:00Z", version, &[])
 }
 
+/// The date [`pins`] carry.
+fn published() -> clauseo_blocklist::Generated {
+    clauseo_blocklist::Generated::parse("2026-11-07T06:00:00Z").unwrap()
+}
+
+/// Installs a fake Chrome for Testing of `version` for `platform` under `dir/app`, as the
+/// download leaves it: the binary, a library and a resource, and its install record. Returns
+/// the binary's path.
+fn install(dir: &Path, platform: Platform, version: &str) -> PathBuf {
+    let binary = match platform {
+        Platform::MacArm64 => CFT_MAC_ARM,
+        Platform::MacX64
+        | Platform::WindowsX64
+        | Platform::WindowsArm64
+        | Platform::Linux
+        | Platform::Other => CFT_WIN,
+    };
+    let folder = dir.join("app/browsers").join(format!("chrome-{version}"));
+    let path = put(&folder, binary, b"the browser");
+    let top = binary.split('/').next().unwrap();
+    put(&folder, &format!("{top}/libGLESv2.dll"), b"a library");
+    put(&folder, &format!("{top}/resources.pak"), b"resources");
+    let name = platform.cft_name().unwrap();
+    record::write(&dir.join("app"), name, version, ZIP_SHA, &folder).unwrap();
+    path
+}
+
 #[test]
-fn a_downloaded_chrome_one_major_behind_the_pins_is_taken_two_behind_refused() {
-    let dir = TempDir::new("chrome-checked-cft");
+fn the_pinned_chrome_for_testing_that_matches_its_record_is_picked() {
+    for platform in [Platform::WindowsX64, Platform::MacArm64] {
+        let dir = TempDir::new("chrome-pinned");
+        let binary = install(dir.path(), platform, PINNED);
+        assert_eq!(
+            find_checked(&roots(dir.path(), platform), now(), || Some(pins(PINNED))),
+            Ok(Picked {
+                path: binary,
+                pins_published: Some(published()),
+            }),
+            "{platform:?}"
+        );
+    }
+}
+
+#[test]
+fn a_folder_above_the_pin_is_refused() {
+    let dir = TempDir::new("chrome-above-pin");
     let roots = roots(dir.path(), Platform::WindowsX64);
-    let cft = touch(
-        dir.path(),
-        &format!("app/browsers/chrome-156.0.7000.1/{CFT_WIN}"),
-    );
+    install(dir.path(), Platform::WindowsX64, "158.0.1.1");
     assert_eq!(
-        find_checked(&roots, now(), || Some(pins("157.0.8103.38"))),
-        Ok(Picked {
-            path: cft.clone(),
-            pins_published: Some(
-                clauseo_blocklist::Generated::parse("2026-11-07T06:00:00Z").unwrap()
-            ),
-        })
-    );
-    assert_eq!(
-        find_checked(&roots, now(), || Some(pins("156.0.1.1"))).map(|picked| picked.path),
-        Ok(cft)
-    );
-    assert_eq!(
-        find_checked(&roots, now(), || Some(pins("158.0.1.1"))),
+        find_checked(&roots, now(), || Some(pins(PINNED))),
         Err(ToolsUnavailableReason::BrowserOutOfDate)
     );
-    let dir = TempDir::new("chrome-checked-old");
-    let roots = self::roots(dir.path(), Platform::MacArm64);
-    touch(
-        dir.path(),
-        &format!("app/browsers/chrome-155.0.1.1/{CFT_MAC_ARM}"),
-    );
+    // With the pinned one beside it, the pinned one is picked, never the higher.
+    let pinned = install(dir.path(), Platform::WindowsX64, PINNED);
     assert_eq!(
-        find_checked(&roots, now(), || Some(pins("157.0.8103.38"))),
+        find_checked(&roots, now(), || Some(pins(PINNED))).map(|picked| picked.path),
+        Ok(pinned)
+    );
+}
+
+#[test]
+fn the_whole_version_is_judged_not_the_major() {
+    let dir = TempDir::new("chrome-full-version");
+    let roots = roots(dir.path(), Platform::WindowsX64);
+    // The same major, one build off, below and above: neither is the pin.
+    for version in [
+        "157.0.8103.37",
+        "157.0.8103.39",
+        "157.0.8103.38.0",
+        "156.0.7000.1",
+    ] {
+        install(dir.path(), Platform::WindowsX64, version);
+    }
+    assert_eq!(
+        find_checked(&roots, now(), || Some(pins(PINNED))),
         Err(ToolsUnavailableReason::BrowserOutOfDate)
     );
-    // The highest version folder is the one judged.
+}
+
+#[test]
+fn a_swapped_main_binary_is_refused() {
+    let dir = TempDir::new("chrome-swapped");
+    let roots = roots(dir.path(), Platform::WindowsX64);
+    let binary = install(dir.path(), Platform::WindowsX64, PINNED);
+    // The same size, other bytes: only the hash tells.
+    write::write_file(&binary, b"the program").unwrap();
+    assert_eq!(
+        find_checked(&roots, now(), || Some(pins(PINNED))),
+        Err(ToolsUnavailableReason::BrowserNotInstalled)
+    );
+    // Another size: the listing tells.
+    write::write_file(&binary, b"another program").unwrap();
+    assert_eq!(
+        find_checked(&roots, now(), || Some(pins(PINNED))),
+        Err(ToolsUnavailableReason::BrowserNotInstalled)
+    );
+}
+
+#[test]
+fn an_added_file_is_refused() {
+    let dir = TempDir::new("chrome-added");
+    let roots = roots(dir.path(), Platform::WindowsX64);
+    install(dir.path(), Platform::WindowsX64, PINNED);
     touch(
         dir.path(),
-        &format!("app/browsers/chrome-157.0.8103.38/{CFT_MAC_ARM}"),
+        &format!("app/browsers/chrome-{PINNED}/chrome-win64/version.dll"),
     );
-    assert!(find_checked(&roots, now(), || Some(pins("157.0.8103.38"))).is_ok());
+    assert_eq!(
+        find_checked(&roots, now(), || Some(pins(PINNED))),
+        Err(ToolsUnavailableReason::BrowserNotInstalled)
+    );
+}
+
+#[test]
+fn a_removed_file_is_refused() {
+    let dir = TempDir::new("chrome-removed");
+    let roots = roots(dir.path(), Platform::WindowsX64);
+    install(dir.path(), Platform::WindowsX64, PINNED);
+    let folder = dir
+        .path()
+        .join(format!("app/browsers/chrome-{PINNED}/chrome-win64"));
+    write::remove_file(&folder.join("resources.pak")).unwrap();
+    assert_eq!(
+        find_checked(&roots, now(), || Some(pins(PINNED))),
+        Err(ToolsUnavailableReason::BrowserNotInstalled)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_changed_mode_is_refused() {
+    let dir = TempDir::new("chrome-mode");
+    let roots = roots(dir.path(), Platform::WindowsX64);
+    let binary = install(dir.path(), Platform::WindowsX64, PINNED);
+    write::set_mode(&binary, 0o4755).unwrap();
+    assert_eq!(
+        find_checked(&roots, now(), || Some(pins(PINNED))),
+        Err(ToolsUnavailableReason::BrowserNotInstalled)
+    );
+}
+
+#[test]
+fn a_pinned_folder_without_its_record_or_with_another_versions_is_refused() {
+    let dir = TempDir::new("chrome-no-record");
+    let roots = roots(dir.path(), Platform::WindowsX64);
+    touch(
+        dir.path(),
+        &format!("app/browsers/chrome-{PINNED}/{CFT_WIN}"),
+    );
+    assert_eq!(
+        find_checked(&roots, now(), || Some(pins(PINNED))),
+        Err(ToolsUnavailableReason::BrowserNotInstalled)
+    );
+    // The record names the version installed last; the pinned folder is not it.
+    install(dir.path(), Platform::WindowsX64, "156.0.7000.1");
+    assert_eq!(
+        find_checked(&roots, now(), || Some(pins(PINNED))),
+        Err(ToolsUnavailableReason::BrowserNotInstalled)
+    );
+    // An unreadable record refuses too.
+    write::write_file(&record::record_path(&dir.path().join("app")), b"{").unwrap();
+    assert_eq!(
+        find_checked(&roots, now(), || Some(pins("156.0.7000.1"))),
+        Err(ToolsUnavailableReason::BrowserNotInstalled)
+    );
 }
 
 #[test]
 fn a_downloaded_chrome_without_verified_pins_is_list_unavailable() {
     let dir = TempDir::new("chrome-checked-no-pins");
-    let roots = roots(dir.path(), Platform::WindowsX64);
-    touch(
-        dir.path(),
-        &format!("app/browsers/chrome-157.0.8103.38/{CFT_WIN}"),
-    );
+    install(dir.path(), Platform::WindowsX64, PINNED);
     assert_eq!(
-        find_checked(&roots, now(), || None),
+        find_checked(&roots(dir.path(), Platform::WindowsX64), now(), || None),
         Err(ToolsUnavailableReason::BrowserListUnavailable)
-    );
-}
-
-#[test]
-fn installed_chrome_is_never_judged_by_the_pins() {
-    let dir = TempDir::new("chrome-checked-system");
-    let roots = roots(dir.path(), Platform::WindowsX64);
-    touch(
-        dir.path(),
-        &format!("app/browsers/chrome-100.0.1.1/{CFT_WIN}"),
-    );
-    let system = touch(&dir.path().join("pf"), WIN_CHROME);
-    let picked = |pins: Option<Pins>| find_checked(&roots, now(), move || pins);
-    let never = Picked {
-        path: system,
-        pins_published: None,
-    };
-    assert_eq!(picked(None), Ok(never.clone()));
-    assert_eq!(picked(Some(pins("157.0.8103.38"))), Ok(never));
-    // And the pins are not even read.
-    assert!(find_checked(&roots, now(), || panic!("read the pins")).is_ok());
-}
-
-#[test]
-fn nothing_found_is_not_installed_whatever_the_pins() {
-    let dir = TempDir::new("chrome-checked-none");
-    let roots = roots(dir.path(), Platform::MacArm64);
-    assert_eq!(
-        find_checked(&roots, now(), || Some(pins("157.0.8103.38"))),
-        Err(ToolsUnavailableReason::BrowserNotInstalled)
     );
 }
 
@@ -358,29 +240,143 @@ fn a_downloaded_chrome_under_a_list_over_45_days_old_is_expired() {
     use crate::browser::pins::tests::at;
     let dir = TempDir::new("chrome-checked-expired");
     let roots = roots(dir.path(), Platform::WindowsX64);
-    touch(
-        dir.path(),
-        &format!("app/browsers/chrome-157.0.8103.38/{CFT_WIN}"),
-    );
+    install(dir.path(), Platform::WindowsX64, PINNED);
     // The pins are dated 2026-11-07T06:00:00Z. 44 days: offered, with the old list's date.
-    let picked = find_checked(&roots, at("2026-12-21T06:00:00Z"), || {
-        Some(pins("157.0.8103.38"))
-    });
+    let picked = find_checked(&roots, at("2026-12-21T06:00:00Z"), || Some(pins(PINNED)));
     assert!(picked.unwrap().pins_published.is_some());
     // 46 days: refused, even at the pinned version.
     assert_eq!(
-        find_checked(&roots, at("2026-12-23T06:00:00Z"), || Some(pins(
-            "157.0.8103.38"
-        ))),
+        find_checked(&roots, at("2026-12-23T06:00:00Z"), || Some(pins(PINNED))),
         Err(ToolsUnavailableReason::BrowserListExpired)
     );
-    // Installed Chrome is never judged, however old the list.
-    let system = touch(&dir.path().join("pf"), WIN_CHROME);
+}
+
+#[test]
+fn chrome_or_edge_installed_on_the_machine_is_never_picked() {
+    let dir = TempDir::new("chrome-installed-never");
+    let root = dir.path().join("root");
+    touch(&root, MAC_CHROME);
+    touch(&root, WIN_CHROME);
+    touch(&root, &format!("Program Files/{WIN_CHROME}"));
+    for platform in [
+        Platform::MacArm64,
+        Platform::MacX64,
+        Platform::WindowsX64,
+        Platform::WindowsArm64,
+    ] {
+        let roots = roots(dir.path(), platform);
+        assert_eq!(
+            find_checked(&roots, now(), || panic!("read the pins")),
+            Err(ToolsUnavailableReason::BrowserNotInstalled),
+            "{platform:?}"
+        );
+    }
+}
+
+#[test]
+fn nothing_downloaded_is_not_installed_and_reads_no_pins() {
+    let dir = TempDir::new("chrome-checked-none");
+    for platform in [
+        Platform::MacArm64,
+        Platform::MacX64,
+        Platform::WindowsX64,
+        Platform::WindowsArm64,
+        Platform::Other,
+    ] {
+        assert_eq!(
+            find_checked(&roots(dir.path(), platform), now(), || panic!(
+                "read the pins"
+            )),
+            Err(ToolsUnavailableReason::BrowserNotInstalled),
+            "{platform:?}"
+        );
+    }
+}
+
+#[test]
+fn windows_arm64_gets_no_chrome_for_testing() {
+    let dir = TempDir::new("chrome-win-arm64");
+    install(dir.path(), Platform::WindowsX64, PINNED);
     assert_eq!(
-        find_checked(&roots, at("2027-06-01T00:00:00Z"), || Some(pins(
-            "157.0.8103.38"
-        )))
-        .map(|picked| picked.path),
-        Ok(system)
+        find_checked(&roots(dir.path(), Platform::WindowsArm64), now(), || Some(
+            pins(PINNED)
+        )),
+        Err(ToolsUnavailableReason::BrowserNotInstalled)
+    );
+}
+
+#[test]
+fn the_mac_layout_is_per_platform() {
+    let dir = TempDir::new("chrome-cft-layout");
+    install(dir.path(), Platform::MacArm64, PINNED);
+    // The arm64 zip's layout is not the x64 one, and the record names arm64.
+    assert_eq!(
+        find_checked(&roots(dir.path(), Platform::MacX64), now(), || Some(pins(
+            PINNED
+        ))),
+        Err(ToolsUnavailableReason::BrowserNotInstalled)
+    );
+}
+
+/// Linux, development and CI only: the system's Google Chrome, then Chromium, unpinned.
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_takes_google_chrome_then_chromium_unpinned() {
+    let dir = TempDir::new("chrome-linux");
+    let roots = roots(dir.path(), Platform::Linux);
+    let none = || -> Option<Pins> { panic!("read the pins") };
+    assert_eq!(
+        find_checked(&roots, now(), none),
+        Err(ToolsUnavailableReason::BrowserNotInstalled)
+    );
+    let chromium = touch(&dir.path().join("root"), "usr/bin/chromium");
+    let picked = |path| Picked {
+        path,
+        pins_published: None,
+    };
+    assert_eq!(find_checked(&roots, now(), none), Ok(picked(chromium)));
+    let chrome = touch(&dir.path().join("root"), "usr/bin/google-chrome");
+    assert_eq!(find_checked(&roots, now(), none), Ok(picked(chrome)));
+}
+
+#[test]
+fn versions_compare_by_number() {
+    assert!(version("131.0.6778.85") > version("99.0.9999.1"));
+    assert_eq!(version("1.2"), Some(vec![1, 2]));
+    for bad in ["", "1..2", "1.x", "v1", "1.2 ", "-1"] {
+        assert_eq!(version(bad), None, "{bad:?}");
+    }
+}
+
+/// A link in the browsers folder picks nothing: a linked version folder, or a binary linked to a
+/// program outside the folder.
+#[cfg(unix)]
+#[test]
+fn a_link_in_the_browsers_folder_is_passed_over() {
+    let dir = TempDir::new("chrome-cft-links");
+    let roots = roots(dir.path(), Platform::WindowsX64);
+    // A pinned folder that is a link to a real install elsewhere.
+    let elsewhere = TempDir::new("chrome-cft-links-elsewhere");
+    install(elsewhere.path(), Platform::WindowsX64, PINNED);
+    write::create_dir_all(&dir.path().join("app/browsers")).unwrap();
+    write::symlink(
+        &elsewhere
+            .path()
+            .join(format!("app/browsers/chrome-{PINNED}")),
+        &dir.path().join(format!("app/browsers/chrome-{PINNED}")),
+    )
+    .unwrap();
+    assert_eq!(
+        find_checked(&roots, now(), || panic!("read the pins")),
+        Err(ToolsUnavailableReason::BrowserNotInstalled)
+    );
+    // A binary swapped for a link to a program outside.
+    let binary = install(dir.path(), Platform::WindowsX64, "1.0");
+    write::remove_file(&binary).unwrap();
+    let outside = touch(dir.path(), "outside/chrome.exe");
+    write::symlink(&outside, &binary).unwrap();
+    assert_eq!(
+        find_checked(&roots, now(), || Some(pins("1.0"))),
+        Err(ToolsUnavailableReason::BrowserNotInstalled)
     );
 }

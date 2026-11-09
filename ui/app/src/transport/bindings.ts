@@ -533,7 +533,8 @@ export type BlockedSiteId = string;
 export type BrowserInstallFailure = 
 /**
  *  The network failed: curl could not connect, the server answered an error, or the
- *  transfer stalled (slower than 1 byte a second for 60 s).
+ *  transfer stalled (slower than 1 byte a second for 60 s); or the proxy the download
+ *  goes through (the firm's `network.upstream_proxy`, else the system's) was refused.
  */
 "network" | 
 /**
@@ -552,7 +553,8 @@ export type BrowserInstallFailure =
 "signature" | 
 /**
  *  The zip did not unpack, held an entry that would land outside its folder or lacked
- *  the browser, or a folder in the app data folder could not be written.
+ *  the browser, or a folder in the app data folder, or the record of what was
+ *  installed, could not be written.
  */
 "unpack" | 
 /**
@@ -5835,7 +5837,13 @@ export type ToolsUnavailableReason =
 "managed_by_firm" | 
 /**  The browser only: no egress proxy for this session. */
 "no_proxy" | 
-/**  The browser only: no browser is installed. */
+/**
+ *  The browser only: no Chrome for Testing that Clauseo downloaded is there, or the one
+ *  at the pinned version no longer matches the record of what the download installed
+ *  (a file added, removed or changed); the app offers the download either way. A Chrome
+ *  or Edge installed on the machine is never used. (On Linux, development only: no
+ *  Google Chrome or Chromium.)
+ */
 "browser_not_installed" | 
 /**
  *  The browser only: the machine already runs as many browser sessions as its memory
@@ -5859,23 +5867,23 @@ export type ToolsUnavailableReason =
  */
 "browser_policy_unreadable" | 
 /**
- *  The browser only: the Chrome for Testing Clauseo downloaded is more than one major
- *  version behind the version Clauseo's signed browser list pins; the app offers the
- *  download, which fetches the pinned version. Chrome installed on the machine is never
- *  judged so.
+ *  The browser only: no Chrome for Testing Clauseo downloaded is exactly the version
+ *  Clauseo's signed browser list pins (each is older, or newer); the app offers the
+ *  download, which fetches the pinned version.
  */
 "browser_out_of_date" | 
 /**
- *  The browser only: a Chrome for Testing Clauseo downloaded is the browser, and no
- *  signed browser list verifies (neither the bundled one nor a fetched one), so its
- *  version cannot be checked.
+ *  The browser only: a Chrome for Testing Clauseo downloaded is there, and no signed
+ *  browser list can be used, so its version cannot be checked: none verifies (neither
+ *  the bundled one nor a fetched one), the newest is dated over a day ahead of this
+ *  computer's clock, or the stored one stopped verifying and none as new as it has
+ *  been fetched again yet.
  */
 "browser_list_unavailable" | 
 /**
  *  The browser only: a Chrome for Testing Clauseo downloaded is the browser, and the
  *  newest signed browser list Clauseo has was published over 45 days ago, so its copy
- *  of Chrome is too old to use, and Clauseo can't update it right now. Chrome
- *  installed on the machine is never judged so.
+ *  of Chrome is too old to use, and Clauseo can't update it right now.
  */
 "browser_list_expired" | 
 /**  A value from a newer Clauseo that this version does not know. */

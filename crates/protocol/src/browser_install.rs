@@ -42,7 +42,8 @@ open_unit_enum! {
     /// never from `message`.
     pub enum BrowserInstallFailure {
         /// The network failed: curl could not connect, the server answered an error, or the
-        /// transfer stalled (slower than 1 byte a second for 60 s).
+        /// transfer stalled (slower than 1 byte a second for 60 s); or the proxy the download
+        /// goes through (the firm's `network.upstream_proxy`, else the system's) was refused.
         Network,
         /// The zip's size did not match its `Content-Length` or the size the signed browser list
         /// pins, the response had none, or it was larger than the pinned size.
@@ -55,7 +56,8 @@ open_unit_enum! {
         /// Chrome's code signature did not check out (only while the host requires it).
         Signature,
         /// The zip did not unpack, held an entry that would land outside its folder or lacked
-        /// the browser, or a folder in the app data folder could not be written.
+        /// the browser, or a folder in the app data folder, or the record of what was
+        /// installed, could not be written.
         Unpack,
         /// This machine gets no Chrome for Testing download: Linux, Windows on ARM64, or a
         /// system tool the download needs is missing.

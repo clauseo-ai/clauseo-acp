@@ -190,7 +190,7 @@ fn the_live_manifest_is_fetched_verified_and_read() {
         pins::expired(pins.published(), now),
         pins::notice(pins.published(), now)
     );
-    assert!(pins::accept(&pins, None));
+    assert!(pins::accept(&pins, None, None));
     assert!(!pins.is_ahead_of(now));
     assert!(!pins::expired(pins.published(), now));
     assert_eq!(

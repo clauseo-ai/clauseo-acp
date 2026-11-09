@@ -9,13 +9,14 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use clauseo_host::browser::chrome::{self, ChromeRoots, Platform};
-use clauseo_host::browser::install::{Cancel, Failure, InstallTools};
+use clauseo_host::browser::chrome::{ChromeRoots, Platform};
+use clauseo_host::browser::install::{Cancel, Failure, InstallTools, record};
 use clauseo_host::{AppSubscription, BrowserPins, HostConfig};
 use clauseo_protocol::{
     BrowserInstallFailure, BrowserInstallState, CommandOutcome, Count, HostCommand, HostEvent,
     Principal,
 };
+use clauseo_sandbox::Route;
 use futures::StreamExt as _;
 
 use crate::support::{Dir, Running, wait};
@@ -102,6 +103,7 @@ impl InstallTools for Fake {
     fn download(
         &self,
         url: &str,
+        _route: &Route,
         zip: &Path,
         max_bytes: u64,
         cancel: &Cancel,
@@ -155,12 +157,31 @@ pub(super) fn roots(dir: &Dir) -> ChromeRoots {
     ChromeRoots {
         platform: Platform::MacArm64,
         root: data.join("root"),
-        home: None,
-        program_files: None,
-        program_files_x86: None,
-        local_app_data: None,
         app_data: data.join("app"),
     }
+}
+
+/// Puts a Chrome for Testing of `pins-131`'s version (131.0.6778.85) for `platform` under
+/// `app` as the download leaves it, its install record included, and returns its binary.
+pub(crate) fn put_chrome_for_testing(app: &Path, platform: Platform) -> PathBuf {
+    let version = "131.0.6778.85";
+    let folder = app.join("browsers").join(format!("chrome-{version}"));
+    let binary = match platform {
+        Platform::MacArm64 => MAC_BINARY,
+        Platform::MacX64
+        | Platform::WindowsX64
+        | Platform::WindowsArm64
+        | Platform::Linux
+        | Platform::Other => "chrome-win64/chrome.exe",
+    };
+    let binary: PathBuf = binary
+        .split('/')
+        .fold(folder.clone(), |path, part| path.join(part));
+    write::create_dir_all(binary.parent().unwrap());
+    write::write(&binary, b"chrome");
+    let name = platform.cft_name().unwrap();
+    record::write(app, name, version, &"0".repeat(64), &folder).unwrap();
+    binary
 }
 
 /// Starts a host on `dir` with `tools`, [`roots`] and [`pins`].
@@ -251,7 +272,14 @@ fn a_download_reaches_the_app_and_the_next_search_finds_it() {
             .join("chrome-131.0.6778.85"),
         |path, part| path.join(part),
     );
-    assert_eq!(chrome::find(&roots(&dir)), Some(binary));
+    assert!(binary.is_file());
+    // The install record is in place: the launch's check takes the folder.
+    let folder = dir.data().join("app/browsers/chrome-131.0.6778.85");
+    let app = dir.data().join("app");
+    assert_eq!(
+        record::verify(&app, "mac-arm64", "131.0.6778.85", &folder),
+        Ok(())
+    );
     host.shutdown();
 }
 
@@ -298,13 +326,16 @@ impl InstallTools for SlowCancel {
     fn download(
         &self,
         url: &str,
+        route: &Route,
         zip: &Path,
         max_bytes: u64,
         cancel: &Cancel,
         progress: &mut dyn FnMut(u64, u64),
     ) -> Result<Option<u64>, Failure> {
         if self.inner.downloads.load(Ordering::SeqCst) > 0 {
-            return self.inner.download(url, zip, max_bytes, cancel, progress);
+            return self
+                .inner
+                .download(url, route, zip, max_bytes, cancel, progress);
         }
         self.inner.downloads.fetch_add(1, Ordering::SeqCst);
         write::write(zip, &EMPTY_ZIP);

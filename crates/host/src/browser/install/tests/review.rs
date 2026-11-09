@@ -20,6 +20,7 @@ use crate::browser::install::system::{CURL_FLAGS, download_args};
 use crate::browser::install::{Cancel, Failure, archive};
 use crate::pipeline::tests::support::TempDir;
 use crate::write;
+use clauseo_sandbox::Route;
 
 /// `archive::check_zip` on a zip of `entries`.
 fn check(entries: &[ZipEntry<'_>]) -> Result<(), Failure> {
@@ -143,6 +144,7 @@ fn a_link_back_in_by_the_unpack_folders_name_is_refused() {
 fn the_download_pins_redirects_and_names_its_files() {
     let args = download_args(
         "https://storage.googleapis.com/z.zip",
+        &Route::Direct,
         Path::new("/w/headers.txt"),
         Path::new("/w/chrome.zip"),
         1234,
@@ -153,6 +155,8 @@ fn the_download_pins_redirects_and_names_its_files() {
         .map(OsString::from)
         .collect();
     for arg in [
+        "--noproxy",
+        "*",
         "--max-filesize",
         "1234",
         "-D",

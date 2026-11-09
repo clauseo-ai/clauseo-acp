@@ -2,9 +2,11 @@
 //! manifest, by the block list's fetch rules (redirects by hand to the allowed hosts, `https`
 //! only in the release, routed through `network.upstream_proxy` else the seams' route), verify
 //! them against the pins' keys, set aside one dated over a day ahead, apply the no-rollback rule
-//! (`pins::accept`) against the newest verified copy on disk (stored or bundled) at any date,
-//! and store the pair. It runs whether block list updates are on or off. Whatever fails keeps the
-//! copies there are, and the next round tries again.
+//! (`pins::accept`) against the newest verified copy on disk (stored or bundled) at any date
+//! and the floor record (`pins/floor.rs`), and store the pair, the floor record first. A
+//! manifest that is the same bytes again rewrites a missing, lower or unreadable floor record.
+//! It runs whether block list updates are on or off. Whatever fails keeps the copies there are,
+//! and the next round tries again.
 
 use clauseo_sandbox::Upstream;
 
@@ -68,15 +70,32 @@ pub(super) fn refresh(this: &Updater, stopped: &dyn Fn() -> bool) -> PinsRound {
         );
         return PinsRound::Refused;
     }
-    // The floor counts every verified copy, even one dated ahead of a clock set back.
+    // The floor counts every verified copy, even one dated ahead of a clock set back, and the
+    // floor record, which outlives a stored pair that stopped verifying. An unreadable record
+    // cannot be compared; the verified copies alone judge, and a manifest taken rewrites it.
     let best = this.pins_source.floor();
-    if !pins::accept(&fetched, best.as_ref()) {
+    let record = this
+        .pins_source
+        .floor_record()
+        .unwrap_or_else(|_unreadable| {
+            tracing::warn!(
+                "the browser pins floor record is unreadable; the next manifest taken rewrites it"
+            );
+            None
+        });
+    if !pins::accept(&fetched, best.as_ref(), record.as_ref()) {
         return PinsRound::NotNewer;
     }
     if best.is_some_and(|best| pins::same_bytes(&fetched, &best)) {
+        if let Err(error) = pins::floor::raise(&this.pins_source.stored, &fetched) {
+            tracing::warn!(
+                kind = ?error.kind(),
+                "the browser pins floor record could not be written"
+            );
+        }
         return PinsRound::Unchanged;
     }
-    if let Err(error) = pins::store(&this.pins_source.stored, &body, &signature) {
+    if let Err(error) = pins::store(&this.pins_source.stored, &fetched, &body, &signature) {
         tracing::warn!(kind = ?error.kind(), "the new browser pins could not be stored");
         return PinsRound::Failed;
     }

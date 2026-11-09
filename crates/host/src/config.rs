@@ -265,7 +265,7 @@ impl HostConfig {
     }
 
     /// A Chrome every session's browser entry runs (`{browser_executable}`), in place of the
-    /// launch prep's search (`browser::chrome::find`), for tests. `None` keeps the search.
+    /// launch prep's search (`browser::chrome::find_checked`), for tests. `None` keeps it.
     #[cfg(feature = "test-support")]
     pub fn with_browser_executable(mut self, chrome: Option<PathBuf>) -> Self {
         self.wiring.browser_executable = chrome;

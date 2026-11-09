@@ -11,10 +11,12 @@
 //!    `unsupported`), and the zip's URL from the fixed template only ([`manifest::zip_url`]):
 //!    the pinned version (dotted digits, checked again), this platform's fixed name and the
 //!    fixed download name. No URL or host is ever read from the pins.
-//! 4. The zip, into `browsers/.partial-<version>-<random>/chrome.zip`, with progress, curl capped
-//!    at the pin's size; its size must equal the response's `Content-Length` and the pin's size,
-//!    else `size_mismatch`; then its sha256 must equal the pin's, else `hash_mismatch`. Both
-//!    run on the finished file before anything reads the zip's content.
+//! 4. The zip, into `browsers/.partial-<version>-<random>/chrome.zip`, with progress, through
+//!    the same route as the browser pins' fetch (`network.upstream_proxy` when set, else the
+//!    system's proxy, asked for the zip's URL: [`Job::upstream`]), curl capped at the pin's
+//!    size; its size must equal the response's `Content-Length` and the pin's size, else
+//!    `size_mismatch`; then its sha256 must equal the pin's, else `hash_mismatch`. Both run on
+//!    the finished file before anything reads the zip's content.
 //! 5. Unpacking: every entry name in the zip's directory is checked first ([`archive`]; on
 //!    Windows no link entry at all), then the system tool unpacks into `.partial-…/chrome/`, then
 //!    the result is walked: every entry must sit inside, and no link may lead out. Else `unpack`.
@@ -22,6 +24,10 @@
 //!    [`signature_required`] says so.
 //! 7. `chrome/` is renamed to `browsers/chrome-<version>/`, walked again there, and the rest of
 //!    `.partial-…` removed.
+//! 8. The install record ([`record`]) is written to `<app data>/browser-pins/`: the version, the
+//!    zip's sha256 and every entry of the folder with its size, mode and sha256. The launch
+//!    checks the folder against it at every start; a record that cannot be written fails the
+//!    download (`unpack`) and removes the folder.
 //!
 //! Every way out but the last removes `.partial-…`, and a cancel (the lawyer's, or the host
 //! stopping) ends the running tool at once. The tools themselves sit behind [`InstallTools`]:
@@ -33,6 +39,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use clauseo_protocol::{BrowserInstallFailure, BrowserInstallState, Count};
+use clauseo_sandbox::{Route, Upstream};
 
 use super::chrome::{BROWSERS_DIR, CFT_PREFIX, Platform};
 use super::pins::Pins;
@@ -40,6 +47,7 @@ use crate::write;
 
 pub mod archive;
 pub mod manifest;
+pub mod record;
 pub mod system;
 #[cfg(windows)]
 mod windows;
@@ -146,13 +154,14 @@ pub trait InstallTools: Send + Sync {
     /// The bytes free to this user on the volume that holds `folder`.
     fn free_bytes(&self, folder: &Path) -> std::io::Result<u64>;
 
-    /// Downloads `url` into the new file `zip`, reading at most `max_bytes` (the pin's size),
-    /// calling `progress(bytes, total)` as it goes, at most about four times a second. Returns
-    /// the response's `Content-Length`, `None` without one; the caller compares it with the
-    /// file.
+    /// Downloads `url` through `route` (the proxy, or none) into the new file `zip`, reading at
+    /// most `max_bytes` (the pin's size), calling `progress(bytes, total)` as it goes, at most
+    /// about four times a second. Returns the response's `Content-Length`, `None` without one;
+    /// the caller compares it with the file.
     fn download(
         &self,
         url: &str,
+        route: &Route,
         zip: &Path,
         max_bytes: u64,
         cancel: &Cancel,
@@ -184,6 +193,11 @@ pub struct Job {
     /// The host clock's time when the download was asked for: pins over 45 days older are
     /// refused (`list_unavailable`).
     pub now: clauseo_protocol::Timestamp,
+    /// Where the zip's route comes from, as for the browser pins' fetch: `network.upstream_proxy`
+    /// when set, else the system's proxy (`HTTPS_PROXY` with `NO_PROXY`, then the OS's settings,
+    /// PAC included). `None` when `network.upstream_proxy` is set but refused: the download
+    /// then fails (`network`) rather than go around it.
+    pub upstream: Option<Upstream>,
 }
 
 /// Runs the download of the version `pins` gives (the newest verified browser pins, read by the
@@ -258,7 +272,15 @@ fn in_partial(
             total: Count::clamped(total),
         });
     };
-    let length = tools.download(&download.url, &zip, download.size, cancel, &mut progress)?;
+    let route = route(job, &download.url)?;
+    let length = tools.download(
+        &download.url,
+        &route,
+        &zip,
+        download.size,
+        cancel,
+        &mut progress,
+    )?;
     // The finished file against the pin, before anything reads what the zip holds.
     check_size(&zip, length, download.size)?;
     cancel.check()?;
@@ -284,7 +306,7 @@ fn in_partial(
     check_signature(signature_required(job.platform), signed)?;
     let browsers = partial.parent().unwrap_or(partial);
     let target = browsers.join(format!("{CFT_PREFIX}{}", download.version));
-    // A folder of the same version that `chrome::find` passed over (its binary gone), or
+    // A folder of the same version that `chrome::find_checked` refused (a file changed), or
     // anything else at that name, is replaced; a link there is removed, never followed.
     let old = match std::fs::symlink_metadata(&target) {
         Ok(meta) if meta.is_dir() => write::remove_tree(&target),
@@ -304,7 +326,44 @@ fn in_partial(
         }
         return Err(failure);
     }
+    let platform = job.platform.cft_name().unwrap_or_default();
+    if let Err(error) = record::write(
+        &job.app_data,
+        platform,
+        &download.version,
+        &download.sha256,
+        &target,
+    ) {
+        if let Err(error) = write::remove_tree(&target) {
+            tracing::warn!(
+                error = %crate::log_file::Cause(&error),
+                "a browser without its install record was not removed"
+            );
+        }
+        return Err(Failure::io("writing the install record", &error));
+    }
     Ok(target)
+}
+
+/// The zip's route: the job's route source asked for `url` (blocking: the OS may run PAC; on
+/// the download's thread). A refused setting, or one the route lookup refuses, fails the
+/// download (`network`), never going around the proxy. The error is not logged: it can quote
+/// the setting.
+fn route(job: &Job, url: &str) -> Result<Route, Failure> {
+    let refused = || {
+        Failure::new(
+            BrowserInstallFailure::Network,
+            "the proxy setting is refused",
+        )
+    };
+    let upstream = job.upstream.as_ref().ok_or_else(refused)?;
+    let url = url::Url::parse(url).map_err(|_unsaid| {
+        Failure::new(
+            BrowserInstallFailure::HostRefused,
+            "the zip's URL is not usable",
+        )
+    })?;
+    clauseo_sandbox::upstream_for(upstream, &url).map_err(|_unsaid| refused())
 }
 
 /// The zip's size against the response's `Content-Length` and the pin's size.

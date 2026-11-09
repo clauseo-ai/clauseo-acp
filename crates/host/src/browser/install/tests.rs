@@ -4,6 +4,7 @@ mod cap;
 mod links;
 mod pinned;
 mod review;
+mod route;
 mod sequence;
 mod support;
 
@@ -12,7 +13,7 @@ use std::path::{Path, PathBuf};
 use clauseo_protocol::{BrowserInstallFailure, BrowserInstallState, Count};
 
 use super::system::{content_length, curl_exit};
-use super::{Cancel, Failure, Job, archive, check_signature, manifest, run};
+use super::{Cancel, Failure, Job, archive, check_signature, manifest, record, run};
 use crate::browser::chrome::{self, ChromeRoots, Platform};
 use crate::browser::pins::Pins;
 use crate::pipeline::tests::support::TempDir;
@@ -27,6 +28,7 @@ fn job(dir: &Path, platform: Platform) -> Job {
         random: "r".to_owned(),
         // Two days after the test pins' date (`support::pins_with`).
         now: crate::browser::pins::tests::at("2026-11-09T06:00:00Z"),
+        upstream: Some(clauseo_sandbox::Upstream::Direct),
     }
 }
 
@@ -76,7 +78,8 @@ fn fails_with(test: &str, tools: &Fake, code: BrowserInstallFailure) -> Failure 
 }
 
 /// A download reports its progress, then `Unpacking`; the folder it makes is the one
-/// `chrome::find` finds at the next session, and no working folder is left.
+/// the launch's check (`chrome::find_checked`) takes at the next session, its install record
+/// written, and no working folder is left.
 #[test]
 fn a_download_reports_progress_then_unpacking_and_find_finds_it() {
     let dir = TempDir::new("cft-done");
@@ -105,16 +108,16 @@ fn a_download_reports_progress_then_unpacking_and_find_finds_it() {
     let roots = ChromeRoots {
         platform: Platform::MacArm64,
         root: dir.path().join("root"),
-        home: None,
-        program_files: None,
-        program_files_x86: None,
-        local_app_data: None,
         app_data: dir.path().join("app"),
     };
     let binary = MAC_BINARY
         .split('/')
         .fold(folder, |path, part| path.join(part));
-    assert_eq!(chrome::find(&roots), Some(binary));
+    // The install record is in place, so the launch's check takes the folder.
+    let now = crate::browser::pins::tests::at("2026-11-09T06:00:00Z");
+    let picked = chrome::find_checked(&roots, now, || Some(tools.pins())).unwrap();
+    assert_eq!(picked.path, binary);
+    assert!(record::record_path(&dir.path().join("app")).is_file());
 }
 
 /// A folder of the same version already there (its binary gone, so `find` passed over it) is
@@ -413,6 +416,7 @@ fn real_download() {
         app_data: dir.path().to_owned(),
         random: "real".to_owned(),
         now,
+        upstream: Some(clauseo_sandbox::Upstream::System),
     };
     let mut states = Vec::new();
     // The real pins: the bundled copy in a release's resource folder, given by hand.

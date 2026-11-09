@@ -14,6 +14,7 @@ use crate::browser::install::system::download_args;
 use crate::browser::install::{Cancel, Failure, manifest};
 use crate::browser::pins::{Pin, Pins};
 use crate::pipeline::tests::support::TempDir;
+use clauseo_sandbox::Route;
 
 /// `run` on Apple silicon with `tools` and `pins` must fail with `code`, leaving `browsers/`
 /// empty: the working folder, zip and all, is gone and nothing is installed.
@@ -153,6 +154,7 @@ fn the_url_is_the_template_and_curl_is_capped_at_the_pins_size() {
     // curl's own cap is the pin's size.
     let args = download_args(
         "https://storage.googleapis.com/z.zip",
+        &Route::Direct,
         Path::new("/w/headers.txt"),
         Path::new("/w/chrome.zip"),
         126_513_060,

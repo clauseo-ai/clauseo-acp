@@ -1023,57 +1023,65 @@ security key, default false) overrides both. Each unread place and bad value is 
 host, with no path (`docs/firm-it.md`, "Browser automation and RemoteDebuggingAllowed"). In
 order:
 
-1. Google Chrome installed: on macOS `/Applications/Google Chrome.app/Contents/MacOS/Google
-   Chrome`, then the same under `~/Applications`; on Windows `%ProgramFiles%`,
-   `%ProgramFiles(x86)%`, then `%LOCALAPPDATA%`, each with `\Google\Chrome\Application\chrome.exe`.
-2. Windows only: Microsoft Edge (`%ProgramFiles(x86)%`, then `%ProgramFiles%`, with
-   `\Microsoft\Edge\Application\msedge.exe`), only while `EDGE_ALLOWED` is true. It is false
-   until G17 item 4.
-3. Chrome for Testing in `<app data>/browsers/chrome-<version>/`, highest dotted version first,
-   with the binary where the zip puts it: `chrome-mac-arm64/Google Chrome for
+Amended 2026-11-09 (review of #806, launch side): the guarded browser is only ever the Chrome
+for Testing Clauseo downloaded, at exactly the pinned version, its folder checked against the
+record the download wrote. A Google Chrome or Microsoft Edge installed on the machine is never
+used, on macOS or Windows: the firm updates those, so the browser pins cannot vouch for them,
+and a Chrome above the pin is as unknown as one below it. macOS and Windows x64 run the pinned
+full Chrome for Testing (a later PR moves macOS to chrome-headless-shell); Windows ARM64, where
+only a slow emulated x64 build exists, gets no browser. `EDGE_ALLOWED` and the installed-Chrome
+search are gone. In order (`chrome::find_checked`):
+
+1. No `<app data>/browsers/chrome-<dotted version>/` folder at all (a real folder: `file_type`,
+   no link followed): `BrowserNotInstalled`, and the app offers the download. The pins are not
+   read. `<app data>` is the host's data folder.
+2. No usable browser pins (the next section, "The browser pins"), read from disk at each
+   launch: none verifies, the newest is dated over a day ahead of the host clock, or the stored
+   pair stopped verifying and no copy stands at or above the floor record: the entry drops with
+   `BrowserListUnavailable`. The Chrome for Testing on disk is not trusted unjudged.
+3. The newest verified pins' signed `published` is more than 45 days before the host clock's
+   now: the entry drops with `BrowserListExpired` (amended 2026-11-08, review of #806). The
+   bundled pair counts by its own `published`; a stage F heartbeat (the same version, published
+   again daily) keeps the pins fresh. The download refuses too (`list_unavailable`, its log
+   message saying the list expired).
+4. No folder named `chrome-<pins' stable.version>`, compared as the whole version string, not
+   its major (157.0.8103.39 is not 157.0.8103.38, nor is 158 or 156): `BrowserOutOfDate`, and the
+   app offers the download, which fetches the pinned version into its own folder. Other version
+   folders are never used.
+5. The pinned folder against its install record ("The install record", below), walked and
+   hashed again at every launch, before the path goes to the guard: a missing or unreadable
+   record, a record for another version or platform, or any entry added, removed or changed
+   (kind, mode, size, link target or sha256) drops the entry with `BrowserNotInstalled` and a
+   warning naming the kind of mismatch, never a path, so the download, which replaces the folder
+   and its record, is offered again. A reason of its own would need new words (listed in the
+   review notes); the download is the remedy either way.
+6. Otherwise the binary where the zip puts it: `chrome-mac-arm64/Google Chrome for
    Testing.app/Contents/MacOS/Google Chrome for Testing` (and `chrome-mac-x64/...`),
-   `chrome-win64\chrome.exe`. A version folder without its binary is passed over. Skipped on
-   Windows ARM64. `<app data>` is the host's data folder. The version found is judged against
-   the browser pins (below); one that fails drops the entry with its own reason, and the search
-   does not fall back to a lower folder.
-4. Otherwise none: `BrowserNotInstalled`.
+   `chrome-win64\chrome.exe`, which, links resolved, must still sit under the browsers folder.
 
-The download that fills step 3 is the next section.
+The download that fills the folder is "The Chrome for Testing download", below.
 
-**Staleness (amended 2026-11-08, PR A).** Steps 1 and 2 are never judged by the browser pins: an
-installed Chrome or Edge is the firm's to update, and behaves as before. A Chrome for Testing from
-step 3 is judged against the newest verified browser pins (the next section, "The browser
-pins"), which the prep reads from disk at each launch:
-
-- `major(found) + 1 < major(pins' stable.version)` (pins at 157: 156 is taken, 155 is not): the
-  entry drops with `BrowserOutOfDate`, and the app offers the download, which fetches the pinned
-  version into its own folder; the next launch picks it as the highest.
-- No verified pins at all, bundled or cached: the entry drops with `BrowserListUnavailable`. The
-  Chrome for Testing on disk is not trusted unjudged.
-- The newest verified pins' signed `published` is more than 45 days before the host clock's
-  now: the entry drops with `BrowserListExpired` (amended 2026-11-08, review of #806), whatever
-  the version. The bundled pair counts by its own `published`; a stage F heartbeat (the same
-  version, published again daily) keeps the pins fresh. The download refuses too
-  (`list_unavailable`, its log message saying the list expired).
 - Taken, but the newest verified pins' `published` is more than 14 days (and at most 45) before
   now: the browser stays available, and the session's header `ToolState` carries
   `notice: BrowserListOld` (`ToolNotice`, an open enum `{ BrowserListOld, Unknown }` in
   `protocol/src/view/tools.rs`; `ToolState::notice` is optional, serde default, skipped when
   `None`).
 
-All three reasons are `ToolsUnavailableReason` variants and ride the prep's existing block path
+`BrowserOutOfDate`, `BrowserListUnavailable` and `BrowserListExpired` are
+`ToolsUnavailableReason` variants and ride the prep's existing block path
 (`Prepared::policy_block`, then `run.browser_blocked`, then `blocked_by_policy` in
 `agent/loads/browser.rs`), as `BrowserBlockedByPolicy` does.
 
-Linux (development and CI only): `/usr/bin/google-chrome`, then `/usr/bin/chromium`. A path
-counts when it is a regular file, following links (an installed Chrome may be one). In
-`<app data>/browsers/` a version folder must be a real folder (`file_type`, no link followed)
-and the binary, links resolved, must sit under the browsers folder, so a planted link picks
-nothing. That folder must stay outside what any agent can write (in tier C too). Every root comes in through `ChromeRoots`
-(`HostConfig::with_chrome_roots`; production uses `ChromeRoots::system`, which reads `HOME`,
-`ProgramFiles`, `ProgramFiles(x86)` and `LOCALAPPDATA`). The tests use one fixture folder per
-case (`browser/chrome/tests.rs`), ARM64 included, and `tests/host/browser.rs` checks that the
-Chrome found reaches `session/new`. `with_browser_executable` stays as a test-support override.
+Linux is not a platform Clauseo ships: for development and CI only, the host takes
+`/usr/bin/google-chrome`, then `/usr/bin/chromium`, unpinned and unchecked (a regular file,
+following links). That code is built on Linux only (`cfg(target_os = "linux")`), so nothing on
+macOS or Windows can reach it. The browsers folder must stay outside what any agent can write
+(in tier C too). Every root comes in through `ChromeRoots` (`platform`, Linux's `root`, and
+`app_data`; `HostConfig::with_chrome_roots`; production uses `ChromeRoots::system`). The tests
+use one fixture folder per case (`browser/chrome/tests.rs`: a folder above the pin, a swapped
+main binary, an added file, a removed file, a changed mode, the whole version judged, installed
+Chrome never picked, ARM64 included), and `tests/host/browser.rs` checks that the Chrome found
+reaches `session/new`. `with_browser_executable` stays as a test-support override.
 
 **agent-browser's config file.** The guard refuses an `AGENT_BROWSER_CONFIG` that names no
 file, so the same prep, once it has found a Chrome, makes `<data>/browser/` (through no link
@@ -1087,6 +1095,35 @@ still shows first. `BrowserNotInstalled` is the nearest existing reason; a reaso
 would be a protocol change. `tests/host/browser.rs` checks the file after a browser session
 starts and that its path is the one the profile's entry names. The smoke test writes its own
 config file, which stands in for this one.
+
+#### The install record (`host/src/browser/install/record.rs`, amended 2026-11-09)
+
+Once the download has moved the browser into `browsers/chrome-<version>/` and walked it there,
+it writes `<app data>/browser-pins/installed-chrome-v1.json` (host-owned, beside the stored pins
+and not in the browsers folder; agents can write neither): `schema` 1, the version exactly as
+the pins wrote it, the platform name, the zip's pinned sha256, and the tree: every entry under
+the version folder, sorted by its relative path (`/` between parts), with its kind (file,
+folder, link), its mode (`mode & 0o7777` on Unix; on Windows `0o444` when read-only, else
+`0o666`), and for a file its size and sha256, for a link its target as text. A record that
+cannot be written fails the download (`unpack`) and removes the folder. Unknown fields and any
+other schema are refused.
+
+At every launch (step 5 above) the folder is walked again: the listing (paths, kinds, modes,
+sizes, link targets) must equal the record's, which refuses an added, removed or resized file
+before anything is hashed; then every file is hashed again, on up to 8 threads (the largest
+files first) and compared. The full tree digest was chosen over a listing plus only the
+executables and libraries: on the measured Linux tree (below) the main binary alone is 75% of
+the bytes, so hashing the rest costs little, and the whole tree fits the budget of about 500 ms
+per browser start. Measured on Chrome for Testing 157.0.8103.38 `chrome-linux64` (312 entries,
+409 MiB, a Linux tree; the macOS and Windows trees were not measured), release build, page cache
+warm, on an AMD EPYC 7B13 VM with 8 vCPUs (SHA-NI) under a load average of 31 to 38 (other
+builds sharing it): one full check (walk and hash of 301 files) took 0.39 to 1.34 s of wall time
+over 10 runs, for 0.35 to 0.37 s of CPU time in all; the main binary alone (306 MB), which no
+thread can split, took 0.24 to 0.27 s of CPU time, so on an idle machine of that kind the check
+takes about 0.3 s. Hashing only the executables and libraries (9 files) took 0.27 to 0.29 s of CPU
+time and the same critical path. A cold page cache adds reading 409 MiB from disk; not measured. A folder an agent
+could rewrite between the check and Chrome's start would defeat it; the folder is outside every
+agent's reach, which is what the check relies on (the sandbox tests for that live elsewhere).
 
 #### Ports and socket folder (`host/src/browser/session.rs`)
 
@@ -1239,11 +1276,22 @@ if it verifies and is either byte-identical to the floor (taken, nothing written
 `published` strictly newer and a `stable.version` not lower than the floor's (amended
 2026-11-08, review of #806). So a heartbeat is taken and resets freshness, and a replay of an
 older or equally dated manifest is refused. A pair dated more than a day ahead of the host's
-clock is not used, as for the block list, but still counts as the floor: with the clock set
-back, a replayed genuinely signed older manifest cannot replace a newer one dated "ahead". The app
-uses the newer verified of the bundled and the cached pair not dated ahead, and fails closed
-(`list_unavailable` at download, `BrowserListUnavailable` at launch) only when neither
-verifies.
+clock still counts as the floor: with the clock set back, a replayed genuinely signed older
+manifest cannot replace a newer one dated "ahead".
+
+Amended 2026-11-09 (review of #806). **Clock set back:** when the floor (the newer verified copy,
+whatever its date) or the floor record below is dated more than a day ahead of the host clock,
+readers use no copy at all (`list_unavailable` at download, `BrowserListUnavailable` at launch),
+never the lower copy beside it, until the clock catches up. **Floor record:** beside the cached
+pair, `<data_dir>/browser-pins/browser-pins-floor-v1.json` (host-owned, `{"published", "version"}`
+of the newest manifest ever stored) is written before the pair and only ever raised
+(`pins/floor.rs`). When no verified copy stands at or above it (published no earlier, version no
+lower, compared over the whole version), because the cached pair stopped verifying or is gone,
+readers use none, rather than the lower bundled copy, and the refresh stores only a manifest at
+or above it (`pins::accept` takes the record too). The same bytes fetched again rewrite a
+missing, lower or unreadable record. An unreadable record makes readers use none until then. So
+the app uses the newer verified of the bundled and the cached pair, and fails closed when
+neither verifies, when it is dated ahead, or when it is below the floor record.
 
 **Refresh.** Each round of the `clauseo-blocklist` thread (decision 0053: at start, then every 6
 hours) also fetches the pair, verifies it, applies the rule above and stores it. It does so
@@ -1290,7 +1338,14 @@ feed carries the event (0012, 0028).
    with the pins' `stable.version` and `name` `chrome` (the code takes the name as a parameter,
    for the later `chrome-headless-shell` caller).
 4. The zip goes into `browsers/.partial-<version>-<random>/chrome.zip`, with curl's
-   `--max-filesize` set to the pin's `size`. curl before 8.4 ignores that flag when the
+   `--max-filesize` set to the pin's `size`. It goes through the same route as the browser pins'
+   fetch (amended 2026-11-09, review of #806): `network.upstream_proxy` when set, else the block
+   list seams' route (the release's: `HTTPS_PROXY` with `NO_PROXY`, then the OS's proxy
+   settings, PAC included), asked for the zip's URL on the download's thread
+   (`clauseo_sandbox::upstream_for`). curl gets it on its command line, `--proxy
+   http://<host>:<port>`, or `--noproxy *` when the route is direct, so nothing of curl's own
+   picks another. A setting that is refused fails the download (`network`), never going around
+   the proxy. curl before 8.4 ignores that flag when the
    response has no `Content-Length`, so the progress poll caps it in process too: once the
    file passes the pin's size, curl's tree is killed (as a cancel does) and the download fails
    `size_mismatch`. Its size must equal both the final response's

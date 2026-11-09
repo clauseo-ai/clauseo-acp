@@ -4,7 +4,8 @@
 //! `HostEvent::BrowserInstall`. The actor never waits on it.
 //!
 //! - `InstallBrowser` starts the thread and answers `Done`; the thread reads the newest verified
-//!   browser pins from disk (`browser::pins`) and downloads the version they pin. While one runs
+//!   browser pins from disk (`browser::pins`) and downloads the version they pin, through the
+//!   pins fetch's route ([`upstream`]). While one runs
 //!   it answers `Done` and does nothing, since the running one's events already tell the app.
 //!   While a cancelled one is still ending, it answers `Done` and a new download starts once that
 //!   one's `Failed` is out. Neither command stores a receipt.
@@ -92,6 +93,25 @@ fn place(actor: &Actor) -> (Platform, PathBuf) {
     }
 }
 
+/// The zip's route source, the browser pins fetch's (`blocklist/updater/pins.rs`):
+/// `network.upstream_proxy` when set (`None` when refused: the download then fails), else the
+/// block list seams' route (the release's: the system's proxy), else the system's proxy.
+fn upstream(actor: &Actor) -> Option<clauseo_sandbox::Upstream> {
+    let fallback = actor
+        .wiring
+        .blocklist
+        .as_ref()
+        .map_or(clauseo_sandbox::Upstream::System, |seams| {
+            seams.update.upstream.clone()
+        });
+    match actor.effective.settings().network.upstream_proxy.as_deref() {
+        Some(proxy) => url::Url::parse(proxy)
+            .ok()
+            .map(clauseo_sandbox::Upstream::Fixed),
+        None => Some(fallback),
+    }
+}
+
 /// Starts the sweep of leftover working folders, off the actor.
 pub(super) fn start(actor: &mut Actor) {
     let browsers = place(actor).1.join(BROWSERS_DIR);
@@ -134,6 +154,7 @@ fn begin(actor: &mut Actor) -> Result<(), Error> {
         app_data,
         random: uuid::Uuid::now_v7().simple().to_string(),
         now,
+        upstream: upstream(actor),
     };
     let cancel = Cancel::new();
     let pins = actor.wiring.browser_pins.source(actor.effective.data_dir());

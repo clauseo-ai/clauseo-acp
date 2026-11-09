@@ -106,7 +106,7 @@ pub(crate) struct RunFolders {
     /// agents, kept when a session ends.
     pub(crate) notes: PathBuf,
     /// `{browser_executable}`: the Chrome the launch prep found for this session
-    /// (`browser::chrome::find`), or none (`BrowserNotInstalled`). Not a folder, but the
+    /// (`browser::chrome::find_checked`), or none (`BrowserNotInstalled`). Not a folder, but the
     /// session's like them, and found on the same thread.
     pub(crate) chrome: Option<PathBuf>,
     /// The session's browser ports, socket folder and agent-browser name

@@ -4,6 +4,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::Mutex;
 
+use clauseo_sandbox::Route;
 use sha2::Digest as _;
 
 use super::super::system::run_tool;
@@ -173,6 +174,8 @@ pub(super) struct Fake {
     pub(super) calls: Mutex<Vec<&'static str>>,
     /// Each download's URL and size cap.
     pub(super) downloads: Mutex<Vec<(String, u64)>>,
+    /// Each download's route.
+    pub(super) routes: Mutex<Vec<Route>>,
 }
 
 impl Fake {
@@ -188,6 +191,7 @@ impl Fake {
             unzip: false,
             calls: Mutex::new(Vec::new()),
             downloads: Mutex::new(Vec::new()),
+            routes: Mutex::new(Vec::new()),
         }
     }
 
@@ -198,6 +202,10 @@ impl Fake {
 
     pub(super) fn downloads(&self) -> Vec<(String, u64)> {
         self.downloads.lock().unwrap().clone()
+    }
+
+    pub(super) fn routes(&self) -> Vec<Route> {
+        self.routes.lock().unwrap().clone()
     }
 
     pub(super) fn calls(&self) -> Vec<&'static str> {
@@ -217,12 +225,14 @@ impl InstallTools for Fake {
     fn download(
         &self,
         url: &str,
+        route: &Route,
         zip: &Path,
         max_bytes: u64,
         cancel: &Cancel,
         progress: &mut dyn FnMut(u64, u64),
     ) -> Result<Option<u64>, Failure> {
         self.call("download");
+        self.routes.lock().unwrap().push(route.clone());
         self.downloads
             .lock()
             .unwrap()

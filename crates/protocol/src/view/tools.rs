@@ -71,7 +71,11 @@ open_unit_enum! {
         ManagedByFirm,
         /// The browser only: no egress proxy for this session.
         NoProxy,
-        /// The browser only: no browser is installed.
+        /// The browser only: no Chrome for Testing that Clauseo downloaded is there, or the one
+        /// at the pinned version no longer matches the record of what the download installed
+        /// (a file added, removed or changed); the app offers the download either way. A Chrome
+        /// or Edge installed on the machine is never used. (On Linux, development only: no
+        /// Google Chrome or Chromium.)
         BrowserNotInstalled,
         /// The browser only: the machine already runs as many browser sessions as its memory
         /// allows.
@@ -88,19 +92,19 @@ open_unit_enum! {
         /// whether remote debugging is allowed; none says false, and the firm's Clauseo policy does
         /// not allow Clauseo's browser anyway. Checked again at the next launch.
         BrowserPolicyUnreadable,
-        /// The browser only: the Chrome for Testing Clauseo downloaded is more than one major
-        /// version behind the version Clauseo's signed browser list pins; the app offers the
-        /// download, which fetches the pinned version. Chrome installed on the machine is never
-        /// judged so.
+        /// The browser only: no Chrome for Testing Clauseo downloaded is exactly the version
+        /// Clauseo's signed browser list pins (each is older, or newer); the app offers the
+        /// download, which fetches the pinned version.
         BrowserOutOfDate,
-        /// The browser only: a Chrome for Testing Clauseo downloaded is the browser, and no
-        /// signed browser list verifies (neither the bundled one nor a fetched one), so its
-        /// version cannot be checked.
+        /// The browser only: a Chrome for Testing Clauseo downloaded is there, and no signed
+        /// browser list can be used, so its version cannot be checked: none verifies (neither
+        /// the bundled one nor a fetched one), the newest is dated over a day ahead of this
+        /// computer's clock, or the stored one stopped verifying and none as new as it has
+        /// been fetched again yet.
         BrowserListUnavailable,
         /// The browser only: a Chrome for Testing Clauseo downloaded is the browser, and the
         /// newest signed browser list Clauseo has was published over 45 days ago, so its copy
-        /// of Chrome is too old to use, and Clauseo can't update it right now. Chrome
-        /// installed on the machine is never judged so.
+        /// of Chrome is too old to use, and Clauseo can't update it right now.
         BrowserListExpired,
     }
     test mod tools_unavailable_reason;

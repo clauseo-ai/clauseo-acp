@@ -413,11 +413,10 @@ do when `clauseo-sandbox-setup.exe` is gone, and how to get it back and check it
   `%LOCALAPPDATA%\ai.clauseo.desktop\`, which default AppLocker rules block. Allow that path, or
   use the IT-installed runtime under Program Files once its policy key lands (`install.bundle`,
   section 6, "Coming").
-- Chrome for Testing, which Clauseo downloads only where Google Chrome is missing and the lawyer
-  agrees, lands in `%LOCALAPPDATA%\ai.clauseo.desktop\browsers\` and is not Authenticode signed
-  (section 6, ["Chrome for Testing: what Clauseo
-  downloads"](#chrome-for-testing-what-clauseo-downloads)). Allow it by path or hash, or install
-  Google Chrome so Clauseo uses that instead.
+- Chrome for Testing, Clauseo's only browser, which it downloads once the lawyer agrees, lands in
+  `%LOCALAPPDATA%\ai.clauseo.desktop\browsers\` and is not Authenticode signed (section 6,
+  ["Chrome for Testing: what Clauseo downloads"](#chrome-for-testing-what-clauseo-downloads)).
+  Allow it by path or hash; an installed Google Chrome is not used instead.
 - Coming (stage C): on Windows, Clauseo's sandbox runs each agent as a separate local user
   (task S15). A policy that forbids local accounts leaves agents running without it, shown in the
   app as "Not protected".
@@ -781,13 +780,11 @@ policy key (above):
 
 #### Chrome for Testing: what Clauseo downloads
 
-**Which browser.** Clauseo uses Google Chrome when it is installed (on Windows under
-`%ProgramFiles%`, `%ProgramFiles(x86)%` or `%LOCALAPPDATA%`, each with
-`\Google\Chrome\Application\chrome.exe`; on macOS `/Applications/Google Chrome.app`, then
-`~/Applications`). Only when there is none does the app offer to download Google's Chrome for
-Testing, and it downloads only once the lawyer agrees. An installed Chrome is never replaced or
-updated by Clauseo; your own updates keep it current. Windows on ARM64 gets no download: Google
-publishes no Chrome for Testing for it.
+**Which browser.** Clauseo's browser is only ever Google's Chrome for Testing that Clauseo
+downloaded, at exactly the version its signed list names; the app offers the download, and it
+downloads only once the lawyer agrees. A Google Chrome or Microsoft Edge installed on the computer
+is never used, nor touched: Clauseo cannot vouch for a version it did not pin. Windows on ARM64
+gets no browser: Google publishes no Chrome for Testing for it.
 
 **What it downloads, and from where.** One zip, from a fixed address on Google's Chrome for
 Testing bucket:
@@ -810,10 +807,10 @@ whether or not `network.unsafe_site_list_updates` is on: that key is about the u
 only. It goes through `network.upstream_proxy` when set, otherwise the OS's proxy settings, and
 trusts the OS's certificate store. The zip itself is fetched only when the lawyer agrees to the
 download, with `curl.exe` from System32 on Windows or `/usr/bin/curl` on macOS, and fails rather
-than follow a redirect. Known limit: that download uses only a proxy set in the `HTTPS_PROXY`
-environment variable (and `NO_PROXY`), as curl reads it; it does not use
-`network.upstream_proxy`, the OS's proxy settings or a PAC file yet. Behind a proxy set only
-there, either set `HTTPS_PROXY` for the user or let `storage.googleapis.com` through directly.
+than follow a redirect. It takes the same route as the list: `network.upstream_proxy` when set,
+otherwise `HTTPS_PROXY` (and `NO_PROXY`), then the OS's proxy settings, PAC included, asked for
+the zip's address; a proxy setting Clauseo refuses fails the download rather than going around
+the proxy.
 
 **Where it lands.** In each user's data folder, `<data>\browsers\chrome-<version>\`:
 `%LOCALAPPDATA%\ai.clauseo.desktop\browsers\chrome-<version>\chrome-win64\chrome.exe` on
@@ -826,13 +823,17 @@ Authenticode signed (checked 2026-11-08 on 157.0.8103.38). On machines enforcing
 Control or a WDAC policy that requires signed code, it will not start unless you allow it by
 hash or by path. Hash rules break at every new version; a path rule on
 `%LOCALAPPDATA%\ai.clauseo.desktop\browsers\` covers every version, but that folder is
-writable by the user, so weigh it against your policy. Installing Google Chrome instead avoids
-it: Clauseo then uses that and never downloads Chrome for Testing.
+writable by the user, so weigh it against your policy. Installing Google Chrome does not avoid
+it: Clauseo never uses an installed Chrome.
 
-**Keeping it current.** Once a newer Chrome major version is out, the list moves to it. A Chrome
-for Testing more than one major version behind the list's (the list at 157: 156 still runs, 155
-doesn't) doesn't start, and the app offers the download, which fetches the listed version. If
-no signed list checks out at all, a downloaded Chrome for Testing doesn't start, and the app
+**Keeping it current.** Once a newer Chrome is out, the list moves to it. Only the exact version
+the list names starts (the list at 157.0.8103.38: neither 157.0.8103.37 nor anything newer);
+otherwise the app offers the download, which fetches the listed version. At every start Clauseo
+also checks the downloaded folder against the record it wrote when it installed it (every
+file's size, mode and sha256, kept in `<data>\browser-pins\`): a file added, removed or changed
+stops the browser, and the app offers the download again. If no signed list checks out at all,
+the newest is dated ahead of the computer's clock, or the stored list stopped checking out and
+none as new has been fetched again, a downloaded Chrome for Testing doesn't start, and the app
 tells the lawyer it couldn't check the browser's version. If the newest list Clauseo has is more
 than 14 days old (the fetch blocked, say), the browser still runs and the app shows a notice that
 its browser list is out of date. Past 45 days the browser stops: a downloaded Chrome for Testing
@@ -841,8 +842,7 @@ old to use and can't be updated right now. Age is the list's signed `published` 
 computer's clock, so a replayed old list counts as old, and the list bundled with an installer
 ages the same way. Clauseo publishes a fresh list every day; letting `github.com` and
 `release-assets.githubusercontent.com` through (below) keeps it current and clears both. Only the
-browser stops; every other tool keeps working. None of this applies to an installed Google Chrome
-or Edge.
+browser stops; every other tool keeps working.
 
 **Your policy still comes first.** `RemoteDebuggingAllowed` (above) is checked before any
 browser starts, Chrome for Testing included, and `browser.allow_when_remote_debugging_disabled`
@@ -868,7 +868,7 @@ allows only the app's own content and its bridge (`app.security.csp` in
 | Sites the agent searches and opens | Web search and Clauseo's browser | Only while `tools.web_search` or `tools.browser` is on |
 | `github.com` (`/clauseo-ai/blocklist/releases/download/current/blocklist-v1.txt.gz` and `blocklist-v1.txt.gz.minisig`), then `release-assets.githubusercontent.com` | Clauseo's signed unsafe-site list: phishing domains and known botnet C2 addresses, which the egress proxy refuses ([decision 0053](decisions/0053-blocklist.md)). The app checks its signature and never applies an older list | Once at start, just after the stored or bundled copy is read, then every 6 hours (±30 minutes; 10 minutes after a signature that does not match, once). Clauseo fetches it itself, outside the agent's sandbox and never through the egress proxy, through `network.upstream_proxy` when it is set, otherwise `HTTPS_PROXY` (and `NO_PROXY`), then the OS's proxy settings, PAC included, asked for each request; a proxy setting Clauseo refuses (a URL with a password, say) fails the fetch rather than going around the proxy. TLS trusts the OS's certificate store, so a firm CA installed there works; `network.ca_certs` is not used for this fetch. Redirects are followed only to `release-assets.githubusercontent.com` (where `github.com` answers 302, `curl -sI`, 2026-11-07) and `objects.githubusercontent.com`, https only. A 404 or a failed fetch keeps the list in use. Off when `network.unsafe_site_list_updates` is false (section 6; a change in the policy file takes effect when Clauseo next starts): no request at all, and the list bundled with the app or the last one fetched is still enforced |
 | `github.com` (`/clauseo-ai/browser-pins/releases/download/current/browser-pins-v1.json` and `browser-pins-v1.json.minisig`), then `release-assets.githubusercontent.com` | Clauseo's signed browser list: the one Chrome for Testing version Clauseo downloads, with each zip's sha256 and size ([section 6](#chrome-for-testing-what-clauseo-downloads)). The app checks its signature and never applies an older list | With the unsafe-site list's fetches above (at start, then every 6 hours), even when `network.unsafe_site_list_updates` is false, which concerns the unsafe-site list only. Same route: `network.upstream_proxy` when set, else the OS's proxy settings; the OS's certificate store; redirects only to `release-assets.githubusercontent.com` and `objects.githubusercontent.com`, https only. A failed fetch keeps the list in use; after 14 days without a newer one the app shows a notice, and after 45 days a downloaded Chrome for Testing no longer starts |
-| `storage.googleapis.com` (`/chrome-for-testing-public/<version>/<platform>/chrome-<platform>.zip`) | Google's Chrome for Testing, Clauseo's browser where no Google Chrome is installed ([section 6](#chrome-for-testing-what-clauseo-downloads)) | Only when the lawyer agrees to download it (no Google Chrome installed; never on Windows ARM64). At most 400 MiB, checked against the signed list's sha256 and size. Through `HTTPS_PROXY` only, not the OS's proxy settings or `network.upstream_proxy` yet; no redirect followed |
+| `storage.googleapis.com` (`/chrome-for-testing-public/<version>/<platform>/chrome-<platform>.zip`) | Google's Chrome for Testing, Clauseo's only browser ([section 6](#chrome-for-testing-what-clauseo-downloads)) | Only when the lawyer agrees to download it (never on Windows ARM64). At most 400 MiB, checked against the signed list's sha256 and size. Same route as the browser list: `network.upstream_proxy` when set, else `HTTPS_PROXY` (and `NO_PROXY`), then the OS's proxy settings, PAC included; no redirect followed |
 | `data.clauseo.chat` | Clauseo's optional paid data connectors. The first, case-law, is Indian Kanoon through Clauseo's relay: for each call, the tool name and its arguments (search words, document ids) go to `data.clauseo.chat` with the lawyer's token, and that server sends searches on to Indian Kanoon. Also the sign-in, `pricing.json`, account reads and recharges | `pricing.json` when Settings opens (at most once a day, or 10 minutes after a fetch that failed); the rest only after a lawyer adds a connector. Only while `tools.connectors` is on (sign-out and remove excepted). Clauseo makes these calls itself, outside the agent's sandbox; the agent never reaches this host. The host side ships with task R24 |
 
 Opening a downloaded installer also makes Windows check it with SmartScreen

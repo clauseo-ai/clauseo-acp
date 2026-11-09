@@ -4,7 +4,7 @@
 //! `BrowserPolicyUnreadable`, until a later launch reads it, unless the firm's Clauseo policy
 //! allows Clauseo's browser anyway; a policy that says nothing, or holds a bad value, leaves the
 //! browser on. With the policy on, a Chrome for Testing Clauseo downloaded is judged by the
-//! signed browser pins: none that verify, `BrowserListUnavailable`; two majors behind,
+//! signed browser pins: none that verify, `BrowserListUnavailable`; not the pinned version,
 //! `BrowserOutOfDate`; pins over 45 days old, `BrowserListExpired`; else offered, with
 //! `BrowserListOld` when the pins are over 14 days old.
 
@@ -27,7 +27,6 @@ use crate::profile_rig::{
     template, turn,
 };
 use crate::support::Dir;
-use crate::write;
 
 /// A firm policy that says `found` at Edge's user place.
 #[derive(Debug)]
@@ -135,20 +134,10 @@ fn states(
         dir.set_policy(policy);
     }
     let app = dir.data().join("app");
-    let cft = app
-        .join("browsers")
-        .join("chrome-131.0.6778.85")
-        .join("chrome-win64")
-        .join("chrome.exe");
-    write::create_dir_all(cft.parent().unwrap());
-    write::write(&cft, b"");
+    crate::browser_install::put_chrome_for_testing(&app, Platform::WindowsX64);
     let roots = ChromeRoots {
         platform: Platform::WindowsX64,
         root: dir.data().join("no-root"),
-        home: None,
-        program_files: None,
-        program_files_x86: None,
-        local_app_data: None,
         app_data: app,
     };
     let launcher = Wired::new(&dir);
@@ -268,7 +257,7 @@ fn chrome_for_testing_without_verified_pins_is_list_unavailable() {
 }
 
 #[test]
-fn chrome_for_testing_two_majors_behind_the_pins_is_out_of_date() {
+fn chrome_for_testing_not_at_the_pinned_version_is_out_of_date() {
     assert_eq!(
         reason(
             "cft_out_of_date",

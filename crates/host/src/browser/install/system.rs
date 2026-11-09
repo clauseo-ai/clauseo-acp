@@ -8,7 +8,9 @@
 //! a cancel ends its tree and waits for it to exit before the working folder is removed.
 //!
 //! Every curl gets `-q` first (no `.curlrc` may add flags), [`CURL_FLAGS`] and `--max-filesize`
-//! with the pin's size. The zip's download writes the response headers with `-D`, and the
+//! with the pin's size, and its route on the command line: `--proxy http://<host>:<port>` for
+//! the proxy the route asked for, else `--noproxy *`, so no variable or file of curl's own picks
+//! another ([`download_args`]). The zip's download writes the response headers with `-D`, and the
 //! progress comes from polling the partial file's size against the final response's
 //! `Content-Length`.
 
@@ -23,6 +25,7 @@ use std::time::Duration;
 
 use clauseo_process::{LaunchSpec, Launched, SpawnOptions, Timer, spawn_in_tree};
 use clauseo_protocol::BrowserInstallFailure;
+use clauseo_sandbox::Route;
 use futures::AsyncReadExt;
 use futures::future::{self, Either};
 
@@ -80,6 +83,7 @@ impl InstallTools for SystemTools {
     fn download(
         &self,
         url: &str,
+        route: &Route,
         zip: &Path,
         max_bytes: u64,
         cancel: &Cancel,
@@ -88,7 +92,7 @@ impl InstallTools for SystemTools {
         let curl = tool("curl")?;
         let work = zip.parent().unwrap_or(zip);
         let headers = work.join("headers.txt");
-        let args = download_args(url, &headers, zip, max_bytes);
+        let args = download_args(url, route, &headers, zip, max_bytes);
         let mut poll = Poll {
             headers: &headers,
             zip,
@@ -186,15 +190,27 @@ fn codesign(app: &Path, cancel: &Cancel) -> Result<(), String> {
     }
 }
 
-/// The zip download's curl arguments: at most `max_bytes` (the pin's size), the response
-/// headers to `headers`, the body to `zip`.
+/// The zip download's curl arguments: through `route` (`--proxy`, or `--noproxy *` for
+/// none), at most `max_bytes` (the pin's size), the response headers to `headers`, the body
+/// to `zip`.
 pub(super) fn download_args(
     url: &str,
+    route: &Route,
     headers: &Path,
     zip: &Path,
     max_bytes: u64,
 ) -> Vec<OsString> {
     let mut args = curl_args::<&str>([]);
+    match route {
+        Route::Direct => args.extend(["--noproxy".into(), "*".into()]),
+        // An IPv6 literal comes without brackets.
+        Route::Http { host, port } if host.contains(':') => {
+            args.extend(["--proxy".into(), format!("http://[{host}]:{port}").into()]);
+        }
+        Route::Http { host, port } => {
+            args.extend(["--proxy".into(), format!("http://{host}:{port}").into()]);
+        }
+    }
     args.extend([
         "--max-filesize".into(),
         max_bytes.to_string().into(),

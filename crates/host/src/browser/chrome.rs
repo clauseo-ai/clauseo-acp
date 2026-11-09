@@ -1,29 +1,30 @@
 //! Which Chrome a session's browser runs (S27, "Which Chrome"; decision record 0029). The host
 //! looks on the launch-prep thread, never on the actor, and fills `{browser_executable}` with
-//! what it found. None found is `BrowserNotInstalled`. Before it looks, the launch prep asks
-//! the firm's Chrome and Edge policy (`super::rd_policy`), so nothing here runs when that blocks.
+//! what it found. Before it looks, the launch prep asks the firm's Chrome and Edge policy
+//! (`super::rd_policy`), so nothing here runs when that blocks.
 //!
-//! In this order:
-//! 1. Google Chrome installed on the machine: on macOS
-//!    `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`, then the same under
-//!    `~/Applications`; on Windows `%ProgramFiles%`, `%ProgramFiles(x86)%`, then `%LOCALAPPDATA%`,
-//!    each with `\Google\Chrome\Application\chrome.exe`.
-//! 2. On Windows only, Microsoft Edge (`%ProgramFiles(x86)%`, then `%ProgramFiles%`, with
-//!    `\Microsoft\Edge\Application\msedge.exe`), only while [`EDGE_ALLOWED`] is true.
-//! 3. Chrome for Testing that Clauseo downloaded into `<app data>/browsers/chrome-<version>/`,
-//!    the highest version first, with the binary where the Chrome for Testing zip puts it.
-//!    Skipped on Windows ARM64, where only a slow emulated x64 build exists.
-//! 4. Otherwise none.
+//! On macOS and Windows x64 the guarded browser is only ever the Chrome for Testing that Clauseo
+//! downloaded (`super::install`), at exactly the version the newest verified browser pins
+//! (`super::pins`) name: `<app data>/browsers/chrome-<pinned version>/`, with the binary where
+//! the zip puts it. A Google Chrome or Microsoft Edge installed on the machine is never used: the
+//! firm updates those, not Clauseo, so the pins could not vouch for them. Windows ARM64, where
+//! only a slow emulated x64 build exists, gets none. [`find_checked`] judges, in order:
+//! 1. No `browsers/chrome-<version>/` folder at all: `BrowserNotInstalled` (the app offers the
+//!    download). The pins are read only past this point.
+//! 2. No pins that verify, or the newest dated over a day ahead of the clock or below the floor
+//!    (`PinsSource::newest`): `BrowserListUnavailable`. Pins over 45 days old:
+//!    `BrowserListExpired`.
+//! 3. No folder named for the pinned version, compared as the whole version string (a folder
+//!    above the pin as much as one below): `BrowserOutOfDate` (the app offers the download,
+//!    which fetches the pinned version).
+//! 4. The pinned folder against its install record (`install::record`), walked and hashed
+//!    again at every start, before the path goes to the guard: a missing record, or a file
+//!    added, removed or changed, is `BrowserNotInstalled` with a warning, so the download, which
+//!    replaces the folder and its record, is offered again.
 //!
-//! The launch prep asks [`find_checked`], which judges a Chrome for Testing Clauseo downloaded
-//! (only that: Chrome and Edge installed on the machine never are) by the newest verified
-//! browser pins (`super::pins`): more than one major version behind the pinned one is
-//! `BrowserOutOfDate` (pins of 157: 156 is fine, 155 refused), pins over 45 days old are
-//! `BrowserListExpired`, and no pins that verify is `BrowserListUnavailable`. The pins are read
-//! only when such a browser is the one found.
-//!
-//! On Linux (development and CI only) the host takes `/usr/bin/google-chrome`, then
-//! `/usr/bin/chromium`.
+//! On Linux, which Clauseo does not ship (development and CI only), the host takes
+//! `/usr/bin/google-chrome`, then `/usr/bin/chromium`, unpinned and unchecked. That code is built
+//! on Linux only, so nothing on macOS or Windows can reach it.
 //!
 //! Every root comes in through [`ChromeRoots`], so the tests use fixture folders.
 
@@ -32,11 +33,8 @@ use std::path::{Path, PathBuf};
 use clauseo_blocklist::Generated;
 use clauseo_protocol::{Timestamp, ToolsUnavailableReason};
 
+use super::install::record;
 use super::pins::Pins;
-
-/// Whether Microsoft Edge may stand in for Chrome on Windows. False until G17 item 4 shows it
-/// works with agent-browser (its issues #177 and #1867; agent-browser does not detect Edge).
-pub const EDGE_ALLOWED: bool = false;
 
 /// The folder under the app data folder that holds Chrome for Testing downloads.
 pub const BROWSERS_DIR: &str = "browsers";
@@ -119,93 +117,22 @@ impl Platform {
 pub struct ChromeRoots {
     /// The machine.
     pub platform: Platform,
-    /// The file system root for absolute paths: `/` on macOS and Linux. On macOS
-    /// `Applications/...` is looked for under it, on Linux `usr/bin/...`.
+    /// Linux only (development and CI): the file system root `usr/bin/...` is looked for under,
+    /// `/` in production. Never read on another platform.
     pub root: PathBuf,
-    /// macOS: the home folder, for `~/Applications`.
-    pub home: Option<PathBuf>,
-    /// Windows: `%ProgramFiles%`.
-    pub program_files: Option<PathBuf>,
-    /// Windows: `%ProgramFiles(x86)%`.
-    pub program_files_x86: Option<PathBuf>,
-    /// Windows: `%LOCALAPPDATA%`.
-    pub local_app_data: Option<PathBuf>,
-    /// Clauseo's app data folder, which holds `browsers/`.
+    /// Clauseo's app data folder, which holds `browsers/` and `browser-pins/`.
     pub app_data: PathBuf,
 }
 
 impl ChromeRoots {
-    /// This machine's roots, with `app_data` the host's data folder. Reads the environment
-    /// (`HOME`, `ProgramFiles`, `ProgramFiles(x86)`, `LOCALAPPDATA`), so it runs off the actor
-    /// with the rest of the launch prep.
+    /// This machine's roots, with `app_data` the host's data folder.
     pub fn system(app_data: &Path) -> Self {
-        let var = |name: &str| {
-            std::env::var_os(name)
-                .filter(|value| !value.is_empty())
-                .map(PathBuf::from)
-        };
         Self {
             platform: Platform::current(),
             root: PathBuf::from("/"),
-            home: var("HOME"),
-            program_files: var("ProgramFiles"),
-            program_files_x86: var("ProgramFiles(x86)"),
-            local_app_data: var("LOCALAPPDATA"),
             app_data: app_data.to_owned(),
         }
     }
-
-    /// The places to look, in order, before Chrome for Testing; Edge's only when
-    /// `edge_allowed`.
-    fn installed(&self, edge_allowed: bool) -> Vec<PathBuf> {
-        let chrome_app = Path::new("Applications")
-            .join("Google Chrome.app")
-            .join("Contents")
-            .join("MacOS")
-            .join("Google Chrome");
-        let chrome_exe = Path::new("Google")
-            .join("Chrome")
-            .join("Application")
-            .join("chrome.exe");
-        let edge_exe = Path::new("Microsoft")
-            .join("Edge")
-            .join("Application")
-            .join("msedge.exe");
-        match self.platform {
-            Platform::MacArm64 | Platform::MacX64 => [Some(&self.root), self.home.as_ref()]
-                .into_iter()
-                .flatten()
-                .map(|base| base.join(&chrome_app))
-                .collect(),
-            Platform::WindowsX64 | Platform::WindowsArm64 => {
-                let chrome = [
-                    &self.program_files,
-                    &self.program_files_x86,
-                    &self.local_app_data,
-                ]
-                .into_iter()
-                .flatten()
-                .map(|base| base.join(&chrome_exe));
-                let edge = [&self.program_files_x86, &self.program_files]
-                    .into_iter()
-                    .flatten()
-                    .filter(|_| edge_allowed)
-                    .map(|base| base.join(&edge_exe));
-                chrome.chain(edge).collect()
-            }
-            Platform::Linux => ["google-chrome", "chromium"]
-                .into_iter()
-                .map(|name| self.root.join("usr").join("bin").join(name))
-                .collect(),
-            Platform::Other => Vec::new(),
-        }
-    }
-}
-
-/// The Chrome this machine offers, or `None` (`BrowserNotInstalled`), unjudged. File system
-/// calls: off the actor.
-pub fn find(roots: &ChromeRoots) -> Option<PathBuf> {
-    locate(roots, EDGE_ALLOWED).map(|found| found.path)
 }
 
 /// The Chrome the launch prep picked.
@@ -213,29 +140,39 @@ pub fn find(roots: &ChromeRoots) -> Option<PathBuf> {
 pub struct Picked {
     /// Its binary.
     pub path: PathBuf,
-    /// When it is a Chrome for Testing Clauseo downloaded: the `published` time of the pins it
-    /// was judged by, for the freshness notice (`pins::notice`). `None` for Chrome or Edge
-    /// installed on the machine.
+    /// The `published` time of the pins it was judged by, for the freshness notice
+    /// (`pins::notice`). `None` for Linux's unpinned development Chrome.
     pub pins_published: Option<Generated>,
 }
 
-/// The Chrome this machine offers, judged: Chrome or Edge installed on the machine as found;
-/// a Chrome for Testing Clauseo downloaded only when `pins()` (called then, and only then)
-/// gives verified pins at most 45 days older than `now` whose major version is at most one
-/// above the browser's. Else why not: `BrowserNotInstalled`, `BrowserListUnavailable`,
-/// `BrowserListExpired` or `BrowserOutOfDate`. File system calls: off the actor.
+/// The Chrome for this session, judged as the module says: the pinned Chrome for Testing whose
+/// folder matches its install record, with the date of the pins (`pins()`, called only once a
+/// downloaded folder is there) that named it. Else why not: `BrowserNotInstalled`,
+/// `BrowserListUnavailable`, `BrowserListExpired` or `BrowserOutOfDate`. Reads and hashes the
+/// whole folder: off the actor.
 pub fn find_checked(
     roots: &ChromeRoots,
     now: Timestamp,
     pins: impl FnOnce() -> Option<Pins>,
 ) -> Result<Picked, ToolsUnavailableReason> {
-    let found = locate(roots, EDGE_ALLOWED).ok_or(ToolsUnavailableReason::BrowserNotInstalled)?;
-    let Some(version) = found.downloaded else {
-        return Ok(Picked {
-            path: found.path,
-            pins_published: None,
-        });
+    #[cfg(target_os = "linux")]
+    if roots.platform == Platform::Linux {
+        return linux_development(roots)
+            .map(|path| Picked {
+                path,
+                pins_published: None,
+            })
+            .ok_or(ToolsUnavailableReason::BrowserNotInstalled);
+    }
+    let (Some(binary), Some(platform)) = (roots.platform.cft_binary(), roots.platform.cft_name())
+    else {
+        return Err(ToolsUnavailableReason::BrowserNotInstalled);
     };
+    let browsers = roots.app_data.join(BROWSERS_DIR);
+    let downloaded = downloaded_versions(&browsers);
+    if downloaded.is_empty() {
+        return Err(ToolsUnavailableReason::BrowserNotInstalled);
+    }
     let pins = pins().ok_or(ToolsUnavailableReason::BrowserListUnavailable)?;
     if super::pins::expired(pins.published(), now) {
         tracing::info!(
@@ -244,79 +181,65 @@ pub fn find_checked(
         );
         return Err(ToolsUnavailableReason::BrowserListExpired);
     }
-    let installed = version.first().copied().unwrap_or_default();
-    if installed.saturating_add(1) < pins.major() {
+    let pinned = pins.version();
+    if !downloaded.iter().any(|version| version == pinned) {
         tracing::info!(
-            installed,
-            pinned = pins.version(),
+            pinned,
             run = pins.run(),
-            "the downloaded Chrome for Testing is out of date"
+            "no downloaded Chrome for Testing is the pinned version"
         );
         return Err(ToolsUnavailableReason::BrowserOutOfDate);
     }
+    let folder = browsers.join(format!("{CFT_PREFIX}{pinned}"));
+    if let Err(refusal) = record::verify(&roots.app_data, platform, pinned, &folder) {
+        tracing::warn!(
+            %refusal,
+            version = pinned,
+            "the downloaded Chrome for Testing does not match its install record; refused"
+        );
+        return Err(ToolsUnavailableReason::BrowserNotInstalled);
+    }
+    let path = folder.join(binary);
+    // The record checked every link in the folder; the binary must still resolve inside it.
+    let inside = dunce::canonicalize(&browsers).is_ok_and(|real_browsers| {
+        dunce::canonicalize(&path).is_ok_and(|real| real.starts_with(&real_browsers))
+    });
+    if !(inside && is_file(&path)) {
+        tracing::warn!("the downloaded Chrome for Testing has no binary; refused");
+        return Err(ToolsUnavailableReason::BrowserNotInstalled);
+    }
     Ok(Picked {
-        path: found.path,
+        path,
         pins_published: Some(pins.published()),
     })
 }
 
-/// A Chrome found, before any judging.
-struct Found {
-    path: PathBuf,
-    /// The version of a Chrome for Testing Clauseo downloaded; `None` for an installed one.
-    downloaded: Option<Vec<u64>>,
-}
-
-/// The Chrome found with the Edge switch given, so its test covers both values.
-fn locate(roots: &ChromeRoots, edge_allowed: bool) -> Option<Found> {
-    let installed = roots
-        .installed(edge_allowed)
-        .into_iter()
-        .find(|path| is_file(path))
-        .map(|path| Found {
-            path,
-            downloaded: None,
-        });
-    installed.or_else(|| {
-        chrome_for_testing(roots).map(|(version, path)| Found {
-            path,
-            downloaded: Some(version),
-        })
-    })
-}
-
-/// [`find`] with the Edge switch given, for its test.
-#[cfg(test)]
-fn find_with(roots: &ChromeRoots, edge_allowed: bool) -> Option<PathBuf> {
-    locate(roots, edge_allowed).map(|found| found.path)
-}
-
-/// The highest-versioned Chrome for Testing under `<app data>/browsers/` whose binary is there.
-/// A version folder must be a real folder (a link is passed over, by `file_type`, which does not
-/// follow it), and the binary, links resolved, must still sit under the browsers folder, so a
-/// link planted in the folder cannot pick another program. The folder must be outside what an
-/// agent can write (record 0029). With its version.
-fn chrome_for_testing(roots: &ChromeRoots) -> Option<(Vec<u64>, PathBuf)> {
-    let binary = roots.platform.cft_binary()?;
-    let browsers = roots.app_data.join(BROWSERS_DIR);
-    let real_browsers = dunce::canonicalize(&browsers).ok()?;
-    let mut found: Vec<(Vec<u64>, PathBuf)> = std::fs::read_dir(&browsers)
-        .ok()?
+/// The versions of the Chrome for Testing folders under `browsers`, as their names spell them:
+/// real folders only (a link is passed over, by `file_type`, which does not follow it) named
+/// `chrome-<dotted digits>`. The folder must be outside what an agent can write (record 0029).
+fn downloaded_versions(browsers: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(browsers) else {
+        return Vec::new();
+    };
+    entries
         .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
         .filter_map(|entry| {
-            if !entry.file_type().ok()?.is_dir() {
-                return None;
-            }
             let name = entry.file_name();
-            let version = version(name.to_str()?.strip_prefix(CFT_PREFIX)?)?;
-            let path = entry.path().join(&binary);
-            let inside =
-                dunce::canonicalize(&path).is_ok_and(|real| real.starts_with(&real_browsers));
-            (inside && is_file(&path)).then_some((version, path))
+            let found = name.to_str()?.strip_prefix(CFT_PREFIX)?;
+            version(found).is_some().then(|| found.to_owned())
         })
-        .collect();
-    found.sort();
-    found.pop()
+        .collect()
+}
+
+/// Linux (development and CI only, never shipped): `/usr/bin/google-chrome`, then
+/// `/usr/bin/chromium`, under `roots.root`; unpinned and unchecked.
+#[cfg(target_os = "linux")]
+fn linux_development(roots: &ChromeRoots) -> Option<PathBuf> {
+    ["google-chrome", "chromium"]
+        .into_iter()
+        .map(|name| roots.root.join("usr").join("bin").join(name))
+        .find(|path| is_file(path))
 }
 
 /// A dotted version, such as `131.0.6778.85`, as numbers to compare; `None` when it is not one.
@@ -330,7 +253,7 @@ pub(crate) fn version(text: &str) -> Option<Vec<u64>> {
         .collect()
 }
 
-/// A regular file, following links (an installed Chrome may be a link).
+/// A regular file, following links (Linux's `/usr/bin/google-chrome` is one).
 fn is_file(path: &Path) -> bool {
     std::fs::metadata(path).is_ok_and(|meta| meta.is_file())
 }

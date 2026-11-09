@@ -161,15 +161,17 @@ fn a_slot_is_free_once_its_session_ends() {
     );
 }
 
-/// With no Chrome forced, the launch prep searches the roots it is given: the Chrome there fills
-/// `{browser_executable}`, and with none the browser is `BrowserNotInstalled`.
+/// With no Chrome forced, the launch prep searches the roots it is given: the pinned Chrome for
+/// Testing there, its install record matching, fills `{browser_executable}`, and with none the
+/// browser is `BrowserNotInstalled`.
 #[test]
 fn the_chrome_the_prep_finds_fills_the_entry() {
     let dir = Dir::new("browser_chrome_found", &[]);
     let roots_dir = dir.data().join("chrome-roots");
-    let chrome = roots_dir.join("usr").join("bin").join("chromium");
-    write::create_dir_all(chrome.parent().unwrap());
-    write::write(&chrome, b"");
+    let chrome = crate::browser_install::put_chrome_for_testing(
+        &roots_dir.join("app"),
+        Platform::WindowsX64,
+    );
     let chrome_text = crate::profile_rig::path_text(&chrome);
     let mut entry = filled_browser();
     entry["env"][3]["value"] = json!(chrome_text);
@@ -189,21 +191,19 @@ fn the_chrome_the_prep_finds_fills_the_entry() {
         json!({"tools": {"browser": true, "web_search": false}}),
     );
     let roots = |root: &Path| ChromeRoots {
-        platform: Platform::Linux,
+        platform: Platform::WindowsX64,
         root: root.to_owned(),
-        home: None,
-        program_files: None,
-        program_files_x86: None,
-        local_app_data: None,
         app_data: root.join("app"),
     };
     let launcher = Wired::new(&dir);
     let found = roots(&roots_dir);
+    let pins = crate::browser_install::pins(&dir);
     let host = dir.start_launching(0, Arc::<Wired>::clone(&launcher), move |config| {
-        config
+        let config = config
             .with_profile_hook(Box::new(browser_hook()))
             .with_egress_proxy(Arc::new(TestProxy(8123)))
-            .with_chrome_roots(found)
+            .with_chrome_roots(found);
+        pins.apply(config)
     });
     let matter = host.create_matter("m", &dir.folder("m", &[]));
     let thread = host.create_thread(matter, CLAUDE);

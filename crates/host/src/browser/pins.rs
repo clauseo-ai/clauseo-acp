@@ -17,15 +17,20 @@
 //!   download's thread) read both from disk each time ([`PinsSource::newest`]) and use the
 //!   newer that verifies; with neither, the downloaded Chrome for Testing is refused
 //!   (`BrowserListUnavailable`) and the download too (`list_unavailable`).
+//! - Floor record (`floor.rs`): beside the stored pair, a host-owned file with the `published`
+//!   and `version` of the newest manifest ever stored, written before the pair. While no copy
+//!   that verifies stands at or above it (the stored pair broken or gone), readers use none,
+//!   rather than the lower bundled copy, until a fetch stores one at or above it.
 //! - Freshness: the used copy's signed `published` against the host clock. Over 14 days the
 //!   downloaded browser carries `BrowserListOld`; over 45 days it is refused
 //!   (`BrowserListExpired`) and the download too (`list_unavailable`). The bundled copy counts
 //!   by its own date. A daily heartbeat (same version, newer date) keeps it fresh.
-//! - No rollback ([`accept`]): a fetched manifest is stored only when it is the same bytes as
-//!   the newest verified copy the app has, at any date ([`PinsSource::floor`]), or is published
-//!   strictly later and pins no lower version. A copy dated over a day ahead of the host clock
-//!   is not used, as the block list's is not, but still counts as the floor: setting the clock
-//!   back lowers nothing.
+//! - No rollback ([`accept`]): a fetched manifest is stored only when it stands at or above the
+//!   floor record and is the same bytes as the newest verified copy the app has, at any date
+//!   ([`PinsSource::floor`]), or is published strictly later and pins no lower version.
+//! - Clock set back: when the newest verified copy, or the floor record, is dated over a day
+//!   ahead of the host clock, readers use no copy at all (`BrowserListUnavailable`), never the
+//!   lower one: setting the clock back lowers nothing.
 
 use std::collections::BTreeMap;
 use std::io::{self, Read as _};
@@ -37,8 +42,10 @@ use clauseo_protocol::{Timestamp, ToolNotice};
 use crate::blocklist::DAY;
 use crate::write;
 
+pub mod floor;
 mod parse;
 
+pub use floor::Floor;
 pub use parse::PinsError;
 
 /// The current key's minisign public key file (key id C5496A136395A5B3), as in
@@ -116,11 +123,6 @@ impl Pins {
         &self.version
     }
 
-    /// The pinned version's major number.
-    pub fn major(&self) -> u64 {
-        self.numbers.first().copied().unwrap_or_default()
-    }
-
     /// The publishing run's number from the trusted comment: for the log only, never read.
     pub fn run(&self) -> &str {
         &self.run
@@ -165,15 +167,17 @@ impl Pins {
 }
 
 /// The floor rule: may `candidate` stand against `floor`, the newest verified manifest the
-/// app has at any date (`PinsSource::floor`; `None`: none)? Only when it is the same bytes,
+/// app has at any date (`PinsSource::floor`; `None`: none), and `record`, the floor record
+/// (`None`: none)? Only when it stands at or above `record`, and is the same bytes as `floor`
 /// or is published strictly later and pins no lower version. So a heartbeat (the same version,
 /// published later) is taken and resets freshness, and a replay of an older or equally dated
-/// manifest is refused.
-pub fn accept(candidate: &Pins, floor: Option<&Pins>) -> bool {
-    floor.is_none_or(|floor| {
-        candidate.digest == floor.digest
-            || (candidate.published > floor.published && candidate.numbers >= floor.numbers)
-    })
+/// manifest is refused, even while the stored pair is broken and only the bundled copy verifies.
+pub fn accept(candidate: &Pins, floor: Option<&Pins>, record: Option<&Floor>) -> bool {
+    record.is_none_or(|record| record.covered_by(candidate))
+        && floor.is_none_or(|floor| {
+            candidate.digest == floor.digest
+                || (candidate.published > floor.published && candidate.numbers >= floor.numbers)
+        })
 }
 
 /// Whether `candidate` is the same bytes as `other`.
@@ -285,26 +289,45 @@ pub struct PinsSource {
 }
 
 impl PinsSource {
-    /// The copy to use: the newer verified of the bundled and the stored copy, each set aside
-    /// when dated over a day ahead of `now`; `None` when neither verifies. A refused copy is
-    /// logged.
+    /// The copy to use: the newer verified of the bundled and the stored copy ([`Self::floor`]).
+    /// `None` (logged) when neither verifies; when that copy, or the floor record, is dated over
+    /// a day ahead of `now` (the clock set back: the lower copy is not used instead); and when
+    /// the floor record is unreadable or that copy stands below it (the stored pair broken: the
+    /// lower bundled copy is not used instead).
     pub fn newest(&self, now: Timestamp) -> Option<Pins> {
-        let ahead = |which: &'static str, pins: Pins| {
-            if !pins.is_ahead_of(now) {
-                return Some(pins);
-            }
-            tracing::warn!(
-                which,
-                published = pins.published.as_str(),
-                "a browser pins copy is dated over a day ahead of this computer's clock; set aside"
-            );
-            None
+        let Ok(record) = floor::read(&self.stored) else {
+            tracing::warn!("the browser pins floor record is unreadable; no browser pins are used");
+            return None;
         };
-        let (bundled, stored) = self.verified();
-        newer_of(
-            bundled.and_then(|pins| ahead("bundled", pins)),
-            stored.and_then(|pins| ahead("stored", pins)),
-        )
+        let best = self.floor()?;
+        if best.is_ahead_of(now)
+            || record
+                .as_ref()
+                .is_some_and(|record| record.is_ahead_of(now))
+        {
+            tracing::warn!(
+                published = best.published.as_str(),
+                "the browser pins are dated over a day ahead of this computer's clock; none used"
+            );
+            return None;
+        }
+        if let Some(record) = record
+            && !record.covered_by(&best)
+        {
+            tracing::warn!(
+                floor = record.published().as_str(),
+                published = best.published.as_str(),
+                "no browser pins copy stands at or above the floor record; none used until a \
+                 newer one is fetched"
+            );
+            return None;
+        }
+        Some(best)
+    }
+
+    /// The floor record beside the stored pair (`floor.rs`): `Ok(None)` when there is none.
+    pub fn floor_record(&self) -> Result<Option<Floor>, floor::Unreadable> {
+        floor::read(&self.stored)
     }
 
     /// The floor: the newer verified of the bundled and the stored copy WHATEVER
@@ -398,12 +421,13 @@ fn read_capped(path: &Path, cap: u64) -> io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
-/// Stores a manifest and its signature in `folder` (created if missing), as the block list's
-/// pair: each file replaced atomically, the manifest first and its signature last, then the
-/// folder synced. A crash between the two leaves a pair that fails verification, so readers
-/// fall back to the bundled copy until the next fetch writes a good pair.
-pub(crate) fn store(folder: &Path, body: &[u8], signature: &[u8]) -> io::Result<()> {
-    write::create_dir_all(folder)?;
+/// Stores `pins`, read from `body` and `signature`, in `folder` (created if missing), as the
+/// block list's pair: the floor record raised to them first (`floor::raise`), then each file
+/// replaced atomically, the manifest first and its signature last, then the folder synced. A
+/// crash between the two leaves a pair that fails verification, and readers use no copy below
+/// the floor until the next fetch writes a good pair.
+pub(crate) fn store(folder: &Path, pins: &Pins, body: &[u8], signature: &[u8]) -> io::Result<()> {
+    floor::raise(folder, pins)?;
     let manifest = folder.join(MANIFEST_FILE);
     let minisig = folder.join(SIGNATURE_FILE);
     write::sweep_temp_files(&manifest);
