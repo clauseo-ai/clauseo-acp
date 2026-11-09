@@ -16,6 +16,7 @@ mod create;
 mod extend;
 mod fake;
 mod fake_acl;
+mod fake_machine;
 mod fake_more;
 mod local_low;
 mod network;
