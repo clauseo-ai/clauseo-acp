@@ -20,6 +20,12 @@ pub type NameOf<'a> = dyn FnMut(&Sid) -> Result<Option<AccountName>, String> + '
 /// LOCAL SYSTEM.
 const SYSTEM: &str = "S-1-5-18";
 
+/// LOCAL SYSTEM's names as an English Windows and the Task Scheduler give them back, matched
+/// without a lookup, so a launch's check of the stop and sweep tasks usually makes none. Another
+/// language's name is looked up (`NameOf`), as LOCAL SYSTEM, a well-known SID: answered on the
+/// machine, never by a domain controller.
+const SYSTEM_NAMES: [&str; 4] = ["LocalSystem", "SYSTEM", r"NT AUTHORITY\SYSTEM", r".\SYSTEM"];
+
 /// A principal or logon trigger user as read back: a SID's text in its canonical form, else the
 /// name as written, trimmed.
 pub fn account_text(read: &str) -> String {
@@ -29,8 +35,9 @@ pub fn account_text(read: &str) -> String {
 
 /// Whether `found` (as [`account_text`] gives it) names the account `expected` (a SID's text)
 /// does: the same SID, or a name that is the expected SID's local name ([`NameOf`]), without
-/// case, bare, after `.\`, or after the domain the lookup names. The Task Scheduler's own
-/// `LocalSystem` is LOCAL SYSTEM. `Err` when the expected SID's name can't be looked up.
+/// case, bare, after `.\`, or after the domain the lookup names. LOCAL SYSTEM's English names
+/// ([`SYSTEM_NAMES`], the Task Scheduler's own `LocalSystem` included) need no lookup. `Err`
+/// when the expected SID's name can't be looked up.
 pub fn same_account(found: &str, expected: &str, name_of: &mut NameOf<'_>) -> Result<bool, String> {
     let Ok(want) = Sid::parse(expected.trim()) else {
         return Ok(false);
@@ -42,7 +49,7 @@ pub fn same_account(found: &str, expected: &str, name_of: &mut NameOf<'_>) -> Re
     if found.is_empty() {
         return Ok(false);
     }
-    if want.as_str() == SYSTEM && found.eq_ignore_ascii_case("LocalSystem") {
+    if want.as_str() == SYSTEM && SYSTEM_NAMES.iter().any(|n| found.eq_ignore_ascii_case(n)) {
         return Ok(true);
     }
     let (prefix, account) = match found.rsplit_once('\\') {

@@ -148,6 +148,9 @@ registered by an earlier version keep their old `UninstallString` until reinstal
   them by hand (see
   [Clearing a leftover Windows sandbox by hand](#clearing-a-leftover-windows-sandbox-by-hand)), or
   reinstall Clauseo and then uninstall it.
+- Clauseo restores its `\Clauseo\SandboxStop`, `\Clauseo\SandboxSweep` and
+  `\Clauseo\SandboxRefresh` tasks if they're changed or removed, so disabling or deleting them
+  doesn't last. To remove them, uninstall Clauseo.
 
 ### Intune (Win32 app)
 

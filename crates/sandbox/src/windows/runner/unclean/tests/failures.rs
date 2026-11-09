@@ -160,7 +160,12 @@ fn tasks_that_cant_be_checked_are_read_once_more_then_refuse_the_logon() {
 fn a_task_scheduler_that_never_answers_refuses_the_launch_without_hanging() {
     use std::sync::mpsc;
 
-    use crate::windows::refresh::task_call::{TASK_CALL_LIMIT, repair_within, within};
+    use crate::windows::refresh::task_call::{Slot, TASK_CALL_LIMIT, repair_within, within};
+    static FIRST: Slot<Option<&'static str>> = Slot::new();
+    static RETRY: Slot<Option<&'static str>> = Slot::new();
+    static ANSWERED: Slot<Option<&'static str>> = Slot::new();
+    static STOP: Slot<bool> = Slot::new();
+    static SEVEN: Slot<u32> = Slot::new();
     assert_eq!(TASK_CALL_LIMIT, Duration::from_secs(10));
     // Each read hangs; the launch's bounded reads give up (here at 50 ms, at 10 s for real), so
     // this test ends rather than hanging.
@@ -174,8 +179,8 @@ fn a_task_scheduler_that_never_answers_refuses_the_launch_without_hanging() {
     };
     let limit = Duration::from_millis(50);
     let mut fake = Fake::new();
-    fake.queued_task_repairs = vec![repair_within(limit, hung(never))];
-    fake.task_repair = repair_within(limit, hung(never_again));
+    fake.queued_task_repairs = vec![repair_within(&FIRST, limit, hung(never))];
+    fake.task_repair = repair_within(&RETRY, limit, hung(never_again));
     let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
     assert_eq!(
         refused,
@@ -183,10 +188,10 @@ fn a_task_scheduler_that_never_answers_refuses_the_launch_without_hanging() {
     );
     // A request that hangs is given up on too; one that answers is passed on.
     let (keep_stop, stuck) = mpsc::channel::<()>();
-    let stop = within(limit, move || stuck.recv().is_ok());
+    let stop = within(&STOP, limit, move || stuck.recv().is_ok());
     assert!(stop.is_err());
-    assert_eq!(within(Duration::from_secs(5), || 7), Ok(7));
-    let answered = repair_within(Duration::from_secs(5), || Some(TASK_MISSING));
+    assert_eq!(within(&SEVEN, Duration::from_secs(5), || 7), Ok(7));
+    let answered = repair_within(&ANSWERED, Duration::from_secs(5), || Some(TASK_MISSING));
     assert_eq!(answered, Some(TASK_MISSING));
     drop((keep, keep_retry, keep_stop));
 }

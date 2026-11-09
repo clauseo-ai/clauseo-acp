@@ -1913,7 +1913,12 @@ computer." (`TASKS_UNCHECKED_AT_LAUNCH`). Every Task Scheduler call on the launc
 check, and the outer's requests for the stop and sweep tasks, at the logon and at the
 session's end) runs on its own thread and is given up on after 10 s
 (`refresh::task_call::TASK_CALL_LIMIT`): a check that didn't answer is couldn't-check, a
-request that didn't is one that failed. A launch refused for `AwaitingSweep` gives the same
+request that didn't is one that failed. The readiness check has the same bound, its local name
+lookups included. At most one call of each kind runs at a time: while one is still running, a
+new one waits on its answer within its own 10 s and starts no thread. The launch's check looks
+up no account name: the stop and sweep tasks run as LOCAL SYSTEM, matched by its well-known SID
+or its English names, and only another language's name for it is looked up, which the machine
+answers itself. A launch refused for `AwaitingSweep` gives the same
 words instead of "didn't finish". The host doesn't carry the words to Settings yet (R17 PR-E).
 
 **Healing without a prompt.** The shipped per-user install registered only the
@@ -1951,8 +1956,9 @@ so by the first launch the swap has usually happened and one run heals; the seco
 launch made before it finished. The host can run the same heal before it starts the runner
 (`runner::heal_before_launch`), showing "Clauseo is finishing an update before it starts the AI
 tool." (`runner::HEALING`) from its callback until the call returns; the runner's own check
-stays the final gate. The readiness check asks for a run the same way,
-waiting for nothing; its next check reads the result. No UAC prompt is involved.
+stays the final gate. The readiness check never asks for a run: it only reads and says what it
+found, so a Settings poll never starts the refresh or takes the set-up lock. The heal runs from
+a launch and from the repair alone. No UAC prompt is involved.
 
 **Per machine.** A per-machine `--adopt` has no owner to name in the descriptor, so it registers
 none of the three. The refresh task stays per-user only: IT updates a per-machine install. The

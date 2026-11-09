@@ -17,12 +17,9 @@ use super::task::{
     TaskError, TaskRead, read_task, read_tasks, request_admin_refresh, request_pool_stop,
     request_pool_sweep,
 };
-use super::task_call::{TASK_CALL_LIMIT, repair_within, within};
+use super::task_call::{Slot, TASK_CALL_LIMIT, ready_within, repair_within, within};
 use super::task_identity::action_exe;
-use super::task_identity::{
-    self, AccountName, ReadError, TASK_CHANGED, TASK_MISSING, TaskIdentity, TaskReader,
-    ready_with_tasks,
-};
+use super::task_identity::{self, AccountName, ReadError, TaskIdentity, TaskReader};
 use super::task_keep::TaskKeeper;
 use super::task_register::{register_task_at, set_task_descriptor};
 use super::{SystemTask, USER_TASKS, task_sddl};
@@ -59,7 +56,14 @@ pub fn read_error(error: TaskError) -> ReadError {
 pub struct OsTasks {
     /// [`USER_TASKS`] as [`read_tasks`] read them, once asked for.
     tasks: Option<Result<Vec<TaskRead>, TaskError>>,
+    /// A launch's check: it looks up no account's name but LOCAL SYSTEM's, a well-known SID
+    /// the machine answers itself, so no domain controller can hold a launch. The stop and
+    /// sweep tasks it reads name no other account.
+    launch: bool,
 }
+
+/// The one account a launch's check may look up by name: LOCAL SYSTEM.
+const SYSTEM_SID: &str = "S-1-5-18";
 
 impl TaskReader for OsTasks {
     fn copy_owner(&mut self) -> Result<Option<CopyOwner>, String> {
@@ -101,6 +105,9 @@ impl TaskReader for OsTasks {
     }
 
     fn account_name(&mut self, sid: &Sid) -> Result<Option<AccountName>, String> {
+        if self.launch && sid.as_str() != SYSTEM_SID {
+            return Err("a launch looks up no account's name but LOCAL SYSTEM's".to_owned());
+        }
         local_account_name(sid)
     }
 }
@@ -158,30 +165,36 @@ pub fn heal_task_descriptor(task: SystemTask, owner: &Sid) -> Result<(), TaskErr
     set_task_descriptor(task, &task_sddl(owner))
 }
 
-/// `UserSetup::state`'s last step (`task_identity::ready_with_tasks`) on this machine.
-/// A stop or sweep task missing or changed also asks for a refresh run, which puts it back
-/// without a prompt (`task_keep`); the next check then reads it back. Nothing waits for it.
+/// One call of each kind at a time (`task_call::Slot`).
+static READY_CALL: Slot<SetupState> = Slot::new();
+static REPAIR_CALL: Slot<Option<&'static str>> = Slot::new();
+static REFRESH_CALL: Slot<Result<(), String>> = Slot::new();
+static STOP_CALL: Slot<bool> = Slot::new();
+static SWEEP_CALL: Slot<Result<(), String>> = Slot::new();
+
+/// `UserSetup::state`'s last step (`task_identity::ready_with_tasks`) on this machine, within
+/// [`TASK_CALL_LIMIT`] (`task_call::ready_within`). It only reads: a stop or sweep task missing
+/// or changed is said, and put back by a launch's heal (`runner::heal_before_launch` and the
+/// runner's own check) or by the repair, never by a readiness poll.
 pub fn ready_with_user_tasks(state: SetupState) -> SetupState {
-    let state = ready_with_tasks(state, &mut OsTasks::default());
-    if let SetupState::Failed(words) = &state
-        && (words == TASK_MISSING || words == TASK_CHANGED)
-    {
-        launch_admin_refresh();
-    }
-    state
+    ready_within(&READY_CALL, TASK_CALL_LIMIT, state, OsTasks::default)
 }
 
 /// What a launch says about the stop and sweep tasks before the pool user's logon, and when it
 /// is refused for `AwaitingSweep`, as the lawyer reads them (`task_identity::tasks_repair`):
 /// `None` while both are the set-up's. The refresh task never gates a launch.
 pub fn tasks_repair() -> Option<&'static str> {
-    task_identity::tasks_repair(&mut OsTasks::default())
+    let mut reader = OsTasks {
+        launch: true,
+        ..OsTasks::default()
+    };
+    task_identity::tasks_repair(&mut reader)
 }
 
-/// `request_admin_refresh` for a launch or the readiness check, within [`TASK_CALL_LIMIT`]:
-/// whether the run was asked for. Its `--refresh` puts the tasks back (`task_keep`).
+/// `request_admin_refresh` for a launch's heal, within [`TASK_CALL_LIMIT`]: whether the run
+/// was asked for. Its `--refresh` puts the tasks back (`task_keep`).
 pub fn launch_admin_refresh() -> bool {
-    let asked = within(TASK_CALL_LIMIT, || {
+    let asked = within(&REFRESH_CALL, TASK_CALL_LIMIT, || {
         request_admin_refresh().map_err(|e| e.to_string())
     });
     match asked.and_then(|asked| asked) {
@@ -196,13 +209,13 @@ pub fn launch_admin_refresh() -> bool {
 /// [`tasks_repair`] for a launch, within [`TASK_CALL_LIMIT`]: couldn't-check when the Task
 /// Scheduler (or a local name lookup) didn't answer by then.
 pub fn launch_tasks_repair() -> Option<&'static str> {
-    repair_within(TASK_CALL_LIMIT, tasks_repair)
+    repair_within(&REPAIR_CALL, TASK_CALL_LIMIT, tasks_repair)
 }
 
 /// `request_pool_stop` for a launch or a session's end, within [`TASK_CALL_LIMIT`]: `false`
 /// when it didn't answer by then.
 pub fn launch_pool_stop() -> bool {
-    within(TASK_CALL_LIMIT, request_pool_stop).unwrap_or_else(|why| {
+    within(&STOP_CALL, TASK_CALL_LIMIT, request_pool_stop).unwrap_or_else(|why| {
         tracing::warn!(%why, "the sandbox's stop task couldn't be started");
         false
     })
@@ -210,7 +223,7 @@ pub fn launch_pool_stop() -> bool {
 
 /// `request_pool_sweep` for a launch or a session's end, within [`TASK_CALL_LIMIT`].
 pub fn launch_pool_sweep() -> Result<(), String> {
-    within(TASK_CALL_LIMIT, || {
+    within(&SWEEP_CALL, TASK_CALL_LIMIT, || {
         request_pool_sweep().map_err(|error| error.to_string())
     })?
 }
