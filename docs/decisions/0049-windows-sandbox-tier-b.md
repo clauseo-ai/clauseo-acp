@@ -1324,21 +1324,24 @@ leaves that profile, both naming the part.
     `SYSTEM` run completed, not that no process survived. Whether one survived is decided before
     that, by the inner's sweep, as the pool user.
 
-    **C5, launch-blocking: a per-slot `SYSTEM` process verdict.** Stop scoped per slot, so a
-    "no survivors" verdict never rests on a pool-user process's own report. Today
-    `SandboxSweep` kills nothing, so on the no-escapee path (`AwaitingSweep`) that no process
-    survived is the inner's own word, a pool-user process's, backed by the next session's first
-    act, another. Only the escapee path ends in a `SYSTEM` process verdict, and `SandboxStop`
-    is pool-wide: it ends every pool user's processes, other matters' live sessions included.
-    Routing a tree that outruns the sweep to the stop (above) widens that path, not its scope.
-    It also hands the agent a lever: a pool-user agent can trigger that pool-wide stop just by
-    respawning faster than eight rounds or 60 s allow, with no DACL trick, and so end other
-    matters' sessions. That is part of the same item, and launch-blocking with it: once the
-    stop is scoped per slot, the lever ends only the agent's own slot. The sweep's view of the
-    pool user's own processes in session 0 behind a shut DACL rests on `WTSEnumerateProcessesW`
-    as a non-admin, which Microsoft doesn't document; a VM test checks it from an interactive
-    session (`runner::sweep::windows_tests`, ignored on CI, whose runner is in session 0). Were such a process unnamed, the sweep would call the
-    session clean, and only this item's `SYSTEM` verdict would close that.
+    **C5, launch-blocking: a per-slot `SYSTEM` process verdict.** Stop scoped per slot, so a "no
+    survivors" verdict never rests on a pool-user process's own report. Today `SandboxSweep` kills
+    nothing, so on the no-escapee path (`AwaitingSweep`) that no process survived is the inner's own
+    word, a pool-user process's, backed by the next session's first act, another. Only the escapee
+    path ends in a `SYSTEM` process verdict, and `SandboxStop` is pool-wide: it ends every pool
+    user's processes, other matters' live sessions included. Routing a tree that outruns the sweep
+    to the stop (above) widens that path, not its scope. It also hands the agent a lever: a
+    pool-user agent can trigger that pool-wide stop just by respawning faster than eight rounds or
+    60 s allow, with no DACL trick, and so end other matters' sessions. That is part of the same
+    item, and launch-blocking with it: once the stop is scoped per slot, the lever ends only the
+    agent's own slot. The sweep's view of the pool user's own processes in session 0 behind a shut
+    DACL rests on `WTSEnumerateProcessesW` as a non-admin, which Microsoft doesn't document. Were
+    such a process unnamed, the sweep would call the session clean. **M1 is unverified on real
+    Windows**: a session-0 pool-user process that shut its own user out has never been put to the
+    sweep. The ignored test
+    `vm_a_session_0_process_that_shut_its_user_out_is_named_and_left_an_escapee`
+    (`runner::sweep::windows_tests`) documents it. The per-slot `SYSTEM` process verdict (this item,
+    launch-blocking) closes it either way, since `SYSTEM` sees every process.
 
     An absent `…Sequence` counts as 0, an absent `…Next` as 1. The numbers are read as the lawyer
     **without the set-up lock**, which only an administrator's token can open (a mutex in a
