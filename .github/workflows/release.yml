@@ -500,7 +500,12 @@ jobs:
             echo "CLAUSEO_UPDATER_PUBKEY is unset ($MODE)"
           fi
 
+      # GH_TOKEN (the job's read-only token) makes the agent-browser and stetdoc downloads go
+      # through the GitHub API instead of github.com's anonymous downloads, whose 504s failed
+      # dry runs (#850); either way the pinned SHA-256 decides (crates/desktop/sidecars/fetch.mjs).
       - name: Sidecars for this target
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           node .github/scripts/sidecars.mjs --safe-workspace="$SAFE_WORKSPACE" "$TARGET"
