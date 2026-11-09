@@ -130,6 +130,7 @@ impl Sid {
     /// [`Sid::to_bytes`] in a buffer of `u32`s, so a pointer to it has the 4-byte alignment
     /// the kernel's SID capture probes for. A binary SID is 8 + 4 × n bytes, so it fills whole
     /// words; each word holds four of its bytes in memory order.
+    #[cfg(any(windows, test))]
     pub(crate) fn to_aligned(&self) -> Vec<u32> {
         let bytes = self.to_bytes();
         let (words, _none_left) = bytes.as_chunks::<4>();
