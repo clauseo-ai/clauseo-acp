@@ -29,6 +29,11 @@ const VERSION: &str = "0.0.3";
 const NATIVE_BYTES: &[u8] = b"the native installer's bytes";
 /// The bytes of the `windows-aarch64` entry: another file than the native one.
 const ARM64_BYTES: &[u8] = b"the arm64 installer's bytes";
+/// The tests run on Windows arm64 (the ARM64 runner). There this build's own key is
+/// [`ARM64_KEY`] (`for_this_machine`), so every release served here has an arm64 entry: the
+/// arm64 check finds it and never falls back, and this build's own installer is the arm64 one. A
+/// native arm64 build never asks for the arm64 target (`emulated_on_arm64` is false there).
+const WINDOWS_ARM64: bool = cfg!(all(windows, target_arch = "aarch64"));
 
 /// The real test-v0.0.3 trusted comment of `fixture`, its global signature verified with the
 /// test key: the file's name and version exactly as the release signs them.
@@ -286,7 +291,9 @@ fn the_check_asks_for_arm64_only_when_the_gate_holds() {
 /// check for this build's own finds the update, and its pending holds the native target. The
 /// download and the install then bind this build's installer: a file signed as the other
 /// architecture's installer (arm64's, or x64's on an arm64 host, whose own is arm64's) is
-/// refused at both, never installed.
+/// refused at both, never installed. On Windows arm64 this build's own entry is the arm64 one
+/// ([`WINDOWS_ARM64`]): the arm64 check finds it with no fallback, and the x64-signed file is
+/// refused all the same.
 #[test]
 fn without_an_arm64_entry_the_check_falls_back_and_never_binds_arm64() {
     let release = Release::start();
@@ -297,12 +304,20 @@ fn without_an_arm64_entry_the_check_falls_back_and_never_binds_arm64() {
     };
     release.serve(&other_arch, None);
     let app = app();
-    assert!(matches!(
-        tauri::async_runtime::block_on(release.updater(&app, Target::Arm64).unwrap().check()),
-        Err(PluginError::TargetNotFound(_))
-    ));
+    let arm64_check =
+        tauri::async_runtime::block_on(release.updater(&app, Target::Arm64).unwrap().check());
     let offer = release.check(&app, Target::Arm64).expect("x64 in place");
-    assert_eq!(target_of(&offer), Target::Native);
+    if WINDOWS_ARM64 {
+        assert!(matches!(arm64_check, Ok(Some(_))));
+        assert_eq!(target_of(&offer), Target::Arm64);
+        assert_eq!(
+            expected_update_file(VERSION, Target::Native),
+            expected_update_file(VERSION, Target::Arm64)
+        );
+    } else {
+        assert!(matches!(arm64_check, Err(PluginError::TargetNotFound(_))));
+        assert_eq!(target_of(&offer), Target::Native);
+    }
     let handle = offer.handle.clone();
     let (downloaded, scratch) = download(&app, &release, "update-arm64-fallback", offer);
     assert!(release.fetched("/native.exe"));
@@ -327,7 +342,9 @@ fn without_an_arm64_entry_the_check_falls_back_and_never_binds_arm64() {
 }
 
 /// The fallback's download of a file signed as this build's own installer is saved (on the
-/// platforms that update: Windows x64 names the real x64 installer).
+/// platforms that update: Windows x64 names the real x64 installer). On Windows arm64 the arm64
+/// check finds this build's own entry with no fallback ([`WINDOWS_ARM64`]), and the file binds
+/// as the arm64 installer, which is this build's own.
 #[test]
 fn the_fallbacks_download_is_bound_to_this_builds_installer() {
     let Some(native) = expected_update_file(VERSION, Target::Native) else {
@@ -340,7 +357,12 @@ fn the_fallbacks_download_is_bound_to_this_builds_installer() {
     );
     let app = app();
     let offer = release.check(&app, Target::Arm64).expect("x64 in place");
-    assert_eq!(target_of(&offer), Target::Native);
+    let found = if WINDOWS_ARM64 {
+        Target::Arm64
+    } else {
+        Target::Native
+    };
+    assert_eq!(target_of(&offer), found);
     let (downloaded, _scratch) = download(&app, &release, "update-arm64-native", offer);
     assert_eq!(downloaded.unwrap().version, VERSION);
 }
@@ -434,7 +456,11 @@ fn a_cached_x64_download_is_fetched_again_for_an_arm64_offer() {
 }
 
 /// The reverse: last run saved the arm64 installer, and this run checks for x64 in place (the
-/// gate flipped back, or the release has no arm64 entry). Fetched again, never reused.
+/// gate flipped back, or the release has no arm64 entry). Fetched again, never reused. On
+/// Windows arm64 there is no x64 offer ([`WINDOWS_ARM64`]): with the arm64 entry the native
+/// check finds it, this build's own installer, and the cached arm64 file binds and is reused;
+/// without it, the arm64 check finds the x64-signed entry under this build's key, and the cached
+/// file is fetched again.
 #[test]
 fn a_cached_arm64_download_is_fetched_again_for_an_x64_offer() {
     for arm64_entry in [true, false] {
@@ -450,6 +476,15 @@ fn a_cached_arm64_download_is_fetched_again_for_an_x64_offer() {
             Target::Arm64
         };
         let offer = release.check(&app, wanted).expect("x64 in place");
+        if WINDOWS_ARM64 {
+            assert_eq!(target_of(&offer), wanted);
+            assert_eq!(
+                cache_checked(&release, &scratch, offer).refetch,
+                !arm64_entry,
+                "{arm64_entry}"
+            );
+            continue;
+        }
         assert_eq!(target_of(&offer), Target::Native);
         assert!(
             cache_checked(&release, &scratch, offer).refetch,
