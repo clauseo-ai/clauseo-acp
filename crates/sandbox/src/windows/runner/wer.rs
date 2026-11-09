@@ -2,7 +2,9 @@
 //! order and decision 0049, "Crash reporting (WER)", the why): keys under `HKEY_USERS\<pool
 //! SID>`, each part opened with `REG_OPTION_OPEN_LINK` so a link opens as itself, a link told by
 //! its `SymbolicLinkValue`, and links deleted as themselves (`NtDeleteKey` on the link's own
-//! handle), never through. Also set-up's repair of a loaded pool hive ([`repair_hive`]).
+//! handle), never through. Also set-up's repair of a loaded pool hive ([`repair_hive`]), which
+//! takes a key that shuts the administrators out for them first (`SeTakeOwnershipPrivilege`,
+//! enabled only for that call).
 #![expect(unsafe_code, reason = "FFI to the registry calls")]
 
 use windows::Wdk::System::Registry::NtDeleteKey;
@@ -11,18 +13,22 @@ use windows::Win32::Foundation::{
     ERROR_SUCCESS, ERROR_UNSUPPORTED_TYPE, HANDLE, WIN32_ERROR,
 };
 use windows::Win32::Security::{
-    DACL_SECURITY_INFORMATION, LABEL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
+    DACL_SECURITY_INFORMATION, LABEL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION,
+    PSECURITY_DESCRIPTOR,
 };
 use windows::Win32::System::Registry::{
     HKEY, HKEY_LOCAL_MACHINE, HKEY_USERS, KEY_CREATE_SUB_KEY, KEY_ENUMERATE_SUB_KEYS,
     KEY_QUERY_VALUE, KEY_SET_VALUE, REG_DWORD, REG_OPTION_NON_VOLATILE, REG_OPTION_OPEN_LINK,
     REG_SAM_FLAGS, REG_VALUE_TYPE, RRF_RT_REG_DWORD, RegCloseKey, RegCreateKeyExW, RegEnumKeyExW,
-    RegGetKeySecurity, RegGetValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
+    RegGetKeySecurity, RegGetValueW, RegOpenKeyExW, RegQueryValueExW, RegSetKeySecurity,
+    RegSetValueExW,
 };
 use windows::core::{HSTRING, PCWSTR, PWSTR, w};
 
-use super::wer_flow::{How, Registry, Root, repair};
+use super::wer_flow::{ACCESS_DENIED, How, Registry, Root, repair};
+use crate::windows::acl::privilege::Privileges;
 use crate::windows::sids::Sid;
+use crate::windows::token::os::LocalDescriptor;
 
 /// The value a registry link holds its target in.
 const LINK_VALUE: PCWSTR = w!("SymbolicLinkValue");
@@ -30,6 +36,10 @@ const LINK_VALUE: PCWSTR = w!("SymbolicLinkValue");
 const READ_CONTROL: u32 = 0x0002_0000;
 /// `DELETE`.
 const DELETE: u32 = 0x0001_0000;
+/// `WRITE_DAC`.
+const WRITE_DAC: u32 = 0x0004_0000;
+/// `WRITE_OWNER`.
+const WRITE_OWNER: u32 = 0x0008_0000;
 /// A key name's longest form, in characters, with its NUL.
 const NAME_CAP: usize = 256;
 
@@ -191,7 +201,14 @@ impl Registry for OsRegistry {
     fn delete(&mut self, key: Key) -> Result<(), u32> {
         if !self.is_link(&key)? {
             for name in subkeys(&key)? {
-                if let Some(child) = self.open(Some(&key), &name, How::Delete)? {
+                let child = match self.open(Some(&key), &name, How::Delete) {
+                    Err(ACCESS_DENIED) => {
+                        self.take(&key, &name)?;
+                        self.open(Some(&key), &name, How::Delete)?
+                    }
+                    opened => opened?,
+                };
+                if let Some(child) = child {
                     self.delete(child)?;
                 }
             }
@@ -203,6 +220,58 @@ impl Registry for OsRegistry {
         }
         Ok(())
     }
+
+    fn take(&mut self, parent: &Key, name: &str) -> Result<(), u32> {
+        let io_code = |error: std::io::Error| {
+            error
+                .raw_os_error()
+                .and_then(|code| u32::try_from(code).ok())
+                .unwrap_or(u32::MAX)
+        };
+        // Held only for this call; dropped (and put back) at its end.
+        let held = Privileges::enable(&["SeTakeOwnershipPrivilege"]).map_err(io_code)?;
+        let owner = LocalDescriptor::new("O:BA").map_err(io_code)?;
+        let key = open_raw(parent, name, WRITE_OWNER)?;
+        // SAFETY: the key is open for WRITE_OWNER; the descriptor lives until `owner` drops.
+        check(unsafe {
+            RegSetKeySecurity(
+                key.0,
+                OWNER_SECURITY_INFORMATION,
+                PSECURITY_DESCRIPTOR(owner.raw()),
+            )
+        })?;
+        drop(key);
+        drop(held);
+        // The administrators own it now, so they may write its DACL.
+        let dacl = LocalDescriptor::new("D:P(A;;KA;;;BA)(A;;KA;;;SY)").map_err(io_code)?;
+        let key = open_raw(parent, name, WRITE_DAC)?;
+        // SAFETY: the key is open for WRITE_DAC; the descriptor lives until `dacl` drops.
+        check(unsafe {
+            RegSetKeySecurity(
+                key.0,
+                DACL_SECURITY_INFORMATION,
+                PSECURITY_DESCRIPTOR(dacl.raw()),
+            )
+        })
+    }
+}
+
+/// Opens `name` under `parent` as itself (`REG_OPTION_OPEN_LINK`) with `access` alone.
+fn open_raw(parent: &Key, name: &str, access: u32) -> Result<Key, u32> {
+    let subkey = HSTRING::from(name);
+    let mut opened = HKEY::default();
+    // SAFETY: `subkey` is live and NUL-terminated; `opened` is a live out-pointer, owned by
+    // `Key` once written.
+    check(unsafe {
+        RegOpenKeyExW(
+            parent.0,
+            &subkey,
+            Some(REG_OPTION_OPEN_LINK.0),
+            REG_SAM_FLAGS(access),
+            &raw mut opened,
+        )
+    })?;
+    Ok(Key(opened))
 }
 
 /// The names of `key`'s subkeys.

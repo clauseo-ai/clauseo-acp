@@ -2351,16 +2351,22 @@ process with the lawyer's rights read memory the agent controls. Two controls cl
     plain open of the whole path, as WER opens it, which also catches a link the first check
     can't see (a link key with no target).
   - **Fails closed, to set-up's repair.** Any failure refuses the launch with
-    `RunExit::PoolProfile` (`0xE0C15012`). It means the pool user's hive is broken or was
+    `RunExit::PoolProfile` (`0xE0C15017`, value 0x17, reserved). It means the pool user's hive is broken or was
     changed, which a retry doesn't fix, so tier detection takes it as a set-up fault, as it takes
     a lost password: `SetUpFailed` with "the sandbox user's Windows profile is damaged or was
     changed: run the set-up again".
   - **The repair.** Set-up's logon of each pool user, with the profile loaded (`setup/logon.rs`),
     deletes a link on the way to the WER key, or a WER key that is a link or fails the security
     check (`wer_flow::repair`). It deletes a link as itself (`NtDeleteKey` on the handle opened
-    with `REG_OPTION_OPEN_LINK`) and never deletes through one, since set-up runs elevated. The
-    next launch makes the key again. Without this, a planted link would refuse every later launch
-    with no way out.
+    with `REG_OPTION_OPEN_LINK`) and never deletes through one, since set-up runs elevated. A key
+    whose DACL shuts the administrators out is first made theirs: `SeTakeOwnershipPrivilege`,
+    enabled for that call only, makes them its owner, and its DACL becomes administrators and
+    `SYSTEM` with full control. The next launch makes the key again. Without this, a planted link
+    would refuse every later launch with no way out.
+  - **Temporary profiles.** A temporary profile (the `ProfileList` `State` flag
+    `PROFILE_TEMP_ASSIGNED`, or a `TEMP` or `TEMP.*` folder, as set-up's own check reads them)
+    refuses with the same repair message. Windows throws such a hive away at logoff, so the end
+    sweeper's separate logon could get a fresh one without the values.
   - **Policy.** A WER policy (`HKLM` or the pool user's
     `Software\Policies\Microsoft\Windows\Windows Error Reporting`) wins over these values. One
     with `Disabled` = 0, keeping WER on, doesn't refuse the launch: the inner logs it on `ctl`,
