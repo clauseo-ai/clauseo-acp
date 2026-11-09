@@ -44,7 +44,9 @@ No `protocol` change: R20 maps the states and codes to the wire.
   `SignedIn { email, plan, source, at }` and `Failed { code, at }`. It is a separate enum from
   `InstallState`, which already has its own `Waiting`.
 - `Found`: `ClaudeSettings`, `ClaudeWindowsSandbox`, `CodexKeyring`, `ReusedFailed`,
-  `ReusedSignedOut`, `ReusedChanged` and `CodexLinkSplit`.
+  `ReusedSignedOut`, `ReusedChanged`, `CodexLinkSplit` and `CodexSandbox`. A jailed Codex launch
+  of a reused Codex login ends reuse with `CodexSandbox` (R17 PR-D2a) and writes `no-reuse`, so
+  detection does not offer that login again.
 - `LoginFrom`: `ClaudeCode` and `Codex`. `Source`: `Reused` and `Own`.
 - `SigninCode::code()` gives `signin.cancelled`, `signin.link_expired`, `signin.no_plan`,
   `signin.device_code_off`, `signin.port_busy` or `signin.failed`.

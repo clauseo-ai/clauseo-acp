@@ -341,6 +341,9 @@ pub enum FoundLogin {
     ClaudeSettings,
     /// Windows with the sandbox set up, where Claude's login is not reused.
     ClaudeWindowsSandbox,
+    /// Codex runs in the sandbox here, where the lawyer's own Codex login is not reused: Clauseo's
+    /// own `ChatGPT` sign-in is needed.
+    CodexSandbox,
     /// A Codex login held in the OS keyring, not in a file.
     CodexKeyring,
     /// Reuse stopped: a refresh failed twice.
@@ -360,9 +363,10 @@ pub enum FoundLogin {
 
 impl FoundLogin {
     /// Every value, in declaration order.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::ClaudeSettings,
         Self::ClaudeWindowsSandbox,
+        Self::CodexSandbox,
         Self::CodexKeyring,
         Self::ReusedFailed,
         Self::ReusedSignedOut,

@@ -75,6 +75,16 @@ impl fmt::Debug for EgressGuard {
 }
 
 impl EgressGuard {
+    /// A guard over `proxy`'s session `key`, opened by the test (the jail's policy tests).
+    #[cfg(test)]
+    pub(crate) fn for_test(proxy: Arc<dyn EgressProxy>, key: SessionKey) -> Self {
+        Self {
+            proxy,
+            key,
+            denials: Arc::default(),
+        }
+    }
+
     /// The session's browser listener port, as the proxy answers it.
     pub(crate) fn port(&self) -> Option<u16> {
         self.proxy.port_for(self.key)

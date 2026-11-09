@@ -4,12 +4,17 @@ use clauseo_protocol::AgentId;
 use futures::executor::block_on;
 
 use super::{RecvError, TryRecvError, channel};
-use crate::agent::login_link::LoginSplit;
+use crate::agent::login_link::{LoginSplit, SplitWhy};
 
 fn split(agent: &AgentId, lawyers_file_gone: bool) -> LoginSplit {
+    let why = if lawyers_file_gone {
+        SplitWhy::LawyersFileGone
+    } else {
+        SplitWhy::LinkSplit
+    };
     LoginSplit {
         agent: agent.clone(),
-        lawyers_file_gone,
+        why,
     }
 }
 

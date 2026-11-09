@@ -42,6 +42,7 @@ use std::time::Instant;
 
 use clauseo_agents::keys::Keychain;
 use clauseo_agents::{Agents, AgentsConfig, Clock, Found, Platform, Snapshot, SystemClock};
+use clauseo_host::SplitWhy;
 use clauseo_process::{AsyncIoTimer, Launcher, PassthroughLauncher, SpawnOptions};
 use clauseo_protocol::{AgentId, CommandOutcome, ErrorCode, HostError, SetupCommand, SetupEvent};
 use clauseo_settings::{Effective, Locations};
@@ -524,12 +525,20 @@ async fn follow_splits(backend: &AgentsBackend) {
         }
     };
     while let Ok(split) = splits.recv().await {
-        let why = if split.lawyers_file_gone {
-            Found::ReusedSignedOut
-        } else {
-            Found::CodexLinkSplit
-        };
-        backend.wiring.leaves.submit(&split.agent, Some(why));
+        backend
+            .wiring
+            .leaves
+            .submit(&split.agent, Some(leave_reason(split.why)));
+    }
+}
+
+/// S18's reason for a split's automatic leave, which its `SignedOut` shows. `CodexSandbox`'s
+/// leave writes `no-reuse` too (`clauseo_agents`), so detection does not offer that login again.
+pub(crate) const fn leave_reason(why: SplitWhy) -> Found {
+    match why {
+        SplitWhy::LinkSplit => Found::CodexLinkSplit,
+        SplitWhy::LawyersFileGone => Found::ReusedSignedOut,
+        SplitWhy::CodexSandbox => Found::CodexSandbox,
     }
 }
 

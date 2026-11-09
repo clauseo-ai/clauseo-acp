@@ -42,8 +42,28 @@ pub(crate) fn native_roots() -> Vec<Vec<u8>> {
         .collect()
 }
 
+/// The PEM certificate blocks of `text`, each from its `BEGIN CERTIFICATE` line to its
+/// `END CERTIFICATE` line, and nothing else: a private key, or any other block or text, in the
+/// same file never reaches the jail. A block with no end is left out.
+pub(crate) fn certificates(text: &str) -> Vec<String> {
+    const BEGIN: &str = "-----BEGIN CERTIFICATE-----";
+    const END: &str = "-----END CERTIFICATE-----";
+    let mut blocks = Vec::new();
+    let mut rest = text;
+    while let Some((_, opened)) = rest.split_once(BEGIN) {
+        let Some((body, after)) = opened.split_once(END) else {
+            break;
+        };
+        // A BEGIN with no END of its own before this one: only the last BEGIN's block counts.
+        let body = body.rsplit_once(BEGIN).map_or(body, |(_, last)| last);
+        blocks.push(format!("{BEGIN}{body}{END}"));
+        rest = after;
+    }
+    blocks
+}
+
 /// The bundle's text: each of `roots` (DER) as a PEM certificate, then the `extra` file's
-/// certificates as written, when it holds PEM certificates.
+/// certificate blocks ([`certificates`]), each as written.
 pub(crate) fn bundle(roots: &[Vec<u8>], extra: Option<&str>) -> String {
     let mut pem = String::new();
     for der in roots {
@@ -55,16 +75,16 @@ pub(crate) fn bundle(roots: &[Vec<u8>], extra: Option<&str>) -> String {
         }
         pem.push_str("-----END CERTIFICATE-----\n");
     }
-    if let Some(extra) = extra {
-        pem.push_str(extra.trim_end());
+    for block in extra.map(certificates).unwrap_or_default() {
+        pem.push_str(&block);
         pem.push('\n');
     }
     pem
 }
 
 /// Writes the bundle for a launch into `run_root` (`run/<session>`): the roots `roots` gives
-/// (the OS's when `None`), and the agent's CA file `extra` when it reads as PEM certificates
-/// (one that does not is left out, with a log line). The file's path, or `None` when it could
+/// (the OS's when `None`), and the certificate blocks of the agent's CA file `extra`, only
+/// them (one with none is left out, with a log line). The file's path, or `None` when it could
 /// not be written (the agent then trusts what its own runtime ships). File system calls: off
 /// the actor.
 pub(crate) fn write(
@@ -74,7 +94,7 @@ pub(crate) fn write(
 ) -> Option<PathBuf> {
     let roots = roots.map_or_else(native_roots, |roots| roots());
     let extra = extra.and_then(|file| match std::fs::read_to_string(file) {
-        Ok(text) if text.contains("-----BEGIN CERTIFICATE-----") => Some(text),
+        Ok(text) if !certificates(&text).is_empty() => Some(text),
         Ok(_) => {
             tracing::warn!("the agent's CA file holds no PEM certificate; the jail goes without it");
             None
@@ -95,3 +115,6 @@ pub(crate) fn write(
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -27,8 +27,9 @@ impl RelayEvents for NoEvents {
     fn event(&self, _event: RelayEvent) {}
 }
 
-/// The fake, its connector and the app's relays, with a data folder of its own.
-struct Rig {
+/// The fake, its connector and the app's relays, with a data folder of its own. The jail's
+/// policy tests open a relay for their session with it too (`sandbox/policy/tests`).
+pub(in crate::actor::turn::launch_checks) struct Rig {
     fake: FakeHandle,
     scratch: ScratchDir,
     _connectors: Connectors,
@@ -38,7 +39,7 @@ struct Rig {
     sweep: RunSweep,
 }
 
-fn rig() -> Rig {
+pub(in crate::actor::turn::launch_checks) fn rig() -> Rig {
     let fake = FakeConnector::start(FakeOptions::default()).unwrap();
     let scratch = ScratchDir::new("launch-relay").unwrap();
     let config = fake.config(scratch.state_file());
@@ -66,7 +67,7 @@ fn rig() -> Rig {
 
 impl Rig {
     /// Adds an API key the fake accepts: the connector is signed in.
-    fn sign_in(&self) {
+    pub(in crate::actor::turn::launch_checks) fn sign_in(&self) {
         self.handle.add_api_key(&self.fake.new_api_key()).unwrap();
     }
 
@@ -91,7 +92,11 @@ impl Rig {
     }
 
     /// A prep with the relays, the switch `on` (`locked` by policy) and no managed MCP.
-    fn prep(&self, on: bool, locked: bool) -> CaseLawPrep {
+    pub(in crate::actor::turn::launch_checks) fn prep(
+        &self,
+        on: bool,
+        locked: bool,
+    ) -> CaseLawPrep {
         CaseLawPrep {
             relays: Some(self.relays.clone()),
             switch: Switch { on, locked },

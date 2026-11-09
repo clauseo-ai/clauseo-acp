@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
-use clauseo_host::{LoginCheck, LoginLink, LoginSplit, Shared};
+use clauseo_host::{LoginCheck, LoginLink, LoginSplit, Shared, SplitWhy};
 use clauseo_protocol::{AgentId, DomainEvent, ErrorCode, StopReason, StreamId};
 
 use crate::codex::{CODEX, Recording, codex_dir, run_turn};
@@ -164,7 +164,7 @@ fn a_split_refuses_the_launch_holds_the_turn_and_sends_the_split() {
         wait("a split", splits.recv()).unwrap(),
         LoginSplit {
             agent: codex(),
-            lawyers_file_gone: false,
+            why: SplitWhy::LinkSplit,
         }
     );
     events.until("the turn put back", |events| {
@@ -201,7 +201,7 @@ fn a_lawyers_file_gone_is_a_split_that_says_so() {
     let (first, _) = host.prompt(thread, "Look at the matter.");
     events.until_turn_ended(first);
     let split = wait("a split", splits.recv()).unwrap();
-    assert!(split.lawyers_file_gone);
+    assert_eq!(split.why, SplitWhy::LawyersFileGone);
     host.shutdown();
 }
 

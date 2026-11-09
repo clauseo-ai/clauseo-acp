@@ -65,9 +65,11 @@ fn reused_signed_in<T: Timer + Send + Sync>(
 
 /// Stops reuse with `why` and gives `SignedOut { found: why }`; never a logout. No reason
 /// (or one that is no stop reason, [`Found::is_stop_reason`]): `no-reuse` is written, and the
-/// state is `SignedOut { found: ReuseOff }`. For Codex, a reused home's link is removed. Then
-/// the reuse record is cleared. `signin.failed` when a marker cannot be written, since the next
-/// start could then reuse again without asking.
+/// state is `SignedOut { found: ReuseOff }`. `CodexSandbox` writes `no-reuse` too, so detection
+/// does not offer the same login again, and its state is `SignedOut { found: CodexSandbox }`.
+/// For Codex, a reused home's link is removed. Then the reuse record is cleared.
+/// `signin.failed` when a marker cannot be written, since the next start could then reuse again
+/// without asking.
 pub(crate) async fn stop<T: Timer + Send + Sync>(
     job: &SigninJob<T>,
     why: Option<Found>,
@@ -75,7 +77,8 @@ pub(crate) async fn stop<T: Timer + Send + Sync>(
     let why = why.filter(|why| why.is_stop_reason());
     let data = &job.config.data_dir;
     let agent = &job.ticket.agent;
-    if why.is_none() && marker::write_no_reuse(data, agent).is_err() {
+    let no_reuse = matches!(why, None | Some(Found::CodexSandbox));
+    if no_reuse && marker::write_no_reuse(data, agent).is_err() {
         return job.failed(SigninCode::Failed);
     }
     // The lock rule: the link and `login-source` change only under the lock on Codex's login

@@ -408,7 +408,7 @@ fn the_header_shows_the_tools_and_a_relaunch_replaces_them() {
     let host = dir.start_launching(1, launcher, |config| {
         config
             .with_profile_hook(Box::new(hook))
-            .with_egress_proxy(Arc::new(clauseo_host::TestProxy(8123)))
+            .with_egress_proxy(Arc::new(clauseo_host::TestProxy::new(8123)))
             .with_browser_executable(Some(PathBuf::from("/chrome")))
     });
     turn(&host, thread);

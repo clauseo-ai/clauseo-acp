@@ -271,6 +271,10 @@ pub enum Found {
     ClaudeSettings,
     /// Windows with tier B set up: Claude is not reused there.
     ClaudeWindowsSandbox,
+    /// Codex's launches run in the sandbox; the lawyer's own Codex login is not reused there
+    /// since the jail never gets their `auth.json`. Reported when a jailed launch meets a reused
+    /// login.
+    CodexSandbox,
     /// A Codex login held in the OS keyring or Windows secrets, not in a file: not reusable.
     CodexKeyring,
     /// Reuse stopped: a refresh failed twice.

@@ -129,7 +129,7 @@ fn hook() -> Hook {
 fn wire(config: HostConfig, relays: Option<&Relays>) -> HostConfig {
     let config = config
         .with_profile_hook(Box::new(hook()))
-        .with_egress_proxy(Arc::new(TestProxy(8123)))
+        .with_egress_proxy(Arc::new(TestProxy::new(8123)))
         .with_browser_executable(Some(PathBuf::from("/chrome")));
     match relays {
         Some(relays) => config.with_case_law_relays(relays.clone()),

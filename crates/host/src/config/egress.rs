@@ -75,30 +75,79 @@ impl fmt::Debug for AgentListener {
 }
 
 /// A proxy stand-in for tests: the same port for every session, for the browser and the agent
-/// listener, with `HTTPS_PROXY` naming it and `ALL_PROXY` removed; `open` and `close` do
-/// nothing.
+/// listener, with `HTTPS_PROXY` naming it and `ALL_PROXY` removed. `open` starts nothing and
+/// keeps what it was opened with ([`TestProxy::opened`]); `close` does nothing.
 #[cfg(feature = "test-support")]
-#[derive(Debug, Clone, Copy)]
-pub struct TestProxy(pub u16);
+#[derive(Debug)]
+pub struct TestProxy {
+    port: u16,
+    opened: std::sync::Mutex<Vec<ProxyOpened>>,
+}
+
+/// One [`TestProxy`] open: the session and what its config asked for.
+#[cfg(feature = "test-support")]
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct ProxyOpened {
+    /// The session.
+    pub session: SessionKey,
+    /// The agent listener's kind (`ProxyConfig::listener`).
+    pub listener: clauseo_sandbox::ports::ListenerFor,
+    /// Whether the token-free browser listener was asked for (`ProxyConfig::browser`).
+    pub browser: bool,
+    /// The block list it reads (`ProxyConfig::block`).
+    pub block: std::sync::Arc<clauseo_blocklist::Current>,
+}
+
+#[cfg(feature = "test-support")]
+impl TestProxy {
+    /// The stand-in on `port`.
+    #[must_use]
+    pub fn new(port: u16) -> Self {
+        Self {
+            port,
+            opened: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Every open so far, in order.
+    #[must_use]
+    pub fn opened(&self) -> Vec<ProxyOpened> {
+        self.opened
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+}
 
 #[cfg(feature = "test-support")]
 impl EgressProxy for TestProxy {
     fn open(
         &self,
-        _session: SessionKey,
-        _config: clauseo_sandbox::ProxyConfig,
+        session: SessionKey,
+        config: clauseo_sandbox::ProxyConfig,
     ) -> Result<(), clauseo_sandbox::Error> {
+        let opened = ProxyOpened {
+            session,
+            listener: config.listener,
+            browser: config.browser,
+            block: config.block,
+        };
+        self.opened
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(opened);
         Ok(())
     }
 
     fn port_for(&self, _session: SessionKey) -> Option<u16> {
-        Some(self.0)
+        Some(self.port)
     }
 
     fn agent_listener(&self, _session: SessionKey) -> Option<AgentListener> {
-        let url = OsString::from(format!("http://clauseo:test@127.0.0.1:{}", self.0));
+        let url = OsString::from(format!("http://clauseo:test@127.0.0.1:{}", self.port));
         Some(AgentListener::new(
-            self.0,
+            self.port,
             vec![
                 (OsString::from("HTTPS_PROXY"), Some(url)),
                 (OsString::from("ALL_PROXY"), None),

@@ -541,6 +541,7 @@ impl DenialSink for LoggedDenials {
 
 mod ca;
 mod notice;
+mod over_cap;
 mod policy;
 use policy::Grants;
 #[cfg(test)]

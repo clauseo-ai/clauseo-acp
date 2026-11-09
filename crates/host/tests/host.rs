@@ -325,6 +325,9 @@ mod relocate;
 #[path = "host/restart.rs"]
 mod restart;
 #[cfg(test)]
+#[path = "host/sandbox_codex_login.rs"]
+mod sandbox_codex_login;
+#[cfg(test)]
 #[path = "host/sandbox_launch.rs"]
 mod sandbox_launch;
 #[cfg(test)]

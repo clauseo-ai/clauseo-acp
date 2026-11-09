@@ -10,13 +10,20 @@
 //!   own config file in the state folder (Codex's `config.toml`, Claude's `settings.json`) is
 //!   read-only.
 //! - **Login** ([`login_grant`], the one place it is chosen): Codex's `auth.json` link in its
-//!   state folder (`credential_link`), Claude's store in Clauseo's login home (`claude_store`:
-//!   its store files only), never the lawyer's own store; no Keychain anywhere.
+//!   state folder (`credential_link`) only for Clauseo's own login home's file, never while the
+//!   login is reused or the file is the lawyer's own by identity (a jailed launch of a reused
+//!   Codex login is refused before the jail, `sign_in::check_launch`); Claude's store in
+//!   Clauseo's login home (`claude_store`: its store files only), never the lawyer's own store;
+//!   no Keychain anywhere.
 //! - **Read and run**, in this order (on Windows' tier B the runner makes the agent's `PATH` of
 //!   exactly this list, #792): the folder of the agent's program (Node for an adapter, links
 //!   followed), its install folder from its install record, stetdoc's folder (`path_prepend`),
 //!   then with the browser its sidecars' folders and Chrome's. A runtime folder in the lawyer's
-//!   Documents, Desktop or Downloads refuses the launch. Read paths never go on `PATH`.
+//!   Documents, Desktop or Downloads ([`personal_folders`]: on Windows the known folders,
+//!   wherever `OneDrive` moved them) or in any matter of the registry refuses the launch. Read
+//!   paths never go on `PATH`.
+//! - **Read only in the matter:** its files over the checkpoint size cap (`over_cap.rs`,
+//!   decision record 0038), besides the sandbox's own read-only names.
 //! - **Read only:** the CA bundle (`ca.rs`), the profile's skills folders, and what exists of the
 //!   session's skill packs, its relay token and agent-browser's config.
 //! - **Hidden:** the data folder (the parts above are allowed again after it) and every other
@@ -53,6 +60,10 @@ pub(crate) const NATIVE_CODE_DENY: bool = false;
 /// The lawyer's folders no runtime folder may sit in (`home/<name>`).
 const PERSONAL_FOLDERS: [&str; 3] = ["Documents", "Desktop", "Downloads"];
 
+/// Where the lawyer's Documents, Desktop and Downloads are for a home ([`personal_folders`]).
+pub(crate) type PersonalFolders =
+    std::sync::Arc<dyn Fn(Option<&Path>) -> Vec<PathBuf> + Send + Sync>;
+
 /// What a jailed launch's policy takes besides its prep, read on the actor when the seam's job
 /// starts: paths and flags only, no file system call.
 #[derive(Clone)]
@@ -81,6 +92,14 @@ pub(crate) struct Grants {
     pub(crate) roots: Option<CaRoots>,
     /// The lawyer's home folder: the policy's, and the base of [`PERSONAL_FOLDERS`].
     pub(crate) home: Option<PathBuf>,
+    /// The lawyer's Documents, Desktop and Downloads for a home, looked up off the actor:
+    /// [`personal_folders`] (tests pass their own).
+    pub(crate) personal: PersonalFolders,
+    /// The checkpoint walk's size cap: a matter file larger than it is read-only (`over_cap.rs`).
+    pub(crate) file_cap: u64,
+    /// Clauseo's own login home for the agent (`Locations::agent_home`): the only home whose
+    /// `auth.json` link the jail gets.
+    pub(crate) login_home: PathBuf,
 }
 
 /// A jailed launch's policy and the variables its agent gets with it: the proxy's (they carry its
@@ -94,7 +113,7 @@ pub(crate) struct Jail {
 /// folder (`ca.rs`), its [`policy`] with `reserved` (the reservation's ports) and the agent's
 /// variables. File system calls: off the actor.
 pub(crate) fn jail(prepared: &Prepared, grants: &Grants, reserved: &[u16]) -> Result<Jail, Error> {
-    let runtime = runtime(grants, &prepared.run)?;
+    let runtime = runtime(grants, prepared)?;
     let ca = super::ca::write(
         &prepared.run.root,
         grants.roots.as_ref(),
@@ -168,6 +187,9 @@ pub(super) fn grants(actor: &Actor, thread: ThreadId) -> Result<Grants, Error> {
             .cloned(),
         roots: sandbox.and_then(|sandbox| sandbox.ca_roots.clone()),
         home: actor.home.clone(),
+        personal: std::sync::Arc::new(personal_folders),
+        file_cap: clauseo_matters::FILE_CAP_BYTES,
+        login_home: actor.effective.locations().agent_home(agent.as_str()),
     })
 }
 
@@ -211,9 +233,11 @@ pub(super) fn install_folder(command: &Path) -> Result<PathBuf, Error> {
 /// The folders the agent reads and runs, in `PATH` order: its program's (Node for an adapter,
 /// links followed), its install record's, stetdoc's, then with the browser its sidecars' and
 /// Chrome's; each once. Refuses the launch when the program's or the install's is missing, or
-/// one sits in the lawyer's Documents, Desktop or Downloads; the message names no path. File
-/// system calls: off the actor.
-pub(crate) fn runtime(grants: &Grants, run: &RunFolders) -> Result<Vec<PathBuf>, Error> {
+/// one sits in the lawyer's Documents, Desktop or Downloads ([`Grants::personal`]) or in a
+/// matter of the registry (this one or another: the sandbox would let the agent read there
+/// again); the message names no path. Compared canonical. File system calls: off the actor.
+pub(crate) fn runtime(grants: &Grants, prepared: &Prepared) -> Result<Vec<PathBuf>, Error> {
+    let run = &prepared.run;
     let mut runtime = vec![install_folder(&grants.command)?];
     if let Some(folder) = &grants.install {
         runtime.push(dunce::canonicalize(folder).map_err(|_missing| {
@@ -233,24 +257,63 @@ pub(crate) fn runtime(grants: &Grants, run: &RunFolders) -> Result<Vec<PathBuf>,
         }));
         runtime.extend(run.chrome.as_deref().and_then(chrome_folder));
     }
-    let personal: Vec<PathBuf> = grants
-        .home
-        .iter()
-        .flat_map(|home| PERSONAL_FOLDERS.iter().map(move |name| home.join(name)))
-        .filter_map(|folder| dunce::canonicalize(folder).ok())
-        .collect();
-    if runtime
-        .iter()
-        .any(|folder| personal.iter().any(|mine| folder.starts_with(mine)))
-    {
+    let inside = |folders: Vec<PathBuf>| {
+        let folders: Vec<PathBuf> = folders
+            .iter()
+            .filter_map(|folder| dunce::canonicalize(folder).ok())
+            .collect();
+        runtime
+            .iter()
+            .any(|folder| folders.iter().any(|outer| folder.starts_with(outer)))
+    };
+    if inside((grants.personal)(grants.home.as_deref())) {
         return Err(launch_failed(
             "The sandbox couldn't start the agent: its program is in the Documents, Desktop or \
              Downloads folder. Install it elsewhere.",
         ));
     }
+    let mut matters = grants.others.clone();
+    matters.push(prepared.stored.clone());
+    if inside(matters) {
+        return Err(launch_failed(
+            "The sandbox couldn't start the agent: its program is in a matter's folder. Install \
+             it elsewhere.",
+        ));
+    }
     let mut seen = std::collections::HashSet::new();
     runtime.retain(|folder| seen.insert(folder.clone()));
     Ok(runtime)
+}
+
+/// The lawyer's Documents, Desktop and Downloads for `home`: `home/<name>` for each, and on
+/// Windows the known folders too (`SHGetKnownFolderPath` through `clauseo_settings::SystemDirs`,
+/// unchecked), which follow a redirection such as `OneDrive`'s Known Folder Move that the text
+/// path misses. Paths as given: [`runtime`] resolves them. File system calls on Windows
+/// (Documents' bounded check): off the actor.
+pub(crate) fn personal_folders(home: Option<&Path>) -> Vec<PathBuf> {
+    #[cfg_attr(
+        not(windows),
+        expect(unused_mut, reason = "only Windows adds known folders")
+    )]
+    let mut folders: Vec<PathBuf> = home
+        .iter()
+        .flat_map(|home| PERSONAL_FOLDERS.iter().map(move |name| home.join(name)))
+        .collect();
+    #[cfg(windows)]
+    {
+        use clauseo_settings::{KnownFolder, PlatformDirs as _, SystemDirs};
+        let known = [
+            KnownFolder::Documents,
+            KnownFolder::Desktop,
+            KnownFolder::Downloads,
+        ];
+        folders.extend(
+            known
+                .into_iter()
+                .filter_map(|folder| SystemDirs.known_folder(folder)),
+        );
+    }
+    folders
 }
 
 /// The folder Chrome runs from: on macOS the `.app` bundle that holds it, elsewhere its own
@@ -294,6 +357,7 @@ pub(crate) fn policy(
     for path in read_only(grants, run, ca) {
         builder = builder.read(path);
     }
+    builder = builder.over_cap(super::over_cap::over_cap(&matter, grants.file_cap));
     builder = builder.hidden(&grants.data);
     for other in &grants.others {
         // A matter inside this one, or holding it, is refused by the registry; one the stored
@@ -317,8 +381,10 @@ fn clauseo_config(kind: AgentKind) -> &'static str {
 
 /// How the agent's login reaches its jail, chosen here alone so the choice can switch (stage C
 /// checks Claude Code's file fallback under a Keychain denial on macOS): a Codex agent's
-/// `auth.json` link in its state folder, when it is the login home's file (`credential_link`,
-/// only that name); a Claude agent's store in Clauseo's login home (`claude_store`: only the
+/// `auth.json` link in its state folder (`credential_link`, only that name), when it is the
+/// file of Clauseo's own login home (`Grants::login_home`), the login is not reused and the
+/// file is not the lawyer's own by identity (`CodexPrepared::lawyers_login`; ruling (a): such
+/// a launch is refused before this, so this is the second fence); a Claude agent's store in Clauseo's login home (`claude_store`: only the
 /// store's files and lock folders), never the lawyer's own store while the login is reused. No
 /// Keychain rule in any policy (`keychain` stays off, ruling of 2026-11-08). Clauseo never reads
 /// the store.
@@ -330,7 +396,10 @@ pub(crate) fn login_grant(
     match grants.kind {
         Some(AgentKind::Codex) => {
             let linked = prepared.codex.as_ref().filter(|codex| {
-                matches!(codex.link, Some(Ok(StateLink::Same | StateLink::Linked)))
+                !grants.reused
+                    && !codex.lawyers_login
+                    && codex.home == grants.login_home
+                    && matches!(codex.link, Some(Ok(StateLink::Same | StateLink::Linked)))
             });
             match linked {
                 Some(codex) => builder

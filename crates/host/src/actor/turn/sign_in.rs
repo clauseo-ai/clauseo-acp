@@ -32,7 +32,7 @@ use super::launch_checks::Prepared;
 use super::queue::{self, Requeue};
 use super::{Current, agents, cancel, current, state};
 use crate::agent::launch_refusals::{KEYS_WAIT, WAITED_OUT};
-use crate::agent::login_link::{self, LoginLink, LoginSplit, Seen, StopFor};
+use crate::agent::login_link::{self, LoginLink, LoginSplit, Seen, SplitWhy, StopFor};
 use crate::agent::state_folder::StateLink;
 use crate::error::Error;
 
@@ -335,7 +335,8 @@ pub(super) fn requeue_of(
 /// The matter's state folder link (R17 PR-C, `agent/state_folder.rs`) counts too: one that
 /// could not be made refuses with its own code (`signin.reuse_other_volume` across volumes),
 /// and while reused a matter's `auth.json` that is not the login's file
-/// ([`StateLink::Split`]) is a split, refused with no re-link.
+/// ([`StateLink::Split`]) is a split, refused with no re-link. A jailed launch of a reused
+/// login is refused first ([`refuse_jailed_reuse`]).
 pub(super) fn check_launch(
     actor: &mut Actor,
     thread: ThreadId,
@@ -355,11 +356,16 @@ pub(super) fn check_launch(
     else {
         return Ok(());
     };
+    let jailed = actor.protection.launchers().is_some();
     let sign_in = &mut actor.wiring.sign_in;
     if let Some(checked) = codex.login {
         sign_in.seen.insert(agent.clone(), checked);
     }
-    if !sign_in.reused.contains(&agent) {
+    let reused = sign_in.reused.contains(&agent);
+    if jailed && (reused || codex.lawyers_login) {
+        return Err(refuse_jailed_reuse(sign_in, agent, reused));
+    }
+    if !reused {
         return Ok(());
     }
     // An unset hook checks nothing, the state folder's link included.
@@ -375,10 +381,12 @@ pub(super) fn check_launch(
         Seen::Answered(link) => {
             tracing::warn!(%agent, ?link, "the reused login split; the launch is refused");
             sign_in.reused.remove(&agent);
-            sign_in.send_split(LoginSplit {
-                agent,
-                lawyers_file_gone: link == LoginLink::Gone,
-            });
+            let why = if link == LoginLink::Gone {
+                SplitWhy::LawyersFileGone
+            } else {
+                SplitWhy::LinkSplit
+            };
+            sign_in.send_split(LoginSplit { agent, why });
             Err(Error::refused(
                 ErrorCode::AgentAuthRequired,
                 "the ChatGPT login Clauseo was using is no longer the one on this computer",
@@ -389,4 +397,28 @@ pub(super) fn check_launch(
             "Clauseo couldn't check the ChatGPT login in time",
         )),
     }
+}
+
+/// A jailed Codex launch of a reused login (orchestrator's ruling (a), R17 PR-D2a): desktop
+/// says it is reused (`reused`), or the matter's `auth.json` is the lawyer's own file by
+/// identity. The jail never gets the lawyer's own `auth.json`, so the launch is refused before
+/// the jail is built, with `agent.auth_required` (its turn is held for the sign-in). While
+/// desktop says reused, the reused flag is set to false and the split sent with
+/// [`SplitWhy::CodexSandbox`]: desktop's leave ends the reuse as `SignedOut { found:
+/// CodexSandbox }`, whose one action is Clauseo's own `ChatGPT` sign-in. Nothing of the lawyer's
+/// `~/.codex` is touched. At tier C nothing changes.
+fn refuse_jailed_reuse(sign_in: &mut login_link::SignIn, agent: AgentId, reused: bool) -> Error {
+    tracing::warn!(%agent, reused, "a jailed launch of a reused Codex login is refused");
+    if reused {
+        sign_in.reused.remove(&agent);
+        sign_in.send_split(LoginSplit {
+            agent,
+            why: SplitWhy::CodexSandbox,
+        });
+    }
+    Error::refused(
+        ErrorCode::AgentAuthRequired,
+        "ChatGPT's sign-in on this computer can't be used in the sandbox: sign in to ChatGPT in \
+         Clauseo",
+    )
 }

@@ -69,6 +69,7 @@ pub(super) fn prepare_codex(
         keys: serde_json::Map::new(),
         login: None,
         link,
+        lawyers_login: false,
         state_denies,
     };
     Ok((prepared, support))
@@ -265,6 +266,12 @@ pub(super) fn reused_login(actor: &Actor, thread: ThreadId) -> bool {
 pub(super) struct StatePlan {
     /// The agent's login is reused (`reused_login`).
     pub(super) reused: bool,
+    /// The launch goes through the sandbox's launchers: a reused Codex login is never linked
+    /// into its state folder, and the launch is refused (`sign_in::check_launch`).
+    jailed: bool,
+    /// For a jailed Codex launch, the lawyer's own login files (`lawyers_logins`), compared by
+    /// identity with the state folder's `auth.json`; none otherwise.
+    lawyers: Vec<PathBuf>,
     state_use: StateUse,
     /// A launch gate is wired.
     gated: bool,
@@ -286,12 +293,30 @@ impl StatePlan {
             .get(&thread)
             .map(|entry| entry.row.agent.clone());
         let state_use = state_use(actor, thread)?;
+        let jailed = actor.protection.launchers().is_some();
+        let codex = agent
+            .as_ref()
+            .is_some_and(|agent| agent.as_str() == AgentKind::Codex.id());
+        let lawyers = if jailed && codex {
+            lawyers_logins(actor)
+        } else {
+            Vec::new()
+        };
         Ok(Self {
             reused,
+            jailed,
+            lawyers,
             state_use,
             gated,
             agent,
         })
+    }
+
+    /// Whether the reused login's link is made once the sign-in hook has answered
+    /// ([`link_reused`]): never for a jailed launch, which the jail never gives the lawyer's
+    /// own `auth.json` (orchestrator's ruling (a)).
+    pub(super) const fn links_reused(&self) -> bool {
+        self.reused && !self.jailed
     }
 
     /// The agent's own preparation on the launch-prep thread, after the data-folder refusals:
@@ -315,7 +340,7 @@ impl StatePlan {
         let (codex_home, claude_home) = if claude { (None, home) } else { (home, None) };
         let codex = match (codex_home, run.state.clone()) {
             (Some(home), Some(state)) => {
-                let (prepared, support) = prepare_codex(
+                let (mut prepared, support) = prepare_codex(
                     check,
                     stored,
                     data,
@@ -324,6 +349,10 @@ impl StatePlan {
                     self.reused,
                     self.state_use,
                 )?;
+                prepared.lawyers_login = is_lawyers_login(&prepared, &self.lawyers);
+                if prepared.lawyers_login && !self.state_use.in_use {
+                    drop_lawyers_link(&prepared.state);
+                }
                 answer = Some(support);
                 Some(prepared)
             }
@@ -334,6 +363,60 @@ impl StatePlan {
             prepare_claude(data, home, run.state.as_deref(), self.state_use.in_use)?;
         }
         Ok((codex, claude_home, answer))
+    }
+}
+
+/// The lawyer's own Codex login files, as paths: `~/.codex/auth.json` under the lawyer's home,
+/// and `$CODEX_HOME/auth.json` when the lawyer's environment (the inherited one, as a launch
+/// reads it) sets an absolute `CODEX_HOME`. Read on the actor, no file system call.
+fn lawyers_logins(actor: &Actor) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = actor
+        .home
+        .iter()
+        .map(|home| home.join(".codex").join(state_folder::LOGIN_FILE))
+        .collect();
+    let codex_home = match &actor.wiring.inherited_env {
+        Some(env) => env
+            .iter()
+            .find(|(name, _)| name.as_os_str() == codex::HOME_VAR)
+            .map(|(_, value)| value.clone()),
+        None => std::env::var_os(codex::HOME_VAR),
+    };
+    files.extend(
+        codex_home
+            .map(PathBuf::from)
+            .filter(|home| home.is_absolute())
+            .map(|home| home.join(state_folder::LOGIN_FILE)),
+    );
+    files
+}
+
+/// Whether `codex`'s state folder `auth.json`, linked (`Same` or `Linked`), is one of the
+/// lawyer's own login files `lawyers` by file identity (device and inode, volume and file id),
+/// wherever its name is: Clauseo's login home may hold a name of the lawyer's file. Never by
+/// link count, which Clauseo's own login legitimately raises (one name per matter). File system
+/// calls: off the actor.
+pub(super) fn is_lawyers_login(codex: &CodexPrepared, lawyers: &[PathBuf]) -> bool {
+    use state_folder::StateLink;
+    let linked = matches!(codex.link, Some(Ok(StateLink::Same | StateLink::Linked)));
+    let file = codex.state.join(state_folder::LOGIN_FILE);
+    linked
+        && lawyers
+            .iter()
+            .any(|lawyers| state_folder::same_file(&file, lawyers).unwrap_or(false))
+}
+
+/// A jailed launch's state folder `auth.json` that is the lawyer's own file: its name in the
+/// state folder is removed, under the folder's lock (never the file it names, never anything of
+/// the lawyer's `~/.codex`), so no jail of the matter finds it; the launch is refused
+/// (`sign_in::check_launch`). A failure is logged by its kind and changes nothing else.
+fn drop_lawyers_link(state: &Path) {
+    let lock = state_folder::folder_lock(state);
+    let _held = lock
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Err(error) = state_folder::remove_stale_link(state) {
+        tracing::warn!(error_kind = ?error.kind(), "the lawyer's login link was not removed");
     }
 }
 

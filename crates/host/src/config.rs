@@ -35,9 +35,9 @@ pub(crate) use parts::{ConfigParts, UpdateSeams};
 pub(crate) mod sandbox;
 pub use sandbox::{Detect, Sandbox, SandboxLaunch, SandboxLaunchers, SessionEnd};
 mod egress;
-#[cfg(feature = "test-support")]
-pub use egress::TestProxy;
 pub use egress::{AgentListener, DEFAULT_TREE_WAIT, EgressProxy};
+#[cfg(feature = "test-support")]
+pub use egress::{ProxyOpened, TestProxy};
 mod session;
 pub use session::SessionKey;
 mod wiring;

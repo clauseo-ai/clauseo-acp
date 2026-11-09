@@ -91,6 +91,12 @@ pub enum KnownFolder {
     ProgramData,
     /// `Public`.
     Public,
+    /// The user's Desktop, wherever Known Folder Move put it (`OneDrive`'s backup redirects it):
+    /// read unchecked, so it may not exist. The host refuses a jailed agent's program there.
+    Desktop,
+    /// The user's Downloads, wherever it was redirected: read unchecked, so it may not exist.
+    /// The host refuses a jailed agent's program there.
+    Downloads,
 }
 
 /// The environment. [`crate::SystemEnv`] reads the process's; tests pass their own.

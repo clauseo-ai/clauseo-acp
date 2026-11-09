@@ -11,7 +11,7 @@ use clauseo_protocol::{AgentKind, MatterId, ThreadId};
 use clauseo_sandbox::Policy;
 
 use super::super::super::{CodexPrepared, Prepared, RunFolders};
-use super::{Grants, NATIVE_CODE_DENY, jail, policy, runtime};
+use super::{Grants, NATIVE_CODE_DENY, jail, personal_folders, policy, runtime};
 use crate::agent::state_folder::{StateLink, state_dir};
 use crate::config::SessionKey;
 use crate::pipeline::tests::support::id;
@@ -36,18 +36,18 @@ const ROOT_DER: [u8; 3] = [0x30, 0x01, 0x00];
 
 /// A fixture: a home with credential stores and three matters, a data folder with the session's
 /// folders, the agents' login homes and an install, and a Node outside both.
-struct Fixture {
-    root: PathBuf,
-    home: PathBuf,
-    data: PathBuf,
-    matter: PathBuf,
-    others: Vec<PathBuf>,
+pub(super) struct Fixture {
+    pub(super) root: PathBuf,
+    pub(super) home: PathBuf,
+    pub(super) data: PathBuf,
+    pub(super) matter: PathBuf,
+    pub(super) others: Vec<PathBuf>,
     node: PathBuf,
     install: PathBuf,
 }
 
 impl Fixture {
-    fn new(test: &str) -> Self {
+    pub(super) fn new(test: &str) -> Self {
         let raw = std::env::temp_dir().join(format!("clauseo-d2a-{test}-{}", std::process::id()));
         write::remove_dir_all(&raw).unwrap();
         write::create_dir_all(&raw).unwrap();
@@ -93,7 +93,7 @@ impl Fixture {
         }
     }
 
-    fn key() -> SessionKey {
+    pub(super) fn key() -> SessionKey {
         SessionKey {
             matter: id::<MatterId>(1),
             thread: id::<ThreadId>(2),
@@ -109,7 +109,7 @@ impl Fixture {
     }
 
     /// The session's folders for `agent` (made), its state folder when it has a kind.
-    fn run(&self, agent: &str, kind: Option<AgentKind>) -> RunFolders {
+    pub(super) fn run(&self, agent: &str, kind: Option<AgentKind>) -> RunFolders {
         let key = Self::key();
         let state = kind.map(|_| state_dir(&self.data, key.matter, agent));
         let run = RunFolders::new(&self.data, key).with_state(state);
@@ -120,7 +120,7 @@ impl Fixture {
         run
     }
 
-    fn grants(&self, kind: Option<AgentKind>) -> Grants {
+    pub(super) fn grants(&self, kind: Option<AgentKind>) -> Grants {
         Grants {
             data: self.data.clone(),
             kind,
@@ -134,10 +134,18 @@ impl Fixture {
             ca_cert: None,
             roots: Some(Arc::new(|| vec![ROOT_DER.to_vec()])),
             home: Some(self.home.clone()),
+            personal: Arc::new(personal_folders),
+            file_cap: clauseo_matters::FILE_CAP_BYTES,
+            login_home: self.codex_home(),
         }
     }
 
-    fn prepared(&self, run: RunFolders) -> Prepared {
+    /// Clauseo's own Codex login home.
+    pub(super) fn codex_home(&self) -> PathBuf {
+        self.data.join("agents").join("codex-acp").join("home")
+    }
+
+    pub(super) fn prepared(&self, run: RunFolders) -> Prepared {
         Prepared {
             stored: self.matter.clone(),
             codex: None,
@@ -150,23 +158,24 @@ impl Fixture {
         }
     }
 
-    fn codex(&self) -> (Prepared, Grants) {
+    pub(super) fn codex(&self) -> (Prepared, Grants) {
         let run = self.run("codex-acp", Some(AgentKind::Codex));
         let state = run.state.clone().unwrap();
         let mut prepared = self.prepared(run);
         prepared.codex = Some(CodexPrepared {
             folder: self.matter.clone(),
-            home: self.data.join("agents").join("codex-acp").join("home"),
+            home: self.codex_home(),
             state,
             keys: serde_json::Map::new(),
             login: None,
             link: Some(Ok(StateLink::Linked)),
+            lawyers_login: false,
             state_denies: Vec::new(),
         });
         (prepared, self.grants(Some(AgentKind::Codex)))
     }
 
-    fn claude(&self) -> (Prepared, Grants) {
+    pub(super) fn claude(&self) -> (Prepared, Grants) {
         let run = self.run("claude-acp", Some(AgentKind::Claude));
         let home = self.data.join("agents").join("claude-acp").join("home");
         write::create_dir_all(&home).unwrap();
@@ -176,7 +185,7 @@ impl Fixture {
     }
 
     /// `path` relative to the fixture's root, `/`-separated.
-    fn rel(&self, path: &Path) -> String {
+    pub(super) fn rel(&self, path: &Path) -> String {
         let rest = path.strip_prefix(&self.root).unwrap_or(path);
         rest.iter()
             .map(|part| part.to_string_lossy().into_owned())
@@ -185,7 +194,7 @@ impl Fixture {
     }
 
     /// The policy as text: every grant, the hidden list, the ports and the pinned switches.
-    fn shown(&self, policy: &Policy) -> String {
+    pub(super) fn shown(&self, policy: &Policy) -> String {
         let list = |paths: &[PathBuf]| {
             paths
                 .iter()
@@ -223,7 +232,7 @@ impl Fixture {
     }
 
     /// Every path the policy grants in any form, with what it is.
-    fn granted(policy: &Policy) -> Vec<(&'static str, PathBuf)> {
+    pub(super) fn granted(policy: &Policy) -> Vec<(&'static str, PathBuf)> {
         let mut granted = vec![
             ("matter", policy.matter().to_owned()),
             ("state", policy.state().to_owned()),
@@ -253,7 +262,7 @@ impl Fixture {
     }
 
     /// The negative golden: what `policy` must not grant in any form.
-    fn assert_absent(&self, policy: &Policy) {
+    pub(super) fn assert_absent(&self, policy: &Policy) {
         assert!(!policy.keychain(), "no Keychain rule in any policy");
         const {
             assert!(
@@ -266,6 +275,8 @@ impl Fixture {
             "R18 adds allowed folders"
         );
         let state = policy.state();
+        // The session's own files in its run folder, each by name: no other run folder's.
+        let run = self.data.join("run").join(Fixture::key().id());
         let own_in_data = |path: &Path| {
             path.starts_with(state)
                 || policy
@@ -274,9 +285,15 @@ impl Fixture {
                 || policy.notes().is_some_and(|notes| path.starts_with(notes))
                 || path.starts_with(&self.install)
                 || path.starts_with(self.data.join("profile"))
-                || path
-                    .file_name()
-                    .is_some_and(|name| name == super::super::ca::CA_FILE)
+                || [
+                    run.join(super::super::ca::CA_FILE),
+                    run.join("relay-token"),
+                    self.data
+                        .join(crate::browser::CONFIG_DIR)
+                        .join(crate::browser::CONFIG_FILE),
+                ]
+                .contains(&path.to_path_buf())
+                || path.starts_with(run.join("skill-packs"))
                 || policy.claude_store().is_some_and(|store| {
                     store.files().iter().any(|file| file == path)
                         || store
@@ -470,14 +487,14 @@ fn a_runtime_folder_in_documents_desktop_or_downloads_refuses_the_launch() {
         let install = fx.home.join(folder).join("agent");
         write::create_dir_all(&install).unwrap();
         grants.install = Some(install);
-        let error = runtime(&grants, &prepared.run).unwrap_err();
+        let error = runtime(&grants, &prepared).unwrap_err();
         assert_eq!(error.code(), clauseo_protocol::ErrorCode::AgentLaunchFailed);
         let text = error.to_string();
         assert!(!text.contains(&*fx.root.to_string_lossy()), "{text}");
     }
     // A missing install folder refuses too, without its path.
     grants.install = Some(fx.root.join("gone"));
-    let text = runtime(&grants, &prepared.run).unwrap_err().to_string();
+    let text = runtime(&grants, &prepared).unwrap_err().to_string();
     assert!(!text.contains(&*fx.root.to_string_lossy()), "{text}");
 }
 
@@ -488,10 +505,12 @@ fn hidden_lists_every_other_registry_matter_but_one_nested_with_this_one() {
     let nested = fx.matter.join("sub");
     write::create_dir_all(&nested).unwrap();
     grants.others.push(nested.clone());
-    let runtime = runtime(&grants, &prepared.run).unwrap();
+    let runtime = runtime(&grants, &prepared).unwrap();
     let built = policy(&prepared, &grants, runtime, None, &[]).unwrap();
     assert!(!built.hidden().contains(&nested));
     for other in &fx.others {
         assert!(built.hidden().contains(other));
     }
 }
+
+mod branches;

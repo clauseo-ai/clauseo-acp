@@ -10,13 +10,13 @@ use std::collections::BTreeSet;
 
 use clauseo_agents::keys::Keychain;
 use clauseo_agents::{Found, SigninState};
-use clauseo_host::AgentsStopped;
-use clauseo_protocol::{AgentId, CommandOutcome, ErrorCode, SignIn, SignInMethod};
+use clauseo_host::{AgentsStopped, SplitWhy};
+use clauseo_protocol::{AgentId, CommandOutcome, ErrorCode, FoundLogin, SignIn, SignInMethod};
 use futures::future::join;
 use serde_json::json;
 
 use super::fakes::{HostCall, Rig, command, rig_keys, rig_on};
-use super::leave::{reuse, stop_using_command};
+use super::leave::{reuse, reused_codex, stop_using_command};
 use super::switching::{count, retry, shown};
 use super::timing::until;
 use super::{SETTINGS, claude, codex};
@@ -24,6 +24,7 @@ use crate::bridge::lock;
 use crate::setup::keys::KeyCache;
 use crate::setup::leave::{Wait, auto_leave};
 use crate::setup::refresh::{SettingsRead, apply_settings};
+use crate::setup::start::leave_reason;
 use crate::test_support::block_on;
 
 const OLD_KEY: &str = "sk-ant-api03-STORED-KEY-0001";
@@ -349,4 +350,39 @@ fn a_hold_lifted_while_the_key_is_unreadable_is_refused_before_the_restart() {
     let restart = at(&HostCall::RestartAgents(claude())).expect("restarted");
     assert!(refused < restart, "refused first: {calls:?}");
     assert_eq!(restarts(&rig, &claude()), 1);
+}
+
+/// Each split's reason is the `SignedOut` its automatic leave shows (`follow_splits`).
+#[test]
+fn each_split_reason_is_the_found_its_leave_shows() {
+    assert_eq!(leave_reason(SplitWhy::LinkSplit), Found::CodexLinkSplit);
+    assert_eq!(
+        leave_reason(SplitWhy::LawyersFileGone),
+        Found::ReusedSignedOut
+    );
+    assert_eq!(leave_reason(SplitWhy::CodexSandbox), Found::CodexSandbox);
+}
+
+/// A jailed Codex launch met the reused login: its automatic leave ends reuse with
+/// `CodexSandbox`, which shows Clauseo's own sign-in only (`SignedOut`, no key or endpoint to
+/// restart with), and nothing restarts.
+#[test]
+fn a_codex_sandbox_automatic_leave_shows_signed_out_and_does_not_restart() {
+    let rig = reused_codex();
+    lock(&rig.agents.answers).insert(
+        "stop_using_login",
+        SigninState::SignedOut {
+            found: Some(Found::CodexSandbox),
+        },
+    );
+    let agent = codex();
+    let leave = auto_leave(&rig.backend, &agent, Some(Found::CodexSandbox));
+    assert_eq!(rig.pumped(leave), Ok(()));
+    assert_eq!(
+        shown(&rig, &codex()),
+        Some(SignIn::SignedOut {
+            found: Some(FoundLogin::CodexSandbox),
+        })
+    );
+    assert_eq!(restarts(&rig, &codex()), 0, "held for the next login");
 }

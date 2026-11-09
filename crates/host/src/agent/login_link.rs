@@ -104,15 +104,28 @@ pub enum LoginLink {
 /// failing so is treated as `agent.auth_required`.
 pub type SignInAgain = fn(&str) -> bool;
 
-/// A reused Codex login that split, sent on `HostHandle::login_splits`: desktop runs S18's
-/// `stop_using_login` with `CodexLinkSplit` (`ReusedSignedOut` when the lawyer's file is gone)
-/// and the leave order. The host has already set its own reused flag for the agent to false.
+/// A reused login the host stopped using at a launch, sent on `HostHandle::login_splits`:
+/// desktop runs S18's `stop_using_login` with the reason [`SplitWhy`] names, and the leave
+/// order. The host has already set its own reused flag for the agent to false.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoginSplit {
     /// The agent whose launch was refused.
     pub agent: AgentId,
-    /// The lawyer's `auth.json` is gone, not replaced.
-    pub lawyers_file_gone: bool,
+    /// Why the reuse ended.
+    pub why: SplitWhy,
+}
+
+/// Why a reused login ended at a launch ([`LoginSplit`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SplitWhy {
+    /// Codex's two names of the login are no longer one file: `CodexLinkSplit`.
+    LinkSplit,
+    /// The lawyer's `auth.json` is gone, not replaced: `ReusedSignedOut`.
+    LawyersFileGone,
+    /// A jailed launch of a reused Codex login (R17 PR-D2a, orchestrator's ruling (a)): the jail
+    /// never gets the lawyer's own `auth.json`, so Clauseo's own `ChatGPT` sign-in is needed:
+    /// `CodexSandbox`.
+    CodexSandbox,
 }
 
 /// How `HostHandle::stop_agents` ended its wait.

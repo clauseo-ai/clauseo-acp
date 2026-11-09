@@ -522,6 +522,12 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
   // UD1-88: the download's line, its bytes in whole MB. The live region hears only the state,
   // Getting {name} ready…, never these bytes
   ["Getting {name} ready… {done} MB of {total} MB", WELCOME, "welcome"],
+  // UD1-89: a jailed Codex launch met the reused Codex login: the ChatGPT plan's line, with Clauseo's own sign-in
+  [
+    "Clauseo's Safe workspace can't share Codex's sign-in. Sign in to ChatGPT in Clauseo instead.",
+    chatgpt({ signed_out: { found: "codex_sandbox" } }),
+    "plan-found",
+  ],
 ];
 
 /** The gate's refusal line for any other code: its code's own sentence, here a sign-in refused while a key is in use.

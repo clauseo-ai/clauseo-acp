@@ -1906,6 +1906,11 @@ export type FoundLogin =
 "claude_settings" | 
 /**  Windows with the sandbox set up, where Claude's login is not reused. */
 "claude_windows_sandbox" | 
+/**
+ *  Codex runs in the sandbox here, where the lawyer's own Codex login is not reused: Clauseo's
+ *  own `ChatGPT` sign-in is needed.
+ */
+"codex_sandbox" | 
 /**  A Codex login held in the OS keyring, not in a file. */
 "codex_keyring" | 
 /**  Reuse stopped: a refresh failed twice. */

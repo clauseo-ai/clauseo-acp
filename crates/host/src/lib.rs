@@ -267,7 +267,7 @@ mod write;
 pub use agent::launch_gate::LaunchGate;
 pub use agent::loads::codex_hook_config;
 pub use agent::login_link::{
-    AgentsStopped, LoginCheck, LoginLink, LoginSplit, Shared, SignInAgain, StopFor,
+    AgentsStopped, LoginCheck, LoginLink, LoginSplit, Shared, SignInAgain, SplitWhy, StopFor,
 };
 pub use agent::login_splits::LoginSplits;
 pub use agent::session_folder;
@@ -276,14 +276,14 @@ pub use clauseo_acp::McpServer;
 #[cfg(feature = "test-support")]
 pub use clock::ManualClock;
 pub use clock::{Clock, Now, SystemClock};
-#[cfg(feature = "test-support")]
-pub use config::TestProxy;
 pub use config::sandbox::{CaRoots, InstallFolders, Reservation};
 pub use config::{
     AgentListener, CAP_MIN_IDLE, DEFAULT_TREE_WAIT, Detect, EgressProxy, HostConfig, IDLE_LIMIT,
     LIVE_AGENTS, NoProfile, PackRequest, ProfileHook, Sandbox, SandboxLaunch, SandboxLaunchers,
     SessionEnd, SessionKey,
 };
+#[cfg(feature = "test-support")]
+pub use config::{ProxyOpened, TestProxy};
 pub use encode::EncodedEvent;
 pub use error::Error;
 pub use handle::{

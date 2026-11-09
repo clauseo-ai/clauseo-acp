@@ -105,6 +105,8 @@ export const HI = {
     "इस कंप्यूटर पर Codex अपना साइन इन ऐसी जगह रखता है जहाँ से Clauseo उसे साझा नहीं कर सकता।",
   "Clauseo's Safe workspace can't share Claude Code's sign-in on Windows yet.":
     "Clauseo का सुरक्षित कार्यक्षेत्र अभी Windows पर Claude Code का साइन-इन साझा नहीं कर सकता।",
+  "Clauseo's Safe workspace can't share Codex's sign-in. Sign in to ChatGPT in Clauseo instead.":
+    "Clauseo का सुरक्षित कार्यक्षेत्र Codex का साइन-इन साझा नहीं कर सकता। इसके बजाय Clauseo में ChatGPT से साइन इन करें।",
   "{app} on this computer is signed out, so Clauseo stopped using its sign-in.":
     "इस कंप्यूटर पर {app} से साइन आउट हो गया है, इसलिए Clauseo ने उसका साइन इन इस्तेमाल करना बंद कर दिया।",
   "{app} on this computer now uses another account, so Clauseo stopped using its sign-in.":
