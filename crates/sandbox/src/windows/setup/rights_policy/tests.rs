@@ -455,3 +455,21 @@ fn a_template_that_doesnt_parse_is_unknown_never_not_defined() {
         );
     }
 }
+
+#[test]
+fn the_recorded_state_round_trips_through_its_text() {
+    for state in PolicyState::ALL {
+        assert_eq!(PolicyState::parse(state.text()), Some(state));
+    }
+    assert_eq!(PolicyState::parse("Defined_With_Pool"), None);
+    assert_eq!(PolicyState::parse(""), None);
+    let without = RightPolicy::Defined {
+        includes_pool: false,
+    };
+    assert_eq!(PolicyState::of(without), PolicyState::DefinedWithoutPool);
+    assert_eq!(PolicyState::of(RightPolicy::Unknown).text(), "unknown");
+    assert_eq!(
+        PolicyState::of(RightPolicy::NotDefined).text(),
+        "not_defined"
+    );
+}

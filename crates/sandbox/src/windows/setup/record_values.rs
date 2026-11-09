@@ -123,9 +123,15 @@ pub const STOP_NEXT: &str = "StopNext";
 /// pool group's, written before the grant (`logon_grant.rs`). `--remove` takes the right off
 /// that SID alone, then deletes the value with the set-up's. Outside [`MachineRecord`].
 pub const LOGON_RIGHT_ADDED: &str = "LogonRightAdded";
+/// `LogonPolicy` (`REG_SZ`, `rights_policy::PolicyState::text`): what set-up or the SYSTEM
+/// refresh last found policy says of "Allow log on locally", for a launch's 1385, which runs as
+/// the desktop user and can't read the policy itself. Outside [`MachineRecord`].
+pub const LOGON_POLICY: &str = "LogonPolicy";
+/// `LogonPolicyAt` (`REG_QWORD`, seconds since 1970): when [`LOGON_POLICY`] was found.
+pub const LOGON_POLICY_AT: &str = "LogonPolicyAt";
 /// The values the set-up owns, which a rollback or `--remove` deletes; the ones `--adopt`
 /// writes stay until `--remove` takes the admin copy away.
-pub const SETUP_VALUES: [&str; 10] = [
+pub const SETUP_VALUES: [&str; 12] = [
     OWNER_SID,
     GROUP_SID,
     POOL_SIDS,
@@ -136,6 +142,8 @@ pub const SETUP_VALUES: [&str; 10] = [
     STOP_SEQUENCE,
     STOP_NEXT,
     LOGON_RIGHT_ADDED,
+    LOGON_POLICY,
+    LOGON_POLICY_AT,
 ];
 
 /// `listed` (`ResetSids` as read) with each of `add` it lacks appended, in order.
@@ -463,6 +471,11 @@ mod tests {
         // And the logon-right grant's record, which `--remove` reads before it goes.
         assert_eq!(LOGON_RIGHT_ADDED, "LogonRightAdded");
         assert!(SETUP_VALUES.contains(&LOGON_RIGHT_ADDED));
+        assert_eq!(
+            (LOGON_POLICY, LOGON_POLICY_AT),
+            ("LogonPolicy", "LogonPolicyAt")
+        );
+        assert!(SETUP_VALUES.contains(&LOGON_POLICY) && SETUP_VALUES.contains(&LOGON_POLICY_AT));
     }
 
     #[test]

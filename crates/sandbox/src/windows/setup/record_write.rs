@@ -25,10 +25,11 @@ use super::lock::Descriptor;
 use super::record_key::{self, Counts, Keys};
 use super::record_values::{
     self, ADMIN_COPY_OWNER, ADMIN_COPY_SHA256, ADMIN_COPY_VERSION, ADMIN_VALUES, AdminValues,
-    CopyOwner, DATA_DIR, GROUP_SID, LOGON_RIGHT_ADDED, OWNER_SID, POOL_SIDS, RECORD_SDDL, REMOVING,
-    RESET_SIDS, RawRecord, RegValue, SETUP_VALUES, USER_INSTALL_DIR, resets_with, resets_without,
-    sids_value,
+    CopyOwner, DATA_DIR, GROUP_SID, LOGON_POLICY, LOGON_POLICY_AT, LOGON_RIGHT_ADDED, OWNER_SID,
+    POOL_SIDS, RECORD_SDDL, REMOVING, RESET_SIDS, RawRecord, RegValue, SETUP_VALUES,
+    USER_INSTALL_DIR, resets_with, resets_without, sids_value,
 };
+use super::rights_policy::PolicyState;
 use crate::windows::pool::{MachineRecord, pool_sids_from_multi_sz};
 use crate::windows::record::{RecordError, read_dword, read_qword, read_string, read_units};
 use crate::windows::sids::Sid;
@@ -209,6 +210,28 @@ pub(super) fn write_logon_grant(key: &str, sid: Option<&Sid>) -> Result<(), Mach
         ),
         None => delete_values(key, &[LOGON_RIGHT_ADDED]),
     }
+}
+
+/// Writes `LogonPolicy` as `state` and `LogonPolicyAt` as `at` into `HKLM\<key>`: made and
+/// secured as [`write`] does when `make` (set-up), else only into a key that is there, never
+/// made (the SYSTEM refresh, which must not bring a removed record back).
+pub(super) fn write_logon_policy(
+    key: &str,
+    state: PolicyState,
+    at: u64,
+    make: bool,
+) -> Result<(), MachineError> {
+    let opened = if make {
+        open_secured(key)?
+    } else {
+        open_existing(key)?
+    };
+    set_value(
+        &opened,
+        LOGON_POLICY,
+        &RegValue::Sz(record_values::sz(state.text())),
+    )?;
+    set_value(&opened, LOGON_POLICY_AT, &RegValue::Qword(at))
 }
 
 /// `HKLM\<key>` opened to set values, made when missing, with its owner (Administrators) and

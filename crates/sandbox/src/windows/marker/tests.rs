@@ -353,3 +353,18 @@ fn a_hard_linked_marker_is_unreadable_and_not_written() {
     assert!(write(temp.path(), &marker(SETUP_VERSION, LAWYER)).is_err());
     drop(outside);
 }
+
+#[test]
+fn a_record_with_no_pool_user_is_a_set_up_to_finish() {
+    // A set-up that stopped after its first record (the group, no users) leaves it.
+    let records = Fake {
+        pool: Ok(Vec::new()),
+        ..Fake::ready()
+    };
+    for marker in [
+        MarkerState::Missing,
+        MarkerState::Current(marker(SETUP_VERSION, LAWYER)),
+    ] {
+        assert_eq!(state_of(marker, &sid(LAWYER), &records), SetupState::Needed);
+    }
+}

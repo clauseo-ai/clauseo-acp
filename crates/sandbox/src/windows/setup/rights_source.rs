@@ -15,8 +15,11 @@ use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 
 use super::ffi::{reg_last_write, reg_string, windows_dir};
 use super::preflight::sid_of_name;
+use super::record_write;
+use super::result_file::now_secs;
 use super::rights_policy::{
-    CACHE_TTL, MDM_KEY, PolicyCache, PolicySource, Pool, RightPolicy, read_policy,
+    CACHE_TTL, INTERACTIVE_RIGHT, MDM_KEY, PolicyCache, PolicySource, PolicyState, Pool,
+    RightPolicy, read_policy,
 };
 use crate::windows::refresh::source::read_capped;
 use crate::windows::sids::Sid;
@@ -112,4 +115,27 @@ pub fn cached(right: &str, pool: Pool<'_>, now: Duration) -> RightPolicy {
     let mut held = CACHE.lock().unwrap_or_else(PoisonError::into_inner);
     held.get_or_insert_with(|| PolicyCache::new(CACHE_TTL))
         .right(&mut WindowsPolicySource, right, pool, now)
+}
+
+/// The SYSTEM refresh's update of the record's `LogonPolicy` (`exe.rs`, before the refresh):
+/// what policy says now of "Allow log on locally" for the record's group and pool, so a policy
+/// that changed since set-up names itself at a launch's 1385. Only into a record that is there
+/// and not being removed (never made again); every failure is logged and changes nothing else.
+pub fn record_for_launches(record_key: &str) {
+    let record = match record_write::read(record_key) {
+        Ok(Some(record)) if !record.removing => record,
+        Ok(_) => return,
+        Err(error) => {
+            tracing::warn!(%error, "the record couldn't be read for LogonPolicy");
+            return;
+        }
+    };
+    let pool = Pool {
+        group: Some(&record.group),
+        users: &record.pool,
+    };
+    let state = PolicyState::of(read_now(INTERACTIVE_RIGHT, pool));
+    if let Err(error) = record_write::write_logon_policy(record_key, state, now_secs(), false) {
+        tracing::warn!(%error, "LogonPolicy couldn't be recorded");
+    }
 }

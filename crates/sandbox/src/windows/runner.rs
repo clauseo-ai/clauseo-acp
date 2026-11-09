@@ -69,7 +69,7 @@ use serde::{Deserialize, Serialize};
 
 use super::pool::pool_number;
 #[cfg(any(windows, test, feature = "test-support"))]
-use super::setup::rights_policy::RightPolicy;
+use super::setup::rights_policy::{PolicyState, RightPolicy};
 use super::sids::Sid;
 
 #[cfg(windows)]
@@ -518,21 +518,27 @@ impl RunExit {
     }
 }
 
-/// What a launch's 1385 is, from what the cached policy read says of "Allow log on locally"
-/// (`setup::rights_source::cached`): a policy that defines it without the pool is
-/// [`RunExit::LogonPolicy`], with [`Blocked::LogonPolicy`](crate::Blocked::LogonPolicy)'s words;
-/// anything else, an unreadable policy included, stays [`RunExit::LogonRight`].
+/// What a launch's 1385 is. First what the record's `LogonPolicy` says (`recorded`; set-up
+/// and the SYSTEM refresh write it, since the desktop user can't read the policy): a policy that
+/// defines "Allow log on locally" without the pool is [`RunExit::LogonPolicy`], with
+/// [`Blocked::LogonPolicy`](crate::Blocked::LogonPolicy)'s words; none, or with the pool, is
+/// [`RunExit::LogonRight`] (setting up again grants it). When the record says nothing or
+/// `unknown`, `cached` (`setup::rights_source::cached`, readable on some machines) decides the
+/// same way, and anything it can't read stays [`RunExit::LogonRight`].
 #[cfg(any(windows, test, feature = "test-support"))]
-pub fn logon_refusal(policy: RightPolicy) -> (RunExit, crate::Blocked) {
-    match policy {
-        RightPolicy::Defined {
-            includes_pool: false,
-        } => (RunExit::LogonPolicy, crate::Blocked::LogonPolicy),
-        RightPolicy::Defined {
-            includes_pool: true,
+pub fn logon_refusal(
+    recorded: Option<PolicyState>,
+    cached: impl FnOnce() -> RightPolicy,
+) -> (RunExit, crate::Blocked) {
+    let state = match recorded {
+        Some(PolicyState::Unknown) | None => PolicyState::of(cached()),
+        Some(state) => state,
+    };
+    match state {
+        PolicyState::DefinedWithoutPool => (RunExit::LogonPolicy, crate::Blocked::LogonPolicy),
+        PolicyState::DefinedWithPool | PolicyState::NotDefined | PolicyState::Unknown => {
+            (RunExit::LogonRight, crate::Blocked::LogonRight)
         }
-        | RightPolicy::NotDefined
-        | RightPolicy::Unknown => (RunExit::LogonRight, crate::Blocked::LogonRight),
     }
 }
 

@@ -795,16 +795,25 @@ default Windows include, so most computers need nothing. Set-up checks the rest
 - **The cache.** For a launch's check, `rights_source::cached` keeps the parsed lists in one
   process-wide `PolicyCache`, keyed by each template's last-write time and the `PolicyManager`
   key's (`RegQueryInfoKey`). It re-reads when one changes, a template appears or goes, or after
-  10 minutes. An `Unknown` is never cached. Set-up reads afresh (`read_now`). A launch's 1385
-  asks it (the outer runner, `steps::logon_failure`, only on a 1385): when it says a policy
-  leaves the pool out, the runner exits `RunExit::LogonPolicy` with `Blocked::LogonPolicy`'s
-  words; otherwise, an unreadable cache as the desktop user included, `RunExit::LogonRight`.
+  10 minutes. An `Unknown` is never cached. Set-up reads afresh (`read_now`).
+- **What a launch's 1385 says.** The outer runner runs as the desktop user, who can't read the
+  template cache. So set-up (step 3a) and the SYSTEM refresh task (`--refresh`, before its
+  refresh; only into a record that is there and not being removed) write what they found into
+  the record, which Users can read: `LogonPolicy` (`defined_with_pool`, `defined_without_pool`,
+  `not_defined`, `unknown`) and `LogonPolicyAt` (seconds since 1970). On a 1385 only, the runner
+  reads it (`steps::logon_failure`, `runner::logon_refusal`). `defined_without_pool` exits
+  `RunExit::LogonPolicy` with `Blocked::LogonPolicy`'s words. `not_defined` and
+  `defined_with_pool` keep `RunExit::LogonRight` (setting up again grants the right). For
+  `unknown`, or no value, the cache decides the same way, and an unreadable cache keeps
+  `LogonRight`.
 - **The grant.** Step 3a, once the group exists and before any pool user logs on: when policy
   doesn't define "Allow log on locally" and `LsaEnumerateAccountsWithUserRight` lists none of the
   group, Users, Everyone or Authenticated Users, set-up writes `LogonRightAdded` (the group's
   SID) to the record, then `LsaAddAccountRights` adds the right to the group. A fresh run writes
   its record (the group, no users yet) before the value, so the value never sits in a key
-  `--remove` reads as no record. If the add fails, the value is cleared. A failed run's rollback
+  `--remove` reads as no record. A crash right after it leaves a record with no pool user: the
+  set-up state is `Needed` (`marker::state_of`), so launches get the ordinary set-up words, and
+  the next set-up adopts the recorded group and makes the pool. If the add fails, the value is cleared. A failed run's rollback
   takes the right off again; when that fails, it keeps the record naming the group, so
   `--remove` still finds the grant. A policy that defines
   the right without the pool gets no grant (the next refresh would undo it): set-up fails at

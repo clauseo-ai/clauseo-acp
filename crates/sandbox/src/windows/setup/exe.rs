@@ -89,6 +89,8 @@ pub fn main(args: impl IntoIterator<Item = OsString>) -> u8 {
         }
     };
     if mode == Mode::Refresh {
+        // The policy a launch's 1385 names, as SYSTEM can read it (`rights_source.rs`).
+        super::rights_source::record_for_launches(RECORD_KEY);
         return refresh::run().as_code();
     }
     if mode == Mode::Stop {

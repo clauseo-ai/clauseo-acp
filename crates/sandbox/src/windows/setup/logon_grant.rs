@@ -19,7 +19,7 @@
 //! "Allow log on through Remote Desktop Services".
 
 use super::machine::MachineError;
-use super::rights_policy::{INTERACTIVE_RIGHT, Pool, RightPolicy};
+use super::rights_policy::{INTERACTIVE_RIGHT, PolicyState, Pool, RightPolicy};
 use crate::windows::sids::Sid;
 
 /// Every right set-up may grant: "Allow log on locally" alone.
@@ -44,6 +44,9 @@ pub trait LogonRights {
     fn recorded(&mut self) -> Result<Option<Sid>, MachineError>;
     /// Writes `LogonRightAdded` as `sid`, or deletes it for `None`.
     fn record(&mut self, sid: Option<&Sid>) -> Result<(), MachineError>;
+    /// Writes the record's `LogonPolicy` as `state`, found at `at` (seconds since 1970), for
+    /// a launch's 1385 to read.
+    fn record_policy(&mut self, state: PolicyState, at: u64) -> Result<(), MachineError>;
 }
 
 /// What the grant step did, or, from [`plan_grant`], will do.

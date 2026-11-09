@@ -4,7 +4,7 @@
 
 use super::LogonRights;
 use crate::windows::setup::MachineError;
-use crate::windows::setup::rights_policy::{Pool, RightPolicy};
+use crate::windows::setup::rights_policy::{PolicyState, Pool, RightPolicy};
 use crate::windows::sids::Sid;
 
 /// The rights in memory.
@@ -20,6 +20,8 @@ pub(crate) struct FakeRights {
     pub(crate) calls: Vec<String>,
     /// The call whose line this is fails, once.
     pub(crate) fail: Option<String>,
+    /// `LogonPolicy` and `LogonPolicyAt`.
+    pub(crate) policy_state: Option<(PolicyState, u64)>,
 }
 
 impl Default for FakeRights {
@@ -31,6 +33,7 @@ impl Default for FakeRights {
             recorded: None,
             calls: Vec::new(),
             fail: None,
+            policy_state: None,
         }
     }
 }
@@ -84,6 +87,12 @@ impl LogonRights for FakeRights {
         };
         self.call(&line)?;
         self.recorded = sid.cloned();
+        Ok(())
+    }
+
+    fn record_policy(&mut self, state: PolicyState, at: u64) -> Result<(), MachineError> {
+        self.call(&format!("policy_state {}", state.text()))?;
+        self.policy_state = Some((state, at));
         Ok(())
     }
 }

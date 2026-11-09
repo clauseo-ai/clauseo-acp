@@ -16,6 +16,7 @@ use super::logon_grant::{GrantError, Granted, add_recorded, plan_grant};
 use super::machine::{Machine, MachineError, owned};
 use super::outcome::{JournalOutcome, LOGON_POLICY_EXCLUDES, SetupFailure, Step, cause_of};
 use super::record_values::CopyOwner;
+use super::rights_policy::PolicyState;
 use super::rollback::Run;
 use crate::Error;
 use crate::windows::apply::{Applied, fence_each};
@@ -45,7 +46,9 @@ pub(super) fn logon_right(
     run: &mut Run,
 ) -> Result<(), Failed> {
     let failed = |error: &MachineError| (Step::LogonRight, cause_of(error));
-    match plan_grant(machine.logon_rights(), group, users) {
+    let planned = plan_grant(machine.logon_rights(), group, users);
+    record_policy(machine, &planned, run);
+    match planned {
         Ok(Granted::Added) => {}
         Ok(Granted::Unknown) => {
             tracing::warn!(
@@ -73,6 +76,35 @@ pub(super) fn logon_right(
     add_recorded(machine.logon_rights(), group).map_err(|error| failed(&error))?;
     run.logon_added = Some(group.clone());
     Ok(())
+}
+
+/// What `planned` says of policy, kept in `run` for the record's `LogonPolicy` (a launch's
+/// 1385 reads it; the desktop user can't read the policy itself), and written at once when the
+/// record exists. A call that failed says nothing of policy.
+fn record_policy(machine: &mut impl Machine, planned: &Result<Granted, GrantError>, run: &mut Run) {
+    run.policy = match planned {
+        Ok(Granted::PolicyIncludes) => Some(PolicyState::DefinedWithPool),
+        Err(GrantError::Excluded) => Some(PolicyState::DefinedWithoutPool),
+        Ok(Granted::Added | Granted::Covered) => Some(PolicyState::NotDefined),
+        Ok(Granted::Unknown) => Some(PolicyState::Unknown),
+        Err(GrantError::Failed(_)) => None,
+    };
+    if run.recorded().is_some() {
+        flush_policy(machine, run);
+    }
+}
+
+/// Writes the policy step 3a found to the record's `LogonPolicy`, once the record exists (so it
+/// never stands in a key that holds no record). A failed write is logged: it only costs a
+/// launch's words.
+pub(super) fn flush_policy(machine: &mut impl Machine, run: &mut Run) {
+    let Some(state) = run.policy.take() else {
+        return;
+    };
+    let at = machine.now();
+    if let Err(error) = machine.logon_rights().record_policy(state, at) {
+        tracing::warn!(%error, "LogonPolicy couldn't be recorded");
+    }
 }
 
 /// After step 5, once the record names `owner` as `OwnerSid`: on a per-machine install (the

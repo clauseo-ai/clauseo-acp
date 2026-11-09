@@ -9,8 +9,8 @@ use super::super::{RunExit, logon_refusal};
 use super::end::since_start;
 use super::{Failure, os};
 use crate::windows::acl::object::Handle;
-use crate::windows::record::sandbox_group_sid;
-use crate::windows::setup::rights_policy::{INTERACTIVE_RIGHT, Pool, RightPolicy};
+use crate::windows::record::{sandbox_group_sid, sandbox_logon_policy};
+use crate::windows::setup::rights_policy::{INTERACTIVE_RIGHT, PolicyState, Pool, RightPolicy};
 use crate::windows::setup::rights_source;
 use crate::windows::sids::Sid;
 use crate::windows::token::os::shut_object;
@@ -86,14 +86,19 @@ impl Steps for Start<'_> {
     }
 }
 
-/// Maps a `CreateProcessWithLogonW` code to its failure. A 1385 asks the cached policy read
-/// whether a policy leaves the pool out of "Allow log on locally" ([`logon_refusal`]), so the
-/// words say whether setting up again helps; read only on a 1385, never on a launch that works.
+/// Maps a `CreateProcessWithLogonW` code to its failure. A 1385 reads the record's
+/// `LogonPolicy`, then the cached policy read, to learn whether a policy leaves the pool out of
+/// "Allow log on locally" ([`logon_refusal`]), so the words say whether setting up again helps;
+/// read only on a 1385, never on a launch that works.
 pub(super) fn logon_failure(code: u32, pool_user: &Sid) -> Failure {
     match code {
         1058 => Failure::new(RunExit::SecondaryLogon, super::super::SECLOGON_DISABLED),
         1385 => {
-            let (exit, blocked) = logon_refusal(launch_policy(pool_user));
+            let recorded = sandbox_logon_policy()
+                .ok()
+                .flatten()
+                .and_then(|text| PolicyState::parse(&text));
+            let (exit, blocked) = logon_refusal(recorded, || launch_policy(pool_user));
             Failure::new(exit, blocked.to_string())
         }
         1326 => Failure::new(RunExit::Password, super::super::PASSWORD_LOST),

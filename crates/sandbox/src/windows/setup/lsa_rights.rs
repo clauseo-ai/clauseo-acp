@@ -5,7 +5,7 @@ use super::logon_grant::LogonRights;
 use super::machine::MachineError;
 use super::preflight::{add_interactive, holders, remove_interactive};
 use super::record_write;
-use super::rights_policy::{Pool, RightPolicy};
+use super::rights_policy::{PolicyState, Pool, RightPolicy};
 use super::rights_source;
 use crate::windows::sids::Sid;
 
@@ -40,5 +40,9 @@ impl LogonRights for WindowsRights {
 
     fn record(&mut self, sid: Option<&Sid>) -> Result<(), MachineError> {
         record_write::write_logon_grant(&self.record_key, sid)
+    }
+
+    fn record_policy(&mut self, state: PolicyState, at: u64) -> Result<(), MachineError> {
+        record_write::write_logon_policy(&self.record_key, state, at, true)
     }
 }

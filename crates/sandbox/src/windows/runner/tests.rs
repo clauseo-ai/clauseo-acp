@@ -555,33 +555,35 @@ fn the_command_line_names_one_mode_and_sweep_takes_nothing_else() {
 }
 
 #[test]
-fn a_launch_1385_names_the_policy_only_when_the_cached_read_says_it_leaves_the_pool_out() {
-    use crate::windows::setup::rights_policy::RightPolicy;
-    let without = RightPolicy::Defined {
+fn a_launch_1385_names_the_policy_from_the_recorded_state() {
+    use crate::windows::setup::rights_policy::{PolicyState, RightPolicy};
+    let without = || RightPolicy::Defined {
         includes_pool: false,
     };
-    let (exit, blocked) = logon_refusal(without);
+    let unread = || RightPolicy::Unknown;
+    let policy = (RunExit::LogonPolicy, crate::Blocked::LogonPolicy);
+    let local = (RunExit::LogonRight, crate::Blocked::LogonRight);
+    // The record decides: without the pool is the IT-policy words, whatever the cache says.
     assert_eq!(
-        (exit, blocked),
-        (RunExit::LogonPolicy, crate::Blocked::LogonPolicy)
+        logon_refusal(Some(PolicyState::DefinedWithoutPool), unread),
+        policy
     );
-    let words = blocked.to_string();
+    let words = policy.1.to_string();
     assert!(words.starts_with("This computer's settings don't let Clauseo's sandbox accounts"));
     assert!(
         !words.contains("set up again") && !words.contains("Setting up"),
         "{words}"
     );
-    for policy in [
-        RightPolicy::Defined {
-            includes_pool: true,
-        },
-        RightPolicy::NotDefined,
-        RightPolicy::Unknown,
-    ] {
-        assert_eq!(
-            logon_refusal(policy),
-            (RunExit::LogonRight, crate::Blocked::LogonRight),
-            "{policy:?}"
-        );
+    // Not defined: set-up grants it, so the words say setting up again (the cache isn't asked).
+    assert_eq!(logon_refusal(Some(PolicyState::NotDefined), without), local);
+    assert_eq!(
+        logon_refusal(Some(PolicyState::DefinedWithPool), without),
+        local
+    );
+    // Unknown, or no value: the cache decides, and an unreadable cache keeps today's words.
+    for recorded in [Some(PolicyState::Unknown), None] {
+        assert_eq!(logon_refusal(recorded, unread), local, "{recorded:?}");
+        assert_eq!(logon_refusal(recorded, without), policy, "{recorded:?}");
+        assert_eq!(logon_refusal(recorded, || RightPolicy::NotDefined), local);
     }
 }

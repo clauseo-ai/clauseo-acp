@@ -1007,6 +1007,10 @@ The matching deny rights (`SeDenyInteractiveLogonRight`, `SeDenyBatchLogonRight`
 
 Set-up never grants "Allow log on through Remote Desktop Services".
 
+Set-up, and Clauseo's SYSTEM refresh task, also record what they found in the values
+`LogonPolicy` and `LogonPolicyAt` of `HKLM\SOFTWARE\Clauseo\Sandbox`, so a launch can tell
+the lawyer whether a policy is the cause.
+
 **Removal.** Uninstalling takes "Allow log on locally" off `ClauseoSandboxUsers` only when
 `LogonRightAdded` says set-up added it. A right you granted yourself stays.
 

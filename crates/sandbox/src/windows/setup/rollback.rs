@@ -17,6 +17,7 @@ use super::create::write_record;
 use super::logon_grant::undo_grant;
 use super::machine::{Machine, Password, owned};
 use super::outcome::cause_of;
+use super::rights_policy::PolicyState;
 use crate::windows::acl_plan::Grant;
 use crate::windows::ledger::Ledger;
 use crate::windows::pool::{MachineRecord, PoolUser};
@@ -57,6 +58,9 @@ pub(super) struct Run {
     pub(super) reset: Vec<(Sid, Password)>,
     /// The SID this run granted "Allow log on locally" to (step 3a), and recorded.
     pub(super) logon_added: Option<Sid>,
+    /// What step 3a found policy says, until it is written to the record's `LogonPolicy`
+    /// (`late_steps::flush_policy`), once the record exists.
+    pub(super) policy: Option<PolicyState>,
 }
 
 impl Run {
@@ -73,6 +77,7 @@ impl Run {
             kept: Vec::new(),
             reset: Vec::new(),
             logon_added: None,
+            policy: None,
         }
     }
 

@@ -185,7 +185,9 @@ pub const REMOVAL_UNFINISHED: &str =
 ///   group and every pool SID the marker names is in `PoolSids` (canonical strings, so equal
 ///   strings are equal SIDs). `PoolSids` may hold more: a later set-up that grew the pool and
 ///   stopped before its marker. No `OwnerSid`, another or missing group, or a marker pool SID
-///   missing from the record: the record was removed or rewritten, [`SetupState::Needed`]. A
+///   missing from the record: the record was removed or rewritten, [`SetupState::Needed`]. So
+///   is a record with no pool user, which a set-up that stopped after its first record leaves
+///   (the next set-up makes the pool). A
 ///   marker with an empty pool, or a value that can't be read or is not a SID:
 ///   [`SetupState::Failed`].
 pub fn state_of(marker: MarkerState, user: &Sid, records: &impl Records) -> SetupState {
@@ -236,7 +238,8 @@ pub fn state_of(marker: MarkerState, user: &Sid, records: &impl Records) -> Setu
         Ok(pool) => pool,
         Err(why) => return SetupState::Failed(format!("the sandbox pool record: {why}")),
     };
-    let recorded = marker.pool.iter().all(|sid| pool.contains(sid));
+    // An empty pool is a set-up that stopped after its first record: set-up again, never Ready.
+    let recorded = !pool.is_empty() && marker.pool.iter().all(|sid| pool.contains(sid));
     if owned && group.as_ref() == Some(&marker.group_sid) && recorded {
         SetupState::Ready
     } else {

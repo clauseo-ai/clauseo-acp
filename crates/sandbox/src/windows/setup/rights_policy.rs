@@ -68,6 +68,62 @@ pub enum RightPolicy {
     Unknown,
 }
 
+/// What set-up and the SYSTEM refresh last found policy says of "Allow log on locally", kept in
+/// the record (`LogonPolicy`, with `LogonPolicyAt`) where the desktop user's launch can read it:
+/// the template cache itself is readable by administrators and SYSTEM only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PolicyState {
+    /// A policy defines it and includes the pool.
+    DefinedWithPool,
+    /// A policy defines it without the pool: setting up again doesn't fix a 1385.
+    DefinedWithoutPool,
+    /// No policy defines it: set-up grants it, so setting up again fixes a 1385.
+    NotDefined,
+    /// The policy couldn't be read.
+    Unknown,
+}
+
+impl PolicyState {
+    /// Every state, in order.
+    pub const ALL: [PolicyState; 4] = [
+        PolicyState::DefinedWithPool,
+        PolicyState::DefinedWithoutPool,
+        PolicyState::NotDefined,
+        PolicyState::Unknown,
+    ];
+
+    /// The state of what was read.
+    pub fn of(policy: RightPolicy) -> PolicyState {
+        match policy {
+            RightPolicy::Defined {
+                includes_pool: true,
+            } => PolicyState::DefinedWithPool,
+            RightPolicy::Defined {
+                includes_pool: false,
+            } => PolicyState::DefinedWithoutPool,
+            RightPolicy::NotDefined => PolicyState::NotDefined,
+            RightPolicy::Unknown => PolicyState::Unknown,
+        }
+    }
+
+    /// Its text in the record.
+    pub fn text(self) -> &'static str {
+        match self {
+            PolicyState::DefinedWithPool => "defined_with_pool",
+            PolicyState::DefinedWithoutPool => "defined_without_pool",
+            PolicyState::NotDefined => "not_defined",
+            PolicyState::Unknown => "unknown",
+        }
+    }
+
+    /// The state `text` names; `None` for any other text.
+    pub fn parse(text: &str) -> Option<PolicyState> {
+        PolicyState::ALL
+            .into_iter()
+            .find(|state| state.text() == text)
+    }
+}
+
 /// One entry of a right's list: a SID (`*S-1-…` in a template), or a name no lookup resolved.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Principal {

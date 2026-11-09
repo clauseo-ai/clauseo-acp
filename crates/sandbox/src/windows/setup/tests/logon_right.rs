@@ -6,6 +6,7 @@ use super::fake::{FakeAcl, FakeMachine};
 use super::remove_fake::Remover;
 use super::*;
 use crate::Blocked;
+use crate::windows::pool::MachineRecord;
 use crate::windows::setup::remove::{Removed, remove};
 use crate::windows::setup::rights_policy::RightPolicy;
 
@@ -191,4 +192,69 @@ fn remove_leaves_a_right_set_up_didnt_add() {
             .iter()
             .any(|call| call.starts_with("remove"))
     );
+}
+
+#[test]
+fn a_record_left_with_no_pool_user_is_repaired_by_the_next_set_up() {
+    // What a crash right after the early record leaves: the record, its group, no users.
+    let mut machine = admins_only("logon-empty-pool");
+    let group = sid(1000);
+    machine.next_rid = 1001;
+    machine.state.group = Some(group.clone());
+    machine.state.record = Some(MachineRecord {
+        owner: owner(),
+        group: group.clone(),
+        pool: Vec::new(),
+        data_dir: machine.data_dir(),
+        removing: false,
+    });
+    machine.rights.recorded = Some(group.clone());
+    machine.rights.holders.push(group.clone());
+    let report = set_up_fresh(&mut machine, &mut FakeAcl::default());
+    assert_eq!(report.group, group);
+    assert_eq!(report.pool.len(), 8);
+    let record = machine.state.record.as_ref().unwrap();
+    assert_eq!(record.pool.len(), 8);
+    // The grant it made stays recorded, and isn't made twice.
+    assert_eq!(machine.rights.recorded, Some(group));
+    assert!(
+        !machine
+            .rights
+            .calls
+            .iter()
+            .any(|call| call.starts_with("add"))
+    );
+}
+
+#[test]
+fn set_up_records_what_policy_says_for_a_launch() {
+    let cases = [
+        (RightPolicy::NotDefined, Some("not_defined")),
+        (RightPolicy::Unknown, Some("unknown")),
+        (
+            RightPolicy::Defined {
+                includes_pool: true,
+            },
+            Some("defined_with_pool"),
+        ),
+    ];
+    for (policy, text) in cases {
+        let mut machine = FakeMachine::new("logon-state");
+        machine.rights.policy = policy;
+        set_up_fresh(&mut machine, &mut FakeAcl::default());
+        let state = machine.rights.policy_state.map(|(state, _)| state.text());
+        assert_eq!(state, text, "{policy:?}");
+    }
+    // A re-run blocked by a policy without the pool keeps that in the record it keeps.
+    let mut machine = FakeMachine::new("logon-state-blocked");
+    set_up_fresh(&mut machine, &mut FakeAcl::default());
+    machine.rights.policy = RightPolicy::Defined {
+        includes_pool: false,
+    };
+    let req = request(&mut machine, 0, Vec::new());
+    let failure = set_up(&mut machine, &mut FakeAcl::default(), &req).unwrap_err();
+    assert_eq!(failure.blocked(), Some(Blocked::LogonPolicy));
+    assert!(machine.state.record.is_some());
+    let state = machine.rights.policy_state.map(|(state, _)| state.text());
+    assert_eq!(state, Some("defined_without_pool"));
 }
