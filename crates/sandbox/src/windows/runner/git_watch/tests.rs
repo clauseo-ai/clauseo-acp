@@ -10,7 +10,6 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use super::records::{Layout, changes};
 use super::{
     Cause, Changes, GONE_LIMIT, Guard, Live, Next, OVERFLOWS, Pulse, Session, Source, watch,
 };
@@ -22,6 +21,7 @@ use crate::{Denial, SetAsideWhat};
 
 mod ends;
 mod notices;
+mod records;
 mod watchdog;
 
 /// The paths of what failed.
@@ -34,7 +34,7 @@ fn added(paths: &[&str]) -> Next {
     Next::Changed(Changes {
         added: paths.iter().map(PathBuf::from).collect(),
         relinked: Vec::new(),
-        renamed_folders: Vec::new(),
+        moved_folders: Vec::new(),
     })
 }
 
@@ -421,94 +421,6 @@ fn a_git_still_stuck_after_the_end_is_tried_and_said() {
     assert_eq!(lines.iter().filter(|l| *l == "retry").count(), 5);
     assert_eq!(lines.last().unwrap(), "said");
     assert!(!lines.iter().any(|l| l == "notice"));
-}
-
-/// One record: its action, name and attributes, padded to a `u32` boundary, in `layout`.
-fn record(layout: Layout, (action, name, attributes): (u32, &str, u32), last: bool) -> Vec<u8> {
-    let units: Vec<u8> = name.encode_utf16().flat_map(u16::to_le_bytes).collect();
-    let header = if layout == Layout::Plain { 12 } else { 84 };
-    let size = (header + units.len()).next_multiple_of(4);
-    let next = if last {
-        0
-    } else {
-        u32::try_from(size).unwrap()
-    };
-    let mut bytes = vec![0; header];
-    bytes[0..4].copy_from_slice(&next.to_le_bytes());
-    bytes[4..8].copy_from_slice(&action.to_le_bytes());
-    let length = u32::try_from(units.len()).unwrap().to_le_bytes();
-    if layout == Layout::Plain {
-        bytes[8..12].copy_from_slice(&length);
-    } else {
-        bytes[56..60].copy_from_slice(&attributes.to_le_bytes());
-        bytes[80..84].copy_from_slice(&length);
-    }
-    bytes.extend(units);
-    bytes.resize(size, 0);
-    bytes
-}
-
-fn buffer(layout: Layout, records: &[(u32, &str, u32)]) -> Vec<u8> {
-    let mut buffer = Vec::new();
-    for (at, each) in records.iter().enumerate() {
-        buffer.extend(record(layout, *each, at + 1 == records.len()));
-    }
-    buffer
-}
-
-/// H1: names made or renamed to are read, and of the changes, only an item that is a reparse
-/// point now (`FILE_ATTRIBUTE_REPARSE_POINT`, 0x400): a junction set on an empty folder.
-#[test]
-fn names_made_and_items_turned_into_reparse_points_are_read_from_the_buffer() {
-    let records = [
-        (1, ".git", 0x10),      // FILE_ACTION_ADDED
-        (2, "gone", 0x10),      // REMOVED
-        (3, "edited", 0x20),    // MODIFIED, an archive bit
-        (3, "junction", 0x410), // MODIFIED, a folder that is a junction now
-        (4, "old-name", 0x10),  // RENAMED_OLD_NAME
-        (5, "sub/.GIT", 0x10),  // RENAMED_NEW_NAME
-        (1, "foo", 0x20),
-    ];
-    let read = changes(&buffer(Layout::Extended, &records), Layout::Extended).unwrap();
-    assert_eq!(read.added, [".git", "sub/.GIT", "foo"].map(PathBuf::from));
-    assert_eq!(read.relinked, [PathBuf::from("junction")]);
-    // Of the folders, only one renamed in: a folder made reports what goes in it.
-    assert_eq!(read.renamed_folders, [PathBuf::from("sub/.GIT")]);
-
-    // With no attributes to tell by, every change is checked.
-    let read = changes(&buffer(Layout::Plain, &records), Layout::Plain).unwrap();
-    assert_eq!(read.added, [".git", "sub/.GIT", "foo"].map(PathBuf::from));
-    assert_eq!(read.relinked, ["edited", "junction"].map(PathBuf::from));
-    assert_eq!(read.renamed_folders, Vec::<PathBuf>::new());
-}
-
-/// The fixes' review: of the folders reported, only one renamed in can count gone by its
-/// check; a folder made (`mkdir tmp`, later `rm -r tmp`) reports what goes in it itself.
-#[test]
-fn only_a_folder_renamed_in_is_listed_to_count_gone_never_one_made() {
-    let made = [(1, "tmp", 0x10), (2, "tmp", 0x10)];
-    let read = changes(&buffer(Layout::Extended, &made), Layout::Extended).unwrap();
-    assert_eq!(read.added, [PathBuf::from("tmp")]);
-    assert_eq!(read.renamed_folders, Vec::<PathBuf>::new());
-
-    let renamed = [(4, "outside", 0x10), (5, "in", 0x10), (5, "note.md", 0x20)];
-    let read = changes(&buffer(Layout::Extended, &renamed), Layout::Extended).unwrap();
-    assert_eq!(read.renamed_folders, [PathBuf::from("in")]);
-}
-
-#[test]
-fn a_buffer_that_doesnt_read_as_records_is_an_overflow() {
-    for layout in [Layout::Plain, Layout::Extended] {
-        let whole = record(layout, (1, ".git", 0), true);
-        assert_eq!(changes(&whole[..10], layout), None);
-        let mut long = whole.clone();
-        let at = if layout == Layout::Plain { 8 } else { 80 };
-        long[at] = 200;
-        assert_eq!(changes(&long, layout), None);
-        let mut loops = record(layout, (1, "a", 0), false);
-        loops[0..4].copy_from_slice(&256_u32.to_le_bytes());
-        assert_eq!(changes(&loops, layout), None);
-    }
 }
 
 /// The lawyer's notice says where the item went (the agent's, here: no step to put it back);

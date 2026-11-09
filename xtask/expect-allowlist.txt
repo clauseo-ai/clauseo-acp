@@ -570,11 +570,14 @@ crates/sandbox/src/windows/pipe/os.rs - unsafe_code
 crates/sandbox/src/windows/runner/spawn.rs - unsafe_code
 crates/sandbox/src/windows/runner/desktop.rs - unsafe_code
 crates/sandbox/src/windows/runner/outer.rs exit_now clippy::exit
-# The git watch: ReadDirectoryChangesExW and its overlapped wait (src/windows/runner/git_watch/os.rs);
+# The git watch: ReadDirectoryChangesExW and its overlapped wait (src/windows/runner/git_watch/os.rs),
+# and the wall clock a folder added is told moved in by, against its creation time (the tests
+# pass it);
 # the time its moves are named for, the monotonic clock its scans' 2 s budget reads, and the
 # bounded pause between tries once the session ended (src/windows/runner/outer/watch.rs; the tests
 # pass all three).
 crates/sandbox/src/windows/runner/git_watch/os.rs - unsafe_code
+crates/sandbox/src/windows/runner/git_watch/os.rs wall_clock clippy::disallowed_methods
 crates/sandbox/src/windows/runner/outer/watch.rs clock clippy::disallowed_methods
 crates/sandbox/src/windows/runner/outer/watch.rs now clippy::disallowed_methods
 crates/sandbox/src/windows/runner/outer/watch.rs pause clippy::disallowed_methods

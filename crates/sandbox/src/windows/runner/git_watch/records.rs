@@ -2,9 +2,11 @@
 //! with: `FILE_NOTIFY_INFORMATION`, or with `ReadDirectoryNotifyExtendedInformation`
 //! `FILE_NOTIFY_EXTENDED_INFORMATION`, which also gives each item's attributes, so a folder
 //! that became a junction (its `FILE_ACTION_MODIFIED` with `FILE_ATTRIBUTE_REPARSE_POINT`) is
-//! told from the many writes the same filter reports.
+//! told from the many writes the same filter reports, and each item's creation time, so a folder
+//! moved in from another folder is told from one just made (both come as `FILE_ACTION_ADDED`).
 
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// `FILE_ACTION_ADDED`.
 const ADDED: u32 = 1;
@@ -16,6 +18,14 @@ const RENAMED_NEW_NAME: u32 = 5;
 const REPARSE_POINT: u32 = 0x400;
 /// `FILE_ATTRIBUTE_DIRECTORY`.
 const DIRECTORY: u32 = 0x10;
+/// How much older than the watch's read a folder reported `FILE_ACTION_ADDED` must have been
+/// created to count as moved in, not made: 5 s, in a FILETIME's 100 ns ticks. A folder just
+/// made is created moments before its record is read; one moved in keeps its creation time.
+pub(crate) const MOVED_IN_AGE: u64 = 5 * 10_000_000;
+/// The FILETIME of the Unix epoch: 100 ns ticks since 1601-01-01.
+const UNIX_EPOCH_TICKS: u64 = 116_444_736_000_000_000;
+/// Where an extended record's `CreationTime` is.
+const CREATION_AT: usize = 8;
 
 /// Where a record's fields are.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,16 +53,43 @@ pub(crate) struct Changes {
     pub(crate) added: Vec<PathBuf>,
     /// Items changed that are reparse points now (with [`Layout::Plain`], every item changed).
     pub(crate) relinked: Vec<PathBuf>,
-    /// Of `added`, each folder renamed in (`FILE_ACTION_RENAMED_NEW_NAME`): one gone by the
-    /// check counts as gone (`set_aside::live`). A folder made (`FILE_ACTION_ADDED`) isn't
-    /// listed: whatever is put in it is reported on its own, so `mkdir tmp` then `rm -r tmp`
-    /// hides nothing. Empty with [`Layout::Plain`], which has no attributes to tell by.
-    pub(crate) renamed_folders: Vec<PathBuf>,
+    /// Of `added`, each folder renamed or moved in: one gone by the check counts as gone
+    /// (`set_aside::live`). Renamed in within its folder is `FILE_ACTION_RENAMED_NEW_NAME`.
+    /// Moved in from another folder comes as `FILE_ACTION_ADDED`, as `mkdir` does, but keeps
+    /// its creation time (confirmed on a Windows Server 2025 VM, NTFS; `mkdir`'s is within about
+    /// 4 ms of the record), so it is told by a creation time more than [`MOVED_IN_AGE`] before
+    /// `now`, when the buffer was received. A folder just made isn't listed: whatever is put in
+    /// it is reported on its own, so `mkdir tmp` then `rm -r tmp` hides nothing. One whose
+    /// creation time is in the future or unreadable is listed. Empty with [`Layout::Plain`],
+    /// which has no attributes or times.
+    pub(crate) moved_folders: Vec<PathBuf>,
 }
 
-/// What the records in `buffer` (chained by `NextEntryOffset`) report. `None` when the buffer
-/// doesn't read as records: the watch then rescans.
-pub(crate) fn changes(buffer: &[u8], layout: Layout) -> Option<Changes> {
+/// `at` as a FILETIME: 100 ns ticks since 1601-01-01; 0 when it is before 1970 or past what a
+/// FILETIME holds, so every folder added counts as moved in.
+pub(crate) fn filetime(at: SystemTime) -> u64 {
+    at.duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|since| u64::try_from(since.as_nanos() / 100).ok())
+        .and_then(|ticks| ticks.checked_add(UNIX_EPOCH_TICKS))
+        .unwrap_or(0)
+}
+
+/// Whether a folder reported added at `created` (a FILETIME) counts as moved in: unless it was
+/// made at most [`MOVED_IN_AGE`] before `now`, it does. A creation time after `now` (clock skew,
+/// or forged) or unreadable (0 or less) counts too: the count fails toward ending the session.
+fn moved_in(created: i64, now: u64) -> bool {
+    let Some(created) = u64::try_from(created).ok().filter(|created| *created > 0) else {
+        return true;
+    };
+    now.checked_sub(created)
+        .is_none_or(|age| age > MOVED_IN_AGE)
+}
+
+/// What the records in `buffer` (chained by `NextEntryOffset`) report, received at `now` (a
+/// FILETIME, [`filetime`], read once per buffer as it arrives). `None` when the buffer doesn't read as
+/// records: the watch then rescans.
+pub(crate) fn changes(buffer: &[u8], layout: Layout, now: u64) -> Option<Changes> {
     let (length_at, name_at, attributes_at) = layout.offsets();
     let mut changes = Changes::default();
     let mut at = 0_usize;
@@ -71,8 +108,10 @@ pub(crate) fn changes(buffer: &[u8], layout: Layout) -> Option<Changes> {
         match action {
             ADDED | RENAMED_NEW_NAME => {
                 let path = path_of(name)?;
-                if folder && action == RENAMED_NEW_NAME {
-                    changes.renamed_folders.push(path.clone());
+                let counted = action == RENAMED_NEW_NAME
+                    || (attributes.is_some() && moved_in(signed(record, CREATION_AT)?, now));
+                if folder && counted {
+                    changes.moved_folders.push(path.clone());
                 }
                 changes.added.push(path);
             }
@@ -90,6 +129,12 @@ pub(crate) fn changes(buffer: &[u8], layout: Layout) -> Option<Changes> {
 fn word(bytes: &[u8], at: usize) -> Option<u32> {
     let four: [u8; 4] = bytes.get(at..at.checked_add(4)?)?.try_into().ok()?;
     Some(u32::from_le_bytes(four))
+}
+
+/// The little-endian `i64` at `at` in `bytes`.
+fn signed(bytes: &[u8], at: usize) -> Option<i64> {
+    let eight: [u8; 8] = bytes.get(at..at.checked_add(8)?)?.try_into().ok()?;
+    Some(i64::from_le_bytes(eight))
 }
 
 /// A name in a record: UTF-16LE, kept as it is on Windows, text or not.
