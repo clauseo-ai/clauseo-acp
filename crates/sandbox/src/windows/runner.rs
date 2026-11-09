@@ -105,7 +105,7 @@ mod sweep;
 #[cfg(any(windows, test))]
 pub mod unclean;
 #[cfg(windows)]
-mod wer;
+pub(crate) mod wer;
 #[cfg(any(windows, test))]
 mod wer_flow;
 
@@ -417,8 +417,7 @@ pub enum RunExit {
     Pipe,
     /// The inner runner couldn't be put in the job, or the job made.
     Job,
-    /// The inner runner's token, desktop or folders couldn't be made, or Windows Error Reporting
-    /// couldn't be turned off for the pool user (`wer_flow.rs`).
+    /// The inner runner's token, desktop or folders couldn't be made.
     Token,
     /// The agent couldn't be started.
     Spawn,
@@ -460,10 +459,15 @@ pub enum RunExit {
     /// none was requested; the outer refuses the launch before its own marker or any logon, and
     /// a later launch checks again.
     AwaitingSweep,
+    /// The pool user's `HKCU` wouldn't take the Windows Error Reporting setting, or read it back
+    /// wrong, or its key is a registry link (`wer_flow.rs`): the pool user's hive is broken or was
+    /// changed, which a retry doesn't fix. A set-up fault, as a lost password is: the inner
+    /// refuses the launch before the agent starts.
+    PoolProfile,
 }
 
 impl RunExit {
-    const ALL: [RunExit; 20] = [
+    const ALL: [RunExit; 21] = [
         RunExit::Usage,
         RunExit::BadLaunch,
         RunExit::NoSecret,
@@ -484,6 +488,7 @@ impl RunExit {
         RunExit::MarkerUnwritable,
         RunExit::AwaitingStop,
         RunExit::AwaitingSweep,
+        RunExit::PoolProfile,
     ];
 
     /// The exit code.
@@ -512,6 +517,7 @@ impl RunExit {
             RunExit::NoSecret | RunExit::Password => {
                 Some(NoSandbox::SetUpFailed(PASSWORD_LOST.to_owned()))
             }
+            RunExit::PoolProfile => Some(NoSandbox::SetUpFailed(POOL_PROFILE_BROKEN.to_owned())),
             RunExit::Usage
             | RunExit::BadLaunch
             | RunExit::Logon
@@ -553,6 +559,9 @@ pub fn station_name(random: [u8; 8]) -> String {
 /// The cause when the Secondary Logon service is disabled: set-up's own words.
 pub const SECLOGON_DISABLED: &str = "the Secondary Logon service (seclogon) is disabled: IT can \
      set it to start manually";
+/// The cause when the pool user's profile won't hold Clauseo's settings ([`RunExit::PoolProfile`]).
+pub const POOL_PROFILE_BROKEN: &str = "the sandbox user's Windows profile is damaged or was \
+     changed: run the set-up again";
 /// The cause when the pool user's password is missing or refused.
 pub const PASSWORD_LOST: &str = "the sandbox user's saved password is missing or out of date: \
      run the set-up again";

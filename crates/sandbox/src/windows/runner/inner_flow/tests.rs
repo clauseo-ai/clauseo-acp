@@ -74,12 +74,17 @@ impl Inner for Record {
         self.done.push("clean".to_owned());
         self.log("clauseo-sandbox-run: cleanup (before launch): removed 1 Run and RunOnce values");
     }
-    fn quiet_wer(&mut self) -> Result<(), Failure> {
+    fn quiet_wer(&mut self) -> Result<Vec<String>, Failure> {
         self.done.push("quiet wer".to_owned());
         if self.fail == Some("wer") {
-            return Err((RunExit::Token, "WER on".to_owned()));
+            return Err((RunExit::PoolProfile, "WER on".to_owned()));
         }
-        Ok(())
+        if self.fail == Some("wer policy") {
+            return Ok(vec![
+                "clauseo-sandbox-run: a machine policy (HKLM) keeps WER on".to_owned(),
+            ]);
+        }
+        Ok(Vec::new())
     }
     fn log(&mut self, line: &str) {
         self.lines.push((line.to_owned(), self.open));
@@ -360,10 +365,10 @@ fn wer_left_on_refuses_the_launch_and_starts_no_agent() {
         fail: Some("wer"),
         ..Record::default()
     };
-    assert_eq!(run(&mut record), RunExit::Token.code());
+    assert_eq!(run(&mut record), RunExit::PoolProfile.code());
     let failed = format!(
         "report Failed {{ exit: {}, what: \"WER on\" }}",
-        RunExit::Token.code()
+        RunExit::PoolProfile.code()
     );
     assert_eq!(
         record.done,
@@ -375,5 +380,21 @@ fn wer_left_on_refuses_the_launch_and_starts_no_agent() {
             "quiet wer",
             failed.as_str(),
         ]
+    );
+}
+
+#[test]
+fn a_wer_policy_keeping_wer_on_is_logged_and_the_agent_starts() {
+    let mut record = Record {
+        fail: Some("wer policy"),
+        ..Record::default()
+    };
+    assert_eq!(run(&mut record), 3);
+    assert!(record.done.contains(&"start agent".to_owned()));
+    assert!(
+        record
+            .lines
+            .iter()
+            .any(|(line, open)| *open && line.contains("keeps WER on"))
     );
 }
