@@ -183,10 +183,25 @@ fn only_known_local_file_systems_are_local() {
     for kind in LOCAL_FS {
         assert!(!Mounts::is_network_fs(kind), "{kind}");
     }
+    for kind in ["lifs", "ntfs", "udf", "cd9660"] {
+        assert!(LOCAL_FS.contains(&kind), "{kind}");
+    }
     for kind in [
         "smbfs", "nfs", "afpfs", "webdav", "autofs", "macfuse", "osxfuse", "nullfs", "bindfs", "",
     ] {
         assert!(Mounts::is_network_fs(kind), "{kind}");
+    }
+}
+
+/// Local media mounted inside a matter (a USB stick, an NTFS disk, a DVD) don't refuse it.
+#[test]
+fn local_media_inside_a_matter_do_not_refuse_it() {
+    for kind in [
+        "apfs", "hfs", "msdos", "exfat", "lifs", "ntfs", "udf", "cd9660",
+    ] {
+        let mounts = Mounts::of_kinds(&[("/", "apfs"), ("/Users/a/m/media", kind)]);
+        assert!(!refused("/Users/a/m", &mounts), "{kind}");
+        assert!(!net("/Users/a/m/media/.git", &mounts), "{kind}");
     }
 }
 

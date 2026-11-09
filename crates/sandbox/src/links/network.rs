@@ -32,10 +32,14 @@ pub(crate) struct Mounts {
     pub(crate) unread: bool,
 }
 
-/// The macOS file system types known to be local. Any other (`smbfs`, `nfs`, `autofs`, macFUSE's
-/// sshfs, `nullfs`, bindfs) counts as network: it may reach a server, or another mount.
+/// The macOS file system types known to be local: disks, Apple's `lifs` (its user-space driver
+/// for FAT and exFAT media), read-only NTFS, and optical media (`udf`, `cd9660`). Any other
+/// (`smbfs`, `nfs`, `autofs`, macFUSE's sshfs, `nullfs`, bindfs) counts as network: it may
+/// reach a server, or another mount.
 #[cfg(any(target_os = "macos", test))]
-const LOCAL_FS: [&str; 5] = ["apfs", "hfs", "msdos", "exfat", "devfs"];
+const LOCAL_FS: [&str; 9] = [
+    "apfs", "hfs", "msdos", "exfat", "devfs", "lifs", "ntfs", "udf", "cd9660",
+];
 
 /// The most `subst` mappings one path goes through before it counts as unknown.
 const SUBST_MAX: usize = 8;
