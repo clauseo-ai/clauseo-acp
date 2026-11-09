@@ -43,13 +43,13 @@ pub(super) fn all_pids() -> Option<Vec<i32>> {
 
 /// The arguments of the processes of one listing, read into one buffer of `KERN_ARGMAX` bytes,
 /// asked for once and reused for every pid.
-pub(super) struct Reader {
+pub(crate) struct Reader {
     buffer: Vec<u8>,
 }
 
 impl Reader {
     /// `None` when `KERN_ARGMAX` cannot be read.
-    pub(super) fn new() -> Option<Reader> {
+    pub(crate) fn new() -> Option<Reader> {
         Some(Reader {
             buffer: vec![0_u8; arg_max()?],
         })
@@ -58,7 +58,7 @@ impl Reader {
     /// `pid`'s arguments, each ended by a NUL ([`procargs::arguments`]: never its environment).
     /// `None` when the call fails (the process is gone, a zombie, or another user's) or the
     /// area does not parse.
-    pub(super) fn args_of(&mut self, pid: i32) -> Option<Vec<u8>> {
+    pub(crate) fn args_of(&mut self, pid: i32) -> Option<Vec<u8>> {
         let mut size = self.buffer.len();
         let mut name = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
         // SAFETY: `name` is a live array of the 3 integers passed as its length; `buffer` is a

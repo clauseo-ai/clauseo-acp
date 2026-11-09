@@ -55,7 +55,7 @@ fn a_guard_killed_while_chrome_starts_leaves_no_chrome() {
 #[cfg(unix)]
 #[test]
 fn a_parent_killed_while_chrome_starts_ends_the_guard() {
-    use crate::support::{GUARD, guard_args, host_env};
+    use crate::support::{GUARD, STUB_SANDBOX, guard_args, host_env};
     let scratch = Scratch::new("race_parent_start");
     scratch.chrome_mode("silent");
     let guard_pid_file = scratch.path().join("guard.pid");
@@ -64,6 +64,7 @@ fn a_parent_killed_while_chrome_starts_ends_the_guard() {
         .arg(GUARD)
         .args(guard_args(&scratch, &example("daemon_stub"), &no_args()))
         .envs(host_env(&scratch))
+        .env(STUB_SANDBOX.0, STUB_SANDBOX.1)
         .env("PARENT_STUB_CHILD_PID", &guard_pid_file);
     let mut parent = Guard::start(command);
     parent.send_call("open");
@@ -84,10 +85,10 @@ fn a_parent_killed_while_chrome_starts_ends_the_guard() {
     drop(parent);
 }
 
-/// Chrome dies just as the agent goes: the stand-in exits right after it prints its endpoint,
-/// and the agent's stdin closes right after its one call, so agent-browser has answered the
-/// close and exited before Chrome's watcher first looks (250 ms). No restart for an agent that
-/// has gone: the guard still exits 1.
+/// Chrome dies just as the agent goes: the stand-in exits as agent-browser starts (after the
+/// guard's check of its sandbox, which needs Chrome alive), and the agent's stdin closes right
+/// after Chrome has gone, so agent-browser has answered the close and exited before Chrome's
+/// watcher first looks (250 ms). No restart for an agent that has gone: the guard still exits 1.
 #[test]
 fn chrome_that_dies_as_the_agent_goes_is_still_reported() {
     let scratch = Scratch::new("race_chrome_eof");
@@ -96,6 +97,11 @@ fn chrome_that_dies_as_the_agent_goes_is_still_reported() {
     let args = [log.as_os_str()];
     let mut guard = Guard::start(guard_command(&scratch, &example("echo_stub"), &args));
     guard.send_call("open");
+    let exiting = scratch.path().join("chrome-exiting");
+    assert!(
+        crate::lifecycle::within(|| exiting.exists()),
+        "Chrome never exited"
+    );
     let (status, (_, stderr)) = guard.finish_with_stderr();
     assert_eq!(status.code(), Some(1), "{stderr}");
     assert!(

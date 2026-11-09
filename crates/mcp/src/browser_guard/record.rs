@@ -23,7 +23,7 @@
 //! say `false`, never `true`.
 
 #[cfg(unix)]
-mod scan;
+pub(super) mod scan;
 #[cfg(windows)]
 pub(crate) mod windows;
 

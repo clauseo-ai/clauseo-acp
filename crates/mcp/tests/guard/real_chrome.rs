@@ -151,6 +151,13 @@ fn command_on(
     // and the test waited out its 60 s in vain. For it the guard waits past the test.
     let start_ms = if quiet { "90000" } else { "45000" };
     command.env("CLAUSEO_TEST_GUARD_START_MS", start_ms);
+    // Under `CI` Chrome runs with `--no-sandbox` (`chrome_for`), so its children are not
+    // sandboxed: the guard's check after the start (a `test-support` build only,
+    // `src/browser_guard/chrome/postcheck.rs`) still lists them and reads their kinds, and takes
+    // them as sandboxed. Elsewhere it checks them for real.
+    if std::env::var_os("CI").is_some() {
+        command.env("CLAUSEO_TEST_GUARD_SANDBOX", "trusted");
+    }
     command
 }
 

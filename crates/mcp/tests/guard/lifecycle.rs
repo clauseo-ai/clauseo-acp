@@ -170,7 +170,7 @@ fn what_agent_browser_leaves_in_its_group_is_ended() {
 #[cfg(unix)]
 #[test]
 fn a_killed_parent_leaves_nothing_behind() {
-    use crate::support::{GUARD, guard_args, host_env};
+    use crate::support::{GUARD, STUB_SANDBOX, guard_args, host_env};
     let scratch = Scratch::new("life_parent");
     let guard_pid_file = scratch.path().join("guard.pid");
     let mut command = std::process::Command::new(example("parent_stub"));
@@ -178,6 +178,7 @@ fn a_killed_parent_leaves_nothing_behind() {
         .arg(GUARD)
         .args(guard_args(&scratch, &example("daemon_stub"), &no_args()))
         .envs(host_env(&scratch))
+        .env(STUB_SANDBOX.0, STUB_SANDBOX.1)
         .env("PARENT_STUB_CHILD_PID", &guard_pid_file);
     let mut parent = Guard::start(command);
     parent.call("open");

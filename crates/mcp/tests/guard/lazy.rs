@@ -250,7 +250,13 @@ fn the_first_call_waits_for_a_busy_debugging_port() {
     let at = args.iter().position(|arg| arg == "--cdp-port").unwrap();
     args[at + 1] = port.into();
     let mut command = std::process::Command::new(crate::support::GUARD);
-    command.args(args).envs(crate::support::host_env(&scratch));
+    command
+        .args(args)
+        .envs(crate::support::host_env(&scratch))
+        .env(
+            crate::support::STUB_SANDBOX.0,
+            crate::support::STUB_SANDBOX.1,
+        );
     let mut guard = Guard::start(command);
     guard.send_call("open");
     guard.stderr_until("is taken; waiting up to 15 s for it");

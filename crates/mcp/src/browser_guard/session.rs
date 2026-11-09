@@ -57,11 +57,30 @@ pub(crate) const PORT_WAIT: Duration = Duration::from_secs(15);
 /// gets [`chrome::sandbox::REFUSAL`] and the host can tell it apart later.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum StartError {
-    /// Chrome's sandbox could not start; what Chrome printed (the fixed part, no path), or
-    /// `None` when the guard refused before starting it (Linux, as root).
-    Sandbox(Option<&'static str>),
+    /// Chrome's sandbox could not start, or did not hold in a child Chrome started.
+    Sandbox(Refused),
     /// Anything else; the reason.
     Other(String),
+}
+
+/// Why the guard refused Chrome for its sandbox. Each names only fixed text: no path, no command
+/// line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Refused {
+    /// Chrome printed one of its sandbox failures; the fixed part (`chrome/sandbox.rs`).
+    Said(&'static str),
+    /// Linux as root: refused before Chrome starts.
+    Root,
+    /// The check after Chrome's start (`chrome/postcheck.rs`) found a child without its sandbox:
+    /// the child's kind and why.
+    Unsandboxed {
+        kind: &'static str,
+        why: &'static str,
+    },
+    /// Windows: before reporting its endpoint, Chrome exited with a crash's code, or a child of
+    /// it seen sandboxed did (`chrome/postcheck/crashed.rs`).
+    #[cfg(windows)]
+    Crashed,
 }
 
 impl From<String> for StartError {
@@ -73,13 +92,23 @@ impl From<String> for StartError {
 impl std::fmt::Display for StartError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Sandbox(Some(said)) => write!(
+            Self::Sandbox(Refused::Said(said)) => write!(
                 f,
                 "Chrome's sandbox could not start (Chrome said \"{said}\"); the guard never runs \
                  Chrome without it"
             ),
-            Self::Sandbox(None) => f.write_str(
+            Self::Sandbox(Refused::Root) => f.write_str(
                 "Chrome's sandbox cannot start as root; the guard never runs Chrome without it",
+            ),
+            #[cfg(windows)]
+            Self::Sandbox(Refused::Crashed) => f.write_str(
+                "Chrome's sandbox could not start: Chrome or a sandboxed child of it crashed \
+                 before Chrome reported its debugging port; the guard never runs Chrome without it",
+            ),
+            Self::Sandbox(Refused::Unsandboxed { kind, why }) => write!(
+                f,
+                "Chrome's sandbox did not hold: its {kind} {why}; the guard never runs Chrome \
+                 without it"
             ),
             Self::Other(reason) => f.write_str(reason),
         }
@@ -330,11 +359,33 @@ fn start_both(
         start_wait(),
         parent,
         Arc::clone(&shared.held),
-    )?;
+        #[cfg(windows)]
+        &launcher.job,
+    );
+    // Windows: a failed wait ends the job too, so Chrome's children (a hung tree, a broker left
+    // running after its sandbox failed) go with Chrome.
+    #[cfg(windows)]
+    if endpoint.is_err() && !launcher.job.kill() {
+        note("Windows refused to end the guard's job; ending Chrome alone");
+    }
+    let endpoint = endpoint?;
     note(&format!(
         "Chrome is listening on the claimed debugging port {}",
         launcher.cdp_port
     ));
+    // Its children really sandboxed (`chrome/postcheck.rs`); on a refusal Chrome is dropped,
+    // which kills it, and on Windows the job ends too, Chrome's children with it.
+    let checked = chrome::postcheck::check_sandbox(
+        &chrome,
+        parent,
+        #[cfg(windows)]
+        &launcher.job,
+    );
+    #[cfg(windows)]
+    if checked.is_err() && !launcher.job.kill() {
+        note("Windows refused to end the guard's job; ending Chrome alone");
+    }
+    checked?;
     let mut env = launcher.env.clone();
     env::set_cdp(&mut env, &endpoint);
     let cannot_run =

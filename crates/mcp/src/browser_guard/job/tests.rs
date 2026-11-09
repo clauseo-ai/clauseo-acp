@@ -23,7 +23,12 @@ use windows::Win32::Foundation::{
     CloseHandle, CompareObjectHandles, DUPLICATE_SAME_ACCESS, DuplicateHandle, HANDLE,
 };
 use windows::Win32::Security::SECURITY_ATTRIBUTES;
-use windows::Win32::System::JobObjects::IsProcessInJob;
+use windows::Win32::System::JobObjects::{
+    IsProcessInJob, JOB_OBJECT_LIMIT_BREAKAWAY_OK, JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION,
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK,
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+    QueryInformationJobObject,
+};
 use windows::Win32::System::Threading::{
     CreateEventW, GetCurrentProcess, INFINITE, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
     PROCESS_SYNCHRONIZE, WaitForSingleObject,
@@ -389,4 +394,41 @@ fn closing_the_agents_job_ends_the_child_made_in_the_guards_job() {
     agent.wait().unwrap();
     drop(held);
     write::remove_dir_all(&dir).unwrap();
+}
+
+/// The job's limits, read back: it ends its processes when its last handle closes (0x2000), ends
+/// a process at once when it crashes (0x400; its exit code the exception's, which the guard
+/// reads, `chrome/postcheck/crashed.rs`), and lets none break away. The crash limit must be on
+/// this job itself: the agent's job's does not reach a process in this nested one.
+#[test]
+fn the_job_kills_on_close_ends_a_crashing_process_and_allows_no_breakaway() {
+    let job = Job::new().unwrap();
+    let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+    let size = u32::try_from(size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>()).unwrap();
+    // SAFETY: `limits` is a live JOBOBJECT_EXTENDED_LIMIT_INFORMATION of `size` bytes, the struct
+    // this information class writes, and `job.handle()` the handle `job` owns.
+    unsafe {
+        QueryInformationJobObject(
+            Some(job.handle()),
+            JobObjectExtendedLimitInformation,
+            (&raw mut limits).cast(),
+            size,
+            None,
+        )
+    }
+    .unwrap();
+    let flags = limits.BasicLimitInformation.LimitFlags;
+    assert!(
+        flags.contains(JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE),
+        "{flags:?}"
+    );
+    assert!(
+        flags.contains(JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION),
+        "{flags:?}"
+    );
+    assert!(!flags.contains(JOB_OBJECT_LIMIT_BREAKAWAY_OK), "{flags:?}");
+    assert!(
+        !flags.contains(JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK),
+        "{flags:?}"
+    );
 }

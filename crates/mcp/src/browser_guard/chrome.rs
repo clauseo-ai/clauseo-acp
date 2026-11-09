@@ -38,7 +38,7 @@ use std::time::Duration;
 use super::downloads::{Held, Mover};
 use super::parent::{self, Parent};
 use super::relay::{Line, Overflow, read_line};
-use super::session::StartError;
+use super::session::{Refused, StartError};
 use super::{Child, ChildStderr, env, pause, quiet};
 use crate::write;
 
@@ -170,7 +170,7 @@ fn launch_on(
     #[cfg(windows)] job: &super::job::Job,
 ) -> Result<Chrome, StartError> {
     if sandbox::refused_up_front(host) {
-        return Err(StartError::Sandbox(None));
+        return Err(StartError::Sandbox(Refused::Root));
     }
     let profile = spec.profile.to_owned();
     let staging = profile.join(STAGING);
@@ -214,19 +214,23 @@ impl Chrome {
     /// Waits for Chrome's endpoint, at most `wait` ([`START_WAIT`] but in tests), checks it is on
     /// the claimed port and starts the download mover, which records held downloads in `held`.
     /// Every [`parent::POLL`] it also looks whether the guard's parent has gone, and gives up if
-    /// so.
+    /// so. On Windows a Chrome that exits first with a crash's code, or a sandboxed child of it
+    /// in `job` that does so during the wait, is the sandbox's refusal (`postcheck/crashed.rs`).
     pub(crate) fn endpoint(
         &mut self,
         cdp_port: u16,
         wait: Duration,
         parent: &Parent,
         held: Arc<Held>,
+        #[cfg(windows)] job: &super::job::Job,
     ) -> Result<String, StartError> {
         let inbox = self
             .starting
             .take()
             .ok_or_else(|| "Chrome's start was already read".to_owned())?;
         let polls = wait.as_millis() / parent::POLL.as_millis();
+        #[cfg(windows)]
+        let mut watch = postcheck::WaitWatch::new(job, lock(&self.child).child.id());
         let mut seen = None;
         for _ in 0..polls {
             match inbox.recv_timeout(parent::POLL) {
@@ -241,17 +245,30 @@ impl Chrome {
                 Err(RecvTimeoutError::Timeout) if parent.gone() => {
                     return Err(super::PARENT_GONE.to_owned().into());
                 }
-                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Timeout) => {
+                    #[cfg(windows)]
+                    watch.sample();
+                }
             }
         }
         let endpoint = match seen {
             Some(Seen::Endpoint(endpoint)) => endpoint,
-            Some(Seen::Sandbox(said)) => return Err(StartError::Sandbox(Some(said))),
+            Some(Seen::Sandbox(said)) => return Err(StartError::Sandbox(Refused::Said(said))),
+            #[cfg(windows)]
+            Some(Seen::Failed(_))
+                if postcheck::crashed_at_start(self) || watch.sandbox_failed() =>
+            {
+                return Err(StartError::Sandbox(Refused::Crashed));
+            }
             Some(Seen::Failed(tail)) => {
                 return Err(StartError::Other(format!(
                     "Chrome stopped before it listened on the claimed debugging port{}",
                     quote(&tail)
                 )));
+            }
+            #[cfg(windows)]
+            None if watch.sandbox_failed() => {
+                return Err(StartError::Sandbox(Refused::Crashed));
             }
             None => {
                 return Err(StartError::Other(format!(
@@ -522,6 +539,7 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+pub(crate) mod postcheck;
 mod profile;
 pub(crate) mod sandbox;
 
