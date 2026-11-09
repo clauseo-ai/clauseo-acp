@@ -64,8 +64,7 @@ pub(crate) struct Flags(u8);
 impl Flags {
     /// [`SpawnOptions::clear_env`].
     pub(crate) const CLEAR_ENV: Flags = Flags(1);
-    /// [`SpawnOptions::end_with_parent`], which only Linux records.
-    #[cfg(target_os = "linux")]
+    /// [`SpawnOptions::end_with_parent`], which only Linux sets.
     pub(crate) const END_WITH_PARENT: Flags = Flags(1 << 1);
     /// [`SpawnOptions::close_other_fds`].
     #[cfg(unix)]
@@ -157,6 +156,22 @@ impl SpawnOptions {
     pub fn close_other_fds(mut self) -> SpawnOptions {
         self.flags = self.flags.with(Flags::CLOSE_OTHER_FDS);
         self
+    }
+
+    /// The home folder [`SpawnOptions::home`] set, if any.
+    pub fn home_dir(&self) -> Option<&std::path::Path> {
+        self.home.as_deref()
+    }
+
+    /// Whether [`SpawnOptions::clear_env`] is set.
+    pub fn clears_env(&self) -> bool {
+        self.flags.has(Flags::CLEAR_ENV)
+    }
+
+    /// Whether [`SpawnOptions::end_with_parent`] is set; always `false` off Linux, where the
+    /// option does nothing.
+    pub fn ends_with_parent(&self) -> bool {
+        self.flags.has(Flags::END_WITH_PARENT)
     }
 
     /// Process creation flags added to the crate's own (`CREATE_SUSPENDED`, `CREATE_NO_WINDOW`).

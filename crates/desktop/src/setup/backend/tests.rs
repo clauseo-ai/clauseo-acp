@@ -429,33 +429,29 @@ fn no_key_reaches_a_log_line_an_event_or_a_debug() {
 fn the_sign_in_launcher_clears_the_environment_and_the_install_launcher_does_not() {
     let recorded: Mutex<Vec<SpawnOptions>> = Mutex::default();
     let home = PathBuf::from("/Users/lawyer");
-    let (install, signin) = launchers(Some(home), |options| {
-        let shown = format!("{options:?}");
-        lock(&recorded).push(options);
-        shown
+    let (install, signin) = launchers(Some(home.clone()), |options| {
+        lock(&recorded).push(options.clone());
+        options
     });
     assert_eq!(lock(&recorded).len(), 2);
-    assert!(install.contains("clear_env: false"), "{install}");
-    assert!(signin.contains("clear_env: true"), "{signin}");
-    assert!(signin.contains("/Users/lawyer"), "{signin}");
-    // Both end with the app on Linux (#386); elsewhere the option has no field to show.
+    assert!(!install.clears_env(), "{install:?}");
+    assert!(signin.clears_env(), "{signin:?}");
+    assert_eq!(signin.home_dir(), Some(home.as_path()), "{signin:?}");
+    // Both end with the app on Linux (#386); elsewhere the option does nothing.
     #[cfg(target_os = "linux")]
-    for shown in [&install, &signin] {
-        assert!(shown.contains("end_with_parent: true"), "{shown}");
+    for options in [&install, &signin] {
+        assert!(options.ends_with_parent(), "{options:?}");
     }
 }
 
-/// It proves something only on Linux, where `end_with_parent` is a field of the options;
-/// elsewhere the option does nothing and the check passes trivially.
+/// It proves something only on Linux, where `end_with_parent` is recorded; elsewhere the
+/// option does nothing and the check passes trivially.
 #[test]
 fn the_host_s_launch_options_never_end_with_the_app() {
     // Its agents start on short-lived prep threads (`start.rs`): the option would kill them.
-    let host = format!(
-        "{:?}",
-        crate::host_spawn_options(Some(PathBuf::from("/Users/lawyer")))
-    );
-    assert!(!host.contains("end_with_parent: true"), "{host}");
-    assert!(host.contains("clear_env: true"), "{host}");
+    let host = crate::host_spawn_options(Some(PathBuf::from("/Users/lawyer")));
+    assert!(!host.ends_with_parent(), "{host:?}");
+    assert!(host.clears_env(), "{host:?}");
 }
 
 #[test]
