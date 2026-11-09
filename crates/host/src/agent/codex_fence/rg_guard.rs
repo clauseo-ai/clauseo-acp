@@ -21,8 +21,9 @@
 //! only through that file beside `bin/`, and without it searches the `PATH` it inherits
 //! (codex-rs rust-v0.162.1 `install-context/src/lib.rs:286-296`). Both canonical paths must lie
 //! in no folder the session writes or Codex keeps (the matter, the run folder, the notes, the
-//! state folder), so neither can be swapped after the check. Otherwise, and on any other processor (no pinned build), the launch is refused with
-//! `agent.launch_failed`. The refusal and the log name no path.
+//! state folder), so neither can be swapped after the check. Otherwise, and on any other
+//! processor (no pinned build), the launch is refused with `agent.launch_failed`. The refusal and
+//! the log name no path.
 //!
 //! Codex runs that `rg` in place, not a checked copy: it puts `codex-path` first on its `PATH`
 //! from its own executable's folder, and no setting names another `rg` (codex-rs rust-v0.162.1
