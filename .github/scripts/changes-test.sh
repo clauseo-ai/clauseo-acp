@@ -99,6 +99,44 @@ check "$T $T $T $T" $'README.md\n'
 check "$T $T $T $T" $'README.md\nui/app/src/App.tsx'
 check "$T $T $T $T" $'docs/a.md\ncrates/desktop/src/lib.rs'
 
+# lowbox: the LowBox proof row and its fetch run only for the LowBox, sandbox and process crates,
+# the browser guard and the host's browser launch, and what builds them. Other paths skip them.
+check_lowbox() { # check_lowbox <true|false> <path>...
+  local want=$1
+  shift
+  local got
+  got=$(printf '%s\0' "$@" | bash "$script" 2> /dev/null | sed -n 's/^lowbox=//p')
+  if [ "$got" != "$want" ]; then
+    echo "FAIL: $* -> lowbox = $got, want $want"
+    fail=1
+  fi
+}
+check_lowbox true crates/lowbox/src/lib.rs
+check_lowbox true crates/lowbox/tests/proof.rs
+check_lowbox true crates/sandbox/src/lib.rs
+check_lowbox true crates/process/src/lib.rs
+check_lowbox true crates/mcp/src/browser_guard/chrome.rs
+check_lowbox true crates/host/src/browser/rd_policy.rs
+check_lowbox true crates/lowbox/assets/notes.md
+check_lowbox true crates/store/src/lib.rs crates/process/Cargo.toml
+check_lowbox true Cargo.lock
+check_lowbox true Cargo.toml
+check_lowbox true rust-toolchain.toml
+check_lowbox true .cargo/config.toml
+check_lowbox true .config/nextest.toml
+check_lowbox true .github/workflows/ci.yml
+check_lowbox true some-new-dir/thing.rs
+check_lowbox true
+check_lowbox false README.md
+check_lowbox false docs/architecture/overview.md
+check_lowbox false crates/host/src/lib.rs
+check_lowbox false crates/mcp/src/lib.rs
+check_lowbox false crates/store/src/lib.rs
+check_lowbox false crates/limits/src/readers/env.rs
+check_lowbox false ui/app/src/App.tsx
+check_lowbox false xtask/src/main.rs
+check_lowbox false budgets.toml
+
 # APP_CRATES is clauseo-desktop's path-dependency closure. Each crate's Cargo.toml names a
 # workspace crate as `path = "../<dir>"`; `path = "."` and `path = "src/..."` are its own targets.
 deps() {
