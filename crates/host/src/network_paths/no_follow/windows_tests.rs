@@ -2,24 +2,16 @@
 //! file symlink swapped in after the walk refuses; a local `subst` drive opens from the volume
 //! it names; a folder the user may pass through but not list stays usable below it; an ordinary
 //! path on the runner's temp drive (`D:\`) opens.
-#![expect(
-    unsafe_code,
-    reason = "FFI to DefineDosDeviceW for the subst drive test and its drop guard"
-)]
 
 use std::io;
 use std::path::{Path, PathBuf};
 
 use clauseo_sandbox::windows::test_dacl::{auto_inherit_with, protect_with};
 use clauseo_sandbox::windows::test_junction::junction;
-use windows::Win32::Storage::FileSystem::{
-    DDD_REMOVE_DEFINITION, DEFINE_DOS_DEVICE_FLAGS, DefineDosDeviceW,
-};
-use windows::core::{HSTRING, PCWSTR};
 
 use super::{Access, Kind, is_link_on_the_way, open_path};
 use crate::network_paths::resolve::Entry;
-use crate::network_paths::windows::device_of;
+use crate::network_paths::windows::TestDrive;
 use crate::write;
 
 /// `ERROR_PRIVILEGE_NOT_HELD`: no right to make a symlink.
@@ -114,38 +106,12 @@ fn a_file_symlink_swapped_in_after_the_walk_is_refused() {
     assert!(is_link_on_the_way(&error), "{error}");
 }
 
-/// A `subst` drive on a free letter, removed on drop.
-struct Subst(char);
-
-impl Subst {
-    fn to(target: &Path) -> Self {
-        let letter = ('G'..='Z')
-            .rev()
-            .find(|letter| device_of(*letter).is_none())
-            .expect("a free drive letter");
-        let name = HSTRING::from(format!("{letter}:"));
-        let target = HSTRING::from(target.as_os_str());
-        // SAFETY: both strings are NUL-terminated and outlive the call, which keeps no pointer.
-        unsafe { DefineDosDeviceW(DEFINE_DOS_DEVICE_FLAGS(0), &name, &target) }.unwrap();
-        Self(letter)
-    }
-}
-
-impl Drop for Subst {
-    fn drop(&mut self) {
-        let name = HSTRING::from(format!("{}:", self.0));
-        // SAFETY: `name` is NUL-terminated and outlives the call; a null target removes the
-        // letter's latest definition, the one `Subst::to` made.
-        drop(unsafe { DefineDosDeviceW(DDD_REMOVE_DEFINITION, &name, PCWSTR::null()) });
-    }
-}
-
 #[test]
 fn a_path_on_a_local_subst_drive_opens_from_the_volume_it_names() {
     let scratch = Scratch::new("subst");
     let document = scratch.file(r"deals\Contract.docx");
-    let drive = Subst::to(&scratch.0);
-    let through = PathBuf::from(format!(r"{}:\deals\Contract.docx", drive.0));
+    let drive = TestDrive::define(&format!(r"\??\{}", scratch.0.display())).expect("a free letter");
+    let through = PathBuf::from(format!(r"{}:\deals\Contract.docx", drive.letter));
     let opened = open_path(&through, Access::Read).unwrap();
     assert_eq!(opened.kind().unwrap(), Kind::File);
     assert_eq!(
@@ -155,7 +121,11 @@ fn a_path_on_a_local_subst_drive_opens_from_the_volume_it_names() {
             .identity()
             .unwrap()
     );
-    let folder = open_path(&PathBuf::from(format!(r"{}:\deals", drive.0)), Access::List).unwrap();
+    let folder = open_path(
+        &PathBuf::from(format!(r"{}:\deals", drive.letter)),
+        Access::List,
+    )
+    .unwrap();
     assert_eq!(folder.names(10).unwrap(), ["Contract.docx"]);
 }
 

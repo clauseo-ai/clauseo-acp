@@ -198,6 +198,18 @@ impl NoFollow {
         self.0.kind()
     }
 
+    /// Whether the handle is a link itself (a symlink, or on Windows a name-surrogate reparse
+    /// point): a share matter's root, opened following links, must not be one.
+    pub(crate) fn is_link(&self) -> io::Result<bool> {
+        self.0.is_link()
+    }
+
+    /// `path` opened as itself, a link included (tests: a share root whose handle is a link).
+    #[cfg(all(test, target_os = "linux"))]
+    pub(crate) fn link_itself(path: &Path) -> io::Result<Self> {
+        sys::Handle::link_itself(path).map(Self)
+    }
+
     /// Its identity: device or volume, and file number.
     pub(crate) fn identity(&self) -> io::Result<(u64, u128)> {
         self.0.identity()

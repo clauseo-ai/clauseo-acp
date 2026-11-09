@@ -78,27 +78,54 @@ pub(crate) struct TestDrive {
 #[cfg(test)]
 impl TestDrive {
     /// A free letter (`Y` down to `M`) defined to the raw device target `target`; `None` when no
-    /// letter is free or the definition fails.
+    /// letter is free or the definition fails. `DefineDosDeviceW` stacks a definition on a letter
+    /// another test (another process, under nextest) took since it was seen free, without an
+    /// error: so the letter's definitions are read back, and unless ours is its only one it is
+    /// removed (exact match, never the other's) and the next free letter tried.
     pub(crate) fn define(target: &str) -> Option<Self> {
         use windows::Win32::Storage::FileSystem::{
             DDD_NO_BROADCAST_SYSTEM, DDD_RAW_TARGET_PATH, DefineDosDeviceW, GetLogicalDrives,
         };
         // SAFETY: no arguments; it returns a bit mask of the drives in use.
         let used = unsafe { GetLogicalDrives() };
-        let letter = ('M'..='Y').rev().find(|letter| {
+        let free = ('M'..='Y').rev().filter(|letter| {
             let bit = u32::from(*letter) - u32::from('A');
             used & (1 << bit) == 0
-        })?;
-        let name = HSTRING::from(format!("{letter}:"));
-        let raw = HSTRING::from(target);
-        // SAFETY: both strings are NUL-terminated and outlive the call, which keeps neither.
-        unsafe { DefineDosDeviceW(DDD_RAW_TARGET_PATH | DDD_NO_BROADCAST_SYSTEM, &name, &raw) }
-            .ok()?;
-        Some(Self {
-            letter,
-            target: target.to_owned(),
-        })
+        });
+        for letter in free {
+            let name = HSTRING::from(format!("{letter}:"));
+            let raw = HSTRING::from(target);
+            // SAFETY: both strings are NUL-terminated and outlive the call, which keeps neither.
+            unsafe { DefineDosDeviceW(DDD_RAW_TARGET_PATH | DDD_NO_BROADCAST_SYSTEM, &name, &raw) }
+                .ok()?;
+            let drive = Self {
+                letter,
+                target: target.to_owned(),
+            };
+            if device_targets(letter) == [target] {
+                return Some(drive);
+            }
+            // Another definition on the letter: ours is removed as `drive` drops.
+        }
+        None
     }
+}
+
+/// Every device target `QueryDosDeviceW` lists for drive `letter`, latest first (tests).
+#[cfg(test)]
+fn device_targets(letter: char) -> Vec<String> {
+    let name = HSTRING::from(format!("{letter}:"));
+    let mut room = vec![0_u16; DEVICE_ROOM];
+    // SAFETY: `name` is NUL-terminated, `room` a buffer of its length; the call writes at most
+    // that many characters and keeps no pointer to either.
+    let written = unsafe { QueryDosDeviceW(&name, Some(&mut room)) };
+    let written = usize::try_from(written).unwrap_or(0);
+    room.get(..written)
+        .unwrap_or_default()
+        .split(|&unit| unit == 0)
+        .filter(|target| !target.is_empty())
+        .map(String::from_utf16_lossy)
+        .collect()
 }
 
 #[cfg(test)]

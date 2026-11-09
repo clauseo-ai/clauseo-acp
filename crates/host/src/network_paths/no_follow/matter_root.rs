@@ -3,7 +3,8 @@
 //! from its volume with no link followed ([`open_path`]). A matter on a share or a mapped drive
 //! on Windows, which canonicalises to a UNC path [`open_path`] refuses as not local: its root as
 //! the lawyer stored it, admitted by the share-matter exception's strict rule
-//! ([`share_matter_root`]) and opened as that one text (the lawyer configured it), then every
+//! ([`share_matter_root`]) and opened as that one text (the lawyer configured it; a handle that
+//! is a link itself is refused), then every
 //! name below it opened from that handle with no link followed and the same reparse-point
 //! refusal. A path an agent names elsewhere on a share stays refused; so does a share root the
 //! rule does not admit, never canonicalised (that would reach the server).
@@ -46,7 +47,7 @@ impl<'a> MatterRoot<'a> {
     /// [`Self::new`], a share matter's root opened by `open_share`.
     pub(crate) fn with(folder: &Path, net: &NetEnv, open_share: &'a OpenShareRoot<'a>) -> Self {
         let form = if share_matter_root(folder, net) {
-            match open_share(folder) {
+            match open_root(open_share, folder) {
                 Ok(root) => Form::Share {
                     stored: folder.to_path_buf(),
                     root,
@@ -76,7 +77,7 @@ impl<'a> MatterRoot<'a> {
             Form::Share { stored, root } => {
                 let names = plain_names(relative)?;
                 let Some((last, folders)) = names.split_last() else {
-                    return (self.open_share)(stored);
+                    return open_root(self.open_share, stored);
                 };
                 let mut at: Option<NoFollow> = None;
                 for name in folders {
@@ -91,6 +92,17 @@ impl<'a> MatterRoot<'a> {
             )),
         }
     }
+}
+
+/// The share root `stored` opened by `open_share` (following links, as DFS needs), refused when
+/// the handle it gives is a link itself (a name-surrogate reparse tag): the system opened the link
+/// rather than a folder, and nothing below it is listed.
+fn open_root(open_share: &OpenShareRoot<'_>, stored: &Path) -> io::Result<NoFollow> {
+    let root = open_share(stored)?;
+    if root.is_link()? {
+        return Err(super::link_on_the_way());
+    }
+    Ok(root)
 }
 
 /// `relative`'s names, each plain; an error for any other part.
