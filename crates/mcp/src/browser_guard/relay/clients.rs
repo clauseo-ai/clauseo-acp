@@ -11,12 +11,14 @@
 //! thread of its own.
 //!
 //! Each line to the client has at most 10 s to be written, and a new client 10 s to send its
-//! first whole line (`streams.rs`). A client that stops reading for that long, sends nothing, or
-//! whose connection fails, is taken as gone: the guard shuts the connection, which ends the
-//! client's reads and so counts as its disconnect, and every later write to it fails at once. So
+//! first whole line, which must be a JSON-RPC request or notification, then at most 10 minutes
+//! between lines (`streams.rs`). A client that stops reading for its line's 10 s, sends no first
+//! line, sends anything else first (a bare newline, say), goes quiet for the 10 minutes, or whose
+//! connection fails, is taken as gone: the guard shuts the connection, which ends the client's
+//! reads and so counts as its disconnect, and every later write to it fails at once. So
 //! no write to a jailed agent that stopped reading holds the agent's output lock past the bound,
 //! the guard's end (which answers what is in flight) is never stuck on one, and a connection
-//! that sends nothing does not hold the one client's place.
+//! that sends nothing or noise does not hold the one client's place.
 //!
 //! When the client disconnects the guard stays up, for the next client: it closes the
 //! connection, sends the agent's lines nowhere until the next one, and stops the browser exactly
@@ -47,7 +49,7 @@ use crate::browser_guard::filter::MAX_LINE_BYTES;
 use crate::browser_guard::{note, pause};
 use crate::connector::head;
 use crate::transport::{Connection, Listener, Peer};
-use streams::{FirstLine, ToClient, first_line_wait, write_wait};
+use streams::{FirstLine, ToClient, first_line_wait, idle_wait, write_wait};
 
 mod streams;
 
@@ -167,7 +169,7 @@ fn client(
         .out
         .attach(Box::new(ToClient::new(writer, write_wait())), floor);
     note("a client connected");
-    let mut input = BufReader::new(FirstLine::new(reader, first_line_wait()));
+    let mut input = BufReader::new(FirstLine::new(reader, first_line_wait(), idle_wait()));
     if pumps::pump_lines(&mut input, shared, parent, events) == Pumped::Ending {
         return false;
     }

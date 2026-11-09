@@ -29,11 +29,17 @@ pub(crate) const CDP_PORT: &str = "61101";
 /// The daemon port the tests give the guard on Windows.
 pub(crate) const DAEMON_PORT: &str = "61102";
 
+/// `/tmp` with its links resolved, read once.
+pub(crate) fn resolved_tmp() -> &'static Path {
+    static TMP: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    TMP.get_or_init(|| dunce::canonicalize("/tmp").expect("/tmp resolves"))
+}
+
 /// A folder under the system temp folder, unique per test and process, removed on drop, with
 /// the host's config file and a copy of the `chrome_stub` example (the Chrome the guard starts)
-/// in it. Each also has its own session id, whose
-/// first 16 characters name the Unix socket folder `/tmp/clauseo-ab-<id>`, which the test makes
-/// as the host does (mode 0700) and removes on drop too.
+/// in it. Each also has its own session id, whose first 16 characters name the Unix socket
+/// folder `<resolved /tmp>/clauseo-ab-<id>`, which the test makes as the host does (mode 0700)
+/// and removes on drop too.
 pub(crate) struct Scratch {
     path: PathBuf,
     session: String,
@@ -71,9 +77,11 @@ impl Scratch {
         &self.session
     }
 
-    /// The socket folder the host gives the guard on Unix.
+    /// The socket folder the host gives the guard on Unix, under `/tmp` resolved: on macOS
+    /// `/tmp` is a link to `/private/tmp`, and the guard refuses a `--listen` path through a link
+    /// (as the host, J4, passes a resolved path).
     pub(crate) fn socket_dir(&self) -> PathBuf {
-        PathBuf::from(format!("/tmp/clauseo-ab-{}", &self.session[..16]))
+        resolved_tmp().join(format!("clauseo-ab-{}", &self.session[..16]))
     }
 
     pub(crate) fn path(&self) -> &Path {

@@ -69,9 +69,23 @@ pub(crate) struct Socket {
 impl Socket {
     /// Opens and checks the folder, then creates and binds the socket in it, mode 0600. Call it
     /// while the guard has one thread: it sets the process's umask and working folder around the
-    /// bind. `Err` with the reason, which names no path.
+    /// bind, both process-wide and taken with no lock, so another thread could create a file with
+    /// the wrong mode or resolve a relative path in the socket's folder meanwhile. The guard calls
+    /// it first thing in `browser_guard.rs`, before any thread or child is started, and a debug
+    /// build asserts the process has one thread. `Err` with the reason, which names no path.
+    ///
+    /// The listener is close-on-exec (std's `bind`) and made before any child exists; it must
+    /// never be handed to another process, which could then accept the bridge's connections.
     pub(crate) fn make(path: &Path) -> Result<Socket, String> {
         use nix::sys::stat::umask;
+        // Not under `cargo test`: the harness runs each unit test on a thread of its own, so no
+        // test of this crate's is ever single-threaded. The guard binary the integration tests
+        // start (`tests/guard/listen.rs`, each test its own process under nextest) asserts it.
+        #[cfg(not(test))]
+        debug_assert!(
+            identity::threads().is_none_or(|threads| threads == 1),
+            "Socket::make runs while the guard has one thread"
+        );
         let (folder, name) = folder::open_checked(path)?;
         if look(&folder, &name).is_ok() {
             return Err(EXISTS.to_owned());
@@ -103,7 +117,8 @@ impl Socket {
         Ok(socket)
     }
 
-    /// The listener, once, for the relay (`browser_guard/relay/clients.rs`).
+    /// The listener, once, for the relay (`browser_guard/relay/clients.rs`). It stays in this
+    /// process: close-on-exec, and never passed to a child or sent over a socket.
     pub(crate) fn take_listener(&mut self) -> Option<UnixListener> {
         self.listener.take()
     }

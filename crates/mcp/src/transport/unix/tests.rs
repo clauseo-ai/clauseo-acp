@@ -9,13 +9,9 @@ use super::folder::{ancestor_refusal, folder_refusal};
 use super::{EXISTS, Socket, own_identity, peer_is};
 
 /// A fresh folder with mode 0700 under `/tmp`, by a path without links (on macOS `/tmp` is a
-/// link to `/private/tmp`).
+/// link to `/private/tmp`), so `/tmp` resolved.
 fn dir(test: &str) -> PathBuf {
-    let temp = PathBuf::from(if cfg!(target_os = "macos") {
-        "/private/tmp"
-    } else {
-        "/tmp"
-    });
+    let temp = dunce::canonicalize("/tmp").unwrap();
     let dir = temp.join(format!("clauseo-listen-{test}-{}", std::process::id()));
     drop(crate::write::remove_dir_all(&dir));
     crate::write::create_dir_all(&dir).unwrap();

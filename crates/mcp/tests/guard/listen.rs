@@ -3,7 +3,9 @@
 //! stays) and the guard stays up for the next client, whose calls start them again; a second
 //! client while one is connected is refused; a socket path that exists is refused; the
 //! parent's going ends the guard and removes the socket, also while a client that stopped reading
-//! holds a write; and a connection that sends nothing loses its place. Waits poll as
+//! holds a write; a connection that sends nothing loses its place; and a client that goes quiet
+//! after its first line is dropped once the idle wait is over; SIGTERM and SIGINT end the guard
+//! as its normal end does, the socket and the browser gone. Waits poll as
 //! `lifecycle.rs`'s do, or read the guard's stderr.
 
 #![cfg(unix)]
@@ -295,4 +297,56 @@ fn a_connection_that_sends_nothing_loses_its_place() {
     client.request(0, "initialize");
     client.request(1, "tools/list");
     drop(guard);
+}
+
+/// A client that sends nothing after its first request is closed once the idle wait (shortened
+/// here) is over, so it cannot keep the one client's place: the next client is served.
+#[test]
+fn a_client_that_goes_quiet_is_dropped() {
+    let scratch = Scratch::new("listen_quiet");
+    let socket = socket_of(&scratch);
+    let mut command = listen_command(&scratch, &socket);
+    command.env("CLAUSEO_TEST_GUARD_CLIENT_IDLE_MS", "1500");
+    let mut guard = Guard::start(command);
+    let mut quiet = Client::connect(&socket);
+    quiet.request(0, "initialize");
+    assert!(quiet.next().is_none(), "the quiet client stayed connected");
+    guard.stderr_until("closed a client that sent nothing for the idle wait");
+    guard.stderr_until("the client disconnected");
+    let mut client = Client::connect(&socket);
+    client.request(0, "initialize");
+    client.request(1, "tools/list");
+    drop(guard);
+}
+
+/// SIGTERM, and SIGINT, end the guard gracefully with a client connected and the browser
+/// running: it stops Chrome and the daemon, removes the socket and exits 0.
+#[test]
+fn sigterm_or_sigint_stops_the_guard_and_removes_the_socket() {
+    use nix::sys::signal::{Signal, kill};
+    use nix::unistd::Pid;
+    for (test, signal) in [
+        ("listen_sigterm", Signal::SIGTERM),
+        ("listen_sigint", Signal::SIGINT),
+    ] {
+        let scratch = Scratch::new(test);
+        let socket = socket_of(&scratch);
+        let mut guard = Guard::start(listen_command(&scratch, &socket));
+        let mut client = Client::connect(&socket);
+        client.call("open");
+        let pids = session_pids(&scratch);
+        let pid = i32::try_from(guard.pid()).unwrap();
+        kill(Pid::from_raw(pid), signal).unwrap();
+        // The listen socket goes only after the browser has stopped: by then nothing is left.
+        guard.stderr_until("asked to stop (SIGTERM or SIGINT)");
+        let status = guard.wait();
+        assert_eq!(status.code(), Some(0), "{status} ({signal})");
+        assert!(
+            std::fs::symlink_metadata(&socket).is_err(),
+            "the socket is left ({signal})"
+        );
+        assert_nothing_left(&scratch, pids);
+        assert!(client.next().is_none(), "the connection stayed open");
+        drop(guard);
+    }
 }

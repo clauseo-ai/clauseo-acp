@@ -46,6 +46,8 @@ mod clients;
 pub(crate) mod lines;
 mod oneshot;
 pub(crate) mod pumps;
+#[cfg(unix)]
+mod stop_signals;
 
 use std::io;
 use std::sync::Arc;
@@ -94,6 +96,9 @@ pub(crate) enum Event {
     CloseAnswered,
     /// The guard's parent has gone.
     ParentGone,
+    /// Listen mode: SIGTERM or SIGINT asked the guard to stop (`stop_signals.rs`).
+    #[cfg(unix)]
+    Stop,
     /// The browser could not start for a tool call; the reason.
     StartFailed(StartError),
     /// A one-shot agent-browser could not start; the error.
@@ -186,7 +191,15 @@ pub(crate) fn run(shared: &Arc<Shared>, parent: &Parent, agent: Agent) -> Outcom
             }));
         }
         #[cfg(unix)]
-        Agent::Listen(listener) => clients::serve(listener, shared, parent, events),
+        Agent::Listen(listener) => {
+            let stop = events.clone();
+            if let Err(error) = stop_signals::watch(move || send(&stop, Event::Stop)) {
+                note(&format!(
+                    "cannot catch SIGTERM or SIGINT; either now ends the guard at once: {error}"
+                ));
+            }
+            clients::serve(listener, shared, parent, events);
+        }
     }
     let end = wait_for_end(shared, &inbox);
     let (stopped, in_flight) = {
@@ -276,6 +289,12 @@ fn wait_for_end(shared: &Shared, inbox: &mpsc::Receiver<Event>) -> End {
             | Event::PortRefused(..)
             | Event::ChromeExited(_) => {}
             Event::ParentGone => return End::ParentGone,
+            // Ends as the agent's leaving does with no browser left to close: stop, exit 0.
+            #[cfg(unix)]
+            Event::Stop => {
+                note("asked to stop (SIGTERM or SIGINT); ending");
+                return End::AgentGone;
+            }
             Event::StartFailed(reason) => return End::StartFailed(reason),
             Event::AgentFailed(error) => return End::AgentFailed(error),
             Event::OneShotEnded(code) => return End::OneShotEnded(code),
