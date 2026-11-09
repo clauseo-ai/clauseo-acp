@@ -1039,14 +1039,17 @@ What set-up changes:
   `(D;;CCDCLCSWRP;;;<SID of ClauseoSandboxUsers>)`, which covers local and remote launch and
   activation (COM's rights 1, 2, 4, 8 and 16; in SDDL `CC`, `DC`, `LC`, `SW` and `RP`).
   No other account loses anything.
-- With no value (Windows' default applies), set-up writes the default Microsoft documents,
-  `O:BAG:BAD:(A;;CCDCLCSWRP;;;BA)(A;;CCDCSW;;;WD)`, with the deny in front.
+- With no value (Windows' default applies), set-up asks COM for the launch limit it uses and
+  writes exactly that, with the deny in front. That default grants more than Microsoft's page
+  lists: Administrators, Everyone, Distributed COM Users, Performance Log Users, ALL APPLICATION
+  PACKAGES and a capability SID. If COM can't be asked, set-up writes nothing and the state reads
+  `degraded: machine launch unknown`.
 - Windows keeps that value only while `MachineAccessRestriction`, in the same key, is set too.
   If it isn't, set-up first writes it as exactly the access limit COM already uses, so no
   account's access changes. If the policy "DCOM: Machine Access Restrictions in SDDL syntax" is
   set (`HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DCOM\MachineAccessRestriction`), set-up
   copies nothing and the state reads `degraded: group policy`. Uninstalling deletes the access
-  value again if it is still exactly those bytes and the launch value is gone.
+  value again if it still means the same and the launch value is gone.
 - If a launch value stays after uninstalling (someone else's entries, or the value as it was
   before Clauseo), the access value Clauseo added stays too, since Windows would move the launch
   value without it. It equals the access limit Windows used when set-up wrote it, and Clauseo
@@ -1057,7 +1060,9 @@ What set-up changes:
 - The value as it was before is kept in `HKLM\SOFTWARE\Clauseo\Sandbox\MachineLaunch`, a key only
   SYSTEM and Administrators can open: `Original` holds the old bytes (empty when there was no
   value), `Written` holds what Clauseo last wrote, and `PutBack` is 1 once Clauseo has had to put
-  its deny back after something else rewrote the value. `AccessAdded` holds the
+  its deny back after something else rewrote the value. `DenyExisted` is 1 when the same deny was
+  there before, and `Default` holds the launch limit COM used, when set-up created the value.
+  `AccessAdded` holds the
   `MachineAccessRestriction` bytes set-up wrote, when it wrote one, and `History` the last 8
   values Clauseo wrote.
 - Clauseo's SYSTEM task `\Clauseo\SandboxRefresh` puts the deny back at each run if something
@@ -1065,12 +1070,18 @@ What set-up changes:
 - A value Clauseo can't read as a valid COM security descriptor is never changed. Neither is a
   value whose entries use COM's old form, `COM_RIGHTS_EXECUTE` alone, since COM refuses a list
   that mixes the two forms.
-- Uninstalling takes the deny off. If the value is still exactly what set-up first wrote, the old
+- Windows rewrites both values within a millisecond of a write: it adds its default entries to
+  the launch value and re-pads the access value. So uninstalling compares values by meaning:
+  the same owner, group and set of entries (type, flags, rights, SID), in any order and with
+  any padding.
+- Uninstalling takes the deny off. If the value still means what set-up first wrote, the old
   bytes go back unchanged, and a value that wasn't there before is deleted. If Windows moved the
   value away, the old bytes go back too, and any value Clauseo wrote is deleted from
-  `MachineLaunchRestrictionOld`. If anything rewrote
-  the value since, even when Clauseo then put its deny back, only Clauseo's exact entry comes
-  off and everything else stays.
+  `MachineLaunchRestrictionOld`. If anything rewrote the value since, even when Clauseo then
+  put its deny back, only the entry Clauseo added comes off and everything else stays. A value
+  Clauseo created is deleted only if what is left means Windows' default; otherwise it stays.
+- If the same deny entry was already in the value before set-up (your organisation added it),
+  uninstalling leaves it.
 
 The guard's state is in `HKLM\SOFTWARE\Clauseo\Sandbox`, value `MachineLaunchDeny`:
 
@@ -1083,6 +1094,7 @@ The guard's state is in `HKLM\SOFTWARE\Clauseo\Sandbox`, value `MachineLaunchDen
 | `degraded: failed` | Reading or writing the registry failed; the Event Log line names the Windows error. |
 | `degraded: dcom moved the value` | Windows moved the value to `MachineLaunchRestrictionOld` after Clauseo wrote it, so the deny isn't in effect. |
 | `degraded: machine access unknown` | `MachineAccessRestriction` isn't set and COM's own access limit couldn't be read, so Clauseo wrote nothing. |
+| `degraded: machine launch unknown` | `MachineLaunchRestriction` isn't set and COM's own launch limit couldn't be read, so Clauseo wrote nothing. |
 
 A degraded state doesn't stop the set-up. The sandbox's other protections against WSL stay on,
 but the computer-wide layer is missing until it is fixed.

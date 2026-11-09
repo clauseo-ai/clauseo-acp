@@ -2395,10 +2395,12 @@ group machine-wide takes nothing from them.
   COM's old form (`COM_RIGHTS_EXECUTE` alone), which the new-form deny would mix with. COM
   rejects a mixed ACL. Before the write, the new bytes are read back through the same parser and
   `IsValidSecurityDescriptor`.
-- **No value.** Windows' documented default applies, "administrators may obtain local and remote
-  launch and activation permissions, and members of the Everyone group may obtain local
-  activation and launch permissions": `O:BAG:BAD:(A;;CCDCLCSWRP;;;BA)(A;;CCDCSW;;;WD)`. The
-  guard writes that default with the deny in front.
+- **No value.** Windows' default applies. Microsoft's page documents only Administrators and
+  Everyone, but a VM run found COM's default also grants Distributed COM Users, Performance Log
+  Users, ALL APPLICATION PACKAGES and a capability SID. So the guard reads the descriptor COM
+  uses with `CoGetSystemSecurityPermissions(SD_LAUNCHRESTRICTIONS)` and writes it with the deny
+  in front, every entry kept. If that call fails, nothing is written and the state is
+  `degraded: machine launch unknown`. The descriptor goes to the backup (`Default`).
 - **`MachineAccessRestriction` beside it** (`machine_launch/hold.rs`). DCOM's launcher service
   keeps `MachineLaunchRestriction` only while `MachineAccessRestriction` is there too. Without
   it, a VM run (row 4, no access value) saw it move the new value to
@@ -2410,7 +2412,10 @@ group machine-wide takes nothing from them.
   `HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DCOM\MachineAccessRestriction` is set, COM's
   descriptor may be the policy's, so nothing is copied and the state is
   `degraded: group policy`. The bytes go to the backup (`AccessAdded`). After the
-  write, both values are read back at 250 ms and at 1 s. The state is `applied` only when the
+  write, both values are read back at 250 ms and at 1 s. DCOM rewrites both within a
+  millisecond (a VM run): it merges Windows' default entries into the launch value and
+  re-serialises the access value with padding. What the last read-back found becomes
+  `Written` and `AccessAdded`, so the removal looks for what DCOM made of Clauseo's write. The state is `applied` only when the
   deny is still first at both reads; otherwise it is `degraded: dcom moved the value`. The
   refresh's put-back is checked the same way, so each refresh run tries the write and the
   read-back again. The app reads the state typed (`windows::sandbox_launch_deny`, `NotSet`,
@@ -2420,7 +2425,8 @@ group machine-wide takes nothing from them.
   value). The subkey has a protected DACL that grants only SYSTEM and Administrators, so the
   pool, which reads the record, can't read or change the backup. The guard also stores the bytes
   it last wrote (`Written`), set before each write, and the last 8 values it wrote
-  (`History`). A later re-apply (a put-back after drift)
+  (`History`). `DenyExisted` is 1 when the value held the same deny before Clauseo's first
+  write. A later re-apply (a put-back after drift)
   keeps the first `Original` and sets `PutBack` to 1: from then on the value holds someone
   else's edit, which no restore may undo.
 - **Where.** Set-up step 8c applies the guard elevated, after the network and once the group and
@@ -2430,17 +2436,21 @@ group machine-wide takes nothing from them.
   placeholder signing key skips it. The refresh skips a record with no `GroupSid` or with
   `Removing` set. A run that finds a deny Clauseo wrote has gone (drift) puts it back and logs an
   information line. The step never fails the set-up.
-- **Removal.** `--remove` (after `DeviceSync`'s deny, before the group goes) checks the value
-  first. The backup goes back byte for byte when the value is exactly the bytes Clauseo
-  wrote and there has been no put-back since the first write, and a backup of "no value" then
-  deletes the value. It also goes back when the value is gone (DCOM moved it, or someone
-  deleted it). Otherwise only our exact deny comes off: a plain deny, no flags, mask
-  `0x1F`, the group's SID. Every other entry stays, a deny for the group with another mask or
-  flags included. A value that holds nothing but Windows' default after that, on a machine that
-  had no value and saw no put-back, is deleted. A value that won't parse is left and logged.
-  `MachineLaunchRestrictionOld` is deleted when it is exactly one of the values in `History`.
-  An access value Clauseo added is deleted only while it is byte for byte what Clauseo wrote and
-  no launch value is left (DCOM would move it); otherwise it is left and logged. Then the
+- **Removal.** `--remove` (after `DeviceSync`'s deny, before the group goes) compares values by
+  meaning (`machine_launch/meaning.rs`): the owner, the group and the set of DACL entries, each
+  as type, flags, mask and SID. Order, layout and padding don't count, since DCOM rewrites
+  them. The backup goes back byte for byte when the value means what Clauseo wrote and there
+  has been no put-back since the first write, and a backup of "no value" then deletes the
+  value. It also goes back when the value is gone (DCOM moved it, or someone deleted it).
+  Otherwise only the deny Clauseo added comes off: a plain deny, no flags, mask `0x1F`, the
+  group's SID. A deny that was there before Clauseo's (`DenyExisted`) is never taken off.
+  Every other entry stays, a deny for the group with another mask or flags included. A value
+  Clauseo made (none before) is deleted only when what is left means COM's default it was built
+  from (`Default`); otherwise it is kept and logged. A value that won't parse is left and
+  logged. `MachineLaunchRestrictionOld` is deleted when it means one of the values in
+  `History`. An access value Clauseo added is deleted only while it means what Clauseo wrote
+  (COM's `SD_ACCESSRESTRICTIONS` descriptor) and no launch value is left (DCOM would move it);
+  otherwise it is left and logged. Then the
   backup subkey and the state go. A set-up rollback that deletes a group it made removes the
   deny first, and keeps the group if it can't.
 - **Group Policy.** `HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DCOM\MachineLaunchRestriction`
@@ -2455,7 +2465,8 @@ group machine-wide takes nothing from them.
   (`docs/firm-it.md`).
 - **Degraded.** The record's `MachineLaunchDeny` (`REG_SZ`, readable by Users) holds the state:
   `applied`, `policy`, `degraded: group policy`, `degraded: unparsable`, `degraded: failed`,
-  `degraded: dcom moved the value` or `degraded: machine access unknown`.
+  `degraded: dcom moved the value`, `degraded: machine access unknown` or
+  `degraded: machine launch unknown`.
   The value is written only when the state changes. A degraded guard is logged (the set-up log,
   and an Event Log error line from the refresh) and is in `SetupReport::launch_deny`. The WSL
   deny and the network filters stay on.
