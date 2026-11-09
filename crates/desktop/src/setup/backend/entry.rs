@@ -51,11 +51,17 @@ pub(crate) fn launch(
 }
 
 /// `state` on the wire, with `hosts` for a waiting or failed install; `None` for a state this
-/// version does not know.
-pub(crate) fn progress(state: &InstallState, hosts: &[String]) -> Option<InstallProgress> {
+/// version does not know. A `Missing` says `installed_before` as given: whether Clauseo's
+/// `agents.<id>` entry is still in the settings (`refresh::installed_before`, #859).
+pub(crate) fn progress(
+    state: &InstallState,
+    hosts: &[String],
+    installed_before: bool,
+) -> Option<InstallProgress> {
     Some(match state {
         InstallState::Missing { download_bytes } => InstallProgress::Missing {
             download_bytes: Count::clamped(*download_bytes),
+            installed_before,
         },
         InstallState::Waiting { reason, log } => InstallProgress::Waiting {
             code: ErrorCode::from_str_lossy(reason.code()),

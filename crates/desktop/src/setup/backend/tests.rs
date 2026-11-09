@@ -22,6 +22,7 @@ mod pending;
 mod quit;
 mod races;
 mod refusals;
+mod reinstall;
 mod retry;
 mod reused;
 mod signin;
@@ -269,7 +270,8 @@ fn a_new_follower_gets_setup_info_then_each_agent_s_install_then_sign_in() {
             SetupEvent::AgentInstallProgress {
                 agent: claude(),
                 state: InstallProgress::Missing {
-                    download_bytes: clauseo_protocol::Count::clamped(1_000)
+                    download_bytes: clauseo_protocol::Count::clamped(1_000),
+                    installed_before: false,
                 },
             },
             SetupEvent::SignInChanged {

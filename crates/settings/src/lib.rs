@@ -148,7 +148,10 @@ pub use locations::{
     SETTINGS_FILE,
 };
 pub use lock_reason::{LockCause, LockReason, SourceKind};
-pub use plans::{PLAN_ENV_NAMES, PLAN_PROXY_NAMES, SECRET_WORDS, secret_shaped, web_address_ok};
+pub use plans::{
+    PLAN_ENV_NAMES, PLAN_PROXY_NAMES, SECRET_WORDS, launch_is_clauseos, secret_shaped,
+    web_address_ok,
+};
 pub use policy::{
     FilePolicy, PolicyRead, PolicySource, PolicyStatus, PolicyValues, SourceError,
     system_policy_sources,

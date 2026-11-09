@@ -135,6 +135,11 @@ const SWITCHING: Scene = {
   events: [READY, signIn(CLAUDE, { switching: { since: AT, stuck: false } })],
 };
 const CHECKING: Scene = { events: [READY, signIn(CLAUDE, "checking")] };
+/** Claude's install went missing after Clauseo installed it (#859), on the first screen. */
+const REINSTALL: Scene = {
+  first: true,
+  events: [install(CLAUDE, { missing: { download_bytes: 182_400_000, installed_before: true } })],
+};
 const STUCK: Scene = { events: [READY, signIn(CLAUDE, { switching: { since: AT, stuck: true } })] };
 /** The key panel open while signed out, the switch begun, then a key sent and refused with command.conflict. */
 const SWITCH_CONFLICT: Scene = {
@@ -525,6 +530,9 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
   ["Getting {name} ready… {done} MB of {total} MB", WELCOME, "welcome"],
   // UD1-89: the sign-in status check still running, at start and through its silent retries
   ["Checking whether you're signed in to {name}…", CHECKING, "signin-checking"],
+  // UD1-90 and UD1-91: the chosen plan's install went missing after Clauseo installed it (#859), and its Install
+  ["{plan} isn't installed on this computer any more.", REINSTALL, "reinstall"],
+  ["Install {plan}", REINSTALL, "reinstall"],
 ];
 
 /** The gate's refusal line for any other code: its code's own sentence, here a sign-in refused while a key is in use.

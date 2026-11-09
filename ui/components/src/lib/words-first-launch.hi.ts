@@ -137,6 +137,11 @@ export const HI = {
   "Checking whether you're signed in to {name}…":
     "जाँच हो रही है कि आपने {name} में साइन इन किया है या नहीं…",
 
+  // the chosen plan's install went missing after Clauseo installed it (#859), and its one press, which installs it
+  // the normal way; {plan} is the plan's name, Claude or ChatGPT (new; provisional)
+  "{plan} isn't installed on this computer any more.": "{plan} अब इस कंप्यूटर पर इंस्टॉल नहीं है।",
+  "Install {plan}": "{plan} इंस्टॉल करें",
+
   // switching accounts: Clauseo still stopping a login it may no longer use (new, 0048)
   "Switching accounts.": "खाता बदला जा रहा है।",
   "Clauseo is still stopping the old login. It keeps trying by itself, so there's nothing you need to do.":
