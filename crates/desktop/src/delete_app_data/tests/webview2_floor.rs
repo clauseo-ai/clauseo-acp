@@ -105,8 +105,8 @@ fn edge_update() -> Vec<(&'static str, Value)> {
 
 #[test]
 fn per_user_a_runtime_below_the_floor_is_left_to_windows_with_one_details_line() {
-    // The floor is 89.0.774.44: an older runtime, even one just below.
-    for version in ["88.0.705.81", "89.0.774.43"] {
+    // The floor is 111.0.1661.41: an older runtime, even one just below.
+    for version in ["110.0.1587.69", "111.0.1661.40"] {
         let said = run("currentUser", version, Some(edge_update()), "0");
         assert_eq!(said, ["DetailPrint $(webview2TooOld)"], "{version}");
     }
@@ -121,7 +121,7 @@ fn per_user_a_runtime_below_the_floor_is_left_to_windows_with_one_details_line()
 
 #[test]
 fn per_user_a_runtime_at_or_above_the_floor_needs_nothing() {
-    for version in ["89.0.774.44", "120.0.2210.91", "160.0.0.0"] {
+    for version in ["111.0.1661.41", "120.0.2210.91", "160.0.0.0"] {
         assert_eq!(
             run("currentUser", version, Some(edge_update()), "0"),
             Vec::<String>::new(),
@@ -133,7 +133,7 @@ fn per_user_a_runtime_at_or_above_the_floor_needs_nothing() {
 #[test]
 fn per_machine_a_runtime_below_the_floor_is_updated_and_a_failed_update_goes_on() {
     let update = format!("ExecWait \"{EDGE_UPDATE}\" /install appguid={GUID}&needsadmin=true");
-    let said = run("perMachine", "88.0.705.81", Some(edge_update()), "0");
+    let said = run("perMachine", "110.0.1587.69", Some(edge_update()), "0");
     assert_eq!(
         said,
         [
@@ -145,7 +145,7 @@ fn per_machine_a_runtime_below_the_floor_is_updated_and_a_failed_update_goes_on(
     // Failed (the VM's -2147219689): two details lines, no box, no Quit; the install goes on.
     let said = run(
         "perMachine",
-        "88.0.705.81",
+        "110.0.1587.69",
         Some(edge_update()),
         "-2147219689",
     );
@@ -160,7 +160,7 @@ fn per_machine_a_runtime_below_the_floor_is_updated_and_a_failed_update_goes_on(
     );
     // At the floor, nothing.
     assert_eq!(
-        run("perMachine", "89.0.774.44", Some(edge_update()), "0"),
+        run("perMachine", "111.0.1661.41", Some(edge_update()), "0"),
         Vec::<String>::new()
     );
 }

@@ -67,11 +67,15 @@ Developer ID.
   `latest-json.mjs` is the one home of this table.
 - **The base config** (`crates/desktop/tauri.conf.json`) holds what every build shares: the bundle
   targets, `createUpdaterArtifacts: true`, macOS 13 and the hardened runtime, the WebView2 bootstrapper
-  (silent) with `minimumWebview2Version` `89.0.774.44`, what the app needs (2026-11-09): Tauri
-  states no minimum (no version check in tauri 2.12.4 or tauri-runtime-wry 2.12.2), and the newest
-  WebView2 interface wry 0.57.0 requires without a fallback is `ICoreWebView2Controller2`, for the
-  window's background colour, which came in SDK 1.0.774.44 with runtime 89.0.774.44 (Microsoft's
-  release notes). Every newer interface wry uses is optional; `ICoreWebView2_22` (runtime
+  (silent) with `minimumWebview2Version` `111.0.1661.41`, what the app needs (2026-11-09), the
+  higher of two floors. The UI's newest required feature is CSS `color-mix()` (Chromium 111;
+  111.0.1661.41 is the first stable runtime); below about 110 it would start broken (no
+  `Object.hasOwn`, 93; no `:has()` or `@container`, 105; no `dvh`, 108) instead of showing the
+  too-old dialog. wry's floor is lower: Tauri states no minimum (no version check in tauri 2.12.4 or
+  tauri-runtime-wry 2.12.2), and the newest WebView2 interface wry 0.57.0 requires without a
+  fallback is `ICoreWebView2Controller2`, for the window's background colour, which came in SDK
+  1.0.774.44 with runtime 89.0.774.44 (Microsoft's release notes). Every newer interface wry uses is
+  optional; `ICoreWebView2_22` (runtime
   122.0.2365.46), for cross-origin iframes and shared workers on the custom protocol, isn't needed:
   the review iframe is same-origin and dev-only, the highlighter's worker dedicated. It was
   155.0.0.0, the `windows-2025` runner's version, which no feature needed, and which made the
