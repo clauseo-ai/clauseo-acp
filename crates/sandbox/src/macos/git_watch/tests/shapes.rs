@@ -2,7 +2,7 @@
 //! `HEAD`, a clonefile'd tree, links out of the matter, and the words the agent and the lawyer
 //! get, with every path shown made safe.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::super::{Phase, flags};
 use super::fake::{
@@ -354,4 +354,27 @@ fn every_path_a_notice_shows_has_its_controls_replaced_visibly() {
         session_ended: false,
     };
     assert!(link.notice().unwrap().contains(r"/x\u{202d}y"));
+}
+
+#[test]
+fn invisible_characters_bad_bytes_and_backslashes_are_shown_apart() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt as _;
+    let shown = |path: &Path| crate::denial::shown(path);
+    assert_eq!(
+        shown(Path::new(
+            "a\u{200B}b\u{200C}c\u{200D}d\u{2060}e\u{2064}f\u{FEFF}g"
+        )),
+        r"a\u{200b}b\u{200c}c\u{200d}d\u{2060}e\u{2064}f\u{feff}g"
+    );
+    // Two names that differ only in a byte that isn't UTF-8 never look the same.
+    let one = shown(Path::new(OsStr::from_bytes(b"memo\x80.git")));
+    let two = shown(Path::new(OsStr::from_bytes(b"memo\x81.git")));
+    assert_eq!(
+        (one.as_str(), two.as_str()),
+        (r"memo\x80.git", r"memo\x81.git")
+    );
+    // Nor does a name that spells an escape out.
+    assert_eq!(shown(Path::new(r"memo\x80.git")), r"memo\\x80.git");
+    assert_eq!(shown(Path::new("Clients/Acme/.git")), "Clients/Acme/.git");
 }

@@ -28,6 +28,7 @@ use super::aside::{Aside, Stuck};
 use super::run::Mode;
 use super::{Fs, Phase, Watch};
 use crate::DenialSink;
+use crate::denial::shown;
 use crate::policy::path_key;
 
 /// A file ID: the volume and the inode.
@@ -116,6 +117,9 @@ pub(crate) struct SessionRecord {
 pub(crate) struct StuckRecord {
     path: Bytes,
     reason: String,
+    /// A folder the final scan could not read: it blocks launches only while still unreadable.
+    #[serde(default)]
+    unreadable: bool,
 }
 
 /// The state file's contents.
@@ -161,19 +165,27 @@ pub(crate) fn begin<F: Fs + Clone, S: Store>(
     store.update(|state| {
         state.matter = matter.display().to_string();
         state.root = Some(matter.into());
-        state
-            .stuck
-            .retain(|stuck| fs.meta(&stuck.path.path()).is_some());
+        state.stuck.retain(|stuck| {
+            let path = stuck.path.path();
+            fs.meta(&path).is_some() && (!stuck.unreadable || fs.list(&path).is_err())
+        });
         if let Some(stuck) = state.stuck.first() {
-            let shown = stuck.path.path();
-            let shown = shown.strip_prefix(matter).unwrap_or(&shown);
-            return Err(io::Error::other(format!(
-                "Clauseo won't start an AI tool in this matter until {} is moved out of it: an \
-                 earlier AI tool left it there, and Clauseo could neither move nor rename it \
-                 ({}).",
-                shown.display(),
-                stuck.reason
-            )));
+            let path = stuck.path.path();
+            let shown = shown(path.strip_prefix(matter).unwrap_or(&path));
+            let reason = &stuck.reason;
+            return Err(io::Error::other(if stuck.unreadable {
+                format!(
+                    "Clauseo won't start an AI tool in this matter until it can read {shown}: \
+                     the folder could not be read when an earlier AI session ended, so Clauseo \
+                     could not check it for Git folders ({reason})."
+                )
+            } else {
+                format!(
+                    "Clauseo won't start an AI tool in this matter until {shown} is moved out of \
+                     it: an earlier AI tool left it there, and Clauseo could neither move nor \
+                     rename it ({reason})."
+                )
+            }));
         }
         let done = finish_dead(state, fs, matter, notices, host);
         if done.left == 0 {
@@ -328,6 +340,7 @@ fn add_stuck(state: &mut MatterState, stuck: Vec<Stuck>) {
         .extend(stuck.into_iter().map(|stuck| StuckRecord {
             path: stuck.path.as_path().into(),
             reason: stuck.reason,
+            unreadable: stuck.unreadable,
         }));
 }
 

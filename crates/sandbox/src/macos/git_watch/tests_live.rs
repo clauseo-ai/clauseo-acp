@@ -400,7 +400,11 @@ fn the_walk_at_launch_and_the_watch_count_the_same_dangling_links() {
         "clauseo-dangling".to_owned(),
         Arc::new(Notices::default()) as Arc<dyn DenialSink>,
     );
-    let watch = Watch::new(os::Real, matter.clone(), aside, &Launch::default());
+    let launch = Launch {
+        keep_repos: true,
+        ..Launch::default()
+    };
+    let watch = Watch::new(os::Real, matter.clone(), aside, &launch);
     let repos: Vec<PathBuf> = watch
         .baseline()
         .repos

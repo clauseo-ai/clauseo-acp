@@ -26,12 +26,14 @@ const NAMES_MAX: u32 = 16;
 /// The names in a git folder that make it one, renamed in a set-aside or neutralised item.
 const GIT_NAMES: [&str; 2] = ["HEAD", "config"];
 
-/// An item that could neither move nor be neutralised: the matter's next launch is refused
-/// while it is there.
+/// An item that could neither move nor be neutralised, or a folder the final scan could not
+/// read: the matter's next launch is refused while it is there (and, for a folder, unreadable).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Stuck {
     pub(crate) path: PathBuf,
     pub(crate) reason: String,
+    /// A folder the final scan could not open or list, rather than an item that would not move.
+    pub(crate) unreadable: bool,
 }
 
 /// Where items go, and what each set-aside is recorded and reported with.
@@ -99,6 +101,7 @@ impl Aside {
                         self.stuck.push(Stuck {
                             path: path.to_owned(),
                             reason: reason.clone(),
+                            unreadable: false,
                         });
                         (GitOutcome::Stuck, Some(io::Error::other(reason)))
                     }

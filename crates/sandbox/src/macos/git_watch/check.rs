@@ -4,7 +4,9 @@
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
+use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::aside::{Aside, Stuck};
@@ -17,8 +19,12 @@ use crate::policy::{name_key, path_key};
 
 mod names;
 mod sweep;
+mod walk;
 
 pub(crate) use sweep::Sweep;
+#[cfg(test)]
+pub(super) use walk::walk;
+use walk::{Next, Visit, walk_with};
 
 /// The most entries the scans of one batch's arrived folders list while the agent may run:
 /// past it the scan stops and the session ends, so a huge folder can't stall the watch while
@@ -62,6 +68,25 @@ pub(crate) struct Watch<F> {
     sweep: Sweep,
     /// Items this watch's events reported that were gone when checked.
     gone: u64,
+    /// Called once per folder any walk lists: the runner's heartbeat.
+    progress: Progress,
+}
+
+/// A hook called once per folder listed.
+pub(crate) type Progress = Arc<dyn Fn() + Send + Sync>;
+
+/// What a scan found: items to set aside, and folders it could not open or list, each with
+/// the error.
+#[derive(Default)]
+struct Found {
+    items: Vec<Item>,
+    unreadable: Vec<(PathBuf, String)>,
+}
+
+impl Found {
+    fn any(&self) -> bool {
+        !self.items.is_empty() || !self.unreadable.is_empty()
+    }
 }
 
 /// A folder's listing.
@@ -73,8 +98,21 @@ type Item = (PathBuf, GitItem, Kind);
 impl<F: Fs> Watch<F> {
     /// The watch of `matter`, setting aside through `aside`. The launch's items' file IDs are
     /// read now, and the matter is walked once for its folders, repositories and `HEAD`
-    /// folders, so call it before the agent starts.
+    /// folders (kept as the launch's only when [`Launch::keep_repos`]), so call it before the
+    /// agent starts.
     pub(crate) fn new(fs: F, matter: PathBuf, aside: Aside, launch: &Launch) -> Watch<F> {
+        Watch::new_with_progress(fs, matter, aside, launch, Arc::new(|| {}))
+    }
+
+    /// [`Watch::new`], calling `progress` once per folder listed, from the launch walk on
+    /// ([`Watch::on_progress`]).
+    pub(crate) fn new_with_progress(
+        fs: F,
+        matter: PathBuf,
+        aside: Aside,
+        launch: &Launch,
+        progress: Progress,
+    ) -> Watch<F> {
         let known = |paths: &[PathBuf]| -> Vec<Known> {
             paths
                 .iter()
@@ -100,30 +138,41 @@ impl<F: Fs> Watch<F> {
         let mut sweep = Sweep::default();
         let mut repo_dirs: HashSet<PathBuf> = HashSet::new();
         let skip: HashSet<PathBuf> = launch.skip.iter().map(|p| path_key(p)).collect();
-        walk(
-            &fs,
-            &matter,
-            &|dir, _| skip.contains(&path_key(dir)),
-            &mut |dir, meta, entries| {
-                folders.insert(meta.id);
-                if repo_head(entries).is_some() {
-                    base.repos.push(Known::new(dir, meta.id));
-                    repo_dirs.insert(dir.to_owned());
-                } else if head_of(entries).is_some() {
-                    base.heads.push(Known::new(dir, meta.id));
-                }
-                // The 30 s pass, as a scan, never enters a launch repository.
-                if !dir.ancestors().any(|above| repo_dirs.contains(above)) {
-                    sweep.add(dir, Some(meta.id), fs.dated(dir).map(|(_, stamp)| stamp));
-                }
-                true
-            },
-        );
+        let mut folder = |dir: &Path, meta: Meta, entries: &Entries| {
+            folders.insert(meta.id);
+            if !launch.keep_repos {
+                // Nothing the profile doesn't make read-only is the launch's: notes.
+            } else if repo_head(entries).is_some() {
+                base.repos.push(Known::new(dir, meta.id));
+                repo_dirs.insert(dir.to_owned());
+            } else if head_of(entries).is_some() {
+                base.heads.push(Known::new(dir, meta.id));
+            }
+            // The 30 s pass, as a scan, never enters a launch repository.
+            if !dir.ancestors().any(|above| repo_dirs.contains(above)) {
+                sweep.add(dir, Some(meta.id), fs.dated(dir).map(|(_, stamp)| stamp));
+            }
+            Next::Below
+        };
+        let mut visit = Visit {
+            skip: &|dir, _| skip.contains(&path_key(dir)),
+            folder: &mut folder,
+            unreadable: &mut |_, _| Next::Past,
+            progress: &*progress,
+        };
+        walk_with(&fs, &matter, &mut visit);
         let mut watch = Watch::resume(fs, matter, aside, base);
         watch.folders = folders;
         watch.all_old = false;
         watch.sweep = sweep;
+        watch.on_progress(progress);
         watch
+    }
+
+    /// Calls `f` once per folder any later walk lists: event scans, full scans, the 30 s pass
+    /// and the final scan. A no-op until set.
+    pub(crate) fn on_progress(&mut self, f: Progress) {
+        self.progress = f;
     }
 
     /// The watch of a session from its recorded `base`, for its final scan: every folder
@@ -156,6 +205,7 @@ impl<F: Fs> Watch<F> {
             all_old: true,
             sweep: Sweep::default(),
             gone: 0,
+            progress: Arc::new(|| {}),
             fs,
             matter,
             aside,
@@ -215,12 +265,12 @@ impl<F: Fs> Watch<F> {
             );
             return Asks { rescan, end: true };
         }
-        let mut items = Vec::new();
+        let mut found = Found::default();
         let budget = Cell::new(SCAN_BUDGET);
         let mut rescan = rescan;
         for event in events {
             self.count_gone(event);
-            let asks = self.event(event, &mut items, &budget);
+            let asks = self.event(event, &mut found, &budget);
             rescan |= asks.rescan;
             if asks.end {
                 tracing::warn!(
@@ -230,8 +280,12 @@ impl<F: Fs> Watch<F> {
                 );
                 return Asks { rescan, end: true };
             }
+            // The first find ends the session: the rest of the batch can wait for the end.
+            if found.any() {
+                break;
+            }
         }
-        Asks { rescan, end: false }.and(self.put(items, Phase::Running))
+        Asks { rescan, end: false }.and(self.put(found, Phase::Running))
     }
 
     /// Counts `event`'s item when something arrived there and is gone now.
@@ -250,8 +304,9 @@ impl<F: Fs> Watch<F> {
         );
     }
 
-    /// Scans the whole matter: while the agent may run a find ends the session; once it has
-    /// ended, each find is set aside.
+    /// Scans the whole matter: while the agent may run the first find, or a folder that can't
+    /// be read, ends the session and the scan; once it has ended the scan is complete, each
+    /// find is set aside and each folder it can't read is kept as stuck.
     pub(crate) fn full_scan(&mut self, phase: Phase) -> Asks {
         if phase == Phase::Ended && self.gone() > 0 {
             tracing::info!(
@@ -259,15 +314,33 @@ impl<F: Fs> Watch<F> {
                 "items the session's events reported were gone when checked"
             );
         }
-        let items = self.scan(&self.matter);
-        self.put(items, phase)
+        let found = self.scan(&self.matter, phase);
+        self.put(found, phase)
     }
 
-    /// While the agent may run, any item ends the session, gone or not; once it has ended,
-    /// each item still there, on a local volume, is set aside.
-    fn put(&mut self, items: Vec<Item>, phase: Phase) -> Asks {
+    /// While the agent may run, any item ends the session, gone or not, as does a folder that
+    /// can't be read (it could hide one); once it has ended, each item still there, on a local
+    /// volume, is set aside, and each folder that can't be read is kept as stuck: the matter's
+    /// next launch is refused until it can be read.
+    fn put(&mut self, found: Found, phase: Phase) -> Asks {
         let mut asks = Asks::default();
-        for (path, what, kind) in items {
+        for (path, error) in found.unreadable {
+            match phase {
+                Phase::Running => {
+                    tracing::warn!(
+                        path = %path.display(), %error,
+                        "the git watch can't read a folder in the matter; ending the session"
+                    );
+                    asks.end = true;
+                }
+                Phase::Ended => self.aside.stuck.push(Stuck {
+                    path,
+                    reason: format!("Clauseo can't read this folder: {error}"),
+                    unreadable: true,
+                }),
+            }
+        }
+        for (path, what, kind) in found.items {
             match phase {
                 Phase::Running => {
                     tracing::warn!(
@@ -299,7 +372,8 @@ impl<F: Fs> Watch<F> {
     /// entries it lists, and a link that arrived is checked. Nothing at or below one of the
     /// launch's repositories is. Asks for a rescan when the events are incomplete or the path
     /// is outside the matter, and to end the session when the scan ran past the budget.
-    fn event(&self, event: &Event, items: &mut Vec<Item>, budget: &Cell<usize>) -> Asks {
+    fn event(&self, event: &Event, found: &mut Found, budget: &Cell<usize>) -> Asks {
+        let items = &mut found.items;
         let rescan = Asks {
             rescan: true,
             end: false,
@@ -343,7 +417,7 @@ impl<F: Fs> Watch<F> {
         }
         let mut asks = Asks::default();
         match meta.kind {
-            Kind::Dir => asks.end = !self.scan_within(&event.path, budget, items),
+            Kind::Dir => asks.end = !self.scan_within(&event.path, budget, true, found),
             Kind::Link => items.extend(self.link(&event.path, meta.kind)),
             Kind::File | Kind::Other => {}
         }
@@ -391,27 +465,55 @@ impl<F: Fs> Watch<F> {
     }
 
     /// Everything found in folder `top` and below: each `.git` not the launch's, each `HEAD`
-    /// [`Watch::head`] takes, each link out, and each new `commondir` path.
-    fn scan(&self, top: &Path) -> Vec<Item> {
-        let mut items = Vec::new();
+    /// [`Watch::head`] takes, each link out, each new `commondir` path, and each folder that
+    /// can't be read. While the agent may run it stops at the first; after, it is complete.
+    fn scan(&self, top: &Path, phase: Phase) -> Found {
+        let mut found = Found::default();
         let unbounded = Cell::new(usize::MAX);
-        self.scan_within(top, &unbounded, &mut items);
-        items
+        self.scan_within(top, &unbounded, phase == Phase::Running, &mut found);
+        found
     }
 
-    /// [`Watch::scan`] of `top` into `items`, listing at most `budget`'s entries, which it
-    /// takes from it. Returns false when it ran past the budget and stopped.
-    fn scan_within(&self, top: &Path, budget: &Cell<usize>, items: &mut Vec<Item>) -> bool {
+    /// [`Watch::scan`] of `top` into `found`, listing at most `budget`'s entries, which it
+    /// takes from it, and stopping at the first find when `first`. Returns false when it ran
+    /// past the budget and stopped.
+    fn scan_within(
+        &self,
+        top: &Path,
+        budget: &Cell<usize>,
+        first: bool,
+        found: &mut Found,
+    ) -> bool {
         let over = Cell::new(false);
-        let skip = |dir: &Path, _: Meta| over.get() || self.passed(&path_key(dir), dir);
-        walk(&self.fs, top, &skip, &mut |dir, meta, entries| {
+        let (mut items, mut unread) = (Vec::new(), Vec::new());
+        let mut folder = |dir: &Path, meta: Meta, entries: &Entries| {
             let Some(left) = budget.get().checked_sub(entries.len()) else {
                 over.set(true);
-                return false;
+                return Next::Stop;
             };
             budget.set(left);
-            self.folder(dir, meta, entries, items)
-        });
+            let below = self.folder(dir, meta, entries, &mut items);
+            if first && !items.is_empty() {
+                Next::Stop
+            } else if below {
+                Next::Below
+            } else {
+                Next::Past
+            }
+        };
+        let mut unreadable = |dir: &Path, error: &io::Error| {
+            unread.push((dir.to_owned(), error.to_string()));
+            if first { Next::Stop } else { Next::Past }
+        };
+        let mut visit = Visit {
+            skip: &|dir, _| self.passed(&path_key(dir), dir),
+            folder: &mut folder,
+            unreadable: &mut unreadable,
+            progress: &*self.progress,
+        };
+        walk_with(&self.fs, top, &mut visit);
+        found.items.extend(items);
+        found.unreadable.extend(unread);
         !over.get()
     }
 
@@ -421,10 +523,10 @@ impl<F: Fs> Watch<F> {
     /// next call goes on where this one stopped.
     pub(crate) fn sweep(&mut self, out_of_time: &dyn Fn() -> bool) -> (Asks, bool) {
         let mut sweep = std::mem::take(&mut self.sweep);
-        let mut items = Vec::new();
-        let done = sweep::stretch(self, &mut sweep, out_of_time, &mut items);
+        let mut found = Found::default();
+        let done = sweep::stretch(self, &mut sweep, out_of_time, &mut found);
         self.sweep = sweep;
-        (self.put(items, Phase::Running), done)
+        (self.put(found, Phase::Running), done)
     }
 
     /// Whether a scan passes folder `dir` (path key `key`) by: a launch repository, or the
@@ -463,69 +565,13 @@ impl<F: Fs> Watch<F> {
     /// What the final scan would set aside, moving nothing: for a session a process of which
     /// outlived its kill.
     pub(crate) fn finds(&self) -> Vec<PathBuf> {
-        let items = self.scan(&self.matter);
+        let found = self.scan(&self.matter, Phase::Ended);
         let here = |path: &PathBuf| self.fs.meta(path).is_some();
-        items.into_iter().map(|item| item.0).filter(here).collect()
-    }
-}
-
-/// How deep a walk holds each folder above it open; below that, a folder is opened again from
-/// its path, so a deep tree never runs out of descriptors.
-const HELD_MAX: usize = 32;
-
-/// A folder a walk will visit: its path, its parent held open (unless past [`HELD_MAX`]) and
-/// its depth.
-type Queued<D> = (PathBuf, Option<std::rc::Rc<D>>, usize);
-
-/// Visits folder `top` and every folder below it with its file ID and listing, never through
-/// a link, never into a `.git`, a folder `skip` names, or a folder [`Fs::open_dir`] refuses (a
-/// network volume, an automount, `/net`), logged. Each folder is listed through its own held
-/// handle and its subfolders are opened from it, so one swapped for a link after the listing
-/// is never followed. `visit` says whether to go below the folder.
-pub(super) fn walk<F: Fs>(
-    fs: &F,
-    top: &Path,
-    skip: &dyn Fn(&Path, Meta) -> bool,
-    visit: &mut dyn FnMut(&Path, Meta, &Entries) -> bool,
-) {
-    let mut folders: Vec<Queued<F::Dir>> = vec![(top.to_owned(), None, 0)];
-    while let Some((dir, above, depth)) = folders.pop() {
-        let opened = match (&above, dir.file_name()) {
-            (Some(above), Some(name)) => fs.open_child(above, name, &dir),
-            _ => fs.open_dir(&dir),
-        };
-        let (held, meta) = match opened {
-            Ok(Some(found)) => found,
-            Ok(None) => continue,
-            Err(error) if error.kind() == std::io::ErrorKind::Unsupported => {
-                let shown = dir.display();
-                tracing::info!(dir = %shown, "the git watch skips a network volume or an automount");
-                continue;
-            }
-            Err(error) => {
-                tracing::warn!(dir = %dir.display(), %error, "the git watch can't open a folder");
-                continue;
-            }
-        };
-        if skip(&dir, meta) {
-            continue;
-        }
-        let entries = match fs.entries(&held) {
-            Ok(entries) => entries,
-            Err(error) => {
-                tracing::warn!(dir = %dir.display(), %error, "the git watch can't list a folder");
-                continue;
-            }
-        };
-        if !visit(&dir, meta, &entries) {
-            continue;
-        }
-        let held = std::rc::Rc::new(held);
-        for (name, kind) in entries {
-            if kind == Kind::Dir && !is_git(&name) {
-                let above = (depth < HELD_MAX).then(|| std::rc::Rc::clone(&held));
-                folders.push((dir.join(name), above, depth + 1));
-            }
-        }
+        found
+            .items
+            .into_iter()
+            .map(|item| item.0)
+            .filter(here)
+            .collect()
     }
 }

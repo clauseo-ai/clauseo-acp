@@ -249,6 +249,10 @@ pub(crate) struct Launch {
     pub(crate) links: Vec<PathBuf>,
     pub(crate) common: Vec<PathBuf>,
     pub(crate) skip: Vec<PathBuf>,
+    /// Whether the repositories and `HEAD` folders the watch's own walk finds at launch are
+    /// the launch's, left alone: true for the matter, whose repositories the profile makes
+    /// read-only; false for notes, where it makes none so, and they are finds like any other.
+    pub(crate) keep_repos: bool,
 }
 
 impl Launch {
@@ -282,6 +286,7 @@ impl Launch {
                 .map(Path::to_owned)
                 .into_iter()
                 .collect(),
+            keep_repos: true,
         }
     }
 }

@@ -227,24 +227,45 @@ impl Denial {
     }
 }
 
-/// `path` as a notice shows it: each control character and each bidirectional control
-/// (U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069), and each line or paragraph
-/// separator, is replaced by its escape (`\u{202e}`), so a crafted name can neither break the
-/// line nor turn the text around.
-fn shown(path: &std::path::Path) -> String {
+/// `path` as a notice or refusal shows it, so two different names never look the same and a
+/// crafted one can neither break the line, hide a letter nor turn the text around: a
+/// backslash is doubled; each control character, bidirectional control (U+061C, U+200E,
+/// U+200F, U+202A to U+202E, U+2066 to U+2069), zero-width or invisible character (U+200B to
+/// U+200D, U+2060 to U+2064, U+FEFF) and line or paragraph separator is shown as its escape
+/// (`\u{202e}`); and each byte that isn't UTF-8 as `\x80`.
+pub(crate) fn shown(path: &std::path::Path) -> String {
     let mut out = String::new();
-    for c in path.to_string_lossy().chars() {
-        let bidi = matches!(
-            c,
-            '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
-        );
-        if c.is_control() || bidi || matches!(c, '\u{2028}' | '\u{2029}') {
-            out.extend(c.escape_unicode());
-        } else {
-            out.push(c);
+    for chunk in path.as_os_str().as_encoded_bytes().utf8_chunks() {
+        for c in chunk.valid().chars() {
+            let hidden = matches!(
+                c,
+                '\u{061C}'
+                    | '\u{200B}'..='\u{200F}'
+                    | '\u{2028}'..='\u{202E}'
+                    | '\u{2060}'..='\u{2064}'
+                    | '\u{2066}'..='\u{2069}'
+                    | '\u{FEFF}'
+            );
+            if c == '\\' {
+                out.push_str("\\\\");
+            } else if c.is_control() || hidden {
+                out.extend(c.escape_unicode());
+            } else {
+                out.push(c);
+            }
+        }
+        for byte in chunk.invalid() {
+            out.push_str("\\x");
+            out.push(hex(byte >> 4));
+            out.push(hex(byte & 0xf));
         }
     }
     out
+}
+
+/// The lowercase hex digit of `n`, below 16.
+fn hex(n: u8) -> char {
+    char::from_digit(u32::from(n), 16).unwrap_or('?')
 }
 
 /// The kind of file access refused.

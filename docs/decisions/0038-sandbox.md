@@ -132,12 +132,19 @@ parent folder's `HEAD`, so a folder of `HEAD` and `config` that gets `objects` a
 later is caught; a created, renamed-in or cloned folder is scanned, within 20,000 listed
 entries for the whole batch: past that the scan stops and the session ends, so a huge folder
 can't hold up the watch while the agent runs (the final scan after the kill has no cap). Any
-find while the agent may run ends the session, gone or not. A dropped or must-scan event, a
+find while the agent may run ends the session, gone or not, and a scan then stops at its first
+find, walking no further; the scan after the kill is complete. A folder in the matter that
+can't be opened or listed (`chmod 000` hides what is in it; a missing folder, or a network
+volume or automount the watch refuses, is no such folder) counts as a find while the agent may
+run; the final scan keeps it as stuck (below). Every walk calls the runner's progress hook
+(`Watch::on_progress`) once per folder it lists. A dropped or must-scan event, a
 changed root or a path outside the matter rescans it; a stream that can't start refuses the
 launch ("Clauseo won't start the AI tool: it can't watch <folder> for changes (...)"), as there
 is no fallback to timed rescans. The session's **notes folder** (`Policy::notes`) gets the
 same: a watch of its own rooted there, with its own stream, canary, 30 s pass and state file
-(keyed by the notes path), an empty launch (nothing in notes is the lawyer's to keep), its items
+(keyed by the notes path), an empty launch (nothing in notes is the lawyer's to keep: the
+profile makes no repository there read-only, so `Launch::keep_repos` is false and even a
+repository found there at launch is a find), its items
 set aside into the data dir's folder, and the same session: a find there ends the session as
 one in the matter does, and the host's start and each launch finish its dead sessions as they
 do the matter's. `start` takes the matter's mode from `Policy::matter_watch()`: `Live`, or
@@ -232,7 +239,10 @@ random `-set-aside-by-clauseo-<16 hex>` suffix (a `.git` gets one too), a file i
 same way, and a link (which holds no data) is removed once its target is recorded. If that fails
 as well, the matter's state file (below) keeps the item, and the matter's launches are refused
 ("Clauseo won't start an AI tool in this matter until <path> is moved out of it ...") until it
-is gone. Nothing else is ever deleted; macOS has no restore of these items.
+is gone. A folder the final scan can't read is kept the same way, and launches are refused
+("... until it can read <path>: the folder could not be read when an earlier AI session ended,
+so Clauseo could not check it for Git folders ...") until it can be read. Nothing else is ever
+deleted; macOS has no restore of these items.
 
 **The matter's state file**, `<git set-aside>/matters/<hash of the matter>.json` under a
 `flock`, records each running session: its host process (pid and start), its probe name, its launch
@@ -277,9 +287,12 @@ own user, so no one can tell who made the item, and the notice blames no one: "A
 appeared in the matter at Clients/Acme/.git while an AI tool was running. Clauseo stopped the
 session and moved it to <path>, because Git folders can run programs when opened. If you put it
 there yourself, you can move it back from there." No other move back is offered. Every path a
-notice or refusal shows has its control characters and bidirectional controls (U+061C, U+200E,
-U+200F, U+202A to U+202E, U+2066 to U+2069) and line separators replaced by `[U+XXXX]`, so a
-crafted name can't break the line or reorder the text. `refusal()` is a line for the agent's
+notice or refusal shows, a stuck item's launch refusal included, has its control characters,
+bidirectional controls (U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069),
+zero-width and invisible characters (U+200B to U+200D, U+2060 to U+2064, U+FEFF) and line
+separators shown as escapes (`\u{202e}`), each byte that isn't UTF-8 as `\x80` and a
+backslash doubled, so a crafted name can't break the line, reorder the text or pass for
+another. `refusal()` is a line for the agent's
 log. The policy cost, plainly: agents can't clone or init a repository into the matter, their
 temp folder or notes, and a find ends their session. A `.git` or bare repository the lawyer
 makes in the matter while a session runs ends that session too and is moved the same way; so

@@ -535,6 +535,7 @@ pub(super) fn watch_with(
         &Launch {
             git: paths(git),
             links: paths(links),
+            keep_repos: true,
             ..Launch::default()
         },
     )

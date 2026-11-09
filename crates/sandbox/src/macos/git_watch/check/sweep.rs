@@ -7,10 +7,11 @@
 //! about 250 ms of the watch's thread, however big the matter.
 
 use std::collections::HashSet;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use super::super::{Fs, Kind, Stamp, is_git};
-use super::{Id, Item, Watch};
+use super::{Found, Id, Watch};
 use crate::policy::path_key;
 
 /// One folder of the pass, as it was when last read: `None` until it is first read.
@@ -42,12 +43,12 @@ impl Sweep {
 }
 
 /// Runs `sweep` from its cursor until `out_of_time` (asked before each folder) or the end,
-/// adding what `watch` finds to `items`. Returns whether the pass reached its end.
+/// adding what `watch` finds to `found`. Returns whether the pass reached its end.
 pub(super) fn stretch<F: Fs>(
     watch: &Watch<F>,
     sweep: &mut Sweep,
     out_of_time: &dyn Fn() -> bool,
-    items: &mut Vec<Item>,
+    found: &mut Found,
 ) -> bool {
     loop {
         if sweep.cursor >= sweep.folders.len() {
@@ -57,16 +58,17 @@ pub(super) fn stretch<F: Fs>(
         if out_of_time() {
             return false;
         }
-        if step(watch, sweep, items) {
+        if step(watch, sweep, found) {
             sweep.cursor += 1;
         }
     }
 }
 
 /// Reads the pass's folder at its cursor in `sweep`, and lists it when it changed, adding
-/// what `watch` finds there to `items`. Returns false when the folder left the pass: gone, no
-/// longer a folder, a launch repository or the volume set-aside folder, or on a network volume.
-fn step<F: Fs>(watch: &Watch<F>, sweep: &mut Sweep, items: &mut Vec<Item>) -> bool {
+/// what `watch` finds there to `found`, the folder itself when it can't be listed. Returns
+/// false when the folder left the pass: gone, no longer a folder, a launch repository or the
+/// volume set-aside folder, or on a network volume.
+fn step<F: Fs>(watch: &Watch<F>, sweep: &mut Sweep, found: &mut Found) -> bool {
     let at = sweep.cursor;
     let Some(path) = sweep.folders.get(at).map(|folder| folder.path.clone()) else {
         return false;
@@ -89,12 +91,17 @@ fn step<F: Fs>(watch: &Watch<F>, sweep: &mut Sweep, items: &mut Vec<Item>) -> bo
     folder.stamp = Some(stamp);
     let entries = match watch.fs.list(&path) {
         Ok(entries) => entries,
+        Err(error) if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::Unsupported) => {
+            return true;
+        }
         Err(error) => {
             tracing::warn!(dir = %path.display(), %error, "the git watch can't list a folder");
+            found.unreadable.push((path, error.to_string()));
             return true;
         }
     };
-    if watch.folder(&path, meta, &entries, items) {
+    (watch.progress)();
+    if watch.folder(&path, meta, &entries, &mut found.items) {
         for (name, kind) in &entries {
             if *kind == Kind::Dir && !is_git(name) {
                 sweep.add(&path.join(name), None, None);

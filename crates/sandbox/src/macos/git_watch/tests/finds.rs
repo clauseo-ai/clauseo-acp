@@ -1,18 +1,23 @@
 //! Which events end the session: a git name in an event's path, whether or not its item is
 //! still there, checked before any folder is read; the count of items gone by check time; the
-//! scan budget of arrived folders; what a final scan moves; and a network volume in the
-//! matter.
+//! scan budget of arrived folders; what a final scan moves; a network volume in the matter;
+//! the progress hook; running scans stopping at their first find; repositories in notes; and
+//! (`finds/locked.rs`) folders the watch can't read.
 
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::super::check::{SCAN_BUDGET, gone_total};
 use super::super::state::Baseline;
-use super::super::{Phase, Watch, flags};
+use super::super::{Launch, Phase, Watch, flags};
 use super::fake::{
     FakeFs, MATTER, MOVED_IN, Notices, aside, assert_moved, assert_set_aside, event, none, quiet,
-    watch,
+    watch, watch_launch,
 };
 use crate::{Denial, GitItem};
+
+mod locked;
 
 const CREATED_FILE: u32 = flags::ITEM_CREATED | 0x1_0000;
 const MODIFIED_FILE: u32 = 0x1000 | 0x1_0000;
@@ -173,4 +178,104 @@ fn a_network_volume_in_the_matter_is_never_entered_but_a_name_still_ends_the_ses
     quiet(watch.full_scan(Phase::Ended));
     assert!(fs.exists("/m/share/.git"));
     none(&notices);
+}
+
+#[test]
+fn every_walk_calls_the_progress_hook_once_per_folder_listed() {
+    let fs = FakeFs::new();
+    fs.dir("/m/a");
+    fs.dir("/m/a/b");
+    let calls = Arc::new(AtomicU64::new(0));
+    let counted = Arc::clone(&calls);
+    let hook = Arc::new(move || {
+        counted.fetch_add(1, Ordering::SeqCst);
+    });
+    let notices = Arc::new(Notices::default());
+    let launch = Launch::default();
+    let mut watch = Watch::new_with_progress(
+        fs.clone(),
+        PathBuf::from(MATTER),
+        aside(&notices),
+        &launch,
+        hook,
+    );
+    let count = || calls.load(Ordering::SeqCst);
+    assert_eq!((count(), fs.listings()), (3, 3), "the launch walk");
+    quiet(watch.full_scan(Phase::Running));
+    quiet(watch.full_scan(Phase::Ended));
+    assert_eq!((count(), fs.listings()), (9, 9), "the full scans");
+    fs.dir("/m/c");
+    fs.dir("/m/a/b/d");
+    quiet(watch.sweep(&|| false).0);
+    assert_eq!(count(), fs.listings(), "the 30 s pass");
+    fs.dir("/m/in");
+    let (before, listed) = (count(), fs.listings());
+    quiet(watch.events(&[event("/m/in", MOVED_IN)]));
+    // The parent's listing is no walk; the scan of the arrived folder is.
+    assert_eq!(
+        (count() - before, fs.listings() - listed),
+        (1, 2),
+        "an event's scan"
+    );
+    // Set later, by the runner.
+    let late = Arc::new(AtomicU64::new(0));
+    let counted = Arc::clone(&late);
+    watch.on_progress(Arc::new(move || {
+        counted.fetch_add(1, Ordering::SeqCst);
+    }));
+    quiet(watch.full_scan(Phase::Ended));
+    assert_eq!(late.load(Ordering::SeqCst), 6);
+}
+
+#[test]
+fn a_running_scan_stops_at_its_first_find_and_the_final_scan_is_complete() {
+    let fs = FakeFs::new();
+    for n in 0..10 {
+        fs.dir(&format!("/m/x{n}"));
+    }
+    let (mut watch, notices) = watch(&fs, &[]);
+    fs.file("/m/.git");
+    let listed = fs.listings();
+    assert!(watch.full_scan(Phase::Running).end);
+    assert_eq!(fs.listings() - listed, 1, "only the matter's own folder");
+    // An arrived folder likewise: its parent's listing, then its own, and no further.
+    fs.dir("/m/in");
+    fs.file("/m/in/.git");
+    for n in 0..10 {
+        fs.dir(&format!("/m/in/y{n}"));
+    }
+    let listed = fs.listings();
+    assert!(watch.events(&[event("/m/in", MOVED_IN)]).end);
+    assert_eq!(fs.listings() - listed, 2);
+    let listed = fs.listings();
+    watch.ended_session();
+    quiet(watch.full_scan(Phase::Ended));
+    assert!(fs.listings() - listed >= 22, "every folder, after the end");
+    assert_eq!(notices.taken().len(), 2);
+}
+
+#[test]
+fn a_repository_in_notes_at_launch_is_a_find_like_any_other() {
+    let fs = FakeFs::new();
+    fs.dir("/m/r");
+    fs.bare("/m/r");
+    fs.dir("/m/half");
+    fs.file("/m/half/HEAD");
+    // The matter's: the profile makes its repositories read-only, so they are the launch's.
+    let matter = Launch {
+        keep_repos: true,
+        ..Launch::default()
+    };
+    let (mut kept, notices) = watch_launch(&fs, &matter);
+    quiet(kept.full_scan(Phase::Running));
+    quiet(kept.full_scan(Phase::Ended));
+    none(&notices);
+    // Notes': nothing there is read-only, so nothing is the launch's.
+    let (mut notes, notices) = watch_launch(&fs, &Launch::default());
+    assert!(notes.full_scan(Phase::Running).end);
+    assert!(notes.events(&[event("/m/r/HEAD", MODIFIED_FILE)]).end);
+    quiet(notes.full_scan(Phase::Ended));
+    assert!(fs.exists("/m/r/objects") && !fs.exists("/m/r/HEAD"));
+    assert!(!fs.exists("/m/half/HEAD"));
+    assert_eq!(notices.taken().len(), 2);
 }
