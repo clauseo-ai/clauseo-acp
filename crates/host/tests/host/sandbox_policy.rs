@@ -4,8 +4,8 @@
 //! session's proxy opens with the tier-B agent listener, no token-free browser listener and the
 //! host's block list; the agent's proxy and CA variables are explicit in a jailed spec and absent
 //! at tier C; a jailed spec keeps no inherited credential and its `PATH` is the runtime's then
-//! the OS's (reviewer M3); a jailed Codex is refused before anything is reserved while it would
-//! start in its ask mode (R17 PR-D2c starts it in the jailed preset).
+//! the OS's (reviewer M3); a jailed Codex launches only in the jailed preset, and a jailed reused
+//! Claude login is refused before anything is reserved (R17 PR-D2c).
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -13,7 +13,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use clauseo_blocklist::Current;
-use clauseo_host::{BlockListSeams, NoProfile, ProfileHook, TestProxy};
+use clauseo_host::{BlockListSeams, LoginSplit, NoProfile, ProfileHook, SplitWhy, TestProxy};
 use clauseo_profile::PacksWritten;
 use clauseo_protocol::{AgentId, CommandOutcome, ErrorCode, HostCommand, StopReason, StreamId};
 use clauseo_sandbox::ports::ListenerFor;
@@ -22,7 +22,7 @@ use crate::codex::{CODEX, codex_dir};
 use crate::egress_block::{FIRST, LISTED, list, no_fetch};
 use crate::profile_rig::CLAUDE;
 use crate::sandbox_rig::{Answer, Env, Fake, RESERVED_PORTS, canonical, dir, failed, start_with};
-use crate::support::{Dir, FAKE, Scenario, matter_with_thread};
+use crate::support::{Dir, FAKE, Scenario, matter_with_thread, wait};
 
 /// The test proxy's port: its browser and agent listener's.
 const PROXY_PORT: u16 = 47_001;
@@ -303,22 +303,89 @@ fn a_jailed_claude_gets_no_inherited_credential_and_the_runtime_s_path() {
     }
 }
 
-/// Until R17 PR-D2c starts a jailed Codex in the jailed preset, a jailed Codex launch is refused
-/// before anything is reserved or any launcher made: it would start in its ask mode.
+/// A jailed Codex launches only in the jailed preset: every launcher the seam made carries
+/// `INITIAL_AGENT_MODE=agent-full-access` (a launch in any other mode is refused before
+/// `reserve`, `codex::jailed::check_launch`, pinned in `agent/codex/jailed/tests.rs`).
 #[test]
-fn a_jailed_codex_is_refused_before_any_reservation_or_launcher() {
+fn a_jailed_codex_launches_only_in_the_jailed_preset() {
     let dir = codex_dir("sandbox_policy_codex", "codex-handshake");
-    let (fake, seam_launched) = Fake::new(&dir, Answer::Launch(Vec::new()));
+    dir.set_agents(&[(CODEX, Scenario::Local("codex-jailed-new"))]);
+    let (fake, _) = Fake::new(&dir, Answer::Launch(Vec::new()));
     let (host, host_launched, _) = start_with(&dir, Some(Arc::clone(&fake)), |config| config);
     let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("a.txt", "x\n")], CODEX);
     let mut events = host.events(StreamId::Thread(thread));
     let (turn, _) = host.prompt(thread, "Look at the matter.");
+    assert_eq!(
+        events.until_turn_ended(turn).stop,
+        StopReason::EndTurn,
+        "{}",
+        events.dump()
+    );
+    assert_eq!((fake.reserved(), fake.calls().len()), (1, 1));
+    let envs = fake.envs();
+    assert!(!envs.is_empty());
+    for env in &envs {
+        assert_eq!(var(env, "INITIAL_AGENT_MODE"), Some("agent-full-access"));
+    }
+    assert_eq!(host_launched.load(std::sync::atomic::Ordering::SeqCst), 0);
+}
+
+/// A jailed launch of a Claude login desktop says is reused is refused before anything is
+/// reserved, held for the sign-in (`agent.auth_required`), and sent as a split with
+/// `ClaudeSandbox` (desktop's `SignedOut { found: ClaudeSandbox }`).
+#[test]
+fn a_jailed_reused_claude_login_is_refused_as_claude_sandbox() {
+    let dir = Dir::new(
+        "sandbox_policy_claude_reused",
+        &[(CLAUDE, Scenario::Bundled("claude-prompt-stream"))],
+    );
+    let (fake, seam_launched) = Fake::new(&dir, Answer::Launch(Vec::new()));
+    let (host, host_launched, _) = start_with(&dir, Some(Arc::clone(&fake)), |config| config);
+    let splits = host.handle.login_splits();
+    let claude = AgentId::new(CLAUDE).unwrap();
+    wait("reused", host.handle.set_reused_login(claude.clone(), true)).unwrap();
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("a.txt", "x\n")], CLAUDE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Look at the matter.");
     events.until_turn_ended(turn);
-    let (code, detail) = failed(&events, turn).expect("refused");
-    assert_eq!(code, ErrorCode::AgentLaunchFailed, "{detail:?}");
+    let (code, _) = failed(&events, turn).expect("refused");
+    assert_eq!(code, ErrorCode::AgentAuthRequired);
+    assert_eq!(
+        wait("a split", splits.recv()).unwrap(),
+        LoginSplit {
+            agent: claude,
+            why: SplitWhy::ClaudeSandbox,
+        }
+    );
     assert_eq!(fake.reserved(), 0, "nothing reserved");
     assert!(fake.calls().is_empty(), "no launcher made");
     let launched = seam_launched.load(std::sync::atomic::Ordering::SeqCst)
         + host_launched.load(std::sync::atomic::Ordering::SeqCst);
     assert_eq!(launched, 0);
+    host.shutdown();
+}
+
+/// At tier C a reused Claude login launches as before: no refusal, no split.
+#[test]
+fn a_reused_claude_login_at_tier_c_is_not_refused() {
+    let dir = Dir::new(
+        "sandbox_policy_claude_reused_c",
+        &[(CLAUDE, Scenario::Bundled("claude-prompt-stream"))],
+    );
+    let (host, host_launched, _) = start_with(&dir, None, |config| config);
+    let splits = host.handle.login_splits();
+    let claude = AgentId::new(CLAUDE).unwrap();
+    wait("reused", host.handle.set_reused_login(claude, true)).unwrap();
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("a.txt", "x\n")], CLAUDE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Look at the matter.");
+    assert_eq!(
+        events.until_turn_ended(turn).stop,
+        StopReason::EndTurn,
+        "{}",
+        events.dump()
+    );
+    assert_eq!(host_launched.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert!(splits.try_recv().is_err(), "no split");
+    host.shutdown();
 }

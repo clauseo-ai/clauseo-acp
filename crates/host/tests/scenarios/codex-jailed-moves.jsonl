@@ -1,0 +1,11 @@
+{"scenario":"codex-jailed-moves","description":"A jailed Codex that reports a move to workspace-write by itself mid-turn (R17 PR-D2c): the client must switch it to read-only, never back to the preset, before the turn ends.","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"promptCapabilities":{"image":true,"embeddedContext":true},"mcpCapabilities":{"http":true,"sse":false},"sessionCapabilities":{"list":{},"delete":{},"additionalDirectories":{},"resume":{},"close":{}}},"authMethods":[],"agentInfo":{"name":"@agentclientprotocol/codex-acp","title":"Codex","version":"2.2.2"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"agent-full-access","availableModes":[{"id":"read-only","name":"Read-only"},{"id":"workspace-write","name":"Workspace access"},{"id":"agent","name":"Auto review"},{"id":"agent-full-access","name":"Full access"}]},"configOptions":[{"id":"mode","name":"Mode","category":"mode","type":"select","currentValue":"agent-full-access","options":[{"value":"read-only","name":"Read-only"},{"value":"workspace-write","name":"Workspace access"},{"value":"agent","name":"Auto review"},{"value":"agent-full-access","name":"Full access"}]}]}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Moved."}}}}
+{"update":{"update":{"sessionUpdate":"current_mode_update","currentModeId":"workspace-write"}}}
+{"expect":{"method":"session/set_mode","as":"back","params":{"sessionId":"sess-1","modeId":"read-only"}}}
+{"respond":{"to":"back","result":{}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

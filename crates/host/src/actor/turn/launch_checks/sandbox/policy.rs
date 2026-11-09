@@ -151,19 +151,14 @@ pub(crate) fn jail(prepared: &Prepared, grants: &Grants, reserved: &[u16]) -> Re
 }
 
 /// What `thread`'s jailed launch's policy takes, read on the actor (`policy::Grants`): paths
-/// and flags only. Refuses a Codex agent while it would start in its ask mode, before anything
-/// is reserved or asked of the seam: a jailed Codex starts only in the jailed preset
-/// (`codex::JAILED_MODE`, R17 PR-D2c).
+/// and flags only. Refuses a Codex agent unless it starts in the jailed preset, before anything
+/// is reserved or asked of the seam (`codex::jailed::check_launch`, R17 PR-D2c).
 pub(super) fn grants(actor: &Actor, thread: ThreadId) -> Result<Grants, Error> {
     let row = &actor.check_thread(thread)?.row;
     let agent = &row.agent;
     let kind = AgentKind::of(agent);
-    if kind == Some(AgentKind::Codex) && codex::launch_mode(true) != codex::JAILED_MODE {
-        return Err(Error::refused(
-            ErrorCode::AgentLaunchFailed,
-            "The sandbox couldn't start Codex: it would run in its ask mode, which the sandbox \
-             does not take yet.",
-        ));
+    if kind == Some(AgentKind::Codex) {
+        codex::jailed::check_launch(codex::launch_mode(true))?;
     }
     let sandbox = actor.protection.sandbox();
     let matters = actor.matters.iter().chain(&actor.forgotten);

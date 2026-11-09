@@ -72,6 +72,9 @@ mod codex_fence;
 #[path = "host/codex_folder.rs"]
 mod codex_folder;
 #[cfg(test)]
+#[path = "host/codex_jailed.rs"]
+mod codex_jailed;
+#[cfg(test)]
 #[path = "host/codex_plans.rs"]
 mod codex_plans;
 #[cfg(test)]

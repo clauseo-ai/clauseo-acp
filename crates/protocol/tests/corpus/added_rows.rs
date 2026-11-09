@@ -499,4 +499,11 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (352, 0x7a87_c4b4_26dc_a37d),
         (254, 0x54b0_eb79_fae0_c755),
     ),
+    (
+        "added/turn_failed-SandboxAskModeUnavailable",
+        include_bytes!("added/turn_failed-SandboxAskModeUnavailable.jsonl"),
+        include_bytes!("added/turn_failed-SandboxAskModeUnavailable.msgpack"),
+        (369, 0x07fc_4eb3_7b19_670a),
+        (271, 0x067b_3b63_fb66_8a63),
+    ),
 ];

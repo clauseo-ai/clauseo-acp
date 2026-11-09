@@ -43,7 +43,7 @@ No `protocol` change: R20 maps the states and codes to the wire.
   `DeviceCode { url, code, expires_at }`, `LoginFound { from, email }`,
   `SignedIn { email, plan, source, at }` and `Failed { code, at }`. It is a separate enum from
   `InstallState`, which already has its own `Waiting`.
-- `Found`: `ClaudeSettings`, `ClaudeWindowsSandbox`, `CodexKeyring`, `ReusedFailed`,
+- `Found`: `ClaudeSettings`, `ClaudeSandbox`, `CodexKeyring`, `ReusedFailed`,
   `ReusedSignedOut`, `ReusedChanged`, `CodexLinkSplit` and `CodexSandbox`. A jailed Codex launch
   of a reused Codex login ends reuse with `CodexSandbox` (R17 PR-D2a) and writes `no-reuse`, so
   detection does not offer that login again.
@@ -607,8 +607,9 @@ The crate cannot enforce these through its API; R20's desktop wiring must:
     file id (R17 PR-D2a, `state_prep::is_lawyers_login`) still catches the live file under any
     name.
 - Open items:
-  - `Found::ClaudeWindowsSandbox` is never reported yet: detection should run again when S15's
-    tier B set-up finishes, and the crate needs a signal from S15 for it.
+  - `Found::ClaudeSandbox` (named `ClaudeWindowsSandbox` until R17 PR-D2c) is reported only
+    when a jailed launch meets a reused Claude login (the host's split, desktop's leave).
+    Detection does not report it yet: it should once the crate has a signal from the sandbox.
   - Windows has no `BROWSER` shim until G7 row 1 says Claude honours it there.
   - `fileid.rs`'s Windows branch is written against `windows` 0.62.2 but was not built or run
     here. It needs `cargo nextest` on `clauseo-win-01`. On ReFS, a 64-bit file index may not be

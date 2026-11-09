@@ -130,6 +130,8 @@ pub(super) struct CodexAgent {
     pub(super) guard: bool,
     /// Its one `authenticate` with its key (`key_retry.rs`).
     pub(super) key_retry: KeyRetry,
+    /// It runs in the jail: only `codex::jailed::MODES` (`forced_mode.rs`).
+    pub(super) jailed: bool,
 }
 
 /// Runs `waiting` once `thread`'s agent has a session, launching the agent first.
@@ -290,7 +292,7 @@ fn launch(
         actor,
         &row.agent,
         &settings.env,
-        prepared.codex,
+        (prepared.codex, prepared.sandbox.is_some()),
         &prepared.run,
         prepared.claude_home.as_deref(),
     );
@@ -434,8 +436,8 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
             end::on_prompt_refused(actor, thread, turn, &error);
         }
         AgentReply::Steer(steered) => super::queue::on_steered(actor, thread, *steered),
-        AgentReply::ModeReset(result) => {
-            super::forced_mode::on_mode_reset(actor, thread, same, result);
+        AgentReply::ModeReset(mode, result) => {
+            super::forced_mode::on_mode_reset(actor, thread, same, mode, result);
         }
         AgentReply::Initialized(_)
         | AgentReply::Session { .. }
@@ -485,41 +487,24 @@ pub(super) fn run_waiting(actor: &mut Actor, thread: ThreadId, waiting: Waiting)
         fail_waiting(actor, thread, &waiting, &lost("the agent"));
         return;
     };
-    let (id, client, forced) = (agent.id, agent.link.client.clone(), agent.forced_ask);
+    let (id, client) = (agent.id, agent.link.client.clone());
     let Some(session) = agent.session.clone() else {
         fail_waiting(actor, thread, &waiting, &lost("the agent's session"));
         return;
     };
+    // Forced ask's and a jailed Codex's modes (`forced_mode.rs`).
+    if let Some((ctx, error)) = super::forced_mode::refusal(actor, thread, &waiting) {
+        actor.finish_command(ctx, Err(error));
+        return;
+    }
     match waiting {
         Waiting::Turn(turn) => steps::on_launched(actor, thread, turn),
-        Waiting::Config(ctx, option, value)
-            if forced && !agent::forced_ask::config_allowed(option.as_str(), select(&value)) =>
-        {
-            let error = Error::refused(
-                ErrorCode::CommandInvalid,
-                format!(
-                    "config option {option} sets the mode, and this matter's folder is \
-                     unprotected: only \"default\" and \"plan\" may be set"
-                ),
-            );
-            actor.finish_command(ctx.id, Err(error));
-        }
         Waiting::Config(ctx, option, value) => {
             super::idle::call_started(actor, thread);
             call(actor, thread, id, async move {
                 let result = client.set_config_option(&session, option, value).await;
                 AgentReply::Config { ctx, result }
             });
-        }
-        Waiting::Mode(ctx, mode) if forced && !agent::forced_ask::mode_allowed(mode.as_str()) => {
-            let error = Error::refused(
-                ErrorCode::CommandInvalid,
-                format!(
-                    "mode {mode} would approve changes without asking, and this matter's folder \
-                     is unprotected: only \"default\" and \"plan\" may be set"
-                ),
-            );
-            actor.finish_command(ctx.id, Err(error));
         }
         Waiting::Mode(ctx, mode) => {
             super::idle::call_started(actor, thread);
@@ -528,14 +513,6 @@ pub(super) fn run_waiting(actor: &mut Actor, thread: ThreadId, waiting: Waiting)
                 AgentReply::Mode { ctx, mode, result }
             });
         }
-    }
-}
-
-/// The choice id `value` names, for a select option; `None` for a boolean.
-fn select(value: &ConfigValue) -> Option<&str> {
-    match value {
-        ConfigValue::Select(choice) => Some(choice.as_str()),
-        ConfigValue::Boolean(_) => None,
     }
 }
 

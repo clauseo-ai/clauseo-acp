@@ -318,6 +318,16 @@ pub(crate) fn start_with(
     fake: Option<Arc<Fake>>,
     adjust: impl FnOnce(clauseo_host::HostConfig) -> clauseo_host::HostConfig,
 ) -> (Running, Arc<AtomicUsize>, Arc<Counting>) {
+    start_run(dir, 0, fake, adjust)
+}
+
+/// As [`start_with`], as the host's run `run` (a restart is run 1).
+pub(crate) fn start_run(
+    dir: &Dir,
+    run: u16,
+    fake: Option<Arc<Fake>>,
+    adjust: impl FnOnce(clauseo_host::HostConfig) -> clauseo_host::HostConfig,
+) -> (Running, Arc<AtomicUsize>, Arc<Counting>) {
     let (host_launcher, host_launched) = Counting::new(dir);
     let mut sandbox = Sandbox::new(Arc::new(tier_a), None)
         .with_ca_roots(Arc::new(|| vec![vec![0x30, 0x01, 0x00]]));
@@ -326,7 +336,7 @@ pub(crate) fn start_with(
         sandbox = sandbox.with_launchers(launchers, SpawnOptions::new());
     }
     let launcher: Arc<dyn Launcher> = Arc::clone(&host_launcher) as _;
-    let host = dir.start_launching(0, launcher, move |config| {
+    let host = dir.start_launching(run, launcher, move |config| {
         adjust(config.with_sandbox(sandbox))
     });
     (host, host_launched, host_launcher)

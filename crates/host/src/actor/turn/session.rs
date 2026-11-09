@@ -266,7 +266,12 @@ fn folder(actor: &Actor, thread: ThreadId) -> Result<PathBuf, Error> {
 /// The session is up. A Codex agent's session first runs [`prepare`]'s checks; a Claude
 /// agent's session that started in another mode than Clauseo's is first switched to it
 /// ([`claude_start`]); any other attaches now.
-pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, start: SessionStart, loaded: bool) {
+pub(super) fn on_started(
+    actor: &mut Actor,
+    thread: ThreadId,
+    mut start: SessionStart,
+    loaded: bool,
+) {
     super::profile_loads::show_tools(actor, thread);
     let kind = actor
         .threads
@@ -277,38 +282,14 @@ pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, start: SessionStar
         Some(AgentKind::Claude) => return claude_start(actor, thread, start, loaded),
         None => return attach(actor, thread, start, loaded),
     }
-    let ask =
-        AgentChoiceId::new(codex::ASK_MODE).map_err(|error| Error::Internal(error.to_string()));
-    let checks = ask.and_then(|ask| {
-        let offered = start.modes.as_ref().is_some_and(|modes| {
-            modes
-                .available
-                .iter()
-                .any(|mode| mode.id == codex::ASK_MODE)
-        });
-        if !offered {
-            return Err(Error::refused(
-                ErrorCode::AgentProtocolError,
-                format!(
-                    "Codex offered no \"{}\" mode, which Clauseo runs it in, so no message was \
-                     sent",
-                    codex::ASK_MODE
-                ),
-            ));
-        }
-        let switch = start
-            .modes
-            .as_ref()
-            .is_some_and(|modes| modes.current != codex::ASK_MODE);
-        Ok((ask, switch))
-    });
-    let (ask, switch) = match checks {
+    // Its ask mode at tier C, a jailed Codex's start mode (`forced_mode::codex_start`).
+    let (ask, switch) = match super::forced_mode::codex_start(actor, thread, &mut start) {
         Ok(checks) => checks,
         Err(error) => {
             tracing::warn!(
                 %thread,
                 error = %Cause(&error),
-                "the Codex session cannot run in its ask mode"
+                "the Codex session cannot run in its mode"
             );
             launch_failed(actor, thread, &error);
             return;

@@ -4,10 +4,10 @@
 
 use clauseo_acp::PendingKey;
 use clauseo_protocol::{
-    AgentChoiceId, CommandOutcome, CompactString, ConfigOption, ConfigOptionsReplaced,
-    ElicitationId, ElicitationOutcome, ElicitationRequest, ElicitationResolved,
-    ElicitationResponse, ErrorCode, ModeChanged, PermissionChoice, PermissionKind,
-    PermissionRequestId, PermissionResolved, Principal, RawPayload, StreamId, ThreadId,
+    AgentChoiceId, CommandOutcome, CompactString, ConfigOption, ElicitationId, ElicitationOutcome,
+    ElicitationRequest, ElicitationResolved, ElicitationResponse, ErrorCode, ModeChanged,
+    PermissionChoice, PermissionKind, PermissionRequestId, PermissionResolved, Principal,
+    RawPayload, StreamId, ThreadId,
 };
 
 use super::super::commands::{AfterCommand, CommandCtx};
@@ -334,7 +334,8 @@ pub(super) fn on_config(
 ) {
     let done = answered(same, result).and_then(|options| {
         let mut out = Out::new(actor, thread, Some(ctx.id))?;
-        out.push(actor, ConfigOptionsReplaced { options })?;
+        let replaced = super::forced_mode::kept(actor, thread, options);
+        out.push(actor, replaced)?;
         send_answer(actor, ctx, thread, out, Then::Nothing)
     });
     if let Err(error) = done {

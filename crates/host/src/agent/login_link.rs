@@ -126,6 +126,9 @@ pub enum SplitWhy {
     /// never gets the lawyer's own `auth.json`, so Clauseo's own `ChatGPT` sign-in is needed:
     /// `CodexSandbox`.
     CodexSandbox,
+    /// A jailed launch of a reused Claude login, whose store the jail never reaches (R17
+    /// PR-D2c): `ClaudeSandbox`.
+    ClaudeSandbox,
 }
 
 /// How `HostHandle::stop_agents` ended its wait.

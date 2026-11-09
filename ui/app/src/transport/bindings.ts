@@ -1708,6 +1708,8 @@ export type ErrorCode =
 "blocklist.revoke_not_saved" | 
 /** A reused Codex login could not be linked into a matter's state folder because Clauseo's data folder is on a different volume from the login file; a link across volumes is impossible and the login is never copied, so no agent was started. Trying again cannot succeed until the data folder moves or Codex is signed in to in Clauseo. */
 "signin.reuse_other_volume" | 
+/** A jailed Codex was asked to start or switch into a mode that asks before changes, which it cannot do in the sandbox (it runs with no asks there), so the mode was refused and the session kept its mode; a saved asking mode starts read-only instead. Trying again cannot succeed: choose Read-only or the mode that works on its own. */
+"sandbox.ask_mode_unavailable" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 
@@ -1906,8 +1908,11 @@ export type FolderSupportKind =
 export type FoundLogin = 
 /**  A Claude login set in the lawyer's own Claude settings (not a `claude.ai` one). */
 "claude_settings" | 
-/**  Windows with the sandbox set up, where Claude's login is not reused. */
-"claude_windows_sandbox" | 
+/**
+ *  Claude runs in the sandbox here (macOS or Windows), where the lawyer's own Claude login
+ *  is not reused.
+ */
+"claude_sandbox" | 
 /**
  *  Codex runs in the sandbox here, where the lawyer's own Codex login is not reused: Clauseo's
  *  own `ChatGPT` sign-in is needed.

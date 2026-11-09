@@ -394,7 +394,7 @@ const FOUND: [FoundLogin, string][] = [
     "Claude Code on this computer signs in through your own Claude settings, which Clauseo keeps out of your matters.",
   ],
   [
-    "claude_windows_sandbox",
+    "claude_sandbox",
     "Clauseo's Safe workspace can't share Claude Code's sign-in on Windows yet.",
   ],
   [

@@ -358,6 +358,16 @@ fn setup_events_have_their_json_form() {
             },
             r#"{"sign_in_changed":{"agent":"claude-acp","state":{"signed_out":{"found":"codex_link_split"}}}}"#,
         ),
+        // Named `claude_windows_sandbox` until R17 PR-D2c: a jailed launch of a reused login.
+        (
+            SetupEvent::SignInChanged {
+                agent: claude(),
+                state: SignIn::SignedOut {
+                    found: Some(FoundLogin::ClaudeSandbox),
+                },
+            },
+            r#"{"sign_in_changed":{"agent":"claude-acp","state":{"signed_out":{"found":"claude_sandbox"}}}}"#,
+        ),
         (
             SetupEvent::SignInChanged {
                 agent: claude(),

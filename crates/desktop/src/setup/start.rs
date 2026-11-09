@@ -539,6 +539,7 @@ pub(crate) const fn leave_reason(why: SplitWhy) -> Found {
         SplitWhy::LinkSplit => Found::CodexLinkSplit,
         SplitWhy::LawyersFileGone => Found::ReusedSignedOut,
         SplitWhy::CodexSandbox => Found::CodexSandbox,
+        SplitWhy::ClaudeSandbox => Found::ClaudeSandbox,
     }
 }
 

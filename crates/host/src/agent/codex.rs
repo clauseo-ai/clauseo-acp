@@ -28,8 +28,7 @@ pub(crate) const ASK_MODE: &str = "workspace-write";
 /// The mode a jailed Codex runs in (R17, orchestrator's ruling of 2026-11-08): codex-acp 2.2.2's
 /// `agent-full-access` preset (`dist/index.js:34310-34319`: sandbox `dangerFullAccess`, approval
 /// `never`), the jail being the fence. codex-acp sends its preset's approval policy with every
-/// turn (`:35598-35615`), so a jailed Codex never asks. R17 PR-D2c starts a jailed Codex in it;
-/// until then a jailed Codex launch is refused (`launch_checks::sandbox`).
+/// turn (`:35598-35615`), so a jailed Codex never asks. Its modes are [`jailed::MODES`].
 pub(crate) const JAILED_MODE: &str = "agent-full-access";
 /// The variable the Codex app-server takes its home from.
 pub(crate) const HOME_VAR: &str = "CODEX_HOME";
@@ -63,10 +62,11 @@ pub(crate) const DROPPED_VARS: [&str; 4] = [
 /// dropped, so no settings value can undo a switch the host sets.
 pub(crate) const MODEL_KEYS: [&str; 2] = ["model", "model_reasoning_effort"];
 
-/// The mode a Codex launch starts in (`INITIAL_AGENT_MODE`), `jailed` or not: [`ASK_MODE`] at
-/// every tier until R17 PR-D2c gives a jailed launch [`JAILED_MODE`].
-pub(crate) const fn launch_mode(_jailed: bool) -> &'static str {
-    ASK_MODE
+/// The mode a Codex launch starts in (`INITIAL_AGENT_MODE`): [`JAILED_MODE`] when `jailed`,
+/// else [`ASK_MODE`] (tier C). The one place that picks it; the session's start may then switch
+/// a jailed Codex to read-only ([`jailed::start_mode`]).
+pub(crate) const fn launch_mode(jailed: bool) -> &'static str {
+    if jailed { JAILED_MODE } else { ASK_MODE }
 }
 
 /// The variables a Codex agent is launched with, over any settings or profile value of the same
@@ -522,6 +522,7 @@ pub(crate) fn prepare_launch(
     Ok((folder, support))
 }
 
+pub(crate) mod jailed;
 pub(crate) mod prepare;
 
 #[cfg(test)]

@@ -28,8 +28,8 @@
 //!
 //! The policy and the variables the agent gets with it (the session proxy's, the CA bundle's)
 //! are R17 PR-D's ([`policy`]); the variables ride on [`Sandboxed`] to the spawn. A jailed Codex
-//! launch is refused before the seam is asked while Codex would start in its ask mode
-//! (`codex::launch_mode`): R17 PR-D2c starts it in the jailed preset.
+//! starts in the jailed preset (`codex::launch_mode`); a launch in any other mode is refused
+//! before the seam is asked (`codex::jailed::check_launch`).
 
 use std::fmt;
 use std::sync::Arc;

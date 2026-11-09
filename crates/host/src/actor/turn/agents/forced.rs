@@ -25,12 +25,13 @@ pub(super) type Forced = (
 );
 
 /// The forced variables of `agent`'s launch: Codex's when `codex` (its preparation), else
-/// Claude's, from the session's folders `run` and Claude's login home `claude_home`.
+/// Claude's, from the session's folders `run` and Claude's login home `claude_home`. A Codex
+/// launch that is `jailed` starts in the jailed preset (`codex::launch_mode`).
 pub(super) fn of(
     actor: &Actor,
     agent: &AgentId,
     settings_env: &BTreeMap<String, String>,
-    codex: Option<CodexPrepared>,
+    (codex, jailed): (Option<CodexPrepared>, bool),
     run: &RunFolders,
     claude_home: Option<&Path>,
 ) -> Forced {
@@ -42,17 +43,22 @@ pub(super) fn of(
     };
     let hooks = codex_hooks(actor);
     let guard = hooks.is_some();
-    let forced = self::codex(
+    let mut forced = self::codex(
         &prepared.state,
         &run.tmp(),
         settings_env,
         prepared.keys,
         hooks,
     );
+    forced.insert(
+        OsString::from(agent::codex::MODE_VAR),
+        OsString::from(agent::codex::launch_mode(jailed)),
+    );
     let codex = CodexAgent {
         folder: prepared.folder,
         guard,
         key_retry: KeyRetry::default(),
+        jailed,
     };
     (forced, Some((codex, prepared.login)))
 }
@@ -81,9 +87,9 @@ pub(super) fn codex(
 /// or the lawyer's default store while desktop says `agent`'s login is reused. None without
 /// a state folder or a login home.
 ///
-/// The reused store `""` is the lawyer's default store (on macOS their Keychain). Right at tier
-/// C, all PR-C has: no jail stands between the agent and that store. The tier A and B rule
-/// (`SignedOut { found: ClaudeSandbox }`, S18) lands with the jail in R17 PR-D.
+/// The reused store `""` is the lawyer's default store (on macOS their Keychain): only at tier
+/// C, where no jail stands between the agent and that store. A jailed launch of a reused login
+/// is refused before this (`sign_in::check_launch`, `SignedOut { found: ClaudeSandbox }`).
 pub(super) fn claude(
     actor: &Actor,
     agent: &AgentId,

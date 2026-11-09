@@ -105,6 +105,10 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             ErrorCode::SigninReuseOtherVolume,
             "the Codex login is on another volume",
         ),
+        failed(
+            ErrorCode::SandboxAskModeUnavailable,
+            "Codex in the sandbox has no mode that asks",
+        ),
     ]
 }
 

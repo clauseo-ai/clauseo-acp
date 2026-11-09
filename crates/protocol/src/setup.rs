@@ -339,8 +339,9 @@ pub enum SignIn {
 pub enum FoundLogin {
     /// A Claude login set in the lawyer's own Claude settings (not a `claude.ai` one).
     ClaudeSettings,
-    /// Windows with the sandbox set up, where Claude's login is not reused.
-    ClaudeWindowsSandbox,
+    /// Claude runs in the sandbox here (macOS or Windows), where the lawyer's own Claude login
+    /// is not reused.
+    ClaudeSandbox,
     /// Codex runs in the sandbox here, where the lawyer's own Codex login is not reused: Clauseo's
     /// own `ChatGPT` sign-in is needed.
     CodexSandbox,
@@ -365,7 +366,7 @@ impl FoundLogin {
     /// Every value, in declaration order.
     pub const ALL: [Self; 10] = [
         Self::ClaudeSettings,
-        Self::ClaudeWindowsSandbox,
+        Self::ClaudeSandbox,
         Self::CodexSandbox,
         Self::CodexKeyring,
         Self::ReusedFailed,
