@@ -1124,7 +1124,10 @@ leaves that profile, both naming the part.
     session's inner runner, agent and `conhost.exe` still running 75 s after it. The inner asks
     instead for its own job's pid list: `QueryInformationJobObject` with no job handle, which
     names the caller's job (the immediate one, the launch's, as jobs nest), for
-    `JobObjectBasicProcessIdList`, the buffer grown until the list fits. It reads the list once a
+    `JobObjectBasicProcessIdList`. A list that doesn't fit (`ERROR_MORE_DATA`, or fewer pids
+    than processes, as when a fork bomb fills the job between two calls) or a failed call is
+    asked again, up to four calls, the buffer sized from the latest count plus 64. A list that
+    still fails is an error with its Win32 code, never an empty list. It reads the list once a
     round, after the round's processes are opened (each pid pinned), so a pid in it is the
     process opened, and a process the agent started since the last round is in it. A process is
     the job's when its pid is in the list and it was created (`GetProcessTimes`) no earlier than
@@ -1425,9 +1428,17 @@ leaves that profile, both naming the part.
   `spawn::ACTIVE_PROCESS_CAP`). A fork bomb of cmd and conhost pairs at 1,024 still costs several
   GB and can starve an 8 GB laptop, while an agent's real work (npm, pip, Python multiprocessing,
   `make -j`, jest workers) peaks well under 100. At the cap the next process fails to start and
-  the session goes on. The outer reads the job's completion port (`job_port.rs`), and the first
-  `JOB_OBJECT_MSG_ACTIVE_PROCESS_LIMIT` gives one notice per session: "A task tried to start too
-  many programs at once, so Clauseo stopped it. Ask the assistant to try a smaller step." It goes
+  the session goes on. The job's limit is 256 (`ActiveProcessLimit`). Windows counts a new
+  process and then refuses it when the count passes the limit (PspAddProcessToJob), so at most
+  256 of the agent's own starts are admitted. On real Windows (VM, build 26100) the job listed 257
+  members at refusal, one of them the agent's console host, which appears to join the job outside
+  the limit check. Not confirmed in source. The cap on the agent's own programs isn't loosened.
+  The Windows CI test `job_cap_tests` checks the count with a cap of 4 and detached processes
+  (no console hosts): a fifth is refused, and once it has gone the job holds exactly 4.
+  The outer reads the job's completion port (`job_port.rs`), and the first
+  `JOB_OBJECT_MSG_ACTIVE_PROCESS_LIMIT` gives one notice per session: "The AI tool tried to run
+  too many programs at once, so Clauseo didn't start the extra ones. It keeps going. If it seems
+  stuck, ask it to try a smaller step." It goes
   to the outer's stderr until #789's session-notice path lands, from a thread of its own, so a
   blocked stderr never stops the port being read. The cap counts only processes in
   the job. Processes outside it (M2, above) remain the per-slot SYSTEM stop item (C5), which

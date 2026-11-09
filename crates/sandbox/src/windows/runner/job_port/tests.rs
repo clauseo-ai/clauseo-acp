@@ -34,8 +34,8 @@ fn a_session_under_the_cap_gives_no_notice() {
 fn the_notice_says_the_lawyer_s_words() {
     assert_eq!(
         TOO_MANY_PROGRAMS,
-        "A task tried to start too many programs at once, so Clauseo stopped it. Ask the \
-         assistant to try a smaller step."
+        "The AI tool tried to run too many programs at once, so Clauseo didn't start the extra \
+         ones. It keeps going. If it seems stuck, ask it to try a smaller step."
     );
 }
 

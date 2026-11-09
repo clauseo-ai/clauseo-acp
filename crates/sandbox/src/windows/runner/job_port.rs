@@ -15,9 +15,10 @@ use std::thread;
 pub(super) const ACTIVE_PROCESS_LIMIT: u32 = 3;
 
 /// What the lawyer sees, once per session, when the job refused a process at its cap.
-pub(super) const TOO_MANY_PROGRAMS: &str = "A task tried to start too many programs at once, so \
-                                            Clauseo stopped it. Ask the assistant to try a \
-                                            smaller step.";
+pub(super) const TOO_MANY_PROGRAMS: &str = "The AI tool tried to run too many programs at once, \
+                                            so Clauseo didn't start the extra ones. It keeps \
+                                            going. If it seems stuck, ask it to try a smaller \
+                                            step.";
 
 /// Reads `messages` (the port's, until it fails) and calls `notify` with [`TOO_MANY_PROGRAMS`] at
 /// the first [`ACTIVE_PROCESS_LIMIT`] only: a fork bomb hits the cap over and over. One outer

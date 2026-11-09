@@ -183,7 +183,9 @@ pub(super) const UI_LIMITS: JOB_OBJECT_UILIMIT = JOB_OBJECT_UILIMIT(
 /// The most processes the job holds at once; the next one fails to start, and the job's port says
 /// so (`job_port.rs`). A fork bomb of cmd+conhost pairs at 1,024 still costs several GB and can
 /// starve an 8 GB laptop, while legitimate agent work (npm, pip, Python multiprocessing,
-/// `make -j`, jest workers) peaks well under 100, so 256 leaves headroom.
+/// `make -j`, jest workers) peaks well under 100, so 256 leaves headroom. Windows counts a newcomer
+/// and refuses it when the count passes the limit, so at most 256 of the agent's own starts are
+/// admitted (on the VM the job listed 257 at refusal, one of them a console host; 0049).
 pub(super) const ACTIVE_PROCESS_CAP: u32 = 256;
 
 /// The job's limit flags: its last handle closing ends every process in it, and it holds at most
