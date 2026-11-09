@@ -13,6 +13,11 @@ crate-type = ["rlib"]
 workspace = true
 
 [features]
+# The sandbox's seam (src/sandbox_seam.rs, R17 PR-D3a), on by default: the host gets the
+# sandbox's detection and, on Windows, tier B's set-up, with no launchers yet, so launches stay
+# as in a build without it while the protection view shows the set-up's state.
+default = ["sandbox"]
+sandbox = []
 # The end-to-end build (src/e2e.rs), never on by default: on Windows the webview opens a DevTools
 # port for Playwright; on every OS `pick_folder` reads E2E_MATTER_DIR and the "always allow"
 # confirm reads E2E_CONFIRM_ALWAYS instead of drawing a dialog; setup takes the installs of the agents
@@ -72,9 +77,9 @@ clauseo-limits = { path = "../limits" }
 # The paid data connectors (src/connectors.rs, R24): the keychain store, the connector's config
 # and the account, handed to the host with the case-law relays.
 clauseo-connectors = { path = "../connectors" }
-# The sandbox: on Windows, the sandbox user record (src/jailed/windows.rs); on every OS, its
-# folder's name, which the uninstaller's deletion keeps (src/delete_app_data/walk.rs). The host
-# already builds it everywhere.
+# The sandbox: its seam for the host (src/sandbox_seam.rs); on Windows, the sandbox user record
+# (src/jailed/windows.rs); on every OS, its folder's name, which the uninstaller's deletion keeps
+# (src/delete_app_data/walk.rs). The host already builds it everywhere.
 clauseo-sandbox = { path = "../sandbox" }
 # The profile's start-up warnings (a skill left out, no profile).
 tracing = { workspace = true }

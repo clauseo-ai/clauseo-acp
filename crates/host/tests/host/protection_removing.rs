@@ -12,7 +12,7 @@ use clauseo_sandbox::{NoSandbox, SetupState};
 
 use crate::codex::{Recording, turn_failed};
 use crate::protection::dir;
-use crate::protection_rig::{Gated, Plan, b, c, rig, send, view};
+use crate::protection_rig::{Gated, Plan, b, c, rig, send, through, view};
 use crate::support::{FAKE, Scenario, wait};
 
 /// A removal that waits at its gate refuses `CreateThread` and a queued turn's launch (no agent
@@ -35,12 +35,10 @@ fn a_removal_refuses_create_thread_and_a_turn_s_launch_until_it_ends() {
     plan.gated = Gated::Remove;
     let mut rig = rig(plan);
     let gate = rig.gate.take().unwrap();
-    let recording = Recording::new(&dir);
+    let recording = Arc::new(Recording::new(&dir));
     let launches = Arc::clone(&recording.envs);
-    let sandbox = rig.sandbox.clone();
-    let host = dir.start_launching(1, Arc::new(recording), move |config| {
-        config.with_sandbox(sandbox)
-    });
+    let sandbox = through(rig.sandbox.clone(), Arc::clone(&recording) as _);
+    let host = dir.start_launching(1, recording, move |config| config.with_sandbox(sandbox));
     let removal = send(&host.handle, HostCommand::RemoveSandboxSetup {});
     gate.started.recv().unwrap();
     assert_eq!(view(&host).in_progress, Some(ProtectionWork::Remove));

@@ -1,7 +1,9 @@
 //! Recording fakes of the sandbox seam (decision record 0051, R17 PR-B1): a set-up with a
 //! scripted `state()` sequence and scripted `run()`, `remove()` and `forget_matter()` outcomes,
 //! one of which can block until the test releases it, and a detection with a scripted sequence.
-//! Each sequence repeats its last value once the earlier ones are used.
+//! Each sequence repeats its last value once the earlier ones are used. A rig's seam has
+//! launchers ([`Through`]) unless its plan says not: only a seam with launchers gates launches
+//! on the sandbox's state (R17 PR-D3a); without them the computer stays `not_built`.
 
 use std::collections::VecDeque;
 use std::future::Future;
@@ -9,13 +11,19 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::task::{Context, Poll};
+use std::time::Duration;
 
-use clauseo_host::{AppSubscription, HostHandle, Sandbox};
+use clauseo_host::{
+    AppSubscription, HostHandle, Sandbox, SandboxLaunch, SandboxLaunchers, SessionEnd, SessionKey,
+};
+use clauseo_process::{Launcher, PassthroughLauncher, SpawnOptions};
 use clauseo_protocol::{
     CommandEnvelope, CommandOutcome, HostCommand, HostError, HostEvent, Principal, ProtectionView,
     QueryResult,
 };
-use clauseo_sandbox::{Detection, NoSandbox, SandboxSetup, SetupError, SetupState, Tier};
+use clauseo_sandbox::{
+    DenialSink, Detection, NoSandbox, Policy, SandboxSetup, SetAside, SetupError, SetupState, Tier,
+};
 use futures::StreamExt as _;
 
 use crate::support::{Running, command_id, wait, within};
@@ -74,6 +82,12 @@ pub(crate) enum Gated {
     Forget,
     /// Every detection after the first (start-up's).
     Detect,
+    /// Every detection, start-up's too.
+    Hang,
+    /// Start-up's detection alone.
+    First,
+    /// Every `state()`.
+    State,
 }
 
 /// Waits at `gate`: says it started, then waits for a release (a dropped sender, at the test's
@@ -99,6 +113,11 @@ impl FakeSetup {
 impl SandboxSetup for FakeSetup {
     fn state(&self) -> SetupState {
         self.note_thread();
+        if self.gated == Gated::State
+            && let Some(gate) = &self.gate
+        {
+            pass(gate);
+        }
         self.states.next()
     }
 
@@ -137,6 +156,33 @@ impl SandboxSetup for FakeSetup {
     }
 }
 
+/// Launchers that start every agent through their launcher with no jail (R17 PR-D3a): what
+/// their presence switches on is the gating on the sandbox's state, which these tests check.
+pub(crate) struct Through(Arc<dyn Launcher>);
+
+impl SandboxLaunchers for Through {
+    fn launcher(
+        &self,
+        _policy: Policy,
+        _matter: &clauseo_protocol::MatterId,
+        _session: &SessionKey,
+        _running: &[SessionKey],
+        _opts: SpawnOptions,
+        _denials: Arc<dyn DenialSink>,
+    ) -> Result<SandboxLaunch, clauseo_sandbox::Error> {
+        Ok(SandboxLaunch::new(Arc::clone(&self.0), Vec::new()))
+    }
+
+    fn after_session(&self, _end: SessionEnd) -> Vec<SetAside> {
+        Vec::new()
+    }
+}
+
+/// `sandbox` with launchers that start each agent through `launcher` (a test's `Recording`).
+pub(crate) fn through(sandbox: Sandbox, launcher: Arc<dyn Launcher>) -> Sandbox {
+    sandbox.with_launchers(Arc::new(Through(launcher)), SpawnOptions::new().clear_env())
+}
+
 /// What a rig is built from.
 pub(crate) struct Plan {
     pub(crate) detections: Vec<Detection>,
@@ -146,6 +192,10 @@ pub(crate) struct Plan {
     pub(crate) forgets: Vec<Result<(), SetupError>>,
     pub(crate) gated: Gated,
     pub(crate) panics: bool,
+    /// The seam has launchers ([`Through`], the default); `false` for a set-up-only seam.
+    pub(crate) launchers: bool,
+    /// The snapshot's wait and the automatic re-check's, when shortened.
+    pub(crate) waits: Option<(Duration, Duration)>,
 }
 
 impl Plan {
@@ -160,6 +210,16 @@ impl Plan {
             forgets: vec![Ok(())],
             gated: Gated::No,
             panics: false,
+            launchers: true,
+            waits: None,
+        }
+    }
+
+    /// As [`Plan::new`], with no launchers: a set-up-only seam (R17 PR-D3a).
+    pub(crate) fn set_up_only(detections: Vec<Detection>, states: Vec<SetupState>) -> Self {
+        Self {
+            launchers: false,
+            ..Self::new(detections, states)
         }
     }
 }
@@ -199,19 +259,38 @@ pub(crate) fn rig(plan: Plan) -> Rig {
     let script = Arc::new(Script::new(plan.detections));
     let detections = Arc::new(AtomicUsize::new(0));
     let counted = Arc::clone(&detections);
-    let detect_gate = (plan.gated == Gated::Detect).then_some(gate).flatten();
+    let gated = plan.gated;
+    let detect_gate = matches!(gated, Gated::Detect | Gated::Hang | Gated::First)
+        .then_some(gate)
+        .flatten();
     let detect = Arc::new(move || {
         let calls = counted.fetch_add(1, Ordering::SeqCst);
-        if calls > 0
-            && let Some(gate) = &detect_gate
-        {
+        let waits = match gated {
+            Gated::Detect => calls > 0,
+            Gated::First => calls == 0,
+            _ => true,
+        };
+        // The value is the call's, by call order, even when an earlier call still waits.
+        let value = script.next();
+        if waits && let Some(gate) = &detect_gate {
             pass(gate);
         }
-        script.next()
+        value
     });
     let shared: Arc<dyn SandboxSetup> = Arc::<FakeSetup>::clone(&setup);
+    let sandbox = Sandbox::new(detect, Some(shared));
+    let sandbox = match plan.waits {
+        Some((detect, retry)) => sandbox.with_detect_waits(detect, retry),
+        None => sandbox,
+    };
+    let sandbox = if plan.launchers {
+        let plain = PassthroughLauncher::new(SpawnOptions::new().clear_env());
+        through(sandbox, Arc::new(plain))
+    } else {
+        sandbox
+    };
     Rig {
-        sandbox: Sandbox::new(detect, Some(shared)),
+        sandbox,
         setup,
         gate: handles,
         detections,

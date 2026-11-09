@@ -34,7 +34,7 @@ pub use profile_hook::{NoProfile, ProfileHook};
 mod parts;
 pub(crate) use parts::{ConfigParts, UpdateSeams};
 mod sandbox;
-pub use sandbox::{Detect, Sandbox, SandboxLaunch, SandboxLaunchers, SessionEnd};
+pub use sandbox::{Detect, DetectBounds, Sandbox, SandboxLaunch, SandboxLaunchers, SessionEnd};
 mod egress;
 #[cfg(feature = "test-support")]
 pub use egress::TestProxy;
@@ -575,9 +575,9 @@ impl HostConfig {
     }
 
     /// The sandbox seam (default: none: the computer is `Unsupported { why: not_built }`, and
-    /// `RetryProtection` and `RemoveSandboxSetup` are `command.invalid`). Pass it only with its
-    /// launchers (`Sandbox::with_launchers`, R17 PR-B2): alone, macOS' detection says tier A
-    /// with no jail behind it, and `sandbox.required` would pass. The first detection runs in
+    /// `RetryProtection` and `RemoveSandboxSetup` are `command.invalid`). Without launchers
+    /// (`Sandbox::with_launchers`) it never gates launches (R17 PR-D3a): the computer stays
+    /// `not_built`, the sandbox's state goes in the view's `set_up_state`. First detection: in
     /// `Host::start`, on the calling thread; later ones off the host's thread.
     #[must_use]
     pub fn with_sandbox(mut self, sandbox: Sandbox) -> Self {

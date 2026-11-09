@@ -27,6 +27,7 @@ fn the_query_is_a_plain_string_and_its_answer_names_each_field() {
         in_progress: None,
         retry_asks_admin: true,
         set_up_at: None,
+        set_up_state: None,
     });
     assert_eq!(
         serde_json::to_string(&answer).unwrap(),

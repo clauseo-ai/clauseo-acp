@@ -4,7 +4,9 @@
 use clauseo_protocol::{ErrorCode, NotProtectedCause, Protection, ProtectionTier, UnsupportedWhy};
 use clauseo_sandbox::{Blocked, Detection, NoSandbox, SET_UP_BY_OTHER_USER, SetupState, Tier};
 
-use super::{Observed, ProtectionHost, asks_admin, observe, protection_of, refusal_of};
+use super::{
+    Observed, ProtectionHost, asks_admin, observe, observe_within, protection_of, refusal_of,
+};
 
 fn c(reason: NoSandbox) -> Detection {
     Detection {
@@ -197,8 +199,169 @@ fn no_seam_is_not_built_with_no_retry() {
             }),
             asks_admin: false,
             set_up_at: None,
+            set_up_state: None,
+            no_answer: false,
         }
     );
+}
+
+/// Launchers that never launch: their presence alone is what [`gated`] reads.
+struct NoLaunch;
+
+impl crate::config::SandboxLaunchers for NoLaunch {
+    fn launcher(
+        &self,
+        _policy: clauseo_sandbox::Policy,
+        _matter: &clauseo_protocol::MatterId,
+        _session: &crate::config::SessionKey,
+        _running: &[crate::config::SessionKey],
+        _opts: clauseo_process::SpawnOptions,
+        _denials: std::sync::Arc<dyn clauseo_sandbox::DenialSink>,
+    ) -> Result<crate::config::SandboxLaunch, clauseo_sandbox::Error> {
+        Err(clauseo_sandbox::Error::Policy(
+            "no launch in these tests".to_owned(),
+        ))
+    }
+
+    fn after_session(&self, _end: crate::config::SessionEnd) -> Vec<clauseo_sandbox::SetAside> {
+        Vec::new()
+    }
+}
+
+/// A seam detecting `found`, its set-up in `state`, with launchers or not.
+fn seam(found: Detection, state: SetupState, launchers: bool) -> crate::config::Sandbox {
+    struct Fixed(SetupState);
+    impl clauseo_sandbox::SandboxSetup for Fixed {
+        fn state(&self) -> SetupState {
+            self.0.clone()
+        }
+        fn run(&self) -> Result<(), clauseo_sandbox::SetupError> {
+            Ok(())
+        }
+        fn forget_matter(
+            &self,
+            _matter: &clauseo_protocol::MatterId,
+        ) -> Result<(), clauseo_sandbox::SetupError> {
+            Ok(())
+        }
+        fn remove(&self) -> Result<(), clauseo_sandbox::SetupError> {
+            Ok(())
+        }
+    }
+    let sandbox = crate::config::Sandbox::new(
+        std::sync::Arc::new(move || found.clone()),
+        Some(std::sync::Arc::new(Fixed(state))),
+    );
+    if launchers {
+        sandbox.with_launchers(
+            std::sync::Arc::new(NoLaunch),
+            clauseo_process::SpawnOptions::new(),
+        )
+    } else {
+        sandbox
+    }
+}
+
+/// Each detection with its set-up state, and the wire's protection for it.
+fn set_up_rows() -> Vec<(Detection, SetupState, Protection)> {
+    vec![
+        (
+            Detection {
+                tier: Tier::B,
+                reason: None,
+            },
+            SetupState::Ready,
+            Protection::Protected {
+                tier: ProtectionTier::B,
+            },
+        ),
+        (
+            c(NoSandbox::NeedsSetUp),
+            SetupState::Needed,
+            not(NotProtectedCause::NeedsSetUp),
+        ),
+        (
+            c(NoSandbox::SetUpRefused),
+            SetupState::Refused,
+            not(NotProtectedCause::SetUpRefused),
+        ),
+        (
+            c(NoSandbox::SetUpFailed("x".to_owned())),
+            SetupState::Failed("x".to_owned()),
+            not(NotProtectedCause::SetUpFailed),
+        ),
+        (
+            c(NoSandbox::SetUpBlocked(Blocked::AdminCopyMissing)),
+            SetupState::Blocked(Blocked::AdminCopyMissing),
+            not(NotProtectedCause::Blocked {
+                reason: "admin_copy_missing".to_owned(),
+            }),
+        ),
+        (
+            c(NoSandbox::SetUpFailed(SET_UP_BY_OTHER_USER.to_owned())),
+            SetupState::SetUpByOtherUser,
+            not(NotProtectedCause::OtherAccount),
+        ),
+    ]
+}
+
+/// R17 PR-D3a, the orchestrator's condition 2: without launchers the computer is not-built
+/// for every set-up state, which goes to `set_up_state` alone, and `retry_asks_admin` still
+/// follows the set-up.
+#[test]
+fn without_launchers_the_computer_is_not_built_and_set_up_state_is_the_sandbox() {
+    let not_built = not(NotProtectedCause::Unsupported {
+        why: UnsupportedWhy::NotBuilt,
+    });
+    for (detection, state, found) in set_up_rows() {
+        let asks = asks_admin(&state);
+        let observed = observe(
+            Some(&seam(detection, state, false)),
+            std::path::Path::new("data"),
+        );
+        assert_eq!(observed.computer, not_built, "{found:?}");
+        assert_eq!(observed.set_up_state.as_ref(), Some(&found));
+        assert_eq!(observed.asks_admin, asks, "{found:?}");
+        assert_eq!(
+            observed.sandbox_protected(),
+            matches!(found, Protection::Protected { .. })
+        );
+        let view = ProtectionHost::new(None, observed).view(false, false);
+        assert_eq!(view.tier, ProtectionTier::C);
+        assert_eq!(view.set_up_state, Some(found));
+    }
+    // An OS with no jail has nothing to set up: its own cause, gated as not-built.
+    let os = observe(
+        Some(&seam(
+            c(NoSandbox::UnsupportedOs),
+            SetupState::Needed,
+            false,
+        )),
+        std::path::Path::new("data"),
+    );
+    assert!(matches!(
+        os.computer,
+        Protection::NotProtected {
+            cause: NotProtectedCause::Unsupported { .. }
+        }
+    ));
+    assert_eq!(os.set_up_state, None);
+}
+
+/// Condition 3: with launchers the computer carries the sandbox's state and `set_up_state`
+/// is `None`: one source of truth.
+#[test]
+fn with_launchers_the_computer_is_the_sandbox_and_set_up_state_is_none() {
+    for (detection, state, found) in set_up_rows() {
+        let observed = observe(
+            Some(&seam(detection, state, true)),
+            std::path::Path::new("data"),
+        );
+        assert_eq!(observed.computer, found);
+        assert_eq!(observed.set_up_state, None);
+        let view = ProtectionHost::new(None, observed).view(false, false);
+        assert_eq!(view.set_up_state, None);
+    }
 }
 
 #[test]
@@ -243,4 +406,157 @@ fn a_change_of_either_setting_gives_the_new_view_once() {
     let auto = host.take_changed(true, true).unwrap();
     assert!(auto.unprotected_auto_allowed);
     assert_eq!(host.take_changed(true, true), None);
+}
+
+/// #813's security review, 1: macOS' detection-only seam (tier A, no set-up, no launchers) has
+/// nothing to set up: `set_up_state` is `None`, the computer not-built, and no retry asks.
+#[test]
+fn a_seam_with_no_set_up_and_no_launchers_has_no_set_up_state() {
+    let tier_a = Detection {
+        tier: Tier::A,
+        reason: None,
+    };
+    let sandbox = crate::config::Sandbox::new(std::sync::Arc::new(move || tier_a.clone()), None);
+    let observed = observe(Some(&sandbox), std::path::Path::new("data"));
+    assert_eq!(
+        observed.computer,
+        not(NotProtectedCause::Unsupported {
+            why: UnsupportedWhy::NotBuilt,
+        })
+    );
+    assert_eq!(observed.set_up_state, None);
+    assert!(!observed.asks_admin);
+    let view = ProtectionHost::new(None, observed).view(false, false);
+    assert_eq!(view.set_up_state, None);
+}
+
+/// #813's security review, 2: with no jail on this computer (Windows on ARM, an older build),
+/// a set-up the record calls needed or failed can't help: no retry runs it, with launchers or
+/// without.
+#[test]
+fn no_jail_means_no_administrator_retry() {
+    for state in [SetupState::Needed, SetupState::Failed("x".to_owned())] {
+        for launchers in [false, true] {
+            let sandbox = seam(c(NoSandbox::UnsupportedOs), state.clone(), launchers);
+            let observed = observe(Some(&sandbox), std::path::Path::new("data"));
+            assert!(!observed.asks_admin, "{state:?}, launchers {launchers}");
+            assert!(matches!(
+                observed.computer,
+                Protection::NotProtected {
+                    cause: NotProtectedCause::Unsupported { .. }
+                }
+            ));
+        }
+    }
+}
+
+/// #813's security review, 3: a detection that doesn't answer within the wait is a failed
+/// probe (`SetUpFailed`, fail closed) and the start goes on; one that answers is taken.
+#[test]
+fn a_detection_past_its_wait_is_a_failed_probe() {
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    let held = std::sync::Mutex::new(held);
+    let hangs = crate::config::Sandbox::new(
+        std::sync::Arc::new(move || {
+            let _released = held.lock().map(|held| held.recv());
+            Detection {
+                tier: Tier::B,
+                reason: None,
+            }
+        }),
+        None,
+    )
+    .with_launchers(
+        std::sync::Arc::new(NoLaunch),
+        clauseo_process::SpawnOptions::new(),
+    );
+    let wait = std::time::Duration::from_millis(50);
+    let observed = observe_within(Some(&hangs), std::path::Path::new("data"), wait);
+    // Here at all: the detection is still held, so the wait gave up on it.
+    assert_eq!(observed.computer, not(NotProtectedCause::SetUpFailed));
+    drop(release);
+    let answers = seam(
+        Detection {
+            tier: Tier::B,
+            reason: None,
+        },
+        SetupState::Ready,
+        true,
+    );
+    let observed = observe_within(
+        Some(&answers),
+        std::path::Path::new("data"),
+        std::time::Duration::from_secs(5),
+    );
+    assert_eq!(
+        observed.computer,
+        Protection::Protected {
+            tier: ProtectionTier::B,
+        }
+    );
+}
+
+/// #813's second review, 1 and 2: a `state()` that hangs is inside the one bounded snapshot,
+/// so the caller gets a failed probe in time; a second request while it hangs joins its thread.
+#[test]
+fn a_hung_state_is_one_bounded_snapshot_thread() {
+    struct Hangs(std::sync::Mutex<std::sync::mpsc::Receiver<()>>);
+    impl clauseo_sandbox::SandboxSetup for Hangs {
+        fn state(&self) -> SetupState {
+            let _released = self.0.lock().map(|held| held.recv());
+            SetupState::Ready
+        }
+        fn run(&self) -> Result<(), clauseo_sandbox::SetupError> {
+            Ok(())
+        }
+        fn forget_matter(
+            &self,
+            _matter: &clauseo_protocol::MatterId,
+        ) -> Result<(), clauseo_sandbox::SetupError> {
+            Ok(())
+        }
+        fn remove(&self) -> Result<(), clauseo_sandbox::SetupError> {
+            Ok(())
+        }
+    }
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    let tier_b = Detection {
+        tier: Tier::B,
+        reason: None,
+    };
+    let sandbox = crate::config::Sandbox::new(
+        std::sync::Arc::new(move || tier_b.clone()),
+        Some(std::sync::Arc::new(Hangs(std::sync::Mutex::new(held)))),
+    );
+    let wait = std::time::Duration::from_millis(50);
+    for _ in 0..2 {
+        let observed = observe_within(Some(&sandbox), std::path::Path::new("data"), wait);
+        assert!(observed.no_answer);
+        assert_eq!(
+            observed.set_up_state,
+            Some(not(NotProtectedCause::SetUpFailed))
+        );
+        assert!(!observed.asks_admin);
+    }
+    let started = || {
+        sandbox
+            .bounds
+            .slot
+            .started
+            .load(std::sync::atomic::Ordering::SeqCst)
+    };
+    assert_eq!(started(), 1, "the second request joined the first's thread");
+    drop(release);
+    let observed = observe_within(
+        Some(&sandbox),
+        std::path::Path::new("data"),
+        std::time::Duration::from_secs(5),
+    );
+    assert!(!observed.no_answer);
+    assert_eq!(
+        observed.set_up_state,
+        Some(Protection::Protected {
+            tier: ProtectionTier::B,
+        })
+    );
 }

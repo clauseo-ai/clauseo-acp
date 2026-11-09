@@ -11,6 +11,10 @@
 //!   thread, then posts the result here.
 //! - With no seam the computer is `Unsupported { why: not_built }`, never what
 //!   `clauseo_sandbox::detect` would say on its own (tier A on macOS, with nothing jailing).
+//! - A seam without launchers never drives launch gating (R17 PR-D3a, [`gated`]): the computer
+//!   is `not_built` for every launch, gate and label, and the sandbox's own state goes only to
+//!   the view's `set_up_state`, for the set-up screen. With launchers the computer is that state
+//!   and `set_up_state` is `None`: one source of truth.
 //! - The view goes to every app subscriber whenever it changes: the detection, the work in
 //!   progress, `retry_asks_admin`, or either setting (the loop's [`tick`] compares the
 //!   settings after every input, so any path that changes them is covered). Like
@@ -18,6 +22,7 @@
 //! - A change of the computer's protection sends `ProtectionChanged` for every listed matter.
 
 use std::path::Path;
+use std::time::Duration;
 
 use clauseo_protocol::{
     ErrorCode, HostEvent, NotProtectedCause, Protection, ProtectionTier, ProtectionView,
@@ -31,15 +36,31 @@ use crate::error::Error;
 
 pub(super) mod forget;
 mod set_up_at;
+mod snapshot;
+pub(crate) use snapshot::Slot;
 pub(super) mod work;
 
 /// What one detection found: the computer's protection, whether a retry would run the set-up
-/// (`retry_asks_admin`), and when a finished set-up finished (`set_up_at`).
+/// (`retry_asks_admin`), when a finished set-up finished (`set_up_at`), and, for a seam
+/// without launchers, the sandbox's own state (`set_up_state`, [`gated`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Observed {
     pub(crate) computer: Protection,
     pub(crate) asks_admin: bool,
     pub(crate) set_up_at: Option<Timestamp>,
+    pub(crate) set_up_state: Option<Protection>,
+    /// The snapshot gave no answer in time (a failed probe stands in): with launchers, the
+    /// host's start checks once more ([`start`]).
+    pub(crate) no_answer: bool,
+}
+
+impl Observed {
+    /// Whether the sandbox itself is protected: its own state where launches don't use it yet,
+    /// else the computer's. A set-up's answer is judged on this.
+    pub(crate) fn sandbox_protected(&self) -> bool {
+        let state = self.set_up_state.as_ref().unwrap_or(&self.computer);
+        matches!(state, Protection::Protected { .. })
+    }
 }
 
 /// The protection state the actor holds.
@@ -89,11 +110,15 @@ impl ProtectionHost {
         &self.observed.computer
     }
 
-    /// Whether the set-up's removal runs.
+    /// Whether the set-up's removal runs while launches go through the sandbox: without
+    /// launchers no agent runs as a pool user, so a removal refuses nothing (R17 PR-D3a).
     fn removing(&self) -> bool {
-        self.running
-            .as_ref()
-            .is_some_and(|running| running.work() == ProtectionWork::Remove)
+        let jailed = self.sandbox.as_ref().is_some_and(|s| s.launchers.is_some());
+        jailed
+            && self
+                .running
+                .as_ref()
+                .is_some_and(|running| running.work() == ProtectionWork::Remove)
     }
 
     /// The view under the settings `required` and `auto` (`sandbox.allow_unprotected_auto`).
@@ -102,6 +127,7 @@ impl ProtectionHost {
         view.in_progress = self.running.as_ref().map(work::Running::work);
         view.retry_asks_admin = self.observed.asks_admin;
         view.set_up_at = self.observed.set_up_at;
+        view.set_up_state.clone_from(&self.observed.set_up_state);
         view
     }
 
@@ -124,10 +150,23 @@ impl ProtectionHost {
     }
 }
 
-/// Detects this computer's protection through `sandbox`, on the calling thread: never the
-/// actor's. No seam: `Unsupported { why: not_built }`, with no retry to offer. A set-up that is
-/// done gives its time from its marker in `data_dir` (`set_up_at`).
+/// Detects this computer's protection through `sandbox`, from the calling thread: never the
+/// actor's, waiting at most the seam's `detect_wait` (5 s). No seam: `Unsupported { why:
+/// not_built }`, with no retry to offer.
 pub(crate) fn observe(sandbox: Option<&Sandbox>, data_dir: &Path) -> Observed {
+    let wait = sandbox.map_or(Duration::ZERO, |sandbox| sandbox.bounds.detect_wait);
+    observe_within(sandbox, data_dir, wait)
+}
+
+/// [`observe`], waiting at most `wait`: one snapshot (`snapshot.rs`) gives the detection, the
+/// set-up's state and a finished set-up's time from its marker in `data_dir` (`set_up_at`),
+/// and everything here is derived from it alone. No answer within `wait` is a failed probe
+/// (`SetUpFailed`, fail closed) with no retry asking for an administrator.
+pub(crate) fn observe_within(
+    sandbox: Option<&Sandbox>,
+    data_dir: &Path,
+    wait: Duration,
+) -> Observed {
     let Some(sandbox) = sandbox else {
         return Observed {
             computer: Protection::NotProtected {
@@ -137,19 +176,69 @@ pub(crate) fn observe(sandbox: Option<&Sandbox>, data_dir: &Path) -> Observed {
             },
             asks_admin: false,
             set_up_at: None,
+            set_up_state: None,
+            no_answer: false,
         };
     };
-    let detection = (sandbox.detect)();
-    let state = sandbox.setup.as_ref().map(|setup| setup.state());
-    let set_up_at = match state {
-        Some(SetupState::Ready) => set_up_at::read(data_dir),
-        _ => None,
+    let (snapshot, no_answer) = match snapshot::take(sandbox, data_dir, wait) {
+        Ok(snapshot) => (snapshot, false),
+        Err(snapshot::NoAnswer(kind)) => {
+            tracing::warn!(kind, "the sandbox check gave no answer");
+            let detection = Detection {
+                tier: Tier::C,
+                reason: Some(NoSandbox::ProbeFailed(kind.to_owned())),
+            };
+            let snapshot = snapshot::Snapshot {
+                detection,
+                state: None,
+                set_up_at: None,
+            };
+            (snapshot, true)
+        }
     };
+    let found = protection_of(&snapshot.detection);
+    // No jail on this computer (an OS without one, Windows on ARM, an older build): a set-up
+    // can't help, so a retry only checks again (#813's security review).
+    let no_jail = is_unsupported(&found);
+    let (computer, set_up_state) = gated(sandbox, found);
     Observed {
-        computer: protection_of(&detection),
-        asks_admin: state.as_ref().is_some_and(asks_admin),
-        set_up_at,
+        computer,
+        asks_admin: !no_jail && snapshot.state.as_ref().is_some_and(asks_admin),
+        set_up_at: snapshot.set_up_at,
+        set_up_state,
+        no_answer,
     }
+}
+
+/// Whether `found` says this computer has no jail Clauseo can use.
+fn is_unsupported(found: &Protection) -> bool {
+    matches!(
+        found,
+        Protection::NotProtected {
+            cause: NotProtectedCause::Unsupported { .. }
+        }
+    )
+}
+
+/// The rule (R17 PR-D3a, orchestrator-approved): a seam without launchers never drives launch
+/// gating. With launchers, `found` is the computer's protection and there is no separate
+/// set-up state. Without them, launches spawn through the host's own launcher with no jail, so
+/// the computer is `Unsupported { why: not_built }` as with no seam: `sandbox.required` refuses
+/// as for not-built, none of R17 PR-E's always-refuse causes refuses, nothing runs under the
+/// runner (`tier` is none), and `found` goes to the view's `set_up_state` for the set-up
+/// screen only, where there is a set-up (Windows' tier B; never macOS' detection-only seam,
+/// #813's security review). An OS with no jail at all (`Unsupported`) has nothing to set up:
+/// it is the computer's protection as it stands, refused the same way as not-built.
+fn gated(sandbox: &Sandbox, found: Protection) -> (Protection, Option<Protection>) {
+    if sandbox.launchers.is_some() || is_unsupported(&found) {
+        return (found, None);
+    }
+    let not_built = Protection::NotProtected {
+        cause: NotProtectedCause::Unsupported {
+            why: UnsupportedWhy::NotBuilt,
+        },
+    };
+    (not_built, sandbox.setup.is_some().then_some(found))
 }
 
 /// Whether a set-up in `state` is one `RetryProtection` runs, with its administrator prompt:
@@ -188,6 +277,9 @@ pub(crate) fn protection_of(detection: &Detection) -> Protection {
         Some(NoSandbox::NotBuilt) => NotProtectedCause::Unsupported {
             why: UnsupportedWhy::NotBuilt,
         },
+        // TODO(R17 PR-D3a follow-up, once #733 is on main): its `NoSandbox::NeedsReSetUp` (a
+        // sandbox update raised `SETUP_VERSION`) runs the set-up once per app start, silently,
+        // off the actor, no retry loop; a first-ever `NeedsSetUp` waits for the lawyer.
         Some(NoSandbox::NeedsSetUp) => NotProtectedCause::NeedsSetUp,
         Some(NoSandbox::SetUpRefused) => NotProtectedCause::SetUpRefused,
         Some(NoSandbox::ProbeFailed(_)) => failed("probe_failed"),
@@ -226,10 +318,16 @@ pub(crate) fn view(actor: &Actor) -> ProtectionView {
     actor.protection.view(required, auto)
 }
 
-/// The start's view, as the one sent: a later change is what goes out.
+/// The start's view, as the one sent: a later change is what goes out. With launchers, a first
+/// snapshot that gave no answer is checked once more, waiting the seam's `retry_wait` (30 s),
+/// before its failed probe stands (#813's review); launches stay refused meanwhile, the view
+/// showing the check.
 pub(super) fn start(actor: &mut Actor) {
     let (required, auto) = settings(actor);
     let _first = actor.protection.take_changed(required, auto);
+    if actor.protection.observed.no_answer && actor.protection.launchers().is_some() {
+        work::recheck(actor);
+    }
 }
 
 /// Sends `ProtectionViewChanged` to every app subscriber when the view changed, and stops the

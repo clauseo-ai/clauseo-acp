@@ -18,7 +18,7 @@ use crate::limits_host::{CLAUDE, Reads};
 use crate::observe::Events;
 use crate::permissions::{KINDS_ANSWERS, answer_from, until_first_request};
 use crate::protection::dir;
-use crate::protection_rig::{Plan, c, rig, view};
+use crate::protection_rig::{Plan, c, rig, through, view};
 use crate::support::{Dir, FAKE, Running, Scenario};
 
 /// One launch's environment, as `Recording` keeps it.
@@ -112,12 +112,10 @@ fn turning_blocked(dir: &Dir, run: u16) -> (Running, Arc<Mutex<Vec<Env>>>) {
         ],
         vec![SetupState::Ready],
     );
-    let recording = Recording::new(dir);
+    let recording = Arc::new(Recording::new(dir));
     let launches = Arc::clone(&recording.envs);
-    let sandbox = rig(plan).sandbox;
-    let host = dir.start_launching(run, Arc::new(recording), move |config| {
-        config.with_sandbox(sandbox)
-    });
+    let sandbox = through(rig(plan).sandbox, Arc::clone(&recording) as _);
+    let host = dir.start_launching(run, recording, move |config| config.with_sandbox(sandbox));
     (host, launches)
 }
 

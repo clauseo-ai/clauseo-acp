@@ -2,10 +2,13 @@
 //! computer's protection, runs the one-time set-up and (B2) starts each agent in the jail.
 //! Without it, the computer is `Unsupported { why: not_built }` and the two protection
 //! commands are `command.invalid`; the host never calls `clauseo_sandbox::detect` on its own,
-//! since on macOS that would report tier A while nothing jails the agent.
+//! since on macOS that would report tier A while nothing jails the agent. With it but without
+//! launchers (R17 PR-D3a), the set-up and its commands work and the view's `set_up_state` says
+//! the sandbox's state, while launches stay as with no seam (`not_built`).
 
 use std::fmt;
 use std::sync::Arc;
+use std::time::Duration;
 
 use clauseo_process::{Launcher, SpawnOptions};
 use clauseo_protocol::MatterId;
@@ -142,7 +145,41 @@ pub struct Sandbox {
     /// [`Sandbox::failing_spawn`]).
     #[cfg(feature = "test-support")]
     pub fail_spawn: bool,
+    /// How the host bounds its reads of the sandbox (#813's reviews).
+    pub bounds: DetectBounds,
 }
+
+/// How the host bounds its reads of the sandbox (#813's reviews, `actor/protection/snapshot.rs`):
+/// the snapshot thread out, if any, shared by every clone of the seam, and how long a snapshot
+/// and the one automatic re-check wait. Built by [`Sandbox::new`]; tests shorten the waits with
+/// [`Sandbox::with_detect_waits`].
+#[derive(Clone)]
+pub struct DetectBounds {
+    /// The snapshot thread out, if any.
+    pub(crate) slot: Arc<crate::actor::protection::Slot>,
+    /// How long a snapshot may take: 5 s.
+    pub(crate) detect_wait: Duration,
+    /// How long the one automatic re-check after a first snapshot that gave no answer waits,
+    /// with launchers: 30 s.
+    pub(crate) retry_wait: Duration,
+}
+
+impl fmt::Debug for DetectBounds {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DetectBounds")
+            .field("detect_wait", &self.detect_wait)
+            .field("retry_wait", &self.retry_wait)
+            .finish_non_exhaustive()
+    }
+}
+
+/// How long a snapshot of the sandbox may take before it counts as a failed probe (#813's
+/// reviews): macOS' first detection starts `sandbox-exec`, and the app's quit waits for the
+/// host's start.
+const DETECT_WAIT: Duration = Duration::from_secs(5);
+
+/// The automatic re-check's wait, after a first snapshot that gave no answer.
+const RETRY_WAIT: Duration = Duration::from_secs(30);
 
 impl Sandbox {
     /// The seam from its detection and set-up.
@@ -155,6 +192,11 @@ impl Sandbox {
             launch_opts: SpawnOptions::new(),
             #[cfg(feature = "test-support")]
             fail_spawn: false,
+            bounds: DetectBounds {
+                slot: Arc::default(),
+                detect_wait: DETECT_WAIT,
+                retry_wait: RETRY_WAIT,
+            },
         }
     }
 
@@ -168,6 +210,16 @@ impl Sandbox {
     ) -> Self {
         self.launchers = Some(launchers);
         self.launch_opts = opts;
+        self
+    }
+
+    /// A snapshot waits `detect` (5 s in the app) and the automatic re-check `retry` (30 s),
+    /// for tests of a hung detection.
+    #[cfg(feature = "test-support")]
+    #[must_use]
+    pub fn with_detect_waits(mut self, detect: Duration, retry: Duration) -> Self {
+        self.bounds.detect_wait = detect;
+        self.bounds.retry_wait = retry;
         self
     }
 

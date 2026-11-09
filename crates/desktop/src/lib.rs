@@ -133,6 +133,7 @@ mod quit;
 #[cfg(unix)]
 mod quit_signals;
 mod rust_only;
+mod sandbox_seam;
 mod settings_window;
 mod setup;
 mod startup;
@@ -439,6 +440,7 @@ fn start_host<R: Runtime>(
         let secrets = connectors::secret_store();
         let config = connectors::with_connectors(config, app.clone(), &data_dir, secrets);
         let config = blocklist::with_blocklist(&app, config, secrets);
+        let config = sandbox_seam::with_sandbox(config, &data_dir);
         let config = match counts {
             Some(counts) => {
                 start_counts(&app, counts.clone());

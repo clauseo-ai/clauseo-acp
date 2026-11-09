@@ -301,11 +301,17 @@ mod protection_edges;
 #[path = "host/protection_forget.rs"]
 mod protection_forget;
 #[cfg(test)]
+#[path = "host/protection_hung.rs"]
+mod protection_hung;
+#[cfg(test)]
 #[path = "host/protection_removing.rs"]
 mod protection_removing;
 #[cfg(test)]
 #[path = "host/protection_rig.rs"]
 mod protection_rig;
+#[cfg(test)]
+#[path = "host/protection_set_up_only.rs"]
+mod protection_set_up_only;
 #[cfg(test)]
 #[path = "host/queue.rs"]
 mod queue;
