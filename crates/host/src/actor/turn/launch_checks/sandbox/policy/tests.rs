@@ -255,10 +255,12 @@ impl Fixture {
     /// The negative golden: what `policy` must not grant in any form.
     fn assert_absent(&self, policy: &Policy) {
         assert!(!policy.keychain(), "no Keychain rule in any policy");
-        assert!(
-            !NATIVE_CODE_DENY,
-            "pinned off until stage D's Python runtime"
-        );
+        const {
+            assert!(
+                !NATIVE_CODE_DENY,
+                "pinned off until stage D's Python runtime"
+            );
+        }
         assert!(
             policy.allowed_folders().is_empty(),
             "R18 adds allowed folders"
@@ -454,7 +456,7 @@ fn an_agent_without_a_kind_writes_the_session_s_work_folder_and_no_login() {
     grants.stetdoc = None;
     let jailed = jail(&prepared, &grants, &[]).unwrap().policy;
     assert_eq!(jailed.state(), prepared.run.work);
-    assert!(jailed.read_only_in_state().is_empty());
+    assert_eq!(jailed.read_only_in_state(), Vec::<PathBuf>::new());
     assert!(jailed.credential_link().is_none() && jailed.claude_store().is_none());
     assert_eq!(jailed.runtime(), [fx.root.join("node").join("bin")]);
     fx.assert_absent(&jailed);

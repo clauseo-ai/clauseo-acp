@@ -216,7 +216,7 @@ pub(super) fn install_folder(command: &Path) -> Result<PathBuf, Error> {
 pub(crate) fn runtime(grants: &Grants, run: &RunFolders) -> Result<Vec<PathBuf>, Error> {
     let mut runtime = vec![install_folder(&grants.command)?];
     if let Some(folder) = &grants.install {
-        runtime.push(dunce::canonicalize(folder).map_err(|_| {
+        runtime.push(dunce::canonicalize(folder).map_err(|_missing| {
             launch_failed("The sandbox couldn't start the agent: its install folder wasn't found.")
         })?);
     }
@@ -380,7 +380,7 @@ fn network(mut builder: PolicyBuilder, run: &RunFolders, ports: &[u16]) -> Polic
     let browser_port = run.egress.as_ref().and_then(|egress| egress.port());
     let relay = match &run.case_law {
         CaseLaw::Open(relay) => Some(relay.port()),
-        _ => None,
+        CaseLaw::Absent | CaseLaw::Unavailable(_) | CaseLaw::Ended(..) => None,
     };
     for port in ports.iter().copied().chain(browser_port).chain(relay) {
         builder = builder.proxy_port(port);

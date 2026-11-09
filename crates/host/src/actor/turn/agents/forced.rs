@@ -106,14 +106,11 @@ pub(super) fn jailed(
 ) -> Vec<String> {
     let mut removed = Vec::new();
     for (name, value) in sandbox.map(|jail| jail.env.as_slice()).unwrap_or_default() {
-        match value {
-            Some(value) => {
-                forced.insert(name.clone(), value.clone());
-            }
-            None => {
-                forced.remove(name);
-                removed.extend(name.to_str().map(str::to_owned));
-            }
+        if let Some(value) = value {
+            forced.insert(name.clone(), value.clone());
+        } else {
+            forced.remove(name);
+            removed.extend(name.to_str().map(str::to_owned));
         }
     }
     removed
