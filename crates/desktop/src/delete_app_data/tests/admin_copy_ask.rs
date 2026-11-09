@@ -158,12 +158,13 @@ fn the_installers_exit_codes_are_their_own() {
             &("TEMP_FAILED".to_owned(), 25)
         ]
     );
-    // Each code once: #638's 20 and 21, these, and the per-machine uninstaller's 26.
+    // Each code once: #638's 20 and 21, these, the per-machine uninstaller's 26, and the
+    // installers' 28 when Clauseo.exe is gone (app_exe_missing.rs).
     let mut values: Vec<u32> = codes.iter().map(|(_, value)| *value).collect();
     values.sort_unstable();
     values.dedup();
     assert_eq!(values.len(), codes.len(), "{codes:?}");
-    assert_eq!(values, [20, 21, 22, 23, 24, 25, 26, 27], "{codes:?}");
+    assert_eq!(values, [20, 21, 22, 23, 24, 25, 26, 27, 28], "{codes:?}");
     // Clear of NSIS's 0 to 2, of #638's 20 and 21 (packaging-setup-exe-missing), of the codes
     // Intune and SCCM read as success or retry, and of the elevated instance's 99 and 100 + code.
     let taken = [0, 1, 2, 20, 21, 99, 1223, 1618, 1641, 1707, 3010];

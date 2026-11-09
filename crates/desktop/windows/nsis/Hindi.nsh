@@ -74,6 +74,13 @@ LangString uninstallNotInPlace ${LANG_HINDI} "Clauseo अनइंस्टॉ�
 ; nativeArm64Notice: the x64 per-machine installer's details line on an ARM64 computer
 ; (windows/hooks.nsh, CLAUSEO_NATIVE_ARM64_NOTICE); details list only. Provisional (2026-11-09).
 LangString nativeArm64Notice ${LANG_HINDI} "इस कंप्यूटर में ARM64 प्रोसेसर है: Clauseo_${VERSION}_arm64-machine-setup.exe इसका मूल प्रति-मशीन इंस्टॉलर है।"
+; clauseoAppRemovedByAv: Clauseo.exe wasn't in the install folder once the files were placed,
+; because Windows security removed or blocked it as setup wrote it (windows/hooks.nsh,
+; CLAUSEO_APP_EXE_CHECK); both installers, every mode: a box, skipped by /S, then exit code 28
+; and the install fails. Provisional Hindi, to be reviewed (2026-11-09):
+; "Protection history" is translated, its English name kept in brackets, since Windows
+; Security's own Hindi screen may name it differently.
+LangString clauseoAppRemovedByAv ${LANG_HINDI} "इंस्टॉल होते समय Windows Security ने Clauseo का एक हिस्सा रोक दिया, इसलिए Clauseo नहीं खुल सकता। Windows Security खोलें, सुरक्षा इतिहास (Protection history) चुनें, Clauseo को अनुमति दें, फिर Clauseo दोबारा इंस्टॉल करें।"
 
 ; webview2TooOld: a per-user install found WebView2 older than Clauseo needs and, so as never to
 ; ask for an administrator, leaves it to Windows to update (installer.nsi block
