@@ -28,7 +28,8 @@ pub(crate) const ASK_MODE: &str = "workspace-write";
 /// The mode a jailed Codex runs in (R17, orchestrator's ruling of 2026-11-08): codex-acp 2.2.2's
 /// `agent-full-access` preset (`dist/index.js:34310-34319`: sandbox `dangerFullAccess`, approval
 /// `never`), the jail being the fence. codex-acp sends its preset's approval policy with every
-/// turn (`:35598-35615`), so a jailed Codex never asks. Its modes are [`jailed::MODES`].
+/// turn (`:35598-35615`), so a jailed Codex never asks. Its modes ([`jailed::MODES`]) are
+/// the jail's policies.
 pub(crate) const JAILED_MODE: &str = "agent-full-access";
 /// The variable the Codex app-server takes its home from.
 pub(crate) const HOME_VAR: &str = "CODEX_HOME";
@@ -63,8 +64,8 @@ pub(crate) const DROPPED_VARS: [&str; 4] = [
 pub(crate) const MODEL_KEYS: [&str; 2] = ["model", "model_reasoning_effort"];
 
 /// The mode a Codex launch starts in (`INITIAL_AGENT_MODE`): [`JAILED_MODE`] when `jailed`,
-/// else [`ASK_MODE`] (tier C). The one place that picks it; the session's start may then switch
-/// a jailed Codex to read-only ([`jailed::start_mode`]).
+/// else [`ASK_MODE`] (tier C). The one place that picks it. A jailed Codex runs it in both its
+/// modes: read-only is the jail's policy, never Codex's preset ([`jailed`]).
 pub(crate) const fn launch_mode(jailed: bool) -> &'static str {
     if jailed { JAILED_MODE } else { ASK_MODE }
 }

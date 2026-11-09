@@ -26,12 +26,13 @@ pub(super) type Forced = (
 
 /// The forced variables of `agent`'s launch: Codex's when `codex` (its preparation), else
 /// Claude's, from the session's folders `run` and Claude's login home `claude_home`. A Codex
-/// launch that is `jailed` starts in the jailed preset (`codex::launch_mode`).
+/// launch in the jail (`jail`, its policy's mode) starts in the jailed preset in either mode
+/// (`codex::launch_mode`).
 pub(super) fn of(
     actor: &Actor,
     agent: &AgentId,
     settings_env: &BTreeMap<String, String>,
-    (codex, jailed): (Option<CodexPrepared>, bool),
+    (codex, jail): (Option<CodexPrepared>, Option<&'static str>),
     run: &RunFolders,
     claude_home: Option<&Path>,
 ) -> Forced {
@@ -52,13 +53,13 @@ pub(super) fn of(
     );
     forced.insert(
         OsString::from(agent::codex::MODE_VAR),
-        OsString::from(agent::codex::launch_mode(jailed)),
+        OsString::from(agent::codex::launch_mode(jail.is_some())),
     );
     let codex = CodexAgent {
         folder: prepared.folder,
         guard,
         key_retry: KeyRetry::default(),
-        jailed,
+        jail,
     };
     (forced, Some((codex, prepared.login)))
 }

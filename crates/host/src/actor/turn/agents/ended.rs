@@ -19,7 +19,8 @@ use crate::log_file::LIFECYCLE;
 pub(super) enum StopCause {
     /// The host closed it (a stop, a failed launch): `Closed`.
     Asked,
-    /// It starts again in its matter's new folder: `Restarting`.
+    /// It starts again in its matter's new folder, or under a jailed Codex's new mode's
+    /// policy (`forced_mode::switch`): `Restarting`.
     Restarting,
     /// It had nothing pending for the idle limit, or the live-agents cap needed its place
     /// (`idle.rs`): `IdleStopped`.
@@ -56,6 +57,35 @@ pub(in super::super) fn stop(actor: &mut Actor, thread: ThreadId) {
     for item in waiting {
         fail_waiting(actor, thread, &item, &Error::Closed);
     }
+    // The session is ending: its case-law relay refuses from now on (R24).
+    launch_checks::relay::end_for(actor, thread);
+}
+
+/// Stops `thread`'s attached agent for its pending mode switch (`forced_mode::switch`), at a
+/// turn boundary: the switch, then any work waiting, go to the agent started after its `Ended`,
+/// which launches under the new mode's policy and resumes the session (the matter move's
+/// restart, `restart_if_moved`); its detach logs `Restarting`. A launch's policy never widens in place.
+pub(in super::super) fn restart_for_switch(actor: &mut Actor, thread: ThreadId) {
+    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
+        return;
+    };
+    let Some(switch) = agent.switch.take() else {
+        return;
+    };
+    agent.after_stop.push(switch);
+    if agent.stage == Stage::Stopping {
+        return;
+    }
+    tracing::info!(target: LIFECYCLE, %thread, "the agent starts again under its new mode");
+    agent.stop_cause = if agent.stage == Stage::Closed || agent.link.closed() {
+        StopCause::Closed
+    } else {
+        StopCause::Restarting
+    };
+    agent.link.stop();
+    agent.stage = Stage::Stopping;
+    let waiting = std::mem::take(&mut agent.waiting);
+    agent.after_stop.extend(waiting);
     // The session is ending: its case-law relay refuses from now on (R24).
     launch_checks::relay::end_for(actor, thread);
 }
@@ -98,8 +128,9 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
     launch_checks::remove_run(actor, thread, agent.link.tree_watch());
     let Agent {
         session,
-        waiting,
+        mut waiting,
         after_stop,
+        switch,
         stop_cause,
         denied_data_folder,
         ..
@@ -136,6 +167,8 @@ pub(in super::super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: End
         denied_data_folder,
         "agent ended"
     );
+    // A mode switch held for a turn the exit cut short: the mode stays as it was.
+    waiting.extend(switch);
     let exited = Error::refused(ErrorCode::AgentExited, "the agent exited");
     for item in waiting {
         fail_waiting(actor, thread, &item, &exited);

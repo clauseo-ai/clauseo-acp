@@ -4,10 +4,10 @@
 
 use clauseo_acp::PendingKey;
 use clauseo_protocol::{
-    AgentChoiceId, CommandOutcome, CompactString, ConfigOption, ElicitationId, ElicitationOutcome,
-    ElicitationRequest, ElicitationResolved, ElicitationResponse, ErrorCode, ModeChanged,
-    PermissionChoice, PermissionKind, PermissionRequestId, PermissionResolved, Principal,
-    RawPayload, StreamId, ThreadId,
+    AgentChoiceId, CommandOutcome, CompactString, ConfigOption, ConfigOptionsReplaced,
+    ElicitationId, ElicitationOutcome, ElicitationRequest, ElicitationResolved,
+    ElicitationResponse, ErrorCode, ModeChanged, PermissionChoice, PermissionKind,
+    PermissionRequestId, PermissionResolved, Principal, RawPayload, StreamId, ThreadId,
 };
 
 use super::super::commands::{AfterCommand, CommandCtx};
@@ -372,4 +372,24 @@ fn answered<T>(same: bool, result: Result<T, clauseo_acp::Error>) -> Result<T, E
         ));
     }
     result.map_err(Error::Acp)
+}
+
+/// A jailed Codex's mode command answered by the host (`forced_mode::switch`): its receipt,
+/// with the thread's `options` for a `SetConfigOption`. Nothing reaches the agent, and no
+/// `ModeChanged`: the attach of the agent that runs the mode logged it.
+pub(super) fn jail_mode(
+    actor: &mut Actor,
+    thread: ThreadId,
+    ctx: CommandCtx,
+    options: Option<ConfigOptionsReplaced>,
+) {
+    let done = Out::new(actor, thread, Some(ctx.id)).and_then(|mut out| {
+        if let Some(options) = options {
+            out.push(actor, options)?;
+        }
+        send_answer(actor, ctx, thread, out, Then::Nothing)
+    });
+    if let Err(error) = done {
+        actor.finish_command(ctx.id, Err(error));
+    }
 }

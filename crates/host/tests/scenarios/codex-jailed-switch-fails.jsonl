@@ -1,0 +1,3 @@
+{"scenario":"codex-jailed-switch-fails","description":"A relaunch for a jailed Codex's mode switch that fails (R17 PR-D2c): the agent exits on initialize, so its session never attaches.","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"exit":{"code":1}}

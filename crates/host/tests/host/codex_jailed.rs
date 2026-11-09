@@ -1,21 +1,23 @@
 //! A jailed Codex's modes through the host and the launcher seam (R17 PR-D2c, the
-//! orchestrator's ruling B): it launches in the jailed preset and offers only read-only and the
-//! preset; `SetMode` or `SetConfigOption` naming another mode is refused with
-//! `sandbox.ask_mode_unavailable` and never reaches the agent; a thread whose saved mode asks
-//! starts read-only, logged once, and a saved preset stays after a restart; a move to an asking
-//! mode by itself is switched to read-only.
+//! orchestrator's rulings B and 1): it always runs the agent-full-access preset, and its two
+//! modes are the jail's policies. `SetMode` or `SetConfigOption` naming another mode is refused
+//! with `sandbox.ask_mode_unavailable` and never reaches the agent; a switch relaunches it at the
+//! turn boundary under the new policy, its `ModeChanged` logged only once the new agent runs; a
+//! thread whose saved mode asks launches read-only; the agent's own mode changes are ignored.
 
 use std::sync::Arc;
+use std::thread::JoinHandle;
 
 use clauseo_protocol::{
-    AgentChoiceId, CommandOutcome, ConfigOption, ConfigOptionKind, ConfigValue, DomainEvent,
-    ErrorCode, HostCommand, Seq, StopReason, StreamId, ThreadId,
+    AgentChoiceId, CommandEnvelope, CommandOutcome, ConfigOption, ConfigOptionKind, ConfigValue,
+    DetachReason, DomainEvent, ErrorCode, HostCommand, HostError, Seq, StopReason, StreamId,
+    ThreadId,
 };
 
 use crate::codex::{CODEX, codex_dir, run_turn};
 use crate::observe::Events;
 use crate::sandbox_rig::{Answer, Env, Fake, start_run};
-use crate::support::{Running, Scenario, matter_with_thread};
+use crate::support::{Running, Scenario, command_id, matter_with_thread, wait};
 
 fn set_mode(thread: ThreadId, mode: &str) -> HostCommand {
     HostCommand::SetMode {
@@ -121,47 +123,45 @@ fn a_jailed_codex_starts_in_the_preset_offers_two_modes_and_refuses_the_rest() {
             ErrorCode::SandboxAskModeUnavailable,
         );
     }
-    assert_eq!(host.ok(set_mode(thread, "read-only")), CommandOutcome::Done);
-    // Back to the preset through the option: its answer's four modes are logged as two.
-    let back = set_config_mode(thread, "agent-full-access");
-    assert_eq!(host.ok(back), CommandOutcome::Done);
+    // The mode it runs in is answered by the host: no call, no event, no relaunch.
+    assert_eq!(
+        host.ok(set_mode(thread, "agent-full-access")),
+        CommandOutcome::Done
+    );
+    let same = set_config_mode(thread, "agent-full-access");
+    assert_eq!(host.ok(same), CommandOutcome::Done);
     host.settle();
     events.drain_ready();
     events.assert_no_mismatch();
-    assert_eq!(modes(&events), ["agent-full-access", "read-only"]);
-    assert_eq!(
-        mode_option(&events),
-        Some((
-            "agent-full-access".to_owned(),
-            vec!["read-only".to_owned(), "agent-full-access".to_owned()]
-        ))
-    );
+    assert_eq!(modes(&events), ["agent-full-access"]);
+    assert_eq!(fake.calls().len(), 1);
+    assert!(!fake.calls()[0].policy.matter_read_only());
     host.shutdown();
 }
 
-/// A jailed Codex that moves itself to an asking mode is switched to read-only.
+/// A jailed Codex that moves itself to an asking mode, and says so in its mode option: neither
+/// is logged nor applied, and the session is put back in the preset, not read-only's.
 #[test]
-fn a_jailed_codex_moving_itself_to_an_asking_mode_is_switched_to_read_only() {
+fn a_jailed_codex_moving_itself_is_ignored_and_put_back_in_the_preset() {
     let dir = codex_dir("codex_jailed_moves", "codex-handshake");
     dir.set_agents(&[(CODEX, Scenario::Local("codex-jailed-moves"))]);
-    let (host, _fake) = jailed(&dir, 0);
+    let (host, fake) = jailed(&dir, 0);
     let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("a.txt", "x\n")], CODEX);
     let mut events = host.events(StreamId::Thread(thread));
-    run_turn(&host, &mut events, thread);
-    events.until("ModeChanged read-only", |e| modes(e).len() == 3);
+    let turn = run_turn(&host, &mut events, thread);
     events.assert_no_mismatch();
-    assert_eq!(
-        modes(&events),
-        ["agent-full-access", "workspace-write", "read-only"],
-        "{}",
-        events.dump()
-    );
+    assert_eq!(events.turn_text(turn), "Moved.", "{}", events.dump());
+    assert_eq!(modes(&events), ["agent-full-access"], "{}", events.dump());
+    let option = mode_option(&events).unwrap();
+    assert_eq!(option.0, "agent-full-access");
+    assert_eq!(fake.calls().len(), 1);
     host.shutdown();
 }
 
-/// Run 0 at tier C saves `workspace-write`; run 1 is jailed and starts read-only.
+/// Run 0 at tier C saves `workspace-write`; run 1 is jailed and launches under the read-only
+/// policy. The agent then asks for full access by itself: nothing changes.
 #[test]
-fn a_saved_asking_mode_starts_read_only_when_codex_becomes_jailed() {
+fn a_saved_asking_mode_starts_read_only_and_the_agent_cannot_leave_it() {
     let dir = codex_dir("codex_jailed_saved_ask", "codex-handshake");
     let host = dir.start(0);
     let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("a.txt", "x\n")], CODEX);
@@ -181,12 +181,16 @@ fn a_saved_asking_mode_starts_read_only_when_codex_becomes_jailed() {
     let turn = run_turn(&host, &mut events, thread);
     events.assert_no_mismatch();
     assert_eq!(events.turn_text(turn), "Read-only.", "{}", events.dump());
+    // Read-only is the jail's policy; Codex runs the preset.
     assert_eq!(
         mode_var(&fake.envs()[0]).as_deref(),
         Some("agent-full-access")
     );
-    // The effective mode, logged once, and the options cut to the two at it.
+    assert!(fake.calls()[0].policy.matter_read_only());
+    // The effective mode, logged once, and the options cut to the two at it. The agent's own
+    // request for full access mid-turn changed nothing: no event, no relaunch.
     assert_eq!(modes(&events), ["read-only"]);
+    assert_eq!(fake.calls().len(), 1);
     assert_eq!(
         mode_option(&events),
         Some((
@@ -211,7 +215,7 @@ fn a_saved_preset_stays_after_a_restart() {
     host.shutdown();
 
     dir.set_agents(&[(CODEX, Scenario::Local("codex-jailed-saved-full"))]);
-    let (host, _fake) = jailed(&dir, 1);
+    let (host, fake) = jailed(&dir, 1);
     let mut events = host.events_after(StreamId::Thread(thread), Seq::new(head).ok());
     events.until_caught_up();
     let turn = run_turn(&host, &mut events, thread);
@@ -223,5 +227,123 @@ fn a_saved_preset_stays_after_a_restart() {
         events.dump()
     );
     assert_eq!(modes(&events), ["agent-full-access"]);
+    assert!(!fake.calls()[0].policy.matter_read_only());
+    host.shutdown();
+}
+
+/// Sends `command` from a thread of its own, so the test goes on while it waits.
+fn send(host: &Running, command: HostCommand) -> JoinHandle<Result<CommandOutcome, HostError>> {
+    let handle = host.handle.clone();
+    std::thread::spawn(move || {
+        let envelope = CommandEnvelope {
+            command_id: command_id(),
+            command,
+        };
+        wait("dispatch", handle.dispatch(envelope))
+    })
+}
+
+/// The switch's order: the lawyer picks Read-only mid-turn and nothing changes while the turn
+/// runs; the turn ends, the agent stops (`Restarting`) and is launched again under the read-only
+/// policy with its session resumed, and only then is `ModeChanged` logged; the next prompt runs
+/// there.
+#[test]
+fn a_switch_to_read_only_relaunches_at_the_turn_boundary_then_logs_the_mode() {
+    let dir = codex_dir("codex_jailed_switch", "codex-handshake");
+    let (host, fake) = jailed(&dir, 0);
+    let plays = ["codex-jailed-switch", "codex-jailed-switched"];
+    fake.play(&plays.map(Scenario::Local));
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("a.txt", "x\n")], CODEX);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (first, _) = host.prompt(thread, "Edit clause 1.");
+    events.until("the permission request", |e| {
+        !e.permission_requests().is_empty()
+    });
+    let picked = send(&host, set_mode(thread, "read-only"));
+    host.settle();
+    events.drain_ready();
+    // Held to the boundary: no event and no relaunch while the turn runs.
+    assert!(!picked.is_finished());
+    assert_eq!(modes(&events), ["agent-full-access"]);
+    assert_eq!(fake.calls().len(), 1);
+    let request = events.permission_requests()[0];
+    let option_id = AgentChoiceId::new("allow-once").unwrap();
+    let answer = HostCommand::AnswerPermission {
+        thread,
+        request,
+        option_id,
+    };
+    assert_eq!(host.ok(answer), CommandOutcome::Done);
+    assert_eq!(picked.join().unwrap(), Ok(CommandOutcome::Done));
+    events.until("ModeChanged read-only", |e| modes(e).len() == 2);
+    let ended = events.position(|e| matches!(e, DomainEvent::TurnEnded(end) if end.turn == first));
+    let detached = events.position(|e| {
+        matches!(e, DomainEvent::AgentSessionDetached(d) if d.reason == DetachReason::Restarting)
+    });
+    let attached = (events.events().enumerate())
+        .filter(|(_, e)| matches!(e, DomainEvent::AgentSessionAttached(_)))
+        .nth(1)
+        .map(|(at, _)| at);
+    let changed =
+        events.position(|e| matches!(e, DomainEvent::ModeChanged(c) if c.mode_id == "read-only"));
+    let order = [ended, detached, attached, changed];
+    assert!(order.iter().all(Option::is_some), "{}", events.dump());
+    assert!(order.is_sorted(), "{order:?}: {}", events.dump());
+    // Launched again under the read-only policy; Codex runs the preset in both.
+    let calls = fake.calls();
+    assert_eq!(calls.len(), 2);
+    assert!(!calls[0].policy.matter_read_only());
+    assert!(calls[1].policy.matter_read_only());
+    let envs = fake.envs();
+    assert!(
+        envs.iter()
+            .all(|env| mode_var(env).as_deref() == Some("agent-full-access"))
+    );
+    let second = run_turn(&host, &mut events, thread);
+    events.assert_no_mismatch();
+    assert_eq!(
+        events.turn_text(second),
+        "Read-only now.",
+        "{}",
+        events.dump()
+    );
+    let started = events.position(|e| crate::observe::started(e, second));
+    assert!(started > changed, "{}", events.dump());
+    assert_eq!(modes(&events), ["agent-full-access", "read-only"]);
+    assert_eq!(fake.calls().len(), 2);
+    host.shutdown();
+}
+
+/// A relaunch for a switch that fails before its session attaches: the `SetMode` fails with
+/// the launch's error, no `ModeChanged` is logged, and the mode stays as it was, so the next
+/// prompt launches under the normal policy.
+#[test]
+fn a_failed_relaunch_logs_no_mode_and_keeps_the_mode() {
+    let dir = codex_dir("codex_jailed_switch_fails", "codex-handshake");
+    let (host, fake) = jailed(&dir, 0);
+    let plays = [
+        "codex-jailed-new",
+        "codex-jailed-switch-fails",
+        "codex-jailed-saved-full",
+    ];
+    fake.play(&plays.map(Scenario::Local));
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("a.txt", "x\n")], CODEX);
+    let mut events = host.events(StreamId::Thread(thread));
+    run_turn(&host, &mut events, thread);
+    let error = host.dispatch(set_mode(thread, "read-only")).unwrap_err();
+    assert!(error.code().as_str().starts_with("agent."), "{error}");
+    host.settle();
+    events.drain_ready();
+    assert_eq!(modes(&events), ["agent-full-access"], "{}", events.dump());
+    assert!(fake.calls()[1].policy.matter_read_only());
+    let turn = run_turn(&host, &mut events, thread);
+    assert_eq!(
+        events.turn_text(turn),
+        "Still on its own.",
+        "{}",
+        events.dump()
+    );
+    assert!(!fake.calls()[2].policy.matter_read_only());
+    assert!(!modes(&events).iter().any(|mode| mode == "read-only"));
     host.shutdown();
 }

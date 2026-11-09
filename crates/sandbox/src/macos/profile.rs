@@ -196,14 +196,22 @@ impl Writer {
 
     /// The policy's allows, before any of its denies.
     fn allows(&mut self, policy: &Policy, p: &Params) {
-        self.note("\n; The matter and the state folder: read and write.");
         let matter = self.param("MATTER", policy.matter());
         let state = self.param("STATE", policy.state());
-        self.rule(
-            "allow",
-            "file-read* file-write*",
-            &[subpath(&matter), subpath(&state)],
-        );
+        if policy.matter_read_only() {
+            self.note(
+                "\n; The matter: read only (read-only mode). The state folder: read and write.",
+            );
+            self.rule("allow", "file-read*", &[subpath(&matter)]);
+            self.rule("allow", "file-read* file-write*", &[subpath(&state)]);
+        } else {
+            self.note("\n; The matter and the state folder: read and write.");
+            self.rule(
+                "allow",
+                "file-read* file-write*",
+                &[subpath(&matter), subpath(&state)],
+            );
+        }
         self.tmpdir(p);
 
         self.note("\n; Runtime: read, run and map as code.");

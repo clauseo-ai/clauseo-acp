@@ -1,6 +1,7 @@
 //! The fake launcher seam the sandbox launch tests share (R17 PR-B2): what it was asked, what
 //! it answers, and a host started with it.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
@@ -28,6 +29,9 @@ pub(crate) struct Counting {
     inner: PassthroughLauncher,
     launched: Arc<AtomicUsize>,
     specs: Mutex<Vec<LaunchSpec>>,
+    /// The scenario each next launch plays instead of the settings', in order, the last one
+    /// again once they run out ([`Fake::play`]); none: the settings'.
+    plays: Mutex<Vec<Scenario>>,
 }
 
 impl Counting {
@@ -37,6 +41,7 @@ impl Counting {
             inner: dir.launcher(),
             launched: Arc::clone(&launched),
             specs: Mutex::new(Vec::new()),
+            plays: Mutex::new(Vec::new()),
         });
         (counting, launched)
     }
@@ -56,7 +61,21 @@ impl Launcher for Counting {
     fn launch(&self, spec: &LaunchSpec) -> Result<Launched, clauseo_process::Error> {
         self.launched.fetch_add(1, Ordering::SeqCst);
         self.specs.lock().unwrap().push(spec.clone());
-        self.inner.launch(spec)
+        let play = {
+            let mut plays = self.plays.lock().unwrap();
+            if plays.len() > 1 {
+                Some(plays.remove(0))
+            } else {
+                plays.first().cloned()
+            }
+        };
+        let Some(play) = play else {
+            return self.inner.launch(spec);
+        };
+        let args = vec![OsString::from("--scenario"), OsString::from(play.arg())];
+        let (program, cwd) = (spec.program().to_path_buf(), spec.cwd().to_path_buf());
+        self.inner
+            .launch(&LaunchSpec::new(program, args, spec.env().clone(), cwd)?)
     }
 }
 
@@ -149,6 +168,11 @@ impl Fake {
         let (fake, launched) = Self::make(dir, answer, Some(hold));
         *fake.entered.lock().unwrap() = Some(entered);
         (Arc::new(fake), launched, release, asked)
+    }
+
+    /// Each next launch through the seam plays these scenarios, in order, the last one again.
+    pub(crate) fn play(&self, scenarios: &[Scenario]) {
+        *self.launcher.plays.lock().unwrap() = scenarios.to_vec();
     }
 
     /// Every `after_session` from now on moves these names ([`moved`]).

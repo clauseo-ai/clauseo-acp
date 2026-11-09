@@ -449,12 +449,9 @@ fn attach_commit(
         },
     )?;
     if let Some(modes) = &start.modes {
-        out.push(
-            actor,
-            ModeChanged {
-                mode_id: modes.current.clone(),
-            },
-        )?;
+        // A jailed Codex's is its launch's policy, not the preset it runs (`forced_mode.rs`).
+        let mode_id = super::forced_mode::shown(actor, thread).unwrap_or(modes.current.clone());
+        out.push(actor, ModeChanged { mode_id })?;
     }
     if !start.config_options.is_empty() {
         out.push(

@@ -425,3 +425,63 @@ fn many_findings_stay_within_the_link_rule_budget() {
     let bytes: usize = profile.args().iter().map(|a| a.len()).sum();
     assert!(bytes < 64 * 1024, "{bytes} bytes");
 }
+
+/// The top-level forms of `text` that allow a write, comments and strings skipped.
+fn write_allows(text: &str) -> Vec<String> {
+    let (mut forms, mut form, mut depth, mut quoted) = (Vec::new(), String::new(), 0_u32, false);
+    for line in text
+        .lines()
+        .filter(|line| !line.trim_start().starts_with(';'))
+    {
+        for c in line.chars().chain(['\n']) {
+            match c {
+                '"' => quoted = !quoted,
+                '(' if !quoted => depth += 1,
+                ')' if !quoted => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+            if depth > 0 || !form.is_empty() {
+                form.push(c);
+            }
+            if depth == 0 && !form.is_empty() && c == ')' {
+                forms.push(std::mem::take(&mut form));
+            }
+        }
+    }
+    forms.retain(|form| form.starts_with("(allow") && form.contains("file-write"));
+    forms
+}
+
+/// The negative golden of the host's read-only mode (`Policy::matter_read_only`): the matter is
+/// read, and no allow that writes names it; the state, temp and notes folders keep theirs.
+#[test]
+fn a_read_only_matter_gets_no_write_allow() {
+    let w = World::new("profile-read-only-matter");
+    let matter = "(subpath (param \"MATTER\"))";
+    let build = |read_only: bool| {
+        let policy = w
+            .builder()
+            .notes(w.at("data/agent-state/m1/notes"))
+            .matter_read_only(read_only)
+            .build()
+            .unwrap();
+        SeatbeltProfile::new(&policy, TAG)
+            .unwrap()
+            .text()
+            .to_owned()
+    };
+    let text = build(true);
+    let writes = write_allows(&text);
+    assert!(
+        writes.iter().all(|form| !form.contains("MATTER")),
+        "{writes:#?}"
+    );
+    assert!(writes.iter().any(|form| form.contains("(param \"STATE\")")));
+    assert!(writes.iter().any(|form| form.contains("(param \"NOTES\")")));
+    assert!(
+        text.contains(&format!("(allow file-read*\n  {matter})")),
+        "{text}"
+    );
+    let wide = write_allows(&build(false));
+    assert!(wide.iter().any(|form| form.contains(matter)), "{wide:#?}");
+}

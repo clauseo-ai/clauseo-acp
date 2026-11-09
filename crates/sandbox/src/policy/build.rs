@@ -139,6 +139,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
         link_targets,
         link_folders,
         read_only_in_matter,
+        matter_read_only: b.matter_read_only,
     })
 }
 

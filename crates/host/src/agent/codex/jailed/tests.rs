@@ -1,5 +1,6 @@
-//! A jailed Codex's modes (R17 PR-D2c): exactly two, a start that never asks, a saved asking
-//! mode that starts read-only, and the refusals' code.
+//! A jailed Codex's modes (R17 PR-D2c): exactly two, both run in the preset, a launch's policy
+//! from the switch it carries or the saved mode, a saved asking mode that starts read-only, and
+//! the refusals' code.
 
 use clauseo_acp::{SessionMode, SessionModes};
 use clauseo_protocol::{
@@ -8,7 +9,7 @@ use clauseo_protocol::{
 
 use super::{
     MODES, READ_ONLY, allowed, check, check_launch, is_mode_option, keep_modes, keep_options,
-    start_mode,
+    launch_policy, start_mode,
 };
 use crate::agent::codex::{ASK_MODE, JAILED_MODE, launch_mode};
 
@@ -63,6 +64,36 @@ fn only_the_two_modes_are_allowed_and_every_other_is_refused_with_its_code() {
     // By exact id.
     assert!(!allowed("Read-only"));
     assert!(!allowed("agent-full-access "));
+}
+
+/// A launch's policy: the lawyer's switch it carries, when one of the two; else the saved mode
+/// as `start_mode` reads it. An asking switch never picks the normal policy.
+#[test]
+fn a_launch_takes_the_switch_it_carries_else_the_saved_mode() {
+    for saved in [
+        None,
+        Some(READ_ONLY),
+        Some(JAILED_MODE),
+        Some("workspace-write"),
+    ] {
+        for had_session in [true, false] {
+            for mode in MODES {
+                assert_eq!(launch_policy(Some(mode), saved, had_session), mode);
+            }
+            let fallback = start_mode(saved, had_session);
+            for asked in ASKING.into_iter().map(Some).chain([None]) {
+                assert_eq!(
+                    launch_policy(asked, saved, had_session),
+                    fallback,
+                    "{asked:?}"
+                );
+            }
+        }
+    }
+    assert_eq!(
+        launch_policy(Some("workspace-write"), Some("agent"), true),
+        READ_ONLY
+    );
 }
 
 #[test]

@@ -33,7 +33,7 @@ mod ended;
 mod forced;
 
 use ended::{StopCause, stop_closed};
-pub(super) use ended::{hold_stop, idle_stop, log_detach, on_ended, stop};
+pub(super) use ended::{hold_stop, idle_stop, log_detach, on_ended, restart_for_switch, stop};
 
 /// Work that waits for the agent's session.
 #[derive(Debug)]
@@ -73,6 +73,8 @@ pub(super) struct Agent {
     pub(super) waiting: Vec<Waiting>,
     /// Work that came while it was stopping: a new agent takes it after `Ended`.
     pub(super) after_stop: Vec<Waiting>,
+    /// A jailed Codex's mode switch held to the turn boundary (`forced_mode::switch`).
+    pub(super) switch: Option<Waiting>,
     /// The matter folder it was started in, its working directory.
     pub(super) folder: PathBuf,
     /// Why it is being stopped, which picks the detach a stop logs.
@@ -130,8 +132,9 @@ pub(super) struct CodexAgent {
     pub(super) guard: bool,
     /// Its one `authenticate` with its key (`key_retry.rs`).
     pub(super) key_retry: KeyRetry,
-    /// It runs in the jail: only `codex::jailed::MODES` (`forced_mode.rs`).
-    pub(super) jailed: bool,
+    /// In the jail, the mode its launch's policy is (one of `codex::jailed::MODES`,
+    /// `forced_mode.rs`); `None` at tier C.
+    pub(super) jail: Option<&'static str>,
 }
 
 /// Runs `waiting` once `thread`'s agent has a session, launching the agent first.
@@ -230,6 +233,7 @@ pub(super) fn launch_now(
         info: None,
         waiting,
         after_stop: Vec::new(),
+        switch: None,
         folder,
         stop_cause: StopCause::Asked,
         session: None,
@@ -287,12 +291,13 @@ fn launch(
     })?;
     // The relay token reaches the agent in a file; its stderr tail hides it all the same.
     let redacted = super::launch_checks::relay::redacted(&prepared.run);
+    let jail = prepared.jail_mode();
     let folder = prepared.stored;
     let (mut forced, codex) = forced::of(
         actor,
         &row.agent,
         &settings.env,
-        (prepared.codex, prepared.sandbox.is_some()),
+        (prepared.codex, jail),
         &prepared.run,
         prepared.claude_home.as_deref(),
     );
@@ -483,6 +488,12 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
 }
 
 pub(super) fn run_waiting(actor: &mut Actor, thread: ThreadId, waiting: Waiting) {
+    let stopping = state(actor, thread).and_then(|state| state.agent.as_deref_mut());
+    if let Some(agent) = stopping.filter(|agent| agent.stage == Stage::Stopping) {
+        // A relaunch for a mode switch began before it (`forced_mode::switch`).
+        agent.after_stop.push(waiting);
+        return;
+    }
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref()) else {
         fail_waiting(actor, thread, &waiting, &lost("the agent"));
         return;
@@ -497,6 +508,9 @@ pub(super) fn run_waiting(actor: &mut Actor, thread: ThreadId, waiting: Waiting)
         actor.finish_command(ctx, Err(error));
         return;
     }
+    let Some(waiting) = super::forced_mode::switch(actor, thread, waiting) else {
+        return;
+    };
     match waiting {
         Waiting::Turn(turn) => steps::on_launched(actor, thread, turn),
         Waiting::Config(ctx, option, value) => {

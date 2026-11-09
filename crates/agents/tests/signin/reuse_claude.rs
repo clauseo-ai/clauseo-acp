@@ -240,6 +240,25 @@ fn stop_using_login_writes_no_reuse_and_runs_no_logout() {
     assert!(!fx.marker(&claude(), "no-reuse").exists());
 }
 
+/// A jailed launch refused the reused login (R17 PR-D2c): the leave with `ClaudeSandbox` shows
+/// it and writes `no-reuse`, so the next status check offers that login no more, no loop.
+#[test]
+fn a_claude_sandbox_leave_writes_no_reuse_so_the_login_is_not_offered_again() {
+    let fx = Fixture::new("reuse-claude-sandbox", "ok-after:0");
+    plant_lawyer(&fx, "claude.ai", EMAIL);
+    let (agents, events) = fx.start();
+    reuse(&agents, &events);
+    agents
+        .stop_using_login(&claude(), Some(Found::ClaudeSandbox))
+        .unwrap();
+    assert_eq!(events.state(), signed_out(Some(Found::ClaudeSandbox)));
+    assert!(fx.marker(&claude(), "no-reuse").is_file());
+    assert!(!fx.marker(&claude(), "login-source").exists());
+    assert_eq!(fx.runs_of("logout"), []);
+    agents.check_status(&claude()).unwrap();
+    assert_eq!(events.state(), signed_out(Some(Found::ReuseOff)));
+}
+
 /// UD2: with no login of the lawyer's, the status check and `find_login` say none was found;
 /// a reason that is no stop reason stops reuse as no reason does.
 #[test]

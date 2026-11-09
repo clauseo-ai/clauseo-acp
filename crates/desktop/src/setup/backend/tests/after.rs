@@ -361,6 +361,7 @@ fn each_split_reason_is_the_found_its_leave_shows() {
         Found::ReusedSignedOut
     );
     assert_eq!(leave_reason(SplitWhy::CodexSandbox), Found::CodexSandbox);
+    assert_eq!(leave_reason(SplitWhy::ClaudeSandbox), Found::ClaudeSandbox);
 }
 
 /// A jailed Codex launch met the reused login: its automatic leave ends reuse with
@@ -385,4 +386,25 @@ fn a_codex_sandbox_automatic_leave_shows_signed_out_and_does_not_restart() {
         })
     );
     assert_eq!(restarts(&rig, &codex()), 0, "held for the next login");
+}
+
+/// A jailed launch refused Claude's reused login (R17 PR-D2c): `follow_splits` leaves with
+/// `ClaudeSandbox`, and the leave ends as `SignedOut { ClaudeSandbox }`, held with nothing usable.
+/// The `no-reuse` marker that leave writes is the agents crate's (`reuse_claude.rs` checks it):
+/// these fakes write none.
+#[test]
+fn a_claude_sandbox_split_leaves_as_signed_out_claude_sandbox() {
+    let why = leave_reason(SplitWhy::ClaudeSandbox);
+    assert_eq!(why, Found::ClaudeSandbox);
+    let rig = reused_claude(false);
+    let ended = SigninState::SignedOut { found: Some(why) };
+    lock(&rig.agents.answers).insert("stop_using_login", ended);
+    let agent = claude();
+    assert_eq!(
+        rig.pumped(auto_leave(&rig.backend, &agent, Some(why))),
+        Ok(())
+    );
+    let found = Some(FoundLogin::ClaudeSandbox);
+    assert_eq!(shown(&rig, &claude()), Some(SignIn::SignedOut { found }));
+    assert_eq!(restarts(&rig, &claude()), 0);
 }

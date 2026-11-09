@@ -131,6 +131,7 @@ impl Fixture {
             skills: vec![self.data.join("profile"), self.data.join("no-such-skills")],
             sidecars: Vec::new(),
             reused: false,
+            read_only: false,
             ca_cert: None,
             roots: Some(Arc::new(|| vec![ROOT_DER.to_vec()])),
             home: Some(self.home.clone()),
@@ -516,6 +517,39 @@ fn hidden_lists_every_other_registry_matter_but_one_nested_with_this_one() {
     assert!(!built.hidden().contains(&nested));
     for other in &fx.others {
         assert!(built.hidden().contains(other));
+    }
+}
+
+/// The read-only mode's negative golden (R17 PR-D2c, ruling 1): Codex's policy with the matter
+/// read only, no write anywhere in it, and every other grant as the normal policy's (the state,
+/// temp and notes folders keep their writes). Anything that widens it fails here; the profile's
+/// and the Windows plan's own goldens are the sandbox crate's.
+#[test]
+fn codex_s_read_only_policy_writes_nothing_in_the_matter() {
+    use clauseo_sandbox::{Access, PathClass};
+    let fx = Fixture::new("codex-read-only");
+    let (prepared, mut grants) = fx.codex();
+    let normal = jail(&prepared, &grants, &[46_101]).unwrap().policy;
+    grants.read_only = true;
+    let read_only = jail(&prepared, &grants, &[46_101]).unwrap().policy;
+    assert!(read_only.matter_read_only());
+    assert!(!normal.matter_read_only());
+    assert_eq!(fx.shown(&read_only), fx.shown(&normal));
+    fx.assert_absent(&read_only);
+    let matter = read_only.matter().to_owned();
+    for path in [
+        matter.clone(),
+        matter.join("brief.docx"),
+        matter.join("a/b.txt"),
+    ] {
+        let class = read_only.classify(&path, Access::Write);
+        assert_eq!(class, PathClass::ReadOnly, "{path:?}");
+        assert_eq!(normal.classify(&path, Access::Write), PathClass::Outside);
+    }
+    let own = [read_only.session_tmpdir(), read_only.notes()];
+    for folder in own.into_iter().flatten().chain([read_only.state()]) {
+        let class = read_only.classify(&folder.join("x"), Access::Write);
+        assert_eq!(class, PathClass::Outside, "{folder:?}");
     }
 }
 

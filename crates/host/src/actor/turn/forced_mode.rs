@@ -3,24 +3,31 @@
 //!
 //! - `SetMode` and `SetConfigOption` on the mode are gated before they reach the agent
 //!   ([`refusal`]).
-//! - A jailed Codex's session starts in the mode [`codex_start`] picks, and its modes and config
-//!   options offer only `codex::jailed::MODES` ([`codex_start`], [`kept`]).
-//! - A mode the agent moves to itself outside its set is logged as it came, then
-//!   `session/set_mode` puts the session back (`default` for forced ask, read-only for a jailed
-//!   Codex), and that is logged once it answers. Meanwhile forced ask's guard hook still asks
-//!   before every tool, so the race costs no unasked change.
+//! - Forced ask: a mode the agent moves to itself outside its set is logged as it came, then
+//!   `session/set_mode` puts the session back to `default`, logged once it answers. Meanwhile
+//!   forced ask's guard hook still asks before every tool, so the race costs no unasked change.
+//! - A jailed Codex always runs the jailed preset; its mode is the host's policy, which the
+//!   launch picked ([`launch_mode`]) and the agent records (`CodexAgent::jail`). The session's
+//!   modes and options offer only `jailed::MODES`, at that mode ([`codex_start`], [`kept`]).
+//!   Only the lawyer's commands change it ([`switch`]): one for the mode it runs in is answered
+//!   at once; another is held to the turn boundary ([`at_boundary`]), where the agent is
+//!   stopped and launched again under the new policy with the session resumed
+//!   (`agents::restart_for_switch`), and its attach logs the new mode. The agent's own mode
+//!   changes (`current_mode_update`, a mode option's value in `config_option_update`) are
+//!   logged by kind and ignored ([`agent_moved`], [`kept`]): no `ModeChanged`, no relaunch.
 
 use clauseo_acp::SessionStart;
 use clauseo_protocol::{
-    AgentChoiceId, CommandId, CompactString, ConfigOption, ConfigOptionsReplaced, ConfigValue,
-    ErrorCode, ModeChanged, StreamId, ThreadId,
+    AgentChoiceId, CommandId, CompactString, ConfigCategory, ConfigOption, ConfigOptionKind,
+    ConfigOptionsReplaced, ConfigValue, ErrorCode, HeaderEntry, ModeChanged, StreamId, ThreadId,
 };
 
 use super::super::Actor;
 use super::agents::{Agent, Waiting, call};
 use super::inputs::AgentReply;
 use super::updates::{agent, commit};
-use crate::agent::codex::{self, jailed};
+use super::{answers, state};
+use crate::agent::codex::{self, JAILED_MODE, jailed};
 use crate::agent::{forced_ask, loads};
 use crate::error::Error;
 
@@ -29,21 +36,9 @@ fn held(actor: &Actor, thread: ThreadId) -> Option<&Agent> {
     actor.threads.get(&thread)?.turn.agent.as_deref()
 }
 
-/// Whether `agent` is a Codex agent in the jail.
-fn is_jailed(agent: &Agent) -> bool {
-    agent.codex.as_ref().is_some_and(|codex| codex.jailed)
-}
-
-/// The mode `agent` is put back in when it moved itself to `mode`: `None` when `mode` is in its
-/// set, or nothing forces its modes.
-fn reset_to(agent: &Agent, mode: &str) -> Option<&'static str> {
-    if agent.forced_ask && !forced_ask::mode_allowed(mode) {
-        Some(loads::CLAUDE_MODE)
-    } else if is_jailed(agent) && !jailed::allowed(mode) {
-        Some(jailed::READ_ONLY)
-    } else {
-        None
-    }
+/// The mode (the policy) of `agent` when it is a Codex agent in the jail.
+fn jail_of(agent: &Agent) -> Option<&'static str> {
+    agent.codex.as_ref().and_then(|codex| codex.jail)
 }
 
 /// Why `waiting` may not reach `thread`'s agent, with the command it fails: a mode outside
@@ -54,6 +49,7 @@ pub(super) fn refusal(
     waiting: &Waiting,
 ) -> Option<(CommandId, Error)> {
     let agent = held(actor, thread)?;
+    let jailed = jail_of(agent).is_some();
     let (ctx, mode) = match waiting {
         Waiting::Turn(_) => return None,
         Waiting::Mode(ctx, mode) => (ctx, Some(mode.as_str())),
@@ -62,7 +58,7 @@ pub(super) fn refusal(
                 ConfigValue::Select(choice) => Some(choice.as_str()),
                 ConfigValue::Boolean(_) => None,
             };
-            let sets_mode = if is_jailed(agent) {
+            let sets_mode = if jailed {
                 jailed::is_mode_option(option.as_str(), &known_options(actor, thread))
             } else {
                 !forced_ask::config_allowed(option.as_str(), mode)
@@ -84,7 +80,7 @@ pub(super) fn refusal(
         );
         return Some((ctx.id, error));
     }
-    if is_jailed(agent) {
+    if jailed {
         return jailed::check(mode.unwrap_or_default())
             .err()
             .map(|error| (ctx.id, error));
@@ -100,7 +96,7 @@ fn known_options(actor: &Actor, thread: ThreadId) -> Vec<ConfigOption> {
 }
 
 /// The thread's header: from the loaded stream, else as the actor kept it at the last unload.
-fn header_of(actor: &Actor, thread: ThreadId) -> Option<&clauseo_protocol::HeaderEntry> {
+fn header_of(actor: &Actor, thread: ThreadId) -> Option<&HeaderEntry> {
     actor
         .loaded(StreamId::Thread(thread))
         .and_then(|loaded| loaded.state.as_thread())
@@ -108,29 +104,49 @@ fn header_of(actor: &Actor, thread: ThreadId) -> Option<&clauseo_protocol::Heade
         .or(actor.threads.get(&thread)?.header.as_ref())
 }
 
-/// A Codex session's start: the mode it must run in, and whether it must be switched there
-/// first. Tier C: [`codex::ASK_MODE`]. Jailed: `jailed::start_mode` of the thread's saved mode
-/// (its header's), checked, and the start's modes and options cut to `jailed::MODES` with the
-/// mode option at that mode. A mode the agent does not offer fails with
-/// `agent.protocol_error`.
+/// The mode `waiting` asks of a jailed Codex: `SetMode`'s, or a select value of its mode option.
+fn asked_mode<'a>(actor: &Actor, thread: ThreadId, waiting: &'a Waiting) -> Option<&'a str> {
+    match waiting {
+        Waiting::Turn(_) | Waiting::Config(_, _, ConfigValue::Boolean(_)) => None,
+        Waiting::Mode(_, mode) => Some(mode.as_str()),
+        Waiting::Config(_, option, ConfigValue::Select(value)) => {
+            jailed::is_mode_option(option.as_str(), &known_options(actor, thread))
+                .then_some(value.as_str())
+        }
+    }
+}
+
+/// The mode, so the policy, of `thread`'s jailed Codex launch that `waiting` waits for: the last
+/// switch to one of `jailed::MODES` among them, else the thread's saved mode as
+/// `jailed::start_mode` reads it (an asking or unreadable one is read-only).
+pub(super) fn launch_mode(actor: &Actor, thread: ThreadId, waiting: &[Waiting]) -> &'static str {
+    let asked = waiting
+        .iter()
+        .rev()
+        .find_map(|item| asked_mode(actor, thread, item).filter(|mode| jailed::allowed(mode)));
+    let saved = header_of(actor, thread).and_then(|header| header.mode_id.as_deref());
+    let had_session = actor
+        .threads
+        .get(&thread)
+        .is_some_and(|entry| entry.row.acp_session_id.is_some());
+    jailed::launch_policy(asked, saved, had_session)
+}
+
+/// A Codex session's start: the mode the agent must run in, and whether it must be switched
+/// there first. Tier C: [`codex::ASK_MODE`]. Jailed: always the preset, the start's modes and
+/// options cut to `jailed::MODES`, the mode option at the launch's mode. A mode the agent does
+/// not offer fails with `agent.protocol_error`.
 pub(super) fn codex_start(
     actor: &Actor,
     thread: ThreadId,
     start: &mut SessionStart,
 ) -> Result<(AgentChoiceId, bool), Error> {
-    let mode = if held(actor, thread).is_some_and(is_jailed) {
-        let saved = header_of(actor, thread).and_then(|header| header.mode_id.as_deref());
-        let had_session = actor
-            .threads
-            .get(&thread)
-            .is_some_and(|entry| entry.row.acp_session_id.is_some());
-        let mode = jailed::start_mode(saved, had_session);
-        jailed::check(mode)?;
+    let mode = if let Some(policy) = held(actor, thread).and_then(jail_of) {
         if let Some(modes) = &mut start.modes {
             jailed::keep_modes(modes);
         }
-        jailed::keep_options(&mut start.config_options, Some(mode));
-        mode
+        jailed::keep_options(&mut start.config_options, Some(policy));
+        JAILED_MODE
     } else {
         codex::ASK_MODE
     };
@@ -154,25 +170,70 @@ pub(super) fn codex_start(
     Ok((id, switch))
 }
 
+/// The mode `thread`'s attach logs in place of the agent's own: a jailed Codex's policy.
+pub(super) fn shown(actor: &Actor, thread: ThreadId) -> Option<CompactString> {
+    held(actor, thread)
+        .and_then(jail_of)
+        .map(CompactString::from)
+}
+
 /// The agent's config options for `thread`'s log: a jailed Codex's mode option keeps only
-/// `jailed::MODES`.
+/// `jailed::MODES`, at the mode it runs in, whatever value the agent gave it.
 pub(super) fn kept(
     actor: &Actor,
     thread: ThreadId,
     mut options: Vec<ConfigOption>,
 ) -> ConfigOptionsReplaced {
-    if held(actor, thread).is_some_and(is_jailed) {
-        jailed::keep_options(&mut options, None);
+    if let Some(policy) = held(actor, thread).and_then(jail_of) {
+        let moved = options.iter().any(|option| {
+            let mode = option.id == jailed::MODE_OPTION || option.category == ConfigCategory::Mode;
+            mode && matches!(&option.kind, ConfigOptionKind::Select { current_value, .. }
+                if current_value != JAILED_MODE)
+        });
+        if moved {
+            tracing::info!(
+                kind = "config_option_update",
+                "a jailed Codex changed its own mode option; ignored (only the lawyer changes it)"
+            );
+        }
+        jailed::keep_options(&mut options, Some(policy));
     }
     ConfigOptionsReplaced { options }
 }
 
-/// `mode` came from the agent: switch it back when its forced set does not hold it.
-pub(super) fn reset_if_forced(actor: &mut Actor, thread: ThreadId, mode: &str) {
+/// `mode` came from the agent (`current_mode_update`). A jailed Codex's is ignored, and its
+/// session put back in the preset if it left it, unlogged; any other is logged, and forced
+/// ask's switched back when its set does not hold it.
+pub(super) fn agent_moved(
+    actor: &mut Actor,
+    thread: ThreadId,
+    mode: CompactString,
+) -> Result<(), Error> {
+    if held(actor, thread).and_then(jail_of).is_some() {
+        tracing::info!(
+            kind = "current_mode_update",
+            "a jailed Codex changed its own mode; ignored (only the lawyer changes it)"
+        );
+        if mode != JAILED_MODE {
+            set_back(actor, thread, &mode, JAILED_MODE);
+        }
+        return Ok(());
+    }
+    let forced = held(actor, thread).is_some_and(|agent| agent.forced_ask);
+    if forced && !forced_ask::mode_allowed(&mode) {
+        set_back(actor, thread, &mode, loads::CLAUDE_MODE);
+    }
+    commit(
+        actor,
+        thread,
+        [ModeChanged { mode_id: mode }.into()],
+        Vec::new(),
+    )
+}
+
+/// `session/set_mode` to `target` for `thread`'s session, which moved itself to `mode`.
+fn set_back(actor: &mut Actor, thread: ThreadId, mode: &str, target: &'static str) {
     let Some(agent) = agent(actor, thread) else {
-        return;
-    };
-    let Some(target) = reset_to(agent, mode) else {
         return;
     };
     let (Some(session), Ok(id)) = (agent.session.clone(), AgentChoiceId::new(target)) else {
@@ -192,8 +253,9 @@ pub(super) fn reset_if_forced(actor: &mut Actor, thread: ThreadId, mode: &str) {
     });
 }
 
-/// The switch back to `mode` answered: it is logged; a failure is a warning (forced ask's hook
-/// still asks).
+/// The switch back to `mode` answered: forced ask's is logged; a jailed Codex's preset is not,
+/// since its mode is the policy's. A failure is a warning (forced ask's hook still asks; the
+/// jail holds whatever Codex's preset).
 pub(super) fn on_mode_reset(
     actor: &mut Actor,
     thread: ThreadId,
@@ -204,14 +266,89 @@ pub(super) fn on_mode_reset(
     if !same {
         return;
     }
-    let logged = result
-        .map_err(Error::Acp)
-        .and_then(|()| commit(actor, thread, [ModeChanged { mode_id }.into()], Vec::new()));
+    let jailed = held(actor, thread).and_then(jail_of).is_some();
+    let logged = result.map_err(Error::Acp).and_then(|()| {
+        if jailed {
+            return Ok(());
+        }
+        commit(actor, thread, [ModeChanged { mode_id }.into()], Vec::new())
+    });
     if let Err(error) = logged {
         tracing::warn!(
             %thread,
             error = %crate::log_file::Cause(&error),
             "a session was not switched back to its allowed mode"
         );
+    }
+}
+
+/// A lawyer's `waiting` for `thread` on its attached agent: given back unless it asks a jailed
+/// Codex for a mode (after [`refusal`], so one of `jailed::MODES`). The mode it runs in is
+/// answered now. Another becomes the pending switch (a later one replaces it, answered with no
+/// event): the agent relaunches under its policy now when no turn runs, else at the boundary.
+pub(super) fn switch(actor: &mut Actor, thread: ThreadId, waiting: Waiting) -> Option<Waiting> {
+    let Some(policy) = held(actor, thread).and_then(jail_of) else {
+        return Some(waiting);
+    };
+    let Some(asked) = asked_mode(actor, thread, &waiting) else {
+        return Some(waiting);
+    };
+    let asked = if asked == jailed::READ_ONLY {
+        jailed::READ_ONLY
+    } else {
+        JAILED_MODE
+    };
+    let Some(state) = state(actor, thread) else {
+        return Some(waiting);
+    };
+    let running = state.current.is_some() || state.closing.is_some();
+    let Some(agent) = state.agent.as_deref_mut() else {
+        return Some(waiting);
+    };
+    let replaced = agent.switch.take();
+    let now = if asked == policy {
+        Some(waiting)
+    } else {
+        tracing::info!(
+            mode = asked,
+            running,
+            "a jailed Codex's mode switches by a relaunch"
+        );
+        agent.switch = Some(waiting);
+        None
+    };
+    if let Some(old) = replaced {
+        answer(actor, thread, &old);
+    }
+    match now {
+        // Its attach logged the mode it runs in, and nothing else logs a jailed Codex's mode.
+        Some(waiting) => answer(actor, thread, &waiting),
+        None if !running => super::agents::restart_for_switch(actor, thread),
+        None => {}
+    }
+    None
+}
+
+/// Answers a jailed Codex's mode command `waiting` with no `ModeChanged`: the attach of the
+/// agent that runs its mode logged it. A `SetConfigOption` gets the thread's options, the mode
+/// option at the mode run in.
+fn answer(actor: &mut Actor, thread: ThreadId, waiting: &Waiting) {
+    let options = matches!(waiting, Waiting::Config(..)).then(|| {
+        let options = known_options(actor, thread);
+        kept(actor, thread, options)
+    });
+    match waiting {
+        Waiting::Mode(ctx, _) | Waiting::Config(ctx, ..) => {
+            answers::jail_mode(actor, thread, *ctx, options);
+        }
+        Waiting::Turn(_) => {}
+    }
+}
+
+/// `thread`'s turn ended (durable): a pending switch relaunches its agent now, before the queue
+/// moves on, so the next turn runs under the new policy.
+pub(super) fn at_boundary(actor: &mut Actor, thread: ThreadId) {
+    if held(actor, thread).is_some_and(|agent| agent.switch.is_some()) {
+        super::agents::restart_for_switch(actor, thread);
     }
 }

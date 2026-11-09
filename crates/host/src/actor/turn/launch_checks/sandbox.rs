@@ -63,6 +63,24 @@ pub(crate) struct Sandboxed {
     pub(crate) env: Vec<(OsString, Option<OsString>)>,
 }
 
+impl Prepared {
+    /// A jailed Codex launch's mode, as its policy is ([`Sandboxed::mode`]); `None` unjailed.
+    pub(crate) fn jail_mode(&self) -> Option<&'static str> {
+        self.sandbox.as_ref().map(Sandboxed::mode)
+    }
+}
+
+impl Sandboxed {
+    /// A jailed Codex's mode, as its policy is: read-only exactly when the matter is.
+    pub(crate) fn mode(&self) -> &'static str {
+        if self.policy.matter_read_only() {
+            crate::agent::codex::jailed::READ_ONLY
+        } else {
+            crate::agent::codex::JAILED_MODE
+        }
+    }
+}
+
 impl fmt::Debug for Sandboxed {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Sandboxed")
@@ -107,7 +125,7 @@ pub(super) fn start(
     seam: (Arc<dyn SandboxLaunchers>, SpawnOptions),
 ) {
     let (launchers, opts) = seam;
-    let grants = match policy::grants(actor, thread) {
+    let grants = match policy::grants(actor, thread, &waiting) {
         Ok(grants) => grants,
         Err(error) => {
             discard(actor, thread, prepared.run, None);

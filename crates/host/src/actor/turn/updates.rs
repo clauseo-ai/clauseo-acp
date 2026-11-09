@@ -6,8 +6,8 @@
 use clauseo_acp::{AcpEvent, AgentUpdate, MessageRole, Origin};
 use clauseo_protocol::{
     AgentId, AgentSessionId, CommandsAvailable, CompactString, CompactionStatus, ContentBlock,
-    DomainEvent, MessageId, ModeChanged, Notice, PlanReplaced, RenameSource, StreamId, TextKind,
-    ThreadId, ThreadRenamed, Title, ToolCallPatch, TurnId, UsageUpdated,
+    DomainEvent, MessageId, Notice, PlanReplaced, RenameSource, StreamId, TextKind, ThreadId,
+    ThreadRenamed, Title, ToolCallPatch, TurnId, UsageUpdated,
 };
 use clauseo_store::BlobIn;
 
@@ -481,8 +481,7 @@ fn plain(actor: &mut Actor, thread: ThreadId, update: AgentUpdate) -> Result<(),
         }
         .into(),
         AgentUpdate::CurrentMode { mode_id } => {
-            super::forced_mode::reset_if_forced(actor, thread, &mode_id);
-            ModeChanged { mode_id }.into()
+            return super::forced_mode::agent_moved(actor, thread, mode_id);
         }
         AgentUpdate::ConfigOptions(options) => {
             super::forced_mode::kept(actor, thread, options).into()

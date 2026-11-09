@@ -1,16 +1,24 @@
-//! A jailed Codex's modes (R17 PR-D2c, the orchestrator's ruling B). In the jail Codex runs
-//! codex-acp 2.2.2's [`JAILED_MODE`] preset (sandbox `dangerFullAccess`, approval `never`):
-//! codex-acp sends its preset's approval policy with every turn (`dist/index.js:35598-35615`),
-//! so no mode of it can ask before a change there. A jailed Codex has two modes, [`MODES`]:
-//! read-only, and the preset, which works on its own inside the jail (the app's "Works on its
-//! own in the Safe workspace").
+//! A jailed Codex's modes (R17 PR-D2c, the orchestrator's rulings B and 1). In the jail Codex
+//! always runs codex-acp 2.2.2's [`JAILED_MODE`] preset (sandbox `dangerFullAccess`, approval
+//! `never`): codex-acp sends its preset's approval policy with every turn
+//! (`dist/index.js:35598-35615`), so it never asks and nests no sandbox of its own. Its
+//! `ReadOnly` preset would do both (approval `on-request`, its own `readOnly` sandbox,
+//! `:34263-34274`), so it is never run. A jailed Codex's two modes, [`MODES`], are the host's
+//! policies, under the same ids the app sees:
+//!
+//! - [`READ_ONLY`]: the jail's read-only variant (`Policy::matter_read_only`): the matter is
+//!   read, never written; the state, temp and notes folders keep their writes.
+//! - [`JAILED_MODE`] ("Works on its own in the Safe workspace"): the normal jailed policy.
+//!
+//! A launch's policy never widens in place, so a switch between them relaunches the agent at
+//! the turn boundary, its session resumed (`actor/turn/forced_mode.rs`).
 //!
 //! - Only [`MODES`] are offered: the session's modes and its mode config option lose every
 //!   other value ([`keep_modes`], [`keep_options`]).
 //! - `SetMode`, or `SetConfigOption` on the mode option, naming another mode is refused with
-//!   `sandbox.ask_mode_unavailable` ([`check`]); so is a start in one.
-//! - A thread whose saved mode is any other (an asking mode, from before the jail) starts
-//!   read-only, never in the preset ([`start_mode`]); the attach logs the mode it starts in.
+//!   `sandbox.ask_mode_unavailable` ([`check`]).
+//! - A thread whose saved mode is any other (an asking mode, from before the jail), or cannot
+//!   be read, launches read-only, never in the normal policy ([`start_mode`]).
 //!
 //! Tier C (no jail) is unchanged: [`super::ASK_MODE`], every mode offered.
 
@@ -20,7 +28,8 @@ use clauseo_protocol::{ConfigCategory, ConfigOption, ConfigOptionKind, ErrorCode
 use super::JAILED_MODE;
 use crate::error::Error;
 
-/// codex-acp 2.2.2's read-only preset (`src/AgentMode.ts`, `dist/index.js:34243-34354`).
+/// The read-only mode's id, codex-acp 2.2.2's read-only preset's (`src/AgentMode.ts`,
+/// `dist/index.js:34243-34354`): here the jail's read-only policy, never that preset.
 pub(crate) const READ_ONLY: &str = "read-only";
 
 /// Every mode a jailed Codex has, in the order it shows them.
@@ -33,6 +42,19 @@ pub(crate) const MODE_OPTION: &str = "mode";
 /// Whether a jailed Codex may be in mode `id`: only [`MODES`], by exact id.
 pub(crate) fn allowed(id: &str) -> bool {
     MODES.contains(&id)
+}
+
+/// The mode, so the policy, of a jailed Codex launch: `asked` (the lawyer's switch it carries)
+/// when one of [`MODES`], else [`start_mode`] of the thread's saved mode.
+pub(crate) fn launch_policy(
+    asked: Option<&str>,
+    saved: Option<&str>,
+    had_session: bool,
+) -> &'static str {
+    match asked.and_then(|asked| MODES.into_iter().find(|mode| *mode == asked)) {
+        Some(mode) => mode,
+        None => start_mode(saved, had_session),
+    }
 }
 
 /// The mode a jailed Codex session starts in, from the thread's saved mode (its header's last

@@ -331,8 +331,9 @@ impl Agents {
     /// logout` runs. With no reason (UD2's "Stop using it here") `no-reuse` is written, so the
     /// next start does not reuse again without asking; with a reason (`ReusedFailed`,
     /// `CodexLinkSplit`, …) only the reuse record is cleared, so the next start shows
-    /// `LoginFound` again; `CodexSandbox` writes `no-reuse` too, so detection does not offer the
-    /// same login again. The state becomes `SignedOut { found: why }`. For Codex the home's
+    /// `LoginFound` again; `CodexSandbox` and `ClaudeSandbox` write `no-reuse` too, so detection
+    /// does not offer the same login again (the jail would refuse it again). The state becomes
+    /// `SignedOut { found: why }`. For Codex the home's
     /// link is removed too ([`crate::unlink_reused_login`]): R20 calls this in its leave order
     /// once every Codex process using the home has stopped, then `sign_in` and relaunch.
     /// Refused with `NotReused` for Clauseo's own login, and as `check_status` is.
