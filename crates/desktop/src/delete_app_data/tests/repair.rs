@@ -220,8 +220,12 @@ fn the_repair_relaunch_starts_clauseo_once_as_the_user_after_the_admin_step() {
             .any(|line| line.starts_with("Abort") || line == "Quit"),
         "{ask:?}"
     );
+    // A `System::Call` with `?e` pushes GetLastError's value, which a later `Pop` takes: it
+    // counts as a Push here.
     let depth = post[..relaunch].iter().fold(0i32, |depth, line| {
-        depth + i32::from(line.starts_with("Push ")) - i32::from(line.starts_with("Pop "))
+        let pushes =
+            line.starts_with("Push ") || (line.starts_with("System::Call ") && line.contains("?e"));
+        depth + i32::from(pushes) - i32::from(line.starts_with("Pop "))
     });
     assert_eq!(depth, 0, "{post:?}");
 }
