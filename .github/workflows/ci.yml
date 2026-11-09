@@ -282,35 +282,120 @@ jobs:
       # guard's crate, the agent-browser pin or this file: #549 (2026-11-06) added such a test that
       # failed first in the merge group, because the pull request's run had skipped it. The tests
       # run one at a time (nextest's real-chrome group) and the runner's Google Chrome is preinstalled.
-      - name: Fetch agent-browser for the guard's real-Chrome tests, if the guard changed
-        if: github.event_name == 'pull_request'
+      #
+      # The binary comes from main's Actions cache, keyed by its pinned sha256, and is checked
+      # against that sha256 after the restore as after a download. On a miss it is downloaded with
+      # `gh release download`, authenticated with the job's read-only token: GitHub sheds anonymous
+      # release downloads first under load (2026-11-09: hours of 504s), and github.com's release
+      # URLs ignore an Authorization header, so only the API path is authenticated. main's
+      # scheduled and on-demand runs fetch it only to fill the cache (need=fill): they set none of
+      # the test variables, so their xtask check runs as before.
+      - name: Does this run need agent-browser? Its cache key
+        id: agent-browser-key
+        if: >-
+          github.event_name == 'pull_request' || (github.ref == 'refs/heads/main'
+          && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'))
+        shell: bash
         env:
+          EVENT: ${{ github.event_name }}
           TARGET: x86_64-unknown-linux-gnu
         run: |
           set -euo pipefail
+          need=false
+          if [ "$EVENT" != pull_request ]; then
+            need="fill"
           # The merge commit's first parent is main; the second, the pull request's head.
-          if ! git diff --quiet HEAD^1 HEAD -- crates/mcp crates/desktop/agent-browser.toml .github/workflows/ci.yml; then
-            pin=crates/desktop/agent-browser.toml
-            value() {
-              awk -v table="[$TARGET]" -v key="$1" '
-                $0 == table { inside = 1; next }
-                /^\[/ { inside = 0 }
-                inside && $1 == key { gsub(/"/, "", $3); print $3 }' "$pin"
-            }
-            url=$(value url)
-            sum=$(value sha256)
-            test -n "$url" && test -n "$sum"
-            curl --fail --silent --show-error --location --retry 3 \
-              --output "$RUNNER_TEMP/agent-browser" "$url"
-            echo "$sum  $RUNNER_TEMP/agent-browser" | sha256sum --check
-            chmod +x "$RUNNER_TEMP/agent-browser"
-            test -x /usr/bin/google-chrome
-            echo "CLAUSEO_TEST_AGENT_BROWSER=$RUNNER_TEMP/agent-browser" >> "$GITHUB_ENV"
-            echo "CLAUSEO_TEST_CHROME=/usr/bin/google-chrome" >> "$GITHUB_ENV"
-            echo "The browser guard changed: the real-Chrome tests run in xtask check's nextest."
+          elif ! git diff --quiet HEAD^1 HEAD -- crates/mcp crates/desktop/agent-browser.toml .github/workflows/ci.yml; then
+            need="test"
           else
             echo "The browser guard is unchanged: its real-Chrome tests skip here and run in the merge group."
           fi
+          echo "need=$need" >> "$GITHUB_OUTPUT"
+          [ "$need" != false ] || exit 0
+          pin=crates/desktop/agent-browser.toml
+          value() {
+            awk -v table="[$TARGET]" -v key="$1" '
+              $0 == table { inside = 1; next }
+              /^\[/ { inside = 0 }
+              inside && $1 == key { gsub(/"/, "", $3); print $3 }' "$pin"
+          }
+          url=$(value url)
+          sha256=$(value sha256)
+          release='^https://github\.com/vercel-labs/agent-browser/releases/download/(v[0-9][0-9A-Za-z.+-]*)/([A-Za-z0-9._-]+)$'
+          if ! [[ "$url" =~ $release ]] || ! [[ "$sha256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::$pin's [$TARGET] needs a url under https://github.com/vercel-labs/agent-browser/releases/download/v<version>/ and a sha256 of 64 lowercase hex digits"
+            exit 1
+          fi
+          {
+            echo "url=$url"
+            echo "tag=${BASH_REMATCH[1]}"
+            echo "asset=${BASH_REMATCH[2]}"
+            echo "sha256=$sha256"
+            echo "dir=$RUNNER_TEMP/agent-browser-cache"
+          } >> "$GITHUB_OUTPUT"
+          echo "key=agent-browser-$TARGET-$sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Restore agent-browser from main's cache
+        id: agent-browser-cache
+        if: steps.agent-browser-key.outputs.need == 'test' || steps.agent-browser-key.outputs.need == 'fill'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.agent-browser-key.outputs.dir }}
+          key: ${{ steps.agent-browser-key.outputs.key }}
+
+      - name: Fetch agent-browser for the guard's real-Chrome tests, if the guard changed
+        if: steps.agent-browser-key.outputs.need == 'test' || steps.agent-browser-key.outputs.need == 'fill'
+        env:
+          NEED: ${{ steps.agent-browser-key.outputs.need }}
+          URL: ${{ steps.agent-browser-key.outputs.url }}
+          TAG: ${{ steps.agent-browser-key.outputs.tag }}
+          ASSET: ${{ steps.agent-browser-key.outputs.asset }}
+          SUM: ${{ steps.agent-browser-key.outputs.sha256 }}
+          DIR: ${{ steps.agent-browser-key.outputs.dir }}
+          HIT: ${{ steps.agent-browser-cache.outputs.cache-hit }}
+          # gh reads it from its environment; it is in no argument and never printed.
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sum=$SUM
+          file=$DIR/agent-browser
+          if [ "$HIT" = true ] && echo "$sum  $file" | sha256sum --check; then
+            echo "agent-browser from main's cache: its sha256 matches the pin."
+          else
+            [ "$HIT" != true ] || echo "::warning::agent-browser from main's cache is not the pinned file; downloading it instead"
+            rm -rf "$DIR"
+            mkdir -p "$DIR"
+            # gh has no retry of its own: 3 attempts, 10 s and then 30 s apart.
+            for attempt in 1 2 3; do
+              if gh release download "$TAG" --repo vercel-labs/agent-browser --pattern "$ASSET" --output "$file" --clobber; then
+                break
+              elif [ "$attempt" -eq 3 ]; then
+                echo "::error::could not download $URL through gh after 3 attempts"
+                exit 1
+              fi
+              echo "downloading $URL through gh (attempt $attempt of 3) failed; trying again in $((attempt * 20 - 10)) s"
+              sleep $((attempt * 20 - 10))
+            done
+            echo "$sum  $file" | sha256sum --check
+          fi
+          chmod +x "$file"
+          if [ "$NEED" = fill ]; then
+            echo "main's run: agent-browser is fetched for the cache only; the real-Chrome tests run in the merge group and on pull requests that touch the guard."
+            exit 0
+          fi
+          test -x /usr/bin/google-chrome
+          echo "CLAUSEO_TEST_AGENT_BROWSER=$file" >> "$GITHUB_ENV"
+          echo "CLAUSEO_TEST_CHROME=/usr/bin/google-chrome" >> "$GITHUB_ENV"
+          echo "The browser guard changed: the real-Chrome tests run in xtask check's nextest."
+
+      # Saved on main's scheduled and on-demand runs only, after a miss; the nightly prune deletes
+      # the older entries (cache-families.txt, agent-browser).
+      - name: Save agent-browser (main, after a miss)
+        if: steps.agent-browser-key.outputs.need == 'fill' && steps.agent-browser-cache.outputs.cache-hit != 'true'
+        uses: ./.github/actions/cache-save-main
+        with:
+          path: ${{ steps.agent-browser-key.outputs.dir }}
+          key: ${{ steps.agent-browser-key.outputs.key }}
 
       - name: cargo xtask check
         run: CI=1 cargo xtask check

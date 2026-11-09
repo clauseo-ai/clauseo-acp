@@ -101,8 +101,15 @@ runs:
       shell: bash
       env:
         PINS_DIR: ${{ steps.pins-after.outputs.dir }}
+        # The job's read-only token: each download goes through `gh release download`,
+        # authenticated (tool-cache.sh says why and how; the token is never printed), as GitHub
+        # sheds anonymous release downloads first under load. The sha256 check is the same.
+        GH_TOKEN: ${{ github.token }}
+        GITHUB_TOKEN: ${{ github.token }}
       run: bash "$GITHUB_WORKSPACE/.github/actions/install-pinned-tools/tool-cache.sh" fetch-assets
 
+    # No token here: at this commit install-action reads GITHUB_TOKEN only for its cargo-binstall
+    # fallback (main.sh), which `fallback: none` turns off; its own downloads are anonymous.
     - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
       if: steps.pins-after.outputs.spec != '' && steps.restored.outputs.cargo_tools != 'true'
       with:
@@ -138,6 +145,11 @@ runs:
       shell: bash
       env:
         ONLY: ${{ steps.pins-after.outputs.binaries }}
+        # As for fetch-assets: xtask downloads through gh, authenticated, when a token is set and
+        # gh is on PATH, and never reads the token itself (xtask/src/setup/install.rs, Fetcher).
+        # Windows installs these with winget, which takes no token.
+        GH_TOKEN: ${{ github.token }}
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
         # $ONLY is "--only <name> ..." and is split on purpose.
         # shellcheck disable=SC2086

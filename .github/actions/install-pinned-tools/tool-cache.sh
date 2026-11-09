@@ -43,8 +43,9 @@
 #
 # Environment: PINS_DIR (the folder `pins` wrote; every command but `pins` reads it), PINS_JSON
 # and NAMES (for `pins`), RUNNER_TEMP, RUNNER_OS, RUNNER_ARCH, ImageOS, GITHUB_OUTPUT, CARGO_HOME.
-# For the tests: CARGO_BIN (where tools go), TOOL_CACHE_DIR (the folder), CURL (the download
-# command).
+# GH_TOKEN or GITHUB_TOKEN, when set, authenticates fetch-assets' downloads through gh (never
+# printed). For the tests: CARGO_BIN (where tools go), TOOL_CACHE_DIR (the folder), CURL and GH
+# (the download commands), SLEEP (the wait between gh attempts).
 set -euo pipefail
 
 here=${GITHUB_WORKSPACE:?}/.github/actions/install-pinned-tools
@@ -232,13 +233,41 @@ cmd_restore() {
   echo "cargo_tools=$all" >> "$output"
 }
 
+# Downloads release asset $2 from $1 (https://github.com/<owner>/<repo>/releases/download/<tag>/
+# <asset>) to $3; returns 1 on failure. With GH_TOKEN or GITHUB_TOKEN set (the job's read-only
+# token, from action.yml) and gh on PATH, through `gh release download`, as xtask's setup does
+# (xtask/src/setup/install.rs, Fetcher): github.com's release URLs ignore an Authorization header,
+# so only the API is an authenticated download, and GitHub sheds anonymous ones first under load.
+# gh reads the token from its environment: it is in no argument and never printed. gh has no
+# retry, so it is tried 3 times, 10 s and then 30 s apart. Otherwise anonymous curl, as before.
+download() {
+  local url=$1 asset=$2 file=$3 path tag repo attempt
+  if { [ -n "${GH_TOKEN:-}" ] || [ -n "${GITHUB_TOKEN:-}" ]; } && command -v "${GH:-gh}" > /dev/null; then
+    path=${url#https://github.com/}
+    repo=$(cut -d/ -f1-2 <<< "$path")
+    tag=$(cut -d/ -f5 <<< "$path")
+    if [ "$path" = "$url" ] || [ "$(cut -d/ -f3-4 <<< "$path")" != releases/download ] || [ "${path##*/}" != "$asset" ]; then
+      warn "$url is not a GitHub release asset URL; downloading it with curl"
+    else
+      for attempt in 1 2 3; do
+        "${GH:-gh}" release download "$tag" --repo "$repo" --pattern "$asset" --output "$file" --clobber && return 0
+        [ "$attempt" -lt 3 ] || break
+        echo "downloading $asset through gh (attempt $attempt of 3) failed; trying again in $((attempt * 20 - 10)) s"
+        "${SLEEP:-sleep}" $((attempt * 20 - 10))
+      done
+      return 1
+    fi
+  fi
+  ${CURL:-curl} -sSfL --retry 5 --retry-all-errors --connect-timeout 30 --max-time 300 -o "$file" "$url"
+}
+
 cmd_fetch_assets() {
   mkdir -p "$dir/assets"
   while IFS=$'\t' read -r name asset want url; do
     [ -n "$name" ] || continue
     local file=$dir/assets/$asset
     [ -f "$file" ] && continue
-    if ! ${CURL:-curl} -sSfL --retry 5 --retry-all-errors --connect-timeout 30 --max-time 300 -o "$file" "$url"; then
+    if ! download "$url" "$asset" "$file"; then
       warn "could not download $url; cargo xtask setup --binaries tries again"
       rm -f "$file"
     elif [ "$(sha256 "$file")" != "$want" ]; then

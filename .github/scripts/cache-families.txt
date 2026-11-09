@@ -27,3 +27,6 @@ tauri-linux-debs                    ^(tauri-linux-debs-[A-Z0-9]+-[a-z0-9-]+-[0-9
 # The pinned tools (install-pinned-tools): one family per image, arch and tool list; the last
 # 16 hex digits hash the versions and checksums.
 pinned-tools                        ^(pinned-tools-v1-.+)-[0-9a-f]{16}$
+# agent-browser for the guard's real-Chrome tests (ci.yml's fast-lane): one family per target; the
+# hash is the binary's pinned sha256 (crates/desktop/agent-browser.toml).
+agent-browser                       ^(agent-browser-[a-z0-9_]+(?:-[a-z0-9_]+)+)-[0-9a-f]{64}$
