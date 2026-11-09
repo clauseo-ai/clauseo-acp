@@ -278,8 +278,8 @@ pub struct McpServerLaunch {
 pub struct ToolsSettings {
     /// Whether the agent may search the web and read web pages. On by default.
     pub web_search: bool,
-    /// Whether the agent gets Clauseo's browser. On by default on macOS; off elsewhere, and on
-    /// Windows until G17 passes.
+    /// Whether the agent gets Clauseo's browser. On by default on macOS and Windows; off on
+    /// Linux, which is for development and CI only.
     pub browser: bool,
     /// Whether data connectors (R24's paid case-law connector) may run. On by default, but
     /// nothing runs until the lawyer adds a connector. A firm turns every connector off here.
@@ -290,7 +290,7 @@ impl Default for ToolsSettings {
     fn default() -> Self {
         ToolsSettings {
             web_search: true,
-            browser: cfg!(target_os = "macos"),
+            browser: cfg!(any(target_os = "macos", windows)),
             connectors: true,
         }
     }

@@ -72,11 +72,11 @@ pub(crate) fn decode(item: &EncodedEvent) -> HostEvent {
 }
 
 /// The tool switches' defaults, as `clauseo-settings` has them: web search on, the browser on
-/// only where it is on by default (macOS).
+/// only where it is on by default (macOS and Windows).
 fn tool_defaults() -> ToolsSettingsView {
     ToolsSettingsView {
         web_search: true,
-        browser: cfg!(target_os = "macos"),
+        browser: cfg!(any(target_os = "macos", windows)),
     }
 }
 

@@ -145,11 +145,10 @@ fn the_browser_is_on_by_default_on_macos() {
     assert!(ToolsSettings::default().browser);
 }
 
-// Off on Windows until G17 passes (R21).
 #[cfg(windows)]
 #[test]
-fn the_browser_is_off_by_default_on_windows() {
-    assert!(!ToolsSettings::default().browser);
+fn the_browser_is_on_by_default_on_windows() {
+    assert!(ToolsSettings::default().browser);
 }
 
 #[cfg(not(any(windows, target_os = "macos")))]
