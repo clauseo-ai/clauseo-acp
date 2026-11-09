@@ -100,11 +100,11 @@
     "by": "app track (ReadOnlyUnavailable; orchestrator's en)"
   },
   "TN-11": {
-    "en": "ChatGPT switched itself to working without asking you, and Clauseo couldn't switch it back, so Clauseo stopped it. Start ChatGPT again to carry on.",
-    "hi": "ChatGPT ने खुद को बिना पूछे काम करने पर बदल लिया, और Clauseo उसे वापस नहीं बदल सका, इसलिए Clauseo ने उसे रोक दिया। जारी रखने के लिए ChatGPT को फिर से शुरू करें।",
+    "en": "ChatGPT switched itself to working without asking you, and Clauseo couldn't switch it back, so Clauseo stopped it. Send another message to start ChatGPT again.",
+    "hi": "ChatGPT ने खुद को बिना पूछे काम करने पर बदल लिया, और Clauseo उसे वापस नहीं बदल सका, इसलिए Clauseo ने उसे रोक दिया। ChatGPT को फिर से शुरू करने के लिए एक और संदेश भेजें।",
     "hi_status": "provisional",
     "hi_at": "2026-11-09",
-    "hi_by": "app track (ModeSetBackFailed)",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
     "status": "approved",
     "at": "2026-11-09",
     "by": "orchestrator (settled en)"

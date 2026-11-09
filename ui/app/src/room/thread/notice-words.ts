@@ -79,7 +79,7 @@ export function noticeLine(kind: NoticeKind | undefined, w: NoticeWords): string
       );
     return kind === "mode_set_back_failed"
       ? w.th(
-          "ChatGPT switched itself to working without asking you, and Clauseo couldn't switch it back, so Clauseo stopped it. Start ChatGPT again to carry on.",
+          "ChatGPT switched itself to working without asking you, and Clauseo couldn't switch it back, so Clauseo stopped it. Send another message to start ChatGPT again.",
         )
       : null;
   }

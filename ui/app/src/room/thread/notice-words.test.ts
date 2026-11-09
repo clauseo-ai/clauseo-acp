@@ -34,10 +34,10 @@ test("Read-only not available here gives its line, in English and Hindi", () => 
 
 test("a failed switch back gives its line, in English and Hindi", () => {
   expect(noticeLine("mode_set_back_failed", en)).toBe(
-    "ChatGPT switched itself to working without asking you, and Clauseo couldn't switch it back, so Clauseo stopped it. Start ChatGPT again to carry on.",
+    "ChatGPT switched itself to working without asking you, and Clauseo couldn't switch it back, so Clauseo stopped it. Send another message to start ChatGPT again.",
   );
   expect(noticeLine("mode_set_back_failed", words("hi"))).toBe(
-    "ChatGPT ने खुद को बिना पूछे काम करने पर बदल लिया, और Clauseo उसे वापस नहीं बदल सका, इसलिए Clauseo ने उसे रोक दिया। जारी रखने के लिए ChatGPT को फिर से शुरू करें।",
+    "ChatGPT ने खुद को बिना पूछे काम करने पर बदल लिया, और Clauseo उसे वापस नहीं बदल सका, इसलिए Clauseo ने उसे रोक दिया। ChatGPT को फिर से शुरू करने के लिए एक और संदेश भेजें।",
   );
 });
 

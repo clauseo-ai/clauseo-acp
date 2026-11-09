@@ -18,7 +18,7 @@ const MANY_BACK =
 const READ_ONLY_UNAVAILABLE =
   "Read-only isn't available for ChatGPT in the Safe workspace on this computer, so ChatGPT can change files in this matter without asking first.";
 const SET_BACK_FAILED =
-  "ChatGPT switched itself to working without asking you, and Clauseo couldn't switch it back, so Clauseo stopped it. Start ChatGPT again to carry on.";
+  "ChatGPT switched itself to working without asking you, and Clauseo couldn't switch it back, so Clauseo stopped it. Send another message to start ChatGPT again.";
 /** A skill pack the launch left out, one line per reason (TN-04 to TN-09); the pack is "nda-kit" in each. */
 const PACK_LINE: Record<Exclude<PackSkipReason, "unknown">, ThreadKey> = {
   not_turned_on:
