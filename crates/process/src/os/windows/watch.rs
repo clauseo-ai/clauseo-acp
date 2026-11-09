@@ -16,10 +16,9 @@
 use std::os::windows::io::OwnedHandle;
 use std::sync::{Arc, PoisonError};
 
-use windows::Win32::System::Threading::PROCESS_SYNCHRONIZE;
-
 use super::job::accounting;
-use super::{Held, Tree, alive, hold_listed, job_pids, open};
+use super::{Held, Root, Tree, alive, hold_listed};
+use crate::browser::{Key, spared};
 
 /// Asks whether the agent's job is empty. Holds the job open (see `TreeWatch`).
 ///
@@ -32,8 +31,11 @@ pub(crate) struct Watch {
     /// The job's processes, held until each has exited; shared with the tree, whose kill adds
     /// the processes it ends.
     held: Held,
-    /// The pids a kill spared (a browser, `spare.rs`): left running, not waited for.
-    spared: Arc<std::sync::Mutex<Vec<u32>>>,
+    /// The processes a kill spared (a browser, `spare.rs`): left running, not waited for,
+    /// nor are their children.
+    spared: Arc<std::sync::Mutex<Vec<Key>>>,
+    /// The run's own process, never spared.
+    root: u32,
 }
 
 /// A [`Watch`] on `tree`'s job, holding the job's processes now, before any kill.
@@ -42,6 +44,7 @@ pub(crate) fn watch(tree: &Tree) -> Watch {
         job: Arc::clone(&tree.job),
         held: Arc::clone(&tree.held),
         spared: Arc::clone(&tree.spared),
+        root: tree.root,
     };
     hold_listed(&watch.job, &watch.held);
     watch
@@ -56,34 +59,51 @@ impl Watch {
     /// After a kill that spared a browser, the browser and its children are left out: the tree
     /// is gone once every other process of the job has exited.
     pub(crate) fn gone(&self) -> bool {
-        let spared = self
+        let kept = self
             .spared
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone();
-        if spared.is_empty() {
+        let mut spared_now: Vec<Key> = Vec::new();
+        if kept.is_empty() {
             if active(&self.job) != Some(0) {
                 return false;
             }
-        } else if !only_spared(&self.job, &spared) {
-            return false;
+        } else {
+            // Read again at each check: the browsers spared, and every child they started since.
+            let root = Root {
+                job: Arc::downgrade(&self.job),
+                pid: 0,
+            };
+            let Some(listed) = root.list() else {
+                return false;
+            };
+            spared_now = spared(&listed, self.root, |proc| {
+                kept.contains(&(proc.pid, proc.start))
+            });
+            // Kept for the next check, so a browser's child stays spared once the browser exits.
+            {
+                let mut known = self.spared.lock().unwrap_or_else(PoisonError::into_inner);
+                for key in &spared_now {
+                    if !known.contains(key) {
+                        known.push(*key);
+                    }
+                }
+            }
+            if listed
+                .iter()
+                .any(|proc| !spared_now.contains(&(proc.pid, proc.start)))
+            {
+                return false;
+            }
         }
         hold_listed(&self.job, &self.held);
         let mut held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
-        held.retain(|(pid, process)| !spared.contains(pid) && alive(process));
+        held.retain(|(pid, process)| {
+            !spared_now.iter().any(|(kept, _)| kept == pid) && alive(process)
+        });
         held.is_empty()
     }
-}
-
-/// Whether every process `job` lists that still runs is one of `spared`; false when the list
-/// cannot be read.
-fn only_spared(job: &OwnedHandle, spared: &[u32]) -> bool {
-    job_pids(job).is_some_and(|pids| {
-        pids.iter().all(|pid| {
-            spared.contains(pid)
-                || !open(*pid, PROCESS_SYNCHRONIZE).is_some_and(|process| alive(&process))
-        })
-    })
 }
 
 /// The job's running processes, or `None` when the query fails.

@@ -85,9 +85,11 @@ impl LaunchSpec {
     /// The same spec, whose tree's stop and kill spare a web browser it starts, with that
     /// browser's own children: the lawyer's browser a sign-in's login opened (Codex's opens it as
     /// its own child on Windows), with every tab in it. Everything else in the tree ends as
-    /// before. It acts on Windows (`os/windows/spare.rs`); on Unix a browser started for a
-    /// sign-in is no child of the tree (a `BROWSER` shim, or `open`'s hand-off to launchd), so
-    /// the flag changes nothing there. A launcher that builds a new spec carries it over.
+    /// before. It acts on Windows (`os/windows/spare.rs`) and nowhere else. On macOS a browser
+    /// a sign-in opens is no child of the tree (Claude's `BROWSER` shim, or `open`'s hand-off to
+    /// launchd). On Linux a browser that `xdg-open` starts fresh does sit in the tree's group and
+    /// ends with it; Linux is no launch platform, so that is left as it is. A launcher that
+    /// builds a new spec carries the flag over.
     #[must_use]
     pub fn spare_browsers(mut self) -> LaunchSpec {
         self.spare_browsers = true;
