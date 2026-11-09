@@ -250,6 +250,13 @@ pub(super) struct Machine {
     /// The record an inlined macro leaves behind it, as a refresh landing while it runs would.
     pub(super) after: HashMap<String, Record>,
     pub(super) said: Vec<String>,
+    /// Each `WriteRegStr` as `ROOT: key, name = value`, expanded, in order.
+    pub(super) written: Vec<String>,
+    /// What the fake `LangDLL::LangDialog` answers, which `Pop` then gets: a language id, or
+    /// "cancel".
+    pub(super) answer: String,
+    /// The (name, id) pairs a `LangDialog` read from the stack, in the order it read them.
+    pub(super) asked: Vec<(String, String)>,
     pub(super) reached: Vec<String>,
 }
 
@@ -271,6 +278,9 @@ impl Machine {
             inline: HashMap::new(),
             after: HashMap::new(),
             said: Vec::new(),
+            written: Vec::new(),
+            answer: String::new(),
+            asked: Vec::new(),
             reached: Vec::new(),
         }
     }
@@ -299,7 +309,17 @@ impl Machine {
                 out.push_str(self.vars.get(*name).map_or("", String::as_str));
                 rest = &rest[name.len()..];
             } else {
-                let len = if rest[1..].starts_with('R') { 3 } else { 2 };
+                // $R0..$R9 and $0..$9 are two or three characters; $LANGUAGE and the like are a
+                // run of letters.
+                let len = if rest[1..].starts_with('R') {
+                    3
+                } else if rest[1..].starts_with(|c: char| c.is_ascii_alphabetic()) {
+                    1 + rest[1..]
+                        .find(|c: char| !c.is_ascii_alphabetic())
+                        .unwrap_or(rest.len() - 1)
+                } else {
+                    2
+                };
                 let name = &rest[..len];
                 out.push_str(self.vars.get(name).map_or("", String::as_str));
                 rest = &rest[len..];
@@ -464,6 +484,33 @@ impl Machine {
                 self.said.push(line.to_owned());
                 self.aborted = true;
             }
+            ["WriteRegStr", root, key, name, value] => {
+                let line = format!(
+                    "{root}: {}, {} = {}",
+                    self.expand(key),
+                    self.expand(name),
+                    self.expand(value)
+                );
+                self.written.push(line);
+            }
+            // The plug-in's dialog, which reads its arguments from the stack as the example in
+            // NSIS's docs pushes them: "A" on top, then each language's name and id, down to the
+            // "" pushed first. It answers by pushing `answer` for the script's Pop.
+            ["LangDLL::LangDialog", title, _text] => {
+                let flag = self.stack.pop().expect("a LangDialog with no stack");
+                assert_eq!(flag, "A", "a LangDialog flag this interpreter doesn't know");
+                self.asked.clear();
+                loop {
+                    let name = self.stack.pop().expect("a LangDialog past its \"\"");
+                    if name.is_empty() {
+                        break;
+                    }
+                    let id = self.stack.pop().expect("a LangDialog name with no id");
+                    self.asked.push((name, id));
+                }
+                self.said.push(format!("LangDialog {title}"));
+                self.stack.push(self.answer.clone());
+            }
             ["SetErrorLevel", code] => {
                 let code = self.expand(code);
                 self.said.push(format!("SetErrorLevel {code}"));
@@ -495,7 +542,12 @@ impl Machine {
             }
             match node {
                 Node::Line(line) if line == "${ExitDo}" => return true,
-                Node::Line(line) => self.line(line),
+                Node::Line(line) => {
+                    self.line(line);
+                    if self.aborted {
+                        return true;
+                    }
+                }
                 Node::If(arms, otherwise) => {
                     let chosen = arms
                         .iter()
