@@ -691,6 +691,12 @@ starts that resolved file, never the name given, and only when it is:
   on Windows; on Linux (development and CI) `/opt/google/chrome/google-chrome` or `chrome`,
   `/usr/bin/chromium`, `/usr/bin/chromium-browser`, `/usr/lib/chromium/chromium` or
   `/usr/lib/chromium-browser/chromium-browser`;
+- a per-user Chrome, for lawyers without admin rights who installed Chrome for themselves: on
+  macOS `<home>/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`, `<home>` from the
+  user database, never from the environment, resolved to its real path (the jail, not the
+  permissions, keeps the agent out of `~/Applications`, as for `/Applications`); on Windows
+  `<any folder>\Google\Chrome\Application\chrome.exe`, which covers `%LOCALAPPDATA%` without
+  knowing the lawyer's profile, under the probe below;
 - Chrome for Testing as the host installs it, `<data>/browsers/chrome-<digits and dots>/<the
   zip's binary>`. On macOS `<data>` is the default data folder of the guard's user, found from
   the user database, never from the environment, so `CLAUSEO_DATA_DIR` moves nothing here. On
@@ -699,16 +705,16 @@ starts that resolved file, never the name given, and only when it is:
   folder above it: the guard opens each for `FILE_WRITE_DATA`, `FILE_APPEND_DATA`,
   `FILE_DELETE_CHILD`, `DELETE`, `WRITE_DAC` and `WRITE_OWNER` in turn, and any open that works
   refuses. A file the agent wrote is its own, and an owner always gets `WRITE_DAC`. Windows'
-  system installs get the same test.
+  system and per-user installs get the same test.
 
 A link from a trusted place to anywhere else resolves to that elsewhere and is refused. Anything
 else fails the first tool call with "The browser Clauseo was asked to use isn't one it installed
-or trusts, so it won't start it.", and the guard exits 1 naming no path. The host's own Chrome
-pick (`host/src/browser/chrome.rs`) still looks in `~/Applications` (macOS) and
-`%LOCALAPPDATA%` (Windows), which the guard refuses; the host should stop picking those, so
-Chrome for Testing is used there instead. Tests: `chrome/pinned/tests.rs` (the pinned install
+or trusts, so it won't start it.", and the guard exits 1 naming no path. Every place the host's
+own pick looks (`host/src/browser/chrome.rs`) passes. Tests: `chrome/pinned/tests.rs` (the pinned install
 passes on a fake data folder; a wrapper, a wrong version folder or binary, and a link from the
-install folder to a temp folder are refused; the Windows rule with a stubbed probe), and
+install folder to a temp folder are refused; a per-user macOS Chrome passes under the given home
+and a lookalike elsewhere does not; the Windows rules with a stubbed probe; and, on the Windows
+job, a file the test wrote is modifiable and refused), and
 `tests/guard/sandbox.rs`, `a_chrome_the_guard_does_not_trust_is_never_started`. The tests start
 stubs through `CLAUSEO_TEST_GUARD_TRUSTED_DIR`, read only in a `test-support` build.
 
@@ -1154,23 +1160,6 @@ The guard cannot enforce these; stage C's egress proxy and sandbox must.
   variant means the second, never Chrome with no jail, and should be renamed (`OwnJail`) when it
   is built. Whether Chrome's own sandbox starts inside a Seatbelt profile of Clauseo's is a row
   of G17 item 1.
-
-### The residual: a browser the agent starts itself
-
-The agent can start our Chrome, or our agent-browser, itself with switches that weaken Chrome's
-sandbox: by running either binary from its jail (Chrome is in its runtime paths, P1; agent-
-browser takes `--executable-path` and `--args`, P2), or by asking agent-browser's daemon or
-stream server for a `launch` (P3 to P5, previous section). It takes a deliberate act, gives at
-most the agent jail's rights, and matters only together with an exploit of Chrome's renderer;
-Clauseo pins the current Stable and refreshes it every 3 hours through the signed browser-pins
-manifest. A browser the agent downloads or brings is not this residual: on macOS the jail's
-`file-map-executable` rule, and on Windows stage C's inherited deny of `FILE_EXECUTE` on the
-sandbox user's writable folders, keep the agent from running native code it wrote. The guarded
-path always runs Chrome with its own sandbox (#803 and the check after the start, "Chrome's
-sandbox, never weakened"), starts only a pinned binary ("The pinned browser"), and filters
-flags hidden inside longer strings (`filter.rs`). The residual closes once Chrome runs in a jail
-of its own after launch, macOS first (option (a) of the jail plan): the agent's jail then holds
-no Chrome binary and no launch control but start and stop.
 - **The host treats `<state>/browser` as agent-writable.** The host runs outside the jail, so it
   follows no link there when it reads or writes: agent-browser's config file (already so:
   `browser::write_config` refuses a linked folder and replaces a link at the file name),
@@ -1185,6 +1174,30 @@ no Chrome binary and no launch control but start and stop.
 - **No daemon outlives its session** since the S27 launch fix: the guard, or its reaper when
   the guard is killed, ends it ("Chrome on the claimed port"). The host still does not kill it
   by PID.
+
+### The residual: a browser the agent starts itself
+
+What the guard does not stop, as of agent-browser v0.41.1:
+- **P1, P2:** the agent runs our Chrome (it is in the jail's runtime paths) or our agent-browser
+  (`--executable-path`, `--args`) itself, with switches that weaken Chrome's sandbox.
+- **P3:** it writes to agent-browser's daemon directly: newline JSON with no handshake
+  (`daemon.rs:548-600`), so a `launch` with any arguments (`actions.rs:5308-5336`).
+- **P4, P5:** it calls the stream server directly: `/api/command` checks only that `Origin`
+  matches `Host`, which a direct client sets at will (`http.rs:139-146`), and `/api/sessions`
+  checks nothing (`http.rs:249`). Chrome's DevTools port is open to it the same way.
+
+All of these go past the guard's filter. No per-session secret can close them: agent-browser runs
+as the agent's user, so a token in its environment is readable by the agent. Each takes a
+deliberate act, gives at most the agent jail's rights, and matters only with an exploit of
+Chrome's renderer; Clauseo pins the current Stable and refreshes it every 3 hours through the
+signed browser-pins manifest. A browser the agent brings is not this residual: macOS's
+`file-map-executable` rule and stage C's inherited deny of `FILE_EXECUTE` on the Windows sandbox
+user's writable folders keep it from running native code it wrote. The guarded path always runs
+Chrome with its own sandbox (#803 and the check after the start), starts only a pinned binary
+("The pinned browser") and filters flags hidden in longer strings. All of P1 to P5 close once
+Chrome and agent-browser run in a jail of their own after launch, macOS first (option (a) of the
+jail plan): the agent's jail then holds no Chrome binary, no daemon and no ports, only start and
+stop.
 
 ### The host part (the second S27 pull request, `crates/host`)
 

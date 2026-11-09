@@ -2,6 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
+#[cfg(windows)]
+use super::modifiable;
 use super::{Cft, Trusted, check};
 use crate::write;
 
@@ -157,5 +159,67 @@ fn the_tests_folder_trusts_its_files() {
     };
     assert_eq!(check(&stub, &trusted, never), Some(stub.clone()));
     assert_eq!(check(&stub, &Trusted::default(), never), None);
+    write::remove_dir_all(&dir).unwrap();
+}
+
+/// macOS: Chrome in the user's own `Applications`, the home given (the user database's in
+/// production); the same path under any other folder is a lookalike.
+#[test]
+fn a_per_user_mac_chrome_passes_only_under_the_users_home() {
+    let dir = scratch("machome");
+    let app = "Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+    let chrome = file(&dir.join("home").join(app));
+    let lookalike = file(&dir.join("tmp/home").join(app));
+    let trusted = Trusted::mac(Some(dir.join("home")), "chrome-mac-arm64");
+    assert_eq!(check(&chrome, &trusted, never), Some(chrome.clone()));
+    assert_eq!(check(&lookalike, &trusted, never), None);
+    assert_eq!(
+        check(&lookalike, &Trusted::mac(None, "chrome-mac-arm64"), never),
+        None
+    );
+    write::remove_dir_all(&dir).unwrap();
+}
+
+/// Windows: `<any folder>\Google\Chrome\Application\chrome.exe`, only where the user can change
+/// nothing above it.
+#[test]
+fn a_per_user_windows_chrome_passes_only_where_the_user_cannot_change_it() {
+    let dir = scratch("winlocal");
+    let end = Path::new("Google")
+        .join("Chrome")
+        .join("Application")
+        .join("chrome.exe");
+    let chrome = file(&dir.join("lawyer/AppData/Local").join(&end));
+    let trusted = Trusted {
+        unmodifiable_ends: vec![end],
+        ..Trusted::default()
+    };
+    assert_eq!(check(&chrome, &trusted, never), Some(chrome.clone()));
+    let local = dir.join("lawyer/AppData/Local");
+    assert_eq!(check(&chrome, &trusted, |path| path == local), None);
+    let other = file(&dir.join("lawyer/AppData/Local/Google/Chrome/chrome.exe"));
+    assert_eq!(check(&other, &trusted, never), None);
+    write::remove_dir_all(&dir).unwrap();
+}
+
+/// Windows, run on the Windows job: a file the test wrote is its own, and an owner may always
+/// rewrite its permissions, so the probe says modifiable and the check refuses it. Only that
+/// direction: the CI runner is elevated, so it could modify a system install too.
+#[cfg(windows)]
+#[test]
+fn a_file_the_user_wrote_is_modifiable_and_refused() {
+    let dir = scratch("owner");
+    let end = Path::new("Google")
+        .join("Chrome")
+        .join("Application")
+        .join("chrome.exe");
+    let chrome = file(&dir.join(&end));
+    assert!(modifiable(&chrome));
+    assert!(modifiable(chrome.parent().unwrap()));
+    let trusted = Trusted {
+        unmodifiable_ends: vec![end],
+        ..Trusted::default()
+    };
+    assert_eq!(check(&chrome, &trusted, modifiable), None);
     write::remove_dir_all(&dir).unwrap();
 }

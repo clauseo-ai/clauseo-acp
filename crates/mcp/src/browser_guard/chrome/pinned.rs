@@ -9,6 +9,10 @@
 //! - a system install of Chrome (or Edge on Windows) at its fixed place ([`Trusted::files`]):
 //!   `/Applications/Google Chrome.app` on macOS, `C:\Program Files` and `C:\Program Files (x86)`
 //!   on Windows, the distribution's folders on Linux;
+//! - a per-user Chrome: on macOS `<home>/Applications/Google Chrome.app`, `<home>` from the user
+//!   database, never from the environment; on Windows `<any folder>\Google\Chrome\Application\
+//!   chrome.exe` (the lawyer's `%LOCALAPPDATA%`), under the same test as below
+//!   ([`Trusted::unmodifiable_ends`]);
 //! - Chrome for Testing as the host installs it, `<data>/browsers/chrome-<version>/<binary>`
 //!   ([`Cft`]). On macOS `<data>` is the default data folder of the guard's user, found from
 //!   the user database and never from the environment. On Windows the guard may run as the
@@ -32,7 +36,7 @@ const BROWSERS_DIR: &str = "browsers";
 /// The prefix of one download's folder (the host's `browser::chrome::CFT_PREFIX`).
 const CFT_PREFIX: &str = "chrome-";
 /// The data folder's name under the OS's per-user folder (`clauseo_settings::IDENTIFIER`).
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
 const IDENTIFIER: &str = "ai.clauseo.desktop";
 
 /// Tests only (the `test-support` feature, never in a shipped build): a folder whose every file
@@ -49,6 +53,9 @@ pub(crate) struct Trusted {
     pub(crate) cft: Option<Cft>,
     /// Any data folder's Chrome for Testing, if the guard's user cannot change it (Windows).
     pub(crate) any_unmodifiable_cft: bool,
+    /// Ends of a path that pass under any folder, if the guard's user cannot change the file or
+    /// any folder above it (Windows: a per-user Chrome in the lawyer's `%LOCALAPPDATA%`).
+    pub(crate) unmodifiable_ends: Vec<PathBuf>,
     /// Tests only: folders whose every file is trusted.
     pub(crate) folders: Vec<PathBuf>,
 }
@@ -84,14 +91,27 @@ impl Trusted {
         } else {
             "chrome-mac-x64"
         };
+        // The user database's home, never `HOME`.
         let home = nix::unistd::User::from_uid(nix::unistd::getuid())
             .ok()
             .flatten()
             .map(|user| user.dir);
+        Trusted::mac(home, arch)
+    }
+
+    /// macOS's places with `home` the user's home: Chrome in `/Applications` and in
+    /// `<home>/Applications` (a per-user install, resolved to its real path), and Chrome for
+    /// Testing in `<home>/Library/Application Support/<IDENTIFIER>/browsers`.
+    #[cfg(any(target_os = "macos", test))]
+    pub(crate) fn mac(home: Option<PathBuf>, arch: &str) -> Trusted {
+        let app = "Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+        let mut files = vec![Path::new("/").join(app)];
+        if let Some(home) = &home {
+            let mine = home.join(app);
+            files.push(real_path(&mine).unwrap_or(mine));
+        }
         Trusted {
-            files: vec![PathBuf::from(
-                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-            )],
+            files,
             cft: Some(Cft {
                 browsers: home.map(|home| {
                     home.join("Library/Application Support")
@@ -102,6 +122,7 @@ impl Trusted {
                     .join("Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"),
             }),
             any_unmodifiable_cft: false,
+            unmodifiable_ends: Vec::new(),
             folders: Vec::new(),
         }
     }
@@ -121,6 +142,7 @@ impl Trusted {
                 binary: Path::new("chrome-win64").join("chrome.exe"),
             }),
             any_unmodifiable_cft: true,
+            unmodifiable_ends: vec![PathBuf::from(chrome)],
             folders: Vec::new(),
         }
     }
@@ -172,7 +194,11 @@ pub(crate) fn check(
         .files
         .iter()
         .any(|file| relative(&shown, file).is_some_and(|rest| rest.as_os_str().is_empty()));
-    if system && unmodifiable() {
+    let ends = trusted
+        .unmodifiable_ends
+        .iter()
+        .any(|end| ends_with(&shown, end));
+    if (system || ends) && unmodifiable() {
         return Some(real);
     }
     let cft = trusted.cft.as_ref()?;
@@ -218,6 +244,17 @@ fn after_browsers(real: &Path) -> Option<PathBuf> {
         .iter()
         .rposition(|part| matches!(part, Component::Normal(name) if same(Path::new(name), Path::new(BROWSERS_DIR))))?;
     Some(parts[at + 1..].iter().collect())
+}
+
+/// Whether `path`'s last components are `end`'s, comparing as the OS does.
+fn ends_with(path: &Path, end: &Path) -> bool {
+    let have: Vec<Component<'_>> = path.components().collect();
+    let want: Vec<Component<'_>> = end.components().collect();
+    have.len() > want.len()
+        && have[have.len() - want.len()..]
+            .iter()
+            .zip(&want)
+            .all(|(a, b)| same(Path::new(a.as_os_str()), Path::new(b.as_os_str())))
 }
 
 /// `path` relative to `base`, comparing as the OS does (Windows: without ASCII case).
