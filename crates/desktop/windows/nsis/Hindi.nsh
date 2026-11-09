@@ -71,6 +71,9 @@ LangString adminCopySkippedSilent ${LANG_HINDI} "सुरक्षित का
 LangString installTempFailed ${LANG_HINDI} "Clauseo इंस्टॉल नहीं हुआ, क्योंकि इंस्टॉलर Program Files में अपनी अस्थायी फ़ाइलों के लिए ऐसा फ़ोल्डर नहीं बना सका जिसे केवल व्यवस्थापक बदल सकें। इंस्टॉलर फिर से चलाएँ।"
 LangString uninstallTempFailed ${LANG_HINDI} "Clauseo अनइंस्टॉल नहीं हुआ, क्योंकि अनइंस्टॉलर Program Files में अपनी अस्थायी फ़ाइलों के लिए ऐसा फ़ोल्डर नहीं बना सका जिसे केवल व्यवस्थापक बदल सकें। कुछ भी नहीं हटाया गया। अनइंस्टॉलर फिर से चलाएँ।"
 LangString uninstallNotInPlace ${LANG_HINDI} "Clauseo अनइंस्टॉल नहीं हुआ, क्योंकि अनइंस्टॉलर Clauseo के अपने फ़ोल्डर से शुरू नहीं किया गया। कुछ भी नहीं हटाया गया। सेटिंग्स > ऐप्स से Clauseo अनइंस्टॉल करें।"
+; nativeArm64Notice: the x64 per-machine installer's details line on an ARM64 computer
+; (windows/hooks.nsh, CLAUSEO_NATIVE_ARM64_NOTICE); details list only. Provisional (2026-11-09).
+LangString nativeArm64Notice ${LANG_HINDI} "इस कंप्यूटर में ARM64 प्रोसेसर है: Clauseo_${VERSION}_arm64-machine-setup.exe इसका मूल प्रति-मशीन इंस्टॉलर है।"
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
 ; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), deleteAppData aside, with one fix:
