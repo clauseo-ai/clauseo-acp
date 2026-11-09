@@ -176,11 +176,21 @@ fn half_and_half_spares_the_agent() {
 }
 
 #[test]
-fn the_first_notice_is_windows_text() {
+fn the_notices_say_what_happens_on_macos() {
     assert_eq!(
         ProcessCapNotice::TooManyPrograms.text(),
-        "A task tried to start too many programs at once, so Clauseo stopped it. Ask the \
-         assistant to try a smaller step."
+        "The AI tool started too many programs at once, so Clauseo ended the extra ones. It \
+         keeps going. If it seems stuck, ask it to try a smaller step."
+    );
+    assert_eq!(
+        ProcessCapNotice::AssistantStopped.text(),
+        "The AI tool kept starting too many programs at once, so Clauseo stopped it. Start it \
+         again and ask it to try a smaller step."
+    );
+    assert_eq!(
+        ProcessCapNotice::CapFailed.text(),
+        "Clauseo couldn't keep track of the AI tool's programs, so it stopped the tool to be \
+         safe. Start it again."
     );
 }
 

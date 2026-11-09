@@ -19,23 +19,28 @@ pub enum ProcessCapNotice {
     CapFailed,
 }
 
+/// [`ProcessCapNotice::TooManyPrograms`]'s text. Not Windows' sentence: here the cap ends the
+/// extra programs and the agent goes on.
+pub(crate) const TOO_MANY_PROGRAMS: &str = "The AI tool started too many programs at once, so \
+                                            Clauseo ended the extra ones. It keeps going. If it \
+                                            seems stuck, ask it to try a smaller step.";
+
+/// [`ProcessCapNotice::AssistantStopped`]'s text: the agent was ended too.
+pub(crate) const ASSISTANT_STOPPED: &str = "The AI tool kept starting too many programs at once, \
+                                            so Clauseo stopped it. Start it again and ask it to \
+                                            try a smaller step.";
+
+/// [`ProcessCapNotice::CapFailed`]'s text: the watch could not go on, so the agent was ended.
+pub(crate) const CAP_FAILED: &str = "Clauseo couldn't keep track of the AI tool's programs, so it \
+                                     stopped the tool to be safe. Start it again.";
+
 impl ProcessCapNotice {
-    /// Its English text. [`ProcessCapNotice::TooManyPrograms`] is Windows' notice
-    /// (`windows/runner/job_port.rs`), word for word.
+    /// Its English text: [`TOO_MANY_PROGRAMS`], [`ASSISTANT_STOPPED`] or [`CAP_FAILED`].
     pub fn text(self) -> &'static str {
         match self {
-            ProcessCapNotice::TooManyPrograms => {
-                "A task tried to start too many programs at once, so Clauseo stopped it. Ask the \
-                 assistant to try a smaller step."
-            }
-            ProcessCapNotice::AssistantStopped => {
-                "A task kept starting too many programs at once, so Clauseo stopped the \
-                 assistant. Start it again and ask for a smaller step."
-            }
-            ProcessCapNotice::CapFailed => {
-                "Clauseo could no longer count the programs the assistant started, so it stopped \
-                 the assistant. Start it again to go on."
-            }
+            ProcessCapNotice::TooManyPrograms => TOO_MANY_PROGRAMS,
+            ProcessCapNotice::AssistantStopped => ASSISTANT_STOPPED,
+            ProcessCapNotice::CapFailed => CAP_FAILED,
         }
     }
 

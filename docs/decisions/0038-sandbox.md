@@ -518,10 +518,17 @@ rule for `setsid` or `setpgid`. `RLIMIT_NPROC` is compared with the user's whole
 - Failing closed: a failed listing, an agent that runs but cannot be read, or one whose start is
   missing at launch is logged, and the agent and its session are killed (at launch, the launch
   fails).
-- Notices (`ProcessCapNotice`): Windows' text when a command was stopped, another when the agent
-  was ended, another when the watchdog lost count. Each goes once per lawyer session through the
-  `ProcessCapSession` the host gives every launcher of that session
-  (`SeatbeltLauncher::process_cap`). Without one, each launcher has its own, writing to the
+- Notices (`ProcessCapNotice`, `process_cap/session.rs`). They are not Windows' sentence, since
+  here the cap ends programs:
+  - a trip: "The AI tool started too many programs at once, so Clauseo ended the extra ones. It
+    keeps going. If it seems stuck, ask it to try a smaller step."
+  - the agent ended: "The AI tool kept starting too many programs at once, so Clauseo stopped
+    it. Start it again and ask it to try a smaller step."
+  - the watch failed closed: "Clauseo couldn't keep track of the AI tool's programs, so it
+    stopped the tool to be safe. Start it again."
+
+  Each goes once per lawyer session through the `ProcessCapSession` the host gives every
+  launcher of that session (`SeatbeltLauncher::process_cap`). Without one, each launcher has its own, writing to the
   host's stderr: no host caller builds a `SeatbeltLauncher` yet.
 - Nothing outside the tree starts processes for the agent: the profile is `(deny default)` with
   no `job-creation`, `lsopen` or `appleevent-send` rule, and its `mach-lookup` names only
