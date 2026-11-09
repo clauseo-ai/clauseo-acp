@@ -836,7 +836,14 @@ jobs:
   # signed binary, then the currentUser installer's updater signature, last.
   sign-windows:
     name: sign-windows (${{ matrix.target }})
+    # It waits for the whole build matrix, but a macOS or Linux leg that failed or never got a
+    # runner doesn't skip it: it runs unless the run was cancelled or check or the block list
+    # failed. Its own Windows leg's exe comes as the windows-exe-<target> artifact, so a failed
+    # Windows build still fails it, at the download. Its installers upload as release-<target>.
+    # assemble and publish keep the default (every job they need succeeded): no release, and no
+    # dist-assets, with a leg missing.
     needs: [check, build, blocklist]
+    if: ${{ !cancelled() && needs.check.result == 'success' && needs.blocklist.result == 'success' }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     continue-on-error: ${{ matrix.tier == 2 }}

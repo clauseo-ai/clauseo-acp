@@ -894,6 +894,29 @@ test("release.yml's builds with release.conf.json take the verified block-list s
   ]);
 });
 
+test("sign-windows runs without the macOS and Linux legs; assemble and publish need every job", () => {
+  const text = readFileSync(RELEASE_YML, "utf8");
+  // The job's own keys: its lines up to `runs-on:`, comments dropped.
+  const head = (job) => {
+    const lines = jobCommands(text, job);
+    return lines.slice(0, lines.findIndex((line) => line.startsWith("runs-on:")));
+  };
+  const sign = head("sign-windows");
+  assert.ok(sign.includes("needs: [check, build, blocklist]"), sign.join("\n"));
+  assert.ok(
+    sign.includes(
+      "if: ${{ !cancelled() && needs.check.result == 'success' && needs.blocklist.result == 'success' }}",
+    ),
+    sign.join("\n"),
+  );
+  // No always(), no !cancelled() and no failure() in assemble or publish: the default success()
+  // keeps a release, or dist-assets, from going out with a leg missing.
+  for (const job of ["assemble", "publish"]) {
+    const ifs = jobCommands(text, job).filter((line) => /^if:/.test(line));
+    assert.deepEqual(ifs.filter((line) => /always\(\)|cancelled\(\)|failure\(\)/.test(line)), [], job);
+  }
+});
+
 test("the workflow lint fails each broken rule", () => {
   const good = [
     "on:",
