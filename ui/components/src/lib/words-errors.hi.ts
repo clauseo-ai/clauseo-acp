@@ -67,8 +67,8 @@ export const HI = {
     "इस फ़ोल्डर में इस मामले की Clauseo फ़ाइल नहीं है। आगे बढ़ने के लिए मामले का फ़ोल्डर ढूँढें।",
   "A whole drive, your home folder or a system folder can't be a matter.":
     "पूरी ड्राइव, आपका होम फ़ोल्डर या कोई सिस्टम फ़ोल्डर मामला नहीं बन सकता।",
-  "This matter's folder holds a .codex folder. Rename or remove it to use Codex here.":
-    "इस मामले के फ़ोल्डर में एक .codex फ़ोल्डर है। यहाँ Codex का उपयोग करने के लिए उसका नाम बदलें या उसे हटाएँ।",
+  "This matter's folder holds a .codex folder. Rename or remove it to use ChatGPT here.":
+    "इस मामले के फ़ोल्डर में एक .codex फ़ोल्डर है। यहाँ ChatGPT का उपयोग करने के लिए उसका नाम बदलें या उसे हटाएँ।",
   "A paper is open in another program. Close it, then try again.":
     "कोई दस्तावेज़ किसी दूसरे प्रोग्राम में खुला है। उसे बंद करें, फिर दोबारा प्रयास करें।",
   "Wait for the answer to finish first.": "पहले उत्तर पूरा होने दें।",
@@ -112,10 +112,10 @@ export const HI = {
   "Sign-in didn't finish. Try again.": "साइन इन पूरा नहीं हुआ। फिर से प्रयास करें।",
   "Clauseo can't read your firm's sign-in settings, so it won't sign in until they can be read.":
     "Clauseo आपकी फ़र्म की साइन इन सेटिंग्स नहीं पढ़ पा रहा, इसलिए उनके पढ़े जाने तक साइन इन नहीं करेगा।",
-  "Codex can't work on a network drive. Move the matter to this computer.":
-    "Codex नेटवर्क ड्राइव पर काम नहीं कर सकता। मामले को इस कंप्यूटर पर ले जाएँ।",
-  "Codex can't work on a drive without file permissions. Move the matter to this computer.":
-    "Codex बिना फ़ाइल अनुमतियों वाली ड्राइव पर काम नहीं कर सकता। मामले को इस कंप्यूटर पर ले जाएँ।",
+  "ChatGPT can't work on a network drive. Move the matter to this computer.":
+    "ChatGPT नेटवर्क ड्राइव पर काम नहीं कर सकता। मामले को इस कंप्यूटर पर ले जाएँ।",
+  "ChatGPT can't work on a drive without file permissions. Move the matter to this computer.":
+    "ChatGPT बिना फ़ाइल अनुमतियों वाली ड्राइव पर काम नहीं कर सकता। मामले को इस कंप्यूटर पर ले जाएँ।",
   "This matter's folder is too deep inside other folders for Clauseo to work in it on Windows. Move it nearer the top of its drive.":
     "इस मामले का फ़ोल्डर दूसरे फ़ोल्डरों के बहुत भीतर है, इसलिए Windows पर Clauseo उसमें काम नहीं कर सकता। उसे ड्राइव के ऊपरी स्तर के पास ले जाएँ।",
   "The update didn't install. Try again.": "अपडेट इंस्टॉल नहीं हुआ। फिर से प्रयास करें।",

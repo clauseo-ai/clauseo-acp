@@ -16,12 +16,12 @@ const SAYS: Readonly<Record<Warned, { name: FolderKey; head: FolderKey; info: Fo
   network: {
     name: "This folder is on a network drive",
     head: "On a network drive",
-    info: "Clauseo can't keep Claude and Codex inside a folder on a network drive.",
+    info: "Clauseo can't keep Claude and ChatGPT inside a folder on a network drive.",
   },
   no_permissions: {
     name: "This drive doesn't keep file permissions",
     head: "No file permissions",
-    info: "Clauseo can't keep Claude and Codex inside a folder on this drive. USB drives often don't keep permissions.",
+    info: "Clauseo can't keep Claude and ChatGPT inside a folder on this drive. USB drives often don't keep permissions.",
   },
 };
 

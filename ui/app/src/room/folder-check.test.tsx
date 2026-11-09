@@ -143,7 +143,7 @@ test("a network drive: the warning's title, name, body and why, with Choose anot
       fr("en", "Claude asks before every change. ChatGPT can't work here."),
   );
   expect(warning()?.querySelector(".room-info")?.getAttribute("aria-label")).toBe(
-    fr("en", "Clauseo can't keep Claude and Codex inside a folder on a network drive."),
+    fr("en", "Clauseo can't keep Claude and ChatGPT inside a folder on a network drive."),
   );
   expect(byId("folder-choose")?.textContent).toBe(fr("en", "Choose another folder"));
   expect(byId("folder-anyway")?.textContent).toBe(fr("en", "Create anyway"));
@@ -163,7 +163,7 @@ test("a drive without file permissions: its own title, name and why, the same bu
   expect(warning()?.querySelector(".room-info")?.getAttribute("aria-label")).toBe(
     fr(
       "en",
-      "Clauseo can't keep Claude and Codex inside a folder on this drive. USB drives often don't keep permissions.",
+      "Clauseo can't keep Claude and ChatGPT inside a folder on this drive. USB drives often don't keep permissions.",
     ),
   );
   expect(byId("folder-choose")).not.toBeNull();

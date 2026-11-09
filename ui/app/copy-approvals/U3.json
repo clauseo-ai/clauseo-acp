@@ -374,14 +374,14 @@
     "note": "Rohan, on the review page (H5-matters-rail, #148 5c3ad943)"
   },
   "U3-err-matter.folder_network": {
-    "en": "Codex can't work on a network drive. Move the matter to this computer.",
-    "hi": "Codex नेटवर्क ड्राइव पर काम नहीं कर सकता। मामले को इस कंप्यूटर पर ले जाएँ।",
+    "en": "ChatGPT can't work on a network drive. Move the matter to this computer.",
+    "hi": "ChatGPT नेटवर्क ड्राइव पर काम नहीं कर सकता। मामले को इस कंप्यूटर पर ले जाएँ।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-06",
+    "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-04",
-    "by": "Rohan",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (codex-to-chatgpt: Codex → ChatGPT; Rohan batch review)",
     "note": "Rohan, on the review page (folder-rights FR18)"
   },
   "U3-err-matter.folder_too_deep": {
@@ -395,23 +395,26 @@
     "by": "app track (provisional; Rohan batch review)"
   },
   "U3-err-matter.folder_no_permissions": {
-    "en": "Codex can't work on a drive without file permissions. Move the matter to this computer.",
-    "hi": "Codex बिना फ़ाइल अनुमतियों वाली ड्राइव पर काम नहीं कर सकता। मामले को इस कंप्यूटर पर ले जाएँ।",
+    "en": "ChatGPT can't work on a drive without file permissions. Move the matter to this computer.",
+    "hi": "ChatGPT बिना फ़ाइल अनुमतियों वाली ड्राइव पर काम नहीं कर सकता। मामले को इस कंप्यूटर पर ले जाएँ।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-06",
+    "hi_at": "2026-11-09",
     "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-04",
-    "by": "Rohan",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (codex-to-chatgpt: Codex → ChatGPT; Rohan batch review)",
     "note": "Rohan, on the review page (folder-rights FR19)"
   },
   "U3-err-matter.codex_folder": {
-    "en": "This matter's folder holds a .codex folder. Rename or remove it to use Codex here.",
-    "hi": "इस मामले के फ़ोल्डर में एक .codex फ़ोल्डर है। यहाँ Codex का उपयोग करने के लिए उसका नाम बदलें या उसे हटाएँ।",
-    "status": "approved",
-    "at": "2026-11-02",
-    "by": "Rohan",
-    "note": "Rohan, on the review page (built from R15-codex c921f277), 2026-11-02 15:35"
+    "en": "This matter's folder holds a .codex folder. Rename or remove it to use ChatGPT here.",
+    "hi": "इस मामले के फ़ोल्डर में एक .codex फ़ोल्डर है। यहाँ ChatGPT का उपयोग करने के लिए उसका नाम बदलें या उसे हटाएँ।",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (codex-to-chatgpt: Codex → ChatGPT; Rohan batch review)",
+    "note": "Rohan, on the review page (built from R15-codex c921f277), 2026-11-02 15:35",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)"
   },
   "U3-err-agent.guard_missing": {
     "en": "Clauseo can't start Claude safely here. Reinstall Clauseo.",
