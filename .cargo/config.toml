@@ -11,15 +11,8 @@ xtask = "run --quiet --locked --package xtask --target-dir target/xtask-run --"
 # - x86_64, windows-2025-runner (3 runs): link.exe 2.98, 3.02, 3.05 s; rust-lld 2.53, 2.66, 2.85 s.
 # - aarch64, windows-11-arm-runner (2 runs): link.exe 3.71, 3.83 s; rust-lld 2.85, 2.97 s.
 # Changing the linker makes cargo rebuild every crate once.
-#
-# +crt-static links the C runtime in: a clean Windows has no VC++ Redistributable, so an exe
-# importing VCRUNTIME140.dll won't start there (ADR 0035, "The C runtime"). For ci.yml and local
-# builds; RUSTFLAGS replaces these rustflags, so release.yml's Windows rows and
-# setup-exe-repro.yml carry the flag themselves.
 [target.x86_64-pc-windows-msvc]
 linker = "rust-lld.exe"
-rustflags = ["-C", "target-feature=+crt-static"]
 
 [target.aarch64-pc-windows-msvc]
 linker = "rust-lld.exe"
-rustflags = ["-C", "target-feature=+crt-static"]

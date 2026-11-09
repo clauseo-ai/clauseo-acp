@@ -7,7 +7,7 @@
 // whatever its name. A clean Windows has no VC++ Redistributable, so an exe importing
 // VCRUNTIME140.dll fails to start there (0xC0000135); our runners, which all have the C++ build
 // tools, never see it. Every Rust binary we build is linked with -C target-feature=+crt-static
-// (release.yml's matrix, .cargo/config.toml). release.yml's `build` job runs this over every PE
+// (release.yml's matrix and setup-exe-repro.yml). release.yml's `build` job runs this over every PE
 // it uploads in windows-exe-<target>, fetched ones included, and every DLL placed for bundling.
 //
 // For each file it reads the import table and the delay-import table (PE32 and PE32+, any
