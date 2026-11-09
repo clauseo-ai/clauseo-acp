@@ -518,7 +518,10 @@ Clauseo draws its window with Microsoft Edge WebView2, Evergreen.
 - **Minimum version:** 152.0.0.0, what Windows 11 ships with (`minimumWebview2Version` in
   `crates/desktop/tauri.conf.json`). Below it, or with no runtime, Clauseo shows a dialog
   ("Clauseo needs Microsoft Edge WebView2 to open", "Download WebView2") instead of a window, and
-  exits (decision 0035, "PR 2").
+  exits (decision 0035, "PR 2"). An installed runtime below it is not updated by the per-user
+  installer, since Edge Update's update would ask for an administrator's password: the
+  installer notes it in its details list and goes on. The per-machine installer updates it, and
+  goes on with a details line if the update fails.
 - **No Fixed Version** runtime is shipped or needed.
 - **Keep the runtime updating.** Its updates are separate from Edge's: the Edge Update policies
   "Update (WebView)" and `UpdatesSuppressed` control them. A frozen Edge does not freeze WebView2,

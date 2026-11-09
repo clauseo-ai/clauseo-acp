@@ -402,7 +402,10 @@ Function PageLeaveReinstall
       ${EndIf}
 
       ; Other errors? show generic error message and return to select un/reinstall page
-      MessageBox MB_ICONEXCLAMATION "$(unableToUninstall)"
+      ; >>> clauseo: unable-to-uninstall-front
+      ; In front of every window, as every Clauseo box is (tests: message_front.rs).
+      MessageBox MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST "$(unableToUninstall)"
+      ; <<< clauseo: unable-to-uninstall-front
       Abort
     ${EndIf}
   reinst_done:
@@ -602,7 +605,10 @@ Function .onInit
           FileWrite $0 "$(silentDowngrades)"
         ${EndIf}
       ${Else}
-        MessageBox MB_ICONSTOP "$(silentDowngrades)"
+        ; >>> clauseo: silent-downgrades-front
+        ; In front of every window, as every Clauseo box is.
+        MessageBox MB_ICONSTOP|MB_SETFOREGROUND|MB_TOPMOST "$(silentDowngrades)"
+        ; <<< clauseo: silent-downgrades-front
       ${EndIf}
       Abort
     ${EndIf}
@@ -675,7 +681,17 @@ Section WebView2
     !if "${MINIMUMWEBVIEW2VERSION}" != ""
       ${VersionCompare} "${MINIMUMWEBVIEW2VERSION}" "$4" $R0
       ${If} $R0 = 1
-        update_webview:
+        ; >>> clauseo: webview2-no-elevation
+        ; A runtime older than MINIMUMWEBVIEW2VERSION. Per user, never Edge Update's
+        ; needsadmin=true update: for a standard user that is a UAC credential prompt, and a
+        ; declined one failed the install. One details line instead, and the install goes on:
+        ; Edge Update keeps WebView2 current in the background, and the app's own check
+        ; (src/webview2.rs) shows the lawyer how to get it if it's still too old. Per machine the
+        ; installer is elevated already, so the update asks for nothing; a failed update is a
+        ; details line and the install goes on (no box, no Quit).
+        !if "${INSTALLMODE}" == "currentUser"
+          DetailPrint "$(webview2TooOld)"
+        !else
           DetailPrint "$(installingWebview2)"
           ${If} ${RunningX64}
             ReadRegStr $R1 HKLM "SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate" "path"
@@ -687,16 +703,16 @@ Section WebView2
           ${EndIf}
           ${If} $R1 != ""
             ; Chromium updater docs: https://source.chromium.org/chromium/chromium/src/+/main:docs/updater/user_manual.md
-            ; Modified from "HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Microsoft EdgeWebView\ModifyPath"
             ExecWait `"$R1" /install appguid=${WEBVIEW2APPGUID}&needsadmin=true` $1
             ${If} $1 = 0
               DetailPrint "$(webview2InstallSuccess)"
             ${Else}
-              MessageBox MB_ICONEXCLAMATION|MB_ABORTRETRYIGNORE "$(webview2InstallError)" IDIGNORE ignore IDRETRY update_webview
-              Quit
-              ignore:
+              DetailPrint "$(webview2InstallError)"
+              DetailPrint "$(webview2TooOld)"
             ${EndIf}
           ${EndIf}
+        !endif
+        ; <<< clauseo: webview2-no-elevation
       ${EndIf}
     !endif
   ${EndIf}

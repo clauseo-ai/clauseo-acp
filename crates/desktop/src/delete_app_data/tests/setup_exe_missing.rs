@@ -183,7 +183,7 @@ fn a_copy_written_then_removed_says_so_and_exits_20() {
         &[
             "${ElseIf} $R6 = 8",
             REMOVED_LINE,
-            "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(setupExeRemoved)\"",
+            "MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST \"$(setupExeRemoved)\"",
             SET_20,
         ],
     );
@@ -251,7 +251,7 @@ fn a_passive_install_writes_a_details_line_and_shows_no_box_or_code() {
         "${IfNot} ${Silent}",
         "${AndIf} $PassiveMode <> 1",
         "${AndIf} $UpdateMode <> 1",
-        "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(setupExeRemoved)\"",
+        "MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST \"$(setupExeRemoved)\"",
         "${EndIf}",
     ];
     assert_run(says, &expected);
@@ -291,7 +291,7 @@ const SAYS_MISSING: [&str; 9] = [
     "${If} ${Silent}",
     "SetErrorLevel ${CLAUSEO_EXIT_REMOVE_EXE_MISSING}",
     "${Else}",
-    "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(removeExeMissing)\"",
+    "MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST \"$(removeExeMissing)\"",
     "${EndIf}",
     "${EndIf}",
     "${EndIf}",

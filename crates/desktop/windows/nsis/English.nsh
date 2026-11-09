@@ -113,6 +113,12 @@ LangString uninstallNotInPlace ${LANG_ENGLISH} "Clauseo wasn't uninstalled, beca
 ; (windows/hooks.nsh, CLAUSEO_NATIVE_ARM64_NOTICE); details list only. Provisional (2026-11-09).
 LangString nativeArm64Notice ${LANG_ENGLISH} "This computer has an ARM64 processor: Clauseo_${VERSION}_arm64-machine-setup.exe is its native per-machine installer."
 
+; webview2TooOld: a per-user install found WebView2 older than Clauseo needs and, so as never to
+; ask for an administrator, leaves it to Windows to update (installer.nsi block
+; webview2-no-elevation); the per-machine installer says it when its update fails. Details list
+; only; the install goes on. Provisional (2026-11-09).
+LangString webview2TooOld ${LANG_ENGLISH} "WebView2 on this computer is older than Clauseo needs. Windows keeps it up to date in the background. If it's still too old when Clauseo opens, Clauseo will show you how to get the newer version."
+
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
 ; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), deleteAppData aside, with one fix:
 ; Tauri writes {{product_name}} in appRunning, appRunningOkKill and failedToKillApp, which NSIS

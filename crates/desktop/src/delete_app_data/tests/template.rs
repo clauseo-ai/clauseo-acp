@@ -9,7 +9,10 @@
 //! one the branch looks for. `ui-language`, later in `.onInit`, sets the installer's language
 //! from the app's (`hooks.nsh`, tested in `installer_language.rs`). The per-machine
 //! uninstaller's blocks (`uninstall-string`, `un-admin-section`, `uninstall-self-delete` and
-//! `un-gui-end`) are tested in `uninstall_in_place.rs`.
+//! `un-gui-end`) are tested in `uninstall_in_place.rs`. `webview2-no-elevation` keeps a per-user
+//! install from asking for an administrator over an old WebView2 (`webview2_floor.rs`);
+//! `unable-to-uninstall-front` and `silent-downgrades-front` bring Tauri's own boxes to the front
+//! (`message_front.rs`).
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -18,6 +21,7 @@ use sha2::{Digest, Sha256};
 
 use super::admin_copy::{admin_code, assert_run, macro_body};
 use super::sources::{line_with, read};
+use super::webview2_floor::UPSTREAM_UPDATE;
 
 /// The Tauri CLI whose template the copy follows: `ui/package.json` pins the CLI that bundles.
 /// Cargo.lock has no tauri-cli or tauri-bundler, so the npm pin is what moves on an upgrade.
@@ -37,7 +41,7 @@ struct Block {
 
 /// The blocks, in the template's order. A new block is one more row here (and its lines in the
 /// template).
-const BLOCKS: [Block; 10] = [
+const BLOCKS: [Block; 13] = [
     Block {
         name: "no-solid",
         after: "  ; Set the compression algorithm. We default to LZMA.",
@@ -54,6 +58,11 @@ const BLOCKS: [Block; 10] = [
             "VIAddVersionKey \"FileVersion\" \"${VERSION}\"",
             "VIAddVersionKey \"ProductVersion\" \"${VERSION}\"",
         ],
+    },
+    Block {
+        name: "unable-to-uninstall-front",
+        after: "      ; Other errors? show generic error message and return to select un/reinstall page",
+        replaces: &["      MessageBox MB_ICONEXCLAMATION \"$(unableToUninstall)\""],
     },
     Block {
         name: "finish-show",
@@ -74,6 +83,16 @@ const BLOCKS: [Block; 10] = [
         name: "ui-language",
         after: "  ${EndIf}",
         replaces: &[],
+    },
+    Block {
+        name: "silent-downgrades-front",
+        after: "      ${Else}",
+        replaces: &["        MessageBox MB_ICONSTOP \"$(silentDowngrades)\""],
+    },
+    Block {
+        name: "webview2-no-elevation",
+        after: "      ${If} $R0 = 1",
+        replaces: &UPSTREAM_UPDATE,
     },
     Block {
         name: "uninstall-string",
@@ -524,7 +543,7 @@ fn the_main_window_class_is_clauseos_own_and_the_installer_looks_for_it() {
         &[
             "${ElseIf} $R6 = 6",
             "DetailPrint \"$(adminCopyAppRunning)\"",
-            "MessageBox MB_OK|MB_ICONEXCLAMATION \"$(adminCopyAppRunning)\"",
+            "MessageBox MB_OK|MB_ICONEXCLAMATION|MB_SETFOREGROUND|MB_TOPMOST \"$(adminCopyAppRunning)\"",
             "SetErrorLevel ${CLAUSEO_EXIT_APP_RUNNING}",
         ],
     );
