@@ -10,12 +10,11 @@ use std::time::Duration;
 use super::desktop::AgentDesktop;
 use super::end::{EndSignal, GRACE, SessionEnd, copy, inner_exited, relay_stdin};
 use super::frame::{InnerLaunch, InnerReport, command_line, read_frame, write_frame};
-use super::marker::marked;
 use super::paths::{CodexReuse, WinPath};
 use super::spawn::{Process, kill_on_close_job, restrict_dll_search, system_folder};
 use super::start::start;
 use super::station::StationSids;
-use super::unclean::os::check_logon;
+use super::unclean::os::{check_logon, marked_as_outer};
 use super::{LAUNCH_CAP, LaunchMessage, RUN_DIR, RunExit, agent_env, codex_reuse, is_launch_name};
 use crate::windows::matters::SANDBOX_DIR;
 use crate::windows::pipe::os::ServerPipe;
@@ -77,8 +76,8 @@ pub fn run_outer(launch_file: &Path, exe: &Path) -> u32 {
 fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
     let message = read_launch(launch_file)?;
     let data_dir = data_dir_of(launch_file)?;
-    // F4, before this session's marker: a marker of this pool user's that awaits a stop refuses
-    // the logon until the stop completes, one that awaits a sweep until it ran (`unclean.rs`).
+    // F4, before this session's marker: a live session's refuses the logon as busy, one that
+    // awaits a stop until the stop completes, one that awaits a sweep until it ran (`unclean.rs`).
     check_logon(&data_dir, &message.pool_user).map_err(|r| Failure::new(r.exit, r.why))?;
     // The unclean-session marker, before anything runs as the pool user; only a clean end in
     // `relay` removes it. One that can't be written refuses the launch with its own code
@@ -89,7 +88,7 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
         let why = format!("the session marker failed (the install id: {e})");
         Failure::new(RunExit::MarkerUnwritable, why)
     })?;
-    marked(
+    marked_as_outer(
         &data_dir,
         launch_file,
         &message.pool_user,

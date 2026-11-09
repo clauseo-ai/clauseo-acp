@@ -97,3 +97,32 @@ fn an_unreadable_session_record_is_busy() {
     let got = sids.assign(&one, "s1", &pool(4), reread(&ledger), &open);
     assert_eq!(got, Err(Assign::Busy(one)));
 }
+
+/// The slot rule F4's live-outer check backs up (`runner::unclean::outer_alive`): two live
+/// launches never share a pool user. A second launch of the same matter is busy; a launch of
+/// another matter gets another user, or none.
+#[test]
+fn two_live_launches_never_share_a_pool_user() {
+    let data = TempDir::new("busy-slot-data");
+    let roots = TempDir::new("busy-slot-matters");
+    let records = TempDir::new("busy-slot-ledger");
+    let ledger = ledger_in(records.path(), &pool(2));
+    let (one, two) = (matter(), matter());
+    let (root_one, root_two) = (roots.dir("m/one"), roots.dir("m/two"));
+    let mut sids = sids_in(&data);
+    launch_matter_on_test_volume(&root_one, data.path(), &one, "s1", tick(1)).unwrap();
+    let open = sids.open_sessions().unwrap();
+    let first = sids.assign(&one, "s1", &pool(2), reread(&ledger), &open);
+    assert_eq!(first, Ok(user(1)));
+
+    launch_beside_on_test_volume(&root_one, data.path(), &one, "s2", &["s1"], tick(2)).unwrap();
+    let open = sids.open_sessions().unwrap();
+    let same = sids.assign(&one, "s2", &pool(2), reread(&ledger), &open);
+    assert_eq!(same, Err(Assign::Busy(one)));
+
+    launch_matter_on_test_volume(&root_two, data.path(), &two, "t1", tick(3)).unwrap();
+    let open = sids.open_sessions().unwrap();
+    let other = sids.assign(&two, "t1", &pool(2), reread(&ledger), &open);
+    assert_eq!(other, Ok(user(2)));
+    assert_ne!(other, first);
+}

@@ -20,7 +20,9 @@
 //! one whose kill was refused has exited is `WaitForSingleObject` with no wait.
 //!
 //! [`OsPrevious`] is the outer's, not the sweep's: its search for a previous session's live
-//! runners before its logon (`previous.rs`), through the same Toolhelp snapshot.
+//! runners before its logon (`previous.rs`), through the same Toolhelp snapshot. So are
+//! [`own_outer`] and [`outer_seen`], its marker's pid and creation time and F4's look at another
+//! marker's outer (`unclean.rs`), through the same open and `GetProcessTimes`.
 //!
 //! [`Processes::job_pids`] is `QueryInformationJobObject` with no job handle, which "uses the
 //! job associated with the calling process" (the immediate one, the launch's, when jobs nest),
@@ -47,14 +49,16 @@ use windows::Win32::System::RemoteDesktop::{
     WTS_CURRENT_SERVER_HANDLE, WTS_PROCESS_INFOW, WTSEnumerateProcessesW, WTSFreeMemory,
 };
 use windows::Win32::System::Threading::{
-    GetCurrentProcess, GetCurrentProcessId, GetProcessTimes, OpenProcess, OpenProcessToken,
-    PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
-    PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
+    GetCurrentProcess, GetCurrentProcessId, GetExitCodeProcess, GetProcessTimes, OpenProcess,
+    OpenProcessToken, PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_LIMITED_INFORMATION,
+    PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
 };
 
 use super::super::RunExit;
+use super::super::marker::Outer;
 use super::super::previous::Previous;
 use super::super::spawn::telemetry_user;
+use super::super::unclean::OuterSeen;
 use super::{Owner, Point, Processes, SWEPT, Seen, SweepError, sweep};
 use crate::windows::acl::object::{Handle, os_error};
 use crate::windows::sids::Sid;
@@ -69,6 +73,8 @@ const NO_SUCH_PID: i32 = 87;
 const NO_MORE: i32 = 18;
 /// `ERROR_ACCESS_DENIED`.
 const DENIED: i32 = 5;
+/// `STILL_ACTIVE`: the exit code `GetExitCodeProcess` gives a process that hasn't exited.
+const STILL_ACTIVE: u32 = 259;
 /// `ERROR_MORE_DATA`: the job's pid list doesn't fit the buffer.
 const MORE_DATA: i32 = 234;
 /// The most pids the job's list is read for: past it, the read fails.
@@ -179,6 +185,38 @@ impl Previous for OsPrevious<'_> {
             Err("it didn't exit once ended".to_owned())
         }
     }
+}
+
+/// This outer's own [`Outer`], for its marker (`unclean::os::marked_as_outer`): its pid and its
+/// creation time.
+pub(in crate::windows::runner) fn own_outer() -> io::Result<Outer> {
+    // SAFETY: no arguments; the pseudo-handle needs no closing.
+    let (pid, process) = unsafe { (GetCurrentProcessId(), GetCurrentProcess()) };
+    Ok(Outer {
+        pid,
+        created: times(process)?,
+    })
+}
+
+/// F4's look at a marker's outer (`unclean::Markers::outer`): `pid` opened with
+/// `PROCESS_QUERY_LIMITED_INFORMATION` alone, then its exit code and creation time read through
+/// that handle. An exit code of `STILL_ACTIVE` is taken as running.
+pub(in crate::windows::runner) fn outer_seen(pid: u32) -> OuterSeen {
+    let process = match open(PROCESS_QUERY_LIMITED_INFORMATION, pid) {
+        Ok(Some(process)) => process,
+        Ok(None) => return OuterSeen::Gone,
+        Err(error) if error.raw_os_error() == Some(DENIED) => return OuterSeen::Denied,
+        Err(_) => return OuterSeen::Failed,
+    };
+    let mut code = 0u32;
+    // SAFETY: the handle is live with PROCESS_QUERY_LIMITED_INFORMATION; a live out-pointer.
+    if unsafe { GetExitCodeProcess(process.0, &raw mut code) }.is_err() {
+        return OuterSeen::Failed;
+    }
+    if code != STILL_ACTIVE {
+        return OuterSeen::Exited;
+    }
+    times(process.0).map_or(OuterSeen::Failed, |created| OuterSeen::Running { created })
 }
 
 /// How long an ended previous runner has to be gone.

@@ -446,16 +446,20 @@ pub enum RunExit {
     /// first act (`token::runner_token_first_sddl`), so the outer can't make its full check: the
     /// launch is refused before the inner does anything else.
     TokenGrant,
+    /// F4: an open marker of this pool user's names an outer that still runs, a live session's
+    /// (`unclean::outer_alive`). The outer refuses the launch before its own marker or any
+    /// logon, requests no stop and ends nothing; a launch once that session ended goes ahead.
+    PoolBusy,
 }
 
-/// [`RunExit::TokenGrant`]'s reserved number past [`RUN_EXIT_BASE`]: `0x12` and `0x13` are
-/// [`RunExit::AwaitingStop`] and [`RunExit::AwaitingSweep`], and `0x14` is another branch's
-/// code (`LeftoverTask`), none here.
-const TOKEN_GRANT_OFFSET: u32 = 0x15;
+/// The variants with an explicit, reserved number past [`RUN_EXIT_BASE`] instead of their
+/// position: [`RunExit::TokenGrant`] `0x15` and [`RunExit::PoolBusy`] `0x20`. The numbers
+/// between are other branches' codes (`0x14` `LeftoverTask`, `0x16` to `0x1f`), none here.
+const RESERVED: [(RunExit, u32); 2] = [(RunExit::TokenGrant, 0x15), (RunExit::PoolBusy, 0x20)];
 
 impl RunExit {
-    /// The variants numbered by position, from [`RUN_EXIT_BASE`]; [`RunExit::TokenGrant`] has an
-    /// explicit, reserved number instead ([`TOKEN_GRANT_OFFSET`]).
+    /// The variants numbered by position, from [`RUN_EXIT_BASE`]; the rest have an explicit,
+    /// reserved number instead ([`RESERVED`]).
     const ALL: [RunExit; 20] = [
         RunExit::Usage,
         RunExit::BadLaunch,
@@ -481,8 +485,8 @@ impl RunExit {
 
     /// The exit code.
     pub fn code(self) -> u32 {
-        if self == RunExit::TokenGrant {
-            return RUN_EXIT_BASE + TOKEN_GRANT_OFFSET;
+        if let Some((_, offset)) = RESERVED.iter().find(|(exit, _)| *exit == self) {
+            return RUN_EXIT_BASE + offset;
         }
         let index = RunExit::ALL
             .iter()
@@ -494,8 +498,8 @@ impl RunExit {
     /// The failure an exit code names, if it is one.
     pub fn from_code(code: u32) -> Option<RunExit> {
         let offset = code.checked_sub(RUN_EXIT_BASE)?;
-        if offset == TOKEN_GRANT_OFFSET {
-            return Some(RunExit::TokenGrant);
+        if let Some((exit, _)) = RESERVED.iter().find(|(_, reserved)| *reserved == offset) {
+            return Some(*exit);
         }
         RunExit::ALL.get(usize::try_from(offset).ok()?).copied()
     }
@@ -527,7 +531,8 @@ impl RunExit {
             | RunExit::MarkerUnwritable
             | RunExit::AwaitingStop
             | RunExit::AwaitingSweep
-            | RunExit::TokenGrant => None,
+            | RunExit::TokenGrant
+            | RunExit::PoolBusy => None,
         }
     }
 }

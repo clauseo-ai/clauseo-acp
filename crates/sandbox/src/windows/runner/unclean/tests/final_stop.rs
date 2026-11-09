@@ -89,6 +89,9 @@ impl Markers for World {
     fn note(&mut self, line: &str) {
         self.fake.note(line);
     }
+    fn outer(&mut self, pid: u32) -> OuterSeen {
+        self.fake.outer(pid)
+    }
 }
 
 #[test]

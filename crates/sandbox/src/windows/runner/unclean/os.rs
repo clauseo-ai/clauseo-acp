@@ -7,10 +7,11 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use super::super::marker::{
-    MarkerState, Sequences, UncleanSession, marker_path, remove_marker, unclean_sessions,
+    MarkerState, Sequences, UncleanSession, marked, marker_path, remove_marker, unclean_sessions,
     write_marker_at,
 };
-use super::{Markers, Refused, StartUp, await_sweeps, logon_check, start_up};
+use super::super::sweep::os::{outer_seen, own_outer};
+use super::{Markers, OuterSeen, Refused, StartUp, await_sweeps, logon_check, start_up};
 use crate::windows::record::sandbox_pool_sids;
 use crate::windows::refresh::{request_pool_stop, request_pool_sweep};
 use crate::windows::setup::record_values::{STOP_SEQUENCE, SWEEP_SEQUENCE};
@@ -95,11 +96,34 @@ impl Markers for OsMarkers {
         let mut stderr = io::stderr().lock();
         drop(writeln!(stderr, "{line}").and_then(|()| stderr.flush()));
     }
+
+    fn outer(&mut self, pid: u32) -> OuterSeen {
+        outer_seen(pid)
+    }
 }
 
 /// F4, for the outer before it writes its own marker (`unclean::logon_check`).
 pub(crate) fn check_logon(data_dir: &Path, pool_user: &Sid) -> Result<(), Refused> {
     logon_check(&mut OsMarkers::new(data_dir), pool_user)
+}
+
+/// The outer's marker before its session (`marker::marked`), naming this process as its outer.
+/// Its creation time that can't be read fails as the marker's write does.
+pub(crate) fn marked_as_outer<T>(
+    data_dir: &Path,
+    launch_file: &Path,
+    pool_user: &Sid,
+    install: Option<&str>,
+    session: impl FnOnce(PathBuf) -> T,
+) -> io::Result<T> {
+    marked(
+        data_dir,
+        launch_file,
+        pool_user,
+        install,
+        own_outer()?,
+        session,
+    )
 }
 
 /// A launch's check, for `clean_close::check_launch` (`unclean::await_sweeps`).

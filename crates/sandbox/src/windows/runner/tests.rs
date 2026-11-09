@@ -436,7 +436,10 @@ fn exit_codes_are_stable_and_map_to_set_up_causes() {
     assert_eq!(RunExit::Usage.code(), 0xE0C1_5000);
     assert_eq!(RunExit::SecondaryLogon.code(), 0xE0C1_5003);
     assert_eq!(RunExit::Spawn.code(), 0xE0C1_500B);
-    for exit in RunExit::ALL.into_iter().chain([RunExit::TokenGrant]) {
+    for exit in RunExit::ALL
+        .into_iter()
+        .chain([RunExit::TokenGrant, RunExit::PoolBusy])
+    {
         assert_eq!(RunExit::from_code(exit.code()), Some(exit));
     }
     assert_eq!(RunExit::from_code(0), None);
@@ -456,7 +459,11 @@ fn exit_codes_are_stable_and_map_to_set_up_causes() {
     // Reserved at 0x15; 0x14 is another branch's code, none here.
     assert_eq!(RunExit::TokenGrant.code(), 0xE0C1_5015);
     assert_eq!(RunExit::TokenGrant.no_sandbox(), None);
-    for unknown in [0x14, 0x16] {
+    // Reserved at 0x20; 0x16 to 0x1f are other branches' codes, none here.
+    assert_eq!(RunExit::PoolBusy.code(), 0xE0C1_5020);
+    assert_eq!(RunExit::PoolBusy.no_sandbox(), None);
+    assert_eq!(RunExit::from_code(0xE0C1_5020), Some(RunExit::PoolBusy));
+    for unknown in [0x14, 0x16, 0x1f, 0x21] {
         assert_eq!(
             RunExit::from_code(RUN_EXIT_BASE + unknown),
             None,

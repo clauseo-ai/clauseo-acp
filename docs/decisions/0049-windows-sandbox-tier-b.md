@@ -1350,7 +1350,10 @@ leaves that profile, both naming the part.
       the same pre-logon check closes it). An older build reads either new state as unreadable,
       which awaits a stop for every pool user: closed, not open.
     - `Open` left standing: the outer died (the host's job end after `stdin_grace`, a crash) or
-      couldn't read a number.
+      couldn't read a number. A live session's marker is `Open` too, so the outer records itself
+      in it (`outer`: its pid and its creation time from `GetProcessTimes`; appended, and a
+      marker without it reads as before; an older build reads a marker with it as unreadable,
+      closed as for the new states).
 
     What these states leave open, besides the gap above:
     - Without an escapee (`AwaitingSweep`, then clean) no stop follows the sweep, so a pool
@@ -1380,10 +1383,22 @@ leaves that profile, both naming the part.
     - **The pool user's logon (F4).** Before writing its own marker, the outer refuses the
       launch (`RunExit::AwaitingStop`, `0xE0C15012`, appended) while a marker of this pool
       user's, or one naming none or unreadable, awaits a stop with `StopSequence` below its
-      number, and requests the stop. An `Open` marker of this pool user's is a dead outer's (one
-      live session per pool user, and this outer hasn't written its own): it becomes
-      `AwaitingStop` with `StopNext` read then, after its session's last launch path closed,
-      and the logon is refused. One whose stop completed is re-marked; one that couldn't be
+      number, and requests the stop. Before anything else, an `Open` marker of this pool user's
+      whose outer still runs refuses the launch as busy (`RunExit::PoolBusy`, `0xE0C15020`,
+      reserved): no stop is requested, nothing is written and nothing is ended, since a stop
+      ends every process of the pool user, the live session's included. A VM run found the gap
+      this closes: a second launch for a pool user while its first session ran took the first's
+      `Open` marker for a dead outer's, refused with `AwaitingStop` in 58 ms, and the stop it
+      requested killed the live session. "Still runs" is strict: the marker's pid opens with
+      `PROCESS_QUERY_LIMITED_INFORMATION`, its exit code is `STILL_ACTIVE`, and its creation
+      time is the marker's. No such pid, another creation time (the pid reused), an exited
+      process whose object a handle keeps, or an open refused (the outer runs as the lawyer,
+      who can open every outer, so a pid the lawyer can't open isn't one) is a dead outer. So is
+      a marker from before the field. The host's `MatterSids::assign` already refuses a second
+      live launch of a pool user (`Assign::Busy`); this is the outer's own backstop. Any other
+      `Open` marker of this pool user's is a dead outer's (this outer hasn't written its own):
+      it becomes `AwaitingStop` with `StopNext` read then, after its session's last launch
+      path closed, and the logon is refused. One whose stop completed is re-marked; one that couldn't be
       (`SweepNext` unreadable, the write failed) refuses the logon, as it refuses a launch,
       without requesting a stop, which has completed (`RunExit::AwaitingSweep`, `0xE0C15013`,
       appended). A marker of this pool
@@ -2365,6 +2380,8 @@ pub struct Progress { pub walked: u64, pub done: bool, pub failed: Option<Arc<Er
   `RunExit::AwaitingSweep` is F4's other refusal, with no stop awaited: a marker of the pool
   user's awaits a sweep that didn't complete within 15 s, or its completed stop (or sweep)
   couldn't be re-marked; a later launch checks again.
+  `RunExit::PoolBusy` is F4's busy refusal: an earlier session of the pool user is still
+  running; nothing was requested, and a launch once it ended goes ahead.
 - **The desktop's start:** once, before any launch and off the UI thread,
   `runner::start_up_requests(data_dir)` settles the markers the last run left and requests the
   stop and sweep tasks for what they still await. It never waits.
