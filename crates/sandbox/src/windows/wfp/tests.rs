@@ -8,19 +8,20 @@ use std::net::Ipv4Addr;
 use super::check::{ERROR_INVALID_OWNER, NetworkGap, OWNER_CHECK, WfpError, owner_allowed};
 use super::spec::{
     ACTRL_ENUM, ACTRL_READ, Action, BLOCK_WEIGHT, Condition, Direction, FIREWALL_UNDER_POLICY,
-    FirewallTrouble, Flags, Layer, Match, Namespace, NetworkSetup, Object, PERMIT_BASE,
-    PERMIT_WEIGHT, PROTOCOL_ICMP, PROTOCOL_ICMPV6, PROTOCOL_TCP, RuleProtocol, SpecError,
-    allowed_users, checked_ports, denied_users, not_pool_sddl, permit_ports, revocations,
-    rule_names, user_sddl,
+    FirewallTrouble, Flags, Layer, Match, Namespace, NetworkSetup, Object, PROTOCOL_ICMP,
+    PROTOCOL_ICMPV6, RuleProtocol, SpecError, allowed_users, checked_ports, denied_users,
+    not_pool_sddl, permit_ports, revocations, rule_names, user_sddl,
 };
-use crate::ports::TIER_B_PORTS;
+use crate::ports::Slot;
 use crate::test_support::TempDir;
 use crate::windows::sids::Sid;
 use crate::{Error, Loopback, Policy};
 use clauseo_protocol::ErrorCode;
 
+mod arbitration;
 mod check;
 mod ports;
+mod slots;
 mod writes;
 
 pub(super) fn sid(rid: u32) -> Sid {
@@ -35,8 +36,13 @@ pub(super) fn group() -> Sid {
     sid(3000)
 }
 
+/// The slot the tests give the pool user with RID `rid`: `rid % 32` (2001 is slot 17).
+pub(super) fn slot_of(rid: u32) -> Slot {
+    Slot::new(u8::try_from(rid % 32).unwrap()).unwrap()
+}
+
 pub(super) fn setup(pool: &[u32]) -> NetworkSetup {
-    let pool: Vec<Sid> = pool.iter().map(|&rid| sid(rid)).collect();
+    let pool: Vec<(Slot, Sid)> = pool.iter().map(|&rid| (slot_of(rid), sid(rid))).collect();
     NetworkSetup::new(&owner(), &group(), &pool).unwrap()
 }
 
@@ -83,29 +89,6 @@ fn blocks_catch_the_group_and_every_pool_user_at_each_layer() {
 }
 
 #[test]
-fn each_pool_user_gets_one_static_permit_for_the_range_only() {
-    let ns = Namespace::production();
-    let filters = setup(&[2002, 2001]).filters(&ns);
-    assert_eq!(filters.len(), 8);
-    for (i, (filter, user)) in filters[6..].iter().zip([2001, 2002]).enumerate() {
-        let i = u16::try_from(i).unwrap();
-        assert_eq!(filter.key, ns.filter_key(PERMIT_BASE + i));
-        assert_eq!(filter.layer, Layer::ConnectV4);
-        assert_eq!(filter.action, Action::Permit);
-        assert!(filter.weight == PERMIT_WEIGHT && PERMIT_WEIGHT > BLOCK_WEIGHT);
-        assert_eq!(
-            filter.conditions,
-            [
-                Condition::Users(vec![sid(user)]),
-                Condition::RemoteV4(Ipv4Addr::LOCALHOST),
-                Condition::Protocol(PROTOCOL_TCP),
-                Condition::RemotePorts(*TIER_B_PORTS.start(), *TIER_B_PORTS.end()),
-            ]
-        );
-    }
-}
-
-#[test]
 fn match_types_and_flags_are_pinned() {
     let filters = setup(&[2001]).filters(&Namespace::production());
     let block = Flags {
@@ -138,6 +121,11 @@ fn match_types_and_flags_are_pinned() {
         Match::Equal
     );
     assert_eq!(matching(Condition::RemotePorts(1, 2)), Match::Range);
+    assert_eq!(matching(Condition::LocalPorts(1, 2)), Match::Range);
+    assert_eq!(
+        matching(Condition::NotUsers(vec![sid(2001)])),
+        Match::NotEqual
+    );
     // The address goes to WFP in host order.
     assert_eq!(u32::from(Ipv4Addr::LOCALHOST), 0x7F00_0001);
 }
@@ -156,14 +144,23 @@ fn a_rerun_over_the_same_pool_builds_the_same_objects() {
 fn an_extend_covers_the_new_user() {
     let ns = Namespace::production();
     let after = setup(&[2001, 2002, 2003]).filters(&ns);
-    for filter in &after[..6] {
+    for filter in &after[..12] {
         let Condition::NotPool { pool, .. } = &filter.conditions[0] else {
             panic!("{filter:?}");
         };
         assert_eq!(pool, &[sid(2001), sid(2002), sid(2003)]);
     }
-    assert_eq!(after.len(), 9);
-    assert_eq!(after[8].conditions[0], Condition::Users(vec![sid(2003)]));
+    assert_eq!(after.len(), 12 + 3 * 6);
+    for filter in &after[12 + 2 * 6..] {
+        let named = [
+            Condition::Users(vec![sid(2003)]),
+            Condition::NotUsers(vec![sid(2003)]),
+        ];
+        assert!(named.contains(&filter.conditions[0]), "{}", filter.name);
+    }
+    // The users already there keep their filters, keys and all.
+    let before = setup(&[2001, 2002]).filters(&ns);
+    assert!(before[12..].iter().all(|f| after.contains(f)));
     let rules = setup(&[2001, 2002, 2003]).rules(&ns);
     assert!(rules.iter().all(|r| r.users.contains(sid(2003).as_str())));
 }
@@ -172,7 +169,13 @@ fn an_extend_covers_the_new_user() {
 fn a_pool_that_would_filter_the_wrong_programs_is_refused() {
     let users = Sid::parse("S-1-5-32-545").unwrap();
     let everyone = Sid::parse("S-1-1-0").unwrap();
-    let new = |group: &Sid, pool: &[Sid]| NetworkSetup::new(&owner(), group, pool);
+    let new = |group: &Sid, pool: &[Sid]| {
+        let slots: Vec<(Slot, Sid)> = (0u8..)
+            .zip(pool)
+            .map(|(n, sid)| (Slot::new(n).unwrap(), sid.clone()))
+            .collect();
+        NetworkSetup::new(&owner(), group, &slots)
+    };
     assert_eq!(new(&group(), &[]), Err(SpecError::NoPoolUser));
     for bad in [users, everyone] {
         let refused = Err(SpecError::NotAnAccount(bad.clone()));
@@ -253,7 +256,7 @@ fn the_firewall_rules_except_only_the_range() {
                 "clauseo_sandbox_block_loopback_tcp",
                 Direction::Out,
                 RuleProtocol::Tcp,
-                Some("1-46099,46200-65535")
+                Some("1-46099,46612-65023,65280-65535")
             ),
         ]
     );
@@ -363,7 +366,7 @@ fn policy(dir: &TempDir, ports: &[u16], loopback: Loopback) -> Policy {
 }
 
 #[test]
-fn a_launch_names_only_ports_in_the_range_and_never_any() {
+fn a_launch_names_only_its_own_slots_ports_and_never_any() {
     let dir = TempDir::new("wfp-permit-ports");
     let listed = Loopback::Ports(vec![46150, 46191]);
     let ports = permit_ports(&policy(&dir, &[46190, 46191], listed)).unwrap();
@@ -372,21 +375,30 @@ fn a_launch_names_only_ports_in_the_range_and_never_any() {
     assert_eq!(none, [46190]);
     let any = permit_ports(&policy(&dir, &[46190], Loopback::Any));
     assert_eq!(any, Err(NetworkGap::LoopbackAny));
-    let outside = permit_ports(&policy(&dir, &[46190], Loopback::Ports(vec![9222])));
-    assert_eq!(outside, Err(NetworkGap::PortOutsideRange(9222)));
-    assert_eq!(checked_ports(&[46199, 46100]), Ok(vec![46100, 46199]));
-    for outside in [46099, 46200, 61080] {
+    let slot = Slot::new(2).unwrap();
+    let (h, p, d) = (46_116, 46_372, 65_040);
+    assert!(slot.host().contains(&h) && slot.pool().contains(&p) && slot.daemon().contains(&d));
+    assert_eq!(checked_ports(slot, &[d, p, h, h]), Ok(vec![h, p, d]));
+    let other = Slot::new(3).unwrap();
+    for outside in [
+        h - 1,
+        *other.host().start(),
+        *other.pool().end(),
+        *other.daemon().start(),
+        9222,
+        61080,
+    ] {
         assert_eq!(
-            checked_ports(&[outside]),
+            checked_ports(slot, &[h, outside]),
             Err(NetworkGap::PortOutsideRange(outside))
         );
     }
     assert!(
         NetworkGap::PortOutsideRange(1)
             .to_string()
-            .contains("46100-46199")
+            .contains("outside this matter's sandbox ports")
     );
-    assert_eq!(checked_ports(&[]), Ok(vec![]));
+    assert_eq!(checked_ports(slot, &[]), Ok(vec![]));
 }
 
 #[test]
@@ -398,6 +410,7 @@ fn a_stale_set_up_needs_set_up_and_the_rest_fail_the_launch() {
         NetworkGap::PoolUserNotCovered,
         NetworkGap::Unreadable { call: "c", code: 5 },
         NetworkGap::ForeignFilter("x".to_owned()),
+        NetworkGap::OldSetup("x".to_owned()),
     ] {
         assert_eq!(code(stale), ErrorCode::SandboxSetupRequired);
     }

@@ -19,10 +19,7 @@ import {
   type GateAct,
   type Plan,
 } from "@clauseo/components/clauseo/first-launch/gate.tsx";
-import {
-  installLine,
-  type InstallActs,
-} from "@clauseo/components/clauseo/first-launch/install.tsx";
+import { installLine } from "@clauseo/components/clauseo/first-launch/install.tsx";
 import { DocumentsLine } from "@clauseo/components/clauseo/first-launch/parts.tsx";
 import { Welcome } from "@clauseo/components/clauseo/first-launch/welcome.tsx";
 import { useDisplay, type Lang, type ReleaseMode } from "@clauseo/components/lib/display.ts";
@@ -61,6 +58,7 @@ import { markButton, markWelcome } from "../../start-marks.ts";
 
 import { repairOf, stepWords, type StepParts } from "./step-parts.ts";
 import { gateView, installView, refusalView } from "./views.ts";
+import { welcomeFoot, type FootActs } from "./welcome-foot.tsx";
 
 // UD2: the expired sign-in card rides here, with the setup store and the gate; the thread's chunk places it
 provideExpiredCard((props) => <ExpiredCard {...props} />);
@@ -475,8 +473,9 @@ export function FirstRun({
       state={state}
       acts={{
         ...installActs(store, state.chosen, state.copied),
-        // no gate on the first screen: the line offers the gate's own Sign in press while the plan isn't here yet
+        // no gate on the first screen: the line offers the gate's own Sign in press until the plan is signed in
         signIn: () => void actsFor(store, transport, state.chosen, null)({ act: "sign-in" }),
+        cancel: () => void actsFor(store, transport, state.chosen, null)({ act: "cancel" }),
       }}
     />
   );
@@ -512,10 +511,10 @@ function FirstScreen({
   plan: Plan;
   setup: AgentSetup | undefined;
   state: SetupState;
-  acts: InstallActs;
+  acts: FootActs;
 }) {
   const { lang } = useDisplay();
-  const install = installLine(lang, installView(setup), NAME[plan], acts, IDS.install);
+  const install = welcomeFoot(lang, state.chosen, NAME[plan], setup, state, acts, IDS.install);
   const [form, setForm] = useState(false);
   const [refused, setRefused] = useState<{ code: string; path: string } | null>(null);
   const wait = usePickWait();

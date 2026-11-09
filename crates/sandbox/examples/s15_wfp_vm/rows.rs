@@ -1,9 +1,8 @@
-//! The rows (S15 PR7, orchestrator ruling 2026-11-07): set-up's blocks catch every pool token,
-//! derived ones included, everywhere outside 127.0.0.1:46100-46199; inside the range a static
-//! permit lets every pool user reach every listener, and the listeners' per-launch secrets keep
-//! matters apart (those rows are `measured`); the owner may read set-up's filters and change
-//! none; a launch refuses a filter set-up didn't write and a listener in the range that isn't
-//! this app's (`foreign`).
+//! The rows (S15 PR7; per-slot ports, 0049 "Loopback ports per slot"): set-up's blocks catch
+//! every pool token, derived ones included, on every loopback port, its own slot's too: no
+//! static filter permits a connect until PR6's SYSTEM server adds per-session permits; the
+//! owner may read set-up's filters and change none; a launch refuses a filter set-up didn't
+//! write and a listener in its host ports that isn't this app's (`foreign`).
 
 use std::error::Error;
 use std::net::TcpListener;
@@ -66,7 +65,9 @@ fn row(user: &'static str, what: &str, step: String, expect: Expect) -> Row {
 pub(crate) fn status() -> Result<(), Box<dyn Error>> {
     for sid in sandbox_pool_sids()? {
         let line = match check_launch_in(&Namespace::production(), &sid, &[]) {
-            Ok(()) => serde_json::json!({ "pool_user": sid.as_str(), "filtered": true }),
+            Ok(slot) => serde_json::json!({
+                "pool_user": sid.as_str(), "filtered": true, "slot": slot.index(),
+            }),
             Err(error) => serde_json::json!({
                 "pool_user": sid.as_str(), "filtered": false, "why": error.to_string(),
             }),
@@ -77,7 +78,7 @@ pub(crate) fn status() -> Result<(), Box<dyn Error>> {
 }
 
 /// `foreign check`, as the desktop user: a launch's check must refuse, while another Windows
-/// user runs `listen <port in 46100-46199>` (a listener that isn't this app's) or after
+/// user runs `listen <port in the slot's host ports>` (a listener that isn't this app's) or after
 /// `foreign add` (a filter set-up didn't write; does the owner's enumeration see it?).
 /// `foreign add` and `foreign remove`, elevated: that filter, persistent, in our sublayer.
 pub(crate) fn foreign(rest: &[String]) -> Result<(), Box<dyn Error>> {
@@ -98,7 +99,7 @@ pub(crate) fn foreign(rest: &[String]) -> Result<(), Box<dyn Error>> {
                 .ok_or("the machine record lists no pool user")?;
             let checked = check_launch_in(&ns, a, &[]);
             let got = match &checked {
-                Ok(()) => "allowed".to_owned(),
+                Ok(_) => "allowed".to_owned(),
                 Err(error) => format!("refused ({error})"),
             };
             let what = "a launch with a foreign filter or listener present";
@@ -128,8 +129,8 @@ pub(crate) fn listen(rest: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// A proxy allowing `example.com`, and its agent credential (`base64("clauseo:<token>")`).
-fn proxy() -> Result<(ProxyHandle, String), Box<dyn Error>> {
+/// A proxy allowing `example.com` in `slot`, and its credential (`base64("clauseo:<token>")`).
+fn proxy(slot: ports::Slot) -> Result<(ProxyHandle, String), Box<dyn Error>> {
     let handle = start_proxy(ProxyConfig {
         allow: Allowlist::exact("example.com")?,
         silent: Allowlist::default(),
@@ -140,7 +141,7 @@ fn proxy() -> Result<(ProxyHandle, String), Box<dyn Error>> {
         record: None,
         // Tier B opens no browser listener (D10).
         browser: false,
-        listener: ports::ListenerFor::TierB,
+        listener: ports::ListenerFor::TierB { slot },
     })?;
     let token = handle
         .env()
@@ -193,19 +194,20 @@ pub(crate) fn rows(exe: &Path, rest: &[String]) -> Result<(), Box<dyn Error>> {
         return Err("the machine record lists fewer than two pool users".into());
     };
     let data_dir = sandbox_data_dir()?.ok_or("the machine record names no data folder")?;
-    let (proxy_a, cred_a) = proxy()?;
-    let (proxy_b, cred_b) = proxy()?;
-    let relay = ports::bind_loopback(ports::ListenerFor::TierB)?;
-    let unlisted = ports::bind_loopback(ports::ListenerFor::TierB)?;
+    let (ns, check) = (Namespace::production(), check_launch_in);
+    let (slot_a, slot_b) = (check(&ns, a, &[])?, check(&ns, b, &[])?);
+    let (proxy_a, cred_a) = proxy(slot_a)?;
+    let (proxy_b, cred_b) = proxy(slot_b)?;
+    let relay = ports::bind_loopback(ports::ListenerFor::TierB { slot: slot_a })?;
+    let unlisted = ports::bind_loopback(ports::ListenerFor::TierB { slot: slot_a })?;
     let ports = Ports {
         pa: proxy_a.port(),
         pb: proxy_b.port(),
         ra: relay.local_addr()?.port(),
         xa: unlisted.local_addr()?.port(),
-        pair_a: ports::claim_port()?.port(),
-        squat: ports::claim_port()?.port(),
+        pair_a: ports::claim_pool_port(slot_a)?.port(),
+        squat: ports::claim_pool_port(slot_a)?.port(),
     };
-    let ns = Namespace::production();
     check_launch_in(&ns, a, &[ports.pa, ports.ra, ports.pair_a, ports.squat])?;
     check_launch_in(&ns, b, &[ports.pb])?;
     if let Some(port) = options.inbound {
@@ -343,47 +345,46 @@ fn outside_rows(p: &Ports) -> Vec<Row> {
         .collect()
 }
 
-/// A's rows inside the range: its own listeners reached; other matters' listeners reached at
-/// the WFP layer (measured), the secret refusing a wrong credential.
+/// A's rows on slot ports: all filtered until PR6's per-session permits open its own.
 fn range_rows(p: &Ports, cred_a: &str, cred_b: &str) -> Vec<Row> {
-    use Expect::{Measured, NotReached, Reached};
+    use Expect::Filtered;
     let local = |port: u16| format!("connect:127.0.0.1:{port}");
-    let range = "the range is open to every pool user; the listener's secret is the check";
+    let range = "no static permit; PR6's are per session and exact-port";
     let table: [(String, String, Expect); 7] = [
         (
             "the proxy port".into(),
             format!("proxy:{}:{cred_a}", p.pa),
-            Reached,
+            Filtered,
         ),
         (
             "a listed loopback port (the relay)".into(),
             local(p.ra),
-            Reached,
+            Filtered,
         ),
         (
             "a loopback pair on a listed port".into(),
             format!("pair:{}", p.pair_a),
-            Reached,
+            Filtered,
         ),
         (
             format!("matter B's proxy port: {range}"),
             local(p.pb),
-            Measured,
+            Filtered,
         ),
         (
             "matter B's proxy with A's own credential (407)".into(),
             format!("proxy:{}:{cred_a}", p.pb),
-            NotReached,
+            Filtered,
         ),
         (
             "matter B's proxy with B's credential (control)".into(),
             format!("proxy:{}:{cred_b}", p.pb),
-            Measured,
+            Filtered,
         ),
         (
             format!("an unlisted listener in the range: {range}"),
             local(p.xa),
-            Measured,
+            Filtered,
         ),
     ];
     table
@@ -439,25 +440,25 @@ fn optional_rows(options: &Options) -> Vec<Row> {
 /// Matter B's rows.
 fn matter_b_rows(p: &Ports, cred_b: &str) -> Vec<Row> {
     let local = |port: u16| format!("connect:127.0.0.1:{port}");
-    let range = "the range is open to every pool user; the listener's secret is the check";
+    let range = "another slot's port, never permitted";
     vec![
         row(
             "B",
             &format!("matter B to matter A's relay port: {range}"),
             local(p.ra),
-            Expect::Measured,
+            Expect::Filtered,
         ),
         row(
             "B",
             &format!("matter B to matter A's proxy port: {range}"),
             local(p.pa),
-            Expect::Measured,
+            Expect::Filtered,
         ),
         row(
             "B",
-            "matter B's own proxy port",
+            "matter B's own proxy port (no static permit; PR6's opens it)",
             format!("proxy:{}:{cred_b}", p.pb),
-            Expect::Reached,
+            Expect::Filtered,
         ),
         row(
             "B",

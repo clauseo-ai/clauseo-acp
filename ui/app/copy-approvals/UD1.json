@@ -100,11 +100,14 @@
     "by": "design"
   },
   "UD1-15": {
-    "en": "Ask your IT team",
-    "hi": "अपनी IT टीम से कहें",
-    "status": "approved",
-    "at": "2026-11-02",
-    "by": "design"
+    "en": "Copy details for IT",
+    "hi": "IT के लिए विवरण कॉपी करें",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (no IT endings)",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (no IT endings)"
   },
   "UD1-16": {
     "en": "Message copied",
@@ -679,14 +682,14 @@
     "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-79": {
-    "en": "Ask your IT team.",
-    "hi": "अपनी IT टीम से कहें।",
+    "en": "Your firm manages these settings.",
+    "hi": "ये सेटिंग्स आपकी फ़र्म प्रबंधित करती है।",
     "hi_status": "provisional",
-    "hi_at": "2026-11-06",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
-    "status": "approved",
-    "at": "2026-11-05",
-    "by": "Rohan",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (no IT endings)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (no IT endings)",
     "note": "Rohan, running-page batch 2026-11-05 (written by app track)"
   },
   "UD1-80": {

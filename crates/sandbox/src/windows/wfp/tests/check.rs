@@ -7,10 +7,11 @@ use super::super::check::{
     FoundCondition, FoundFilter, Kind, NetworkGap, SetupReader, check_setup, classify,
 };
 use super::super::spec::{
-    Action, Condition, FilterSpec, Match, Namespace, PERMIT_BASE, SUBLAYER_WEIGHT, not_pool_sddl,
-    permit_filter, user_sddl,
+    Action, Condition, FilterSpec, Layer, Match, Namespace, PERMIT_WEIGHT, PROTOCOL_TCP,
+    SUBLAYER_WEIGHT, not_pool_sddl, old_permit_filter, slot_filters, slot_key, slot_offset_key,
+    user_sddl,
 };
-use super::{group, setup, sid};
+use super::{group, setup, sid, slot_of};
 use crate::windows::sids::Sid;
 
 /// A read's failure.
@@ -35,6 +36,11 @@ pub(super) fn as_written(ns: &Namespace, spec: &FilterSpec) -> FoundFilter {
             Condition::Protocol(p) => FoundCondition::Protocol(*p),
             Condition::RemoteV4(a) => FoundCondition::RemoteV4(u32::from(*a)),
             Condition::RemotePorts(lo, hi) => FoundCondition::RemotePorts(*lo, *hi),
+            Condition::LocalPorts(lo, hi) => FoundCondition::LocalPorts(*lo, *hi),
+            Condition::NotUsers(users) => FoundCondition::Users {
+                matching: Match::NotEqual,
+                sddl: dacl(user_sddl(users)),
+            },
         })
         .collect();
     FoundFilter {
@@ -98,8 +104,8 @@ impl SetupReader for FakeWfp {
 fn a_whole_set_up_passes_for_each_covered_user_only() {
     let ns = Namespace::production();
     let mut wfp = FakeWfp::installed(&ns, &[2001, 2002]);
-    assert_eq!(check_setup(&ns, &sid(2001), &mut wfp), Ok(()));
-    assert_eq!(check_setup(&ns, &sid(2002), &mut wfp), Ok(()));
+    assert_eq!(check_setup(&ns, &sid(2001), &mut wfp), Ok(slot_of(2001)));
+    assert_eq!(check_setup(&ns, &sid(2002), &mut wfp), Ok(slot_of(2002)));
     assert_eq!(
         check_setup(&ns, &sid(2003), &mut wfp),
         Err(NetworkGap::PoolUserNotCovered),
@@ -107,7 +113,11 @@ fn a_whole_set_up_passes_for_each_covered_user_only() {
     );
     let found: Vec<Kind> = wfp.filters.values().map(|f| classify(&ns, f)).collect();
     assert!(matches!(found[0], Kind::Block(0, _)));
-    assert_eq!(found[6], Kind::Permit(sid(2001)));
+    assert!(matches!(found[11], Kind::Block(11, _)));
+    assert_eq!(found[12], Kind::Slot(slot_of(2001), 0, sid(2001)));
+    assert_eq!(found[17], Kind::Slot(slot_of(2001), 5, sid(2001)));
+    assert_eq!(found[18], Kind::Slot(slot_of(2002), 0, sid(2002)));
+    assert_eq!(found.len(), 12 + 2 * 6);
 }
 
 #[test]
@@ -122,7 +132,7 @@ fn another_namespace_s_filters_are_foreign() {
     );
 }
 
-/// A change to an installed [`FakeWfp`]: the first block's key and the first permit's.
+/// A change to an installed [`FakeWfp`]: the first block's key and the slot's first filter's.
 type Change = fn(&mut FakeWfp, u128, u128);
 
 #[test]
@@ -147,9 +157,9 @@ fn each_missing_changed_or_foreign_filter_refuses_the_launch() {
             connect(),
         ),
         (
-            "the permit gone",
+            "the slot's pool listen permit gone",
             |w, _, p| drop(w.filters.remove(&p)),
-            NetworkGap::PoolUserNotCovered,
+            NetworkGap::FilterMissing("Clauseo sandbox listen_pool slot 17".to_owned()),
         ),
         (
             "a block turned permit",
@@ -196,8 +206,8 @@ fn each_missing_changed_or_foreign_filter_refuses_the_launch() {
         ),
         (
             "a permit widened to every port",
-            |w, _, p| w.filter(p).conditions[3] = FoundCondition::RemotePorts(1, 65535),
-            foreign("Clauseo sandbox permit loopback range S-1-5-21-11-22-33-2001"),
+            |w, _, p| w.filter(p).conditions[1] = FoundCondition::LocalPorts(1, 65535),
+            foreign("Clauseo sandbox listen_pool slot 17"),
         ),
         (
             "a permit for two users",
@@ -208,12 +218,12 @@ fn each_missing_changed_or_foreign_filter_refuses_the_launch() {
                     sddl: sddl.to_owned(),
                 };
             },
-            foreign("Clauseo sandbox permit loopback range S-1-5-21-11-22-33-2001"),
+            foreign("Clauseo sandbox listen_pool slot 17"),
         ),
         (
             "a permit that clears its action right",
             |w, _, p| w.filter(p).flags.clear_action_right = true,
-            foreign("Clauseo sandbox permit loopback range S-1-5-21-11-22-33-2001"),
+            foreign("Clauseo sandbox listen_pool slot 17"),
         ),
         (
             "someone else's filter in our sublayer",
@@ -231,7 +241,7 @@ fn each_missing_changed_or_foreign_filter_refuses_the_launch() {
 
 /// Applies each change to a fresh set-up and checks it refuses with its gap.
 fn refuses_each(ns: &Namespace, cases: Vec<(&str, Change, NetworkGap)>) {
-    let (first, permit) = (ns.filter_key(0), ns.filter_key(PERMIT_BASE));
+    let (first, permit) = (ns.filter_key(0), slot_key(ns, slot_of(2001), 0));
     for (what, change, gap) in cases {
         let mut wfp = FakeWfp::installed(ns, &[2001]);
         change(&mut wfp, first, permit);
@@ -270,13 +280,46 @@ fn a_disabled_or_moved_filter_a_reweighted_sublayer_or_an_outside_permit_refuses
             foreign("Clauseo sandbox block_connect_v4"),
         ),
         (
-            "a permit for a user outside the pool",
+            "a slot for a user outside the pool",
             |w, _, _| {
                 let ns = Namespace::production();
-                let spec = permit_filter(&ns, 1, &sid(2999));
+                for spec in slot_filters(&ns, slot_of(2005), &sid(2999)) {
+                    w.filters.insert(spec.key, as_written(&ns, &spec));
+                }
+            },
+            foreign("Clauseo sandbox listen_pool slot 21"),
+        ),
+        (
+            "a second slot for the same user",
+            |w, _, _| {
+                let ns = Namespace::production();
+                for spec in slot_filters(&ns, slot_of(2005), &sid(2001)) {
+                    w.filters.insert(spec.key, as_written(&ns, &spec));
+                }
+            },
+            foreign("Clauseo sandbox listen_pool slot 21"),
+        ),
+        (
+            "a slot filter naming another user than the rest",
+            |w, _, p| {
+                let sddl = "D:(A;;CC;;;S-1-5-21-11-22-33-2002)";
+                w.filter(p).conditions[0] = FoundCondition::Users {
+                    matching: Match::Equal,
+                    sddl: sddl.to_owned(),
+                };
+            },
+            foreign("Clauseo sandbox listen_daemon slot 17"),
+        ),
+        (
+            "an earlier set-up's shared permit left beside the slot's",
+            |w, _, _| {
+                let ns = Namespace::production();
+                let spec = old_permit_filter(&ns, 0, &sid(2001));
                 w.filters.insert(spec.key, as_written(&ns, &spec));
             },
-            foreign("Clauseo sandbox permit loopback range S-1-5-21-11-22-33-2999"),
+            NetworkGap::OldSetup(
+                "Clauseo sandbox permit loopback range S-1-5-21-11-22-33-2001".to_owned(),
+            ),
         ),
     ];
     refuses_each(&ns, cases);
@@ -312,4 +355,71 @@ fn a_block_denying_a_well_known_sid_is_foreign() {
             "Clauseo sandbox block_connect_v4".to_owned()
         ))
     );
+}
+
+#[test]
+fn an_old_install_with_the_shared_permit_needs_set_up() {
+    let ns = Namespace::production();
+    let mut wfp = FakeWfp::installed(&ns, &[2001]);
+    wfp.filters
+        .retain(|_, f| !f.name.contains(" slot ") && !f.name.contains("listen"));
+    let old = old_permit_filter(&ns, 0, &sid(2001));
+    wfp.filters.insert(old.key, as_written(&ns, &old));
+    assert_eq!(
+        classify(&ns, &wfp.filters[&old.key]),
+        Kind::Permit(sid(2001))
+    );
+    let refused = check_setup(&ns, &sid(2001), &mut wfp).unwrap_err();
+    assert_eq!(
+        refused,
+        NetworkGap::OldSetup(
+            "Clauseo sandbox permit loopback range S-1-5-21-11-22-33-2001".to_owned()
+        )
+    );
+    assert!(refused.needs_setup());
+    // Without the old permit, the missing listen blocks and slot filters still refuse.
+    wfp.filters.remove(&old.key);
+    let missing = check_setup(&ns, &sid(2001), &mut wfp).unwrap_err();
+    assert!(
+        matches!(missing, NetworkGap::FilterMissing(_)),
+        "{missing:?}"
+    );
+    assert!(missing.needs_setup());
+}
+
+#[test]
+fn an_earlier_builds_static_connect_permit_refuses_the_launch_until_set_up_runs() {
+    let ns = Namespace::production();
+    let slot = slot_of(2001);
+    let host = slot.host();
+    // What an earlier build of this branch wrote at slot offset 0 (`connect_host`, F1).
+    let retired = FilterSpec {
+        key: slot_offset_key(&ns, slot, 0),
+        name: "Clauseo sandbox connect_host slot 17".to_owned(),
+        layer: Layer::ConnectV4,
+        action: Action::Permit,
+        weight: PERMIT_WEIGHT,
+        conditions: vec![
+            Condition::Users(vec![sid(2001)]),
+            Condition::RemoteV4(std::net::Ipv4Addr::LOCALHOST),
+            Condition::Protocol(PROTOCOL_TCP),
+            Condition::RemotePorts(*host.start(), *host.end()),
+        ],
+    };
+    let mut wfp = FakeWfp::installed(&ns, &[2001]);
+    assert!(
+        wfp.filters
+            .values()
+            .all(|f| !f.name.contains("connect_host"))
+    );
+    wfp.filters.insert(retired.key, as_written(&ns, &retired));
+    assert_eq!(classify(&ns, &wfp.filters[&retired.key]), Kind::Foreign);
+    let refused = check_setup(&ns, &sid(2001), &mut wfp).unwrap_err();
+    assert_eq!(
+        refused,
+        NetworkGap::ForeignFilter("Clauseo sandbox connect_host slot 17".to_owned())
+    );
+    assert!(refused.needs_setup());
+    // Set-up's and removal's sweep names every retired key too (`removal_keys`).
+    assert!(ns.removal_keys().contains(&retired.key));
 }

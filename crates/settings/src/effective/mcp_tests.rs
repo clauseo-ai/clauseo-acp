@@ -289,6 +289,7 @@ fn an_unreadable_policy_source_locks_the_list_empty() {
     assert_eq!(
         effective.locked().collect::<Vec<_>>(),
         [
+            "browser.allow_when_remote_debugging_disabled",
             "install.bundle",
             "install.registry",
             "mcp.servers",

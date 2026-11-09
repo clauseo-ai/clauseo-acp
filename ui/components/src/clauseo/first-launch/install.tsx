@@ -177,7 +177,7 @@ export function installLine(
                 acts.setCopied("message");
               }}
             >
-              {acts.copied === "message" ? w("Message copied") : w("Ask your IT team")}
+              {acts.copied === "message" ? w("Message copied") : w("Copy details for IT")}
             </Button>
           </>,
         ),

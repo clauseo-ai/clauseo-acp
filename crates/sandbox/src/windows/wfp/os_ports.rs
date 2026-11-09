@@ -4,10 +4,14 @@
 //!   properties `DynamicPortRangeStartPort` and `DynamicPortRangeNumberOfPorts` (the class behind
 //!   `Get-NetTCPSetting` and `netsh int ipv4 show dynamicport tcp`; learn.microsoft.com,
 //!   windows/win32/fwp/wmi/nettcpipprov/msft-nettcpsetting), every setting's range;
-//! - the excluded ports, by test binds (`ports::refused_ports` says why there is no list to
-//!   read);
+//! - the excluded ports, by test binds that never listen (`ports/reserved.rs` says why there
+//!   is no list to read);
 //! - the TCP listeners, from `GetExtendedTcpTable` with `TCP_TABLE_OWNER_PID_LISTENER`, IPv4 and
-//!   IPv6, any address, each with its process's program (`QueryFullProcessImageNameW`).
+//!   IPv6, any address, each with its process's program (`QueryFullProcessImageNameW`);
+//! - for the slot claims and the browser's gate (`ports.rs`): every TCP socket's local port
+//!   (`TCP_TABLE_OWNER_PID_ALL`), the listeners' processes, and whether a process is in a Job
+//!   Object ([`WindowsJobProbe`]: a handle first, then the listeners with their bind times,
+//!   `TCP_TABLE_OWNER_MODULE_LISTENER`, then `IsProcessInJob` on the handle).
 
 #![expect(
     unsafe_code,
@@ -18,10 +22,11 @@ use std::collections::BTreeSet;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use windows::Win32::Foundation::{CloseHandle, HANDLE};
+use windows::Win32::Foundation::{CloseHandle, FILETIME, HANDLE};
 use windows::Win32::NetworkManagement::IpHelper::{
-    GetExtendedTcpTable, MIB_TCP6TABLE_OWNER_PID, MIB_TCPTABLE_OWNER_PID,
-    TCP_TABLE_OWNER_PID_LISTENER,
+    GetExtendedTcpTable, MIB_TCP6TABLE_OWNER_MODULE, MIB_TCP6TABLE_OWNER_PID,
+    MIB_TCPTABLE_OWNER_MODULE, MIB_TCPTABLE_OWNER_PID, TCP_TABLE_CLASS,
+    TCP_TABLE_OWNER_MODULE_LISTENER, TCP_TABLE_OWNER_PID_ALL, TCP_TABLE_OWNER_PID_LISTENER,
 };
 use windows::Win32::Networking::WinSock::{AF_INET, AF_INET6};
 use windows::Win32::System::Com::{
@@ -29,45 +34,60 @@ use windows::Win32::System::Com::{
     CoSetProxyBlanket, CoUninitialize, EOAC_NONE, RPC_C_AUTHN_LEVEL_CALL,
     RPC_C_IMP_LEVEL_IMPERSONATE,
 };
+use windows::Win32::System::JobObjects::IsProcessInJob;
 use windows::Win32::System::Rpc::{RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE};
 use windows::Win32::System::Threading::{
-    OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
+    GetProcessTimes, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+    QueryFullProcessImageNameW,
 };
 use windows::Win32::System::Variant::{VARIANT, VT_I2, VT_I4, VT_UI2, VariantClear};
 use windows::Win32::System::Wmi::{
     IWbemClassObject, IWbemLocator, WBEM_FLAG_CONNECT_USE_MAX_WAIT, WBEM_FLAG_FORWARD_ONLY,
     WBEM_FLAG_RETURN_IMMEDIATELY, WbemLocator,
 };
-use windows::core::{BSTR, HRESULT, PCWSTR, PWSTR, w};
+use windows::core::{BOOL, BSTR, HRESULT, PCWSTR, PWSTR, w};
 
 use super::check::NetworkGap;
-use super::port_check::{Listener, PortsSeen, dynamic_span, is_ours, ports_usable};
-use crate::ports::{TIER_B_PORTS, refused_ports};
+use super::port_check::{LaunchPorts, Listener, PortsSeen, dynamic_span, is_ours, ports_usable};
+use crate::ports::{BoundListener, JobProbe, TIER_B_PORTS, refused_ports};
 
 /// `ERROR_INSUFFICIENT_BUFFER`.
 const INSUFFICIENT_BUFFER: u32 = 122;
 
-/// Checks tier B's ports on this machine ([`ports_usable`]): Windows' dynamic range and its
-/// excluded ports always, and with `launch` every listener in the range too, which must be this
-/// process's (its pid; the proxy and the relay run in the host). Fails closed when the machine
-/// can't be read.
-pub fn check_ports(launch: bool) -> Result<(), NetworkGap> {
+/// Checks tier B's ports on this machine ([`ports_usable`]): Windows' dynamic range always, and
+/// with `launch` its slot's 24 ports (excluded ones, by test binds) and the listeners, which on
+/// the policy's ports must be this process's (its pid; the proxy and the relay run in the host).
+/// Fails closed when the machine can't be read.
+pub fn check_ports(launch: Option<LaunchPorts<'_>>) -> Result<(), NetworkGap> {
     let dynamic = dynamic_ranges()?;
-    // The listeners first, then the test binds, then the listeners again for any port that
-    // refused a bind: a listener that came up in between is named as one, not as a reservation.
-    let mut found = listeners()?;
-    let listening: BTreeSet<u16> = found.iter().map(|listener| listener.port).collect();
-    let mut reserved = refused_ports(&listening);
+    let Some(LaunchPorts { slot, .. }) = launch else {
+        return ports_usable(
+            &PortsSeen {
+                dynamic,
+                ..PortsSeen::default()
+            },
+            None,
+            |_| true,
+        );
+    };
+    // Every socket's port first, then the test binds, then every socket's port again for any
+    // port that refused a bind: a socket that came up in between isn't a reservation (another
+    // user's socket on the port can refuse a bind with `WSAEACCES` too; `ports/reserved.rs`).
+    let found = listeners()?;
+    let slot_ports = slot.host().chain(slot.pool()).chain(slot.daemon());
+    let mut reserved = refused_ports(slot_ports, &ports_in_use()?);
     if !reserved.is_empty() {
-        found = listeners()?;
-        reserved.retain(|port| !found.iter().any(|listener| listener.port == *port));
+        let in_use = ports_in_use()?;
+        reserved.retain(|port| !in_use.contains(port));
     }
     let seen = PortsSeen {
         dynamic,
         reserved,
-        listeners: if launch { found } else { Vec::new() },
+        listeners: found,
     };
-    ports_usable(&seen, |listener| is_ours(listener, std::process::id()))
+    ports_usable(&seen, launch, |listener| {
+        is_ours(listener, std::process::id())
+    })
 }
 
 /// How long the whole WMI read may take before the check fails closed.
@@ -227,7 +247,7 @@ fn number(row: &IWbemClassObject, name: PCWSTR) -> Result<Option<u16>, NetworkGa
 fn listeners() -> Result<Vec<Listener>, NetworkGap> {
     let mut found = Vec::new();
     for family in [AF_INET.0, AF_INET6.0] {
-        let table = table(family)?;
+        let table = table(family, TCP_TABLE_OWNER_PID_LISTENER)?;
         for (port, pid) in rows(&table, family == AF_INET6.0) {
             if TIER_B_PORTS.contains(&port) {
                 found.push(Listener {
@@ -241,22 +261,141 @@ fn listeners() -> Result<Vec<Listener>, NetworkGap> {
     Ok(found)
 }
 
-/// `GetExtendedTcpTable`'s listener table for `family`, in an aligned buffer.
-fn table(family: u16) -> Result<Vec<u64>, NetworkGap> {
+/// Every TCP listener, IPv4 and IPv6, any address, as (port, process id).
+pub(crate) fn listener_rows() -> Result<Vec<(u16, u32)>, NetworkGap> {
+    every_row(TCP_TABLE_OWNER_PID_LISTENER)
+}
+
+/// The local port of every TCP socket, IPv4 and IPv6, any state (listening, connected, or
+/// closing in `TIME_WAIT`): a port Windows lent as a connection's source port is here.
+pub(crate) fn ports_in_use() -> Result<BTreeSet<u16>, NetworkGap> {
+    Ok(every_row(TCP_TABLE_OWNER_PID_ALL)?
+        .into_iter()
+        .map(|(port, _)| port)
+        .collect())
+}
+
+/// Every row of `class`'s table, IPv4 then IPv6, as (port, process id).
+fn every_row(class: TCP_TABLE_CLASS) -> Result<Vec<(u16, u32)>, NetworkGap> {
+    let mut found = Vec::new();
+    for family in [AF_INET.0, AF_INET6.0] {
+        found.extend(rows(&table(family, class)?, family == AF_INET6.0));
+    }
+    Ok(found)
+}
+
+/// An open process handle, closed on drop.
+pub(crate) struct OpenedProcess(HANDLE);
+
+impl Drop for OpenedProcess {
+    fn drop(&mut self) {
+        // SAFETY: opened by `WindowsJobProbe::open`, closed once.
+        drop(unsafe { CloseHandle(self.0) });
+    }
+}
+
+/// The browser gate's questions (`ports::listener_in_job`) against Windows and the launch's
+/// Job Object, borrowed for the probe's life.
+pub(crate) struct WindowsJobProbe<'a> {
+    job: std::os::windows::io::BorrowedHandle<'a>,
+}
+
+impl<'a> WindowsJobProbe<'a> {
+    /// A probe against `job` (which needs `JOB_OBJECT_QUERY`).
+    pub(crate) fn new(job: std::os::windows::io::BorrowedHandle<'a>) -> Self {
+        WindowsJobProbe { job }
+    }
+}
+
+impl JobProbe for WindowsJobProbe<'_> {
+    type Process = OpenedProcess;
+
+    fn open(&mut self, pid: u32) -> Option<OpenedProcess> {
+        // SAFETY: an ordinary open; `OpenedProcess` closes the handle.
+        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?;
+        Some(OpenedProcess(handle))
+    }
+
+    fn listeners(&mut self) -> Option<Vec<BoundListener>> {
+        let mut found = Vec::new();
+        for family in [AF_INET.0, AF_INET6.0] {
+            let table = table(family, TCP_TABLE_OWNER_MODULE_LISTENER).ok()?;
+            found.extend(module_rows(&table, family == AF_INET6.0));
+        }
+        Some(found)
+    }
+
+    fn created(&mut self, process: &OpenedProcess) -> Option<u64> {
+        let (mut created, mut exited, mut kernel, mut user) = Default::default();
+        // SAFETY: `process` is open; the four are live out-pointers.
+        unsafe {
+            GetProcessTimes(
+                process.0,
+                &raw mut created,
+                &raw mut exited,
+                &raw mut kernel,
+                &raw mut user,
+            )
+        }
+        .ok()?;
+        let FILETIME {
+            dwLowDateTime: low,
+            dwHighDateTime: high,
+        } = created;
+        Some(u64::from(high) << 32 | u64::from(low))
+    }
+
+    fn in_job(&mut self, process: &OpenedProcess) -> Option<bool> {
+        use std::os::windows::io::AsRawHandle;
+        let mut inside = BOOL::default();
+        let job = HANDLE(self.job.as_raw_handle());
+        // SAFETY: `process` is open; `job` is the caller's live job handle, borrowed;
+        // `inside` is a live out-pointer.
+        unsafe { IsProcessInJob(process.0, Some(job), &raw mut inside) }.ok()?;
+        Some(inside.as_bool())
+    }
+}
+
+/// Each listener row's port, process and bind time, from a `TCP_TABLE_OWNER_MODULE_LISTENER`
+/// table [`table`] filled.
+fn module_rows(table: &[u64], v6: bool) -> Vec<BoundListener> {
+    let port = |raw: u32| u16::from_be(u16::try_from(raw & 0xFFFF).unwrap_or(0));
+    let row = |raw_port: u32, pid: u32, stamp: i64| BoundListener {
+        port: port(raw_port),
+        pid,
+        bound_at: u64::try_from(stamp).unwrap_or(0),
+    };
+    if table.is_empty() {
+        return Vec::new();
+    }
+    // SAFETY: GetExtendedTcpTable wrote the family's table at the start of the aligned buffer:
+    // its count, then that many rows.
+    unsafe {
+        if v6 {
+            let head = &*table.as_ptr().cast::<MIB_TCP6TABLE_OWNER_MODULE>();
+            let all = std::slice::from_raw_parts(head.table.as_ptr(), head.dwNumEntries as usize);
+            all.iter()
+                .map(|r| row(r.dwLocalPort, r.dwOwningPid, r.liCreateTimestamp))
+                .collect()
+        } else {
+            let head = &*table.as_ptr().cast::<MIB_TCPTABLE_OWNER_MODULE>();
+            let all = std::slice::from_raw_parts(head.table.as_ptr(), head.dwNumEntries as usize);
+            all.iter()
+                .map(|r| row(r.dwLocalPort, r.dwOwningPid, r.liCreateTimestamp))
+                .collect()
+        }
+    }
+}
+
+/// `GetExtendedTcpTable`'s `class` table for `family`, in an aligned buffer.
+fn table(family: u16, class: TCP_TABLE_CLASS) -> Result<Vec<u64>, NetworkGap> {
     let mut buffer: Vec<u64> = Vec::new();
     for _ in 0..8 {
         let mut size = u32::try_from(buffer.len() * 8).unwrap_or(u32::MAX);
         let pointer = (!buffer.is_empty()).then(|| buffer.as_mut_ptr().cast());
         // SAFETY: `pointer` is `size` writable bytes, or none to ask for the size.
         let result = unsafe {
-            GetExtendedTcpTable(
-                pointer,
-                &raw mut size,
-                false,
-                u32::from(family),
-                TCP_TABLE_OWNER_PID_LISTENER,
-                0,
-            )
+            GetExtendedTcpTable(pointer, &raw mut size, false, u32::from(family), class, 0)
         };
         match result {
             0 => return Ok(buffer),

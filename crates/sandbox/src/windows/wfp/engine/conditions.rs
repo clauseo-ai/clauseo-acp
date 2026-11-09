@@ -12,8 +12,8 @@ use windows::Win32::NetworkManagement::WindowsFilteringPlatform::{
     FWP_MATCH_EQUAL, FWP_MATCH_FLAGS_NONE_SET, FWP_MATCH_NOT_EQUAL, FWP_MATCH_RANGE,
     FWP_MATCH_TYPE, FWP_RANGE_TYPE, FWP_RANGE0, FWP_SECURITY_DESCRIPTOR_TYPE, FWP_UINT8,
     FWP_UINT16, FWP_UINT32, FWP_VALUE0, FWP_VALUE0_0, FWPM_CONDITION_ALE_USER_ID,
-    FWPM_CONDITION_FLAGS, FWPM_CONDITION_IP_PROTOCOL, FWPM_CONDITION_IP_REMOTE_ADDRESS,
-    FWPM_CONDITION_IP_REMOTE_PORT, FWPM_FILTER_CONDITION0,
+    FWPM_CONDITION_FLAGS, FWPM_CONDITION_IP_LOCAL_PORT, FWPM_CONDITION_IP_PROTOCOL,
+    FWPM_CONDITION_IP_REMOTE_ADDRESS, FWPM_CONDITION_IP_REMOTE_PORT, FWPM_FILTER_CONDITION0,
 };
 use windows::Win32::Security::Authorization::{
     ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
@@ -126,11 +126,14 @@ pub(super) fn build(conditions: &[Condition]) -> Result<Built, WfpError> {
     let ranges: Box<[FWP_RANGE0]> = conditions
         .iter()
         .filter_map(|c| match c {
-            Condition::RemotePorts(low, high) => Some(FWP_RANGE0 {
-                valueLow: port(*low),
-                valueHigh: port(*high),
-            }),
+            Condition::RemotePorts(low, high) | Condition::LocalPorts(low, high) => {
+                Some(FWP_RANGE0 {
+                    valueLow: port(*low),
+                    valueHigh: port(*high),
+                })
+            }
             Condition::Users(_)
+            | Condition::NotUsers(_)
             | Condition::NotPool { .. }
             | Condition::NotLoopback
             | Condition::Protocol(_)
@@ -142,7 +145,7 @@ pub(super) fn build(conditions: &[Condition]) -> Result<Built, WfpError> {
     let mut built = Vec::new();
     for condition in conditions {
         let (field, value) = match condition {
-            Condition::Users(users) => (
+            Condition::Users(users) | Condition::NotUsers(users) => (
                 FWPM_CONDITION_ALE_USER_ID,
                 users_value(&user_sddl(users), &mut descriptors)?,
             ),
@@ -175,12 +178,18 @@ pub(super) fn build(conditions: &[Condition]) -> Result<Built, WfpError> {
                     },
                 },
             ),
-            Condition::RemotePorts(..) => {
+            Condition::RemotePorts(..) | Condition::LocalPorts(..) => {
+                // The ranges are in the conditions' order, so each takes the next.
                 let pointer = next_range.next().map_or(ptr::null_mut(), |r| {
                     ptr::from_ref::<FWP_RANGE0>(r).cast_mut()
                 });
+                let field = if matches!(condition, Condition::LocalPorts(..)) {
+                    FWPM_CONDITION_IP_LOCAL_PORT
+                } else {
+                    FWPM_CONDITION_IP_REMOTE_PORT
+                };
                 (
-                    FWPM_CONDITION_IP_REMOTE_PORT,
+                    field,
                     FWP_CONDITION_VALUE0 {
                         r#type: FWP_RANGE_TYPE,
                         Anonymous: FWP_CONDITION_VALUE0_0 {

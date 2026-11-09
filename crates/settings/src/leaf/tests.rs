@@ -6,8 +6,8 @@
 use super::{KEYS, Leaf, Raw, SECURITY_KEYS, agent_id, typed};
 use crate::policy::kind_of;
 use crate::schema::{
-    AgentLaunch, Density, FontSize, Language, Lite, McpServerLaunch, Motion, NetworkSettings,
-    PrivacySettings, SandboxSettings, Settings, Theme, ToolsSettings, UpdateMode,
+    AgentLaunch, BrowserSettings, Density, FontSize, Language, Lite, McpServerLaunch, Motion,
+    NetworkSettings, PrivacySettings, SandboxSettings, Settings, Theme, ToolsSettings, UpdateMode,
 };
 use crate::testing::{abs, abs_str};
 use crate::warning::{Origin, Warning, WarningKind};
@@ -360,6 +360,7 @@ fn every_fixed_key_types_and_the_kinds_agree() {
         json!(["docs.firm.example", "*.firm.example"]),
         json!(false),
         json!(false),
+        json!(true),
     ];
     // One sample per row, so a new row cannot go unchecked.
     assert_eq!(samples.len(), KEYS.len());
@@ -404,6 +405,7 @@ fn a_refused_key_goes_back_to_its_default() {
         json!(["docs.firm.example"]),
         json!(!NetworkSettings::default().allow_unsafe_site_override),
         json!(!NetworkSettings::default().unsafe_site_list_updates),
+        json!(!BrowserSettings::default().allow_when_remote_debugging_disabled),
     ];
     assert_eq!(samples.len(), KEYS.len());
     for ((key, _), sample) in KEYS.iter().zip(samples) {

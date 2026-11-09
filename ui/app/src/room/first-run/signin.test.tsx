@@ -305,7 +305,7 @@ test("signin-failed: Sign-in didn't finish, with Try again", async () => {
   expect(setups(t)).toEqual([{ start_sign_in: { agent: CLAUDE } }]);
 });
 
-test("signin-policy: the firm's settings can't be read, Ask your IT team, and no button", async () => {
+test("signin-policy: the firm's settings can't be read, the firm manages them, and no button", async () => {
   await at({ failed: { code: "signin.policy_unreadable", at: AT } });
   expect(text()).toContain(
     "Clauseo can't read your firm's settings for Claude, so it won't sign in until they can be read.",

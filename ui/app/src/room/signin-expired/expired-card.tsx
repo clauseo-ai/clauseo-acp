@@ -238,7 +238,7 @@ export function ExpiredCard({
           icon={<IconQuestion size={16} />}
           label={label}
           title={sx(lang, "Your firm's account didn't accept the question. Your question is kept.")}
-          sub={fl(lang, "Ask your IT team.")}
+          sub={fl(lang, "Your firm manages this account.")}
         />
       );
       break;

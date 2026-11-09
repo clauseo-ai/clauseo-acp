@@ -6,7 +6,7 @@ use std::cell::RefCell;
 
 use super::super::check::{ERROR_INVALID_OWNER, FoundFilter, OWNER_CHECK, WfpError};
 use super::super::spec::{FilterSpec, Namespace, Object};
-use super::super::writes::{ADMIN_OWNED, SetupWriter, remove_objects, write_objects};
+use super::super::writes::{ADMIN_OWNED, SetupWriter, remove_objects, replace, write_objects};
 use super::check::as_written;
 use super::{owner, setup};
 
@@ -22,6 +22,8 @@ struct Fake {
     objects: RefCell<Vec<(Object, String)>>,
     filters: RefCell<Vec<FoundFilter>>,
     calls: RefCell<Vec<String>>,
+    /// The add call (counted from 1) that fails, if any.
+    fail_add: Option<usize>,
 }
 
 impl Fake {
@@ -33,6 +35,7 @@ impl Fake {
             objects: RefCell::new(Vec::new()),
             filters: RefCell::new(Vec::new()),
             calls: RefCell::new(Vec::new()),
+            fail_add: None,
         }
     }
 
@@ -87,6 +90,20 @@ impl Fake {
 }
 
 impl SetupWriter for Fake {
+    fn begin(&self) -> Result<(), WfpError> {
+        self.calls.borrow_mut().push("begin".to_owned());
+        Ok(())
+    }
+
+    fn commit(&self) -> Result<(), WfpError> {
+        self.calls.borrow_mut().push("commit".to_owned());
+        Ok(())
+    }
+
+    fn abort(&self) {
+        self.calls.borrow_mut().push("abort".to_owned());
+    }
+
     fn add_provider(&self, _: &Namespace, sddl: Option<&str>) -> Result<(), WfpError> {
         self.create(Object::Provider, sddl, "add_provider");
         Ok(())
@@ -103,6 +120,13 @@ impl SetupWriter for Fake {
         spec: &FilterSpec,
         sddl: Option<&str>,
     ) -> Result<u64, WfpError> {
+        let adds = self.calls_of("add_filter").len() + 1;
+        if self.fail_add == Some(adds) {
+            return Err(WfpError {
+                call: "FwpmFilterAdd0",
+                code: 0x8032_0009,
+            });
+        }
         self.create(Object::Filter(spec.key), sddl, "add_filter");
         let mut filters = self.filters.borrow_mut();
         let id = u64::try_from(filters.len()).unwrap() + 1;
@@ -251,4 +275,128 @@ fn removal_deletes_every_object() {
     write_objects(&wfp, &ns, &filters).unwrap();
     assert_eq!(remove_objects(&wfp, &ns), Ok(0));
     assert!(wfp.objects.borrow().is_empty());
+}
+
+/// An earlier set-up's filters (the blocks of the day and the shared permits) in `fake`.
+fn old_install(fake: &Fake, ns: &Namespace) {
+    use super::super::spec::old_permit_filter;
+    let blocks = setup(&[2001, 2002]).filters(ns);
+    let mut old: Vec<FilterSpec> = blocks.into_iter().take(6).collect();
+    old.extend([
+        old_permit_filter(ns, 0, &super::sid(2001)),
+        old_permit_filter(ns, 1, &super::sid(2002)),
+    ]);
+    for spec in &old {
+        fake.add_filter(ns, spec, Some(ADMIN_OWNED)).unwrap();
+    }
+    fake.calls.borrow_mut().clear();
+}
+
+#[test]
+fn the_shared_permits_go_and_the_slot_filters_come_in_one_transaction() {
+    let ns = Namespace::production();
+    let fake = Fake::new();
+    old_install(&fake, &ns);
+    let filters = setup(&[2001, 2002]).filters(&ns);
+    replace(&fake, &ns, &filters).unwrap();
+    let calls = fake.calls.borrow().clone();
+    assert_eq!(calls.first().map(String::as_str), Some("begin"));
+    assert_eq!(calls.last().map(String::as_str), Some("commit"));
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|c| *c == "begin" || *c == "commit")
+            .count(),
+        2
+    );
+    // Every deletion of the old filters, and every addition, lies between the two.
+    let deletes = calls
+        .iter()
+        .filter(|c| c.starts_with("delete_by_id"))
+        .count();
+    assert_eq!(deletes, 8);
+    assert_eq!(fake.calls_of("add_filter").len(), filters.len());
+    let left: Vec<String> = fake
+        .filters
+        .borrow()
+        .iter()
+        .map(|f| f.name.clone())
+        .collect();
+    assert!(
+        left.iter()
+            .all(|name| !name.contains("permit loopback range")),
+        "{left:?}"
+    );
+    assert_eq!(left.len(), filters.len());
+}
+
+#[test]
+fn a_failure_midway_aborts_the_transaction_and_never_commits() {
+    let ns = Namespace::production();
+    let fake = Fake {
+        fail_add: Some(9),
+        ..Fake::new()
+    };
+    old_install(&fake, &ns);
+    let filters = setup(&[2001, 2002]).filters(&ns);
+    let error = replace(&fake, &ns, &filters).unwrap_err();
+    assert_eq!(error.call, "FwpmFilterAdd0");
+    let calls = fake.calls.borrow().clone();
+    assert_eq!(calls.first().map(String::as_str), Some("begin"));
+    assert_eq!(calls.last().map(String::as_str), Some("abort"));
+    assert!(!calls.iter().any(|c| c == "commit"), "{calls:?}");
+}
+
+/// An earlier build of this branch's install in `fake`: today's filters, and its static
+/// connect permit (`connect_host`, F1) at each slot's retired offset 0.
+fn earlier_branch_install(fake: &Fake, ns: &Namespace) -> Vec<u128> {
+    use super::super::spec::{Action, Condition, Layer, PERMIT_WEIGHT, slot_offset_key};
+    let mut specs = setup(&[2001, 2002]).filters(ns);
+    let mut retired = Vec::new();
+    for rid in [2001, 2002] {
+        let slot = super::slot_of(rid);
+        let key = slot_offset_key(ns, slot, 0);
+        retired.push(key);
+        specs.push(FilterSpec {
+            key,
+            name: format!("{} connect_host slot {}", ns.display, slot.index()),
+            layer: Layer::ConnectV4,
+            action: Action::Permit,
+            weight: PERMIT_WEIGHT,
+            conditions: vec![Condition::Users(vec![super::sid(rid)])],
+        });
+    }
+    for spec in &specs {
+        fake.add_filter(ns, spec, Some(ADMIN_OWNED)).unwrap();
+    }
+    fake.calls.borrow_mut().clear();
+    retired
+}
+
+#[test]
+fn set_up_and_removal_delete_an_earlier_builds_static_connect_permits() {
+    let ns = Namespace::production();
+    let gone = |fake: &Fake| {
+        fake.filters
+            .borrow()
+            .iter()
+            .all(|f| !f.name.contains("connect_host"))
+    };
+    let fake = Fake::new();
+    let retired = earlier_branch_install(&fake, &ns);
+    assert!(!gone(&fake));
+    let filters = setup(&[2001, 2002]).filters(&ns);
+    // They read as filters set-up didn't write (no build in the field wrote them), so set-up
+    // counts and logs them as it deletes them.
+    assert_eq!(replace(&fake, &ns, &filters), Ok(2));
+    assert!(gone(&fake));
+    assert_eq!(fake.filters.borrow().len(), filters.len());
+    // The key sweep names them too, whatever the sublayer enumeration returned.
+    for key in &retired {
+        assert!(ns.removal_keys().contains(key));
+    }
+    let fake = Fake::new();
+    earlier_branch_install(&fake, &ns);
+    assert_eq!(remove_objects(&fake, &ns), Ok(2));
+    assert!(fake.filters.borrow().is_empty());
 }

@@ -255,7 +255,7 @@ test("an API key refused, and the firm's account refused: their lines and no but
   expect(words()).toContain(
     "Your firm's account didn't accept the question. Your question is kept.",
   );
-  expect(words()).toContain("Ask your IT team.");
+  expect(words()).toContain("Your firm manages this account.");
   expect(card()?.querySelector("button")).toBeNull();
 });
 

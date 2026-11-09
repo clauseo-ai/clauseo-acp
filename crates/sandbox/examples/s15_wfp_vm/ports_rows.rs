@@ -1,8 +1,8 @@
 //! `ports` (S15 PR7 re-check, item 8): tier B's port check as the VM sees it. Run it as the
 //! desktop user, unelevated, since `check_launch` runs in the lawyer's process. Prints every
 //! `MSFT_NetTCPSetting` dynamic range WMI reports and how long the read took, then the whole
-//! check (`wfp::check_ports`, listeners included) and its time. For the IPv6 row, set the
-//! IPv6 range apart first and put it back after:
+//! check for slot 0 (`wfp::check_ports`, its excluded ports and listeners included) and its
+//! time. For the IPv6 row, set the IPv6 range apart first and put it back after:
 //!
 //! ```text
 //! netsh int ipv6 set dynamicport tcp start=40000 num=10000   (elevated; overlaps 46100-46199)
@@ -12,7 +12,8 @@
 
 use std::time::{Duration, Instant};
 
-use clauseo_sandbox::windows::wfp::{check_ports, dynamic_port_ranges};
+use clauseo_sandbox::ports::Slot;
+use clauseo_sandbox::windows::wfp::{LaunchPorts, check_ports, dynamic_port_ranges};
 
 use super::say;
 
@@ -35,9 +36,12 @@ pub(crate) fn ports() {
         "ms": read.as_millis(),
     })
     .to_string());
-    let (checked, whole) = timed(|| check_ports(true));
+    let Some(slot) = Slot::new(0) else {
+        return;
+    };
+    let (checked, whole) = timed(|| check_ports(Some(LaunchPorts { slot, ports: &[] })));
     say(&serde_json::json!({
-        "row": "the whole port check (dynamic, excluded, listeners)",
+        "row": "the whole port check for slot 0 (dynamic, its excluded ports, listeners)",
         "got": format!("{checked:?}"),
         "ms": whole.as_millis(),
     })

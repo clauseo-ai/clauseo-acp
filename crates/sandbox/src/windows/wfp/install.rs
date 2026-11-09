@@ -1,6 +1,7 @@
 //! Set-up's network step and its removal (S15 PR7), run elevated by the setup exe. In one
 //! transaction: the provider and the sublayer; every filter already in our sublayer deleted
-//! (ours, and any foreign one); the block filters and one static permit per pool user added.
+//! (ours, an earlier set-up's shared permits, and any foreign one); the block filters and each
+//! pool user's slot's filters added.
 //! So a re-run or an extend replaces the filters with no moment where a pool user is
 //! unfiltered. Every object is created owned by Administrators, one an earlier run left owned by
 //! another account is recreated, and each owner is read back before the commit (`writes.rs`):
@@ -15,10 +16,22 @@ use super::spec::{
     FilterSpec, FirewallOutcome, Namespace, NetworkReport, NetworkSetup, Object, revocations,
     rule_names,
 };
-use super::writes::{SetupWriter, remove_objects, write_objects};
+use super::writes::{SetupWriter, remove_objects, replace};
 use crate::windows::sids::Sid;
 
 impl SetupWriter for Engine {
+    fn begin(&self) -> Result<(), WfpError> {
+        Engine::begin(self)
+    }
+
+    fn commit(&self) -> Result<(), WfpError> {
+        Engine::commit(self)
+    }
+
+    fn abort(&self) {
+        Engine::abort(self);
+    }
+
     fn add_provider(&self, ns: &Namespace, sddl: Option<&str>) -> Result<(), WfpError> {
         Engine::add_provider(self, ns, sddl)
     }
@@ -67,11 +80,9 @@ impl SetupWriter for Engine {
 pub fn install(ns: &Namespace, setup: &NetworkSetup) -> Result<NetworkReport, WfpError> {
     let engine = Engine::open(false, &ns.display)?;
     let filters = setup.filters(ns);
-    let transaction = engine.transaction()?;
-    // Owners are read back inside the transaction: a wrong one aborts it, so nothing another
-    // account owns is left committed.
-    let foreign_removed = write_objects(&engine, ns, &filters)?;
-    transaction.commit()?;
+    // One transaction: an earlier set-up's filters go as these come. Owners are read back inside
+    // it: a wrong one aborts it, so nothing another account owns is left committed.
+    let foreign_removed = replace(&engine, ns, &filters)?;
     for each in setup.grants(ns) {
         grant(&engine, ns, each.object, setup.owner(), each.mask, false)?;
     }

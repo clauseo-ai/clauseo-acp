@@ -1045,6 +1045,7 @@ jobs:
             echo
             echo "- **For your own Windows account** (most people): \`Clauseo_${VERSION}_x64-setup.exe\`, or \`Clauseo_${VERSION}_arm64-setup.exe\` on Windows on ARM."
             echo "- **For every account on the computer** (IT, run as an administrator): \`Clauseo_${VERSION}_x64-machine-setup.exe\`, or \`Clauseo_${VERSION}_arm64-machine-setup.exe\`."
+            echo "- If Windows says it only runs Microsoft-verified apps, see [Switching out of S mode](https://github.com/clauseo-ai/clauseo-acp/blob/main/docs/install/windows-s-mode.md)."
             if [ -s missing.txt ]; then
               echo
               echo "Not in this release (a tier 2 build failed):"
