@@ -713,7 +713,8 @@ test("release.yml signs each macOS archive under its arch name in the build and 
   const named = at(build, "tarball=Clauseo_${VERSION}_${{ matrix.arch }}.app.tar.gz", bundled);
   const moved = at(build, 'mv "$macos/Clauseo.app.tar.gz" "$macos/$tarball"', named);
   const dropped = at(build, 'rm "$macos/Clauseo.app.tar.gz.sig"', moved);
-  const signed = at(build, 'pnpm -C ui tauri signer sign --app-version "$VERSION" "$macos/$tarball"', dropped);
+  // By its absolute path: pnpm -C ui runs the signer in ui/, where "$macos/..." doesn't resolve.
+  const signed = at(build, 'pnpm -C ui tauri signer sign --app-version "$VERSION" "$PWD/$macos/$tarball"', dropped);
   const guard = build.lastIndexOf('[ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || { echo "::error::no updater key for a $MODE run"; exit 1; }', bundled);
   assert.ok(guard !== -1 && build.slice(guard, signed).every((line) => !line.startsWith("- name:")), "the key guard is in the signing step");
   const collected = at(build, 'cp "$bundle/macos/$tarball" "$bundle/macos/$tarball.sig" "$OUT/"', signed);
