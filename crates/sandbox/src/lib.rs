@@ -76,8 +76,9 @@
 //! - [`SeatbeltProfile::new`]`(policy, tag)` (every target): the profile text and its `-D`
 //!   parameters; every policy path is a parameter, and the text holds only rules, port numbers
 //!   and the tag. Rules: `src/macos/profile.rs` and `src/macos/base.sb`.
-//! - macOS: [`SeatbeltLauncher::new`]`(policy, opts, denials, cap)` is a `process::Launcher`. Each
-//!   launch runs `/usr/bin/sandbox-exec -p <profile> -D NAME=path ... <program> <args>` through
+//! - macOS: [`SeatbeltLauncher::new`]`(policy, opts, denials, cap, marks)` is a
+//!   `process::Launcher`. Each launch runs
+//!   `/usr/bin/sandbox-exec -p <profile> -D NAME=path ... <program> <args>` through
 //!   `spawn_in_tree`, with the agent's variables plus `TMPDIR=`[`Policy::tmpdir`] (made if
 //!   missing) and nothing else: the launcher always adds `SpawnOptions::clear_env` to the
 //!   options it is given, so no variable of the host's environment reaches the jail.
@@ -88,6 +89,13 @@
 //!   ([`ProcessCapNotice`], each once a session) count in `cap`, a [`ProcessCapSession`]: the
 //!   host makes exactly one per lawyer session and clones it into every launcher of that
 //!   session. There is no default and no other way to set it.
+//!   The launcher makes its session mark in `marks` (refused inside a folder the agent may
+//!   write) and its profile names it, so `macos::sweep` finds every process of its launches
+//!   wherever it went: `processes(marks, since)`, `end_session_processes(marks, deadline)`
+//!   (`Gone` or `Survivors`), the mode-switch gate `switch_to_read_only` (`ReadOnly` only from
+//!   `Gone`), `end_session` (removes the marks after `Gone`), and the launch's session handle
+//!   `JailedSession` from [`SeatbeltLauncher::launch_jailed`] (`processes_gone`, `end`); the
+//!   process cap's 2 s sweep counts the same scan.
 //!   Denials reach `denials` through a [`CappedSink`]. The first launch registers the launcher
 //!   with the one host-wide watcher (`/usr/bin/log stream`, started with the first launcher
 //!   and stopped with the last); dropping the launcher unregisters it. The tag, the sink and the

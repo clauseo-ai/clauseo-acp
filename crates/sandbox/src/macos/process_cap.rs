@@ -92,6 +92,8 @@ pub(crate) struct Proc {
     /// Its start, in microseconds since the epoch: with the pid it names one process, as a
     /// reused pid has a later start.
     pub(crate) start: u64,
+    /// Its real user id: the session sweep asks only about this user's processes.
+    pub(crate) uid: u32,
 }
 
 /// The descendants of `root` (which started at `root_start`) among `all`, the root left out:
@@ -155,15 +157,19 @@ pub(crate) fn verdict(trip: u32, root: u32, found: &[Proc]) -> Verdict {
 }
 
 /// Where the watchdog leaves the descendants its bounded kill rounds did not end (a process
-/// still forking, or one it could not read). The session sweep (a later change) takes them over
-/// here; until then they are logged and the watchdog goes on: its next poll counts them again,
-/// and its next sweep finds them by parent.
+/// still forking, or one it could not read): the session sweep takes them over
+/// (`sweep::take_over`), with every process the launch's mark still finds, the agent left out.
+/// What still runs after it is logged, and the watchdog goes on: its next poll counts them
+/// again, and its next sweep finds them by session, parent and mark.
 pub(crate) fn hand_over_to_session_sweep(root: u32, left: &[Proc]) {
-    tracing::warn!(
-        agent = root,
-        left = left.len(),
-        "the agent's process cap could not end every descendant; it keeps sweeping"
-    );
+    let running = crate::macos::sweep::take_over(root, left);
+    if running > 0 {
+        tracing::warn!(
+            agent = root,
+            left = running,
+            "the agent's process cap could not end every descendant; it keeps sweeping"
+        );
+    }
 }
 
 #[cfg(test)]

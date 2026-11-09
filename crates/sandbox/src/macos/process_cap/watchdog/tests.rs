@@ -88,6 +88,7 @@ impl System for Fake {
             parent: p.parent,
             session: p.session,
             start: p.start,
+            uid: 501,
         })
     }
 

@@ -90,3 +90,13 @@ mod chrome;
 #[cfg(target_os = "macos")]
 #[path = "jail/forkcap.rs"]
 mod forkcap;
+
+#[cfg(test)]
+#[cfg(target_os = "macos")]
+#[path = "jail/sweep.rs"]
+mod sweep;
+
+#[cfg(test)]
+#[cfg(target_os = "macos")]
+#[path = "jail/escaper.rs"]
+mod escaper;

@@ -205,6 +205,8 @@ impl DenialSink for Collect {
 
 /// A launcher for `policy` whose denials arrive on the returned receiver, in a process cap
 /// session of its own (each test is one lawyer session); its notices are dropped.
+/// Its session mark is in `marks/` of the policy's first hidden path (the world's data dir,
+/// as the host's marks sit in its own).
 pub(crate) fn launcher(policy: Policy) -> (SeatbeltLauncher, mpsc::Receiver<Denial>) {
     launcher_in(policy, ProcessCapSession::new(|_| {}))
 }
@@ -217,10 +219,21 @@ pub(crate) fn launcher_in(
 ) -> (SeatbeltLauncher, mpsc::Receiver<Denial>) {
     let (tx, rx) = mpsc::channel();
     let sink = Arc::new(Collect(Mutex::new(tx)));
-    (
-        SeatbeltLauncher::new(policy, SpawnOptions::new(), sink, cap),
-        rx,
-    )
+    let marks = marks_of(&policy);
+    let launcher = SeatbeltLauncher::new(policy, SpawnOptions::new(), sink, cap, &marks).unwrap();
+    (launcher, rx)
+}
+
+/// The session marks folder of `policy`: `marks/` in its first hidden path, the world's data
+/// dir, made if missing.
+pub(crate) fn marks_of(policy: &Policy) -> PathBuf {
+    let data = policy
+        .hidden()
+        .first()
+        .expect("the world hides its data dir");
+    let marks = data.join("marks");
+    std::fs::create_dir_all(&marks).unwrap();
+    marks
 }
 
 /// What a program printed and how it ended.

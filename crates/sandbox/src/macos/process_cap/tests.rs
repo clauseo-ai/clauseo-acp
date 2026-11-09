@@ -8,6 +8,7 @@ fn proc(pid: u32, parent: u32, session: u32, start: u64) -> Proc {
         parent,
         session,
         start,
+        uid: 501,
     }
 }
 

@@ -25,6 +25,9 @@ pub(crate) const TAG_PREFIX: &str = "clauseo-";
 /// The parameter naming the browser socket folder.
 const BROWSER_SOCKETS: &str = "BROWSER_SOCKETS";
 
+/// The parameter naming the launch's session mark.
+pub(crate) const SESSION_MARK: &str = "SESSION_MARK";
+
 /// The longest tag the profile takes.
 const TAG_MAX: usize = 64;
 
@@ -74,8 +77,16 @@ impl SeatbeltProfile {
 
 /// The profile for `policy` with a tag the caller made and knows to pass [`check_tag`].
 pub(crate) fn build(policy: &Policy, tag: &str) -> SeatbeltProfile {
+    build_marked(policy, tag, None)
+}
+
+/// [`build`], plus the launch's one rule on its session mark when `mark` is set (the
+/// launcher's, `macos/sweep.rs`): `file-write-data` on that file and nothing else, after every
+/// other file rule, so the mark's folder stays under whatever denies it (the data dir's).
+pub(crate) fn build_marked(policy: &Policy, tag: &str, mark: Option<&Path>) -> SeatbeltProfile {
     debug_assert!(check_tag(tag).is_ok(), "{tag}");
     let mut w = Writer::new(tag);
+    w.mark = mark.map(Path::to_owned);
     w.write(policy);
     SeatbeltProfile {
         text: w.text,
@@ -84,7 +95,7 @@ pub(crate) fn build(policy: &Policy, tag: &str) -> SeatbeltProfile {
 }
 
 /// Refuses a tag that could break out of its string or miss the watcher's predicate.
-fn check_tag(tag: &str) -> Result<(), Error> {
+pub(crate) fn check_tag(tag: &str) -> Result<(), Error> {
     let rest = tag.strip_prefix(TAG_PREFIX).unwrap_or_default();
     let ok = !rest.is_empty()
         && tag.len() <= TAG_MAX
@@ -106,6 +117,8 @@ struct Writer {
     message: String,
     /// A comment written before the next rule, and dropped if a new comment comes first.
     comment: Option<String>,
+    /// The launch's session mark, if any ([`build_marked`]).
+    mark: Option<PathBuf>,
 }
 
 impl Writer {
@@ -115,6 +128,7 @@ impl Writer {
             params: Vec::new(),
             message: format!("(with message \"{tag}\")"),
             comment: None,
+            mark: None,
         }
     }
 
@@ -188,6 +202,7 @@ impl Writer {
         self.fixed_folders(&p);
         self.credential_link_metadata(&p);
         self.read_only_state(&p);
+        self.session_mark();
         self.browser_sockets(policy);
         self.network(policy);
         bridge::browser_allows(self, policy);
@@ -430,6 +445,20 @@ impl Writer {
         }
         self.rule("deny", "file-write*", &filters);
         self.rule("deny", "file-write-unlink", &parents);
+    }
+
+    /// The launch's session mark: `file-write-data` on that one file, which the host's sweep
+    /// asks the kernel about (`sandbox_check`) to find this launch's processes wherever they
+    /// went. Its canary beside it is named by no rule. Last of the file rules, so it wins over
+    /// the hidden data dir's deny around it; nothing else in its folder is allowed.
+    fn session_mark(&mut self) {
+        let Some(mark) = self.mark.clone() else {
+            return;
+        };
+        self.note("\n; The session mark: data writes to this one file, so the host can find every");
+        self.note("; process of this launch, whatever its parent, session or group (0038).");
+        let mark = literal(&self.param(SESSION_MARK, &mark));
+        self.rule("allow", "file-write-data", &[mark]);
     }
 
     /// The browser socket folder the host made: regular files and sockets in it may be made,

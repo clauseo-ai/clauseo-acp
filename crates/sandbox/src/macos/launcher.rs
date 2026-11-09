@@ -1,7 +1,9 @@
 //! [`SeatbeltLauncher`]: runs an agent under its policy's profile through
 //! `/usr/bin/sandbox-exec`, which applies the profile and execs the agent in place, so the pid,
 //! the process group and the tree kill stay `process`'s. The agent leads a session of its own
-//! under the process cap (`process_cap.rs`): its `RLIMIT_NPROC` and a watchdog thread.
+//! under the process cap (`process_cap.rs`): its `RLIMIT_NPROC` and a watchdog thread. Each
+//! launcher makes a session mark before its first launch (`sweep.rs`), which its profile names,
+//! so every process of its launches can be found and ended wherever it went.
 
 use std::ffi::OsString;
 use std::io;
@@ -11,10 +13,14 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use clauseo_process::{LaunchSpec, Launched, Launcher, SpawnOptions, spawn_in_tree};
 
+use super::process_cap::libproc::Libproc;
+use super::process_cap::watchdog::System as _;
 use super::process_cap::{self, ProcessCapSession, libproc, watchdog};
 use super::profile::{self, SeatbeltProfile};
+use super::sweep::{self, JailedSession, ProcId, SessionMark};
 use super::watch::{self, Registration};
-use crate::{CappedSink, DenialSink, Policy};
+use crate::policy::under;
+use crate::{CappedSink, DenialSink, Error, Policy};
 
 /// The Seatbelt front end.
 pub(crate) const SANDBOX_EXEC: &str = "/usr/bin/sandbox-exec";
@@ -40,6 +46,7 @@ pub struct SeatbeltLauncher {
     sink: Arc<LaunchSink>,
     registration: Mutex<Option<Registration>>,
     cap: ProcessCapSession,
+    mark: Arc<SessionMark>,
 }
 
 impl std::fmt::Debug for SeatbeltLauncher {
@@ -62,16 +69,30 @@ impl SeatbeltLauncher {
     /// third ends the agent) and its notices, each once a session. The host makes exactly one
     /// [`ProcessCapSession`] per lawyer session and gives a clone of it to every launcher of
     /// that session; one made per launcher would reset both at every launch.
+    ///
+    /// The launcher's [`SessionMark`] is made here, in `marks` (the host's own folder for
+    /// them, under its data dir), and its profile lets the agent write that one file's data.
+    /// [`Error::Policy`] when `marks` does not exist or sits in a folder the policy lets the
+    /// agent write (the matter, the state, notes, temp or browser socket folder, the Claude
+    /// store, the credential link): an agent could move the mark away and blind the sweep.
+    /// [`Error::Launch`] when the mark cannot be made.
     pub fn new(
         policy: Policy,
         opts: SpawnOptions,
         denials: Arc<dyn DenialSink>,
         cap: ProcessCapSession,
-    ) -> SeatbeltLauncher {
+        marks: &Path,
+    ) -> Result<SeatbeltLauncher, Error> {
         let n = NEXT_TAG.fetch_add(1, Ordering::Relaxed);
         let tag = format!("{}{}-{n}", profile::TAG_PREFIX, std::process::id());
-        let profile = profile::build(&policy, &tag);
-        SeatbeltLauncher {
+        let marks = check_marks(&policy, marks)?;
+        let mark =
+            SessionMark::create(&marks, &tag).map_err(|source| clauseo_process::Error::Os {
+                what: "the launch's session mark could not be made",
+                source,
+            })?;
+        let profile = profile::build_marked(&policy, &tag, Some(mark.path()));
+        Ok(SeatbeltLauncher {
             policy: Arc::new(policy),
             profile,
             tag,
@@ -79,7 +100,53 @@ impl SeatbeltLauncher {
             sink: Arc::new(CappedSink::new(denials)),
             registration: Mutex::new(None),
             cap,
-        }
+            mark: Arc::new(mark),
+        })
+    }
+
+    /// The launcher's session mark, shared by all its launches: what the mode-switch gate and
+    /// session end pass to [`sweep::switch_to_read_only`] and [`sweep::end_session`].
+    pub fn session_mark(&self) -> &Arc<SessionMark> {
+        &self.mark
+    }
+
+    /// [`Launcher::launch`], with the launch's session handle: the agent's tree and the
+    /// launcher's mark ([`JailedSession`]).
+    pub fn launch_jailed(
+        &self,
+        spec: &LaunchSpec,
+    ) -> Result<(Launched, JailedSession), clauseo_process::Error> {
+        let jailed = self.jailed_spec(spec)?;
+        make_tmpdir(&self.policy.tmpdir()).map_err(|source| clauseo_process::Error::Os {
+            what: "the agent's TMPDIR could not be made",
+            source,
+        })?;
+        // A mark that is gone (removed after its session ended, or by hand) would hide every
+        // process of this launch from the sweep: no launch then.
+        self.mark
+            .check_files()
+            .map_err(|error| clauseo_process::Error::Os {
+                what: "the launch's session mark is missing",
+                source: io::Error::other(error),
+            })?;
+        let limit = launch_limit()?;
+        self.register();
+        let opts = self.opts.clone().own_session().max_processes(limit);
+        let launched = spawn_in_tree(&jailed, &opts)?;
+        let pid = launched.handle.pid();
+        // Read while the agent is this process's unreaped child; an agent gone already has
+        // nothing to find.
+        let root = ProcId::new(pid, Libproc.info(pid).map_or(0, |agent| agent.start));
+        sweep::register(&self.mark, root);
+        // A watchdog that cannot start ends the agent (`launched` drops, and its tree with it):
+        // it never runs without its cap.
+        watchdog::watch(pid, self.cap.clone()).map_err(|source| clauseo_process::Error::Os {
+            what: "the agent's process cap could not start",
+            source,
+        })?;
+        let session =
+            JailedSession::new(launched.handle.tree_watch(), Arc::clone(&self.mark), root);
+        Ok((launched, session))
     }
 
     /// The profile every launch runs under.
@@ -136,25 +203,10 @@ impl SeatbeltLauncher {
 }
 
 impl Launcher for SeatbeltLauncher {
+    /// [`SeatbeltLauncher::launch_jailed`] without its session handle: the launcher keeps
+    /// the mark ([`SeatbeltLauncher::session_mark`]).
     fn launch(&self, spec: &LaunchSpec) -> Result<Launched, clauseo_process::Error> {
-        let jailed = self.jailed_spec(spec)?;
-        make_tmpdir(&self.policy.tmpdir()).map_err(|source| clauseo_process::Error::Os {
-            what: "the agent's TMPDIR could not be made",
-            source,
-        })?;
-        let limit = launch_limit()?;
-        self.register();
-        let opts = self.opts.clone().own_session().max_processes(limit);
-        let launched = spawn_in_tree(&jailed, &opts)?;
-        // A watchdog that cannot start ends the agent (`launched` drops, and its tree with it):
-        // it never runs without its cap.
-        watchdog::watch(launched.handle.pid(), self.cap.clone()).map_err(|source| {
-            clauseo_process::Error::Os {
-                what: "the agent's process cap could not start",
-                source,
-            }
-        })?;
-        Ok(launched)
+        self.launch_jailed(spec).map(|(launched, _)| launched)
     }
 }
 
@@ -170,6 +222,34 @@ fn launch_limit() -> Result<u64, clauseo_process::Error> {
         libproc::max_proc().map_err(read)?,
         libproc::hard_limit().map_err(read)?,
     )
+}
+
+/// `marks`, canonical, unless it does not exist or sits in a folder `policy` lets the agent
+/// write.
+fn check_marks(policy: &Policy, marks: &Path) -> Result<PathBuf, Error> {
+    let marks = dunce::canonicalize(marks).map_err(|error| {
+        Error::Policy(format!(
+            "the session marks folder {}: {error}",
+            marks.display()
+        ))
+    })?;
+    let tmpdir = policy.tmpdir();
+    let mut writable: Vec<&Path> = vec![policy.matter(), policy.state(), &tmpdir];
+    writable.extend(policy.notes());
+    writable.extend(policy.browser_socket_dir());
+    writable.extend(policy.credential_link());
+    let store: Vec<PathBuf> = policy
+        .claude_store()
+        .map(|store| [store.files(), store.lock_folders()].concat())
+        .unwrap_or_default();
+    writable.extend(store.iter().map(PathBuf::as_path));
+    if writable.iter().any(|folder| under(&marks, folder)) {
+        return Err(Error::Policy(format!(
+            "the session marks folder {} is in a folder the agent may write",
+            marks.display()
+        )));
+    }
+    Ok(marks)
 }
 
 /// Makes the agent's `TMPDIR` ([`Policy::tmpdir`]) if it is missing; the folder it is in exists

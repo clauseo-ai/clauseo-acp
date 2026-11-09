@@ -546,12 +546,12 @@ cap holds after the fact: a bomb runs past 256 for up to one poll.
 
 Residual risks:
 - A descendant that calls `setsid` and is then orphaned (its parent exits, so launchd adopts
-  it) is in neither the session nor the parent walk: the watchdog does not see it or its
-  children. `setsid` is not a shell builtin and macOS ships no `setsid` tool, but any language
-  runtime (`perl -e 'POSIX::setsid()'`, Python, Node) calls it. Only the backstop bounds them:
-  they can reach the agent's limit and no further, and they keep running until the handle's tree
-  kill, which misses them too. The session-marker sweep (a later change) covers them. Leaving a
-  process group alone is not an escape: the session still holds it.
+  it) is in neither the session nor the parent walk. `setsid` is not a shell builtin and macOS
+  ships no `setsid` tool, but any language runtime (`perl -e 'POSIX::setsid()'`, Python, Node)
+  calls it. The session sweep below finds it and its children by the launch's mark at each 2 s
+  sweep, so they count and are killed by the same rule; between two sweeps only the backstop
+  bounds them, and the handle's tree kill misses them (session end ends them with the sweep).
+  Leaving a process group alone is not an escape: the session still holds it.
 - The cap counts processes, not threads or memory: 256 large processes can still fill memory.
 - With the Keychain on (`profile.rs`, `keychain`), the agent reaches SecurityServer,
   securityd.xpc and trustd.agent. securityd can have launchd start SecurityAgent, and trustd's
@@ -560,6 +560,82 @@ Residual risks:
   lawyer.
 - Between a process's start check and its `kill`, it could exit and its pid be reused: that
   needs the pid space to wrap within microseconds. macOS has no pidfd.
+
+### The session sweep
+
+Every process of a launch has to be found and ended at the mode switch and at session end,
+including one that called `setsid`, double-forked, closed every descriptor and was adopted by
+launchd: no parent, group or session link leads back to the agent, and a jailed process can
+disclaim its responsible pid (`responsibility_spawnattrs_setdisclaim`, measured), so that cannot
+be the filter either. What a jailed process cannot change is its Seatbelt profile. The route
+(`macos/sweep.rs`):
+- **The mark.** `SeatbeltLauncher::new` takes the host's marks folder and makes
+  `SessionMark::create(dir, tag)`: `<dir>/<tag>/mark` and `<dir>/<tag>/canary`, regular
+  files at 0600 in a folder at 0700, made before any launch. The profile adds one rule,
+  `(allow file-write-data (literal (param "SESSION_MARK")))`, after every other file rule; no rule
+  names the canary. The folder must sit outside every folder the policy lets the agent write
+  (the launcher refuses the matter, state, notes, temp and browser socket folders, the Claude
+  store and the credential link); the host's is under its hidden data dir. Under the profile the
+  agent can truncate the mark (harmless: nothing reads it) but not remove, rename or link it.
+- **The scan.** `processes(marks, since)` lists this user's processes (`proc_listallpids`,
+  `proc_pidinfo`) that started at or after `since`, and asks the kernel about each:
+  `sandbox_check(pid, NULL)` (is it sandboxed), then `sandbox_check(pid, "file-write-data",
+  SANDBOX_FILTER_PATH, path)` for the mark and the canary. A process belongs to the launch when
+  it is sandboxed, the mark is allowed and the canary denied. A process is its pid and its start.
+  Every call passes `SANDBOX_CHECK_NO_REPORT`: without it, each "denied" answer is logged as the
+  process's own denial under its launch's tag (about 700 lines for 3 scans, measured), which the
+  watcher would report to the lawyer. The canary is required: 16 of this Mac's 241 sandboxed
+  processes may write any file of a `~/Library/Caches` folder, and 8 Apple daemons (cfprefsd
+  among them) may write a `/private/tmp` run folder's files, so "the mark is allowed" alone would
+  have the sweep kill cfprefsd; all of them allow the canary too. A missing mark is an error, not
+  an empty list: the kernel answers "denied" for a path that does not exist, for every process.
+- **The drift check.** Each scan checks every live agent of the marks (registered at launch,
+  pid and start) that has run for more than 1 s: one that does not match its own mark is
+  `SweepError::Drift`, never an empty list.
+- **The end.** `end_session_processes(marks, deadline) -> Result<Gone, Survivors>`:
+  `killpg(SIGSTOP)` on each live agent's group, then rounds of scan, `SIGSTOP` on each new
+  process (its start checked first) until a round finds none new (a stopped process cannot
+  fork), then `SIGKILL` on each, its start checked again, until a scan finds nothing (`Gone`) or
+  the deadline passes (`Survivors`, everything found killed on the way out). A failed scan, drift
+  above all, kills the known agents and answers `Survivors`: it never answers `Gone` on a scan
+  it cannot trust. Its scans, and the session handle's, have no start filter: starts are
+  wall-clock stamps, and a clock set back must not hide a process from the gate.
+- **Three callers, one scan.** The process cap's 2 s sweep adds the mark's processes that left
+  the agent's session (a `setsid` orphan, the one escape from its count) to the count, so they
+  trip the cap and are killed by the same rule (descendants killed, the agent spared unless the
+  verdict says otherwise); a scan error there is logged once per mark. What a trip's kill rounds
+  leave goes to `hand_over_to_session_sweep`, which stops and kills it with everything the mark
+  still finds but the agent, for up to 20 rounds. The mode-switch gate, `switch_to_read_only(marks, deadline)`, answers
+  `ReadOnly` only from `Gone`; on `Survivors` the switch fails closed. Session end,
+  `end_session(marks, deadline)`, removes the marks only after `Gone`. A launch's session
+  handle, `JailedSession` (from `SeatbeltLauncher::launch_jailed`), holds the agent's
+  `TreeWatch` and the launcher's mark; `processes_gone` is the tree gone and an empty scan with
+  the drift check passing.
+
+Measured on a Mac mini (M-series, macOS 27.2): the escaped child (setsid, double fork, every
+descriptor closed, adopted by launchd) matched its launch and nothing else, and was ended; a
+second launch with its own mark was never stopped; an unsandboxed process, one under a profile
+that allows everything, launchd and the host never matched; 3 scans gave the watcher no denial;
+300 sleepers started by a launchd orphan in its own session tripped the cap at the next sweep and
+were killed with the agent spared (the jail tests `sweep`). A scan with one agent running took
+1.3 to 1.4 ms (mean of 200) with no start filter and about 0.2 ms counting from the mark's making,
+about 0.1 % of a core at the 2 s sweep.
+
+Residual risks:
+- Work system services do on the session's behalf runs under their sandbox, not the launch's,
+  and is not found or ended. Under `base.sb`'s 6 Mach services no such route was found
+  (`launchctl submit` failed, setuid binaries were refused); any Mach service, XPC or AppleEvent
+  grant added to a profile later needs this review.
+- Writes made before the stop, or one system call in flight when `SIGSTOP` lands, are not
+  undone: `Gone` means no process of the session runs, not that nothing was written.
+- Private API drift: `sandbox_check` is undocumented and `SANDBOX_FILTER_PATH` (1) is not
+  exported. The drift check runs on every scan and turns a change into a loud failure and a
+  failed switch, never a silent miss; it needs a live agent that has run 1 s, so a scan with
+  every agent exited has no check. A small pid-reuse window remains between the last start check
+  and `SIGKILL`: the target is stopped, so its pid can only be reused if something else ends it
+  and the pids wrap in between. The process cap's sweep counts from the agent's start, a
+  wall-clock stamp: a clock set back can hide an escaped process from that count (not from the
+  gate or session end).
 
 ## Status
 

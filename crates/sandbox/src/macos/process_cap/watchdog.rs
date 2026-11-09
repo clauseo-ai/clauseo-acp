@@ -212,7 +212,10 @@ impl Watch {
             .into_iter()
             .filter_map(|pid| system.info(pid))
             .collect();
-        Some(descendants(self.root.pid, self.root.start, &all))
+        let mut found = descendants(self.root.pid, self.root.start, &all);
+        // The session sweep: the launch's processes that left the session (a `setsid` orphan).
+        crate::macos::sweep::add_escaped(self.root.pid, self.root.start, &all, &mut found);
+        Some(found)
     }
 
     /// Stops and kills every descendant of the agent, and the agent too when [`verdict`] says
