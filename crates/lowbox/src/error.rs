@@ -103,9 +103,15 @@ pub enum HandleProblem {
         /// The NTSTATUS.
         status: i32,
     },
-    /// The object is not the slot's object in this package's namespace. The name is not kept:
-    /// it holds the package SID, which is never logged.
-    WrongName,
+    /// The object is not the slot's object in this package's namespace. Both names are kept
+    /// with every app package SID in them written as a placeholder (`crate::handles::redact`),
+    /// since a package SID is never logged; the form of the name is what a refusal shows.
+    WrongName {
+        /// The name the kernel reported, redacted.
+        found: String,
+        /// The name the slot's object has, redacted.
+        expected: String,
+    },
     /// The value is one of this process's standard handles, which it never takes over.
     StandardHandle,
     /// The object's owner could not be read (`GetSecurityInfo` failed).
@@ -162,7 +168,10 @@ impl fmt::Display for HandleProblem {
                     status.cast_unsigned()
                 )
             }
-            HandleProblem::WrongName => f.write_str("not this package's object"),
+            HandleProblem::WrongName { found, expected } => write!(
+                f,
+                "not this package's object (the kernel names it \"{found}\", expected \"{expected}\")"
+            ),
             HandleProblem::StandardHandle => f.write_str("one of this process's standard handles"),
             HandleProblem::OwnerUnreadable { code } => {
                 write!(f, "owner unreadable (error {code})")
@@ -201,6 +210,22 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "handle for Session: wrong object type Event"
+        );
+    }
+
+    #[test]
+    fn a_wrong_name_shows_both_names() {
+        let error = Error::Handle {
+            slot: Slot::Pipes,
+            problem: HandleProblem::WrongName {
+                found: r"\Device\NamedPipe\".to_owned(),
+                expected: r"\Device\NamedPipe\Sessions\2\AppContainerNamedObjects\<package SID>"
+                    .to_owned(),
+            },
+        };
+        assert_eq!(
+            error.to_string(),
+            r#"handle for the pipe folder: not this package's object (the kernel names it "\Device\NamedPipe\", expected "\Device\NamedPipe\Sessions\2\AppContainerNamedObjects\<package SID>")"#
         );
     }
 }

@@ -41,6 +41,17 @@ impl Table {
     }
 }
 
+/// The slot `result` refused for its name, if that was the refusal.
+fn refused_for_its_name(result: &Result<(), Error>) -> Option<Slot> {
+    match result {
+        Err(Error::Handle {
+            slot,
+            problem: HandleProblem::WrongName { .. },
+        }) => Some(*slot),
+        _ => None,
+    }
+}
+
 const VALUES: [usize; 6] = [0x10, 0x14, 0x18, 0x1c, 0x20, 0x24];
 
 impl Probe for Table {
@@ -131,11 +142,8 @@ fn a_namespace_in_another_session_fails_closed() {
         entry.1 = entry.1.replace(r"\Sessions\1\", r"\Sessions\12\");
     }
     assert_eq!(
-        run(&table, &VALUES, 1),
-        Err(Error::Handle {
-            slot: Slot::Directory,
-            problem: HandleProblem::WrongName
-        })
+        refused_for_its_name(&run(&table, &VALUES, 1)),
+        Some(Slot::Directory)
     );
     assert_eq!(run(&table, &VALUES, 12), Ok(()));
     let mut zeros = Table::good();
@@ -155,13 +163,50 @@ fn a_pipe_folder_of_another_name_fails_closed() {
         let mut table = Table::good();
         table.entries.get_mut(&0x24).unwrap().1 = name.clone();
         assert_eq!(
-            run(&table, &VALUES, 1),
-            Err(Error::Handle {
-                slot: Slot::Pipes,
-                problem: HandleProblem::WrongName
-            }),
+            refused_for_its_name(&run(&table, &VALUES, 1)),
+            Some(Slot::Pipes),
             "{name}"
         );
+    }
+}
+
+/// A name refusal shows both names, with the package SID (in either case) and any other
+/// package's SID written as placeholders; the refusal itself is the same.
+#[test]
+fn a_name_refusal_shows_both_names_without_a_package_sid() {
+    let mut table = Table::good();
+    table.entries.get_mut(&0x24).unwrap().1 = format!(
+        r"\Device\NamedPipe\Sessions\1\AppContainerNamedObjects\{}\",
+        SID.to_lowercase()
+    );
+    let expected = r"\Device\NamedPipe\Sessions\1\AppContainerNamedObjects\<package SID>";
+    assert_eq!(
+        run(&table, &VALUES, 1),
+        Err(Error::Handle {
+            slot: Slot::Pipes,
+            problem: HandleProblem::WrongName {
+                found: format!(r"{expected}\"),
+                expected: expected.to_owned(),
+            }
+        })
+    );
+    let package = Sid::parse(SID).unwrap();
+    for (name, shown) in [
+        (
+            r"\Device\NamedPipe\".to_owned(),
+            r"\Device\NamedPipe\".to_owned(),
+        ),
+        (
+            format!(r"Sessions\1\AppContainerNamedObjects\{SID}-"),
+            r"Sessions\1\AppContainerNamedObjects\<package SID>-".to_owned(),
+        ),
+        (
+            r"\x\S-1-15-2-1-2-3\y\s-1-15-2-".to_owned(),
+            r"\x\<another package SID>\y\<another package SID>".to_owned(),
+        ),
+        (String::new(), String::new()),
+    ] {
+        assert_eq!(redact(&name, &package), shown, "{name}");
     }
 }
 
@@ -248,11 +293,8 @@ fn handles_out_of_order_fail_closed() {
     let rpc = table.entries.insert(0x14, global).unwrap();
     table.entries.insert(0x18, rpc);
     assert_eq!(
-        run(&table, &VALUES, 1),
-        Err(Error::Handle {
-            slot: Slot::RpcControl,
-            problem: HandleProblem::WrongName
-        })
+        refused_for_its_name(&run(&table, &VALUES, 1)),
+        Some(Slot::RpcControl)
     );
 }
 
@@ -266,7 +308,7 @@ fn another_package_or_place_fails_closed() {
         run(&other, &VALUES, 1),
         Err(Error::Handle {
             slot: Slot::Directory,
-            problem: HandleProblem::WrongName
+            problem: HandleProblem::WrongName { .. },
         })
     ));
     for dir in [
@@ -282,7 +324,7 @@ fn another_package_or_place_fails_closed() {
                 run(&table, &VALUES, 1),
                 Err(Error::Handle {
                     slot: Slot::Directory,
-                    problem: HandleProblem::WrongName
+                    problem: HandleProblem::WrongName { .. },
                 })
             ),
             "{dir}"
@@ -296,11 +338,8 @@ fn a_link_in_another_session_fails_closed() {
     let session = &mut table.entries.get_mut(&0x20).unwrap().1;
     *session = session.replace(r"\Sessions\1\", r"\Sessions\2\");
     assert_eq!(
-        run(&table, &VALUES, 1),
-        Err(Error::Handle {
-            slot: Slot::Session,
-            problem: HandleProblem::WrongName
-        })
+        refused_for_its_name(&run(&table, &VALUES, 1)),
+        Some(Slot::Session)
     );
 }
 

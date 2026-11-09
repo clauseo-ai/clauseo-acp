@@ -230,7 +230,10 @@ pub(crate) fn check(
             .map_err(|status| fail(HandleProblem::NameUnreadable { status }))?;
         let wanted = layout::object_name(slot, expected.session, expected.package);
         if !name.eq_ignore_ascii_case(&wanted) {
-            return Err(fail(HandleProblem::WrongName));
+            return Err(fail(HandleProblem::WrongName {
+                found: redact(&name, expected.package),
+                expected: redact(&wanted, expected.package),
+            }));
         }
         let owner = probe
             .owner(value)
@@ -240,6 +243,37 @@ pub(crate) fn check(
         }
     }
     Ok(())
+}
+
+/// The start of an app package SID's text.
+const PACKAGE_SID_PREFIX: &str = "s-1-15-2-";
+
+/// `name` with `package` (letters in either case) written `<package SID>` and any other app
+/// package SID (`S-1-15-2-…`) written `<another package SID>`, so a refusal shows the name's
+/// form without logging a package SID.
+pub(crate) fn redact(name: &str, package: &Sid) -> String {
+    // ASCII lowering keeps every byte offset, so positions found in `lower` index `name`.
+    let lower = name.to_ascii_lowercase();
+    let mut out = String::with_capacity(name.len());
+    let mut rest = 0;
+    while let Some(found) = lower[rest..].find(PACKAGE_SID_PREFIX) {
+        let start = rest + found;
+        let body = start + PACKAGE_SID_PREFIX.len();
+        let digits = lower[body..]
+            .find(|c: char| !(c.is_ascii_digit() || c == '-'))
+            .map_or(lower.len(), |n| body + n);
+        // A SID's text ends in a digit; a trailing '-' is the name's, not the SID's.
+        let end = body + lower[body..digits].trim_end_matches('-').len();
+        out.push_str(&name[rest..start]);
+        out.push_str(if name[start..end].eq_ignore_ascii_case(package.as_str()) {
+            "<package SID>"
+        } else {
+            "<another package SID>"
+        });
+        rest = end;
+    }
+    out.push_str(&name[rest..]);
+    out
 }
 
 #[cfg(test)]
