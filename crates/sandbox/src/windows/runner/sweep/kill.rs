@@ -4,9 +4,12 @@
 //! `SYNCHRONIZE`) is signalled within [`KILL_WAIT`] of the kill: the call's success says
 //! nothing about the process being gone (one frozen, or held in the kernel, stays). One still
 //! running then is a survivor ([`SweepError::Survived`]), an escapee like one that can't be
-//! ended: never logged as killed, asked again (without the wait) when a later round lists it, and
-//! the sweep ends in [`SweepError::Left`] with it counted as unkillable, so the slot is
-//! quarantined (`RunExit::Escapee`).
+//! ended: never logged as killed. The verdict is the held handles', not the listings': at each
+//! round's end every survivor is asked again (without the wait) and its handle looked at, listed
+//! or not ([`settle`]); one still unsignalled is counted as unkillable, so the sweep ends in
+//! [`SweepError::Left`] and the slot is quarantined (`RunExit::Escapee`). Every wait is cut to
+//! what is left of the sweep's deadline (`SWEEP_DEADLINE`): past it a kill waits for nothing, and
+//! a process not gone at once is a survivor.
 //!
 //! **Pid and creation time.** A later round's listing of a process the sweep already ended (its
 //! pid and creation time, its handle held) is that process's object, not a new one: it is neither
@@ -26,61 +29,91 @@
 use std::time::Duration;
 
 use super::refused::Refused;
-use super::{KILL_WAIT, Point, Processes, Rule, Seen, Spared, SweepError, failed, spared};
+use super::{
+    Failures, KILL_WAIT, Point, Processes, Rule, Seen, Spared, SweepError, failed, spared,
+};
 
-/// The processes a sweep killed, held open until the sweep is over: while a handle to a process
-/// is open its pid is never given to another, so a later process whose parent pid names one of
-/// them, created after it was, is its child.
-///
-/// Beside them, the survivors (asked to end, still running) and the exited processes found
-/// still listed, so a later round or pass knows each by its pid and creation time.
+/// A process the sweep holds open: its pid, creation time (when the sweep could read it) and
+/// handle.
+struct Held<T> {
+    pid: u32,
+    created: Option<u64>,
+    /// Held open, never read: it pins the pid.
+    _process: T,
+    /// The sweep ended it (killed, or exited by itself once refused); else it had exited
+    /// before the sweep came to it.
+    ended_here: bool,
+}
+
+/// A process asked to end whose handle wasn't signalled.
+struct Survivor<T> {
+    pid: u32,
+    created: Option<u64>,
+    image: String,
+    process: T,
+    /// Found this round: its kill has just been waited on, and isn't asked again until the next.
+    fresh: bool,
+}
+
+/// The processes a sweep holds open until it is over: while a handle to a process is open its
+/// pid is never given to another, so a later process whose parent pid names one of them,
+/// created after it was, is its child. The ones it ended, the exited ones it found still listed,
+/// and the survivors (asked to end, still running), so a later round or pass knows each by its
+/// pid and creation time.
 pub(crate) struct Killed<T> {
-    /// Each one's pid, creation time (when the sweep could read it) and open process.
-    pub(super) entries: Vec<(u32, Option<u64>, T)>,
-    /// The survivors: asked to end, their handle not signalled after [`KILL_WAIT`]. Each one's
-    /// pid, creation time, image name and open process.
-    survivors: Vec<(u32, Option<u64>, String, T)>,
-    /// The exited processes found still listed (held open by another process), each logged
-    /// once: pid and creation time.
-    exited: Vec<(u32, Option<u64>)>,
+    held: Vec<Held<T>>,
+    survivors: Vec<Survivor<T>>,
 }
 
 impl<T> Killed<T> {
     pub(crate) fn new() -> Killed<T> {
         Killed {
-            entries: Vec::new(),
+            held: Vec::new(),
             survivors: Vec::new(),
-            exited: Vec::new(),
         }
     }
 
-    /// Whether the process `pid` created at `created` is one this sweep ended: same pid, same
-    /// creation time. Its handle is held, so its pid is no other process's meanwhile; a creation
-    /// time that differs is another process all the same.
-    fn holds(&self, pid: u32, created: Option<u64>) -> bool {
-        self.entries
-            .iter()
-            .any(|(known, at, _)| *known == pid && *at == created)
+    /// Keeps `process` as one the sweep ended.
+    pub(super) fn ended(&mut self, pid: u32, created: Option<u64>, process: T) {
+        self.held.push(Held {
+            pid,
+            created,
+            _process: process,
+            ended_here: true,
+        });
     }
 
-    /// The index of the survivor that is the process `pid` created at `created`.
-    fn survivor(&self, pid: u32, created: Option<u64>) -> Option<usize> {
+    /// Whether the process `pid` created at `created` is one this sweep holds (ended, or found
+    /// exited): same pid, same creation time. Its handle is held, so its pid is no other
+    /// process's meanwhile; a creation time that differs is another process all the same.
+    fn holds(&self, pid: u32, created: Option<u64>) -> bool {
+        self.held
+            .iter()
+            .any(|held| held.pid == pid && held.created == created)
+    }
+
+    /// Whether the process `pid` created at `created` is a survivor.
+    fn survives(&self, pid: u32, created: Option<u64>) -> bool {
         self.survivors
             .iter()
-            .position(|(known, at, _, _)| *known == pid && *at == created)
+            .any(|survivor| survivor.pid == pid && survivor.created == created)
     }
 
-    /// Their pids, in the order they were killed.
+    /// The pids it ended, in order: killed, or exited by themselves once refused.
     pub(crate) fn pids(&self) -> Vec<u32> {
-        self.entries.iter().map(|(pid, _, _)| *pid).collect()
+        self.held
+            .iter()
+            .filter(|held| held.ended_here)
+            .map(|held| held.pid)
+            .collect()
     }
 
     /// Whether a process whose parent pid is `parent`, created at `started`, was started by one
-    /// of them: one has that pid and was created at or before it.
+    /// it holds: one has that pid and was created at or before it.
     pub(super) fn started_by(&self, parent: Option<u32>, started: u64) -> bool {
         parent.is_some_and(|parent| {
-            self.entries.iter().any(|(pid, created, _)| {
-                *pid == parent && created.is_some_and(|created| created <= started)
+            self.held.iter().any(|held| {
+                held.pid == parent && held.created.is_some_and(|created| created <= started)
             })
         })
     }
@@ -88,13 +121,14 @@ impl<T> Killed<T> {
 
 /// What [`one`] came to.
 pub(super) enum Done<'a, T> {
-    /// Nothing: kept, already ended, or exited and held open by another process.
+    /// Nothing for the round: kept, already held, a survivor (looked at by [`settle`]), or
+    /// exited and held open by another process.
     Nothing,
     /// Its handle was signalled after its kill (logged): a round's kill.
     Killed,
     /// Its kill was refused: looked at again after the round's kills.
     Refused(Refused<'a, T>),
-    /// It couldn't be checked, or survived its kill.
+    /// It couldn't be checked.
     Failed(SweepError),
 }
 
@@ -113,35 +147,29 @@ pub(super) fn one<'a, P: Processes>(
     // which the held handles pin.
     let created = calls.started(&process);
     let known = created.as_ref().ok().copied();
-    // The object of a process this sweep already ended: not a new kill.
-    if killed.holds(found.pid, known) {
+    // A process this sweep holds, or a survivor: [`settle`] looks at its handle.
+    if killed.holds(found.pid, known) || killed.survives(found.pid, known) {
         return Done::Nothing;
-    }
-    if let Some(index) = killed.survivor(found.pid, known) {
-        return match retried(calls, killed, index) {
-            Some(ended) => {
-                log(&killed_line(point, found));
-                killed.entries.push(ended);
-                Done::Killed
-            }
-            None => Done::Failed(survived(found)),
-        };
     }
     let started = match spared(found, created, rule, killed) {
         Ok(Spared::Yes) => return Done::Nothing,
         Ok(Spared::No(started)) => started.or(known),
         Err((error, step)) => return Done::Failed(failed(found, &error, step)),
     };
-    // Exited already, still listed: another process holds it open. Nothing to end.
+    // Exited already, still listed: another process holds it open. Nothing to end; held, so a
+    // process it started is still known as its child, and it isn't looked at again.
     if calls.exited(&process, Duration::ZERO) {
-        if !killed.exited.contains(&(found.pid, known)) {
-            killed.exited.push((found.pid, known));
-            log(&format!(
-                "clauseo-sandbox-run: sweep ({point}): the sandbox user's process {} ({}) had \
-                 already exited (another process holds it open)",
-                found.pid, found.image
-            ));
-        }
+        log(&format!(
+            "clauseo-sandbox-run: sweep ({point}): the sandbox user's process {} ({}) had \
+             already exited (another process holds it open)",
+            found.pid, found.image
+        ));
+        killed.held.push(Held {
+            pid: found.pid,
+            created: started,
+            _process: process,
+            ended_here: false,
+        });
         return Done::Nothing;
     }
     if let Err(error) = calls.kill(&process) {
@@ -152,45 +180,61 @@ pub(super) fn one<'a, P: Processes>(
             error,
         });
     }
-    if !calls.exited(&process, KILL_WAIT) {
-        killed
-            .survivors
-            .push((found.pid, started, found.image.clone(), process));
-        return Done::Failed(survived(found));
+    let wait = KILL_WAIT.min(rule.deadline.saturating_sub(calls.now()));
+    if !calls.exited(&process, wait) {
+        killed.survivors.push(Survivor {
+            pid: found.pid,
+            created: started,
+            image: found.image.clone(),
+            process,
+            fresh: true,
+        });
+        return Done::Nothing;
     }
-    log(&killed_line(point, found));
-    killed.entries.push((found.pid, started, process));
+    log(&killed_line(point, found.pid, &found.image));
+    killed.ended(found.pid, started, process);
     Done::Killed
 }
 
-fn survived(found: &Seen) -> SweepError {
-    SweepError::Survived {
-        pid: found.pid,
-        image: found.image.clone(),
+/// The held handles' verdict on the survivors, at a round's end, listed again or not: one found
+/// this round is counted (its kill was just waited on); an earlier one is asked to end again,
+/// without waiting, and is killed (logged, moved to the ones ended) if its handle is signalled
+/// now, else counted. Each one counted is a [`SweepError::Survived`] failure. How many ended.
+pub(super) fn settle<P: Processes>(
+    calls: &mut P,
+    killed: &mut Killed<P::Process>,
+    point: Point,
+    failures: &mut Failures,
+    log: &mut dyn FnMut(&str),
+) -> Result<usize, SweepError> {
+    let mut ended = 0;
+    let mut index = 0;
+    while let Some(survivor) = killed.survivors.get_mut(index) {
+        if !survivor.fresh {
+            // Its success says nothing; the handle does.
+            drop(calls.kill(&survivor.process));
+            if calls.exited(&survivor.process, Duration::ZERO) {
+                let gone = killed.survivors.swap_remove(index);
+                log(&killed_line(point, gone.pid, &gone.image));
+                killed.ended(gone.pid, gone.created, gone.process);
+                ended += 1;
+                continue;
+            }
+        }
+        survivor.fresh = false;
+        let error = SweepError::Survived {
+            pid: survivor.pid,
+            image: survivor.image.clone(),
+        };
+        failures.add(error, log)?;
+        index += 1;
     }
+    Ok(ended)
 }
 
 /// The line logged for a process whose handle was signalled after its kill.
-fn killed_line(point: Point, found: &Seen) -> String {
+fn killed_line(point: Point, pid: u32, image: &str) -> String {
     format!(
-        "clauseo-sandbox-run: sweep ({point}) killed the sandbox user's process {} ({})",
-        found.pid, found.image
+        "clauseo-sandbox-run: sweep ({point}) killed the sandbox user's process {pid} ({image})"
     )
-}
-
-/// Asks the survivor at `index` to end again, without waiting: its entry for
-/// [`Killed::entries`] once its handle is signalled, else `None` (it stays a survivor).
-fn retried<P: Processes>(
-    calls: &mut P,
-    killed: &mut Killed<P::Process>,
-    index: usize,
-) -> Option<(u32, Option<u64>, P::Process)> {
-    let process = &killed.survivors.get(index)?.3;
-    // Its success says nothing; the handle does.
-    drop(calls.kill(process));
-    if !calls.exited(process, Duration::ZERO) {
-        return None;
-    }
-    let (pid, created, _, process) = killed.survivors.swap_remove(index);
-    Some((pid, created, process))
 }

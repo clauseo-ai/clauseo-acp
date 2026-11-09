@@ -66,6 +66,9 @@ fn an_end_sweeper_that_cant_read_its_own_start_kills_nothing() {
         fn pause(&mut self, pause: Duration) {
             self.0.pause(pause);
         }
+        fn now(&mut self) -> Duration {
+            self.0.now()
+        }
     }
     let mut fake = machine();
     fake.procs.insert(31, pool_proc("task.exe"));

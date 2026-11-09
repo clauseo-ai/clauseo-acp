@@ -208,10 +208,10 @@ fn a_process_in_a_job_of_its_own_is_found_by_its_user_and_killed() {
 
 #[test]
 fn a_pid_reused_with_another_creation_time_isnt_taken_for_the_survivor_and_isnt_killed() {
-    // The end sweeper started at 1000. 1628 survives its kill; by the next round it has gone and
-    // a next session's process (created at 1500) has its pid. Known by pid alone it would be
-    // the survivor, asked to end again and reported; by pid and creation time it is a new
-    // process, spared by the cutoff.
+    // The end sweeper started at 1000. 1628 survives its kill; by the next round it has ended
+    // and a next session's process (created at 1500) has its pid. Known by pid alone it would be
+    // the survivor; by pid and creation time it is a new process, spared by the cutoff. The
+    // survivor's own handle, asked again, is signalled: it is killed.
     let mut fake = machine();
     fake.procs.insert(
         1628,
@@ -235,14 +235,131 @@ fn a_pid_reused_with_another_creation_time_isnt_taken_for_the_survivor_and_isnt_
         )],
     );
     let (got, _) = run(&mut fake, &[30], Point::Sweeper);
-    assert_eq!(got, Ok(vec![13]));
-    assert_eq!(
-        fake.asked,
-        [13, 1628],
-        "the next session's process isn't asked to end"
-    );
+    assert_eq!(got, Ok(vec![13, 1628]));
+    // The second ask is the survivor's handle's, which the next session's process isn't.
+    assert_eq!(fake.asked, [13, 1628, 1628]);
+    assert_eq!(fake.killed, [13]);
     assert_eq!(
         fake.procs.get(&1628).map(|p| p.image),
         Some("next-agent.exe")
     );
+}
+
+#[test]
+fn a_survivor_that_drops_out_of_the_lists_is_still_a_survivor() {
+    // The verdict is the held handle's: once asked to end, 1628 is in neither list, yet still
+    // runs. Each round's end looks at its handle, listed or not.
+    for spawns in [false, true] {
+        let mut fake = machine();
+        fake.procs.insert(1628, pool_proc(CHROME));
+        fake.stays.insert(1628, u32::MAX);
+        fake.vanish.insert(1628);
+        if spawns {
+            // A second round, which lists no 1628.
+            fake.procs.insert(13, pool_proc("stray.exe"));
+            fake.spawns.insert(13, (40, pool_proc("child.exe")));
+        }
+        let (got, _) = run(&mut fake, &[], Point::Tick);
+        assert_eq!(
+            got,
+            Err(SweepError::Left {
+                count: 1,
+                unkillable: 1,
+                images: vec![CHROME.to_owned()],
+            }),
+            "{spawns}"
+        );
+        assert!(fake.procs.contains_key(&1628));
+    }
+}
+
+#[test]
+fn an_exited_process_is_held_so_the_end_sweeper_still_kills_its_children() {
+    // 20 had exited before the sweeper came to it (created at 900, held open by another
+    // process); 31, created after the sweeper started (1000), names it as its parent and was
+    // created after it: its child, killed. 41, created at 1500 by the next session's outer (4),
+    // is left.
+    let mut fake = machine();
+    fake.procs.insert(
+        20,
+        Proc {
+            started: 900,
+            ..pool_proc("exited.exe")
+        },
+    );
+    fake.dead.insert(20);
+    fake.procs.insert(
+        31,
+        Proc {
+            started: 1_100,
+            parent: 20,
+            ..pool_proc("child.exe")
+        },
+    );
+    fake.procs.insert(
+        41,
+        Proc {
+            started: 1_500,
+            ..pool_proc("next-agent.exe")
+        },
+    );
+    let mut lines = Vec::new();
+    let got = end_sweep(&mut fake, &sid(POOL), &[30], &mut |l| {
+        lines.push(l.to_owned());
+    });
+    assert_eq!(got, Ok(vec![31]));
+    assert_eq!(fake.asked, [31]);
+    assert!(fake.procs.contains_key(&41));
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|l| l.contains("had already exited"))
+            .count(),
+        1,
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn one_deadline_caps_every_wait_of_a_sweep() {
+    // 15 survivors: the first 12 kills wait KILL_WAIT each, the deadline's whole 60 s; the rest
+    // wait for nothing, and all 15 are survivors.
+    let mut fake = machine();
+    for pid in 100..115 {
+        fake.procs.insert(pid, pool_proc(CHROME));
+        fake.stays.insert(pid, u32::MAX);
+    }
+    let (got, _) = run(&mut fake, &[], Point::Tick);
+    assert!(
+        matches!(
+            got,
+            Err(SweepError::Left {
+                count: 15,
+                unkillable: 15,
+                ..
+            })
+        ),
+        "{got:?}"
+    );
+    let full = usize::try_from(SWEEP_DEADLINE.as_secs() / KILL_WAIT.as_secs()).unwrap();
+    assert_eq!(fake.waits, vec![KILL_WAIT; full]);
+    assert_eq!(fake.clock, SWEEP_DEADLINE);
+}
+
+#[test]
+fn a_sweep_whose_kills_keep_it_going_past_its_deadline_stops_there() {
+    // A process that starts another each time it is killed, each kill taking KILL_WAIT: the end
+    // sweeper's two passes stop at their shared deadline.
+    let mut fake = machine();
+    fake.procs.insert(12, pool_proc("hydra.exe"));
+    fake.forever = Some(12);
+    fake.slow_kills = true;
+    let mut lines = Vec::new();
+    let got = end_sweep(&mut fake, &sid(POOL), &[30], &mut |l| {
+        lines.push(l.to_owned());
+    });
+    assert_eq!(got, Err(SweepError::Deadline));
+    assert_eq!(fake.clock, END_SWEEP_DEADLINE);
+    // The first pass ran out of rounds (8 kills, 40 s); the second was out of time at once.
+    assert_eq!(fake.killed.len(), 8);
 }

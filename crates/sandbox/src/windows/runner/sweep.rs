@@ -105,6 +105,13 @@ pub(crate) const TICK: Duration = Duration::from_secs(30);
 const ROUNDS: usize = 8;
 /// How long a killed process has to be gone (its handle signalled) before it is a survivor.
 pub(crate) const KILL_WAIT: Duration = Duration::from_secs(5);
+/// The most one sweep waits on processes' ends, every kill's and refusal's together: past it, no
+/// wait is longer than none, and the sweep ends with what its held handles say.
+pub(crate) const SWEEP_DEADLINE: Duration = Duration::from_secs(60);
+/// The end sweeper's deadline for its two passes: shorter than [`SWEEP_DEADLINE`], so its verdict
+/// (an escapee among it) comes before its own 60 s limit (`sweeper.rs`) and the time it needs
+/// to remove what is left.
+pub(crate) const END_SWEEP_DEADLINE: Duration = Duration::from_secs(40);
 /// The exit code a swept process ends with: the runner's `RunExit` range's last code.
 pub(crate) const SWEPT: u32 = super::RUN_EXIT_BASE + 0xff;
 /// The most image names an escapee report carries.
@@ -186,6 +193,8 @@ pub(crate) trait Processes {
     fn exited(&mut self, process: &Self::Process, wait: Duration) -> bool;
     /// Waits `pause` before the next look at a refused process.
     fn pause(&mut self, pause: Duration);
+    /// A monotonic clock's reading, from any origin: the sweep's deadline is on it.
+    fn now(&mut self) -> Duration;
 }
 
 /// Why a sweep failed. Its text names a pid, an image name and an OS code, nothing else.
@@ -220,6 +229,9 @@ pub(crate) enum SweepError {
     /// The pool user still had new processes after every round.
     #[error("the sandbox user still started processes after {ROUNDS} rounds")]
     StillRunning,
+    /// The sweep's waits reached its deadline with processes still to look at.
+    #[error("the sweep ran out of its time with the sandbox user's processes still to end")]
+    Deadline,
     /// The creation time of one of them, or of the end sweeper itself, couldn't be read.
     #[error("the sandbox user's process {pid} ({image}) has no start time ({code})")]
     Started {
@@ -270,6 +282,7 @@ impl SweepError {
             SweepError::List(_)
             | SweepError::JobList(_)
             | SweepError::StillRunning
+            | SweepError::Deadline
             | SweepError::Started { .. }
             | SweepError::Left { .. }
             | SweepError::OwnStart { .. } => None,
@@ -300,14 +313,16 @@ pub(crate) fn sweep<P: Processes>(
     log: &mut dyn FnMut(&str),
 ) -> Result<Vec<u32>, SweepError> {
     let mut killed = Killed::new();
-    sweep_with(calls, user, keep, point, &mut killed, log)?;
+    let deadline = calls.now().saturating_add(SWEEP_DEADLINE);
+    sweep_with(calls, (user, keep), point, deadline, &mut killed, log)?;
     Ok(killed.pids())
 }
 
 /// The end sweeper's sweep: two passes of [`sweep`]'s rounds at [`Point::Sweeper`], the second
 /// keeping what the first killed, so a process one of those started is still known as its
 /// child. Its result is the second pass's, which tries again what the first left; the first
-/// pass's failure is logged. The pids both killed.
+/// pass's failure is logged. Both passes share one deadline, [`END_SWEEP_DEADLINE`]. The pids
+/// both killed.
 pub(crate) fn end_sweep<P: Processes>(
     calls: &mut P,
     user: &Sid,
@@ -315,22 +330,26 @@ pub(crate) fn end_sweep<P: Processes>(
     log: &mut dyn FnMut(&str),
 ) -> Result<Vec<u32>, SweepError> {
     let mut killed = Killed::new();
-    if let Err(error) = sweep_with(calls, user, keep, Point::Sweeper, &mut killed, log) {
+    let deadline = calls.now().saturating_add(END_SWEEP_DEADLINE);
+    let point = Point::Sweeper;
+    if let Err(error) = sweep_with(calls, (user, keep), point, deadline, &mut killed, log) {
         log(&format!(
             "clauseo-sandbox-run: sweep ({}), first pass: {error}",
             Point::Sweeper
         ));
     }
-    sweep_with(calls, user, keep, Point::Sweeper, &mut killed, log)?;
+    sweep_with(calls, (user, keep), point, deadline, &mut killed, log)?;
     Ok(killed.pids())
 }
 
-/// [`sweep`], adding what it kills to `killed`, which may hold an earlier pass's.
+/// [`sweep`], adding what it kills to `killed`, which may hold an earlier pass's, its waits
+/// ending at `deadline` ([`Processes::now`]). The verdict is the held handles': every
+/// survivor's, listed again or not, is looked at once each round ([`kill::settle`]).
 fn sweep_with<P: Processes>(
     calls: &mut P,
-    user: &Sid,
-    keep: &[u32],
+    (user, keep): (&Sid, &[u32]),
     point: Point,
+    deadline: Duration,
     killed: &mut Killed<P::Process>,
     log: &mut dyn FnMut(&str),
 ) -> Result<(), SweepError> {
@@ -355,6 +374,11 @@ fn sweep_with<P: Processes>(
         failures.count = 0;
         failures.unkillable = 0;
         failures.images.clear();
+        // Out of time: the held handles are the verdict, each survivor's looked at once more.
+        if calls.now() >= deadline {
+            kill::settle(calls, killed, point, &mut failures, log)?;
+            return Err(failures.verdict(SweepError::Deadline));
+        }
         let seen = list(calls)?;
         let mut opened = Vec::new();
         for found in seen
@@ -381,7 +405,12 @@ fn sweep_with<P: Processes>(
                 .map_err(|e| SweepError::JobList(code(&e)))?,
             Point::Start | Point::Tick | Point::End | Point::Sweeper => Vec::new(),
         };
-        let rule = Rule { point, own, job };
+        let rule = Rule {
+            point,
+            own,
+            job,
+            deadline,
+        };
         let mut round = 0usize;
         let mut refused = Vec::new();
         for (found, process) in opened {
@@ -395,29 +424,25 @@ fn sweep_with<P: Processes>(
                 Done::Failed(error) => failures.add(error, log)?,
             }
         }
-        let (ended, left) = refused::wait_out(calls, refused);
+        let budget = deadline.saturating_sub(calls.now());
+        let (ended, left) = refused::wait_out(calls, refused, budget);
         for gone in ended {
             log(&gone.exited_line(point));
-            killed
-                .entries
-                .push((gone.found.pid, gone.started, gone.process));
+            killed.ended(gone.found.pid, gone.started, gone.process);
             round += 1;
         }
         for still in left {
             failures.add(failed(still.found, &still.error, Step::Kill), log)?;
         }
+        round += kill::settle(calls, killed, point, &mut failures, log)?;
         if round == 0 {
             return match failures.count {
                 0 => Ok(()),
-                count => Err(SweepError::Left {
-                    count,
-                    unkillable: failures.unkillable,
-                    images: failures.images,
-                }),
+                _ => Err(failures.left()),
             };
         }
     }
-    Err(SweepError::StillRunning)
+    Err(failures.verdict(SweepError::StillRunning))
 }
 
 /// What [`spared`] decided.
@@ -435,6 +460,8 @@ struct Rule {
     own: u64,
     /// The pids of its job's processes, read this round; empty where none is kept.
     job: Vec<u32>,
+    /// When the sweep's waits end ([`Processes::now`]).
+    deadline: Duration,
 }
 
 /// Whether the process `pid`, created at `started`, is kept as one of the inner's job: `job`,
@@ -483,6 +510,25 @@ struct Failures {
 }
 
 impl Failures {
+    /// The verdict of a sweep cut short (out of rounds or time): [`SweepError::Left`] when the
+    /// last round counted an escapee (a survivor among them), so the slot is quarantined; else
+    /// `otherwise`.
+    fn verdict(&mut self, otherwise: SweepError) -> SweepError {
+        if self.unkillable == 0 {
+            return otherwise;
+        }
+        self.left()
+    }
+
+    /// The round's failures as [`SweepError::Left`].
+    fn left(&mut self) -> SweepError {
+        SweepError::Left {
+            count: self.count,
+            unkillable: self.unkillable,
+            images: std::mem::take(&mut self.images),
+        }
+    }
+
     fn add(&mut self, error: SweepError, log: &mut dyn FnMut(&str)) -> Result<(), SweepError> {
         if self.point == Point::Start {
             return Err(error);
@@ -515,6 +561,7 @@ fn pid_of(error: &SweepError) -> u32 {
         SweepError::List(_)
         | SweepError::JobList(_)
         | SweepError::StillRunning
+        | SweepError::Deadline
         | SweepError::Left { .. }
         | SweepError::OwnStart { .. } => 0,
     }

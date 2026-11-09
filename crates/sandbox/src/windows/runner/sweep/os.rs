@@ -32,7 +32,8 @@
 )]
 
 use std::io;
-use std::time::Duration;
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{FILETIME, HANDLE, WAIT_OBJECT_0};
 use windows::Win32::Security::TOKEN_QUERY;
@@ -209,6 +210,23 @@ impl Processes for OsProcesses<'_> {
     fn pause(&mut self, pause: Duration) {
         sleep(pause);
     }
+
+    fn now(&mut self) -> Duration {
+        let origin = *ORIGIN.get_or_init(clock);
+        clock().saturating_duration_since(origin)
+    }
+}
+
+/// [`Processes::now`]'s origin: its first reading.
+static ORIGIN: OnceLock<Instant> = OnceLock::new();
+
+/// The monotonic clock's reading, for [`Processes::now`].
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the sweep's deadline on its waits; the tests inject the clock (`Processes::now`)"
+)]
+fn clock() -> Instant {
+    Instant::now()
 }
 
 /// The pause between two looks at a process whose kill was refused.

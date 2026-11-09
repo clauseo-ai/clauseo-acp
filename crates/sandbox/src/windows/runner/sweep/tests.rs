@@ -90,6 +90,15 @@ struct Fake {
     asked: Vec<u32>,
     /// Every wait longer than none on a process's end, in order.
     waits: Vec<Duration>,
+    /// The clock: each pause, and each wait on a process that doesn't end within it, moves it on.
+    clock: Duration,
+    /// Once asked to end, this pid is in neither list, whether or not it ended.
+    vanish: BTreeSet<u32>,
+    /// A killed process ends only once a wait on it has run its whole length: its kill takes
+    /// time.
+    slow_kills: bool,
+    /// Killed processes not yet ended (`slow_kills`).
+    ending: BTreeSet<u32>,
 }
 
 /// An open process: its pid and creation time, as a handle names one process and no later one
@@ -97,6 +106,11 @@ struct Fake {
 type Handle = (u32, u64);
 
 impl Fake {
+    /// Whether `pid` was asked to end and is to vanish from the lists.
+    fn vanished(&self, pid: u32) -> bool {
+        self.vanish.contains(&pid) && self.asked.contains(&pid)
+    }
+
     /// Whether the process `handle` names is still the one at its pid, and running.
     fn running(&self, (pid, started): Handle) -> bool {
         self.procs.get(&pid).is_some_and(|p| p.started == started) && !self.dead.contains(&pid)
@@ -113,6 +127,7 @@ impl Processes for Fake {
         Ok(self
             .procs
             .iter()
+            .filter(|(pid, _)| !self.vanished(**pid))
             .map(|(pid, p)| Seen {
                 pid: *pid,
                 image: p.image.to_owned(),
@@ -130,7 +145,9 @@ impl Processes for Fake {
         Ok(self
             .procs
             .iter()
-            .filter(|(_, p)| matches!(&p.owner, Owner::User(u) if *u == sid(POOL)))
+            .filter(|(pid, p)| {
+                matches!(&p.owner, Owner::User(u) if *u == sid(POOL)) && !self.vanished(**pid)
+            })
             .map(|(pid, p)| Seen {
                 pid: *pid,
                 image: p.image.to_owned(),
@@ -197,7 +214,9 @@ impl Processes for Fake {
             *left -= 1;
             return Err(io::Error::from_raw_os_error(5));
         }
-        if self.lists_the_dead {
+        if self.slow_kills {
+            self.ending.insert(*pid);
+        } else if self.lists_the_dead {
             self.dead.insert(*pid);
         } else {
             self.procs.remove(pid);
@@ -217,9 +236,26 @@ impl Processes for Fake {
         if !wait.is_zero() {
             self.waits.push(wait);
         }
-        !self.running(*process)
+        if self.ending.contains(&process.0) {
+            if wait.is_zero() {
+                return false;
+            }
+            self.clock += wait;
+            self.ending.remove(&process.0);
+            self.procs.remove(&process.0);
+            return true;
+        }
+        let running = self.running(*process);
+        if running {
+            self.clock += wait;
+        }
+        !running
+    }
+    fn now(&mut self) -> Duration {
+        self.clock
     }
     fn pause(&mut self, pause: Duration) {
+        self.clock += pause;
         self.pauses.push(pause);
         for (pid, left) in &mut self.exits_after {
             *left = left.saturating_sub(1);
