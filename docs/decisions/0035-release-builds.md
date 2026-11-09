@@ -396,6 +396,26 @@ S15's tools sat in `windows.conf.json` and S27's in `tauri.conf.json`.
   summary. A snapshot generated more than 24 hours before the run adds a warning there, and the run
   goes on: an older signed list is still better than none.
 
+## Safe workspace off for launch (Rohan, 2026-11-09)
+
+Clauseo launches as a plain AI-tool client with the Safe workspace parked. The Windows installers
+run none of its elevated set-up: no UAC prompt, no `clauseo-sandbox-setup --adopt`, no admin copy
+in `C:\Program Files\Clauseo\Sandbox`, and the uninstaller starts no elevated removal (it keeps any
+`sandbox` folder, as after a declined removal). No sandbox exe is built, signed, bundled or
+published, and `assemble` fails if either Windows installer holds one. The code stays behind two
+names, both off. In NSIS, the compile-time define `CLAUSEO_SAFE_WORKSPACE`: `hooks.nsh` wraps
+`admin_copy.nsh`'s include and every insert of the set-up and the removal in `!ifdef`, and
+`windows/hooks_safe_workspace.nsh` defines it and includes `hooks.nsh` (the bundler cannot pass
+makensis a `-D`). In the release, `release.yml`'s top-level env `SAFE_WORKSPACE: "false"`, which
+it passes to `sidecars.mjs --safe-workspace=<true|false>` (the set-up tool's row has
+`safeWorkspace: true` and is left out otherwise), and which gates the signing, the `.sig`
+resource, the hooks overlay, the published exe and its checks in `assemble`, and the release
+notes' table. To turn it back on, set `SAFE_WORKSPACE: "true"`: that one change builds the tool,
+bundles it with `hooks_safe_workspace.nsh` as the hooks, and publishes it. `setup-exe-repro.yml`
+(`--setup-exe`) builds the exe on demand whatever the switch. The NSIS tests compile the hooks
+with the define for the set-up's coverage and without it to show it is gone
+(`delete_app_data/tests/safe_workspace_off.rs`).
+
 ## Status
 
 proposed

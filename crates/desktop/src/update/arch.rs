@@ -137,10 +137,24 @@ fn native_is_arm64() -> bool {
 #[cfg(windows)]
 fn admin_copy() -> AdminCopy {
     use clauseo_sandbox::windows::refresh::{installed_setup_sha256, recorded_admin_copy_sha256};
-    let recorded = recorded_admin_copy_sha256().ok()?;
+    admin_copy_from(recorded_admin_copy_sha256(), installed_setup_sha256)
+}
+
+/// [`admin_copy`] over what it read: the record's hash, and the installed set-up program's,
+/// which `installed` reads only when the record holds a hash. No record means no admin copy
+/// (`NotSetUp`), whether or not the set-up program is there: the release without the Safe
+/// workspace ships none and writes no record, so the move goes ahead. A record with the program
+/// missing or unreadable is none (stay x64): the copy's refresh can't be confirmed. A failed read
+/// of the record is none too.
+#[cfg(any(windows, test))]
+pub(super) fn admin_copy_from<E>(
+    recorded: Result<Option<String>, E>,
+    installed: impl FnOnce() -> std::io::Result<Option<String>>,
+) -> AdminCopy {
+    let recorded = recorded.ok()?;
     let installed = match recorded {
         None => None,
-        Some(_) => installed_setup_sha256().ok()?,
+        Some(_) => installed().ok()?,
     };
     Some(crate::admin_refresh::refresh_needed(
         recorded.as_deref(),

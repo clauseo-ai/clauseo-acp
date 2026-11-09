@@ -17,6 +17,7 @@ mod nsis_names;
 mod nsis_run;
 mod repair;
 mod safe_temp;
+mod safe_workspace_off;
 mod sandbox_link;
 mod set_aside;
 mod setup_exe_missing;

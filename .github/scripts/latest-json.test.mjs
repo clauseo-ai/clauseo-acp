@@ -17,9 +17,11 @@
 // sidecars.mjs (third-party build scripts) with a secret in it or in any step before it.
 // release.yml's own test also holds every `tauri build` and `tauri bundle` of the shipped legs
 // to passing the generated sidecar overlay last, and checks the sandbox tool's path: its one name
-// (SANDBOX_EXE), its updater signature before NSIS, its .sig in both installers, assemble's checks
-// of the published exe and .sig against both installers and the updater key, and the build env
-// its build.rs reads; and every job that passes release.conf.json to passing blocklist.conf.json
+// (SANDBOX_EXE), the Safe workspace switch (SAFE_WORKSPACE, "false" for launch) every step of that
+// path is behind, its updater signature before NSIS, its .sig in both installers, assemble's checks
+// of the published exe and .sig against both installers and the updater key, assemble's check
+// that with the switch off neither installer holds a sandbox file, and the build env its build.rs
+// reads; and every job that passes release.conf.json to passing blocklist.conf.json
 // with it, needing `blocklist` and downloading blocklist-snapshot before it builds or bundles.
 
 import assert from "node:assert/strict";
@@ -676,13 +678,81 @@ test("--key-id passes a matching UpdaterKeyId, fails another and exits 3 on none
   }
 });
 
+/** release.yml's top-level SAFE_WORKSPACE, the Safe workspace switch. */
+function safeWorkspace(text) {
+  const match = text.match(/^env:\n(?:  .*\n)*?  SAFE_WORKSPACE: "(\S+)"$/m);
+  assert.ok(match, "release.yml's top-level env sets SAFE_WORKSPACE, quoted");
+  return match[1];
+}
+
+/** The index of the exact command <line> in <commands>; fails when it is not there. */
+function commandAt(commands, line) {
+  const index = commands.indexOf(line);
+  assert.notEqual(index, -1, line);
+  return index;
+}
+
+/** Whether <commands>[<index>] is inside an `if [ "$SAFE_WORKSPACE" = true ]; then` block. */
+function underSwitchOn(commands, index) {
+  let depth = 0;
+  for (let i = index - 1; i >= 0; i -= 1) {
+    const line = commands[i];
+    if (line === "fi") depth += 1;
+    else if (/^if .*; then$/.test(line)) {
+      if (depth === 0) return line === 'if [ "$SAFE_WORKSPACE" = true ]; then';
+      depth -= 1;
+    }
+  }
+  return false;
+}
+
+test("release.yml's Safe workspace switch is off for launch and every sandbox tool step is behind it", () => {
+  const text = readFileSync(RELEASE_YML, "utf8");
+  assert.equal(safeWorkspace(text), "false");
+  // The seam passes the switch to sidecars.mjs, which builds the sandbox tool only for "true".
+  const build = jobCommands(text, "build");
+  commandAt(build, 'node .github/scripts/sidecars.mjs --safe-workspace="$SAFE_WORKSPACE" "$TARGET"');
+  assert.deepEqual(
+    build.filter((line) => line.startsWith("node .github/scripts/sidecars.mjs") && line !== "node .github/scripts/sidecars.mjs --check"),
+    ['node .github/scripts/sidecars.mjs --safe-workspace="$SAFE_WORKSPACE" "$TARGET"'],
+  );
+  const sign = jobCommands(text, "sign-windows");
+  // The signing step runs only with the switch on.
+  const step = sign.indexOf("- name: Sign the sandbox tool for the updater");
+  assert.notEqual(step, -1);
+  assert.equal(sign[step + 1], "if: env.SAFE_WORKSPACE == 'true'");
+  // The bundle overlay with the .sig and hooks_safe_workspace.nsh only with it on; off, empty.
+  const hooks = sign.findIndex((line) => line.includes("windows/hooks_safe_workspace.nsh"));
+  assert.ok(hooks !== -1 && underSwitchOn(sign, hooks), "hooks_safe_workspace.nsh only with the switch on");
+  const empty = commandAt(sign, `echo '{}' > "$RUNNER_TEMP/safe-workspace.conf.json"`);
+  assert.equal(sign[empty - 1], "else");
+  assert.ok(underSwitchOn(sign, commandAt(sign, 'cp "crates/desktop/$sig" "$OUT/$asset.sig"')));
+  // Assemble: the sandbox tool's rows, signature, key ID, installer contents and notes with it on.
+  const assemble = jobCommands(text, "assemble");
+  const manifest = assemble.filter((line) => line.startsWith("node .github/scripts/latest-json.mjs dist "));
+  assert.equal(manifest.length, 2, manifest.join("\n"));
+  const withExe = assemble.findIndex((line) => line.endsWith('"$SANDBOX_EXE" > missing.txt'));
+  assert.ok(underSwitchOn(assemble, withExe));
+  const without = commandAt(assemble, 'node .github/scripts/latest-json.mjs dist "$VERSION" "$base" "$pub_date" > missing.txt');
+  assert.equal(assemble[without - 1], "else");
+  assert.ok(underSwitchOn(assemble, commandAt(assemble, 'echo "## Inside the Windows installers"')));
+  // Off: neither installer may hold a file named like the sandbox's (clauseo-sandbox), then the
+  // loop moves on before any check of the sandbox tool.
+  const off = commandAt(assemble, 'if [ "$SAFE_WORKSPACE" != true ]; then');
+  const refused = commandAt(assemble, '! grep -qiF "${SANDBOX_EXE%-*}" <<< "$listing" ||');
+  const next = assemble.indexOf("continue", refused);
+  const installerSig = commandAt(
+    assemble,
+    'node .github/scripts/latest-json.mjs --verify "${files[0]}" "$pub" "$(basename "${files[0]}")" "$VERSION" ||',
+  );
+  const exeSig = commandAt(assemble, 'node .github/scripts/latest-json.mjs --verify "$exe" "$pub" "$SANDBOX_EXE" "$VERSION" ||');
+  assert.ok(installerSig < off && off < refused && refused < next && next < exeSig, "the installer's .sig either way");
+  assert.equal(sandboxExe(text).replace(/-[^-]*$/, ""), "clauseo-sandbox");
+});
+
 test("release.yml signs the sandbox tool, ships its .sig in both installers and checks both in assemble", () => {
   const text = readFileSync(RELEASE_YML, "utf8");
-  const at = (commands, line) => {
-    const index = commands.indexOf(line);
-    assert.notEqual(index, -1, line);
-    return index;
-  };
+  const at = commandAt;
   const sign = jobCommands(text, "sign-windows");
   // Signed as SANDBOX_EXE (the trusted comment's file:), its .sig moved where the overlay reads it.
   const signed = at(sign, 'pnpm -C ui tauri signer sign --app-version "$VERSION" "$dir/$SANDBOX_EXE"');
@@ -690,7 +760,11 @@ test("release.yml signs the sandbox tool, ships its .sig in both installers and 
   assert.ok(signed < at(sign, 'mv "$dir/$SANDBOX_EXE.sig" "$exe.sig"'));
   const bundled = sign.findIndex((line) => /\btauri bundle\b/.test(line));
   assert.ok(signed < bundled, "the sandbox tool is signed before NSIS takes it");
-  assert.ok(sign[bundled].includes('--config "$RUNNER_TEMP/sandbox-sig.conf.json" --config release/sidecars.generated.json'));
+  assert.ok(sign[bundled].includes('--config "$RUNNER_TEMP/safe-workspace.conf.json" --config release/sidecars.generated.json'));
+  // The overlay names the .sig as a resource and hooks_safe_workspace.nsh as the hooks.
+  const overlay = sign.find((line) => line.includes("windows/hooks_safe_workspace.nsh"));
+  assert.ok(overlay.includes('"$RUNNER_TEMP/safe-workspace.conf.json" "$sig" "$SANDBOX_EXE.sig"'), overlay);
+  assert.ok(overlay.includes("installerHooks: process.argv[4]"), overlay);
   at(sign, 'cp "crates/desktop/$sig" "$OUT/$asset.sig"');
   const assemble = jobCommands(text, "assemble");
   const verified = at(assemble, 'node .github/scripts/latest-json.mjs --verify "$exe" "$pub" "$SANDBOX_EXE" "$VERSION" ||');
@@ -710,6 +784,9 @@ test("release.yml signs the sandbox tool, ships its .sig in both installers and 
   at(assemble, "printf '%s\\n' \"${inside[@]}\"");
   assert.ok(verified < listed && listed < same && same < notes);
   assert.ok(assemble.some((line) => line.includes('"$SANDBOX_EXE" > missing.txt')), "latest-json.mjs gets SANDBOX_EXE");
+  // assets() gets the switch's exe name, or null with it off.
+  assert.ok(assemble.some((line) => line.includes("assets(process.argv[1], process.argv[2] || null)")));
+  assert.ok(assemble.includes('" "$VERSION" "$sandbox_exe")'));
   // apt-get in assemble and blocklist (minisign) only.
   for (const job of ["check", "ui", "build", "sign-windows", "publish", "measure-builds"]) {
     assert.deepEqual(jobCommands(text, job).filter((line) => /\bapt-get\b/.test(line)), [], job);
@@ -925,6 +1002,29 @@ test("the release's latest.json is right and every platforms URL downloads", { s
     assert.equal(createHash("sha256").update(body).digest("hex"), sums.get(name), `${name} against SHA256SUMS.txt`);
     const sig = (await get(`${entry.url}.sig`)).toString("utf8").trim();
     assert.equal(sig, entry.signature, `${name}.sig against latest.json`);
+  }
+});
+
+test("the CLI writes latest.json with the sandbox tool's rows only when given its name", () => {
+  const dir = release("1.2.3");
+  try {
+    const cli = (...args) =>
+      spawnSync(process.execPath, [join(here, "latest-json.mjs"), dir, "1.2.3", BASE, DATE, ...args], { encoding: "utf8" });
+    // The Safe workspace off: no sandbox exe in the release, and none asked for.
+    const off = cli();
+    assert.equal(off.status, 0, off.stderr);
+    assert.equal(off.stdout, "");
+    const manifest = readFileSync(join(dir, "latest.json"), "utf8");
+    assert.doesNotMatch(manifest, /sandbox/);
+    // On: the tier 1 exe is required.
+    const on = cli("clauseo-sandbox-setup.exe");
+    assert.equal(on.status, 1);
+    assert.match(on.stderr, /clauseo-sandbox-setup-x64\.exe is missing \(tier 1\)/);
+    // A bad name, or an option where the folder goes, is a usage error.
+    assert.equal(cli("Setup.EXE").status, 2);
+    assert.equal(spawnSync(process.execPath, [join(here, "latest-json.mjs"), "--verify", "a", "b", "c"]).status, 2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

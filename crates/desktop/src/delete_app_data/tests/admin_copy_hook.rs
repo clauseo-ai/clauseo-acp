@@ -7,6 +7,7 @@
 
 use super::admin_copy::admin_code;
 use super::nsis_run::{Machine, Node, Record, Value, chain, defines, lines, parse_all, preprocess};
+use super::safe_workspace_off::SAFE_WORKSPACE;
 use super::sources::{hook_code, line_with, preuninstall, read};
 
 #[test]
@@ -340,6 +341,8 @@ fn refusal(mode: &str, verified: &str, record: Record, silent: bool) -> Vec<Stri
     let mut defines = defines(&code);
     defines.insert("INSTALLMODE".to_owned(), mode.to_owned());
     defines.insert("NSIS_PTR_SIZE".to_owned(), "4".to_owned());
+    // The removal is the Safe workspace's: compiled only with its define.
+    defines.insert(SAFE_WORKSPACE.to_owned(), String::new());
     let body = preprocess(preuninstall(&code), &defines);
     let nodes = parse_all(&body);
     let Some(Node::If(arms, _)) = chain(&nodes, "If $R4 <> 1") else {

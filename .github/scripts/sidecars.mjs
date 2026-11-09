@@ -1,7 +1,7 @@
 // sidecars.mjs: every sidecar a release ships, built or fetched for one target, and the
 // release-only overlay that bundles them (ADR 0035, "Sidecars").
 //
-//   node .github/scripts/sidecars.mjs <target-triple>
+//   node .github/scripts/sidecars.mjs [--safe-workspace=true|false] <target-triple>
 //   node .github/scripts/sidecars.mjs --check <target-triple>   (the overlay holds only its allowed shape)
 //   node .github/scripts/sidecars.mjs --setup-exe <target-triple>   (that exe only; prints its path)
 //
@@ -27,6 +27,12 @@
 // merge patch replaces arrays, so this one list is the target's whole externalBin. Both outputs
 // are gitignored. The base tauri.conf.json has no externalBin: tauri-build checks that every
 // listed file exists, which would break every dev, CI and e2e build.
+//
+// The Safe workspace is off for launch (ADR 0035, "Safe workspace off for launch"): its sidecars
+// (the elevated set-up tool, clauseo-sandbox-setup) carry `safeWorkspace: true` and are built
+// and listed only with --safe-workspace=true, which release.yml passes from its SAFE_WORKSPACE
+// switch. Without it (the default) no sandbox exe is built, placed or bundled. --setup-exe builds
+// the exe on demand either way (setup-exe-repro.yml).
 //
 // Cargo runs with the job's own environment (RUSTFLAGS and the CARGO_PROFILE_RELEASE_* flags),
 // so a sidecar gets the same release flags as the app, and its .pdb, .dSYM or .dwp lands in
@@ -160,15 +166,17 @@ export const SIDECARS = [
   // Parked (host thread, 2026-11-03): the guard's start time was not the cost. If it returns:
   // { name: "clauseo-guard", targets: RELEASE_TARGETS, place: cargoBin("clauseo-guard") },
   // which gets -C target-feature=+crt-static on Windows from the job's flags, as every row.
-  // S15's set-up tool, a [[bin]] of the clauseo-sandbox package. Tauri bundles it beside
-  // Clauseo.exe as clauseo-sandbox-setup.exe; hooks.nsh runs it in NSIS_HOOK_PREUNINSTALL, and
-  // the NSIS template deletes it after that hook.
+  // S15's set-up tool, a [[bin]] of the clauseo-sandbox package, only with the Safe workspace on
+  // (safeWorkspace). Tauri bundles it beside Clauseo.exe as clauseo-sandbox-setup.exe;
+  // hooks.nsh (CLAUSEO_SAFE_WORKSPACE) writes it to Program Files and runs it, and the NSIS
+  // template deletes it on uninstall.
   {
     name: "clauseo-sandbox-setup",
     targets: RELEASE_TARGETS.filter(isWindows),
     place: setupExe,
+    safeWorkspace: true,
   },
-  // clauseo-sandbox-run comes later (S15 PR5), Windows targets only.
+  // clauseo-sandbox-run comes later (S15 PR5), Windows targets only, with safeWorkspace: true.
   // stetdoc, in its own folder (STETDOC): never in externalBin, so never beside the app.
   { name: "clauseo-stetdoc", targets: RELEASE_TARGETS, ownFolder: true, place: pinnedStetdoc },
 ];
@@ -255,13 +263,15 @@ function runCargo(args, extra = {}) {
 /**
  * Places every sidecar for `triple` and writes the overlay. Returns the overlay's externalBin
  * (without a darwin target's helper, which is in bundle.macOS.files, or stetdoc, in its own folder).
+ * The Safe workspace's sidecars (`safeWorkspace: true`) only with `safeWorkspace` true.
  *
  * @param {string} triple a target in RELEASE_TARGETS
  * @param {{ root?: string, cargo?: (args: string[], extra?: object) => void, targetDir?: string,
  *   fetchAgentBrowser?: typeof fetchAgentBrowser, agentBrowserOptions?: object,
  *   fetchStetdoc?: typeof fetchStetdoc, stetdocOptions?: object,
- *   sidecars?: typeof SIDECARS, commitTime?: (root: string) => string }} [options] the tests
- *   replace cargo, the fetch, the root and git's commit time
+ *   sidecars?: typeof SIDECARS, commitTime?: (root: string) => string,
+ *   safeWorkspace?: boolean }} [options] the tests replace cargo, the fetch, the root and git's
+ *   commit time; safeWorkspace is release.yml's SAFE_WORKSPACE switch, off when left out
  * @returns {Promise<string[]>}
  */
 export async function placeSidecars(triple, options = {}) {
@@ -305,6 +315,10 @@ export async function placeSidecars(triple, options = {}) {
   const resources = {};
   for (const sidecar of sidecars) {
     if (!sidecar.targets.includes(triple)) continue;
+    if (sidecar.safeWorkspace && options.safeWorkspace !== true) {
+      console.log(`${sidecar.name}: the Safe workspace is off, left out`);
+      continue;
+    }
     const dest = join(binaries, `${sidecar.name}-${triple}${exe(triple)}`);
     const placed = await sidecar.place(triple, ctx, dest);
     if (placed === null) {
@@ -354,13 +368,31 @@ export async function buildSetupExe(triple, options = {}) {
   return setupExe(triple, { root, targetDir, commitTime: options.commitTime, cargo: options.cargo ?? runCargo });
 }
 
-const USAGE = "usage: node .github/scripts/sidecars.mjs <target-triple> | --check <target-triple> | --setup-exe <target-triple>";
+const USAGE =
+  "usage: node .github/scripts/sidecars.mjs [--safe-workspace=true|false] <target-triple> | --check <target-triple> | --setup-exe <target-triple>";
+
+/**
+ * The Safe workspace switch's value from its option, or null for anything but
+ * --safe-workspace=true or --safe-workspace=false, so a typo can't turn it off unseen.
+ * @param {string} arg
+ * @returns {boolean | null}
+ */
+export function safeWorkspaceOption(arg) {
+  return { "--safe-workspace=true": true, "--safe-workspace=false": false }[arg] ?? null;
+}
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  const [first, ...rest] = process.argv.slice(2);
+  const args = process.argv.slice(2);
+  let safeWorkspace = false;
+  if (args[0]?.startsWith("--safe-workspace")) {
+    safeWorkspace = safeWorkspaceOption(args.shift());
+  }
+  // The switch goes with the plain form only: --check and --setup-exe take none.
+  const switched = args.length < process.argv.length - 2;
+  const [first, ...rest] = args;
   const flag = first === "--setup-exe" || first === "--check";
   const setup = first === "--setup-exe";
-  if (!first || rest.length !== (flag ? 1 : 0)) {
+  if (safeWorkspace === null || !first || rest.length !== (flag ? 1 : 0) || (switched && flag)) {
     console.error(USAGE);
     process.exit(2);
   }
@@ -372,7 +404,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       if (problem !== null) throw new Error(`crates/desktop/release/sidecars.generated.json: ${problem}`);
       console.log(`crates/desktop/release/sidecars.generated.json holds only its allowed shape for ${rest[0]}`);
     } else {
-      await placeSidecars(first);
+      await placeSidecars(first, { safeWorkspace });
     }
   } catch (error) {
     console.error(`::error::${error.message}`);
