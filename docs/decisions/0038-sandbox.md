@@ -360,9 +360,11 @@ The profile is `(deny default)`, an explicit `(deny file-map-executable)`, then 
 - run, read and map of the headless shell's folder and the stack's binaries; read and map of
   `/System` and `/usr/lib` (frameworks, dylibs, fonts: a trap or abort without either), read of
   `/` (dyld aborts without it), metadata of `/etc`, `/tmp`, `/var` (not needed; about 2,600
-  denials a run without it) and of the folders above the allowed paths (a trap without them);
+  denials a run without it) and of each folder above the allowed paths, as literals, so no
+  entries are listed (a trap without them; the guard `lstat`s each from `/` down to `sock/`);
 - `process-fork` (a trap without it); signals and process info within the sandbox (not needed
-  for a run; kept for teardown and the guard's `sandbox_check` of Chrome's pids);
+  for a run; kept for teardown). `sandbox_check(pid, NULL, 0)` needs no rule: from inside the
+  profile it answers 1 for Chrome's browser, GPU, utility and renderer processes (measured);
 - read and write of the run folder, the only writable path; `/dev/null` (a trap without it);
 - the sysctls `hw.machine`, `hw.memsize`, `hw.ncpu`, `hw.pagesize_compat`, `kern.hostname`,
   `kern.osproductversion`, `kern.osrelease`, `kern.ostype`, `kern.version` (a trap or abort
@@ -373,30 +375,44 @@ The profile is `(deny default)`, an explicit `(deny file-map-executable)`, then 
 - Unix sockets: bind and connect at `sock/guard.sock` and under `ab/` (agent-browser's daemon,
   Chrome's singleton); TCP over IPv4 loopback (`tcp4 "localhost:<port>"`: Seatbelt takes only `*`
   or `localhost` as a host) out to the three ports, and bind and inbound on the DevTools and
-  stream ports. No UDP, no IPv6, no wildcard.
+  stream ports. No UDP, no IPv6, no other port. Not loopback only, though: Seatbelt's
+  `localhost` matches every address of the Mac for a bind, and `network-inbound` is checked at
+  `listen` by the local address alone, so a bind of `0.0.0.0` on those two ports passes
+  (measured; a jail test pins it).
 The last rules are denies, with no allow after them: no run or map of anything in the run
 folder (the agent writes `staging/`), no keychain (folders and services, as in the jail), no GPU
 or IOSurface user client (Chrome draws with SwiftShader), no window server or `CARenderServer`,
-no `nvram`, no `iokit-get-properties`. The jail tests run under it: matters, the home, `.ssh`
-and other state refused for read and write; the keychain and the window server refused; only the
-three ports reachable; a binary or library dropped in the run folder neither runs nor maps; no
-socket bound in `sock/` but `guard.sock`; the outermost refusal; and the headless shell's
-screenshot of a local page (skipped when none is on the machine).
+no `nvram`, no `iokit-get-properties`, and no `process-info*` on a process outside the sandbox
+(#811's rule; `(deny default)` does not refuse it, so a renderer exploit could read every
+process's arguments). That refuses listing pids too (`proc_listallpids`, `proc_listchildpids`),
+so the guard must learn Chrome's pids another way (say, DevTools' `SystemInfo.getProcessInfo`).
+The jail tests run under it: matters, the home, `.ssh` and other state refused for read and
+write; the keychain refused; the window server, `lsd.mapdb`, `configd` and an unknown name
+refused, the port broker's name passed; an outside process's arguments and the pid list refused,
+a sibling's read; only the three ports reachable; IPv6 and other-port binds refused;
+the ancestors `lstat` but do not list; a binary or library dropped in the run folder neither
+runs nor maps; no socket bound in `sock/` but `guard.sock`; the outermost refusal; and the
+headless shell's screenshot of a local page (skipped when none is on the machine).
 
 The guard's marker (D3): `sandbox_check(pid, "file-write-data", SANDBOX_FILTER_PATH |
 SANDBOX_CHECK_NO_REPORT, path)` answers 0 for a write under `<data>/browser-runs/` only under this
 profile (the jail hides the data dir: 1), and `file-read-data` of the home answers 1 in it (0
 unsandboxed). The kernel answers 1 for a path that does not exist even with no sandbox, so the
-guard checks paths that exist. `macos::browser::{sandboxed, path_allowed}` wrap the call.
+guard checks paths that exist. `macos::browser::{sandboxed, pid_sandboxed, path_allowed}` wrap
+the call; the guard mirrors them rather than depending on the crate, so their meaning is fixed.
 
-The agent's side (`PolicyBuilder::browser`, `BrowserBridge { socket, staging, bundles }`): a
-connect to exactly `<run>/sock/guard.sock` (a `path-literal` rule; no bind, create or unlink in
-`sock/`), read of the run's `staging/`, and as last rules: no run, read or map of each bundle
-(`Contents/Helpers`, `<data>/browsers`; a new helper there is refused by its folder's rule), no
+The agent's side (`PolicyBuilder::browser`, `BrowserBridge { socket, staging, bundles,
+write_denied, ports }`): a connect to exactly `<run>/sock/guard.sock` (a `path-literal` rule; no
+bind, create or unlink in `sock/`), read of the run's `staging/`, and as last rules: no run,
+read, map or write of each bundle (`Contents/Helpers`, `<data>/browsers`, so the browser
+profile's shell and binaries; a new helper there is refused by its folder's rule), no write of
+each write-denied folder (`<data>/browser-pins`: the signed list, the install record), no
 write, run or map anywhere in `<data>/browser-runs/` and no read there but the run's staging, its
 ancestors and the socket (`require-not`, so the exceptions survive with no allow after the
-denies). The builder refuses `Loopback::Any`, a browser socket folder, and a runtime path in a
-bundle while a bridge is set. With a bridge or without, no run or map of an installed browser
+denies). The builder refuses, while a bridge is set: `Loopback::Any`, a loopback or proxy port
+that is the browser's `DevTools` or stream port, a browser socket folder, a runtime path in a
+bundle, and a bundle or write-denied folder that meets a path the agent writes (planted code
+there would run outside the jail). With a bridge or without, no run or map of an installed browser
 (`INSTALLED_BROWSERS`: Chrome and its channels, Chromium, Edge and its channels, Brave, Vivaldi,
 Opera, Arc) in `/Applications` or the home's `Applications`, matched by a case-folded regex on
 `<name>.app/`, since Seatbelt cannot match bundle ids; read stays. The agent profile never allows
@@ -411,6 +427,18 @@ Residual risks:
 - The browser profile allows `mach-register` of rendezvous names for any pid. A compromised
   renderer could register the names of pids not yet in use and so stop a Chromium outside the
   sandbox from starting: denial of service only, accepted.
+- Chrome shares its sandbox with the guard and agent-browser, so a compromised Chrome could
+  replace `guard.sock` and answer the agent itself: a compromised browser feeding the agent,
+  which it can do through the guard anyway.
+- The profile lets the stack write its whole run folder, downloads included, not only
+  `staging/`: the bridge reads only from `staging/`, so nothing else reaches the agent, and no
+  downloads-only rule is needed.
+- The `DevTools` and stream ports can be bound on every address, not only loopback (above). A
+  compromised renderer could take one with `SO_REUSEADDR` and listen there for a peer on the
+  local network: an inbound channel to the browser stack, which reads nothing of the lawyer's.
+  The application firewall may block it; no Seatbelt rule can. Closing it means no TCP listener
+  in the stack (DevTools over `--remote-debugging-pipe`, the stream over a Unix socket in
+  `ab/`), stage E's to decide.
 - Seatbelt's regex: `#"^[A-Za-z0-9.-]+\.MachPortRendezvousServer\.[0-9]+$"` as a `global-name-regex`
   matched every Mach service on this Mac (logd, SecurityServer). The rule uses the exact name.
 

@@ -1,8 +1,8 @@
 //! The agent profile's rules for the browser stack, which runs outside the jail (0038, "The
 //! browser profile"): with a [`BrowserBridge`](crate::BrowserBridge), a connect to the guard's
 //! socket and a read of the run's staging folder; then, as last rules, no run, read or map of
-//! the bridge's bundles, nothing else in the run folders, and no run or map of an installed
-//! browser, with a bridge or without.
+//! the bridge's bundles, no write of them or its pins, nothing else in the run folders, and no
+//! run or map of an installed browser, with a bridge or without.
 
 use super::{Writer, ancestors, literal, subpath};
 use crate::Policy;
@@ -75,7 +75,7 @@ pub(super) fn browser_allows(w: &mut Writer, policy: &Policy) {
 pub(super) fn browser_denies(w: &mut Writer, policy: &Policy) {
     w.note("\n; The browser's last rules: denies only.");
     if let Some(bridge) = policy.browser() {
-        w.note("; The browser binaries: not run, read or mapped as code.");
+        w.note("; The browser binaries: not run, read, mapped as code or written.");
         let bundles: Vec<String> = bridge
             .bundles
             .iter()
@@ -84,9 +84,17 @@ pub(super) fn browser_denies(w: &mut Writer, policy: &Policy) {
             .collect();
         w.rule(
             "deny",
-            "process-exec file-read* file-map-executable",
+            "process-exec file-read* file-map-executable file-write*",
             &bundles,
         );
+        w.note("; The browser's pins (the signed list, the install record): not written.");
+        let pins: Vec<String> = bridge
+            .write_denied
+            .iter()
+            .enumerate()
+            .map(|(i, path)| subpath(&w.param(&format!("BROWSER_WRITE_DENIED_{i}"), path)))
+            .collect();
+        w.rule("deny", "file-write*", &pins);
         let socket = w.param("BROWSER_SOCKET", &bridge.socket);
         let staging = w.param("BROWSER_STAGING", &bridge.staging);
         let runs = w.param("BROWSER_RUNS", bridge.runs());

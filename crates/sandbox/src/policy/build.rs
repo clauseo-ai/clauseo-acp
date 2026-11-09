@@ -117,7 +117,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
     let link_targets = covered_targets(&links, &allowed, &allowed_exactly);
     let link_folders = fit_budget(&links, &link_targets, &matter, &working_trees)?;
 
-    Ok(Policy {
+    bridge::verified(Policy {
         matter,
         state,
         tmpdir,

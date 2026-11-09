@@ -23,6 +23,7 @@ impl World {
             "data/browser-runs/r1/staging",
             "data/browser-runs/r1/sock",
             "data/browsers",
+            "data/browser-pins",
             "data/agents/codex-acp",
             "app/Contents/Helpers",
             "home",
@@ -41,6 +42,8 @@ impl World {
             socket: self.at("data/browser-runs/r1/sock/guard.sock"),
             staging: self.at("data/browser-runs/r1/staging"),
             bundles: vec![self.at("app/Contents/Helpers"), self.at("data/browsers")],
+            write_denied: vec![self.at("data/browser-pins")],
+            ports: vec![41_002, 41_003],
         }
     }
 
@@ -95,8 +98,10 @@ fn the_bridge_opens_its_socket_and_staging_and_closes_the_rest_last() {
         );
     }
     let bundles = &all[last];
-    assert!(bundles.starts_with("(deny process-exec file-read* file-map-executable"));
+    assert!(bundles.starts_with("(deny process-exec file-read* file-map-executable file-write*"));
     assert!(bundles.contains("(param \"BROWSER_BUNDLE_1\")"));
+    let pins = &all[last + 1];
+    assert!(pins.starts_with("(deny file-write*\n  (subpath (param \"BROWSER_WRITE_DENIED_0\"))"));
     let params = profile.params();
     let runs = params.iter().find(|(n, _)| n == "BROWSER_RUNS").unwrap();
     assert!(runs.1.ends_with("data/browser-runs"), "{runs:?}");
@@ -190,6 +195,29 @@ fn the_builder_refuses_what_the_bridge_cannot_live_with() {
     bridge.bundles.push(w.at("data"));
     let e = refused(w.builder().browser(bridge));
     assert!(e.contains("browser runs folder"), "{e}");
+    // The browser's own ports, as loopback or proxy ports: the agent would reach DevTools.
+    let e = refused(
+        w.builder()
+            .browser(w.bridge())
+            .loopback(Loopback::Ports(vec![41_002])),
+    );
+    assert!(e.contains("browser's port 41002"), "{e}");
+    let e = refused(w.builder().browser(w.bridge()).proxy_port(41_003));
+    assert!(e.contains("browser's port 41003"), "{e}");
+    // A bundle or the pins where the agent writes: planted code would run outside the jail.
+    w.dir.dir("matter/shell");
+    let mut bridge = w.bridge();
+    bridge.bundles.push(w.at("matter/shell"));
+    let e = refused(w.builder().browser(bridge));
+    assert!(e.contains("a path the agent writes"), "{e}");
+    let mut bridge = w.bridge();
+    bridge.write_denied = vec![w.at("data/agent-state/m1/codex/pins")];
+    let e = refused(w.builder().browser(bridge));
+    assert!(e.contains("a path the agent writes"), "{e}");
+    let mut bridge = w.bridge();
+    bridge.bundles.push(w.at("data/agent-state"));
+    let e = refused(w.builder().browser(bridge));
+    assert!(e.contains("a path the agent writes"), "{e}");
     // A loopback of listed ports stays possible with a bridge.
     w.builder()
         .browser(w.bridge())

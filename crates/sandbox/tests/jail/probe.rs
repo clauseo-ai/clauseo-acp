@@ -9,6 +9,14 @@
 //! - `lookup <name>`: looks up the Mach service, and prints `bootstrap_look_up`'s result (0 when
 //!   found; 1100, `BOOTSTRAP_NOT_PRIVILEGED`, when the profile refuses it).
 //! - `bind <path>`: binds a Unix socket there, or names the error.
+//! - `tcp-bind <address>`: binds a TCP listener there, or names the error.
+//! - `procargs <pid>`: reads the process's arguments (`KERN_PROCARGS2`), or names the error.
+//! - `listpids`: lists every pid (`proc_listallpids`), or names the error.
+//! - `pid-sandboxed <pid>`: whether `sandbox_check(pid, NULL, 0)` says the process is
+//!   sandboxed, as the guard asks of Chrome's processes.
+//! - `lstat-up <path>`: `lstat`s every folder from `/` down to the path, and the path, as the
+//!   guard does before it binds: `ok`, or the first that failed.
+//! - `readdir <path>`: lists the folder, or names the error.
 
 #![expect(
     clippy::disallowed_methods,
@@ -18,7 +26,7 @@
 use std::ffi::{CString, c_char, c_int};
 use std::path::{Path, PathBuf};
 
-use clauseo_sandbox::macos::browser::{path_allowed, refuse_nesting, sandboxed};
+use clauseo_sandbox::macos::browser::{path_allowed, pid_sandboxed, refuse_nesting, sandboxed};
 
 /// The variable that turns the probe on, and its two arguments.
 const MODE: &str = "CLAUSEO_JAIL_PROBE";
@@ -51,7 +59,80 @@ fn probe() {
             Ok(_) => println!("PROBE bind=ok"),
             Err(error) => println!("PROBE bind={error}"),
         },
+        "tcp-bind" => match std::net::TcpListener::bind(std::env::var(ARG1).unwrap_or_default()) {
+            Ok(_) => println!("PROBE tcp-bind=ok"),
+            Err(error) => println!("PROBE tcp-bind={error}"),
+        },
+        "procargs" | "listpids" => println!("PROBE {mode}={}", inspect(&mode, &arg(ARG1))),
+        "pid-sandboxed" => {
+            let pid = std::env::var(ARG1).unwrap_or_default().parse().unwrap_or(0);
+            println!("PROBE pid-sandboxed={}", pid_sandboxed(pid));
+        }
+        "lstat-up" => println!("PROBE lstat-up={}", lstat_up(&arg(ARG1))),
+        "readdir" => match std::fs::read_dir(arg(ARG1)) {
+            Ok(_) => println!("PROBE readdir=ok"),
+            Err(error) => println!("PROBE readdir={error}"),
+        },
         other => println!("PROBE unknown mode {other}"),
+    }
+}
+
+/// `lstat` of every folder above `path`, from `/`, and of `path`: `ok`, or the first failure.
+fn lstat_up(path: &Path) -> String {
+    let mut at = PathBuf::new();
+    for name in path.components() {
+        at.push(name);
+        if let Err(error) = std::fs::symlink_metadata(&at) {
+            return format!("{}: {error}", at.display());
+        }
+    }
+    "ok".to_owned()
+}
+
+/// `procargs`: the arguments of process `pid` (`KERN_PROCARGS2`); `listpids`: every pid.
+/// `ok`, or the OS error.
+#[expect(
+    unsafe_code,
+    reason = "sysctl and proc_listallpids, to ask the profile for process-info"
+)]
+pub(crate) fn inspect(what: &str, pid: &Path) -> String {
+    unsafe extern "C" {
+        fn sysctl(
+            name: *mut c_int,
+            len: u32,
+            old: *mut std::ffi::c_void,
+            oldlen: *mut usize,
+            new: *mut std::ffi::c_void,
+            newlen: usize,
+        ) -> c_int;
+        fn proc_listallpids(buffer: *mut std::ffi::c_void, size: c_int) -> c_int;
+    }
+    const CTL_KERN: c_int = 1;
+    const KERN_PROCARGS2: c_int = 49;
+    let pid: c_int = pid.to_str().and_then(|p| p.parse().ok()).unwrap_or(0);
+    // SAFETY: the name array and the buffer outlive each call, and their lengths are given.
+    let failed = unsafe {
+        if what == "procargs" {
+            let mut name = [CTL_KERN, KERN_PROCARGS2, pid];
+            let mut buf = vec![0_u8; 65_536];
+            let mut len = buf.len();
+            let p = buf.as_mut_ptr().cast();
+            sysctl(
+                name.as_mut_ptr(),
+                3,
+                p,
+                &raw mut len,
+                std::ptr::null_mut(),
+                0,
+            ) != 0
+        } else {
+            proc_listallpids(std::ptr::null_mut(), 0) <= 0
+        }
+    };
+    if failed {
+        std::io::Error::last_os_error().to_string()
+    } else {
+        "ok".to_owned()
     }
 }
 

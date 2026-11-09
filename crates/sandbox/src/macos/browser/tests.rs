@@ -181,6 +181,7 @@ fn no_gpu_window_server_or_keychain_is_allowed() {
         }
     }
     for deny in [
+        "(deny process-info*\n  (require-not (target same-sandbox))",
         "(deny nvram*",
         "(deny iokit-get-properties",
         "(iokit-user-client-class \"IOSurfaceRootUserClient\")",

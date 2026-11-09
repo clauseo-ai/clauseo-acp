@@ -20,7 +20,7 @@ mod check;
 mod launcher;
 
 #[cfg(target_os = "macos")]
-pub use check::{path_allowed, sandboxed};
+pub use check::{path_allowed, pid_sandboxed, sandboxed};
 #[cfg(target_os = "macos")]
 pub use launcher::{BrowserLauncher, refuse_nesting};
 
@@ -338,6 +338,15 @@ fn write(c: &Checked, paths: &BrowserPaths) -> String {
     for op in ["nvram*", "iokit-get-properties"] {
         t.push_str(&rule("deny", op, &[]));
     }
+    t.push_str(
+        "; No process outside this sandbox: its arguments (`kern.procargs2`), path, info,\n",
+    );
+    t.push_str("; and no pid listing. `(deny default)` does not refuse these (measured, #811).\n");
+    t.push_str(&rule(
+        "deny",
+        "process-info*",
+        &["(require-not (target same-sandbox))".to_owned()],
+    ));
     t
 }
 

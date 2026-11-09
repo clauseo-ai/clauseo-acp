@@ -63,6 +63,7 @@ impl Bridged {
             probe::dylib_to(&w.at(rel));
         }
         w.dir("data/browser-runs/r1/sock");
+        w.file("data/browser-pins/pins.json", "{}\n");
         w.file("data/browser-runs/r1/staging/page.txt", "staged page\n");
         w.file("data/browser-runs/r2/staging/page.txt", "another run\n");
         Bridged { w }
@@ -80,6 +81,8 @@ impl Bridged {
                 self.at("app/Clauseo.app/Contents/Helpers"),
                 self.at("data/browsers"),
             ],
+            write_denied: vec![self.at("data/browser-pins")],
+            ports: vec![],
         }
     }
 
@@ -211,6 +214,30 @@ fn t4_agent_browser_is_refused_and_so_is_any_new_helper() {
         r#"echo "$@""#,
     );
     never_started(&b.start(&l, &new));
+}
+
+/// The browser installs and their pins (`<data>/browsers`, `<data>/browser-pins`): nothing is
+/// made, renamed or written there from the jail.
+#[test]
+fn browser_installs_and_pins_are_not_written() {
+    let b = Bridged::new();
+    let l = b.launcher(true);
+    let m1 = b.at("m1");
+    b.w.file("m1/mine.txt", "agent's\n");
+    let shell = b.at("data/browsers/chs/chrome-headless-shell");
+    for (dir, existing) in [
+        ("data/browsers/chs", shell),
+        ("data/browser-pins", b.at("data/browser-pins/pins.json")),
+    ] {
+        let dir = b.at(dir);
+        sh(&l, &m1, r#": > "$1/new""#, &[s(&dir)]).assert_refused();
+        sh(&l, &m1, r#"mv mine.txt "$1/moved""#, &[s(&dir)]).assert_refused();
+        sh(&l, &m1, r#"mv "$1" "$1.old""#, &[s(&existing)]).assert_refused();
+        sh(&l, &m1, r#"echo planted >> "$1""#, &[s(&existing)]).assert_refused();
+        assert!(!dir.join("new").exists() && !dir.join("moved").exists() && existing.exists());
+    }
+    let pins = std::fs::read_to_string(b.at("data/browser-pins/pins.json")).unwrap();
+    assert_eq!(pins, "{}\n");
 }
 
 /// T7, the part the profile decides: with a bridge the guard runs and reaches its socket, reads

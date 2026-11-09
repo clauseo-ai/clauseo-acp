@@ -2,10 +2,11 @@
 //! probe run through `BrowserLauncher` against the jail tests' world plus a run folder,
 //! `data/browser-runs/r1/`. Matters, the home and other state folders are its deny roots.
 
+use std::collections::BTreeMap;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 
-use clauseo_process::SpawnOptions;
+use clauseo_process::{LaunchSpec, Launcher, PassthroughLauncher, SpawnOptions};
 use clauseo_sandbox::macos::browser::{BrowserLauncher, BrowserPaths, RUN_SUBFOLDERS};
 
 use crate::probe;
@@ -15,6 +16,7 @@ use crate::support::{Output, World, launcher, run};
 const BASH: &str = "/bin/bash";
 const CAT: &str = "/bin/cat";
 const NC: &str = "/usr/bin/nc";
+const SLEEP: &str = "/bin/sleep";
 
 /// The world, its run folder, the profile's launcher and the loopback listeners it may reach.
 struct Browser {
@@ -25,6 +27,8 @@ struct Browser {
     proxy: TcpListener,
     cdp: TcpListener,
     other: TcpListener,
+    /// The stream port, left free for the bind tests.
+    stream_port: u16,
 }
 
 fn port(listener: &TcpListener) -> u16 {
@@ -47,7 +51,7 @@ impl Browser {
         let paths = BrowserPaths {
             run_dir: w.at("data/browser-runs/r1"),
             chrome_bundle: bundle.map_or_else(|| w.at("chrome/chs"), Path::to_owned),
-            exec_bins: [BASH, CAT, NC]
+            exec_bins: [BASH, CAT, NC, SLEEP]
                 .map(PathBuf::from)
                 .into_iter()
                 .chain([probe.clone()])
@@ -69,6 +73,8 @@ impl Browser {
         };
         let launcher = BrowserLauncher::new(&paths, SpawnOptions::new()).unwrap();
         let run = launcher.run_dir().to_owned();
+        let stream_port = port(&stream);
+        drop(stream);
         Browser {
             w,
             run,
@@ -77,6 +83,7 @@ impl Browser {
             proxy,
             cdp,
             other,
+            stream_port,
         }
     }
 
@@ -266,13 +273,104 @@ fn the_headless_shell_screenshots_a_local_page() {
     screenshot(shell.parent().unwrap(), &shell, "--headless");
 }
 
-/// The window server, which an app-bundle Chrome needs, is refused: the profile denies it.
+/// Only Chrome's port broker name may be looked up. The window server, `LaunchServices`'
+/// database and network configuration, which an app-bundle Chrome needs, and any other name,
+/// are refused (1100); the broker's name passes and is unknown here (1102). Pins the exact name:
+/// a wider regex once matched every service.
 #[test]
-fn the_window_server_is_refused() {
+fn only_the_port_broker_name_is_looked_up() {
     let b = Browser::new(None);
-    let name = "com.apple.windowserver.active";
-    assert_eq!(probe::lookup(name), 0, "the test itself reaches {name}");
-    assert_eq!(b.probe("lookup", &[name]), "lookup=1100");
+    for name in [
+        "com.apple.windowserver.active",
+        "com.apple.lsd.mapdb",
+        "com.apple.SystemConfiguration.configd",
+    ] {
+        assert_eq!(probe::lookup(name), 0, "the test itself reaches {name}");
+        assert_eq!(b.probe("lookup", &[name]), "lookup=1100", "{name}");
+    }
+    let unknown = "com.clauseo.test.no-such-service";
+    assert_eq!(b.probe("lookup", &[unknown]), "lookup=1100");
+    let broker = "org.chromium.Chromium.MachPortRendezvousServer.1";
+    assert_eq!(b.probe("lookup", &[broker]), "lookup=1102");
+}
+
+/// A process outside the sandbox: its arguments (`KERN_PROCARGS2`) and the pid list are
+/// refused, and `sandbox_check` says it is not sandboxed. The sandbox's own processes (here a
+/// `sleep` beside the probe; in a run, Chrome's renderers) read, and `sandbox_check` answers 1
+/// for them, as the guard needs.
+#[test]
+fn outside_processes_are_hidden_and_the_sandbox_s_own_are_not() {
+    let b = Browser::new(None);
+    let spec = LaunchSpec::new(
+        SLEEP.into(),
+        vec!["60".into()],
+        BTreeMap::new(),
+        b.run.clone(),
+    );
+    let mut sleeper = PassthroughLauncher::new(SpawnOptions::new())
+        .launch(&spec.unwrap())
+        .unwrap();
+    let pid = sleeper.handle.pid().to_string();
+    let refused = "Operation not permitted (os error 1)";
+    assert_eq!(probe::inspect("procargs", Path::new(&pid)), "ok");
+    assert_eq!(b.probe("procargs", &[&pid]), format!("procargs={refused}"));
+    assert_eq!(b.probe("listpids", &[]), format!("listpids={refused}"));
+    assert_eq!(b.probe("pid-sandboxed", &[&pid]), "pid-sandboxed=false");
+    let own = r#"/bin/sleep 5 & c=$!
+        for mode in procargs pid-sandboxed; do
+            CLAUSEO_JAIL_PROBE=$mode CLAUSEO_JAIL_PROBE_1=$c "$1" probe::probe --exact --nocapture
+        done
+        kill $c"#;
+    let out = b.bash(own, &[s(&b.probe)]);
+    assert!(out.stdout.contains("PROBE procargs=ok"), "{out:#?}");
+    assert!(out.stdout.contains("PROBE pid-sandboxed=true"), "{out:#?}");
+    clauseo_process::kill(sleeper.handle.pid());
+    async_io::block_on(sleeper.handle.exited());
+}
+
+/// The guard `lstat`s every folder from `/` down to `sock/` before it binds, and the stack
+/// `lstat`s `tmp/`: the run folder's ancestors give their metadata (literal rules), not their
+/// entries.
+#[test]
+fn the_run_folder_s_ancestors_stat_but_do_not_list() {
+    let b = Browser::new(None);
+    for sub in ["sock", "tmp"] {
+        assert_eq!(b.probe("lstat-up", &[s(&b.run.join(sub))]), "lstat-up=ok");
+    }
+    let refused = "readdir=Operation not permitted (os error 1)";
+    let runs = b.run.parent().unwrap();
+    for above in [runs, runs.parent().unwrap(), Path::new("/private/tmp")] {
+        assert_eq!(
+            b.probe("readdir", &[s(above)]),
+            refused,
+            "{}",
+            above.display()
+        );
+    }
+}
+
+/// TCP binds: IPv6 (loopback or every address) and any other port are refused. On the
+/// profile's own ports a bind on every IPv4 address passes too: Seatbelt's `localhost` matches
+/// any of the Mac's addresses for a bind, and it checks `network-inbound` at `listen` by the
+/// local address only (measured on macOS 27.2), so no rule keeps a listener on loopback. Pinned
+/// here so a change shows; 0038 records it as a residual risk.
+#[test]
+fn binds_are_ipv4_on_the_profile_s_ports_only() {
+    let b = Browser::new(None);
+    let free = port(&listen());
+    let stream = b.stream_port;
+    let refused = "tcp-bind=Operation not permitted (os error 1)";
+    for addr in [
+        format!("[::1]:{stream}"),
+        format!("[::]:{stream}"),
+        format!("127.0.0.1:{free}"),
+        format!("0.0.0.0:{free}"),
+    ] {
+        assert_eq!(b.probe("tcp-bind", &[&addr]), refused, "{addr}");
+    }
+    for addr in [format!("127.0.0.1:{stream}"), format!("0.0.0.0:{stream}")] {
+        assert_eq!(b.probe("tcp-bind", &[&addr]), "tcp-bind=ok", "{addr}");
+    }
 }
 
 /// Runs `chrome` of `bundle` under the profile and checks the screenshot it wrote.
