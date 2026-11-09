@@ -72,6 +72,40 @@ pub fn python_command_dir(config: &AgentsConfig) -> Option<PathBuf> {
         .then(|| runtime_command_dir(&dir, config.platform.os))
 }
 
+/// The installed Python runtime's folders for an agent session's `PATH`, in order, after
+/// stetdoc's and before the user's: on macOS (and Linux, for the tests) `[<rt>/bin]`; on
+/// Windows `[<rt>\clauseo-bin, <rt>, <rt>\Scripts]` (pandoc is in `clauseo-bin`,
+/// `python.exe` in the root, pip in `Scripts`). Empty unless the runtime passes its receipt
+/// check, as [`python_command_dir`]; a folder that is not there is left out. It reads the disk:
+/// desktop calls it on its setup thread only, never from the launch hook.
+pub fn python_path_dirs(config: &AgentsConfig) -> Vec<PathBuf> {
+    let Some(archive) = config.snapshot.python_archive(config.platform) else {
+        return Vec::new();
+    };
+    let dir = runtime_dir(&config.data_dir, archive);
+    if !python_runtime_valid(&dir, archive, config.platform.os) {
+        return Vec::new();
+    }
+    runtime_path_dirs(&dir, config.platform.os)
+}
+
+/// [`python_path_dirs`]' folders inside the runtime folder `dir` for `os`, those that are
+/// folders (read through no link).
+pub(crate) fn runtime_path_dirs(dir: &Path, os: Os) -> Vec<PathBuf> {
+    let candidates = match os {
+        Os::Win32 => vec![
+            dir.join("clauseo-bin"),
+            dir.to_path_buf(),
+            dir.join("Scripts"),
+        ],
+        Os::Darwin | Os::Linux => vec![dir.join("bin")],
+    };
+    candidates
+        .into_iter()
+        .filter(|path| std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_dir()))
+        .collect()
+}
+
 /// Whether this platform has Python and its runtime is not installed: an install fetches it.
 pub(crate) fn needed(config: &AgentsConfig) -> bool {
     config

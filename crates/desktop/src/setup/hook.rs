@@ -16,6 +16,10 @@
 //!   one the plan's `env` or the agent's own entry sets, and never `SSL_CERT_FILE`; the host's
 //!   forced variables (the sandbox's egress proxy, its root set) come after the hook's and win.
 //!
+//! And to Claude's and Codex's session `PATH` (`ProfileHook::agent_path`), Clauseo's Python
+//! runtime folders from the [`PythonSlot`] (`setup/python_path.rs`), which the setup thread
+//! fills once Python is `Ready` and empties otherwise; the host puts them after stetdoc's.
+//!
 //! Both snapshots are refreshed on each `SettingsChanged` (`setup/refresh.rs`). [`setup_vars`] is
 //! the one function that makes these variables: the limits readers take the same ones
 //! (`setup/readers.rs`), so a read goes where the agent's launches go. Desktop's copy is
@@ -24,6 +28,7 @@
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
+use std::path::PathBuf;
 use std::sync::{Arc, PoisonError, RwLock};
 
 use clauseo_host::{McpServer, NoProfile, PackRequest, ProfileHook};
@@ -35,6 +40,7 @@ use zeroize::Zeroizing;
 
 use super::keys::KeySlot;
 use super::network::{NetworkSlot, with_loopback};
+use super::python_path::PythonSlot;
 
 /// Each agent's firm plan, by agent id, as the settings last read gave it.
 pub(crate) type Plans = Arc<RwLock<BTreeMap<AgentId, Plan>>>;
@@ -49,23 +55,33 @@ pub(crate) fn plans_of(effective: &Effective) -> BTreeMap<AgentId, Plan> {
         .collect()
 }
 
-/// The launch profile, if it was built, plus the keys, the plans and the network route.
+/// The launch profile, if it was built, plus the keys, the plans, the network route and the
+/// Python folders.
 pub(crate) struct SetupHook {
     profile: Box<dyn ProfileHook>,
     keys: KeySlot,
     plans: Plans,
     network: NetworkSlot,
+    python: PythonSlot,
 }
 
 impl SetupHook {
-    /// The hook over `keys`, `plans` and `network`, with no profile (as `NoProfile`).
+    /// The hook over `keys`, `plans` and `network`, with no profile (as `NoProfile`) and no
+    /// Python folders.
     pub(crate) fn new(keys: KeySlot, plans: Plans, network: NetworkSlot) -> Self {
         Self {
             profile: Box::new(NoProfile),
             keys,
             plans,
             network,
+            python: PythonSlot::default(),
         }
+    }
+
+    /// This hook with Claude's and Codex's session `PATH` folders read from `python`.
+    #[must_use]
+    pub(crate) fn with_python(self, python: PythonSlot) -> Self {
+        Self { python, ..self }
     }
 
     /// This hook over `profile`, whose calls it hands through.
@@ -220,6 +236,19 @@ impl ProfileHook for SetupHook {
 
     fn pack_write(&self, agent: &AgentId, request: &PackRequest) -> Option<PackWrite> {
         self.profile.pack_write(agent, request)
+    }
+
+    /// The Python runtime's folders, as the setup thread last put them in the slot, for a
+    /// Claude or Codex agent; none for any other. A read of memory only: no I/O.
+    fn agent_path(&self, agent: &AgentId) -> Vec<PathBuf> {
+        match AgentKind::of(agent) {
+            Some(AgentKind::Claude | AgentKind::Codex) => self
+                .python
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone(),
+            None => Vec::new(),
+        }
     }
 }
 

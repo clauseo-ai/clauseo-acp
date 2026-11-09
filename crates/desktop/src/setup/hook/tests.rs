@@ -1,7 +1,9 @@
-//! The hook's env with no profile: only the key variable and the plan's variables, per kind.
+//! The hook's env with no profile: only the key variable and the plan's variables, per kind;
+//! and its session `PATH` folders: the Python slot's, for Claude and Codex only.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
+use std::path::PathBuf;
 use std::sync::{Arc, OnceLock, RwLock};
 
 use clauseo_agents::keys::Keychain;
@@ -11,6 +13,7 @@ use clauseo_settings::{Plan, PlanProvider};
 
 use super::SetupHook;
 use crate::setup::keys::KeyCache;
+use crate::setup::python_path::PythonSlot;
 
 const CLAUDE_KEY: &str = "fakeAnthropicKey0123";
 const CODEX_KEY: &str = "fakeOpenAiKey0123456";
@@ -96,4 +99,30 @@ fn the_env_holds_only_the_key_variable_plus_the_plan_variables() {
     );
     // An agent of no kind gets nothing.
     assert!(hook.launch_env(&id("gemini-acp")).is_empty());
+}
+
+#[test]
+fn the_python_folders_go_to_claude_and_codex_only_as_the_slot_holds_them() {
+    let python = PythonSlot::default();
+    let hook = SetupHook::new(Arc::new(OnceLock::new()), Arc::default(), Arc::default())
+        .with_python(Arc::clone(&python));
+    let agents = [id("claude-acp"), id("codex-acp"), id("gemini-acp")];
+    // Python not Ready: an empty slot, no folder for anyone.
+    for agent in &agents {
+        assert_eq!(hook.agent_path(agent), Vec::<PathBuf>::new(), "{agent}");
+    }
+    let dirs = vec![
+        PathBuf::from("/data/agents/runtime/clauseo-python/clauseo-bin"),
+        PathBuf::from("/data/agents/runtime/clauseo-python"),
+    ];
+    python.write().unwrap().clone_from(&dirs);
+    assert_eq!(hook.agent_path(&agents[0]), dirs);
+    assert_eq!(hook.agent_path(&agents[1]), dirs);
+    assert_eq!(hook.agent_path(&agents[2]), Vec::<PathBuf>::new());
+    // Emptied again (any state but Ready): none.
+    python.write().unwrap().clear();
+    assert_eq!(hook.agent_path(&agents[0]), Vec::<PathBuf>::new());
+    // A hook built with no slot gives none.
+    let bare = SetupHook::new(Arc::new(OnceLock::new()), Arc::default(), Arc::default());
+    assert_eq!(bare.agent_path(&agents[0]), Vec::<PathBuf>::new());
 }

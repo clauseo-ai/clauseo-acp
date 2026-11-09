@@ -401,6 +401,7 @@ fn start_host<R: Runtime>(
         let plans = Arc::new(std::sync::RwLock::new(setup::plans_of(&effective)));
         let network: setup::NetworkSlot =
             Arc::new(std::sync::RwLock::new(setup_read.network_at_start()));
+        let python = setup::PythonSlot::default();
         let readers = Arc::new(
             setup::SwappableReaders::new(
                 &effective,
@@ -419,6 +420,7 @@ fn start_host<R: Runtime>(
             reused: reused.clone(),
             plans: Arc::clone(&plans),
             network: Arc::clone(&network),
+            python: Arc::clone(&python),
             reread: Box::new(move || load_effective(&reread_at)),
             notes: key_notes,
         };
@@ -455,7 +457,7 @@ fn start_host<R: Runtime>(
             machine_memory::total_bytes,
             HostConfig::with_machine_memory,
         );
-        let hook = setup::SetupHook::new(keys, plans, network);
+        let hook = setup::SetupHook::new(keys, plans, network).with_python(python);
         // The updater, and a watch on the host that exits the app to install (update.rs).
         let config = egress::with_proxies(update::with_updater(&app, config, &locations), &proxies);
         update::start_host(&app, with_profile(config, profile, hook))

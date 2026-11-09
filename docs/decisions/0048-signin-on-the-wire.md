@@ -595,6 +595,24 @@ reads' hold dropped and `limits_login_changed`.
 - *Clauseo's own login signed out* calls `restart_agents` as well as `limits_login_changed`
   (ruling 3), so no idle agent stays on the old login.
 
+### PATH
+
+Once Clauseo's Python runtime is `Ready`, Claude's and Codex's session processes find it on
+their `PATH`, unjailed (stage D, launch). The order is stetdoc's folder first, as before, then
+the runtime's folders, then the user's `PATH`. On macOS the runtime's folder is `<rt>/bin`; on
+Windows it is `<rt>\clauseo-bin` (pandoc), `<rt>` (`python.exe`) and `<rt>\Scripts` (pip),
+those that exist. `agents::python_path_dirs` gives them, empty unless the runtime passes its
+receipt check. Desktop looks them up on the setup thread at start and on each Python state,
+into a slot: `Ready` fills it, any other state empties it. `SetupHook::agent_path` (the host's
+`ProfileHook::agent_path`) hands the slot to Claude and Codex only, with no I/O. The host takes
+only absolute folders, since a relative one would resolve against the matter folder. Sessions
+only: sign-in, status and detection runs, the limits readers and the Node lookup get nothing.
+There is no stub: while Python is not `Ready`, nothing is added and a system Python stays as
+it was. When the runtime's folders go on, the session drops an inherited `PYTHONHOME` and
+`PYTHONPATH`, either of which could stop the bundled Python starting. On Windows `<rt>` on
+`PATH` also puts `python313.dll` and `vcruntime140.dll` on child processes' DLL search path;
+that is accepted for launch, and PR 2's launcher, after launch, removes the need.
+
 ## Consequences
 
 - Desktop owns the mapping from `agents` to the wire. A state or code added to `agents` needs a

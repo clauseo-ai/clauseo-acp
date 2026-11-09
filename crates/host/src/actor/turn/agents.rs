@@ -267,8 +267,9 @@ type Launched = (AgentLink, PathBuf, Option<CodexAgent>, Option<PathBuf>);
 
 /// The launch itself: the spec from the settings (inherited environment, the agent's
 /// variables, then the profile hook's with the host's switches over them, then what the host
-/// forces for the agent's kind), in the matter folder that was checked (`prepared`). A Codex
-/// agent's `.codex` refusal (#184), its home and its `config.toml` are done by then.
+/// forces for the agent's kind, with stetdoc's and the hook's folders first on `PATH`), in the
+/// matter folder that was checked (`prepared`). A Codex agent's `.codex` refusal (#184), its
+/// home and its `config.toml` are done by then.
 fn launch(
     actor: &Actor,
     thread: ThreadId,
@@ -309,11 +310,19 @@ fn launch(
         codex.key_retry = KeyRetry::at_launch(&hook, login);
         codex
     });
-    let dropped: &[&str] = if codex.is_some() {
-        &agent::codex::DROPPED_VARS
-    } else {
-        &[]
-    };
+    // Stetdoc's folder, then the hook's (Clauseo's Python runtime), then the user's `PATH`;
+    // with the hook's on it, an inherited Python's variables go.
+    let (path, hook_path) = agent::session_path(
+        actor.wiring.path_prepend.as_deref(),
+        actor.profile.agent_path(&row.agent),
+    );
+    let mut dropped: Vec<&str> = Vec::new();
+    if codex.is_some() {
+        dropped.extend(agent::codex::DROPPED_VARS);
+    }
+    if hook_path {
+        dropped.extend(agent::PYTHON_VARS);
+    }
     let inherited: Vec<_> = match &actor.wiring.inherited_env {
         Some(env) => env.clone(),
         None => std::env::vars_os().collect(),
@@ -324,10 +333,10 @@ fn launch(
         settings,
         hook,
         forced,
-        dropped,
+        &dropped,
         inherited.into_iter(),
         agent::session_folder(&folder),
-        actor.wiring.path_prepend.as_deref(),
+        &path,
     )
     .map_err(super::launch_checks::folder::gone_at_spawn)?
     .with_redacted(redacted);
