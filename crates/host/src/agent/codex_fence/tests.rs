@@ -420,6 +420,21 @@ fn the_own_folders_state_folder_and_the_built_in_skills_stay_readable() {
     assert_eq!(access(&keys, &matter().join("a.txt")), "write");
 }
 
+/// R17 PR-D1 round 3: Codex's install, and the bundled `rg` the ripgrep guard checks
+/// (`rg_guard.rs`) in it, are read-only to Codex's shell in both kinds of turn, so the shell
+/// cannot swap the `rg` Codex runs after the check (decision record 0051).
+#[test]
+fn the_codex_install_and_its_rg_are_read_only_to_the_shell() {
+    let keys = fence();
+    let install = data().join("agents").join("codex-acp");
+    let rg = install.join(
+        "node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path/rg",
+    );
+    for path in [install.clone(), install.join("node_modules"), rg] {
+        assert_eq!(access(&keys, &path), "read", "{}", path.display());
+    }
+}
+
 /// The review's D1: nothing Codex or its shell loads at the next launch from the state folder
 /// (its `CODEX_HOME` and `HOME`) is writable by the shell: `.env`, which Codex exports at
 /// start, git's `.config/git/config`, `agents` role files, `AGENTS.md`, `config.toml`. The login

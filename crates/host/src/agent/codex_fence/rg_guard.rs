@@ -19,6 +19,12 @@
 //! (the matter, the run folder, the notes, the state folder), so it cannot be swapped after the
 //! check. Otherwise, and on any other processor (no pinned build), the launch is refused with
 //! `agent.launch_failed`. The refusal and the log name no path.
+//!
+//! Codex runs that `rg` in place, not a checked copy: it puts `codex-path` first on its `PATH`
+//! from its own executable's folder, and no setting names another `rg` (codex-rs rust-v0.162.1
+//! `install-context/src/lib.rs:297`, `arg0/src/lib.rs:181, 458-467`). So the install is kept
+//! read-only to every agent instead (decision record 0051, with the residual on Linux, which
+//! has no jail yet: a script Claude runs that builds the path at run time).
 
 use std::path::{Path, PathBuf};
 

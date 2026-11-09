@@ -76,6 +76,8 @@ fn the_deny_rules_name_the_clauseo_only_subtrees_and_not_the_run_folder() {
         "Edit(//d/ata/skill-packs/**)",
         "Read(//d/ata/matters/**)",
         "Read(//d/ata/agents/codex-acp/**)",
+        // Codex's install, its bundled `rg` with it (R17 PR-D1's ripgrep guard).
+        "Edit(//d/ata/agents/codex-acp/**)",
         "Read(//d/ata/agents/claude-acp/**)",
         "Read(//d/ata/agent-state/*/codex-acp/**)",
         "Read(//d/ata/claude-state/*/claude-acp/projects/*/*.jsonl)",

@@ -320,7 +320,20 @@ The orchestrator's conditions, which the later pull requests must meet:
     would name another place one level up.
   - **ripgrep.** On Linux, a Codex launch runs only with the `rg` of the pinned `@openai/codex`
     package, found by absolute path in Node's lookup order and checked by SHA-256; `PATH` is
-    never searched. The residual above about a missing `codex-path/rg` is closed.
+    never searched. The residual above about a missing `codex-path/rg` is closed. Codex then
+    runs that `rg` in place for the whole session: it puts `codex-path` first on its `PATH` from
+    its own executable's folder, and no setting names another `rg` (codex-rs rust-v0.162.1
+    `install-context/src/lib.rs:297`, `arg0/src/lib.rs:181, 458-467`), so a checked copy
+    elsewhere would never run. Instead Codex's install is read-only to every agent: Codex's
+    shell may only read it (`codex_fence/tests.rs`), each jail grants it read and run at most
+    (`launch_checks/sandbox/tests.rs`, the Seatbelt snapshot
+    `with_a_runtime_path_in_the_data_dir`, `acl_plan/tests/data.rs`), and Claude's deny rules
+    name `agents/codex-acp/**` for Read and Edit.
+  - **Residual: swapping ripgrep mid-session.** Linux has no jail yet (tier C), so only Claude's
+    deny rules and the host's auto-deny keep Claude out of `agents/codex-acp`, and a script
+    Claude runs that builds the path at run time could still replace `rg` during a Codex
+    session. A process running as the user outside any agent can replace it too; that is
+    outside the threat model.
 
 ## Status
 

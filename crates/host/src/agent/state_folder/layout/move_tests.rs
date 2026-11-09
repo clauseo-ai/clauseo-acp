@@ -6,10 +6,10 @@ use std::path::{Path, PathBuf};
 
 use clauseo_protocol::ErrorCode;
 
-#[cfg(unix)]
 use super::super::Migrated;
 #[cfg(unix)]
-use super::super::moves::{may_hold_links, staging};
+use super::super::moves::may_hold_links;
+use super::super::moves::staging;
 use super::super::{adopt, migrate, notes_at, refusal};
 use super::{fail_renames_after, old};
 use crate::agent::state_folder::tests::{data, matter};
@@ -149,6 +149,70 @@ fn a_staging_folder_left_is_never_left_behind() {
     assert_eq!(migrate(&data).moved, 1);
     assert!(holds(&notes, &["a.md", "b.md"]));
     assert!(!staged.exists() && !old(&data, 1, "notes").exists());
+}
+
+/// Writes each of `files` (relative path) into `folder`, its own name as its text.
+fn plant(folder: &Path, files: &[&str]) {
+    for file in files {
+        let path = folder.join(file);
+        write::create_dir_all(path.parent().unwrap()).unwrap();
+        write::write_file(&path, file.as_bytes()).unwrap();
+    }
+}
+
+/// Two launches' preps racing on the same notes can leave a staging folder holding entries
+/// beside the new notes folder (`moves::move_folder`). Built by hand, with no old folder left:
+/// the next start drains it entry by entry, a folder the new one has too drained into it, and
+/// removes it; the start after does nothing.
+#[test]
+fn a_staging_folder_a_race_left_beside_new_notes_is_drained_by_the_next_start() {
+    let (data, _home) = data("layout_staged_race");
+    let notes = notes_at(&data, &matter(1).to_string());
+    let staged = staging(&notes).unwrap();
+    plant(&notes, &["a.md", "sub/x.md"]);
+    plant(&staged, &["b.md", "sub/y.md", "deep/z.md"]);
+    assert_eq!(
+        migrate(&data),
+        Migrated {
+            drained: 1,
+            ..Migrated::default()
+        }
+    );
+    assert!(holds(
+        &notes,
+        &["a.md", "sub/x.md", "b.md", "sub/y.md", "deep/z.md"]
+    ));
+    assert!(!staged.exists(), "the emptied staging folder goes");
+    assert_eq!(migrate(&data), Migrated::default());
+}
+
+/// Draining a staging folder a race left keeps its rules: a link stays behind in it and never
+/// reaches the new notes, a name the new notes have already is never replaced, and the staging
+/// folder stays while it holds them; beside old notes still holding a link, too.
+#[cfg(unix)]
+#[test]
+fn a_drained_staging_folder_keeps_its_links_and_clashes_behind() {
+    let (data, _home) = data("layout_staged_race_links");
+    let old_notes = plant_notes(&data, 1, &[]);
+    write::symlink(Path::new("../.."), &old_notes.join("up")).unwrap();
+    let notes = notes_at(&data, &matter(1).to_string());
+    let staged = staging(&notes).unwrap();
+    plant(&notes, &["a.md"]);
+    write::create_dir_all(&staged).unwrap();
+    write::write_file(&staged.join("a.md"), b"other").unwrap();
+    plant(&staged, &["c.md"]);
+    write::symlink(Path::new("../../agents"), &staged.join("up")).unwrap();
+    let counts = migrate(&data);
+    // The old notes' link (merge) and the staging folder's link and clash stay.
+    assert_eq!(
+        (counts.clashes, counts.drained, counts.failed),
+        (3, 0, 0),
+        "{counts:?}"
+    );
+    assert!(holds(&notes, &["a.md", "c.md"]), "a.md is never replaced");
+    assert!(std::fs::symlink_metadata(notes.join("up")).is_err());
+    assert!(staged.join("up").is_symlink() && staged.join("a.md").exists());
+    assert!(!staged.join("c.md").exists());
 }
 
 /// A merge cut short mid-way (old notes beside new ones) keeps what moved; the next start

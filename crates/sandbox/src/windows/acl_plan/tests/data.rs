@@ -210,6 +210,35 @@ fn writable_targets_in_the_data_folder_outside_the_allow_list_are_refused() {
     }
 }
 
+/// R17 PR-D1 round 3: Codex's install, with the bundled `rg` the host's ripgrep guard checks,
+/// is never a writable target: as the state folder, the notes folder or the Claude store it is
+/// refused, so no agent's jail can swap the `rg` after the check; a folder in it as the runtime
+/// (read and run) is planned.
+#[test]
+fn the_codex_install_is_never_a_writable_target() {
+    let w = World::new("plan-codex-install");
+    let install = "data/agents/codex-acp";
+    let rg = "data/agents/codex-acp/node_modules/@openai/codex-linux-x64/vendor/codex-path";
+    w.dir.dir(rg);
+    for folder in [install, rg] {
+        let refused = |policy: Policy, kind: PathKind| {
+            let want = (kind, FolderRefusal::OverlapsDataFolder);
+            assert_eq!(refusal(&w, &policy), Some(want), "{folder}");
+        };
+        refused(state_policy(&w, folder), PathKind::State);
+        refused(
+            w.builder().notes(w.at(folder)).build().unwrap(),
+            PathKind::Notes,
+        );
+        let store = w.builder().claude_store(w.at(folder)).build().unwrap();
+        let got = refusal(&w, &store).unwrap();
+        assert_eq!(got.1, FolderRefusal::OverlapsDataFolder, "{folder}");
+    }
+    // A folder inside the agent's folder, never the agent's folder itself.
+    let runtime = w.builder().runtime(w.at(rg)).build().unwrap();
+    assert_eq!(refusal(&w, &runtime), None);
+}
+
 /// A policy whose state folder is `state` (relative), with the world's matter, home and temp
 /// folder and the data folder hidden.
 fn state_policy(w: &World, state: &str) -> Policy {

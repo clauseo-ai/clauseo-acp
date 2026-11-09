@@ -111,7 +111,8 @@ pub(super) fn move_folder(old: &Path, new: &Path, links: bool) -> io::Result<usi
     let left = move_entries(old, &staged, 0)?;
     match rename(&staged, new) {
         // Another launch's prep gave its staging folder the new name first, and nothing was
-        // left for this one: its own empty staging folder goes.
+        // left for this one: its own empty staging folder goes. One holding entries stays, and
+        // the next start drains it into the new folder ([`drain_staged`]).
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
             crate::write::remove_empty_dir(&staged).map_err(|_not_empty| error)?;
         }
@@ -124,12 +125,30 @@ pub(super) fn move_folder(old: &Path, new: &Path, links: bool) -> io::Result<usi
     Ok(left)
 }
 
+/// Drains the staging folder `staged` (a real folder) into the new folder `new` (a real folder)
+/// beside it, which a race left: two launches' preps filled the same staging folder, one gave it
+/// the new name, and the other's entries went into a staging folder made again
+/// ([`move_folder`]'s `AlreadyExists`). Entry by entry by [`move_entries`]' rules: a link stays,
+/// a name `new` has already stays, a folder `new` has too is drained into it; `staged` is
+/// removed once empty. Run at the start only, when no agent runs. Returns how many entries
+/// stayed.
+pub(super) fn drain_staged(staged: &Path, new: &Path) -> io::Result<usize> {
+    let left = move_entries(staged, new, 0)?;
+    sync(&[Some(staged), Some(new)]);
+    if left == 0 {
+        crate::write::remove_empty_dir(staged)?;
+    }
+    Ok(left)
+}
+
 /// Moves each entry of the real folder `from` into `to` (made when missing, a real folder):
-/// a link stays; a folder that holds a link goes on entry by entry, `depth` levels down, to at
-/// most [`SCAN_DEPTH`]; any other entry moves whole in one rename. `to` is a staging folder only
-/// this move fills, so a folder already there (a start cut short) is one of this move's and is
-/// gone on with entry by entry. A folder of `from` emptied below the top is removed. Returns how
-/// many entries stayed (links, and folders that still hold them).
+/// a link stays; a folder that holds a link, or whose name `to` holds as a real folder, goes on
+/// entry by entry, `depth` levels down, to at most [`SCAN_DEPTH`]; any other entry moves whole in
+/// one no-replace rename, and stays when `to` has its name already (a clash: never replaced).
+/// `to` is a staging folder only this move fills, so a folder already there (a start cut short)
+/// is one of this move's and is gone on with entry by entry; or the new folder a staging folder
+/// drains into ([`drain_staged`]). A folder of `from` emptied below the top is removed. Returns
+/// how many entries stayed (links, clashes, and folders that still hold them).
 fn move_entries(from: &Path, to: &Path, depth: usize) -> io::Result<usize> {
     match crate::write::create_private_dir(to) {
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
@@ -149,7 +168,11 @@ fn move_entries(from: &Path, to: &Path, depth: usize) -> io::Result<usize> {
         if kind.is_symlink() {
             left += 1;
         } else if kind.is_dir() && (may_hold_links(&path) || crate::write::is_real_dir(&target)) {
-            if depth + 1 >= SCAN_DEPTH {
+            if depth + 1 >= SCAN_DEPTH
+                || (std::fs::symlink_metadata(&target).is_ok()
+                    && !crate::write::is_real_dir(&target))
+            {
+                // Too deep, or a clash with a file or a link of `to`'s.
                 left += 1;
                 continue;
             }
@@ -160,7 +183,12 @@ fn move_entries(from: &Path, to: &Path, depth: usize) -> io::Result<usize> {
                 left += 1;
             }
         } else {
-            rename(&path, &target)?;
+            match rename(&path, &target) {
+                Ok(()) => {}
+                // A clash: `AlreadyExists`, or on Windows access denied onto a folder.
+                Err(_clash) if std::fs::symlink_metadata(&target).is_ok() => left += 1,
+                Err(error) => return Err(error),
+            }
         }
     }
     Ok(left)

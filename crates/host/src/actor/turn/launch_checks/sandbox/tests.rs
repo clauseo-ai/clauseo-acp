@@ -173,6 +173,71 @@ fn the_policy_grants_the_matter_the_session_tmp_and_the_install() {
     write::remove_dir_all(&root).unwrap();
 }
 
+/// Whether `policy`'s jail may let the agent write `path`, counted widely: `path` inside any of
+/// its read-write grants (the matter, the state folder, the temp folder, the notes, the
+/// credential link, the browser socket folder, the Claude store's folder whole) and none of its
+/// read-only paths.
+fn jail_may_write(policy: &clauseo_sandbox::Policy, path: &Path) -> bool {
+    use clauseo_sandbox::{Access, PathClass};
+    let granted = [
+        Some(policy.matter()),
+        Some(policy.state()),
+        Some(policy.tmpdir()),
+        policy.notes(),
+        policy.credential_link(),
+        policy.browser_socket_dir(),
+        policy.claude_store().map(clauseo_sandbox::ClaudeStore::dir),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|root| path.starts_with(root));
+    granted && policy.classify(path, Access::Write) != PathClass::ReadOnly
+}
+
+/// R17 PR-D1 round 3: Codex's install under `<data>/agents/codex-acp`, with the bundled `rg`
+/// the ripgrep guard checks (`codex_fence/rg_guard.rs`), is never writable in an agent's jail:
+/// not in Claude's (whose install is its own) and not in Codex's, where it is the read-and-run
+/// runtime. The Seatbelt profile (`macos/profile` snapshot `with_a_runtime_path_in_the_data_dir`)
+/// and the Windows plan (`acl_plan/tests/data.rs`) render the same policy.
+#[test]
+fn the_codex_install_is_never_writable_in_an_agents_jail() {
+    let root = std::env::temp_dir().join(format!("clauseo-d1-rg-jail-{}", std::process::id()));
+    write::remove_dir_all(&root).unwrap();
+    let (data, matter) = (root.join("data"), root.join("m"));
+    let codex = data.join("agents/codex-acp");
+    let rg = codex
+        .join("node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path");
+    let claude = data.join("agents/claude-acp/bin");
+    for folder in [&matter, &rg, &claude] {
+        write::create_dir_all(folder).unwrap();
+    }
+    write::write_file(&rg.join("rg"), b"rg").unwrap();
+    let run = RunFolders::new(
+        &data,
+        SessionKey {
+            matter: id::<MatterId>(1),
+            thread: id::<ThreadId>(2),
+            launch: 3,
+        },
+    );
+    write::create_dir_all(&run.work).unwrap();
+    let rg = dunce::canonicalize(rg.join("rg")).unwrap();
+    for install in [&claude, &codex] {
+        let policy = launch_policy(&matter, &run, install).unwrap();
+        for path in [
+            rg.as_path(),
+            rg.parent().unwrap(),
+            &dunce::canonicalize(&codex).unwrap(),
+        ] {
+            assert!(!jail_may_write(&policy, path), "{}", path.display());
+        }
+    }
+    let codex_jail = launch_policy(&matter, &run, &codex).unwrap();
+    let class = codex_jail.classify(&rg, clauseo_sandbox::Access::Write);
+    assert_eq!(class, clauseo_sandbox::PathClass::ReadOnly);
+    write::remove_dir_all(&root).unwrap();
+}
+
 /// A guard whose undo counts into the returned cell.
 fn counted() -> (
     UndoOnDrop<u8, impl FnOnce(u8)>,

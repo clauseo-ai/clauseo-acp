@@ -314,8 +314,12 @@ pub(crate) struct Migrated {
     pub(crate) left: usize,
     /// Old notes entries merged into a new notes folder ([`Adopted::Merged`]).
     pub(crate) merged: usize,
-    /// Old notes entries left beside a new notes folder: a clash or a link.
+    /// Old notes entries left beside a new notes folder (a clash or a link), and entries left in
+    /// a staging folder beside one ([`drain_leftovers`]).
     pub(crate) clashes: usize,
+    /// Staging folders a race left beside a new notes folder, drained into it and removed
+    /// ([`drain_leftovers`]).
+    pub(crate) drained: usize,
     /// Old places that cannot move ([`Unmovable`]) with no new folder; their launches are
     /// refused.
     pub(crate) unmovable: usize,
@@ -326,19 +330,40 @@ pub(crate) struct Migrated {
 /// Moves every matter's Claude state folder and notes out of `<data>/agent-state` to the new
 /// layout ([`adopt`] for each matter folder there that is a real folder with a UTF-8 name). Run
 /// once at the host's start, with the store's lock held and before the actor serves: no agent
-/// runs, so old notes beside new ones are merged here ([`moves::merge_notes`]). A missing
-/// `agent-state`, or one that is a link, moves nothing. Logs counts only.
+/// runs, so old notes beside new ones are merged here ([`moves::merge_notes`]), and staging
+/// folders a race left are drained ([`drain_leftovers`]). A missing `agent-state`, or one that
+/// is a link, moves nothing. Logs counts only.
 pub(crate) fn migrate(data: &Path) -> Migrated {
     let mut counts = Migrated::default();
+    move_old(data, &mut counts);
+    drain_leftovers(data, &mut counts);
+    if counts != Migrated::default() {
+        tracing::info!(
+            moved = counts.moved,
+            left = counts.left,
+            merged = counts.merged,
+            clashes = counts.clashes,
+            drained = counts.drained,
+            unmovable = counts.unmovable,
+            failed = counts.failed,
+            "matters' Claude state and notes moved out of the agent state folder"
+        );
+    }
+    counts
+}
+
+/// [`migrate`]'s moves: [`adopt_with`] (merging) for each matter folder in `<data>/agent-state`
+/// that is a real folder with a UTF-8 name, counted into `counts`.
+fn move_old(data: &Path, counts: &mut Migrated) {
     let root = data.join(STATE_ROOT);
     if !crate::write::is_real_dir(&root) {
-        return counts;
+        return;
     }
     let entries = match std::fs::read_dir(&root) {
         Ok(entries) => entries,
         Err(error) => {
             tracing::warn!(error = %Cause(&error), "the agent state folder was not listed");
-            return counts;
+            return;
         }
     };
     for entry in entries.flatten() {
@@ -370,18 +395,58 @@ pub(crate) fn migrate(data: &Path) -> Migrated {
             }
         }
     }
-    if counts != Migrated::default() {
-        tracing::info!(
-            moved = counts.moved,
-            left = counts.left,
-            merged = counts.merged,
-            clashes = counts.clashes,
-            unmovable = counts.unmovable,
-            failed = counts.failed,
-            "matters' Claude state and notes moved out of the agent state folder"
-        );
+}
+
+/// The matter of a staging folder's name in `<data>/notes`, `.<matter>.moving`
+/// ([`moves::staging`]).
+fn staged_matter(name: &OsStr) -> Option<&str> {
+    let matter = name.to_str()?.strip_prefix('.')?.strip_suffix(".moving")?;
+    let one_name = matches!(
+        Path::new(matter).components().collect::<Vec<_>>().as_slice(),
+        [Component::Normal(only)] if *only == OsStr::new(matter)
+    );
+    one_name.then_some(matter)
+}
+
+/// At the start, after the moves: each staging folder in `<data>/notes` (a real folder, reached
+/// through no link) beside a new notes folder that is a real folder, as a race between two
+/// launches leaves one (`moves::move_folder`), is drained into it entry by entry, the links left
+/// behind, and removed once empty ([`moves::drain_staged`]); one with neither a new folder nor
+/// an old one is given the new name ([`finish_staged`]). Counts into `counts`.
+fn drain_leftovers(data: &Path, counts: &mut Migrated) {
+    let root = data.join(NOTES_ROOT);
+    if !real_below(data, &root) {
+        return;
     }
-    counts
+    let Ok(entries) = std::fs::read_dir(&root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(matter) = staged_matter(&name) else {
+            continue;
+        };
+        let (staged, new) = (entry.path(), notes_at(data, matter));
+        if !real_below(data, &staged) {
+            continue;
+        }
+        let done = if real_below(data, &new) {
+            moves::drain_staged(&staged, &new).map(|left| {
+                counts.clashes += left;
+                counts.drained += usize::from(left == 0);
+            })
+        } else if old_place(data, &new).is_some_and(|old| std::fs::symlink_metadata(old).is_err()) {
+            finish_staged(data, &new).map(|adopted| {
+                counts.moved += usize::from(adopted == Adopted::Moved);
+            })
+        } else {
+            Ok(())
+        };
+        if let Err(error) = done {
+            counts.failed += 1;
+            tracing::warn!(error = %Cause(&error), "a staging folder of a matter's notes was not drained");
+        }
+    }
 }
 
 #[cfg(test)]
