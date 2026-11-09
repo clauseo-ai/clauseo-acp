@@ -50,6 +50,10 @@ pub struct Swept {
     /// didn't give (one whose descriptor shuts this process out, say), and whose task file
     /// didn't show them not the pool's ([`unlisted`]).
     pub hidden: usize,
+    /// Keys the Task Scheduler's cache holds that the listing didn't give with no task past
+    /// their `Tree` key, no task file and an owner that isn't a pool SID: orphans, left
+    /// ([`unlisted`]).
+    pub orphans: usize,
 }
 
 impl Swept {
@@ -96,7 +100,8 @@ pub(super) fn log_line(users: usize, swept: &Swept, jobs: &Result<Jobs, Failed>)
          pool's tasks deleted, {} unreadable ({} more skipped, not the pool's by their task \
          file), {} with no user or group, {} unresolved (no SID, \
          not another domain's), {} skipped (another domain's, no SID), {} not deleted, {} \
-         not listed (in a task file or the cache only), {} running instances stopped, {} not, \
+         not listed (in a task file or the cache only), {} orphan cache keys (no task, not the \
+         pool's), {} running instances stopped, {} not, \
          {cancelled} BITS jobs cancelled, {failed} not{unlisted}{capped}{listed}",
         swept.folders,
         swept.tasks,
@@ -108,6 +113,7 @@ pub(super) fn log_line(users: usize, swept: &Swept, jobs: &Result<Jobs, Failed>)
         swept.skipped,
         swept.not_deleted,
         swept.hidden,
+        swept.orphans,
         swept.instances_stopped,
         swept.instances_not_stopped
     )

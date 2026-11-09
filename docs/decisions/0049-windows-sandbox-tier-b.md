@@ -2096,7 +2096,20 @@ the pool-user check. No record, or an empty pool, is nothing to sweep. Then it:
    missing or can't be read, keeps it 56. A hidden task is never deleted: with no task object,
    nothing is deleted through a file or the registry, and the run fails closed. A listing that
    can't be read is 56 too. The log line counts hidden tasks ("not listed (in a task file or
-   the cache only)");
+   the cache only)").
+   **Orphan cache keys.** Feature updates and uninstalls leave `Tree` keys behind that are no
+   task: each holds its `SD`, `Id` and `Index` (0) and nothing more, owned by Administrators or
+   SYSTEM, with no entry under `TaskCache\{Tasks,Plain,Logon,Boot}` and no task file. A test VM
+   held 26, and with each counted hidden every run ended 56 and every launch after the first
+   was refused. A path only the cache holds is an orphan, counted apart ("orphan cache keys (no
+   task, not the pool's)") and not 56, when all three hold: its `SD` parses and its owner isn't
+   a pool SID; none of `Tasks\{Id}`, `Plain\{Id}`, `Logon\{Id}` or `Boot\{Id}` exists, `{Id}`
+   the key's `Id` (`REG_SZ`, refused unless a GUID in braces, so it can't name another key),
+   each key opened read-only from `HKLM` by its whole path as the `Tree` keys are; and the file
+   listing, read whole, has no file at its path. Anything that can't be read, a key that can't
+   be opened for any reason but being missing, or a file listing that failed, leaves the path
+   to the rule above, so a Tarrask-style hidden task (its `SD` deleted or a pool user's while
+   `Tasks\{Id}` still holds it) stays 56. Orphans are Windows' and are never deleted;
 4. cancels every BITS job a pool user owns with the stop's BITS step
    (`pool_steps::cancel_pool_jobs`), whatever the walk found. Only then, with no pool task
    left to trigger and no job left to notify, it stops the running instances of the pool's

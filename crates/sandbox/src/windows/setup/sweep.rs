@@ -64,8 +64,10 @@
 //!    the tasks the caller may read, so the walk is then held against every task file below
 //!    `Tasks` and every task in the Task Scheduler's cache (`HKLM\…\Schedule\TaskCache\Tree`),
 //!    read only ([`unlisted`]): a task either holds that the walk didn't list is 56, unless its
-//!    trusted task file names a principal that isn't the pool's, and is never deleted through a
-//!    file or the registry. A listing that can't be read is 56 too;
+//!    trusted task file names a principal that isn't the pool's, or it is an orphan cache key
+//!    (no task past its `Tree` key, no task file, an owner that isn't a pool SID: counted, not
+//!    56), and is never deleted through a file or the registry. A listing that can't be read is
+//!    56 too;
 //! 5. cancels every BITS job a pool user owns, whatever step 4 found (`BG_JOB_ENUM_ALL_USERS`,
 //!    each job's owner). One that can't be cancelled, an owner that can't be read, a list that
 //!    can't be read, or one of `JOBS_CAP` jobs is 57; 56 wins when both. Only then, with no
@@ -269,6 +271,12 @@ pub trait Sweeper: Gate + Bits + Record {
     /// key holds (`TaskCache\Tree\<path>`, its `SD` value, `REG_BINARY`, read only, the 64-bit
     /// view); `Err` when the key or value is missing or can't be read, or names no owner.
     fn task_cache_owner(&mut self, path: &str) -> Result<Sid, Failed>;
+    /// Whether the cache holds a task for the key at `path` (`TaskCache\Tree\<path>`) past
+    /// that key: `TaskCache\Tasks\{Id}`, `Plain\{Id}`, `Logon\{Id}` or `Boot\{Id}`, `{Id}` the
+    /// key's `Id` value (`REG_SZ`, a GUID in braces), each key opened as the others; `Err` when
+    /// the `Id` is missing, can't be read or isn't a GUID, or a key can't be opened for any
+    /// reason but being missing.
+    fn task_cache_entries(&mut self, path: &str) -> Result<bool, Failed>;
     /// Deletes the task `name` from `folder`.
     fn delete_task(&mut self, folder: &Self::Folder, name: &str) -> Result<(), Failed>;
     /// Writes one line to the log: `error` for a refusal or a failure.

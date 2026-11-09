@@ -164,13 +164,14 @@ fn elevated_this_machines_tasks_all_have_a_principal_that_resolves() {
     let swept = sweep_tasks(&mut sweeper, &[]);
     eprintln!(
         "{} folders, {} tasks, {} with no user or group, {} unreadable, {} skipped, {} folders \
-         unlisted",
+         unlisted, {} orphan cache keys",
         swept.folders,
         swept.tasks,
         swept.no_principal,
         swept.unreadable,
         swept.skipped,
-        swept.unlisted
+        swept.unlisted,
+        swept.orphans
     );
     for (why, count) in &swept.why {
         eprintln!("{count} x {why}");
