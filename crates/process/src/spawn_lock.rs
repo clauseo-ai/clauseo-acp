@@ -34,33 +34,28 @@ pub fn spawn_lock() -> SpawnLock {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::{Arc, mpsc};
+    use std::sync::TryLockError;
     use std::thread;
-    use std::time::Duration;
 
-    use super::spawn_lock;
+    use super::{SPAWN, spawn_lock};
+
+    /// Whether another thread finds the lock taken. A poisoned lock (the panic test, when the
+    /// tests share a process) counts as free: `spawn_lock` ignores the poison.
+    fn taken_elsewhere() -> bool {
+        thread::spawn(|| matches!(SPAWN.try_lock(), Err(TryLockError::WouldBlock)))
+            .join()
+            .unwrap()
+    }
 
     #[test]
-    fn a_second_holder_waits_for_the_first() {
+    fn the_lock_is_taken_until_dropped() {
         let held = spawn_lock();
-        let entered = Arc::new(AtomicBool::new(false));
-        let (started, wait_started) = mpsc::channel();
-        let flag = Arc::clone(&entered);
-        let other = thread::spawn(move || {
-            started.send(()).unwrap();
-            let _lock = spawn_lock();
-            flag.store(true, Ordering::SeqCst);
-        });
-        wait_started.recv().unwrap();
-        thread::sleep(Duration::from_millis(50));
         assert!(
-            !entered.load(Ordering::SeqCst),
-            "took the lock while it was held"
+            taken_elsewhere(),
+            "another thread took the lock while it was held"
         );
         drop(held);
-        other.join().unwrap();
-        assert!(entered.load(Ordering::SeqCst));
+        assert!(!taken_elsewhere());
     }
 
     #[test]
