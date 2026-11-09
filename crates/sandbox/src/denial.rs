@@ -86,7 +86,7 @@ pub enum Denial {
         session_ended: bool,
     },
     /// The macOS git watch lost its view of the matter: its `FSEvents` stream stopped
-    /// delivering (its canary's event did not come within 2 s), or its canary could not be
+    /// delivering (its canary's event did not come within 5 s), or its canary could not be
     /// written (decision record 0038). It ended the session first, then ran its final scan.
     /// [`Denial::notice`] is the lawyer's text. Never rate-capped.
     GitWatchLost,

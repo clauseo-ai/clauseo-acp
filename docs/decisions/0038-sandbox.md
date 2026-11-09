@@ -165,12 +165,12 @@ Two backstops cover a stream that loses events without saying so (seen on a disk
 seconds before, under a full parallel test run: nothing for over 10 s). **The canary:** every
 10 s the watch rewrites `watch-canary` in the set-aside folder it uses, which is on the matter's
 volume, denied to the agent and watched by the same stream (one stream, two paths). Its event
-comes about 4 ms after the write on this Mac. When none comes within 2 s, or the canary can't
+comes about 4 ms after the write on this Mac. When none comes within 5 s, or the canary can't
 be written, the stream is lost and the session ends as for a find: kill first, then the final
 scan, and the lawyer gets `Denial::GitWatchLost` ("Clauseo stopped the AI tool because it
 could no longer watch this matter's folder for changes."). The canary's lateness is judged on
 every input, once the canary's events in the batch being read count, and each batch is stamped
-when the stream queues it: one read 2 s or more after that ends the session the same way, as
+when the stream queues it: one read 5 s or more after that ends the session the same way, as
 the watch lags behind the agent (an agent that writes nonstop would otherwise hold the canary's
 event back behind its own). There is no fallback to rescans. An
 event flagged must-scan-subdirectories or dropped (user or kernel) only rescans the matter at
@@ -220,13 +220,15 @@ A watch thread that panics ends the session; an attach to a thread already gone 
 whole; a disk can stop answering), and
 while one check holds the watch's thread nothing else is checked. So each runner publishes when
 its check began and each folder a walk lists, and one watchdog thread per host looks every
-0.1 s: a check (one batch of events, a rescan, a 30 s pass) with no progress for 2 s ends the
+0.1 s: a check (one batch of events, a rescan, a 30 s pass) with no progress for 5 s ends the
 session by its tree and probe, logged, and the kill goes again on each look while that check
 runs; the runner, once its check returns, tells the lawyer (`Denial::GitWatchLost`) and goes to
 the final scan. A check still held 10 s after the first kill, with a process of the session
 left, has the session's record marked outlived from the watchdog's thread, so the matter's next
-launch is refused even if the check never returns. 2 s is the canary's wait: a check held
-longer leaves the agent as unwatched as a lost stream. A rescan of a big matter that keeps
+launch is refused even if the check never returns. 5 s is the canary's wait: a check held
+longer leaves the agent as unwatched as a lost stream. The three windows (the canary, a late
+batch, the watchdog) are 5 s each: at 2 s, load averages of 50 and more on the test Mac lagged
+the stream or the watch thread past the window and ended sessions that were fine. A rescan of a big matter that keeps
 listing folders is not stuck. A session attached after the watchdog gave up on a check is ended
 at once.
 

@@ -22,12 +22,12 @@ use std::time::Duration;
 use super::{KILL_CAP, Session};
 use crate::{Clock, SystemClock};
 
-/// The most time one check may go without progress while the agent may run. 2 s is how long
+/// The most time one check may go without progress while the agent may run. 5 s is how long
 /// the canary's event may take before the stream counts as lost (`CANARY_WAIT`): a check held
 /// longer leaves the agent as unwatched as a lost stream does. A check that is not stuck lists
 /// a folder well within it on a local disk; one that doesn't, such as a listing on a disk that
 /// stopped answering, ends the session (fail-closed).
-pub(crate) const BUDGET: Duration = Duration::from_secs(2);
+pub(crate) const BUDGET: Duration = Duration::from_secs(5);
 
 /// How often the watchdog looks.
 const LOOK_EVERY: Duration = Duration::from_millis(100);

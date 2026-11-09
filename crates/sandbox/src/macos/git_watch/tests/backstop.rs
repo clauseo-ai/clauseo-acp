@@ -11,7 +11,8 @@ use std::time::Duration;
 use super::super::flags;
 use super::super::host::Register;
 use super::super::run::{
-    CANARY_EVERY, CANARY_WAIT, End, Flow, Mode, Msg, Runner, SWEEP_CAP, SWEEP_EVERY, start_with,
+    BATCH_LATE, CANARY_EVERY, CANARY_WAIT, End, Flow, Mode, Msg, Runner, SWEEP_CAP, SWEEP_EVERY,
+    start_with,
 };
 use super::fake::{FakeFs, FakeSession, MemStore, Notices, SET_ASIDE, event, none, quiet, watch};
 use crate::{Clock, Denial, SystemClock};
@@ -82,7 +83,7 @@ fn the_canarys_event_keeps_the_stream_trusted() {
     );
     fs.repo("/m/.git");
     assert_eq!(runner.input(Some(other), ms(200)), Flow::Go);
-    assert_eq!(runner.input(None, CANARY_WAIT * 2), Flow::Go);
+    assert_eq!(runner.input(None, CANARY_WAIT + ms(1_000)), Flow::Go);
     fs.remove("/m/.git");
     // Each write's event comes: the run goes on.
     assert_eq!(runner.input(None, CANARY_EVERY), Flow::Go);
@@ -91,7 +92,8 @@ fn the_canarys_event_keeps_the_stream_trusted() {
         runner.input(Some(echo(CANARY_EVERY + ms(100))), CANARY_EVERY + ms(100)),
         Flow::Go
     );
-    assert_eq!(runner.input(None, CANARY_EVERY + CANARY_WAIT * 2), Flow::Go);
+    let later = CANARY_EVERY + CANARY_WAIT + ms(1_000);
+    assert_eq!(runner.input(None, later), Flow::Go);
     assert!(!runner.lost());
     assert_eq!(ends(&session), 0);
     none(&notices);
@@ -319,11 +321,11 @@ fn a_batch_read_late_ends_the_session_as_a_lost_stream() {
     assert_eq!(runner.input(Some(echo(ms(50))), ms(50)), Flow::Go);
     // Read within the wait of its queueing: the run goes on.
     let batch = Msg::Events(vec![event("/m/a.txt", 0x1000)], ms(100));
-    assert_eq!(runner.input(Some(batch), ms(99) + CANARY_WAIT), Flow::Go);
+    assert_eq!(runner.input(Some(batch), ms(99) + BATCH_LATE), Flow::Go);
     assert!(!runner.lost());
     // Read the wait or more after it was queued: the watch lags behind the agent.
     let batch = Msg::Events(vec![event("/m/b.txt", 0x1000)], ms(200));
-    assert_eq!(runner.input(Some(batch), ms(200) + CANARY_WAIT), Flow::Done);
+    assert_eq!(runner.input(Some(batch), ms(200) + BATCH_LATE), Flow::Done);
     assert!(runner.lost());
     assert_eq!(ends(&session), 1);
     assert_eq!(notices.taken(), [Denial::GitWatchLost]);
@@ -358,5 +360,47 @@ fn a_canary_write_that_fails_for_a_moment_is_tried_again() {
     fs.fail_touches(3);
     assert_eq!(runner.input(None, CANARY_EVERY), Flow::Done);
     assert!(runner.lost());
+    assert_eq!(notices.taken(), [Denial::GitWatchLost]);
+}
+
+/// The canary's window is 5 s: its event 4.9 s late ends nothing, 5.1 s late ends the run.
+#[test]
+fn the_canary_waits_five_seconds() {
+    assert_eq!(CANARY_WAIT, Duration::from_secs(5));
+    let fs = FakeFs::new();
+    let (mut runner, session, notices) = runner(&fs);
+    // Written at 0, its event never comes.
+    assert_eq!(runner.input(None, ms(4_900)), Flow::Go);
+    assert!(!runner.lost());
+    assert_eq!(ends(&session), 0);
+    none(&notices);
+    assert_eq!(runner.input(None, ms(5_100)), Flow::Done);
+    assert!(runner.lost());
+    assert_eq!(ends(&session), 1);
+    assert_eq!(notices.taken(), [Denial::GitWatchLost]);
+}
+
+/// A batch's window is 5 s: read 4.9 s after the stream queued it ends nothing, 5.1 s after
+/// ends the run.
+#[test]
+fn a_batch_may_wait_five_seconds_to_be_read() {
+    assert_eq!(BATCH_LATE, Duration::from_secs(5));
+    let fs = FakeFs::new();
+    let (mut runner, session, notices) = runner(&fs);
+    // The canary's event comes at once, so only the batches' own lag is judged.
+    assert_eq!(runner.input(Some(echo(ms(50))), ms(50)), Flow::Go);
+    let batch = Msg::Events(vec![event("/m/a.txt", 0x1000)], ms(100));
+    assert_eq!(runner.input(Some(batch), ms(5_000)), Flow::Go, "4.9 s late");
+    assert!(!runner.lost());
+    assert_eq!(ends(&session), 0);
+    none(&notices);
+    let batch = Msg::Events(vec![event("/m/b.txt", 0x1000)], ms(200));
+    assert_eq!(
+        runner.input(Some(batch), ms(5_300)),
+        Flow::Done,
+        "5.1 s late"
+    );
+    assert!(runner.lost());
+    assert_eq!(ends(&session), 1);
     assert_eq!(notices.taken(), [Denial::GitWatchLost]);
 }

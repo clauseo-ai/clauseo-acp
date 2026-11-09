@@ -27,7 +27,7 @@ fn ms(n: u64) -> Duration {
 fn within(what: &str, done: impl Fn() -> bool) {
     let clock = SystemClock::new();
     while !done() {
-        assert!(clock.now() < Duration::from_secs(5), "{what} within 5 s");
+        assert!(clock.now() < Duration::from_secs(10), "{what} within 10 s");
         async_io::block_on(async_io::Timer::after(ms(20)));
     }
 }
@@ -124,18 +124,20 @@ impl Clock for Manual {
 
 #[test]
 fn the_watchdog_ends_a_session_whose_check_runs_past_its_budget() {
+    assert_eq!(BUDGET, Duration::from_secs(5));
     let clock = Arc::new(Manual::default());
     let busy = Busy::new(Arc::clone(&clock) as Arc<dyn Clock>);
     let session = FakeSession::default();
     busy.attach(&(Arc::new(session.clone()) as Arc<dyn Session>));
     assert!(!busy.look(BUDGET), "no check running");
     busy.start();
-    clock.0.store(1_999, Ordering::SeqCst);
-    assert!(!busy.look(BUDGET), "within its budget");
-    assert!(!busy.stop());
-    busy.start();
-    clock.0.store(1_999 + 2_000, Ordering::SeqCst);
-    assert!(busy.look(BUDGET));
+    clock.0.store(4_900, Ordering::SeqCst);
+    assert!(
+        !busy.look(BUDGET),
+        "4.9 s without progress: within its budget"
+    );
+    clock.0.store(5_100, Ordering::SeqCst);
+    assert!(busy.look(BUDGET), "5.1 s without progress: past it");
     assert_eq!(session.ends.load(Ordering::SeqCst), 1);
     assert!(busy.stop(), "the runner finds it ended");
     // A session attached after the watchdog gave up is ended at once.
@@ -431,7 +433,7 @@ fn the_watchdog_kills_again_while_the_check_is_stuck_and_marks_it_past_the_cap()
     let session = FakeSession::default();
     busy.attach(&(Arc::new(session.clone()) as Arc<dyn Session>));
     busy.start();
-    clock.0.store(2_000, Ordering::SeqCst);
+    clock.0.store(5_000, Ordering::SeqCst);
     assert!(busy.look(BUDGET));
     assert_eq!(session.ends.load(Ordering::SeqCst), 1);
     for n in 2..5 {
@@ -444,10 +446,10 @@ fn the_watchdog_kills_again_while_the_check_is_stuck_and_marks_it_past_the_cap()
         );
     }
     let cap = u64::try_from(KILL_CAP.as_millis()).unwrap();
-    clock.0.store(2_000 + cap - 1, Ordering::SeqCst);
+    clock.0.store(5_000 + cap - 1, Ordering::SeqCst);
     busy.look(BUDGET);
     assert_eq!(marks.load(Ordering::SeqCst), 0, "within the cap");
-    clock.0.store(2_000 + cap, Ordering::SeqCst);
+    clock.0.store(5_000 + cap, Ordering::SeqCst);
     busy.look(BUDGET);
     assert_eq!(
         marks.load(Ordering::SeqCst),
@@ -471,8 +473,10 @@ fn a_check_that_beats_is_judged_by_its_progress_not_its_length() {
         assert!(!busy.look(BUDGET), "a folder listed every 1.5 s");
         assert!(busy.beat());
     }
-    clock.0.fetch_add(2_000, Ordering::SeqCst);
-    assert!(busy.look(BUDGET), "no progress for the budget");
+    clock.0.fetch_add(4_900, Ordering::SeqCst);
+    assert!(!busy.look(BUDGET), "4.9 s since the last folder");
+    clock.0.fetch_add(200, Ordering::SeqCst);
+    assert!(busy.look(BUDGET), "5.1 s since the last folder");
     assert_eq!(session.ends.load(Ordering::SeqCst), 1);
     // A beat between checks starts none.
     let idle = Busy::new(Arc::clone(&clock) as Arc<dyn Clock>);

@@ -6,10 +6,10 @@
 //! A launch whose stream can't start is refused: the agent never runs on a weaker watch. The
 //! canary: every 10 s the thread rewrites a file in the set-aside folder it uses, which is on
 //! the watched folder's volume, out of the agent's reach, and watched by the same stream. When
-//! no event for it comes within 2 s, or it can't be written, the stream is lost: the session
+//! no event for it comes within 5 s, or it can't be written, the stream is lost: the session
 //! ends as for a find (kill first, then the final scan) and the lawyer gets
 //! [`Denial::GitWatchLost`](crate::Denial). Each batch is stamped when the stream queues it,
-//! and one read 2 s or more after that ends the session the same way: the watch lags behind
+//! and one read 5 s or more after that ends the session the same way: the watch lags behind
 //! the agent (one that writes nonstop would otherwise hold the canary's event back behind its
 //! own for as long as it writes). An event that says events were dropped or must be
 //! rescanned only rescans the folder at once, and the watch carries on. A check that runs past
@@ -52,8 +52,15 @@ pub(crate) const KILL_CAP: Duration = Duration::from_secs(10);
 /// How often the canary file is rewritten.
 pub(crate) const CANARY_EVERY: Duration = Duration::from_secs(10);
 
-/// How long the canary's event may take before the stream counts as lost.
-pub(crate) const CANARY_WAIT: Duration = Duration::from_secs(2);
+/// How long the canary's event may take before the stream counts as lost. 5 s, as
+/// [`BATCH_LATE`] and the watchdog's [`BUDGET`]: long enough for a busy Mac (load averages of
+/// 50 and more lagged the stream past 2 s in the tests), short enough that the agent runs
+/// unwatched no longer than that.
+pub(crate) const CANARY_WAIT: Duration = Duration::from_secs(5);
+
+/// How long after the stream queued a batch the watch may read it before it counts as lagging
+/// behind the agent, which ends the session as a lost stream. 5 s, as [`CANARY_WAIT`].
+pub(crate) const BATCH_LATE: Duration = Duration::from_secs(5);
 
 /// The canary file's name in the set-aside folder.
 const CANARY: &str = "watch-canary";
@@ -275,7 +282,7 @@ impl<F: Fs> Runner<F> {
                     return false;
                 }
                 let lag = now.saturating_sub(queued);
-                if lag >= CANARY_WAIT && self.mode == Mode::Live {
+                if lag >= BATCH_LATE && self.mode == Mode::Live {
                     tracing::error!(
                         ?lag,
                         "the git watch reads the stream's events late; it lags behind the agent"
