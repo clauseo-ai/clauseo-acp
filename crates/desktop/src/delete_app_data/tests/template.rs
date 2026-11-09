@@ -9,7 +9,9 @@
 //! one the branch looks for. `ui-language`, later in `.onInit`, sets the installer's language
 //! from the app's (`hooks.nsh`, tested in `installer_language.rs`). The per-machine
 //! uninstaller's blocks (`uninstall-string`, `un-admin-section`, `uninstall-self-delete` and
-//! `un-gui-end`) are tested in `uninstall_in_place.rs`.
+//! `un-gui-end`) are tested in `uninstall_in_place.rs`. `reinstall-guard` and
+//! `restore-location-guard` check the previous install folder right before each use (`hooks.nsh`,
+//! tested in `previous_dir.rs`).
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -37,7 +39,7 @@ struct Block {
 
 /// The blocks, in the template's order. A new block is one more row here (and its lines in the
 /// template).
-const BLOCKS: [Block; 10] = [
+const BLOCKS: [Block; 12] = [
     Block {
         name: "no-solid",
         after: "  ; Set the compression algorithm. We default to LZMA.",
@@ -54,6 +56,11 @@ const BLOCKS: [Block; 10] = [
             "VIAddVersionKey \"FileVersion\" \"${VERSION}\"",
             "VIAddVersionKey \"ProductVersion\" \"${VERSION}\"",
         ],
+    },
+    Block {
+        name: "reinstall-guard",
+        after: "      ReadRegStr $4 SHCTX \"${MANUPRODUCTKEY}\" \"\"",
+        replaces: &["      ReadRegStr $R1 SHCTX \"${UNINSTKEY}\" \"UninstallString\""],
     },
     Block {
         name: "finish-show",
@@ -95,6 +102,11 @@ const BLOCKS: [Block; 10] = [
     Block {
         name: "un-gui-end",
         after: "SectionEnd",
+        replaces: &[],
+    },
+    Block {
+        name: "restore-location-guard",
+        after: "  ReadRegStr $4 SHCTX \"${MANUPRODUCTKEY}\" \"\"",
         replaces: &[],
     },
 ];

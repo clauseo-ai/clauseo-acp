@@ -153,19 +153,24 @@ fn parse(lines: &[String], at: &mut usize, ends: &[&str]) -> Vec<Node> {
     nodes
 }
 
-/// Splits on spaces outside double quotes; the quotes are dropped.
+/// Splits on spaces outside quotes, double or single; the outer quotes are dropped, and a quote
+/// of the other kind inside them is kept as text.
 pub(super) fn words(line: &str) -> Vec<String> {
     let mut words = Vec::new();
     let mut word = String::new();
-    let mut quoted = false;
+    let mut quoted: Option<char> = None;
     let mut any = false;
     for c in line.chars() {
         match c {
-            '"' => {
-                quoted = !quoted;
+            '"' | '\'' if quoted.is_none() => {
+                quoted = Some(c);
                 any = true;
             }
-            ' ' if !quoted => {
+            '"' | '\'' if quoted == Some(c) => {
+                quoted = None;
+                any = true;
+            }
+            ' ' if quoted.is_none() => {
                 if any {
                     words.push(std::mem::take(&mut word));
                     any = false;
@@ -221,9 +226,9 @@ pub(super) fn lines(nodes: &[Node]) -> Vec<&str> {
 
 /// The machine: the defines, variables, error flag and stack, the record under
 /// `HKLM\SOFTWARE\Clauseo\Sandbox` and the lawyer's key under `HKCU\Software\Clauseo`, whether
-/// the run is silent, the user's SID for `CLAUSEO_OWN_SID`, the macros it runs inline (and the
-/// record each leaves), what it said (`DetailPrint`, `MessageBox`, `SetErrorLevel`), and which
-/// stubbed macros it reached.
+/// other keys a test sets (`keys`, by root and expanded key), whether the run is silent, the
+/// user's SID for `CLAUSEO_OWN_SID`, the macros it runs inline (and the record each leaves), what
+/// it said (`DetailPrint`, `MessageBox`, `SetErrorLevel`), and which stubbed macros it reached.
 pub(super) struct Machine {
     pub(super) defines: HashMap<String, String>,
     pub(super) vars: HashMap<String, String>,
@@ -232,6 +237,8 @@ pub(super) struct Machine {
     pub(super) record: Record,
     /// The lawyer's key, `HKCU\Software\Clauseo`, where the app writes `UiLanguage`.
     pub(super) user: Record,
+    /// Any other key, by `ROOT\key` (`SHCTX\Software\Clauseo\Clauseo`, say).
+    pub(super) keys: HashMap<String, Vec<(&'static str, Value)>>,
     pub(super) silent: bool,
     pub(super) own_sid: &'static str,
     pub(super) inline: HashMap<String, Vec<Node>>,
@@ -250,6 +257,7 @@ impl Machine {
             stack: Vec::new(),
             record,
             user: None,
+            keys: HashMap::new(),
             silent: false,
             own_sid: "",
             inline: HashMap::new(),
@@ -259,8 +267,8 @@ impl Machine {
         }
     }
 
-    /// `${NAME}` from the defines, `$R0`..`$R9` and `$0`..`$9` from the variables; `$(name)`, a
-    /// language string, stays as it is.
+    /// `${NAME}` from the defines, `$R0`..`$R9` and `$0`..`$9` from the variables, as is any other
+    /// `$name` (`$INSTDIR`, a `Var`); `$(name)`, a language string, stays as it is.
     fn expand(&self, word: &str) -> String {
         let mut out = String::new();
         let mut rest = word;
@@ -280,7 +288,17 @@ impl Machine {
                 out.push_str(&rest[..end]);
                 rest = &rest[end..];
             } else {
-                let len = if rest[1..].starts_with('R') { 3 } else { 2 };
+                let tail = &rest[1..];
+                let register = tail.starts_with(|c: char| c.is_ascii_digit())
+                    || (tail.starts_with('R')
+                        && tail[1..].starts_with(|c: char| c.is_ascii_digit()));
+                let len = if register {
+                    if tail.starts_with('R') { 3 } else { 2 }
+                } else {
+                    1 + tail
+                        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                        .unwrap_or(tail.len())
+                };
                 let name = &rest[..len];
                 out.push_str(self.vars.get(name).map_or("", String::as_str));
                 rest = &rest[len..];
@@ -328,7 +346,11 @@ impl Machine {
     }
 
     fn key(&self, root: &str, key: &str) -> Option<&Vec<(&'static str, Value)>> {
-        match (root, self.expand(key).as_str()) {
+        let key = self.expand(key);
+        if let Some(values) = self.keys.get(&format!("{root}\\{key}")) {
+            return Some(values);
+        }
+        match (root, key.as_str()) {
             ("HKLM", "SOFTWARE\\Clauseo\\Sandbox") => self.record.as_ref(),
             ("HKCU", "Software\\Clauseo") => self.user.as_ref(),
             (root, key) => panic!("a key this interpreter doesn't know: {root}\\{key}"),
@@ -349,12 +371,20 @@ impl Machine {
         let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
         match parts.as_slice() {
             ["StrCpy", var, value] => self.set(var, self.expand(value)),
+            ["StrCpy", var, value, len] => {
+                let text = str_copy(&self.expand(value), &self.expand(len), "0");
+                self.set(var, text);
+            }
+            ["StrCpy", var, value, len, offset] => {
+                let text = str_copy(&self.expand(value), &self.expand(len), &self.expand(offset));
+                self.set(var, text);
+            }
             ["ClearErrors"] => self.error = false,
             ["StrLen", var, text] => {
                 let len = self.expand(text).chars().count();
                 self.set(var, len.to_string());
             }
-            ["SetRegView", "64" | "lastused"] => {}
+            ["SetRegView", "64" | "lastused"] | ["BringToFront"] => {}
             ["Push", value] => self.stack.push(self.expand(value)),
             ["Pop", var] => {
                 let value = self.stack.pop().expect("a Pop on an empty stack");
@@ -391,6 +421,19 @@ impl Machine {
                 let b: i64 = self.expand(b).parse().unwrap();
                 self.set(var, (a + b).to_string());
             }
+            ["IntOp", var, a, "&", b] => {
+                let a: i64 = self.expand(a).parse().unwrap();
+                let b: i64 = self.expand(b).parse().unwrap();
+                self.set(var, (a & b).to_string());
+            }
+            // A program started and waited for: said, and its exit code 0.
+            ["ExecWait", command, var] => {
+                let command = self.expand(command);
+                self.said.push(format!("ExecWait {command}"));
+                self.set(var, "0".to_owned());
+            }
+            // A jump, said; the tests put it last in its arm.
+            ["Goto", label] => self.said.push(format!("Goto {label}")),
             ["DetailPrint", text] => {
                 let text = self.expand(text);
                 self.said.push(format!("DetailPrint {text}"));
@@ -449,4 +492,27 @@ impl Machine {
         }
         false
     }
+}
+
+/// NSIS's `StrCpy var text len offset`: `offset` characters in (from the end when negative), then
+/// `len` characters (all when empty; all but that many from the end when negative).
+fn str_copy(text: &str, len: &str, offset: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let count = i64::try_from(chars.len()).unwrap();
+    let offset: i64 = offset.parse().unwrap();
+    let start = if offset < 0 { count + offset } else { offset }.clamp(0, count);
+    let rest = count - start;
+    let take = match len {
+        "" => rest,
+        len => {
+            let len: i64 = len.parse().unwrap();
+            if len < 0 { rest + len } else { len }
+        }
+    }
+    .clamp(0, rest);
+    let (start, take) = (
+        usize::try_from(start).unwrap(),
+        usize::try_from(take).unwrap(),
+    );
+    chars[start..start + take].iter().collect()
 }

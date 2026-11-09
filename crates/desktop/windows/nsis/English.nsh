@@ -109,6 +109,14 @@ LangString uninstallTempFailed ${LANG_ENGLISH} "Clauseo wasn't uninstalled, beca
 ; added after _?= (windows/uninstall_in_place.nsh); a box, skipped by /S, then exit code 26.
 ; Provisional (2026-11-07).
 LangString uninstallNotInPlace ${LANG_ENGLISH} "Clauseo wasn't uninstalled, because the uninstaller wasn't started from Clauseo's own folder. Nothing was removed. Uninstall Clauseo from Settings > Apps, or ask whoever looks after this computer."
+; previousInstallIgnored: the installer found an earlier install's folder it couldn't confirm
+; (windows/hooks.nsh, CLAUSEO_PREVIOUS_DIR_OK), so it ran no old uninstaller and installed in its
+; default folder; one details line, no box. Provisional (2026-11-09).
+LangString previousInstallIgnored ${LANG_ENGLISH} "Clauseo found an earlier install in a folder it couldn't confirm, so it installed fresh in its usual folder."
+; previousInstallKeyMismatch: the per-machine installer found the vendor key's folder differing
+; from the uninstall key's InstallLocation, so it ignored the vendor key (windows/hooks.nsh,
+; CLAUSEO_PREVIOUS_DIR_GUARD); one details line, no box. Provisional (2026-11-09).
+LangString previousInstallKeyMismatch ${LANG_ENGLISH} "Clauseo found two different records of where it was installed before, so it used the one only administrators can change."
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
 ; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), deleteAppData aside, with one fix:

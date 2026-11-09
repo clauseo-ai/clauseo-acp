@@ -242,6 +242,42 @@
   ${EndIf}
 !macroend
 
+; The chain rule, as admin_copy.rs reads it: sets $5 to 1 when every level from the drive's root
+; down to the file at $0 passes CLAUSEO_LEVEL_SAFE: each prefix of the path that ends before a
+; backslash, the root (C:\) first against CLAUSEO_ROOT_CHANGE_RIGHTS, every other folder against
+; CLAUSEO_CHANGE_RIGHTS, then the file itself (a file, no reparse point); else 0, a path without a
+; drive's root included. The admin copy's check and the previous install folder's check
+; (CLAUSEO_PREVIOUS_DIR_OK) both use it. Uses $1 to $4, $6 to $9, $R0 to $R2 and $R6 to $R9.
+!macro CLAUSEO_CHAIN_SAFE
+  StrCpy $5 1
+  StrCpy $1 $0 2 1
+  ${If} $1 != ":\"
+    StrCpy $5 0
+  ${EndIf}
+  StrLen $2 $0
+  ${If} $5 = 1
+    ${For} $3 2 $2
+      StrCpy $1 $0 1 $3
+      ${If} $1 == "\"
+      ${OrIf} $3 = $2
+        StrCpy $4 $0 $3
+        StrCpy $6 ${CLAUSEO_CHANGE_RIGHTS}
+        StrCpy $7 16
+        ${If} $3 = 2
+          StrCpy $4 $0 3
+          StrCpy $6 ${CLAUSEO_ROOT_CHANGE_RIGHTS}
+        ${ElseIf} $3 = $2
+          StrCpy $7 0
+        ${EndIf}
+        !insertmacro CLAUSEO_LEVEL_SAFE
+        ${If} $5 = 0
+          ${ExitFor}
+        ${EndIf}
+      ${EndIf}
+    ${Next}
+  ${EndIf}
+!macroend
+
 ; The SHA-256 of the copy at $0, computed in this process (bcrypt.dll from $SYSDIR, by its full
 ; path, through System::Call), never by a program started for it: AppLocker, WDAC or an ASR rule
 ; may block one. The file opened for reading (FILE_GENERIC_READ 0x120089), shared for reading only
@@ -308,8 +344,7 @@
 !macroend
 
 ; Sets $R4 to 1 when the admin copy may be started elevated, in this order: (1) every level from
-; the drive's root to the copy passes CLAUSEO_LEVEL_SAFE, the root against
-; CLAUSEO_ROOT_CHANGE_RIGHTS and the rest against CLAUSEO_CHANGE_RIGHTS; (2) the machine's record
+; the drive's root to the copy passes CLAUSEO_CHAIN_SAFE; (2) the machine's record
 ; (64-bit view) holds a 64-character AdminCopySha256; (3) the copy's SHA-256
 ; (CLAUSEO_SHA256_OF_COPY); (4) the two equal, ignoring case. On a mismatch the record is read
 ; once more and compared again: a refresh may have written a new copy and its hash between the
@@ -334,36 +369,9 @@
   Push $R8
   Push $R9
   StrCpy $R4 0
-  ; 1. The chain: each prefix of the copy's path that ends before a backslash, the root (C:\)
-  ; first, then the copy itself.
+  ; 1. The chain (CLAUSEO_CHAIN_SAFE), the root first, then the copy itself.
   StrCpy $0 "${CLAUSEO_ADMIN_EXE}"
-  StrCpy $5 1
-  StrCpy $1 $0 2 1
-  ${If} $1 != ":\"
-    StrCpy $5 0
-  ${EndIf}
-  StrLen $2 $0
-  ${If} $5 = 1
-    ${For} $3 2 $2
-      StrCpy $1 $0 1 $3
-      ${If} $1 == "\"
-      ${OrIf} $3 = $2
-        StrCpy $4 $0 $3
-        StrCpy $6 ${CLAUSEO_CHANGE_RIGHTS}
-        StrCpy $7 16
-        ${If} $3 = 2
-          StrCpy $4 $0 3
-          StrCpy $6 ${CLAUSEO_ROOT_CHANGE_RIGHTS}
-        ${ElseIf} $3 = $2
-          StrCpy $7 0
-        ${EndIf}
-        !insertmacro CLAUSEO_LEVEL_SAFE
-        ${If} $5 = 0
-          ${ExitFor}
-        ${EndIf}
-      ${EndIf}
-    ${Next}
-  ${EndIf}
+  !insertmacro CLAUSEO_CHAIN_SAFE
   ${If} $5 = 1
     ; 2. The recorded hash.
     SetRegView 64
@@ -404,6 +412,291 @@
   Pop $2
   Pop $1
   Pop $0
+!macroend
+
+; The previous install folder. The template reads it from SHCTX\${MANUPRODUCTKEY} (default
+; value) in two places: the reinstall page starts the old uninstaller in it (_?=), and
+; RestorePreviousInstallLocation installs into it. For the per-machine installer that value is in
+; HKLM and the work is elevated, so a value someone else put there must never steer either. The
+; template's blocks "reinstall-guard" and "restore-location-guard" insert
+; CLAUSEO_PREVIOUS_DIR_GUARD right before each use, so the folder is checked again at each use and
+; no verdict is kept between them.
+Var ClauseoPreviousIgnored
+Var ClauseoPreviousKeyMismatch
+
+; GetDriveTypeW of the root in $1 (X:\), into $2; 3 is DRIVE_FIXED.
+!macro CLAUSEO_DRIVE_TYPE
+  System::Call 'kernel32::GetDriveTypeW(w r1) i .r2'
+!macroend
+
+; GetFileAttributesW of the path in $1 itself (never through a link), into $2;
+; INVALID_FILE_ATTRIBUTES is -1.
+!macro CLAUSEO_FILE_ATTRIBUTES
+  System::Call 'kernel32::GetFileAttributesW(w r1) i .r2'
+!macroend
+
+; The uninstall key's InstallLocation into $1: the template writes it quoted, so one pair of
+; quotes is taken off, then one trailing backslash; "" when there is none. Per machine the key is in
+; HKLM, which only administrators can change. Uses $2.
+!macro CLAUSEO_INSTALL_LOCATION
+  ReadRegStr $1 SHCTX "${UNINSTKEY}" "InstallLocation"
+  StrCpy $2 $1 1
+  ${If} $2 == '"'
+    StrCpy $1 $1 "" 1
+    StrCpy $2 $1 "" -1
+    ${If} $2 == '"'
+      StrCpy $1 $1 -1
+    ${EndIf}
+  ${EndIf}
+  StrCpy $2 $1 "" -1
+  ${If} $2 == "\"
+    StrCpy $1 $1 -1
+  ${EndIf}
+!macroend
+
+; Keeps the folder in $4, without one trailing backslash, only when all of these hold, else
+; clears $4:
+; 1. it is X:\... with X a letter: not UNC (\\server), not a device path (\\?\, \\.\), no "/",
+;    no "." or ".." segment, and its drive is fixed (CLAUSEO_DRIVE_TYPE);
+; 2. it equals, ignoring case, the template's default folder ($PROGRAMFILES64\${PRODUCTNAME}
+;    per machine, $LOCALAPPDATA\${PRODUCTNAME} per user, as .onInit builds $INSTDIR) or the
+;    uninstall key's InstallLocation (written quoted; one trailing backslash ignored). Per machine
+;    that key is in HKLM, which only administrators can change;
+; 3. uninstall.exe in it is a regular file, by its own attributes: no folder, no reparse point.
+;    Its contents aren't checked: no hash holds across versions, and the beta isn't signed;
+; 4. per machine only: the chain from the drive's root down to that uninstall.exe, the folder
+;    included, is administrators' alone (CLAUSEO_CHAIN_SAFE, the admin copy's rule).
+; Keeps every other register. $R3 is the verdict and $R4 the folder while it runs.
+!macro CLAUSEO_PREVIOUS_DIR_OK
+  Push $0
+  Push $1
+  Push $2
+  Push $3
+  Push $5
+  Push $6
+  Push $7
+  Push $8
+  Push $9
+  Push $R0
+  Push $R1
+  Push $R2
+  Push $R3
+  Push $R4
+  Push $R6
+  Push $R7
+  Push $R8
+  Push $R9
+  StrCpy $R3 1
+  StrCpy $R4 $4
+  StrCpy $1 $R4 "" -1
+  ${If} $1 == "\"
+    StrCpy $R4 $R4 -1
+  ${EndIf}
+  ; 1. A drive letter, ":\", then no "/" and no "." or ".." segment.
+  StrCpy $1 $R4 1
+  StrCpy $2 $R4 2 1
+  ${If} $2 != ":\"
+    StrCpy $R3 0
+  ${EndIf}
+  StrCpy $3 "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+  StrCpy $5 0
+  ${Do}
+    StrCpy $2 $3 1
+    ${If} $2 == ""
+      ${ExitDo}
+    ${EndIf}
+    ${If} $2 == $1
+      StrCpy $5 1
+      ${ExitDo}
+    ${EndIf}
+    StrCpy $3 $3 "" 1
+  ${Loop}
+  ${If} $5 = 0
+    StrCpy $R3 0
+  ${EndIf}
+  StrCpy $3 "$R4\"
+  ${Do}
+    StrCpy $2 $3 1
+    ${If} $2 == ""
+    ${OrIf} $R3 = 0
+      ${ExitDo}
+    ${EndIf}
+    ${If} $2 == "/"
+      StrCpy $R3 0
+    ${EndIf}
+    StrCpy $2 $3 3
+    ${If} $2 == "\.\"
+      StrCpy $R3 0
+    ${EndIf}
+    StrCpy $2 $3 4
+    ${If} $2 == "\..\"
+      StrCpy $R3 0
+    ${EndIf}
+    StrCpy $3 $3 "" 1
+  ${Loop}
+  ${If} $R3 = 1
+    StrCpy $1 $R4 3
+    !insertmacro CLAUSEO_DRIVE_TYPE
+    ${If} $2 <> 3
+      StrCpy $R3 0
+    ${EndIf}
+  ${EndIf}
+  ; 2. The default folder, else InstallLocation.
+  ${If} $R3 = 1
+    !if "${INSTALLMODE}" == "perMachine"
+      StrCpy $1 "$PROGRAMFILES64\${PRODUCTNAME}"
+    !else
+      StrCpy $1 "$LOCALAPPDATA\${PRODUCTNAME}"
+    !endif
+    ${If} $R4 != $1
+      !insertmacro CLAUSEO_INSTALL_LOCATION
+      ${If} $1 == ""
+      ${OrIf} $R4 != $1
+        StrCpy $R3 0
+      ${EndIf}
+    ${EndIf}
+  ${EndIf}
+  ; 3. uninstall.exe a regular file (FILE_ATTRIBUTE_DIRECTORY 0x10 and REPARSE_POINT 0x400 clear).
+  ${If} $R3 = 1
+    StrCpy $1 "$R4\uninstall.exe"
+    !insertmacro CLAUSEO_FILE_ATTRIBUTES
+    ${If} $2 = -1
+      StrCpy $R3 0
+    ${Else}
+      IntOp $2 $2 & 1040
+      ${If} $2 <> 0
+        StrCpy $R3 0
+      ${EndIf}
+    ${EndIf}
+  ${EndIf}
+  ; 4. Per machine: the chain, administrators' alone.
+  !if "${INSTALLMODE}" == "perMachine"
+    ${If} $R3 = 1
+      StrCpy $0 "$R4\uninstall.exe"
+      !insertmacro CLAUSEO_CHAIN_SAFE
+      ${If} $5 <> 1
+        StrCpy $R3 0
+      ${EndIf}
+    ${EndIf}
+  !endif
+  ${If} $R3 = 1
+    StrCpy $4 $R4
+  ${Else}
+    StrCpy $4 ""
+  ${EndIf}
+  Pop $R9
+  Pop $R8
+  Pop $R7
+  Pop $R6
+  Pop $R4
+  Pop $R3
+  Pop $R2
+  Pop $R1
+  Pop $R0
+  Pop $9
+  Pop $8
+  Pop $7
+  Pop $6
+  Pop $5
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+!macroend
+
+; The check at a use, with the folder the template read from SHCTX\${MANUPRODUCTKEY} in $4.
+; Per user that folder is the candidate. Per machine it never is: that key isn't protected before
+; the first set-up, so the candidate is the HKLM uninstall key's InstallLocation (administrators'
+; alone), else the default folder; a vendor value that differs from it is ignored and said
+; (previousInstallKeyMismatch). The candidate goes through CLAUSEO_PREVIOUS_DIR_OK and comes back
+; in $4, or "" when refused. A refused folder that some key named is said once in the details
+; (previousInstallIgnored); $INSTDIR, when it is that folder (taken at an earlier use), goes back
+; to the template's default folder. Keeps every other register.
+!macro CLAUSEO_PREVIOUS_DIR_GUARD
+  ; Only the two modes built: "both" would pick the mode at run time, and the !else branches
+  ; below would take an elevated install for a per-user one.
+  !if "${INSTALLMODE}" != "perMachine"
+    !if "${INSTALLMODE}" != "currentUser"
+      !error "hooks.nsh's previous-folder check supports only the currentUser and perMachine install modes"
+    !endif
+  !endif
+  ; The per-machine default is $PROGRAMFILES64\${PRODUCTNAME}, which is .onInit's choice only for
+  ; x64 and arm64 builds.
+  !if "${INSTALLMODE}" == "perMachine"
+    !if "${ARCH}" != "x64"
+      !if "${ARCH}" != "arm64"
+        !error "hooks.nsh's previous-folder check assumes an x64 or arm64 build"
+      !endif
+    !endif
+  !endif
+  Push $1
+  Push $2
+  Push $R5
+  Push $R6
+  StrCpy $R5 $4 "" -1
+  ${If} $R5 == "\"
+    StrCpy $R5 $4 -1
+  ${Else}
+    StrCpy $R5 $4
+  ${EndIf}
+  ; $R6: what a key named, for the details line.
+  StrCpy $R6 $R5
+  !if "${INSTALLMODE}" == "perMachine"
+    !insertmacro CLAUSEO_INSTALL_LOCATION
+    ${If} $R6 == ""
+      StrCpy $R6 $1
+    ${EndIf}
+    ${If} $1 == ""
+      StrCpy $1 "$PROGRAMFILES64\${PRODUCTNAME}"
+    ${EndIf}
+    ${If} $R5 != ""
+    ${AndIf} $R5 != $1
+      StrCpy $ClauseoPreviousKeyMismatch 1
+    ${EndIf}
+    StrCpy $R5 $1
+    StrCpy $4 $1
+  !endif
+  ${If} $4 != ""
+    !insertmacro CLAUSEO_PREVIOUS_DIR_OK
+    ${If} $4 == ""
+      ${If} $R6 != ""
+        StrCpy $ClauseoPreviousIgnored 1
+      ${EndIf}
+      ${If} $INSTDIR == $R5
+        !if "${INSTALLMODE}" == "perMachine"
+          StrCpy $INSTDIR "$PROGRAMFILES64\${PRODUCTNAME}"
+        !else
+          StrCpy $INSTDIR "$LOCALAPPDATA\${PRODUCTNAME}"
+        !endif
+      ${EndIf}
+    ${EndIf}
+  ${EndIf}
+  Pop $R6
+  Pop $R5
+  Pop $2
+  Pop $1
+!macroend
+
+; The old uninstaller's command into $R1, after CLAUSEO_PREVIOUS_DIR_GUARD accepted the folder in
+; $4; the template then appends /UPDATE, /P and " _?=$4". Per machine it is that folder's own
+; uninstall.exe, the file the check looked at, never UninstallString, which nothing ties to the
+; folder. Per user, UninstallString, as the template reads it.
+!macro CLAUSEO_PREVIOUS_UNINSTALLER
+  !if "${INSTALLMODE}" == "perMachine"
+    StrCpy $R1 '"$4\uninstall.exe"'
+  !else
+    ReadRegStr $R1 SHCTX "${UNINSTKEY}" "UninstallString"
+  !endif
+!macroend
+
+; The install's lines about the previous folder, first in `Section Install`; no box.
+!macro NSIS_HOOK_PREINSTALL
+  ${If} $ClauseoPreviousKeyMismatch = 1
+    DetailPrint "$(previousInstallKeyMismatch)"
+  ${EndIf}
+  ${If} $ClauseoPreviousIgnored = 1
+    DetailPrint "$(previousInstallIgnored)"
+  ${EndIf}
 !macroend
 
 ; Sets $R3 to the set-up's owner, the record's OwnerSid, when the uninstaller may say that the

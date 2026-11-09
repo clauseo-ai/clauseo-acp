@@ -64,14 +64,13 @@ fn the_reinstall_page_appends_its_own_folder_last_so_nsis_takes_it() {
         "Function PageLeaveReinstall",
         "FunctionEnd",
     );
-    let read_string = line_with(
-        &lines,
-        &["ReadRegStr $R1 SHCTX \"${UNINSTKEY}\" \"UninstallString\""],
-    );
+    // The command comes from the block "reinstall-guard" (previous_dir.rs), then the template's
+    // appends, the folder last.
+    let read_string = line_with(&lines, &["; <<< clauseo: reinstall-guard"]);
     assert_run(
         &lines[read_string..],
         &[
-            "ReadRegStr $R1 SHCTX \"${UNINSTKEY}\" \"UninstallString\"",
+            "; <<< clauseo: reinstall-guard",
             "${IfThen} $UpdateMode = 1 ${|} StrCpy $R1 \"$R1 /UPDATE\" ${|} ; append /UPDATE",
             "${IfThen} $PassiveMode = 1 ${|} StrCpy $R1 \"$R1 /P\" ${|} ; append /P",
             "StrCpy $R1 \"$R1 _?=$4\" ; append uninstall directory",

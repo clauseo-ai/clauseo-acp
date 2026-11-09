@@ -13,6 +13,8 @@ mod installer_version_info;
 mod make;
 mod nsis_names;
 mod nsis_run;
+mod previous_dir;
+mod previous_dir_refusals;
 mod safe_temp;
 mod sandbox_link;
 mod set_aside;
