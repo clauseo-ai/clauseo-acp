@@ -433,6 +433,8 @@ fn spawn(spec: &Spec<'_>, args: &[OsString]) -> io::Result<Child> {
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .process_group(0);
+    // No accepted client connection is inherited (`transport/unix.rs`).
+    let _accepts = crate::transport::unix::hold_accepts();
     command.spawn()
 }
 

@@ -6,12 +6,13 @@ use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
-use super::Connection;
+use super::{Connection, Peer};
 
 /// One end of a socket pair, with the peer check's answer fixed.
 pub(crate) struct Fake {
     pub(crate) stream: UnixStream,
-    pub(crate) same_user: bool,
+    /// What every peer check answers.
+    pub(crate) passes: bool,
 }
 
 impl Read for Fake {
@@ -34,7 +35,7 @@ impl Connection for Fake {
     fn try_clone(&self) -> io::Result<Self> {
         Ok(Fake {
             stream: self.stream.try_clone()?,
-            same_user: self.same_user,
+            passes: self.passes,
         })
     }
 
@@ -50,7 +51,7 @@ impl Connection for Fake {
         self.stream.set_read_timeout(timeout)
     }
 
-    fn same_user(&self) -> bool {
-        self.same_user
+    fn peer_is(&self, _peer: Peer) -> bool {
+        self.passes
     }
 }

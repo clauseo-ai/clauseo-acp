@@ -136,7 +136,11 @@ impl Reaper {
         if let Some(ms) = std::env::var_os(DAEMON_AGAIN_FOR_TESTS) {
             command.env(DAEMON_AGAIN_FOR_TESTS, ms);
         }
-        let mut child = command.spawn()?;
+        // Started before any listener, but held as every spawn is (`transport/unix.rs`).
+        let mut child = {
+            let _accepts = crate::transport::unix::hold_accepts();
+            command.spawn()?
+        };
         let teller = Teller(Arc::new(Mutex::new(child.stdin.take())));
         let mut ready = String::new();
         if let Some(stdout) = child.stdout.take() {

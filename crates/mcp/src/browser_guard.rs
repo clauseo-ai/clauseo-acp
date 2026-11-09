@@ -7,7 +7,9 @@
 //! instead of on stdio: the host runs it outside the agent's jail and the agent reaches it through
 //! `clauseo-mcp browser-bridge` (`browser_bridge.rs`). A client's disconnect stops the browser
 //! as the idle stop does and the guard waits for the next client; everything below holds as
-//! over stdio but for the agent's stdin, and the guard removes the socket when it exits.
+//! over stdio but for the agent's stdin, and the guard removes the socket when it exits. Once
+//! the socket is made it prints `clauseo-mcp browser-guard: listening as <pid>/<version>` on
+//! stderr, its own process identity, which the host passes to the bridge.
 //!
 //! In order: note the guard's parent (`parent.rs`; exit 1 if it is gone already), read the
 //! command line (exit 2 on anything else), build the child's environment from the host's
@@ -169,6 +171,14 @@ pub fn run(args: &[OsString]) -> Result<i32, Failure> {
         .map(transport::unix::Socket::make)
         .transpose()
         .map_err(|reason| failed(&reason))?;
+    // The host reads this line, checks the pid is the child it started, and passes the identity
+    // to the bridge (`browser_bridge.rs`, `--guard-pid` and `--guard-pidversion`).
+    #[cfg(unix)]
+    if socket.is_some() {
+        let own = transport::unix::own_identity()
+            .ok_or_else(|| failed("cannot read the guard's own process identity"))?;
+        note(&format!("{LISTENING} {own}"));
+    }
     #[cfg(unix)]
     let agent = match socket
         .as_mut()
@@ -323,6 +333,11 @@ pub(crate) mod lines {
     pub(crate) use super::relay::lines::error_reply;
     pub(crate) use super::relay::{CHILD_MAX_LINE_BYTES, Line, Overflow, read_line};
 }
+
+/// The start of the line that tells the host the guard listens, then `<pid>/<version>`
+/// (`transport.rs`'s `Identity`).
+#[cfg(unix)]
+pub(crate) const LISTENING: &str = "listening as";
 
 /// The failure when the guard's parent has gone (`parent.rs`).
 pub(crate) const PARENT_GONE: &str =

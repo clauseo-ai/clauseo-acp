@@ -11,8 +11,14 @@ use std::thread::{self, JoinHandle};
 
 use serde_json::{Value, json};
 
-use super::{CONNECT_WAIT, Caps, Out, UNAVAILABLE, connect_within, serve};
+use super::{CONNECT_WAIT, Caps, Out, UNAVAILABLE, connect_within, parse, serve};
+use crate::transport::Peer;
 use crate::transport::fake::Fake;
+
+/// The stand-in guard's peer: this test process, which binds its socket.
+fn own() -> Peer {
+    Peer::Process(crate::transport::unix::own_identity().unwrap())
+}
 
 /// A folder for the stand-in guard's socket, removed on drop.
 struct Dir(PathBuf);
@@ -55,7 +61,7 @@ impl Bridge {
         let thread = thread::spawn(move || {
             let out: Out = Arc::new(Mutex::new(their_stdout));
             let connect = || connect_within(&socket, CONNECT_WAIT);
-            serve(BufReader::new(their_stdin), &out, &connect, caps)
+            serve(BufReader::new(their_stdin), &out, &connect, own(), caps)
         });
         Bridge {
             stdin: Some(stdin),
@@ -90,15 +96,15 @@ impl Bridge {
 }
 
 /// One accepted connection on the stand-in guard's side.
-struct Peer {
+struct Remote {
     reader: BufReader<UnixStream>,
     writer: UnixStream,
 }
 
-impl Peer {
-    fn accept(listener: &UnixListener) -> Peer {
+impl Remote {
+    fn accept(listener: &UnixListener) -> Remote {
         let (stream, _) = listener.accept().unwrap();
-        Peer {
+        Remote {
             writer: stream.try_clone().unwrap(),
             reader: BufReader::new(stream),
         }
@@ -128,7 +134,7 @@ fn lines_go_both_ways_unchanged() {
     let dir = Dir::new("both");
     let listener = listen(&dir.socket());
     let guard = thread::spawn(move || {
-        let mut peer = Peer::accept(&listener);
+        let mut peer = Remote::accept(&listener);
         let mut received = Vec::new();
         while let Some(line) = peer.line() {
             if line.contains("\"id\"") {
@@ -164,7 +170,7 @@ fn lines_over_the_caps_are_refused_or_end_the_link() {
     let guard = {
         let long = long.clone();
         thread::spawn(move || {
-            let mut peer = Peer::accept(&listener);
+            let mut peer = Remote::accept(&listener);
             let first = peer.line();
             // The second request: a line over the cap back, which ends the link.
             let second = peer.line();
@@ -221,7 +227,7 @@ fn with_no_guard_each_request_gets_an_error_and_stdin_is_read_to_its_end() {
     );
     let written = Arc::new(Mutex::new(Vec::<u8>::new()));
     let out: Out = Arc::<Mutex<Vec<u8>>>::clone(&written);
-    serve(Cursor::new(stdin), &out, &connect, Caps::GUARD).unwrap();
+    serve(Cursor::new(stdin), &out, &connect, own(), Caps::GUARD).unwrap();
     let text = String::from_utf8(written.lock().unwrap().clone()).unwrap();
     let answers: Vec<Value> = text
         .lines()
@@ -244,14 +250,14 @@ fn a_guard_gone_mid_session_answers_what_was_pending_and_the_next_request_reconn
     let listener = listen(&dir.socket());
     let (dropped_tx, dropped) = std::sync::mpsc::channel::<()>();
     let guard = thread::spawn(move || {
-        let mut first = Peer::accept(&listener);
+        let mut first = Remote::accept(&listener);
         assert!(first.line().is_some_and(|line| line.contains("\"open\"")));
         first.write(r#"{"jsonrpc":"2.0","id":"open","result":{}}"#);
         assert!(first.line().is_some_and(|line| line.contains("\"held\"")));
         // The guard goes without answering.
         drop(first);
         dropped_tx.send(()).unwrap();
-        let mut second = Peer::accept(&listener);
+        let mut second = Remote::accept(&listener);
         assert!(second.line().is_some_and(|line| line.contains("\"again\"")));
         second.write(r#"{"jsonrpc":"2.0","id":"again","result":{}}"#);
         // Gone for good, without answering "late".
@@ -278,10 +284,10 @@ fn a_guard_gone_mid_session_answers_what_was_pending_and_the_next_request_reconn
     bridge.finish();
 }
 
-/// A peer of another user at the socket (a squatter posing as the guard): the bridge sends it
-/// nothing and answers the request itself, as though no guard were there.
+/// A peer that fails the peer check (a squatter posing as the guard): the bridge sends it nothing
+/// and answers the request itself, as though no guard were there.
 #[test]
-fn a_peer_of_another_user_is_no_guard() {
+fn a_peer_that_fails_the_check_is_no_guard() {
     use std::io::Read;
     let (theirs, ours) = UnixStream::pair().unwrap();
     let squatter = Mutex::new(Some(ours));
@@ -289,16 +295,58 @@ fn a_peer_of_another_user_is_no_guard() {
         let stream = squatter.lock().unwrap().take().unwrap();
         Ok(Fake {
             stream,
-            same_user: false,
+            passes: false,
         })
     };
     let stdin = concat!(r#"{"jsonrpc":"2.0","id":1,"method":"tools/call"}"#, "\n");
     let written = Arc::new(Mutex::new(Vec::<u8>::new()));
     let out: Out = Arc::<Mutex<Vec<u8>>>::clone(&written);
-    serve(Cursor::new(stdin), &out, &connect, Caps::GUARD).unwrap();
+    serve(Cursor::new(stdin), &out, &connect, own(), Caps::GUARD).unwrap();
     let text = String::from_utf8(written.lock().unwrap().clone()).unwrap();
     unavailable(&serde_json::from_str(text.trim_end()).unwrap(), &json!(1));
     let mut sent = Vec::new();
     (&theirs).read_to_end(&mut sent).unwrap();
     assert!(sent.is_empty(), "the squatter got {sent:?}");
+}
+
+/// `--socket <path> --guard-pid <pid> --guard-pidversion <version>` exactly; both numbers
+/// required, plain decimal, the pid over 1.
+#[test]
+fn the_guards_identity_is_required() {
+    let args = |list: &[&str]| -> Vec<std::ffi::OsString> { list.iter().map(Into::into).collect() };
+    let with = |pid: &str, version: &str| {
+        parse(&args(&[
+            "--socket",
+            "/tmp/g.sock",
+            "--guard-pid",
+            pid,
+            "--guard-pidversion",
+            version,
+        ]))
+    };
+    assert_eq!(
+        with("4242", "7"),
+        Ok((
+            PathBuf::from("/tmp/g.sock"),
+            Peer::Process(crate::transport::Identity {
+                pid: 4242,
+                version: 7
+            })
+        ))
+    );
+    assert!(with("4242", "0").is_ok(), "a version of 0");
+    assert!(
+        parse(&args(&["--socket", "/tmp/g.sock", "--guard-pid", "4242"])).is_err(),
+        "no version"
+    );
+    assert!(
+        parse(&args(&["--socket", "/tmp/g.sock"])).is_err(),
+        "no pid"
+    );
+    for bad in ["", "0", "1", "04242", "+4242", "-1", "42x", "4294967296"] {
+        assert!(with(bad, "7").is_err(), "pid {bad:?}");
+    }
+    for bad in ["", "07", "+7", "-7", "7x"] {
+        assert!(with("4242", bad).is_err(), "version {bad:?}");
+    }
 }

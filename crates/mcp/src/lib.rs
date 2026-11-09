@@ -12,9 +12,10 @@
 //!   Clauseo's isolation; and leaves no Chrome or agent-browser daemon behind when it ends.
 //!   `docs/decisions/0029-browser.md` is the record.
 //! - The browser bridge ([`browser_bridge`], Unix only): `clauseo-mcp browser-bridge --socket
-//!   <path>`, which relays each JSON-RPC line, unchanged, between the agent's stdio and a guard
-//!   started with `--listen <path>`, and answers each request itself while the guard cannot be
-//!   reached.
+//!   <path> --guard-pid <pid> --guard-pidversion <version>`, which relays each JSON-RPC line,
+//!   unchanged, between the agent's stdio and a guard started with `--listen <path>`, only if the
+//!   process on the socket is that guard (the identity it printed), and answers each request
+//!   itself while the guard cannot be reached.
 //! - The connector relay client ([`connector`]): `clauseo-mcp connector <name>`, the stdio MCP
 //!   server for a connector. It relays each JSON-RPC line, unchanged, over loopback TCP to the
 //!   host's per-launch relay, and answers "not reachable" itself when there is no relay. It reads

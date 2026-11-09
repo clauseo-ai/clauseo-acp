@@ -60,12 +60,15 @@ pub(crate) fn read_no_follow(file: &Path) -> io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
-/// `UnixListener::bind`: the guard's `--listen` socket (`transport/unix.rs`), which never
-/// replaces or follows what is at the path.
-#[cfg(unix)]
+/// `UnixListener::bind` at a path, for the tests' stand-in guards; the guard's own socket is
+/// [`bind_unix_socket_in`].
+#[cfg(all(test, unix))]
 pub(crate) fn bind_unix_socket(path: &Path) -> io::Result<std::os::unix::net::UnixListener> {
     std::os::unix::net::UnixListener::bind(path)
 }
+
+#[cfg(unix)]
+pub(crate) use unix::{bind_unix_socket_in, remove_in};
 
 /// `fs::create_dir_all`: Chrome's profile folders (`browser_guard/chrome.rs`).
 pub(crate) fn create_dir_all(path: &Path) -> io::Result<()> {
