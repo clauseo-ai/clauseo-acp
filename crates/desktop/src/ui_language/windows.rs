@@ -1,7 +1,8 @@
-//! Windows: the value written and read under `HKCU`.
+//! Windows: the value written and read under `HKCU`, and the display language.
 #![expect(unsafe_code, reason = "FFI to the Win32 registry")]
 
 use windows::Win32::Foundation::ERROR_SUCCESS;
+use windows::Win32::Globalization::GetUserDefaultUILanguage;
 use windows::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, KEY_SET_VALUE, REG_OPTION_NON_VOLATILE, REG_SZ, RRF_RT_REG_SZ,
     RegCloseKey, RegCreateKeyExW, RegGetValueW, RegSetValueExW,
@@ -97,4 +98,10 @@ pub(super) fn delete_key(key: &str) -> Result<(), u32> {
     } else {
         Err(deleted.0)
     }
+}
+
+/// The user's display language, a `LANGID` (`GetUserDefaultUILanguage`).
+pub(super) fn display_language() -> u16 {
+    // SAFETY: no arguments; it returns a value and cannot fail.
+    unsafe { GetUserDefaultUILanguage() }
 }
