@@ -12,8 +12,9 @@ use super::sources::read;
 use super::template::{TEMPLATE, block_code, split_blocks};
 
 /// The upstream lines `webview2-no-elevation` stands in for: tauri-cli 2.12.2's update of an
-/// installed runtime older than the floor, with its Abort/Retry/Ignore box and `Quit`.
-pub(super) const UPSTREAM_UPDATE: [&str; 21] = [
+/// installed runtime older than the floor, with its Abort/Retry/Ignore box and `Quit`, through
+/// the end of its `${If} $R1 != ""` (the block closes that `${If}` itself).
+pub(super) const UPSTREAM_UPDATE: [&str; 22] = [
     "        update_webview:",
     "          DetailPrint \"$(installingWebview2)\"",
     "          ${If} ${RunningX64}",
@@ -37,6 +38,7 @@ pub(super) const UPSTREAM_UPDATE: [&str; 21] = [
     "              Quit",
     "              ignore:",
     "            ${EndIf}",
+    "          ${EndIf}",
 ];
 
 const GUID: &str = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";

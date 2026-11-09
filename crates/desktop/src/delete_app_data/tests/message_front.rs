@@ -56,8 +56,9 @@ fn every_box_in_the_repos_scripts_comes_to_the_front() {
             seen += 1;
         }
     }
-    // The set-up's outcomes, the uninstall's, the temporary folder's and the in-place check's.
-    assert!(seen >= 20, "{seen}");
+    // The set-up's outcomes (10 in admin_copy.nsh), the uninstall's (6 in hooks.nsh), the
+    // temporary folder's (2) and the in-place check's (1).
+    assert!(seen >= 19, "{seen}");
     // The box after a failed set-up, the one the VM saw behind Explorer.
     let admin = read("windows/admin_copy.nsh");
     assert!(
