@@ -53,6 +53,9 @@
 //!   whether a cutoff taken now would cover it, and [`kill`] kills one, for tests that watch a
 //!   process they did not start; on Windows, `image_and_parent` reads one's executable and
 //!   parent pid.
+//! - [`spawn_lock`]: the process-wide spawn lock ([`SpawnLock`]). [`spawn_in_tree`] holds it
+//!   across its spawn; a start that marks its own handles inheritable (`clauseo-lowbox`) holds
+//!   it from the mark to the reset, so no other start in the process inherits them.
 //! - [`processes_named`] (macOS and Windows): the starts of the running processes with a name,
 //!   or `None` when that is unknown. It blocks, and signals nothing.
 //! - [`ExitReport`]: the code or signal, [`ExitReport::stderr_tail`], and
@@ -103,6 +106,7 @@ mod live;
 #[cfg(all(test, any(target_os = "macos", windows)))]
 mod named_tests;
 mod os;
+mod spawn_lock;
 mod spec;
 mod stderr;
 mod stdin;
@@ -115,6 +119,7 @@ pub use launch::{
     Launched, Launcher, NODE_ENV, PassthroughLauncher, SpawnOptions, is_node_env, spawn_in_tree,
 };
 pub use live::{close_spawns, live_handles};
+pub use spawn_lock::{SpawnLock, spawn_lock};
 pub use spec::LaunchSpec;
 pub use stderr::StderrPump;
 pub use stdin::AgentStdin;
