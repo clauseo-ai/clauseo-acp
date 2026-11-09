@@ -174,7 +174,13 @@ the matter or notes at launch is refused rather than watched ("Disconnect the ne
 the profile, fixed when the launcher is made, can't deny it per launch. Device numbers can be
 reused once a volume is ejected, so a new volume that happens to get a launch volume's number
 passes as that one. A session recorded before volumes were kept judges no volume new in its
-dead-session scan; its matter's next launch records them.
+dead-session scan; its matter's next launch records them. Not covered: a volume mounted inside another volume that
+also appeared during the session is recorded only as the outer one (the scan doesn't enter a
+new volume), so after the outer is ejected nothing records the inner; and a stuck record clears
+once its folder's device matches the folder's above it, which a mount nested under a volume
+ejected and remounted can satisfy early. The jail test reads the Sandbox's refusal with `log
+stream`, which needs an administrator account and can drop lines under load: on a standard
+account, or on a very busy machine, that test can fail with nothing wrong in the jail.
 
 Two backstops cover a stream that loses events without saying so (seen on a disk image mounted
 seconds before, under a full parallel test run: nothing for over 10 s). **The canary:** every
