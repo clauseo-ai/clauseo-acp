@@ -38,8 +38,7 @@ pub const APPROVER_LOGON_REFUSED: &str = "Windows refused the sign-in of the acc
 pub const DATA_DIR_NOT_OWNED: &str = "this computer's Clauseo data folder isn't owned by you: \
      ask whoever looks after this computer";
 /// The cause when the Secondary Logon service is disabled.
-pub const SECLOGON_DISABLED: &str = "the Secondary Logon service (seclogon) is disabled: IT can \
-     set it to start manually";
+pub const SECLOGON_DISABLED: &str = "the Secondary Logon service (seclogon) is disabled";
 /// The cause when local policy refuses the interactive logon right to `Users`.
 pub const LOGON_REFUSED: &str = "Windows' \"Deny log on locally\" setting includes the Users \
      group, so the sandbox users can't sign in: IT can take Users out of it";

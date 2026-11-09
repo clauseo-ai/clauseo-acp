@@ -564,11 +564,9 @@ pub fn station_name(random: [u8; 8]) -> String {
 }
 
 /// The cause when the Secondary Logon service is disabled: set-up's own words.
-pub const SECLOGON_DISABLED: &str = "the Secondary Logon service (seclogon) is disabled: IT can \
-     set it to start manually";
+pub const SECLOGON_DISABLED: &str = "the Secondary Logon service (seclogon) is disabled";
 /// The cause when the pool user's password is missing or refused.
-pub const PASSWORD_LOST: &str = "the sandbox user's saved password is missing or out of date: \
-     run the set-up again";
+pub const PASSWORD_LOST: &str = "the sandbox user's saved password is missing or out of date";
 
 fn field(field: &'static str, rule: &'static str) -> LaunchError {
     LaunchError::Field { field, rule }

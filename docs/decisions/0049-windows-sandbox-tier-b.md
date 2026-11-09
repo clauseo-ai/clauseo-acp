@@ -1781,43 +1781,43 @@ formatting of an error outside a `Detail::new` closure.
 **The host maps these names to its own error codes, so a name, once given, never changes.** A
 finer kind shares its `RunExit` code with the code's own kind only where the lawyer acts
 differently; `PoolStop` (`0xE0C15010`) is no longer produced and has no kind. The class is what
-the lawyer can do: `setup` (run the set-up again), `admin` (IT changes the computer),
-`transient` (a later launch may go ahead), `permanent` (nothing on this computer, as it is),
+the lawyer can do: `setup` (the sandbox set-up runs again), `admin` (an administrator of this
+computer changes it), `transient` (a later launch may go ahead), `permanent` (nothing on this computer, as it is),
 `internal` (Clauseo's own fault), `notice` (nothing was refused). Of the refusals, `job`,
 `token` and `spawn` are the agent failing to start inside the jail; `codex_reuse`,
 `matter_unwatchable`, `sweep`, `escapee`, `awaiting_stop` and `awaiting_sweep` are the jail
 refusing. The runner checks no folder's drive (the host's admit does, before the launch), so no
 kind names one. `stderr/tests.rs` checks this table against the code.
 
-| Kind | `RunExit` (code) | Class | Sentence | What the lawyer should do |
+| Kind | `RunExit` (code) | Class | Sentence | What the app should offer |
 | --- | --- | --- | --- | --- |
-| `usage` | `Usage` (0xE0C15000) | internal | the sandbox runner was started the wrong way | Nothing on this computer: report it to Clauseo support. |
-| `bad_launch` | `BadLaunch` (0xE0C15001) | internal | the sandbox runner couldn't read or accept the launch it was given | Try again; if it repeats, report it to Clauseo support. |
-| `pool_user_missing` | `BadLaunch` (0xE0C15001) | setup | the matter's sandbox user isn't among those set up on this computer: run the set-up again | Run Clauseo's sandbox set-up again. |
-| `no_secret` | `NoSecret` (0xE0C15002) | setup | the sandbox user's saved password is missing or can't be read: run the set-up again | Run Clauseo's sandbox set-up again. |
-| `secondary_logon_disabled` | `SecondaryLogon` (0xE0C15003) | admin | the Secondary Logon service (seclogon) is disabled: IT can set it to start manually | Ask IT to set the Secondary Logon service to start manually. |
-| `logon_right_missing` | `LogonRight` (0xE0C15004) | admin | Windows doesn't allow the sandbox users to log on locally: IT can allow it | Ask IT to let the sandbox users log on locally ("Allow log on locally"). |
-| `password_refused` | `Password` (0xE0C15005) | setup | the sandbox user's saved password is missing or out of date: run the set-up again | Run Clauseo's sandbox set-up again. |
-| `logon` | `Logon` (0xE0C15006) | transient | the sandbox user couldn't be logged on | Try again; if it repeats, run the set-up again. |
-| `codex_reuse` | `CodexReuse` (0xE0C15007) | permanent | the launch would use your own Codex folder, which the sandbox never shares | Point the AI tool's settings (`CODEX_HOME`, its credential) away from your own Codex folder, then try again. |
+| `usage` | `Usage` (0xE0C15000) | internal | the sandbox runner was started the wrong way | Nothing to do on this computer; the app offers to send a report. |
+| `bad_launch` | `BadLaunch` (0xE0C15001) | internal | the sandbox runner couldn't read or accept the launch it was given | Try again; if it repeats, the app offers to send a report. |
+| `pool_user_missing` | `BadLaunch` (0xE0C15001) | setup | the matter's sandbox user isn't among those set up on this computer | Offer to run the sandbox set-up again. |
+| `no_secret` | `NoSecret` (0xE0C15002) | setup | the sandbox user's saved password is missing or can't be read | Offer to run the sandbox set-up again. |
+| `secondary_logon_disabled` | `SecondaryLogon` (0xE0C15003) | admin | the Secondary Logon service (seclogon) is disabled | Needs an administrator of this computer to set the Secondary Logon service to start manually; the app's words come from copy review. |
+| `logon_right_missing` | `LogonRight` (0xE0C15004) | admin | Windows doesn't allow the sandbox users to log on locally | Needs an administrator of this computer to let the sandbox users log on locally ("Allow log on locally"); the app's words come from copy review. |
+| `password_refused` | `Password` (0xE0C15005) | setup | the sandbox user's saved password is missing or out of date | Offer to run the sandbox set-up again. |
+| `logon` | `Logon` (0xE0C15006) | transient | the sandbox user couldn't be logged on | Try again; if it repeats, offer to run the sandbox set-up again. |
+| `codex_reuse` | `CodexReuse` (0xE0C15007) | permanent | the launch would use your own Codex folder, which the sandbox never shares | Explain how to point the AI tool's settings (`CODEX_HOME`, its credential) away from your own Codex folder, then try again. |
 | `pipe` | `Pipe` (0xE0C15008) | transient | the sandbox runner's private connection to its other half failed | Try again. |
-| `pipe_intruder` | `Pipe` (0xE0C15008) | admin | another program connected to the sandbox runner's private connection | Don't start the session again until IT has checked the computer: another program joined the sandbox's connection. |
-| `job` | `Job` (0xE0C15009) | transient | the sandbox couldn't hold the agent's processes together, so the agent didn't start | Try again; if it repeats, restart the computer. |
-| `token` | `Token` (0xE0C1500A) | transient | the sandbox couldn't make the agent's restricted access, so the agent didn't start | Try again; if it repeats, restart the computer. |
-| `spawn` | `Spawn` (0xE0C1500B) | transient | the agent couldn't be started inside the sandbox | Check the AI tool is installed, then try again. |
-| `matter_unwatchable` | `Spawn` (0xE0C1500B) | transient | Clauseo can't watch the matter's folder for changes, so it didn't start the session | Try again; if it repeats, report it to Clauseo support with where the matter's folder is. |
-| `internal` | `Spawn` (0xE0C1500B) | internal | the sandbox runner failed in a way it can't name | Try again; if it repeats, report it to Clauseo support. |
-| `agent_reserved` | `AgentReserved` (0xE0C1500C) | internal | the agent exited with a code kept for the sandbox runner's own failures | The AI tool failed: try again, and report it if it repeats. |
-| `ended_before_start` | `AgentReserved` (0xE0C1500C) | transient | the session ended before its agent started; the agent never ran | Start the session again: it was stopped (a cancel, or the git watch) before the AI tool ran. |
-| `sweep` | `Sweep` (0xE0C1500D) | transient | the sandbox couldn't clear the sandbox user's earlier processes, so the agent didn't start | Wait a minute and try again; if it repeats, restart the computer. |
-| `dll_search` | `DllSearch` (0xE0C1500E) | internal | the sandbox runner couldn't keep Windows to its own folder for the libraries it loads | Report it to Clauseo support. |
-| `escapee` | `Escapee` (0xE0C1500F) | transient | a process of the sandbox user's outlived every sweep of this session | Nothing now: Clauseo asks Windows to stop the leftover process before the next session. If the next start reports `awaiting_stop` for long, restart the computer. |
-| `marker_unwritable` | `MarkerUnwritable` (0xE0C15011) | transient | the session's marker couldn't be written, so the session didn't start | Check the disk isn't full, then try again. |
-| `install_record_unreadable` | `MarkerUnwritable` (0xE0C15011) | setup | the sandbox's install record can't be read, so the session didn't start: run the set-up again | Run Clauseo's sandbox set-up again. |
-| `awaiting_stop` | `AwaitingStop` (0xE0C15012) | transient | an earlier session of this sandbox user awaits the sandbox's stop | Wait a minute and try again; if it repeats, restart the computer. |
+| `pipe_intruder` | `Pipe` (0xE0C15008) | admin | another program connected to the sandbox runner's private connection, so the session was stopped | Needs an administrator of this computer to check the computer before the session starts again; the app's words come from copy review. |
+| `job` | `Job` (0xE0C15009) | transient | the sandbox couldn't hold the agent's processes together, so the agent didn't start | Try again; if it repeats, suggest restarting the computer. |
+| `token` | `Token` (0xE0C1500A) | transient | the sandbox couldn't make the agent's restricted access, so the agent didn't start | Try again; if it repeats, suggest restarting the computer. |
+| `spawn` | `Spawn` (0xE0C1500B) | transient | the agent couldn't be started inside the sandbox | Offer a check that the AI tool is installed, then try again. |
+| `matter_unwatchable` | `Spawn` (0xE0C1500B) | transient | Clauseo can't watch the matter's folder for changes, so it didn't start the session | Try again; if it repeats, the app offers to send a report with where the matter's folder is. |
+| `internal` | `Spawn` (0xE0C1500B) | internal | the sandbox runner failed in a way it can't name | Try again; if it repeats, the app offers to send a report. |
+| `agent_reserved` | `AgentReserved` (0xE0C1500C) | internal | the agent exited with a code kept for the sandbox runner's own failures | The AI tool failed: try again; the app offers to send a report if it repeats. |
+| `ended_before_start` | `AgentReserved` (0xE0C1500C) | transient | the session ended before its agent started; the agent never ran | Offer to start the session again: it was stopped (a cancel, or the git watch) before the AI tool ran. |
+| `sweep` | `Sweep` (0xE0C1500D) | transient | the sandbox couldn't clear the sandbox user's earlier processes, so the agent didn't start | Wait a minute and try again; if it repeats, suggest restarting the computer. |
+| `dll_search` | `DllSearch` (0xE0C1500E) | internal | the sandbox runner couldn't keep Windows to its own folder for the libraries it loads | Nothing to do on this computer; the app offers to send a report. |
+| `escapee` | `Escapee` (0xE0C1500F) | transient | a process of the sandbox user's outlived every sweep of this session | Nothing to do now: Clauseo asks Windows to stop the leftover process before the next session. If the next start reports `awaiting_stop` for long, suggest restarting the computer. |
+| `marker_unwritable` | `MarkerUnwritable` (0xE0C15011) | transient | the session's marker couldn't be written, so the session didn't start | Offer a check that the disk isn't full, then try again. |
+| `install_record_unreadable` | `MarkerUnwritable` (0xE0C15011) | setup | the sandbox's install record can't be read, so the session didn't start | Offer to run the sandbox set-up again. |
+| `awaiting_stop` | `AwaitingStop` (0xE0C15012) | transient | an earlier session of this sandbox user awaits the sandbox's stop | Wait a minute and try again; if it repeats, suggest restarting the computer. |
 | `awaiting_sweep` | `AwaitingSweep` (0xE0C15013) | transient | an earlier session of this sandbox user awaits the sandbox's sweep | Wait a minute and try again. |
 | `not_windows` | none (exit 2) | permanent | it runs agents in Clauseo's sandbox on Windows only | Nothing: the sandbox runner runs on Windows only. |
-| `git_pairing_lost` | none | notice | Clauseo can't follow folders the AI tool moves in this session, so it will stop the session if the AI tool keeps moving or removing new folders in the matter before Clauseo can check them. | Nothing; avoid moving new folders in the matter while the AI tool works. |
+| `git_pairing_lost` | none | notice | Clauseo can't follow folders the AI tool moves in this session, so it will stop the session if the AI tool keeps moving or removing new folders in the matter before Clauseo can check them. | Nothing to do; the notice says what the session can't follow. |
 | `git_watch_broken` | none | notice | git watch: the watch failed; ending the session | Nothing: it is for the log. |
 | `git_watch_overflow` | none | notice | git watch: too many changes at once; rescanning the folder | Nothing: it is for the log. |
 | `git_items_left` | none | notice | git watch: items not set aside while the agent's processes may still run; the check after the session sets them aside | Nothing: it is for the log. |
@@ -1840,9 +1840,9 @@ kind names one. `stderr/tests.rs` checks this table against the code.
 | `sweep_failed` | none | notice | sweep: a process of the sandbox user's couldn't be checked or ended | Nothing: it is for the log. |
 | `sweep_escapee` | none | notice | sweep: processes of the sandbox user's can't be ended | Nothing now: see `escapee`. |
 | `launch_file_kept` | none | notice | the launch file couldn't be removed and stays | Nothing: it is for the log. |
-| `firm_ca_unmerged` | none | notice | the firm CA wasn't merged; the machine bundle stays | If the AI tool can't reach the firm's servers, ask IT to check the firm's CA certificates. |
-| `firm_ca_file_skipped` | none | notice | a firm CA file was left out | If the AI tool can't reach the firm's servers, ask IT to check the firm's CA certificates. |
-| `firm_ca_entries_skipped` | none | notice | firm CA entries were left out: unreadable, disallowed or not a CA | If the AI tool can't reach the firm's servers, ask IT to check the firm's CA certificates. |
+| `firm_ca_unmerged` | none | notice | the firm CA wasn't merged; the machine bundle stays | If the AI tool can't reach the firm's servers, needs an administrator of this computer to check the firm's CA certificates; the app's words come from copy review. |
+| `firm_ca_file_skipped` | none | notice | a firm CA file was left out | If the AI tool can't reach the firm's servers, needs an administrator of this computer to check the firm's CA certificates; the app's words come from copy review. |
+| `firm_ca_entries_skipped` | none | notice | firm CA entries were left out: unreadable, disallowed or not a CA | If the AI tool can't reach the firm's servers, needs an administrator of this computer to check the firm's CA certificates; the app's words come from copy review. |
 | `agent_windows_status` | none | notice | the agent ended at a Windows status | Nothing: it is for the log. |
 | `inner_windows_status` | none | notice | the inner runner ended at a Windows status | Nothing: it is for the log. |
 

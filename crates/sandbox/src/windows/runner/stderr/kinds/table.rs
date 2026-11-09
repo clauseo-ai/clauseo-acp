@@ -37,16 +37,14 @@ pub(in super::super) const TABLE: [Row; 54] = [
         name: "pool_user_missing",
         exit: Some(RunExit::BadLaunch),
         class: Setup,
-        sentence: "the matter's sandbox user isn't among those set up on this computer: run the \
-         set-up again",
+        sentence: "the matter's sandbox user isn't among those set up on this computer",
     },
     Row {
         kind: RunnerKind::NoSecret,
         name: "no_secret",
         exit: Some(RunExit::NoSecret),
         class: Setup,
-        sentence: "the sandbox user's saved password is missing or can't be read: run the set-up \
-         again",
+        sentence: "the sandbox user's saved password is missing or can't be read",
     },
     Row {
         kind: RunnerKind::SecondaryLogonDisabled,
@@ -60,7 +58,7 @@ pub(in super::super) const TABLE: [Row; 54] = [
         name: "logon_right_missing",
         exit: Some(RunExit::LogonRight),
         class: Admin,
-        sentence: "Windows doesn't allow the sandbox users to log on locally: IT can allow it",
+        sentence: "Windows doesn't allow the sandbox users to log on locally",
     },
     Row {
         kind: RunnerKind::PasswordRefused,
@@ -95,7 +93,8 @@ pub(in super::super) const TABLE: [Row; 54] = [
         name: "pipe_intruder",
         exit: Some(RunExit::Pipe),
         class: Admin,
-        sentence: "another program connected to the sandbox runner's private connection",
+        sentence: "another program connected to the sandbox runner's private connection, so the \
+         session was stopped",
     },
     Row {
         kind: RunnerKind::Job,
@@ -184,8 +183,7 @@ pub(in super::super) const TABLE: [Row; 54] = [
         name: "install_record_unreadable",
         exit: Some(RunExit::MarkerUnwritable),
         class: Setup,
-        sentence: "the sandbox's install record can't be read, so the session didn't start: run \
-         the set-up again",
+        sentence: "the sandbox's install record can't be read, so the session didn't start",
     },
     Row {
         kind: RunnerKind::AwaitingStop,
