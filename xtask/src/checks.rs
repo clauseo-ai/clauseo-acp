@@ -40,6 +40,7 @@ pub(crate) mod log_literals;
 pub(crate) mod pins;
 pub(crate) mod planted;
 pub(crate) mod plugins;
+pub(crate) mod runner_stderr;
 pub(crate) mod tauri_config;
 pub(crate) mod toml_lines;
 
@@ -262,6 +263,7 @@ pub(crate) const ALL: &[StaticCheck] = &[
     expect_allowlist::CHECK,
     pins::CHECK,
     log_literals::CHECK,
+    runner_stderr::CHECK,
 ];
 
 /// The package name of the desktop crate. The checks find its directory through `Context::members`,
