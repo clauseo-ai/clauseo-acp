@@ -4,7 +4,8 @@
 use std::time::Duration;
 
 use clauseo_agents::{
-    Agents, Found, InstallState, Installed, Method, Network, PasteCode, SigninError, SigninState,
+    Agents, Found, InstallState, Installed, Method, Network, OwnLogin, PasteCode, SigninError,
+    SigninState,
 };
 use clauseo_protocol::AgentId;
 
@@ -22,8 +23,8 @@ pub(crate) trait SetupAgents: Send + Sync {
     fn sign_in(&self, agent: &AgentId, method: Method) -> Result<(), SigninError>;
     /// `Agents::sign_in_switching`: after the lawyer's yes to `Ask::SwitchAccount`.
     fn sign_in_switching(&self, agent: &AgentId, method: Method) -> Result<(), SigninError>;
-    /// `Agents::replaces_own_login`.
-    fn replaces_own_login(&self, agent: &AgentId) -> bool;
+    /// `Agents::own_login`: the Clauseo-own Codex login a login now would replace, by a stat.
+    fn own_login(&self, agent: &AgentId) -> Option<OwnLogin>;
     /// `Agents::cancel_sign_in`.
     fn cancel_sign_in(&self, agent: &AgentId) -> Result<(), SigninError>;
     /// `Agents::paste_code`.
@@ -74,8 +75,8 @@ impl SetupAgents for Agents {
     fn sign_in_switching(&self, agent: &AgentId, method: Method) -> Result<(), SigninError> {
         Agents::sign_in_switching(self, agent, method)
     }
-    fn replaces_own_login(&self, agent: &AgentId) -> bool {
-        Agents::replaces_own_login(self, agent)
+    fn own_login(&self, agent: &AgentId) -> Option<OwnLogin> {
+        Agents::own_login(self, agent)
     }
     fn cancel_sign_in(&self, agent: &AgentId) -> Result<(), SigninError> {
         Agents::cancel_sign_in(self, agent)

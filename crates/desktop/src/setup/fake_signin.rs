@@ -411,8 +411,11 @@ impl SetupAgents for FakeSignin {
             None => self.real.sign_in_switching(agent, method),
         }
     }
-    fn replaces_own_login(&self, agent: &AgentId) -> bool {
-        self.script(agent).is_none() && self.real.replaces_own_login(agent)
+    fn own_login(&self, agent: &AgentId) -> Option<clauseo_agents::OwnLogin> {
+        self.script(agent)
+            .is_none()
+            .then(|| self.real.own_login(agent))
+            .flatten()
     }
     fn cancel_sign_in(&self, agent: &AgentId) -> Result<(), SigninError> {
         if self.script(agent).is_none() {

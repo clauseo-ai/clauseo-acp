@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use clauseo_agents::keys::Keychain;
 use clauseo_agents::{
-    AgentsEvent, Found, InstallState, Installed, Method, PasteCode, SigninError, SigninState,
-    Source,
+    AgentsEvent, Found, InstallState, Installed, Method, OwnLogin, PasteCode, SigninError,
+    SigninState, Source,
 };
 use clauseo_counts::schema::Event;
 use clauseo_host::{AgentsStopped, LoginSplits};
@@ -75,6 +75,7 @@ pub(super) struct FakeAgents {
     pub(super) tries: Mutex<BTreeMap<AgentId, u32>>,
     /// Each `set_network`, in order.
     pub(crate) networks: Mutex<Vec<clauseo_agents::Network>>,
+    pub(super) own_login: std::sync::atomic::AtomicU64,
 }
 
 impl FakeAgents {
@@ -146,16 +147,18 @@ impl SetupAgents for FakeAgents {
         };
         self.reserve(name, agent, true)
     }
-    /// S18's rule, by the state the test set: Codex signed in with Clauseo's own login.
-    fn replaces_own_login(&self, agent: &AgentId) -> bool {
-        agent.as_str() == "codex-acp"
-            && matches!(
-                lock(&self.signin).get(agent),
-                Some(SigninState::SignedIn {
-                    source: Source::Own,
-                    ..
-                })
-            )
+    /// S18's rule, by the state the test set: Codex signed in with Clauseo's own login, the
+    /// one numbered `own_login` (a test bumps it to replace that login).
+    fn own_login(&self, agent: &AgentId) -> Option<OwnLogin> {
+        let own = matches!(
+            lock(&self.signin).get(agent),
+            Some(SigninState::SignedIn {
+                source: Source::Own,
+                ..
+            })
+        );
+        let n = self.own_login.load(std::sync::atomic::Ordering::SeqCst);
+        (agent.as_str() == "codex-acp" && own).then(|| OwnLogin::for_tests(n))
     }
     /// S18's: `NotRunning` unless a sign-in job is reserved or its state is a running one.
     fn cancel_sign_in(&self, agent: &AgentId) -> Result<(), SigninError> {

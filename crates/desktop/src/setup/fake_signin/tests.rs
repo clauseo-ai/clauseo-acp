@@ -99,8 +99,8 @@ impl crate::setup::backend::SetupAgents for Real {
         self.call("sign_in_switching");
         Ok(())
     }
-    fn replaces_own_login(&self, _: &AgentId) -> bool {
-        false
+    fn own_login(&self, _: &AgentId) -> Option<clauseo_agents::OwnLogin> {
+        None
     }
     fn signin_state(&self, _: &AgentId) -> Option<SigninState> {
         None
