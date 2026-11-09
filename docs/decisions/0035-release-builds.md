@@ -67,12 +67,17 @@ Developer ID.
   `latest-json.mjs` is the one home of this table.
 - **The base config** (`crates/desktop/tauri.conf.json`) holds what every build shares: the bundle
   targets, `createUpdaterArtifacts: true`, macOS 13 and the hardened runtime, the WebView2 bootstrapper
-  (silent) with `minimumWebview2Version` `152.0.0.0`, the version clean Windows 11 ships (WebView2
-  152.0.4191.66 on the ARM64 VM's `win11-clean`, 2026-11-09). Above it, the per-user installer's
-  bootstrapper updates a per-machine runtime, which asks a standard user for an administrator's
-  credentials, and declining fails the install. It was 155.0.0.0, the `windows-2025` runner's
-  version (image 20261021.299.1), which no feature needed. Raised only on purpose, and only to a
-  version clean Windows ships. NSIS `currentUser` in English, `allowDowngrades: false`.
+  (silent) with `minimumWebview2Version` `89.0.774.44`, what the app needs (2026-11-09): Tauri
+  states no minimum (no version check in tauri 2.12.4 or tauri-runtime-wry 2.12.2), and the newest
+  WebView2 interface wry 0.57.0 requires without a fallback is `ICoreWebView2Controller2`, for the
+  window's background colour, which came in SDK 1.0.774.44 with runtime 89.0.774.44 (Microsoft's
+  release notes). Every newer interface wry uses is optional; `ICoreWebView2_22` (runtime
+  122.0.2365.46), for cross-origin iframes and shared workers on the custom protocol, isn't needed:
+  the review iframe is same-origin and dev-only, the highlighter's worker dedicated. It was
+  155.0.0.0, the `windows-2025` runner's version, which no feature needed, and which made the
+  per-user installer ask a standard user on clean Windows 11 (WebView2 152) for an administrator.
+  Below the floor a per-user install never elevates (the `webview2-no-elevation` block). NSIS
+  `currentUser` in English, `allowDowngrades: false`.
 - **Release overlays,** in `crates/desktop/release/`, passed with `--config`:
   `release.conf.json` (`mainBinaryName: "Clauseo"`, and no `beforeBuildCommand`, since the legs embed
   the `ui` job's build); `windows.conf.json` (`bundle.windows.nsis.installerHooks`, the uninstall hook

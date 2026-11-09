@@ -117,7 +117,7 @@ LangString nativeArm64Notice ${LANG_ENGLISH} "This computer has an ARM64 process
 ; ask for an administrator, leaves it to Windows to update (installer.nsi block
 ; webview2-no-elevation); the per-machine installer says it when its update fails. Details list
 ; only; the install goes on. Provisional (2026-11-09).
-LangString webview2TooOld ${LANG_ENGLISH} "WebView2 on this computer is older than Clauseo needs. Windows keeps it up to date in the background. If it's still too old when Clauseo opens, Clauseo will show you how to get the newer version."
+LangString webview2TooOld ${LANG_ENGLISH} "WebView2 on this computer is older than Clauseo needs. Windows updates it by itself. Open Clauseo again once it's updated."
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
 ; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), deleteAppData aside, with one fix:
