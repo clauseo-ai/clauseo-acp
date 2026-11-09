@@ -348,12 +348,24 @@ build 26100):
     and counts; a folder just made doesn't, since what goes in it is reported on its own, so a
     script's `mkdir tmp` then `rm -r tmp` ends nothing. A creation time in the future (clock
     skew, or forged) or unreadable counts as moved in: the count fails toward ending the
-    session. A VM (Windows Server 2025, NTFS) confirmed the records: a cross-folder move gives
-    `FILE_ACTION_ADDED` with the folder's original creation time, `mkdir` one within about
-    4 ms, and a rename within a folder `FILE_ACTION_RENAMED_NEW_NAME`. Known limit: the plain
-    records (a network share) carry no attributes or times, so a folder renamed or moved in and
-    back out there isn't counted; counting every name renamed in would end sessions over an
-    editor's backup renames. The 2 s budget doesn't depend on the check returning: a watchdog thread
+    session. A folder that looks just made still counts when its file ID (from the extended
+    record) left another watched place: a `FILE_ACTION_REMOVED` or `FILE_ACTION_RENAMED_OLD_NAME`
+    for the same file ID in the matter, its notes folder, or the agent's state or temp folder,
+    within the last 10 s (`git_watch/pairs.rs`: `PAIR_WINDOW`, at most `PAIR_MAX` = 4096 file
+    IDs kept across the watches, oldest dropped). The folder's own leaving from where it was made
+    doesn't pair. The state and temp folders get watches of their own (recursive, extended
+    records) that only note file IDs: they move nothing and end nothing, and one that can't be
+    armed is logged and passed over rather than refusing the launch, since the matter stays
+    watched and the creation-time rule still holds. The other watch may read its record after
+    the check, so a check with such a folder gone and unpaired waits once (`PAIR_WAIT`, 200 ms)
+    and looks again. Residual: a folder moved in from a place no watch covers that the agent can
+    write, with its creation time set to now, isn't counted (the VM is sizing this). A VM (Windows
+    Server 2025, NTFS) confirmed the records: a cross-folder move gives `FILE_ACTION_ADDED` with the
+    folder's original creation time, `mkdir` one within about 4 ms, and a rename within a folder
+    `FILE_ACTION_RENAMED_NEW_NAME`. Known limit: the plain records (a network share) carry no
+    attributes or times, so a folder renamed or moved in and back out there isn't counted; counting
+    every name renamed in would end sessions over an editor's backup renames. The 2 s budget doesn't
+    depend on the check returning: a watchdog thread
     (`runner/git_watch/watchdog.rs`) wakes every 250 ms and ends the session (`Cause::Stalled`)
     once one check has been busy past 2 s, while that check is still blocked. A scan of a folder
     made or moved in stops at the 2 s mark instead of walking on (a million empty folders with a
