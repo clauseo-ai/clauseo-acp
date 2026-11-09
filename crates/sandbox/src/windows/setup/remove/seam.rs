@@ -12,6 +12,7 @@ use crate::windows::apply::Surroundings;
 use crate::windows::ledger::Ledger;
 use crate::windows::pool::MachineRecord;
 use crate::windows::setup::record_values::CopyOwner;
+use crate::windows::setup::stranded::PoolAccounts;
 use crate::windows::setup::{MachineError, ProfileDir};
 use crate::windows::sids::Sid;
 
@@ -23,8 +24,13 @@ pub trait Removal {
     fn lock_within(&mut self, wait_ms: u32) -> Result<(), MachineError>;
     /// Gives the lock back. Called once for every `lock_within` that succeeded.
     fn unlock(&mut self);
-    /// `HKLM\SOFTWARE\Clauseo\Sandbox`, whole; `None` when the key is missing.
+    /// `HKLM\SOFTWARE\Clauseo\Sandbox`, whole; `None` when the key is missing. As
+    /// `Machine::read_record`: a malformed `PoolSids` is an empty pool, and a record whose
+    /// `OwnerSid`, `GroupSid` or `DataDir` can't be read is `MachineError::RecordCorrupt`.
     fn read_record(&mut self) -> Result<Option<MachineRecord>, MachineError>;
+    /// As `Machine::pool_accounts`: the local accounts in `ClauseoSandboxUsers` or with a pool
+    /// user's name, each with whether it is in the group and marked (`stranded.rs`).
+    fn pool_accounts(&mut self) -> Result<PoolAccounts, MachineError>;
     /// Writes `record` as the whole key.
     fn write_record(&mut self, record: &MachineRecord) -> Result<(), MachineError>;
     /// Deletes the key; one already gone is `Ok`.

@@ -299,6 +299,23 @@ pub fn decode(raw: RawRecord) -> Result<Option<MachineRecord>, RecordValueError>
     }))
 }
 
+/// [`decode`], as set-up and `--remove` read the record (`stranded.rs`): a malformed `PoolSids`
+/// is an empty pool, never a shorter list, and no SID in it is trusted. A key holding nothing
+/// else is no record.
+pub fn decode_untrusting_pool(
+    mut raw: RawRecord,
+) -> Result<Option<MachineRecord>, RecordValueError> {
+    if raw
+        .pool
+        .as_deref()
+        .is_some_and(|units| pool_sids_from_multi_sz(units).is_err())
+    {
+        tracing::warn!("the record's PoolSids is malformed; no SID in it is trusted");
+        raw.pool = None;
+    }
+    decode(raw)
+}
+
 /// The SID `text` spells, for the value `name`.
 fn sid(text: Option<String>, name: &'static str) -> Result<Sid, RecordValueError> {
     let text = text.ok_or(RecordValueError::Missing(name))?;

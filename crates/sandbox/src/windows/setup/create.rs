@@ -6,7 +6,7 @@ use std::io;
 use std::path::PathBuf;
 
 use super::late_steps::{
-    admin_lock, fence, journals, network, own_protected, refuse_pool_owner, registered, stop_task,
+    admin_lock, fence, journals, network, own_protected, registered, shared_writes, stop_task,
 };
 use super::machine::{LogonRight, Machine, Password, ServiceStart, owned};
 use super::outcome::{
@@ -14,16 +14,13 @@ use super::outcome::{
 };
 use super::resets::{self, resets_due};
 use super::rollback::{Made, Run, roll_back};
-use super::top_up;
 use super::{POOL_START, SetupRequest};
+use super::{stranded, top_up};
 use crate::windows::fence::RegisteredMatter;
 use crate::windows::marker::{Marker, MarkerState, SETUP_VERSION};
 use crate::windows::pool::{MachineRecord, POOL_CAP, PoolUser, pool_name, pool_number};
-use crate::windows::shared_writes::{
-    SharedWrites, apply_shared_write_denies, plan_shared_write_denies, shared_write_targets,
-};
 use crate::windows::sids::Sid;
-use crate::windows::writer::{AclWriter, ApplyFailure};
+use crate::windows::writer::AclWriter;
 
 /// A step's failure inside the run: where, and why.
 pub(super) type Failed = (Step, String);
@@ -31,8 +28,10 @@ pub(super) type Failed = (Step, String);
 /// Who the pool is before the changes, and what the run will make.
 #[derive(Debug, Default)]
 struct Plan {
-    /// The recorded users whose accounts exist, in record order.
+    /// The recorded users whose accounts exist, in record order, then the adopted ones.
     kept: Vec<PoolUser>,
+    /// Proven pool users the record doesn't list, adopted back (`stranded.rs`).
+    adopted: Vec<Sid>,
     /// The record's SIDs that stay in it, in record order: the kept users' and the dead ones a
     /// ledger entry names.
     base: Vec<Sid>,
@@ -73,9 +72,7 @@ pub(super) fn run(
     acl: &mut impl AclWriter,
     req: &SetupRequest,
 ) -> Result<SetupReport, SetupFailure> {
-    let before = machine
-        .read_record()
-        .map_err(|error| SetupFailure::early(Step::ReadRecord, cause_of(&error)))?;
+    let before = stranded::record_or_sweep(machine)?;
     check_owner(before.as_ref(), &req.owner)?;
     let matters = registered(machine, before.as_ref())?;
     let resets = resets_due(machine, before.as_ref())?;
@@ -151,7 +148,8 @@ fn preflight(machine: &mut impl Machine) -> Result<(), SetupFailure> {
     }
 }
 
-/// The plan: which recorded users stay, which dead SIDs stay or go, how many to make.
+/// The plan: which recorded users stay, which proven users the record lost are adopted back
+/// (`stranded.rs`, counted as kept), which dead SIDs stay or go, how many to make.
 ///
 /// A recorded SID whose account exists stays, and must be a pool name, or set-up refuses
 /// rather than touch another account. A dead SID stays while a ledger entry names it (or the
@@ -195,6 +193,12 @@ fn plan_pool(
             Err(error) => return Err(pool_failure(cause_of(&error))),
         }
     }
+    for user in before.map_or(Ok(Vec::new()), |record| {
+        stranded::adoptable(machine, record)
+    })? {
+        plan.adopted.push(user.sid.clone());
+        plan.kept.push(user);
+    }
     let mut missing = 0;
     if let (Some(record), false) = (before, dead.is_empty()) {
         let marker = machine.as_owner(Machine::read_marker);
@@ -225,6 +229,7 @@ fn plan_pool(
             .pool
             .iter()
             .filter(|sid| !plan.dropped.contains(sid))
+            .chain(&plan.adopted)
             .cloned()
             .collect();
     } else {
@@ -370,7 +375,8 @@ fn group(machine: &mut impl Machine, run: &mut Run) -> Result<Sid, Failed> {
 /// A recorded user that exists. A re-run resets its password, puts it back in its groups,
 /// hides it and logs it on (which makes its profile again if it was deleted). An extend leaves
 /// it as it is, but puts it in a group this run made, and reads its profile. A user owed a
-/// profile reset (`resets.rs`) has its profile deleted first, then goes as in a re-run.
+/// profile reset (`resets.rs`) has its profile deleted first, then goes as in a re-run. An
+/// adopted user (`stranded.rs`) goes as in a re-run, in an extend too: its password is new.
 fn keep_user(
     machine: &mut impl Machine,
     plan: &Plan,
@@ -381,7 +387,7 @@ fn keep_user(
 ) -> Result<(), Failed> {
     let name = user.name.as_str();
     let wipe = plan.resets.contains(&user.sid);
-    if !plan.reset && !wipe {
+    if !plan.reset && !wipe && !plan.adopted.contains(&user.sid) {
         if run.group_made {
             machine
                 .add_to_group(name, group)
@@ -545,51 +551,4 @@ pub(super) fn write_record(
     machine
         .write_record(record)
         .map_err(|error| cause_of(&error))
-}
-
-/// Step 7: `DeviceSync` and every live user's `LocalLow` denied to the group. Any failed target
-/// fails the set-up; what was written stays (D12), except what the rollback takes off with the
-/// users this run made.
-fn shared_writes(
-    machine: &mut impl Machine,
-    acl: &mut impl AclWriter,
-    group: &Sid,
-    profiles: &[(PoolUser, PathBuf)],
-    run: &mut Run,
-) -> Result<SharedWrites, Failed> {
-    let failed = |cause: String| (Step::SharedWrites, cause);
-    let program_data = machine
-        .program_data()
-        .map_err(|error| failed(cause_of(&error)))?;
-    let folders: Vec<PathBuf> = profiles.iter().map(|(_, path)| path.clone()).collect();
-    let live: Vec<Sid> = profiles.iter().map(|(user, _)| user.sid.clone()).collect();
-    let device_sync = program_data.join("Microsoft").join("DeviceSync");
-    let there = machine.exists(&device_sync).map_err(|error| {
-        let cause = cause_of(&error);
-        (Step::Owners, format!("{}: {cause}", device_sync.display()))
-    })?;
-    if there {
-        let mut pool = live.clone();
-        pool.push(group.clone());
-        refuse_pool_owner(machine, &device_sync, &pool)?;
-    }
-    let targets = shared_write_targets(&program_data, &folders);
-    let grants =
-        plan_shared_write_denies(group, &targets).map_err(|error| failed(error.to_string()))?;
-    let done = apply_shared_write_denies(acl, &grants, &live);
-    run.added.clone_from(&done.added);
-    if done.failed.is_empty() {
-        Ok(done)
-    } else {
-        Err(failed(failed_targets(&done.failed)))
-    }
-}
-
-/// Each failed target and why, for the cause.
-fn failed_targets(failed: &[(PathBuf, ApplyFailure)]) -> String {
-    let each: Vec<String> = failed
-        .iter()
-        .map(|(path, failure)| format!("{}: {failure}", path.display()))
-        .collect();
-    format!("a shared folder couldn't be closed ({})", each.join("; "))
 }

@@ -13,6 +13,7 @@ use crate::windows::ledger::Ledger;
 use crate::windows::marker::{Marker, MarkerState};
 use crate::windows::pool::MachineRecord;
 use crate::windows::setup::record_values::CopyOwner;
+use crate::windows::setup::stranded::PoolAccounts;
 use crate::windows::sids::Sid;
 use crate::windows::wfp::{NetworkReport, NetworkSetup};
 
@@ -47,6 +48,12 @@ pub enum MachineError {
          there: remove the sandbox users, then run set-up again"
     )]
     ProfileChanged(String),
+    /// The machine's record can't be trusted: `OwnerSid`, `GroupSid` or `DataDir` is missing,
+    /// of the wrong type or malformed, while other values are there (what is wrong, never a
+    /// value). Nothing in it is used: set-up and `--remove` take out the accounts they can
+    /// prove are Clauseo's (`stranded.rs`), and adopt none.
+    #[error("the machine's record can't be trusted: {0}")]
+    RecordCorrupt(String),
 }
 
 /// How the Secondary Logon service (`seclogon`) starts.
@@ -96,8 +103,13 @@ pub trait Machine {
     fn lock(&mut self) -> Result<(), MachineError>;
     /// Gives the lock back. Called once for every `lock` that succeeded.
     fn unlock(&mut self);
-    /// `HKLM\SOFTWARE\Clauseo\Sandbox`, whole; `None` when the key is missing.
+    /// `HKLM\SOFTWARE\Clauseo\Sandbox`, whole; `None` when the key is missing. A malformed
+    /// `PoolSids` reads as an empty pool, never trusted for a SID; a record whose `OwnerSid`,
+    /// `GroupSid` or `DataDir` can't be read is [`MachineError::RecordCorrupt`].
     fn read_record(&mut self) -> Result<Option<MachineRecord>, MachineError>;
+    /// The local accounts in `ClauseoSandboxUsers` or with a pool user's name, each with
+    /// whether it is in the group and carries set-up's mark (`stranded.rs`).
+    fn pool_accounts(&mut self) -> Result<PoolAccounts, MachineError>;
     /// Writes `record` as the whole key, replacing every value.
     fn write_record(&mut self, record: &MachineRecord) -> Result<(), MachineError>;
     /// Deletes the key: only when a fresh set-up rolls back to nothing.

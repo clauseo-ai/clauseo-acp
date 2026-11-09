@@ -20,6 +20,7 @@ use crate::windows::set_aside::forget_bookkeeping;
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::setup::remove::Removal;
 use crate::windows::setup::remove::{FolderOwner, owners};
+use crate::windows::setup::stranded::PoolAccounts;
 use crate::windows::setup::{Machine, MachineError, ProfileDir};
 use crate::windows::shared_writes::OWNER_RIGHTS_SID;
 use crate::windows::sids::Reserved;
@@ -197,6 +198,10 @@ impl Removal for Remover {
     fn read_record(&mut self) -> Result<Option<MachineRecord>, MachineError> {
         self.call("read_record")?;
         Machine::read_record(&mut self.m)
+    }
+
+    fn pool_accounts(&mut self) -> Result<PoolAccounts, MachineError> {
+        Ok(self.m.survey())
     }
 
     fn write_record(&mut self, record: &MachineRecord) -> Result<(), MachineError> {

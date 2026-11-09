@@ -9,8 +9,9 @@ use std::path::{Path, PathBuf};
 
 use crate::windows::acl_plan::Sid;
 use crate::windows::marker::Marker;
-use crate::windows::pool::MachineRecord;
+use crate::windows::pool::{MachineRecord, pool_number};
 use crate::windows::setup::record_values::CopyOwner;
+use crate::windows::setup::stranded::{PoolAccounts, Seen};
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -224,6 +225,8 @@ pub(super) fn new_machine(test: &str) -> FakeMachine {
         next_rid: 1000,
         passwords: 0,
         around: Around::default(),
+        unflagged: BTreeSet::new(),
+        corrupt: None,
     }
 }
 
@@ -276,6 +279,29 @@ impl FakeMachine {
         match self.fails.iter().position(|(text, _)| *text == line) {
             Some(at) => Err(self.fails.remove(at).1),
             None => Ok(()),
+        }
+    }
+
+    /// What `pool_accounts` finds, with no call line: the accounts in the group or with a pool
+    /// name, each marked when hidden and not `unflagged`.
+    pub(super) fn survey(&self) -> PoolAccounts {
+        let group = self.state.group.clone();
+        let mut seen = Vec::new();
+        for (name, account) in &self.state.accounts {
+            let in_group = group.as_ref().is_some_and(|g| account.groups.contains(g));
+            if in_group || pool_number(name).is_some() {
+                seen.push(Seen {
+                    name: name.clone(),
+                    sid: account.sid.clone(),
+                    in_group,
+                    marked: account.hidden && !self.unflagged.contains(name),
+                });
+            }
+        }
+        PoolAccounts {
+            group,
+            seen,
+            foreign: 0,
         }
     }
 

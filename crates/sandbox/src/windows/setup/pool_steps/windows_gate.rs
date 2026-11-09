@@ -47,6 +47,7 @@ pub(crate) fn check_pool(pool: &Pool) -> Result<(), Failed> {
         error @ (MachineError::Os { .. }
         | MachineError::LockHeld
         | MachineError::Unsupported(_)
-        | MachineError::ProfileChanged(_)) => error.to_string(),
+        | MachineError::ProfileChanged(_)
+        | MachineError::RecordCorrupt(_)) => error.to_string(),
     })
 }

@@ -334,8 +334,8 @@ pub(super) fn unhide(name: &str) -> Result<(), MachineError> {
     check("RegDeleteValueW", deleted)
 }
 
-/// Whether `name`'s sign-in screen value is there, for the tests.
-#[cfg(test)]
+/// Whether `name`'s sign-in screen value is there, as `hide` writes it (part of set-up's
+/// mark, `stranded_os::marked`).
 pub(crate) fn hidden(name: &str) -> Result<bool, MachineError> {
     let key = HSTRING::from(HIDDEN_USERS);
     let value = HSTRING::from(name);
@@ -485,7 +485,7 @@ pub(super) fn net(call: &'static str, status: u32) -> Result<(), MachineError> {
 }
 
 /// `sid`'s text, from a valid SID.
-fn sid_text(sid: PSID) -> Result<Sid, MachineError> {
+pub(super) fn sid_text(sid: PSID) -> Result<Sid, MachineError> {
     let mut text = PWSTR::null();
     // SAFETY: the caller's SID is valid; `text` is a live out-pointer, freed below.
     unsafe { ConvertSidToStringSidW(sid, &raw mut text) }

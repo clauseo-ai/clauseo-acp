@@ -443,7 +443,7 @@ pub(super) fn check(call: &'static str, code: WIN32_ERROR) -> Result<(), Machine
 }
 
 /// A failed read of a record value.
-fn reading(error: RecordError) -> MachineError {
+pub(super) fn reading(error: RecordError) -> MachineError {
     match error {
         RecordError::Denied => MachineError::Os {
             call: "RegGetValueW",

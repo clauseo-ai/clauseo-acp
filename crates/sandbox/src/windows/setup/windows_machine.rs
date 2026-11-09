@@ -27,7 +27,8 @@ use super::owner::Owner;
 use super::record_values::CopyOwner;
 use super::record_write::{self, RECORD_KEY};
 use super::registered::registered;
-use super::{ffi, journal, logon, password, preflight, profile};
+use super::stranded::PoolAccounts;
+use super::{ffi, journal, logon, password, preflight, profile, stranded_os};
 use crate::SetupError;
 use crate::windows::acl;
 use crate::windows::admin_copy;
@@ -207,7 +208,11 @@ impl Machine for WindowsMachine {
     }
 
     fn read_record(&mut self) -> Result<Option<MachineRecord>, MachineError> {
-        record_write::read(&self.names.record_key)
+        stranded_os::read_untrusting_pool(&self.names.record_key)
+    }
+
+    fn pool_accounts(&mut self) -> Result<PoolAccounts, MachineError> {
+        stranded_os::pool_accounts(&self.names)
     }
 
     fn write_record(&mut self, record: &MachineRecord) -> Result<(), MachineError> {

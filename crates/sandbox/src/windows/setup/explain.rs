@@ -96,7 +96,8 @@ impl From<MachineError> for Cause {
             MachineError::LockHeld
             | MachineError::Unsupported(_)
             | MachineError::Other(_)
-            | MachineError::ProfileChanged(_) => None,
+            | MachineError::ProfileChanged(_)
+            | MachineError::RecordCorrupt(_) => None,
         };
         Cause {
             text: error.to_string(),

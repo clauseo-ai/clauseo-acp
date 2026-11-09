@@ -19,6 +19,7 @@ use crate::windows::ledger::{Ledger, ledger_path};
 use crate::windows::marker::{Marker, MarkerState};
 use crate::windows::pool::MachineRecord;
 use crate::windows::setup::record_values::CopyOwner;
+use crate::windows::setup::stranded::PoolAccounts;
 use crate::windows::setup::{
     LogonRight, Machine, MachineError, Password, ProfileDir, ServiceStart,
 };
@@ -113,6 +114,10 @@ pub(super) struct FakeMachine {
     pub(super) next_rid: u32,
     pub(super) passwords: u32,
     pub(super) around: Around,
+    /// Accounts made without set-up's flags: never marked, hidden or not (`stranded.rs`).
+    pub(super) unflagged: BTreeSet<String>,
+    /// What `read_record` finds wrong with the record, until one is written or deleted.
+    pub(super) corrupt: Option<&'static str>,
 }
 
 impl Machine for FakeMachine {
@@ -130,12 +135,20 @@ impl Machine for FakeMachine {
 
     fn read_record(&mut self) -> Result<Option<MachineRecord>, MachineError> {
         self.call("read_record")?;
+        if let Some(why) = self.corrupt {
+            return Err(MachineError::RecordCorrupt(why.to_owned()));
+        }
         Ok(self.state.record.clone())
+    }
+
+    fn pool_accounts(&mut self) -> Result<PoolAccounts, MachineError> {
+        Ok(self.survey())
     }
 
     fn write_record(&mut self, record: &MachineRecord) -> Result<(), MachineError> {
         self.call(format!("write_record {}", rids(&record.pool)))?;
         self.state.record = Some(record.clone());
+        self.corrupt = None;
         self.written.push(record.clone());
         Ok(())
     }
@@ -143,6 +156,7 @@ impl Machine for FakeMachine {
     fn delete_record(&mut self) -> Result<(), MachineError> {
         self.call("delete_record")?;
         self.state.record = None;
+        self.corrupt = None;
         Ok(())
     }
 

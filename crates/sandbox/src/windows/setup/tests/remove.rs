@@ -328,13 +328,20 @@ fn no_record_while_a_set_up_holds_the_lock_is_lock_held_never_0() {
 }
 
 #[test]
-fn a_record_deleted_while_waiting_for_the_lock_is_nothing_to_remove() {
+fn a_record_deleted_while_waiting_for_the_lock_leaves_only_its_stranded_users_to_remove() {
     let (mut machine, mut acl) = pool("remove-changed-gone", Some(owner()));
     machine.after_lock = Some(Change::Delete);
     let removed = remove(&mut machine, &mut acl, false).unwrap();
-    assert_eq!(removed, Removed::NothingSetUp);
-    let lines = ["read_record", "lock 60000", "read_record", "unlock"];
-    assert_eq!(machine.lines(), lines);
+    let Removed::All(report) = removed else {
+        panic!("{removed:?}");
+    };
+    // The group and its marked users stayed: `stranded::sweep` takes them, adopting nothing.
+    assert_eq!((report.accounts, report.group), (MIN_FREE_AFTER_RUN, true));
+    let lines = machine.lines();
+    assert_eq!(lines[..3], ["read_record", "lock 60000", "read_record"]);
+    assert!(!lines.iter().any(|line| line.starts_with("write_record")));
+    assert_eq!(lines.last().map(String::as_str), Some("unlock"));
+    assert_eq!(machine.m.state.group, None);
 }
 
 #[test]

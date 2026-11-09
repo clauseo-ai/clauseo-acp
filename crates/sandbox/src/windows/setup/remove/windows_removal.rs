@@ -41,8 +41,11 @@ use super::super::machine::{MachineError, ProfileDir};
 use super::super::outcome::cause_of;
 use super::super::owner::Owner;
 use super::super::record_values::CopyOwner;
+use super::super::stranded::PoolAccounts;
 use super::super::windows_machine::{Acting, Names};
-use super::super::{admin_member, args, ffi, preflight, processes, profile, record_write};
+use super::super::{
+    admin_member, args, ffi, preflight, processes, profile, record_write, stranded_os,
+};
 use super::{FolderOwner, Removal, acting_token, owners};
 use crate::windows::acl::object::Object;
 use crate::windows::acl_plan::in_folder;
@@ -205,7 +208,11 @@ impl Removal for WindowsRemoval {
     }
 
     fn read_record(&mut self) -> Result<Option<MachineRecord>, MachineError> {
-        record_write::read(&self.names.record_key)
+        stranded_os::read_untrusting_pool(&self.names.record_key)
+    }
+
+    fn pool_accounts(&mut self) -> Result<PoolAccounts, MachineError> {
+        stranded_os::pool_accounts(&self.names)
     }
 
     fn write_record(&mut self, record: &MachineRecord) -> Result<(), MachineError> {
