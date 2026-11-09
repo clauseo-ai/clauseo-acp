@@ -78,6 +78,8 @@ mod private_dir;
 pub mod reclaim;
 #[cfg(windows)]
 mod record;
+#[cfg(any(windows, test))]
+mod record_settle;
 // The admin copy's refresh: its engine and checks build everywhere for the tests.
 #[cfg(any(windows, test))]
 pub mod refresh;

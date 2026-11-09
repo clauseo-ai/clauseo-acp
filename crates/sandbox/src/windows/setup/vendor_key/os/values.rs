@@ -1,10 +1,12 @@
 //! A key's values read and written whole, for the vendor key's walk, which copies `Sandbox`'s
-//! values through its delete and remake.
+//! values through its delete and remake, and the copy's flush and rename into place.
 #![expect(unsafe_code, reason = "FFI to the registry's value calls")]
 
 use windows::Win32::Foundation::ERROR_NO_MORE_ITEMS;
-use windows::Win32::System::Registry::{REG_VALUE_TYPE, RegEnumValueW, RegSetValueExW};
-use windows::core::{HSTRING, PWSTR};
+use windows::Win32::System::Registry::{
+    REG_VALUE_TYPE, RegEnumValueW, RegFlushKey, RegRenameKey, RegSetValueExW,
+};
+use windows::core::{HSTRING, PCWSTR, PWSTR};
 
 use super::{Key, check};
 use crate::windows::setup::vendor_key::{Miss, Value};
@@ -83,4 +85,27 @@ pub(super) fn write(key: &Key, values: &[Value]) -> Result<(), Miss> {
         check("RegSetValueExW", set)?;
     }
     Ok(())
+}
+
+/// Writes the key `key` is open on, and its values, to disk (`RegFlushKey`).
+pub(super) fn flush(key: &Key) -> Result<(), Miss> {
+    // SAFETY: the key is open; `RegFlushKey` takes no other pointer.
+    let flushed = unsafe { RegFlushKey(key.0) };
+    check("RegFlushKey", flushed)
+}
+
+/// Renames the key `key` is open on to `name` (`RegRenameKey` with a null subkey: the key
+/// itself, so no name is looked up and no link followed). A taken `name` fails.
+pub(super) fn rename(key: &Key, name: &str) -> Result<(), Miss> {
+    #[cfg(test)]
+    if super::FAIL_RENAME.get() {
+        return Err(Miss::Failed(
+            "RegRenameKey failed (the test's crash)".to_owned(),
+        ));
+    }
+    let name = HSTRING::from(name);
+    // SAFETY: the key is open with full access; the null subkey names the key itself; the new
+    // name is NUL-terminated and lives for the call.
+    let renamed = unsafe { RegRenameKey(key.0, PCWSTR::null(), &name) };
+    check("RegRenameKey", renamed)
 }

@@ -11,8 +11,10 @@ use crate::windows::setup::record_key::VENDOR_KEY;
 use crate::windows::setup::record_values::RECORD_SDDL;
 
 mod access;
+mod fake;
 mod installer;
 mod owners;
+mod record;
 mod verify;
 
 /// A key of a user's, which Users may write subkeys and values into: the weak root.
@@ -30,14 +32,15 @@ const ADMIN_USER_KEY: &str = "O:S-1-5-21-1-2-3-500D:P(A;;KA;;;BA)";
 /// A key whose owner's membership can't be resolved (a deleted account).
 const GHOST_KEY: &str = "O:S-1-5-21-1-2-3-1999D:P(A;;KA;;;BA)";
 
-/// One fake key: its SDDL, whether it is a real link, whether it holds a link value, and its
-/// values' names.
+/// One fake key: its SDDL, whether it is a real link, whether it holds a link value, its
+/// values' names, and the data of those written whole (`write_values`), by name.
 #[derive(Clone)]
 struct Node {
     sddl: String,
     link: bool,
     link_value: bool,
     values: Vec<String>,
+    data: BTreeMap<String, (u32, Vec<u8>)>,
 }
 
 /// What happens when a take-over of a trigger path is done, as a planter with an open handle,
@@ -64,6 +67,11 @@ struct FakeTree {
     created: Vec<String>,
     fail_take: Option<String>,
     fail_delete: Option<String>,
+    /// A crash at the flush or the rename: the call fails, and the run stops there.
+    fail_flush: bool,
+    fail_rename: bool,
+    /// Each rename, in order: from and to.
+    renamed: Vec<(String, String)>,
     /// Events by the path whose take-over sets them off, each once.
     events: Vec<(String, Event)>,
     /// Membership of Administrators by owner SID; any other is not a member.
@@ -103,6 +111,7 @@ impl FakeTree {
                 link,
                 link_value: link,
                 values: Vec::new(),
+                data: BTreeMap::new(),
             },
         );
     }
@@ -151,148 +160,6 @@ impl FakeTree {
             }
         }
         Ok((path.to_owned(), before))
-    }
-}
-
-impl super::Tree for FakeTree {
-    type Key = String;
-
-    fn open_root(&mut self) -> Result<Option<String>, Miss> {
-        Ok(self.has(VENDOR_KEY).then(|| VENDOR_KEY.to_owned()))
-    }
-
-    fn create_root(&mut self) -> Result<(), Miss> {
-        self.insert(VENDOR_KEY.to_owned(), VENDOR_SDDL, false);
-        self.created.push(VENDOR_KEY.to_owned());
-        Ok(())
-    }
-
-    fn take_over_root(&mut self, sddl: &str) -> Result<String, Miss> {
-        self.take(VENDOR_KEY, sddl).map(|(key, _)| key)
-    }
-
-    fn root_leads_elsewhere(&mut self, key: &String) -> Result<bool, Miss> {
-        Ok(self.node(key)?.link)
-    }
-
-    fn take_over_child(
-        &mut self,
-        parent: &String,
-        name: &str,
-        sddl: &str,
-    ) -> Result<(String, String), Miss> {
-        self.node(parent)?;
-        self.take(&format!("{parent}\\{name}"), sddl)
-    }
-
-    fn create_child(&mut self, parent: &String, name: &str, sddl: &str) -> Result<String, Miss> {
-        self.node(parent)?;
-        let path = format!("{parent}\\{name}");
-        self.insert(path.clone(), sddl, false);
-        self.created.push(path.clone());
-        Ok(path)
-    }
-
-    fn read_values(&mut self, key: &String) -> Result<Vec<super::Value>, Miss> {
-        Ok(self
-            .node(key)?
-            .values
-            .iter()
-            .map(|name| super::Value {
-                name: name.clone(),
-                kind: 1,
-                data: Vec::new(),
-            })
-            .collect())
-    }
-
-    fn write_values(&mut self, key: &String, values: &[super::Value]) -> Result<(), Miss> {
-        let node = self.node(key)?;
-        node.values
-            .extend(values.iter().map(|value| value.name.clone()));
-        Ok(())
-    }
-
-    fn retake(&mut self, key: &String, sddl: &str) -> Result<(), Miss> {
-        self.set_sddl(key, sddl)?;
-        if let Some((path, undone)) = self.retake_undone.clone()
-            && &path == key
-        {
-            self.node(key)?.sddl = undone;
-        }
-        Ok(())
-    }
-
-    fn has_link_value(&mut self, key: &String) -> Result<bool, Miss> {
-        Ok(self.node(key)?.link_value)
-    }
-
-    fn delete_link_value(&mut self, key: &String) -> Result<(), Miss> {
-        self.node(key)?.link_value = false;
-        Ok(())
-    }
-
-    fn sddl(&mut self, key: &String) -> Result<String, Miss> {
-        Ok(self.node(key)?.sddl.clone())
-    }
-
-    fn set_sddl(&mut self, key: &String, sddl: &str) -> Result<(), Miss> {
-        self.node(key)?.sddl = sddl.to_owned();
-        self.set.push((key.clone(), sddl.to_owned()));
-        Ok(())
-    }
-
-    fn subkeys(&mut self, key: &String) -> Result<Vec<String>, Miss> {
-        self.node(key)?;
-        let prefix = format!("{key}\\");
-        Ok(self
-            .keys
-            .keys()
-            .filter_map(|path| path.strip_prefix(&prefix))
-            .filter(|rest| !rest.contains('\\'))
-            .map(str::to_owned)
-            .collect())
-    }
-
-    fn delete(&mut self, key: String) -> Result<(), Miss> {
-        if self.fail_delete.as_deref() == Some(key.as_str()) {
-            return Err(Miss::Failed("NtDeleteKey failed (0xc0000022)".to_owned()));
-        }
-        if !self.subkeys(&key)?.is_empty() {
-            return Err(Miss::Failed(
-                "NtDeleteKey failed: the key has subkeys".to_owned(),
-            ));
-        }
-        self.keys.remove(&key);
-        self.deleted.push(key);
-        Ok(())
-    }
-
-    fn reset_install_dir(&mut self, key: &String) -> Result<Option<String>, Miss> {
-        let location = self.install_location.clone();
-        let node = self.node(key)?;
-        node.values.retain(|value| value != "(default)");
-        if location.is_some() {
-            node.values.push("(default)".to_owned());
-        }
-        self.install_resets.push(key.clone());
-        Ok(location)
-    }
-
-    fn local_domain(&mut self) -> Result<[u32; 3], String> {
-        Ok([1, 2, 3])
-    }
-
-    fn in_administrators(&mut self, sid: &str) -> Result<bool, String> {
-        self.admins.get(sid).cloned().unwrap_or(Ok(false))
-    }
-
-    fn spell_out(&mut self, alias: &str) -> Result<String, String> {
-        match alias {
-            "LA" => Ok("S-1-5-21-1-2-3-500".to_owned()),
-            "LG" => Ok("S-1-5-21-1-2-3-501".to_owned()),
-            _ => Err("no such alias".to_owned()),
-        }
     }
 }
 

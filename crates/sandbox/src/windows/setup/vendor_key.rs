@@ -20,7 +20,12 @@
 //!      opened while its DACL was weak outlives any DACL written later, and made again under the
 //!      locked root with its own SD. Its values are copied through only when SYSTEM,
 //!      Administrators or a local account in Administrators owned it and no one else could write
-//!      it (a NULL DACL lets everyone); otherwise it comes back empty;
+//!      it (a NULL DACL lets everyone); otherwise it comes back empty. The new key is written
+//!      whole as `Sandbox.new` and flushed, the old one deleted, and the new one renamed, so a
+//!      crash leaves the old record, the new one, or both. The walk first settles what an earlier
+//!      run left: a `Sandbox.new` beside `Sandbox` is deleted; one alone is renamed into place
+//!      when its SD is the pinned one, owned by SYSTEM or Administrators, with no link value, no
+//!      subkey and values that parse, else deleted. The name is never kept as a stranger's key;
 //!    - the installer's `Clauseo\Clauseo`, whose install folder the uninstaller deletes, is
 //!      always deleted for the same reason, and made again with the folder from the trusted
 //!      `InstallLocation` of the uninstall key, or none when there is none;
@@ -66,6 +71,10 @@ pub(super) const LOCKED_SDDL: &str = "O:SYD:P(A;;KA;;;SY)(A;;KA;;;BA)";
 
 /// The record's subkey under the vendor key (`record_write.rs`).
 const RECORD_NAME: &str = "Sandbox";
+
+/// The record's new copy, written whole and flushed before the old record is deleted and it
+/// is renamed to [`RECORD_NAME`] (`walk/record.rs`).
+const RECORD_TEMP_NAME: &str = crate::windows::record_settle::TEMP_NAME;
 
 /// The installer's subkey, `Clauseo\Clauseo`: its default value is the install folder, which
 /// the installer reads on repair and hands its uninstaller as the folder to delete.
@@ -133,6 +142,12 @@ pub(super) struct Report {
     /// The kept keys whose owner or DACL had changed again after their take-over, taken over
     /// again.
     pub(super) retaken: Vec<String>,
+    /// A record's new copy left alone by a run that stopped after deleting the old one, checked
+    /// and renamed into place.
+    pub(super) recovered: Vec<String>,
+    /// A record's new copy deleted unused: the old record was still there, or the copy failed
+    /// its check (its SD, its owner, a link, a subkey, or values that don't parse).
+    pub(super) dropped_copies: Vec<String>,
 }
 
 /// One registry value, copied whole: its name (empty for the default value), type and data.
@@ -165,7 +180,8 @@ pub(super) trait Tree {
         name: &str,
         sddl: &str,
     ) -> Result<(Self::Key, String), Miss>;
-    /// Makes subkey `name` of `parent` with `sddl`, and returns it open for writing.
+    /// Makes subkey `name` of `parent` with `sddl`, and returns it open for writing; fails when
+    /// a key of that name is there already, so nothing is opened through a link.
     fn create_child(
         &mut self,
         parent: &Self::Key,
@@ -176,6 +192,11 @@ pub(super) trait Tree {
     fn read_values(&mut self, key: &Self::Key) -> Result<Vec<Value>, Miss>;
     /// Writes `values` to the key, each whole.
     fn write_values(&mut self, key: &Self::Key, values: &[Value]) -> Result<(), Miss>;
+    /// Writes the key and its values to disk (`RegFlushKey`).
+    fn flush(&mut self, key: &Self::Key) -> Result<(), Miss>;
+    /// Renames the key `key` is open on to `name` through that handle (`RegRenameKey` with no
+    /// subkey), so no name is looked up and no link followed; fails when `name` is taken.
+    fn rename(&mut self, key: &Self::Key, name: &str) -> Result<(), Miss>;
     /// Takes `key` over again with `sddl` through its open handle, as a take-over writes it.
     fn retake(&mut self, key: &Self::Key, sddl: &str) -> Result<(), Miss>;
     /// Whether the key holds a `SymbolicLinkValue` of type `REG_LINK`.
@@ -361,6 +382,14 @@ fn log(report: &Report) {
         (
             &report.retaken,
             "took over keys under the vendor key again: their security had changed back",
+        ),
+        (
+            &report.recovered,
+            "renamed a record copy an interrupted set-up left into place",
+        ),
+        (
+            &report.dropped_copies,
+            "deleted a record copy an interrupted set-up or someone else left",
         ),
     ];
     for (keys, what) in lists {

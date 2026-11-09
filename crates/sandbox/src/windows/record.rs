@@ -8,15 +8,22 @@
 //! protected, full control for SYSTEM and Administrators, read for Users. Users must read it
 //! because #317 runs under a pool token, whose restricting set holds `Users`. No reader here
 //! writes or creates the key.
+//!
+//! These readers hold no set-up lock, and set-up makes the key again on every run, so each
+//! reads through one handle on the key and is settled (`record_settle`): a read denied,
+//! unparsable or catching the key missing mid-remake is read again for up to half a second
+//! before its answer is given back. `read_string` and the other helpers below read once.
 #![expect(unsafe_code, reason = "FFI to the Win32 registry, token and SID calls")]
 
 use std::io;
+use std::marker::PhantomData;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use windows::Win32::Foundation::{
     CloseHandle, ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND, ERROR_INSUFFICIENT_BUFFER,
-    ERROR_NO_TOKEN, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS, ERROR_UNSUPPORTED_TYPE, HANDLE, HLOCAL,
-    LocalFree, WIN32_ERROR,
+    ERROR_KEY_DELETED, ERROR_NO_TOKEN, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS, ERROR_UNSUPPORTED_TYPE,
+    HANDLE, HLOCAL, LocalFree, WIN32_ERROR,
 };
 use windows::Win32::Security::Authorization::ConvertSidToStringSidW;
 use windows::Win32::Security::{
@@ -24,19 +31,24 @@ use windows::Win32::Security::{
     TOKEN_USER, TokenGroups, TokenUser,
 };
 use windows::Win32::System::Registry::{
-    HKEY_LOCAL_MACHINE, REG_ROUTINE_FLAGS, RRF_NOEXPAND, RRF_RT_REG_DWORD, RRF_RT_REG_MULTI_SZ,
-    RRF_RT_REG_QWORD, RRF_RT_REG_SZ, RRF_SUBKEY_WOW6464KEY, RegGetValueW,
+    HKEY, HKEY_LOCAL_MACHINE, KEY_QUERY_VALUE, KEY_WOW64_64KEY, REG_ROUTINE_FLAGS, RRF_NOEXPAND,
+    RRF_RT_REG_DWORD, RRF_RT_REG_MULTI_SZ, RRF_RT_REG_QWORD, RRF_RT_REG_SZ, RRF_SUBKEY_WOW6464KEY,
+    RegCloseKey, RegGetValueW, RegOpenKeyExW,
 };
 use windows::Win32::System::Threading::{
     GetCurrentProcess, GetCurrentThread, OpenProcessToken, OpenThreadToken,
 };
-use windows::core::{HRESULT, PCWSTR, PWSTR, w};
+use windows::core::{HRESULT, HSTRING, PCWSTR, PWSTR, w};
 
 use super::pool::{MultiSzError, pool_sids_from_multi_sz};
+use super::record_settle::{self, Record, TEMP_NAME};
 use super::sids::Sid;
 
 /// The record's key under `HKLM`. The only place that names it.
 const RECORD_KEY: PCWSTR = w!("SOFTWARE\\Clauseo\\Sandbox");
+
+/// How long a settled read waits before it reads again, in milliseconds (`record_settle`).
+const PAUSE_MS: u64 = 50;
 
 /// Why a registry read failed. The desktop's check (#317) counts all but `Other` as sandboxed.
 #[derive(Debug, thiserror::Error)]
@@ -65,53 +77,162 @@ pub enum RecordError {
 /// (`pool_sids_from_multi_sz`) is [`RecordError::Malformed`]: never a shorter list. The
 /// desktop's check (#317) compares the token user with each.
 pub fn sandbox_pool_sids() -> Result<Vec<Sid>, RecordError> {
-    let Some(units) = read_units(RECORD_KEY, w!("PoolSids"), RRF_RT_REG_MULTI_SZ)? else {
-        return Ok(Vec::new());
+    let read = |key| {
+        read_units_in(key, PCWSTR::null(), w!("PoolSids"), RRF_RT_REG_MULTI_SZ)?
+            .map(|units| pool_sids_from_multi_sz(&units).map_err(RecordError::Malformed))
+            .transpose()
     };
-    pool_sids_from_multi_sz(&units).map_err(RecordError::Malformed)
+    Ok(settled(read)?.flatten().unwrap_or_default())
 }
 
 /// The Windows user who set the sandbox up: value `OwnerSid` (`REG_SZ`, the SID string, 64-bit
 /// view), written by the set-up with the setting-up user's SID. `Ok(None)` when missing. The
 /// text comes back as stored, unchecked.
 pub fn sandbox_owner_sid() -> Result<Option<String>, RecordError> {
-    read_string(RECORD_KEY, w!("OwnerSid"))
+    record_string(w!("OwnerSid"))
 }
 
 /// The `ClauseoSandboxUsers` group's SID: value `GroupSid` (`REG_SZ`, 64-bit view).
 /// `Ok(None)` when missing. Unchecked text, as [`sandbox_owner_sid`].
 pub fn sandbox_group_sid() -> Result<Option<String>, RecordError> {
-    read_string(RECORD_KEY, w!("GroupSid"))
+    record_string(w!("GroupSid"))
 }
 
 /// The owner's data folder, which holds `sandbox\`: value `DataDir` (`REG_SZ`, read
 /// unexpanded, 64-bit view). `Ok(None)` when missing. Unchecked.
 pub fn sandbox_data_dir() -> Result<Option<PathBuf>, RecordError> {
-    Ok(read_string(RECORD_KEY, w!("DataDir"))?.map(PathBuf::from))
+    Ok(record_string(w!("DataDir"))?.map(PathBuf::from))
 }
 
 /// Whether a removal started and has not finished: value `Removing` (`REG_DWORD`), set when
 /// it is non-zero. `Ok(false)` when missing.
 pub(crate) fn sandbox_removing() -> Result<bool, RecordError> {
-    read_dword(RECORD_KEY, w!("Removing")).map(|value| value.is_some_and(|value| value != 0))
+    let read = |key| read_dword_in(key, PCWSTR::null(), w!("Removing"));
+    Ok(settled(read)?.flatten().is_some_and(|value| value != 0))
 }
 
 /// The admin copy's SHA-256 as the installer's `--adopt` recorded it (`AdminCopySha256`,
 /// `windows::admin_copy`); `Ok(None)` when the key or the value is missing.
 pub(crate) fn admin_copy_sha256() -> Result<Option<String>, RecordError> {
-    read_string(RECORD_KEY, w!("AdminCopySha256"))
+    record_string(w!("AdminCopySha256"))
 }
 
 /// The install folder `--adopt` was given (`UserInstallDir`, read unexpanded), the folder the
 /// refresh task copies from; `Ok(None)` when the key or the value is missing. Untrusted.
 pub(crate) fn user_install_dir() -> Result<Option<PathBuf>, RecordError> {
-    Ok(read_string(RECORD_KEY, w!("UserInstallDir"))?.map(PathBuf::from))
+    Ok(record_string(w!("UserInstallDir"))?.map(PathBuf::from))
 }
 
 /// The admin copy's owner as `--adopt` recorded it (`AdminCopyOwner`: a SID, or `machine`);
 /// `Ok(None)` when the key or the value is missing.
 pub(crate) fn admin_copy_owner() -> Result<Option<String>, RecordError> {
-    read_string(RECORD_KEY, w!("AdminCopyOwner"))
+    record_string(w!("AdminCopyOwner"))
+}
+
+/// The record's `REG_SZ` `value`, settled; `Ok(None)` when the key or the value is missing.
+fn record_string(value: PCWSTR) -> Result<Option<String>, RecordError> {
+    Ok(settled(|key| read_string_in(key, PCWSTR::null(), value))?.flatten())
+}
+
+/// `read` run on a handle on the record key and settled ([`record_settle::settle`]);
+/// `Ok(None)` when the key is missing.
+fn settled<T>(read: impl FnMut(HKEY) -> Result<T, RecordError>) -> Result<Option<T>, RecordError> {
+    record_settle::settle(&mut Settled {
+        read,
+        answer: PhantomData,
+    })
+}
+
+/// A reader's read of the record, for [`record_settle::settle`].
+struct Settled<F, T> {
+    read: F,
+    answer: PhantomData<T>,
+}
+
+impl<F: FnMut(HKEY) -> Result<T, RecordError>, T> Record for Settled<F, T> {
+    type Answer = T;
+    type Error = RecordError;
+
+    fn read(&mut self) -> Result<Option<T>, RecordError> {
+        let Some(key) = open_to_read(RECORD_KEY)? else {
+            return Ok(None);
+        };
+        (self.read)(key.0).map(Some)
+    }
+
+    fn unsteady(&self, error: &RecordError) -> bool {
+        match error {
+            RecordError::Denied
+            | RecordError::WrongType
+            | RecordError::NotText
+            | RecordError::Malformed(_) => true,
+            RecordError::Other(error) => {
+                error.raw_os_error() == i32::try_from(ERROR_KEY_DELETED.0).ok()
+            }
+        }
+    }
+
+    fn copy_there(&mut self) -> bool {
+        let copy = HSTRING::from(format!("SOFTWARE\\Clauseo\\{TEMP_NAME}"));
+        !matches!(open_to_read(PCWSTR(copy.as_ptr())), Ok(None))
+    }
+
+    fn key_there(&mut self) -> bool {
+        !matches!(open_to_read(RECORD_KEY), Ok(None))
+    }
+
+    fn pause(&mut self) {
+        pause();
+    }
+}
+
+/// The wait between two reads of a settled read.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a settled read's bounded wait for a set-up's remake of the record, 50 ms at a time \
+              for up to half a second; the tests script the pause (`record_settle`)"
+)]
+fn pause() {
+    std::thread::sleep(Duration::from_millis(PAUSE_MS));
+}
+
+/// A key opened to read its values, closed on drop.
+struct Opened(HKEY);
+
+impl Drop for Opened {
+    fn drop(&mut self) {
+        // SAFETY: the key came from `RegOpenKeyExW` and is closed once, here. A failed close
+        // leaves nothing to do.
+        let _closed = unsafe { RegCloseKey(self.0) };
+    }
+}
+
+/// `HKLM\<subkey>` opened to read its values, in the 64-bit view; `Ok(None)` when missing.
+fn open_to_read(subkey: PCWSTR) -> Result<Option<Opened>, RecordError> {
+    let mut key = HKEY::default();
+    // SAFETY: `subkey` is NUL-terminated and lives for the call; `key` is a live out-pointer,
+    // owned by `Opened` once written.
+    let opened = unsafe {
+        RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            subkey,
+            None,
+            KEY_QUERY_VALUE | KEY_WOW64_64KEY,
+            &raw mut key,
+        )
+    };
+    Ok(present(opened)?.then_some(Opened(key)))
+}
+
+/// The view flag a read of `subkey` under a key takes: none for the key itself (`subkey`
+/// null), whose handle was opened in the 64-bit view; the flag is for a subkey `RegGetValueW`
+/// opens.
+fn view(subkey: PCWSTR) -> REG_ROUTINE_FLAGS {
+    if subkey.is_null() {
+        REG_ROUTINE_FLAGS(0)
+    } else {
+        RRF_SUBKEY_WOW6464KEY
+    }
 }
 
 /// The `REG_SZ` `value` of `HKLM\<subkey>`, read in the 64-bit view (`RRF_SUBKEY_WOW6464KEY`,
@@ -120,7 +241,16 @@ pub(crate) fn admin_copy_owner() -> Result<Option<String>, RecordError> {
 /// [`RecordError::WrongType`]. Refused: [`RecordError::Denied`]. Not UTF-16:
 /// [`RecordError::NotText`].
 pub(crate) fn read_string(subkey: PCWSTR, value: PCWSTR) -> Result<Option<String>, RecordError> {
-    let Some(units) = read_units(subkey, value, RRF_RT_REG_SZ)? else {
+    read_string_in(HKEY_LOCAL_MACHINE, subkey, value)
+}
+
+/// [`read_string`] under `root`; a null `subkey` reads `root` itself.
+fn read_string_in(
+    root: HKEY,
+    subkey: PCWSTR,
+    value: PCWSTR,
+) -> Result<Option<String>, RecordError> {
+    let Some(units) = read_units_in(root, subkey, value, RRF_RT_REG_SZ)? else {
         return Ok(None);
     };
     let text = units.split(|unit| *unit == 0).next().unwrap_or_default();
@@ -136,21 +266,22 @@ pub(crate) fn read_units(
     value: PCWSTR,
     kind: REG_ROUTINE_FLAGS,
 ) -> Result<Option<Vec<u16>>, RecordError> {
-    let flags = kind | RRF_NOEXPAND | RRF_SUBKEY_WOW6464KEY;
+    read_units_in(HKEY_LOCAL_MACHINE, subkey, value, kind)
+}
+
+/// [`read_units`] under `root`; a null `subkey` reads `root` itself.
+fn read_units_in(
+    root: HKEY,
+    subkey: PCWSTR,
+    value: PCWSTR,
+    kind: REG_ROUTINE_FLAGS,
+) -> Result<Option<Vec<u16>>, RecordError> {
+    let flags = kind | RRF_NOEXPAND | view(subkey);
     let mut size = 0u32;
     // SAFETY: the key and value names are NUL-terminated literals; no data pointer asks only for
     // the size, written to `size`.
-    let found = unsafe {
-        RegGetValueW(
-            HKEY_LOCAL_MACHINE,
-            subkey,
-            value,
-            flags,
-            None,
-            None,
-            Some(&raw mut size),
-        )
-    };
+    let found =
+        unsafe { RegGetValueW(root, subkey, value, flags, None, None, Some(&raw mut size)) };
     if !present(found)? {
         return Ok(None);
     }
@@ -164,7 +295,7 @@ pub(crate) fn read_units(
     // SAFETY: `buffer` is live, writable and `written` bytes long for the call.
     let read = unsafe {
         RegGetValueW(
-            HKEY_LOCAL_MACHINE,
+            root,
             subkey,
             value,
             flags,
@@ -184,6 +315,11 @@ pub(crate) fn read_units(
 /// The `REG_DWORD` `value` of `HKLM\<subkey>`, in the 64-bit view. Missing: `Ok(None)`.
 /// Another type: [`RecordError::WrongType`].
 pub(crate) fn read_dword(subkey: PCWSTR, value: PCWSTR) -> Result<Option<u32>, RecordError> {
+    read_dword_in(HKEY_LOCAL_MACHINE, subkey, value)
+}
+
+/// [`read_dword`] under `root`; a null `subkey` reads `root` itself.
+fn read_dword_in(root: HKEY, subkey: PCWSTR, value: PCWSTR) -> Result<Option<u32>, RecordError> {
     let mut answer = 0u32;
     let mut size = u32::try_from(size_of::<u32>())
         .map_err(|error| RecordError::Other(io::Error::other(error)))?;
@@ -191,10 +327,10 @@ pub(crate) fn read_dword(subkey: PCWSTR, value: PCWSTR) -> Result<Option<u32>, R
     // long for the call.
     let read = unsafe {
         RegGetValueW(
-            HKEY_LOCAL_MACHINE,
+            root,
             subkey,
             value,
-            RRF_RT_REG_DWORD | RRF_SUBKEY_WOW6464KEY,
+            RRF_RT_REG_DWORD | view(subkey),
             None,
             Some((&raw mut answer).cast()),
             Some(&raw mut size),

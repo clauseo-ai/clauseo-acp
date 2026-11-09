@@ -1,6 +1,7 @@
 //! The walk under the root, as [`super`] describes it: each subkey taken over before it is read,
 //! judged by its owner and DACL as they were, then kept or deleted with its subtree; the keys
-//! the walk kept checked once more when it is done. Pure, against [`Tree`].
+//! the walk kept checked once more when it is done. The record's remake and the settling of a
+//! copy an earlier run left are `record.rs`. Pure, against [`Tree`].
 
 use std::collections::VecDeque;
 
@@ -9,6 +10,10 @@ use super::{
     INHERITED_SDDL, INSTALLER_NAME, LOCKED_SDDL, Report, Tree, Value, VendorFault, pinned,
     unless_gone,
 };
+
+mod record;
+#[cfg(test)]
+pub(super) use record::parses;
 
 /// What a key the walk makes again starts with, owned by Administrators (which the caller may
 /// assign) until it is taken over.
@@ -56,10 +61,13 @@ struct At {
 enum Visit<K> {
     /// Kept, with its frame.
     Kept(Frame<K>),
-    /// Deleted by the walk, with the values to copy into it when it is made again.
-    Deleted(Option<Vec<Value>>),
+    /// Deleted by the walk.
+    Deleted,
     /// Gone under the walk.
     Gone,
+    /// A pinned key, taken over and still there, to be made again ([`record::replace`]) with
+    /// the values to copy into it, if any.
+    Pinned(K, Option<Vec<Value>>),
 }
 
 /// Walks every subkey under `root` (left with `target`) with an explicit stack, depth first, and
@@ -72,7 +80,8 @@ pub(super) fn clean<T: Tree>(
     report: &mut Report,
 ) -> Result<Vec<Kept<T::Key>>, VendorFault> {
     let local = tree.local_domain();
-    let names = unless_gone(tree.subkeys(&root), VendorFault::CleanUp)?.unwrap_or_default();
+    let mut names = unless_gone(tree.subkeys(&root), VendorFault::CleanUp)?.unwrap_or_default();
+    record::recover(tree, &root, path, &mut names, report)?;
     let mut kept = Vec::new();
     let mut stack = vec![Frame {
         key: root,
@@ -111,28 +120,20 @@ pub(super) fn clean<T: Tree>(
             local: &local,
         };
         let visited = visit(tree, &frame.key, &name, &child, &judged, report)?;
-        let (deleted, carried) = match visited {
+        let (deleted, old, carried) = match visited {
             Visit::Kept(frame) => {
                 stack.push(frame);
                 continue;
             }
-            Visit::Deleted(carried) => (true, carried),
-            Visit::Gone => (false, None),
+            Visit::Deleted => (true, None, None),
+            Visit::Gone => (false, None, None),
+            Visit::Pinned(old, carried) => (true, Some(old), carried),
         };
         let Some(parent) = stack.last() else {
             continue;
         };
         if let Some(pinned) = pinned.as_deref() {
-            let made = unless_gone(
-                tree.create_child(&parent.key, &name, pinned),
-                VendorFault::Secure,
-            )?;
-            if let Some(made) = made {
-                if let Some(values) = carried {
-                    unless_gone(tree.write_values(&made, &values), VendorFault::Secure)?;
-                }
-                report.recreated.push(child.path);
-            }
+            record::replace(tree, &parent.key, old, carried, pinned, child.path, report)?;
         } else if deleted && child.relative.eq_ignore_ascii_case(INSTALLER_NAME) {
             remake_installer(tree, &parent.key, &name, child.path, report)?;
         }
@@ -207,7 +208,6 @@ fn visit<T: Tree>(
         } else {
             None
         };
-        drain(tree, key)?;
         if link {
             report.removed.push(at.path.clone());
         } else if planted {
@@ -215,7 +215,12 @@ fn visit<T: Tree>(
         } else if pinned.is_some() && others_wrote {
             report.writable_pinned.push(at.path.clone());
         }
-        return Ok(Visit::Deleted(carried));
+        // A pinned key is deleted only once its copy is written ([`record::replace`]).
+        if pinned.is_some() {
+            return Ok(Visit::Pinned(key, carried));
+        }
+        drain(tree, key)?;
+        return Ok(Visit::Deleted);
     }
     let target = INHERITED_SDDL;
     if unless_gone(tree.set_sddl(&key, target), VendorFault::Secure)?.is_none() {

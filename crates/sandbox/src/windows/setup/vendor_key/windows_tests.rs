@@ -4,7 +4,8 @@
 //! owner's rights with OWNER RIGHTS, one whose planter sets its owner back mid-take, an
 //! admin-owned key denying both, the installer-shaped key, a planted `Sandbox`, a real link
 //! child whose unprotected target stays byte for byte); a link parent is refused. The walk runs
-//! with `SeBackupPrivilege` alone, as set-up's does.
+//! with `SeBackupPrivilege` alone, as set-up's does. A crash before the record's rename recovers
+//! with its values, a copy beside the record is deleted, and a planted weak copy is not adopted.
 #![expect(
     unsafe_code,
     reason = "FFI to the registry's tree delete and value calls"
@@ -21,7 +22,7 @@ use windows::Win32::System::Registry::{
 };
 use windows::core::{HSTRING, PCWSTR};
 
-use super::os::{AFTER_OWNER_WRITE, Key, Registry};
+use super::os::{AFTER_OWNER_WRITE, FAIL_RENAME, Key, Registry};
 use super::security::Security;
 use super::{Report, Tree, VENDOR_SDDL, VendorFault, ensure};
 use crate::windows::acl::privilege::{Privileges, RECLAIM};
@@ -458,4 +459,66 @@ fn elevated_a_link_parent_is_refused_before_anything_is_written() {
         before,
         "the target is untouched"
     );
+}
+
+/// Writes a record's text values (owner, group, data folder) into the key `path`.
+fn set_record(path: &str, owner: &str) -> Result<(), String> {
+    set_string(path, "OwnerSid", owner)?;
+    set_string(path, "GroupSid", "S-1-5-21-1-2-3-1100")?;
+    set_string(path, "DataDir", "C:\\Users\\a\\Clauseo")
+}
+
+#[test]
+#[ignore = "elevated: writes HKLM; CI's elevated step runs it"]
+fn elevated_a_crash_mid_remake_recovers_the_record_and_a_weak_copy_is_deleted() {
+    if !elevated_tests_enabled() {
+        return;
+    }
+    let _clear = Clear;
+    Clear::run();
+    let path = format!("{TEST_ROOT}\\Vendor");
+    let record = format!("{path}\\Sandbox");
+    let copy = format!("{path}\\Sandbox.new");
+    let pinned = format!("O:BA{RECORD_SDDL}");
+    let names = ["OwnerSid", "GroupSid", "DataDir"];
+    let owner = "S-1-5-21-1-2-3-1001";
+    let held = Privileges::enable(&WALK).unwrap();
+    ensure(&mut Registry::at(&path), &path).unwrap();
+    create_key_with(&record, &pinned).unwrap();
+    set_record(&record, owner).unwrap();
+    let wanted = read_texts(&record, &names).unwrap();
+
+    // A crash before the rename: the old record deleted, the copy left whole.
+    FAIL_RENAME.set(true);
+    let crashed = ensure(&mut Registry::at(&path), &path);
+    FAIL_RENAME.set(false);
+    assert!(crashed.is_err(), "{crashed:?}");
+    assert!(key_sddl(&record).is_err() && key_sddl(&copy).is_ok());
+    let report = ensure(&mut Registry::at(&path), &path).unwrap();
+    assert_eq!(report.recovered, std::slice::from_ref(&copy));
+    assert_eq!(read_texts(&record, &names).unwrap(), wanted);
+    let security = Security::parse(&key_sddl(&record).unwrap());
+    assert_eq!(security, Security::parse(&pinned));
+    assert!(key_sddl(&copy).is_err(), "the copy is the record now");
+
+    // A copy beside the record, as a crash before the delete leaves: deleted, the record kept.
+    create_key_with(&copy, &pinned).unwrap();
+    set_record(&copy, "S-1-5-21-9-9-9-1001").unwrap();
+    let report = ensure(&mut Registry::at(&path), &path).unwrap();
+    assert_eq!(report.dropped_copies, std::slice::from_ref(&copy));
+    assert_eq!(read_texts(&record, &names).unwrap(), wanted);
+    assert!(key_sddl(&copy).is_err());
+
+    // A copy Users planted, with a weak SD and no record: deleted, not adopted.
+    assert_eq!(delete_key(&record), ERROR_SUCCESS.0);
+    drop(held);
+    let reclaim = Privileges::enable(&RECLAIM).unwrap();
+    create_key_with(&copy, PLANT).unwrap();
+    set_record(&copy, owner).unwrap();
+    drop(reclaim);
+    let _held = Privileges::enable(&WALK).unwrap();
+    let report = ensure(&mut Registry::at(&path), &path).unwrap();
+    assert_eq!(report.dropped_copies, std::slice::from_ref(&copy));
+    assert_eq!(report.recovered, Vec::<String>::new());
+    assert!(key_sddl(&copy).is_err() && key_sddl(&record).is_err());
 }
