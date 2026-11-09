@@ -6,6 +6,7 @@ use futures::executor::block_on;
 
 use super::*;
 use crate::platform::Arch;
+use crate::state::PythonBlocker;
 use crate::testing::runtime_tar_gz;
 use crate::write::TestDir;
 
@@ -206,18 +207,34 @@ fn a_refused_start_is_blocked_and_another_launch_error_is_failed() {
     let data = TestDir::new("python-refused");
     let (path, entry, archive) = stage(&data, &fake_archive("echo 3.13.18"));
     let dir = runtime_dir(&data.0, &archive);
-    let blocked: [fn() -> io::Error; 4] = [
-        || io::Error::from(io::ErrorKind::PermissionDenied),
-        || io::Error::from_raw_os_error(1260),
-        || io::Error::from_raw_os_error(4551),
-        || io::Error::from_raw_os_error(0xC0E9_0002_u32.cast_signed()),
+    let blocked: [(fn() -> io::Error, PythonBlocker); 5] = [
+        (
+            || io::Error::from(io::ErrorKind::PermissionDenied),
+            PythonBlocker::Unknown,
+        ),
+        (
+            || io::Error::from_raw_os_error(1260),
+            PythonBlocker::AppLocker,
+        ),
+        (
+            || io::Error::from_raw_os_error(4551),
+            PythonBlocker::AppControl,
+        ),
+        (
+            || io::Error::from_raw_os_error(0xC0E9_0002_u32.cast_signed()),
+            PythonBlocker::AppControl,
+        ),
+        (
+            || io::Error::from_raw_os_error(0xC000_0428_u32.cast_signed()),
+            PythonBlocker::Unknown,
+        ),
     ];
-    for error in blocked {
+    for (error, want) in blocked {
         let err = install(&path, &entry, &archive, &dir, &Refusing(error)).unwrap_err();
-        assert!(
-            matches!(err, PythonError::Run(RunFailure::Blocked(_))),
-            "{err:?}"
-        );
+        let PythonError::Run(RunFailure::Blocked(_, by)) = err else {
+            panic!("{err:?}");
+        };
+        assert_eq!(by, want, "{:?}", error());
         assert!(!dir.exists());
     }
     let missing = || io::Error::from(io::ErrorKind::NotFound);

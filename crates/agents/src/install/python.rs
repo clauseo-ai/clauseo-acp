@@ -58,12 +58,19 @@ pub(super) async fn step<T: Timer + Send + Sync>(job: &Job<T>) -> Option<PythonS
             Err(Stop::Run(RunFailure::Cancelled)) => return None,
             Err(Stop::Run(failure)) => {
                 tries += 1;
-                let kind = match failure {
-                    RunFailure::Blocked(_) => PythonFailureKind::RunBlocked,
-                    _ => PythonFailureKind::RunFailed,
+                let (kind, blocked_by) = match failure {
+                    RunFailure::Blocked(_, by) => (PythonFailureKind::RunBlocked, Some(by)),
+                    _ => (PythonFailureKind::RunFailed, None),
                 };
                 log.push(crate::log::redact(&failure.to_string(), &config.data_dir));
-                return Some(failed(log, kind, tries));
+                if let Some(by) = blocked_by {
+                    log.push(format!("blocked by: {}", by.word()));
+                }
+                let mut state = failed(log, kind, tries);
+                if let PythonState::Failed(failure) = &mut state {
+                    failure.blocked_by = blocked_by;
+                }
+                return Some(state);
             }
             Err(Stop::Try(err)) => err,
         };
@@ -116,7 +123,11 @@ pub(super) async fn step<T: Timer + Send + Sync>(job: &Job<T>) -> Option<PythonS
 /// `Failed` of `kind`, with the log's `result:` line.
 fn failed(mut log: InstallLog, kind: PythonFailureKind, tries: u32) -> PythonState {
     log.push(format!("result: {} after {tries} tries", kind.word()));
-    PythonState::Failed(PythonFailure { kind, log })
+    PythonState::Failed(PythonFailure {
+        kind,
+        blocked_by: None,
+        log,
+    })
 }
 
 /// One try: the space check, the archive, then the unpack, the run and the receipt. On `Ready`

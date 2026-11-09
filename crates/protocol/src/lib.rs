@@ -275,7 +275,8 @@ wire_types! {
     },
     skill_packs::{PackReason, PackRefusal, PackState, PackStatus},
     setup::{
-        FoundLogin, InstallLog, InstallProgress, LoginFrom, PythonFailureCause, PythonProgress,
+        FoundLogin, InstallLog, InstallProgress, LoginFrom, PythonBlockedBy, PythonFailureCause,
+        PythonProgress,
         Secret, SetupCommand, SetupEvent, SignIn, SignInMethod, SignInSource,
     },
     stream::{StreamId},

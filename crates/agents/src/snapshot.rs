@@ -352,20 +352,19 @@ impl Snapshot {
     }
 
     /// Bytes an install of `id` on `platform` downloads: the agent's packages (its sizes row;
-    /// none for a platform with no row) plus Node's archive when `node_needed`, plus Python's
-    /// archive when `python_needed` (none for a platform with no Python).
+    /// none for a platform with no row) plus Node's archive when `node_needed`. Python's archive
+    /// is not in it: Python is one for the computer, and `PythonState::Missing` carries its own
+    /// size, so a window summing every missing agent and Python counts it once.
     pub fn download_bytes(
         &self,
         id: &AgentId,
         platform: Platform,
         node_needed: bool,
-        python_needed: bool,
     ) -> Option<u64> {
         let row = self.agent(id)?.sizes_for(platform);
         let agent = row.map_or(0, |row| row.download_bytes);
         let node = self.node_part(platform, node_needed, |archive| archive.size);
-        let python = self.python_part(platform, python_needed, PythonArchive::size);
-        Some(agent.saturating_add(node).saturating_add(python))
+        Some(agent.saturating_add(node))
     }
 
     /// The free space an install needs: twice the download (the tarballs and the npm cache)

@@ -89,6 +89,7 @@ fn assert_exported(types: &Types, ts: &str) {
         "InstallProgress",
         "InstallLog",
         "PythonProgress",
+        "PythonBlockedBy",
         "PythonFailureCause",
         "SignIn",
         "FoundLogin",

@@ -13,13 +13,16 @@ use clauseo_agents::{
     Agents, InstallState, PythonArchive, PythonEntry, PythonFailureKind, PythonState, TestResolver,
     python_command_dir,
 };
-use clauseo_process::{LaunchSpec, Launched, Launcher, PassthroughLauncher, SpawnOptions};
 
 use crate::support::{
     A_PACKAGES, BASE, Events, Fixture, agent_a, agent_b, node_entry, platform, snapshot, states_of,
     to_hex,
 };
 use crate::write;
+
+// The run check's cases: a refused start, a failed check, no interpreter.
+#[path = "python_run.rs"]
+mod run;
 
 const fn secs(n: u64) -> Duration {
     Duration::from_secs(n)
@@ -134,7 +137,8 @@ fn python_installs_after_the_agent_with_its_receipt_and_manifest_and_its_downloa
     let fx = with_python("py-install", &bytes);
     let (agents, events) = fx.start();
     let (a, _) = events.first_states();
-    // A's Missing counts Python's archive (the user's Node: none of Node's).
+    // A's Missing leaves Python's archive out (and the user's Node: none of Node's); Python's
+    // own Missing carries it, so a window adds it once.
     let a_packages: u64 = A_PACKAGES
         .iter()
         .map(|name| u64::try_from(fx.tarballs[name].len()).unwrap())
@@ -143,7 +147,7 @@ fn python_installs_after_the_agent_with_its_receipt_and_manifest_and_its_downloa
     assert_eq!(
         a,
         InstallState::Missing {
-            download_bytes: a_packages + size
+            download_bytes: a_packages
         }
     );
     assert_eq!(
@@ -213,6 +217,62 @@ fn a_tampered_archive_fails_python_after_three_tries_and_the_agent_stays_ready()
     agents.retry(&agent_a(), false);
     let (_, last) = events.until_python_end();
     assert!(matches!(last, PythonState::Ready { .. }), "{last:?}");
+}
+
+#[test]
+fn a_retry_of_any_ready_agent_retries_python_and_leaves_that_agent_s_install_alone() {
+    let bytes = fake_python("echo 3.13.18");
+    let fx = with_python("py-retry-any", &bytes);
+    let path = format!("/py/{}", archive_name(1));
+    for _ in 0..6 {
+        fx.registry.then(&path, Behaviour::Tamper);
+    }
+    let (agents, events) = fx.start();
+    events.first_states();
+    // A's job fails Python, then B's job installs B and fails Python again.
+    agents.install(&agent_a());
+    events.until_end(&agent_a());
+    fx.timer.fire_next(secs(2));
+    fx.timer.fire_next(secs(8));
+    assert_eq!(
+        failure_kind(&events.until_python_end().1),
+        PythonFailureKind::Failed
+    );
+    agents.install(&agent_b());
+    let (_, last) = events.until_end(&agent_b());
+    assert!(matches!(last, InstallState::Ready { .. }), "{last:?}");
+    fx.timer.fire_next(secs(2));
+    fx.timer.fire_next(secs(8));
+    assert_eq!(
+        failure_kind(&events.until_python_end().1),
+        PythonFailureKind::Failed
+    );
+    let b_installed = agents.installed(&agent_b());
+    assert!(b_installed.is_some());
+    let other_requests = |fx: &Fixture| {
+        fx.registry
+            .requests()
+            .into_iter()
+            .filter(|request| request.path != path)
+            .count()
+    };
+    let before = other_requests(&fx);
+    // A retry sent with B's id (the window may send any ready plan's) retries Python.
+    agents.retry(&agent_b(), false);
+    let (_, last) = events.until_python_end();
+    assert!(matches!(last, PythonState::Ready { .. }), "{last:?}");
+    // B's own install is not redone: nothing but Python fetched, B never left Ready, A
+    // untouched, and B's install is the same.
+    assert_eq!(other_requests(&fx), before);
+    let seen = events.drain();
+    assert!(
+        states_of(&seen, &agent_b())
+            .iter()
+            .all(|state| matches!(state, InstallState::Ready { .. })),
+        "{seen:?}"
+    );
+    assert_eq!(states_of(&seen, &agent_a()), []);
+    assert_eq!(agents.installed(&agent_b()), b_installed);
 }
 
 #[test]
@@ -396,100 +456,6 @@ fn the_disk_check_counts_python() {
     assert_eq!(failure.kind, clauseo_agents::FailureKind::DiskFull);
     assert!(failure.need_mb.unwrap() > (1_u64 << 60) / 1_000_000);
     assert_eq!(fx.registry.requests(), []);
-}
-
-/// The passthrough launcher, refusing every `python3` with access denied.
-struct RefusePython(PassthroughLauncher);
-
-impl Launcher for RefusePython {
-    fn launch(&self, spec: &LaunchSpec) -> Result<Launched, clauseo_process::Error> {
-        if spec.program().ends_with("python3") {
-            return Err(clauseo_process::Error::Spawn {
-                program: spec.program().to_owned(),
-                source: io::Error::from(io::ErrorKind::PermissionDenied),
-            });
-        }
-        self.0.launch(spec)
-    }
-}
-
-#[test]
-fn a_refused_python_is_run_blocked_and_the_agent_stays_ready() {
-    let bytes = fake_python("echo 3.13.18");
-    let fx = with_python("py-refused", &bytes);
-    let launcher: Arc<dyn Launcher> =
-        Arc::new(RefusePython(PassthroughLauncher::new(SpawnOptions::new())));
-    let (agents, events) = Agents::start(fx.config.clone(), launcher, fx.timer.clone());
-    let events = Events::new(events);
-    events.first_states();
-    let last = install_a(&agents, &events);
-    assert_eq!(failure_kind(&last), PythonFailureKind::RunBlocked);
-    assert!(matches!(
-        agents.state(&agent_a()),
-        Some(InstallState::Ready { .. })
-    ));
-    assert!(!runtime_dir(&fx, 1).exists(), "the refused tree is removed");
-    assert!(download(&fx).exists(), "the archive stays for a retry");
-    assert_eq!(fx.timer.install_waits(), Vec::<Duration>::new(), "no retry");
-}
-
-#[test]
-fn a_python_whose_check_exits_non_zero_is_run_failed() {
-    let bytes = fake_python("exit 2");
-    let fx = with_python("py-exit", &bytes);
-    let (agents, events) = fx.start();
-    events.first_states();
-    let last = install_a(&agents, &events);
-    assert_eq!(failure_kind(&last), PythonFailureKind::RunFailed);
-    let PythonState::Failed(failure) = &last else {
-        unreachable!()
-    };
-    let log = failure.log.to_string();
-    assert!(log.contains("exited with code 2"), "{log}");
-    // The failed try's read-only tree is gone, temp folder included.
-    let runtime = fx.data.path().join("agents/runtime");
-    let left: Vec<_> = std::fs::read_dir(&runtime).unwrap().collect();
-    assert!(left.is_empty(), "{left:?}");
-}
-
-#[test]
-fn a_python_that_does_not_answer_in_20_seconds_is_run_failed() {
-    let bytes = fake_python("sleep 600");
-    let fx = with_python("py-hang", &bytes);
-    let (agents, events) = fx.start();
-    events.first_states();
-    agents.install(&agent_a());
-    events.until(&agent_a(), |s| matches!(s, InstallState::Ready { .. }));
-    events.until_python(|s| *s == PythonState::Installing);
-    fx.timer.fire_next(secs(20));
-    let (_, last) = events.until_python_end();
-    assert_eq!(failure_kind(&last), PythonFailureKind::RunFailed);
-    assert!(!runtime_dir(&fx, 1).exists());
-}
-
-#[test]
-fn an_archive_with_no_interpreter_leaves_no_read_only_temp_folder() {
-    let bytes = runtime_tar_gz(
-        "python",
-        &[
-            ("lib/", 0o755, b""),
-            ("lib/deep/", 0o755, b""),
-            ("lib/deep/x.py", 0o644, b""),
-        ],
-    )
-    .unwrap();
-    let fx = with_python("py-no-interpreter", &bytes);
-    let (agents, events) = fx.start();
-    events.first_states();
-    agents.install(&agent_a());
-    events.until_end(&agent_a());
-    fx.timer.fire_next(secs(2));
-    fx.timer.fire_next(secs(8));
-    let (_, last) = events.until_python_end();
-    assert_eq!(failure_kind(&last), PythonFailureKind::Failed);
-    let runtime = fx.data.path().join("agents/runtime");
-    let left: Vec<_> = std::fs::read_dir(&runtime).unwrap().collect();
-    assert!(left.is_empty(), "{left:?}");
 }
 
 #[test]

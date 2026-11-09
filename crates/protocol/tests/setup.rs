@@ -12,3 +12,6 @@ pub mod fixtures;
 #[cfg(test)]
 #[path = "setup/wire.rs"]
 mod wire;
+
+#[path = "setup/python.rs"]
+mod python;

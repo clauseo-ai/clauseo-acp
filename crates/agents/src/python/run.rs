@@ -13,6 +13,7 @@ use clauseo_process::{LaunchSpec, Launched, Launcher, Timer};
 use futures::future::{Either, join3, select};
 
 use crate::cancel::Cancel;
+use crate::state::PythonBlocker;
 
 /// How long the run may take.
 pub(crate) const SMOKE_LIMIT: Duration = Duration::from_secs(20);
@@ -25,14 +26,35 @@ const SMOKE_CODE: &str = "import sys, lxml, numpy; print(sys.version)";
 /// (1260), `ERROR_SYSTEM_INTEGRITY_POLICY_VIOLATION` (4551), and the NT statuses a process
 /// refused at load exits with, `STATUS_SYSTEM_INTEGRITY_POLICY_VIOLATION` (`0xC0E90002`) and
 /// `STATUS_INVALID_IMAGE_HASH` (`0xC0000428`).
-const POLICY_ERRORS: [i32; 2] = [1260, 4551];
-const POLICY_STATUSES: [u32; 2] = [0xC0E9_0002, 0xC000_0428];
+const POLICY_ERRORS: [i32; 2] = [ACCESS_DISABLED_BY_POLICY, INTEGRITY_POLICY_VIOLATION];
+const POLICY_STATUSES: [u32; 2] = [INTEGRITY_POLICY_STATUS, 0xC000_0428];
+
+/// `ERROR_ACCESS_DISABLED_BY_POLICY`: `AppLocker` or Software Restriction Policies.
+const ACCESS_DISABLED_BY_POLICY: i32 = 1260;
+/// `ERROR_SYSTEM_INTEGRITY_POLICY_VIOLATION`: App Control for Business or Smart App Control.
+const INTEGRITY_POLICY_VIOLATION: i32 = 4551;
+/// `STATUS_SYSTEM_INTEGRITY_POLICY_VIOLATION`, the NT status 4551 comes from.
+const INTEGRITY_POLICY_STATUS: u32 = 0xC0E9_0002;
+
+/// Which policy a refusal's code names, from the code alone: 4551 (or its NT status) is App
+/// Control, 1260 is `AppLocker`, anything else (access denied, an image hash) is unknown.
+// TODO(#812): tell Smart App Control apart from other App Control policies with #812's
+// Smart App Control registry read, once it is on main.
+fn blocker(code: Option<i32>) -> PythonBlocker {
+    match code {
+        Some(INTEGRITY_POLICY_VIOLATION) => PythonBlocker::AppControl,
+        Some(code) if code == INTEGRITY_POLICY_STATUS.cast_signed() => PythonBlocker::AppControl,
+        Some(ACCESS_DISABLED_BY_POLICY) => PythonBlocker::AppLocker,
+        _ => PythonBlocker::Unknown,
+    }
+}
 
 /// Why the run failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RunFailure {
-    /// The OS refused to start the interpreter or load its code: access denied or a policy.
-    Blocked(String),
+    /// The OS refused to start the interpreter or load its code: access denied or a policy,
+    /// and which kind of policy its error code names.
+    Blocked(String, PythonBlocker),
     /// It started but exited non-zero, printed nothing, or took longer than [`SMOKE_LIMIT`].
     Failed(String),
     /// The install was paused or quit meanwhile.
@@ -42,7 +64,7 @@ pub(crate) enum RunFailure {
 impl std::fmt::Display for RunFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RunFailure::Blocked(detail) | RunFailure::Failed(detail) => f.write_str(detail),
+            RunFailure::Blocked(detail, _) | RunFailure::Failed(detail) => f.write_str(detail),
             RunFailure::Cancelled => f.write_str("cancelled"),
         }
     }
@@ -73,9 +95,10 @@ pub(crate) async fn smoke<T: Timer>(
     let spec = LaunchSpec::new(program.to_owned(), args, BTreeMap::new(), cwd)
         .map_err(|err| RunFailure::Failed(format!("Python could not be started: {err}")))?;
     let launched = launcher.launch(&spec).map_err(|err| match &err {
-        clauseo_process::Error::Spawn { source, .. } if refused(source) => {
-            RunFailure::Blocked(format!("this computer refused to start Python: {err}"))
-        }
+        clauseo_process::Error::Spawn { source, .. } if refused(source) => RunFailure::Blocked(
+            format!("this computer refused to start Python: {err}"),
+            blocker(source.raw_os_error()),
+        ),
         _ => RunFailure::Failed(format!("Python could not be started: {err}")),
     })?;
     let Launched {
@@ -121,9 +144,10 @@ pub(crate) async fn smoke<T: Timer>(
     match code {
         Some(0) if seen > 0 => Ok(()),
         Some(code) if POLICY_STATUSES.iter().any(|&s| code == s.cast_signed()) => {
-            Err(RunFailure::Blocked(format!(
-                "this computer refused to load Python (code {code:#x})"
-            )))
+            Err(RunFailure::Blocked(
+                format!("this computer refused to load Python (code {code:#x})"),
+                blocker(Some(code)),
+            ))
         }
         Some(code) => Err(RunFailure::Failed(format!(
             "Python's check exited with code {code}"

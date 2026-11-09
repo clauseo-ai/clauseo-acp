@@ -240,5 +240,6 @@ pub(super) fn embedded_python() -> PythonEntry {
             PythonArchive::new(os, arch, name, url, size, unpacked, sha)
         })
         .collect();
-    PythonEntry::new(PYTHON_VERSION, archives)
+    let hosts = PYTHON_HOSTS.iter().map(|&host| host.to_owned()).collect();
+    PythonEntry::new(PYTHON_VERSION, archives).with_hosts(hosts)
 }

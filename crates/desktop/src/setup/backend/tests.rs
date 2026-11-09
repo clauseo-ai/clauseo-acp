@@ -20,6 +20,7 @@ mod network;
 mod once;
 mod pending;
 mod pending_switch;
+mod python;
 mod quit;
 mod races;
 mod refusals;

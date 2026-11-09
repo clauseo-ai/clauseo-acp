@@ -66,6 +66,8 @@ pub enum AgentsEvent {
 pub enum InstallState {
     /// Not installed, and no install running. `download_bytes` is what an install would fetch
     /// here, Node's archive included when Node would be downloaded (UD1's "About {size} MB").
+    /// Python's archive is never in it: [`PythonState::Missing`] carries its size, once for the
+    /// computer. The install's disk check still counts Python.
     Missing {
         /// Bytes an install would download.
         download_bytes: u64,
@@ -109,7 +111,8 @@ pub enum PythonState {
     /// This build has no Python for this platform (Linux, or before Clauseo publishes the
     /// archives): nothing is fetched.
     Unavailable,
-    /// Not installed, and no install of it running. `download_bytes` is its archive's size.
+    /// Not installed, and no install of it running. `download_bytes` is its archive's size, in
+    /// no agent's `InstallState::Missing`: a window adds it once to the missing agents' sizes.
     Missing {
         /// Bytes its install would download.
         download_bytes: u64,
@@ -145,8 +148,35 @@ pub enum PythonState {
 pub struct PythonFailure {
     /// Which kind.
     pub kind: PythonFailureKind,
+    /// For [`PythonFailureKind::RunBlocked`]: which kind of policy the refusal's error code
+    /// names; `None` for every other kind.
+    pub blocked_by: Option<PythonBlocker>,
     /// The log, for "Details".
     pub log: InstallLog,
+}
+
+/// What refused to start the Python runtime, read only from the failed start's error code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum PythonBlocker {
+    /// App Control for Business (WDAC) or Smart App Control: Windows error 4551, or its NT
+    /// status `0xC0E90002`.
+    AppControl,
+    /// `AppLocker` or Software Restriction Policies: Windows error 1260.
+    AppLocker,
+    /// Any other refusal: access denied, or `STATUS_INVALID_IMAGE_HASH`.
+    Unknown,
+}
+
+impl PythonBlocker {
+    /// The word the log's `blocked by:` line uses.
+    pub fn word(self) -> &'static str {
+        match self {
+            PythonBlocker::AppControl => "app_control",
+            PythonBlocker::AppLocker => "applocker",
+            PythonBlocker::Unknown => "unknown",
+        }
+    }
 }
 
 /// Why the Python runtime's install stopped.

@@ -74,9 +74,16 @@ window sent still passes through Tauri's buffers, which Clauseo does not zero.
 
 **`SetupEvent`.** Three payloads, in the crate's event form (external tagging, snake case,
 `None` fields left out):
-- `SetupInfo { keys_available }`: whether the OS keychain can hold a key (false where Linux has
-  no Secret Service; the key screens hide). A new subscription gets it first, then every agent's
-  install and sign-in state, before any newer event.
+- `SetupInfo { keys_available, python }`: whether the OS keychain can hold a key (false where
+  Linux has no Secret Service; the key screens hide), and, since stage D, the Python runtime's
+  state as an optional `PythonProgress` (left out when unset, so an older host's event decodes
+  with none). Desktop sends `SetupInfo` again on each Python change. A new subscription gets it
+  first, then every agent's install and sign-in state, before any newer event.
+  `PythonProgress` is `Unavailable`, `Missing { download_bytes }`, `Waiting { code, hosts,
+  log }`, `Downloading { received, total }`, `Installing`, `Ready { version }` and
+  `Failed { cause, code, blocked_by, hosts, log }`; `code`, `blocked_by` and `hosts` are
+  optional. Python is one for the computer: no agent's `Missing` counts its archive, and a
+  `RetryAgentInstall` for any ready agent retries it.
 - `AgentInstallProgress { agent, state: InstallProgress }`, S17's `InstallState`:
   `Missing { download_bytes }`, `Waiting { code, hosts, log }` (offline; it retries by itself),
   `Downloading { received, total }`, `Installing`, `Ready { version }`,
@@ -103,6 +110,16 @@ A second `FindLogin` replaces the first (`agents` `signin/job.rs`, `Task::supers
 
 Install and sign-in failures carry an `ErrorCode`, never `agents`' own kinds. These enums are
 closed: setup events are never logged, and window and desktop ship together.
+
+Python's failures are the exception: they carry a `PythonFailureCause` (`blocked`,
+`disk_full`, `failed`, `run_blocked`, `run_failed`). Two of those, the OS refusing to start
+the runtime and its check failing, have no `ErrorCode`, and adding codes would change the counts
+schema for a state that never stops an agent. A download-side failure also carries the agent
+install's code (`agent.install_blocked`, `agent.install_disk_full`, `agent.install_failed`),
+and a blocked download the Python hosts, so the window reuses the agent's lines. `run_blocked`
+carries an optional `blocked_by` (`PythonBlockedBy`: `app_control` for Windows error 4551,
+App Control for Business or Smart App Control; `applocker` for 1260, `AppLocker` or Software
+Restriction Policies; `unknown` otherwise), read only from the failed start's error code.
 
 **New error codes.** Eleven, before `unknown`, each with its row in 0003 and in
 `docs/ui-states.md` section 9. An unknown code still decodes to `unknown`.

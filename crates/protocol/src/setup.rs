@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 
 pub use self::install::{
     InstallLog, InstallProgress, MAX_INSTALL_LOG_LINE_BYTES, MAX_INSTALL_LOG_LINES,
-    PythonFailureCause, PythonProgress,
+    PythonBlockedBy, PythonFailureCause, PythonProgress,
 };
 pub use self::secret::{MAX_SECRET_BYTES, Secret};
 use crate::{AgentId, ErrorCode, PlanLabel, Timestamp};
@@ -36,7 +36,11 @@ pub enum SetupCommand {
         /// The agent.
         agent: AgentId,
     },
-    /// Start a failed or paused install again.
+    /// Start a failed or paused install again. On a ready agent it retries the Python runtime
+    /// instead (when Python is missing, waiting or failed): Python is one for the computer, so
+    /// retrying any ready agent's install retries it, and the window may send any ready plan's
+    /// id. The ready agent's own install is left alone: it stays ready and nothing of it is
+    /// fetched or installed again.
     RetryAgentInstall {
         /// The agent.
         agent: AgentId,
