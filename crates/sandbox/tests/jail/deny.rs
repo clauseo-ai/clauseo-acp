@@ -127,6 +127,16 @@ int main(int argc, char **argv) {
         size_t size = sizeof args;
         return sys("procargs", sysctl(mib, 3, args, &size, NULL, 0) == 0 && size > 0);
     }
+    if (!strcmp(op, "listall")) {
+        static pid_t pids[65536];
+        return sys("listall", proc_listallpids(pids, sizeof pids) > 0);
+    }
+    if (!strcmp(op, "children")) {
+        static pid_t pids[4096];
+        int n = proc_listchildpids(getppid(), pids, sizeof pids), found = 0;
+        for (int i = 0; i < n; i++) found |= pids[i] == atoi(a);
+        return sys("children", found);
+    }
     if (!strcmp(op, "pidpath")) {
         char path[PROC_PIDPATHINFO_MAXSIZE];
         return sys("pidpath", proc_pidpath(atoi(a), path, sizeof path) > 0);

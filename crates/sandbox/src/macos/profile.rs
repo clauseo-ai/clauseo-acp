@@ -27,6 +27,20 @@ const INSTRUCTIONS_REGEX: &str = "/[cC][lL][aA][uU][dD][eE]\\.[mM][dD]$";
 /// The parameter naming the browser socket folder.
 const BROWSER_SOCKETS: &str = "BROWSER_SOCKETS";
 
+/// Every `process-info*` operation but `process-info-listpids`, refused for a process outside
+/// the jail. Named one by one, not `process-info*` with an allow after it, so no allow follows
+/// a deny; listing pids gives numbers only, and the jail's own listing needs it.
+const PROCESS_INFO_OUTSIDE: [&str; 8] = [
+    "process-info-codesignature",
+    "process-info-dirtycontrol",
+    "process-info-ledger",
+    "process-info-pidinfo",
+    "process-info-pidfdinfo",
+    "process-info-pidfileportinfo",
+    "process-info-rusage",
+    "process-info-setcontrol",
+];
+
 /// The longest tag the profile takes.
 const TAG_MAX: usize = 64;
 
@@ -215,10 +229,11 @@ impl Writer {
         self.note(
             "; Processes outside the jail: no arguments (`kern.procargs2`), path or other info.",
         );
-        self.note("; The base allows the jail's own (`same-sandbox`); this keeps it.");
+        self.note("; The base allows the jail's own (`same-sandbox`); this keeps it. Listing pids");
+        self.note("; (`process-info-listpids`) stays allowed: the jail lists its own children.");
         self.rule(
             "deny",
-            "process-info*",
+            &PROCESS_INFO_OUTSIDE.join(" "),
             &["(require-not (target same-sandbox))".to_owned()],
         );
     }

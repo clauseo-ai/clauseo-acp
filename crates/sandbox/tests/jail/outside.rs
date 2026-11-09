@@ -29,7 +29,8 @@ const NET: &str = r#"use Socket qw(:all); my $op = shift;
 
 /// Item 1: a process the user started outside the jail. `ps` is set-user-ID and the jail does
 /// not run it; the arguments (`KERN_PROCARGS2`) and path (`proc_pidpath`) are refused, which
-/// `(deny default)` alone did not do on macOS 27.2. The jail's own children stay visible.
+/// `(deny default)` alone did not do on macOS 27.2. Listing pids still works, so the jail finds
+/// its own children, and their arguments and path read.
 #[test]
 fn another_process_cannot_be_inspected() {
     let j = Jail::new();
@@ -51,11 +52,12 @@ fn another_process_cannot_be_inspected() {
     let ps = run(&j.launcher, "/bin/ps", &["eww", &pid], &j.m1(), &[]);
     assert_ne!(ps.code, Some(0), "{ps:#?}");
     assert!(!ps.stdout.contains("sleep"), "{ps:#?}");
-    let own = format!(
-        r#"/bin/sleep 5 & "{}" procargs $!"#,
-        j.w.at("tools/probe").display()
-    );
-    j.sh(&own, &[]).assert_ok();
+    let own = r#"/bin/sleep 5 & child=$!
+        "$1" listall && "$1" children $child && "$1" procargs $child && "$1" pidpath $child"#;
+    let out = j.sh(own, &[j.w.at("tools/probe").to_str().unwrap()]);
+    for step in ["listall", "children", "procargs", "pidpath"] {
+        assert!(out.stdout.contains(&format!("ALLOWED {step}")), "{out:#?}");
+    }
     run_outside("/bin/kill", &["-TERM", &pid], &j.m1()).assert_ok();
     async_io::block_on(sleeper.handle.exited());
 }
