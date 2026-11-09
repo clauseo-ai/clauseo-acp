@@ -294,9 +294,9 @@ impl Launch {
 }
 
 /// Whether `name` is `want` as the matter's volume opens names: without the code points HFS+
-/// ignores, then by the policy's fold ([`opens_as`]).
+/// ignores, then by the policy's fold ([`opens_as`], which takes `want` in lowercase).
 fn is_name(name: &OsStr, want: &str) -> bool {
-    opens_as(name, want)
+    opens_as(name, &want.to_ascii_lowercase())
 }
 
 /// Whether `name` is `.git`.
