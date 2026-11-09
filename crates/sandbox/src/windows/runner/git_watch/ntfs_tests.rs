@@ -1,14 +1,16 @@
 //! The watch on NTFS: `ReadDirectoryChangesExW` armed on a matter, a lawyer's folder renamed to
 //! `.git`, and an empty folder turned into a junction leading out (`mklink /J`'s two steps),
-//! each set aside within the 2 s the decision record promises, the session ended first.
+//! each set aside within the 2 s the decision record promises, the session ended first; and the
+//! pairing's records: a folder moved out of a watched temp folder leaves it with the 64-bit file
+//! ID the matter's `FILE_ACTION_ADDED` carries, and a file moved out isn't listed.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use super::os::{DirWatch, Stop};
-use super::{Changes, Guard, Pulse, Session, watch};
+use super::os::{DirWatch, Notify, Stop};
+use super::{Changes, Guard, Next, Pulse, Session, Source, watch};
 use crate::windows::denial_pipe::Record;
 use crate::windows::set_aside::tests::launch_matter_on_test_volume;
 use crate::windows::set_aside::{Failed, GitGuard, Hooks, Live};
@@ -97,7 +99,7 @@ fn watched_while(root: &Path, data: &Path, act: impl FnOnce(), name: &str) -> (b
             said: thread_said,
             pulse: Pulse::default(),
         };
-        let first = DirWatch::arm(&thread_root, &thread_stop).expect("the watch arms");
+        let first = DirWatch::arm(&thread_root, &thread_stop, Notify::All).expect("the watch arms");
         armed.send(()).unwrap();
         watch(first, &guard, &session);
     });
@@ -165,4 +167,57 @@ fn an_empty_folder_turned_into_a_junction_leading_out_is_set_aside_within_two_se
 /// Whether `name` is in `root`, itself.
 fn there(root: &Path, name: &str) -> bool {
     std::fs::symlink_metadata(root.join(name)).is_ok()
+}
+
+/// The pairing's records (`pairs.rs`): a folder moved from the agent's temp folder into the
+/// matter leaves temp (`FILE_ACTION_REMOVED`, a watch for names only) with the same file ID as
+/// the matter's `FILE_ACTION_ADDED`, which lists it fresh by its creation time; a file deleted
+/// out of temp isn't listed. The ID's top 16 bits are NTFS's sequence number, never 0 for a file.
+#[test]
+fn a_folder_moved_out_of_temp_leaves_with_the_file_id_its_added_record_carries() {
+    let w = World::new("ntfs-git-watch-pairing");
+    w.dir.file("temp/x/inside.txt", "x");
+    w.dir.file("temp/note.txt", "x");
+    w.dir.dir("matter");
+    w.dir.dir("elsewhere");
+    let (temp, matter) = (w.canonical("temp"), w.canonical("matter"));
+    let stop = Stop::new().unwrap();
+    let mut from = DirWatch::arm(&temp, &stop, Notify::Names).unwrap();
+    let mut into = DirWatch::arm(&matter, &stop, Notify::All).unwrap();
+    rename_new(
+        &temp.join("note.txt"),
+        &w.canonical("elsewhere").join("note.txt"),
+    )
+    .unwrap();
+    rename_new(&temp.join("x"), &matter.join("x")).unwrap();
+    let left = gathered(&mut from).left;
+    let fresh = gathered(&mut into).fresh_folders;
+    assert_eq!(left.len(), 1, "the folder only: {left:?}");
+    let (path, id) = &left[0];
+    assert_eq!(path, Path::new("x"));
+    assert_ne!(
+        id >> 48,
+        0,
+        "the sequence number is in the top bits: {id:#x}"
+    );
+    assert_eq!(fresh, [(PathBuf::from("x"), *id)]);
+}
+
+/// What `watch` reads until it goes idle once something came, merged: at most five reads.
+fn gathered(watch: &mut DirWatch<'_>) -> Changes {
+    let mut all = Changes::default();
+    let mut came = false;
+    for _ in 0..5 {
+        match watch.next() {
+            Next::Changed(changes) => {
+                came = true;
+                all.left.extend(changes.left);
+                all.fresh_folders.extend(changes.fresh_folders);
+            }
+            Next::Idle if came => break,
+            Next::Idle => {}
+            next @ (Next::Overflow | Next::Broken(_) | Next::Stopped) => panic!("{next:?}"),
+        }
+    }
+    all
 }

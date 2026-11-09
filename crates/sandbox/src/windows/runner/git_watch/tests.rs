@@ -20,6 +20,7 @@ use crate::windows::test_world::matter_one;
 use crate::{Denial, SetAsideWhat};
 
 mod ends;
+mod lost;
 mod notices;
 mod pairs;
 mod records;

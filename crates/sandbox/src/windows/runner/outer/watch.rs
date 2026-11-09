@@ -10,7 +10,9 @@
 //! (`start.rs`), or only to the log when the launch names none. The agent's state and temp
 //! folders get watches that only note which file IDs left them, so a folder moved from there
 //! into the matter counts gone by its check whatever its creation time says (`git_watch::pairs`);
-//! one that can't be armed is passed over.
+//! one that can't be armed, can't start its thread, panics or breaks doesn't refuse the launch
+//! or end the session, but loses the pairing for the session: every folder made just now and gone
+//! before its check then counts gone.
 
 use std::io;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -22,7 +24,7 @@ use std::time::{Duration, Instant, SystemTime};
 use clauseo_protocol::MatterId;
 
 use super::super::end::EndSignal;
-use super::super::git_watch::os::{DirWatch, Stop};
+use super::super::git_watch::os::{DirWatch, Notify, Stop};
 use super::super::git_watch::{
     Cause, Changes, Dog, Guard, Paired, Pairs, Pulse, Session, feed, watch, watchdog,
 };
@@ -118,7 +120,7 @@ fn start(
                         root: guard.0.root().to_owned(),
                     },
                 };
-                match DirWatch::arm(guard.0.root(), &stop) {
+                match DirWatch::arm(guard.0.root(), &stop, Notify::All) {
                     Ok(source) => {
                         watching = true;
                         let _sent = armed.send(Ok(()));
@@ -165,10 +167,11 @@ fn start(
     Ok(done)
 }
 
-/// Starts the watches that only feed the pairing (`git_watch::feed`): on the agent's state
-/// folder, and on its temp folder when that isn't inside the state folder. A folder that can't
-/// be watched (or a thread that can't start) is logged and passed over, never refusing the
-/// launch: the pairing only adds to the creation-time rule, and the matter stays watched.
+/// Starts the watches that only feed the pairing (`git_watch::feed`), for names only: on the
+/// agent's state folder, and on its temp folder when that isn't inside the state folder. A
+/// folder that can't be watched, a thread that can't start or one that panics never refuses
+/// the launch, since the matter stays watched, but fails closed: the pairing is lost for the
+/// session (`Pairs::lose_for_good`), so every folder made just now and gone counts.
 fn pairing(
     message: &LaunchMessage,
     stop: &Arc<Stop>,
@@ -185,26 +188,34 @@ fn pairing(
     );
     let mut done = Vec::new();
     for root in roots {
-        let (stop, pairs) = (Arc::clone(stop), Arc::clone(pairs));
+        let (stop, thread_pairs) = (Arc::clone(stop), Arc::clone(pairs));
         let (finished, ended) = mpsc::channel();
         let started = thread::Builder::new()
             .name("git-pairing".to_owned())
             .spawn(move || {
-                let ran = catch_unwind(AssertUnwindSafe(|| match DirWatch::arm(&root, &stop) {
-                    Ok(source) => feed(source, &Paired { pairs, root }, monotonic),
-                    Err(error) => tracing::warn!(
-                        code = error.raw_os_error(),
-                        "a pairing watch couldn't be armed; passed over"
-                    ),
+                let paired = Paired {
+                    pairs: thread_pairs,
+                    root,
+                };
+                let ran = catch_unwind(AssertUnwindSafe(|| {
+                    let armed = DirWatch::arm(&paired.root, &stop, Notify::Names);
+                    feed(armed, &paired, monotonic);
                 }));
                 if ran.is_err() {
-                    tracing::warn!("a pairing watch panicked; it notes no more");
+                    tracing::warn!("a pairing watch panicked; the pairing is lost for the session");
+                    paired.lose_for_good();
                 }
                 let _sent = finished.send(());
             });
         match started {
             Ok(_) => done.push(ended),
-            Err(error) => tracing::warn!(%error, "a pairing watch's thread couldn't start"),
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    "a pairing watch's thread couldn't start; the pairing is lost for the session"
+                );
+                pairs.lose_for_good();
+            }
         }
     }
     done

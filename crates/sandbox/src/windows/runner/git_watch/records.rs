@@ -31,7 +31,9 @@ pub(crate) const MOVED_IN_AGE: u64 = 5 * 10_000_000;
 const UNIX_EPOCH_TICKS: u64 = 116_444_736_000_000_000;
 /// Where an extended record's `CreationTime` is.
 const CREATION_AT: usize = 8;
-/// Where an extended record's `FileId` is.
+/// Where an extended record's `FileId` is: a `LARGE_INTEGER`, read whole. On NTFS it is the
+/// file reference number, the MFT record's 48-bit number with its 16-bit sequence number in the
+/// top bits, which NTFS bumps each time it reuses the record (`pairs.rs`).
 const FILE_ID_AT: usize = 64;
 
 /// Where a record's fields are.
@@ -74,8 +76,11 @@ pub(crate) struct Changes {
     /// by the check counts as gone only when that file ID left another place (`pairs.rs`), so
     /// a forged creation time doesn't hide a folder moved in. Not listed without a file ID.
     pub(crate) fresh_folders: Vec<(PathBuf, u64)>,
-    /// Each item removed or renamed away (`FILE_ACTION_REMOVED`, `FILE_ACTION_RENAMED_OLD_NAME`),
-    /// with its file ID, for the pairing: none without a file ID, nor with [`Layout::Plain`].
+    /// Each folder removed or renamed away (`FILE_ACTION_REMOVED`,
+    /// `FILE_ACTION_RENAMED_OLD_NAME`), with its file ID, for the pairing: none without a file
+    /// ID, nor with [`Layout::Plain`]. Files aren't listed, so a flood of them doesn't push a
+    /// folder's file ID out of the pairing's bounded list; an item with no attributes at all (0,
+    /// which no file has) is listed, in case it was a folder.
     pub(crate) left: Vec<(PathBuf, u64)>,
 }
 
@@ -100,8 +105,11 @@ pub(crate) fn filetime(at: SystemTime) -> u64 {
 }
 
 /// Whether a folder reported added at `created` (a FILETIME) counts as moved in: unless it was
-/// made at most [`MOVED_IN_AGE`] before `now`, it does. A creation time after `now` (clock skew,
-/// or forged) or unreadable (0 or less) counts too: the count fails toward ending the session.
+/// made at most [`MOVED_IN_AGE`] before `now`, it does. `now` is when the buffer was received,
+/// not when the folder's event happened: a record read late makes a folder just made look older,
+/// which errs only toward counting it and so ending the session, never toward missing one. A
+/// creation time after `now` (clock skew, or forged) or unreadable (0 or less) counts too: the
+/// count fails toward ending the session.
 fn moved_in(created: i64, now: u64) -> bool {
     let Some(created) = u64::try_from(created).ok().filter(|created| *created > 0) else {
         return true;
@@ -141,7 +149,7 @@ pub(crate) fn changes(buffer: &[u8], layout: Layout, now: u64) -> Option<Changes
                 }
                 changes.added.push(path);
             }
-            REMOVED | RENAMED_OLD_NAME if attributes.is_some() => {
+            REMOVED | RENAMED_OLD_NAME if folder || attributes == Some(0) => {
                 if let Some(id) = file_id(record) {
                     changes.left.push((path_of(name)?, id));
                 }
