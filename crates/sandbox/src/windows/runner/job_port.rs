@@ -6,6 +6,10 @@
 //! #789's outer-to-lawyer session-notice path lands, the `notify` the outer passes moves onto it;
 //! nothing else here changes.
 
+use std::io;
+use std::sync::mpsc;
+use std::thread;
+
 /// `JOB_OBJECT_MSG_ACTIVE_PROCESS_LIMIT`: a process was refused a place in the job because it
 /// already holds its limit of active processes.
 pub(super) const ACTIVE_PROCESS_LIMIT: u32 = 3;
@@ -18,7 +22,7 @@ pub(super) const TOO_MANY_PROGRAMS: &str = "A task tried to start too many progr
 /// Reads `messages` (the port's, until it fails) and calls `notify` with [`TOO_MANY_PROGRAMS`] at
 /// the first [`ACTIVE_PROCESS_LIMIT`] only: a fork bomb hits the cap over and over. One outer
 /// serves one session, so once here is once per session.
-pub(super) fn watch(messages: impl IntoIterator<Item = u32>, mut notify: impl FnMut(&str)) {
+pub(super) fn watch(messages: impl IntoIterator<Item = u32>, mut notify: impl FnMut(&'static str)) {
     let mut told = false;
     for message in messages {
         if message == ACTIVE_PROCESS_LIMIT && !told {
@@ -26,6 +30,24 @@ pub(super) fn watch(messages: impl IntoIterator<Item = u32>, mut notify: impl Fn
             notify(TOO_MANY_PROGRAMS);
         }
     }
+}
+
+/// A `notify` for [`watch`] that hands the notice to a thread of its own, which calls `say`: a
+/// `say` that blocks (a full stderr pipe the host stopped reading) never stops the reader
+/// draining the port. The hand-off is a one-slot channel, and [`watch`] notifies at most once,
+/// so it never waits.
+pub(super) fn hand_off(
+    say: impl FnOnce(&str) + Send + 'static,
+) -> io::Result<impl FnMut(&'static str) + Send + 'static> {
+    let (hand, notice) = mpsc::sync_channel::<&'static str>(1);
+    thread::Builder::new().spawn(move || {
+        if let Ok(line) = notice.recv() {
+            say(line);
+        }
+    })?;
+    Ok(move |line| {
+        let _sent = hand.try_send(line);
+    })
 }
 
 #[cfg(windows)]

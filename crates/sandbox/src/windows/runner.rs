@@ -575,6 +575,9 @@ fn is_batch(program: &str) -> bool {
 
 #[cfg(test)]
 #[cfg(windows)]
+mod job_cap_tests;
+#[cfg(test)]
+#[cfg(windows)]
 mod job_tests;
 #[cfg(test)]
 #[cfg(windows)]

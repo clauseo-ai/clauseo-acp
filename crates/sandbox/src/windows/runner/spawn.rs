@@ -191,20 +191,20 @@ pub(super) const ACTIVE_PROCESS_CAP: u32 = 256;
 pub(super) const JOB_LIMITS: JOB_OBJECT_LIMIT =
     JOB_OBJECT_LIMIT(JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE.0 | JOB_OBJECT_LIMIT_ACTIVE_PROCESS.0);
 
-/// The job's extended limits: [`JOB_LIMITS`], with [`ACTIVE_PROCESS_CAP`] for the count.
-pub(super) fn job_limits() -> JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
-    let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-    limits.BasicLimitInformation.LimitFlags = JOB_LIMITS;
-    limits.BasicLimitInformation.ActiveProcessLimit = ACTIVE_PROCESS_CAP;
-    limits
+/// A job whose last handle closing ends every process in it, with no breakaway allowed,
+/// [`JOB_LIMITS`] with [`ACTIVE_PROCESS_CAP`], and [`UI_LIMITS`]: the inner runner, the agent
+/// and all it starts.
+pub(super) fn kill_on_close_job() -> io::Result<Handle> {
+    capped_job(ACTIVE_PROCESS_CAP)
 }
 
-/// A job whose last handle closing ends every process in it, with no breakaway allowed,
-/// [`JOB_LIMITS`] and [`UI_LIMITS`]: the inner runner, the agent and all it starts.
-pub(super) fn kill_on_close_job() -> io::Result<Handle> {
+/// [`kill_on_close_job`] holding at most `cap` processes (the tests' cap is a small one).
+pub(super) fn capped_job(cap: u32) -> io::Result<Handle> {
     // SAFETY: no attributes (an unnamed job no other process can open) and no name.
     let job = Handle(unsafe { CreateJobObjectW(None, PCWSTR::null()) }.map_err(|e| os_error(&e))?);
-    let limits = job_limits();
+    let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+    limits.BasicLimitInformation.LimitFlags = JOB_LIMITS;
+    limits.BasicLimitInformation.ActiveProcessLimit = cap;
     // SAFETY: the job is live; `limits` is the structure the class names, for its size.
     unsafe {
         SetInformationJobObject(
@@ -254,6 +254,25 @@ pub(super) fn active_processes(job: &Handle) -> io::Result<u32> {
     }
     .map_err(|e| os_error(&e))?;
     Ok(info.ActiveProcesses)
+}
+
+/// The extended limits `job` holds, as Windows reads them back.
+#[cfg(test)]
+pub(super) fn limits_of(job: &Handle) -> io::Result<JOBOBJECT_EXTENDED_LIMIT_INFORMATION> {
+    let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+    // SAFETY: the job is live with every right (this process made it); `info` is the structure
+    // the class names, writable for its size; the returned length isn't needed.
+    unsafe {
+        QueryInformationJobObject(
+            Some(job.0),
+            JobObjectExtendedLimitInformation,
+            (&raw mut info).cast::<c_void>(),
+            u32::try_from(size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>()).unwrap_or(0),
+            None,
+        )
+    }
+    .map_err(|e| os_error(&e))?;
+    Ok(info)
 }
 
 /// Keeps this process's later DLL loads to System32 and takes the current folder out of the

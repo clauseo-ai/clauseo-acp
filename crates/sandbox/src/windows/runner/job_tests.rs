@@ -13,7 +13,7 @@ use windows::Win32::System::JobObjects::{
     JOB_OBJECT_LIMIT_ACTIVE_PROCESS, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
 
-use super::spawn::{assign, job_limits, kill_on_close_job};
+use super::spawn::{assign, kill_on_close_job, limits_of};
 use super::sweep::os::own_job_pids;
 
 /// Set in the child's environment: it makes [`job_child`] the child's part.
@@ -107,10 +107,13 @@ fn a_kill_on_close_jobs_child_that_read_its_own_job_dies_with_the_creators_handl
     assert!(code.is_some(), "{code:?}");
 }
 
-/// The job holds at most 256 processes, and still ends them all when its handle closes.
+/// The launch's job holds at most 256 processes, and still ends them all when its handle
+/// closes: its limits as Windows reads them back.
 #[test]
 fn the_job_caps_its_processes_at_256() {
-    let limits = job_limits().BasicLimitInformation;
+    let limits = limits_of(&kill_on_close_job().unwrap())
+        .unwrap()
+        .BasicLimitInformation;
     assert!(limits.LimitFlags.contains(JOB_OBJECT_LIMIT_ACTIVE_PROCESS));
     assert!(
         limits

@@ -1428,7 +1428,8 @@ leaves that profile, both naming the part.
   the session goes on. The outer reads the job's completion port (`job_port.rs`), and the first
   `JOB_OBJECT_MSG_ACTIVE_PROCESS_LIMIT` gives one notice per session: "A task tried to start too
   many programs at once, so Clauseo stopped it. Ask the assistant to try a smaller step." It goes
-  to the outer's stderr until #789's session-notice path lands. The cap counts only processes in
+  to the outer's stderr until #789's session-notice path lands, from a thread of its own, so a
+  blocked stderr never stops the port being read. The cap counts only processes in
   the job. Processes outside it (M2, above) remain the per-slot SYSTEM stop item (C5), which
   blocks launch.
 - **The pipes** (D11's mitigation). The outer makes four named pipes per launch (`ctl`, the
