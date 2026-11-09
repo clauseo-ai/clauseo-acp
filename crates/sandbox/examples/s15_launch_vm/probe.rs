@@ -39,7 +39,7 @@
 //!   `SECURITY_ATTRIBUTES` whose DACL names the token's user and `SYSTEM`.
 //! - `ui-relay <desktop> <desktop user> <ms>`: the control's variants (a) and (g), started by
 //!   the harness as a pool user on a control station (`<desktop>` is that station's for (a), the
-//!   agent's own `ClauseoRun-<hex>\Default` for (g)): makes the agent's token from its own as
+//!   agent's own `Service-0x0-<LUID>$\Default` for (g)): makes the agent's token from its own as
 //!   the inner runner does and starts `probe ui-control` with it on `<desktop>`, waiting up to
 //!   `<ms>`; prints the child's lines, then `ui-relay exit <code or None>`, or `ui-relay error
 //!   <why>`.

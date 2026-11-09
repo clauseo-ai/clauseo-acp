@@ -1,7 +1,17 @@
 //! The order the outer runner starts the inner runner in (M1), apart from its calls so the tests
-//! hold it on every OS: the logon, the check of the inner's token user, the job, the shut of its
-//! process and thread, and only then the resume. A step that fails after the logon kills the
-//! suspended inner runner, which never runs.
+//! hold it on every OS: a previous session's runners waited for and ended (`previous.rs`), the
+//! logon, the check of the inner's token user, the job, the shut of its
+//! process and thread, the resume, and the full check of its token. A step that fails after the
+//! logon kills the inner runner: before the resume it never runs.
+//!
+//! The check is in two stages. Before the resume, the user alone (`check_user`): on the agent's
+//! own station the inner's token doesn't grant the outer `TOKEN_QUERY`, and the user is read
+//! from the process instead (`inner_user.rs`). After the resume the inner's one act is to grant
+//! the desktop user `TOKEN_QUERY` on its token, say it is ready on `ctl`, and wait; the outer
+//! then opens the token and checks it (`confirm`: the user again, a logon SID of the run's own,
+//! not the desktop user's, Medium integrity, no full elevation; not its groups or restricting
+//! SIDs) before it sends the go. Until the go the inner has done
+//! nothing but the grant (`inner_flow.rs`).
 //!
 //! No step gives the inner a handle to its job: the job kills on close, which happens only when
 //! its last handle closes, so the outer's must be the only one, and the inner and the agent end
@@ -17,6 +27,8 @@ pub(crate) trait Steps {
     type Inner;
     /// A failure, which ends the launch.
     type Error;
+    /// Waits for, then ends, a previous session's live runners of the pool user.
+    fn clear(&mut self) -> Result<(), Self::Error>;
     /// Starts the inner runner as the pool user, suspended.
     fn log_on(&mut self) -> Result<Self::Inner, Self::Error>;
     /// Checks its token's user is the pool user.
@@ -27,18 +39,22 @@ pub(crate) trait Steps {
     fn shut(&mut self, inner: &Self::Inner) -> Result<(), Self::Error>;
     /// Lets it run.
     fn resume(&mut self, inner: &Self::Inner) -> Result<(), Self::Error>;
+    /// Waits for its ready, checks its token (`inner_user::check_full`), and sends it the go.
+    fn confirm(&mut self, inner: &Self::Inner) -> Result<(), Self::Error>;
     /// Ends it after `error`.
     fn kill(&mut self, inner: &Self::Inner, error: &Self::Error);
 }
 
 /// Runs the steps in order; the running inner runner, or the first failure.
 pub(crate) fn start<S: Steps>(steps: &mut S) -> Result<S::Inner, S::Error> {
+    steps.clear()?;
     let inner = steps.log_on()?;
     let started = steps
         .check_user(&inner)
         .and_then(|()| steps.assign(&inner))
         .and_then(|()| steps.shut(&inner))
-        .and_then(|()| steps.resume(&inner));
+        .and_then(|()| steps.resume(&inner))
+        .and_then(|()| steps.confirm(&inner));
     match started {
         Ok(()) => Ok(inner),
         Err(error) => {
@@ -72,6 +88,9 @@ mod tests {
     impl Steps for Record {
         type Inner = u32;
         type Error = String;
+        fn clear(&mut self) -> Result<(), String> {
+            self.step("clear")
+        }
         fn log_on(&mut self) -> Result<u32, String> {
             self.step("log on").map(|()| 7)
         }
@@ -87,12 +106,23 @@ mod tests {
         fn resume(&mut self, _: &u32) -> Result<(), String> {
             self.step("resume")
         }
+        fn confirm(&mut self, _: &u32) -> Result<(), String> {
+            self.step("confirm")
+        }
         fn kill(&mut self, inner: &u32, error: &String) {
             self.done.push(format!("kill {inner} after {error}"));
         }
     }
 
-    const ORDER: [&str; 5] = ["log on", "check user", "assign", "shut", "resume"];
+    const ORDER: [&str; 7] = [
+        "clear",
+        "log on",
+        "check user",
+        "assign",
+        "shut",
+        "resume",
+        "confirm",
+    ];
 
     /// The steps are the whole start: none hands the inner a handle (to its job or anything).
     #[test]
@@ -109,12 +139,26 @@ mod tests {
             ..Record::default()
         };
         assert_eq!(start(&mut record), Err("log on".to_owned()));
-        assert_eq!(record.done, ["log on"]);
+        assert_eq!(record.done, ["clear", "log on"]);
+    }
+
+    /// A previous runner that couldn't be waited for or ended refuses the launch before any
+    /// logon: nothing of this session runs beside it.
+    #[test]
+    fn a_failed_clear_logs_nothing_on() {
+        let mut record = Record {
+            fail: Some("clear"),
+            ..Record::default()
+        };
+        assert_eq!(start(&mut record), Err("clear".to_owned()));
+        assert_eq!(record.done, ["clear"]);
     }
 
     #[test]
-    fn a_failure_after_logon_kills_the_inner_and_never_resumes_it() {
-        for (at, step) in ORDER.iter().enumerate().skip(1) {
+    /// Each failure kills the inner: before the resume it never ran, and a failed full check
+    /// (`confirm`) kills it before its go, with nothing done but its token's grant.
+    fn a_failure_after_logon_kills_the_inner() {
+        for (at, step) in ORDER.iter().enumerate().skip(2) {
             let mut record = Record {
                 fail: Some(step),
                 ..Record::default()

@@ -10,6 +10,7 @@ use super::*;
 mod failures;
 mod final_stop;
 mod install;
+mod live;
 
 const POOL_A: &str = "S-1-5-21-1-2-3-1010";
 const POOL_B: &str = "S-1-5-21-1-2-3-1011";
@@ -44,6 +45,10 @@ struct Fake {
     sweep_next_fails: bool,
     /// Which of the marker writes and removals fail.
     fails: Fails,
+    /// The outer each marker names, by id (none for the rest).
+    outers: BTreeMap<String, Outer>,
+    /// What opening each pid finds; [`OuterSeen::Gone`] for the rest.
+    processes: BTreeMap<u32, OuterSeen>,
     log: Vec<String>,
 }
 
@@ -60,6 +65,8 @@ impl Fake {
             unreadable: false,
             sweep_next_fails: false,
             fails: Fails::default(),
+            outers: BTreeMap::new(),
+            processes: BTreeMap::new(),
             log: Vec::new(),
         }
     }
@@ -99,6 +106,7 @@ impl Markers for Fake {
                 pool_user: user.clone(),
                 state: *state,
                 install: state.and(install.clone()),
+                outer: self.outers.get(id).copied(),
             });
         Ok(sessions.collect())
     }
@@ -165,6 +173,10 @@ impl Markers for Fake {
     }
     fn note(&mut self, line: &str) {
         self.log.push(format!("note {line}"));
+    }
+    fn outer(&mut self, pid: u32) -> OuterSeen {
+        self.log.push(format!("open {pid}"));
+        self.processes.get(&pid).copied().unwrap_or(OuterSeen::Gone)
     }
 }
 

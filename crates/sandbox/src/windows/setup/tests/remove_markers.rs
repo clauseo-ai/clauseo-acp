@@ -6,7 +6,7 @@ use super::fake::OTHER_OWNER;
 use super::remove::pool;
 use super::*;
 use crate::windows::runner::marker::{
-    MarkerState, unclean_sessions, write_marker, write_marker_at,
+    MarkerState, Outer, unclean_sessions, write_marker, write_marker_at,
 };
 use crate::windows::setup::record_values::{
     SETUP_VALUES, STOP_COMPLETED, STOP_NEXT, STOP_SEQUENCE, SWEEP_COMPLETED, SWEEP_NEXT,
@@ -18,8 +18,9 @@ fn leave_markers(machine: &remove_fake::Remover) {
     let data = machine.m.data_dir();
     machine.m.dir.dir("data/sandbox/run");
     let pool_user = Sid::parse("S-1-5-21-1-2-3-1001").unwrap();
-    write_marker(&data, "00000000000000aa", &pool_user, None).unwrap();
-    let waiting = write_marker(&data, "00000000000000bb", &pool_user, None).unwrap();
+    let outer = Outer { pid: 7, created: 1 };
+    write_marker(&data, "00000000000000aa", &pool_user, None, outer).unwrap();
+    let waiting = write_marker(&data, "00000000000000bb", &pool_user, None, outer).unwrap();
     let state = MarkerState::AwaitingStop { stop: 3 };
     write_marker_at(&waiting, Some(&pool_user), None, state).unwrap();
     assert_eq!(unclean_sessions(&data).unwrap().len(), 2);

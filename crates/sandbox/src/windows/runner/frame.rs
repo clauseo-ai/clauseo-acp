@@ -1,8 +1,10 @@
 //! What the two runners say to each other on the `ctl` pipe, and the agent's command line.
 //!
 //! A frame is a little-endian `u32` length, then that many bytes of JSON, at most
-//! [`LAUNCH_CAP`](super::LAUNCH_CAP). The outer sends one [`InnerLaunch`]; the inner answers with
-//! [`InnerReport`]s. Nothing else crosses `ctl`.
+//! [`LAUNCH_CAP`](super::LAUNCH_CAP). First the inner, its token's `TOKEN_QUERY` granted to the
+//! desktop user, sends one [`InnerReady`], and the outer, its full check of the inner's token
+//! made, answers one [`InnerGo`]. Then the outer sends one [`InnerLaunch`]; the inner answers
+//! with [`InnerReport`]s. Nothing else crosses `ctl`.
 
 use std::io::{self, Read, Write};
 
@@ -11,6 +13,24 @@ use serde::{Deserialize, Serialize};
 
 use super::LAUNCH_CAP;
 use crate::windows::sids::Sid;
+
+/// The inner runner's first frame, once its token grants the desktop user `TOKEN_QUERY`: its
+/// pid, which the outer checks against the process it started.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InnerReady {
+    /// The inner runner's pid.
+    pub pid: u32,
+}
+
+/// The outer runner's answer to [`InnerReady`], once its full check of the inner's token
+/// passed; the inner does nothing else before it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InnerGo {
+    /// Always `true`; a failed check sends nothing and kills the inner.
+    pub go: bool,
+}
 
 /// What the outer runner sends the inner runner: everything it needs to start the agent, the
 /// environment already made ([`super::agent_env`]).
@@ -35,7 +55,8 @@ pub struct InnerLaunch {
     pub folders: Vec<String>,
     /// The folder they all lie below, which exists: the state folder.
     pub folder_base: String,
-    /// The private desktop the outer runner made for the agent, `WinSta0\<name>`.
+    /// The private desktop the outer runner made for the agent: `<station>\Default`, the station
+    /// `Service-0x…$` that Windows named (`station::StationDesktop`).
     pub desktop: String,
 }
 

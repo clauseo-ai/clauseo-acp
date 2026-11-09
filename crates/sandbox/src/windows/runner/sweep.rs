@@ -49,9 +49,11 @@
 //! a process is found, fails its open, and fails the first act closed.
 //!
 //! **Rounds.** A sweep lists again after any round that killed something, until a round kills
-//! nothing: a process one it killed started meanwhile is killed in the next round. A runner of an
-//! earlier session's is open to a later inner's sweep: the runners' process DACL grants the
-//! desktop user's logon SID, which both hold (`token::runner_process_sddl`).
+//! nothing: a process one it killed started meanwhile is killed in the next round. No runner opens
+//! another: the runners' process DACL grants the pool user nothing and names no logon SID
+//! (`token::runner_process_sddl`), so an earlier session's inner still live would fail this
+//! sweep's open. The next outer, as the desktop user, waits for any such runner and then ends it
+//! before its logon (`previous.rs`).
 //!
 //! Each process found is opened first, which pins its pid, and then the lists are read again: only
 //! a pid they still give the pool user is killed, so a pid reused meanwhile is left alone.

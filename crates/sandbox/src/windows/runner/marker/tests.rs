@@ -6,6 +6,11 @@ use crate::test_support::TempDir;
 
 const POOL: &str = "S-1-5-21-1111111111-2222222222-3333333333-1001";
 const ID: &str = "0123456789abcdef";
+/// The outer that writes the markers here.
+const OUTER: Outer = Outer {
+    pid: 4242,
+    created: 133_000_000_000_000_000,
+};
 
 fn sid(text: &str) -> Sid {
     Sid::parse(text).unwrap()
@@ -65,7 +70,7 @@ fn a_marker_is_left_until_it_is_removed() {
     let ids = ["00000000000000aa", "00000000000000bb", "00000000000000cc"];
     let paths: Vec<PathBuf> = ids
         .iter()
-        .map(|id| write_marker(data.path(), id, &sid(POOL), None).unwrap())
+        .map(|id| write_marker(data.path(), id, &sid(POOL), None, OUTER).unwrap())
         .collect();
     for path in &paths {
         assert!(path.is_file(), "{}", path.display());
@@ -86,12 +91,14 @@ fn a_marker_is_left_until_it_is_removed() {
                 pool_user: Some(sid(POOL)),
                 state: Some(MarkerState::Open),
                 install: None,
+                outer: Some(OUTER),
             },
             UncleanSession {
                 id: ids[2].to_owned(),
                 pool_user: Some(sid(POOL)),
                 state: Some(MarkerState::Open),
                 install: None,
+                outer: Some(OUTER),
             },
         ]
     );
@@ -112,7 +119,7 @@ fn the_listing_skips_other_files_and_still_lists_a_marker_it_cant_read() {
     // Not a marker's content, and not the user's alone: listed, with no pool user.
     let garbled = data.file("sandbox/run/00000000000000dd.session", "not json");
     owner_only(&garbled);
-    let shared = write_marker(data.path(), "00000000000000ee", &sid(POOL), None).unwrap();
+    let shared = write_marker(data.path(), "00000000000000ee", &sid(POOL), None, OUTER).unwrap();
     #[cfg(unix)]
     crate::test_support::set_mode(&shared, 0o644);
     #[cfg(not(unix))]
@@ -126,6 +133,7 @@ fn the_listing_skips_other_files_and_still_lists_a_marker_it_cant_read() {
                 pool_user: None,
                 state: None,
                 install: None,
+                outer: None,
             },
             UncleanSession {
                 id: "00000000000000ee".to_owned(),
@@ -136,6 +144,7 @@ fn the_listing_skips_other_files_and_still_lists_a_marker_it_cant_read() {
                     Some(MarkerState::Open)
                 },
                 install: None,
+                outer: if cfg!(unix) { None } else { Some(OUTER) },
             },
         ]
     );
@@ -146,7 +155,7 @@ fn a_marker_takes_only_a_launch_id() {
     let data = TempDir::new("marker-id");
     run_folder(&data);
     for bad in ["../escape", "0123456789ABCDEF", "short"] {
-        let got = write_marker(data.path(), bad, &sid(POOL), None);
+        let got = write_marker(data.path(), bad, &sid(POOL), None, OUTER);
         assert_eq!(
             got.map_err(|e| e.kind()),
             Err(io::ErrorKind::InvalidInput),
@@ -165,13 +174,15 @@ fn a_marker_that_cant_be_written_refuses_the_launch_before_any_logon() {
         .join(format!("{ID}.json"));
     // No run folder: the write fails, and the session (the logons) never runs.
     let mut logged_on = false;
-    let refused = marked(data.path(), &launch, &sid(POOL), None, |_| logged_on = true);
+    let refused = marked(data.path(), &launch, &sid(POOL), None, OUTER, |_| {
+        logged_on = true;
+    });
     assert!(refused.is_err());
     assert!(!logged_on, "a session ran with no marker");
     // Nor with a launch file whose name gives no id.
     run_folder(&data);
     let unnamed = data.path().join("sandbox").join("run").join("launch.json");
-    let refused = marked(data.path(), &unnamed, &sid(POOL), None, |_| {
+    let refused = marked(data.path(), &unnamed, &sid(POOL), None, OUTER, |_| {
         logged_on = true;
     });
     assert_eq!(
@@ -180,7 +191,7 @@ fn a_marker_that_cant_be_written_refuses_the_launch_before_any_logon() {
     );
     assert!(!logged_on);
     // Written, the session runs with the marker's path, already on disk.
-    let ran = marked(data.path(), &launch, &sid(POOL), None, |marker| {
+    let ran = marked(data.path(), &launch, &sid(POOL), None, OUTER, |marker| {
         logged_on = true;
         marker.is_file().then_some(marker)
     });
@@ -192,7 +203,7 @@ fn a_marker_that_cant_be_written_refuses_the_launch_before_any_logon() {
 fn a_marker_is_settled_in_place_and_reads_back_what_it_waits_for() {
     let data = TempDir::new("marker-states");
     run_folder(&data);
-    let path = write_marker(data.path(), ID, &sid(POOL), None).unwrap();
+    let path = write_marker(data.path(), ID, &sid(POOL), None, OUTER).unwrap();
     owner_only(&path);
     let states = [
         MarkerState::AwaitingSweep { sweep: 7 },
@@ -311,7 +322,7 @@ fn a_marker_records_the_install_it_was_written_under() {
     let data = TempDir::new("marker-install");
     run_folder(&data);
     let install = "0123456789abcdef0123456789abcdef";
-    let path = write_marker(data.path(), ID, &sid(POOL), Some(install)).unwrap();
+    let path = write_marker(data.path(), ID, &sid(POOL), Some(install), OUTER).unwrap();
     owner_only(&path);
     let left = unclean_sessions(data.path()).unwrap();
     assert_eq!(left[0].install.as_deref(), Some(install));
@@ -321,4 +332,39 @@ fn a_marker_records_the_install_it_was_written_under() {
     let text = std::fs::read_to_string(&path).unwrap();
     assert!(!text.contains("install"), "{text}");
     assert_eq!(unclean_sessions(data.path()).unwrap()[0].install, None);
+}
+
+#[test]
+fn an_open_marker_names_its_outer_and_an_older_one_reads_as_naming_none() {
+    let data = TempDir::new("marker-outer");
+    run_folder(&data);
+    let path = write_marker(data.path(), ID, &sid(POOL), None, OUTER).unwrap();
+    owner_only(&path);
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        text.contains(r#""outer":{"pid":4242,"created":133000000000000000}"#),
+        "{text}"
+    );
+    assert_eq!(unclean_sessions(data.path()).unwrap()[0].outer, Some(OUTER));
+    // Settled to wait for a task's run, it names no outer any more.
+    write_marker_at(
+        &path,
+        Some(&sid(POOL)),
+        None,
+        MarkerState::AwaitingSweep { sweep: 2 },
+    )
+    .unwrap();
+    owner_only(&path);
+    assert!(!std::fs::read_to_string(&path).unwrap().contains("outer"));
+    assert_eq!(unclean_sessions(data.path()).unwrap()[0].outer, None);
+    // A marker written before the field: open, naming no outer.
+    let older = format!(r#"{{"pool_user":"{POOL}","state":{{"kind":"open"}}}}"#);
+    let path = data.file(&format!("sandbox/run/{ID}.session"), &older);
+    owner_only(&path);
+    let left = unclean_sessions(data.path()).unwrap();
+    assert_eq!(left[0].state, Some(MarkerState::Open));
+    assert_eq!(
+        (left[0].pool_user.clone(), left[0].outer),
+        (Some(sid(POOL)), None)
+    );
 }

@@ -131,7 +131,7 @@ The security rows (`checks_sec.rs`, `checks_m3.rs`):
 - `handles`: the agent's handle table holds exactly the `in`, `out` and `err` runner pipes,
   never `ctl` (by name; by counting client pipe ends when names don't come back).
 - `desktop`: prints the DACLs of `WinSta0` and `WinSta0\Default`; the agent runs on its own
-  `ClauseoRun-…` window station, can't open `WinSta0` (and if it could, can't open `Default`
+  `Service-0x0-<LUID>$` window station, can't open `WinSta0` (and if it could, can't open `Default`
   there after `SetProcessWindowStation`), and `SwitchDesktop` gives 5 under the job's desktop
   UI limit (without that limit the row fails, `no desktop UI limit`). An ACE for A's pool SID
   on `Default` prints `ALERT desktop: …` and fails the row. Without the limit, `SwitchDesktop`
@@ -248,10 +248,11 @@ The sweep rows and `end-cleanup` fail until the runner's sweep lands: they are i
 harness ends its benign process if it still runs at the row's end, and notes it.
 
 The UI limits (`whoami`, `node-pipes` and `codex` check them; `checks_ui.rs`): the agent runs
-on a window station of its own, `ClauseoRun-…`, whose DACL grants the pool user `GA`, in a job
-with every `JOB_OBJECT_UILIMIT_*` (`0xff`). The probe's direct read of its innermost job's UI
-limits must be exactly `0xff`. Only when it reads exactly `0x0` (node's children sit in
-libuv's own nested job) does the effect decide instead, and both halves must hold:
+on a window station of its own, `Service-0x0-<LUID>$`, whose DACL grants the pool user
+`0x2007F`, in a job with every `JOB_OBJECT_UILIMIT_*` (`0xff`). The probe's direct read of its
+innermost job's UI limits must be exactly `0xff`. Only when it reads exactly `0x0` (node's
+children sit in libuv's own nested job) does the effect decide instead, and both halves must
+hold:
 
 - `CreateDesktopW` on its own station fails with exactly 5. The station's DACL grants
   `WINSTA_CREATEDESKTOP`, so only the job's `DESKTOP` limit refuses it. Agent and control both
@@ -275,25 +276,26 @@ variant that carried each discriminating effect. On CI every variant gets 8 from
 `CreateDesktopW`, while their clipboard writes succeed, so the clipboard carries the row.
 
 Then the harness runs the positive control (`checks_ctl.rs`): `probe ui-control` once per
-variant, each on its own fresh window station `ClauseoS15Ctl-<hex>` made as the outer runner
-makes `ClauseoRun-…` (`CreateWindowStationW(name, 0, GENERIC_ALL, sa)`, a DACL of `SYSTEM`, the
-token's user and the harness's user, labelled Low, with a `Default` desktop), kept open while
-the process runs on `ClauseoS15Ctl-<hex>\Default`. No variant is in a job of ours; each inherits
-whatever job the harness runs in (on CI, the runner service's), which the row notes. The probe
-tries `CreateDesktopW` on its own station, then the clipboard write, and prints each result with
-its token's user, integrity and restricting SIDs. Every variant's result is printed. The
-variants, closest to the agent first:
+variant, each on its own fresh control station (`win_station.rs`), made the unelevated way the
+outer runner makes the agent's: a pool user's interactive logon makes it unnamed
+(`Service-0x0-<LUID>$`), then the harness takes it over and gives it and its `Default` desktop
+a DACL of `SYSTEM`, the token's user and the harness's user (`GA` each), labelled Low. It is
+kept open while the process runs on `<station>\Default`. No variant is in a job of
+ours; each inherits whatever job the harness runs in (on CI, the runner service's), which the
+row notes. The probe tries `CreateDesktopW` on its own station, then the clipboard write, and
+prints each result with its token's user, integrity and restricting SIDs. Every variant's result
+is printed. The variants, closest to the agent first:
 
 - (g) the agent's own token shape on the agent's own station, outside the runner's job, so only the
   job differs. In `node-pipes`, node prints `node waiting` after `probe job-ui` (which prints
-  `ui-effect station ClauseoRun-<hex>`) and waits for a line on stdin, so the agent's station still
-  exists. The harness starts `probe ui-relay` as matter A's pool user (as (a) does as A2) on a fresh
-  control station, and the relay starts `probe ui-control` with the agent's token shape on
-  `ClauseoRun-<hex>\Default` (the station's DACL names the pool user). (g) counts only when it ran
-  on that station, by the name the agent printed, as pool user A, Low, with 4 restricting SIDs. When
-  (g) ran, it alone can carry an effect; when it couldn't, the row text says why (the call and its
-  code) and (a) to (d) carry instead. `codex` and `whoami` skip (g): their probe has ended, and the
-  agent's station with it, before the harness reads it.
+  `ui-effect station Service-0x0-<LUID>$`) and waits for a line on stdin, so the agent's station
+  still exists. The harness starts `probe ui-relay` as matter A's pool user (as (a) does as A2)
+  on a fresh control station, and the relay starts `probe ui-control` with the agent's token
+  shape on `Service-0x0-<LUID>$\Default` (the station's DACL names the pool user). (g) counts
+  only when it ran on that station, by the name the agent printed, as pool user A, Low, with 4
+  restricting SIDs. When (g) ran, it alone can carry an effect; when it couldn't, the row text
+  says why (the call and its code) and (a) to (d) carry instead. `codex` and `whoami` skip (g):
+  their probe has ended, and the agent's station with it, before the harness reads it.
 
 - (a) the agent's own token shape: the harness reads matter A's second pool user's (`A2`) password
   from `secrets.bin` as the outer runner does (`secrets::secret_for`, never printed) and starts
@@ -314,7 +316,7 @@ variants, closest to the agent first:
 - (e) as (b), Low but with no restricting SIDs.
 - (f) the lawyer's own token unchanged, run as a child process the same way.
 
-A variant counts only when it ran on its station (`ClauseoS15Ctl-`, or the agent's for (g)) with
+A variant counts only when it ran on its station (a control one, or the agent's for (g)) with
 its own token shape. Of (a) to (f), only (d) or closer can carry an effect, since then the
 agent's refusal comes from the job's limits; what (e) and (f) succeed at is printed as evidence
 only. The row notes how each carrier differs from the agent. Any other read of the agent's
@@ -323,7 +325,7 @@ limits fails the row and names the value.
 `node-pipes` and `codex` also add a global atom as the lawyer and pass its name to
 `probe job-ui <atom>` (as node's argument, and in the command the mock asks codex to run). What
 the agent's lookup and the harness's own lookup get is printed as information, never the pass
-rule: atoms belong to a window station, so the agent's `ClauseoRun-…` station hides the lawyer's
+rule: atoms belong to a window station, so the agent's own station hides the lawyer's
 atom whatever the job's limits are. The lookup outside the job is the control for the harness's
 own atom; the desktop refusal is the effect that tells the limits apart.
 

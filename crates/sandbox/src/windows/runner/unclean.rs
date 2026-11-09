@@ -4,18 +4,21 @@
 //!
 //! - **The pool user's logon** (F4, [`logon_check`], the outer before it writes its own marker):
 //!   refused while a marker of this pool user, or one naming none or unreadable, awaits a stop
-//!   with `StopSequence` below its number. An `Open` marker of this pool user is a dead outer's
-//!   (one live session per pool user, and this outer hasn't written its own yet): it becomes
-//!   `AwaitingStop`, with `StopNext` read now, after its session's last launch path closed. An
-//!   unreadable or corrupt marker, or an `Open` one naming no pool user, becomes the same,
-//!   naming none, so it heals once that stop completes instead of refusing every logon for
-//!   good. Each such refusal requests the stop task, as does one awaiting a final stop that
-//!   hasn't completed. Otherwise a marker of this pool user awaiting a sweep (a re-mark's, or
-//!   any other) is waited for, up to [`SWEEP_WAIT`], and refuses the logon if the sweep doesn't
-//!   complete, with no stop requested: a task the escapee registered is live until that sweep
-//!   ran. One whose sweep completed but owes its final stop is re-marked to await that stop,
-//!   which is requested, and the logon refused. TODO: once slot groups land (two pool users
-//!   share a slot's grants on a matter), the scope becomes the pool user's slot, since an
+//!   with `StopSequence` below its number. An `Open` marker of this pool user whose outer still
+//!   runs ([`outer_alive`]) is a live session's: the logon is refused as busy
+//!   ([`RunExit::PoolBusy`]) before anything else, with no stop requested and nothing written,
+//!   since a stop would end that session. Any other `Open` marker of this pool user is a dead
+//!   outer's (this outer hasn't written its own yet), one from before the outer was recorded
+//!   included: it becomes `AwaitingStop`, with `StopNext` read now, after its session's last
+//!   launch path closed. An unreadable or corrupt marker, or an `Open` one naming no pool user,
+//!   becomes the same, naming none, so it heals once that stop completes instead of refusing
+//!   every logon for good. Each such refusal requests the stop task, as does one awaiting a
+//!   final stop that hasn't completed. Otherwise a marker of this pool user awaiting a sweep (a
+//!   re-mark's, or any other) is waited for, up to [`SWEEP_WAIT`], and refuses the logon if the
+//!   sweep doesn't complete, with no stop requested: a task the escapee registered is live until
+//!   that sweep ran. One whose sweep completed but owes its final stop is re-marked to await
+//!   that stop, which is requested, and the logon refused. TODO: once slot groups land (two pool
+//!   users share a slot's grants on a matter), the scope becomes the pool user's slot, since an
 //!   escapee of one user still holds the slot group's grants.
 //! - **A launch** ([`await_sweeps`], `clean_close::check_launch`, inside the host's 180 s): any
 //!   marker awaiting a sweep is clean once `SweepSequence` reaches its number. Otherwise the
@@ -52,7 +55,7 @@ use std::io;
 use std::time::Duration;
 
 use super::RunExit;
-use super::marker::{MarkerState, Sequences, UncleanSession};
+use super::marker::{MarkerState, Outer, Sequences, UncleanSession};
 use crate::windows::setup::record_values::{STOP_NEXT, SWEEP_NEXT};
 use crate::windows::sids::Sid;
 
@@ -73,9 +76,13 @@ const STUCK: &str = "an earlier session's marker couldn't be moved on from its c
 const STUCK_SWEPT: &str =
     "an earlier session's marker couldn't be moved on from its completed sweep to its final stop";
 
+/// Why F4 refused a logon because a live session holds the pool user.
+const BUSY: &str = "this sandbox user's earlier session is still running; try again when it ends";
+
 /// Why F4 refused a logon, with the outer's exit for it: [`RunExit::AwaitingStop`] when it
 /// requested the stop, [`RunExit::AwaitingSweep`] when no stop is awaited (a sweep that didn't
-/// complete, or a marker whose completed stop couldn't be re-marked).
+/// complete, or a marker whose completed stop couldn't be re-marked), [`RunExit::PoolBusy`]
+/// when a live session's outer holds the pool user.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Refused {
     /// The outer's exit.
@@ -98,6 +105,49 @@ impl Refused {
             why,
         }
     }
+
+    fn busy() -> Self {
+        Refused {
+            exit: RunExit::PoolBusy,
+            why: BUSY.to_owned(),
+        }
+    }
+}
+
+/// What opening a marker's outer by its pid found (`unclean/os.rs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OuterSeen {
+    /// It opened, hasn't exited, and was created at `created`.
+    Running {
+        /// Its creation time, as [`Outer::created`] holds it.
+        created: u64,
+    },
+    /// It opened but has exited: a handle someone still holds keeps its object.
+    Exited,
+    /// No process has the pid.
+    Gone,
+    /// The open was refused. The outer runs as the lawyer, who can open every outer, so a
+    /// process the lawyer can't open isn't one.
+    Denied,
+    /// Any other failure, of the open or of a read through it.
+    Failed,
+}
+
+/// Whether `outer` still runs, strictly: a process opened by its pid that hasn't exited and
+/// whose creation time is the marker's. Anything else (`seen` gone, refused, failed, exited, or
+/// created at another time, a later process given the same pid) is a dead outer.
+pub fn outer_alive(seen: OuterSeen, outer: Outer) -> bool {
+    seen == OuterSeen::Running {
+        created: outer.created,
+    }
+}
+
+/// The id and outer pid of `session` when it is open and its outer still runs.
+fn live_outer(fs: &mut impl Markers, session: &UncleanSession) -> Option<(String, u32)> {
+    let outer = session
+        .outer
+        .filter(|_| session.state == Some(MarkerState::Open))?;
+    outer_alive(fs.outer(outer.pid), outer).then(|| (session.id.clone(), outer.pid))
 }
 
 /// The markers' effects, as the lawyer.
@@ -132,6 +182,8 @@ pub trait Markers {
     fn pause(&mut self, pause: Duration);
     /// Says `line` on the outer's stderr: what went wrong but refuses nothing.
     fn note(&mut self, line: &str);
+    /// Opens the process `pid` (`PROCESS_QUERY_LIMITED_INFORMATION`): what it found.
+    fn outer(&mut self, pid: u32) -> OuterSeen;
 }
 
 /// The markers, the stale ones removed: those of a pool user the record no longer lists, and
@@ -241,7 +293,9 @@ fn remark_swept(
     sessions
 }
 
-/// F4: whether `pool_user` may log on. `Err` says why not: the stop task was requested when a
+/// F4: whether `pool_user` may log on. `Err` says why not: an open marker of this pool user
+/// whose outer still runs ([`outer_alive`]) refuses it as busy ([`RunExit::PoolBusy`]), with no
+/// stop requested and no marker written; otherwise the stop task was requested when a
 /// marker awaits a stop, first or final; a marker awaiting a sweep (a re-mark's, or any other)
 /// is waited for instead, up to [`SWEEP_WAIT`], with no stop requested, since a stop ends every
 /// session. One whose sweep before its final stop completed (now or earlier) is re-marked to
@@ -261,6 +315,12 @@ pub fn logon_check(fs: &mut impl Markers, pool_user: &Sid) -> Result<(), Refused
                 .is_none_or(|user| user == pool_user)
         })
         .collect();
+    // A live session's marker is open too. A stop would end that session, so none is requested
+    // and nothing is written: the logon is refused as busy. The pid goes to the log alone.
+    if let Some((id, pid)) = ours.iter().find_map(|session| live_outer(fs, session)) {
+        fs.note(&format!("the session {id}'s outer (pid {pid}) still runs"));
+        return Err(Refused::busy());
+    }
     let mut standing = false;
     let mut awaiting = Vec::new();
     let mut sweeping = Vec::new();

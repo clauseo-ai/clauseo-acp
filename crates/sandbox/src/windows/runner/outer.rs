@@ -10,11 +10,11 @@ use std::time::Duration;
 use super::desktop::AgentDesktop;
 use super::end::{EndSignal, GRACE, SessionEnd, copy, inner_exited, relay_stdin};
 use super::frame::{InnerLaunch, InnerReport, command_line, read_frame, write_frame};
-use super::marker::marked;
 use super::paths::{CodexReuse, WinPath};
 use super::spawn::{Process, kill_on_close_job, restrict_dll_search, system_folder};
 use super::start::start;
-use super::unclean::os::check_logon;
+use super::station::StationSids;
+use super::unclean::os::{check_logon, marked_as_outer};
 use super::{LAUNCH_CAP, LaunchMessage, RUN_DIR, RunExit, agent_env, codex_reuse, is_launch_name};
 use crate::windows::matters::SANDBOX_DIR;
 use crate::windows::pipe::os::ServerPipe;
@@ -23,7 +23,6 @@ use crate::windows::record::current_user_sid;
 use crate::windows::secrets::{SecretError, secret_for};
 use crate::windows::setup::read_record_install_id;
 use crate::windows::token::os::{logon_sid, own_token, profile_folder};
-use crate::windows::token::{desktop_sddl, station_sddl};
 use crate::windows::{private_dir, write};
 use end::OsEnd;
 use steps::Start;
@@ -77,8 +76,8 @@ pub fn run_outer(launch_file: &Path, exe: &Path) -> u32 {
 fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
     let message = read_launch(launch_file)?;
     let data_dir = data_dir_of(launch_file)?;
-    // F4, before this session's marker: a marker of this pool user's that awaits a stop refuses
-    // the logon until the stop completes, one that awaits a sweep until it ran (`unclean.rs`).
+    // F4, before this session's marker: a live session's refuses the logon as busy, one that
+    // awaits a stop until the stop completes, one that awaits a sweep until it ran (`unclean.rs`).
     check_logon(&data_dir, &message.pool_user).map_err(|r| Failure::new(r.exit, r.why))?;
     // The unclean-session marker, before anything runs as the pool user; only a clean end in
     // `relay` removes it. One that can't be written refuses the launch with its own code
@@ -89,7 +88,7 @@ fn outer(launch_file: &Path, exe: &Path) -> Result<u32, Failure> {
         let why = format!("the session marker failed (the install id: {e})");
         Failure::new(RunExit::MarkerUnwritable, why)
     })?;
-    marked(
+    marked_as_outer(
         &data_dir,
         launch_file,
         &message.pool_user,
@@ -114,8 +113,8 @@ fn marked_outer(
     // The inner runner starts in System32, a folder the Low agent can't write (no DLL planted
     // in its current folder); it gets the agent's folder over `ctl`.
     let cwd = system_folder().map_err(|e| Failure::new(RunExit::Logon, os("system folder", &e)))?;
-    // The desktop user's logon SID, which the runners hold too: their process DACL grants it, so
-    // one runner's sweep can end another's (`token::runner_process_sddl`).
+    // The desktop user's logon SID: the inner's full check refuses a token that holds it
+    // (`inner_user::check_full`); each runner holds its own logon's fresh one.
     let logon = own_token()
         .and_then(|token| logon_sid(&token))
         .map_err(|e| Failure::new(RunExit::Token, os("logon SID", &e)))?;
@@ -180,32 +179,19 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
         | SecretError::Malformed(_)
         | SecretError::Dpapi { .. }) => Failure::new(RunExit::NoSecret, other.to_string()),
     })?;
-    // The agent's window station and desktop (`desktop.rs`), made here so the job can carry the
-    // desktop UI limit: no process in it may make or switch desktops. They live as long as this
-    // process.
-    let mut random = [0u8; 8];
-    getrandom::fill(&mut random).map_err(|error| {
-        Failure::new(
-            RunExit::Token,
-            format!("the window station's name: random failed ({error})"),
-        )
-    })?;
-    let station_name = super::station_name(random);
-    let matter = message.matter_sid.as_ref();
-    let agent_desktop = AgentDesktop::create(
-        &station_name,
-        &desktop,
-        &station_sddl(&message.pool_user, matter),
-        &desktop_sddl(&message.pool_user, matter),
-    )
-    .map_err(|(call, e)| {
-        Failure::new(
-            RunExit::Token,
-            os(&format!("the agent's window station: {call}"), &e),
-        )
-    })?;
-    // The logon, the user's check, the job, the shut, then the resume (`start.rs`); the inner's
-    // first act is the sweep of every other process of the pool user's. The job's one handle stays
+    // The agent's window station and desktop (`station.rs`, `desktop.rs`), made here so the
+    // job can carry the desktop UI limit: no process in it may make or switch desktops. They
+    // live as long as this process. Any failure refuses the launch: no other station is used.
+    let sids = StationSids {
+        creator: &desktop,
+        pool_user: &message.pool_user,
+        matter: message.matter_sid.as_ref(),
+    };
+    let agent_desktop = AgentDesktop::create(&message.pool_name, &password, &sids)
+        .map_err(|(call, e)| station_failure(call, &e))?;
+    // The logon, the user's check, the job, the shut, the resume, then the full check before the
+    // go (`start.rs`); the inner's first act after the go is the sweep of every other process of
+    // the pool user's. The job's one handle stays
     // this process's, so the job's processes end with it.
     let mut steps = Start {
         pool_name: &message.pool_name,
@@ -216,7 +202,11 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
         exe: &steps.exe,
         base: set.base(),
         cwd: &steps.cwd,
+        station_desktop: &agent_desktop.path,
         job,
+        ctl: pipes
+            .first()
+            .ok_or_else(|| Failure::new(RunExit::Pipe, "four pipes expected"))?,
     };
     let inner = start(&mut steps)?;
     let launch = InnerLaunch {
@@ -228,12 +218,14 @@ fn session(message: &LaunchMessage, end: &End) -> Result<u32, Failure> {
         cwd: message.cwd.clone(),
         env,
         folders,
-        desktop: agent_desktop.path.clone(),
+        desktop: agent_desktop.path.as_str().to_owned(),
         folder_base: WinPath::parse(&message.state)
             .map(|state| state.display())
             .unwrap_or_default(),
     };
     let result = serve(&inner, pipes, &launch, end);
+    // Held until here: the station goes with its last handle.
+    drop(agent_desktop);
     // `serve` returns only on a failure (`relay` exits the process): the job ends and empties,
     // then the sweep task is requested.
     end.trigger(EndSignal::Failed);
@@ -251,19 +243,18 @@ fn serve(
     let Ok([ctl, stdin, stdout, stderr]) = <[ServerPipe; 4]>::try_from(pipes) else {
         return Err(Failure::new(RunExit::Pipe, "four pipes expected"));
     };
-    // The client is the inner runner's process, whose token user was checked before it ran. It
-    // connects once its first-act sweep and cleanup are done; one that exited first said why in
-    // its exit code.
-    if let Err(failure) = accept(&ctl, inner, FIRST_CONNECT) {
-        return Err(inner_exit(inner).unwrap_or(failure));
-    }
+    // `ctl`'s client is the inner runner's process, connected already (`steps.rs`'s `confirm`):
+    // its token's user was checked before it ran, and its whole token before its go. It reads the
+    // launch once its first-act sweep and cleanup are done.
     if let Err(error) = write_frame(&ctl, launch) {
         // An inner whose first-act sweep failed reported it and exited without reading.
         let failure = Failure::new(RunExit::Pipe, os("ctl write", &error));
         return Err(reported(&ctl, inner, end).unwrap_or(failure));
     }
-    for pipe in [&stdin, &stdout, &stderr] {
-        if let Err(failure) = accept(pipe, inner, NEXT_CONNECT) {
+    // stdin waits as long as `ctl` once did: the inner opens it after its first-act sweep.
+    let waits = [FIRST_CONNECT, NEXT_CONNECT, NEXT_CONNECT];
+    for (pipe, timeout) in [&stdin, &stdout, &stderr].into_iter().zip(waits) {
+        if let Err(failure) = accept(pipe, inner, timeout) {
             // An inner runner that failed before it opened its pipes said why on `ctl`.
             return Err(reported(&ctl, inner, end).unwrap_or(failure));
         }
@@ -570,6 +561,18 @@ fn logon_failure(code: u32) -> Failure {
         other => Failure::new(
             RunExit::Logon,
             format!("CreateProcessWithLogonW failed ({other})"),
+        ),
+    }
+}
+
+/// Maps a failure of the agent's window station's `call` to its failure: `LogonUserW`'s refused
+/// password or logon right as the inner's logon's ([`logon_failure`]), the rest [`RunExit::Token`].
+fn station_failure(call: &str, error: &io::Error) -> Failure {
+    match (call, error.raw_os_error()) {
+        ("LogonUserW", Some(code @ (1326 | 1385))) => logon_failure(code.unsigned_abs()),
+        _ => Failure::new(
+            RunExit::Token,
+            os(&format!("the agent's window station: {call}"), error),
         ),
     }
 }

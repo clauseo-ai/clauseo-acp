@@ -155,10 +155,15 @@ fn a_malformed_launch_file_names_where_it_failed_and_no_value() {
 }
 
 #[test]
-fn the_station_name_is_its_own_random_value() {
-    let name = station_name([0xab; 8]);
-    assert_eq!(name, "ClauseoRun-abababababababab");
-    assert_ne!(station_name([1; 8]), station_name([2; 8]));
+fn the_job_carries_every_ui_limit() {
+    // HANDLES, READCLIPBOARD, WRITECLIPBOARD, SYSTEMPARAMETERS, DISPLAYSETTINGS, GLOBALATOMS,
+    // DESKTOP, EXITWINDOWS: the eight flags Windows defines, every one set.
+    let flags = [0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80];
+    assert_eq!(
+        flags.iter().fold(0u32, |all, flag| all | flag),
+        UI_LIMIT_MASK
+    );
+    assert_eq!(UI_LIMIT_MASK, 0xFF);
 }
 
 #[test]
@@ -431,7 +436,10 @@ fn exit_codes_are_stable_and_map_to_set_up_causes() {
     assert_eq!(RunExit::Usage.code(), 0xE0C1_5000);
     assert_eq!(RunExit::SecondaryLogon.code(), 0xE0C1_5003);
     assert_eq!(RunExit::Spawn.code(), 0xE0C1_500B);
-    for exit in RunExit::ALL {
+    for exit in RunExit::ALL
+        .into_iter()
+        .chain([RunExit::TokenGrant, RunExit::PoolBusy])
+    {
         assert_eq!(RunExit::from_code(exit.code()), Some(exit));
     }
     assert_eq!(RunExit::from_code(0), None);
@@ -448,7 +456,20 @@ fn exit_codes_are_stable_and_map_to_set_up_causes() {
     assert_eq!(RunExit::AwaitingStop.no_sandbox(), None);
     assert_eq!(RunExit::AwaitingSweep.code(), 0xE0C1_5013);
     assert_eq!(RunExit::AwaitingSweep.no_sandbox(), None);
-    assert_eq!(RunExit::from_code(RUN_EXIT_BASE + 20), None);
+    // Reserved at 0x15; 0x14 is another branch's code, none here.
+    assert_eq!(RunExit::TokenGrant.code(), 0xE0C1_5015);
+    assert_eq!(RunExit::TokenGrant.no_sandbox(), None);
+    // Reserved at 0x20; 0x16 to 0x1f are other branches' codes, none here.
+    assert_eq!(RunExit::PoolBusy.code(), 0xE0C1_5020);
+    assert_eq!(RunExit::PoolBusy.no_sandbox(), None);
+    assert_eq!(RunExit::from_code(0xE0C1_5020), Some(RunExit::PoolBusy));
+    for unknown in [0x14, 0x16, 0x1f, 0x21] {
+        assert_eq!(
+            RunExit::from_code(RUN_EXIT_BASE + unknown),
+            None,
+            "0x{unknown:x}"
+        );
+    }
     assert_eq!(RunExit::DllSearch.no_sandbox(), None);
     assert_eq!(RunExit::AgentReserved.no_sandbox(), None);
     assert_eq!(RunExit::Sweep.no_sandbox(), None);
@@ -535,8 +556,15 @@ fn the_command_line_names_one_mode_and_sweep_is_none_of_them() {
         )))
     );
     assert_eq!(
-        mode(&args(&["--inner", "clauseo-run-0123"])),
-        Some(Mode::Inner("clauseo-run-0123".to_owned()))
+        mode(&args(&[
+            "--inner",
+            "clauseo-run-0123",
+            "S-1-5-21-1-2-3-1001"
+        ])),
+        Some(Mode::Inner(
+            "clauseo-run-0123".to_owned(),
+            Sid::parse("S-1-5-21-1-2-3-1001").unwrap()
+        ))
     );
     for wrong in [
         &[][..],
@@ -549,6 +577,9 @@ fn the_command_line_names_one_mode_and_sweep_is_none_of_them() {
         &["--launch"],
         &["--inner"],
         &["--inner", "b", "--sweep"],
+        &["--inner", "b"],
+        &["--inner", "b", "BA"],
+        &["--inner", "b", "S-1-5-21-1-2-3-1001", "x"],
     ] {
         assert_eq!(mode(&args(wrong)), None, "{wrong:?}");
     }

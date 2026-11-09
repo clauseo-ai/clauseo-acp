@@ -106,7 +106,7 @@ pub(crate) fn atom_info(ctx: &Ctx<'_>, lines: &[String], name: &str) {
     ctx.note(&format!(
         "information, not the pass criterion: the agent's GlobalFindAtomW({name}) gave {agent}; \
          the harness's outside the job gave {outside:#x} (the positive control for its own atom). \
-         Atoms are per window station, so the agent's own ClauseoRun- station hides the lawyer's \
+         Atoms are per window station, so the agent's own station hides the lawyer's \
          atom whatever the job limits are; the desktop-create refusal is the discriminating effect"
     ));
 }

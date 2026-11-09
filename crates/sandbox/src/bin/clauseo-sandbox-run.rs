@@ -20,7 +20,7 @@ fn main() -> ExitCode {
             Ok(exe) => run_outer(&file, &exe),
             Err(_) => RunExit::Usage.code(),
         },
-        Some(Mode::Inner(base)) => run_inner(&base),
+        Some(Mode::Inner(base, desktop_user)) => run_inner(&base, &desktop_user),
         None => RunExit::Usage.code(),
     };
     exit_with(code)

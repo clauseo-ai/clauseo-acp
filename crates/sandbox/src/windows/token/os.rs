@@ -19,10 +19,11 @@ use windows::Win32::Security::Authorization::{
 };
 use windows::Win32::Security::{
     ACL, CreateRestrictedToken, DACL_SECURITY_INFORMATION, DISABLE_MAX_PRIVILEGE, GetLengthSid,
-    GetSecurityDescriptorDacl, GetTokenInformation, PROTECTED_DACL_SECURITY_INFORMATION,
-    PSECURITY_DESCRIPTOR, PSID, SID_AND_ATTRIBUTES, SetTokenInformation, TOKEN_ALL_ACCESS,
-    TOKEN_DEFAULT_DACL, TOKEN_GROUPS, TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_LABEL,
-    TokenDefaultDacl, TokenGroups, TokenIntegrityLevel,
+    GetSecurityDescriptorDacl, GetSecurityDescriptorSacl, GetTokenInformation,
+    LABEL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
+    SID_AND_ATTRIBUTES, SetTokenInformation, TOKEN_ALL_ACCESS, TOKEN_DEFAULT_DACL, TOKEN_GROUPS,
+    TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_LABEL, TokenDefaultDacl, TokenElevationType,
+    TokenGroups, TokenIntegrityLevel,
 };
 use windows::Win32::Storage::FileSystem::WRITE_DAC;
 use windows::Win32::System::Diagnostics::ToolHelp::{
@@ -114,6 +115,22 @@ impl LocalDescriptor {
         }
         Ok(dacl)
     }
+
+    /// Its SACL (a label's), valid while `self` lives.
+    pub(in crate::windows) fn sacl(&self) -> io::Result<*mut ACL> {
+        let mut present = BOOL(0);
+        let mut sacl: *mut ACL = null_mut();
+        let mut defaulted = BOOL(0);
+        // SAFETY: the descriptor is valid while `self` lives; the out-pointers are live.
+        unsafe {
+            GetSecurityDescriptorSacl(self.0, &raw mut present, &raw mut sacl, &raw mut defaulted)
+        }
+        .map_err(|error| os_error(&error))?;
+        if !present.as_bool() || sacl.is_null() {
+            return Err(io::Error::other("the SDDL gave no SACL"));
+        }
+        Ok(sacl)
+    }
 }
 
 impl Drop for LocalDescriptor {
@@ -154,6 +171,28 @@ pub(in crate::windows) fn profile_folder(token: &Handle) -> io::Result<String> {
 pub(in crate::windows) fn user(token: &Handle) -> io::Result<Sid> {
     let text = user_of(token.0)?;
     Sid::parse(&text).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+}
+
+/// `token`'s integrity level, as its label's SID (`S-1-16-<level>`).
+pub(in crate::windows) fn integrity(token: &Handle) -> io::Result<Sid> {
+    let buffer = information(token, TokenIntegrityLevel)?;
+    if size_of_val(buffer.as_slice()) < size_of::<TOKEN_MANDATORY_LABEL>() {
+        return Err(io::Error::other("the token's label is too short"));
+    }
+    // SAFETY: `buffer` holds at least a TOKEN_MANDATORY_LABEL, aligned (u64 words), as
+    // GetTokenInformation wrote it; its SID points into `buffer`, live for the call.
+    let label = unsafe { &*buffer.as_ptr().cast::<TOKEN_MANDATORY_LABEL>() };
+    sid_text(label.Label.Sid)
+}
+
+/// `token`'s `TOKEN_ELEVATION_TYPE`: 1 default, 2 full (elevated), 3 limited.
+pub(in crate::windows) fn elevation_type(token: &Handle) -> io::Result<u32> {
+    let buffer = information(token, TokenElevationType)?;
+    let word = buffer
+        .first()
+        .ok_or_else(|| io::Error::other("the token gave no elevation type"))?;
+    // The enum's 4 bytes, first in the buffer, little-endian.
+    u32::try_from(word & 0xFFFF_FFFF).map_err(io::Error::other)
 }
 
 /// `token`'s logon SID: the group marked `SE_GROUP_LOGON_ID`. Exactly one, or an error.
@@ -252,11 +291,7 @@ pub(in crate::windows) fn make(base: &Handle, spec: &TokenSpec) -> io::Result<Ha
 /// already, while the inner was suspended; this runs first thing after the launch is read, before
 /// the agent's token is made (whose own DACL is set explicitly, `TokenSpec::token_dacl`). The
 /// handles this runner holds keep their access.
-pub(in crate::windows) fn shut_self(
-    token: &Handle,
-    desktop_user: &Sid,
-    logon: &Sid,
-) -> io::Result<()> {
+pub(in crate::windows) fn shut_self(token: &Handle, desktop_user: &Sid) -> io::Result<()> {
     use super::{runner_process_sddl, runner_thread_sddl, runner_token_sddl};
 
     set_kernel_dacl(
@@ -265,10 +300,7 @@ pub(in crate::windows) fn shut_self(
     )?;
     // SAFETY: the pseudo-handle of this process needs no close and carries every right.
     let own_process = unsafe { GetCurrentProcess() };
-    set_kernel_dacl(
-        own_process,
-        &LocalDescriptor::new(&runner_process_sddl(desktop_user, logon))?,
-    )?;
+    shut_process(own_process, &runner_process_sddl(desktop_user))?;
     shut_threads(&runner_thread_sddl(desktop_user))
 }
 
@@ -311,13 +343,16 @@ pub(in crate::windows) fn shut_threads(sddl: &str) -> io::Result<()> {
     Ok(())
 }
 
-/// Shuts this runner's primary token to everyone but `SYSTEM` (`token::RUNNER_TOKEN_FIRST_SDDL`),
-/// the inner runner's first act, before it opens a pipe: the launch, which names the desktop user
-/// [`shut_self`] then adds, hasn't arrived yet.
-pub(in crate::windows) fn shut_token_first(token: &Handle) -> io::Result<()> {
+/// The inner runner's first act, before it opens a pipe: shuts its primary token to everyone
+/// but `SYSTEM` and `desktop_user`'s `TOKEN_QUERY` (`token::runner_token_first_sddl`), for the
+/// outer's full check before its go.
+pub(in crate::windows) fn shut_inner_token_first(
+    token: &Handle,
+    desktop_user: &Sid,
+) -> io::Result<()> {
     set_kernel_dacl(
         token.0,
-        &LocalDescriptor::new(super::RUNNER_TOKEN_FIRST_SDDL)?,
+        &LocalDescriptor::new(&super::runner_token_first_sddl(desktop_user))?,
     )
 }
 
@@ -325,6 +360,35 @@ pub(in crate::windows) fn shut_token_first(token: &Handle) -> io::Result<()> {
 /// handles to the suspended inner runner's process and thread).
 pub(in crate::windows) fn shut_object(handle: HANDLE, sddl: &str) -> io::Result<()> {
     set_kernel_dacl(handle, &LocalDescriptor::new(sddl)?)
+}
+
+/// Sets the protected DACL and the mandatory label of `sddl` (`token::runner_process_sddl`) on
+/// the process `handle`, which needs `WRITE_DAC` and `WRITE_OWNER` (the logon's handle and this
+/// process's pseudo-handle have both).
+pub(in crate::windows) fn shut_process(handle: HANDLE, sddl: &str) -> io::Result<()> {
+    let descriptor = LocalDescriptor::new(sddl)?;
+    let (dacl, sacl) = (descriptor.dacl()?, descriptor.sacl()?);
+    // SAFETY: the handle is live with `WRITE_DAC` and `WRITE_OWNER`; both ACLs live in
+    // `descriptor`, which outlives the call.
+    let code = unsafe {
+        SetSecurityInfo(
+            handle,
+            SE_KERNEL_OBJECT,
+            DACL_SECURITY_INFORMATION
+                | PROTECTED_DACL_SECURITY_INFORMATION
+                | LABEL_SECURITY_INFORMATION,
+            None,
+            None,
+            Some(dacl.cast_const()),
+            Some(sacl.cast_const()),
+        )
+    };
+    if code.is_err() {
+        return Err(io::Error::from_raw_os_error(
+            i32::try_from(code.0).unwrap_or(i32::MAX),
+        ));
+    }
+    Ok(())
 }
 
 /// The ids of this process's threads, from a Toolhelp snapshot.

@@ -572,6 +572,7 @@ crates/sandbox/src/windows/token/os.rs - unsafe_code
 crates/sandbox/src/windows/pipe/os.rs - unsafe_code
 crates/sandbox/src/windows/runner/spawn.rs - unsafe_code
 crates/sandbox/src/windows/runner/desktop.rs - unsafe_code
+crates/sandbox/src/windows/runner/desktop.rs refuse_now clippy::exit
 crates/sandbox/src/windows/runner/outer.rs exit_now clippy::exit
 crates/sandbox/src/windows/runner/sweep/os.rs - unsafe_code
 crates/sandbox/src/windows/runner/leftovers/os.rs - unsafe_code
@@ -612,3 +613,4 @@ crates/sandbox/examples/s15_launch_vm/win_switch.rs - unsafe_code
 crates/sandbox/examples/s15_launch_vm/win_pool.rs - unsafe_code
 # The cancel row's thread states: NtQuerySystemInformation against ntdll, and a pid's token user.
 crates/sandbox/examples/s15_launch_vm/win_suspend.rs - unsafe_code
+crates/sandbox/examples/s15_launch_vm/win_station.rs - unsafe_code

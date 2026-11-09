@@ -19,9 +19,11 @@ Tier B works only from a desktop session; from session 0 the restricted child fa
 build 26100):
 
 - **PR0** started from one shared user, `ClauseoSandbox`, with one SID per matter. It showed that
-  `CreateProcessWithLogonW` hands the runner the desktop user's own logon SID, that `Users` must be
-  a restricting SID (System32 DLLs outside KnownDLLs grant `Users` only), and that the default
-  DACL, not the desktop, caused `0xC0000142`.
+  `CreateProcessWithLogonW` hands the runner the desktop user's own logon SID (corrected since: a
+  VM measurement, with `LOGON_WITH_PROFILE` and an explicit desktop, found each child holds only
+  its own logon's fresh logon SID, never the desktop user's), that `Users` must be a restricting
+  SID (System32 DLLs outside KnownDLLs grant `Users` only), and that the default DACL, not the
+  desktop, caused `0xC0000142`.
 - **That token was superseded** (spike B, private `measurements/s15-spikes-userpool.md`). NPFS
   gives a pipe made with no security set a default descriptor that grants its owner full access
   and `Everyone` read. Under the shared user, the owner wasn't a restricting SID, so the agent
@@ -1014,33 +1016,108 @@ leaves that profile, both naming the part.
   comes back as `AgentReserved`, never as a runner or set-up failure. The host removes the
   launch file if the outer exits without having removed it. If the outer is killed between the
   logon and the job, a suspended inner runner is left that never runs.
-- **A window station and desktop of the agent's own.** The outer makes a window station,
-  `ClauseoRun-<16 hex>` from 64 random bits of its own (not the pipe base, which the pipe listing
-  shows), with `CWF_CREATE_ONLY`, so a station that already has the name fails the launch rather
-  than being opened. It holds one desktop. Both name only `SYSTEM` and the pool user, are
-  labelled Low, and are made before the inner runner joins the job; the agent starts on it.
-  Neither the lawyer's `WinSta0` (whose DACL names the logon SID, deny-only in the token) nor a
-  service window station grants the token anything, and user32 then fails to start the agent
-  (`0xC0000142`; the first Windows runs of the harness). Its own station also keeps the agent's
-  clipboard and global atoms apart from the lawyer's.
-- **UI limits on the job:** reading and writing the clipboard, global atoms, other processes'
+- **A window station and desktop of the agent's own** (`runner/station.rs` holds the order,
+  `runner/desktop.rs` the calls). The agent runs on `<station>\Default`, its own station's one
+  desktop, made by the outer before the inner runner joins the job. Neither the lawyer's
+  `WinSta0` (whose DACL names the logon SID, deny-only in the token) nor a service window station
+  grants the token anything, and user32 then fails to start the agent (`0xC0000142`; the first
+  Windows runs of the harness). Its own station also keeps the agent's clipboard and global
+  atoms apart from the lawyer's.
+  - **Why not a named station.** The outer first made `ClauseoRun-<16 hex>` by name. The outer
+    runs as the lawyer, unelevated, and `\Sessions\<n>\Windows\WindowStations` grants
+    `CreateChild` to `Administrators` alone, so the call failed with 5 and every launch failed
+    (`RunExit::Token`). Every earlier test had run elevated.
+  - **How it is made** (verified by hand on Windows Server 2025 and Windows 11 ARM64). The outer
+    logs the run's pool user on with `LogonUserW(LOGON32_LOGON_INTERACTIVE)`, with the password
+    it already holds for the inner's `CreateProcessWithLogonW` (users hold the interactive
+    right by default; a batch logon fails with 1385). Acting as that logon
+    (`ImpersonateLoggedOnUser`, then a check that the thread's token is the pool user's at
+    `SecurityImpersonation`), it calls `CreateWindowStationW(NULL, …)`: Windows names an
+    unnamed station `Service-0x0-<logon LUID>$`, one per logon, so parallel launches get
+    their own. `RevertToSelf` runs on every path out of that step (a guard's drop), and a
+    `RevertToSelf` that fails ends the process: nothing may run on a thread still acting as
+    the pool user. The logon's token is closed at once; the station outlives it. The outer reads
+    the name (`GetUserObjectInformationW(UOI_NAME)`), opens the station by it as the lawyer
+    with `READ_CONTROL | WRITE_DAC | WRITE_OWNER | WINSTA_CREATEDESKTOP`, and makes the lawyer
+    its owner. It switches this process to the station for `CreateDesktopW("Default")` alone,
+    asking for `READ_CONTROL | WRITE_DAC | WRITE_OWNER` and the desktop use rights `0xC7` (the
+    first three alone fail with 8), and switches back on every path; a switch back Windows
+    refuses ends the process at once (`RunExit::Token`), as a failed `RevertToSelf` does, so the
+    outer never runs on the agent's station. Windows has no create-only flag for desktops
+    (`CWF_CREATE_ONLY` is for stations), so a `CreateDesktopW` that succeeds with
+    `ERROR_ALREADY_EXISTS` (a `Default` someone made first) refuses the launch too. Last, as
+    their owner, it sets both last descriptors.
+  - **The descriptor it is made with** is always explicit: the default DACL grants `Everyone`
+    and `RESTRICTED` `0xF037F`. `D:P(A;;0xF037F;;;SY)(A;;0xE0008;;;<lawyer>)(A;;0x20000;;;OW)`
+    for the station. The pool user owns it until the lawyer takes it, and the `OWNER RIGHTS`
+    entry, held to `READ_CONTROL`, takes away the owner's implied `WRITE_DAC` and grants it no
+    use right, so no pool process rewrites the DACL, or makes `Default` first
+    (`WINSTA_CREATEDESKTOP`), in that window. The logon asks for `READ_CONTROL` alone when it
+    makes the station. The desktop is made with
+    `D:P(A;;0xF01FF;;;SY)(A;;0xE00C7;;;<lawyer>)(A;;0x20000;;;OW)`.
+  - **The last descriptors** (`token::station_sddl`, `token::desktop_sddl`), protected and
+    labelled Low: `D:P(A;;0xF037F;;;SY)(A;;0xE0000;;;<lawyer>)(A;;0x2007F;;;<pool>)
+    S:(ML;;NW;;;LW)` on the station and `D:P(A;;0xF01FF;;;SY)(A;;0xE0000;;;<lawyer>)
+    (A;;0x200C7;;;<pool>)S:(ML;;NW;;;LW)` on the desktop (`token::DESKTOP_POOL_FINAL_RIGHTS`;
+    the `READ_CONTROL` lets Chrome's own sandbox read the desktop's DACL when it builds child
+    desktops; the creation descriptors are unchanged), the matter SID given the pool's rights
+    after the pool user when the launch restricts with one. No `OWNER RIGHTS` entry: the lawyer
+    owns both by then, and one would give the lawyer's processes, Low ones included, the pool's
+    use rights. The owner keeps its implied `READ_CONTROL | WRITE_DAC` and the explicit
+    `READ_CONTROL | WRITE_DAC | WRITE_OWNER`, enough to clean up, and no use right.
+    The pool's station rights must be `READ_CONTROL` and `0x7F`: less, and user32 fails to start
+    the agent's GUI DLLs (`0x45A`). Without the Low label a Low agent hangs in conhost's start
+    (PowerShell and `whoami` hang). The pool user's effective rights read `0x2007F` and `0x200C7`,
+    and none of the pool user, the run's group or `RESTRICTED` gets `WRITE_DAC`, `WRITE_OWNER`
+    or `DELETE` (read by hand on both machines).
+  - **Every runner process starts on it, never on `WinSta0`.** The inner runner's
+    `CreateProcessWithLogonW` names `<station>\Default` as `lpDesktop`, as the agent's
+    `CreateProcessAsUserW` does. With `lpDesktop` `NULL` the Secondary Logon service grants the
+    new logon access to the caller's `WinSta0\Default`, which put a Medium pool process where it
+    could reach the lawyer's windows; with a named desktop it changes no DACL. The path is a
+    `station::StationDesktop`, built only from an unnamed station's name
+    (`Service-0x<hex>-<hex>$`), so `spawn::log_on` can't be given `WinSta0` or nothing.
+  - **Nothing to clean.** The station goes with its last handle: the outer's, held until its
+    `serve` returns, and the inner's and the agent's own.
+  - **Any failure refuses the launch**, with the call named (`the agent's window station:
+    CreateWindowStationW failed (5)`), as `RunExit::Token`, whose meaning already covered the
+    agent's desktop, so no code is added. A `LogonUserW` refused for the password (1326) or the
+    logon right (1385) is `RunExit::Password` or `RunExit::LogonRight`, as the inner's own
+    logon's would be, so tier detection still names the set-up's cause. There is never a
+    fallback to `WinSta0` or a shared station.
+  - **The Security log.** Each launch adds one 4624 of logon type 2 for the pool user, from the
+    outer's process, and a 4634 when it ends; no 4672, since the pool users hold no
+    administrator rights (`docs/firm-it.md`, "Sandbox sign-ins in the Security log").
+- **UI limits on the job:** every `JOB_OBJECT_UILIMIT_*` flag (`0xFF`, `runner::UI_LIMIT_MASK`,
+  which `spawn::UI_LIMITS` is checked against as it compiles), defence in depth behind the
+  agent's own station: reading and writing the clipboard, global atoms, other processes'
   USER handles, system parameters, display settings, exiting Windows, and making or switching
   desktops. `WinSta0`, not the desktop, owns the clipboard and the global atom table, so a
   private desktop alone doesn't keep an agent from the lawyer's; Chromium's sandbox sets the same
-  limits. The desktop limit keeps the agent from making its desktop the one the lawyer sees.
+  limits. The desktop limit keeps the agent from making its desktop the one the lawyer sees, and
+  from making one on its own station, whose DACL grants the pool user `WINSTA_CREATEDESKTOP`.
+  The agent's tools (PowerShell, cmd, node, python, git) ran under `0xFF` in a hand test.
 - **The token** is (B) as above, made by the inner runner from its own token with
   `DISABLE_MAX_PRIVILEGE`: `SeChangeNotifyPrivilege` is the one privilege left, and it must stay
   (bypass traverse, §3 of the plan). The inner runner sets `SetErrorMode`; the agent inherits
   only its three pipes. The agent runs as the inner runner's own user, so the inner runner is
-  shut to it: the outer reads the inner's token user and gives its process and first thread a
-  protected DACL naming `SYSTEM` and the lawyer alone, with `OWNER RIGHTS` held to
-  `READ_CONTROL` (the process's also grants the lawyer's logon SID wait, query and end, for the
-  sweeps below), while the inner is still suspended (`CreateProcessWithLogonW` takes no
-  descriptor, so the pid exists with the logon's default DACL from its return until then, before
-  any of the inner's code runs). The inner's first act shuts its primary token to `SYSTEM` alone;
-  after reading the launch it adds the lawyer's query and shuts every thread it has; once the
-  agent's token is made (`CreateRestrictedToken` builds its descriptor from the default DACL), it
-  gives its default DACL the threads' entries so a thread the system starts in it later is shut
+  shut to it: the outer reads the inner's user (from its token, or, on the agent's own station
+  where the token refuses the lawyer, from `ProcessTelemetryIdInformation`) and gives its process
+  and first thread a protected DACL naming `SYSTEM` and the lawyer alone, with `OWNER RIGHTS`
+  held to `READ_CONTROL`, no pool user and no logon SID, and a Medium label with no-write-up,
+  no-read-up and no-execute-up (`token::runner_process_sddl`), while the inner is still suspended
+  (`CreateProcessWithLogonW` takes no descriptor, so the pid exists with the logon's default DACL
+  from its return until then, before any of the inner's code runs). The inner's first act shuts its primary token to `SYSTEM` and the
+  lawyer's `TOKEN_QUERY` alone, says ready on `ctl` and waits (60 s at most, on its one thread);
+  the outer, within 30 s, checks the token's user, a logon SID of the run's own (not the
+  lawyer's), Medium integrity and no full elevation (not its groups or restricting SIDs), and
+  only then sends the go, or kills it. Residual, accepted: until `shut_self`, the loader's own
+  worker threads carry the pool logon's default DACL, which grants the pool user full access; a
+  Medium pool-user process (from a task, a BITS job or a service, `inner_flow.rs` step 1) could
+  open them. The agent can't make one (it is Low and can't create a Medium process of the pool
+  user), and those threads came before this change. After reading the launch the inner adds the
+  lawyer's query and shuts every thread it has; once the agent's token is made
+  (`CreateRestrictedToken` builds its descriptor from the default DACL), it gives its default DACL the threads' entries so a thread the system starts in it later is shut
   too, and shuts every thread again. Once the inner runs, its own agent can't open its Medium,
   unrestricted token. A process already running as the pool user could, in the gap before the
   shut; the next item closes that gap. The agent's own token gets an explicit protected DACL:
@@ -1056,8 +1133,8 @@ leaves that profile, both naming the part.
   logon's default DACL, which gives the pool user full access. A process already running as that
   pool user could open the process then, and its token too (the harness's `runners` row first
   found `TOKEN_QUERY` and `TOKEN_DUPLICATE` open on that DACL). A handle opened in the gap
-  outlives the shut, and the token is Medium, unrestricted, with the lawyer's logon SID enabled.
-  Two rules close the gap:
+  outlives the shut, and the token is Medium, unrestricted, with its own logon's fresh logon SID
+  enabled. Two rules close the gap:
   - A pool user serves one live session at a time. A matter holds one pool user for now, so
     `MatterSids::assign` refuses a second session of a matter while the matter's set-aside
     record lists another session open (`Assign::Busy`; a record that can't be read counts as
@@ -1109,7 +1186,7 @@ leaves that profile, both naming the part.
     to start at a logon or to run in a later runner: its per-user COM classes
     (`HKCU\Software\Classes\{CLSID,Interface,AppID,TypeLib}` and their `Wow6432Node` twins,
     deleted whole: a sandbox account has none of its own, and one registered for a class a runner
-    makes would run in that runner with the lawyer's logon SID); every value of its
+    makes would run in that runner, as the pool user); every value of its
     `HKCU\...\CurrentVersion\Run` and `RunOnce`; and every entry of its Startup folder. The
     inner makes no COM call, and nothing else removes these three. The Startup folder must lie in
     the pool user's profile. It is reached one name at a time relative
@@ -1190,16 +1267,17 @@ leaves that profile, both naming the part.
     user at the session's end; `Cancel` failed with 1245 even with the proxy set to impersonate,
     so that step only signalled `RunExit::PoolStop` (`0xE0C15010`, now reserved and no longer
     produced).
-  - **A next session's first act.** The next inner's first act kills an inner of an earlier
-    session still alive, a pool-user process outside its job. For it to open one, the inner's
-    process DACL (not its threads' or token's) grants the lawyer's logon SID `SYNCHRONIZE`,
-    `PROCESS_QUERY_LIMITED_INFORMATION` and `PROCESS_TERMINATE`. `CreateProcessWithLogonW`
-    gives the inner that SID, enabled. The agent holds it deny-only, so an allow entry never
-    matches it; the pool user itself is one of the agent's restricting SIDs, so an entry naming
-    the pool user would have reached the agent. A pool-user process a service started outside the
-    job runs in the pool user's own logon session and doesn't hold the SID. Other matters' runners
-    started from the same logon do, and can open these, but their sweeps only kill their own pool
-    user's processes.
+  - **A next session's first act.** An inner of an earlier session still alive is a pool-user
+    process outside the next inner's job, and that inner's first act can't open it: no runner
+    opens another. The runners' process DACL grants the pool user nothing (the pool user is one
+    of the agent's restricting SIDs, and `PROCESS_TERMINATE` would let the agent end its own
+    inner with a code of its choosing), and names no logon SID (each runner's is its own logon's).
+    Instead, before its logon, the next outer, as the lawyer, whom that DACL grants wait, query
+    and end, finds every live runner of the pool user (the runner's image, opened with those
+    rights, its user read through the handle from `ProcessTelemetryIdInformation`), waits for it
+    up to 60 s, then ends it (`runner/previous.rs`). The inner is the only process the outer
+    starts as the pool user; `\Clauseo\SandboxSweep` runs as `SYSTEM`, and the outer's marker
+    check waits for it (F4), not this. What an ended inner left, the new inner's first act sweeps.
   - **The exit code on a cancel.** The guard keeps the signal that began the end. The outer's job
     end gives the inner and the agent the sweeps' kill code (`sweep::SWEPT`, `RUN_EXIT_BASE +
     0xff`, which would come back as `AgentReserved`). When the end began at the host's stdin
@@ -1272,7 +1350,10 @@ leaves that profile, both naming the part.
       the same pre-logon check closes it). An older build reads either new state as unreadable,
       which awaits a stop for every pool user: closed, not open.
     - `Open` left standing: the outer died (the host's job end after `stdin_grace`, a crash) or
-      couldn't read a number.
+      couldn't read a number. A live session's marker is `Open` too, so the outer records itself
+      in it (`outer`: its pid and its creation time from `GetProcessTimes`; appended, and a
+      marker without it reads as before; an older build reads a marker with it as unreadable,
+      closed as for the new states).
 
     What these states leave open, besides the gap above:
     - Without an escapee (`AwaitingSweep`, then clean) no stop follows the sweep, so a pool
@@ -1302,10 +1383,22 @@ leaves that profile, both naming the part.
     - **The pool user's logon (F4).** Before writing its own marker, the outer refuses the
       launch (`RunExit::AwaitingStop`, `0xE0C15012`, appended) while a marker of this pool
       user's, or one naming none or unreadable, awaits a stop with `StopSequence` below its
-      number, and requests the stop. An `Open` marker of this pool user's is a dead outer's (one
-      live session per pool user, and this outer hasn't written its own): it becomes
-      `AwaitingStop` with `StopNext` read then, after its session's last launch path closed,
-      and the logon is refused. One whose stop completed is re-marked; one that couldn't be
+      number, and requests the stop. Before anything else, an `Open` marker of this pool user's
+      whose outer still runs refuses the launch as busy (`RunExit::PoolBusy`, `0xE0C15020`,
+      reserved): no stop is requested, nothing is written and nothing is ended, since a stop
+      ends every process of the pool user, the live session's included. A VM run found the gap
+      this closes: a second launch for a pool user while its first session ran took the first's
+      `Open` marker for a dead outer's, refused with `AwaitingStop` in 58 ms, and the stop it
+      requested killed the live session. "Still runs" is strict: the marker's pid opens with
+      `PROCESS_QUERY_LIMITED_INFORMATION`, its exit code is `STILL_ACTIVE`, and its creation
+      time is the marker's. No such pid, another creation time (the pid reused), an exited
+      process whose object a handle keeps, or an open refused (the outer runs as the lawyer,
+      who can open every outer, so a pid the lawyer can't open isn't one) is a dead outer. So is
+      a marker from before the field. The host's `MatterSids::assign` already refuses a second
+      live launch of a pool user (`Assign::Busy`); this is the outer's own backstop. Any other
+      `Open` marker of this pool user's is a dead outer's (this outer hasn't written its own):
+      it becomes `AwaitingStop` with `StopNext` read then, after its session's last launch
+      path closed, and the logon is refused. One whose stop completed is re-marked; one that couldn't be
       (`SweepNext` unreadable, the write failed) refuses the logon, as it refuses a launch,
       without requesting a stop, which has completed (`RunExit::AwaitingSweep`, `0xE0C15013`,
       appended). A marker of this pool
@@ -2287,6 +2380,8 @@ pub struct Progress { pub walked: u64, pub done: bool, pub failed: Option<Arc<Er
   `RunExit::AwaitingSweep` is F4's other refusal, with no stop awaited: a marker of the pool
   user's awaits a sweep that didn't complete within 15 s, or its completed stop (or sweep)
   couldn't be re-marked; a later launch checks again.
+  `RunExit::PoolBusy` is F4's busy refusal: an earlier session of the pool user is still
+  running; nothing was requested, and a launch once it ended goes ahead.
 - **The desktop's start:** once, before any launch and off the UI thread,
   `runner::start_up_requests(data_dir)` settles the markers the last run left and requests the
   stop and sweep tasks for what they still await. It never waits.

@@ -21,7 +21,9 @@
 //!   only task instances, so the final stop, reserved after the sweep completed, ends the rest.
 //! - [`MarkerState::Open`] left standing: the outer died (the host's job end after its
 //!   `stdin_grace`, a crash) or couldn't read a number. The pool user's next logon or the
-//!   desktop's start makes it `AwaitingStop`, reading `StopNext` then (`unclean.rs`).
+//!   desktop's start makes it `AwaitingStop`, reading `StopNext` then (`unclean.rs`). An open
+//!   marker also names its outer ([`Outer`]: pid and creation time), so the next logon can tell
+//!   a live session's marker from a dead outer's; one written before that names none.
 //!
 //! An absent `…Sequence` counts as 0. A clean marker is removed by whoever finds it clean. The
 //! numbers are read without the set-up lock, which only an administrator can take; why that is
@@ -65,6 +67,21 @@ struct Marker {
     /// The record's `InstallId` when it was written; absent under an install without one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     install: Option<String>,
+    /// The outer that wrote it open; absent once it waits for a task's run, and in a marker
+    /// written before the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    outer: Option<Outer>,
+}
+
+/// The outer runner that wrote a marker open: its pid and its creation time (`GetProcessTimes`,
+/// 100 ns since 1601), which tells it from a later process given the same pid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Outer {
+    /// Its process id.
+    pub pid: u32,
+    /// Its creation time.
+    pub created: u64,
 }
 
 /// What a marker waits for before it is clean.
@@ -222,6 +239,8 @@ pub struct UncleanSession {
     pub state: Option<MarkerState>,
     /// The install id it was written under; `None` when it has none or can't be read.
     pub install: Option<String>,
+    /// The outer that wrote it open; `None` when it names none or can't be read.
+    pub outer: Option<Outer>,
 }
 
 /// The marker's path for the launch `id`: `<data_dir>\sandbox\run\<id>.session`.
@@ -246,26 +265,46 @@ pub fn launch_id(path: &Path) -> Option<&str> {
         .filter(|hex| is_id(hex))
 }
 
-/// Writes the open marker for the launch `id`, its pool user and the install id `install`, in
-/// the run folder (which must exist: the launch file came from it); its path.
+/// Writes the open marker for the launch `id`, its pool user, the install id `install` and
+/// its outer `outer`, in the run folder (which must exist: the launch file came from it); its
+/// path.
 pub fn write_marker(
     data_dir: &Path,
     id: &str,
     pool_user: &Sid,
     install: Option<&str>,
+    outer: Outer,
 ) -> io::Result<PathBuf> {
     let path = marker_path(data_dir, id);
-    write_marker_at(&path, Some(pool_user), install, MarkerState::Open)?;
+    write_marker_as(
+        &path,
+        Some(pool_user),
+        install,
+        MarkerState::Open,
+        Some(outer),
+    )?;
     Ok(path)
 }
 
 /// Writes the marker at `path` (`<16 hex>.session` in the run folder) as `state`, for
-/// `pool_user` under the install id `install`, in place of what it held.
+/// `pool_user` under the install id `install`, in place of what it held. It names no outer:
+/// only the outer's own open marker does ([`write_marker`]).
 pub fn write_marker_at(
     path: &Path,
     pool_user: Option<&Sid>,
     install: Option<&str>,
     state: MarkerState,
+) -> io::Result<()> {
+    write_marker_as(path, pool_user, install, state, None)
+}
+
+/// [`write_marker_at`], naming `outer`.
+fn write_marker_as(
+    path: &Path,
+    pool_user: Option<&Sid>,
+    install: Option<&str>,
+    state: MarkerState,
+    outer: Option<Outer>,
 ) -> io::Result<()> {
     let named = path.file_name().and_then(|name| name.to_str());
     if named.and_then(marker_id).is_none() {
@@ -278,6 +317,7 @@ pub fn write_marker_at(
         pool_user: pool_user.cloned(),
         state,
         install: install.map(str::to_owned),
+        outer,
     };
     let bytes = serde_json::to_vec(&marker).map_err(io::Error::other)?;
     write::write_atomic(path, &bytes)?;
@@ -290,16 +330,17 @@ pub fn write_marker_at(
 }
 
 /// The outer's order once it read the launch `launch_file`: writes the session's marker for
-/// `pool_user`, under the install id `install`, in `data_dir`, then runs `session` (everything
-/// that runs as the pool user) with its path. A marker that can't be written, or a launch file
-/// whose name gives no id, refuses the
-/// launch: `session` never runs, and the error comes back. No session runs unmarked, so none can
-/// leave a process of the pool user that no marker names.
+/// `pool_user`, under the install id `install`, naming the outer `outer`, in `data_dir`, then
+/// runs `session` (everything that runs as the pool user) with its path. A marker that can't be
+/// written, or a launch file whose name gives no id, refuses the launch: `session` never runs,
+/// and the error comes back. No session runs unmarked, so none can leave a process of the pool
+/// user that no marker names.
 pub(crate) fn marked<T>(
     data_dir: &Path,
     launch_file: &Path,
     pool_user: &Sid,
     install: Option<&str>,
+    outer: Outer,
     session: impl FnOnce(PathBuf) -> T,
 ) -> io::Result<T> {
     let id = launch_id(launch_file).ok_or_else(|| {
@@ -308,7 +349,7 @@ pub(crate) fn marked<T>(
             "the launch file's name gives no id",
         )
     })?;
-    let marker = write_marker(data_dir, id, pool_user, install)?;
+    let marker = write_marker(data_dir, id, pool_user, install, outer)?;
     Ok(session(marker))
 }
 
@@ -342,6 +383,7 @@ pub fn unclean_sessions(data_dir: &Path) -> io::Result<Vec<UncleanSession>> {
             id: id.to_owned(),
             pool_user: marker.as_ref().and_then(|marker| marker.pool_user.clone()),
             install: marker.as_ref().and_then(|marker| marker.install.clone()),
+            outer: marker.as_ref().and_then(|marker| marker.outer),
             state: marker.map(|marker| marker.state),
         });
     }

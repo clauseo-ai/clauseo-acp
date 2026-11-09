@@ -19,6 +19,11 @@
 //! creation time is read with `GetProcessTimes`, and it is ended with `TerminateProcess`. Whether
 //! one whose kill was refused has exited is `WaitForSingleObject` with no wait.
 //!
+//! [`OsPrevious`] is the outer's, not the sweep's: its search for a previous session's live
+//! runners before its logon (`previous.rs`), through the same Toolhelp snapshot. So are
+//! [`own_outer`] and [`outer_seen`], its marker's pid and creation time and F4's look at another
+//! marker's outer (`unclean.rs`), through the same open and `GetProcessTimes`.
+//!
 //! [`Processes::job_pids`] is `QueryInformationJobObject` with no job handle, which "uses the
 //! job associated with the calling process" (the immediate one, the launch's, when jobs nest),
 //! for `JobObjectBasicProcessIdList`, the buffer grown until the list fits. The inner holds no
@@ -44,14 +49,20 @@ use windows::Win32::System::RemoteDesktop::{
     WTS_CURRENT_SERVER_HANDLE, WTS_PROCESS_INFOW, WTSEnumerateProcessesW, WTSFreeMemory,
 };
 use windows::Win32::System::Threading::{
-    GetCurrentProcess, GetCurrentProcessId, GetProcessTimes, OpenProcess, OpenProcessToken,
-    PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
-    PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
+    GetCurrentProcess, GetCurrentProcessId, GetExitCodeProcess, GetProcessTimes, OpenProcess,
+    OpenProcessToken, PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_LIMITED_INFORMATION,
+    PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
 };
 
+use super::super::RunExit;
+use super::super::marker::Outer;
+use super::super::previous::Previous;
+use super::super::spawn::telemetry_user;
+use super::super::unclean::OuterSeen;
 use super::{Owner, Point, Processes, SWEPT, Seen, SweepError, sweep};
 use crate::windows::acl::object::{Handle, os_error};
 use crate::windows::sids::Sid;
+use crate::windows::token::DESKTOP_USER_RIGHTS;
 use crate::windows::token::os::{shut_object, sid_text};
 
 /// How long an ended process has to be gone.
@@ -62,6 +73,8 @@ const NO_SUCH_PID: i32 = 87;
 const NO_MORE: i32 = 18;
 /// `ERROR_ACCESS_DENIED`.
 const DENIED: i32 = 5;
+/// `STILL_ACTIVE`: the exit code `GetExitCodeProcess` gives a process that hasn't exited.
+const STILL_ACTIVE: u32 = 259;
 /// `ERROR_MORE_DATA`: the job's pid list doesn't fit the buffer.
 const MORE_DATA: i32 = 234;
 /// The most pids the job's list is read for: past it, the read fails.
@@ -97,6 +110,117 @@ pub(in crate::windows::runner) fn sweep_own(
     let mut calls = OsProcesses { me };
     sweep(&mut calls, me, &[own], point, log).map(drop)
 }
+
+/// The outer's [`Previous`] calls (`previous.rs`), as the desktop user: a Toolhelp snapshot's
+/// processes with the runner's image (`image`, compared case-insensitively), each opened with
+/// `DESKTOP_USER_RIGHTS` (what the runners' process DACL grants the desktop user; anything else
+/// of that image refuses the open and is no runner of this launch's) and kept when its user,
+/// read through that handle (`ProcessTelemetryIdInformation`), is `pool_user`. The handle pins
+/// the pid until the wait and the end are done.
+pub(in crate::windows::runner) struct OsPrevious<'a> {
+    pub(in crate::windows::runner) pool_user: &'a Sid,
+    pub(in crate::windows::runner) image: &'a str,
+}
+
+impl Previous for OsPrevious<'_> {
+    type Runner = Handle;
+
+    fn find(&mut self) -> Result<Vec<Handle>, String> {
+        let failed = |e: &io::Error| format!("the process list failed ({e})");
+        // SAFETY: a snapshot of every process; the handle is owned by `Handle`.
+        let snapshot = Handle(
+            unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }
+                .map_err(|e| failed(&os_error(&e)))?,
+        );
+        let mut entry = PROCESSENTRY32W {
+            dwSize: u32::try_from(size_of::<PROCESSENTRY32W>()).unwrap_or(0),
+            ..PROCESSENTRY32W::default()
+        };
+        // SAFETY: no arguments.
+        let own = unsafe { GetCurrentProcessId() };
+        let mut found = Vec::new();
+        // SAFETY: the snapshot is live; `entry` is a live PROCESSENTRY32W with its size set.
+        let mut next = unsafe { Process32FirstW(snapshot.0, &raw mut entry) };
+        loop {
+            match next {
+                Ok(()) => {
+                    let pid = entry.th32ProcessID;
+                    if pid != own && image(&entry.szExeFile).eq_ignore_ascii_case(self.image) {
+                        let access = PROCESS_ACCESS_RIGHTS(DESKTOP_USER_RIGHTS);
+                        if let Ok(Some(process)) = open(access, pid)
+                            && telemetry_user(process.0, pid).is_ok_and(|u| u == *self.pool_user)
+                        {
+                            found.push(process);
+                        }
+                    }
+                }
+                Err(error) if os_error(&error).raw_os_error() == Some(NO_MORE) => {
+                    return Ok(found);
+                }
+                Err(error) => return Err(failed(&os_error(&error))),
+            }
+            // SAFETY: as for the first entry.
+            next = unsafe { Process32NextW(snapshot.0, &raw mut entry) };
+        }
+    }
+
+    fn wait(&mut self, runner: &Handle, limit: Duration) -> bool {
+        let millis = u32::try_from(limit.as_millis()).unwrap_or(u32::MAX - 1);
+        // SAFETY: the handle is live with SYNCHRONIZE.
+        let woke = unsafe { WaitForSingleObject(runner.0, millis) };
+        woke == WAIT_OBJECT_0
+    }
+
+    fn end(&mut self, runner: &Handle) -> Result<(), String> {
+        // SAFETY: the handle is live with PROCESS_TERMINATE.
+        if let Err(error) = unsafe { TerminateProcess(runner.0, RunExit::Sweep.code()) } {
+            // One that exited meanwhile is gone, as wanted.
+            if !self.wait(runner, Duration::ZERO) {
+                return Err(format!("TerminateProcess failed ({})", os_error(&error)));
+            }
+        }
+        if self.wait(runner, END_WAIT) {
+            Ok(())
+        } else {
+            Err("it didn't exit once ended".to_owned())
+        }
+    }
+}
+
+/// This outer's own [`Outer`], for its marker (`unclean::os::marked_as_outer`): its pid and its
+/// creation time.
+pub(in crate::windows::runner) fn own_outer() -> io::Result<Outer> {
+    // SAFETY: no arguments; the pseudo-handle needs no closing.
+    let (pid, process) = unsafe { (GetCurrentProcessId(), GetCurrentProcess()) };
+    Ok(Outer {
+        pid,
+        created: times(process)?,
+    })
+}
+
+/// F4's look at a marker's outer (`unclean::Markers::outer`): `pid` opened with
+/// `PROCESS_QUERY_LIMITED_INFORMATION` alone, then its exit code and creation time read through
+/// that handle. An exit code of `STILL_ACTIVE` is taken as running.
+pub(in crate::windows::runner) fn outer_seen(pid: u32) -> OuterSeen {
+    let process = match open(PROCESS_QUERY_LIMITED_INFORMATION, pid) {
+        Ok(Some(process)) => process,
+        Ok(None) => return OuterSeen::Gone,
+        Err(error) if error.raw_os_error() == Some(DENIED) => return OuterSeen::Denied,
+        Err(_) => return OuterSeen::Failed,
+    };
+    let mut code = 0u32;
+    // SAFETY: the handle is live with PROCESS_QUERY_LIMITED_INFORMATION; a live out-pointer.
+    if unsafe { GetExitCodeProcess(process.0, &raw mut code) }.is_err() {
+        return OuterSeen::Failed;
+    }
+    if code != STILL_ACTIVE {
+        return OuterSeen::Exited;
+    }
+    times(process.0).map_or(OuterSeen::Failed, |created| OuterSeen::Running { created })
+}
+
+/// How long an ended previous runner has to be gone.
+const END_WAIT: Duration = Duration::from_secs(5);
 
 impl Processes for OsProcesses<'_> {
     type Process = Handle;

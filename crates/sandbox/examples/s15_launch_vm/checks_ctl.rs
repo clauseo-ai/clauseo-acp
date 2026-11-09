@@ -1,8 +1,8 @@
 //! The positive control for the UI-limit effects ([`controls`]): when the agent's innermost job
 //! reads `0x0` (or in strict mode), the harness runs `probe ui-control` once per [`VARIANTS`]
-//! entry, each on a fresh `ClauseoS15Ctl-<hex>` station and outside any job of ours, and, while
-//! the agent still runs, variant [`G`] on the agent's own `ClauseoRun-<hex>\Default`. Each
-//! result is printed; `gate.rs` decides per effect which variants carry it.
+//! entry, each on a fresh control station (`win_station.rs`) and outside any job of ours, and,
+//! while the agent still runs, variant [`G`] on the agent's own `Service-0x0-<LUID>$\Default`.
+//! Each result is printed; `gate.rs` decides per effect which variants carry it.
 
 use std::time::Duration;
 
@@ -10,12 +10,12 @@ use clauseo_sandbox::windows::secrets::secret_for;
 use clauseo_sandbox::windows::sids::Sid;
 
 use super::checks_pool::settle;
-use super::checks_ui::random;
 use super::gate::{self, Control, Got, Judged, Rank};
 use super::manifest::Pool;
 use super::rows::Ctx;
 use super::win_ctl::{self, Ran, Shape};
-use super::{win, win_desk, win_logon};
+use super::win_station::ControlStation;
+use super::{win, win_logon};
 
 /// How long one variant's process may run (or the row's limit, when shorter).
 const CONTROL_LIMIT: Duration = Duration::from_secs(15);
@@ -123,7 +123,7 @@ const G: Variant = Variant {
     differs: "only in not being in the runner's job: the agent's token shape (pool user A, Low, \
               the four restricting SIDs, the logon SID deny-only) made by a relay running as \
               pool user A, as (a)'s relay does as A2, and started on the agent's own \
-              ClauseoRun-<hex>\\Default while the agent waits",
+              Service-0x0-<LUID>$\\Default while the agent waits",
     restricted: 4,
     low: true,
 };
@@ -149,9 +149,9 @@ pub(crate) enum Live<'a> {
 /// Which station a variant's `probe ui-control` must report.
 #[derive(Debug, Clone, Copy)]
 enum Station<'a> {
-    /// A fresh `ClauseoS15Ctl-<hex>`.
+    /// A fresh control station, `Service-0x0-<LUID>$` (`win_station.rs`).
     Control,
-    /// The agent's own, by the name it printed (`ClauseoRun-<hex>`).
+    /// The agent's own, by the name it printed (`Service-0x0-<LUID>$`).
     Agent(&'a str),
     /// The user's interactive `WinSta0` (strict mode's (w)).
     Interactive,
@@ -180,10 +180,10 @@ pub(crate) fn controls(
     };
     ctx.note(&format!(
         "positive control: probe ui-control as variant (g) on the agent's own station while it \
-         waits, then (a) to (f), each on a fresh ClauseoS15Ctl-<hex> station made as the outer \
-         runner makes ClauseoRun-… (GENERIC_ALL; DACL SYSTEM and the token's user, the \
-         harness's user too; Low label); none in a job of ours. Per effect, (g) alone carries it \
-         when (g) ran, else (a) to (d); {}",
+         waits, then (a) to (f), each on a fresh control station made unnamed through a pool \
+         user's logon as the outer runner makes the agent's (DACL SYSTEM and the token's user, \
+         the harness's user too, GA each; Low label); none in a job of ours. Per effect, (g) \
+         alone carries it when (g) ran, else (a) to (d); {}",
         win_ctl::own_job()
     ));
     let mut runs = Vec::new();
@@ -253,16 +253,25 @@ pub(crate) fn controls(
     judged
 }
 
-/// The agent's own station, from its `ui-effect station` line: a `ClauseoRun-` name.
+/// Whether `name` is the shape of a station made unnamed while acting as a logon, which Windows
+/// names `Service-0x0-<logon LUID>$`: the agent's own (the outer runner makes it as the pool
+/// user's logon) and the harness's control stations (`win_station.rs`).
+pub(crate) fn is_logon_station(name: &str) -> bool {
+    name.strip_prefix("Service-0x0-")
+        .and_then(|rest| rest.strip_suffix('$'))
+        .is_some_and(|luid| !luid.is_empty() && luid.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
+/// The agent's own station, from its `ui-effect station` line: [`is_logon_station`]'s shape.
 fn agent_station(lines: &[String]) -> Result<&str, String> {
     let station = lines
         .iter()
         .find_map(|l| l.strip_prefix("ui-effect station "))
         .map(str::trim);
     match station {
-        Some(name) if name.starts_with("ClauseoRun-") => Ok(name),
+        Some(name) if is_logon_station(name) => Ok(name),
         other => Err(format!(
-            "the agent printed station {other:?}, not a ClauseoRun- one"
+            "the agent printed station {other:?}, not a Service-0x0-<LUID>$ one"
         )),
     }
 }
@@ -313,33 +322,37 @@ fn run_variant(
     lawyer: &str,
     on: Station<'_>,
 ) -> Result<Vec<String>, String> {
-    let station = format!("ClauseoS15Ctl-{}", random()?);
-    let desktop = format!("{station}\\Default");
-    let target = match on {
-        Station::Control => desktop.clone(),
-        Station::Agent(name) => format!("{name}\\Default"),
-        Station::Interactive => "WinSta0\\Default".to_owned(),
-    };
     let limit = ctx.limit.min(CONTROL_LIMIT);
     let exe = ctx.manifest.harness_exe();
     let bin = ctx.manifest.bin();
+    // The station is made through the pool user's own logon (`win_station.rs`): an unelevated
+    // harness can't make a named one.
+    let pool = control_pool(ctx, on).ok_or("the manifest names no such pool user")?;
+    let sid = Sid::parse(&pool.sid).map_err(|e| e.to_string())?;
+    // The crate's error text never holds the password.
+    let password = secret_for(&ctx.manifest.data_dir, &sid)
+        .map_err(|e| format!("secret_for({}): {e}", pool.sid))?;
     let open = |sids: &[&str]| {
-        win_desk::ControlStation::open(&station, sids)
-            .map_err(|(call, code)| format!("{call} gave {code} (station {station})"))
+        ControlStation::open(&pool.name, &password, sids)
+            .map_err(|(call, code)| format!("{call} gave {code} (control station)"))
+    };
+    let target = |held: Option<&ControlStation>| match (on, held) {
+        (Station::Agent(name), _) => Ok(format!("{name}\\Default")),
+        (Station::Interactive, _) => Ok("WinSta0\\Default".to_owned()),
+        (Station::Control, Some(held)) => Ok(held.desktop()),
+        (Station::Control, None) => Err("no control station".to_owned()),
     };
     let ran: Ran = match variant.source {
         Source::Pool => {
-            let pool = control_pool(ctx, on).ok_or("the manifest names no such pool user")?;
             if !matches!(on, Station::Agent(_)) {
                 settle(ctx, pool)?;
             }
-            let sid = Sid::parse(&pool.sid).map_err(|e| e.to_string())?;
             let held = open(&[lawyer, pool.sid.as_str()])?;
-            // The crate's error text never holds the password.
-            let password = secret_for(&ctx.manifest.data_dir, &sid)
-                .map_err(|e| format!("secret_for({}): {e}", pool.sid))?;
+            let desktop = held.desktop();
+            let target = target(Some(&held))?;
             let ms = limit.saturating_sub(RELAY_MARGIN).as_millis().to_string();
             let args = ["probe", "ui-relay", target.as_str(), lawyer, ms.as_str()];
+            let password = password.clone();
             let ran =
                 win_logon::run_with_logon(&pool.name, password, &desktop, &exe, &args, &bin, limit);
             drop(held);
@@ -352,6 +365,7 @@ fn run_variant(
                 Station::Interactive => None,
                 _ => Some(open(&[lawyer])?),
             };
+            let target = target(held.as_ref())?;
             let args: &[&str] = if variant.sa {
                 &["probe", "ui-control", "sa"]
             } else {
@@ -412,14 +426,14 @@ fn facts(lines: &[String]) -> String {
 }
 
 /// A variant's shape, on its `probe ui-control` lines: it ran on the station `on` names (a
-/// `ClauseoS15Ctl-` one, or exactly the agent's `ClauseoRun-` one) as `user`, with the integrity
-/// and restricting SIDs `variant` names (and explicit attributes for (c)). Otherwise why. What it
-/// got at each effect is `gate.rs`'s.
+/// fresh control one, or exactly the agent's `Service-0x0-<LUID>$` one) as `user`, with the
+/// integrity and restricting SIDs `variant` names (and explicit attributes for (c)). Otherwise
+/// why. What it got at each effect is `gate.rs`'s.
 fn shape(variant: &Variant, user: &str, lines: &[String], on: Station<'_>) -> Result<(), String> {
     let station = get(lines, "station");
     let right = match on {
-        Station::Control => station.is_some_and(|s| s.starts_with("ClauseoS15Ctl-")),
-        Station::Agent(name) => station == Some(name) && name.starts_with("ClauseoRun-"),
+        Station::Control => station.is_some_and(is_logon_station),
+        Station::Agent(name) => station == Some(name) && is_logon_station(name),
         Station::Interactive => station == Some("WinSta0"),
     };
     if !right {
@@ -459,7 +473,7 @@ mod tests {
     }
 
     const GOOD: [&str; 5] = [
-        "ui-control station ClauseoS15Ctl-00",
+        "ui-control station Service-0x0-77$",
         "ui-control user S-1-5-21-1-1001",
         "ui-control integrity S-1-16-4096",
         "ui-control restricted 4",
@@ -495,7 +509,7 @@ mod tests {
         assert!(shape(&W, user, &on_winsta0, Station::Interactive).is_ok());
         let mut fresh = on_winsta0.clone();
         if let Some(line) = fresh.first_mut() {
-            *line = "ui-control station ClauseoS15Ctl-00".to_owned();
+            *line = "ui-control station Service-0x0-77$".to_owned();
         }
         assert!(shape(&W, user, &fresh, Station::Interactive).is_err());
         assert!(shape(&W, "S-1-5-21-1-1002", &on_winsta0, Station::Interactive).is_err());
@@ -521,7 +535,7 @@ mod tests {
         let open = swap(3, "ui-control restricted 0");
         assert_eq!(shape(unrestricted, user, &open, on), Ok(()));
         assert!(shape(lawyer, user, &swap(0, "ui-control station WinSta0"), on).is_err());
-        let agents = swap(0, "ui-control station ClauseoRun-0123456789abcdef");
+        let agents = swap(0, "ui-control station Service-0x0-1a2b3c$");
         assert!(shape(pool, user, &agents, on).is_err());
         assert!(shape(lawyer, user, &lines(&GOOD[..4]), on).is_err());
     }
@@ -529,14 +543,14 @@ mod tests {
     #[test]
     fn variant_g_must_be_on_the_agents_own_station_as_pool_user_low_restricted() {
         let user = "S-1-5-21-1-1001";
-        let name = "ClauseoRun-0123456789abcdef";
+        let name = "Service-0x0-1a2b3c$";
         let on = Station::Agent(name);
-        let agents = swap(0, "ui-control station ClauseoRun-0123456789abcdef");
+        let agents = swap(0, "ui-control station Service-0x0-1a2b3c$");
         assert_eq!(shape(&G, user, &agents, on), Ok(()));
         assert!(shape(&G, user, &lines(&GOOD), on).is_err());
-        let other = swap(0, "ui-control station ClauseoRun-fedcba9876543210");
+        let other = swap(0, "ui-control station Service-0x0-4d5e6f$");
         assert!(shape(&G, user, &other, on).is_err());
-        let ctl = Station::Agent("ClauseoS15Ctl-00");
+        let ctl = Station::Agent("Service-0x0-77$");
         assert!(shape(&G, user, &lines(&GOOD), ctl).is_err());
         assert!(shape(&G, "S-1-5-21-1-500", &agents, on).is_err());
         let mut medium = agents.clone();
@@ -545,9 +559,25 @@ mod tests {
         let mut open = agents;
         open[3] = "ui-control restricted 0".to_owned();
         assert!(shape(&G, user, &open, on).is_err());
-        let printed = lines(&["ui-effect station ClauseoRun-0123456789abcdef"]);
+        let printed = lines(&["ui-effect station Service-0x0-1a2b3c$"]);
         assert_eq!(agent_station(&printed), Ok(name));
-        assert!(agent_station(&lines(&["ui-effect station ClauseoS15Ctl-00"])).is_err());
+        assert!(agent_station(&lines(&["ui-effect station Service-0x0-77$"])).is_err());
         assert!(agent_station(&[]).is_err());
+        let winsta0 = lines(&["ui-effect station WinSta0"]);
+        assert!(agent_station(&winsta0).is_err());
+    }
+
+    #[test]
+    fn the_agents_station_is_a_logons_unnamed_one() {
+        assert!(is_logon_station("Service-0x0-1a2b3c$"));
+        for not in [
+            "WinSta0",
+            "Service-0x0-$",
+            "Service-0x0-1a2b3c",
+            "ClauseoRun-0123",
+            "x$",
+        ] {
+            assert!(!is_logon_station(not), "{not}");
+        }
     }
 }

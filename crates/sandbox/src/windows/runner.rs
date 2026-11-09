@@ -72,6 +72,7 @@ use serde::{Deserialize, Serialize};
 use super::pool::pool_number;
 use super::sids::Sid;
 
+mod args;
 #[cfg(windows)]
 mod ca;
 #[cfg(windows)]
@@ -85,6 +86,8 @@ mod inner;
 #[cfg(any(windows, test))]
 mod inner_flow;
 #[cfg(any(windows, test))]
+mod inner_user;
+#[cfg(any(windows, test))]
 mod leftovers;
 #[cfg(any(windows, test))]
 pub mod marker;
@@ -92,15 +95,20 @@ pub mod marker;
 mod outer;
 pub mod paths;
 mod policy;
+#[cfg(any(windows, test))]
+mod previous;
 #[cfg(windows)]
 mod spawn;
 #[cfg(any(windows, test))]
 mod start;
 #[cfg(any(windows, test))]
+mod station;
+#[cfg(any(windows, test))]
 mod sweep;
 #[cfg(any(windows, test))]
 pub mod unclean;
 
+pub use args::{Mode, mode, runner_args};
 pub use env::agent_env;
 #[cfg(windows)]
 pub use inner::run_inner;
@@ -112,6 +120,9 @@ pub use paths::{WinPath, codex_reuse};
 #[cfg(windows)]
 pub use policy::codex_link_in_policy;
 pub use policy::{codex_reuse_in_policy, granted_paths};
+/// The s15 harness's control stations read their names the way the outer does.
+#[cfg(any(windows, test))]
+pub use station::station_name_of_path;
 #[cfg(any(windows, test))]
 pub use unclean::StartUp;
 #[cfg(windows)]
@@ -336,29 +347,6 @@ pub fn is_launch_name(name: &str) -> bool {
     })
 }
 
-/// What [`RUNNER_EXE`] was started to do, from its arguments.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Mode {
-    /// `--launch <file>`: the outer runner.
-    Launch(PathBuf),
-    /// `--inner <pipe base>`: the inner runner.
-    Inner(String),
-}
-
-/// The mode `args` (the arguments after the program) name; `None` for any other command line.
-pub fn mode(args: &[std::ffi::OsString]) -> Option<Mode> {
-    match args {
-        [flag, file] if flag == "--launch" => Some(Mode::Launch(PathBuf::from(file))),
-        [flag, base] if flag == "--inner" => base.to_str().map(|base| Mode::Inner(base.to_owned())),
-        _ => None,
-    }
-}
-
-/// The arguments the host starts [`RUNNER_EXE`] with.
-pub fn runner_args(launch_file: &Path) -> Vec<std::ffi::OsString> {
-    vec!["--launch".into(), launch_file.as_os_str().to_owned()]
-}
-
 /// Writes `message` to a new launch file in `<data_dir>\sandbox\run\` (made protected if
 /// missing), atomically, and gives its path for [`runner_args`].
 pub fn write_launch(data_dir: &Path, message: &LaunchMessage) -> std::io::Result<PathBuf> {
@@ -409,7 +397,10 @@ pub enum RunExit {
     Pipe,
     /// The inner runner couldn't be put in the job, or the job made.
     Job,
-    /// The inner runner's token, desktop or folders couldn't be made.
+    /// The inner runner's token, desktop or folders couldn't be made, or the outer's window
+    /// station and desktop for the agent (`desktop.rs`): any of their calls but a refused
+    /// `LogonUserW` password or right, which are [`RunExit::Password`] and
+    /// [`RunExit::LogonRight`] as the inner's logon's are.
     Token,
     /// The agent couldn't be started.
     Spawn,
@@ -451,9 +442,24 @@ pub enum RunExit {
     /// none was requested; the outer refuses the launch before its own marker or any logon, and
     /// a later launch checks again.
     AwaitingSweep,
+    /// The inner runner couldn't grant the desktop user `TOKEN_QUERY` on its own token, its
+    /// first act (`token::runner_token_first_sddl`), so the outer can't make its full check: the
+    /// launch is refused before the inner does anything else.
+    TokenGrant,
+    /// F4: an open marker of this pool user's names an outer that still runs, a live session's
+    /// (`unclean::outer_alive`). The outer refuses the launch before its own marker or any
+    /// logon, requests no stop and ends nothing; a launch once that session ended goes ahead.
+    PoolBusy,
 }
 
+/// The variants with an explicit, reserved number past [`RUN_EXIT_BASE`] instead of their
+/// position: [`RunExit::TokenGrant`] `0x15` and [`RunExit::PoolBusy`] `0x20`. The numbers
+/// between are other branches' codes (`0x14` `LeftoverTask`, `0x16` to `0x1f`), none here.
+const RESERVED: [(RunExit, u32); 2] = [(RunExit::TokenGrant, 0x15), (RunExit::PoolBusy, 0x20)];
+
 impl RunExit {
+    /// The variants numbered by position, from [`RUN_EXIT_BASE`]; the rest have an explicit,
+    /// reserved number instead ([`RESERVED`]).
     const ALL: [RunExit; 20] = [
         RunExit::Usage,
         RunExit::BadLaunch,
@@ -479,6 +485,9 @@ impl RunExit {
 
     /// The exit code.
     pub fn code(self) -> u32 {
+        if let Some((_, offset)) = RESERVED.iter().find(|(exit, _)| *exit == self) {
+            return RUN_EXIT_BASE + offset;
+        }
         let index = RunExit::ALL
             .iter()
             .position(|exit| *exit == self)
@@ -488,8 +497,11 @@ impl RunExit {
 
     /// The failure an exit code names, if it is one.
     pub fn from_code(code: u32) -> Option<RunExit> {
-        let index = usize::try_from(code.checked_sub(RUN_EXIT_BASE)?).ok()?;
-        RunExit::ALL.get(index).copied()
+        let offset = code.checked_sub(RUN_EXIT_BASE)?;
+        if let Some((exit, _)) = RESERVED.iter().find(|(_, reserved)| *reserved == offset) {
+            return Some(*exit);
+        }
+        RunExit::ALL.get(usize::try_from(offset).ok()?).copied()
     }
 
     /// What tier detection makes of it: the set-up's failures, which running the set-up again or
@@ -518,7 +530,9 @@ impl RunExit {
             | RunExit::PoolStop
             | RunExit::MarkerUnwritable
             | RunExit::AwaitingStop
-            | RunExit::AwaitingSweep => None,
+            | RunExit::AwaitingSweep
+            | RunExit::TokenGrant
+            | RunExit::PoolBusy => None,
         }
     }
 }
@@ -534,12 +548,11 @@ pub fn agent_code(code: u32) -> u32 {
     }
 }
 
-/// The agent's window station's name, `ClauseoRun-<16 hex>`, from 64 bits of its own randomness:
-/// nothing another process can read first (the pipe base is in the `\\.\pipe\` listing), and
-/// the station is made only if no station has the name (`CWF_CREATE_ONLY`).
-pub fn station_name(random: [u8; 8]) -> String {
-    format!("ClauseoRun-{}", super::pipe::hex(&random))
-}
+/// The UI limits the launch's job carries: every `JOB_OBJECT_UILIMIT_*` flag (`HANDLES` `0x1`,
+/// `READCLIPBOARD` `0x2`, `WRITECLIPBOARD` `0x4`, `SYSTEMPARAMETERS` `0x8`, `DISPLAYSETTINGS`
+/// `0x10`, `GLOBALATOMS` `0x20`, `DESKTOP` `0x40`, `EXITWINDOWS` `0x80`), behind the agent's own
+/// window station. `spawn::UI_LIMITS` is checked against it when it compiles.
+pub const UI_LIMIT_MASK: u32 = 0xFF;
 
 /// The cause when the Secondary Logon service is disabled: set-up's own words.
 pub const SECLOGON_DISABLED: &str = "the Secondary Logon service (seclogon) is disabled: IT can \

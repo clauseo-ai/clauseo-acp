@@ -1,7 +1,8 @@
 //! The runners' process calls (Windows): the outer's `CreateProcessWithLogonW` of the inner
 //! runner, the kill-on-close job (whose one handle is the outer's), and the inner's private
 //! desktop, error mode and `CreateProcessAsUserW` of the agent with only its three pipes
-//! inherited.
+//! inherited, and the outer's read of the suspended inner's user through
+//! `NtQueryInformationProcess(ProcessTelemetryIdInformation)`.
 #![expect(
     unsafe_code,
     reason = "FFI to the logon, job, desktop and process calls"
@@ -11,8 +12,12 @@ use std::ffi::c_void;
 use std::io;
 use std::time::Duration;
 
-use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
-use windows::Win32::Security::TOKEN_QUERY;
+use windows::Wdk::System::Threading::{NtQueryInformationProcess, PROCESSINFOCLASS};
+use windows::Win32::Foundation::{
+    HANDLE, STATUS_BUFFER_OVERFLOW, STATUS_BUFFER_TOO_SMALL, STATUS_INFO_LENGTH_MISMATCH,
+    WAIT_OBJECT_0, WAIT_TIMEOUT,
+};
+use windows::Win32::Security::{IsValidSid, PSID, TOKEN_QUERY};
 use windows::Win32::System::Diagnostics::Debug::{
     SEM_FAILCRITICALERRORS, SEM_NOGPFAULTERRORBOX, SEM_NOOPENFILEERRORBOX, SetErrorMode,
 };
@@ -42,6 +47,8 @@ use windows::Win32::System::Threading::{
 use windows::core::{HSTRING, PCWSTR, PWSTR};
 use zeroize::Zeroizing;
 
+use super::inner_user::telemetry_sid;
+use super::station::StationDesktop;
 use crate::windows::acl::object::{Handle, os_error};
 
 /// `SW_HIDE`.
@@ -92,10 +99,95 @@ impl Process {
         crate::windows::token::os::user(&Handle(token))
     }
 
+    /// Its token's user, logon SID, integrity and elevation type, for the outer's full check
+    /// once the inner granted it `TOKEN_QUERY`.
+    pub(super) fn token_parts(&self) -> io::Result<super::inner_user::TokenParts> {
+        let mut token = HANDLE::default();
+        // SAFETY: the process handle has every right (it came from the logon call); `token` is
+        // a live out-pointer, owned by `Handle` once written.
+        unsafe { OpenProcessToken(self.handle.0, TOKEN_QUERY, &raw mut token) }
+            .map_err(|e| os_error(&e))?;
+        let token = Handle(token);
+        Ok(super::inner_user::TokenParts {
+            user: crate::windows::token::os::user(&token)?,
+            logon: crate::windows::token::os::logon_sid(&token)?,
+            integrity: crate::windows::token::os::integrity(&token)?,
+            elevation_type: crate::windows::token::os::elevation_type(&token)?,
+        })
+    }
+
     /// Ends it with `code`; one already gone is fine.
     pub(super) fn kill(&self, code: u32) {
         // SAFETY: the process handle is live; a failure (already exited) leaves nothing to do.
         drop(unsafe { TerminateProcess(self.handle.0, code) });
+    }
+}
+
+/// `ProcessTelemetryIdInformation`, the `PROCESSINFOCLASS` value.
+const PROCESS_TELEMETRY_ID_INFORMATION: i32 = 64;
+/// The telemetry buffer's first size (the VM's was 456 bytes); it grows to what the call asks,
+/// up to [`TELEMETRY_MAX`].
+const TELEMETRY_FIRST: usize = 4096;
+/// The largest telemetry buffer: a header, a SID and four paths and names.
+const TELEMETRY_MAX: usize = 256 * 1024;
+
+/// The user of the process `handle` (pid `pid`) from `ProcessTelemetryIdInformation`
+/// (`inner_user.rs`), which needs only `PROCESS_QUERY_LIMITED_INFORMATION` on the handle: the
+/// suspended inner's (through the logon's handle), or a previous runner's (`previous.rs`).
+///
+/// The pid the buffer must name is stable: this process holds `handle` (for the inner, the
+/// creation handle `CreateProcessWithLogonW` gave), so the process object, and its pid, can't be
+/// freed and reused while it is held; and a suspended inner can't have changed its token yet.
+pub(super) fn telemetry_user(
+    handle: HANDLE,
+    pid: u32,
+) -> Result<crate::windows::sids::Sid, String> {
+    let mut size = TELEMETRY_FIRST;
+    loop {
+        let mut buffer = vec![0u8; size];
+        let len = u32::try_from(size).unwrap_or(u32::MAX);
+        let mut needed = 0u32;
+        // SAFETY: the process handle is live; `buffer` is a live, writable `len`-byte buffer;
+        // `needed` is a live out-pointer.
+        let status = unsafe {
+            NtQueryInformationProcess(
+                handle,
+                PROCESSINFOCLASS(PROCESS_TELEMETRY_ID_INFORMATION),
+                buffer.as_mut_ptr().cast::<c_void>(),
+                len,
+                &raw mut needed,
+            )
+        };
+        let short = status == STATUS_INFO_LENGTH_MISMATCH
+            || status == STATUS_BUFFER_TOO_SMALL
+            || status == STATUS_BUFFER_OVERFLOW;
+        let wanted = usize::try_from(needed).unwrap_or(usize::MAX);
+        if short && wanted > size && wanted <= TELEMETRY_MAX {
+            size = wanted;
+            continue;
+        }
+        if status.is_err() {
+            return Err(format!(
+                "NtQueryInformationProcess(ProcessTelemetryIdInformation) failed (0x{:08X})",
+                status.0.cast_unsigned()
+            ));
+        }
+        // Only the bytes written are read; a length past the buffer leaves it whole, and the
+        // parse checks every offset against what is left.
+        buffer.truncate(wanted);
+        let (offset, sid) = telemetry_sid(&buffer, pid)?;
+        // `telemetry_sid` checked the SID's bytes lie inside `buffer` from `offset`.
+        let at = buffer
+            .get(offset..)
+            .ok_or_else(|| "ProcessTelemetryIdInformation: the user's offset".to_owned())?;
+        // SAFETY: `at` is a live slice holding a whole SID (its count's sub-authorities
+        // included), which IsValidSid only reads.
+        if !unsafe { IsValidSid(PSID(at.as_ptr().cast_mut().cast())) }.as_bool() {
+            return Err(
+                "ProcessTelemetryIdInformation: IsValidSid refused the user's SID".to_owned(),
+            );
+        }
+        return Ok(sid);
     }
 }
 
@@ -114,14 +206,17 @@ unsafe impl Send for Job {}
 unsafe impl Sync for Job {}
 
 /// The outer's call: starts `exe <args>` (`--inner <base>`) as the pool user `name` (on this
-/// computer) with its profile loaded, suspended, hidden, in `cwd`, with the pool user's own
-/// environment. The password buffer is wiped when this returns. A failure gives the Win32 code.
+/// computer) with its profile loaded, suspended, hidden, in `cwd`, on `desktop` (never `NULL`:
+/// the Secondary Logon service would grant the pool user's logon the lawyer's
+/// `WinSta0\Default`), with the pool user's own environment. The password buffer is wiped when
+/// this returns. A failure gives the Win32 code.
 pub(super) fn log_on(
     name: &str,
     password: Zeroizing<String>,
     exe: &str,
     args: &str,
     cwd: &str,
+    desktop: &StationDesktop,
 ) -> Result<Process, u32> {
     let user = HSTRING::from(name);
     let mut secret: Zeroizing<Vec<u16>> = Zeroizing::new(Vec::with_capacity(password.len() + 1));
@@ -132,12 +227,8 @@ pub(super) fn log_on(
         .encode_utf16()
         .chain([0])
         .collect();
-    let startup = STARTUPINFOW {
-        cb: u32::try_from(size_of::<STARTUPINFOW>()).unwrap_or(0),
-        dwFlags: STARTF_USESHOWWINDOW,
-        wShowWindow: SW_HIDE,
-        ..STARTUPINFOW::default()
-    };
+    let mut desktop = desktop.wide();
+    let startup = logon_startup(&mut desktop);
     let mut info = PROCESS_INFORMATION::default();
     // SAFETY: every string is NUL-terminated and outlives the call, the command line writable as
     // the call requires; no environment, so the pool user's own is made from its profile;
@@ -164,11 +255,25 @@ pub(super) fn log_on(
     }
 }
 
-/// The job's UI limits, as Chromium's sandbox sets them. `WinSta0`, not the desktop, owns the
-/// clipboard and the global atom table, so the private desktop alone doesn't keep the agent from
-/// the lawyer's clipboard or atoms. `DESKTOP`: no process in the job makes or switches desktops,
-/// so the agent can't make its own desktop the one the lawyer sees; the outer runner makes the
-/// agent's desktop before the inner runner joins the job.
+/// The `STARTUPINFOW` of [`log_on`]'s call: hidden, on `desktop` (a NUL-terminated
+/// [`StationDesktop::wide`], which must outlive the call).
+pub(super) fn logon_startup(desktop: &mut [u16]) -> STARTUPINFOW {
+    STARTUPINFOW {
+        cb: u32::try_from(size_of::<STARTUPINFOW>()).unwrap_or(0),
+        lpDesktop: PWSTR(desktop.as_mut_ptr()),
+        dwFlags: STARTF_USESHOWWINDOW,
+        wShowWindow: SW_HIDE,
+        ..STARTUPINFOW::default()
+    }
+}
+
+/// The job's UI limits, every one Windows has ([`super::UI_LIMIT_MASK`]), as Chromium's sandbox
+/// sets them, defence in depth behind the agent's own window station (`desktop.rs`). `WinSta0`,
+/// not the desktop, owns the clipboard and the global atom table, so a private desktop alone
+/// doesn't keep the agent from the lawyer's clipboard or atoms. `DESKTOP`: no process in the job
+/// makes or switches desktops, so the agent can't make its own desktop the one the lawyer sees,
+/// nor one on its station (whose DACL grants the pool user `WINSTA_CREATEDESKTOP`); the outer
+/// runner makes the agent's desktop before the inner runner joins the job.
 pub(super) const UI_LIMITS: JOB_OBJECT_UILIMIT = JOB_OBJECT_UILIMIT(
     JOB_OBJECT_UILIMIT_READCLIPBOARD.0
         | JOB_OBJECT_UILIMIT_WRITECLIPBOARD.0
@@ -179,6 +284,8 @@ pub(super) const UI_LIMITS: JOB_OBJECT_UILIMIT = JOB_OBJECT_UILIMIT(
         | JOB_OBJECT_UILIMIT_EXITWINDOWS.0
         | JOB_OBJECT_UILIMIT_DESKTOP.0,
 );
+// Every flag, as the tests that run on every OS read it (`UI_LIMIT_MASK`, 0xFF).
+const _: () = assert!(UI_LIMITS.0 == super::UI_LIMIT_MASK);
 
 /// A job whose last handle closing ends every process in it, with no breakaway allowed and
 /// [`UI_LIMITS`]: the inner runner, the agent and all it starts.
