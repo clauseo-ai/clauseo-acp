@@ -152,6 +152,13 @@ mod snapshot;
 mod state;
 mod status;
 mod sysproxy;
+#[cfg_attr(
+    not(any(windows, test)),
+    expect(
+        dead_code,
+        reason = "only Windows reads a DLL's signer and version; elsewhere nothing is placed"
+    )
+)]
 mod vcruntime;
 mod worker;
 mod write;

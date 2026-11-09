@@ -1,18 +1,22 @@
-use std::cell::RefCell;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
+use fixture::{Fake, Layout};
 use pe_file::pe_file;
 
+/// The fake Windows checks and install folder.
+mod fixture;
 /// The PE files the tests use, and the PE reader's own tests.
 mod pe_file;
+/// The refusals and races the security review asked for.
+mod refusals;
 /// Windows only: the real `WinVerifyTrust` and version calls.
 #[cfg(windows)]
 mod windows;
 
 use super::pe::{self, MACHINE_ARM64};
 use super::{
-    Inspect, Outcome, PLACED_DLLS, Refused, Signer, VENDOR, check, is_forbidden, missing_beside,
-    place_with, rel,
+    Outcome, PLACED_DLLS, Refused, Signer, VENDOR, VersionInfo, check, is_forbidden,
+    missing_beside, place_with, rel,
 };
 use crate::platform::{Arch, Os, Platform};
 use crate::write::TestDir;
@@ -34,99 +38,6 @@ const RG_IMPORTS: [&str; 7] = [
     "api-ms-win-crt-runtime-l1-1-0.dll",
     "api-ms-win-crt-heap-l1-1-0.dll",
 ];
-
-/// The fake Windows checks: one answer each, and every path they were asked about.
-struct Fake {
-    signer: Signer,
-    version: Option<[u16; 4]>,
-    asked: RefCell<Vec<PathBuf>>,
-}
-
-impl Fake {
-    fn new(signer: Signer, version: Option<[u16; 4]>) -> Fake {
-        Fake {
-            signer,
-            version,
-            asked: RefCell::new(Vec::new()),
-        }
-    }
-
-    /// Microsoft-signed, the shipped version.
-    fn good() -> Fake {
-        Fake::new(Signer::Microsoft, Some(SHIPPED))
-    }
-}
-
-impl Inspect for Fake {
-    fn signer(&self, path: &Path) -> Signer {
-        self.asked.borrow_mut().push(path.to_path_buf());
-        self.signer.clone()
-    }
-
-    fn file_version(&self, path: &Path) -> Option<[u16; 4]> {
-        self.asked.borrow_mut().push(path.to_path_buf());
-        self.version
-    }
-}
-
-/// An install folder holding Codex's ARM64 layout.
-struct Layout {
-    dir: TestDir,
-}
-
-impl Layout {
-    /// `rg.exe` with `rg_imports` in `rg_dir`, and the voice host's DLLs (name, machine).
-    fn new(rg_dir: &str, rg_imports: &[&str], sources: &[(&str, u16)]) -> Layout {
-        let dir = TestDir::new("vcruntime");
-        let vendor = VENDOR;
-        dir.file(
-            &format!("{vendor}/{rg_dir}/rg.exe"),
-            &pe_file(MACHINE_ARM64, RG_LINKER, rg_imports, &[]),
-        );
-        for (name, machine) in sources {
-            dir.file(
-                &format!("{vendor}/codex-resources/voice/bin/{name}"),
-                &pe_file(*machine, (14, 50), &["KERNEL32.dll"], &[]),
-            );
-        }
-        Layout { dir }
-    }
-
-    /// The usual layout: rg in `codex-path`, an ARM64 vcruntime140.dll in the voice host.
-    fn usual() -> Layout {
-        Layout::new(
-            "codex-path",
-            &RG_IMPORTS,
-            &[("vcruntime140.dll", MACHINE_ARM64)],
-        )
-    }
-
-    fn root(&self) -> &Path {
-        &self.dir.0
-    }
-
-    fn vendor(&self) -> PathBuf {
-        rel(self.root(), VENDOR)
-    }
-
-    fn rg_dir(&self, name: &str) -> PathBuf {
-        self.vendor().join(name)
-    }
-
-    fn source(&self, dll: &str) -> PathBuf {
-        self.vendor().join("codex-resources/voice/bin").join(dll)
-    }
-
-    /// The file names in `rg_dir`, sorted.
-    fn names(&self, rg_dir: &str) -> Vec<String> {
-        let mut names: Vec<String> = std::fs::read_dir(self.rg_dir(rg_dir))
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-            .collect();
-        names.sort();
-        names
-    }
-}
 
 fn outcomes(found: Vec<(PathBuf, Outcome)>) -> Vec<Outcome> {
     found.into_iter().map(|(_, outcome)| outcome).collect()
@@ -431,20 +342,34 @@ fn check_runs_in_order() {
     let arm64 = pe::parse(&pe_file(MACHINE_ARM64, (14, 50), &[], &[])).unwrap();
     let x64 = pe::parse(&pe_file(X64, (14, 50), &[], &[])).unwrap();
     let untrusted = Signer::NotTrusted("no".to_owned());
+    let dll = "vcruntime140.dll";
+    let shipped = VersionInfo {
+        version: SHIPPED,
+        original_filename: Some(dll.to_owned()),
+    };
+    let unnamed = VersionInfo {
+        version: [15, 0, 0, 0],
+        original_filename: None,
+    };
     assert_eq!(
-        check(&x64, &untrusted, None, RG_LINKER),
+        check(&x64, &untrusted, None, dll, RG_LINKER),
         Err(Refused::WrongArch(X64))
     );
     assert_eq!(
-        check(&arm64, &untrusted, Some(SHIPPED), RG_LINKER),
+        check(&arm64, &untrusted, Some(&shipped), dll, RG_LINKER),
         Err(Refused::NotTrusted("no".to_owned()))
     );
+    // The name before the version: a renamed DLL is refused whatever its version.
     assert_eq!(
-        check(&arm64, &Signer::Microsoft, Some(SHIPPED), (15, 0)),
+        check(&arm64, &Signer::Microsoft, Some(&unnamed), dll, RG_LINKER),
+        Err(Refused::WrongName(None))
+    );
+    assert_eq!(
+        check(&arm64, &Signer::Microsoft, Some(&shipped), dll, (15, 0)),
         Err(Refused::UnknownToolset((15, 0)))
     );
     assert_eq!(
-        check(&arm64, &Signer::Microsoft, Some(SHIPPED), RG_LINKER),
+        check(&arm64, &Signer::Microsoft, Some(&shipped), dll, RG_LINKER),
         Ok(SHIPPED)
     );
 }

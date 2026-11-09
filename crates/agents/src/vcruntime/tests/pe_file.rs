@@ -111,3 +111,53 @@ fn pe_reader_reads_imports_and_refuses_bad_files() {
     endless[0x200..end].fill(0xFF);
     assert!(pe::parse(&endless).is_err());
 }
+
+/// Where `pe_file` puts things: the COFF header's section count, the PE32+ image base, and the
+/// section's bytes (its first descriptor).
+const SECTIONS_AT: usize = 0x44 + 2;
+const IMAGE_BASE_AT: usize = 0x58 + 24;
+const SECTION_AT: usize = 0x200;
+
+#[test]
+fn a_non_ascii_import_name_is_refused() {
+    let mut bytes = pe_file(MACHINE_ARM64, RG_LINKER, &["VCRUNTIME140.dll"], &[]);
+    let at = bytes
+        .windows(16)
+        .position(|window| window == b"VCRUNTIME140.dll")
+        .unwrap();
+    bytes[at] = 0xC3;
+    assert_eq!(pe::parse(&bytes), Err(pe::NotPe("non-ASCII name")));
+}
+
+#[test]
+fn more_than_96_sections_is_refused() {
+    let mut bytes = pe_file(MACHINE_ARM64, RG_LINKER, &["VCRUNTIME140.dll"], &[]);
+    bytes[SECTIONS_AT..SECTIONS_AT + 2].copy_from_slice(&97_u16.to_le_bytes());
+    assert_eq!(pe::parse(&bytes), Err(pe::NotPe("too many sections")));
+    bytes[SECTIONS_AT..SECTIONS_AT + 2].copy_from_slice(&u16::MAX.to_le_bytes());
+    assert_eq!(pe::parse(&bytes), Err(pe::NotPe("too many sections")));
+}
+
+/// Visual C++ 6's delay-import descriptors (`Attributes` bit 0 clear) hold the name as a VA:
+/// the image base is subtracted; a VA below the image base is an error, never a wrap.
+#[test]
+fn the_old_delay_import_form_reads_its_name_as_a_va() {
+    let base: u32 = 0x0001_0000;
+    let mut bytes = pe_file(MACHINE_ARM64, RG_LINKER, &[], &["old.dll"]);
+    // No imports: the import table is its terminator alone (20 bytes), then the delay table.
+    let desc = SECTION_AT + 20;
+    let rva = u32::from_le_bytes(bytes[desc + 4..desc + 8].try_into().unwrap());
+    bytes[desc..desc + 4].copy_from_slice(&0_u32.to_le_bytes());
+    let mut below = bytes.clone();
+    // Below the image base (0x1_4000_0000 here): refused.
+    assert_eq!(
+        pe::parse(&below),
+        Err(pe::NotPe("import name outside the file"))
+    );
+    bytes[IMAGE_BASE_AT..IMAGE_BASE_AT + 8].copy_from_slice(&u64::from(base).to_le_bytes());
+    bytes[desc + 4..desc + 8].copy_from_slice(&(rva + base).to_le_bytes());
+    assert_eq!(pe::parse(&bytes).unwrap().delay_imports, ["old.dll"]);
+    // The same VA with the old image base set back: below it, refused.
+    below[desc + 4..desc + 8].copy_from_slice(&(rva + base).to_le_bytes());
+    assert!(pe::parse(&below).is_err());
+}

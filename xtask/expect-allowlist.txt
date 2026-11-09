@@ -479,6 +479,7 @@ crates/agents/src/signin/stopping/owner/windows.rs - unsafe_code
 crates/agents/src/sac/windows.rs - unsafe_code
 crates/agents/src/lib.rs sac dead_code
 crates/agents/src/vcruntime/windows.rs - unsafe_code
+crates/agents/src/lib.rs vcruntime dead_code
 crates/agents/src/sysproxy.rs system_proxy clippy::unused_async
 crates/agents/src/sysproxy.rs system_proxy clippy::unused_async
 crates/agents/src/testing/trace.rs trace clippy::disallowed_methods

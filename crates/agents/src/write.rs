@@ -439,7 +439,8 @@ pub(crate) fn symlink(target: &Path, link: &Path) -> io::Result<()> {
 
 /// Makes a hard link at `link` to `original`: one file under two names, `std::fs::hard_link`,
 /// which opens neither (`link(2)` on Unix, `CreateHardLinkW` on Windows). An existing `link`
-/// is an error, never replaced. Codex's reused login (`signin/reuse.rs`), and tests.
+/// is an error, never replaced. Codex's reused login (`signin/reuse.rs`), the VC++ runtime DLL
+/// moved into place beside Codex's `rg.exe` with no replace (`vcruntime`), and tests.
 pub(crate) fn hard_link(original: &Path, link: &Path) -> io::Result<()> {
     std::fs::hard_link(original, link)
 }
