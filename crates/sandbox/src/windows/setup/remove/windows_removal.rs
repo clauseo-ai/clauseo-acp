@@ -41,7 +41,7 @@ use super::super::machine::{MachineError, ProfileDir};
 use super::super::outcome::cause_of;
 use super::super::owner::Owner;
 use super::super::record_values::CopyOwner;
-use super::super::stranded::PoolAccounts;
+use super::super::stranded::{PartialRecord, PoolAccounts};
 use super::super::windows_machine::{Acting, Names};
 use super::super::{
     admin_member, args, ffi, preflight, processes, profile, record_write, stranded_os,
@@ -215,6 +215,23 @@ impl Removal for WindowsRemoval {
         stranded_os::pool_accounts(&self.names)
     }
 
+    fn disable(&mut self, name: &str) -> Result<(), MachineError> {
+        stranded_os::disable_account(&self.names.real(name))
+    }
+
+    fn read_partial(&mut self) -> PartialRecord {
+        stranded_os::read_partial(&self.names.record_key)
+    }
+
+    fn revoke_rights(&mut self, sid: &Sid) -> Result<(), MachineError> {
+        preflight::remove_all_rights(sid)
+    }
+
+    fn sweep_tasks(&mut self, pool: &[Sid]) -> Result<(), MachineError> {
+        crate::windows::setup::sweep::windows_sweeper::delete_pool_tasks(pool);
+        Ok(())
+    }
+
     fn write_record(&mut self, record: &MachineRecord) -> Result<(), MachineError> {
         record_write::write(&self.names.record_key, record)
     }
@@ -261,8 +278,8 @@ impl Removal for WindowsRemoval {
         Ok(stopped.failed.len() + stopped.timed_out.len())
     }
 
-    fn remove_network(&mut self, owner: &Sid) -> Result<Option<String>, MachineError> {
-        let removed = wfp::remove(&self.names.wfp, Some(owner))
+    fn remove_network(&mut self, owner: Option<&Sid>) -> Result<Option<String>, MachineError> {
+        let removed = wfp::remove(&self.names.wfp, owner)
             .map_err(|error| MachineError::Other(error.cause()))?;
         if removed.foreign_removed > 0 {
             tracing::warn!(

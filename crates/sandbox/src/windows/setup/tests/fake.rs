@@ -28,7 +28,7 @@ use crate::windows::wfp::{NetworkReport, NetworkSetup};
 
 pub(super) use super::fake_acl::FakeAcl;
 pub(super) use super::fake_more::folder_name;
-pub(super) use super::fake_more::{Account, State};
+pub(super) use super::fake_more::{Account, State, Stranded};
 use super::fake_more::{Around, ProfileFaults};
 
 /// The owner's SID, and its account's name.
@@ -114,10 +114,8 @@ pub(super) struct FakeMachine {
     pub(super) next_rid: u32,
     pub(super) passwords: u32,
     pub(super) around: Around,
-    /// Accounts made without set-up's flags: never marked, hidden or not (`stranded.rs`).
-    pub(super) unflagged: BTreeSet<String>,
-    /// What `read_record` finds wrong with the record, until one is written or deleted.
-    pub(super) corrupt: Option<&'static str>,
+    /// The marks, rights and tasks `stranded.rs` reads and clears (`fake_more.rs`).
+    pub(super) stranded: Stranded,
 }
 
 impl Machine for FakeMachine {
@@ -135,7 +133,7 @@ impl Machine for FakeMachine {
 
     fn read_record(&mut self) -> Result<Option<MachineRecord>, MachineError> {
         self.call("read_record")?;
-        if let Some(why) = self.corrupt {
+        if let Some(why) = self.stranded.corrupt {
             return Err(MachineError::RecordCorrupt(why.to_owned()));
         }
         Ok(self.state.record.clone())
@@ -145,10 +143,31 @@ impl Machine for FakeMachine {
         Ok(self.survey())
     }
 
+    fn mark(&mut self, name: &str) -> Result<(), MachineError> {
+        self.fake_mark(name)
+    }
+
+    fn write_marker_version(&mut self) -> Result<(), MachineError> {
+        self.fake_marker_version();
+        Ok(())
+    }
+
+    fn disable(&mut self, name: &str) -> Result<(), MachineError> {
+        self.fake_disable(name)
+    }
+
+    fn revoke_rights(&mut self, sid: &Sid) -> Result<(), MachineError> {
+        self.fake_revoke(sid)
+    }
+
+    fn sweep_tasks(&mut self, pool: &[Sid]) -> Result<(), MachineError> {
+        self.fake_sweep_tasks(pool)
+    }
+
     fn write_record(&mut self, record: &MachineRecord) -> Result<(), MachineError> {
         self.call(format!("write_record {}", rids(&record.pool)))?;
         self.state.record = Some(record.clone());
-        self.corrupt = None;
+        self.stranded.corrupt = None;
         self.written.push(record.clone());
         Ok(())
     }
@@ -156,7 +175,7 @@ impl Machine for FakeMachine {
     fn delete_record(&mut self) -> Result<(), MachineError> {
         self.call("delete_record")?;
         self.state.record = None;
-        self.corrupt = None;
+        self.stranded.corrupt = None;
         Ok(())
     }
 
@@ -259,6 +278,7 @@ impl Machine for FakeMachine {
             hidden: false,
         };
         self.state.accounts.insert(name.to_owned(), account);
+        self.stranded.commented.insert(name.to_owned());
         Ok(sid)
     }
 
@@ -290,6 +310,7 @@ impl Machine for FakeMachine {
         self.call(format!("delete_user {name}"))?;
         self.account(name)?;
         self.state.accounts.remove(name);
+        self.stranded.commented.remove(name);
         Ok(())
     }
 

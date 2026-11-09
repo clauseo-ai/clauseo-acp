@@ -215,6 +215,27 @@ impl Machine for WindowsMachine {
         stranded_os::pool_accounts(&self.names)
     }
 
+    fn mark(&mut self, name: &str) -> Result<(), MachineError> {
+        stranded_os::set_comment(&self.names.real(name))
+    }
+
+    fn write_marker_version(&mut self) -> Result<(), MachineError> {
+        stranded_os::write_marker_version(&self.names.record_key)
+    }
+
+    fn disable(&mut self, name: &str) -> Result<(), MachineError> {
+        stranded_os::disable_account(&self.names.real(name))
+    }
+
+    fn revoke_rights(&mut self, sid: &Sid) -> Result<(), MachineError> {
+        preflight::remove_all_rights(sid)
+    }
+
+    fn sweep_tasks(&mut self, pool: &[Sid]) -> Result<(), MachineError> {
+        crate::windows::setup::sweep::windows_sweeper::delete_pool_tasks(pool);
+        Ok(())
+    }
+
     fn write_record(&mut self, record: &MachineRecord) -> Result<(), MachineError> {
         record_write::write(&self.names.record_key, record)
     }

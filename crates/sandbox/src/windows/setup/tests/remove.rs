@@ -48,8 +48,10 @@ pub(super) fn full_removal() -> Vec<String> {
             format!("walk {local_low}"),
             format!("delete_profile 100{n}"),
             format!("delete_user ClauseoSb0{n}"),
+            format!("revoke_rights 100{n}"),
         ]);
     }
+    lines.push(format!("sweep_tasks {}", strays.join(",")));
     // Only once every pool account is gone and a second sweep ran (a stray must stay filtered).
     lines.push(format!("stop_strays {}", strays.join(",")));
     lines.push("remove_network".to_owned());
@@ -254,7 +256,7 @@ fn the_steps_are_named_by_what_failed() {
         "write_record" => RemoveStep::Flag,
         "stop_strays" => RemoveStep::Strays,
         "remove_network" => RemoveStep::Network,
-        "account_name" | "delete_user" => RemoveStep::Account,
+        "account_name" | "delete_user" | "revoke_rights" | "sweep_tasks" => RemoveStep::Account,
         "profile_of" | "delete_profile" => RemoveStep::Profile,
         "program_data" => RemoveStep::DeviceSync,
         "remove" | "walk" if line.contains("DeviceSync") => RemoveStep::DeviceSync,

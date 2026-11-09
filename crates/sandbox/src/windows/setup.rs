@@ -146,6 +146,7 @@ pub mod stop;
 pub mod stranded;
 #[cfg(windows)]
 mod stranded_os;
+mod stranded_setup;
 pub mod strays;
 #[cfg(any(windows, test))]
 pub mod sweep;

@@ -147,10 +147,13 @@ pub const SWEEP_SEQUENCE: &str = "SweepSequence";
 /// (without the lock, `pool_steps::sequence` says why) as the marker's `M`; the marker is
 /// clean once [`SWEEP_SEQUENCE`] `>= M`.
 pub const SWEEP_NEXT: &str = "SweepNext";
+/// `MarkerVersion` (`REG_QWORD`): `stranded::MARKER_VERSION` once every pool user carries the
+/// comment, so an account with the older mark alone is never proven (`stranded.rs`).
+pub const MARKER_VERSION: &str = "MarkerVersion";
 /// The values the set-up owns, which a rollback or `--remove` deletes; the ones `--adopt`
 /// writes stay until `--remove` takes the admin copy away. Each `…Sequence` comes before its
 /// `…Next`, so a marker read during a removal can only wait longer (`pool_steps::sequence`).
-pub const SETUP_VALUES: [&str; 14] = [
+pub const SETUP_VALUES: [&str; 15] = [
     OWNER_SID,
     GROUP_SID,
     POOL_SIDS,
@@ -165,6 +168,7 @@ pub const SETUP_VALUES: [&str; 14] = [
     SWEEP_COMPLETED,
     SWEEP_SEQUENCE,
     SWEEP_NEXT,
+    MARKER_VERSION,
 ];
 
 /// `listed` (`ResetSids` as read) with each of `add` it lacks appended, in order.

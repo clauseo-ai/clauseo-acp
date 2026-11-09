@@ -138,7 +138,7 @@ fn remove_takes_a_blanked_records_users_and_exits_0() {
 #[test]
 fn a_corrupt_record_has_set_up_remove_its_users_and_make_a_new_pool() {
     let (mut machine, mut acl) = blanked("stranded-corrupt-setup");
-    machine.corrupt = Some("the record has no OwnerSid");
+    machine.stranded.corrupt = Some("the record has no OwnerSid");
     let from = machine.calls.len();
     let report = set_up_fresh(&mut machine, &mut acl);
     let calls = machine.calls_since(from);
@@ -157,7 +157,7 @@ fn a_corrupt_record_has_set_up_remove_its_users_and_make_a_new_pool() {
 #[test]
 fn a_corrupt_record_has_remove_take_its_users_and_exit_0() {
     let (mut machine, mut acl) = pool("stranded-corrupt-remove", Some(owner()));
-    machine.m.corrupt = Some("the record's GroupSid is malformed");
+    machine.m.stranded.corrupt = Some("the record's GroupSid is malformed");
     let removed = remove(&mut machine, &mut acl, false).unwrap();
     let Removed::All(report) = removed else {
         panic!("{removed:?}");
@@ -169,14 +169,14 @@ fn a_corrupt_record_has_remove_take_its_users_and_exit_0() {
     assert_eq!(pool_names(&machine.m), Vec::<String>::new());
     assert_eq!(machine.m.state.group, None);
     assert!(machine.lines().contains(&"delete_record".to_owned()));
-    assert_eq!(machine.m.corrupt, None);
+    assert_eq!(machine.m.stranded.corrupt, None);
 }
 
 #[test]
 fn a_member_without_the_mark_is_never_adopted_or_removed_but_named() {
     let (mut machine, mut acl) = blanked("stranded-unmarked");
     account(&mut machine, "ClauseoSb09", 555, Some(sid(1000)), true);
-    machine.unflagged.insert("ClauseoSb09".to_owned());
+    machine.stranded.unflagged.insert("ClauseoSb09".to_owned());
     let report = set_up_fresh(&mut machine, &mut acl);
     let record = machine.state.record.clone().unwrap();
     assert!(!record.pool.contains(&sid(555)));

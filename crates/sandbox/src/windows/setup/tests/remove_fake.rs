@@ -20,7 +20,7 @@ use crate::windows::set_aside::forget_bookkeeping;
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::setup::remove::Removal;
 use crate::windows::setup::remove::{FolderOwner, owners};
-use crate::windows::setup::stranded::PoolAccounts;
+use crate::windows::setup::stranded::{PartialRecord, PoolAccounts};
 use crate::windows::setup::{Machine, MachineError, ProfileDir};
 use crate::windows::shared_writes::OWNER_RIGHTS_SID;
 use crate::windows::sids::Reserved;
@@ -243,10 +243,9 @@ impl Removal for Remover {
         Ok(self.strays_left)
     }
 
-    fn remove_network(&mut self, owner: &Sid) -> Result<Option<String>, MachineError> {
-        assert_eq!(
-            owner.as_str(),
-            OWNER,
+    fn remove_network(&mut self, owner: Option<&Sid>) -> Result<Option<String>, MachineError> {
+        assert!(
+            owner.is_none_or(|owner| owner.as_str() == OWNER),
             "the grant taken back is the record's owner's"
         );
         self.call("remove_network".to_owned())?;
@@ -276,6 +275,25 @@ impl Removal for Remover {
     fn delete_user(&mut self, name: &str) -> Result<(), MachineError> {
         self.call(format!("delete_user {name}"))?;
         Machine::delete_user(&mut self.m, name)
+    }
+
+    fn disable(&mut self, name: &str) -> Result<(), MachineError> {
+        self.call(format!("disable {name}"))?;
+        self.m.fake_disable(name)
+    }
+
+    fn read_partial(&mut self) -> PartialRecord {
+        self.m.stranded.partial.clone()
+    }
+
+    fn revoke_rights(&mut self, sid: &Sid) -> Result<(), MachineError> {
+        self.call(format!("revoke_rights {}", rid(sid)))?;
+        self.m.fake_revoke(sid)
+    }
+
+    fn sweep_tasks(&mut self, pool: &[Sid]) -> Result<(), MachineError> {
+        self.call(format!("sweep_tasks {}", rids(pool)))?;
+        self.m.fake_sweep_tasks(pool)
     }
 
     fn program_data(&mut self) -> Result<PathBuf, MachineError> {

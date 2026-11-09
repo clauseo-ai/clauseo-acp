@@ -1,41 +1,53 @@
 //! Pool accounts the machine's record doesn't list (0049, "Stranded pool accounts"): a record
 //! whose `PoolSids` was blanked, cut short or corrupted, or a record lost whole while its group
-//! and accounts stayed. Set-up and `--remove` find them here, so none is left behind enabled
-//! and holding the logon right through `ClauseoSandboxUsers`.
+//! and accounts stayed. Set-up (`stranded_setup.rs`) and `--remove` (`remove/stranded.rs`)
+//! find them here, so none is left behind enabled and holding the logon right through
+//! `ClauseoSandboxUsers`.
 //!
-//! An account is proven Clauseo's only when both hold:
+//! The group counts only as this computer's own: a local group (an alias, `LookupAccountNameW`
+//! on `<computer>\ClauseoSandboxUsers`) whose SID lies in this machine's account domain
+//! (`S-1-5-21-<machine>-<rid>`, [`PoolAccounts::machine`]). A domain group of that name never
+//! does: then no account is proven. An account the record doesn't list is proven Clauseo's only
+//! when it is a member of that group (the one the record's `GroupSid` names, when the record
+//! is trusted) and named as a pool user, and either:
 //!
-//! - it is a member of `ClauseoSandboxUsers`: the group whose SID the record's `GroupSid` names,
-//!   or, with no record to trust, the group by that name, which only an administrator can make;
-//! - it carries set-up's mark (`stranded_os::marked`): the account `NetUserAdd` made for a
-//!   pool user, a standard user (`USER_PRIV_USER`) with `UF_DONT_EXPIRE_PASSWD |
-//!   UF_PASSWD_CANT_CHANGE` (`accounts::create_user`), and hidden from the sign-in screen by
-//!   its `SpecialAccounts\UserList` value 0 (`accounts::hide`).
+//! - it carries [`POOL_COMMENT`], the comment set-up gives every pool account it makes or keeps
+//!   (`accounts::create_user`, `Machine::mark`); or
+//! - it carries the older mark only (`stranded_os::marked`: a standard user with
+//!   `UF_DONT_EXPIRE_PASSWD | UF_PASSWD_CANT_CHANGE`, hidden from the sign-in screen by its
+//!   `SpecialAccounts\UserList` value 0), no member of the group carries the comment, and the
+//!   record's `MarkerVersion` is absent or older than [`MARKER_VERSION`]. So a pool set up
+//!   since the comment never accepts an account with the older mark alone.
 //!
-//! It must also have a pool user's name, as every account set-up makes does, but a name alone
-//! never proves anything (D-B5: anyone who can make an account can make a `ClauseoSb01`). A
-//! malformed `PoolSids` is never trusted for a SID: it reads as an empty pool.
+//! A name alone never proves anything (D-B5: anyone who can make an account can make a
+//! `ClauseoSb01`). A malformed `PoolSids` is never trusted for a SID: it reads as an empty pool.
 //!
 //! What each side does with them:
 //!
 //! - the record's `OwnerSid`, `GroupSid` and `DataDir` read: set-up adopts each proven account
 //!   back into the record, keeping its SID (so the ledger's and the ACLs' references stay
 //!   good), resetting its password as for its own accounts, then makes only what is missing;
-//!   `--remove` removes each the way it removes a recorded one (`remove/stranded.rs`);
+//!   `--remove` removes each the way it removes a recorded one;
 //! - no record, or one whose `OwnerSid`, `GroupSid` or `DataDir` can't be read: nothing is
 //!   adopted (D5: no account, and none of the grants its SID holds on the last owner's matters,
-//!   goes to whoever runs set-up next). Both take each proven account out with its profile,
-//!   then the group with its Remote Desktop deny once it is empty; set-up then makes a new pool.
+//!   goes to whoever runs set-up next). Both take each proven account out as a recorded one goes
+//!   (its profile, with its `ProfileList` entry; the account with its sign-in screen value; any
+//!   user right its SID still holds; its scheduled tasks), then the group with its Remote
+//!   Desktop deny once it is empty; set-up then makes a new pool.
 //!
 //! Every other account the survey sees, one condition short, is named in the log (warn, which
 //! reaches the Event Log) and left as it is, with the group while it has members.
 
 use std::fmt;
 
-use super::machine::{Machine, MachineError};
-use super::outcome::{SetupFailure, Step, cause_of};
-use crate::windows::pool::{MachineRecord, POOL_GROUP, PoolUser, pool_number};
+use crate::windows::pool::{POOL_GROUP, PoolUser, pool_number};
 use crate::windows::sids::Sid;
+
+/// The comment set-up gives every pool account (`usri1_comment`), the mark that proves it.
+pub const POOL_COMMENT: &str = "Clauseo sandbox account; managed by Clauseo set-up";
+
+/// The record's `MarkerVersion` once set-up marks its accounts with [`POOL_COMMENT`].
+pub const MARKER_VERSION: u32 = 2;
 
 /// One local account the survey looked at: in the group, or with a pool user's name.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,7 +58,9 @@ pub struct Seen {
     pub sid: Sid,
     /// Whether it is a member of the group found ([`PoolAccounts::group`]).
     pub in_group: bool,
-    /// Whether it carries set-up's mark.
+    /// Whether its comment is exactly [`POOL_COMMENT`].
+    pub commented: bool,
+    /// Whether it carries the older mark: the flags and the sign-in screen value.
     pub marked: bool,
 }
 
@@ -55,11 +69,28 @@ pub struct Seen {
 pub struct PoolAccounts {
     /// The SID of the local group `ClauseoSandboxUsers`, found by name, if it exists.
     pub group: Option<Sid>,
+    /// This machine's account domain (`preflight::machine_domain`): the group counts only
+    /// when its SID lies in it.
+    pub machine: [u32; 3],
     /// Each local account in that group or with a pool user's name.
     pub seen: Vec<Seen>,
     /// Members of the group that aren't this computer's user accounts (a domain account, a
-    /// group): never proven, never removed.
-    pub foreign: usize,
+    /// group), each by `DOMAIN\name`, or `an account Windows can't name`: never proven,
+    /// never removed.
+    pub foreign: Vec<String>,
+    /// The record's `MarkerVersion`, when it can be read.
+    pub marker_version: Option<u32>,
+}
+
+/// What a corrupt record still says (`Removal::read_partial`): each value that reads alone.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PartialRecord {
+    /// `OwnerSid`.
+    pub owner: Option<Sid>,
+    /// `GroupSid`.
+    pub group: Option<Sid>,
+    /// `DataDir`.
+    pub data_dir: Option<std::path::PathBuf>,
 }
 
 /// Why an account isn't proven Clauseo's.
@@ -71,6 +102,8 @@ pub enum Why {
     OutsideGroup,
     /// In the group and marked, but not named as a pool user.
     NotPoolName,
+    /// In the group with the older mark only, while the pool is marked with the comment.
+    OlderMark,
 }
 
 /// An account one condition short: named, never touched.
@@ -90,39 +123,72 @@ impl fmt::Display for Doubt {
                 "looks like a Clauseo sandbox user but isn't in ClauseoSandboxUsers"
             }
             Why::NotPoolName => "is in ClauseoSandboxUsers but isn't named as a sandbox user",
+            Why::OlderMark => {
+                "is in ClauseoSandboxUsers without the comment Clauseo's set-up now gives"
+            }
         };
         write!(f, "{} {why}", self.name)
     }
 }
 
-/// The survey sorted: the proven accounts, in pool-number order, and the doubtful ones.
+/// The survey sorted: the group when it is this computer's, the proven accounts, in
+/// pool-number order, and the doubtful ones.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Sorted {
-    /// In the group, marked and named as pool users: Clauseo's.
+    /// The local group, when its SID lies in this machine's account domain.
+    pub group: Option<Sid>,
+    /// Proven Clauseo's, as the module says.
     pub proven: Vec<PoolUser>,
     /// One condition short: named in the log and left.
     pub doubtful: Vec<Doubt>,
 }
 
-/// `seen` sorted as the module says, leaving out every account whose SID `skip` lists (the
+/// `accounts` sorted as the module says, leaving out every account whose SID `skip` lists (the
 /// record's own users, and the owner or the user who asked). An account neither in the group
-/// nor marked (a `ClauseoSb01` a user made, say) is neither: it isn't named.
-pub fn sort(seen: &[Seen], skip: &[Sid]) -> Sorted {
-    let mut sorted = Sorted::default();
-    for account in seen.iter().filter(|account| !skip.contains(&account.sid)) {
+/// nor marked (a `ClauseoSb01` a user made, say) is neither: it isn't named. A group outside
+/// this machine's account domain counts as none, and no account is in it.
+pub fn sort(accounts: &PoolAccounts, skip: &[Sid]) -> Sorted {
+    let group = accounts.group.clone().filter(|group| {
+        let local = group.domain() == Some(accounts.machine);
+        if !local {
+            tracing::warn!("{POOL_GROUP} isn't this computer's own group; it is left alone");
+        }
+        local
+    });
+    let local = group.is_some();
+    let commented_pool = accounts
+        .seen
+        .iter()
+        .any(|s| local && s.in_group && s.commented);
+    let older_allowed = !commented_pool
+        && accounts
+            .marker_version
+            .is_none_or(|version| version < MARKER_VERSION);
+    let mut sorted = Sorted {
+        group,
+        ..Sorted::default()
+    };
+    for account in accounts
+        .seen
+        .iter()
+        .filter(|account| !skip.contains(&account.sid))
+    {
+        let in_group = local && account.in_group;
         let pool_name = pool_number(&account.name).is_some();
-        let why = match (account.in_group, account.marked, pool_name) {
-            (true, true, true) => {
+        let any_mark = account.commented || account.marked;
+        let why = match (in_group, pool_name) {
+            (true, true) if account.commented || (account.marked && older_allowed) => {
                 sorted.proven.push(PoolUser {
                     name: account.name.clone(),
                     sid: account.sid.clone(),
                 });
                 continue;
             }
-            (true, false, _) => Why::Unmarked,
-            (true, true, false) => Why::NotPoolName,
-            (false, true, true) => Why::OutsideGroup,
-            (false, _, _) => continue,
+            (true, true) if account.marked => Why::OlderMark,
+            (true, _) if !any_mark => Why::Unmarked,
+            (true, _) => Why::NotPoolName,
+            (false, true) if any_mark => Why::OutsideGroup,
+            (false, _) => continue,
         };
         sorted.doubtful.push(Doubt {
             name: account.name.clone(),
@@ -133,138 +199,84 @@ pub fn sort(seen: &[Seen], skip: &[Sid]) -> Sorted {
     sorted
 }
 
-/// Names each doubtful account, and counts the group's foreign members, in the log.
-pub fn log_doubtful(doubtful: &[Doubt], foreign: usize) {
+/// Names each doubtful account, and each of the group's foreign members, in the log.
+pub fn log_doubtful(doubtful: &[Doubt], foreign: &[String]) {
     for doubt in doubtful {
         tracing::warn!(account = %doubt.name, "{doubt}; it was left as it is");
     }
-    if foreign > 0 {
+    for member in foreign {
         tracing::warn!(
-            foreign,
-            "{POOL_GROUP} has members that aren't this computer's accounts; they were left"
+            %member,
+            "a member of {POOL_GROUP} isn't this computer's account; it was left"
         );
     }
 }
 
-/// The record set-up starts from: the record when it can be trusted; otherwise, with
-/// everything a lost or corrupt record stranded taken out first, none. A group left with
-/// members set-up can't prove are Clauseo's refuses the run, naming them.
-pub(super) fn record_or_sweep(
-    machine: &mut impl Machine,
-) -> Result<Option<MachineRecord>, SetupFailure> {
-    match machine.read_record() {
-        Ok(Some(record)) => return Ok(Some(record)),
-        Ok(None) => {}
-        Err(MachineError::RecordCorrupt(why)) => tracing::warn!(
-            %why,
-            "the machine's record can't be trusted; set-up removes the sandbox users it can \
-             prove are Clauseo's and makes a new pool"
-        ),
-        Err(error) => return Err(SetupFailure::early(Step::ReadRecord, cause_of(&error))),
-    }
-    let accounts = machine
-        .pool_accounts()
-        .map_err(|error| SetupFailure::early(Step::Pool, cause_of(&error)))?;
-    let skip = [machine.owner().clone()];
-    let sorted = sort(&accounts.seen, &skip);
-    log_doubtful(&sorted.doubtful, accounts.foreign);
-    let Some(group) = accounts.group else {
-        return Ok(None);
-    };
-    let failed = |step: Step, error: &MachineError| SetupFailure::early(step, cause_of(error));
-    for user in &sorted.proven {
-        tracing::warn!(account = %user.name, "a sandbox user no record lists is removed");
-        let profile = machine
-            .profile_of(&user.sid)
-            .map_err(|error| failed(Step::Profile, &error))?;
-        if profile.is_some() {
-            machine
-                .delete_profile(&user.sid)
-                .map_err(|error| failed(Step::Profile, &error))?;
-        }
-        machine
-            .delete_user(&user.name)
-            .map_err(|error| failed(Step::CreateUser, &error))?;
-    }
-    let left = machine
-        .group_members(&group)
-        .map_err(|error| failed(Step::Group, &error))?;
-    if left > 0 {
-        let names: Vec<&str> = sorted.doubtful.iter().map(|d| d.name.as_str()).collect();
-        return Err(SetupFailure::early(
-            Step::Group,
-            format!(
-                "the group {POOL_GROUP}, which no record names, still has {left} member(s) \
-                 set-up can't prove are Clauseo's ({}); take them out of the group, then run \
-                 set-up again",
-                names.join(", ")
-            ),
-        ));
-    }
-    machine
-        .remove_remote_logon_deny(&group)
-        .map_err(|error| failed(Step::RemoteLogon, &error))?;
-    machine
-        .delete_group(&group)
-        .map_err(|error| failed(Step::Group, &error))?;
-    Ok(None)
-}
-
-/// The proven accounts `record` doesn't list, for set-up to adopt: none when the group by name
-/// isn't the record's (the group step then refuses).
-pub(super) fn adoptable(
-    machine: &mut impl Machine,
-    record: &MachineRecord,
-) -> Result<Vec<PoolUser>, SetupFailure> {
-    let accounts = machine
-        .pool_accounts()
-        .map_err(|error| SetupFailure::early(Step::Pool, cause_of(&error)))?;
-    let mut skip = record.pool.clone();
-    skip.push(record.owner.clone());
-    let mut sorted = sort(&accounts.seen, &skip);
-    if accounts.group.as_ref() != Some(&record.group) {
-        sorted.proven.clear();
-    }
-    log_doubtful(&sorted.doubtful, accounts.foreign);
-    for user in &sorted.proven {
-        tracing::warn!(account = %user.name, "a sandbox user the record lost is adopted back");
-    }
-    Ok(sorted.proven)
+/// The group's members that can't be proven Clauseo's, by name: the doubtful accounts in it,
+/// then its foreign members. What an administrator takes out before the group can go.
+pub fn unprovable_members(sorted: &Sorted, foreign: &[String]) -> Vec<String> {
+    let in_group = sorted
+        .doubtful
+        .iter()
+        .filter(|doubt| doubt.why != Why::OutsideGroup);
+    in_group
+        .map(|doubt| doubt.name.clone())
+        .chain(foreign.iter().cloned())
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn seen(name: &str, rid: u32, in_group: bool, marked: bool) -> Seen {
+    const MACHINE: [u32; 3] = [5, 5, 5];
+
+    fn seen(name: &str, rid: u32, in_group: bool, commented: bool, marked: bool) -> Seen {
         Seen {
             name: name.to_owned(),
             sid: Sid::parse(&format!("S-1-5-21-5-5-5-{rid}")).unwrap(),
             in_group,
+            commented,
             marked,
         }
     }
 
-    #[test]
-    fn only_a_marked_member_with_a_pool_name_is_proven() {
-        let all = [
-            seen("ClauseoSb03", 1003, true, true),
-            seen("ClauseoSb01", 1001, true, true),
-            seen("ClauseoSb02", 1002, true, false),
-            seen("ClauseoSb04", 1004, false, true),
-            seen("ClauseoSb05", 1005, false, false),
-            seen("Helper", 1006, true, true),
-        ];
-        let sorted = sort(&all, &[]);
-        let proven: Vec<&str> = sorted.proven.iter().map(|u| u.name.as_str()).collect();
-        assert_eq!(proven, ["ClauseoSb01", "ClauseoSb03"]);
-        let doubtful: Vec<(&str, Why)> = sorted
+    fn accounts(seen: Vec<Seen>, version: Option<u32>) -> PoolAccounts {
+        PoolAccounts {
+            group: Some(Sid::parse("S-1-5-21-5-5-5-1000").unwrap()),
+            machine: MACHINE,
+            seen,
+            foreign: Vec::new(),
+            marker_version: version,
+        }
+    }
+
+    fn proven(sorted: &Sorted) -> Vec<&str> {
+        sorted.proven.iter().map(|u| u.name.as_str()).collect()
+    }
+
+    fn doubtful(sorted: &Sorted) -> Vec<(&str, Why)> {
+        sorted
             .doubtful
             .iter()
             .map(|d| (d.name.as_str(), d.why))
-            .collect();
+            .collect()
+    }
+
+    #[test]
+    fn a_commented_member_with_a_pool_name_is_proven_whatever_its_flags() {
+        let all = vec![
+            seen("ClauseoSb03", 1003, true, true, false),
+            seen("ClauseoSb01", 1001, true, true, true),
+            seen("ClauseoSb02", 1002, true, false, false),
+            seen("ClauseoSb04", 1004, false, true, true),
+            seen("ClauseoSb05", 1005, false, false, false),
+            seen("Helper", 1006, true, true, true),
+        ];
+        let sorted = sort(&accounts(all, Some(MARKER_VERSION)), &[]);
+        assert_eq!(proven(&sorted), ["ClauseoSb01", "ClauseoSb03"]);
         assert_eq!(
-            doubtful,
+            doubtful(&sorted),
             [
                 ("ClauseoSb02", Why::Unmarked),
                 ("ClauseoSb04", Why::OutsideGroup),
@@ -274,10 +286,50 @@ mod tests {
     }
 
     #[test]
+    fn the_older_mark_alone_is_proven_only_before_the_comment() {
+        let older = || vec![seen("ClauseoSb01", 1001, true, false, true)];
+        for version in [None, Some(1)] {
+            let sorted = sort(&accounts(older(), version), &[]);
+            assert_eq!(proven(&sorted), ["ClauseoSb01"], "{version:?}");
+        }
+        // The record says the pool is marked with the comment.
+        let sorted = sort(&accounts(older(), Some(MARKER_VERSION)), &[]);
+        assert_eq!(doubtful(&sorted), [("ClauseoSb01", Why::OlderMark)]);
+        assert_eq!(proven(&sorted), Vec::<&str>::new());
+        // Another member carries the comment, a recorded one (skipped) included.
+        let mut mixed = older();
+        mixed.push(seen("ClauseoSb02", 1002, true, true, true));
+        let skip = [mixed[1].sid.clone()];
+        let sorted = sort(&accounts(mixed, None), &skip);
+        assert_eq!(doubtful(&sorted), [("ClauseoSb01", Why::OlderMark)]);
+        assert_eq!(proven(&sorted), Vec::<&str>::new());
+        // Neither mark at all is never proven.
+        let bare = vec![seen("ClauseoSb01", 1001, true, false, false)];
+        assert_eq!(
+            doubtful(&sort(&accounts(bare, None), &[])),
+            [("ClauseoSb01", Why::Unmarked)]
+        );
+    }
+
+    #[test]
+    fn a_domain_group_of_that_name_proves_nothing() {
+        let mut found = accounts(vec![seen("ClauseoSb01", 1001, true, true, true)], None);
+        found.group = Some(Sid::parse("S-1-5-21-9-9-9-1000").unwrap());
+        let sorted = sort(&found, &[]);
+        assert_eq!(sorted.group, None);
+        assert_eq!(proven(&sorted), Vec::<&str>::new());
+        assert_eq!(doubtful(&sorted), [("ClauseoSb01", Why::OutsideGroup)]);
+        // A well-known group (`BUILTIN\...`) isn't in the account domain either.
+        found.group = Some(Sid::parse("S-1-5-32-545").unwrap());
+        assert_eq!(sort(&found, &[]).group, None);
+    }
+
+    #[test]
     fn a_skipped_sid_is_neither_proven_nor_named() {
-        let all = [seen("ClauseoSb01", 1001, true, true)];
+        let all = vec![seen("ClauseoSb01", 1001, true, true, true)];
         let skip = [all[0].sid.clone()];
-        assert_eq!(sort(&all, &skip), Sorted::default());
+        let sorted = sort(&accounts(all, None), &skip);
+        assert_eq!((sorted.proven.len(), sorted.doubtful.len()), (0, 0));
     }
 
     #[test]

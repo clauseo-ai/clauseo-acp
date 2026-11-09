@@ -15,7 +15,7 @@ use super::outcome::{
 use super::resets::{self, resets_due};
 use super::rollback::{Made, Run, roll_back};
 use super::{POOL_START, SetupRequest};
-use super::{stranded, top_up};
+use super::{stranded_setup, top_up};
 use crate::windows::fence::RegisteredMatter;
 use crate::windows::marker::{Marker, MarkerState, SETUP_VERSION};
 use crate::windows::pool::{MachineRecord, POOL_CAP, PoolUser, pool_name, pool_number};
@@ -72,7 +72,7 @@ pub(super) fn run(
     acl: &mut impl AclWriter,
     req: &SetupRequest,
 ) -> Result<SetupReport, SetupFailure> {
-    let before = stranded::record_or_sweep(machine)?;
+    let before = stranded_setup::record_or_sweep(machine)?;
     check_owner(before.as_ref(), &req.owner)?;
     let matters = registered(machine, before.as_ref())?;
     let resets = resets_due(machine, before.as_ref())?;
@@ -194,7 +194,7 @@ fn plan_pool(
         }
     }
     for user in before.map_or(Ok(Vec::new()), |record| {
-        stranded::adoptable(machine, record)
+        stranded_setup::adoptable(machine, record)
     })? {
         plan.adopted.push(user.sid.clone());
         plan.kept.push(user);
@@ -291,6 +291,10 @@ fn change(
         run.recorded = Some(record);
     }
     admin_lock(machine, &group)?;
+    // Every live pool user carries the comment now (`stranded.rs`).
+    machine
+        .write_marker_version()
+        .map_err(|error| (Step::WriteRecord, cause_of(&error)))?;
     // A failure after this leaves the task registered, naming this run's owner: the rollback has
     // no step for it. It still stops only what the record names: after a first set-up's rollback
     // there is no record (`--stop` then does nothing) or only the users the rollback couldn't
@@ -372,11 +376,12 @@ fn group(machine: &mut impl Machine, run: &mut Run) -> Result<Sid, Failed> {
     Ok(sid)
 }
 
-/// A recorded user that exists. A re-run resets its password, puts it back in its groups,
-/// hides it and logs it on (which makes its profile again if it was deleted). An extend leaves
-/// it as it is, but puts it in a group this run made, and reads its profile. A user owed a
-/// profile reset (`resets.rs`) has its profile deleted first, then goes as in a re-run. An
-/// adopted user (`stranded.rs`) goes as in a re-run, in an extend too: its password is new.
+/// A recorded user that exists, given set-up's comment first. A re-run resets its password, puts it
+/// back in its groups, hides it and logs it on (which makes its profile again if it was deleted).
+/// An extend leaves it as it is, but puts it in a group this run made, and reads its profile. A
+/// user owed a profile reset (`resets.rs`) has its profile deleted first, then goes as in a re-run.
+/// An adopted user (`stranded.rs`) goes as one owed a reset, in an extend too: a new profile and
+/// password.
 fn keep_user(
     machine: &mut impl Machine,
     plan: &Plan,
@@ -386,8 +391,12 @@ fn keep_user(
     users: &mut Users,
 ) -> Result<(), Failed> {
     let name = user.name.as_str();
-    let wipe = plan.resets.contains(&user.sid);
-    if !plan.reset && !wipe && !plan.adopted.contains(&user.sid) {
+    machine
+        .mark(name)
+        .map_err(|error| (Step::Hide, cause_of(&error)))?;
+    // An adopted user's history is unknown: its profile is made again too.
+    let wipe = plan.resets.contains(&user.sid) || plan.adopted.contains(&user.sid);
+    if !plan.reset && !wipe {
         if run.group_made {
             machine
                 .add_to_group(name, group)

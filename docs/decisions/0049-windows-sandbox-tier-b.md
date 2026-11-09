@@ -819,25 +819,38 @@ takes the user who asked from its recorded parent (D-B2), never from an argument
   `ClauseoSandboxUsers` group, no pool account and no `sandbox\` when the box is ticked.
 - **Stranded pool accounts** (`setup/stranded.rs`). A VM row blanked a live pool's `PoolSids`:
   the next set-up made Sb09 to Sb16 and left Sb01 to Sb08 enabled, holding the logon right
-  through the group, and `--remove` then exited 4 at the group ("still has 8 members"). Now an
-  account the record doesn't list counts as Clauseo's only when it is in `ClauseoSandboxUsers`
-  **and** carries set-up's mark: a standard user with `UF_DONT_EXPIRE_PASSWD |
-  UF_PASSWD_CANT_CHANGE`, hidden by its `SpecialAccounts\UserList` value 0, as `NetUserAdd` and
-  `hide` made it. A name alone never counts (D-B5). A malformed `PoolSids` reads as an empty
-  pool, never trusted for a SID. With `OwnerSid`, `GroupSid` and `DataDir` readable, set-up
-  adopts each proven account back (same SID, so ledger and ACL references stay good; new
-  password) and makes only what is missing, and `--remove` writes them into the record with
-  `Removing`, then removes them like recorded users. With no record, or one whose `OwnerSid`,
-  `GroupSid` or `DataDir` can't be read, nothing is adopted (D5). Set-up and `--remove` both
-  remove each proven member of the group found by name, with its profile, then the group and
-  its Remote Desktop deny once it is empty. Set-up then makes a fresh pool, and `--remove`
-  exits 0. An account with only one of the two conditions is named in the log (warn, so the
-  Event Log) and in `RemoveReport::left`, and left alone, as is a group that still has members.
-  ACEs that name a deleted SID stay as unresolvable entries until the ledger's or the strict
-  walks drop them. That is harmless, since Windows never reuses a SID. `--remove` always runs
-  elevated, so it never lacks the right to delete an account; a stranded account that won't go
-  is named and found again by the next set-up or removal. VM row: blank the record on a live
-  pool; set-up adopts; `--remove` exits 0 and leaves no accounts.
+  through the group, and `--remove` then exited 4 at the group ("still has 8 members").
+  - **Proof.** An account the record doesn't list is Clauseo's only when it has a pool name and
+    is in `ClauseoSandboxUsers`: this computer's own alias, whose SID lies in the machine's
+    account domain, never a domain group of that name. It must also carry set-up's mark: the
+    comment `Clauseo sandbox account; managed by Clauseo set-up`, which set-up gives every pool
+    account it makes or keeps. Or it carries the older mark (a standard user with
+    `UF_DONT_EXPIRE_PASSWD | UF_PASSWD_CANT_CHANGE`, hidden by its `SpecialAccounts\UserList`
+    value 0), and then only while no member of the group carries the comment and the record's
+    `MarkerVersion` (2 once set-up marks its users) is absent or older. A name alone never
+    counts (D-B5). A malformed `PoolSids` reads as an empty pool, never trusted for a SID, and
+    a malformed `Removing` counts as set.
+  - **A trusted record** (`OwnerSid`, `GroupSid` and `DataDir` read): set-up adopts each proven
+    account back with the same SID, so ledger and ACL references stay good. It gets a new
+    password and a new profile, since its history is unknown. Set-up then makes only what is
+    missing. `--remove` writes them into the record with `Removing`, then removes them like
+    recorded users.
+  - **No record, or an untrusted one:** nothing is adopted (D5). Set-up and `--remove` disable
+    each proven member of the group first (`UF_ACCOUNTDISABLE`), then remove it as a recorded
+    user goes: profile and `ProfileList` entry, sign-in screen value (before the account),
+    account, every user right its SID holds, scheduled tasks. Then the group and its Remote
+    Desktop deny go once it is empty. A proven account that won't go fails set-up, or makes
+    `--remove` exit 4, disabled; the next run finds it by the same proof. For a corrupt record,
+    `--remove` decides from `OwnerSid` when it reads (D-B9: a per-user removal by anyone else
+    touches nothing). It takes off the network filters, `DeviceSync`'s deny, the ledger's
+    entries (with `OwnerSid` and `DataDir`), the owner's markers and the stop and sweep tasks,
+    then the record's values.
+  - **Left alone:** an account short of the proof is named in the log (warn, so the Event Log)
+    and in `RemoveReport::left`, as is a group that still has members. Set-up's refusal names
+    exactly the group's unprovable members, foreign ones included.
+  - ACEs that name a deleted SID stay as unresolvable entries until the ledger's or the strict
+    walks drop them; harmless, since Windows never reuses a SID. VM row: blank the record on a
+    live pool; set-up adopts; `--remove` exits 0 and leaves no accounts.
 
 **Accepted residual.** A per-machine removal someone other than the owner runs deletes the record
 even when the ledger lists entries it may not touch, as ruled. Those entries name dead SIDs, which

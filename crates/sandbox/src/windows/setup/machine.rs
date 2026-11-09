@@ -110,6 +110,21 @@ pub trait Machine {
     /// The local accounts in `ClauseoSandboxUsers` or with a pool user's name, each with
     /// whether it is in the group and carries set-up's mark (`stranded.rs`).
     fn pool_accounts(&mut self) -> Result<PoolAccounts, MachineError>;
+    /// Sets the account `name`'s comment to `stranded::POOL_COMMENT` (`NetUserSetInfo` level
+    /// 1007): every kept pool user gets set-up's mark, as every new one has it from creation.
+    fn mark(&mut self, name: &str) -> Result<(), MachineError>;
+    /// Writes the record's `MarkerVersion` (`stranded::MARKER_VERSION`), once every pool user
+    /// carries the comment.
+    fn write_marker_version(&mut self) -> Result<(), MachineError>;
+    /// Disables the account `name` (`UF_ACCOUNTDISABLE`, its other flags kept), so a delete
+    /// that then fails leaves an account that can't log on.
+    fn disable(&mut self, name: &str) -> Result<(), MachineError>;
+    /// Takes every user right off `sid` (`LsaRemoveAccountRights`, all rights): a deleted
+    /// account's SID keeps none. Holding none is `Ok`.
+    fn revoke_rights(&mut self, sid: &Sid) -> Result<(), MachineError>;
+    /// Deletes every scheduled task whose principal or owner is one of `pool`
+    /// (`sweep::sweep_tasks`); one that may be left is logged, not an error.
+    fn sweep_tasks(&mut self, pool: &[Sid]) -> Result<(), MachineError>;
     /// Writes `record` as the whole key, replacing every value.
     fn write_record(&mut self, record: &MachineRecord) -> Result<(), MachineError>;
     /// Deletes the key: only when a fresh set-up rolls back to nothing.
@@ -140,8 +155,8 @@ pub trait Machine {
     /// A new random password for a pool user (`PR4e`'s generator).
     fn new_password(&mut self) -> Password;
     /// Makes the local account `name` with `password`, `UF_DONT_EXPIRE_PASSWD |
-    /// UF_PASSWD_CANT_CHANGE`; its SID. An account by that name already there is an error,
-    /// never adopted (D-B5).
+    /// UF_PASSWD_CANT_CHANGE` and the comment `stranded::POOL_COMMENT`; its SID. An account by that
+    /// name already there is an error, never adopted (D-B5).
     fn create_user(&mut self, name: &str, password: &Password) -> Result<Sid, MachineError>;
     /// Sets `name`'s password to `password` (a re-run, D-B6).
     fn set_password(&mut self, name: &str, password: &Password) -> Result<(), MachineError>;

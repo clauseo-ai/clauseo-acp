@@ -1,24 +1,36 @@
 //! `--remove`'s side of `stranded.rs`: the pool accounts the record doesn't list, proven
-//! Clauseo's (in `ClauseoSandboxUsers` and marked), removed; the rest named and left. Never
-//! [`SetupExit::RemovedPartly`]: a stranded account has no record to finish from, and the next
-//! set-up or removal finds it again by the same proof.
+//! Clauseo's, removed; the rest named and left.
 //!
 //! - [`widen`]: a record whose `OwnerSid`, `GroupSid` and `DataDir` read, but whose pool lost
 //!   users (blanked, cut short, or malformed and read as empty): each proven account the group
 //!   named by `GroupSid` holds is written back into the record, with `Removing`, and then goes
 //!   the way every recorded user goes (`remove.rs` step 4), its profile and rights included.
-//! - [`sweep`]: no record, or one that can't be trusted ([`MachineError::RecordCorrupt`]): the
-//!   group is found by name (only an administrator can make a local group), each proven member
-//!   is stopped and removed with its profile, then the group with its Remote Desktop deny when
-//!   it is empty; a corrupt record's set-up values go last. Nothing is handed to anyone: the
-//!   SIDs die with their accounts.
+//! - [`sweep`]: no record, or one that can't be trusted ([`MachineError::RecordCorrupt`]). A
+//!   corrupt record whose `OwnerSid` still reads is decided as a record is ([`decide_corrupt`],
+//!   D-B9: a per-user removal by anyone else touches nothing). The local group is found by name
+//!   (only an administrator can make one); each proven member is stopped, disabled
+//!   (`UF_ACCOUNTDISABLE`, so a delete that fails leaves an account that can't log on), and
+//!   goes as a recorded user goes: its profile with its `ProfileList` entry, the account with
+//!   its sign-in screen value, every user right its SID holds, its scheduled tasks. A proven
+//!   account left is [`SetupExit::RemovedPartly`]: the next run finds it again by the same
+//!   proof. Then, for a corrupt record, what `remove.rs` steps 4 to 9 take off around the pool:
+//!   the network filters (the owner's read grant only when `OwnerSid` reads), `DeviceSync`'s
+//!   deny (by `GroupSid`, or the group found), the ledger's entries (only when `OwnerSid` and
+//!   `DataDir` read), the group once empty, the owner's markers (as the owner only), the stop
+//!   and sweep tasks, and last the record's values. Nothing is handed to anyone: the SIDs die
+//!   with their accounts.
 
 use super::super::machine::MachineError;
 use super::super::outcome::{SetupExit, cause_of};
-use super::super::stranded::{log_doubtful, sort};
-use super::{Removal, RemoveFailure, RemoveReport, RemoveStep, Removed};
+use super::super::stranded::{PartialRecord, log_doubtful, sort};
+use super::{
+    Acting, Decision, Removal, RemoveFailure, RemoveReport, RemoveStep, Removed, clear_markers,
+    decide, ledger_work, remove_denies, remove_stop_task,
+};
 use crate::windows::pool::{MachineRecord, POOL_GROUP, PoolUser};
+use crate::windows::shared_writes::shared_write_targets;
 use crate::windows::sids::Sid;
+use crate::windows::writer::AclWriter;
 
 /// `SYSTEM`: who strays and profiles are checked against when no one asked and no record
 /// names an owner; never a pool user's SID.
@@ -59,6 +71,27 @@ pub(super) fn read(machine: &mut impl Removal) -> Result<Found, RemoveFailure> {
     }
 }
 
+/// For a record that is gone (`corrupt` false): `Ok(None)`, the sweep alone. For a corrupt one:
+/// who acts, decided from its `OwnerSid` when that reads as `remove.rs` decides a record's
+/// (`Err` with what to end with, a per-user removal by anyone else included), else as an
+/// administrator.
+pub(super) fn decide_corrupt(
+    machine: &mut impl Removal,
+    corrupt: bool,
+    per_machine: bool,
+) -> Result<Result<Option<Acting>, Removed>, RemoveFailure> {
+    if !corrupt {
+        return Ok(Ok(None));
+    }
+    let Some(owner) = machine.read_partial().owner else {
+        return Ok(Ok(Some(Acting::Admin)));
+    };
+    Ok(match decide(machine, Some(&owner), per_machine)? {
+        Decision::Stop(removed) => Err(removed),
+        Decision::Act(acting) => Ok(Some(acting)),
+    })
+}
+
 /// `record` with every proven account it doesn't list added to its pool, written with
 /// `Removing` set when any was, and the doubtful accounts' names.
 pub(super) fn widen(
@@ -72,11 +105,11 @@ pub(super) fn widen(
     })?;
     let mut skip = record.pool.clone();
     skip.push(record.owner.clone());
-    let mut sorted = sort(&accounts.seen, &skip);
-    if accounts.group.as_ref() != Some(&record.group) {
+    let mut sorted = sort(&accounts, &skip);
+    if sorted.group.as_ref() != Some(&record.group) {
         sorted.proven.clear();
     }
-    log_doubtful(&sorted.doubtful, accounts.foreign);
+    log_doubtful(&sorted.doubtful, &accounts.foreign);
     let left = sorted.doubtful.iter().map(ToString::to_string).collect();
     if sorted.proven.is_empty() {
         return Ok((record, left));
@@ -99,68 +132,160 @@ pub(super) fn widen(
     Ok((widened, left))
 }
 
-/// With no record to trust: each proven account and its profile, then the group when empty,
-/// then a corrupt record's values. [`Removed::NothingSetUp`] when there was nothing (no group,
-/// no record); else [`Removed::All`], with what was left named in [`RemoveReport::left`].
-pub(super) fn sweep(machine: &mut impl Removal, corrupt: bool) -> Result<Removed, RemoveFailure> {
+/// With no record to trust, as the module says. `corrupt` is who acts for a corrupt record,
+/// `None` for one that is gone. [`Removed::NothingSetUp`] when there was nothing (no group, no
+/// record); else [`Removed::All`], with what was left named in [`RemoveReport::left`].
+pub(super) fn sweep(
+    machine: &mut impl Removal,
+    acl: &mut impl AclWriter,
+    corrupt: Option<Acting>,
+) -> Result<Removed, RemoveFailure> {
     let accounts = machine.pool_accounts().map_err(|error| RemoveFailure {
         step: RemoveStep::ReadRecord,
         cause: cause_of(&error),
         exit: SetupExit::Failed,
     })?;
-    let owner = match machine.invoker() {
-        Some(invoker) => invoker.clone(),
+    let partial = match corrupt {
+        Some(_) => machine.read_partial(),
+        None => PartialRecord::default(),
+    };
+    let asker = machine.invoker().cloned();
+    let owner = match partial.owner.clone().or_else(|| asker.clone()) {
+        Some(owner) => owner,
         None => Sid::parse(SYSTEM).map_err(|error| RemoveFailure {
             step: RemoveStep::Owner,
             cause: error.to_string(),
             exit: SetupExit::Failed,
         })?,
     };
-    let sorted = sort(&accounts.seen, std::slice::from_ref(&owner));
-    log_doubtful(&sorted.doubtful, accounts.foreign);
+    let skip: Vec<Sid> = [Some(owner.clone()), asker].into_iter().flatten().collect();
+    let sorted = sort(&accounts, &skip);
+    log_doubtful(&sorted.doubtful, &accounts.foreign);
     let mut report = RemoveReport {
         left: sorted.doubtful.iter().map(ToString::to_string).collect(),
         ..RemoveReport::default()
     };
-    if let Some(group) = &accounts.group {
-        let pool: Vec<Sid> = sorted.proven.iter().map(|user| user.sid.clone()).collect();
-        if !pool.is_empty() {
-            match machine.stop_strays(&pool, &owner) {
-                Ok(0) => {}
-                Ok(left) => {
-                    tracing::warn!(left, "processes of the sandbox users wouldn't stop");
-                }
-                Err(error) => {
-                    tracing::warn!(%error, "the sandbox users' processes weren't stopped");
-                }
-            }
-        }
-        for user in &sorted.proven {
-            tracing::warn!(account = %user.name, "a sandbox user no record lists is removed");
-            if let Err(cause) = remove_user(machine, user, &owner, &mut report) {
-                tracing::warn!(
-                    account = %user.name,
-                    %cause,
-                    "a sandbox user couldn't be removed; the next set-up or removal finds it again"
-                );
-                report.left.push(format!("{}: {cause}", user.name));
-            }
-        }
-        report.group = remove_group(machine, group, &mut report.left);
-    } else if !corrupt {
+    if sorted.group.is_none() && corrupt.is_none() {
         return Ok(Removed::NothingSetUp);
     }
-    if corrupt && let Err(error) = machine.delete_record() {
-        tracing::warn!(%error, "the record that can't be trusted couldn't be deleted");
+    let pool: Vec<Sid> = sorted.proven.iter().map(|user| user.sid.clone()).collect();
+    if !pool.is_empty() {
+        match machine.stop_strays(&pool, &owner) {
+            Ok(0) => {}
+            Ok(left) => {
+                tracing::warn!(left, "processes of the sandbox users wouldn't stop");
+            }
+            Err(error) => {
+                tracing::warn!(%error, "the sandbox users' processes weren't stopped");
+            }
+        }
+    }
+    let mut remaining = Vec::new();
+    for user in &sorted.proven {
+        tracing::warn!(account = %user.name, "a sandbox user no record lists is removed");
+        if let Err(cause) = remove_user(machine, user, &owner, &mut report) {
+            tracing::warn!(account = %user.name, %cause, "a sandbox user couldn't be removed");
+            remaining.push(format!("{}: {cause}", user.name));
+        }
+    }
+    if !pool.is_empty()
+        && let Err(error) = machine.sweep_tasks(&pool)
+    {
+        tracing::warn!(%error, "the removed sandbox users' tasks weren't swept");
         report
             .left
-            .push(format!("the machine's record: {}", cause_of(&error)));
+            .push(format!("their scheduled tasks: {}", cause_of(&error)));
+    }
+    if !remaining.is_empty() {
+        return Err(RemoveFailure {
+            step: RemoveStep::Account,
+            cause: format!(
+                "sandbox users Clauseo set up couldn't be removed, and were disabled: {}; \
+                 uninstall again to finish",
+                remaining.join("; ")
+            ),
+            exit: SetupExit::RemovedPartly,
+        });
+    }
+    let partly = |(step, cause): (RemoveStep, String)| RemoveFailure {
+        step,
+        cause,
+        exit: SetupExit::RemovedPartly,
+    };
+    if let Some(acting) = corrupt {
+        around_the_pool(
+            machine,
+            acl,
+            &partial,
+            sorted.group.as_ref(),
+            &pool,
+            acting,
+            &mut report,
+        )
+        .map_err(partly)?;
+    }
+    if let Some(group) = &sorted.group {
+        report.group = remove_group(machine, group, &mut report.left);
+    }
+    if let Some(acting) = corrupt {
+        if acting == Acting::Owner {
+            clear_markers(machine).map_err(partly)?;
+        }
+        remove_stop_task(machine).map_err(partly)?;
+        machine
+            .delete_record()
+            .map_err(|error| partly((RemoveStep::Record, cause_of(&error))))?;
     }
     Ok(Removed::All(report))
 }
 
-/// One proven account: its profile, then the account. Its `LocalLow` deny goes with the
-/// profile.
+/// For a corrupt record, `remove.rs` steps 4 to 6 around the pool: the network, `DeviceSync`'s
+/// deny for the group (`GroupSid`, or the group found), and the ledger's entries when
+/// `OwnerSid`, `GroupSid` and `DataDir` read (else left: they name SIDs nothing has, K10).
+fn around_the_pool(
+    machine: &mut impl Removal,
+    acl: &mut impl AclWriter,
+    partial: &PartialRecord,
+    found: Option<&Sid>,
+    pool: &[Sid],
+    acting: Acting,
+    report: &mut RemoveReport,
+) -> Result<(), (RemoveStep, String)> {
+    report.firewall = machine
+        .remove_network(partial.owner.as_ref())
+        .map_err(|e| (RemoveStep::Network, cause_of(&e)))?;
+    let Some(group) = partial.group.clone().or_else(|| found.cloned()) else {
+        return Ok(());
+    };
+    let program_data = machine
+        .program_data()
+        .map_err(|e| (RemoveStep::DeviceSync, cause_of(&e)))?;
+    let device_sync = shared_write_targets(&program_data, &[]);
+    remove_denies(acl, &group, &device_sync).map_err(|cause| {
+        (
+            RemoveStep::DeviceSync,
+            format!("DeviceSync's deny: {cause}"),
+        )
+    })?;
+    let (Some(owner), Some(data_dir)) = (&partial.owner, &partial.data_dir) else {
+        tracing::warn!("the corrupt record names no owner or data folder; the ledger stays");
+        return Ok(());
+    };
+    let record = MachineRecord {
+        owner: owner.clone(),
+        group,
+        pool: pool.to_vec(),
+        data_dir: data_dir.clone(),
+        removing: true,
+    };
+    report.ledger = ledger_work::run(machine, acl, &record, acting)?;
+    Ok(())
+}
+
+/// One proven account as a recorded one goes: disabled first, then its profile
+/// (`DeleteProfileW`, its folder and `ProfileList` entry; its `LocalLow` deny with it), the
+/// account with its sign-in screen value, then every user right its SID still holds. `Err`
+/// when the account is left; a right that won't come off is named in `left` only.
 fn remove_user(
     machine: &mut impl Removal,
     user: &PoolUser,
@@ -168,12 +293,21 @@ fn remove_user(
     report: &mut RemoveReport,
 ) -> Result<(), String> {
     let failed = |error: MachineError| cause_of(&error);
+    if let Err(error) = machine.disable(&user.name) {
+        tracing::warn!(account = %user.name, %error, "a sandbox user couldn't be disabled");
+    }
     if machine.profile_of(&user.sid).map_err(failed)?.is_some() {
         machine.delete_profile(&user.sid, owner).map_err(failed)?;
         report.profiles += 1;
     }
     machine.delete_user(&user.name).map_err(failed)?;
     report.accounts += 1;
+    if let Err(error) = machine.revoke_rights(&user.sid) {
+        tracing::warn!(account = %user.name, %error, "a removed user's rights stay on its SID");
+        report
+            .left
+            .push(format!("{}'s user rights: {}", user.name, cause_of(&error)));
+    }
     Ok(())
 }
 

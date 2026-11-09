@@ -28,10 +28,9 @@
 //! (past that [`SetupExit::LockHeld`], nothing touched; the hook's own bound is 120 s, K3). A
 //! first read before the lock that finds no record still tries the lock, without waiting: a
 //! set-up holding it may be writing the first record, so that is `LockHeld` too, never 0.
-//! With no record, or one that can't be trusted (`MachineError::RecordCorrupt`), whoever
-//! asked, the accounts proven Clauseo's (in `ClauseoSandboxUsers` and marked) go with their
-//! profiles, then the group once empty (`remove/stranded.rs`), and the exit is 0; what is one
-//! condition short is named in the log and [`RemoveReport::left`], and left.
+//! With no record, or one that can't be trusted, the accounts proven Clauseo's go as
+//! `remove/stranded.rs` says, with a corrupt record's network, tasks, denies, ledger, markers
+//! and values; what is one condition short is named in [`RemoveReport::left`] and left.
 //!
 //! 1. the record read again under the lock, and who acts decided again from it; then each
 //!    proven account its pool doesn't list (a blanked or malformed `PoolSids`) written back
@@ -39,9 +38,10 @@
 //! 2. `Removing = 1` written to the record (once; a re-run finds it set);
 //! 3. every process running as a pool SID stopped (D-B13);
 //! 4. per pool user, in record order: its `LocalLow` denies (planned again from the record's
-//!    group, D-B11), its profile, its account with its sign-in screen value. A reparse point on
-//!    the way to `LocalLow` (`Removal::in_profile`) is logged, and the deny goes with the
-//!    profile, whose delete takes each link in it out itself first;
+//!    group, D-B11), its profile (`DeleteProfileW`, with its `ProfileList` entry), its account
+//!    with its sign-in screen value, every right its SID holds; then the pool's tasks. A reparse
+//!    point on the way to `LocalLow` (`Removal::in_profile`) is logged, and the deny goes with
+//!    the profile, whose delete takes each link in it out itself first;
 //!    Then, only once every pool account is gone and a second sweep has stopped every process
 //!    still running as a pool SID (one that won't stop ends the run at `Strays`, network on),
 //!    the network filters, the owner's read grant
@@ -247,15 +247,21 @@ pub fn remove_then(
     // someone else, ends at once and never waits for a set-up's lock.
     let before = stranded::read(machine)?;
     if before.record.is_none() {
-        // No record, unless a set-up holding the lock is about to write it. What a lost or
-        // corrupt record stranded goes (`stranded::sweep`).
-        lock(machine, 0)?;
+        // No record, unless a set-up holding the lock is about to write it; a corrupt one is
+        // decided by its `OwnerSid` when that reads (D-B9). Then `stranded::sweep`.
+        let corrupt = match stranded::decide_corrupt(machine, before.corrupt, per_machine)? {
+            Ok(acting) => acting,
+            Err(removed) => return Ok(removed),
+        };
+        let wait = corrupt.map_or(0, |_| REMOVE_LOCK_WAIT_MS);
+        lock(machine, wait)?;
         let locked = Locked(machine);
-        let removed = stranded::sweep(&mut *locked.0, before.corrupt)?;
+        let removed = stranded::sweep(&mut *locked.0, acl, corrupt)?;
         while_locked(&removed);
         return Ok(removed);
     }
-    if let Decision::Stop(removed) = decide(machine, before.record.as_ref(), per_machine)? {
+    let owner = before.record.as_ref().map(|record| &record.owner);
+    if let Decision::Stop(removed) = decide(machine, owner, per_machine)? {
         return Ok(removed);
     }
     lock(machine, REMOVE_LOCK_WAIT_MS)?;
@@ -263,11 +269,14 @@ pub fn remove_then(
     let machine = &mut *locked.0;
     let found = stranded::read(machine)?;
     let Some(record) = found.record else {
-        let removed = stranded::sweep(machine, found.corrupt)?;
+        let removed = match stranded::decide_corrupt(machine, found.corrupt, per_machine)? {
+            Ok(corrupt) => stranded::sweep(machine, acl, corrupt)?,
+            Err(removed) => removed,
+        };
         while_locked(&removed);
         return Ok(removed);
     };
-    let acting = match decide(machine, Some(&record), per_machine)? {
+    let acting = match decide(machine, Some(&record.owner), per_machine)? {
         Decision::Stop(removed) => {
             while_locked(&removed);
             return Ok(removed);
@@ -331,23 +340,21 @@ pub fn acting_token<T, E: std::fmt::Display>(
 /// Whether to stop, and who acts otherwise, as the module says.
 fn decide(
     machine: &impl Removal,
-    record: Option<&MachineRecord>,
+    owner: Option<&Sid>,
     per_machine: bool,
 ) -> Result<Decision, RemoveFailure> {
-    let Some(record) = record else {
+    let Some(owner) = owner else {
         return Ok(Decision::Stop(Removed::NothingSetUp));
     };
     match machine.invoker() {
-        Some(invoker) if *invoker == record.owner && machine.can_act_as_owner() => {
+        Some(invoker) if *invoker == *owner && machine.can_act_as_owner() => {
             Ok(Decision::Act(Acting::Owner))
         }
         // The owner asked, but no token weaker than an administrator's can act as them. A
         // per-machine run takes the administrator's bounded path; a per-user one stops, since
         // that path would delete the record with ledger entries left.
-        Some(invoker) if *invoker == record.owner && per_machine => {
-            Ok(Decision::Act(Acting::Admin))
-        }
-        Some(invoker) if *invoker == record.owner => Err(RemoveFailure {
+        Some(invoker) if *invoker == *owner && per_machine => Ok(Decision::Act(Acting::Admin)),
+        Some(invoker) if *invoker == *owner => Err(RemoveFailure {
             step: RemoveStep::Owner,
             cause: "the owner's token couldn't be lowered to a standard user's, so nothing was \
                     removed"
@@ -392,6 +399,9 @@ fn steps(
     for (at, sid) in record.pool.iter().enumerate() {
         remove_user(machine, acl, record, at, sid, &mut report)?;
     }
+    machine
+        .sweep_tasks(&record.pool)
+        .map_err(|e| (RemoveStep::Account, cause_of(&e)))?;
     // Anything still running as a pool SID (one that started since the first sweep, or one the
     // first couldn't stop) is stopped again, elevated, before the network goes. One that won't
     // stop keeps the network on: the run ends here, RemovedPartly, and a re-run retries.
@@ -408,7 +418,7 @@ fn steps(
         ));
     }
     report.firewall = machine
-        .remove_network(&record.owner)
+        .remove_network(Some(&record.owner))
         .map_err(|e| (RemoveStep::Network, cause_of(&e)))?;
     let program_data = machine
         .program_data()
@@ -494,6 +504,8 @@ fn remove_user(
             .map_err(|e| (RemoveStep::Account, format!("{label}: {}", cause_of(&e))))?;
         report.accounts += 1;
     }
+    let rights = |e: MachineError| (RemoveStep::Account, format!("{label}: {}", cause_of(&e)));
+    machine.revoke_rights(sid).map_err(rights)?;
     Ok(())
 }
 
