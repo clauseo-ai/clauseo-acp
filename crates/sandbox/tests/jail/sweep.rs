@@ -39,10 +39,10 @@ use crate::support::{Jail, World, launcher, launcher_in, marks_of, run, run_outs
 /// Kills, at the end of a test, each pid it was given that still runs: the escaped processes,
 /// started by this test, in case an assertion failed before the sweep ended them.
 #[derive(Default)]
-struct Guard(Mutex<Vec<i32>>);
+pub(crate) struct Guard(Mutex<Vec<i32>>);
 
 impl Guard {
-    fn keep(&self, pids: &[i32]) {
+    pub(crate) fn keep(&self, pids: &[i32]) {
         self.0.lock().unwrap().extend_from_slice(pids);
     }
 }
@@ -132,7 +132,7 @@ pub(crate) fn sleeper(launcher: &SeatbeltLauncher, w: &World) -> Agent {
 
 /// A launcher for `w` whose policy runs this test binary (the escaper), and its process cap's
 /// notices.
-fn escaping(w: &World) -> (Jail, Arc<Mutex<Vec<ProcessCapNotice>>>) {
+pub(crate) fn escaping(w: &World) -> (Jail, Arc<Mutex<Vec<ProcessCapNotice>>>) {
     let exe = dunce::canonicalize(std::env::current_exe().unwrap()).unwrap();
     let policy = w.builder().runtime(exe.parent().unwrap()).build().unwrap();
     let notices = Arc::new(Mutex::new(Vec::new()));
@@ -142,11 +142,11 @@ fn escaping(w: &World) -> (Jail, Arc<Mutex<Vec<ProcessCapNotice>>>) {
 }
 
 /// The agent script that runs the escaper (`$1`), says `escaped` and sleeps.
-const ESCAPE: &str = "\"$1\" --exact escaper::escaper --ignored --nocapture --test-threads 1 \
+pub(crate) const ESCAPE: &str = "\"$1\" --exact escaper::escaper --ignored --nocapture --test-threads 1 \
                       >/dev/null 2>&1; echo escaped; exec /bin/sleep 30";
 
 /// The pids in `file`, once it holds `count` of them, within 10 s.
-fn pids_in(file: &Path, count: usize) -> Vec<i32> {
+pub(crate) fn pids_in(file: &Path, count: usize) -> Vec<i32> {
     let start = Instant::now();
     loop {
         let pids: Vec<i32> = std::fs::read_to_string(file)
@@ -175,7 +175,7 @@ pub(crate) fn alive(pid: i32) -> bool {
 }
 
 /// The pids of `pids` still alive after up to 3 s.
-fn left_after(pids: &[i32]) -> Vec<i32> {
+pub(crate) fn left_after(pids: &[i32]) -> Vec<i32> {
     let start = Instant::now();
     loop {
         let alive: Vec<i32> = pids.iter().copied().filter(|&pid| alive(pid)).collect();

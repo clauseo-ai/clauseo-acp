@@ -125,7 +125,13 @@ struct Sweep(Arc<Mutex<Swept>>);
 #[derive(Default)]
 struct Swept {
     marked: HashSet<u32>,
+    /// The scan fails outright (the listing).
     fails: bool,
+    /// The scan's doubt: `Some(true)` for a killed sentinel, `Some(false)` for an unvouched
+    /// scan.
+    doubt: Option<bool>,
+    /// How many times the watch restarted the sentinel.
+    revived: usize,
     ended: bool,
     handed: Vec<u32>,
 }
@@ -137,18 +143,31 @@ impl Sweep {
 }
 
 impl Escapes for Sweep {
-    fn escaped(&self, rest: &[Proc]) -> Result<Option<Vec<Proc>>, SweepError> {
+    fn escaped(&self, rest: &[Proc]) -> Result<Option<Escaped>, SweepError> {
         let swept = self.0.lock().unwrap();
         if swept.ended {
             return Ok(None);
         }
         if swept.fails {
-            return Err(SweepError::Unknown {
-                tag: "clauseo-1-0".to_owned(),
-            });
+            return Err(SweepError::Listing);
         }
+        let tag = "clauseo-1-0".to_owned();
         let found = rest.iter().filter(|p| swept.marked.contains(&p.pid));
-        Ok(Some(found.copied().collect()))
+        Ok(Some(Escaped {
+            found: found.copied().collect(),
+            doubt: swept.doubt.map(|killed| {
+                if killed {
+                    SweepError::SentinelGone { tag }
+                } else {
+                    SweepError::Unknown { tag }
+                }
+            }),
+        }))
+    }
+
+    fn revive(&self) -> bool {
+        self.0.lock().unwrap().revived += 1;
+        true
     }
 
     fn take_over(&self, left: &[Proc]) -> usize {
@@ -491,8 +510,8 @@ fn session_end_ends_the_watch_of_what_the_mark_found() {
 
 #[test]
 fn a_failed_session_sweep_ends_the_agent() {
-    // M3: the mark's scan fails (an unvouched scan, drift, a missing mark): the cap cannot
-    // count what left the session, so it fails closed as for a failed listing.
+    // M3: the mark's scan fails outright (the listing, a missing mark): the cap cannot count
+    // what left the session, so it fails closed as for a failed listing.
     let (cap, told) = session();
     let (fake, mut watch, sweep) = agent_swept(&cap);
     fake.add(101, AGENT, AGENT, 20);
@@ -505,12 +524,61 @@ fn a_failed_session_sweep_ends_the_agent() {
 
 #[test]
 fn a_failed_session_sweep_after_the_session_emptied_is_told() {
+    // An unvouched scan that finds nothing, once the session is empty: told, and done.
     let (cap, told) = session();
     let (fake, mut watch, sweep) = agent_swept(&cap);
     fake.procs.borrow_mut().remove(&AGENT);
-    sweep.0.lock().unwrap().fails = true;
+    sweep.0.lock().unwrap().doubt = Some(false);
     assert_eq!(watch.step(&fake), Step::Done);
     assert_eq!(*told.lock().unwrap(), [ProcessCapNotice::CapFailed]);
     // No group of the agent's pid exists any longer: none is signalled.
     assert!(fake.groups.borrow().is_empty());
+}
+
+#[test]
+fn an_unvouched_sweep_ends_what_it_found_and_watches_while_any_remains() {
+    // (c): the scan cannot vouch, but its finds are real: the session is ended with them, and
+    // the watch goes on ending what it finds until nothing is.
+    let (cap, told) = session();
+    let (fake, mut watch, sweep) = agent_swept(&cap);
+    fake.add(101, AGENT, AGENT, 20);
+    fake.add(2_000, 1, 2_000, 30);
+    fake.set(2_000, |p| p.immortal = true);
+    sweep.mark(2_000..2_001);
+    sweep.0.lock().unwrap().doubt = Some(false);
+    assert_eq!(to_the_sweep(&mut watch, &fake), Step::Watch);
+    assert_eq!(fake.signals_to(AGENT), [libc::SIGKILL]);
+    assert_eq!(fake.signals_to(101), [libc::SIGKILL]);
+    assert_eq!(fake.signals_to(2_000), [libc::SIGKILL]);
+    failed_closed(&fake, &told);
+    // Every poll from now on kills what is found, while it is found.
+    assert_eq!(watch.step(&fake), Step::Watch);
+    assert_eq!(fake.signals_to(2_000), [libc::SIGKILL; 2]);
+    fake.set(2_000, |p| p.immortal = false);
+    assert_eq!(watch.step(&fake), Step::Watch);
+    assert!(!fake.running(2_000));
+    assert_eq!(watch.step(&fake), Step::Done);
+    assert_eq!(sweep.0.lock().unwrap().revived, 0);
+}
+
+#[test]
+fn a_killed_sentinel_ends_the_session_and_is_restarted() {
+    // (d): only tampering kills the sentinel mid-session: the agent, its session and every
+    // process the mark finds go, the lawyer is told, and the sentinel is restarted (b).
+    let (cap, told) = session();
+    let (fake, mut watch, sweep) = agent_swept(&cap);
+    fake.add(101, AGENT, AGENT, 20);
+    fake.add(2_000, 1, 2_000, 30);
+    sweep.mark(2_000..2_001);
+    sweep.0.lock().unwrap().doubt = Some(true);
+    assert_eq!(to_the_sweep(&mut watch, &fake), Step::Watch);
+    for pid in [AGENT, 101, 2_000] {
+        assert!(!fake.running(pid), "{pid} survived");
+    }
+    assert!(fake.groups.borrow().contains(&(AGENT, libc::SIGKILL)));
+    assert_eq!(*told.lock().unwrap(), [ProcessCapNotice::Tampered]);
+    assert_eq!(sweep.0.lock().unwrap().revived, 1);
+    // Restarted, the sentinel vouches again, and a scan that finds nothing ends the watch.
+    sweep.0.lock().unwrap().doubt = None;
+    assert_eq!(watch.step(&fake), Step::Done);
 }

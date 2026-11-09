@@ -27,6 +27,8 @@ static NEXT: AtomicU64 = AtomicU64::new(0);
 /// 104-byte limit. Removed on drop.
 pub(crate) struct World {
     root: PathBuf,
+    /// Whether dropping it removes the folder: a world this process made.
+    owned: bool,
 }
 
 impl World {
@@ -44,7 +46,7 @@ impl World {
         if root.exists() {
             std::fs::remove_dir_all(&root).unwrap();
         }
-        let w = World { root };
+        let w = World { root, owned: true };
         for dir in [
             "data/agent-state/m1/codex",
             "data/agent-state/m1/notes",
@@ -74,6 +76,17 @@ impl World {
         // checked at its target, which the jail refuses).
         w.hard_link("login/auth.json", "data/agent-state/m1/codex/auth.json");
         w
+    }
+
+    /// The world another test process made at `root` (`World::root`), which this one only uses:
+    /// dropping it removes nothing.
+    pub(crate) fn reopen(root: PathBuf) -> World {
+        World { root, owned: false }
+    }
+
+    /// Its folder.
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
     }
 
     pub(crate) fn at(&self, rel: &str) -> PathBuf {
@@ -189,7 +202,7 @@ pub(crate) fn listen_unix_at(path: PathBuf) -> PathBuf {
 
 impl Drop for World {
     fn drop(&mut self) {
-        if std::fs::remove_dir_all(&self.root).is_ok() {
+        if !self.owned || std::fs::remove_dir_all(&self.root).is_ok() {
             return;
         }
         // A session mark a failed test left is immutable (`UF_IMMUTABLE`): clear the flags it

@@ -30,9 +30,11 @@ const SENTINEL_WAIT: Duration = Duration::from_secs(2);
 const SENTINEL_PAUSE: Duration = Duration::from_millis(5);
 
 /// The profile of the control a mark with no sentinel of its own (one an earlier host left)
-/// is scanned with: every write allowed but the canary's, so it matches the mark.
-const CONTROL_PROFILE: &str =
-    "(version 1)(allow default)(deny file-write* (literal (param \"CANARY\")))";
+/// is scanned with: `/bin/cat` may run and read, and may write the mark's data, nothing else.
+const CONTROL_PROFILE: &str = "(version 1)(deny default)\
+                               (allow process-exec (literal \"/bin/cat\"))\
+                               (allow file-read* file-map-executable)\
+                               (allow file-write-data (literal (param \"SESSION_MARK\")))";
 
 /// A launch's session mark: `<dir>/<tag>/mark`, which only this launch's profile lets its
 /// processes write (`file-write-data`, nothing else), and `<dir>/<tag>/canary` beside it, which
@@ -66,8 +68,8 @@ pub struct SessionMark {
     created: SystemTime,
     /// The launch's agent, once launched.
     root: OnceLock<ProcId>,
-    /// The launch's sentinel, while it runs.
-    sentinel: Mutex<Option<Sentinel>>,
+    /// The launch's sentinel and what restarts it.
+    sentinel: Mutex<Slot>,
     /// Whether a sentinel was ever started: until then no process ran under the profile.
     started: AtomicBool,
     /// Whether session end ended it ([`super::end_session`]).
@@ -104,7 +106,7 @@ impl SessionMark {
             canary,
             created: now_wall(),
             root: OnceLock::new(),
-            sentinel: Mutex::new(None),
+            sentinel: Mutex::new(Slot::default()),
             started: AtomicBool::new(false),
             ended: AtomicBool::new(false),
             clean_on_drop: true,
@@ -133,7 +135,7 @@ impl SessionMark {
             canary,
             created: UNIX_EPOCH,
             root: OnceLock::new(),
-            sentinel: Mutex::new(None),
+            sentinel: Mutex::new(Slot::default()),
             started: AtomicBool::new(false),
             ended: AtomicBool::new(false),
             clean_on_drop: false,
@@ -145,25 +147,18 @@ impl SessionMark {
     /// Removes the mark if a scan with no start filter finds no process of it, the drift check
     /// passing and a sentinel vouching for it; answers whether it went. The sentinel is the
     /// launch's own while it runs. A mark no process ever ran under (made here, no sentinel
-    /// ever started) goes without a scan. A mark an earlier host left is scanned with a
-    /// control of its own: a process under a profile that allows every write but the canary's,
-    /// started and ended for this one scan. A failed scan removes nothing: a process it could
-    /// not see may still match.
+    /// ever started) goes without a scan. Any other is scanned with a control of its own
+    /// ([`SessionMark::control_args`]), started and ended for this one scan. A failed scan
+    /// removes nothing: a process it could not see may still match. Nothing is killed: an
+    /// earlier host's leftovers are ended by the next launcher (`sweep::clean_stale`).
     pub fn remove_if_unused(&self) -> bool {
         let unused = if self.sentinel().is_some() {
             processes(&[self], UNIX_EPOCH).is_ok_and(|found| found.is_empty())
         } else if self.clean_on_drop && !self.started.load(Ordering::Relaxed) {
             true
         } else {
-            let mut define = OsString::from("CANARY=");
-            define.push(&self.canary);
-            let args = [
-                OsString::from("-p"),
-                OsString::from(CONTROL_PROFILE),
-                OsString::from("-D"),
-                define,
-            ];
-            let vouched = seatbelt::api().and_then(|api| self.start_sentinel(api, &args));
+            let vouched =
+                seatbelt::api().and_then(|api| self.start_sentinel(api, &self.control_args()));
             let unused =
                 vouched.is_ok() && processes(&[self], UNIX_EPOCH).is_ok_and(|f| f.is_empty());
             self.end_sentinel();
@@ -181,22 +176,52 @@ impl SessionMark {
         }
     }
 
+    /// The arguments of a control for this mark alone: `sandbox-exec` with a minimal profile
+    /// ([`CONTROL_PROFILE`]) whose one write is this mark's data. For a mark with no sentinel
+    /// of its own: one an earlier host left.
+    pub(crate) fn control_args(&self) -> Vec<OsString> {
+        let mut define = OsString::from(format!("{SESSION_MARK}="));
+        define.push(&self.mark);
+        vec![
+            OsString::from("-p"),
+            OsString::from(CONTROL_PROFILE),
+            OsString::from("-D"),
+            define,
+        ]
+    }
+
     /// Starts the launch's sentinel, `sandbox-exec <args> /bin/cat` (`args`: the launch's
     /// profile and its parameters), and waits until `check` finds it matching the mark: its
     /// pid and start. [`SweepError::Unknown`] when it does not match within 2 s (the kernel's
-    /// answers are not what the sweep needs: no launch then), or it could not start.
+    /// answers are not what the sweep needs: no launch then), or it could not start. A sentinel
+    /// that dies later is restarted with the same `args` ([`SessionMark::revive`]).
     pub(crate) fn start_sentinel(
         &self,
         check: &dyn Checker,
         args: &[OsString],
     ) -> Result<ProcId, SweepError> {
         self.started.store(true, Ordering::Relaxed);
+        let sentinel = self.spawn_matching(check, args)?;
+        let id = sentinel.id();
+        let mut slot = self.slot();
+        slot.current = Some(sentinel);
+        slot.args = args.to_vec();
+        slot.retired = false;
+        Ok(id)
+    }
+
+    /// Starts `sandbox-exec <args> /bin/cat` and waits until `check` finds it matching the mark.
+    fn spawn_matching(
+        &self,
+        check: &dyn Checker,
+        args: &[OsString],
+    ) -> Result<Sentinel, SweepError> {
         let sentinel = Sentinel::start(args).map_err(|source| SweepError::Sentinel { source })?;
         let id = sentinel.id();
         let deadline = now() + SENTINEL_WAIT;
         loop {
-            if check.sandboxed(id.pid()) == Some(true) && matches(check, id.pid(), self) {
-                break;
+            if check.sandboxed(id.pid()) == Ok(true) && matches(check, id.pid(), self) == Ok(true) {
+                return Ok(sentinel);
             }
             if now() >= deadline || !sentinel.running() {
                 return Err(SweepError::Unknown {
@@ -205,35 +230,85 @@ impl SessionMark {
             }
             thread::park_timeout(SENTINEL_PAUSE);
         }
-        *self.sentinel.lock().unwrap_or_else(PoisonError::into_inner) = Some(sentinel);
-        Ok(id)
+    }
+
+    /// Restarts the sentinel when one was started, has not been ended
+    /// ([`SessionMark::end_sentinel`], session end) and no longer runs: a fresh process under the
+    /// same profile is as good a control as the first. Each restart is logged (`kind`
+    /// `sentinel_restarted`), and so is a restart that fails (`sentinel_restart_failed`; the
+    /// scans stay unknown). Answers whether it started one.
+    pub(crate) fn revive(&self, check: &dyn Checker) -> bool {
+        let mut slot = self.slot();
+        if slot.retired || slot.args.is_empty() || self.ended() {
+            return false;
+        }
+        if slot.current.as_ref().is_some_and(Sentinel::running) {
+            return false;
+        }
+        let dead = slot.current.take().map(|s| s.id());
+        // Reaped here: its pid named it alone until now.
+        let args = slot.args.clone();
+        match self.spawn_matching(check, &args) {
+            Ok(sentinel) => {
+                tracing::warn!(
+                    kind = "sentinel_restarted",
+                    tag = self.tag,
+                    dead = dead.map(|id| id.pid()),
+                    sentinel = sentinel.id().pid(),
+                    "the session sweep's sentinel was dead and is restarted"
+                );
+                slot.current = Some(sentinel);
+                true
+            }
+            Err(error) => {
+                tracing::error!(
+                    kind = "sentinel_restart_failed",
+                    tag = self.tag,
+                    %error,
+                    "the session sweep's sentinel was dead and could not be restarted"
+                );
+                false
+            }
+        }
     }
 
     /// A unit test's stand-in sentinel: the process `id`, never signalled.
     #[cfg(test)]
     pub(super) fn stand_in_sentinel(&self, id: ProcId) {
         self.started.store(true, Ordering::Relaxed);
-        *self.sentinel.lock().unwrap_or_else(PoisonError::into_inner) =
-            Some(Sentinel::stand_in(id));
+        let mut slot = self.slot();
+        slot.current = Some(Sentinel::stand_in(id));
+        slot.retired = false;
     }
 
     /// The sentinel's pid and start, if one was started and not ended (it may have died since).
     pub fn sentinel(&self) -> Option<ProcId> {
-        self.sentinel
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .as_ref()
-            .map(Sentinel::id)
+        self.slot().current.as_ref().map(Sentinel::id)
     }
 
-    /// Kills and reaps the sentinel, if any.
-    pub(crate) fn end_sentinel(&self) {
-        let sentinel = self
-            .sentinel
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take();
+    /// Whether a sentinel was started, not ended, and no longer runs: it was killed.
+    pub(crate) fn sentinel_dead(&self) -> bool {
+        self.slot()
+            .current
+            .as_ref()
+            .is_some_and(|sentinel| !sentinel.running())
+    }
+
+    /// Kills and reaps the sentinel, if any, for good: it is not restarted, and every later
+    /// scan of the mark is unknown ([`SweepError::Unknown`]), never "nothing runs". Session end
+    /// calls it after [`Gone`](super::Gone); otherwise only a test should.
+    pub fn end_sentinel(&self) {
+        let sentinel = {
+            let mut slot = self.slot();
+            slot.retired = true;
+            slot.current.take()
+        };
         drop(sentinel);
+    }
+
+    /// The sentinel's slot, locked.
+    fn slot(&self) -> std::sync::MutexGuard<'_, Slot> {
+        self.sentinel.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Session end's last step, after [`Gone`](super::Gone): marks it ended (the watchdog
@@ -308,25 +383,36 @@ impl SessionMark {
 
     /// Both files are still regular files (`lstat`), else [`SweepError::Mark`].
     pub(crate) fn check_files(&self) -> Result<(), SweepError> {
-        for path in [&self.mark, &self.canary] {
+        for (file, path) in [(MARK, &self.mark), (CANARY, &self.canary)] {
             match std::fs::symlink_metadata(path) {
                 Ok(meta) if meta.is_file() => {}
                 Ok(_) => {
                     return Err(SweepError::Mark {
-                        path: path.clone(),
-                        source: io::Error::other("not a regular file"),
+                        file,
+                        kind: io::ErrorKind::InvalidData,
                     });
                 }
-                Err(source) => {
+                Err(error) => {
                     return Err(SweepError::Mark {
-                        path: path.clone(),
-                        source,
+                        file,
+                        kind: error.kind(),
                     });
                 }
             }
         }
         Ok(())
     }
+}
+
+/// A mark's sentinel: the one running, if any, the arguments that restart it, and whether it was
+/// ended for good.
+#[derive(Debug, Default)]
+struct Slot {
+    current: Option<Sentinel>,
+    /// The `sandbox-exec` arguments it was started with; empty until one was.
+    args: Vec<OsString>,
+    /// Ended by [`SessionMark::end_sentinel`]: never restarted.
+    retired: bool,
 }
 
 impl Drop for SessionMark {

@@ -14,15 +14,16 @@
 //! (`process_cap/watchdog.rs`, through [`LaunchSweep`], which holds only its launch's mark), the
 //! mode-switch gate ([`switch_to_read_only`]) and session end ([`end_session`],
 //! [`JailedSession`]). Every scan is vouched for by the launch's sentinel, a process under the
-//! launch's own profile that must match (else [`SweepError::Unknown`]), and checks the private
-//! call against the live agent too (else [`SweepError::Drift`]): never an empty list on a check
-//! that stopped answering as measured.
+//! launch's own profile that must match (else [`SweepError::Unknown`], or
+//! [`SweepError::SentinelGone`] when it was killed), and checks the private call against the live
+//! agent too (else [`SweepError::Drift`]): never an empty list on a check that stopped answering
+//! as measured. An unvouched scan still answers what it found: a match is positive evidence, so
+//! every caller ends it all the same, and only "nothing else runs" is withheld. A dead sentinel is
+//! restarted ([`SessionMark::revive`]); the process cap's watchdog ends the session when one is
+//! killed mid-session, since only tampering explains that.
 
-use std::collections::HashSet;
 use std::ffi::CStr;
-use std::path::Path;
 use std::sync::Arc;
-use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use clauseo_process::TreeWatch;
@@ -30,17 +31,24 @@ use clauseo_process::TreeWatch;
 use super::process_cap::Proc;
 use super::process_cap::libproc::Libproc;
 use super::process_cap::watchdog::System as _;
-use super::profile::TAG_PREFIX;
 
+mod end;
 mod launch;
 mod mark;
 mod seatbelt;
 mod sentinel;
+mod stale;
 
+#[cfg(test)]
+use end::gate_with;
+pub use end::{end_session, end_session_processes, switch_to_read_only};
 pub(crate) use launch::LaunchSweep;
 pub use mark::SessionMark;
 pub(crate) use mark::check_folder;
 pub(crate) use seatbelt::api;
+pub(crate) use stale::clean_stale;
+#[cfg(test)]
+use stale::host_of;
 
 /// How long a launch's agent may run before the drift check expects it to match its mark:
 /// `sandbox-exec` applies the profile and execs in place within milliseconds of the spawn.
@@ -83,13 +91,14 @@ impl ProcId {
 #[derive(Debug, thiserror::Error)]
 pub enum SweepError {
     /// A mark or its canary is missing or not a regular file. The kernel answers "denied" for a
-    /// path that does not exist, for every process, so a scan would silently find nothing.
-    #[error("the session mark {path} is unusable: {source}")]
+    /// path that does not exist, for every process, so a scan would silently find nothing. It
+    /// names the file by its role, never its path (launch errors carry it).
+    #[error("the session's {file} file is unusable ({kind})")]
     Mark {
-        /// The mark or the canary.
-        path: std::path::PathBuf,
-        /// What `lstat` said, or why the file is refused.
-        source: std::io::Error,
+        /// Which file: `mark` or `canary`.
+        file: &'static str,
+        /// What `lstat` said (`InvalidData`: not a regular file).
+        kind: std::io::ErrorKind,
     },
     /// The process listing failed.
     #[error("the process listing failed")]
@@ -111,9 +120,17 @@ pub enum SweepError {
     /// may have changed (a macOS update), so "nothing found" would mean nothing: the answer is
     /// unknown, never [`Gone`].
     #[error(
-        "the session sweep cannot vouch for its scan: launch {tag}'s sentinel is not running or does not match its mark"
+        "the session sweep cannot vouch for its scan: launch {tag}'s sentinel is not running or does not match its mark, or the check failed"
     )]
     Unknown {
+        /// The launch's tag.
+        tag: String,
+    },
+    /// The launch's sentinel was killed: started, never ended by this process, and no longer
+    /// running. The scan is unknown, as for [`SweepError::Unknown`]; mid-session only tampering
+    /// explains it, so the watchdog ends the session, and the sentinel is restarted.
+    #[error("the session sweep cannot vouch for its scan: launch {tag}'s sentinel was killed")]
+    SentinelGone {
         /// The launch's tag.
         tag: String,
     },
@@ -125,7 +142,7 @@ pub enum SweepError {
     },
     /// This macOS lacks `sandbox_check` or `SANDBOX_CHECK_NO_REPORT` (looked up at run time):
     /// no scan can run, so no jailed launch may.
-    #[error("this Mac's sandbox lacks the call the session sweep needs (sandbox_check)")]
+    #[error("this Mac's sandbox lacks a call the session sweep needs")]
     Unavailable,
     /// The deadline passed with processes of the session still running.
     #[error("the deadline passed with processes of the session running")]
@@ -211,28 +228,71 @@ impl JailedSession {
     }
 }
 
+/// Why one check failed (`sandbox_check` answered -1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CheckFailed {
+    /// `ESRCH`: the process exited since the listing.
+    Gone,
+    /// Any other `errno`: the call no longer answers, so no scan is complete.
+    Failed,
+}
+
+/// One answer of the kernel's check.
+pub(crate) type Answer = Result<bool, CheckFailed>;
+
 /// What the scan asks the kernel; [`seatbelt::Seatbelt`] in use, a fake in the unit tests.
 pub(crate) trait Checker {
-    /// Whether `pid` runs under any sandbox; `None` when the call failed (the process is gone).
-    fn sandboxed(&self, pid: u32) -> Option<bool>;
-    /// Whether `pid` may `file-write-data` the canonical, existing `path`; `None` on failure.
-    fn may_write(&self, pid: u32, path: &CStr) -> Option<bool>;
+    /// Whether `pid` runs under any sandbox.
+    fn sandboxed(&self, pid: u32) -> Answer;
+    /// Whether `pid` may `file-write-data` the canonical, existing `path`.
+    fn may_write(&self, pid: u32, path: &CStr) -> Answer;
 }
 
 /// Whether sandboxed process `pid` belongs to `mark`: the mark allowed and the canary denied.
-fn matches(check: &dyn Checker, pid: u32, mark: &SessionMark) -> bool {
-    check.may_write(pid, mark.mark_c()) == Some(true)
-        && check.may_write(pid, mark.canary_c()) == Some(false)
+/// A process gone since the listing does not; a failed call is [`CheckFailed::Failed`].
+fn matches(check: &dyn Checker, pid: u32, mark: &SessionMark) -> Result<bool, CheckFailed> {
+    let answers = (
+        check.may_write(pid, mark.mark_c()),
+        check.may_write(pid, mark.canary_c()),
+    );
+    match answers {
+        (Ok(true), Ok(false)) => Ok(true),
+        (Err(CheckFailed::Failed), _) | (_, Err(CheckFailed::Failed)) => Err(CheckFailed::Failed),
+        _ => Ok(false),
+    }
+}
+
+/// What one scan found, and why it cannot say nothing else runs.
+#[derive(Debug)]
+pub(crate) struct Scan {
+    /// Every process found matching a mark: positive evidence even when the scan is unvouched.
+    pub(crate) found: Vec<ProcId>,
+    /// `None` when every sentinel vouched for the scan; else why it is incomplete
+    /// ([`SweepError::SentinelGone`], [`SweepError::Drift`] or [`SweepError::Unknown`]).
+    pub(crate) doubt: Option<SweepError>,
+}
+
+impl Scan {
+    /// What it found, if the scan was vouched for; else its doubt.
+    pub(crate) fn vouched(self) -> Result<Vec<ProcId>, SweepError> {
+        match self.doubt {
+            None => Ok(self.found),
+            Some(doubt) => Err(doubt),
+        }
+    }
 }
 
 /// The processes among `all` that belong to any of `marks`: this user's (`uid`), started at or
 /// after `since` (microseconds since the epoch), sandboxed, the mark allowed and the canary
 /// denied; never a mark's sentinel.
 ///
-/// Each mark's sentinel must be among `all` and match its mark, whatever its start, else
-/// [`SweepError::Unknown`]: the positive control that holds with no agent left. Each mark's
-/// live agent is checked whatever its start; one that started more than [`ROOT_GRACE`] before
-/// `now` and does not match its own mark is [`SweepError::Drift`].
+/// Each mark's sentinel must be among `all` and match its mark, whatever its start: the positive
+/// control that holds with no agent left. A sentinel started and not ended that is no longer
+/// listed was killed ([`SweepError::SentinelGone`]); one missing or not matching, or a call that
+/// failed for any process but one gone since the listing, is [`SweepError::Unknown`]. Each
+/// mark's live agent is checked whatever its start; one that started more than [`ROOT_GRACE`]
+/// before `now` and does not match its own mark is [`SweepError::Drift`]. Each of these is the
+/// scan's doubt: what it found stands. A mark whose files are unusable fails the scan.
 pub(crate) fn scan(
     check: &dyn Checker,
     marks: &[&SessionMark],
@@ -240,38 +300,56 @@ pub(crate) fn scan(
     now: u64,
     uid: u32,
     all: &[Proc],
-) -> Result<Vec<ProcId>, SweepError> {
+) -> Result<Scan, SweepError> {
     let mut sentinels = Vec::with_capacity(marks.len());
     for mark in marks {
         mark.check_files()?;
-        sentinels.push(mark.sentinel().ok_or_else(|| SweepError::Unknown {
-            tag: mark.tag().to_owned(),
-        })?);
+        sentinels.push(mark.sentinel());
     }
+    let mut listed = vec![false; marks.len()];
     let mut vouched = vec![false; marks.len()];
+    let mut failed = false;
+    let mut drift = None;
     let grace = u64::try_from(ROOT_GRACE.as_micros()).unwrap_or(u64::MAX);
     let mut found = Vec::new();
     for process in all.iter().filter(|p| p.uid == uid) {
         let id = ProcId::of(process);
-        let sentinel = sentinels.iter().position(|s| *s == id);
+        let sentinel_of: Vec<usize> = (0..marks.len())
+            .filter(|&i| sentinels.get(i).copied().flatten() == Some(id))
+            .collect();
         let own = marks.iter().position(|m| m.root() == Some(id));
-        if process.start < since && own.is_none() && sentinel.is_none() {
+        if process.start < since && own.is_none() && sentinel_of.is_empty() {
             continue;
         }
-        let sandboxed = check.sandboxed(process.pid) == Some(true);
-        let hits: Vec<usize> = if sandboxed {
-            (0..marks.len())
-                .filter(|&i| marks.get(i).is_some_and(|m| matches(check, process.pid, m)))
-                .collect()
-        } else {
-            Vec::new()
+        let sandboxed = match check.sandboxed(process.pid) {
+            Ok(sandboxed) => sandboxed,
+            Err(CheckFailed::Gone) => false,
+            Err(CheckFailed::Failed) => {
+                failed = true;
+                false
+            }
         };
-        if let Some(i) = sentinel {
+        let mut hits = Vec::new();
+        if sandboxed {
+            for (i, mark) in marks.iter().enumerate() {
+                match matches(check, process.pid, mark) {
+                    Ok(true) => hits.push(i),
+                    Ok(false) => {}
+                    Err(_) => failed = true,
+                }
+            }
+        }
+        if !sentinel_of.is_empty() {
             // The control: never a process of the session, only proof the answers hold.
-            if hits.contains(&i)
-                && let Some(seen) = vouched.get_mut(i)
-            {
-                *seen = true;
+            for i in sentinel_of {
+                if let Some(seen) = listed.get_mut(i) {
+                    *seen = true;
+                }
+                if hits.contains(&i)
+                    && let Some(seen) = vouched.get_mut(i)
+                {
+                    *seen = true;
+                }
             }
             continue;
         }
@@ -279,183 +357,70 @@ pub(crate) fn scan(
             found.push(id);
         }
         let settled = process.start.saturating_add(grace) <= now;
-        if let Some(i) = own.filter(|i| settled && !hits.contains(i)) {
+        if drift.is_none()
+            && let Some(i) = own.filter(|i| settled && !hits.contains(i))
+        {
             let tag = marks.get(i).map(|m| m.tag().to_owned()).unwrap_or_default();
-            return Err(SweepError::Drift {
+            drift = Some(SweepError::Drift {
                 tag,
                 pid: process.pid,
             });
         }
     }
-    if let Some(i) = vouched.iter().position(|seen| !seen) {
-        let tag = marks.get(i).map(|m| m.tag().to_owned()).unwrap_or_default();
-        return Err(SweepError::Unknown { tag });
-    }
-    Ok(found)
+    let tag = |i: usize| marks.get(i).map(|m| m.tag().to_owned()).unwrap_or_default();
+    let killed = (0..marks.len()).find(|&i| {
+        sentinels.get(i).is_some_and(Option::is_some) && !listed.get(i).copied().unwrap_or(false)
+    });
+    let doubt = if let Some(i) = killed {
+        Some(SweepError::SentinelGone { tag: tag(i) })
+    } else if drift.is_some() {
+        drift
+    } else if let Some(i) = vouched.iter().position(|seen| !seen) {
+        Some(SweepError::Unknown { tag: tag(i) })
+    } else if failed {
+        Some(SweepError::Unknown { tag: tag(0) })
+    } else {
+        None
+    };
+    Ok(Scan { found, doubt })
 }
 
 /// Every running process of the sessions `marks` name that started at or after `since`, the
 /// launches' agents among them, their sentinels never. Each call checks the marks exist, that
 /// each sentinel matches and runs the drift check.
 pub fn processes(marks: &[&SessionMark], since: SystemTime) -> Result<Vec<ProcId>, SweepError> {
-    processes_with(api()?, marks, since)
+    scan_with(api()?, marks, since)?.vouched()
 }
 
-/// [`processes`] through `check`.
-fn processes_with(
+/// One [`scan`] of every process through `check`.
+fn scan_with(
     check: &dyn Checker,
     marks: &[&SessionMark],
     since: SystemTime,
-) -> Result<Vec<ProcId>, SweepError> {
+) -> Result<Scan, SweepError> {
     let all = all().ok_or(SweepError::Listing)?;
-    scan(
+    let scan = scan(
         check,
         marks,
         micros(since),
         micros(now_wall()),
         seatbelt::uid(),
         &all,
-    )
+    )?;
+    Ok(settle(scan, marks))
 }
 
-/// Ends every process of the sessions `marks` name, the launches' agents included, by
-/// [`end_session_processes`]; then, only on [`Gone`], ends each sentinel and removes the
-/// marks ([`SessionMark::remove`]). A mark that cannot be removed is logged: the session is
-/// gone.
-pub fn end_session(marks: &[&SessionMark], deadline: Instant) -> Result<Gone, Survivors> {
-    let gone = end_session_processes(marks, deadline)?;
-    for mark in marks {
-        if let Err(error) = mark.finish() {
-            tracing::warn!(tag = mark.tag(), %error, "a session mark could not be removed");
-        }
+/// `scan`, its doubt [`SweepError::SentinelGone`] when it was unknown because a sentinel was
+/// being killed: listed alive, it no longer matched by the time it was asked about.
+fn settle(mut scan: Scan, marks: &[&SessionMark]) -> Scan {
+    if matches!(scan.doubt, Some(SweepError::Unknown { .. }))
+        && let Some(mark) = marks.iter().find(|mark| mark.sentinel_dead())
+    {
+        scan.doubt = Some(SweepError::SentinelGone {
+            tag: mark.tag().to_owned(),
+        });
     }
-    Ok(gone)
-}
-
-/// The mode-switch gate: ends every process of the matter's sessions (`marks`, one per launch)
-/// and answers [`ReadOnly`] only on [`Gone`]. On [`Survivors`] the switch fails closed, an
-/// unvouched scan ([`SweepError::Unknown`]) among them.
-pub fn switch_to_read_only(
-    marks: &[&SessionMark],
-    deadline: Instant,
-) -> Result<ReadOnly, Survivors> {
-    match api() {
-        Ok(check) => gate_with(check, marks, deadline),
-        Err(why) => Err(Survivors {
-            left: kill_roots(marks),
-            why,
-        }),
-    }
-}
-
-/// [`switch_to_read_only`] through `check`.
-fn gate_with(
-    check: &dyn Checker,
-    marks: &[&SessionMark],
-    deadline: Instant,
-) -> Result<ReadOnly, Survivors> {
-    end_with(check, marks, deadline).map(|gone| ReadOnly { gone })
-}
-
-/// Stops, then kills, every process of the sessions `marks` name, until a scan finds none
-/// ([`Gone`]) or `deadline` passes ([`Survivors`], [`SweepError::Deadline`]). A scan that fails,
-/// an unvouched one or the drift check's above all, ends it at once ([`Survivors`] with that
-/// error): it never answers [`Gone`] on a scan it cannot trust. The sentinels are never
-/// signalled.
-///
-/// Each launch's agent leads its own session, so one `killpg(SIGSTOP)` freezes its group first.
-/// Then each round scans: every process found that is not stopped yet gets `SIGSTOP` (its start
-/// checked first), and the round repeats, since a stopped process cannot fork; once a round
-/// finds nothing new, each one found gets `SIGKILL`, its start checked again. The scans have no
-/// start filter (about 1.3 ms each rather than 0.2): process starts are wall-clock stamps, and a
-/// clock set back must not hide a process from the gate.
-pub fn end_session_processes(marks: &[&SessionMark], deadline: Instant) -> Result<Gone, Survivors> {
-    match api() {
-        Ok(check) => end_with(check, marks, deadline),
-        Err(why) => Err(Survivors {
-            left: kill_roots(marks),
-            why,
-        }),
-    }
-}
-
-/// The launches' agents that still run with their starts.
-fn live_roots(marks: &[&SessionMark]) -> Vec<ProcId> {
-    marks
-        .iter()
-        .filter_map(|mark| mark.root())
-        .filter(|root| start_of(root.pid) == Some(root.start))
-        .collect()
-}
-
-/// Kills the launches' agents that still run (by their starts); answers them.
-fn kill_roots(marks: &[&SessionMark]) -> Vec<ProcId> {
-    let left = live_roots(marks);
-    for root in &left {
-        Libproc.signal(root.pid, root.start, libc::SIGKILL);
-    }
-    left
-}
-
-/// [`end_session_processes`] through `check`.
-fn end_with(
-    check: &dyn Checker,
-    marks: &[&SessionMark],
-    deadline: Instant,
-) -> Result<Gone, Survivors> {
-    for root in live_roots(marks) {
-        Libproc.signal_group(root.pid, libc::SIGSTOP);
-    }
-    let mut stopped: HashSet<ProcId> = HashSet::new();
-    let mut ended: HashSet<ProcId> = HashSet::new();
-    loop {
-        let mut targets = match processes_with(check, marks, UNIX_EPOCH) {
-            Ok(found) => found,
-            // The scan cannot be trusted; the agents themselves are known, so they go.
-            Err(why) => {
-                return Err(Survivors {
-                    left: kill_roots(marks),
-                    why,
-                });
-            }
-        };
-        // An agent still starting may not carry its profile yet; it is ended all the same.
-        for root in live_roots(marks) {
-            if !targets.contains(&root) {
-                targets.push(root);
-            }
-        }
-        if targets.is_empty() {
-            return Ok(Gone { ended: ended.len() });
-        }
-        if now() >= deadline {
-            for id in &targets {
-                Libproc.signal(id.pid, id.start, libc::SIGKILL);
-            }
-            return Err(Survivors {
-                left: targets,
-                why: SweepError::Deadline,
-            });
-        }
-        let fresh: Vec<ProcId> = targets
-            .iter()
-            .copied()
-            .filter(|id| !stopped.contains(id))
-            .collect();
-        if fresh.is_empty() {
-            for id in &targets {
-                if Libproc.signal(id.pid, id.start, libc::SIGKILL) {
-                    ended.insert(*id);
-                }
-            }
-            thread::park_timeout(END_PAUSE);
-        } else {
-            for id in fresh {
-                Libproc.signal(id.pid, id.start, libc::SIGSTOP);
-                stopped.insert(id);
-            }
-        }
-    }
+    scan
 }
 
 /// Every process this user can read, zombies left out; `None` when the listing fails.
@@ -472,46 +437,6 @@ fn all() -> Option<Vec<Proc>> {
 /// The start of running process `pid`; `None` when it is gone, unreadable or a zombie.
 pub(crate) fn start_of(pid: u32) -> Option<u64> {
     Libproc.info(pid).map(|process| process.start)
-}
-
-/// Removes the stale marks in `dir` (canonical), the marks folder: those of launchers of an
-/// earlier host, whose tag names a host pid that is not this process's and runs no longer, and
-/// that no process matches ([`SessionMark::remove_if_unused`]). A mark a process still
-/// matches, one whose scan fails, or one of a host that still runs is never touched. Answers how
-/// many went.
-pub(crate) fn clean_stale(dir: &Path) -> usize {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return 0;
-    };
-    let mut removed = 0;
-    for entry in entries.flatten() {
-        let Some(host) = entry.file_name().to_str().and_then(host_of) else {
-            continue;
-        };
-        if host == std::process::id() || host_alive(host) {
-            continue;
-        }
-        if let Ok(mark) = SessionMark::open(&entry.path())
-            && mark.remove_if_unused()
-        {
-            removed += 1;
-        }
-    }
-    removed
-}
-
-/// The host pid a launcher's tag names: `clauseo-<pid>-<n>-<nonce>`.
-fn host_of(tag: &str) -> Option<u32> {
-    tag.strip_prefix(TAG_PREFIX)?
-        .split('-')
-        .next()?
-        .parse()
-        .ok()
-}
-
-/// Whether `pid` names a running process (another host may still hold its marks).
-fn host_alive(pid: u32) -> bool {
-    Libproc.info(pid).is_some() || Libproc.session_of(pid).is_some()
 }
 
 /// Microseconds since the epoch; 0 before it.

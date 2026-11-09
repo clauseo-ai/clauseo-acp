@@ -82,8 +82,10 @@ impl SeatbeltLauncher {
     /// notes, temp or browser socket folder, the Claude store, the credential link): an agent
     /// could move the mark away and blind the sweep. [`Error::SweepUnavailable`] when this
     /// macOS lacks the private call the sweep needs. [`Error::Launch`] when the mark cannot be
-    /// made. Before it, the stale marks of an earlier host's launchers in `marks` are removed:
-    /// those no process matches any longer.
+    /// made. Before it, the marks an earlier host's launchers left in `marks` (a host that
+    /// runs no longer, by its pid and start) are dealt with: every process each one still finds
+    /// is ended, a fresh control vouching for the scan, and then the mark is removed; one whose
+    /// scan stays unknown is kept for the next launcher.
     pub fn new(
         policy: Policy,
         opts: SpawnOptions,
@@ -93,15 +95,22 @@ impl SeatbeltLauncher {
     ) -> Result<SeatbeltLauncher, Error> {
         require_sweep(sweep::api().map(drop))?;
         let n = NEXT_TAG.fetch_add(1, Ordering::Relaxed);
+        let host = std::process::id();
+        // The host's start names it with its pid, so a later host tells it from a reused pid.
+        let start = sweep::start_of(host).ok_or_else(|| {
+            Error::Launch(clauseo_process::Error::Os {
+                what: "this process's start could not be read",
+                source: io::Error::from(io::ErrorKind::NotFound),
+            })
+        })?;
         let tag = format!(
-            "{}{}-{n}-{:016x}",
+            "{}{host}-{start}-{n}-{:016x}",
             profile::TAG_PREFIX,
-            std::process::id(),
             nonce()?
         );
         let writable = profile::build(&policy, &tag);
         let marks = check_marks(writable.writable(), marks)?;
-        // Marks a crashed earlier host left, which no process matches any longer.
+        // Marks a crashed earlier host left: what they still find is ended first.
         let stale = sweep::clean_stale(&marks);
         if stale > 0 {
             tracing::info!(stale, "stale session marks removed");
@@ -212,7 +221,8 @@ impl SeatbeltLauncher {
         &self.profile
     }
 
-    /// The launch tag every deny rule carries: `clauseo-<pid of the host>-<counter>`.
+    /// The launch tag every deny rule carries:
+    /// `clauseo-<pid of the host>-<its start, µs>-<counter>-<random nonce>`.
     pub fn tag(&self) -> &str {
         &self.tag
     }

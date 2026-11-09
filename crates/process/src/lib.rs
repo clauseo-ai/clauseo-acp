@@ -116,6 +116,8 @@ mod timer;
 pub use descendants::{Cutoff, Descendants, Snapshot, Swept};
 pub use error::Error;
 pub use handle::{ExitReport, Handle, ShutdownOutcome, TreeWatch};
+#[cfg(unix)]
+pub use launch::close_other_fds;
 pub use launch::{
     Launched, Launcher, NODE_ENV, PassthroughLauncher, SpawnOptions, cloexec_pipe, is_node_env,
     spawn_in_tree, spawn_locked,

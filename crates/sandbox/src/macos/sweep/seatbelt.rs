@@ -13,7 +13,7 @@ use std::ffi::{CStr, c_char, c_int, c_void};
 use std::io;
 use std::sync::OnceLock;
 
-use super::{Checker, SweepError};
+use super::{Answer, CheckFailed, Checker, SweepError};
 
 /// `int sandbox_check(pid_t pid, const char *operation, enum sandbox_filter_type type, ...)`:
 /// 0 allowed, 1 denied, -1 failed (`errno`). With `SANDBOX_FILTER_PATH` the variadic argument is
@@ -75,20 +75,24 @@ pub(super) fn resolve(lookup: impl Fn(&CStr) -> *mut c_void) -> Option<Seatbelt>
 }
 
 impl Checker for Seatbelt {
-    fn sandboxed(&self, pid: u32) -> Option<bool> {
-        let pid = libc::pid_t::try_from(pid).ok()?;
+    fn sandboxed(&self, pid: u32) -> Answer {
+        let Ok(pid) = libc::pid_t::try_from(pid) else {
+            return Err(CheckFailed::Failed);
+        };
         // SAFETY: a plain pid, a null operation (allowed with FILTER_NONE, which reads no
         // variadic argument) and an integer flag; the call reads nothing else.
         let answer = unsafe { (self.check)(pid, std::ptr::null(), FILTER_NONE | self.no_report) };
         match answer {
-            1 => Some(true),
-            0 => Some(false),
-            _ => None,
+            1 => Ok(true),
+            0 => Ok(false),
+            _ => Err(failure()),
         }
     }
 
-    fn may_write(&self, pid: u32, path: &CStr) -> Option<bool> {
-        let pid = libc::pid_t::try_from(pid).ok()?;
+    fn may_write(&self, pid: u32, path: &CStr) -> Answer {
+        let Ok(pid) = libc::pid_t::try_from(pid) else {
+            return Err(CheckFailed::Failed);
+        };
         // SAFETY: the operation is a NUL-terminated literal; with FILTER_PATH the call reads
         // exactly one variadic argument, a NUL-terminated path, which `path` is and outlives
         // the call.
@@ -101,10 +105,20 @@ impl Checker for Seatbelt {
             )
         };
         match answer {
-            0 => Some(true),
-            1 => Some(false),
-            _ => None,
+            0 => Ok(true),
+            1 => Ok(false),
+            _ => Err(failure()),
         }
+    }
+}
+
+/// Why the call just failed: `ESRCH` is a process that exited since the listing, anything else
+/// a call that no longer answers (the scan is then unknown, never "no match").
+fn failure() -> CheckFailed {
+    if io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
+        CheckFailed::Gone
+    } else {
+        CheckFailed::Failed
     }
 }
 

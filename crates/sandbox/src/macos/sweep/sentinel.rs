@@ -5,8 +5,11 @@
 //! closed once no agent is left to check it against (0038, "The session sweep").
 //!
 //! It dies with the host: when the host exits, crashed or not, the pipe's last writer goes and
-//! `cat` reads its end. It is never counted, stopped or killed by a scan's callers: the scan
-//! leaves it out of what it finds.
+//! `cat` reads its end. It is started as the launches are (#827's descriptor hygiene): under
+//! `clauseo_process::spawn_locked`, so no pipe of another start is half made when it forks, and
+//! with every other descriptor closed before it runs, so it holds no other launch's pipe open
+//! and no other start can hold its own. It is never counted, stopped or killed by a scan's
+//! callers: the scan leaves it out of what it finds.
 
 use std::ffi::OsString;
 use std::io;
@@ -30,21 +33,24 @@ pub(crate) struct Sentinel {
 
 impl Sentinel {
     /// Starts `sandbox-exec <args> /bin/cat` with no variables, in `/`, its standard input a
-    /// pipe this process holds and its output discarded.
+    /// pipe this process holds, its output discarded and no other descriptor open, under the
+    /// lock every launch holds while it starts.
     #[expect(
         clippy::disallowed_methods,
         reason = "the sentinel is the host's own child, outside every launch's tree and cap"
     )]
     pub(super) fn start(args: &[OsString]) -> io::Result<Sentinel> {
-        let mut child = Command::new(SANDBOX_EXEC)
+        let mut command = Command::new(SANDBOX_EXEC);
+        command
             .args(args)
             .arg(PROGRAM)
             .env_clear()
             .current_dir("/")
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()?;
+            .stderr(Stdio::null());
+        clauseo_process::close_other_fds(&mut command);
+        let mut child = clauseo_process::spawn_locked(|| command.spawn())?;
         let stdin = child.stdin.take();
         let pid = child.id();
         // An unreaped child keeps its pid and start; a sentinel that is gone already is useless.

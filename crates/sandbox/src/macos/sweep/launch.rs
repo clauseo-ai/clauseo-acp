@@ -4,12 +4,12 @@ use std::sync::Arc;
 use std::thread;
 
 use super::{
-    END_PAUSE, ProcId, SessionMark, SweepError, all, api, micros, now_wall, scan, seatbelt,
-    start_of,
+    END_PAUSE, ProcId, Scan, SessionMark, SweepError, all, api, micros, now_wall, scan, seatbelt,
+    settle, start_of,
 };
 use crate::macos::process_cap::Proc;
 use crate::macos::process_cap::libproc::Libproc;
-use crate::macos::process_cap::watchdog::{Escapes, System as _};
+use crate::macos::process_cap::watchdog::{Escaped, Escapes, System as _};
 
 /// How many rounds the hand-over runs before it leaves the rest to the watchdog's next sweep.
 const TAKE_OVER_ROUNDS: usize = 20;
@@ -27,53 +27,66 @@ impl LaunchSweep {
         LaunchSweep { mark }
     }
 
-    /// The launch's processes among `all` but its agent, with no start filter.
-    fn found(&self, all: &[Proc]) -> Result<Vec<ProcId>, SweepError> {
-        let found = scan(
-            api()?,
+    /// The launch's processes among `all` but its agent, with no start filter, and the scan's
+    /// doubt.
+    fn found(&self, all: &[Proc]) -> Result<Scan, SweepError> {
+        let mut scan = settle(
+            scan(
+                api()?,
+                &[&self.mark],
+                0,
+                micros(now_wall()),
+                seatbelt::uid(),
+                all,
+            )?,
             &[&self.mark],
-            0,
-            micros(now_wall()),
-            seatbelt::uid(),
-            all,
-        )?;
+        );
         let root = self.mark.root();
-        Ok(found.into_iter().filter(|id| Some(*id) != root).collect())
+        scan.found.retain(|id| Some(*id) != root);
+        Ok(scan)
     }
 }
 
 impl Escapes for LaunchSweep {
     /// The processes among `rest` of this launch, the agent and the sentinel left out: those
     /// that left the agent's tree and group are found by the mark. With no start filter, so a
-    /// clock set back hides none. `Ok(None)` once session end ended the mark.
-    fn escaped(&self, rest: &[Proc]) -> Result<Option<Vec<Proc>>, SweepError> {
+    /// clock set back hides none. An unvouched scan answers what it found with its doubt.
+    /// `Ok(None)` once session end ended the mark.
+    fn escaped(&self, rest: &[Proc]) -> Result<Option<Escaped>, SweepError> {
         if self.mark.ended() {
             return Ok(None);
         }
         match self.found(rest) {
-            Ok(found) => Ok(Some(
-                rest.iter()
-                    .filter(|p| found.contains(&ProcId::of(p)))
+            // Session end ended the mark (and its sentinel) between the look and the scan.
+            Ok(Scan { doubt: Some(_), .. }) | Err(_) if self.mark.ended() => Ok(None),
+            Ok(scan) => Ok(Some(Escaped {
+                found: rest
+                    .iter()
+                    .filter(|p| scan.found.contains(&ProcId::of(p)))
                     .copied()
                     .collect(),
-            )),
-            // Session end ended the mark between the look and the scan.
-            Err(_) if self.mark.ended() => Ok(None),
+                doubt: scan.doubt,
+            })),
             Err(error) => Err(error),
         }
     }
 
+    /// Restarts the launch's sentinel if it is dead ([`SessionMark::revive`]).
+    fn revive(&self) -> bool {
+        api().is_ok_and(|check| self.mark.revive(check))
+    }
+
     /// What a trip's kill rounds left running (`left`), and every process of this launch the
-    /// mark still finds (the agent and the sentinel left out), stopped and then killed, each by
-    /// its start, for up to [`TAKE_OVER_ROUNDS`] rounds. Answers how many still run; the
-    /// watchdog's next sweep counts them again.
+    /// mark still finds (the agent and the sentinel left out; an unvouched scan's finds too),
+    /// stopped and then killed, each by its start, for up to [`TAKE_OVER_ROUNDS`] rounds.
+    /// Answers how many still run; the watchdog's next sweep counts them again.
     fn take_over(&self, left: &[Proc]) -> usize {
         let mut targets: Vec<ProcId> = left.iter().map(ProcId::of).collect();
         for _ in 0..TAKE_OVER_ROUNDS {
             if let Some(all) = all()
-                && let Ok(found) = self.found(&all)
+                && let Ok(scan) = self.found(&all)
             {
-                for id in found {
+                for id in scan.found {
                     if !targets.contains(&id) {
                         targets.push(id);
                     }

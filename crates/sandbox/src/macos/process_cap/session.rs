@@ -17,6 +17,9 @@ pub enum ProcessCapNotice {
     /// The watchdog could no longer count the agent's processes (a listing or a read of the
     /// agent failed), so it ended the agent rather than leave it uncounted.
     CapFailed,
+    /// The session sweep's sentinel was killed mid-session, which only tampering explains, so
+    /// the watchdog ended the agent and every process of its launch.
+    Tampered,
 }
 
 /// [`ProcessCapNotice::TooManyPrograms`]'s text. Not Windows' sentence: here the cap ends the
@@ -34,13 +37,21 @@ pub(crate) const ASSISTANT_STOPPED: &str = "The AI tool kept starting too many p
 pub(crate) const CAP_FAILED: &str = "Clauseo couldn't keep track of the AI tool's programs, so it \
                                      stopped the tool to be safe. Start it again.";
 
+/// [`ProcessCapNotice::Tampered`]'s text: something ended the check that keeps track of the
+/// tool's programs, so the tool and its programs were ended.
+pub(crate) const TAMPERED: &str = "Something stopped the check Clauseo uses to keep track of the \
+                                   AI tool's programs, so Clauseo stopped the tool and everything \
+                                   it started. Start it again.";
+
 impl ProcessCapNotice {
-    /// Its English text: [`TOO_MANY_PROGRAMS`], [`ASSISTANT_STOPPED`] or [`CAP_FAILED`].
+    /// Its English text: [`TOO_MANY_PROGRAMS`], [`ASSISTANT_STOPPED`], [`CAP_FAILED`] or
+    /// [`TAMPERED`].
     pub fn text(self) -> &'static str {
         match self {
             ProcessCapNotice::TooManyPrograms => TOO_MANY_PROGRAMS,
             ProcessCapNotice::AssistantStopped => ASSISTANT_STOPPED,
             ProcessCapNotice::CapFailed => CAP_FAILED,
+            ProcessCapNotice::Tampered => TAMPERED,
         }
     }
 
@@ -50,6 +61,7 @@ impl ProcessCapNotice {
             ProcessCapNotice::TooManyPrograms => 1,
             ProcessCapNotice::AssistantStopped => 2,
             ProcessCapNotice::CapFailed => 4,
+            ProcessCapNotice::Tampered => 8,
         }
     }
 }

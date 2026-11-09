@@ -6,6 +6,12 @@
 //! ends once neither finds anything or session end ended the mark, or when it can no longer
 //! count, after it ended the agent ([`Watch::fail`]).
 //!
+//! A scan of the mark its sentinel cannot vouch for still names what it found. The watchdog
+//! then ends the session: the agent, its session and everything the mark finds, at every poll
+//! until a scan finds nothing ([`Watch::doubted`]). A sentinel killed mid-session, which only
+//! tampering explains, is told as [`ProcessCapNotice::Tampered`] and restarted; any other
+//! doubt (an unmatched sentinel, drift, a failed check) as [`ProcessCapNotice::CapFailed`].
+//!
 //! Each [`POLL`] it lists every pid (`proc_listallpids`) and asks each one's session (`getsid`):
 //! the members of the agent's session, which job control (`set -m`, `setpgid`) does not leave,
 //! orphans included. A zombie has no session to `getsid` (it answers `ESRCH`), so zombies never
@@ -55,13 +61,24 @@ pub(crate) trait System {
     fn pause(&self, time: Duration);
 }
 
+/// What the session sweep found among the processes the tree walk did not find.
+#[derive(Debug, Default)]
+pub(crate) struct Escaped {
+    /// The launch's processes found, the agent and the sentinel left out.
+    pub(crate) found: Vec<Proc>,
+    /// Why the scan cannot say nothing else runs; `None` when its sentinel vouched for it.
+    pub(crate) doubt: Option<SweepError>,
+}
+
 /// What the watchdog asks the session sweep about its own launch: `sweep::LaunchSweep`, which
 /// holds that launch's mark and no other, or a test's.
 pub(crate) trait Escapes: Send {
     /// The launch's processes among `rest` (processes the tree walk did not find), the agent
-    /// and the launch's sentinel left out; `Ok(None)` once session end ended the launch; an
-    /// error when the scan failed (the watchdog then fails closed).
-    fn escaped(&self, rest: &[Proc]) -> Result<Option<Vec<Proc>>, SweepError>;
+    /// and the launch's sentinel left out, with the scan's doubt; `Ok(None)` once session end
+    /// ended the launch; an error when the scan failed outright (the watchdog then fails closed).
+    fn escaped(&self, rest: &[Proc]) -> Result<Option<Escaped>, SweepError>;
+    /// Restarts the launch's sentinel if it is dead; whether it did.
+    fn revive(&self) -> bool;
     /// Stops and kills what a trip's kill rounds left (`left`) with every process of the
     /// launch the mark still finds, the agent left out; answers how many still run.
     fn take_over(&self, left: &[Proc]) -> usize;
@@ -106,6 +123,9 @@ pub(crate) struct Watch {
     /// Whether the agent's session has emptied with processes of the launch still found by its
     /// mark: from then on they are read at each sweep.
     orphaned: bool,
+    /// Whether the watchdog is ending the session after a doubted scan: from then on every
+    /// poll kills everything it finds, until a scan finds nothing.
+    ending: bool,
 }
 
 impl std::fmt::Debug for Watch {
@@ -114,6 +134,7 @@ impl std::fmt::Debug for Watch {
             .field("root", &self.root)
             .field("polls", &self.polls)
             .field("orphaned", &self.orphaned)
+            .field("ending", &self.ending)
             .finish_non_exhaustive()
     }
 }
@@ -173,6 +194,7 @@ impl Watch {
             polls: 0,
             escapes,
             orphaned: false,
+            ending: false,
         }))
     }
 
@@ -203,31 +225,37 @@ impl Watch {
     /// Once the session is empty, the launch's mark alone counts what is left (the agent and
     /// its session are gone, so its pid may name another process and is never signalled as a
     /// group): read at once, then at each sweep, until it finds nothing or session end ended it.
+    /// A scan its sentinel cannot vouch for ends the session ([`Watch::doubted`]); from then on
+    /// each poll ends what it finds ([`Watch::end_round`]).
     pub(crate) fn step(&mut self, system: &impl System) -> Step {
         self.polls = self.polls.wrapping_add(1);
         let sweep = self.polls.is_multiple_of(SWEEP_EVERY);
         let Some(members) = members(system, self.root.pid) else {
             return self.fail(system, "the process listing failed", true);
         };
+        if self.ending {
+            return self.end_round(system, !members.is_empty());
+        }
         if members.is_empty() {
             if self.orphaned && !sweep {
                 return Step::Watch;
             }
-            let found = match self.read(system, false) {
-                Ok(found) => found,
+            let read = match self.read(system, false) {
+                Ok(Some(read)) => read,
+                Ok(None) => return Step::Done,
                 Err(reason) => return self.fail(system, reason, false),
             };
-            match found {
-                None => return Step::Done,
-                Some(found) if found.is_empty() => return Step::Done,
-                Some(found) => {
-                    self.orphaned = true;
-                    if found.len() > AGENT_PROCESS_CAP {
-                        self.trip(system, false, false);
-                    }
-                    return Step::Watch;
-                }
+            if let Some(doubt) = read.doubt {
+                return self.doubted(system, &doubt, &read.found, false);
             }
+            if read.found.is_empty() {
+                return Step::Done;
+            }
+            self.orphaned = true;
+            if read.found.len() > AGENT_PROCESS_CAP {
+                self.trip(system, false, false);
+            }
+            return Step::Watch;
         }
         // While the session lives no other process has the agent's pid, so a member with it is
         // the agent.
@@ -239,14 +267,91 @@ impl Watch {
         if count <= AGENT_PROCESS_CAP && !sweep {
             return Step::Watch;
         }
-        let found = match self.read(system, true) {
-            Ok(found) => found.unwrap_or_default(),
+        let read = match self.read(system, true) {
+            Ok(read) => read.unwrap_or_default(),
             Err(reason) => return self.fail(system, reason, true),
         };
-        if found.len() > AGENT_PROCESS_CAP {
+        if let Some(doubt) = read.doubt {
+            return self.doubted(system, &doubt, &read.found, true);
+        }
+        if read.found.len() > AGENT_PROCESS_CAP {
             self.trip(system, agent, true);
         }
         Step::Watch
+    }
+
+    /// A scan of the mark its sentinel could not vouch for (`doubt`) found `found`: it is
+    /// positive evidence all the same. The session is ended: the agent, its group and its
+    /// session's members while it lives (`session`), and everything found, each by its start.
+    ///
+    /// A sentinel killed mid-session ([`SweepError::SentinelGone`]): only tampering explains
+    /// it, so the lawyer is told [`ProcessCapNotice::Tampered`], and the sentinel is restarted
+    /// so a later scan can be vouched for again. Any other doubt is the cap losing count
+    /// ([`ProcessCapNotice::CapFailed`]). Either way the watch goes on, ending what each poll
+    /// finds, while anything is found ([`Watch::end_round`]); with nothing found and no
+    /// sentinel to restart it stops.
+    fn doubted(
+        &mut self,
+        system: &impl System,
+        doubt: &SweepError,
+        found: &[Proc],
+        session: bool,
+    ) -> Step {
+        let root = self.root;
+        let tampered = matches!(doubt, SweepError::SentinelGone { .. });
+        if tampered {
+            tracing::error!(
+                kind = "sentinel_killed",
+                agent = root.pid,
+                %doubt,
+                found = found.len(),
+                "the session sweep's sentinel was killed mid-session: the watchdog ends the session"
+            );
+        } else {
+            tracing::error!(
+                kind = "sweep_unvouched",
+                agent = root.pid,
+                %doubt,
+                found = found.len(),
+                "the process cap's session sweep cannot vouch for its scan: it ends the session"
+            );
+        }
+        self.kill_all(system, found, session);
+        self.cap.tell(if tampered {
+            ProcessCapNotice::Tampered
+        } else {
+            ProcessCapNotice::CapFailed
+        });
+        self.ending = true;
+        if tampered {
+            self.escapes.revive();
+            return Step::Watch;
+        }
+        if found.is_empty() {
+            Step::Done
+        } else {
+            Step::Watch
+        }
+    }
+
+    /// A poll of a session being ended: everything read (the session's while it lives, and
+    /// what the mark finds, vouched for or not) is killed. A sentinel found dead again is
+    /// restarted. Done once a read finds nothing.
+    fn end_round(&mut self, system: &impl System, session: bool) -> Step {
+        let read = match self.read(system, session) {
+            Ok(Some(read)) => read,
+            Ok(None) => return Step::Done,
+            Err(reason) => return self.fail(system, reason, session),
+        };
+        self.kill_all(system, &read.found, session);
+        if matches!(read.doubt, Some(SweepError::SentinelGone { .. })) {
+            self.escapes.revive();
+        }
+        if read.found.is_empty() {
+            Step::Done
+        } else {
+            Step::Watch
+        }
     }
 
     /// Whether the agent still reads with its start, or has just exited (gone between the
@@ -260,9 +365,10 @@ impl Watch {
 
     /// The agent's running descendants: by session and parent while its session lives
     /// (`session`), and those the launch's mark finds among the rest (a `setsid` orphan), only
-    /// those once the session is empty. `Ok(None)` when the session is empty and session end
-    /// ended the launch; an error when the listing or the session sweep failed.
-    fn read(&self, system: &impl System, session: bool) -> Result<Option<Vec<Proc>>, &'static str> {
+    /// those once the session is empty, with the mark's scan's doubt. `Ok(None)` when the
+    /// session is empty and session end ended the launch; an error when the listing failed or
+    /// the session sweep failed outright.
+    fn read(&self, system: &impl System, session: bool) -> Result<Option<Escaped>, &'static str> {
         let all: Vec<Proc> = system
             .pids()
             .ok_or("the process listing failed")?
@@ -281,16 +387,19 @@ impl Watch {
             .into_iter()
             .filter(|p| !known.contains(&p.pid))
             .collect();
-        match self.escapes.escaped(&rest) {
-            Ok(Some(escaped)) => found.extend(escaped),
-            Ok(None) if session => {}
+        let doubt = match self.escapes.escaped(&rest) {
+            Ok(Some(escaped)) => {
+                found.extend(escaped.found);
+                escaped.doubt
+            }
+            Ok(None) if session => None,
             Ok(None) => return Ok(None),
             Err(error) => {
                 tracing::error!(agent = self.root.pid, %error, "the process cap's session sweep failed");
                 return Err("the session sweep failed");
             }
-        }
-        Ok(Some(found))
+        };
+        Ok(Some(Escaped { found, doubt }))
     }
 
     /// Stops and kills every descendant of the agent, and the agent too when [`verdict`] says
@@ -313,10 +422,11 @@ impl Watch {
         let mut stopped: Vec<Proc> = Vec::new();
         let mut seen = HashSet::new();
         for _ in 0..STOP_ROUNDS {
-            let Ok(Some(found)) = self.read(system, session) else {
+            let Ok(Some(read)) = self.read(system, session) else {
                 break;
             };
-            let fresh: Vec<Proc> = found
+            let fresh: Vec<Proc> = read
+                .found
                 .into_iter()
                 .filter(|p| seen.insert((p.pid, p.start)))
                 .collect();
@@ -342,7 +452,8 @@ impl Watch {
                 .read(system, session)
                 .ok()
                 .flatten()
-                .unwrap_or_default();
+                .unwrap_or_default()
+                .found;
             if left.is_empty() {
                 break;
             }
@@ -394,12 +505,21 @@ impl Watch {
     /// for the reason [`Watch::trip`] gives, while its session lives (`session`); once it is
     /// empty, only the agent is signalled, by its start.
     fn fail(&self, system: &impl System, reason: &'static str, session: bool) -> Step {
-        let root = self.root;
         tracing::error!(
-            agent = root.pid,
+            agent = self.root.pid,
             reason,
             "the agent's process cap lost count: it ends the agent and its session"
         );
+        self.kill_all(system, &[], session);
+        self.cap.tell(ProcessCapNotice::CapFailed);
+        Step::Done
+    }
+
+    /// Kills the agent's group, the agent (by its start) and every member of its session it can
+    /// still list (each by its start) while the session lives (`session`; else only the agent,
+    /// by its start), and each of `found`, by its start.
+    fn kill_all(&self, system: &impl System, found: &[Proc], session: bool) {
+        let root = self.root;
         if session {
             system.signal_group(root.pid, libc::SIGKILL);
         }
@@ -411,8 +531,9 @@ impl Watch {
                 }
             }
         }
-        self.cap.tell(ProcessCapNotice::CapFailed);
-        Step::Done
+        for process in found {
+            system.signal(process.pid, process.start, libc::SIGKILL);
+        }
     }
 }
 

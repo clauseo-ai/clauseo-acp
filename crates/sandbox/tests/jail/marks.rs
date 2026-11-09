@@ -1,6 +1,7 @@
 //! Leftover session marks (`macos/sweep/mark.rs`): a mark goes with its last holder once no
-//! process matches it, and a later launcher removes an earlier host's marks that no process
-//! matches; a mark a live process still matches is never removed.
+//! process matches it, and a mark a live process of a running host still matches is never
+//! removed. A later launcher ends what an earlier, crashed host's marks still find, a fresh
+//! control vouching for the scan, and then removes them.
 
 #![expect(
     clippy::disallowed_methods,
@@ -13,12 +14,15 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use clauseo_process::{LaunchSpec, Launcher, PassthroughLauncher, SpawnOptions};
+use futures::StreamExt;
+use futures::io::{AsyncBufReadExt, BufReader};
 use nix::errno::Errno;
 use nix::sys::signal::{Signal, kill};
 use nix::unistd::Pid;
 
+use crate::escaper::ESCAPE_DIR;
 use crate::support::{World, launcher, marks_of};
-use crate::sweep::{Agent, deadline, sleeper};
+use crate::sweep::{Agent, ESCAPE, Guard, alive, deadline, left_after, pids_in, sleeper, start};
 
 #[test]
 fn a_mark_goes_with_its_last_holder_once_nothing_runs() {
@@ -48,7 +52,7 @@ fn gone_within(path: &std::path::Path) -> bool {
 }
 
 #[test]
-fn a_mark_a_live_process_matches_survives_its_drop_and_the_clean_up() {
+fn a_mark_a_live_process_matches_survives_its_drop_and_a_stale_one_s_process_is_ended() {
     let w = World::new();
     let policy = w.builder().build().unwrap();
     let marks = marks_of(&policy);
@@ -71,7 +75,7 @@ fn a_mark_a_live_process_matches_survives_its_drop_and_the_clean_up() {
         .rev()
         .find(|&pid| kill(Pid::from_raw(pid), None) == Err(Errno::ESRCH))
         .unwrap();
-    let left = marks.join(format!("clauseo-{dead}-0"));
+    let left = marks.join(format!("clauseo-{dead}-1-0-00"));
     std::fs::create_dir(&left).unwrap();
     std::fs::write(left.join("mark"), "").unwrap();
     std::fs::write(left.join("canary"), "").unwrap();
@@ -93,19 +97,10 @@ fn a_mark_a_live_process_matches_survives_its_drop_and_the_clean_up() {
     .unwrap();
     let mut matcher = outside.launch(&spec).unwrap();
     std::thread::park_timeout(Duration::from_millis(500));
-    let (next, _) = launcher(policy.clone());
-    assert!(
-        left.join("mark").exists(),
-        "the clean-up removed a mark a process matches"
-    );
-    drop(next);
-
-    // Once that process is gone, the next launcher's clean-up removes it.
-    let pid = Pid::from_raw(i32::try_from(matcher.handle.pid()).unwrap());
-    kill(pid, Signal::SIGKILL).unwrap();
-    let report = async_io::block_on(matcher.handle.exited());
-    assert_eq!(report.signal(), Some(9));
+    // The next launcher ends that process, then removes the mark.
     let (_next, _) = launcher(policy);
+    let report = async_io::block_on(matcher.handle.exited());
+    assert_eq!(report.signal(), Some(9), "{report:?}");
     assert!(!left.exists(), "the stale mark stayed");
 
     // The running agent's own mark is still there (its watchdog, the last holder, keeps it),
@@ -118,4 +113,98 @@ fn a_mark_a_live_process_matches_survives_its_drop_and_the_clean_up() {
     .unwrap();
     async_io::block_on(handle.exited());
     assert!(gone_within(&ours), "the mark stayed after its last process");
+}
+
+/// The world folder the crash test's host runs in.
+const CRASH_WORLD: &str = "CLAUSEO_JAIL_CRASH_WORLD";
+
+/// Run by the crash test as a host of its own, never on its own: in the world at
+/// `CRASH_WORLD`, it launches the escaper through a launcher whose marks are the world's,
+/// prints the agent's pid, and waits for the test to kill it (30 s at most).
+#[test]
+#[ignore = "run by the crash test as a host of its own"]
+fn crash_host() {
+    let Some(root) = std::env::var_os(CRASH_WORLD) else {
+        return;
+    };
+    let w = World::reopen(PathBuf::from(root));
+    let exe = dunce::canonicalize(std::env::current_exe().unwrap()).unwrap();
+    let policy = w.builder().runtime(exe.parent().unwrap()).build().unwrap();
+    let (jail, _) = launcher(policy);
+    let (agent, first) = start(
+        &jail,
+        &w.at("m1"),
+        ESCAPE,
+        &[exe.to_str().unwrap()],
+        &[(ESCAPE_DIR, w.at("m1/escape").to_str().unwrap())],
+    );
+    assert_eq!(first, "escaped");
+    println!("agent {}", agent.pid());
+    std::thread::park_timeout(Duration::from_secs(30));
+}
+
+#[test]
+fn a_crashed_host_s_escaped_process_is_ended_by_the_next_launcher() {
+    // D-M2: a host is killed while its agent's escaped process runs; neither dies with it. The
+    // next launcher ends both, a control of its own vouching, and removes the host's mark.
+    let w = World::new();
+    let guard = Guard::default();
+    let dir = w.dir("m1/escape");
+    let exe = std::env::current_exe().unwrap();
+    let args = [
+        "--exact",
+        "marks::crash_host",
+        "--ignored",
+        "--nocapture",
+        "--test-threads",
+        "1",
+    ];
+    let env = BTreeMap::from([(OsString::from(CRASH_WORLD), w.root().as_os_str().to_owned())]);
+    let spec = LaunchSpec::new(
+        exe,
+        args.iter().map(OsString::from).collect(),
+        env,
+        w.at("outside"),
+    )
+    .unwrap();
+    let mut host = PassthroughLauncher::new(SpawnOptions::new())
+        .launch(&spec)
+        .unwrap();
+    let mut lines = BufReader::new(host.stdout).lines();
+    let agent: i32 = loop {
+        let line = async_io::block_on(lines.next())
+            .expect("the host ended before its agent ran")
+            .unwrap();
+        // libtest prints the test's name on the same line first.
+        if let Some(pid) = line.split("agent ").nth(1) {
+            break pid.trim().parse().unwrap();
+        }
+    };
+    let pids = pids_in(&dir.join("pids"), 1);
+    guard.keep(&pids);
+    guard.keep(&[agent]);
+    let [escaped] = pids[..] else {
+        panic!("the escaper logged {pids:?}");
+    };
+    let marks = marks_of(&w.builder().build().unwrap());
+    let left: Vec<PathBuf> = std::fs::read_dir(&marks)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    assert_eq!(left.len(), 1, "{left:?}");
+
+    // The crash.
+    let pid = Pid::from_raw(i32::try_from(host.handle.pid()).unwrap());
+    kill(pid, Signal::SIGKILL).unwrap();
+    let report = async_io::block_on(host.handle.exited());
+    assert_eq!(report.signal(), Some(9), "{report:?}");
+    std::thread::park_timeout(Duration::from_millis(300));
+    assert!(alive(escaped) && alive(agent), "nothing outlived the host");
+    assert!(left[0].join("mark").exists());
+
+    // The next launcher.
+    let (next, _) = launcher(w.builder().build().unwrap());
+    assert_eq!(left_after(&[escaped, agent]), [] as [i32; 0]);
+    assert!(!left[0].exists(), "the crashed host's mark stayed");
+    drop(next);
 }

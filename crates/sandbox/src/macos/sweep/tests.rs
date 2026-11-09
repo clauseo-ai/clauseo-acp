@@ -9,6 +9,8 @@ use std::ffi::{CStr, CString, c_void};
 use super::*;
 use crate::test_support::{TempDir, remove};
 
+mod unvouched;
+
 /// The fake kernel: each sandboxed pid with the paths it may write; a pid not listed is
 /// unsandboxed, and may write any path (as the real check answers for an unsandboxed process).
 #[derive(Default)]
@@ -23,12 +25,12 @@ impl Fake {
 }
 
 impl Checker for Fake {
-    fn sandboxed(&self, pid: u32) -> Option<bool> {
-        Some(self.0.contains_key(&pid))
+    fn sandboxed(&self, pid: u32) -> Answer {
+        Ok(self.0.contains_key(&pid))
     }
 
-    fn may_write(&self, pid: u32, path: &CStr) -> Option<bool> {
-        Some(self.0.get(&pid).is_none_or(|paths| paths.contains(path)))
+    fn may_write(&self, pid: u32, path: &CStr) -> Answer {
+        Ok(self.0.get(&pid).is_none_or(|paths| paths.contains(path)))
     }
 }
 
@@ -36,12 +38,12 @@ impl Checker for Fake {
 struct Failing;
 
 impl Checker for Failing {
-    fn sandboxed(&self, _: u32) -> Option<bool> {
-        None
+    fn sandboxed(&self, _: u32) -> Answer {
+        Err(CheckFailed::Failed)
     }
 
-    fn may_write(&self, _: u32, _: &CStr) -> Option<bool> {
-        None
+    fn may_write(&self, _: u32, _: &CStr) -> Answer {
+        Err(CheckFailed::Failed)
     }
 }
 
@@ -50,12 +52,12 @@ impl Checker for Failing {
 struct WrongFilter;
 
 impl Checker for WrongFilter {
-    fn sandboxed(&self, _: u32) -> Option<bool> {
-        Some(true)
+    fn sandboxed(&self, _: u32) -> Answer {
+        Ok(true)
     }
 
-    fn may_write(&self, _: u32, _: &CStr) -> Option<bool> {
-        Some(false)
+    fn may_write(&self, _: u32, _: &CStr) -> Answer {
+        Ok(false)
     }
 }
 
@@ -73,6 +75,18 @@ fn proc(pid: u32, start: u64) -> Proc {
         start,
         uid: UID,
     }
+}
+
+/// [`scan`], answering only a vouched scan's finds.
+fn scanned(
+    check: &dyn Checker,
+    marks: &[&SessionMark],
+    since: u64,
+    now: u64,
+    uid: u32,
+    all: &[Proc],
+) -> Result<Vec<ProcId>, SweepError> {
+    scan(check, marks, since, now, uid, all)?.vouched()
 }
 
 fn pids(found: &[ProcId]) -> Vec<u32> {
@@ -132,11 +146,11 @@ fn a_process_matches_when_the_mark_is_allowed_and_the_canary_denied() {
     let (fake, mut all) = vouched(fake, &[&s, &t]);
     // 14 is unsandboxed: it may write every path, and is not sandboxed.
     all.extend((10..=14).map(|pid| proc(pid, 50_000_000)));
-    let found = scan(&fake, &[&s], 0, NOW, UID, &all).unwrap();
+    let found = scanned(&fake, &[&s], 0, NOW, UID, &all).unwrap();
     assert_eq!(pids(&found), [10], "the sentinel is never found");
-    let found = scan(&fake, &[&t], 0, NOW, UID, &all).unwrap();
+    let found = scanned(&fake, &[&t], 0, NOW, UID, &all).unwrap();
     assert_eq!(pids(&found), [11]);
-    let found = scan(&fake, &[&s, &t], 0, NOW, UID, &all).unwrap();
+    let found = scanned(&fake, &[&s, &t], 0, NOW, UID, &all).unwrap();
     assert_eq!(pids(&found), [10, 11]);
 }
 
@@ -149,7 +163,7 @@ fn another_user_s_process_is_never_asked_about() {
     let mut other = proc(10, 50_000_000);
     other.uid = 0;
     all.push(other);
-    assert_eq!(scan(&fake, &[&s], 0, NOW, UID, &all).unwrap(), []);
+    assert_eq!(scanned(&fake, &[&s], 0, NOW, UID, &all).unwrap(), []);
 }
 
 #[test]
@@ -163,10 +177,10 @@ fn a_process_older_than_since_is_skipped() {
     // The sentinel started at 1 s, before `since`: it vouches all the same.
     let (fake, mut all) = vouched(fake, &[&s]);
     all.extend([proc(10, 40_000_000), proc(11, 60_000_000)]);
-    let found = scan(&fake, &[&s], 50_000_000, NOW, UID, &all).unwrap();
+    let found = scanned(&fake, &[&s], 50_000_000, NOW, UID, &all).unwrap();
     assert_eq!(pids(&found), [11]);
     // A start at `since` exactly counts.
-    let found = scan(&fake, &[&s], 40_000_000, NOW, UID, &all).unwrap();
+    let found = scanned(&fake, &[&s], 40_000_000, NOW, UID, &all).unwrap();
     assert_eq!(pids(&found), [10, 11]);
 }
 
@@ -177,7 +191,7 @@ fn a_process_is_its_pid_and_its_start() {
     let _removed = Removed(vec![&s]);
     let (fake, sentinels) = vouched(Fake::default().jailed(10, &[s.mark_c()]), &[&s]);
     let all = [sentinels.clone(), vec![proc(10, 50_000_000)]].concat();
-    let found = scan(&fake, &[&s], 0, NOW, UID, &all).unwrap();
+    let found = scanned(&fake, &[&s], 0, NOW, UID, &all).unwrap();
     assert_eq!(found, [ProcId::new(10, 50_000_000)]);
     assert_ne!(found, [ProcId::new(10, 50_000_001)]);
     assert_eq!(
@@ -188,12 +202,12 @@ fn a_process_is_its_pid_and_its_start() {
     // pid): it is not the agent, so its not matching is no drift.
     assert!(s.claim(ProcId::new(20, 30_000_000)));
     let all = [sentinels, vec![proc(20, 70_000_000)]].concat();
-    assert_eq!(scan(&fake, &[&s], 0, NOW, UID, &all).unwrap(), []);
-    // A sentinel whose pid now names a later process vouches for nothing.
+    assert_eq!(scanned(&fake, &[&s], 0, NOW, UID, &all).unwrap(), []);
+    // A sentinel whose pid names a later process vouches for nothing: it is gone.
     let reused = [proc(SENTINEL, 2_000_000)];
     assert!(matches!(
-        scan(&fake, &[&s], 0, NOW, UID, &reused),
-        Err(SweepError::Unknown { .. })
+        scanned(&fake, &[&s], 0, NOW, UID, &reused),
+        Err(SweepError::SentinelGone { .. })
     ));
 }
 
@@ -218,7 +232,7 @@ fn an_agent_that_does_not_match_its_own_mark_is_drift() {
     assert!(s.claim(ProcId::new(10, 50_000_000)));
     let (fake, sentinels) = vouched(Fake::default().jailed(10, &[s.mark_c()]), &[&s, &t]);
     let all = [sentinels, vec![proc(10, 50_000_000)]].concat();
-    let found = scan(&fake, &[&s], 60_000_000, NOW, UID, &all).unwrap();
+    let found = scanned(&fake, &[&s], 60_000_000, NOW, UID, &all).unwrap();
     assert_eq!(
         pids(&found),
         [10],
@@ -226,7 +240,7 @@ fn an_agent_that_does_not_match_its_own_mark_is_drift() {
     );
     // The kernel's answers drift for the agent alone: sandboxed but matching no mark.
     let (drifted, _) = vouched(Fake::default().jailed(10, &[]), &[&s, &t]);
-    let error = scan(&drifted, &[&s], 0, NOW, UID, &all).unwrap_err();
+    let error = scanned(&drifted, &[&s], 0, NOW, UID, &all).unwrap_err();
     assert!(
         matches!(&error, SweepError::Drift { tag, pid: 10 } if tag == "clauseo-1-0"),
         "{error:?}"
@@ -234,7 +248,7 @@ fn an_agent_that_does_not_match_its_own_mark_is_drift() {
     // An agent that matches another launch's mark only is drift for its own.
     let (crossed, _) = vouched(Fake::default().jailed(10, &[t.mark_c()]), &[&s, &t]);
     assert!(matches!(
-        scan(&crossed, &[&s, &t], 0, NOW, UID, &all),
+        scanned(&crossed, &[&s, &t], 0, NOW, UID, &all),
         Err(SweepError::Drift { .. })
     ));
     // An agent within its first second may not carry its profile yet: no drift.
@@ -243,10 +257,13 @@ fn an_agent_that_does_not_match_its_own_mark_is_drift() {
     assert!(young.claim(ProcId::new(10, NOW - 500_000)));
     let (unjailed, sentinels) = vouched(Fake::default(), &[&young]);
     let all = [sentinels.clone(), vec![proc(10, NOW - 500_000)]].concat();
-    assert_eq!(scan(&unjailed, &[&young], 0, NOW, UID, &all).unwrap(), []);
+    assert_eq!(
+        scanned(&unjailed, &[&young], 0, NOW, UID, &all).unwrap(),
+        []
+    );
     // An agent that has exited (not listed) is not checked.
     assert_eq!(
-        scan(&unjailed, &[&young], 0, NOW, UID, &sentinels).unwrap(),
+        scanned(&unjailed, &[&young], 0, NOW, UID, &sentinels).unwrap(),
         []
     );
 }
@@ -259,23 +276,26 @@ fn a_scan_its_sentinel_does_not_vouch_for_is_unknown() {
     let _removed = Removed(vec![&s, &t]);
     let unknown = |result: Result<Vec<ProcId>, SweepError>| matches!(result, Err(SweepError::Unknown { tag }) if tag == "clauseo-1-0");
     // No sentinel at all.
-    assert!(unknown(scan(&Fake::default(), &[&s], 0, NOW, UID, &[])));
+    assert!(unknown(scanned(&Fake::default(), &[&s], 0, NOW, UID, &[])));
     let (fake, all) = vouched(Fake::default(), &[&s, &t]);
-    assert_eq!(scan(&fake, &[&s, &t], 0, NOW, UID, &all).unwrap(), []);
-    // The sentinel is not running (not listed).
-    assert!(unknown(scan(&fake, &[&s], 0, NOW, UID, &[])));
+    assert_eq!(scanned(&fake, &[&s, &t], 0, NOW, UID, &all).unwrap(), []);
+    // The sentinel is not running (not listed): killed.
+    assert!(matches!(
+        scanned(&fake, &[&s], 0, NOW, UID, &[]),
+        Err(SweepError::SentinelGone { tag }) if tag == "clauseo-1-0"
+    ));
     // The call fails for every process (-1): what would read as "nothing matches".
-    assert!(unknown(scan(&Failing, &[&s], 0, NOW, UID, &all)));
+    assert!(unknown(scanned(&Failing, &[&s], 0, NOW, UID, &all)));
     // The path filter reads wrongly: every path denied, the mark too.
-    assert!(unknown(scan(&WrongFilter, &[&s], 0, NOW, UID, &all)));
+    assert!(unknown(scanned(&WrongFilter, &[&s], 0, NOW, UID, &all)));
     // Nothing is sandboxed any longer.
     let blind = Fake::default();
-    assert!(unknown(scan(&blind, &[&s], 0, NOW, UID, &all)));
+    assert!(unknown(scanned(&blind, &[&s], 0, NOW, UID, &all)));
     // T's sentinel matching T vouches for T alone.
     let (half, _) = vouched(Fake::default(), &[&t]);
     let all = [proc(SENTINEL, 1_000_000)];
-    assert!(scan(&half, &[&t], 0, NOW, UID, &all).is_ok());
-    assert!(unknown(scan(&half, &[&s, &t], 0, NOW, UID, &all)));
+    assert!(scanned(&half, &[&t], 0, NOW, UID, &all).is_ok());
+    assert!(unknown(scanned(&half, &[&s, &t], 0, NOW, UID, &all)));
 }
 
 #[test]
@@ -310,12 +330,23 @@ fn a_missing_mark_or_canary_fails_the_scan() {
     let (fake, mut all) = vouched(Fake::default().jailed(10, &[s.mark_c()]), &[&s, &t]);
     all.push(proc(10, 50_000_000));
     remove(s.canary());
-    let error = scan(&fake, &[&s], 0, NOW, UID, &all).unwrap_err();
-    assert!(matches!(&error, SweepError::Mark { path, .. } if path == s.canary()));
+    let error = scanned(&fake, &[&s], 0, NOW, UID, &all).unwrap_err();
+    assert!(
+        matches!(
+            error,
+            SweepError::Mark {
+                file: "canary",
+                kind: std::io::ErrorKind::NotFound
+            }
+        ),
+        "{error:?}"
+    );
+    // L4: the error names the file by its role, never its path.
+    assert!(!error.to_string().contains('/'), "{error}");
     t.remove().unwrap();
     assert!(!t.path().exists() && !t.path().parent().unwrap().exists());
     assert!(matches!(
-        scan(&fake, &[&t], 0, NOW, UID, &all),
+        scanned(&fake, &[&t], 0, NOW, UID, &all),
         Err(SweepError::Mark { .. })
     ));
     s.remove().unwrap();
@@ -375,7 +406,7 @@ fn the_mark_is_made_as_a_private_immutable_file_beside_its_canary() {
 fn dead_pid() -> u32 {
     (90_000..99_000)
         .rev()
-        .find(|&pid| !host_alive(pid))
+        .find(|&pid| start_of(pid).is_none() && Libproc.session_of(pid).is_none())
         .expect("a free pid")
 }
 
@@ -405,26 +436,28 @@ fn only_an_unused_mark_of_a_host_that_is_gone_is_cleaned() {
         mark.clean_on_drop = false;
         mark.path().parent().unwrap().to_owned()
     };
-    let dead = left(&format!("clauseo-{}-0", dead_pid()));
-    let ours = left(&format!("clauseo-{}-99", std::process::id()));
-    // launchd: a host that still runs.
-    let running = left("clauseo-1-7");
+    let me = std::process::id();
+    let started = start_of(me).unwrap();
+    let dead = left(&format!("clauseo-{}-{started}-0-00", dead_pid()));
+    // This host: its pid and its start.
+    let ours = left(&format!("clauseo-{me}-{started}-99-00"));
+    // L2: this host's pid with another start names a host that is gone (a reused pid).
+    let reused = left(&format!("clauseo-{me}-{}-5-00", started - 1));
     // A broken mark (its canary gone) of a dead host: its scan fails, so it stays.
-    let broken = left(&format!("clauseo-{}-1", dead_pid()));
+    let broken = left(&format!("clauseo-{}-{started}-1-00", dead_pid()));
     remove(&broken.join("canary"));
     dir.dir("not-a-mark");
-    // The dead host's mark is scanned with a control of its own, started for the scan.
-    assert_eq!(clean_stale(&root), 1);
-    assert!(!dead.exists());
-    for kept in [&ours, &running, &broken] {
+    // Each dead host's mark is scanned with a control of its own, started for the scan.
+    assert_eq!(clean_stale(&root), 2);
+    assert!(!dead.exists() && !reused.exists());
+    for kept in [&ours, &broken] {
         assert!(kept.join("mark").exists(), "{}", kept.display());
     }
     assert!(root.join("not-a-mark").exists());
-    assert_eq!(host_of("clauseo-4242-7-00ff"), Some(4242));
+    assert_eq!(host_of("clauseo-4242-77-7-00ff"), Some((4242, 77)));
     assert_eq!(host_of("clauseo-x-7"), None);
-    for kept in [&ours, &running] {
-        SessionMark::open(kept).unwrap().remove().unwrap();
-    }
+    assert_eq!(host_of("clauseo-4242"), None);
+    SessionMark::open(&ours).unwrap().remove().unwrap();
     let mark = CString::new(broken.join("mark").into_os_string().into_encoded_bytes()).unwrap();
     seatbelt::set_immutable(&mark, false).unwrap();
 }

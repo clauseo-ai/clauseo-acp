@@ -99,8 +99,11 @@
 //!   `end_session` (ends the sentinels and removes the marks after `Gone`), and the launch's
 //!   session handle `JailedSession` from [`SeatbeltLauncher::launch_jailed`]
 //!   (`processes_gone`, `end`); the process cap's 2 s sweep counts the same scan. A scan the
-//!   sentinel does not vouch for is `SweepError::Unknown`, never `Gone`. A macOS without
-//!   `sandbox_check` refuses the launcher ([`Error::SweepUnavailable`]).
+//!   sentinel does not vouch for is `SweepError::Unknown` (or `SentinelGone`), never `Gone`,
+//!   yet what it found is still ended; a killed sentinel is restarted, and mid-session the
+//!   watchdog ends the session (`ProcessCapNotice::Tampered`). The launcher ends what a crashed
+//!   earlier host's marks still find before it removes them. A macOS without `sandbox_check`
+//!   refuses the launcher ([`Error::SweepUnavailable`]).
 //!   Denials reach `denials` through a [`CappedSink`]. The launch registers the launcher
 //!   with the one host-wide watcher (`/usr/bin/log stream`, started with the first launcher
 //!   and stopped with the last); dropping the launcher unregisters it. The tag, the sink and the
