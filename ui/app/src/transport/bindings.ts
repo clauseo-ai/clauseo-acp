@@ -3622,6 +3622,12 @@ export type NoticeKind =
  *  Read-only on this computer yet (Windows, until stage C's PR6).
  */
 "read_only_unavailable" | 
+/**
+ *  An unjailed Codex agent (`ChatGPT` to the lawyer) switched itself to a mode that
+ *  works without asking, the host's switch back to the ask mode failed or went
+ *  unanswered, so the host stopped the agent.
+ */
+"mode_set_back_failed" | 
 /**  A kind from a newer Clauseo; written back as the plain string `kind`. */
 string;
 

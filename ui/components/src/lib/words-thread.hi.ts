@@ -108,7 +108,8 @@ export const HI = {
   // client put back, one or {n} (provisional, TN-02 and TN-03; {papers} as Versions' undo rows name them); a skill
   // pack the launch left out, one full line per reason (provisional, TN-04 to TN-09; {pack} is the pack's id); a
   // jailed ChatGPT last in Read-only that starts on its own, where the sandbox doesn't enforce Read-only yet
-  // (provisional, TN-10; Windows until stage C's PR6)
+  // (provisional, TN-10; Windows until stage C's PR6); an unjailed ChatGPT that switched itself to working without
+  // asking, whose switch back failed, so Clauseo stopped it (provisional, TN-11)
   "Clauseo doesn't remember the earlier questions and answers in this conversation. Include what it needs from them in your next question.":
     "Clauseo को इस बातचीत के पहले के प्रश्न और उत्तर याद नहीं हैं। उनसे जो ज़रूरी हो, उसे अपने अगले प्रश्न में शामिल करें।",
   "1 paper came back after the undo: {papers}. Clauseo didn't remove it again.":
@@ -129,6 +130,8 @@ export const HI = {
     "Clauseo ने स्किल पैक '{pack}' लोड नहीं किया। Clauseo एक बार में अधिकतम 16 स्किल पैक लोड करता है।",
   "Read-only isn't available for ChatGPT in the Safe workspace on this computer, so ChatGPT can change files in this matter without asking first.":
     "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र में ChatGPT के लिए केवल-पढ़ने वाला मोड उपलब्ध नहीं है, इसलिए ChatGPT पहले पूछे बिना इस मामले की फ़ाइलें बदल सकता है।",
+  "ChatGPT switched itself to working without asking you, and Clauseo couldn't switch it back, so Clauseo stopped it. Start ChatGPT again to carry on.":
+    "ChatGPT ने खुद को आपसे पूछे बिना काम करने पर बदल लिया, और Clauseo उसे वापस नहीं बदल सका, इसलिए Clauseo ने उसे रोक दिया। जारी रखने के लिए ChatGPT को फिर से शुरू करें।",
   // the composer
   // in the composer's place while the open conversation is archived (U16a's Find opens one): it takes no question
   "Archived. Read only.": "संग्रहीत। केवल पढ़ने के लिए।",

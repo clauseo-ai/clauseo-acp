@@ -312,6 +312,10 @@ open_data_enum! {
         /// started in the mode that works on its own, because the sandbox does not enforce
         /// Read-only on this computer yet (Windows, until stage C's PR6).
         ReadOnlyUnavailable = "read_only_unavailable",
+        /// An unjailed Codex agent (`ChatGPT` to the lawyer) switched itself to a mode that
+        /// works without asking, the host's switch back to the ask mode failed or went
+        /// unanswered, so the host stopped the agent.
+        ModeSetBackFailed = "mode_set_back_failed",
         _ =>
         /// A kind from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
@@ -327,6 +331,7 @@ open_data_enum! {
             reason: PackSkipReason::Changed,
         },
         NoticeKind::ReadOnlyUnavailable,
+        NoticeKind::ModeSetBackFailed,
     ];
 }
 

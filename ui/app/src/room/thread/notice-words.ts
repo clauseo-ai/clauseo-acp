@@ -73,9 +73,13 @@ export function noticeLine(kind: NoticeKind | undefined, w: NoticeWords): string
       return w.th(
         "Clauseo doesn't remember the earlier questions and answers in this conversation. Include what it needs from them in your next question.",
       );
-    return kind === "read_only_unavailable"
+    if (kind === "read_only_unavailable")
+      return w.th(
+        "Read-only isn't available for ChatGPT in the Safe workspace on this computer, so ChatGPT can change files in this matter without asking first.",
+      );
+    return kind === "mode_set_back_failed"
       ? w.th(
-          "Read-only isn't available for ChatGPT in the Safe workspace on this computer, so ChatGPT can change files in this matter without asking first.",
+          "ChatGPT switched itself to working without asking you, and Clauseo couldn't switch it back, so Clauseo stopped it. Start ChatGPT again to carry on.",
         )
       : null;
   }

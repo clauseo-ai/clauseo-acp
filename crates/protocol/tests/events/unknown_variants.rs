@@ -164,6 +164,7 @@ fn notice_kind() {
         r#""read_only_unavailable""#,
         &NoticeKind::ReadOnlyUnavailable,
     );
+    decodes_in_both(r#""mode_set_back_failed""#, &NoticeKind::ModeSetBackFailed);
     let pack = PackId::new("nda-kit").unwrap();
     let skipped = NoticeKind::SkillPackNotLoaded {
         pack,

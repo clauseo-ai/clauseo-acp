@@ -18,7 +18,12 @@
 //! - An unjailed Codex (tier C) runs `codex::ASK_MODE`: a start in another mode is switched
 //!   there ([`codex_start`]); its own move to a mode that approves without asking is logged as
 //!   it came and switched back, as forced ask's is, unless the lawyer sent it that mode
-//!   ([`unasked_move`]). The lawyer's own pick stands (D2e will gate it).
+//!   ([`unjailed`]). The lawyer's own pick stands (D2e will gate it); a failed switch back
+//!   stops the agent.
+
+mod unjailed;
+
+use std::sync::Arc;
 
 use clauseo_acp::SessionStart;
 use clauseo_protocol::{
@@ -26,6 +31,7 @@ use clauseo_protocol::{
     ConfigOptionKind, ConfigOptionsReplaced, ConfigValue, ErrorCode, HeaderEntry, ModeChanged,
     Notice, NoticeKind, NoticeLevel, StreamId, ThreadId,
 };
+use futures::future::{Either, select};
 
 use super::super::Actor;
 use super::agents::{Agent, Waiting, call};
@@ -35,6 +41,9 @@ use super::{answers, state};
 use crate::agent::codex::{self, JAILED_MODE, jailed};
 use crate::agent::{forced_ask, loads};
 use crate::error::Error;
+
+pub(super) use unjailed::CodexModes;
+use unjailed::{Kind, capped};
 
 /// `thread`'s agent, read only.
 fn held(actor: &Actor, thread: ThreadId) -> Option<&Agent> {
@@ -136,7 +145,7 @@ pub(super) fn launch_mode(actor: &Actor, thread: ThreadId, waiting: &[Waiting]) 
 /// options cut to `jailed::MODES`, the mode option at the launch's mode. A mode the agent does
 /// not offer fails with `agent.protocol_error`.
 pub(super) fn codex_start(
-    actor: &Actor,
+    actor: &mut Actor,
     thread: ThreadId,
     start: &mut SessionStart,
 ) -> Result<(AgentChoiceId, bool), Error> {
@@ -148,9 +157,11 @@ pub(super) fn codex_start(
         JAILED_MODE
     } else {
         let current = start.modes.as_ref().map(|modes| modes.current.as_str());
-        if current.is_some_and(codex::approves_unasked) {
+        if current.is_some_and(codex::approves_unasked)
+            && unjailed::first(actor, thread, Kind::Started)
+        {
             tracing::info!(
-                kind = "agent_started_in_full_access",
+                kind = Kind::Started.name(),
                 "an unjailed Codex session started in a mode that approves without asking; \
                  switching it to the ask mode"
             );
@@ -206,7 +217,7 @@ pub(super) fn read_only_notice(actor: &Actor, thread: ThreadId) -> Option<Notice
 /// The agent's config options for `thread`'s log: a jailed Codex's mode option keeps only
 /// `jailed::MODES`, at the mode it runs in, whatever value the agent gave it.
 pub(super) fn kept(
-    actor: &Actor,
+    actor: &mut Actor,
     thread: ThreadId,
     mut options: Vec<ConfigOption>,
 ) -> ConfigOptionsReplaced {
@@ -223,14 +234,29 @@ pub(super) fn kept(
             );
         }
         jailed::keep_options(&mut options, Some(policy));
+    } else if let Some(mode) = option_mode(&options)
+        && unjailed::moved(actor, thread, &mode, "config_option_update")
+    {
+        set_back(actor, thread, &mode, codex::ASK_MODE);
     }
     ConfigOptionsReplaced { options }
+}
+
+/// The current value of the mode option among `options`, if one holds a select value.
+fn option_mode(options: &[ConfigOption]) -> Option<CompactString> {
+    options.iter().find_map(|option| {
+        let mode = option.id == jailed::MODE_OPTION || option.category == ConfigCategory::Mode;
+        if let (true, ConfigOptionKind::Select { current_value, .. }) = (mode, &option.kind) {
+            return Some(CompactString::from(current_value.as_str()));
+        }
+        None
+    })
 }
 
 /// `mode` came from the agent (`current_mode_update`). A jailed Codex's is ignored, and its
 /// session put back in the preset if it left it, unlogged; any other is logged, and switched
 /// back when forced ask's set does not hold it, or when an unjailed Codex moved itself to a mode
-/// that approves without asking which the lawyer did not send it ([`unasked_move`]).
+/// that approves without asking which the lawyer did not send it (`unjailed::moved`).
 pub(super) fn agent_moved(
     actor: &mut Actor,
     thread: ThreadId,
@@ -249,7 +275,7 @@ pub(super) fn agent_moved(
     let forced = held(actor, thread).is_some_and(|agent| agent.forced_ask);
     if forced && !forced_ask::mode_allowed(&mode) {
         set_back(actor, thread, &mode, loads::CLAUDE_MODE);
-    } else if unasked_move(actor, thread, &mode) {
+    } else if unjailed::moved(actor, thread, &mode, "current_mode_update") {
         set_back(actor, thread, &mode, codex::ASK_MODE);
     }
     commit(
@@ -260,30 +286,8 @@ pub(super) fn agent_moved(
     )
 }
 
-/// An unjailed Codex moved itself to `mode`: whether that is to a mode that approves without
-/// asking which is not the lawyer's pick (`CodexAgent::picked`, set by [`switch`]). The pick
-/// stands until the session reports another mode.
-fn unasked_move(actor: &mut Actor, thread: ThreadId, mode: &str) -> bool {
-    let Some(codex) = agent(actor, thread).and_then(|agent| agent.codex.as_mut()) else {
-        return false;
-    };
-    if codex.picked.as_deref() == Some(mode) {
-        return false;
-    }
-    codex.picked = None;
-    let unasked = codex::approves_unasked(mode);
-    if unasked {
-        tracing::info!(
-            kind = "agent_moved_to_full_access",
-            mode,
-            "an unjailed Codex moved itself to a mode that approves without asking"
-        );
-    }
-    unasked
-}
-
 /// A lawyer's mode command for an unjailed Codex is about to reach it: `SetMode`'s mode, or a
-/// select value of its mode option, becomes its pick (`CodexAgent::picked`).
+/// select value of its mode option, becomes its pick (`unjailed::picked`).
 fn note_pick(actor: &mut Actor, thread: ThreadId, waiting: &Waiting) {
     let picked = match waiting {
         Waiting::Turn(_) | Waiting::Config(_, _, ConfigValue::Boolean(_)) => return,
@@ -295,15 +299,26 @@ fn note_pick(actor: &mut Actor, thread: ThreadId, waiting: &Waiting) {
             CompactString::from(value.as_str())
         }
     };
-    if let Some(codex) = agent(actor, thread).and_then(|agent| agent.codex.as_mut()) {
-        codex.picked = Some(picked);
+    unjailed::picked(actor, thread, picked);
+}
+
+/// The lawyer's command for `mode` on `thread`'s agent answered, `ok` when it succeeded
+/// (`unjailed::answered`): a failed one whose mode an unjailed Codex reported meanwhile is
+/// switched back.
+pub(super) fn pick_answered(actor: &mut Actor, thread: ThreadId, same: bool, mode: &str, ok: bool) {
+    if !same {
+        return;
+    }
+    if let Some(mode) = unjailed::answered(actor, thread, mode, ok) {
+        set_back(actor, thread, &mode, codex::ASK_MODE);
     }
 }
 
-/// The lawyer's mode command for `thread` failed: an unjailed Codex keeps no pick.
-pub(super) fn pick_failed(actor: &mut Actor, thread: ThreadId) {
-    if let Some(codex) = agent(actor, thread).and_then(|agent| agent.codex.as_mut()) {
-        codex.picked = None;
+/// The lawyer's `SetConfigOption` on `thread`'s agent succeeded with `options`: the mode
+/// option's value, when it is an unjailed Codex's pick, makes the pick hold.
+pub(super) fn config_answered(actor: &mut Actor, thread: ThreadId, options: &[ConfigOption]) {
+    if let Some(mode) = option_mode(options) {
+        pick_answered(actor, thread, true, &mode, true);
     }
 }
 
@@ -316,22 +331,40 @@ fn set_back(actor: &mut Actor, thread: ThreadId, mode: &str, target: &'static st
         return;
     };
     let (agent_id, client) = (agent.id, agent.link.client.clone());
-    let matter = actor.threads.get(&thread).map(|entry| entry.row.matter);
-    tracing::info!(
-        matter = ?matter,
-        mode,
-        target,
-        "a session moved to a mode outside the modes Clauseo allows it; switching it back"
-    );
+    let unjailed = agent
+        .codex
+        .as_ref()
+        .is_some_and(|codex| codex.jail.is_none());
+    if unjailed {
+        unjailed::resetting(actor, thread);
+    }
+    if unjailed::first(actor, thread, Kind::SetBack) {
+        let matter = actor.threads.get(&thread).map(|entry| entry.row.matter);
+        tracing::info!(
+            kind = Kind::SetBack.name(),
+            matter = ?matter,
+            mode = %capped(mode),
+            target,
+            "a session moved to a mode outside the modes Clauseo allows it; switching it back"
+        );
+    }
+    let clock = Arc::clone(&actor.clock);
     call(actor, thread, agent_id, async move {
-        let result = client.set_mode(&session, id).await;
+        let answer = std::pin::pin!(client.set_mode(&session, id));
+        let result = match select(answer, clock.after(unjailed::SET_BACK_WAIT)).await {
+            Either::Left((result, _)) => result,
+            Either::Right(((), _)) => Err(clauseo_acp::Error::Protocol(
+                "no answer to session/set_mode in time".to_owned(),
+            )),
+        };
         AgentReply::ModeReset(CompactString::from(target), result)
     });
 }
 
-/// The switch back to `mode` answered: forced ask's is logged; a jailed Codex's preset is not,
-/// since its mode is the policy's. A failure is a warning (forced ask's hook still asks; the
-/// jail holds whatever Codex's preset).
+/// The switch back to `mode` answered: forced ask's and an unjailed Codex's are logged; a jailed
+/// Codex's preset is not, since its mode is the policy's. An unjailed Codex's failure (an error,
+/// or no answer in `unjailed::SET_BACK_WAIT`) stops it (`unjailed::stop_unasked`); any other
+/// is a warning (forced ask's hook still asks; the jail holds whatever Codex's preset).
 pub(super) fn on_mode_reset(
     actor: &mut Actor,
     thread: ThreadId,
@@ -343,6 +376,13 @@ pub(super) fn on_mode_reset(
         return;
     }
     let jailed = held(actor, thread).and_then(jail_of).is_some();
+    let unjailed = unjailed::reset_answered(actor, thread);
+    if let Err(error) = &result
+        && unjailed
+    {
+        unjailed::stop_unasked(actor, thread, &Error::Acp(error.clone()));
+        return;
+    }
     let logged = result.map_err(Error::Acp).and_then(|()| {
         if jailed {
             return Ok(());
@@ -458,6 +498,7 @@ fn answer(actor: &mut Actor, thread: ThreadId, waiting: &Waiting, outcome: Comma
 /// `thread`'s turn ended (durable): a pending switch relaunches its agent now, before the queue
 /// moves on, so the next turn runs under the new policy.
 pub(super) fn at_boundary(actor: &mut Actor, thread: ThreadId) {
+    unjailed::flush(actor, thread);
     if held(actor, thread).is_some_and(|agent| agent.switch.is_some()) {
         super::agents::restart_for_switch(actor, thread);
     }

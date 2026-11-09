@@ -343,6 +343,7 @@ pub(super) fn on_config(
     result: Result<Vec<ConfigOption>, clauseo_acp::Error>,
 ) {
     let done = answered(same, result).and_then(|options| {
+        super::forced_mode::config_answered(actor, thread, &options);
         let mut out = Out::new(actor, thread, Some(ctx.id))?;
         let replaced = super::forced_mode::kept(actor, thread, options);
         out.push(actor, replaced)?;
@@ -362,6 +363,7 @@ pub(super) fn on_mode(
     mode: &AgentChoiceId,
     result: Result<(), clauseo_acp::Error>,
 ) {
+    super::forced_mode::pick_answered(actor, thread, same, mode.as_str(), result.is_ok());
     let done = answered(same, result).and_then(|()| {
         let mut out = Out::new(actor, thread, Some(ctx.id))?;
         let mode_id = CompactString::from(mode.as_str());
@@ -369,7 +371,6 @@ pub(super) fn on_mode(
         send_answer(actor, ctx, thread, out, Then::Nothing)
     });
     if let Err(error) = done {
-        super::forced_mode::pick_failed(actor, thread);
         actor.finish_command(ctx.id, Err(error));
     }
 }

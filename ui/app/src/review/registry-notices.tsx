@@ -17,6 +17,8 @@ const MANY_BACK =
   "{n} papers came back after the undo: {papers}. Clauseo didn't remove them again.";
 const READ_ONLY_UNAVAILABLE =
   "Read-only isn't available for ChatGPT in the Safe workspace on this computer, so ChatGPT can change files in this matter without asking first.";
+const SET_BACK_FAILED =
+  "ChatGPT switched itself to working without asking you, and Clauseo couldn't switch it back, so Clauseo stopped it. Start ChatGPT again to carry on.";
 /** A skill pack the launch left out, one line per reason (TN-04 to TN-09); the pack is "nda-kit" in each. */
 const PACK_LINE: Record<Exclude<PackSkipReason, "unknown">, ThreadKey> = {
   not_turned_on:
@@ -128,5 +130,13 @@ export const TN: Entry[] = [
     words: threadWords(READ_ONLY_UNAVAILABLE),
     screen: "room/thread",
     render: thread(notice(6, { text: READ_ONLY_UNAVAILABLE, kind: "read_only_unavailable" })),
+  },
+  {
+    id: "TN-11",
+    words: threadWords(SET_BACK_FAILED),
+    screen: "room/thread",
+    render: thread(
+      notice(6, { level: "warning", text: SET_BACK_FAILED, kind: "mode_set_back_failed" }),
+    ),
   },
 ];

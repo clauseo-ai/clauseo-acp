@@ -149,6 +149,13 @@ pub(super) fn notices() -> Vec<DomainEvent> {
                 .to_owned(),
             kind: Some(NoticeKind::ReadOnlyUnavailable),
         },
+        Notice {
+            level: NoticeLevel::Warning,
+            text: "ChatGPT switched itself to working without asking you, and Clauseo couldn't \
+                   switch it back, so Clauseo stopped it. Start ChatGPT again to carry on."
+                .to_owned(),
+            kind: Some(NoticeKind::ModeSetBackFailed),
+        },
     ];
     notices.extend(
         [

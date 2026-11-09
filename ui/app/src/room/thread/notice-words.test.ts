@@ -32,6 +32,15 @@ test("Read-only not available here gives its line, in English and Hindi", () => 
   );
 });
 
+test("a failed switch back gives its line, in English and Hindi", () => {
+  expect(noticeLine("mode_set_back_failed", en)).toBe(
+    "ChatGPT switched itself to working without asking you, and Clauseo couldn't switch it back, so Clauseo stopped it. Start ChatGPT again to carry on.",
+  );
+  expect(noticeLine("mode_set_back_failed", words("hi"))).toBe(
+    "ChatGPT ने खुद को आपसे पूछे बिना काम करने पर बदल लिया, और Clauseo उसे वापस नहीं बदल सका, इसलिए Clauseo ने उसे रोक दिया। जारी रखने के लिए ChatGPT को फिर से शुरू करें।",
+  );
+});
+
 test("no kind (an agent's notice) gives null, so the row shows its own text", () => {
   expect(noticeLine(undefined, en)).toBeNull();
 });

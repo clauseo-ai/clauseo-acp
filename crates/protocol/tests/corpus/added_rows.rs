@@ -513,4 +513,11 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (397, 0xa183_c705_a3bb_5276),
         (318, 0x7e18_60c8_cb34_87df),
     ),
+    (
+        "added/notice-ModeSetBackFailed",
+        include_bytes!("added/notice-ModeSetBackFailed.jsonl"),
+        include_bytes!("added/notice-ModeSetBackFailed.msgpack"),
+        (431, 0x164b_a10d_5190_e4f3),
+        (352, 0xea9a_c835_3682_21be),
+    ),
 ];

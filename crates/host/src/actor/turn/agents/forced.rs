@@ -57,7 +57,7 @@ pub(super) fn of(
         guard,
         key_retry: KeyRetry::default(),
         jail,
-        picked: None,
+        modes: super::super::forced_mode::CodexModes::default(),
     };
     (forced, Some((codex, prepared.login)))
 }
