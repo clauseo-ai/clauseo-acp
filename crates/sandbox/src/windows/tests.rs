@@ -133,11 +133,16 @@ fn a_device_unc_path_is_network() {
     assert_eq!(folder_support(share).unwrap(), FolderSupport::Network);
 }
 
+/// A `\\?\` path on a local drive goes on to the drive check and is answered. The same folder
+/// as a `\\.\` device path is `Network` before any open: the classifier counts every `\\.\`
+/// form as a device it doesn't know (`links::network::classify`), and fails closed.
 #[test]
-fn a_local_device_path_answers() {
+fn a_local_verbatim_path_answers_and_a_device_path_is_not_touched() {
     let temp = TempDir::new("folder-device-path");
+    let verbatim = PathBuf::from(format!(r"\\?\{}", temp.path().display()));
+    assert_eq!(folder_support(&verbatim).unwrap(), FolderSupport::Ok);
     let device = PathBuf::from(format!(r"\\.\{}", temp.path().display()));
-    assert_eq!(folder_support(&device).unwrap(), FolderSupport::Ok);
+    assert_eq!(folder_support(&device).unwrap(), FolderSupport::Network);
 }
 
 #[test]

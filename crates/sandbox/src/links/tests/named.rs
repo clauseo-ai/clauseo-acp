@@ -157,6 +157,8 @@ fn the_walk_refuses_a_matter_through_a_link_to_a_share() {
 
 /// `gitdir:` and `commondir` are read as git reads them: a `.git` file must start with exactly
 /// `gitdir: `, and only trailing CR and LF are taken off, so a space stays part of the path.
+/// On Unix `spaced ` is then a folder that doesn't exist. On Windows, Win32 drops a trailing
+/// space from a name when it opens a path, so `../spaced ` reaches `spaced` and it's listed.
 #[test]
 fn git_files_are_parsed_as_git_parses_them() {
     let dir = TempDir::new("links-git-parse");
@@ -172,10 +174,11 @@ fn git_files_are_parsed_as_git_parses_them() {
     dir.file("matter/e/commondir", "../spaced \n");
     let matter = canon(&dir.path().join("matter"));
     let scan = scan_matter(&matter).unwrap();
-    assert_eq!(
-        scan.git_dirs(),
-        [matter.join("common"), matter.join("crlf")]
-    );
+    let mut want = vec![matter.join("common"), matter.join("crlf")];
+    if cfg!(windows) {
+        want.push(matter.join("spaced"));
+    }
+    assert_eq!(scan.git_dirs(), want);
 }
 
 /// A matter holding a network mount, or on one, refuses before the walk lists anything; the
