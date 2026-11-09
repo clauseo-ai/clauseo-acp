@@ -38,10 +38,9 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use clauseo_agents::{Clock, Found, LoginFrom, SigninCode, SigninState, Source};
+use clauseo_agents::{Clock, SigninCode, SigninState, Source};
 use clauseo_protocol::{
-    AgentId, AgentKind, ErrorCode, FoundLogin, PlanLabel, SetupEvent, SignIn, SignInMethod,
-    SignInSource, Timestamp,
+    AgentId, ErrorCode, SetupEvent, SignIn, SignInMethod, SignInSource, Timestamp,
 };
 
 use super::SetupEvents;
@@ -214,47 +213,6 @@ pub(crate) fn wire(agent: &AgentId, state: &SigninState) -> Option<SignIn> {
         SigninState::Failed { code, at } => {
             failed(ErrorCode::from_str_lossy(code.code()), *at, false)
         }
-        _ => return None,
-    })
-}
-
-/// The plan's words for `agent`'s raw plan string, as `limits` names it; `None` for a plan or
-/// an agent it does not know.
-fn plan_words(agent: &AgentId, plan: &str) -> Option<PlanLabel> {
-    let words = match AgentKind::of(agent)? {
-        AgentKind::Claude => clauseo_limits::claude_plan(plan),
-        AgentKind::Codex => clauseo_limits::codex_plan(plan),
-    };
-    words.map(|words| PlanLabel(words.to_owned()))
-}
-
-fn found_login(found: Found) -> Option<FoundLogin> {
-    Some(match found {
-        Found::ClaudeSettings => FoundLogin::ClaudeSettings,
-        Found::ClaudeWindowsSandbox => FoundLogin::ClaudeWindowsSandbox,
-        Found::CodexKeyring => FoundLogin::CodexKeyring,
-        Found::ReusedFailed => FoundLogin::ReusedFailed,
-        Found::ReusedSignedOut => FoundLogin::ReusedSignedOut,
-        Found::ReusedChanged => FoundLogin::ReusedChanged,
-        Found::CodexLinkSplit => FoundLogin::CodexLinkSplit,
-        Found::NoLogin => FoundLogin::NoneFound,
-        Found::ReuseOff => FoundLogin::ReuseOff,
-        _ => return None,
-    })
-}
-
-fn login_from(from: LoginFrom) -> Option<clauseo_protocol::LoginFrom> {
-    Some(match from {
-        LoginFrom::ClaudeCode => clauseo_protocol::LoginFrom::ClaudeCode,
-        LoginFrom::Codex => clauseo_protocol::LoginFrom::Codex,
-        _ => return None,
-    })
-}
-
-fn sign_in_source(source: Source) -> Option<SignInSource> {
-    Some(match source {
-        Source::Reused => SignInSource::Reused,
-        Source::Own => SignInSource::Own,
         _ => return None,
     })
 }
@@ -597,6 +555,9 @@ fn keep_signed_in_at(previous: Option<&SigninState>, state: &mut SigninState) {
         *at = *was_at;
     }
 }
+
+mod words;
+use words::{found_login, login_from, plan_words, sign_in_source};
 
 #[cfg(test)]
 mod tests;
