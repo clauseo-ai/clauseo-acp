@@ -25,8 +25,10 @@
 //! the child shuts the ping's DACL itself, as an escapee would ([`SHUT`]), then reads both lists
 //! with the sweep's own calls (`OsProcesses`) and sweeps (`sweep_own`).
 //!
-//! The test prints both sessions. When its own is 0 too, the run covers the user's own session-0
-//! process, not an inner in the lawyer's session with its escapee in session 0.
+//! The case under test is an inner in the lawyer's session with its escapee in session 0, so the
+//! test fails, before it makes anything, when its own session is 0: there the user's process
+//! would share the child's session and prove nothing. The repo's CI notes say its Windows runner
+//! runs in session 0 (`desktop`'s e2e exit, "session 0, as in CI"); this case is then the VM's.
 //!
 //! Elevated, from CI's elevated step only (`CLAUSEO_ELEVATED_TESTS=1`): making an account and a
 //! task as it needs it. The task, the account with its profile, and the folder are removed on
@@ -272,6 +274,12 @@ fn elevated_a_session_0_process_that_shut_its_user_out_is_named_and_left_an_esca
     if !gate("elevated_a_session_0_process_that_shut_its_user_out_is_named_and_left_an_escapee") {
         return;
     }
+    // 0. The case is an inner outside session 0 with its escapee in it: fail, never pass, here.
+    assert_ne!(
+        session(std::process::id()),
+        "0",
+        "runner session is 0, so the session-0 visibility case can't be tested here"
+    );
     // 1. The pool user's stand-in, and a folder it may read holding this binary.
     clear_leftovers(TASK_TEST_PREFIX);
     let user = TestUser::named(TASK_TEST_PREFIX, &random_hex(3));
@@ -314,9 +322,11 @@ fn elevated_a_session_0_process_that_shut_its_user_out_is_named_and_left_an_esca
         "0",
         "the task's ping isn't in session 0"
     );
-    if line("own-session") == "0" {
-        eprintln!("4. this test's session is 0 too: an inner in another session isn't covered");
-    }
+    assert_ne!(
+        line("own-session"),
+        "0",
+        "the child's session is 0, so the session-0 visibility case can't be tested here"
+    );
     assert_eq!(line("shut"), "ok", "the user couldn't shut its own process");
     assert_eq!(
         line("listed"),
@@ -338,10 +348,10 @@ fn elevated_a_session_0_process_that_shut_its_user_out_is_named_and_left_an_esca
     );
     let named = format!("process {pid} (");
     assert!(
-        report
-            .lines()
-            .any(|line| line.starts_with("log ") && line.contains(&named)),
-        "no line of the sweep's names pid {pid}"
+        report.lines().any(|line| line.starts_with("log ")
+            && line.contains(&named)
+            && line.contains("can't be opened")),
+        "no line of the sweep's says pid {pid} can't be opened"
     );
     drop(task);
     drop(user);
