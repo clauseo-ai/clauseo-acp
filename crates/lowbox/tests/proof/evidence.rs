@@ -97,6 +97,7 @@ fn first<'a>(lines: &'a [Line], kind: &str, key: &str) -> Option<&'a str> {
 pub(crate) fn check(lines: &[Line], context: &Context) -> Vec<String> {
     let mut problems = check_station(lines, context);
     problems.extend(check_processes(lines));
+    problems.extend(check_probe(lines));
     problems.extend(check_exits(lines));
     problems.extend(check_cdp(lines));
     problems.extend(check_listeners(lines));
@@ -147,59 +148,63 @@ fn check_station(lines: &[Line], context: &Context) -> Vec<String> {
     problems
 }
 
-/// Chrome's processes: one live renderer (Untrusted), GPU process (Low) and network service (in
-/// this package) at least, and every live one opened with its token, as the guard needs.
+/// Each role chrome must run, with the integrity RID its token must have.
+const ROLES: [(&str, u32); 4] = [
+    ("browser", LOW),
+    ("renderer", UNTRUSTED),
+    ("gpu", LOW),
+    ("network", LOW),
+];
+/// The integrity RID of Untrusted.
+const UNTRUSTED: u32 = 0x0000;
+/// The integrity RID of Low.
+const LOW: u32 = 0x1000;
+/// The one privilege a `LowBox` token may keep (the crate strips every other one).
+const KEPT_PRIVILEGE: &str = "SeChangeNotifyPrivilege";
+
+/// The integrity name of `rid`, for the messages.
+fn integrity_name(rid: u32) -> &'static str {
+    if rid == UNTRUSTED { "Untrusted" } else { "Low" }
+}
+
+/// A fact's `integrity` as a RID, when it is one.
+fn integrity_of(fact: &Line) -> Option<u32> {
+    u32::from_str_radix(fact.get("integrity").strip_prefix("0x")?, 16).ok()
+}
+
+/// Chrome's processes: chrome itself, a renderer, the GPU process and the network service, each
+/// found live with its role's integrity (Low; Untrusted for renderers). Every live process of
+/// chrome's tree, those four roles and any other, is in an `AppContainer` whose package is this
+/// one, holds no capability and no privilege but `SeChangeNotifyPrivilege`, and is no higher
+/// than Low. Every process not gone was opened with its token, as the guard needs.
 fn check_processes(lines: &[Line]) -> Vec<String> {
     let mut problems = Vec::new();
-    let facts: Vec<&Line> = lines
+    for (role, rid) in ROLES {
+        let live = with_role(lines, role);
+        if live.is_empty() {
+            problems.push(format!("no live {role} process was found"));
+        }
+        for fact in live {
+            if integrity_of(fact) != Some(rid) {
+                problems.push(format!(
+                    "{role} pid {} has integrity {}, not {} ({rid:#06x})",
+                    fact.get("pid"),
+                    fact.get("integrity"),
+                    integrity_name(rid)
+                ));
+            }
+        }
+    }
+    let live = lines
+        .iter()
+        .filter(|l| l.kind == "fact" && l.get("open") == "ok");
+    for fact in live {
+        problems.extend(check_token(fact));
+    }
+    for f in lines
         .iter()
         .filter(|l| l.kind == "fact" && l.get("open") != "gone")
-        .collect();
-    if with_role(lines, "browser").is_empty() {
-        problems.push("no fact for chrome itself (role=browser)".to_owned());
-    }
-    let renderers = with_role(lines, "renderer");
-    if renderers.is_empty() {
-        problems.push("no live renderer process was found".to_owned());
-    }
-    for r in &renderers {
-        if r.get("integrity") != "0x0000" {
-            problems.push(format!(
-                "renderer pid {} has integrity {}, not Untrusted (0x0000)",
-                r.get("pid"),
-                r.get("integrity")
-            ));
-        }
-    }
-    let gpus = with_role(lines, "gpu");
-    if gpus.is_empty() {
-        problems.push("no live GPU process was found".to_owned());
-    }
-    for g in &gpus {
-        if g.get("integrity") != "0x1000" {
-            problems.push(format!(
-                "GPU process pid {} has integrity {}, not Low (0x1000)",
-                g.get("pid"),
-                g.get("integrity")
-            ));
-        }
-    }
-    let networks = with_role(lines, "network");
-    if networks.is_empty() {
-        problems.push("no live network-service process was found".to_owned());
-    }
-    for n in &networks {
-        if n.get("appcontainer") != "1" || n.get("this_package") != "1" {
-            problems.push(format!(
-                "network service pid {} is not in this package's AppContainer (appcontainer={}, \
-                 this_package={})",
-                n.get("pid"),
-                n.get("appcontainer"),
-                n.get("this_package")
-            ));
-        }
-    }
-    for f in &facts {
+    {
         if f.get("open") != "ok" || f.get("token") != "ok" {
             problems.push(format!(
                 "B_s could not open {} pid {} (process {}, token {}): the guard would refuse",
@@ -208,6 +213,119 @@ fn check_processes(lines: &[Line]) -> Vec<String> {
                 f.get("open"),
                 f.get("token")
             ));
+        }
+    }
+    problems
+}
+
+/// One live process's token: this package's `AppContainer`, no capability, no privilege but
+/// [`KEPT_PRIVILEGE`], no higher than Low.
+fn check_token(fact: &Line) -> Vec<String> {
+    let mut problems = Vec::new();
+    let (role, pid) = (fact.get("role"), fact.get("pid"));
+    if fact.get("appcontainer") != "1" || fact.get("this_package") != "1" {
+        problems.push(format!(
+            "{role} pid {pid} is not in this package's AppContainer (appcontainer={}, \
+             this_package={})",
+            fact.get("appcontainer"),
+            fact.get("this_package")
+        ));
+    }
+    if fact.get("caps") != "0" {
+        problems.push(format!(
+            "{role} pid {pid} has capabilities={}, not 0",
+            fact.get("caps")
+        ));
+    }
+    let privs = fact.get("privs");
+    let extra: Vec<&str> = match privs {
+        "none" => Vec::new(),
+        "-" => vec!["(not read)"],
+        list => list.split(',').filter(|p| *p != KEPT_PRIVILEGE).collect(),
+    };
+    if !extra.is_empty() {
+        problems.push(format!(
+            "{role} pid {pid} holds privileges {privs}: only {KEPT_PRIVILEGE} may remain (extra: \
+             {})",
+            extra.join(",")
+        ));
+    }
+    if integrity_of(fact).is_none_or(|rid| rid > LOW) {
+        problems.push(format!(
+            "{role} pid {pid} has integrity {}, above Low or unread",
+            fact.get("integrity")
+        ));
+    }
+    problems
+}
+
+/// The probe's opens package B must be refused: A's namespace and each of A's folders.
+const DENIED: [&str; 10] = [
+    "a-dir",
+    "a-pipes",
+    "a-profile-list",
+    "a-profile-read",
+    "a-staging-list",
+    "a-staging-read",
+    "a-tmp-list",
+    "a-tmp-read",
+    "a-shell-list",
+    "a-shell-read",
+];
+/// The probe's positive controls, which must open: B's own namespace and the shared folder.
+const ALLOWED: [&str; 4] = ["b-dir", "b-pipes", "shared-list", "shared-read"];
+/// `STATUS_ACCESS_DENIED`.
+const NT_DENIED: u32 = 0xC000_0022;
+/// `ERROR_ACCESS_DENIED`.
+const WIN32_DENIED: u32 = 5;
+
+/// The probe's `code` for `target` and its `api`, if it reported one.
+fn probe_result<'a>(lines: &'a [Line], target: &str) -> Option<(&'a str, Option<u32>)> {
+    let line = lines
+        .iter()
+        .find(|l| l.kind == "probe" && l.get("target") == target)?;
+    let code = line
+        .get("code")
+        .strip_prefix("0x")
+        .and_then(|hex| u32::from_str_radix(hex, 16).ok());
+    Some((line.get("api"), code))
+}
+
+/// The negative check: package B's probe exited 0, every open of A's was refused with access
+/// denied (not some other error, which would prove nothing), and every positive control opened.
+fn check_probe(lines: &[Line]) -> Vec<String> {
+    let mut problems = Vec::new();
+    match lines.iter().find(|l| l.kind == "probe-exit") {
+        None => problems.push("the helper never reported the probe's exit".to_owned()),
+        Some(exit) if exit.get("exited") != "1" || exit.get("code") != "0x0" => {
+            problems.push(format!(
+                "package B's probe did not exit 0 in time: {}",
+                exit.text
+            ));
+        }
+        Some(_) => {}
+    }
+    for target in DENIED {
+        match probe_result(lines, target) {
+            None => problems.push(format!("no probe result for {target}")),
+            Some(("nt", Some(NT_DENIED)) | ("win32", Some(WIN32_DENIED))) => {}
+            Some((api, Some(0))) => problems.push(format!(
+                "package B opened package A's {target} ({api} code 0): the isolation failed"
+            )),
+            Some((api, code)) => problems.push(format!(
+                "package B's open of A's {target} failed with {api} code {code:#x?}, not access \
+                 denied"
+            )),
+        }
+    }
+    for target in ALLOWED {
+        match probe_result(lines, target) {
+            None => problems.push(format!("no probe result for the control {target}")),
+            Some((_, Some(0))) => {}
+            Some((api, code)) => problems.push(format!(
+                "the positive control {target} failed with {api} code {code:#x?}: the probe \
+                 cannot tell a refusal from a broken open"
+            )),
         }
     }
     problems
@@ -272,15 +390,31 @@ fn check_cdp(lines: &[Line]) -> Vec<String> {
 }
 
 /// No process of chrome's job listened on a TCP port, at either look (`inspect`, `close`).
+/// Each look must have counted chrome's processes, chrome itself among them: a look that found
+/// none would pass with nothing checked.
 fn check_listeners(lines: &[Line]) -> Vec<String> {
     let listen: Vec<&Line> = lines.iter().filter(|l| l.kind == "listen").collect();
+    let chrome = first(lines, "started", "pid").unwrap_or("-");
     let mut problems = Vec::new();
     for stage in ["inspect", "close"] {
-        let looked = listen
+        let counted: Vec<&str> = listen
             .iter()
-            .any(|l| l.get("stage") == stage && l.fields.contains_key("pids"));
-        if !looked {
-            problems.push(format!("no TCP listener count at the {stage} look"));
+            .filter(|l| l.get("stage") == stage && l.fields.contains_key("pid"))
+            .map(|l| l.get("pid"))
+            .collect();
+        let pids = listen
+            .iter()
+            .find(|l| l.get("stage") == stage && l.fields.contains_key("pids"))
+            .map(|l| l.get("pids"));
+        match pids {
+            None => problems.push(format!("no TCP listener count at the {stage} look")),
+            Some(n) if n == "0" || counted.is_empty() => problems.push(format!(
+                "the {stage} look found no chrome process (pids={n}): nothing was checked"
+            )),
+            Some(_) if !counted.contains(&chrome) => problems.push(format!(
+                "the {stage} look did not count chrome itself (pid {chrome})"
+            )),
+            Some(_) => {}
         }
     }
     for l in &listen {
@@ -333,6 +467,10 @@ pub(crate) fn summary(lines: &[Line], context: &Context) -> Vec<String> {
                 | "inspected"
                 | "chrome"
                 | "handles"
+                | "probe-start"
+                | "probe"
+                | "probe-done"
+                | "probe-exit"
                 | "snapshots"
                 | "stderr"
                 | "cdp"

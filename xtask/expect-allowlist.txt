@@ -644,4 +644,5 @@ crates/lowbox/tests/proof/launch.rs - unsafe_code
 crates/lowbox/tests/proof/helper.rs - unsafe_code
 crates/lowbox/tests/proof/inspect.rs - unsafe_code
 crates/lowbox/tests/proof/listen.rs - unsafe_code
+crates/lowbox/tests/proof/probe.rs - unsafe_code
 crates/lowbox/tests/proof/write.rs - clippy::disallowed_methods

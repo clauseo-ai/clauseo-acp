@@ -1,8 +1,8 @@
 //! The owner's cleanup: undoes what the row made, in a fixed order, each step checked and
 //! printed. It runs after the row and, if the row panicked, from `Drop for Run`. The removals
 //! that could pass unnoticed are confirmed: the account's processes are gone before anything
-//! they hold is removed, the namespace no longer opens by name, the station no longer opens by
-//! name, and the test root no longer exists.
+//! they hold is removed, neither package's namespace opens by name any more, the station no
+//! longer opens by name, and the test root no longer exists.
 
 use std::io::ErrorKind;
 use std::path::Path;
@@ -43,7 +43,10 @@ pub(crate) fn cleanup(run: &mut Run) -> Vec<String> {
         step("stop the proxy", Ok(proxy.stop()));
     }
     if let Some(built) = run.namespace.take() {
-        step("delete the namespace", namespace_gone(built));
+        step("delete package A's namespace", namespace_gone(built));
+    }
+    if let Some(built) = run.namespace_b.take() {
+        step("delete package B's namespace", namespace_gone(built));
     }
     if let Some(drive_root) = run.drive_root.take() {
         step("restore the drive root's DACL", drive_root.restore());

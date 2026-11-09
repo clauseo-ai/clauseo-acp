@@ -1,7 +1,8 @@
 //! The private window station and its desktop `Default`, made by the owner with the recipe's
 //! final descriptors (recipe step 3): SYSTEM, the owner (`READ_CONTROL | WRITE_DAC |
-//! WRITE_OWNER` only), the test account and the package, label Low. They are made with a
-//! creation descriptor that lets the owner make the desktop, then given the final one.
+//! WRITE_OWNER` only), the test account and the packages (A for chrome, and B for the probe,
+//! whose user32 must attach to the station and desktop to start at all), label Low. They are made
+//! with a creation descriptor that lets the owner make the desktop, then given the final one.
 #![expect(
     unsafe_code,
     reason = "FFI to the window station, desktop and SetSecurityInfo calls"
@@ -53,8 +54,8 @@ pub(crate) struct Station {
 
 impl Station {
     /// Makes the station `name` and its desktop `Default` for the owner `owner`, the test
-    /// account `user` and the package `package` (SID texts).
-    pub(crate) fn create(name: &str, owner: &str, user: &str, package: &str) -> Res<Station> {
+    /// account `user` and the `packages` (SID texts).
+    pub(crate) fn create(name: &str, owner: &str, user: &str, packages: &[&str]) -> Res<Station> {
         let creation = Sd::from_sddl(&format!(
             "D:P(A;;0xF037F;;;SY)(A;;{STATION_ACCESS:#x};;;{owner})"
         ))?;
@@ -76,11 +77,19 @@ impl Station {
             name: name.to_owned(),
         };
         made.desktop = desktop_on(station, owner)?;
+        let ace = |mask: &str| -> String {
+            packages
+                .iter()
+                .map(|package| format!("(A;;{mask};;;{package})"))
+                .collect::<Vec<String>>()
+                .concat()
+        };
+        let (station_aces, desktop_aces) = (ace("0x2007F"), ace("0x200C7"));
         secure(
             HANDLE(made.winsta.0),
             &format!(
                 "D:P(A;;0xF037F;;;SY)(A;;0xE0000;;;{owner})(A;;0x2007F;;;{user})\
-                 (A;;0x2007F;;;{package})S:(ML;;NW;;;LW)"
+                 {station_aces}S:(ML;;NW;;;LW)"
             ),
             "station",
         )?;
@@ -88,7 +97,7 @@ impl Station {
             HANDLE(made.desktop.0),
             &format!(
                 "D:P(A;;0xF01FF;;;SY)(A;;0xE0000;;;{owner})(A;;0x200C7;;;{user})\
-                 (A;;0x200C7;;;{package})S:(ML;;NW;;;LW)"
+                 {desktop_aces}S:(ML;;NW;;;LW)"
             ),
             "desktop",
         )?;

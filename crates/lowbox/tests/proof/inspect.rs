@@ -1,8 +1,9 @@
 //! The helper's look at chrome and its descendants, as the guard (`B_s`) would look: which it
 //! can open (`PROCESS_QUERY_LIMITED_INFORMATION`, then the token with `TOKEN_QUERY`), each one's
-//! role from its command line, its token's integrity, `AppContainer` package and restriction,
-//! and its machine type. It snapshots every 500 ms for up to 20 s until a renderer, the GPU
-//! process and the network service are all there and open. One `fact` line per process of the
+//! role from its command line, its token's integrity, `AppContainer` package, capability
+//! count, privileges (every one present, by name, enabled or not) and restriction, and its
+//! machine type. It snapshots every 500 ms for up to 20 s until chrome itself, a renderer, the
+//! GPU process and the network service are all there and open. One `fact` line per process of the
 //! last snapshot; one that ended before or during the look is `open=gone`. The package SID is
 //! never printed, only whether a token's package is this one.
 #![expect(
@@ -16,12 +17,13 @@ use std::ffi::c_void;
 use std::os::windows::io::OwnedHandle;
 
 use windows::Wdk::System::Threading::{NtQueryInformationProcess, ProcessCommandLineInformation};
-use windows::Win32::Foundation::{HANDLE, STILL_ACTIVE, UNICODE_STRING};
+use windows::Win32::Foundation::{HANDLE, LUID, STILL_ACTIVE, UNICODE_STRING};
 use windows::Win32::Security::{
     GetLengthSid, GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation,
-    IsTokenRestricted, TOKEN_APPCONTAINER_INFORMATION, TOKEN_INFORMATION_CLASS,
-    TOKEN_MANDATORY_LABEL, TOKEN_QUERY, TokenAppContainerSid, TokenIntegrityLevel,
-    TokenIsAppContainer,
+    IsTokenRestricted, LUID_AND_ATTRIBUTES, LookupPrivilegeNameW, TOKEN_APPCONTAINER_INFORMATION,
+    TOKEN_INFORMATION_CLASS, TOKEN_MANDATORY_LABEL, TOKEN_PRIVILEGES, TOKEN_QUERY,
+    TokenAppContainerSid, TokenCapabilities, TokenIntegrityLevel, TokenIsAppContainer,
+    TokenPrivileges,
 };
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
@@ -31,6 +33,7 @@ use windows::Win32::System::Threading::{
     GetExitCodeProcess, GetProcessInformation, IsWow64Process2, OpenProcess, OpenProcessToken,
     PROCESS_MACHINE_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, ProcessMachineTypeInfo,
 };
+use windows::core::{PCWSTR, PWSTR};
 
 use super::helper::say;
 use super::win::{Res, code, failed, owned, raw, sleep_ms};
@@ -40,7 +43,7 @@ const SNAPSHOTS: u32 = 40;
 /// The pause between them.
 const SNAPSHOT_PAUSE_MS: u32 = 500;
 /// The roles the row needs, each with a live process the helper opened.
-const NEEDED: [&str; 3] = ["renderer", "gpu", "network"];
+const NEEDED: [&str; 4] = ["browser", "renderer", "gpu", "network"];
 /// `ERROR_INVALID_PARAMETER`: `OpenProcess` on an id whose process has ended.
 const GONE: u32 = 87;
 
@@ -218,7 +221,8 @@ fn report(probe: Probe, package: &[u8]) -> Seen {
     let (token, machine) = match &opened {
         Ok(process) => (token_facts(process, package), machine(raw(process))),
         Err(_) => (
-            "token=- integrity=- appcontainer=- this_package=- restricted=-".to_owned(),
+            "token=- integrity=- appcontainer=- this_package=- caps=- privs=- restricted=-"
+                .to_owned(),
             "machine=- wow=- native=-".to_owned(),
         ),
     };
@@ -240,14 +244,15 @@ fn report(probe: Probe, package: &[u8]) -> Seen {
     }
 }
 
-/// The token's facts as `token=… integrity=… appcontainer=… this_package=… restricted=…`.
+/// The token's facts as `token=… integrity=… appcontainer=… this_package=… caps=… privs=…
+/// restricted=…`.
 fn token_facts(process: &OwnedHandle, package: &[u8]) -> String {
     let mut token = HANDLE::default();
     // SAFETY: an open process handle; `token` gets a new handle, owned below.
     let opened = unsafe { OpenProcessToken(raw(process), TOKEN_QUERY, &raw mut token) };
     if let Err(e) = opened {
         return format!(
-            "token=err{} integrity=- appcontainer=- this_package=- restricted=-",
+            "token=err{} integrity=- appcontainer=- this_package=- caps=- privs=- restricted=-",
             code(&e)
         );
     }
@@ -262,11 +267,22 @@ fn token_facts(process: &OwnedHandle, package: &[u8]) -> String {
         },
     );
     let this_package = is_package(&token, package).map_or_else(|e| e, |b| u8::from(b).to_string());
+    let caps = capabilities(&token).map_or_else(|e| e, |n| n.to_string());
+    let privs = privileges(&token).map_or_else(
+        |e| e,
+        |names| {
+            if names.is_empty() {
+                "none".to_owned()
+            } else {
+                names.join(",")
+            }
+        },
+    );
     // SAFETY: an open token handle with TOKEN_QUERY.
     let restricted = u8::from(unsafe { IsTokenRestricted(raw(&token)) }.is_ok());
     format!(
         "token=ok integrity={integrity} appcontainer={appcontainer} this_package={this_package} \
-         restricted={restricted}"
+         caps={caps} privs={privs} restricted={restricted}"
     )
 }
 
@@ -328,6 +344,66 @@ fn is_package(token: &OwnedHandle, package: &[u8]) -> Result<bool, String> {
         }
         let len = usize::try_from(GetLengthSid(sid)).unwrap_or(0);
         Ok(std::slice::from_raw_parts(sid.0.cast::<u8>().cast_const(), len) == package)
+    }
+}
+
+/// How many capability SIDs the token holds (`TokenCapabilities`).
+fn capabilities(token: &OwnedHandle) -> Result<u32, String> {
+    let buffer = query(token, TokenCapabilities)?;
+    // SAFETY: the call filled a TOKEN_GROUPS, whose first field is the u32 GroupCount, at the
+    // start of `buffer` (at least 8 bytes, 8-byte aligned).
+    Ok(unsafe { buffer.as_ptr().cast::<u32>().read() })
+}
+
+/// The name of every privilege the token holds (`TokenPrivileges`), enabled or not; one whose
+/// name cannot be read shows as `luid<high>:<low>`.
+fn privileges(token: &OwnedHandle) -> Result<Vec<String>, String> {
+    let buffer = query(token, TokenPrivileges)?;
+    let bytes = buffer.len() * 8;
+    let base = buffer.as_ptr().cast::<u8>();
+    // TOKEN_PRIVILEGES starts with the u32 PrivilegeCount (little-endian, so the first word's
+    // low half).
+    let count =
+        usize::try_from(buffer.first().map_or(0, |w| w & 0xFFFF_FFFF)).unwrap_or(usize::MAX);
+    let first = std::mem::offset_of!(TOKEN_PRIVILEGES, Privileges);
+    let row = size_of::<LUID_AND_ATTRIBUTES>();
+    if count
+        .checked_mul(row)
+        .and_then(|n| n.checked_add(first))
+        .is_none_or(|end| end > bytes)
+    {
+        return Err(format!("privs-overflow{count}"));
+    }
+    Ok((0..count)
+        .map(|i| {
+            // SAFETY: entry `i` lies inside `buffer` (checked above); read unaligned.
+            let entry = unsafe {
+                base.add(first + i * row)
+                    .cast::<LUID_AND_ATTRIBUTES>()
+                    .read_unaligned()
+            };
+            privilege_name(entry.Luid)
+        })
+        .collect())
+}
+
+/// The name of the privilege `luid` (`LookupPrivilegeNameW` on this machine).
+fn privilege_name(luid: LUID) -> String {
+    let mut name = [0_u16; 64];
+    let mut len = u32::try_from(name.len()).unwrap_or(0);
+    // SAFETY: `luid` is a local, `name` is writable for `len` characters and outlives the call.
+    let looked = unsafe {
+        LookupPrivilegeNameW(
+            PCWSTR::null(),
+            &raw const luid,
+            Some(PWSTR(name.as_mut_ptr())),
+            &raw mut len,
+        )
+    };
+    let len = usize::try_from(len).unwrap_or(0).min(name.len());
+    match looked {
+        Ok(()) => String::from_utf16_lossy(&name[..len]),
+        Err(_) => format!("luid{:#x}:{:#x}", luid.HighPart, luid.LowPart),
     }
 }
 

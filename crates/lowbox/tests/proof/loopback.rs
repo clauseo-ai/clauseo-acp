@@ -1,6 +1,11 @@
-//! The loopback exemption (recipe step 4): the package joins the list of app containers allowed
-//! to reach 127.0.0.1, where the row's proxy listens. The set call replaces the whole list, so
-//! the row reads it first and writes it back afterwards.
+//! The loopback exemption (recipe step 4): package A, and only A, joins the list of app
+//! containers allowed to reach 127.0.0.1, where the row's proxy listens. The exemption is per
+//! package (`NetworkIsolationSetAppContainerConfig` with A's SID), never the machine-wide
+//! loopback switch; package B (the probe's) stays off the list. It stands in until PR 4's WFP
+//! filters, which let one package reach only its own proxy port; until then the exempt package
+//! reaches every 127.0.0.1 listener. The set call replaces the whole list, so the row reads it
+//! first, sets it to that list plus A (read back and compared), and at cleanup writes the
+//! original back and reads it again to compare.
 #![expect(
     unsafe_code,
     reason = "FFI to the NetworkIsolation{Get,Set}AppContainerConfig calls"
@@ -63,8 +68,34 @@ pub(crate) fn set(sids: &[Vec<u8>]) -> Res<()> {
     Ok(())
 }
 
-/// Writes `original` back, then reads the list again and compares (as sets: the order is the
-/// API's).
+/// Sets the list to `original` (just read) plus `package`, then reads it back: it must be
+/// exactly `original` plus `package`, with `absent` (package B) not on it. Neither package may
+/// be on `original`, since a fresh package never is and the restore would then keep it.
+pub(crate) fn exempt(original: &[Vec<u8>], package: &[u8], absent: &[u8]) -> Res<String> {
+    if original.iter().any(|sid| sid == package || sid == absent) {
+        return Err("a fresh package is already on the loopback list".to_owned());
+    }
+    let mut want = original.to_vec();
+    want.push(package.to_vec());
+    set(&want)?;
+    let mut now = current()?;
+    now.sort();
+    want.sort();
+    if now != want {
+        return Err(format!(
+            "the re-read list has {} entries, not the original {} plus package A",
+            now.len(),
+            original.len()
+        ));
+    }
+    Ok(format!(
+        "package A only (re-read: the original {} entries plus A; B is not on it)",
+        original.len()
+    ))
+}
+
+/// Writes `original` back, then reads the list again and compares, entry for entry (sorted: the
+/// order is the API's).
 pub(crate) fn restore(original: &[Vec<u8>]) -> Res<String> {
     set(original)?;
     let mut now = current()?;

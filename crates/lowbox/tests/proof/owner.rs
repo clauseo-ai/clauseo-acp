@@ -2,25 +2,27 @@
 //! helper's start, the run, the artifacts and the evidence. The cleanup, which always runs, is in
 //! `teardown.rs`.
 //!
-//! The row's own bounded waits: the page 180 s (the helper's first four CDP steps, 20 s each,
-//! run inside it), the facts 60 s, the helper's exit 150 s (navigate, load and screenshot 20 s
-//! each, `Browser.close` 10 s, chrome's exit 30 s, the exit codes 15 s, chrome's stderr 10 s:
-//! 125 s), its last output 10 s, then in the cleanup the helper's kill 10 s, the account's
-//! processes 30 s, the profile's delete 57 s and the root's delete 10 s: 507 s in all, under the
-//! 600 s nextest gives this row (`.config/nextest.toml`).
+//! The row's own bounded waits: the page 180 s (inside it the helper's probe in package B, 30 s
+//! and its output 10 s, then its first four CDP steps, 20 s each: 120 s), the facts 60 s, the
+//! helper's exit 150 s (navigate, load and screenshot 20 s each, `Browser.close` 10 s, chrome's
+//! exit 30 s, the exit codes 15 s, chrome's stderr 10 s: 125 s), its last output 10 s, then in
+//! the cleanup the helper's kill 10 s, the account's processes 30 s, the profile's delete 57 s
+//! and the root's delete 10 s: 507 s in all, under the 600 s nextest gives this row
+//! (`.config/nextest.toml`).
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
 
 use clauseo_lowbox::{
-    BrowserFolders, Namespace, NamespaceHandles, PackageName, Sid, grants, package_sid,
+    BrowserFolders, Namespace, NamespaceHandles, PackageName, Rights, Sid, grants, package_sid,
 };
 
 use super::acl::{self, DriveRoot, NullDevice};
 use super::evidence::{self, Context, PNG_SIGNATURE, redact};
 use super::helper::{Config, STDERR_LOG};
 use super::launch::{self, Helper};
+use super::probe::{MARKER, MARKER_TEXT, PROBE_EXE};
 use super::proxy::Proxy;
 use super::station::Station;
 use super::win::{self, Res};
@@ -34,6 +36,10 @@ const FACTS_WAIT: Duration = Duration::from_secs(60);
 const HELPER_EXIT_MS: u32 = 150_000;
 /// How long it waits for the helper's last output after its exit.
 const DRAIN_WAIT: Duration = Duration::from_secs(10);
+/// ALL APPLICATION PACKAGES: may read the probe's folder, so both packages can.
+const ALL_APPLICATION_PACKAGES: &str = "S-1-15-2-1";
+/// Where CI documents the row's inputs.
+const CI: &str = "the Elevated tests step of ci.yml and windows-pr-tests.yml";
 
 /// The row's inputs from CI.
 struct Inputs {
@@ -50,7 +56,7 @@ impl Inputs {
     fn from_env() -> Inputs {
         let var = |name: &str| {
             std::env::var(name).unwrap_or_else(|_| {
-                panic!("{name} is not set: the proof row needs it (arm64-browser-proof.yml)")
+                panic!("{name} is not set: the proof row needs it ({CI} sets it)")
             })
         };
         assert_eq!(
@@ -84,6 +90,18 @@ pub(crate) struct User {
     pub(crate) profile_fallback: PathBuf,
 }
 
+/// What `lay_out` made: the paths the helper needs.
+struct Layout {
+    /// chrome-headless-shell.exe in the shell folder.
+    shell: PathBuf,
+    /// The helper (the test binary) in its own folder.
+    helper_exe: PathBuf,
+    /// The probe (the test binary) in a folder ALL APPLICATION PACKAGES may read.
+    probe_exe: PathBuf,
+    /// Package A's folders.
+    folders: BrowserFolders,
+}
+
 /// The namespace's handles and what opens it again by name.
 pub(crate) struct Built {
     /// The handles `Namespace::build` returned.
@@ -102,8 +120,10 @@ pub(crate) struct Run {
     pub(crate) helper: Option<Helper>,
     /// The proxy.
     pub(crate) proxy: Option<Proxy>,
-    /// The namespace.
+    /// Package A's namespace (chrome's).
     pub(crate) namespace: Option<Built>,
+    /// Package B's namespace (the probe's).
+    pub(crate) namespace_b: Option<Built>,
     /// The drive root's saved DACL.
     pub(crate) drive_root: Option<DriveRoot>,
     /// `\Device\Null`'s saved DACL.
@@ -135,10 +155,12 @@ pub(crate) fn row() {
     problems.extend(cleanup.into_iter().map(|f| format!("cleanup: {f}")));
     assert!(
         problems.is_empty(),
-        "lowbox_headless_shell_row failed:\n- {}",
+        "elevated_lowbox_headless_shell_row failed:\n- {}",
         problems.join("\n- ")
     );
-    println!("lowbox_headless_shell_row: every assertion held and the cleanup is complete");
+    println!(
+        "elevated_lowbox_headless_shell_row: every assertion held and the cleanup is complete"
+    );
 }
 
 /// `e` as a sentence about `what`.
@@ -159,7 +181,11 @@ impl Run {
         let package = PackageName::new(&format!("Clauseo.Browser.Proof{tag}"))
             .map_err(because("the package name"))?;
         let package_text = package_sid(&package).as_str().to_owned();
-        println!("setup: test account {user} and a fresh package (its name is not printed)");
+        // Package B: the negative check's (`probe.rs`). No file grant, no loopback exemption.
+        let package_b = PackageName::new(&format!("Clauseo.Browser.ProofB{tag}"))
+            .map_err(because("package B's name"))?;
+        let package_b_text = package_sid(&package_b).as_str().to_owned();
+        println!("setup: test account {user} and two fresh packages (names not printed)");
 
         let password = win::random_password();
         account::add(&user, &password)?;
@@ -182,7 +208,12 @@ impl Run {
         ));
         acl::create_root(&root, &user_sid)?;
         self.root = Some(root.clone());
-        let (shell, helper_exe, folders) = Self::lay_out(&root, inputs, &package)?;
+        let Layout {
+            shell,
+            helper_exe,
+            probe_exe,
+            folders,
+        } = Self::lay_out(&root, inputs, &package)?;
         println!("setup: test root {} laid out and granted", root.display());
 
         let drive_root = format!(r"{}\", inputs.system_drive);
@@ -194,19 +225,24 @@ impl Run {
         added.check(&package_text)?;
         println!(r"setup: package ACEs added on {drive_root} and \Device\Null (re-read)");
 
+        // Per package, for A only: never the machine-wide switch. It stands in until PR 4's WFP
+        // filters (see loopback.rs).
         let original = loopback::current()?;
         self.loopback = Some(original.clone());
-        let mut exempt = original;
-        exempt.push(package_sid(&package).to_bytes());
-        loopback::set(&exempt)?;
-        println!("setup: loopback exemption added");
+        let exempted = loopback::exempt(
+            &original,
+            &package_sid(&package).to_bytes(),
+            &package_sid(&package_b).to_bytes(),
+        )?;
+        println!("setup: loopback exemption for {exempted}");
 
         let owner = win::token_user_sid()?;
+        let owner_sid = Sid::parse(&owner).map_err(because("the owner's SID"))?;
         let station = self.station.insert(Station::create(
             &format!("ClauseoLowbox-{tag}"),
             &owner,
             &user_sid,
-            &package_text,
+            &[&package_text, &package_b_text],
         )?);
         let (station_name, desktop) = (station.name().to_owned(), station.desktop_path());
         println!("setup: private station {station_name} and its desktop Default");
@@ -215,39 +251,32 @@ impl Run {
             .proxy
             .insert(Proxy::start().map_err(|e| format!("the proxy: {e}"))?)
             .port();
-        let browser = Sid::parse(&user_sid).map_err(because("the account's SID"))?;
-        let session = Namespace::current_session().map_err(because("the session"))?;
-        assert_ne!(
-            session, 0,
-            "the row runs in session 0, which has no \\Sessions\\0\\BaseNamedObjects for the \
-             namespace: run it from a logged-on session"
-        );
-        let handles =
-            Namespace::build(&package, session, &browser).map_err(because("Namespace::build"))?;
-        let namespace = &self
-            .namespace
-            .insert(Built {
-                handles,
-                package: package.clone(),
-                session,
-            })
-            .handles;
-        println!("setup: namespace built in session {session}; proxy on 127.0.0.1:{port}");
+        let session = self.build_namespaces(&package, &package_b, &user_sid)?;
+        println!("setup: both namespaces built in session {session}; proxy on 127.0.0.1:{port}");
 
         let helper = self
             .helper
             .insert(launch::start(&user, &password, &helper_exe, &desktop)?);
         drop(password);
-        let values = namespace
-            .duplicate_into(helper.process())
-            .map_err(because("duplicate_into"))?;
-        let config = Config {
-            handles: values
+        let copy = |built: Option<&Built>, what: &str| -> Res<String> {
+            let built = built.ok_or_else(|| format!("no namespace for {what}"))?;
+            let values = built
+                .handles
+                .duplicate_into(helper.process())
+                .map_err(because(what))?;
+            Ok(values
                 .iter()
                 .map(|v| format!("{v:#x}"))
                 .collect::<Vec<String>>()
-                .join(","),
+                .join(","))
+        };
+        let config = Config {
+            owner: owner_sid.as_str().to_owned(),
+            handles: copy(self.namespace.as_ref(), "duplicate_into(package A)")?,
             package: package.as_str().to_owned(),
+            handles_b: copy(self.namespace_b.as_ref(), "duplicate_into(package B)")?,
+            package_b: package_b.as_str().to_owned(),
+            probe: text(&probe_exe),
             shell: text(&shell),
             profile: text(&folders.profile),
             staging: text(&folders.staging),
@@ -256,7 +285,7 @@ impl Run {
         };
         helper.send(&config.line())?;
         println!(
-            "run: helper pid {} started as {user}; handles copied",
+            "run: helper pid {} started as {user}; both packages' handles copied",
             helper.pid()
         );
 
@@ -271,14 +300,43 @@ impl Run {
         }
     }
 
-    /// Makes the test root's folders, applies the package's grants, then copies the shell and
-    /// the helper in (so their files inherit). Returns the shell's path, the helper's path and
-    /// the folders.
-    fn lay_out(
-        root: &Path,
-        inputs: &Inputs,
+    /// Builds package A's namespace and package B's in this session, for the test account
+    /// `user_sid`; the session.
+    fn build_namespaces(
+        &mut self,
         package: &PackageName,
-    ) -> Res<(PathBuf, PathBuf, BrowserFolders)> {
+        package_b: &PackageName,
+        user_sid: &str,
+    ) -> Res<u32> {
+        let browser = Sid::parse(user_sid).map_err(because("the account's SID"))?;
+        let session = Namespace::current_session().map_err(because("the session"))?;
+        assert_ne!(
+            session, 0,
+            "the row runs in session 0, which has no \\Sessions\\0\\BaseNamedObjects for the \
+             namespace: run it from a logged-on session"
+        );
+        let handles =
+            Namespace::build(package, session, &browser).map_err(because("Namespace::build"))?;
+        self.namespace = Some(Built {
+            handles,
+            package: package.clone(),
+            session,
+        });
+        let handles_b = Namespace::build(package_b, session, &browser)
+            .map_err(because("Namespace::build(package B)"))?;
+        self.namespace_b = Some(Built {
+            handles: handles_b,
+            package: package_b.clone(),
+            session,
+        });
+        Ok(session)
+    }
+
+    /// Makes the test root's folders (`grants` opens each, so they exist first), applies the
+    /// package's grants, writes the probe's marker in each of A's folders, then copies the shell
+    /// and the helper in (so their files inherit). The probe's folder gets one grant, read and
+    /// run for ALL APPLICATION PACKAGES (not for B alone), and the test binary as the probe.
+    fn lay_out(root: &Path, inputs: &Inputs, package: &PackageName) -> Res<Layout> {
         let folders = BrowserFolders {
             profile: root.join("profile"),
             staging: root.join("staging"),
@@ -287,6 +345,7 @@ impl Run {
         };
         let pins = root.join("pins");
         let helper_dir = root.join("helper");
+        let probe_dir = root.join("probe");
         for dir in [
             &folders.shell,
             &folders.profile,
@@ -294,11 +353,27 @@ impl Run {
             &folders.tmp,
             &pins,
             &helper_dir,
+            &probe_dir,
         ] {
             acl::mkdir(dir)?;
         }
         for grant in grants(package, &folders, &pins).map_err(because("grants"))? {
             acl::grant(&grant.path, grant.rights.mask(), grant.sid.as_str())?;
+        }
+        acl::grant(
+            &probe_dir,
+            Rights::ReadExecute.mask(),
+            ALL_APPLICATION_PACKAGES,
+        )?;
+        for dir in [
+            &folders.profile,
+            &folders.staging,
+            &folders.tmp,
+            &folders.shell,
+            &probe_dir,
+        ] {
+            write::write(&dir.join(MARKER), MARKER_TEXT)
+                .map_err(|e| format!("writing the probe's marker in {}: {e}", dir.display()))?;
         }
         let source = inputs.shell.parent().ok_or("the shell has no folder")?;
         let files = write::copy_tree(source, &folders.shell)
@@ -308,10 +383,17 @@ impl Run {
             .file_name()
             .ok_or("the shell has no file name")?;
         let helper_exe = helper_dir.join("clauseo-lowbox-proof-helper.exe");
+        let probe_exe = probe_dir.join(PROBE_EXE);
         let me = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
         write::copy(&me, &helper_exe).map_err(|e| format!("copying the test binary: {e}"))?;
-        println!("setup: copied {files} shell files and the test binary as the helper");
-        Ok((folders.shell.join(name), helper_exe, folders))
+        write::copy(&me, &probe_exe).map_err(|e| format!("copying the test binary: {e}"))?;
+        println!("setup: copied {files} shell files and the test binary as the helper and probe");
+        Ok(Layout {
+            shell: folders.shell.join(name),
+            helper_exe,
+            probe_exe,
+            folders,
+        })
     }
 
     /// The run itself: waits for the page request, asks for the inspection, collects the facts,

@@ -1,7 +1,8 @@
 //! The helper: the test binary again, started by the owner as the test account (the guard's
-//! role, `B_s`). It reads one line from the owner (the copied namespace handles, the package and
-//! the paths), takes the handles with `from_inherited`, starts chrome-headless-shell in the
-//! `LowBox` token inside a Job Object of its own, waits for the owner's `inspect`, reports what
+//! role, `B_s`). It reads one line from the owner (the copied namespace handles of packages A
+//! and B, the packages, the owner's SID and the paths), takes both sets with `from_inherited`,
+//! runs the probe in B's token (`probe.rs`), starts chrome-headless-shell in A's `LowBox`
+//! token inside a Job Object of its own, waits for the owner's `inspect`, reports what
 //! it can see of chrome's processes, waits for chrome to exit and reports the exit codes. Each
 //! report is a line starting [`MARK`], which the owner parses. Chrome's standard output is
 //! `NUL` and its standard error goes to [`STDERR_LOG`] in staging, so neither reaches the
@@ -34,7 +35,8 @@ use std::time::Duration;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use clauseo_lowbox::{
-    LowBoxCommand, NamespaceHandles, PackageName, Spawned, Stdio, package_sid, parse_handle_arg,
+    LowBoxCommand, Namespace, NamespaceHandles, PackageName, Sid, Spawned, Stdio, package_sid,
+    parse_handle_arg,
 };
 use serde_json::{Value, json};
 use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0};
@@ -55,6 +57,7 @@ use windows::core::PCWSTR;
 use super::cdp::{Cdp, Reply, failure, field};
 use super::inspect;
 use super::listen;
+use super::probe::{self, Kind, Target};
 use super::proxy::URL;
 use super::win::{Res, code, failed, owned, raw, sleep_ms, wide};
 use super::write;
@@ -82,10 +85,18 @@ pub(crate) fn say(line: impl Display) {
 /// What the owner tells the helper, as one line of `key=value` fields split by tabs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Config {
-    /// The `--lowbox-handles` text of the handles copied into the helper.
+    /// The owner's user SID: the owner of every namespace object (`from_inherited` checks it).
+    pub(crate) owner: String,
+    /// The `--lowbox-handles` text of package A's handles copied into the helper.
     pub(crate) handles: String,
-    /// The package name.
+    /// Package A's name: chrome's.
     pub(crate) package: String,
+    /// The `--lowbox-handles` text of package B's handles copied into the helper.
+    pub(crate) handles_b: String,
+    /// Package B's name: the probe's.
+    pub(crate) package_b: String,
+    /// The probe's full path, in a folder ALL APPLICATION PACKAGES may read.
+    pub(crate) probe: String,
     /// chrome-headless-shell's full path.
     pub(crate) shell: String,
     /// `--user-data-dir`.
@@ -102,8 +113,19 @@ impl Config {
     /// The line the owner writes.
     pub(crate) fn line(&self) -> String {
         format!(
-            "handles={}\tpackage={}\tshell={}\tprofile={}\tstaging={}\ttmp={}\tport={}",
-            self.handles, self.package, self.shell, self.profile, self.staging, self.tmp, self.port
+            "owner={}\thandles={}\tpackage={}\thandles_b={}\tpackage_b={}\tprobe={}\tshell={}\t\
+             profile={}\tstaging={}\ttmp={}\tport={}",
+            self.owner,
+            self.handles,
+            self.package,
+            self.handles_b,
+            self.package_b,
+            self.probe,
+            self.shell,
+            self.profile,
+            self.staging,
+            self.tmp,
+            self.port
         )
     }
 
@@ -117,8 +139,12 @@ impl Config {
                 .ok_or(format!("the owner's line has no {key}"))
         };
         Ok(Config {
+            owner: field("owner")?,
             handles: field("handles")?,
             package: field("package")?,
+            handles_b: field("handles_b")?,
+            package_b: field("package_b")?,
+            probe: field("probe")?,
             shell: field("shell")?,
             profile: field("profile")?,
             staging: field("staging")?,
@@ -138,13 +164,26 @@ pub(crate) fn run() {
         .expect("the owner's line")
         .expect("the owner's line is text");
     let config = Config::parse(&first).unwrap();
+    let owner = Sid::parse(&config.owner).unwrap();
     let package = PackageName::new(&config.package).unwrap();
     let values = parse_handle_arg(&config.handles).unwrap();
-    let namespace = NamespaceHandles::from_inherited(&package, &values)
-        .unwrap_or_else(|e| panic!("from_inherited: {e}"));
-    say("handles taken=6");
+    let namespace = NamespaceHandles::from_inherited(&package, &owner, &values)
+        .unwrap_or_else(|e| panic!("from_inherited(A): {e}"));
+    let package_b = PackageName::new(&config.package_b).unwrap();
+    let values_b = parse_handle_arg(&config.handles_b).unwrap();
+    let namespace_b = NamespaceHandles::from_inherited(&package_b, &owner, &values_b)
+        .unwrap_or_else(|e| panic!("from_inherited(B): {e}"));
+    say("handles taken=6 taken_b=6");
     say(format_args!("station {}", station_report()));
     say(format_args!("desktop {}", named(desktop_name())));
+    // The negative check runs first, while nothing of chrome's exists yet; its failure is a
+    // report line the owner judges, so chrome's evidence is still gathered.
+    let probed = probe_targets(&config, &package, &package_b)
+        .and_then(|targets| probe::run_in_b(&namespace_b, Path::new(&config.probe), &targets));
+    if let Err(e) = probed {
+        say(format_args!("probe-exit error={}", e.replace(' ', "_")));
+    }
+    drop(namespace_b);
 
     let shell = Path::new(&config.shell);
     let staging = Path::new(&config.staging);
@@ -372,8 +411,51 @@ fn report_exits(seen: &[inspect::Seen]) {
     }
 }
 
+/// What the probe opens in package B's token (`probe.rs`): A's package directory and pipe
+/// folder and A's four granted folders, each to be refused; B's own directory and pipe folder
+/// and the probe's folder, each to open (the positive controls).
+fn probe_targets(config: &Config, a: &PackageName, b: &PackageName) -> Res<Vec<Target>> {
+    let session = Namespace::current_session().map_err(|e| format!("the session: {e}"))?;
+    let directory = |package: &PackageName| {
+        format!(
+            r"\Sessions\{session}\AppContainerNamedObjects\{}",
+            package_sid(package).as_str()
+        )
+    };
+    let shell_dir = Path::new(&config.shell)
+        .parent()
+        .ok_or("the shell has no folder")?;
+    let shared = Path::new(&config.probe)
+        .parent()
+        .ok_or("the probe has no folder")?;
+    let target = |label: &str, kind: Kind, path: String| Target {
+        label: label.to_owned(),
+        kind,
+        path,
+    };
+    Ok(vec![
+        target("a-dir", Kind::Directory, directory(a)),
+        target(
+            "a-pipes",
+            Kind::Pipes,
+            format!(r"\Device\NamedPipe{}", directory(a)),
+        ),
+        target("a-profile", Kind::Folder, config.profile.clone()),
+        target("a-staging", Kind::Folder, config.staging.clone()),
+        target("a-tmp", Kind::Folder, config.tmp.clone()),
+        target("a-shell", Kind::Folder, shell_dir.display().to_string()),
+        target("b-dir", Kind::Directory, directory(b)),
+        target(
+            "b-pipes",
+            Kind::Pipes,
+            format!(r"\Device\NamedPipe{}", directory(b)),
+        ),
+        target("shared", Kind::Folder, shared.display().to_string()),
+    ])
+}
+
 /// A Job Object that ends its processes when its last handle closes.
-fn kill_on_close_job() -> Res<OwnedHandle> {
+pub(crate) fn kill_on_close_job() -> Res<OwnedHandle> {
     // SAFETY: no attributes and no name; the handle is owned below.
     let job = unsafe { CreateJobObjectW(None, PCWSTR::null()) }
         .map_err(|e| failed("CreateJobObjectW", &e))?;
@@ -454,6 +536,6 @@ fn desktop_name() -> Res<String> {
 }
 
 /// The helper's own value of a system variable, or `fallback`.
-fn system_var(name: &str, fallback: &str) -> String {
+pub(crate) fn system_var(name: &str, fallback: &str) -> String {
     std::env::var(name).unwrap_or_else(|_unset| fallback.to_owned())
 }
