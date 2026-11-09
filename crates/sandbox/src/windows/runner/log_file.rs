@@ -20,8 +20,10 @@
 //!   secret: [`Kept`] writes the message and number and `bool` fields, and a string field only
 //!   when its name is one whose values are the code's own words ([`WORDS`]). Any other field
 //!   (`%error`, `?reason`, a string field by any other name) is written as `name=<dropped>`: an
-//!   error's text can hold a path. Every runner call's message is a literal; one holding `\` or
-//!   `/` is withheld too, as it might be a path.
+//!   error's text can hold a path. A message is written as it is: `tracing` hands a literal and
+//!   a formatted message over alike, so the `log-literals` xtask check keeps every `warn!` and
+//!   `error!` under `windows/` (but `windows/setup/`) a literal with no format argument. One
+//!   holding `\` or `/` is withheld too, as it might be a path.
 
 use std::fmt;
 use std::io;
