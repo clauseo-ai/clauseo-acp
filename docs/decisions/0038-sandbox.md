@@ -527,13 +527,15 @@ rule for `setsid` or `setpgid`. `RLIMIT_NPROC` is compared with the user's whole
   - the watch failed closed: "Clauseo couldn't keep track of the AI tool's programs, so it
     stopped the tool to be safe. Start it again."
 
-  Each goes once per lawyer session through the `ProcessCapSession` the host gives every
-  launcher of that session (`SeatbeltLauncher::process_cap`). Without one, each launcher has its own, writing to the
-  host's stderr: no host caller builds a `SeatbeltLauncher` yet.
+  Each goes once per lawyer session through `cap`, the `ProcessCapSession` that
+  `SeatbeltLauncher::new` requires. The host makes exactly one per lawyer session and clones it
+  into every launcher of that session. There is no default, so a launcher can't silently count
+  per launch. An agent that exits at once, with its session empty at the first count, is a
+  normal end: no notice and no failed launch.
 - Nothing outside the tree starts processes for the agent: the profile is `(deny default)` with
   no `job-creation`, `lsopen` or `appleevent-send` rule, and its `mach-lookup` names only
   opendirectoryd, notifyd, logd, diagnosticd and powerd (`base.sb`), plus securityd and trustd
-  with the Keychain. `launchctl submit` from the jail fails and launchd holds no job (the jail
+  with the Keychain (a residual below). `launchctl submit` from the jail fails and launchd holds no job (the jail
   test `launchd_starts_nothing_for_the_agent`); outside the jail the same command works.
 
 Measured on a Mac mini (M-series, macOS 27.2): a binary tree of shells 10 levels deep (2,047
@@ -551,6 +553,11 @@ Residual risks:
   kill, which misses them too. The session-marker sweep (a later change) covers them. Leaving a
   process group alone is not an escape: the session still holds it.
 - The cap counts processes, not threads or memory: 256 large processes can still fill memory.
+- With the Keychain on (`profile.rs`, `keychain`), the agent reaches SecurityServer,
+  securityd.xpc and trustd.agent. securityd can have launchd start SecurityAgent, and trustd's
+  agent is per user. Each is a single instance, so the agent cannot multiply them, but they run
+  outside its tree and its `RLIMIT_NPROC`, and SecurityAgent can put a prompt in front of the
+  lawyer.
 - Between a process's start check and its `kill`, it could exit and its pid be reused: that
   needs the pid space to wrap within microseconds. macOS has no pidfd.
 
