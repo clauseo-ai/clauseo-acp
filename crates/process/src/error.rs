@@ -39,16 +39,16 @@ pub enum Error {
     /// was started.
     #[error("the app is exiting: no new process starts")]
     Closing,
-    /// macOS: the Mac lets one user run so few processes (`kern.maxprocperuid`) that the Safe
-    /// workspace cannot hold back its reserve for the lawyer's own apps and still leave the agent
-    /// room, so the agent was not started.
+    /// macOS: the Mac lets so few processes run (`kern.maxprocperuid`, `kern.maxproc`, or this
+    /// process's hard `RLIMIT_NPROC`) that the Safe workspace cannot hold back its reserve for
+    /// the lawyer's own apps and still leave the agent room, so the agent was not started.
     #[error(
-        "This Mac's process limit is too low for Clauseo's Safe workspace: it lets one user run \
-         {per_user} programs at once, and the Safe workspace needs at least {needed}."
+        "This Mac's process limit is too low for Clauseo's Safe workspace: it leaves room for \
+         {allowed} programs at once, and the Safe workspace needs at least {needed}."
     )]
     ProcessLimitTooLow {
-        /// `kern.maxprocperuid`, as read.
-        per_user: u64,
+        /// The programs the limits leave room for, the lawyer's and the agent's together.
+        allowed: u64,
         /// The least the launcher accepts.
         needed: u64,
     },
@@ -94,7 +94,7 @@ mod tests {
             },
             Error::Closing,
             Error::ProcessLimitTooLow {
-                per_user: 600,
+                allowed: 600,
                 needed: 1024,
             },
         ];

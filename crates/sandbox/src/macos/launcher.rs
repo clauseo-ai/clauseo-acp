@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use clauseo_process::{LaunchSpec, Launched, Launcher, SpawnOptions, spawn_in_tree};
 
-use super::process_cap::{self, Notify, libproc, watchdog};
+use super::process_cap::{self, ProcessCapNotice, ProcessCapSession, libproc, watchdog};
 use super::profile::{self, SeatbeltProfile};
 use super::watch::{self, Registration};
 use crate::{CappedSink, DenialSink, Policy};
@@ -39,7 +39,7 @@ pub struct SeatbeltLauncher {
     opts: SpawnOptions,
     sink: Arc<LaunchSink>,
     registration: Mutex<Option<Registration>>,
-    notify: Notify,
+    cap: ProcessCapSession,
 }
 
 impl std::fmt::Debug for SeatbeltLauncher {
@@ -72,19 +72,17 @@ impl SeatbeltLauncher {
             opts: opts.clear_env().close_other_fds(),
             sink: Arc::new(CappedSink::new(denials)),
             registration: Mutex::new(None),
-            notify: Arc::new(say),
+            cap: ProcessCapSession::new(say),
         }
     }
 
-    /// Where the process cap's notice goes ([`process_cap::TOO_MANY_PROGRAMS`], once per
-    /// launch, at the first time an agent's descendants pass the cap). By default this process's
-    /// stderr: macOS has no session-notice path to the lawyer yet (Windows says it on the outer's
-    /// stderr for the same reason). `notify` must not block: the watchdog calls it.
-    pub fn on_too_many_programs(
-        mut self,
-        notify: impl Fn(&str) + Send + Sync + 'static,
-    ) -> SeatbeltLauncher {
-        self.notify = Arc::new(notify);
+    /// The lawyer session whose process cap this launcher's agents count in: its trips (the
+    /// third ends the agent) and its notices, each once a session ([`ProcessCapSession`]). The
+    /// host gives every launcher of a session a clone of the session's one. By default each
+    /// launcher has its own, whose notices go to this process's stderr: no host caller builds a
+    /// `SeatbeltLauncher` yet.
+    pub fn process_cap(mut self, session: ProcessCapSession) -> SeatbeltLauncher {
+        self.cap = session;
         self
     }
 
@@ -154,7 +152,7 @@ impl Launcher for SeatbeltLauncher {
         let launched = spawn_in_tree(&jailed, &opts)?;
         // A watchdog that cannot start ends the agent (`launched` drops, and its tree with it):
         // it never runs without its cap.
-        watchdog::watch(launched.handle.pid(), Arc::clone(&self.notify)).map_err(|source| {
+        watchdog::watch(launched.handle.pid(), self.cap.clone()).map_err(|source| {
             clauseo_process::Error::Os {
                 what: "the agent's process cap could not start",
                 source,
@@ -164,8 +162,8 @@ impl Launcher for SeatbeltLauncher {
     }
 }
 
-/// The agent's `RLIMIT_NPROC` ([`process_cap::process_limit`]), from `kern.maxprocperuid` and
-/// this process's hard limit, read at each launch.
+/// The agent's `RLIMIT_NPROC` ([`process_cap::process_limit`]), from `kern.maxprocperuid`,
+/// `kern.maxproc` and this process's hard limit, read at each launch.
 fn launch_limit() -> Result<u64, clauseo_process::Error> {
     let read = |source| clauseo_process::Error::Os {
         what: "this Mac's process limit could not be read",
@@ -173,14 +171,15 @@ fn launch_limit() -> Result<u64, clauseo_process::Error> {
     };
     process_cap::process_limit(
         libproc::per_user().map_err(read)?,
+        libproc::max_proc().map_err(read)?,
         libproc::hard_limit().map_err(read)?,
     )
 }
 
-/// The default notice: one line on this process's stderr.
-fn say(text: &str) {
+/// The default notice: its text, one line on this process's stderr.
+fn say(notice: ProcessCapNotice) {
     use std::io::Write as _;
-    drop(writeln!(io::stderr().lock(), "{text}"));
+    drop(writeln!(io::stderr().lock(), "{}", notice.text()));
 }
 
 /// Makes the agent's `TMPDIR` ([`Policy::tmpdir`]) if it is missing; the folder it is in exists

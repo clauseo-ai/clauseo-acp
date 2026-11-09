@@ -1,7 +1,9 @@
 //! The process cap (`macos/process_cap.rs`) on a jailed agent: a bounded fork bomb in a command
-//! is stopped near the cap and the agent goes on to report it; an agent that forks itself past
-//! the cap is ended. Each bomb is bounded on its own (a fixed tree depth or count, and every
-//! process a 20 s sleep), so a cap that failed would leave nothing running for long.
+//! is stopped near the cap and the agent goes on to report it, the job-control variant (`set -m`,
+//! each job in a group of its own and orphaned) too; an agent that forks itself past the cap is
+//! ended, and so is one whose session trips the cap a third time; zombies never trip it. Each
+//! bomb is bounded on its own (a fixed tree depth or count, and every process a 20 s sleep), so
+//! a cap that failed would leave nothing running for long.
 
 #![expect(
     clippy::disallowed_methods,
@@ -15,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use clauseo_process::{ExitReport, LaunchSpec, Launched, Launcher};
-use clauseo_sandbox::SeatbeltLauncher;
+use clauseo_sandbox::{ProcessCapNotice, ProcessCapSession, SeatbeltLauncher};
 use futures::StreamExt;
 use futures::io::{AsyncBufReadExt, BufReader};
 use nix::errno::Errno;
@@ -23,10 +25,6 @@ use nix::sys::signal::kill;
 use nix::unistd::{Pid, getpgid, getsid};
 
 use crate::support::{World, launcher, run_outside};
-
-/// Windows' notice, word for word.
-const NOTICE: &str = "A task tried to start too many programs at once, so Clauseo stopped it. \
-                      Ask the assistant to try a smaller step.";
 
 /// A binary tree of shells `$1` levels deep (2,047 processes at 10), each logging its pid to
 /// `$2` and then becoming a 20 s sleep.
@@ -38,14 +36,40 @@ if [ \"$1\" -gt 0 ]; then
 fi
 exec /bin/sleep 20";
 
-/// A launcher for `w`'s policy whose notices land in the returned list.
-fn capped(w: &World) -> (SeatbeltLauncher, Arc<Mutex<Vec<String>>>) {
-    let notices = Arc::new(Mutex::new(Vec::new()));
-    let kept = Arc::clone(&notices);
+/// [`TREE`] under job control: each shell puts its two jobs in groups of their own (`set -m`)
+/// and exits, so launchd adopts them; only the leaves stay, as 20 s sleeps. Neither the agent's
+/// group nor a parent walk from the agent finds any of it: only its session does.
+const JOBS: &str = "set -m
+echo $$ >> \"$2\"
+if [ \"$1\" -gt 0 ]; then
+  d=$(($1 - 1))
+  \"$0\" \"$d\" \"$2\" &
+  \"$0\" \"$d\" \"$2\" &
+  exit 0
+fi
+exec /bin/sleep 20";
+
+/// The notices one session gave.
+type Told = Arc<Mutex<Vec<ProcessCapNotice>>>;
+
+/// A session whose notices land in the returned list.
+fn session() -> (ProcessCapSession, Told) {
+    let told = Arc::new(Mutex::new(Vec::new()));
+    let kept = Arc::clone(&told);
+    let session = ProcessCapSession::new(move |notice| kept.lock().unwrap().push(notice));
+    (session, told)
+}
+
+/// A launcher for `w`'s policy in `session`.
+fn capped_in(w: &World, session: &ProcessCapSession) -> SeatbeltLauncher {
     let (launcher, _) = launcher(w.builder().build().unwrap());
-    let launcher =
-        launcher.on_too_many_programs(move |text| kept.lock().unwrap().push(text.to_owned()));
-    (launcher, notices)
+    launcher.process_cap(session.clone())
+}
+
+/// A launcher for `w`'s policy in a session of its own.
+fn capped(w: &World) -> (SeatbeltLauncher, ProcessCapSession, Told) {
+    let (session, told) = session();
+    (capped_in(w, &session), session, told)
 }
 
 /// Runs `/bin/sh -c script` with `args` through `launcher` in `cwd`. `during` runs once
@@ -94,23 +118,28 @@ fn run_agent(
     })
 }
 
-/// The notices, once one came or 2 s passed: the watchdog says it just after the trip.
-fn notices_soon(notices: &Mutex<Vec<String>>) -> Vec<String> {
+/// The notices, once `n` came or 10 s passed: the watchdog tells just after the trip.
+fn notices_soon(told: &Mutex<Vec<ProcessCapNotice>>, n: usize) -> Vec<ProcessCapNotice> {
     let start = Instant::now();
-    while notices.lock().unwrap().is_empty() && start.elapsed() < Duration::from_secs(2) {
+    while told.lock().unwrap().len() < n && start.elapsed() < Duration::from_secs(10) {
         std::thread::park_timeout(Duration::from_millis(20));
     }
-    notices.lock().unwrap().clone()
+    told.lock().unwrap().clone()
+}
+
+/// The pids logged in `log`.
+fn logged(log: &Path) -> Vec<i32> {
+    std::fs::read_to_string(log)
+        .unwrap()
+        .lines()
+        .map(|line| line.parse().unwrap())
+        .collect()
 }
 
 /// The pids logged in `log` that still run 3 s after the agent's exit at most: a killed process
 /// is a zombie until launchd reaps it.
 fn survivors(log: &Path) -> Vec<i32> {
-    let pids: Vec<i32> = std::fs::read_to_string(log)
-        .unwrap()
-        .lines()
-        .map(|line| line.parse().unwrap())
-        .collect();
+    let pids = logged(log);
     let start = Instant::now();
     loop {
         let alive: Vec<i32> = pids
@@ -130,7 +159,7 @@ fn a_fork_bomb_in_a_command_is_stopped_and_the_agent_reports() {
     let w = World::new();
     let tree = w.script("m1/tree.sh", TREE);
     let log = w.file("m1/pids.log", "");
-    let (launcher, notices) = capped(&w);
+    let (launcher, cap, told) = capped(&w);
     // The lawyer's side while the bomb runs: process starts outside the jail, timed.
     let lawyer = std::thread::spawn(|| {
         (0..20)
@@ -160,16 +189,13 @@ fn a_fork_bomb_in_a_command_is_stopped_and_the_agent_reports() {
         },
     );
     let slowest = lawyer.join().unwrap();
-    let made = std::fs::read_to_string(&log).unwrap().lines().count();
+    let made = logged(&log).len();
     eprintln!("bomb: {made} of 2047 started, stopped in {took:?}, slowest start {slowest:?}");
-    eprintln!(
-        "{}",
-        std::fs::read_to_string(w.at("m1/err.log")).unwrap_or_default()
-    );
     // The agent survived and reported: its child was SIGKILLed (128 + 9).
     assert_eq!(report.code(), Some(0), "{report:?} {out}");
     assert_eq!(out, "agent: the task ended with 137\n");
-    assert_eq!(notices_soon(&notices), [NOTICE]);
+    assert_eq!(notices_soon(&told, 1), [ProcessCapNotice::TooManyPrograms]);
+    assert_eq!(cap.trips(), 1);
     // Stopped near the cap: about 200 had logged on this Mac (the rest were mid-start).
     assert!(made < 1_000, "the bomb ran on past the cap: {made}");
     assert!(took < Duration::from_secs(10), "{took:?}");
@@ -178,29 +204,147 @@ fn a_fork_bomb_in_a_command_is_stopped_and_the_agent_reports() {
 }
 
 #[test]
+fn a_job_control_bomb_is_stopped_by_its_session() {
+    // H1: `set -m` puts every job in a group of its own and each shell exits at once, so the
+    // bomb is launchd's orphans in groups that are not the agent's.
+    let w = World::new();
+    let jobs = w.script("m1/jobs.sh", JOBS);
+    let log = w.file("m1/pids.log", "");
+    let (launcher, cap, told) = capped(&w);
+    let script = "\"$1\" 10 \"$2\" >/dev/null 2>&1; echo \"agent: the task ended with $?\"; \
+                  until [ -e go ]; do /bin/sleep 0.05; done";
+    let mut notices = Vec::new();
+    let mut left = Vec::new();
+    let started = Instant::now();
+    let mut took = Duration::ZERO;
+    let (out, report) = run_agent(
+        &launcher,
+        &w.at("m1"),
+        script,
+        &[jobs.to_str().unwrap(), log.to_str().unwrap()],
+        || {
+            notices = notices_soon(&told, 1);
+            took = started.elapsed();
+            left = survivors(&log);
+            w.file("m1/go", "");
+        },
+    );
+    let made = logged(&log).len();
+    eprintln!("job-control bomb: {made} of 2047 started, stopped in {took:?}");
+    // The tree's first shell exited 0 at once, its jobs detached; the agent was only paused.
+    assert_eq!(report.code(), Some(0), "{report:?} {out}");
+    assert_eq!(out, "agent: the task ended with 0\n");
+    assert_eq!(notices, [ProcessCapNotice::TooManyPrograms]);
+    assert_eq!(cap.trips(), 1);
+    assert!(made < 2_047, "the bomb ran to its end: {made}");
+    assert_eq!(left, [] as [i32; 0], "the bomb's processes still run");
+}
+
+#[test]
 fn an_agent_that_forks_itself_past_the_cap_is_ended() {
     let w = World::new();
-    let (launcher, notices) = capped(&w);
+    let (launcher, _, told) = capped(&w);
     let script = "i=0; while [ $i -lt 400 ]; do /bin/sleep 20 & i=$((i + 1)); done; \
                   echo survived";
     let started = Instant::now();
     let (out, report) = run_agent(&launcher, &w.at("m1"), script, &[], || {});
     assert_eq!(report.signal(), Some(9), "{report:?} {out}");
     assert_eq!(out, "");
-    assert_eq!(notices_soon(&notices), [NOTICE]);
+    assert_eq!(notices_soon(&told, 1), [ProcessCapNotice::AssistantStopped]);
     assert!(started.elapsed() < Duration::from_secs(10));
+}
+
+#[test]
+fn the_third_trip_in_a_session_ends_the_agent() {
+    // M1: one launch's command bombs twice and the agent reports both; the session's next
+    // launch bombs once more, and that agent is ended.
+    let w = World::new();
+    let tree = w.script("m1/tree.sh", TREE);
+    let log = w.file("m1/pids.log", "");
+    let (session, told) = session();
+    let args = [tree.to_str().unwrap(), log.to_str().unwrap()];
+    let twice = "\"$1\" 10 \"$2\" >/dev/null 2>&1; echo \"first $?\"; \
+                 \"$1\" 10 \"$2\" >/dev/null 2>&1; echo \"second $?\"";
+    let (out, report) = run_agent(&capped_in(&w, &session), &w.at("m1"), twice, &args, || {});
+    assert_eq!(report.code(), Some(0), "{report:?} {out}");
+    assert_eq!(out, "first 137\nsecond 137\n");
+    assert_eq!(session.trips(), 2);
+    let third = "\"$1\" 10 \"$2\" >/dev/null 2>&1; echo \"third $?\"";
+    let (out, report) = run_agent(&capped_in(&w, &session), &w.at("m1"), third, &args, || {});
+    eprintln!("three trips: {} shells started in all", logged(&log).len());
+    assert_eq!(report.signal(), Some(9), "{report:?} {out}");
+    assert_eq!(out, "");
+    assert_eq!(session.trips(), 3);
+    assert_eq!(
+        notices_soon(&told, 2),
+        [
+            ProcessCapNotice::TooManyPrograms,
+            ProcessCapNotice::AssistantStopped
+        ]
+    );
+    assert_eq!(
+        survivors(&log),
+        [] as [i32; 0],
+        "the bombs' processes still run"
+    );
+}
+
+#[test]
+fn zombies_never_trip_the_cap() {
+    // M2: 400 children exit and stay unreaped (perl does not wait), while the agent starts
+    // short-lived programs beside them.
+    let w = World::new();
+    let (launcher, cap, told) = capped(&w);
+    let script = "/usr/bin/perl -e 'for (1..400) { fork or exit 0 } print \"held\\n\"; \
+                  $| = 1; sleep 3' & \
+                  i=0; while [ $i -lt 100 ]; do /usr/bin/true; i=$((i + 1)); done; wait; \
+                  echo done";
+    let (out, report) = run_agent(&launcher, &w.at("m1"), script, &[], || {});
+    assert_eq!(report.code(), Some(0), "{report:?} {out}");
+    assert_eq!(out, "held\ndone\n");
+    assert_eq!(cap.trips(), 0);
+    assert!(told.lock().unwrap().is_empty());
+}
+
+#[test]
+fn launchd_starts_nothing_for_the_agent() {
+    // L7: the profile allows no Mach lookup of launchd's or LaunchServices' services, so a job
+    // the agent submits is refused and never runs outside its tree.
+    let w = World::new();
+    let (launcher, _, _) = capped(&w);
+    let label = format!("chat.clauseo.forkcap-probe.{}", std::process::id());
+    let script = "said=$(/bin/launchctl submit -l \"$1\" -- /bin/sleep 30 2>&1); \
+                  echo \"submit $? $said\"";
+    let (out, report) = run_agent(&launcher, &w.at("m1"), script, &[&label], || {});
+    let listed = run_outside("/bin/launchctl", &["list", &label], Path::new("/"));
+    // Whatever the outcome, nothing of ours stays with launchd.
+    drop(run_outside(
+        "/bin/launchctl",
+        &["remove", &label],
+        Path::new("/"),
+    ));
+    eprintln!(
+        "launchctl in the jail: {out:?}; outside, list said {:?}",
+        listed.code
+    );
+    assert_eq!(report.code(), Some(0), "{report:?} {out}");
+    assert!(
+        !out.starts_with("submit 0"),
+        "launchctl submit worked from the jail: {out}"
+    );
+    assert_ne!(listed.code, Some(0), "launchd holds the agent's job");
 }
 
 #[test]
 fn the_jailed_agent_leads_its_session_under_the_backstop() {
     let w = World::new();
     let (launcher, _) = launcher(w.builder().build().unwrap());
-    let per_user = run_outside(
-        "/usr/sbin/sysctl",
-        &["-n", "kern.maxprocperuid"],
-        Path::new("/"),
-    );
-    let per_user: u64 = per_user.assert_ok().stdout.trim().parse().unwrap();
+    let sysctl = |name| {
+        let out = run_outside("/usr/sbin/sysctl", &["-n", name], Path::new("/"));
+        out.assert_ok().stdout.trim().parse::<u64>().unwrap()
+    };
+    let per_user = sysctl("kern.maxprocperuid");
+    let max_proc = sysctl("kern.maxproc");
     let args = [
         "-c",
         "echo \"$(ulimit -u) $(ulimit -Hu)\"; exec /bin/sleep 20",
@@ -219,7 +363,7 @@ fn the_jailed_agent_leads_its_session_under_the_backstop() {
     // Read while the agent runs (a sleep now, the same process); the handle's drop ends it.
     assert_eq!(getsid(Some(pid)), Ok(pid), "not a session leader");
     assert_eq!(getpgid(Some(pid)), Ok(pid));
-    let limit = per_user - 512;
+    let limit = per_user.min(max_proc - 512) - 512;
     assert_eq!(line, format!("{limit} {limit}"));
     drop(handle);
 }

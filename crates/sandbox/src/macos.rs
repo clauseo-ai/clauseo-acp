@@ -18,4 +18,6 @@ mod watch;
 
 #[cfg(target_os = "macos")]
 pub use launcher::SeatbeltLauncher;
+#[cfg(target_os = "macos")]
+pub use process_cap::{ProcessCapNotice, ProcessCapSession};
 pub use profile::{INSTALLED_BROWSERS, SeatbeltProfile};

@@ -1,17 +1,18 @@
 //! The process cap's system calls, each with its `unsafe` block and the reason it is sound: the
-//! limits (`sysctlbyname`, `getrlimit`), libproc's listings and reads (`proc_listpgrppids`,
-//! `proc_listallpids`, `proc_pidinfo`), the signals (`kill`, `killpg`) and the agent's kqueue.
+//! limits (`sysctlbyname`, `getrlimit`), libproc's listing and reads (`proc_listallpids`,
+//! `proc_pidinfo`), `getsid`, and the signals (`kill`, `killpg`). [`Libproc`] is the
+//! watchdog's [`System`] on them.
 #![expect(
     unsafe_code,
-    reason = "FFI: sysctlbyname, getrlimit, libproc, kill, killpg and kqueue for the process cap"
+    reason = "FFI: sysctlbyname, getrlimit, libproc, getsid, kill and killpg for the process cap"
 )]
 
-use std::ffi::{c_int, c_void};
+use std::ffi::{CStr, c_int, c_void};
 use std::io;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::time::Duration;
 
 use super::Proc;
+use super::watchdog::System;
 
 /// `SZOMB` from `<sys/proc.h>`: `pbi_status` of a process that has exited and waits to be
 /// reaped. The libc crate does not export it.
@@ -25,13 +26,23 @@ const MAX_PIDS: usize = 1 << 20;
 
 /// `kern.maxprocperuid`: the most processes one user may run.
 pub(crate) fn per_user() -> io::Result<u64> {
+    sysctl_int(c"kern.maxprocperuid")
+}
+
+/// `kern.maxproc`: the most processes the system runs, every user's together.
+pub(crate) fn max_proc() -> io::Result<u64> {
+    sysctl_int(c"kern.maxproc")
+}
+
+/// The `int` sysctl `name`, which must not be negative.
+fn sysctl_int(name: &CStr) -> io::Result<u64> {
     let mut value: c_int = 0;
     let mut size = size_of::<c_int>();
-    // SAFETY: the name is a NUL-terminated literal; `value` is a live `c_int` and `size` says
+    // SAFETY: the name is a NUL-terminated string; `value` is a live `c_int` and `size` says
     // its size, so the kernel writes at most that many bytes; no new value is set (null, 0).
     let status = unsafe {
         libc::sysctlbyname(
-            c"kern.maxprocperuid".as_ptr(),
+            name.as_ptr(),
             (&raw mut value).cast::<c_void>(),
             &raw mut size,
             std::ptr::null_mut(),
@@ -57,39 +68,34 @@ pub(crate) fn hard_limit() -> io::Result<u64> {
     Ok(limit.rlim_max)
 }
 
-/// How many pids are in process group `group`, zombies included; `None` when the call fails.
-pub(crate) fn group_size(group: u32) -> Option<usize> {
-    let group = c_int::try_from(group).ok()?;
+/// Every pid, zombies included; `None` when the listing fails.
+fn pids() -> Option<Vec<u32>> {
     listing(|buffer, bytes| {
         // SAFETY: `buffer` is a live, zeroed buffer of exactly `bytes` bytes that the call may
         // fill with pids and nothing else. The return counts pids (xnu
         // libsyscall/wrappers/libproc/libproc.c divides the byte count by `sizeof(int)`) or is
         // -1 on failure.
-        unsafe { libc::proc_listpgrppids(group, buffer, bytes) }
+        unsafe { libc::proc_listallpids(buffer, bytes) }
     })
-    .map(|pids| pids.len())
 }
 
-/// Every running process this user can read: its pid, parent, group and start. Zombies and
-/// processes `proc_pidinfo` refuses (another user's) are left out. `None` when the listing
-/// fails.
-pub(crate) fn all() -> Option<Vec<Proc>> {
-    let pids = listing(|buffer, bytes| {
-        // SAFETY: as in `group_size`: a live buffer of `bytes` bytes, filled with pids only;
-        // the return counts pids or is -1.
-        unsafe { libc::proc_listallpids(buffer, bytes) }
-    })?;
-    Some(pids.into_iter().filter_map(info).collect())
+/// The session of `pid`; `None` when it is gone or a zombie (`getsid` answers `ESRCH` for
+/// both, measured). Any user's process answers: xnu's `getsid` checks no permission.
+fn session_of(pid: u32) -> Option<u32> {
+    let raw = libc::pid_t::try_from(pid).ok()?;
+    // SAFETY: getsid(2) takes a plain integer and answers a session id or -1.
+    let sid = unsafe { libc::getsid(raw) };
+    u32::try_from(sid).ok()
 }
 
 /// The start of running process `pid`; `None` when it is gone, unreadable or a zombie.
-pub(crate) fn start_of(pid: u32) -> Option<u64> {
+fn start_of(pid: u32) -> Option<u64> {
     info(pid).map(|process| process.start)
 }
 
 /// Sends `signal` to `pid` if it still runs with `start` (so a reused pid is never signalled).
 /// Returns whether it went.
-pub(crate) fn signal(pid: u32, start: u64, signal: c_int) -> bool {
+fn signal(pid: u32, start: u64, signal: c_int) -> bool {
     let Ok(raw) = libc::pid_t::try_from(pid) else {
         return false;
     };
@@ -101,7 +107,7 @@ pub(crate) fn signal(pid: u32, start: u64, signal: c_int) -> bool {
 }
 
 /// Sends `signal` to process group `group`. Returns whether it went.
-pub(crate) fn signal_group(group: u32, signal: c_int) -> bool {
+fn signal_group(group: u32, signal: c_int) -> bool {
     let Ok(raw) = libc::pid_t::try_from(group) else {
         return false;
     };
@@ -136,8 +142,9 @@ fn listing(call: impl Fn(*mut c_void, c_int) -> c_int) -> Option<Vec<u32>> {
     }
 }
 
-/// `proc_pidinfo(PROC_PIDTBSDINFO)` for `pid`, as a [`Proc`]; `None` when the call fails,
-/// answers short, or the process is a zombie.
+/// `proc_pidinfo(PROC_PIDTBSDINFO)` and `getsid` for `pid`, as a [`Proc`]; `None` when the
+/// call fails (another user's process, or one gone), answers short (a zombie answers 0), or the
+/// process is a zombie or gone by the `getsid`.
 fn info(pid: u32) -> Option<Proc> {
     let raw = c_int::try_from(pid).ok()?;
     let mut bsd = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
@@ -161,10 +168,13 @@ fn info(pid: u32) -> Option<Proc> {
     // SAFETY: the call wrote the whole struct (`written == size`), and it was zeroed before;
     // `proc_bsdinfo` is plain integers and arrays.
     let bsd = unsafe { bsd.assume_init() };
-    (bsd.pbi_status != SZOMB).then(|| Proc {
+    if bsd.pbi_status == SZOMB {
+        return None;
+    }
+    Some(Proc {
         pid,
         parent: bsd.pbi_ppid,
-        group: bsd.pbi_pgid,
+        session: session_of(pid)?,
         start: bsd
             .pbi_start_tvsec
             .saturating_mul(1_000_000)
@@ -172,102 +182,32 @@ fn info(pid: u32) -> Option<Proc> {
     })
 }
 
-/// Why [`Queue::wait`] returned.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Wake {
-    /// The time ran out, or a signal broke the wait.
-    Tick,
-    /// The agent forked.
-    Fork,
-    /// The agent exited.
-    Exit,
-    /// The queue failed.
-    Failed,
-}
+/// The watchdog's [`System`]: this Mac's processes, through the calls above.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Libproc;
 
-/// A kqueue watching the agent's forks and exit (`EVFILT_PROC`, `NOTE_FORK | NOTE_EXIT`).
-/// `NOTE_FORK` comes for the agent's own forks only: its children are not followed
-/// (`NOTE_TRACK` is gone since 10.5), so it wakes the count early and the poll does the rest.
-#[derive(Debug)]
-pub(crate) struct Queue(OwnedFd);
-
-impl Queue {
-    /// A queue on `pid`; `None` when the process is gone already.
-    pub(crate) fn new(pid: u32) -> io::Result<Option<Queue>> {
-        let ident = usize::try_from(pid).map_err(io::Error::other)?;
-        // SAFETY: kqueue(2) takes no argument and answers a new descriptor or -1.
-        let fd = unsafe { libc::kqueue() };
-        if fd < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        // SAFETY: `fd` is a new descriptor this process owns and nothing else holds.
-        let queue = Queue(unsafe { OwnedFd::from_raw_fd(fd) });
-        let change = libc::kevent {
-            ident,
-            filter: libc::EVFILT_PROC,
-            flags: libc::EV_ADD | libc::EV_CLEAR,
-            fflags: libc::NOTE_FORK | libc::NOTE_EXIT,
-            data: 0,
-            udata: std::ptr::null_mut(),
-        };
-        // SAFETY: one change from a live struct, no event list (null, 0), no timeout: the call
-        // registers the filter and returns.
-        let status = unsafe {
-            libc::kevent(
-                queue.0.as_raw_fd(),
-                &raw const change,
-                1,
-                std::ptr::null_mut(),
-                0,
-                std::ptr::null(),
-            )
-        };
-        if status < 0 {
-            let error = io::Error::last_os_error();
-            return match error.raw_os_error() {
-                Some(libc::ESRCH) => Ok(None),
-                _ => Err(error),
-            };
-        }
-        Ok(Some(queue))
+impl System for Libproc {
+    fn pids(&self) -> Option<Vec<u32>> {
+        pids()
     }
 
-    /// Waits up to `timeout` for the agent's next fork or its exit.
-    pub(crate) fn wait(&self, timeout: Duration) -> Wake {
-        let Ok(tv_sec) = libc::time_t::try_from(timeout.as_secs()) else {
-            return Wake::Failed;
-        };
-        let timeout = libc::timespec {
-            tv_sec,
-            tv_nsec: libc::c_long::from(timeout.subsec_nanos()),
-        };
-        let mut event = libc::kevent {
-            ident: 0,
-            filter: 0,
-            flags: 0,
-            fflags: 0,
-            data: 0,
-            udata: std::ptr::null_mut(),
-        };
-        // SAFETY: no changes (null, 0); one event slot in a live struct; a live timeout. The
-        // call writes at most one event.
-        let count = unsafe {
-            libc::kevent(
-                self.0.as_raw_fd(),
-                std::ptr::null(),
-                0,
-                &raw mut event,
-                1,
-                &raw const timeout,
-            )
-        };
-        match count {
-            0 => Wake::Tick,
-            1 if event.flags & libc::EV_ERROR != 0 => Wake::Failed,
-            1 if event.fflags & libc::NOTE_EXIT != 0 => Wake::Exit,
-            1 => Wake::Fork,
-            _ if io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) => Wake::Tick,
-            _ => Wake::Failed,
-        }
+    fn session_of(&self, pid: u32) -> Option<u32> {
+        session_of(pid)
+    }
+
+    fn info(&self, pid: u32) -> Option<Proc> {
+        info(pid)
+    }
+
+    fn signal(&self, pid: u32, start: u64, signal: c_int) -> bool {
+        self::signal(pid, start, signal)
+    }
+
+    fn signal_group(&self, group: u32, signal: c_int) -> bool {
+        signal_group(group, signal)
+    }
+
+    fn pause(&self, time: Duration) {
+        std::thread::park_timeout(time);
     }
 }

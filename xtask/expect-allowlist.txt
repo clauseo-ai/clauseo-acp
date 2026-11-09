@@ -391,9 +391,8 @@ crates/sandbox/src/links/tests.rs walk_of_fifty_thousand_files clippy::disallowe
 # Added by S14 (macOS): the agent's TMPDIR in its state folder, the jail tests' file setup.
 crates/sandbox/src/macos/launcher.rs make_tmpdir clippy::disallowed_methods
 crates/sandbox/tests/jail/support.rs - clippy::disallowed_methods
-# The macOS process cap: its system calls, the watchdog's clock, and the bomb tests' timing.
+# The macOS process cap: its system calls, and the bomb tests' timing.
 crates/sandbox/src/macos/process_cap/libproc.rs - unsafe_code
-crates/sandbox/src/macos/process_cap/watchdog.rs now clippy::disallowed_methods
 crates/sandbox/tests/jail/forkcap.rs - clippy::disallowed_methods
 # J3 (macOS): the browser profile's sandbox_check, and the jail probe's copies, dlopen,
 # bootstrap_look_up, KERN_PROCARGS2 and proc_listallpids.
