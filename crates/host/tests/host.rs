@@ -81,6 +81,9 @@ mod codex_jailed_gate;
 #[path = "host/codex_plans.rs"]
 mod codex_plans;
 #[cfg(test)]
+#[path = "host/codex_saved_read_only.rs"]
+mod codex_saved_read_only;
+#[cfg(test)]
 #[path = "host/commands.rs"]
 mod commands;
 

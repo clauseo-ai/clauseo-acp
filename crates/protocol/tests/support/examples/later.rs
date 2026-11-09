@@ -142,6 +142,13 @@ pub(super) fn notices() -> Vec<DomainEvent> {
                 more: 0,
             }),
         },
+        Notice {
+            level: NoticeLevel::Info,
+            text: "Read-only isn't available for ChatGPT in the Safe workspace on this computer \
+                   yet, so ChatGPT works on its own here."
+                .to_owned(),
+            kind: Some(NoticeKind::ReadOnlyUnavailable),
+        },
     ];
     notices.extend(
         [

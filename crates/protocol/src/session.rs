@@ -308,6 +308,10 @@ open_data_enum! {
             /// Why the launch left it out.
             reason: PackSkipReason,
         },
+        /// A jailed Codex agent (`ChatGPT` to the lawyer) whose thread was last in Read-only
+        /// started in the mode that works on its own, because the sandbox does not enforce
+        /// Read-only on this computer yet (Windows, until stage C's PR6).
+        ReadOnlyUnavailable = "read_only_unavailable",
         _ =>
         /// A kind from a newer Clauseo; written back as the plain string `kind`.
         Unknown,
@@ -322,6 +326,7 @@ open_data_enum! {
             pack: PackId::new("nda-kit").unwrap(),
             reason: PackSkipReason::Changed,
         },
+        NoticeKind::ReadOnlyUnavailable,
     ];
 }
 

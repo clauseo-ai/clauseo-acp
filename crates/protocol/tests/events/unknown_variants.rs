@@ -160,6 +160,10 @@ fn pack_skip_reason() {
 #[test]
 fn notice_kind() {
     decodes_in_both(r#""context_not_restored""#, &NoticeKind::ContextNotRestored);
+    decodes_in_both(
+        r#""read_only_unavailable""#,
+        &NoticeKind::ReadOnlyUnavailable,
+    );
     let pack = PackId::new("nda-kit").unwrap();
     let skipped = NoticeKind::SkillPackNotLoaded {
         pack,

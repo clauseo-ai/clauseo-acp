@@ -255,3 +255,99 @@ fn the_mode_list_and_the_mode_options_are_exactly_the_offered_ones() {
     assert!(is_mode_option("approvals", &options));
     assert!(!is_mode_option("model", &options));
 }
+
+/// A start: the preset, the jail's policy, whether the lawyer is told.
+type Start = (&'static str, Option<&'static str>, bool);
+
+/// A Codex launch's start, as the host picks it: the preset `INITIAL_AGENT_MODE` names, the
+/// jail's policy (`None` unjailed) and whether the attach tells the lawyer Read-only is not
+/// available here. Unjailed, the saved mode is no input: `codex::launch_mode(false)` and
+/// `forced_mode::codex_start` take none, and `forced_mode::read_only_notice` needs a jail.
+fn start(jailed: bool, saved: Option<&str>) -> Start {
+    if !jailed {
+        return (launch_mode(false), None, false);
+    }
+    let policy = start_mode(saved);
+    (
+        launch_mode(true),
+        Some(policy),
+        super::read_only_unavailable(saved, policy),
+    )
+}
+
+/// (jailed, unjailed) × saved (Read-only, an asking mode, none, the preset): unjailed always
+/// starts in the ask mode with no notice; jailed in the preset, its policy Read-only only where
+/// the jail enforces it, and the notice exactly where a saved Read-only cannot be kept.
+#[test]
+fn a_codex_start_by_jail_and_saved_mode() {
+    let read_only = if READ_ONLY_ENFORCED {
+        (JAILED_MODE, Some(READ_ONLY), false)
+    } else {
+        (JAILED_MODE, Some(JAILED_MODE), true)
+    };
+    let table: [(bool, Option<&str>, Start); 8] = [
+        (true, Some(READ_ONLY), read_only),
+        (
+            true,
+            Some(ASK_MODE),
+            (JAILED_MODE, Some(SAVED_ASK_FALLBACK), false),
+        ),
+        (true, None, (JAILED_MODE, Some(JAILED_MODE), false)),
+        (
+            true,
+            Some(JAILED_MODE),
+            (JAILED_MODE, Some(JAILED_MODE), false),
+        ),
+        (false, Some(READ_ONLY), (ASK_MODE, None, false)),
+        (false, Some(ASK_MODE), (ASK_MODE, None, false)),
+        (false, None, (ASK_MODE, None, false)),
+        (false, Some(JAILED_MODE), (ASK_MODE, None, false)),
+    ];
+    for (jailed, saved, expected) in table {
+        assert_eq!(
+            start(jailed, saved),
+            expected,
+            "jailed {jailed}, saved {saved:?}"
+        );
+    }
+}
+
+/// On every system: no unjailed Codex launch starts in the full-access preset, whatever the
+/// thread saved, in its `INITIAL_AGENT_MODE` with `HOME` set or not.
+#[test]
+fn no_unjailed_codex_launch_starts_in_full_access() {
+    assert_ne!(launch_mode(false), JAILED_MODE);
+    for saved in CODEX_MODES.into_iter().map(Some).chain([None]) {
+        assert_ne!(start(false, saved).0, JAILED_MODE, "{saved:?}");
+    }
+    let home = std::path::Path::new("state");
+    for unix in [true, false] {
+        let env = crate::agent::codex::launch_env_on(
+            home,
+            &std::collections::BTreeMap::new(),
+            serde_json::Map::new(),
+            None,
+            unix,
+        );
+        let mode = env.get(std::ffi::OsStr::new(crate::agent::codex::MODE_VAR));
+        assert_eq!(
+            mode,
+            Some(&std::ffi::OsString::from(ASK_MODE)),
+            "unix {unix}"
+        );
+    }
+}
+
+/// The notice's rule on both kinds of system: only where Read-only is not enforced, the thread
+/// was last in it, and the launch is not.
+#[test]
+fn read_only_unavailable_only_where_it_is_not_enforced() {
+    use super::read_only_unavailable_on as told;
+    for enforced in [true, false] {
+        assert_eq!(told(enforced, Some(READ_ONLY), JAILED_MODE), !enforced);
+        assert!(!told(enforced, Some(READ_ONLY), READ_ONLY));
+        for saved in [Some(ASK_MODE), Some(JAILED_MODE), Some("agent"), None] {
+            assert!(!told(enforced, saved, JAILED_MODE), "{saved:?}");
+        }
+    }
+}

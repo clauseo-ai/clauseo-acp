@@ -455,7 +455,8 @@ fn two_queued_switches_launch_once_in_the_last_mode() {
     host.settle();
     assert!(!first.is_finished() && !second.is_finished());
     group::reap(helper);
-    assert_eq!(first.join().unwrap(), Ok(CommandOutcome::Done));
+    // The first was replaced before it took effect: not success (round 4, item 2).
+    assert_eq!(first.join().unwrap(), Ok(CommandOutcome::Replaced));
     assert_eq!(second.join().unwrap(), Ok(CommandOutcome::Done));
     host.settle();
     events.drain_ready();

@@ -448,6 +448,9 @@ fn attach_commit(
             capabilities: info.capabilities,
         },
     )?;
+    if let Some(notice) = super::forced_mode::read_only_notice(actor, thread) {
+        out.push(actor, notice)?;
+    }
     if let Some(modes) = &start.modes {
         // A jailed Codex's is its launch's policy, not the preset it runs (`forced_mode.rs`).
         let mode_id = super::forced_mode::shown(actor, thread).unwrap_or(modes.current.clone());

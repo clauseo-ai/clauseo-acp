@@ -218,7 +218,7 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   // provisional (app thread, Rohan's batch review): a jailed Codex asked for a mode that asks
   // before changes (R17 PR-D2c)
   "sandbox.ask_mode_unavailable":
-    "Choose Read-only, or use Claude to approve each change. ChatGPT can't ask before each change in the Safe workspace, so its mode didn't change.",
+    "Use Claude to approve each change. ChatGPT can't ask before each change in the Safe workspace, so its mode didn't change.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };

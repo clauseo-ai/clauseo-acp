@@ -18,8 +18,9 @@
 
 use clauseo_acp::SessionStart;
 use clauseo_protocol::{
-    AgentChoiceId, CommandId, CompactString, ConfigCategory, ConfigOption, ConfigOptionKind,
-    ConfigOptionsReplaced, ConfigValue, ErrorCode, HeaderEntry, ModeChanged, StreamId, ThreadId,
+    AgentChoiceId, CommandId, CommandOutcome, CompactString, ConfigCategory, ConfigOption,
+    ConfigOptionKind, ConfigOptionsReplaced, ConfigValue, ErrorCode, HeaderEntry, ModeChanged,
+    Notice, NoticeKind, NoticeLevel, StreamId, ThreadId,
 };
 
 use super::super::Actor;
@@ -170,6 +171,26 @@ pub(super) fn shown(actor: &Actor, thread: ThreadId) -> Option<CompactString> {
         .map(CompactString::from)
 }
 
+/// The notice `thread`'s attach logs before its mode when a jailed Codex whose thread was last
+/// in Read-only starts in the jailed preset's policy, where the jail does not enforce Read-only
+/// (`jailed::read_only_unavailable`, Windows until PR6). Read before the attach logs the new
+/// mode, so the thread is told once. Never for an unjailed Codex: it runs `codex::ASK_MODE`.
+pub(super) fn read_only_notice(actor: &Actor, thread: ThreadId) -> Option<Notice> {
+    let policy = held(actor, thread).and_then(jail_of)?;
+    let saved = header_of(actor, thread).and_then(|header| header.mode_id.as_deref());
+    if !jailed::read_only_unavailable(saved, policy) {
+        return None;
+    }
+    tracing::info!(
+        "a jailed Codex last in Read-only starts on its own: Read-only isn't enforced here"
+    );
+    Some(Notice {
+        level: NoticeLevel::Info,
+        text: jailed::READ_ONLY_UNAVAILABLE.to_owned(),
+        kind: Some(NoticeKind::ReadOnlyUnavailable),
+    })
+}
+
 /// The agent's config options for `thread`'s log: a jailed Codex's mode option keeps only
 /// `jailed::MODES`, at the mode it runs in, whatever value the agent gave it.
 pub(super) fn kept(
@@ -278,7 +299,8 @@ pub(super) fn on_mode_reset(
 /// A lawyer's `waiting` for `thread` on its attached agent: given back unless it asks a jailed
 /// Codex for a mode (after [`refusal`], so one of `jailed::MODES`). The mode it runs in is
 /// answered now. Another becomes the pending switch (a later one replaces it, answered with no
-/// event): the agent relaunches under its policy now when no turn runs, else at the boundary.
+/// event, its receipt `Replaced`): the agent relaunches under its policy now when no turn runs,
+/// else at the boundary.
 pub(super) fn switch(actor: &mut Actor, thread: ThreadId, waiting: Waiting) -> Option<Waiting> {
     let Some(policy) = held(actor, thread).and_then(jail_of) else {
         return Some(waiting);
@@ -311,11 +333,11 @@ pub(super) fn switch(actor: &mut Actor, thread: ThreadId, waiting: Waiting) -> O
         None
     };
     if let Some(old) = replaced {
-        answer(actor, thread, &old);
+        answer(actor, thread, &old, CommandOutcome::Replaced);
     }
     match now {
         // Its attach logged the mode it runs in, and nothing else logs a jailed Codex's mode.
-        Some(waiting) => answer(actor, thread, &waiting),
+        Some(waiting) => answer(actor, thread, &waiting, CommandOutcome::Done),
         None if !running => super::agents::restart_for_switch(actor, thread),
         None => {}
     }
@@ -344,7 +366,7 @@ pub(super) fn latest_mode(
     let mut kept = Vec::with_capacity(waiting.len());
     for ((at, item), mode) in waiting.into_iter().enumerate().zip(modes) {
         if mode && at != last {
-            answer(actor, thread, &item);
+            answer(actor, thread, &item, CommandOutcome::Replaced);
         } else {
             kept.push(item);
         }
@@ -352,17 +374,18 @@ pub(super) fn latest_mode(
     kept
 }
 
-/// Answers a jailed Codex's mode command `waiting` with no `ModeChanged`: the attach of the
-/// agent that runs its mode logged it. A `SetConfigOption` gets the thread's options, the mode
-/// option at the mode run in.
-fn answer(actor: &mut Actor, thread: ThreadId, waiting: &Waiting) {
+/// Answers a jailed Codex's mode command `waiting` with `outcome` and no `ModeChanged`: the
+/// attach of the agent that runs its mode logged it. `Replaced` for one a later command
+/// replaced, so no app reads it as its mode being set. A `SetConfigOption` gets the thread's
+/// options, the mode option at the mode run in.
+fn answer(actor: &mut Actor, thread: ThreadId, waiting: &Waiting, outcome: CommandOutcome) {
     let options = matches!(waiting, Waiting::Config(..)).then(|| {
         let options = known_options(actor, thread);
         kept(actor, thread, options)
     });
     match waiting {
         Waiting::Mode(ctx, _) | Waiting::Config(ctx, ..) => {
-            answers::jail_mode(actor, thread, *ctx, options);
+            answers::jail_mode(actor, thread, (*ctx, outcome), options);
         }
         Waiting::Turn(_) => {}
     }

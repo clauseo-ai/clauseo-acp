@@ -152,8 +152,8 @@ export const HI = {
     "Clauseo के बंद होने तक यह वेबसाइट फिर से अवरुद्ध है। Clauseo यह बदलाव सहेज नहीं सका, इसलिए अगली बार Clauseo खुलने पर इसे फिर से अनुमति मिल सकती है।",
   "Clauseo can't use the Codex sign-in already on this computer, because Clauseo's data folder is on a different drive from your home folder. Sign in to Codex in Clauseo instead.":
     "Clauseo इस कंप्यूटर पर पहले से मौजूद Codex साइन इन का उपयोग नहीं कर सकता, क्योंकि Clauseo का डेटा फ़ोल्डर आपके होम फ़ोल्डर से अलग ड्राइव पर है। इसके बजाय Clauseo में Codex में साइन इन करें।",
-  "Choose Read-only, or use Claude to approve each change. ChatGPT can't ask before each change in the Safe workspace, so its mode didn't change.":
-    "केवल-पढ़ने वाला चुनें, या हर बदलाव को मंज़ूरी देने के लिए Claude का उपयोग करें। सुरक्षित कार्यक्षेत्र में ChatGPT हर बदलाव से पहले नहीं पूछ सकता, इसलिए उसका मोड नहीं बदला।",
+  "Use Claude to approve each change. ChatGPT can't ask before each change in the Safe workspace, so its mode didn't change.":
+    "हर बदलाव को मंज़ूरी देने के लिए Claude का उपयोग करें। सुरक्षित कार्यक्षेत्र में ChatGPT हर बदलाव से पहले नहीं पूछ सकता, इसलिए उसका मोड नहीं बदला।",
 } as const;
 
 /** The sentences' Hindi, for the copy review to tell hi: later from Hindi. */

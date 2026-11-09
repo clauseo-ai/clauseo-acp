@@ -86,11 +86,21 @@ fn send_answer(
     actor: &mut Actor,
     ctx: CommandCtx,
     thread: ThreadId,
+    out: Out,
+    then: Then,
+) -> Result<(), Error> {
+    send_outcome(actor, (ctx, CommandOutcome::Done), thread, out, then)
+}
+
+/// [`send_answer`] with the receipt's `outcome`.
+fn send_outcome(
+    actor: &mut Actor,
+    (ctx, outcome): (CommandCtx, CommandOutcome),
+    thread: ThreadId,
     mut out: Out,
     then: Then,
 ) -> Result<(), Error> {
     let now = actor.now().wall;
-    let outcome = CommandOutcome::Done;
     out.draft
         .receipt(ctx.receipt(Some(StreamId::Thread(thread)), outcome, now));
     let tag = Tag::Command {
@@ -375,19 +385,20 @@ fn answered<T>(same: bool, result: Result<T, clauseo_acp::Error>) -> Result<T, E
 }
 
 /// A jailed Codex's mode command answered by the host (`forced_mode::switch`): its receipt,
-/// with the thread's `options` for a `SetConfigOption`. Nothing reaches the agent, and no
-/// `ModeChanged`: the attach of the agent that runs the mode logged it.
+/// `outcome` (`Done`, or `Replaced` for one a later command replaced), with the thread's
+/// `options` for a `SetConfigOption`. Nothing reaches the agent, and no `ModeChanged`: the
+/// attach of the agent that runs the mode logged it.
 pub(super) fn jail_mode(
     actor: &mut Actor,
     thread: ThreadId,
-    ctx: CommandCtx,
+    (ctx, outcome): (CommandCtx, CommandOutcome),
     options: Option<ConfigOptionsReplaced>,
 ) {
     let done = Out::new(actor, thread, Some(ctx.id)).and_then(|mut out| {
         if let Some(options) = options {
             out.push(actor, options)?;
         }
-        send_answer(actor, ctx, thread, out, Then::Nothing)
+        send_outcome(actor, (ctx, outcome), thread, out, Then::Nothing)
     });
     if let Err(error) = done {
         actor.finish_command(ctx.id, Err(error));

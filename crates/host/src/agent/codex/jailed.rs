@@ -81,6 +81,26 @@ pub(crate) fn start_mode(saved: Option<&str>) -> &'static str {
     }
 }
 
+/// The words of the notice a jailed Codex's attach logs when its thread was last in [`READ_ONLY`]
+/// but it starts in [`JAILED_MODE`], since the jail does not enforce Read-only here
+/// ([`read_only_unavailable`]); `NoticeKind::ReadOnlyUnavailable`, for a view that does not know
+/// the kind. Provisional (app thread).
+pub(crate) const READ_ONLY_UNAVAILABLE: &str = "Read-only isn't available for ChatGPT in the \
+     Safe workspace on this computer yet, so ChatGPT works on its own here.";
+
+/// Whether a jailed Codex starting in policy `mode`, on a thread whose saved mode is `saved`,
+/// tells the lawyer that Read-only is not available here: only where the jail does not enforce
+/// it ([`READ_ONLY_ENFORCED`], TODO(PR6)), the saved mode was [`READ_ONLY`] and the launch is
+/// not in it. The attach logs the new mode right after, so a thread is told once.
+pub(crate) fn read_only_unavailable(saved: Option<&str>, mode: &str) -> bool {
+    read_only_unavailable_on(READ_ONLY_ENFORCED, saved, mode)
+}
+
+/// [`read_only_unavailable`], with the jail enforcing Read-only when `enforced`.
+pub(crate) fn read_only_unavailable_on(enforced: bool, saved: Option<&str>, mode: &str) -> bool {
+    !enforced && saved == Some(READ_ONLY) && mode != READ_ONLY
+}
+
 /// `id` as one of [`MODES`], when it is one.
 fn offered(id: &str) -> Option<&'static str> {
     MODES.iter().copied().find(|mode| *mode == id)

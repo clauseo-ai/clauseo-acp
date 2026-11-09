@@ -712,7 +712,8 @@ export type CommandId = string;
  *  `MarkSeen`, `ScanFolder`, `CancelScan`, `SnoozeThread`, `MarkThreadDone`, `SweepDone`,
  *  `InstallBrowser`, `CancelBrowserInstall`, the four update commands, the connector commands and
  *  the two allowed-site commands answer `Done`; the last two kinds store no receipt, as the two
- *  browser commands do not.
+ *  browser commands do not. A jailed Codex's `SetMode` or mode `SetConfigOption` that a later
+ *  one replaced answers `Replaced`.
  */
 export type CommandOutcome = 
 /**  Done; nothing new to name. */
@@ -743,7 +744,14 @@ export type CommandOutcome =
 ({ version_restored: {
 	/**  The checkpoint the restore wrote. */
 	checkpoint: CheckpointId,
-} }) & { matter_created?: never; prompt_accepted?: never; step_undone?: never; thread_created?: never };
+} }) & { matter_created?: never; prompt_accepted?: never; step_undone?: never; thread_created?: never } | 
+/**
+ *  Nothing it asked was applied: a later command of the same kind replaced it before it took
+ *  effect (a jailed Codex's mode switch the next one replaced, R17 PR-D2c). Not success: the
+ *  app must not read it as the mode being set. A receipt an older build cannot decode counts
+ *  as missing (`lib.rs`, Depends on), so this closed enum may gain it.
+ */
+"replaced";
 
 /**  The agent's slash commands, replaced whole. */
 export type CommandsAvailable = {
@@ -3608,6 +3616,12 @@ export type NoticeKind =
 	/**  Why the launch left it out. */
 	reason: PackSkipReason,
 } }) & { files_came_back?: never } | 
+/**
+ *  A jailed Codex agent (`ChatGPT` to the lawyer) whose thread was last in Read-only
+ *  started in the mode that works on its own, because the sandbox does not enforce
+ *  Read-only on this computer yet (Windows, until stage C's PR6).
+ */
+"read_only_unavailable" | 
 /**  A kind from a newer Clauseo; written back as the plain string `kind`. */
 string;
 

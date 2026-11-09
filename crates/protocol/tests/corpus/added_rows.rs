@@ -506,4 +506,11 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (369, 0x07fc_4eb3_7b19_670a),
         (271, 0x067b_3b63_fb66_8a63),
     ),
+    (
+        "added/notice-ReadOnlyUnavailable",
+        include_bytes!("added/notice-ReadOnlyUnavailable.jsonl"),
+        include_bytes!("added/notice-ReadOnlyUnavailable.msgpack"),
+        (397, 0xa183_c705_a3bb_5276),
+        (318, 0x7e18_60c8_cb34_87df),
+    ),
 ];

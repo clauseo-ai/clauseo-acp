@@ -23,6 +23,15 @@ test("a known kind gives the app's line, in the page's words", () => {
   expect(noticeLine("context_not_restored", en)).toBe(CONTEXT);
 });
 
+test("Read-only not available here gives its line, in English and Hindi", () => {
+  expect(noticeLine("read_only_unavailable", en)).toBe(
+    "Read-only isn't available for ChatGPT in the Safe workspace on this computer yet, so ChatGPT works on its own here.",
+  );
+  expect(noticeLine("read_only_unavailable", words("hi"))).toBe(
+    "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र में ChatGPT के लिए केवल-पढ़ने वाला मोड अभी उपलब्ध नहीं है, इसलिए यहाँ ChatGPT अपने आप काम करता है।",
+  );
+});
+
 test("no kind (an agent's notice) gives null, so the row shows its own text", () => {
   expect(noticeLine(undefined, en)).toBeNull();
 });

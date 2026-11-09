@@ -15,6 +15,8 @@ const CONTEXT =
 const ONE_BACK = "1 paper came back after the undo: {papers}. Clauseo didn't remove it again.";
 const MANY_BACK =
   "{n} papers came back after the undo: {papers}. Clauseo didn't remove them again.";
+const READ_ONLY_UNAVAILABLE =
+  "Read-only isn't available for ChatGPT in the Safe workspace on this computer yet, so ChatGPT works on its own here.";
 /** A skill pack the launch left out, one line per reason (TN-04 to TN-09); the pack is "nda-kit" in each. */
 const PACK_LINE: Record<Exclude<PackSkipReason, "unknown">, ThreadKey> = {
   not_turned_on:
@@ -121,4 +123,10 @@ export const TN: Entry[] = [
     screen: "room/thread",
     render: thread(packSkipped(reason)),
   })),
+  {
+    id: "TN-10",
+    words: threadWords(READ_ONLY_UNAVAILABLE),
+    screen: "room/thread",
+    render: thread(notice(6, { text: READ_ONLY_UNAVAILABLE, kind: "read_only_unavailable" })),
+  },
 ];

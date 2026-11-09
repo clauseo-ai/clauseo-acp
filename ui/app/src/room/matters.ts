@@ -290,7 +290,7 @@ export class Matters {
     let matter: MatterId;
     if (this.#rows !== null) {
       const outcome = await this.#rows.command({ create_matter: { name, source, ...details } });
-      if (outcome === "done" || !("matter_created" in outcome))
+      if (typeof outcome === "string" || !("matter_created" in outcome))
         throw new Error("create_matter gave no matter");
       matter = outcome.matter_created.matter;
     } else {
@@ -299,7 +299,7 @@ export class Matters {
         command_id: crypto.randomUUID(),
         command: { create_matter: { name, source } },
       });
-      if (outcome === "done" || !("matter_created" in outcome))
+      if (typeof outcome === "string" || !("matter_created" in outcome))
         throw new Error("create_matter gave no matter");
       matter = outcome.matter_created.matter;
     }
