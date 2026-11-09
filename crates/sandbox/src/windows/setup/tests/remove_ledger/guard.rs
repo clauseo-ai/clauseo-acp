@@ -15,12 +15,16 @@ fn as_an_administrator_the_guard_comes_off_with_the_pools_entries() {
     let grants = vec![
         g(&pool_user, Rights::Modify, Inherit::Tree),
         g(&pool_user, Rights::DenyExecute, Inherit::FilesBelow),
-        g(&pool_user, Rights::DenyPermissionChange, Inherit::Below),
-        g(&owner_rights, Rights::OwnerModify, Inherit::Below),
+        g(
+            &pool_user,
+            Rights::DenyPermissionChange,
+            Inherit::FilesBelow,
+        ),
+        g(&owner_rights, Rights::OwnerModify, Inherit::FilesBelow),
         // Crafted: `OWNER RIGHTS` with another right, or that right for another SID. Neither is
         // trusted, so neither is listed or acted on.
         g(&owner_rights, Rights::Modify, Inherit::Tree),
-        g(&pool_user, Rights::OwnerModify, Inherit::Below),
+        g(&pool_user, Rights::OwnerModify, Inherit::FilesBelow),
     ];
     record(&data_dir, matter_one(), grants, None);
     machine.admin_owned = vec![(m1.clone(), owner())];
@@ -50,7 +54,7 @@ fn as_an_administrator_its_own_owner_rights_entry_stays() {
     let g = |sid: &Sid, rights, inherit| grant(&m1, sid, rights, inherit, PathKind::Matter);
     let grants = vec![
         g(&pool_sid(1001), Rights::Modify, Inherit::Tree),
-        g(&owner_rights, Rights::OwnerModify, Inherit::Below),
+        g(&owner_rights, Rights::OwnerModify, Inherit::FilesBelow),
     ];
     let mut ledger = Ledger::open(ledger_path(&data_dir), &named(), &Reserved::new([])).unwrap();
     let mut plan = AdmittedPlan::from_grants(matter_one(), grants);

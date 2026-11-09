@@ -817,6 +817,11 @@ because native code the agent installs into a matter breaks with it: python-docx
 pandas, today, from a venv or `pip install` in the matter. It turns on, on both OSes at once,
 with the pinned Python runtime (stage D), whose own native modules sit on a runtime path.
 
+**The switch-on prerequisites.** With the switch on, a venv's copied `python.exe` can't run in
+writable places (uv's venv and the standard library's), and native extension modules (`.pyd`)
+installed into writable places can't load. The switch flips only after stage D's pinned-runtime
+plan covers venvs and native packages on both OSes and the orchestrator rules.
+
 Only the product sets it: a constant, or the host's policy builder from a value pinned per
 release. Never a lawyer's setting, an environment variable, the launch file's parts an agent can
 reach, or anything else an agent can write. The builder method is the only way in; nothing in
@@ -837,10 +842,56 @@ right, and the file is the lawyer's own. On each folder:
   below, at any depth. Folders get nothing, since the same bit is traverse for them. A deny
   blocks an image load as well as a process start, so an `.exe`, `.dll`, `.node` or `.pyd` there
   neither runs nor loads.
-- `(D;OICIIO;0xc0000;;;<subject>)` (`DenyPermissionChange`): no `WRITE_DAC` or `WRITE_OWNER` on
-  anything below.
-- `(A;OICIIO;0x1301bf;;;OW)` (`OwnerModify`): `OWNER RIGHTS` holds `Modify`, which has no
-  `WRITE_DAC` or `WRITE_OWNER`.
+- `(D;OIIO;0xc0000;;;<subject>)` (`DenyPermissionChange`): no `WRITE_DAC` or `WRITE_OWNER` on
+  any file below.
+- `(A;OIIO;0x1301bf;;;OW)` (`OwnerModify`): on a file, `OWNER RIGHTS` holds `Modify`, which has
+  no `WRITE_DAC` or `WRITE_OWNER`.
+
+The last two are for files only, so a folder keeps its owner's `WRITE_DAC`. The VM found that
+with them on folders too, CPython 3.12.7's `os.mkdir(p, 0o700)` failed with error 5 in the
+temp folder and the matter, so `tempfile.mkdtemp` looped and every `pip install` hung. Since
+3.12.4 that call passes a protected DACL at creation, `D:P(A;OICI;FA;;;OW)(A;OICI;FA;;;SY)
+(A;OICI;FA;;;BA)`, and NTFS refuses it to a creator that wouldn't hold `WRITE_DAC` on the new
+folder. That rule is inferred from the VM run, not found documented. Node's `fs.mkdtemp`, npm's
+cache, git, uv and venv pass no descriptor (the VM measures them).
+
+**The window, and the image-load policy.** A folder made with its own protected DACL takes no
+inherited deny. Inside a folder the agent creates with its own protected DACL, a binary it writes
+can run until the watcher strips it, within the measured latency (TBD (VM)); DLL/.pyd/.node loads
+into the agent's own process are refused by D; children's own executables aren't covered. Same
+class as macOS's main-executable residual.
+- The watcher (C) is the desktop-side watch over the matter, state and temp folders (#789's
+  outer watch). It applies the strict walk's repair below to each pool-owned protected folder as
+  it appears. It comes after #789 (design below). Until then the
+  strip runs at the next strict walk: `repair_after_session` when the agent exits, or the next
+  launch.
+- D is `PROCESS_CREATION_MITIGATION_POLICY_IMAGE_LOAD_NO_LOW_LABEL_ALWAYS_ON`, set with
+  `PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY` when the inner runner starts the agent, with the
+  switch on (`runner/mitigation.rs`). Every file the Low token makes carries the Low label
+  whatever DACL it is given, so the agent process maps no image the agent wrote. The attribute
+  applies to that process alone. Windows passes no mitigation policy set this way on to the
+  processes it starts, and no job-object limit sets an image-load policy, so the agent's children
+  (a shell, node, python, git) run without it unless they set it themselves. Image File
+  Execution Options (`MitigationOptions` with `FilterFullPath`, set-up's, per pinned
+  executable) could reach them; that is not built.
+
+**The watcher (C), design; built after #789.**
+- **Where it hooks.** #789's outer watch, `ReadDirectoryChangesExW` with
+  `ReadDirectoryNotifyExtendedInformation` over the matter, state and session temp folders, run
+  as the desktop user. With `native_code_deny` on it also takes `FILE_ACTION_ADDED` and
+  `FILE_ACTION_RENAMED_NEW_NAME` for folders (`FILE_ATTRIBUTE_DIRECTORY` in the record), with no
+  other read.
+- **Per added folder.** Open it with `FILE_FLAG_OPEN_REPARSE_POINT` and `READ_CONTROL |
+  WRITE_DAC`, relative to its parent's handle, never following a link. Read its owner and DACL.
+  If a pool user owns it and the DACL is protected, or carries an allow `guard_offends` names,
+  write the strict walk's repair (`without_guarded`, protection cleared, inherited entries worked
+  out again) through that handle. Then walk what is below it once, since the agent may have
+  written into it before the event was read. A folder the lawyer owns is never touched.
+- **Races.** Between the create and the strip, a binary written there runs: that is the window,
+  latency TBD (VM). A handle the agent opened before the strip keeps its rights. A buffer
+  overflow (`ERROR_NOTIFY_ENUM_DIR`) means a strict walk of the whole tree. A folder renamed or
+  deleted before it is opened is skipped. The open by handle stops a swap for a junction. The
+  next strict walk (`repair_after_session`, the next launch) stays the backstop.
 
 Each deny names every subject the allows name (the pool user, and the matter SID when set). On
 each of the store's allowed files, an explicit `(D;;0x20;;;<subject>)`, which comes before the
@@ -856,9 +907,10 @@ enough under the profile, but a matter that inherits `C:\`'s `(A;OICIIO;GA;;;CO)
 (`C:\Matters\X`) gives each item the pool makes an inherited full-control allow naming the pool
 user, `WRITE_DAC` included. The permission deny closes that: it comes from the matter's own
 entries, before anything inherited from `C:\`. It works only together with the `OWNER RIGHTS`
-entry, since without it the implied `WRITE_DAC` is granted before the deny is read. Nothing an
-agent runs needs `WRITE_DAC`: Git Bash mounts with `noacl`, and Node's and Python's `chmod` only
-flip the read-only attribute (VM rows below). `OWNER RIGHTS` also binds a lawyer who owns an item
+entry, since without it the implied `WRITE_DAC` is granted before the deny is read. On files,
+ordinary tools need no `WRITE_DAC`: Git Bash mounts with `noacl`, Node's and Python's `chmod`
+only flip the read-only attribute, and git, `npm ci`, Office-style saves and LibreOffice pass
+(VM). `ReplaceFile` and a full-control reopen don't (known limits below). `OWNER RIGHTS` also binds a lawyer who owns an item
 below: the lawyer keeps `Modify` through it, and full control through the lawyer's own inherited
 entries, and loses only the implied `WRITE_DAC`, which a lawyer whose only right is ownership
 would need. The ledger trusts an `OwnerModify` entry naming `OWNER RIGHTS` and nothing else
@@ -902,12 +954,16 @@ plan's data-folder rules refuse a writable place in `<data_dir>\agents` other th
 npm, pip, zip tools, an installer), none of which sets a descriptor. It is not a boundary against
 an agent that sets out to get past it:
 
-- **A descriptor passed at creation.** A creator may give a new file its own DACL with no
-  `WRITE_DAC` (`CreateFile` with `SECURITY_ATTRIBUTES`, a few lines of PowerShell or Python):
-  protected, the inherited deny never lands; not protected, its explicit allow of `FILE_EXECUTE`
-  for the pool user comes before the inherited deny. Such a file runs until the next strict walk
-  of its tree (`repair_after_session` when the agent exits, or the next launch), which repairs
-  it as above. Owner: the orchestrator's follow-up (an image-load mitigation is being weighed).
+- **A descriptor passed at creation.** A folder may be made with its own DACL (Python's
+  `os.mkdir(p, 0o700)` does): protected, the inherited deny never reaches what is below it.
+  That is the window above, closed by the watcher and the strict walk, with image loads into the
+  agent refused by D. A file made with its own DACL is refused, as NTFS asks for the `WRITE_DAC`
+  the files' deny takes away.
+- **Row 5, while the switch is on.** `File.Replace` and `ReplaceFile` (without the
+  ignore-ACL-errors flag), and reopening a file the agent made asking for full control, are
+  refused: the files' `WRITE_DAC` deny is what stops an agent adding an explicit execute allow
+  ahead of the inherited deny. git, `npm ci`, Office-style saves and LibreOffice pass (VM,
+  `bb1c396ee`).
 - **FAT and exFAT drives** keep no ACLs: a program on a USB stick runs.
 - **A handle opened before the walk** keeps the rights it was opened with.
 

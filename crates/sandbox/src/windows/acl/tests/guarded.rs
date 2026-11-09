@@ -26,7 +26,7 @@ fn pythons_temp_folder_in_a_guarded_matter_loses_its_owner_allow() {
             &matter,
             OWNER_RIGHTS_SID,
             Rights::OwnerModify,
-            Inherit::Below,
+            Inherit::FilesBelow,
         ),
     ];
     let mut acl = NtfsAcl::new().unwrap();

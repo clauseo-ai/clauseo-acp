@@ -75,8 +75,8 @@ fn every_writable_place_and_only_those_gets_the_guard() {
             .collect();
         let want = vec![
             (Rights::DenyExecute, Inherit::FilesBelow, "pool"),
-            (Rights::DenyPermissionChange, Inherit::Below, "pool"),
-            (Rights::OwnerModify, Inherit::Below, "owner-rights"),
+            (Rights::DenyPermissionChange, Inherit::FilesBelow, "pool"),
+            (Rights::OwnerModify, Inherit::FilesBelow, "owner-rights"),
         ];
         assert_eq!(guard, want, "{folder}");
     }
@@ -112,15 +112,16 @@ fn the_denies_name_every_subject_the_allows_name() {
     let want = vec![
         (Rights::DenyExecute, Inherit::FilesBelow, "pool"),
         (Rights::DenyExecute, Inherit::FilesBelow, "matter"),
-        (Rights::DenyPermissionChange, Inherit::Below, "pool"),
-        (Rights::DenyPermissionChange, Inherit::Below, "matter"),
-        (Rights::OwnerModify, Inherit::Below, "owner-rights"),
+        (Rights::DenyPermissionChange, Inherit::FilesBelow, "pool"),
+        (Rights::DenyPermissionChange, Inherit::FilesBelow, "matter"),
+        (Rights::OwnerModify, Inherit::FilesBelow, "owner-rights"),
     ];
     assert_eq!(guard, want);
 }
 
-/// The entries as written on a folder: `(D;OIIO;0x20;;;pool)`, `(D;OICIIO;0xc0000;;;pool)` and
-/// `(A;OICIIO;0x1301bf;;;OW)`, the last without `WRITE_DAC` or `WRITE_OWNER`.
+/// The entries as written on a folder, all for files only: `(D;OIIO;0x20;;;pool)`,
+/// `(D;OIIO;0xc0000;;;pool)` and `(A;OIIO;0x1301bf;;;OW)`, the last without `WRITE_DAC` or
+/// `WRITE_OWNER`.
 #[test]
 fn the_entries_carry_the_planned_flags_and_masks() {
     let w = World::new("guard-aces");
@@ -143,9 +144,9 @@ fn the_entries_carry_the_planned_flags_and_masks() {
     assert_eq!(spec(Rights::DenyExecute), ace(1, 0x9, 0x20, &pool));
     assert_eq!(
         spec(Rights::DenyPermissionChange),
-        ace(1, 0xb, 0xc_0000, &pool)
+        ace(1, 0x9, 0xc_0000, &pool)
     );
-    assert_eq!(spec(Rights::OwnerModify), ace(0, 0xb, 0x0013_01bf, &owner));
+    assert_eq!(spec(Rights::OwnerModify), ace(0, 0x9, 0x0013_01bf, &owner));
     assert_eq!(Rights::OwnerModify.mask() & 0x000c_0000, 0);
     // On a file, a files-below entry is refused rather than written as something else.
     let deny = grants

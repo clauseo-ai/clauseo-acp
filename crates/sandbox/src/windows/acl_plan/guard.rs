@@ -8,14 +8,19 @@
 //! folder, and each of the Claude store's allowed files. The credential link is left out: its
 //! allow ([`Rights::ReadWriteData`]) has no execute right, and the file is the lawyer's own.
 //!
-//! - On a folder: [`Rights::DenyExecute`] for files only ([`Inherit::FilesBelow`],
-//!   `(D;OIIO;0x20;;;<sid>)`), so a folder's traverse (the same bit) stays; and
-//!   [`Rights::DenyPermissionChange`] below it ([`Inherit::Below`]), each for every subject the
-//!   allows name (the pool user, and the matter SID when set). Then one [`Rights::OwnerModify`]
-//!   below it: an owner's implied `WRITE_DAC` is granted before any deny is read, so without it
-//!   a pool user owning a file it made could drop the inherited deny; with it, the owner holds
-//!   only `Modify`, and the permission deny wins over a `CREATOR OWNER` allow inherited from
-//!   `C:\` (which comes after the matter's own entries, from further up).
+//! - On a folder, all three for files only ([`Inherit::FilesBelow`], object inherit, inherit
+//!   only): [`Rights::DenyExecute`], `(D;OIIO;0x20;;;<sid>)`, so a folder's traverse (the same
+//!   bit) stays; [`Rights::DenyPermissionChange`], `(D;OIIO;0xc0000;;;<sid>)`, each for every
+//!   subject the allows name (the pool user, and the matter SID when set); then one
+//!   [`Rights::OwnerModify`], `(A;OIIO;0x1301bf;;;OW)`. An owner's implied `WRITE_DAC` is
+//!   granted before any deny is read, so without it a pool user owning a file it made could drop
+//!   the inherited deny; with it, the owner holds only `Modify`, and the permission deny wins
+//!   over a `CREATOR OWNER` allow inherited from `C:\` (which comes after the matter's own
+//!   entries, from further up). Folders keep their owner's `WRITE_DAC`: Python's `os.mkdir(p,
+//!   0o700)` (3.12.4 and later, so `tempfile.mkdtemp` and pip) passes its own protected DACL at
+//!   creation, which NTFS refuses to a creator that wouldn't hold `WRITE_DAC` there. Such a
+//!   folder takes no inherited deny; the strict walk's repair (`acl_bytes::without_guarded`)
+//!   strips it, and `NoLowMandatoryLabelImages` on the agent refuses image loads from it (0049).
 //! - On a file: [`Rights::DenyExecute`] on the file alone, explicit, so it comes before the
 //!   file's explicit `Modify` allow.
 //!
@@ -63,10 +68,10 @@ pub(super) fn guard_writes(plan: &mut Plan<'_>) -> Result<(), Error> {
         }
         for sid in &subjects {
             let deny = Rights::DenyPermissionChange;
-            plan.push(&path, sid.clone(), deny, Inherit::Below, kind);
+            plan.push(&path, sid.clone(), deny, Inherit::FilesBelow, kind);
         }
         let owner = owner.clone();
-        plan.push(&path, owner, Rights::OwnerModify, Inherit::Below, kind);
+        plan.push(&path, owner, Rights::OwnerModify, Inherit::FilesBelow, kind);
     }
     Ok(())
 }
