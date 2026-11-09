@@ -12,6 +12,8 @@ use super::test_dacl;
 use super::{FolderSupport, folder_support};
 use crate::test_support::TempDir;
 
+mod drive_report;
+
 /// `OWNER RIGHTS` with Modify only, and no inherited entries: the owner loses the implicit
 /// `WRITE_DAC` that an owner otherwise has. `0x1301bf` is Modify (`DELETE` included).
 const OWNER_RIGHTS_MODIFY: &str = "D:P(A;OICI;0x1301bf;;;OW)";
