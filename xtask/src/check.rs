@@ -4,17 +4,41 @@ use crate::changes::{self, ScanRange, Selection};
 use crate::output::Printer;
 use crate::process::{Cmd, Program, QuietRunner};
 use crate::steps::{self, Exec, Scope, StepStatus};
-use crate::workspace::Context;
+use crate::workspace::{Context, Member};
 use std::io::Write;
 use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
 
+/// What `--quick` and `--no-dependents` ask clippy and nextest to cover.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Quick {
+    /// No `--quick`: every package.
+    #[default]
+    Off,
+    /// `--quick`: the changed packages and their dependents.
+    WithDependents,
+    /// `--quick --no-dependents`: the changed packages only.
+    ChangedOnly,
+}
+
+impl Quick {
+    /// From the two flags. `main.rs` rejects `--no-dependents` without `--quick`; given it
+    /// anyway, it changes nothing.
+    pub(crate) fn from_flags(quick: bool, no_dependents: bool) -> Quick {
+        match (quick, no_dependents) {
+            (false, _) => Quick::Off,
+            (true, false) => Quick::WithDependents,
+            (true, true) => Quick::ChangedOnly,
+        }
+    }
+}
+
 /// The flags of `cargo xtask check`, as `main.rs` parses them.
 #[derive(Clone, Copy, Default)]
 pub(crate) struct Flags {
-    /// `--quick`: clippy and nextest only on changed packages.
-    pub(crate) quick: bool,
+    /// `--quick` (`--no-dependents`): clippy and nextest only on changed packages.
+    pub(crate) quick: Quick,
     /// `--skip-ui`: the ui steps are skipped, and pnpm is not probed.
     pub(crate) skip_ui: bool,
     /// `--no-tests`: the test steps are skipped (`steps::without_tests`).
@@ -42,10 +66,14 @@ pub(crate) fn run(
         out.note(format!("note: {error}"));
     }
 
-    let scope = if quick {
-        quick_scope(&mut out, ctx, changes::changed_files(&ctx.root))
-    } else {
-        Scope::Workspace
+    let scope = match quick {
+        Quick::Off => Scope::Workspace,
+        Quick::WithDependents | Quick::ChangedOnly => quick_scope(
+            &mut out,
+            ctx,
+            changes::changed_files(&ctx.root),
+            quick == Quick::ChangedOnly,
+        ),
     };
     let range = gitleaks_range(&mut out, &changes::scan_range(&ctx.root, ci));
     let mut steps = steps::plan(
@@ -93,10 +121,14 @@ pub(crate) fn is_ci(value: Option<&str>) -> bool {
 
 /// Decides what `--quick` covers, and prints the decision.
 /// When `cargo metadata` failed, the checks that read members quote its error.
+/// With `no_dependents` (`--no-dependents`) a package selection is the changed packages and the
+/// test binaries they need (`changes::built_for_tests`), without their dependents. A change that
+/// selects every package still selects every package.
 fn quick_scope<W: Write>(
     out: &mut Printer<W>,
     ctx: &Context,
     changed: Result<Vec<String>, String>,
+    no_dependents: bool,
 ) -> Scope {
     let Ok(members) = &ctx.members else {
         out.note(
@@ -118,6 +150,7 @@ fn quick_scope<W: Write>(
             out.note(format!("quick: all packages ({reason})"));
             Scope::Workspace
         }
+        Selection::Packages(_) if no_dependents => changed_only(out, &files, members),
         Selection::Packages(names) => {
             if names.is_empty() {
                 out.note("quick: no changed packages");
@@ -145,6 +178,29 @@ fn quick_scope<W: Write>(
             Scope::packages(names)
         }
     }
+}
+
+/// The `--no-dependents` scope: the changed packages and the test binaries they need, printed.
+fn changed_only<W: Write>(out: &mut Printer<W>, files: &[String], members: &[Member]) -> Scope {
+    let direct = changes::direct_members(files, members);
+    if direct.is_empty() {
+        out.note("quick: no changed packages");
+        return Scope::Nothing;
+    }
+    let built = changes::built_for_tests(&direct.iter().cloned().collect(), members);
+    let built_segment = if built.is_empty() {
+        String::new()
+    } else {
+        format!("; built for their tests: {}", built.join(", "))
+    };
+    let mut names: Vec<String> = direct.iter().chain(&built).cloned().collect();
+    names.sort();
+    out.note(format!(
+        "quick: packages {} (changed: {}; dependents skipped: --no-dependents{built_segment})",
+        names.join(", "),
+        direct.join(", "),
+    ));
+    Scope::packages(names)
 }
 
 /// The `--log-opts` range gitleaks scans (see `changes::scan_range`), or `None` for all history.
@@ -350,7 +406,12 @@ mod tests {
         let (_root, mut ctx) = scratch_context("check-quick-dependents");
         ctx.members = Ok(core_and_app());
         let mut out = Printer::new(Vec::<u8>::new(), false);
-        quick_scope(&mut out, &ctx, Ok(vec!["crates/core/src/lib.rs".into()]));
+        quick_scope(
+            &mut out,
+            &ctx,
+            Ok(vec!["crates/core/src/lib.rs".into()]),
+            false,
+        );
         assert_eq!(
             printed(out),
             "quick: packages app, core (changed: core; dependents: app)\n"
@@ -362,7 +423,12 @@ mod tests {
         let (_root, mut ctx) = scratch_context("check-quick-none");
         ctx.members = Ok(core_and_app());
         let mut out = Printer::new(Vec::<u8>::new(), false);
-        quick_scope(&mut out, &ctx, Ok(vec!["crates/app/src/main.rs".into()]));
+        quick_scope(
+            &mut out,
+            &ctx,
+            Ok(vec!["crates/app/src/main.rs".into()]),
+            false,
+        );
         assert_eq!(
             printed(out),
             "quick: packages app (changed: app; dependents: none)\n"
@@ -396,7 +462,12 @@ mod tests {
         let (_root, mut ctx) = scratch_context("check-quick-fake-agent");
         ctx.members = Ok(core_app_and_fake_agent());
         let mut out = Printer::new(Vec::<u8>::new(), false);
-        let scope = quick_scope(&mut out, &ctx, Ok(vec!["crates/core/src/lib.rs".into()]));
+        let scope = quick_scope(
+            &mut out,
+            &ctx,
+            Ok(vec!["crates/core/src/lib.rs".into()]),
+            false,
+        );
         assert_eq!(
             printed(out),
             "quick: packages app, clauseo-fake_agent, core (changed: core; dependents: app; \
@@ -421,12 +492,15 @@ mod tests {
             &mut out,
             &ctx,
             Ok(vec!["crates/fake_agent/src/main.rs".into()]),
+            false,
         );
         assert_eq!(
             printed(out),
             "quick: packages app, clauseo-fake_agent (changed: clauseo-fake_agent; dependents: app)\n"
         );
     }
+
+    mod no_dependents;
 
     #[test]
     fn gitleaks_scans_the_commits_since_the_merge_base_without_a_note() {

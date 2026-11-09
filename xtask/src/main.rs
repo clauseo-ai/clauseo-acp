@@ -1,4 +1,4 @@
-//! Workspace automation: `cargo xtask check [--quick] [--skip-ui] [--no-tests]`,
+//! Workspace automation: `cargo xtask check [--quick [--no-dependents]] [--skip-ui] [--no-tests]`,
 //! `cargo xtask setup [--binaries] [--only <tool>]... | --list`,
 //! `cargo xtask buildtime [rust|web|all|worktree] [--runs N] [--json]`, `cargo xtask mutants` and
 //! `cargo xtask python-runtime {check,bump,build}`.
@@ -34,7 +34,10 @@
 //!   and CI never passes; and `--quick` adding clauseo-fake_agent when a selected package's
 //!   tests run it (`changes::built_for_tests`). A third, approved by Rohan 2026-11-04:
 //!   `check --no-tests`, which `.github/scripts/pre-push.sh` always passes so that a push runs
-//!   the format, lint, typecheck and build steps only, and CI never passes.
+//!   the format, lint, typecheck and build steps only, and CI never passes. A fourth, approved
+//!   by Rohan 2026-11-09: `check --quick --no-dependents`, which `.github/scripts/pre-push.sh`
+//!   always passes so that a push lints the changed packages and not their dependents, and CI
+//!   never passes.
 //! - `python-runtime` checks, bumps and builds Clauseo's pinned Python runtime from
 //!   `python-runtime/lock.toml` (`python_runtime.rs` says how). It is not a check of
 //!   `cargo xtask check`: its offline lock check runs there as the xtask test `real_lock_passes`.
@@ -92,6 +95,10 @@ enum Commands {
         /// steps still run. `.github/scripts/pre-push.sh` always passes it; CI never does.
         #[arg(long)]
         no_tests: bool,
+        /// With `--quick`: only the changed packages, without their dependents; the summary says
+        /// so. Needs `--quick`. `.github/scripts/pre-push.sh` always passes it; CI never does.
+        #[arg(long, requires = "quick")]
+        no_dependents: bool,
     },
     /// Install the pinned cargo tools (`cargo install --locked <tool> --version <version>`), print
     /// how to install gitleaks and lefthook, and check their versions against the pins. `--only`
@@ -179,6 +186,7 @@ fn main() -> ExitCode {
             quick,
             skip_ui,
             no_tests,
+            no_dependents,
         } => {
             let root = workspace::workspace_root();
             let ctx = workspace::Context {
@@ -191,7 +199,7 @@ fn main() -> ExitCode {
                 process::capture(cmd, &root, on_output)
             };
             let flags = check::Flags {
-                quick,
+                quick: check::Quick::from_flags(quick, no_dependents),
                 skip_ui,
                 no_tests,
             };
@@ -220,5 +228,35 @@ fn main() -> ExitCode {
         #[cfg(unix)]
         Commands::ProcessLeader => process::lead(),
         Commands::ProcessTest { output, script } => process::test_mode(output, &script),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_dependents_needs_quick() {
+        let Err(error) = Cli::try_parse_from(["xtask", "check", "--no-dependents"]) else {
+            panic!("--no-dependents without --quick parsed");
+        };
+        assert_eq!(
+            error.kind(),
+            clap::error::ErrorKind::MissingRequiredArgument
+        );
+        assert!(error.to_string().contains("--quick"), "{error}");
+    }
+
+    #[test]
+    fn no_dependents_parses_with_quick() {
+        let cli = Cli::try_parse_from(["xtask", "check", "--quick", "--no-dependents"]);
+        assert!(matches!(
+            cli.map(|cli| cli.command),
+            Ok(Commands::Check {
+                quick: true,
+                no_dependents: true,
+                ..
+            })
+        ));
     }
 }
