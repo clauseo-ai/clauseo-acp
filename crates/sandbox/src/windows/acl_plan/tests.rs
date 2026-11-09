@@ -499,6 +499,9 @@ fn the_session_temp_folder_gets_modify_and_the_low_label_and_its_parents_nothing
 /// The profile, the sandbox records and the data folder's allow list.
 mod data;
 
+/// The read-only matter across the builder's options.
+mod read_only;
+
 /// The negative golden of the host's read-only mode (`Policy::matter_read_only`): on and in the
 /// matter only `ReadAndExecute` and the write denies, no allow with a write right and no Low
 /// label; the state and notes folders keep `Modify`. Anything that widens it fails here.

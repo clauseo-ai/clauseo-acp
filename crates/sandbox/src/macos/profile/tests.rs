@@ -485,3 +485,6 @@ fn a_read_only_matter_gets_no_write_allow() {
     let wide = write_allows(&build(false));
     assert!(wide.iter().any(|form| form.contains(matter)), "{wide:#?}");
 }
+
+/// The read-only matter across the builder's options.
+mod read_only;
