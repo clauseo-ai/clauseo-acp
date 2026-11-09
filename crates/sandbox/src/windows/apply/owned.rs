@@ -13,18 +13,20 @@
 //! first) goes to the lawyer with its `WRITE_DAC` (L1), then a walk, so what is in it loses the
 //! entries it inherited from above (`C:\`'s `Users` entries).
 //!
-//! The data folder's contents are walked once ([`walk_data`]): `agents` strictly, even when the
-//! data folder itself is skipped (N2), and a failure there refuses the launch, so no sign-in
+//! The data folder's contents are walked once: `agents` strictly, even when the data folder
+//! itself is skipped (N2), right after the protection and before anything is recorded
+//! ([`walk_sign_ins`]), a failure refusing the launch before any grant is written, so no sign-in
 //! stays readable to other accounts (N1, [`Error::SignInUnsecured`]); the host's other folders
-//! plainly, a failure only logged. Once, that is: when the data folder's or `agents`' DACL
-//! changes, and at each launch until one such walk has passed (`sandbox\owned-walked`). The
+//! plainly with the launch's walks ([`walk_data`]), a failure only logged. Once, that is: when
+//! the data folder's or `agents`' DACL changes, and at each launch until one such walk has passed
+//! (`sandbox\owned-walked`). The
 //! strict walk watches nothing, so it strips only broad allows (`Users`, `Everyone`) from what a
 //! pool user owns there: another live session's recorded allows in the Claude store stay (N7).
 
 use std::io;
 use std::path::{Path, PathBuf};
 
-use super::walk::{Refused, Walk};
+use super::walk::Walk;
 use super::{exists, strict_for};
 use crate::Error;
 use crate::windows::acl_plan::{AdmittedPlan, Grant, OwnedKind, Sid, in_folder};
@@ -178,12 +180,31 @@ fn mark(data: &Path) -> PathBuf {
     data.join(SANDBOX_DIR).join(WALKED_MARK)
 }
 
-/// The data walk `walk`: when the data folder is owned, each item directly in it worked out from
-/// it and each folder in it but [`NOT_WALKED`] walked down, a failure only logged; then
-/// `agents` walked strictly (held to the pool SIDs, nothing watched: a pool user's item there is
-/// repaired, other allows stay), a failure refusing the launch as
-/// [`Error::SignInUnsecured`]. Then, when nothing failed, the record that it passed.
-pub(super) fn walk_data(acl: &mut dyn AclWriter, walk: &DataWalk) -> Result<Walked, Refused> {
+/// The first half of the data walk `walk`, before anything is recorded: `agents` walked
+/// strictly (held to the pool SIDs, nothing watched: a pool user's item there is repaired, other
+/// allows stay). A failure refuses the launch as [`Error::SignInUnsecured`] before any grant is
+/// written or recorded.
+pub(super) fn walk_sign_ins(acl: &mut dyn AclWriter, walk: &DataWalk) -> Result<Walked, Error> {
+    let Some(agents) = &walk.agents else {
+        return Ok(Walked::default());
+    };
+    let strict = Strict {
+        watched: Vec::new(),
+        pool: walk.pool.clone(),
+        assigned: Vec::new(),
+    };
+    acl.propagate(agents, Reach::Tree, Some(&strict))
+        .map_err(|failure| {
+            tracing::warn!(%failure, "the sign-ins' folder wasn't secured; launch refused");
+            Error::SignInUnsecured { failure }
+        })
+}
+
+/// The second half of the data walk `walk`, once `agents` has passed ([`walk_sign_ins`]): when
+/// the data folder is owned, each item directly in it worked out from it and each folder in it
+/// but [`NOT_WALKED`] walked down, a failure only logged. Then, when nothing failed, the record
+/// that the data walk passed.
+pub(super) fn walk_data(acl: &mut dyn AclWriter, walk: &DataWalk) -> Walked {
     let mut seen = Walked::default();
     let mut passed = true;
     if walk.whole {
@@ -199,28 +220,10 @@ pub(super) fn walk_data(acl: &mut dyn AclWriter, walk: &DataWalk) -> Result<Walk
             walk_one(&child, Reach::Tree);
         }
     }
-    if let Some(agents) = &walk.agents {
-        let strict = Strict {
-            watched: Vec::new(),
-            pool: walk.pool.clone(),
-            assigned: Vec::new(),
-        };
-        let walked = acl
-            .propagate(agents, Reach::Tree, Some(&strict))
-            .map_err(|failure| {
-                tracing::warn!(%failure, "the sign-ins' folder wasn't secured; launch refused");
-                Refused {
-                    at: acl.refused_at(),
-                    sign_in: true,
-                    ..Refused::new(PathKind::ClaudeStore, failure)
-                }
-            })?;
-        seen.add(walked);
-    }
     if passed && let Err(error) = record_walked(&walk.data) {
         tracing::warn!(%error, "the data walk's record wasn't written; it runs again");
     }
-    Ok(seen)
+    seen
 }
 
 /// The folders directly in `data` its plain walk goes down: none of [`NOT_WALKED`], no link.

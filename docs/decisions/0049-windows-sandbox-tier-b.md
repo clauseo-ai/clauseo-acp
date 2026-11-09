@@ -847,9 +847,10 @@ the data folder's entries, even when the data folder itself is skipped (a volume
 holding the profile, keeps the DACL Windows or the lawyer gave it). The data folder's contents are
 walked once: when its or `agents`' DACL changes, and at each launch until one walk has passed
 (`sandbox\owned-walked`). `agents` is walked strictly, watching no SID, so it strips only broad
-allows and another live session's recorded allows in the Claude store stay; if that walk fails the
-launch is refused ("Clauseo couldn't secure its sign-in folder. Restart the computer and try
-again."), so no sign-in stays readable to other accounts across sessions. A failed walk of the
+allows and another live session's recorded allows in the Claude store stay. It runs right after
+the protection, before anything is recorded, and if it fails the launch is refused ("Clauseo
+couldn't secure its sign-in folder. Restart the computer and try again."), so no sign-in stays
+readable to other accounts across sessions. A failed walk of the
 host's other folders is logged and retried.
 
 **Follow-ups** (not in this change):

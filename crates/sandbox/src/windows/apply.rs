@@ -238,10 +238,15 @@ fn run_plan(
     check_credentials(plan, acl, &*around)?;
     let handed = roots::hand_back_roots(plan, ledger, acl, pool)?;
     let owned = owned::protect_owned(plan, ledger, acl, pool, &handed)?;
+    let signed_in = match &owned.data {
+        Some(data) => owned::walk_sign_ins(acl, data)?,
+        None => Walked::default(),
+    };
     ledger
         .record_pending(plan)
         .map_err(|e| refused(PathKind::Matter, ApplyFailure::Ledger(e.kind())))?;
     let mut run = Run::default();
+    run.walked.add(signed_in);
     match write_all(ledger, plan, acl, around, (own, &owned), &mut run) {
         Ok(()) => Ok(run),
         Err(mut refused) => {
@@ -428,7 +433,7 @@ fn write_all(
         run.walked.add(seen);
     }
     if let Some(data) = &owned.data {
-        run.walked.add(owned::walk_data(acl, data)?);
+        run.walked.add(owned::walk_data(acl, data));
     }
     ledger
         .mark_walked(plan.entries())

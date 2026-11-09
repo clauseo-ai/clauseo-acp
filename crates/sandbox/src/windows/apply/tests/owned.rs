@@ -178,9 +178,9 @@ fn the_data_folders_contents_are_walked_until_one_walk_passes() {
     )
     .unwrap();
     let want = vec![
+        (data.join("agents"), Reach::Tree, true),
         (data.clone(), Reach::Children, false),
         (updates, Reach::Tree, false),
-        (data.join("agents"), Reach::Tree, true),
     ];
     assert_eq!(data_walks(&acl, &data), want);
     let mark = data.join("sandbox").join("owned-walked");
@@ -208,7 +208,8 @@ fn the_data_folders_contents_are_walked_until_one_walk_passes() {
 }
 
 /// N1: a failed strict walk of `agents` (the sign-ins) refuses the launch with the repair
-/// message, its new entries rolled back and no record written, so the next launch walks again.
+/// message before any grant is written or any entry recorded, pending or not, and no record of
+/// a data walk is written, so the next launch walks again.
 #[test]
 fn a_failed_walk_of_the_sign_ins_refuses_the_launch() {
     let w = world("owned-sign-in", &[]);
@@ -236,7 +237,14 @@ fn a_failed_walk_of_the_sign_ins_refuses_the_launch() {
         error.to_string().contains("Restart the computer"),
         "{error}"
     );
-    assert_eq!(ledger.entries().count(), 0, "rolled back");
+    assert_eq!(
+        ledger.entries().count(),
+        0,
+        "nothing recorded, not even pending"
+    );
+    assert!(acl.aces.is_empty(), "no grant written: {:?}", acl.aces);
+    let reopened = Ledger::open(ledger_path(&w.at("data")), &trusted(), &reserved()).unwrap();
+    assert_eq!(reopened.entries().count(), 0, "nothing on disk either");
     assert!(!w.at("data/sandbox/owned-walked").exists());
     acl.walks.clear();
     apply(

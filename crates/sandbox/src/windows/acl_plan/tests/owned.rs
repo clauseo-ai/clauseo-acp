@@ -202,83 +202,125 @@ fn a_fence_only_plan_owns_nothing() {
     assert_eq!(plan.owned_roots(), []);
 }
 
-/// Each kind of path on an owned chain, and the owned kind of the folder it is or is in.
-const ON_CHAIN: [(PathKind, OwnedKind); 4] = [
-    (PathKind::State, OwnedKind::State),
-    (PathKind::Notes, OwnedKind::Notes),
-    (PathKind::CredentialLink, OwnedKind::State),
-    (PathKind::TempFolder, OwnedKind::TempFolder),
-];
-
-/// The owned kind a folder `depth` levels below the data folder must have, on the chain down to
-/// a path of `kind`: the layout `targets.rs` accepts (`<data>\<AGENT_STATE_DIR>\<matter>\<x>`,
-/// `<data>\<RUN_DIR>\<session>\tmp`). `None` below the owned folder (the credential link).
-fn chain_kind(kind: PathKind, depth: usize) -> Option<OwnedKind> {
-    let (_, own) = ON_CHAIN.into_iter().find(|(k, _)| *k == kind)?;
-    let middle = if own == OwnedKind::TempFolder {
-        OwnedKind::RunFolder
-    } else {
-        OwnedKind::MatterFolder
-    };
-    [OwnedKind::DataRoot, OwnedKind::DataFolder, middle, own]
-        .get(depth)
-        .copied()
+/// How the owned roots cover an allow of some kind inside the data folder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Covered {
+    /// By its chain of owned folders: the data folder, the shared folder named so in
+    /// `targets.rs`, the matter's or session's folder (`middle`), and its own (`own`).
+    Chain {
+        shared: &'static str,
+        middle: OwnedKind,
+        own: OwnedKind,
+    },
+    /// By `<data>\agents`, an owned root of its own (`OwnedKind::Agents`).
+    Agents,
 }
 
-/// Cross-check against the layout (host #823 moves it): for each state, notes, credential link
-/// and temp path `check_target` accepted in the test worlds, `owned_roots` covers its chain in
-/// the data folder with the right kinds, the shared folder named as `targets.rs` names it. A
-/// layout change in either place without the other fails here.
+/// How an allow of `kind` the plan grants inside the data folder is covered. Exhaustive, with no
+/// catch-all: a new kind of path is a compile error here until someone says how it is covered.
+fn coverage(kind: PathKind) -> Covered {
+    let matter = |own| Covered::Chain {
+        shared: targets::AGENT_STATE_DIR,
+        middle: OwnedKind::MatterFolder,
+        own,
+    };
+    match kind {
+        PathKind::State | PathKind::CredentialLink => matter(OwnedKind::State),
+        PathKind::Notes => matter(OwnedKind::Notes),
+        PathKind::TempFolder => Covered::Chain {
+            shared: targets::RUN_DIR,
+            middle: OwnedKind::RunFolder,
+            own: OwnedKind::TempFolder,
+        },
+        // Clauseo's Claude sign-in (`<data>\agents\claude-acp\home`) and its files, shared by
+        // every matter: no per-matter chain, but inside `agents`, owned with the data folder's
+        // entries even when the data folder is skipped, and walked strictly once. A read or run
+        // path the plan may grant in the data folder is only ever inside one agent's install
+        // under `agents` (`check_target`), so the same root covers it.
+        PathKind::ClaudeStore
+        | PathKind::ClaudeStoreFile
+        | PathKind::Runtime
+        | PathKind::Read
+        | PathKind::AllowedFolder => Covered::Agents,
+        PathKind::Matter => panic!("the matter folder is never inside the data folder"),
+        PathKind::ReadOnlyInMatter
+        | PathKind::ReadOnlyInState
+        | PathKind::OtherMatter
+        | PathKind::Sibling
+        | PathKind::ParentFiles
+        | PathKind::SharedWrite => panic!("{kind:?} is a deny, never an allow"),
+    }
+}
+
+/// Cross-check against the layout (host #823 moves it): for every allow the plan grants inside
+/// the data folder in the test worlds, `owned_roots` covers it as [`coverage`] says: its chain
+/// of owned folders with the right kinds and `targets.rs`'s shared folder names, or the
+/// `agents` root. A layout change in either place without the other fails here.
 #[test]
-fn owned_roots_cover_every_accepted_state_notes_and_temp_paths_chain() {
+fn owned_roots_cover_every_allow_the_plan_grants_in_the_data_folder() {
     let w = World::new("plan-owned-chain");
     w.dir.dir("data/run/s1/tmp");
+    w.dir.dir("data/agents/claude-acp/bin");
     let session = w
         .builder()
         .notes(w.at(NOTES))
         .tmpdir(w.at("data/run/s1/tmp"))
+        .runtime(w.at("data/agents/claude-acp/bin"))
         .build()
         .unwrap();
     let data = w.canonical("data");
-    let kinds = ON_CHAIN.map(|(kind, _)| kind);
+    let agents = data.join(targets::AGENTS_DIR);
     let mut checked: Vec<PathKind> = Vec::new();
     for policy in [w.full_policy(), session] {
         let admitted = admitted(&w, &policy, &[], &FakeFolders::default());
         let plan = plan(&admitted, &sids(), matter_one()).unwrap();
-        for grant in plan.grants().iter().filter(|g| kinds.contains(&g.kind)) {
-            let below: Vec<&Path> = grant
-                .path
-                .ancestors()
-                .take_while(|a| in_folder(a, &data))
-                .collect();
-            for (depth, folder) in below.iter().rev().enumerate() {
-                let found = plan
-                    .owned_roots()
-                    .iter()
-                    .find(|r| r.path() == *folder)
-                    .map(OwnedRoot::kind);
-                let want = chain_kind(grant.kind, depth);
-                assert_eq!(found, want, "{:?} at {}", grant.kind, w.relative(folder));
+        let kind_at = |folder: &Path| {
+            plan.owned_roots()
+                .iter()
+                .find(|r| r.path() == folder)
+                .map(OwnedRoot::kind)
+        };
+        let in_data = |g: &&Grant| g.rights.is_allow() && in_folder(&g.path, &data);
+        for grant in plan.grants().iter().filter(in_data) {
+            let at = w.relative(&grant.path);
+            match coverage(grant.kind) {
+                Covered::Chain {
+                    shared,
+                    middle,
+                    own,
+                } => {
+                    let below: Vec<&Path> = grant
+                        .path
+                        .ancestors()
+                        .take_while(|a| in_folder(a, &data))
+                        .collect();
+                    let chain = [OwnedKind::DataRoot, OwnedKind::DataFolder, middle, own];
+                    for (depth, folder) in below.iter().rev().enumerate() {
+                        let want = chain.get(depth).copied();
+                        assert_eq!(kind_at(folder), want, "{:?} {at}", grant.kind);
+                    }
+                    let name = below.iter().rev().nth(1).and_then(|f| f.file_name());
+                    assert_eq!(name, Some(std::ffi::OsStr::new(shared)), "{at}");
+                }
+                Covered::Agents => {
+                    assert!(in_folder(&grant.path, &agents), "{:?} {at}", grant.kind);
+                    assert_eq!(kind_at(&agents), Some(OwnedKind::Agents), "{at}");
+                    assert_eq!(kind_at(&data), Some(OwnedKind::DataRoot), "{at}");
+                }
             }
-            let shared = below.iter().rev().nth(1).and_then(|f| f.file_name());
-            let named = if grant.kind == PathKind::TempFolder {
-                targets::RUN_DIR
-            } else {
-                targets::AGENT_STATE_DIR
-            };
-            assert_eq!(
-                shared,
-                Some(std::ffi::OsStr::new(named)),
-                "{:?}",
-                grant.kind
-            );
             checked.push(grant.kind);
         }
     }
-    for kind in kinds {
-        assert!(
-            checked.contains(&kind),
-            "no accepted {kind:?} path was checked"
-        );
+    let want = [
+        PathKind::State,
+        PathKind::Notes,
+        PathKind::CredentialLink,
+        PathKind::TempFolder,
+        PathKind::ClaudeStore,
+        PathKind::ClaudeStoreFile,
+        PathKind::Runtime,
+    ];
+    for kind in want {
+        assert!(checked.contains(&kind), "no {kind:?} allow was checked");
     }
 }
