@@ -75,7 +75,8 @@ impl SeatbeltLauncher {
     /// [`Error::Policy`] when `marks` does not exist or sits in a folder the policy lets the
     /// agent write (the matter, the state, notes, temp or browser socket folder, the Claude
     /// store, the credential link): an agent could move the mark away and blind the sweep.
-    /// [`Error::Launch`] when the mark cannot be made.
+    /// [`Error::Launch`] when the mark cannot be made. Before it, the stale marks of an earlier
+    /// host's launchers in `marks` are removed: those no process matches any longer.
     pub fn new(
         policy: Policy,
         opts: SpawnOptions,
@@ -86,6 +87,11 @@ impl SeatbeltLauncher {
         let n = NEXT_TAG.fetch_add(1, Ordering::Relaxed);
         let tag = format!("{}{}-{n}", profile::TAG_PREFIX, std::process::id());
         let marks = check_marks(&policy, marks)?;
+        // Marks a crashed earlier host left, which no process matches any longer.
+        let stale = sweep::clean_stale(&marks);
+        if stale > 0 {
+            tracing::info!(stale, "stale session marks removed");
+        }
         let mark =
             SessionMark::create(&marks, &tag).map_err(|source| clauseo_process::Error::Os {
                 what: "the launch's session mark could not be made",

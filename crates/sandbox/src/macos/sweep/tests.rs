@@ -208,3 +208,54 @@ fn the_mark_is_made_as_a_private_regular_file_beside_its_canary() {
     dir.symlink("links/clauseo-1-2/mark", &elsewhere);
     assert!(SessionMark::create(&dir.path().join("links"), "clauseo-1-2").is_err());
 }
+
+/// A pid that names no process, from the top of the pid space down.
+fn dead_pid() -> u32 {
+    (90_000..99_000)
+        .rev()
+        .find(|&pid| !host_alive(pid))
+        .expect("a free pid")
+}
+
+#[test]
+fn a_dropped_mark_no_process_matches_removes_itself() {
+    let dir = TempDir::new("sweep-drop");
+    let s = SessionMark::create(dir.path(), "clauseo-1-0").unwrap();
+    let folder = s.path().parent().unwrap().to_owned();
+    drop(s);
+    assert!(!folder.exists(), "the unused mark stayed");
+    // A mark found on disk is never removed by its drop.
+    let mut kept = SessionMark::create(dir.path(), "clauseo-1-1").unwrap();
+    kept.clean_on_drop = false;
+    let folder = kept.path().parent().unwrap().to_owned();
+    drop(kept);
+    drop(SessionMark::open(&folder).unwrap());
+    assert!(folder.join("mark").exists() && folder.join("canary").exists());
+}
+
+#[test]
+fn only_an_unused_mark_of_a_host_that_is_gone_is_cleaned() {
+    let dir = TempDir::new("sweep-stale");
+    let root = dunce::canonicalize(dir.path()).unwrap();
+    let left = |tag: &str| {
+        let mut mark = SessionMark::create(&root, tag).unwrap();
+        mark.clean_on_drop = false;
+        mark.path().parent().unwrap().to_owned()
+    };
+    let dead = left(&format!("clauseo-{}-0", dead_pid()));
+    let ours = left(&format!("clauseo-{}-99", std::process::id()));
+    // launchd: a host that still runs.
+    let running = left("clauseo-1-7");
+    // A broken mark (its canary gone) of a dead host: its scan fails, so it stays.
+    let broken = left(&format!("clauseo-{}-1", dead_pid()));
+    remove(&broken.join("canary"));
+    dir.dir("not-a-mark");
+    assert_eq!(clean_stale(&root), 1);
+    assert!(!dead.exists());
+    for kept in [&ours, &running, &broken] {
+        assert!(kept.join("mark").exists(), "{}", kept.display());
+    }
+    assert!(root.join("not-a-mark").exists());
+    assert_eq!(host_of("clauseo-4242-7"), Some(4242));
+    assert_eq!(host_of("clauseo-x-7"), None);
+}

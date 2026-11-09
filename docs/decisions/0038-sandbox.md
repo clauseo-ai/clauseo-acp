@@ -611,6 +611,11 @@ be the filter either. What a jailed process cannot change is its Seatbelt profil
   handle, `JailedSession` (from `SeatbeltLauncher::launch_jailed`), holds the agent's
   `TreeWatch` and the launcher's mark; `processes_gone` is the tree gone and an empty scan with
   the drift check passing.
+- **Leftover marks.** A mark goes when its last holder (the launcher and every `JailedSession`
+  of its launches) drops it, if a scan finds no process of it; nothing is killed on drop, so a
+  mark a process still matches stays findable. `SeatbeltLauncher::new` removes the marks of an
+  earlier host (its pid, in the tag, no longer runs) that no process matches; a mark a process
+  matches, one whose scan fails, and one of a host that still runs are never touched.
 
 Measured on a Mac mini (M-series, macOS 27.2): the escaped child (setsid, double fork, every
 descriptor closed, adopted by launchd) matched its launch and nothing else, and was ended; a

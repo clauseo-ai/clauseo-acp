@@ -9,9 +9,9 @@ use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
-use std::time::SystemTime;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::{ProcId, SweepError, now_wall, start_of};
+use super::{ProcId, SweepError, now_wall, processes, start_of};
 use crate::macos::profile::{SESSION_MARK, check_tag};
 
 /// The mark's file name in its folder.
@@ -26,6 +26,15 @@ const CANARY: &str = "canary";
 ///
 /// `dir` must sit outside every folder any profile lets an agent write (the launcher checks it
 /// against its policy): the data dir's own folder, which the profile hides.
+///
+/// When the last holder drops a mark it made (the launcher and every [`JailedSession`] of its
+/// launches), the mark removes itself if a scan finds no process of it, the drift check passing
+/// ([`SessionMark::remove_if_unused`], one scan, about 1.5 ms). Nothing is killed on drop: a
+/// mark a process still matches stays, so the gate, session end or a later launcher's clean-up
+/// ([`SeatbeltLauncher::new`]) can still find that process.
+///
+/// [`JailedSession`]: super::JailedSession
+/// [`SeatbeltLauncher::new`]: crate::SeatbeltLauncher::new
 #[derive(Debug)]
 pub struct SessionMark {
     tag: String,
@@ -36,6 +45,9 @@ pub struct SessionMark {
     created: SystemTime,
     roots: Mutex<Vec<ProcId>>,
     told: AtomicBool,
+    /// Whether dropping it removes it when unused: a mark this process made, not one
+    /// [`SessionMark::open`] found.
+    pub(super) clean_on_drop: bool,
 }
 
 impl SessionMark {
@@ -68,7 +80,53 @@ impl SessionMark {
             created: now_wall(),
             roots: Mutex::new(Vec::new()),
             told: AtomicBool::new(false),
+            clean_on_drop: true,
         })
+    }
+
+    /// The mark already in `folder` (canonical; named by a launcher's tag), left by an earlier
+    /// launcher: both files must be regular files. Dropping it removes nothing.
+    pub(crate) fn open(folder: &Path) -> io::Result<SessionMark> {
+        let tag = folder
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| io::Error::other("not a tag"))?;
+        check_tag(tag).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
+        if !std::fs::symlink_metadata(folder)?.is_dir() {
+            return Err(io::Error::other("not a folder"));
+        }
+        let mark = folder.join(MARK);
+        let canary = folder.join(CANARY);
+        let c = |path: &Path| CString::new(path.as_os_str().as_bytes()).map_err(io::Error::other);
+        let found = SessionMark {
+            tag: tag.to_owned(),
+            mark_c: c(&mark)?,
+            canary_c: c(&canary)?,
+            mark,
+            canary,
+            created: UNIX_EPOCH,
+            roots: Mutex::new(Vec::new()),
+            told: AtomicBool::new(false),
+            clean_on_drop: false,
+        };
+        found.check_files().map_err(io::Error::other)?;
+        Ok(found)
+    }
+
+    /// Removes the mark if a scan with no start filter finds no process of it, the drift check
+    /// passing; answers whether it went. A failed scan removes nothing: a process it could not
+    /// see may still match.
+    pub fn remove_if_unused(&self) -> bool {
+        match processes(&[self], UNIX_EPOCH) {
+            Ok(found) if found.is_empty() => match self.remove() {
+                Ok(()) => true,
+                Err(error) => {
+                    tracing::warn!(tag = self.tag, %error, "an unused session mark could not be removed");
+                    false
+                }
+            },
+            Ok(_) | Err(_) => false,
+        }
     }
 
     /// The launch's tag.
@@ -152,6 +210,15 @@ impl SessionMark {
             }
         }
         Ok(())
+    }
+}
+
+impl Drop for SessionMark {
+    /// A mark this process made, still on disk, goes when no process matches it.
+    fn drop(&mut self) {
+        if self.clean_on_drop && self.check_files().is_ok() {
+            self.remove_if_unused();
+        }
     }
 }
 

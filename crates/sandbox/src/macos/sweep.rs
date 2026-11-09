@@ -18,6 +18,7 @@
 
 use std::collections::HashSet;
 use std::ffi::CStr;
+use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -27,6 +28,7 @@ use clauseo_process::TreeWatch;
 use super::process_cap::Proc;
 use super::process_cap::libproc::Libproc;
 use super::process_cap::watchdog::System as _;
+use super::profile::TAG_PREFIX;
 
 mod mark;
 mod seatbelt;
@@ -490,6 +492,46 @@ fn all() -> Option<Vec<Proc>> {
 /// The start of running process `pid`; `None` when it is gone, unreadable or a zombie.
 pub(crate) fn start_of(pid: u32) -> Option<u64> {
     Libproc.info(pid).map(|process| process.start)
+}
+
+/// Removes the stale marks in `dir` (canonical), the marks folder: those of launchers of an
+/// earlier host, whose tag names a host pid that is not this process's and runs no longer, and
+/// that no process matches ([`SessionMark::remove_if_unused`]). A mark a process still
+/// matches, one whose scan fails, or one of a host that still runs is never touched. Answers how
+/// many went.
+pub(crate) fn clean_stale(dir: &Path) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let Some(host) = entry.file_name().to_str().and_then(host_of) else {
+            continue;
+        };
+        if host == std::process::id() || host_alive(host) {
+            continue;
+        }
+        if let Ok(mark) = SessionMark::open(&entry.path())
+            && mark.remove_if_unused()
+        {
+            removed += 1;
+        }
+    }
+    removed
+}
+
+/// The host pid a launcher's tag names: `clauseo-<pid>-<n>`.
+fn host_of(tag: &str) -> Option<u32> {
+    tag.strip_prefix(TAG_PREFIX)?
+        .split('-')
+        .next()?
+        .parse()
+        .ok()
+}
+
+/// Whether `pid` names a running process (another host may still hold its marks).
+fn host_alive(pid: u32) -> bool {
+    Libproc.info(pid).is_some() || Libproc.session_of(pid).is_some()
 }
 
 /// Microseconds since the epoch; 0 before it.

@@ -100,3 +100,8 @@ mod sweep;
 #[cfg(target_os = "macos")]
 #[path = "jail/escaper.rs"]
 mod escaper;
+
+#[cfg(test)]
+#[cfg(target_os = "macos")]
+#[path = "jail/marks.rs"]
+mod marks;

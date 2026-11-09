@@ -404,6 +404,7 @@ crates/sandbox/src/macos/sweep/mark.rs make_folder clippy::disallowed_methods
 crates/sandbox/src/macos/sweep/mark.rs make_file clippy::disallowed_methods
 crates/sandbox/src/macos/sweep/mark.rs remove clippy::disallowed_methods
 crates/sandbox/tests/jail/sweep.rs - clippy::disallowed_methods
+crates/sandbox/tests/jail/marks.rs - clippy::disallowed_methods
 crates/sandbox/tests/jail/escaper.rs escape unsafe_code
 crates/sandbox/tests/jail/escaper.rs append_pid unsafe_code
 crates/sandbox/tests/jail/escaper.rs append unsafe_code

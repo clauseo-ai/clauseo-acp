@@ -58,11 +58,11 @@ impl Drop for Guard {
 }
 
 /// A running launch: its first stdout line read, its stderr kept open.
-struct Agent {
+pub(crate) struct Agent {
     lines: Lines<BufReader<ChildStdout>>,
     _stderr: StderrPump,
-    handle: Handle,
-    session: JailedSession,
+    pub(crate) handle: Handle,
+    pub(crate) session: JailedSession,
 }
 
 impl Agent {
@@ -117,7 +117,7 @@ fn start(
 }
 
 /// A jailed sleeper of `launcher`: prints `up` and becomes a 30 s sleep.
-fn sleeper(launcher: &SeatbeltLauncher, w: &World) -> Agent {
+pub(crate) fn sleeper(launcher: &SeatbeltLauncher, w: &World) -> Agent {
     let (agent, first) = start(
         launcher,
         &w.at("m1"),
@@ -185,7 +185,7 @@ fn left_after(pids: &[i32]) -> Vec<i32> {
     }
 }
 
-fn deadline(seconds: u64) -> Instant {
+pub(crate) fn deadline(seconds: u64) -> Instant {
     Instant::now() + Duration::from_secs(seconds)
 }
 
