@@ -1,4 +1,7 @@
-use super::{Held, apfs_key, as_listed_by, bounds, held_files_with, holds, named_in, raw_text};
+use super::{
+    Held, apfs_key, as_listed_by, bounds, held_files_with, holds, named_in, raw_text,
+    stored_spelling,
+};
 use crate::pre_write_guard::timings;
 use crate::pre_write_guard::words::Escape;
 use crate::write;
@@ -163,4 +166,37 @@ fn a_held_file_found_in_another_spelling_is_shown_as_listed() {
         as_listed_by(path("Pe\u{301}tition.docx"), &held, str::to_owned),
         path("Pe\u{301}tition.docx")
     );
+}
+
+/// A held file's stored spelling is read from the folders on its way, on APFS's rules, run on
+/// every system: each name as listed, the exact one first; `None` for a name no folder lists.
+#[test]
+fn a_held_file_found_by_a_tool_is_shown_as_its_folders_list_it() {
+    let path = |text: &str| {
+        clauseo_protocol::MatterPath::from_relative(std::path::Path::new(text)).unwrap()
+    };
+    let root = std::env::temp_dir().join(format!("clauseo-host-stored-{}", std::process::id()));
+    write::remove_dir_all(&root).unwrap();
+    write::create_dir_all(&root.join("Drafts")).unwrap();
+    for name in ["Drafts/Contract.docx", "P\u{e9}tition.docx", "Free.docx"] {
+        write::write_file(&root.join(name), b"x").unwrap();
+    }
+    for (typed, shown) in [
+        ("drafts/CONTRACT.docx", Some("Drafts/Contract.docx")),
+        ("Pe\u{301}tition.docx", Some("P\u{e9}tition.docx")),
+        ("FREE.DOCX", Some("Free.docx")),
+        ("Free.docx", Some("Free.docx")),
+        ("Missing.docx", None),
+    ] {
+        assert_eq!(
+            stored_spelling(&root, &path(typed), apfs_key),
+            shown.map(path),
+            "{typed}"
+        );
+    }
+    assert_eq!(
+        stored_spelling(&root, &path("FREE.DOCX"), str::to_owned),
+        None
+    );
+    drop(write::remove_dir_all(&root));
 }
