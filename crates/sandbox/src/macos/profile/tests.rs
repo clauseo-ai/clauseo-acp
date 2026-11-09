@@ -2,7 +2,7 @@ use std::path::{Component, Path, PathBuf};
 
 use super::*;
 use crate::test_support::TempDir;
-use crate::{LinkFinding, LinkKind, PolicyBuilder};
+use crate::{LinkFinding, LinkKind, Loopback, PolicyBuilder};
 
 const TAG: &str = "clauseo-4242-7";
 
