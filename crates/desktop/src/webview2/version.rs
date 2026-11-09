@@ -3,9 +3,11 @@
 use std::cmp::Ordering;
 
 /// The oldest runtime the app starts on: `bundle.windows.minimumWebview2Version` in
-/// `tauri.conf.json`, which the installer also uses (a test holds the two together). Raised only
-/// on purpose (`docs/decisions/0035-release-builds.md`).
-pub(super) const MINIMUM: &str = "155.0.0.0";
+/// `tauri.conf.json`, which the installer also uses (a test holds the two together). It is the
+/// version clean Windows 11 ships: above it, the per-user installer updates the runtime and a
+/// standard user is asked for an administrator. Raised only on purpose, and only to a version
+/// clean Windows ships (`docs/decisions/0035-release-builds.md`).
+pub(super) const MINIMUM: &str = "152.0.0.0";
 
 /// A `WebView2` version: major, minor, build and patch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
