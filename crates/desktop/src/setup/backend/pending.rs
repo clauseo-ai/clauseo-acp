@@ -10,7 +10,10 @@
 //!   switch check too: a press keeps the lawyer's yes to `Ask::SwitchAccount` (`switch.rs`),
 //!   asked when pressed; a press kept without one that finds Clauseo's own login at `Ready`
 //!   is refused (`SigninError::OwnLoginPresent`) and dropped, never asked then, so no
-//!   `codex login` starts over that login unasked.
+//!   `codex login` starts over that login unasked. The yes holds through a failed install and
+//!   its Retry, but lives only as long as its press (memory only: gone at a restart) and covers
+//!   only the login it was given for, recorded by a stat (`Agents::own_login`, never an open):
+//!   another login there by `Ready` drops the press the same way, and the next press asks.
 //! - **Kept** while the install downloads, installs or waits offline to try again (`Waiting`),
 //!   and when it ends `Failed`: the failed view shows with its Retry, and a retry that ends
 //!   `Ready` carries on to the sign-in the lawyer asked for.
@@ -23,7 +26,7 @@
 //! S18 itself queues a sign-in until the install is `Ready`, but runs it then with no new check
 //! and keeps it through a failure, so desktop never hands it a sign-in for an agent not installed.
 
-use clauseo_agents::{InstallState, Method, SigninError, SigninState};
+use clauseo_agents::{InstallState, Method, OwnLogin, SigninError, SigninState};
 use clauseo_protocol::{AgentId, HostError};
 
 use super::{AgentsBackend, signin_error, switch};
@@ -38,12 +41,13 @@ pub(crate) enum Press {
     DifferentAccount,
 }
 
-/// A kept press and whether the lawyer said yes to replacing Clauseo's own Codex login when it
-/// was pressed (`switch.rs`).
+/// A kept press and, when the lawyer said yes to replacing Clauseo's own Codex login when it
+/// was pressed (`switch.rs`), that login as a stat saw it then. The yes lives as long as the
+/// press, in memory only, and covers only that login (`yes_holds`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Kept {
     pub(crate) press: Press,
-    pub(crate) switch: bool,
+    pub(crate) switch: Option<OwnLogin>,
 }
 
 /// Whether an agent in install `state` can sign in now: installed, or the firm's runtime.
@@ -68,7 +72,7 @@ pub(super) fn keep_press(
     backend: &AgentsBackend,
     agent: &AgentId,
     press: Press,
-    switch: bool,
+    switch: Option<OwnLogin>,
 ) -> bool {
     let kept = lock(&backend.pending).contains_key(agent);
     if !kept && installed(backend.agents.state(agent).as_ref()) {
@@ -77,6 +81,7 @@ pub(super) fn keep_press(
     let replaced = lock(&backend.pending)
         .insert(agent.clone(), Kept { press, switch })
         .is_some();
+    let switch = switch.is_some();
     tracing::info!(%agent, method = ?press, switch, replaced, "sign-in pending: installing first");
     backend.compose.signin(agent, SigninState::Queued);
     backend.agents.install(agent);
@@ -89,12 +94,12 @@ pub(super) fn keep_or_start(
     backend: &AgentsBackend,
     agent: &AgentId,
     press: Press,
-    switch: bool,
+    switch: Option<OwnLogin>,
 ) -> Result<(), HostError> {
     if keep_press(backend, agent, press, switch) {
         return Ok(());
     }
-    call(backend, agent, press, switch)?;
+    call(backend, agent, press, switch.is_some())?;
     tracing::info!(%agent, method = ?press, "sign-in started");
     backend.replaced(agent);
     Ok(())
@@ -174,16 +179,37 @@ pub(super) fn run_press(backend: &AgentsBackend, agent: &AgentId) -> bool {
     }
 }
 
-/// `kept`'s checks and its S18 call, as the direct press's. Without the lawyer's yes, a login
-/// that would replace Clauseo's own is refused here as S18 refuses it, so the fake `Agents` of
-/// the tests needs no copy of S18's rule.
+/// `kept`'s checks and its S18 call, as the direct press's. A login that would replace
+/// Clauseo's own with no yes for that very login ([`yes_holds`]) is refused here as S18
+/// refuses it, so the fake `Agents` of the tests needs no copy of S18's rule.
 fn start_press(backend: &AgentsBackend, agent: &AgentId, kept: Kept) -> Result<(), HostError> {
     backend.refuse_reused(agent)?;
     backend.refuse_start(agent)?;
-    if !kept.switch && backend.agents.replaces_own_login(agent) {
-        return Err(signin_error(&SigninError::OwnLoginPresent(agent.clone())));
+    let switch = yes_holds(agent, kept.switch, backend.agents.own_login(agent))?;
+    call(backend, agent, kept.press, switch)
+}
+
+/// Whether a kept press starts the confirmed login, by `yes` (the own login the lawyer said yes
+/// to replacing, as a stat saw it when pressed) and `now` (the one there at `Ready`):
+/// `false` when there is none to replace now (the yes, if any, is dropped: nothing needs it);
+/// `true` when it is the very login the yes was for. Otherwise `OwnLoginPresent`: a press with
+/// no yes, or whose login changed since the yes (another file, or one gone and back), is
+/// dropped with no sign-in started, and the lawyer's next press asks (`switch_first`).
+fn yes_holds(
+    agent: &AgentId,
+    yes: Option<OwnLogin>,
+    now: Option<OwnLogin>,
+) -> Result<bool, HostError> {
+    match (yes, now) {
+        (_, None) => Ok(false),
+        (Some(yes), Some(now)) if yes == now => Ok(true),
+        (yes, Some(_)) => {
+            if yes.is_some() {
+                tracing::info!(%agent, "the kept yes is dropped: Clauseo's own login changed");
+            }
+            Err(signin_error(&SigninError::OwnLoginPresent(agent.clone())))
+        }
     }
-    call(backend, agent, kept.press, kept.switch)
 }
 
 /// `press`'s S18 call, the confirmed form with `switch`.

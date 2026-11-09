@@ -57,7 +57,7 @@
 mod device;
 mod ended;
 pub(crate) mod identity;
-mod written;
+pub(crate) mod written;
 
 use std::ffi::OsString;
 use std::net::{Ipv4Addr, TcpListener};

@@ -41,6 +41,7 @@ mod thread;
 
 pub(crate) use self::signin::SigninHub;
 use self::signin::SigninStart;
+pub use self::switch::OwnLogin;
 use self::switch::Switch;
 use self::thread::Worker;
 
@@ -297,6 +298,14 @@ impl Agents {
     /// Such a sign-in needs the lawyer's yes, then `sign_in_switching`.
     pub fn replaces_own_login(&self, agent: &AgentId) -> bool {
         self.shared.signin.replaces_own_login(agent)
+    }
+
+    /// The Clauseo-own login [`Agents::replaces_own_login`] finds, by a stat of its file (file
+    /// id, size, modified time; never opened): `None` when there is none to replace. A caller
+    /// that keeps the lawyer's yes past the moment it was given compares it again before using
+    /// that yes, so the yes never covers a login it was not given for.
+    pub fn own_login(&self, agent: &AgentId) -> Option<OwnLogin> {
+        self.shared.signin.own_login(agent)
     }
 
     /// Codex's "Try again" after `signin.port_busy`: probes port 1455 every 2 s and starts the

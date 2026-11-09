@@ -13,8 +13,8 @@ use std::time::SystemTime;
 
 /// What a stat of the home's login file said: its id when one could be read, its size and its
 /// modified time.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct Stamp {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Stamp {
     id: Option<(u64, u64)>,
     len: u64,
     modified: Option<SystemTime>,
@@ -22,7 +22,7 @@ pub(super) struct Stamp {
 
 impl Stamp {
     /// The home's login file now, `None` when there is none (or it cannot be stat'ed).
-    pub(super) fn of(codex_home: &Path) -> Option<Self> {
+    pub(crate) fn of(codex_home: &Path) -> Option<Self> {
         let path = crate::signin::reuse::login_file(codex_home);
         let meta = std::fs::symlink_metadata(&path).ok()?;
         Some(Self {
@@ -30,6 +30,16 @@ impl Stamp {
             len: meta.len(),
             modified: meta.modified().ok(),
         })
+    }
+
+    /// Test support: a stamp told apart from others by `n` alone, for a fake `Agents`.
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) fn for_tests(n: u64) -> Self {
+        Self {
+            id: Some((0, n)),
+            len: n,
+            modified: None,
+        }
     }
 }
 

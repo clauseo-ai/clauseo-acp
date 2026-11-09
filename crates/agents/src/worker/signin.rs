@@ -12,7 +12,7 @@ use clauseo_protocol::AgentId;
 
 use super::Ticket;
 use super::stop::{JobEnd, Stopped};
-use super::switch::{self, Switch};
+use super::switch::{self, OwnLogin, Switch};
 use super::thread::Worker;
 use crate::cancel::{Cancel, Stop};
 use crate::config::AgentsConfig;
@@ -110,12 +110,15 @@ impl SigninHub {
         }
     }
 
-    /// [`switch::replaces_own_login`] for `agent`.
+    /// [`switch::own_login`] for `agent`.
+    pub(super) fn own_login(&self, agent: &AgentId) -> Option<OwnLogin> {
+        let known = self.agents.get(agent)?;
+        switch::own_login(&self.data_dir, agent, known.vendor, known.home.as_deref())
+    }
+
+    /// Whether a Codex login for `agent` now would replace Clauseo's own ([`Self::own_login`]).
     pub(super) fn replaces_own_login(&self, agent: &AgentId) -> bool {
-        self.agents.get(agent).is_some_and(|known| {
-            let home = known.home.as_deref();
-            switch::replaces_own_login(&self.data_dir, agent, known.vendor, home)
-        })
+        self.own_login(agent).is_some()
     }
 
     /// Refuses a Codex login over Clauseo's own login unless `switch` is the lawyer's yes.

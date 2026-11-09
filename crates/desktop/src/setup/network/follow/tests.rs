@@ -107,8 +107,8 @@ impl SetupAgents for Networks {
     ) -> Result<(), clauseo_agents::SigninError> {
         Ok(())
     }
-    fn replaces_own_login(&self, _agent: &AgentId) -> bool {
-        false
+    fn own_login(&self, _agent: &AgentId) -> Option<clauseo_agents::OwnLogin> {
+        None
     }
     fn signin_state(&self, _agent: &AgentId) -> Option<clauseo_agents::SigninState> {
         None

@@ -61,8 +61,8 @@ impl SetupAgents for Real {
     fn sign_in_switching(&self, _: &AgentId, _: Method) -> Result<(), SigninError> {
         Ok(())
     }
-    fn replaces_own_login(&self, _: &AgentId) -> bool {
-        false
+    fn own_login(&self, _: &AgentId) -> Option<clauseo_agents::OwnLogin> {
+        None
     }
     fn cancel_sign_in(&self, _: &AgentId) -> Result<(), SigninError> {
         Ok(())

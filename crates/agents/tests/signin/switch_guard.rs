@@ -5,6 +5,7 @@
 //! `use_different_account_switching` go ahead. The guard reads the files, so it holds at start-up
 //! too, while the state is still `None`.
 
+use clauseo_agents::testing::{remove_file, write_file};
 use clauseo_agents::{Method, SigninError, SigninState};
 
 use crate::codex_cli::{home, start};
@@ -65,4 +66,23 @@ fn with_no_login_file_nothing_is_refused() {
     // The fake's own marker is not Codex's login file: a second sign-in replaces nothing.
     assert!(!agents.replaces_own_login(&codex()));
     agents.sign_in(&codex(), Method::Browser).unwrap();
+}
+
+/// `own_login` is a stat of Clauseo's own login file, so a caller keeping the lawyer's yes can
+/// tell the login it was given for: the same while the file is untouched, another once a login
+/// replaced the file, and `None` once it is gone.
+#[test]
+fn own_login_tells_the_login_the_yes_was_for() {
+    let fx = Fixture::new("switch-guard-identity", "slow-save:0");
+    let (agents, _events) = signed_in_with_file(&fx);
+    let yes = agents.own_login(&codex()).expect("Clauseo's own login");
+    assert_eq!(agents.own_login(&codex()), Some(yes), "untouched");
+    let file = home(&fx).join(concat!("auth", ".json"));
+    // Another login saved over it (a dummy, never a credential): another size.
+    write_file(&file, br#"{"another": "login, a dummy, of another size"}"#).unwrap();
+    let now = agents.own_login(&codex()).expect("still an own login");
+    assert_ne!(now, yes, "replaced");
+    remove_file(&file).unwrap();
+    assert_eq!(agents.own_login(&codex()), None, "gone");
+    assert!(!agents.replaces_own_login(&codex()));
 }

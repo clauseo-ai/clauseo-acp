@@ -161,7 +161,7 @@ pub use snapshot::{
 };
 pub use state::{AgentsEvent, Failure, FailureKind, InstallState, Installed};
 pub use status::is_sign_in_again;
-pub use worker::Agents;
+pub use worker::{Agents, OwnLogin};
 
 /// The variable `agent`'s CLI reads an extra CA file (`network.ca_certs`) from:
 /// `NODE_EXTRA_CA_CERTS` for Claude, `CODEX_CA_CERTIFICATE` for Codex; `None` for an agent with
