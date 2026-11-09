@@ -1,8 +1,8 @@
 //! The relay between the agent and agent-browser, and the browser's lifecycle around it.
 //!
-//! The agent is the guard's stdio, or in listen mode (Unix) one client of the guard's socket at a
-//! time (`clients.rs`), whose disconnect stops the browser as the idle stop does and never ends
-//! the guard. What follows is said of stdio; listen mode differs only there.
+//! The agent is the guard's stdio, or in listen mode one client of the guard's socket (Unix) or
+//! pipe (Windows) at a time (`clients.rs`), whose disconnect stops the browser as the idle stop
+//! does and never ends the guard. What follows is said of stdio; listen mode differs only there.
 //!
 //! One thread reads the agent's lines, runs each through `filter.rs` and routes what passes
 //! (`pumps.rs`): to the running agent-browser; a tool call while the browser is stopped starts
@@ -41,7 +41,6 @@
 //! (`setsid`), and `reaper.rs`'s `kill_daemon` ends it afterwards; the reaper also learns
 //! agent-browser's pid, for a guard that is killed.
 
-#[cfg(unix)]
 mod clients;
 pub(crate) mod lines;
 mod oneshot;
@@ -159,17 +158,13 @@ pub(crate) enum Agent {
     /// stops the browser and the guard waits for the next.
     #[cfg(unix)]
     Listen(std::os::unix::net::UnixListener),
+    /// The clients of the listen pipe (Windows), as [`Agent::Listen`] is on Unix.
+    #[cfg(windows)]
+    Listen(crate::transport::windows::PipeListener),
 }
 
 /// Relays until the agent leaves (over stdio), agent-browser exits, Chrome dies twice, the
 /// browser cannot start or the guard's parent goes; then stops whatever runs.
-#[cfg_attr(
-    windows,
-    expect(
-        clippy::needless_pass_by_value,
-        reason = "Windows has only `Agent::Stdio`, which holds nothing; Unix moves the listener"
-    )
-)]
 pub(crate) fn run(shared: &Arc<Shared>, parent: &Parent, agent: Agent) -> Outcome {
     let (events, inbox) = mpsc::channel();
     {
@@ -185,7 +180,6 @@ pub(crate) fn run(shared: &Arc<Shared>, parent: &Parent, agent: Agent) -> Outcom
                 pumps::pump_agent(&mut io::stdin().lock(), &shared, &parent, &events);
             }));
         }
-        #[cfg(unix)]
         Agent::Listen(listener) => clients::serve(listener, shared, parent, events),
     }
     let end = wait_for_end(shared, &inbox);

@@ -1,7 +1,7 @@
-//! `clauseo-mcp`: the sidecar binary the agents start as an MCP server. Two modes:
-//! `browser-guard` and `connector`; on Unix two more: `browser-reaper`, which only the guard
-//! starts (`browser_guard/reaper.rs`), and `browser-bridge`, the agent's side of a guard the host
-//! runs outside the agent's jail (`browser_bridge.rs`).
+//! `clauseo-mcp`: the sidecar binary the agents start as an MCP server. Three modes:
+//! `browser-guard`, `connector` and `browser-bridge`, the agent's side of a guard the host runs
+//! outside the agent's jail (`browser_bridge.rs`); on Unix one more, `browser-reaper`, which only
+//! the guard starts (`browser_guard/reaper.rs`).
 //!
 //! # Owns
 //!
@@ -11,11 +11,12 @@
 //!   from scratch; relays stdio both ways; refuses tool calls whose arguments would undo
 //!   Clauseo's isolation; and leaves no Chrome or agent-browser daemon behind when it ends.
 //!   `docs/decisions/0029-browser.md` is the record.
-//! - The browser bridge ([`browser_bridge`], Unix only): `clauseo-mcp browser-bridge --socket
-//!   <path> --guard-pid <pid> --guard-pidversion <version>`, which relays each JSON-RPC line,
-//!   unchanged, between the agent's stdio and a guard started with `--listen <path>`, only if the
-//!   process on the socket is that guard (the identity it printed), and answers each request
-//!   itself while the guard cannot be reached.
+//! - The browser bridge ([`browser_bridge`]): `clauseo-mcp browser-bridge --socket <path>
+//!   --guard-pid <pid> --guard-pidversion <version>` on Unix, `--pipe <name> --server-sid <SID>`
+//!   on Windows, which relays each JSON-RPC line, unchanged, between the agent's stdio and a guard
+//!   started with `--listen <path>` (or `--listen-pipe <name> --client-sid <SID>`), only if the
+//!   peer is that guard (on Unix the identity it printed, on Windows the pipe's owner), and
+//!   answers each request itself while the guard cannot be reached.
 //! - The connector relay client ([`connector`]): `clauseo-mcp connector <name>`, the stdio MCP
 //!   server for a connector. It relays each JSON-RPC line, unchanged, over loopback TCP to the
 //!   host's per-launch relay, and answers "not reachable" itself when there is no relay. It reads
@@ -34,7 +35,9 @@
 //! - The command line: `clauseo-mcp browser-guard --agent-browser <file> --cwd <folder>
 //!   --cdp-port <port> -- <agent-browser args...>`, with `--daemon-port <port>` on Windows, and
 //!   on Unix optionally `--listen <socket>` first, which serves a Unix socket instead of stdio
-//!   and exits 1 if the path exists.
+//!   and exits 1 if the path exists, and on Windows optionally `--listen-pipe <name> --client-sid
+//!   <SID>` first, which serves a named pipe (`transport/windows.rs`) and exits 3
+//!   ([`browser_guard::EXIT_PIPE_TAKEN`]) if the name exists.
 //!   Exit 2 for a bad command line or a missing or invalid variable; 1 when a folder cannot be
 //!   made or Chrome or agent-browser cannot start, when Chrome does not listen on the claimed
 //!   port within 15 s, when Chrome exits or the guard's parent goes, when agent-browser was
@@ -61,11 +64,9 @@
 //! `browser_guard.rs`, then `browser_guard/filter.rs` (the rules), `env.rs`, `chrome.rs`,
 //! `relay.rs`.
 
-#[cfg(unix)]
 pub mod browser_bridge;
 pub mod browser_guard;
 pub mod connector;
-#[cfg(unix)]
 mod transport;
 mod write;
 

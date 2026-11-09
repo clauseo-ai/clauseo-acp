@@ -13,11 +13,11 @@ use crate::write;
 const MODE_USAGE: &str = if cfg!(unix) {
     "usage: clauseo-mcp <mode> ... (modes: browser-bridge, browser-guard, browser-reaper, connector)\n"
 } else {
-    "usage: clauseo-mcp <mode> ... (modes: browser-guard, connector)\n"
+    "usage: clauseo-mcp <mode> ... (modes: browser-bridge, browser-guard, connector)\n"
 };
 const GUARD_USAGE: &str = if cfg!(windows) {
-    "usage: clauseo-mcp browser-guard --agent-browser <file> --cwd <folder> --cdp-port <port> \
-     --daemon-port <port> -- <agent-browser args...>\n"
+    "usage: clauseo-mcp browser-guard [--listen-pipe <name> --client-sid <sid>] --agent-browser \
+     <file> --cwd <folder> --cdp-port <port> --daemon-port <port> -- <agent-browser args...>\n"
 } else {
     "usage: clauseo-mcp browser-guard [--listen <socket>] --agent-browser <file> --cwd <folder> \
      --cdp-port <port> -- <agent-browser args...>\n"

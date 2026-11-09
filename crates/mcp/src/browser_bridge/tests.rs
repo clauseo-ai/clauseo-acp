@@ -11,7 +11,7 @@ use std::thread::{self, JoinHandle};
 
 use serde_json::{Value, json};
 
-use super::{CONNECT_WAIT, Caps, Out, UNAVAILABLE, connect_within, parse, serve};
+use super::{CONNECT_WAIT, Caps, Out, Target, UNAVAILABLE, connect_within, parse, serve};
 use crate::transport::Peer;
 use crate::transport::fake::Fake;
 
@@ -315,32 +315,39 @@ fn a_peer_that_fails_the_check_is_no_guard() {
 fn the_guards_identity_is_required() {
     let args = |list: &[&str]| -> Vec<std::ffi::OsString> { list.iter().map(Into::into).collect() };
     let with = |pid: &str, version: &str| {
-        parse(&args(&[
-            "--socket",
-            "/tmp/g.sock",
-            "--guard-pid",
-            pid,
-            "--guard-pidversion",
-            version,
-        ]))
+        parse(
+            &args(&[
+                "--socket",
+                "/tmp/g.sock",
+                "--guard-pid",
+                pid,
+                "--guard-pidversion",
+                version,
+            ]),
+            false,
+        )
     };
     assert_eq!(
         with("4242", "7"),
-        Ok((
-            PathBuf::from("/tmp/g.sock"),
-            Peer::Process(crate::transport::Identity {
+        Ok(Target::Socket {
+            socket: PathBuf::from("/tmp/g.sock"),
+            guard: Peer::Process(crate::transport::Identity {
                 pid: 4242,
                 version: 7
             })
-        ))
+        })
     );
     assert!(with("4242", "0").is_ok(), "a version of 0");
     assert!(
-        parse(&args(&["--socket", "/tmp/g.sock", "--guard-pid", "4242"])).is_err(),
+        parse(
+            &args(&["--socket", "/tmp/g.sock", "--guard-pid", "4242"]),
+            false
+        )
+        .is_err(),
         "no version"
     );
     assert!(
-        parse(&args(&["--socket", "/tmp/g.sock"])).is_err(),
+        parse(&args(&["--socket", "/tmp/g.sock"]), false).is_err(),
         "no pid"
     );
     for bad in ["", "0", "1", "04242", "+4242", "-1", "42x", "4294967296"] {

@@ -37,13 +37,11 @@ impl Out {
     }
 
     /// From now on, lines go to `writer`, and only agent-browser's from generation `floor` on.
-    #[cfg(unix)]
     pub(crate) fn attach(&self, writer: Box<dyn Write + Send>, floor: u64) {
         *lock(&self.slot) = Slot { writer, floor };
     }
 
     /// From now on, lines go nowhere: no client is connected.
-    #[cfg(unix)]
     pub(crate) fn detach(&self) {
         *lock(&self.slot) = Slot {
             writer: Box::new(io::sink()),

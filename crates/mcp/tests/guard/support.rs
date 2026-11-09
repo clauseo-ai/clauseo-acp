@@ -425,7 +425,6 @@ impl Guard {
     }
 
     /// Reads stderr lines until one contains `needle`, and returns that line. Panics at EOF.
-    #[cfg(unix)]
     pub(crate) fn stderr_until(&mut self, needle: &str) -> String {
         loop {
             let mut line = String::new();

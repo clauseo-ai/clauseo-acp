@@ -1,6 +1,7 @@
-//! Unix only: listen mode's clients (`browser-guard --listen`), one at a time, each served as the
-//! agent's stdio is: its lines through the filter and [`pumps::pump_lines`], and every line to the
-//! agent written to it ([`Out::attach`](super::lines::Out::attach)).
+//! Listen mode's clients (`browser-guard --listen` on Unix, `--listen-pipe` on Windows), one at a
+//! time, each served as the agent's stdio is: its lines through the filter and
+//! [`pumps::pump_lines`], and every line to the agent written to it
+//! ([`Out::attach`](super::lines::Out::attach)).
 //!
 //! It sees the transport only through `crate::transport`'s [`Listener`] and [`Connection`]. A
 //! thread accepts each connection. One whose peer runs as another user ([`Connection::peer_is`])
@@ -195,5 +196,8 @@ fn client(
     true
 }
 
+// Against socket pairs (`transport/fake.rs`); the pipe's own tests are in
+// `transport/windows/tests.rs` and `tests/guard/listen_pipe.rs`.
 #[cfg(test)]
+#[cfg(unix)]
 mod tests;

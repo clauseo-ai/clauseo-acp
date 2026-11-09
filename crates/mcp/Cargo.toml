@@ -51,8 +51,17 @@ libc = { workspace = true }
 # and a process handle wait for the guard's parent (src/browser_guard/parent/windows.rs). The
 # workspace line's features, plus `Win32_Storage_FileSystem` for `MoveFileExW`, the download
 # move that never replaces a file (src/write/windows.rs), and `CreateFileW`, a child's `NUL`.
+# For the guard's `--listen-pipe` and the bridge's `--pipe` (src/transport/windows.rs and its
+# folder): `Win32_System_Pipes` for the named-pipe calls (create, connect, impersonate the client),
+# `Win32_System_IO` for overlapped reads and writes, and `Win32_Security_Authorization` for the
+# SID and SDDL conversions and `GetSecurityInfo` (the pipe's owner and, in the tests, its label).
 [target.'cfg(windows)'.dependencies]
-windows = { workspace = true, features = ["Win32_Storage_FileSystem"] }
+windows = { workspace = true, features = [
+  "Win32_Storage_FileSystem",
+  "Win32_System_Pipes",
+  "Win32_System_IO",
+  "Win32_Security_Authorization",
+] }
 
 # Itself with test-support, so the guard the tests run reads the test's idle stop.
 [dev-dependencies]

@@ -1,10 +1,11 @@
-//! The `browser-bridge` mode (Unix only): `clauseo-mcp browser-bridge --socket <path> --guard-pid
-//! <pid> --guard-pidversion <version>`, the MCP server the agent's harness starts inside the
-//! agent's jail when the browser guard runs outside it, as `clauseo-mcp browser-guard --listen
-//! <path>` (`transport/unix.rs`). The host starts the guard before the agent, reads the identity
-//! the guard prints (`listening as <pid>/<version>`), checks the pid is the child it started, and
-//! passes both numbers here (`transport.rs`'s `Identity`: the pidversion on macOS, the start
-//! time on Linux).
+//! The `browser-bridge` mode, the MCP server the agent's harness starts inside the agent's jail
+//! when the browser guard runs outside it. On Unix `clauseo-mcp browser-bridge --socket <path>
+//! --guard-pid <pid> --guard-pidversion <version>`, for a guard started as `clauseo-mcp
+//! browser-guard --listen <path>` (`transport/unix.rs`): the host starts the guard before the
+//! agent, reads the identity the guard prints (`listening as <pid>/<version>`), checks the pid is
+//! the child it started, and passes both numbers here (`transport.rs`'s `Identity`: the
+//! pidversion on macOS, the start time on Linux). On Windows `--pipe <name> --server-sid <SID>`,
+//! for a guard started as `--listen-pipe <name> --client-sid <SID>` (`transport/windows.rs`).
 //!
 //! It relays lines, unchanged: each stdin line to the guard's socket, each socket line to stdout,
 //! with the guard's own caps (`browser_guard::lines`). It parses nothing but a line's `id`, for
@@ -22,6 +23,8 @@
 //! The boundary on macOS is the guard's and the agent's Seatbelt profiles, the socket folder's
 //! check (`transport/unix.rs`) and this check; checking the peer's code identity (its audit
 //! token) is later hardening.
+//! On Windows the check is the pipe's owner: it must be the `--server-sid` account (the guard's),
+//! so a pipe the agent's own account made first under the name is refused the same way.
 //!
 //! When it cannot reach the guard (no socket, refused, or the guard gone mid-session) it answers
 //! each request with [`UNAVAILABLE`] and keeps reading stdin to its end, so the agent's client
@@ -33,21 +36,32 @@
 //! A stdin line over the guard's cap gets the parse error the guard would give, and is not sent.
 //! A socket line over the cap, or one the socket ends in the middle of, ends the link.
 //!
-//! It sees the transport only through `crate::transport`'s [`Connection`]; [`connect_within`]
-//! is the one Unix-socket call. It touches no file but the socket it connects to, and writes no
-//! path anywhere (on Linux, a development platform, it reads the peer's `/proc/<pid>/stat`). Exit
-//! 0 when stdin ends; 1 when stdout fails; 2 for a bad command line, `--guard-pid` or
-//! `--guard-pidversion` missing included.
+//! It sees the transport only through `crate::transport`'s [`Connection`]; `connect_within`
+//! is the one Unix-socket call, and `transport::windows::connect_within` the pipe's. A pipe has
+//! no half-close, so on Windows the guard learns stdin has ended only when the bridge closes,
+//! after the grace below. It touches no file but the socket it connects to, and writes no path,
+//! pipe name or SID anywhere (on Linux, a development platform, it reads the peer's
+//! `/proc/<pid>/stat`). Exit 0 when stdin ends; 1 when stdout fails; 2 for a bad command line,
+//! on Unix `--guard-pid` or `--guard-pidversion` missing included.
 
 mod link;
 #[cfg(test)]
+mod parse_tests;
+// The bridge against a stand-in guard on a Unix socket; the pipe's own tests are in
+// `transport/windows/tests.rs`.
+#[cfg(test)]
+#[cfg(unix)]
 mod tests;
 
 use std::ffi::OsString;
 use std::io::{self, BufRead, Write};
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError, mpsc};
+#[cfg(unix)]
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex, PoisonError};
+#[cfg(unix)]
 use std::thread;
 use std::time::Duration;
 
@@ -58,11 +72,15 @@ use crate::browser_guard::lines::{
     AGENT_MAX_LINE_BYTES, CHILD_MAX_LINE_BYTES, Line, Overflow, error_reply, read_line,
 };
 use crate::connector::head;
-use crate::transport::{Connection, Identity, Peer};
+use crate::transport::{Connection, Identity, Peer, checks};
 use link::{Link, Sent};
 
-/// The mode's command line.
-pub const USAGE: &str = "usage: clauseo-mcp browser-bridge --socket <path> --guard-pid <pid> --guard-pidversion <version>";
+/// The mode's command line on this OS.
+pub const USAGE: &str = if cfg!(windows) {
+    "usage: clauseo-mcp browser-bridge --pipe <name> --server-sid <sid>"
+} else {
+    "usage: clauseo-mcp browser-bridge --socket <path> --guard-pid <pid> --guard-pidversion <version>"
+};
 /// The error each request gets when the guard cannot be reached.
 pub(crate) const UNAVAILABLE: &str = "The browser isn't available right now.";
 /// How long one try to connect may take.
@@ -95,45 +113,110 @@ impl Caps {
 
 /// Runs the mode with the arguments after `browser-bridge`, on the process's stdin and stdout.
 pub fn run(args: &[OsString]) -> Result<i32, Failure> {
-    let (socket, guard) = parse(args).map_err(|reason| Failure {
-        code: EXIT_USAGE,
-        message: format!("clauseo-mcp browser-bridge: {reason}\n{USAGE}"),
-    })?;
+    let target = parse(args, cfg!(windows)).map_err(usage)?;
     let out: Out = Arc::new(Mutex::new(io::stdout()));
-    let connect = || connect_within(&socket, CONNECT_WAIT);
-    serve(io::stdin().lock(), &out, &connect, guard, Caps::GUARD).map_err(|error| Failure {
+    let stdin = io::stdin().lock();
+    let served = match target {
+        #[cfg(unix)]
+        Target::Socket { socket, guard } => {
+            let connect = || connect_within(&socket, CONNECT_WAIT);
+            serve(stdin, &out, &connect, guard, Caps::GUARD)
+        }
+        #[cfg(windows)]
+        Target::Pipe { name, server_sid } => {
+            use crate::transport::windows::{Sid, connect_within};
+            let server = Sid::parse(&server_sid).ok_or_else(|| usage(SERVER_SID_BAD))?;
+            let connect = || connect_within(&name, &server, CONNECT_WAIT);
+            // The pipe's own owner check (`server`) is the peer check; the peer is not read.
+            serve(stdin, &out, &connect, Peer::SameUser, Caps::GUARD)
+        }
+        // `parse` gives only this OS's target.
+        #[cfg(unix)]
+        Target::Pipe { .. } => return Err(usage(PIPE_WINDOWS_ONLY)),
+        #[cfg(windows)]
+        Target::Socket { .. } => return Err(usage(SOCKET_UNIX_ONLY)),
+    };
+    served.map_err(|error| Failure {
         code: EXIT_FAILED,
         message: format!("clauseo-mcp browser-bridge: stdio failed: {error}"),
     })?;
     Ok(0)
 }
 
-/// Exactly `--socket <path> --guard-pid <pid> --guard-pidversion <version>`: the path absolute,
-/// the numbers plain decimal, the pid over 1 (no guard is pid 0 or init). Returns the path and the
-/// guard's peer. The reasons name no path.
-fn parse(args: &[OsString]) -> Result<(PathBuf, Peer), &'static str> {
-    const EXPECTED: &str =
-        "expected --socket <path> --guard-pid <pid> --guard-pidversion <version>";
-    let [flag_socket, socket, flag_pid, pid, flag_version, version] = args else {
-        return Err(EXPECTED);
-    };
-    if flag_socket != "--socket"
-        || flag_pid != "--guard-pid"
-        || flag_version != "--guard-pidversion"
-    {
-        return Err(EXPECTED);
+/// A bad command line: exit 2, the reason and the usage.
+fn usage(reason: &str) -> Failure {
+    Failure {
+        code: EXIT_USAGE,
+        message: format!("clauseo-mcp browser-bridge: {reason}\n{USAGE}"),
     }
-    let socket = Path::new(socket);
-    if !socket.is_absolute() {
-        return Err("--socket must be an absolute path");
+}
+
+/// Where the guard is.
+#[derive(Debug, PartialEq, Eq)]
+enum Target {
+    /// Unix: `--socket <path> --guard-pid <pid> --guard-pidversion <version>`.
+    Socket { socket: PathBuf, guard: Peer },
+    /// Windows: `--pipe <name> --server-sid <SID>`.
+    Pipe { name: String, server_sid: String },
+}
+
+/// The refusals of the command line. None names a path, a pipe or a SID.
+const EXPECTED_SOCKET: &str =
+    "expected --socket <path> --guard-pid <pid> --guard-pidversion <version>";
+const EXPECTED_PIPE: &str = "expected --pipe <name> --server-sid <sid>";
+const SOCKET_UNIX_ONLY: &str = "--socket is for macOS and Linux only";
+const PIPE_WINDOWS_ONLY: &str = "--pipe and --server-sid are for Windows only";
+const PIPE_NAME_BAD: &str = "--pipe must be 1 to 200 letters, digits and dashes";
+const SERVER_SID_BAD: &str = "--server-sid must be a SID string, S-1-...";
+
+/// On Unix exactly `--socket <path> --guard-pid <pid> --guard-pidversion <version>`: the path
+/// absolute, the numbers plain decimal, the pid over 1 (no guard is pid 0 or init). On Windows
+/// (`windows`) exactly `--pipe <name> --server-sid <SID>`, the name letters, digits and dashes.
+/// Each OS refuses the other's options.
+fn parse(args: &[OsString], windows: bool) -> Result<Target, &'static str> {
+    let pipe_flag = |flag: &OsString| flag == "--pipe" || flag == "--server-sid";
+    match (windows, args) {
+        (false, [flag_socket, socket, flag_pid, pid, flag_version, version])
+            if flag_socket == "--socket"
+                && flag_pid == "--guard-pid"
+                && flag_version == "--guard-pidversion" =>
+        {
+            let socket = Path::new(socket);
+            if !socket.is_absolute() {
+                return Err("--socket must be an absolute path");
+            }
+            let pid = decimal(pid)
+                .and_then(|pid| u32::try_from(pid).ok())
+                .filter(|pid| *pid > 1)
+                .ok_or("--guard-pid must be the guard's process id, in plain decimal")?;
+            let version = decimal(version).ok_or(
+                "--guard-pidversion must be the guard's process version, in plain decimal",
+            )?;
+            let guard = Peer::Process(Identity { pid, version });
+            Ok(Target::Socket {
+                socket: socket.to_owned(),
+                guard,
+            })
+        }
+        (false, [flag, ..]) if pipe_flag(flag) => Err(PIPE_WINDOWS_ONLY),
+        (false, _) => Err(EXPECTED_SOCKET),
+        (true, [flag, name, sid_flag, sid]) if flag == "--pipe" && sid_flag == "--server-sid" => {
+            let name = name
+                .to_str()
+                .filter(|name| checks::pipe_name_ok(name))
+                .ok_or(PIPE_NAME_BAD)?;
+            let sid = sid
+                .to_str()
+                .filter(|sid| checks::sid_text_ok(sid))
+                .ok_or(SERVER_SID_BAD)?;
+            Ok(Target::Pipe {
+                name: name.to_owned(),
+                server_sid: sid.to_owned(),
+            })
+        }
+        (true, [flag, ..]) if flag == "--socket" => Err(SOCKET_UNIX_ONLY),
+        (true, _) => Err(EXPECTED_PIPE),
     }
-    let pid = decimal(pid)
-        .and_then(|pid| u32::try_from(pid).ok())
-        .filter(|pid| *pid > 1)
-        .ok_or("--guard-pid must be the guard's process id, in plain decimal")?;
-    let version = decimal(version)
-        .ok_or("--guard-pidversion must be the guard's process version, in plain decimal")?;
-    Ok((socket.to_owned(), Peer::Process(Identity { pid, version })))
 }
 
 /// `value` as a number in plain decimal: digits only, no leading zero but for `0` itself.
@@ -147,6 +230,7 @@ fn decimal(value: &OsString) -> Option<u64> {
 
 /// Connects to the socket at `path`, giving up after `within`. A connect still running then is
 /// left to finish on its own thread, which closes what it gets.
+#[cfg(unix)]
 pub(crate) fn connect_within(path: &Path, within: Duration) -> io::Result<UnixStream> {
     let (done, result) = mpsc::channel();
     let path = path.to_owned();
