@@ -393,8 +393,8 @@ impl Guard {
         rest
     }
 
-    /// The process id, for the Unix tests that signal it.
-    #[cfg(unix)]
+    /// The process id, for the Unix tests that signal it and the Windows test of the identity
+    /// the guard prints.
     pub(crate) fn pid(&self) -> u32 {
         self.child.id()
     }

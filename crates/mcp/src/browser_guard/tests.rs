@@ -93,11 +93,11 @@ fn listen_comes_first_on_unix_only() {
             &with(&["--listen-pipe", "p", "--client-sid", "S-1-5-18"]),
             Os::Unix
         ),
-        Err("--listen-pipe and --client-sid are for Windows only")
+        Err("--listen-pipe, --client-sid and --client-package-sid are for Windows only")
     );
     assert_eq!(
         parse(&with(&["--client-sid", "S-1-5-18"]), Os::Unix),
-        Err("--listen-pipe and --client-sid are for Windows only")
+        Err("--listen-pipe, --client-sid and --client-package-sid are for Windows only")
     );
 }
 
@@ -130,6 +130,7 @@ fn listen_pipe_comes_first_on_windows_only() {
         Some(Listen::Pipe {
             name: "clauseo-ab-0f3a".to_owned(),
             client_sid: sid.to_owned(),
+            package_sid: None,
         })
     );
     assert_eq!(parsed.daemon_port, Some(61_102));
@@ -174,6 +175,91 @@ fn listen_pipe_comes_first_on_windows_only() {
     assert!(
         parse(&late, Os::Windows).is_err(),
         "--listen-pipe after the ports"
+    );
+}
+
+/// `--client-package-sid <SID>` may follow `--client-sid` on Windows; it must be an
+/// `AppContainer` package SID (`S-1-15-2-` and seven numbers), never ALL APPLICATION PACKAGES.
+#[test]
+fn the_client_package_sid_is_optional_and_checked() {
+    let (program, cwd) = program_and_cwd();
+    let rest = [
+        "--agent-browser",
+        program.as_str(),
+        "--cwd",
+        cwd.as_str(),
+        "--cdp-port",
+        "61101",
+        "--daemon-port",
+        "61102",
+        "--",
+        "mcp",
+    ];
+    let with = |first: &[&str]| args(&[first, &rest[..]].concat());
+    let sid = "S-1-5-21-3623811015-3361044348-30300820-1013";
+    let package = "S-1-15-2-2434737943-167758768-3180539153-984336765-1107280622-3591121930-26772";
+    let parsed = parse(
+        &with(&[
+            "--listen-pipe",
+            "p",
+            "--client-sid",
+            sid,
+            "--client-package-sid",
+            package,
+        ]),
+        Os::Windows,
+    )
+    .unwrap();
+    assert_eq!(
+        parsed.listen,
+        Some(Listen::Pipe {
+            name: "p".to_owned(),
+            client_sid: sid.to_owned(),
+            package_sid: Some(package.to_owned()),
+        })
+    );
+    assert_eq!(parsed.child_args, args(&["mcp"]));
+    for bad in [
+        "S-1-5-18",
+        "S-1-15-2-1",
+        "S-1-15-3-1024-1-2-3-4-5-6-7-8",
+        "WD",
+        "",
+    ] {
+        assert_eq!(
+            parse(
+                &with(&[
+                    "--listen-pipe",
+                    "p",
+                    "--client-sid",
+                    sid,
+                    "--client-package-sid",
+                    bad
+                ]),
+                Os::Windows
+            ),
+            Err(
+                "--client-package-sid must be an AppContainer package SID, S-1-15-2- and seven numbers"
+            ),
+            "{bad:?}"
+        );
+    }
+    assert_eq!(
+        parse(
+            &with(&[
+                "--listen-pipe",
+                "p",
+                "--client-sid",
+                sid,
+                "--client-package-sid"
+            ]),
+            Os::Windows
+        )
+        .map(|_| ()),
+        Err(
+            "--client-package-sid must be an AppContainer package SID, S-1-15-2- and seven numbers"
+        ),
+        "a package flag with no SID takes the next argument as its SID"
     );
 }
 

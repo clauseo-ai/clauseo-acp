@@ -1,11 +1,14 @@
 //! Windows only: the SIDs the pipe's checks compare, and the two checks themselves.
 //!
-//! [`Sid`] is a SID copied into memory this process owns, so it can move between threads and
-//! needs no freeing. [`client_is`] is the guard's peer check: it impersonates the pipe's client
-//! (at identification level, all the bridge allows), opens that thread token, and reverts at
-//! once; the [`Revert`] guard reverts on every path, and a thread that cannot revert ends the
-//! process rather than run another line as someone else. [`owner_of`] is the bridge's: the
-//! pipe's owner SID. [`Descriptor`] is the pipe's security descriptor, built from SDDL.
+//! [`Sid`] is a SID copied into memory this process owns, so it can move between threads and needs
+//! no freeing. [`client_is`] is the guard's peer check: it impersonates the pipe's client (at
+//! identification level, all the bridge allows), opens that thread token, and reverts at once; the
+//! [`Revert`] guard reverts on every path, and a thread that cannot revert ends the process rather
+//! than run another line as someone else. With a package SID it also requires an `AppContainer`
+//! token of that package with no capability (`TokenIsAppContainer`, `TokenAppContainerSid`,
+//! `TokenCapabilities`); an anonymous client's token cannot be opened at all, so it fails.
+//! [`owner_of`] is the bridge's: the pipe's owner SID. [`Descriptor`] is the pipe's security
+//! descriptor, built from SDDL.
 #![expect(
     unsafe_code,
     reason = "FFI to the Win32 SID, token and security-descriptor APIs, for the named pipe's checks"
@@ -21,7 +24,9 @@ use windows::Win32::Security::Authorization::{
 };
 use windows::Win32::Security::{
     CopySid, EqualSid, GetLengthSid, GetTokenInformation, IsValidSid, OWNER_SECURITY_INFORMATION,
-    PSECURITY_DESCRIPTOR, PSID, RevertToSelf, TOKEN_QUERY, TOKEN_USER, TokenUser,
+    PSECURITY_DESCRIPTOR, PSID, RevertToSelf, TOKEN_APPCONTAINER_INFORMATION, TOKEN_GROUPS,
+    TOKEN_INFORMATION_CLASS, TOKEN_QUERY, TOKEN_USER, TokenAppContainerSid, TokenCapabilities,
+    TokenIsAppContainer, TokenUser,
 };
 use windows::Win32::System::Pipes::ImpersonateNamedPipeClient;
 use windows::Win32::System::Threading::{
@@ -76,7 +81,7 @@ impl Sid {
     }
 
     /// Whether the SID at `other` (valid for the call) is this one.
-    fn equals(&self, other: PSID) -> bool {
+    pub(super) fn equals(&self, other: PSID) -> bool {
         // SAFETY: both point to valid SIDs that outlive the call; EqualSid only reads them.
         unsafe { EqualSid(self.as_psid(), other) }.is_ok()
     }
@@ -112,33 +117,61 @@ pub(crate) fn current_user() -> io::Result<Sid> {
     token_user(&token).ok_or_else(|| io::Error::other("cannot read this process's user"))
 }
 
-/// The user SID of the token `token`, opened with `TOKEN_QUERY`.
-fn token_user(token: &OwnedHandle) -> Option<Sid> {
+/// One class of information about the token `token` (opened with `TOKEN_QUERY`), in a buffer
+/// of u64 words, aligned for any of the structs it may start with (they hold pointers).
+fn token_info(token: &OwnedHandle, class: TOKEN_INFORMATION_CLASS) -> Option<Vec<u64>> {
     let token = HANDLE(token.as_raw_handle());
     let mut needed = 0u32;
     // SAFETY: a size query: no buffer, and `needed` is a live u32. It fails with the size.
-    let sized = unsafe { GetTokenInformation(token, TokenUser, None, 0, &raw mut needed) };
+    let sized = unsafe { GetTokenInformation(token, class, None, 0, &raw mut needed) };
     if sized.is_ok() || needed == 0 {
         return None;
     }
-    // u64 words: TOKEN_USER holds a pointer, so the buffer is aligned for one.
     let mut buffer = vec![0u64; usize::try_from(needed).ok()?.div_ceil(8)];
-    // SAFETY: `buffer` holds at least `needed` bytes, aligned for TOKEN_USER, and outlives the
-    // call; `needed` is a live u32.
+    // SAFETY: `buffer` holds at least `needed` bytes, aligned for the class's struct, and
+    // outlives the call; `needed` is a live u32.
     unsafe {
         GetTokenInformation(
             token,
-            TokenUser,
+            class,
             Some(buffer.as_mut_ptr().cast()),
             needed,
             &raw mut needed,
         )
     }
     .ok()?;
-    // SAFETY: on success the buffer starts with a TOKEN_USER whose SID points into the buffer,
-    // which lives until the copy below is made.
+    Some(buffer)
+}
+
+/// The user SID of the token `token`, opened with `TOKEN_QUERY`.
+fn token_user(token: &OwnedHandle) -> Option<Sid> {
+    let buffer = token_info(token, TokenUser)?;
+    // SAFETY: the buffer starts with a TOKEN_USER whose SID points into the buffer, which lives
+    // until the copy is made.
     let user = unsafe { &*buffer.as_ptr().cast::<TOKEN_USER>() };
     Sid::copy_from(user.User.Sid)
+}
+
+/// Whether the token `token` is an `AppContainer` (`LowBox`) token of the package `package` with no
+/// capability at all: `TokenIsAppContainer` is 1, `TokenAppContainerSid` is `package`, and
+/// `TokenCapabilities` has no entry. `false` when any of them cannot be read.
+fn is_package_without_capabilities(token: &OwnedHandle, package: &Sid) -> bool {
+    let contained = token_info(token, TokenIsAppContainer)
+        .and_then(|buffer| buffer.first().copied())
+        // The answer is a DWORD, the low 4 bytes of the first word (little-endian).
+        .is_some_and(|word| word & 0xFFFF_FFFF == 1);
+    let same_package = token_info(token, TokenAppContainerSid).is_some_and(|buffer| {
+        // SAFETY: the buffer starts with a TOKEN_APPCONTAINER_INFORMATION whose SID, when not
+        // null, points into the buffer, alive for the comparison.
+        let info = unsafe { &*buffer.as_ptr().cast::<TOKEN_APPCONTAINER_INFORMATION>() };
+        !info.TokenAppContainer.0.is_null() && package.equals(info.TokenAppContainer)
+    });
+    let no_capabilities = token_info(token, TokenCapabilities).is_some_and(|buffer| {
+        // SAFETY: the buffer starts with a TOKEN_GROUPS; only its count is read.
+        let groups = unsafe { &*buffer.as_ptr().cast::<TOKEN_GROUPS>() };
+        groups.GroupCount == 0
+    });
+    contained && same_package && no_capabilities
 }
 
 /// Reverts the calling thread to the process's own identity when dropped.
@@ -156,9 +189,10 @@ impl Drop for Revert {
 }
 
 /// The guard's peer check: whether the client connected on the server end `pipe` runs as
-/// `expected`. Impersonates the client, opens the thread's token, reverts (always, through
-/// [`Revert`]), then compares the token's user. `false` on any failure.
-pub(crate) fn client_is(pipe: &OwnedHandle, expected: &Sid) -> bool {
+/// `expected` and, when `package` is given, in that `AppContainer` package with no capability
+/// ([`is_package_without_capabilities`]). Impersonates the client, opens the thread's token,
+/// reverts (always, through [`Revert`]), then reads the token. `false` on any failure.
+pub(crate) fn client_is(pipe: &OwnedHandle, expected: &Sid, package: Option<&Sid>) -> bool {
     // SAFETY: `pipe` is the open server end of a connected pipe, which the caller holds.
     if unsafe { ImpersonateNamedPipeClient(HANDLE(pipe.as_raw_handle())) }.is_err() {
         return false;
@@ -180,6 +214,7 @@ pub(crate) fn client_is(pipe: &OwnedHandle, expected: &Sid) -> bool {
     // SAFETY: `raw` is the token handle just opened, which nothing else owns.
     let token = unsafe { OwnedHandle::from_raw_handle(raw.0) };
     token_user(&token).is_some_and(|user| user.same_as(expected))
+        && package.is_none_or(|package| is_package_without_capabilities(&token, package))
 }
 
 /// The owner SID of the kernel object `handle` (opened with `READ_CONTROL`), or `None`.

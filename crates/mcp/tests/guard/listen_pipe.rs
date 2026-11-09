@@ -2,6 +2,7 @@
 //! stubs, the twin of `listen.rs`'s cycle: a client connects, its tool call starts the stub
 //! Chrome, its disconnect stops the browser (the profile stays) and the guard stays up for the
 //! next client, whose calls start it again; a second client while one is connected is refused;
+//! a connection that sends nothing loses its place; the guard prints its pid and creation time;
 //! and a pipe name that exists exits 3. The test's own user is the client SID. Waits poll as
 //! `lifecycle.rs`'s do, or read the guard's stderr.
 
@@ -23,7 +24,7 @@ use crate::support::{
 const LEFT: &str = "the client disconnected; stopped Chrome and agent-browser";
 
 /// A pipe name unique to the test and this process.
-fn pipe_name(test: &str) -> String {
+pub(crate) fn pipe_name(test: &str) -> String {
     format!("clauseo-test-{test}-{}", std::process::id())
 }
 
@@ -32,7 +33,7 @@ fn pipe_path(name: &str) -> PathBuf {
 }
 
 /// The test's own user SID, from `whoami /user`: the one word of its table that is a SID.
-fn own_sid() -> String {
+pub(crate) fn own_sid() -> String {
     let mut command = Command::new("whoami");
     command.arg("/user");
     let output = run(command);
@@ -44,7 +45,7 @@ fn own_sid() -> String {
         .to_owned()
 }
 
-fn listen_command(scratch: &Scratch, name: &str) -> Command {
+pub(crate) fn listen_command(scratch: &Scratch, name: &str) -> Command {
     let mut args = guard_args(scratch, &example("daemon_stub"), &no_args());
     args.splice(
         1..1,
@@ -182,4 +183,39 @@ fn a_pipe_name_that_exists_exits_3_and_names_nothing() {
     );
     assert!(!stderr.contains(&name), "the name in {stderr}");
     assert!(!stderr.contains(&own_sid()), "the SID in {stderr}");
+}
+
+/// A connection that sends nothing is closed once the first-line wait (shortened here) is over,
+/// so it cannot keep the one client's place: the next client is served. The pipe's read timeout
+/// is what bounds that wait.
+#[test]
+fn a_connection_that_sends_nothing_loses_its_place() {
+    let scratch = Scratch::new("pipe_silent");
+    let name = pipe_name("silent");
+    let mut command = listen_command(&scratch, &name);
+    command.env("CLAUSEO_TEST_GUARD_FIRST_LINE_MS", "300");
+    let mut guard = Guard::start(command);
+    let mut silent = Client::connect(&name);
+    assert!(silent.next().is_none(), "the silent connection stayed open");
+    guard.stderr_until("closed a client that sent no whole line in time");
+    guard.stderr_until("the client disconnected");
+    let mut client = Client::connect(&name);
+    client.request(0, "initialize");
+    client.request(1, "tools/list");
+    drop(guard);
+}
+
+/// The guard prints its identity for the host, `<pid>/<creation time>`, as on Unix.
+#[test]
+fn the_guard_prints_its_pid_and_creation_time() {
+    let scratch = Scratch::new("pipe_identity");
+    let name = pipe_name("identity");
+    let mut guard = Guard::start(listen_command(&scratch, &name));
+    let line = guard.stderr_until("listening as");
+    let identity = line.trim().rsplit(' ').next().unwrap();
+    let (pid, version) = identity.split_once('/').unwrap();
+    assert_eq!(pid.parse::<u32>().unwrap(), guard.pid());
+    assert!(version.parse::<u64>().unwrap() > 0, "{line}");
+    assert!(!line.contains(&name), "the pipe name in {line}");
+    drop(guard);
 }

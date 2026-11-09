@@ -2,7 +2,8 @@
 //! are the same account here, which the checks allow when the SIDs say so): a round trip with a
 //! read and a write in flight at once, the client SID check, a name someone holds already, the
 //! bridge's owner check, the pipe's flags, its DACL and its Low label, a shutdown that wakes a
-//! blocked read, and read and write timeouts.
+//! blocked read, and read and write timeouts. The package SID, the anonymous client and the
+//! process identity are in `access_tests.rs`.
 #![expect(
     unsafe_code,
     reason = "FFI to read the pipe's flags and descriptor back, and to squat a name"
@@ -32,7 +33,7 @@ use super::{CLIENT_RIGHTS, MAX_INSTANCES, MakeError, Pipe, PipeListener, connect
 use crate::transport::{Connection, Listener, Peer};
 
 /// SYSTEM: a SID that is never the CI user.
-const SYSTEM: &str = "S-1-5-18";
+pub(super) const SYSTEM: &str = "S-1-5-18";
 /// The Low mandatory level.
 const LOW: &str = "S-1-16-4096";
 /// `SYSTEM_MANDATORY_LABEL_ACE_TYPE` and `SYSTEM_MANDATORY_LABEL_NO_WRITE_UP`.
@@ -40,19 +41,19 @@ const LABEL_ACE: u8 = 0x11;
 const NO_WRITE_UP: u32 = 0x1;
 /// `ACCESS_ALLOWED_ACE_TYPE`, `FILE_ALL_ACCESS` (what `GA` maps to on a file object) and
 /// `FILE_CREATE_PIPE_INSTANCE`.
-const ALLOWED_ACE: u8 = 0x0;
-const FILE_ALL_ACCESS: u32 = 0x001F_01FF;
+pub(super) const ALLOWED_ACE: u8 = 0x0;
+pub(super) const FILE_ALL_ACCESS: u32 = 0x001F_01FF;
 const CREATE_PIPE_INSTANCE: u32 = 0x4;
-const WAIT: Duration = Duration::from_secs(3);
+pub(super) const WAIT: Duration = Duration::from_secs(3);
 
 /// A pipe name no other test or run uses.
-fn name(test: &str) -> String {
+pub(super) fn name(test: &str) -> String {
     static NEXT: AtomicU32 = AtomicU32::new(0);
     let n = NEXT.fetch_add(1, Ordering::SeqCst);
     format!("clauseo-test-{test}-{}-{n}", std::process::id())
 }
 
-fn own() -> String {
+pub(super) fn own() -> String {
     sid::current_user().unwrap().text().unwrap()
 }
 
@@ -65,7 +66,7 @@ fn read_line(reader: &mut impl BufRead) -> String {
 #[test]
 fn the_right_user_connects_and_lines_go_both_ways_while_a_read_waits() {
     let name = name("round");
-    let listener = PipeListener::make(&name, &own()).unwrap();
+    let listener = PipeListener::make(&name, &own(), None).unwrap();
     let guard = thread::spawn(move || {
         let pipe = listener.accept().unwrap();
         assert!(
@@ -99,7 +100,7 @@ fn the_right_user_connects_and_lines_go_both_ways_while_a_read_waits() {
 fn a_client_of_another_user_fails_the_check_and_is_disconnected() {
     let name = name("other");
     // The CI user can open it as the pipe's owner; the check wants SYSTEM.
-    let listener = PipeListener::make(&name, SYSTEM).unwrap();
+    let listener = PipeListener::make(&name, SYSTEM, None).unwrap();
     let guard = thread::spawn(move || {
         let pipe = listener.accept().unwrap();
         let checked = pipe.peer_is(Peer::SameUser);
@@ -141,20 +142,20 @@ fn a_name_that_exists_is_taken() {
     // SAFETY: the handle just created, owned once.
     let squatter = unsafe { OwnedHandle::from_raw_handle(raw.0) };
     assert!(matches!(
-        PipeListener::make(&name, &own()),
+        PipeListener::make(&name, &own(), None),
         Err(MakeError::Taken)
     ));
     drop(squatter);
     // A guard's own pipe is taken too, for the next guard.
     let name = self::name("again");
-    let first = PipeListener::make(&name, &own()).unwrap();
+    let first = PipeListener::make(&name, &own(), None).unwrap();
     assert!(matches!(
-        PipeListener::make(&name, &own()),
+        PipeListener::make(&name, &own(), None),
         Err(MakeError::Taken)
     ));
     drop(first);
     assert!(matches!(
-        PipeListener::make("a", "S-1-5-18-not"),
+        PipeListener::make("a", "S-1-5-18-not", None),
         Err(MakeError::BadSid)
     ));
 }
@@ -162,7 +163,7 @@ fn a_name_that_exists_is_taken() {
 #[test]
 fn the_bridge_refuses_a_pipe_another_user_owns() {
     let name = name("owner");
-    let listener = PipeListener::make(&name, &own()).unwrap();
+    let listener = PipeListener::make(&name, &own(), None).unwrap();
     // The bridge's peer check (`browser_bridge::serve` drops a connection that fails it).
     let other = connect_within(&name, &Sid::parse(SYSTEM).unwrap(), WAIT).unwrap();
     assert!(
@@ -185,7 +186,7 @@ fn the_bridge_refuses_a_pipe_another_user_owns() {
 #[test]
 fn the_pipe_is_a_byte_pipe_with_few_instances() {
     let name = name("flags");
-    let listener = PipeListener::make(&name, &own()).unwrap();
+    let listener = PipeListener::make(&name, &own(), None).unwrap();
     let waiting = listener.lock();
     let server = waiting.as_ref().unwrap();
     let (mut flags, mut instances) = (NAMED_PIPE_MODE(0), 0u32);
@@ -207,14 +208,14 @@ fn the_pipe_is_a_byte_pipe_with_few_instances() {
 
 /// One ACE: its type, mask and SID.
 #[derive(Debug, PartialEq, Eq)]
-struct Ace {
-    kind: u8,
-    mask: u32,
-    sid: String,
+pub(super) struct Ace {
+    pub(super) kind: u8,
+    pub(super) mask: u32,
+    pub(super) sid: String,
 }
 
 /// The ACEs of `acl`. A label ACE has the allowed ACE's layout.
-fn aces(acl: *const ACL) -> Vec<Ace> {
+pub(super) fn aces(acl: *const ACL) -> Vec<Ace> {
     // SAFETY: `acl` points into a descriptor the caller keeps alive.
     let count = unsafe { (*acl).AceCount };
     (0..u32::from(count))
@@ -252,7 +253,7 @@ fn text_of(sid: PSID) -> String {
 #[test]
 fn the_dacl_names_two_users_and_the_label_is_low_no_write_up() {
     let name = name("label");
-    let listener = PipeListener::make(&name, SYSTEM).unwrap();
+    let listener = PipeListener::make(&name, SYSTEM, None).unwrap();
     // The bridge's own handle: what it may read is what the client sees.
     let client = connect_within(&name, &Sid::parse(&own()).unwrap(), WAIT).unwrap();
     let (mut owner, mut dacl, mut sacl) =
@@ -313,7 +314,7 @@ fn the_dacl_names_two_users_and_the_label_is_low_no_write_up() {
 #[test]
 fn reads_and_writes_time_out_and_a_shutdown_ends_a_blocked_read() {
     let name = name("shut");
-    let listener = PipeListener::make(&name, &own()).unwrap();
+    let listener = PipeListener::make(&name, &own(), None).unwrap();
     let guard = thread::spawn(move || (listener.accept().unwrap(), listener));
     let client = connect_within(&name, &Sid::parse(&own()).unwrap(), WAIT).unwrap();
     let (server, listener) = guard.join().unwrap();
@@ -346,6 +347,6 @@ fn reads_and_writes_time_out_and_a_shutdown_ends_a_blocked_read() {
     drop((client, server, listener));
 }
 
-fn raw(pipe: &Pipe) -> HANDLE {
+pub(super) fn raw(pipe: &Pipe) -> HANDLE {
     HANDLE(pipe.handle().as_raw_handle())
 }

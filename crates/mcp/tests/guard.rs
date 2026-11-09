@@ -20,6 +20,9 @@ mod write;
 #[path = "guard/bridge.rs"]
 mod bridge;
 #[cfg(test)]
+#[path = "guard/bridge_pipe.rs"]
+mod bridge_pipe;
+#[cfg(test)]
 #[path = "guard/deps.rs"]
 mod deps;
 #[cfg(test)]

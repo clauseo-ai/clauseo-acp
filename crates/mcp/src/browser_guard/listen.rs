@@ -1,7 +1,7 @@
 //! The guard's listen options, at the front of its command line: `--listen <socket>` on Unix
-//! (`transport/unix.rs`), `--listen-pipe <name> --client-sid <SID>` on Windows
-//! (`transport/windows.rs`). Each OS takes its own and refuses the other's; no refusal names the
-//! path, the pipe or the SID.
+//! (`transport/unix.rs`), `--listen-pipe <name> --client-sid <SID> [--client-package-sid <SID>]` on
+//! Windows (`transport/windows.rs`). Each OS takes its own and refuses the other's; no refusal
+//! names the path, the pipe or the SID.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -18,18 +18,28 @@ use crate::{Failure, transport::windows::MakeError};
 pub(super) enum Listen {
     /// Unix: `--listen <socket>`.
     Socket(PathBuf),
-    /// Windows: `--listen-pipe <name> --client-sid <SID>`.
-    Pipe { name: String, client_sid: String },
+    /// Windows: `--listen-pipe <name> --client-sid <SID>`, then optionally
+    /// `--client-package-sid <SID>`, the agent's `AppContainer` package (required once the agent
+    /// runs in a `LowBox` token).
+    Pipe {
+        name: String,
+        client_sid: String,
+        package_sid: Option<String>,
+    },
 }
 
 /// The refusals of `--listen`, `--listen-pipe` and `--client-sid`. None names the value.
 pub(super) const LISTEN_UNIX_ONLY: &str = "--listen is for macOS and Linux only";
 const LISTEN_ABSOLUTE: &str = "--listen must be an absolute path";
 pub(super) const LISTEN_PIPE_WINDOWS_ONLY: &str =
-    "--listen-pipe and --client-sid are for Windows only";
+    "--listen-pipe, --client-sid and --client-package-sid are for Windows only";
 const LISTEN_PIPE_EXPECTED: &str = "expected --listen-pipe <name> --client-sid <sid> first";
 const PIPE_NAME_BAD: &str = "--listen-pipe must be 1 to 200 letters, digits and dashes";
 const CLIENT_SID_BAD: &str = "--client-sid must be a SID string, S-1-...";
+#[cfg(windows)]
+const SID_REFUSED: &str = "--client-sid or --client-package-sid is not a SID Windows takes";
+const PACKAGE_SID_BAD: &str =
+    "--client-package-sid must be an AppContainer package SID, S-1-15-2- and seven numbers";
 
 /// The listen option at the front of `args`, if any, and the arguments after it. Each OS's own
 /// option only; the other's is refused.
@@ -37,7 +47,9 @@ pub(super) fn listen_option(
     args: &[OsString],
     os: env::Os,
 ) -> Result<(Option<Listen>, &[OsString]), &'static str> {
-    let pipe_flag = |flag: &OsString| flag == "--listen-pipe" || flag == "--client-sid";
+    let pipe_flag = |flag: &OsString| {
+        flag == "--listen-pipe" || flag == "--client-sid" || flag == "--client-package-sid"
+    };
     match (os, args) {
         (env::Os::Unix, [flag, socket, rest @ ..]) if flag == "--listen" => {
             let socket = Path::new(socket);
@@ -58,9 +70,21 @@ pub(super) fn listen_option(
                 .to_str()
                 .filter(|sid| checks::sid_text_ok(sid))
                 .ok_or(CLIENT_SID_BAD)?;
+            let (package_sid, rest) = match rest {
+                [flag, package, rest @ ..] if flag == "--client-package-sid" => {
+                    let package = package
+                        .to_str()
+                        .filter(|package| checks::package_sid_text_ok(package))
+                        .ok_or(PACKAGE_SID_BAD)?;
+                    (Some(package.to_owned()), rest)
+                }
+                [flag, ..] if flag == "--client-package-sid" => return Err(PACKAGE_SID_BAD),
+                _ => (None, rest),
+            };
             let pipe = Listen::Pipe {
                 name: name.to_owned(),
                 client_sid: sid.to_owned(),
+                package_sid,
             };
             Ok((Some(pipe), rest))
         }
@@ -80,7 +104,7 @@ pub(super) fn pipe_failure(error: MakeError) -> Failure {
                       makes the pipe fresh and never joins one"
                 .to_owned(),
         },
-        MakeError::BadSid => usage(CLIENT_SID_BAD),
+        MakeError::BadSid => usage(SID_REFUSED),
         MakeError::Failed(reason) => failed(&reason),
     }
 }

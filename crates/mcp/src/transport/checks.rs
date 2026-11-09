@@ -1,7 +1,7 @@
 //! The command-line checks of the Windows pipe options, kept free of Windows calls so they are
-//! tested on every OS: the pipe name the host picks (`--listen-pipe`, `--pipe`) and the shape of
-//! a SID string (`--client-sid`, `--server-sid`). Windows itself has the last word on a SID
-//! (`windows/sid.rs` converts it); this only keeps anything but `S-1-...` digits out.
+//! tested on every OS: the pipe name the host picks (`--listen-pipe`, `--pipe`) and the shape of a
+//! SID string (`--client-sid`, `--server-sid`, `--client-package-sid`). Windows itself has the last
+//! word on a SID (`windows/sid.rs` converts it); this only keeps anything but `S-1-...` digits out.
 
 /// The longest pipe name taken. Windows allows 256 characters for the whole `\\.\pipe\` path.
 pub(crate) const PIPE_NAME_MAX: usize = 200;
@@ -32,9 +32,21 @@ pub(crate) fn sid_text_ok(text: &str) -> bool {
         })
 }
 
+/// Whether `text` has an `AppContainer` package SID's shape: [`sid_text_ok`], `S-1-15-2-` then
+/// the seven sub-authorities a package name derives, so never ALL APPLICATION PACKAGES
+/// (`S-1-15-2-1`) or ALL RESTRICTED APPLICATION PACKAGES (`S-1-15-2-2`), which would let any
+/// `LowBox` process in, Chrome's included. The host derives it from the agent's package name (stage
+/// C's `crates/lowbox`); the guard only checks and compares it.
+pub(crate) fn package_sid_text_ok(text: &str) -> bool {
+    sid_text_ok(text)
+        && text
+            .strip_prefix("S-1-15-2-")
+            .is_some_and(|rids| rids.split('-').count() == 7)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{PIPE_NAME_MAX, pipe_name_ok, sid_text_ok};
+    use super::{PIPE_NAME_MAX, package_sid_text_ok, pipe_name_ok, sid_text_ok};
 
     #[test]
     fn a_pipe_name_is_letters_digits_and_dashes() {
@@ -84,6 +96,28 @@ mod tests {
             "S-1-5-1-2-3-4-5-6-7-8-9-10-11-12-13-14-15-16",
         ] {
             assert!(!sid_text_ok(bad), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn a_package_sid_is_an_appcontainer_sid() {
+        assert!(package_sid_text_ok(
+            "S-1-15-2-2434737943-167758768-3180539153-984336765-1107280622-3591121930-2677285773"
+        ));
+        for bad in [
+            "S-1-5-18",
+            "S-1-15-3-1024-1-2-3-4-5-6-7-8",
+            "S-1-15-2-1",
+            "S-1-15-2-2",
+            "S-1-15-2-1-2-3-4-5-6",
+            "S-1-15-2-1-2-3-4-5-6-7-8",
+            "S-1-15-2",
+            "S-1-15-2-",
+            "S-1-15-20-1",
+            "S-1-15-2-1)(A;;GA;;;WD",
+            "",
+        ] {
+            assert!(!package_sid_text_ok(bad), "{bad:?}");
         }
     }
 }

@@ -1,7 +1,7 @@
 //! The `browser-guard` mode: `clauseo-mcp browser-guard --agent-browser <file> --cwd <folder>
 //! --cdp-port <port> -- <agent-browser args...>`, with `--daemon-port <port>` after
 //! `--cdp-port` on Windows, and optionally first `--listen <socket>` on Unix or
-//! `--listen-pipe <name> --client-sid <SID>` on Windows.
+//! `--listen-pipe <name> --client-sid <SID> [--client-package-sid <SID>]` on Windows.
 //!
 //! With `--listen` (Unix only) the guard serves the same lines on a Unix socket it creates
 //! fresh with mode 0600 (`transport/unix.rs`), to one client at a time (`relay/clients.rs`),
@@ -13,9 +13,10 @@
 //! stderr, its own process identity, which the host passes to the bridge.
 //!
 //! With `--listen-pipe` (Windows only) the guard serves the named pipe `\\.\pipe\<name>`
-//! instead, for clients running as the `--client-sid` account (`transport/windows.rs`), the same
-//! way. A name that exists already exits [`EXIT_PIPE_TAKEN`] (3) before anything is claimed; the
-//! host retries with a new name.
+//! instead, for clients running as the `--client-sid` account and, when given, in the
+//! `--client-package-sid` `AppContainer` package (`transport/windows.rs`), the same way, and
+//! prints the same line, the version being its creation time. A name that exists already exits
+//! [`EXIT_PIPE_TAKEN`] (3) before anything is claimed; the host retries with a new name.
 //!
 //! In order: note the guard's parent (`parent.rs`; exit 1 if it is gone already), read the
 //! command line (exit 2 on anything else), build the child's environment from the host's
@@ -98,14 +99,16 @@ pub const USAGE: &str = if cfg!(windows) {
 const USAGE_UNIX: &str = "usage: clauseo-mcp browser-guard [--listen <socket>] --agent-browser <file> --cwd <folder> --cdp-port <port> -- <agent-browser args...>";
 /// The command line on Windows: the daemon's port too, which agent-browser derives from the
 /// session name and the host claimed (`port_file.rs`).
-const USAGE_WINDOWS: &str = "usage: clauseo-mcp browser-guard [--listen-pipe <name> --client-sid <sid>] --agent-browser <file> --cwd <folder> --cdp-port <port> --daemon-port <port> -- <agent-browser args...>";
+const USAGE_WINDOWS: &str = "usage: clauseo-mcp browser-guard [--listen-pipe <name> --client-sid <sid> [--client-package-sid <sid>]] --agent-browser <file> --cwd <folder> --cdp-port <port> --daemon-port <port> -- <agent-browser args...>";
 
 /// The exit code for a bad command line or environment.
 const EXIT_USAGE: i32 = 2;
 /// The exit code when the guard cannot make its folders or start agent-browser.
 const EXIT_FAILED: i32 = 1;
 /// Windows: the exit code when the `--listen-pipe` name exists already, given before anything
-/// is claimed or started, so the host can retry with a new name.
+/// is claimed or started, so the host can retry with a new name. 3 is also a code agent-browser
+/// may exit with later, which the guard passes on: the host (J4-W) must read it as "name taken"
+/// only when the guard exits before its `listening as` line, and must cap its retries.
 pub const EXIT_PIPE_TAKEN: i32 = 3;
 
 /// What the command line names.
@@ -183,8 +186,19 @@ pub fn run(args: &[OsString]) -> Result<i32, Failure> {
     };
     #[cfg(windows)]
     let agent = match &command.listen {
-        Some(Listen::Pipe { name, client_sid }) => {
-            relay::Agent::Listen(PipeListener::make(name, client_sid).map_err(pipe_failure)?)
+        Some(Listen::Pipe {
+            name,
+            client_sid,
+            package_sid,
+        }) => {
+            let pipe = PipeListener::make(name, client_sid, package_sid.as_deref())
+                .map_err(pipe_failure)?;
+            // As on Unix: the host passes this identity to the bridge, which checks the pipe's
+            // server process against it (`transport/windows/identity.rs`).
+            let own = crate::transport::windows::own_identity()
+                .ok_or_else(|| failed("cannot read the guard's own process identity"))?;
+            note(&format!("{LISTENING} {own}"));
+            relay::Agent::Listen(pipe)
         }
         Some(Listen::Socket(_)) => return Err(usage(LISTEN_UNIX_ONLY)),
         None => relay::Agent::Stdio,
@@ -334,8 +348,7 @@ pub(crate) mod lines {
 }
 
 /// The start of the line that tells the host the guard listens, then `<pid>/<version>`
-/// (`transport.rs`'s `Identity`).
-#[cfg(unix)]
+/// (`transport.rs`'s `Identity`; on Windows the version is the creation time).
 pub(crate) const LISTENING: &str = "listening as";
 
 /// The failure when the guard's parent has gone (`parent.rs`).

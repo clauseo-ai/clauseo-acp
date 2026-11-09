@@ -4,8 +4,9 @@
 //! browser-guard --listen <path>` (`transport/unix.rs`): the host starts the guard before the
 //! agent, reads the identity the guard prints (`listening as <pid>/<version>`), checks the pid is
 //! the child it started, and passes both numbers here (`transport.rs`'s `Identity`: the
-//! pidversion on macOS, the start time on Linux). On Windows `--pipe <name> --server-sid <SID>`,
-//! for a guard started as `--listen-pipe <name> --client-sid <SID>` (`transport/windows.rs`).
+//! pidversion on macOS, the start time on Linux). On Windows `--pipe <name> --server-sid <SID>
+//! --guard-pid <pid> --guard-pidversion <version>`, for a guard started as `--listen-pipe <name>
+//! --client-sid <SID>` (`transport/windows.rs`), the version being the guard's creation time.
 //!
 //! It relays lines, unchanged: each stdin line to the guard's socket, each socket line to stdout,
 //! with the guard's own caps (`browser_guard::lines`). It parses nothing but a line's `id`, for
@@ -23,8 +24,10 @@
 //! The boundary on macOS is the guard's and the agent's Seatbelt profiles, the socket folder's
 //! check (`transport/unix.rs`) and this check; checking the peer's code identity (its audit
 //! token) is later hardening.
-//! On Windows the check is the pipe's owner: it must be the `--server-sid` account (the guard's),
-//! so a pipe the agent's own account made first under the name is refused the same way.
+//! On Windows the pipe's owner must be the `--server-sid` account (the guard's), so a pipe the
+//! agent's own account made first under the name is refused, and the pipe's server process must
+//! be the guard by pid and creation time, so an instance another process of the browser's account
+//! (agent-browser, its daemon) added is refused too (`transport/windows/identity.rs`).
 //!
 //! When it cannot reach the guard (no socket, refused, or the guard gone mid-session) it answers
 //! each request with [`UNAVAILABLE`] and keeps reading stdin to its end, so the agent's client
@@ -36,13 +39,14 @@
 //! A stdin line over the guard's cap gets the parse error the guard would give, and is not sent.
 //! A socket line over the cap, or one the socket ends in the middle of, ends the link.
 //!
-//! It sees the transport only through `crate::transport`'s [`Connection`]; `connect_within`
-//! is the one Unix-socket call, and `transport::windows::connect_within` the pipe's. A pipe has
-//! no half-close, so on Windows the guard learns stdin has ended only when the bridge closes,
-//! after the grace below. It touches no file but the socket it connects to, and writes no path,
-//! pipe name or SID anywhere (on Linux, a development platform, it reads the peer's
-//! `/proc/<pid>/stat`). Exit 0 when stdin ends; 1 when stdout fails; 2 for a bad command line,
-//! on Unix `--guard-pid` or `--guard-pidversion` missing included.
+//! It sees the transport only through `crate::transport`'s [`Connection`]; `connect_within` is the
+//! one Unix-socket call, and `transport::windows::connect_within` the pipe's. A pipe has no
+//! half-close, so on Windows the guard learns stdin has ended only when the bridge closes, after
+//! [`EXIT_GRACE`] (2 s): an agent leaving takes up to 2 s longer to reach the guard there. It
+//! touches no file but the socket it connects to, and writes no path, pipe name or SID anywhere (on
+//! Linux, a development platform, it reads the peer's `/proc/<pid>/stat`). Exit 0 when stdin ends;
+//! 1 when stdout fails; 2 for a bad command line, `--guard-pid` or `--guard-pidversion` missing
+//! included.
 
 mod link;
 #[cfg(test)]
@@ -77,7 +81,7 @@ use link::{Link, Sent};
 
 /// The mode's command line on this OS.
 pub const USAGE: &str = if cfg!(windows) {
-    "usage: clauseo-mcp browser-bridge --pipe <name> --server-sid <sid>"
+    "usage: clauseo-mcp browser-bridge --pipe <name> --server-sid <sid> --guard-pid <pid> --guard-pidversion <version>"
 } else {
     "usage: clauseo-mcp browser-bridge --socket <path> --guard-pid <pid> --guard-pidversion <version>"
 };
@@ -123,12 +127,15 @@ pub fn run(args: &[OsString]) -> Result<i32, Failure> {
             serve(stdin, &out, &connect, guard, Caps::GUARD)
         }
         #[cfg(windows)]
-        Target::Pipe { name, server_sid } => {
+        Target::Pipe {
+            name,
+            server_sid,
+            guard,
+        } => {
             use crate::transport::windows::{Sid, connect_within};
             let server = Sid::parse(&server_sid).ok_or_else(|| usage(SERVER_SID_BAD))?;
             let connect = || connect_within(&name, &server, CONNECT_WAIT);
-            // The pipe's own owner check (`server`) is the peer check; the peer is not read.
-            serve(stdin, &out, &connect, Peer::SameUser, Caps::GUARD)
+            serve(stdin, &out, &connect, guard, Caps::GUARD)
         }
         // `parse` gives only this OS's target.
         #[cfg(unix)]
@@ -156,51 +163,64 @@ fn usage(reason: &str) -> Failure {
 enum Target {
     /// Unix: `--socket <path> --guard-pid <pid> --guard-pidversion <version>`.
     Socket { socket: PathBuf, guard: Peer },
-    /// Windows: `--pipe <name> --server-sid <SID>`.
-    Pipe { name: String, server_sid: String },
+    /// Windows: `--pipe <name> --server-sid <SID> --guard-pid <pid> --guard-pidversion <version>`.
+    Pipe {
+        name: String,
+        server_sid: String,
+        guard: Peer,
+    },
 }
 
 /// The refusals of the command line. None names a path, a pipe or a SID.
 const EXPECTED_SOCKET: &str =
     "expected --socket <path> --guard-pid <pid> --guard-pidversion <version>";
-const EXPECTED_PIPE: &str = "expected --pipe <name> --server-sid <sid>";
+const EXPECTED_PIPE: &str =
+    "expected --pipe <name> --server-sid <sid> --guard-pid <pid> --guard-pidversion <version>";
 const SOCKET_UNIX_ONLY: &str = "--socket is for macOS and Linux only";
 const PIPE_WINDOWS_ONLY: &str = "--pipe and --server-sid are for Windows only";
 const PIPE_NAME_BAD: &str = "--pipe must be 1 to 200 letters, digits and dashes";
 const SERVER_SID_BAD: &str = "--server-sid must be a SID string, S-1-...";
 
-/// On Unix exactly `--socket <path> --guard-pid <pid> --guard-pidversion <version>`: the path
-/// absolute, the numbers plain decimal, the pid over 1 (no guard is pid 0 or init). On Windows
-/// (`windows`) exactly `--pipe <name> --server-sid <SID>`, the name letters, digits and dashes.
-/// Each OS refuses the other's options.
+/// On Unix exactly `--socket <path>`, the path absolute, on Windows (`windows`) exactly `--pipe
+/// <name> --server-sid <SID>`, the name letters, digits and dashes; then on both
+/// `--guard-pid <pid> --guard-pidversion <version>` ([`guard_identity`]). Each OS refuses the
+/// other's options.
 fn parse(args: &[OsString], windows: bool) -> Result<Target, &'static str> {
     let pipe_flag = |flag: &OsString| flag == "--pipe" || flag == "--server-sid";
+    let identity_flags = |pid: &OsString, version: &OsString| {
+        pid == "--guard-pid" && version == "--guard-pidversion"
+    };
     match (windows, args) {
         (false, [flag_socket, socket, flag_pid, pid, flag_version, version])
-            if flag_socket == "--socket"
-                && flag_pid == "--guard-pid"
-                && flag_version == "--guard-pidversion" =>
+            if flag_socket == "--socket" && identity_flags(flag_pid, flag_version) =>
         {
             let socket = Path::new(socket);
             if !socket.is_absolute() {
                 return Err("--socket must be an absolute path");
             }
-            let pid = decimal(pid)
-                .and_then(|pid| u32::try_from(pid).ok())
-                .filter(|pid| *pid > 1)
-                .ok_or("--guard-pid must be the guard's process id, in plain decimal")?;
-            let version = decimal(version).ok_or(
-                "--guard-pidversion must be the guard's process version, in plain decimal",
-            )?;
-            let guard = Peer::Process(Identity { pid, version });
             Ok(Target::Socket {
                 socket: socket.to_owned(),
-                guard,
+                guard: guard_identity(pid, version)?,
             })
         }
         (false, [flag, ..]) if pipe_flag(flag) => Err(PIPE_WINDOWS_ONLY),
         (false, _) => Err(EXPECTED_SOCKET),
-        (true, [flag, name, sid_flag, sid]) if flag == "--pipe" && sid_flag == "--server-sid" => {
+        (
+            true,
+            [
+                flag,
+                name,
+                sid_flag,
+                sid,
+                flag_pid,
+                pid,
+                flag_version,
+                version,
+            ],
+        ) if flag == "--pipe"
+            && sid_flag == "--server-sid"
+            && identity_flags(flag_pid, flag_version) =>
+        {
             let name = name
                 .to_str()
                 .filter(|name| checks::pipe_name_ok(name))
@@ -212,11 +232,25 @@ fn parse(args: &[OsString], windows: bool) -> Result<Target, &'static str> {
             Ok(Target::Pipe {
                 name: name.to_owned(),
                 server_sid: sid.to_owned(),
+                guard: guard_identity(pid, version)?,
             })
         }
         (true, [flag, ..]) if flag == "--socket" => Err(SOCKET_UNIX_ONLY),
         (true, _) => Err(EXPECTED_PIPE),
     }
+}
+
+/// The guard's identity from `--guard-pid` and `--guard-pidversion`: plain decimal, the pid
+/// over 1 (no guard is pid 0 or init). The version is the pidversion on macOS, the start time on
+/// Linux and the creation time on Windows.
+fn guard_identity(pid: &OsString, version: &OsString) -> Result<Peer, &'static str> {
+    let pid = decimal(pid)
+        .and_then(|pid| u32::try_from(pid).ok())
+        .filter(|pid| *pid > 1)
+        .ok_or("--guard-pid must be the guard's process id, in plain decimal")?;
+    let version = decimal(version)
+        .ok_or("--guard-pidversion must be the guard's process version, in plain decimal")?;
+    Ok(Peer::Process(Identity { pid, version }))
 }
 
 /// `value` as a number in plain decimal: digits only, no leading zero but for `0` itself.

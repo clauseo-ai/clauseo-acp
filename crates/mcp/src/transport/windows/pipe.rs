@@ -14,9 +14,11 @@
 //! ([`Connection::set_read_timeout`], [`Connection::set_write_timeout`]) cancels an operation
 //! still pending when it passes, which then fails with `TimedOut`.
 //!
-//! The peer check ([`Connection::peer_is`]) depends on the end, not on the `Peer` asked for: the guard's asks whether the
-//! client runs as the `--client-sid` user (`sid::client_is`); the bridge's whether the pipe is
-//! owned by the `--server-sid` user (`sid::owner_of`).
+//! The peer check ([`Connection::peer_is`]) depends on the end: the guard's asks whether the
+//! client runs as the `--client-sid` user, in the `--client-package-sid` package with no
+//! capability when that is given (`sid::client_is`); the bridge's whether the pipe is owned by
+//! the `--server-sid` user (`sid::owner_of`) and its server is the guard's process, by pid and
+//! creation time (`identity::server_is`).
 #![expect(
     unsafe_code,
     reason = "FFI to the Win32 overlapped pipe I/O, for the named pipe transport"
@@ -40,6 +42,7 @@ use windows::Win32::System::Threading::{
 };
 use windows::core::PCWSTR;
 
+use super::identity;
 use super::sid::{self, Sid};
 use crate::transport::{Connection, Peer};
 
@@ -48,8 +51,9 @@ const MAX_IO: usize = 1 << 20;
 
 /// Which end of the pipe, with what its peer check expects.
 pub(super) enum End {
-    /// The guard's: the client must run as this user.
-    Server { client: Sid },
+    /// The guard's: the client must run as this user, and in this `AppContainer` package with no
+    /// capability when one is given.
+    Server { client: Sid, package: Option<Sid> },
     /// The bridge's: the pipe must be owned by this user.
     Client { server: Sid },
 }
@@ -275,12 +279,19 @@ impl Connection for Pipe {
         set_timeout(&self.inner.read_timeout, timeout)
     }
 
-    /// Each end carries what it expects; `peer` is not read (see `transport.rs`).
-    fn peer_is(&self, _peer: Peer) -> bool {
+    /// The guard's end checks the client against what it carries and does not read `peer`; the
+    /// bridge's checks the owner it carries and, for [`Peer::Process`], the server's identity.
+    fn peer_is(&self, peer: Peer) -> bool {
         match &self.inner.end {
-            End::Server { client } => sid::client_is(&self.inner.handle, client),
+            End::Server { client, package } => {
+                sid::client_is(&self.inner.handle, client, package.as_ref())
+            }
             End::Client { server } => {
                 sid::owner_of(&self.inner.handle).is_some_and(|owner| owner.same_as(server))
+                    && match peer {
+                        Peer::Process(guard) => identity::server_is(&self.inner.handle, guard),
+                        Peer::SameUser => true,
+                    }
             }
         }
     }
