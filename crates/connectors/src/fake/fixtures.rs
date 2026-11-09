@@ -105,6 +105,28 @@ const FILES: &[(&str, &str)] = &[
         "mcp/insufficient-credits-result.json",
         include_str!("../../fixtures/mcp/insufficient-credits-result.json"),
     ),
+    // The live Indian Kanoon server's results (server main 921725f), read by the host's
+    // case-law sources tests; the fake connector does not serve them.
+    (
+        "mcp/ik-search-law.json",
+        include_str!("../../fixtures/mcp/ik-search-law.json"),
+    ),
+    (
+        "mcp/ik-search-law-two-queries.json",
+        include_str!("../../fixtures/mcp/ik-search-law-two-queries.json"),
+    ),
+    (
+        "mcp/ik-read-document.json",
+        include_str!("../../fixtures/mcp/ik-read-document.json"),
+    ),
+    (
+        "mcp/ik-read-document-two.json",
+        include_str!("../../fixtures/mcp/ik-read-document-two.json"),
+    ),
+    (
+        "mcp/ik-search-law-no-hits.json",
+        include_str!("../../fixtures/mcp/ik-search-law-no-hits.json"),
+    ),
 ];
 
 /// A fixture's text as it is on disk (every URL on `https://data.clauseo.chat`), by its path

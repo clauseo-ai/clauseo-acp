@@ -6,9 +6,9 @@
 //!
 //! Two shapes are read, never merged. First the structured one, the fake connector's:
 //! `structuredContent.results[]` for a search and `structuredContent.documents[]` for a read.
-//! When that gives no links, the text one, the live Indian Kanoon server's, which answers with
-//! `content[]` text blocks only (`d123 "Title"`, linked to `https://data.clauseo.chat/d/<id>`;
-//! see [`text`]).
+//! When that gives no links, the text one, the live Indian Kanoon server's (server main 921725f),
+//! which answers with `content[]` text blocks only: lines that start `d123 "Title" · …`, or a
+//! JSON first block, each document linked to `https://data.clauseo.chat/d/d123` (see [`text`]).
 //!
 //! Every step is lenient: a missing or misshapen list gives no links, an entry that is not an
 //! object or has no string `url` (or `link`) is skipped, as is one whose link is not https or a
