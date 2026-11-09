@@ -8,6 +8,8 @@ dist-probe/
 dist-review/
 # why: release.yml's blocklist snapshot, downloaded into place before each release build
 /crates/desktop/blocklist/
+# why: release.yml's browser-pins snapshot, downloaded into place before each release build
+/crates/desktop/browser-pins/
 .claude/worktrees/
 CLAUDE.local.md
 *.local.*

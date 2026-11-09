@@ -1,0 +1,8 @@
+{
+  "bundle": {
+    "resources": {
+      "browser-pins/browser-pins-v1.json": "browser-pins/browser-pins-v1.json",
+      "browser-pins/browser-pins-v1.json.minisig": "browser-pins/browser-pins-v1.json.minisig"
+    }
+  }
+}
