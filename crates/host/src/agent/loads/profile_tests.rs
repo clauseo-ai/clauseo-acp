@@ -167,8 +167,7 @@ fn a_folder_named_like_a_token_stays_literal() {
     let folders = Folders {
         work: "/w/{matter_notes}",
         notes: "/n/{work_folder}",
-        connectors: "",
-        browser: "",
+        ..folders()
     };
     assert_eq!(
         fill_instructions("{work_folder} and {matter_notes}", folders).unwrap(),
@@ -542,9 +541,7 @@ fn the_instructions_are_filled_and_escaped_for_json() {
         .unwrap();
     let odd = Folders {
         work: "/data/run/a \"b\"\n\\c/work",
-        notes: "/data/agent-state/m/notes",
-        connectors: "",
-        browser: "",
+        ..folders()
     };
     fill_meta(&mut meta, odd).unwrap();
     let text = Value::Object(meta).to_string();

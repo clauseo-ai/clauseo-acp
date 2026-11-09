@@ -274,7 +274,7 @@ pub(crate) struct ShellInputs<'a> {
     pub(crate) executable: &'a Path,
 }
 
-/// What a session with the shell tool wired (`HostConfig::with_browser_tool`) shows in its
+/// What a session with the shell tool wired (`ProfileHook::browser_tool`) shows in its
 /// header and is told in `{browser}`: available once its Chrome was found; else turned off
 /// (`tools.browser`), left out by the firm's browser policy, or not installed.
 pub(crate) fn shell_state(

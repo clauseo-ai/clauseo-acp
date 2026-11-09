@@ -250,6 +250,10 @@ impl ProfileHook for SetupHook {
             None => Vec::new(),
         }
     }
+
+    fn browser_tool(&self) -> Option<PathBuf> {
+        self.profile.browser_tool()
+    }
 }
 
 #[cfg(test)]

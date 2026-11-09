@@ -122,7 +122,7 @@ pub(crate) struct RunFolders {
     pub(crate) browser_blocked: Option<clauseo_protocol::ToolsUnavailableReason>,
     /// Whether the launch prep read that policy (it does whenever the browser could come).
     pub(crate) browser_policy_read: bool,
-    /// The browser as a shell tool (`HostConfig::with_browser_tool`, `tools.browser` on): the
+    /// The browser as a shell tool (`ProfileHook::browser_tool`, `tools.browser` on): the
     /// session has it once [`Self::chrome`] is found and its two folders below are made.
     pub(crate) browser_shell: bool,
     /// `<root>/downloads`, `AGENT_BROWSER_DOWNLOAD_PATH`, and `<root>/browser-profile`,
@@ -418,8 +418,8 @@ fn claim(run: &mut RunFolders, data: &Path, claims: Claims, slot: bool) {
 }
 
 /// Makes the shell tool's downloads and profile folders, in the launch's own run folder, so the
-/// profile starts empty: no earlier launch's cookies. One that cannot be made leaves the session without the
-/// browser (`BrowserNotInstalled`), with a warning; the launch goes on.
+/// profile starts empty: no earlier launch's cookies. One that cannot be made leaves the session
+/// without the browser (`BrowserNotInstalled`), with a warning; the launch goes on.
 fn shell_folders(run: &mut RunFolders, data: &Path) {
     for folder in [&run.downloads, &run.browser_profile] {
         if let Err(error) = crate::write::create_private_dirs_under(data, folder) {

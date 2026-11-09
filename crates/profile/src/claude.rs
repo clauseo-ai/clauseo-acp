@@ -97,7 +97,8 @@ pub struct ClaudeOptions {
     /// `Bash(stetdoc <sub>:*)` for each of [`STETDOC_READ_ONLY`], then, with the browser,
     /// `Bash(agent-browser <sub>:*)` for each of [`AGENT_BROWSER_ALLOWED`].
     allowed_tools: Vec<String>,
-    /// With the browser, the agent-browser denials ([`Self::with_browser`]); otherwise none: the web tools are the host's, from `tools.web_search`.
+    /// With the browser, the agent-browser denials ([`Self::with_browser`]); otherwise none: the
+    /// web tools are the host's, from `tools.web_search`.
     disallowed_tools: Vec<String>,
     /// The local plugin holding the skills.
     plugin_dir: Option<PathBuf>,
@@ -129,7 +130,8 @@ impl ClaudeOptions {
     /// The same options with `Bash(agent-browser <sub>:*)` allowed for each of
     /// [`AGENT_BROWSER_ALLOWED`], and denied: `Bash(agent-browser *<flag>*)` for each of
     /// [`AGENT_BROWSER_DENIED`] and `Bash(agent-browser <sub>*)` for each of
-    /// [`AGENT_BROWSER_DENIED_SUBCOMMANDS`]: for a profile whose app put the command on the agents' `PATH`.
+    /// [`AGENT_BROWSER_DENIED_SUBCOMMANDS`]: for a profile whose app put the command on the
+    /// agents' `PATH`.
     #[must_use]
     pub fn with_browser(mut self) -> Self {
         self.allowed_tools.extend(

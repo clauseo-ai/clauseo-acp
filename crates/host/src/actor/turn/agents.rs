@@ -256,32 +256,6 @@ pub(super) fn launch_now(
     None
 }
 
-/// The shell browser's variables (`agent::loads::browser::shell_env`) and its folder for the
-/// agent's `PATH`, for a session whose launch prep found its Chrome and made its folders; none
-/// for any other, or when the app wired no shell tool (`HostConfig::with_browser_tool`).
-fn shell_browser(
-    actor: &Actor,
-    run: &super::launch_checks::RunFolders,
-) -> Option<(BTreeMap<std::ffi::OsString, std::ffi::OsString>, PathBuf)> {
-    let folder = actor.wiring.browser_tool.as_ref()?;
-    let executable = run.chrome.as_deref().filter(|_| run.browser_shell)?;
-    let config = actor
-        .effective
-        .locations()
-        .data_dir()
-        .join(crate::browser::CONFIG_DIR)
-        .join(crate::browser::CONFIG_FILE);
-    let session = run.key.id();
-    let inputs = agent::loads::browser::ShellInputs {
-        session: &session,
-        config: &config,
-        downloads: &run.downloads,
-        profile: &run.browser_profile,
-        executable,
-    };
-    Some((agent::loads::browser::shell_env(&inputs), folder.clone()))
-}
-
 /// A new agent id (a Codex launch's preparation takes one too).
 pub(super) fn next_agent_id() -> u64 {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -331,23 +305,19 @@ fn launch(
             .map(agent::home::claude_launch_env);
         (forced.unwrap_or_default(), None)
     };
-    let (mut forced, browser_folder) = (forced, shell_browser(actor, &prepared.run));
-    if let Some((env, _)) = &browser_folder {
-        forced.extend(env.clone());
-    }
     let hook = agent::loads::launch_env(actor.profile.launch_env(&row.agent));
     // The key retry is armed by the hook's key and the launch's sign-in check.
     let codex = codex.map(|(mut codex, login)| {
         codex.key_retry = KeyRetry::at_launch(&hook, login);
         codex
     });
-    let tools = browser_folder.map(|(_, folder)| folder);
+    let tools = super::profile_loads::browser_tools(actor, &prepared.run);
     let parts = path::launch_parts(actor, &row.agent, codex.is_some(), tools);
     // Tier C (no jail) leaves the agent's environment alone: no session proxy variables here
     // (`ProxyHandle::env`); only the browser entry reaches the proxy, advisory without a jail.
     let spec = agent::launch_spec(
         settings,
-        hook,
+        super::profile_loads::with_shell_env(actor, &prepared.run, hook),
         forced,
         &parts.dropped,
         parts.inherited.into_iter(),

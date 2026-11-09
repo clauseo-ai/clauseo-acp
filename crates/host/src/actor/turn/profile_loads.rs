@@ -259,15 +259,55 @@ fn case_law_servers(
 }
 
 /// The shell tool's header state and browser part for `run`'s session, or none when the app
-/// wired no shell tool (`HostConfig::with_browser_tool`).
+/// wired no shell tool (`ProfileHook::browser_tool`).
 fn shell_browser(
     actor: &Actor,
     run: &RunFolders,
 ) -> Option<(clauseo_protocol::ToolState, BrowserPart)> {
-    actor.wiring.browser_tool.as_ref()?;
+    actor.profile.browser_tool()?;
     let (_, switch) = switches(actor);
     let found = run.browser_shell && run.chrome.is_some();
     Some(browser::shell_state(switch, run.browser_blocked, found))
+}
+
+/// `env` (the hook's variables) with agent-browser's (`agent::loads::browser::shell_env`) for a
+/// session with the browser as a shell tool: its launch prep found its Chrome and made its
+/// folders. They go over the agent's own and the settings' variables, under what the host
+/// forces for the agent's kind.
+pub(super) fn with_shell_env(
+    actor: &Actor,
+    run: &RunFolders,
+    mut env: std::collections::BTreeMap<OsString, OsString>,
+) -> std::collections::BTreeMap<OsString, OsString> {
+    let Some(executable) = shell_chrome(actor, run) else {
+        return env;
+    };
+    let config = actor.effective.locations().data_dir();
+    let config = config
+        .join(crate::browser::CONFIG_DIR)
+        .join(crate::browser::CONFIG_FILE);
+    let session = run.key.id();
+    let inputs = browser::ShellInputs {
+        session: &session,
+        config: &config,
+        downloads: &run.downloads,
+        profile: &run.browser_profile,
+        executable,
+    };
+    env.extend(browser::shell_env(&inputs));
+    env
+}
+
+/// The shell browser's tools folder for the agent's `PATH` (after stetdoc's, before the profile
+/// hook's: `agents::path::launch_parts`), for a session that has it.
+pub(super) fn browser_tools(actor: &Actor, run: &RunFolders) -> Option<PathBuf> {
+    shell_chrome(actor, run).and_then(|_| actor.profile.browser_tool())
+}
+
+/// The Chrome of `run`'s session when it has the browser as a shell tool.
+fn shell_chrome<'a>(actor: &Actor, run: &'a RunFolders) -> Option<&'a Path> {
+    actor.profile.browser_tool()?;
+    run.chrome.as_deref().filter(|_| run.browser_shell)
 }
 
 /// What `{browser}` becomes: the shell tool's part, or the no-browser sentence without it.

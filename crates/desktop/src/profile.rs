@@ -61,7 +61,7 @@ pub(crate) struct DesktopProfile {
     profile: ClauseoProfile,
     prepend_stetdoc: bool,
     /// `<data>/tools`, holding the `agent-browser` command, when its copy is there
-    /// ([`install_browser`]): the host's `HostConfig::with_browser_tool`.
+    /// ([`install_browser`]): the host's `ProfileHook::browser_tool`.
     browser_tool: Option<PathBuf>,
 }
 
@@ -115,11 +115,6 @@ impl DesktopProfile {
     pub(crate) fn with_browser_tool(mut self, folder: Option<PathBuf>) -> Self {
         self.browser_tool = folder;
         self
-    }
-
-    /// The folder for `HostConfig::with_browser_tool`, when the `agent-browser` copy is there.
-    pub(crate) fn browser_tool(&self) -> Option<&Path> {
-        self.browser_tool.as_deref()
     }
 
     /// The hook over `profile`, built and rendered already; `prepend_stetdoc` says whether
@@ -425,6 +420,10 @@ impl ProfileHook for DesktopProfile {
             request.allow_scripts(),
         )
     }
+
+    fn browser_tool(&self) -> Option<PathBuf> {
+        self.browser_tool.clone()
+    }
 }
 
 /// `config` with setup's hook (`setup/hook.rs`: the key and plan variables) over the launch
@@ -442,14 +441,6 @@ pub(crate) fn with_profile(
     };
     let config = match profile.path_prepend().and_then(absolute_folder) {
         Some(folder) => config.with_agent_path_prepend(folder),
-        None => config,
-    };
-    let config = match profile
-        .browser_tool()
-        .map(Path::to_path_buf)
-        .and_then(absolute_folder)
-    {
-        Some(folder) => config.with_browser_tool(folder),
         None => config,
     };
     config.with_profile_hook(Box::new(hook.over(Box::new(profile))))
