@@ -384,15 +384,17 @@ folder (the agent writes `staging/`), no keychain (folders and services, as in t
 or IOSurface user client (Chrome draws with SwiftShader), no window server or `CARenderServer`,
 no `nvram`, no `iokit-get-properties`, and no `process-info*` on a process outside the sandbox
 (#811's rule; `(deny default)` does not refuse it, so a renderer exploit could read every
-process's arguments). That refuses listing pids too (`proc_listallpids`, `proc_listchildpids`),
-so the guard must learn Chrome's pids another way (say, DevTools' `SystemInfo.getProcessInfo`).
+process's arguments), with `process-info-listpids` allowed back right after, numbers only, as
+#811 does: the guard finds Chrome's children by listing pids and reading each one's parent
+(`proc_pidinfo`), which reads only for the sandbox's own processes.
 The jail tests run under it: matters, the home, `.ssh` and other state refused for read and
 write; the keychain refused; the window server, `lsd.mapdb`, `configd` and an unknown name
-refused, the port broker's name passed; an outside process's arguments and the pid list refused,
-a sibling's read; only the three ports reachable; IPv6 and other-port binds refused;
-the ancestors `lstat` but do not list; a binary or library dropped in the run folder neither
-runs nor maps; no socket bound in `sock/` but `guard.sock`; the outermost refusal; and the
-headless shell's screenshot of a local page (skipped when none is on the machine).
+refused, the port broker's name passed; an outside process's arguments and info refused, the
+pid list and a sibling's arguments and parent read; only the three ports reachable; IPv6 and
+other-port binds refused; the ancestors `lstat` but do not list; a binary or library dropped in
+the run folder neither runs nor maps; no socket bound in `sock/` but `guard.sock`; the
+outermost refusal; and the headless shell's screenshot of a local page (skipped when none is on
+the machine).
 
 The guard's marker (D3): `sandbox_check(pid, "file-write-data", SANDBOX_FILTER_PATH |
 SANDBOX_CHECK_NO_REPORT, path)` answers 0 for a write under `<data>/browser-runs/` only under this

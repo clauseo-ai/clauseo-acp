@@ -89,7 +89,14 @@ fn the_text_is_allows_then_denies_and_every_deny_is_tagged() {
         .skip(3)
         .position(|r| r.starts_with("(deny"))
         .unwrap();
-    for rule in all.iter().skip(3 + first_deny) {
+    // The one allow after a deny: the pid list, right after the outside-process deny (#811).
+    let (last, denies) = all[3 + first_deny..].split_last().unwrap();
+    assert_eq!(last, "(allow process-info-listpids)");
+    assert!(
+        denies.last().unwrap().starts_with("(deny process-info*"),
+        "{denies:?}"
+    );
+    for rule in denies {
         assert!(rule.starts_with("(deny"), "an allow after a deny: {rule}");
     }
     for rule in all.iter().filter(|r| r.starts_with("(deny")) {

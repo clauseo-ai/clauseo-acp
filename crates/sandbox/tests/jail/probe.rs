@@ -12,6 +12,7 @@
 //! - `tcp-bind <address>`: binds a TCP listener there, or names the error.
 //! - `procargs <pid>`: reads the process's arguments (`KERN_PROCARGS2`), or names the error.
 //! - `listpids`: lists every pid (`proc_listallpids`), or names the error.
+//! - `ppid <pid>`: the process's parent (`proc_pidinfo`, `PROC_PIDTBSDINFO`), or the error.
 //! - `pid-sandboxed <pid>`: whether `sandbox_check(pid, NULL, 0)` says the process is
 //!   sandboxed, as the guard asks of Chrome's processes.
 //! - `lstat-up <path>`: `lstat`s every folder from `/` down to the path, and the path, as the
@@ -63,7 +64,9 @@ fn probe() {
             Ok(_) => println!("PROBE tcp-bind=ok"),
             Err(error) => println!("PROBE tcp-bind={error}"),
         },
-        "procargs" | "listpids" => println!("PROBE {mode}={}", inspect(&mode, &arg(ARG1))),
+        "procargs" | "listpids" | "ppid" => {
+            println!("PROBE {mode}={}", inspect(&mode, &arg(ARG1)));
+        }
         "pid-sandboxed" => {
             let pid = std::env::var(ARG1).unwrap_or_default().parse().unwrap_or(0);
             println!("PROBE pid-sandboxed={}", pid_sandboxed(pid));
@@ -89,8 +92,8 @@ fn lstat_up(path: &Path) -> String {
     "ok".to_owned()
 }
 
-/// `procargs`: the arguments of process `pid` (`KERN_PROCARGS2`); `listpids`: every pid.
-/// `ok`, or the OS error.
+/// `procargs`: the arguments of process `pid` (`KERN_PROCARGS2`); `listpids`: every pid;
+/// `ppid`: its parent's pid (`proc_pidinfo`). `ok` or the parent, or the OS error.
 #[expect(
     unsafe_code,
     reason = "sysctl and proc_listallpids, to ask the profile for process-info"
@@ -106,10 +109,32 @@ pub(crate) fn inspect(what: &str, pid: &Path) -> String {
             newlen: usize,
         ) -> c_int;
         fn proc_listallpids(buffer: *mut std::ffi::c_void, size: c_int) -> c_int;
+        fn proc_pidinfo(
+            pid: c_int,
+            flavor: c_int,
+            arg: u64,
+            buffer: *mut std::ffi::c_void,
+            size: c_int,
+        ) -> c_int;
     }
+    /// `PROC_PIDTBSDINFO`, and the size of its `struct proc_bsdinfo`, whose fifth `u32` is the
+    /// parent's pid.
+    const PROC_PIDTBSDINFO: c_int = 3;
+    const BSDINFO_SIZE: usize = 136;
     const CTL_KERN: c_int = 1;
     const KERN_PROCARGS2: c_int = 49;
     let pid: c_int = pid.to_str().and_then(|p| p.parse().ok()).unwrap_or(0);
+    if what == "ppid" {
+        let mut info = [0_u32; BSDINFO_SIZE / 4];
+        let size = c_int::try_from(BSDINFO_SIZE).unwrap_or(0);
+        // SAFETY: the buffer is BSDINFO_SIZE bytes and outlives the call.
+        let got = unsafe { proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, info.as_mut_ptr().cast(), size) };
+        return if got == size {
+            info[4].to_string()
+        } else {
+            std::io::Error::last_os_error().to_string()
+        };
+    }
     // SAFETY: the name array and the buffer outlive each call, and their lengths are given.
     let failed = unsafe {
         if what == "procargs" {

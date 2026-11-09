@@ -294,10 +294,11 @@ fn only_the_port_broker_name_is_looked_up() {
     assert_eq!(b.probe("lookup", &[broker]), "lookup=1102");
 }
 
-/// A process outside the sandbox: its arguments (`KERN_PROCARGS2`) and the pid list are
-/// refused, and `sandbox_check` says it is not sandboxed. The sandbox's own processes (here a
-/// `sleep` beside the probe; in a run, Chrome's renderers) read, and `sandbox_check` answers 1
-/// for them, as the guard needs.
+/// A process outside the sandbox: its arguments (`KERN_PROCARGS2`) and info (`proc_pidinfo`)
+/// are refused, and `sandbox_check` says it is not sandboxed. The pid list works (numbers only,
+/// as in #811), and the sandbox's own processes (here a `sleep` and its parent shell; in a run,
+/// Chrome's renderers) read: their arguments and their parent, so the guard finds Chrome's
+/// children by listing pids and reading each one's parent, and `sandbox_check` answers 1.
 #[test]
 fn outside_processes_are_hidden_and_the_sandbox_s_own_are_not() {
     let b = Browser::new(None);
@@ -313,16 +314,28 @@ fn outside_processes_are_hidden_and_the_sandbox_s_own_are_not() {
     let pid = sleeper.handle.pid().to_string();
     let refused = "Operation not permitted (os error 1)";
     assert_eq!(probe::inspect("procargs", Path::new(&pid)), "ok");
+    assert_ne!(probe::inspect("ppid", Path::new(&pid)), refused);
     assert_eq!(b.probe("procargs", &[&pid]), format!("procargs={refused}"));
-    assert_eq!(b.probe("listpids", &[]), format!("listpids={refused}"));
+    assert_eq!(b.probe("ppid", &[&pid]), format!("ppid={refused}"));
+    assert_eq!(b.probe("listpids", &[]), "listpids=ok");
     assert_eq!(b.probe("pid-sandboxed", &[&pid]), "pid-sandboxed=false");
     let own = r#"/bin/sleep 5 & c=$!
-        for mode in procargs pid-sandboxed; do
+        echo "SHELL $$"
+        for mode in procargs ppid pid-sandboxed; do
             CLAUSEO_JAIL_PROBE=$mode CLAUSEO_JAIL_PROBE_1=$c "$1" probe::probe --exact --nocapture
         done
         kill $c"#;
     let out = b.bash(own, &[s(&b.probe)]);
+    let shell = out
+        .stdout
+        .lines()
+        .find_map(|l| l.strip_prefix("SHELL "))
+        .unwrap();
     assert!(out.stdout.contains("PROBE procargs=ok"), "{out:#?}");
+    assert!(
+        out.stdout.contains(&format!("PROBE ppid={shell}")),
+        "{out:#?}"
+    );
     assert!(out.stdout.contains("PROBE pid-sandboxed=true"), "{out:#?}");
     clauseo_process::kill(sleeper.handle.pid());
     async_io::block_on(sleeper.handle.exited());

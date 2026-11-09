@@ -339,14 +339,21 @@ fn write(c: &Checked, paths: &BrowserPaths) -> String {
         t.push_str(&rule("deny", op, &[]));
     }
     t.push_str(
-        "; No process outside this sandbox: its arguments (`kern.procargs2`), path, info,\n",
+        "; No process outside this sandbox: its arguments (`kern.procargs2`), path or info.\n",
     );
-    t.push_str("; and no pid listing. `(deny default)` does not refuse these (measured, #811).\n");
+    t.push_str(
+        "; `(deny default)` does not refuse these (measured, #811). Listing pids is allowed\n",
+    );
+    t.push_str(
+        "; back right after, numbers only, as #811 does: the guard finds Chrome's children\n",
+    );
+    t.push_str("; by listing pids and reading each one's parent, which only its own give.\n");
     t.push_str(&rule(
         "deny",
         "process-info*",
         &["(require-not (target same-sandbox))".to_owned()],
     ));
+    t.push_str("(allow process-info-listpids)\n");
     t
 }
 
