@@ -88,8 +88,9 @@ pub(crate) fn is_credential(name: &OsStr) -> bool {
 /// The names that run code in, or move the config of, the agent's shells and tools: dropped
 /// from every source of a jailed launch. The host sets none of them itself; the Windows runner
 /// sets `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_0` and `GIT_CONFIG_VALUE_0` (git over OpenSSL,
-/// `runner::env::GIT_OPENSSL`) after this filter, and those stay. A value the host forces later
-/// (R17 PR-D3b-win's `CLAUDE_CODE_GIT_BASH_PATH`) is not one of the filtered sources.
+/// `runner::env::GIT_OPENSSL`) after this filter, and those stay, as does the runner's own
+/// `CLAUDE_CODE_GIT_BASH_PATH` (#792, `runner/env.rs`), which it always sets to its per-pool
+/// Git tree.
 pub(crate) const BLOCKED: [Pattern; 18] = [
     // Run by bash and sh at start.
     Pattern::Name("BASH_ENV"),
@@ -118,7 +119,7 @@ pub(crate) const BLOCKED: [Pattern; 18] = [
     Pattern::Name("NODE_OPTIONS"),
     Pattern::Name("NODE_PATH"),
     // The bash Claude Code runs on Windows, read before its own search: a lawyer's value could
-    // name a bash they can write to. R17 PR-D3b-win sets it itself, after its own checks.
+    // name a bash they can write to. The Windows runner sets it itself (#792, its per-pool tree).
     Pattern::Name("CLAUDE_CODE_GIT_BASH_PATH"),
     // Claude Code's PowerShell tool, its only shell on Windows without Git Bash: `0` turns it
     // off and Claude Code exits, so no source may set it.
