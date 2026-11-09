@@ -384,11 +384,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Windows links the C runtime statically (+crt-static), as a clean machine has no VC++
+        # Redistributable; pe-crt-imports.mjs checks the exes. Never on macOS or Linux (static
+        # glibc). setup-exe-repro.yml's RUSTFLAGS repeat the Windows rows' byte for byte, as cargo
+        # hashes them into symbol names; pe-crt-imports.test.mjs fails when they differ.
         include:
           - { target: aarch64-apple-darwin, runner: macos-15, tier: 1, signs: true, arch: aarch64, rustflags: "-C force-frame-pointers=yes" }
           - { target: x86_64-apple-darwin, runner: macos-15, tier: 2, signs: true, arch: x64, rustflags: "-C force-frame-pointers=yes" }
-          - { target: x86_64-pc-windows-msvc, runner: windows-2025, tier: 1, signs: false, arch: x64, rustflags: "-C force-frame-pointers=yes" }
-          - { target: aarch64-pc-windows-msvc, runner: windows-11-arm, tier: 1, signs: false, arch: arm64, rustflags: "-C force-frame-pointers=yes" }
+          - { target: x86_64-pc-windows-msvc, runner: windows-2025, tier: 1, signs: false, arch: x64, rustflags: "-C force-frame-pointers=yes -C target-feature=+crt-static" }
+          - { target: aarch64-pc-windows-msvc, runner: windows-11-arm, tier: 1, signs: false, arch: arm64, rustflags: "-C force-frame-pointers=yes -C target-feature=+crt-static" }
           - { target: x86_64-unknown-linux-gnu, runner: ubuntu-22.04, tier: 2, signs: false, arch: amd64, rustflags: "-C force-frame-pointers=yes -C link-arg=-Wl,--build-id=sha1" }
     env:
       TARGET: ${{ matrix.target }}
@@ -682,6 +686,21 @@ jobs:
           name: dry-updater-pub-${{ matrix.target }}
           path: ${{ runner.temp }}/dry-updater.key.pub
           if-no-files-found: error
+
+      # A clean Windows has no VC++ Redistributable, so a PE importing VCRUNTIME140.dll won't start
+      # there (ADR 0035, "The C runtime"). Every exe the upload below ships, fetched ones too, and
+      # any DLL placed beside them or in the bundle's resources. None ships today (WebView2Loader is
+      # linked statically on msvc; bundle.resources is the block-list), so one that appears is
+      # checked here before anyone has to remember it.
+      - name: Check that no shipped Windows binary imports the VC++ runtime
+        if: runner.os == 'Windows'
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          dlls=("$RELEASE_DIR"/*.dll crates/desktop/binaries/*.dll crates/desktop/blocklist/*.dll)
+          [ ${#dlls[@]} -gt 0 ] || echo "No DLL beside the exes or in the bundle's resources: no DLL ships"
+          node .github/scripts/pe-crt-imports.mjs "$RELEASE_DIR/Clauseo.exe" \
+            crates/desktop/binaries/*-"$TARGET".exe ${dlls[@]+"${dlls[@]}"}
 
       # The exe exactly as linked, the sidecars as placed and the overlay that lists them, for
       # sign-windows to sign and bundle. Paths are kept from the repo root, so the download puts
@@ -1378,12 +1397,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # build's rustflags for the same target: crt-static on Windows only.
         include:
-          - { target: aarch64-apple-darwin, runner: macos-15, feature: marks, exe: "" }
-          - { target: x86_64-pc-windows-msvc, runner: windows-2025, feature: e2e, exe: .exe }
+          - { target: aarch64-apple-darwin, runner: macos-15, feature: marks, exe: "", rustflags: "-C force-frame-pointers=yes" }
+          - { target: x86_64-pc-windows-msvc, runner: windows-2025, feature: e2e, exe: .exe, rustflags: "-C force-frame-pointers=yes -C target-feature=+crt-static" }
     env:
       TARGET: ${{ matrix.target }}
-      RUSTFLAGS: "-C force-frame-pointers=yes"
+      RUSTFLAGS: ${{ matrix.rustflags }}
       RELEASE_DIR: target/${{ matrix.target }}/release
     defaults:
       run:

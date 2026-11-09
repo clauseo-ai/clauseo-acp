@@ -196,10 +196,11 @@ jobs:
           echo "node $(node -v), ui/package.json wants $(node -p 'require("./ui/package.json").engines.node')"
 
       # release.yml runs only on tags and on demand, so its rules (pull request triggers, pinned
-      # actions, permissions, secrets on steps, the sidecar seam), latest.json's writer and the
-      # sidecar script are tested here, in plain Node, without the network or cargo.
+      # actions, permissions, secrets on steps, the sidecar seam), latest.json's writer, the
+      # sidecar script and the VC++ runtime import check are tested here, in plain Node, without
+      # the network or cargo.
       - name: Test the release scripts and release.yml's rules
-        run: node --test .github/scripts/latest-json.test.mjs .github/scripts/sidecars.test.mjs
+        run: node --test .github/scripts/latest-json.test.mjs .github/scripts/sidecars.test.mjs .github/scripts/pe-crt-imports.test.mjs
 
       # Saved on main only, as every Rust cache here. The key names the image: rust-cache's own key
       # holds only the OS, and build scripts compiled on 24.04 would not run on 22.04's older glibc.
