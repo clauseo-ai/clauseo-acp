@@ -92,6 +92,8 @@ pub mod marker;
 mod outer;
 pub mod paths;
 mod policy;
+#[cfg(any(windows, test))]
+mod previous;
 #[cfg(windows)]
 mod spawn;
 #[cfg(any(windows, test))]
@@ -462,8 +464,14 @@ pub enum RunExit {
     TokenGrant,
 }
 
+/// [`RunExit::TokenGrant`]'s reserved number past [`RUN_EXIT_BASE`]; `0x12` to `0x14` are other
+/// branches' codes (`AwaitingStop`, `AwaitingSweep`, `LeftoverTask`), none here.
+const TOKEN_GRANT_OFFSET: u32 = 0x15;
+
 impl RunExit {
-    const ALL: [RunExit; 19] = [
+    /// The variants numbered by position, from [`RUN_EXIT_BASE`]; [`RunExit::TokenGrant`] has an
+    /// explicit, reserved number instead ([`TOKEN_GRANT_OFFSET`]).
+    const ALL: [RunExit; 18] = [
         RunExit::Usage,
         RunExit::BadLaunch,
         RunExit::NoSecret,
@@ -482,11 +490,13 @@ impl RunExit {
         RunExit::Escapee,
         RunExit::PoolStop,
         RunExit::MarkerUnwritable,
-        RunExit::TokenGrant,
     ];
 
     /// The exit code.
     pub fn code(self) -> u32 {
+        if self == RunExit::TokenGrant {
+            return RUN_EXIT_BASE + TOKEN_GRANT_OFFSET;
+        }
         let index = RunExit::ALL
             .iter()
             .position(|exit| *exit == self)
@@ -496,8 +506,11 @@ impl RunExit {
 
     /// The failure an exit code names, if it is one.
     pub fn from_code(code: u32) -> Option<RunExit> {
-        let index = usize::try_from(code.checked_sub(RUN_EXIT_BASE)?).ok()?;
-        RunExit::ALL.get(index).copied()
+        let offset = code.checked_sub(RUN_EXIT_BASE)?;
+        if offset == TOKEN_GRANT_OFFSET {
+            return Some(RunExit::TokenGrant);
+        }
+        RunExit::ALL.get(usize::try_from(offset).ok()?).copied()
     }
 
     /// What tier detection makes of it: the set-up's failures, which running the set-up again or

@@ -23,7 +23,7 @@ use super::{os, say};
 use crate::windows::acl::object::Handle;
 use crate::windows::secrets::secret_for;
 use crate::windows::sids::Sid;
-use crate::windows::token::os::shut_object;
+use crate::windows::token::os::{shut_object, shut_process};
 use crate::windows::token::{runner_process_sddl, runner_thread_sddl};
 
 /// How long the outer, still alive at its end, waits for the sweeper to report.
@@ -35,7 +35,8 @@ pub(super) struct OsSweeper {
     pub(super) pool_user: Sid,
     pub(super) pool_name: String,
     pub(super) desktop: Sid,
-    /// The desktop user's logon SID, which the runners' process DACL grants.
+    /// The desktop user's logon SID, which the inner's token must not hold
+    /// (`inner_user::check_full`).
     pub(super) logon: Sid,
     pub(super) exe: String,
     pub(super) cwd: String,
@@ -154,12 +155,9 @@ impl SweeperSteps for OsSweeper {
     }
 
     fn shut(&self, sweeper: &Process) -> Result<(), String> {
-        shut_object(
-            sweeper.handle.0,
-            &runner_process_sddl(&self.desktop, &self.logon),
-        )
-        .and_then(|()| shut_object(sweeper.thread.0, &runner_thread_sddl(&self.desktop)))
-        .map_err(|e| os("the end sweeper's DACL", &e))?;
+        shut_process(sweeper.handle.0, &runner_process_sddl(&self.desktop))
+            .and_then(|()| shut_object(sweeper.thread.0, &runner_thread_sddl(&self.desktop)))
+            .map_err(|e| os("the end sweeper's DACL", &e))?;
         // The sweeper outlives this process, and its station goes with its last handle.
         match self.agent_desktop.get() {
             Some(made) => made

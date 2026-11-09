@@ -19,9 +19,11 @@ Tier B works only from a desktop session; from session 0 the restricted child fa
 build 26100):
 
 - **PR0** started from one shared user, `ClauseoSandbox`, with one SID per matter. It showed that
-  `CreateProcessWithLogonW` hands the runner the desktop user's own logon SID, that `Users` must be
-  a restricting SID (System32 DLLs outside KnownDLLs grant `Users` only), and that the default
-  DACL, not the desktop, caused `0xC0000142`.
+  `CreateProcessWithLogonW` hands the runner the desktop user's own logon SID (corrected since: a
+  VM measurement, with `LOGON_WITH_PROFILE` and an explicit desktop, found each child holds only
+  its own logon's fresh logon SID, never the desktop user's), that `Users` must be a restricting
+  SID (System32 DLLs outside KnownDLLs grant `Users` only), and that the default DACL, not the
+  desktop, caused `0xC0000142`.
 - **That token was superseded** (spike B, private `measurements/s15-spikes-userpool.md`). NPFS
   gives a pipe made with no security set a default descriptor that grants its owner full access
   and `Everyone` read. Under the shared user, the owner wasn't a restricting SID, so the agent
@@ -1096,18 +1098,21 @@ leaves that profile, both naming the part.
   only its three pipes. The agent runs as the inner runner's own user, so the inner runner is
   shut to it: the outer reads the inner's user (from its token, or, on the agent's own station
   where the token refuses the lawyer, from `ProcessTelemetryIdInformation`) and gives its process
-  and first thread a
-  protected DACL naming `SYSTEM` and the lawyer alone, with `OWNER RIGHTS` held to
-  `READ_CONTROL` (the process's also grants the lawyer's logon SID wait, query and end, for the
-  sweeps below), while the inner is still suspended (`CreateProcessWithLogonW` takes no
-  descriptor, so the pid exists with the logon's default DACL from its return until then, before
-  any of the inner's code runs). The inner's first act shuts its primary token to `SYSTEM` and the
+  and first thread a protected DACL naming `SYSTEM` and the lawyer alone, with `OWNER RIGHTS`
+  held to `READ_CONTROL`, no pool user and no logon SID, and a Medium label with no-write-up,
+  no-read-up and no-execute-up (`token::runner_process_sddl`), while the inner is still suspended
+  (`CreateProcessWithLogonW` takes no descriptor, so the pid exists with the logon's default DACL
+  from its return until then, before any of the inner's code runs). The inner's first act shuts its primary token to `SYSTEM` and the
   lawyer's `TOKEN_QUERY` alone, says ready on `ctl` and waits (60 s at most, on its one thread);
   the outer, within 30 s, checks the token's user, a logon SID of the run's own (not the
   lawyer's), Medium integrity and no full elevation (not its groups or restricting SIDs), and
-  only then sends the go, or kills it. After reading the launch it adds the lawyer's query and shuts every thread it has; once the
-  agent's token is made (`CreateRestrictedToken` builds its descriptor from the default DACL), it
-  gives its default DACL the threads' entries so a thread the system starts in it later is shut
+  only then sends the go, or kills it. Residual, accepted: until `shut_self`, the loader's own
+  worker threads carry the pool logon's default DACL, which grants the pool user full access; a
+  Medium pool-user process (from a task, a BITS job or a service, `inner_flow.rs` step 1) could
+  open them. The agent can't make one (it is Low and can't create a Medium process of the pool
+  user), and those threads came before this change. After reading the launch the inner adds the
+  lawyer's query and shuts every thread it has; once the agent's token is made
+  (`CreateRestrictedToken` builds its descriptor from the default DACL), it gives its default DACL the threads' entries so a thread the system starts in it later is shut
   too, and shuts every thread again. Once the inner runs, its own agent can't open its Medium,
   unrestricted token. A process already running as the pool user could, in the gap before the
   shut; the next item closes that gap. The agent's own token gets an explicit protected DACL:
@@ -1123,8 +1128,8 @@ leaves that profile, both naming the part.
   logon's default DACL, which gives the pool user full access. A process already running as that
   pool user could open the process then, and its token too (the harness's `runners` row first
   found `TOKEN_QUERY` and `TOKEN_DUPLICATE` open on that DACL). A handle opened in the gap
-  outlives the shut, and the token is Medium, unrestricted, with the lawyer's logon SID enabled.
-  Two rules close the gap:
+  outlives the shut, and the token is Medium, unrestricted, with its own logon's fresh logon SID
+  enabled. Two rules close the gap:
   - A pool user serves one live session at a time. A matter holds one pool user for now, so
     `MatterSids::assign` refuses a second session of a matter while the matter's set-aside
     record lists another session open (`Assign::Busy`; a record that can't be read counts as
@@ -1173,7 +1178,7 @@ leaves that profile, both naming the part.
     what the pool user could have left to start at a logon or to run in a later runner: its
     per-user COM classes (`HKCU\Software\Classes\{CLSID,Interface,AppID,TypeLib}` and their
     `Wow6432Node` twins, deleted whole: a sandbox account has none of its own, and one registered
-    for a class a runner makes would run in that runner with the lawyer's logon SID); every value
+    for a class a runner makes would run in that runner, as the pool user); every value
     of its `HKCU\...\CurrentVersion\Run` and `RunOnce`; and every entry of its Startup folder.
     The inner makes no COM call. The end sweeper removes the same three, then, over COM (MTA) and
     only when no class key is left, scheduled tasks whose principal or author is the pool user,
@@ -1299,19 +1304,15 @@ leaves that profile, both naming the part.
     was created before it. Each pass already lists again after any round that killed something;
     the second pass, which keeps what the first killed, takes what got past the first pass's last
     listing. A process an escaped one starts after the sweeper started, or one a service starts
-    for it, is killed by the next session's first act or tick. The other way round, the next inner's first
-    act kills a sweeper still running, a pool-user process outside its job. Nothing is lost: that
-    inner makes the same cleanup itself. For either to open the other, the runners' process DACL
-    (the inner's and the sweeper's, not their threads or token) grants the lawyer's logon SID
-    `SYNCHRONIZE`, `PROCESS_QUERY_LIMITED_INFORMATION` and `PROCESS_TERMINATE`.
-    `CreateProcessWithLogonW` gives both runners that SID, enabled. The agent holds it deny-only,
-    so an allow entry never matches it; the pool user itself is one of the agent's restricting
-    SIDs, so an entry naming the pool user would have reached the agent. A pool-user process a
-    service started outside the job runs in the pool user's own logon session and doesn't hold
-    the SID. Other matters' runners started from the same logon do, and can open these, but
-    their sweeps only kill their own pool user's processes. Accepted: a sweeper from before the
-    lawyer signed out and in again holds the old logon SID, so a launch during its up to 60 s
-    can't open it and fails `RunExit::Escapee`, and a retry once it exited works.
+    for it, is killed by the next session's first act or tick. No runner opens another: the
+    runners' process DACL grants the pool user nothing (the pool user is one of the agent's
+    restricting SIDs, and `PROCESS_TERMINATE` would let the agent end its own inner with a code of
+    its choosing), and names no logon SID (each runner's is its own logon's). Instead, before its
+    logon, the next outer, as the lawyer, whom that DACL grants wait, query and end, finds every
+    live runner of the pool user (the runner's image, opened with those rights, its user read
+    through the handle from `ProcessTelemetryIdInformation`), waits for it up to the sweeper's
+    60 s, then ends it (`runner/previous.rs`). What an ended sweeper didn't get to, the new
+    inner's first act sweeps.
   - **The exit code on a cancel.** The guard keeps the signal that started the sweeper. The
     outer's job end gives the inner and the agent the sweeper's kill code (`RUN_EXIT_BASE +
     0xff`, which would come back as `AgentReserved`). When the end began at the host's stdin
@@ -1374,7 +1375,7 @@ leaves that profile, both naming the part.
     the sweeper, logs a warning that it did so for time, and goes on as when the job didn't empty.
     The session isn't clean, so its marker stays. With a 1.5 s grace and the 400 ms wait, about
     100 ms was left for the logon, shut and resume, and a host kill between the sweeper's creation
-    and its shut could leave it suspended and unshut: Medium, holding the lawyer's logon SID, with
+    and its shut could leave it suspended and unshut: Medium, holding its own logon SID, with
     a default DACL that grants the pool user `GA`. With a 1 s grace the logon starts at most
     1.5 s after the stdin end, and 500 ms is more than the harness has measured for a whole
     session start through the agent's first line, the outer's logon of the inner included (123
@@ -1399,9 +1400,11 @@ leaves that profile, both naming the part.
   - **A suspended sweeper hands over the lawyer's session.** A suspended sweeper runs none of its
     own code, but until the outer's shut its process, thread and token carry the logon's default
     DACL, which grants the pool user `GA`. A Medium pool-user process that the job's end didn't
-    reach (one outside the job, M2) can open it and inject code. The sweeper runs as the pool
-    user, but its token also holds the lawyer's logon SID, and that SID means control of the
-    lawyer's desktop and read access to the lawyer's processes:
+    reach (one outside the job, M2) can open it and inject code. **Corrected:** this item assumed
+    the sweeper's token also holds the lawyer's logon SID; a VM measurement found it holds only its
+    own logon's fresh logon SID, so the lawyer's desktop and processes below aren't reached through
+    it. Injected code still runs as the pool user. As first written, that SID would have meant
+    control of the lawyer's desktop and read access to the lawyer's processes:
     - `WinSta0` and its `Default` desktop are secured to it. A Medium process holding it can
       attach to the lawyer's desktop and set global hooks, which load its code into the lawyer's
       processes; send keystrokes and mouse input; read the clipboard; and capture the screen.

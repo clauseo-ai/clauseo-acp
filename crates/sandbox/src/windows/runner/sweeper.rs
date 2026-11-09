@@ -1,8 +1,8 @@
 //! The detached end sweeper (Windows): `clauseo-sandbox-run --sweep`, started by the outer as
 //! the pool user at a session's end (`end.rs`), outside the launch's job, once the job is empty.
 //! It takes nothing but its flag. Its first act, as the inner's, is to shut its own primary token
-//! to all but `SYSTEM` (`token::RUNNER_TOKEN_FIRST_SDDL`): it is Medium, unrestricted, with the
-//! desktop user's logon SID enabled, and the handle opened for the shut keeps its rights. It then
+//! to all but `SYSTEM` (`token::RUNNER_TOKEN_FIRST_SDDL`): it is Medium, unrestricted, with its own
+//! logon's fresh logon SID enabled, and the handle opened for the shut keeps its rights. It then
 //! shuts its default DACL and every thread it has to `SYSTEM` alone (`token::SWEEPER_*`), as the
 //! inner shuts its own to the agent, so a thread the system or COM starts later is shut too. It
 //! kills every process of its own user but itself (no job is kept: the session is ending) that
@@ -43,7 +43,7 @@ use crate::windows::token::os::{
 };
 
 /// How long the whole sweep may take.
-const SWEEP_LIMIT: Duration = Duration::from_secs(60);
+const SWEEP_LIMIT: Duration = super::previous::SWEEPER_LIMIT;
 
 /// The sweeper's whole run; its exit code.
 pub fn run_sweep() -> u32 {

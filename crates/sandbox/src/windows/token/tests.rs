@@ -199,9 +199,9 @@ fn display_names_every_part() {
 
 #[test]
 fn the_inner_runners_own_objects_name_no_pool_user() {
-    let (desktop, logon) = (sid(DESKTOP), sid(LOGON));
+    let desktop = sid(DESKTOP);
     for sddl in [
-        runner_process_sddl(&desktop, &logon),
+        runner_process_sddl(&desktop),
         runner_thread_sddl(&desktop),
         runner_token_sddl(&desktop),
         runner_default_dacl(&desktop),
@@ -211,8 +211,9 @@ fn the_inner_runners_own_objects_name_no_pool_user() {
             assert!(!sddl.contains(absent), "{absent} in {sddl}");
         }
     }
-    // Only the process names the logon SID; the threads and the token don't.
+    // None names a logon SID: each runner's is its own logon's.
     for sddl in [
+        runner_process_sddl(&desktop),
         runner_thread_sddl(&desktop),
         runner_token_sddl(&desktop),
         runner_default_dacl(&desktop),
@@ -266,32 +267,19 @@ fn the_pool_user_cant_change_the_agents_token() {
 }
 
 #[test]
-fn the_runners_process_grants_the_logon_sid_wait_query_and_end_and_the_pool_user_nothing() {
-    // The pool user's sweeps reach the runners (the inner, the end sweeper) through the desktop
-    // user's logon SID, which the agent holds deny-only.
-    let (desktop, logon) = (sid(DESKTOP), sid(LOGON));
-    let sddl = runner_process_sddl(&desktop, &logon);
+fn the_runners_process_grants_the_desktop_user_alone_and_carries_a_medium_label() {
+    // No pool user (the agent, and any other process of the pool user's, opens nothing of a
+    // runner, and no runner opens another) and no logon SID (each runner's is its own logon's);
+    // the owner held to READ_CONTROL; a Medium label refusing Low callers write, read and
+    // execute.
+    let sddl = runner_process_sddl(&sid(DESKTOP));
     assert_eq!(
         sddl,
-        format!("D:P(A;;GA;;;SY)(A;;0x101001;;;{DESKTOP})(A;;0x101001;;;{LOGON})(A;;RC;;;OW)")
+        format!("D:P(A;;GA;;;SY)(A;;0x101001;;;{DESKTOP})(A;;RC;;;OW)S:(ML;;NWNRNX;;;ME)")
     );
-    // Every entry, SID by SID: no other SID gains anything, and the pool user isn't one.
-    let entries: Vec<&str> = sddl
-        .trim_start_matches("D:P(")
-        .trim_end_matches(')')
-        .split(")(")
-        .collect();
-    let want = [
-        "A;;GA;;;SY".to_owned(),
-        format!("A;;0x101001;;;{DESKTOP}"),
-        format!("A;;0x{DESKTOP_USER_RIGHTS:x};;;{LOGON}"),
-        "A;;RC;;;OW".to_owned(),
-    ];
-    assert_eq!(entries, want);
-    assert!(!sddl.contains(POOL));
-    // The agent's token holds that logon SID deny-only, so the allow never matches it.
-    let spec = TokenSpec::for_pool(&sid(POOL), &logon, &desktop, None).unwrap();
-    assert_eq!(spec.deny_only, [logon]);
+    for absent in [POOL, LOGON, ";WD)", ";BU)", ";AU)"] {
+        assert!(!sddl.contains(absent), "{absent} in {sddl}");
+    }
 }
 
 #[test]

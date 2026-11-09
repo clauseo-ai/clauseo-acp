@@ -54,8 +54,10 @@
 //! whose service reads the tokens). A pid either names the pool user is the pool user's, so such
 //! a process is found, fails its open, and fails the first act closed.
 //!
-//! **The end sweeper and a next session.** The end sweeper lives up to 60 s, and a next launch
-//! for the same pool user may start meanwhile. It kills only what was created before it started,
+//! **The end sweeper and a next session.** The end sweeper lives up to 60 s. A next launch for the
+//! same pool user waits for it, then ends it, before its logon (`previous.rs`, the outer's, as
+//! the desktop user): no runner opens another, and the runners' process DACL grants the pool user
+//! nothing. The sweeper still kills only what was created before it started,
 //! and what a process it killed started: the next session's processes start later, from the next
 //! outer (`CreateProcessWithLogonW` names its caller as the parent) and its inner, and are left
 //! alone. A process created after the sweeper whose parent pid (the snapshot's) names a process
@@ -69,11 +71,8 @@
 //! **Two passes.** Each pass lists again after any round that killed something, until a round
 //! kills nothing. The end sweeper then makes a second pass, keeping what the first killed (open,
 //! for the parent check): for what got past the first pass's last listing, such as a child whose
-//! parent the first pass killed as it was being created. The other
-//! way round, the next inner's first act kills a sweeper still running (a pool-user process
-//! outside its job), which loses nothing: that inner makes the same cleanup itself
-//! (`leftovers.rs`). Each can open the other: the runners' process DACL grants the desktop
-//! user's logon SID, which both hold (`token::runner_process_sddl`).
+//! parent the first pass killed as it was being created. A sweeper the next outer ended loses
+//! nothing: the next inner's first act makes the same sweep and cleanup (`leftovers.rs`).
 //!
 //! Each process found is opened first, which pins its pid, and then the lists are read again: only
 //! a pid they still give the pool user is killed, so a pid reused meanwhile is left alone.

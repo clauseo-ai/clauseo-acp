@@ -217,7 +217,7 @@ fn the_inner_runners_token_sequence_passes_in_order() {
     let logon = os::logon_sid(&token).unwrap();
     let desktop = sid("S-1-5-21-1-2-3-1001");
     os::shut_inner_token_first(&token, &desktop).unwrap();
-    os::shut_self(&token, &desktop, &logon).unwrap();
+    os::shut_self(&token, &desktop).unwrap();
     let spec = TokenSpec::for_pool(&me, &logon, &desktop, None).unwrap();
     let agent = os::make(&token, &spec).unwrap();
     assert_eq!(os::user(&agent).unwrap(), me);

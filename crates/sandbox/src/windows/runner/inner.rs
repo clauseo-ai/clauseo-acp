@@ -171,8 +171,7 @@ impl Inner for Calls {
         // Then, before anything else: shut this runner's token (now with the desktop user's
         // query), process, threads and later objects to the agent (`token::os::shut_self`); the
         // outer shut the process and first thread while this runner was still suspended.
-        let logon = logon_sid(&self.token).map_err(|e| fail(RunExit::Token, "logon SID", &e))?;
-        shut_self(&self.token, &launch.desktop_user, &logon)
+        shut_self(&self.token, &launch.desktop_user)
             .map_err(|e| fail(RunExit::Token, "the inner runner's own DACL", &e))?;
         self.launch = Some(launch);
         Ok(())

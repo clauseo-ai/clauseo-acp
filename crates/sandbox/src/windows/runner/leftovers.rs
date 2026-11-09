@@ -7,7 +7,7 @@
 //!
 //! The per-user classes (`HKCU\Software\Classes\{CLSID,Interface,AppID,TypeLib}` and their
 //! `Wow6432Node` twins) go first: a server registered there for a class a runner makes would run
-//! for that runner with the lawyer's logon SID, and a sandbox account has no per-user class of its
+//! in that runner, as the pool user, and a sandbox account has no per-user class of its
 //! own to keep. The tasks, the one kind reached over COM, are skipped when any class key is left.
 //! Task Scheduler's class object comes from System32's `taskschd.dll` itself, with no class lookup
 //! (`os/com.rs`).
