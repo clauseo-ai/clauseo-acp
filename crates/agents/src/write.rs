@@ -17,7 +17,9 @@ use std::path::Path;
 
 pub(crate) mod extract;
 
-pub(crate) use extract::{ArchiveKind, ExtractError, extract};
+pub(crate) use extract::{
+    ArchiveKind, ExtractError, ManifestEntry, extract, extract_tar_gz_read_only,
+};
 
 /// `fs::create_dir_all`.
 pub(crate) fn create_dir_all(path: &Path) -> io::Result<()> {
@@ -242,6 +244,17 @@ pub(crate) fn sync_file(path: &Path) -> io::Result<()> {
     open_no_follow(OpenOptions::new().write(true), path)?.sync_all()
 }
 
+/// Flushes the read-only file `path`'s bytes to the disk: Python's interpreter, unpacked
+/// `0o555`. On Unix through a read-only handle (`fsync` needs no write access); on Windows,
+/// where no unpack sets a read-only attribute, as [`sync_file`].
+pub(crate) fn sync_read_only(path: &Path) -> io::Result<()> {
+    if cfg!(unix) {
+        open_read(path)?.sync_all()
+    } else {
+        sync_file(path)
+    }
+}
+
 /// `fs::rename`: `from` replaces `to` (a file), or moves a folder to a free name.
 pub(crate) fn rename(from: &Path, to: &Path) -> io::Result<()> {
     std::fs::rename(from, to)
@@ -256,12 +269,73 @@ pub(crate) fn remove_file(path: &Path) -> io::Result<()> {
 }
 
 /// Removes the folder at `path` and everything in it, never following a link out of it; a
-/// missing folder is fine.
+/// missing folder is fine. A folder that refuses (Python's read-only runtime, `0o555` folders
+/// on Unix) is made writable through no link ([`make_writable`]) and removed again: every
+/// removal (a temp folder, a failed try's tree, a stale runtime, a reinstall) goes through here.
 pub(crate) fn remove_dir_all(path: &Path) -> io::Result<()> {
     match std::fs::remove_dir_all(path) {
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(err) if cfg!(unix) && err.kind() == io::ErrorKind::PermissionDenied => {
+            make_writable(path)?;
+            match std::fs::remove_dir_all(path) {
+                Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+                other => other,
+            }
+        }
         other => other,
     }
+}
+
+/// Gives the owner full access (`0o700` added, on Unix) to the real folder `path` and every
+/// real folder under it, so what is in them can be removed. Read with `symlink_metadata`: a
+/// link is never followed, and a file is left as it is (unlinking it needs only its folder
+/// writable). Windows has no mode to change; the walk then only reads.
+pub(crate) fn make_writable(path: &Path) -> io::Result<()> {
+    let meta = match std::fs::symlink_metadata(path) {
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
+        meta => meta?,
+    };
+    if !meta.is_dir() || is_reparse_point(&meta) {
+        return Ok(());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = meta.permissions().mode();
+        if mode & 0o700 != 0o700 {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode | 0o700))?;
+        }
+    }
+    for entry in std::fs::read_dir(path)? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            make_writable(&entry.path())?;
+        }
+    }
+    Ok(())
+}
+
+/// Sets every real folder under `dir` (not `dir` itself) to `0o555` on Unix, deepest first, so
+/// nothing can be added, renamed or removed below it. Links are never followed. Windows has no
+/// mode to set (the sandbox's ACLs keep the runtime read-only for the agent); the walk then
+/// only reads.
+pub(crate) fn seal_below(dir: &Path) -> io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            seal_below(&entry.path())?;
+            #[cfg(unix)]
+            make_read_only(&entry.path())?;
+        }
+    }
+    Ok(())
+}
+
+/// Sets the one folder `dir` to `0o555`: Python's runtime folder, once its receipt is in.
+#[cfg(unix)]
+pub(crate) fn make_read_only(dir: &Path) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o555))
 }
 
 /// Writes `bytes` to `path` atomically: into `.<name>.tmp` beside it, synced, then renamed

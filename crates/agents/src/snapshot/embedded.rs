@@ -1,10 +1,11 @@
 //! The embedded snapshot's data: G16's pins, the sizes measured for them, Node 24.22.0's
-//! archives and the agents' hosts.
+//! archives, the Python runtime's (none published yet) and the agents' hosts.
 
 use clauseo_protocol::AgentId;
 
 use super::{
-    AgentEntry, AgentSizes, NPM_REGISTRY, NodeArchive, NodeEntry, Snapshot, SnapshotError,
+    AgentEntry, AgentSizes, NPM_REGISTRY, NodeArchive, NodeEntry, PythonArchive, PythonEntry,
+    Snapshot, SnapshotError,
 };
 use crate::platform::{Arch, Os};
 
@@ -136,8 +137,24 @@ const NODE_ARCHIVES: [(Os, Arch, &str, u64, u64, &str); 6] = [
     ),
 ];
 
+/// The Python runtime's version.
+const PYTHON_VERSION: &str = "3.13.18";
+/// Whether Clauseo's CI has published the Python archives this build pins. Until it has,
+/// [`PYTHON_ARCHIVES`] stays empty and no platform has Python: an install skips it and reports
+/// it unavailable, and the agents install as before. A test holds the two together.
+pub(super) const PYTHON_ARCHIVES_PUBLISHED: bool = false;
+/// Each Python archive Clauseo's CI publishes as a release asset on `clauseo-ai/clauseo-acp`:
+/// platform, file name (`clauseo-python-3.13.18-c<build>-<os>-<arch>.tar.gz`), URL, size,
+/// unpacked size, SHA-256. macOS arm64 and x64, Windows x64 and ARM64; Linux has no Python. A
+/// security fix ships as an app update with new rows here; the old runtime folder is removed at
+/// the next start. Empty until [`PYTHON_ARCHIVES_PUBLISHED`].
+pub(super) const PYTHON_ARCHIVES: [(Os, Arch, &str, &str, u64, u64, &str); 0] = [];
+
 /// Hosts every install contacts.
 const INSTALL_HOSTS: [&str; 2] = ["nodejs.org", "registry.npmjs.org"];
+/// Hosts the Python archive's download contacts (the release asset and its redirect), added to
+/// every agent's install hosts once [`PYTHON_ARCHIVES`] has rows.
+const PYTHON_HOSTS: [&str; 2] = ["github.com", "release-assets.githubusercontent.com"];
 // The sign-in hosts below are S18's: G7 row 1 confirms them against a real sign-in.
 /// Claude's sign-in hosts. `claude.com` is where Claude Code's authorize page now lives
 /// (`https://claude.com/cai/oauth/authorize`, the address the brief's fake opens).
@@ -171,6 +188,11 @@ pub(super) fn build_embedded() -> Result<Snapshot, SnapshotError> {
         let agent_id = AgentId::new(id).map_err(|_bad| SnapshotError::ReservedId(id.to_owned()))?;
         let mut entry = AgentEntry::new(agent_id, name, root, "dist/index.js");
         entry.install_hosts = INSTALL_HOSTS.iter().map(|&host| host.to_owned()).collect();
+        if !PYTHON_ARCHIVES.is_empty() {
+            entry
+                .install_hosts
+                .extend(PYTHON_HOSTS.iter().map(|&host| host.to_owned()));
+        }
         entry.signin_hosts = signin.iter().map(|&host| host.to_owned()).collect();
         entry.sizes = SIZES
             .iter()
@@ -193,6 +215,7 @@ pub(super) fn build_embedded() -> Result<Snapshot, SnapshotError> {
         embedded_node(),
         entries,
     )
+    .map(|snapshot| snapshot.with_python(embedded_python()))
 }
 
 /// Node 24.22.0's entry.
@@ -204,4 +227,18 @@ pub(super) fn embedded_node() -> NodeEntry {
         })
         .collect();
     NodeEntry::new(NODE_VERSION, NODE_BASE, archives)
+}
+
+/// The Python runtime's entry: no archive until [`PYTHON_ARCHIVES_PUBLISHED`].
+pub(super) fn embedded_python() -> PythonEntry {
+    if !PYTHON_ARCHIVES_PUBLISHED {
+        return PythonEntry::new(PYTHON_VERSION, Vec::new());
+    }
+    let archives = PYTHON_ARCHIVES
+        .iter()
+        .filter_map(|&(os, arch, name, url, size, unpacked, sha)| {
+            PythonArchive::new(os, arch, name, url, size, unpacked, sha)
+        })
+        .collect();
+    PythonEntry::new(PYTHON_VERSION, archives)
 }

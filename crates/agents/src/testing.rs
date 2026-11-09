@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 
-pub use pack::{npm_tarball, sha512_integrity};
+pub use pack::{npm_tarball, runtime_tar_gz, sha512_integrity};
 pub use trace::{instant, millis_since, trace};
 
 use crate::TestResolver;

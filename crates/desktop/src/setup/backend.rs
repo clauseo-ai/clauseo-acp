@@ -509,6 +509,7 @@ impl AgentsBackend {
                     }
                 }
                 AgentsEvent::SigninNote { agent, note } => events::note(&agent, note),
+                AgentsEvent::Python { state } => entry::python_event(self, &state),
                 // A job that ended with no state (a status check that could not tell): an
                 // `auth_required` re-check of it is over, so the next hold may ask again.
                 AgentsEvent::SigninUnchanged { agent } => {

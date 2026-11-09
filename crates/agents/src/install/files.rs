@@ -126,27 +126,7 @@ pub(super) fn fetch_all<T: Timer + Send + Sync>(
             }
             Source::Fetch(fetch_job) => {
                 if fetcher.is_none() {
-                    // The network now, not the job's start's: a fresh one from the caller when it
-                    // has one (its route resolved again past 60 s), else the last
-                    // `set_network` gave, so a try after a change (one waiting offline, say)
-                    // goes through the new proxy.
-                    let mut install = config.install.clone();
-                    let fresh = config
-                        .install
-                        .refresh
-                        .as_ref()
-                        .and_then(|refresh| refresh());
-                    let network = fresh.unwrap_or_else(|| {
-                        let network = job.network.read().unwrap_or_else(PoisonError::into_inner);
-                        network.clone()
-                    });
-                    install.set_network(network);
-                    fetcher = Some(Fetcher::new(
-                        &install,
-                        &job.ticket.agent,
-                        job.system_proxy.as_deref(),
-                        &config.data_dir,
-                    )?);
+                    fetcher = Some(new_fetcher(job)?);
                 }
                 let Some(client) = fetcher.as_ref() else {
                     return Err(TryError::retry("no HTTP client", config));
@@ -169,6 +149,30 @@ pub(super) fn fetch_all<T: Timer + Send + Sync>(
     }
     progress.tick(job, run, true);
     Ok(fetched)
+}
+
+/// A client on the network now, not the job's start's: a fresh one from the caller when it has
+/// one (its route resolved again past 60 s), else the last `set_network` gave, so a try after a
+/// change (one waiting offline, say) goes through the new proxy.
+pub(super) fn new_fetcher<T: Timer + Send + Sync>(job: &Job<T>) -> Result<Fetcher, TryError> {
+    let config = &job.config;
+    let mut install = config.install.clone();
+    let fresh = config
+        .install
+        .refresh
+        .as_ref()
+        .and_then(|refresh| refresh());
+    let network = fresh.unwrap_or_else(|| {
+        let network = job.network.read().unwrap_or_else(PoisonError::into_inner);
+        network.clone()
+    });
+    install.set_network(network);
+    Ok(Fetcher::new(
+        &install,
+        &job.ticket.agent,
+        job.system_proxy.as_deref(),
+        &config.data_dir,
+    )?)
 }
 
 /// The try's files, Node's archive first.

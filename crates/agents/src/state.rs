@@ -21,6 +21,13 @@ pub enum AgentsEvent {
         /// Its new state.
         state: InstallState,
     },
+    /// The Python runtime's state changed, or its download made progress. One runtime serves
+    /// every agent; it is installed as the second step of an agent's install job, after the
+    /// agent is `Ready`, and its failure never changes the agent's state.
+    Python {
+        /// Its new state.
+        state: PythonState,
+    },
     /// An agent's sign-in state changed.
     Signin {
         /// The agent.
@@ -93,6 +100,84 @@ pub enum InstallState {
     Paused,
     /// IT's runtime: policy sets `agents.<id>`, so nothing is installed for it.
     Managed,
+}
+
+/// Where the Python runtime is: one for the computer, kept apart from each agent's state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PythonState {
+    /// This build has no Python for this platform (Linux, or before Clauseo publishes the
+    /// archives): nothing is fetched.
+    Unavailable,
+    /// Not installed, and no install of it running. `download_bytes` is its archive's size.
+    Missing {
+        /// Bytes its install would download.
+        download_bytes: u64,
+    },
+    /// Offline: waiting to try again by itself, as an agent's install does.
+    Waiting {
+        /// Why it waits: [`FailureKind::Offline`].
+        reason: FailureKind,
+        /// The log so far.
+        log: InstallLog,
+    },
+    /// Downloading its archive (or copying it from the offline bundle).
+    Downloading {
+        /// Bytes received so far, a partial file kept from an earlier try included.
+        received: u64,
+        /// The archive's size.
+        total: u64,
+    },
+    /// The archive is here and checked; it is being unpacked and run once.
+    Installing,
+    /// Installed: its receipt is written.
+    Ready {
+        /// Python's version (`3.13.18`).
+        version: String,
+    },
+    /// Stopped with a failure; a retry of any agent's install tries again.
+    Failed(PythonFailure),
+}
+
+/// A stopped install of the Python runtime.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PythonFailure {
+    /// Which kind.
+    pub kind: PythonFailureKind,
+    /// The log, for "Details".
+    pub log: InstallLog,
+}
+
+/// Why the Python runtime's install stopped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum PythonFailureKind {
+    /// A proxy or TLS refused the download, as [`FailureKind::Blocked`].
+    Blocked,
+    /// Too little free space, or `ENOSPC` while writing.
+    DiskFull,
+    /// The download, the offline bundle's copy or the unpack failed, after three tries.
+    Failed,
+    /// The OS refused to start the unpacked interpreter or load its libraries (access denied,
+    /// or a policy such as Smart App Control, `AppLocker` or WDAC).
+    RunBlocked,
+    /// The unpacked interpreter started but its check failed: a non-zero exit, no answer, or
+    /// no answer within 20 s.
+    RunFailed,
+}
+
+impl PythonFailureKind {
+    /// The word the log's `result:` line uses.
+    pub fn word(self) -> &'static str {
+        match self {
+            PythonFailureKind::Blocked => "blocked",
+            PythonFailureKind::DiskFull => "disk_full",
+            PythonFailureKind::Failed => "failed",
+            PythonFailureKind::RunBlocked => "run_blocked",
+            PythonFailureKind::RunFailed => "run_failed",
+        }
+    }
 }
 
 /// Why an install stopped. Each kind is one error code, which R20 adds to `ErrorCode`.

@@ -4313,6 +4313,65 @@ export type ProtectionWork =
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
 
+/**  Why the Python runtime's install stopped. */
+export type PythonFailureCause = 
+/**  A proxy or TLS refused the download. */
+"blocked" | 
+/**  Too little free space. */
+"disk_full" | 
+/**  The download, the offline bundle's copy or the unpack failed after its tries. */
+"failed" | 
+/**
+ *  This computer refused to start Python or load its libraries (a policy, or access
+ *  denied).
+ */
+"run_blocked" | 
+/**  Python started but its check failed or did not answer. */
+"run_failed";
+
+/**
+ *  Where the Python runtime the agents use is: `agents`' `PythonState`. One for the computer,
+ *  installed after an agent's install in the same job; its failure never changes an agent's
+ *  [`InstallProgress`]. Rides on [`crate::SetupEvent::SetupInfo`]'s optional `python`.
+ */
+export type PythonProgress = 
+/**  This build has no Python for this computer: nothing is fetched. */
+"unavailable" | 
+/**  Not installed, and no install of it running. */
+({ missing: {
+	/**  Bytes its install would download (already in each agent's `Missing`). */
+	download_bytes: Count,
+} }) & { downloading?: never; failed?: never; ready?: never; waiting?: never } | 
+/**  Offline: its install waits and tries again by itself. */
+({ waiting: {
+	/**  The log so far, for "Details". */
+	log: InstallLog,
+} }) & { downloading?: never; failed?: never; missing?: never; ready?: never } | 
+/**  Downloading. */
+({ downloading: {
+	/**  Bytes received so far. */
+	received: Count,
+	/**  Bytes in all. */
+	total: Count,
+} }) & { failed?: never; missing?: never; ready?: never; waiting?: never } | 
+/**  Unpacking and checking that it runs. */
+"installing" | 
+/**  Installed. */
+({ ready: {
+	/**  Python's version. */
+	version: string,
+} }) & { downloading?: never; failed?: never; missing?: never; waiting?: never } | 
+/**
+ *  Stopped with a failure; [`crate::SetupCommand::RetryAgentInstall`] for a ready agent
+ *  tries again.
+ */
+({ failed: {
+	/**  Why. */
+	cause: PythonFailureCause,
+	/**  The log, for "Details". */
+	log: InstallLog,
+} }) & { downloading?: never; missing?: never; ready?: never; waiting?: never };
+
 /**  A query's answer. */
 export type QueryResult = 
 /**  For `ListMatters`. */
@@ -4930,6 +4989,11 @@ export type SetupEvent =
 	 *  Service, and the key screens are hidden.
 	 */
 	keys_available: boolean,
+	/**
+	 *  The Python runtime's state, sent again with each change; missing from older hosts
+	 *  and before it is known.
+	 */
+	python?: PythonProgress,
 } }) & { agent_install_progress?: never; sign_in_changed?: never } | 
 /**  An agent's install state changed, or its download made progress. */
 ({ agent_install_progress: {

@@ -253,6 +253,7 @@ fn a_new_follower_gets_setup_info_then_each_agent_s_install_then_sign_in() {
     let rig = rig(true);
     rig.events.publish(SetupEvent::SetupInfo {
         keys_available: true,
+        python: None,
     });
     block_on(rig.backend.pump(futures::stream::iter([
         missing(claude()),
@@ -266,7 +267,8 @@ fn a_new_follower_gets_setup_info_then_each_agent_s_install_then_sign_in() {
         setup_events(&mut feed),
         [
             SetupEvent::SetupInfo {
-                keys_available: true
+                keys_available: true,
+                python: None,
             },
             SetupEvent::AgentInstallProgress {
                 agent: claude(),

@@ -1,16 +1,21 @@
-//! Unpacking a Node archive (`.tar.gz` or `.zip`) into a folder: the archive's top folder
-//! stripped, no link made, and no entry written outside the folder.
+//! Unpacking a runtime archive (Node's `.tar.gz` or `.zip`, Python's `.tar.gz`) into a folder:
+//! the archive's top folder stripped, no link made, and no entry written outside the folder.
+//! Python's is unpacked from a reader (streamed from the disk), read-only on Unix, with a
+//! manifest of every file written.
 
 #![expect(
     clippy::disallowed_methods,
-    reason = "agents unpacks Node's archive here alone; clippy.toml bans std's writes elsewhere"
+    reason = "agents unpacks the runtimes' archives here alone; clippy.toml bans std's writes \
+              elsewhere"
 )]
 
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
+use sha2::Digest as _;
 
 /// Which format an archive is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,6 +71,102 @@ fn extract_tar_gz(archive: &[u8], dest: &Path) -> Result<(), ExtractError> {
         // Links, devices, FIFOs and extension headers are skipped.
     }
     Ok(())
+}
+
+/// One file a read-only unpack wrote: its path (`/`-separated, under the destination), size and
+/// SHA-256 (lowercase hex).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ManifestEntry {
+    pub(crate) path: String,
+    pub(crate) size: u64,
+    pub(crate) sha256: String,
+}
+
+/// Unpacks the gzipped tar read from `reader` into `dest` (made if missing) by
+/// [`extract`]'s rules, hashing each file as it is written, and gives every file written,
+/// sorted by path. On Unix each file is `0o555` when its entry has any exec bit, else `0o444`,
+/// and every folder below `dest` is `0o555` once all is written; `dest` itself stays writable
+/// so its receipt can go in ([`super::make_read_only`] seals it after). Node's unpack keeps its
+/// writable modes.
+pub(crate) fn extract_tar_gz_read_only(
+    reader: impl io::Read,
+    dest: &Path,
+) -> Result<Vec<ManifestEntry>, ExtractError> {
+    std::fs::create_dir_all(dest)?;
+    let mut tar = tar::Archive::new(GzDecoder::new(reader));
+    let mut files = BTreeMap::new();
+    for entry in tar.entries()? {
+        let mut entry = entry?;
+        let kind = entry.header().entry_type();
+        let name = String::from_utf8(entry.path_bytes().into_owned())
+            .map_err(|err| ExtractError::Malformed(format!("an entry's name: {err}")))?;
+        let Some(rel) = inside(&name)? else {
+            continue;
+        };
+        if kind.is_dir() {
+            std::fs::create_dir_all(dest.join(&rel))?;
+        } else if kind.is_file() {
+            let exec = entry.header().mode().is_ok_and(|mode| mode & 0o111 != 0);
+            let (size, sha256) = write_file_hashed(&dest.join(&rel), &mut entry, exec)?;
+            let parts: Vec<String> = rel
+                .components()
+                .map(|part| part.as_os_str().to_string_lossy().into_owned())
+                .collect();
+            files.insert(parts.join("/"), (size, sha256));
+        }
+    }
+    super::seal_below(dest)?;
+    Ok(files
+        .into_iter()
+        .map(|(path, (size, sha256))| ManifestEntry { path, size, sha256 })
+        .collect())
+}
+
+/// [`write_file`] for a read-only unpack: the file's mode is `0o555` or `0o444` (Unix), and
+/// its size and SHA-256 come back.
+fn write_file_hashed(
+    path: &Path,
+    from: &mut impl io::Read,
+    exec: bool,
+) -> io::Result<(u64, String)> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut file = File::create(path)?;
+    let mut hashing = Hashing {
+        inner: from,
+        hasher: sha2::Sha256::new(),
+    };
+    let size = io::copy(&mut hashing, &mut file)?;
+    // Windows has no mode: the sandbox's ACLs keep the runtime read-only for the agent.
+    #[cfg(unix)]
+    set_read_only(&file, exec)?;
+    #[cfg(not(unix))]
+    let _ = exec;
+    let digest = hashing.hasher.finalize();
+    Ok((size, crate::integrity::to_hex(&digest)))
+}
+
+/// A reader that hashes what passes through it.
+struct Hashing<'a, R> {
+    inner: &'a mut R,
+    hasher: sha2::Sha256,
+}
+
+impl<R: io::Read> io::Read for Hashing<'_, R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.hasher.update(buf.get(..n).unwrap_or_default());
+        Ok(n)
+    }
+}
+
+/// Sets `file` to `0o555` when `exec`, else `0o444`.
+#[cfg(unix)]
+fn set_read_only(file: &File, exec: bool) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+    let mode = if exec { 0o555 } else { 0o444 };
+    file.set_permissions(std::fs::Permissions::from_mode(mode))
 }
 
 fn extract_zip(archive: &[u8], dest: &Path) -> Result<(), ExtractError> {

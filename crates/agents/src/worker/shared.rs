@@ -7,7 +7,7 @@ use std::time::Duration;
 use clauseo_protocol::AgentId;
 
 use super::{Inner, Shared, Ticket};
-use crate::state::{AgentsEvent, InstallState, Installed};
+use crate::state::{AgentsEvent, InstallState, Installed, PythonState};
 
 impl Shared {
     pub(super) fn lock(&self) -> MutexGuard<'_, Inner> {
@@ -54,6 +54,50 @@ impl Shared {
 
     fn jobs_lock(&self) -> MutexGuard<'_, usize> {
         self.jobs.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The Python runtime's state.
+    pub(crate) fn python_state(&self) -> PythonState {
+        self.lock().python.clone()
+    }
+
+    /// Records and sends the Python runtime's `state`: the worker's own events.
+    pub(super) fn set_python(&self, state: PythonState) {
+        Inner::set_python(&mut self.lock(), &self.events, state);
+    }
+
+    /// Records the size of Python's archive, for the `Missing` a paused Python download falls
+    /// back to.
+    pub(super) fn set_python_bytes(&self, bytes: u64) {
+        self.lock().python_bytes = bytes;
+    }
+
+    /// Records and sends Python's `state` for the job of `ticket`, unless it was paused or
+    /// superseded: then nothing happens and `false` comes back.
+    pub(crate) fn emit_python_job(&self, ticket: &Ticket, state: PythonState) -> bool {
+        let mut inner = self.lock();
+        if ticket.cancel.is_cancelled() {
+            return false;
+        }
+        Inner::set_python(&mut inner, &self.events, state);
+        true
+    }
+
+    /// Ends the job of `ticket` (its agent `Ready` already sent) with Python's last `state`,
+    /// unless it was paused or superseded.
+    pub(crate) fn end_python_job(&self, ticket: &Ticket, state: PythonState) {
+        let mut inner = self.lock();
+        if ticket.cancel.is_cancelled() {
+            return;
+        }
+        if inner
+            .current
+            .as_ref()
+            .is_some_and(|current| current.job == ticket.job)
+        {
+            inner.current = None;
+        }
+        Inner::set_python(&mut inner, &self.events, state);
     }
 
     /// Records `tries` as `agent`'s last install job's, just before that job's last event.
@@ -125,6 +169,21 @@ impl Drop for Running {
     }
 }
 
+impl Default for Inner {
+    fn default() -> Inner {
+        Inner {
+            states: std::collections::BTreeMap::new(),
+            python: PythonState::Unavailable,
+            python_bytes: 0,
+            installed: std::collections::BTreeMap::new(),
+            current: None,
+            next_job: 0,
+            tries: std::collections::BTreeMap::new(),
+            closed: false,
+        }
+    }
+}
+
 impl Inner {
     pub(super) fn set(
         inner: &mut Inner,
@@ -150,8 +209,20 @@ impl Inner {
         }));
     }
 
+    /// Records and sends Python's `state`.
+    pub(super) fn set_python(
+        inner: &mut Inner,
+        events: &async_channel::Sender<AgentsEvent>,
+        state: PythonState,
+    ) {
+        inner.python = state.clone();
+        drop(events.try_send(AgentsEvent::Python { state }));
+    }
+
     /// Stops the running job. It becomes `Paused`, unless it is `next`'s own job (a retry
-    /// while it waits), which is superseded quietly.
+    /// while it waits), which is superseded quietly. A job past its agent's `Ready`, installing
+    /// Python, leaves the agent `Ready`; Python's download goes back to `Missing`, its partial
+    /// file kept.
     pub(super) fn stop_current(
         &mut self,
         events: &async_channel::Sender<AgentsEvent>,
@@ -161,7 +232,22 @@ impl Inner {
             return;
         };
         running.cancel.cancel();
-        if next != Some(&running.agent) {
+        let ready = matches!(
+            self.states.get(&running.agent),
+            Some(InstallState::Ready { .. })
+        );
+        if ready {
+            let going = matches!(
+                self.python,
+                PythonState::Waiting { .. }
+                    | PythonState::Downloading { .. }
+                    | PythonState::Installing
+            );
+            if going {
+                let download_bytes = self.python_bytes;
+                Inner::set_python(self, events, PythonState::Missing { download_bytes });
+            }
+        } else if next != Some(&running.agent) {
             Inner::set(self, events, &running.agent, InstallState::Paused, None);
         }
     }

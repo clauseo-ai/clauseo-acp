@@ -22,14 +22,15 @@ use clauseo_agents::testing::{
     Lookups, TempDir, TestRegistry, instant, millis_since, npm_tarball, resolve_all_to, trace,
 };
 use clauseo_agents::{
-    AgentEntry, AgentSizes, Agents, AgentsConfig, AgentsEvent, Clock, InstallState, NodeArchive,
-    NodeEntry, NodeSearch, Platform, Snapshot,
+    AgentEntry, AgentSizes, Agents, AgentsConfig, Clock, NodeArchive, NodeEntry, NodeSearch,
+    Platform, Snapshot,
 };
 use clauseo_process::{
     LaunchSpec, Launched, Launcher, ManualTimer, PassthroughLauncher, SpawnOptions, Timer,
 };
 use clauseo_protocol::AgentId;
 
+pub(crate) use crate::events::{Events, states_of};
 use crate::write;
 
 /// The fixture's registry base.
@@ -372,7 +373,7 @@ impl Fixture {
         });
         trace(format_args!("fixture: Agents::start"));
         let (agents, events) = Agents::start(self.config.clone(), launcher, self.timer.clone());
-        (agents, Events(events))
+        (agents, Events::new(events))
     }
 
     /// Starts `Agents` on the fixture with a launcher that calls `before` with each spec just
@@ -387,7 +388,7 @@ impl Fixture {
         });
         trace(format_args!("fixture: Agents::start, hooked"));
         let (agents, events) = Agents::start(self.config.clone(), launcher, self.timer.clone());
-        (agents, Events(events))
+        (agents, Events::new(events))
     }
 
     /// Starts `Agents` on the fixture with a launcher that adds `extra` to each spec's variables
@@ -399,7 +400,7 @@ impl Fixture {
         });
         trace(format_args!("fixture: Agents::start, adding env"));
         let (agents, events) = Agents::start(self.config.clone(), launcher, self.timer.clone());
-        (agents, Events(events))
+        (agents, Events::new(events))
     }
 
     /// The requests made for package `name`'s tarball.
@@ -482,87 +483,6 @@ pub(crate) fn user_node_search() -> NodeSearch {
     let mut search = NodeSearch::none();
     search.path = Some(program.parent().unwrap().as_os_str().to_owned());
     search
-}
-
-/// The events' receiver, read by blocking.
-pub(crate) struct Events(pub(crate) async_channel::Receiver<AgentsEvent>);
-
-impl Events {
-    /// The next event.
-    pub(crate) fn next(&self) -> (AgentId, InstallState) {
-        let event = futures::executor::block_on(self.0.recv()).expect("the events closed");
-        let AgentsEvent::Install { agent, state } = event else {
-            panic!("an event of another kind: {event:?}");
-        };
-        trace_state(&agent, &state);
-        (agent, state)
-    }
-
-    /// Events up to and including the first of `agent`'s for which `done` holds.
-    pub(crate) fn until(
-        &self,
-        agent: &AgentId,
-        done: impl Fn(&InstallState) -> bool,
-    ) -> Vec<(AgentId, InstallState)> {
-        let mut seen = Vec::new();
-        loop {
-            let (id, state) = self.next();
-            let last = id == *agent && done(&state);
-            seen.push((id, state));
-            if last {
-                return seen;
-            }
-        }
-    }
-
-    /// Events up to `agent`'s `Ready` or `Failed`, and that last state.
-    pub(crate) fn until_end(
-        &self,
-        agent: &AgentId,
-    ) -> (Vec<(AgentId, InstallState)>, InstallState) {
-        let seen = self.until(agent, |state| {
-            matches!(state, InstallState::Ready { .. } | InstallState::Failed(_))
-        });
-        let last = seen.last().unwrap().1.clone();
-        (seen, last)
-    }
-
-    /// Both agents' first states, A's then B's.
-    pub(crate) fn first_states(&self) -> (InstallState, InstallState) {
-        let (a, first) = self.next();
-        let (b, second) = self.next();
-        assert_eq!((a, b), (agent_a(), agent_b()));
-        (first, second)
-    }
-
-    /// Every event already sent, without waiting.
-    pub(crate) fn drain(&self) -> Vec<(AgentId, InstallState)> {
-        std::iter::from_fn(|| self.0.try_recv().ok())
-            .filter_map(|event| match event {
-                AgentsEvent::Install { agent, state } => Some((agent, state)),
-                _ => None,
-            })
-            .collect()
-    }
-}
-
-/// Traces `agent`'s new state by its kind (`Downloading`, `Ready`, …), not its fields.
-fn trace_state(agent: &AgentId, state: &InstallState) {
-    let text = format!("{state:?}");
-    let kind = text
-        .split(|ch: char| !ch.is_alphanumeric())
-        .next()
-        .unwrap_or_default();
-    trace(format_args!("event: {agent} {kind}"));
-}
-
-/// `agent`'s states among `events`.
-pub(crate) fn states_of(events: &[(AgentId, InstallState)], agent: &AgentId) -> Vec<InstallState> {
-    events
-        .iter()
-        .filter(|(id, _)| id == agent)
-        .map(|(_, state)| state.clone())
-        .collect()
 }
 
 /// Every symbolic link or junction under `dir`, not following any.

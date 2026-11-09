@@ -272,7 +272,9 @@ mirror install works as before, from the same first use.
    its fetcher then reads that as `C:\server\share\a.tgz` (checked by running npm's own
    npm-package-arg and arborist code as win32). So each such tarball is copied into
    `agents/downloads/` as it is hashed, as Node's archive is, and npm reads the copy. Making a
-   bundle is S25's.
+   bundle is S25's. Once Clauseo's Python runtime ships (stage D), a bundle also holds
+   `python/<Python's archive name>`, copied and hashed into `agents/downloads/` exactly as
+   Node's archive is; a missing file fails Python's install alone, never the agent's.
 3. A firm npm mirror (`install.registry`, R20's setting): `mirror_url` replaces each `resolved`
    URL's snapshot registry base (`https://registry.npmjs.org/` in the build) with the mirror's
    base. A URL off that base is refused. The integrity check is unchanged.

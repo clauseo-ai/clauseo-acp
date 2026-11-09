@@ -7,8 +7,7 @@
 mod error;
 pub(crate) mod firm;
 
-use std::fs::File;
-use std::io::{self, Read as _, Write as _};
+use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -494,7 +493,10 @@ pub(crate) fn hash_file(path: &Path, hasher: &mut crate::integrity::Hasher) -> i
 }
 
 /// Adds the bytes `file` has left to `hasher`, returning how many there were.
-pub(crate) fn hash_read(mut file: File, hasher: &mut crate::integrity::Hasher) -> io::Result<u64> {
+pub(crate) fn hash_read(
+    mut file: impl io::Read,
+    hasher: &mut crate::integrity::Hasher,
+) -> io::Result<u64> {
     let mut buf = vec![0; CHUNK];
     let mut size = 0u64;
     loop {
