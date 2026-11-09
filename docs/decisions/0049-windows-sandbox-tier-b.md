@@ -360,17 +360,23 @@ build 26100):
     a flood of files leaving pushes nothing out. The pairing fails closed when it loses track: a
     folder's ID under 10 s old pushed out of the bounded list (`PAIR_MAX` = 4096 kept across the
     watches, and as many held), or any watch's overflow, loses it for 10 s, and a state or temp
-    watch that can't be armed, can't start its thread, panics or breaks loses it for the
-    session; while lost, every folder that looks just made and is gone before its scan counts,
-    those held when it was lost too. The state and temp folders get watches of their own
+    watch that can't be armed, gets only the plain records (a network share, such as AppData
+    redirected to a server: no file IDs, so it notes nothing), can't start its thread, panics or
+    breaks loses it for the session; while lost, every folder that looks just made and is gone
+    before its scan counts, those held when it was lost too. The state and temp folders get watches of their own
     (recursive, extended records, names only: `FILE_NOTIFY_CHANGE_FILE_NAME` and
     `FILE_NOTIFY_CHANGE_DIR_NAME`, so the agent's writes there don't overflow them) that only note
     file IDs: they move nothing and end nothing, and one that fails doesn't refuse the launch.
     Residual: a folder moved in from a place no watch covers that the agent can write, with its
     creation time set to now, isn't counted. The VM's AccessCheck found that, outside the matter,
     the agent's state folder and its temp folder, the only folders the agent can create in are
-    other matters' folders: a cross-matter case, which the cross-matter fix addresses. A VM (Windows
-    Server 2025, NTFS) confirmed the records: a cross-folder move gives `FILE_ACTION_ADDED` with the
+    other matters' folders: a cross-matter case, which the cross-matter fix addresses. Folders a
+    policy grants the agent beyond those (`allowed_folders`, writable runtime paths) aren't
+    watched for the pairing either: the launch message doesn't name them apart from read-only
+    grants, and they may be many, large or on a network share, where only the plain records come
+    and, by the rule above, every session would lose the pairing. A watch not read for over 10 s
+    (starved) sees its overflow only after a folder held meanwhile was dropped uncounted;
+    accepted. A VM (Windows Server 2025, NTFS) confirmed the records: a cross-folder move gives `FILE_ACTION_ADDED` with the
     folder's original creation time, `mkdir` one within about 4 ms, and a rename within a folder
     `FILE_ACTION_RENAMED_NEW_NAME`. Known limit: the plain records (a network share) carry no
     attributes or times, so a folder renamed or moved in and back out there isn't counted; counting
