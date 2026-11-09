@@ -2283,9 +2283,11 @@ it first in step 9, before the stop and sweep tasks and the record. `--remove --
 `refresh::TEARDOWN` after the stop task. Both go through `unregister_task`, which for this task
 disables it, ends a running watcher (`IRegisteredTask::Stop`), stops the session by name,
 deletes the published name (`HKLM\SOFTWARE\Clauseo\SandboxWatch`), and then deletes it. A
-killed watcher's key is SYSTEM's, which administrators only read: a refused delete takes it for
-Administrators (`SeTakeOwnershipPrivilege`) and deletes it, the task goes even if that fails,
-and the next `--remove` finishes whatever is left (`watch/teardown.rs`). The
+killed watcher's key is SYSTEM's, which administrators only read: opened as itself
+(`REG_OPTION_OPEN_LINK`), a link or a key not SYSTEM's is left and the step fails; SYSTEM's is
+taken for Administrators (`SeTakeOwnershipPrivilege`) when a delete is refused, and deleted by
+handle. The task goes even if that fails, and the next `--remove` finishes whatever is left
+(`watch/teardown.rs`). The
 runner starts it with `refresh::request_watch` (as the lawyer, through
 `FRFX`).
 

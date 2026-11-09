@@ -23,9 +23,8 @@ use windows::Win32::Security::Authorization::{
     GetSecurityInfo, SE_KERNEL_OBJECT, SE_OBJECT_TYPE, SE_REGISTRY_KEY,
 };
 use windows::Win32::Security::{
-    DACL_SECURITY_INFORMATION, IsWellKnownSid, OBJECT_SECURITY_INFORMATION,
-    OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
-    SECURITY_ATTRIBUTES, WinLocalSystemSid,
+    IsWellKnownSid, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
+    WinLocalSystemSid,
 };
 use windows::Win32::Storage::FileSystem::{
     FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, FILE_FLAGS_AND_ATTRIBUTES,
@@ -39,7 +38,7 @@ use windows::Win32::System::Pipes::{
 use windows::Win32::System::Registry::{
     HKEY, HKEY_LOCAL_MACHINE, KEY_SET_VALUE, KEY_WOW64_64KEY, REG_CREATE_KEY_DISPOSITION,
     REG_CREATED_NEW_KEY, REG_OPTION_VOLATILE, REG_SAM_FLAGS, REG_SZ, RegCloseKey, RegCreateKeyExW,
-    RegDeleteKeyExW, RegOpenKeyExW, RegSetKeySecurity, RegSetValueExW,
+    RegDeleteKeyExW, RegOpenKeyExW, RegSetValueExW,
 };
 use windows::Win32::System::Threading::{CreateEventW, ResetEvent, WaitForSingleObject};
 use windows::core::HSTRING;
@@ -47,9 +46,7 @@ use windows::core::HSTRING;
 use super::Failed;
 use super::instances::{Connect, Instances, MAX_INSTANCES, Pipes};
 use super::protocol::{KEY_SDDL, KeyStart, PIPE_VALUE, WATCH_KEY, key_start, pipe_name, pipe_sddl};
-use super::teardown::KeyDelete;
 use crate::windows::acl::object::{Handle, os_error};
-use crate::windows::acl::privilege::Privileges;
 use crate::windows::sids::Sid;
 use crate::windows::token::os::LocalDescriptor;
 
@@ -303,7 +300,7 @@ impl Drop for Instance {
 }
 
 /// Whether the owner of `object` (open with `READ_CONTROL`) is LOCAL SYSTEM.
-fn owner_is_system(object: HANDLE, kind: SE_OBJECT_TYPE) -> io::Result<bool> {
+pub(super) fn owner_is_system(object: HANDLE, kind: SE_OBJECT_TYPE) -> io::Result<bool> {
     let mut owner = PSID::default();
     let mut descriptor = PSECURITY_DESCRIPTOR::default();
     // SAFETY: the handle is open; both out-pointers are live; `owner` points into the
@@ -369,7 +366,7 @@ fn disconnect(client: &Handle) {
 }
 
 /// `code` as an `io::Error` unless it is success.
-fn checked(code: WIN32_ERROR) -> io::Result<()> {
+pub(super) fn checked(code: WIN32_ERROR) -> io::Result<()> {
     if code == ERROR_SUCCESS {
         Ok(())
     } else {
@@ -457,9 +454,9 @@ fn key_owner_is_system() -> io::Result<Option<bool>> {
     system.map(Some)
 }
 
-/// Deletes [`WATCH_KEY`]; one that isn't there is fine. `--remove` calls it too, through the
-/// task's removal (`refresh::task`), so a killed watcher's name doesn't outlive the task.
-pub(crate) fn unpublish() -> io::Result<()> {
+/// Deletes [`WATCH_KEY`]; one that isn't there is fine. `--remove` deletes a killed watcher's
+/// through the task's removal (`windows_key.rs`), as itself, never through a link.
+fn unpublish() -> io::Result<()> {
     // SAFETY: the key's name is a live HSTRING.
     let code = unsafe {
         RegDeleteKeyExW(
@@ -473,68 +470,4 @@ pub(crate) fn unpublish() -> io::Result<()> {
         return Ok(());
     }
     checked(code)
-}
-
-/// [`unpublish`] as `--remove` sees it: a refusal (`ERROR_ACCESS_DENIED`) is
-/// [`KeyDelete::Denied`], the key a killed watcher left, which an administrator may only read.
-pub(crate) fn delete_key() -> io::Result<KeyDelete> {
-    match unpublish() {
-        Ok(()) => Ok(KeyDelete::Gone),
-        Err(error) if error.raw_os_error() == i32::try_from(ERROR_ACCESS_DENIED.0).ok() => {
-            Ok(KeyDelete::Denied)
-        }
-        Err(error) => Err(error),
-    }
-}
-
-/// Takes [`WATCH_KEY`] for Administrators, elevated, so [`unpublish`] may delete it: with
-/// `SeTakeOwnershipPrivilege` enabled (as `--reclaim` does), opened for `WRITE_OWNER` alone
-/// and given the owner Administrators; then, as its owner, opened for `WRITE_DAC` and given
-/// [`TAKEN_SDDL`]. A key that isn't there is fine.
-pub(crate) fn take_for_admins() -> io::Result<()> {
-    let _privilege = Privileges::enable(&["SeTakeOwnershipPrivilege"])?;
-    let owner = LocalDescriptor::new("O:BA")?;
-    if !set_key_security(WRITE_OWNER, OWNER_SECURITY_INFORMATION, &owner)? {
-        return Ok(());
-    }
-    let dacl = LocalDescriptor::new(TAKEN_SDDL)?;
-    let info = DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION;
-    set_key_security(WRITE_DAC, info, &dacl).map(|_| ())
-}
-
-/// The DACL a taken key gets: protected; SYSTEM and Administrators full control.
-const TAKEN_SDDL: &str = "D:P(A;;KA;;;SY)(A;;KA;;;BA)";
-/// `WRITE_DAC`, which `RegSetKeySecurity` needs for the DACL (as `record_write.rs` has it).
-const WRITE_DAC: REG_SAM_FLAGS = REG_SAM_FLAGS(0x0004_0000);
-/// `WRITE_OWNER`, which `RegSetKeySecurity` needs for the owner.
-const WRITE_OWNER: REG_SAM_FLAGS = REG_SAM_FLAGS(0x0008_0000);
-
-/// Opens [`WATCH_KEY`] for `access` and writes `info` of `descriptor` to it: `false` when
-/// there is no key.
-fn set_key_security(
-    access: REG_SAM_FLAGS,
-    info: OBJECT_SECURITY_INFORMATION,
-    descriptor: &LocalDescriptor,
-) -> io::Result<bool> {
-    let mut key = HKEY::default();
-    // SAFETY: the key's name is a live HSTRING and `key` a live out-pointer.
-    let code = unsafe {
-        RegOpenKeyExW(
-            HKEY_LOCAL_MACHINE,
-            &HSTRING::from(WATCH_KEY),
-            None,
-            access | KEY_WOW64_64KEY,
-            &raw mut key,
-        )
-    };
-    if code == ERROR_FILE_NOT_FOUND {
-        return Ok(false);
-    }
-    checked(code)?;
-    // SAFETY: the key is open for `access`, which `info` needs; the descriptor is valid while
-    // `descriptor` lives.
-    let set = unsafe { RegSetKeySecurity(key, info, PSECURITY_DESCRIPTOR(descriptor.raw())) };
-    // SAFETY: a key this call opened.
-    let _closed = unsafe { RegCloseKey(key) };
-    checked(set).map(|()| true)
 }

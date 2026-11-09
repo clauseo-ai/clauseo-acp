@@ -12,7 +12,7 @@ use crate::windows::setup::record_values::CopyOwner;
 pub(super) const WATCH_TEARDOWN: [&str; 4] = [
     "end_watch_task",
     "stop_watch_session",
-    "delete_watch_key",
+    "inspect_watch_key",
     "delete_watch_task",
 ];
 

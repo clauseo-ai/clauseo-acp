@@ -539,6 +539,7 @@ crates/sandbox/src/windows/setup/sweep/windows_tests.rs elevated_the_sweep_delet
 crates/sandbox/src/windows/setup/sweep/windows_tests.rs elevated_a_task_whose_descriptor_shuts_system_out_is_deleted_or_56_never_left_at_0 clippy::disallowed_methods
 # The denial reporter's SYSTEM side: its pipe and published key, its ETW session and consumer,
 # and its monotonic clock.
+crates/sandbox/src/windows/setup/watch/windows_key.rs - unsafe_code
 crates/sandbox/src/windows/setup/watch/windows_pipe.rs - unsafe_code
 crates/sandbox/src/windows/setup/watch/windows_trace.rs - unsafe_code
 crates/sandbox/src/windows/setup/watch/windows_watcher.rs - unsafe_code

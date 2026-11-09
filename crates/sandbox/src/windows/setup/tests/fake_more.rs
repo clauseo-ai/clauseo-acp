@@ -190,8 +190,12 @@ pub(super) struct Watcher {
 pub(super) enum KeyOwner {
     /// SYSTEM, as the watcher makes it: administrators may only read it.
     System,
-    /// Administrators, once the removal took it: they may delete it.
+    /// Administrators, once the removal took it (or anyone else's, before): they may delete it.
     Administrators,
+    /// A registry link someone put at its name.
+    Link,
+    /// A key whose owner can't be read.
+    Unreadable,
 }
 
 impl Watcher {

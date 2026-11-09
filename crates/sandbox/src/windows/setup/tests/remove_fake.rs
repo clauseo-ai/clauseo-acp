@@ -21,7 +21,9 @@ use crate::windows::set_aside::forget_bookkeeping;
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::setup::remove::Removal;
 use crate::windows::setup::remove::{FolderOwner, owners};
-use crate::windows::setup::watch::teardown::{KeyDelete, WatchParts, remove_watch};
+use crate::windows::setup::watch::teardown::{
+    KeyDelete, KeyLeft, WatchKey, WatchParts, remove_watch,
+};
 use crate::windows::setup::{Machine, MachineError, ProfileDir};
 use crate::windows::shared_writes::OWNER_RIGHTS_SID;
 use crate::windows::sids::Reserved;
@@ -540,12 +542,26 @@ impl WatchParts for FakeWatch<'_> {
         Ok(())
     }
 
+    fn inspect_key(&mut self) -> Result<WatchKey, MachineError> {
+        self.0.call("inspect_watch_key")?;
+        match self.0.m.state.watcher.key {
+            None => Ok(WatchKey::Absent),
+            Some(KeyOwner::Link) => Ok(WatchKey::Link),
+            Some(KeyOwner::System) => Ok(WatchKey::System),
+            Some(KeyOwner::Administrators) => Ok(WatchKey::Other),
+            Some(KeyOwner::Unreadable) => Err(MachineError::Other(
+                "the watch key's owner can't be read".to_owned(),
+            )),
+        }
+    }
+
+    /// Deletes the key at its name; a link is deleted as itself, as the real one does.
     fn delete_key(&mut self) -> Result<KeyDelete, MachineError> {
         self.0.call("delete_watch_key")?;
         let key = &mut self.0.m.state.watcher.key;
         Ok(match key {
-            Some(KeyOwner::System) => KeyDelete::Denied,
-            Some(KeyOwner::Administrators) | None => {
+            Some(KeyOwner::System | KeyOwner::Unreadable) => KeyDelete::Denied,
+            Some(KeyOwner::Administrators | KeyOwner::Link) | None => {
                 *key = None;
                 KeyDelete::Gone
             }
@@ -561,8 +577,8 @@ impl WatchParts for FakeWatch<'_> {
         Ok(())
     }
 
-    fn still_denied(&self) -> MachineError {
-        MachineError::Other("the watch key's delete was refused after it was taken".to_owned())
+    fn left(&self, why: KeyLeft) -> MachineError {
+        MachineError::Other(format!("the watch key: {}", why.line()))
     }
 
     fn delete_task(&mut self) -> Result<(), MachineError> {

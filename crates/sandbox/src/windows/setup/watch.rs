@@ -58,6 +58,8 @@ pub mod teardown;
 #[cfg(test)]
 mod tests;
 #[cfg(windows)]
+pub(crate) mod windows_key;
+#[cfg(windows)]
 pub(crate) mod windows_pipe;
 #[cfg(windows)]
 pub(crate) mod windows_trace;

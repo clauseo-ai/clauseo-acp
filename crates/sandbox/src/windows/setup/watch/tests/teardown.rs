@@ -2,12 +2,14 @@
 //! delete is refused, a delete still refused once taken fails the run, and the task goes
 //! whatever an earlier step gave.
 
-use super::super::teardown::{KeyDelete, WatchParts, remove_watch};
+use super::super::teardown::{KeyDelete, KeyLeft, WatchKey, WatchParts, remove_watch};
 
-/// Each effect, in order; the key's deletes give `deletes` in turn, and `failing` fails.
+/// Each effect, in order; the key is `key` (SYSTEM's when `None`), its deletes give `deletes`
+/// in turn, and `failing` fails.
 #[derive(Default)]
 struct Record {
     calls: Vec<&'static str>,
+    key: Option<WatchKey>,
     deletes: Vec<KeyDelete>,
     failing: Option<&'static str>,
 }
@@ -33,6 +35,11 @@ impl WatchParts for Record {
         self.call("stop_session")
     }
 
+    fn inspect_key(&mut self) -> Result<WatchKey, String> {
+        self.call("inspect_key")?;
+        Ok(self.key.unwrap_or(WatchKey::System))
+    }
+
     fn delete_key(&mut self) -> Result<KeyDelete, String> {
         self.call("delete_key")?;
         Ok(if self.deletes.is_empty() {
@@ -46,8 +53,8 @@ impl WatchParts for Record {
         self.call("take_key")
     }
 
-    fn still_denied(&self) -> String {
-        "still denied".to_owned()
+    fn left(&self, why: KeyLeft) -> String {
+        format!("{why:?}")
     }
 
     fn delete_task(&mut self) -> Result<(), String> {
@@ -59,7 +66,13 @@ impl WatchParts for Record {
 fn a_key_deleted_at_once_is_never_taken() {
     let mut parts = Record::default();
     assert_eq!(remove_watch(&mut parts), Ok(()));
-    let order = ["end_task", "stop_session", "delete_key", "delete_task"];
+    let order = [
+        "end_task",
+        "stop_session",
+        "inspect_key",
+        "delete_key",
+        "delete_task",
+    ];
     assert_eq!(parts.calls, order);
 }
 
@@ -71,23 +84,29 @@ fn a_refused_delete_takes_the_key_once_and_a_second_refusal_fails_after_the_task
     };
     assert_eq!(remove_watch(&mut parts), Ok(()));
     assert_eq!(
-        parts.calls[2..],
+        parts.calls[3..],
         ["delete_key", "take_key", "delete_key", "delete_task"]
     );
     let mut parts = Record {
         deletes: vec![KeyDelete::Denied, KeyDelete::Denied],
         ..Record::default()
     };
-    assert_eq!(remove_watch(&mut parts), Err("still denied".to_owned()));
+    assert_eq!(remove_watch(&mut parts), Err("StillDenied".to_owned()));
     assert_eq!(
-        parts.calls[2..],
+        parts.calls[3..],
         ["delete_key", "take_key", "delete_key", "delete_task"]
     );
 }
 
 #[test]
 fn the_task_goes_whatever_failed_before_it_and_the_first_failure_is_the_result() {
-    for failing in ["end_task", "stop_session", "delete_key", "take_key"] {
+    for failing in [
+        "end_task",
+        "stop_session",
+        "inspect_key",
+        "delete_key",
+        "take_key",
+    ] {
         let mut parts = Record {
             deletes: vec![KeyDelete::Denied],
             failing: Some(failing),
@@ -104,4 +123,22 @@ fn the_task_goes_whatever_failed_before_it_and_the_first_failure_is_the_result()
         remove_watch(&mut parts),
         Err("delete_task failed".to_owned())
     );
+}
+
+#[test]
+fn a_link_or_a_key_not_systems_is_left_untouched_and_the_task_still_goes() {
+    for (key, why) in [(WatchKey::Link, "Link"), (WatchKey::Other, "NotSystems")] {
+        let mut parts = Record {
+            key: Some(key),
+            ..Record::default()
+        };
+        assert_eq!(remove_watch(&mut parts), Err(why.to_owned()));
+        assert_eq!(parts.calls[2..], ["inspect_key", "delete_task"], "{why}");
+    }
+    let mut parts = Record {
+        key: Some(WatchKey::Absent),
+        ..Record::default()
+    };
+    assert_eq!(remove_watch(&mut parts), Ok(()));
+    assert_eq!(parts.calls[2..], ["inspect_key", "delete_task"]);
 }

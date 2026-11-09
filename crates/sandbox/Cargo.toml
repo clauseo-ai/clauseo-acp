@@ -111,6 +111,7 @@ rustix = { workspace = true, features = ["fs", "process"] }
 # (System_ProcessStatus).
 # secrets.bin (src/windows/secrets/dpapi.rs, setup/owner): CryptProtectData (Security_Cryptography);
 # the set-up's recorded parent from NtQueryInformationProcess (Wdk_System_Threading).
+# --remove deletes the watch key by a handle opened as itself (NtDeleteKey, Wdk_System_Registry).
 # The setup exe and UserSetup (S15 PR4h): SHGetKnownFolderPath and ShellExecuteExW (UI_Shell), the
 # known folder's string freed with CoTaskMemFree (System_Com), and the exe's DLL search kept to
 # System32 (SetDefaultDllDirectories, System_LibraryLoader).
@@ -145,6 +146,7 @@ socket2 = { workspace = true }
 windows = { workspace = true, features = [
   "Wdk_Foundation",
   "Wdk_Storage_FileSystem",
+  "Wdk_System_Registry",
   "Wdk_System_Threading",
   "Win32_Foundation",
   "Win32_Networking_BackgroundIntelligentTransferService",

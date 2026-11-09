@@ -50,6 +50,7 @@ fn a_killed_watchers_system_key_is_taken_and_deleted_before_the_task_and_the_rem
             [
                 "end_watch_task",
                 "stop_watch_session",
+                "inspect_watch_key",
                 "delete_watch_key",
                 "take_watch_key",
                 "delete_watch_key",
@@ -126,4 +127,35 @@ fn a_task_delete_that_fails_leaves_no_key_and_a_second_removal_finishes_the_task
             .any(|l| l == "take_watch_key")
     );
     assert_all_gone(&machine);
+}
+
+#[test]
+fn a_link_or_a_key_not_systems_is_never_taken_or_deleted_and_the_tasks_still_go() {
+    for (test, key) in [
+        ("remove-watch-link", KeyOwner::Link),
+        ("remove-watch-other", KeyOwner::Administrators),
+        ("remove-watch-unreadable", KeyOwner::Unreadable),
+    ] {
+        let watcher = Watcher {
+            key: Some(key),
+            ..Watcher::killed()
+        };
+        let (mut machine, mut acl) = with_watcher(test, &watcher);
+        for run in 0..2 {
+            let failure = remove(&mut machine, &mut acl, true).unwrap_err();
+            assert_eq!(failure.step, RemoveStep::WatchTask, "{test} {run}");
+            assert_eq!(failure.exit, SetupExit::RemovedPartly, "{test} {run}");
+            let state = &machine.m.state;
+            assert_eq!(state.watch_task, None, "{test} {run}");
+            assert_eq!(state.watcher.key, Some(key), "{test} {run}");
+            assert!(!state.watcher.session, "{test} {run}");
+            assert!(state.record.is_some(), "{test} {run}");
+        }
+        let lines = machine.lines();
+        let touched = lines
+            .iter()
+            .any(|l| l == "take_watch_key" || l == "delete_watch_key");
+        assert!(!touched, "{test}: {lines:?}");
+        assert!(lines.iter().any(|l| l == "delete_watch_task"), "{test}");
+    }
 }

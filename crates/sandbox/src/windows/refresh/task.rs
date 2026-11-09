@@ -44,8 +44,10 @@ use super::last_run::{LastRun, last_run};
 use super::task_folder::{Folders, prepare};
 use super::windows_refresher::{EXE_NAME, sandbox_dir};
 use super::{SystemTask, action_path, task_sddl};
-use crate::windows::setup::watch::teardown::{KeyDelete, WatchParts, remove_watch};
-use crate::windows::setup::watch::{windows_pipe, windows_trace};
+use crate::windows::setup::watch::teardown::{
+    KeyDelete, KeyLeft, WatchKey, WatchParts, remove_watch,
+};
+use crate::windows::setup::watch::{windows_key, windows_trace};
 use crate::windows::sids::Sid;
 
 /// The task's folder.
@@ -432,17 +434,23 @@ impl WatchParts for WindowsWatch<'_> {
             .map_err(TaskError::Session)
     }
 
+    fn inspect_key(&mut self) -> Result<WatchKey, TaskError> {
+        windows_key::inspect()
+            .map_err(|error| TaskError::WatchKey(format!("reading its owner: {error}")))
+    }
+
     fn delete_key(&mut self) -> Result<KeyDelete, TaskError> {
-        windows_pipe::delete_key().map_err(|error| TaskError::WatchKey(error.to_string()))
+        windows_key::delete().map_err(|error| TaskError::WatchKey(error.to_string()))
     }
 
     fn take_key(&mut self) -> Result<(), TaskError> {
-        windows_pipe::take_for_admins()
+        windows_key::take_for_admins()
             .map_err(|error| TaskError::WatchKey(format!("taking it: {error}")))
     }
 
-    fn still_denied(&self) -> TaskError {
-        TaskError::WatchKey("its delete was refused after it was taken".to_owned())
+    fn left(&self, why: KeyLeft) -> TaskError {
+        tracing::warn!(reason = why.line(), "the watcher's key was left");
+        TaskError::WatchKey(why.line().to_owned())
     }
 
     fn delete_task(&mut self) -> Result<(), TaskError> {
