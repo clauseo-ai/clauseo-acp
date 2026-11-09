@@ -10,7 +10,7 @@
 
 use std::io;
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use windows::Win32::Foundation::{
     ERROR_INVALID_FUNCTION, ERROR_INVALID_PARAMETER, ERROR_NOT_SUPPORTED, ERROR_NOTIFY_ENUM_DIR,
@@ -28,7 +28,7 @@ use windows::Win32::System::Threading::{
 };
 use windows::core::HSTRING;
 
-use super::records::Layout;
+use super::records::{Layout, filetime};
 use super::{Next, Source, changes};
 use crate::windows::acl::object::{Handle, os_error};
 use crate::windows::pipe::os::Overlapped;
@@ -195,10 +195,13 @@ impl Source for DirWatch<'_> {
         match io.result(&self.folder) {
             Ok(0) => Next::Overflow,
             Ok(read) => {
+                // Once per buffer, as it is received: each folder added is told moved in or made
+                // by its creation time against this.
+                let now = filetime(wall_clock());
                 let bytes = bytes_of(&self.buffer);
                 bytes
                     .get(..read)
-                    .and_then(|read| changes(read, self.layout))
+                    .and_then(|read| changes(read, self.layout, now))
                     .map_or(Next::Overflow, Next::Changed)
             }
             Err(error)
@@ -234,6 +237,17 @@ fn refused(error: &io::Error) -> bool {
     ]
     .iter()
     .any(|refused| code == Some(refused.0))
+}
+
+/// The wall clock, read once per buffer as it is received: a folder reported added that was
+/// created more than `records::MOVED_IN_AGE` before was moved in, not made.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a folder moved in is told from one made by its creation time against the wall \
+              clock; the tests pass the time to `records::changes`"
+)]
+fn wall_clock() -> SystemTime {
+    SystemTime::now()
 }
 
 /// The buffer's bytes.
