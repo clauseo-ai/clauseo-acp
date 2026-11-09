@@ -2,9 +2,10 @@
 //! reparse points now, and which folders count gone by their check (renamed in, or moved in
 //! from another folder as told by a creation time older than [`MOVED_IN_AGE`]).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
+use super::super::pairs::{PAIR_MAX, Pairs};
 use super::super::records::{Layout, MOVED_IN_AGE, changes, filetime};
 
 /// A record's action, name, attributes and creation time (a FILETIME).
@@ -204,7 +205,8 @@ fn the_wall_clock_reads_as_a_filetime() {
 }
 
 /// The ruling's pairing: a folder made just now is listed fresh with its file ID (an ADDED one
-/// with no file ID isn't), and each item removed or renamed away is listed with its own.
+/// with no file ID isn't), and each folder removed or renamed away is listed with its own; a
+/// file isn't, and an item with no attributes at all is, in case it was a folder.
 #[test]
 fn fresh_folders_and_what_left_are_read_with_their_file_ids() {
     let records = [
@@ -213,7 +215,10 @@ fn fresh_folders_and_what_left_are_read_with_their_file_ids() {
         ((1, "file", 0x20, before(0)), 8),
         ((1, "old", 0x10, before(MOVED_IN_AGE + 1)), 9),
         ((2, "rm", 0x10, 0), 10),
-        ((4, "away", 0x20, 0), 11),
+        ((4, "away", 0x10, 0), 11),
+        ((4, "file-away", 0x20, 0), 12),
+        ((2, "file-gone", 0x80, 0), 13),
+        ((2, "unknown", 0, 0), 14),
         ((2, "no-id-gone", 0x10, 0), 0),
     ];
     let read = changes(
@@ -226,9 +231,36 @@ fn fresh_folders_and_what_left_are_read_with_their_file_ids() {
     assert_eq!(read.moved_folders, [PathBuf::from("old")]);
     assert_eq!(
         read.left,
-        [(PathBuf::from("rm"), 10), (PathBuf::from("away"), 11)]
+        [
+            (PathBuf::from("rm"), 10),
+            (PathBuf::from("away"), 11),
+            (PathBuf::from("unknown"), 14)
+        ]
     );
     let read = changes(&buffer_ids(Layout::Plain, &records), Layout::Plain, NOW).unwrap();
     assert_eq!(read.fresh_folders, Vec::<(PathBuf, u64)>::new());
     assert_eq!(read.left, Vec::<(PathBuf, u64)>::new());
+}
+
+/// The review's flood: the agent moves a folder in from its temp folder, deletes about 5000
+/// files there, then moves the folder on. The files' records aren't listed, so the folder's
+/// leaving record stays in the pairing's list and the gone folder pairs, with nothing lost.
+#[test]
+fn a_flood_of_files_leaving_temp_pushes_no_folder_out_of_the_pairing() {
+    let names: Vec<String> = (0..5000).map(|n| format!("f{n}.tmp")).collect();
+    let mut records = vec![((2_u32, "x", 0x10_u32, 0_i64), 7_u64)];
+    records.extend(names.iter().map(|name| ((2, name.as_str(), 0x20, 0), 100)));
+    assert!(records.len() > PAIR_MAX);
+    let read = changes(
+        &buffer_ids(Layout::Extended, &records),
+        Layout::Extended,
+        NOW,
+    )
+    .unwrap();
+    assert_eq!(read.left, [(PathBuf::from("x"), 7)]);
+    let pairs = Pairs::default();
+    let now = Duration::from_secs(100);
+    pairs.note(now, Path::new("temp"), &read.left);
+    assert!(!pairs.lost(now));
+    assert!(pairs.paired(now, 7, &Path::new("matter").join("x")));
 }

@@ -3,6 +3,10 @@
 //! for `ReadDirectoryNotifyExtendedInformation`, whose records carry each item's attributes,
 //! into a 1 MiB buffer; a volume that refuses either (a network share takes at most 64 KiB, and
 //! may not give the extended records) gets 64 KiB, then `ReadDirectoryChangesW`'s own records.
+//! The matter's and notes' watches ask for names, attributes and writes ([`Notify::All`]); the
+//! pairing's on the agent's state and temp folders for names only ([`Notify::Names`]), so the
+//! agent's writes there don't fill the buffer. A wait with nothing read for [`IDLE_TICK`]
+//! returns [`Next::Idle`], the read still in flight.
 #![expect(
     unsafe_code,
     reason = "FFI to ReadDirectoryChangesW and the overlapped wait"
@@ -14,17 +18,17 @@ use std::time::{Duration, SystemTime};
 
 use windows::Win32::Foundation::{
     ERROR_INVALID_FUNCTION, ERROR_INVALID_PARAMETER, ERROR_NOT_SUPPORTED, ERROR_NOTIFY_ENUM_DIR,
-    HANDLE, WAIT_OBJECT_0,
+    HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OVERLAPPED, FILE_LIST_DIRECTORY,
-    FILE_NOTIFY_CHANGE_ATTRIBUTES, FILE_NOTIFY_CHANGE_DIR_NAME, FILE_NOTIFY_CHANGE_FILE_NAME,
-    FILE_NOTIFY_CHANGE_LAST_WRITE, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    OPEN_EXISTING, ReadDirectoryChangesExW, ReadDirectoryChangesW,
-    ReadDirectoryNotifyExtendedInformation,
+    FILE_NOTIFY_CHANGE, FILE_NOTIFY_CHANGE_ATTRIBUTES, FILE_NOTIFY_CHANGE_DIR_NAME,
+    FILE_NOTIFY_CHANGE_FILE_NAME, FILE_NOTIFY_CHANGE_LAST_WRITE, FILE_SHARE_DELETE,
+    FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING, ReadDirectoryChangesExW,
+    ReadDirectoryChangesW, ReadDirectoryNotifyExtendedInformation,
 };
 use windows::Win32::System::Threading::{
-    CreateEventW, INFINITE, SetEvent, WaitForMultipleObjects, WaitForSingleObject,
+    CreateEventW, SetEvent, WaitForMultipleObjects, WaitForSingleObject,
 };
 use windows::core::HSTRING;
 
@@ -44,6 +48,29 @@ const TRIES: [(Layout, usize); 3] = [
     (Layout::Extended, SHARE_WORDS),
     (Layout::Plain, SHARE_WORDS),
 ];
+
+/// How long a wait goes with nothing read before it returns [`Next::Idle`].
+const IDLE_TICK: Duration = Duration::from_secs(1);
+
+/// What a watch asks to be told of, anywhere below its folder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Notify {
+    /// Names made, renamed or removed, attributes and writes: a junction set on a folder changes
+    /// its attributes. The matter's and the notes' watches.
+    All,
+    /// Names made, renamed or removed only: the pairing's watches, which only note what left.
+    Names,
+}
+
+impl Notify {
+    fn filter(self) -> FILE_NOTIFY_CHANGE {
+        let names = FILE_NOTIFY_CHANGE_DIR_NAME | FILE_NOTIFY_CHANGE_FILE_NAME;
+        match self {
+            Notify::All => names | FILE_NOTIFY_CHANGE_ATTRIBUTES | FILE_NOTIFY_CHANGE_LAST_WRITE,
+            Notify::Names => names,
+        }
+    }
+}
 
 /// The watch's stop: a manual-reset event the outer sets at the session's end.
 pub(crate) struct Stop(Handle);
@@ -89,11 +116,13 @@ pub(crate) struct DirWatch<'a> {
     layout: Layout,
     pending: Option<Overlapped>,
     stop: &'a Stop,
+    notify: Notify,
 }
 
 impl<'a> DirWatch<'a> {
-    /// Opens `root` and starts the first read, so a watch that can't be armed fails here.
-    pub(crate) fn arm(root: &Path, stop: &'a Stop) -> io::Result<DirWatch<'a>> {
+    /// Opens `root` and starts the first read, of what `notify` asks for, so a watch that can't
+    /// be armed fails here.
+    pub(crate) fn arm(root: &Path, stop: &'a Stop, notify: Notify) -> io::Result<DirWatch<'a>> {
         let share = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
         // SAFETY: the name is a live HSTRING; no security attributes or template are passed,
         // and the handle is owned by `Handle` from here.
@@ -115,6 +144,7 @@ impl<'a> DirWatch<'a> {
             layout: Layout::Extended,
             pending: None,
             stop,
+            notify,
         };
         let mut last = io::Error::other("no read tried");
         for (layout, words) in TRIES {
@@ -129,15 +159,11 @@ impl<'a> DirWatch<'a> {
         Err(last)
     }
 
-    /// Starts the next read, of names made, renamed or removed, attributes and writes anywhere
-    /// below the folder: a junction set on a folder changes its attributes.
+    /// Starts the next read, of what the watch asks for ([`Notify`]) anywhere below the folder.
     fn read(&mut self) -> io::Result<()> {
         let mut io = Overlapped::new()?;
         let length = u32::try_from(size_of_val(&*self.buffer)).map_err(io::Error::other)?;
-        let filter = FILE_NOTIFY_CHANGE_DIR_NAME
-            | FILE_NOTIFY_CHANGE_FILE_NAME
-            | FILE_NOTIFY_CHANGE_ATTRIBUTES
-            | FILE_NOTIFY_CHANGE_LAST_WRITE;
+        let filter = self.notify.filter();
         let buffer = self.buffer.as_mut_ptr().cast();
         // SAFETY: the folder is open for overlapped I/O; the buffer is boxed, `u64`-aligned and
         // `length` bytes long, and it and `io` stay in `self` until the read is waited for or
@@ -183,9 +209,13 @@ impl Source for DirWatch<'_> {
         let Some(io) = self.pending.as_ref() else {
             return Next::Broken(io::Error::other("no read in flight"));
         };
+        let tick = u32::try_from(IDLE_TICK.as_millis()).unwrap_or(u32::MAX);
         // SAFETY: both events are live for the wait.
-        let woke =
-            unsafe { WaitForMultipleObjects(&[io.event.0, self.stop.raw()], false, INFINITE) };
+        let woke = unsafe { WaitForMultipleObjects(&[io.event.0, self.stop.raw()], false, tick) };
+        if woke == WAIT_TIMEOUT {
+            // The read stays in flight; the next call waits on it again.
+            return Next::Idle;
+        }
         if woke != WAIT_OBJECT_0 {
             return Next::Stopped;
         }
@@ -196,7 +226,9 @@ impl Source for DirWatch<'_> {
             Ok(0) => Next::Overflow,
             Ok(read) => {
                 // Once per buffer, as it is received: each folder added is told moved in or made
-                // by its creation time against this.
+                // by its creation time against this. It is the receipt time, not each event's: a
+                // buffer read late makes a folder just made look older, which errs only toward
+                // counting it moved in and ending the session.
                 let now = filetime(wall_clock());
                 let bytes = bytes_of(&self.buffer);
                 bytes

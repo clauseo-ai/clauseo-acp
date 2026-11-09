@@ -28,7 +28,8 @@
 //!   and one that breaks while the agent runs ends the session: nothing stands in for it.
 //! - A folder renamed or moved in and gone before its scan counts as gone; one made just now
 //!   (`mkdir`, by its creation time) only when its file ID left another watched place, the
-//!   agent's state and temp folders included ([`pairs`]).
+//!   agent's state and temp folders included, within 10 s either way, or when the pairing lost
+//!   track (an overflow, its bounded list full, a pairing watch broken): [`pairs`].
 //! - An item that can't be moved (the agent holding a handle to it, say) is tried again once
 //!   the session ended: fail closed.
 //! - Once the job is empty, the watch is stopped and rescans its folder one last time. When the
@@ -94,6 +95,10 @@ pub(crate) enum Next {
     Broken(io::Error),
     /// The session ended: the watch is to stop.
     Stopped,
+    /// Nothing came for a while (`os.rs`'s idle tick): the watch counts what the pairing
+    /// settled meanwhile (`pairs.rs`), so a folder paired by another watch's later record counts
+    /// even when this folder goes quiet.
+    Idle,
 }
 
 /// A watch armed on the folder.
@@ -278,6 +283,11 @@ pub(crate) fn watch<S: Source>(mut source: S, guard: &impl Guard, session: &impl
     session.pulse().end();
     let emptied = !ender.ended.replace(true) || ender.empty.get();
     ender.empty.set(emptied);
+    // What the pairing still holds for this watch is settled: counted, or dropped by the
+    // creation-time rule.
+    if let Some(paired) = session.paired() {
+        count_gone(&paired.finish(), &ender);
+    }
     act(&busy(session, || guard.rescan(&ender)), guard, &ender);
 }
 
@@ -294,10 +304,18 @@ fn keep_watching<S: Source, T: Session>(source: &mut S, guard: &impl Guard, ende
                     paired.note(session.now(), &changes.left);
                 }
                 let mut live = busy(session, || guard.changed(&changes, ender));
-                pairs::promote(&mut live, &changes.fresh_folders, paired, session);
+                pairs::promote(&mut live, &changes.fresh_folders, paired, session.now());
                 act(&live, guard, ender);
             }
-            Next::Overflow => overflowed(guard, ender),
+            Next::Overflow => {
+                // What left in this flood is unknown: the pairing lost track.
+                if let Some(paired) = session.paired() {
+                    paired.lose(session.now());
+                }
+                overflowed(guard, ender);
+                take_paired(ender);
+            }
+            Next::Idle => take_paired(ender),
             Next::Broken(error) => {
                 session.say(&format!(
                     "{SAID}git watch: the watch failed ({}); ending the session",
@@ -312,21 +330,42 @@ fn keep_watching<S: Source, T: Session>(source: &mut S, guard: &impl Guard, ende
     }
 }
 
+/// Counts what the pairing settled for this watch's held folders ([`Paired::take`]).
+fn take_paired<T: Session>(ender: &Ender<'_, T>) {
+    if let Some(paired) = ender.session.paired() {
+        count_gone(&paired.take(ender.session.now()), ender);
+    }
+}
+
 /// A watch on a folder the agent can write that only feeds the pairing (`pairs.rs`): the
-/// agent's state and temp folders. It moves nothing and ends nothing; one that breaks or is
-/// stopped just ends, and an overflow loses what it would have noted.
-pub(crate) fn feed(mut source: impl Source, paired: &Paired, now: impl Fn() -> Duration) {
+/// agent's state and temp folders, `armed` or not. It moves nothing and ends nothing itself.
+/// It fails closed: an overflow loses the pairing for its window, and a watch that couldn't be
+/// armed or broke loses it for the session, so every fresh folder gone and unpaired counts.
+pub(crate) fn feed(armed: io::Result<impl Source>, paired: &Paired, now: impl Fn() -> Duration) {
+    let mut source = match armed {
+        Ok(source) => source,
+        Err(error) => {
+            tracing::warn!(
+                code = code(&error),
+                "a pairing watch couldn't be armed; the pairing is lost for the session"
+            );
+            paired.lose_for_good();
+            return;
+        }
+    };
     loop {
         match source.next() {
             Next::Changed(changes) => paired.note(now(), &changes.left),
-            Next::Overflow => {}
+            Next::Overflow => paired.lose(now()),
             Next::Broken(error) => {
                 tracing::warn!(
                     code = code(&error),
-                    "a pairing watch broke; it notes no more"
+                    "a pairing watch broke; the pairing is lost for the session"
                 );
+                paired.lose_for_good();
                 return;
             }
+            Next::Idle => {}
             Next::Stopped => return,
         }
     }
