@@ -40,15 +40,21 @@ fn no_runtime_is_missing() {
 
 #[test]
 fn an_older_runtime_is_too_old() {
-    for older in ["89.0.774.43", "88.0.705.81", "60", "89", "88.0.705.81 beta"] {
+    for older in [
+        "111.0.1661.40",
+        "110.0.1587.69",
+        "60",
+        "111",
+        "110.0.1587.69 beta",
+    ] {
         assert_eq!(verdict(Some(older), minimum()), Verdict::TooOld, "{older}");
     }
 }
 
 #[test]
 fn the_minimum_itself_starts() {
-    assert_eq!(verdict(Some("89.0.774.44"), minimum()), Verdict::Start);
-    assert_eq!(verdict(Some("90"), minimum()), Verdict::Start);
+    assert_eq!(verdict(Some("111.0.1661.41"), minimum()), Verdict::Start);
+    assert_eq!(verdict(Some("120"), minimum()), Verdict::Start);
     // Clean Windows 11's runtime (the ARM64 VM's win11-clean, 2026-11-09).
     assert_eq!(verdict(Some("152.0.4191.66"), minimum()), Verdict::Start);
 }

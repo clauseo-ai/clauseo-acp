@@ -710,9 +710,9 @@ jobs:
 
       # budgets.toml's release_binary_size is the app binary alone; each sidecar gets its own row
       # beside it, never counted in that limit. deb_size is the .deb.
-      # minimumWebview2Version in tauri.conf.json is what the app needs (89.0.774.44, for
-      # ICoreWebView2Controller2; decision 0035), raised only on purpose. This line shows what the
-      # runner has now. It never fails the job.
+      # minimumWebview2Version in tauri.conf.json is what the app needs (111.0.1661.41: the UI's
+      # color-mix(); decision 0035), raised only on purpose. This line shows what the runner has
+      # now. It never fails the job.
       - name: The runner's WebView2 version, beside minimumWebview2Version
         if: runner.os == 'Windows'
         shell: pwsh
