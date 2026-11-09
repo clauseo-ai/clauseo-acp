@@ -165,6 +165,9 @@ fn a_session_with_a_chrome_gets_the_shell_browser() {
     assert_eq!(parts.first(), Some(&data.join("stetdoc")));
     assert_eq!(parts.get(1), Some(&data.join("tools")));
     assert!(instructions.contains("use the `agent-browser` command in your shell"));
+    // Codex's line: ask to run unsandboxed, with one prefix rule to approve.
+    assert!(instructions.contains(r#"`sandbox_permissions: "require_escalated"`"#));
+    assert!(instructions.contains(r#"`prefix_rule: ["agent-browser"]`"#));
     assert!(!instructions.contains("{browser}"));
     assert_eq!(
         header_browser(&header),
