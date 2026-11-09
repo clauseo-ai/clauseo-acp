@@ -16,7 +16,7 @@ struct Record {
     escape_sweep: Vec<Point>,
     /// Reports told, and whether `ctl` was open when they were.
     told: Vec<(InnerReport, bool)>,
-    /// This step fails: "connect", "read", "start", "started".
+    /// This step fails: "connect", "read", "wer", "start", "started".
     fail: Option<&'static str>,
     /// How many waits pass before the agent exits.
     waits_left: usize,
@@ -74,8 +74,12 @@ impl Inner for Record {
         self.done.push("clean".to_owned());
         self.log("clauseo-sandbox-run: cleanup (before launch): removed 1 Run and RunOnce values");
     }
-    fn quiet_wer(&mut self) {
+    fn quiet_wer(&mut self) -> Result<(), Failure> {
         self.done.push("quiet wer".to_owned());
+        if self.fail == Some("wer") {
+            return Err((RunExit::Token, "WER on".to_owned()));
+        }
+        Ok(())
     }
     fn log(&mut self, line: &str) {
         self.lines.push((line.to_owned(), self.open));
@@ -134,9 +138,9 @@ fn the_first_act_sweeps_and_cleans_before_the_launch_and_the_agent() {
         [
             "sweep before launch",
             "clean",
-            "quiet wer",
             "connect",
             "read launch",
+            "quiet wer",
             "start agent",
             "report Started { pid: 77 }",
             "wait 30s",
@@ -342,4 +346,28 @@ fn a_job_list_that_cant_be_read_fails_the_first_act_closed_and_a_tick_tries_agai
         .collect();
     assert_eq!(failed.len(), 2, "{failed:?}");
     assert_eq!(record.done.last().unwrap(), "report Exited { code: 3 }");
+}
+
+#[test]
+fn wer_left_on_refuses_the_launch_and_starts_no_agent() {
+    let mut record = Record {
+        fail: Some("wer"),
+        ..Record::default()
+    };
+    assert_eq!(run(&mut record), RunExit::Token.code());
+    let failed = format!(
+        "report Failed {{ exit: {}, what: \"WER on\" }}",
+        RunExit::Token.code()
+    );
+    assert_eq!(
+        record.done,
+        [
+            "sweep before launch",
+            "clean",
+            "connect",
+            "read launch",
+            "quiet wer",
+            failed.as_str(),
+        ]
+    );
 }

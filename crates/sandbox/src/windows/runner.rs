@@ -51,8 +51,8 @@
 //!   characters, so nothing but the pipe base goes there.
 //! - The job ends a process at its unhandled exception, before Windows Error Reporting is asked
 //!   (`JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION`), and the inner runner turns WER off in the
-//!   pool user's own `HKCU` before the agent starts (`wer.rs`): no `WerFault` as the lawyer opens
-//!   a crashed sandbox process (decision 0049).
+//!   pool user's own `HKCU` before the agent starts, or refuses the launch (`wer_flow.rs`): no
+//!   `WerFault` as the lawyer opens a crashed sandbox process (decision 0049).
 //! - The inner runner sets `SetErrorMode`, makes the private desktop and the (B) token
 //!   (`token.rs`), makes the profile folders the environment names, and starts the agent with
 //!   only its three pipe handles inherited (`PROC_THREAD_ATTRIBUTE_HANDLE_LIST`). It exits with
@@ -106,6 +106,8 @@ mod sweeper;
 mod sweeper_flow;
 #[cfg(windows)]
 mod wer;
+#[cfg(any(windows, test))]
+mod wer_flow;
 
 pub use env::agent_env;
 #[cfg(windows)]
@@ -416,7 +418,8 @@ pub enum RunExit {
     Pipe,
     /// The inner runner couldn't be put in the job, or the job made.
     Job,
-    /// The inner runner's token, desktop or folders couldn't be made.
+    /// The inner runner's token, desktop or folders couldn't be made, or Windows Error Reporting
+    /// couldn't be turned off for the pool user (`wer_flow.rs`).
     Token,
     /// The agent couldn't be started.
     Spawn,
