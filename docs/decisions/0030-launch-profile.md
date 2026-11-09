@@ -617,6 +617,13 @@ ask, could close even those: a later option, not this change.
   this, and an unreadable identity a request leads to refuses that request. The host reads the
   failing identity again at each check, logs once when names-only starts and once when it
   clears (no path), and sets `ProtectionView::data_fence_names_only` for the app to show.
+  A kept identity is checked again at every check (the data folder's own, one read), so a data
+  folder removed and made again is compared on its new identity; a late result from an older
+  check never overwrites a newer one's. Known limit: an agent that can change the permissions
+  of a folder above the data folder can lock the lawyer out of it and so switch names-only on,
+  which drops the identity checks (links and junctions the walk resolves are still caught, a
+  hard alias isn't) while the flag shows it. On Windows the sandbox should refuse that write;
+  it is on the VM's tier-B rows (decision 0049).
   Callers that go on to touch a path (the held-open check,
   the after-turn tool paths, the pre-write guard) use the walked path, never the agent's text
   again.

@@ -80,12 +80,24 @@ pub(super) struct DataIdentity<'a> {
 impl<'a> DataIdentity<'a> {
     /// `real_data`'s identity and its folders' on `fs`, each kept for the decisions it serves
     /// (the module's list), through the host's `health`: a complete capture kept from an
-    /// earlier check is used as it is; while one of them can't be read, that one is read again
-    /// (one read), and only once it reads is every one read again. Only `real_data` (the host's
+    /// earlier check is used once `real_data`'s own identity, read again (one read), is the kept
+    /// one; while one of them can't be read, that one is read again (one read); otherwise, or
+    /// once it reads, every one is read again. The result is recorded under the sequence number
+    /// taken as this capture starts ([`DataFenceHealth::begin`]). Only `real_data` (the host's
     /// data folder, resolved) and its parents are read here, never anything a request names.
     pub(super) fn capture(fs: &'a dyn Fs, real_data: &'a Path, health: &DataFenceHealth) -> Self {
+        let sequence = health.begin();
+        let fresh = || {
+            let fresh = read_line(fs, real_data);
+            health.record(sequence, fresh.clone());
+            fresh
+        };
         let captured = match health.kept(real_data) {
-            Some(kept) if kept.complete => kept,
+            Some(kept) if kept.complete => match identity_of(fs, real_data) {
+                Ok(Some(id)) if kept.data == Some(id) => kept,
+                // Recreated (a new identity), gone, or unreadable: every one read again.
+                Ok(_) | Err(Unreadable) => fresh(),
+            },
             Some(kept) => {
                 let retried = kept
                     .failing
@@ -94,16 +106,10 @@ impl<'a> DataIdentity<'a> {
                 if matches!(retried, Some(Err(Unreadable))) {
                     kept
                 } else {
-                    let fresh = read_line(fs, real_data);
-                    health.record(fresh.clone());
-                    fresh
+                    fresh()
                 }
             }
-            None => {
-                let fresh = read_line(fs, real_data);
-                health.record(fresh.clone());
-                fresh
-            }
+            None => fresh(),
         };
         let mut me = Self::none(fs);
         me.real_data = Some(real_data);

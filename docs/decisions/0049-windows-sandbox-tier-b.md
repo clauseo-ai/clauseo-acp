@@ -357,6 +357,11 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
 - **A neighbour on a network share** gets no fence: the restricted token fails network logon
   (measured over `\\localhost`). Accepted risk: a share name that aliases a local folder. Owner:
   PR7's VM rows (`s15_wfp_vm`: the (B) token against `\\localhost\C$` and a guest share).
+- **A path inside an interpreter's string argument** (`python3 -c "open('C:/m/j/x')"`) is judged
+  by the host's data fence and pre-write guard as text only: an alias in it (a junction, a
+  link, an 8.3 name) is not resolved, because the host can't tell which strings the program
+  will open. The OS jail stays the boundary there, as it is for any program the agent runs;
+  this is no new exposure (#766's review).
 - **Folders on `C:\` outside the matter's parent, and `ProgramData`**, stay readable where
   `Users` reads them. Owner: S15 close-out, Rohan's read-gap decision.
 - **Hard-linked files and junction targets inside a matter or sibling** stay bare (D7): no fence
