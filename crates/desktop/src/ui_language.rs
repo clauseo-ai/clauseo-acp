@@ -22,6 +22,12 @@
 //! - Best effort: it never fails or blocks the follower beyond one local `HKCU` write on the
 //!   setup host thread (not the UI thread). A failed write logs one warning with the Win32 code
 //!   and is not retried; the next different language tries again.
+//! - [`first_paint_script`] reads it (`saved`, Windows) on the main thread before the main
+//!   window exists, and [`init_script`] gives the page that language before any page script
+//!   runs (`window.__CLAUSEO_UI_LANGUAGE__` and `<html lang>`), so the first paint is already in
+//!   the language the app settles on (`ui/app/src/display/connect.ts`). The host's settings
+//!   still win once they arrive. Only a known tag makes a script; none or an unknown one gives
+//!   none, and the page starts as before.
 //! - Unit-test builds never touch the real key: their [`follow`] writes nowhere and their
 //!   [`seed_from_registry`] reads neither the key nor the display language; the Windows test
 //!   writes and reads a scratch key through [`windows::write_value`] and
@@ -216,10 +222,32 @@ pub(crate) fn seed(
     }
 }
 
+/// The script that gives the page `language` (`saved`'s, on Windows) before any page script
+/// runs: the global the display store starts from, and `<html lang>` where the element already
+/// exists. `None` for no language, so the page starts as it did without one. The tag is the
+/// language's serde form (`en`, `hi`), written as a JSON string.
+pub(crate) fn init_script(language: Option<clauseo_protocol::Language>) -> Option<String> {
+    let quoted = serde_json::to_string(&language?).ok()?;
+    Some(format!(
+        "window.__CLAUSEO_UI_LANGUAGE__ = {quoted};\n\
+         if (document.documentElement) document.documentElement.lang = {quoted};\n"
+    ))
+}
+
 /// [`seed`] from `HKCU\`[`KEY`] or the display language into `settings.json`, at start. Off
 /// Windows it reads nothing.
 pub(crate) fn seed_from_registry(effective: &mut Effective) {
     let _seeded = seed(effective, &SystemFiles, &App);
+}
+
+/// [`init_script`] for the language the registry records (`saved`), for the main window. Only
+/// Windows records one; elsewhere there is none, and the page starts as before.
+pub(crate) fn first_paint_script() -> Option<String> {
+    #[cfg(windows)]
+    let recorded = saved();
+    #[cfg(not(windows))]
+    let recorded = None;
+    init_script(recorded)
 }
 
 /// The effective language the last [`follow`] saw, English before the first (module docs).
