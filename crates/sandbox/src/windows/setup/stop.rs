@@ -59,12 +59,14 @@
 //!    of [`JOBS_CAP`] jobs, the most read, as more may be past it (the pool's jobs within it are
 //!    cancelled first, and the log line says the list was longer);
 //!    5b. ends each pool user's WSL 2 VM ([`vms`]): of HCS's compute systems owned by `WSL`,
-//!    one whose folder, `temp\<id>` under `Local AppData`, is in the lawyer's profile is left
-//!    alone (checked first); one whose folder is in a pool user's profile is terminated, with a
-//!    bounded wait, and its user marked; any other is unmapped and marks every pool user. With
-//!    no HCS (`computecore.dll` or the `vmcompute` service missing) there is nothing to do. A
-//!    pool user's VM that isn't ended, an unmapped WSL system, or a list that fails while
-//!    `WSLService` or `LxssManager` is installed, is 48. The
+//!    one whose folder, `temp\<id>` under `Local AppData`, is in the lawyer's or any other
+//!    non-pool profile is left alone (checked first); one whose folder is in a pool user's
+//!    profile is terminated, with a bounded wait, and its user marked; one in no profile marks
+//!    every pool user and is terminated too, unless a non-pool profile couldn't be read, when
+//!    it is unmapped, as is one a non-pool profile may hold. With no HCS (`computecore.dll` or
+//!    the `vmcompute` service missing) there is nothing to do. A VM that isn't ended, an
+//!    unmapped WSL system, or a list that fails while `WSLService` or `LxssManager` is
+//!    installed, is 48. The
 //!    pool's WSL 1 instances need nothing more: their pico processes, `wslhost.exe` and
 //!    `wslrelay.exe` carry the pool user's token, and step 4 stops them;
 //! 6. adds each pool user it found running, owning a job or a VM, to the record's `ResetSids`,
@@ -133,6 +135,8 @@ mod tests;
 mod vms;
 #[cfg(windows)]
 mod windows_hcs;
+#[cfg(windows)]
+mod windows_profiles;
 #[cfg(windows)]
 pub(crate) mod windows_stopper;
 #[cfg(windows)]

@@ -1,8 +1,9 @@
-//! The stop's WSL step (step 5b, `vms.rs`) through the fake: a VM whose folder the lawyer's
-//! profile holds is left alone (a pool user holding it too is marked), a VM whose folder a pool
-//! user's profile holds is ended and its user marked, any other WSL VM is unmapped (48, every
-//! pool user marked, nothing ended), a VM that isn't ended is 48, a list that fails is 48 only
-//! with WSL installed, and with no HCS nothing is asked.
+//! The stop's WSL step (step 5b, `vms.rs`) through the fake: a VM whose folder the lawyer's or
+//! another non-pool profile holds is left alone (a pool user holding it too is marked), a VM
+//! whose folder a pool user's profile holds is ended and its user marked, a VM in no profile is
+//! ended with every pool user marked unless a non-pool profile couldn't be read (then it is
+//! unmapped: 48, nothing ended), a VM that isn't ended is 48, a list that fails is 48 only with
+//! WSL installed, and with no HCS nothing is asked.
 
 use super::*;
 
@@ -27,6 +28,12 @@ pub(super) struct FakeVms {
     pub(super) owner_unreadable: bool,
     /// The lawyer's folder reads.
     pub(super) owner_reads: usize,
+    /// `ProfileList`'s SIDs; `None` is the lawyer's and the pool's.
+    pub(super) profiles: Option<Result<Vec<Sid>, Failed>>,
+    /// The folders `temp\<id>` other non-pool profiles' `Local AppData` hold.
+    pub(super) other_folders: Vec<(Sid, String)>,
+    /// Other non-pool profiles that can't be read.
+    pub(super) other_unreadable: Vec<Sid>,
     /// Ids whose termination fails.
     pub(super) refuse: Vec<String>,
     /// Ids that never end: each termination waits out its wait, on the fake clock.
@@ -45,6 +52,9 @@ impl Default for FakeVms {
             owner_folders: Vec::new(),
             owner_unreadable: false,
             owner_reads: 0,
+            profiles: None,
+            other_folders: Vec::new(),
+            other_unreadable: Vec::new(),
             refuse: Vec::new(),
             hang: Vec::new(),
             reads: 0,
@@ -70,12 +80,17 @@ impl VmStopper for Fake {
         Ok(self.vms.folders.contains(&folder))
     }
 
-    fn owner_vm_folder(&mut self, owner: &Sid, id: &VmId) -> Result<bool, Failed> {
-        assert_eq!(
-            owner.as_str(),
-            OWNER,
-            "only the lawyer's folders are read here"
-        );
+    fn non_pool_vm_folder(&mut self, user: &Sid, id: &VmId) -> Result<bool, Failed> {
+        let pool = self.pool.clone().ok().flatten().map(|pool| pool.users);
+        let pool = pool.unwrap_or_default();
+        assert!(!pool.contains(user), "no pool user's folder is read here");
+        if user.as_str() != OWNER {
+            if self.vms.other_unreadable.contains(user) {
+                return Err("a non-pool profile couldn't be read (5)".to_owned());
+            }
+            let folder = (user.clone(), id.as_str().to_owned());
+            return Ok(self.vms.other_folders.contains(&folder));
+        }
         self.vms.owner_reads += 1;
         if self.vms.owner_unreadable {
             return Err("the lawyer's Local AppData redirect can't be expanded".to_owned());
@@ -85,6 +100,15 @@ impl VmStopper for Fake {
             .owner_folders
             .iter()
             .any(|held| held == id.as_str()))
+    }
+
+    fn profile_sids(&mut self) -> Result<Vec<Sid>, Failed> {
+        let pool = self.pool.clone().ok().flatten().map(|pool| pool.users);
+        let listed = std::iter::once(Sid::parse(OWNER).unwrap()).chain(pool.unwrap_or_default());
+        self.vms
+            .profiles
+            .clone()
+            .unwrap_or_else(|| Ok(listed.collect()))
     }
 
     fn terminate_vm(&mut self, id: &VmId, wait: Duration) -> Result<(), Failed> {
@@ -139,7 +163,7 @@ fn a_pool_users_vm_is_ended_and_its_user_marked_and_the_lawyers_left() {
     let (error, line) = &fake.logged[0];
     assert!(!error, "{line}");
     assert!(
-        line.contains("0 not, 1 pool WSL VMs ended, 0 not, 0 unmapped; 1 users marked"),
+        line.contains("0 not, 1 pool WSL VMs ended, 0 not, 0 unmapped, 0 in no profile; 1 users"),
         "{line}"
     );
     assert!(
@@ -224,26 +248,94 @@ fn the_lawyers_vm_is_left_and_a_pool_users_planted_copy_of_its_folder_marks_that
     );
 }
 
+/// A VM no profile holds a folder for.
+const HIDDEN_VM: &str = "11111111-2222-4333-8444-555555555555";
+/// Another Windows account on the machine, not the lawyer, not a pool user.
+const OTHER: u32 = 1050;
+
+/// [`with_vms`], with [`OTHER`]'s profile listed too.
+fn with_other(systems: &[&str]) -> Fake {
+    let mut fake = with_vms(systems);
+    let listed = [Sid::parse(OWNER).unwrap(), sid(1010), sid(1011), sid(OTHER)];
+    fake.vms.profiles = Some(Ok(listed.to_vec()));
+    fake
+}
+
 #[test]
-fn an_unknown_wsl_vm_is_48_marks_every_pool_user_and_nothing_is_ended() {
-    // No folder names it: another account's VM, or a pool user's hidden one.
-    let unknown = "11111111-2222-4333-8444-555555555555";
-    let mut fake = with_vms(&[unknown, POOL_VM]);
-    fake.vms.refuse = vec![unknown.to_owned()];
-    assert_eq!(stop(&mut fake), StopExit::NotStopped);
-    // The pool's VM is still ended; the unknown one is never tried.
-    assert_eq!(ended(&fake), [POOL_VM]);
-    assert_eq!(fake.waits, [VM_WAIT]);
-    assert_eq!(fake.resets, [sid(1010), sid(1011)]);
-    assert_eq!(fake.completed(), None);
+fn a_vm_in_no_profile_is_ended_and_every_pool_user_marked() {
+    // No folder names it: most likely a pool user's VM that hid its folder.
+    let mut fake = with_other(&[HIDDEN_VM, POOL_VM]);
+    assert_eq!(stop(&mut fake), StopExit::Done);
+    assert_eq!(ended(&fake), [POOL_VM, HIDDEN_VM]);
+    assert_eq!(fake.resets, [sid(1011), sid(1010)]);
+    // Both marked before it was terminated.
+    let at = |line: &str| fake.done.iter().position(|done| done == line);
+    let hidden = at(&format!("end vm {HIDDEN_VM}"));
+    let marks = fake.done.iter().filter(|done| done.starts_with("mark"));
+    let last_mark = fake.done.iter().rposition(|done| done.starts_with("mark"));
+    assert_eq!(marks.count(), 2, "{:?}", fake.done);
+    assert!(last_mark < hidden, "{:?}", fake.done);
     let line = &fake.logged[0].1;
     assert!(
-        line.contains("1 pool WSL VMs ended, 0 not, 1 unmapped"),
+        line.contains("2 pool WSL VMs ended, 0 not, 0 unmapped, 1 in no profile"),
+        "{line}"
+    );
+    // Its termination failing is 48, the pool still marked.
+    let mut fake = with_other(&[HIDDEN_VM]);
+    fake.vms.refuse = vec![HIDDEN_VM.to_owned()];
+    assert_eq!(stop(&mut fake), StopExit::NotStopped);
+    assert_eq!(fake.resets, [sid(1010), sid(1011)]);
+    let line = &fake.logged[0].1;
+    assert!(line.contains("0 pool WSL VMs ended, 1 not"), "{line}");
+    // A WSL system whose id isn't a GUID can't be named to HCS: unmapped, 48.
+    let mut fake = with_vms(&["wsl-container"]);
+    assert_eq!(stop(&mut fake), StopExit::NotStopped);
+    assert_eq!(ended(&fake), Vec::<&str>::new());
+    assert!(fake.logged[0].1.contains("1 unmapped"), "{:?}", fake.logged);
+}
+
+#[test]
+fn a_vm_another_non_pool_account_holds_is_left_and_a_planted_copy_marks_that_user() {
+    let mut fake = with_other(&[HIDDEN_VM]);
+    fake.vms.other_folders = vec![(sid(OTHER), HIDDEN_VM.to_owned())];
+    fake.vms.folders.push((sid(1010), HIDDEN_VM.to_owned()));
+    assert_eq!(stop(&mut fake), StopExit::Done);
+    assert_eq!(ended(&fake), Vec::<&str>::new());
+    assert_eq!(fake.resets, [sid(1010)]);
+    let line = &fake.logged[0].1;
+    assert!(
+        line.contains("0 not, 0 unmapped, 0 in no profile"),
+        "{line}"
+    );
+}
+
+#[test]
+fn a_non_pool_profile_that_cant_be_read_leaves_every_vm_in_no_profile_running_at_48() {
+    // Another account's profile can't be read: the VM in no profile may be that account's.
+    let mut fake = with_other(&[HIDDEN_VM, POOL_VM]);
+    fake.vms.other_unreadable = vec![sid(OTHER)];
+    assert_eq!(stop(&mut fake), StopExit::NotStopped);
+    // The pool user's VM is still ended: another account's profile that can't be read is
+    // passed over in matching.
+    assert_eq!(ended(&fake), [POOL_VM]);
+    assert_eq!(fake.resets, [sid(1011), sid(1010)]);
+    let line = &fake.logged[0].1;
+    assert!(
+        line.contains("1 pool WSL VMs ended, 0 not, 1 unmapped, 0 in no"),
         "{line}"
     );
     assert!(line.contains("WSL VM's user isn't known"), "{line}");
-    // A WSL system whose id isn't a GUID is unmapped too.
-    let mut fake = with_vms(&["wsl-container"]);
+    // The list of profiles failing is the same: nothing in no profile is ended.
+    let mut fake = with_vms(&[HIDDEN_VM, POOL_VM]);
+    fake.vms.profiles = Some(Err("RegEnumKeyExW (ProfileList) failed (5)".to_owned()));
+    assert_eq!(stop(&mut fake), StopExit::NotStopped);
+    assert_eq!(ended(&fake), [POOL_VM]);
+    assert_eq!(fake.resets, [sid(1011), sid(1010)]);
+    assert!(fake.logged[0].1.contains("1 unmapped"), "{:?}", fake.logged);
+    // One read failing for one VM's id holds back the VM in no profile seen before it too.
+    let mut fake = with_vms(&[HIDDEN_VM, LAWYER_VM]);
+    fake.vms.owner_folders.clear();
+    fake.vms.owner_unreadable = true;
     assert_eq!(stop(&mut fake), StopExit::NotStopped);
     assert_eq!(ended(&fake), Vec::<&str>::new());
 }
@@ -259,14 +351,13 @@ fn a_vm_whose_lawyers_folder_cant_be_read_is_unmapped_even_with_a_pool_users_fol
 }
 
 #[test]
-fn a_vm_a_pool_users_unreadable_profile_may_hold_is_48_and_every_user_marked() {
-    let unknown = "11111111-2222-4333-8444-555555555555";
-    let mut fake = with_vms(&[unknown]);
+fn a_vm_a_pool_users_unreadable_profile_may_hold_is_ended_and_every_user_marked() {
+    // In no profile it is ended, every pool user marked, the unreadable one included.
+    let mut fake = with_vms(&[HIDDEN_VM]);
     fake.vms.unreadable = vec![sid(1010)];
-    assert_eq!(stop(&mut fake), StopExit::NotStopped);
-    assert_eq!(ended(&fake), Vec::<&str>::new());
+    assert_eq!(stop(&mut fake), StopExit::Done);
+    assert_eq!(ended(&fake), [HIDDEN_VM]);
     assert_eq!(fake.resets, [sid(1010), sid(1011)]);
-    assert!(fake.logged[0].1.contains("1 unmapped"), "{:?}", fake.logged);
     // With no VM at all, nothing is read, so nothing is unknown.
     let mut fake = with_vms(&[]);
     fake.vms.unreadable = vec![sid(1010)];

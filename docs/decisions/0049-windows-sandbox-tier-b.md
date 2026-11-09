@@ -2547,16 +2547,19 @@ That folder can't show a pool user's VM is absent. WSL finds `%LOCALAPPDATA%` wi
 `SHGetKnownFolderPath(FOLDERID_LocalAppData, userToken)` (`filesystem.cpp`), which follows the
 user's own `HKCU\...\User Shell Folders`, and a folder it fails to make only logs and starts the
 VM anyway (`WslCoreVm.cpp:145-152`), so a pool user could redirect its folder, or deny itself the
-right to make it, and keep its VM out of a walk of its profile. So each WSL system is identified
-positively, the lawyer first:
+right to make it, and keep its VM out of a walk of its profile. So the profiles no pool user can
+write are read first, the lawyer's first (`setup/stop/vms.rs`, `stop_vms`):
 
-- **the lawyer's** (`OwnerSid`): its profile holds `AppData\Local\temp\<id>`, or `temp\<id>` under
-  the `Local AppData` its loaded hive names
-  (`HKU\<OwnerSid>\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders`,
-  `%USERPROFILE%` expanded against the lawyer's profile; an absolute path as it is; any other
-  variable can't be expanded and counts as unread). It is left alone, and a pool user whose
-  profile holds that folder too planted it and is marked: a pool user that learned the lawyer's
-  VM id can't have the stop end it;
+- **the lawyer's, or another non-pool account's**: the lawyer's (`OwnerSid`) profile, then every
+  other profile `ProfileList` lists that isn't a pool user's (`windows_profiles.rs`), holds
+  `AppData\Local\temp\<id>`, or `temp\<id>` under the `Local AppData` its hive names
+  (`Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders`, read from
+  `HKU\<SID>` when the hive is loaded, else from the profile's `NTUSER.DAT` loaded read-only for
+  the read as a private app hive (`RegLoadAppKeyW` with `REG_APP_HIVE_OPEN_READ_ONLY`);
+  `%USERPROFILE%` expanded against that profile; an absolute path as it is; any other variable
+  can't be expanded and counts as unread). It is left alone, and a pool user whose profile holds
+  that folder too planted it and is marked: a pool user that learned another account's VM id
+  can't have the stop end it. A profile with no `NTUSER.DAT` has no redirect;
 - **a pool user's**: its profile (`ProfileList`) holds `AppData\Local\temp\<id>`, read from the
   profile folder down without following a link (a junction could point the check at the lawyer's
   folders). Its user is marked for a reset first (under the set-up lock, so a run the task's
@@ -2565,25 +2568,32 @@ positively, the lawyer first:
   (`HcsTerminateComputeSystem`, at most 5 s each and 10 s in all, through an operation waited
   for, cancelled if the wait runs out (`HcsCancelOperation`, where `computecore.dll` has it),
   and closed). A system already gone is ended;
-- **any other WSL system is unmapped**, as is one whose lawyer's folder can't be read or whose id
-  isn't a GUID: nothing terminates it (it may be the lawyer's, or another account's), every pool
-  user is marked, and the stop ends at 48.
+- **in no profile**: every pool user is marked first, then it is terminated as a pool user's is.
+  A WSL system whose folder no profile holds, once each non-pool profile was read, is most likely
+  a pool user's VM that hid its folder (a redirect, or a `temp` it denied itself);
+- **unmapped**, left running, every pool user marked, the stop ending at 48: one whose lawyer's
+  folder can't be read (even with a pool user's folder: that pool user may have planted it), one
+  whose id isn't a GUID, and every one in no profile when any non-pool profile's folder or
+  redirect, or `ProfileList` itself, couldn't be read anywhere in the step: it may be that
+  account's VM, and the stop never ends a real user's VM it can't rule out. Another account's
+  profile that can't be read is otherwise passed over: a VM a pool user's profile holds is still
+  ended.
 
-So on a machine where another Windows account also runs WSL, a stop that runs while that
-account's VM is up ends at 48 and marks the whole pool (fail closed). Its VM's folder is in no
-profile the stop trusts, and telling it from a pool user's hidden VM would mean trusting what a pool
-user can change (its own shell folders and its `temp`'s rights). The next stop after that VM ends
-completes. A lawyer whose hive isn't loaded has no redirect to read: its redirected VM, if one
-outlives its logon, is unmapped too.
+So on a machine where another Windows account also runs WSL, that account's VM is found in its
+profile and left alone, whether its hive is loaded or not; a stop ends at 48 only while some
+non-pool profile can't be read. Not verified on a VM: that `RegLoadAppKeyW` takes
+`REG_APP_HIVE_OPEN_READ_ONLY` (a load it refuses is a profile that can't be read, so the stop
+ends at 48 rather than end a VM in no profile), and that a logon racing the read-only load gets
+its own hive.
 
 `computecore.dll` is loaded at run time from System32 (`LoadLibraryExW`, `GetProcAddress`),
 never imported, so the exe starts where it is missing; with it missing, or no `vmcompute`
 service, there is nothing to do and the log line says nothing of VMs. The stop ends at 48 when a
-pool user's VM isn't ended (a failure, a wait that ran out, or none tried once the 10 s are spent),
-when a WSL system is unmapped, or when the list fails while `WSLService` or `LxssManager` is
+VM it tried to end isn't ended (a failure, a wait that ran out, or none tried once the 10 s are
+spent), when a WSL system is unmapped, or when the list fails while `WSLService` or `LxssManager` is
 installed (either runs WSL 2); a list that fails with neither is logged and passed over. A pool
 user whose folder couldn't be read (a link on the way, or a read that failed) is marked. The log
-line adds counts only: VMs ended, not, and unmapped, never an id, a path or a SID. Not done:
+line adds counts only: VMs ended, not, unmapped, and in no profile, never an id, a path or a SID. Not done:
 restarting `WSLService` as a fallback (it would end the lawyer's sessions too). Not verified on a
 VM: that SYSTEM's list shows WSL's VMs with `Owner` `WSL` and the folder's name as the id, and
 that a termination from outside the service leaves it consistent (the elevated test checks only
