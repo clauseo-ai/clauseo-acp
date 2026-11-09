@@ -8,7 +8,9 @@ use std::path::{Path, PathBuf};
 
 use super::Around;
 use crate::windows::acl::owner;
-use crate::windows::acl_bytes::{Acl, Descriptor, INHERITED, flags, kind, mask, sid, sid_text};
+use crate::windows::acl_bytes::{
+    Acl, CONTAINER_INHERIT, Descriptor, INHERITED, OBJECT_INHERIT, flags, kind, mask, sid, sid_text,
+};
 use crate::windows::acl_plan::{
     AdmittedPlan, Inherit, LOW_LABEL_SID, OwnedKind, Rights, Sid, Subjects, owned_sddl, plan,
 };
@@ -173,15 +175,22 @@ fn owned_roots_are_protected_with_exactly_the_plans_entries_and_nothing_inside_i
         );
         assert_eq!(names_broad(path), None, "{path:?} {all:?}");
     }
-    // OWNER RIGHTS: what the agent makes in its own folders leaves its owner no WRITE_DAC.
-    let owner_rights = (
-        0,
-        INHERITED,
-        Rights::Modify.mask(),
-        Sid::parse("S-1-3-4").unwrap(),
-    );
+    // OWNER RIGHTS: what the agent makes in its own folders leaves its owner no WRITE_DAC. The
+    // roots' entry is `OI|CI|IO`: a file inherits it bare, a folder keeps `OI|CI` to hand on.
     for path in &made_after {
-        assert!(entries(path).contains(&owner_rights), "{path:?}");
+        let handed_on = if path.is_dir() {
+            OBJECT_INHERIT | CONTAINER_INHERIT
+        } else {
+            0
+        };
+        let owner_rights = (
+            0,
+            handed_on | INHERITED,
+            Rights::Modify.mask(),
+            Sid::parse("S-1-3-4").unwrap(),
+        );
+        let all = entries(path);
+        assert!(all.contains(&owner_rights), "{path:?} {all:?}");
     }
     // The data folder's other contents, there before the launch, are walked once: the Claude
     // sign-in folder and the host's `updates` keep no Users entry.
