@@ -4,8 +4,8 @@
 // websites' row with its visit sentence behind an info icon, unless both tools are off; the "On the web" group only
 // when the host sends the tools' switches (SettingsView.tools), each row led by its tool's glyph with the state on it and
 // one helper line at most, each switch showing its value and a flip sent as set_tool_settings with its key; a locked
-// key's switch disabled, showing the host's value, its glyph locked, U11-07's line in its helper's place; an on
-// Browser switch's helper giving way to the room's "Not available yet"; the nav's icon not the web's globe; no
+// key's switch disabled, showing the host's value, its glyph locked, U11-07's line in its helper's place; the Browser
+// switch's helper the same on or off (no "Not available yet" since #870); the nav's icon not the web's globe; no
 // Indian Kanoon.
 import axe from "axe-core";
 import { act } from "react";
@@ -186,6 +186,7 @@ const SEARCH_NOTE = "Search the web and read pages.";
 const BROWSER_NOTE = "Runs on this computer.";
 // the room popover's lock wording, one for both
 const LOCKED = "Managed by firm";
+// UEP-16, retired after #870: the browser runs without a website check, so this never shows
 const NO_CHECK = "Not available yet";
 /** A tool row's leading glyph, and the state drawn on it: a slash for off, a lock for a firm's lock, neither for on. */
 const glyphOf = (row: Element | null | undefined) => {
@@ -282,9 +283,7 @@ test("each tool row says one helper line at most, in every state", async () => {
       const row = switchNamed(el, name)?.closest(".set-row");
       const label = row?.querySelector("label")?.textContent ?? "";
       expect(row?.textContent?.startsWith(label)).toBe(true);
-      expect([SEARCH_NOTE, BROWSER_NOTE, LOCKED, NO_CHECK]).toContain(
-        row?.textContent?.slice(label.length),
-      );
+      expect([SEARCH_NOTE, BROWSER_NOTE, LOCKED]).toContain(row?.textContent?.slice(label.length));
     }
     await act(async () => root?.unmount());
     host?.remove();
@@ -310,22 +309,16 @@ test("with both tools off, no websites' row", async () => {
   expect(el.querySelector('[data-testid="dest-websites"]')).toBeNull();
 });
 
-test("an on Browser switch gives the room's reason in its helper's place", async () => {
-  const { el } = await mount({ tools: ON });
-  const browserRow = switchNamed(el, "Browser")?.closest(".set-row");
-  expect(browserRow?.textContent).toBe(`Browser${NO_CHECK}`);
-  expect(browserRow?.textContent).not.toContain(BROWSER_NOTE);
-  const searchRow = switchNamed(el, "Web search")?.closest(".set-row");
-  expect(searchRow?.textContent).not.toContain(NO_CHECK);
-});
-
-test("an off Browser switch gives its helper, and no such reason", async () => {
-  const { el } = await mount({ tools: { web_search: true, browser: false } });
-  expect(pane(el).textContent).not.toContain(NO_CHECK);
-  expect(switchNamed(el, "Browser")?.closest(".set-row")?.textContent).toBe(
-    `Browser${BROWSER_NOTE}`,
-  );
-});
+test.each([true, false])(
+  "the Browser switch gives its helper whether on or off (%s), and never Not available yet",
+  async (on) => {
+    const { el } = await mount({ tools: { web_search: true, browser: on } });
+    expect(pane(el).textContent).not.toContain(NO_CHECK);
+    expect(switchNamed(el, "Browser")?.closest(".set-row")?.textContent).toBe(
+      `Browser${BROWSER_NOTE}`,
+    );
+  },
+);
 
 test("Privacy's nav icon is neither the web's globe nor the Safe workspace's lock", () => {
   const privacy = SECTIONS.find((s) => s.id === "privacy");

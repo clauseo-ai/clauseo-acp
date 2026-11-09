@@ -10,11 +10,11 @@ export const WEB_ON = "Web search: on.";
 export const ON = "On";
 export const OFF = "Off";
 
-/** Every reason the browser row can give when off, whatever the machine's browser state. */
+/** Every reason the browser row can give when off on Windows, whatever the machine's browser state. */
 export const BROWSER_REASONS = [
   "In Settings",
   "Managed by firm",
-  "Not available yet",
-  "Too many browsers open",
-  "Needs Chrome",
+  "Install Chrome or Edge",
+  "Blocked by your firm",
+  "Couldn't check browser settings",
 ];

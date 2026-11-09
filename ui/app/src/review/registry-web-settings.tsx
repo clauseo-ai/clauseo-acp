@@ -74,7 +74,8 @@ const entry = (id: string, words: WordsRef, state: State = {}): Entry => ({
 
 /** Privacy's entries, each id written as it is: an id never moves when an entry is added or taken out. Retired in
  * round 3 (icons first): UEP-05, UEP-09, UEP-11, UEP-12; UEP-17 (each plan's own what-line, now UEP-23's one note);
- * UEP-02 (the pane's lead, which repeated its first heading). */
+ * UEP-02 (the pane's lead, which repeated its first heading); UEP-16 (Not available yet under the Browser switch,
+ * wrong once #870's browser runs without a website check). */
 export const WEB_SETTINGS: Entry[] = [
   entry("UEP-01", settingsWords("Privacy")),
   entry("UEP-03", settingsWords("What leaves this computer")),
@@ -117,6 +118,4 @@ export const WEB_SETTINGS: Entry[] = [
   entry("UEP-22", settingsWords("About websites"), {
     tip: "About websites",
   }),
-  // the Browser switch on, and no website check yet: the room's reason in its helper's place
-  entry("UEP-16", lineWords("Not available yet"), { tools: ON }),
 ];

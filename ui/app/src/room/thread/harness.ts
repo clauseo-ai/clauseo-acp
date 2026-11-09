@@ -66,6 +66,8 @@ export type Script = {
   setup?: FakeHost["setup"];
   /** Windows' Smart App Control state display_info reports (FakeHost's smartAppControl); unknown when left out. */
   smartAppControl?: FakeHost["smartAppControl"];
+  /** The OS display_info reports (FakeHost's platform); Linux when left out. */
+  platform?: FakeHost["platform"];
 };
 
 export const defaultOutcome = (command: HostCommand): CommandOutcome => {
@@ -135,6 +137,7 @@ export async function mountRoom(script: Script = {}): Promise<Harness> {
     ...(script.protection === undefined ? {} : { protection: script.protection }),
     ...(script.setup === undefined ? {} : { setup: script.setup }),
     ...(script.smartAppControl === undefined ? {} : { smartAppControl: script.smartAppControl }),
+    ...(script.platform === undefined ? {} : { platform: script.platform }),
   });
   connectRoom(transport, script.display ?? {});
   const manual = manualBatch();

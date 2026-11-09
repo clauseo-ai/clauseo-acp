@@ -399,8 +399,8 @@ export class FakeTransport implements HostTransport, NextHostSource, LimitsSourc
     return this.only("setup").map((c) => c.command);
   }
 
-  /** Plays one app event (H4) as the host would send it to every window; `{ browser_install: { state } }` is the
-   * Chrome download's state (room/browser-install.ts). A new app listener hears `host.next.first` first, the catch-up. */
+  /** Plays one app event (H4) as the host would send it to every window; `{ browser_policy: { state } }` is the
+   * firm's browser policy re-read (room/browser-policy.ts). A new app listener hears `host.next.first` first, the catch-up. */
   appEvent(event: AppEvent): void {
     for (const listener of this.#appHeard) listener(event);
   }

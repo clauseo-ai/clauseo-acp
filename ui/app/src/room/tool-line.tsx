@@ -1,12 +1,11 @@
 // The tool line on the status line, after the plan: one glyph per tool, its state on it (on, slashed off, the firm's
 // lock), in one quiet button named in words, its tooltip saying the same, that opens where each stands (DESIGN.md
-// §Icons: no visible words). The popover, its rows, the Chrome download and their words are a chunk of their own
+// §Icons: no visible words). The popover, its rows and their words are a chunk of their own
 // (tool-popover.tsx), loaded with the line's own chunk (tool-line-room.ts), as the line first shows. Until it is in,
 // the glyphs stand alone, named the same.
 import { lazy, Suspense, use, useMemo } from "react";
 import { ToolGlyph } from "@clauseo/components/icons/tool-glyph.tsx";
 import { late } from "@clauseo/components/lib/late.ts";
-import { browserInstallOf } from "./browser-install.ts";
 import { browserPolicyOf } from "./browser-policy.ts";
 import { ToolLineContext } from "./tool-line-context.ts";
 import type { ToolLineRoom } from "./tool-line-room.ts";
@@ -33,7 +32,6 @@ export function ToolLine({ label, tools }: { label: string; tools: readonly Know
     () => ({
       plan,
       openSettings,
-      install: transport === null ? null : browserInstallOf(transport),
       policy: transport === null ? null : browserPolicyOf(transport),
     }),
     [plan, openSettings, transport],
