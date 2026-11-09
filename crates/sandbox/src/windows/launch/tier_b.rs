@@ -143,9 +143,10 @@ impl<S: LaunchSteps> TierBLauncher<S> {
     /// Makes the pipe, writes the launch file and starts the outer; the feed starts with it.
     ///
     /// A session whose end began during the spawn (the host's `after_session` raced the start)
-    /// gets no agent: the outer is ended and seen empty (`LaunchSteps::end_outer`) before its
-    /// slot and matter are freed, or they stay held (stuck), and the launch fails. One whose end
-    /// began before the spawn starts nothing.
+    /// gets no agent: the outer is ended and seen empty (`LaunchSteps::end_outer`), and only
+    /// then does the end's pass run here (repair, set-aside, slot and matter freed); if it can't
+    /// be ended, nothing moves and the matter stays stuck. The launch fails either way. One
+    /// whose end began before the spawn starts nothing.
     fn start(&self, spec: &LaunchSpec) -> Result<Launched, clauseo_process::Error> {
         let (mut pipe, pipe_name) = self.steps.create_pipe().map_err(launch_error)?;
         let file = self
@@ -178,8 +179,8 @@ impl<S: LaunchSteps> TierBLauncher<S> {
                 drop(started);
                 self.remove_launch(&file);
                 tracing::warn!("tier B's session ended while its outer started: ending it");
-                let ended = self.steps.end_outer(&self.pool).is_ok();
-                self.guard.finish_race(ended);
+                let gone = self.steps.end_outer(&self.pool).is_ok();
+                self.guard.finish_race(gone);
                 return Err(ended_early());
             }
         }

@@ -402,11 +402,13 @@ fn an_end_before_the_start_fails_the_launch() {
     );
 }
 
-/// An end that comes while the outer is starting: the pass runs, but the slot and the matter
-/// stay held; the launcher opens the outer (before its handle can drop), ends it, and frees
-/// them only once `end_outer` has seen its job empty. If it can't, the matter is stuck.
+/// An end that comes while the outer is starting moves nothing: no repair, no set-aside, and
+/// the slot and the matter stay held. The launcher opens the outer (before its handle can
+/// drop), ends it, and only once `end_outer` has seen its job empty runs the end's pass, which
+/// waits for the pool user's processes, then repairs, sets aside and frees. If the outer can't
+/// be ended within its bound, nothing moves and the matter is stuck.
 #[test]
-fn an_end_during_the_spawn_holds_the_slot_until_the_outer_is_gone() {
+fn an_end_during_the_spawn_moves_nothing_until_the_outer_is_gone() {
     for end_fails in [false, true] {
         let world = World::new();
         let dir = TempDir::new(&format!("launch-end-race-{end_fails}"));
@@ -421,7 +423,8 @@ fn an_end_during_the_spawn_holds_the_slot_until_the_outer_is_gone() {
         std::thread::scope(|scope| {
             let starting = scope.spawn(|| launcher.launch(&spec(&dir)).is_err());
             held.reached();
-            launchers.after_session(MATTER, "s1", &policy);
+            let moved = launchers.after_session(MATTER, "s1", &policy);
+            assert_eq!(moved, Vec::<SetAside>::new());
             let busy = launchers.reserve(MATTER, "s2", &[]);
             assert!(matches!(busy, Err(Error::MatterBusy)), "held: {busy:?}");
             assert!(!world.claimed_slots().is_empty(), "the slot stays claimed");
@@ -429,20 +432,21 @@ fn an_end_during_the_spawn_holds_the_slot_until_the_outer_is_gone() {
             assert!(starting.join().unwrap(), "the launch failed");
         });
         let calls = world.calls();
-        let at = |call: &str| calls.iter().position(|each| each == call).unwrap();
-        assert!(at("end_run 1") < at("watch_outer"), "{calls:?}");
+        let at = calls.iter().position(|call| call == "watch_outer").unwrap();
+        assert_eq!(
+            calls[..at],
+            ["create_pipe", "write_launch", "spawn_outer"],
+            "nothing moved while the outer was starting"
+        );
         // Opened first; the handle dropped (the outer ended) before the file and `end_outer`.
-        let tail: Vec<&str> = calls[at("watch_outer")..]
-            .iter()
-            .map(String::as_str)
-            .collect();
+        let head = ["watch_outer", "remove_launch", "end_outer"];
         let next = launchers.reserve(MATTER, "s2", &[]);
         if end_fails {
-            assert_eq!(tail, ["watch_outer", "remove_launch", "end_outer"]);
+            assert_eq!(calls[at..], head, "no repair, no set-aside: quarantined");
             assert!(matches!(next, Err(Error::MatterStuck)), "{next:?}");
         } else {
-            let want = ["watch_outer", "remove_launch", "end_outer", "release_slot"];
-            assert_eq!(tail, want);
+            let pass = [&head[..], &["wait_exited 2"], &PASS].concat();
+            assert_eq!(calls[at..], pass);
             assert!(next.is_ok(), "{next:?}");
         }
         drop(launcher);

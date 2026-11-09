@@ -2441,14 +2441,17 @@ The orchestrator's rulings change the interface above in these ways:
     (`reserve` answers `MatterBusy`), end the processes by the stop task and the sweep again,
     and free both only once the pool user is truly empty (#697). Until then a reused slot has
     only the proxy's auth between the old processes and the new session.
+  - know that a panic in the launcher's start while an end races it fails closed: the matter
+    stays stuck until Clauseo restarts (C4); the restart's crash recovery clears it.
 - **Accepted: the launcher's check-to-spawn window.** `TierBLauncher` checks the session is
   still launched (`is_launched`) and then starts the outer; an `after_session` that begins in
   between isn't seen. This is accepted: the pass and the undo are decided by the registry's
   lock, and an outer started in the gap is the next launch's leftover, stopped or refused.
   C4 keeps it to timing only: the launcher marks its spawn under the registry's lock, and an
-  end that comes during it runs its pass but leaves the slot and the matter to the launcher,
-  which frees them only once `end_outer` has seen the outer's job empty (else the matter is
-  stuck). No slot is reused while the raced outer's processes may live.
+  end that comes during it moves nothing. The launcher ends the outer, and only once
+  `end_outer` has seen its job empty does it run the end's pass (repair, set-aside, then the
+  slot and the matter freed); if it can't, nothing moves and the matter is stuck. Nothing
+  moves, and no slot is reused, while the raced outer's processes may live.
 - **A gate for C5: `apply`'s grants name the run's group.** A failed or cancelled walk undoes
   the session's work, but not the permission entries `apply` wrote (by design: the next walk
   continues from them). C5 must confirm that those entries name the run's group
@@ -2466,8 +2469,8 @@ The orchestrator's rulings change the interface above in these ways:
   otherwise by the session's end, its undo, or a failed start. A removal that fails is noted
   and tried again at each end and undo; the next start's stale sweep removes any left.
 - **A session whose end began before its outer started gets no agent:** the start is refused,
-  or, if the end came during the spawn, the outer is ended and seen empty before its slot and
-  matter are freed, and the launch fails.
+  or, if the end came during the spawn, the outer is ended and seen empty before the end's
+  pass runs (repair, set-aside, the slot and the matter freed), and the launch fails.
 - **Denials come on the denial pipe, never from stderr.** The outer's stderr carries the
   agent's, so the agent could forge any line there. The pipe has a random name
   (`clauseo-run-<32 hex>-denials`), the desktop user alone in its DACL, the Medium label, one

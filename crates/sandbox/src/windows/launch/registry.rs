@@ -43,7 +43,7 @@ use crate::{Error, SetAside};
 mod ended;
 mod held;
 
-pub(super) use ended::{Ended, OuterState, finish_race};
+pub(super) use ended::{Ended, OuterState, raced};
 pub(super) use held::{Finish, FinishEnd};
 use held::{Owed, stuck};
 

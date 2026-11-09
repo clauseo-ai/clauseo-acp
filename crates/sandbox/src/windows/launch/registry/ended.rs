@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use super::{Entry, Registry, State};
+use super::{Registry, State};
 use crate::windows::launch::prepare::Shared;
 use crate::windows::launch::steps::{LaunchSteps, Slot};
 use crate::windows::pool::PoolUser;
@@ -20,8 +20,8 @@ pub(in crate::windows::launch) enum OuterState {
     Spawning,
     /// Started: the end waits for the pool user's processes to truly exit.
     Spawned,
-    /// The end came while it was being started: the launcher frees the slot and the matter
-    /// once the outer is ended and seen empty ([`finish_race`]), or leaves them stuck.
+    /// The end came while it was being started: the launcher runs the end's pass once the
+    /// outer is ended and seen empty ([`raced`]), or leaves the matter stuck.
     Raced,
 }
 
@@ -35,8 +35,8 @@ pub(in crate::windows::launch) struct Ended<S: LaunchSteps> {
     pub(in crate::windows::launch) walk: Arc<Shared>,
     pub(in crate::windows::launch) spawned: bool,
     pub(in crate::windows::launch) launch_file: Option<PathBuf>,
-    /// The outer was starting: the slot stays on the entry and the matter held, for the
-    /// launcher to free once the outer is ended ([`finish_race`]).
+    /// The outer was starting: everything stays on the entry, and the matter held, for the
+    /// pass the launcher runs once the outer is ended ([`raced`]).
     pub(in crate::windows::launch) handoff: bool,
 }
 
@@ -64,10 +64,23 @@ pub(super) fn end<S: LaunchSteps>(
     let walk = Shared::new(now);
     entry.since = now;
     entry.walk = Some(Arc::clone(&walk));
+    if handoff {
+        // Everything stays on the entry for the pass the launcher runs ([`raced`]).
+        return Some(Ended {
+            id: entry.id,
+            pool: None,
+            slot: None,
+            run: None,
+            walk,
+            spawned: false,
+            launch_file: None,
+            handoff,
+        });
+    }
     Some(Ended {
         id: entry.id,
         pool: entry.pool.clone(),
-        slot: if handoff { None } else { entry.slot.clone() },
+        slot: entry.slot.clone(),
         run: entry.run.take(),
         walk,
         spawned: entry.outer == OuterState::Spawned,
@@ -76,41 +89,39 @@ pub(super) fn end<S: LaunchSteps>(
     })
 }
 
-/// Frees the slot and the matter of claim `id`, whose end came while its outer was starting,
-/// once the launcher has ended that outer and seen its job empty (`ended`); if it couldn't,
-/// they stay held (the matter stuck): no slot or matter is freed while pool processes may live.
-pub(in crate::windows::launch) fn finish_race<S: LaunchSteps>(
+/// The end of claim `id`, which came while its outer was starting, once the launcher has tried
+/// to end that outer: `gone` (its job seen truly empty), the pass to run now, as a session's
+/// end takes it; not gone, `None` and the matter stuck (no repair, no set-aside, nothing
+/// freed): nothing moves while pool processes may live.
+pub(in crate::windows::launch) fn raced<S: LaunchSteps>(
     registry: &Registry<S>,
     matter: &str,
     id: u64,
-    ended: bool,
-) {
-    let ours = |entry: &&mut Entry<S>| entry.id == id && entry.outer == OuterState::Raced;
-    let slot = {
-        let mut matters = registry.lock();
-        let Some(entry) = matters.get_mut(matter).filter(ours) else {
-            return;
-        };
-        if !ended {
-            tracing::warn!(
-                "tier B couldn't end an outer its session's end raced; the matter stays"
-            );
-            entry.stuck_from = None;
-            entry.state = State::Stuck;
-            return;
-        }
-        entry.slot.take()
-    };
-    // The slot first, then the matter, as an end frees them.
-    if let Some(slot) = slot {
-        registry.steps.release_slot(&slot);
-    }
+    gone: bool,
+) -> Option<Ended<S>> {
+    let now = registry.steps.now();
     let mut matters = registry.lock();
-    if matters
-        .get(matter)
-        .is_some_and(|entry| entry.id == id && entry.outer == OuterState::Raced)
-    {
-        matters.remove(matter);
-        registry.freed.notify_all();
+    let entry = matters
+        .get_mut(matter)
+        .filter(|entry| entry.id == id && entry.outer == OuterState::Raced)?;
+    if !gone {
+        tracing::warn!("tier B couldn't end an outer its session's end raced; the matter stays");
+        entry.stuck_from = None;
+        entry.state = State::Stuck;
+        return None;
     }
+    entry.outer = OuterState::Spawned;
+    let walk = Shared::new(now);
+    entry.since = now;
+    entry.walk = Some(Arc::clone(&walk));
+    Some(Ended {
+        id: entry.id,
+        pool: entry.pool.clone(),
+        slot: entry.slot.clone(),
+        run: entry.run.take(),
+        walk,
+        spawned: true,
+        launch_file: entry.launch_file.take(),
+        handoff: false,
+    })
 }

@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use super::prepare::Walk;
-use super::registry::{FinishEnd, OuterState, Registry, State, finish_race};
+use super::registry::{Ended, FinishEnd, OuterState, Registry, State, raced};
 use super::steps::{Ending, LaunchSteps, Slot};
 use crate::windows::pool::PoolUser;
 use crate::windows::runner::outcome::Meaning;
@@ -99,20 +99,30 @@ pub(super) fn end_session<S: LaunchSteps>(
     (matter, session, id): (&str, &str, Option<u64>),
     policy: &Policy,
 ) -> Option<Vec<SetAside>> {
-    let steps = &*registry.steps;
     let ended = registry.end(matter, session, id)?;
+    if ended.handoff {
+        // The end raced the outer's start: nothing moves (no repair, no set-aside) until the
+        // launcher has ended the outer and seen its job truly empty; it runs the pass then
+        // (`SessionGuard::finish_race`), and what that pass moves is only logged.
+        tracing::info!("tier B's session end raced its outer's start; the launcher ends it");
+        return Some(Vec::new());
+    }
+    Some(pass(registry, (matter, session), ended, policy))
+}
+
+/// The after-session pass over `ended`: see [`end_session`].
+fn pass<S: LaunchSteps>(
+    registry: &Registry<S>,
+    (matter, session): (&str, &str),
+    ended: Ended<S>,
+    policy: &Policy,
+) -> Vec<SetAside> {
+    let steps = &*registry.steps;
     // Dropped in reverse: the run's group and the slot first, then the matter freed.
-    // An end that raced the outer's start leaves the matter (and the slot) to the launcher,
-    // which frees them once the outer is ended and seen empty (`finish_race`).
-    // (Built only when it frees: `then_some` would build one and drop it, freeing at once.)
-    let _finish = if ended.handoff {
-        None
-    } else {
-        Some(FinishEnd {
-            registry,
-            matter,
-            id: ended.id,
-        })
+    let _finish = FinishEnd {
+        registry,
+        matter,
+        id: ended.id,
     };
     let _end_run = EndRun {
         registry,
@@ -170,7 +180,7 @@ pub(super) fn end_session<S: LaunchSteps>(
         }
         steps.write_clean_close(&end, cursor.as_ref(), &repaired, &passed);
     }
-    Some(moved)
+    moved
 }
 
 /// Ends the run's group, then gives the slot back, when dropped: at the end of the pass, or on
@@ -286,10 +296,23 @@ impl<S: LaunchSteps> SessionGuard<S> {
         next
     }
 
-    /// The end raced the start: frees the slot and the matter once the outer is `ended` and seen
-    /// empty, or leaves the matter stuck.
-    pub(super) fn finish_race(&self, ended: bool) {
-        finish_race(&self.registry, &self.matter, self.id, ended);
+    /// The end raced the start: once the outer is `gone` (ended and its job seen truly empty),
+    /// runs the end's pass here, which frees the slot and the matter; else leaves the matter
+    /// stuck, with no repair and no set-aside.
+    pub(super) fn finish_race(&self, gone: bool) {
+        let Some(ended) = raced(&self.registry, &self.matter, self.id, gone) else {
+            return;
+        };
+        let moved = pass(
+            &self.registry,
+            (&self.matter, &self.session),
+            ended,
+            &self.policy,
+        );
+        tracing::info!(
+            moved = moved.len(),
+            "tier B ended a session whose end raced its start"
+        );
     }
 
     /// Notes the session's launch file, which its end or undo deletes if nothing has.
