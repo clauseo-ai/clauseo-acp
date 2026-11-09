@@ -25,7 +25,9 @@
 // that release.yml keeps signing behind check's `signing` (SIGNPATH_ENABLED for a tag, the
 // self-signed input for a dry run), signs every PE before any updater signature, captures and
 // substitutes the uninstaller around its signing, and fails assemble on an unsigned PE only when
-// signing is on; and that the local authenticode action pins its actions.
+// signing is on; that the local authenticode action pins its actions and checks each signed file's
+// Authenticode digest and signer; that SignPath's token is read only in the environment-bound job;
+// and that every windows-exe-* and release-* download is checked against its uploader's sums.
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -39,6 +41,7 @@ import {
   PLACEHOLDER_KEY_ID,
   assets,
   authenticode,
+  authenticodeDigest,
   buildManifest,
   expectedKeyId,
   manifestProblems,
@@ -628,6 +631,66 @@ test("authenticode reads the certificate table: a signed PE has a PKCS#7 one, an
   assert.throws(() => authenticode(Buffer.from("MZ not a PE file at all, just some text here")), /not a readable PE file/);
 });
 
+/** <unsigned> as a signer leaves it: padded to 8 bytes, a new CheckSum, <certificate> appended. */
+function signPe(unsigned, certificate = winCertificate()) {
+  const padded = Buffer.concat([unsigned, Buffer.alloc((8 - (unsigned.length % 8)) % 8)]);
+  const directory = 0x58 + 112 + 4 * 8;
+  padded.writeUInt32LE(padded.length, directory);
+  padded.writeUInt32LE(certificate.length, directory + 4);
+  padded.writeUInt32LE(0x1234abcd, 0x58 + 64);
+  return Buffer.concat([padded, certificate]);
+}
+
+test("authenticodeDigest is the same for a file and the file signed, and differs for any other change", () => {
+  // An overlay after the sections (as an NSIS installer has) leaves a file unaligned: hashed as if
+  // padded to 8, as the signer pads it.
+  const odd = Buffer.concat([fakePe({ ProductName: "Clauseo" }), Buffer.from("abc")]);
+  assert.notEqual(odd.length % 8, 0);
+  for (const unsigned of [fakePe(null), fakePe({ ProductName: "Clauseo" }), fakePe({ ProductName: "Clauseo!" }), odd]) {
+    const digest = authenticodeDigest(unsigned);
+    assert.match(digest, /^[0-9a-f]{64}$/);
+    assert.equal(authenticodeDigest(signPe(unsigned)), digest, "signed by anyone");
+    assert.equal(authenticodeDigest(signPe(unsigned, winCertificate(Buffer.from("another signer's")))), digest);
+    // Re-signing a signed file (its table replaced) keeps it too.
+    assert.equal(authenticodeDigest(signPe(signPe(unsigned).subarray(0, unsigned.length))), digest);
+  }
+  // Any change outside the CheckSum, the table's entry and the table is another file.
+  const unsigned = fakePe({ ProductName: "Clauseo" });
+  const changed = Buffer.from(unsigned);
+  changed[0x200 + 100] ^= 1;
+  assert.notEqual(authenticodeDigest(changed), authenticodeDigest(unsigned));
+  assert.notEqual(authenticodeDigest(signPe(changed)), authenticodeDigest(unsigned));
+  const timestamp = Buffer.from(unsigned);
+  timestamp.writeUInt32LE(1, 0x48);
+  assert.notEqual(authenticodeDigest(timestamp), authenticodeDigest(unsigned));
+  // Data after the table counts.
+  assert.notEqual(authenticodeDigest(Buffer.concat([signPe(unsigned), Buffer.from("tail")])), authenticodeDigest(unsigned));
+  assert.throws(() => authenticodeDigest(signPe(unsigned).subarray(0, unsigned.length + 4)), /runs past the end/);
+  assert.throws(() => authenticodeDigest(Buffer.from("not a PE file at all, just some text here....")), /not a readable PE file/);
+});
+
+test("--authenticode-digest prints each PE file's digest by name, and fails on a file that is not one", () => {
+  const dir = mkdtempSync(join(tmpdir(), "latest-json-digest-"));
+  const run = (...files) =>
+    spawnSync(process.execPath, [join(here, "latest-json.mjs"), "--authenticode-digest", ...files], { encoding: "utf8" });
+  try {
+    const unsigned = fakePe({ ProductName: "Clauseo" });
+    writeFileSync(join(dir, "a.exe"), unsigned);
+    writeFileSync(join(dir, "b.dll"), fakePe(null));
+    const before = run(join(dir, "a.exe"), join(dir, "b.dll"));
+    assert.equal(before.status, 0, before.stderr);
+    assert.equal(before.stdout, `${authenticodeDigest(unsigned)}  a.exe\n${authenticodeDigest(fakePe(null))}  b.dll\n`);
+    writeFileSync(join(dir, "a.exe"), signPe(unsigned));
+    writeFileSync(join(dir, "b.dll"), signPe(fakePe(null)));
+    assert.equal(run(join(dir, "a.exe"), join(dir, "b.dll")).stdout, before.stdout);
+    writeFileSync(join(dir, "notes.txt"), "text");
+    assert.equal(run(join(dir, "notes.txt")).status, 1);
+    assert.equal(run().status, 2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("--unsigned lists every PE file without a signature, by its headers, under the paths given", () => {
   const dir = mkdtempSync(join(tmpdir(), "latest-json-unsigned-"));
   const run = (...paths) =>
@@ -838,7 +901,12 @@ test("release.yml's Authenticode steps run only when signing is on, and leave th
   }
   const job = jobCommands(text, "sign-windows");
   assert.ok(job.includes("actions: read"), "SignPath's action reads the artifact with the job's token");
-  assert.ok(job.includes("timeout-minutes: ${{ needs.check.outputs.signing == 'none' && 30 || 150 }}"));
+  const timeout = job.find((line) => line.startsWith("timeout-minutes: "));
+  assert.equal(timeout, "timeout-minutes: ${{ needs.check.outputs.signing == 'none' && 30 || 180 }}");
+  // Every signing request's wait, and twice the unsigned job's limit for the rest, fit inside it:
+  // a wait runs out (SignPath's error) before the job does.
+  const wait = Number(readFileSync(AUTHENTICODE_ACTION, "utf8").match(/wait-for-completion-timeout-in-seconds: (\d+)/)[1]);
+  assert.ok(uses.length * (wait / 60) + 2 * 30 <= 180, `${uses.length} × ${wait} s`);
 });
 
 test("release.yml Authenticode-signs every PE before any updater signature, the uninstaller between its two bundles", () => {
@@ -890,8 +958,10 @@ test("assemble lists every unsigned PE in the assets and both installers, failin
   assert.ok(upload < unpacked && unpacked < listed && listed < release);
   assert.ok(assemble.includes("SIGNING: ${{ needs.check.outputs.signing }}"));
   const step = jobSteps(text, "assemble").find((one) => one.includes("--unsigned dist"));
-  assert.match(step, /if \[ "\$SIGNING" = none \]; then\n\s+echo "::notice::signing is off: /);
-  assert.match(step, /else\n\s+echo "::error::signing is \$SIGNING, but /);
+  // Skipped with signing off: an unsigned release can't fail on it.
+  assert.match(step, /^ {8}if: needs\.check\.outputs\.signing != 'none'$/m);
+  assert.doesNotMatch(step, /continue-on-error|::notice::/);
+  assert.match(step, /echo "::error::signing is \$SIGNING, but /);
   assert.match(step, /echo "::error::7-Zip found no uninstall\.exe in /);
   assert.match(step, /exit "\$status"$/m);
 });
@@ -912,11 +982,134 @@ test("the authenticode action pins its actions, signs with SignPath or the throw
   assert.match(step("Sign it with SignPath and wait"), /github-artifact-id: \$\{\{ steps\.upload\.outputs\.artifact-id \}\}/);
   assert.match(step("Put SignPath's files in place of the folder's"), /if: inputs\.backend == 'signpath'/);
   assert.match(step("Sign it with the throwaway certificate"), /if: inputs\.backend == 'selfsigned'/);
-  const last = steps.at(-1);
-  assert.ok(last.startsWith("name: Every PE file in the folder is signed"));
-  assert.doesNotMatch(last, /\bif:/);
-  assert.match(last, /latest-json\.mjs" --unsigned "\$FOLDER"/);
+  // SignPath returns exactly the files sent.
+  assert.match(step("Put SignPath's files in place of the folder's"), /SignPath returned \$name, which was not sent/);
+  // Before signing, each file's Authenticode digest; after, the same digests, a signature on every
+  // PE file and, from Windows, a valid one by the expected signer. None of the three is skippable.
+  const names = steps.map((one) => one.match(/^name: (.*)/)[1]);
+  const recorded = names.indexOf("Record each file's Authenticode digest");
+  const signedAt = names.indexOf("Sign it with SignPath and wait");
+  assert.ok(recorded !== -1 && recorded < names.indexOf("Upload the folder for SignPath") && recorded < signedAt);
+  assert.match(steps[recorded], /latest-json\.mjs" --authenticode-digest "\$FOLDER"\/\* > "\$DIGESTS"/);
+  assert.deepEqual(names.slice(-2), [
+    "Every PE file in the folder is signed, and is the file sent",
+    "Every signature holds and is the expected signer's",
+  ]);
+  const [same, signer] = steps.slice(-2);
+  for (const one of [steps[recorded], same, signer]) {
+    assert.doesNotMatch(one, /\bif:/);
+  }
+  assert.match(same, /latest-json\.mjs" --unsigned "\$FOLDER"/);
+  assert.match(same, /--authenticode-digest "\$FOLDER"\/\* > "\$DIGESTS\.signed"\n\s+diff "\$DIGESTS" "\$DIGESTS\.signed" \|\|/);
+  assert.match(signer, /shell: powershell/);
+  assert.match(signer, /Get-AuthenticodeSignature -LiteralPath \$file\.FullName/);
+  // SignPath's must be Valid: the hash, the signature and the chain; the throwaway certificate may
+  // be untrusted, nothing else.
+  assert.match(signer, /\$accepted = @\('Valid'\)\n/);
+  assert.match(signer, /\$accepted = @\('Valid', 'UnknownError', 'NotTrusted'\)/);
+  assert.match(signer, /\$expected = @\(\$env:CLAUSEO_SELFSIGNED_THUMBPRINT\)/);
+  assert.match(signer, /\$expected = @\(-split \$env:EXPECTED_SIGNER\)/);
+  assert.match(signer, /if \(\$accepted -notcontains \[string\]\$signature\.Status -or \$expected -notcontains \$thumbprint\)/);
+  assert.match(step("Check the backend and the folder"), /is not a SHA-1 thumbprint \(40 hex digits\)/);
   assert.doesNotMatch(text, /\bsecrets\b/);
+});
+
+test("release.yml reads SignPath's token only in sign-windows, from the mode's environment, only for SignPath", () => {
+  const text = readFileSync(RELEASE_YML, "utf8");
+  const lines = text.split("\n");
+  const jobAt = (n) => {
+    for (let i = n; i >= 0; i -= 1) {
+      const match = lines[i].match(/^ {2}([a-z-]+):\s*$/);
+      if (match) {
+        return match[1];
+      }
+    }
+    return null;
+  };
+  const uses = lines.map((line, i) => [stripComment(line), i]).filter(([line]) => /SIGNPATH_API_TOKEN/.test(line) && /\bsecrets\b/.test(line));
+  assert.ok(uses.length >= 4);
+  for (const [line, i] of uses) {
+    assert.equal(jobAt(i), "sign-windows", `line ${i + 1}`);
+    assert.ok(
+      line.includes("needs.check.outputs.signing == 'signpath' && secrets.SIGNPATH_API_TOKEN || ''") ||
+        line.trim() === "HAS_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN != '' }}",
+      line,
+    );
+  }
+  // No other form of secret access that could reach it: no toJSON(secrets), no secrets: inherit.
+  assert.doesNotMatch(text, /toJSON\(secrets\)|secrets: inherit|secrets\[/);
+  const job = jobCommands(text, "sign-windows");
+  assert.ok(job.includes("environment: ${{ needs.check.outputs.environment }}"));
+  const settings = jobSteps(text, "sign-windows").find((one) => one.includes("name: SignPath's settings for this mode"));
+  assert.match(settings, /^ {8}if: needs\.check\.outputs\.signing == 'signpath'$/m);
+  assert.match(settings, /HAS_TOKEN: \$\{\{ secrets\.SIGNPATH_API_TOKEN != '' \}\}/);
+  // The job must be in the mode's environment, whose token has rights on that mode's policy only.
+  assert.match(settings, /release\) policy=\$RELEASE_POLICY_SLUG name=SIGNPATH_RELEASE_POLICY_SLUG environment=release ;;/);
+  assert.match(settings, /test\) policy=\$TEST_POLICY_SLUG name=SIGNPATH_TEST_POLICY_SLUG environment=release-test ;;/);
+  assert.match(settings, /\[ "\$ENVIRONMENT" = "\$environment" \] \|\|/);
+  // The expected signer is required, as thumbprints.
+  assert.match(settings, /"SIGNPATH_EXPECTED_SIGNER=\$EXPECTED_SIGNER"/);
+  assert.match(settings, /\[\[ "\$thumbprint" =~ \^\[0-9A-Fa-f\]\{40\}\$ \]\]/);
+  for (const step of jobSteps(text, "sign-windows").filter((one) => one.includes("uses: ./.github/actions/authenticode"))) {
+    assert.match(step, /^ {10}expected-signer: \$\{\{ vars\.SIGNPATH_EXPECTED_SIGNER \}\}$/m);
+  }
+});
+
+/** The matrix targets of <job>, from its `- { target: ... }` lines. */
+function matrixTargets(text, job) {
+  return jobCommands(text, job)
+    .map((line) => line.match(/^- \{ target: ([a-z0-9_-]+),.*runner: ([a-z0-9.-]+)/))
+    .filter(Boolean)
+    .map(([, target, runner]) => ({ target, windows: runner.startsWith("windows") }));
+}
+
+test("release.yml checks every windows-exe-* and release-* download against its uploader's sums", () => {
+  const text = readFileSync(RELEASE_YML, "utf8");
+  const build = jobCommands(text, "build");
+  const sign = jobCommands(text, "sign-windows");
+  const assemble = jobCommands(text, "assemble");
+  // One output per leg, named by the artifact it describes.
+  const expectOutputs = (commands, names) => {
+    for (const name of names) {
+      assert.ok(commands.includes(`${name}: \${{ steps.sums.outputs.${name} }}`), name);
+    }
+    assert.equal(commands.filter((line) => /^[a-z0-9_-]+: \$\{\{ steps\.sums\.outputs\./.test(line)).length, names.length);
+  };
+  const buildTargets = matrixTargets(text, "build");
+  assert.equal(buildTargets.length, 5);
+  expectOutputs(build, buildTargets.map(({ target, windows }) => `${windows ? "windows-exe" : "release"}-${target}`));
+  const signTargets = matrixTargets(text, "sign-windows");
+  assert.equal(signTargets.length, 2);
+  expectOutputs(sign, signTargets.map(({ target }) => `release-${target}`));
+  // Each sums step after its upload; each check after its download, before anything reads it.
+  const at = (commands, exact) => {
+    const index = commands.indexOf(exact);
+    assert.notEqual(index, -1, exact);
+    return index;
+  };
+  const exeUpload = at(build, "name: windows-exe-${{ matrix.target }}");
+  const buildSums = at(build, 'sums=$(node .github/scripts/artifact-sums.mjs sums . "$RELEASE_DIR/Clauseo.exe" crates/desktop/binaries/*-"$TARGET".exe crates/desktop/release/sidecars.generated.json)');
+  assert.ok(exeUpload < buildSums);
+  assert.ok(at(build, "name: release-${{ matrix.target }}") < at(build, 'sums=$(node .github/scripts/artifact-sums.mjs sums "$OUT" "$OUT")'));
+  // The windows-exe upload's paths are the ones summed and checked.
+  assert.ok(build.includes("crates/desktop/binaries/*-${{ matrix.target }}.exe"));
+  const exeDownload = at(sign, "name: windows-exe-${{ matrix.target }}");
+  const exeCheck = at(sign, 'node .github/scripts/artifact-sums.mjs check "$BUILD_OUTPUTS" "windows-exe-$TARGET" . "$RELEASE_DIR/Clauseo.exe" crates/desktop/binaries/*-"$TARGET".exe crates/desktop/release/sidecars.generated.json');
+  assert.ok(exeDownload < exeCheck && exeCheck < at(sign, "run: node .github/scripts/sidecars.mjs --check"));
+  assert.ok(sign.includes("BUILD_OUTPUTS: ${{ toJSON(needs.build.outputs) }}"));
+  const signUpload = sign.lastIndexOf("name: release-${{ matrix.target }}");
+  assert.ok(signUpload < at(sign, 'sums=$(node .github/scripts/artifact-sums.mjs sums "$OUT" "$OUT")'));
+  const legs = at(assemble, "pattern: release-*");
+  const legCheck = at(assemble, 'node .github/scripts/artifact-sums.mjs check "$outputs" "$(basename "$leg")" "$leg" "$leg"');
+  const named = assemble.findIndex((line, i) => i > legCheck && line.startsWith('for leg in "$RUNNER_TEMP"/legs/release-*; do'));
+  assert.ok(legs < legCheck && legCheck < named, "checked before the assets are renamed");
+  assert.ok(assemble.includes("SIGN_OUTPUTS: ${{ toJSON(needs.sign-windows.outputs) }}"));
+  // None of them is behind the signing switch: they run with signing off too.
+  for (const step of [...jobSteps(text, "build"), ...jobSteps(text, "sign-windows"), ...jobSteps(text, "assemble")]) {
+    if (step.includes("artifact-sums.mjs")) {
+      assert.doesNotMatch(step, /^ {8}if:/m);
+    }
+  }
 });
 
 test("release.yml's build tells the sandbox's build.rs the mode and, for release and test, the updater key", () => {

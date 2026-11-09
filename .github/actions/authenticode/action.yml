@@ -10,8 +10,15 @@
 # - backend "selfsigned": a dry run's plumbing proof (release.yml's input sign_test_selfsigned).
 #   Windows PowerShell signs each file with the throwaway certificate whose thumbprint is in
 #   CLAUSEO_SELFSIGNED_THUMBPRINT. Not trusted by anything; it shows the steps cover every file.
-# - Either way, the last step fails unless every PE file in the folder now has a signature
-#   (latest-json.mjs --unsigned).
+# - Either way, before signing it records each file's Authenticode digest (latest-json.mjs
+#   --authenticode-digest: the file without the parts signing changes), and the last two steps fail
+#   unless every file comes back with the same digest (the file sent, signed, never another binary)
+#   and a signature Windows accepts from the expected signer: Get-AuthenticodeSignature's status
+#   Valid (the signature, the file's hash and the chain all hold) and a signer certificate whose
+#   SHA-1 thumbprint is one of expected-signer's (release.yml passes vars.SIGNPATH_EXPECTED_SIGNER).
+#   The throwaway certificate is trusted by nothing, so with "selfsigned" the status may say its
+#   root is untrusted (UnknownError or NotTrusted), never more, and the signer must be that
+#   certificate, by the thumbprint the job made it with.
 # - The caller has checked out the repo (this action and the script are read from it) and set up
 #   Node. SignPath's action reads the artifact with the job's token, so the job needs
 #   `actions: read`.
@@ -29,8 +36,12 @@ inputs:
   artifact-name:
     description: The name of the workflow artifact SignPath signs, unique in the run (signpath only).
     required: true
+  expected-signer:
+    description: The SHA-1 thumbprints, space-separated, of the certificates SignPath may sign with (signpath only; with selfsigned the throwaway certificate's, CLAUSEO_SELFSIGNED_THUMBPRINT, is the one).
+    required: false
+    default: ""
   signpath-api-token:
-    description: The SignPath API token of a submitter (signpath only).
+    description: The SignPath API token of a submitter, the job environment's own (signpath only).
     required: false
     default: ""
   signpath-organization-id:
@@ -58,18 +69,37 @@ runs:
       env:
         BACKEND: ${{ inputs.backend }}
         FOLDER: ${{ inputs.path }}
+        EXPECTED_SIGNER: ${{ inputs.expected-signer }}
       run: |
         set -euo pipefail
         case "$BACKEND" in
-          signpath | selfsigned) ;;
+          signpath) expected=$EXPECTED_SIGNER ;;
+          selfsigned) expected=${CLAUSEO_SELFSIGNED_THUMBPRINT:-} ;;
           *) echo "::error::authenticode: backend is \"$BACKEND\", not signpath or selfsigned"; exit 1 ;;
         esac
+        [ -n "$expected" ] || { echo "::error::authenticode: no expected signer for $BACKEND"; exit 1; }
+        for thumbprint in $expected; do
+          [[ "$thumbprint" =~ ^[0-9A-Fa-f]{40}$ ]] ||
+            { echo "::error::authenticode: the expected signer \"$thumbprint\" is not a SHA-1 thumbprint (40 hex digits)"; exit 1; }
+        done
         [ -d "$FOLDER" ] || { echo "::error::authenticode: no folder $FOLDER"; exit 1; }
         if [ -n "$(find "$FOLDER" -mindepth 2 -type f)" ]; then
           echo "::error::authenticode: $FOLDER has subfolders; it signs a flat folder"
           exit 1
         fi
         ls -l "$FOLDER"
+
+    # What signing may not change: each file's Authenticode digest, kept outside the folder.
+    - name: Record each file's Authenticode digest
+      shell: bash
+      env:
+        FOLDER: ${{ inputs.path }}
+        DIGESTS: ${{ runner.temp }}/authenticode-digests/${{ inputs.artifact-name }}.txt
+      run: |
+        set -euo pipefail
+        mkdir -p "$(dirname "$DIGESTS")"
+        node "$GITHUB_WORKSPACE/.github/scripts/latest-json.mjs" --authenticode-digest "$FOLDER"/* > "$DIGESTS"
+        cat "$DIGESTS"
 
     - name: Upload the folder for SignPath
       id: upload
@@ -93,8 +123,11 @@ runs:
         artifact-configuration-slug: ${{ inputs.signpath-artifact-configuration-slug }}
         github-artifact-id: ${{ steps.upload.outputs.artifact-id }}
         wait-for-completion: true
-        # Long enough for a release policy that waits for a person's approval.
-        wait-for-completion-timeout-in-seconds: 3600
+        # Long enough for a release policy that waits for a person's approval. Three requests per
+        # leg, so 3 × 40 minutes stays inside sign-windows' 180 with an hour left for the rest of
+        # the job (twice the 30 minutes the job is allowed without signing): a request that waits
+        # too long fails here, with SignPath's own error, rather than the job being cut off mid-wait.
+        wait-for-completion-timeout-in-seconds: 2400
         output-artifact-directory: ${{ runner.temp }}/authenticode-signed/${{ inputs.artifact-name }}
 
     - name: Put SignPath's files in place of the folder's
@@ -108,8 +141,12 @@ runs:
         for file in "$FOLDER"/*; do
           name=$(basename "$file")
           [ -f "$SIGNED/$name" ] || { echo "::error::authenticode: SignPath returned no $name"; exit 1; }
-          cp "$SIGNED/$name" "$file"
         done
+        for file in "$SIGNED"/*; do
+          name=$(basename "$file")
+          [ -f "$FOLDER/$name" ] || { echo "::error::authenticode: SignPath returned $name, which was not sent"; exit 1; }
+        done
+        for file in "$FOLDER"/*; do cp "$SIGNED/$(basename "$file")" "$file"; done
 
     - name: Sign it with the throwaway certificate
       if: inputs.backend == 'selfsigned'
@@ -133,11 +170,48 @@ runs:
           "signed $($file.Name) ($($signature.Status))"
         }
 
-    - name: Every PE file in the folder is signed
+    - name: Every PE file in the folder is signed, and is the file sent
       shell: bash
       env:
         FOLDER: ${{ inputs.path }}
+        DIGESTS: ${{ runner.temp }}/authenticode-digests/${{ inputs.artifact-name }}.txt
       run: |
         set -euo pipefail
         node "$GITHUB_WORKSPACE/.github/scripts/latest-json.mjs" --unsigned "$FOLDER" ||
           { echo "::error::authenticode: a PE file in $FOLDER is still unsigned (listed above)"; exit 1; }
+        node "$GITHUB_WORKSPACE/.github/scripts/latest-json.mjs" --authenticode-digest "$FOLDER"/* > "$DIGESTS.signed"
+        diff "$DIGESTS" "$DIGESTS.signed" ||
+          { echo "::error::authenticode: a file came back with another Authenticode digest than the one sent (diff above: before, after)"; exit 1; }
+
+    - name: Every signature holds and is the expected signer's
+      shell: powershell
+      env:
+        BACKEND: ${{ inputs.backend }}
+        FOLDER: ${{ inputs.path }}
+        EXPECTED_SIGNER: ${{ inputs.expected-signer }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        if ($env:BACKEND -eq 'selfsigned') {
+          $expected = @($env:CLAUSEO_SELFSIGNED_THUMBPRINT)
+          $accepted = @('Valid', 'UnknownError', 'NotTrusted')
+        } else {
+          $expected = @(-split $env:EXPECTED_SIGNER)
+          $accepted = @('Valid')
+        }
+        $expected = @($expected | Where-Object { $_ } | ForEach-Object { $_.ToUpperInvariant() })
+        if ($expected.Count -eq 0) { throw "authenticode: no expected signer for $env:BACKEND" }
+        $files = @(Get-ChildItem -LiteralPath $env:FOLDER -File)
+        if ($files.Count -eq 0) { throw "authenticode: no file in $env:FOLDER" }
+        $failed = 0
+        foreach ($file in $files) {
+          $signature = Get-AuthenticodeSignature -LiteralPath $file.FullName
+          $signer = $signature.SignerCertificate
+          $thumbprint = if ($signer) { $signer.Thumbprint.ToUpperInvariant() } else { '' }
+          if ($accepted -notcontains [string]$signature.Status -or $expected -notcontains $thumbprint) {
+            "::error::authenticode: $($file.Name): $($signature.Status), signer $thumbprint $($signer.Subject): $($signature.StatusMessage)"
+            $failed += 1
+          } else {
+            "$($file.Name): $($signature.Status), signed by $($signer.Subject) ($thumbprint)"
+          }
+        }
+        if ($failed -gt 0) { exit 1 }

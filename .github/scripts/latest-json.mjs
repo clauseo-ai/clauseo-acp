@@ -32,6 +32,9 @@
 // exist. It checks that a signature is there, not whose it is or whether Windows trusts it.
 // release.yml runs it after each Authenticode step in sign-windows and, in assemble, over the
 // published assets and both installers' contents (S20a). Plain Node: no package to install.
+// --authenticode-digest prints `<digest>  <name>` for each PE file given: its SHA-256 without the
+// parts signing changes (authenticodeDigest), so a file sent to be signed and the file that comes
+// back must print the same: 0 when every file reads, 1 when one is not a PE file.
 //
 // The manifest is the plugin's static format: { version, notes, pub_date, platforms }, each
 // platform keyed `<os>-<arch>-<bundle>` (the plugin tries that key, then `<os>-<arch>`). The
@@ -51,7 +54,7 @@ import {
   realpathSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 /** A plain `X.Y.Z` version, the only form a Clauseo release takes. */
@@ -117,9 +120,11 @@ function notPe(what) {
 }
 
 /**
- * Runs <read> over the headers of PE file <pe> (a Buffer): { directory, offsetOf }, where
- * directory(i) is data directory <i> as { address, size } ({ 0, 0 } past the ones the optional
- * header declares) and offsetOf(rva) maps an RVA to a file offset through the section table.
+ * Runs <read> over the headers of PE file <pe> (a Buffer): { directory, directoryAt, checksumAt,
+ * offsetOf }, where directory(i) is data directory <i> as { address, size } ({ 0, 0 } past the ones
+ * the optional header declares), directoryAt(i) its file offset (null past them), checksumAt the
+ * file offset of the optional header's CheckSum, and offsetOf(rva) maps an RVA to a file offset
+ * through the section table.
  * Throws when <pe> is not a PE file, or when <read> reads past its end.
  */
 function readPe(pe, read) {
@@ -140,6 +145,7 @@ function readPe(pe, read) {
     }
     const rvaCount = pe.readUInt32LE(optional + (magic === 0x20b ? 108 : 92));
     const directories = optional + (magic === 0x20b ? 112 : 96);
+    const directoryAt = (index) => (index < rvaCount ? directories + index * 8 : null);
     const directory = (index) =>
       index < rvaCount
         ? { address: pe.readUInt32LE(directories + index * 8), size: pe.readUInt32LE(directories + index * 8 + 4) }
@@ -156,7 +162,7 @@ function readPe(pe, read) {
       }
       return notPe(`RVA 0x${rva.toString(16)} is in no section`);
     };
-    return read({ directory, offsetOf });
+    return read({ directory, directoryAt, checksumAt: optional + 64, offsetOf });
   } catch (error) {
     if (error instanceof RangeError) {
       return notPe("a structure runs past the end of the file");
@@ -242,6 +248,38 @@ export function authenticode(pe) {
       notPe(`the certificate table holds revision 0x${revision.toString(16)} type 0x${type.toString(16)}, not PKCS#7 SignedData`);
     }
     return { offset, size };
+  });
+}
+
+/**
+ * The SHA-256 Authenticode digest of PE file <pe> (a Buffer), as hex: the file without its CheckSum,
+ * its certificate table's data directory entry and the certificate table itself, the three things
+ * signing changes. An unsigned file is hashed as if padded with zeros to a multiple of 8 bytes, as
+ * a signer pads it before it appends the table (and hashes the padding). So a file and the same
+ * file signed, by anyone, have the same digest; any other change to it gives another. It hashes
+ * the file in order rather than section by section (Authenticode's own order), so it is for
+ * comparing two files with each other, not with the digest inside a signature.
+ */
+export function authenticodeDigest(pe) {
+  return readPe(pe, ({ directory, directoryAt, checksumAt }) => {
+    const entry = directoryAt(4);
+    const { address, size } = directory(4);
+    if (size !== 0 && (address < checksumAt + 4 || address + size > pe.length)) {
+      notPe("the certificate table runs past the end of the file");
+    }
+    const end = size === 0 ? pe.length : address;
+    const hash = createHash("sha256").update(pe.subarray(0, checksumAt));
+    if (entry === null) {
+      hash.update(pe.subarray(checksumAt + 4, end));
+    } else {
+      hash.update(pe.subarray(checksumAt + 4, entry)).update(pe.subarray(entry + 8, end));
+    }
+    if (size === 0) {
+      hash.update(Buffer.alloc((8 - (end % 8)) % 8));
+    } else {
+      hash.update(pe.subarray(address + size));
+    }
+    return hash.digest("hex");
   });
 }
 
@@ -611,6 +649,18 @@ function main(argv) {
     }
     return unsigned.length === 0 ? 0 : 1;
   }
+  if (argv[0] === "--authenticode-digest" && argv.length > 1) {
+    let status = 0;
+    for (const file of argv.slice(1)) {
+      try {
+        process.stdout.write(`${authenticodeDigest(readFileSync(file))}  ${basename(file)}\n`);
+      } catch (error) {
+        process.stderr.write(`${file}: ${error.message}\n`);
+        status = 1;
+      }
+    }
+    return status;
+  }
   if (argv[0] === "--key-id" && argv.length === 3) {
     const [, exe, mode] = argv;
     let expected;
@@ -654,7 +704,8 @@ function main(argv) {
       "usage: node latest-json.mjs <dir> <version> <base-url> <pub-date> <sandbox-exe>\n" +
         "       node latest-json.mjs --verify <file> <public-key-file> [<signed-name> <version>]\n" +
         "       node latest-json.mjs --key-id <exe> <mode>\n" +
-        "       node latest-json.mjs --unsigned <file-or-folder>...\n",
+        "       node latest-json.mjs --unsigned <file-or-folder>...\n" +
+        "       node latest-json.mjs --authenticode-digest <pe-file>...\n",
     );
     return 2;
   }

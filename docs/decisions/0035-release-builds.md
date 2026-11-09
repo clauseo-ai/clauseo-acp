@@ -369,21 +369,51 @@ it on is settings, not code.
   second build's uninstaller differs from the first. (4) Both installers. (5) The currentUser
   installer's updater signature, last. Each signing step ends with `latest-json.mjs --unsigned` over
   what it signed.
+- **Each signed file is checked as it comes back, on Windows.** Before a folder goes to be signed,
+  the action records each file's Authenticode digest (`latest-json.mjs --authenticode-digest`: the
+  file's SHA-256 without its CheckSum, its certificate-table entry and the table, the parts signing
+  changes). SignPath must return exactly the files sent, and each must have the digest it was sent
+  with: a signed file can't be a different binary. Then `Get-AuthenticodeSignature` must give
+  status `Valid` (the signature, the file's hash and the chain to a root Windows trusts all hold)
+  and a signer certificate whose SHA-1 thumbprint is in `SIGNPATH_EXPECTED_SIGNER`.
+- **The expected signer is pinned by thumbprint.** `SIGNPATH_EXPECTED_SIGNER` holds the SHA-1
+  thumbprint (40 hex digits) of the certificate SignPath signs with, or several, space-separated,
+  while a renewed certificate overlaps the old one. It names one exact certificate. A subject and
+  issuer would also match any other certificate issued to the same name, and SignPath's
+  open-source certificate is issued to SignPath Foundation, the same name for every project it
+  signs. Renewing the certificate means adding its thumbprint before the old one expires, then
+  removing the old one. A self-signed dry run checks against the throwaway certificate's thumbprint,
+  which the job makes, and accepts only the untrusted-root status that certificate must give.
+- **Where the full check runs.** The full check runs only on the Windows leg, where Windows' own
+  verifier is. On Linux, `assemble` checks that every PE file in the assets and inside both
+  installers has a signature. It also checks, in every mode, that each leg's `release-*` files
+  are byte for byte what that leg uploaded (next point). So the files it publishes are the ones
+  sign-windows checked.
+- **Artifacts between jobs.** Each `windows-exe-*` and `release-*` artifact's files, every one
+  (the machine installer, the sandbox tool and every `.sig` too), go from the uploading job to the
+  next as a job output of SHA-256s (`.github/scripts/artifact-sums.mjs`), one output per matrix
+  target. sign-windows checks its `windows-exe-*` download against build's, and assemble checks
+  each `release-*` download against build's or sign-windows'. A missing, extra or changed file
+  fails the job.
 - **Why the two passes go through the action.** SignPath's open-source signing requires origin
   verification, which only its GitHub connector supplies: the official action
   (`signpath/github-action-submit-signing-request`, pinned) submitting a workflow artifact. A request
   from inside makensis through the REST API would carry no origin data. The local action
-  `.github/actions/authenticode` uploads a flat folder, has SignPath sign it, waits (up to an hour, for
-  a policy that needs a person's approval) and puts the signed files back. The cost, per Windows
+  `.github/actions/authenticode` uploads a flat folder, has SignPath sign it, waits (up to 40 minutes,
+  for a policy that needs a person's approval) and puts the signed files back. The cost, per Windows
   architecture and only with signing on: three signing requests (exe, sidecars and plug-ins; the two
   uninstallers; the two installers), one uncompressed bundle and two full bundles more than today's two
-  (five makensis runs instead of two). The job's limit rises from 30 to 150 minutes when signing is on.
+  (five makensis runs instead of two). The job's limit rises from 30 to 180 minutes when signing is on:
+  three waits of up to 40 minutes, 120 in all, and an hour for the rest of the job, twice its
+  unsigned limit. A request that waits too long then fails with SignPath's own error, not by the job
+  being cut off mid-wait.
 - **The release check.** `assemble` unpacks both installers of each architecture with 7-Zip and runs
   `latest-json.mjs --unsigned` over the assets and the unpacked files. It finds PE files by their
   headers and treats a file as signed when its certificate table (data directory 4) holds a PKCS#7
-  `WIN_CERTIFICATE`. It checks that a signature is there, not whose it is. With `none` the list is a
-  notice and goes to the job summary. Otherwise any entry fails the run before the Release is created,
-  and so does an installer in which 7-Zip finds no `uninstall.exe`.
+  `WIN_CERTIFICATE`. It checks that a signature is there; whose it is, sign-windows has checked
+  (above). It runs only with signing on: any entry fails the run before the Release is created, and
+  so does an installer in which 7-Zip finds no `uninstall.exe`. With `none` it is skipped, so an
+  error in 7-Zip or the script can't fail an unsigned release.
 - **The plumbing proof.** `gh workflow run release.yml --ref <branch> -f sign_test_selfsigned=true`
   runs the same steps with a throwaway self-signed certificate (`New-SelfSignedCertificate` and
   `Set-AuthenticodeSignature` in Windows PowerShell, trusted by nothing) in place of SignPath. It proves
@@ -405,12 +435,20 @@ it on is settings, not code.
      - one artifact configuration for a zip whose `*.exe` and `*.dll` at its root are all signed, for
        example `<zip-file><pe-file path="*.exe" max-matches="unbounded"><authenticode-sign/></pe-file>`
        and the same for `*.dll` with `min-matches="0"`;
-     - a CI user's API token with submitter rights on both policies.
+     - two CI users' API tokens, one per policy, each with submitter rights on its own policy only:
+       the release token can't sign with the test policy, and the test token can't sign with the
+       release policy. Never one token shared by both.
   3. In GitHub:
      - the variables `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG`,
        `SIGNPATH_ARTIFACT_CONFIGURATION_SLUG`, `SIGNPATH_RELEASE_POLICY_SLUG` (used for `v*`) and
        `SIGNPATH_TEST_POLICY_SLUG` (used for `test-v*`), at the repository or on the environments;
-     - the secret `SIGNPATH_API_TOKEN` on the environments `release` and `release-test`.
+     - the variable `SIGNPATH_EXPECTED_SIGNER` (above);
+     - the secret `SIGNPATH_API_TOKEN` as an environment secret only: the release policy's token on
+       `release`, the test policy's on `release-test`. Never as a repository or organization
+       secret: GitHub falls back to one of those for an environment without its own, and a workflow
+       can't tell the two apart. The workflow reads the token only in `sign-windows` (whose
+       environment is the mode's), only when `signing` is `signpath`, and fails unless the job
+       runs in the mode's environment.
      `sign-windows` fails early, naming what is missing, when the switch is on without them.
   4. A self-signed dry run, then a `test-v*` run with the test policy, and only then
      `SIGNPATH_ENABLED` for releases.
@@ -419,7 +457,11 @@ it on is settings, not code.
   - `Set-AuthenticodeSignature` with an untrusted certificate;
   - 7-Zip naming the uninstaller `uninstall.exe`, and its exit code on a signed installer (the
     sandbox check's `7z` pipes treat any non-zero code as a failure);
-  - whether the two builds of an uninstaller come out byte for byte the same.
+  - whether the two builds of an uninstaller come out byte for byte the same;
+  - `Get-AuthenticodeSignature`'s status for the throwaway certificate (`UnknownError` or
+    `NotTrusted` is assumed) and, until a `test-v*` run, for SignPath's (`Valid`);
+  - that SignPath pads a file with zeros before its certificate table, as the digest check assumes;
+  - that a matrix job's legs each set their own output without clearing the others'.
   The self-signed dry run is the test of each.
 
 ## Status

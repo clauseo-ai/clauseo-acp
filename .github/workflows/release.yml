@@ -28,9 +28,12 @@
 # the template's `signed-plugins` block makes NSIS take) and the uninstaller (captured in a first bundle
 # of each installer, signed, and put in place in the second through the template's
 # `sign-uninstaller` block and .github/scripts/nsis-uninstaller.mjs), then both installers; every
-# updater signature is made after. assemble lists each PE without a signature, in the assets and
-# inside both installers: a notice with `none`, a failure otherwise. The variables and the secret
-# SignPath needs are in decision 0035.
+# updater signature is made after. Each file that comes back from signing must be the file sent
+# (its Authenticode digest) and carry a signature Windows accepts from the expected signer. With
+# signing on, assemble fails on any PE without a signature, in the assets or inside either
+# installer. Every windows-exe-* and release-* artifact is checked, file by file, against the
+# SHA-256s its uploading job set as outputs (.github/scripts/artifact-sums.mjs), in every mode.
+# The variables and the secret SignPath needs are in decision 0035.
 #
 # - The app's version lives in crates/desktop/Cargo.toml and tauri.conf.json (the desktop test
 #   tests/version.rs keeps them equal); a tag must name it. No version of a tool is written here:
@@ -391,6 +394,15 @@ jobs:
     environment: ${{ matrix.signs && needs.check.outputs.environment || '' }}
     permissions:
       contents: read
+    # Each leg's artifact, file by file (.github/scripts/artifact-sums.mjs), one output per leg (a
+    # matrix job's legs share its outputs, so each sets only its own): sign-windows checks its
+    # windows-exe-* download against it, assemble its release-* ones. One line per matrix target.
+    outputs:
+      release-aarch64-apple-darwin: ${{ steps.sums.outputs.release-aarch64-apple-darwin }}
+      release-x86_64-apple-darwin: ${{ steps.sums.outputs.release-x86_64-apple-darwin }}
+      windows-exe-x86_64-pc-windows-msvc: ${{ steps.sums.outputs.windows-exe-x86_64-pc-windows-msvc }}
+      windows-exe-aarch64-pc-windows-msvc: ${{ steps.sums.outputs.windows-exe-aarch64-pc-windows-msvc }}
+      release-x86_64-unknown-linux-gnu: ${{ steps.sums.outputs.release-x86_64-unknown-linux-gnu }}
     strategy:
       fail-fast: false
       matrix:
@@ -639,6 +651,20 @@ jobs:
             crates/desktop/release/sidecars.generated.json
           if-no-files-found: error
 
+      # After the upload, so a leg that set its output uploaded those files: the same paths as the
+      # upload's, from the repo root (the windows-exe download puts them back there).
+      - name: This leg's artifact, file by file, for the job that downloads it
+        id: sums
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_OS" = Windows ]; then
+            sums=$(node .github/scripts/artifact-sums.mjs sums . "$RELEASE_DIR/Clauseo.exe" crates/desktop/binaries/*-"$TARGET".exe crates/desktop/release/sidecars.generated.json)
+            echo "windows-exe-$TARGET=$sums" | tee -a "$GITHUB_OUTPUT"
+          else
+            sums=$(node .github/scripts/artifact-sums.mjs sums "$OUT" "$OUT")
+            echo "release-$TARGET=$sums" | tee -a "$GITHUB_OUTPUT"
+          fi
+
       # From the same link as the shipped binaries, for S22's symbols job. Never on the Release.
       # The globs take clauseo-mcp's .pdb, .dSYM or .dwp beside the app's (agent-browser is
       # fetched, so it has none).
@@ -740,14 +766,20 @@ jobs:
     needs: [check, build, blocklist]
     runs-on: ${{ matrix.runner }}
     # Signing adds a bundle to fetch NSIS, a first bundle of each installer and three signing
-    # requests, which a release policy may hold for a person's approval.
-    timeout-minutes: ${{ needs.check.outputs.signing == 'none' && 30 || 150 }}
+    # requests, which a release policy may hold for a person's approval: each waits up to 40
+    # minutes (the authenticode action), 120 in all, and the rest of the job gets twice its
+    # unsigned 30. So a request that waits too long fails with SignPath's error, never by timeout.
+    timeout-minutes: ${{ needs.check.outputs.signing == 'none' && 30 || 180 }}
     continue-on-error: ${{ matrix.tier == 2 }}
     environment: ${{ needs.check.outputs.environment }}
     permissions:
       contents: read
       # SignPath's action reads the artifacts it signs with the job's token.
       actions: read
+    # Each leg's release-* artifact, file by file, as build's outputs (assemble checks them).
+    outputs:
+      release-x86_64-pc-windows-msvc: ${{ steps.sums.outputs.release-x86_64-pc-windows-msvc }}
+      release-aarch64-pc-windows-msvc: ${{ steps.sums.outputs.release-aarch64-pc-windows-msvc }}
     strategy:
       fail-fast: false
       matrix:
@@ -796,6 +828,12 @@ jobs:
         with:
           name: windows-exe-${{ matrix.target }}
 
+      - name: The download is the build leg's upload, file by file
+        env:
+          BUILD_OUTPUTS: ${{ toJSON(needs.build.outputs) }}
+        run: |
+          node .github/scripts/artifact-sums.mjs check "$BUILD_OUTPUTS" "windows-exe-$TARGET" . "$RELEASE_DIR/Clauseo.exe" crates/desktop/binaries/*-"$TARGET".exe crates/desktop/release/sidecars.generated.json
+
       - name: The downloaded overlay holds only bundle.externalBin
         run: node .github/scripts/sidecars.mjs --check
 
@@ -809,11 +847,15 @@ jobs:
       # runs only when check's signing is not none ----
       # SignPath's settings for this mode, checked before anything is built for them: the
       # organization, the project, the artifact configuration (a zip whose *.exe and *.dll at its
-      # root it signs) and the mode's signing policy, a release's or a test run's. Variables, at
-      # the repository or on the environment; the API token is the environment's secret.
+      # root it signs), the mode's signing policy, a release's or a test run's, and the signing
+      # certificate's thumbprint, which every signed file must carry. Variables, at the repository
+      # or on the environment. The API token is the environment's own secret: release's for a
+      # release, release-test's for a test run, each with rights on its own policy only (0035).
       - name: SignPath's settings for this mode
         if: needs.check.outputs.signing == 'signpath'
         env:
+          ENVIRONMENT: ${{ needs.check.outputs.environment }}
+          EXPECTED_SIGNER: ${{ vars.SIGNPATH_EXPECTED_SIGNER }}
           ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
           PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
           ARTIFACT_CONFIGURATION_SLUG: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
@@ -823,19 +865,27 @@ jobs:
         run: |
           set -euo pipefail
           case "$MODE" in
-            release) policy=$RELEASE_POLICY_SLUG name=SIGNPATH_RELEASE_POLICY_SLUG ;;
-            test) policy=$TEST_POLICY_SLUG name=SIGNPATH_TEST_POLICY_SLUG ;;
+            release) policy=$RELEASE_POLICY_SLUG name=SIGNPATH_RELEASE_POLICY_SLUG environment=release ;;
+            test) policy=$TEST_POLICY_SLUG name=SIGNPATH_TEST_POLICY_SLUG environment=release-test ;;
             *) echo "::error::SignPath signs a release or a test run, not a $MODE run"; exit 1 ;;
           esac
+          [ "$ENVIRONMENT" = "$environment" ] ||
+            { echo "::error::a $MODE run signs with the $environment environment's token, but this job runs in \"$ENVIRONMENT\""; exit 1; }
           status=0
           for pair in "SIGNPATH_ORGANIZATION_ID=$ORGANIZATION_ID" "SIGNPATH_PROJECT_SLUG=$PROJECT_SLUG" \
-            "SIGNPATH_ARTIFACT_CONFIGURATION_SLUG=$ARTIFACT_CONFIGURATION_SLUG" "$name=$policy"; do
+            "SIGNPATH_ARTIFACT_CONFIGURATION_SLUG=$ARTIFACT_CONFIGURATION_SLUG" "$name=$policy" \
+            "SIGNPATH_EXPECTED_SIGNER=$EXPECTED_SIGNER"; do
             [ -n "${pair#*=}" ] || { echo "::error::SIGNPATH_ENABLED is true but the variable ${pair%%=*} is not set"; status=1; }
           done
-          [ "$HAS_TOKEN" = true ] || { echo "::error::SIGNPATH_ENABLED is true but the secret SIGNPATH_API_TOKEN is not set for $MODE"; status=1; }
+          for thumbprint in $EXPECTED_SIGNER; do
+            [[ "$thumbprint" =~ ^[0-9A-Fa-f]{40}$ ]] ||
+              { echo "::error::SIGNPATH_EXPECTED_SIGNER holds \"$thumbprint\", not a SHA-1 thumbprint (40 hex digits)"; status=1; }
+          done
+          [ "$HAS_TOKEN" = true ] ||
+            { echo "::error::SIGNPATH_ENABLED is true but the $environment environment has no secret SIGNPATH_API_TOKEN"; status=1; }
           [ "$status" = 0 ] || exit 1
           echo "SIGNPATH_POLICY_SLUG=$policy" >> "$GITHUB_ENV"
-          echo "SignPath: project $PROJECT_SLUG, policy $policy, artifact configuration $ARTIFACT_CONFIGURATION_SLUG"
+          echo "SignPath: project $PROJECT_SLUG, policy $policy, artifact configuration $ARTIFACT_CONFIGURATION_SLUG, signer $EXPECTED_SIGNER"
 
       # The dry run's plumbing proof: a certificate made here, trusted by nothing, gone with the runner.
       - name: Make a throwaway code-signing certificate (dry run, sign_test_selfsigned)
@@ -883,6 +933,7 @@ jobs:
           backend: ${{ needs.check.outputs.signing }}
           path: ${{ runner.temp }}/authenticode-exe
           artifact-name: authenticode-exe-${{ matrix.target }}
+          expected-signer: ${{ vars.SIGNPATH_EXPECTED_SIGNER }}
           signpath-api-token: ${{ needs.check.outputs.signing == 'signpath' && secrets.SIGNPATH_API_TOKEN || '' }}
           signpath-organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
           signpath-project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
@@ -978,6 +1029,7 @@ jobs:
           backend: ${{ needs.check.outputs.signing }}
           path: ${{ runner.temp }}/authenticode-uninstallers
           artifact-name: authenticode-uninstallers-${{ matrix.target }}
+          expected-signer: ${{ vars.SIGNPATH_EXPECTED_SIGNER }}
           signpath-api-token: ${{ needs.check.outputs.signing == 'signpath' && secrets.SIGNPATH_API_TOKEN || '' }}
           signpath-organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
           signpath-project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
@@ -1068,6 +1120,7 @@ jobs:
           backend: ${{ needs.check.outputs.signing }}
           path: ${{ runner.temp }}/authenticode-installers
           artifact-name: authenticode-installers-${{ matrix.target }}
+          expected-signer: ${{ vars.SIGNPATH_EXPECTED_SIGNER }}
           signpath-api-token: ${{ needs.check.outputs.signing == 'signpath' && secrets.SIGNPATH_API_TOKEN || '' }}
           signpath-organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
           signpath-project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
@@ -1102,6 +1155,13 @@ jobs:
           name: release-${{ matrix.target }}
           path: ${{ env.OUT }}
           if-no-files-found: error
+
+      - name: This leg's artifact, file by file, for assemble
+        id: sums
+        run: |
+          set -euo pipefail
+          sums=$(node .github/scripts/artifact-sums.mjs sums "$OUT" "$OUT")
+          echo "release-$TARGET=$sums" | tee -a "$GITHUB_OUTPUT"
 
       # A dry run's throwaway public key, for assemble to check this leg's signatures with. Never
       # on a Release.
@@ -1155,6 +1215,23 @@ jobs:
         with:
           pattern: release-*
           path: ${{ runner.temp }}/legs
+
+      # Every leg's files exactly as its job uploaded them: build's legs, and sign-windows' for
+      # Windows (both installers, the sandbox tool and every .sig). A leg that failed (tier 2)
+      # uploaded nothing and set no output.
+      - name: Each leg's download is its upload, file by file
+        env:
+          BUILD_OUTPUTS: ${{ toJSON(needs.build.outputs) }}
+          SIGN_OUTPUTS: ${{ toJSON(needs.sign-windows.outputs) }}
+        run: |
+          set -euo pipefail
+          outputs=$(jq -cn --argjson build "$BUILD_OUTPUTS" --argjson sign "$SIGN_OUTPUTS" '$build + $sign')
+          for leg in "$RUNNER_TEMP"/legs/release-*; do
+            node .github/scripts/artifact-sums.mjs check "$outputs" "$(basename "$leg")" "$leg" "$leg"
+          done
+          for key in $(jq -r 'to_entries[] | select(.key | startswith("release-")) | select(.value != "") | .key' <<< "$outputs"); do
+            [ -d "$RUNNER_TEMP/legs/$key" ] || { echo "::error::$key was uploaded but not downloaded"; exit 1; }
+          done
 
       # A dry run signs each Windows leg with that leg's throwaway key; a release or a test run
       # takes its public key from the repo.
@@ -1293,10 +1370,14 @@ jobs:
 
       # S20a's release check, after the upload so the assets can be looked at when it fails: every
       # PE file without an Authenticode signature, among the assets and inside both installers of
-      # each architecture (7-Zip unpacks the plug-ins, the files and the uninstaller). With signing
-      # on, any such file, or an installer whose uninstall.exe 7-Zip can't find, fails the run
-      # before the Release is made; with it off the list is a notice.
+      # each architecture (7-Zip unpacks the plug-ins, the files and the uninstaller). Any such
+      # file, or an installer whose uninstall.exe 7-Zip can't find, fails the run before the
+      # Release is made. Whose signature each is, and that it holds, sign-windows checked on
+      # Windows as each file came back from signing (the authenticode action); the step before the
+      # first here checked that these are those bytes. Only with signing on: an unsigned release
+      # has nothing to check, and an error in 7-Zip or the script must not fail it.
       - name: Every Windows PE file is Authenticode-signed (S20a)
+        if: needs.check.outputs.signing != 'none'
         env:
           SIGNING: ${{ needs.check.outputs.signing }}
         run: |
@@ -1310,12 +1391,8 @@ jobs:
             # 7-Zip's 1 is a warning (a signed installer has its signature after the NSIS data).
             7z x -y -aou -o"$out" "$installer" > /dev/null || [ $? -eq 1 ]
             if [ -z "$(find "$out" -type f -iname uninstall.exe)" ]; then
-              if [ "$SIGNING" = none ]; then
-                echo "7-Zip found no uninstall.exe in $(basename "$installer")"
-              else
-                echo "::error::7-Zip found no uninstall.exe in $(basename "$installer"), so its signature can't be checked"
-                status=1
-              fi
+              echo "::error::7-Zip found no uninstall.exe in $(basename "$installer"), so its signature can't be checked"
+              status=1
             fi
           done
           mkdir -p "$inside"
@@ -1338,12 +1415,8 @@ jobs:
             fi
           } | tee -a "$GITHUB_STEP_SUMMARY"
           if [ -s unsigned.txt ]; then
-            if [ "$SIGNING" = none ]; then
-              echo "::notice::signing is off: $(wc -l < unsigned.txt) PE files in the assets and installers have no Authenticode signature (listed in the log and the job summary)"
-            else
-              echo "::error::signing is $SIGNING, but $(wc -l < unsigned.txt) PE files have no Authenticode signature (listed above)"
-              status=1
-            fi
+            echo "::error::signing is $SIGNING, but $(wc -l < unsigned.txt) PE files have no Authenticode signature (listed above)"
+            status=1
           fi
           exit "$status"
 
