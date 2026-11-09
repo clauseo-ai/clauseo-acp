@@ -188,7 +188,7 @@ pub fn scan_matter(matter: &Path) -> Result<MatterScan, Error> {
             };
             let path = entry.path();
             match entry.file_type() {
-                Ok(kind) if in_git => walk.visit_in_git(path, kind, &entry),
+                Ok(kind) if in_git => walk.visit_in_git(&matter, path, kind, &entry),
                 Ok(kind) => walk.visit(&matter, path, kind, &entry),
                 Err(error) => {
                     tracing::warn!(%error, "matter walk skipped an entry");
@@ -294,12 +294,46 @@ impl Walk {
     }
 
     /// One entry inside a `.git` folder: folders are walked and files counted for hard links;
-    /// symbolic links are neither followed nor found (git makes none that lead out).
-    fn visit_in_git(&mut self, path: PathBuf, kind: FileType, entry: &fs::DirEntry) {
+    /// symbolic links are neither followed nor found (git makes none that lead out). A
+    /// `commondir` file in a worktree's folder under `.git/worktrees` is read as well.
+    fn visit_in_git(&mut self, matter: &Path, path: PathBuf, kind: FileType, entry: &fs::DirEntry) {
         if kind.is_dir() {
             self.folders.push((path, true));
         } else if kind.is_file() {
+            if opens_as(&entry.file_name(), "commondir") {
+                self.worktree_commondir(matter, &path);
+            }
             self.hard_link(path, entry);
+        }
+    }
+
+    /// Lists the folder the `commondir` file at `file` names inside the matter, if `file` is
+    /// in a worktree's folder under a `.git` folder's `worktrees` (`.git/worktrees/<name>/`).
+    /// Git reads the repository's `config` through it, under the `gitdir:` rule.
+    fn worktree_commondir(&mut self, matter: &Path, file: &Path) {
+        let Some(folder) = file.parent() else {
+            return;
+        };
+        let Some(worktrees) = folder.parent() else {
+            return;
+        };
+        let Some(git) = worktrees.parent() else {
+            return;
+        };
+        let is_worktrees = worktrees
+            .file_name()
+            .is_some_and(|name| opens_as(name, "worktrees"));
+        let is_git = git
+            .file_name()
+            .is_some_and(|name| name.eq_ignore_ascii_case(".git"));
+        if !is_worktrees || !is_git {
+            return;
+        }
+        if let Some(dir) = read_small(file)
+            .ok()
+            .and_then(|text| dir_named(matter, folder, text.lines().next()?))
+        {
+            self.scan.git_dirs.push(dir);
         }
     }
 

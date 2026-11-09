@@ -231,6 +231,54 @@ fn a_git_link_to_a_folder_in_the_matter_names_that_folder() {
     assert_eq!(scan.git_dirs(), [matter.join(".realgit")]);
 }
 
+/// A `commondir` in a worktree's folder under `.git/worktrees` names the folder git reads the
+/// repository's `config` from, inside the matter (`../..` is the `.git` itself). One outside
+/// the matter, or the matter itself, is left out.
+#[test]
+fn a_worktree_commondir_names_its_folder_inside_the_matter() {
+    let dir = TempDir::new("links-wt-commondir");
+    dir.file("matter/.git/worktrees/wt1/commondir", "../..\n");
+    dir.file("matter/.git/worktrees/wt2/commondir", "../../../shared\n");
+    dir.dir("matter/shared");
+    dir.file(
+        "matter/.git/worktrees/wt3/commondir",
+        "../../../../outside/common\n",
+    );
+    dir.dir("outside/common");
+    dir.file("matter/.git/worktrees/wt4/commondir", "../../../\n");
+    dir.dir("matter/other5");
+    dir.dir("matter/other6");
+    // Not under `.git/worktrees`: not read.
+    dir.file(
+        "matter/.git/modules/m/worktrees/wt5/commondir",
+        "../../../../../other5\n",
+    );
+    dir.file("matter/other/worktrees/wt6/commondir", "../../../other6\n");
+    let scan = scan_matter(&dir.path().join("matter")).unwrap();
+    let matter = canon(&dir.path().join("matter"));
+    assert_eq!(
+        scan.git_dirs(),
+        [matter.join(".git"), matter.join("shared")]
+    );
+    assert_eq!(scan.git(), [matter.join(".git")]);
+}
+
+/// A `worktrees` folder that is a symbolic link is not followed inside a `.git`, so nothing
+/// it holds is read.
+#[cfg(unix)]
+#[test]
+fn a_symlinked_worktrees_folder_in_a_git_dir_is_not_read() {
+    let dir = TempDir::new("links-wt-link");
+    dir.file("matter/real/wt/commondir", "../../other\n");
+    dir.dir("matter/other");
+    dir.dir("matter/.git");
+    dir.symlink("matter/.git/worktrees", Path::new("../real"));
+    let scan = scan_matter(&dir.path().join("matter")).unwrap();
+    let matter = canon(&dir.path().join("matter"));
+    assert!(scan.git_dirs().is_empty(), "{:?}", scan.git_dirs());
+    assert_eq!(scan.git(), [matter.join(".git")]);
+}
+
 /// S15 `PR4a2`: the other names write-denied at any depth, matched by name in any letter case:
 /// folders, files and links to something in the matter, the root's too; none inside a `.git`.
 /// A link out is a finding instead; a longer name doesn't count.

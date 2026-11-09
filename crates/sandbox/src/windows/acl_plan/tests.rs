@@ -318,6 +318,28 @@ fn a_bare_repository_in_the_matter_gets_the_git_folders_deny() {
     assert_eq!(deny("lone"), want);
 }
 
+/// A folder a worktree's `commondir` under the `.git` names gets the same whole-tree deny of
+/// writes as the `.git` folder.
+#[test]
+fn a_worktree_commondir_gets_the_deny_of_its_folder() {
+    let w = World::new("plan-wt-commondir");
+    w.dir
+        .file("matter/.git/worktrees/wt/commondir", "../../../shared\n");
+    w.dir.dir("matter/shared");
+    let policy = w.full_policy();
+    let grants = grants_for(&w, &policy, &sids());
+    let deny = |name: &str| {
+        let path = w.canonical("matter").join(name);
+        grants
+            .iter()
+            .find(|g| g.path == path && g.rights == Rights::DenyWrite && g.sid.as_str() == USER_SID)
+            .map(|g| (g.inherit, g.kind))
+    };
+    let want = Some((Inherit::Tree, PathKind::ReadOnlyInMatter));
+    assert_eq!(deny(".git"), want);
+    assert_eq!(deny("shared"), want);
+}
+
 #[test]
 fn modify_never_gives_delete_child_or_permission_changes() {
     // Without these, the agent can't strip a deny, nor delete a protected name through its
