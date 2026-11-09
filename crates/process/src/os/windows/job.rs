@@ -7,8 +7,10 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use windows::Win32::Foundation::{ERROR_MORE_DATA, WAIT_TIMEOUT};
 use windows::Win32::System::JobObjects::{
-    IsProcessInJob, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_BASIC_PROCESS_ID_LIST,
-    JobObjectBasicAccountingInformation, JobObjectBasicProcessIdList, QueryInformationJobObject,
+    IsProcessInJob, JOB_OBJECT_LIMIT, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
+    JOBOBJECT_BASIC_PROCESS_ID_LIST, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    JobObjectBasicAccountingInformation, JobObjectBasicProcessIdList,
+    JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
 };
 use windows::Win32::System::Threading::{
     OpenProcess, PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
@@ -72,6 +74,26 @@ pub(super) fn hold_in_job(job: &OwnedHandle, held: &Held) {
             held.push((pid, process));
         }
     }
+}
+
+/// Sets `job`'s limits to `flags` and nothing else: `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` for a
+/// new job, none once a kill has spared a browser that must outlive the job's handle.
+pub(super) fn set_limits(job: &OwnedHandle, flags: JOB_OBJECT_LIMIT) -> std::io::Result<()> {
+    let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+    limits.BasicLimitInformation.LimitFlags = flags;
+    let size = u32::try_from(size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>())
+        .map_err(std::io::Error::other)?;
+    // SAFETY: `limits` is a live JOBOBJECT_EXTENDED_LIMIT_INFORMATION of `size` bytes, the
+    // struct this information class takes, and `job` is a live job handle.
+    unsafe {
+        SetInformationJobObject(
+            raw(job),
+            JobObjectExtendedLimitInformation,
+            (&raw const limits).cast(),
+            size,
+        )
+    }
+    .map_err(std::io::Error::from)
 }
 
 /// The job's count of running processes and of every process it has held, from

@@ -21,7 +21,7 @@ use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, SystemTime};
 
 use async_process::Child;
@@ -32,8 +32,7 @@ use windows::Win32::System::Diagnostics::ToolHelp::{
 };
 use windows::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
-    SetInformationJobObject, TerminateJobObject,
+    TerminateJobObject,
 };
 use windows::Win32::System::SystemInformation::GetSystemTimeAsFileTime;
 use windows::Win32::System::Threading::{
@@ -46,7 +45,7 @@ use windows::core::{PCWSTR, PWSTR};
 
 use crate::descendants::Proc;
 use crate::{Error, SpawnOptions};
-use job::{Held, accounting, alive, hold_in_job, hold_listed, in_job, job_pids, open};
+use job::{Held, accounting, alive, hold_in_job, hold_listed, in_job, job_pids, open, set_limits};
 
 /// Every process the job has held, from its accounting; `None` when the query fails.
 fn total(job: &OwnedHandle) -> Option<u32> {
@@ -72,6 +71,11 @@ pub(crate) struct Tree {
     /// The job's processes as last listed, each by a handle that waits for its exit: shared with
     /// every [`watch::Watch`], which reads the tree as gone only once each has exited.
     held: Held,
+    /// Whether the kill spares a browser and its children (`LaunchSpec::spare_browsers`).
+    spare: bool,
+    /// The pids the kill spared, left running in a job that no longer kills on close: shared
+    /// with every [`watch::Watch`], which does not wait for them.
+    spared: Arc<Mutex<Vec<u32>>>,
 }
 
 impl Tree {
@@ -106,9 +110,17 @@ impl Tree {
     /// A process that joins between the listing and the terminate moves the job's total, and is
     /// then held from the system's process list ([`hold_in_job`]): the job's own list, read again
     /// after the terminate, may already leave it out.
+    ///
+    /// A tree that spares a browser ([`Tree::spare_browsers`]) ends every other process one by
+    /// one instead ([`spare::kill_sparing`]) when it holds a browser; with none it ends as above.
     pub(crate) fn kill(&self) -> bool {
         let before = total(&self.job);
         hold_listed(&self.job, &self.held);
+        if self.spare
+            && let Some(ended) = spare::kill_sparing(self)
+        {
+            return ended;
+        }
         // SAFETY: `self.job()` is the job handle `self` owns, open until `self` drops.
         let ended = unsafe { TerminateJobObject(self.job(), TERMINATED) }.is_ok();
         if before.is_none() || total(&self.job) != before {
@@ -146,7 +158,15 @@ impl Tree {
         Tree {
             job,
             held: Held::default(),
+            spare: false,
+            spared: Arc::default(),
         }
+    }
+
+    /// From now on the tree's kill, and so its handle's drop, spares a browser it holds and that
+    /// browser's children (`LaunchSpec::spare_browsers`).
+    pub(crate) fn spare_browsers(&mut self) {
+        self.spare = true;
     }
 
     /// The job handle, borrowed for a Win32 call.
@@ -166,27 +186,13 @@ impl Tree {
         let tree = Tree {
             job,
             held: Held::default(),
+            spare: false,
+            spared: Arc::default(),
         };
-        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        let size =
-            u32::try_from(size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>()).map_err(|source| {
-                Error::Os {
-                    what: "the job limit struct is too large",
-                    source: io::Error::other(source),
-                }
-            })?;
-        // SAFETY: `limits` is a live JOBOBJECT_EXTENDED_LIMIT_INFORMATION of `size` bytes, the
-        // struct this information class takes, and `tree.job()` is the job handle `tree` owns.
-        unsafe {
-            SetInformationJobObject(
-                tree.job(),
-                JobObjectExtendedLimitInformation,
-                (&raw const limits).cast(),
-                size,
-            )
-        }
-        .map_err(|error| os_error("could not set the job to kill on close", error))?;
+        set_limits(&tree.job, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE).map_err(|source| Error::Os {
+            what: "could not set the job to kill on close",
+            source,
+        })?;
         Ok(tree)
     }
 }
@@ -536,4 +542,5 @@ fn os_error(what: &'static str, error: windows::core::Error) -> Error {
 }
 
 mod job;
+mod spare;
 pub(crate) mod watch;

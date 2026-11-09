@@ -31,9 +31,13 @@ libc = { workspace = true }
 
 # The Job Object, the suspended start and the thread resume, and the job's process list with each
 # process's creation time, image name, parent (Toolhelp) and end; the system time for a sweep's
-# cutoff (`Win32_System_SystemInformation`) (src/os/windows.rs).
+# cutoff (`Win32_System_SystemInformation`) (src/os/windows.rs); the default http handler's
+# executable, so a stop spares the browser a sign-in opened (`Win32_UI_Shell`, os/windows/spare.rs).
 [target.'cfg(windows)'.dependencies]
-windows = { workspace = true, features = ["Win32_System_SystemInformation"] }
+windows = { workspace = true, features = [
+  "Win32_System_SystemInformation",
+  "Win32_UI_Shell",
+] }
 
 [dev-dependencies]
 # Itself with test-support, so the pipe tests reach `ManualTimer` with no flag.

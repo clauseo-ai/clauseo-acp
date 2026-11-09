@@ -36,6 +36,10 @@ mod status_retry;
 mod graceful;
 
 #[cfg(test)]
+#[path = "signin/cancel_before_spawn.rs"]
+mod cancel_before_spawn;
+
+#[cfg(test)]
 #[path = "signin/kept_login.rs"]
 mod kept_login;
 

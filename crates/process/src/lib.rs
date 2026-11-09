@@ -95,6 +95,8 @@
 //! listings and the sweep), `stderr.rs` (the pump, the ring and the tail) and `stdin.rs`.
 //! Tests: unit tests in `src/*/tests.rs`; the pipe tests against `fake_agent` in `tests/pipes/`.
 
+#[cfg(any(windows, test))]
+mod browser;
 mod descendants;
 mod error;
 mod handle;

@@ -177,7 +177,15 @@ pub fn spawn_in_tree(spec: &LaunchSpec, opts: &SpawnOptions) -> Result<Launched,
             source: std::io::Error::other("a piped stdio stream is missing"),
         });
     };
-    let tree = os::Tree::adopt(&mut child)?;
+    #[cfg_attr(
+        not(windows),
+        expect(unused_mut, reason = "only Windows spares a browser")
+    )]
+    let mut tree = os::Tree::adopt(&mut child)?;
+    #[cfg(windows)]
+    if spec.spares_browsers() {
+        tree.spare_browsers();
+    }
     // Read now, while the agent is this process's unreaped child, so its pid is still its own.
     let root = os::Root::of(&tree, child.id());
     let ring = Arc::new(Mutex::new(Ring::new()));

@@ -48,7 +48,7 @@ pub(super) fn codex_browser_login(script: &Script, folder: &Path) -> io::Result<
     }
     let listener = match callback_port() {
         Some(port) => {
-            wait_for_gate();
+            wait_for_gate(BIND_GATE_VAR);
             let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port))?;
             write::create_dir_all(folder)?;
             write::write(folder.join(LISTENING_FILE), b"")?;
@@ -74,10 +74,10 @@ fn callback_port() -> Option<u16> {
     std::env::var(CODEX_PORT_VAR).ok()?.parse().ok()
 }
 
-/// Waits until the file `FAKE_CODEX_BIND_GATE` names exists, when it names one: forever if it
-/// never does (the run is then killed).
-fn wait_for_gate() {
-    let Some(gate) = std::env::var_os(BIND_GATE_VAR).map(PathBuf::from) else {
+/// Waits until the file the variable `var` names exists (`FAKE_CODEX_BIND_GATE`,
+/// `FAKE_STATUS_GATE`), when it names one: forever if it never does (the run is then killed).
+pub(super) fn wait_for_gate(var: &str) {
+    let Some(gate) = std::env::var_os(var).map(PathBuf::from) else {
         return;
     };
     while !gate.exists() {
