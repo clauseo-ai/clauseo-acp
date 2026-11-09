@@ -19,6 +19,8 @@ pub(super) const EXIT_POLL: Duration = Duration::from_millis(100);
 pub(super) struct Refused<'a, T> {
     pub(super) found: &'a Seen,
     pub(super) process: T,
+    /// Its creation time, when the sweep could read it: with its pid, which process it is.
+    pub(super) started: Option<u64>,
     /// Why the kill failed.
     pub(super) error: io::Error,
 }
@@ -51,7 +53,7 @@ pub(super) fn wait_out<'a, P: Processes>(
     loop {
         let (gone, still): (Vec<_>, Vec<_>) = left
             .into_iter()
-            .partition(|refused| calls.exited(&refused.process));
+            .partition(|refused| calls.exited(&refused.process, Duration::ZERO));
         ended.extend(gone);
         left = still;
         if left.is_empty() || waited >= EXIT_WAIT {

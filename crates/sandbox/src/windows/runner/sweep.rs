@@ -55,6 +55,10 @@
 //!
 //! Each process found is opened first, which pins its pid, and then the lists are read again: only
 //! a pid they still give the pool user is killed, so a pid reused meanwhile is left alone.
+//!
+//! A kill is a signalled handle, and a process is known by its pid and creation time
+//! (`kill.rs`).
+//!
 //! The calls are behind [`Processes`]; Windows' is `os.rs`.
 
 use std::collections::BTreeSet;
@@ -64,15 +68,20 @@ use std::time::Duration;
 
 use crate::windows::sids::Sid;
 
+mod kill;
 #[cfg(windows)]
 pub(super) mod os;
 mod refused;
+
+use kill::{Done, Killed};
 
 /// How often the inner sweeps while the agent runs.
 pub(crate) const TICK: Duration = Duration::from_secs(30);
 /// How many rounds one sweep makes: a round that kills something is followed by another, for
 /// what those processes started meanwhile.
 const ROUNDS: usize = 8;
+/// How long a killed process has to be gone (its handle signalled) before it is a survivor.
+pub(crate) const KILL_WAIT: Duration = Duration::from_secs(5);
 /// The exit code a swept process ends with: the runner's `RunExit` range's last code.
 pub(crate) const SWEPT: u32 = super::RUN_EXIT_BASE + 0xff;
 /// The most image names an escapee report carries.
@@ -121,26 +130,6 @@ pub(crate) struct Seen {
     pub(crate) owner: Owner,
 }
 
-/// The processes a sweep ended, held open until the sweep is over, so a pid it gives is never
-/// another process's meanwhile.
-pub(crate) struct Killed<T> {
-    /// Each one's pid and open process.
-    entries: Vec<(u32, T)>,
-}
-
-impl<T> Killed<T> {
-    pub(crate) fn new() -> Killed<T> {
-        Killed {
-            entries: Vec::new(),
-        }
-    }
-
-    /// Their pids, in the order they were ended.
-    pub(crate) fn pids(&self) -> Vec<u32> {
-        self.entries.iter().map(|(pid, _)| *pid).collect()
-    }
-}
-
 /// The system calls a sweep makes.
 pub(crate) trait Processes {
     /// An open process; holding it pins its pid.
@@ -160,10 +149,12 @@ pub(crate) trait Processes {
     /// When this process was created, in the same ticks: the earliest a process of the inner's
     /// job can have been created.
     fn own_start(&mut self) -> io::Result<u64>;
-    /// Ends it, and waits until it has ended.
+    /// Asks for it to end (`TerminateProcess`), without waiting: whether it ended is
+    /// [`Processes::exited`]'s, never this call's success.
     fn kill(&mut self, process: &Self::Process) -> io::Result<()>;
-    /// Whether it has exited, without waiting: a process whose kill was refused.
-    fn exited(&mut self, process: &Self::Process) -> bool;
+    /// Whether it has exited (its handle signalled) within `wait`; `Duration::ZERO` doesn't
+    /// wait.
+    fn exited(&mut self, process: &Self::Process, wait: Duration) -> bool;
     /// Waits `pause` before the next look at a refused process.
     fn pause(&mut self, pause: Duration);
 }
@@ -191,6 +182,12 @@ pub(crate) enum SweepError {
         image: String,
         code: String,
     },
+    /// One was asked to end and its handle still wasn't signalled [`KILL_WAIT`] later.
+    #[error(
+        "the sandbox user's process {pid} ({image}) still runs {secs} s after its kill",
+        secs = KILL_WAIT.as_secs()
+    )]
+    Survived { pid: u32, image: String },
     /// The pool user still had new processes after every round.
     #[error("the sandbox user still started processes after {ROUNDS} rounds")]
     StillRunning,
@@ -224,11 +221,14 @@ pub(crate) struct Escapees {
 }
 
 impl SweepError {
-    /// The escapees this failure names: a process that couldn't be opened or ended, or the ones
-    /// [`SweepError::Left`] counts so; `None` for any other failure.
+    /// The escapees this failure names: a process that couldn't be opened or ended, or that
+    /// survived its kill, or the ones [`SweepError::Left`] counts so; `None` for any other
+    /// failure.
     pub(crate) fn escapees(&self) -> Option<Escapees> {
         match self {
-            SweepError::Open { image, .. } | SweepError::Kill { image, .. } => Some(Escapees {
+            SweepError::Open { image, .. }
+            | SweepError::Kill { image, .. }
+            | SweepError::Survived { image, .. } => Some(Escapees {
                 count: 1,
                 images: vec![image.clone()],
             }),
@@ -306,40 +306,26 @@ pub(crate) fn sweep<P: Processes>(
                 .map_err(|e| SweepError::JobList(code(&e)))?,
             Point::Start | Point::Tick | Point::End => Vec::new(),
         };
-        let rule = Rule { own, job };
+        let rule = Rule { point, own, job };
         let mut round = 0usize;
         let mut refused = Vec::new();
         for (found, process) in opened {
             if !again.iter().any(|s| s.pid == found.pid && is(s, user)) {
                 continue;
             }
-            match spared(calls, found, &process, &rule) {
-                Ok(true) => continue,
-                Ok(false) => {}
-                Err(error) => {
-                    failures.add(failed(found, &error, Step::Started), log)?;
-                    continue;
-                }
+            match kill::one(calls, (found, process), &rule, &mut killed, log) {
+                Done::Nothing => {}
+                Done::Killed => round += 1,
+                Done::Refused(one) => refused.push(one),
+                Done::Failed(error) => failures.add(error, log)?,
             }
-            if let Err(error) = calls.kill(&process) {
-                refused.push(refused::Refused {
-                    found,
-                    process,
-                    error,
-                });
-                continue;
-            }
-            log(&format!(
-                "clauseo-sandbox-run: sweep ({point}) killed the sandbox user's process {} ({})",
-                found.pid, found.image
-            ));
-            killed.entries.push((found.pid, process));
-            round += 1;
         }
         let (ended, left) = refused::wait_out(calls, refused);
         for gone in ended {
             log(&gone.exited_line(point));
-            killed.entries.push((gone.found.pid, gone.process));
+            killed
+                .entries
+                .push((gone.found.pid, gone.started, gone.process));
             round += 1;
         }
         for still in left {
@@ -361,6 +347,7 @@ pub(crate) fn sweep<P: Processes>(
 
 /// What a round keeps besides `keep`.
 struct Rule {
+    point: Point,
     /// The sweeping runner's creation time.
     own: u64,
     /// The pids of its job's processes, read this round; empty where none is kept.
@@ -374,19 +361,14 @@ pub(crate) fn job_kept(job: &[u32], pid: u32, started: u64, own: u64) -> bool {
     job.contains(&pid) && started >= own
 }
 
-/// Whether `process` (`found`) is kept: it is the job's ([`job_kept`]). Its creation time is
-/// read only for a pid in the job's list.
-fn spared<P: Processes>(
-    calls: &mut P,
-    found: &Seen,
-    process: &P::Process,
-    rule: &Rule,
-) -> io::Result<bool> {
+/// Whether the process `found`, created at `created` (as read), is kept: it is the job's
+/// ([`job_kept`]). A creation time that couldn't be read fails only for a pid in the job's list,
+/// where it decides.
+fn spared(found: &Seen, created: io::Result<u64>, rule: &Rule) -> io::Result<bool> {
     if !rule.job.contains(&found.pid) {
         return Ok(false);
     }
-    let started = calls.started(process)?;
-    Ok(job_kept(&rule.job, found.pid, started, rule.own))
+    Ok(job_kept(&rule.job, found.pid, created?, rule.own))
 }
 
 /// A round's failures: the first act's first ends the sweep; past it, each is logged once a
@@ -429,6 +411,7 @@ fn pid_of(error: &SweepError) -> u32 {
     match error {
         SweepError::Open { pid, .. }
         | SweepError::Kill { pid, .. }
+        | SweepError::Survived { pid, .. }
         | SweepError::Started { pid, .. } => *pid,
         SweepError::List(_)
         | SweepError::JobList(_)

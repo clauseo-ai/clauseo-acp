@@ -66,15 +66,46 @@ struct Fake {
     /// Opening a hidden process with `WRITE_DAC` and granting itself works (no `OWNER RIGHTS`
     /// entry): its next open succeeds.
     regrant: bool,
+    /// The opening list's nth call (from 1) finds these processes started meanwhile.
+    appear: BTreeMap<usize, Vec<(u32, Proc)>>,
+    /// How many times the opening list was read.
+    lists: usize,
     /// This pid exits by itself after this many pauses.
     exits_after: BTreeMap<u32, u32>,
     /// Every pause the sweep made, in order.
     pauses: Vec<Duration>,
+    /// Asking this pid to end "works" (the call succeeds) but leaves it running this many more
+    /// times (`u32::MAX`: always): a process frozen, or held in the kernel.
+    stays: BTreeMap<u32, u32>,
+    /// These pids have exited but are still listed and can be opened: another process holds
+    /// them open. Their kill is refused (5), as Windows refuses one for an exited process.
+    dead: BTreeSet<u32>,
+    /// A process killed stays listed, exited (`dead`), while the sweep holds it open.
+    lists_the_dead: bool,
+    /// Every kill asked for, in order, whether or not it ended the process.
+    asked: Vec<u32>,
+    /// Every wait longer than none on a process's end, in order.
+    waits: Vec<Duration>,
+}
+
+/// An open process: its pid and creation time, as a handle names one process and no later one
+/// that gets its pid.
+type Handle = (u32, u64);
+
+impl Fake {
+    /// Whether the process `handle` names is still the one at its pid, and running.
+    fn running(&self, (pid, started): Handle) -> bool {
+        self.procs.get(&pid).is_some_and(|p| p.started == started) && !self.dead.contains(&pid)
+    }
 }
 
 impl Processes for Fake {
-    type Process = u32;
+    type Process = Handle;
     fn list(&mut self) -> io::Result<Vec<Seen>> {
+        self.lists += 1;
+        for (pid, proc) in self.appear.remove(&self.lists).unwrap_or_default() {
+            self.procs.insert(pid, proc);
+        }
         Ok(self
             .procs
             .iter()
@@ -107,7 +138,7 @@ impl Processes for Fake {
             }])
             .collect())
     }
-    fn open(&mut self, pid: u32) -> io::Result<Option<u32>> {
+    fn open(&mut self, pid: u32) -> io::Result<Option<Handle>> {
         let hidden = self.procs.get(&pid).is_some_and(|p| p.hidden);
         if hidden && self.regrant {
             if let Some(p) = self.procs.get_mut(&pid) {
@@ -119,7 +150,7 @@ impl Processes for Fake {
         if let Some(other) = self.reused.remove(&pid) {
             self.procs.insert(pid, other);
         }
-        Ok(self.procs.contains_key(&pid).then_some(pid))
+        Ok(self.procs.get(&pid).map(|p| (pid, p.started)))
     }
     fn job_pids(&mut self) -> io::Result<Vec<u32>> {
         self.job_reads += 1;
@@ -133,24 +164,37 @@ impl Processes for Fake {
             .map(|(pid, _)| *pid)
             .collect())
     }
-    fn started(&mut self, process: &u32) -> io::Result<u64> {
-        self.procs
-            .get(process)
-            .map(|p| p.started)
-            .ok_or_else(|| io::Error::from_raw_os_error(87))
+    fn started(&mut self, process: &Handle) -> io::Result<u64> {
+        // A handle reads its own process's time, whatever has the pid since.
+        Ok(process.1)
     }
     fn own_start(&mut self) -> io::Result<u64> {
         Ok(self.own_start)
     }
-    fn kill(&mut self, process: &u32) -> io::Result<()> {
-        let pid = process;
+    fn kill(&mut self, process: &Handle) -> io::Result<()> {
+        let pid = &process.0;
+        self.asked.push(*pid);
+        if !self.running(*process) {
+            // Windows refuses to end what has exited.
+            return Err(io::Error::from_raw_os_error(5));
+        }
+        if let Some(left) = self.stays.get_mut(pid)
+            && *left > 0
+        {
+            *left = left.saturating_sub(1);
+            return Ok(());
+        }
         if let Some(left) = self.deny_kill.get_mut(pid)
             && *left > 0
         {
             *left -= 1;
             return Err(io::Error::from_raw_os_error(5));
         }
-        self.procs.remove(pid);
+        if self.lists_the_dead {
+            self.dead.insert(*pid);
+        } else {
+            self.procs.remove(pid);
+        }
         self.killed.push(*pid);
         if let Some((child, proc)) = self.spawns.remove(pid) {
             self.procs.insert(child, proc);
@@ -162,8 +206,11 @@ impl Processes for Fake {
         }
         Ok(())
     }
-    fn exited(&mut self, process: &u32) -> bool {
-        !self.procs.contains_key(process)
+    fn exited(&mut self, process: &Handle, wait: Duration) -> bool {
+        if !wait.is_zero() {
+            self.waits.push(wait);
+        }
+        !self.running(*process)
     }
     fn pause(&mut self, pause: Duration) {
         self.pauses.push(pause);
@@ -471,4 +518,5 @@ fn a_job_list_that_cant_be_read_fails_the_sweep() {
 }
 
 mod escapees;
+mod kills;
 mod refused;
