@@ -8,7 +8,8 @@
 //! 1. the Group Policy security-template cache, `%windir%\security\templates\policies\gpt*.inf`
 //!    and `gpt*.dom`: each applied GPO's template, whose `[Privilege Rights]` section lists the
 //!    rights it defines ([`inf_rights`]);
-//! 2. Intune (MDM): the `UserRights` CSP's values under [`MDM_KEY`] ([`MDM_NAMES`]).
+//! 2. Intune (MDM): the `UserRights` CSP's values ([`MDM_NAMES`]) under [`MDM_KEY`] and under
+//!    each provider's own key ([`provider_key`]), where a setting can stand alone.
 //!
 //! A right listed by any of them is [`RightPolicy::Defined`], and includes the pool only when
 //! every list that defines it does, since which one wins isn't known from here. Any read that
@@ -26,6 +27,7 @@ use std::time::Duration;
 
 use super::answers::{DENY_BATCH_RIGHT, DENY_INTERACTIVE_RIGHT, DENY_SERVICE_RIGHT};
 use super::answers::{LogonKind, pool_sids_for};
+use super::logon_grant::COVERING_HOLDERS;
 use super::machine::MachineError;
 use crate::windows::pool::MachineRecord;
 use crate::windows::pool::{POOL_GROUP, pool_number};
@@ -38,8 +40,16 @@ pub const BATCH_RIGHT: &str = "SeBatchLogonRight";
 /// "Log on as a service".
 pub const SERVICE_RIGHT: &str = "SeServiceLogonRight";
 
-/// The Intune `UserRights` CSP's settings, as `PolicyManager` stores them.
+/// The Intune `UserRights` CSP's merged settings, as `PolicyManager` stores them.
 pub const MDM_KEY: &str = r"SOFTWARE\Microsoft\PolicyManager\current\device\UserRights";
+/// Where `PolicyManager` keeps each MDM provider's own settings: a subkey per provider (a GUID).
+pub const MDM_PROVIDERS: &str = r"SOFTWARE\Microsoft\PolicyManager\providers";
+
+/// The provider `provider`'s `UserRights` key (`providers\<GUID>\default\Device\UserRights`).
+/// An Intune setting can stand here alone, with nothing under [`MDM_KEY`].
+pub fn provider_key(provider: &str) -> String {
+    format!(r"{MDM_PROVIDERS}\{provider}\default\Device\UserRights")
+}
 
 /// Each right this module reads, with the `UserRights` CSP's name for it (Microsoft Learn,
 /// "Policy CSP - `UserRights`").
@@ -152,10 +162,12 @@ pub trait PolicySource {
     fn cache_files(&mut self) -> io::Result<Vec<(PathBuf, u64)>>;
     /// The bytes of the cache file `path`.
     fn read_file(&mut self, path: &Path) -> io::Result<Vec<u8>>;
-    /// [`MDM_KEY`]'s last-write time; `None` when the key is missing.
-    fn mdm_stamp(&mut self) -> io::Result<Option<u64>>;
-    /// The `REG_SZ` value `name` under [`MDM_KEY`]; `None` when it is missing.
-    fn mdm_value(&mut self, name: &str) -> io::Result<Option<String>>;
+    /// Every Intune `UserRights` key there is, with its last-write time: [`MDM_KEY`]
+    /// (`current\device`), and each provider's (`provider_key`), which is where the CSP's
+    /// value can be alone; a key that is missing is left out.
+    fn mdm_keys(&mut self) -> io::Result<Vec<(String, u64)>>;
+    /// The `REG_SZ` value `name` under `HKLM\<key>`; `None` when it is missing.
+    fn mdm_value(&mut self, key: &str, name: &str) -> io::Result<Option<String>>;
     /// The SID of the account or group `name`; `None` when no lookup finds it.
     fn resolve(&mut self, name: &str) -> Option<Sid>;
 }
@@ -356,7 +368,7 @@ impl Snapshot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stamp {
     files: Vec<(PathBuf, u64)>,
-    mdm: Option<u64>,
+    mdm: Vec<(String, u64)>,
 }
 
 /// The stamp now: the templates sorted by path, others in the folder left out.
@@ -371,7 +383,8 @@ pub fn stamp(source: &mut dyn PolicySource) -> io::Result<Stamp> {
         })
         .collect();
     files.sort();
-    let mdm = source.mdm_stamp()?;
+    let mut mdm = source.mdm_keys()?;
+    mdm.sort();
     Ok(Stamp { files, mdm })
 }
 
@@ -389,9 +402,9 @@ pub fn load(source: &mut dyn PolicySource, stamp: &Stamp) -> io::Result<Snapshot
             }
         }
     }
-    if stamp.mdm.is_some() {
+    for (key, _) in &stamp.mdm {
         for (right, name) in MDM_NAMES {
-            if let Some(value) = source.mdm_value(name)? {
+            if let Some(value) = source.mdm_value(key, name)? {
                 let list = resolved(source, mdm_principals(&value));
                 snapshot.add(right, list);
             }
@@ -484,6 +497,8 @@ pub trait LaunchRecord {
     fn read(&mut self) -> Result<Option<MachineRecord>, MachineError>;
     /// What policy says now of "Allow log on locally" for `pool`.
     fn policy(&mut self, pool: Pool<'_>) -> RightPolicy;
+    /// Who holds "Allow log on locally" in effect now (`LsaEnumerateAccountsWithUserRight`).
+    fn holders(&mut self) -> Result<Vec<Sid>, MachineError>;
     /// Writes `LogonPolicy` as `state` and `LogonPolicyAt` as `at`, into the key only when
     /// it is there.
     fn write(&mut self, state: PolicyState, at: u64) -> Result<(), MachineError>;
@@ -502,7 +517,10 @@ pub enum LaunchUpdate {
 
 /// The SYSTEM refresh's update of the record's `LogonPolicy`, found at `at`: what policy says
 /// now for the record's group and pool, written only into a record that is there and not being
-/// removed, and never `unknown` over what set-up or an earlier refresh found.
+/// removed, and never `unknown` over what set-up or an earlier refresh found. The backstop: when
+/// the right in effect (the LSA's holders) no longer admits the pool (none of the group,
+/// `Users`, `Everyone` or `Authenticated Users`), something replaced the list set-up left, a
+/// policy this read can't see among them, so it is `defined_without_pool` whatever the read says.
 pub fn update_launch_record(
     record: &mut dyn LaunchRecord,
     at: u64,
@@ -514,7 +532,14 @@ pub fn update_launch_record(
         group: Some(&found.group),
         users: &found.pool,
     };
-    let state = PolicyState::of(record.policy(pool));
+    let mut state = PolicyState::of(record.policy(pool));
+    match record.holders() {
+        Ok(holders) if !admits_pool(&holders, &found.group) => {
+            state = PolicyState::DefinedWithoutPool;
+        }
+        Ok(_) => {}
+        Err(error) => tracing::warn!(%error, "who holds \"Allow log on locally\" couldn't be read"),
+    }
     if state == PolicyState::Unknown {
         return Ok(LaunchUpdate::KeptLast);
     }
@@ -522,5 +547,15 @@ pub fn update_launch_record(
     Ok(LaunchUpdate::Written(state))
 }
 
+/// Whether `holders` of "Allow log on locally" admit the pool: the group `group`, or one of
+/// [`COVERING_HOLDERS`] (`Users`, `Everyone`, `Authenticated Users`).
+pub fn admits_pool(holders: &[Sid], group: &Sid) -> bool {
+    holders
+        .iter()
+        .any(|sid| sid == group || COVERING_HOLDERS.contains(&sid.as_str()))
+}
+
+#[cfg(test)]
+mod launch_tests;
 #[cfg(test)]
 mod tests;

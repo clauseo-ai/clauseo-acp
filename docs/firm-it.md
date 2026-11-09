@@ -1017,7 +1017,8 @@ The matching deny rights (`SeDenyInteractiveLogonRight`, `SeDenyBatchLogonRight`
 
 **What set-up does.** Set-up checks whether a Group Policy (the templates in
 `%windir%\security\templates\policies`) or Intune (the UserRights CSP, under
-`HKLM\SOFTWARE\Microsoft\PolicyManager\current\device\UserRights`) sets "Allow log on locally":
+`HKLM\SOFTWARE\Microsoft\PolicyManager\current\device\UserRights` or a provider's
+`HKLM\SOFTWARE\Microsoft\PolicyManager\providers\<GUID>\default\Device\UserRights`) sets "Allow log on locally":
 
 - No policy sets it: set-up grants it to `ClauseoSandboxUsers` when the local setting doesn't
   already include that group, `Users`, `Everyone` or `Authenticated Users`, and records that in

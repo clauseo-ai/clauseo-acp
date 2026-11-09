@@ -13,15 +13,16 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 
-use super::ffi::{reg_last_write, reg_string, windows_dir};
+use super::ffi::{reg_last_write, reg_string, reg_subkeys, windows_dir};
 use super::machine::MachineError;
+use super::preflight::holders;
 use super::preflight::sid_of_name;
 use super::record_logon;
 use super::record_write::{self, RECORD_KEY};
 use super::result_file::now_secs;
 use super::rights_policy::{
-    CACHE_TTL, INTERACTIVE_RIGHT, LaunchRecord, MDM_KEY, PolicyCache, PolicySource, PolicyState,
-    Pool, RightPolicy, read_policy, update_launch_record,
+    CACHE_TTL, INTERACTIVE_RIGHT, LaunchRecord, MDM_KEY, MDM_PROVIDERS, PolicyCache, PolicySource,
+    PolicyState, Pool, RightPolicy, provider_key, read_policy, update_launch_record,
 };
 use crate::windows::pool::MachineRecord;
 use crate::windows::refresh::source::read_capped;
@@ -86,12 +87,23 @@ impl PolicySource for WindowsPolicySource {
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
     }
 
-    fn mdm_stamp(&mut self) -> io::Result<Option<u64>> {
-        reg_last_write(MDM_KEY).map_err(io::Error::other)
+    fn mdm_keys(&mut self) -> io::Result<Vec<(String, u64)>> {
+        let mut keys = Vec::new();
+        let providers = reg_subkeys(MDM_PROVIDERS)
+            .map_err(io::Error::other)?
+            .unwrap_or_default();
+        let candidates =
+            std::iter::once(MDM_KEY.to_owned()).chain(providers.iter().map(|p| provider_key(p)));
+        for key in candidates {
+            if let Some(stamp) = reg_last_write(&key).map_err(io::Error::other)? {
+                keys.push((key, stamp));
+            }
+        }
+        Ok(keys)
     }
 
-    fn mdm_value(&mut self, name: &str) -> io::Result<Option<String>> {
-        reg_string(MDM_KEY, name).map_err(io::Error::other)
+    fn mdm_value(&mut self, key: &str, name: &str) -> io::Result<Option<String>> {
+        reg_string(key, name).map_err(io::Error::other)
     }
 
     fn resolve(&mut self, name: &str) -> Option<Sid> {
@@ -132,6 +144,10 @@ impl LaunchRecord for RegistryRecord<'_> {
 
     fn policy(&mut self, pool: Pool<'_>) -> RightPolicy {
         read_now(INTERACTIVE_RIGHT, pool)
+    }
+
+    fn holders(&mut self) -> Result<Vec<Sid>, MachineError> {
+        holders(INTERACTIVE_RIGHT)
     }
 
     fn write(&mut self, state: PolicyState, at: u64) -> Result<(), MachineError> {

@@ -1,8 +1,5 @@
 use std::collections::BTreeMap;
 
-use crate::windows::pool::MachineRecord;
-use crate::windows::setup::MachineError;
-
 use super::*;
 
 fn sid(text: &str) -> Sid {
@@ -14,7 +11,8 @@ fn sid(text: &str) -> Sid {
 #[derive(Default)]
 struct FakeSource {
     files: BTreeMap<PathBuf, (u64, Vec<u8>)>,
-    mdm: Option<(u64, BTreeMap<String, String>)>,
+    /// Each Intune `UserRights` key there is: its stamp and values.
+    mdm: BTreeMap<String, (u64, BTreeMap<String, String>)>,
     names: BTreeMap<String, Sid>,
     fail_list: bool,
     fail_read: bool,
@@ -49,14 +47,18 @@ impl PolicySource for FakeSource {
         Ok(self.files[path].1.clone())
     }
 
-    fn mdm_stamp(&mut self) -> io::Result<Option<u64>> {
-        Ok(self.mdm.as_ref().map(|(stamp, _)| *stamp))
-    }
-
-    fn mdm_value(&mut self, name: &str) -> io::Result<Option<String>> {
+    fn mdm_keys(&mut self) -> io::Result<Vec<(String, u64)>> {
         Ok(self
             .mdm
-            .as_ref()
+            .iter()
+            .map(|(key, (stamp, _))| (key.clone(), *stamp))
+            .collect())
+    }
+
+    fn mdm_value(&mut self, key: &str, name: &str) -> io::Result<Option<String>> {
+        Ok(self
+            .mdm
+            .get(key)
             .and_then(|(_, values)| values.get(name).cloned()))
     }
 
@@ -281,7 +283,7 @@ fn intune_defines_a_right_too() {
         ),
     ]);
     let mut source = FakeSource {
-        mdm: Some((7, values)),
+        mdm: BTreeMap::from([(MDM_KEY.to_owned(), (7, values))]),
         ..FakeSource::default()
     };
     assert_eq!(
@@ -361,7 +363,7 @@ fn the_cache_reads_again_only_when_a_stamp_changes_or_the_ttl_passes() {
     );
     assert_eq!(source.reads, 2);
     // The MDM key's stamp changes: read again.
-    source.mdm = Some((9, BTreeMap::new()));
+    source.mdm.insert(MDM_KEY.to_owned(), (9, BTreeMap::new()));
     assert_eq!(
         cache.right(&mut source, INTERACTIVE_RIGHT, pool_of(&group), later),
         with
@@ -477,94 +479,100 @@ fn the_recorded_state_round_trips_through_its_text() {
     );
 }
 
-/// The record in memory, for [`update_launch_record`].
-struct FakeRecord {
-    record: Option<MachineRecord>,
-    policy: RightPolicy,
-    /// `LogonPolicy` and `LogonPolicyAt`, as they stand.
-    value: Option<(PolicyState, u64)>,
-    reads: usize,
-}
-
-impl LaunchRecord for FakeRecord {
-    fn read(&mut self) -> Result<Option<MachineRecord>, MachineError> {
-        Ok(self.record.clone())
-    }
-
-    fn policy(&mut self, pool: Pool<'_>) -> RightPolicy {
-        assert_eq!(pool.group, self.record.as_ref().map(|r| &r.group));
-        self.reads += 1;
-        self.policy
-    }
-
-    fn write(&mut self, state: PolicyState, at: u64) -> Result<(), MachineError> {
-        // Only into a key that is there, as `write_logon_policy(.., false)`.
-        if self.record.is_none() {
-            return Err(MachineError::Other("the key is gone".to_owned()));
-        }
-        self.value = Some((state, at));
-        Ok(())
-    }
-}
-
-fn a_record(removing: bool) -> MachineRecord {
-    MachineRecord {
-        owner: sid("S-1-5-21-7-8-9-1001"),
-        group: sid(GROUP),
-        pool: vec![sid("S-1-5-21-5-5-5-1001")],
-        data_dir: PathBuf::from(r"C:\Users\Lawyer\AppData\Local\Clauseo"),
-        removing,
-    }
+/// A provider's key, as Intune's `providers\<GUID>\default\Device\UserRights` names it.
+fn intune_provider() -> String {
+    provider_key("A0D8DF3E-28B9-4FB9-9D8A-7A1A2E3A4B5C")
 }
 
 #[test]
-fn the_refresh_records_what_policy_says_into_a_record_that_is_there() {
+fn an_intune_provider_key_alone_defines_the_right() {
+    let group = sid(GROUP);
     let without = RightPolicy::Defined {
         includes_pool: false,
     };
-    let mut record = FakeRecord {
-        record: Some(a_record(false)),
-        policy: without,
-        value: Some((PolicyState::NotDefined, 10)),
-        reads: 0,
+    let with = RightPolicy::Defined {
+        includes_pool: true,
     };
-    let written = update_launch_record(&mut record, 20).unwrap();
-    assert_eq!(
-        written,
-        LaunchUpdate::Written(PolicyState::DefinedWithoutPool)
-    );
-    assert_eq!(record.value, Some((PolicyState::DefinedWithoutPool, 20)));
-}
-
-#[test]
-fn the_refresh_makes_no_record_key_and_touches_none_being_removed() {
-    for found in [None, Some(a_record(true))] {
-        let mut record = FakeRecord {
-            record: found,
-            policy: RightPolicy::NotDefined,
-            value: None,
-            reads: 0,
+    assert!(intune_provider().ends_with(r"\default\Device\UserRights"));
+    assert!(intune_provider().starts_with(MDM_PROVIDERS));
+    // The value as the CSP writes it: entries split by U+F000, SIDs with their `*`, or names.
+    for (value, expected) in [
+        ("*S-1-5-32-544".to_owned(), without),
+        ("*S-1-5-32-544\u{F000}*S-1-5-32-545".to_owned(), with),
+        ("Administrators\u{F000}Users".to_owned(), with),
+        (format!("*S-1-5-32-544\u{F000}*{GROUP}"), with),
+        (
+            "<![CDATA[*S-1-5-32-544&#xF000;*S-1-5-32-546]]>".to_owned(),
+            without,
+        ),
+    ] {
+        let values = BTreeMap::from([("AllowLocalLogOn".to_owned(), value.clone())]);
+        let mut source = FakeSource {
+            mdm: BTreeMap::from([(intune_provider(), (3, values))]),
+            ..FakeSource::default()
         };
         assert_eq!(
-            update_launch_record(&mut record, 20),
-            Ok(LaunchUpdate::NoRecord)
+            read_policy(&mut source, INTERACTIVE_RIGHT, pool_of(&group)),
+            expected,
+            "{value:?}"
         );
-        assert_eq!(record.value, None);
-        assert_eq!(record.reads, 0, "the policy isn't even read");
     }
 }
 
 #[test]
-fn an_unreadable_policy_keeps_the_last_known_state_and_its_time() {
-    let mut record = FakeRecord {
-        record: Some(a_record(false)),
-        policy: RightPolicy::Unknown,
-        value: Some((PolicyState::DefinedWithoutPool, 10)),
-        reads: 0,
+fn a_provider_and_the_cache_that_disagree_leave_the_pool_out() {
+    let group = sid(GROUP);
+    let without = RightPolicy::Defined {
+        includes_pool: false,
+    };
+    let provider = |value: &str| {
+        let values = BTreeMap::from([("AllowLocalLogOn".to_owned(), value.to_owned())]);
+        BTreeMap::from([(intune_provider(), (3, values))])
+    };
+    // The GPO includes Users, Intune doesn't.
+    let mut source = FakeSource {
+        mdm: provider("*S-1-5-32-544"),
+        ..FakeSource::default().with_inf(
+            "gpt00000.inf",
+            1,
+            &template("SeInteractiveLogonRight = *S-1-5-32-545"),
+        )
     };
     assert_eq!(
-        update_launch_record(&mut record, 20),
-        Ok(LaunchUpdate::KeptLast)
+        read_policy(&mut source, INTERACTIVE_RIGHT, pool_of(&group)),
+        without
     );
-    assert_eq!(record.value, Some((PolicyState::DefinedWithoutPool, 10)));
+    // Intune includes Users, the GPO doesn't.
+    let mut source = FakeSource {
+        mdm: provider("*S-1-5-32-545"),
+        ..FakeSource::default().with_inf(
+            "gpt00000.inf",
+            1,
+            &template("SeInteractiveLogonRight = *S-1-5-32-544"),
+        )
+    };
+    assert_eq!(
+        read_policy(&mut source, INTERACTIVE_RIGHT, pool_of(&group)),
+        without
+    );
+}
+
+#[test]
+fn a_new_provider_key_invalidates_the_cache() {
+    let group = sid(GROUP);
+    let mut source = FakeSource::default();
+    let mut cache = PolicyCache::new(CACHE_TTL);
+    let now = Duration::from_secs(1_000);
+    assert_eq!(
+        cache.right(&mut source, INTERACTIVE_RIGHT, pool_of(&group), now),
+        RightPolicy::NotDefined
+    );
+    let values = BTreeMap::from([("AllowLocalLogOn".to_owned(), "*S-1-5-32-544".to_owned())]);
+    source.mdm.insert(intune_provider(), (3, values));
+    assert_eq!(
+        cache.right(&mut source, INTERACTIVE_RIGHT, pool_of(&group), now),
+        RightPolicy::Defined {
+            includes_pool: false
+        }
+    );
 }

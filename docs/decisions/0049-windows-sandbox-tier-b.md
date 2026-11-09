@@ -783,7 +783,9 @@ default Windows include, so most computers need nothing. Set-up checks the rest
 - **Detection.** A right is *defined by policy* when a source lists it: first the Group Policy
   template cache, `%windir%\security\templates\policies\gpt*.inf` and `gpt*.dom` (each applied
   GPO's `[Privilege Rights]`, UTF-16 or UTF-8), then Intune's UserRights CSP under
-  `HKLM\SOFTWARE\Microsoft\PolicyManager\current\device\UserRights` (`AllowLocalLogOn`,
+  `HKLM\SOFTWARE\Microsoft\PolicyManager\current\device\UserRights` and under each provider's
+  `PolicyManager\providers\<GUID>\default\Device\UserRights`, where a setting can stand alone
+  (a VM row found `AllowLocalLogOn` only there) (`AllowLocalLogOn`,
   `DenyLocalLogOn`, `LogOnAsBatchJob`, `DenyLogOnAsBatchJob`, `LogOnAsService`,
   `DenyLogOnAsService`; entries split on U+F000). The answer is `Defined { includes_pool }`,
   `NotDefined` or `Unknown`. `includes_pool` holds when every list that defines the right
@@ -808,8 +810,9 @@ default Windows include, so most computers need nothing. Set-up checks the rest
   template cache. So set-up (step 3a) and the SYSTEM refresh task (`--refresh`, after its
   SYSTEM and path checks, under the set-up lock; only into a record key that is there and not
   being removed, never made; an unreadable policy keeps the last known state and its time,
-  `rights_policy::update_launch_record`) write what they found into the record, which Users
-  can read: `LogonPolicy` (`defined_with_pool`, `defined_without_pool`,
+  `rights_policy::update_launch_record`; its backstop: when the LSA's holders of the right no
+  longer admit the pool, it records `defined_without_pool` whatever the read says) write what
+  they found into the record, which Users can read: `LogonPolicy` (`defined_with_pool`, `defined_without_pool`,
   `not_defined`, `unknown`) and `LogonPolicyAt` (seconds since 1970). On a 1385 only, the runner
   reads it (`steps::logon_failure`, `runner::logon_refusal`). `defined_without_pool` exits
   `RunExit::LogonPolicy` with `Blocked::LogonPolicy`'s words. `not_defined` and
