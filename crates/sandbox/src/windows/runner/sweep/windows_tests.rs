@@ -28,11 +28,13 @@
 //! The case under test is an inner in the lawyer's session with its escapee in session 0, so the
 //! test fails, before it makes anything, when its own session is 0: there the user's process
 //! would share the child's session and prove nothing. The repo's CI notes say its Windows runner
-//! runs in session 0 (`desktop`'s e2e exit, "session 0, as in CI"); this case is then the VM's.
-//!
-//! Elevated, from CI's elevated step only (`CLAUSEO_ELEVATED_TESTS=1`): making an account and a
-//! task as it needs it. The task, the account with its profile, and the folder are removed on
-//! drop, a failed assertion included.
+//! runs in session 0 (`desktop`'s e2e exit, "session 0, as in CI"), so the test is the VM's:
+//! ignored, and named `vm_`, not `elevated_`, so CI's elevated steps (`--run-ignored only`
+//! with an `elevated_` filter) leave it out. On the VM, from an interactive session, elevated:
+//! `CLAUSEO_ELEVATED_TESTS=1 cargo nextest run -p clauseo-sandbox --run-ignored only -E
+//! 'test(/::vm_a_session_0_/)'`. Making an account and a task needs the elevated token. The
+//! task, the account with its profile, and the folder are removed on drop, a failed assertion
+//! included.
 #![expect(
     unsafe_code,
     reason = "FFI to the Task Scheduler, a pid's session and the ping's DACL"
@@ -269,9 +271,9 @@ fn run_child(user: &TestUser, exe: &Path, dir: &Path) -> String {
 }
 
 #[test]
-#[ignore = "elevated: run by CI's elevated step with CLAUSEO_ELEVATED_TESTS=1"]
-fn elevated_a_session_0_process_that_shut_its_user_out_is_named_and_left_an_escapee() {
-    if !gate("elevated_a_session_0_process_that_shut_its_user_out_is_named_and_left_an_escapee") {
+#[ignore = "needs an interactive session; run on the VM"]
+fn vm_a_session_0_process_that_shut_its_user_out_is_named_and_left_an_escapee() {
+    if !gate("vm_a_session_0_process_that_shut_its_user_out_is_named_and_left_an_escapee") {
         return;
     }
     // 0. The case is an inner outside session 0 with its escapee in it: fail, never pass, here.
@@ -360,7 +362,7 @@ fn elevated_a_session_0_process_that_shut_its_user_out_is_named_and_left_an_esca
 /// The child's part of the test above, a pass in any other run: with [`ORDER`] beside its exe,
 /// it does [`child_report`]'s steps as the test user and writes the lines to [`REPORT`].
 #[test]
-#[ignore = "the elevated test's child: run by that test alone, as its test user"]
+#[ignore = "the VM test's child: run by that test alone, as its test user"]
 fn sweep_child() {
     let exe = std::env::current_exe().unwrap();
     let Some(dir) = exe.parent() else {

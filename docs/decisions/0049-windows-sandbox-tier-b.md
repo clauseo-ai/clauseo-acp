@@ -1336,8 +1336,8 @@ leaves that profile, both naming the part.
     matters' sessions. That is part of the same item, and launch-blocking with it: once the
     stop is scoped per slot, the lever ends only the agent's own slot. The sweep's view of the
     pool user's own processes in session 0 behind a shut DACL rests on `WTSEnumerateProcessesW`
-    as a non-admin, which Microsoft doesn't document; an `elevated_` Windows test checks it
-    (`runner::sweep::windows_tests`). Were such a process unnamed, the sweep would call the
+    as a non-admin, which Microsoft doesn't document; a VM test checks it from an interactive
+    session (`runner::sweep::windows_tests`, ignored on CI, whose runner is in session 0). Were such a process unnamed, the sweep would call the
     session clean, and only this item's `SYSTEM` verdict would close that.
 
     An absent `…Sequence` counts as 0, an absent `…Next` as 1. The numbers are read as the lawyer
