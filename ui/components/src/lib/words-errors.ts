@@ -141,8 +141,10 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   "matter.folder_network": "Codex can't work on a network drive. Move the matter to this computer.",
   "matter.folder_no_permissions":
     "Codex can't work on a drive without file permissions. Move the matter to this computer.",
+  // provisional (app track, folder_nested): a jailed launch refused for another matter's folder inside this one.
+  // The path (HostError.files) isn't shown yet: only set_mode and set_config_option carry it, which the app never sends
   "matter.folder_nested":
-    "To work here, move {path} out of this matter's folder. It's another matter's folder, and the Safe workspace can't keep the two apart while one is inside the other.",
+    "To work here, move the other matter's folder that's inside this one somewhere else. The Safe workspace can't keep the two apart while one is inside the other.",
   "matter.folder_too_deep":
     "This matter's folder is too deep inside other folders for Clauseo to work in it on Windows. Move it nearer the top of its drive.",
   "transport.unauthorized": "That wasn't allowed, so nothing changed.",

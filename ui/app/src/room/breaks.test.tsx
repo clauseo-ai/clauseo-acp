@@ -81,3 +81,41 @@ test("a failed step: agent.exited marks where it stopped with its time; every ot
     failures.map((_, i) => `Answer ${i}`),
   );
 });
+
+const NESTED =
+  "To work here, move the other matter's folder that's inside this one somewhere else. The Safe workspace can't keep the two apart while one is inside the other.";
+
+test("matter.folder_nested on a failed step (TurnFailed, no path) says the line with no path in it", async () => {
+  h = await mountRoom();
+  h.deliver([
+    reset([
+      userMessage(5, 1, "Summarise the notice"),
+      step(7, { stop: "failed", failure: "matter.folder_nested", turn: uuid(1, 4) }),
+    ]),
+  ]);
+  const row = h.one("turn-stopped");
+  expect(row?.dataset["failure"]).toBe("matter.folder_nested");
+  expect(row?.textContent).toBe(NESTED);
+  expect(row?.textContent).not.toContain("{path}");
+});
+
+test("matter.folder_nested refused with HostError.files keeps the no-path line: the path isn't shown yet", async () => {
+  h = await mountRoom({
+    dispatch: (command) => {
+      if (command.send_prompt !== undefined)
+        throw {
+          code: "matter.folder_nested",
+          message: SECRET,
+          retryable: false,
+          files: ["Other matter"],
+        };
+      return "done";
+    },
+  });
+  await h.type("Summarise the notice");
+  await h.click(h.one("send"));
+  const line = h.one("error");
+  expect(line?.textContent).toContain(NESTED);
+  expect(line?.textContent).not.toContain("Other matter");
+  expect(line?.textContent).not.toContain("{path}");
+});

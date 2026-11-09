@@ -720,5 +720,35 @@
     "status": "provisional",
     "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-107": {
+    "en": "Some of {plan}'s settings aren't used in the Safe workspace.",
+    "hi": "सुरक्षित कार्यक्षेत्र में {plan} की कुछ सेटिंग्स का उपयोग नहीं होता।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-108": {
+    "en": "Sign in through Clauseo instead.",
+    "hi": "इसके बजाय Clauseo से साइन इन करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-109": {
+    "en": "Not used: {names}",
+    "hi": "उपयोग नहीं होता: {names}",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (provisional; Rohan batch review)"
   }
 }
