@@ -1,4 +1,4 @@
-//! The status parsers, table-driven: Claude's JSON and its detection and sign-in verdicts,
+//! The status parsers, table-driven: Claude's JSON and sign-in verdict, both detection verdicts,
 //! Codex's exit codes and `account/read`, and the sign-in-again text.
 
 use clauseo_codex_appserver::GetAccountResponse;
@@ -12,11 +12,10 @@ use crate::signin::{Found, LoginFrom, SigninState};
 /// The fake's signed-in line (the brief, "The fakes").
 const SIGNED_IN: &str = r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"test@example.com","subscriptionType":"max"}"#;
 
-fn status(auth_method: &str, api_provider: Option<&str>) -> ClaudeStatus {
+fn status(auth_method: &str) -> ClaudeStatus {
     ClaudeStatus {
         logged_in: auth_method != "none",
         auth_method: Some(auth_method.to_owned()),
-        api_provider: api_provider.map(str::to_owned),
         email: Some("lawyer@firm.example".to_owned()),
         subscription_type: Some("pro".to_owned()),
     }
@@ -30,7 +29,6 @@ fn claude_status_parses_with_unknown_fields_ignored() {
             Some(ClaudeStatus {
                 logged_in: true,
                 auth_method: Some("claude.ai".to_owned()),
-                api_provider: Some("firstParty".to_owned()),
                 email: Some("test@example.com".to_owned()),
                 subscription_type: Some("max".to_owned()),
             }),
@@ -59,77 +57,22 @@ fn claude_status_parses_with_unknown_fields_ignored() {
     }
 }
 
+/// Claude's detection is a stat: a regular login file is `LoginFound` with no email, anything
+/// else nothing found.
 #[test]
-fn claude_detection_finds_only_a_first_party_claude_ai_login() {
-    let found = |email: &str| SigninState::LoginFound {
-        from: LoginFrom::ClaudeCode,
-        email: Some(email.to_owned()),
-    };
-    let out = |found| SigninState::SignedOut { found };
-    let table = [
-        (
-            Some(0),
-            Some(status("claude.ai", Some("firstParty"))),
-            found("lawyer@firm.example"),
-        ),
-        (
-            Some(0),
-            Some(status("claude.ai", None)),
-            found("lawyer@firm.example"),
-        ),
-        (
-            Some(0),
-            Some(status("claude.ai", Some("bedrock"))),
-            out(Some(Found::ClaudeSettings)),
-        ),
-        (
-            Some(0),
-            Some(status("third_party", Some("vertex"))),
-            out(Some(Found::ClaudeSettings)),
-        ),
-        (
-            Some(0),
-            Some(status("api_key_helper", None)),
-            out(Some(Found::ClaudeSettings)),
-        ),
-        (
-            Some(0),
-            Some(status("api_key", None)),
-            out(Some(Found::ClaudeSettings)),
-        ),
-        (
-            Some(0),
-            Some(status("oauth_token", None)),
-            out(Some(Found::ClaudeSettings)),
-        ),
-        (
-            Some(0),
-            Some(status("none", None)),
-            out(Some(Found::NoLogin)),
-        ),
-        (
-            Some(1),
-            Some(status("claude.ai", Some("firstParty"))),
-            out(Some(Found::NoLogin)),
-        ),
-        (
-            None,
-            Some(status("claude.ai", Some("firstParty"))),
-            out(Some(Found::NoLogin)),
-        ),
-        (Some(0), None, out(Some(Found::NoLogin))),
-    ];
-    for (exit, status, want) in table {
-        assert_eq!(
-            claude_detection(exit, status.as_ref()),
-            want,
-            "{exit:?} {status:?}"
-        );
-    }
-    let parsed = parse_claude_status(SIGNED_IN);
+fn claude_detection_is_found_with_no_email_or_nothing() {
     assert_eq!(
-        claude_detection(Some(0), parsed.as_ref()),
-        found("test@example.com")
+        claude_detection(true),
+        SigninState::LoginFound {
+            from: LoginFrom::ClaudeCode,
+            email: None
+        }
+    );
+    assert_eq!(
+        claude_detection(false),
+        SigninState::SignedOut {
+            found: Some(Found::NoLogin)
+        }
     );
 }
 
@@ -140,14 +83,10 @@ fn claude_signed_in_reads_the_account_and_plan() {
         plan: Some("pro".to_owned()),
     };
     let table = [
-        (
-            Some(0),
-            Some(status("claude.ai", Some("firstParty"))),
-            Some(identity.clone()),
-        ),
-        (Some(0), Some(status("api_key", None)), Some(identity)),
-        (Some(0), Some(status("none", None)), None),
-        (Some(1), Some(status("claude.ai", None)), None),
+        (Some(0), Some(status("claude.ai")), Some(identity.clone())),
+        (Some(0), Some(status("api_key")), Some(identity)),
+        (Some(0), Some(status("none")), None),
+        (Some(1), Some(status("claude.ai")), None),
         (Some(0), None, None),
     ];
     for (exit, status, want) in table {

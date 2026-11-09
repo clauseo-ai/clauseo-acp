@@ -86,8 +86,8 @@ pub(crate) async fn read_as<T: Timer + Send + Sync>(
 }
 
 /// The arguments after `codex.js`: the store argument, the overrides, then `app-server`.
-pub(crate) fn app_server_args(kind: RunKind<'_>) -> Vec<OsString> {
-    let mut args = codex_store_args(kind);
+pub(crate) fn app_server_args() -> Vec<OsString> {
+    let mut args = codex_store_args();
     for set in APP_SERVER_OVERRIDES {
         args.extend([OsString::from("-c"), OsString::from(set)]);
     }
@@ -112,7 +112,7 @@ async fn account<T: Timer + Send + Sync>(
     if cancel.is_cancelled() {
         return None;
     }
-    let mut spec = job.spec(app_server_args(kind), job.env(kind, None), APP_SERVER_LIMIT);
+    let mut spec = job.spec(app_server_args(), job.env(kind, None), APP_SERVER_LIMIT);
     spec.cwd = cwd.to_path_buf();
     if let Some(home) = stopping::codex_home_of(&spec.env) {
         stopping::before_status(

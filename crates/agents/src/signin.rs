@@ -21,8 +21,9 @@
 //! - reads status output with the parsers in `crate::status`;
 //! - compares `auth.json` names with [`crate::same_file`], never by opening either.
 //!
-//! Clauseo never opens or reads a credential, and nothing here names a credential file: the
-//! test `tests/credential_names.rs` fails if any file under `src` does outside a comment.
+//! Clauseo never opens or reads a credential, and only `reuse.rs` names a credential file, to
+//! stat it: the test `tests/credential_names.rs` fails if any other file under `src` does
+//! outside a comment.
 
 use std::time::SystemTime;
 
@@ -41,7 +42,6 @@ pub(crate) mod marker;
 pub(crate) mod queue;
 pub(crate) mod reuse;
 pub(crate) mod run;
-pub(crate) mod scratch;
 pub(crate) mod shim;
 pub(crate) mod stopping;
 

@@ -1,15 +1,15 @@
 //! Done-when 2 of S18: Clauseo never names an agent's credential file in its code.
 //!
-//! The test fails if any file under `crates/agents/src` names Claude's credential file or one of
-//! Claude Code's config files in the lawyer's home (`.claude.json`, `.config.json`,
-//! `settings.json`, which can hold a key), or names
-//! Codex's login file outside `src/signin/reuse.rs`, anywhere but in a comment (string literals
+//! The test fails if any file under `crates/agents/src` names one of Claude Code's config files
+//! in the lawyer's home (`.claude.json`, `.config.json`, `settings.json`, which can hold a key),
+//! or names Claude's credential file or Codex's login file outside `src/signin/reuse.rs`,
+//! anywhere but in a comment (string literals
 //! count); if a literal spells a dot with an escape, or an `"auth"` literal or a `format!`
 //! holding `auth` has `json` or `with_extension` beside it (the name built in pieces); and if
 //! `reuse.rs` calls `File::open`, any `fs::read*`, `OpenOptions`, the crate's own `open_read`
 //! or `read_small`, any `read_…(`, `options(`, `open(`, `copy(` or `rename(`, or names `File`
-//! at all. `reuse.rs` (the hard link, the stat and the
-//! markers) may name Codex's file to link it and stat it, never to open it.
+//! at all. `reuse.rs` (the hard link, the stats and the markers) may name Codex's file to link
+//! it and stat it, and Claude's to stat it (detection), never to open either.
 //!
 //! The scan is defence in depth, not proof (decision 0046): it reads text, and code written to
 //! get around it can still pass. The file names are built with `concat!` below, so this file

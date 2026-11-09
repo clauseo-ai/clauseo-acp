@@ -193,7 +193,7 @@ async fn login<T: Timer + Send + Sync>(job: &SigninJob<T>, device: bool) -> Sign
         return job.failed(SigninCode::Failed);
     }
     let kind = RunKind::Own { home: &job.home };
-    let mut args = codex_store_args(kind);
+    let mut args = codex_store_args();
     args.push(OsString::from("login"));
     if device {
         args.push(OsString::from("--device-auth"));
@@ -459,7 +459,7 @@ pub(crate) async fn status_run<T: Timer + Send + Sync>(
     kind: RunKind<'_>,
     cwd: &Path,
 ) -> StatusSaid {
-    let mut args = codex_store_args(kind);
+    let mut args = codex_store_args();
     args.extend([OsString::from("login"), OsString::from("status")]);
     let limit = job.status_limit(STATUS_LIMIT);
     let mut spec = job.spec(args, job.env(kind, None), limit);
@@ -525,7 +525,7 @@ pub(crate) async fn sign_out<T: Timer + Send + Sync>(job: &SigninJob<T>) -> Opti
         return super::found::check(job).await;
     }
     let kind = RunKind::Own { home: &job.home };
-    let mut args = codex_store_args(kind);
+    let mut args = codex_store_args();
     args.push(OsString::from("logout"));
     let mut spec = job.spec(args, job.env(kind, None), LOGOUT_LIMIT);
     spec.on_stop = LOGOUT_STOP;

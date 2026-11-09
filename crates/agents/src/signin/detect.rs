@@ -1,125 +1,108 @@
 //! Detection (the brief, "Detection"): whether the lawyer already has a Claude Code or Codex
-//! login. It never writes into the lawyer's own Claude or Codex config.
+//! login. It starts no CLI, so it writes nothing into the lawyer's own config and sends nothing
+//! over the network: for each agent it is one stat (never an open) of the login file where the
+//! CLI keeps it by default (`super::reuse`, the one file that may name them).
 //!
-//! - Claude: `--cli auth status --json`, with `RunKind::Detect`'s environment: the run's own,
-//!   empty config folder (`super::scratch`, `CLAUDE_CONFIG_DIR`) and
-//!   `CLAUDE_SECURESTORAGE_CONFIG_DIR=""`, so the login is read from the lawyer's default store
-//!   and everything the CLI writes lands in that folder, which goes after the run. Clauseo never
-//!   opens the lawyer's global config or settings (they can hold a key), so the CLI does not see
-//!   them either: `LoginFound` has no email (the email lives in the global config; "Use it"'s
-//!   status under the reused environment gives what it can), and a login set up in the settings
-//!   is not seen. `HOME` is the lawyer's; cwd is an empty Clauseo folder, so no project
-//!   settings apply: `<data_dir>/agents/signin/detect`. "Exit 0 with `authMethod` `claude.ai` is
-//!   reusable. Any other signed-in `authMethod` … is a login set up in the lawyer's
-//!   `~/.claude/settings.json`: not reusable, `found: ClaudeSettings`"
-//!   (`status::claude_detection`).
-//! - Codex: no CLI runs (its `login status` writes `~/.codex/tmp/arg0` even when signed out,
-//!   and `app-server` more). A stat (never an open) of the lawyer's login file
-//!   (`reuse::lawyer_login_present`, a regular file only, never a link) decides:
-//!   `status::codex_detection`. When the lawyer's environment sets `CODEX_HOME`, their Codex keeps
-//!   its login there, not in `~/.codex`, where "Use it", the split check and the guard look; so
-//!   nothing is found ([`codex_home_moved`]).
+//! Why no CLI: Claude Code's `auth status` writes into the lawyer's folders, even offline. On an
+//! expired token it takes and removes its refresh locks (`~/.claude/.oauth_refresh.lock`, an
+//! `.owner` record written through a temp file and a rename, and `~/.claude.lock`), and online
+//! the refresh rewrites `~/.claude/.credentials.json`; with no `CLAUDE_CONFIG_DIR` it also
+//! rewrites `~/.claude.json` and writes a backup the first time a version meets the home. Codex's
+//! `login status` writes `~/.codex/tmp/arg0` even when signed out. (Decision 0046, "Detection".)
+//!
+//! - Claude: `~/.claude/.credentials.json` (`%USERPROFILE%\.claude` on Windows) a regular file
+//!   is `LoginFound { from: ClaudeCode, email: None }`; anything else (missing, a link, a folder)
+//!   is `SignedOut { found: NoLogin }`. macOS keeps the login in the Keychain, so nothing is
+//!   found there. With `CLAUDE_CONFIG_DIR` set in the lawyer's environment nothing is found: their
+//!   Claude Code keeps its login elsewhere, and "Use it" reads the default store only
+//!   (`CLAUDE_SECURESTORAGE_CONFIG_DIR=""`).
+//! - Codex: `~/.codex/auth.json` a regular file is `LoginFound { from: Codex, email: None }`, else
+//!   `SignedOut { found: NoLogin }`. With `CODEX_HOME` set in the lawyer's environment nothing is
+//!   found: "Use it", the split check and the guard address `~/.codex` only.
+//!
+//! No email, plan or account comes from detection. "Use it" confirms through the agent's own
+//! status under the reused environment (the lawyer's explicit choice, so a refresh write there is
+//! theirs), which gives the plan and what email it reports; the account itself is enforced by
+//! R20's session-start identity check (#554).
 //!
 //! Detection never starts reuse: it gives `LoginFound`, and only "Use it" reuses.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
-use std::path::PathBuf;
-
-use clauseo_process::Timer;
+use std::path::Path;
 
 use crate::cancel::Cancel;
-use crate::signin::SigninState;
-use crate::signin::env::RunKind;
 use crate::signin::job::SigninJob;
-use crate::signin::scratch::Scratch;
-use crate::signin::{claude, reuse};
+use crate::signin::{SigninState, reuse};
 use crate::status::{Identity, claude_detection, codex_detection};
 
-/// What detection found: the state, and for a reusable login the account and plan the CLI's own
-/// status gave.
+/// What detection found: the state, and an account it never knows (kept for the callers'
+/// shape: always empty).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Detected {
     /// `LoginFound`, or `SignedOut` with what was seen.
     pub(crate) state: SigninState,
-    /// The plan behind a reusable Claude login (empty otherwise, and always for Codex); never an
-    /// email.
+    /// Always empty: detection reads no email or plan.
     pub(crate) identity: Identity,
 }
 
-/// The empty Clauseo folder detection runs in, made if missing.
-fn folder<T>(job: &SigninJob<T>) -> Option<PathBuf> {
-    let folder = job
-        .config
-        .data_dir
-        .join("agents")
-        .join("signin")
-        .join("detect");
-    crate::write::create_private_dirs_under(&job.config.data_dir, &folder).ok()?;
-    Some(folder)
+/// Claude's detection, a stat alone: see the module docs. `None` only when cancelled.
+pub(crate) fn claude<T>(job: &SigninJob<T>, cancel: &Cancel) -> Option<Detected> {
+    detected(
+        job,
+        cancel,
+        "CLAUDE_CONFIG_DIR",
+        reuse::claude_login_present,
+    )
+    .map(|present| found(claude_detection(present)))
 }
 
-/// Claude's detection; `None` when it could not tell (no start, killed past 5 s, cancelled, or
-/// no config folder of its own could be made: it never runs on the lawyer's).
-pub(crate) async fn claude<T: Timer + Send + Sync>(
+/// Codex's detection, a stat alone: see the module docs. `None` only when cancelled.
+pub(crate) fn codex<T>(job: &SigninJob<T>, cancel: &Cancel) -> Option<Detected> {
+    detected(job, cancel, "CODEX_HOME", reuse::lawyer_login_present)
+        .map(|present| found(codex_detection(present)))
+}
+
+/// Whether the agent's login file is there by `stat` (in the lawyer's home), unless the
+/// lawyer's environment moves the agent's folder with `moved_by`; `None` when cancelled.
+fn detected<T>(
     job: &SigninJob<T>,
     cancel: &Cancel,
-) -> Option<Detected> {
-    let folder = folder(job)?;
-    // Dropped at the end of this function, or with its future on a timeout or cancel: the
-    // folder goes then.
-    let scratch = Scratch::create(&job.config.data_dir, &job.ticket.agent, job.now()).ok()?;
-    let kind = RunKind::Detect {
-        config: scratch.path(),
-    };
-    let (code, parsed) = claude::status_run(job, cancel, kind, &folder).await?;
-    drop(scratch);
-    let parsed = parsed.map(|mut parsed| {
-        // Never an email: the CLI keeps it in the lawyer's global config, which this run does
-        // not see; whatever a CLI printed here would come from somewhere else.
-        parsed.email = None;
-        parsed
-    });
-    let state = claude_detection(code, parsed.as_ref());
-    let identity = match (&state, parsed) {
-        (SigninState::LoginFound { .. }, Some(parsed)) => Identity {
-            email: None,
-            plan: parsed.subscription_type,
-        },
-        _ => Identity::default(),
-    };
-    Some(Detected { state, identity })
-}
-
-/// Codex's detection, a stat alone (no run, so nothing to await): see the module docs. `None`
-/// only when cancelled.
-pub(crate) fn codex<T>(job: &SigninJob<T>, cancel: &Cancel) -> Option<Detected> {
+    moved_by: &str,
+    stat: fn(&Path) -> bool,
+) -> Option<bool> {
     if cancel.is_cancelled() {
         return None;
     }
-    let present = !codex_home_moved(&job.config.signin.base_env, cfg!(windows))
-        && job
-            .config
-            .signin
-            .lawyer_home()
-            .is_some_and(|lawyer| reuse::lawyer_login_present(&lawyer));
-    Some(Detected {
-        state: codex_detection(present),
-        identity: Identity::default(),
-    })
+    let env = &job.config.signin.base_env;
+    Some(
+        !folder_moved(env, moved_by, cfg!(windows))
+            && job
+                .config
+                .signin
+                .lawyer_home()
+                .is_some_and(|lawyer| stat(&lawyer)),
+    )
 }
 
-/// Whether the lawyer's environment `env` sets `CODEX_HOME` (not empty; names in any case on
-/// Windows, as Windows reads them). Their Codex then keeps its login under that folder, while
-/// "Use it" links, and the split check and guard compare, `~/.codex`'s file only; so detection
+fn found(state: SigninState) -> Detected {
+    Detected {
+        state,
+        identity: Identity::default(),
+    }
+}
+
+/// Whether the lawyer's environment `env` sets `name` (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) to a
+/// folder (not empty; names in any case on Windows, as Windows reads them). Their CLI then keeps
+/// its login under that folder, while "Use it" takes the default one only; so detection
 /// reports nothing found rather than offer a login "Use it" would not take.
-pub(crate) fn codex_home_moved(env: &BTreeMap<OsString, OsString>, windows: bool) -> bool {
-    env.iter().any(|(name, value)| {
-        let name = name.to_string_lossy();
+pub(crate) fn folder_moved(env: &BTreeMap<OsString, OsString>, name: &str, windows: bool) -> bool {
+    env.iter().any(|(key, value)| {
+        let key = key.to_string_lossy();
         let named = if windows {
-            name.eq_ignore_ascii_case("CODEX_HOME")
+            key.eq_ignore_ascii_case(name)
         } else {
-            name == "CODEX_HOME"
+            key == name
         };
         named && !value.is_empty()
     })

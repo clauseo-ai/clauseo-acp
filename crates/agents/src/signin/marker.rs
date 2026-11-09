@@ -3,7 +3,10 @@
 //!
 //! - `login-source`: "`reused` with the accepted email, or `own`; no secret", "written on \"Use
 //!   it\" or when Clauseo's sign-in ends". The text is one line, `own`, or two, `reused` and
-//!   then the accepted email (the second line is left out when the status reported none). For
+//!   then the accepted email (the second line is left out when the status reported none).
+//!   Detection is a stat and reports no email (`super::detect`), so a Claude reuse records
+//!   none and a Codex one records what Codex's own confirmation gave; the record ties a reuse
+//!   to no account, and R20's session-start identity check (#554) is what enforces it. For
 //!   Codex "a missing file with a home `auth.json` is `reused`": that rule is `signin/reuse.rs`'s,
 //!   which may name the file.
 //! - `no-reuse`: written by "Sign in with a different account" and "Stop using it here", and
@@ -35,7 +38,8 @@ pub(crate) enum LoginSource {
     Own,
     /// The lawyer's own login, reused after "Use it", with the email they accepted.
     Reused {
-        /// The accepted email, from the agent's own status output.
+        /// The email recorded at "Use it": Codex's confirmed one, `None` for Claude (detection
+        /// reports none). Not an account check: see the module docs.
         email: Option<String>,
     },
 }
