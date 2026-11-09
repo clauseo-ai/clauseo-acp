@@ -1,12 +1,13 @@
-//! The installer acts on the previous install folder only when `hooks.nsh`'s `CLAUSEO_PREVIOUS_DIR_OK` accepts it: an absolute path on a fixed drive,
-//! equal to the default folder or the uninstall key's `InstallLocation`, holding a regular
-//! `uninstall.exe`, and per machine with a chain only administrators can change. The template's
-//! The folder is the vendor key's (`SHCTX\${MANUPRODUCTKEY}`, default value) per user; per machine
-//! it is the HKLM uninstall key's `InstallLocation`, else the default, and a vendor key that
-//! differs is ignored and said. The template's blocks `reinstall-guard` and `restore-location-guard` run the check right before each use: a
-//! refused folder starts no old uninstaller and leaves `$INSTDIR` at the default, with one details
-//! line. The native calls (drive type, attributes, the chain) are faked by path here; the Windows
-//! VM runs them for real.
+//! The installer acts on the previous install folder only when `hooks.nsh`'s
+//! `CLAUSEO_PREVIOUS_DIR_OK` accepts it: an absolute path on a fixed drive, equal to the default
+//! folder or the uninstall key's `InstallLocation`, holding a regular `uninstall.exe`, and per
+//! machine with a chain only administrators can change. The folder is the vendor key's
+//! (`SHCTX\${MANUPRODUCTKEY}`, default value) per user; per machine it is the HKLM uninstall
+//! key's `InstallLocation`, else the default, and a vendor key that differs is ignored and said.
+//! The template's blocks `reinstall-guard` and `restore-location-guard` run the check right
+//! before each use: a refused folder starts no old uninstaller and leaves `$INSTDIR` at the
+//! default, with one details line. The native calls (drive type, attributes, the chain) are
+//! faked by path here; the Windows VM runs them for real.
 
 use std::collections::HashMap;
 
@@ -16,37 +17,38 @@ use super::template::{TEMPLATE, block_named, split_blocks};
 
 const PROGRAM_FILES: &str = r"C:\Program Files";
 const LOCAL_APP_DATA: &str = r"C:\Users\me\AppData\Local";
-const MACHINE_DEFAULT: &str = r"C:\Program Files\Clauseo";
-const USER_DEFAULT: &str = r"C:\Users\me\AppData\Local\Clauseo";
+pub(super) const MACHINE_DEFAULT: &str = r"C:\Program Files\Clauseo";
+pub(super) const USER_DEFAULT: &str = r"C:\Users\me\AppData\Local\Clauseo";
 const UNINSTKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Clauseo";
 const MANUPRODUCTKEY: &str = r"Software\Clauseo\Clauseo";
-const OTHER: &str = r"D:\Apps\Clauseo";
+pub(super) const OTHER: &str = r"D:\Apps\Clauseo";
 /// What `UninstallString` names unless a test says otherwise: a program that isn't the folder's.
 const OTHER_PROGRAM: &str = r#""C:\Users\other\other.exe""#;
 /// `FILE_ATTRIBUTE_ARCHIVE`, a plain file; a folder; a reparse point (a link to a file).
-const FILE: i64 = 0x20;
-const FOLDER: i64 = 0x10;
-const LINK: i64 = 0x420;
+pub(super) const FILE: i64 = 0x20;
+pub(super) const FOLDER: i64 = 0x10;
+pub(super) const LINK: i64 = 0x420;
 
 /// What the fake machine holds: the install mode, the registry's previous folder and
 /// `InstallLocation` (as written, quotes and all), drives that aren't fixed, the attributes of
-/// each `uninstall.exe` there is, and the `uninstall.exe` paths whose chain someone else can change.
+/// each `uninstall.exe` there is, and the `uninstall.exe` paths whose chain someone else can
+/// change.
 #[derive(Clone)]
-struct World {
-    mode: &'static str,
-    previous: Option<&'static str>,
+pub(super) struct World {
+    pub(super) mode: &'static str,
+    pub(super) previous: Option<&'static str>,
     install_location: Option<String>,
     /// The uninstall key's `UninstallString`.
     uninstall_string: &'static str,
-    not_fixed: Vec<&'static str>,
-    uninstallers: Vec<(String, i64)>,
-    open_chains: Vec<String>,
+    pub(super) not_fixed: Vec<&'static str>,
+    pub(super) uninstallers: Vec<(String, i64)>,
+    pub(super) open_chains: Vec<String>,
 }
 
 impl World {
     /// A per-`mode` machine whose previous folder is `previous`, with a regular `uninstall.exe` in
     /// it, a fixed drive and a closed chain, and no `InstallLocation`.
-    fn new(mode: &'static str, previous: &'static str) -> Self {
+    pub(super) fn new(mode: &'static str, previous: &'static str) -> Self {
         Self {
             mode,
             previous: Some(previous),
@@ -58,7 +60,7 @@ impl World {
         }
     }
 
-    fn located(mut self, folder: &str) -> Self {
+    pub(super) fn located(mut self, folder: &str) -> Self {
         self.install_location = Some(format!("\"{folder}\""));
         self
     }
@@ -72,12 +74,12 @@ impl World {
     }
 }
 
-fn exe(folder: &str) -> String {
+pub(super) fn exe(folder: &str) -> String {
     format!(r"{}\uninstall.exe", folder.trim_end_matches('\\'))
 }
 
 /// The code lines of `name` in `code`, `!macro` and `!macroend` left out.
-fn macro_body<'a>(code: &'a [String], name: &str) -> &'a [String] {
+pub(super) fn macro_body<'a>(code: &'a [String], name: &str) -> &'a [String] {
     let start = code
         .iter()
         .position(|line| line == &format!("!macro {name}"))
@@ -97,7 +99,7 @@ fn table(out: &str, default: &str, input: &str, rows: &[(String, String)]) -> Ve
     parse_all(&lines)
 }
 
-fn mode_defines(mode: &str) -> HashMap<String, String> {
+pub(super) fn mode_defines(mode: &str) -> HashMap<String, String> {
     let mut defines = defines(&hook_code());
     for (name, value) in [
         ("INSTALLMODE", mode),
@@ -113,7 +115,7 @@ fn mode_defines(mode: &str) -> HashMap<String, String> {
 }
 
 /// Sets the fakes from `world`: the registry, and the native calls' answers.
-fn load(machine: &mut Machine, world: &World) {
+pub(super) fn load(machine: &mut Machine, world: &World) {
     let previous = world.previous.map(|p| vec![("", Value::Text(p))]);
     machine.keys.insert(
         format!(r"SHCTX\{MANUPRODUCTKEY}"),
@@ -153,7 +155,7 @@ fn load(machine: &mut Machine, world: &World) {
 
 /// A machine for `world`, the guard's macros real, `$INSTDIR` the template's default, and every
 /// register but `$4` seeded so a test can see it kept.
-fn machine(world: &World) -> Machine {
+pub(super) fn machine(world: &World) -> Machine {
     let defines = mode_defines(world.mode);
     let code = hook_code();
     let mut machine = Machine::new(defines.clone(), None);
@@ -221,7 +223,7 @@ const EXEC: &str = "ExecWait '$R1' $0";
 
 /// `RestorePreviousInstallLocation` as the template runs it: the read, the block, then
 /// `StrCmp $4 "" +2 0` / `StrCpy $INSTDIR $4` (a jump the interpreter doesn't take, so run here).
-fn restore(machine: &mut Machine, mode: &str) {
+pub(super) fn restore(machine: &mut Machine, mode: &str) {
     let lines = function("RestorePreviousInstallLocation");
     let read_at = line_with(&lines, &[READ_PREVIOUS]);
     assert_eq!(lines[read_at + 1], "; >>> clauseo: restore-location-guard");
@@ -244,7 +246,7 @@ fn restore(machine: &mut Machine, mode: &str) {
 /// read, the block (the guard, then the command into $R1), then (unless it jumped to
 /// `reinst_done`) the template's own appends and start. `/UPDATE` and `/P` aren't set here,
 /// so their two `${IfThen}` lines append nothing and are only checked to be there.
-fn reinstall(machine: &mut Machine, mode: &str) {
+pub(super) fn reinstall(machine: &mut Machine, mode: &str) {
     let lines = function("PageLeaveReinstall");
     let read_at = line_with(&lines, &[READ_PREVIOUS]);
     assert_eq!(lines[read_at + 1], "; >>> clauseo: reinstall-guard");
@@ -334,13 +336,13 @@ fn refused_said(world: &World, told: bool, mismatch: bool) {
     );
 }
 
-fn refused(world: &World) {
+pub(super) fn refused(world: &World) {
     refused_said(world, true, false);
 }
 
 /// The command the old uninstaller is started with: per machine the accepted folder's own
 /// uninstall.exe, per user `UninstallString`, then the folder.
-fn command(world: &World, folder: &str) -> String {
+pub(super) fn command(world: &World, folder: &str) -> String {
     if world.mode == "perMachine" {
         format!("\"{folder}\\uninstall.exe\" _?={folder}")
     } else {
@@ -360,7 +362,7 @@ fn accepted_said(world: &World, folder: &str, mismatch: bool) {
     );
 }
 
-fn accepted(world: &World, folder: &str) {
+pub(super) fn accepted(world: &World, folder: &str) {
     accepted_said(world, folder, false);
 }
 
@@ -445,50 +447,6 @@ fn only_x64_or_arm64_builds_of_the_two_built_modes_compile_the_check() {
 }
 
 #[test]
-fn a_unc_or_device_path_is_refused_even_as_install_location() {
-    for path in [
-        r"\\server\share\Clauseo",
-        r"\\?\C:\Program Files\Clauseo",
-        r"\\.\C:\Program Files\Clauseo",
-        r"C:\Program Files\Clauseo\..\..\Users\other",
-        r"C:\Program Files\.\Clauseo",
-        r"C:\Program Files/Clauseo",
-        r"Program Files\Clauseo",
-        r"1:\Clauseo",
-    ] {
-        refused(&World::new("perMachine", path).located(path));
-    }
-}
-
-#[test]
-fn a_folder_on_a_drive_that_isnt_fixed_is_refused() {
-    let mut world = World::new("perMachine", r"E:\Clauseo").located(r"E:\Clauseo");
-    world.not_fixed.push(r"E:\");
-    refused(&world);
-    // The same folder on a fixed drive is accepted: the drive is what refused it.
-    world.not_fixed.clear();
-    accepted(&world, r"E:\Clauseo");
-}
-
-#[test]
-fn a_folder_without_a_regular_uninstaller_is_refused() {
-    let mut world = World::new("perMachine", MACHINE_DEFAULT);
-    world.uninstallers.clear();
-    refused(&world);
-    for attributes in [FOLDER, LINK] {
-        world.uninstallers = vec![(exe(MACHINE_DEFAULT), attributes)];
-        refused(&world);
-    }
-}
-
-#[test]
-fn a_folder_whose_chain_others_can_change_is_refused_per_machine() {
-    let mut world = World::new("perMachine", MACHINE_DEFAULT);
-    world.open_chains.push(exe(MACHINE_DEFAULT));
-    refused(&world);
-}
-
-#[test]
 fn the_default_folder_with_everything_right_is_accepted_and_uninstalled_in_place() {
     accepted(&World::new("perMachine", MACHINE_DEFAULT), MACHINE_DEFAULT);
     // A vendor key differing only in case and one trailing backslash is no mismatch; the folder
@@ -533,52 +491,6 @@ fn no_previous_folder_is_a_fresh_install_that_says_nothing() {
         world.uninstallers.clear();
         refused_said(&world, false, false);
     }
-}
-
-#[test]
-fn each_use_checks_again_so_a_change_between_them_is_still_caught() {
-    // The folder passes when $INSTDIR is set from it in .onInit, then its chain opens before the
-    // reinstall page starts the old uninstaller: the second use checks again and refuses, and
-    // $INSTDIR goes back to the default.
-    let world = World::new("perMachine", OTHER).located(OTHER);
-    let mut machine = machine(&world);
-    restore(&mut machine, world.mode);
-    assert_eq!(machine.vars["$INSTDIR"], OTHER);
-    assert_eq!(machine.vars["$ClauseoPreviousIgnored"], "0");
-    let mut changed = world.clone();
-    changed.open_chains.push(exe(OTHER));
-    load(&mut machine, &changed);
-    reinstall(&mut machine, world.mode);
-    assert_eq!(machine.said, ["Goto reinst_done"]);
-    assert_eq!(machine.vars["$INSTDIR"], MACHINE_DEFAULT);
-    assert_eq!(machine.vars["$ClauseoPreviousIgnored"], "1");
-    // Per user, the vendor key swapped after the first use is caught the same way.
-    let world = World::new("currentUser", USER_DEFAULT);
-    let mut machine = super::previous_dir::machine(&world);
-    restore(&mut machine, world.mode);
-    assert_eq!(machine.vars["$INSTDIR"], USER_DEFAULT);
-    let mut swapped = world.clone();
-    swapped.previous = Some(r"C:\Users\other\x");
-    swapped.uninstallers.push((exe(r"C:\Users\other\x"), FILE));
-    load(&mut machine, &swapped);
-    reinstall(&mut machine, world.mode);
-    assert_eq!(machine.said, ["Goto reinst_done"]);
-    // Per machine, a vendor key swapped after the first use changes nothing: InstallLocation
-    // is still the folder used, and the swap is said.
-    let world = World::new("perMachine", OTHER).located(OTHER);
-    let mut machine = super::previous_dir::machine(&world);
-    restore(&mut machine, world.mode);
-    let mut swapped = world.clone();
-    swapped.previous = Some(r"C:\Users\other\x");
-    swapped.uninstallers.push((exe(r"C:\Users\other\x"), FILE));
-    load(&mut machine, &swapped);
-    machine.said.clear();
-    reinstall(&mut machine, world.mode);
-    assert_eq!(
-        machine.said,
-        [format!("ExecWait {}", command(&world, OTHER))]
-    );
-    assert_eq!(machine.vars["$ClauseoPreviousKeyMismatch"], "1");
 }
 
 #[test]
@@ -633,49 +545,6 @@ fn the_template_reads_the_previous_folder_only_where_a_guard_follows() {
     );
     let done = lines.iter().position(|l| l == "reinst_done:").unwrap();
     assert!(box_at < done);
-}
-
-#[test]
-fn the_native_checks_read_the_path_itself_and_say_no_box() {
-    let code = hook_code();
-    assert_eq!(
-        macro_body(&code, "CLAUSEO_DRIVE_TYPE"),
-        ["System::Call 'kernel32::GetDriveTypeW(w r1) i .r2'"]
-    );
-    assert_eq!(
-        macro_body(&code, "CLAUSEO_FILE_ATTRIBUTES"),
-        ["System::Call 'kernel32::GetFileAttributesW(w r1) i .r2'"]
-    );
-    assert_eq!(
-        preprocess(
-            macro_body(&code, "CLAUSEO_PREVIOUS_UNINSTALLER"),
-            &mode_defines("perMachine")
-        ),
-        ["StrCpy $R1 '\"$4\\uninstall.exe\"'"]
-    );
-    // The check, the guard and the details line show no box and stop nothing.
-    for name in [
-        "CLAUSEO_INSTALL_LOCATION",
-        "CLAUSEO_PREVIOUS_DIR_OK",
-        "CLAUSEO_PREVIOUS_DIR_GUARD",
-        "NSIS_HOOK_PREINSTALL",
-    ] {
-        for line in macro_body(&code, name) {
-            for word in ["MessageBox", "Abort", "Quit", "Goto", "Exec"] {
-                assert!(!line.contains(word), "{name}: {line}");
-            }
-        }
-    }
-    // What the check borrows it gives back, in reverse, $4 (its answer) aside.
-    let body = macro_body(&code, "CLAUSEO_PREVIOUS_DIR_OK");
-    let pushed: Vec<&str> = body
-        .iter()
-        .filter_map(|l| l.strip_prefix("Push "))
-        .collect();
-    let mut popped: Vec<&str> = body.iter().filter_map(|l| l.strip_prefix("Pop ")).collect();
-    popped.reverse();
-    assert_eq!(pushed, popped);
-    assert!(!pushed.contains(&"$4"));
 }
 
 #[test]

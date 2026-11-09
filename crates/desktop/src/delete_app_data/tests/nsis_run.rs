@@ -226,9 +226,9 @@ pub(super) fn lines(nodes: &[Node]) -> Vec<&str> {
 
 /// The machine: the defines, variables, error flag and stack, the record under
 /// `HKLM\SOFTWARE\Clauseo\Sandbox` and the lawyer's key under `HKCU\Software\Clauseo`, whether
-/// other keys a test sets (`keys`, by root and expanded key), whether the run is silent, the user's SID for `CLAUSEO_OWN_SID`, the macros it runs inline (and the
-/// record each leaves), what it said (`DetailPrint`, `MessageBox`, `SetErrorLevel`), and which
-/// stubbed macros it reached.
+/// other keys a test sets (`keys`, by root and expanded key), whether the run is silent, the
+/// user's SID for `CLAUSEO_OWN_SID`, the macros it runs inline (and the record each leaves), what
+/// it said (`DetailPrint`, `MessageBox`, `SetErrorLevel`), and which stubbed macros it reached.
 pub(super) struct Machine {
     pub(super) defines: HashMap<String, String>,
     pub(super) vars: HashMap<String, String>,
