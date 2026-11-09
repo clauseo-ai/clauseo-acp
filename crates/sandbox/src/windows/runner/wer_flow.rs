@@ -19,8 +19,9 @@
 //! over these values. One that keeps WER on (`Disabled` = 0) doesn't refuse the launch: it is
 //! logged, and the job's limit and the sweeps are what remain (`firm-it.md`).
 //!
-//! A temporary profile refuses too ([`quiet`]). Set-up's repair takes a key that shuts the
-//! administrators out for them before deleting it ([`Registry::take`]).
+//! A temporary profile refuses too ([`quiet`]). Set-up's repair takes the WER key, when it shuts
+//! the administrators out, for them and then deletes it ([`Registry::take`]); it never takes or
+//! changes a parent on the way, and one it can't open fails the repair.
 //!
 //! Another key or value joins by a row in [`WER_SETTINGS`].
 
@@ -289,8 +290,26 @@ pub(crate) fn repair_one<R: Registry>(
     };
     let last = setting.path.len().saturating_sub(1);
     for (at, &part) in setting.path.iter().enumerate() {
-        let Some(key) = open_for_delete(registry, &parent, part)? else {
-            return Ok(false);
+        let key = match registry.open(Some(&parent), part, How::Delete) {
+            Ok(Some(key)) => key,
+            Ok(None) => return Ok(false),
+            // The WER key itself shuts the administrators out: it is taken for them only to be
+            // deleted, since a key left theirs alone would refuse every launch.
+            Err(ACCESS_DENIED) if at == last => {
+                registry
+                    .take(&parent, part)
+                    .map_err(|code| WerError::Take { part, code })?;
+                let taken = registry
+                    .open(Some(&parent), part, How::Delete)
+                    .map_err(|code| WerError::Open { part, code })?
+                    .ok_or(WerError::Open { part, code: 2 })?;
+                registry
+                    .delete(taken)
+                    .map_err(|code| WerError::Delete { part, code })?;
+                return Ok(true);
+            }
+            // A parent on the way is never taken or changed: set-up fails, naming it.
+            Err(code) => return Err(WerError::Open { part, code }),
         };
         let link = registry
             .is_link(&key)
@@ -310,26 +329,6 @@ pub(crate) fn repair_one<R: Registry>(
         parent = key;
     }
     Ok(false)
-}
-
-/// Opens `part` under `parent` to delete it. One that shuts the administrators out (5) is taken
-/// for them first ([`Registry::take`]) and opened again.
-fn open_for_delete<R: Registry>(
-    registry: &mut R,
-    parent: &R::Key,
-    part: &'static str,
-) -> Result<Option<R::Key>, WerError> {
-    match registry.open(Some(parent), part, How::Delete) {
-        Err(ACCESS_DENIED) => {
-            registry
-                .take(parent, part)
-                .map_err(|code| WerError::Take { part, code })?;
-            registry
-                .open(Some(parent), part, How::Delete)
-                .map_err(|code| WerError::Open { part, code })
-        }
-        opened => opened.map_err(|code| WerError::Open { part, code }),
-    }
 }
 
 /// `ERROR_ACCESS_DENIED`.

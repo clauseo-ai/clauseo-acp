@@ -2072,10 +2072,12 @@ process with the lawyer's rights read memory the agent controls. Two controls cl
   - **The repair.** Set-up's logon of each pool user, with the profile loaded (`setup/logon.rs`),
     deletes a link on the way to the WER key, or a WER key that is a link or fails the security
     check (`wer_flow::repair`). It deletes a link as itself (`NtDeleteKey` on the handle opened
-    with `REG_OPTION_OPEN_LINK`) and never deletes through one, since set-up runs elevated. A key
-    whose DACL shuts the administrators out is first made theirs: `SeTakeOwnershipPrivilege`,
-    enabled for that call only, makes them its owner, and its DACL becomes administrators and
-    `SYSTEM` with full control. The next launch makes the key again. Without this, a planted link
+    with `REG_OPTION_OPEN_LINK`) and never deletes through one, since set-up runs elevated. A WER key
+    whose DACL shuts the administrators out is made theirs and then always deleted:
+    `SeTakeOwnershipPrivilege`, enabled for that call only, makes them its owner, and its DACL
+    becomes administrators and `SYSTEM` with full control. A parent on the way (`Software`,
+    `Microsoft`, `Windows`) is never taken or changed. If set-up can't open one, it fails and names
+    the key. The next launch makes the key again. Without this, a planted link
     would refuse every later launch with no way out.
   - **Temporary profiles.** A temporary profile (the `ProfileList` `State` flag
     `PROFILE_TEMP_ASSIGNED`, or a `TEMP` or `TEMP.*` folder, as set-up's own check reads them)

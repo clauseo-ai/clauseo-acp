@@ -500,3 +500,35 @@ fn set_ups_repair_takes_a_key_that_shuts_the_administrators_out_then_deletes_it(
     assert_eq!(fake.deleted, [KEY]);
     assert_eq!(quiet(&mut fake, &pool(), &home()), Ok(vec![]));
 }
+
+#[test]
+fn set_ups_repair_never_takes_a_parent_that_shuts_the_administrators_out() {
+    let mut fake = Fake::loaded();
+    quiet(&mut fake, &pool(), &home()).unwrap();
+    let software = format!("{POOL}\\Software");
+    let shut = descriptor(&[ace(ALLOWED, 0, 0x000F_003F, POOL)], None);
+    let node = fake.keys.get_mut(&software).unwrap();
+    node.deny_admins = true;
+    node.security = shut.clone();
+    assert_eq!(
+        repair(&mut fake, &pool()),
+        Err(WerError::Open {
+            part: "Software",
+            code: ACCESS_DENIED
+        })
+    );
+    assert_eq!(fake.keys[&software].security, shut);
+    assert!(fake.keys[&software].deny_admins);
+    assert_eq!(fake.taken, Vec::<String>::new());
+    assert_eq!(fake.deleted, Vec::<String>::new());
+}
+
+#[test]
+fn set_ups_repair_deletes_a_wer_key_it_had_to_take_even_when_safe() {
+    let mut fake = Fake::loaded();
+    quiet(&mut fake, &pool(), &home()).unwrap();
+    fake.keys.get_mut(KEY).unwrap().deny_admins = true;
+    assert_eq!(repair(&mut fake, &pool()), Ok(true));
+    assert_eq!(fake.taken, [KEY]);
+    assert_eq!(fake.deleted, [KEY]);
+}
