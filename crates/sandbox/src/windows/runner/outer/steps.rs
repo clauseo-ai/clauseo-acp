@@ -5,14 +5,14 @@
 use zeroize::Zeroizing;
 
 use super::super::RunExit;
-use super::super::frame::{InnerGo, InnerReady, read_frame, write_frame};
-use super::super::inner_user::{TokenSeen, check_full, check_inner_user};
+use super::super::frame::{InnerGo, write_frame};
+use super::super::inner_user::{READY_WAIT, TokenSeen, check_full, check_inner_user, ready_within};
 use super::super::spawn::{Process, assign, log_on, resume, telemetry_user};
 use super::super::start::Steps;
 use super::super::station::StationDesktop;
 use super::{FIRST_CONNECT, Failure, accept, inner_exit, logon_failure, os};
 use crate::windows::acl::object::Handle;
-use crate::windows::pipe::os::ServerPipe;
+use crate::windows::pipe::os::{ServerPipe, Until};
 use crate::windows::sids::Sid;
 use crate::windows::token::os::shut_object;
 use crate::windows::token::{runner_process_sddl, runner_thread_sddl};
@@ -97,9 +97,9 @@ impl Steps for Start<'_> {
         if let Err(failure) = accept(self.ctl, inner, FIRST_CONNECT) {
             return Err(inner_exit(inner).unwrap_or(failure));
         }
-        let ready: InnerReady = read_frame(self.ctl).map_err(|e| {
-            inner_exit(inner)
-                .unwrap_or_else(|| Failure::new(RunExit::Logon, os("the inner runner's ready", &e)))
+        // Bounded (`READY_WAIT`): an inner that never says ready is killed (`start.rs`).
+        let ready = ready_within(Until::new(self.ctl, READY_WAIT)).map_err(|(exit, message)| {
+            inner_exit(inner).unwrap_or_else(|| Failure::new(exit, message))
         })?;
         let (user, logon) = inner.user_and_logon().map_err(|e| {
             Failure::new(

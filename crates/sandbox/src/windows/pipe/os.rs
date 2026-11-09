@@ -21,6 +21,7 @@ use windows::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, PIPE_READMODE_BYTE,
     PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT,
 };
+use windows::Win32::System::SystemInformation::GetTickCount64;
 use windows::Win32::System::Threading::{CreateEventW, WaitForMultipleObjects};
 use windows::core::HSTRING;
 
@@ -127,6 +128,67 @@ impl ServerPipe {
         unsafe { GetNamedPipeClientProcessId(self.handle.0, &raw mut pid) }
             .map_err(|error| os_error(&error))?;
         Ok(pid)
+    }
+}
+
+/// A pipe read with a deadline (`GetTickCount64` milliseconds): a read still pending then is
+/// cancelled and fails `TimedOut`, however many reads a frame takes. For the outer's wait for
+/// the inner's ready (`runner/outer/steps.rs`).
+pub(in crate::windows) struct Until<'a> {
+    pipe: &'a ServerPipe,
+    deadline: u64,
+}
+
+impl Until<'_> {
+    /// `pipe`, read for `within` from now.
+    pub(in crate::windows) fn new(pipe: &ServerPipe, within: Duration) -> Until<'_> {
+        let within = u64::try_from(within.as_millis()).unwrap_or(u64::MAX);
+        // SAFETY: GetTickCount64 only reads the clock.
+        let now = unsafe { GetTickCount64() };
+        Until {
+            pipe,
+            deadline: now.saturating_add(within),
+        }
+    }
+}
+
+impl io::Read for Until<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let pipe = self.pipe;
+        let mut io = Overlapped::new()?;
+        let len = buf.len().min(BUFFER as usize);
+        // SAFETY: `buf` and `io` outlive the operation, which is completed by `result` or
+        // cancelled (and waited for) by `cancel` before either drops.
+        let started = unsafe {
+            ReadFile(
+                pipe.handle.0,
+                buf.get_mut(..len),
+                None,
+                Some(io.as_mut_ptr()),
+            )
+        };
+        match started {
+            Ok(()) => {}
+            Err(error) if error.code() == ERROR_IO_PENDING.to_hresult() => {}
+            Err(error) if ended(&error) => return Ok(0),
+            Err(error) => return Err(os_error(&error)),
+        }
+        // SAFETY: GetTickCount64 only reads the clock.
+        let left = self.deadline.saturating_sub(unsafe { GetTickCount64() });
+        let millis = u32::try_from(left).unwrap_or(u32::MAX - 1);
+        // SAFETY: the event is live for the wait.
+        if unsafe { WaitForMultipleObjects(&[io.event.0], false, millis) } != WAIT_OBJECT_0 {
+            io.cancel(&pipe.handle);
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "the read timed out",
+            ));
+        }
+        match io.result(&pipe.handle) {
+            Ok(read) => Ok(read),
+            Err(error) if error.raw_os_error().is_some_and(ended_code) => Ok(0),
+            Err(error) => Err(error),
+        }
     }
 }
 

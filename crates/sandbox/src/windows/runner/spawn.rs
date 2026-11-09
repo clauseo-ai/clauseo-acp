@@ -40,10 +40,10 @@ use windows::Win32::System::SystemInformation::GetSystemDirectoryW;
 use windows::Win32::System::Threading::{
     CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW,
     CreateProcessWithLogonW, DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT,
-    GetExitCodeProcess, InitializeProcThreadAttributeList, LOGON_WITH_PROFILE,
+    GetCurrentProcess, GetExitCodeProcess, InitializeProcThreadAttributeList, LOGON_WITH_PROFILE,
     LPPROC_THREAD_ATTRIBUTE_LIST, OpenProcessToken, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
     PROCESS_INFORMATION, ResumeThread, STARTF_USESHOWWINDOW, STARTF_USESTDHANDLES, STARTUPINFOEXW,
-    STARTUPINFOW, TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
+    STARTUPINFOW, Sleep, TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
 };
 use windows::core::{HSTRING, PCWSTR, PWSTR};
 use zeroize::Zeroizing;
@@ -188,6 +188,26 @@ pub(super) fn telemetry_user(inner: &Process) -> Result<crate::windows::sids::Si
         }
         return Ok(sid);
     }
+}
+
+/// A watchdog: a thread that, once `after` passed, exits this process with `code` unless `done`
+/// was set meanwhile. The inner's bound on its wait for the outer's go (`inner.rs`).
+pub(super) fn exit_unless(
+    done: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    after: Duration,
+    code: u32,
+) -> io::Result<()> {
+    let millis = u32::try_from(after.as_millis()).unwrap_or(u32::MAX - 1);
+    std::thread::Builder::new()
+        .spawn(move || {
+            // SAFETY: Sleep only waits.
+            unsafe { Sleep(millis) };
+            if !done.load(std::sync::atomic::Ordering::SeqCst) {
+                // SAFETY: the current process's pseudo-handle; ending this process is the point.
+                drop(unsafe { TerminateProcess(GetCurrentProcess(), code) });
+            }
+        })
+        .map(drop)
 }
 
 // SAFETY: the handles are kernel handles any thread may use; the end sweeper's is kept behind a

@@ -21,7 +21,10 @@
 //! `RunExit::Logon` with the way named.
 
 use std::fmt::Write as _;
-use std::io;
+use std::io::{self, Read};
+use std::time::Duration;
+
+use super::frame::{InnerReady, read_frame};
 
 use super::RunExit;
 use crate::windows::sids::Sid;
@@ -70,6 +73,24 @@ fn compare(pool_user: &Sid, user: &Sid, how: &str) -> Result<(), (RunExit, Strin
             format!("the inner runner isn't the pool user (by {how})"),
         ))
     }
+}
+
+/// How long the outer waits for the inner's ready once `ctl` connected: the inner does nothing
+/// before it but set its token's DACL and open the pipe.
+pub(super) const READY_WAIT: Duration = Duration::from_secs(30);
+
+/// The inner's ready from `from`, a `ctl` read bounded by [`READY_WAIT`]: a timeout, the end
+/// of the pipe, or anything but an [`InnerReady`] frame is [`RunExit::Logon`].
+pub(super) fn ready_within(from: impl Read) -> Result<InnerReady, (RunExit, String)> {
+    read_frame(from).map_err(|_e| {
+        (
+            RunExit::Logon,
+            format!(
+                "the inner runner didn't confirm its token within {} s",
+                READY_WAIT.as_secs()
+            ),
+        )
+    })
 }
 
 /// The inner runner's token as the outer reads it after the inner's grant.
@@ -396,5 +417,34 @@ mod tests {
                 "{what}"
             );
         }
+    }
+
+    /// A `ctl` whose inner never sends its ready: the bounded read times out.
+    struct Silent;
+
+    impl Read for Silent {
+        fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+            Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "the read timed out",
+            ))
+        }
+    }
+
+    #[test]
+    fn an_inner_that_never_confirms_is_logon() {
+        let want = Err((
+            RunExit::Logon,
+            "the inner runner didn't confirm its token within 30 s".to_owned(),
+        ));
+        assert_eq!(ready_within(Silent), want);
+        // The pipe's end (the inner exited) and a frame that isn't a ready fail the same way.
+        assert_eq!(ready_within(&[][..]), want);
+        let mut other = Vec::new();
+        super::super::frame::write_frame(&mut other, &"started").unwrap();
+        assert_eq!(ready_within(other.as_slice()), want);
+        let mut ready = Vec::new();
+        super::super::frame::write_frame(&mut ready, &InnerReady { pid: 41 }).unwrap();
+        assert_eq!(ready_within(ready.as_slice()), Ok(InnerReady { pid: 41 }));
     }
 }

@@ -4,6 +4,8 @@
 
 use std::fs::File;
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use super::RunExit;
@@ -11,7 +13,7 @@ use super::frame::{InnerGo, InnerLaunch, InnerReady, InnerReport, read_frame, wr
 use super::inner_flow::{Failure, Inner, run};
 use super::leftovers::os::OsLeftovers;
 use super::leftovers::{Kind, remove_all};
-use super::spawn::{Agent, Process, quiet_errors, restrict_dll_search, start_agent};
+use super::spawn::{Agent, Process, exit_unless, quiet_errors, restrict_dll_search, start_agent};
 use super::station::StationDesktop;
 use super::sweep::os::sweep_own;
 use super::sweep::{Point, SweepError};
@@ -24,6 +26,10 @@ use crate::windows::token::os::{
     logon_sid, make, own_token, shut_inner_token_first, shut_later, shut_self, user,
 };
 use crate::windows::write;
+
+/// How long the inner waits for the outer's go after its ready: twice the outer's own wait for
+/// the ready (`inner_user::READY_WAIT`), which the full check and the go follow at once.
+const GO_WAIT: Duration = Duration::from_secs(60);
 
 /// The inner runner's whole run; its exit code: the agent's, or a [`RunExit`] code.
 pub fn run_inner(base: &str, desktop_user: &Sid) -> u32 {
@@ -126,8 +132,13 @@ impl Inner for Calls {
             },
         )
         .map_err(|_e| RunExit::Pipe)?;
-        // Blocks until the outer's full check passed; a failed one kills this process.
-        match read_frame::<InnerGo>(&ctl) {
+        // Waits for the outer's full check; a failed one kills this process. Bounded by
+        // [`GO_WAIT`]: past it this process exits `RunExit::Pipe` from a watchdog thread.
+        let got = Arc::new(AtomicBool::new(false));
+        exit_unless(Arc::clone(&got), GO_WAIT, RunExit::Pipe.code()).map_err(|_e| RunExit::Pipe)?;
+        let go = read_frame::<InnerGo>(&ctl);
+        got.store(true, Ordering::SeqCst);
+        match go {
             Ok(InnerGo { go: true }) => {}
             Ok(InnerGo { go: false }) | Err(_) => return Err(RunExit::Pipe),
         }
