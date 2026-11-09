@@ -28,11 +28,13 @@ pub(super) enum Next {
 
 /// What a walk calls: `skip` before a folder is listed (true: pass it by), `folder` with each
 /// listing, `unreadable` for a folder that can't be opened or listed (not one missing, nor one
-/// on a volume a scan never enters), and `progress` once per folder listed.
+/// on a volume a scan never enters), `refused` for a folder on a volume a scan never enters (a
+/// network volume, an automount, `/net`), and `progress` once per folder listed.
 pub(super) struct Visit<'a> {
     pub(super) skip: &'a dyn Fn(&Path, Meta) -> bool,
     pub(super) folder: &'a mut dyn FnMut(&Path, Meta, &Entries) -> Next,
     pub(super) unreadable: &'a mut dyn FnMut(&Path, &io::Error) -> Next,
+    pub(super) refused: &'a mut dyn FnMut(&Path) -> Next,
     pub(super) progress: &'a dyn Fn(),
 }
 
@@ -59,6 +61,7 @@ pub(in super::super) fn walk<F: Fs>(
         skip,
         folder: &mut folder,
         unreadable: &mut |_, _| Next::Past,
+        refused: &mut |_| Next::Past,
         progress: &|| {},
     };
     walk_with(fs, top, &mut visit);
@@ -78,6 +81,9 @@ pub(super) fn walk_with<F: Fs>(fs: &F, top: &Path, visit: &mut Visit<'_>) {
             Err(error) if error.kind() == io::ErrorKind::Unsupported => {
                 let shown = dir.display();
                 tracing::info!(dir = %shown, "the git watch skips a network volume or an automount");
+                if (visit.refused)(&dir) == Next::Stop {
+                    return;
+                }
                 continue;
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => continue,

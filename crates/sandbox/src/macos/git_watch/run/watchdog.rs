@@ -19,15 +19,20 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
 use std::time::Duration;
 
-use super::{KILL_CAP, Session};
+use super::{CANARY_WAIT, KILL_CAP, Session};
 use crate::{Clock, SystemClock};
 
-/// The most time one check may go without progress while the agent may run. 5 s is how long
-/// the canary's event may take before the stream counts as lost (`CANARY_WAIT`): a check held
-/// longer leaves the agent as unwatched as a lost stream does. A check that is not stuck lists
+/// The most time one check may go without progress while the agent may run: the canary's wait
+/// (`CANARY_WAIT`, 5 s), since a check held longer leaves the agent as unwatched as a lost
+/// stream does. A check that is not stuck lists
 /// a folder well within it on a local disk; one that doesn't, such as a listing on a disk that
 /// stopped answering, ends the session (fail-closed).
-pub(crate) const BUDGET: Duration = Duration::from_secs(5);
+pub(crate) const BUDGET: Duration = CANARY_WAIT;
+
+/// The most time one check may take in all while the agent may run, progress or not: a listing
+/// that never ends (a folder that keeps growing as fast as it is read) still beats on every
+/// folder, so the budget alone would never end it.
+pub(crate) const CHECK_DEADLINE: Duration = Duration::from_secs(60);
 
 /// How often the watchdog looks.
 const LOOK_EVERY: Duration = Duration::from_millis(100);
@@ -42,6 +47,8 @@ pub(crate) struct Busy {
     /// When the check now running began or last made progress, in milliseconds on `clock`
     /// plus one; 0 between checks.
     since: AtomicU64,
+    /// When the check now running began, as `since`.
+    began: AtomicU64,
     /// The watchdog ended the session. Stays set.
     overran: AtomicBool,
     /// How many checks began.
@@ -62,6 +69,7 @@ impl Busy {
         Arc::new(Busy {
             clock,
             since: AtomicU64::new(0),
+            began: AtomicU64::new(0),
             overran: AtomicBool::new(false),
             checks: AtomicU64::new(0),
             overran_at: AtomicU64::new(0),
@@ -81,7 +89,9 @@ impl Busy {
     /// A check begins.
     pub(crate) fn start(&self) {
         self.checks.fetch_add(1, Ordering::SeqCst);
-        self.since.store(self.millis(), Ordering::SeqCst);
+        let now = self.millis();
+        self.began.store(now, Ordering::SeqCst);
+        self.since.store(now, Ordering::SeqCst);
     }
 
     /// The check now running made progress (a walk listed a folder): its budget starts again.
@@ -124,8 +134,8 @@ impl Busy {
             .clone()
     }
 
-    /// The watchdog's look: when the check running made no progress for `budget`, ends the
-    /// session. Once it has, the kill goes again on each look while that check runs, and once
+    /// The watchdog's look: when the check running made no progress for `budget`, or has run
+    /// [`CHECK_DEADLINE`] in all, ends the session. Once it has, the kill goes again on each look while that check runs, and once
     /// the check it ended in has run `KILL_CAP` past that with a process of the session left,
     /// the session's record is marked outlived, once. Returns whether a check is judged stuck.
     pub(crate) fn look(&self, budget: Duration) -> bool {
@@ -159,7 +169,9 @@ impl Busy {
             return true;
         }
         let idle = Duration::from_millis(now.saturating_sub(since));
-        if idle < budget {
+        let began = self.began.load(Ordering::SeqCst);
+        let took = Duration::from_millis(now.saturating_sub(began));
+        if idle < budget && took < CHECK_DEADLINE {
             return false;
         }
         self.overran_at.store(now, Ordering::SeqCst);
@@ -168,7 +180,9 @@ impl Busy {
         self.overran.store(true, Ordering::SeqCst);
         tracing::error!(
             ?idle,
-            "a git watch check is stuck; ending the session, which runs unwatched meanwhile"
+            ?took,
+            "a git watch check is stuck or past its deadline; ending the session, which runs \
+             unwatched meanwhile"
         );
         if let Some(session) = &session {
             session.end();

@@ -128,6 +128,7 @@ fn an_item_left_in_place_refuses_the_matter_until_it_is_gone() {
         path: PathBuf::from("/m/.git"),
         reason: "Operation not permitted".to_owned(),
         unreadable: false,
+        mount: false,
     }];
     state::end(&store, "s", stuck);
     assert_eq!(store.0.lock().unwrap().sessions.len(), 0);

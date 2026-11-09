@@ -4,14 +4,11 @@ use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::io;
 use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
-use super::super::aside::Aside;
-use super::super::state::{MatterState, Store};
-use super::super::{Asks, Event, Fs, Kind, Launch, Meta, Phase, Session, Stamp, Watch, flags};
-use crate::{Denial, DenialSink, GitItem, GitOutcome};
+use super::super::{Fs, Kind, Meta, Stamp};
 
 /// The fake volume: every entry by path, with its kind and inode.
 #[derive(Default)]
@@ -20,6 +17,8 @@ struct Disk {
     next: u64,
     /// Paths on a network volume.
     network: Vec<PathBuf>,
+    /// Paths on a local volume of their own, with its device.
+    volumes: Vec<(PathBuf, u64)>,
     /// Renames into the set-aside folder fail with this OS error.
     fail_moves: Option<i32>,
     /// Each link's target, absolute.
@@ -138,6 +137,19 @@ impl FakeFs {
     /// Marks `path` and below a network volume.
     pub(super) fn network(&self, path: &str) {
         self.0.lock().unwrap().network.push(PathBuf::from(path));
+    }
+
+    /// Marks `path` and below a local volume of its own, device `dev`.
+    pub(super) fn volume(&self, path: &str, dev: u64) {
+        let mut disk = self.0.lock().unwrap();
+        disk.volumes.push((PathBuf::from(path), dev));
+    }
+
+    /// Ejects the volume mounted at `path`: what is there is on the volume above it again.
+    pub(super) fn eject(&self, path: &str) {
+        let mut disk = self.0.lock().unwrap();
+        disk.network.retain(|at| at != Path::new(path));
+        disk.volumes.retain(|(at, _)| at != Path::new(path));
     }
 
     /// Fails every move into the set-aside folder with OS error `code`.
@@ -264,10 +276,11 @@ impl Fs for FakeFs {
     fn meta(&self, path: &Path) -> Option<Meta> {
         let disk = self.0.lock().unwrap();
         // A network volume is a volume of its own, as a real mount is.
+        let mounted = disk.volumes.iter().find(|(at, _)| path.starts_with(at));
         let volume = if disk.network.iter().any(|n| path.starts_with(n)) {
             2
         } else {
-            1
+            mounted.map_or(1, |(_, dev)| *dev)
         };
         disk.entries.get(path).map(|&(kind, ino)| Meta {
             kind,
@@ -281,6 +294,12 @@ impl Fs for FakeFs {
         disk.dated += 1;
         let changes = disk.stamps.get(path).copied().unwrap_or_default();
         Some((meta, [changes, 0, changes, 0]))
+    }
+
+    fn remove_file(&self, path: &Path) -> io::Result<()> {
+        let mut disk = self.0.lock().unwrap();
+        disk.touched.retain(|at| at != path);
+        Ok(())
     }
 
     fn touch(&self, path: &Path) -> io::Result<()> {
@@ -454,146 +473,6 @@ impl Fs for FakeFs {
     }
 }
 
-/// A matter state in memory.
-#[derive(Clone, Default)]
-pub(super) struct MemStore(pub(super) Arc<Mutex<MatterState>>);
+mod kit;
 
-impl Store for MemStore {
-    fn update<T>(&self, change: impl FnOnce(&mut MatterState) -> T) -> io::Result<T> {
-        Ok(change(&mut self.0.lock().unwrap()))
-    }
-}
-
-/// The notices the watch sent.
-#[derive(Default)]
-pub(super) struct Notices(Mutex<Vec<Denial>>);
-
-impl DenialSink for Notices {
-    fn denied(&self, d: Denial) {
-        self.0.lock().unwrap().push(d);
-    }
-}
-
-impl Notices {
-    pub(super) fn taken(&self) -> Vec<Denial> {
-        std::mem::take(&mut *self.0.lock().unwrap())
-    }
-
-    pub(super) fn count(&self) -> usize {
-        self.0.lock().unwrap().len()
-    }
-}
-
-/// A session whose processes go when told, or when ended (if `dies`).
-#[derive(Clone, Default)]
-pub(super) struct FakeSession {
-    pub(super) gone: Arc<AtomicBool>,
-    pub(super) ends: Arc<AtomicU32>,
-    pub(super) dies: bool,
-}
-
-impl Session for FakeSession {
-    fn gone(&self) -> bool {
-        self.gone.load(Ordering::SeqCst)
-    }
-
-    fn end(&self) {
-        self.ends.fetch_add(1, Ordering::SeqCst);
-        if self.dies {
-            self.gone.store(true, Ordering::SeqCst);
-        }
-    }
-}
-
-static NEXT_SESSION: AtomicU32 = AtomicU32::new(0);
-
-/// The aside of a watch of `/m` for a new session.
-pub(super) fn aside(notices: &Arc<Notices>) -> Aside {
-    let n = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
-    Aside::new(
-        PathBuf::from(MATTER),
-        PathBuf::from(SET_ASIDE),
-        format!("clauseo-1-0-{n}"),
-        Arc::clone(notices) as Arc<dyn DenialSink>,
-    )
-}
-
-/// A watch of `/m`; `git` are the launch's `.git`s.
-pub(super) fn watch(fs: &FakeFs, git: &[&str]) -> (Watch<FakeFs>, Arc<Notices>) {
-    watch_with(fs, git, &[])
-}
-
-/// [`watch`] with the launch's links out too.
-pub(super) fn watch_with(
-    fs: &FakeFs,
-    git: &[&str],
-    links: &[&str],
-) -> (Watch<FakeFs>, Arc<Notices>) {
-    let paths = |p: &[&str]| p.iter().map(PathBuf::from).collect();
-    watch_launch(
-        fs,
-        &Launch {
-            git: paths(git),
-            links: paths(links),
-            keep_repos: true,
-            ..Launch::default()
-        },
-    )
-}
-
-/// [`watch`] with the launch given whole.
-pub(super) fn watch_launch(fs: &FakeFs, launch: &Launch) -> (Watch<FakeFs>, Arc<Notices>) {
-    let notices = Arc::new(Notices::default());
-    let watch = Watch::new(fs.clone(), PathBuf::from(MATTER), aside(&notices), launch);
-    (watch, notices)
-}
-
-pub(super) fn event(path: &str, flags: u32) -> Event {
-    Event {
-        path: PathBuf::from(path),
-        flags,
-    }
-}
-
-/// A check that found nothing: it does not ask to end the session.
-pub(super) fn quiet(asks: Asks) {
-    assert!(!asks.end, "{asks:?}");
-}
-
-/// `events` find something while the agent may run: nothing moves, and the session must end.
-/// Then, the session ended, the final scan sets aside.
-pub(super) fn found(watch: &mut Watch<FakeFs>, events: &[Event]) {
-    let asks = watch.events(events);
-    assert!(asks.end, "{events:?}");
-    watch.ended_session();
-    quiet(watch.full_scan(Phase::Ended));
-}
-
-/// No notice came.
-pub(super) fn none(notices: &Notices) {
-    assert_eq!(notices.taken(), Vec::<Denial>::new());
-}
-
-pub(super) const MOVED_IN: u32 = flags::ITEM_RENAMED | 0x2_0000;
-
-/// The one notice, for the `.git` at `rel`, moved into the set-aside folder.
-pub(super) fn assert_moved(notices: &Notices, rel: &str) {
-    assert_set_aside(notices, rel, GitItem::DotGit);
-}
-
-/// The one notice, for the `want` at `rel`, moved into the set-aside folder.
-pub(super) fn assert_set_aside(notices: &Notices, rel: &str, want: GitItem) {
-    let notices = notices.taken();
-    assert_eq!(notices.len(), 1, "{notices:?}");
-    let Denial::GitSetAside {
-        path,
-        what,
-        outcome: GitOutcome::Moved(to),
-        ..
-    } = &notices[0]
-    else {
-        panic!("{notices:?}");
-    };
-    assert_eq!((path.as_path(), *what), (Path::new(rel), want));
-    assert!(to.starts_with(SET_ASIDE) && to.ends_with("item"), "{to:?}");
-}
+pub(super) use kit::*;

@@ -12,7 +12,7 @@ use super::super::flags;
 use super::super::host::Register;
 use super::super::run::{
     BATCH_LATE, CANARY_EVERY, CANARY_WAIT, End, Flow, Mode, Msg, Runner, SWEEP_CAP, SWEEP_EVERY,
-    start_with,
+    canary_file, start_with,
 };
 use super::fake::{FakeFs, FakeSession, MemStore, Notices, SET_ASIDE, event, none, quiet, watch};
 use crate::{Clock, Denial, SystemClock};
@@ -403,4 +403,28 @@ fn a_batch_may_wait_five_seconds_to_be_read() {
     assert!(runner.lost());
     assert_eq!(ends(&session), 1);
     assert_eq!(notices.taken(), [Denial::GitWatchLost]);
+}
+
+/// Each watch's canary has a random part of its own, so no other session's write answers it,
+/// and it is removed when the watch stops.
+#[test]
+fn each_watch_has_a_canary_of_its_own_and_removes_it() {
+    let fs = FakeFs::new();
+    let folder = PathBuf::from(SET_ASIDE);
+    let one = canary_file(&fs, &folder, "watch-canary");
+    let two = canary_file(&fs, &folder, "watch-canary");
+    assert_ne!(one, two);
+    for canary in [&one, &two] {
+        assert_eq!(canary.parent(), Some(folder.as_path()));
+        let name = canary.file_name().unwrap().to_str().unwrap();
+        let hex = name.strip_prefix("watch-canary-").unwrap();
+        assert_eq!(hex.len(), 16, "{name}");
+    }
+    let (watch, _notices) = watch(&fs, &[]);
+    let mut runner =
+        Runner::new(watch, Mode::Live, Duration::ZERO).with_canary(one.clone(), Duration::ZERO);
+    assert_eq!(runner.input(None, Duration::ZERO), Flow::Go);
+    assert_eq!(fs.touched(), [one]);
+    runner.remove_canary();
+    assert_eq!(fs.touched(), Vec::<PathBuf>::new(), "removed");
 }

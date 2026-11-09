@@ -77,8 +77,18 @@ fn step<F: Fs>(watch: &Watch<F>, sweep: &mut Sweep, found: &mut Found) -> bool {
     let dated = watch
         .fs
         .dated(&path)
-        .filter(|(meta, _)| meta.kind == Kind::Dir && !watch.passed(&key, &path))
-        .filter(|_| watch.fs.local(&path));
+        .filter(|(meta, _)| meta.kind == Kind::Dir && !watch.passed(&key, &path));
+    // A volume the launch didn't meet: a find, never a silent skip.
+    let local = dated.is_some() && watch.fs.local(&path);
+    let mount = match &dated {
+        Some((meta, _)) if local => watch.new_volume(meta.id.0),
+        Some(_) => watch.new_refusal(&path),
+        None => false,
+    };
+    if mount {
+        found.mounts.push(path.clone());
+    }
+    let dated = dated.filter(|_| local && !mount);
     let (Some((meta, stamp)), Some(folder)) = (dated, sweep.folders.get_mut(at)) else {
         sweep.known.remove(&key);
         sweep.folders.remove(at);
@@ -91,9 +101,13 @@ fn step<F: Fs>(watch: &Watch<F>, sweep: &mut Sweep, found: &mut Found) -> bool {
     folder.stamp = Some(stamp);
     let entries = match watch.fs.list(&path) {
         Ok(entries) => entries,
-        Err(error) if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::Unsupported) => {
+        Err(error) if error.kind() == ErrorKind::Unsupported => {
+            if watch.new_refusal(&path) {
+                found.mounts.push(path);
+            }
             return true;
         }
+        Err(error) if error.kind() == ErrorKind::NotFound => return true,
         Err(error) => {
             tracing::warn!(dir = %path.display(), %error, "the git watch can't list a folder");
             found.unreadable.push((path, error.to_string()));

@@ -247,3 +247,65 @@ fn the_session_probe_cant_be_shed_from_inside() {
     );
     assert_ne!(out.code, Some(0), "{out:#?}");
 }
+
+/// The matter's mounts (`mount` run outside), at or below `at`.
+fn mounts_below(at: &Path) -> Vec<String> {
+    let at = at.to_str().unwrap();
+    run_outside("/sbin/mount", &[], Path::new("/"))
+        .stdout
+        .lines()
+        .filter(|line| line.contains(at) || line.contains("cgw-mount"))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// No volume can be mounted in the matter from inside the jail: a disk image in the matter
+/// attached with `hdiutil`, an SMB share with `mount_smbfs` or `mount -t smbfs`, and `mount
+/// -t` of a local file system all fail, and nothing is mounted. A volume that appeared in a
+/// live matter would hold a repository no event announced.
+#[test]
+fn no_volume_can_be_mounted_in_the_matter_from_inside() {
+    let w = World::new();
+    let m1 = w.at("m1");
+    dir_at(&m1.join("sub"));
+    let image = m1.join("x.dmg");
+    let made = [
+        "create",
+        "-quiet",
+        "-size",
+        "4m",
+        "-fs",
+        "APFS",
+        "-volname",
+        "cgw-mount",
+        image.to_str().unwrap(),
+    ];
+    run_outside("/usr/bin/hdiutil", &made, &w.at("")).assert_ok();
+    let (launcher, _) = launcher(w.builder().build().unwrap());
+    for script in [
+        "exec /usr/bin/hdiutil attach -nobrowse -mountpoint sub x.dmg",
+        "exec /usr/bin/hdiutil attach -nobrowse x.dmg",
+        "exec /sbin/mount_smbfs -N //guest@127.0.0.1/share sub",
+        "exec /sbin/mount -t smbfs //guest@127.0.0.1/share sub",
+        "exec /sbin/mount -t devfs devfs sub",
+        "exec /sbin/mount -t apfs /dev/disk99s1 sub",
+    ] {
+        let out = sh(&launcher, &m1, script, &[]);
+        let mounted = mounts_below(&m1);
+        for line in &mounted {
+            if let Some(at) = line.split(" on ").nth(1).and_then(|r| r.split(" (").next()) {
+                drop(run_outside(
+                    "/usr/bin/hdiutil",
+                    &["detach", "-force", at],
+                    Path::new("/"),
+                ));
+            }
+        }
+        assert_eq!(
+            mounted,
+            Vec::<String>::new(),
+            "{script} mounted a volume: {out:#?}"
+        );
+        assert_ne!(out.code, Some(0), "{script}: {out:#?}");
+    }
+}

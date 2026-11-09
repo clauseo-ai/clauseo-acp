@@ -18,6 +18,7 @@ use super::fake::{
 use crate::{Denial, GitItem};
 
 mod locked;
+mod volumes;
 
 const CREATED_FILE: u32 = flags::ITEM_CREATED | 0x1_0000;
 const MODIFIED_FILE: u32 = 0x1000 | 0x1_0000;
@@ -167,10 +168,10 @@ fn a_dead_sessions_scan_moves_repository_shapes_only() {
 #[test]
 fn a_network_volume_in_the_matter_is_never_entered_but_a_name_still_ends_the_session() {
     let fs = FakeFs::new();
-    let (mut watch, notices) = watch(&fs, &[]);
     fs.dir("/m/share");
     fs.repo("/m/share/.git");
     fs.network("/m/share");
+    let (mut watch, notices) = watch(&fs, &[]);
     quiet(watch.full_scan(Phase::Ended));
     // An event naming a .git ends the session before anything is read, on any volume.
     assert!(watch.events(&[event("/m/share/.git", MOVED_IN)]).end);
@@ -278,4 +279,21 @@ fn a_repository_in_notes_at_launch_is_a_find_like_any_other() {
     assert!(fs.exists("/m/r/objects") && !fs.exists("/m/r/HEAD"));
     assert!(!fs.exists("/m/half/HEAD"));
     assert_eq!(notices.taken().len(), 2);
+}
+
+/// A `commondir` arriving anywhere ends the session, a link especially: git reads `config`
+/// and `hooks` through what it names, and a link can lead anywhere.
+#[test]
+fn a_commondir_arriving_anywhere_ends_the_session() {
+    let fs = FakeFs::new();
+    let (mut watch, _notices) = watch(&fs, &[]);
+    fs.dir("/m/x");
+    fs.link("/m/x/commondir", "/elsewhere");
+    let created = flags::ITEM_CREATED | 0x4_0000;
+    assert!(
+        watch.events(&[event("/m/x/commondir", created)]).end,
+        "a link, no HEAD beside it"
+    );
+    // Gone by check time, or a file: still a name hit.
+    assert!(watch.events(&[event("/m/y/commondir", created)]).end);
 }

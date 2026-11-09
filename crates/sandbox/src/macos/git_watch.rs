@@ -208,6 +208,8 @@ pub(crate) trait Fs: Send {
     fn read_link(&self, path: &Path) -> io::Result<PathBuf>;
     /// Removes the link at `path`, never anything else.
     fn remove_link(&self, path: &Path) -> io::Result<()>;
+    /// Removes the regular file at `path`, never anything else: the watch's own canary.
+    fn remove_file(&self, path: &Path) -> io::Result<()>;
     /// A random number, for names no one can guess.
     fn random(&self) -> u64;
     /// The wall time, for records.

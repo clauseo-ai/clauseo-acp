@@ -11,7 +11,7 @@ use std::time::Duration;
 use super::super::aside::Aside;
 use super::super::check::SCAN_BUDGET;
 use super::super::run::{
-    BUDGET, Busy, End, Flow, KILL_CAP, Mode, Msg, Runner, Session, start_with,
+    BUDGET, Busy, CHECK_DEADLINE, End, Flow, KILL_CAP, Mode, Msg, Runner, Session, start_with,
 };
 use super::super::{Launch, Watch, flags};
 use super::fake::{
@@ -459,6 +459,26 @@ fn the_watchdog_kills_again_while_the_check_is_stuck_and_marks_it_past_the_cap()
     clock.0.fetch_add(500, Ordering::SeqCst);
     busy.look(BUDGET);
     assert_eq!(marks.load(Ordering::SeqCst), 1, "once");
+}
+
+/// A check that keeps listing folders still ends at its deadline, 60 s in all.
+#[test]
+fn a_check_that_beats_forever_ends_at_its_deadline() {
+    assert_eq!(CHECK_DEADLINE, Duration::from_secs(60));
+    let clock = Arc::new(Manual::default());
+    let busy = Busy::new(Arc::clone(&clock) as Arc<dyn Clock>);
+    let session = FakeSession::default();
+    busy.attach(&(Arc::new(session.clone()) as Arc<dyn Session>));
+    busy.start();
+    while clock.0.load(Ordering::SeqCst) < 59_900 {
+        clock.0.fetch_add(100, Ordering::SeqCst);
+        assert!(busy.beat());
+        assert!(!busy.look(BUDGET), "a folder every 0.1 s, under 60 s");
+    }
+    clock.0.store(60_100, Ordering::SeqCst);
+    assert!(busy.beat());
+    assert!(busy.look(BUDGET), "60.1 s in all, progress or not");
+    assert_eq!(session.ends.load(Ordering::SeqCst), 1);
 }
 
 #[test]

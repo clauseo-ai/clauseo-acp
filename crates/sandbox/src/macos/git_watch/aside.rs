@@ -34,6 +34,8 @@ pub(crate) struct Stuck {
     pub(crate) reason: String,
     /// A folder the final scan could not open or list, rather than an item that would not move.
     pub(crate) unreadable: bool,
+    /// A volume mounted during the session.
+    pub(crate) mount: bool,
 }
 
 /// Where items go, and what each set-aside is recorded and reported with.
@@ -102,6 +104,7 @@ impl Aside {
                             path: path.to_owned(),
                             reason: reason.clone(),
                             unreadable: false,
+                            mount: false,
                         });
                         (GitOutcome::Stuck, Some(io::Error::other(reason)))
                     }

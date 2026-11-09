@@ -85,6 +85,19 @@ pub(crate) struct Baseline {
     pub(crate) links: Vec<Known>,
     pub(crate) common: Vec<(Bytes, Option<Id>)>,
     pub(crate) skip: Vec<Bytes>,
+    /// The volumes the launch found under the folder; `None` in a record made before they were
+    /// kept, whose scan then judges no volume new.
+    #[serde(default)]
+    pub(crate) volumes: Option<Volumes>,
+}
+
+/// The volumes a launch found under its folder: the devices of the folders it walked, and the
+/// folders on volumes a scan never enters (network volumes, automounts). Any other volume
+/// under the folder appeared during the session.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct Volumes {
+    pub(crate) devices: Vec<u64>,
+    pub(crate) refused: Vec<Bytes>,
 }
 
 /// One running session.
@@ -120,6 +133,9 @@ pub(crate) struct StuckRecord {
     /// A folder the final scan could not read: it blocks launches only while still unreadable.
     #[serde(default)]
     unreadable: bool,
+    /// A volume mounted during the session: it blocks launches while it is still mounted.
+    #[serde(default)]
+    mount: bool,
 }
 
 /// The state file's contents.
@@ -167,13 +183,25 @@ pub(crate) fn begin<F: Fs + Clone, S: Store>(
         state.root = Some(matter.into());
         state.stuck.retain(|stuck| {
             let path = stuck.path.path();
-            fs.meta(&path).is_some() && (!stuck.unreadable || fs.list(&path).is_err())
+            let here = fs.meta(&path);
+            if stuck.mount {
+                // Still mounted while its device differs from the folder's above it.
+                let above = path.parent().and_then(|dir| fs.meta(dir));
+                return here.zip(above).is_some_and(|(at, up)| at.id.0 != up.id.0);
+            }
+            here.is_some() && (!stuck.unreadable || fs.list(&path).is_err())
         });
         if let Some(stuck) = state.stuck.first() {
             let path = stuck.path.path();
             let shown = shown(path.strip_prefix(matter).unwrap_or(&path));
             let reason = &stuck.reason;
-            return Err(io::Error::other(if stuck.unreadable {
+            return Err(io::Error::other(if stuck.mount {
+                format!(
+                    "Clauseo won't start an AI tool in this matter until the disk or share \
+                     mounted at {shown} is ejected: it appeared while an earlier AI session ran, \
+                     so Clauseo could not check it for Git folders."
+                )
+            } else if stuck.unreadable {
                 format!(
                     "Clauseo won't start an AI tool in this matter until it can read {shown}: \
                      the folder could not be read when an earlier AI session ended, so Clauseo \
@@ -341,6 +369,7 @@ fn add_stuck(state: &mut MatterState, stuck: Vec<Stuck>) {
             path: stuck.path.as_path().into(),
             reason: stuck.reason,
             unreadable: stuck.unreadable,
+            mount: stuck.mount,
         }));
 }
 

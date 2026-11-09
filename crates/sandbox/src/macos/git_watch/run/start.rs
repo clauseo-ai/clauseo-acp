@@ -130,11 +130,20 @@ struct Root<'a> {
     launch: Launch,
     /// The watch's id in the records and the host's register.
     session: String,
-    /// Its canary file's name in its set-aside folder: the matter's and the notes folder's
-    /// differ, so the two watches of one launch, which share the data dir's folder when the
-    /// matter is on its volume, never create one file at the same moment (APFS can answer
-    /// such a race with `ENOENT`).
+    /// Its canary file's name in its set-aside folder, before a random part of this session's:
+    /// no other watch writes it, so no other session's write can answer this one's canary, and
+    /// the two watches of one launch, which share the data dir's folder when the matter is on
+    /// its volume, never create one file at the same moment (APFS can answer such a race with
+    /// `ENOENT`). The watch removes it when it stops.
     canary: &'static str,
+}
+
+/// One watch's canary file: `<folder>/<prefix>-<16 hex>`, the hex a random number of its own,
+/// in the folder as it really is (the stream reports real paths).
+pub(crate) fn canary_file<F: Fs>(fs: &F, folder: &Path, prefix: &str) -> PathBuf {
+    os::resolve(folder)
+        .unwrap_or_else(|| folder.to_owned())
+        .join(format!("{prefix}-{:016x}", fs.random()))
 }
 
 /// [`start`] for one folder, its state kept under `data`.
@@ -157,9 +166,7 @@ fn start_root(
     // The folder's own volume, read from it now: an after-only matter's is let in.
     let fs = os::Within::of(dir)?;
     state::begin(&store, &fs, dir, notices, &host::host())?;
-    let canary = os::resolve(&folder)
-        .unwrap_or_else(|| folder.clone())
-        .join(canary);
+    let canary = canary_file(&fs, &folder, canary);
     let aside = Aside::new(
         dir.to_owned(),
         folder.clone(),
@@ -322,6 +329,7 @@ where
             };
             drive(&mut runner, &rx, clock);
             drop(stream);
+            runner.remove_canary();
             match runner.finish(&|| state::outlived(&store, &session, &[])) {
                 End::Scanned(stuck) => state::end(&store, &session, stuck),
                 End::Outlived(finds) => state::outlived(&store, &session, &finds),

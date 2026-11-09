@@ -160,10 +160,20 @@ and below the matter (a different mount inside it stays refused). A folder's ent
 `fstatat` from its parent and, on another volume, that volume's flags with `getattrlistat`,
 before anything is opened: autofs fires no trigger for a lookup of attributes on the last name
 (its `trigger_resolve`), except on a "force a mount" node only its own maps make.
+**Volumes under the folder:** the launch walk notes every device it meets under the matter (and
+notes), and every folder on a volume a scan never enters. Any other volume a later scan meets
+(a disk image or share mounted inside the live matter brings a ready-made tree with no event
+for what is in it) is a find, never a silent skip: while the agent may run it ends the session;
+the final scan keeps it as stuck, and the matter's launches are refused ("... until the disk or
+share mounted at <path> is ejected") while it is still mounted there. From inside the jail
+none can be mounted at all: `hdiutil attach`, `mount_smbfs`, `mount -t smbfs`, `mount -t
+devfs` and `mount -t apfs` all fail and mount nothing (jail test).
 
 Two backstops cover a stream that loses events without saying so (seen on a disk image mounted
 seconds before, under a full parallel test run: nothing for over 10 s). **The canary:** every
-10 s the watch rewrites `watch-canary` in the set-aside folder it uses, which is on the matter's
+10 s the watch rewrites its canary, `watch-canary-<16 hex>` with a random part of its own (no
+other session's write can answer it; removed when the watch stops), in the set-aside folder it
+uses, which is on the matter's
 volume, denied to the agent and watched by the same stream (one stream, two paths). Its event
 comes about 4 ms after the write on this Mac. When none comes within 5 s, or the canary can't
 be written, the stream is lost and the session ends as for a find: kill first, then the final
@@ -228,8 +238,11 @@ left, has the session's record marked outlived from the watchdog's thread, so th
 launch is refused even if the check never returns. 5 s is the canary's wait: a check held
 longer leaves the agent as unwatched as a lost stream. The three windows (the canary, a late
 batch, the watchdog) are 5 s each: at 2 s, load averages of 50 and more on the test Mac lagged
-the stream or the watch thread past the window and ended sessions that were fine. A rescan of a big matter that keeps
-listing folders is not stuck. A session attached after the watchdog gave up on a check is ended
+the stream or the watch thread past the window and ended sessions that were fine. The canary's
+wait stays under its 10 s interval, and the other two are defined as it. A rescan of a big
+matter that keeps listing folders is not stuck, but no check runs past 60 s in all
+(`CHECK_DEADLINE`): a listing that never ends still beats on every folder. A session
+attached after the watchdog gave up on a check is ended
 at once.
 
 Then the final scan sets each item aside by one `rename(2)` that never replaces into
@@ -291,7 +304,10 @@ build `objects`, `refs` and `config` there. `build()` lists them: for a missing 
 profile denies writes at and below it; for an existing folder, writes at and below `objects`,
 `refs`, `config`, `packed-refs`, `hooks`, `info` and `worktrees` in it (Seatbelt matches
 these literals in any letter case on APFS, checked on this Mac). The watch flags anything new at
-those paths in the matter.
+those paths in the matter. A `commondir` that is a symbolic link, dangling or not, refuses the
+build ("a git repository's `commondir` may not be a symbolic link"): git reads `config` and
+`hooks` through it, and where it leads can change once the agent runs. A `commondir` that
+arrives anywhere during a session ends it by its name, before anything is read.
 
 Each set-aside reaches the launch's sink, uncapped, as `Denial::GitSetAside { path, what,
 outcome, session_ended }`. `notice()` is the lawyer's text. The agent runs as the lawyer's

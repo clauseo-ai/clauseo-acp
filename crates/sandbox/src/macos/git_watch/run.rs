@@ -33,11 +33,13 @@ use crate::{Clock, SystemClock};
 mod start;
 mod watchdog;
 
+#[cfg(test)]
+pub(crate) use start::canary_file;
 pub(crate) use start::start;
 #[cfg(test)]
 pub(crate) use start::start_with;
 #[cfg(test)]
-pub(crate) use watchdog::{BUDGET, Busy};
+pub(crate) use watchdog::{BUDGET, Busy, CHECK_DEADLINE};
 
 /// How often the thread looks at the session when no event comes.
 const TICK: Duration = Duration::from_millis(100);
@@ -52,15 +54,18 @@ pub(crate) const KILL_CAP: Duration = Duration::from_secs(10);
 /// How often the canary file is rewritten.
 pub(crate) const CANARY_EVERY: Duration = Duration::from_secs(10);
 
-/// How long the canary's event may take before the stream counts as lost. 5 s, as
-/// [`BATCH_LATE`] and the watchdog's [`BUDGET`]: long enough for a busy Mac (load averages of
-/// 50 and more lagged the stream past 2 s in the tests), short enough that the agent runs
-/// unwatched no longer than that.
+/// How long the canary's event may take before the stream counts as lost: 5 s, long enough
+/// for a busy Mac (load averages of 50 and more lagged the stream past 2 s in the tests), short
+/// enough that the agent runs unwatched no longer than that. [`BATCH_LATE`] and the watchdog's
+/// [`BUDGET`] are this same wait. Under [`CANARY_EVERY`], so each write is judged before the
+/// next goes.
 pub(crate) const CANARY_WAIT: Duration = Duration::from_secs(5);
 
+const _: () = assert!(CANARY_WAIT.as_millis() < CANARY_EVERY.as_millis());
+
 /// How long after the stream queued a batch the watch may read it before it counts as lagging
-/// behind the agent, which ends the session as a lost stream. 5 s, as [`CANARY_WAIT`].
-pub(crate) const BATCH_LATE: Duration = Duration::from_secs(5);
+/// behind the agent, which ends the session as a lost stream: the canary's wait.
+pub(crate) const BATCH_LATE: Duration = CANARY_WAIT;
 
 /// The canary file's name in the set-aside folder.
 const CANARY: &str = "watch-canary";
@@ -439,6 +444,16 @@ impl<F: Fs> Runner<F> {
             self.watch.lost_stream();
         }
         true
+    }
+
+    /// Removes the canary file, once the stream is gone.
+    pub(crate) fn remove_canary(&mut self) {
+        if let Some(canary) = self.canary.take()
+            && let Err(error) = self.watch.fs().remove_file(&canary.path)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!(%error, path = %canary.path.display(), "the canary stays");
+        }
     }
 
     /// The final scan. With every process gone each find is set aside; with one left after the

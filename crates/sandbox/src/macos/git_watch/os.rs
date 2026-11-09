@@ -281,6 +281,16 @@ impl<Os: Scope> Fs for Os {
         Ok(unlinkat(&dir, name, AtFlags::empty())?)
     }
 
+    fn remove_file(&self, path: &Path) -> io::Result<()> {
+        let (dir, name) = fd::parent(path, false, self.allow())?;
+        let is_file = fd::lstat_at(&dir, name)?
+            .is_some_and(|stat| FileType::from_raw_mode(stat.st_mode) == FileType::RegularFile);
+        if !is_file {
+            return Err(io::Error::other("not a file"));
+        }
+        Ok(unlinkat(&dir, name, AtFlags::empty())?)
+    }
+
     fn random(&self) -> u64 {
         let mut bytes = [0_u8; 8];
         if getrandom::fill(&mut bytes).is_err() {

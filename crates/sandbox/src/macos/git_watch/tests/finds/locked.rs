@@ -100,6 +100,9 @@ impl Fs for Locked {
     fn remove_link(&self, path: &Path) -> io::Result<()> {
         self.fs.remove_link(path)
     }
+    fn remove_file(&self, path: &Path) -> io::Result<()> {
+        self.fs.remove_file(path)
+    }
     fn random(&self) -> u64 {
         self.fs.random()
     }
@@ -140,13 +143,8 @@ fn an_unreadable_folder_ends_the_session_while_the_agent_may_run() {
         watch.events(&[event("/m/in", MOVED_IN)]).end,
         "an event's scan"
     );
-    // A network volume the watch never enters is no find.
-    fs.unlock();
-    fake.remove("/m/in");
-    fake.dir("/m/share");
-    fake.network("/m/share");
-    quiet(watch.full_scan(Phase::Running));
-    quiet(watch.events(&[event("/m/share", MOVED_IN)]));
+    // A network volume the watch never enters is no unreadable folder (`finds/volumes.rs` has
+    // a volume that appears).
     assert_eq!(notices.taken(), Vec::<crate::Denial>::new());
 }
 

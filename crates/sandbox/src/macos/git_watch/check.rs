@@ -1,7 +1,7 @@
 //! The watch's decisions: which events and which entries of a scan are found, and, once the
 //! session has ended, set aside.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::io;
@@ -18,10 +18,14 @@ use crate::GitItem;
 use crate::policy::{name_key, path_key};
 
 mod names;
+mod outcome;
 mod sweep;
+mod volumes;
 mod walk;
 
+use outcome::Found;
 pub(crate) use sweep::Sweep;
+use volumes::{Met, Seen};
 #[cfg(test)]
 pub(super) use walk::walk;
 use walk::{Next, Visit, walk_with};
@@ -70,24 +74,13 @@ pub(crate) struct Watch<F> {
     gone: u64,
     /// Called once per folder any walk lists: the runner's heartbeat.
     progress: Progress,
+    /// The volumes the launch met under the folder (`check/volumes.rs`); `None` for a record
+    /// made before they were kept.
+    volumes: Option<Seen>,
 }
 
 /// A hook called once per folder listed.
 pub(crate) type Progress = Arc<dyn Fn() + Send + Sync>;
-
-/// What a scan found: items to set aside, and folders it could not open or list, each with
-/// the error.
-#[derive(Default)]
-struct Found {
-    items: Vec<Item>,
-    unreadable: Vec<(PathBuf, String)>,
-}
-
-impl Found {
-    fn any(&self) -> bool {
-        !self.items.is_empty() || !self.unreadable.is_empty()
-    }
-}
 
 /// A folder's listing.
 type Entries = [(OsString, Kind)];
@@ -138,8 +131,10 @@ impl<F: Fs> Watch<F> {
         let mut sweep = Sweep::default();
         let mut repo_dirs: HashSet<PathBuf> = HashSet::new();
         let skip: HashSet<PathBuf> = launch.skip.iter().map(|p| path_key(p)).collect();
+        let met = RefCell::new(Met::default());
         let mut folder = |dir: &Path, meta: Meta, entries: &Entries| {
             folders.insert(meta.id);
+            met.borrow_mut().device(meta.id.0);
             if !launch.keep_repos {
                 // Nothing the profile doesn't make read-only is the launch's: notes.
             } else if repo_head(entries).is_some() {
@@ -158,9 +153,14 @@ impl<F: Fs> Watch<F> {
             skip: &|dir, _| skip.contains(&path_key(dir)),
             folder: &mut folder,
             unreadable: &mut |_, _| Next::Past,
+            refused: &mut |dir| {
+                met.borrow_mut().refused(dir);
+                Next::Past
+            },
             progress: &*progress,
         };
         walk_with(&fs, &matter, &mut visit);
+        base.volumes = Some(met.into_inner().record());
         let mut watch = Watch::resume(fs, matter, aside, base);
         watch.folders = folders;
         watch.all_old = false;
@@ -206,6 +206,7 @@ impl<F: Fs> Watch<F> {
             sweep: Sweep::default(),
             gone: 0,
             progress: Arc::new(|| {}),
+            volumes: base.volumes.as_ref().map(Seen::of),
             fs,
             matter,
             aside,
@@ -285,7 +286,7 @@ impl<F: Fs> Watch<F> {
                 break;
             }
         }
-        Asks { rescan, end: false }.and(self.put(found, Phase::Running))
+        Asks { rescan, end: false }.and(outcome::put(self, found, Phase::Running))
     }
 
     /// Counts `event`'s item when something arrived there and is gone now.
@@ -315,49 +316,7 @@ impl<F: Fs> Watch<F> {
             );
         }
         let found = self.scan(&self.matter, phase);
-        self.put(found, phase)
-    }
-
-    /// While the agent may run, any item ends the session, gone or not, as does a folder that
-    /// can't be read (it could hide one); once it has ended, each item still there, on a local
-    /// volume, is set aside, and each folder that can't be read is kept as stuck: the matter's
-    /// next launch is refused until it can be read.
-    fn put(&mut self, found: Found, phase: Phase) -> Asks {
-        let mut asks = Asks::default();
-        for (path, error) in found.unreadable {
-            match phase {
-                Phase::Running => {
-                    tracing::warn!(
-                        path = %path.display(), %error,
-                        "the git watch can't read a folder in the matter; ending the session"
-                    );
-                    asks.end = true;
-                }
-                Phase::Ended => self.aside.stuck.push(Stuck {
-                    path,
-                    reason: format!("Clauseo can't read this folder: {error}"),
-                    unreadable: true,
-                }),
-            }
-        }
-        for (path, what, kind) in found.items {
-            match phase {
-                Phase::Running => {
-                    tracing::warn!(
-                        path = %path.display(), ?what,
-                        "the git watch found a git item in the matter; ending the session"
-                    );
-                    asks.end = true;
-                }
-                Phase::Ended => {
-                    let local = path.parent().is_some_and(|dir| self.fs.local(dir));
-                    if local && self.fs.meta(&path).is_some() {
-                        self.aside.put(&self.fs, &path, what, kind);
-                    }
-                }
-            }
-        }
-        asks
+        outcome::put(self, found, phase)
     }
 
     /// Whether `path` (with path key `key`) is in `map`, still with its file ID.
@@ -486,7 +445,13 @@ impl<F: Fs> Watch<F> {
     ) -> bool {
         let over = Cell::new(false);
         let (mut items, mut unread) = (Vec::new(), Vec::new());
+        let mounts = RefCell::new(Vec::new());
+        let stop = if first { Next::Stop } else { Next::Past };
         let mut folder = |dir: &Path, meta: Meta, entries: &Entries| {
+            if self.new_volume(meta.id.0) {
+                mounts.borrow_mut().push(dir.to_owned());
+                return stop;
+            }
             let Some(left) = budget.get().checked_sub(entries.len()) else {
                 over.set(true);
                 return Next::Stop;
@@ -503,17 +468,26 @@ impl<F: Fs> Watch<F> {
         };
         let mut unreadable = |dir: &Path, error: &io::Error| {
             unread.push((dir.to_owned(), error.to_string()));
-            if first { Next::Stop } else { Next::Past }
+            stop
+        };
+        let mut refused = |dir: &Path| {
+            if self.new_refusal(dir) {
+                mounts.borrow_mut().push(dir.to_owned());
+                return stop;
+            }
+            Next::Past
         };
         let mut visit = Visit {
             skip: &|dir, _| self.passed(&path_key(dir), dir),
             folder: &mut folder,
             unreadable: &mut unreadable,
+            refused: &mut refused,
             progress: &*self.progress,
         };
         walk_with(&self.fs, top, &mut visit);
         found.items.extend(items);
         found.unreadable.extend(unread);
+        found.mounts.extend(mounts.into_inner());
         !over.get()
     }
 
@@ -526,7 +500,21 @@ impl<F: Fs> Watch<F> {
         let mut found = Found::default();
         let done = sweep::stretch(self, &mut sweep, out_of_time, &mut found);
         self.sweep = sweep;
-        (self.put(found, Phase::Running), done)
+        (outcome::put(self, found, Phase::Running), done)
+    }
+
+    /// Whether a folder on device `dev` is on a volume the launch didn't meet under the folder.
+    fn new_volume(&self, dev: u64) -> bool {
+        self.volumes
+            .as_ref()
+            .is_some_and(|seen| seen.new_device(dev))
+    }
+
+    /// Whether `dir`, on a volume a scan never enters, wasn't one at launch.
+    fn new_refusal(&self, dir: &Path) -> bool {
+        self.volumes
+            .as_ref()
+            .is_some_and(|seen| seen.new_refusal(dir))
     }
 
     /// Whether a scan passes folder `dir` (path key `key`) by: a launch repository, or the
