@@ -1,18 +1,19 @@
-//! The stop's WSL step (step 5b, `vms.rs`) through the fake: a VM whose folder a pool user's
-//! profile holds is ended and its user marked, every other VM (the lawyer's) is left alone, a
-//! VM that isn't ended or can't be mapped is 48, a list that fails is 48 only with WSL
-//! installed, and with no HCS nothing is asked.
+//! The stop's WSL step (step 5b, `vms.rs`) through the fake: a VM whose folder the lawyer's
+//! profile holds is left alone (a pool user holding it too is marked), a VM whose folder a pool
+//! user's profile holds is ended and its user marked, any other WSL VM is unmapped (48, every
+//! pool user marked, nothing ended), a VM that isn't ended is 48, a list that fails is 48 only
+//! with WSL installed, and with no HCS nothing is asked.
 
 use super::*;
 
-/// The lawyer's VM: no pool user's profile holds its folder.
+/// The lawyer's VM: the lawyer's profile holds its folder.
 const LAWYER_VM: &str = "0F0E0D0C-0B0A-4908-8706-050403020100";
 /// A pool user's VM, as WSL names its folder (upper case, no braces).
 const POOL_VM: &str = "6B29FC40-CA47-1067-B31D-00DD010662DA";
 
 /// HCS on the fake machine, and the pool's VM folders.
 pub(super) struct FakeVms {
-    /// `Stopper::compute_systems`: `Ok(None)` is no HCS.
+    /// `Stopper::compute_systems` (WSL's systems only): `Ok(None)` is no HCS.
     pub(super) systems: Result<Option<Vec<String>>, Failed>,
     /// `WSLService` or `LxssManager` is installed.
     pub(super) wsl: bool,
@@ -20,6 +21,12 @@ pub(super) struct FakeVms {
     pub(super) folders: Vec<(Sid, String)>,
     /// Pool users whose profile can't be read.
     pub(super) unreadable: Vec<Sid>,
+    /// The folders `temp\<id>` the lawyer's `Local AppData` holds.
+    pub(super) owner_folders: Vec<String>,
+    /// The lawyer's profile, or its redirect, can't be read.
+    pub(super) owner_unreadable: bool,
+    /// The lawyer's folder reads.
+    pub(super) owner_reads: usize,
     /// Ids whose termination fails.
     pub(super) refuse: Vec<String>,
     /// Ids that never end: each termination waits out its wait, on the fake clock.
@@ -35,6 +42,9 @@ impl Default for FakeVms {
             wsl: true,
             folders: Vec::new(),
             unreadable: Vec::new(),
+            owner_folders: Vec::new(),
+            owner_unreadable: false,
+            owner_reads: 0,
             refuse: Vec::new(),
             hang: Vec::new(),
             reads: 0,
@@ -60,6 +70,23 @@ impl VmStopper for Fake {
         Ok(self.vms.folders.contains(&folder))
     }
 
+    fn owner_vm_folder(&mut self, owner: &Sid, id: &VmId) -> Result<bool, Failed> {
+        assert_eq!(
+            owner.as_str(),
+            OWNER,
+            "only the lawyer's folders are read here"
+        );
+        self.vms.owner_reads += 1;
+        if self.vms.owner_unreadable {
+            return Err("the lawyer's Local AppData redirect can't be expanded".to_owned());
+        }
+        Ok(self
+            .vms
+            .owner_folders
+            .iter()
+            .any(|held| held == id.as_str()))
+    }
+
     fn terminate_vm(&mut self, id: &VmId, wait: Duration) -> Result<(), Failed> {
         self.waits.push(wait);
         let id = id.as_str().to_owned();
@@ -76,13 +103,14 @@ impl VmStopper for Fake {
 }
 
 /// A stop of pool users 1010 and 1011, with no process running, over HCS's `systems`, where
-/// 1011's profile holds `POOL_VM`'s folder.
+/// 1011's profile holds `POOL_VM`'s folder and the lawyer's `LAWYER_VM`'s.
 fn with_vms(systems: &[&str]) -> Fake {
     let mut fake = Fake::new(&[1010, 1011]);
     fake.snapshots = vec![Ok(vec![seen(11, Some(Sid::parse(OWNER).unwrap()))])];
     let systems = systems.iter().map(|id| (*id).to_owned()).collect();
     fake.vms.systems = Ok(Some(systems));
     fake.vms.folders = vec![(sid(1011), POOL_VM.to_owned())];
+    fake.vms.owner_folders = vec![LAWYER_VM.to_owned()];
     fake
 }
 
@@ -97,15 +125,16 @@ fn ended(fake: &Fake) -> Vec<&str> {
 
 #[test]
 fn a_pool_users_vm_is_ended_and_its_user_marked_and_the_lawyers_left() {
-    // HCS's id for the pool's VM in another case and with braces; an id that isn't a GUID (a
-    // container's) isn't WSL's.
+    // HCS's id for the pool's VM in another case and with braces.
     let braced = format!("{{{}}}", POOL_VM.to_ascii_lowercase());
-    let mut fake = with_vms(&[LAWYER_VM, &braced, "docker-0123"]);
+    let mut fake = with_vms(&[LAWYER_VM, &braced]);
     assert_eq!(stop(&mut fake), StopExit::Done);
     assert_eq!(ended(&fake), [POOL_VM]);
     assert_eq!(fake.waits, [VM_WAIT]);
     assert_eq!(fake.resets, [sid(1011)]);
-    // Each pool user is read for the lawyer's VM; 1010 then 1011 for the pool's.
+    // The lawyer first for each; each pool user for the lawyer's VM (a planted copy), then 1010
+    // and 1011 for the pool's.
+    assert_eq!(fake.vms.owner_reads, 2);
     assert_eq!(fake.vms.reads, 4);
     let (error, line) = &fake.logged[0];
     assert!(!error, "{line}");
@@ -147,6 +176,7 @@ fn a_pool_vm_that_isnt_ended_is_48_and_its_user_still_marked() {
 fn the_terminations_stop_once_their_time_is_spent() {
     let ids = [POOL_VM, "6B29FC40-CA47-1067-B31D-00DD010662DB", LAWYER_VM];
     let mut fake = with_vms(&ids);
+    fake.vms.owner_folders.clear();
     fake.vms.folders = ids.iter().map(|id| (sid(1010), (*id).to_owned())).collect();
     fake.vms.hang = ids.iter().map(|id| (*id).to_owned()).collect();
     assert_eq!(stop(&mut fake), StopExit::NotStopped);
@@ -160,12 +190,61 @@ fn the_terminations_stop_once_their_time_is_spent() {
 }
 
 #[test]
-fn a_vm_a_pool_users_unreadable_profile_may_hold_is_48_and_that_user_marked() {
+fn the_lawyers_vm_is_left_and_a_pool_users_planted_copy_of_its_folder_marks_that_user() {
     let mut fake = with_vms(&[LAWYER_VM]);
+    fake.vms.folders = vec![(sid(1010), LAWYER_VM.to_owned())];
+    assert_eq!(stop(&mut fake), StopExit::Done);
+    assert_eq!(ended(&fake), Vec::<&str>::new());
+    assert_eq!(fake.resets, [sid(1010)]);
+    let line = &fake.logged[0].1;
+    assert!(
+        line.contains("0 pool WSL VMs ended, 0 not, 0 unmapped"),
+        "{line}"
+    );
+}
+
+#[test]
+fn an_unknown_wsl_vm_is_48_marks_every_pool_user_and_nothing_is_ended() {
+    // No folder names it: another account's VM, or a pool user's hidden one.
+    let unknown = "11111111-2222-4333-8444-555555555555";
+    let mut fake = with_vms(&[unknown, POOL_VM]);
+    fake.vms.refuse = vec![unknown.to_owned()];
+    assert_eq!(stop(&mut fake), StopExit::NotStopped);
+    // The pool's VM is still ended; the unknown one is never tried.
+    assert_eq!(ended(&fake), [POOL_VM]);
+    assert_eq!(fake.waits, [VM_WAIT]);
+    assert_eq!(fake.resets, [sid(1010), sid(1011)]);
+    assert_eq!(fake.completed(), None);
+    let line = &fake.logged[0].1;
+    assert!(
+        line.contains("1 pool WSL VMs ended, 0 not, 1 unmapped"),
+        "{line}"
+    );
+    assert!(line.contains("WSL VM's user isn't known"), "{line}");
+    // A WSL system whose id isn't a GUID is unmapped too.
+    let mut fake = with_vms(&["wsl-container"]);
+    assert_eq!(stop(&mut fake), StopExit::NotStopped);
+    assert_eq!(ended(&fake), Vec::<&str>::new());
+}
+
+#[test]
+fn a_vm_whose_lawyers_folder_cant_be_read_is_unmapped_even_with_a_pool_users_folder() {
+    let mut fake = with_vms(&[POOL_VM]);
+    fake.vms.owner_unreadable = true;
+    assert_eq!(stop(&mut fake), StopExit::NotStopped);
+    assert_eq!(ended(&fake), Vec::<&str>::new());
+    assert_eq!(fake.resets, [sid(1010), sid(1011)]);
+    assert!(fake.logged[0].1.contains("1 unmapped"), "{:?}", fake.logged);
+}
+
+#[test]
+fn a_vm_a_pool_users_unreadable_profile_may_hold_is_48_and_every_user_marked() {
+    let unknown = "11111111-2222-4333-8444-555555555555";
+    let mut fake = with_vms(&[unknown]);
     fake.vms.unreadable = vec![sid(1010)];
     assert_eq!(stop(&mut fake), StopExit::NotStopped);
     assert_eq!(ended(&fake), Vec::<&str>::new());
-    assert_eq!(fake.resets, [sid(1010)]);
+    assert_eq!(fake.resets, [sid(1010), sid(1011)]);
     assert!(fake.logged[0].1.contains("1 unmapped"), "{:?}", fake.logged);
     // With no VM at all, nothing is read, so nothing is unknown.
     let mut fake = with_vms(&[]);
@@ -213,12 +292,45 @@ fn only_a_guid_is_a_vm_id_and_it_is_held_upper_case_without_braces() {
 }
 
 #[test]
-fn the_lists_ids_are_read_from_hcs_json_and_anything_else_is_refused() {
-    let document = r#"[{"Id":"A","SystemType":"VirtualMachine","Owner":"WSL"},{"Id":"b"}]"#;
-    assert_eq!(ids_from_json(document).unwrap(), ["A", "b"]);
-    assert_eq!(ids_from_json("[]").unwrap(), Vec::<String>::new());
+fn the_lists_wsl_ids_are_read_from_hcs_json_and_anything_else_is_refused() {
+    let document = r#"[{"Id":"A","SystemType":"VirtualMachine","Owner":"WSL"},{"Id":"b"},
+        {"Id":"C","Owner":"docker"},{"Id":"D","Owner":"wsl"},{"Id":"E","Owner":"WSL"}]"#;
+    assert_eq!(wsl_ids_from_json(document).unwrap(), ["A", "E"]);
+    assert_eq!(wsl_ids_from_json("[]").unwrap(), Vec::<String>::new());
     for bad in ["", "{}", r#"[{"Owner":"WSL"}]"#, "[1]"] {
-        let why = ids_from_json(bad).unwrap_err();
+        let why = wsl_ids_from_json(bad).unwrap_err();
         assert!(!why.contains("WSL"), "{why}");
+    }
+}
+
+#[test]
+fn the_lawyers_local_app_data_redirect_is_expanded_against_its_profile_only() {
+    let profile = r"C:\Users\lawyer";
+    let expanded = |value: &str| local_app_data(value, profile);
+    assert_eq!(
+        expanded(r"%USERPROFILE%\AppData\Local").as_deref(),
+        Some(r"C:\Users\lawyer\AppData\Local")
+    );
+    assert_eq!(
+        expanded(r" %userprofile%\Local ").as_deref(),
+        Some(r"C:\Users\lawyer\Local")
+    );
+    assert_eq!(
+        expanded(r"D:\Data\Local").as_deref(),
+        Some(r"D:\Data\Local")
+    );
+    assert_eq!(
+        expanded(r"\\server\share\lawyer").as_deref(),
+        Some(r"\\server\share\lawyer")
+    );
+    for refused in [
+        r"%LOCALAPPDATA%",
+        r"%HOMEDRIVE%%HOMEPATH%\Local",
+        r"%USERPROFILE%\%X%",
+        r"AppData\Local",
+        r"C:",
+        "",
+    ] {
+        assert_eq!(expanded(refused), None, "{refused}");
     }
 }

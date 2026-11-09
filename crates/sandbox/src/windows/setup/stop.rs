@@ -58,12 +58,13 @@
 //!    cancelled. One that can't be cancelled, or whose owner can't be read, is 48; so is a list
 //!    of [`JOBS_CAP`] jobs, the most read, as more may be past it (the pool's jobs within it are
 //!    cancelled first, and the log line says the list was longer);
-//!    5b. ends each pool user's WSL 2 VM ([`vms`]): every HCS compute system whose folder,
-//!    `AppData\Local\temp\<id>`, is in a pool user's profile is terminated, with a bounded
-//!    wait, and its user marked; any other system (the lawyer's VMs) is left alone. With no
-//!    HCS (`computecore.dll` or the `vmcompute` service missing) there is nothing to do. A
-//!    pool user's VM that isn't ended, a VM that may be a pool user's whose folder couldn't be
-//!    read, or a list that fails while `WSLService` or `LxssManager` is installed, is 48. The
+//!    5b. ends each pool user's WSL 2 VM ([`vms`]): of HCS's compute systems owned by `WSL`,
+//!    one whose folder, `temp\<id>` under `Local AppData`, is in the lawyer's profile is left
+//!    alone (checked first); one whose folder is in a pool user's profile is terminated, with a
+//!    bounded wait, and its user marked; any other is unmapped and marks every pool user. With
+//!    no HCS (`computecore.dll` or the `vmcompute` service missing) there is nothing to do. A
+//!    pool user's VM that isn't ended, an unmapped WSL system, or a list that fails while
+//!    `WSLService` or `LxssManager` is installed, is 48. The
 //!    pool's WSL 1 instances need nothing more: their pico processes, `wslhost.exe` and
 //!    `wslrelay.exe` carry the pool user's token, and step 4 stops them;
 //! 6. adds each pool user it found running, owning a job or a VM, to the record's `ResetSids`,
@@ -121,7 +122,9 @@ use crate::windows::sids::Sid;
 
 pub use super::pool_steps::{Failed, Pool};
 pub use pick::{Image, Picked, Process, image_names, kernel_made, pick};
-pub use vms::{LIST_WAIT, VM_WAIT, VMS_BUDGET, VmId, VmStopper, ids_from_json};
+pub use vms::{
+    LIST_WAIT, VM_WAIT, VMS_BUDGET, VmId, VmStopper, WSL_OWNER, local_app_data, wsl_ids_from_json,
+};
 
 mod owed;
 mod pick;
@@ -324,7 +327,7 @@ fn run_steps(fs: &mut impl Stopper) -> Result<String, Refusal> {
         Err(why) => format!("; the sweep task couldn't be requested ({why})"),
     };
     let cancelled = cancel_jobs(fs, &pool.users, &mut passes);
-    let vms = vms::stop_vms(fs, &pool.users, &mut passes);
+    let vms = vms::stop_vms(fs, &pool, &mut passes);
     // Without the list, a process no token names is unknown: the line says why.
     let list = if passes.list_failed {
         " (the process list couldn't be read)"
@@ -366,7 +369,7 @@ fn run_steps(fs: &mut impl Stopper) -> Result<String, Refusal> {
         );
     }
     if passes.vms.left > 0 || passes.vms.unmapped > 0 {
-        return not_stopped("a pool user's WSL VM wasn't ended, or a VM's user couldn't be read");
+        return not_stopped("a pool user's WSL VM wasn't ended, or a WSL VM's user isn't known");
     }
     if passes.left > 0 {
         return not_stopped("a pool user's process was still there when the passes' time ran out");

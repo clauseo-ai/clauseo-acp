@@ -378,6 +378,12 @@ file (`unknown images: ...`), by file name only. A security product that hides i
 tokens from SYSTEM can cause this on every run; tell Clauseo support the file names the line
 gives.
 
+The line's `unmapped` count is WSL 2 VMs the task couldn't tie to the signed-in lawyer or to a
+sandbox user, which it leaves running. Another Windows account that uses WSL on the same computer
+causes this while its VM runs (a VM's owner can only be read from the profile that holds its
+folder); the task then ends at 48 and resets every sandbox user, and a later run after that VM
+ends completes.
+
 ### If the SandboxSweep task ends with 56 or 57
 
 The SYSTEM task `\Clauseo\SandboxSweep` runs at the end of every sandboxed session. It deletes the

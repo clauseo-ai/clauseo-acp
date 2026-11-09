@@ -304,4 +304,5 @@ fn elevated_the_stops_hcs_calls_list_and_treat_a_missing_system_as_gone() {
     );
     let nobody = Sid::parse("S-1-5-21-1-2-3-4000").unwrap();
     assert_eq!(stopper.vm_folder(&nobody, &unused), Ok(false));
+    assert_eq!(stopper.owner_vm_folder(&nobody, &unused), Ok(false));
 }
