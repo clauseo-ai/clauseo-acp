@@ -82,6 +82,8 @@ export const HI = {
     "Clauseo इंस्टॉल होने के बाद से सुरक्षित कार्यक्षेत्र तैयार करने वाला प्रोग्राम बदल गया है। उसे वापस लाने के लिए Clauseo फिर से इंस्टॉल करें।",
   "The folder that holds the Safe workspace's set-up program isn't limited to administrators, or holds files it shouldn't. Your firm manages this folder on this computer.":
     "सुरक्षित कार्यक्षेत्र का सेटअप प्रोग्राम जिस फ़ोल्डर में है, वह केवल व्यवस्थापकों तक सीमित नहीं है, या उसमें ऐसी फ़ाइलें हैं जो नहीं होनी चाहिए। इस कंप्यूटर पर यह फ़ोल्डर आपकी फ़र्म प्रबंधित करती है।",
+  "Another program on this computer limits what Clauseo can start, so Clauseo couldn't start the AI tool in the Safe workspace.":
+    "इस कंप्यूटर पर कोई दूसरा प्रोग्राम सीमित करता है कि Clauseo क्या शुरू कर सकता है, इसलिए Clauseo सुरक्षित कार्यक्षेत्र में AI टूल शुरू नहीं कर सका।",
   "The Safe workspace on this computer belongs to another Windows account. Your firm manages this computer's Windows accounts.":
     "इस कंप्यूटर का सुरक्षित कार्यक्षेत्र किसी दूसरे Windows खाते का है। इस कंप्यूटर के Windows खाते आपकी फ़र्म प्रबंधित करती है।",
   "Something on this computer stops the Safe workspace. Your firm manages this computer's settings.":

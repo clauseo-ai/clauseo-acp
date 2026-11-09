@@ -70,6 +70,10 @@ test.each([
   ],
   ["admin_copy_missing", "The Safe workspace wasn't set up when Clauseo was installed."],
   [
+    "other_programs_job",
+    "Another program on this computer limits what Clauseo can start, so Clauseo couldn't start the AI tool in the Safe workspace.",
+  ],
+  [
     "admin_copy_changed",
     "The program that sets up the Safe workspace has changed since Clauseo was installed. Install Clauseo again to restore it.",
   ],
@@ -112,6 +116,14 @@ test("the repair is the installer only for a missing admin copy; set-up causes k
     expect(needsInstaller(cause(c))).toBe(false);
 });
 
+test("other_programs_job is not repairable in the app: no installer, no set-up again, no retry", () => {
+  const c = cause({ blocked: { reason: "other_programs_job" } });
+  expect(blockOf(c)).toBe("other_programs_job");
+  expect(needsInstaller(c)).toBe(false);
+  expect(setUpFixes(c)).toBe(false);
+  expect(canRetry(c)).toBe(false);
+});
+
 test("setting up again is offered for logon_right only; every other block keeps no retry", () => {
   expect(setUpFixes(cause({ blocked: { reason: "logon_right" } }))).toBe(true);
   expect(canRetry(cause({ blocked: { reason: "logon_right" } }))).toBe(true);
@@ -121,6 +133,7 @@ test("setting up again is offered for logon_right only; every other block keeps 
     "admin_copy_missing",
     "admin_copy_changed",
     "admin_copy_unsafe",
+    "other_programs_job",
     "something_new",
   ]) {
     expect(setUpFixes(cause({ blocked: { reason } }))).toBe(false);

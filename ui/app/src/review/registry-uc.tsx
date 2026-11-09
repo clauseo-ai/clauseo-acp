@@ -48,6 +48,7 @@ const P = {
   missing: np({ blocked: { reason: "admin_copy_missing" } }),
   logon: np({ blocked: { reason: "logon_right" } }),
   policy: np({ blocked: { reason: "policy" } }),
+  otherJob: np({ blocked: { reason: "other_programs_job" } }),
   tool: np({ blocked: { reason: "tool_missing" } }),
   changed: np({ blocked: { reason: "admin_copy_changed" } }),
   unsafe: np({ blocked: { reason: "admin_copy_unsafe" } }),
@@ -183,7 +184,7 @@ const REFUSED_INVALID: FakeProtectionHost = {
   },
 };
 
-/** UC's entries, UC-01 to UC-96, each id written as it is; ids missing are unused. */
+/** UC's entries, UC-01 to UC-112, each id written as it is; ids missing are unused. */
 export const UC: Entry[] = [
   room(
     "UC-01",
@@ -585,5 +586,12 @@ export const UC: Entry[] = [
     undefined,
     {},
     P.missing,
+  ),
+  settings(
+    "UC-112",
+    pw(
+      "Another program on this computer limits what Clauseo can start, so Clauseo couldn't start the AI tool in the Safe workspace.",
+    ),
+    held(P.otherJob),
   ),
 ];

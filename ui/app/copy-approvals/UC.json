@@ -720,5 +720,15 @@
     "status": "provisional",
     "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-112": {
+    "en": "Another program on this computer limits what Clauseo can start, so Clauseo couldn't start the AI tool in the Safe workspace.",
+    "hi": "इस कंप्यूटर पर कोई दूसरा प्रोग्राम सीमित करता है कि Clauseo क्या शुरू कर सकता है, इसलिए Clauseo सुरक्षित कार्यक्षेत्र में AI टूल शुरू नहीं कर सका।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "approved",
+    "at": "2026-11-09",
+    "by": "orchestrator (settled en)"
   }
 }

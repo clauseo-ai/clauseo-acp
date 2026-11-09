@@ -20,6 +20,7 @@ export type BlockReason =
   | "admin_copy_missing"
   | "admin_copy_changed"
   | "admin_copy_unsafe"
+  | "other_programs_job"
   | "other_account";
 
 /** Each reason's line: the lawyer's own step where one exists (set up again, install again), else
@@ -36,6 +37,8 @@ const REASON_WORDS: Record<BlockReason, ProtectionKey> = {
     "The program that sets up the Safe workspace has changed since Clauseo was installed. Install Clauseo again to restore it.",
   admin_copy_unsafe:
     "The folder that holds the Safe workspace's set-up program isn't limited to administrators, or holds files it shouldn't. Your firm manages this folder on this computer.",
+  other_programs_job:
+    "Another program on this computer limits what Clauseo can start, so Clauseo couldn't start the AI tool in the Safe workspace.",
   other_account:
     "The Safe workspace on this computer belongs to another Windows account. Your firm manages this computer's Windows accounts.",
 };

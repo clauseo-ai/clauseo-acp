@@ -16,6 +16,7 @@ export const PROT = {
   missing: np({ blocked: { reason: "admin_copy_missing" } }),
   logon: np({ blocked: { reason: "logon_right" } }),
   policy: np({ blocked: { reason: "policy" } }),
+  otherJob: np({ blocked: { reason: "other_programs_job" } }),
   blockedNewer: np({ blocked: { reason: "a_reason_from_a_newer_clauseo" } }),
   otherAccount: np("other_account"),
 };
