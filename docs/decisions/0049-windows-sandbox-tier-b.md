@@ -354,9 +354,16 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
 - **Another matter's allowed, read or runtime paths** beside a matter get no sibling deny, so
   every pool user reads them wherever `Users` can. Owner: S15 close-out, Rohan's read-gap
   decision.
-- **A drive letter with no DOS device counts as local** (Low): the walk reads drive letters with
-  `QueryDosDeviceW` and refuses a matter on a network drive. Whether Windows lazily reconnects a
-  persistent mapping on the first open of such a letter is unverified. Owner: S15 close-out.
+- **A drive letter with no DOS device counts as local** (measured). The walk reads drive letters
+  with `QueryDosDeviceW` and refuses a matter on a network drive.
+  - An Unavailable persistent mapping to a host that doesn't exist has no DOS device
+    (`QueryDosDeviceW` error 2). The walk counts it as local and missing and skips it, and the
+    launch goes on.
+  - A Disconnected mapping that has a device refuses with the `gitdir:` refusal.
+  - Neither case makes a network attempt. pktmon (twice) and ETW (SMB client, TCP/IP, DNS) showed
+    no 445, 139, 137 or 5355 traffic, no name lookup and no NTLM. The policy built in 53 ms.
+  - The pool user's logon session can't see the lawyer's mapping.
+  - A letter that appears mid-session is outside the launch check's scope.
 - **A VHD mounted from a share** shows as a local `HarddiskVolume`, so a matter on it is walked
   and admitted; its reads reach the server (known limit). Owner: S15 close-out.
 - **Links inside `.git` and `include.path` in a repository's `config`** are not checked by the
