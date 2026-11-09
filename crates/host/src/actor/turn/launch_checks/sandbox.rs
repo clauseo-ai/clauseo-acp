@@ -408,6 +408,7 @@ fn kind(error: &clauseo_sandbox::Error) -> &'static str {
         E::ProtectedLink { .. } => "a protected item in the matter is a shortcut",
         E::NetworkUnfiltered { .. } => "the matter's network filter isn't in place",
         E::Blocked(_) => "it is blocked on this computer, and whoever looks after it can lift that",
+        E::UncleanSession(_) => "its clean-up after an earlier session isn't finished",
     }
 }
 
