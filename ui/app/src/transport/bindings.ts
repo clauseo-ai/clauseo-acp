@@ -2870,7 +2870,9 @@ export type InstallProgress =
 ({ missing: {
 	/**
 	 *  Bytes an install would download here, Node's archive included when Node would be
-	 *  downloaded ("About {size} MB").
+	 *  downloaded ("About {size} MB"). Python's archive is never in it: it is in
+	 *  [`PythonProgress::Missing`], once for the computer, so a window adds that once to
+	 *  the missing agents' sizes.
 	 */
 	download_bytes: Count,
 } }) & { downloading?: never; failed?: never; ready?: never; waiting?: never } | 
@@ -4313,6 +4315,24 @@ export type ProtectionWork =
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
 
+/**
+ *  What refused to start Python, for [`PythonFailureCause::RunBlocked`]: read only from the
+ *  error code the failed start returned, with no further probing.
+ */
+export type PythonBlockedBy = 
+/**
+ *  App Control for Business (WDAC) or Smart App Control: Windows error 4551
+ *  (`ERROR_SYSTEM_INTEGRITY_POLICY_VIOLATION`) or its NT status `0xC0E90002`.
+ */
+"app_control" | 
+/**
+ *  `AppLocker` or Software Restriction Policies: Windows error 1260
+ *  (`ERROR_ACCESS_DISABLED_BY_POLICY`).
+ */
+"applocker" | 
+/**  Any other refusal: access denied, or `STATUS_INVALID_IMAGE_HASH` (`0xC0000428`). */
+"unknown";
+
 /**  Why the Python runtime's install stopped. */
 export type PythonFailureCause = 
 /**  A proxy or TLS refused the download. */
@@ -4333,17 +4353,34 @@ export type PythonFailureCause =
  *  Where the Python runtime the agents use is: `agents`' `PythonState`. One for the computer,
  *  installed after an agent's install in the same job; its failure never changes an agent's
  *  [`InstallProgress`]. Rides on [`crate::SetupEvent::SetupInfo`]'s optional `python`.
+ * 
+ *  Its retry: [`crate::SetupCommand::RetryAgentInstall`] for **any** ready agent retries
+ *  Python (one for the computer); the window may send any ready plan's id. That agent's own
+ *  install is left as it is: it stays `Ready`, and nothing of it is fetched or installed again.
  */
 export type PythonProgress = 
 /**  This build has no Python for this computer: nothing is fetched. */
 "unavailable" | 
 /**  Not installed, and no install of it running. */
 ({ missing: {
-	/**  Bytes its install would download (already in each agent's `Missing`). */
+	/**
+	 *  Bytes its install would download. No agent's [`InstallProgress::Missing`] counts
+	 *  them, so the size to show is the missing agents' sum plus this, once.
+	 */
 	download_bytes: Count,
 } }) & { downloading?: never; failed?: never; ready?: never; waiting?: never } | 
 /**  Offline: its install waits and tries again by itself. */
 ({ waiting: {
+	/**
+	 *  Why it waits, as an agent's `Waiting`: `agent.install_offline`. Missing from an
+	 *  older host.
+	 */
+	code?: ErrorCode,
+	/**
+	 *  The hosts Python's download contacts, for "Ask your IT team"; empty (left out) from
+	 *  an older host.
+	 */
+	hosts?: string[],
 	/**  The log so far, for "Details". */
 	log: InstallLog,
 } }) & { downloading?: never; failed?: never; missing?: never; ready?: never } | 
@@ -4362,12 +4399,28 @@ export type PythonProgress =
 	version: string,
 } }) & { downloading?: never; failed?: never; missing?: never; waiting?: never } | 
 /**
- *  Stopped with a failure; [`crate::SetupCommand::RetryAgentInstall`] for a ready agent
+ *  Stopped with a failure; [`crate::SetupCommand::RetryAgentInstall`] for any ready agent
  *  tries again.
  */
 ({ failed: {
 	/**  Why. */
 	cause: PythonFailureCause,
+	/**
+	 *  For a download-side cause, the agent install's code for it: `agent.install_blocked`,
+	 *  `agent.install_disk_full` or `agent.install_failed`. Missing for `run_blocked` and
+	 *  `run_failed` (no code names them), and from an older host.
+	 */
+	code?: ErrorCode,
+	/**
+	 *  For [`PythonFailureCause::Blocked`]: the hosts Python's download contacts, for "Ask
+	 *  your IT team"; empty (left out) otherwise.
+	 */
+	hosts?: string[],
+	/**
+	 *  For [`PythonFailureCause::RunBlocked`]: which kind of policy refused the start, read
+	 *  from the error code alone. Missing for every other cause, and from an older host.
+	 */
+	blocked_by?: PythonBlockedBy,
 	/**  The log, for "Details". */
 	log: InstallLog,
 } }) & { downloading?: never; missing?: never; ready?: never; waiting?: never };
@@ -4880,7 +4933,13 @@ export type SetupCommand =
 	/**  The agent. */
 	agent: AgentId,
 } }) & { cancel_sign_in?: never; clear_agent_key?: never; find_login?: never; open_sign_in_page?: never; paste_sign_in_code?: never; retry_agent_install?: never; set_agent_key?: never; set_firm_endpoint?: never; sign_out?: never; start_sign_in?: never; stop_using_login?: never; use_device_code?: never; use_different_account?: never; use_found_login?: never } | 
-/**  Start a failed or paused install again. */
+/**
+ *  Start a failed or paused install again. On a ready agent it retries the Python runtime
+ *  instead (when Python is missing, waiting or failed): Python is one for the computer, so
+ *  retrying any ready agent's install retries it, and the window may send any ready plan's
+ *  id. The ready agent's own install is left alone: it stays ready and nothing of it is
+ *  fetched or installed again.
+ */
 ({ retry_agent_install: {
 	/**  The agent. */
 	agent: AgentId,

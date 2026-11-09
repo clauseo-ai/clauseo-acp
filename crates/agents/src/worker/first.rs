@@ -33,7 +33,6 @@ pub(super) async fn first_states<T: Timer + Send + Sync + 'static>(worker: &Work
         let keep = keep.map(crate::snapshot::PythonArchive::stem);
         drop(python::remove_stale_runtimes(&config.data_dir, keep));
     }
-    let python_needed = python::needed(config);
     worker.shared.set_python_bytes(
         config
             .snapshot
@@ -77,7 +76,7 @@ pub(super) async fn first_states<T: Timer + Send + Sync + 'static>(worker: &Work
         let node_needed = search.found.is_none() && !install::runtime_ready(config);
         let download_bytes = config
             .snapshot
-            .download_bytes(&agent, config.platform, node_needed, python_needed)
+            .download_bytes(&agent, config.platform, node_needed)
             .unwrap_or(0);
         worker
             .shared

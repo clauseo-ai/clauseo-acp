@@ -62,7 +62,7 @@
 //!   [`ca_cert_var`], the CA variable of each agent's CLI.
 //! - [`InstallState`], [`Failure`], [`FailureKind`] (with its error code), [`InstallLog`] and
 //!   [`Installed`]; [`PythonState`] ([`AgentsEvent::Python`], [`Agents::python_state`]),
-//!   [`PythonFailure`], [`PythonFailureKind`] and [`python_command_dir`].
+//!   [`PythonFailure`], [`PythonFailureKind`], [`PythonBlocker`] and [`python_command_dir`].
 //! - [`SigninState`], [`Found`], [`LoginFrom`], [`Source`], [`SigninCode`] (with its error
 //!   code), [`Method`], [`SigninError`], [`PasteCode`] and [`SigninConfig`];
 //!   [`SigninNote`]; [`AgentsEvent::Signin`], [`AgentsEvent::OpenUrl`] and
@@ -171,8 +171,8 @@ pub use snapshot::{
     Snapshot, SnapshotError,
 };
 pub use state::{
-    AgentsEvent, Failure, FailureKind, InstallState, Installed, PythonFailure, PythonFailureKind,
-    PythonState,
+    AgentsEvent, Failure, FailureKind, InstallState, Installed, PythonBlocker, PythonFailure,
+    PythonFailureKind, PythonState,
 };
 pub use status::is_sign_in_again;
 pub use worker::{Agents, OwnLogin};

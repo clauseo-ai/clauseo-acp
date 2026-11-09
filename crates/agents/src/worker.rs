@@ -174,7 +174,9 @@ impl Agents {
     }
 
     /// Starts a `Failed`, `Waiting` or `Paused` install again with a fresh count of tries, or,
-    /// for a `Ready` agent, Python's install when it is `Missing`, `Waiting` or `Failed`. With
+    /// for a `Ready` agent, Python's install when it is `Missing`, `Waiting` or `Failed`:
+    /// Python is one for the computer, so a retry of any `Ready` agent retries it, and that
+    /// agent's own install is not redone (its job finds its receipt and goes to Python). With
     /// `use_system_proxy`, the OS's static proxy setting is read now and kept for later
     /// installs (a proxy set in the install settings still wins).
     pub fn retry(&self, agent: &AgentId, use_system_proxy: bool) {

@@ -37,6 +37,9 @@ pub(crate) struct Wiring {
     /// Where each settings read's network facts go (`setup/network.rs`): none until the setup
     /// thread sets it.
     pub(crate) network: NetworkFollow,
+    /// The hosts the Python runtime's download contacts, for its `Waiting` and blocked
+    /// `Failed` (`backend/entry.rs`); none until the setup thread sets them.
+    pub(crate) python_hosts: Vec<String>,
 }
 
 impl Wiring {
@@ -61,7 +64,15 @@ impl Wiring {
             refusal_gate: futures::lock::Mutex::new(()),
             applied: Mutex::new(start),
             network: NetworkFollow::default(),
+            python_hosts: Vec::new(),
         }
+    }
+
+    /// Python's download hosts are `hosts`.
+    #[must_use]
+    pub(crate) fn with_python_hosts(mut self, hosts: Vec<String>) -> Self {
+        self.python_hosts = hosts;
+        self
     }
 
     /// The network facts of each settings read go to `network`.

@@ -4,10 +4,13 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use clauseo_agents::{InstallState, Installed, PythonFailureKind, PythonState};
+use clauseo_agents::{
+    FailureKind, InstallState, Installed, PythonBlocker, PythonFailure, PythonFailureKind,
+    PythonState,
+};
 use clauseo_protocol::{
-    AgentId, AgentKind, Count, ErrorCode, InstallLog, InstallProgress, PythonFailureCause,
-    PythonProgress, SetupEvent, SignInSource,
+    AgentId, AgentKind, Count, ErrorCode, InstallLog, InstallProgress, PythonBlockedBy,
+    PythonFailureCause, PythonProgress, SetupEvent, SignInSource,
 };
 use clauseo_settings::AgentLaunch;
 
@@ -51,12 +54,10 @@ pub(crate) fn launch(
     })
 }
 
-/// `state` on the wire, with `hosts` for a waiting or failed install; `None` for a state this
-/// version does not know.
 /// Python's state out to the windows: `SetupInfo` again, with the keychain's answer as at the
 /// start and `python` set. A state the wire does not know is not sent.
 pub(crate) fn python_event(backend: &super::AgentsBackend, state: &PythonState) {
-    let Some(python) = python_progress(state) else {
+    let Some(python) = python_progress(state, &backend.wiring.python_hosts) else {
         return;
     };
     backend.events.publish(SetupEvent::SetupInfo {
@@ -65,15 +66,21 @@ pub(crate) fn python_event(backend: &super::AgentsBackend, state: &PythonState) 
     });
 }
 
-/// `agents`' Python state as the wire's.
-pub(crate) fn python_progress(state: &PythonState) -> Option<PythonProgress> {
+/// `agents`' Python state as the wire's, with `hosts` (Python's download hosts) and the agent
+/// install's code for a waiting or download-blocked one, as [`progress`] gives an agent's;
+/// `None` for a state this version does not know.
+pub(crate) fn python_progress(state: &PythonState, hosts: &[String]) -> Option<PythonProgress> {
     let log = |log: &clauseo_agents::InstallLog| InstallLog::new(log.lines().iter().cloned());
     Some(match state {
         PythonState::Unavailable => PythonProgress::Unavailable,
         PythonState::Missing { download_bytes } => PythonProgress::Missing {
             download_bytes: Count::clamped(*download_bytes),
         },
-        PythonState::Waiting { log: lines, .. } => PythonProgress::Waiting { log: log(lines) },
+        PythonState::Waiting { reason, log: lines } => PythonProgress::Waiting {
+            code: Some(ErrorCode::from_str_lossy(reason.code())),
+            hosts: hosts.to_vec(),
+            log: log(lines),
+        },
         PythonState::Downloading { received, total } => PythonProgress::Downloading {
             received: Count::clamped(*received),
             total: Count::clamped(*total),
@@ -82,20 +89,37 @@ pub(crate) fn python_progress(state: &PythonState) -> Option<PythonProgress> {
         PythonState::Ready { version } => PythonProgress::Ready {
             version: version.clone(),
         },
-        PythonState::Failed(failure) => PythonProgress::Failed {
-            cause: match failure.kind {
-                PythonFailureKind::Blocked => PythonFailureCause::Blocked,
-                PythonFailureKind::DiskFull => PythonFailureCause::DiskFull,
-                PythonFailureKind::RunBlocked => PythonFailureCause::RunBlocked,
-                PythonFailureKind::RunFailed => PythonFailureCause::RunFailed,
-                _ => PythonFailureCause::Failed,
-            },
-            log: log(&failure.log),
-        },
+        PythonState::Failed(failure) => python_failed(failure, hosts, log(&failure.log)),
         _ => return None,
     })
 }
 
+/// A failed Python install on the wire: a download-side failure with the agent install's code,
+/// a blocked download with `hosts` too, a refused start with what refused it.
+fn python_failed(failure: &PythonFailure, hosts: &[String], log: InstallLog) -> PythonProgress {
+    let (cause, kind) = match failure.kind {
+        PythonFailureKind::Blocked => (PythonFailureCause::Blocked, Some(FailureKind::Blocked)),
+        PythonFailureKind::DiskFull => (PythonFailureCause::DiskFull, Some(FailureKind::DiskFull)),
+        PythonFailureKind::RunBlocked => (PythonFailureCause::RunBlocked, None),
+        PythonFailureKind::RunFailed => (PythonFailureCause::RunFailed, None),
+        _ => (PythonFailureCause::Failed, Some(FailureKind::Failed)),
+    };
+    let blocked = cause == PythonFailureCause::Blocked;
+    PythonProgress::Failed {
+        cause,
+        code: kind.map(|kind| ErrorCode::from_str_lossy(kind.code())),
+        hosts: if blocked { hosts.to_vec() } else { Vec::new() },
+        blocked_by: failure.blocked_by.map(|by| match by {
+            PythonBlocker::AppControl => PythonBlockedBy::AppControl,
+            PythonBlocker::AppLocker => PythonBlockedBy::AppLocker,
+            _ => PythonBlockedBy::Unknown,
+        }),
+        log,
+    }
+}
+
+/// `state` on the wire, with `hosts` for a waiting or failed install; `None` for a state this
+/// version does not know.
 pub(crate) fn progress(state: &InstallState, hosts: &[String]) -> Option<InstallProgress> {
     Some(match state {
         InstallState::Missing { download_bytes } => InstallProgress::Missing {

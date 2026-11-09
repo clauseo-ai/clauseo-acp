@@ -538,6 +538,20 @@ pub fn failed(agent: &clauseo_protocol::AgentId, kind: crate::FailureKind) -> cr
     })
 }
 
+/// A `Failed` Python install of `kind` for tests, refused by `blocked_by`, with `agent`'s
+/// empty log.
+pub fn python_failed(
+    agent: &clauseo_protocol::AgentId,
+    kind: crate::PythonFailureKind,
+    blocked_by: Option<crate::PythonBlocker>,
+) -> crate::PythonState {
+    crate::PythonState::Failed(crate::PythonFailure {
+        kind,
+        blocked_by,
+        log: crate::InstallLog::new(agent),
+    })
+}
+
 /// Writes `bytes` to `path`, making its folder, replacing any file there.
 pub fn write_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
     if let Some(parent) = path.parent() {

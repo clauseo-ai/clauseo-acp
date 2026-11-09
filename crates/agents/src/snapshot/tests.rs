@@ -242,11 +242,11 @@ fn sizes_follow_the_records_formula() {
     let snapshot = Snapshot::embedded();
     let mac = Platform::new(Os::Darwin, Arch::Arm64);
     assert_eq!(
-        snapshot.download_bytes(&claude(), mac, false, false),
+        snapshot.download_bytes(&claude(), mac, false),
         Some(112_272_099)
     );
     assert_eq!(
-        snapshot.download_bytes(&claude(), mac, true, false),
+        snapshot.download_bytes(&claude(), mac, true),
         Some(112_272_099 + 53_049_576)
     );
     let base: u64 = 2 * 112_272_099 + 284_447_720;
@@ -264,13 +264,10 @@ fn sizes_follow_the_records_formula() {
         ..linux()
     };
     assert_eq!(
-        snapshot.download_bytes(&codex(), musl, false, false),
+        snapshot.download_bytes(&codex(), musl, false),
         Some(167_703_509)
     );
-    assert_eq!(
-        snapshot.download_bytes(&id("other"), musl, false, false),
-        None
-    );
+    assert_eq!(snapshot.download_bytes(&id("other"), musl, false), None);
 }
 
 #[test]
@@ -290,12 +287,9 @@ fn a_fixture_with_no_sizes_row_counts_only_node() {
         vec![entry],
     )
     .unwrap();
+    assert_eq!(fixture.download_bytes(&id("x"), linux(), false), Some(0));
     assert_eq!(
-        fixture.download_bytes(&id("x"), linux(), false, false),
-        Some(0)
-    );
-    assert_eq!(
-        fixture.download_bytes(&id("x"), linux(), true, false),
+        fixture.download_bytes(&id("x"), linux(), true),
         Some(58_256_361)
     );
     assert_eq!(fixture.need_bytes(&id("x"), linux(), false, false), Some(0));
@@ -397,7 +391,7 @@ fn a_python_archive_needs_a_plain_tar_gz_name_and_a_sha256() {
 }
 
 #[test]
-fn sizes_add_python_when_it_is_needed_and_the_platform_has_it() {
+fn the_disk_need_adds_python_and_the_agent_s_download_leaves_it_out() {
     let mac = Platform::new(Os::Darwin, Arch::Arm64);
     let python = PythonEntry::new(
         "3.13.18",
@@ -409,9 +403,10 @@ fn sizes_add_python_when_it_is_needed_and_the_platform_has_it() {
         )],
     );
     let snapshot = Snapshot::embedded().with_python(python);
+    // The agent's download leaves Python out: its own Missing carries it.
     assert_eq!(
-        snapshot.download_bytes(&claude(), mac, false, true),
-        Some(112_272_099 + 70_000_000)
+        snapshot.download_bytes(&claude(), mac, false),
+        Some(112_272_099)
     );
     let base: u64 = 2 * 112_272_099 + 284_447_720 + 70_000_000 + 220_000_000;
     assert_eq!(
@@ -420,8 +415,8 @@ fn sizes_add_python_when_it_is_needed_and_the_platform_has_it() {
     );
     // No archive for Linux: nothing added.
     assert_eq!(
-        snapshot.download_bytes(&codex(), linux(), false, true),
-        snapshot.download_bytes(&codex(), linux(), false, false)
+        snapshot.need_bytes(&codex(), linux(), false, true),
+        snapshot.need_bytes(&codex(), linux(), false, false)
     );
     // The fixture's `new` has none.
     let embedded = Snapshot::embedded();

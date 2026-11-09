@@ -194,6 +194,8 @@ pub(crate) struct SetupStart {
     settings: SettingsRead,
     registry: Option<String>,
     bundle: Option<PathBuf>,
+    /// The hosts the Python runtime's download contacts (none while this build has none).
+    python_hosts: Vec<String>,
 }
 
 impl SetupStart {
@@ -202,6 +204,14 @@ impl SetupStart {
     /// keys have loaded.
     pub(crate) fn launch_refusals(&self) -> Vec<(AgentId, ErrorCode)> {
         refusals_at_start(self.known.keys(), &self.settings.blocked)
+    }
+
+    /// Each known agent's home, for its sign-in.
+    fn homes(&self) -> BTreeMap<AgentId, PathBuf> {
+        let homes = self.known.iter();
+        homes
+            .map(|(agent, info)| (agent.clone(), info.home.clone()))
+            .collect()
     }
 
     /// The agents an unreadable policy blocks, as read at start: the limits readers' first.
@@ -259,6 +269,7 @@ impl SetupStart {
             settings,
             registry: install.registry.clone(),
             bundle: install.bundle.clone(),
+            python_hosts: snapshot.python().hosts().to_vec(),
         }
     }
 }
@@ -352,12 +363,9 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     // The settings' and the environment's route; the OS's follows from the network thread.
     let at_start = read.network_at_start().agents_network();
+    let homes = read.homes();
     let mut config = AgentsConfig::new(read.data_dir, platform);
-    config.signin.homes = read
-        .known
-        .iter()
-        .map(|(agent, info)| (agent.clone(), info.home.clone()))
-        .collect();
+    config.signin.homes = homes;
     config.managed = read.managed;
     config.install.registry = read.registry;
     config.install.bundle = read.bundle;
@@ -398,7 +406,8 @@ fn run(read: SetupStart, parts: SetupParts, side: HostSide) {
             read.settings,
             refused_at_start,
         )
-        .with_network(network);
+        .with_network(network)
+        .with_python_hosts(read.python_hosts);
         let backend = Arc::new(AgentsBackend {
             agents,
             keys: Arc::clone(&keys),

@@ -10,6 +10,7 @@ use crate::platform::{Arch, Os, Platform};
 pub struct PythonEntry {
     version: String,
     archives: Vec<PythonArchive>,
+    hosts: Vec<String>,
 }
 
 impl PythonEntry {
@@ -18,7 +19,20 @@ impl PythonEntry {
         PythonEntry {
             version: version.to_owned(),
             archives,
+            hosts: Vec::new(),
         }
+    }
+
+    /// The same, with `hosts`: the hosts its download contacts, for "Ask your IT team".
+    #[must_use]
+    pub fn with_hosts(mut self, hosts: Vec<String>) -> PythonEntry {
+        self.hosts = hosts;
+        self
+    }
+
+    /// The hosts its download contacts (the archive's and its redirect's); none unless given.
+    pub fn hosts(&self) -> &[String] {
+        &self.hosts
     }
 
     /// No Python on any platform: what a snapshot has unless given one.
