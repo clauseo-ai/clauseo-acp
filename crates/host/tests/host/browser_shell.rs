@@ -52,7 +52,7 @@ fn profile(root: &Path) -> ClauseoProfile {
 /// `extra` settings; the launch seen, its developer instructions and its header's tools.
 fn launch(
     name: &str,
-    chrome: Option<PathBuf>,
+    chrome: Option<&Path>,
     extra: &str,
 ) -> (Dir, Seen, String, Vec<clauseo_protocol::ToolState>) {
     let dir = Dir::new(name, &[]);
@@ -82,7 +82,7 @@ fn launch(
             .with_profile_hook(Box::new(hook))
             .with_agent_path_prepend(stetdoc.clone())
             .with_browser_tool(tools.clone())
-            .with_browser_executable(chrome.clone())
+            .with_browser_executable(chrome.map(Path::to_path_buf))
             .with_chrome_roots(empty)
     });
     let matter = host.create_matter("m", &dir.folder("m", &[]));
@@ -111,13 +111,18 @@ fn path_parts(seen: &Seen) -> Vec<PathBuf> {
         .iter()
         .find(|(name, _)| name.eq_ignore_ascii_case("PATH"))
         .expect("a PATH");
-    std::env::split_paths(path).collect()
+    let separator = if cfg!(windows) { ';' } else { ':' };
+    path.to_str()
+        .unwrap()
+        .split(separator)
+        .map(PathBuf::from)
+        .collect()
 }
 
 #[test]
 fn a_session_with_a_chrome_gets_the_shell_browser() {
     let chrome = PathBuf::from("/opt/chrome/chrome");
-    let (dir, seen, instructions, header) = launch("shell_browser_on", Some(chrome.clone()), ON);
+    let (dir, seen, instructions, header) = launch("shell_browser_on", Some(&chrome), ON);
     assert_eq!(
         header_browser(&header),
         Some(tool(ClauseoTool::Browser, None)),
@@ -179,7 +184,7 @@ fn a_session_with_no_chrome_gets_no_browser_and_is_told_why() {
         instructions.contains("found no Google Chrome"),
         "{header:?} {instructions}"
     );
-    let run = seen.run.clone().unwrap();
+    let run = seen.run.as_ref().unwrap();
     assert!(!run.join("browser-profile").exists());
     assert_eq!(
         header_browser(&header),
@@ -192,10 +197,10 @@ fn a_session_with_no_chrome_gets_no_browser_and_is_told_why() {
 
 #[test]
 fn a_session_with_the_browser_off_gets_no_browser() {
-    let chrome = Some(PathBuf::from("/opt/chrome/chrome"));
+    let chrome = PathBuf::from("/opt/chrome/chrome");
     let (dir, seen, instructions, header) = launch(
         "shell_browser_off",
-        chrome,
+        Some(&chrome),
         r#"{"tools": {"browser": false}}"#,
     );
     for name in NAMES {

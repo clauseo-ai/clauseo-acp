@@ -147,7 +147,7 @@ pub(crate) fn replace_program(target: &Path, bytes: &[u8]) -> Result<(), Profile
                 let old = dir.join(format!(".{name}.{}-{n}{OLD_SUFFIX}", std::process::id()));
                 std::fs::rename(target, &old)
                     .and_then(|()| std::fs::rename(&temp, target))
-                    .map_err(|_| err)
+                    .map_err(|_aside| err)
             }
             other => other,
         });
