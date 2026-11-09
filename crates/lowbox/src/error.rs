@@ -64,6 +64,19 @@ pub enum Error {
         /// `GetLastError()`, or the code the call returned.
         code: u32,
     },
+    /// The owner refused to build or hand over a namespace: another session than its own, or an
+    /// object that was there before it, or not as it made it.
+    Namespace {
+        /// What is wrong.
+        reason: &'static str,
+    },
+    /// A token is not what a `LowBox` launch needs: the guard's own token (elevated, an
+    /// administrator, already an `AppContainer`) or the new `LowBox` token (not this package,
+    /// not Low, a capability or a privilege left).
+    Token {
+        /// What is wrong.
+        reason: &'static str,
+    },
 }
 
 /// What [`crate::NamespaceHandles::from_inherited`] found wrong with one handle value.
@@ -93,6 +106,15 @@ pub enum HandleProblem {
     /// The object is not the slot's object in this package's namespace. The name is not kept:
     /// it holds the package SID, which is never logged.
     WrongName,
+    /// The value is one of this process's standard handles, which it never takes over.
+    StandardHandle,
+    /// The object's owner could not be read (`GetSecurityInfo` failed).
+    OwnerUnreadable {
+        /// The Win32 error.
+        code: u32,
+    },
+    /// The object is not owned by the user who built the namespace.
+    WrongOwner,
 }
 
 impl fmt::Display for Error {
@@ -115,6 +137,8 @@ impl fmt::Display for Error {
                 )
             }
             Error::Win32 { call, code } => write!(f, "{call} failed with Win32 error {code}"),
+            Error::Namespace { reason } => write!(f, "namespace: {reason}"),
+            Error::Token { reason } => write!(f, "token: {reason}"),
         }
     }
 }
@@ -139,6 +163,11 @@ impl fmt::Display for HandleProblem {
                 )
             }
             HandleProblem::WrongName => f.write_str("not this package's object"),
+            HandleProblem::StandardHandle => f.write_str("one of this process's standard handles"),
+            HandleProblem::OwnerUnreadable { code } => {
+                write!(f, "owner unreadable (error {code})")
+            }
+            HandleProblem::WrongOwner => f.write_str("not owned by the namespace's builder"),
         }
     }
 }

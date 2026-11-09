@@ -1,12 +1,20 @@
-//! The real [`Probe`]: `GetHandleInformation` and `NtQueryObject` on this process's handles.
-#![expect(unsafe_code, reason = "FFI to GetHandleInformation and NtQueryObject")]
+//! The real [`Probe`]: `GetStdHandle`, `GetHandleInformation`, `NtQueryObject` and the owner
+//! (`GetSecurityInfo`) on this process's handles.
+#![expect(
+    unsafe_code,
+    reason = "FFI to GetStdHandle, GetHandleInformation and NtQueryObject"
+)]
 
 use std::ffi::c_void;
 
 use ::windows::Wdk::Foundation::{NtQueryObject, OBJECT_INFORMATION_CLASS, ObjectTypeInformation};
 use ::windows::Win32::Foundation::{GetHandleInformation, HANDLE, UNICODE_STRING};
 
-use super::win32;
+use ::windows::Win32::System::Console::{
+    GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+};
+
+use super::{token, win32};
 use crate::error::Error;
 use crate::handles::Probe;
 
@@ -24,6 +32,13 @@ const MAX_UNITS: usize = 8192;
 pub(super) struct ThisProcess;
 
 impl Probe for ThisProcess {
+    fn std_handles(&self) -> [usize; 3] {
+        [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE].map(|id| {
+            // SAFETY: GetStdHandle only reads this process's parameters.
+            unsafe { GetStdHandle(id) }.map_or(0, |h| h.0.expose_provenance())
+        })
+    }
+
     fn check_open(&self, value: usize) -> Result<(), u32> {
         let mut flags = 0_u32;
         // SAFETY: GetHandleInformation only reads the handle table entry of `value`; a value
@@ -42,6 +57,10 @@ impl Probe for ThisProcess {
 
     fn object_name(&self, value: usize) -> Result<String, i32> {
         query_string(value, OBJECT_NAME_INFORMATION)
+    }
+
+    fn owner(&self, value: usize) -> Result<String, u32> {
+        token::owner_of(handle(value))
     }
 }
 

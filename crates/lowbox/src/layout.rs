@@ -32,24 +32,26 @@ pub(crate) fn shadow(slot: Slot, session: u32) -> Option<String> {
     }
 }
 
-/// The descriptor of the directories and links (the recipe's D1): all access for SYSTEM, the
+/// The descriptor of the directories and links: the recipe's D1 (all access for SYSTEM, the
 /// owner, the browser account and the package; inherited all access for SYSTEM, the creator
-/// and the package; label Low, no write up.
+/// and the package; label Low, no write up), with the owner's user as the objects' owner (`O:`)
+/// so the guard can check who made them, an elevated owner's included (whose default owner is
+/// Administrators).
 pub(crate) fn directory_sddl(owner: &Sid, browser: &Sid, package: &Sid) -> String {
     let (o, b, p) = (owner.as_str(), browser.as_str(), package.as_str());
     format!(
-        "D:(A;;GA;;;SY)(A;;GA;;;{o})(A;;GA;;;{b})(A;;GA;;;{p})\
+        "O:{o}D:(A;;GA;;;SY)(A;;GA;;;{o})(A;;GA;;;{b})(A;;GA;;;{p})\
          (A;OICIIO;GA;;;SY)(A;OICIIO;GA;;;CO)(A;OICIIO;GA;;;{p})S:(ML;;NW;;;LW)"
     )
 }
 
-/// The descriptor of the pipe folder (the recipe's F1): as [`directory_sddl`], but file access,
-/// and for the package `0x1F0006` (`FILE_ADD_FILE`, `FILE_ADD_SUBDIRECTORY` and the standard
-/// rights): it makes pipes in the folder, never lists or reads it.
+/// The descriptor of the pipe folder (the recipe's F1, with `O:` as [`directory_sddl`]): file
+/// access, and for the package `0x1F0006` (`FILE_ADD_FILE`, `FILE_ADD_SUBDIRECTORY` and the
+/// standard rights): it makes pipes in the folder, never lists or reads it.
 pub(crate) fn pipe_folder_sddl(owner: &Sid, browser: &Sid, package: &Sid) -> String {
     let (o, b, p) = (owner.as_str(), browser.as_str(), package.as_str());
     format!(
-        "D:(A;;FA;;;SY)(A;;FA;;;{o})(A;;FA;;;{b})(A;;0x1f0006;;;{p})\
+        "O:{o}D:(A;;FA;;;SY)(A;;FA;;;{o})(A;;FA;;;{b})(A;;0x1f0006;;;{p})\
          (A;OICIIO;GA;;;SY)(A;OICIIO;GA;;;CO)(A;OICIIO;GA;;;{p})S:(ML;;NW;;;LW)"
     )
 }
@@ -101,7 +103,7 @@ mod tests {
         );
     }
 
-    /// D1 and F1, copied from the recipe's table, with the VM's SIDs.
+    /// D1 and F1, copied from the recipe's table, with the VM's SIDs; the crate adds `O:`.
     const D1: &str = "D:(A;;GA;;;SY)(A;;GA;;;S-1-5-21-4086760546-1163544284-2580614524-1001)\
         (A;;GA;;;S-1-5-21-4086760546-1163544284-2580614524-1002)\
         (A;;GA;;;S-1-15-2-4291742471-3177126929-1079639061-2360262239-4224205492-3771709147-\
@@ -122,7 +124,7 @@ mod tests {
             Sid::parse(BROWSER).unwrap(),
             b01(),
         );
-        assert_eq!(directory_sddl(&o, &b, &p), D1);
-        assert_eq!(pipe_folder_sddl(&o, &b, &p), F1);
+        assert_eq!(directory_sddl(&o, &b, &p), format!("O:{OWNER}{D1}"));
+        assert_eq!(pipe_folder_sddl(&o, &b, &p), format!("O:{OWNER}{F1}"));
     }
 }

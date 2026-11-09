@@ -3,6 +3,8 @@
 //! through [`Probe`], so they are tested off Windows; `windows::probe` is the real one.
 
 use crate::error::{Error, HandleProblem};
+use crate::layout;
+use crate::package::Sid;
 
 /// How many handles the namespace has: one per [`Slot`].
 pub const HANDLE_COUNT: usize = 6;
@@ -73,7 +75,7 @@ impl Slot {
     }
 
     /// The object's name below the package directory (`""` for the directory itself), or
-    /// `None` for the pipe folder, which lives under `\Device\NamedPipe`.
+    /// `None` for the pipe folder, which lives under `\Device\NamedPipe` (`crate::layout`).
     pub(crate) fn below_directory(self) -> Option<&'static str> {
         match self {
             Slot::Directory => Some(""),
@@ -174,23 +176,46 @@ pub(crate) fn check_inherit_list(values: &[usize]) -> Result<(), Error> {
 
 /// What the checks ask of a handle value in this process.
 pub(crate) trait Probe {
+    /// This process's standard input, output and error handle values (0 for one it lacks).
+    fn std_handles(&self) -> [usize; 3];
     /// `Ok` when `value` is an open handle, else `GetLastError()`.
     fn check_open(&self, value: usize) -> Result<(), u32>;
     /// The object's type name, else the NTSTATUS.
     fn type_name(&self, value: usize) -> Result<String, i32>;
-    /// The object's full name, else the NTSTATUS. Never asked of the pipe folder.
+    /// The object's full name, else the NTSTATUS.
     fn object_name(&self, value: usize) -> Result<String, i32>;
+    /// The `S-1-…` text of the object's owner, else the Win32 error.
+    fn owner(&self, value: usize) -> Result<String, u32>;
 }
 
-/// Each of `values` checked for its slot: an open handle, of the slot's type, and (all but the
-/// pipe folder) named as the slot's object in the namespace of the package whose SID text is
-/// `package_sid`: `\Sessions\<n>\AppContainerNamedObjects\<package SID>` and below. Fails
+/// What each handle must be: the objects of the package with SID `package` in session
+/// `session` (the guard's own), owned by `owner` (the user who built the namespace).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Expected<'a> {
+    /// The package SID.
+    pub(crate) package: &'a Sid,
+    /// The session the namespace must be in: the caller's.
+    pub(crate) session: u32,
+    /// The objects' owner.
+    pub(crate) owner: &'a Sid,
+}
+
+/// Each of `values` checked for its slot: not one of this process's standard handles, an open
+/// handle, of the slot's type, named exactly as the slot's object in `expected`'s namespace
+/// (`crate::layout::object_name`, letters in either case) and owned by `expected.owner`. Fails
 /// closed at the first value that does not pass.
-pub(crate) fn check(probe: &impl Probe, values: &[usize], package_sid: &str) -> Result<(), Error> {
+pub(crate) fn check(
+    probe: &impl Probe,
+    values: &[usize],
+    expected: &Expected<'_>,
+) -> Result<(), Error> {
     check_values(values)?;
-    let mut directory: Option<String> = None;
+    let standard = probe.std_handles();
     for (slot, &value) in Slot::ALL.iter().copied().zip(values) {
         let fail = |problem| Error::Handle { slot, problem };
+        if standard.contains(&value) {
+            return Err(fail(HandleProblem::StandardHandle));
+        }
         probe
             .check_open(value)
             .map_err(|code| fail(HandleProblem::NotOpen { code }))?;
@@ -200,47 +225,21 @@ pub(crate) fn check(probe: &impl Probe, values: &[usize], package_sid: &str) -> 
         if found != slot.kind().type_name() {
             return Err(fail(HandleProblem::WrongType { found }));
         }
-        let Some(below) = slot.below_directory() else {
-            continue;
-        };
         let name = probe
             .object_name(value)
             .map_err(|status| fail(HandleProblem::NameUnreadable { status }))?;
-        let matches = match &directory {
-            None => is_package_directory(&name, package_sid),
-            Some(dir) => {
-                name.len() == dir.len() + below.len()
-                    && name
-                        .get(..dir.len())
-                        .is_some_and(|head| head.eq_ignore_ascii_case(dir))
-                    && name
-                        .get(dir.len()..)
-                        .is_some_and(|tail| tail.eq_ignore_ascii_case(below))
-            }
-        };
-        if !matches {
+        let wanted = layout::object_name(slot, expected.session, expected.package);
+        if !name.eq_ignore_ascii_case(&wanted) {
             return Err(fail(HandleProblem::WrongName));
         }
-        if directory.is_none() {
-            directory = Some(name);
+        let owner = probe
+            .owner(value)
+            .map_err(|code| fail(HandleProblem::OwnerUnreadable { code }))?;
+        if owner != expected.owner.as_str() {
+            return Err(fail(HandleProblem::WrongOwner));
         }
     }
     Ok(())
-}
-
-/// Whether `name` is `\Sessions\<n>\AppContainerNamedObjects\<package_sid>`, letters in either
-/// case.
-fn is_package_directory(name: &str, package_sid: &str) -> bool {
-    let parts: Vec<&str> = name.split('\\').collect();
-    matches!(
-        parts.as_slice(),
-        ["", sessions, n, container, sid]
-            if sessions.eq_ignore_ascii_case("Sessions")
-                && !n.is_empty()
-                && n.bytes().all(|b| b.is_ascii_digit())
-                && container.eq_ignore_ascii_case("AppContainerNamedObjects")
-                && sid.eq_ignore_ascii_case(package_sid)
-    )
 }
 
 #[cfg(test)]
