@@ -242,6 +242,19 @@ impl Handle {
         )
     }
 
+    /// Whether this handle is a link itself (only an `O_PATH | O_NOFOLLOW` open gives one).
+    pub(super) fn is_link(&self) -> io::Result<bool> {
+        Ok(file_type(&rustix::fs::fstat(&self.0)?) == FileType::Symlink)
+    }
+
+    /// `path`'s last name opened as itself, a link included (`O_PATH | O_NOFOLLOW`): the tests'
+    /// stand-in for a share root whose handle is a link.
+    #[cfg(all(test, target_os = "linux"))]
+    pub(super) fn link_itself(path: &Path) -> io::Result<Self> {
+        let flags = OFlags::PATH | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+        Ok(Self(rustix::fs::openat(CWD, path, flags, Mode::empty())?))
+    }
+
     pub(super) fn identity(&self) -> io::Result<(u64, u128)> {
         Ok(identity_of(&rustix::fs::fstat(&self.0)?))
     }

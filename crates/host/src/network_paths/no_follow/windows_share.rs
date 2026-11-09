@@ -1,8 +1,9 @@
 //! A share matter's root, opened on Windows as the lawyer stored it ([`super::MatterRoot`]):
 //! `CreateFileW` on that one text, links on it followed as the system does (the lawyer
-//! configured it; an agent names nothing here), checked to be a folder. Every name below it is
-//! opened from this handle with no link followed (`super::sys`), so the root is the only text
-//! the system resolves.
+//! configured it, and a DFS path needs it; an agent names nothing here), checked to be a folder.
+//! [`super::MatterRoot`] then refuses a handle that is a link itself (a name-surrogate tag).
+//! Every name below it is opened from this handle with no link followed (`super::sys`), so the
+//! root is the only text the system resolves.
 #![expect(unsafe_code, reason = "FFI to CreateFileW for a share matter's root")]
 
 use std::io;

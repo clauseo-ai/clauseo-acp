@@ -101,6 +101,44 @@ fn a_share_matters_held_files_are_found_from_its_root_as_stored() {
     }
 }
 
+/// A share root the system opened as a link itself (a name-surrogate tag on its handle on
+/// Windows; here a symlink opened as itself, through the seam) is refused: nothing is listed
+/// below it, at the start or when the root is opened again for its own listing.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_share_root_whose_handle_is_a_link_is_refused() {
+    let folder = Folder::new("share-link");
+    let link = folder.0.with_extension("link");
+    drop(write::remove_file(&link));
+    write::symlink(&folder.0, &link).unwrap();
+    let net = plain_net(true);
+    let stored = Path::new(r"\\server\deals\Acme");
+    let as_link = |_: &Path| NoFollow::link_itself(&link);
+    let held = held_files_with(&MatterRoot::with(stored, &net, &as_link), false);
+    assert!(held.is_empty(), "a root that is a link");
+    // The same seam answering with the folder itself finds the held file.
+    let as_folder = |_: &Path| open_path(&dunce::canonicalize(&folder.0)?, Access::List);
+    let held = held_files_with(&MatterRoot::with(stored, &net, &as_folder), false);
+    assert_eq!(held.len(), 1);
+    // The root opened again for its own listing is checked too.
+    let calls = std::cell::Cell::new(0);
+    let link_second = |_: &Path| {
+        calls.set(calls.get() + 1);
+        if calls.get() == 1 {
+            open_path(&dunce::canonicalize(&folder.0)?, Access::List)
+        } else {
+            NoFollow::link_itself(&link)
+        }
+    };
+    let root = MatterRoot::with(stored, &net, &link_second);
+    let error = root.open(Path::new(""), Access::List).unwrap_err();
+    assert!(
+        crate::network_paths::no_follow::is_link_on_the_way(&error),
+        "{error}"
+    );
+    write::remove_file(&link).unwrap();
+}
+
 /// The counts at the end of the timings line `line`: `checked` and `probed`.
 fn counts(line: &str) -> (usize, usize) {
     let number = |key: &str| {

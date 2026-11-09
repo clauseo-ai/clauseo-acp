@@ -324,6 +324,12 @@ impl Handle {
     /// An error when this handle is a reparse point it may not be: a link unless `last` takes
     /// one as itself, or a tag not known to be local.
     fn refuse_reparse(&self, last: Last) -> io::Result<()> {
+        let (attributes, tag) = self.tag_info()?;
+        reparse_allowed(attributes, tag, last)
+    }
+
+    /// This handle's attributes and reparse tag (`FileAttributeTagInfo`).
+    fn tag_info(&self) -> io::Result<(u32, u32)> {
         let mut info = FILE_ATTRIBUTE_TAG_INFO::default();
         let size = u32::try_from(size_of::<FILE_ATTRIBUTE_TAG_INFO>()).unwrap_or(0);
         // SAFETY: the handle is open; `info` is a FILE_ATTRIBUTE_TAG_INFO of `size` bytes.
@@ -336,7 +342,7 @@ impl Handle {
             )
         }
         .map_err(|error| win_error(&error))?;
-        reparse_allowed(info.FileAttributes, info.ReparseTag, last)
+        Ok((info.FileAttributes, info.ReparseTag))
     }
 
     /// The entry `name` of this folder opened for `access`, read from the listing first and
@@ -349,6 +355,13 @@ impl Handle {
         let opened = Self(nt_open(Some(&self.0), &wide, rights, share, options)?);
         opened.refuse_reparse(last)?;
         Ok(opened)
+    }
+
+    /// Whether this handle is a link itself (a name-surrogate reparse tag). Any other tag is not
+    /// (a share root's own business, followed); a tag that can't be read is an error.
+    pub(super) fn is_link(&self) -> io::Result<bool> {
+        let (attributes, tag) = self.tag_info()?;
+        Ok(attributes & REPARSE_POINT != 0 && name_surrogate(tag))
     }
 
     pub(super) fn kind(&self) -> io::Result<Kind> {
