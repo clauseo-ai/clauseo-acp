@@ -137,11 +137,6 @@ pub(crate) fn off_local(path: &Path, mounts: &Mounts) -> Option<(PathBuf, Off)> 
     link_to_network(path, mounts, read_if_link)
 }
 
-/// Whether `path` is on a network drive, share or mount by [`classify`]: not an unknown device.
-pub(crate) fn on_network(path: &Path, mounts: &Mounts) -> bool {
-    matches!(classify(path, mounts), Place::Off(Off::Network))
-}
-
 /// Why a path is not touched.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Off {

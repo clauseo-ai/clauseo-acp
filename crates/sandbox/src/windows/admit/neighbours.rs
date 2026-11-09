@@ -7,12 +7,20 @@ use std::path::Path;
 
 use super::{FolderRefusal, FolderSupport, refusal};
 use crate::Error;
+use crate::links::network::{Mounts, lexical, off_local};
 use crate::windows::acl_plan::targets::odd_spelling;
 use crate::windows::fence::{Fence, Neighbours};
 
-/// `neighbours` with every path canonical; a path that doesn't resolve keeps its spelling.
-pub(super) fn resolve(neighbours: &Neighbours) -> Neighbours {
-    let canonical = |p: &Path| dunce::canonicalize(p).unwrap_or_else(|_missing| p.to_owned());
+/// `neighbours` with every path canonical; a path that doesn't resolve keeps its spelling. One
+/// off the local disks by [`off_local`] (another matter on a share) is never touched: it keeps
+/// its spelling with `..` taken off by text.
+pub(super) fn resolve(neighbours: &Neighbours, mounts: &Mounts) -> Neighbours {
+    let canonical = |p: &Path| {
+        if off_local(p, mounts).is_some() {
+            return lexical(p);
+        }
+        dunce::canonicalize(p).unwrap_or_else(|_missing| p.to_owned())
+    };
     let mut resolved = neighbours.clone();
     for other in &mut resolved.registered {
         other.folders.root = canonical(&other.folders.root);
@@ -29,7 +37,8 @@ pub(super) fn resolve(neighbours: &Neighbours) -> Neighbours {
 /// (a name-surrogate reparse point; `policy/build.rs`'s `root_folder`), and resolves every link
 /// above it; its own plan refuses an odd spelling of the resolved path. So here: a folder that
 /// doesn't exist is left out (nothing to protect yet; the host's matter creation fences it); one
-/// on a network share is left out too, as a sibling is; a folder reached through a linked parent
+/// on a network share, or off the local disks by [`off_local`] (checked before any file call),
+/// is left out too, as a sibling is; a folder reached through a linked parent
 /// is fenced at its resolved target; a cloud placeholder or other reparse point that isn't a
 /// name surrogate is accepted, as D7 does. A folder that is itself a link, has an odd resolved
 /// spelling, or can't take the fence refuses the launch with [`Error::NeighbourUnfenceable`]
@@ -38,6 +47,7 @@ pub(super) fn fences(
     resolved: &Neighbours,
     given: &Neighbours,
     check: &mut impl FnMut(&Path) -> io::Result<FolderSupport>,
+    mounts: &Mounts,
 ) -> Result<Vec<Fence>, Error> {
     let mut fences = Vec::new();
     for (other, spelled) in resolved.registered.iter().zip(&given.registered) {
@@ -53,6 +63,10 @@ pub(super) fn fences(
                 path_kind: kind,
                 support,
             };
+            // Off the local disks: left out untouched, as a share is below.
+            if off_local(asked, mounts).is_some() || off_local(folder, mounts).is_some() {
+                continue;
+            }
             match own_name_is_link(asked) {
                 Ok(true) => return Err(refuse(FolderRefusal::ReparsePoint)),
                 Ok(false) => {}

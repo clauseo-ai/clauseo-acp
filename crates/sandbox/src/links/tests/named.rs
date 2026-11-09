@@ -13,9 +13,9 @@ fn mounts() -> Mounts {
 }
 
 /// A server, device or network-drive path as written, or one that reaches a network mount once
-/// joined to its folder, is skipped before any look at it or resolve.
+/// joined to its folder, is unknown before any look at it or resolve: the policy refuses it.
 #[test]
-fn a_network_path_is_skipped_before_any_file_call() {
+fn a_network_path_is_unknown_before_any_file_call() {
     let matter = Path::new("/m");
     let base = Path::new("/m/.git/worktrees/wt");
     let read = fake(&[]);
@@ -29,18 +29,15 @@ fn a_network_path_is_skipped_before_any_file_call() {
         "/Volumes/share/repo",
         "../../../../Volumes/share/repo",
     ] {
-        assert_eq!(
-            named_with(matter, base, line, &mounts(), &read, never),
-            None,
-            "{line}"
-        );
+        let got = named_with(matter, base, line, &mounts(), &read, never);
+        assert!(matches!(got, Some(Named::Unknown(_))), "{line}: {got:?}");
     }
 }
 
 /// A path that reaches the network through a link in the matter (`share` links to a server) is
-/// skipped: the walk classifies every link on the way before it resolves anything.
+/// unknown: the walk classifies every link on the way before it resolves anything.
 #[test]
-fn a_path_through_a_link_to_the_network_is_skipped() {
+fn a_path_through_a_link_to_the_network_is_unknown() {
     let matter = Path::new("/m");
     let base = Path::new("/m/.git");
     for target in [
@@ -51,7 +48,7 @@ fn a_path_through_a_link_to_the_network_is_skipped() {
     ] {
         let read = fake(&[("/m/share", target)]);
         let got = named_with(matter, base, "../share/x", &mounts(), &read, never);
-        assert_eq!(got, None, "{target}");
+        assert!(matches!(got, Some(Named::Unknown(_))), "{target}: {got:?}");
     }
 }
 
@@ -75,14 +72,21 @@ fn a_path_on_an_unknown_device_is_unknown() {
 
 /// A local `subst` drive leads where it maps to: here into the session's temp folder, which
 /// the policy then refuses as agent-writable (`policy::tests::git_dirs`).
+#[cfg(windows)]
 #[test]
 fn a_subst_drive_leads_where_it_maps() {
-    let matter = Path::new("/m");
-    let base = Path::new("/m/.git");
-    let got = named_with(matter, base, "X:/repo", &mounts(), fake(&[]), ECHO);
+    let matter = Path::new(r"C:\m");
+    let base = Path::new(r"C:\m\.git");
+    let mounts = Mounts::new(Vec::new(), b"Z")
+        .with_drive(b'C', network::Drive::Local)
+        .with_drive(
+            b'X',
+            network::Drive::Subst(r"C:\data\run\s1\tmp".to_owned()),
+        );
+    let got = named_with(matter, base, r"X:\repo", &mounts, fake(&[]), ECHO);
     assert_eq!(
         got,
-        Some(Named::Outside(PathBuf::from("C:/data/run/s1/tmp/repo")))
+        Some(Named::Outside(PathBuf::from(r"C:\data\run\s1\tmp\repo")))
     );
 }
 
@@ -110,10 +114,10 @@ fn a_local_path_is_resolved() {
     );
 }
 
-/// The walk skips a network `gitdir:` and network `commondir` files unread, in a `.git` or
-/// beside a `HEAD` outside one.
+/// The walk lists a network `gitdir:` and network `commondir` files as unknown, unread, in a
+/// `.git` or beside a `HEAD` outside one: the policy refuses them.
 #[test]
-fn the_walk_lists_nothing_a_network_path_names() {
+fn the_walk_lists_what_a_network_path_names_as_unknown() {
     let dir = TempDir::new("links-commondir-unc");
     dir.file("matter/a/.git", "gitdir: //host/share/repo\n");
     dir.file("matter/.git/HEAD", "ref: refs/heads/main\n");
@@ -127,10 +131,48 @@ fn the_walk_lists_nothing_a_network_path_names() {
         "{:?}",
         scan.git_dirs_outside
     );
-    assert!(
-        scan.git_dirs_unknown.is_empty(),
+    assert_eq!(
+        scan.git_dirs_unknown.len(),
+        3,
         "{:?}",
         scan.git_dirs_unknown
+    );
+}
+
+/// A matter written through a link above it to a network mount refuses before it is resolved.
+#[cfg(unix)]
+#[test]
+fn the_walk_refuses_a_matter_through_a_link_to_a_share() {
+    let dir = TempDir::new("links-matter-link");
+    dir.symlink("Shares", Path::new("/Volumes/share"));
+    let mounts = Mounts::new(vec![(PathBuf::from("/Volumes/share"), true)], &[]);
+    let refused = scan_matter_with(&dir.path().join("Shares/m"), mounts, GIT_DIRS_MAX);
+    assert!(
+        matches!(refused, Err(Error::MatterOnNetwork)),
+        "{refused:?}"
+    );
+}
+
+/// `gitdir:` and `commondir` are read as git reads them: a `.git` file must start with exactly
+/// `gitdir: `, and only trailing CR and LF are taken off, so a space stays part of the path.
+#[test]
+fn git_files_are_parsed_as_git_parses_them() {
+    let dir = TempDir::new("links-git-parse");
+    for name in ["crlf", "nospace", "indented", "common", "spaced"] {
+        dir.dir(&format!("matter/{name}"));
+    }
+    dir.file("matter/a/.git", "gitdir: ../crlf\r\n");
+    dir.file("matter/b/.git", "gitdir:../nospace\n");
+    dir.file("matter/c/.git", "x\ngitdir: ../indented\n");
+    dir.file("matter/d/HEAD", "ref: refs/heads/main\n");
+    dir.file("matter/d/commondir", "../common\r\n");
+    dir.file("matter/e/HEAD", "ref: refs/heads/main\n");
+    dir.file("matter/e/commondir", "../spaced \n");
+    let matter = canon(&dir.path().join("matter"));
+    let scan = scan_matter(&matter).unwrap();
+    assert_eq!(
+        scan.git_dirs(),
+        [matter.join("common"), matter.join("crlf")]
     );
 }
 

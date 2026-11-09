@@ -167,6 +167,10 @@ impl Walk<'_> {
         let failed =
             |error: io::Error| refused(PathKind::Sibling, FolderRefusal::CheckFailed(error.kind()));
         for listed in folders.subfolders(dir).map_err(failed)? {
+            // A link is left out before anything follows it: it may lead to a share.
+            if is_reparse_point(&listed).map_err(failed)? {
+                continue;
+            }
             let sibling = match dunce::canonicalize(&listed) {
                 Ok(sibling) => sibling,
                 Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
@@ -175,9 +179,6 @@ impl Walk<'_> {
             // A listing gives what is in `dir`; anything else is left alone, so the walk only
             // goes down.
             if !in_folder(&sibling, dir) || in_folder(dir, &sibling) {
-                continue;
-            }
-            if is_reparse_point(&listed).map_err(failed)? {
                 continue;
             }
             let overlaps = |a: &Path, b: &Path| in_folder(a, b) || in_folder(b, a);

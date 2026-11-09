@@ -13,7 +13,7 @@ use crate::{Error, PROTECTED_AT_ANY_DEPTH};
 
 pub(crate) mod network;
 
-use network::{Mounts, Off, classify, link_to_network, read_if_link};
+use network::{Mounts, classify, link_to_network, read_if_link};
 
 /// The most git dirs (folders holding a `HEAD`) one walk reads a `commondir` in; past it the
 /// launch is refused, so a matter can't make the launch read without end.
@@ -64,8 +64,8 @@ pub struct MatterScan {
     /// The `commondir` names beside a `HEAD` that are links, sorted: git follows one, the walk
     /// does not, so the policy refuses the launch.
     commondir_links: Vec<PathBuf>,
-    /// The paths those name on a device the launch doesn't know (neither a local disk nor a
-    /// network one), sorted: never touched, and the policy refuses the launch.
+    /// The paths those name off the local disks (a network path, or a device the launch doesn't
+    /// know), sorted: never touched, and the policy refuses the launch.
     git_dirs_unknown: Vec<PathBuf>,
     bare: Vec<PathBuf>,
     nested: Vec<PathBuf>,
@@ -104,8 +104,8 @@ impl MatterScan {
     /// The folders that `.git` files' `gitdir:` lines and `commondir` files beside a `HEAD`
     /// (inside a `.git` or not) name inside the matter, and that `.git` links lead to inside it,
     /// canonical, sorted. One outside the matter is left out here (the policy refuses one the
-    /// agent can write; the jail denies the rest anyway), and one on a network path is skipped
-    /// unread ([`network`]).
+    /// agent can write; the jail denies the rest anyway), and one off the local disks is never
+    /// read and refuses the launch ([`network`]).
     pub fn git_dirs(&self) -> &[PathBuf] {
         &self.git_dirs
     }
@@ -206,7 +206,11 @@ pub fn scan_matter(matter: &Path) -> Result<MatterScan, Error> {
 
 /// [`scan_matter`] with this mount table and cap.
 fn scan_matter_with(matter: &Path, mounts: Mounts, cap: usize) -> Result<MatterScan, Error> {
-    network::check_matter_local(matter, &mounts)?;
+    // Every name and link on the way classified before the matter is resolved.
+    if let Some((_, off)) = network::off_local(matter, &mounts) {
+        tracing::info!(?off, "the sandbox refused a matter off the local disks");
+        return Err(Error::MatterOnNetwork);
+    }
     let matter = dunce::canonicalize(matter).map_err(Error::Probe)?;
     network::check_matter_local(&matter, &mounts)?;
     let mut walk = Walk {
@@ -367,13 +371,12 @@ impl Walk {
             match entry.file_type() {
                 Ok(kind) if kind.is_symlink() => self.scan.commondir_links.push(entry.path()),
                 Ok(kind) if kind.is_file() => {
-                    let Some(line) = read_small(&entry.path())
-                        .ok()
-                        .and_then(|text| text.lines().next().map(str::to_owned))
-                    else {
+                    // As git reads it: the whole file, trailing CR and LF taken off.
+                    let Ok(text) = read_small(&entry.path()) else {
                         continue;
                     };
-                    let named = dir_named(matter, folder, &line, &self.mounts);
+                    let line = text.trim_end_matches(['\r', '\n']);
+                    let named = dir_named(matter, folder, line, &self.mounts);
                     self.note(named);
                 }
                 _ => {}
@@ -509,14 +512,18 @@ enum Named {
     Inside(PathBuf),
     /// A folder outside the matter.
     Outside(PathBuf),
-    /// A path on a device the launch doesn't know, as far as it was read: never touched.
+    /// A path on a network or unknown device, as far as it was read: never touched.
     Unknown(PathBuf),
 }
 
 /// Where a `.git` file's `gitdir:` line leads, by [`dir_named`].
 fn git_dir_named(matter: &Path, git_file: &Path, mounts: &Mounts) -> Option<Named> {
+    // As git reads it: the whole file, which starts with exactly `gitdir: `, trailing CR and
+    // LF taken off.
     let text = read_small(git_file).ok()?;
-    let line = text.lines().find_map(|line| line.strip_prefix("gitdir:"))?;
+    let line = text
+        .strip_prefix("gitdir: ")?
+        .trim_end_matches(['\r', '\n']);
     dir_named(matter, git_file.parent()?, line, mounts)
 }
 
@@ -530,9 +537,10 @@ fn dir_named(matter: &Path, base: &Path, line: &str, mounts: &Mounts) -> Option<
 
 /// [`dir_named`] with `read` and `resolve` in place of reading a link and canonicalize. The
 /// path is classified as written, then name by name and link by link ([`link_to_network`]),
-/// and `resolve` runs only once every name and link on the way is local. A network path is
-/// skipped with a warning that leaves the path out; an unknown one is [`Named::Unknown`]. The
-/// matter itself is left out too: naming it would make the whole matter read-only.
+/// and `resolve` runs only once every name and link on the way is local. A network or unknown
+/// path is [`Named::Unknown`], unresolved, which the policy refuses (it may be one the agent can
+/// write), with a warning that leaves the path out. The matter itself is left out: naming it
+/// would make the whole matter read-only.
 fn named_with(
     matter: &Path,
     base: &Path,
@@ -541,7 +549,7 @@ fn named_with(
     read: impl Fn(&Path) -> io::Result<Option<PathBuf>>,
     resolve: impl FnOnce(&Path) -> io::Result<PathBuf>,
 ) -> Option<Named> {
-    let written = Path::new(line.trim());
+    let written = Path::new(line);
     let off = match classify(written, mounts) {
         network::Place::Local(named) => {
             // A `subst` drive's mapping is a whole path, whatever this platform calls absolute.
@@ -557,13 +565,12 @@ fn named_with(
         }
         network::Place::Off(off) => (written.to_owned(), off),
     };
-    match off {
-        (_, Off::Network) => {
-            tracing::warn!("the matter walk skipped a git folder named on a network path");
-            None
-        }
-        (path, Off::Unknown) => Some(Named::Unknown(path)),
-    }
+    let (path, kind) = off;
+    tracing::warn!(
+        ?kind,
+        "the matter walk met a git folder named off the local disks"
+    );
+    Some(Named::Unknown(path))
 }
 
 /// [`Named`] for the canonical `dir`; the matter itself is `None`.

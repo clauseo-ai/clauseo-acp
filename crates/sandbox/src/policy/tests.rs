@@ -5,6 +5,7 @@ mod allowed;
 mod git_dirs;
 mod links;
 mod nested;
+mod network;
 mod reallowed;
 mod tmpdir;
 mod unicode;

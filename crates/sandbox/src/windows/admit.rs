@@ -23,6 +23,8 @@ use super::acl_plan::targets::AGENTS_DIR;
 #[cfg(any(windows, test, feature = "test-support"))]
 use crate::Error;
 use crate::Policy;
+#[cfg(any(windows, test, feature = "test-support"))]
+use crate::links::network::{Mounts, off_local};
 
 /// Which kind of path a grant or a refusal is about. Errors and logs name this, never the path,
 /// so no matter's or client's name reaches them. Stored in the ledger by its snake-case name;
@@ -309,7 +311,8 @@ struct Checks<E, L> {
 /// 0. The matter folder must not be `data_dir` (Clauseo's data folder), hold it, or sit inside
 ///    it, compared canonically: `data_dir` is canonicalised (the policy's paths already are),
 ///    then compared part by part by the policy's comparison and also without ASCII case, as
-///    NTFS compares names. A `data_dir` that doesn't resolve refuses, failing closed. Either
+///    NTFS compares names. A `data_dir` that doesn't resolve, or is off the local disks by
+///    `off_local` (checked before any file call), refuses, failing closed. Either
 ///    refuses with [`FolderRefusal::OverlapsDataFolder`] for [`PathKind::Matter`].
 /// 1. Each of [`grant_folders`] must answer [`FolderSupport::Ok`] to the label check (each gets
 ///    the Low label, so a folder the lawyer can't label is [`FolderSupport::CantLabel`]); any
@@ -344,6 +347,13 @@ fn gate<'a>(
         entries: mut check,
         mut label,
     } = checks;
+    // Every path is classified before it is touched: a link to a share would send the user's
+    // NTLM hash. A data folder off the local disks refuses, as one that doesn't resolve does.
+    let mounts = Mounts::current();
+    if mounts.unread || off_local(data_dir, &mounts).is_some() {
+        tracing::warn!("the data folder is off the local disks; tier B refuses");
+        return Err(refused(PathKind::Matter, FolderRefusal::OverlapsDataFolder));
+    }
     let data = match dunce::canonicalize(data_dir) {
         Ok(data) => data,
         Err(error) => {
@@ -363,7 +373,7 @@ fn gate<'a>(
         return Err(refused(kind, refusal));
     }
     let given = neighbours;
-    let resolved = neighbours::resolve(given);
+    let resolved = neighbours::resolve(given, &mounts);
     let nested = resolved
         .registered
         .iter()
@@ -377,7 +387,7 @@ fn gate<'a>(
             return Err(refused(kind, refusal));
         }
     }
-    let fences = neighbours::fences(&resolved, given, &mut check)?;
+    let fences = neighbours::fences(&resolved, given, &mut check, &mounts)?;
     let walked = siblings::siblings(policy, &data, &resolved, &mut check, folders)?;
     Ok(Admitted {
         policy,
@@ -518,8 +528,9 @@ pub(crate) fn fences_for(
             .collect(),
         reach: Vec::new(),
     };
-    let resolved = neighbours::resolve(&given);
-    neighbours::fences(&resolved, &given, &mut check)
+    let mounts = Mounts::current();
+    let resolved = neighbours::resolve(&given, &mounts);
+    neighbours::fences(&resolved, &given, &mut check, &mounts)
 }
 
 #[cfg(any(windows, test, feature = "test-support"))]

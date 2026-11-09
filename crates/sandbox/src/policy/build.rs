@@ -15,21 +15,14 @@ use super::{
     PolicyBuilder, same, under,
 };
 use crate::Error;
-use crate::links::network::{Mounts, check_matter_local, on_network};
+use crate::links::network::check_matter_local;
 use crate::links::{LinkFinding, scan_matter};
 
 /// The checks and the canonical policy.
 pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
-    // A matter on a network drive refuses before it is walked: as written, by its text and the
-    // mount table (no file call), then resolved, with any network mount inside it.
-    let mounts = Mounts::current();
-    if mounts.unread {
-        let error = io::Error::other("the mount list could not be read");
-        return Err(Error::Probe(error));
-    }
-    if on_network(&b.matter, &mounts) {
-        return Err(Error::MatterOnNetwork);
-    }
+    // Every path classified before any is resolved; the matter's network mounts once resolved.
+    let mounts = super::local::mounts(&b)?;
+    let split = super::local::check(&b, &mounts)?;
     let matter = root_folder(&b.matter, "matter")?;
     let state = root_folder(&b.state, "state folder")?;
     let home = b
@@ -37,7 +30,8 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
         .as_deref()
         .map(|home| beneath_existing(home, "home folder"))
         .transpose()?;
-    let hidden = all_beneath(&b.hidden, "hidden path")?;
+    let mut hidden = all_beneath(&split.local, "hidden path")?;
+    hidden.extend(split.off);
     let home_ref = home.as_deref();
     check_matter(&matter, &state, home_ref, &hidden)?;
     check_matter_local(&matter, &mounts)?;
@@ -84,10 +78,10 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
     };
     scan.add_links(b.links);
     let parts = scan.into_parts();
-    // The places the agent can write first, for the git dirs' check; then the read-only ones.
+    // The places the agent can write first, for the git dirs' check; then the read-only ones
+    // (allowed folders are read-only in both jails).
     let mut allowed: Vec<&Path> = vec![state.as_path()];
     allowed.extend(tmpdir.as_deref());
-    allowed.extend(allowed_folders.iter().map(PathBuf::as_path));
     allowed.extend(notes.as_deref());
     let others = Writable {
         socket: b.browser_socket_dir.as_deref(),
@@ -95,6 +89,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
         claude_store: claude_store.as_ref(),
     };
     check_git_dirs(&parts, &allowed, &others)?;
+    allowed.extend(allowed_folders.iter().map(PathBuf::as_path));
     allowed.extend(runtime.iter().map(PathBuf::as_path));
     allowed.extend(read.iter().map(PathBuf::as_path));
     let working_trees = working_trees(&parts.git);

@@ -26,7 +26,7 @@ use crate::links::ScanParts;
 use crate::links::network::{Mounts, is_network_path};
 use crate::{Error, LinkFinding, LinkKind};
 
-/// The places the agent can write besides the state, temp, notes and allowed folders, for
+/// The places the agent can write besides the state, temp and notes folders, for
 /// [`check_git_dirs`]: the browser socket folder, the hidden paths (they hold the other matters'
 /// folders, which the agent can create in on Windows; the rest are counted too, which can only
 /// refuse more), and the Claude store's lock folders, which the agent can create.
@@ -56,7 +56,8 @@ pub(super) fn check_git_dirs(
     }
     if let Some(path) = parts.git_dirs_unknown.first() {
         return refuse(format!(
-            "a git folder's commondir or gitdir: names a drive the launch can't check: {}",
+            "a git folder's commondir or gitdir: names a network drive or a drive the launch \
+             can't check: {}",
             path.display()
         ));
     }

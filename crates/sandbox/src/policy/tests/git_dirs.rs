@@ -41,7 +41,7 @@ fn naming(test: &str, target: &str) -> (World, PathBuf) {
     (w, target)
 }
 
-/// A `commondir` naming a folder in the session's temp folder, the notes folder or an allowed
+/// A `commondir` naming a folder in the session's temp folder, the notes folder or the state
 /// folder refuses the launch: the agent could write the repository's `config` there.
 #[test]
 fn a_commondir_naming_a_folder_the_agent_can_write_is_refused() {
@@ -54,20 +54,21 @@ fn a_commondir_naming_a_folder_the_agent_can_write_is_refused() {
     let built = w.builder().notes(w.at("data/agent-state/m1/notes")).build();
     refused(built, rule, &target);
 
-    let (w, target) = naming("commondir-allowed", "other/common");
-    let built = w.builder().allowed_folder(w.at("other")).build();
-    refused(built, rule, &target);
-
     let (w, target) = naming("commondir-state", "state/common");
     refused(w.builder().build(), rule, &target);
 }
 
 /// A `commondir` naming a folder outside the matter that the agent can't write needs no rule:
-/// the jail denies it anyway.
+/// the jail denies it anyway. An allowed folder is one: it is read-only in both jails.
 #[test]
 fn a_commondir_naming_an_unwritable_outside_folder_is_ignored() {
     let (w, target) = naming("commondir-other", "other/common");
     let policy = w.builder().build().unwrap();
+    let rules = policy.read_only_in_matter();
+    assert!(rules.iter().all(|rule| rule.path() != target), "{rules:?}");
+
+    let (w, target) = naming("commondir-allowed", "other/common");
+    let policy = w.builder().allowed_folder(w.at("other")).build().unwrap();
     let rules = policy.read_only_in_matter();
     assert!(rules.iter().all(|rule| rule.path() != target), "{rules:?}");
 }
@@ -92,9 +93,9 @@ fn a_commondir_link_is_refused() {
 #[test]
 fn a_target_holding_or_in_another_writable_place_is_refused() {
     let rule = "may not name a folder the agent can write";
-    let (w, target) = naming("commondir-holds", "other");
-    w.dir.dir("other/sub");
-    let built = w.builder().allowed_folder(w.at("other/sub")).build();
+    let (w, target) = naming("commondir-holds", "data/agent-state/m1");
+    w.dir.dir("data/agent-state/m1/notes");
+    let built = w.builder().notes(w.at("data/agent-state/m1/notes")).build();
     refused(built, rule, &target);
 
     let (w, target) = naming("commondir-hidden", "data/agent-state/m2");
@@ -146,9 +147,5 @@ fn a_subst_onto_the_temp_folder_and_an_unknown_device_are_refused() {
         crate::policy::links::check_git_dirs(&parts(&["C:/other/repo"], &[]), &tmp, &others);
     assert!(found.is_ok(), "{found:?}");
     let found = crate::policy::links::check_git_dirs(&parts(&[], &[r"V:\repo"]), &tmp, &others);
-    refused(
-        found,
-        "names a drive the launch can't check",
-        Path::new(r"V:\repo"),
-    );
+    refused(found, "drive the launch can't check", Path::new(r"V:\repo"));
 }

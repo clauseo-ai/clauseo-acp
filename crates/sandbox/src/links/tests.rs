@@ -10,7 +10,8 @@ fn canon(p: &Path) -> PathBuf {
 }
 
 /// A fake file system of `links` (link, target as written); any other path is not a link. It
-/// fails the test when asked about a network path.
+/// fails the test when asked about a network path: a server or device path, the share mount,
+/// or a path on the mapped network drive `Z:`.
 fn fake(links: &[(&str, &str)]) -> impl Fn(&Path) -> io::Result<Option<PathBuf>> + use<> {
     let links: Vec<(PathBuf, PathBuf)> = links
         .iter()
@@ -18,7 +19,7 @@ fn fake(links: &[(&str, &str)]) -> impl Fn(&Path) -> io::Result<Option<PathBuf>>
         .collect();
     move |path: &Path| {
         let text = path.to_string_lossy();
-        let network = ["\\\\", "\\??\\", "//", "/Volumes/share"];
+        let network = ["\\\\", "\\??\\", "//", "/Volumes/share", "Z:", "z:"];
         assert!(
             !network.iter().any(|start| text.starts_with(start)),
             "a network path was looked at: {text}"

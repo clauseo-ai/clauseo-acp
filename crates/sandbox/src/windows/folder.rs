@@ -24,13 +24,11 @@ use windows::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_ALL_ACCESS, FILE_ATTRIBUTE_DIRECTORY,
     FILE_FLAG_BACKUP_SEMANTICS, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
     FILE_NAME_OPENED, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    GETFINALPATHNAMEBYHANDLE_FLAGS, GetDriveTypeW, GetFileInformationByHandle,
-    GetFinalPathNameByHandleW, GetVolumeInformationByHandleW, OPEN_EXISTING, VOLUME_NAME_DOS,
-    WRITE_DAC, WRITE_OWNER,
+    GETFINALPATHNAMEBYHANDLE_FLAGS, GetFileInformationByHandle, GetFinalPathNameByHandleW,
+    GetVolumeInformationByHandleW, OPEN_EXISTING, VOLUME_NAME_DOS, WRITE_DAC, WRITE_OWNER,
 };
 use windows::Win32::System::SystemServices::FILE_PERSISTENT_ACLS;
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
-use windows::Win32::System::WindowsProgramming::DRIVE_REMOTE;
 use windows::core::{BOOL, PCWSTR};
 
 use super::FolderSupport;
@@ -39,7 +37,8 @@ use super::FolderSupport;
 /// first that answers wins):
 ///
 /// 1. `Network` when the path is a UNC path (`\\?\UNC\...`, any case), or its drive letter is
-///    `DRIVE_REMOTE`. Asked before the folder is opened, so an unreachable server can't fail it.
+///    not a local disk by its DOS device (a redirector, a `subst` onto a share, an unknown
+///    device). Asked before the folder is opened, so an unreachable server can't fail it.
 /// 2. Open the folder. A missing path is `NotFound`; a file is `InvalidInput`.
 /// 3. `Network` when the folder's final path, from `FILE_NAME_OPENED | VOLUME_NAME_DOS`, is a UNC
 ///    path (any case): a link to a share. If that call fails, the answer is an error, never a
@@ -71,7 +70,7 @@ pub fn label_support(path: &Path) -> io::Result<FolderSupport> {
 /// [`folder_support`]'s steps, with [`label_support`]'s last one when `label`.
 fn support(path: &Path, label: bool) -> io::Result<FolderSupport> {
     let wide = verbatim_wide(path)?;
-    if is_share_path(&wide) || on_remote_drive(&wide) {
+    if is_share_path(&wide) || off_local_drive(path) {
         return Ok(FolderSupport::Network);
     }
     let folder = open(&wide, FILE_READ_ATTRIBUTES.0).map_err(|error| os_error(&error))?;
@@ -187,20 +186,13 @@ fn ascii_upper(unit: u16) -> u16 {
     u8::try_from(unit).map_or(unit, |byte| u16::from(byte.to_ascii_uppercase()))
 }
 
-/// Whether the drive letter of `wide` (a verbatim path, so the letter is at index 4) is a
-/// `DRIVE_REMOTE` drive. The drive is asked by its root, `X:\`, so no folder is opened. A path
-/// without a drive letter is not answered here.
-fn on_remote_drive(wide: &[u16]) -> bool {
-    let Some(&[letter, colon]) = wide.get(4..6) else {
-        return false;
-    };
-    let is_letter = u8::try_from(letter).is_ok_and(|byte| byte.is_ascii_alphabetic());
-    if !is_letter || colon != u16::from(b':') {
-        return false;
-    }
-    let root = [letter, colon, u16::from(b'\\'), 0];
-    // SAFETY: `root` is NUL-terminated UTF-16 that outlives the call.
-    unsafe { GetDriveTypeW(PCWSTR(root.as_ptr())) == DRIVE_REMOTE }
+/// Whether `path`'s drive letter is not a local disk by the walk's classifier
+/// (`links::network::classify`), which reads each letter's DOS device with `QueryDosDeviceW`
+/// and asks no file system or server: a redirector, a `subst` onto a share, or a device it
+/// doesn't know. Not `GetDriveTypeW`, which may try to reconnect a disconnected mapped drive.
+fn off_local_drive(path: &Path) -> bool {
+    use crate::links::network::{Mounts, is_network_path};
+    is_network_path(path, &Mounts::current())
 }
 
 /// The volume's file-system flags.
