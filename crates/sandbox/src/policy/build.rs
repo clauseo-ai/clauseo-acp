@@ -15,10 +15,21 @@ use super::{
     PolicyBuilder, same, under,
 };
 use crate::Error;
+use crate::links::network::{Mounts, check_matter_local, on_network};
 use crate::links::{LinkFinding, scan_matter};
 
 /// The checks and the canonical policy.
 pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
+    // A matter on a network drive refuses before it is walked: as written, by its text and the
+    // mount table (no file call), then resolved, with any network mount inside it.
+    let mounts = Mounts::current();
+    if mounts.unread {
+        let error = io::Error::other("the mount list could not be read");
+        return Err(Error::Probe(error));
+    }
+    if on_network(&b.matter, &mounts) {
+        return Err(Error::MatterOnNetwork);
+    }
     let matter = root_folder(&b.matter, "matter")?;
     let state = root_folder(&b.state, "state folder")?;
     let home = b
@@ -29,6 +40,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
     let hidden = all_beneath(&b.hidden, "hidden path")?;
     let home_ref = home.as_deref();
     check_matter(&matter, &state, home_ref, &hidden)?;
+    check_matter_local(&matter, &mounts)?;
     let tmpdir = tmp_folder(b.tmpdir.as_deref(), &matter, &state, home_ref, &hidden)?;
 
     let notes = b

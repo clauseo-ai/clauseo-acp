@@ -179,10 +179,8 @@ struct Walk {
     folders: Vec<(PathBuf, bool)>,
     /// Files with a link count above 1, by (device, inode).
     hard: BTreeMap<(u64, u64), Names>,
-    /// The mount table, the matter's own mount counted local ([`Mounts::trusting`]).
+    /// The mount table.
     mounts: Mounts,
-    /// The network mount points inside the matter: folders the walk never enters.
-    network_inside: Vec<PathBuf>,
     /// How many more git dirs' `commondir` the walk may read.
     git_dirs_left: usize,
     /// Whether a git dir past [`GIT_DIRS_MAX`] was met.
@@ -194,7 +192,8 @@ struct Walk {
 /// cannot be read is skipped with a warning: the agent runs as the same user, so it cannot read
 /// it either (and a file whose other name is in it counts as linked outside). Fails if `matter`
 /// cannot be resolved or listed, or the mount table can't be read, and refuses past
-/// [`GIT_DIRS_MAX`] git dirs. A network mount inside the matter is never entered.
+/// [`GIT_DIRS_MAX`] git dirs. A matter on a network drive, or holding a network mount, is
+/// refused before it is walked ([`network::check_matter_local`]).
 pub fn scan_matter(matter: &Path) -> Result<MatterScan, Error> {
     let mounts = Mounts::current();
     if mounts.unread {
@@ -207,11 +206,11 @@ pub fn scan_matter(matter: &Path) -> Result<MatterScan, Error> {
 
 /// [`scan_matter`] with this mount table and cap.
 fn scan_matter_with(matter: &Path, mounts: Mounts, cap: usize) -> Result<MatterScan, Error> {
+    network::check_matter_local(matter, &mounts)?;
     let matter = dunce::canonicalize(matter).map_err(Error::Probe)?;
-    let mounts = mounts.trusting(&matter);
+    network::check_matter_local(&matter, &mounts)?;
     let mut walk = Walk {
         folders: vec![(matter.clone(), false)],
-        network_inside: mounts.network_inside(&matter),
         mounts,
         git_dirs_left: cap,
         scan: MatterScan::default(),
@@ -325,7 +324,7 @@ impl Walk {
             if is_git {
                 self.scan.git.push(path.clone());
             }
-            self.enter(path, is_git);
+            self.folders.push((path, is_git));
         } else if kind.is_file() {
             if is_git {
                 self.scan.git.push(path.clone());
@@ -393,19 +392,10 @@ impl Walk {
             self.commondir(matter, folder);
         }
         if kind.is_dir() {
-            self.enter(path, true);
+            self.folders.push((path, true));
         } else if kind.is_file() {
             self.hard_link(path, entry);
         }
-    }
-
-    /// Lists the folder `path` later, unless it is a network mount point.
-    fn enter(&mut self, path: PathBuf, in_git: bool) {
-        if self.network_inside.iter().any(|point| same(point, &path)) {
-            tracing::warn!("the matter walk did not enter a network mount in the matter");
-            return;
-        }
-        self.folders.push((path, in_git));
     }
 
     /// Adds where a `gitdir:` or `commondir` line leads to the scan.

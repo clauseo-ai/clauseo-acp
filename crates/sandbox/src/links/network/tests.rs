@@ -119,27 +119,54 @@ fn the_longest_mount_point_prefix_decides() {
     assert!(!net("/Users/a", &Mounts::default()));
 }
 
-/// The mount holding the matter counts local (the walk reads it anyway); one inside the matter
-/// keeps its kind, and is listed as a folder the walk never enters.
+fn refused(matter: &str, mounts: &Mounts) -> bool {
+    match check_matter_local(Path::new(matter), mounts) {
+        Ok(()) => false,
+        Err(Error::MatterOnNetwork) => true,
+        Err(other) => panic!("{other:?}"),
+    }
+}
+
+/// A matter on a Windows network drive refuses: a mapped drive, a server path, a verbatim server
+/// path, and a `subst` onto a share, directly or through another `subst`. A local one doesn't.
 #[test]
-fn the_matters_own_mount_is_trusted_and_mounts_inside_it_are_not() {
-    let mounts = Mounts::new(
-        vec![
-            (PathBuf::from("/"), false),
-            (PathBuf::from("/Volumes/share"), true),
-            (PathBuf::from("/Volumes/share/m/inner"), true),
-            (PathBuf::from("/Volumes/other"), true),
-        ],
-        &[],
-    )
-    .trusting(Path::new("/Volumes/share/m"));
-    assert!(!net("/Volumes/share/m/.git", &mounts));
-    assert!(net("/Volumes/share/m/inner/x", &mounts));
-    assert!(net("/Volumes/other/x", &mounts));
-    assert_eq!(
-        mounts.network_inside(Path::new("/Volumes/share/m")),
-        [PathBuf::from("/Volumes/share/m/inner")]
-    );
+fn a_matter_on_a_windows_network_drive_refuses() {
+    let mounts = Mounts::new(Vec::new(), b"Z")
+        .with_drive(b'C', Drive::Local)
+        .with_drive(b'Y', drives::drive(r"\??\UNC\host\share"))
+        .with_drive(b'X', drives::drive(r"\??\Y:\work"))
+        .with_drive(b'W', drives::drive(r"\??\C:\work"));
+    for matter in [
+        r"Z:\matters\m",
+        r"z:\m",
+        r"\\server\share\m",
+        "//server/share/m",
+        r"\\?\UNC\server\share\m",
+        r"\??\UNC\server\share\m",
+        r"Y:\m",
+        r"X:\m",
+        r"\\?\Z:\m",
+    ] {
+        assert!(refused(matter, &mounts), "{matter}");
+    }
+    for matter in [r"C:\matters\m", r"W:\m", r"D:\m", r"\\?\C:\m"] {
+        assert!(!refused(matter, &mounts), "{matter}");
+    }
+}
+
+/// A matter on a macOS network mount refuses, by the local-fs allowlist; so does a matter
+/// holding one. A local matter beside them doesn't.
+#[test]
+fn a_matter_on_or_holding_a_macos_network_mount_refuses() {
+    for kind in ["smbfs", "nfs", "afpfs", "webdav"] {
+        let mounts = Mounts::of_kinds(&[("/", "apfs"), ("/Volumes/share", kind)]);
+        assert!(refused("/Volumes/share/m", &mounts), "{kind}");
+        assert!(refused("/Volumes/share", &mounts), "{kind}");
+        assert!(!refused("/Users/a/m", &mounts), "{kind}");
+        let inner = Mounts::of_kinds(&[("/", "apfs"), ("/Users/a/m/inner", kind)]);
+        assert!(refused("/Users/a/m", &inner), "{kind}");
+        assert!(!refused("/Users/a/other", &inner), "{kind}");
+    }
 }
 
 #[cfg(target_os = "macos")]

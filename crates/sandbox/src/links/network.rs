@@ -12,6 +12,7 @@ use std::ffi::OsString;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
+use crate::Error;
 use crate::policy::{same, under};
 
 mod drives;
@@ -57,6 +58,16 @@ impl Mounts {
         }
     }
 
+    /// A table of these mount points, each with its file system type (`f_fstypename`).
+    #[cfg(test)]
+    pub(crate) fn of_kinds(points: &[(&str, &str)]) -> Mounts {
+        let points = points
+            .iter()
+            .map(|(point, kind)| (PathBuf::from(point), Mounts::is_network_fs(kind)))
+            .collect();
+        Mounts::new(points, &[])
+    }
+
     /// This table with drive `letter` set to `drive`.
     #[cfg(test)]
     pub(crate) fn with_drive(mut self, letter: u8, drive: Drive) -> Mounts {
@@ -77,24 +88,8 @@ impl Mounts {
         os::current()
     }
 
-    /// This table with the mount holding `matter` counted local: the walk reads that volume
-    /// anyway, so a path on it reaches no new server. Mounts inside the matter keep their kind.
-    pub(crate) fn trusting(mut self, matter: &Path) -> Mounts {
-        let holder = self
-            .points
-            .iter()
-            .enumerate()
-            .filter(|(_, (point, _))| under(matter, point))
-            .max_by_key(|(_, (point, _))| point.components().count())
-            .map(|(at, _)| at);
-        if let Some((_, network)) = holder.and_then(|at| self.points.get_mut(at)) {
-            *network = false;
-        }
-        self
-    }
-
-    /// The network mount points strictly inside `matter`: folders the walk never enters.
-    pub(crate) fn network_inside(&self, matter: &Path) -> Vec<PathBuf> {
+    /// The network mount points strictly inside `matter`.
+    fn network_inside(&self, matter: &Path) -> Vec<PathBuf> {
         self.points
             .iter()
             .filter(|(point, network)| *network && under(point, matter) && !same(point, matter))
@@ -110,6 +105,26 @@ impl Mounts {
             .find(|(have, _)| *have == letter)
             .map_or(&Drive::Local, |(_, drive)| drive)
     }
+}
+
+/// Refuses a protected launch for a matter on a network drive or share (a mapped drive, a
+/// `subst` onto one, `\\server\share`, `\\?\UNC\…`, a non-local macOS mount), or holding a
+/// network mount, by [`classify`] and `mounts` alone, so before any file call on it. The agent
+/// writes anywhere in the matter, and a server holds what the jail can't guard; sharing
+/// matters over a network comes later. A matter on an unknown device is left to the walk,
+/// which refuses any git folder there. On Windows a link in the matter to a share is a link
+/// finding, never followed.
+pub(crate) fn check_matter_local(matter: &Path, mounts: &Mounts) -> Result<(), Error> {
+    if on_network(matter, mounts) || !mounts.network_inside(matter).is_empty() {
+        tracing::info!("the sandbox refused a matter on a network drive; nothing was planned");
+        return Err(Error::MatterOnNetwork);
+    }
+    Ok(())
+}
+
+/// Whether `path` is on a network drive, share or mount by [`classify`]: not an unknown device.
+pub(crate) fn on_network(path: &Path, mounts: &Mounts) -> bool {
+    matches!(classify(path, mounts), Place::Off(Off::Network))
 }
 
 /// Why a path is not touched.

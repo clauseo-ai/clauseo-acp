@@ -108,11 +108,6 @@ fn a_local_path_is_resolved() {
         ),
         Some(Named::Outside(PathBuf::from("/elsewhere")))
     );
-    let on_share = Mounts::new(vec![(PathBuf::from("/m"), true)], &[]).trusting(matter);
-    assert_eq!(
-        named_with(matter, base, "../../../shared", &on_share, fake(&[]), ECHO),
-        Some(Named::Inside(PathBuf::from("/m/shared")))
-    );
 }
 
 /// The walk skips a network `gitdir:` and network `commondir` files unread, in a `.git` or
@@ -139,18 +134,37 @@ fn the_walk_lists_nothing_a_network_path_names() {
     );
 }
 
-/// A network mount inside the matter is never entered: nothing under it is listed.
+/// A matter holding a network mount, or on one, refuses before the walk lists anything; the
+/// same matter with only local mounts is walked. Not dependent on any other launch check.
 #[test]
-fn the_walk_never_enters_a_network_mount_in_the_matter() {
+fn the_walk_refuses_a_matter_on_or_holding_a_network_mount() {
     let dir = TempDir::new("links-inner-mount");
     dir.dir("matter/share/.git");
     dir.file("matter/share/CLAUDE.md", "c");
     dir.dir("matter/local/.git");
     let matter = canon(&dir.path().join("matter"));
-    let mounts = Mounts::new(vec![(matter.join("share"), true)], &[]);
-    let scan = scan_matter_with(&matter, mounts, GIT_DIRS_MAX).unwrap();
-    assert_eq!(scan.git(), [matter.join("local/.git")]);
-    assert!(scan.nested().is_empty(), "{:?}", scan.nested());
+    let inner = Mounts::new(vec![(matter.join("share"), true)], &[]);
+    let refused = scan_matter_with(&matter, inner, GIT_DIRS_MAX);
+    assert!(
+        matches!(refused, Err(Error::MatterOnNetwork)),
+        "{refused:?}"
+    );
+    // On Windows a drive letter, not a mount point, says where the matter is.
+    #[cfg(unix)]
+    {
+        let holder = Mounts::new(vec![(canon(dir.path()), true)], &[]);
+        let refused = scan_matter_with(&matter, holder, GIT_DIRS_MAX);
+        assert!(
+            matches!(refused, Err(Error::MatterOnNetwork)),
+            "{refused:?}"
+        );
+    }
+    let local = Mounts::new(vec![(matter.join("share"), false)], &[]);
+    let scan = scan_matter_with(&matter, local, GIT_DIRS_MAX).unwrap();
+    assert_eq!(
+        scan.git(),
+        [matter.join("local/.git"), matter.join("share/.git")]
+    );
 }
 
 /// Past the cap of git dirs, the walk refuses the launch.

@@ -119,6 +119,15 @@ pub enum Error {
     /// planned or written; a later launch checks again. Its message names no path.
     #[error("the sandbox's clean-up after an earlier session isn't finished: {0}")]
     UncleanSession(String),
+    /// The matter is on a network drive or share, or holds a network mount (`links::network`):
+    /// the agent's writes there reach a server the jail can't guard, and a launch would read
+    /// it. Refused on both OSes before anything is walked or planned; sharing matters over a
+    /// network comes later. Its message tells the lawyer what to do and names no path.
+    #[error(
+        "This matter is on a network drive. Move it onto this computer to use it with the Safe \
+         workspace."
+    )]
+    MatterOnNetwork,
 }
 
 impl Error {
@@ -140,7 +149,8 @@ impl Error {
             | Error::CleanClose(_)
             | Error::NetworkUnfiltered { .. }
             | Error::ProtectedLink { .. }
-            | Error::UncleanSession(_) => None,
+            | Error::UncleanSession(_)
+            | Error::MatterOnNetwork => None,
         }
     }
 
@@ -165,7 +175,8 @@ impl Error {
             | Error::AclApply { .. }
             | Error::SetAside { .. }
             | Error::CleanClose(_)
-            | Error::NetworkUnfiltered { .. } => ErrorCode::AgentLaunchFailed,
+            | Error::NetworkUnfiltered { .. }
+            | Error::MatterOnNetwork => ErrorCode::AgentLaunchFailed,
             Error::Blocked(_) => ErrorCode::SandboxBlocked,
             Error::UncleanSession(_) => ErrorCode::SandboxCleaningUp,
             Error::ProtectedLink { .. } => ErrorCode::MatterProtectedLink,
@@ -226,6 +237,14 @@ mod tests {
             "the sandbox can't prepare the state folder: it is on a network drive"
         );
         assert_eq!(folder.cause(), None);
+        let network = Error::MatterOnNetwork;
+        assert_eq!(network.code(), ErrorCode::AgentLaunchFailed);
+        assert_eq!(network.cause(), None);
+        assert_eq!(
+            network.to_string(),
+            "This matter is on a network drive. Move it onto this computer to use it with the \
+             Safe workspace."
+        );
         assert_eq!(launch.cause(), None);
         let changed = Error::Blocked(crate::Blocked::AdminCopyChanged);
         assert_eq!(changed.cause(), Some("admin_copy_changed"));
