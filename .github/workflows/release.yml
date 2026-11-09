@@ -311,8 +311,6 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-    env:
-      BASE: https://github.com/clauseo-ai/browser-pins/releases/download/current
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -328,11 +326,47 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y minisign
 
+      # Fetched through the API with the job's token and retried, like the block-list snapshot:
+      # GitHub has answered anonymous downloads with HTTP 504 during its incidents, and the
+      # publisher replaces the two assets one after the other, so a fetch can meet a missing asset
+      # or a new file with the old signature. The pair is fetched again until either key verifies
+      # it, five times at most, 30 s apart; the next step verifies it again and names the failure
+      # if it still does not. The manifest is refused above 1 MiB.
       - name: Download the snapshot and its signature
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          for file in browser-pins-v1.json browser-pins-v1.json.minisig; do
-            curl -fsSL --retry 3 --max-filesize 1048576 -o "$file" "$BASE/$file"
+          keys=crates/host/keys/browser-pins
+          verifies() {
+            local key
+            for key in minisign minisign-next; do
+              if minisign -V -q -p "$keys/$key.pub" -m browser-pins-v1.json \
+                -x browser-pins-v1.json.minisig; then
+                return 0
+              fi
+            done
+            return 1
+          }
+          for attempt in 1 2 3 4 5; do
+            if gh release download current --repo clauseo-ai/browser-pins --clobber \
+              --pattern browser-pins-v1.json --pattern browser-pins-v1.json.minisig; then
+              size=$(stat -c %s browser-pins-v1.json)
+              if [ "$size" -gt 1048576 ]; then
+                echo "::error::browser-pins-v1.json is $size bytes, more than 1 MiB"
+                exit 1
+              fi
+              if verifies; then
+                break
+              fi
+              echo "The pair does not verify (attempt $attempt of 5)."
+            elif [ "$attempt" -eq 5 ]; then
+              echo "::error::could not download the browser-pins snapshot (5 attempts)"
+              exit 1
+            fi
+            if [ "$attempt" -lt 5 ]; then
+              sleep 30
+            fi
           done
 
       # minisign checks the file's signature and the signature over the trusted comment, so the
