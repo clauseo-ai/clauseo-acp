@@ -183,11 +183,14 @@ expression: text
 ; IORegistry properties (`ioreg`): the Mac's serial number, its hardware.
 (deny iokit-get-properties (with message "clauseo-4242-7"))
 ; Processes outside the jail: no arguments (`kern.procargs2`), path or other info.
-; The base allows the jail's own (`same-sandbox`); this keeps it. Listing pids
-; (`process-info-listpids`) stays allowed: the jail lists its own children.
-(deny process-info-codesignature process-info-dirtycontrol process-info-ledger process-info-pidinfo process-info-pidfdinfo process-info-pidfileportinfo process-info-rusage process-info-setcontrol
+; The base allows the jail's own (`same-sandbox`); this keeps it. Every operation
+; is refused, ones Apple adds later too, and listing pids allowed back right after:
+; numbers only, which the jail needs to find its own children. Before every
+; policy deny, so no allow follows one.
+(deny process-info*
   (require-not (target same-sandbox))
   (with message "clauseo-4242-7"))
+(allow process-info-listpids)
 
 ; The matter and the state folder: read and write.
 (allow file-read* file-write*

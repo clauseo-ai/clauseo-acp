@@ -266,6 +266,56 @@ fn with_the_claude_store() {
     insta::assert_snapshot!(w.render(&policy));
 }
 
+/// The listpids allow comes right after the `process-info*` deny and before every deny the
+/// policy writes (credential link, read-only paths, links, hidden paths, socket folder), so no
+/// allow follows those. Only the gaps written right after the base precede it.
+#[test]
+fn the_listpids_allow_precedes_the_policy_denies() {
+    let w = World::new("profile-listpids-order");
+    w.dir.dir("home/.claude");
+    w.dir.file("matter/.git/HEAD", "ref\n");
+    let sockets = w.at("sockets");
+    w.dir.dir("sockets");
+    let policy = w
+        .builder()
+        .claude_store(w.at("home/.claude"))
+        .keychain(true)
+        .browser_socket_path(sockets)
+        .build()
+        .unwrap();
+    let profile = SeatbeltProfile::new(&policy, TAG).unwrap();
+    let text = profile.text();
+    let allow = text
+        .find("(allow process-info-listpids)")
+        .expect("the listpids allow");
+    let deny = text
+        .find("(deny process-info*")
+        .expect("the process-info deny");
+    let between = text.get(deny..allow).unwrap();
+    assert_eq!(between.matches("(allow").count(), 0, "{between}");
+    assert_eq!(between.matches("(deny").count(), 1, "{between}");
+    let gaps = [
+        "(deny default",
+        "(deny nvram*",
+        "(deny iokit-get-properties",
+        "(deny process-info*",
+    ];
+    let denies: Vec<usize> = text.match_indices("(deny").map(|(at, _)| at).collect();
+    assert!(denies.len() > gaps.len(), "the policy wrote no deny");
+    for at in denies {
+        if !gaps
+            .iter()
+            .any(|gap| text.get(at..).unwrap().starts_with(gap))
+        {
+            assert!(
+                at > allow,
+                "a deny precedes the listpids allow: {}",
+                text.get(at..).unwrap()
+            );
+        }
+    }
+}
+
 #[test]
 fn with_a_runtime_path_in_the_data_dir() {
     let w = World::new("profile-runtime-in-data");
