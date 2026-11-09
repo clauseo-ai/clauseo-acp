@@ -323,12 +323,15 @@ mod shell_tests {
     /// in milliseconds): nothing about a proxy, a stream port or a socket folder.
     #[test]
     fn shell_env_is_the_session_config_folders_and_chrome() {
+        // Joined as the host joins them, so the separator is the OS's own (`\` on Windows).
         let run = PathBuf::from("/data/run/t-1");
+        let downloads = run.join("downloads");
+        let profile = run.join("browser-profile");
         let inputs = ShellInputs {
             session: "t-1",
             config: Path::new("/data/browser/agent-browser.json"),
-            downloads: &run.join("downloads"),
-            profile: &run.join("browser-profile"),
+            downloads: &downloads,
+            profile: &profile,
             executable: Path::new("/opt/chrome"),
         };
         let env = shell_env(&inputs);
@@ -340,10 +343,10 @@ mod shell_tests {
             text,
             [
                 ("AGENT_BROWSER_CONFIG", "/data/browser/agent-browser.json"),
-                ("AGENT_BROWSER_DOWNLOAD_PATH", "/data/run/t-1/downloads"),
+                ("AGENT_BROWSER_DOWNLOAD_PATH", downloads.to_str().unwrap()),
                 ("AGENT_BROWSER_EXECUTABLE_PATH", "/opt/chrome"),
                 ("AGENT_BROWSER_IDLE_TIMEOUT_MS", "600000"),
-                ("AGENT_BROWSER_PROFILE", "/data/run/t-1/browser-profile"),
+                ("AGENT_BROWSER_PROFILE", profile.to_str().unwrap()),
                 ("AGENT_BROWSER_SESSION", "t-1"),
             ]
         );
