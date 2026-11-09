@@ -50,3 +50,23 @@ fn the_dacl_names_the_desktop_user_and_the_pool_user_only() {
         "FILE_GENERIC_READ | FILE_GENERIC_WRITE, less FILE_CREATE_PIPE_INSTANCE"
     );
 }
+
+/// The denial pipe: its own name in a fresh set, and the desktop user alone, protected and
+/// labelled, so the agent (a pool user) can't open it.
+#[test]
+fn the_denial_pipe_is_the_desktop_users_alone() {
+    let set = PipeSet::random().unwrap();
+    assert_eq!(
+        set.name(Role::Denials),
+        format!(r"\\.\pipe\{}-denials", set.base())
+    );
+    assert!(
+        !Role::ALL.contains(&Role::Denials),
+        "not one of the runner's four"
+    );
+    let desktop = Sid::parse("S-1-5-21-1-2-3-1001").unwrap();
+    assert_eq!(
+        denial_sddl(&desktop),
+        "D:P(A;;0x12019b;;;S-1-5-21-1-2-3-1001)S:(ML;;NWNR;;;ME)"
+    );
+}

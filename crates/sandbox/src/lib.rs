@@ -177,7 +177,7 @@ pub mod windows;
 pub use browser_dir::BrowserSocketDir;
 pub use denial::{
     Access, CappedSink, Clock, DENIAL_WINDOW, DENIALS_PER_WINDOW, Denial, DenialSink, HostRefusal,
-    PathClass, Reachability, SystemClock,
+    PathClass, Reachability, SetAsideWhat, SystemClock,
 };
 pub use detect::{Detection, NoSandbox, SET_UP_BY_OTHER_USER, Tier, detect, probe};
 pub use error::Error;

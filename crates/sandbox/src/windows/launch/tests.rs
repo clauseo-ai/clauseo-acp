@@ -1,5 +1,6 @@
 //! `Launchers`' order over the fake steps (`fake.rs`): the reserve here, the preparation in
-//! `prepare.rs`, the launch and the session's end in `session.rs`.
+//! `prepare.rs`, the launch and the session's end in `session.rs`, the outer, its denial feed
+//! and the end's once-only pass in `end.rs`.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,9 +11,12 @@ use crate::test_support::TempDir;
 use crate::windows::pool::assign::{HeldBack, Why};
 use crate::windows::sids::Sid;
 
+mod end;
 mod fake;
+mod feeding;
 mod held;
 mod limits;
+mod pipe;
 mod prepare;
 mod session;
 

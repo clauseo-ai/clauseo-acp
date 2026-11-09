@@ -1,100 +1,246 @@
 //! The launcher `Launchers::launch` returns: one agent each, started through the outer runner.
 //!
-//! TODO(C4): this is C3's minimal one. C4 adds the outer's stderr tap into `denial_from_line`
-//! and the denial sink, the minimal environment and `opts.clear_env()`, the 5 s `stdin_grace`
-//! (C1), the exit decode (`RunOutcome`) and the end sequence; and decides whether a launch file
-//! written for a spawn that failed is removed here (the undo below doesn't remove it).
-//!
-//! **The claim's hand-over:** `Launchers::launch` gives this launcher the reservation's claim,
-//! armed. It is let go of only once the outer has started (from then on `after_session` ends
-//! the session). If writing the launch file or starting the outer fails, the session is undone
-//! here before the error returns (the run's group, the slot, the session's mark) and the matter
-//! freed; if the launcher is dropped unused, the claim's drop does the same, off the dropping
-//! thread. C4 keeps this hand-over wherever it moves the start.
-//!
-//! Before it starts anything, the launcher checks its session is still launched in the
-//! registry (an `after_session` may have ended it): if not, `WrongReservation`. A panic in the
-//! start is caught: the outer it may have started is ended first (its job killed and seen truly
-//! empty, `LaunchSteps::end_outer`), and only then is the claim released. If the outer can't
-//! be ended, the matter is marked stuck, never released.
+//! - **The outer:** the launcher makes the denial pipe and writes the protected launch file,
+//!   which names it, then starts
+//!   `clauseo-sandbox-run.exe --launch <file>` in the host's tree ([`outer_spec`]), with a
+//!   minimal environment ([`OUTER_ENV`]) and `clear_env`: the agent's own environment travels
+//!   in the launch file. The outer runs as the lawyer and makes the agent's window station and
+//!   desktop itself (#786), so the launcher does nothing for desktops.
+//! - **Its options** ([`outer_options`]): the host's, with `clear_env` and a 5 s stdin grace
+//!   unless the host set one. Nothing is read from the outer's stderr: it carries the agent's,
+//!   so nothing there is trusted; the host only drains it.
+//! - **Denials:** once the outer has started, a thread of its own reads the denial pipe into
+//!   the launch's sink, from the outer alone (`feed.rs`).
+//! - **A cancel** is the host's shutdown ladder on the outer's handle: stdin closed (the outer
+//!   passes the close on to the agent), the grace, then the tree's kill (`clauseo_process`).
+//! - **The claim's hand-over** (C3): `Launchers::launch` gives this launcher the reservation's
+//!   claim, armed. It is let go of only once the outer has started. If the pipe, the launch
+//!   file or the start fails, the session is undone here before the error returns (the run's
+//!   group, the slot, the session's mark) and the matter freed; if the launcher is dropped
+//!   unused, the claim's drop does the same, off the dropping thread. No pass runs then.
+//! - **Before it starts anything** the launcher checks its session is still launched in the
+//!   registry (an `after_session` may have ended it): if not, `WrongReservation`. **A panic in
+//!   the start is caught** (C3): the outer it may have started is ended first (its job killed
+//!   and seen truly empty, `LaunchSteps::end_outer`), and only then is the claim released; if
+//!   the outer can't be ended, the matter is marked stuck, never released.
+//! - **The end:** once the outer started, the host decodes its exit ([`RunEnd`](super::RunEnd)),
+//!   then the session's after-session pass runs once (`end.rs`); dropping the launcher runs it
+//!   if nobody has.
 
+use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::panic::AssertUnwindSafe;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 
-use clauseo_process::{LaunchSpec, Launched, Launcher, SpawnOptions};
+use clauseo_process::{LaunchSpec, Launched, Launcher, SpawnOptions, TreeWatch};
 
+use super::end::{AfterSpawn, EXIT_WAIT, SessionGuard};
+use super::feed::{self, DenialPipe, Peer};
 use super::registry::Registry;
 use super::steps::LaunchSteps;
 use crate::reservation::Claim;
 use crate::windows::pool::PoolUser;
-use crate::{Error, Policy};
+use crate::windows::runner::runner_args;
+use crate::{DenialSink, Error, Policy};
 
-/// Starts one agent as the matter's pool user: writes the protected launch file, then starts
-/// `clauseo-sandbox-run.exe --launch <file>` in the host's tree.
+/// How long the host's shutdown waits after closing the outer's stdin, unless the host set its
+/// own: the outer passes the close to the agent and waits for it, then for its own end.
+pub const OUTER_STDIN_GRACE: Duration = Duration::from_secs(5);
+
+/// The host's variables the outer gets, when set; nothing else. Windows' own DLLs look for the
+/// system folder in the first three; the temporary folder is the lawyer's, the outer's user.
+pub const OUTER_ENV: [&str; 5] = ["SystemRoot", "SystemDrive", "windir", "TEMP", "TMP"];
+
+/// The outer's options: the host's `opts`, with `clear_env` and [`OUTER_STDIN_GRACE`] unless
+/// the host set a grace.
+pub(super) fn outer_options(opts: SpawnOptions) -> SpawnOptions {
+    let grace = opts.stdin_grace_set().unwrap_or(OUTER_STDIN_GRACE);
+    opts.clear_env().stdin_grace(grace)
+}
+
+/// The outer's spec: `runner` with `--launch <launch>`, in the runner's folder, with the
+/// [`OUTER_ENV`] variables `var` gives.
+pub(super) fn outer_spec(
+    runner: PathBuf,
+    launch: &Path,
+    var: impl Fn(&str) -> Option<OsString>,
+) -> Result<LaunchSpec, clauseo_process::Error> {
+    let folder = runner.parent().map(Path::to_path_buf).ok_or_else(|| {
+        clauseo_process::Error::InvalidSpec("the runner has no folder".to_owned())
+    })?;
+    let env: BTreeMap<OsString, OsString> = OUTER_ENV
+        .into_iter()
+        .filter_map(|name| var(name).map(|value| (OsString::from(name), value)))
+        .collect();
+    LaunchSpec::new(runner, runner_args(launch), env, folder)
+}
+
+/// Starts one agent as the matter's pool user: makes the denial pipe, writes the protected
+/// launch file, then starts `clauseo-sandbox-run.exe --launch <file>` in the host's tree. Holds
+/// the session's claim until the outer starts, then its end (`end.rs`) until dropped.
 pub struct TierBLauncher<S: LaunchSteps> {
-    registry: Arc<Registry<S>>,
-    /// The session's claim, until its agent starts: released (the session undone) if it never
+    steps: Arc<S>,
+    /// The session's claim, until its outer starts: released (the session undone) if it never
     /// does.
     claim: Mutex<Option<Claim>>,
-    policy: Policy,
     pool: PoolUser,
     opts: SpawnOptions,
+    denials: Arc<dyn DenialSink>,
     started: AtomicBool,
+    /// The outer's job, held open from the spawn until the start is known, for `end_outer`
+    /// on a path that ends the outer (a raced end, a panic).
+    job: Mutex<Option<TreeWatch>>,
+    guard: SessionGuard<S>,
+}
+
+/// What the launcher of a launched session is made from.
+pub(super) struct Handover {
+    pub(super) matter: String,
+    pub(super) session: String,
+    pub(super) claim: Claim,
+    pub(super) policy: Policy,
+    pub(super) pool: PoolUser,
 }
 
 impl<S: LaunchSteps> TierBLauncher<S> {
-    /// The launcher of the launched session `claim` names, in `registry`.
+    /// The launcher of the launched `session` in `registry`; `opts` are the outer's
+    /// ([`outer_options`]), `denials` the launch's sink.
     pub(super) fn new(
         registry: Arc<Registry<S>>,
-        claim: Claim,
-        policy: Policy,
-        pool: PoolUser,
+        session: Handover,
         opts: SpawnOptions,
+        denials: Arc<dyn DenialSink>,
     ) -> TierBLauncher<S> {
-        TierBLauncher {
-            registry,
-            claim: Mutex::new(Some(claim)),
+        let Handover {
+            matter,
+            session,
+            claim,
             policy,
             pool,
+        } = session;
+        TierBLauncher {
+            steps: Arc::clone(&registry.steps),
+            guard: SessionGuard {
+                id: claim.id,
+                registry,
+                matter,
+                session,
+                policy,
+                armed: AtomicBool::new(false),
+            },
+            claim: Mutex::new(Some(claim)),
+            pool,
             opts,
+            denials,
             started: AtomicBool::new(false),
+            job: Mutex::new(None),
         }
     }
 
-    /// Writes the launch file and starts the outer.
+    fn policy(&self) -> &Policy {
+        &self.guard.policy
+    }
+
+    /// Makes the pipe, writes the launch file and starts the outer; the feed starts with it.
+    ///
+    /// A session whose end began during the spawn (the host's `after_session` raced the start)
+    /// gets no agent: the outer is ended and seen empty (`LaunchSteps::end_outer`), and only
+    /// then does the end's pass run here (repair, set-aside, slot and matter freed); if it can't
+    /// be ended, nothing moves and the matter stays stuck. The launch fails either way. One
+    /// whose end began before the spawn starts nothing.
     fn start(&self, spec: &LaunchSpec) -> Result<Launched, clauseo_process::Error> {
-        let steps = &*self.registry.steps;
-        let file = steps
-            .write_launch(&self.policy, &self.pool, spec)
-            .map_err(|error| {
-                if let Error::Launch(error) = error {
-                    error
-                } else {
-                    clauseo_process::Error::Os {
-                        what: "the sandbox couldn't write the launch file",
-                        source: std::io::Error::other(error.kind()),
-                    }
+        let (mut pipe, pipe_name) = self.steps.create_pipe().map_err(launch_error)?;
+        let file = self
+            .steps
+            .write_launch(self.policy(), &self.pool, spec, &pipe_name)
+            .map_err(launch_error)?;
+        // The session's end and undo delete it too, if nothing has by then.
+        self.guard.launch_file(&file);
+        if !self.guard.spawning() {
+            self.remove_launch(&file);
+            return Err(ended_early());
+        }
+        let outer = outer_spec(self.steps.runner(), &file, |name| self.steps.host_var(name));
+        let started = outer.and_then(|outer| self.steps.spawn_outer(&outer, &self.opts));
+        // First, before anything that could drop `launched` (an early return, a `?`, a panic
+        // unwinding): keep its job open, for `end_outer` on any path that ends the outer, and
+        // open the outer by its pid while `launched` holds its process handle, so the pid is
+        // still its own. Nothing between the spawn and here can fail or return.
+        if let Ok(launched) = &started {
+            *self.job() = Some(launched.handle.tree_watch());
+        }
+        let watched = started
+            .as_ref()
+            .ok()
+            .and_then(|launched| feed::watch(&mut pipe, launched.handle.pid()));
+        match self.guard.spawned(started.is_ok()) {
+            AfterSpawn::Run => drop(self.job().take()),
+            AfterSpawn::Failed => {
+                self.remove_launch(&file);
+                return started;
+            }
+            AfterSpawn::Raced => {
+                // Dropping `launched` sends its job the kill; `end_outer` waits, on the job
+                // still held open, until it holds no running process.
+                drop(started);
+                self.remove_launch(&file);
+                tracing::warn!("tier B's session ended while its outer started: ending it");
+                let gone = self.end_outer().is_ok();
+                self.guard.finish_race(gone);
+                return Err(ended_early());
+            }
+        }
+        if let Some(outer) = watched {
+            let (registry, take_file) = (Arc::clone(&self.guard.registry), self.guard.file_taker());
+            let connected = move || {
+                if let Some(file) = take_file() {
+                    registry.files.remove(&*registry.steps, &file);
                 }
-            })?;
-        steps.spawn_outer(&file, &self.opts)
+            };
+            start_feed(pipe, outer, Arc::clone(&self.denials), connected);
+        }
+        started
+    }
+
+    /// The outer's job, as held from the spawn.
+    fn job(&self) -> std::sync::MutexGuard<'_, Option<TreeWatch>> {
+        self.job.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Ends the outer this launcher started, if any, on its job held open since the spawn,
+    /// within [`EXIT_WAIT`]: `Err` (the matter to stay stuck) when it isn't empty by then.
+    fn end_outer(&self) -> Result<(), Error> {
+        let job = self.job().take();
+        self.steps.end_outer(&self.pool, job.as_ref(), EXIT_WAIT)
+    }
+
+    /// Deletes the launch file `file`, and forgets the session's note of it.
+    fn remove_launch(&self, file: &Path) {
+        let _noted = self.guard.take_launch_file();
+        self.guard.registry.files.remove(&*self.steps, file);
     }
 }
 
 impl<S: LaunchSteps> Launcher for TierBLauncher<S> {
     /// Starts the agent `spec` names; a second call is refused: each launcher starts one agent.
+    /// A launch file whose outer didn't start is removed, its pipe closed, and the session
+    /// undone before the error returns.
     fn launch(&self, spec: &LaunchSpec) -> Result<Launched, clauseo_process::Error> {
         if self.started.swap(true, Ordering::AcqRel) {
             return Err(clauseo_process::Error::InvalidSpec(
                 "a tier B launcher starts one agent".to_owned(),
             ));
         }
+        let registry = &self.guard.registry;
         let claim = self
             .claim
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take();
-        let Some(claim) = claim.filter(|claim| self.registry.is_launched(claim.id)) else {
+        let Some(claim) = claim.filter(|claim| registry.is_launched(claim.id)) else {
             // Its end began (or it was released): nothing is started for a session gone.
             return Err(clauseo_process::Error::Os {
                 what: "the sandbox's reservation is no longer held",
@@ -105,11 +251,11 @@ impl<S: LaunchSteps> Launcher for TierBLauncher<S> {
             tracing::warn!("tier B's launcher panicked while starting the outer");
             let id = claim.id;
             claim.disarm();
-            match self.registry.steps.end_outer(&self.pool) {
-                Ok(()) => self.registry.release_now(id),
+            match self.end_outer() {
+                Ok(()) => registry.release_now(id),
                 Err(error) => {
                     tracing::warn!(kind = error.kind(), "tier B couldn't end the outer");
-                    self.registry.stick(id);
+                    registry.stick(id);
                 }
             }
             return Err(clauseo_process::Error::Os {
@@ -117,7 +263,7 @@ impl<S: LaunchSteps> Launcher for TierBLauncher<S> {
                 source: std::io::Error::other("a step panicked"),
             });
         };
-        hand_over(&self.registry, Some(claim), started.is_ok());
+        hand_over(registry, Some(claim), started.is_ok());
         started
     }
 }
@@ -135,6 +281,43 @@ pub(super) fn hand_over<S: LaunchSteps>(
         claim.disarm();
         if !started {
             registry.release_now(id);
+        }
+    }
+}
+
+/// The launch's error for a session whose end began before its outer started.
+fn ended_early() -> clauseo_process::Error {
+    clauseo_process::Error::Os {
+        what: "the session ended before its agent started",
+        source: std::io::ErrorKind::Interrupted.into(),
+    }
+}
+
+/// Starts the denial pipe's feed for `outer` on a thread of its own, which ends when the outer
+/// closes the pipe or exits; `connected` runs once the outer has connected. A thread that won't
+/// start leaves the pipe closed: the session runs, with no set-aside reaching the sink.
+fn start_feed<P: DenialPipe>(
+    pipe: P,
+    outer: Peer,
+    denials: Arc<dyn DenialSink>,
+    connected: impl FnOnce() + Send + 'static,
+) {
+    let started = std::thread::Builder::new()
+        .name("clauseo-tierb-denials".to_owned())
+        .spawn(move || feed::feed(pipe, outer, &*denials, connected));
+    if started.is_err() {
+        tracing::warn!("tier B's denial pipe thread didn't start");
+    }
+}
+
+/// The sandbox's error making the pipe or writing the launch file, as the process seam's.
+fn launch_error(error: Error) -> clauseo_process::Error {
+    if let Error::Launch(error) = error {
+        error
+    } else {
+        clauseo_process::Error::Os {
+            what: "the sandbox couldn't prepare the outer runner's launch",
+            source: std::io::Error::other(error.kind()),
         }
     }
 }

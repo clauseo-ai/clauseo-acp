@@ -1,8 +1,11 @@
 //! The fake steps: a world that outlives one set of launchers (the "disk": slot claims, open
 //! sessions, the data folder), a log of every call, a step that fails, panics, waits or takes
-//! time on demand, and a clock the retries and slow steps move.
+//! time on demand, and a clock the retries and slow steps move. The pool user's processes are a
+//! count: leftovers, or the outer's tree, which [`FakeSteps::spawn_outer`] starts as a real
+//! process that exits at once (`spawn_fails` makes it fail instead).
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -12,6 +15,7 @@ use std::time::Duration;
 use clauseo_process::{LaunchSpec, Launched, SpawnOptions};
 
 use super::super::{Ending, LaunchSteps, RunRefusal, Slot, Stopped, Walk};
+use super::pipe::{FakePipe, Outer, PIPE, Spawned, host_var, install, quick_outer};
 use crate::test_support::TempDir;
 use crate::windows::pool::PoolUser;
 use crate::windows::pool::assign::Assign;
@@ -57,6 +61,7 @@ impl Held {
 #[derive(Default)]
 pub(super) struct World {
     log: Mutex<Vec<String>>,
+    logged: std::sync::Condvar,
     /// The slot records: each slot's number and the claim it names.
     slots: Mutex<BTreeMap<u8, u64>>,
     open: Mutex<BTreeMap<String, BTreeSet<String>>>,
@@ -65,10 +70,10 @@ pub(super) struct World {
     run_answers: Mutex<VecDeque<RunRefusal>>,
     setup_always_running: Mutex<bool>,
     gate: Mutex<Option<Gate>>,
-    clock: Mutex<Duration>,
+    pub(super) clock: Mutex<Duration>,
     pauses: Mutex<u32>,
     groups: Mutex<u32>,
-    leftovers: Mutex<u32>,
+    pub(super) leftovers: Mutex<u32>,
     stubborn: Mutex<bool>,
     sweeper: Mutex<bool>,
     panic_at: Mutex<Option<&'static str>>,
@@ -77,6 +82,8 @@ pub(super) struct World {
     progressing: Mutex<Option<(&'static str, Duration)>>,
     end_run_fails: Mutex<u32>,
     dir: OnceLock<TempDir>,
+    /// The outer's side of the world (`pipe.rs`).
+    pub(super) outer: Outer,
 }
 
 impl World {
@@ -195,8 +202,21 @@ impl World {
         *self.clock.lock().unwrap()
     }
 
-    fn log(&self, call: impl Into<String>) {
+    pub(super) fn log(&self, call: impl Into<String>) {
         self.log.lock().unwrap().push(call.into());
+        self.logged.notify_all();
+    }
+
+    /// Waits until `call` is in the log (not taken), from any thread.
+    pub(super) fn wait_for(&self, call: &str) {
+        let log = self.log.lock().unwrap();
+        let (_log, waited) = self
+            .logged
+            .wait_timeout_while(log, Duration::from_secs(10), |log| {
+                !log.iter().any(|each| each == call)
+            })
+            .unwrap();
+        assert!(!waited.timed_out(), "{call} never came");
     }
 
     /// A work step: [`World::step`], then the time it takes, its items counted.
@@ -215,7 +235,7 @@ impl World {
     }
 
     /// Logs `step`, waits at its gate, takes its time, panics or fails it if asked to.
-    fn step(&self, step: &'static str) -> Result<(), Error> {
+    pub(super) fn step(&self, step: &'static str) -> Result<(), Error> {
         self.log(step);
         let gate = {
             let mut gate = self.gate.lock().unwrap();
@@ -286,6 +306,7 @@ impl LaunchSteps for FakeSteps {
     type Cursor = ();
     type Repaired = ();
     type Passed = Vec<SetAside>;
+    type Pipe = FakePipe;
 
     fn data_dir(&self) -> &Path {
         &self.dir
@@ -293,6 +314,7 @@ impl LaunchSteps for FakeSteps {
 
     fn clear_stale(&self) -> Result<(), Error> {
         self.world.step("clear_stale")?;
+        self.world.outer.files.lock().unwrap().clear();
         self.world.slots.lock().unwrap().clear();
         Ok(())
     }
@@ -443,27 +465,78 @@ impl LaunchSteps for FakeSteps {
         Ok(())
     }
 
+    fn create_pipe(&self) -> Result<(FakePipe, String), Error> {
+        self.world.step("create_pipe")?;
+        let pipe = FakePipe {
+            world: Some(Arc::clone(&self.world)),
+            ..self.world.outer.pipe()
+        };
+        Ok((pipe, PIPE.to_owned()))
+    }
+
     fn write_launch(
         &self,
         _policy: &Policy,
         _pool: &PoolUser,
         _spec: &LaunchSpec,
+        denial_pipe: &str,
     ) -> Result<PathBuf, Error> {
         self.world.step("write_launch")?;
-        Ok(PathBuf::from("run/0123456789abcdef.json"))
+        *self.world.outer.denial_pipe.lock().unwrap() = Some(denial_pipe.to_owned());
+        let file = PathBuf::from("run/0123456789abcdef.json");
+        self.world.outer.files.lock().unwrap().insert(file.clone());
+        Ok(file)
     }
 
+    fn remove_launch(&self, launch: &Path) -> Result<(), Error> {
+        self.world.step("remove_launch")?;
+        self.world.outer.files.lock().unwrap().remove(launch);
+        Ok(())
+    }
+
+    fn runner(&self) -> PathBuf {
+        install().join("clauseo-sandbox-run.exe")
+    }
+
+    fn host_var(&self, name: &str) -> Option<OsString> {
+        host_var(name)
+    }
+
+    /// Records what it was given, then fails, or with [`World::spawn_starts`] starts a real
+    /// process that exits at once and "starts" the outer's two processes.
     fn spawn_outer(
         &self,
-        _launch: &Path,
-        _opts: &SpawnOptions,
+        spec: &LaunchSpec,
+        opts: &SpawnOptions,
     ) -> Result<Launched, clauseo_process::Error> {
-        self.world.log("spawn_outer");
-        Err(clauseo_process::Error::Closing)
+        self.world
+            .step("spawn_outer")
+            .map_err(|_failed| clauseo_process::Error::Closing)?;
+        *self.world.outer.spawned.lock().unwrap() = Some(Spawned::of(spec, opts));
+        if !*self.world.outer.spawn_starts.lock().unwrap() {
+            return Err(clauseo_process::Error::Closing);
+        }
+        *self.world.leftovers.lock().unwrap() = 2;
+        quick_outer()
     }
 
-    fn end_outer(&self, _pool: &PoolUser) -> Result<(), Error> {
-        self.world.step("end_outer")
+    /// Logs the processes running when it starts: they exit within the wait, unless they
+    /// linger, which costs the whole wait.
+    fn wait_exited(&self, _pool: &PoolUser, within: Duration) -> Result<Vec<u32>, Error> {
+        let fails = *self.world.fail_at.lock().unwrap() == Some("wait_exited");
+        self.world.outer.waited(&self.world, within, fails)
+    }
+
+    fn end_outer(
+        &self,
+        _pool: &PoolUser,
+        job: Option<&clauseo_process::TreeWatch>,
+        within: Duration,
+    ) -> Result<(), Error> {
+        self.world.step("end_outer")?;
+        self.world
+            .outer
+            .ended(job.is_some(), within, &self.world.clock)
     }
 
     fn session_cursor(&self, _end: &Ending<'_>) -> Option<()> {

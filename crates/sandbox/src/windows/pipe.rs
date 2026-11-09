@@ -45,6 +45,10 @@ pub enum Role {
     Out,
     /// The agent's stderr: the agent writes, the outer reads.
     Err,
+    /// Tier B's denial pipe (PR6), not one of the runner's four ([`Role::ALL`]): the host makes
+    /// it before the launch file, which names it; the outer writes its set-aside records, the
+    /// host reads them. Its descriptor is [`denial_sddl`]'s.
+    Denials,
 }
 
 impl Role {
@@ -58,6 +62,7 @@ impl Role {
             Role::In => "in",
             Role::Out => "out",
             Role::Err => "err",
+            Role::Denials => "denials",
         }
     }
 }
@@ -131,6 +136,13 @@ pub fn pipe_sddl(desktop_user: &Sid, pool_user: &Sid) -> String {
         "D:P(A;;0x{PIPE_RIGHTS:x};;;{desktop_user})(A;;0x{PIPE_RIGHTS:x};;;{pool_user})\
          S:(ML;;NWNR;;;ME)"
     )
+}
+
+/// The denial pipe's descriptor ([`Role::Denials`]): protected, the desktop user alone with
+/// [`PIPE_RIGHTS`] (no pool user: the agent never opens it), and the same Medium label, so no
+/// Low process of the desktop user's opens it either.
+pub fn denial_sddl(desktop_user: &Sid) -> String {
+    format!("D:P(A;;0x{PIPE_RIGHTS:x};;;{desktop_user})S:(ML;;NWNR;;;ME)")
 }
 
 /// `bytes` as lowercase hex.

@@ -9,10 +9,11 @@
 //!   `killpg`); on Windows a Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, which the agent
 //!   joins while suspended (`CREATE_SUSPENDED`, then its threads resume) and which it never runs
 //!   outside. Windows children get `CREATE_NO_WINDOW`. Every Win32 call is in `os/windows.rs`.
-//! - The shutdown ladder: close stdin, 2 s, SIGTERM to the group, 3 s, SIGKILL to the group, and
-//!   2 s more for the exit. On Windows: close stdin, 2 s, end the job, 2 s. On Unix the tree kill
-//!   then kills every descendant in the listing the caller passed to the shutdown, because a
-//!   command an agent starts in a session of its own (Codex does) has left the group.
+//! - The shutdown ladder: close stdin, the stdin grace (2 s, or [`SpawnOptions::stdin_grace`]),
+//!   SIGTERM to the group, 3 s, SIGKILL to the group, and 2 s more for the exit. On Windows: close
+//!   stdin, the stdin grace, end the job, 2 s. On Unix the tree kill then kills every descendant
+//!   in the listing the caller passed to the shutdown, because a command an agent starts in a
+//!   session of its own (Codex does) has left the group.
 //! - The agent's descendants: listed by parent pid on Unix (`/proc` on Linux, libproc on macOS)
 //!   and from the job's process list on Windows (parents from Toolhelp), each with its start
 //!   time so a reused pid is never signalled; and the sweep that ends those new since an earlier
@@ -30,6 +31,7 @@
 //!   [`spawn_in_tree`] with the spec unchanged and its [`SpawnOptions`] (the home folder for
 //!   redaction, [`SpawnOptions::clear_env`] so the child gets only the spec's variables, and on
 //!   Windows extra creation flags). By default the child inherits this process's environment.
+//!   [`SpawnOptions::stdin_grace`] sets the shutdown's first wait (2 s by default).
 //! - [`Launched`]: [`AgentStdin`] (an `AsyncWrite` the handle can close), the agent's stdout, the
 //!   [`StderrPump`] the caller must drive, and the [`Handle`].
 //! - [`Handle::exited`] (the agent exited on its own; its tree is then killed),

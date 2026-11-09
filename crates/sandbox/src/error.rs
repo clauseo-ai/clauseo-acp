@@ -177,10 +177,11 @@ pub enum Error {
     /// Windows tier B's work for this matter (a walk, its undo, or a session's end) is still in
     /// one step past the 180 s bound and its grace (`windows::launch`'s `STUCK_GRACE`). Nothing
     /// is undone from another thread (the step could still grant once it returns), so the
-    /// matter refuses every launch until Clauseo restarts. **Not retryable.**
+    /// matter refuses every launch until a restart. Until Clauseo stops pool-user processes at
+    /// its start (0049's C5 list), the words say to restart the computer. **Not retryable.**
     #[error(
-        "A step of the Safe workspace stopped answering for this matter. Restart Clauseo to \
-         continue with this matter."
+        "A step of the Safe workspace stopped answering for this matter. Restart the computer \
+         to continue with this matter."
     )]
     MatterStuck,
     /// Windows tier B's preparation of the matter made no counted progress for 60 s
@@ -434,7 +435,11 @@ mod tests {
             !Error::MatterStuck.code().is_retryable(),
             "Clauseo must restart"
         );
-        assert!(Error::MatterStuck.to_string().contains("Restart Clauseo"));
+        assert!(
+            Error::MatterStuck
+                .to_string()
+                .contains("Restart the computer")
+        );
         assert!(
             Error::NotPrepared.code().is_retryable(),
             "the host prepares again"

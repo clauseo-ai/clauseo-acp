@@ -2386,7 +2386,7 @@ The orchestrator's rulings change the interface above in these ways:
   session's end with no progress for the stall timer plus 60 s of grace (or past the cap plus
   the grace), or a reserve, an undo or a release running for 180 s plus the grace, makes
   `reserve` mark the matter stuck and refuse it with `Error::MatterStuck` (`Internal`, not
-  retryable: "Restart Clauseo to continue with this matter") until Clauseo restarts. A session's
+  retryable: "Restart the computer to continue with this matter") until a restart. A session's
   end stuck this way frees the matter once its steps return.
 - **One set of launchers per sandbox folder.** `Launchers::with_steps` takes the folder's
   `tier-b-launchers.lock` without waiting, before it clears what a crash left, and holds it
@@ -2435,16 +2435,68 @@ The orchestrator's rulings change the interface above in these ways:
   - give claim ids a per-run random prefix (or the process start time), so a slot record's
     claim can't collide across restarts, and keep `clear_stale` before the first claim;
   - keep the pool users out of the sandbox data folder (no access at all), where
-    `tier-b-launchers.lock` and the records live.
+    `tier-b-launchers.lock` and the records live;
+  - never free a slot or a matter while the pool user still runs processes after the end's
+    two 10 s waits (C4, a TODO in `launch/end.rs`): quarantine the slot, keep the matter held
+    (`reserve` answers `MatterBusy`), end the processes by the stop task and the sweep again,
+    and free both only once the pool user is truly empty (#697). Until then a reused slot has
+    only the proxy's auth between the old processes and the new session.
+  - know that a panic in the launcher's start while an end races it fails closed: the matter
+    stays stuck until a restart (C4), and only the start-up stop below makes a restart enough;
+  - **verify an unclean slot before any grant:** before the PR6 launcher grants anything
+    (`prepare_run`, then `apply`, in `walk.rs`), a slot marked unclean runs `--verify`, and a
+    failure refuses with `Quarantined`. It lands with or right after #819, and before PR6's
+    launchers are switched on;
+  - **stop pool-user processes at start-up:** when Clauseo starts, before any launch, stop the
+    pool-user processes of any stuck matter or unclean slot (the follow-up `refresh/task.rs`
+    names), and have the outer write the unclean marker when it dies before reading the launch
+    file (`runner.rs`), so that stop finds it. Until then a stuck matter's words say to restart
+    the computer, not Clauseo.
 - **Accepted: the launcher's check-to-spawn window.** `TierBLauncher` checks the session is
   still launched (`is_launched`) and then starts the outer; an `after_session` that begins in
   between isn't seen. This is accepted: the pass and the undo are decided by the registry's
   lock, and an outer started in the gap is the next launch's leftover, stopped or refused.
+  C4 keeps it to timing only: the launcher marks its spawn under the registry's lock, and an
+  end that comes during it moves nothing. The launcher ends the outer, and only once
+  `end_outer` has seen its job empty does it run the end's pass (repair, set-aside, then the
+  slot and the matter freed); if it can't, nothing moves and the matter is stuck. Nothing
+  moves, and no slot is reused, while the raced outer's processes may live.
 - **A gate for C5: `apply`'s grants name the run's group.** A failed or cancelled walk undoes
   the session's work, but not the permission entries `apply` wrote (by design: the next walk
   continues from them). C5 must confirm that those entries name the run's group
   (`ClauseoRun-<hex>`, which `EndRun` deletes), not the pool user. Otherwise a grant survives a
   failed check and the pool user keeps it outside any run.
+
+#### As built (PR6 C4)
+
+- **The outer:** `TierBLauncher` makes the denial pipe, writes the launch file, which names
+  the pipe, then starts `clauseo-sandbox-run.exe --launch <file>` from the runner's folder. It
+  runs with `clear_env` and only `SystemRoot`, `SystemDrive`, `windir`, `TEMP` and `TMP`. Its
+  stdin grace is 5 s unless the host set one. The launch file is lawyer-only while it exists
+  (its own protected DACL: the desktop user, `SYSTEM` and `Administrators`). It is deleted
+  once the outer connects to the denial pipe, which it does after reading the file, and
+  otherwise by the session's end, its undo, or a failed start. A removal that fails is noted
+  and tried again at each end and undo; the next start's stale sweep removes any left.
+- **A session whose end began before its outer started gets no agent:** the start is refused,
+  or, if the end came during the spawn, the outer is ended and seen empty before the end's
+  pass runs (repair, set-aside, the slot and the matter freed), and the launch fails.
+- **Denials come on the denial pipe, never from stderr.** The outer's stderr carries the
+  agent's, so the agent could forge any line there. The pipe has a random name
+  (`clauseo-run-<32 hex>-denials`), the desktop user alone in its DACL, the Medium label, one
+  instance made first, and local clients only. Once the outer has started, a thread reads it
+  only if its client is the outer, by pid and creation time. Each set-aside record goes to the
+  launch's sink in order. Each read also waits on the outer's process handle: once the outer
+  has exited the feed stops, drops what is unread (a handle it left behind could still write)
+  and closes the pipe. The record format is a stand-in until #789's.
+- **The exit:** `RunEnd::from_exit(code)` gives the host one of `Exited`, `HostEnded`,
+  `LeftSafeWorkspace`, `Redetect(cause)` or `Failed(error)`.
+- **The end runs once per session**, whoever asks first: the host's `after_session`, or the
+  launcher dropped without one, on a thread `Launchers::wait_ends` waits for. Until its outer
+  starts the launcher holds the reservation's claim, and a failed start or an unused drop
+  undoes the session instead; the end's guard is armed only once the outer has started. The
+  end waits first for the pool user's processes to have truly exited
+  (`LaunchSteps::wait_exited`, by token and handle, not the job's count). Any left after 10 s
+  get the stop task and a second wait. Only then is the matter free for `reserve`.
 
 ## Consequences
 

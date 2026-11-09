@@ -200,7 +200,15 @@ fn the_launch_hands_out_one_agents_launcher() {
     );
     assert_eq!(
         world.calls(),
-        ["write_launch", "spawn_outer", "end_run 1", UNDO[0], UNDO[1]]
+        [
+            "create_pipe",
+            "write_launch",
+            "spawn_outer",
+            "remove_launch",
+            "end_run 1",
+            UNDO[0],
+            UNDO[1]
+        ]
     );
     assert!(world.claimed_slots().is_empty());
     assert!(world.open_sessions(MATTER).is_empty());
@@ -239,7 +247,7 @@ fn a_failed_launch_file_undoes_the_session() {
     );
     assert_eq!(
         world.calls(),
-        ["write_launch", "end_run 1", UNDO[0], UNDO[1]]
+        ["create_pipe", "write_launch", "end_run 1", UNDO[0], UNDO[1]]
     );
     // Held to the end: a dropped reservation's undo would log on its own thread.
     let free = launchers.reserve(MATTER, "s2", &[]);
@@ -294,11 +302,18 @@ fn a_panic_in_the_launcher_ends_the_outer_first() {
         );
         let next = launchers.reserve(MATTER, "s2", &[]);
         if end_fails {
-            assert_eq!(world.calls(), ["write_launch", "end_outer"]);
+            assert_eq!(world.calls(), ["create_pipe", "write_launch", "end_outer"]);
             assert!(matches!(next, Err(Error::MatterStuck)), "{next:?}");
         } else {
-            let want = ["write_launch", "end_outer", "end_run 1", UNDO[0], UNDO[1]];
-            assert_eq!(world.calls()[..5], want);
+            let want = [
+                "create_pipe",
+                "write_launch",
+                "end_outer",
+                "end_run 1",
+                UNDO[0],
+                UNDO[1],
+            ];
+            assert_eq!(world.calls()[..6], want);
             assert!(next.is_ok(), "{next:?}");
         }
     }

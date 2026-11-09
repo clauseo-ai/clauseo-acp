@@ -58,6 +58,20 @@ fn a_written_launch_file_is_one_the_outer_runner_reads() {
         .expect("the outer runner reads the file");
     assert_eq!(LaunchMessage::parse(&bytes).unwrap(), message);
     assert!(crate::windows::test_acl::protected(&path));
+    // Lawyer-only while it exists (it holds the agent's environment): exactly the desktop
+    // user, SYSTEM and Administrators on its own protected DACL, no pool user, no group.
+    let user = crate::windows::record::current_user_sid()
+        .unwrap()
+        .to_string();
+    let mut named: Vec<String> = crate::windows::test_acl::entries(&path)
+        .into_iter()
+        .filter(|(kind, ..)| *kind == 0)
+        .map(|(.., sid)| sid.to_string())
+        .collect();
+    named.sort();
+    let mut want = vec![user, "S-1-5-18".to_owned(), "S-1-5-32-544".to_owned()];
+    want.sort();
+    assert_eq!(named, want);
     crate::windows::write::remove_owned_file(&path).unwrap();
 }
 

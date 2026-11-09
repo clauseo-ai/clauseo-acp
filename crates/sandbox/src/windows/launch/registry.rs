@@ -40,8 +40,10 @@ use crate::reservation::Release;
 use crate::windows::pool::PoolUser;
 use crate::{Error, SetAside};
 
+mod ended;
 mod held;
 
+pub(super) use ended::{Ended, OuterState, raced};
 pub(super) use held::{Finish, FinishEnd};
 use held::{Owed, stuck};
 
@@ -108,6 +110,11 @@ pub(super) struct Entry<S: LaunchSteps> {
     /// When it entered its state, on the steps' clock: the limit of a reserve, an undo, a
     /// release or a session's end counts from here.
     pub(super) since: Duration,
+    /// Where the launcher's start of the outer is (`ended.rs`).
+    pub(super) outer: OuterState,
+    /// The launch file, until the outer has read it: deleted by the feed then, else by the
+    /// session's end or undo.
+    pub(super) launch_file: Option<PathBuf>,
 }
 
 /// What an undo takes from an entry: the run's group, the slot, the session's mark.
@@ -118,6 +125,7 @@ pub(super) struct Undo<S: LaunchSteps> {
     run: Option<S::RunGroup>,
     slot: Option<Slot>,
     opened: bool,
+    launch_file: Option<PathBuf>,
 }
 
 /// What follows a walk's undo: the matter freed (the reservation was dropped), kept stuck, or
@@ -138,16 +146,6 @@ pub(super) enum Begun {
     Done,
 }
 
-/// What `after_session` takes from a launched session's entry.
-pub(super) struct Ended<S: LaunchSteps> {
-    pub(super) id: u64,
-    pub(super) pool: Option<PoolUser>,
-    pub(super) slot: Option<Slot>,
-    pub(super) run: Option<S::RunGroup>,
-    /// The end's progress, for its work steps' [`Walk`](super::Walk).
-    pub(super) walk: Arc<Shared>,
-}
-
 /// The sessions of one set of launchers, by matter.
 pub(super) struct Registry<S: LaunchSteps> {
     pub(super) owner: u64,
@@ -161,6 +159,10 @@ pub(super) struct Registry<S: LaunchSteps> {
     /// The sandbox folder's lock, held while anything (a reservation, a walk, a release thread)
     /// can still use the registry. `None` only once a test let go of it as a crash would.
     data_lock: Mutex<Option<File>>,
+    /// The ends dropped launchers run on threads of their own (`end.rs`).
+    pub(super) ends: super::end::Ends,
+    /// Launch files whose removal failed, tried again at each end and undo.
+    pub(super) files: super::end::LaunchFiles,
 }
 
 impl<S: LaunchSteps> Registry<S> {
@@ -173,6 +175,8 @@ impl<S: LaunchSteps> Registry<S> {
             owed: Mutex::new(Vec::new()),
             freed: Condvar::new(),
             data_lock: Mutex::new(Some(data_lock)),
+            ends: super::end::Ends::default(),
+            files: super::end::LaunchFiles::default(),
         }
     }
 
@@ -258,6 +262,8 @@ impl<S: LaunchSteps> Registry<S> {
                 walk: None,
                 stuck_from: None,
                 since: now,
+                outer: OuterState::Unstarted,
+                launch_file: None,
             },
         );
         Ok(id)
@@ -425,25 +431,9 @@ impl<S: LaunchSteps> Registry<S> {
         Ok((pool, std::mem::take(&mut entry.moved)))
     }
 
-    /// Starts `session`'s end: launched, it becomes ending, with its progress (the walk's stall
-    /// rule and cap, not a wall bound). `None` for a session not launched.
-    pub(super) fn end(&self, matter: &str, session: &str) -> Option<Ended<S>> {
-        let now = self.steps.now();
-        let mut matters = self.lock();
-        let entry = matters
-            .get_mut(matter)
-            .filter(|entry| entry.session == session && entry.state == State::Launched)?;
-        let walk = Shared::new(now);
-        entry.state = State::Ending;
-        entry.since = now;
-        entry.walk = Some(Arc::clone(&walk));
-        Some(Ended {
-            id: entry.id,
-            pool: entry.pool.clone(),
-            slot: entry.slot.clone(),
-            run: entry.run.take(),
-            walk,
-        })
+    /// Starts `session`'s end, once (`ended.rs`).
+    pub(super) fn end(&self, matter: &str, session: &str, id: Option<u64>) -> Option<Ended<S>> {
+        ended::end(self, matter, session, id)
     }
 
     /// Runs `undo`'s steps, then frees claim `id`'s matter, even if a step panics. Blocks:
@@ -461,6 +451,10 @@ impl<S: LaunchSteps> Registry<S> {
     /// Runs `undo`'s steps, newest first: `EndRun`, the slot, the session's mark. Blocks:
     /// never under the lock, and never from a drop.
     fn undo(&self, undo: Undo<S>) {
+        if let Some(file) = &undo.launch_file {
+            self.files.remove(&*self.steps, file);
+        }
+        self.files.retry(&*self.steps);
         self.end_run_and_free_slot(undo.pool.as_ref(), undo.run, undo.slot);
         if undo.opened {
             self.steps.close_session(&undo.matter, &undo.session);
@@ -548,6 +542,7 @@ fn take_undo<S: LaunchSteps>(matter: &str, entry: &mut Entry<S>) -> Undo<S> {
         run: entry.run.take(),
         slot: entry.slot.take(),
         opened: std::mem::take(&mut entry.opened),
+        launch_file: entry.launch_file.take(),
     }
 }
 

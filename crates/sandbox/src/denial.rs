@@ -68,6 +68,87 @@ pub enum Denial {
         /// When the list that matched was made.
         generated: clauseo_blocklist::Generated,
     },
+    /// Something the agent made in the matter that Clauseo set aside at once, while the agent
+    /// ran (Windows tier B's watch, `windows/runner/git_watch.rs`). Its words
+    /// ([`SetAsideWhat::words`]) tell the agent why, so it can work elsewhere.
+    SetAside {
+        /// Where it was, below the watched folder (the matter's, or its notes folder).
+        path: PathBuf,
+        /// Where it is now, in the set-aside: the lawyer's notice names it
+        /// ([`SetAsideWhat::notice`]).
+        to: PathBuf,
+        /// What it was.
+        what: SetAsideWhat,
+    },
+}
+
+/// What the watch set aside.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SetAsideWhat {
+    /// A git repository, or the part that makes one: a `.git`, a bare repository's folder, or
+    /// its `HEAD` file. Git trusts one in a lawyer's folder and would run its hooks as the
+    /// lawyer.
+    GitRepository,
+    /// A link (a junction or symbolic link) that leads outside the matter, or nowhere Clauseo
+    /// can tell.
+    LinkOut,
+    /// A folder the agent made or moved in, too big to check while it ran: set aside whole once
+    /// a scan of it ran past its time, so a repository deep inside can't stay there meanwhile.
+    UncheckedFolder,
+}
+
+impl SetAsideWhat {
+    /// Every kind, for reading a line back.
+    pub const ALL: [SetAsideWhat; 3] = [
+        SetAsideWhat::GitRepository,
+        SetAsideWhat::LinkOut,
+        SetAsideWhat::UncheckedFolder,
+    ];
+
+    /// The plain refusal for the item at `path`, below the matter's folder.
+    pub fn words(self, path: &std::path::Path) -> String {
+        format!("Clauseo set aside {}: {}", path.display(), self.why())
+    }
+
+    /// The lawyer's notice for the item `name` moved to `to`: where it went, and, since a
+    /// restore refuses a git folder, the step to put back one the lawyer made.
+    pub fn notice(self, name: &std::path::Path, to: &std::path::Path) -> String {
+        let (name, to) = (name.display(), to.display());
+        match self {
+            SetAsideWhat::GitRepository => format!(
+                "The AI tool tried to put a code repository in the matter. Clauseo stopped it \
+                 and moved {name} to {to}. If you made it yourself, move it back after the \
+                 session ends."
+            ),
+            SetAsideWhat::LinkOut => format!(
+                "The AI tool made a link in the matter that leads outside it. Clauseo stopped \
+                 it and moved {name} to {to}."
+            ),
+            SetAsideWhat::UncheckedFolder => format!(
+                "The AI tool added a folder to the matter too big to check while it worked. \
+                 Clauseo stopped it and moved {name} to {to}. Nothing was lost."
+            ),
+        }
+    }
+
+    /// Why, after the path.
+    pub fn why(self) -> &'static str {
+        match self {
+            SetAsideWhat::GitRepository => {
+                "an agent can't create a git repository inside a matter. Clone or init in your \
+                 scratch folder instead."
+            }
+            SetAsideWhat::LinkOut => {
+                "an agent can't make a link inside a matter that leads outside it. Work on those \
+                 files where they are, or copy them into your scratch folder."
+            }
+            SetAsideWhat::UncheckedFolder => {
+                "an agent can't add a folder tree to a matter too big to check while it runs. \
+                 Unpack or build big trees in your scratch folder instead."
+            }
+        }
+    }
 }
 
 /// The kind of file access refused.
