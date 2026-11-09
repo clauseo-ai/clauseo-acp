@@ -214,3 +214,114 @@ fn lexical_drops_dots_and_never_climbs_past_the_root() {
         Path::new("/Volumes/s")
     );
 }
+
+/// A fake `read`: `links` (link, target as written), `errors` (path, kind); any other path is
+/// not a link.
+fn reader<'a>(
+    links: &'a [(&str, &str)],
+    errors: &'a [(&str, io::ErrorKind)],
+) -> impl Fn(&Path) -> io::Result<Option<PathBuf>> + 'a {
+    move |path: &Path| {
+        let text = path.to_string_lossy();
+        assert!(
+            !text.starts_with("/Volumes/share") && !text.starts_with("//"),
+            "a network path was looked at: {text}"
+        );
+        if let Some((_, kind)) = errors.iter().find(|(at, _)| Path::new(at) == path) {
+            return Err(io::Error::from(*kind));
+        }
+        Ok(links
+            .iter()
+            .find(|(link, _)| Path::new(link) == path)
+            .map(|(_, target)| PathBuf::from(target)))
+    }
+}
+
+fn share() -> Mounts {
+    Mounts::new(vec![(PathBuf::from("/Volumes/share"), true)], &[])
+}
+
+/// Windows takes `..` off by text before it opens a path, so `J/../N/x` opens `N/x` whatever
+/// `J` links to: the check does the same, and finds `N`'s link to the share. The kernel's way
+/// (elsewhere) steps back from `J`'s target and finds no `N` there.
+#[test]
+fn on_windows_dots_go_by_text_before_any_link_is_followed() {
+    let read = reader(&[("/m/J", "/far/deep"), ("/m/N", "//host/share")], &[]);
+    let path = Path::new("/m/J/../N/x");
+    let by_text = link_to_network_as(path, &share(), &read, true);
+    assert_eq!(by_text, Some((PathBuf::from("//host/share"), Off::Network)));
+    assert_eq!(link_to_network_as(path, &share(), &read, false), None);
+}
+
+/// A relative link target is joined to the link's folder and its `..` taken off by text too.
+#[test]
+fn on_windows_a_relative_target_drops_its_dots_by_text() {
+    let read = reader(
+        &[("/m/a", "sub/../../Volumes/share/x"), ("/m/sub", "/far")],
+        &[],
+    );
+    let got = link_to_network_as(Path::new("/m/a/y"), &share(), &read, true);
+    assert_eq!(
+        got,
+        Some((PathBuf::from("/Volumes/share/x/y"), Off::Network))
+    );
+}
+
+/// The same on Windows paths, on Windows.
+#[cfg(windows)]
+#[test]
+fn a_junction_then_dots_on_windows_paths_is_caught() {
+    let mounts = Mounts::new(Vec::new(), &[]).with_drive(b'C', Drive::Local);
+    let read = reader(
+        &[(r"C:\m\J", r"C:\far\deep"), (r"C:\m\N", r"\\host\share")],
+        &[],
+    );
+    let got = link_to_network(Path::new(r"C:\m\J\..\N\x"), &mounts, &read);
+    assert_eq!(got, Some((PathBuf::from(r"\\host\share"), Off::Network)));
+}
+
+/// Only a missing name ends a chain as local; any other failed look is unknown, never local.
+#[test]
+fn only_a_missing_name_ends_a_chain() {
+    let errors = [
+        ("/m/gone", io::ErrorKind::NotFound),
+        ("/m/denied", io::ErrorKind::PermissionDenied),
+        ("/m/odd", io::ErrorKind::Other),
+    ];
+    let read = reader(&[], &errors);
+    for dots_by_text in [false, true] {
+        let gone = link_to_network_as(Path::new("/m/gone/x"), &share(), &read, dots_by_text);
+        assert_eq!(gone, None);
+        for name in ["denied", "odd"] {
+            let path = PathBuf::from("/m").join(name);
+            let got = link_to_network_as(&path.join("x"), &share(), &read, dots_by_text);
+            assert_eq!(got, Some((path, Off::Unknown)), "{name}");
+        }
+    }
+}
+
+/// A chain longer than the kernel follows is unknown, never local: one more hop could reach a
+/// share. Windows follows 63 reparse points, so its cap is 63.
+#[test]
+fn a_chain_past_the_hop_cap_is_unknown() {
+    let names: Vec<(String, String)> = (0..=HOPS_MAX)
+        .map(|at| (format!("/m/l{at}"), format!("/m/l{}", at + 1)))
+        .collect();
+    let links: Vec<(&str, &str)> = names
+        .iter()
+        .map(|(a, b)| (a.as_str(), b.as_str()))
+        .collect();
+    let read = reader(&links, &[]);
+    for dots_by_text in [false, true] {
+        let got = link_to_network_as(Path::new("/m/l0"), &share(), &read, dots_by_text);
+        assert!(matches!(got, Some((_, Off::Unknown))), "{got:?}");
+    }
+    #[cfg(windows)]
+    assert_eq!(HOPS_MAX, 63);
+}
+
+#[test]
+fn lexical_keeps_leading_dots_of_a_relative_path() {
+    assert_eq!(lexical(Path::new("../a/../../b")), Path::new("../../b"));
+    assert_eq!(lexical(Path::new("a/../..")), Path::new(".."));
+}

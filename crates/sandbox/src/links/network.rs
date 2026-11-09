@@ -44,7 +44,12 @@ const LOCAL_FS: [&str; 9] = [
 /// The most `subst` mappings one path goes through before it counts as unknown.
 const SUBST_MAX: usize = 8;
 
-/// The most links one chain follows before it counts as a loop, as the kernels' limits do.
+/// The most links one chain follows; past it the path counts as unknown. At least the kernel's
+/// own limit (macOS 32, Linux 40, Windows 63 reparse points), so the check never gives up on a
+/// chain the open would still follow.
+#[cfg(windows)]
+const HOPS_MAX: usize = 63;
+#[cfg(not(windows))]
 const HOPS_MAX: usize = 40;
 
 impl Mounts {
@@ -119,11 +124,17 @@ impl Mounts {
 /// which refuses any git folder there. On Windows a link in the matter to a share is a link
 /// finding, never followed.
 pub(crate) fn check_matter_local(matter: &Path, mounts: &Mounts) -> Result<(), Error> {
-    if on_network(matter, mounts) || !mounts.network_inside(matter).is_empty() {
+    if is_network_path(matter, mounts) || !mounts.network_inside(matter).is_empty() {
         tracing::info!("the sandbox refused a matter on a network drive; nothing was planned");
         return Err(Error::MatterOnNetwork);
     }
     Ok(())
+}
+
+/// Where `path` leaves the local disks by [`link_to_network`] with the file system's calls:
+/// the check run on a settings path before anything else touches it.
+pub(crate) fn off_local(path: &Path, mounts: &Mounts) -> Option<(PathBuf, Off)> {
+    link_to_network(path, mounts, read_if_link)
 }
 
 /// Whether `path` is on a network drive, share or mount by [`classify`]: not an unknown device.
@@ -239,15 +250,33 @@ fn drive_letter(bytes: &[u8]) -> Option<u8> {
 /// Where `path` leaves the local disks, name by name and link by link, if it does: the path as
 /// a whole, each name before it is looked at, and each link's target as written before it is
 /// followed, by [`classify`]. `read` is the one file call, `symlink_metadata` then `read_link`
-/// on a local path: its target if a link, `None` if not. A missing name or a loop ends the
-/// chain (local: resolving it then fails without leaving the disk).
+/// on a local path: its target if a link, `None` if not. A missing name ends the chain (local:
+/// resolving it then fails without leaving the disk). Any other failed read, and a chain past
+/// [`HOPS_MAX`] links, is unknown. On Windows `..` is taken off by text, as Win32 does before
+/// it opens a path and the I/O manager does with a relative link's target joined to its folder;
+/// elsewhere a `..` steps back from wherever the links led, as the kernel does.
 pub(crate) fn link_to_network(
     path: &Path,
     mounts: &Mounts,
     read: impl Fn(&Path) -> io::Result<Option<PathBuf>>,
 ) -> Option<(PathBuf, Off)> {
-    let start = match classify(path, mounts) {
-        Place::Off(off) => return Some((path.to_owned(), off)),
+    link_to_network_as(path, mounts, read, cfg!(windows))
+}
+
+/// [`link_to_network`], taking `..` off by text when `dots_by_text` (Windows's way).
+pub(crate) fn link_to_network_as(
+    path: &Path,
+    mounts: &Mounts,
+    read: impl Fn(&Path) -> io::Result<Option<PathBuf>>,
+    dots_by_text: bool,
+) -> Option<(PathBuf, Off)> {
+    let path = if dots_by_text {
+        lexical(path)
+    } else {
+        path.to_owned()
+    };
+    let start = match classify(&path, mounts) {
+        Place::Off(off) => return Some((path, off)),
         Place::Local(start) => start,
     };
     let mut todo: VecDeque<Part> = start.components().map(Part::of).collect();
@@ -277,7 +306,8 @@ pub(crate) fn link_to_network(
                 done = next;
                 continue;
             }
-            Err(_) => return None,
+            Err(error) if ends_chain(&error) => return None,
+            Err(_) => return Some((next, Off::Unknown)),
         };
         let target = match classify(&target, mounts) {
             Place::Off(off) => return Some((target, off)),
@@ -285,13 +315,41 @@ pub(crate) fn link_to_network(
         };
         hops += 1;
         if hops > HOPS_MAX {
-            return None;
+            return Some((next, Off::Unknown));
         }
-        for part in target.components().rev() {
-            todo.push_front(Part::of(part));
+        if dots_by_text {
+            // The target joined to the link's folder, then the rest, with `..` taken off by text.
+            let folder = next.parent().unwrap_or(&done);
+            let mut whole = folder.join(target);
+            for part in todo.drain(..) {
+                match part {
+                    Part::Fixed(name) | Part::Name(name) => whole.push(name),
+                    Part::Up => whole.push(".."),
+                    Part::Here => {}
+                }
+            }
+            let whole = lexical(&whole);
+            let whole = match classify(&whole, mounts) {
+                Place::Off(off) => return Some((whole, off)),
+                Place::Local(whole) => whole,
+            };
+            todo = whole.components().map(Part::of).collect();
+            done = PathBuf::new();
+        } else {
+            for part in target.components().rev() {
+                todo.push_front(Part::of(part));
+            }
         }
     }
     None
+}
+
+/// Whether a failed look at a name means the name isn't there, which ends a chain as local.
+fn ends_chain(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+    )
 }
 
 /// One step of [`link_to_network`]'s path: a prefix or root, kept as it is; `..`; `.`; a name.
@@ -322,19 +380,20 @@ pub(crate) fn read_if_link(path: &Path) -> io::Result<Option<PathBuf>> {
     }
 }
 
-#[cfg(test)]
-/// `path` with `.` dropped and each `..` taking off the name before it, by text alone: where
-/// the path points if no link is on the way, for the mount check before any file call.
+/// `path` with `.` dropped and each `..` taking off the name before it, by text alone, as
+/// Win32 does: never past the root, and kept at the start of a relative path.
 pub(crate) fn lexical(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for part in path.components() {
         match part {
             Component::CurDir => {}
-            Component::ParentDir => {
-                if matches!(out.components().next_back(), Some(Component::Normal(_))) {
+            Component::ParentDir => match out.components().next_back() {
+                Some(Component::Normal(_)) => {
                     out.pop();
                 }
-            }
+                None | Some(Component::ParentDir) => out.push(".."),
+                Some(Component::Prefix(_) | Component::RootDir | Component::CurDir) => {}
+            },
             other @ (Component::Prefix(_) | Component::RootDir | Component::Normal(_)) => {
                 out.push(other);
             }
