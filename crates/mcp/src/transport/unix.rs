@@ -46,7 +46,8 @@ impl Socket {
         if std::fs::symlink_metadata(path).is_ok() {
             return Err(EXISTS.to_owned());
         }
-        let old = umask(Mode::from_bits_truncate(0o777 & !MODE));
+        // 0o177, which leaves [`MODE`]; named bits, as `mode_t` is `u16` on macOS, `u32` on Linux.
+        let old = umask(Mode::S_IXUSR | Mode::S_IRWXG | Mode::S_IRWXO);
         let bound = write::bind_unix_socket(path);
         umask(old);
         let listener = bound.map_err(|error| match error.kind() {
