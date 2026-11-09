@@ -50,7 +50,9 @@
 //! RIGHTS` entry so its owner keeps no implied `WRITE_DAC`). [`Processes::named`] gives the
 //! user of each of the caller's own processes whatever their DACL (`WTSEnumerateProcessesW`,
 //! whose service reads the tokens). A pid either names the pool user is the pool user's, so such
-//! a process is found, fails its open, and fails the first act closed.
+//! a process is found, fails its open, and fails the first act closed. Microsoft doesn't say
+//! that WTS gives a user that isn't an administrator its own processes in session 0, where a
+//! task or a service starts them; `windows_tests.rs` checks it on CI with a test user's task.
 //!
 //! **Rounds.** A sweep lists again after any round that killed something, until a round kills
 //! nothing: a process one it killed started meanwhile is killed in the next round. A runner of an
@@ -461,3 +463,6 @@ fn code(error: &io::Error) -> String {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+#[cfg(windows)]
+mod windows_tests;

@@ -581,6 +581,12 @@ crates/sandbox/src/windows/runner/outer/end.rs clock clippy::disallowed_methods
 crates/sandbox/src/windows/runner/end/stdin_tests.rs clock clippy::disallowed_methods
 crates/sandbox/src/windows/runner/sweep/os.rs sleep clippy::disallowed_methods
 crates/sandbox/src/windows/runner/sweep/os.rs clock clippy::disallowed_methods
+# M1: the sweep's lists read as a test user standing in for the pool user: its task, the session
+# of a pid, the DACL its child shuts, the binary copied for it, the child's report and the wait.
+crates/sandbox/src/windows/runner/sweep/windows_tests.rs - unsafe_code
+crates/sandbox/src/windows/runner/sweep/windows_tests.rs pause clippy::disallowed_methods
+crates/sandbox/src/windows/runner/sweep/windows_tests.rs copy_self clippy::disallowed_methods
+crates/sandbox/src/windows/runner/sweep/windows_tests.rs write_report clippy::disallowed_methods
 crates/sandbox/src/windows/runner/job_tests.rs start_child clippy::disallowed_methods
 crates/sandbox/src/windows/ca_bundle/store.rs - unsafe_code
 crates/sandbox/src/windows/ca_bundle/store.rs timed clippy::disallowed_methods
