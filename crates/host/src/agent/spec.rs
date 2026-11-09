@@ -43,8 +43,9 @@ use crate::error::Error;
 /// every inherited key or token stays out of the stderr tail. Never `Debug`-print the spec: it
 /// holds those secrets.
 ///
-/// `path_prepend` (`HostConfig::with_agent_path_prepend`, stetdoc's folder) goes first on the
-/// merged `PATH` ([`prepend_path`]).
+/// `path_prepend` goes first on the merged `PATH`, in its order ([`prepend_path`]): stetdoc's
+/// folder (`HostConfig::with_agent_path_prepend`), then the profile hook's
+/// ([`session_path`]).
 pub(crate) fn launch_spec(
     agent: &AgentLaunch,
     mut hook_env: BTreeMap<OsString, OsString>,
@@ -52,7 +53,7 @@ pub(crate) fn launch_spec(
     dropped: &[&str],
     inherited: impl Iterator<Item = (OsString, OsString)>,
     cwd: PathBuf,
-    path_prepend: Option<&Path>,
+    path_prepend: &[PathBuf],
 ) -> Result<LaunchSpec, Error> {
     let drops = |name: &OsStr| {
         clauseo_process::is_node_env(name)
@@ -77,8 +78,8 @@ pub(crate) fn launch_spec(
     env.extend(own);
     env.extend(hook_env);
     env.extend(forced);
-    if let Some(folder) = path_prepend {
-        prepend_path(&mut env, folder);
+    if !path_prepend.is_empty() {
+        prepend_path(&mut env, path_prepend);
     }
     let args = agent.args.iter().map(OsString::from).collect();
     Ok(LaunchSpec::new(
@@ -89,29 +90,71 @@ pub(crate) fn launch_spec(
     )?)
 }
 
-/// Puts `folder` first on `env`'s `PATH`: the one the merge kept (the hook's, else the agent's
-/// settings, else the inherited one), found ignoring ASCII case and written back under its own
-/// name (`Path` on Windows stays `Path`), or a new `PATH` holding only `folder`. A folder
-/// that cannot be joined (it holds the separator) is left out with a warning.
+/// Puts `folders` first on `env`'s `PATH`, in their order: the one the merge kept (the hook's,
+/// else the agent's settings, else the inherited one), found ignoring ASCII case and written
+/// back under its own name (`Path` on Windows stays `Path`), or a new `PATH` holding only
+/// `folders`. A folder that cannot be joined (it holds the separator) is left out, with a
+/// warning that counts them.
 #[expect(
     clippy::disallowed_methods,
-    reason = "the agent's PATH value is split once, to put stetdoc's folder first; nothing is looked up on it"
+    reason = "the agent's PATH value is split once, to put stetdoc's and the hook's folders first; nothing is looked up on it"
 )]
-pub(crate) fn prepend_path(env: &mut BTreeMap<OsString, OsString>, folder: &Path) {
+pub(crate) fn prepend_path(env: &mut BTreeMap<OsString, OsString>, folders: &[PathBuf]) {
     let name = env
         .keys()
         .find(|key| same(key, OsStr::new("PATH")))
         .cloned()
         .unwrap_or_else(|| OsString::from("PATH"));
+    let (joinable, left_out): (Vec<&PathBuf>, Vec<&PathBuf>) = folders
+        .iter()
+        .partition(|folder| std::env::join_paths([folder]).is_ok());
+    if !left_out.is_empty() {
+        tracing::warn!(
+            left_out = left_out.len(),
+            "folders that hold the PATH separator cannot go on the agent's PATH"
+        );
+    }
+    if joinable.is_empty() {
+        return;
+    }
     let rest = env.get(&name).cloned().unwrap_or_default();
-    let parts = std::iter::once(folder.to_path_buf())
+    let parts = joinable
+        .into_iter()
+        .cloned()
         .chain(std::env::split_paths(&rest).filter(|part| !part.as_os_str().is_empty()));
     match std::env::join_paths(parts) {
         Ok(joined) => {
             env.insert(name, joined);
         }
-        Err(error) => tracing::warn!(%error, "the stetdoc folder cannot go on the agent's PATH"),
+        Err(error) => tracing::warn!(%error, "the folders cannot go on the agent's PATH"),
     }
+}
+
+/// The inherited variables a session drops when the profile hook puts folders on its `PATH`
+/// (Clauseo's Python runtime, decision record 0048): either could stop that Python starting, or
+/// point it at another Python's modules.
+pub(crate) const PYTHON_VARS: [&str; 2] = ["PYTHONHOME", "PYTHONPATH"];
+
+/// A session's `PATH` folders, in order: `prepend` (stetdoc's) first, then the absolute ones
+/// of `hook` (`ProfileHook::agent_path`); and whether any of the hook's went on, which drops
+/// [`PYTHON_VARS`]. A relative folder is skipped: it would resolve against the matter folder,
+/// which the agent can write. Only a count is logged, never a folder.
+pub(crate) fn session_path(prepend: Option<&Path>, hook: Vec<PathBuf>) -> (Vec<PathBuf>, bool) {
+    let given = hook.len();
+    let hook: Vec<PathBuf> = hook.into_iter().filter(|dir| dir.is_absolute()).collect();
+    if hook.len() < given {
+        tracing::warn!(
+            skipped = given - hook.len(),
+            "relative folders from the profile hook left off the agent's PATH"
+        );
+    }
+    let any = !hook.is_empty();
+    let path = prepend
+        .map(Path::to_path_buf)
+        .into_iter()
+        .chain(hook)
+        .collect();
+    (path, any)
 }
 
 /// The prefixes of the inherited variables no agent gets: `GIT_*` would point its git at another

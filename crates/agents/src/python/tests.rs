@@ -316,3 +316,64 @@ fn no_python_for_the_platform_means_unavailable_and_no_command_folder() {
     assert!(!needed(&config));
     assert_eq!(python_command_dir(&config), None);
 }
+
+#[cfg(unix)]
+#[test]
+fn the_session_path_dirs_come_only_from_a_runtime_that_passes_its_receipt_check() {
+    let data = TestDir::new("python-path-dirs");
+    let (path, entry, archive) = stage(&data, &fake_archive("echo 3.13.18"));
+    let mut config = AgentsConfig::new(
+        data.0.clone(),
+        crate::platform::Platform::new(Os::Linux, Arch::X64),
+    );
+    config.snapshot = config.snapshot.clone().with_python(entry.clone());
+    assert_eq!(
+        python_path_dirs(&config),
+        Vec::<PathBuf>::new(),
+        "none installed"
+    );
+    let dir = runtime_dir(&data.0, &archive);
+    install(&path, &entry, &archive, &dir, &launcher()).unwrap();
+    assert_eq!(python_path_dirs(&config), [dir.join("bin")]);
+    // No manifest: the receipt check fails, and so nothing goes on the PATH.
+    write::make_writable(&dir).unwrap();
+    write::remove_file(&dir.join(PYTHON_MANIFEST)).unwrap();
+    assert_eq!(python_path_dirs(&config), Vec::<PathBuf>::new(), "invalid");
+}
+
+#[test]
+fn the_session_path_dirs_per_os_are_those_that_exist() {
+    let data = TestDir::new("python-path-layout");
+    let dir = data.0.join("rt");
+    // Nothing there yet: no folder on either OS.
+    assert_eq!(runtime_path_dirs(&dir, Os::Darwin), Vec::<PathBuf>::new());
+    assert_eq!(runtime_path_dirs(&dir, Os::Win32), Vec::<PathBuf>::new());
+    data.file("rt/bin/python3", b"");
+    data.file("rt/clauseo-bin/pandoc.exe", b"");
+    data.file("rt/python.exe", b"");
+    assert_eq!(runtime_path_dirs(&dir, Os::Darwin), [dir.join("bin")]);
+    assert_eq!(runtime_path_dirs(&dir, Os::Linux), [dir.join("bin")]);
+    // Windows: pandoc's folder, then the interpreter's; no `Scripts`, so none.
+    assert_eq!(
+        runtime_path_dirs(&dir, Os::Win32),
+        [dir.join("clauseo-bin"), dir.clone()]
+    );
+    data.file("rt/Scripts/pip.exe", b"");
+    assert_eq!(
+        runtime_path_dirs(&dir, Os::Win32),
+        [dir.join("clauseo-bin"), dir.clone(), dir.join("Scripts")]
+    );
+    // A file where a folder should be is no folder.
+    data.file("rt-file/bin", b"");
+    assert_eq!(
+        runtime_path_dirs(&data.0.join("rt-file"), Os::Darwin),
+        Vec::<PathBuf>::new()
+    );
+}
+
+/// Desktop's setup thread keeps a config in a `Send + Sync` lookup for [`python_path_dirs`].
+#[test]
+fn a_config_is_send_and_sync_for_the_path_lookup() {
+    fn send_sync<T: Send + Sync>() {}
+    send_sync::<AgentsConfig>();
+}

@@ -1,8 +1,8 @@
 //! What piece B adds to the setup backend: the limits readers it holds and swaps entries in,
 //! the reused logins the host's login check reads, the waiters on S18's states, the running
 //! leaves and the leave's timer, the plans
-//! snapshot the launch hook reads, what it last took from the settings, and where the network
-//! route is resolved.
+//! snapshot the launch hook reads, what it last took from the settings, where the network
+//! route is resolved, and the launch hook's Python folders.
 
 use clauseo_protocol::{AgentId, ErrorCode};
 use std::collections::BTreeMap;
@@ -14,6 +14,7 @@ use clauseo_process::AsyncIoTimer;
 use super::leave::{LeaveTimer, Leaves, Waiters};
 use super::login_check::ReusedLogins;
 use super::network::NetworkFollow;
+use super::python_path::PythonPath;
 use super::readers::LeaveReaders;
 use super::refresh::SettingsRead;
 
@@ -40,6 +41,9 @@ pub(crate) struct Wiring {
     /// The hosts the Python runtime's download contacts, for its `Waiting` and blocked
     /// `Failed` (`backend/entry.rs`); none until the setup thread sets them.
     pub(crate) python_hosts: Vec<String>,
+    /// The launch hook's Python folders, filled on `Ready` and emptied on any other Python
+    /// state (`backend/entry.rs`); a slot no hook reads until the setup thread sets it.
+    pub(crate) python: PythonPath,
 }
 
 impl Wiring {
@@ -65,6 +69,7 @@ impl Wiring {
             applied: Mutex::new(start),
             network: NetworkFollow::default(),
             python_hosts: Vec::new(),
+            python: PythonPath::default(),
         }
     }
 
@@ -72,6 +77,13 @@ impl Wiring {
     #[must_use]
     pub(crate) fn with_python_hosts(mut self, hosts: Vec<String>) -> Self {
         self.python_hosts = hosts;
+        self
+    }
+
+    /// Python's states fill and empty `python`'s slot.
+    #[must_use]
+    pub(crate) fn with_python_path(mut self, python: PythonPath) -> Self {
+        self.python = python;
         self
     }
 

@@ -49,7 +49,7 @@ fn launch_spec_drops_remote_markers_and_keeps_what_agents_need() {
         &[],
         inherited,
         std::env::temp_dir(),
-        None,
+        &[],
     )
     .unwrap();
     let env: Vec<_> = spec
@@ -99,7 +99,7 @@ fn every_agents_spec_keeps_system_root_for_the_connectors_it_starts() {
             dropped,
             inherited.into_iter(),
             std::env::temp_dir(),
-            None,
+            &[],
         )
         .unwrap();
         assert_eq!(
@@ -133,7 +133,7 @@ fn launch_spec_drops_node_options_and_node_path_from_every_source() {
         &[],
         inherited.into_iter(),
         std::env::temp_dir(),
-        None,
+        &[],
     )
     .unwrap();
     let names: Vec<_> = spec.env().keys().map(|k| k.to_str().unwrap()).collect();

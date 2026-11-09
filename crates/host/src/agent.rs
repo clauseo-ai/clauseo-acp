@@ -55,7 +55,7 @@ use futures::task::LocalSpawnExt;
 use crate::clock::{Clock, ProcessTimer};
 use crate::error::Error;
 
-pub(crate) use spec::launch_spec;
+pub(crate) use spec::{PYTHON_VARS, launch_spec, session_path};
 
 /// How long the owner waits, after the agent is gone, for its stderr pipe and its stdout to end,
 /// so the exit report's tail holds the last lines and [`Ended`] follows every event. A helper the
