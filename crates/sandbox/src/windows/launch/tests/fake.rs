@@ -70,10 +70,10 @@ pub(super) struct World {
     run_answers: Mutex<VecDeque<RunRefusal>>,
     setup_always_running: Mutex<bool>,
     gate: Mutex<Option<Gate>>,
-    clock: Mutex<Duration>,
+    pub(super) clock: Mutex<Duration>,
     pauses: Mutex<u32>,
     groups: Mutex<u32>,
-    leftovers: Mutex<u32>,
+    pub(super) leftovers: Mutex<u32>,
     stubborn: Mutex<bool>,
     sweeper: Mutex<bool>,
     panic_at: Mutex<Option<&'static str>>,
@@ -235,7 +235,7 @@ impl World {
     }
 
     /// Logs `step`, waits at its gate, takes its time, panics or fails it if asked to.
-    fn step(&self, step: &'static str) -> Result<(), Error> {
+    pub(super) fn step(&self, step: &'static str) -> Result<(), Error> {
         self.log(step);
         let gate = {
             let mut gate = self.gate.lock().unwrap();
@@ -523,23 +523,20 @@ impl LaunchSteps for FakeSteps {
     /// Logs the processes running when it starts: they exit within the wait, unless they
     /// linger, which costs the whole wait.
     fn wait_exited(&self, _pool: &PoolUser, within: Duration) -> Result<Vec<u32>, Error> {
-        let mut leftovers = self.world.leftovers.lock().unwrap();
-        self.world.log(format!("wait_exited {}", *leftovers));
-        if *self.world.fail_at.lock().unwrap() == Some("wait_exited") {
-            return Err(Error::Policy("fake wait_exited failed".to_owned()));
-        }
-        let mut lingering = self.world.outer.lingering.lock().unwrap();
-        if *lingering > 0 && *leftovers > 0 {
-            *lingering -= 1;
-            *self.world.clock.lock().unwrap() += within;
-            return Ok((1..=*leftovers).collect());
-        }
-        *leftovers = 0;
-        Ok(Vec::new())
+        let fails = *self.world.fail_at.lock().unwrap() == Some("wait_exited");
+        self.world.outer.waited(&self.world, within, fails)
     }
 
-    fn end_outer(&self, _pool: &PoolUser) -> Result<(), Error> {
-        self.world.step("end_outer")
+    fn end_outer(
+        &self,
+        _pool: &PoolUser,
+        job: Option<&clauseo_process::TreeWatch>,
+        within: Duration,
+    ) -> Result<(), Error> {
+        self.world.step("end_outer")?;
+        self.world
+            .outer
+            .ended(job.is_some(), within, &self.world.clock)
     }
 
     fn session_cursor(&self, _end: &Ending<'_>) -> Option<()> {

@@ -9,7 +9,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use clauseo_process::{LaunchSpec, Launched, SpawnOptions};
+use clauseo_process::{LaunchSpec, Launched, SpawnOptions, TreeWatch};
 
 use super::feed::DenialPipe;
 use super::prepare::Walk;
@@ -210,10 +210,19 @@ pub trait LaunchSteps: Send + Sync + 'static {
         spec: &LaunchSpec,
         opts: &SpawnOptions,
     ) -> Result<Launched, clauseo_process::Error>;
-    /// Ends the outer a launcher may have started for `pool`'s run, after a panic in the
-    /// launcher: kills its job and waits until the job is truly empty (#697), or fails. Nothing
-    /// to end is fine. TODO(C4/C5): the real one, by the job the spawn made.
-    fn end_outer(&self, pool: &PoolUser) -> Result<(), Error>;
+    /// Ends the outer a launcher started for `pool`'s run and won't keep (a panic in the
+    /// launcher, or a session end that raced the start). `job` is the outer's job, from the spawn,
+    /// held open: its kill was sent when the outer's handle dropped. Waits up to `within`
+    /// ([`EXIT_WAIT`](super::EXIT_WAIT)) until the job holds no running process, judged by its
+    /// active-process count (`TreeWatch::gone`: `JobObjectBasicAccountingInformation`), never
+    /// by listing processes. A timeout is `Err`, and the matter stays stuck. No job (nothing
+    /// was started) is `Ok`.
+    fn end_outer(
+        &self,
+        pool: &PoolUser,
+        job: Option<&TreeWatch>,
+        within: Duration,
+    ) -> Result<(), Error>;
     /// Waits up to `within` for every process running as the pool user to have truly exited:
     /// found by its token's user and each handle waited on, not by the job's count, which reads
     /// empty while processes still tear down (stage D, #697). The pids still running then.

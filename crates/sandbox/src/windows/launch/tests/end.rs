@@ -441,10 +441,13 @@ fn an_end_during_the_spawn_moves_nothing_until_the_outer_is_gone() {
         // Opened first; the handle dropped (the outer ended) before the file and `end_outer`.
         let head = ["watch_outer", "remove_launch", "end_outer"];
         let next = launchers.reserve(MATTER, "s2", &[]);
+        let jobs = world.outer.end_outer_jobs();
         if end_fails {
+            assert_eq!(jobs, Vec::<bool>::new(), "end_outer failed at its step");
             assert_eq!(calls[at..], head, "no repair, no set-aside: quarantined");
             assert!(matches!(next, Err(Error::MatterStuck)), "{next:?}");
         } else {
+            assert_eq!(jobs, [true], "end_outer had the outer's job, still open");
             let pass = [&head[..], &["wait_exited 2"], &PASS].concat();
             assert_eq!(calls[at..], pass);
             assert!(next.is_ok(), "{next:?}");
@@ -452,6 +455,52 @@ fn an_end_during_the_spawn_moves_nothing_until_the_outer_is_gone() {
         drop(launcher);
         assert!(launchers.wait_ends(WAIT));
     }
+}
+
+/// The raced end's `end_outer` gets its bound, `EXIT_WAIT`: an outer whose job outlives it is
+/// `Err`, and nothing moves; the matter stays stuck.
+#[test]
+fn an_outer_that_outlives_the_bound_leaves_the_matter_stuck() {
+    let world = World::new();
+    let dir = TempDir::new("launch-end-race-bound");
+    let launchers = launchers(&world);
+    let policy = policy_at(&dir, "matter");
+    let launcher = launched(&launchers, &world, &dir, SpawnOptions::new());
+    world.outer.spawn_starts();
+    *world.outer.job_lingers.lock().unwrap() = true;
+    let held = world.hold("spawn_outer");
+    let before = world.now();
+    std::thread::scope(|scope| {
+        let starting = scope.spawn(|| launcher.launch(&spec(&dir)).is_err());
+        held.reached();
+        launchers.after_session(MATTER, "s1", &policy);
+        held.go();
+        assert!(starting.join().unwrap());
+    });
+    assert_eq!(world.now().saturating_sub(before), EXIT_WAIT);
+    assert_eq!(world.outer.end_outer_jobs(), [true]);
+    let calls = world.calls();
+    assert!(!calls.contains(&"repair".to_owned()), "{calls:?}");
+    let next = launchers.reserve(MATTER, "s2", &[]);
+    assert!(matches!(next, Err(Error::MatterStuck)), "{next:?}");
+}
+
+/// A panic in the start after the spawn ends the outer on its job, still open, before the
+/// session is undone and the matter freed.
+#[test]
+fn a_panic_after_the_spawn_ends_the_outer_on_its_job() {
+    let world = World::new();
+    let dir = TempDir::new("launch-panic-after-spawn");
+    let launchers = launchers(&world);
+    let launcher = launched(&launchers, &world, &dir, SpawnOptions::new());
+    world.outer.spawn_starts();
+    world.panic_at("watch_outer");
+    assert!(launcher.launch(&spec(&dir)).is_err());
+    assert_eq!(world.outer.end_outer_jobs(), [true]);
+    let calls = world.calls();
+    let at = calls.iter().position(|call| call == "end_outer").unwrap();
+    assert_eq!(calls[at - 1], "watch_outer", "{calls:?}");
+    assert!(launchers.reserve(MATTER, "s2", &[]).is_ok());
 }
 
 /// A launch file whose removal fails is noted and tried again at the session's end; one that

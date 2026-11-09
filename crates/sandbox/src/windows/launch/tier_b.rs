@@ -35,9 +35,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use clauseo_process::{LaunchSpec, Launched, Launcher, SpawnOptions};
+use clauseo_process::{LaunchSpec, Launched, Launcher, SpawnOptions, TreeWatch};
 
-use super::end::{AfterSpawn, SessionGuard};
+use super::end::{AfterSpawn, EXIT_WAIT, SessionGuard};
 use super::feed::{self, DenialPipe, Peer};
 use super::registry::Registry;
 use super::steps::LaunchSteps;
@@ -90,6 +90,9 @@ pub struct TierBLauncher<S: LaunchSteps> {
     opts: SpawnOptions,
     denials: Arc<dyn DenialSink>,
     started: AtomicBool,
+    /// The outer's job, held open from the spawn until the start is known, for `end_outer`
+    /// on a path that ends the outer (a raced end, a panic).
+    job: Mutex<Option<TreeWatch>>,
     guard: SessionGuard<S>,
 }
 
@@ -133,6 +136,7 @@ impl<S: LaunchSteps> TierBLauncher<S> {
             opts,
             denials,
             started: AtomicBool::new(false),
+            job: Mutex::new(None),
         }
     }
 
@@ -162,24 +166,29 @@ impl<S: LaunchSteps> TierBLauncher<S> {
         let outer = outer_spec(self.steps.runner(), &file, |name| self.steps.host_var(name));
         let started = outer.and_then(|outer| self.steps.spawn_outer(&outer, &self.opts));
         // First, before anything that could drop `launched` (an early return, a `?`, a panic
-        // unwinding): open the outer by its pid while `launched` holds its process handle, so
-        // the pid is still its own. Nothing between the spawn and here can fail or return.
+        // unwinding): keep its job open, for `end_outer` on any path that ends the outer, and
+        // open the outer by its pid while `launched` holds its process handle, so the pid is
+        // still its own. Nothing between the spawn and here can fail or return.
+        if let Ok(launched) = &started {
+            *self.job() = Some(launched.handle.tree_watch());
+        }
         let watched = started
             .as_ref()
             .ok()
             .and_then(|launched| feed::watch(&mut pipe, launched.handle.pid()));
         match self.guard.spawned(started.is_ok()) {
-            AfterSpawn::Run => {}
+            AfterSpawn::Run => drop(self.job().take()),
             AfterSpawn::Failed => {
                 self.remove_launch(&file);
                 return started;
             }
             AfterSpawn::Raced => {
-                // Dropping `launched` ends its job; `end_outer` waits until it is truly empty.
+                // Dropping `launched` sends its job the kill; `end_outer` waits, on the job
+                // still held open, until it holds no running process.
                 drop(started);
                 self.remove_launch(&file);
                 tracing::warn!("tier B's session ended while its outer started: ending it");
-                let gone = self.steps.end_outer(&self.pool).is_ok();
+                let gone = self.end_outer().is_ok();
                 self.guard.finish_race(gone);
                 return Err(ended_early());
             }
@@ -194,6 +203,18 @@ impl<S: LaunchSteps> TierBLauncher<S> {
             start_feed(pipe, outer, Arc::clone(&self.denials), connected);
         }
         started
+    }
+
+    /// The outer's job, as held from the spawn.
+    fn job(&self) -> std::sync::MutexGuard<'_, Option<TreeWatch>> {
+        self.job.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Ends the outer this launcher started, if any, on its job held open since the spawn,
+    /// within [`EXIT_WAIT`]: `Err` (the matter to stay stuck) when it isn't empty by then.
+    fn end_outer(&self) -> Result<(), Error> {
+        let job = self.job().take();
+        self.steps.end_outer(&self.pool, job.as_ref(), EXIT_WAIT)
     }
 
     /// Deletes the launch file `file`, and forgets the session's note of it.
@@ -230,7 +251,7 @@ impl<S: LaunchSteps> Launcher for TierBLauncher<S> {
             tracing::warn!("tier B's launcher panicked while starting the outer");
             let id = claim.id;
             claim.disarm();
-            match self.steps.end_outer(&self.pool) {
+            match self.end_outer() {
                 Ok(()) => registry.release_now(id),
                 Err(error) => {
                     tracing::warn!(kind = error.kind(), "tier B couldn't end the outer");

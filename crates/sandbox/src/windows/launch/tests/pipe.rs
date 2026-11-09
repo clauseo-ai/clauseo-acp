@@ -20,6 +20,10 @@ pub(super) struct Outer {
     pub(super) denial_pipe: Mutex<Option<String>>,
     pub(super) spawn_starts: Mutex<bool>,
     pub(super) pipe_connects: Mutex<bool>,
+    /// For each `end_outer`: whether it was given the outer's job, still open.
+    pub(super) end_outer_jobs: Mutex<Vec<bool>>,
+    /// The outer's job outlives `end_outer`'s bound: it times out.
+    pub(super) job_lingers: Mutex<bool>,
     /// The launch files on "disk": written, not yet removed.
     pub(super) files: Mutex<std::collections::BTreeSet<PathBuf>>,
 }
@@ -77,6 +81,50 @@ pub(super) fn quick_outer() -> Result<clauseo_process::Launched, clauseo_process
 }
 
 impl Outer {
+    /// A wait for the pool user's processes (`wait_exited`): logs those running as it starts;
+    /// they exit within the wait, unless they linger, which costs the whole wait.
+    pub(super) fn waited(
+        &self,
+        world: &World,
+        within: Duration,
+        fails: bool,
+    ) -> Result<Vec<u32>, crate::Error> {
+        let mut leftovers = world.leftovers.lock().unwrap();
+        world.log(format!("wait_exited {}", *leftovers));
+        if fails {
+            return Err(crate::Error::Policy("fake wait_exited failed".to_owned()));
+        }
+        let mut lingering = self.lingering.lock().unwrap();
+        if *lingering > 0 && *leftovers > 0 {
+            *lingering -= 1;
+            *world.clock.lock().unwrap() += within;
+            return Ok((1..=*leftovers).collect());
+        }
+        *leftovers = 0;
+        Ok(Vec::new())
+    }
+
+    /// `end_outer` was given the job (`open`) and its bound: notes it, and times out (moving
+    /// `clock` by the bound) while the job lingers.
+    pub(super) fn ended(
+        &self,
+        open: bool,
+        within: Duration,
+        clock: &Mutex<Duration>,
+    ) -> Result<(), crate::Error> {
+        self.end_outer_jobs.lock().unwrap().push(open);
+        if *self.job_lingers.lock().unwrap() {
+            *clock.lock().unwrap() += within;
+            return Err(crate::Error::Probe(std::io::ErrorKind::TimedOut.into()));
+        }
+        Ok(())
+    }
+
+    /// For each `end_outer`: whether it was given the outer's job, still open.
+    pub(super) fn end_outer_jobs(&self) -> Vec<bool> {
+        self.end_outer_jobs.lock().unwrap().clone()
+    }
+
     /// A launch's denial pipe, as the world has it connect.
     pub(super) fn pipe(&self) -> FakePipe {
         FakePipe {
@@ -139,7 +187,8 @@ pub(super) struct FakePipe {
 impl DenialPipe for FakePipe {
     fn watch(&mut self, pid: u32) -> std::io::Result<Peer> {
         if let Some(world) = &self.world {
-            world.log("watch_outer");
+            // A step, so a test can make it panic: the launcher's start, after the spawn.
+            let _stepped = world.step("watch_outer");
         }
         if self.adopts {
             let outer = Peer { pid, started: 1 };

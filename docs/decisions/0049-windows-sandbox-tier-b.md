@@ -2386,7 +2386,7 @@ The orchestrator's rulings change the interface above in these ways:
   session's end with no progress for the stall timer plus 60 s of grace (or past the cap plus
   the grace), or a reserve, an undo or a release running for 180 s plus the grace, makes
   `reserve` mark the matter stuck and refuse it with `Error::MatterStuck` (`Internal`, not
-  retryable: "Restart Clauseo to continue with this matter") until Clauseo restarts. A session's
+  retryable: "Restart the computer to continue with this matter") until a restart. A session's
   end stuck this way frees the matter once its steps return.
 - **One set of launchers per sandbox folder.** `Launchers::with_steps` takes the folder's
   `tier-b-launchers.lock` without waiting, before it clears what a crash left, and holds it
@@ -2442,7 +2442,16 @@ The orchestrator's rulings change the interface above in these ways:
     and free both only once the pool user is truly empty (#697). Until then a reused slot has
     only the proxy's auth between the old processes and the new session.
   - know that a panic in the launcher's start while an end races it fails closed: the matter
-    stays stuck until Clauseo restarts (C4); the restart's crash recovery clears it.
+    stays stuck until a restart (C4), and only the start-up stop below makes a restart enough;
+  - **verify an unclean slot before any grant:** before the PR6 launcher grants anything
+    (`prepare_run`, then `apply`, in `walk.rs`), a slot marked unclean runs `--verify`, and a
+    failure refuses with `Quarantined`. It lands with or right after #819, and before PR6's
+    launchers are switched on;
+  - **stop pool-user processes at start-up:** when Clauseo starts, before any launch, stop the
+    pool-user processes of any stuck matter or unclean slot (the follow-up `refresh/task.rs`
+    names), and have the outer write the unclean marker when it dies before reading the launch
+    file (`runner.rs`), so that stop finds it. Until then a stuck matter's words say to restart
+    the computer, not Clauseo.
 - **Accepted: the launcher's check-to-spawn window.** `TierBLauncher` checks the session is
   still launched (`is_launched`) and then starts the outer; an `after_session` that begins in
   between isn't seen. This is accepted: the pass and the undo are decided by the registry's
