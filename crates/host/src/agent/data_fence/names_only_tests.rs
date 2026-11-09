@@ -180,7 +180,7 @@ fn an_unreadable_identity_a_request_leads_to_refuses_rather_than_falling_back() 
 
 /// The fallback starts when the data folder's identity can't be read, costs one identity read
 /// per check while it lasts (the one that failed, retried), and clears at the first check after
-/// it reads again; once all read, nothing is read again for them.
+/// it reads again; once all read, only the data folder's own identity is read again per check.
 #[test]
 fn the_flag_is_set_retried_once_per_check_and_clears_once_the_identity_reads() {
     let mut failing = disk();
@@ -203,10 +203,11 @@ fn the_flag_is_set_retried_once_per_check_and_clears_once_the_identity_reads() {
     assert!(!health.names_only());
     let (denied, read) = refused_on(&check, &readable, true);
     assert!(!denied);
-    assert!(
-        !read.iter().any(|path| at("d").starts_with(path)),
-        "{read:?}"
-    );
+    let line: Vec<&PathBuf> = read
+        .iter()
+        .filter(|path| at("d").starts_with(path))
+        .collect();
+    assert_eq!(line, [&at("d")], "{read:?}");
     // A parent's identity unreadable is the same fallback.
     let mut parent = disk();
     parent
@@ -220,4 +221,65 @@ fn the_flag_is_set_retried_once_per_check_and_clears_once_the_identity_reads() {
         &request(&health, &[at("m/j/state.sqlite")], None),
         &parent
     ));
+}
+
+/// A data folder removed and made again has a new identity: the next check reads the data
+/// folder's own identity, sees it changed, reads every one again, and compares with the new one,
+/// so a folder that is now the data folder by identity is refused, never passed on the stale one.
+#[test]
+fn a_recreated_data_folder_is_picked_up_at_the_next_check() {
+    let health = DataFenceHealth::default();
+    let before = disk();
+    let check = request(&health, &[at("other/x")], None);
+    assert!(!refused(&check, &before));
+    // Recreated: a new identity, which `other` now has too (a link the system can't show).
+    let mut after = disk();
+    after.ids.insert(at("d"), (1, 70));
+    after.ids.insert(at("other"), (1, 70));
+    let (denied, read) = refused_on(&check, &after, true);
+    assert!(denied, "compared with the recreated data folder's identity");
+    assert!(
+        read.contains(&at("d").parent().unwrap().to_owned()),
+        "every one read again: {read:?}"
+    );
+    assert!(!health.names_only());
+    // Gone, then back unreadable: the fallback starts rather than trusting the old identity.
+    let mut unreadable = disk();
+    unreadable.unreadable_ids.push(at("d"));
+    assert!(!refused(
+        &request(&health, &[at("m/brief.docx")], None),
+        &unreadable
+    ));
+    assert!(health.names_only());
+}
+
+/// A check's result is recorded under the sequence number it took as it started: an older check
+/// that fails and finishes after a newer good one doesn't overwrite it, so the flag doesn't
+/// flicker; a later failing check still sets it.
+#[test]
+fn an_older_check_finishing_late_does_not_overwrite_a_newer_result() {
+    use super::health::Captured;
+    let health = DataFenceHealth::default();
+    let good = Captured {
+        real_data: at("d"),
+        data: Some((1, 7)),
+        line: vec![(1, 7)],
+        failing: None,
+        complete: true,
+    };
+    let failing = Captured {
+        failing: Some(at("d")),
+        complete: false,
+        ..good.clone()
+    };
+    let older = health.begin();
+    let newer = health.begin();
+    assert!(newer > older);
+    health.record(newer, good);
+    health.record(older, failing.clone());
+    assert!(!health.names_only(), "the late, older failure is dropped");
+    assert!(health.kept(&at("d")).is_some_and(|kept| kept.complete));
+    health.record(health.begin(), failing);
+    assert!(health.names_only());
+    assert!(health.kept(&at("d")).is_some_and(|kept| !kept.complete));
 }
