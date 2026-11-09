@@ -299,26 +299,49 @@ fn note_pick(actor: &mut Actor, thread: ThreadId, waiting: &Waiting) {
             CompactString::from(value.as_str())
         }
     };
-    unjailed::picked(actor, thread, picked);
+    let (Waiting::Mode(ctx, _) | Waiting::Config(ctx, ..)) = waiting else {
+        return;
+    };
+    unjailed::picked(actor, thread, ctx.id, picked);
 }
 
-/// The lawyer's command for `mode` on `thread`'s agent answered, `ok` when it succeeded
-/// (`unjailed::answered`): a failed one whose mode an unjailed Codex reported meanwhile is
-/// switched back.
-pub(super) fn pick_answered(actor: &mut Actor, thread: ThreadId, same: bool, mode: &str, ok: bool) {
+/// The lawyer's `SetMode` `command` for `mode` on `thread`'s agent answered, `ok` when it
+/// succeeded (`unjailed::answered`).
+pub(super) fn mode_answered(
+    actor: &mut Actor,
+    (thread, same): (ThreadId, bool),
+    command: CommandId,
+    mode: &str,
+    ok: bool,
+) {
+    pick_answered(actor, (thread, same), command, ok.then_some(mode));
+}
+
+/// The lawyer's `SetConfigOption` `command` on `thread`'s agent answered with `options`, `None`
+/// when it failed: the mode option's value is the mode it now runs (`unjailed::answered`).
+pub(super) fn config_answered(
+    actor: &mut Actor,
+    (thread, same): (ThreadId, bool),
+    command: CommandId,
+    options: Option<&[ConfigOption]>,
+) {
+    let mode = options.and_then(option_mode);
+    pick_answered(actor, (thread, same), command, mode.as_deref());
+}
+
+/// A lawyer's mode command answered (`unjailed::answered`): a pick that did not hold, whose
+/// mode an unjailed Codex reported meanwhile, is switched back.
+fn pick_answered(
+    actor: &mut Actor,
+    (thread, same): (ThreadId, bool),
+    command: CommandId,
+    mode: Option<&str>,
+) {
     if !same {
         return;
     }
-    if let Some(mode) = unjailed::answered(actor, thread, mode, ok) {
+    if let Some(mode) = unjailed::answered(actor, thread, command, mode) {
         set_back(actor, thread, &mode, codex::ASK_MODE);
-    }
-}
-
-/// The lawyer's `SetConfigOption` on `thread`'s agent succeeded with `options`: the mode
-/// option's value, when it is an unjailed Codex's pick, makes the pick hold.
-pub(super) fn config_answered(actor: &mut Actor, thread: ThreadId, options: &[ConfigOption]) {
-    if let Some(mode) = option_mode(options) {
-        pick_answered(actor, thread, true, &mode, true);
     }
 }
 
@@ -363,8 +386,10 @@ fn set_back(actor: &mut Actor, thread: ThreadId, mode: &str, target: &'static st
 
 /// The switch back to `mode` answered: forced ask's and an unjailed Codex's are logged; a jailed
 /// Codex's preset is not, since its mode is the policy's. An unjailed Codex's failure (an error,
-/// or no answer in `unjailed::SET_BACK_WAIT`) stops it (`unjailed::stop_unasked`); any other
-/// is a warning (forced ask's hook still asks; the jail holds whatever Codex's preset).
+/// or no answer in `unjailed::SET_BACK_WAIT`) stops it (`unjailed::stop_unasked`); one that
+/// succeeded while the agent reported a mode that approves without asking is sent once more,
+/// and a third stops it (`unjailed::After`). Any other failure is a warning (forced ask's hook
+/// still asks; the jail holds whatever Codex's preset).
 pub(super) fn on_mode_reset(
     actor: &mut Actor,
     thread: ThreadId,
@@ -376,13 +401,18 @@ pub(super) fn on_mode_reset(
         return;
     }
     let jailed = held(actor, thread).and_then(jail_of).is_some();
-    let unjailed = unjailed::reset_answered(actor, thread);
-    if let Err(error) = &result
-        && unjailed
-    {
-        unjailed::stop_unasked(actor, thread, &Error::Acp(error.clone()));
-        return;
-    }
+    let again = match unjailed::reset_answered(actor, thread, result.is_ok()) {
+        Some(unjailed::After::Stop) => {
+            let error = result.err().map_or_else(
+                || Error::Internal("it moved again while it was switched back".to_owned()),
+                Error::Acp,
+            );
+            unjailed::stop_unasked(actor, thread, &error);
+            return;
+        }
+        Some(unjailed::After::Again(mode)) => Some(mode),
+        Some(unjailed::After::Done) | None => None,
+    };
     let logged = result.map_err(Error::Acp).and_then(|()| {
         if jailed {
             return Ok(());
@@ -395,6 +425,9 @@ pub(super) fn on_mode_reset(
             error = %crate::log_file::Cause(&error),
             "a session was not switched back to its allowed mode"
         );
+    }
+    if let Some(mode) = again {
+        set_back(actor, thread, &mode, codex::ASK_MODE);
     }
 }
 

@@ -87,6 +87,9 @@ mod codex_plans;
 #[path = "host/codex_saved_read_only.rs"]
 mod codex_saved_read_only;
 #[cfg(test)]
+#[path = "host/codex_set_back.rs"]
+mod codex_set_back;
+#[cfg(test)]
 #[path = "host/commands.rs"]
 mod commands;
 

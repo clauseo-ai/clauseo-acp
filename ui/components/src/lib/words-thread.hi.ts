@@ -131,7 +131,7 @@ export const HI = {
   "Read-only isn't available for ChatGPT in the Safe workspace on this computer, so ChatGPT can change files in this matter without asking first.":
     "इस कंप्यूटर पर सुरक्षित कार्यक्षेत्र में ChatGPT के लिए केवल-पढ़ने वाला मोड उपलब्ध नहीं है, इसलिए ChatGPT पहले पूछे बिना इस मामले की फ़ाइलें बदल सकता है।",
   "ChatGPT switched itself to working without asking you, and Clauseo couldn't switch it back, so Clauseo stopped it. Start ChatGPT again to carry on.":
-    "ChatGPT ने खुद को आपसे पूछे बिना काम करने पर बदल लिया, और Clauseo उसे वापस नहीं बदल सका, इसलिए Clauseo ने उसे रोक दिया। जारी रखने के लिए ChatGPT को फिर से शुरू करें।",
+    "ChatGPT ने खुद को बिना पूछे काम करने पर बदल लिया, और Clauseo उसे वापस नहीं बदल सका, इसलिए Clauseo ने उसे रोक दिया। जारी रखने के लिए ChatGPT को फिर से शुरू करें।",
   // the composer
   // in the composer's place while the open conversation is archived (U16a's Find opens one): it takes no question
   "Archived. Read only.": "संग्रहीत। केवल पढ़ने के लिए।",

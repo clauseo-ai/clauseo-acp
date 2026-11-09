@@ -1,22 +1,25 @@
 //! An unjailed Codex's (tier C) own moves to a mode that approves without asking
-//! (`codex::approves_unasked`), R17 PR-D2c rounds 5 and 6.
+//! (`codex::approves_unasked`), R17 PR-D2c rounds 5 to 7.
 //!
 //! - The lawyer's mode command becomes the agent's pick when it is sent ([`picked`]); the
 //!   agent's report of that mode stands while the command is in flight. The pick holds once
-//!   the command succeeded ([`answered`]); a failed `SetMode` drops it, and a report of it made
+//!   the command succeeded with that mode ([`answered`]); a failed `SetMode` or
+//!   `SetConfigOption`, or one answered with another value, drops it, and a report of it made
 //!   meanwhile is switched back like any other move.
 //! - Any other move there ([`moved`]), from `current_mode_update` or a mode option's value in
 //!   `config_option_update`, is switched back to `codex::ASK_MODE`; one switch back at a time.
+//!   A mode reported while one is in flight is checked when it is answered: one that approves
+//!   without asking gets one more switch back, and after that the agent is stopped.
 //! - A switch back that fails or goes unanswered stops the agent ([`stop_unasked`]): its turn is
-//!   cancelled, its session ends the normal way through the launch gate, and one notice
-//!   (`NoticeKind::ModeSetBackFailed`) says so.
+//!   cancelled, its tree killed at once (no graces), its session ends the normal way through the
+//!   launch gate, and one notice (`NoticeKind::ModeSetBackFailed`) says so.
 //! - Its mode log lines come once per kind per turn ([`first`]), with a count at the turn's
 //!   end ([`flush`]), the mode id capped at [`MODE_LOG_CHARS`] characters ([`capped`]).
 
 use std::borrow::Cow;
 use std::time::Duration;
 
-use clauseo_protocol::{CompactString, Notice, NoticeKind, NoticeLevel, ThreadId};
+use clauseo_protocol::{CommandId, CompactString, Notice, NoticeKind, NoticeLevel, ThreadId};
 
 use super::super::super::Actor;
 use super::super::agents::{self, Stage};
@@ -44,6 +47,11 @@ pub(in super::super) struct CodexModes {
     pick: Option<Pick>,
     /// A switch back to the ask mode is in flight.
     resetting: bool,
+    /// The last mode the agent reported while a switch back was in flight, checked once that
+    /// switch back is answered ([`reset_answered`]).
+    during: Option<CompactString>,
+    /// The switch back in flight is the second for one move: a third stops the agent.
+    again: bool,
     /// This turn's mode log lines, by [`Kind`].
     seen: Seen,
 }
@@ -69,6 +77,8 @@ impl Seen {
 /// The lawyer's mode command.
 #[derive(Debug)]
 struct Pick {
+    /// The command, which its answer names.
+    command: CommandId,
     mode: CompactString,
     /// It succeeded.
     answered: bool,
@@ -140,10 +150,17 @@ pub(in super::super) fn capped(mode: &str) -> Cow<'_, str> {
     Cow::Owned(cut)
 }
 
-/// The lawyer's mode command for `thread`'s unjailed Codex is sent: `mode` is its pick.
-pub(in super::super) fn picked(actor: &mut Actor, thread: ThreadId, mode: CompactString) {
+/// The lawyer's mode command `command` for `thread`'s unjailed Codex is sent: `mode` is its
+/// pick.
+pub(in super::super) fn picked(
+    actor: &mut Actor,
+    thread: ThreadId,
+    command: CommandId,
+    mode: CompactString,
+) {
     if let Some(modes) = modes(actor, thread) {
         modes.pick = Some(Pick {
+            command,
             mode,
             answered: false,
             reported: false,
@@ -151,35 +168,36 @@ pub(in super::super) fn picked(actor: &mut Actor, thread: ThreadId, mode: Compac
     }
 }
 
-/// The lawyer's command for `mode` answered, `ok` when it succeeded: the pick holds, or it is
-/// dropped. A failed one's mode comes back when the agent reported it meanwhile and it approves
-/// without asking, to be switched back.
+/// The lawyer's mode command `command` answered with `mode`: the mode it now runs, or `None`
+/// when it failed or its answer names none. The pick holds when that is its mode, else it is
+/// dropped (a failed `SetMode`, a failed `SetConfigOption`, or one answered with another
+/// value). A dropped pick's mode comes back when the agent reported it meanwhile and it
+/// approves without asking, to be switched back.
 pub(in super::super) fn answered(
     actor: &mut Actor,
     thread: ThreadId,
-    mode: &str,
-    ok: bool,
+    command: CommandId,
+    mode: Option<&str>,
 ) -> Option<CompactString> {
     let modes = modes(actor, thread)?;
-    if modes.pick.as_ref().is_none_or(|pick| pick.mode != mode) {
-        return None;
-    }
-    if ok {
-        if let Some(pick) = &mut modes.pick {
-            pick.answered = true;
-        }
+    let pick = modes.pick.as_mut().filter(|pick| pick.command == command)?;
+    if mode == Some(pick.mode.as_str()) {
+        pick.answered = true;
         return None;
     }
     let pick = modes.pick.take()?;
-    let back = pick.reported && codex::approves_unasked(&pick.mode) && !modes.resetting;
-    if !back {
+    if !pick.reported || !codex::approves_unasked(&pick.mode) {
+        return None;
+    }
+    if modes.resetting {
+        modes.during = Some(pick.mode);
         return None;
     }
     if first(actor, thread, Kind::Moved) {
         tracing::info!(
             kind = Kind::Moved.name(),
             mode = %capped(&pick.mode),
-            "an unjailed Codex reported the mode of a lawyer's command that then failed"
+            "an unjailed Codex reported the mode of a lawyer's command that did not hold"
         );
     }
     Some(pick.mode)
@@ -187,7 +205,8 @@ pub(in super::super) fn answered(
 
 /// `thread`'s unjailed Codex reported `mode` (`from` the update it came in): whether to switch
 /// it back, a mode that approves without asking that is not the lawyer's pick, with no switch
-/// back in flight. A `current_mode_update` of another mode ends a pick that succeeded.
+/// back in flight; one reported while a switch back is in flight is kept for its answer
+/// ([`reset_answered`]). A `current_mode_update` of another mode ends a pick that succeeded.
 pub(in super::super) fn moved(
     actor: &mut Actor,
     thread: ThreadId,
@@ -206,7 +225,11 @@ pub(in super::super) fn moved(
             modes.pick = None;
         }
     }
-    if !codex::approves_unasked(mode) || modes.resetting {
+    if modes.resetting {
+        modes.during = Some(CompactString::from(mode));
+        return false;
+    }
+    if !codex::approves_unasked(mode) {
         return false;
     }
     if first(actor, thread, Kind::Moved) {
@@ -227,13 +250,54 @@ pub(in super::super) fn resetting(actor: &mut Actor, thread: ThreadId) {
     }
 }
 
-/// A switch back answered: whether it was an unjailed Codex's.
-pub(in super::super) fn reset_answered(actor: &mut Actor, thread: ThreadId) -> bool {
-    modes(actor, thread).is_some_and(|modes| std::mem::take(&mut modes.resetting))
+/// What follows an unjailed Codex's switch back once answered.
+#[derive(Debug)]
+pub(in super::super) enum After {
+    /// It holds: log the ask mode.
+    Done,
+    /// It succeeded, but the agent reported this mode, which approves without asking, while it
+    /// was in flight: log the ask mode and switch back once more.
+    Again(CompactString),
+    /// It failed or went unanswered, or the agent moved again during the second switch back
+    /// for one move: stop the agent ([`stop_unasked`]).
+    Stop,
 }
 
-/// The switch back of `thread`'s unjailed Codex failed or went unanswered: one notice, its turn
-/// cancelled, and the agent stopped; its session ends through the launch gate as any stop's.
+/// A switch back of `thread`'s agent answered, `ok` when it succeeded: what follows when it
+/// was an unjailed Codex's, `None` otherwise.
+pub(in super::super) fn reset_answered(
+    actor: &mut Actor,
+    thread: ThreadId,
+    ok: bool,
+) -> Option<After> {
+    let modes = modes(actor, thread)?;
+    if !std::mem::take(&mut modes.resetting) {
+        return None;
+    }
+    let during = modes.during.take();
+    if !ok {
+        return Some(After::Stop);
+    }
+    let Some(mode) = during.filter(|mode| codex::approves_unasked(mode)) else {
+        modes.again = false;
+        return Some(After::Done);
+    };
+    if std::mem::replace(&mut modes.again, true) {
+        return Some(After::Stop);
+    }
+    if first(actor, thread, Kind::Moved) {
+        tracing::info!(
+            kind = Kind::Moved.name(),
+            mode = %capped(&mode),
+            "an unjailed Codex moved itself again while it was switched back"
+        );
+    }
+    Some(After::Again(mode))
+}
+
+/// The switch back of `thread`'s unjailed Codex failed, went unanswered, or did not hold: one
+/// notice, its turn cancelled, and the agent stopped at once, its tree killed with no graces
+/// (`AgentLink::stop_now`); its session ends through the launch gate as any stop's.
 pub(in super::super) fn stop_unasked(actor: &mut Actor, thread: ThreadId, error: &Error) {
     if agent(actor, thread).is_none_or(|agent| agent.stage == Stage::Stopping) {
         return;
@@ -254,6 +318,9 @@ pub(in super::super) fn stop_unasked(actor: &mut Actor, thread: ThreadId, error:
     }
     if current(actor, thread).is_some_and(|current| !current.cancelled) {
         cancel::cancel_current(actor, thread);
+    }
+    if let Some(agent) = agent(actor, thread) {
+        agent.link.stop_now();
     }
     agents::stop(actor, thread);
 }

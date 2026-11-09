@@ -1,0 +1,14 @@
+{"scenario":"codex-keeps-moving","description":"An unjailed Codex (tier C) that moves itself to agent-full-access again during each of the host's two set_mode workspace-write (R17 PR-D2c round 7): after the second answer the host cancels the turn and kills the agent. Written from codex-acp 2.2.2 source (src/AgentMode.ts, dist/index.js:34243-34354) until G8a's recordings replace it.","on_stdin_close":"hang"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":false,"promptCapabilities":{"image":true,"embeddedContext":true},"mcpCapabilities":{"http":true,"sse":false},"sessionCapabilities":{"list":{},"delete":{},"additionalDirectories":{},"resume":{},"close":{}}},"authMethods":[],"agentInfo":{"name":"@agentclientprotocol/codex-acp","title":"Codex","version":"2.2.2"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1","modes":{"currentModeId":"workspace-write","availableModes":[{"id":"read-only","name":"Read-only"},{"id":"workspace-write","name":"Workspace access"},{"id":"agent","name":"Auto review"},{"id":"agent-full-access","name":"Full access"}]}}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"current_mode_update","currentModeId":"agent-full-access"},"session":"sess-1"}}
+{"expect":{"method":"session/set_mode","as":"set-back-1","params":{"sessionId":"sess-1","modeId":"workspace-write"}}}
+{"update":{"update":{"sessionUpdate":"current_mode_update","currentModeId":"agent-full-access"},"session":"sess-1"}}
+{"respond":{"to":"set-back-1","result":{}}}
+{"expect":{"method":"session/set_mode","as":"set-back-2","params":{"sessionId":"sess-1","modeId":"workspace-write"}}}
+{"update":{"update":{"sessionUpdate":"current_mode_update","currentModeId":"agent-full-access"},"session":"sess-1"}}
+{"respond":{"to":"set-back-2","result":{}}}
+{"note":"The host cancels the turn, then kills the agent; another prompt here is a mismatch.","expect":{"method":"session/cancel","params":{"sessionId":"sess-1"}}}

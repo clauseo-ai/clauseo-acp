@@ -37,7 +37,7 @@ test("a failed switch back gives its line, in English and Hindi", () => {
     "ChatGPT switched itself to working without asking you, and Clauseo couldn't switch it back, so Clauseo stopped it. Start ChatGPT again to carry on.",
   );
   expect(noticeLine("mode_set_back_failed", words("hi"))).toBe(
-    "ChatGPT ने खुद को आपसे पूछे बिना काम करने पर बदल लिया, और Clauseo उसे वापस नहीं बदल सका, इसलिए Clauseo ने उसे रोक दिया। जारी रखने के लिए ChatGPT को फिर से शुरू करें।",
+    "ChatGPT ने खुद को बिना पूछे काम करने पर बदल लिया, और Clauseo उसे वापस नहीं बदल सका, इसलिए Clauseo ने उसे रोक दिया। जारी रखने के लिए ChatGPT को फिर से शुरू करें।",
   );
 });
 

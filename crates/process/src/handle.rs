@@ -104,10 +104,22 @@ impl Handle {
     ///
     /// Keep reading the agent's stdout, or drop it, while this runs: an agent blocked writing to
     /// a full stdout pipe never sees its stdin close, and costs the whole 2 s and the SIGTERM.
-    pub async fn shutdown<T: Timer>(
+    pub async fn shutdown<T: Timer>(self, timer: &T, listed: Option<Snapshot>) -> ShutdownOutcome {
+        self.stop(timer, listed, Grace::Ladder).await
+    }
+
+    /// Stops the agent at once, as [`Handle::shutdown`] without its graces: close its stdin
+    /// and kill its tree in the same step, then wait 2 s for the exit. For an agent that may
+    /// not run a moment longer than it must (one that switched itself to working without asking).
+    pub async fn kill_now<T: Timer>(self, timer: &T, listed: Option<Snapshot>) -> ShutdownOutcome {
+        self.stop(timer, listed, Grace::None).await
+    }
+
+    async fn stop<T: Timer>(
         mut self,
         timer: &T,
         listed: Option<Snapshot>,
+        grace: Grace,
     ) -> ShutdownOutcome {
         #[cfg(unix)]
         {
@@ -117,7 +129,7 @@ impl Handle {
         drop(listed);
         self.stdin.close();
         let exit = pin!(self.child.status());
-        let ended = ladder(exit, timer, |step| self.step(step)).await;
+        let ended = ladder(exit, timer, grace, |step| self.step(step)).await;
         match ended {
             Ended::StdinClosed(status) => ShutdownOutcome::StdinClosed(self.finish(&status)),
             #[cfg(unix)]
@@ -221,21 +233,33 @@ enum Ended<S> {
     Unresponsive,
 }
 
+/// Whether a stop gives the agent its graces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Grace {
+    /// Stdin closed, then (Unix) SIGTERM, each with its wait, before the kill.
+    Ladder,
+    /// The kill at once.
+    None,
+}
+
 /// The ladder's waits, once stdin is closed: `exit` against each grace period, with `act`
-/// taking the step that follows a wait that ran out.
+/// taking the step that follows a wait that ran out. With [`Grace::None`], the kill at once.
 async fn ladder<S, T: Timer>(
     mut exit: Pin<&mut impl Future<Output = S>>,
     timer: &T,
+    grace: Grace,
     mut act: impl FnMut(Step),
 ) -> Ended<S> {
-    if let Some(status) = within(exit.as_mut(), timer.after(STDIN_GRACE)).await {
-        return Ended::StdinClosed(status);
-    }
-    #[cfg(unix)]
-    {
-        act(Step::Terminate);
-        if let Some(status) = within(exit.as_mut(), timer.after(TERM_GRACE)).await {
-            return Ended::Terminated(status);
+    if grace == Grace::Ladder {
+        if let Some(status) = within(exit.as_mut(), timer.after(STDIN_GRACE)).await {
+            return Ended::StdinClosed(status);
+        }
+        #[cfg(unix)]
+        {
+            act(Step::Terminate);
+            if let Some(status) = within(exit.as_mut(), timer.after(TERM_GRACE)).await {
+                return Ended::Terminated(status);
+            }
         }
     }
     act(Step::Kill);
