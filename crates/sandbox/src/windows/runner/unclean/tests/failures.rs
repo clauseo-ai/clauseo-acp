@@ -161,11 +161,11 @@ fn a_task_scheduler_that_never_answers_refuses_the_launch_without_hanging() {
     use std::sync::mpsc;
 
     use crate::windows::refresh::task_call::{Slot, TASK_CALL_LIMIT, repair_within, within};
-    static FIRST: Slot<Option<&'static str>> = Slot::new();
-    static RETRY: Slot<Option<&'static str>> = Slot::new();
-    static ANSWERED: Slot<Option<&'static str>> = Slot::new();
-    static STOP: Slot<bool> = Slot::new();
-    static SEVEN: Slot<u32> = Slot::new();
+    static FIRST: Slot<Option<&'static str>> = Slot::new("test");
+    static RETRY: Slot<Option<&'static str>> = Slot::new("test");
+    static ANSWERED: Slot<Option<&'static str>> = Slot::new("test");
+    static STOP: Slot<bool> = Slot::new("test");
+    static SEVEN: Slot<u32> = Slot::new("test");
     assert_eq!(TASK_CALL_LIMIT, Duration::from_secs(10));
     // Each read hangs; the launch's bounded reads give up (here at 50 ms, at 10 s for real), so
     // this test ends rather than hanging.

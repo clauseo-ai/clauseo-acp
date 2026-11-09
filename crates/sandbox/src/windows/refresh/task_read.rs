@@ -166,11 +166,11 @@ pub fn heal_task_descriptor(task: SystemTask, owner: &Sid) -> Result<(), TaskErr
 }
 
 /// One call of each kind at a time (`task_call::Slot`).
-static READY_CALL: Slot<SetupState> = Slot::new();
-static REPAIR_CALL: Slot<Option<&'static str>> = Slot::new();
-static REFRESH_CALL: Slot<Result<(), String>> = Slot::new();
-static STOP_CALL: Slot<bool> = Slot::new();
-static SWEEP_CALL: Slot<Result<(), String>> = Slot::new();
+static READY_CALL: Slot<SetupState> = Slot::new("readiness");
+static REPAIR_CALL: Slot<Option<&'static str>> = Slot::new("launch check");
+static REFRESH_CALL: Slot<Result<(), String>> = Slot::new("refresh request");
+static STOP_CALL: Slot<bool> = Slot::new("stop request");
+static SWEEP_CALL: Slot<Result<(), String>> = Slot::new("sweep request");
 
 /// `UserSetup::state`'s last step (`task_identity::ready_with_tasks`) on this machine, within
 /// [`TASK_CALL_LIMIT`] (`task_call::ready_within`). It only reads: a stop or sweep task missing

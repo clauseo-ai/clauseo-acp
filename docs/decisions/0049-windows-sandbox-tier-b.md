@@ -1915,7 +1915,9 @@ session's end) runs on its own thread and is given up on after 10 s
 (`refresh::task_call::TASK_CALL_LIMIT`): a check that didn't answer is couldn't-check, a
 request that didn't is one that failed. The readiness check has the same bound, its local name
 lookups included. At most one call of each kind runs at a time: while one is still running, a
-new one waits on its answer within its own 10 s and starts no thread. The launch's check looks
+new one waits on its answer within its own 10 s and starts no thread. One that times out three
+times in a row is abandoned and the next call may start a worker, with at most two abandoned per
+kind still running; past that the kind is couldn't-check. The launch's check looks
 up no account name: the stop and sweep tasks run as LOCAL SYSTEM, matched by its well-known SID
 or its English names, and only another language's name for it is looked up, which the machine
 answers itself. A launch refused for `AwaitingSweep` gives the same

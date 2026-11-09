@@ -6,7 +6,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use super::{Slot, ready_within, within};
+use super::{ABANDONED_CAP, Slot, TIMEOUTS_BEFORE_ABANDON, ready_within, repair_within, within};
 use crate::SetupState;
 use crate::windows::refresh::SystemTask;
 use crate::windows::refresh::task_identity::{
@@ -21,7 +21,7 @@ const LIMIT: Duration = Duration::from_millis(50);
 
 #[test]
 fn three_calls_to_a_task_scheduler_that_never_answers_start_one_thread() {
-    static HUNG: Slot<bool> = Slot::new();
+    static HUNG: Slot<bool> = Slot::new("test");
     let (keep, never) = mpsc::channel::<()>();
     let never = Arc::new(Mutex::new(never));
     for _ in 0..3 {
@@ -30,22 +30,15 @@ fn three_calls_to_a_task_scheduler_that_never_answers_start_one_thread() {
         assert!(within(&HUNG, LIMIT, call).is_err());
     }
     assert_eq!(HUNG.started(), 1);
-    // Once it answers, the next call starts afresh and is answered.
+    // Three timeouts abandoned it: the next call starts the second thread.
     drop(keep);
-    // A call that joins the hung one as it ends gets its answer (`false`); the one after it
-    // starts the second thread.
-    let joined = within(&HUNG, Duration::from_secs(5), || true);
-    if joined == Ok(false) {
-        assert_eq!(within(&HUNG, Duration::from_secs(5), || true), Ok(true));
-    } else {
-        assert_eq!(joined, Ok(true));
-    }
+    assert_eq!(within(&HUNG, Duration::from_secs(5), || true), Ok(true));
     assert_eq!(HUNG.started(), 2);
 }
 
 #[test]
 fn a_call_joining_a_pending_one_gets_its_answer() {
-    static SLOW: Slot<u32> = Slot::new();
+    static SLOW: Slot<u32> = Slot::new("test");
     let (go, wait) = mpsc::channel::<()>();
     let first = within(&SLOW, LIMIT, move || {
         let _answered_or_dropped = wait.recv().is_ok();
@@ -87,7 +80,7 @@ impl TaskReader for HungLookup {
 
 #[test]
 fn readiness_whose_name_lookup_never_answers_is_couldnt_check_within_the_bound() {
-    static READY: Slot<SetupState> = Slot::new();
+    static READY: Slot<SetupState> = Slot::new("test");
     let (keep, never) = mpsc::channel::<()>();
     // The refresh task's trigger reads back as a name, so its user is looked up.
     let mut reader = Reader::adopted();
@@ -112,7 +105,7 @@ fn readiness_whose_name_lookup_never_answers_is_couldnt_check_within_the_bound()
 
 #[test]
 fn readiness_with_the_sweep_task_missing_asks_for_no_refresh_run() {
-    static READY: Slot<SetupState> = Slot::new();
+    static READY: Slot<SetupState> = Slot::new("test");
     // The readiness check gets a reader and nothing that can start a task: the missing sweep
     // task is said, and no run is asked for. A launch's heal asks for one (`unclean::tests::
     // failures::a_missing_task_is_put_back_by_the_refresh_task_before_the_launch_refuses`).
@@ -182,4 +175,76 @@ fn the_launch_check_of_stop_and_sweep_read_back_as_system_looks_up_no_name() {
         assert_eq!(tasks_repair(&mut reader), None, "{name}");
         assert_eq!(reader.lookups, 0, "{name}");
     }
+}
+
+/// A call that blocks until `never`'s sender is dropped, shared by every worker.
+fn hung(never: &Arc<Mutex<mpsc::Receiver<()>>>) -> impl FnOnce() -> bool + Send + 'static {
+    let never = Arc::clone(never);
+    move || never.lock().unwrap().recv().is_ok()
+}
+
+#[test]
+fn a_thread_that_doesnt_start_is_couldnt_check_without_hanging() {
+    static FAILS: Slot<Option<&'static str>> = Slot::with_spawn("test", |_work| {
+        Err(std::io::Error::other("no threads left"))
+    });
+    let (done, finished) = mpsc::channel();
+    std::thread::spawn(move || {
+        let twice = [(); 2].map(|()| repair_within(&FAILS, LIMIT, || None));
+        done.send(twice).unwrap();
+    });
+    let twice = finished.recv_timeout(Duration::from_secs(5));
+    assert_eq!(twice, Ok([Some(TASK_UNCHECKED); 2]));
+    assert_eq!(FAILS.started(), 0);
+}
+
+#[test]
+fn three_timeouts_abandon_the_call_and_the_fourth_starts_a_worker() {
+    static STUCK: Slot<bool> = Slot::new("test");
+    assert_eq!((TIMEOUTS_BEFORE_ABANDON, ABANDONED_CAP), (3, 2));
+    let (keep, never) = mpsc::channel::<()>();
+    let never = Arc::new(Mutex::new(never));
+    for _ in 0..3 {
+        assert!(within(&STUCK, LIMIT, hung(&never)).is_err());
+    }
+    assert_eq!(STUCK.started(), 1);
+    assert!(within(&STUCK, LIMIT, hung(&never)).is_err());
+    assert_eq!(STUCK.started(), 2);
+    drop(keep);
+}
+
+#[test]
+fn a_permanent_hang_starts_at_most_one_worker_and_two_more() {
+    static FOREVER: Slot<bool> = Slot::new("test");
+    let (keep, never) = mpsc::channel::<()>();
+    let never = Arc::new(Mutex::new(never));
+    for _ in 0..20 {
+        assert!(within(&FOREVER, Duration::from_millis(10), hung(&never)).is_err());
+    }
+    assert_eq!(FOREVER.started(), 3);
+    drop(keep);
+}
+
+#[test]
+fn an_answer_resets_the_timeouts() {
+    static RESET: Slot<bool> = Slot::new("test");
+    let (keep, never) = mpsc::channel::<()>();
+    let never = Arc::new(Mutex::new(never));
+    for _ in 0..2 {
+        assert!(within(&RESET, LIMIT, hung(&never)).is_err());
+    }
+    // The first worker answers.
+    drop(keep);
+    assert!(within(&RESET, Duration::from_secs(5), || true).is_ok());
+    let (keep, never) = mpsc::channel::<()>();
+    let never = Arc::new(Mutex::new(never));
+    let mut started = 0;
+    for _ in 0..2 {
+        assert!(within(&RESET, LIMIT, hung(&never)).is_err());
+        started = RESET.started();
+    }
+    // Two timeouts on the new worker: the third call still joins it, starting none.
+    assert!(within(&RESET, LIMIT, hung(&never)).is_err());
+    assert_eq!(RESET.started(), started);
+    drop(keep);
 }
