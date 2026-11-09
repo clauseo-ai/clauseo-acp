@@ -84,6 +84,8 @@ pub(crate) enum Gated {
     Detect,
     /// Every detection, start-up's too.
     Hang,
+    /// Start-up's detection alone.
+    First,
     /// Every `state()`.
     State,
 }
@@ -257,18 +259,23 @@ pub(crate) fn rig(plan: Plan) -> Rig {
     let script = Arc::new(Script::new(plan.detections));
     let detections = Arc::new(AtomicUsize::new(0));
     let counted = Arc::clone(&detections);
-    let hang = plan.gated == Gated::Hang;
-    let detect_gate = matches!(plan.gated, Gated::Detect | Gated::Hang)
+    let gated = plan.gated;
+    let detect_gate = matches!(gated, Gated::Detect | Gated::Hang | Gated::First)
         .then_some(gate)
         .flatten();
     let detect = Arc::new(move || {
         let calls = counted.fetch_add(1, Ordering::SeqCst);
-        if (calls > 0 || hang)
-            && let Some(gate) = &detect_gate
-        {
+        let waits = match gated {
+            Gated::Detect => calls > 0,
+            Gated::First => calls == 0,
+            _ => true,
+        };
+        // The value is the call's, by call order, even when an earlier call still waits.
+        let value = script.next();
+        if waits && let Some(gate) = &detect_gate {
             pass(gate);
         }
-        script.next()
+        value
     });
     let shared: Arc<dyn SandboxSetup> = Arc::<FakeSetup>::clone(&setup);
     let sandbox = Sandbox::new(detect, Some(shared));

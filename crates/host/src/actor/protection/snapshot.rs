@@ -7,6 +7,9 @@
 //! - At most one snapshot thread runs per seam ([`Slot`]): a request while one is still out
 //!   (one that hung past an earlier wait) waits for that one instead of starting another, so a
 //!   hang costs one thread however many retries come.
+//! - A removal of the set-up (`RemoveSandboxSetup`) starts a new generation ([`Slot::removed`]):
+//!   no request after it joins a thread started before it, whose answer may predate the
+//!   removal (tier B, set up); that answer is discarded and a fresh snapshot decides.
 //! - Each request waits at most its own `wait`; past it the answer is [`NoAnswer`], which the
 //!   caller turns into a failed probe. A late answer still lands in the slot for whoever waits
 //!   then.
@@ -46,10 +49,28 @@ pub(crate) struct NoAnswer(pub(crate) &'static str);
 /// A seam's snapshot thread, if one is out (shared by every clone of the seam).
 #[derive(Default)]
 pub(crate) struct Slot {
-    flight: Mutex<Option<Arc<Flight>>>,
+    flight: Mutex<Out>,
     /// The snapshot threads started (tests count them).
     #[cfg(test)]
     pub(crate) started: std::sync::atomic::AtomicUsize,
+}
+
+/// The slot's state: its generation (one per removal) and the thread out, with the generation
+/// it started in.
+#[derive(Default)]
+struct Out {
+    generation: u64,
+    flight: Option<(u64, Arc<Flight>)>,
+}
+
+impl Slot {
+    /// The set-up was removed: a snapshot thread started before now is never joined again, and
+    /// its answer is discarded.
+    pub(crate) fn removed(&self) {
+        let mut out = lock(&self.flight);
+        out.generation += 1;
+        out.flight = None;
+    }
 }
 
 /// One snapshot thread's outcome, as it stands.
@@ -119,13 +140,16 @@ pub(crate) fn take(
     wait: Duration,
 ) -> Result<Snapshot, NoAnswer> {
     let flight = {
-        let mut slot = lock(&sandbox.bounds.slot.flight);
-        match slot.as_ref() {
-            Some(flight) if flight.running() => Arc::clone(flight),
+        let mut out = lock(&sandbox.bounds.slot.flight);
+        let generation = out.generation;
+        match &out.flight {
+            Some((started, flight)) if *started == generation && flight.running() => {
+                Arc::clone(flight)
+            }
             _ => {
                 let flight = Arc::new(Flight::default());
                 start(sandbox, data_dir.to_path_buf(), Arc::clone(&flight))?;
-                *slot = Some(Arc::clone(&flight));
+                out.flight = Some((generation, Arc::clone(&flight)));
                 flight
             }
         }

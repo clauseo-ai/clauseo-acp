@@ -2,7 +2,8 @@
 //! set-up's state and its time, so a hung `state()` holds neither the host's start nor its
 //! quit; at most one snapshot thread is out, so retries during a hang join it; with launchers a
 //! first snapshot with no answer is checked once more before its failed probe stands, launches
-//! refused throughout; without launchers a timeout only shows in `set_up_state`.
+//! refused throughout; without launchers a timeout only shows in `set_up_state`; a removal
+//! never takes the answer of a detection started before it.
 
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -11,10 +12,10 @@ use clauseo_protocol::{
     CommandOutcome, ErrorCode, HostCommand, NotProtectedCause, Protection, ProtectionTier,
     ProtectionView, ProtectionWork, UnsupportedWhy,
 };
-use clauseo_sandbox::SetupState;
+use clauseo_sandbox::{NoSandbox, SetupState};
 
 use crate::protection::{dir, start};
-use crate::protection_rig::{Gated, Plan, b, protection_events, subscribe, view};
+use crate::protection_rig::{Gated, Plan, b, c, protection_events, subscribe, view};
 use crate::support::Running;
 
 /// A snapshot gives up after this in these tests.
@@ -155,4 +156,40 @@ fn without_launchers_a_detection_with_no_answer_shows_only_in_set_up_state() {
     let _made = host.ok(create_thread(&host));
     host.shutdown();
     drop(gate.release);
+}
+
+/// The gate review's LOW: a removal never joins a detection started before it. The start's
+/// detection hangs; the removal's snapshot starts a fresh one (the set-up now needed), which
+/// decides, where joining the old one would have waited it out. Released after, the old one
+/// answers "set up, tier B": that answer predates the removal and is never used, and the next
+/// check is fresh again.
+#[test]
+fn a_removal_never_takes_an_answer_from_before_it() {
+    let dir = dir("protection_hung_removal");
+    let mut plan = Plan::new(vec![b(), c(NoSandbox::NeedsSetUp)], vec![SetupState::Ready]);
+    plan.gated = Gated::First;
+    plan.waits = Some((Duration::from_secs(1), SHORT));
+    let (host, mut rig) = start(&dir, 0, plan);
+    let gate = rig.gate.take().unwrap();
+    gate.started.recv().unwrap();
+    let before = until_view(&host, |view| view.in_progress.is_none());
+    assert_eq!(before.computer, failed());
+    let needed = Protection::NotProtected {
+        cause: NotProtectedCause::NeedsSetUp,
+    };
+    assert_eq!(
+        host.ok(HostCommand::RemoveSandboxSetup {}),
+        CommandOutcome::Done
+    );
+    assert_eq!(view(&host).computer, needed, "the fresh detection decides");
+    assert_eq!(rig.detections.load(Ordering::SeqCst), 2);
+    assert_eq!(rig.setup.remove_calls.load(Ordering::SeqCst), 1);
+    // The old detection answers tier B now; nobody takes it.
+    drop(gate.release);
+    assert_eq!(
+        host.ok(HostCommand::RetryProtection {}),
+        CommandOutcome::Done
+    );
+    assert_eq!(view(&host).computer, needed);
+    host.shutdown();
 }

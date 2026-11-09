@@ -173,6 +173,10 @@ fn start(
     let data_dir = actor.effective.data_dir().to_path_buf();
     let spawned = spawn(fail, move || {
         let outcome = run(work, setup.as_deref());
+        if work == ProtectionWork::Remove {
+            // A snapshot from before the removal may still say set up: a fresh one decides.
+            sandbox.bounds.slot.removed();
+        }
         let observed = observe_within(Some(&sandbox), &data_dir, wait);
         report.send(Ended::Ran { outcome, observed });
     });
