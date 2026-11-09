@@ -197,7 +197,7 @@ crates/sandbox/src/windows/test_junction.rs - unsafe_code
 crates/sandbox/src/windows/test_junction.rs - clippy::disallowed_methods
 crates/sandbox/src/windows/record.rs - unsafe_code
 crates/sandbox/src/windows/machine_launch/os.rs - unsafe_code
-crates/sandbox/src/windows/machine_launch/os.rs settle clippy::disallowed_methods
+crates/sandbox/src/windows/machine_launch/os.rs WindowsLaunchStore::settle clippy::disallowed_methods
 crates/sandbox/src/windows/machine_launch/effective.rs - unsafe_code
 crates/sandbox/src/windows/detect.rs - unsafe_code
 crates/sandbox/src/windows/private_dir.rs - unsafe_code
