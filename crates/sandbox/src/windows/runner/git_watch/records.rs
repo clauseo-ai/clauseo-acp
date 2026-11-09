@@ -2,14 +2,19 @@
 //! with: `FILE_NOTIFY_INFORMATION`, or with `ReadDirectoryNotifyExtendedInformation`
 //! `FILE_NOTIFY_EXTENDED_INFORMATION`, which also gives each item's attributes, so a folder
 //! that became a junction (its `FILE_ACTION_MODIFIED` with `FILE_ATTRIBUTE_REPARSE_POINT`) is
-//! told from the many writes the same filter reports, and each item's creation time, so a folder
-//! moved in from another folder is told from one just made (both come as `FILE_ACTION_ADDED`).
+//! told from the many writes the same filter reports, and each item's creation time and file ID,
+//! so a folder moved in from another folder is told from one just made (both come as
+//! `FILE_ACTION_ADDED`): by its age, or by its file ID leaving another place (`pairs.rs`).
 
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// `FILE_ACTION_ADDED`.
 const ADDED: u32 = 1;
+/// `FILE_ACTION_REMOVED`.
+const REMOVED: u32 = 2;
+/// `FILE_ACTION_RENAMED_OLD_NAME`.
+const RENAMED_OLD_NAME: u32 = 4;
 /// `FILE_ACTION_MODIFIED`.
 const MODIFIED: u32 = 3;
 /// `FILE_ACTION_RENAMED_NEW_NAME`.
@@ -26,6 +31,8 @@ pub(crate) const MOVED_IN_AGE: u64 = 5 * 10_000_000;
 const UNIX_EPOCH_TICKS: u64 = 116_444_736_000_000_000;
 /// Where an extended record's `CreationTime` is.
 const CREATION_AT: usize = 8;
+/// Where an extended record's `FileId` is.
+const FILE_ID_AT: usize = 64;
 
 /// Where a record's fields are.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,6 +70,23 @@ pub(crate) struct Changes {
     /// creation time is in the future or unreadable is listed. Empty with [`Layout::Plain`],
     /// which has no attributes or times.
     pub(crate) moved_folders: Vec<PathBuf>,
+    /// Of `added`, each folder made just now by its creation time, with its file ID: one gone
+    /// by the check counts as gone only when that file ID left another place (`pairs.rs`), so
+    /// a forged creation time doesn't hide a folder moved in. Not listed without a file ID.
+    pub(crate) fresh_folders: Vec<(PathBuf, u64)>,
+    /// Each item removed or renamed away (`FILE_ACTION_REMOVED`, `FILE_ACTION_RENAMED_OLD_NAME`),
+    /// with its file ID, for the pairing: none without a file ID, nor with [`Layout::Plain`].
+    pub(crate) left: Vec<(PathBuf, u64)>,
+}
+
+impl Changes {
+    /// The paths of [`Changes::fresh_folders`].
+    pub(crate) fn fresh_paths(&self) -> Vec<PathBuf> {
+        self.fresh_folders
+            .iter()
+            .map(|(path, _)| path.clone())
+            .collect()
+    }
 }
 
 /// `at` as a FILETIME: 100 ns ticks since 1601-01-01; 0 when it is before 1970 or past what a
@@ -87,8 +111,8 @@ fn moved_in(created: i64, now: u64) -> bool {
 }
 
 /// What the records in `buffer` (chained by `NextEntryOffset`) report, received at `now` (a
-/// FILETIME, [`filetime`], read once per buffer as it arrives). `None` when the buffer doesn't read as
-/// records: the watch then rescans.
+/// FILETIME, [`filetime`], read once per buffer as it arrives). `None` when the buffer doesn't
+/// read as records: the watch then rescans.
 pub(crate) fn changes(buffer: &[u8], layout: Layout, now: u64) -> Option<Changes> {
     let (length_at, name_at, attributes_at) = layout.offsets();
     let mut changes = Changes::default();
@@ -112,8 +136,15 @@ pub(crate) fn changes(buffer: &[u8], layout: Layout, now: u64) -> Option<Changes
                     || (attributes.is_some() && moved_in(signed(record, CREATION_AT)?, now));
                 if folder && counted {
                     changes.moved_folders.push(path.clone());
+                } else if folder && let Some(id) = file_id(record) {
+                    changes.fresh_folders.push((path.clone(), id));
                 }
                 changes.added.push(path);
+            }
+            REMOVED | RENAMED_OLD_NAME if attributes.is_some() => {
+                if let Some(id) = file_id(record) {
+                    changes.left.push((path_of(name)?, id));
+                }
             }
             MODIFIED if reparse => changes.relinked.push(path_of(name)?),
             _ => {}
@@ -129,6 +160,12 @@ pub(crate) fn changes(buffer: &[u8], layout: Layout, now: u64) -> Option<Changes
 fn word(bytes: &[u8], at: usize) -> Option<u32> {
     let four: [u8; 4] = bytes.get(at..at.checked_add(4)?)?.try_into().ok()?;
     Some(u32::from_le_bytes(four))
+}
+
+/// An extended record's file ID; `None` when it is 0 (none given) or the record is too short.
+fn file_id(record: &[u8]) -> Option<u64> {
+    let id = signed(record, FILE_ID_AT)?;
+    (id != 0).then(|| u64::from_le_bytes(id.to_le_bytes()))
 }
 
 /// The little-endian `i64` at `at` in `bytes`.

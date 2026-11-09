@@ -21,6 +21,7 @@ use crate::{Denial, SetAsideWhat};
 
 mod ends;
 mod notices;
+mod pairs;
 mod records;
 mod watchdog;
 
@@ -35,6 +36,8 @@ fn added(paths: &[&str]) -> Next {
         added: paths.iter().map(PathBuf::from).collect(),
         relinked: Vec::new(),
         moved_folders: Vec::new(),
+        fresh_folders: Vec::new(),
+        left: Vec::new(),
     })
 }
 

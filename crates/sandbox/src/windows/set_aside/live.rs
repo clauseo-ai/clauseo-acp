@@ -111,6 +111,10 @@ pub(crate) struct Live {
     /// confirmed ([`Hooks::end`] said the agent's job isn't empty yet): the check after the
     /// session moves it.
     pub(crate) left: Vec<PathBuf>,
+    /// Each folder reported made just now (`fresh`, by its creation time) and gone before it
+    /// could be scanned, by its path below the watched folder: it counts as gone only when its
+    /// file ID left another place (`runner/git_watch/pairs.rs`).
+    pub(crate) unpaired: Vec<PathBuf>,
 }
 
 /// Why the watch ends the session.
@@ -255,22 +259,25 @@ impl Watched {
         now: SystemTime,
         hooks: &impl Hooks,
     ) -> Live {
-        self.changed_with_folders(volume, paths, &[], now, hooks)
+        self.changed_with_folders(volume, paths, (&[], &[]), now, hooks)
     }
 
     /// [`Watched::changed`], told which of `paths` were folders renamed or moved in
     /// (`git_watch/records.rs`): one gone by its check (nothing at its name, or past a link
     /// now) is listed in [`Live::gone`], as a gone `.git` is, so an agent can't move a folder
-    /// holding a `.git` in and back out before it is scanned, again and again.
+    /// holding a `.git` in and back out before it is scanned, again and again. A folder in
+    /// `fresh` (made just now, by its creation time) gone so is listed in [`Live::unpaired`]
+    /// instead, for the watch to pair by its file ID.
     pub(super) fn changed_with_folders(
         &self,
         volume: &impl Volume,
         paths: &[PathBuf],
-        folders: &[PathBuf],
+        (folders, fresh): (&[PathBuf], &[PathBuf]),
         now: SystemTime,
         hooks: &impl Hooks,
     ) -> Live {
         let folders: Vec<Key> = folders.iter().filter_map(|p| key_of(p)).collect();
+        let fresh: Vec<Key> = fresh.iter().filter_map(|p| key_of(p)).collect();
         let mut live = Live::default();
         let mut run = Run::new(self, volume, now, hooks, &mut live);
         let (mut hits, mut rest) = (Vec::new(), Vec::new());
@@ -291,7 +298,7 @@ impl Watched {
         for key in &hits {
             run.check(key, SetAsideWhat::GitRepository);
         }
-        let (mut scanned, mut gone) = (Vec::new(), Vec::<PathBuf>::new());
+        let (mut scanned, mut gone, mut unpaired) = (Vec::new(), Vec::<PathBuf>::new(), Vec::new());
         for key in rest {
             let repo = key.iter().position(|part| is_git(part)).map(|at| at + 1);
             if let Some(end) = repo.or_else(|| self.common_at(&key)) {
@@ -312,6 +319,9 @@ impl Watched {
                     tracing::debug!("a folder reported went before it could be scanned");
                     gone.push(key.iter().collect());
                 }
+                Ok((_, None)) | Err(Missed::Gone | Missed::Link) if fresh.contains(&key) => {
+                    unpaired.push(key.iter().collect());
+                }
                 Ok((_, Some((_, Kind::Other)) | None)) | Err(_) => {}
             }
         }
@@ -319,6 +329,7 @@ impl Watched {
             run.below(key);
         }
         live.gone.extend(gone);
+        live.unpaired.extend(unpaired);
         live
     }
 

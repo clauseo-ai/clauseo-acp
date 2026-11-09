@@ -26,6 +26,9 @@
 //! - An overflow (`ERROR_NOTIFY_ENUM_DIR`, an empty or unreadable buffer) rescans the whole
 //!   folder and reads on. A watch that can't be armed refuses the launch (`outer/watch.rs`),
 //!   and one that breaks while the agent runs ends the session: nothing stands in for it.
+//! - A folder renamed or moved in and gone before its scan counts as gone; one made just now
+//!   (`mkdir`, by its creation time) only when its file ID left another watched place, the
+//!   agent's state and temp folders included ([`pairs`]).
 //! - An item that can't be moved (the agent holding a handle to it, say) is tried again once
 //!   the session ended: fail closed.
 //! - Once the job is empty, the watch is stopped and rescans its folder one last time. When the
@@ -42,6 +45,9 @@ use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
 
+pub(crate) use self::pairs::Paired;
+#[cfg(windows)]
+pub(crate) use self::pairs::Pairs;
 pub(crate) use self::records::Changes;
 #[cfg(windows)]
 pub(crate) use self::records::changes;
@@ -53,6 +59,7 @@ use crate::{Denial, SetAsideWhat};
 
 #[cfg(windows)]
 pub(super) mod os;
+mod pairs;
 mod records;
 mod watchdog;
 // Two attributes, as in `windows.rs`: clippy's test allowances look for `cfg(test)`.
@@ -122,6 +129,11 @@ pub(crate) trait Session {
     fn now(&self) -> Duration;
     /// What the watch shares with its watchdog: each check marked busy while it runs.
     fn pulse(&self) -> &Pulse;
+    /// What the watch shares with the other watches, to pair a folder made just now with its
+    /// file ID leaving another place (`pairs.rs`); with none, such a folder never counts gone.
+    fn paired(&self) -> Option<&Paired> {
+        None
+    }
 }
 
 /// Why the watch ended the session.
@@ -277,11 +289,13 @@ fn keep_watching<S: Source, T: Session>(source: &mut S, guard: &impl Guard, ende
         match source.next() {
             Next::Changed(changes) => {
                 ender.overflows.set(0);
-                act(
-                    &busy(session, || guard.changed(&changes, ender)),
-                    guard,
-                    ender,
-                );
+                let paired = session.paired();
+                if let Some(paired) = paired {
+                    paired.note(session.now(), &changes.left);
+                }
+                let mut live = busy(session, || guard.changed(&changes, ender));
+                pairs::promote(&mut live, &changes.fresh_folders, paired, session);
+                act(&live, guard, ender);
             }
             Next::Overflow => overflowed(guard, ender),
             Next::Broken(error) => {
@@ -291,6 +305,26 @@ fn keep_watching<S: Source, T: Session>(source: &mut S, guard: &impl Guard, ende
                 ));
                 ender.stop(Cause::Broken);
                 while !session.pause(STOP_POLL) {}
+                return;
+            }
+            Next::Stopped => return,
+        }
+    }
+}
+
+/// A watch on a folder the agent can write that only feeds the pairing (`pairs.rs`): the
+/// agent's state and temp folders. It moves nothing and ends nothing; one that breaks or is
+/// stopped just ends, and an overflow loses what it would have noted.
+pub(crate) fn feed(mut source: impl Source, paired: &Paired, now: impl Fn() -> Duration) {
+    loop {
+        match source.next() {
+            Next::Changed(changes) => paired.note(now(), &changes.left),
+            Next::Overflow => {}
+            Next::Broken(error) => {
+                tracing::warn!(
+                    code = code(&error),
+                    "a pairing watch broke; it notes no more"
+                );
                 return;
             }
             Next::Stopped => return,
