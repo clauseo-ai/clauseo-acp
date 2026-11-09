@@ -350,9 +350,11 @@ pub(crate) fn write_atomic_with(
 
 /// Adds `bytes` to the end of the log file `path`, made if missing. When that would take it past
 /// `cap` bytes, the file is first renamed over `rotated` (one older file kept), so each file
-/// stays at or below `cap` unless `bytes` alone is bigger. Opened for each write and closed
-/// after, so runners writing the same file at once each append whole lines and none keeps it
-/// open (std opens with every share mode, so another's rename goes through).
+/// stays at or below `cap` unless `bytes` alone is bigger. When that rename fails (`rotated` a
+/// folder, or held open by a viewer that doesn't share delete), the file is emptied instead and
+/// the next rotation tries the rename again: its older lines go, logging goes on. Opened for each
+/// write and closed after, so runners writing the same file at once each append whole lines and
+/// none keeps it open (std opens with every share mode, so another's rename goes through).
 ///
 /// `path` is checked first as the run folder's other files are ([`check_owned_file`]: another
 /// owner's file taken back). What it refuses (a link or a second hard link left from before the
@@ -371,8 +373,12 @@ pub(crate) fn append_capped(path: &Path, rotated: &Path, bytes: &[u8], cap: u64)
     let adding = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
     if len > 0 && len.saturating_add(adding) > cap {
         drop(file);
-        std::fs::rename(path, rotated)?;
-        file = open()?;
+        if std::fs::rename(path, rotated).is_ok() {
+            file = open()?;
+        } else {
+            file = open()?;
+            file.set_len(0)?;
+        }
     }
     file.write_all(bytes)
 }

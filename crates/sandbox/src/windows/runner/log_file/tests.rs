@@ -2,7 +2,7 @@
 
 use std::io;
 
-use super::{LINE_MAX, LOG_FILE, LogFile, build, line_end};
+use super::{LINE_MAX, LOG_FILE, LogFile, OLD_LOG_FILE, build, line_end};
 use crate::test_support::TempDir;
 
 /// The file's text after `log` ran with the runner's subscriber writing into `temp`.
@@ -104,4 +104,21 @@ fn a_planted_link_at_the_log_is_removed_never_followed() {
         assert!(text.ends_with("a second warning\n"), "{text}");
         assert_eq!(std::fs::read_to_string(&elsewhere).unwrap(), "untouched");
     }
+}
+
+/// A rotation whose rename fails (here `runner.1.log` is a folder) empties the log and writes
+/// the line, so logging goes on within its bound; the next rotation tries the rename again.
+#[test]
+fn a_failed_rotation_keeps_logging_and_retries_next_time() {
+    use crate::windows::write::append_capped;
+
+    let temp = TempDir::new("runner-log-rotation");
+    let (log, old) = (temp.path().join(LOG_FILE), temp.dir(OLD_LOG_FILE));
+    append_capped(&log, &old, b"0123456789\n", 15).unwrap();
+    append_capped(&log, &old, b"abcdefghij\n", 15).unwrap();
+    assert_eq!(std::fs::read(&log).unwrap(), b"abcdefghij\n");
+    crate::test_support::remove_dir(&old);
+    append_capped(&log, &old, b"ABCDEFGHIJ\n", 15).unwrap();
+    assert_eq!(std::fs::read(&log).unwrap(), b"ABCDEFGHIJ\n");
+    assert_eq!(std::fs::read(&old).unwrap(), b"abcdefghij\n");
 }

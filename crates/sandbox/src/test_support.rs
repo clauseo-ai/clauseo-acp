@@ -139,7 +139,6 @@ pub(crate) fn remove(path: &Path) {
 }
 
 /// Removes the empty folder at `path`.
-#[cfg(windows)]
 pub(crate) fn remove_dir(path: &Path) {
     std::fs::remove_dir(path).unwrap();
 }
