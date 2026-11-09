@@ -60,6 +60,9 @@ pub(crate) const STETDOC_START_LIMIT: Duration = Duration::from_secs(3);
 pub(crate) struct DesktopProfile {
     profile: ClauseoProfile,
     prepend_stetdoc: bool,
+    /// `<data>/tools`, holding the `agent-browser` command, when its copy is there
+    /// ([`install_browser`]): the host's `HostConfig::with_browser_tool`.
+    browser_tool: Option<PathBuf>,
 }
 
 impl DesktopProfile {
@@ -92,11 +95,31 @@ impl DesktopProfile {
             .as_deref()
             .and_then(|program| load_stetdoc_skill(program, &paths.claude_skills()));
         let prepend = skill.is_some() && found.as_deref().is_some_and(alone_in_its_folder);
-        let (profile, refused) = ClauseoProfile::new(paths, None).with_builtin_skills(skill);
+        let browser_tool = install_browser(&paths, path);
+        // The browser's skill only when a Chrome is there at start: without one, no session
+        // gets the browser (the host says so per session) and the skill would name a command
+        // no agent has on its `PATH`.
+        let chrome = browser_tool.is_some()
+            && clauseo_host::browser::chrome::find(
+                &clauseo_host::browser::chrome::ChromeRoots::system(locations.data_dir()),
+            )
+            .is_some();
+        let (profile, refused) = ClauseoProfile::new(paths, None).with_tool_skills(skill, chrome);
         for err in refused {
             tracing::warn!(%err, "a skill is left out of the profile");
         }
-        Ok(Self::new(profile, prepend))
+        Ok(Self::new(profile, prepend).with_browser_tool(browser_tool))
+    }
+
+    /// The same hook with `folder` as the shell browser's folder (none: no shell browser).
+    pub(crate) fn with_browser_tool(mut self, folder: Option<PathBuf>) -> Self {
+        self.browser_tool = folder;
+        self
+    }
+
+    /// The folder for `HostConfig::with_browser_tool`, when the `agent-browser` copy is there.
+    pub(crate) fn browser_tool(&self) -> Option<&Path> {
+        self.browser_tool.as_deref()
     }
 
     /// The hook over `profile`, built and rendered already; `prepend_stetdoc` says whether
@@ -105,6 +128,7 @@ impl DesktopProfile {
         Self {
             profile,
             prepend_stetdoc,
+            browser_tool: None,
         }
     }
 
@@ -115,6 +139,42 @@ impl DesktopProfile {
             return None;
         }
         self.profile.path_prepend().map(Path::to_path_buf)
+    }
+}
+
+/// The `agent-browser` command for the agents: the bundled sidecar (`<exe dir>/clauseo-agent-
+/// browser`), or in a debug build with no sidecar the first `agent-browser` on `path`, copied
+/// into `<data>/tools` (`clauseo_profile::tools`, only when its SHA-256 changed). Returns the
+/// folder, or none, with a log line, when there is no program to copy or the copy failed: then
+/// no session gets the browser, its skill or its instructions, and the app runs on.
+fn install_browser(paths: &ProfilePaths, path: Option<&OsStr>) -> Option<PathBuf> {
+    let Some(source) = browser_program(paths, path) else {
+        tracing::info!("no agent-browser program: the agents get no browser");
+        return None;
+    };
+    match clauseo_profile::tools::install_agent_browser(&source, paths) {
+        Ok((_, wrote)) => {
+            tracing::debug!(wrote, "the agents' agent-browser command is in place");
+            Some(paths.tools().to_path_buf())
+        }
+        Err(err) => {
+            tracing::warn!(%err, "agent-browser was not copied for the agents: they get no browser");
+            None
+        }
+    }
+}
+
+/// The agent-browser program to copy: the bundled sidecar when it is there; else, in a debug
+/// build, the first `agent-browser` on `path` (as stetdoc's debug fallback); else none.
+fn browser_program(paths: &ProfilePaths, path: Option<&OsStr>) -> Option<PathBuf> {
+    let sidecar = &paths.browser().agent_browser;
+    if is_program(sidecar) {
+        return Some(sidecar.clone());
+    }
+    if cfg!(debug_assertions) {
+        first_on_path(clauseo_profile::paths::AGENT_BROWSER_COMMAND, path?)
+    } else {
+        None
     }
 }
 
@@ -368,7 +428,9 @@ impl ProfileHook for DesktopProfile {
 }
 
 /// `config` with setup's hook (`setup/hook.rs`: the key and plan variables) over the launch
-/// profile, and stetdoc's folder first on the agents' `PATH` when stetdoc was found; with no
+/// profile, stetdoc's folder first on the agents' `PATH` when stetdoc was found, and the shell
+/// browser's folder when its copy is there (the host puts it on a session's `PATH` only when
+/// that session has the browser); with no
 /// profile (it could not be built) the hook adds only setup's variables.
 pub(crate) fn with_profile(
     config: HostConfig,
@@ -380,6 +442,14 @@ pub(crate) fn with_profile(
     };
     let config = match profile.path_prepend().and_then(absolute_folder) {
         Some(folder) => config.with_agent_path_prepend(folder),
+        None => config,
+    };
+    let config = match profile
+        .browser_tool()
+        .map(Path::to_path_buf)
+        .and_then(absolute_folder)
+    {
+        Some(folder) => config.with_browser_tool(folder),
         None => config,
     };
     config.with_profile_hook(Box::new(hook.over(Box::new(profile))))
