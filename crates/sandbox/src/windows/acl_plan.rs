@@ -480,9 +480,8 @@ pub fn plan(
             });
         }
     }
-    let own_subjects = assigned_subjects(&assigned, matter);
     let mut admitted_plan = AdmittedPlan::new(matter, owners, plan.grants, assigned);
-    admitted_plan.owned = owned::owned_roots(policy, admitted.data_dir(), &own_subjects);
+    admitted_plan.owned = owned::owned_roots(policy, admitted.data_dir());
     Ok(admitted_plan)
 }
 
@@ -583,9 +582,7 @@ pub(in crate::windows) use verbatim::verbatim;
 mod owned;
 pub(super) mod targets;
 
-#[cfg(windows)]
-pub(crate) use owned::FULL_ACCESS;
-pub use owned::{OwnedKind, OwnedRoot, owned_sddl};
+pub use owned::{FixedEntry, OwnedKind, OwnedRoot, owned_sddl};
 
 use targets::check_target;
 #[cfg(test)]

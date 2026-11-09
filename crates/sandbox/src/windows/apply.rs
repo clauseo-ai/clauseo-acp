@@ -18,7 +18,8 @@
 //!    refuses, as [`ApplyFailure::PoolOwned`] (`roots.rs`, S15 `PR4h`). A read-only target a
 //!    pool user owns is handed back just before its deny is written (step 4, S15 `PR4a2`).
 //!    Then each folder Clauseo owns for the launch gets its protected DACL, nothing inherited
-//!    (`owned.rs`), and one that changed has its tree walked in step 5.
+//!    (`owned.rs`); one that changed gets an owner pass and a walk in step 5, and the data
+//!    folder's other contents a walk of their own.
 //! 4. Every grant is recorded `pending` ([`Ledger::record_pending`]). Each new Low label entry
 //!    first records the explicit label its path has now, so it can be put back, unless that
 //!    label is our own: the one this grant writes, or the one another entry for the same file
@@ -236,12 +237,12 @@ fn run_plan(
     plan.retain_existing(exists);
     check_credentials(plan, acl, &*around)?;
     roots::hand_back_roots(plan, ledger, acl, pool)?;
-    let owned_walks = owned::protect_owned(plan, acl, pool)?;
+    let owned = owned::protect_owned(plan, ledger, acl, pool)?;
     ledger
         .record_pending(plan)
         .map_err(|e| refused(PathKind::Matter, ApplyFailure::Ledger(e.kind())))?;
     let mut run = Run::default();
-    match write_all(ledger, plan, acl, around, (own, &owned_walks), &mut run) {
+    match write_all(ledger, plan, acl, around, (own, &owned), &mut run) {
         Ok(()) => Ok(run),
         Err(mut refused) => {
             refused.at = refused.at.or_else(|| acl.refused_at());
@@ -313,7 +314,7 @@ fn write_all(
     plan: &AdmittedPlan,
     acl: &mut dyn AclWriter,
     around: &mut dyn Surroundings,
-    (own_walks, owned_walks): (&OwnWalks, &[Walk]),
+    (own_walks, owned): (&OwnWalks, &owned::OwnedWork),
     run: &mut Run,
 ) -> Result<(), Refused> {
     let grants = plan.grants();
@@ -404,8 +405,15 @@ fn write_all(
         })?;
         run.walked.add(seen);
     }
+    // The owned roots protected just now: what a pool user made there goes to the lawyer.
+    for (root, kind, pool) in &owned.passes {
+        let seen = clearing(acl, around, &own, *kind, |acl| {
+            acl.hand_back_tree(root, pool)
+        })?;
+        run.walked.add(seen);
+    }
     let mut extra = extra.to_vec();
-    extra.extend(owned_walks.iter().cloned());
+    extra.extend(owned.walks.iter().cloned());
     for walk in walks(plan, unwalked, all_own, &extra) {
         let Walk {
             root,
@@ -418,6 +426,9 @@ fn write_all(
             acl.propagate(root, *reach, strict.as_ref())
         })?;
         run.walked.add(seen);
+    }
+    if let Some(data) = &owned.data {
+        run.walked.add(owned::walk_data(acl, data, &strict.pool));
     }
     ledger
         .mark_walked(plan.entries())

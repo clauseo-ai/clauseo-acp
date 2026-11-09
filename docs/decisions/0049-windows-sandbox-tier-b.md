@@ -824,13 +824,26 @@ inheritance. A file planted in another session's state (its agent's settings) co
 - the data folder, its `agent-state` and `run` folders: full access (`OICI`) for `SYSTEM`,
   `Administrators` and the desktop user, as the sandbox folder has it;
 - `agent-state\<matter>` and `run\<session>`: `SYSTEM` and the desktop user;
-- the state, notes and temp folders: the same two, then the plan's own entries as before (the
-  pool user's `Modify`, the other pool users' fence, the Low label).
+- the state, notes and temp folders: the same two, an inherit-only `OWNER RIGHTS` allow of
+  `Modify` (`(A;OICIIO;0x1301bf;;;OW)`: the agent owns what it makes but gets no `WRITE_DAC` on
+  it, so it can't open its files to another matter's agent), then the plan's own entries as
+  before (the pool user's `Modify`, the other pool users' fence, the Low label).
 
-No `Users`, `Authenticated Users`, `Everyone` or `CREATOR OWNER`; what the agent makes inherits
+Every explicit allow the ledger records on the folder for a launch stays, with its recorded mask,
+so another live session of the matter keeps its access; any other explicit entry goes. No
+`Users`, `Authenticated Users`, `Everyone` or `CREATOR OWNER`; what the agent makes inherits
 these alone. Each is written after the roots' hand-back (a pool user's goes to the lawyer first)
-and before anything is recorded; it is never rolled back. A root whose DACL changed has its tree
-walked, the data folder and its shared folders excepted (each session's launch walks its own).
+and before anything is recorded; it is never rolled back.
+
+A folder whose DACL changed, but `agent-state` and `run` (each session's launch does its own),
+then gets an owner pass and a walk: what a pool user made in it before (a file or a junction in a
+run folder another matter's agent made first) goes to the lawyer, a junction as itself, never
+followed, and what is in it loses what it inherited from above. In the state, notes and matter
+folders the matter's own agent keeps its items. The data folder's other contents (`agents`,
+with Clauseo's Claude sign-in, walked strictly; the host's files) are walked once: when the data
+folder's DACL changes, and at each launch until one walk has passed (`sandbox\owned-walked`). A
+refused data walk is logged and the launch goes on. A data folder that is a volume's root or holds
+the profile is never protected or walked: its DACL is Windows' or the lawyer's.
 
 The lawyer's matter folders are a separate decision, pending the VM walk: they keep what they
 inherit.

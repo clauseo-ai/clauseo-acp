@@ -259,8 +259,13 @@ impl AclWriter for NtfsAcl {
         }
     }
 
-    fn protect(&mut self, root: &OwnedRoot, pool: &[Sid]) -> Result<Added, ApplyFailure> {
-        owned::protect(root, pool)
+    fn protect(
+        &mut self,
+        root: &OwnedRoot,
+        pool: &[Sid],
+        keep: &[Grant],
+    ) -> Result<Added, ApplyFailure> {
+        owned::protect(root, pool, keep)
     }
 
     fn strip_taken(

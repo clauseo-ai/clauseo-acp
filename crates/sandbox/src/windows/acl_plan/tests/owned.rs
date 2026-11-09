@@ -58,6 +58,7 @@ fn a_sessions_owned_roots_get_protected_dacls_naming_no_broad_group() {
     let admins = "D:PAI(A;OICI;FA;;;S-1-5-18)(A;OICI;FA;;;S-1-5-32-544)(A;OICI;FA;;;lawyer)";
     let bare = "D:PAI(A;OICI;FA;;;S-1-5-18)(A;OICI;FA;;;lawyer)";
     let fence = "(D;OICI;0xf01ff;;;other1)(D;OICI;0xf01ff;;;other2)";
+    let ow = "(A;OICIIO;0x1301bf;;;S-1-3-4)";
     let own = "(A;OICI;0x1301bf;;;pool)S:(ML;OICI;NW;;;LW)";
     let want = [
         (
@@ -84,17 +85,17 @@ fn a_sessions_owned_roots_get_protected_dacls_naming_no_broad_group() {
         (
             OwnedKind::State,
             format!("{m}/claude"),
-            format!("D:PAI{fence}(A;OICI;FA;;;S-1-5-18)(A;OICI;FA;;;lawyer){own}"),
+            format!("D:PAI{fence}(A;OICI;FA;;;S-1-5-18)(A;OICI;FA;;;lawyer){ow}{own}"),
         ),
         (
             OwnedKind::Notes,
             format!("{m}/notes"),
-            format!("D:PAI{fence}(A;OICI;FA;;;S-1-5-18)(A;OICI;FA;;;lawyer){own}"),
+            format!("D:PAI{fence}(A;OICI;FA;;;S-1-5-18)(A;OICI;FA;;;lawyer){ow}{own}"),
         ),
         (
             OwnedKind::TempFolder,
             "<root>/data/run/s1/tmp".to_owned(),
-            format!("{bare}{own}"),
+            format!("{bare}{ow}{own}"),
         ),
     ];
     let got = owned(&w, &plan);
@@ -115,33 +116,54 @@ fn the_matter_sid_keeps_its_allow_on_the_launch_folders_only() {
         ..sids()
     };
     let plan = session_plan(&w, &subjects);
-    for root in plan.owned_roots() {
+    for (kind, path, sddl) in owned(&w, &plan) {
         let own = matches!(
-            root.kind(),
+            kind,
             OwnedKind::State | OwnedKind::Notes | OwnedKind::TempFolder
         );
-        let want: Vec<&str> = if own {
-            vec![USER_SID, MATTER_SID]
-        } else {
-            Vec::new()
-        };
-        let got: Vec<&str> = root.allow().iter().map(Sid::as_str).collect();
-        assert_eq!(got, want, "{:?}", root.kind());
+        let has = sddl.contains("(A;OICI;0x1301bf;;;matter)");
+        assert_eq!(has, own, "{path}: {sddl}");
+        assert_eq!(sddl.contains(";;;S-1-3-4)"), own, "{path}: OWNER RIGHTS");
     }
-    let tmp = plan
-        .owned_roots()
-        .iter()
-        .find(|r| r.kind() == OwnedKind::TempFolder)
+}
+
+/// The data folder itself is owned only when it has a name of its own and doesn't hold the
+/// profile: a volume's root and a profile folder keep the DACLs Windows and the lawyer gave
+/// them, on purpose (the review's L2).
+#[test]
+fn a_data_folder_that_is_a_volumes_root_or_holds_the_profile_is_skipped_on_purpose() {
+    let w = World::new("plan-owned-skip");
+    let volume = if cfg!(windows) {
+        Path::new(r"C:\")
+    } else {
+        Path::new("/")
+    };
+    let elsewhere = Policy::builder(w.at("matter"), w.at(STATE))
+        .home(w.at("home"))
+        .build()
         .unwrap();
-    let sddl = owned(&w, &plan)
-        .into_iter()
-        .find(|(kind, _, _)| *kind == OwnedKind::TempFolder)
-        .unwrap()
-        .2;
-    assert!(
-        sddl.contains("(A;OICI;0x1301bf;;;matter)"),
-        "{sddl} {tmp:?}"
-    );
+    let kinds = |policy: &Policy, data: &Path| -> Vec<OwnedKind> {
+        crate::windows::acl_plan::owned::owned_roots(policy, data)
+            .iter()
+            .map(OwnedRoot::kind)
+            .collect()
+    };
+    assert!(!kinds(&elsewhere, volume).contains(&OwnedKind::DataRoot));
+    // The profile inside the data folder, or the data folder the profile itself.
+    let data = w.canonical("data");
+    for home in [data.join("home"), data.clone()] {
+        let policy = Policy::builder(w.at("matter"), w.at(STATE))
+            .home(home.clone())
+            .build()
+            .unwrap();
+        let got = kinds(&policy, &data);
+        assert!(!got.contains(&OwnedKind::DataRoot), "{home:?}: {got:?}");
+        assert!(
+            got.contains(&OwnedKind::State),
+            "{home:?}: the state folder still is"
+        );
+    }
+    assert!(kinds(&elsewhere, &data).contains(&OwnedKind::DataRoot));
 }
 
 #[test]

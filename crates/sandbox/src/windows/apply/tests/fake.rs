@@ -89,6 +89,8 @@ pub(super) struct FakeAcl {
     /// stay; and what a protect reports (`AlreadyThere` when `None`).
     pub(super) protected: Vec<(PathBuf, Vec<Sid>)>,
     pub(super) protect_gives: Option<Added>,
+    /// The allows each protect was told to keep, in order.
+    pub(super) kept: Vec<(PathBuf, Vec<Grant>)>,
     /// A protect of this root fails, as one the lawyer may not change would.
     pub(super) fail_protect: Option<PathBuf>,
 }
@@ -325,7 +327,13 @@ impl AclWriter for FakeAcl {
         Ok(Walked::default())
     }
 
-    fn protect(&mut self, root: &OwnedRoot, pool: &[Sid]) -> Result<Added, ApplyFailure> {
+    fn protect(
+        &mut self,
+        root: &OwnedRoot,
+        pool: &[Sid],
+        keep: &[Grant],
+    ) -> Result<Added, ApplyFailure> {
+        self.kept.push((root.path().to_owned(), keep.to_vec()));
         if self.fail_protect.as_deref() == Some(root.path()) {
             return Err(ApplyFailure::Io(io::ErrorKind::PermissionDenied));
         }

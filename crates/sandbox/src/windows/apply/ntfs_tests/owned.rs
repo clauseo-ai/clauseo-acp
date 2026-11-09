@@ -7,9 +7,10 @@
 use std::path::{Path, PathBuf};
 
 use super::Around;
+use crate::windows::acl::owner;
 use crate::windows::acl_bytes::{Acl, Descriptor, INHERITED, flags, kind, mask, sid, sid_text};
 use crate::windows::acl_plan::{
-    AdmittedPlan, Inherit, LOW_LABEL_SID, OwnedKind, Rights, Sid, owned_sddl, plan,
+    AdmittedPlan, Inherit, LOW_LABEL_SID, OwnedKind, Rights, Sid, Subjects, owned_sddl, plan,
 };
 use crate::windows::admit::admit_with;
 use crate::windows::apply::apply;
@@ -18,9 +19,10 @@ use crate::windows::ledger::{Ledger, ledger_path};
 use crate::windows::record::current_user_sid;
 use crate::windows::test_acl::{elevated_tests_enabled, entries, grant, has, protected};
 use crate::windows::test_dacl::{protect_with, sddl_bytes};
-use crate::windows::test_pool::{Impersonating, TestUser, low_restricted_token};
+use crate::windows::test_junction::junction;
+use crate::windows::test_pool::{Impersonating, TestUser, log_on, low_restricted_token};
 use crate::windows::test_world::{
-    FakeFolders, NOTES, STATE, World, matter_one, reserved, sids, trusted,
+    FakeFolders, NOTES, OTHER_POOL_SIDS, STATE, World, matter_one, reserved, sids, trusted,
 };
 use crate::windows::writer::AclWriter as _;
 use crate::windows::{FolderSupport, NtfsAcl};
@@ -65,6 +67,11 @@ fn session(test: &str) -> (World, AdmittedPlan) {
 
 /// Matter one's plan for `w`, with notes and the session's temp folder.
 fn session_plan(w: &World) -> AdmittedPlan {
+    session_plan_for(w, &sids())
+}
+
+/// [`session_plan`] with `subjects`.
+fn session_plan_for(w: &World, subjects: &Subjects) -> AdmittedPlan {
     let policy = w
         .builder()
         .notes(w.at(NOTES))
@@ -74,7 +81,7 @@ fn session_plan(w: &World) -> AdmittedPlan {
     let ok = |_: &Path| Ok(FolderSupport::Ok);
     let none = FakeFolders::default();
     let admitted = admit_with(&policy, &w.at("data"), &Neighbours::default(), ok, &none).unwrap();
-    plan(&admitted, &sids(), matter_one()).unwrap()
+    plan(&admitted, subjects, matter_one()).unwrap()
 }
 
 fn launch(w: &World, plan: &mut AdmittedPlan) {
@@ -155,6 +162,23 @@ fn owned_roots_are_protected_with_exactly_the_plans_entries_and_nothing_inside_i
         );
         assert_eq!(names_broad(path), None, "{path:?} {all:?}");
     }
+    // OWNER RIGHTS: what the agent makes in its own folders leaves its owner no WRITE_DAC.
+    let owner_rights = (
+        0,
+        INHERITED,
+        Rights::Modify.mask(),
+        Sid::parse("S-1-3-4").unwrap(),
+    );
+    for path in &made_after {
+        assert!(entries(path).contains(&owner_rights), "{path:?}");
+    }
+    // The data folder's other contents, there before the launch, are walked once: the Claude
+    // sign-in folder and the host's `updates` keep no Users entry.
+    for rel in ["data/agents/claude-acp/home", "data/updates"] {
+        let path = w.canonical(rel);
+        assert_eq!(names_broad(&path), None, "{rel}: {:?}", entries(&path));
+    }
+    assert!(w.at("data/sandbox/owned-walked").exists());
     // A second launch finds every root as it left it and writes none again.
     let before_again: Vec<Vec<u8>> = roots
         .iter()
@@ -219,4 +243,62 @@ fn elevated_another_pool_users_low_token_plants_nothing_in_the_owned_folders() {
     for (folder, got) in folders.iter().zip(&made) {
         assert_eq!(got, &[Err(5), Err(5)], "must refuse: {folder:?}");
     }
+}
+
+/// Makes `folder`, a file in it and a junction in it to `target`, as the impersonated token.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test makes a run folder as another matter's agent would, before Clauseo does"
+)]
+fn plant(folder: &Path, target: &Path) {
+    std::fs::create_dir(folder).unwrap();
+    std::fs::write(folder.join("planted.json"), b"{}").unwrap();
+    junction(&folder.join("j"), target).unwrap();
+}
+
+/// The review's L1: another matter's agent makes the session's run folder first, with a file
+/// and a junction in it. The launch hands the folder, the file and the junction itself (never
+/// what it names) to the lawyer, so that agent keeps no `WRITE_DAC` on any of them.
+#[test]
+#[ignore = "elevated: run by CI's elevated step with CLAUSEO_ELEVATED_TESTS=1"]
+fn elevated_a_run_folder_another_agent_made_first_goes_to_the_lawyer_with_what_it_planted() {
+    if !elevated_tests_enabled() {
+        return;
+    }
+    let w = World::new("elevated-owned-planted");
+    protect_with(w.dir.path(), LIKE_C_ROOT).unwrap();
+    w.dir.dir("data/run");
+    let elsewhere = w.canonical("elsewhere");
+    let before = crate::windows::acl::descriptor(&elsewhere).unwrap();
+    let user = TestUser::new();
+    let run = w.at(RUN);
+    {
+        let _as_agent = Impersonating::start(&log_on(&user));
+        plant(&run, &elsewhere);
+    }
+    let run = w.canonical(RUN);
+    let (planted, link) = (run.join("planted.json"), run.join("j"));
+    for path in [&run, &planted, &link] {
+        assert_eq!(owner(path).unwrap(), user.sid, "{path:?} made by the agent");
+    }
+    w.dir.dir(&format!("{RUN}/tmp"));
+    let mut others: Vec<Sid> = OTHER_POOL_SIDS
+        .iter()
+        .map(|s| Sid::parse(s).unwrap())
+        .collect();
+    others.push(user.sid.clone());
+    let subjects = Subjects {
+        other_pool_users: others,
+        ..sids()
+    };
+    let mut plan = session_plan_for(&w, &subjects);
+    launch(&w, &mut plan);
+    let me = current_user_sid().unwrap();
+    for path in [&run, &planted, &link] {
+        assert_eq!(owner(path).unwrap(), me, "{path:?} handed to the lawyer");
+        assert_eq!(names_broad(path), None, "{path:?}");
+    }
+    assert!(protected(&run));
+    let after = crate::windows::acl::descriptor(&elsewhere).unwrap();
+    assert_eq!(after, before, "what the junction names is never touched");
 }
