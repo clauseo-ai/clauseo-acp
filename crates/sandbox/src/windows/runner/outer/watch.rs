@@ -171,7 +171,8 @@ fn start(
 /// agent's state folder, and on its temp folder when that isn't inside the state folder. A
 /// folder that can't be watched or gets only the plain records (no file IDs), a thread that
 /// can't start or one that panics never refuses the launch, since the matter stays watched, but
-/// fails closed: the pairing is lost for the session (`Pairs::lose_for_good`), so every folder made just now and gone counts.
+/// fails closed: the pairing is lost for the session (`Pairs::lose_for_good`), so every folder
+/// made just now and gone counts.
 fn pairing(
     message: &LaunchMessage,
     stop: &Arc<Stop>,
