@@ -393,45 +393,46 @@ pub fn write_launch(data_dir: &Path, message: &LaunchMessage) -> std::io::Result
 }
 
 /// The runner's own failures, as its exit code (`RUN_EXIT_BASE + n`). Appended, never
-/// renumbered: the host reads them.
+/// renumbered: the host reads them. Each value is explicit, so a reserved one can be skipped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
 pub enum RunExit {
     /// The command line isn't `--launch <file>`, `--inner <base>` or `--sweep`.
-    Usage,
+    Usage = 0x00,
     /// The launch file is missing, isn't the desktop user's alone, or breaks a rule.
-    BadLaunch,
+    BadLaunch = 0x01,
     /// `secrets.bin` has no password for the pool user: set-up must run again.
-    NoSecret,
+    NoSecret = 0x02,
     /// The Secondary Logon service is disabled (1058).
-    SecondaryLogon,
+    SecondaryLogon = 0x03,
     /// "Allow log on locally" doesn't include the pool user (1385).
-    LogonRight,
+    LogonRight = 0x04,
     /// The pool user's password was refused (1326): set-up must run again.
-    Password,
+    Password = 0x05,
     /// Another logon failure, or what the outer needs before its logon failed to be read: the
     /// pool user's secret, System32's path. A marker that can't be written is
     /// [`RunExit::MarkerUnwritable`].
-    Logon,
+    Logon = 0x06,
     /// M3: the launch would reuse the lawyer's `~\.codex`.
-    CodexReuse,
+    CodexReuse = 0x07,
     /// A runner pipe couldn't be made, connected or checked.
-    Pipe,
+    Pipe = 0x08,
     /// The inner runner couldn't be put in the job, or the job made.
-    Job,
+    Job = 0x09,
     /// The inner runner's token, desktop or folders couldn't be made.
-    Token,
+    Token = 0x0A,
     /// The agent couldn't be started.
-    Spawn,
+    Spawn = 0x0B,
     /// The agent exited with a code in the runner's own range, which the outer runner never
     /// passes on as it is ([`RUN_EXIT_BASE`] to `+0xff`).
-    AgentReserved,
+    AgentReserved = 0x0C,
     /// The inner runner's first-act sweep of the pool user's processes failed (`sweep.rs`): the
     /// process list couldn't be read, or a process of the pool user's couldn't be checked, or it
     /// kept starting processes. Also the end sweeper's exit code when anything it did failed but
     /// for an escapee. A process that couldn't be opened or ended is [`RunExit::Escapee`].
-    Sweep,
+    Sweep = 0x0D,
     /// The runner's DLL search couldn't be kept to System32.
-    DllSearch,
+    DllSearch = 0x0E,
     /// A sweep found a process of the pool user's it couldn't end, even after the owner's
     /// `WRITE_DAC` reopen: one that shut its DACL to its own user, alive outside every job (M2).
     /// The inner's first act exits with it and starts no agent; the end sweeper exits with it.
@@ -440,21 +441,22 @@ pub enum RunExit {
     /// outer still waits for it). It wins over the agent's own code, even 0, which the outer then
     /// says on stderr: the run's output came through, but the pool user has a process no sweep of
     /// its own can end, and only the host can act on that (0049).
-    Escapee,
+    Escapee = 0x0F,
     /// Reserved, no longer produced. The end sweeper once exited with it when everything went
     /// but BITS jobs of the pool user's it couldn't cancel (1245). It makes no BITS call now
     /// (`leftovers.rs`), and the outer takes this code as any failed sweeper's. Kept, with its
     /// number, since the codes are explicit and may be read downstream.
-    PoolStop,
+    PoolStop = 0x10,
     /// The session's unclean-session marker couldn't be written, or the launch file's name gives
     /// it no id (`marker::marked`): the outer refuses the launch before any logon, so no session
     /// runs that no marker names.
-    MarkerUnwritable,
+    MarkerUnwritable = 0x11,
     /// The pool user's `HKCU` wouldn't take the Windows Error Reporting setting, or read it back
     /// wrong, or its key is a registry link (`wer_flow.rs`): the pool user's hive is broken or was
     /// changed, which a retry doesn't fix. A set-up fault, as a lost password is: the inner
     /// refuses the launch before the agent starts.
-    PoolProfile,
+    // Reserved as 0x17 (#809's table): 0x12 to 0x16 belong to other open changes.
+    PoolProfile = 0x17,
 }
 
 impl RunExit {
@@ -482,17 +484,12 @@ impl RunExit {
 
     /// The exit code.
     pub fn code(self) -> u32 {
-        let index = RunExit::ALL
-            .iter()
-            .position(|exit| *exit == self)
-            .unwrap_or(0);
-        RUN_EXIT_BASE + u32::try_from(index).unwrap_or(0)
+        RUN_EXIT_BASE + self as u32
     }
 
     /// The failure an exit code names, if it is one.
     pub fn from_code(code: u32) -> Option<RunExit> {
-        let index = usize::try_from(code.checked_sub(RUN_EXIT_BASE)?).ok()?;
-        RunExit::ALL.get(index).copied()
+        RunExit::ALL.into_iter().find(|exit| exit.code() == code)
     }
 
     /// What tier detection makes of it: the set-up's failures, which running the set-up again or

@@ -444,8 +444,16 @@ fn exit_codes_are_stable_and_map_to_set_up_causes() {
     assert_eq!(RunExit::PoolStop.no_sandbox(), None);
     assert_eq!(RunExit::MarkerUnwritable.code(), 0xE0C1_5011);
     assert_eq!(RunExit::MarkerUnwritable.no_sandbox(), None);
-    assert_eq!(RunExit::PoolProfile.code(), 0xE0C1_5012);
-    assert_eq!(RunExit::from_code(RUN_EXIT_BASE + 19), None);
+    // Reserved, not the next free value: 0x12 to 0x16 belong to other open changes.
+    assert_eq!(RunExit::PoolProfile.code(), RUN_EXIT_BASE + 0x17);
+    for unused in 0x12..0x17 {
+        assert_eq!(RunExit::from_code(RUN_EXIT_BASE + unused), None);
+    }
+    assert_eq!(RunExit::from_code(RUN_EXIT_BASE + 0x18), None);
+    // Nothing before it moved.
+    for (index, exit) in RunExit::ALL.iter().take(18).enumerate() {
+        assert_eq!(exit.code(), RUN_EXIT_BASE + u32::try_from(index).unwrap());
+    }
     assert_eq!(RunExit::DllSearch.no_sandbox(), None);
     assert_eq!(RunExit::AgentReserved.no_sandbox(), None);
     assert_eq!(RunExit::Sweep.no_sandbox(), None);

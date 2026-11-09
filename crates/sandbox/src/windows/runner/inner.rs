@@ -15,16 +15,20 @@ use super::spawn::{Agent, Process, quiet_errors, restrict_dll_search, start_agen
 use super::sweep::os::sweep_own;
 use super::sweep::{Point, SweepError};
 use super::wer::OsRegistry;
-use super::wer_flow;
+use super::wer_flow::{self, Profile, Registry as _, Root};
 use crate::windows::acl::object::Handle;
 use crate::windows::pipe::os::{into_file, open_client};
 use crate::windows::pipe::{PipeSet, Role};
+use crate::windows::setup::logon::profile_directory;
 use crate::windows::sids::Sid;
 use crate::windows::token::TokenSpec;
 use crate::windows::token::os::{
     logon_sid, make, own_token, shut_later, shut_self, shut_token_first, user,
 };
 use crate::windows::write;
+
+/// The profiles' list, under `HKEY_LOCAL_MACHINE`: each `<SID>` key's `State`.
+const PROFILE_LIST: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList";
 
 /// The inner runner's whole run; its exit code: the agent's, or a [`RunExit`] code.
 pub fn run_inner(base: &str) -> u32 {
@@ -109,8 +113,19 @@ impl Inner for Calls {
                 "the inner runner isn't the pool user".to_owned(),
             ));
         }
-        wer_flow::quiet(&mut OsRegistry, &self.me)
-            .map_err(|error| (RunExit::PoolProfile, error.to_string()))
+        let pool_profile = |what: String| (RunExit::PoolProfile, what);
+        let state = OsRegistry
+            .read(
+                Root::Machine,
+                &format!("{}\\{}", PROFILE_LIST, self.me.as_str()),
+                "State",
+            )
+            .map_err(|code| pool_profile(format!("reading the profile's state failed ({code})")))?;
+        let path = profile_directory(self.token.0).map_err(|error| {
+            pool_profile(format!("reading the profile's folder failed: {error}"))
+        })?;
+        wer_flow::quiet(&mut OsRegistry, &self.me, &Profile { state, path })
+            .map_err(|error| pool_profile(error.to_string()))
     }
 
     fn log(&mut self, line: &str) {

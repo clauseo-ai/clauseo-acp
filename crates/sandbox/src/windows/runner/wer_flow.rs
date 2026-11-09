@@ -19,11 +19,16 @@
 //! over these values. One that keeps WER on (`Disabled` = 0) doesn't refuse the launch: it is
 //! logged, and the job's limit and the sweeps are what remain (`firm-it.md`).
 //!
+//! A temporary profile refuses too ([`quiet`]). Set-up's repair takes a key that shuts the
+//! administrators out for them before deleting it ([`Registry::take`]).
+//!
 //! Another key or value joins by a row in [`WER_SETTINGS`].
 
 use std::fmt;
+use std::path::PathBuf;
 
 use super::super::acl_bytes::{self, ALLOWED, Acl, Descriptor, INHERIT_ONLY, LABEL};
+use super::super::setup::answers::is_temporary;
 use super::super::sids::Sid;
 
 /// A key under the pool user's hive and the DWORD values set in it.
@@ -98,6 +103,17 @@ pub(crate) trait Registry {
     fn read(&mut self, root: Root, path: &str, name: &str) -> Result<Option<u32>, u32>;
     /// Deletes `key` and everything below it, never through a link.
     fn delete(&mut self, key: Self::Key) -> Result<(), u32>;
+    /// Makes `name` under `parent` (opened as itself, a link too) the administrators' with full
+    /// control, through `SeTakeOwnershipPrivilege` held only for the call: set-up's repair of a
+    /// key that shuts the administrators out.
+    fn take(&mut self, parent: &Self::Key, name: &str) -> Result<(), u32>;
+}
+
+/// The pool user's profile as this logon has it: its `ProfileList` `State` and its folder.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Profile {
+    pub(crate) state: Option<u32>,
+    pub(crate) path: PathBuf,
 }
 
 /// Why WER couldn't be turned off, or the pool hive repaired.
@@ -108,6 +124,9 @@ pub(crate) enum WerError {
     },
     NotLoaded {
         sid: String,
+    },
+    Temporary {
+        path: String,
     },
     Open {
         part: &'static str,
@@ -142,6 +161,10 @@ pub(crate) enum WerError {
         part: &'static str,
         code: u32,
     },
+    Take {
+        part: &'static str,
+        code: u32,
+    },
 }
 
 impl fmt::Display for WerError {
@@ -150,6 +173,12 @@ impl fmt::Display for WerError {
         match self {
             WerError::NotAUser { sid } => write!(f, "{sid} isn't a user account"),
             WerError::NotLoaded { sid } => write!(f, "the hive of {sid} isn't loaded"),
+            WerError::Temporary { path } => {
+                write!(
+                    f,
+                    "Windows gave the sandbox user a temporary profile ({path})"
+                )
+            }
             WerError::Open { part, code } => write!(f, "opening {part} ({code})"),
             WerError::LinkCheck { part, code } => write!(f, "checking {part} for a link ({code})"),
             WerError::Link { part } => write!(f, "{part} is a registry link"),
@@ -162,13 +191,26 @@ impl fmt::Display for WerError {
                 None => write!(f, "{name} reads back as missing"),
             },
             WerError::Delete { part, code } => write!(f, "deleting {part} ({code})"),
+            WerError::Take { part, code } => {
+                write!(f, "taking {part} for the administrators ({code})")
+            }
         }
     }
 }
 
 /// Sets every value of [`WER_SETTINGS`] in `pool`'s hive and reads each back; the lines to log
-/// (a policy keeping WER on).
-pub(crate) fn quiet<R: Registry>(registry: &mut R, pool: &Sid) -> Result<Vec<String>, WerError> {
+/// (a policy keeping WER on). A temporary `profile` refuses: Windows throws its hive away at
+/// logoff, so another logon of the pool user (the end sweeper's) may get one without the values.
+pub(crate) fn quiet<R: Registry>(
+    registry: &mut R,
+    pool: &Sid,
+    profile: &Profile,
+) -> Result<Vec<String>, WerError> {
+    if is_temporary(profile.state, &profile.path) {
+        return Err(WerError::Temporary {
+            path: profile.path.display().to_string(),
+        });
+    }
     for setting in &WER_SETTINGS {
         apply(registry, pool, setting)?;
     }
@@ -247,10 +289,7 @@ pub(crate) fn repair_one<R: Registry>(
     };
     let last = setting.path.len().saturating_sub(1);
     for (at, &part) in setting.path.iter().enumerate() {
-        let Some(key) = registry
-            .open(Some(&parent), part, How::Delete)
-            .map_err(|code| WerError::Open { part, code })?
-        else {
+        let Some(key) = open_for_delete(registry, &parent, part)? else {
             return Ok(false);
         };
         let link = registry
@@ -272,6 +311,29 @@ pub(crate) fn repair_one<R: Registry>(
     }
     Ok(false)
 }
+
+/// Opens `part` under `parent` to delete it. One that shuts the administrators out (5) is taken
+/// for them first ([`Registry::take`]) and opened again.
+fn open_for_delete<R: Registry>(
+    registry: &mut R,
+    parent: &R::Key,
+    part: &'static str,
+) -> Result<Option<R::Key>, WerError> {
+    match registry.open(Some(parent), part, How::Delete) {
+        Err(ACCESS_DENIED) => {
+            registry
+                .take(parent, part)
+                .map_err(|code| WerError::Take { part, code })?;
+            registry
+                .open(Some(parent), part, How::Delete)
+                .map_err(|code| WerError::Open { part, code })
+        }
+        opened => opened.map_err(|code| WerError::Open { part, code }),
+    }
+}
+
+/// `ERROR_ACCESS_DENIED`.
+pub(crate) const ACCESS_DENIED: u32 = 5;
 
 /// The pool user's SID as a hive name, refused unless it is a user account's (never
 /// `.DEFAULT` or a service's).

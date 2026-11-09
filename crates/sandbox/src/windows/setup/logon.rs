@@ -96,8 +96,9 @@ pub fn log_on_once(name: &str, password: &Password) -> Result<ProfileDir, Machin
     Ok(ProfileDir { path, temporary })
 }
 
-/// The profile folder of `token`'s user (`GetUserProfileDirectoryW`).
-fn profile_directory(token: HANDLE) -> Result<PathBuf, MachineError> {
+/// The profile folder of `token`'s user (`GetUserProfileDirectoryW`); also the inner runner's
+/// check that its own profile isn't temporary (`runner/wer_flow.rs`).
+pub(crate) fn profile_directory(token: HANDLE) -> Result<PathBuf, MachineError> {
     let mut size = 0u32;
     // SAFETY: no buffer asks only for the size, written to `size`.
     match unsafe { GetUserProfileDirectoryW(token, None, &raw mut size) } {

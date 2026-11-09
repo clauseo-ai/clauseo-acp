@@ -4,6 +4,7 @@
 //! set-up's repair deleting a link or an unsafe key. The security checks read fake descriptors.
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use super::super::super::acl_bytes::{AceSpec, DENIED, build_descriptor, empty_acl, sid_bytes};
 use super::*;
@@ -13,6 +14,14 @@ const KEY: &str = r"S-1-5-21-1-2-3-1001\Software\Microsoft\Windows\Windows Error
 
 fn pool() -> Sid {
     Sid::parse(POOL).unwrap()
+}
+
+/// The pool user's own profile, not temporary.
+fn home() -> Profile {
+    Profile {
+        state: Some(0),
+        path: PathBuf::from(r"C:\Users\ClauseoSb01"),
+    }
 }
 
 fn ace(kind: u8, flags: u8, mask: u32, sid: &str) -> AceSpec {
@@ -55,6 +64,8 @@ fn safe() -> Vec<u8> {
 #[derive(Default, Clone)]
 struct Node {
     link: bool,
+    /// Its DACL shuts the administrators out: a delete open is refused (5) until taken.
+    deny_admins: bool,
     values: BTreeMap<String, u32>,
     security: Vec<u8>,
 }
@@ -71,6 +82,7 @@ struct Fake {
     /// Plain reads (as WER reads) of this value find nothing.
     plain_missing: Option<&'static str>,
     deleted: Vec<String>,
+    taken: Vec<String>,
 }
 
 impl Fake {
@@ -103,6 +115,9 @@ impl Registry for Fake {
                     ..Node::default()
                 },
             );
+        }
+        if how == How::Delete && self.keys[&path].deny_admins {
+            return Err(ACCESS_DENIED);
         }
         Ok(Some(path))
     }
@@ -147,6 +162,14 @@ impl Registry for Fake {
         self.deleted.push(key);
         Ok(())
     }
+    fn take(&mut self, parent: &String, name: &str) -> Result<(), u32> {
+        let path = format!("{parent}\\{name}");
+        let node = self.keys.get_mut(&path).ok_or(2u32)?;
+        node.deny_admins = false;
+        node.security = safe();
+        self.taken.push(path);
+        Ok(())
+    }
 }
 
 const VALUES: [(&str, u32); 4] = [
@@ -167,15 +190,15 @@ fn values(fake: &Fake) -> Vec<(&str, u32)> {
 #[test]
 fn the_pool_hives_wer_key_gets_all_four_values() {
     let mut fake = Fake::loaded();
-    assert_eq!(quiet(&mut fake, &pool()), Ok(vec![]));
+    assert_eq!(quiet(&mut fake, &pool(), &home()), Ok(vec![]));
     assert_eq!(values(&fake), VALUES);
 }
 
 #[test]
 fn setting_the_values_again_changes_nothing() {
     let mut fake = Fake::loaded();
-    quiet(&mut fake, &pool()).unwrap();
-    quiet(&mut fake, &pool()).unwrap();
+    quiet(&mut fake, &pool(), &home()).unwrap();
+    quiet(&mut fake, &pool(), &home()).unwrap();
     assert_eq!(values(&fake), VALUES);
 }
 
@@ -183,7 +206,7 @@ fn setting_the_values_again_changes_nothing() {
 fn a_hive_that_isnt_loaded_refuses_and_nothing_is_made() {
     let mut fake = Fake::default();
     assert_eq!(
-        quiet(&mut fake, &pool()),
+        quiet(&mut fake, &pool(), &home()),
         Err(WerError::NotLoaded {
             sid: POOL.to_owned()
         })
@@ -196,7 +219,7 @@ fn a_sid_that_isnt_a_users_never_opens_a_hive() {
     for sid in ["S-1-5-18", "S-1-1-0"] {
         let mut fake = Fake::loaded();
         assert_eq!(
-            quiet(&mut fake, &Sid::parse(sid).unwrap()),
+            quiet(&mut fake, &Sid::parse(sid).unwrap(), &home()),
             Err(WerError::NotAUser {
                 sid: sid.to_owned()
             })
@@ -242,7 +265,10 @@ fn a_link_on_the_way_or_at_the_key_refuses_before_any_write() {
                 );
             }
         }
-        assert_eq!(quiet(&mut fake, &pool()), Err(WerError::Link { part }));
+        assert_eq!(
+            quiet(&mut fake, &pool(), &home()),
+            Err(WerError::Link { part })
+        );
         assert!(fake.keys.values().all(|n| n.values.is_empty()));
     }
 }
@@ -279,11 +305,14 @@ fn a_low_labelled_or_widely_writable_key_refuses() {
             "{why}: {fault:?}"
         );
         let mut fake = Fake::loaded();
-        quiet(&mut fake, &pool()).unwrap();
+        quiet(&mut fake, &pool(), &home()).unwrap();
         fake.keys.get_mut(KEY).unwrap().security = security;
         fake.keys.get_mut(KEY).unwrap().values.clear();
         assert!(
-            matches!(quiet(&mut fake, &pool()), Err(WerError::Unsafe { .. })),
+            matches!(
+                quiet(&mut fake, &pool(), &home()),
+                Err(WerError::Unsafe { .. })
+            ),
             "{why}"
         );
         assert!(fake.keys[KEY].values.is_empty(), "{why}");
@@ -312,7 +341,7 @@ fn a_failed_write_is_refused() {
         ..Fake::loaded()
     };
     assert_eq!(
-        quiet(&mut fake, &pool()),
+        quiet(&mut fake, &pool(), &home()),
         Err(WerError::Write {
             name: "DontShowUI",
             code: 5
@@ -327,7 +356,7 @@ fn a_failed_read_back_is_refused() {
         ..Fake::loaded()
     };
     assert_eq!(
-        quiet(&mut fake, &pool()),
+        quiet(&mut fake, &pool(), &home()),
         Err(WerError::Read {
             name: "LoggingDisabled",
             code: 87
@@ -342,7 +371,7 @@ fn a_value_that_reads_back_wrong_or_missing_is_refused() {
         ..Fake::loaded()
     };
     assert_eq!(
-        quiet(&mut fake, &pool()),
+        quiet(&mut fake, &pool(), &home()),
         Err(WerError::ReadBack {
             name: "Disabled",
             found: None
@@ -353,7 +382,7 @@ fn a_value_that_reads_back_wrong_or_missing_is_refused() {
         ..Fake::loaded()
     };
     assert_eq!(
-        quiet(&mut plain, &pool()),
+        quiet(&mut plain, &pool(), &home()),
         Err(WerError::ReadBack {
             name: "DontSendAdditionalData",
             found: None
@@ -367,7 +396,7 @@ fn a_policy_keeping_wer_on_is_logged_and_the_launch_goes_on() {
         machine_policy: Some(0),
         ..Fake::loaded()
     };
-    let lines = quiet(&mut fake, &pool()).unwrap();
+    let lines = quiet(&mut fake, &pool(), &home()).unwrap();
     assert_eq!(lines.len(), 1);
     assert!(lines[0].contains("a machine policy (HKLM) keeps Windows Error Reporting on"));
     assert_eq!(values(&fake), VALUES);
@@ -376,41 +405,41 @@ fn a_policy_keeping_wer_on_is_logged_and_the_launch_goes_on() {
     let mut node = Node::default();
     node.values.insert("Disabled".to_owned(), 0);
     user.keys.insert(policy, node);
-    let lines = quiet(&mut user, &pool()).unwrap();
+    let lines = quiet(&mut user, &pool(), &home()).unwrap();
     assert!(lines.len() == 1 && lines[0].contains("a policy for the sandbox user"));
     let mut off = Fake {
         machine_policy: Some(1),
         ..Fake::loaded()
     };
-    assert_eq!(quiet(&mut off, &pool()), Ok(vec![]));
+    assert_eq!(quiet(&mut off, &pool(), &home()), Ok(vec![]));
 }
 
 #[test]
 fn set_ups_repair_deletes_a_link_on_the_way_or_at_the_key() {
     let mut fake = Fake::loaded();
-    quiet(&mut fake, &pool()).unwrap();
+    quiet(&mut fake, &pool(), &home()).unwrap();
     fake.keys.get_mut(KEY).unwrap().link = true;
     assert_eq!(repair(&mut fake, &pool()), Ok(true));
     assert_eq!(fake.deleted, [KEY]);
-    assert_eq!(quiet(&mut fake, &pool()), Ok(vec![]));
+    assert_eq!(quiet(&mut fake, &pool(), &home()), Ok(vec![]));
     let windows = format!("{POOL}\\Software\\Microsoft\\Windows");
     fake.keys.get_mut(&windows).unwrap().link = true;
     assert_eq!(repair(&mut fake, &pool()), Ok(true));
     assert_eq!(fake.deleted.last(), Some(&windows));
-    assert_eq!(quiet(&mut fake, &pool()), Ok(vec![]));
+    assert_eq!(quiet(&mut fake, &pool(), &home()), Ok(vec![]));
 }
 
 #[test]
 fn set_ups_repair_deletes_an_unsafe_key_and_keeps_a_safe_one() {
     let mut fake = Fake::loaded();
-    quiet(&mut fake, &pool()).unwrap();
+    quiet(&mut fake, &pool(), &home()).unwrap();
     assert_eq!(repair(&mut fake, &pool()), Ok(false));
     assert_eq!(fake.deleted, Vec::<String>::new());
     fake.keys.get_mut(KEY).unwrap().security =
         descriptor(&[ace(ALLOWED, 0, 0x000F_003F, POOL)], Some((0x1000, 1)));
     assert_eq!(repair(&mut fake, &pool()), Ok(true));
     assert_eq!(fake.deleted, [KEY]);
-    assert_eq!(quiet(&mut fake, &pool()), Ok(vec![]));
+    assert_eq!(quiet(&mut fake, &pool(), &home()), Ok(vec![]));
 }
 
 #[test]
@@ -435,4 +464,39 @@ fn the_failure_names_the_sandbox_user_and_the_cause() {
         "turning off Windows Error Reporting for the sandbox user failed: Windows Error Reporting \
          is a registry link"
     );
+}
+
+#[test]
+fn a_temporary_profile_refuses_before_any_write() {
+    let temporary = [
+        Profile {
+            state: Some(0x0800),
+            path: PathBuf::from(r"C:\Users\ClauseoSb01"),
+        },
+        Profile {
+            state: Some(0),
+            path: PathBuf::from(r"C:\Users\TEMP.PC.000"),
+        },
+    ];
+    for profile in temporary {
+        let mut fake = Fake::loaded();
+        assert!(matches!(
+            quiet(&mut fake, &pool(), &profile),
+            Err(WerError::Temporary { .. })
+        ));
+        assert_eq!(fake.keys.len(), 1, "nothing made: {profile:?}");
+    }
+}
+
+#[test]
+fn set_ups_repair_takes_a_key_that_shuts_the_administrators_out_then_deletes_it() {
+    let mut fake = Fake::loaded();
+    quiet(&mut fake, &pool(), &home()).unwrap();
+    let key = fake.keys.get_mut(KEY).unwrap();
+    key.link = true;
+    key.deny_admins = true;
+    assert_eq!(repair(&mut fake, &pool()), Ok(true));
+    assert_eq!(fake.taken, [KEY]);
+    assert_eq!(fake.deleted, [KEY]);
+    assert_eq!(quiet(&mut fake, &pool(), &home()), Ok(vec![]));
 }
