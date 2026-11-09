@@ -129,7 +129,7 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
     "This folder doesn't hold this matter's Clauseo file. Locate the matter's folder to carry on.",
   "matter.folder_refused": "A whole drive, your home folder or a system folder can't be a matter.",
   "matter.codex_folder":
-    "This matter's folder holds a .codex folder. Rename or remove it to use Codex here.",
+    "This matter's folder holds a .codex folder. Rename or remove it to use ChatGPT here.",
   "matter.file_locked": "A paper is open in another program. Close it, then try again.",
   "matter.turn_running": "Wait for the answer to finish first.",
   "matter.folder_is_drive": "A whole drive can't be a matter.",
@@ -138,9 +138,10 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   "matter.folder_unreadable": "Clauseo can't read that folder.",
   "matter.folder_is_matter": "That folder is already a matter's, or inside one.",
   "matter.folder_in_matters_root": "That folder holds Clauseo's own data.",
-  "matter.folder_network": "Codex can't work on a network drive. Move the matter to this computer.",
+  "matter.folder_network":
+    "ChatGPT can't work on a network drive. Move the matter to this computer.",
   "matter.folder_no_permissions":
-    "Codex can't work on a drive without file permissions. Move the matter to this computer.",
+    "ChatGPT can't work on a drive without file permissions. Move the matter to this computer.",
   "matter.folder_too_deep":
     "This matter's folder is too deep inside other folders for Clauseo to work in it on Windows. Move it nearer the top of its drive.",
   "transport.unauthorized": "That wasn't allowed, so nothing changed.",

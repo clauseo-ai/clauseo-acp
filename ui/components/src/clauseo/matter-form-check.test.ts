@@ -63,7 +63,7 @@ test("a folder refusal with its own line in words-errors gives that line, in the
   expect(createErrorLine("en", "matter.folder_too_deep", "C:\\Matters\\Acme")).toBe(TOO_DEEP);
   expect(createErrorLine("hi", "matter.folder_too_deep", "C:\\Matters\\Acme")).toBe(HI[TOO_DEEP]);
   expect(createErrorLine("en", "matter.folder_network")).toBe(
-    "Codex can't work on a network drive. Move the matter to this computer.",
+    "ChatGPT can't work on a network drive. Move the matter to this computer.",
   );
   expect(createErrorLine("en", "matter.something_new")).toBe(
     "Clauseo couldn't create the matter. Try again, or choose another folder.",

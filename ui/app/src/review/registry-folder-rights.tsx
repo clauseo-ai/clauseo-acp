@@ -105,7 +105,7 @@ export const FOLDER_RIGHTS: Entry[] = [
   entry(
     "FR-02",
     w(
-      "You can change files here, but not this folder's permissions. Clauseo needs them to keep Claude and Codex inside the matter. Some edits won't go through.",
+      "You can change files here, but not this folder's permissions. Clauseo needs them to keep Claude and ChatGPT inside the matter. Some edits won't go through.",
     ),
     () => <RoomFocusing host={room("cant_change_permissions")} focus={INFO} />,
   ),
@@ -119,7 +119,7 @@ export const FOLDER_RIGHTS: Entry[] = [
     "FR-05",
     joined([
       w(
-        'Please give my account "Change permissions" on this folder: {path}. Clauseo, the app I use for this matter, adds one entry to the folder\'s permissions so Claude and Codex, which it runs, can write only inside it.',
+        'Please give my account "Change permissions" on this folder: {path}. Clauseo, the app I use for this matter, adds one entry to the folder\'s permissions so Claude and ChatGPT, which it runs, can write only inside it.',
       ),
       w("Copy"),
     ]),
@@ -147,7 +147,7 @@ export const FOLDER_RIGHTS: Entry[] = [
     "FR-08",
     joined([
       w("Claude asks before every change. ChatGPT can't work here."),
-      w("Clauseo can't keep Claude and Codex inside a folder on a network drive."),
+      w("Clauseo can't keep Claude and ChatGPT inside a folder on a network drive."),
     ]),
     warned("network"),
   ),
@@ -164,7 +164,7 @@ export const FOLDER_RIGHTS: Entry[] = [
       w("Claude asks before every change. ChatGPT can't work here."),
       w("This matter's folder is on a network drive"),
       w(
-        "Clauseo can't keep Claude and Codex inside this folder. To work in the Safe workspace, move the matter to a folder on this computer.",
+        "Clauseo can't keep Claude and ChatGPT inside this folder. To work in the Safe workspace, move the matter to a folder on this computer.",
       ),
     ]),
     () => <RoomFocusing host={room("network")} focus={INFO} />,
@@ -177,7 +177,7 @@ export const FOLDER_RIGHTS: Entry[] = [
       w("Claude asks before every change. ChatGPT can't work here."),
       w("This matter's folder is on a drive that doesn't keep file permissions"),
       w(
-        "Clauseo can't keep Claude and Codex inside this folder. USB drives often don't keep permissions. To work in the Safe workspace, move the matter to a folder on this computer.",
+        "Clauseo can't keep Claude and ChatGPT inside this folder. USB drives often don't keep permissions. To work in the Safe workspace, move the matter to a folder on this computer.",
       ),
     ]),
     () => <RoomFocusing host={room("no_permissions")} focus={INFO} />,
@@ -193,7 +193,7 @@ export const FOLDER_RIGHTS: Entry[] = [
     joined([
       w("Claude asks before every change. ChatGPT can't work here."),
       w(
-        "Clauseo can't keep Claude and Codex inside a folder on this drive. USB drives often don't keep permissions.",
+        "Clauseo can't keep Claude and ChatGPT inside a folder on this drive. USB drives often don't keep permissions.",
       ),
     ]),
     warned("no_permissions"),

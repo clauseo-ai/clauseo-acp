@@ -47,7 +47,7 @@ test("a folder whose permissions can't change: Clauseo asks before each edit, wh
   expect(info()).toBe(
     fr(
       "en",
-      "You can change files here, but not this folder's permissions. Clauseo needs them to keep Claude and Codex inside the matter. Some edits won't go through.",
+      "You can change files here, but not this folder's permissions. Clauseo needs them to keep Claude and ChatGPT inside the matter. Some edits won't go through.",
     ),
   );
   expect(h.one("folder-it")?.textContent).toBe(fr("en", "What to tell IT"));
@@ -61,7 +61,7 @@ test("What to tell IT opens the text for IT with the matter's folder in it, and 
   expect(h.one("folder-it")?.getAttribute("aria-expanded")).toBe("true");
   const it = h.one("folder-it-text")?.textContent ?? "";
   expect(it).toContain(`on this folder: \u2068${FOLDER}\u2069.`);
-  expect(it).toContain("so Claude and Codex, which it runs, can write only inside it.");
+  expect(it).toContain("so Claude and ChatGPT, which it runs, can write only inside it.");
   expect(it).toContain(fr("en", "Copy"));
 });
 
@@ -101,7 +101,7 @@ test("a network drive: Not protected, and its notice says Claude asks and ChatGP
   expect(info()).toBe(
     fr(
       "en",
-      "Clauseo can't keep Claude and Codex inside this folder. To work in the Safe workspace, move the matter to a folder on this computer.",
+      "Clauseo can't keep Claude and ChatGPT inside this folder. To work in the Safe workspace, move the matter to a folder on this computer.",
     ),
   );
   expect(h.one("folder-it")).toBeNull();
