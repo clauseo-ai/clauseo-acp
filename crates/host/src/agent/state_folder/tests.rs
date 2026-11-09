@@ -495,3 +495,26 @@ fn timing_first_launch_state_folder() {
     }
     write::remove_dir_all(&data).unwrap();
 }
+
+/// On Windows a missing file reads as `NotFound` (the Win32 error, not its HRESULT), so a fresh
+/// Claude state folder with no `.claude.json` or `settings.json` is no failure.
+#[cfg(windows)]
+#[test]
+fn a_missing_file_reads_as_not_found_on_windows() {
+    use super::{file_id, safe_read};
+    let dir = std::env::temp_dir();
+    let name = format!("clauseo-file-id-absent-{}", std::process::id());
+    for path in [
+        dir.join(format!("{name}.json")),
+        dir.join(&name).join("absent.json"),
+    ] {
+        let error = file_id::link_count(&path).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound, "{error}");
+        let error = file_id::same_file(&path, &dir).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound, "{error}");
+        assert_eq!(
+            safe_read::read_plain(&path).unwrap(),
+            safe_read::Found::Missing
+        );
+    }
+}

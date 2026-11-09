@@ -9,7 +9,8 @@ use std::path::Path;
 
 /// Whether `a` and `b` are one file: the same device and inode on Unix, the same volume serial
 /// number and file index on Windows. False when either is a symbolic link, a junction or any
-/// other reparse point. Err when either cannot be read (a missing file included).
+/// other reparse point. Err when either cannot be read (a missing file included, whose error
+/// is `NotFound` on Windows too: [`os_error`]).
 ///
 /// Unix reads `symlink_metadata` (`lstat`), which opens nothing. Windows opens a handle to each
 /// path with `CreateFileW` and desired access 0 (no right to the contents), sharing read, write
@@ -79,7 +80,7 @@ fn file_id(path: &Path) -> io::Result<Option<((u64, u64), u64)>> {
             None,
         )
     }
-    .map_err(io::Error::from)?;
+    .map_err(|error| os_error(&error))?;
     // SAFETY: `raw` is a valid handle CreateFileW just returned, owned by nothing else; the
     // `OwnedHandle` closes it once, when dropped.
     let handle = unsafe { OwnedHandle::from_raw_handle(raw.0) };
@@ -87,7 +88,7 @@ fn file_id(path: &Path) -> io::Result<Option<((u64, u64), u64)>> {
     // SAFETY: `handle` is open for the call's duration, and `info` is a valid, writable
     // BY_HANDLE_FILE_INFORMATION.
     unsafe { GetFileInformationByHandle(HANDLE(handle.as_raw_handle()), &raw mut info) }
-        .map_err(io::Error::from)?;
+        .map_err(|error| os_error(&error))?;
     drop(handle);
     if info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
         return Ok(None);
@@ -95,4 +96,19 @@ fn file_id(path: &Path) -> io::Result<Option<((u64, u64), u64)>> {
     let index = (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow);
     let id = (u64::from(info.dwVolumeSerialNumber), index);
     Ok(Some((id, u64::from(info.nNumberOfLinks))))
+}
+
+/// The Win32 error inside `error` as std's own OS error, so `kind()` is right: a missing file
+/// (`ERROR_FILE_NOT_FOUND`, `ERROR_PATH_NOT_FOUND`) reads as `NotFound`, which
+/// `safe_read::read_plain` takes for an absent file. `io::Error::from` would keep the HRESULT
+/// (`0x80070002`), whose kind std does not know, and so failed every Claude launch whose state
+/// folder had no `.claude.json` or `settings.json` yet. The rule of `clauseo_mcp`'s Windows
+/// write.
+#[cfg(windows)]
+fn os_error(error: &windows::core::Error) -> io::Error {
+    use windows::Win32::Foundation::WIN32_ERROR;
+    match WIN32_ERROR::from_error(error).and_then(|code| i32::try_from(code.0).ok()) {
+        Some(code) => io::Error::from_raw_os_error(code),
+        None => io::Error::from(error.clone()),
+    }
 }
