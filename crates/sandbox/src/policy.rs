@@ -452,6 +452,7 @@ impl PolicyBuilder {
 
     /// The folder holding Claude's login store (the lawyer's `~/.claude`, or Clauseo's login
     /// home). Only [`CLAUDE_STORE_FILES`] and [`CLAUDE_STORE_LOCK_FOLDERS`] in it are allowed.
+    /// It may not be inside the matter or hold it ([`PolicyBuilder::build`]).
     pub fn claude_store(mut self, dir: impl Into<PathBuf>) -> PolicyBuilder {
         self.claude_store = Some(dir.into());
         self
@@ -479,7 +480,8 @@ impl PolicyBuilder {
     /// The browser socket folder the host made for this launch. The policy keeps its canonical
     /// path; the jail then allows Unix-socket bind and connect, and file create, write, read
     /// and unlink, under that one folder, but not making or removing the folder itself.
-    /// Without it the jail allows no Unix socket anywhere.
+    /// Without it the jail allows no Unix socket anywhere. It may not be inside the matter or
+    /// hold it ([`PolicyBuilder::build`]).
     #[cfg(unix)]
     pub fn browser_socket_dir(mut self, dir: &crate::BrowserSocketDir) -> PolicyBuilder {
         self.browser_socket_dir = Some(dir.canonical().to_owned());
@@ -542,10 +544,11 @@ impl PolicyBuilder {
     /// - The matter may not be `/` or equal or hold the home folder, nor equal, hold or sit
     ///   inside a hidden path. The state folder and the matter may not be one inside the other
     ///   (or the same); the state folder may not equal or hold a hidden path. The notes folder
-    ///   may not be inside the matter, hold it, or equal or hold a hidden path. The credential
-    ///   link must be inside the state folder. Runtime and read paths may not be `/` or equal
-    ///   or hold the home folder, the matter or a hidden path (inside one is fine: that is why
-    ///   they are allowed again). Read-only paths in the state folder must be inside it;
+    ///   may not be inside the matter, hold it, or equal or hold a hidden path. The Claude store
+    ///   folder and the browser socket folder may not be inside the matter or hold it. The
+    ///   credential link must be inside the state folder. Runtime and read paths may not be `/`
+    ///   or equal or hold the home folder, the matter or a hidden path (inside one is fine: that
+    ///   is why they are allowed again). Read-only paths in the state folder must be inside it;
     ///   over-cap files inside the matter. The temp folder may not end in `.` or `..` as
     ///   written, be `/`, equal or hold the home folder, the state folder or a hidden path, nor
     ///   be inside the matter or hold it; and it must be `.../run/<session>/tmp`.

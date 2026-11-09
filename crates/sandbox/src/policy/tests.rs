@@ -4,6 +4,7 @@ use crate::test_support::TempDir;
 mod allowed;
 mod links;
 mod nested;
+mod outside_matter;
 mod reallowed;
 mod tmpdir;
 mod unicode;

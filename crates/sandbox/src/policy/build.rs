@@ -51,11 +51,8 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
             link.display()
         ));
     }
-    let claude_store = b
-        .claude_store
-        .as_deref()
-        .map(|dir| existing(dir, "Claude store folder").map(|dir| ClaudeStore { dir }))
-        .transpose()?;
+    let claude_store = claude_store_folder(b.claude_store.as_deref(), &matter)?;
+    check_socket_folder(b.browser_socket_dir.as_deref(), &matter)?;
 
     let runtime = all_existing(&b.runtime, "runtime path")?;
     let read = all_existing(&b.read, "read path")?;
@@ -228,16 +225,47 @@ fn check_matter(
     Ok(())
 }
 
+/// A folder the jail allows again after the hidden paths (`what`, with its article), on a
+/// canonical `p`: it may not be inside the matter or hold it, since its writes would reach the
+/// matter. The notes folder, the temp folder, the Claude store and the browser socket folder
+/// all keep this rule.
+fn check_outside_matter(p: &Path, what: &str, matter: &Path) -> Result<(), Error> {
+    if overlap(p, matter) {
+        return refuse(format!(
+            "the {what} may not be inside the matter or hold it: {} and {}",
+            p.display(),
+            matter.display()
+        ));
+    }
+    Ok(())
+}
+
+/// Claude's login store folder, if given: canonical by [`existing`], and not inside the matter
+/// or holding it, since the jail allows its names again.
+fn claude_store_folder(p: Option<&Path>, matter: &Path) -> Result<Option<ClaudeStore>, Error> {
+    let Some(p) = p else {
+        return Ok(None);
+    };
+    let store = ClaudeStore {
+        dir: existing(p, "Claude store folder")?,
+    };
+    check_outside_matter(store.dir(), "Claude store", matter)?;
+    Ok(Some(store))
+}
+
+/// The browser socket folder, if given, by [`check_outside_matter`]: the jail allows Unix
+/// sockets and writes under it, so it may not be inside the matter or hold it.
+fn check_socket_folder(socket: Option<&Path>, matter: &Path) -> Result<(), Error> {
+    socket.map_or(Ok(()), |socket| {
+        check_outside_matter(socket, "browser socket folder", matter)
+    })
+}
+
 /// The notes folder's rules, on canonical paths: it is allowed again after the hidden paths,
 /// so it may not be in the matter, hold it, or equal or hold a hidden path.
 fn check_notes(notes: &Path, matter: &Path, hidden: &[PathBuf]) -> Result<(), Error> {
     let shown = notes.display();
-    if overlap(notes, matter) {
-        return refuse(format!(
-            "the notes folder may not be inside the matter or hold it: {shown} and {}",
-            matter.display()
-        ));
-    }
+    check_outside_matter(notes, "notes folder", matter)?;
     if let Some(h) = hidden.iter().find(|h| under(h, notes)) {
         return refuse(format!(
             "the notes folder may not equal or hold a hidden path: {shown} and {}",
@@ -250,7 +278,8 @@ fn check_notes(notes: &Path, matter: &Path, hidden: &[PathBuf]) -> Result<(), Er
 /// The session's temp folder if set, by [`folder_and_name`] after refusing a `p` whose own name
 /// is a symbolic link (the launcher makes the folder if it is missing). It is allowed again
 /// after the hidden paths and holds the agent's writes, so it may not be `/`, equal or hold the
-/// home folder, the state folder or a hidden path, nor be inside the matter or hold it.
+/// home folder, the state folder or a hidden path, nor be inside the matter or hold it
+/// ([`check_outside_matter`]).
 fn tmp_folder(
     p: Option<&Path>,
     matter: &Path,
@@ -291,12 +320,7 @@ fn tmp_folder(
             state.display()
         ));
     }
-    if overlap(&tmpdir, matter) {
-        return refuse(format!(
-            "the {what} may not be inside the matter or hold it: {shown} and {}",
-            matter.display()
-        ));
-    }
+    check_outside_matter(&tmpdir, what, matter)?;
     if let Some(h) = hidden.iter().find(|h| under(h, &tmpdir)) {
         return refuse(format!(
             "the {what} may not equal or hold a hidden path: {shown} and {}",
