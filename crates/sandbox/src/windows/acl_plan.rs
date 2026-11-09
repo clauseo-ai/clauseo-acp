@@ -37,11 +37,14 @@
 //!   grants, outside agents' homes, besides the Claude store and credential link themselves; and
 //!   no read, runtime or allowed path elsewhere over or in `<data_dir>` outside this matter's
 //!   own state and notes folders. Such a plan is refused (see [`check_target`]).
+//! - The folders Clauseo makes for the launch in `<data_dir>` (the data folder, its
+//!   `agent-state` and `run` folders, the matter's, the state, notes, run and temp folders) get a
+//!   protected DACL, nothing inherited ([`AdmittedPlan::owned_roots`], `owned.rs`).
 //!
 //! The plan comes back as an [`AdmittedPlan`]: only [`plan`] makes one, from an [`Admitted`]
 //! only the gate makes, and only an `AdmittedPlan` reaches the ledger.
 
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use clauseo_protocol::MatterId;
 use serde::{Deserialize, Serialize};
@@ -52,7 +55,6 @@ use super::fence::Fence;
 use super::fence::{MatterFolders, fence_grants, plan_fence};
 use super::ledger::EntryId;
 pub use super::sids::Sid;
-use crate::policy::under;
 use crate::{Error, PathRule, Policy};
 
 /// The SIDs a launch's entries name. PR4 makes the pool and the group; the plan takes them as
@@ -216,11 +218,38 @@ pub struct AdmittedPlan {
     grants: Vec<Grant>,
     /// Each planned matter's own subjects: the pool owners its children may have (S15 `PR4h`).
     assigned: Vec<(MatterId, Sid)>,
+    /// The folders this launch owns ([`OwnedRoot`]): each gets a protected DACL.
+    owned: Vec<OwnedRoot>,
     pub(crate) entries: Vec<EntryId>,
     pub(crate) created: Vec<EntryId>,
 }
 
 impl AdmittedPlan {
+    /// A plan of `grants`, each owned by its `owners` entry, owning no folder.
+    fn new(
+        matter: MatterId,
+        owners: Vec<MatterId>,
+        grants: Vec<Grant>,
+        assigned: Vec<(MatterId, Sid)>,
+    ) -> AdmittedPlan {
+        let (owned, entries, created) = (Vec::new(), Vec::new(), Vec::new());
+        AdmittedPlan {
+            matter,
+            owners,
+            grants,
+            assigned,
+            owned,
+            entries,
+            created,
+        }
+    }
+
+    /// The folders this launch owns, shallowest first ([`OwnedRoot`]); none for a fence-only
+    /// plan.
+    pub fn owned_roots(&self) -> &[OwnedRoot] {
+        &self.owned
+    }
+
     /// The matter this plan is for.
     pub fn matter(&self) -> MatterId {
         self.matter
@@ -239,8 +268,7 @@ impl AdmittedPlan {
 
     /// The subjects assigned to `matter` (see `assigned`); empty for a matter not planned.
     pub(crate) fn assigned_to(&self, matter: MatterId) -> Vec<Sid> {
-        let mine = self.assigned.iter().filter(|(m, _)| *m == matter);
-        mine.map(|(_, sid)| sid.clone()).collect()
+        assigned_subjects(&self.assigned, matter)
     }
 
     /// Each grant's ledger entry, in the grants' order, once recorded; empty before.
@@ -267,6 +295,7 @@ impl AdmittedPlan {
             .unzip();
         self.grants = grants;
         self.owners = owners;
+        self.owned.retain(|root| exists(&root.path));
     }
 
     /// The plan of `fences`, as the gate's check resolved them, against the whole `pool`, each
@@ -288,14 +317,7 @@ impl AdmittedPlan {
                 owners.push(fence.id);
             }
         }
-        Some(AdmittedPlan {
-            matter,
-            owners,
-            grants,
-            assigned,
-            entries: Vec::new(),
-            created: Vec::new(),
-        })
+        Some(AdmittedPlan::new(matter, owners, grants, assigned))
     }
 
     /// The walk-down set's denies for `group`, owned by `matter`: a read deny down each of
@@ -325,27 +347,13 @@ impl AdmittedPlan {
                 .iter()
                 .map(|l| deny(l, Inherit::FilesInFolder, PathKind::ParentFiles)),
         );
-        AdmittedPlan {
-            matter,
-            owners: vec![matter; grants.len()],
-            grants,
-            assigned: Vec::new(),
-            entries: Vec::new(),
-            created: Vec::new(),
-        }
+        AdmittedPlan::new(matter, vec![matter; grants.len()], grants, Vec::new())
     }
 
     /// A plan of `grants` without the gate, for the ledger's tests.
     #[cfg(test)]
     pub(crate) fn from_grants(matter: MatterId, grants: Vec<Grant>) -> AdmittedPlan {
-        AdmittedPlan {
-            matter,
-            owners: vec![matter; grants.len()],
-            grants,
-            assigned: Vec::new(),
-            entries: Vec::new(),
-            created: Vec::new(),
-        }
+        AdmittedPlan::new(matter, vec![matter; grants.len()], grants, Vec::new())
     }
 }
 
@@ -472,14 +480,16 @@ pub fn plan(
             });
         }
     }
-    Ok(AdmittedPlan {
-        matter,
-        owners,
-        grants: plan.grants,
-        assigned,
-        entries: Vec::new(),
-        created: Vec::new(),
-    })
+    let own_subjects = assigned_subjects(&assigned, matter);
+    let mut admitted_plan = AdmittedPlan::new(matter, owners, plan.grants, assigned);
+    admitted_plan.owned = owned::owned_roots(policy, admitted.data_dir(), &own_subjects);
+    Ok(admitted_plan)
+}
+
+/// The subjects `assigned` gives `matter`.
+fn assigned_subjects(assigned: &[(MatterId, Sid)], matter: MatterId) -> Vec<Sid> {
+    let mine = assigned.iter().filter(|(m, _)| *m == matter);
+    mine.map(|(_, sid)| sid.clone()).collect()
 }
 
 /// The entries planned so far.
@@ -566,30 +576,16 @@ impl Plan<'_> {
     }
 }
 
-/// Whether `path` is `folder` or under it, by the policy's comparison and also without ASCII
-/// case, as NTFS compares `.claude` with `.Claude`. Both are compared [`verbatim`].
-pub(super) fn in_folder(path: &Path, folder: &Path) -> bool {
-    let (path, folder) = (verbatim(path), verbatim(folder));
-    let (path, folder) = (path.as_path(), folder.as_path());
-    if under(path, folder) {
-        return true;
-    }
-    let mut parts = path.components();
-    folder.components().all(|want| {
-        parts.next().is_some_and(|got| match (got, want) {
-            (Component::Normal(got), Component::Normal(want)) => got.eq_ignore_ascii_case(want),
-            (Component::Prefix(got), Component::Prefix(want)) => {
-                got.as_os_str().eq_ignore_ascii_case(want.as_os_str())
-            }
-            (got, want) => got == want,
-        })
-    })
-}
-
 mod verbatim;
+pub(super) use verbatim::in_folder;
 pub(in crate::windows) use verbatim::verbatim;
 
+mod owned;
 pub(super) mod targets;
+
+#[cfg(windows)]
+pub(crate) use owned::FULL_ACCESS;
+pub use owned::{OwnedKind, OwnedRoot, owned_sddl};
 
 use targets::check_target;
 #[cfg(test)]

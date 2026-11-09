@@ -2,7 +2,29 @@
 
 use std::borrow::Cow;
 use std::ffi::OsString;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
+
+use crate::policy::under;
+
+/// Whether `path` is `folder` or under it, by the policy's comparison and also without ASCII
+/// case, as NTFS compares `.claude` with `.Claude`. Both are compared [`verbatim`].
+pub(in crate::windows) fn in_folder(path: &Path, folder: &Path) -> bool {
+    let (path, folder) = (verbatim(path), verbatim(folder));
+    let (path, folder) = (path.as_path(), folder.as_path());
+    if under(path, folder) {
+        return true;
+    }
+    let mut parts = path.components();
+    folder.components().all(|want| {
+        parts.next().is_some_and(|got| match (got, want) {
+            (Component::Normal(got), Component::Normal(want)) => got.eq_ignore_ascii_case(want),
+            (Component::Prefix(got), Component::Prefix(want)) => {
+                got.as_os_str().eq_ignore_ascii_case(want.as_os_str())
+            }
+            (got, want) => got == want,
+        })
+    })
+}
 
 /// `path` in the verbatim `\\?\` form, whatever its length, by `folder::verbatim_wide`'s
 /// rules: kept when it has the prefix, `\\.\` turned into `\\?\`, `\\server\share` made

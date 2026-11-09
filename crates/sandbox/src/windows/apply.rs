@@ -17,6 +17,8 @@
 //!    ([`AclWriter::hand_back`]) before anything is recorded; only one whose hand-back fails
 //!    refuses, as [`ApplyFailure::PoolOwned`] (`roots.rs`, S15 `PR4h`). A read-only target a
 //!    pool user owns is handed back just before its deny is written (step 4, S15 `PR4a2`).
+//!    Then each folder Clauseo owns for the launch gets its protected DACL, nothing inherited
+//!    (`owned.rs`), and one that changed has its tree walked in step 5.
 //! 4. Every grant is recorded `pending` ([`Ledger::record_pending`]). Each new Low label entry
 //!    first records the explicit label its path has now, so it can be put back, unless that
 //!    label is our own: the one this grant writes, or the one another entry for the same file
@@ -66,6 +68,7 @@ mod back;
 #[cfg(any(windows, test, feature = "test-support"))]
 mod fence;
 mod lift;
+mod owned;
 mod roots;
 mod stuck;
 mod walk;
@@ -233,11 +236,12 @@ fn run_plan(
     plan.retain_existing(exists);
     check_credentials(plan, acl, &*around)?;
     roots::hand_back_roots(plan, ledger, acl, pool)?;
+    let owned_walks = owned::protect_owned(plan, acl, pool)?;
     ledger
         .record_pending(plan)
         .map_err(|e| refused(PathKind::Matter, ApplyFailure::Ledger(e.kind())))?;
     let mut run = Run::default();
-    match write_all(ledger, plan, acl, around, own, &mut run) {
+    match write_all(ledger, plan, acl, around, (own, &owned_walks), &mut run) {
         Ok(()) => Ok(run),
         Err(mut refused) => {
             refused.at = refused.at.or_else(|| acl.refused_at());
@@ -309,7 +313,7 @@ fn write_all(
     plan: &AdmittedPlan,
     acl: &mut dyn AclWriter,
     around: &mut dyn Surroundings,
-    own_walks: &OwnWalks,
+    (own_walks, owned_walks): (&OwnWalks, &[Walk]),
     run: &mut Run,
 ) -> Result<(), Refused> {
     let grants = plan.grants();
@@ -400,7 +404,9 @@ fn write_all(
         })?;
         run.walked.add(seen);
     }
-    for walk in walks(plan, unwalked, all_own, extra) {
+    let mut extra = extra.to_vec();
+    extra.extend(owned_walks.iter().cloned());
+    for walk in walks(plan, unwalked, all_own, &extra) {
         let Walk {
             root,
             reach,

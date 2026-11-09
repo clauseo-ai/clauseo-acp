@@ -238,6 +238,9 @@ crates/sandbox/src/windows/apply/ntfs_tests.rs timing_first_propagation_and_fix_
 # The pool user's writes a nested protected item's deny must refuse (S15 PR4a2): the test plays
 # the agent, through std's own calls.
 crates/sandbox/src/windows/apply/ntfs_tests/nested.rs agent clippy::disallowed_methods
+# Another pool user's Low token tries to plant a file and a folder in the owned folders (S15
+# owned roots): the test plays that agent, through std's own calls.
+crates/sandbox/src/windows/apply/ntfs_tests/owned.rs try_make clippy::disallowed_methods
 # The set-aside's scan timing (S15 PR4a): the clock that times the nested probe lists.
 crates/sandbox/src/windows/set_aside/tests/timing.rs timed clippy::disallowed_methods
 

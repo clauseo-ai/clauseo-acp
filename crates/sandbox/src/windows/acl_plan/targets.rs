@@ -147,10 +147,10 @@ pub(crate) fn odd_spelling(path: &Path) -> bool {
 pub(crate) const AGENTS_DIR: &str = "agents";
 
 /// `<data_dir>\agent-state`: each matter's state and notes folders, by matter id.
-const AGENT_STATE_DIR: &str = "agent-state";
+pub(super) const AGENT_STATE_DIR: &str = "agent-state";
 
 /// `<data_dir>\run`: each session's folder, holding its token and its temp folder.
-const RUN_DIR: &str = "run";
+pub(super) const RUN_DIR: &str = "run";
 
 /// A session's temp folder in `<data_dir>\run\<session>`.
 const TEMP_DIR: &str = "tmp";

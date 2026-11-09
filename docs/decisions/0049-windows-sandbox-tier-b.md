@@ -810,6 +810,31 @@ on, treats any failed target as a set-up failure, and keeps what was written. Un
 the `LocalLow` denies before it deletes each profile, then the account, then `DeviceSync`'s deny
 (`shared_writes.rs`).
 
+### Owned roots
+
+**The finding** (VM, an observer's `AccessCheck` with the real agent token): matter A's agent
+could make files and folders in matter B's state folder, its `AppData` folders and its temp
+folder (granted `0x1200af`). The data folder sat directly under `C:\`, and `C:\`'s
+`(A;CI;LC;;;BU)` and `(A;CI;DC;;;BU)` reached them by inheritance: the Low label we write keeps
+inheritance. A file planted in another session's state (its agent's settings) could run there.
+
+**The fix:** every folder Clauseo makes for a launch in `<data_dir>` gets a protected DACL
+(`SE_DACL_PROTECTED`) with explicit entries only (`acl_plan/owned.rs`, `apply/owned.rs`):
+
+- the data folder, its `agent-state` and `run` folders: full access (`OICI`) for `SYSTEM`,
+  `Administrators` and the desktop user, as the sandbox folder has it;
+- `agent-state\<matter>` and `run\<session>`: `SYSTEM` and the desktop user;
+- the state, notes and temp folders: the same two, then the plan's own entries as before (the
+  pool user's `Modify`, the other pool users' fence, the Low label).
+
+No `Users`, `Authenticated Users`, `Everyone` or `CREATOR OWNER`; what the agent makes inherits
+these alone. Each is written after the roots' hand-back (a pool user's goes to the lawyer first)
+and before anything is recorded; it is never rolled back. A root whose DACL changed has its tree
+walked, the data folder and its shared folders excepted (each session's launch walks its own).
+
+The lawyer's matter folders are a separate decision, pending the VM walk: they keep what they
+inherit.
+
 ### Fast later launches (PR3d)
 
 A later launch spent its time on the strict walk of the matter, state and notes trees and on the

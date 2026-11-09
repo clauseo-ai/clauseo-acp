@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use clauseo_protocol::MatterId;
 
 use crate::windows::FolderSupport;
-use crate::windows::acl_plan::{Grant, Inherit, Rights, Sid};
+use crate::windows::acl_plan::{Grant, Inherit, OwnedRoot, Rights, Sid};
 use crate::windows::admit::{FolderList, PathKind, ReadDir};
 use crate::windows::apply::Surroundings;
 use crate::windows::ledger::RecordedFile;
@@ -85,6 +85,12 @@ pub(super) struct FakeAcl {
     pub(super) keeps_owner: BTreeSet<PathBuf>,
     /// The next this many adds of an allow on this path fail (S15 `PR4h`).
     pub(super) fail_allow: Option<(PathBuf, u32)>,
+    /// The owned roots given their protected DACL, in order, with the pool SIDs whose denies
+    /// stay; and what a protect reports (`AlreadyThere` when `None`).
+    pub(super) protected: Vec<(PathBuf, Vec<Sid>)>,
+    pub(super) protect_gives: Option<Added>,
+    /// A protect of this root fails, as one the lawyer may not change would.
+    pub(super) fail_protect: Option<PathBuf>,
 }
 
 /// The owner the fake's hand-back gives: the desktop user.
@@ -317,6 +323,14 @@ impl AclWriter for FakeAcl {
             }
         }
         Ok(Walked::default())
+    }
+
+    fn protect(&mut self, root: &OwnedRoot, pool: &[Sid]) -> Result<Added, ApplyFailure> {
+        if self.fail_protect.as_deref() == Some(root.path()) {
+            return Err(ApplyFailure::Io(io::ErrorKind::PermissionDenied));
+        }
+        self.protected.push((root.path().to_owned(), pool.to_vec()));
+        Ok(self.protect_gives.unwrap_or(Added::AlreadyThere))
     }
 
     fn hand_back(&mut self, path: &Path, pool: &[Sid]) -> Result<bool, ApplyFailure> {

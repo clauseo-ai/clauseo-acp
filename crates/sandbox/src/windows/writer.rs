@@ -7,7 +7,7 @@ use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use super::acl_plan::{Grant, Sid, verbatim};
+use super::acl_plan::{Grant, OwnedRoot, Sid, verbatim};
 use super::ledger::RecordedFile;
 
 /// How far a walk goes below its root.
@@ -317,6 +317,18 @@ pub trait AclWriter {
     /// Puts `label` back as the explicit label on `grant`'s path (a Low label grant), in place
     /// of ours or of none; another explicit label set since is left as it is.
     fn restore_label(&mut self, grant: &Grant, label: Label) -> Result<(), ApplyFailure>;
+    /// Gives `root`, a folder Clauseo owns, its protected DACL (`acl_bytes::owned_dacl`): the
+    /// explicit denies it has for one of `pool`, full access inherited inside for `SYSTEM`
+    /// (`Administrators` too on the data folder and its shared folders) and the desktop user
+    /// (this process's user), then the explicit allows it has for one of `root`'s subjects;
+    /// nothing inherited, nothing else. Its owner, label and what is inside are left as they
+    /// are. Through one handle opened without following a link: a link there, or a final path
+    /// other than planned, is [`ApplyFailure::Changed`]; a volume's root is
+    /// [`ApplyFailure::VolumeRoot`]. `AlreadyThere` when it had that DACL, protected. The
+    /// default, for writers no launch drives, is `Unsupported`, so none passes unprotected.
+    fn protect(&mut self, _root: &OwnedRoot, _pool: &[Sid]) -> Result<Added, ApplyFailure> {
+        Err(ApplyFailure::Io(io::ErrorKind::Unsupported))
+    }
     /// The hand-back after `--reclaim` (S15 `PR4i`), and nothing else calls it: `root` (and, when
     /// `whole`, everything below it, through each folder's handle, never following a link) that the
     /// desktop user owns loses its explicit plain allows for `others` (the pool users but the

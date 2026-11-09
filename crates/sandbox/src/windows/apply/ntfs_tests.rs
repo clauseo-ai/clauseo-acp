@@ -15,6 +15,8 @@ use crate::windows::test_world::{OTHER_POOL_SIDS, USER_SID, matter_one, reserved
 
 /// S15 `PR4a2`: the pool user against a nested `CLAUDE.md` and `.git\config`.
 mod nested;
+/// S15 owned roots: protected under a parent that hands `Users` entries down.
+mod owned;
 
 fn ledger(place: &Place) -> Ledger {
     Ledger::open(ledger_path(&place.at("data")), &trusted(), &reserved()).unwrap()

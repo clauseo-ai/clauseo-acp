@@ -36,7 +36,7 @@ use super::acl_bytes::{
     AceSpec, Acl, DACL_AUTO_INHERITED, DACL_PROTECTED, Descriptor, SACL_AUTO_INHERITED,
     SACL_PROTECTED, build_descriptor, empty_acl, explicit_label, label_spec, owner_sid, sid_bytes,
 };
-use super::acl_plan::{Grant, Inherit, Sid, in_folder};
+use super::acl_plan::{Grant, Inherit, OwnedRoot, Sid, in_folder};
 use super::admit::PathKind;
 use super::folder::verbatim_wide;
 use super::ledger::RecordedFile;
@@ -46,6 +46,7 @@ use object::{Handle, Object, os_error};
 use walk::{Foreign, Mode};
 
 pub(in crate::windows) mod object;
+mod owned;
 pub(in crate::windows) mod privilege;
 pub(crate) mod profile;
 pub(in crate::windows) mod take;
@@ -256,6 +257,10 @@ impl AclWriter for NtfsAcl {
             Some(target) => restore_on(&target, grant, label),
             None => Ok(()),
         }
+    }
+
+    fn protect(&mut self, root: &OwnedRoot, pool: &[Sid]) -> Result<Added, ApplyFailure> {
+        owned::protect(root, pool)
     }
 
     fn strip_taken(

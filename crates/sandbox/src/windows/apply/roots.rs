@@ -51,9 +51,16 @@ pub(super) fn hand_back_roots(
     pool.sort();
     pool.dedup();
     let mut seen: BTreeSet<&Path> = BTreeSet::new();
-    for grant in plan.grants() {
-        let (kind, path) = (grant.kind(), grant.path());
-        if !ROOT_KINDS.contains(&kind) || !seen.insert(path) {
+    let granted = plan
+        .grants()
+        .iter()
+        .filter(|g| ROOT_KINDS.contains(&g.kind()))
+        .map(|g| (g.kind(), g.path()));
+    // The folders Clauseo owns too: an agent may have made one before Clauseo did, under a data
+    // folder that let it (S15 owned roots); it goes to the lawyer before its DACL is protected.
+    let owned = plan.owned_roots().iter().map(|r| (r.path_kind(), r.path()));
+    for (kind, path) in granted.chain(owned) {
+        if !seen.insert(path) {
             continue;
         }
         let refuse = |failure| Error::AclApply {

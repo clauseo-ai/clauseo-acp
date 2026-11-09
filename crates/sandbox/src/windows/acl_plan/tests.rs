@@ -529,3 +529,5 @@ fn the_session_temp_folder_gets_modify_and_the_low_label_and_its_parents_nothing
 
 /// The profile, the sandbox records and the data folder's allow list.
 mod data;
+/// The folders Clauseo owns and their protected DACLs.
+mod owned;
