@@ -354,6 +354,9 @@ may drop `Everyone` behind a proxy that runs as the desktop user.
 - **Another matter's allowed, read or runtime paths** beside a matter get no sibling deny, so
   every pool user reads them wherever `Users` can. Owner: S15 close-out, Rohan's read-gap
   decision.
+- **A drive letter with no DOS device counts as local** (Low): the walk reads drive letters with
+  `QueryDosDeviceW` and refuses a matter on a network drive. Whether Windows lazily reconnects a
+  persistent mapping on the first open of such a letter is unverified. Owner: S15 close-out.
 - **A neighbour on a network share** gets no fence: the restricted token fails network logon
   (measured over `\\localhost`). Accepted risk: a share name that aliases a local folder. Owner:
   PR7's VM rows (`s15_wfp_vm`: the (B) token against `\\localhost\C$` and a guest share).
