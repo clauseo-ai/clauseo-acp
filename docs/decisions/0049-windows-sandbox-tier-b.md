@@ -345,18 +345,31 @@ build 26100):
     and counts; a folder just made doesn't, since what goes in it is reported on its own, so a
     script's `mkdir tmp` then `rm -r tmp` ends nothing. A creation time in the future (clock
     skew, or forged) or unreadable counts as moved in: the count fails toward ending the
-    session. A folder that looks just made still counts when its file ID (from the extended
-    record) left another watched place: a `FILE_ACTION_REMOVED` or `FILE_ACTION_RENAMED_OLD_NAME`
-    for the same file ID in the matter, its notes folder, or the agent's state or temp folder,
-    within the last 10 s (`git_watch/pairs.rs`: `PAIR_WINDOW`, at most `PAIR_MAX` = 4096 file
-    IDs kept across the watches, oldest dropped). The folder's own leaving from where it was made
-    doesn't pair. The state and temp folders get watches of their own (recursive, extended
-    records) that only note file IDs: they move nothing and end nothing, and one that can't be
-    armed is logged and passed over rather than refusing the launch, since the matter stays
-    watched and the creation-time rule still holds. The other watch may read its record after
-    the check, so a check with such a folder gone and unpaired waits once (`PAIR_WAIT`, 200 ms)
-    and looks again. Residual: a folder moved in from a place no watch covers that the agent can
-    write, with its creation time set to now, isn't counted (the VM is sizing this). A VM (Windows
+    session. The time is the buffer's receipt, not the event's: a record read late makes a
+    folder just made look older, which errs only toward ending the session. A folder that looks
+    just made still counts when its file ID (the extended record's 64-bit `FileId`: on NTFS the
+    file reference number, whose top 16 bits are the sequence number NTFS bumps when it reuses
+    the MFT record, so an ID isn't reused within the window; on ReFS it isn't promised unique,
+    and a false match only counts more) left another watched place: a `FILE_ACTION_REMOVED` or
+    `FILE_ACTION_RENAMED_OLD_NAME` of a folder with the same file ID in the matter, its notes
+    folder, or the agent's state or temp folder, within 10 s either way (`git_watch/pairs.rs`:
+    `PAIR_WINDOW`). A folder's ID that left first is kept 10 s; a folder gone and unpaired is
+    held 10 s for a leaving record another watch reads later, counted by its own watch on its
+    next record or its 1 s idle tick, and dropped by the creation-time rule when nothing pairs.
+    The folder's own leaving from where it was made doesn't pair. Files' records aren't kept, so
+    a flood of files leaving pushes nothing out. The pairing fails closed when it loses track: a
+    folder's ID under 10 s old pushed out of the bounded list (`PAIR_MAX` = 4096 kept across the
+    watches, and as many held), or any watch's overflow, loses it for 10 s, and a state or temp
+    watch that can't be armed, can't start its thread, panics or breaks loses it for the
+    session; while lost, every folder that looks just made and is gone before its scan counts,
+    those held when it was lost too. The state and temp folders get watches of their own
+    (recursive, extended records, names only: `FILE_NOTIFY_CHANGE_FILE_NAME` and
+    `FILE_NOTIFY_CHANGE_DIR_NAME`, so the agent's writes there don't overflow them) that only note
+    file IDs: they move nothing and end nothing, and one that fails doesn't refuse the launch.
+    Residual: a folder moved in from a place no watch covers that the agent can write, with its
+    creation time set to now, isn't counted. The VM's AccessCheck found that, outside the matter,
+    the agent's state folder and its temp folder, the only folders the agent can create in are
+    other matters' folders: a cross-matter case, which the cross-matter fix addresses. A VM (Windows
     Server 2025, NTFS) confirmed the records: a cross-folder move gives `FILE_ACTION_ADDED` with the
     folder's original creation time, `mkdir` one within about 4 ms, and a rename within a folder
     `FILE_ACTION_RENAMED_NEW_NAME`. Known limit: the plain records (a network share) carry no
