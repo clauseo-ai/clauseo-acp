@@ -183,6 +183,15 @@ pub fn cloexec_pipe() -> std::io::Result<(std::io::PipeReader, std::io::PipeWrit
     std::io::pipe()
 }
 
+/// Runs `start` under the lock [`spawn_in_tree`] holds while it starts a child and
+/// [`cloexec_pipe`] holds while it makes a pipe: for a start outside this crate (an
+/// `async_process::Command`'s `spawn`, say), so its child cannot catch a pipe whose ends are not
+/// close-on-exec yet. `start` should only start the child: other starts wait for it.
+pub fn spawn_locked<T>(start: impl FnOnce() -> T) -> T {
+    let _held = SPAWNING.lock().unwrap_or_else(PoisonError::into_inner);
+    start()
+}
+
 /// Starts `spec` with stdio pipes in a tree of its own: a new process group on Unix, a Job Object
 /// on Windows that it joins before it runs. The child inherits this process's environment, then
 /// `spec`'s variables override it; with [`SpawnOptions::clear_env`] it gets only `spec`'s
@@ -211,10 +220,7 @@ pub fn spawn_in_tree(spec: &LaunchSpec, opts: &SpawnOptions) -> Result<Launched,
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    let spawned = {
-        let _held = SPAWNING.lock().unwrap_or_else(PoisonError::into_inner);
-        command.spawn()
-    };
+    let spawned = spawn_locked(|| command.spawn());
     let mut child = spawned.map_err(|source| Error::Spawn {
         program: spec.program().to_owned(),
         source,

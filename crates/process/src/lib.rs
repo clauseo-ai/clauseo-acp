@@ -116,7 +116,7 @@ pub use error::Error;
 pub use handle::{ExitReport, Handle, ShutdownOutcome, TreeWatch};
 pub use launch::{
     Launched, Launcher, NODE_ENV, PassthroughLauncher, SpawnOptions, cloexec_pipe, is_node_env,
-    spawn_in_tree,
+    spawn_in_tree, spawn_locked,
 };
 pub use live::{close_spawns, live_handles};
 pub use spec::LaunchSpec;

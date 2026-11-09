@@ -366,9 +366,10 @@ which puts `--remote-debugging-pipe` first, drops any `remote-debugging-port` or
 `ChromeLaunch`. macOS has no `pipe2`: a pipe is made, then marked close-on-exec in a second call,
 and a child forked in between keeps both ends. So the pipes come from
 `clauseo_process::cloexec_pipe`, made under the lock `spawn_in_tree` holds while it starts any
-child. A start outside that crate takes no such lock, so both sandbox launchers (the agent's and the
-browser's) also set `SpawnOptions::close_other_fds`: before exec the child closes every descriptor
-of 3 or above it was not passed and that is not close-on-exec. It lists them with
+child; the denial watcher's own starts (`log stream` and its probe) take it too, through
+`clauseo_process::spawn_locked`. Any other start takes no such lock, so both sandbox launchers (the
+agent's and the browser's) also set `SpawnOptions::close_other_fds`: before exec the child closes
+every descriptor of 3 or above it was not passed and that is not close-on-exec. It lists them with
 `proc_pidinfo(PROC_PIDLISTFDS)` into a stack buffer, or tries each up to `getdtablesize` when the
 list does not fit. Tests: a descriptor left open across exec reaches a plain child but not a jailed
 agent or the browser stack, and no plain child started while Chrome's pipes were being made held one
