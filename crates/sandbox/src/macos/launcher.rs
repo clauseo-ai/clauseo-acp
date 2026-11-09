@@ -1,6 +1,7 @@
 //! [`SeatbeltLauncher`]: runs an agent under its policy's profile through
 //! `/usr/bin/sandbox-exec`, which applies the profile and execs the agent in place, so the pid,
-//! the process group and the tree kill stay `process`'s.
+//! the process group and the tree kill stay `process`'s. The agent leads a session of its own
+//! under the process cap (`process_cap.rs`): its `RLIMIT_NPROC` and a watchdog thread.
 
 use std::ffi::OsString;
 use std::io;
@@ -10,6 +11,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use clauseo_process::{LaunchSpec, Launched, Launcher, SpawnOptions, spawn_in_tree};
 
+use super::process_cap::{self, ProcessCapSession, libproc, watchdog};
 use super::profile::{self, SeatbeltProfile};
 use super::watch::{self, Registration};
 use crate::{CappedSink, DenialSink, Policy};
@@ -37,6 +39,7 @@ pub struct SeatbeltLauncher {
     opts: SpawnOptions,
     sink: Arc<LaunchSink>,
     registration: Mutex<Option<Registration>>,
+    cap: ProcessCapSession,
 }
 
 impl std::fmt::Debug for SeatbeltLauncher {
@@ -54,10 +57,16 @@ impl SeatbeltLauncher {
     /// variables plus `TMPDIR`, nothing from this process's environment, and no descriptor of
     /// this process's but its stdio. Its denials reach `denials` through the rate cap
     /// ([`CappedSink`]); the watcher ticks the cap once a second.
+    ///
+    /// `cap` is the process cap of the lawyer session this launch belongs to: its trips (the
+    /// third ends the agent) and its notices, each once a session. The host makes exactly one
+    /// [`ProcessCapSession`] per lawyer session and gives a clone of it to every launcher of
+    /// that session; one made per launcher would reset both at every launch.
     pub fn new(
         policy: Policy,
         opts: SpawnOptions,
         denials: Arc<dyn DenialSink>,
+        cap: ProcessCapSession,
     ) -> SeatbeltLauncher {
         let n = NEXT_TAG.fetch_add(1, Ordering::Relaxed);
         let tag = format!("{}{}-{n}", profile::TAG_PREFIX, std::process::id());
@@ -69,6 +78,7 @@ impl SeatbeltLauncher {
             opts: opts.clear_env().close_other_fds(),
             sink: Arc::new(CappedSink::new(denials)),
             registration: Mutex::new(None),
+            cap,
         }
     }
 
@@ -132,9 +142,34 @@ impl Launcher for SeatbeltLauncher {
             what: "the agent's TMPDIR could not be made",
             source,
         })?;
+        let limit = launch_limit()?;
         self.register();
-        spawn_in_tree(&jailed, &self.opts)
+        let opts = self.opts.clone().own_session().max_processes(limit);
+        let launched = spawn_in_tree(&jailed, &opts)?;
+        // A watchdog that cannot start ends the agent (`launched` drops, and its tree with it):
+        // it never runs without its cap.
+        watchdog::watch(launched.handle.pid(), self.cap.clone()).map_err(|source| {
+            clauseo_process::Error::Os {
+                what: "the agent's process cap could not start",
+                source,
+            }
+        })?;
+        Ok(launched)
     }
+}
+
+/// The agent's `RLIMIT_NPROC` ([`process_cap::process_limit`]), from `kern.maxprocperuid`,
+/// `kern.maxproc` and this process's hard limit, read at each launch.
+fn launch_limit() -> Result<u64, clauseo_process::Error> {
+    let read = |source| clauseo_process::Error::Os {
+        what: "this Mac's process limit could not be read",
+        source,
+    };
+    process_cap::process_limit(
+        libproc::per_user().map_err(read)?,
+        libproc::max_proc().map_err(read)?,
+        libproc::hard_limit().map_err(read)?,
+    )
 }
 
 /// Makes the agent's `TMPDIR` ([`Policy::tmpdir`]) if it is missing; the folder it is in exists

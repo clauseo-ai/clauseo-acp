@@ -15,7 +15,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 
 use clauseo_process::{LaunchSpec, Launched, Launcher, PassthroughLauncher, SpawnOptions};
-use clauseo_sandbox::{Denial, DenialSink, Policy, PolicyBuilder, SeatbeltLauncher};
+use clauseo_sandbox::{
+    Denial, DenialSink, Policy, PolicyBuilder, ProcessCapSession, SeatbeltLauncher,
+};
 use futures::io::AsyncReadExt;
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -201,11 +203,24 @@ impl DenialSink for Collect {
     }
 }
 
-/// A launcher for `policy` whose denials arrive on the returned receiver.
+/// A launcher for `policy` whose denials arrive on the returned receiver, in a process cap
+/// session of its own (each test is one lawyer session); its notices are dropped.
 pub(crate) fn launcher(policy: Policy) -> (SeatbeltLauncher, mpsc::Receiver<Denial>) {
+    launcher_in(policy, ProcessCapSession::new(|_| {}))
+}
+
+/// A launcher for `policy` in the process cap session `cap`, whose denials arrive on the
+/// returned receiver.
+pub(crate) fn launcher_in(
+    policy: Policy,
+    cap: ProcessCapSession,
+) -> (SeatbeltLauncher, mpsc::Receiver<Denial>) {
     let (tx, rx) = mpsc::channel();
     let sink = Arc::new(Collect(Mutex::new(tx)));
-    (SeatbeltLauncher::new(policy, SpawnOptions::new(), sink), rx)
+    (
+        SeatbeltLauncher::new(policy, SpawnOptions::new(), sink, cap),
+        rx,
+    )
 }
 
 /// What a program printed and how it ended.

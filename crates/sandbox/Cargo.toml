@@ -69,8 +69,10 @@ semver = { workspace = true }
 # The watcher (src/macos/watch.rs): `log stream` started as a child, its ndjson lines read on a
 # thread of its own with a once-a-second tick, each line parsed as JSON.
 # The upstream lookup's proxy settings and PAC runs (src/proxy/upstream/macos.rs).
+# The process cap's limits, libproc listings, signals and kqueue (src/macos/process_cap/libproc.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
 async-process = { workspace = true }
+libc = { workspace = true }
 objc2-cf-network = { workspace = true, features = ["std", "CFProxySupport"] }
 objc2-core-foundation = { workspace = true, features = [
   "CFArray",
@@ -207,9 +209,16 @@ clauseo-process = { path = "../process", features = ["test-support"] }
 ring = { workspace = true }
 
 # The jail tests drive the launched programs, wait for a jailed tree's exits with kqueue, and
-# open a pty outside the jail (`term`, and `fs` for its name).
+# open a pty outside the jail (`term`, and `fs` for its name); the process cap's tests read the
+# agent's session and group (`process`).
 [target.'cfg(target_os = "macos")'.dev-dependencies]
-nix = { workspace = true, features = ["event", "term", "fs", "signal"] }
+nix = { workspace = true, features = [
+  "event",
+  "term",
+  "fs",
+  "signal",
+  "process",
+] }
 
 [lints]
 workspace = true

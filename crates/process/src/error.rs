@@ -39,6 +39,19 @@ pub enum Error {
     /// was started.
     #[error("the app is exiting: no new process starts")]
     Closing,
+    /// macOS: the Mac lets so few processes run (`kern.maxprocperuid`, `kern.maxproc`, or this
+    /// process's hard `RLIMIT_NPROC`) that the Safe workspace cannot hold back its reserve for
+    /// the lawyer's own apps and still leave the agent room, so the agent was not started.
+    #[error(
+        "This Mac's process limit is too low for Clauseo's Safe workspace: it leaves room for \
+         {allowed} programs at once, and the Safe workspace needs at least {needed}."
+    )]
+    ProcessLimitTooLow {
+        /// The programs the limits leave room for, the lawyer's and the agent's together.
+        allowed: u64,
+        /// The least the launcher accepts.
+        needed: u64,
+    },
 }
 
 impl Error {
@@ -49,7 +62,8 @@ impl Error {
             | Error::NoWorkingFolder
             | Error::Spawn { .. }
             | Error::Os { .. }
-            | Error::Closing => ErrorCode::AgentLaunchFailed,
+            | Error::Closing
+            | Error::ProcessLimitTooLow { .. } => ErrorCode::AgentLaunchFailed,
         }
     }
 }
@@ -79,6 +93,10 @@ mod tests {
                 source: io::Error::other("denied"),
             },
             Error::Closing,
+            Error::ProcessLimitTooLow {
+                allowed: 600,
+                needed: 1024,
+            },
         ];
         for error in &errors {
             assert_eq!(error.code(), ErrorCode::AgentLaunchFailed, "{error}");

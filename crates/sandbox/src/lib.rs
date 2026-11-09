@@ -76,11 +76,18 @@
 //! - [`SeatbeltProfile::new`]`(policy, tag)` (every target): the profile text and its `-D`
 //!   parameters; every policy path is a parameter, and the text holds only rules, port numbers
 //!   and the tag. Rules: `src/macos/profile.rs` and `src/macos/base.sb`.
-//! - macOS: [`SeatbeltLauncher::new`]`(policy, opts, denials)` is a `process::Launcher`. Each
+//! - macOS: [`SeatbeltLauncher::new`]`(policy, opts, denials, cap)` is a `process::Launcher`. Each
 //!   launch runs `/usr/bin/sandbox-exec -p <profile> -D NAME=path ... <program> <args>` through
 //!   `spawn_in_tree`, with the agent's variables plus `TMPDIR=`[`Policy::tmpdir`] (made if
 //!   missing) and nothing else: the launcher always adds `SpawnOptions::clear_env` to the
 //!   options it is given, so no variable of the host's environment reaches the jail.
+//!   The agent leads a session of its own under the process cap (`src/macos/process_cap.rs`):
+//!   `RLIMIT_NPROC` at `min(kern.maxprocperuid, kern.maxproc - 512) - 512` (a Mac that leaves
+//!   under 1,024 refuses the launch), and a watchdog that stops the session's descendants past
+//!   256 and ends the agent at a session's third trip. Its trips and notices
+//!   ([`ProcessCapNotice`], each once a session) count in `cap`, a [`ProcessCapSession`]: the
+//!   host makes exactly one per lawyer session and clones it into every launcher of that
+//!   session. There is no default and no other way to set it.
 //!   Denials reach `denials` through a [`CappedSink`]. The first launch registers the launcher
 //!   with the one host-wide watcher (`/usr/bin/log stream`, started with the first launcher
 //!   and stopped with the last); dropping the launcher unregisters it. The tag, the sink and the
@@ -181,9 +188,9 @@ pub use denial::{
 pub use detect::{Detection, NoSandbox, SET_UP_BY_OTHER_USER, Tier, detect, probe};
 pub use error::Error;
 pub use links::{LinkFinding, LinkKind, MatterScan, scan_links, scan_matter};
-#[cfg(target_os = "macos")]
-pub use macos::SeatbeltLauncher;
 pub use macos::SeatbeltProfile;
+#[cfg(target_os = "macos")]
+pub use macos::{ProcessCapNotice, ProcessCapSession, SeatbeltLauncher};
 pub use policy::{
     BrowserBridge, CLAUDE_STORE_BESIDE_LOCK_SUFFIX, CLAUDE_STORE_FILES, CLAUDE_STORE_LOCK_FOLDERS,
     ClaudeStore, INSTRUCTIONS_AT_ANY_DEPTH, LINK_RULES_MAX, Loopback, PROTECTED_AT_ANY_DEPTH,

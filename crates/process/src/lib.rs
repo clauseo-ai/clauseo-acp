@@ -5,10 +5,12 @@
 //!
 //! - Every agent process start: [`spawn_in_tree`] is the one place a child starts, and sandbox
 //!   launchers later rewrite the spec and call it, behind the same [`Launcher`] trait.
-//! - The process tree: a new process group on Unix (`process_group(0)`, signals through `nix`'s
-//!   `killpg`); on Windows a Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, which the agent
-//!   joins while suspended (`CREATE_SUSPENDED`, then its threads resume) and which it never runs
-//!   outside. Windows children get `CREATE_NO_WINDOW`. Every Win32 call is in `os/windows.rs`.
+//! - The process tree: a new process group on Unix (`process_group(0)`, or a new session with
+//!   [`SpawnOptions::own_session`]; signals through `nix`'s `killpg`), and an optional
+//!   `RLIMIT_NPROC` ([`SpawnOptions::max_processes`]); on Windows a Job Object with
+//!   `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, which the agent joins while suspended
+//!   (`CREATE_SUSPENDED`, then its threads resume) and which it never runs outside. Windows
+//!   children get `CREATE_NO_WINDOW`. Every Win32 call is in `os/windows.rs`.
 //! - The shutdown ladder: close stdin, the stdin grace (2 s, or [`SpawnOptions::stdin_grace`]),
 //!   SIGTERM to the group, 3 s, SIGKILL to the group, and 2 s more for the exit. On Windows: close
 //!   stdin, the stdin grace, end the job, 2 s. On Unix the tree kill then kills every descendant

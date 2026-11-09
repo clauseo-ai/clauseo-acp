@@ -485,6 +485,82 @@ Residual risks:
 - Seatbelt's regex: `#"^[A-Za-z0-9.-]+\.MachPortRendezvousServer\.[0-9]+$"` as a `global-name-regex`
   matched every Mach service on this Mac (logd, SecurityServer). The rule uses the exact name.
 
+### The process cap
+
+Seatbelt cannot count processes: `process-fork` is allow or deny, with no counter, and it has no
+rule for `setsid` or `setpgid`. `RLIMIT_NPROC` is compared with the user's whole process count
+(xnu `fork1`), not one tree's. So the cap is the launcher's (`macos/process_cap.rs`):
+- Launch: the agent leads a session of its own (`setsid` in `pre_exec`,
+  `SpawnOptions::own_session`) with `RLIMIT_NPROC` soft and hard at
+  `min(kern.maxprocperuid, kern.maxproc - 512) - 512` (3,488 on a Mac at 4,000 and 6,000), read
+  at each launch and never above the launcher's own hard limit (`SpawnOptions::max_processes`).
+  The backstop: whatever the agent does, the lawyer keeps 512 process slots for windows,
+  Terminal tabs and apps, and other users' processes (root's daemons, 183 on an idle Mac mini)
+  keep 512 of `kern.maxproc`, at which fork fails system-wide. When the limits leave under
+  1,024 (a low hard limit included), the launch is refused
+  (`clauseo_process::Error::ProcessLimitTooLow`).
+- Watchdog: a thread of the host per agent. Every 50 ms it lists every pid
+  (`proc_listallpids`) and asks each one's session (`getsid`, about 66 µs for 600 processes):
+  the agent's session holds every process the agent started that did not call `setsid`,
+  whatever group job control (`set -m`, `setpgid`) moved it to and whoever adopted it. A zombie
+  answers `ESRCH` to `getsid`, so zombies never count. Every 2 s, and past the cap, it also
+  reads every process (`proc_pidinfo`) and walks parents from the agent and its session, for
+  descendants that called `setsid` while their parent lives. One listing runs per poll; there
+  is no kqueue. The session's id is the agent's pid, and xnu gives no new process a pid that
+  names a live session or group (`kern_fork.c`), so a member is the agent's while one lives.
+  The watchdog goes on after the agent exits, until the session is empty.
+- At `AGENT_PROCESS_CAP` (256 descendants, Windows' job cap): `killpg(SIGSTOP)` freezes the
+  agent's group, each descendant found is stopped too, then each is killed, by pid with its start
+  checked, never by name. The agent gets `SIGCONT` and its turn reports the failed command, as on
+  Windows. It is killed instead when its own children are more than half of the descendants (it
+  is the one forking), or at the lawyer session's third trip. What the bounded kill rounds leave
+  goes to `hand_over_to_session_sweep`.
+- Failing closed: a failed listing, an agent that runs but cannot be read, or one whose start is
+  missing at launch is logged, and the agent and its session are killed (at launch, the launch
+  fails).
+- Notices (`ProcessCapNotice`, `process_cap/session.rs`). They are not Windows' sentence, since
+  here the cap ends programs:
+  - a trip: "The AI tool started too many programs at once, so Clauseo ended the extra ones. It
+    keeps going. If it seems stuck, ask it to try a smaller step."
+  - the agent ended: "The AI tool kept starting too many programs at once, so Clauseo stopped
+    it. Start it again and ask it to try a smaller step."
+  - the watch failed closed: "Clauseo couldn't keep track of the AI tool's programs, so it
+    stopped the tool to be safe. Start it again."
+
+  Each goes once per lawyer session through `cap`, the `ProcessCapSession` that
+  `SeatbeltLauncher::new` requires. The host makes exactly one per lawyer session and clones it
+  into every launcher of that session. There is no default, so a launcher can't silently count
+  per launch. An agent that exits at once, with its session empty at the first count, is a
+  normal end: no notice and no failed launch.
+- Nothing outside the tree starts processes for the agent: the profile is `(deny default)` with
+  no `job-creation`, `lsopen` or `appleevent-send` rule, and its `mach-lookup` names only
+  opendirectoryd, notifyd, logd, diagnosticd and powerd (`base.sb`), plus securityd and trustd
+  with the Keychain (a residual below). `launchctl submit` from the jail fails and launchd holds no job (the jail
+  test `launchd_starts_nothing_for_the_agent`); outside the jail the same command works.
+
+Measured on a Mac mini (M-series, macOS 27.2): a binary tree of shells 10 levels deep (2,047
+processes at most) was frozen with 145 to 225 of its shells started and about 400 processes in
+all, and process starts outside the jail took at most 72 ms while it ran (the jail test
+`forkcap`). The `set -m` variant, every job orphaned in a group of its own, was frozen too. The
+cap holds after the fact: a bomb runs past 256 for up to one poll.
+
+Residual risks:
+- A descendant that calls `setsid` and is then orphaned (its parent exits, so launchd adopts
+  it) is in neither the session nor the parent walk: the watchdog does not see it or its
+  children. `setsid` is not a shell builtin and macOS ships no `setsid` tool, but any language
+  runtime (`perl -e 'POSIX::setsid()'`, Python, Node) calls it. Only the backstop bounds them:
+  they can reach the agent's limit and no further, and they keep running until the handle's tree
+  kill, which misses them too. The session-marker sweep (a later change) covers them. Leaving a
+  process group alone is not an escape: the session still holds it.
+- The cap counts processes, not threads or memory: 256 large processes can still fill memory.
+- With the Keychain on (`profile.rs`, `keychain`), the agent reaches SecurityServer,
+  securityd.xpc and trustd.agent. securityd can have launchd start SecurityAgent, and trustd's
+  agent is per user. Each is a single instance, so the agent cannot multiply them, but they run
+  outside its tree and its `RLIMIT_NPROC`, and SecurityAgent can put a prompt in front of the
+  lawyer.
+- Between a process's start check and its `kill`, it could exit and its pid be reused: that
+  needs the pid space to wrap within microseconds. macOS has no pidfd.
+
 ## Status
 
 proposed

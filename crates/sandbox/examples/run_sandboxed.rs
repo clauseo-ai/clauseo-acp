@@ -64,7 +64,7 @@ mod jail {
     };
     use clauseo_process::{AgentStdin, LaunchSpec, Launched, Launcher, SpawnOptions};
     use clauseo_sandbox::{
-        BrowserSocketDir, Denial, DenialSink, Loopback, Policy, SeatbeltLauncher,
+        BrowserSocketDir, Denial, DenialSink, Loopback, Policy, ProcessCapSession, SeatbeltLauncher,
     };
     use futures::io::{AllowStdIo, AsyncWriteExt as _};
     use nix::sys::signal::{SaFlags, SigAction, SigHandler, SigSet, Signal, killpg, sigaction};
@@ -307,7 +307,9 @@ mod jail {
         };
         let policy = builder.build().map_err(|e| e.to_string())?;
         let cwd = policy.matter().to_owned();
-        let launcher = SeatbeltLauncher::new(policy, SpawnOptions::new(), Arc::new(PrintSink));
+        // One run is one session: its process cap notices go to stderr.
+        let cap = ProcessCapSession::new(|notice| say(&format!("{}\n", notice.text())));
+        let launcher = SeatbeltLauncher::new(policy, SpawnOptions::new(), Arc::new(PrintSink), cap);
         let mut command = args.command.into_iter();
         let program = PathBuf::from(command.next().unwrap_or_default());
         if let Some(dir) = &socket_dir {
