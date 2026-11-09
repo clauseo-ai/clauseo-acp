@@ -19,10 +19,11 @@
 // within a 120 s timeout, body included. With GH_TOKEN set (the release job's token) the asset
 // comes through the GitHub API, as `gh release download` fetches it: the release by its tag,
 // then the asset's API url with Accept: application/octet-stream; without it, the pinned url,
-// anonymously. Each request is tried up to 5 times, 30 s apart, on a network error, a 5xx or a
-// 429 (github.com's anonymous 504s, #850); a 404 or other answer, an oversized body and a
-// checksum mismatch fail at once. The archive is read in memory: a .tar.gz with gunzip and
-// the ustar headers, a .zip through its central directory (stored or deflated entries).
+// anonymously. Each request goes through fetch.mjs, the helper agent-browser.mjs shares: tried up
+// to 5 times, 30 s apart, on a network error, a 5xx or a 429 (github.com's anonymous 504s, #850);
+// a 404 or other answer, an oversized body and a checksum mismatch fail at once. The archive is
+// read in memory: a .tar.gz with gunzip and the ustar headers, a .zip through its central
+// directory (stored or deflated entries).
 //
 // Tests: `stetdoc.test.mjs` next to this file, run with
 // `node --test 'crates/desktop/sidecars/*.test.mjs'`.
@@ -31,6 +32,7 @@ import { createHash } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { gunzipSync, inflateRawSync } from 'node:zlib';
+import { fetchGitHubAsset } from './fetch.mjs';
 
 /** The pin, next to this folder: `crates/desktop/stetdoc.toml`. */
 const DEFAULT_PIN = new URL('../stetdoc.toml', import.meta.url);
@@ -55,7 +57,8 @@ export const assetName = (triple) => `stetdoc-${triple}${isWindows(triple) ? '.z
  * with `url` and `sha256` strings, or a `pending` string. Anything else throws, with the line.
  *
  * @param {string} text the file's contents
- * @returns {{ version: string, triples: Map<string, { url: string, sha256: string } | { pending: string }> }}
+ * @returns {{ version: string,
+ *   triples: Map<string, { url: string, sha256: string } | { pending: string }> }}
  */
 export function parsePin(text) {
   let version;
@@ -122,20 +125,6 @@ export function parsePin(text) {
   return { version, triples };
 }
 
-/** How many times a request is tried, and the wait between tries. */
-const ATTEMPTS = 5;
-const RETRY_MS = 30_000;
-const API = 'https://api.github.com/repos/clauseo-ai/stetdoc/releases';
-const API_ASSET = /^https:\/\/api\.github\.com\/repos\/clauseo-ai\/stetdoc\/releases\/assets\/\d+$/;
-
-/** A failure worth another try: a network error, a 5xx or a 429. */
-class Transient extends Error {}
-
-/** The longest a download may take, body included. */
-const TIMEOUT_MS = 120_000;
-/** The largest asset we accept: the pinned archives are about 4 MB. */
-const MAX_BYTES = 64 * 1024 * 1024;
-
 /** Throws unless `url` is https on github.com, the pinned release's asset for `triple`. */
 function checkUrl(url, version, triple) {
   let parsed;
@@ -156,41 +145,6 @@ function checkUrl(url, version, triple) {
   if (!plain || parsed.pathname !== want) {
     throw new Error(`stetdoc: pinned url for ${triple} must be https://${HOST}${want}: ${url}`);
   }
-}
-
-/** The response body, at most MAX_BYTES. */
-async function readCapped(response, triple) {
-  const tooBig = `stetdoc: download for ${triple} is over ${MAX_BYTES} bytes; nothing written`;
-  const declared = response.headers?.get('content-length');
-  if (declared !== null && declared !== undefined && Number(declared) > MAX_BYTES) {
-    await response.body?.cancel();
-    throw new Error(tooBig);
-  }
-  if (!response.body) {
-    const bytes = Buffer.from(await response.arrayBuffer());
-    if (bytes.length > MAX_BYTES) throw new Error(tooBig);
-    return bytes;
-  }
-  const reader = response.body.getReader();
-  const chunks = [];
-  let total = 0;
-  for (;;) {
-    let done;
-    let value;
-    try {
-      ({ done, value } = await reader.read());
-    } catch (error) {
-      throw new Transient(`stetdoc: download for ${triple} broke off: ${error.message}`);
-    }
-    if (done) break;
-    total += value.byteLength;
-    if (total > MAX_BYTES) {
-      await reader.cancel();
-      throw new Error(tooBig);
-    }
-    chunks.push(value);
-  }
-  return Buffer.concat(chunks, total);
 }
 
 /** A path's last component, `/` or `\` separated. */
@@ -286,7 +240,6 @@ export function extractProgram(archive, program, zip) {
  * @returns {Promise<string>}
  */
 export async function fetchStetdoc(triple, destPath, options = {}) {
-  const doFetch = options.fetch ?? globalThis.fetch;
   const log = options.log ?? console.log;
   const pin = parsePin(await readFile(options.pinPath ?? DEFAULT_PIN, 'utf8'));
 
@@ -300,46 +253,18 @@ export async function fetchStetdoc(triple, destPath, options = {}) {
   }
   checkUrl(entry.url, pin.version, triple);
 
-  const wait = options.wait ?? ((ms) => new Promise((done) => setTimeout(done, ms)));
-  const token = (options.env ?? process.env).GH_TOKEN || '';
-  /** One GET of `url` with `headers`, tried up to ATTEMPTS times; returns the body. */
-  const get = async (url, headers) => {
-    for (let attempt = 1; ; attempt += 1) {
-      try {
-        let response;
-        try {
-          response = await doFetch(url, { headers, redirect: 'follow', signal: AbortSignal.timeout(TIMEOUT_MS) });
-        } catch (error) {
-          throw new Transient(`stetdoc: download for ${triple} failed: ${error.message}`);
-        }
-        if (response.status !== 200) {
-          const message = `stetdoc: download for ${triple} answered HTTP ${response.status}, not 200`;
-          await response.body?.cancel();
-          throw response.status === 429 || response.status >= 500 ? new Transient(message) : new Error(message);
-        }
-        return await readCapped(response, triple);
-      } catch (error) {
-        if (!(error instanceof Transient) || attempt >= ATTEMPTS) throw error;
-        log(`${error.message} (try ${attempt} of ${ATTEMPTS}); trying again in ${RETRY_MS / 1000} s`);
-        await wait(RETRY_MS);
-      }
-    }
-  };
-
-  let bytes;
-  if (token) {
-    const auth = { Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28' };
-    const release = JSON.parse(
-      (await get(`${API}/tags/v${pin.version}`, { ...auth, Accept: 'application/vnd.github+json' })).toString('utf8'),
-    );
-    const asset = (release.assets ?? []).find((candidate) => candidate.name === assetName(triple));
-    if (!asset || typeof asset.url !== 'string' || !API_ASSET.test(asset.url)) {
-      throw new Error(`stetdoc: release v${pin.version} lists no API asset ${assetName(triple)}`);
-    }
-    bytes = await get(asset.url, { ...auth, Accept: 'application/octet-stream' });
-  } else {
-    bytes = await get(entry.url, {});
-  }
+  const bytes = await fetchGitHubAsset({
+    url: entry.url,
+    owner: 'clauseo-ai',
+    repo: 'stetdoc',
+    tag: `v${pin.version}`,
+    assetName: assetName(triple),
+    token: (options.env ?? process.env).GH_TOKEN,
+    label: `stetdoc: download for ${triple}`,
+    fetch: options.fetch,
+    wait: options.wait,
+    log,
+  });
   const digest = createHash('sha256').update(bytes).digest('hex');
   if (digest !== entry.sha256) {
     throw new Error(`stetdoc: sha256 for ${triple} is ${digest}, the pin says ${entry.sha256}; nothing written`);
