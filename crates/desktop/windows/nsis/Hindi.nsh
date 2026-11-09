@@ -79,7 +79,7 @@ LangString nativeArm64Notice ${LANG_HINDI} "इस कंप्यूटर म�
 ; ask for an administrator, leaves it to Windows to update (installer.nsi block
 ; webview2-no-elevation); the per-machine installer says it when its update fails. Details list
 ; only; the install goes on. Provisional (2026-11-09).
-LangString webview2TooOld ${LANG_HINDI} "इस कंप्यूटर पर WebView2 का संस्करण Clauseo की ज़रूरत से पुराना है। Windows इसे बैकग्राउंड में अपने-आप अपडेट करता रहता है। अगर Clauseo खोलते समय भी यह पुराना हो, तो Clauseo आपको बताएगा कि नया संस्करण कैसे पाएँ।"
+LangString webview2TooOld ${LANG_HINDI} "इस कंप्यूटर पर WebView2 का संस्करण Clauseo की ज़रूरत से पुराना है। Windows इसे अपने-आप अपडेट करता है। अपडेट होने के बाद Clauseo फिर से खोलें।"
 
 ; Tauri's stock English, as @tauri-apps/cli 2.12.2 ships it (crates/tauri-bundler/src/bundle/
 ; windows/nsis/languages/English.nsh at tauri-cli-v2.12.2), deleteAppData aside, with one fix:

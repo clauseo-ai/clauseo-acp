@@ -3,11 +3,12 @@
 use std::cmp::Ordering;
 
 /// The oldest runtime the app starts on: `bundle.windows.minimumWebview2Version` in
-/// `tauri.conf.json`, which the installer also uses (a test holds the two together). It is the
-/// version clean Windows 11 ships: above it, the per-user installer updates the runtime and a
-/// standard user is asked for an administrator. Raised only on purpose, and only to a version
-/// clean Windows ships (`docs/decisions/0035-release-builds.md`).
-pub(super) const MINIMUM: &str = "152.0.0.0";
+/// `tauri.conf.json`, which the installer also uses (a test holds the two together). It is what
+/// the app needs: runtime 89.0.774.44 (SDK 1.0.774.44) brought `ICoreWebView2Controller2`, which
+/// wry requires for the window's background colour; every newer interface wry uses has a fallback,
+/// and Tauri states no minimum. Raised only on purpose, when the app comes to need a newer runtime
+/// (`docs/decisions/0035-release-builds.md`).
+pub(super) const MINIMUM: &str = "89.0.774.44";
 
 /// A `WebView2` version: major, minor, build and patch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
