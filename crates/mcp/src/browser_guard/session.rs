@@ -260,6 +260,13 @@ impl State {
         call
     }
 
+    /// Whether a request sent to agent-browser awaits its answer (`relay/clients/streams.rs`
+    /// holds a listen client's idle deadline meanwhile).
+    #[cfg(unix)]
+    pub(crate) fn awaiting(&self) -> bool {
+        !self.in_flight.is_empty()
+    }
+
     /// The ids still unanswered, which the guard now answers itself.
     pub(crate) fn take_in_flight(&mut self) -> Vec<Value> {
         self.in_flight.drain(..).map(|(id, _)| id).collect()

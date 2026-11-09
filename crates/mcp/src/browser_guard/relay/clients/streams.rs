@@ -5,9 +5,10 @@
 //!   the client's disconnect) and every later write fails at once: the agent's output lock is never
 //!   held past that bound.
 //! - [`FirstLine`] gives a new client [`FIRST_LINE_WAIT`] for its first whole line, which must be
-//!   a JSON-RPC request or notification, and then [`IDLE_WAIT`] between reads. One that sends no
-//!   such line in time, sends anything else first, or later sends nothing for the idle wait, is
-//!   taken as gone, so no connection holds the one client's place by sending nothing or noise.
+//!   a JSON-RPC request or notification, and then [`IDLE_WAIT`] from each whole line to the next,
+//!   paused while a request of its awaits its answer. One that sends no such line in time, sends
+//!   anything else first, or later sends no whole line for the idle wait, is taken as gone, so no
+//!   connection holds the one client's place by sending nothing, noise or a byte at a time.
 
 use std::io::{self, Read, Write};
 use std::net::Shutdown;
@@ -19,12 +20,13 @@ use crate::transport::Connection;
 
 /// The longest one line to the client may take to write.
 pub(crate) const WRITE_WAIT: Duration = Duration::from_secs(10);
-/// The longest a new client may take to send its first whole line.
-pub(crate) const FIRST_LINE_WAIT: Duration = Duration::from_secs(10);
-/// The longest a client may send nothing once its first line has passed: the browser's own idle
-/// stop (`session::IDLE_STOP`), so a quiet client is closed no sooner than its browser would stop
-/// anyway. Its disconnect stops the browser as the idle stop does, and the bridge connects again
-/// at its next request. Windows' pipe (`bjail-wj1-pipe`) has no idle bound of its own to match.
+/// The longest a new client may take, from the accept, to send its first whole line.
+pub(crate) const FIRST_LINE_WAIT: Duration = Duration::from_secs(30);
+/// The longest a client may go without sending a whole line once its first line has passed, with
+/// none of its requests awaiting an answer: the browser's own idle stop (`session::IDLE_STOP`),
+/// so a quiet client is closed no sooner than its browser would stop anyway. Its disconnect stops
+/// the browser as the idle stop does, and the bridge connects again at its next request. Windows'
+/// pipe (`bjail-wj1-pipe`) has no idle bound of its own to match.
 pub(crate) const IDLE_WAIT: Duration = Duration::from_secs(600);
 /// Tests only (the `test-support` feature, never in a shipped build): [`WRITE_WAIT`] in
 /// milliseconds, read from the guard's own environment.
@@ -134,71 +136,124 @@ impl<C: Connection> Write for ToClient<C> {
     }
 }
 
-/// The client's side of the agent's input. Until the first newline, reads are bounded by the
-/// first-line deadline and kept here; the first line must then be a request or notification (a
-/// JSON object with a string `method`), or the connection is refused, so a bare newline or any
-/// other noise does not take the one client's place. The kept bytes are then handed on as read,
-/// and every later read is bounded by the idle wait ([`IDLE_WAIT`]): a client that sends nothing
-/// for that long is taken as gone.
+/// The client's side of the agent's input, with two deadlines, each a point in time that only a
+/// whole line moves: partial bytes never extend either.
+///
+/// - Until the first newline: [`FIRST_LINE_WAIT`] from the accept. What arrives is kept here,
+///   and the line must then be a request or notification (a JSON object with a string
+///   `method`), or the connection is refused, so a bare newline or other noise does not take
+///   the one client's place. The kept bytes are then handed on as read.
+/// - After it: [`IDLE_WAIT`] from the last newline that arrived. While any of the client's
+///   requests awaits its answer ([`FirstLine::paused_while`]), the deadline does not run: it
+///   starts again, whole, once the last answer is in, so a slow tool call is never cut off.
+///
+/// Each read's timeout is the time left until the deadline, set afresh before every read, so a
+/// client dripping one byte at a time is dropped at the deadline all the same.
 pub(crate) struct FirstLine<C: Connection> {
     conn: C,
-    /// `None` once the first line has arrived and passed.
-    deadline: Option<Instant>,
-    /// The bound on each read after the first line.
+    /// When the client is taken as gone, unless a whole line arrives (or, after the first line,
+    /// a request of its awaits its answer).
+    deadline: Instant,
+    /// The bound after each whole line.
     idle: Duration,
+    /// Whether the first line has arrived and passed.
+    passed: bool,
     /// What was read up to the first newline and past it in the same read, not yet handed on.
     kept: Vec<u8>,
+    /// How much of `kept` has been scanned for the first newline: each byte is scanned once.
+    scanned: usize,
     /// How much of `kept` has been handed on.
     handed: usize,
+    /// Whether any of the client's requests awaits its answer; the deadline waits meanwhile.
+    busy: Option<Box<dyn Fn() -> bool + Send>>,
+    /// Whether `busy` said so at the last look.
+    was_busy: bool,
 }
 
+/// How often a read looks again whether the client's requests are all answered, while one
+/// awaits its answer.
+const BUSY_LOOK: Duration = Duration::from_secs(1);
+
 impl<C: Connection> FirstLine<C> {
+    /// `wait` from now for the first line, then `idle` after each whole line.
     pub(crate) fn new(conn: C, wait: Duration, idle: Duration) -> FirstLine<C> {
         FirstLine {
             conn,
-            deadline: Some(now() + wait),
+            deadline: now() + wait,
             idle,
+            passed: false,
             kept: Vec::new(),
+            scanned: 0,
             handed: 0,
+            busy: None,
+            was_busy: false,
         }
     }
 
-    /// Reads until the first newline, within the deadline, and checks the line it ends.
-    fn first_line(&mut self, deadline: Instant) -> io::Result<()> {
+    /// Holds the idle deadline while `busy` says a request of the client's awaits its answer.
+    #[must_use]
+    pub(crate) fn paused_while(mut self, busy: impl Fn() -> bool + Send + 'static) -> FirstLine<C> {
+        self.busy = Some(Box::new(busy));
+        self
+    }
+
+    /// One read from the connection, bounded by the deadline (by [`BUSY_LOOK`] instead while a
+    /// request awaits its answer, the deadline then moving with it). `Ok(None)` when the bound
+    /// passed with the deadline still ahead: the caller reads again. `Err` once the deadline
+    /// has passed.
+    fn read_bounded(&mut self, buf: &mut [u8]) -> io::Result<Option<usize>> {
+        let busy = self.passed && self.busy.as_ref().is_some_and(|busy| busy());
+        // While busy, and once at the end of it, the whole idle bound lies ahead again.
+        if busy || self.was_busy {
+            self.deadline = now() + self.idle;
+        }
+        self.was_busy = busy;
+        let left = self.deadline.saturating_duration_since(now());
+        if left.is_zero() {
+            note(if self.passed {
+                "closed a client that sent no whole line for the idle wait"
+            } else {
+                "closed a client that sent no whole line in time"
+            });
+            return Err(io::ErrorKind::TimedOut.into());
+        }
+        let bound = if busy { left.min(BUSY_LOOK) } else { left };
+        self.conn.set_read_timeout(Some(bound))?;
+        match self.conn.read(buf) {
+            Ok(count) => Ok(Some(count)),
+            Err(error) if timed_out(&error) || error.kind() == io::ErrorKind::Interrupted => {
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Reads until the first newline, within the first deadline, and checks the line it ends.
+    fn first_line(&mut self) -> io::Result<()> {
         let mut chunk = [0_u8; 8192];
         let end = loop {
-            if let Some(at) = self.kept.iter().position(|&byte| byte == b'\n') {
-                break at;
+            let unscanned = self.kept.get(self.scanned..).unwrap_or_default();
+            if let Some(at) = unscanned.iter().position(|&byte| byte == b'\n') {
+                break self.scanned + at;
             }
+            self.scanned = self.kept.len();
             if self.kept.len() > MAX_LINE_BYTES {
                 return Err(refused("closed a client whose first line is too long"));
             }
-            let left = deadline.saturating_duration_since(now());
-            let read = if left.is_zero() {
-                Err(io::ErrorKind::TimedOut.into())
-            } else {
-                self.conn
-                    .set_read_timeout(Some(left))
-                    .and_then(|()| self.conn.read(&mut chunk))
-            };
-            match read {
-                Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
-                Ok(count) => self
+            match self.read_bounded(&mut chunk)? {
+                None => {}
+                Some(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
+                Some(count) => self
                     .kept
                     .extend_from_slice(chunk.get(..count).unwrap_or_default()),
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
-                Err(error) if timed_out(&error) => {
-                    note("closed a client that sent no whole line in time");
-                    return Err(error);
-                }
-                Err(error) => return Err(error),
             }
         };
         if !is_request(self.kept.get(..end).unwrap_or_default()) {
             return Err(refused("closed a client whose first line is not a request"));
         }
-        self.deadline = None;
-        self.conn.set_read_timeout(Some(self.idle))
+        self.passed = true;
+        self.deadline = now() + self.idle;
+        Ok(())
     }
 }
 
@@ -226,8 +281,8 @@ fn refused(why: &str) -> io::Error {
 
 impl<C: Connection> Read for FirstLine<C> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if let Some(deadline) = self.deadline {
-            self.first_line(deadline)?;
+        if !self.passed {
+            self.first_line()?;
         }
         if let Some(rest) = self.kept.get(self.handed..)
             && !rest.is_empty()
@@ -243,12 +298,17 @@ impl<C: Connection> Read for FirstLine<C> {
             }
             return Ok(count);
         }
-        match self.conn.read(buf) {
-            Err(error) if timed_out(&error) => {
-                note("closed a client that sent nothing for the idle wait");
-                Err(error)
+        loop {
+            if let Some(count) = self.read_bounded(buf)? {
+                // Each byte read is scanned once, here.
+                if buf.get(..count).is_some_and(|bytes| bytes.contains(&b'\n')) {
+                    self.deadline = now() + self.idle;
+                }
+                return Ok(count);
             }
-            read => read,
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

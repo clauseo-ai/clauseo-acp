@@ -9,9 +9,9 @@
 //! version; a peer that has gone, or a lookup that fails, reads as `None`, so the check fails
 //! closed. On Linux the pid comes from the peer's pidfd (`SO_PEERPIDFD`, Linux 6.5 on) when the
 //! kernel has it, and the start time is taken only while that pidfd shows the peer still running,
-//! so a pid reused between the two reads cannot pass; an older kernel (`ENOPROTOOPT`, `EINVAL`)
-//! falls back to `SO_PEERCRED`'s pid and its start time, which a pid reused within that window
-//! could match.
+//! so a pid reused between the two reads cannot pass. An older kernel (`ENOPROTOOPT`) falls back
+//! to `SO_PEERCRED`'s pid and its start time, which a pid reused within that window could match;
+//! `EINVAL` refuses, as it can mean the peer is gone and reaped already.
 
 use std::os::unix::net::UnixStream;
 
@@ -30,22 +30,23 @@ pub(crate) fn own() -> Option<Identity> {
     }
 }
 
-/// How many threads this process has, `None` when the kernel cannot say: `Socket::make` checks it
-/// is one (`unix.rs`). It sits here with the other reads of this process's own task.
+/// How many threads this process has, `None` when the kernel cannot say: `Socket::make` refuses
+/// to listen unless it is one (`unix.rs`). It sits here with the other reads of this process's
+/// own task.
 pub(crate) fn threads() -> Option<usize> {
     #[cfg(target_os = "macos")]
     {
         mac::threads()
     }
+    // One entry per thread in `/proc/self/task`; an entry that cannot be read fails the count.
     #[cfg(not(target_os = "macos"))]
     {
-        let status = std::fs::read_to_string("/proc/self/status").ok()?;
-        status
-            .lines()
-            .find_map(|line| line.strip_prefix("Threads:"))?
-            .trim()
-            .parse()
-            .ok()
+        let mut count = 0;
+        for entry in std::fs::read_dir("/proc/self/task").ok()? {
+            entry.ok()?;
+            count += 1;
+        }
+        Some(count)
     }
 }
 
@@ -90,11 +91,18 @@ enum Pidfd {
 /// The peer's pidfd; `None` when the kernel has `SO_PEERPIDFD` and refuses.
 #[cfg(target_os = "linux")]
 fn peer_pidfd(stream: &UnixStream) -> Option<Pidfd> {
-    use nix::errno::Errno;
     use nix::sys::socket::{getsockopt, sockopt::PeerPidfd};
-    match getsockopt(stream, PeerPidfd) {
+    pidfd_from(getsockopt(stream, PeerPidfd))
+}
+
+/// What `SO_PEERPIDFD`'s result means: only `ENOPROTOOPT` says the kernel lacks it. `EINVAL`
+/// (Linux 6.5 to 6.15) can mean the peer is gone and reaped already, so it refuses, as every
+/// other error does.
+#[cfg(target_os = "linux")]
+fn pidfd_from(result: nix::Result<std::os::fd::OwnedFd>) -> Option<Pidfd> {
+    match result {
         Ok(pidfd) => Some(Pidfd::Got(pidfd)),
-        Err(Errno::ENOPROTOOPT | Errno::EINVAL) => Some(Pidfd::Unsupported),
+        Err(nix::errno::Errno::ENOPROTOOPT) => Some(Pidfd::Unsupported),
         Err(_) => None,
     }
 }
@@ -164,6 +172,26 @@ mod thread_tests {
         other.join().unwrap();
         // Other tests' threads may come and go in the same process (not under nextest).
         assert!(during > before || during >= 3, "{before} then {during}");
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod pidfd_tests {
+    use nix::errno::Errno;
+
+    use super::{Pidfd, pidfd_from};
+
+    /// Only `ENOPROTOOPT` falls back; `EINVAL` and any other error refuse; a pidfd is used.
+    #[test]
+    fn only_enoprotoopt_falls_back_and_einval_refuses() {
+        assert!(matches!(
+            pidfd_from(Err(Errno::ENOPROTOOPT)),
+            Some(Pidfd::Unsupported)
+        ));
+        assert!(pidfd_from(Err(Errno::EINVAL)).is_none());
+        assert!(pidfd_from(Err(Errno::EPERM)).is_none());
+        let fd = std::os::fd::OwnedFd::from(std::fs::File::open("/proc/self/stat").unwrap());
+        assert!(matches!(pidfd_from(Ok(fd)), Some(Pidfd::Got(_))));
     }
 }
 

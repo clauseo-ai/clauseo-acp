@@ -311,11 +311,36 @@ fn a_client_that_goes_quiet_is_dropped() {
     let mut quiet = Client::connect(&socket);
     quiet.request(0, "initialize");
     assert!(quiet.next().is_none(), "the quiet client stayed connected");
-    guard.stderr_until("closed a client that sent nothing for the idle wait");
+    guard.stderr_until("closed a client that sent no whole line for the idle wait");
     guard.stderr_until("the client disconnected");
     let mut client = Client::connect(&socket);
     client.request(0, "initialize");
     client.request(1, "tools/list");
+    drop(guard);
+}
+
+/// A call still awaiting its answer holds the idle wait (shortened here): the client stays
+/// connected well past it, and its next request is answered.
+#[test]
+fn a_call_awaiting_its_answer_keeps_a_quiet_client() {
+    let scratch = Scratch::new("listen_held_call");
+    let socket = socket_of(&scratch);
+    let mut command = listen_command(&scratch, &socket);
+    command.env("CLAUSEO_TEST_GUARD_CLIENT_IDLE_MS", "1000");
+    let guard = Guard::start(command);
+    let mut client = Client::connect(&socket);
+    client.call("open");
+    // `daemon_stub` never answers it.
+    client.send(
+        &json!({"jsonrpc": "2.0", "id": "held", "method": "tools/call",
+        "params": {"name": "stub_hold", "arguments": {}}}),
+    );
+    let quiet = std::time::Duration::from_millis(3000);
+    assert!(
+        throughout(quiet, || std::fs::symlink_metadata(&socket).is_ok()),
+        "the guard went"
+    );
+    client.request(9, "tools/list");
     drop(guard);
 }
 
