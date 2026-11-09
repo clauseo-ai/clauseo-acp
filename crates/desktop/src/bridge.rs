@@ -249,6 +249,9 @@ impl Bridge {
             | HostQuery::ListThreads { .. }
             | HostQuery::PageEntries { .. }
             | HostQuery::CompareVersions { .. }
+            // The Word blackline: copies a matter document's two sides outside the matter and
+            // runs stetdoc on them; writes nothing in the matter.
+            | HostQuery::WordBlackline { .. }
             | HostQuery::PreviewRestore { .. }
             // Undo's "changed after Clauseo's edit" ask (#360): reads the folder, writes nothing.
             | HostQuery::PreviewUndo { .. }

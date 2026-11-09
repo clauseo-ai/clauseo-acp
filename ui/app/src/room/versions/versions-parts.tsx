@@ -1,6 +1,7 @@
 // Versions in the room, from its own chunk: the timeline in the rail's place (VersionsRail), and the band over the
 // work with the restore dialog (VersionsCentre). Both read one VersionsController (controller.ts) and compose the parts
-// of ui/components: VersionPanel, VersionWhere, VersionBand, CompareBar, PdfSheet and RestoreDialog.
+// of ui/components: VersionPanel, VersionWhere, VersionBand, CompareBar, PdfSheet and RestoreDialog; a Word document
+// compared with now is marked up by the host's Word tool (blackline-sheet.tsx).
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { RestoreDialog } from "@clauseo/components/clauseo/restore-dialog.tsx";
 import { keyIsMine, useRoom } from "@clauseo/components/clauseo/room-scope.ts";
@@ -28,6 +29,8 @@ import type { FileRefId } from "../../transport/protocol.ts";
 import { locatable, useLocateFolder } from "../act-refusals.ts";
 import { LocateButton } from "../locate-button.tsx";
 import { refusalOf } from "../open.ts";
+import { markable, markAskOf, type Blacklines } from "./blackline.ts";
+import { MarkedDesk } from "./blackline-sheet.tsx";
 import type { VersionsController } from "./controller.ts";
 import { restoreOf, type Snapshot } from "./state.ts";
 import type { StandIns } from "./stand-ins.ts";
@@ -158,6 +161,7 @@ const takesBack = (s: Snapshot, v: Version): boolean => {
 /** The band over the work, the comparison under it, and the restore dialog. */
 export function VersionsCentre({
   controller: c,
+  blacklines,
   standIns,
   fileRef,
   onLeave,
@@ -165,6 +169,8 @@ export function VersionsCentre({
   onAway,
 }: {
   controller: VersionsController;
+  /** The Word documents' marked-up changes, kept while Versions is open. */
+  blacklines: Blacklines;
   standIns: StandIns;
   fileRef: FileRefOf;
   /** Closes Versions: Cancel in a dialog the toolbar's Undo opened along with Versions. */
@@ -268,6 +274,37 @@ export function VersionsCentre({
   const changes = s.compare?.changes ?? null;
   const inView = changes?.find((f) => f.path === doc) ?? changes?.[0];
   const ask = askOf(lang, cal, s, s.ask);
+  // the sheet that says only that the file in view changed, with the two times: a Word document's marked-up sheet
+  // stands in its place, and falls back to it when the marking up fails
+  const thenHead =
+    shown === undefined
+      ? ""
+      : shown.day === cal.today
+        ? vt(lang, "As it was at {time} today", { time: w.clock(shown.at) })
+        : vt(lang, "As it was at {time} on {date}", {
+            time: w.clock(shown.at),
+            date: cal.words(lang, shown.day, "date"),
+          });
+  const nowHead = vt(lang, "As it is now");
+  const changedSheet =
+    inView === undefined || shown === undefined ? null : (
+      <PdfSheet
+        title={fileName(inView.path)}
+        changed
+        state={
+          shown.day === cal.today
+            ? vt(lang, "Changed since {time} today", { time: w.clock(shown.at) })
+            : vt(lang, "Changed since {time} on {date}", {
+                time: w.clock(shown.at),
+                date: cal.words(lang, shown.day, "date"),
+              })
+        }
+        then={{ head: thenHead, facts: "", saved: "" }}
+        now={{ head: nowHead, facts: "", saved: "" }}
+        pdf={/\.pdf$/i.test(inView.path)}
+        {...openNow(standIns, fileRef(inView.path), c)}
+      />
+    );
   const held =
     s.ask?.act === "undo" &&
     s.ask.stage === "confirm" &&
@@ -330,32 +367,18 @@ export function VersionsCentre({
           />
           {inView !== undefined && (
             <Desk label={fileName(inView.path)} scrollRef={desk}>
-              <PdfSheet
-                title={fileName(inView.path)}
-                changed
-                state={
-                  shown.day === cal.today
-                    ? vt(lang, "Changed since {time} today", { time: w.clock(shown.at) })
-                    : vt(lang, "Changed since {time} on {date}", {
-                        time: w.clock(shown.at),
-                        date: cal.words(lang, shown.day, "date"),
-                      })
-                }
-                then={{
-                  head:
-                    shown.day === cal.today
-                      ? vt(lang, "As it was at {time} today", { time: w.clock(shown.at) })
-                      : vt(lang, "As it was at {time} on {date}", {
-                          time: w.clock(shown.at),
-                          date: cal.words(lang, shown.day, "date"),
-                        }),
-                  facts: "",
-                  saved: "",
-                }}
-                now={{ head: vt(lang, "As it is now"), facts: "", saved: "" }}
-                pdf={/\.pdf$/i.test(inView.path)}
-                {...openNow(standIns, fileRef(inView.path), c)}
-              />
+              {markable(inView) ? (
+                <MarkedDesk
+                  blacklines={blacklines}
+                  ask={markAskOf(inView, shown.id)}
+                  title={fileName(inView.path)}
+                  then={thenHead}
+                  now={nowHead}
+                  fallback={changedSheet}
+                />
+              ) : (
+                changedSheet
+              )}
             </Desk>
           )}
         </>

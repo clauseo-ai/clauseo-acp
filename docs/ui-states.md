@@ -351,6 +351,8 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | "Allow this site" that lasts until Clauseo closes, because Clauseo couldn't save it (0053) | `ErrorCode::BlocklistAllowNotSaved` | no |
 | Removing an allowed site that is blocked again until Clauseo closes, because Clauseo couldn't save that (0053) | `ErrorCode::BlocklistRevokeNotSaved` | no |
 | Safe workspace still cleaning up after an earlier session, its stop or sweep not done after 15 s (S15) | `ErrorCode::SandboxCleaningUp` | yes |
+| Word blackline: no Word tool, or not a Word document | `ErrorCode::BlacklineNoWordTool`, `ErrorCode::BlacklineNotWord` | no |
+| Word blackline failed (the compare or its view) | `ErrorCode::BlacklineFailed` | yes |
 | A code from a newer Clauseo | `ErrorCode::Unknown` | no |
 
 A failed turn shows its code from `turn_failed` on the step card (section 3).

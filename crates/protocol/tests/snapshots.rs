@@ -268,6 +268,9 @@ mod host_command;
 #[path = "snapshots/update.rs"]
 mod update;
 
+#[path = "snapshots/blackline.rs"]
+mod blackline;
+
 #[cfg(test)]
 #[path = "snapshots/connectors.rs"]
 mod connectors;

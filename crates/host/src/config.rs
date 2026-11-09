@@ -42,7 +42,7 @@ pub use egress::{DEFAULT_TREE_WAIT, EgressProxy};
 mod session;
 pub use session::SessionKey;
 mod wiring;
-pub(crate) use wiring::{LaunchWiring, PackReadHook};
+pub(crate) use wiring::{LaunchWiring, PackReadHook, Stetdoc};
 
 pub use crate::actor::turn::PackRequest;
 

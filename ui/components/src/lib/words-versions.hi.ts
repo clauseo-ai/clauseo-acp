@@ -72,6 +72,13 @@ const OWN = {
   "Changed since {time} today": "आज {time} बजे के बाद बदला गया",
   "As it was at {time} on {date}": "जैसा {date} को {time} बजे था",
   "As it was at {time} today": "जैसा आज {time} बजे था",
+  // a Word document's changes, marked up by the host's Word tool (UC-113 to UC-116); provisional, English and Hindi
+  "Marking up the changes…": "बदलाव चिह्नित किए जा रहे हैं…",
+  "Clauseo's Word tool is missing. Reinstall Clauseo to see the marked-up changes.":
+    "Clauseo का Word टूल मौजूद नहीं है। चिह्नित बदलाव देखने के लिए Clauseo दोबारा इंस्टॉल करें।",
+  "The changes in this document couldn't be marked up.": "इस दस्तावेज़ के बदलाव चिह्नित नहीं किए जा सके।",
+  "This document is very long, so only part of it is shown.":
+    "यह दस्तावेज़ बहुत लंबा है, इसलिए इसका केवल एक हिस्सा दिखाया गया है।",
   // over the sheet, and saving it as a new draft
   "{paper}, as it stood at {time} on {date}": "{paper}, जैसा {date} को {time} बजे था",
   "{paper}, as it stood at {time} today": "{paper}, जैसा आज {time} बजे था",

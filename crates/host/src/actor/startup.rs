@@ -46,6 +46,8 @@ pub(super) async fn open(
     )?;
     #[cfg(unix)]
     crate::browser::session::sweep_stale(parts.wiring.browser_socket_root.as_deref());
+    // Once the store is open this host is the data folder's only one.
+    super::query::blackline::sweep_leftovers(parts.effective.data_dir(), parts.clock.now().wall);
     let heads = store.heads().await?;
     let allowed = Box::new(super::allowed::AllowState::new(parts.effective.data_dir()));
     let tails = store.tail_times().await?.into_iter().collect();

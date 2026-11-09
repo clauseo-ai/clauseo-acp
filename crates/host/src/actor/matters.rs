@@ -496,6 +496,7 @@ pub(super) fn on_matter_reply(
         MatterTag::Papers(answer) => super::papers::answer(actor, matter, reply, answer),
         MatterTag::Discard => made::discarded(actor, matter, &reply),
         MatterTag::CameBack(check) => turn::came_back_reply(actor, check, reply),
+        MatterTag::Blackline(ask) => super::query::blackline::sides_written(ask, reply),
     }
 }
 

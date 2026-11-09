@@ -269,6 +269,15 @@ error_codes! {
         agent's files all downloaded and checked, but setting them up on this computer failed \
         after three tries (unpacking, `npm ci`, the move into place or its receipt), often \
         because security software held the fresh files. Trying again may work.";
+    BlacklineNoWordTool = "blackline.no_word_tool", retryable: false, meaning: "The Word \
+        blackline needs stetdoc, Clauseo's Word tool, and this Clauseo has none, so nothing was \
+        compared.";
+    BlacklineNotWord = "blackline.not_word", retryable: false, meaning: "The file is not a \
+        Word document (.docx), so it has no Word blackline.";
+    BlacklineFailed = "blackline.failed", retryable: true, meaning: "The Word blackline \
+        failed: the compare or its view failed, took too long, or printed what Clauseo could not \
+        read; nothing is shown and nothing was written in the matter. Trying again can \
+        succeed.";
     Unknown = "unknown", retryable: false, meaning: "A code from a newer Clauseo that this \
         version does not know. Never produced here.";
 }

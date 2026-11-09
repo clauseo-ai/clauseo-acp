@@ -97,6 +97,27 @@ export type ParaDiff = {
   runs: Run[];
 };
 
+/** A paragraph of a blackline another program marked up (the host's Word tool): how it changed, and its runs. Both
+ * kinds are open: a newer host may send one this version doesn't know ("unknown"). */
+export type MarkedParagraph = {
+  change: ParaDiff["kind"] | "unknown";
+  runs: readonly { kind: Run["kind"] | "unknown"; text: string }[];
+};
+
+/** A blackline marked up elsewhere, as the sheet sets one: each paragraph in its place. No run is the lawyer's own,
+ * since the marks don't say who wrote what. A paragraph changed in a way this version doesn't know reads as changed,
+ * and a run of a kind it doesn't know as the same words. */
+export const markedDiffs = (paragraphs: readonly MarkedParagraph[]): ParaDiff[] =>
+  paragraphs.map((p, place) => ({
+    place,
+    kind: p.change === "unknown" ? "changed" : p.change,
+    runs: p.runs.map((r) => ({
+      kind: r.kind === "unknown" ? "same" : r.kind,
+      text: r.text,
+      mine: false,
+    })),
+  }));
+
 const asRuns = (kind: Run["kind"], s: string): Run[] =>
   merge(words(s).map((w) => ({ kind, text: w.text, mine: w.mine })));
 

@@ -17,6 +17,7 @@ import type { ViewStore } from "../../store/store.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { MatterId } from "../../transport/protocol.ts";
 import type { Papers } from "../host-next.ts";
+import type { Blacklines } from "./blackline.ts";
 import type { VersionsController } from "./controller.ts";
 import { NO_STAND_INS, type StandIns } from "./stand-ins.ts";
 
@@ -87,6 +88,7 @@ export function useVersions({
     matter: MatterId;
     mod: Chunk;
     controller: VersionsController;
+    blacklines: Blacklines;
   } | null>(null);
   // Versions belongs to the matter it opened on: opening another closes it, and coming back finds it closed
   if (session !== null && session.matter !== matter) setSession(null);
@@ -139,7 +141,7 @@ export function useVersions({
         // Undo opened Versions: Cancel in its dialog closes it again
         if (undo) controller.undoNewest(true);
         putPanel(false);
-        setSession({ matter, mod, controller });
+        setSession({ matter, mod, controller, blacklines: new mod.Blacklines(transport, matter) });
       },
       (error: unknown) => console.warn(`Versions' chunk did not load: ${String(error)}`),
     );
@@ -180,7 +182,7 @@ export function useVersions({
       canLeave: true,
       close,
     };
-  const { mod, controller } = live;
+  const { mod, controller, blacklines } = live;
   const onPicked = () => putPanel(isMid());
   const onPanel = () => {
     setAway(false);
@@ -202,6 +204,7 @@ export function useVersions({
       : null,
     centre: createElement(mod.VersionsCentre, {
       controller,
+      blacklines,
       standIns,
       fileRef,
       onLeave: close,

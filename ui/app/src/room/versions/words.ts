@@ -221,6 +221,12 @@ export const failedLine = (lang: Lang, code: string): BandNotice => ({
   text: errorWords(lang, code),
 });
 
+/** Why a Word document's changes couldn't be marked up, by the code (words-errors.ts's sentence): the Word tool
+ * missing says to reinstall; any other failure, the host's or the transport's, says only that it couldn't be done
+ * (the sheet that says the file changed stands under it). */
+export const markFailedLine = (lang: Lang, code: string): string =>
+  errorWords(lang, code === "blackline.no_word_tool" ? code : "blackline.failed");
+
 /** The not-saved line: which paper Clauseo changed and when, that the change couldn't be kept as a version, and that
  * the paper stands as Clauseo left it. A change on another day says its day. */
 export function unsavedLine(lang: Lang, s: Snapshot, u: Unsaved): string {
