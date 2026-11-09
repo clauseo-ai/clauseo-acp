@@ -628,3 +628,14 @@ crates/lowbox/src/windows/probe.rs - unsafe_code
 crates/lowbox/src/windows/spawn.rs - unsafe_code
 crates/lowbox/src/windows/stdio.rs - unsafe_code
 crates/lowbox/src/windows/tests.rs - unsafe_code
+# The headless-shell proof row (tests/proof.rs): its Win32 modules, and its one module of file
+# writes (the shell and helper copies, the artifacts, the test root's removal).
+crates/lowbox/tests/proof/win.rs - unsafe_code
+crates/lowbox/tests/proof/account.rs - unsafe_code
+crates/lowbox/tests/proof/acl.rs - unsafe_code
+crates/lowbox/tests/proof/loopback.rs - unsafe_code
+crates/lowbox/tests/proof/station.rs - unsafe_code
+crates/lowbox/tests/proof/launch.rs - unsafe_code
+crates/lowbox/tests/proof/helper.rs - unsafe_code
+crates/lowbox/tests/proof/inspect.rs - unsafe_code
+crates/lowbox/tests/proof/write.rs - clippy::disallowed_methods
