@@ -3,6 +3,7 @@
 //! and no logon start; the uninstaller's removal takes them all down before the copy they run,
 //! and a per-machine install's set-up registers and removes the stop and sweep tasks.
 
+use super::rules::{MSI_EVENT_IDS, Trigger, msi_event_query};
 use super::*;
 use crate::windows::setup::args::{Mode, parse};
 
@@ -45,20 +46,58 @@ fn the_stop_and_sweep_tasks_are_the_refresh_task_but_for_name_argument_limit_and
         assert_ne!(task.description(), "");
     }
     // The refresh also starts at the owner's logon; the stop and the sweep only when asked. A
-    // sweep asked for while one runs is queued after it; the others' second runs are dropped.
+    // refresh or sweep asked for while one runs is queued after it; the stop's second run is
+    // dropped.
     assert!(refresh.at_logon());
     assert!(!stop.at_logon());
     assert!(!sweep.at_logon());
     assert_eq!(
         TASKS.map(SystemTask::queues),
-        [false, false, true],
-        "only the sweep queues"
+        [true, false, true],
+        "the refresh and the sweep queue"
     );
     // The argument each task passes is the one the exe parses as its mode, and alone.
     let mode = |task: SystemTask| parse([std::ffi::OsString::from(task.argument())]);
     assert_eq!(mode(refresh), Ok(Mode::Refresh));
     assert_eq!(mode(stop), Ok(Mode::Stop));
     assert_eq!(mode(sweep), Ok(Mode::SweepTasks));
+}
+
+#[test]
+fn the_triggers_pass_nothing_but_the_fixed_argument() {
+    // The refresh starts at the owner's logon and on Windows Installer's events (WSL's deny
+    // comes back after a WSL update); the stop and the sweep only on demand.
+    assert_eq!(
+        SystemTask::Refresh.triggers(),
+        [Trigger::Logon, Trigger::MsiEvents]
+    );
+    assert_eq!(SystemTask::Stop.triggers(), []);
+    assert_eq!(SystemTask::Sweep.triggers(), []);
+    assert_eq!(
+        MSI_EVENT_IDS,
+        [1022, 1033, 1035, 1040, 1042, 11707, 11724, 11728]
+    );
+    // The subscription is fixed text: the Application log, the MsiInstaller provider, those
+    // IDs, and nothing else. `register_task` sets it alone: no value queries, so no event data
+    // reaches the action.
+    let query = msi_event_query();
+    assert_eq!(
+        query,
+        "<QueryList><Query Id=\"0\" Path=\"Application\"><Select Path=\"Application\">\
+         *[System[Provider[@Name='MsiInstaller'] and (EventID=1022 or EventID=1033 or \
+         EventID=1035 or EventID=1040 or EventID=1042 or EventID=11707 or EventID=11724 or \
+         EventID=11728)]]</Select></Query></QueryList>"
+    );
+    assert!(!query.contains("$("), "{query}");
+    // Whatever starts it, the action's argument is the one fixed argument, with no event value
+    // to substitute (the Task Scheduler's `$(name)`).
+    for task in TASKS {
+        assert!(!task.argument().contains('$'), "{task:?}");
+    }
+    assert_eq!(SystemTask::Refresh.argument(), REFRESH_ARG);
+    // An event during a refresh queues another run, one at a time; the stop drops it.
+    assert!(SystemTask::Refresh.queues());
+    assert!(!SystemTask::Stop.queues());
 }
 
 #[test]

@@ -31,7 +31,7 @@ use super::{
 use crate::windows::admin_copy::{self, Found, level_safe, locked_file_sddl, os};
 pub(crate) use crate::windows::admin_copy::{SETUP_EXE as EXE_NAME, SETUP_SIG as SIG_NAME};
 use crate::windows::detect::native_machine;
-use crate::windows::record::read_string;
+use crate::windows::record::{read_string, sandbox_group_sid, sandbox_removing};
 use crate::windows::setup::adopt::windows_adopter::own_profile;
 use crate::windows::setup::lock::{Held, SETUP_MUTEX, try_lock};
 use crate::windows::setup::owner::this_process;
@@ -39,6 +39,7 @@ use crate::windows::setup::record_values::{
     ADMIN_COPY_OWNER, ADMIN_COPY_SHA256, ADMIN_COPY_VERSION, GROUP_SID, USER_INSTALL_DIR,
 };
 use crate::windows::sids::Sid;
+use crate::windows::wsl;
 
 /// The record's key under `HKLM`.
 const RECORD_KEY: &str = "SOFTWARE\\Clauseo\\Sandbox";
@@ -287,6 +288,21 @@ impl Refresher for WindowsRefresher {
 
     fn log(&mut self, error: bool, line: &str) {
         event_log(error, line);
+    }
+
+    fn reapply_wsl(&mut self) -> Result<Option<String>, Failed> {
+        // No group, or a removal under way: nothing is owed, and nothing is put back that a
+        // removal is taking off.
+        if sandbox_removing().map_err(|error| error.to_string())? {
+            return Ok(None);
+        }
+        let group = sandbox_group_sid().map_err(|error| error.to_string())?;
+        let Some(group) = group.as_deref().and_then(|text| Sid::parse(text).ok()) else {
+            return Ok(None);
+        };
+        let applied = wsl::apply(&mut wsl::WindowsWsl::writer(RECORD_KEY), &group)
+            .map_err(|error| error.to_string())?;
+        applied.outcome()
     }
 }
 

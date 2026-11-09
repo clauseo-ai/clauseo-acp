@@ -108,6 +108,7 @@ mod windows_refresher;
 #[cfg(test)]
 #[cfg(windows)]
 pub(crate) mod windows_tests;
+mod wsl_phase;
 
 #[cfg(windows)]
 pub use installed::{installed_setup_sha256, recorded_admin_copy_sha256};
@@ -307,11 +308,13 @@ pub trait Refresher {
     fn leave_staging(&mut self, swapped: bool);
     /// Writes one line to the log: `error` for a refusal or a failure.
     fn log(&mut self, error: bool, line: &str);
+    /// Re-applies WSL's deny under the set-up lock (`wsl_phase.rs`); a line when it changed any.
+    fn reapply_wsl(&mut self) -> Result<Option<String>, Failed>;
 }
 
-/// Runs the refresh as the module says, checking the staged exe against `trust`.
+/// Runs the refresh as the module says, checking the staged exe against `trust`, then WSL's deny.
 pub fn refresh(fs: &mut impl Refresher, trust: &Trust<'_>) -> RefreshExit {
-    match run_steps(fs, trust) {
+    let exit = match run_steps(fs, trust) {
         Ok(line) => {
             fs.log(false, &line);
             RefreshExit::Done
@@ -320,7 +323,8 @@ pub fn refresh(fs: &mut impl Refresher, trust: &Trust<'_>) -> RefreshExit {
             fs.log(true, &format!("the sandbox's admin copy was kept: {line}"));
             exit
         }
-    }
+    };
+    wsl_phase::after(fs, exit)
 }
 
 /// A refusal: its exit and its log line.
