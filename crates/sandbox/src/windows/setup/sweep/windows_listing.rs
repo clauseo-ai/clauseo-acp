@@ -52,8 +52,10 @@ const BACKUP: [&str; 1] = ["SeBackupPrivilege"];
 /// two ACLs of at most 65 535 bytes each, about 128 KiB; the cap leaves room past that.
 const SD_CAP: usize = 256 * 1024;
 
-/// The Task Scheduler's cache of task definitions by `Id`, below `HKEY_LOCAL_MACHINE`.
-const TASKS: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tasks";
+/// The Task Scheduler's cache, below `HKEY_LOCAL_MACHINE`, and the keys in it that hold a
+/// task's entry by its `Id`, as #840's `ENTRIES`.
+const CACHE: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache";
+const ENTRIES: [&str; 4] = ["Tasks", "Plain", "Logon", "Boot"];
 
 /// The Task Scheduler's cache of task paths, below `HKEY_LOCAL_MACHINE`.
 const TREE: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tree";
@@ -354,7 +356,8 @@ pub(super) fn task_cache_id_units(path: &str) -> Result<Option<Vec<u16>>, Failed
 }
 
 /// Whether the task at `path` can run, for [`Sweeper::task_cache_runnable`]: its `Tree` key's
-/// `Id` names a `TaskCache\Tasks\{Id}` key. `Ok(false)` when either is gone.
+/// `Id` names a key under `TaskCache\{Tasks,Plain,Logon,Boot}` ([`has_entry`]). `Ok(false)`
+/// when the `Tree` key is gone or none of the four is there.
 ///
 /// [`Sweeper::task_cache_runnable`]: super::Sweeper::task_cache_runnable
 pub(super) fn task_cache_runnable(path: &str) -> Result<bool, Failed> {
@@ -364,8 +367,24 @@ pub(super) fn task_cache_runnable(path: &str) -> Result<bool, Failed> {
     let Some(id) = key.id()? else {
         return Ok(false);
     };
-    let task = Key::open(HKEY_LOCAL_MACHINE, &HSTRING::from(format!("{TASKS}\\{id}")))?;
-    Ok(task.is_some())
+    has_entry(&id, |at| {
+        Ok(Key::open(HKEY_LOCAL_MACHINE, &HSTRING::from(at))?.is_some())
+    })
+}
+
+/// Whether `present` finds a key for the task `id` under any of `TaskCache\{Tasks,Plain,
+/// Logon,Boot}`, each asked by its whole path below `HKEY_LOCAL_MACHINE`, as #840's
+/// `task_cache_entries` asks; the first that can't be told is `Err`.
+fn has_entry(
+    id: &str,
+    mut present: impl FnMut(&str) -> Result<bool, Failed>,
+) -> Result<bool, Failed> {
+    for entries in ENTRIES {
+        if present(&format!("{CACHE}\\{entries}\\{id}"))? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Whether the key at `path` below `Tree` is there.
@@ -424,4 +443,51 @@ pub(super) fn task_cache() -> Result<Listing, Failed> {
         }
     }
     Ok(Listing { paths, vanished })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CACHE, has_entry};
+
+    const ID: &str = "{0A1B2C3D-4E5F-6789-ABCD-EF0123456789}";
+
+    /// [`has_entry`] with only `TaskCache\<only>\{ID}` there, and every path it asked.
+    fn only_under(only: &str) -> (Result<bool, String>, Vec<String>) {
+        let mut asked = Vec::new();
+        let found = has_entry(ID, |at| {
+            asked.push(at.to_owned());
+            Ok(at == format!(r"{CACHE}\{only}\{ID}"))
+        });
+        (found, asked)
+    }
+
+    #[test]
+    fn a_key_whose_id_is_only_under_plain_logon_or_boot_can_run() {
+        for only in ["Tasks", "Plain", "Logon", "Boot"] {
+            assert_eq!(only_under(only).0, Ok(true), "{only}");
+        }
+    }
+
+    #[test]
+    fn a_key_whose_id_is_under_none_of_the_four_cant_run_after_all_four_are_asked() {
+        let (found, asked) = only_under("Tree");
+        assert_eq!(found, Ok(false));
+        let expected: Vec<String> = ["Tasks", "Plain", "Logon", "Boot"]
+            .iter()
+            .map(|entries| format!(r"{CACHE}\{entries}\{ID}"))
+            .collect();
+        assert_eq!(asked, expected);
+    }
+
+    #[test]
+    fn a_place_that_cant_be_told_is_an_error_not_cant_run() {
+        let found = has_entry(ID, |at| {
+            if at.contains(r"\Plain\") {
+                Err("unread".to_owned())
+            } else {
+                Ok(false)
+            }
+        });
+        assert_eq!(found, Err("unread".to_owned()));
+    }
 }

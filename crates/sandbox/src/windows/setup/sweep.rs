@@ -279,8 +279,8 @@ pub trait Sweeper: Gate + Bits + Record {
     /// descriptor, read through a handle opened as [`Sweeper::read_task_file`] opens (never
     /// through a link) for `READ_CONTROL` alone; `Err` when it can't be opened or read.
     fn task_file_owner(&mut self, parts: &[String]) -> Result<Sid, Failed>;
-    /// Whether the task at `path` can run: its `Tree` key's `Id` (a GUID) names a
-    /// `TaskCache\Tasks\{Id}` key. `Ok(false)` when either key is gone; `Err` when unread.
+    /// Whether the task at `path` can run: its `Tree` key's `Id` (a GUID) names a key under
+    /// `TaskCache\{Tasks,Plain,Logon,Boot}`. `Ok(false)` when none is there; `Err` when unread.
     fn task_cache_runnable(&mut self, path: &str) -> Result<bool, Failed>;
     /// Whether the folder `path` (`\A\B`) below `Tasks` is there, opened as
     /// [`Sweeper::task_file_paths`] walks; `Err` when that can't be told.

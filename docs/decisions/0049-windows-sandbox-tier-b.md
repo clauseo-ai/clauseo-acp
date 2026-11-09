@@ -2174,8 +2174,10 @@ the pool-user check. No record, or an empty pool, is nothing to sweep. Then it:
      SYSTEM or any other owner leaves a stray file, ignored and counted;
    - **in the cache alone** (no task file): first, whether the task can run. The key's `Id`
      value (a `REG_SZ` GUID in braces, checked before it names a key) must name a
-     `TaskCache\Tasks\{Id}` key, which holds the definition the Task Scheduler runs; with
-     none, the key is stale, ignored and counted. An `Id` that can't be read or isn't a GUID
+     key under `TaskCache\Tasks`, `Plain`, `Logon` or `Boot` (`TaskCache\Tasks\{Id}` holds the
+     definition the Task Scheduler runs; the other three, as #840 checks, index it); with
+     none of the four, the key is stale, ignored and counted. An `Id` that can't be read or
+     isn't a GUID
      is 56. A key whose task can run is 56, whatever its `SD` says: the Task Scheduler
      service writes the `SD` value, but its content, owner included, is the descriptor the
      task's registrant gave, and a pool user may hold delete on its own task's file, which

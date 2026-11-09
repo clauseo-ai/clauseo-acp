@@ -24,11 +24,12 @@
 //!   ([`Sweeper::task_file_owner`]), decides. A pool SID, or an owner that can't be read, is
 //!   56; any other (Administrators, SYSTEM, another user) leaves a stray file, ignored;
 //! - in the cache alone (no task file): whether the task can run decides
-//!   ([`Sweeper::task_cache_runnable`]). A key whose `Id` names no `TaskCache\Tasks\{Id}` key
-//!   holds no task the Task Scheduler can run, a stale key, ignored; one that can run, or can't
-//!   be told, is 56. Its `SD`'s owner is never trusted: the `SD` holds the descriptor the task's
-//!   registrant gave, and a pool user may delete its own task's file. The principal in
-//!   `Tasks\{Id}`'s binary values isn't read either: their format is undocumented.
+//!   ([`Sweeper::task_cache_runnable`]). A key whose `Id` names no key under
+//!   `TaskCache\{Tasks,Plain,Logon,Boot}` (as #840 checks) holds no task the Task Scheduler
+//!   can run, a stale key, ignored; one that can run, or can't be told, is 56. Its `SD`'s owner
+//!   is never trusted: the `SD` holds the descriptor the task's registrant gave, and a pool user
+//!   may delete its own task's file. The principal in `Tasks\{Id}`'s binary values isn't read
+//!   either: their format is undocumented.
 //!
 //! A folder or key that vanishes while listed is left out of its listing, never failing it,
 //! and checked once more after the judged read: one there again is 56 ([`Swept::reappeared`]);
