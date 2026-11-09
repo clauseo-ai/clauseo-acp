@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { checkPe, expandPaths, isForbidden, peImports } from "./pe-crt-imports.mjs";
+import { checkFile, checkPe, expandPaths, isForbidden, peImports } from "./pe-crt-imports.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", "..");
@@ -167,6 +167,165 @@ test("the command line: directories give their .exe, .dll and .node files, neste
   assert.equal(run(join(scratch, "missing.exe")).status, 1);
   assert.equal(run(join(dir, "notes.txt")).status, 1);
   assert.equal(run().status, 2);
+});
+
+/** A folder under scratch, made fresh enough: mkdir -p. */
+async function folder(name) {
+  const dir = join(scratch, name);
+  await mkdir(dir, { recursive: true });
+  return dir;
+}
+
+test("--app-local-ok: a forbidden import whose DLL sits beside the importer passes, with a note", async () => {
+  const dir = await folder("beside");
+  const importer = join(dir, "python.exe");
+  const dll = join(dir, "VCRUNTIME140.dll");
+  await writeFile(dll, makePe({ imports: CLEAN }));
+  await writeFile(importer, makePe({ imports: [...CLEAN, "VCRUNTIME140.dll"] }));
+  const result = await checkFile(importer, { appLocalDirs: [] });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.notes, [`${importer} imports VCRUNTIME140.dll, found at ${dll}`]);
+  assert.deepEqual(result.lines, [`${importer}: PE32+ x64, 5 DLLs, VC++ runtime app-local`]);
+  assert.equal((await checkFile(importer)).ok, false, "without app-local resolution it still fails");
+});
+
+test("--app-local-ok=<dir>: a DLL directly in a listed folder passes; one in its subfolder doesn't", async () => {
+  const app = await folder("listed/app");
+  const libs = await folder("listed/libs");
+  const importer = join(app, "python.exe");
+  await writeFile(importer, makePe({ imports: ["VCRUNTIME140.dll"] }));
+  await writeFile(join(libs, "VCRUNTIME140.dll"), makePe({ imports: CLEAN }));
+  const result = await checkFile(importer, { appLocalDirs: [libs] });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.notes, [`${importer} imports VCRUNTIME140.dll, found at ${join(libs, "VCRUNTIME140.dll")}`]);
+
+  const outer = await folder("listed/outer");
+  await writeFile(join(await folder("listed/outer/inner"), "VCRUNTIME140.dll"), makePe({ imports: CLEAN }));
+  const nested = await checkFile(importer, { appLocalDirs: [outer] });
+  assert.equal(nested.ok, false);
+  assert.deepEqual(nested.lines, [`${importer} imports VCRUNTIME140.dll, which needs the VC++ Redistributable`]);
+});
+
+test("--app-local-ok: a DLL in neither the importer's folder nor a listed one fails as before", async () => {
+  const app = await folder("neither/app");
+  const other = await folder("neither/other");
+  const importer = join(app, "mcp.exe");
+  await writeFile(importer, makePe({ imports: ["VCRUNTIME140.dll"] }));
+  await writeFile(join(other, "msvcp140.dll"), makePe({ imports: CLEAN }));
+  const result = await checkFile(importer, { appLocalDirs: [other] });
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.lines, [`${importer} imports VCRUNTIME140.dll, which needs the VC++ Redistributable`]);
+  assert.deepEqual(result.notes, []);
+});
+
+test("--app-local-ok: a different name does not stand in (vcruntime140.dll for VCRUNTIME140_1.dll)", async () => {
+  const dir = await folder("mismatch");
+  await writeFile(join(dir, "vcruntime140.dll"), makePe({ imports: CLEAN }));
+  const importer = join(dir, "python.exe");
+  await writeFile(importer, makePe({ imports: ["VCRUNTIME140_1.dll"] }));
+  const result = await checkFile(importer, { appLocalDirs: [] });
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.lines, [`${importer} imports VCRUNTIME140_1.dll, which needs the VC++ Redistributable`]);
+});
+
+test("--app-local-ok: the name matches case-insensitively", async () => {
+  const dir = await folder("case");
+  const dll = join(dir, "vcruntime140.dll");
+  await writeFile(dll, makePe({ imports: CLEAN }));
+  const importer = join(dir, "python.exe");
+  await writeFile(importer, makePe({ imports: ["VCRUNTIME140.dll"] }));
+  const result = await checkFile(importer, { appLocalDirs: [] });
+  assert.equal(result.ok, true, result.lines.join("\n"));
+  assert.deepEqual(result.notes, [`${importer} imports VCRUNTIME140.dll, found at ${dll}`]);
+});
+
+test("--app-local-ok: a found file that is not a PE fails the importer", async () => {
+  const dir = await folder("not-pe");
+  const dll = join(dir, "vcruntime140.dll");
+  await writeFile(dll, Buffer.from("MZ, but not a portable executable at all, just bytes"));
+  const importer = join(dir, "python.exe");
+  await writeFile(importer, makePe({ imports: ["VCRUNTIME140.dll"] }));
+  const result = await checkFile(importer, { appLocalDirs: [] });
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.lines, [`${importer} imports VCRUNTIME140.dll; ${dll} is not a readable PE`]);
+});
+
+test("--app-local-ok: a found DLL whose own forbidden import is absent fails the chain, naming it", async () => {
+  const app = await folder("chain-missing/app");
+  const libs = await folder("chain-missing/libs");
+  const importer = join(app, "python.exe");
+  const dll1 = join(libs, "vcruntime140_1.dll");
+  await writeFile(importer, makePe({ imports: ["VCRUNTIME140_1.dll"] }));
+  await writeFile(dll1, makePe({ imports: ["VCRUNTIME140.dll"] }));
+  const result = await checkFile(importer, { appLocalDirs: [libs] });
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.lines, [
+    `${importer} imports VCRUNTIME140_1.dll, found at ${dll1}, which fails: ` +
+      `${dll1} imports VCRUNTIME140.dll, which needs the VC++ Redistributable`,
+  ]);
+});
+
+test("--app-local-ok: the vcruntime140_1.dll -> vcruntime140.dll chain passes when both are shipped", async () => {
+  const app = await folder("chain-present/app");
+  const libs = await folder("chain-present/libs");
+  const importer = join(app, "python.exe");
+  const dll1 = join(libs, "vcruntime140_1.dll");
+  const dll0 = join(libs, "vcruntime140.dll");
+  await writeFile(importer, makePe({ imports: ["VCRUNTIME140_1.dll"] }));
+  await writeFile(dll1, makePe({ imports: ["VCRUNTIME140.dll"] }));
+  await writeFile(dll0, makePe({ imports: CLEAN }));
+  const result = await checkFile(importer, { appLocalDirs: [libs] });
+  assert.equal(result.ok, true, result.lines.join("\n"));
+  assert.deepEqual(result.notes, [
+    `${importer} imports VCRUNTIME140_1.dll, found at ${dll1}`,
+    `${dll1} imports VCRUNTIME140.dll, found at ${dll0}`,
+  ]);
+});
+
+test("--app-local-ok: a cycle of forbidden imports ends, and both files pass", async () => {
+  const dir = await folder("cycle");
+  const a = join(dir, "vcruntime140.dll");
+  const b = join(dir, "vcruntime140_1.dll");
+  await writeFile(a, makePe({ imports: ["VCRUNTIME140_1.dll"] }));
+  await writeFile(b, makePe({ imports: ["VCRUNTIME140.dll"] }));
+  const result = await checkFile(a, { appLocalDirs: [] });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.notes, [`${a} imports VCRUNTIME140_1.dll, found at ${b}`, `${b} imports VCRUNTIME140.dll, found at ${a}`]);
+  assert.equal((await checkFile(b, { appLocalDirs: [] })).ok, true);
+});
+
+test("the command line: --app-local-ok=<dir> must exist; with it, notes print and the summary says app-local", async () => {
+  const app = await folder("cli-app-local/app");
+  const libs = await folder("cli-app-local/libs");
+  const beside = await folder("cli-app-local/beside");
+  await writeFile(join(app, "python.exe"), makePe({ imports: [...CLEAN, "VCRUNTIME140.dll"] }));
+  await writeFile(join(libs, "VCRUNTIME140.dll"), makePe({ imports: CLEAN }));
+  await writeFile(join(beside, "python.exe"), makePe({ imports: [...CLEAN, "VCRUNTIME140.dll"] }));
+  await writeFile(join(beside, "VCRUNTIME140.dll"), makePe({ imports: CLEAN }));
+  const run = (...args) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8" });
+
+  const missing = run(`--app-local-ok=${join(scratch, "no-such-dir")}`, app);
+  assert.equal(missing.status, 1);
+  assert.match(missing.stdout, /^::error::--app-local-ok=.*no-such-dir: not an existing folder$/m);
+
+  const off = run(app);
+  assert.equal(off.status, 1);
+  assert.match(off.stdout, /::error::.*python\.exe imports VCRUNTIME140\.dll, which needs/);
+
+  const on = run(app, `--app-local-ok=${libs}`);
+  assert.equal(on.status, 0, on.stdout + on.stderr);
+  assert.match(on.stdout, /^note: .*python\.exe imports VCRUNTIME140\.dll, found at .*VCRUNTIME140\.dll$/m);
+  assert.match(on.stdout, /^ok .*python\.exe: PE32\+ x64, 5 DLLs, VC\+\+ runtime app-local$/m);
+  assert.match(on.stdout, /^1 files \(0 DLLs or addons\): none imports the VC\+\+ runtime unresolved; 1 app-local \(see the notes\)$/m);
+
+  const bare = run(app, "--app-local-ok");
+  assert.equal(bare.status, 1, "the bare form searches the importer's folder only");
+  const bareBeside = run("--app-local-ok", beside);
+  assert.equal(bareBeside.status, 0, bareBeside.stdout + bareBeside.stderr);
+  assert.match(bareBeside.stdout, /^note: .*python\.exe imports VCRUNTIME140\.dll, found at .*VCRUNTIME140\.dll$/m);
+
+  assert.equal(run(app, "--app-local-ok=").status, 1, "an empty <dir> is not a folder");
+  assert.equal(run("--app-local-ok").status, 2, "options alone are usage");
 });
 
 /** The quoted rustflags or RUSTFLAGS on the first line of `text` matching `line`. */
