@@ -277,6 +277,18 @@ The orchestrator's conditions, which the later pull requests must meet:
 - Adding a cause needs only its row in `open_data_enum!`, its sample, a `docs/ui-states.md`
   row and its words.
 - Firm IT can set the keys now; nothing acts on them until the host's sandbox reads them.
+- Residual of the jailed environment (R17 PR-D2a), by design: on the stored-key route the jailed
+  agent holds the real key. The setup hook's `ANTHROPIC_API_KEY` (Claude) or `CODEX_API_KEY`
+  (Codex) passes by source (`jailed_env::filters::ROUTES`), since the agent calls the API with
+  it, so any command in the jail can read it. Subscription logins carry `ANTHROPIC_API_KEY=""`
+  (0046) and no key. Where a prompt-injected agent can send the key is bounded twice: the jail
+  reaches only the session proxy's ports (`launch_checks/egress.rs`), and the proxy reaches
+  only its allowlist: the login kind's built-in hosts (`builtin_allowlist`: `api.anthropic.com`
+  for `ClaudeApiKey`, `api.openai.com` for `CodexApiKey`), `network.allowed_domains`, the
+  matter's remembered sites and the seed list, less the block list. The seed and allowed sites
+  are the remaining channel: a page there that accepts posted text could receive the key. A
+  placeholder the proxy swaps outside the jail (a jail-only CA) or a short-lived key per session
+  would close it; both are deferred until after launch (Rohan, 2026-11-09).
 - Residual of PR-C's Codex fence (rust-v0.162.1): Codex finds rg only through PATH
   (`linux-sandbox/src/bwrap.rs:901`, `sandboxing/src/bwrap.rs:193-206`). The `@openai/codex`
   package Clauseo installs ships `vendor/<triple>/codex-path/rg`, which Codex puts first on its
