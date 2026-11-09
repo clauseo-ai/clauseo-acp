@@ -497,7 +497,7 @@ fn the_browser_adds_agent_browser_allow_and_deny_rules() {
         json!(denied)
     );
     let without = profile().claude_options();
-    assert!(without.disallowed_tools().is_empty());
+    assert_eq!(without.disallowed_tools(), [] as [String; 0]);
     assert!(
         !without
             .allowed_tools()

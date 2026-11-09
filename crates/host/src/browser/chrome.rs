@@ -147,6 +147,23 @@ impl ChromeRoots {
         }
     }
 
+    /// Windows' places for Microsoft Edge, in order: `%ProgramFiles(x86)%` (where Edge installs
+    /// itself), then `%ProgramFiles%`. None on any other machine.
+    pub fn edge(&self) -> Vec<PathBuf> {
+        if !matches!(self.platform, Platform::WindowsX64 | Platform::WindowsArm64) {
+            return Vec::new();
+        }
+        let edge_exe = Path::new("Microsoft")
+            .join("Edge")
+            .join("Application")
+            .join("msedge.exe");
+        [&self.program_files_x86, &self.program_files]
+            .into_iter()
+            .flatten()
+            .map(|base| base.join(&edge_exe))
+            .collect()
+    }
+
     /// The places to look for Chrome, in order, before Chrome for Testing.
     fn installed(&self) -> Vec<PathBuf> {
         let chrome_app = Path::new("Applications")
@@ -179,25 +196,6 @@ impl ChromeRoots {
                 .collect(),
             Platform::Other => Vec::new(),
         }
-    }
-}
-
-impl ChromeRoots {
-    /// Windows' places for Microsoft Edge, in order: `%ProgramFiles(x86)%` (where Edge installs
-    /// itself), then `%ProgramFiles%`. None on any other machine.
-    pub fn edge(&self) -> Vec<PathBuf> {
-        if !matches!(self.platform, Platform::WindowsX64 | Platform::WindowsArm64) {
-            return Vec::new();
-        }
-        let edge_exe = Path::new("Microsoft")
-            .join("Edge")
-            .join("Application")
-            .join("msedge.exe");
-        [&self.program_files_x86, &self.program_files]
-            .into_iter()
-            .flatten()
-            .map(|base| base.join(&edge_exe))
-            .collect()
     }
 }
 
