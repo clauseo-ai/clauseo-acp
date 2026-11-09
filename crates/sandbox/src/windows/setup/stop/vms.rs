@@ -185,6 +185,9 @@ pub(super) struct Vms {
     pub(super) nowhere: usize,
     /// The step was skipped: no evidence that a pool user started WSL.
     pub(super) skipped: bool,
+    /// Evidence that a pool user started WSL, recorded before any process is stopped
+    /// ([`evidence`], and each pass's snapshot): without it the step is skipped.
+    pub(super) evidence: bool,
 }
 
 impl Vms {
@@ -204,7 +207,7 @@ impl Vms {
 }
 
 /// Step 5b, as the module says (users marked under the set-up lock before each termination),
-/// once there is evidence (`passes.wsl_evidence`); with none, nothing is asked or ended:
+/// once there is evidence (`passes.vms.evidence`); with none, nothing is asked or ended:
 /// each WSL system a non-pool profile's folder names (the lawyer's first) is left, and a pool
 /// user whose profile holds that folder too is added to `passes.suspects`; each a pool user's
 /// folder names is terminated, its user added to `passes.found`; each in no profile adds every
@@ -220,7 +223,7 @@ pub(super) fn stop_vms(
     pool: &Pool,
     passes: &mut Passes,
 ) -> Result<(), String> {
-    if !passes.wsl_evidence {
+    if !passes.vms.evidence {
         passes.vms.skipped = true;
         return Ok(());
     }
@@ -300,7 +303,7 @@ pub(super) fn evidence(fs: &mut impl Stopper, pool: &[Sid], passes: &mut Passes)
         if !matches!(fs.temp_vm_folder(user), Ok(false))
             || !matches!(fs.lxss_registered(user), Ok(false))
         {
-            passes.wsl_evidence = true;
+            passes.vms.evidence = true;
             return;
         }
     }

@@ -34,8 +34,7 @@ pub(super) type Failed = (Step, String);
 struct Plan {
     /// The recorded users whose accounts exist, in record order.
     kept: Vec<PoolUser>,
-    /// The record's SIDs that stay in it, in record order: the kept users' and the dead ones a
-    /// ledger entry names.
+    /// The record's SIDs that stay, in record order: kept users' and dead ones a ledger names.
     base: Vec<Sid>,
     /// Recorded SIDs whose accounts are gone and which a ledger entry names.
     kept_dead: Vec<Sid>,
@@ -265,8 +264,7 @@ fn plan_pool(
     Ok(plan)
 }
 
-/// Steps 3 to 11: everything that changes the machine. The first failure returns at once; the
-/// caller rolls back what `run` lists.
+/// Steps 3 to 11, the changes. The first failure returns at once; the caller rolls back `run`.
 fn change(
     machine: &mut impl Machine,
     acl: &mut impl AclWriter,
@@ -290,10 +288,7 @@ fn change(
     run.wsl_tried = true;
     let first_wsl = wsl_deny(machine, &group);
     admin_lock(machine, &group)?;
-    // A failure after this leaves the task registered, naming this run's owner: the rollback has
-    // no step for it. It still stops only what the record names: after a first set-up's rollback
-    // there is no record (`--stop` then does nothing) or only the users the rollback couldn't
-    // remove; after a re-run's, the pool as before.
+    // A later failure keeps the tasks (no rollback step); they act only on the record's pool.
     machine_tasks(machine, &req.owner)?;
     let local_lows: Vec<(PathBuf, PathBuf)> = users
         .profiles

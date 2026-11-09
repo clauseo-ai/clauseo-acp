@@ -93,8 +93,7 @@ struct Fake {
     pool_from: Option<(usize, Result<Option<Pool>, Failed>)>,
     /// The `Stop*` value whose reads fail.
     read_fails: Option<&'static str>,
-    /// The task's end: terminating this pid kills the run there, as the Task Scheduler's end
-    /// (or its time limit) kills the process.
+    /// Terminating this pid kills the run there, as the Task Scheduler's end (or limit) does.
     end_at: Option<u32>,
     /// The sweep task's requests, each with how many snapshots were taken by then.
     sweeps: Vec<usize>,

@@ -192,7 +192,7 @@ fn a_pool_users_vm_is_ended_and_its_user_marked_and_the_lawyers_left() {
     let (error, line) = &fake.logged[0];
     assert!(!error, "{line}");
     assert!(
-        line.contains("0 not, 1 pool WSL VMs ended, 0 not, 0 unmapped, 0 in no profile; 1 users"),
+        line.contains("0 not, 1 pool WSL VMs ended, 0 not, 0 unmapped, 0 in no profile; the sweep task was requested; 1 users"),
         "{line}"
     );
     assert!(

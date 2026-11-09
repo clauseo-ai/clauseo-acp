@@ -97,23 +97,10 @@ fn a_failed_registration_fails_the_set_up_closed() {
     assert!(acl.aces.is_empty(), "{:?}", acl.aces);
     // The sweep's or the WSL deny task's registration failing fails it the same way, naming
     // that task.
-    let sweep_failed = |machine: &FakeMachine| machine.state.sweep_task.clone();
-    let wsl_failed = |machine: &FakeMachine| machine.state.wsl_task.clone();
-    let cases: [(_, _, _, fn(&FakeMachine) -> Option<Sid>); 2] = [
-        (
-            "setup-sweep-task-fail",
-            SWEEP_1001,
-            "SandboxSweep",
-            sweep_failed,
-        ),
-        (
-            "setup-wsl-task-fail",
-            WSL_1001,
-            "SandboxWslDeny",
-            wsl_failed,
-        ),
-    ];
-    for (test, call, name, failed_task) in cases {
+    for (test, call, name) in [
+        ("setup-sweep-task-fail", SWEEP_1001, "SandboxSweep"),
+        ("setup-wsl-task-fail", WSL_1001, "SandboxWslDeny"),
+    ] {
         let mut machine = installed(test, Some(CopyOwner::Machine));
         machine.fail(call);
         let mut acl = FakeAcl::default();
@@ -123,7 +110,11 @@ fn a_failed_registration_fails_the_set_up_closed() {
         assert!(failure.rolled_back, "{failure:?}");
         assert!(failure.cause.contains(name), "{}", failure.cause);
         assert_eq!(machine.state.record, None, "{test}");
-        assert_eq!(failed_task(&machine), None, "{test}");
+        let failed = match name {
+            "SandboxSweep" => &machine.state.sweep_task,
+            _ => &machine.state.wsl_task,
+        };
+        assert_eq!(*failed, None, "{test}");
     }
 }
 

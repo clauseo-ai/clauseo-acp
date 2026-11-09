@@ -281,11 +281,8 @@ struct Passes {
     clean_at: Option<u64>,
     /// When the BITS step's enumeration began.
     jobs_at: Option<u64>,
-    /// What the WSL step did.
+    /// What the WSL step did, and its evidence (`vms::Vms::evidence`).
     vms: vms::Vms,
-    /// Evidence that a pool user started WSL, recorded before any process is stopped
-    /// ([`vms::evidence`], and each pass's snapshot): without it the WSL step is skipped.
-    wsl_evidence: bool,
 }
 
 /// Runs the stop as the module says.
@@ -459,7 +456,7 @@ fn run_passes(fs: &mut impl Stopper, pool: &[Sid], passes: &mut Passes) -> Resul
             seen.iter()
                 .any(|process| process.pid == *pid && process.wsl)
         };
-        passes.wsl_evidence |= picked.stop.iter().any(|(pid, _)| wsl(pid));
+        passes.vms.evidence |= picked.stop.iter().any(|(pid, _)| wsl(pid));
         mark_new(fs, pool, passes);
         if picked.stop.is_empty() {
             passes.clean_at = Some(at);
