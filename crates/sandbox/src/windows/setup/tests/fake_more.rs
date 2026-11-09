@@ -168,6 +168,8 @@ pub(super) struct State {
     pub(super) stop_task: Option<Sid>,
     /// The SIDs local policy denies "log on through Remote Desktop Services".
     pub(super) remote_denied: BTreeSet<Sid>,
+    /// The group WSL's launch permissions deny, while they do.
+    pub(super) wsl: Option<Sid>,
 }
 
 /// [`FakeMachine::new`]: a machine with only the owner's account, `DeviceSync`, an empty data
@@ -197,6 +199,7 @@ pub(super) fn new_machine(test: &str) -> FakeMachine {
             copy_owner: None,
             stop_task: None,
             remote_denied: BTreeSet::new(),
+            wsl: None,
         },
         written: Vec::new(),
         temporary: BTreeSet::new(),

@@ -15,7 +15,7 @@ use crate::windows::pool::MachineRecord;
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::sids::Sid;
 use crate::windows::wfp::{NetworkReport, NetworkSetup};
-use crate::windows::wsl::WslApplied;
+use crate::windows::wsl::{WslApplied, WslRemoved};
 
 /// A pool user's password: wiped from memory when dropped.
 pub type Password = Zeroizing<String>;
@@ -250,6 +250,10 @@ pub trait Machine {
     /// find the targets or read the record is the error; each target that failed is in the
     /// report.
     fn wsl_deny(&mut self, group: &Sid) -> Result<WslApplied, MachineError>;
+    /// The rollback's WSL step (`wsl::remove`), elevated, not as the owner: `group`'s denies
+    /// off every recorded and present target, and the record's WSL values deleted, before the
+    /// group this run made goes, so no deny names a group that is gone.
+    fn wsl_remove(&mut self, group: &Sid) -> Result<WslRemoved, MachineError>;
     /// Writes `<data_dir>\sandbox\secrets.bin` as the owner, protected for the owner: each of
     /// `secrets`, and for every other SID of `pool` the blob the file holds now (an extend
     /// leaves the existing users' passwords as they are).

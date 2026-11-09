@@ -305,6 +305,7 @@ fn change(
         None => (None, Vec::new()),
     };
     let network = network(machine, &req.owner, &group, &live)?;
+    run.wsl_tried = true;
     let wsl = wsl_deny(machine, &group);
     let journals = journals(machine, &plan.matters);
     owned(machine, |machine| {

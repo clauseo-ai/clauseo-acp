@@ -2435,8 +2435,10 @@ the set-up's (`SETUP_VALUES`, now 11): `WslDenyAppIds` (`REG_MULTI_SZ`, every Ap
 deny or found with it, braced and upper-case) and `WslDenyAbsent` (those whose value was made
 from the default). A list holding anything but braced GUIDs is refused whole, so no record text
 becomes a key path. The writes never make the record's key, so a refresh after `--remove` can't
-bring it back. A rollback leaves the deny, as it leaves every deny (D12): one naming a group that
-is gone grants and refuses nothing.
+bring it back. A rollback after the deny was tried takes it off (`wsl::remove`, with the record's
+two values) before it deletes the group this run made; a removal that fails keeps the group and the
+record naming it, so no deny is left naming a group that is gone (unlike D12's other denies, this
+one sits in machine-wide keys whose record would go with the group's).
 
 **The launch check** (`wsl::check`, unelevated, in `clean_close::check_launch` right after the
 admin copy's check, before the clean-close record is read). WSL is present when `WSLService` or
