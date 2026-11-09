@@ -6,11 +6,13 @@ use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
+use super::grants::{
+    Places, check_not_holding, check_outside_matter, check_socket_folder, claude_store_folder,
+};
 use super::links::{canonical_findings, covered_targets, fit_budget, split_linked};
 use super::names::{Keys, path_key};
 use super::{
-    ClaudeStore, Loopback, PROTECTED_AT_ANY_DEPTH, PROTECTED_NAMES, PathRule, Policy,
-    PolicyBuilder, same, under,
+    Loopback, PROTECTED_AT_ANY_DEPTH, PROTECTED_NAMES, PathRule, Policy, PolicyBuilder, same, under,
 };
 use crate::Error;
 use crate::links::{LinkFinding, scan_matter};
@@ -28,6 +30,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
     let home_ref = home.as_deref();
     check_matter(&matter, &state, home_ref, &hidden)?;
     let tmpdir = tmp_folder(b.tmpdir.as_deref(), &matter, &state, home_ref, &hidden)?;
+    let places = Places::new(&matter, &state, home_ref, &hidden);
 
     let notes = b
         .notes
@@ -51,8 +54,8 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
             link.display()
         ));
     }
-    let claude_store = claude_store_folder(b.claude_store.as_deref(), &matter)?;
-    check_socket_folder(b.browser_socket_dir.as_deref(), &matter)?;
+    let claude_store = claude_store_folder(b.claude_store.as_deref(), &places)?;
+    check_socket_folder(b.browser_socket_dir.as_deref(), &places)?;
 
     let runtime = all_existing(&b.runtime, "runtime path")?;
     let read = all_existing(&b.read, "read path")?;
@@ -225,42 +228,6 @@ fn check_matter(
     Ok(())
 }
 
-/// A folder the jail allows again after the hidden paths (`what`, with its article), on a
-/// canonical `p`: it may not be inside the matter or hold it, since its writes would reach the
-/// matter. The notes folder, the temp folder, the Claude store and the browser socket folder
-/// all keep this rule.
-fn check_outside_matter(p: &Path, what: &str, matter: &Path) -> Result<(), Error> {
-    if overlap(p, matter) {
-        return refuse(format!(
-            "the {what} may not be inside the matter or hold it: {} and {}",
-            p.display(),
-            matter.display()
-        ));
-    }
-    Ok(())
-}
-
-/// Claude's login store folder, if given: canonical by [`existing`], and not inside the matter
-/// or holding it, since the jail allows its names again.
-fn claude_store_folder(p: Option<&Path>, matter: &Path) -> Result<Option<ClaudeStore>, Error> {
-    let Some(p) = p else {
-        return Ok(None);
-    };
-    let store = ClaudeStore {
-        dir: existing(p, "Claude store folder")?,
-    };
-    check_outside_matter(store.dir(), "Claude store", matter)?;
-    Ok(Some(store))
-}
-
-/// The browser socket folder, if given, by [`check_outside_matter`]: the jail allows Unix
-/// sockets and writes under it, so it may not be inside the matter or hold it.
-fn check_socket_folder(socket: Option<&Path>, matter: &Path) -> Result<(), Error> {
-    socket.map_or(Ok(()), |socket| {
-        check_outside_matter(socket, "browser socket folder", matter)
-    })
-}
-
 /// The notes folder's rules, on canonical paths: it is allowed again after the hidden paths,
 /// so it may not be in the matter, hold it, or equal or hold a hidden path.
 fn check_notes(notes: &Path, matter: &Path, hidden: &[PathBuf]) -> Result<(), Error> {
@@ -309,24 +276,8 @@ fn tmp_folder(
     if is_root(&tmpdir) {
         return refuse(format!("the {what} may not be the root folder: {shown}"));
     }
-    if home.is_some_and(|home| under(home, &tmpdir)) {
-        return refuse(format!(
-            "the {what} may not equal or hold the home folder: {shown}"
-        ));
-    }
-    if under(state, &tmpdir) {
-        return refuse(format!(
-            "the {what} may not equal or hold the state folder: {shown} and {}",
-            state.display()
-        ));
-    }
+    check_not_holding(&tmpdir, what, home, state, hidden)?;
     check_outside_matter(&tmpdir, what, matter)?;
-    if let Some(h) = hidden.iter().find(|h| under(h, &tmpdir)) {
-        return refuse(format!(
-            "the {what} may not equal or hold a hidden path: {shown} and {}",
-            h.display()
-        ));
-    }
     if !run_shaped(&tmpdir) {
         return refuse(format!(
             "the {what} must be `<data_dir>/{RUN_DIR}/<session>/{TEMP_DIR}`: {shown}"
@@ -541,7 +492,7 @@ fn absolute(p: &Path, what: &str) -> Result<(), Error> {
 }
 
 /// Whether `a` and `b` are the same or one holds the other, by [`under`].
-fn overlap(a: &Path, b: &Path) -> bool {
+pub(super) fn overlap(a: &Path, b: &Path) -> bool {
     under(a, b) || under(b, a)
 }
 
