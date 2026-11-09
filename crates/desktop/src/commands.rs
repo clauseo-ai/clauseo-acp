@@ -25,6 +25,7 @@ use crate::bridge::Bridge;
 use crate::counts::{CountsState, UiCount};
 use crate::frame::Frame;
 use crate::open::{AppData, NativeLinkConfirm, NativeOpener, OpenGates, OpenedFile, RevealTarget};
+use crate::smart_app_control::SmartAppControl;
 
 /// The command names, in the order `build.rs` and `capabilities/main.json` list them. A test
 /// checks they, `lib.rs`'s handler and the bindings agree.
@@ -110,6 +111,9 @@ pub(crate) struct DisplayInfo {
     /// `…/releases/tag/v{version}`, a test build `…/releases/tag/test-v{version}`, and a dry build
     /// shows no button.
     pub(crate) release_mode: ReleaseMode,
+    /// Windows' Smart App Control state, read once per run (`smart_app_control.rs`): the page
+    /// shows a one-time note in `evaluation`. `None` on macOS and Linux, or when unreadable.
+    pub(crate) smart_app_control: Option<SmartAppControl>,
 }
 
 /// The release mode of this build, as release.yml sets `CLAUSEO_RELEASE_MODE` for its cargo build.
@@ -289,6 +293,7 @@ pub(crate) async fn display_info<R: Runtime>(_app: AppHandle<R>) -> Result<Displ
             release_date: RELEASE_DATE,
             test_build: cfg!(feature = "e2e"),
             release_mode: release_mode(RELEASE_MODE_ENV, cfg!(feature = "e2e")),
+            smart_app_control: crate::smart_app_control::state(),
         })
     })
     .await

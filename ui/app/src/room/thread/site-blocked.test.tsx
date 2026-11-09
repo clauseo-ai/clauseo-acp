@@ -38,7 +38,7 @@ const BLOCK = uuid(9, 7);
 const OTHER = uuid(10, 7);
 const T2 = uuid(2, 4);
 const OFF =
-  "Your firm has turned off allowing sites on Clauseo's unsafe-site list, so this site stays blocked. Ask your IT team if you need it.";
+  "Your firm has turned off allowing sites on Clauseo's unsafe-site list, so this site stays blocked.";
 const EXPIRED = "This notice has expired. Open the site again, then allow it from the new notice.";
 const UNSAVED = errorWords("en", "blocklist.allow_not_saved");
 

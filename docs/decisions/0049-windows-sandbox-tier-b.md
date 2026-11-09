@@ -1364,6 +1364,72 @@ leaves that profile, both naming the part.
     0 while the outer waited, and no sweep found an escapee. A crash, a cancel, a failure, a job
     that didn't empty or an escapee leaves it. `runner::unclean_sessions` lists the sessions
     whose marker is left, with their pool users; nothing calls it yet.
+  - **A kill is a signalled handle; a survivor quarantines its slot.** A sweep counts a process
+    as killed only once its handle is signalled within 5 s of `TerminateProcess`. Being in a
+    listing never means a process is alive: WER's zero-thread clone of a crashed process stays
+    listed, already signalled, while that process holds it. A process still running after the
+    5 s is a survivor, an escapee (`RunExit::Escapee`). The verdict comes from the held handles:
+    each survivor is checked at every round's end, whether it is listed again or not. A process
+    that couldn't be opened, or whose kill was refused and which still runs, counts every round
+    the same way, however it is listed. One 60 s deadline caps a sweep's waits (40 s for the end
+    sweeper's two passes).
+  - **The unclean mark: first written, last removed** (`runner::quarantine`). Before anything of
+    a session runs as the pool user, the outer writes `<data_dir>\sandbox\run\<SID>.unclean`,
+    protected as the session marker is. A mark that can't be written refuses the launch
+    (`RunExit::MarkerUnwritable`). Only a clean end removes it: the inner exited clean, the end
+    sweeper exited 0 while the outer waited, and no sweep found an escapee. Every other end leaves
+    it: a sweep out of rounds or time, a survivor, a failure, a cancel, a killed outer, an end
+    sweeper still running after the outer's 20 s. `pool::assign` gives a marked user to no other
+    matter (`Why::Unclean`). The next launch of the matter that holds it runs a verify-only pass
+    first (`--verify`: the end sweeper's two passes as the pool user, no removal, started
+    suspended and shut with `token::runner_process_sddl` as the end sweeper is). That pass comes
+    before any pipe, job, window station or desktop names the pool user. Its exit 0 lets the
+    launch go on with the slot marked again for the session. Any other result refuses with
+    `RunExit::Quarantined` (`0xE0C15018`) and "the sandbox user still has a process from an
+    earlier session that couldn't be ended; restart the computer, then try again".
+  - **The forged exit 0 (interim).** Two exit codes clear the mark today: the verify pass's
+    exit 0 admits a marked slot, and the end sweeper's exit 0 is part of the clean end that
+    removes the mark. Both run as the pool user, so each code is the pool user's word, and either
+    can be forged:
+    - A Medium survivor that opens the pass or the sweeper between `CreateProcessWithLogonW` and
+      the shut of its process DACL holds full rights to it, and can end it with exit code 0.
+    - After the shut, `token::runner_process_sddl` still grants the desktop user's logon SID
+      `PROCESS_TERMINATE`, so it can be forged for the whole pass too. Any process holding that
+      SID can end a verify pass or the end sweeper with exit code 0 at any time while it runs.
+      That covers the runners and every process of the pool user's logons through
+      `CreateProcessWithLogonW`, which carry the caller's logon SID.
+
+    Either way the mark is lifted for a slot that still has a process. The second channel closes
+    when #786's next head drops that entry from `runner_process_sddl` (no runner opens another
+    runner, and the label is `ME` with `NWNRNX`). The first closes only with an observer the
+    pool user can't reach: C5 (b).
+  - **C5, launch-blocking before tier B serves lawyers' agents (PR6):**
+    - **(a) Verify before any grant.** A matter's grants are written by the host
+      (`set_aside::before_launch`, `apply`) before the launch file, so even for the matter that
+      holds a marked user they come before the verify pass. "No new exposure" holds only while
+      this launch's grants are a subset of the earlier session's, which the survivor already had.
+      A grant added since reaches the survivor until the pass refuses. The launcher must verify a
+      marked slot before it writes any grant for it.
+    - **(b) A SYSTEM verdict clears the mark.** Both clears count: the verify pass's exit 0,
+      which admits a marked slot, and the end sweeper's exit 0, which is part of the clean end
+      that removes the mark. Only a per-slot verdict from `\Clauseo\SandboxStop` (SYSTEM,
+      which reads every process's SID) may clear either: no process of the pool SID, in a result
+      newer than the request. Neither exit code alone clears anything. A missing or stale result,
+      a timeout or a non-zero count keeps the slot quarantined.
+      Today the task takes no argument (`args.rs`: `--stop` alone). Its only result is the
+      pool-wide `StopSequence` in `HKLM\SOFTWARE\Clauseo\Sandbox`, written only on a clean,
+      completed run, which the outer can read. It stops every pool user's processes, including
+      other matters' live sessions, and nothing in the runner starts it yet. Scoping it to one slot
+      changes its registration, which set-up must redo.
+    - **(c) Persistence.** Pool-user scheduled tasks and other persistence. The verify pass removes
+      nothing and keeps what starts after it, such as a task firing. The fix: the `SYSTEM`
+      refresh deletes every task a pool user registered, and (b)'s check covers the processes
+      that started during the pass. Meanwhile the inner's start sweep is the backstop: it kills
+      every pool-user process outside the job before the launch is read.
+    - The logon refusal (F4, `setup/stop.rs`) doesn't read the mark yet, so a marked user can
+      still log on outside a launch.
+    - A marked user whose matter was released waits for a verify pass that only the launcher,
+      the stop task or an extend can run.
   - **Why "just after resume" holds.** Nothing the pool user left behind can start at its next
     logon: the end sweeper removed it, and if it didn't run, the first act removes the classes,
     `Run` values and Startup entries before the launch is read. A task stays until an end
@@ -1746,7 +1812,7 @@ folder of it through a junction at any time, or re-run `--adopt` with another fo
    Administrators alone, read back; "The staging folder's DACL" below),
    and verifies the staged bytes, never the user's file, so a swap after the check changes nothing;
 6. requires the staged image's CPU type (its PE `Machine`) to be the running copy's, so a signed
-   exe for another CPU never replaces it;
+   exe for another CPU never replaces it, save one move ("The one move across CPU types");
 7. checks the versions ("Versions" below), so an older signed exe can't roll the copy back;
 8. stops when the staged SHA-256 is already recorded;
 9. otherwise opens `Sandbox\` for adding a file (`FILE_WRITE_DATA | FILE_ADD_FILE`), sharing
@@ -1812,6 +1878,19 @@ checked.
 - An older version is refused. So is an equal version whose bytes differ from the copy in place.
 - A leading `v` is dropped. A record's `X.Y.Z.0` reads as the release `X.Y.Z`. Anything
   unreadable, a non-zero fourth part included, refuses the run.
+
+**The one move across CPU types.** Windows ARM64 is tier 1, so an x64 install on an ARM64 machine
+moves to the native build through the normal update, and nobody is told to reinstall. Step 6
+allows that one move and no other (`refresh/machine.rs`). The running copy must be x64, and so
+must the copy on disk it replaces, its PE `Machine` read by handle as its hash is. The staged
+image must be plain ARM64, not ARM64EC or ARM64X (a load config naming CHPE metadata marks a
+hybrid). The machine must be natively ARM64 (`IsWow64Process2`'s native machine, which
+detection reads). The signed version must be strictly newer than `AdminCopyVersion`: the equal
+version a same-CPU run repairs with never moves the copy. The signature, its `file:`, the
+`FILEVERSION` binding, the hash record, the set-up lock and staging apply as before. Anything
+else across CPU types exits 42, ARM64 to x64 included: it would put a native copy back under
+emulation, a downgrade of the platform match. `--adopt` checks no CPU type, so the per-machine
+installer already moves an x64 copy to ARM64 on the version rule alone.
 
 **The key.** `crates/sandbox/build.rs` builds the key in: `CLAUSEO_UPDATER_PUBKEY`, else
 `plugins.updater.pubkey` from `tauri.conf.json`, else the placeholder `AC986E7C6BA67AB9`. The

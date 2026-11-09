@@ -72,6 +72,31 @@ pub(crate) fn run<S: SweeperActs>(steps: &mut S, log: &mut dyn FnMut(&str)) -> u
     end_sweeper_exit(&kills, removed)
 }
 
+/// The verify-only pass's run (`--verify`, `quarantine.rs`): shut, then the sweep's two passes,
+/// nothing removed and the token never widened; its exit code: 0 when the sweep left no process of
+/// its user, `RunExit::Escapee` when it left an escapee (a survivor among them), else
+/// `RunExit::Sweep`.
+pub(crate) fn verify<S: SweeperActs>(steps: &mut S, log: &mut dyn FnMut(&str)) -> u32 {
+    if let Err((what, error)) = steps.shut() {
+        log(&format!(
+            "clauseo-sandbox-run: the verify pass can't {what} ({})",
+            code(&error)
+        ));
+        return RunExit::Sweep.code();
+    }
+    let kills = steps.sweep(log);
+    match &kills {
+        Ok(()) => 0,
+        Err(error) => {
+            log(&format!(
+                "clauseo-sandbox-run: verify pass: {}",
+                at(Point::Sweeper, error)
+            ));
+            end_sweeper_exit(&kills, true)
+        }
+    }
+}
+
 /// An error's OS code, or its kind.
 fn code(error: &io::Error) -> String {
     error

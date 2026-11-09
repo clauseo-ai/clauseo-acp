@@ -257,6 +257,9 @@ pub(crate) enum Input {
     Located(Box<super::locate::Located>),
     /// Where the Chrome for Testing download stands, from its thread.
     BrowserInstall(clauseo_protocol::BrowserInstallState),
+    /// What the lawyer's re-read of the firm's browser policy found, from its thread, or its
+    /// deadline (`browser_policy.rs`).
+    BrowserPolicy(super::browser_policy::PolicyInput),
     /// A `SetSkillPack`'s read of its pack, from its thread (`settings/packs.rs`).
     SkillPack(Box<super::settings::packs::PackRead>),
     /// The updater's check, download, progress, timer or file thread (`update.rs`).
@@ -300,6 +303,7 @@ impl std::fmt::Debug for Input {
             Self::NewFolder(_) => "NewFolder",
             Self::Located(_) => "Located",
             Self::BrowserInstall(_) => "BrowserInstall",
+            Self::BrowserPolicy(_) => "BrowserPolicy",
             Self::SkillPack(_) => "SkillPack",
             Self::Update(_) => "Update",
             Self::Connector(_) => "Connector",

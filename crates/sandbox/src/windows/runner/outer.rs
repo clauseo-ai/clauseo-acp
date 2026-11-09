@@ -10,7 +10,7 @@ use std::time::Duration;
 use super::desktop::AgentDesktop;
 use super::end::{EndSignal, EndSweep, GRACE, copy, inner_exited, relay_stdin};
 use super::frame::{InnerLaunch, InnerReport, command_line, read_frame, write_frame};
-use super::marker::{marked, remove_marker};
+use super::marker::marked;
 use super::paths::{CodexReuse, WinPath};
 use super::spawn::{Process, kill_on_close_job, restrict_dll_search, system_folder};
 use super::start::start;
@@ -28,6 +28,7 @@ use steps::Start;
 
 mod end;
 mod steps;
+mod verify;
 
 /// The end sweeper's guard, shared with the stdin relay's thread.
 type End = Arc<EndSweep<OsSweeper>>;
@@ -105,9 +106,7 @@ fn marked_outer(
     let logon = own_token()
         .and_then(|token| logon_sid(&token))
         .map_err(|e| Failure::new(RunExit::Token, os("logon SID", &e)))?;
-    // From here every end path first ends the job, waits for it to empty, and starts the
-    // detached end sweeper (`end.rs`).
-    let end: End = Arc::new(EndSweep::new(OsSweeper {
+    let sweeper = OsSweeper {
         data_dir,
         pool_user: message.pool_user.clone(),
         pool_name: message.pool_name.clone(),
@@ -119,7 +118,13 @@ fn marked_outer(
         job: OnceLock::new(),
         agent_desktop: OnceLock::new(),
         marker,
-    }));
+    };
+    // An unclean slot is verified, then marked, before anything names the pool user
+    // (`quarantine.rs`); only a clean end, in `relay`, removes the mark.
+    verify::admitted(&mut verify::OsSlot(&sweeper))?;
+    // From here every end path first ends the job, waits for it to empty, and starts the
+    // detached end sweeper (`end.rs`).
+    let end: End = Arc::new(EndSweep::new(sweeper));
     let result = session(message, &end);
     if result.is_err() {
         end.trigger(EndSignal::Failed);
@@ -417,14 +422,7 @@ fn relay(
     });
     tell_status(last.as_ref(), code);
     let swept = end.wait();
-    if end.clean(swept, reported.is_some())
-        && let Err(error) = remove_marker(&end.steps().marker)
-    {
-        say(&format!(
-            "clauseo-sandbox-run: {}",
-            os("the session marker's removal", &error)
-        ));
-    }
+    verify::ended_slot(end.steps(), end.clean(swept, reported.is_some()));
     if end.escaped() {
         say(&format!(
             "clauseo-sandbox-run: {ESCAPED}; the run would have exited 0x{code:08X}"

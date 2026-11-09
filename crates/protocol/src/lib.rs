@@ -141,6 +141,7 @@
 mod allowed_sites;
 mod approval;
 mod browser_install;
+mod browser_policy;
 mod command;
 mod connectors;
 mod content;
@@ -202,6 +203,7 @@ wire_types! {
         PermissionAbout, PermissionChoice, PermissionKind, PermissionOption, Principal,
     },
     browser_install::{BrowserInstallFailure, BrowserInstallState},
+    browser_policy::{BrowserPolicyState},
     command::{
         CommandEnvelope, CommandOutcome, ConfigValue, ConnectorCommand, DeliveryRequest,
         HostCommand, MatterSource, RefreshWhy, RestoreRequest,

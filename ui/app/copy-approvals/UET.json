@@ -339,5 +339,49 @@
     "at": "2026-11-04",
     "by": "Rohan",
     "note": "Rohan, on the review page (web and browser, icon-first v2)"
+  },
+  "UET-44": {
+    "en": "Blocked by your firm",
+    "hi": "आपकी फ़र्म ने रोका है",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (final provisional Hindi; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Browser blocked by the firm's RemoteDebuggingAllowed policy (browser_blocked_by_policy): pending copy review; no download offered"
+  },
+  "UET-45": {
+    "en": "Your firm doesn't allow apps to control a browser on this computer, so Clauseo can't use one for you.",
+    "hi": "आपकी फ़र्म इस कंप्यूटर पर ऐप्स को ब्राउज़र नियंत्रित करने की अनुमति नहीं देती, इसलिए Clauseo आपके लिए ब्राउज़र का उपयोग नहीं कर सकता।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (final provisional Hindi; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; reworded 2026-11-08)",
+    "note": "Browser blocked by the firm's RemoteDebuggingAllowed policy (browser_blocked_by_policy): pending copy review; no download offered"
+  },
+  "UET-46": {
+    "en": "Couldn't check browser settings",
+    "hi": "ब्राउज़र सेटिंग्स की जाँच नहीं हो सकी",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (final provisional Hindi; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Browser policy (RemoteDebuggingAllowed) couldn't be read (browser_policy_unreadable): pending copy review; no download offered"
+  },
+  "UET-47": {
+    "en": "Clauseo couldn't check this computer's browser settings, so it won't use a browser for now. It checks again the next time it needs one.",
+    "hi": "Clauseo इस कंप्यूटर की ब्राउज़र सेटिंग्स की जाँच नहीं कर सका, इसलिए वह अभी ब्राउज़र का उपयोग नहीं करेगा। अगली बार ब्राउज़र की ज़रूरत होने पर वह फिर से जाँच करेगा।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app track (final provisional Hindi; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app track (provisional; Rohan batch review)",
+    "note": "Browser policy (RemoteDebuggingAllowed) couldn't be read (browser_policy_unreadable): pending copy review; no download offered"
   }
 }

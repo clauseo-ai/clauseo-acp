@@ -213,6 +213,10 @@ pub enum SigninState {
         /// What was found, if anything.
         found: Option<Found>,
     },
+    /// The status check is running and no state was shown before it (at start, and through its
+    /// retries after a run killed at its limit): the card says "Checking sign-in…", never
+    /// nothing.
+    Checking,
     /// Sign-in was pressed before the install was ready, or while offline: the run starts by
     /// itself once both hold.
     Queued,

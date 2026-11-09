@@ -1,7 +1,10 @@
 // The tool line's popover: one row per tool the open conversation's header speaks for, its glyph and name, an On or
 // Off chip, and only when off, the reason in a few words (DESIGN.md §Icons). Under the browser with no Chrome, the
 // download: Download Chrome is the consent, then its bar, Unpacking, then the reason Ready for new conversations or what
-// went wrong with Try again. A tool
+// went wrong with Try again. Under the browser the firm's policy blocks, or whose policy Clauseo couldn't check, the
+// reason in full; for the policy not checked, Try again, which asks the host to read it now and waits (disabled, busy)
+// until the read ends, then the row follows what it found: Ready for new conversations, as after a download.
+// A tool
 // the lawyer turned off is turned on in Settings: one Open Settings at the popover's foot, however many rows are off
 // there, its tooltip saying what a change reaches. Its own chunk, loaded as the status line first shows the tool line
 // (tool-line.tsx).
@@ -23,8 +26,9 @@ import { useToolsWords } from "@clauseo/components/lib/words-tools.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import { chip } from "@clauseo/components/ui/recipes.ts";
 import type { BrowserInstall, BrowserInstallStore } from "./browser-install.ts";
+import type { BrowserPolicy, BrowserPolicyStore } from "./browser-policy.ts";
 import type { ToolLineRoom } from "./tool-line-room.ts";
-import { toolRow, type DownloadPart } from "./tool-rows.ts";
+import { toolRow, type DownloadPart, type RecheckPart } from "./tool-rows.ts";
 import type { KnownTool } from "./tools.ts";
 
 const nothing = () => () => {};
@@ -32,6 +36,36 @@ const none = (): BrowserInstall | null => null;
 
 function useInstall(store: BrowserInstallStore | null): BrowserInstall | null {
   return useSyncExternalStore(store?.subscribe ?? nothing, store?.get ?? none, store?.get ?? none);
+}
+
+const unheard = (): BrowserPolicy | null => null;
+
+function usePolicy(store: BrowserPolicyStore | null): BrowserPolicy | null {
+  return useSyncExternalStore(
+    store?.subscribe ?? nothing,
+    store?.get ?? unheard,
+    store?.get ?? unheard,
+  );
+}
+
+/** Try again under the browser whose policy Clauseo couldn't check: disabled and busy while the read runs. */
+function Recheck({ part, onRecheck }: { part: RecheckPart; onRecheck: () => void }) {
+  return (
+    <div className="tool-row-sub flex items-center gap-s2">
+      <Button
+        kind="tone"
+        size="small"
+        data-testid="tool-recheck"
+        data-waiting={part.waiting}
+        disabled={part.waiting}
+        aria-busy={part.waiting}
+        onClick={onRecheck}
+      >
+        <IconTryAgain size={16} />
+        {part.button}
+      </Button>
+    </div>
+  );
 }
 
 /** A button whose tooltip says more than its words, the same words its description, for assistive technology. The
@@ -174,11 +208,13 @@ export function ToolPopover({
 }) {
   const w = useToolsWords();
   const install = useInstall(room.install);
+  const policy = usePolicy(room.policy);
   const rows = tools.map((tool) =>
-    toolRow(w.lang, tool, { settings: room.openSettings !== undefined, install }),
+    toolRow(w.lang, tool, { settings: room.openSettings !== undefined, install, policy }),
   );
   const settings = rows.some((row) => row.settings);
   const onInstall = () => room.install?.install();
+  const onRecheck = () => room.policy?.recheck();
   return (
     <ToolLinePopover label={label} glyphs={glyphs}>
       <ul className="grid">
@@ -207,7 +243,13 @@ export function ToolPopover({
               )}
             </span>
             {row.reason !== null && !row.beside && <Reason text={row.reason} tip={row.reasonTip} />}
+            {row.note !== null && (
+              <p className="tool-row-sub text-small text-muted" data-testid="tool-row-full">
+                {row.note}
+              </p>
+            )}
             {row.download !== null && <Download part={row.download} onInstall={onInstall} />}
+            {row.recheck !== null && <Recheck part={row.recheck} onRecheck={onRecheck} />}
           </li>
         ))}
       </ul>

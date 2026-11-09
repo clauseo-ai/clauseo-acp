@@ -218,6 +218,7 @@ fn next_scan_of(app: &mut AppSubscription) -> FolderScanned {
             | HostEvent::MattersChanged(_)
             | HostEvent::ThreadsChanged(_)
             | HostEvent::BrowserInstall { .. }
+            | HostEvent::BrowserPolicy { .. }
             | HostEvent::UpdateChanged(_)
             | HostEvent::ConnectorsChanged(_)
             | HostEvent::CaseLawHint { .. }
@@ -468,6 +469,7 @@ fn import_summary(
             | HostEvent::ThreadsChanged(_)
             | HostEvent::FolderScanned(_)
             | HostEvent::BrowserInstall { .. }
+            | HostEvent::BrowserPolicy { .. }
             | HostEvent::UpdateChanged(_)
             | HostEvent::ConnectorsChanged(_)
             | HostEvent::CaseLawHint { .. }

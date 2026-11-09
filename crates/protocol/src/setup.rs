@@ -270,6 +270,10 @@ pub enum SignIn {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         found: Option<FoundLogin>,
     },
+    /// The sign-in status check is running and nothing was shown before it (at start, and
+    /// through its retries after a check that timed out): the card says it is checking. Ends
+    /// in the check's state, or `SignedOut` once its retries time out too.
+    Checking,
     /// Waiting for the install to finish or the network to return; the sign-in then starts by
     /// itself.
     Queued,

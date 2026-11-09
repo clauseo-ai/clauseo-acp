@@ -177,6 +177,7 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
           ("matters_changed" in event && event.matters_changed !== undefined) ||
           ("threads_changed" in event && event.threads_changed !== undefined) ||
           ("browser_install" in event && event.browser_install !== undefined) ||
+          ("browser_policy" in event && event.browser_policy !== undefined) ||
           ("connectors_changed" in event && event.connectors_changed !== undefined) ||
           ("case_law_hint" in event && event.case_law_hint !== undefined) ||
           ("folder_scanned" in event && event.folder_scanned !== undefined) ||
@@ -258,8 +259,9 @@ export class TauriTransport implements HostTransport, AppFeedSource, LimitsSourc
   }
 
   /** Hears each app-wide event (`settings_changed`, `matters_changed`, `threads_changed`,
-   * `browser_install`, `connectors_changed`, `case_law_hint`, `folder_scanned`,
-   * `protection_changed`, `site_blocked`, `update_changed`). The first listener subscribes the window's channel to
+   * `browser_install`, `browser_policy`, `connectors_changed`, `case_law_hint`,
+   * `folder_scanned`, `protection_changed`, `site_blocked`, `update_changed`). The first listener
+   * subscribes the window's channel to
    * them; read the current state with `query` after `ready`, so no change falls between. */
   onAppEvent(listener: (event: HostEvent) => void): AppFeed {
     this.#appListeners.add(listener);

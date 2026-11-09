@@ -237,6 +237,17 @@ form; ext4 (Linux) and NTFS (Windows) keep each form a separate file.
   and the folder `Matter::relink` writes `matter.json` into; folding there would cover a sibling
   spelled in the other form.
 
+### Security
+
+- Clauseo never opens a matter's own `.git`. It is only ever a name, refused by the sandbox and the
+  fence (decision record 0038).
+- Clauseo never spawns `git`, or any tool a repository configures, as the lawyer.
+- The shadow `history.git` lives outside the matter folder, in Clauseo's data area, and is opened
+  only with gix's isolated options: no system, global, user or `GIT_*` environment config, and no
+  hooks, filters, diff drivers or fsmonitor. The test
+  `recorded_worktree_ignores_the_global_system_and_user_config` (in
+  `crates/matters/src/history/tests/repo.rs`) pins that.
+
 ### `ARCHITECTURE.md`
 
 The `matters` row becomes: Owns "Shadow repos via gix: create and import, checkpoints, undo, restore,

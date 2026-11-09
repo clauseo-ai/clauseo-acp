@@ -17,8 +17,10 @@
 //! `SYNCHRONIZE`. One whose DACL refuses that (error 5) is opened with `WRITE_DAC`, which its
 //! owner (this user) holds unless an `OWNER RIGHTS` entry takes it away, given a DACL granting
 //! this user those rights, and opened again; when that fails too, the first error stands. Its
-//! creation time is read with `GetProcessTimes`, and it is ended with `TerminateProcess`. Whether
-//! one whose kill was refused has exited is `WaitForSingleObject` with no wait.
+//! creation time is read with `GetProcessTimes`, and it is ended with `TerminateProcess`, whose
+//! success is never taken for its end: whether it has exited is `WaitForSingleObject` on the
+//! same handle (`SYNCHRONIZE`), `WAIT_OBJECT_0` and nothing else, for as long as the sweep says
+//! (`KILL_WAIT` after a kill, no wait for one whose kill was refused).
 //!
 //! [`OsPrevious`] is the outer's, not the sweep's: its search for a previous session's live
 //! runners before its logon (`previous.rs`), through the same Toolhelp snapshot.
@@ -33,7 +35,8 @@
 )]
 
 use std::io;
-use std::time::Duration;
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{FILETIME, HANDLE, WAIT_OBJECT_0};
 use windows::Win32::Security::TOKEN_QUERY;
@@ -62,8 +65,6 @@ use crate::windows::sids::Sid;
 use crate::windows::token::DESKTOP_USER_RIGHTS;
 use crate::windows::token::os::{shut_object, sid_text};
 
-/// How long an ended process has to be gone.
-const KILL_WAIT: Duration = Duration::from_secs(5);
 /// `ERROR_INVALID_PARAMETER`: `OpenProcess` of a pid no process has.
 const NO_SUCH_PID: i32 = 87;
 /// `ERROR_NO_MORE_FILES`: the snapshot's end.
@@ -285,29 +286,33 @@ impl Processes for OsProcesses<'_> {
 
     fn kill(&mut self, process: &Handle) -> io::Result<()> {
         // SAFETY: the handle is live with PROCESS_TERMINATE.
-        let ended = unsafe { TerminateProcess(process.0, SWEPT) }.map_err(|e| os_error(&e));
-        if let Err(error) = ended {
-            // One already exiting refuses the call; it is gone all the same.
-            return if exited(process.0, Duration::ZERO) {
-                Ok(())
-            } else {
-                Err(error)
-            };
-        }
-        if exited(process.0, KILL_WAIT) {
-            Ok(())
-        } else {
-            Err(io::Error::from(io::ErrorKind::TimedOut))
-        }
+        unsafe { TerminateProcess(process.0, SWEPT) }.map_err(|e| os_error(&e))
     }
 
-    fn exited(&mut self, process: &Handle) -> bool {
-        exited(process.0, Duration::ZERO)
+    fn exited(&mut self, process: &Handle, wait: Duration) -> bool {
+        exited(process.0, wait)
     }
 
     fn pause(&mut self, pause: Duration) {
         sleep(pause);
     }
+
+    fn now(&mut self) -> Duration {
+        let origin = *ORIGIN.get_or_init(clock);
+        clock().saturating_duration_since(origin)
+    }
+}
+
+/// [`Processes::now`]'s origin: its first reading.
+static ORIGIN: OnceLock<Instant> = OnceLock::new();
+
+/// The monotonic clock's reading, for [`Processes::now`].
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the sweep's deadline on its waits; the tests inject the clock (`Processes::now`)"
+)]
+fn clock() -> Instant {
+    Instant::now()
 }
 
 /// The pause between two looks at a process whose kill was refused.

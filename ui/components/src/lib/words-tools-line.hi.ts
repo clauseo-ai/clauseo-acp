@@ -18,6 +18,12 @@ export const HI = {
   "Not available yet": "अभी उपलब्ध नहीं",
   "Too many browsers open": "बहुत सारे ब्राउज़र खुले हैं",
   "Needs Chrome": "Chrome चाहिए",
+  // the firm's Chrome or Edge policy turns off remote debugging, so no browser starts
+  // (provisional Hindi, app track final)
+  "Blocked by your firm": "आपकी फ़र्म ने रोका है",
+  // Clauseo couldn't read that browser policy, so no browser starts until it can
+  // (provisional Hindi, app track final)
+  "Couldn't check browser settings": "ब्राउज़र सेटिंग्स की जाँच नहीं हो सकी",
 } as const;
 
 /** Every string, English and Hindi, for the tests that hold the voice. */

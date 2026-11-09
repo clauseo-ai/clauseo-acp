@@ -8,6 +8,7 @@ use crate::windows::admin_copy::fake::{descriptor, locked_dacl};
 use crate::windows::setup::explain::Code;
 use crate::windows::setup::record_values::{AdminValues, CopyOwner};
 
+mod cpu_type;
 mod reports;
 
 const LAWYER: &str = "S-1-5-21-1-2-3-1001";

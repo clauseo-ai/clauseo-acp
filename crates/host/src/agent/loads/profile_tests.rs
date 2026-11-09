@@ -107,6 +107,7 @@ fn inputs<'a>(browser_dir: &'a Path, chrome: Option<&'a Path>) -> BrowserInputs<
         slot_free: true,
         proxy_set: true,
         port: Some(8123),
+        blocked_by_policy: None,
         executable: chrome,
         browser_dir,
         claims: Some(claims()),
@@ -219,6 +220,26 @@ fn each_reason_drops_the_browser_in_order() {
                 ..base
             },
             ToolsUnavailableReason::NoProxy,
+        ),
+        (
+            BrowserInputs {
+                blocked_by_policy: Some(ToolsUnavailableReason::BrowserBlockedByPolicy),
+                port: None,
+                executable: None,
+                claims: None,
+                ..base
+            },
+            ToolsUnavailableReason::BrowserBlockedByPolicy,
+        ),
+        (
+            BrowserInputs {
+                blocked_by_policy: Some(ToolsUnavailableReason::BrowserPolicyUnreadable),
+                port: None,
+                executable: None,
+                claims: None,
+                ..base
+            },
+            ToolsUnavailableReason::BrowserPolicyUnreadable,
         ),
         (
             BrowserInputs {

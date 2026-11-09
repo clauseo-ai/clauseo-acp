@@ -42,6 +42,8 @@ crates/desktop/src/window_size/windows_theme.rs - unsafe_code
 crates/desktop/src/window_size.rs ground_in_env unsafe_code
 # The main window's mark through WebView2's start: a CBT hook for the build, a subclass to the page's load, GDI and GDI+.
 crates/desktop/src/native_mark/windows.rs - unsafe_code
+# One RegGetValueW of HKLM's Smart App Control state, off the UI thread (the page's one-time note).
+crates/desktop/src/smart_app_control/windows.rs - unsafe_code
 crates/desktop/src/ui_language.rs KEY dead_code
 crates/desktop/src/chooser/windows.rs - unsafe_code
 # WebView2's argument variable keeps the no-DNS rule: set_var, first thing in main.
@@ -255,6 +257,8 @@ crates/matters/src/fsync.rs barrier clippy::unnecessary_wraps
 crates/matters/src/fsync.rs full_flush clippy::unnecessary_wraps
 # Added by R8 relink: SetFileAttributesW, to hide `.clauseo` on Windows (#100).
 crates/matters/src/write/windows.rs - unsafe_code
+# The gix_store guard: its test points git's config at temp files, with set_var (edition 2024).
+crates/matters/src/history/tests/repo.rs point_git_config_at unsafe_code
 # matters' macOS tests: their folder setup.
 crates/matters/tests/matters_macos.rs - clippy::disallowed_methods
 # matters' Windows tests: their folder setup, and files held open without sharing.
@@ -562,6 +566,7 @@ crates/sandbox/src/windows/runner/outer/end.rs pause clippy::disallowed_methods
 crates/sandbox/src/windows/runner/outer/end.rs clock clippy::disallowed_methods
 crates/sandbox/src/windows/runner/end/stdin_tests.rs clock clippy::disallowed_methods
 crates/sandbox/src/windows/runner/sweep/os.rs sleep clippy::disallowed_methods
+crates/sandbox/src/windows/runner/sweep/os.rs clock clippy::disallowed_methods
 crates/sandbox/src/windows/runner/job_tests.rs start_child clippy::disallowed_methods
 crates/sandbox/src/windows/ca_bundle/store.rs - unsafe_code
 crates/sandbox/src/windows/ca_bundle/store.rs timed clippy::disallowed_methods
