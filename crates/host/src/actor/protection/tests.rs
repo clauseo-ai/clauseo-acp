@@ -135,3 +135,72 @@ fn a_change_of_either_setting_gives_the_new_view_once() {
     assert!(auto.unprotected_auto_allowed);
     assert_eq!(host.take_changed(true, true), None);
 }
+
+/// A seam that never launches: only its presence counts here.
+struct NoLaunch;
+
+impl crate::config::SandboxLaunchers for NoLaunch {
+    fn reserve(
+        &self,
+        matter: &clauseo_protocol::MatterId,
+        session: &crate::config::SessionKey,
+        _running: &[crate::config::SessionKey],
+    ) -> Result<crate::config::sandbox::Reservation, clauseo_sandbox::Error> {
+        Ok(crate::config::sandbox::Reservation::unpooled(
+            *matter, *session,
+        ))
+    }
+
+    fn launcher(
+        &self,
+        _policy: clauseo_sandbox::Policy,
+        _matter: &clauseo_protocol::MatterId,
+        _session: &crate::config::SessionKey,
+        _reservation: crate::config::sandbox::Reservation,
+        _opts: clauseo_process::SpawnOptions,
+        _denials: std::sync::Arc<dyn clauseo_sandbox::DenialSink>,
+    ) -> Result<crate::config::SandboxLaunch, clauseo_sandbox::Error> {
+        Err(clauseo_sandbox::Error::Policy("never".to_owned()))
+    }
+
+    fn after_session(&self, _end: crate::config::SessionEnd) -> Vec<clauseo_sandbox::SetAside> {
+        Vec::new()
+    }
+}
+
+/// An agent's tier is the computer's only when its launch goes through the sandbox's launchers:
+/// without them it is C, even where the computer reports B (#712's review LOW).
+#[test]
+fn an_agent_s_tier_is_c_without_launchers_and_the_computer_s_with_them() {
+    let protected = |tier| Observed {
+        computer: Protection::Protected { tier },
+        asks_admin: false,
+    };
+    let detect: crate::config::Detect = std::sync::Arc::new(|| Detection {
+        tier: Tier::B,
+        reason: None,
+    });
+    let bare = crate::config::Sandbox::new(std::sync::Arc::clone(&detect), None);
+    let jailed = bare.clone().with_launchers(
+        std::sync::Arc::new(NoLaunch),
+        clauseo_process::SpawnOptions::new(),
+    );
+    for tier in [ProtectionTier::A, ProtectionTier::B] {
+        let without = ProtectionHost::new(Some(bare.clone()), protected(tier));
+        assert_eq!(without.launch_tier(), None, "no launchers: tier C");
+        let with = ProtectionHost::new(Some(jailed.clone()), protected(tier));
+        assert_eq!(with.launch_tier(), Some(tier));
+    }
+    let unprotected = Observed {
+        computer: not(NotProtectedCause::NeedsSetUp),
+        asks_admin: false,
+    };
+    assert_eq!(
+        ProtectionHost::new(Some(jailed), unprotected).launch_tier(),
+        None
+    );
+    assert_eq!(
+        ProtectionHost::new(None, protected(ProtectionTier::B)).launch_tier(),
+        None
+    );
+}

@@ -778,5 +778,15 @@
     "status": "provisional",
     "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "UD1-89": {
+    "en": "Sign in to ChatGPT in Clauseo. The Safe workspace can't use the sign-in Codex already has on this computer.",
+    "hi": "Clauseo में ChatGPT से साइन इन करें। सुरक्षित कार्यक्षेत्र इस कंप्यूटर पर Codex के पहले से मौजूद साइन-इन का उपयोग नहीं कर सकता।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app thread (provisional)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app thread (provisional)"
   }
 }

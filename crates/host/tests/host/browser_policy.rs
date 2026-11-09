@@ -126,7 +126,7 @@ fn reasons(
                 servers: vec![browser_server()],
                 ..Hook::default()
             }))
-            .with_egress_proxy(Arc::new(TestProxy(8123)))
+            .with_egress_proxy(Arc::new(TestProxy::new(8123)))
             .with_remote_debugging_policy(rd_policy);
         with_chrome(config, chrome, roots)
     });

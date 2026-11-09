@@ -286,6 +286,9 @@ pub(crate) struct CodexPrepared {
     /// hook found the reused login's link holding); `None` when it was not tried (reused, and
     /// the hook found no shared login: the split check refuses the launch then).
     pub(super) link: Option<Result<StateLink, Error>>,
+    /// For a jailed launch: the linked `auth.json` is one of the lawyer's own login files by
+    /// identity (`state_prep::is_lawyers_login`), so the login is reused whatever desktop said.
+    pub(super) lawyers_login: bool,
     /// The shell fence's `agent-state` denies, read at the launch
     /// (`agent::codex_fence::state_denies`).
     pub(super) state_denies: Vec<PathBuf>,
@@ -311,7 +314,7 @@ pub(super) fn prepare(
             return;
         }
     };
-    let reused = plan.reused;
+    let reused = plan.links_reused();
     let LaunchPaths {
         stored,
         data,
@@ -576,7 +579,7 @@ mod removal;
 use removal::discard;
 pub(super) use removal::on_run_removed;
 mod sandbox;
-pub(super) use sandbox::{SandboxInput, launcher, on_sandbox_input};
+pub(super) use sandbox::{SandboxInput, Sandboxed, launcher, on_sandbox_input};
 mod spawn;
 use spawn::launch_prepared;
 mod sweep;

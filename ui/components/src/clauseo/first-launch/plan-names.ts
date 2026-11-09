@@ -16,6 +16,8 @@ export const FOUND: Record<Found, FirstLaunchKey> = {
   codex_keyring: "Codex on this computer keeps its sign-in where Clauseo can't share it.",
   claude_windows_sandbox:
     "Clauseo's Safe workspace can't share Claude Code's sign-in on Windows yet.",
+  codex_sandbox:
+    "Sign in to ChatGPT in Clauseo. The Safe workspace can't use the sign-in Codex already has on this computer.",
   reused_signed_out: "{app} on this computer is signed out, so Clauseo stopped using its sign-in.",
   reused_changed:
     "{app} on this computer now uses another account, so Clauseo stopped using its sign-in.",

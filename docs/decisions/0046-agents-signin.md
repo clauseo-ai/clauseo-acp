@@ -44,7 +44,9 @@ No `protocol` change: R20 maps the states and codes to the wire.
   `SignedIn { email, plan, source, at }` and `Failed { code, at }`. It is a separate enum from
   `InstallState`, which already has its own `Waiting`.
 - `Found`: `ClaudeSettings`, `ClaudeWindowsSandbox`, `CodexKeyring`, `ReusedFailed`,
-  `ReusedSignedOut`, `ReusedChanged` and `CodexLinkSplit`.
+  `ReusedSignedOut`, `ReusedChanged`, `CodexLinkSplit` and `CodexSandbox`. A jailed Codex launch
+  of a reused Codex login ends reuse with `CodexSandbox` (R17 PR-D2a) and writes `no-reuse`, so
+  detection does not offer that login again.
 - `LoginFrom`: `ClaudeCode` and `Codex`. `Source`: `Reused` and `Own`.
 - `SigninCode::code()` gives `signin.cancelled`, `signin.link_expired`, `signin.no_plan`,
   `signin.device_code_off`, `signin.port_busy` or `signin.failed`.
@@ -598,6 +600,12 @@ The crate cannot enforce these through its API; R20's desktop wiring must:
     before `OpenUrl`;
   - the file operations on login file paths (listed under "Reuse"), the guard, the split check,
     and the markers' "unreadable reads as reused" rule.
+- Residuals:
+  - A byte-identical leftover copy of the lawyer's tokens inside Clauseo's state (an old
+    `auth.json` copied in, not linked) is not detected, since Clauseo never opens or reads a
+    credential and a hash would need the same full read. The jailed launch's identity check by
+    file id (R17 PR-D2a, `state_prep::is_lawyers_login`) still catches the live file under any
+    name.
 - Open items:
   - `Found::ClaudeWindowsSandbox` is never reported yet: detection should run again when S15's
     tier B set-up finishes, and the crate needs a signal from S15 for it.

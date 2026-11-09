@@ -21,6 +21,7 @@ import { APP, FOUND, NAME, other } from "./plan-names.ts";
 export type Found =
   | "claude_settings"
   | "claude_windows_sandbox"
+  | "codex_sandbox"
   | "codex_keyring"
   | "reused_failed"
   | "reused_signed_out"

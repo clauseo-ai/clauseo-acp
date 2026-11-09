@@ -286,7 +286,7 @@ fn launch(
     // The relay token reaches the agent in a file; its stderr tail hides it all the same.
     let redacted = super::launch_checks::relay::redacted(&prepared.run);
     let folder = prepared.stored;
-    let (forced, codex) = forced::of(
+    let (mut forced, codex) = forced::of(
         actor,
         &row.agent,
         &settings.env,
@@ -294,31 +294,34 @@ fn launch(
         &prepared.run,
         prepared.claude_home.as_deref(),
     );
-    let hook = agent::loads::launch_env(actor.profile.launch_env(&row.agent));
+    let (settings, hook, inherited, path_prepend) =
+        forced::sources(actor, &row.agent, settings, prepared.sandbox.is_some());
     // The key retry is armed by the hook's key and the launch's sign-in check.
     let codex = codex.map(|(mut codex, login)| {
         codex.key_retry = KeyRetry::at_launch(&hook, login);
         codex
     });
-    let dropped: &[&str] = if codex.is_some() {
+    let removed = forced::jailed(&mut forced, prepared.sandbox.as_ref());
+    let codex_dropped: &[&str] = if codex.is_some() {
         &agent::codex::DROPPED_VARS
     } else {
         &[]
     };
-    let inherited: Vec<_> = match &actor.wiring.inherited_env {
-        Some(env) => env.clone(),
-        None => std::env::vars_os().collect(),
-    };
+    let dropped: Vec<&str> = codex_dropped
+        .iter()
+        .copied()
+        .chain(removed.iter().map(String::as_str))
+        .collect();
     // Tier C (no jail) leaves the agent's environment alone: no session proxy variables here
     // (`ProxyHandle::env`); only the browser entry reaches the proxy, advisory without a jail.
     let spec = agent::launch_spec(
-        settings,
+        &settings,
         hook,
         forced,
-        dropped,
+        &dropped,
         inherited.into_iter(),
         agent::session_folder(&folder),
-        actor.wiring.path_prepend.as_deref(),
+        path_prepend.as_deref(),
     )
     .map_err(super::launch_checks::folder::gone_at_spawn)?
     .with_redacted(redacted);
@@ -340,29 +343,6 @@ fn launch(
         tree,
     )?;
     Ok((link, folder, codex, plan_notes))
-}
-
-/// THE CODEX HOOKS SEAM: the `hooks` object a Codex agent's `CODEX_CONFIG` carries, with its
-/// `state` trust entry and `trusted_hash`: the one a test set (`HostConfig::with_codex_hooks`),
-/// else [`codex_hook_config`](agent::loads::codex_hook_config) for the guard program the
-/// Claude Code entry runs (`HostConfig::with_pre_write_guard`), so its `PreToolUse` holds one
-/// group, the guard's. `None` with no guard program, or (with a warning) one that
-/// `codex_hook_config` cannot quote. It is read once per launch, which records on the agent
-/// whether one went in (`Agent::guard`); with none the session start skips the guard's trust
-/// check.
-fn codex_hooks(actor: &Actor) -> Option<serde_json::Map<String, serde_json::Value>> {
-    if let Some(hooks) = &actor.codex_hooks {
-        return Some(hooks.clone());
-    }
-    let program = actor.pre_write_guard.as_deref()?;
-    let Some(serde_json::Value::Object(hooks)) = agent::loads::codex_hook_config(program) else {
-        tracing::warn!(
-            "the pre-write guard's path cannot go in Codex's hook command, so Codex runs without \
-             the guard"
-        );
-        return None;
-    };
-    Some(hooks)
 }
 
 /// Step 4 for a turn whose agent was started in another folder than its matter's row now names
@@ -570,8 +550,8 @@ fn fail_waiting(actor: &mut Actor, thread: ThreadId, waiting: &Waiting, error: &
     match waiting {
         Waiting::Turn(turn) => steps::on_launch_failed(actor, thread, *turn, error),
         Waiting::Config(ctx, ..) | Waiting::Mode(ctx, ..) => {
-            let error = Error::refused(error.code(), error.to_string());
-            actor.finish_command(ctx.id, Err(error));
+            // The wire form keeps what a refusal carries (`matter.folder_nested`'s files).
+            actor.finish_command(ctx.id, Err(Error::Refused(error.to_wire())));
         }
     }
 }

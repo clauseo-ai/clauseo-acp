@@ -495,3 +495,53 @@ fn timing_first_launch_state_folder() {
     }
     write::remove_dir_all(&data).unwrap();
 }
+
+/// On Windows a missing file reads as `NotFound` (the Win32 error, not its HRESULT), so a fresh
+/// Claude state folder with no `.claude.json` or `settings.json` is no failure.
+#[cfg(windows)]
+#[test]
+fn a_missing_file_reads_as_not_found_on_windows() {
+    use super::{file_id, safe_read};
+    let dir = std::env::temp_dir();
+    let name = format!("clauseo-file-id-absent-{}", std::process::id());
+    for path in [
+        dir.join(format!("{name}.json")),
+        dir.join(&name).join("absent.json"),
+    ] {
+        let error = file_id::link_count(&path).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound, "{error}");
+        let error = file_id::same_file(&path, &dir).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound, "{error}");
+        assert_eq!(
+            safe_read::read_plain(&path).unwrap(),
+            safe_read::Found::Missing
+        );
+    }
+}
+
+/// On Windows only `ERROR_FILE_NOT_FOUND` (2) and `ERROR_PATH_NOT_FOUND` (3) read as
+/// `NotFound`: access denied (5), a sharing violation (32), a reparse refusal
+/// (`ERROR_CANT_ACCESS_FILE`, 1920) and the codes std also reads as `NotFound` (15, 53, 67)
+/// stay errors, so `safe_read::read_plain` fails closed and never takes them for a missing file.
+#[cfg(windows)]
+#[test]
+fn only_a_missing_file_or_path_reads_as_not_found_on_windows() {
+    use windows::Win32::Foundation::WIN32_ERROR;
+    let kind = |code: u32| {
+        let error = windows::core::Error::from(WIN32_ERROR(code).to_hresult());
+        super::file_id::os_error(&error).kind()
+    };
+    for code in [2, 3] {
+        assert_eq!(kind(code), std::io::ErrorKind::NotFound, "code {code}");
+    }
+    assert_eq!(kind(5), std::io::ErrorKind::PermissionDenied);
+    for code in [5, 32, 15, 53, 67, 1920] {
+        assert_ne!(kind(code), std::io::ErrorKind::NotFound, "code {code}");
+    }
+    let not_win32 =
+        windows::core::Error::from(windows::core::HRESULT(0x8000_4005_u32.cast_signed()));
+    assert_ne!(
+        super::file_id::os_error(&not_win32).kind(),
+        std::io::ErrorKind::NotFound
+    );
+}

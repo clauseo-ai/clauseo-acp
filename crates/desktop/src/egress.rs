@@ -4,8 +4,10 @@
 //! by session, never by matter: two sessions of one matter get two proxies.
 //!
 //! Every OS gets it. Tier C (no jail) leaves the agent's own environment alone: only the browser
-//! entry reaches its proxy, through the browser port. The quit stops whatever is still open
-//! ([`DesktopProxies::stop_all`]) after the host has stopped, waiting at most [`STOP_WAIT`].
+//! entry reaches its proxy, through the browser port. A jailed launch (R17 PR-D) gets one too,
+//! with or without the browser, and points the agent at it (`agent_listener`). The quit stops
+//! whatever is still open ([`DesktopProxies::stop_all`]) after the host has stopped, waiting at
+//! most [`STOP_WAIT`].
 //!
 //! No lock is held while a proxy starts or stops: a start binds two listeners and spawns a
 //! thread, and a stop joins it.
@@ -14,7 +16,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
-use clauseo_host::{EgressProxy, HostConfig, HostExit, SessionKey};
+use clauseo_host::{AgentListener, EgressProxy, HostConfig, HostExit, SessionKey};
 use clauseo_sandbox::{ProxyConfig, ProxyHandle};
 use tauri::{App, AppHandle, Manager as _, Runtime};
 
@@ -83,6 +85,12 @@ impl EgressProxy for DesktopProxies {
         lock(&self.open)
             .get(&session)
             .and_then(ProxyHandle::browser_port)
+    }
+
+    fn agent_listener(&self, session: SessionKey) -> Option<AgentListener> {
+        lock(&self.open)
+            .get(&session)
+            .map(|handle| AgentListener::new(handle.port(), handle.env()))
     }
 
     fn close(&self, session: SessionKey) {

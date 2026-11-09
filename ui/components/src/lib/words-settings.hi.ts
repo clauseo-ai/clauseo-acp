@@ -75,6 +75,12 @@ export const HI = {
   "Needs a download of about {mb} MB. Signing in happens in your browser.":
     "लगभग {mb} MB का डाउनलोड ज़रूरी है। साइन इन आपके ब्राउज़र में होता है।",
   "Signing in happens in your browser.": "साइन इन आपके ब्राउज़र में होता है।",
+  // provisional (app track): a plan's settings variables holding credential names the Safe workspace leaves out
+  // (SettingsView.safe_workspace_unused_env), names only, never a value
+  "Some of {plan}'s settings aren't used in the Safe workspace.":
+    "सुरक्षित कार्यक्षेत्र में {plan} की कुछ सेटिंग्स का उपयोग नहीं होता।",
+  "Sign in through Clauseo instead.": "इसके बजाय Clauseo से साइन इन करें।",
+  "Not used: {names}": "उपयोग नहीं होता: {names}",
   "Other ways in": "जुड़ने के दूसरे तरीके",
   "Change key": "key बदलें",
   "Remove key": "key हटाएँ",

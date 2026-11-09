@@ -3,7 +3,13 @@
 // shows after the press that opens it; "Signed out of Claude." after the sign-out is confirmed and the host answers.
 // The room's scan, first read and expired card are part A's (registry-ud2.tsx). English only (hi: later).
 import type { SettingsKey } from "@clauseo/components/lib/words-settings.ts";
-import type { AgentId, InstallProgress, SetupEvent, SignIn } from "../transport/protocol.ts";
+import type {
+  AgentId,
+  InstallProgress,
+  SettingsView,
+  SetupEvent,
+  SignIn,
+} from "../transport/protocol.ts";
 import type { Entry } from "./entry.ts";
 import { PressInOrder } from "./press-words.tsx";
 import { SettingsOver, type CellSetup } from "./states-settings.tsx";
@@ -46,6 +52,7 @@ const both = (claude: SignIn, codex: SignIn = { signed_out: {} }): SetupEvent[] 
 type Scene = {
   setup: CellSetup;
   plans?: { endpoint: string };
+  unusedEnv?: SettingsView["safe_workspace_unused_env"];
   /** Controls pressed in order, each once it is on the page (CSS selectors; a dialog's are in its portal). */
   press?: string[];
 };
@@ -100,6 +107,12 @@ const ENDPOINT: Scene = {
   setup: { first: both({ signed_in: { method: "firm", source: "own", at: AT } }) },
   plans: { endpoint: "https://ai.mehrachambers.in" },
 };
+/** ChatGPT signed in through Codex's own login (reused), its settings holding two credential names the Safe
+ * workspace leaves out: the note with its sign-in line. */
+const UNUSED: Scene = {
+  setup: { first: both(signed(), signed({ plan: "ChatGPT Plus", source: "reused" })) },
+  unusedEnv: { [CODEX]: ["OPENAI_API_KEY", "OPENAI_BASE_URL"] },
+};
 const found = (f: string): Scene => ({
   setup: { first: both({ signed_out: { found: f as never } }) },
 });
@@ -117,6 +130,7 @@ const entry = (id: string, key: SettingsKey, scene: Scene): Entry => ({
         lang={lang}
         setup={scene.setup}
         {...(scene.plans === undefined ? {} : { plans: { [CLAUDE]: scene.plans } })}
+        {...(scene.unusedEnv === undefined ? {} : { unusedEnv: scene.unusedEnv })}
       />
     );
     return scene.press === undefined ? (
@@ -172,4 +186,12 @@ export const UD2_PLANS: Entry[] = [
   entry("UD2-56", "Clauseo isn't using {app}'s sign-in here.", found("reuse_off")),
   // UD2-59: the card's line with no size known (a download of no bytes)
   entry("UD2-59", "Signing in happens in your browser.", ADD0),
+];
+
+/** The Safe workspace's note on a plan's settings it leaves out (SettingsView.safe_workspace_unused_env), in Plans:
+ * UC's ids, as the Safe workspace's words, UC-107 to UC-109. */
+export const UC_PLANS: Entry[] = [
+  entry("UC-107", "Some of {plan}'s settings aren't used in the Safe workspace.", UNUSED),
+  entry("UC-108", "Sign in through Clauseo instead.", UNUSED),
+  entry("UC-109", "Not used: {names}", UNUSED),
 ];

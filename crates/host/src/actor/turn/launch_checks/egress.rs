@@ -14,8 +14,13 @@
 //!
 //! Tier C (no jail): the agent's own environment is left alone, with no proxy variable, and only
 //! the browser entry reaches the proxy, through `{proxy_port}`. The proxy is advisory there:
-//! nothing stops the agent going around it until a jail exists (R17 PR-D sets the agent's
-//! variables from `ProxyHandle::env` and puts the ports in the policy's `proxy_ports`).
+//! nothing stops the agent going around it.
+//!
+//! Jailed (the sandbox's launchers are set, R17 PR-D): every session gets its proxy, with or
+//! without the browser, its agent listener bound for a tier-B launch (`ListenerFor::TierB`). The
+//! jail's policy allows only its ports (`proxy_ports`), and the agent's variables point at it
+//! (`EgressProxy::agent_listener`, `launch_checks::sandbox`), so the block list holds for the
+//! agent's own requests too. A jailed session whose proxy did not open has no network at all.
 //!
 //! What the proxy allows ([`proxy_config`]): the agent kind's built-in hosts
 //! (`clauseo_sandbox::builtin_allowlist`), plus the browser's seed sites
@@ -70,9 +75,25 @@ impl fmt::Debug for EgressGuard {
 }
 
 impl EgressGuard {
+    /// A guard over `proxy`'s session `key`, opened by the test (the jail's policy tests).
+    #[cfg(test)]
+    pub(crate) fn for_test(proxy: Arc<dyn EgressProxy>, key: SessionKey) -> Self {
+        Self {
+            proxy,
+            key,
+            denials: Arc::default(),
+        }
+    }
+
     /// The session's browser listener port, as the proxy answers it.
     pub(crate) fn port(&self) -> Option<u16> {
         self.proxy.port_for(self.key)
+    }
+
+    /// The session's agent listener, as the proxy answers it (a jailed launch's policy and
+    /// environment take it).
+    pub(crate) fn agent_listener(&self) -> Option<crate::config::AgentListener> {
+        self.proxy.agent_listener(self.key)
     }
 }
 
@@ -91,8 +112,11 @@ impl Drop for EgressGuard {
 
 /// What the launch prep needs for a session's proxy, gathered on the actor.
 pub(super) struct EgressPrep {
-    /// The proxy, when one is set and the session can get the browser.
+    /// The proxy, when one is set and the session can get the browser or is jailed.
     proxy: Option<Arc<dyn EgressProxy>>,
+    /// Whether the launch goes through the sandbox's launchers: it gets its proxy whatever the
+    /// browser does.
+    jailed: bool,
     /// The agent, for its built-in hosts.
     agent: AgentId,
     /// The block list in use (`BlockListSeams::current`), when the host has one.
@@ -106,16 +130,22 @@ pub(super) struct EgressPrep {
     allowed: Arc<AllowedSites>,
 }
 
-/// The egress part of `agent`'s launch prep: a proxy to open only when `browser` will look for
-/// the session's browser.
+/// The egress part of `agent`'s launch prep: a proxy to open when the launch is jailed, else only
+/// when `browser` will look for the session's browser.
 pub(super) fn egress_prep(actor: &Actor, agent: &AgentId, browser: &BrowserPrep) -> EgressPrep {
-    let proxy = actor.wiring.proxy.clone().filter(|_| browser.wanted());
+    let jailed = actor.protection.launchers().is_some();
+    let proxy = actor
+        .wiring
+        .proxy
+        .clone()
+        .filter(|_| jailed || browser.wanted());
     let seams = actor.wiring.blocklist.as_ref();
     EgressPrep {
         first_load: seams
             .filter(|seams| proxy.is_some() && seams.bundled.is_some())
             .map(|seams| seams.first_load.clone()),
         proxy,
+        jailed,
         agent: agent.clone(),
         block: seams.map(|seams| Arc::clone(seams.current())),
         post: actor.post.clone(),
@@ -138,21 +168,23 @@ impl EgressPrep {
 
     /// Opens `key`'s proxy, when the session gets one, its token-free browser listener bound
     /// only when the launch offers the browser (`browser`, `ProxyConfig::browser`). Under tier C
-    /// a launch without the browser gets no proxy at all: nothing would go through it. The jail
-    /// (R17 PR-D) opens one for every session, with `browser` false for those. Starts a thread
-    /// and binds loopback listeners: off the actor.
+    /// a launch without the browser gets no proxy at all: nothing would go through it. A jailed
+    /// launch opens one whatever the browser does, `browser` false without it, its agent
+    /// listener for tier B. Starts a thread and binds loopback listeners: off the actor.
     pub(super) fn open(self, key: SessionKey, browser: bool) -> Option<Arc<EgressGuard>> {
-        let proxy = self.proxy.filter(|_| browser)?;
+        let jailed = self.jailed;
+        let proxy = self.proxy.filter(|_| browser || jailed)?;
         let denials = Arc::new(CountDenials::reporting(key, self.post));
-        match proxy.open(
-            key,
-            proxy_config(
-                &self.agent,
-                Arc::clone(&denials),
-                (self.block, self.allowed.for_matter(key.matter)),
-                browser,
-            ),
-        ) {
+        let mut config = proxy_config(
+            &self.agent,
+            Arc::clone(&denials),
+            (self.block, self.allowed.for_matter(key.matter)),
+            browser,
+        );
+        if jailed {
+            config.listener = ListenerFor::TierB;
+        }
+        match proxy.open(key, config) {
             Ok(()) => Some(Arc::new(EgressGuard {
                 proxy,
                 key,
@@ -206,8 +238,8 @@ pub(crate) fn proxy_config(
         record: None,
         // Stage C's rule: the token-free listener only for a launch with the browser.
         browser,
-        // Tier C (the module header): the agent listener stays outside `TIER_B_PORTS` until
-        // R17 PR-E passes `ListenerFor::TierB` for a tier-B launch, as for the relay.
+        // Tier C (the module header): the agent listener stays outside `TIER_B_PORTS`; a jailed
+        // launch sets `ListenerFor::TierB` (`EgressPrep::open`).
         listener: ListenerFor::Other,
     }
 }

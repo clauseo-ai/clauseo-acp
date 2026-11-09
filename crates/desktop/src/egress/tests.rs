@@ -355,6 +355,10 @@ impl EgressProxy for Logged {
         self.inner.port_for(session)
     }
 
+    fn agent_listener(&self, session: SessionKey) -> Option<clauseo_host::AgentListener> {
+        self.inner.agent_listener(session)
+    }
+
     fn close(&self, session: SessionKey) {
         self.log.lock().unwrap().push(("close", session));
         self.inner.close(session);

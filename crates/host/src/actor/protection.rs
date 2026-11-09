@@ -75,6 +75,22 @@ impl ProtectionHost {
         Some((launchers, sandbox.launch_opts.clone()))
     }
 
+    /// The seam itself (`HostConfig::with_sandbox`), when set: a jailed launch reads its install
+    /// folders and CA roots.
+    pub(crate) fn sandbox(&self) -> Option<&Sandbox> {
+        self.sandbox.as_ref()
+    }
+
+    /// The tier an agent launched now runs under: the computer's when its launch goes through
+    /// the sandbox's launchers, else C (`None`), whatever the computer reports: without
+    /// launchers nothing jails the agent. #712's `Agent::tier` takes it at the launch.
+    pub(crate) fn launch_tier(&self) -> Option<ProtectionTier> {
+        match (&self.observed.computer, self.launchers().is_some()) {
+            (Protection::Protected { tier }, true) => Some(*tier),
+            _ => None,
+        }
+    }
+
     /// The computer's protection now.
     pub(crate) fn computer(&self) -> &Protection {
         &self.observed.computer

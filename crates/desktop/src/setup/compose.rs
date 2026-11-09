@@ -207,6 +207,7 @@ fn found_login(found: Found) -> Option<FoundLogin> {
     Some(match found {
         Found::ClaudeSettings => FoundLogin::ClaudeSettings,
         Found::ClaudeWindowsSandbox => FoundLogin::ClaudeWindowsSandbox,
+        Found::CodexSandbox => FoundLogin::CodexSandbox,
         Found::CodexKeyring => FoundLogin::CodexKeyring,
         Found::ReusedFailed => FoundLogin::ReusedFailed,
         Found::ReusedSignedOut => FoundLogin::ReusedSignedOut,

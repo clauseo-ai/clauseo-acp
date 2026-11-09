@@ -17,22 +17,24 @@
 //! it set aside still get their notice.
 //!
 //! The seam gets the launch's `SessionKey` and those of the matter's other sessions still
-//! running, taken on the actor when the job starts ([`running`]). The names it set aside before
+//! running, taken on the actor when the job starts ([`running`]), in `reserve` first: the
+//! reservation's ports go into the policy, and it is handed to `launcher` by value (dropped,
+//! so released, on every failure in between). The names it set aside before
 //! the launch (Windows' `before_launch`) give one `Notice` on the thread, relative to the matter
 //! ([`notice`]). Once the agent spawned, its launcher, its policy and the seam ride on the
 //! thread's run folder ([`SandboxSession`]); when the agent has exited and the run folder goes,
 //! the seam's `after_session` is called once with that policy, off the actor, bounded like the
 //! removal, and what it moved gives one more notice.
 //!
-//! The policy is B2's minimum: the matter folder read-write, the session's `run/<session>/tmp`
-//! as `TMPDIR`, the agent's install folder (its program's, links followed) read and run. R17
-//! PR-C adds the per-agent state
-//! folders (until then the state folder is the session's `work` folder); PR-D the CA files,
-//! skills, the browser sidecar and the login files.
+//! The policy and the variables the agent gets with it (the session proxy's, the CA bundle's)
+//! are R17 PR-D's ([`policy`]); the variables ride on [`Sandboxed`] to the spawn. A jailed Codex
+//! launch is refused before the seam is asked while Codex would start in its ask mode
+//! (`codex::launch_mode`): R17 PR-D2c starts it in the jailed preset.
 
 use std::fmt;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+use std::ffi::OsString;
 
 use clauseo_process::{Launcher, SpawnOptions};
 use clauseo_protocol::{ErrorCode, MatterId, ThreadId};
@@ -42,7 +44,7 @@ use super::super::super::Actor;
 use super::super::super::input::Input;
 use super::super::agents::{self, Waiting};
 use super::super::{TurnInput, host_stopping, state};
-use super::{Prepared, Preparing, RunFolders, discard, undo_late};
+use super::{Prepared, Preparing, discard, undo_late};
 use crate::agent::codex::prepare::{Job, LAUNCH_WAIT, off_actor, off_actor_or_undo};
 use crate::config::{SandboxLaunchers, SessionEnd, SessionKey};
 use crate::error::Error;
@@ -56,6 +58,9 @@ pub(crate) struct Sandboxed {
     policy: Policy,
     /// The names set aside before the launch, relative to the matter.
     moved: Vec<String>,
+    /// The variables the jailed agent gets over its own (the session proxy's, the CA bundle's):
+    /// `Some` to set, `None` to remove. The proxy's carry its token: never logged.
+    pub(crate) env: Vec<(OsString, Option<OsString>)>,
 }
 
 impl fmt::Debug for Sandboxed {
@@ -82,23 +87,6 @@ impl fmt::Debug for SandboxSession {
     }
 }
 
-/// The policy of one agent launch: `matter` (the folder the thread's matter row stores, as the
-/// agent runs in it, `agent::session_folder`) read-write, the session's `run/<session>/tmp`
-/// as its `TMPDIR` (never the run folder itself), and the agent's `install` folder
-/// ([`install_folder`]) read and run. The state folder is the session's `work` folder until
-/// R17 PR-C's per-agent state folders. R17 PR-C and PR-D extend this function. File system
-/// calls (`build` walks the matter): off the actor.
-pub(crate) fn launch_policy(
-    matter: &Path,
-    run: &RunFolders,
-    install: &Path,
-) -> Result<Policy, clauseo_sandbox::Error> {
-    Policy::builder(crate::agent::session_folder(matter), &run.work)
-        .tmpdir(run.tmp())
-        .runtime(install)
-        .build()
-}
-
 /// The seam's job: a launch's policy and launcher, waited on as long as a launch's checks.
 const fn job(matter: MatterId) -> Job {
     Job {
@@ -119,14 +107,19 @@ pub(super) fn start(
     seam: (Arc<dyn SandboxLaunchers>, SpawnOptions),
 ) {
     let (launchers, opts) = seam;
-    let command = match command(actor, thread) {
-        Ok(command) => command,
+    let grants = match policy::grants(actor, thread) {
+        Ok(grants) => grants,
         Err(error) => {
             discard(actor, thread, prepared.run, None);
             agents::fail_all(actor, thread, waiting, &error);
             return;
         }
     };
+    tracing::debug!(
+        tier = ?actor.protection.launch_tier(),
+        native_code_deny = policy::NATIVE_CODE_DENY,
+        "the agent's launch goes through the sandbox"
+    );
     let Some(state) = state(actor, thread) else {
         discard(actor, thread, prepared.run, None);
         return;
@@ -137,7 +130,7 @@ pub(super) fn start(
     let clock = Arc::clone(&actor.clock);
     let denials: Arc<dyn DenialSink> = Arc::new(LoggedDenials { matter: key.matter });
     let ask = Ask {
-        command,
+        grants,
         running,
         opts,
         denials,
@@ -292,103 +285,71 @@ pub(super) fn running(actor: &Actor, key: SessionKey) -> Vec<SessionKey> {
     running
 }
 
-/// What the seam is asked with besides the launch: the agent's program (its install folder is
-/// found from it off the actor), the matter's other running sessions, the spawn options and
-/// the denial sink.
+/// What the seam is asked with besides the launch: what the policy takes (`policy::Grants`), the
+/// matter's other running sessions, the spawn options and the denial sink.
 struct Ask {
-    command: PathBuf,
+    grants: Grants,
     running: Vec<SessionKey>,
     opts: SpawnOptions,
     denials: Arc<dyn DenialSink>,
 }
 
-/// The agent's program (`command`), which must be an absolute path with a folder.
-fn command(actor: &Actor, thread: ThreadId) -> Result<PathBuf, Error> {
-    let row = &actor.check_thread(thread)?.row;
-    let settings = actor.effective.agent(row.agent.as_str()).ok_or_else(|| {
-        Error::refused(
-            ErrorCode::AgentLaunchFailed,
-            format!("no agent {} in the settings", row.agent),
-        )
-    })?;
-    let command = Path::new(&settings.command);
-    command
-        .parent()
-        .filter(|folder| !folder.as_os_str().is_empty())
-        .map(|_| command.to_path_buf())
-        .ok_or_else(|| {
-            Error::refused(
-                ErrorCode::AgentLaunchFailed,
-                "The sandbox couldn't start the agent: its program has no folder.",
-            )
-        })
-}
-
-/// The agent's install folder: the folder of its program with every link followed, so a
-/// `/opt/homebrew/bin/claude` link grants the real install and not all of `bin`. File system
-/// calls: off the actor.
-pub(super) fn install_folder(command: &Path) -> Result<PathBuf, Error> {
-    dunce::canonicalize(command)
-        .ok()
-        .and_then(|real| real.parent().map(Path::to_path_buf))
-        .ok_or_else(|| {
-            Error::refused(
-                ErrorCode::AgentLaunchFailed,
-                "The sandbox couldn't start the agent: its program wasn't found.",
-            )
-        })
-}
-
-/// On the seam's thread: the install folder, the policy, then the seam's launcher. On a
-/// failure the run folder is taken back here, before the answer goes out.
+/// On the seam's thread: the reservation, the jail (its runtime folders, CA bundle, policy and
+/// variables, `policy::jail`), then the seam's launcher with the reservation. On a failure the run
+/// folder is taken back here, before the answer goes out, and a reservation made is dropped
+/// (released) here too.
 fn make(
     launchers: &dyn SandboxLaunchers,
     mut held: UndoOnDrop<Box<Prepared>, fn(Box<Prepared>)>,
     ask: Ask,
 ) -> Result<Box<Prepared>, Error> {
-    let install = match install_folder(&ask.command) {
-        Ok(install) => install,
-        Err(error) => {
-            tracing::warn!("the sandbox found no program for the agent's launch");
-            // The run folder goes here, on the seam's thread.
-            drop(held);
-            return Err(error);
-        }
-    };
     let Some(prepared) = held.get_mut() else {
         return Err(unanswered());
     };
     let key = prepared.run.key;
     let matter = key.matter;
-    let made = launch_policy(&prepared.stored, &prepared.run, &install).and_then(|policy| {
-        let launch = launchers.launcher(
-            policy.clone(),
-            &matter,
-            &key,
-            &ask.running,
-            ask.opts,
-            ask.denials,
-        )?;
-        Ok((policy, launch))
-    });
+    let made = launchers
+        .reserve(&matter, &key, &ask.running)
+        .map_err(|error| fail(matter, &error))
+        .and_then(|reservation| {
+            let jail = policy::jail(prepared, &ask.grants, reservation.ports())?;
+            let launch = launchers
+                .launcher(
+                    jail.policy.clone(),
+                    &matter,
+                    &key,
+                    reservation,
+                    ask.opts,
+                    ask.denials,
+                )
+                .map_err(|error| fail(matter, &error))?;
+            Ok((jail, launch))
+        });
     match made {
-        Ok((policy, launch)) => {
-            let moved = notice::relative_names(&launch.set_aside, policy.matter());
+        Ok((jail, launch)) => {
+            let moved = notice::relative_names(&launch.set_aside, jail.policy.matter());
             prepared.sandbox = Some(Sandboxed {
                 launcher: launch.launcher,
-                policy,
+                policy: jail.policy,
                 moved,
+                env: jail.env,
             });
             held.take().ok_or_else(unanswered)
         }
         Err(error) => {
-            let kind = kind(&error);
-            tracing::warn!(%matter, kind, "the sandbox refused the agent's launch");
+            tracing::warn!(%matter, "the sandbox did not prepare the agent's launch");
             // The run folder goes here, on the seam's thread.
             drop(held);
-            Err(refused(&error))
+            Err(error)
         }
     }
+}
+
+/// A seam's `error`, logged by its kind only, as the launch's failure.
+fn fail(matter: MatterId, error: &clauseo_sandbox::Error) -> Error {
+    let kind = kind(error);
+    tracing::warn!(%matter, kind, "the sandbox refused the agent's launch");
+    refused(error)
 }
 
 /// The kind of a seam's failure, for the message and the log: never its path.
@@ -578,6 +539,10 @@ impl DenialSink for LoggedDenials {
     }
 }
 
+mod ca;
 mod notice;
+mod over_cap;
+mod policy;
+use policy::Grants;
 #[cfg(test)]
 mod tests;

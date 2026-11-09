@@ -1091,6 +1091,7 @@ version = "0.1.0"
 dependencies = [
  "async-channel",
  "async-io",
+ "base64 0.22.1",
  "clauseo-acp",
  "clauseo-blocklist",
  "clauseo-connectors",
@@ -1117,6 +1118,7 @@ dependencies = [
  "quick-xml",
  "rusqlite",
  "rustix",
+ "rustls-native-certs",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -1128,6 +1130,7 @@ dependencies = [
  "url",
  "uuid",
  "windows",
+ "x509-parser",
  "zeroize",
 ]
 

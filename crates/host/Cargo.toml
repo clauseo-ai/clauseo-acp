@@ -62,6 +62,13 @@ unicode-normalization = { workspace = true }
 # Elicitation values withheld from a turn's tool output, wiped when the turn lets them go
 # (actor/turn/withheld.rs).
 zeroize = { workspace = true }
+# A jailed launch's CA bundle (R17 PR-D, launch_checks/sandbox/ca.rs): the OS's roots, the set
+# Node's `NODE_USE_SYSTEM_CA` and Codex read outside the jail, written as PEM.
+rustls-native-certs = "0.8.5"
+base64 = { workspace = true }
+# The CA file's blocks are kept only when each parses as an X.509 certificate (already in the
+# lock through rcgen; no default features).
+x509-parser = { version = "0.18.1", default-features = false }
 
 # The Chrome for Testing download's free-space check (browser/install/system.rs): statvfs, safe.
 [target.'cfg(unix)'.dependencies]

@@ -405,6 +405,16 @@
     "by": "Rohan",
     "note": "Rohan, on the review page (folder-rights FR19)"
   },
+  "U3-err-matter.folder_nested": {
+    "en": "To work here, move the other matter's folder that's inside this one somewhere else. The Safe workspace can't keep the two apart while one is inside the other.",
+    "hi": "यहाँ काम करने के लिए, इस मामले के फ़ोल्डर के भीतर मौजूद दूसरे मामले के फ़ोल्डर को कहीं और ले जाएँ। जब तक एक फ़ोल्डर दूसरे के भीतर है, सुरक्षित कार्यक्षेत्र दोनों को अलग नहीं रख सकता।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (folder_nested; provisional, Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (folder_nested; provisional, Rohan batch review)"
+  },
   "U3-err-matter.codex_folder": {
     "en": "This matter's folder holds a .codex folder. Rename or remove it to use Codex here.",
     "hi": "इस मामले के फ़ोल्डर में एक .codex फ़ोल्डर है। यहाँ Codex का उपयोग करने के लिए उसका नाम बदलें या उसे हटाएँ।",

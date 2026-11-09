@@ -21,15 +21,15 @@ const LOGIN_FILE: &str = "auth.json";
 const STORE: &str = "cli_auth_credentials_store=\"file\"";
 const EMAIL: &str = "test@example.com";
 
-fn lawyer_file(fx: &Fixture) -> PathBuf {
+pub(super) fn lawyer_file(fx: &Fixture) -> PathBuf {
     fx.user_home().join(".codex").join(LOGIN_FILE)
 }
 
-fn home(fx: &Fixture) -> PathBuf {
+pub(super) fn home(fx: &Fixture) -> PathBuf {
     fx.config.signin.homes[&codex()].clone()
 }
 
-fn home_file(fx: &Fixture) -> PathBuf {
+pub(super) fn home_file(fx: &Fixture) -> PathBuf {
     home(fx).join(LOGIN_FILE)
 }
 
@@ -38,14 +38,14 @@ fn plant_lawyer(fx: &Fixture) {
     write_file(&lawyer_file(fx), b"").unwrap();
 }
 
-fn found() -> SigninState {
+pub(super) fn found() -> SigninState {
     SigninState::LoginFound {
         from: LoginFrom::Codex,
         email: Some(EMAIL.to_owned()),
     }
 }
 
-fn reused() -> SigninState {
+pub(super) fn reused() -> SigninState {
     SigninState::SignedIn {
         email: Some(EMAIL.to_owned()),
         plan: Some("plus".to_owned()),
@@ -54,16 +54,16 @@ fn reused() -> SigninState {
     }
 }
 
-fn signed_out(found: Option<Found>) -> SigninState {
+pub(super) fn signed_out(found: Option<Found>) -> SigninState {
     SigninState::SignedOut { found }
 }
 
-fn start(fx: &Fixture) -> (clauseo_agents::Agents, Events) {
+pub(super) fn start(fx: &Fixture) -> (clauseo_agents::Agents, Events) {
     fx.start_for(codex())
 }
 
 /// `check_status`, `LoginFound`, `use_found_login`, `SignedIn { Reused }`.
-fn reuse(agents: &clauseo_agents::Agents, events: &Events) {
+pub(super) fn reuse(agents: &clauseo_agents::Agents, events: &Events) {
     agents.check_status(&codex()).unwrap();
     assert_eq!(events.state(), found());
     agents.use_found_login(&codex()).unwrap();
@@ -75,7 +75,7 @@ fn has_store(run: &Launch) -> bool {
     run.args.iter().any(|arg| arg == STORE)
 }
 
-fn logouts(fx: &Fixture) -> Vec<Launch> {
+pub(super) fn logouts(fx: &Fixture) -> Vec<Launch> {
     fx.codex_runs(&["logout"])
 }
 

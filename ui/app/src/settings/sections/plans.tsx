@@ -48,6 +48,7 @@ export function Plans({ ctx }: { ctx: SectionContext }) {
           transport={transport}
           locked={planLocked(ctx.settings.locked, agent)}
           endpoint={ctx.settings.plans?.[agent]?.endpoint}
+          unusedEnv={ctx.settings.safe_workspace_unused_env?.[agent]}
           onOther={() => goTo(agent === CLAUDE ? CODEX : CLAUDE)}
           blockRef={(el) => {
             if (el === null) blocks.current.delete(agent);

@@ -32,6 +32,7 @@ pub(crate) fn settings_view() -> SettingsView {
         },
         locked: vec!["ui.font_size".to_owned(), "ui.theme".to_owned()],
         plans: BTreeMap::new(),
+        safe_workspace_unused_env: BTreeMap::new(),
     }
 }
 

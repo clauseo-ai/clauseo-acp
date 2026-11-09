@@ -54,6 +54,11 @@ pub(crate) fn write(path: &Path, bytes: &[u8]) {
     std::fs::write(path, bytes).unwrap();
 }
 
+/// `fs::hard_link`: `link` becomes a second name of `original`.
+pub(crate) fn hard_link(original: &Path, link: &Path) {
+    std::fs::hard_link(original, link).unwrap();
+}
+
 /// Unix: makes `path` executable by its owner, as a test's fake `npm` must be.
 #[cfg(unix)]
 pub(crate) fn make_executable(path: &Path) {

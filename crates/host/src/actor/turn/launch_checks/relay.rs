@@ -242,4 +242,4 @@ fn turns(actor: &mut Actor, thread: ThreadId) -> Option<TurnHandle> {
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

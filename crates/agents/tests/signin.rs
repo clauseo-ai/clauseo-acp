@@ -40,6 +40,10 @@ mod reuse_claude;
 mod reuse_codex;
 
 #[cfg(test)]
+#[path = "signin/reuse_codex_sandbox.rs"]
+mod reuse_codex_sandbox;
+
+#[cfg(test)]
 #[path = "signin/shim.rs"]
 mod shim;
 

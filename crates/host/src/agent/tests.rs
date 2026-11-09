@@ -104,7 +104,7 @@ async fn ended(rx: &mut mpsc::UnboundedReceiver<AgentInput>) -> Ended {
 
 /// An absolute program path on every OS (`/bin/agent` is not absolute on Windows); the spec
 /// checks only that it is absolute, and nothing launches it.
-fn absolute_program() -> String {
+pub(super) fn absolute_program() -> String {
     std::env::temp_dir()
         .join("agent")
         .to_str()

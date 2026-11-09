@@ -72,7 +72,7 @@ fn browsers(test: &str, memory: u64, count: usize) -> Vec<Option<ToolsUnavailabl
 fn with_browser(config: HostConfig) -> HostConfig {
     config
         .with_profile_hook(Box::new(browser_hook()))
-        .with_egress_proxy(Arc::new(TestProxy(8123)))
+        .with_egress_proxy(Arc::new(TestProxy::new(8123)))
         .with_browser_executable(Some(PathBuf::from("/chrome")))
 }
 
@@ -202,7 +202,7 @@ fn the_chrome_the_prep_finds_fills_the_entry() {
     let host = dir.start_launching(0, Arc::<Wired>::clone(&launcher), move |config| {
         config
             .with_profile_hook(Box::new(browser_hook()))
-            .with_egress_proxy(Arc::new(TestProxy(8123)))
+            .with_egress_proxy(Arc::new(TestProxy::new(8123)))
             .with_chrome_roots(found)
     });
     let matter = host.create_matter("m", &dir.folder("m", &[]));
@@ -228,7 +228,7 @@ fn the_chrome_the_prep_finds_fills_the_entry() {
     let host = dir.start_launching(1, Arc::<Wired>::clone(&launcher), move |config| {
         config
             .with_profile_hook(Box::new(browser_hook()))
-            .with_egress_proxy(Arc::new(TestProxy(8123)))
+            .with_egress_proxy(Arc::new(TestProxy::new(8123)))
             .with_chrome_roots(empty)
     });
     let thread = host.create_thread(matter, CLAUDE);
@@ -260,7 +260,7 @@ fn reason_with_entry(test: &str, entry: McpServer) -> Option<ToolsUnavailableRea
     let host = dir.start_launching(0, Wired::new(&dir), move |config| {
         config
             .with_profile_hook(Box::new(hook))
-            .with_egress_proxy(Arc::new(TestProxy(8123)))
+            .with_egress_proxy(Arc::new(TestProxy::new(8123)))
             .with_browser_executable(Some(PathBuf::from("/chrome")))
     });
     let matter = host.create_matter("m", &dir.folder("m", &[]));
@@ -370,7 +370,7 @@ fn the_socket_folder_lives_until_the_agents_tree_has_exited() {
     let host = dir.start_launching(0, Arc::<Wired>::clone(&launcher), move |config| {
         config
             .with_profile_hook(Box::new(hook))
-            .with_egress_proxy(Arc::new(TestProxy(8123)))
+            .with_egress_proxy(Arc::new(TestProxy::new(8123)))
             .with_browser_executable(Some(PathBuf::from("/chrome")))
             .with_browser_socket_root(root)
     });

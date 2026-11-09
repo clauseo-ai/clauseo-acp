@@ -116,6 +116,9 @@ export const HI = {
     "Codex नेटवर्क ड्राइव पर काम नहीं कर सकता। मामले को इस कंप्यूटर पर ले जाएँ।",
   "Codex can't work on a drive without file permissions. Move the matter to this computer.":
     "Codex बिना फ़ाइल अनुमतियों वाली ड्राइव पर काम नहीं कर सकता। मामले को इस कंप्यूटर पर ले जाएँ।",
+  // provisional (app track, folder_nested)
+  "To work here, move the other matter's folder that's inside this one somewhere else. The Safe workspace can't keep the two apart while one is inside the other.":
+    "यहाँ काम करने के लिए, इस मामले के फ़ोल्डर के भीतर मौजूद दूसरे मामले के फ़ोल्डर को कहीं और ले जाएँ। जब तक एक फ़ोल्डर दूसरे के भीतर है, सुरक्षित कार्यक्षेत्र दोनों को अलग नहीं रख सकता।",
   "This matter's folder is too deep inside other folders for Clauseo to work in it on Windows. Move it nearer the top of its drive.":
     "इस मामले का फ़ोल्डर दूसरे फ़ोल्डरों के बहुत भीतर है, इसलिए Windows पर Clauseo उसमें काम नहीं कर सकता। उसे ड्राइव के ऊपरी स्तर के पास ले जाएँ।",
   "The update didn't install. Try again.": "अपडेट इंस्टॉल नहीं हुआ। फिर से प्रयास करें।",

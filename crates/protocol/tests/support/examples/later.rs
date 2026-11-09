@@ -41,6 +41,10 @@ pub(super) fn failures() -> Vec<DomainEvent> {
             "too deep for Windows to start programs in",
         ),
         failed(
+            ErrorCode::MatterFolderNested,
+            "another matter's folder is inside",
+        ),
+        failed(
             ErrorCode::SigninAgentsStillRunning,
             "an agent was still running after the stop wait",
         ),

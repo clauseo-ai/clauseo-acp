@@ -362,6 +362,15 @@ fn setup_events_have_their_json_form() {
             SetupEvent::SignInChanged {
                 agent: claude(),
                 state: SignIn::SignedOut {
+                    found: Some(FoundLogin::CodexSandbox),
+                },
+            },
+            r#"{"sign_in_changed":{"agent":"claude-acp","state":{"signed_out":{"found":"codex_sandbox"}}}}"#,
+        ),
+        (
+            SetupEvent::SignInChanged {
+                agent: claude(),
+                state: SignIn::SignedOut {
                     found: Some(FoundLogin::NoneFound),
                 },
             },

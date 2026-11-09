@@ -45,6 +45,11 @@ use crate::error::Error;
 ///
 /// `path_prepend` (`HostConfig::with_agent_path_prepend`, stetdoc's folder) goes first on the
 /// merged `PATH` ([`prepend_path`]).
+///
+/// A jailed launch hands this function sources already cut down by `agent::jailed_env` (the
+/// inherited environment to its allow-list, the settings without credential names, neither the
+/// settings nor the hook with a name the host sets) and the jail's `PATH` among `forced`, with
+/// no `path_prepend`; the rules above are this function's at every tier.
 pub(crate) fn launch_spec(
     agent: &AgentLaunch,
     mut hook_env: BTreeMap<OsString, OsString>,

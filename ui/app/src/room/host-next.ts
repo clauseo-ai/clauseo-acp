@@ -83,6 +83,9 @@ export type Settings = {
   tools?: ToolsSettingsView;
   /** Each agent's firm plan (`plans.<id>`, SettingsView.plans): Plans shows the firm's address from it (UD2). */
   plans?: SettingsView["plans"];
+  /** Per agent, the credential names in its settings variables the Safe workspace leaves out
+   * (SettingsView.safe_workspace_unused_env), names only: Plans' note. */
+  safe_workspace_unused_env?: SettingsView["safe_workspace_unused_env"];
 };
 
 /* ---------- H3, H5, H20: a matter's details ---------- */

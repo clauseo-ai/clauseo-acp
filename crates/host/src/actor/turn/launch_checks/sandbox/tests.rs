@@ -1,17 +1,14 @@
 //! The launch's jail, its pure parts: the set-aside names made relative, the notice, the
-//! failure's message without a path, and B2's policy.
+//! failure's message without a path, and the prep guard. The policy's goldens are in
+//! `policy/tests.rs`.
 
 use std::path::{Path, PathBuf};
 
-use clauseo_protocol::{ErrorCode, MatterId, ThreadId};
+use clauseo_protocol::ErrorCode;
 use clauseo_sandbox::SetAside;
 
 use super::notice::{NAMED, When, notice, plain, relative_names};
-use super::{UndoOnDrop, launch_policy, refused};
-use crate::actor::turn::launch_checks::RunFolders;
-use crate::config::SessionKey;
-use crate::pipeline::tests::support::id;
-use crate::write;
+use super::{UndoOnDrop, refused};
 
 fn moved(from: &Path) -> SetAside {
     SetAside {
@@ -143,36 +140,6 @@ fn a_failure_names_its_kind_and_never_its_path() {
     )));
     assert_eq!(probe.code(), ErrorCode::Internal);
     assert!(!link.to_string().contains("AGENTS.md"), "{link}");
-}
-
-#[test]
-fn the_policy_grants_the_matter_the_session_tmp_and_the_install() {
-    let root = std::env::temp_dir().join(format!("clauseo-b2-policy-{}", std::process::id()));
-    write::remove_dir_all(&root).unwrap();
-    let (data, matter, install) = (root.join("data"), root.join("m"), root.join("agent"));
-    for folder in [&matter, &install] {
-        write::create_dir_all(folder).unwrap();
-    }
-    let run = RunFolders::new(
-        &data,
-        SessionKey {
-            matter: id::<MatterId>(1),
-            thread: id::<ThreadId>(2),
-            launch: 3,
-        },
-    );
-    write::create_dir_all(&run.work).unwrap();
-    let policy = launch_policy(&matter, &run, &install).unwrap();
-    let real = |path: &Path| dunce::canonicalize(path).unwrap();
-    assert_eq!(policy.matter(), real(&matter));
-    assert_eq!(policy.state(), real(&run.work));
-    assert_eq!(
-        policy.session_tmpdir(),
-        Some(real(&run.root).join("tmp").as_path())
-    );
-    assert_eq!(policy.runtime(), [real(&install)]);
-    assert!(policy.read().is_empty() && policy.allowed_folders().is_empty());
-    write::remove_dir_all(&root).unwrap();
 }
 
 /// A guard whose undo counts into the returned cell.

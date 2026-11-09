@@ -1,17 +1,19 @@
 //! The variables a launch forces for the agent's kind with the matter's state folder (R17 PR-C):
-//! Codex's ([`codex`]) and Claude's ([`claude`]), and a Codex agent's own state ([`of`]).
+//! Codex's ([`codex`]) and Claude's ([`claude`]), and a Codex agent's own state ([`of`]); a
+//! jailed launch's own over them ([`jailed`]), and the other sources of its spec ([`sources`]).
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use clauseo_protocol::AgentId;
+use clauseo_settings::AgentLaunch;
 use serde_json::{Map, Value};
 
 use super::super::super::Actor;
 use super::super::key_retry::KeyRetry;
-use super::super::launch_checks::{CodexPrepared, RunFolders};
-use super::{CodexAgent, codex_hooks};
+use super::super::launch_checks::{CodexPrepared, RunFolders, Sandboxed};
+use super::CodexAgent;
 use crate::agent;
 use crate::agent::login_link::Checked;
 
@@ -94,4 +96,85 @@ pub(super) fn claude(
         .filter(|_| claude_home.is_some())
         .map(|state| agent::home::claude_launch_env(state, store))
         .unwrap_or_default()
+}
+
+/// A jailed launch's variables (`Sandboxed::env`: the session proxy's, which carry its token, and
+/// the CA bundle's) put over `forced`, so they win over every other source; the names it
+/// removes (`ALL_PROXY`, `all_proxy`) come back to be dropped from every source. Tier C
+/// (`sandbox` none) changes nothing.
+pub(super) fn jailed(
+    forced: &mut BTreeMap<OsString, OsString>,
+    sandbox: Option<&Sandboxed>,
+) -> Vec<String> {
+    let mut removed = Vec::new();
+    for (name, value) in sandbox.map(|jail| jail.env.as_slice()).unwrap_or_default() {
+        if let Some(value) = value {
+            forced.insert(name.clone(), value.clone());
+        } else {
+            forced.remove(name);
+            removed.extend(name.to_str().map(str::to_owned));
+        }
+    }
+    removed
+}
+
+/// A launch's other sources for `launch_spec`: the agent's settings, the hook's variables with the
+/// host's switch (`loads::launch_env`), the inherited environment (`HostWiring::inherited_env`,
+/// else this process's) and the folder put first on `PATH` (stetdoc's).
+pub(super) type Sources = (
+    AgentLaunch,
+    BTreeMap<OsString, OsString>,
+    Vec<(OsString, OsString)>,
+    Option<PathBuf>,
+);
+
+/// [`Sources`] for `agent`'s launch with `settings`: as they are at tier C; by
+/// `agent::jailed_env`'s rules when `jailed`, with no folder for `PATH` (stetdoc's is among
+/// the policy's runtime folders, which make the jailed `PATH`).
+pub(super) fn sources(
+    actor: &Actor,
+    agent: &AgentId,
+    settings: &AgentLaunch,
+    jailed: bool,
+) -> Sources {
+    let hook = actor.profile.launch_env(agent);
+    let inherited: Vec<_> = match &actor.wiring.inherited_env {
+        Some(env) => env.clone(),
+        None => std::env::vars_os().collect(),
+    };
+    if !jailed {
+        let prepend = actor.wiring.path_prepend.clone();
+        return (
+            settings.clone(),
+            agent::loads::launch_env(hook),
+            inherited,
+            prepend,
+        );
+    }
+    let jailed = agent::jailed_env::sources(inherited, settings, hook);
+    let hook = agent::loads::launch_env(jailed.hook);
+    (jailed.settings, hook, jailed.inherited, None)
+}
+
+/// THE CODEX HOOKS SEAM: the `hooks` object a Codex agent's `CODEX_CONFIG` carries, with its
+/// `state` trust entry and `trusted_hash`: the one a test set (`HostConfig::with_codex_hooks`),
+/// else [`codex_hook_config`](agent::loads::codex_hook_config) for the guard program the
+/// Claude Code entry runs (`HostConfig::with_pre_write_guard`), so its `PreToolUse` holds one
+/// group, the guard's. `None` with no guard program, or (with a warning) one that
+/// `codex_hook_config` cannot quote. It is read once per launch, which records on the agent
+/// whether one went in (`Agent::guard`); with none the session start skips the guard's trust
+/// check.
+fn codex_hooks(actor: &Actor) -> Option<Map<String, Value>> {
+    if let Some(hooks) = &actor.codex_hooks {
+        return Some(hooks.clone());
+    }
+    let program = actor.pre_write_guard.as_deref()?;
+    let Some(Value::Object(hooks)) = agent::loads::codex_hook_config(program) else {
+        tracing::warn!(
+            "the pre-write guard's path cannot go in Codex's hook command, so Codex runs without \
+             the guard"
+        );
+        return None;
+    };
+    Some(hooks)
 }

@@ -92,7 +92,9 @@ window sent still passes through Tauri's buffers, which Clauseo does not zero.
   `Failed { code, at }`, and desktop's own `Switching { since, stuck }` (P5b, below). `found`
   is a `FoundLogin` (`claude_settings`,
   `claude_windows_sandbox`, `codex_keyring`, `reused_failed`, `reused_signed_out`,
-  `reused_changed`, `codex_link_split`, then UD2's `none_found`: the search ran and found no
+  `reused_changed`, `codex_link_split`, `codex_sandbox` (a jailed Codex launch of a reused Codex
+  login ends reuse with it, R17 PR-D2a, and `no-reuse` is written so detection does not offer that
+  login again), then UD2's `none_found`: the search ran and found no
   login, and `reuse_off`: S18's `no-reuse` is there, so nothing was looked for); `from` is a `LoginFrom` (`claude_code`, `codex`);
   `method` a `SignInMethod` (`plan`, `api_key`, `firm`); `source` a `SignInSource` (`reused`,
   the lawyer's own CLI login, or `own`, Clauseo's). `plan` is a `PlanLabel` in words, from

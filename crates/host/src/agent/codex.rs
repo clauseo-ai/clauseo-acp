@@ -25,8 +25,16 @@ pub(crate) const MODE_VAR: &str = "INITIAL_AGENT_MODE";
 /// asking (G8a saw it, clauseo-acp-private #255), and asks before writing outside it or
 /// escalating. Undo per turn is the lawyer's way back.
 pub(crate) const ASK_MODE: &str = "workspace-write";
+/// The mode a jailed Codex runs in (R17, orchestrator's ruling of 2026-11-08): codex-acp 2.2.2's
+/// `agent-full-access` preset (`dist/index.js:34310-34319`: sandbox `dangerFullAccess`, approval
+/// `never`), the jail being the fence. codex-acp sends its preset's approval policy with every
+/// turn (`:35598-35615`), so a jailed Codex never asks. R17 PR-D2c starts a jailed Codex in it;
+/// until then a jailed Codex launch is refused (`launch_checks::sandbox`).
+pub(crate) const JAILED_MODE: &str = "agent-full-access";
 /// The variable the Codex app-server takes its home from.
 pub(crate) const HOME_VAR: &str = "CODEX_HOME";
+/// Clauseo's config file in a Codex home ([`write_home_config`]): read-only in the jail.
+pub(crate) const HOME_CONFIG: &str = "config.toml";
 /// The temp folder variable: a Codex session's is its run folder's `tmp` (`RunFolders::tmp`).
 pub(crate) const TMPDIR_VAR: &str = "TMPDIR";
 /// The user's home folder on macOS and Linux, set to the state folder for Codex.
@@ -55,6 +63,12 @@ pub(crate) const DROPPED_VARS: [&str; 4] = [
 /// dropped, so no settings value can undo a switch the host sets.
 pub(crate) const MODEL_KEYS: [&str; 2] = ["model", "model_reasoning_effort"];
 
+/// The mode a Codex launch starts in (`INITIAL_AGENT_MODE`), `jailed` or not: [`ASK_MODE`] at
+/// every tier until R17 PR-D2c gives a jailed launch [`JAILED_MODE`].
+pub(crate) const fn launch_mode(_jailed: bool) -> &'static str {
+    ASK_MODE
+}
+
 /// The variables a Codex agent is launched with, over any settings or profile value of the same
 /// name: the ask mode, `home` (the matter's state folder, `agent/state_folder.rs`) as
 /// `CODEX_HOME`, and on macOS and Linux as `HOME` too, so Codex's `~/.agents/skills` and the
@@ -79,7 +93,7 @@ pub(crate) fn launch_env_on(
 ) -> BTreeMap<OsString, OsString> {
     let config = Value::Object(config(settings_env, profile, hooks)).to_string();
     let mut env = BTreeMap::from([
-        (OsString::from(MODE_VAR), OsString::from(ASK_MODE)),
+        (OsString::from(MODE_VAR), OsString::from(launch_mode(false))),
         (OsString::from(HOME_VAR), home.as_os_str().to_owned()),
         (OsString::from(CONFIG_VAR), OsString::from(config)),
         (OsString::from(MCP_FILTER_VAR), OsString::from("true")),
@@ -296,7 +310,7 @@ pub(crate) fn home_config() -> String {
 /// as it is: no write, so no rename over a file another program holds open on Windows. Before a
 /// write, temp files a crashed write left beside it (`config.toml.clauseo-*.new`) are removed.
 pub(crate) fn write_home_config(home: &Path) -> Result<(), Error> {
-    let path = home.join("config.toml");
+    let path = home.join(HOME_CONFIG);
     let text = home_config();
     if holds(&path, text.as_bytes()) {
         return Ok(());

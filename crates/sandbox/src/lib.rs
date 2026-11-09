@@ -184,6 +184,7 @@ pub use links::{LinkFinding, LinkKind, MatterScan, scan_links, scan_matter};
 #[cfg(target_os = "macos")]
 pub use macos::SeatbeltLauncher;
 pub use macos::SeatbeltProfile;
+pub use policy::under as path_under;
 pub use policy::{
     CLAUDE_STORE_BESIDE_LOCK_SUFFIX, CLAUDE_STORE_FILES, CLAUDE_STORE_LOCK_FOLDERS, ClaudeStore,
     INSTRUCTIONS_AT_ANY_DEPTH, LINK_RULES_MAX, Loopback, PROTECTED_AT_ANY_DEPTH, PROTECTED_NAMES,

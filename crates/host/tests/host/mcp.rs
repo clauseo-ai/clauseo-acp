@@ -302,7 +302,7 @@ fn hook_servers_follow_the_lawyers_with_their_per_session_values() {
     let wire = |config: clauseo_host::HostConfig, hook: Hook| {
         config
             .with_profile_hook(Box::new(hook))
-            .with_egress_proxy(Arc::new(clauseo_host::TestProxy(8123)))
+            .with_egress_proxy(Arc::new(clauseo_host::TestProxy::new(8123)))
             .with_browser_executable(Some(std::path::PathBuf::from("/chrome")))
     };
     let launcher = Wired::new(&dir);

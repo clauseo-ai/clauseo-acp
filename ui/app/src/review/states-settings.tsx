@@ -38,6 +38,7 @@ export function SettingsOver({
   connectors,
   setup,
   plans,
+  unusedEnv,
   protection,
   blocklist,
   update,
@@ -56,6 +57,8 @@ export function SettingsOver({
   setup?: CellSetup;
   /** Each agent's firm plan the host sends (SettingsView.plans). */
   plans?: SettingsView["plans"];
+  /** The credential names the Safe workspace leaves out, per plan (SettingsView.safe_workspace_unused_env). */
+  unusedEnv?: SettingsView["safe_workspace_unused_env"];
   /** UC's protection wire; none when left out, and the Safe workspace doesn't show. */
   protection?: FakeProtectionHost;
   /** The unsafe-site list's host (0053), Privacy's allowed sites; none listed when left out. */
@@ -77,6 +80,7 @@ export function SettingsOver({
                 locked,
                 ...(tools === undefined ? {} : { tools }),
                 ...(plans === undefined ? {} : { plans }),
+                ...(unusedEnv === undefined ? {} : { safe_workspace_unused_env: unusedEnv }),
               },
             };
           throw new Error("not scripted");

@@ -99,10 +99,72 @@ pub(super) fn plans_view(plans: &BTreeMap<String, Plan>) -> BTreeMap<AgentId, Pl
         .collect()
 }
 
+/// Each agent's settings variables a jailed launch leaves out (`agent::jailed_env::ignored`:
+/// credential names), by agent id; an agent with none is left out, as is an id that is no agent
+/// id or a name that is no variable name.
+pub(super) fn unused_in_jail(
+    agents: &BTreeMap<String, AgentLaunch>,
+) -> BTreeMap<AgentId, Vec<EnvName>> {
+    agents
+        .iter()
+        .filter_map(|(id, launch)| {
+            let names: Vec<EnvName> = crate::agent::jailed_env::ignored(&launch.env)
+                .iter()
+                .filter_map(|name| EnvName::new(name.as_str()).ok())
+                .collect();
+            let id = AgentId::new(id.as_str()).ok()?;
+            (!names.is_empty()).then_some((id, names))
+        })
+        .collect()
+}
+
 fn provider_out(provider: settings::PlanProvider) -> PlanProvider {
     match provider {
         settings::PlanProvider::Anthropic => PlanProvider::Anthropic,
         settings::PlanProvider::Bedrock => PlanProvider::Bedrock,
         settings::PlanProvider::Vertex => PlanProvider::Vertex,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use clauseo_protocol::{AgentId, EnvName};
+    use clauseo_settings::AgentLaunch;
+
+    use super::unused_in_jail;
+
+    /// The view names each agent's settings credentials, sorted, and leaves out an agent with
+    /// none.
+    #[test]
+    fn the_view_names_each_agent_s_settings_credentials_only() {
+        let launch = |env: &[&str]| AgentLaunch {
+            command: "/bin/agent".to_owned(),
+            args: Vec::new(),
+            env: env
+                .iter()
+                .map(|name| ((*name).to_owned(), "x".to_owned()))
+                .collect(),
+        };
+        let agents = BTreeMap::from([
+            (
+                "codex-acp".to_owned(),
+                launch(&["OPENAI_API_KEY", "CODEX_HOME_EXTRA", "AWS_PROFILE"]),
+            ),
+            ("claude-acp".to_owned(), launch(&["ANTHROPIC_MODEL"])),
+        ]);
+        let names = |list: &[&str]| -> Vec<EnvName> {
+            list.iter()
+                .map(|name| EnvName::new(name).unwrap())
+                .collect()
+        };
+        assert_eq!(
+            unused_in_jail(&agents),
+            BTreeMap::from([(
+                AgentId::new("codex-acp").unwrap(),
+                names(&["AWS_PROFILE", "OPENAI_API_KEY"])
+            )])
+        );
     }
 }

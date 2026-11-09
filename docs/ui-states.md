@@ -326,6 +326,7 @@ retried as they are; the others need the lawyer or a fix first. Meanings are in 
 | Matter | `ErrorCode::MatterCheckpointFailed`, `ErrorCode::MatterFileLocked`, `ErrorCode::MatterTurnRunning` | yes |
 | Matter | `ErrorCode::MatterFolderMissing`, `ErrorCode::MatterCodexFolder`; `ErrorCode::MatterFolderRefused` only from a host before decision record 0022 | no |
 | Codex refused: its sandbox can't work in the folder (Windows) | `ErrorCode::MatterFolderNetwork`, `ErrorCode::MatterFolderNoPermissions` | no |
+| Jailed launch refused: another matter's folder (a forgotten one too) is inside this one; the error's `files` names it (R17 PR-D2a) | `ErrorCode::MatterFolderNested` | no |
 | Matter folder refused (0022) | `ErrorCode::MatterFolderIsDrive`, `ErrorCode::MatterFolderIsHome`, `ErrorCode::MatterFolderIsSystem`, `ErrorCode::MatterFolderUnreadable`, `ErrorCode::MatterFolderIsMatter`, `ErrorCode::MatterFolderInMattersRoot`, `ErrorCode::MatterFolderTooDeep` (Windows) | no |
 | Transport | `ErrorCode::TransportUnauthorized`, `ErrorCode::TransportTooLarge` | no |
 | Settings | `ErrorCode::SettingsLocked`, `ErrorCode::SettingsRefused`, `ErrorCode::SettingsKeyStored` | no |

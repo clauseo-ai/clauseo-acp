@@ -70,7 +70,7 @@ fn seeded(web_search: bool) -> Vec<String> {
 fn with_browser(config: HostConfig, hook: Hook) -> HostConfig {
     config
         .with_profile_hook(Box::new(hook))
-        .with_egress_proxy(Arc::new(TestProxy(8123)))
+        .with_egress_proxy(Arc::new(TestProxy::new(8123)))
         .with_browser_executable(Some(PathBuf::from("/chrome")))
 }
 
