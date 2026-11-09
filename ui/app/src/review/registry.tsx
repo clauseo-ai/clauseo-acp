@@ -57,7 +57,7 @@ import {
   type WordsRef,
 } from "./words.ts";
 import type { NextErrorCode } from "../room/host-next.ts";
-import { ERROR_WORDS, type ErrorKey } from "@clauseo/components/lib/words-errors.ts";
+import { ERROR_WORDS, MARK_KEYS, type ErrorKey } from "@clauseo/components/lib/words-errors.ts";
 import { agentText, step, toolCall, TURN, userMessage, uuid } from "../testing/stream-script.ts";
 import type { ErrorCode, StepEntry, ViewEntry } from "../transport/protocol.ts";
 import { U16B } from "./registry-u16b.tsx";
@@ -124,11 +124,16 @@ const limit = (reason: string, resets_at?: number): ViewEntry => ({
 
 const thread = (state: ThreadState) => () => <RoomOver host={() => threadHost(state)} />;
 
+/** An error sentence whose words are Versions' own: the Word blackline's (words-errors.ts's MARK_KEYS). */
+const versionsOwn = (key: ErrorKey): key is (typeof MARK_KEYS)[number] =>
+  (MARK_KEYS as readonly string[]).includes(key);
+
 /** One entry per error code, "U3-err-<code>", refused on a send: an id that names its code never moves when a code
- * is added. Codes whose sentence is U3-07's (words-thread.ts's) need no entry of their own. */
+ * is added. Codes whose sentence is U3-07's (words-thread.ts's), or Versions' own (the Word blackline's, UC-114 and
+ * UC-115), need no entry of their own. */
 const ERRORS: Entry[] = (Object.entries(ERROR_WORDS) as [ErrorCode, ErrorKey][]).flatMap(
   ([code, key]) =>
-    key === "The answer stopped. Your question and the answer so far are kept."
+    key === "The answer stopped. Your question and the answer so far are kept." || versionsOwn(key)
       ? []
       : [
           {

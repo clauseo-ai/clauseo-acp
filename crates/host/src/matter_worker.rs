@@ -16,8 +16,8 @@ use clauseo_matters::{
     Settings, TimelineEntry, TurnMeta, UndoRequest, Undone, matter_path_of_resolved,
 };
 use clauseo_protocol::{
-    CheckpointId, ErrorCode, FileChange, FileDecision, FolderSupportKind, ImportSummary, MatterId,
-    MatterPath, RestoreRequest, ThreadId, Timestamp, TurnId,
+    CheckpointId, FileChange, FileDecision, FolderSupportKind, ImportSummary, MatterId, MatterPath,
+    RestoreRequest, ThreadId, Timestamp, TurnId,
 };
 
 use crate::agent::data_fence::{FenceCheck, PathsChecked, check_paths};
@@ -182,6 +182,8 @@ pub(crate) enum MatterJob {
     /// `Matter::discard`: undoes the create or import this worker ran, for a matter the host
     /// could not record; the worker holds no matter afterwards. With none held, nothing to do.
     Discard,
+    /// A Word blackline's two sides of `path`, copied into the new folder `dir` (`sides.rs`).
+    WriteSides(Sides),
 }
 
 /// How an import ended.
@@ -234,6 +236,7 @@ pub(crate) fn made(reply: MatterReply) -> Result<Made, Error> {
         | MatterReply::HeldOpen(_)
         | MatterReply::Papers(_)
         | MatterReply::StillGone(_)
+        | MatterReply::SidesWritten(_)
         | MatterReply::Discarded(_) => Err(Error::Internal(
             "a matter's create got another job's reply".to_owned(),
         )),
@@ -264,6 +267,8 @@ pub(crate) enum MatterReply {
     /// The paths in the folder again.
     StillGone(Result<Vec<MatterPath>, Error>),
     Discarded(Result<(), Error>),
+    /// The blackline's folder with both sides in it.
+    SidesWritten(Result<BlacklineDir, Error>),
 }
 
 impl MatterReply {
@@ -285,6 +290,7 @@ impl MatterReply {
             Self::EditedSince(_) => "EditedSince",
             Self::StillGone(_) => "StillGone",
             Self::Discarded(_) => "Discarded",
+            Self::SidesWritten(_) => "SidesWritten",
         }
     }
 }
@@ -521,6 +527,7 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             Slot::Open(matter) => matter.discard().map_err(Error::from),
             Slot::Empty | Slot::Unopened { .. } => Ok(()),
         }),
+        MatterJob::WriteSides(sides) => sides.reply(settings, slot),
     }
 }
 
@@ -566,31 +573,20 @@ fn open<'s>(settings: &Settings, slot: &'s mut Slot) -> Result<&'s mut Matter, E
     }
 }
 
-/// Refuses `folder` when Windows can't start programs in it: `matter.folder_too_deep`, on
-/// Windows only (`clauseo_matters::is_too_deep`). An open checks it before the matter is opened,
-/// and a turn's launch before its agent's home or any session folder is made, so a matter moved
-/// or renamed deeper is refused where it is opened or launched, and stays listed. Its file
-/// system calls: none.
-pub(crate) fn refuse_too_deep(folder: &Path) -> Result<(), Error> {
-    if clauseo_matters::is_too_deep(folder) {
-        return Err(Error::refused(
-            ErrorCode::MatterFolderTooDeep,
-            "the matter's path is too long for Windows to start programs in it",
-        ));
-    }
-    Ok(())
-}
-
 mod checkpoints;
 mod claims;
 mod import;
 mod relocate;
+mod sides;
+mod too_deep;
 
 use checkpoints::{repair, timeline_entry, turn_checkpoint};
 pub(crate) use claims::{Claim, Claimed, check_registry};
 use import::import;
 pub(crate) use relocate::{Registry, Relink};
 use relocate::{locate, relink_matter};
+pub(crate) use sides::{BlacklineDir, NEW, OLD, Sides};
+pub(crate) use too_deep::refuse_too_deep;
 
 #[cfg(test)]
 mod tests;

@@ -184,6 +184,8 @@ pub(crate) enum MatterTag {
     Discard,
     /// A check for papers an undo removed that came back (`turn/came_back.rs`).
     CameBack(super::turn::CameBackCheck),
+    /// A Word blackline's sides, then its stetdoc runs (`query/blackline.rs`).
+    Blackline(Box<super::query::blackline::Ask>),
 }
 
 /// Everything else the actor reads, posted by its own tasks and by other threads.

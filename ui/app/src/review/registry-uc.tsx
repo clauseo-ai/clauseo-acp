@@ -21,6 +21,7 @@ import { SafeWorkspaceLine } from "@clauseo/components/clauseo/safe-workspace-li
 import type { Entry } from "./entry.ts";
 import { MATTER } from "./hosts.ts";
 import { PressInOrder } from "./press-words.tsx";
+import { UC_BLACKLINE } from "./registry-uc-blackline.tsx";
 import { RoomOver } from "./states.tsx";
 import { SettingsOver } from "./states-settings.tsx";
 import {
@@ -187,7 +188,8 @@ const REFUSED_INVALID: FakeProtectionHost = {
   },
 };
 
-/** UC's entries, UC-01 to UC-106, each id written as it is; ids missing are unused. */
+/** UC's entries, UC-01 to UC-116 (UC-113 to UC-116 in registry-uc-blackline.tsx), each id written as it is; ids
+ * missing are unused. */
 export const UC: Entry[] = [
   room(
     "UC-01",
@@ -597,4 +599,5 @@ export const UC: Entry[] = [
       </p>
     ),
   },
+  ...UC_BLACKLINE,
 ];

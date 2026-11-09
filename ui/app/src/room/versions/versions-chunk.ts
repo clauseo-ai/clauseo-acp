@@ -4,6 +4,7 @@
 // too, for the lock's lines, the first time a program holds a file an Undo must write.
 import sheet from "./versions.css?url";
 
+export { Blacklines } from "./blackline.ts";
 export { VersionsController } from "./controller.ts";
 export { VersionsCentre, VersionsRail } from "./versions-parts.tsx";
 // the change note's lock lines (word/word-lock.tsx) share Versions' words: the thread loads them from here, so the words

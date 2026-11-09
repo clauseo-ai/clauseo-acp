@@ -7,6 +7,7 @@ import type { Lang } from "./display.ts";
 import { wordsOf } from "./words-core.ts";
 import { th } from "./words-thread.ts";
 import type { HI } from "./words-errors.hi.ts";
+import type { VersionKey } from "./words-versions.ts";
 
 /** Why a host call failed: the protocol's `ErrorCode` (ui/app/src/transport/bindings.ts), copied, since the parts
  * can't import the app. ui/app/src/room/thread/error-codes.test.ts fails when the two differ. */
@@ -88,13 +89,25 @@ export type ErrorCode =
   | "blocklist.allow_not_saved"
   | "blocklist.revoke_not_saved"
   | "sandbox.cleaning_up"
+  | "blackline.no_word_tool"
+  | "blackline.not_word"
+  | "blackline.failed"
   | "unknown";
 
 /** The thread's own sentence for an answer cut short: its Hindi lives in words-thread.ts, once. */
 const STOPPED = "The answer stopped. Your question and the answer so far are kept." as const;
 
+/** The Word blackline's sentences, said in Versions over the sheet: their words live in words-versions.ts, once, and
+ * the copy review registers them there (UC-114, UC-115). */
+export const MARK_KEYS = [
+  "Clauseo's Word tool is missing. Reinstall Clauseo to see the marked-up changes.",
+  "The changes in this document couldn't be marked up.",
+] as const satisfies readonly VersionKey[];
+type MarkKey = (typeof MARK_KEYS)[number];
+const isMark = (key: ErrorKey): key is MarkKey => (MARK_KEYS as readonly string[]).includes(key);
+
 /** Every error sentence, in English. */
-export type ErrorKey = keyof typeof HI | typeof STOPPED;
+export type ErrorKey = keyof typeof HI | typeof STOPPED | MarkKey;
 
 /** One sentence per code, in English. */
 export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
@@ -215,15 +228,24 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   // session's clean-up is still running (decision record 0049); retryable
   "sandbox.cleaning_up":
     "Clauseo is still tidying up the Safe workspace after it last closed. Try again in a moment. Your question is kept.",
+  // provisional (UC-114, UC-115): the Word blackline's refusals, as Versions says them over the sheet
+  "blackline.no_word_tool":
+    "Clauseo's Word tool is missing. Reinstall Clauseo to see the marked-up changes.",
+  "blackline.not_word": "The changes in this document couldn't be marked up.",
+  "blackline.failed": "The changes in this document couldn't be marked up.",
   // a code from a newer Clauseo: as internal reads, since this version can say nothing truer
   unknown: "Something went wrong inside Clauseo.",
 };
 
 const own = wordsOf("errors");
+/** Versions' words, read from the shared list rather than words-versions.ts, which stays out of the room's first
+ * load (first-load.test.ts). */
+const versions = wordsOf("versions");
 
 /** An error sentence in the language. */
 export function errorSentence(lang: Lang, key: ErrorKey): string {
-  return key === STOPPED ? th(lang, key) : own(lang, key);
+  if (key === STOPPED) return th(lang, key);
+  return isMark(key) ? versions(lang, key) : own(lang, key);
 }
 
 /** The codes whose sentence names Claude, with their sentence for a thread on the ChatGPT plan, for an agent of no kind
@@ -291,7 +313,7 @@ export function plannedKey(code: ErrorCode, agent?: AgentName): { key: ErrorKey;
 export function errorWords(lang: Lang, code: string, agent?: AgentName): string {
   const known = Object.hasOwn(ERROR_WORDS, code) ? (code as ErrorCode) : "unknown";
   const { key, name } = plannedKey(known, agent);
-  return name === undefined || key === STOPPED
+  return name === undefined || key === STOPPED || isMark(key)
     ? errorSentence(lang, key)
     : own(lang, key, { name });
 }

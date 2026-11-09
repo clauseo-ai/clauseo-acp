@@ -63,6 +63,10 @@ mod protection;
 #[path = "commands/allowed_sites.rs"]
 mod allowed_sites;
 
+#[cfg(test)]
+#[path = "commands/blackline.rs"]
+mod blackline;
+
 use std::str::FromStr;
 
 use clauseo_protocol::{

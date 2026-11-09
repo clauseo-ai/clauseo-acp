@@ -726,5 +726,45 @@
     "status": "provisional",
     "at": "2026-11-09",
     "by": "app track (asking-truth; Rohan batch review)"
+  },
+  "UC-113": {
+    "en": "Marking up the changes…",
+    "hi": "बदलाव चिह्नित किए जा रहे हैं…",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (provisional; Rohan batch review; word blackline)"
+  },
+  "UC-114": {
+    "en": "Clauseo's Word tool is missing. Reinstall Clauseo to see the marked-up changes.",
+    "hi": "Clauseo का Word टूल मौजूद नहीं है। चिह्नित बदलाव देखने के लिए Clauseo दोबारा इंस्टॉल करें।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (provisional; Rohan batch review; word blackline)"
+  },
+  "UC-115": {
+    "en": "The changes in this document couldn't be marked up.",
+    "hi": "इस दस्तावेज़ के बदलाव चिह्नित नहीं किए जा सके।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (provisional; Rohan batch review; word blackline)"
+  },
+  "UC-116": {
+    "en": "This document is very long, so only part of it is shown.",
+    "hi": "यह दस्तावेज़ बहुत लंबा है, इसलिए इसका केवल एक हिस्सा दिखाया गया है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (provisional; Rohan batch review; word blackline)"
   }
 }

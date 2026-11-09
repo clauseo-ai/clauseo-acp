@@ -7,6 +7,8 @@
 //! (`turn/undo_preview.rs`). `FolderSupport` checks a picked folder off the actor
 //! (`query/folder_support.rs`), and `ListSkillPacks` reads the skill packs off it
 //! (`query/skill_packs.rs`). `Protection` answers from the cached detection (`protection.rs`).
+//! `WordBlackline` copies a document's two sides on the matter's worker and runs stetdoc on a
+//! thread of its own (`query/blackline.rs`).
 
 use clauseo_matters::CompareSide;
 use clauseo_protocol::{
@@ -29,6 +31,7 @@ use crate::log_file::Cause;
 use crate::matter_worker::{MatterJob, MatterReply};
 use crate::principal::{Access, authorize};
 
+pub(super) mod blackline;
 mod folder_support;
 mod skill_packs;
 
@@ -52,6 +55,10 @@ fn default_location(actor: &Actor, reply: Reply<QueryResult>) {
 }
 
 /// Answers one query.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one arm per query, each calling out; a split would only scatter the match"
+)]
 pub(super) fn query(
     actor: &mut Actor,
     principal: &Principal,
@@ -153,6 +160,7 @@ pub(super) fn query(
             let _gone = reply.send(Ok(QueryResult::Protection(view)));
         }
         HostQuery::AllowedSites => super::allowed::list(actor, reply),
+        HostQuery::WordBlackline { .. } => blackline::word_blackline(actor, query, reply),
         HostQuery::ListPapers { matter } => {
             if let Err(error) = actor.check_matter(matter) {
                 let _gone = reply.send(Err(error));
@@ -262,6 +270,7 @@ pub(super) fn matter_answer(reply: MatterReply) -> Result<QueryResult, Error> {
         | MatterReply::HeldOpen(_)
         | MatterReply::StillGone(_)
         | MatterReply::Papers(_)
+        | MatterReply::SidesWritten(_)
         | MatterReply::Discarded(_)) => Err(Error::Internal(format!(
             "a query answered with another job's reply: {other:?}"
         ))),

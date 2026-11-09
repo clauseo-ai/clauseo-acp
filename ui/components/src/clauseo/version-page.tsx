@@ -85,24 +85,90 @@ export function DraftSheet({
       <Heading level={2} className="page-title" id={id("ver-title")}>
         <Say>{head.title}</Say>
       </Heading>
-      <div className="page-paras">
-        {diffs.map((d) => (
-          <p
-            key={d.place}
-            className="ver-place"
-            data-place={d.place}
-            data-change={marked && d.kind !== "same" ? d.kind : undefined}
-            data-differs={differs?.has(d.place) === true ? "" : undefined}
-          >
-            <Runs runs={d.runs} />
-          </p>
-        ))}
-      </div>
+      <Paras diffs={diffs} marked={marked} differs={differs} />
       <p className="page-foot">
         <span aria-hidden="true">1</span>
         <span className="sr-only">{w.t("Page 1")}</span>
       </p>
     </article>
+  );
+}
+
+/** A sheet's paragraphs, each in its place; marked: each that changed carries its bar. */
+function Paras({
+  diffs,
+  marked,
+  differs,
+}: {
+  diffs: readonly ParaDiff[];
+  marked: boolean;
+  differs?: ReadonlySet<number> | undefined;
+}) {
+  return (
+    <div className="page-paras">
+      {diffs.map((d) => (
+        <p
+          key={d.place}
+          className="ver-place"
+          data-place={d.place}
+          data-change={marked && d.kind !== "same" ? d.kind : undefined}
+          data-differs={differs?.has(d.place) === true ? "" : undefined}
+        >
+          <Runs runs={d.runs} />
+        </p>
+      ))}
+    </div>
+  );
+}
+
+/** A Word document whose changes the host's Word tool marked up: its name over its paragraphs, words in underlined,
+ * words out struck, and a bar by each paragraph that changed. */
+export function MarkedSheet({ title, diffs }: { title: string; diffs: readonly ParaDiff[] }) {
+  const { id } = useRoom();
+  return (
+    <article className="page ver-page ver-marked" aria-labelledby={id("ver-marked")}>
+      <Heading level={2} className="page-title ver-marked-title" id={id("ver-marked")}>
+        <Say>{title}</Say>
+      </Heading>
+      <Paras diffs={diffs} marked />
+    </article>
+  );
+}
+
+/** Over a marked-up sheet: when the struck words stood, and that the underlined ones stand now. */
+export function MarkedHead({ then, now }: { then: string; now: string }) {
+  return (
+    <div className="ver-sheet-head ver-marked-head">
+      <p className="ver-sheet-label" data-side="then">
+        <Say>{then}</Say>
+      </p>
+      <p className="ver-sheet-label" data-side="now">
+        <Say>{now}</Say>
+      </p>
+    </div>
+  );
+}
+
+/** A line on the desk over the sheet: that the marking up runs, why it couldn't be done (with Try again where another
+ * try may mend it), or that only part of the document is shown. */
+export function MarkLine({
+  text,
+  failed = false,
+  action,
+}: {
+  text: string;
+  /** Optional: the line says why the marking up failed. */
+  failed?: boolean;
+  /** Optional: a way on beside the line, Try again. */
+  action?: ReactNode;
+}) {
+  return (
+    <div className="ver-mark-line" data-tone={failed ? "failed" : undefined}>
+      <p className="ver-mark-text" role="status">
+        <Say>{text}</Say>
+      </p>
+      {action}
+    </div>
   );
 }
 

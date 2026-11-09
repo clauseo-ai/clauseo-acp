@@ -63,6 +63,8 @@ pub(crate) struct DesktopProfile {
     /// `<data>/tools`, holding the `agent-browser` command, when its copy is there
     /// ([`install_browser`]): the host's `ProfileHook::browser_tool`.
     browser_tool: Option<PathBuf>,
+    /// The stetdoc [`stetdoc_program`] found, for the Word blackline; `None` when none was.
+    stetdoc: Option<PathBuf>,
 }
 
 impl DesktopProfile {
@@ -108,7 +110,11 @@ impl DesktopProfile {
         for err in refused {
             tracing::warn!(%err, "a skill is left out of the profile");
         }
-        Ok(Self::new(profile, prepend).with_browser_tool(browser_tool))
+        Ok(Self {
+            stetdoc: found,
+            ..Self::new(profile, prepend)
+        }
+        .with_browser_tool(browser_tool))
     }
 
     /// The same hook with `folder` as the shell browser's folder (none: no shell browser).
@@ -124,7 +130,15 @@ impl DesktopProfile {
             profile,
             prepend_stetdoc,
             browser_tool: None,
+            stetdoc: None,
         }
+    }
+
+    /// The stetdoc found when the profile was built (`stetdoc_program`), for
+    /// `HostConfig::with_stetdoc`: the Word blackline runs it. `None` when none was found, and
+    /// for a profile made with [`Self::new`].
+    pub(crate) fn stetdoc(&self) -> Option<&Path> {
+        self.stetdoc.as_deref()
     }
 
     /// The folder for `HostConfig::with_agent_path_prepend`: stetdoc's, when it may go first
@@ -427,9 +441,10 @@ impl ProfileHook for DesktopProfile {
 }
 
 /// `config` with setup's hook (`setup/hook.rs`: the key and plan variables) over the launch
-/// profile, stetdoc's folder first on the agents' `PATH` when stetdoc was found, and the shell
-/// browser's folder when its copy is there (the host puts it on a session's `PATH` only when
-/// that session has the browser); with no
+/// profile, stetdoc's folder first on the agents' `PATH` when stetdoc was found, that stetdoc
+/// for the Word blackline (`HostConfig::with_stetdoc`), and the shell browser's folder when its
+/// copy is there (the host puts it on a session's `PATH` only when that session has the
+/// browser); with no
 /// profile (it could not be built) the hook adds only setup's variables.
 pub(crate) fn with_profile(
     config: HostConfig,
@@ -441,6 +456,14 @@ pub(crate) fn with_profile(
     };
     let config = match profile.path_prepend().and_then(absolute_folder) {
         Some(folder) => config.with_agent_path_prepend(folder),
+        None => config,
+    };
+    // The Word blackline runs the stetdoc found, under the profile's author (the lawyer's
+    // name, or "Clauseo"); with none found, the host refuses it (`blackline.no_word_tool`).
+    let config = match profile.stetdoc() {
+        Some(program) => {
+            config.with_stetdoc(program.to_path_buf(), profile.profile.author().to_owned())
+        }
         None => config,
     };
     config.with_profile_hook(Box::new(hook.over(Box::new(profile))))

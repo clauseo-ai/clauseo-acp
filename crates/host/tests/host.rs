@@ -29,6 +29,9 @@ mod agent_name;
 #[path = "host/ask_user_question.rs"]
 mod ask_user_question;
 #[cfg(test)]
+#[path = "host/blackline.rs"]
+mod blackline;
+#[cfg(test)]
 #[path = "host/blobs.rs"]
 mod blobs;
 #[cfg(test)]

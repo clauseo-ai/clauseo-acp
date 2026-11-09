@@ -14,9 +14,11 @@ import {
 } from "../testing/stream-script.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
 import type {
+  BlacklineParagraph,
   CheckpointKind,
   FileChange,
   MatterSummary,
+  QueryResult,
   RestorePreview,
   StepEntry,
   ViewEntry,
@@ -108,7 +110,39 @@ export type Matter = {
   openable?: boolean;
   /** preview_restore names these as locked, and the restore is refused with matter.file_locked (U9). */
   locked?: string[];
+  /** word_blackline's answer for a Word document compared with now: marked up (by default, whole), left unanswered,
+   * or refused with a code. */
+  mark?: "hold" | { truncated: boolean } | { refused: string; retryable: boolean };
 };
+
+/** The host's Word tool's marking up of the notice: a word out and a word in, and a paragraph added. */
+const MARKED_NOTICE: BlacklineParagraph[] = [
+  {
+    change: "same",
+    runs: [{ kind: "same", text: "To the Branch Manager, State Bank of India, Connaught Place." }],
+  },
+  {
+    change: "changed",
+    runs: [
+      { kind: "same", text: "My client asks that the account be restored within " },
+      { kind: "del", text: "thirty" },
+      { kind: "ins", text: "fifteen" },
+      { kind: "same", text: " days of this notice." },
+    ],
+  },
+  {
+    change: "added",
+    runs: [{ kind: "ins", text: "A copy of the statement of 3 March is annexed." }],
+  },
+];
+
+/** word_blackline's answer, as `mark` asks. */
+function marking(mark: Matter["mark"]): QueryResult | Promise<QueryResult> {
+  if (mark === "hold") return new Promise<QueryResult>(() => {});
+  if (mark !== undefined && "refused" in mark)
+    return Promise.reject({ code: mark.refused, message: "", retryable: mark.retryable });
+  return { word_blackline: { paragraphs: MARKED_NOTICE, truncated: mark?.truncated ?? false } };
+}
 
 /** The matter's history: its papers brought in three days ago, a turn of the conversation's that morning, the
  * lawyer's edits outside Clauseo this hour, and the conversation's next turn, now. */
@@ -179,6 +213,7 @@ export function versionsHost(m: Matter): FakeTransport {
         };
       if (query.compare_versions !== undefined) return { file_changes: m.compare ?? [] };
       if (query.preview_restore !== undefined) return { restore_preview: preview };
+      if (query.word_blackline !== undefined) return marking(m.mark);
       throw new Error(`not scripted: ${JSON.stringify(query)}`);
     },
     dispatch: (envelope) => {
@@ -238,6 +273,10 @@ const CONFIRM = '[data-testid="dialog-confirm"]';
 /** Versions open beside the work: a window past the room's 1200 px breakpoint, tall enough for the dialogs. */
 const WINDOW = { width: 1280, height: 760 } as const;
 
+/** Versions at the turn's version three days ago, compared with now, over `m`'s host. */
+export const compared = (id: string, words: WordsRef, m: Matter): Entry =>
+  state(id, words, m, [OPEN, EARLIER, COMPARE]);
+
 const state = (id: string, words: WordsRef, m: Matter, clicks: readonly string[]): Entry => ({
   id,
   words,
@@ -252,7 +291,8 @@ const state = (id: string, words: WordsRef, m: Matter, clicks: readonly string[]
   ),
 });
 
-const SHEET = [file(NOTICE)];
+/** A document whose words can't be compared yet: a Word document is marked up instead (registry-uc-blackline.tsx). */
+const SHEET = [file("Notes for counsel.txt")];
 /** A PDF, whose sheet shows both sides and says a PDF shows only whether it changed. */
 const PDF_SHEET = [file("Annexure 3.pdf")];
 /** H11's open_file, standing in on the review page: it opens nothing. */

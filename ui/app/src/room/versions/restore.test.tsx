@@ -68,7 +68,8 @@ const answering =
 
 for (const [name, path, pdf] of [
   ["a PDF", "exhibit.pdf", true],
-  ["a Word document", "reply.docx", false],
+  // a Word document is marked up instead (blackline.test.tsx)
+  ["a document whose words can't be compared yet", "reply.txt", false],
 ] as const) {
   test(`comparing with now shows ${name} on the same sheet, with the PDF's sentence on PDFs only`, async () => {
     h = await mountVersions(VERSIONS, STEPS, {

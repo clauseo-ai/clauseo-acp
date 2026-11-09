@@ -188,6 +188,36 @@
     margin-top: var(--s4);
   }
 
+  /* ---------- a Word document the host marked up: the two times over it, and a line while it works ---------- */
+  .ver-marked-head {
+    justify-content: flex-start;
+    column-gap: var(--s4);
+  }
+  .ver-marked-title {
+    margin-top: 0;
+  }
+  /* Word's line breaks inside a paragraph, and the tab after a list's number, stand as Word sets them */
+  .ver-marked .page-paras p {
+    white-space: pre-wrap;
+    tab-size: 4;
+  }
+  .ver-mark-line {
+    @apply text-small text-primary;
+    max-width: calc(var(--measure) + var(--page-extra));
+    margin: 0 auto var(--s3);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s1) var(--s3);
+  }
+  .ver-mark-line[data-tone="failed"] {
+    @apply text-muted;
+  }
+  .ver-mark-text {
+    flex: 1 1 var(--change-text-min);
+    min-width: 0;
+  }
+
   /* ---------- a paper not made yet: a bare sheet that says so ---------- */
   .ver-missing {
     max-width: calc(var(--measure) + var(--page-extra));

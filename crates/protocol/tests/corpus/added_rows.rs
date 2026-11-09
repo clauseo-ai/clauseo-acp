@@ -499,4 +499,25 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (354, 0xaa51_6b8d_d493_6995),
         (255, 0xf275_489c_77b6_f6b2),
     ),
+    (
+        "added/turn_failed-BlacklineNoWordTool",
+        include_bytes!("added/turn_failed-BlacklineNoWordTool.jsonl"),
+        include_bytes!("added/turn_failed-BlacklineNoWordTool.msgpack"),
+        (346, 0xc1c2_724e_23d8_a4c5),
+        (247, 0x538a_d72a_5d5f_94ea),
+    ),
+    (
+        "added/turn_failed-BlacklineNotWord",
+        include_bytes!("added/turn_failed-BlacklineNotWord.jsonl"),
+        include_bytes!("added/turn_failed-BlacklineNotWord.msgpack"),
+        (340, 0xa1c7_0bdc_5f91_3a6d),
+        (241, 0xc3a5_8d0e_99af_f64c),
+    ),
+    (
+        "added/turn_failed-BlacklineFailed",
+        include_bytes!("added/turn_failed-BlacklineFailed.jsonl"),
+        include_bytes!("added/turn_failed-BlacklineFailed.msgpack"),
+        (339, 0xcdc8_9a04_fdf0_ae25),
+        (240, 0x69a6_0ee5_f28c_e2cf),
+    ),
 ];

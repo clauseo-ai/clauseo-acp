@@ -15,6 +15,9 @@ use crate::browser::rd_policy::RdPolicy;
 
 use super::EgressProxy;
 
+mod stetdoc;
+pub(crate) use stetdoc::Stetdoc;
+
 /// A hook run with a session's run folder just before it is removed
 /// (`HostConfig::with_run_removal_hook`).
 pub(crate) type RunRemovalHook = Arc<dyn Fn(&std::path::Path) + Send + Sync>;
@@ -78,6 +81,8 @@ pub(crate) struct LaunchWiring {
     /// The block list's seams (ADR 0053, `BlockListSeams::apply`); `None`: no fetch. Boxed, so
     /// the actor (which keeps this wiring) stays within the host thread's close-future budget.
     pub(crate) blocklist: Option<Box<crate::blocklist::BlockListSeams>>,
+    /// The stetdoc the Word blackline runs (`HostConfig::with_stetdoc`); `None`: refused.
+    pub(crate) stetdoc: Option<Stetdoc>,
 }
 
 impl Default for LaunchWiring {
@@ -103,6 +108,7 @@ impl Default for LaunchWiring {
             removal_thread_fails: false,
             held: HeldRuns::default(),
             blocklist: None,
+            stetdoc: None,
         }
     }
 }
@@ -123,6 +129,7 @@ impl std::fmt::Debug for LaunchWiring {
             .field("relays", &self.relays)
             .field("connectors", &self.connectors)
             .field("tree_wait", &self.tree_wait)
+            .field("stetdoc", &self.stetdoc)
             .finish_non_exhaustive()
     }
 }

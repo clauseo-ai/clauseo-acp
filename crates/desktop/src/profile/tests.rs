@@ -305,6 +305,26 @@ fn the_host_config_gets_the_hook_and_stetdocs_folder() {
     );
 }
 
+/// The stetdoc found goes to the host for the Word blackline, with the profile's author; with
+/// none found, the host gets none and refuses the blackline.
+#[test]
+fn the_host_config_gets_the_stetdoc_found_for_the_blackline() {
+    let scratch = Scratch::new("profile-blackline-stetdoc", &[]);
+    let program = scratch.path().join("bin").join("stetdoc").join("stetdoc");
+    let hook = DesktopProfile {
+        stetdoc: Some(program.clone()),
+        ..DesktopProfile::new(profile(&scratch), true)
+    };
+    assert_eq!(hook.stetdoc(), Some(program.as_path()));
+    let config = super::with_profile(scratch.config(Vec::new()), Some(hook), setup_hook());
+    assert_eq!(config.stetdoc(), Some((program.as_path(), "Clauseo")));
+
+    let none = DesktopProfile::new(profile(&scratch), false);
+    assert_eq!(none.stetdoc(), None);
+    let config = super::with_profile(scratch.config(Vec::new()), Some(none), setup_hook());
+    assert_eq!(config.stetdoc(), None);
+}
+
 #[test]
 fn stetdoc_not_found_goes_on_no_path() {
     let scratch = Scratch::new("profile-no-stetdoc", &[]);
