@@ -11,9 +11,10 @@
 //! 2. An array (a batch): `-32600`, nothing forwarded. A scalar: `-32600`, nothing forwarded.
 //! 3. Any message whose `id` is [`RESERVED_ID`], the guard's own close request's: `-32600`
 //!    with that id, nothing forwarded.
-//! 4. An object whose `method` is exactly `tools/call` naming a live-view tool of
-//!    [`LIVE_VIEW_TOOLS`], or an `agent_browser_batch` with a command of [`LIVE_VIEW_COMMANDS`]:
-//!    [`UNAVAILABLE`], nothing forwarded.
+//! 4. An object whose `method` is exactly `tools/call` naming a tool outside [`ALLOWED_TOOLS`]
+//!    (a missing or non-string name included): a live view of [`LIVE_VIEW_TOOLS`] gets
+//!    [`UNAVAILABLE`], any other [`UNKNOWN_TOOL`]; nothing forwarded. `agent_browser_batch` is
+//!    not on the list, so no command inside one ever needs checking.
 //! 5. An object whose `method` is exactly `tools/call`, with `params.arguments` an object:
 //!    a. any key of [`REFUSED_KEYS`];
 //!    b. a key of [`MUST_BE_FALSE`] whose value is anything but `false`;
@@ -96,11 +97,49 @@ pub(crate) const EXTRA_ARGS_ALLOWED: &[&str] =
 /// The text of a refused batch.
 pub(crate) const BATCH_MESSAGE: &str = "Clauseo does not allow batched requests in the browser.";
 
-/// agent-browser's live views, each serving the browser on a loopback port: the stream server
-/// (`stream_enable`, `actions.rs:9772-9785` at v0.41.1, with its `disable` and `status`), the
-/// dashboard that shows its streams, and the developer tools page of `inspect`
-/// (`native/inspect_server.rs`). The macOS browser profile denies every inet bind anyway; the
-/// guard stops the try.
+/// The only tools that reach agent-browser: exactly agent-browser v0.41.1's `core` profile
+/// (`CORE_PROFILE_TOOLS`, `cli/src/mcp.rs:340-370` at tag v0.41.1), the profile the host starts
+/// it with (`mcp --tools core`, `crates/profile/src/servers.rs:61`). An agent that starts the
+/// guard itself with `--tools all` gains nothing: every other tool, a new or renamed one
+/// included, is refused here. `agent_browser_tools_profiles` only prints the profiles
+/// (`call_tools_profiles`, `mcp.rs:2539-2560`); it changes none.
+pub(crate) const ALLOWED_TOOLS: &[&str] = &[
+    "agent_browser_tools_profiles",
+    "agent_browser_open",
+    "agent_browser_read",
+    "agent_browser_snapshot",
+    "agent_browser_back",
+    "agent_browser_forward",
+    "agent_browser_reload",
+    "agent_browser_click",
+    "agent_browser_fill",
+    "agent_browser_type",
+    "agent_browser_press",
+    "agent_browser_check",
+    "agent_browser_uncheck",
+    "agent_browser_select",
+    "agent_browser_scroll",
+    "agent_browser_wait_ms",
+    "agent_browser_wait_for_selector",
+    "agent_browser_wait_for_text",
+    "agent_browser_wait_for_load",
+    "agent_browser_screenshot",
+    "agent_browser_get_text",
+    "agent_browser_get_url",
+    "agent_browser_get_title",
+    "agent_browser_tab_new",
+    "agent_browser_tab_list",
+    "agent_browser_tab_switch",
+    "agent_browser_tab_close",
+    "agent_browser_eval",
+    "agent_browser_close",
+];
+
+/// agent-browser's live views, none of them on [`ALLOWED_TOOLS`], named only so their refusal
+/// reads as a feature Clauseo leaves out: each serves the browser on a loopback port, the stream
+/// server (`stream_enable`, `actions.rs:9772-9785` at v0.41.1, with its `disable` and
+/// `status`), the dashboard that shows its streams, and the developer tools page of `inspect`
+/// (`native/inspect_server.rs`). The macOS browser profile denies every inet bind anyway.
 pub(crate) const LIVE_VIEW_TOOLS: &[&str] = &[
     "agent_browser_stream_enable",
     "agent_browser_stream_disable",
@@ -110,14 +149,11 @@ pub(crate) const LIVE_VIEW_TOOLS: &[&str] = &[
     "agent_browser_inspect",
 ];
 
-/// The same live views as CLI commands: the first string of one of `agent_browser_batch`'s
-/// `commands`, which the CLI matches exactly (`mcp.rs:3684-3719`, `commands.rs:1066,1403`).
-pub(crate) const LIVE_VIEW_COMMANDS: &[&str] = &["stream", "dashboard", "inspect"];
-
 /// What a live-view request gets: no path, no port.
 pub(crate) const UNAVAILABLE: &str = "That browser feature isn't available in Clauseo.";
 
-const TOOL_BATCH: &str = "agent_browser_batch";
+/// What a call to any other tool off [`ALLOWED_TOOLS`] gets, its name not repeated.
+pub(crate) const UNKNOWN_TOOL: &str = "That browser tool isn't one Clauseo offers.";
 
 /// The longest name a refusal repeats; a longer one is cut and ends in `...`.
 const NAME_MAX_CHARS: usize = 64;
@@ -175,45 +211,28 @@ fn check_object(object: &Map<String, Value>) -> Result<(), String> {
     if object.get("method").and_then(Value::as_str) != Some("tools/call") {
         return Ok(());
     }
-    if is_live_view(object.get("params")) {
-        return Err(UNAVAILABLE.to_owned());
+    let params = object.get("params");
+    let tool = params
+        .and_then(|params| params.get("name"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if !ALLOWED_TOOLS.contains(&tool) {
+        let text = if LIVE_VIEW_TOOLS.contains(&tool) {
+            UNAVAILABLE
+        } else {
+            UNKNOWN_TOOL
+        };
+        return Err(text.to_owned());
     }
     // Not an object (or absent): agent-browser refuses it before running anything
     // (`validate_arguments_object`, mcp.rs:3967-3975, reached from every tool's argument reads).
-    let params = object.get("params");
     let Some(arguments) = params
         .and_then(|params| params.get("arguments"))
         .and_then(Value::as_object)
     else {
         return Ok(());
     };
-    let tool = params
-        .and_then(|params| params.get("name"))
-        .and_then(Value::as_str)
-        .unwrap_or_default();
     check_arguments(tool, arguments).map_err(|name| refusal_text(&name))
-}
-
-/// Whether a tool call's `params` ask for a live view, whatever else they hold.
-fn is_live_view(params: Option<&Value>) -> bool {
-    let tool = params
-        .and_then(|params| params.get("name"))
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    if LIVE_VIEW_TOOLS.contains(&tool) {
-        return true;
-    }
-    let commands = params
-        .and_then(|params| params.get("arguments"))
-        .and_then(|arguments| arguments.get("commands"))
-        .and_then(Value::as_array);
-    tool == TOOL_BATCH
-        && commands.into_iter().flatten().any(|command| {
-            command
-                .get(0)
-                .and_then(Value::as_str)
-                .is_some_and(|first| LIVE_VIEW_COMMANDS.contains(&first))
-        })
 }
 
 fn check_arguments(tool: &str, arguments: &Map<String, Value>) -> Result<(), String> {

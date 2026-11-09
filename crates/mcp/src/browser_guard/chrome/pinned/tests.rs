@@ -3,9 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-#[cfg(windows)]
-use super::modifiable;
-use super::{CFT_PREFIX, Layout, SHELL_PREFIX, Trusted, check};
+use super::{CFT_PREFIX, Layout, SHELL_PREFIX, Trusted, check, is_sid_text};
 use crate::write;
 
 /// The Chrome for Testing binary inside a download's folder, as the macOS zip lays it out.
@@ -111,41 +109,74 @@ fn a_link_from_a_trusted_place_to_anywhere_else_is_refused() {
     write::remove_dir_all(&dir).unwrap();
 }
 
-/// Windows: any data folder's Chrome for Testing, if the user can change nothing above it.
+/// Only the anchored data folder's `browsers` passes (Windows: `--data-dir`'s), never another
+/// folder named `browsers`; none passes without one; and the agent able to change, or owning,
+/// the binary or any folder above it, the root included, refuses it.
 #[test]
-fn any_data_folders_install_passes_only_where_the_user_cannot_change_it() {
-    let dir = scratch("unmodifiable");
-    let chrome = file(
-        &dir.join("lawyer/data/browsers/chrome-131.0.6778.85")
+fn only_the_anchored_data_folders_install_passes_and_only_where_the_agent_cannot_change_it() {
+    let dir = scratch("anchored");
+    let data = dir.join("lawyer/data");
+    let chrome = file(&data.join("browsers/chrome-131.0.6778.85").join(BINARY));
+    let other = file(
+        &dir.join("agent/data/browsers/chrome-131.0.6778.85")
             .join(BINARY),
     );
-    let trusted = Trusted {
-        any_unmodifiable_browsers: true,
+    assert_eq!(check(&chrome, &trusted(&data), never), Some(chrome.clone()));
+    assert_eq!(check(&other, &trusted(&data), never), None);
+    let unanchored = Trusted {
         layouts: vec![layout()],
         ..Trusted::default()
     };
-    assert_eq!(check(&chrome, &trusted, never), Some(chrome.clone()));
-    assert_eq!(check(&chrome, &trusted, |path| path == chrome), None);
-    let data = dir.join("lawyer/data");
-    assert_eq!(check(&chrome, &trusted, |path| path == data), None);
-    let without = Trusted {
-        any_unmodifiable_browsers: false,
-        ..trusted
-    };
-    assert_eq!(check(&chrome, &without, never), None);
+    assert_eq!(check(&chrome, &unanchored, never), None);
+    for owned in [
+        chrome.clone(),
+        data.clone(),
+        PathBuf::from(chrome.ancestors().last().unwrap()),
+    ] {
+        assert_eq!(
+            check(&chrome, &trusted(&data), |path| path == owned),
+            None,
+            "{owned:?}"
+        );
+    }
     write::remove_dir_all(&dir).unwrap();
 }
 
-/// Linux (development and CI only): an installed browser passes only at its exact place.
 #[test]
-fn a_listed_install_passes_only_at_its_exact_place() {
+fn a_sid_reads_as_one_only_in_its_own_form() {
+    for good in ["S-1-5-18", "S-1-5-21-1-2-3-1001", "S-1-15-2-1-2-3-4-5-6-7"] {
+        assert!(is_sid_text(good), "{good}");
+    }
+    let long = format!("S-1-{}", "1-".repeat(100));
+    for bad in [
+        "",
+        "S-1-",
+        "S-1-5-",
+        "s-1-5-18",
+        "S-2-5",
+        "S-1-5-x",
+        "S-1--5",
+        long.as_str(),
+    ] {
+        assert!(!is_sid_text(bad), "{bad}");
+    }
+}
+
+/// Linux (test builds only): an installed browser passes only at its exact place, and only as
+/// an ELF binary, never a script (Arch's `/usr/bin/chromium` reads a flags file).
+#[test]
+fn a_listed_install_passes_only_at_its_exact_place_and_as_a_binary() {
     let dir = scratch("listed");
-    let chrome = file(&dir.join("opt/google/chrome/chrome"));
+    let chrome = dir.join("opt/google/chrome/chrome");
+    file(&chrome);
+    write::write(&chrome, b"\x7fELF\x02\x01\x01").unwrap();
+    let script = file(&dir.join("usr/bin/chromium"));
     let trusted = Trusted {
-        files: vec![chrome.clone()],
+        files: vec![chrome.clone(), script.clone()],
         ..Trusted::default()
     };
     assert_eq!(check(&chrome, &trusted, never), Some(chrome.clone()));
+    assert_eq!(check(&script, &trusted, never), None, "a script");
     let beside = file(&dir.join("opt/google/chrome/other"));
     assert_eq!(check(&beside, &trusted, never), None);
     write::remove_dir_all(&dir).unwrap();
@@ -195,21 +226,72 @@ fn on_a_mac_only_the_pinned_downloads_in_the_users_data_folder_pass() {
     write::remove_dir_all(&dir).unwrap();
 }
 
-/// Windows, run on the Windows job: a file the test wrote is its own, and an owner may always
-/// rewrite its permissions, so the probe says modifiable and the check refuses it. Only that
-/// direction: the CI runner is elevated, so it could modify a system install too.
+/// Windows, run on the Windows job: what the test wrote is the guard token's own, so its owner
+/// check refuses it, whoever else may write it; a system file owned by `TrustedInstaller` is not.
 #[cfg(windows)]
 #[test]
-fn a_file_the_user_wrote_is_modifiable_and_refused() {
+fn a_file_the_agent_owns_is_modifiable_and_refused() {
+    use super::{Agent, authz::Writers, modifiable_by};
     let dir = scratch("owner");
-    let chrome = file(&dir.join("data/browsers/chrome-131.0.6778.85").join(BINARY));
-    assert!(modifiable(&chrome));
-    assert!(modifiable(chrome.parent().unwrap()));
-    let trusted = Trusted {
-        any_unmodifiable_browsers: true,
-        layouts: vec![layout()],
-        ..Trusted::default()
-    };
-    assert_eq!(check(&chrome, &trusted, modifiable), None);
+    let data = dir.join("data");
+    let chrome = file(&data.join("browsers/chrome-131.0.6778.85").join(BINARY));
+    let writers = Writers::new(&Agent::default()).unwrap();
+    assert!(writers.owns(&chrome));
+    assert!(writers.owns(chrome.parent().unwrap()));
+    let system = Path::new(&std::env::var_os("SystemRoot").unwrap()).join("System32\\kernel32.dll");
+    assert!(!writers.owns(&system), "TrustedInstaller's");
+    assert_eq!(
+        check(&chrome, &trusted(&data), modifiable_by(&Agent::default())),
+        None
+    );
+    write::remove_dir_all(&dir).unwrap();
+}
+
+/// Windows: an agent that locks its own launcher with an `OWNER RIGHTS` entry granting itself
+/// only reading (so no access check grants it a write) is still refused, as its owner.
+#[cfg(windows)]
+#[test]
+fn an_owner_rights_lock_down_does_not_pass() {
+    use super::{Agent, authz, modifiable_by};
+    let dir = scratch("ownerrights");
+    let data = dir.join("data");
+    let chrome = file(&data.join("browsers/chrome-131.0.6778.85").join(BINARY));
+    // OW: OWNER RIGHTS (S-1-3-4), FR: file read. The folder above keeps its rights, so the
+    // test can still delete the file afterwards.
+    authz::set_dacl(&chrome, "D:P(A;;FR;;;OW)");
+    let writers = authz::Writers::new(&Agent::default()).unwrap();
+    assert!(writers.owns(&chrome));
+    assert!(modifiable_by(&Agent::default())(&chrome));
+    assert_eq!(
+        check(&chrome, &trusted(&data), modifiable_by(&Agent::default())),
+        None
+    );
+    write::remove_dir_all(&dir).unwrap();
+}
+
+/// Windows: with `--agent-sid` (the test's own user SID standing in for the agent's account,
+/// `AuthzInitializeContextFromSid` and the groups Windows gives it), a folder above the binary
+/// that the agent's user or group owns is refused, as is a path it may write.
+#[cfg(windows)]
+#[test]
+fn an_ancestor_the_agent_sid_owns_is_refused() {
+    use super::authz::{Writers, own_user_sid};
+    let dir = scratch("agentsid");
+    let data = dir.join("data");
+    let chrome = file(&data.join("browsers/chrome-131.0.6778.85").join(BINARY));
+    let sid = own_user_sid();
+    let agent = Writers::only_sid(&sid, None).unwrap();
+    assert!(
+        agent.owns(&data),
+        "the agent's user or one of its groups owns it"
+    );
+    let modifiable = |path: &Path| agent.owns(path) || agent.can_change(path);
+    assert_eq!(check(&chrome, &trusted(&data), modifiable), None);
+    let system = Path::new(&std::env::var_os("SystemRoot").unwrap()).join("System32\\kernel32.dll");
+    assert!(!agent.owns(&system));
+    assert!(
+        Writers::only_sid("S-1-5-21-0-0-0-not", None).is_none(),
+        "not a SID: fail closed"
+    );
     write::remove_dir_all(&dir).unwrap();
 }

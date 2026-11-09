@@ -674,10 +674,15 @@ never reach Chrome; and the filter refuses every flag-shaped string in a tool ca
 with a flag-shaped piece when split on commas and whitespace (`x,--no-sandbox`, `a --headed`),
 every string naming a switch of this section anywhere (`weakening_in`, so typed text holding
 `single-process` is refused too), and every `extraArgs` token but six output flags
-(`filter.rs`; `agent_browser_eval`'s `script` stays exempt). Every live view (the stream,
-dashboard and `inspect` tools, and those commands in `agent_browser_batch`) gets "That browser
-feature isn't available in Clauseo." and never reaches agent-browser; the macOS browser profile
-denies every inet bind anyway. The binary is pinned as well: a
+(`filter.rs`; `agent_browser_eval`'s `script` stays exempt). Only the 29 tools of agent-browser
+v0.41.1's `core` profile pass (`ALLOWED_TOOLS`, from `cli/src/mcp.rs:340-370` at the tag), the
+profile the host starts it with (`crates/profile/src/servers.rs:61`): the guard enforces the
+core profile itself, so an agent that runs the guard with `--tools all` gains nothing, and a new
+or renamed tool is refused, never let through. Every live view (the stream, dashboard and
+`inspect` tools) gets "That browser feature isn't available in Clauseo."; any other tool off the
+list, `agent_browser_batch` included (it is not in `core`, so no command inside a batch needs a
+check), gets "That browser tool isn't one Clauseo offers."; neither reaches agent-browser. The
+macOS browser profile denies every inet bind anyway. The binary is pinned as well: a
 wrapper named as Chrome is never started ("The pinned browser", next). This is the guard's path
 only; what the agent can start without the guard is "The residual", below.
 
@@ -698,15 +703,38 @@ An installed Google Chrome or Edge is refused by design, wherever it is (`/Appli
 `~/Applications`, `C:\Program Files`, `%LOCALAPPDATA%`): the guarded browser runs pinned
 builds only. On macOS `<data>` is the default data folder of the guard's user, found from the
 user database, never from the environment, so `CLAUSEO_DATA_DIR` moves nothing here. On Windows
-the guard may run as the slot's sandbox user, whose folders are not the lawyer's, so any data
-folder's `browsers/` passes, but only if that user can change neither the binary nor any folder
-above it: the guard opens each for `FILE_WRITE_DATA`, `FILE_APPEND_DATA`, `FILE_DELETE_CHILD`,
-`DELETE`, `WRITE_DAC` and `WRITE_OWNER` in turn, and any open that works refuses. A file the
-agent wrote is its own, and an owner always gets `WRITE_DAC`. Linux is not a shipped platform,
-only development and CI, and there the guard also trusts the distributions' installs at their
-fixed places, unpinned: `/opt/google/chrome/google-chrome` or `chrome`, `/usr/bin/chromium`,
+the guard may run as another account than the data folder's owner (the browser account under
+W2), so `<data>` is the guard's `--data-dir` argument, host-set like
+`AGENT_BROWSER_EXECUTABLE_PATH`; only `<data-dir>\browsers\…` passes, never another folder
+named `browsers`. J4-W passes `--data-dir` when it starts the guard as the browser account;
+until then the guarded browser on Windows refuses to start (today's in-jail Windows browser
+cannot start anyway: Chrome dies under the agent token). It must also be that the agent can
+change no part of the path and owns none of it (`chrome/pinned/authz.rs`):
+- **Rights.** An Authz client context per identity, the guard's own token always, plus the
+  agent's user SID (`AuthzInitializeContextFromSid`, its groups as Windows computes them) and
+  its AppContainer package SID (`AuthzSetAppContainerInformation`) when the host passes
+  `--agent-sid` and `--agent-package-sid` (W2; in-jail, guard and agent share an account, so the
+  token is the agent's). `AuthzAccessCheck` asks each the maximum it is granted on the binary and
+  on every folder above it but the drive's root (any user may add folders there); any of
+  `FILE_WRITE_DATA`/`FILE_ADD_FILE`, `FILE_APPEND_DATA`/`FILE_ADD_SUBDIRECTORY`,
+  `FILE_DELETE_CHILD`, `DELETE`, `WRITE_DAC` or `WRITE_OWNER` refuses. An agent that runs the
+  guard itself is the guard's token, so naming another account with `--agent-sid` gains it
+  nothing.
+- **Ownership.** An owner can add an `OWNER RIGHTS` entry that takes its own write and
+  permission rights away, so the access check grants it nothing; so a binary or any folder above
+  it, the drive's root included, owned by any identity's user, package or (not deny-only) group
+  refuses too.
+- Any call failing refuses (the rule fails closed).
+
+Linux is not a shipped platform, only development and CI, and only a `test-support` build (the
+tests' own; `cfg(debug_assertions)` would also cover an unshipped dev build of the app and would
+not survive a `--release` test run) trusts the distributions' installs at their fixed places,
+unpinned, and only when the resolved file starts with ELF's magic bytes (Arch's
+`/usr/bin/chromium` is a script reading a flags file the user can write):
+`/opt/google/chrome/google-chrome` or `chrome`, `/usr/bin/chromium`,
 `/usr/bin/chromium-browser`, `/usr/lib/chromium/chromium` or
-`/usr/lib/chromium-browser/chromium-browser`.
+`/usr/lib/chromium-browser/chromium-browser`. A release build trusts none. CI's real-Chrome tests
+name Chrome's folder through `CLAUSEO_TEST_GUARD_TRUSTED_DIR` and do not use this list.
 
 A link from a trusted place to anywhere else resolves to that elsewhere and is refused. Anything
 else fails the first tool call with "The browser Clauseo was asked to use isn't one it installed
@@ -714,15 +742,35 @@ or trusts, so it won't start it.", and the guard exits 1 naming no path. Tests:
 `chrome/pinned/tests.rs` (the pinned download passes on a fake data folder; a wrapper, a wrong
 version folder or binary, and a link from the download folder to a temp folder are refused; on
 macOS both layouts pass under the given home, while an installed Chrome in `~/Applications` and
-a lookalike elsewhere do not; a Linux install passes only at its exact place; the Windows rule
-with a stubbed probe; and, on the Windows job, a file the test wrote is modifiable and refused),
+a lookalike elsewhere do not; only the anchored data folder's install passes, none without one,
+and an owned or writable binary, folder or root refuses, with a stubbed probe; a Linux install
+passes only at its exact place and as an ELF binary; and, on the Windows job, the Authz path: a
+file the test wrote is owned and refused, an `OWNER RIGHTS` lock-down still refuses, and an
+ancestor the `--agent-sid` identity owns refuses, while TrustedInstaller's `kernel32.dll` is
+not owned),
 and `tests/guard/sandbox.rs`, `a_chrome_the_guard_does_not_trust_is_never_started`. The tests
 start stubs through `CLAUSEO_TEST_GUARD_TRUSTED_DIR`, read only in a `test-support` build.
 
-What the check rests on, not verified on a machine: on macOS that the jail keeps the agent from
-writing the data folder's `browsers/` (the agent is the same user, so permissions say nothing
-there); on Windows that the probe's six opens cover every right that lets the sandbox user
-replace the file (G17's Windows row).
+What the check rests on, not verified on a machine:
+- **The candidate is host-set.** The host writes `AGENT_BROWSER_EXECUTABLE_PATH` into the
+  `browser` entry (`crates/profile/src/servers.rs:73`, filled with the Chrome it picked in
+  `crates/host/src/agent/loads/browser.rs:204`), and on Windows `--data-dir` and
+  `--agent-sid` are the host's too. An in-jail agent can run the guard with an environment and
+  arguments of its own; then this check refuses anything not pinned where the agent cannot
+  reach, which is the point.
+- **macOS: no digest here.** Any version-named folder under `<data>/browsers` passes, unhashed.
+  That rests on (a) the jail keeping agents out of `<data>/browsers` (stage C, #827, denies
+  writes there) and (b) the host re-verifying the install's tree digest at every launch, from
+  #806's install record, before it passes the path. The guard itself cannot read
+  `browser-pins/` (denied to it by design), so it cannot check the digest.
+- **Windows:** that the six rights and the owner check cover every way the agent's identity
+  could replace the file (G17's Windows row).
+- **Started by path.** The guard checks the resolved path, then starts Chrome by that path, not
+  from a handle it opened, so a swap between the check and the start would win. Starting from a
+  handle is not cheap: `fexecve` exists on Linux only (not shipped), macOS has none, and Windows'
+  `CreateProcessW` takes a path. The window rests on the same ground as the check: the jail
+  keeps agents out of `<data>/browsers` on macOS, and on Windows the agent can change no part of
+  the path.
 
 **The refusal.** Chrome's stderr, read up to its endpoint line, is matched against the messages
 Chromium prints when the sandbox cannot start:

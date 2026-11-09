@@ -14,14 +14,17 @@
 //!
 //! On macOS `<data>` is the default data folder of the guard's user, found from the user database
 //! and never from the environment; the jail, not the permissions, keeps the agent (the same user
-//! as the lawyer) out of it. On Windows the guard may run as the slot's sandbox user, whose
-//! folders are not the lawyer's, so any data folder's `browsers` passes, but only where that user
-//! can change neither the binary nor any folder above it ([`modifiable`]): a file the agent wrote
-//! is its own, and an owner may always rewrite its permissions.
+//! as the lawyer) out of it. On Windows the guard may run as another account than the data
+//! folder's owner (the browser account under W2), so `<data>` is the host-set `--data-dir`;
+//! without it no Chrome passes. There the agent must also be unable to change the binary or any
+//! folder above it, and own none of them ([`modifiable_by`], `pinned/authz.rs`): an owner can
+//! re-permission what it owns even after an `OWNER RIGHTS` entry took its rights away.
 //!
-//! Linux is not a shipped platform, only development and CI, and there the guard trusts the
-//! distributions' installed Chrome and Chromium at their fixed places ([`Trusted::files`]),
-//! unpinned. A link from a trusted place to anywhere else resolves to that elsewhere and is
+//! Linux is not a shipped platform, only development and CI. Builds with the `test-support`
+//! feature (the tests' own) trust the distributions' installed Chrome and Chromium at their
+//! fixed places ([`Trusted::files`]), unpinned, and only as an ELF binary: Arch's
+//! `/usr/bin/chromium` is a script that reads a flags file the user can write. A release build
+//! trusts none. A link from a trusted place to anywhere else resolves to that elsewhere and is
 //! refused.
 
 use std::path::{Component, Path, PathBuf};
@@ -32,6 +35,7 @@ pub(crate) const REFUSAL: &str =
 
 /// The folder under the data folder that holds the downloads (the host's
 /// `browser::chrome::BROWSERS_DIR`).
+#[cfg(any(target_os = "macos", windows, test))]
 const BROWSERS_DIR: &str = "browsers";
 /// The prefix of a Chrome for Testing download's folder (the host's `browser::chrome::CFT_PREFIX`).
 #[cfg(any(target_os = "macos", windows, test))]
@@ -51,16 +55,35 @@ const TRUSTED_FOR_TESTS: &str = "CLAUSEO_TEST_GUARD_TRUSTED_DIR";
 /// Where a trusted Chrome may be.
 #[derive(Debug, Default)]
 pub(crate) struct Trusted {
-    /// Installed browsers, each the exact file (Linux only: development and CI, unpinned).
+    /// Installed browsers, each the exact file and an ELF binary (Linux test builds only).
     pub(crate) files: Vec<PathBuf>,
-    /// `<data>/browsers` (macOS).
+    /// `<data>/browsers`: the user's own data folder's (macOS), `--data-dir`'s (Windows).
     pub(crate) browsers: Option<PathBuf>,
-    /// Any data folder's `browsers`, if the guard's user cannot change it (Windows).
-    pub(crate) any_unmodifiable_browsers: bool,
     /// How a download is laid out inside `browsers`.
     pub(crate) layouts: Vec<Layout>,
     /// Tests only: folders whose every file is trusted.
     pub(crate) folders: Vec<PathBuf>,
+}
+
+/// Who the agent is, for the Windows check that it can change no part of the path: the host's
+/// `--agent-sid`, and `--agent-package-sid` when the agent runs in an `AppContainer`. Both absent:
+/// the guard's own token is the agent's (today's in-jail run, where they share an account).
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct Agent {
+    /// The agent's user SID, `S-1-…`.
+    pub(crate) user: Option<String>,
+    /// The agent's `AppContainer` package SID, given only with `user`.
+    pub(crate) package: Option<String>,
+}
+
+/// Whether `text` reads as a SID string: `S-1-`, then parts of decimal digits, at most 184
+/// characters (`SECURITY_MAX_SID_STRING_CHARACTERS`). Windows parses it again, failing closed.
+pub(crate) fn is_sid_text(text: &str) -> bool {
+    text.len() <= 184
+        && text.strip_prefix("S-1-").is_some_and(|rest| {
+            rest.split('-')
+                .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
+        })
 }
 
 /// One pinned download's layout: `<prefix><version>/<binary>`, the version digits and dots.
@@ -73,16 +96,16 @@ pub(crate) struct Layout {
 }
 
 impl Trusted {
-    /// This machine's.
-    pub(crate) fn here() -> Trusted {
+    /// This machine's; `data_dir` is the host's `--data-dir` (Windows only).
+    pub(crate) fn here(data_dir: Option<&Path>) -> Trusted {
         Trusted {
             folders: folders_for_tests(),
-            ..Trusted::system()
+            ..Trusted::system(data_dir)
         }
     }
 
     #[cfg(target_os = "macos")]
-    fn system() -> Trusted {
+    fn system(_data_dir: Option<&Path>) -> Trusted {
         let platform = if cfg!(target_arch = "aarch64") {
             "mac-arm64"
         } else {
@@ -111,7 +134,6 @@ impl Trusted {
                     .join(IDENTIFIER)
                     .join(BROWSERS_DIR)
             }),
-            any_unmodifiable_browsers: false,
             layouts: vec![
                 Layout {
                     prefix: CFT_PREFIX,
@@ -126,12 +148,12 @@ impl Trusted {
         }
     }
 
+    /// Windows: the downloads in `<data_dir>/browsers`, none without a `--data-dir`.
     #[cfg(windows)]
-    fn system() -> Trusted {
+    fn system(data_dir: Option<&Path>) -> Trusted {
         Trusted {
             files: Vec::new(),
-            browsers: None,
-            any_unmodifiable_browsers: true,
+            browsers: data_dir.map(|data| data.join(BROWSERS_DIR)),
             layouts: vec![
                 Layout {
                     prefix: CFT_PREFIX,
@@ -147,10 +169,10 @@ impl Trusted {
         }
     }
 
-    /// Linux, never shipped, for development and CI: the distributions' installs, each root's
-    /// own, unpinned.
-    #[cfg(target_os = "linux")]
-    fn system() -> Trusted {
+    /// Linux, never shipped, in a test build: the distributions' installs, each root's own,
+    /// unpinned.
+    #[cfg(all(target_os = "linux", feature = "test-support"))]
+    fn system(_data_dir: Option<&Path>) -> Trusted {
         let files = [
             "/opt/google/chrome/google-chrome",
             "/opt/google/chrome/chrome",
@@ -165,9 +187,13 @@ impl Trusted {
         }
     }
 
-    /// Any other system: none but the tests' own.
-    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
-    fn system() -> Trusted {
+    /// A Linux release build, or any other system: none but the tests' own.
+    #[cfg(not(any(
+        target_os = "macos",
+        windows,
+        all(target_os = "linux", feature = "test-support")
+    )))]
+    fn system(_data_dir: Option<&Path>) -> Trusted {
         Trusted::default()
     }
 }
@@ -188,7 +214,8 @@ fn folders_for_tests() -> Vec<PathBuf> {
 }
 
 /// The real path of `asked` if it is a Chrome the guard trusts, else `None`. `modifiable` says
-/// whether the guard's user can change a file or folder ([`modifiable`] in production).
+/// whether the agent can change, or owns, a file or folder ([`modifiable_by`] in production);
+/// it is asked of the binary and of every folder above it, the root included.
 pub(crate) fn check(
     asked: &Path,
     trusted: &Trusted,
@@ -210,24 +237,17 @@ pub(crate) fn check(
     let installed = trusted
         .files
         .iter()
-        .any(|file| relative(&shown, file).is_some_and(|rest| rest.as_os_str().is_empty()));
+        .any(|file| relative(&shown, file).is_some_and(|rest| rest.as_os_str().is_empty()))
+        && is_elf(&real);
     if installed {
         return Some(real);
     }
-    let rest = match &trusted.browsers {
-        Some(browsers) => under(browsers)?,
-        None if trusted.any_unmodifiable_browsers => after_browsers(&shown)?,
-        None => return None,
-    };
+    let rest = under(trusted.browsers.as_ref()?)?;
     let download = trusted
         .layouts
         .iter()
         .any(|layout| is_download(&rest, layout));
-    let unmodifiable = || {
-        real.ancestors()
-            .take_while(|path| path.parent().is_some())
-            .all(|path| !modifiable(path))
-    };
+    let unmodifiable = || real.ancestors().all(|path| !modifiable(path));
     (download && unmodifiable()).then_some(real)
 }
 
@@ -258,15 +278,6 @@ fn is_download(rest: &Path, layout: &Layout) -> bool {
         && same(parts.as_path(), &layout.binary)
 }
 
-/// What follows the last `browsers` folder in `real` (Windows: any data folder's).
-fn after_browsers(real: &Path) -> Option<PathBuf> {
-    let parts: Vec<Component<'_>> = real.components().collect();
-    let at = parts
-        .iter()
-        .rposition(|part| matches!(part, Component::Normal(name) if same(Path::new(name), Path::new(BROWSERS_DIR))))?;
-    Some(parts[at + 1..].iter().collect())
-}
-
 /// `path` relative to `base`, comparing as the OS does (Windows: without ASCII case).
 fn relative(path: &Path, base: &Path) -> Option<PathBuf> {
     let mut parts = path.components();
@@ -277,6 +288,16 @@ fn relative(path: &Path, base: &Path) -> Option<PathBuf> {
         }
     }
     Some(parts.as_path().to_owned())
+}
+
+/// Whether `path` starts with ELF's magic bytes: a binary, not a script an interpreter runs.
+fn is_elf(path: &Path) -> bool {
+    use std::io::Read;
+    let mut magic = [0_u8; 4];
+    std::fs::File::open(path)
+        .and_then(|mut file| file.read_exact(&mut magic))
+        .is_ok()
+        && magic == *b"\x7fELF"
 }
 
 /// Whether two paths are the same text, without ASCII case on Windows.
@@ -303,49 +324,28 @@ fn plain(path: &Path) -> PathBuf {
     }
 }
 
-/// Whether the guard's user can change `path`: Windows opens it once for each right that would
-/// let it rewrite, replace or re-permission the file or a folder's entries; any open that
-/// succeeds says yes. An owner always gets `WRITE_DAC`, so a file the user wrote always says yes.
+/// What says whether `agent` can change, or owns, a path (Windows, `pinned/authz.rs`): any
+/// right that would let it rewrite, replace or re-permission the file or a folder's entries,
+/// asked of every path but the root, which any user may add folders to; ownership asked of
+/// every path, the root included. When the identities cannot be read, everything is modifiable.
 #[cfg(windows)]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "a probe that opens and closes with no read or write, changing nothing"
-)]
-pub(crate) fn modifiable(path: &Path) -> bool {
-    use std::os::windows::fs::OpenOptionsExt;
-    const FILE_WRITE_DATA: u32 = 0x2;
-    const FILE_APPEND_DATA: u32 = 0x4;
-    const FILE_DELETE_CHILD: u32 = 0x40;
-    const DELETE: u32 = 0x1_0000;
-    const WRITE_DAC: u32 = 0x4_0000;
-    const WRITE_OWNER: u32 = 0x8_0000;
-    const SHARE_ALL: u32 = 0x7;
-    // Opens a folder too; follows no reparse point (the path is already resolved).
-    const FLAGS: u32 = 0x0200_0000 | 0x0020_0000;
-    [
-        FILE_WRITE_DATA,
-        FILE_APPEND_DATA,
-        FILE_DELETE_CHILD,
-        DELETE,
-        WRITE_DAC,
-        WRITE_OWNER,
-    ]
-    .iter()
-    .any(|&right| {
-        std::fs::OpenOptions::new()
-            .access_mode(right)
-            .share_mode(SHARE_ALL)
-            .custom_flags(FLAGS)
-            .open(path)
-            .is_ok()
-    })
+pub(crate) fn modifiable_by(agent: &Agent) -> impl Fn(&Path) -> bool {
+    let writers = authz::Writers::new(agent);
+    move |path: &Path| {
+        writers.as_ref().is_none_or(|writers| {
+            writers.owns(path) || (path.parent().is_some() && writers.can_change(path))
+        })
+    }
 }
 
 /// macOS and Linux: the jail, not the permissions, keeps the agent out (see the module's text).
 #[cfg(not(windows))]
-pub(crate) fn modifiable(_path: &Path) -> bool {
-    false
+pub(crate) fn modifiable_by(_agent: &Agent) -> impl Fn(&Path) -> bool {
+    |_: &Path| false
 }
+
+#[cfg(windows)]
+mod authz;
 
 #[cfg(test)]
 mod tests;

@@ -73,7 +73,10 @@ pub const USAGE: &str = if cfg!(windows) {
 const USAGE_UNIX: &str = "usage: clauseo-mcp browser-guard --agent-browser <file> --cwd <folder> --cdp-port <port> -- <agent-browser args...>";
 /// The command line on Windows: the daemon's port too, which agent-browser derives from the
 /// session name and the host claimed (`port_file.rs`).
-const USAGE_WINDOWS: &str = "usage: clauseo-mcp browser-guard --agent-browser <file> --cwd <folder> --cdp-port <port> --daemon-port <port> -- <agent-browser args...>";
+/// `--data-dir` names the host's data folder, whose `browsers` holds the pinned Chrome;
+/// `--agent-sid` and `--agent-package-sid` name the agent when the guard runs as another account
+/// (`chrome/pinned.rs`). All three are the host's to set.
+const USAGE_WINDOWS: &str = "usage: clauseo-mcp browser-guard --agent-browser <file> --cwd <folder> --cdp-port <port> --daemon-port <port> [--data-dir <folder>] [--agent-sid <sid> [--agent-package-sid <sid>]] -- <agent-browser args...>";
 
 /// The exit code for a bad command line or environment.
 const EXIT_USAGE: i32 = 2;
@@ -89,6 +92,10 @@ struct Command {
     cdp_port: u16,
     /// Windows only: the port agent-browser's daemon must listen on.
     daemon_port: Option<u16>,
+    /// Windows only: the host's data folder, `--data-dir`; without it no Chrome is trusted.
+    data_dir: Option<PathBuf>,
+    /// Windows only: the agent's identity, `--agent-sid` and `--agent-package-sid`.
+    agent: chrome::pinned::Agent,
     child_args: Vec<OsString>,
 }
 
@@ -209,9 +216,9 @@ fn serve(
         .map_err(|error| failed(&format!("cannot start the reaper: {error}")))?;
     let launcher = session::Launcher {
         executable: env.get(env::EXECUTABLE_PATH).and_then(|asked| {
-            let trusted = chrome::pinned::Trusted::here();
-            let real =
-                chrome::pinned::check(Path::new(asked), &trusted, chrome::pinned::modifiable);
+            let trusted = chrome::pinned::Trusted::here(command.data_dir.as_deref());
+            let modifiable = chrome::pinned::modifiable_by(&command.agent);
+            let real = chrome::pinned::check(Path::new(asked), &trusted, modifiable);
             if real.is_none() {
                 note("the Chrome the host named is not one Clauseo installed or trusts");
             }
@@ -352,11 +359,13 @@ fn port_checks(
 /// What the command line must look like, for its refusals.
 const EXPECTED_UNIX: &str =
     "expected --agent-browser <file> --cwd <folder> --cdp-port <port> -- <args...>";
-const EXPECTED_WINDOWS: &str = "expected --agent-browser <file> --cwd <folder> --cdp-port <port> --daemon-port <port> -- <args...>";
+const EXPECTED_WINDOWS: &str = "expected --agent-browser <file> --cwd <folder> --cdp-port <port> --daemon-port <port> [--data-dir <folder>] [--agent-sid <sid> [--agent-package-sid <sid>]] -- <args...>";
 
 /// Exactly `--agent-browser <file> --cwd <folder> --cdp-port <port> -- <args...>`, in that
-/// order, with `--daemon-port <port>` after `--cdp-port` on Windows and never on Unix; each
-/// path absolute and existing, each port from 1024 to 65535 in plain decimal. The child's
+/// order, with `--daemon-port <port>` after `--cdp-port` on Windows and never on Unix, then on
+/// Windows only, each optional and in this order, `--data-dir <folder>`, `--agent-sid <sid>` and
+/// `--agent-package-sid <sid>` (only after `--agent-sid`); each path absolute and existing, each
+/// port from 1024 to 65535 in plain decimal, each SID `S-1-` and decimal parts. The child's
 /// arguments are kept as given.
 fn parse(args: &[OsString], os: env::Os) -> Result<Command, &'static str> {
     let expected = match os {
@@ -378,10 +387,10 @@ fn parse(args: &[OsString], os: env::Os) -> Result<Command, &'static str> {
     if flag_program != "--agent-browser" || flag_cwd != "--cwd" || flag_cdp != "--cdp-port" {
         return Err(expected);
     }
+    let mut options = WindowsOptions::default();
     let (daemon, separator, child_args) = match (os, rest) {
-        (env::Os::Windows, [flag_daemon, daemon, separator, child_args @ ..])
-            if flag_daemon == "--daemon-port" =>
-        {
+        (env::Os::Windows, [flag_daemon, daemon, rest @ ..]) if flag_daemon == "--daemon-port" => {
+            let (separator, child_args) = options.read(rest, expected)?;
             (Some(daemon), separator, child_args)
         }
         (env::Os::Unix, [flag_daemon, ..]) if flag_daemon == "--daemon-port" => {
@@ -415,8 +424,57 @@ fn parse(args: &[OsString], os: env::Os) -> Result<Command, &'static str> {
         cwd: cwd.to_owned(),
         cdp_port,
         daemon_port,
+        data_dir: options.data_dir,
+        agent: options.agent,
         child_args: child_args.to_vec(),
     })
+}
+
+/// Windows' optional arguments after `--daemon-port`.
+#[derive(Default)]
+struct WindowsOptions {
+    data_dir: Option<PathBuf>,
+    agent: chrome::pinned::Agent,
+}
+
+impl WindowsOptions {
+    /// Reads `[--data-dir <folder>] [--agent-sid <sid> [--agent-package-sid <sid>]]` from the
+    /// front of `rest`; returns the separator that must follow and what follows it.
+    fn read<'a>(
+        &mut self,
+        mut rest: &'a [OsString],
+        expected: &'static str,
+    ) -> Result<(&'a OsString, &'a [OsString]), &'static str> {
+        if let [flag, folder, after @ ..] = rest
+            && flag == "--data-dir"
+        {
+            let folder = Path::new(folder);
+            if !folder.is_absolute() || !folder.is_dir() {
+                return Err("--data-dir must be the absolute path of an existing folder");
+            }
+            self.data_dir = Some(folder.to_owned());
+            rest = after;
+        }
+        let sid = |text: &OsString| {
+            text.to_str()
+                .filter(|text| chrome::pinned::is_sid_text(text))
+                .map(str::to_owned)
+                .ok_or("--agent-sid and --agent-package-sid must each be a SID, S-1-...")
+        };
+        if let [flag, user, after @ ..] = rest
+            && flag == "--agent-sid"
+        {
+            self.agent.user = Some(sid(user)?);
+            rest = after;
+            if let [flag, package, after @ ..] = rest
+                && flag == "--agent-package-sid"
+            {
+                self.agent.package = Some(sid(package)?);
+                rest = after;
+            }
+        }
+        rest.split_first().ok_or(expected)
+    }
 }
 
 /// Makes `path` if it is missing, then insists it is a real folder, not a link or a file.

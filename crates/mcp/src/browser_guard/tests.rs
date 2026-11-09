@@ -1,5 +1,6 @@
 use std::ffi::OsString;
 
+use super::chrome::pinned::Agent;
 use super::env::Os;
 use super::{Command, parse};
 
@@ -38,6 +39,8 @@ fn the_cdp_port_is_required_and_parsed() {
             cwd: cwd.clone().into(),
             cdp_port: 61_101,
             daemon_port: None,
+            data_dir: None,
+            agent: Agent::default(),
             child_args: args(&["mcp"]),
         }
     );
@@ -140,4 +143,65 @@ fn the_daemon_port_is_windows_only_and_required_there() {
         parse(&bad, Os::Windows).unwrap_err(),
         "--daemon-port must be a port from 1024 to 65535 with no leading zero"
     );
+}
+
+/// Windows: `--data-dir`, `--agent-sid` and `--agent-package-sid` after `--daemon-port`, each
+/// optional, in that order; a package only with a user; each SID `S-1-` and decimal parts. On
+/// Unix none is read.
+#[test]
+fn the_windows_identity_arguments_are_optional_and_checked() {
+    let (program, cwd) = program_and_cwd();
+    let head = [
+        "--agent-browser",
+        program.as_str(),
+        "--cwd",
+        cwd.as_str(),
+        "--cdp-port",
+        "61101",
+        "--daemon-port",
+        "61102",
+    ];
+    let with = |tail: &[&str]| args(&[&head[..], tail].concat());
+    let all = with(&[
+        "--data-dir",
+        &cwd,
+        "--agent-sid",
+        "S-1-5-21-1-2-3-1001",
+        "--agent-package-sid",
+        "S-1-15-2-1-2",
+        "--",
+        "mcp",
+    ]);
+    let parsed = parse(&all, Os::Windows).unwrap();
+    assert_eq!(parsed.data_dir, Some(cwd.clone().into()));
+    assert_eq!(parsed.agent.user.as_deref(), Some("S-1-5-21-1-2-3-1001"));
+    assert_eq!(parsed.agent.package.as_deref(), Some("S-1-15-2-1-2"));
+    assert_eq!(parsed.child_args, args(&["mcp"]));
+    let bare = parse(&with(&["--", "mcp"]), Os::Windows).unwrap();
+    assert_eq!((bare.data_dir, bare.agent), (None, Agent::default()));
+    let user_only = parse(&with(&["--agent-sid", "S-1-5-18", "--"]), Os::Windows).unwrap();
+    assert_eq!(user_only.agent.user.as_deref(), Some("S-1-5-18"));
+    for bad in [
+        &["--agent-sid", "S-1-5-", "--"][..],
+        &["--agent-sid", "1-5-18", "--"],
+        &["--agent-sid", "S-1-5-x", "--"],
+        &["--agent-package-sid", "S-1-15-2-1", "--"],
+        &["--agent-sid", "S-1-5-18", "--data-dir", &cwd, "--"],
+        &["--data-dir", "relative", "--"],
+        &["--data-dir", &program, "--"],
+    ] {
+        assert!(parse(&with(bad), Os::Windows).is_err(), "{bad:?}");
+    }
+    let unix = args(&[
+        "--agent-browser",
+        &program,
+        "--cwd",
+        &cwd,
+        "--cdp-port",
+        "61101",
+        "--data-dir",
+        &cwd,
+        "--",
+    ]);
+    assert!(parse(&unix, Os::Unix).is_err());
 }

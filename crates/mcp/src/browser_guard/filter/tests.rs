@@ -1,9 +1,11 @@
 use serde_json::{Value, json};
 
 use super::{
-    BATCH_MESSAGE, EXTRA_ARGS_ALLOWED, LIVE_VIEW_COMMANDS, LIVE_VIEW_TOOLS, MUST_BE_FALSE,
-    REFUSED_KEYS, SCREENSHOT_PATH, TIMEOUT, UNAVAILABLE, Verdict, check, refusal_text,
+    BATCH_MESSAGE, EXTRA_ARGS_ALLOWED, MUST_BE_FALSE, REFUSED_KEYS, SCREENSHOT_PATH, TIMEOUT,
+    Verdict, check, refusal_text,
 };
+
+mod tools;
 
 fn call_tool(tool: &str, arguments: &Value) -> Value {
     json!({
@@ -43,54 +45,6 @@ fn refused_on(tool: &str, arguments: &Value) -> Option<String> {
         }
         Verdict::Drop => panic!("a request is never dropped"),
     }
-}
-
-/// Each live-view tool, and each live-view command in a batch, gets the plain refusal and never
-/// reaches agent-browser, whatever its arguments; as a notification it is dropped.
-#[test]
-fn every_live_view_is_unavailable() {
-    let unavailable = |message: &Value| {
-        let Verdict::Answer(text) = verdict(message) else {
-            panic!("forwarded: {message}");
-        };
-        let answer: Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(answer["id"], 7);
-        assert_eq!(answer["result"]["isError"], true);
-        assert_eq!(answer["result"]["content"][0]["text"], UNAVAILABLE);
-    };
-    let tools = [
-        "agent_browser_stream_enable",
-        "agent_browser_stream_disable",
-        "agent_browser_stream_status",
-        "agent_browser_dashboard_start",
-        "agent_browser_dashboard_stop",
-        "agent_browser_inspect",
-    ];
-    assert_eq!(LIVE_VIEW_TOOLS, tools);
-    for tool in tools {
-        unavailable(&call_tool(tool, &json!({})));
-        unavailable(&call_tool(tool, &json!({"port": 9222})));
-        let mut bare = call_tool(tool, &json!({}));
-        bare["params"].as_object_mut().unwrap().remove("arguments");
-        unavailable(&bare);
-        bare.as_object_mut().unwrap().remove("id");
-        assert_eq!(verdict(&bare), Verdict::Drop, "{tool}");
-    }
-    assert_eq!(LIVE_VIEW_COMMANDS, ["stream", "dashboard", "inspect"]);
-    for command in [
-        json!(["stream", "enable"]),
-        json!(["stream", "disable"]),
-        json!(["stream", "status"]),
-        json!(["dashboard", "start"]),
-        json!(["dashboard", "stop"]),
-        json!(["inspect"]),
-    ] {
-        let commands = json!({"commands": [["open", "https://example.com"], command]});
-        unavailable(&call_tool("agent_browser_batch", &commands));
-    }
-    let fine = json!({"commands": [["open", "https://example.com"], ["get", "text", "stream"]]});
-    assert_eq!(refused_on("agent_browser_batch", &fine), None);
-    assert_eq!(refused_on("agent_browser_record_start", &json!({})), None);
 }
 
 #[test]
@@ -478,7 +432,8 @@ fn arguments_that_are_not_an_object_pass_on() {
     for arguments in [json!(null), json!("--headed"), json!(["--headed"])] {
         assert_eq!(refused(&arguments), None, "{arguments}");
     }
-    let no_arguments = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {}});
+    let no_arguments = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": {"name": "agent_browser_open"}});
     assert!(matches!(verdict(&no_arguments), Verdict::Forward(_)));
 }
 
@@ -502,7 +457,7 @@ fn a_refused_notification_is_dropped() {
 fn an_id_of_null_or_a_string_comes_back_as_given() {
     for id in [json!(null), json!("abc"), json!(1.5)] {
         let message = json!({"jsonrpc": "2.0", "id": id, "method": "tools/call",
-            "params": {"name": "x", "arguments": {"headed": true}}});
+            "params": {"name": "agent_browser_open", "arguments": {"headed": true}}});
         let Verdict::Answer(text) = verdict(&message) else {
             panic!()
         };

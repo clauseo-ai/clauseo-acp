@@ -49,9 +49,12 @@ libc = { workspace = true }
 # move that never replaces a file (src/write/windows.rs), and `CreateFileW`, a child's `NUL`.
 # `Win32_System_SystemInformation` is for `GetWindowsDirectoryW` and `GetSystemDirectoryW`, the
 # folders a child's `SystemRoot`, `windir` and `ComSpec` default to
-# (src/browser_guard/job/spawn.rs).
+# (src/browser_guard/job/spawn.rs). `Win32_Security_Authorization` is for the Authz access check
+# and the security descriptor reads that say what the agent may change of the pinned Chrome
+# (src/browser_guard/chrome/pinned/authz.rs).
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
+  "Win32_Security_Authorization",
   "Win32_Storage_FileSystem",
   "Win32_System_SystemInformation",
 ] }
