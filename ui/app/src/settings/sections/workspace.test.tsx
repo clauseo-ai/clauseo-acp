@@ -9,7 +9,7 @@
 // no timer at rest.
 import { settled } from "@clauseo/components/lib/late.ts";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
-import { INSTALLER_CLOSE, pw } from "@clauseo/components/lib/words-protection.ts";
+import { INSTALLER_CLOSE, NAMES_ONLY, pw } from "@clauseo/components/lib/words-protection.ts";
 import { st } from "@clauseo/components/lib/words-settings.ts";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -550,4 +550,32 @@ test("keys: Set up the Safe workspace without a confirm puts focus on the waitin
   await press(one("protection-setup"));
   expect(one("protection-confirm")).toBeNull();
   expect(document.activeElement).toBe(one("protection-wait"));
+});
+
+test.each([
+  ["protected", PROT.b],
+  ["not protected", PROT.refused],
+] as const)(
+  "%s with data_fence_names_only: one quiet line, nothing to press, gone once a view says false",
+  async (_, p) => {
+    const names = { data_fence_names_only: true } as Partial<ProtectionView>;
+    const t = await mount({ view: () => view(p, names) });
+    const state = block()?.dataset["state"];
+    const buttons = block()?.querySelectorAll("button").length;
+    expect(one("protection-names-only")?.textContent).toBe(pw("en", NAMES_ONLY));
+    expect(one("protection-names-only")?.querySelector("button")).toBeNull();
+    await act(async () =>
+      t.protectionViewChanged(view(p, { data_fence_names_only: false } as Partial<ProtectionView>)),
+    );
+    await settle();
+    expect(one("protection-names-only")).toBeNull();
+    // the flag changes nothing else in the block
+    expect(block()?.dataset["state"]).toBe(state);
+    expect(block()?.querySelectorAll("button").length).toBe(buttons);
+  },
+);
+
+test("without data_fence_names_only (an older host) no names-only line", async () => {
+  await mount({ view: () => view(PROT.b) });
+  expect(one("protection-names-only")).toBeNull();
 });

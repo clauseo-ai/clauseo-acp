@@ -18,7 +18,8 @@ import type { HostTransport } from "../../transport/host-transport.ts";
 import type { Cause } from "./causes.ts";
 import { retryProtection } from "./commands.ts";
 import { failedWords, useSetUpPress, waitingWords } from "./setup.tsx";
-import { canRetry } from "./view.ts";
+import { canRetry, namesOnly } from "./view.ts";
+import { NAMES_ONLY, pw } from "@clauseo/components/lib/words-protection.ts";
 import { named1385, poolOf, whyOf } from "./detail.ts";
 
 /** The note's `why` for a cause: a missing admin copy reads as not set up yet. */
@@ -92,6 +93,8 @@ export function ProtectionNote({
   const extra = [
     ...(block === null ? [] : [block]),
     ...(repair ? [repairLine(lang, state.view, state.managedBy)] : []),
+    // the data fence by names only (#766): a quiet fact while the host says so, gone when it clears
+    ...(namesOnly(state.view) ? [pw(lang, NAMES_ONLY)] : []),
   ];
   return (
     <>

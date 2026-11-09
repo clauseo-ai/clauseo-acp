@@ -39,6 +39,11 @@ export function asksAdmin(view: ProtectionView | null | undefined, cause?: Cause
   return computer?.name === "needs_set_up" || computer?.name === "set_up_refused";
 }
 
+/** #766's `data_fence_names_only`, read loosely: the data fence compares the data folder by name only for now. It
+ * says one quiet line (Settings, the open note) and gates nothing. */
+export const namesOnly = (view: ProtectionView | null | undefined): boolean =>
+  (view as { data_fence_names_only?: unknown } | null | undefined)?.data_fence_names_only === true;
+
 /** R17 PR-B's `in_progress` (set_up, remove, check), read loosely: what the host is doing now, after a reload too. */
 export function inProgress(
   view: ProtectionView | null | undefined,

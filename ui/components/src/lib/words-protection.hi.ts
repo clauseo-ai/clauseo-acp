@@ -98,4 +98,8 @@ export const HI = {
   // sandbox.blocked, a command's refusal (not in ErrorCode on this base; #639 adds it)
   "Something on this computer stops the Safe workspace, so Clauseo can't answer here. Ask your IT team to look into it.":
     "इस कंप्यूटर पर कोई चीज़ सुरक्षित कार्यक्षेत्र को रोक रही है, इसलिए Clauseo यहाँ उत्तर नहीं दे सकता। अपनी IT टीम से इसकी जाँच करने को कहें।",
+  // #766's data_fence_names_only: Settings' Safe workspace and the open note, while the data folder's
+  // identity can't be read (provisional)
+  "Clauseo can't confirm its own data folder on this computer right now, so it protects that folder by checking its name only. This clears by itself once Clauseo can confirm the folder again.":
+    "Clauseo अभी इस कंप्यूटर पर अपना डेटा फ़ोल्डर पक्का नहीं कर पा रहा, इसलिए वह उस फ़ोल्डर को सिर्फ़ उसके नाम की जाँच से सुरक्षित रखता है। जब Clauseo फ़ोल्डर को फिर से पक्का कर पाएगा, यह अपने-आप हट जाएगा।",
 } as const;

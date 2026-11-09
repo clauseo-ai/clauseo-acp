@@ -690,5 +690,15 @@
     "status": "provisional",
     "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-105": {
+    "en": "Clauseo can't confirm its own data folder on this computer right now, so it protects that folder by checking its name only. This clears by itself once Clauseo can confirm the folder again.",
+    "hi": "Clauseo अभी इस कंप्यूटर पर अपना डेटा फ़ोल्डर पक्का नहीं कर पा रहा, इसलिए वह उस फ़ोल्डर को सिर्फ़ उसके नाम की जाँच से सुरक्षित रखता है। जब Clauseo फ़ोल्डर को फिर से पक्का कर पाएगा, यह अपने-आप हट जाएगा।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (provisional; Rohan batch review; #766 data fence by names only)"
   }
 }

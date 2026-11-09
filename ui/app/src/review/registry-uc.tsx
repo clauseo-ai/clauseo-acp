@@ -6,7 +6,7 @@
 // so none opens by itself over a line's cell. The shipped and the design's own lines are approved
 // "by": "design"; the new ones are provisional, English only (hi: later). R18's screens are UC2's.
 import type { FirstLaunchKey } from "@clauseo/components/lib/words-first-launch.ts";
-import type { ProtectionKey } from "@clauseo/components/lib/words-protection.ts";
+import { NAMES_ONLY, type ProtectionKey } from "@clauseo/components/lib/words-protection.ts";
 import type { SettingsKey } from "@clauseo/components/lib/words-settings.ts";
 import { FakeTransport, type FakeProtectionHost } from "../transport/fake-transport.ts";
 import type {
@@ -183,7 +183,7 @@ const REFUSED_INVALID: FakeProtectionHost = {
   },
 };
 
-/** UC's entries, UC-01 to UC-96, each id written as it is; ids missing are unused. */
+/** UC's entries, UC-01 to UC-96 and UC-105, each id written as it is; ids missing are unused. */
 export const UC: Entry[] = [
   room(
     "UC-01",
@@ -554,5 +554,11 @@ export const UC: Entry[] = [
     undefined,
     {},
     P.missing,
+  ),
+  // #766: the data fence by names only, a quiet line under the block (UC-97 to UC-104 are other branches')
+  settings(
+    "UC-105",
+    pw(NAMES_ONLY),
+    held(P.b, { data_fence_names_only: true } as Partial<ProtectionView>),
   ),
 ];

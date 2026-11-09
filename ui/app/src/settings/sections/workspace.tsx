@@ -9,11 +9,12 @@
 // Where the host doesn't answer the query yet (`command.invalid`, before R17 PR-B admits this
 // window) the section says so quietly. A matter's own state (a full pool, protection switched off)
 // is the room's, never shown here. No timers: the view is read when the window opens, after each
-// command and on each protection_changed.
+// command and on each protection_changed. While the data fence compares the data folder by name
+// only (#766's `data_fence_names_only`), one quiet line says so under the block, whatever the state.
 import { ProtectionConfirm } from "@clauseo/components/clauseo/protection-confirm.tsx";
 import { IconSafeWorkspace } from "@clauseo/components/icons/icons.tsx";
 import { useDisplay, type Lang } from "@clauseo/components/lib/display.ts";
-import { INSTALLER_CLOSE, pw } from "@clauseo/components/lib/words-protection.ts";
+import { INSTALLER_CLOSE, NAMES_ONLY, pw } from "@clauseo/components/lib/words-protection.ts";
 import { useSettingsWords, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import { useEffect, useId, useRef, useState } from "react";
@@ -22,7 +23,7 @@ import { useProtection } from "../../store/protection-run.ts";
 import type { ProtectionView } from "../../transport/protocol.ts";
 import type { Cause } from "../../room/protection/causes.ts";
 import { failedWords, useSetUpPress, waitingWords } from "../../room/protection/setup.tsx";
-import { computerCause, setUpAt } from "../../room/protection/view.ts";
+import { computerCause, namesOnly, setUpAt } from "../../room/protection/view.ts";
 import { named1385, whyOf } from "../../room/protection/detail.ts";
 import {
   blockLine,
@@ -250,6 +251,11 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
       {off && !view.unprotected_auto_allowed && (
         <p className="set-note" data-testid="protection-no-auto">
           {w.say(w.s("Your firm doesn't allow Clauseo to work without asking on this computer."))}
+        </p>
+      )}
+      {namesOnly(view) && (
+        <p className="set-note" data-testid="protection-names-only">
+          {w.say(pw(lang, NAMES_ONLY))}
         </p>
       )}
       {confirm}

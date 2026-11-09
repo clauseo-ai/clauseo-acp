@@ -26,6 +26,11 @@ export const POOL_FULL_CODE = "sandbox.pool_full";
  * cause (blocked.ts), never the turn. */
 export const BLOCKED_CODE = "sandbox.blocked";
 
+/** The quiet line while the data fence compares the data folder by name only (#766's
+ * `data_fence_names_only`), on Settings' Safe workspace and in the open note. */
+export const NAMES_ONLY: ProtectionKey =
+  "Clauseo can't confirm its own data folder on this computer right now, so it protects that folder by checking its name only. This clears by itself once Clauseo can confirm the folder again.";
+
 /** The line beside "Get the installer" on a personal install: the button quits Clauseo once the
  * page is open (the app's quit, desktop's quit_app), so the lawyer knows before clicking. */
 export const INSTALLER_CLOSE: ProtectionKey =
