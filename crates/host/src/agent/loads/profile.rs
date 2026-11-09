@@ -172,6 +172,11 @@ pub(crate) struct ClaudeKeys<'a> {
     /// The session gets the `case-law` entry (R24): `allowedTools` gains `mcp__case-law`
     /// (decision D7). Without it, any hook rule for a `case-law` server is dropped.
     pub(crate) case_law: bool,
+    /// The session has the browser as a shell tool: `allowedTools` gains agent-browser's page
+    /// subcommands and `disallowedTools` its denied flags and subcommands
+    /// (`clauseo_profile::claude::agent_browser_allowed`, `agent_browser_denied`). Without it,
+    /// any hook rule naming agent-browser is dropped, so a session without the browser has none.
+    pub(crate) browser: bool,
 }
 
 /// Adds [`ClaudeKeys`] to `claudeCode.options` (see the module doc).
@@ -194,6 +199,13 @@ pub(crate) fn claude_options(options: &mut Map<String, Value>, keys: &ClaudeKeys
     allowed.retain(|rule| !rule.as_str().is_some_and(super::case_law::is_case_law_rule));
     if keys.case_law {
         push_new(&mut allowed, super::case_law::CLAUDE_ALLOW);
+    }
+    let names_browser = |rule: &Value| rule.as_str().is_some_and(|r| r.contains("agent-browser"));
+    allowed.retain(|rule| !names_browser(rule));
+    disallowed.retain(|rule| !names_browser(rule));
+    if keys.browser {
+        allowed.extend(clauseo_profile::claude::agent_browser_allowed().map(Value::String));
+        disallowed.extend(clauseo_profile::claude::agent_browser_denied().map(Value::String));
     }
     if !disallowed.is_empty() {
         options.insert("disallowedTools".to_owned(), Value::Array(disallowed));

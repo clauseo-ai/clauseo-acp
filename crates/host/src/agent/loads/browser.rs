@@ -389,4 +389,62 @@ mod shell_tests {
             );
         }
     }
+
+    /// Claude's agent-browser rules come only with the browser in that session: on, the allow
+    /// and deny rules; off or unavailable, none, and a hook's stray agent-browser rule is dropped.
+    #[test]
+    fn claude_gets_agent_browser_rules_only_with_the_browser() {
+        use crate::agent::loads::profile::{ClaudeKeys, Folders, Login, claude_options};
+        let names = |options: &serde_json::Map<String, serde_json::Value>, key: &str| {
+            options
+                .get(key)
+                .and_then(serde_json::Value::as_array)
+                .map(|rules| {
+                    rules
+                        .iter()
+                        .filter_map(serde_json::Value::as_str)
+                        .filter(|rule| rule.contains("agent-browser"))
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        };
+        let data = crate::agent::data_fence::LaunchDeny::default();
+        for browser in [true, false] {
+            let mut options = serde_json::Map::new();
+            options.insert(
+                "allowedTools".to_owned(),
+                serde_json::json!(["Bash(agent-browser eval:*)"]),
+            );
+            let keys = ClaudeKeys {
+                web_search: Switch {
+                    on: true,
+                    locked: false,
+                },
+                login: Login::FirstParty,
+                folders: Folders {
+                    work: "/w",
+                    notes: "/n",
+                    connectors: "",
+                    browser: "",
+                },
+                seed_sites: &[],
+                forced_ask: false,
+                data: &data,
+                case_law: false,
+                browser,
+            };
+            claude_options(&mut options, &keys);
+            let allowed = names(&options, "allowedTools");
+            let denied = names(&options, "disallowedTools");
+            if browser {
+                let want: Vec<String> = clauseo_profile::claude::agent_browser_allowed().collect();
+                assert_eq!(allowed, want);
+                let want: Vec<String> = clauseo_profile::claude::agent_browser_denied().collect();
+                assert_eq!(denied, want);
+            } else {
+                assert_eq!((allowed, denied), (Vec::new(), Vec::new()));
+            }
+        }
+    }
 }

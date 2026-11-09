@@ -381,6 +381,7 @@ fn keys(web_search: Switch, login: Login) -> ClaudeKeys<'static> {
         forced_ask: false,
         data: &NO_DENY,
         case_law: false,
+        browser: false,
     }
 }
 

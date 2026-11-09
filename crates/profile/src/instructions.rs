@@ -45,6 +45,13 @@ pub const BROWSER_OFF: &str = include_str!("../assets/instructions/browser-off.t
 /// line the agent can pass on to the lawyer.
 pub const BROWSER_NONE: &str = include_str!("../assets/instructions/browser-none.txt");
 
+/// The line a Codex session with the browser gets after [`BROWSER`]: Codex's sandbox blocks the
+/// browser (no network, no socket), so each command asks to run unsandboxed, in the terms of
+/// codex 0.162.1's shell tool (`sandbox_permissions: "require_escalated"`, `justification`,
+/// `prefix_rule`: `core/src/tools/handlers/shell_spec.rs:232-266` at `rust-v0.162.1`), and offers
+/// one prefix rule so the lawyer approves it once.
+pub const BROWSER_CODEX: &str = include_str!("../assets/instructions/browser-codex.txt");
+
 /// Which browser part a session gets in place of `{browser}`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrowserPart {
@@ -69,6 +76,18 @@ pub fn browser_part(part: BrowserPart) -> &'static str {
         BrowserPart::On => &ON,
         BrowserPart::Off => &OFF,
         BrowserPart::NotInstalled => &NONE,
+    }
+}
+
+/// [`browser_part`], with [`BROWSER_CODEX`] after the rules for a Codex session (`codex`) that
+/// has the browser. Claude never gets the Codex line.
+pub fn browser_part_for(part: BrowserPart, codex: bool) -> &'static str {
+    static ON_CODEX: std::sync::LazyLock<String> =
+        std::sync::LazyLock::new(|| format!(" {} {}", BROWSER.trim(), BROWSER_CODEX.trim()));
+    if codex && part == BrowserPart::On {
+        &ON_CODEX
+    } else {
+        browser_part(part)
     }
 }
 

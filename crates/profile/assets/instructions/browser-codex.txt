@@ -1,0 +1,1 @@
+Codex's sandbox blocks the browser, so run every `agent-browser` command with `sandbox_permissions: "require_escalated"`, a short `justification` that names the page and why you need it, and `prefix_rule: ["agent-browser"]`, so the lawyer can approve agent-browser once instead of at every command.

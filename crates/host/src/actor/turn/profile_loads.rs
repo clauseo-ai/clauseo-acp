@@ -59,7 +59,7 @@ pub(super) fn launch_keys(
         let shell = shell_browser(actor, &prepared.run);
         let folders = Folders::of(&prepared.run.work, &prepared.run.notes)?
             .with_connectors(part)
-            .with_browser(browser_part(shell.as_ref()));
+            .with_browser(browser_part(shell.as_ref(), true));
         let (web_search, _) = switches(actor);
         let packs = prepared.run.packs_written.as_deref();
         let keys = actor
@@ -111,7 +111,7 @@ pub(super) fn session_loads(
     let shell = shell_browser(actor, &run);
     let folders = Folders::of(&run.work, &run.notes)?
         .with_connectors(part)
-        .with_browser(browser_part(shell.as_ref()));
+        .with_browser(browser_part(shell.as_ref(), kind == Some(AgentKind::Codex)));
     let (web_search, browser_switch) = switches(actor);
     let settings_env = actor
         .effective
@@ -135,6 +135,9 @@ pub(super) fn session_loads(
         forced_ask,
         data: &run.data_deny,
         case_law: case_law_entry.is_some(),
+        browser: shell
+            .as_ref()
+            .is_some_and(|(_, part)| *part == BrowserPart::On),
     });
     let guard = actor
         .pre_write_guard
@@ -310,10 +313,14 @@ fn shell_chrome<'a>(actor: &Actor, run: &'a RunFolders) -> Option<&'a Path> {
     run.chrome.as_deref().filter(|_| run.browser_shell)
 }
 
-/// What `{browser}` becomes: the shell tool's part, or the no-browser sentence without it.
-fn browser_part(shell: Option<&(clauseo_protocol::ToolState, BrowserPart)>) -> &'static str {
+/// What `{browser}` becomes: the shell tool's part (with Codex's line for `codex`), or the
+/// no-browser sentence without it.
+fn browser_part(
+    shell: Option<&(clauseo_protocol::ToolState, BrowserPart)>,
+    codex: bool,
+) -> &'static str {
     let part = shell.map_or(BrowserPart::Off, |(_, part)| *part);
-    clauseo_profile::instructions::browser_part(part)
+    clauseo_profile::instructions::browser_part_for(part, codex)
 }
 
 /// What `{connectors}` becomes: the paragraph when the session gets the `case-law` entry.
