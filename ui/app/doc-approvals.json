@@ -28,6 +28,8 @@
       "removeSkippedSilent",
       "removeExeMissing",
       "removeAdminCopyRefused",
+      "removeAdminCopyUnhashed",
+      "removeAdminCopyNoClaim",
       "setupExeRemoved",
       "adminCopyAsk",
       "adminCopyWorking",
@@ -35,6 +37,7 @@
       "adminCopyDeclined",
       "adminCopyFailed",
       "adminCopyBlocked",
+      "adminCopyElevationError",
       "adminCopyOtherAccount",
       "adminCopyMachineFailed",
       "adminCopyNewerKept",
@@ -43,7 +46,7 @@
       "adminCopySkippedSilent"
     ],
     "slots": {
-      "$R9": "the data folder",
+      "$R9": "the data folder, or the error number",
       "$R8": "the folder it kept",
       "$APPDATA": "C:\\ProgramData"
     }

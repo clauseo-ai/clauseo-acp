@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 /// A record value as `ReadRegStr` reads it: text, or a value it can't read (another type).
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(super) enum Value {
     Text(&'static str),
     Unreadable,
@@ -232,6 +232,9 @@ pub(super) struct Machine {
     pub(super) record: Record,
     /// The lawyer's key, `HKCU\Software\Clauseo`, where the app writes `UiLanguage`.
     pub(super) user: Record,
+    /// UAC's policy key, `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System`;
+    /// a DWORD value is its number as text.
+    pub(super) policy: Record,
     pub(super) silent: bool,
     pub(super) own_sid: &'static str,
     pub(super) inline: HashMap<String, Vec<Node>>,
@@ -250,6 +253,7 @@ impl Machine {
             stack: Vec::new(),
             record,
             user: None,
+            policy: None,
             silent: false,
             own_sid: "",
             inline: HashMap::new(),
@@ -331,6 +335,9 @@ impl Machine {
         match (root, self.expand(key).as_str()) {
             ("HKLM", "SOFTWARE\\Clauseo\\Sandbox") => self.record.as_ref(),
             ("HKCU", "Software\\Clauseo") => self.user.as_ref(),
+            ("HKLM", "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System") => {
+                self.policy.as_ref()
+            }
             (root, key) => panic!("a key this interpreter doesn't know: {root}\\{key}"),
         }
     }
@@ -385,6 +392,23 @@ impl Machine {
                     }
                 };
                 self.set(var, text.to_owned());
+            }
+            // A DWORD: its number, or the error flag and "" when the value is missing, unreadable
+            // or not a number (another type).
+            ["ReadRegDWORD", var, root, key, name] => {
+                let name = self.expand(name);
+                let found = self.key(root, key).and_then(|values| {
+                    values
+                        .iter()
+                        .find(|(have, _)| have.eq_ignore_ascii_case(&name))
+                        .map(|(_, value)| *value)
+                });
+                let number = match found {
+                    Some(Value::Text(text)) => text.parse::<u32>().ok(),
+                    Some(Value::Unreadable) | None => None,
+                };
+                self.error |= number.is_none();
+                self.set(var, number.map_or_else(String::new, |n| n.to_string()));
             }
             ["IntOp", var, a, "+", b] => {
                 let a: i64 = self.expand(a).parse().unwrap();

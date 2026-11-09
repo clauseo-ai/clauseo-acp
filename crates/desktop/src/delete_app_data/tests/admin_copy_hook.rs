@@ -330,8 +330,8 @@ fn arm_after<'a>(nodes: &'a [Node], open: &str) -> Option<&'a [Node]> {
 
 const ME: &str = "S-1-5-21-1-2-3-1001";
 const OTHER: &str = "S-1-5-21-1-2-3-1002";
-const NO_CLAIM: &str = "the sandbox tool in Program Files failed its check, so it wasn't started";
-const UNHASHED: &str = "couldn't compute the sandbox tool's hash";
+const NO_CLAIM: &str = "DetailPrint $(removeAdminCopyNoClaim)";
+const UNHASHED: &str = "DetailPrint $(removeAdminCopyUnhashed)";
 
 /// The refusal (the hook's `${If} $R4 <> 1` arm) in the `mode` build, run with `verified` in $R4
 /// on `record`, as the user `ME`, silent or not: what it said.
@@ -375,8 +375,8 @@ fn the_refusal_says_the_accounts_stay_only_to_their_owner() {
         "MessageBox $(removeAdminCopyRefused)",
     ]);
     let claim_silent = said(&["DetailPrint $(removeAdminCopyRefused)", "SetErrorLevel 27"]);
-    let no_claim = said(&[&format!("DetailPrint {NO_CLAIM}")]);
-    let no_claim_silent = said(&[&format!("DetailPrint {NO_CLAIM}"), "SetErrorLevel 27"]);
+    let no_claim = said(&[NO_CLAIM]);
+    let no_claim_silent = said(&[NO_CLAIM, "SetErrorLevel 27"]);
     // Per user: to the owner, the claim (a box unless /S); to anyone else, or with no owner, a
     // details line that claims nothing, and no box.
     assert_eq!(refusal("currentUser", "0", owned_by(ME), false), claim);
@@ -399,19 +399,20 @@ fn the_refusal_says_the_accounts_stay_only_to_their_owner() {
         assert_eq!(refusal("perMachine", "0", record, true), no_claim_silent);
     }
     // A hash that couldn't be computed says so first; the claim follows the same rule.
-    let unhashed = format!("DetailPrint {UNHASHED}");
-    let mut with_claim = said(&[&unhashed]);
+    let unhashed = UNHASHED;
+    let mut with_claim = said(&[unhashed]);
     with_claim.extend(claim);
     assert_eq!(
         refusal("perMachine", "2", owned_by(OTHER), false),
         with_claim
     );
-    assert_eq!(refusal("currentUser", "2", None, false), said(&[&unhashed]));
+    assert_eq!(refusal("currentUser", "2", None, false), said(&[unhashed]));
     assert_eq!(
         refusal("currentUser", "2", owned_by(OTHER), true),
-        said(&[&unhashed, "SetErrorLevel 27"])
+        said(&[unhashed, "SetErrorLevel 27"])
     );
-    // The claim's words are the draft's; the other two are plain details lines.
+    // The claim's words are the draft's; the other three are plain details lines, localised in
+    // English.nsh and Hindi.nsh.
     let english = read("windows/nsis/English.nsh");
     let words = "LangString removeAdminCopyRefused ${LANG_ENGLISH} \"Clauseo couldn't remove the \
                  Safe workspace, because it couldn't confirm that the program that sets it up, in \
@@ -420,16 +421,24 @@ fn the_refusal_says_the_accounts_stay_only_to_their_owner() {
                  computer. Whoever looks after this computer can remove them. Clauseo's notes for \
                  IT explain how.\"";
     assert!(english.lines().any(|line| line == words), "{words}");
+    for line in [
+        "LangString removeAdminCopyUnhashed ${LANG_ENGLISH} \"Clauseo couldn't check the Safe \
+         workspace's program in Program Files, so it didn't start it.\"",
+        "LangString removeAdminCopyNoClaim ${LANG_ENGLISH} \"The Safe workspace's program in \
+         Program Files failed Clauseo's check, so it wasn't started.\"",
+    ] {
+        assert!(english.lines().any(|l| l == line), "{line}");
+    }
     let approvals: serde_json::Value =
         serde_json::from_str(&read("../../ui/app/doc-approvals.json")).unwrap();
     let lines = &approvals["crates/desktop/windows/nsis/English.nsh"]["lines"];
-    assert!(
-        lines
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|line| line == "removeAdminCopyRefused")
-    );
+    for key in [
+        "removeAdminCopyRefused",
+        "removeAdminCopyUnhashed",
+        "removeAdminCopyNoClaim",
+    ] {
+        assert!(lines.as_array().unwrap().iter().any(|line| line == key));
+    }
     line_with(
         &hook_code(),
         &["!define CLAUSEO_EXIT_ADMIN_COPY_REFUSED 27"],

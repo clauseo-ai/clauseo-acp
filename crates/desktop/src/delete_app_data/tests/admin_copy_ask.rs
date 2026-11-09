@@ -4,7 +4,7 @@
 //! the words are the provisional ones. The rest is in `admin_copy.rs`.
 
 use super::admin_copy::{ASK, admin_code, assert_run, block, code_of, macro_body};
-use super::nsis_run::{Machine, chain, defines, parse_all};
+use super::nsis_run::{Machine, Value, chain, defines, parse_all};
 use super::sources::{hook_code, line_with, read};
 
 #[test]
@@ -65,7 +65,10 @@ fn the_per_user_installer_asks_once_by_starting_itself_elevated_and_never_in_upd
             "StrCpy $R2 \"\"",
             "${EndIf}",
             "${If} $R2 != \"\"",
+            "!insertmacro CLAUSEO_ASK_AUTO_DENIED",
+            "${If} $R9 <> 1",
             "MessageBox MB_OK|MB_ICONINFORMATION \"$(adminCopyAsk)\"",
+            "${EndIf}",
         ],
     );
     let calls: Vec<usize> = (0..body.len())
@@ -95,7 +98,7 @@ fn the_per_user_installer_asks_once_by_starting_itself_elevated_and_never_in_upd
             "${ElseIf} $R9 = 1223",
             "StrCpy $R6 4",
             "${Else}",
-            "DetailPrint \"Windows refused the elevation (error $R9)\"",
+            "DetailPrint \"$(adminCopyElevationError)\"",
             "${If} $R9 = 1260",
             "${OrIf} $R9 = 5",
             "StrCpy $R6 9",
@@ -298,13 +301,15 @@ fn says_after_a_failed_launch(code: u32) -> Vec<String> {
     machine.set_var("$R8", "99");
     machine.set_var("$R9", &code.to_string());
     machine.run(std::slice::from_ref(launch));
+    // The error line's $R9 is still the launch's code, so NSIS prints that number in it.
+    assert_eq!(machine.vars["$R9"], code.to_string());
     machine.run(std::slice::from_ref(outcome));
     machine.said
 }
 
 #[test]
 fn a_failed_launch_says_blocked_declined_or_failed_by_its_code() {
-    let refused = |code: u32| format!("DetailPrint Windows refused the elevation (error {code})");
+    let refused = |_: u32| "DetailPrint $(adminCopyElevationError)".to_owned();
     // 1260, the VM's measured code for a policy-refused elevation (a standard user with
     // ConsentPromptBehaviorUser 0), and 5 under other UAC settings: adminCopyBlocked.
     for code in [1260, 5] {
@@ -343,14 +348,106 @@ fn a_failed_launch_says_blocked_declined_or_failed_by_its_code() {
     line_with(macro_body(&admin, ASK), &["${AndIf} $R6 <> 9"]);
 }
 
+/// Whether the per-user ask skips its notice (`CLAUSEO_ASK_AUTO_DENIED`'s `$R9`), for UAC's
+/// `ConsentPromptBehaviorUser` (`None` when absent) and the token `CLAUSEO_TOKEN_KIND` reads: its
+/// elevation type and whether `BUILTIN\Administrators` is enabled in it.
+fn skips_the_notice(prompt: Option<Value>, elevation: u32, admin: bool) -> bool {
+    let admin_lines = admin_code();
+    let mut machine = Machine::new(defines(&admin_lines), None);
+    machine.policy =
+        Some(prompt.map_or_else(Vec::new, |value| vec![("ConsentPromptBehaviorUser", value)]));
+    let token = [
+        format!("StrCpy $R4 {elevation}"),
+        format!("StrCpy $R7 {}", u8::from(admin)),
+    ];
+    machine
+        .inline
+        .insert("CLAUSEO_TOKEN_KIND".to_owned(), parse_all(&token));
+    let body = &macro_body(&admin_lines, "CLAUSEO_ASK_AUTO_DENIED")[1..];
+    machine.run(&parse_all(body));
+    match machine.vars["$R9"].as_str() {
+        "1" => true,
+        "0" => false,
+        other => panic!("$R9 {other}"),
+    }
+}
+
+#[test]
+fn the_notice_is_skipped_only_for_a_standard_user_whom_uac_denies_without_asking() {
+    let zero = || Some(Value::Text("0"));
+    // A standard user (no linked token, not an administrator) with automatic denial: no prompt
+    // comes, so no notice; the launch fails with 1260 and says adminCopyBlocked.
+    assert!(skips_the_notice(zero(), 1, false));
+    // A standard user whom Windows asks for credentials (3, the default; 1), or whose value is
+    // absent, unreadable or not a DWORD: the notice shows.
+    for prompt in [
+        Some(Value::Text("3")),
+        Some(Value::Text("1")),
+        None,
+        Some(Value::Unreadable),
+        Some(Value::Text("text")),
+    ] {
+        assert!(!skips_the_notice(prompt, 1, false), "{prompt:?}");
+    }
+    // An administrator gets the administrators' consent prompt whatever the value: a filtered
+    // token (3, limited), an elevated one (2), one with UAC off (1, in the group), and a token
+    // that couldn't be read (0, counted in the group).
+    for (elevation, admin) in [(3, false), (2, true), (1, true), (0, true)] {
+        assert!(
+            !skips_the_notice(zero(), elevation, admin),
+            "{elevation} {admin}"
+        );
+    }
+}
+
+#[test]
+fn the_token_kind_reads_the_elevation_type_and_the_administrators_group() {
+    let code = admin_code();
+    let body = macro_body(&code, "CLAUSEO_TOKEN_KIND");
+    let order = [
+        "StrCpy $R4 0",
+        "StrCpy $R7 1",
+        "advapi32::OpenProcessToken(p -1, i 8, *p .R5) i .R9",
+        "advapi32::GetTokenInformation(p R5, i 18, *i .R4, i 4, *i .R9) i .R9",
+        "kernel32::CloseHandle(p R5)",
+        "System::Call '*(&i68) p .R5'",
+        "advapi32::CreateWellKnownSid(i 26, p 0, p R5, *i 68) i .R9",
+        "advapi32::CheckTokenMembership(p 0, p R5, *i .R7) i .R9",
+        "System::Free $R5",
+    ];
+    let lines: Vec<usize> = order.iter().map(|part| line_with(body, &[part])).collect();
+    assert!(lines.windows(2).all(|pair| pair[0] < pair[1]), "{body:?}");
+    // The policy from the 64-bit view, put back after.
+    let denied = macro_body(&code, "CLAUSEO_ASK_AUTO_DENIED");
+    assert_run(
+        denied,
+        &[
+            "StrCpy $R9 0",
+            "SetRegView 64",
+            "ClearErrors",
+            "ReadRegDWORD $R4 HKLM \"${CLAUSEO_UAC_POLICY_KEY}\" \"${CLAUSEO_UAC_USER_PROMPT}\"",
+        ],
+    );
+    assert_eq!(denied.last().unwrap(), "SetRegView lastused", "{denied:?}");
+    let key = line_with(&code, &["!define CLAUSEO_UAC_POLICY_KEY "]);
+    assert_eq!(
+        code[key],
+        concat!(
+            r#"!define CLAUSEO_UAC_POLICY_KEY "#,
+            r#""SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System""#
+        )
+    );
+}
+
 #[test]
 fn the_words_about_the_admin_copy_are_the_provisional_ones() {
     let english = read("windows/nsis/English.nsh");
     for (key, words) in [
         (
             "adminCopyAsk",
-            "Next, Windows asks for permission to set up the Safe workspace. It will say the \
-             publisher is unknown. That's expected: it's this installer asking. Choose Yes.",
+            "Next, Windows may ask for permission to set up the Safe workspace. If it does, it \
+             will say the publisher is unknown. That's expected: it's this installer asking. \
+             Choose Yes.",
         ),
         (
             "adminCopyWorking",
@@ -367,9 +464,15 @@ fn the_words_about_the_admin_copy_are_the_provisional_ones() {
         (
             "adminCopyBlocked",
             "Clauseo is installed, but the Safe workspace isn't set up, because your Windows \
-             account isn't allowed to approve this change. To set it up, ask whoever looks after \
-             this computer to run this installer with an administrator account, or to install \
-             Clauseo for all users.",
+             account isn't allowed to approve this change. Until it's set up, Clauseo can read any \
+             file you can open on this computer, and asks before changing anything outside a \
+             matter's folder. To set it up, run this installer from an administrator account, or \
+             install Clauseo for all users.",
+        ),
+        (
+            "adminCopyElevationError",
+            "Windows didn't run the program that sets up the Safe workspace as an administrator \
+             (error $R9).",
         ),
         (
             "adminCopyFailed",
