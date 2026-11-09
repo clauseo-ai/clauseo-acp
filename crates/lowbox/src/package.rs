@@ -23,12 +23,13 @@ const APP_PACKAGE_AUTHORITY: u64 = 15;
 const APP_PACKAGE_BASE_RID: u32 = 2;
 
 /// An `AppContainer` package name, such as `Clauseo.Browser.B01`: 1 to 64 ASCII letters, digits,
-/// dots and dashes.
+/// dots and dashes. Kept lowercased: Windows derives the SID from the lowercased name, so two
+/// names that differ only in letter case are one package, and compare and hash as one.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PackageName(String);
 
 impl PackageName {
-    /// The name, checked.
+    /// The name, checked and lowercased.
     pub fn new(name: &str) -> Result<PackageName, Error> {
         if name.is_empty() {
             return Err(Error::PackageName { reason: "empty" });
@@ -46,10 +47,10 @@ impl PackageName {
                 reason: "not only ASCII letters, digits, dots and dashes",
             });
         }
-        Ok(PackageName(name.to_owned()))
+        Ok(PackageName(name.to_ascii_lowercase()))
     }
 
-    /// The name as given.
+    /// The name, lowercased.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -125,6 +126,15 @@ impl Sid {
         }
         bytes
     }
+
+    /// [`Sid::to_bytes`] in a buffer of `u32`s, so a pointer to it has the 4-byte alignment
+    /// the kernel's SID capture probes for. A binary SID is 8 + 4 × n bytes, so it fills whole
+    /// words; each word holds four of its bytes in memory order.
+    pub(crate) fn to_aligned(&self) -> Vec<u32> {
+        let bytes = self.to_bytes();
+        let (words, _none_left) = bytes.as_chunks::<4>();
+        words.iter().map(|w| u32::from_ne_bytes(*w)).collect()
+    }
 }
 
 impl fmt::Debug for Sid {
@@ -144,9 +154,9 @@ fn decimal<T: std::str::FromStr>(part: &str) -> Option<T> {
 /// The package SID of `name`, `S-1-15-2-…`, as `DeriveAppContainerSidFromAppContainerName`
 /// derives it. No profile needs to be registered. Never log it.
 pub fn package_sid(name: &PackageName) -> Sid {
+    // Lowercased already (`PackageName::new`).
     let utf16: Vec<u8> = name
         .as_str()
-        .to_ascii_lowercase()
         .encode_utf16()
         .flat_map(u16::to_le_bytes)
         .collect();
@@ -159,12 +169,19 @@ pub fn package_sid(name: &PackageName) -> Sid {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// The W2 (j) recipe's vector: `Get-NtSid -PackageName 'Clauseo.Browser.B01'` on the VM.
     const B01: &str = "S-1-15-2-4291742471-3177126929-1079639061-2360262239-4224205492-\
                        3771709147-1509459664";
+
+    /// A name at the 64-character limit.
+    pub(crate) const LONGEST: &str =
+        "Clauseo.Browser.Longest-Name-At-The-Limit-0123456789-ABCDEFGHIJK";
+    /// Its package SID, from Python: `hashlib.sha256(name.lower().encode("utf-16-le"))`.
+    const LONGEST_SID: &str = "S-1-15-2-2091307814-3276343069-1066385404-277365165-\
+                               1844948808-800365280-310130186";
 
     #[test]
     fn the_package_sid_matches_the_vm_vector() {
@@ -176,6 +193,34 @@ mod tests {
     fn the_derivation_ignores_letter_case() {
         let upper = PackageName::new("CLAUSEO.BROWSER.B01").unwrap();
         assert_eq!(package_sid(&upper).as_str(), B01);
+    }
+
+    #[test]
+    fn names_that_differ_in_case_are_one_package() {
+        use std::collections::HashSet;
+        let mixed = PackageName::new("Clauseo.Browser.B01").unwrap();
+        let lower = PackageName::new("clauseo.browser.b01").unwrap();
+        assert_eq!(mixed, lower);
+        assert_eq!(mixed.as_str(), "clauseo.browser.b01");
+        let set: HashSet<PackageName> = [mixed, lower].into_iter().collect();
+        assert_eq!(set.len(), 1);
+    }
+
+    /// A 64-character name hashes three SHA-256 blocks (128 bytes of UTF-16 and the padding);
+    /// the value is Python's `hashlib.sha256` of the lowercased name in UTF-16LE, and
+    /// `windows::tests` checks the same name against `DeriveAppContainerSidFromAppContainerName`.
+    #[test]
+    fn the_longest_name_matches_an_independent_sha256() {
+        let name = PackageName::new(LONGEST).unwrap();
+        assert_eq!(package_sid(&name).as_str(), LONGEST_SID);
+    }
+
+    #[test]
+    fn the_aligned_sid_holds_the_same_bytes() {
+        let sid = Sid::parse(B01).unwrap();
+        let words = sid.to_aligned();
+        let bytes: Vec<u8> = words.iter().flat_map(|w| w.to_ne_bytes()).collect();
+        assert_eq!(bytes, sid.to_bytes());
     }
 
     #[test]
