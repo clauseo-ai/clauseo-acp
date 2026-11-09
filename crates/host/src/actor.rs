@@ -518,6 +518,10 @@ impl Actor {
             Input::Abort(reply) => {
                 let _gone = reply.send(());
             }
+            #[cfg(feature = "test-support")]
+            Input::StateForTest(reply) => {
+                let _gone = reply.send(turn::sign_in::state_for_test(self));
+            }
         }
     }
 

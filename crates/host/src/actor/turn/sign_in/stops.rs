@@ -37,6 +37,24 @@ struct StopWait {
     timer: AbortHandle,
 }
 
+impl StopWaits {
+    /// The calls waiting, as `id agent unresponsive`, for the tests' dump.
+    #[cfg(feature = "test-support")]
+    pub(in crate::actor::turn) fn describe_for_test(&self) -> String {
+        let waits: Vec<String> = self
+            .waits
+            .iter()
+            .map(|wait| {
+                format!(
+                    "#{} {} unresponsive={}",
+                    wait.id, wait.agent, wait.unresponsive
+                )
+            })
+            .collect();
+        format!("[{}]", waits.join(", "))
+    }
+}
+
 /// A thread of `agent` whose agent has not ended yet: a process, or a launch being prepared.
 fn live_thread(actor: &Actor, agent: &AgentId) -> Option<ThreadId> {
     actor
@@ -119,5 +137,17 @@ pub(in crate::actor::turn) fn on_timer(actor: &mut Actor, id: u64) {
     };
     let wait = waits.remove(at);
     tracing::warn!(agent = %wait.agent, "the agents did not all stop in time for the login change");
+    // Which step each one stayed in (`agent.rs`'s owner), or its launch still being prepared.
+    for (thread, entry) in &actor.threads {
+        if entry.row.agent != wait.agent {
+            continue;
+        }
+        if let Some(agent) = entry.turn.agent.as_deref() {
+            let step = agent.link.owner_step();
+            tracing::warn!(%thread, ?step, "an agent still stopping for the login change");
+        } else if entry.turn.preparing.is_some() {
+            tracing::warn!(%thread, "a launch still prepared for the login change");
+        }
+    }
     let _gone = wait.reply.send(Ok(AgentsStopped::TimedOut));
 }

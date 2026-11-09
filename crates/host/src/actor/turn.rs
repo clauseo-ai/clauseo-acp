@@ -33,7 +33,7 @@ mod reconcile;
 mod restore;
 mod route;
 mod session;
-mod sign_in;
+pub(super) mod sign_in;
 mod state;
 mod steps;
 mod text;

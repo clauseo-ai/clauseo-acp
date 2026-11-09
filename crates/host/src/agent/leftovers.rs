@@ -11,6 +11,7 @@
 use std::path::PathBuf;
 use std::pin::pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use clauseo_process::{Cutoff, Descendants, Snapshot, Swept};
@@ -25,17 +26,31 @@ const THREAD_NAME: &str = "clauseo-sweep";
 /// should it be cancelled. A listing takes a few milliseconds.
 pub(crate) const SNAPSHOT_WAIT: Duration = Duration::from_secs(1);
 
+/// The listings started and not yet taken, in this process (the tests' dump of the stop path).
+static LISTING: AtomicUsize = AtomicUsize::new(0);
+
+/// How many listings run now, in this process.
+#[cfg(feature = "test-support")]
+pub(crate) fn listings_running() -> usize {
+    LISTING.load(Ordering::SeqCst)
+}
+
 /// The agent's descendants now, listed on a `clauseo-sweep` thread; `None` when the thread could
 /// not start or did not answer within [`SNAPSHOT_WAIT`] on `clock`.
 pub(crate) async fn snapshot(descendants: Descendants, clock: Arc<dyn Clock>) -> Option<Snapshot> {
     let (send, answer) = async_channel::bounded(1);
+    LISTING.fetch_add(1, Ordering::SeqCst);
     let started = std::thread::Builder::new()
         .name(THREAD_NAME.to_owned())
         .spawn(move || {
+            let snapshot = descendants.snapshot();
+            LISTING.fetch_sub(1, Ordering::SeqCst);
+            tracing::debug!("the agent's descendants are listed");
             // The prompt stopped waiting: nobody is left to take the listing.
-            drop(send.send_blocking(descendants.snapshot()));
+            drop(send.send_blocking(snapshot));
         });
     if let Err(error) = started {
+        LISTING.fetch_sub(1, Ordering::SeqCst);
         tracing::warn!(
             error = %crate::log_file::Cause(&error),
             "could not start {THREAD_NAME} for a listing"
