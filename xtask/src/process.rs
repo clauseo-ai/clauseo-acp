@@ -48,6 +48,9 @@ pub(crate) enum Program {
     Cargo,
     /// A program found on `PATH`.
     Named(&'static str),
+    /// A program at this path, which is not looked up on `PATH`: the Python of the runtime
+    /// `python-runtime build` assembles, or the one `python-runtime bump` is given.
+    Path(String),
     /// pnpm. On Windows it may be `pnpm.cmd` (npm and corepack install that), so it is resolved
     /// by `pnpm_file`.
     Pnpm,
@@ -89,10 +92,11 @@ const GIT_LOCAL_ENV: [&str; 16] = [
 
 impl Program {
     /// The name people see: `cargo`, the named program, or `pnpm`.
-    pub(crate) fn name(&self) -> &'static str {
-        match *self {
+    pub(crate) fn name(&self) -> &str {
+        match self {
             Program::Cargo => "cargo",
             Program::Named(name) => name,
+            Program::Path(path) => path,
             Program::Pnpm => "pnpm",
             Program::Git => "git",
         }
@@ -100,7 +104,7 @@ impl Program {
 
     /// The command for this program, without the variables `cargo run` set for xtask.
     fn command(&self) -> Command {
-        let mut command = match *self {
+        let mut command = match self {
             Program::Cargo => {
                 let mut cargo =
                     Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
@@ -110,6 +114,7 @@ impl Program {
                 cargo
             }
             Program::Named(name) => Command::new(name),
+            Program::Path(path) => Command::new(path),
             Program::Pnpm => Command::new(pnpm_file()),
             Program::Git => {
                 let mut git = Command::new("git");

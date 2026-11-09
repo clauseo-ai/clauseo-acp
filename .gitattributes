@@ -3,3 +3,5 @@
 *.cmd eol=crlf
 # Fuzz seeds are raw inputs: their bytes, line endings included, stay as they are.
 fuzz/seeds/** binary
+# The smoke test's PDF: its cross-reference table gives byte offsets, so its bytes stay as they are.
+python-runtime/smoke/*.pdf binary

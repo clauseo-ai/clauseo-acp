@@ -1,6 +1,7 @@
 //! Workspace automation: `cargo xtask check [--quick] [--skip-ui] [--no-tests]`,
 //! `cargo xtask setup [--binaries] [--only <tool>]... | --list`,
-//! `cargo xtask buildtime [rust|web|all|worktree] [--runs N] [--json]` and `cargo xtask mutants`.
+//! `cargo xtask buildtime [rust|web|all|worktree] [--runs N] [--json]`, `cargo xtask mutants` and
+//! `cargo xtask python-runtime {check,bump,build}`.
 //!
 //! For people and agents:
 //! - Add an external step: one `ToolStep` in `steps/plan.rs`, or `steps/policy.rs` for a
@@ -34,6 +35,9 @@
 //!   tests run it (`changes::built_for_tests`). A third, approved by Rohan 2026-11-04:
 //!   `check --no-tests`, which `.github/scripts/pre-push.sh` always passes so that a push runs
 //!   the format, lint, typecheck and build steps only, and CI never passes.
+//! - `python-runtime` checks, bumps and builds Clauseo's pinned Python runtime from
+//!   `python-runtime/lock.toml` (`python_runtime.rs` says how). It is not a check of
+//!   `cargo xtask check`: its offline lock check runs there as the xtask test `real_lock_passes`.
 //! - `mutants` runs cargo-mutants on the diff against origin/main and reads its `outcomes.json`
 //!   (`mutants/outcomes.rs`); exclusions live in `.cargo/mutants.toml`, each with its reason.
 
@@ -48,6 +52,7 @@ mod mutants;
 mod output;
 mod parse;
 mod process;
+mod python_runtime;
 #[cfg(test)]
 mod scratch;
 mod setup;
@@ -150,6 +155,11 @@ enum Commands {
     /// (settings in `.cargo/mutants.toml`). Each missed mutant fails as `path:line: what` and
     /// `fix:`. A run is capped at 20 minutes.
     Mutants,
+    /// Check, bump or build Clauseo's pinned Python runtime (python-runtime/lock.toml).
+    PythonRuntime {
+        #[command(subcommand)]
+        action: python_runtime::Action,
+    },
     /// The leader `process.rs` starts on Unix: stops the process groups it is told about when
     /// its stdin closes.
     #[cfg(unix)]
@@ -204,6 +214,9 @@ fn main() -> ExitCode {
             buildtime::run(&workspace::workspace_root(), part, runs, json)
         }
         Commands::Mutants => mutants::run(&workspace::workspace_root()),
+        Commands::PythonRuntime { action } => {
+            python_runtime::run(&workspace::workspace_root(), action)
+        }
         #[cfg(unix)]
         Commands::ProcessLeader => process::lead(),
         Commands::ProcessTest { output, script } => process::test_mode(output, &script),
