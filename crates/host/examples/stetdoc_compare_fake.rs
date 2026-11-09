@@ -35,7 +35,7 @@ fn main() -> ExitCode {
     done.unwrap_or(ExitCode::from(3))
 }
 
-/// The `compare` run: `compare --json --author A -o OUT OLD NEW`.
+/// The `compare` run: `compare --json --author=A -o OUT OLD NEW`.
 fn compare(dir: &Path, args: &[String]) -> Option<ExitCode> {
     std::fs::write(dir.join("args-compare.txt"), args.join("\n")).ok()?;
     if let Ok(code) = std::fs::read_to_string(dir.join("compare-exit.txt")) {

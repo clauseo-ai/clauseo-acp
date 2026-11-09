@@ -480,6 +480,25 @@ export type BillingProvider =
 /**  Anyone else. */
 "other";
 
+/**  One paragraph of a blackline. */
+export type BlacklineParagraph = {
+	/**  How the paragraph changed as a whole. */
+	change: ParagraphChange,
+	/**
+	 *  Its text as runs, in order; two runs next to each other never have the same kind, and
+	 *  no run is empty. An empty paragraph has none.
+	 */
+	runs: BlacklineRun[],
+};
+
+/**  A stretch of a paragraph's text with one kind. */
+export type BlacklineRun = {
+	/**  Kept, inserted or deleted. */
+	kind: RunKind,
+	/**  The text, as the document has it: a tab is `\t` and a line break `\n`. */
+	text: string,
+};
+
 /**
  *  A 32-byte BLAKE3 digest naming a blob. A human-readable format (JSON) writes its text form, 64
  *  lowercase hex characters, and every other format (`MessagePack`) its 32 bytes, so the stored
@@ -1735,6 +1754,12 @@ export type ErrorCode =
 "sandbox.cleaning_up" | 
 /** The agent's files all downloaded and checked, but setting them up on this computer failed after three tries (unpacking, `npm ci`, the move into place or its receipt), often because security software held the fresh files. Trying again may work. */
 "agent.install_setup_failed" | 
+/** The Word blackline needs stetdoc, Clauseo's Word tool, and this Clauseo has none, so nothing was compared. */
+"blackline.no_word_tool" | 
+/** The file is not a Word document (.docx), so it has no Word blackline. */
+"blackline.not_word" | 
+/** The Word blackline failed: the compare or its view failed, took too long, or printed what Clauseo could not read; nothing is shown and nothing was written in the matter. Trying again can succeed. */
+"blackline.failed" | 
 /** A code from a newer Clauseo that this version does not know. Never produced here. */
 "unknown";
 
@@ -2724,7 +2749,7 @@ export type HostQuery =
 ({ list_threads: {
 	/**  The matter. */
 	matter: MatterId,
-} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never } | 
+} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never; word_blackline?: never } | 
 /**
  *  Older entries of a stream's view, for scrolling back: up to `limit` entries with an
  *  `order` below `before_order`, newest last.
@@ -2736,7 +2761,7 @@ export type HostQuery =
 	before_order?: Seq,
 	/**  How many. */
 	limit: PageLimit,
-} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_threads?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never } | 
+} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_threads?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never; word_blackline?: never } | 
 /**
  *  The files that differ between two versions of a matter, or between a version and the
  *  matter's folder as it is now when `to` is `None` (nothing is stored).
@@ -2748,7 +2773,7 @@ export type HostQuery =
 	from: CheckpointId,
 	/**  The newer version; `None` (missing or `null` in JSON) is the folder now. */
 	to?: CheckpointId,
-} }) & { folder_support?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never } | 
+} }) & { folder_support?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never; word_blackline?: never } | 
 /**  What restoring a version would do now, file by file. Writes nothing. */
 ({ preview_restore: {
 	/**  The matter. */
@@ -2757,7 +2782,7 @@ export type HostQuery =
 	checkpoint: CheckpointId,
 	/**  The whole matter or chosen files, as `RestoreVersion` takes it. */
 	scope: RestoreRequest,
-} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_undo?: never; read_blob?: never; search?: never } | 
+} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_undo?: never; read_blob?: never; search?: never; word_blackline?: never } | 
 /**
  *  What undoing a turn's step would meet now: the step's files whose content in the folder
  *  differs from the step's after-turn checkpoint (edited since). Writes nothing and logs
@@ -2769,7 +2794,7 @@ export type HostQuery =
 	thread: ThreadId,
 	/**  The step's turn. */
 	turn: TurnId,
-} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never; read_blob?: never; search?: never } | 
+} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never; read_blob?: never; search?: never; word_blackline?: never } | 
 /**  Part of a blob's text. */
 ({ read_blob: {
 	/**  The blob. */
@@ -2778,14 +2803,14 @@ export type HostQuery =
 	offset: Count,
 	/**  How many bytes. */
 	len: ReadLen,
-} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; search?: never } | 
+} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; search?: never; word_blackline?: never } | 
 /**  The display settings in force, and the keys the firm's policy locks. */
 "get_settings" | 
 /**  The files of a matter's folder as it is now, for its file list (`QueryResult::Papers`). */
 ({ list_papers: {
 	/**  The matter. */
 	matter: MatterId,
-} }) & { compare_versions?: never; folder_support?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never } | 
+} }) & { compare_versions?: never; folder_support?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never; word_blackline?: never } | 
 /**  The agents in the settings, for a new thread's choice of agent. */
 "list_agents" | 
 /**
@@ -2800,7 +2825,7 @@ export type HostQuery =
  *  Search inside matters and conversations (decision 0043). Answered
  *  `QueryResult::Search`.
  */
-({ search: SearchRequest }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never } | 
+({ search: SearchRequest }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; word_blackline?: never } | 
 /**
  *  The Windows folder check of the place a `CreateMatter` with `source` would use, before
  *  the matter exists: the New matter dialog's warning. Send the same `source` the create
@@ -2816,7 +2841,7 @@ export type HostQuery =
 ({ folder_support: {
 	/**  Where the matter would be made, as `CreateMatter` names it. */
 	source: MatterSource,
-} }) & { compare_versions?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never } | 
+} }) & { compare_versions?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never; word_blackline?: never } | 
 /**
  *  Where the updater stands (decision record 0037), read after subscribing to the app
  *  stream as `GetSettings` is. Answered `QueryResult::Update`. JSON: `"get_update"`.
@@ -2841,7 +2866,26 @@ export type HostQuery =
  *  `SettingsView::locked` says so. Answered `QueryResult::AllowedSites`.
  *  JSON: `"allowed_sites"`.
  */
-"allowed_sites";
+"allowed_sites" | 
+/**
+ *  The Word blackline of one `.docx` between a version and another version, or the
+ *  matter's folder as it is now when `to` is `None`, as `CompareVersions` takes them. The
+ *  host runs stetdoc on copies outside the matter and writes nothing in it. Answered
+ *  `QueryResult::WordBlackline`; refused with `blackline.not_word` for a path that does
+ *  not end in `.docx`, `blackline.no_word_tool` when this Clauseo has no stetdoc, and
+ *  `blackline.failed` when stetdoc fails, takes too long or prints what the host can't
+ *  read. JSON: `{"word_blackline": {"matter": "...", "path": "...", "from": "..."}}`.
+ */
+({ word_blackline: {
+	/**  The matter. */
+	matter: MatterId,
+	/**  The document, relative to the matter folder. */
+	path: MatterPath,
+	/**  The older version. */
+	from: CheckpointId,
+	/**  The newer version; `None` (missing or `null` in JSON) is the folder now. */
+	to?: CheckpointId,
+} }) & { compare_versions?: never; folder_support?: never; list_papers?: never; list_threads?: never; page_entries?: never; preview_restore?: never; preview_undo?: never; read_blob?: never; search?: never };
 
 /**
  *  What the first checkpoint of a folder matter found. Counts are at most `u32::MAX`; `bytes`
@@ -3904,6 +3948,19 @@ export type PaperSummary = {
 	modified: Timestamp,
 };
 
+/**  How a paragraph changed between the two versions. */
+export type ParagraphChange = 
+/**  The same in both: every run is `same`. */
+"same" | 
+/**  In both, with text inserted or deleted. */
+"changed" | 
+/**  Only in the newer version: the whole paragraph was inserted. */
+"added" | 
+/**  Only in the older version: the whole paragraph was deleted. */
+"removed" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
+
 /**  Patches of one stream, sent together. The stream and the epoch come once per batch. */
 export type PatchBatch = {
 	/**  The stream. */
@@ -4437,23 +4494,23 @@ export type PythonProgress =
 /**  A query's answer. */
 export type QueryResult = 
 /**  For `ListMatters`. */
-({ matters: MatterSummary[] }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never } | 
+({ matters: MatterSummary[] }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `ListThreads`. */
-({ threads: ThreadSummary[] }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; undo_preview?: never; update?: never } | 
+({ threads: ThreadSummary[] }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `PageEntries`, newest last; fewer than `limit` means none older is left. */
-({ entries: ViewEntry[] }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never } | 
+({ entries: ViewEntry[] }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `CompareVersions`. */
-({ file_changes: FileChange[] }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never } | 
+({ file_changes: FileChange[] }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `PreviewRestore`. */
-({ restore_preview: RestorePreview }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never } | 
+({ restore_preview: RestorePreview }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `PreviewUndo`. */
-({ undo_preview: UndoPreview }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; update?: never } | 
+({ undo_preview: UndoPreview }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; update?: never; word_blackline?: never } | 
 /**  For `ReadBlob`. */
-({ blob: BlobRange }) & { agents?: never; allowed_sites?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never } | 
+({ blob: BlobRange }) & { agents?: never; allowed_sites?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `GetSettings`. */
-({ settings: SettingsView }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never } | 
+({ settings: SettingsView }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `GetUpdate`. */
-({ update: UpdateView }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never } | 
+({ update: UpdateView }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; word_blackline?: never } | 
 /**
  *  For `ListPapers`: the matter's folder as it is now, by the rules a checkpoint versions
  *  it by (the same excluded names, size cap and cloud-only files).
@@ -4478,27 +4535,29 @@ export type QueryResult =
 	 *  where `<folder>/` sorts).
 	 */
 	truncated: boolean,
-} }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never } | 
+} }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `ListAgents`: one per settings agent whose id is a valid [`AgentId`], sorted by id. */
-({ agents: AgentSummary[] }) & { allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never } | 
+({ agents: AgentSummary[] }) & { allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `GetDefaultLocation`. JSON: `{"default_location": {"display": "..."}}`. */
-({ default_location: DefaultLocation }) & { agents?: never; allowed_sites?: never; blob?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never } | 
+({ default_location: DefaultLocation }) & { agents?: never; allowed_sites?: never; blob?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**
  *  For `Search`: a page of hits, or `Cancelled` when a newer search from the same window
  *  came first.
  */
-({ search: SearchAnswer }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never } | 
+({ search: SearchAnswer }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**
  *  For `FolderSupport`. JSON: `{"folder_support": {"support": "network"}}`, or
  *  `{"folder_support": {}}` for a fine folder.
  */
-({ folder_support: PickedFolderSupport }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never } | 
+({ folder_support: PickedFolderSupport }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `ListSkillPacks`. */
-({ skill_packs: PackStatus[] }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; threads?: never; undo_preview?: never; update?: never } | 
+({ skill_packs: PackStatus[] }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `Protection`. */
-({ protection: ProtectionView }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never } | 
+({ protection: ProtectionView }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
 /**  For `AllowedSites`. */
-({ allowed_sites: AllowedSite[] }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never };
+({ allowed_sites: AllowedSite[] }) & { agents?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never; word_blackline?: never } | 
+/**  For `WordBlackline`. */
+({ word_blackline: WordBlackline }) & { agents?: never; allowed_sites?: never; blob?: never; default_location?: never; entries?: never; file_changes?: never; folder_support?: never; matters?: never; papers?: never; protection?: never; restore_preview?: never; search?: never; settings?: never; skill_packs?: never; threads?: never; undo_preview?: never; update?: never };
 
 /**
  *  Why a thread's queued turns wait, the most specific reason that applies. Set only while
@@ -4732,6 +4791,17 @@ export type RevealTarget =
 { matter: MatterId } | 
 /**  Clauseo's app data folder: the event store, the version store and the settings. */
 "app_data";
+
+/**  What a run of a blackline paragraph is. */
+export type RunKind = 
+/**  Text in both versions. */
+"same" | 
+/**  Text only in the newer version. */
+"ins" | 
+/**  Text only in the older version. */
+"del" | 
+/**  A value from a newer Clauseo that this version does not know. */
+"unknown";
 
 /**  A search's answer. */
 export type SearchAnswer = 
@@ -6682,6 +6752,21 @@ export type WindowKind =
 "model" | 
 /**  A window `limits` does not classify; its label says what it is. */
 "other";
+
+/**
+ *  A Word document's blackline, for `WordBlackline`: its body's paragraphs in document order,
+ *  each table cell a paragraph of its own. A struct, so later fields are additive; it accepts
+ *  fields it does not know.
+ */
+export type WordBlackline = {
+	/**  The paragraphs, first to last. */
+	paragraphs: BlacklineParagraph[],
+	/**
+	 *  Whether stetdoc said its view stops before the end of the document: `paragraphs` are
+	 *  then the first part of it only.
+	 */
+	truncated: boolean,
+};
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {
