@@ -141,28 +141,19 @@ fn every_string_is_there() {
         }
         assert_eq!(set.title, "Clauseo");
     }
-    // Each set has its action: the set with none has one string fewer, and no empty one.
+    // Missing has its action; TooOld has none, so one string fewer, and no empty one.
     assert_eq!(MISSING.all().len(), 6);
-    assert_eq!(TOO_OLD.all().len(), 6);
-    let only_close = Words {
-        action: None,
-        ..TOO_OLD
-    };
-    assert_eq!(only_close.all().len(), 5);
-    assert!(only_close.all().iter().all(|text| !text.trim().is_empty()));
+    assert_eq!(TOO_OLD.all().len(), 5);
 }
 
 #[test]
-fn the_action_button_downloads_for_both_verdicts() {
-    // Both buttons take the one id, which the one link opens (DOWNLOAD_URL).
+fn only_missing_offers_the_download() {
+    // Missing's button takes the id the link opens (DOWNLOAD_URL); TooOld shows only Close.
     assert_eq!(
         buttons(&MISSING),
         [(DOWNLOAD, "Download WebView2"), (CLOSE, "Close")]
     );
-    assert_eq!(
-        buttons(&TOO_OLD),
-        [(DOWNLOAD, "Update WebView2"), (CLOSE, "Close")]
-    );
+    assert_eq!(buttons(&TOO_OLD), [(CLOSE, "Close")]);
     assert_eq!(next::<()>(&Ok(DOWNLOAD)), Next::Download);
 }
 
@@ -238,7 +229,7 @@ fn the_message_box_says_the_main_line_then_the_body() {
     assert_eq!(
         message_box_text(words(Verdict::TooOld).unwrap()),
         "Clauseo needs a newer Microsoft Edge WebView2\n\n\
-         Windows updates it by itself. You can also update it now."
+         Windows updates it by itself."
     );
 }
 
