@@ -563,9 +563,15 @@ impl<F: Fs> Watch<F> {
     }
 
     /// What the final scan would set aside, moving nothing: for a session a process of which
-    /// outlived its kill.
+    /// outlived its kill. Lists at most [`SCAN_BUDGET`] entries: the agent may still run.
     pub(crate) fn finds(&self) -> Vec<PathBuf> {
-        let found = self.scan(&self.matter, Phase::Ended);
+        let mut found = Found::default();
+        if !self.scan_within(&self.matter, &Cell::new(SCAN_BUDGET), false, &mut found) {
+            tracing::warn!(
+                budget = SCAN_BUDGET,
+                "the list of what a session that outlived its kill left stopped at its budget"
+            );
+        }
         let here = |path: &PathBuf| self.fs.meta(path).is_some();
         found
             .items

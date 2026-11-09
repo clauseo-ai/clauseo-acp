@@ -9,7 +9,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use super::super::aside::Aside;
-use super::super::run::{BUDGET, Busy, Flow, Mode, Msg, Runner, Session, start_with};
+use super::super::check::SCAN_BUDGET;
+use super::super::run::{
+    BUDGET, Busy, End, Flow, KILL_CAP, Mode, Msg, Runner, Session, start_with,
+};
 use super::super::{Launch, Watch, flags};
 use super::fake::{
     FakeFs, FakeSession, MOVED_IN, MemStore, Notices, SET_ASIDE, assert_moved, event, watch,
@@ -70,7 +73,10 @@ fn a_find_kills_before_the_batchs_rescan_lists_anything() {
         event("/m", flags::MUST_SCAN_SUB_DIRS),
         event("/m/foo", MOVED_IN),
     ];
-    assert_eq!(runner.input(Some(Msg::Events(batch)), ms(100)), Flow::Done);
+    assert_eq!(
+        runner.input(Some(Msg::Events(batch, ms(100))), ms(100)),
+        Flow::Done
+    );
     let at_kill = session.at_kill.lock().unwrap().unwrap();
     // The find's own check lists its parent and the folder moved in; a full scan lists 52+.
     assert!(
@@ -93,10 +99,10 @@ fn nothing_more_is_checked_while_the_session_is_ending() {
     let session = FakeSession::default();
     let _ = runner.input(Some(Msg::Attach(Arc::new(session.clone()))), Duration::ZERO);
     fs.repo("/m/.git");
-    let found = Msg::Events(vec![event("/m/.git", MOVED_IN)]);
+    let found = Msg::Events(vec![event("/m/.git", MOVED_IN)], Duration::ZERO);
     assert_eq!(runner.input(Some(found), ms(100)), Flow::Go);
     let lists = fs.listings();
-    let rescan = Msg::Events(vec![event("/m", flags::MUST_SCAN_SUB_DIRS)]);
+    let rescan = Msg::Events(vec![event("/m", flags::MUST_SCAN_SUB_DIRS)], Duration::ZERO);
     assert_eq!(runner.input(Some(rescan), ms(200)), Flow::Go);
     assert_eq!(runner.input(None, Duration::from_secs(31)), Flow::Done);
     assert_eq!(fs.listings(), lists, "no rescan or 30 s pass while it ends");
@@ -131,7 +137,6 @@ fn the_watchdog_ends_a_session_whose_check_runs_past_its_budget() {
     clock.0.store(1_999 + 2_000, Ordering::SeqCst);
     assert!(busy.look(BUDGET));
     assert_eq!(session.ends.load(Ordering::SeqCst), 1);
-    assert!(!busy.look(BUDGET), "once");
     assert!(busy.stop(), "the runner finds it ended");
     // A session attached after the watchdog gave up is ended at once.
     let late = FakeSession::default();
@@ -158,7 +163,7 @@ fn a_runner_whose_check_overran_ends_the_session_and_tells_the_lawyer() {
     assert!(busy.look(BUDGET));
     assert_eq!(runner.input(None, ms(100)), Flow::Done);
     assert_eq!(notices.taken(), [Denial::GitWatchLost]);
-    assert_eq!(runner.finish().stuck().len(), 0);
+    assert_eq!(runner.finish(&|| {}).stuck().len(), 0);
     assert!(!fs.exists("/m/.git"), "the final scan ran");
 }
 
@@ -172,7 +177,8 @@ fn a_listing_that_blocks_is_ended_by_the_hosts_watchdog() {
         Ok(())
     };
     let store = MemStore::default();
-    let watching = start_with(watch, "w".to_owned(), store, None, Mode::Live, source).unwrap();
+    let watching =
+        start_with(watch, "w".to_owned(), store, None, None, Mode::Live, source).unwrap();
     let session = FakeSession {
         dies: true,
         ..FakeSession::default()
@@ -183,7 +189,7 @@ fn a_listing_that_blocks_is_ended_by_the_hosts_watchdog() {
     fs.dir("/m/slow");
     let open = fs.block_listing("/m/slow");
     events
-        .send(Msg::Events(vec![event("/m/slow", MOVED_IN)]))
+        .send(Msg::queued(vec![event("/m/slow", MOVED_IN)]))
         .unwrap();
     let clock = SystemClock::new();
     within("the watchdog's kill", || {
@@ -226,6 +232,7 @@ fn a_folder_watched_after_only_starts_no_stream_and_sets_aside_at_the_end() {
         "a".to_owned(),
         store,
         canary,
+        None,
         Mode::AfterOnly,
         source,
     );
@@ -289,6 +296,7 @@ fn a_find_in_the_notes_folder_ends_the_session_and_is_set_aside() {
         "m".to_owned(),
         matter_store,
         None,
+        None,
         Mode::Live,
         source(&senders),
     );
@@ -296,6 +304,7 @@ fn a_find_in_the_notes_folder_ends_the_session_and_is_set_aside() {
         notes,
         "n".to_owned(),
         notes_store,
+        None,
         None,
         Mode::Live,
         source(&senders),
@@ -318,7 +327,7 @@ fn a_find_in_the_notes_folder_ends_the_session_and_is_set_aside() {
     fs.repo("/notes/foo/.git");
     streams[1]
         .1
-        .send(Msg::Events(vec![event("/notes/foo", MOVED_IN)]))
+        .send(Msg::queued(vec![event("/notes/foo", MOVED_IN)]))
         .unwrap();
     within("the session's end", || {
         session.ends.load(Ordering::SeqCst) > 0
@@ -327,4 +336,173 @@ fn a_find_in_the_notes_folder_ends_the_session_and_is_set_aside() {
     within("its notice", || notes_notices.count() > 0);
     assert_moved(&notes_notices, "foo/.git");
     assert_eq!(matter_notices.count(), 0, "nothing in the matter");
+}
+
+#[test]
+fn a_batchs_names_are_checked_before_any_of_its_scans() {
+    let fs = FakeFs::new();
+    let (watch, _notices) = watch(&fs, &[]);
+    let mut runner = Runner::new(watch, Mode::Live, Duration::ZERO);
+    let session = Arc::new(Counting {
+        fs: fs.clone(),
+        at_kill: Mutex::new(None),
+    });
+    let attach = Msg::Attach(Arc::clone(&session) as Arc<dyn Session>);
+    let _ = runner.input(Some(attach), Duration::ZERO);
+    // A folder moved in first, whose scan lists it and all below it; a repository after it.
+    fs.dir("/m/big");
+    for n in 0..20 {
+        fs.dir(&format!("/m/big/d{n}"));
+    }
+    fs.repo("/m/.git");
+    let before = fs.listings();
+    let batch = vec![event("/m/big", MOVED_IN), event("/m/.git", MOVED_IN)];
+    let _ = runner.input(Some(Msg::Events(batch, ms(100))), ms(100));
+    let at_kill = session.at_kill.lock().unwrap().unwrap();
+    assert_eq!(
+        at_kill, before,
+        "the name ended the session before any listing"
+    );
+}
+
+/// A runner of `/m` whose session outlived its kill, a repository in the matter.
+fn lingering(fs: &FakeFs) -> Runner<FakeFs> {
+    let (watch, _notices) = watch(fs, &[]);
+    let mut runner = Runner::new(watch, Mode::Live, Duration::ZERO);
+    let session = FakeSession::default();
+    let _ = runner.input(Some(Msg::Attach(Arc::new(session))), Duration::ZERO);
+    fs.repo("/m/.git");
+    let found = Msg::Events(vec![event("/m/.git", MOVED_IN)], ms(100));
+    assert_eq!(runner.input(Some(found), ms(100)), Flow::Go);
+    assert_eq!(runner.input(None, KILL_CAP + ms(100)), Flow::Done);
+    assert!(runner.lingering());
+    runner
+}
+
+#[test]
+fn a_session_that_outlives_its_kill_is_marked_before_anything_is_listed() {
+    let fs = FakeFs::new();
+    let runner = lingering(&fs);
+    let open = fs.block_listing("/m");
+    let marked = Arc::new(AtomicBool::new(false));
+    let mark = Arc::clone(&marked);
+    let finish = std::thread::spawn(move || runner.finish(&|| mark.store(true, Ordering::SeqCst)));
+    within("the mark", || marked.load(Ordering::SeqCst));
+    assert!(
+        !open.load(Ordering::SeqCst),
+        "while the listing still hangs"
+    );
+    open.store(true, Ordering::SeqCst);
+    let End::Outlived(finds) = finish.join().unwrap() else {
+        panic!("the final scan moved with a process left");
+    };
+    assert_eq!(finds, [PathBuf::from("/m/.git")]);
+    assert!(fs.exists("/m/.git"), "nothing moved");
+}
+
+#[test]
+fn the_finds_of_a_session_that_outlives_its_kill_are_listed_within_the_budget() {
+    let fs = FakeFs::new();
+    let runner = lingering(&fs);
+    for dir in ["a", "b", "c"] {
+        fs.dir(&format!("/m/{dir}"));
+        for n in 0..=SCAN_BUDGET / 2 {
+            fs.file(&format!("/m/{dir}/f{n}"));
+        }
+    }
+    let before = fs.listings();
+    let End::Outlived(_) = runner.finish(&|| {}) else {
+        panic!("the final scan moved with a process left");
+    };
+    let listed = fs.listings() - before;
+    // The matter's own and two of the three folders: the third is past the budget.
+    assert!(listed <= 3, "{listed} folders listed");
+}
+
+#[test]
+fn the_watchdog_kills_again_while_the_check_is_stuck_and_marks_it_past_the_cap() {
+    let clock = Arc::new(Manual::default());
+    let busy = Busy::new(Arc::clone(&clock) as Arc<dyn Clock>);
+    let marks = Arc::new(AtomicU64::new(0));
+    let counted = Arc::clone(&marks);
+    busy.on_stuck(move || {
+        counted.fetch_add(1, Ordering::SeqCst);
+    });
+    let session = FakeSession::default();
+    busy.attach(&(Arc::new(session.clone()) as Arc<dyn Session>));
+    busy.start();
+    clock.0.store(2_000, Ordering::SeqCst);
+    assert!(busy.look(BUDGET));
+    assert_eq!(session.ends.load(Ordering::SeqCst), 1);
+    for n in 2..5 {
+        clock.0.fetch_add(100, Ordering::SeqCst);
+        assert!(busy.look(BUDGET));
+        assert_eq!(
+            session.ends.load(Ordering::SeqCst),
+            n,
+            "the kill went again"
+        );
+    }
+    let cap = u64::try_from(KILL_CAP.as_millis()).unwrap();
+    clock.0.store(2_000 + cap - 1, Ordering::SeqCst);
+    busy.look(BUDGET);
+    assert_eq!(marks.load(Ordering::SeqCst), 0, "within the cap");
+    clock.0.store(2_000 + cap, Ordering::SeqCst);
+    busy.look(BUDGET);
+    assert_eq!(
+        marks.load(Ordering::SeqCst),
+        1,
+        "marked outlived past the cap"
+    );
+    clock.0.fetch_add(500, Ordering::SeqCst);
+    busy.look(BUDGET);
+    assert_eq!(marks.load(Ordering::SeqCst), 1, "once");
+}
+
+#[test]
+fn a_check_that_beats_is_judged_by_its_progress_not_its_length() {
+    let clock = Arc::new(Manual::default());
+    let busy = Busy::new(Arc::clone(&clock) as Arc<dyn Clock>);
+    let session = FakeSession::default();
+    busy.attach(&(Arc::new(session.clone()) as Arc<dyn Session>));
+    busy.start();
+    for _ in 0..5 {
+        clock.0.fetch_add(1_500, Ordering::SeqCst);
+        assert!(!busy.look(BUDGET), "a folder listed every 1.5 s");
+        assert!(busy.beat());
+    }
+    clock.0.fetch_add(2_000, Ordering::SeqCst);
+    assert!(busy.look(BUDGET), "no progress for the budget");
+    assert_eq!(session.ends.load(Ordering::SeqCst), 1);
+    // A beat between checks starts none.
+    let idle = Busy::new(Arc::clone(&clock) as Arc<dyn Clock>);
+    assert!(!idle.beat());
+    clock.0.fetch_add(5_000, Ordering::SeqCst);
+    assert!(!idle.look(BUDGET));
+}
+
+#[test]
+fn an_agent_that_did_not_start_but_left_a_process_moves_nothing() {
+    for left in [true, false] {
+        let fs = FakeFs::new();
+        let (watch, notices) = watch(&fs, &[]);
+        let probe = FakeSession::default();
+        probe.gone.store(!left, Ordering::SeqCst);
+        let mut runner = Runner::new(watch, Mode::Live, Duration::ZERO)
+            .with_probe(Some(Arc::new(probe.clone())));
+        fs.repo("/m/.git");
+        assert_eq!(runner.input(Some(Msg::Abandon), ms(100)), Flow::Done);
+        let marked = AtomicBool::new(false);
+        let end = runner.finish(&|| marked.store(true, Ordering::SeqCst));
+        if left {
+            assert!(matches!(end, End::Outlived(_)), "a process is left");
+            assert!(marked.load(Ordering::SeqCst), "its record is marked");
+            assert!(fs.exists("/m/.git"), "nothing moved");
+            assert_eq!(probe.ends.load(Ordering::SeqCst), 1, "and it was killed");
+        } else {
+            assert_eq!(end.stuck().len(), 0);
+            assert!(!marked.load(Ordering::SeqCst));
+            assert_moved(&notices, ".git");
+        }
+    }
 }

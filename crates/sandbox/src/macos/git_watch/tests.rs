@@ -166,7 +166,7 @@ fn incomplete_events_and_paths_outside_the_matter_rescan_it() {
         fs.dir("/m/deep");
         fs.dir("/m/deep/er");
         fs.repo("/m/deep/er/.git");
-        let msg = Msg::Events(vec![event(path, flag)]);
+        let msg = Msg::Events(vec![event(path, flag)], Duration::ZERO);
         assert_eq!(
             runner.input(Some(msg), Duration::ZERO),
             Flow::Done,
@@ -174,7 +174,7 @@ fn incomplete_events_and_paths_outside_the_matter_rescan_it() {
         );
         assert_eq!(session.ends.load(Ordering::SeqCst), 1, "{flag:#x}");
         assert!(fs.exists("/m/deep/er/.git"), "nothing moves before the end");
-        assert_eq!(runner.finish().stuck().len(), 0);
+        assert_eq!(runner.finish(&|| {}).stuck().len(), 0);
         assert!(!fs.exists("/m/deep/er/.git"), "{flag:#x}");
         assert_moved(&notices, "deep/er/.git");
     }
@@ -191,6 +191,7 @@ fn without_a_stream_the_launch_is_refused_and_nothing_runs() {
         watch,
         "s".to_owned(),
         store.clone(),
+        None,
         None,
         Mode::Live,
         failing,
@@ -241,7 +242,7 @@ fn a_find_ends_the_session_before_anything_moves() {
     let _ = runner.input(Some(Msg::Attach(Arc::new(session.clone()))), t);
     fs.dir("/m/foo");
     fs.repo("/m/foo/.git");
-    let msg = Msg::Events(vec![event("/m/foo", MOVED_IN)]);
+    let msg = Msg::Events(vec![event("/m/foo", MOVED_IN)], Duration::ZERO);
     assert_eq!(runner.input(Some(msg), t * 2), Flow::Go);
     assert_eq!(session.ends.load(Ordering::SeqCst), 1, "killed at once");
     assert!(
@@ -251,7 +252,7 @@ fn a_find_ends_the_session_before_anything_moves() {
     none(&notices);
     session.gone.store(true, Ordering::SeqCst);
     assert_eq!(runner.input(None, t * 3), Flow::Done);
-    assert_eq!(runner.finish().stuck().len(), 0);
+    assert_eq!(runner.finish(&|| {}).stuck().len(), 0);
     assert!(!fs.exists("/m/foo/.git"));
     let notices = notices.taken();
     let [
@@ -273,7 +274,7 @@ fn a_kill_is_sent_again_until_the_session_goes_and_capped() {
     let mut runner = Runner::new(watch, Mode::Live, Duration::ZERO);
     fs.repo("/m/.git");
     // The find comes before the agent is attached: the kill goes once it is.
-    let msg = Msg::Events(vec![event("/m/.git", MOVED_IN)]);
+    let msg = Msg::Events(vec![event("/m/.git", MOVED_IN)], Duration::ZERO);
     assert_eq!(runner.input(Some(msg), Duration::ZERO), Flow::Go);
     let session = FakeSession::default();
     let attach = Msg::Attach(Arc::new(session.clone()));
@@ -299,7 +300,7 @@ fn the_final_scan_catches_what_the_events_missed() {
     session.gone.store(true, Ordering::SeqCst);
     assert_eq!(runner.input(None, Duration::from_millis(200)), Flow::Done);
     assert!(fs.exists("/m/a/.git"));
-    runner.finish().stuck();
+    runner.finish(&|| {}).stuck();
     assert!(!fs.exists("/m/a/.git"));
     assert_moved(&notices, "a/.git");
 }
@@ -326,6 +327,7 @@ fn a_watch_thread_that_panics_ends_the_session() {
         "p".to_owned(),
         MemStore::default(),
         None,
+        None,
         Mode::Live,
         source,
     )
@@ -336,7 +338,7 @@ fn a_watch_thread_that_panics_ends_the_session() {
     fs.dir("/m/boom");
     fs.panic_on("/m/boom");
     events
-        .send(Msg::Events(vec![event("/m/boom", MOVED_IN)]))
+        .send(Msg::queued(vec![event("/m/boom", MOVED_IN)]))
         .unwrap();
     let clock = crate::SystemClock::new();
     while session.ends.load(Ordering::SeqCst) == 0 {

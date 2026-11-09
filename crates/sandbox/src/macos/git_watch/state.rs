@@ -345,6 +345,7 @@ fn add_stuck(state: &mut MatterState, stuck: Vec<Stuck>) {
 }
 
 /// The matter's state file in the data dir's git set-aside folder.
+#[derive(Clone)]
 pub(crate) struct FileStore {
     file: PathBuf,
     lock: PathBuf,

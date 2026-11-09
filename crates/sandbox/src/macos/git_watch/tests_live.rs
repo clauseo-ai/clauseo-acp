@@ -90,8 +90,16 @@ impl Live {
         );
         let watch = Watch::new(os::Real, live.matter.clone(), aside, &Launch::default());
         let store = FileStore::new(&live.set_aside, &live.matter);
-        let watching =
-            start_with(watch, session, store, None, Mode::Live, fsevents::start).unwrap();
+        let watching = start_with(
+            watch,
+            session,
+            store,
+            None,
+            None,
+            Mode::Live,
+            fsevents::start,
+        )
+        .unwrap();
         watching.attach(Running(Arc::clone(&live.gone)));
         live
     }
@@ -334,7 +342,7 @@ fn the_canarys_write_reaches_the_stream() {
     loop {
         let left = Duration::from_secs(2).saturating_sub(clock.now());
         match rx.recv_timeout(left) {
-            Ok(Msg::Events(events)) if events.iter().any(|e| e.path == canary) => break,
+            Ok(Msg::Events(events, _)) if events.iter().any(|e| e.path == canary) => break,
             Ok(_) => {}
             Err(error) => panic!("no event for the canary within 2 s: {error}"),
         }

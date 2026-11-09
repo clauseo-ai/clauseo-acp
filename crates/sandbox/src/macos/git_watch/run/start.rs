@@ -10,9 +10,9 @@ use super::super::host::{self, LIVE};
 use super::super::state::{self, FileStore, SessionRecord, Store};
 use super::super::{Fs, Launch, Watch, fsevents, os};
 use super::watchdog::{self, Busy};
-use super::{CANARY, CANARY_NOTES, End, Flow, Mode, Msg, Runner, Session, TICK};
+use super::{CANARY, CANARY_NOTES, End, Flow, Mode, Msg, Runner, Session, TICK, queue_clock};
 use crate::macos::jail_procs::{self, Probe};
-use crate::{Clock, DenialSink, MatterWatch, Policy, SystemClock};
+use crate::{Clock, DenialSink, MatterWatch, Policy};
 
 /// A session's watches, started before its agent. [`Watching::attach`] hands them the agent
 /// once it runs; dropped without that, they say the agent did not start, and each scans once
@@ -191,12 +191,15 @@ fn start_root(
         finds: Vec::new(),
         mode,
     };
+    // What an agent that did not start may have left: its probe's processes, by name.
+    let left: Arc<dyn Session> = Arc::new(Left(probe.clone().since(launched)));
     let started = state::record(&store, record).and_then(|()| {
         start_with(
             watch,
             session.clone(),
             store,
             Some(canary),
+            Some(left),
             mode,
             fsevents::start,
         )
@@ -205,6 +208,19 @@ fn start_root(
         LIVE.remove(&session);
     }
     started
+}
+
+/// A launch's probe as a session: every process carrying it.
+struct Left(Probe);
+
+impl Session for Left {
+    fn gone(&self) -> bool {
+        self.0.gone()
+    }
+
+    fn end(&self) {
+        self.0.kill_all();
+    }
 }
 
 /// Ends the session if the thread dies (fail-closed), and takes it off the host's register
@@ -229,19 +245,21 @@ impl Drop for Guard {
 /// [`start`] for one folder with the watch made and the stream's source given: the tests pass
 /// a fake one and a store in memory. The source watches the folder, and the canary's folder
 /// when it is outside it; [`Mode::AfterOnly`] never calls it. When the source fails, the
-/// launch is refused and the session's record, if `store` has one, removed.
+/// launch is refused and the session's record, if `store` has one, removed. `probe` is the
+/// launch's probe, for an agent that does not start.
 pub(crate) fn start_with<F, S, T>(
     watch: Watch<F>,
     session: String,
     store: T,
     canary: Option<PathBuf>,
+    probe: Option<Arc<dyn Session>>,
     mode: Mode,
     source: impl FnOnce(&[PathBuf], Sender<Msg>) -> Result<S, String>,
 ) -> std::io::Result<Watching>
 where
     F: Fs + 'static,
     S: Send + 'static,
-    T: Store,
+    T: Store + Clone + Sync,
 {
     let (tx, rx) = mpsc::channel();
     let matter = watch.matter().to_owned();
@@ -253,13 +271,16 @@ where
             .filter(|folder| !folder.starts_with(&matter))
             .map(Path::to_owned),
     );
-    let clock = SystemClock::new();
+    let clock = queue_clock();
     let now = clock.now();
-    let mut runner = Runner::new(watch, mode, now);
+    let mut runner = Runner::new(watch, mode, now).with_probe(probe);
     if let Some(canary) = canary {
         runner = runner.with_canary(canary, now);
     }
     let busy = Arc::clone(runner.busy());
+    // At W3's merge: `runner.watch.on_progress(...)` calling `busy.beat()` per folder listed.
+    let (marks, marked) = (store.clone(), session.clone());
+    busy.on_stuck(move || state::outlived(&marks, &marked, &[]));
     let refuse = |error: std::io::Error| {
         state::end(&store, &session, Vec::new());
         Err(error)
@@ -295,9 +316,9 @@ where
                 busy: guard_busy,
                 session: session.clone(),
             };
-            drive(&mut runner, &rx, &clock);
+            drive(&mut runner, &rx, clock);
             drop(stream);
-            match runner.finish() {
+            match runner.finish(&|| state::outlived(&store, &session, &[])) {
                 End::Scanned(stuck) => state::end(&store, &session, stuck),
                 End::Outlived(finds) => state::outlived(&store, &session, &finds),
             }

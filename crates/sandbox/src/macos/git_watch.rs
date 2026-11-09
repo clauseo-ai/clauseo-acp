@@ -27,7 +27,8 @@
 //! - A canary checks the stream (`run.rs`): every 10 s a file in the set-aside folder, on the
 //!   matter's volume and out of the agent's reach, is rewritten; when its event doesn't come
 //!   within 2 s, or it can't be written, the stream is lost: the session ends as for a find,
-//!   and the lawyer gets [`Denial::GitWatchLost`](crate::Denial).
+//!   and the lawyer gets [`Denial::GitWatchLost`](crate::Denial). A batch read 2 s or more
+//!   after the stream queued it ends the session the same way: the watch lags.
 //! - Every 30 s a pass lists the folders whose modification or status-change time changed
 //!   since the last pass (`check/sweep.rs`), at most 250 ms of work at a time, going on where
 //!   it stopped. What it finds ends the session as an event's find does.
@@ -39,8 +40,9 @@
 //!   (`jail_procs.rs`), which finds a `setsid` child re-parented to launchd. The kill goes
 //!   before any rescan or 30 s pass. Only once none is left does it scan the matter and set
 //!   aside, so nothing races the moves; when one outlives the kill's 10 s, nothing moves.
-//! - A watchdog thread (`run/watchdog.rs`) ends the session when one check runs past 2 s,
-//!   such as a listing on a disk that stopped answering.
+//! - A watchdog thread (`run/watchdog.rs`) ends the session when one check goes 2 s without
+//!   progress, such as a listing on a disk that stopped answering, and kills again until it
+//!   returns; held 10 s past that, it marks the session's record outlived.
 //! - Setting aside is one `rename(2)`, never replacing, into
 //!   `<set-aside>/<UTC time>-<session>-<random>/item` beside a `record.json` (`aside.rs`),
 //!   with the item's own `HEAD` and `config` renamed. The folder is the data dir's, or a

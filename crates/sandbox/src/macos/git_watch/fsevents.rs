@@ -2,7 +2,8 @@
 //! run on a serial dispatch queue of its own, with file events
 //! (`kFSEventStreamCreateFlagFileEvents`), no defer, the roots watched and a 0.1 s latency: the
 //! matter, and the canary's folder when that is outside it (`run.rs`). Each
-//! callback's batch goes down the session's channel as [`Msg::Events`]. The workspace has no
+//! callback's batch goes down the session's channel as [`Msg::Events`], stamped as it is
+//! queued ([`Msg::queued`]), so the runner sees how far behind it reads. The workspace has no
 //! `FSEvents` crate; this is the one place the watch calls into `CoreServices`.
 
 #![expect(
@@ -150,7 +151,7 @@ extern "C" fn callback(
     }
     // SAFETY: the stream holds a count of the `Arc<Info>` behind `info` while it can call back.
     let tx = unsafe { &*info.cast::<Info>().cast_const() };
-    if tx.send(Msg::Events(events)).is_err() {
+    if tx.send(Msg::queued(events)).is_err() {
         // The session's thread is gone; its drop of the stream follows.
     }
 }

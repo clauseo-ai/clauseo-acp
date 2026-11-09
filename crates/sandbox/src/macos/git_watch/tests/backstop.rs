@@ -36,8 +36,9 @@ fn runner(fs: &FakeFs) -> (Runner<FakeFs>, FakeSession, Arc<Notices>) {
     (runner, session, notices)
 }
 
-fn echo() -> Msg {
-    Msg::Events(vec![event(CANARY, 0x1000)])
+/// The canary's event, queued `at`.
+fn echo(at: Duration) -> Msg {
+    Msg::Events(vec![event(CANARY, 0x1000)], at)
 }
 
 fn ends(session: &FakeSession) -> u32 {
@@ -60,7 +61,7 @@ fn a_canary_miss_ends_the_run_kill_first_then_the_final_scan() {
     assert_eq!(ends(&session), 1, "the session was killed");
     assert!(fs.exists("/m/.git"), "nothing moved before the kill");
     assert_eq!(notices.taken(), [Denial::GitWatchLost]);
-    assert_eq!(runner.finish().stuck().len(), 0);
+    assert_eq!(runner.finish(&|| {}).stuck().len(), 0);
     assert!(!fs.exists("/m/.git"), "the final scan set it aside");
     let after = notices.taken();
     assert!(
@@ -73,9 +74,12 @@ fn a_canary_miss_ends_the_run_kill_first_then_the_final_scan() {
 fn the_canarys_event_keeps_the_stream_trusted() {
     let fs = FakeFs::new();
     let (mut runner, session, notices) = runner(&fs);
-    assert_eq!(runner.input(Some(echo()), ms(100)), Flow::Go);
+    assert_eq!(runner.input(Some(echo(ms(100))), ms(100)), Flow::Go);
     // Other events in the set-aside folder are not the matter's: no rescan.
-    let other = Msg::Events(vec![event(&format!("{SET_ASIDE}/x/item"), 0x800)]);
+    let other = Msg::Events(
+        vec![event(&format!("{SET_ASIDE}/x/item"), 0x800)],
+        Duration::ZERO,
+    );
     fs.repo("/m/.git");
     assert_eq!(runner.input(Some(other), ms(200)), Flow::Go);
     assert_eq!(runner.input(None, CANARY_WAIT * 2), Flow::Go);
@@ -83,7 +87,10 @@ fn the_canarys_event_keeps_the_stream_trusted() {
     // Each write's event comes: the run goes on.
     assert_eq!(runner.input(None, CANARY_EVERY), Flow::Go);
     assert_eq!(fs.touched().len(), 2);
-    assert_eq!(runner.input(Some(echo()), CANARY_EVERY + ms(100)), Flow::Go);
+    assert_eq!(
+        runner.input(Some(echo(CANARY_EVERY + ms(100))), CANARY_EVERY + ms(100)),
+        Flow::Go
+    );
     assert_eq!(runner.input(None, CANARY_EVERY + CANARY_WAIT * 2), Flow::Go);
     assert!(!runner.lost());
     assert_eq!(ends(&session), 0);
@@ -99,13 +106,13 @@ fn a_must_scan_or_dropped_flag_rescans_at_once_and_carries_on() {
     ] {
         let fs = FakeFs::new();
         let (mut runner, session, _notices) = runner(&fs);
-        let rescan = Msg::Events(vec![event("/m", flag)]);
+        let rescan = Msg::Events(vec![event("/m", flag)], Duration::ZERO);
         assert_eq!(runner.input(Some(rescan), ms(100)), Flow::Go, "{flag:#x}");
         assert_eq!(ends(&session), 0, "nothing found: the run goes on");
         // The next one finds what arrived without an event of its own.
         fs.dir("/m/deep");
         fs.repo("/m/deep/.git");
-        let rescan = Msg::Events(vec![event("/m", flag)]);
+        let rescan = Msg::Events(vec![event("/m", flag)], Duration::ZERO);
         assert_eq!(runner.input(Some(rescan), ms(200)), Flow::Done, "{flag:#x}");
         assert_eq!(ends(&session), 1);
     }
@@ -120,7 +127,7 @@ fn the_thirty_second_pass_finds_what_the_events_missed() {
     // Each canary write's event comes; the matter's events never do.
     let mut at = Duration::ZERO;
     while at < SWEEP_EVERY {
-        assert_eq!(runner.input(Some(echo()), at), Flow::Go);
+        assert_eq!(runner.input(Some(echo(at)), at), Flow::Go);
         at += ms(500);
         if at == ms(1_000) {
             fs.dir("/m/a/b/new");
@@ -128,9 +135,12 @@ fn the_thirty_second_pass_finds_what_the_events_missed() {
         }
     }
     assert_eq!(ends(&session), 0, "nothing before the pass");
-    assert_eq!(runner.input(Some(echo()), SWEEP_EVERY), Flow::Done);
+    assert_eq!(
+        runner.input(Some(echo(SWEEP_EVERY)), SWEEP_EVERY),
+        Flow::Done
+    );
     assert_eq!(ends(&session), 1);
-    runner.finish().stuck();
+    runner.finish(&|| {}).stuck();
     assert!(!fs.exists("/m/a/b/new/HEAD"));
 }
 
@@ -203,7 +213,7 @@ fn a_kill_that_runs_out_moves_nothing_and_lists_the_finds() {
     let session = FakeSession::default();
     let _ = runner.input(Some(Msg::Attach(Arc::new(session))), Duration::ZERO);
     fs.repo("/m/.git");
-    let found = Msg::Events(vec![event("/m/.git", 0x100)]);
+    let found = Msg::Events(vec![event("/m/.git", 0x100)], Duration::ZERO);
     assert_eq!(runner.input(Some(found), ms(100)), Flow::Go);
     assert!(!runner.lingering());
     assert_eq!(runner.input(None, Duration::from_secs(11)), Flow::Done);
@@ -211,7 +221,7 @@ fn a_kill_that_runs_out_moves_nothing_and_lists_the_finds() {
         runner.lingering(),
         "its record stays for the next start or launch"
     );
-    let End::Outlived(finds) = runner.finish() else {
+    let End::Outlived(finds) = runner.finish(&|| {}) else {
         panic!("the final scan moved with a process left");
     };
     assert_eq!(finds, [PathBuf::from("/m/.git")]);
@@ -235,6 +245,7 @@ fn the_stream_watches_the_canarys_folder_too() {
         "c".to_owned(),
         MemStore::default(),
         Some(PathBuf::from(CANARY)),
+        None,
         Mode::Live,
         source,
     )
@@ -280,14 +291,55 @@ fn the_hosts_quit_gives_up_on_a_watch_after_its_time() {
 }
 
 #[test]
-fn a_canary_event_queued_behind_others_is_read_before_lateness_is_judged() {
+fn an_agent_that_writes_nonstop_cannot_hold_the_canary_back() {
     let fs = FakeFs::new();
     let (mut runner, session, notices) = runner(&fs);
-    // The thread was held up past the wait: other events come first, the canary's after.
-    let other = Msg::Events(vec![event("/m/notes.txt", 0x1000)]);
-    assert_eq!(runner.input(Some(other), CANARY_WAIT + ms(500)), Flow::Go);
-    assert_eq!(runner.input(Some(echo()), CANARY_WAIT + ms(510)), Flow::Go);
-    assert_eq!(runner.input(None, CANARY_WAIT + ms(600)), Flow::Go);
+    // The agent's events come every 100 ms, each read as soon as queued; the canary's never.
+    let mut at = ms(100);
+    while at < CANARY_WAIT {
+        let busy = Msg::Events(vec![event("/m/notes.txt", 0x1000)], at);
+        assert_eq!(runner.input(Some(busy), at), Flow::Go);
+        at += ms(100);
+    }
+    let busy = Msg::Events(vec![event("/m/notes.txt", 0x1000)], at);
+    assert_eq!(
+        runner.input(Some(busy), at),
+        Flow::Done,
+        "judged on events too"
+    );
+    assert!(runner.lost());
+    assert_eq!(ends(&session), 1);
+    assert_eq!(notices.taken(), [Denial::GitWatchLost]);
+}
+
+#[test]
+fn a_batch_read_late_ends_the_session_as_a_lost_stream() {
+    let fs = FakeFs::new();
+    let (mut runner, session, notices) = runner(&fs);
+    assert_eq!(runner.input(Some(echo(ms(50))), ms(50)), Flow::Go);
+    // Read within the wait of its queueing: the run goes on.
+    let batch = Msg::Events(vec![event("/m/a.txt", 0x1000)], ms(100));
+    assert_eq!(runner.input(Some(batch), ms(99) + CANARY_WAIT), Flow::Go);
+    assert!(!runner.lost());
+    // Read the wait or more after it was queued: the watch lags behind the agent.
+    let batch = Msg::Events(vec![event("/m/b.txt", 0x1000)], ms(200));
+    assert_eq!(runner.input(Some(batch), ms(200) + CANARY_WAIT), Flow::Done);
+    assert!(runner.lost());
+    assert_eq!(ends(&session), 1);
+    assert_eq!(notices.taken(), [Denial::GitWatchLost]);
+}
+
+#[test]
+fn a_canary_event_in_the_batch_being_read_counts_before_lateness_is_judged() {
+    let fs = FakeFs::new();
+    let (mut runner, session, notices) = runner(&fs);
+    // Past the wait by the clock, but the canary's event is in this batch, queued in time.
+    let late = CANARY_WAIT + ms(100);
+    let batch = vec![event("/m/notes.txt", 0x1000), event(CANARY, 0x1000)];
+    assert_eq!(
+        runner.input(Some(Msg::Events(batch, ms(300))), late),
+        Flow::Go
+    );
     assert!(!runner.lost());
     assert_eq!(ends(&session), 0);
     none(&notices);
@@ -299,7 +351,7 @@ fn a_canary_write_that_fails_for_a_moment_is_tried_again() {
     fs.fail_touches(2);
     let (mut runner, session, notices) = runner(&fs);
     assert_eq!(fs.touched().len(), 1, "the third try went");
-    assert_eq!(runner.input(Some(echo()), ms(100)), Flow::Go);
+    assert_eq!(runner.input(Some(echo(ms(100))), ms(100)), Flow::Go);
     assert_eq!(ends(&session), 0);
     none(&notices);
     // One that keeps failing loses the stream.

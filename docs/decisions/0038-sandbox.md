@@ -168,7 +168,11 @@ volume, denied to the agent and watched by the same stream (one stream, two path
 comes about 4 ms after the write on this Mac. When none comes within 2 s, or the canary can't
 be written, the stream is lost and the session ends as for a find: kill first, then the final
 scan, and the lawyer gets `Denial::GitWatchLost` ("Clauseo stopped the AI tool because it
-could no longer watch this matter's folder for changes."). There is no fallback to rescans. An
+could no longer watch this matter's folder for changes."). The canary's lateness is judged on
+every input, once the canary's events in the batch being read count, and each batch is stamped
+when the stream queues it: one read 2 s or more after that ends the session the same way, as
+the watch lags behind the agent (an agent that writes nonstop would otherwise hold the canary's
+event back behind its own). There is no fallback to rescans. An
 event flagged must-scan-subdirectories or dropped (user or kernel) only rescans the matter at
 once, and the watch carries on.
 **The 30 s pass:** the watch keeps every folder of the matter with its file ID and its
@@ -195,10 +199,13 @@ PID (a process can spawn with the "disclaim" attribute and be its own), and a pa
 counts as over only when its group is empty and no process carries the probe; its kill is
 `TreeKill` plus SIGKILL to each probed process, checked again just before its signal, sent again
 every 0.1 s. The kill goes first: the first find of a batch returns at once, before the batch's
-other events, a rescan or the 30 s pass, and nothing more is checked while the session ends.
+other events' scans (a batch's names are all checked first, then its arrived folders on one
+budget), a rescan or the 30 s pass, and nothing more is checked while the session ends.
 Nothing moves while a process of the session is left: when one outlives the kill's 10 s, the
-final scan only lists what it finds (renames by path could be redirected by a live process
-swapping a folder), and the session's record stays, marked, with those paths (below).
+session's record is marked first, then the final scan only lists what it finds, within the
+scan's entry budget (renames by path could be redirected by a live process swapping a folder),
+and the record keeps those paths (below). An agent that did not start is treated the same when
+a process carrying its probe is left.
 The probe fails closed: a `sandbox_check` that errs on a running process keeps the session
 running, so only a plain "not sandboxed", "may not look up the session's name" or "may look up
 the control name" rules a process out. Such a process is never killed, though: only one every
@@ -212,13 +219,16 @@ A watch thread that panics ends the session; an attach to a thread already gone 
 **The watchdog:** a check reads what the agent made while it runs (a folder moved in is walked
 whole; a disk can stop answering), and
 while one check holds the watch's thread nothing else is checked. So each runner publishes when
-its check began, and one watchdog thread per host looks every 0.1 s: a check (one batch of
-events, a rescan, a 30 s pass) past 2 s ends the session by its tree and probe, logged; the
-runner, once its check returns, tells the lawyer (`Denial::GitWatchLost`) and goes to the final
-scan. 2 s is the canary's wait: a check held longer leaves the agent as unwatched as a lost
-stream. The cost: a check that is slow without being stuck, such as the walk of a folder of
-some hundred thousand entries moved in at once, ends the session too. A session attached after
-the watchdog gave up on a check is ended at once.
+its check began and each folder a walk lists, and one watchdog thread per host looks every
+0.1 s: a check (one batch of events, a rescan, a 30 s pass) with no progress for 2 s ends the
+session by its tree and probe, logged, and the kill goes again on each look while that check
+runs; the runner, once its check returns, tells the lawyer (`Denial::GitWatchLost`) and goes to
+the final scan. A check still held 10 s after the first kill, with a process of the session
+left, has the session's record marked outlived from the watchdog's thread, so the matter's next
+launch is refused even if the check never returns. 2 s is the canary's wait: a check held
+longer leaves the agent as unwatched as a lost stream. A rescan of a big matter that keeps
+listing folders is not stuck. A session attached after the watchdog gave up on a check is ended
+at once.
 
 Then the final scan sets each item aside by one `rename(2)` that never replaces into
 `<set-aside>/<UTC time>-<session>-<random>/item`, beside a `record.json` (the original path,
