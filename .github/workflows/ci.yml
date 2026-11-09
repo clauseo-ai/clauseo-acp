@@ -322,14 +322,21 @@ jobs:
           url=$(value url)
           sha256=$(value sha256)
           release='^https://github\.com/vercel-labs/agent-browser/releases/download/(v[0-9][0-9A-Za-z.+-]*)/([A-Za-z0-9._-]+)$'
-          if ! [[ "$url" =~ $release ]] || ! [[ "$sha256" =~ ^[0-9a-f]{64}$ ]]; then
+          # The tag and asset are taken from BASH_REMATCH before the sha256 test, whose own =~
+          # replaces BASH_REMATCH (with set -u, a later ${BASH_REMATCH[1]} is then unbound).
+          tag='' asset=''
+          if [[ "$url" =~ $release ]]; then
+            tag=${BASH_REMATCH[1]}
+            asset=${BASH_REMATCH[2]}
+          fi
+          if [ -z "$tag" ] || ! [[ "$sha256" =~ ^[0-9a-f]{64}$ ]]; then
             echo "::error::$pin's [$TARGET] needs a url under https://github.com/vercel-labs/agent-browser/releases/download/v<version>/ and a sha256 of 64 lowercase hex digits"
             exit 1
           fi
           {
             echo "url=$url"
-            echo "tag=${BASH_REMATCH[1]}"
-            echo "asset=${BASH_REMATCH[2]}"
+            echo "tag=$tag"
+            echo "asset=$asset"
             echo "sha256=$sha256"
             echo "dir=$RUNNER_TEMP/agent-browser-cache"
           } >> "$GITHUB_OUTPUT"
