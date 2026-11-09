@@ -312,9 +312,15 @@ fn an_unsafe_socket_folder_stops_the_guard() {
     check(&dir, "it is a link");
     write::remove_dir_all(&dir).unwrap();
     // `<dir>/<session>.sock`, the session the run's own, at most 23 bytes
-    // (`run-4294967295-ffffffff`): 104 bytes with a 75-byte folder.
-    let long = std::path::PathBuf::from(format!("{}{}", dir.display(), "x".repeat(43)));
-    assert_eq!(long.as_os_str().len(), 75);
+    // (`run-4294967295-ffffffff`): 104 bytes with a 75-byte folder. The padding comes from the
+    // resolved folder's own length (`/private/tmp/…` on macOS is longer than `/tmp/…`).
+    let pad = 75usize.saturating_sub(dir.as_os_str().len());
+    let long = std::path::PathBuf::from(format!("{}{}", dir.display(), "x".repeat(pad)));
+    assert_eq!(
+        long.as_os_str().len(),
+        75,
+        "the scratch folder is already longer than 75 bytes"
+    );
     write::create_dir_all(&long).unwrap();
     write::set_mode(&long, 0o700).unwrap();
     check(&long, "is 104 bytes, over the 103 a Unix socket allows");
