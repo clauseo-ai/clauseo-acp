@@ -84,7 +84,10 @@ impl Drop for Inheritable<'_> {
     fn drop(&mut self) {
         for h in self.handles.handles().into_iter().take(self.on) {
             // A failure leaves the flag on, which only a start without a handle list would
-            // notice, and every start in this process takes the lock; nothing to undo here.
+            // notice; nothing to undo here. `clauseo_process::spawn_lock()` is taken by
+            // `spawn_in_tree` and lowbox's own starts. `mcp/src/browser_guard/job/spawn.rs`
+            // must take the same lock around its inheritable handles when mcp adopts lowbox (a
+            // follow-up). Process starts by third-party code inside the host are a residual.
             let _left_on = set_flag(h, false);
         }
     }

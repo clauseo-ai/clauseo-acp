@@ -18,6 +18,14 @@
 //!
 //! The package SID, the argument quoting, the handle list's parse and checks, and the grants are
 //! plain Rust on every OS; the calls into Windows are in the `windows` module.
+//!
+//! **Residual: inheritable handles and other starts.** While a launch runs, the namespace's
+//! handles are inheritable ([`NamespaceHandles::inheritable`]), under
+//! `clauseo_process::spawn_lock()`. That lock is taken by `spawn_in_tree` and lowbox's own
+//! starts. `mcp/src/browser_guard/job/spawn.rs` must take the same lock around its inheritable
+//! handles when mcp adopts lowbox (a follow-up). Process starts by third-party code inside the
+//! host are a residual: one that starts a child without a handle list in that window could pass
+//! the handles on.
 
 #[cfg_attr(
     all(not(windows), not(test)),
