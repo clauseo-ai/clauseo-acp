@@ -123,7 +123,7 @@ use super::pool_steps::{Bits, Gate, JOBS_CAP, Record, Refused, cancel_pool_jobs,
 use crate::windows::sids::Sid;
 
 pub use super::pool_steps::{Failed, Pool};
-pub use pick::{Image, Picked, Process, image_names, kernel_made, pick};
+pub use pick::{Image, Picked, Process, image_names, kernel_made, pick, wsl_image};
 pub use vms::{
     LIST_WAIT, VM_WAIT, VMS_BUDGET, VmId, VmStopper, WSL_OWNER, local_app_data, wsl_ids_from_json,
 };
@@ -283,6 +283,9 @@ struct Passes {
     jobs_at: Option<u64>,
     /// What the WSL step did.
     vms: vms::Vms,
+    /// Evidence that a pool user started WSL, recorded before any process is stopped
+    /// ([`vms::evidence`], and each pass's snapshot): without it the WSL step is skipped.
+    wsl_evidence: bool,
 }
 
 /// Runs the stop as the module says.
@@ -324,6 +327,7 @@ fn run_steps(fs: &mut impl Stopper) -> Result<String, Refusal> {
         lockless: unreserved.is_some(),
         ..Passes::default()
     };
+    vms::evidence(fs, &pool.users, &mut passes);
     let ran = run_passes(fs, &pool.users, &mut passes);
     // What the processes left (a task, a job) is the sweep's: asked for once the kills are done.
     let requested = match fs.request_sweep() {
@@ -450,6 +454,12 @@ fn run_passes(fs: &mut impl Stopper, pool: &[Sid], passes: &mut Passes) -> Resul
         passes
             .found
             .extend(picked.stop.iter().map(|(_, user)| user.clone()));
+        // A pool user's WSL process is evidence for the WSL step, recorded before it is stopped.
+        let wsl = |pid: &u32| {
+            seen.iter()
+                .any(|process| process.pid == *pid && process.wsl)
+        };
+        passes.wsl_evidence |= picked.stop.iter().any(|(pid, _)| wsl(pid));
         mark_new(fs, pool, passes);
         if picked.stop.is_empty() {
             passes.clean_at = Some(at);

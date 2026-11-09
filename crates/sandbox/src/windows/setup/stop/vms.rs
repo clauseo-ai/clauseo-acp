@@ -23,6 +23,15 @@
 //! it), as is one left running for want of a read, or whose id isn't a GUID: nothing terminates
 //! it, every pool user is marked, and the stop ends at 48.
 //!
+//! The whole step is gated on evidence that a pool user started WSL ([`evidence`]), recorded
+//! before any process is stopped: a pool user's profile holds `AppData\Local\temp\<GUID>`, its
+//! loaded hive holds a WSL distribution registration (`Software\...\Lxss\*`), or a pass's
+//! snapshot saw one of its processes that is WSL's (`wsl.exe`, `wslhost.exe`, `wslrelay.exe`,
+//! `wslg.exe`, or a WSL 1 pico process). A read of the first two that fails counts as evidence.
+//! With none, the step asks HCS nothing (`computecore.dll` isn't even loaded) and ends nothing:
+//! the deny should keep the pool out of WSL, so on a real machine the step runs only when a pool
+//! user demonstrably got in, and a mapping mistake can't end the lawyer's VMs in the normal case.
+//!
 //! The seam is [`VmStopper`], which `windows_hcs.rs` implements and the tests fake. The step
 //! runs after the process passes, so no pool user's process is left to change its profile
 //! while the folders are read, and each pool folder is read component by component without
@@ -143,6 +152,15 @@ pub trait VmStopper {
     fn non_pool_vm_folder(&mut self, user: &Sid, id: &VmId) -> Result<bool, Failed>;
     /// Every SID `ProfileList` lists (a subkey whose name isn't a SID is passed over).
     fn profile_sids(&mut self) -> Result<Vec<Sid>, Failed>;
+    /// Whether the pool user `user`'s profile holds a folder (or anything) named as a GUID in
+    /// `AppData\Local\temp`, read from the profile folder down without following a link:
+    /// `false` with no profile or no such folder. A link on the way, or a read that fails, is
+    /// the error.
+    fn temp_vm_folder(&mut self, user: &Sid) -> Result<bool, Failed>;
+    /// Whether the pool user `user`'s loaded hive holds a WSL distribution registration (a
+    /// subkey of `HKU\<user>\Software\Microsoft\Windows\CurrentVersion\Lxss`): `false` when
+    /// the hive isn't loaded or the key is missing or empty. A read that fails is the error.
+    fn lxss_registered(&mut self, user: &Sid) -> Result<bool, Failed>;
     /// Terminates the compute system `id` and waits up to `wait` for it to end; one already
     /// gone is `Ok`.
     fn terminate_vm(&mut self, id: &VmId, wait: Duration) -> Result<(), Failed>;
@@ -165,11 +183,16 @@ pub(super) struct Vms {
     /// WSL systems whose folder is in no profile, taken as a pool user's (each counted in
     /// `ended` or `left` too).
     pub(super) nowhere: usize,
+    /// The step was skipped: no evidence that a pool user started WSL.
+    pub(super) skipped: bool,
 }
 
 impl Vms {
     /// The log line's part, counts only; empty when HCS wasn't there.
     pub(super) fn counts(&self) -> String {
+        if self.skipped {
+            return ", WSL VM step skipped: no pool WSL evidence".to_owned();
+        }
         if !self.listed {
             return String::new();
         }
@@ -180,7 +203,8 @@ impl Vms {
     }
 }
 
-/// Step 5b, as the module says (users marked under the set-up lock before each termination):
+/// Step 5b, as the module says (users marked under the set-up lock before each termination),
+/// once there is evidence (`passes.wsl_evidence`); with none, nothing is asked or ended:
 /// each WSL system a non-pool profile's folder names (the lawyer's first) is left, and a pool
 /// user whose profile holds that folder too is added to `passes.suspects`; each a pool user's
 /// folder names is terminated, its user added to `passes.found`; each in no profile adds every
@@ -196,6 +220,10 @@ pub(super) fn stop_vms(
     pool: &Pool,
     passes: &mut Passes,
 ) -> Result<(), String> {
+    if !passes.wsl_evidence {
+        passes.vms.skipped = true;
+        return Ok(());
+    }
     let ids = match fs.compute_systems() {
         Ok(None) => return Ok(()),
         Ok(Some(ids)) => ids,
@@ -261,6 +289,21 @@ pub(super) fn stop_vms(
         end(fs, pool, &id, began, passes);
     }
     Ok(())
+}
+
+/// Before the passes, the evidence that outlives a pool user's processes: a pool user's profile
+/// holding `AppData\Local\temp\<GUID>`, or its loaded hive a WSL distribution registration. A
+/// read that fails counts as evidence (a pool user may make its own profile unreadable). Each
+/// pass adds the third kind, a pool user's WSL process, before it stops anything.
+pub(super) fn evidence(fs: &mut impl Stopper, pool: &[Sid], passes: &mut Passes) {
+    for user in pool {
+        if !matches!(fs.temp_vm_folder(user), Ok(false))
+            || !matches!(fs.lxss_registered(user), Ok(false))
+        {
+            passes.wsl_evidence = true;
+            return;
+        }
+    }
 }
 
 /// Whether a non-pool profile holds a VM's folder.

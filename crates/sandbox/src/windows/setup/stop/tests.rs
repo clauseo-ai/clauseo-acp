@@ -377,8 +377,8 @@ fn only_the_records_pool_users_processes_are_stopped_and_those_users_marked() {
     assert_eq!(
         line,
         "the sandbox's stop: 3 pool users, 2 found running, 3 processes stopped in 2 passes, \
-         0 left, 0 unknown, 0 BITS jobs cancelled, 0 not; the sweep task was requested; 2 \
-         users marked for a profile reset (0 retried)"
+         0 left, 0 unknown, 0 BITS jobs cancelled, 0 not, WSL VM step skipped: no pool WSL \
+         evidence; the sweep task was requested; 2 users marked for a profile reset (0 retried)"
     );
     // The sweep is asked for once, after the last pass.
     assert_eq!(fake.sweeps, [2]);
