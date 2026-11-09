@@ -69,9 +69,12 @@ fn a_descriptor_open_across_exec_reaches_a_child_only_without_close_other_fds() 
     let (leaked, _writer) = std::io::pipe().unwrap();
     fcntl(&leaked, FcntlArg::F_SETFD(FdFlag::empty())).unwrap();
     let fd = leaked.as_raw_fd();
-    // Whether descriptor `fd` is open in a child started with `opts`.
+    // Whether descriptor `fd` is open in a child started with `opts`. The shell's own `[`
+    // looks at `/dev/fd/$FD` (on Linux `/proc/self/fd`), opening nothing, rather than
+    // redirecting from `fd`: Linux's `/bin/sh` is dash, which exits silently when a redirection
+    // on `:` names a closed descriptor, and refuses any number above 9.
     let open_in_child = |fd: i32, opts: &SpawnOptions| -> bool {
-        let script = r#"if { : <&"$FD"; } 2>/dev/null; then echo open; else echo closed; fi"#;
+        let script = r#"if [ -e "/dev/fd/$FD" ]; then echo open; else echo closed; fi"#;
         let spec = LaunchSpec::new(
             PathBuf::from("/bin/sh"),
             vec!["-c".into(), script.into()],
