@@ -380,8 +380,8 @@ pub fn plan(
     let mut own = vec![(policy.state(), PathKind::State)];
     if policy.matter_read_only() {
         // TODO(stage C's PR6, the Windows launcher): the ledger keeps a matter's grants across
-        // launches, so a read-only launch after a read-write one still finds the matter's Modify
-        // entry. PR6 must take it back, or deny writes, first: until then read-only isn't enforced.
+        // launches, so a read-only launch after a read-write one finds the Modify entry and the
+        // Low label (it persists too). PR6 must take both back first, or read-only isn't enforced.
         let kind = PathKind::Matter;
         plan.allow(policy.matter(), Rights::ReadAndExecute, Inherit::Tree, kind);
     } else {

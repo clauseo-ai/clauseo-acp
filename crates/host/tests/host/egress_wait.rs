@@ -28,7 +28,7 @@ fn exit() -> Value {
 
 /// Waits `wait` with nothing to do.
 #[cfg(target_os = "linux")]
-fn pause(wait: Duration) {
+pub(crate) fn pause(wait: Duration) {
     let (_keep, never) = channel::<()>();
     let _timed_out = never.recv_timeout(wait);
 }
@@ -42,7 +42,7 @@ fn no_close_within(closes: &Receiver<SessionKey>, wait: Duration) {
 }
 
 #[cfg(target_os = "linux")]
-mod group {
+pub(crate) mod group {
     //! The agent's helper as a straggler in its group.
 
     use std::path::Path;
@@ -55,21 +55,21 @@ mod group {
     use super::pause;
 
     /// The file, in the matter folder (the agent's working folder), the helper's pid goes in.
-    pub(super) const PID_FILE: &str = "helper.pid";
+    pub(crate) const PID_FILE: &str = "helper.pid";
 
     /// The scenario step that starts the helper in the agent's group, its pid in [`PID_FILE`].
-    pub(super) fn helper() -> Value {
+    pub(crate) fn helper() -> Value {
         json!({"spawn_child": {"pid_file": PID_FILE, "own_group": false}})
     }
 
     /// Makes this test process the reaper of its orphans, so the agent's helper, orphaned when
     /// the agent exits, stays a zombie in the agent's group until [`reap`].
-    pub(super) fn become_reaper() {
+    pub(crate) fn become_reaper() {
         nix::sys::prctl::set_child_subreaper(true).unwrap();
     }
 
     /// The helper's pid, once the matter folder `folder` holds its file.
-    pub(super) fn pid(folder: &Path) -> Pid {
+    pub(crate) fn pid(folder: &Path) -> Pid {
         let pid_file = folder.join(PID_FILE);
         for _ in 0..600 {
             if let Ok(text) = std::fs::read_to_string(&pid_file)
@@ -83,7 +83,7 @@ mod group {
     }
 
     /// Waits until `pid` is a zombie: the agent has exited and its tree's kill reached it.
-    pub(super) fn until_zombie(pid: Pid) {
+    pub(crate) fn until_zombie(pid: Pid) {
         let stat = format!("/proc/{pid}/stat");
         for _ in 0..600 {
             let text = std::fs::read_to_string(&stat).unwrap_or_default();
@@ -101,7 +101,7 @@ mod group {
     }
 
     /// Reaps `pid`: the agent's group is gone.
-    pub(super) fn reap(pid: Pid) {
+    pub(crate) fn reap(pid: Pid) {
         waitpid(pid, None).unwrap();
     }
 }

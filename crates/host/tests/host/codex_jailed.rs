@@ -7,6 +7,8 @@
 
 use std::sync::Arc;
 use std::thread::JoinHandle;
+#[cfg(target_os = "linux")]
+use std::time::Duration;
 
 use clauseo_protocol::{
     AgentChoiceId, CommandEnvelope, CommandOutcome, ConfigOption, ConfigOptionKind, ConfigValue,
@@ -344,6 +346,81 @@ fn a_failed_relaunch_logs_no_mode_and_keeps_the_mode() {
         events.dump()
     );
     assert!(!fake.calls()[2].policy.matter_read_only());
+    assert!(!modes(&events).iter().any(|mode| mode == "read-only"));
+    host.shutdown();
+}
+
+/// A jailed host whose seam plays `plays`, with the tree wait's cap `cap`.
+#[cfg(target_os = "linux")]
+fn lingering(dir: &crate::support::Dir, plays: [&'static str; 2], cap: Duration) -> Linger {
+    use crate::egress_wait::group;
+    group::become_reaper();
+    let (fake, _) = Fake::new(dir, Answer::Launch(Vec::new()));
+    let (host, _, _) = start_run(dir, 0, Some(Arc::clone(&fake)), |config| {
+        config.with_tree_wait(cap)
+    });
+    fake.play(&plays.map(Scenario::Local));
+    let (_, thread, folder) = matter_with_thread(dir, &host, "m", &[("a.txt", "x\n")], CODEX);
+    let mut events = host.events(StreamId::Thread(thread));
+    run_turn(&host, &mut events, thread);
+    let helper = group::pid(&folder);
+    (host, fake, thread, events, helper)
+}
+
+#[cfg(target_os = "linux")]
+type Linger = (Running, Arc<Fake>, ThreadId, Events, nix::unistd::Pid);
+
+/// A switch to Read-only while a helper of the read-write session's tree lingers: neither the
+/// relaunch nor `ModeChanged` comes until the helper is gone (`launch_checks::relaunch`).
+#[cfg(target_os = "linux")]
+#[test]
+fn a_switch_relaunches_and_logs_the_mode_only_once_the_old_tree_is_gone() {
+    use crate::egress_wait::{group, pause};
+    let dir = codex_dir("codex_jailed_linger", "codex-handshake");
+    let plays = ["codex-jailed-linger", "codex-jailed-switched"];
+    let (host, fake, thread, mut events, helper) = lingering(&dir, plays, Duration::from_secs(20));
+    let picked = send(&host, set_mode(thread, "read-only"));
+    group::until_zombie(helper);
+    pause(Duration::from_secs(1));
+    host.settle();
+    events.drain_ready();
+    assert!(!picked.is_finished(), "answered beside the old tree");
+    assert_eq!(fake.calls().len(), 1, "relaunched beside the old tree");
+    assert_eq!(modes(&events), ["agent-full-access"]);
+    group::reap(helper);
+    assert_eq!(picked.join().unwrap(), Ok(CommandOutcome::Done));
+    events.until("ModeChanged read-only", |e| modes(e).len() == 2);
+    let calls = fake.calls();
+    assert_eq!(calls.len(), 2);
+    assert!(calls[1].policy.matter_read_only());
+    host.shutdown();
+}
+
+/// A helper of the old tree that outlives the wait's cap: the switch fails, nothing relaunches,
+/// no `ModeChanged` is logged and the mode stays, so the next prompt runs read-write.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_tree_that_outlives_the_wait_fails_the_switch_with_no_mode() {
+    use crate::egress_wait::group;
+    let dir = codex_dir("codex_jailed_linger_cap", "codex-handshake");
+    let plays = ["codex-jailed-linger", "codex-jailed-saved-full"];
+    let (host, fake, thread, mut events, helper) =
+        lingering(&dir, plays, Duration::from_millis(300));
+    let error = host.dispatch(set_mode(thread, "read-only")).unwrap_err();
+    assert_eq!(error.code(), ErrorCode::AgentLaunchFailed, "{error}");
+    host.settle();
+    events.drain_ready();
+    assert_eq!(fake.calls().len(), 1);
+    assert_eq!(modes(&events), ["agent-full-access"], "{}", events.dump());
+    group::reap(helper);
+    let turn = run_turn(&host, &mut events, thread);
+    assert_eq!(
+        events.turn_text(turn),
+        "Still on its own.",
+        "{}",
+        events.dump()
+    );
+    assert!(!fake.calls()[1].policy.matter_read_only());
     assert!(!modes(&events).iter().any(|mode| mode == "read-only"));
     host.shutdown();
 }

@@ -374,6 +374,7 @@ pub(crate) fn turn_input(actor: &mut Actor, input: TurnInput) {
         TurnInput::Sandbox(input) => launch_checks::on_sandbox_input(actor, input),
         TurnInput::RunRemoved { key, freed } => launch_checks::on_run_removed(actor, key, freed),
         TurnInput::CameBack(check) => came_back::on_due(actor, check),
+        TurnInput::Relaunch(gone) => launch_checks::on_gone(actor, gone),
         TurnInput::Log {
             thread,
             why,

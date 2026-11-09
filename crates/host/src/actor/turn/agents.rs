@@ -32,7 +32,7 @@ use crate::sent::SentView;
 mod ended;
 mod forced;
 
-use ended::{StopCause, stop_closed};
+use ended::{Relaunch, StopCause, stop_closed};
 pub(super) use ended::{hold_stop, idle_stop, log_detach, on_ended, restart_for_switch, stop};
 
 /// Work that waits for the agent's session.
@@ -75,6 +75,8 @@ pub(super) struct Agent {
     pub(super) after_stop: Vec<Waiting>,
     /// A jailed Codex's mode switch held to the turn boundary (`forced_mode::switch`).
     pub(super) switch: Option<Waiting>,
+    /// When its successor launches: after its tree is gone when it was stopped to start again.
+    relaunch: Relaunch,
     /// The matter folder it was started in, its working directory.
     pub(super) folder: PathBuf,
     /// Why it is being stopped, which picks the detach a stop logs.
@@ -165,7 +167,7 @@ pub(super) fn ensure(actor: &mut Actor, thread: ThreadId, waiting: Waiting) {
 /// writes) off the actor first (`launch_checks.rs`). A launch the sign-in refuses fails what
 /// waits for it (`sign_in::launch_refusal`), but one refused while the keys load waits for
 /// them first (`sign_in::keys_wait`), and its checks look at the refusals again after.
-fn start(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>) {
+pub(super) fn start(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>) {
     if host_stopping(actor) {
         fail_all(actor, thread, waiting, &Error::Closed);
         return;
@@ -234,6 +236,7 @@ pub(super) fn launch_now(
         waiting,
         after_stop: Vec::new(),
         switch: None,
+        relaunch: Relaunch::AtOnce,
         folder,
         stop_cause: StopCause::Asked,
         session: None,
@@ -376,6 +379,7 @@ pub(super) fn restart_if_moved(actor: &mut Actor, thread: ThreadId, turn: TurnId
     agent.link.stop();
     agent.stage = Stage::Stopping;
     agent.stop_cause = StopCause::Restarting;
+    agent.relaunch = Relaunch::AfterTree;
     let waiting = std::mem::take(&mut agent.waiting);
     agent.after_stop.extend(waiting);
     agent.after_stop.push(Waiting::Turn(turn));

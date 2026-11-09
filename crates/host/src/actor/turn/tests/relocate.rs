@@ -356,3 +356,75 @@ fn a_list_read_of_the_old_folder_does_not_land_after_a_relocate() {
     );
     rig.finish();
 }
+
+/// The moved matter's restart waits for the old agent's tree like a mode switch's
+/// (`launch_checks::relaunch`): a helper left in the old agent's group (a zombie the test reaps,
+/// as its orphans' reaper) holds the relaunch, and the turn runs once it is gone. Linux only.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_moved_matters_restart_waits_until_the_old_tree_is_gone() {
+    use nix::sys::wait::waitpid;
+    use nix::unistd::Pid;
+    const LINGER: &str = r#"{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"spawn_child":{"pid_file":"helper.pid","own_group":false}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
+"#;
+    let pid_in = |folder: &std::path::Path| -> Pid {
+        let text = std::fs::read_to_string(folder.join("helper.pid")).unwrap();
+        Pid::from_raw(text.trim().parse().unwrap())
+    };
+    nix::sys::prctl::set_child_subreaper(true).unwrap();
+    let mut rig = Rig::start("relocate-linger", LINGER);
+    let thread = rig.thread();
+    let matter = rig.matter();
+    let old = PathBuf::from(&rig.actor.matters[&matter].row.folder_path);
+    send_prompt(&mut rig, 10, thread);
+    until_idle(&mut rig, thread);
+    let helper = pid_in(&old);
+    let copies = TempDir::new("relocate-linger-copies");
+    let moved = copies.path().join("Scratch moved");
+    crate::write::create_dir_all(&moved.join(".clauseo")).unwrap();
+    let marker = std::fs::read(old.join(".clauseo/matter.json")).unwrap();
+    crate::write::write_file(&moved.join(".clauseo/matter.json"), &marker).unwrap();
+    let now = rig.actor.now().wall;
+    let folder: FolderRefId = rig.actor.ids.mint(now).unwrap();
+    rig.actor.folders.insert(folder, moved.clone());
+    let relocated = rig.dispatch(20, HostCommand::RelocateMatter { matter, folder });
+    assert!(relocated.is_ok(), "{relocated:?}");
+
+    let old_key = rig.actor.threads[&thread]
+        .turn
+        .run
+        .as_ref()
+        .map(|run| run.key);
+    let second = send_prompt(&mut rig, 21, thread);
+    rig.run_until("the old agent's end", |actor| {
+        let state = &actor.threads[&thread].turn;
+        state.agent.is_none() && state.preparing.is_some()
+    });
+    // Long enough for a launch's checks, were it not held.
+    let (_keep, never) = std::sync::mpsc::channel::<()>();
+    let _waited = never.recv_timeout(std::time::Duration::from_secs(1));
+    rig.drain();
+    let state = &rig.actor.threads[&thread].turn;
+    assert!(state.agent.is_none(), "relaunched beside the old tree");
+    // The relaunch's wait holds the work under the old session's key, not a new launch's.
+    let held = state.preparing.as_ref().map(|preparing| preparing.key);
+    assert!(old_key.is_some() && held == old_key, "{held:?} {old_key:?}");
+    assert!(!rig.log(thread).iter().any(|event| matches!(event,
+        DomainEvent::TurnStarted(started) if started.turn == second)));
+    waitpid(helper, None).unwrap();
+    until_idle(&mut rig, thread);
+    let ended = rig.log(thread).iter().find_map(|event| {
+        if let DomainEvent::TurnEnded(ended) = event
+            && ended.turn == second
+        {
+            return Some(ended.stop);
+        }
+        None
+    });
+    assert_eq!(ended, Some(StopReason::EndTurn));
+    rig.finish();
+    // The relaunched agent's helper, left by the same scenario.
+    let _reaped = waitpid(pid_in(&moved), None);
+}

@@ -575,6 +575,8 @@ pub(super) mod folder;
 pub(super) mod relay;
 mod straggler;
 pub(crate) use straggler::HeldRuns;
+mod relaunch;
+pub(super) use relaunch::{TreeWait, after_tree, on_gone};
 mod removal;
 use removal::discard;
 pub(super) use removal::on_run_removed;

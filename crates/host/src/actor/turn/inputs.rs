@@ -40,6 +40,8 @@ pub(crate) enum TurnInput {
         /// Whether the run was freed (its slot goes back), or held.
         freed: bool,
     },
+    /// A restarted agent's old tree is gone, or outlived the wait (`launch_checks::relaunch`).
+    Relaunch(super::launch_checks::TreeWait),
     /// A check for papers an undo removed that came back is due (`came_back.rs`).
     CameBack(super::came_back::Check),
 }
