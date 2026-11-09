@@ -82,6 +82,16 @@ impl SystemTask {
         }
     }
 
+    /// Its process priority, as the task's `<Priority>` (0 highest, 10 lowest). The Task
+    /// Scheduler's default, 7, is below normal; the watcher's real-time consumer gets 5, normal,
+    /// so it keeps up with the kernel's events rather than fall behind and lose them.
+    pub fn priority(self) -> i32 {
+        match self {
+            SystemTask::Refresh | SystemTask::Stop | SystemTask::Sweep => 7,
+            SystemTask::Watch => 5,
+        }
+    }
+
     /// Whether it also starts at the record owner's logon; otherwise only on demand.
     pub fn at_logon(self) -> bool {
         match self {

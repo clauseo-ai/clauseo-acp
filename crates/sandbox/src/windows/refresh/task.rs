@@ -290,6 +290,9 @@ pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError>
             TASK_INSTANCES_IGNORE_NEW
         };
         settings
+            .SetPriority(spec.priority())
+            .map_err(com("SetPriority"))?;
+        settings
             .SetMultipleInstances(instances)
             .map_err(com("SetMultipleInstances"))?;
         settings

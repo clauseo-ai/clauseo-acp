@@ -70,6 +70,9 @@ fn the_watch_task_runs_on_demand_with_its_one_argument_and_a_backstop_limit() {
     );
     assert_eq!((WATCH_ARG, WATCH_EXECUTION_LIMIT), ("--watch", "PT12H"));
     assert!(!watch.at_logon());
+    // `<Priority>5</Priority>`, normal: the default 7 (below normal) is the others'.
+    assert_eq!(watch.priority(), 5);
+    assert!(TASKS.iter().all(|task| task.priority() == 7));
     assert_ne!(watch.description(), "");
     // Never the installer's: `--adopt` registers only TASKS.
     assert!(!TASKS.contains(&watch));
