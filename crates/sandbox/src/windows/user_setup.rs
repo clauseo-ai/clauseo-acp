@@ -231,9 +231,10 @@ impl SandboxSetup for UserSetup {
     /// for its file identity between calls (`StateAdminCopy`). Never writes: the result file is
     /// read unchanged, and ignored unless it is this user's alone
     /// (`result_file::read_unchanged`); `run` repairs it. Last, on a per-user install, a
-    /// `Ready` whose SYSTEM refresh, stop or sweep task (`refresh::USER_TASKS`) is missing, isn't
-    /// the set-up's or can't be read is [`SetupState::Failed`] in words for it, so the app offers
-    /// the set-up again, which puts the task back (`refresh::ready_with_user_tasks`).
+    /// `Ready` whose SYSTEM stop or sweep task is missing, isn't the set-up's or can't be read
+    /// is [`SetupState::Failed`] in words for it, and one whose refresh task is is
+    /// [`SetupState::RepairNeeded`], so the app offers the set-up again, which puts the task
+    /// back (`refresh::ready_with_user_tasks`).
     fn state(&self) -> SetupState {
         let last = result_file::read_unchanged(&self.data_dir);
         let marker = setup_state(&self.data_dir);

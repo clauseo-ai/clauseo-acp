@@ -216,6 +216,7 @@ fn pools() -> Vec<(&'static str, Result<Vec<Sid>, String>)> {
 fn show(state: &SetupState) -> String {
     match state {
         SetupState::Failed(why) => format!("failed: {why}"),
+        SetupState::RepairNeeded(why) => format!("repair needed: {why}"),
         SetupState::Ready
         | SetupState::Needed
         | SetupState::Refused

@@ -126,7 +126,7 @@ fn a_definition_without_a_descriptor_rests_on_the_tasks_own() {
     // An earlier --adopt's task, from before registration set the definition's descriptor:
     // none carried, the task's own descriptor the set-up's. The same.
     let mut found = expected.clone();
-    found.definition_descriptor = None;
+    found.definition_descriptor = Carried::Absent;
     assert_eq!(compare(&found, &expected), TaskCheck::Same);
     // None carried and the task's own descriptor wrong: changed.
     let users = (0, 0, FULL_ACCESS, "S-1-5-32-545");
@@ -140,12 +140,16 @@ fn a_definition_without_a_descriptor_rests_on_the_tasks_own() {
     assert_eq!(compare(&found, &expected), changed);
     // One carried that lets Users in: changed, whatever the task's own says.
     let mut found = expected.clone();
-    found.definition_descriptor = Some(with_entries(ADMINISTRATORS, &wider));
+    found.definition_descriptor = Carried::Descriptor(with_entries(ADMINISTRATORS, &wider));
+    assert_eq!(compare(&found, &expected), changed);
+    // One carried that isn't a string or doesn't parse: changed, never skipped.
+    let mut found = expected.clone();
+    found.definition_descriptor = Carried::Unreadable;
     assert_eq!(compare(&found, &expected), changed);
     // The expected task carries the descriptor it is registered with.
     assert_eq!(
-        expected.definition_descriptor.as_deref(),
-        Some(expected.descriptor.as_slice())
+        expected.definition_descriptor,
+        Carried::Descriptor(expected.descriptor.clone())
     );
 }
 
@@ -204,13 +208,46 @@ fn readiness_says_missing_over_changed_over_unchecked_across_every_task() {
     }
     let mut reader = reader.without(SystemTask::Sweep);
     assert_eq!(tasks_repair(&mut reader), Some(TASK_MISSING));
-    // Refresh unreadable, sweep changed: changed.
+    // Refresh unreadable, sweep changed: changed (the refresh task isn't the launch's).
     let mut reader = Reader::adopted();
     reader.tasks[at(SystemTask::Refresh)].1 = Err(ReadError::Failed("down".to_owned()));
     reader.tasks[at(SystemTask::Sweep)].1 = Err(ReadError::Refused);
     assert_eq!(tasks_repair(&mut reader), Some(TASK_CHANGED));
-    // Only the refresh task missing is missing too.
-    let mut reader = Reader::adopted().without(SystemTask::Refresh);
+    assert_eq!(tasks_repair(&mut Reader::adopted()), None);
+}
+
+#[test]
+fn the_refresh_task_alone_never_gates_a_launch_and_asks_for_a_repair() {
+    let at = |task: SystemTask| USER_TASKS.iter().position(|t| *t == task).unwrap();
+    // The refresh task alone, missing, changed or unreadable: nothing for the launch's check
+    // (`tasks_repair`, which `logon_check` reads), and a repair needed for readiness.
+    let repair = SetupState::RepairNeeded(REFRESH_TASK_MISSING.to_owned());
+    let at_refresh = at(SystemTask::Refresh);
+    let refresh_states: [fn(&mut Reader); 3] = [
+        |r| r.tasks.retain(|(t, _)| *t != SystemTask::Refresh),
+        |r| {
+            if let Ok(t) = &mut r.tasks[0].1 {
+                t.settings.enabled = false;
+            }
+        },
+        |r| r.tasks[0].1 = Err(ReadError::Failed("down".to_owned())),
+    ];
+    assert_eq!(at_refresh, 0);
+    for change in refresh_states {
+        let mut reader = Reader::adopted();
+        change(&mut reader);
+        assert_eq!(tasks_repair(&mut reader), None);
+        assert_eq!(ready_with_tasks(SetupState::Ready, &mut reader), repair);
+    }
+    assert_eq!(
+        REFRESH_TASK_MISSING,
+        "Clauseo's update task is missing, so its safety program won't get updates. The AI \
+         tools still work. Repair Clauseo to put the task back."
+    );
+    // With the sweep task missing too: the clean-up words, for the launch and for readiness.
+    let mut reader = Reader::adopted()
+        .without(SystemTask::Refresh)
+        .without(SystemTask::Sweep);
     assert_eq!(tasks_repair(&mut reader), Some(TASK_MISSING));
     assert_eq!(
         ready_with_tasks(SetupState::Ready, &mut reader),

@@ -9,12 +9,14 @@
 //! registers it again (`setup::user_tasks`).
 //!
 //! The same comparison is the readiness check's (`UserSetup::state`, [`ready_with_tasks`]) and
-//! the launch's ([`tasks_repair`]): on a per-user install, any of [`USER_TASKS`] (the refresh,
-//! stop and sweep tasks) that is missing, changed or can't be read makes the set-up not ready,
-//! in [`TASK_MISSING`]'s, [`TASK_CHANGED`]'s or [`TASK_UNCHECKED`]'s words (every task checked,
-//! the first of those that applies said), so the app's repair runs the set-up, which puts it
-//! back. A per-machine install is left as it was: its set-up replaces both tasks on every
-//! run (`late_steps::stop_task`).
+//! the launch's ([`tasks_repair`]): on a per-user install, a stop or sweep task that is missing,
+//! changed or can't be read makes the set-up not ready, in [`TASK_MISSING`]'s, [`TASK_CHANGED`]'s
+//! or [`TASK_UNCHECKED`]'s words (both checked, the first of those that applies said), and
+//! refuses a launch. A refresh task in any of those states only asks for a repair
+//! ([`SetupState::RepairNeeded`], [`REFRESH_TASK_MISSING`]) and never gates a launch. Either
+//! way the app's repair runs the set-up, which puts every one of [`USER_TASKS`] back. A
+//! per-machine install is left as it was: its set-up replaces both tasks on every run
+//! (`late_steps::stop_task`).
 //!
 //! Before a per-user set-up registers anything, the action's program is held to the whole of
 //! `admin_copy::check` ([`action_exe`]): the copy and every folder above it up to the volume root
@@ -28,7 +30,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use super::rules::action_path;
-use super::{SystemTask, USER_TASKS};
+use super::{POOL_TASKS, SystemTask, USER_TASKS};
 use crate::windows::acl_bytes::{self, Acl, Descriptor};
 use crate::windows::admin_copy::{self, AdminCopyFs};
 use crate::windows::setup::record_values::CopyOwner;
@@ -41,6 +43,10 @@ pub const TASK_MISSING: &str = "Clauseo's clean-up task is missing. Repair Claus
 /// What they say while it is there but isn't the one the set-up registers.
 pub const TASK_CHANGED: &str =
     "Clauseo's clean-up task has been changed. Repair Clauseo to put it back.";
+/// What the readiness check says while the refresh task, which keeps the admin copy updated, is
+/// missing, changed or can't be read: [`SetupState::RepairNeeded`], since launches still go ahead.
+pub const REFRESH_TASK_MISSING: &str = "Clauseo's update task is missing, so its safety program \
+     won't get updates. The AI tools still work. Repair Clauseo to put the task back.";
 /// What they say while it can't be read: the Task Scheduler is stopped or didn't answer.
 pub const TASK_UNCHECKED: &str = "Clauseo couldn't check its clean-up task because Windows Task \
      Scheduler didn't respond. Restart the computer; if this message stays, repair Clauseo.";
@@ -137,9 +143,20 @@ pub struct TaskIdentity {
     /// The task's owner and DACL, as a self-relative descriptor.
     pub descriptor: Vec<u8>,
     /// The descriptor its definition carries (`IRegistrationInfo::SecurityDescriptor`, the
-    /// XML's `<SecurityDescriptor>`) as a self-relative descriptor: `None` when it carries
-    /// none, or one that can't be read.
-    pub definition_descriptor: Option<Vec<u8>>,
+    /// XML's `<SecurityDescriptor>`).
+    pub definition_descriptor: Carried,
+}
+
+/// The descriptor a task's definition carries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Carried {
+    /// None: an empty value or an empty string, as an earlier `--adopt` registered it, before
+    /// registration set one. The task's own descriptor stands for it.
+    Absent,
+    /// One that isn't a string, or whose text doesn't parse as SDDL: changed.
+    Unreadable,
+    /// One, as a self-relative descriptor.
+    Descriptor(Vec<u8>),
 }
 
 impl TaskIdentity {
@@ -172,7 +189,7 @@ impl TaskIdentity {
                     INSTANCES_IGNORE_NEW
                 },
             },
-            definition_descriptor: Some(descriptor.clone()),
+            definition_descriptor: Carried::Descriptor(descriptor.clone()),
             descriptor,
         }
     }
@@ -305,15 +322,19 @@ fn differs(found: &TaskIdentity, expected: &TaskIdentity) -> Option<Differs> {
             Differs::Descriptor,
         ),
         // A definition that carries none (an earlier `--adopt`'s, from before it set one) rests on
-        // the task's own descriptor, compared just above.
+        // the task's own descriptor, compared just above; one that can't be read is changed.
         (
-            found
-                .definition_descriptor
-                .as_deref()
-                .is_none_or(|carried| {
-                    let want = expected.definition_descriptor.as_deref();
-                    same_descriptor(carried, want.unwrap_or(&expected.descriptor))
-                }),
+            match &found.definition_descriptor {
+                Carried::Absent => true,
+                Carried::Unreadable => false,
+                Carried::Descriptor(carried) => {
+                    let want = match &expected.definition_descriptor {
+                        Carried::Descriptor(want) => want,
+                        Carried::Absent | Carried::Unreadable => &expected.descriptor,
+                    };
+                    same_descriptor(carried, want)
+                }
+            },
             Differs::Descriptor,
         ),
     ];
@@ -514,29 +535,43 @@ pub fn repair_reason(reader: &mut dyn TaskReader, task: SystemTask) -> Option<&'
     }
 }
 
-/// What the set-up's repair would mend in any of [`USER_TASKS`], each checked
-/// ([`repair_reason`]), in the words that say the most a repair can do: [`TASK_MISSING`] over
-/// [`TASK_CHANGED`] over [`TASK_UNCHECKED`]. `None` when every one is the set-up's.
+/// What the set-up's repair would mend in the stop and sweep tasks ([`POOL_TASKS`], the ones a
+/// session's end and the next launch rely on), each checked ([`repair_reason`]), in the words
+/// that say the most a repair can do: [`TASK_MISSING`] over [`TASK_CHANGED`] over
+/// [`TASK_UNCHECKED`]. `None` when both are the set-up's. The launch's check before the pool
+/// user's logon reads this alone: the refresh task never gates a launch.
 pub fn tasks_repair(reader: &mut dyn TaskReader) -> Option<&'static str> {
     let rank = |words: &&str| {
         [TASK_MISSING, TASK_CHANGED, TASK_UNCHECKED]
             .iter()
             .position(|known| known == words)
     };
-    USER_TASKS
+    POOL_TASKS
         .into_iter()
         .filter_map(|task| repair_reason(reader, task))
         .min_by_key(rank)
 }
 
-/// The readiness check's last step: `state` as it is unless it is [`SetupState::Ready`] and a
-/// task needs a repair ([`tasks_repair`]), which is [`SetupState::Failed`] in its words: not
-/// ready, and the app's "Set up again" runs the repair.
+/// The readiness check's last step over every one of [`USER_TASKS`]: `state` as it is unless
+/// it is [`SetupState::Ready`]. Then a stop or sweep task that needs a repair ([`tasks_repair`])
+/// is [`SetupState::Failed`] in its words: not ready, and the app's "Set up again" runs the
+/// repair. Else a refresh task that is missing, changed or can't be read is
+/// [`SetupState::RepairNeeded`] in [`REFRESH_TASK_MISSING`]'s words: still working, with the
+/// repair offered. It never gates a launch.
 pub fn ready_with_tasks(state: SetupState, reader: &mut dyn TaskReader) -> SetupState {
     if state != SetupState::Ready {
         return state;
     }
-    tasks_repair(reader).map_or(state, |words| SetupState::Failed(words.to_owned()))
+    if let Some(words) = tasks_repair(reader) {
+        return SetupState::Failed(words.to_owned());
+    }
+    let refresh = USER_TASKS
+        .into_iter()
+        .filter(|task| !POOL_TASKS.contains(task))
+        .find_map(|task| repair_reason(reader, task));
+    refresh.map_or(state, |_| {
+        SetupState::RepairNeeded(REFRESH_TASK_MISSING.to_owned())
+    })
 }
 
 /// `task_sddl(owner)`'s meaning as bytes, as Windows would make them, for the tests on every OS:

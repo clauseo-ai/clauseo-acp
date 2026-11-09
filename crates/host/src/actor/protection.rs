@@ -120,15 +120,16 @@ pub(crate) fn observe(sandbox: Option<&Sandbox>) -> Observed {
 
 /// Whether a set-up in `state` is one `RetryProtection` runs, with its administrator prompt:
 /// needed, refused, failed, blocked by a Windows policy (stage C's D-B4: trying again asks the
-/// administrator, R17 PR-E names it) or outdated. Done, or owned by another Windows user, it is
-/// not: a set-up cannot fix those.
+/// administrator, R17 PR-E names it), outdated, or working with a repair to offer. Done, or
+/// owned by another Windows user, it is not: a set-up cannot fix those.
 pub(crate) fn asks_admin(state: &SetupState) -> bool {
     match state {
         SetupState::Needed
         | SetupState::Refused
         | SetupState::Failed(_)
         | SetupState::Blocked(_)
-        | SetupState::Outdated { .. } => true,
+        | SetupState::Outdated { .. }
+        | SetupState::RepairNeeded(_) => true,
         SetupState::Ready | SetupState::SetUpByOtherUser => false,
     }
 }

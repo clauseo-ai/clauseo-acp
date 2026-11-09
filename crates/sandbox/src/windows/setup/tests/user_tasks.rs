@@ -11,8 +11,9 @@ use super::fake::{FakeAcl, FakeMachine, OTHER_OWNER, rid};
 use super::fake_more::{TASK_EXE, registered_task};
 use super::*;
 use crate::windows::refresh::task_identity::{
-    INSTANCES_IGNORE_NEW, OnBattery, ReadError, TASK_CHANGED, TASK_MISSING, TASK_UNCHECKED,
-    TaskAction, TaskIdentity, TaskReader, TaskTrigger, ready_with_tasks, test_descriptor,
+    Carried, INSTANCES_IGNORE_NEW, OnBattery, REFRESH_TASK_MISSING, ReadError, TASK_CHANGED,
+    TASK_MISSING, TASK_UNCHECKED, TaskAction, TaskIdentity, TaskReader, TaskTrigger,
+    ready_with_tasks, test_descriptor,
 };
 use crate::windows::refresh::{SystemTask, USER_TASKS};
 use crate::windows::setup::record_values::CopyOwner;
@@ -244,12 +245,12 @@ fn readiness_says_missing_over_changed_whichever_task_comes_first() {
 #[test]
 fn the_refresh_task_is_put_back_like_the_others() {
     // A deleted `\Clauseo` folder takes the refresh task too: the repair registers it again,
-    // for the owner's logon, and readiness waits for it.
+    // for the owner's logon. Until then readiness offers the repair without refusing anything.
     let mut machine = adopted("user-tasks-refresh");
     machine.state.tasks.remove("SandboxRefresh");
     assert_eq!(
         readiness(&machine),
-        SetupState::Failed(TASK_MISSING.to_owned())
+        SetupState::RepairNeeded(REFRESH_TASK_MISSING.to_owned())
     );
     let report = set_up_fresh(&mut machine, &mut FakeAcl::default());
     assert_eq!(report.tasks, Ok(()));
@@ -268,7 +269,7 @@ fn an_earlier_adopts_task_without_a_definition_descriptor_is_left_alone() {
     // descriptor: the task's own descriptor is the set-up's, so it is the same and left.
     let mut machine = adopted("user-tasks-no-sd");
     if let Some(Ok(stop)) = machine.state.tasks.get_mut("SandboxStop") {
-        stop.definition_descriptor = None;
+        stop.definition_descriptor = Carried::Absent;
     }
     assert_eq!(readiness(&machine), SetupState::Ready);
     set_up_fresh(&mut machine, &mut FakeAcl::default());
@@ -277,7 +278,7 @@ fn an_earlier_adopts_task_without_a_definition_descriptor_is_left_alone() {
     // writes carries the descriptor it was given.
     let mut machine = adopted("user-tasks-no-sd-wrong");
     if let Some(Ok(stop)) = machine.state.tasks.get_mut("SandboxStop") {
-        stop.definition_descriptor = None;
+        stop.definition_descriptor = Carried::Absent;
         stop.descriptor = test_descriptor(&Sid::parse(OTHER_OWNER).unwrap());
     }
     assert_eq!(
@@ -293,8 +294,9 @@ fn an_earlier_adopts_task_without_a_definition_descriptor_is_left_alone() {
     let registered = machine.state.tasks.get("SandboxStop").cloned();
     let carried = registered
         .and_then(Result::ok)
-        .and_then(|t| t.definition_descriptor);
-    assert_eq!(carried, Some(test_descriptor(&owner())));
+        .map(|t| t.definition_descriptor);
+    let given = Carried::Descriptor(test_descriptor(&owner()));
+    assert_eq!(carried, Some(given));
     assert_eq!(readiness(&machine), SetupState::Ready);
 }
 

@@ -125,7 +125,8 @@ pub(crate) const FIRST_BUILD: u32 = 19045;
 /// The Windows tier from the cached OS facts and the set-up's live state. ARM64 and builds
 /// before [`FIRST_BUILD`] are C with [`NoSandbox::UnsupportedOs`] whatever the set-up says, and a
 /// build that can't be read is C with [`NoSandbox::ProbeFailed`]. Tier A (S15a's MXC probe) is
-/// not built, so the rest is tier B when the state is [`SetupState::Ready`] and C otherwise.
+/// not built, so the rest is tier B when the state is [`SetupState::Ready`] or
+/// [`SetupState::RepairNeeded`] (working, with a repair to offer) and C otherwise.
 #[cfg(any(windows, test))]
 fn decide(os: &OsFacts, setup: Option<&dyn SandboxSetup>) -> Detection {
     if os.arm64 {
@@ -140,7 +141,7 @@ fn decide(os: &OsFacts, setup: Option<&dyn SandboxSetup>) -> Detection {
         return Detection::none(NoSandbox::NeedsSetUp);
     };
     match setup.state() {
-        SetupState::Ready => Detection {
+        SetupState::Ready | SetupState::RepairNeeded(_) => Detection {
             tier: Tier::B,
             reason: None,
         },

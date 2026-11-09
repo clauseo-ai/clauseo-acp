@@ -44,7 +44,7 @@ use windows::Win32::System::TaskScheduler::{
     TASK_ACTION_TYPE, TASK_ENUM_HIDDEN, TASK_INSTANCES_POLICY, TASK_RUNLEVEL_TYPE,
     TASK_TRIGGER_LOGON, TASK_TRIGGER_TYPE2, TaskScheduler,
 };
-use windows::Win32::System::Variant::{VARIANT, VT_BSTR};
+use windows::Win32::System::Variant::{VARIANT, VT_BSTR, VT_EMPTY, VT_NULL};
 use windows::core::{BSTR, Interface};
 
 use super::SystemTask;
@@ -52,7 +52,8 @@ use super::last_run::{LastRun, last_run};
 use super::staging::sddl_bytes;
 use super::task_folder::{Folders, prepare};
 use super::task_identity::{
-    OnBattery, TaskAction, TaskIdentity, TaskSettings, TaskTrigger, not_found, principal_sid,
+    Carried, OnBattery, TaskAction, TaskIdentity, TaskSettings, TaskTrigger, not_found,
+    principal_sid,
 };
 use crate::windows::setup::sweep::windows_sweeper::lookup_account;
 
@@ -493,12 +494,20 @@ fn identity(task: &IRegisteredTask) -> Result<TaskIdentity, TaskError> {
         let carried: VARIANT = out("IRegistrationInfo::SecurityDescriptor", |at| {
             info.SecurityDescriptor(at)
         })?;
-        // A string only: an empty VARIANT is a definition that carries no descriptor.
-        let carried = (carried.vt() == VT_BSTR)
-            .then(|| carried.Anonymous.Anonymous.Anonymous.bstrVal.to_string());
-        let definition_descriptor = carried
-            .filter(|text| !text.trim().is_empty())
-            .and_then(|text| sddl_bytes(&text).ok());
+        // An empty value or string carries none; any other type, or text that isn't SDDL, is
+        // one that can't be read, which is changed.
+        let definition_descriptor = match carried.vt() {
+            VT_EMPTY | VT_NULL => Carried::Absent,
+            VT_BSTR => {
+                let text = carried.Anonymous.Anonymous.Anonymous.bstrVal.to_string();
+                if text.trim().is_empty() {
+                    Carried::Absent
+                } else {
+                    sddl_bytes(&text).map_or(Carried::Unreadable, Carried::Descriptor)
+                }
+            }
+            _ => Carried::Unreadable,
+        };
         let lookup = |name: &str| lookup_account(name).ok();
         Ok(TaskIdentity {
             principal: principal_sid(&user.to_string(), lookup),

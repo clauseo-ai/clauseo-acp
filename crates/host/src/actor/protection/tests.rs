@@ -108,6 +108,7 @@ fn a_retry_asks_for_an_administrator_only_when_a_set_up_can_help() {
             },
             true,
         ),
+        (SetupState::RepairNeeded("x".to_owned()), true),
         (SetupState::Ready, false),
         (SetupState::SetUpByOtherUser, false),
     ] {

@@ -96,9 +96,9 @@ pub fn ready_with_user_tasks(state: SetupState) -> SetupState {
     ready_with_tasks(state, &mut OsTasks::default())
 }
 
-/// What a launch says about [`USER_TASKS`] before the pool user's logon, and when it is
-/// refused for `AwaitingSweep`, as the lawyer reads them (`task_identity::tasks_repair`):
-/// `None` while each is the set-up's.
+/// What a launch says about the stop and sweep tasks before the pool user's logon, and when it
+/// is refused for `AwaitingSweep`, as the lawyer reads them (`task_identity::tasks_repair`):
+/// `None` while both are the set-up's. The refresh task never gates a launch.
 pub fn tasks_repair() -> Option<&'static str> {
     task_identity::tasks_repair(&mut OsTasks::default())
 }

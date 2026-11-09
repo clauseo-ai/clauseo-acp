@@ -17,11 +17,11 @@
 //!   which is requested, and the logon refused. TODO: once slot groups land (two pool users
 //!   share a slot's grants on a matter), the scope becomes the pool user's slot, since an
 //!   escapee of one user still holds the slot group's grants. Before all that, on a per-user
-//!   install, a SYSTEM task it needs (`refresh::USER_TASKS`) that is missing or changed refuses
+//!   install, a stop or sweep task (`refresh::POOL_TASKS`) that is missing or changed refuses
 //!   the logon up front, in the readiness check's words: its session's end couldn't ask for the
 //!   sweep, so the launch would run and only the next one would be refused. Tasks that can't be
 //!   read are read once more after [`TASK_RETRY`], then refuse it too
-//!   ([`TASKS_UNCHECKED_AT_LAUNCH`]).
+//!   ([`TASKS_UNCHECKED_AT_LAUNCH`]). The refresh task never refuses a launch.
 //! - **A launch** ([`await_sweeps`], `clean_close::check_launch`, inside the host's 180 s): any
 //!   marker awaiting a sweep is clean once `SweepSequence` reaches its number. Otherwise the
 //!   launch requests a sweep and waits for it, up to [`SWEEP_WAIT`], and refuses if it still
@@ -141,10 +141,10 @@ pub trait Markers {
     fn pause(&mut self, pause: Duration);
     /// Says `line` on the outer's stderr: what went wrong but refuses nothing.
     fn note(&mut self, line: &str);
-    /// What the app's repair would mend in the SYSTEM tasks a per-user install needs
-    /// (`refresh::USER_TASKS`), in the readiness check's words (`refresh::tasks_repair`:
-    /// missing, changed, or unreadable); `None` while each is the set-up's, or on a
-    /// per-machine install.
+    /// What the app's repair would mend in a per-user install's stop and sweep tasks
+    /// (`refresh::POOL_TASKS`; never the refresh task), in the readiness check's words
+    /// (`refresh::tasks_repair`: missing, changed, or unreadable); `None` while each is the
+    /// set-up's, or on a per-machine install.
     fn task_repair(&mut self) -> Option<&'static str>;
 }
 

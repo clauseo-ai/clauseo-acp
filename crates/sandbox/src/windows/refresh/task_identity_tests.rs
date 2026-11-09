@@ -443,7 +443,7 @@ fn readiness_says_missing_changed_or_unchecked_on_a_per_user_install() {
     refused.tasks[2].1 = Err(ReadError::Refused);
     assert_eq!(ready(refused), failed(TASK_CHANGED));
     let mut down = Reader::adopted();
-    down.tasks[0].1 = Err(ReadError::Failed("CoCreateInstance failed".to_owned()));
+    down.tasks[1].1 = Err(ReadError::Failed("CoCreateInstance failed".to_owned()));
     assert_eq!(ready(down), failed(TASK_UNCHECKED));
     // A state that isn't ready stays as it is.
     let mut gone = Reader::adopted().without(SystemTask::Sweep);
