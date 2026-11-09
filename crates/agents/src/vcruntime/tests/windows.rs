@@ -38,16 +38,31 @@ fn step_with(source: &Path) -> (Layout, Vec<Outcome>) {
     (layout, found)
 }
 
-/// The VC++ runtime the Redistributable installs is embedded-signed by Microsoft (Windows'
-/// own DLLs are mostly catalog-signed, which this check does not accept). The CI images have
-/// the Redistributable.
+/// The VC++ runtime in System32 is embedded-signed by Microsoft (Windows' own DLLs are mostly
+/// catalog-signed, which this check does not accept), through the real Windows calls. Which
+/// Microsoft certificate signed it varies by image: GitHub's Windows image carries a copy signed
+/// as `CN=Microsoft Windows Software Compatibility Publisher`, a certificate the placing step
+/// refuses on purpose (it is not `Microsoft Corporation`). So this pins what the calls read
+/// (the organisation and a Microsoft root), and that only `Microsoft Corporation` as common
+/// name reads as [`Signer::Microsoft`]; the package's own copy is `Microsoft Corporation`.
 #[test]
-fn a_microsoft_signed_runtime_is_microsoft() {
+fn the_system_runtime_reads_as_microsoft_signed_through_the_real_calls() {
     let dll = system32("vcruntime140.dll");
     if !present(&dll) {
         return;
     }
-    assert_eq!(signer(&dll), Signer::Microsoft);
+    match signer(&dll) {
+        Signer::Microsoft => {}
+        Signer::Other(details) => {
+            assert!(
+                details.contains("organisation \"Microsoft Corporation\"")
+                    && details.contains("Microsoft root: true")
+                    && !details.contains("common name \"Microsoft Corporation\""),
+                "{details}"
+            );
+        }
+        Signer::NotTrusted(why) => panic!("System32's vcruntime140.dll is not trusted: {why}"),
+    }
     let info = version_info(&dll).unwrap();
     assert_eq!(info.version[0], 14, "{info:?}");
     let original = info.original_filename.unwrap();
