@@ -88,6 +88,9 @@ mod sources;
 mod staging;
 #[cfg(windows)]
 pub mod task;
+mod task_account;
+#[cfg(any(windows, test))]
+pub(crate) mod task_call;
 #[cfg(test)]
 mod task_descriptor_tests;
 #[cfg(any(windows, test))]
@@ -95,6 +98,9 @@ mod task_folder;
 pub mod task_identity;
 #[cfg(test)]
 mod task_identity_tests;
+mod task_keep;
+#[cfg(test)]
+mod task_keep_tests;
 #[cfg(windows)]
 pub mod task_read;
 #[cfg(windows)]
@@ -130,7 +136,9 @@ pub use task_identity::{
 };
 #[cfg(windows)]
 pub use task_read::{
-    read_error, ready_with_user_tasks, replace_task, task_descriptor, tasks_repair,
+    heal_task_descriptor, launch_admin_refresh, launch_pool_stop, launch_pool_sweep,
+    launch_tasks_repair, local_account_name, read_error, ready_with_user_tasks, replace_task,
+    task_descriptor, tasks_repair,
 };
 #[cfg(windows)]
 pub use task_register::{register_task, register_task_at};
@@ -313,6 +321,8 @@ pub trait Refresher {
     fn leave_staging(&mut self, swapped: bool);
     /// Writes one line to the log: `error` for a refusal or a failure.
     fn log(&mut self, error: bool, line: &str);
+    /// Puts back the per-user tasks of `owner`, the record's `AdminCopyOwner` (`task_keep`).
+    fn keep_tasks(&mut self, owner: &Sid) -> Result<Vec<&'static str>, Failed>;
 }
 
 /// Runs the refresh as the module says, checking the staged exe against `trust`.
@@ -334,6 +344,7 @@ type Refusal = (RefreshExit, String);
 
 /// What the record gives a run, checked.
 struct Checked {
+    owner: CopyOwner,
     dir: PathBuf,
     sha256: Option<String>,
     version: String,
@@ -373,6 +384,7 @@ fn locked_steps(fs: &mut impl Refresher, trust: &Trust<'_>) -> Result<String, Re
         fs.discard_staged();
     }
     fs.leave_staging(swapped);
+    task_keep::kept_by(fs, &checked.owner);
     outcome.map(|replaced| replaced.line().to_owned())
 }
 
@@ -458,10 +470,10 @@ fn checked(fs: &mut impl Refresher, record: RefreshRecord) -> Result<Checked, Re
         .admin_copy_version
         .ok_or_else(|| refuse("the record has no AdminCopyVersion"))?;
     let outside = |why: String| (RefreshExit::OutsideProfile, why);
-    match owner {
+    match &owner {
         CopyOwner::User(owner) => {
             let profile = fs
-                .profile_dir(&owner)
+                .profile_dir(owner)
                 .map_err(outside)?
                 .ok_or_else(|| outside("the owner has no profile".to_owned()))?;
             if !inside_profile(&dir, &profile) {
@@ -480,6 +492,7 @@ fn checked(fs: &mut impl Refresher, record: RefreshRecord) -> Result<Checked, Re
         }
     }
     Ok(Checked {
+        owner,
         dir,
         sha256: record.admin_copy_sha256,
         version,

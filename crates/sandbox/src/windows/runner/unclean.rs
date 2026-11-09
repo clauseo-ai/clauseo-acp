@@ -61,10 +61,12 @@ use std::time::Duration;
 
 use super::RunExit;
 use super::marker::{MarkerState, Sequences, UncleanSession};
-use crate::windows::refresh::TASK_UNCHECKED;
 use crate::windows::setup::record_values::{STOP_NEXT, SWEEP_NEXT};
 use crate::windows::sids::Sid;
+use launch_tasks::tasks_ready;
+pub use launch_tasks::{HEAL_POLL, HEAL_WAIT, TASK_RETRY, TASKS_UNCHECKED_AT_LAUNCH};
 
+mod launch_tasks;
 #[cfg(windows)]
 pub(crate) mod os;
 #[cfg(test)]
@@ -146,41 +148,15 @@ pub trait Markers {
     /// (`refresh::tasks_repair`: missing, changed, or unreadable); `None` while each is the
     /// set-up's, or on a per-machine install.
     fn task_repair(&mut self) -> Option<&'static str>;
+    /// Asks for a run of the refresh task, which puts the tasks back as SYSTEM: whether it
+    /// was asked for (`refresh::launch_admin_refresh`, bounded).
+    fn heal_tasks(&mut self) -> bool;
 }
 
 /// Why a sweep a marker awaits didn't complete: `waited`, unless a task is missing, changed
 /// or can't be read, which no wait mends: then the readiness check's words for it.
 fn unswept(fs: &mut impl Markers, waited: String) -> String {
     fs.task_repair().map_or(waited, str::to_owned)
-}
-
-/// What a launch refused before the pool user's logon says when the tasks still can't be
-/// checked after [`TASK_RETRY`].
-pub const TASKS_UNCHECKED_AT_LAUNCH: &str = "Clauseo couldn't check its clean-up task, so it \
-     didn't start the AI tool. Try again. If this keeps happening, restart your computer.";
-/// How long the launch's check waits before it reads the tasks once more, when the Task
-/// Scheduler didn't answer: long enough for a brief stall to pass, short against the host's 180 s.
-pub const TASK_RETRY: Duration = Duration::from_millis(300);
-
-/// The launch's check of the tasks before the pool user's logon: a task that is missing or
-/// changed refuses it now ([`RunExit::AwaitingSweep`], the readiness check's words), since its
-/// session's end couldn't ask for the sweep (or stop) that the next launch would then wait on.
-/// One that can't be read (the Task Scheduler not answering) is read once more after
-/// [`TASK_RETRY`]; still unreadable, the launch is refused the same way, in
-/// [`TASKS_UNCHECKED_AT_LAUNCH`]'s words, since nothing says its end could sweep.
-fn tasks_ready(fs: &mut impl Markers) -> Result<(), Refused> {
-    let mut repair = fs.task_repair();
-    if repair == Some(TASK_UNCHECKED) {
-        fs.pause(TASK_RETRY);
-        repair = fs.task_repair();
-    }
-    match repair {
-        None => Ok(()),
-        Some(words) if words == TASK_UNCHECKED => {
-            Err(Refused::sweep(TASKS_UNCHECKED_AT_LAUNCH.to_owned()))
-        }
-        Some(words) => Err(Refused::sweep(words.to_owned())),
-    }
 }
 
 /// The markers, the stale ones removed: those of a pool user the record no longer lists, and

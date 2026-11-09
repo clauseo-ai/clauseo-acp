@@ -28,8 +28,8 @@ use crate::windows::wfp::{NetworkReport, NetworkSetup};
 pub(super) use super::fake_acl::FakeAcl;
 pub(super) use super::fake_more::folder_name;
 pub(super) use super::fake_more::{Account, State};
-use super::fake_more::{Around, ProfileFaults, TASK_EXE, registered_task};
-use crate::windows::refresh::task_identity::test_descriptor;
+use super::fake_more::{Around, ProfileFaults, TASK_EXE};
+use crate::windows::refresh::task_identity::{AccountName, test_descriptor};
 use crate::windows::refresh::{ReadError, SystemTask, TaskIdentity as Task, TaskIdentity};
 use crate::windows::setup::MachineError as Error;
 
@@ -487,12 +487,8 @@ impl Machine for FakeMachine {
     }
 
     fn task_expected(&mut self, task: SystemTask, owner: &Sid, exe: &Path) -> Result<Task, Error> {
-        Ok(TaskIdentity::expected(
-            task,
-            owner,
-            exe,
-            test_descriptor(owner),
-        ))
+        let descriptor = test_descriptor(owner);
+        Ok(TaskIdentity::expected(task, owner, exe, descriptor))
     }
 
     fn replace_task(&mut self, task: SystemTask, owner: &Sid, exe: &Path) -> Result<(), Error> {
@@ -503,9 +499,16 @@ impl Machine for FakeMachine {
             "the path checked is the path registered"
         );
         self.call(format!("replace_task {} {}", task.name(), rid(owner)))?;
-        let found = Ok(registered_task(task, owner));
-        self.state.tasks.insert(task.name().to_owned(), found);
+        self.register_in_place(task, owner);
         Ok(())
+    }
+
+    fn heal_task_descriptor(&mut self, task: SystemTask, owner: &Sid) -> Result<(), Error> {
+        self.heal_descriptor(task, owner)
+    }
+
+    fn task_account_name(&mut self, sid: &Sid) -> Result<Option<AccountName>, String> {
+        self.account_name_of(sid)
     }
 
     fn held_users(

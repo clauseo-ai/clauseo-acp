@@ -92,6 +92,9 @@ impl Markers for World {
     fn task_repair(&mut self) -> Option<&'static str> {
         self.fake.task_repair()
     }
+    fn heal_tasks(&mut self) -> bool {
+        self.fake.heal_tasks()
+    }
 }
 
 #[test]

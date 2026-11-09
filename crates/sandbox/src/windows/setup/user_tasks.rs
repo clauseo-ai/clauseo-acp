@@ -13,7 +13,11 @@
 //!    SID and run level, the program, its argument, the triggers, whether and how it runs, and
 //!    the descriptor. The same task is left; a missing or changed one, or one this process may
 //!    not read, is registered, or updated in place, by `--adopt`'s own registration, with the
-//!    path step 1 checked (`Machine::replace_task`, `refresh::register_task_at`).
+//!    path step 1 checked (`Machine::replace_task`, `refresh::register_task_at`). An earlier
+//!    build's task updated in place keeps its own descriptor; when the compare still finds it
+//!    differs, it is set (`Machine::heal_task_descriptor`,
+//!    `IRegisteredTask::SetSecurityDescriptor`), which Administrators' full control allows this
+//!    elevated run.
 //!
 //! None of this rolls the pool back: a task that can't be put back is logged and named in the
 //! report (`SetupReport::tasks`), and the other tasks are still tried. The run's result then isn't
@@ -23,8 +27,9 @@
 
 use super::machine::Machine;
 use super::outcome::cause_of;
+use crate::windows::refresh::SystemTask;
 use crate::windows::refresh::USER_TASKS;
-use crate::windows::refresh::task_identity::{TaskCheck, check};
+use crate::windows::refresh::task_identity::{Differs, TaskCheck, TaskIdentity, check};
 use crate::windows::sids::Sid;
 
 /// Puts back each of the per-user install's tasks ([`USER_TASKS`]) for the owner `owner` that is
@@ -42,18 +47,17 @@ pub(super) fn ensure(machine: &mut impl Machine, owner: &Sid) -> Result<(), Stri
     let mut failed = Vec::new();
     for task in USER_TASKS {
         let name = task.name();
-        let checked = machine
-            .task_expected(task, owner, &exe)
-            .map_err(|error| cause_of(&error))
-            .and_then(|expected| {
-                let found = machine.task_found(task);
-                check(found.as_ref().map(Option::as_ref), &expected)
-            });
-        let put_back = match checked {
+        let expected = match machine.task_expected(task, owner, &exe) {
+            Ok(expected) => expected,
+            Err(error) => {
+                failed.push(format!("{name} can't be read ({})", cause_of(&error)));
+                continue;
+            }
+        };
+        match compare(machine, task, &expected) {
             Ok(TaskCheck::Same) => continue,
             Ok(TaskCheck::Missing) => {
                 tracing::warn!(task = name, "a sandbox task is missing; registering it");
-                machine.replace_task(task, owner, &exe)
             }
             Ok(TaskCheck::Differs(part)) => {
                 tracing::warn!(
@@ -61,15 +65,26 @@ pub(super) fn ensure(machine: &mut impl Machine, owner: &Sid) -> Result<(), Stri
                     ?part,
                     "a sandbox task is changed; registering it"
                 );
-                machine.replace_task(task, owner, &exe)
             }
             Err(why) => {
                 failed.push(format!("{name} can't be read ({why})"));
                 continue;
             }
-        };
-        if let Err(error) = put_back {
+        }
+        if let Err(error) = machine.replace_task(task, owner, &exe) {
             failed.push(format!("{name}: {}", cause_of(&error)));
+            continue;
+        }
+        // An earlier build's task, updated in place, keeps its own descriptor (the VM: no `P`,
+        // and Windows' `SY FR`): set it, nothing deleted.
+        if compare(machine, task, &expected) == Ok(TaskCheck::Differs(Differs::Descriptor)) {
+            tracing::warn!(
+                task = name,
+                "a sandbox task kept an older descriptor; setting it"
+            );
+            if let Err(error) = machine.heal_task_descriptor(task, owner) {
+                failed.push(format!("{name}: {}", cause_of(&error)));
+            }
         }
     }
     if failed.is_empty() {
@@ -81,4 +96,15 @@ pub(super) fn ensure(machine: &mut impl Machine, owner: &Sid) -> Result<(), Stri
     );
     tracing::error!(%why, "the set-up left a sandbox task as it was");
     Err(why)
+}
+
+/// `task` as registered against `expected`, names looked up locally (`task_identity::check`).
+fn compare(
+    machine: &mut impl Machine,
+    task: SystemTask,
+    expected: &TaskIdentity,
+) -> Result<TaskCheck, String> {
+    let found = machine.task_found(task);
+    let mut name_of = |sid: &Sid| machine.task_account_name(sid);
+    check(found.as_ref().map(Option::as_ref), expected, &mut name_of)
 }

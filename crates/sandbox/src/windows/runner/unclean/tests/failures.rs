@@ -114,11 +114,8 @@ fn a_missing_or_changed_task_refuses_the_logon_before_it_happens() {
         let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
         assert_eq!(refused, Refused::sweep(words.to_owned()));
         assert_eq!(refused.exit, RunExit::AwaitingSweep);
-        assert_eq!(
-            fake.log,
-            Vec::<String>::new(),
-            "nothing requested or written"
-        );
+        // The refresh task couldn't be started: refused, nothing else asked for or written.
+        assert_eq!(fake.log, ["heal"], "nothing requested or written");
         assert_eq!(fake.task_reads, 1);
     }
 }
@@ -150,4 +147,77 @@ fn tasks_that_cant_be_checked_are_read_once_more_then_refuse_the_logon() {
     );
     assert_eq!(fake.log, ["pause for the tasks"]);
     assert_eq!(fake.task_reads, 2);
+}
+
+#[test]
+fn a_task_scheduler_that_never_answers_refuses_the_launch_without_hanging() {
+    use std::sync::mpsc;
+
+    use crate::windows::refresh::task_call::{TASK_CALL_LIMIT, repair_within, within};
+    assert_eq!(TASK_CALL_LIMIT, Duration::from_secs(10));
+    // Each read hangs; the launch's bounded reads give up (here at 50 ms, at 10 s for real), so
+    // this test ends rather than hanging.
+    let (keep, never) = mpsc::channel::<()>();
+    let (keep_retry, never_again) = mpsc::channel::<()>();
+    let hung = |never: mpsc::Receiver<()>| {
+        move || {
+            let _hung_until_the_test_ends = never.recv();
+            None
+        }
+    };
+    let limit = Duration::from_millis(50);
+    let mut fake = Fake::new();
+    fake.queued_task_repairs = vec![repair_within(limit, hung(never))];
+    fake.task_repair = repair_within(limit, hung(never_again));
+    let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
+    assert_eq!(
+        refused,
+        Refused::sweep(TASKS_UNCHECKED_AT_LAUNCH.to_owned())
+    );
+    // A request that hangs is given up on too; one that answers is passed on.
+    let (keep_stop, stuck) = mpsc::channel::<()>();
+    let stop = within(limit, move || stuck.recv().is_ok());
+    assert!(stop.is_err());
+    assert_eq!(within(Duration::from_secs(5), || 7), Ok(7));
+    let answered = repair_within(Duration::from_secs(5), || Some(TASK_MISSING));
+    assert_eq!(answered, Some(TASK_MISSING));
+    drop((keep, keep_retry, keep_stop));
+}
+
+#[test]
+fn a_missing_task_is_put_back_by_the_refresh_task_before_the_launch_refuses() {
+    assert_eq!(
+        (HEAL_WAIT, HEAL_POLL),
+        (Duration::from_secs(15), Duration::from_millis(500))
+    );
+    // After an update from the shipped release: no sweep task. The refresh task puts it back,
+    // and the launch goes ahead.
+    let mut fake = Fake::new();
+    fake.task_repair = Some(TASK_MISSING);
+    fake.heal_starts = true;
+    assert_eq!(logon_check(&mut fake, &sid(POOL_A)), Ok(()));
+    assert_eq!(fake.log, ["heal", "pause for the heal"]);
+    // A heal that doesn't start: refused in the missing words at once.
+    let mut fake = Fake::new();
+    fake.task_repair = Some(TASK_MISSING);
+    let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
+    assert_eq!(refused, Refused::sweep(TASK_MISSING.to_owned()));
+    assert_eq!(fake.log, ["heal"]);
+    // A heal that never lands: refused after 15 s of reads, asking again every 3 s.
+    let mut fake = Fake::new();
+    fake.task_repair = Some(TASK_MISSING);
+    fake.heal_starts = true;
+    fake.heal_leaves = Some(TASK_MISSING);
+    let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
+    assert_eq!(refused, Refused::sweep(TASK_MISSING.to_owned()));
+    assert_eq!(fake.asked("pause for the heal"), 30);
+    assert_eq!(fake.asked("heal"), 1 + 5);
+    // A Task Scheduler that stops answering while it waits: refused in the missing words.
+    let mut fake = Fake::new();
+    fake.task_repair = Some(TASK_CHANGED);
+    fake.heal_starts = true;
+    fake.heal_leaves = Some(TASK_UNCHECKED);
+    let refused = logon_check(&mut fake, &sid(POOL_A)).unwrap_err();
+    assert_eq!(refused, Refused::sweep(TASK_CHANGED.to_owned()));
+    assert_eq!(fake.asked("pause for the heal"), 1);
 }

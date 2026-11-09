@@ -50,6 +50,9 @@ struct Fake {
     queued_task_repairs: Vec<Option<&'static str>>,
     /// How many times the tasks were read.
     task_reads: usize,
+    /// Whether the refresh task can be started, and what its run leaves the tasks needing.
+    heal_starts: bool,
+    heal_leaves: Option<&'static str>,
     log: Vec<String>,
 }
 
@@ -69,6 +72,8 @@ impl Fake {
             task_repair: None,
             queued_task_repairs: Vec::new(),
             task_reads: 0,
+            heal_starts: false,
+            heal_leaves: None,
             log: Vec::new(),
         }
     }
@@ -166,6 +171,10 @@ impl Markers for Fake {
         Ok(())
     }
     fn pause(&mut self, pause: Duration) {
+        if pause == HEAL_POLL {
+            self.log.push("pause for the heal".to_owned());
+            return;
+        }
         if pause == TASK_RETRY {
             self.log.push("pause for the tasks".to_owned());
             return;
@@ -178,6 +187,13 @@ impl Markers for Fake {
     }
     fn note(&mut self, line: &str) {
         self.log.push(format!("note {line}"));
+    }
+    fn heal_tasks(&mut self) -> bool {
+        self.log.push("heal".to_owned());
+        if self.heal_starts {
+            self.task_repair = self.heal_leaves;
+        }
+        self.heal_starts
     }
     fn task_repair(&mut self) -> Option<&'static str> {
         self.task_reads += 1;

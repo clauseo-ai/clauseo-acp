@@ -18,7 +18,7 @@ use windows::Win32::System::TaskScheduler::{
 use windows::Win32::System::Variant::VARIANT;
 use windows::core::{BSTR, Interface};
 
-use super::task::{Apartment, SYSTEM, TaskError, com, folder, service};
+use super::task::{Apartment, SYSTEM, TASK_FOLDER, TaskError, com, folder, service};
 use super::windows_refresher::{EXE_NAME, sandbox_dir};
 use super::{REGISTER_FLAGS, SystemTask, action_path, task_sddl};
 use crate::windows::sids::Sid;
@@ -128,6 +128,28 @@ pub fn register_task_at(spec: SystemTask, owner_sid: &Sid, exe: &Path) -> Result
                 &VARIANT::from(sddl.as_str()),
             )
             .map_err(com("ITaskFolder::RegisterTaskDefinition"))?;
+    }
+    Ok(())
+}
+
+/// Sets `task`'s own descriptor to `sddl` (`IRegisteredTask::SetSecurityDescriptor`, with
+/// `TASK_DONT_ADD_PRINCIPAL_ACE`), elevated: Administrators' full control holds `WRITE_DAC`.
+/// Nothing is deleted or registered again.
+pub(super) fn set_task_descriptor(task: SystemTask, sddl: &str) -> Result<(), TaskError> {
+    let _apartment = Apartment::enter()?;
+    let service = service()?;
+    // SAFETY: a live service, folder and task, each from the call before, with BSTRs that
+    // outlive their calls.
+    unsafe {
+        let folder = service
+            .GetFolder(&BSTR::from(TASK_FOLDER))
+            .map_err(com("ITaskService::GetFolder"))?;
+        let registered = folder
+            .GetTask(&BSTR::from(task.name()))
+            .map_err(com("ITaskFolder::GetTask"))?;
+        registered
+            .SetSecurityDescriptor(&BSTR::from(sddl), TASK_DONT_ADD_PRINCIPAL_ACE.0)
+            .map_err(com("IRegisteredTask::SetSecurityDescriptor"))?;
     }
     Ok(())
 }

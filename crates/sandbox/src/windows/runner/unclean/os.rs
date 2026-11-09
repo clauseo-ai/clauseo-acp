@@ -1,6 +1,7 @@
 //! The markers' effects on Windows (`unclean.rs`), as the lawyer: the run folder's markers, the
 //! record's sequences and `PoolSids` (the record grants Users read), and requests for the stop
-//! and sweep tasks through the owner's `FRFX` entry. [`start_up_requests`] is the desktop's call.
+//! and sweep tasks through the owner's `FRFX` entry. Every Task Scheduler call here is bounded
+//! (`refresh::task_call`, 10 s). [`start_up_requests`] is the desktop's call.
 
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
@@ -12,7 +13,9 @@ use super::super::marker::{
 };
 use super::{Markers, Refused, StartUp, await_sweeps, logon_check, start_up};
 use crate::windows::record::sandbox_pool_sids;
-use crate::windows::refresh::{request_pool_stop, request_pool_sweep, tasks_repair};
+use crate::windows::refresh::{
+    launch_admin_refresh, launch_pool_stop, launch_pool_sweep, launch_tasks_repair,
+};
 use crate::windows::setup::record_values::{STOP_SEQUENCE, SWEEP_SEQUENCE};
 use crate::windows::setup::{read_record_install_id, read_record_value};
 use crate::windows::sids::Sid;
@@ -75,11 +78,11 @@ impl Markers for OsMarkers {
     }
 
     fn request_stop(&mut self) -> bool {
-        request_pool_stop()
+        launch_pool_stop()
     }
 
     fn request_sweep(&mut self) -> Result<(), String> {
-        request_pool_sweep().map_err(|error| error.to_string())
+        launch_pool_sweep()
     }
 
     #[expect(
@@ -97,7 +100,11 @@ impl Markers for OsMarkers {
     }
 
     fn task_repair(&mut self) -> Option<&'static str> {
-        tasks_repair()
+        launch_tasks_repair()
+    }
+
+    fn heal_tasks(&mut self) -> bool {
+        launch_admin_refresh()
     }
 }
 

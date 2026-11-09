@@ -1831,19 +1831,31 @@ tasks, all that `--adopt` registers per user, named on their own rather than as 
 `TASKS`), is what the per-user set-up puts back and what the readiness check reads. A launch
 checks only the stop and sweep tasks (`refresh::POOL_TASKS`). The per-user set-up (the app's repair, run
 elevated through the admin copy) reads each back and compares it by meaning with what
-`register_task` makes (`refresh::task_identity`). The fields compared: the principal's SID and
+`register_task` makes (`refresh::task_identity`). The fields compared: the principal and
 run level, the program (canonical path) and argument, the triggers (the refresh task's logon
-trigger for the owner included, its user resolved to a SID as the principal is, since Windows
-may write it back as `DOMAIN\user`), enabled, start on demand, battery behaviour, the instance
+trigger for the owner included), enabled, start on demand, battery behaviour, the instance
 policy, and two descriptors: the task's, and the one its definition carries (the XML's
 `<SecurityDescriptor>`). A definition that carries none (an earlier `--adopt`'s, from before
 registration set it) rests on the task's own descriptor; one that isn't a string or doesn't
-parse counts as changed. For each descriptor: the owner must match; the DACL must be protected
-(`SE_DACL_PROTECTED`) as `task_sddl`'s is; every entry the set-up gives must be there with
-exactly its type, mask and SID; and extra entries are allowed only when they are allow entries for SYSTEM or
-Administrators, who already have full control. Any other extra entry (Users, Everyone, a pool
-user, a second or wider one for the lawyer, any deny entry) counts as changed
-(`task_identity::same_descriptor`).
+parse counts as changed. For each descriptor: the owner must match; every entry the set-up
+gives must be there with exactly its type, mask and SID; and extra entries are allowed only
+when they are allow entries for SYSTEM or Administrators, who already have full control. Any
+other extra entry (Users, Everyone, a pool user, a second or wider one for the lawyer, any deny
+entry) counts as changed (`task_identity::same_descriptor`). The DACL's control flags
+(protected, auto-inherited) aren't compared: the entry rule already counts an inherited entry
+as present and allows no extra but SYSTEM's and Administrators'.
+
+The principal and the logon trigger's user come back as a SID or as a name. On the VM the
+principal read as the SID in the XML but as `SYSTEM` through COM, and the refresh task's
+logon trigger, registered by SID, as `MACHINE\user` both ways. A SID is compared as a SID. A
+name is compared with the expected SID's own name, looked up locally (`LookupAccountSidW`,
+which answers from the well-known SIDs, the local accounts and the LSA's cache of logged-on
+users), without case, bare or after `.\` or the domain that lookup names
+(`refresh::task_account`). A name is never resolved forwards (`LookupAccountNameW`), which may
+ask a domain controller. A lookup that fails can't tell either way: couldn't-check, never
+changed. The launch never needs the lawyer's name: the stop and sweep tasks' principal is
+LOCAL SYSTEM, a well-known SID, and only the refresh task, which doesn't gate a launch, names
+the lawyer. So a domain lawyer working off VPN still launches.
 
 Measured on the VM (Server 2025): the standard lawyer can read every task back (`GetFolder`,
 `GetTask`, `.Xml`, `.Definition`, `GetSecurityDescriptor`). The read-back DACL was
@@ -1857,11 +1869,19 @@ task or who may start it. The compare still accepts tasks registered before the 
 `<SecurityDescriptor>`, so registration now also sets the definition's own descriptor
 (`IRegistrationInfo::SecurityDescriptor`) to the same `task_sddl`. A deleted `\Clauseo`
 read as `0x80070002` (`ERROR_FILE_NOT_FOUND`); it and `0x80070003` both count as missing.
+An earlier build's stop and sweep tasks, updated in place by `RegisterTaskDefinition` with
+those flags, kept their own descriptor: `D:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;<lawyer>)
+(A;;FR;;;SY)`, no `P`, no `AI`, owner and group as set. The compare calls that the same, so
+an upgrade needs no repair. A fresh task reads `D:PAI(A;;FA;;;SY)(A;;FA;;;BA)
+(A;;0x1200a9;;;<lawyer>)`. A per-user set-up's XML was the same as a fresh `--adopt`'s.
 
 A missing task, one that differs, or one the set-up may not read is registered again, or
 updated in place, by `register_task`: the one registration `--adopt` uses too
-(`refresh::task_register`), so the definition written is the same. It runs the path the set-up
-checked, and only once the copy passes the whole of `admin_copy::check`. A failure here never
+(`refresh::task_register`), so the definition written is the same. Updating in place keeps
+the task's own descriptor, so when the compare still finds it differs, the set-up sets it
+(`IRegisteredTask::SetSecurityDescriptor`, `refresh::heal_task_descriptor`), deleting
+nothing: the elevated set-up holds `WRITE_DAC` through Administrators' full control. It runs
+the path the set-up checked, and only once the copy passes the whole of `admin_copy::check`. A failure here never
 rolls the pool back: it is named in the report (`SetupReport::tasks`), and the other tasks are
 still tried. The run still isn't a success: the setup exe exits 3 (`SetupExit::Failed`,
 `outcome::exit_of`), and `setup-result.json` has the step "registering the sandbox's stop and
@@ -1889,8 +1909,42 @@ it run with no sweep to ask for at its end and refusing the next one. Tasks that
 are read once more after 300 ms (`unclean::TASK_RETRY`); still unreadable, the launch is
 refused the same way, with `RunExit::AwaitingSweep` and "Clauseo couldn't check its clean-up
 task, so it didn't start the AI tool. Try again. If this keeps happening, restart your
-computer." (`TASKS_UNCHECKED_AT_LAUNCH`). A launch refused for `AwaitingSweep` gives the same
+computer." (`TASKS_UNCHECKED_AT_LAUNCH`). Every Task Scheduler call on the launch path (this
+check, and the outer's requests for the stop and sweep tasks, at the logon and at the
+session's end) runs on its own thread and is given up on after 10 s
+(`refresh::task_call::TASK_CALL_LIMIT`): a check that didn't answer is couldn't-check, a
+request that didn't is one that failed. A launch refused for `AwaitingSweep` gives the same
 words instead of "didn't finish". The host doesn't carry the words to Settings yet (R17 PR-E).
+
+**Healing without a prompt.** The shipped per-user install registered only the
+refresh and stop tasks; the VM's untouched install had no `SandboxSweep`. Its live descriptors
+read `O:BAG:<domain>-513D:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;<lawyer>)(A;;FR;;;SY)`, which
+the compare calls the same (the group isn't compared, as `task_sddl` names none). An update
+(`/UPDATE`) runs no elevated set-up (`admin_copy.nsh` skips `--adopt` for it) and
+`SETUP_VERSION` is unchanged, so after updating, the sweep task is missing, and a launch
+that refused for it would stay refused until a repair whose UAC prompt a standard lawyer can't
+answer. So `--refresh` puts the tasks back too (`refresh::task_keep`). `\Clauseo\SandboxRefresh`
+runs the admin copy (`<ProgramFiles>\Clauseo\Sandbox\clauseo-sandbox-setup.exe --refresh`) as
+SYSTEM, and the lawyer may start it (`FRFX`). After an update its first run is the old copy's,
+which swaps the new signed copy in; every later run is the new copy's, which also, with the
+set-up lock held, puts back each of the three tasks that is missing or changed, as a repair
+does. The guard on that privilege boundary:
+
+- only the three fixed tasks (`refresh::USER_TASKS`, a compile-time list);
+- the owner from the record's `AdminCopyOwner` (`HKLM`, written by administrators and SYSTEM
+  only), the principal LOCAL SYSTEM; nothing the lawyer can write is read: no profile file, no
+  environment, no `HKCU`;
+- the fixed descriptor (`task_sddl`'s template with that owner);
+- the action's program the admin copy at its fixed path, once it passes the whole of
+  `admin_copy::check`, its recorded `AdminCopySha256` included;
+- no input from the trigger: `--refresh` takes no other argument, the task is started with no
+  parameters, and the refresh reads no environment.
+
+A launch that finds the stop or sweep task missing or changed asks for a refresh run, reads the
+tasks every 500 ms for up to 15 s (asking again every 3 s: a run asked for while one runs is
+dropped, and the first run after an update is the old copy's), and refuses only if they are
+still missing or changed (`unclean::healed`). The readiness check asks for a run the same way,
+waiting for nothing; its next check reads the result. No UAC prompt is involved.
 
 **Per machine.** A per-machine `--adopt` has no owner to name in the descriptor, so it registers
 none of the three. The refresh task stays per-user only: IT updates a per-machine install. The

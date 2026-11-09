@@ -11,8 +11,8 @@ use super::fake::{FakeAcl, FakeMachine, OTHER_OWNER, rid};
 use super::fake_more::{TASK_EXE, registered_task};
 use super::*;
 use crate::windows::refresh::task_identity::{
-    Carried, INSTANCES_IGNORE_NEW, OnBattery, REFRESH_TASK_MISSING, ReadError, TASK_CHANGED,
-    TASK_MISSING, TASK_UNCHECKED, TaskAction, TaskIdentity, TaskReader, TaskTrigger,
+    AccountName, Carried, INSTANCES_IGNORE_NEW, OnBattery, REFRESH_TASK_MISSING, ReadError,
+    TASK_CHANGED, TASK_MISSING, TASK_UNCHECKED, TaskAction, TaskIdentity, TaskReader, TaskTrigger,
     ready_with_tasks, test_descriptor,
 };
 use crate::windows::refresh::{SystemTask, USER_TASKS};
@@ -62,6 +62,10 @@ impl TaskReader for Reader<'_> {
     }
     fn descriptor(&mut self, owner: &Sid) -> Result<Vec<u8>, String> {
         Ok(test_descriptor(owner))
+    }
+    fn account_name(&mut self, sid: &Sid) -> Result<Option<AccountName>, String> {
+        let named = (*sid == owner()).then(|| (OWNER_NAME.to_owned(), "PC-7".to_owned()));
+        Ok(named)
     }
 }
 
@@ -298,6 +302,48 @@ fn an_earlier_adopts_task_without_a_definition_descriptor_is_left_alone() {
     let given = Carried::Descriptor(test_descriptor(&owner()));
     assert_eq!(carried, Some(given));
     assert_eq!(readiness(&machine), SetupState::Ready);
+}
+
+#[test]
+fn a_task_updated_in_place_with_an_older_descriptor_gets_the_set_ups() {
+    // An earlier build's task: registering it again updates it in place, which keeps its own
+    // descriptor (here one naming another owner), so the repair then sets that descriptor.
+    let owner_rid = rid(&owner());
+    let older = test_descriptor(&Sid::parse(OTHER_OWNER).unwrap());
+    let mut machine = adopted("user-tasks-heal");
+    if let Some(Ok(stop)) = machine.state.tasks.get_mut("SandboxStop") {
+        stop.descriptor = older.clone();
+    }
+    assert_eq!(
+        readiness(&machine),
+        SetupState::Failed(TASK_CHANGED.to_owned())
+    );
+    let report = set_up_fresh(&mut machine, &mut FakeAcl::default());
+    assert_eq!(report.tasks, Ok(()));
+    let tasks = ["replace_task", "heal_task"];
+    let calls = machine.calls_since(0);
+    let calls = calls
+        .into_iter()
+        .filter(|c| tasks.iter().any(|task| c.starts_with(task)));
+    let calls: Vec<&str> = calls.collect();
+    let stop = |call: &str| format!("{call} SandboxStop {owner_rid}");
+    assert_eq!(calls, [stop("replace_task"), stop("heal_task_descriptor")]);
+    assert!(holds(&machine, SystemTask::Stop));
+    assert_eq!(readiness(&machine), SetupState::Ready);
+    // One the set-up can't set is named, and readiness still says changed.
+    let mut machine = adopted("user-tasks-heal-fails");
+    if let Some(Ok(stop)) = machine.state.tasks.get_mut("SandboxStop") {
+        stop.descriptor = older;
+    }
+    machine.fail(&stop("heal_task_descriptor"));
+    let why = set_up_fresh(&mut machine, &mut FakeAcl::default())
+        .tasks
+        .unwrap_err();
+    assert!(why.contains("SandboxStop"), "{why}");
+    assert_eq!(
+        readiness(&machine),
+        SetupState::Failed(TASK_CHANGED.to_owned())
+    );
 }
 
 #[test]

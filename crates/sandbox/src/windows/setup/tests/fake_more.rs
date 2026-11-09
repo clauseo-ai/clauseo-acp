@@ -17,7 +17,7 @@ use crate::windows::setup::record_values::CopyOwner;
 use std::cell::Cell;
 use std::rc::Rc;
 
-use super::fake::{FakeMachine, OWNER, OWNER_NAME, VOLUME, sid};
+use super::fake::{FakeMachine, OWNER, OWNER_NAME, VOLUME, rid, sid};
 use crate::test_support::TempDir;
 use crate::windows::setup::{LogonRight, MachineError, ServiceStart};
 
@@ -275,6 +275,55 @@ impl FakeMachine {
             line.to_owned(),
             MachineError::Other(format!("injected: {line}")),
         ));
+    }
+
+    /// `replace_task`'s registration, in place as Windows does it: a task already there keeps
+    /// its own descriptor (an earlier build's, as the VM read it), the rest the set-up's.
+    pub(super) fn register_in_place(&mut self, task: SystemTask, owner: &Sid) {
+        let mut registered = registered_task(task, owner);
+        if let Some(Ok(kept)) = self.state.tasks.get(task.name()) {
+            registered.descriptor = kept.descriptor.clone();
+        }
+        self.state
+            .tasks
+            .insert(task.name().to_owned(), Ok(registered));
+    }
+
+    /// `heal_task_descriptor`: the task's own descriptor set to the set-up's.
+    pub(super) fn heal_descriptor(
+        &mut self,
+        task: SystemTask,
+        owner: &Sid,
+    ) -> Result<(), MachineError> {
+        assert!(!self.acting.get(), "the descriptor is set as admin");
+        self.call(format!(
+            "heal_task_descriptor {} {}",
+            task.name(),
+            rid(owner)
+        ))?;
+        if let Some(Ok(found)) = self.state.tasks.get_mut(task.name()) {
+            found.descriptor = test_descriptor(owner);
+        }
+        Ok(())
+    }
+
+    /// `task_account_name`, as `LookupAccountSidW` answers locally: LOCAL SYSTEM, and the
+    /// machine's accounts on `PC-7`. A failure is a `task_account_name <rid>` call told to fail.
+    pub(super) fn account_name_of(
+        &mut self,
+        sid: &Sid,
+    ) -> Result<Option<(String, String)>, String> {
+        self.call(format!("task_account_name {}", rid(sid)))
+            .map_err(|error| error.to_string())?;
+        if sid.as_str() == "S-1-5-18" {
+            return Ok(Some(("SYSTEM".to_owned(), "NT AUTHORITY".to_owned())));
+        }
+        let named = self
+            .state
+            .accounts
+            .iter()
+            .find(|(_, account)| account.sid == *sid);
+        Ok(named.map(|(name, _)| (name.clone(), "PC-7".to_owned())))
     }
 
     /// The calls since `from`.

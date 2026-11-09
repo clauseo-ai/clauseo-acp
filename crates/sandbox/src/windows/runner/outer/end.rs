@@ -2,7 +2,8 @@
 //! (`TerminateJobObject`) and waited for until `ActiveProcesses` is 0, the record's `SweepNext`
 //! and `StopNext` read as the desktop user (the record grants Users read), runs of the `SYSTEM`
 //! tasks `\Clauseo\SandboxSweep` and `\Clauseo\SandboxStop` requested as the desktop user
-//! (`refresh::request_pool_sweep`, `refresh::request_pool_stop`), and the session's marker
+//! (`refresh::launch_pool_sweep`, `refresh::launch_pool_stop`, each bounded to 10 s), and the
+//! session's marker
 //! written. A run is the Task Scheduler's once queued: the host ending the outer's job leaves it
 //! running. No process of the pool user's is started here.
 
@@ -17,7 +18,7 @@ use super::super::spawn::{Job, active_processes, end_job};
 use super::super::sweep::SWEPT;
 use super::say;
 use crate::windows::acl::object::Handle;
-use crate::windows::refresh::{request_pool_stop, request_pool_sweep};
+use crate::windows::refresh::{launch_pool_stop, launch_pool_sweep};
 use crate::windows::setup::{read_record_install_id, read_record_value};
 use crate::windows::sids::Sid;
 
@@ -87,11 +88,11 @@ impl EndSteps for OsEnd {
     }
 
     fn request_sweep(&self) -> Result<(), String> {
-        request_pool_sweep().map_err(|error| error.to_string())
+        launch_pool_sweep()
     }
 
     fn request_stop(&self) -> bool {
-        request_pool_stop()
+        launch_pool_stop()
     }
 
     fn settle(&self, state: &MarkerState) -> Result<(), String> {

@@ -38,7 +38,7 @@ use crate::windows::marker::{self, Marker, MarkerState};
 use crate::windows::matters::MatterSids;
 use crate::windows::pool::{MachineRecord, POOL_GROUP, POOL_PREFIX, pool_number};
 use crate::windows::record::current_user_sid;
-use crate::windows::refresh::task_identity::action_exe;
+use crate::windows::refresh::task_identity::{AccountName, action_exe};
 use crate::windows::refresh::{self, ReadError, SystemTask, TaskIdentity};
 use crate::windows::secrets;
 use crate::windows::sids::{Reserved, Sid};
@@ -459,6 +459,15 @@ impl Machine for WindowsMachine {
     ) -> Result<(), MachineError> {
         refresh::replace_task(task, owner, exe)
             .map_err(|error| MachineError::Other(format!("{}: {error}", task.name())))
+    }
+
+    fn heal_task_descriptor(&mut self, task: SystemTask, owner: &Sid) -> Result<(), MachineError> {
+        refresh::heal_task_descriptor(task, owner)
+            .map_err(|error| MachineError::Other(format!("{}: {error}", task.name())))
+    }
+
+    fn task_account_name(&mut self, sid: &Sid) -> Result<Option<AccountName>, String> {
+        refresh::local_account_name(sid)
     }
 
     fn held_users(

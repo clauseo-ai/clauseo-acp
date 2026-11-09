@@ -52,10 +52,9 @@ use super::last_run::{LastRun, last_run};
 use super::staging::sddl_bytes;
 use super::task_folder::{Folders, prepare};
 use super::task_identity::{
-    Carried, OnBattery, TaskAction, TaskIdentity, TaskSettings, TaskTrigger, not_found,
-    principal_sid,
+    Carried, OnBattery, TaskAction, TaskIdentity, TaskSettings, TaskTrigger, account_text,
+    not_found,
 };
-use crate::windows::setup::sweep::windows_sweeper::lookup_account;
 
 /// The task's folder.
 pub const TASK_FOLDER: &str = "\\Clauseo";
@@ -410,7 +409,8 @@ fn out<T: Default>(
 }
 
 /// What makes `task` the set-up's, read from its definition, its state and its descriptor; the
-/// principal resolved to a SID (`task_identity::principal_sid`, `LookupAccountNameW`).
+/// principal and the logon trigger's user as written (`task_identity::account_text`), never
+/// resolved forwards here (`LookupAccountNameW` may ask a domain controller).
 fn identity(task: &IRegisteredTask) -> Result<TaskIdentity, TaskError> {
     // SAFETY: each call is on a live interface the one before returned, each out-pointer live
     // for its call (`out`); the collections are read by 1-based index within their counts; the
@@ -456,9 +456,9 @@ fn identity(task: &IRegisteredTask) -> Result<TaskIdentity, TaskError> {
             }
             let logon: ILogonTrigger = trigger.cast().map_err(com("ILogonTrigger"))?;
             let user: BSTR = out("ILogonTrigger::UserId", |at| logon.UserId(at))?;
-            // By SID, as the principal: Windows may write the user back as `DOMAIN\user`.
-            let lookup = |name: &str| lookup_account(name).ok();
-            triggers.push(TaskTrigger::Logon(principal_sid(&user.to_string(), lookup)));
+            // As written: Windows gives it back as `MACHINE\user` though registered by SID, and
+            // `task_identity` compares names locally (`same_account`).
+            triggers.push(TaskTrigger::Logon(account_text(&user.to_string())));
         }
         let settings = definition.Settings().map_err(com("Settings"))?;
         let flag =
@@ -508,9 +508,8 @@ fn identity(task: &IRegisteredTask) -> Result<TaskIdentity, TaskError> {
             }
             _ => Carried::Unreadable,
         };
-        let lookup = |name: &str| lookup_account(name).ok();
         Ok(TaskIdentity {
-            principal: principal_sid(&user.to_string(), lookup),
+            principal: account_text(&user.to_string()),
             run_level: level.0,
             actions,
             triggers,

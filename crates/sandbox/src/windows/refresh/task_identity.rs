@@ -30,6 +30,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use super::rules::action_path;
+pub use super::task_account::{AccountName, NameOf, account_text, same_account};
 use super::{POOL_TASKS, SystemTask, USER_TASKS};
 use crate::windows::acl_bytes::{self, Acl, Descriptor};
 use crate::windows::admin_copy::{self, AdminCopyFs};
@@ -84,8 +85,9 @@ pub enum TaskAction {
 /// One trigger of a registered task.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskTrigger {
-    /// `TASK_TRIGGER_LOGON`, for the user it names (empty: anyone's logon), by SID when the name
-    /// resolves to one ([`principal_sid`]): Windows may write it back as `DOMAIN\user`.
+    /// `TASK_TRIGGER_LOGON`, for the user it names (empty: anyone's logon), as read
+    /// ([`account_text`]): Windows may write it back as `MACHINE\user`, compared by
+    /// [`same_account`].
     Logon(String),
     /// Any other trigger, by its `TASK_TRIGGER_TYPE2`.
     Other(i32),
@@ -130,7 +132,8 @@ impl OnBattery {
 /// What makes a task the one `register_task` registers, as read back from the Task Scheduler.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskIdentity {
-    /// The principal's SID ([`principal_sid`]), or its name as read when it names no account.
+    /// The principal as read ([`account_text`]): its SID, or its name (`SYSTEM` through COM),
+    /// compared by [`same_account`].
     pub principal: String,
     /// `IPrincipal::RunLevel`, a `TASK_RUNLEVEL_TYPE`.
     pub run_level: i32,
@@ -259,56 +262,73 @@ pub fn not_found(hresult: u32) -> bool {
     NOT_FOUND.contains(&hresult)
 }
 
-/// `found` (the task read back) against `expected` ([`TaskIdentity::expected`]): `Err` when it
-/// couldn't be read for any reason but a refusal, which is a changed descriptor.
+/// `found` (the task read back) against `expected` ([`TaskIdentity::expected`]), names looked
+/// up locally through `name_of` ([`same_account`]): `Err` when it couldn't be read for any
+/// reason but a refusal, which is a changed descriptor, or a name in it couldn't be checked.
 pub fn check(
     found: Result<Option<&TaskIdentity>, &ReadError>,
     expected: &TaskIdentity,
+    name_of: &mut NameOf<'_>,
 ) -> Result<TaskCheck, String> {
     match found {
         Ok(None) => Ok(TaskCheck::Missing),
-        Ok(Some(found)) => Ok(differs(found, expected).map_or(TaskCheck::Same, TaskCheck::Differs)),
+        Ok(Some(found)) => {
+            Ok(differs(found, expected, name_of)?.map_or(TaskCheck::Same, TaskCheck::Differs))
+        }
         Err(ReadError::Refused) => Ok(TaskCheck::Differs(Differs::Descriptor)),
         Err(ReadError::Failed(error)) => Err(error.clone()),
     }
 }
 
-/// The first part of `found` that isn't `expected`'s.
-fn differs(found: &TaskIdentity, expected: &TaskIdentity) -> Option<Differs> {
-    let sid = |text: &str| Sid::parse(text).ok();
-    if sid(&found.principal).is_none() || sid(&found.principal) != sid(&expected.principal) {
-        return Some(Differs::Principal);
+/// The first part of `found` that isn't `expected`'s; `Err` when a name can't be checked.
+fn differs(
+    found: &TaskIdentity,
+    expected: &TaskIdentity,
+    name_of: &mut NameOf<'_>,
+) -> Result<Option<Differs>, String> {
+    if !same_account(&found.principal, &expected.principal, name_of)? {
+        return Ok(Some(Differs::Principal));
     }
+    differs_past_principal(found, expected, name_of)
+}
+
+/// [`differs`] past the principal.
+fn differs_past_principal(
+    found: &TaskIdentity,
+    expected: &TaskIdentity,
+    name_of: &mut NameOf<'_>,
+) -> Result<Option<Differs>, String> {
     let program = |action: &TaskAction| match action {
         TaskAction::Exec { path, arguments } => Some((canonical_path(path), arguments.clone())),
         TaskAction::Other => None,
     };
     let ([found_action], [want]) = (found.actions.as_slice(), expected.actions.as_slice()) else {
-        return Some(Differs::Action);
+        return Ok(Some(Differs::Action));
     };
     let (Some((path, arguments)), Some((want_path, want_arguments))) =
         (program(found_action), program(want))
     else {
-        return Some(Differs::Action);
+        return Ok(Some(Differs::Action));
     };
     if path != want_path {
-        return Some(Differs::Action);
+        return Ok(Some(Differs::Action));
     }
     if arguments != want_arguments {
-        return Some(Differs::Arguments);
+        return Ok(Some(Differs::Arguments));
     }
-    let same_trigger = |(a, b): (&TaskTrigger, &TaskTrigger)| match (a, b) {
-        (TaskTrigger::Logon(a), TaskTrigger::Logon(b)) => a.eq_ignore_ascii_case(b),
-        _ => false,
-    };
-    if found.triggers.len() != expected.triggers.len()
-        || !found
-            .triggers
-            .iter()
-            .zip(&expected.triggers)
-            .all(same_trigger)
-    {
-        return Some(Differs::Triggers);
+    if found.triggers.len() != expected.triggers.len() {
+        return Ok(Some(Differs::Triggers));
+    }
+    for pair in found.triggers.iter().zip(&expected.triggers) {
+        let same = match pair {
+            (TaskTrigger::Logon(a), TaskTrigger::Logon(b)) => {
+                (a.is_empty() && b.is_empty()) || same_account(a, b, name_of)?
+            }
+            _ => false,
+        };
+        if !same {
+            return Ok(Some(Differs::Triggers));
+        }
     }
     let (got, want) = (found.settings, expected.settings);
     let parts = [
@@ -338,10 +358,10 @@ fn differs(found: &TaskIdentity, expected: &TaskIdentity) -> Option<Differs> {
             Differs::Descriptor,
         ),
     ];
-    parts
+    Ok(parts
         .into_iter()
         .find(|(same, _)| !same)
-        .map(|(_, part)| part)
+        .map(|(_, part)| part))
 }
 
 /// `path` as Windows resolves it, for comparing: one pair of surrounding quotes and spaces
@@ -373,35 +393,21 @@ pub fn canonical_path(path: &str) -> String {
     parts.join("\\").to_lowercase()
 }
 
-/// The principal's SID, or a logon trigger's user's: `name` itself when it is one, else what
-/// `lookup` resolves it to (the Task Scheduler may write LOCAL SYSTEM by its name, in the
-/// computer's language, and a user as `DOMAIN\user`), else `name`.
-pub fn principal_sid(name: &str, lookup: impl FnOnce(&str) -> Option<Sid>) -> String {
-    match Sid::parse(name.trim()) {
-        Ok(sid) => sid.as_str().to_owned(),
-        Err(_not_a_sid) => {
-            lookup(name.trim()).map_or_else(|| name.to_owned(), |sid| sid.as_str().to_owned())
-        }
-    }
-}
-
 /// Whether the self-relative descriptor `found` is `expected`'s as Windows keeps it: the same
-/// owner, the DACL protected from inheritance (`SE_DACL_PROTECTED`) as `expected`'s is, the same
-/// group when `expected` names one (a group grants nothing on a task), every
+/// owner, the same group when `expected` names one (a group grants nothing on a task), every
 /// DACL entry of `expected` present exactly (type, inheritance flags but inherited or not,
 /// rights with generic ones mapped to the file rights the Task Scheduler checks, and SID), and
 /// nothing else but allow entries for SYSTEM or Administrators. Windows adds those itself: a
 /// registration names its principal, LOCAL SYSTEM, read access (`(A;;FR;;;SY)`, read back on
 /// Server 2025) unless `TASK_DONT_ADD_PRINCIPAL_ACE` is passed. They grant nothing to anyone
 /// who doesn't already hold full control. Any other entry (Users, Everyone, a pool user, a wider
-/// or second entry for the owner, any deny entry) is a change.
-fn same_descriptor(found: &[u8], expected: &[u8]) -> bool {
+/// or second entry for the owner, any deny entry) is a change. The DACL's control flags
+/// (protected, auto-inherited) aren't compared: an earlier build's task updated in place reads
+/// back with neither (the VM, Server 2025), and the entry rule already counts inherited entries
+/// as present and allows no extra but SYSTEM's and Administrators'.
+pub(super) fn same_descriptor(found: &[u8], expected: &[u8]) -> bool {
     let owner = acl_bytes::owner_sid(found);
     if owner.is_none() || owner != acl_bytes::owner_sid(expected) {
-        return false;
-    }
-    let protected = |bytes: &[u8]| Descriptor::parse(bytes).ok().map(|d| d.dacl_protected());
-    if protected(found).is_none() || protected(found) != protected(expected) {
         return false;
     }
     if let Some(group) = group_sid(expected)
@@ -491,6 +497,8 @@ pub trait TaskReader {
     fn found(&mut self, task: SystemTask) -> Result<Option<TaskIdentity>, ReadError>;
     /// `task_sddl(owner)` made into a self-relative descriptor.
     fn descriptor(&mut self, owner: &Sid) -> Result<Vec<u8>, String>;
+    /// The account `sid` names, looked up locally (`LookupAccountSidW`, [`NameOf`]).
+    fn account_name(&mut self, sid: &Sid) -> Result<Option<AccountName>, String>;
 }
 
 /// What the set-up's repair would mend in `task`, in the words for it: on a per-user install
@@ -515,7 +523,8 @@ pub fn repair_reason(reader: &mut dyn TaskReader, task: SystemTask) -> Option<&'
         let exe = reader.exe()?;
         let expected = TaskIdentity::expected(task, &user, &exe, reader.descriptor(&user)?);
         let found = reader.found(task);
-        check(found.as_ref().map(Option::as_ref), &expected)
+        let mut name_of = |sid: &Sid| reader.account_name(sid);
+        check(found.as_ref().map(Option::as_ref), &expected, &mut name_of)
     })();
     match checked {
         Ok(TaskCheck::Same) => None,

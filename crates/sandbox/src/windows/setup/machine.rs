@@ -13,6 +13,8 @@ use crate::windows::ledger::Ledger;
 use crate::windows::marker::{Marker, MarkerState};
 use crate::windows::pool::MachineRecord;
 #[cfg(any(windows, test))]
+use crate::windows::refresh::task_identity::AccountName;
+#[cfg(any(windows, test))]
 use crate::windows::refresh::{ReadError, SystemTask, TaskIdentity};
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::sids::Sid;
@@ -243,6 +245,14 @@ pub trait Machine {
         owner: &Sid,
         exe: &Path,
     ) -> Result<(), MachineError>;
+    #[cfg(any(windows, test))]
+    /// Sets `task`'s own descriptor to `task_sddl(owner)`, as this process (elevated), when
+    /// registering it in place left an older one (`refresh::heal_task_descriptor`).
+    fn heal_task_descriptor(&mut self, task: SystemTask, owner: &Sid) -> Result<(), MachineError>;
+    #[cfg(any(windows, test))]
+    /// The account `sid` names, looked up locally (`refresh::local_account_name`), for the
+    /// compare of a task's principal and logon trigger when Windows gives back a name.
+    fn task_account_name(&mut self, sid: &Sid) -> Result<Option<AccountName>, String>;
     /// The users of `pool` the reuse rule would hold back once this run has reset `resets`, for
     /// the top-up's count (`top_up.rs`, `MatterSids::held_after_resets`), the owner's ledger
     /// opened trusting `trusted`; an input that can't be read holds every user. The engine calls

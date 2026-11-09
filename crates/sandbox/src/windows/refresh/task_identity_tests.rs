@@ -34,7 +34,24 @@ pub(super) fn registered(task: SystemTask) -> TaskIdentity {
 
 /// `found` against `expected`, read without error.
 pub(super) fn compare(found: &TaskIdentity, expected: &TaskIdentity) -> TaskCheck {
-    check(Ok(Some(found)), expected).unwrap()
+    check(Ok(Some(found)), expected, &mut local_names).unwrap()
+}
+
+/// A SID whose local lookup fails, as one would with the LSA unable to answer.
+pub(super) const UNANSWERED: &str = "S-1-5-21-1-2-3-9999";
+
+/// `LookupAccountSidW` as this test machine, `CLAUSEO-VM`, answers it locally.
+pub(super) fn local_names(sid: &Sid) -> Result<Option<AccountName>, String> {
+    if sid.as_str() == UNANSWERED {
+        return Err("LookupAccountSidW: the LSA didn't answer".to_owned());
+    }
+    let named = match sid.as_str() {
+        SYSTEM => Some(("SYSTEM", "NT AUTHORITY")),
+        LAWYER => Some(("lawyer", "CLAUSEO-VM")),
+        OTHER => Some(("other", "CLAUSEO-VM")),
+        _ => None,
+    };
+    Ok(named.map(|(name, domain)| (name.to_owned(), domain.to_owned())))
 }
 
 /// A program action.
@@ -51,7 +68,7 @@ pub(super) fn with_entries(owner: &str, entries: &[(u8, u8, u32, &str)]) -> Vec<
 }
 
 /// `bytes` with `group` as its group.
-fn with_group(mut bytes: Vec<u8>, group: &str) -> Vec<u8> {
+pub(super) fn with_group(mut bytes: Vec<u8>, group: &str) -> Vec<u8> {
     let at = u32::try_from(bytes.len()).unwrap();
     bytes.extend(acl_bytes::sid_bytes(&Sid::parse(group).unwrap()));
     bytes[8..12].copy_from_slice(&at.to_le_bytes());
@@ -84,7 +101,10 @@ fn the_expected_task_runs_the_admin_copy_as_system_whenever_asked() {
             compare(&registered(task), &registered(task)),
             TaskCheck::Same
         );
-        assert_eq!(check(Ok(None), &registered(task)), Ok(TaskCheck::Missing));
+        assert_eq!(
+            check(Ok(None), &registered(task), &mut local_names),
+            Ok(TaskCheck::Missing)
+        );
     }
 }
 
@@ -215,15 +235,19 @@ fn a_disabled_sweep_task_is_changed() {
 #[test]
 fn a_german_read_back_and_other_texts_with_the_same_meaning_are_the_same() {
     let expected = registered(SystemTask::Stop);
-    // The principal by SID, whatever the language of its name.
-    let lookup = |name: &str| (name == GERMAN_SYSTEM).then(|| Sid::parse(SYSTEM).unwrap());
+    // The principal by SID, or by LOCAL SYSTEM's own name in the machine's language.
+    let mut german = |sid: &Sid| {
+        let system = (sid.as_str() == SYSTEM).then(|| ("SYSTEM".into(), "NT-AUTORITÄT".into()));
+        Ok(system)
+    };
     let mut found = expected.clone();
-    found.principal = principal_sid(GERMAN_SYSTEM, lookup);
-    assert_eq!(found.principal, SYSTEM);
-    assert_eq!(compare(&found, &expected), TaskCheck::Same);
-    assert_eq!(principal_sid(" S-1-5-18 ", |_| None), SYSTEM);
+    found.principal = account_text(GERMAN_SYSTEM);
+    assert_eq!(found.principal, GERMAN_SYSTEM);
+    let checked = check(Ok(Some(&found)), &expected, &mut german);
+    assert_eq!(checked, Ok(TaskCheck::Same));
+    assert_eq!(account_text(" S-1-5-18 "), SYSTEM);
     assert_eq!(
-        principal_sid("AUTORITE NT\\Inconnu", |_| None),
+        account_text(" AUTORITE NT\\Inconnu "),
         "AUTORITE NT\\Inconnu"
     );
     // The program by its canonical path.
@@ -262,21 +286,21 @@ fn a_german_read_back_and_other_texts_with_the_same_meaning_are_the_same() {
     assert_eq!(READ_EXECUTE, 0x0012_0089 | 0x0012_00A0);
 }
 
-/// This machine's own name for LOCAL SYSTEM, in its language, as the Task Scheduler may write
-/// it back, resolves to its SID through the lookup `task.rs` uses.
+/// This machine's own names for LOCAL SYSTEM and for the user running the tests, in its
+/// language, as the Task Scheduler may write them back, are theirs through the local lookup
+/// `task_read.rs` uses (`LookupAccountSidW`).
 #[cfg(windows)]
 #[test]
-fn this_machines_name_for_system_resolves_to_its_sid() {
-    use crate::windows::setup::accounts::lookup_sid;
-    use crate::windows::setup::sweep::windows_sweeper::lookup_account;
-    let system = Sid::parse(SYSTEM).unwrap();
-    let (name, domain, _) = lookup_sid(&system).unwrap().unwrap();
-    for name in [format!("{domain}\\{name}"), name] {
-        assert_eq!(
-            principal_sid(&name, |n| lookup_account(n).ok()),
-            SYSTEM,
-            "{name}"
-        );
+fn this_machines_names_for_system_and_the_user_are_theirs() {
+    use crate::windows::record::current_user_sid;
+    use crate::windows::refresh::local_account_name;
+    let user = current_user_sid().unwrap();
+    for sid in [Sid::parse(SYSTEM).unwrap(), user] {
+        let (name, domain) = local_account_name(&sid).unwrap().unwrap();
+        for written in [format!("{domain}\\{name}"), name.to_uppercase(), name] {
+            let same = same_account(&written, sid.as_str(), &mut local_account_name);
+            assert_eq!(same, Ok(true), "{written}");
+        }
     }
 }
 
@@ -286,12 +310,12 @@ fn a_refused_read_is_changed_and_any_other_error_cant_be_told() {
     let refused = ReadError::of(0x8007_0005, "E_ACCESSDENIED".to_owned());
     assert_eq!(refused, ReadError::Refused);
     assert_eq!(
-        check(Err(&refused), &expected),
+        check(Err(&refused), &expected, &mut local_names),
         Ok(TaskCheck::Differs(Differs::Descriptor))
     );
     let down = ReadError::of(0x8004_1315, "the Task Scheduler isn't running".to_owned());
     assert_eq!(
-        check(Err(&down), &expected),
+        check(Err(&down), &expected, &mut local_names),
         Err("the Task Scheduler isn't running".to_owned())
     );
     // No task, or no `\Clauseo` folder at all, is a missing task.
@@ -412,6 +436,9 @@ impl TaskReader for Reader {
     }
     fn descriptor(&mut self, owner: &Sid) -> Result<Vec<u8>, String> {
         Ok(test_descriptor(owner))
+    }
+    fn account_name(&mut self, sid: &Sid) -> Result<Option<AccountName>, String> {
+        local_names(sid)
     }
 }
 

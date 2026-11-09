@@ -2,14 +2,17 @@
 //! the task exactly, and the only extra entries allowed are allow entries for SYSTEM or
 //! Administrators, as Windows adds at registration (the VM's read-back, Server 2025). The
 //! descriptor the definition carries (the XML's `<SecurityDescriptor>`) is held to the same rule;
-//! a definition carrying none rests on the task's own. The DACL must be protected, and the
-//! refresh task's logon trigger names the owner by SID, however Windows writes the user back.
+//! a definition carrying none rests on the task's own. The DACL's control flags aren't compared
+//! (an earlier build's task updated in place reads back unprotected), and names (the principal
+//! as `SYSTEM`, the refresh task's logon trigger as `MACHINE\user`) are compared with the
+//! expected SID's local name, a failed lookup being couldn't-check.
 //! And the readiness check's words over every task a per-user install needs: missing over
 //! changed over unchecked, whichever task comes first.
 
 use super::task_identity::*;
 use super::task_identity_tests::{
-    ADMINISTRATORS, LAWYER, Reader, SYSTEM, compare, registered, with_entries,
+    ADMINISTRATORS, LAWYER, Reader, SYSTEM, UNANSWERED, compare, local_names, registered,
+    with_entries, with_group,
 };
 use super::{SystemTask, USER_TASKS};
 use crate::SetupState;
@@ -154,46 +157,120 @@ fn a_definition_without_a_descriptor_rests_on_the_tasks_own() {
 }
 
 #[test]
-fn a_dacl_that_isnt_protected_is_changed() {
+fn an_earlier_builds_task_updated_in_place_is_the_same() {
+    // The VM (Server 2025): Stop and Sweep from an earlier build, updated in place, read back
+    // D:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;<lawyer>)(A;;FR;;;SY), no P, no AI. The control
+    // flags aren't compared; the entry rule holds.
     let expected = registered(SystemTask::Sweep);
-    let set_ups = [
+    let upgraded = [
         (0, 0, FULL_ACCESS, SYSTEM),
         (0, 0, FULL_ACCESS, ADMINISTRATORS),
         (0, 0, READ_EXECUTE, LAWYER),
+        (0, 0, 0x0012_0089, SYSTEM),
     ];
     let mut found = expected.clone();
-    found.descriptor = descriptor(ADMINISTRATORS, Some(&set_ups), false);
+    found.descriptor = descriptor(ADMINISTRATORS, Some(&upgraded), false);
+    found.definition_descriptor = Carried::Absent;
+    assert_eq!(compare(&found, &expected), TaskCheck::Same);
+    found.descriptor = descriptor(ADMINISTRATORS, Some(&upgraded), true);
+    assert_eq!(compare(&found, &expected), TaskCheck::Same);
+    // Unprotected or not, an entry for Users is still a change.
+    let users = (0, 0, FULL_ACCESS, "S-1-5-32-545");
+    let wider = [upgraded[0], upgraded[1], upgraded[2], users];
+    found.descriptor = descriptor(ADMINISTRATORS, Some(&wider), false);
     assert_eq!(
         compare(&found, &expected),
         TaskCheck::Differs(Differs::Descriptor)
     );
-    found.descriptor = descriptor(ADMINISTRATORS, Some(&set_ups), true);
-    assert_eq!(compare(&found, &expected), TaskCheck::Same);
 }
 
 #[test]
-fn the_refresh_logon_trigger_compares_by_sid_however_windows_writes_the_user() {
-    let expected = registered(SystemTask::Refresh);
-    let lawyer_name = r"CLAUSEO-VM\lawyer";
-    let lookup = |name: &str| (name == lawyer_name).then(|| Sid::parse(LAWYER).unwrap());
-    // The SID as written, and the account's name resolving to the same SID: the same.
-    for written in [LAWYER, lawyer_name] {
-        let mut found = expected.clone();
-        found.triggers = vec![TaskTrigger::Logon(principal_sid(written, lookup))];
-        assert_eq!(compare(&found, &expected), TaskCheck::Same, "{written}");
-    }
-    // Another user, by SID or by a name that resolves to theirs: changed.
-    let other = "S-1-5-21-1-2-3-1002";
-    let other_name = r"CLAUSEO-VM\other";
-    let lookup = |name: &str| (name == other_name).then(|| Sid::parse(other).unwrap());
-    for written in [other, other_name, r"CLAUSEO-VM\nobody"] {
-        let mut found = expected.clone();
-        found.triggers = vec![TaskTrigger::Logon(principal_sid(written, lookup))];
-        let changed = TaskCheck::Differs(Differs::Triggers);
-        assert_eq!(compare(&found, &expected), changed, "{written}");
-    }
+fn the_shipped_releases_stop_and_refresh_tasks_are_the_same() {
+    // The VM's untouched per-user install of the shipped release: both tasks'
+    // live descriptor O:BAG:<domain>-513D:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;<lawyer>)
+    // (A;;FR;;;SY): no P, no AI, Windows' SY FR, and a group the set-up names none of, so
+    // isn't compared. The principal S-1-5-18; Stop's XML carries the set-up's descriptor,
+    // Refresh's none, and Refresh's logon trigger names the lawyer as MACHINE\user.
+    let shipped = [
+        (0, 0, FULL_ACCESS, SYSTEM),
+        (0, 0, FULL_ACCESS, ADMINISTRATORS),
+        (0, 0, 0x0012_00a9, LAWYER),
+        (0, 0, 0x0012_0089, SYSTEM),
+    ];
+    let live = with_group(
+        descriptor(ADMINISTRATORS, Some(&shipped), false),
+        "S-1-5-21-1-2-3-513",
+    );
+    let stop_expected = registered(SystemTask::Stop);
+    let mut stop = stop_expected.clone();
+    stop.principal = account_text(SYSTEM);
+    stop.descriptor = live.clone();
+    assert_eq!(compare(&stop, &stop_expected), TaskCheck::Same);
+    let refresh_expected = registered(SystemTask::Refresh);
+    let mut refresh = refresh_expected.clone();
+    refresh.descriptor = live;
+    refresh.definition_descriptor = Carried::Absent;
+    refresh.triggers = vec![TaskTrigger::Logon(account_text(r"CLAUSEO-VM\lawyer"))];
+    assert_eq!(compare(&refresh, &refresh_expected), TaskCheck::Same);
 }
 
+#[test]
+fn names_compare_with_the_expected_sids_local_name_and_never_ask_further() {
+    let expected = registered(SystemTask::Refresh);
+    // The principal through COM: `SYSTEM` against S-1-5-18, any case or prefix.
+    for written in [
+        "SYSTEM",
+        "system",
+        r"NT AUTHORITY\SYSTEM",
+        "LocalSystem",
+        SYSTEM,
+    ] {
+        let mut found = expected.clone();
+        found.principal = account_text(written);
+        assert_eq!(compare(&found, &expected), TaskCheck::Same, "{written}");
+    }
+    // The refresh task's logon trigger, registered by SID, read back as `MACHINE\user`.
+    for written in [
+        r"CLAUSEO-VM\lawyer",
+        r"clauseo-vm\LAWYER",
+        r".\lawyer",
+        "lawyer",
+        LAWYER,
+    ] {
+        let mut found = expected.clone();
+        found.triggers = vec![TaskTrigger::Logon(account_text(written))];
+        assert_eq!(compare(&found, &expected), TaskCheck::Same, "{written}");
+    }
+    // Another user, by SID or by name, or the lawyer's name in another domain: changed.
+    let changed = TaskCheck::Differs(Differs::Triggers);
+    for written in [
+        "S-1-5-21-1-2-3-1002",
+        r"CLAUSEO-VM\other",
+        r"CORP\lawyer",
+        "",
+    ] {
+        let mut found = expected.clone();
+        found.triggers = vec![TaskTrigger::Logon(account_text(written))];
+        assert_eq!(compare(&found, &expected), changed, "{written}");
+    }
+    let mut found = expected.clone();
+    found.principal = account_text(r"CLAUSEO-VM\lawyer");
+    assert_eq!(
+        compare(&found, &expected),
+        TaskCheck::Differs(Differs::Principal)
+    );
+    // A local lookup that fails can't tell: couldn't-check, never changed. A SID needs none.
+    let mut down = |_: &Sid| Err("LookupAccountSidW: RPC server unavailable".to_owned());
+    let mut found = expected.clone();
+    found.triggers = vec![TaskTrigger::Logon(account_text(r"CLAUSEO-VM\lawyer"))];
+    assert!(check(Ok(Some(&found)), &expected, &mut down).is_err());
+    let mut nameless = |_: &Sid| Ok(None);
+    assert!(check(Ok(Some(&found)), &expected, &mut nameless).is_err());
+    let unanswered = same_account(r"CLAUSEO-VM\lawyer", UNANSWERED, &mut local_names);
+    assert!(unanswered.is_err());
+    let checked = check(Ok(Some(&expected)), &expected, &mut down);
+    assert_eq!(checked, Ok(TaskCheck::Same));
+}
 #[test]
 fn readiness_says_missing_over_changed_over_unchecked_across_every_task() {
     assert_eq!(
