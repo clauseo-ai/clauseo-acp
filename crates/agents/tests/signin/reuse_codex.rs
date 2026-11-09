@@ -2,6 +2,8 @@
 //! 1's "Reuse, on the fakes" items for Codex, and the public split check and guard. The lawyer's
 //! login is a dummy, empty login file in `$HOME/.codex` (the fixture's `HOME` is
 //! `<data>/user-home`), which the fake takes as its marker; it is never a real credential.
+//! Detection only stats that file (no Codex run), so `LoginFound` has no email; "Use it"
+//! confirms the account through the link, which gives the email and plan.
 
 use std::ffi::OsStr;
 use std::path::PathBuf;
@@ -38,10 +40,11 @@ fn plant_lawyer(fx: &Fixture) {
     write_file(&lawyer_file(fx), b"").unwrap();
 }
 
+/// Detection's `LoginFound` for Codex: a stat gives no email.
 fn found() -> SigninState {
     SigninState::LoginFound {
         from: LoginFrom::Codex,
-        email: Some(EMAIL.to_owned()),
+        email: None,
     }
 }
 
@@ -79,53 +82,38 @@ fn logouts(fx: &Fixture) -> Vec<Launch> {
     fx.codex_runs(&["logout"])
 }
 
-/// "detection runs with `CLAUDE_CONFIG_DIR` and `CODEX_HOME` absent from the child's env" and
-/// "detection runs without `cli_auth_credentials_store`": the base environment sets both
-/// variables; the fake reports the names its last run (detection's `app-server`) got.
+/// Codex's detection starts no Codex run at all (its `login status` writes `~/.codex/tmp`):
+/// every Codex run of a status check that detects has Clauseo's `CODEX_HOME` and the store
+/// argument, though the base environment sets `CLAUDE_CONFIG_DIR` (`CODEX_HOME` there is the
+/// lawyer's own, `detect_nowrite.rs`).
 #[test]
-fn codex_detection_runs_without_codex_home_or_the_store_argument() {
+fn codex_detection_starts_no_codex_run() {
     let mut fx = Fixture::new("reuse-codex-env", "ok-after:0");
-    for name in ["CODEX_HOME", "CLAUDE_CONFIG_DIR"] {
-        fx.config
-            .signin
-            .base_env
-            .insert(name.into(), fx.data.path().join("stray").into_os_string());
-    }
+    fx.config.signin.base_env.insert(
+        "CLAUDE_CONFIG_DIR".into(),
+        fx.data.path().join("stray").into_os_string(),
+    );
     plant_lawyer(&fx);
     let (agents, events) = start(&fx);
     agents.check_status(&codex()).unwrap();
     assert_eq!(events.state(), found());
-    let names = fx.env_names();
-    assert!(!names.iter().any(|name| name == "CODEX_HOME"), "{names:?}");
-    assert!(
-        !names.iter().any(|name| name == "CLAUDE_CONFIG_DIR"),
-        "{names:?}"
-    );
-    // Detection runs are the ones without `CODEX_HOME`: Clauseo's own-store runs always set it,
-    // and on Windows they keep the inherited `HOME`, so `HOME` alone cannot tell them apart.
-    let home = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
-    let detection: Vec<Launch> = fx
-        .launches()
-        .into_iter()
-        .filter(|run| !run.env.contains_key(OsStr::new("CODEX_HOME")))
-        .collect();
-    let commands: Vec<Vec<&str>> = detection.iter().map(Launch::command).collect();
-    assert_eq!(commands, [vec!["login", "status"], vec!["app-server"]]);
-    for run in &detection {
-        assert!(!has_store(run), "{:?}", run.args);
+    let runs = fx.launches();
+    assert_ne!(runs.len(), 0);
+    for run in &runs {
+        assert!(has_store(run), "{:?}", run.args);
         assert_eq!(
-            run.env.get(OsStr::new(home)),
-            Some(&fx.user_home().into()),
+            run.env.get(OsStr::new("CODEX_HOME")),
+            Some(&home(&fx).into_os_string()),
             "{:?}",
             run.args
         );
     }
 }
 
-/// "a Codex status of 0 with `~/.codex/auth.json` present gives `LoginFound { from: Codex,
-/// email }` (the fake's `account/read`) and makes no link".
+/// The lawyer's `~/.codex/auth.json` present (a regular file) gives `LoginFound { from: Codex,
+/// email: None }` and makes no link.
 #[test]
-fn a_codex_status_of_0_with_the_file_present_gives_login_found_and_no_link() {
+fn the_lawyer_s_file_present_gives_login_found_and_no_link() {
     let fx = Fixture::new("reuse-codex-found", "ok-after:0");
     plant_lawyer(&fx);
     let (agents, events) = start(&fx);
@@ -160,15 +148,16 @@ fn use_found_login_leaves_one_file_under_two_names() {
     assert_eq!(events.state(), reused());
 }
 
-/// "… and with it absent gives `found: CodexKeyring`": status 0 (the fake's marker in
-/// `~/.codex`) with no login file.
+/// With no login file, nothing is found, though Codex's CLI would say signed in (the fake's
+/// marker in `~/.codex`, a keyring login say): telling a keyring login apart needs the CLI,
+/// which detection never runs.
 #[test]
-fn with_the_file_absent_codex_gives_codex_keyring() {
+fn with_the_file_absent_codex_finds_no_login() {
     let fx = Fixture::new("reuse-codex-keyring", "ok-after:0");
     write_file(&fx.user_home().join(".codex/fake-signin-marker"), b"{}").unwrap();
     let (agents, events) = start(&fx);
     agents.check_status(&codex()).unwrap();
-    assert_eq!(events.state(), signed_out(Some(Found::CodexKeyring)));
+    assert_eq!(events.state(), signed_out(Some(Found::NoLogin)));
     assert_eq!(
         agents.use_found_login(&codex()),
         Err(SigninError::NothingFound(codex()))
@@ -325,9 +314,9 @@ fn the_split_rule_stops_reuse_once_the_names_are_two_files() {
     unlink_reused_login(&home(&fx)).unwrap();
 }
 
-/// "Codex runs other than detection get `HOME` set to Clauseo's folder on macOS and Linux,
-/// Claude runs never": every Codex run with the store argument has `HOME` its home, every one
-/// without (detection) the lawyer's; every Claude run the lawyer's.
+/// "Codex runs get `HOME` set to Clauseo's folder on macOS and Linux, Claude runs never":
+/// every Codex run has the store argument and `HOME` its home (detection starts none); every
+/// Claude run has the lawyer's.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn codex_runs_but_detection_get_clauseo_s_home_and_claude_runs_never() {
@@ -364,20 +353,13 @@ fn codex_runs_but_detection_get_clauseo_s_home_and_claude_runs_never() {
             seen.2 += 1;
         }
     }
-    assert!(seen.0 > 0 && seen.1 > 0 && seen.2 > 0, "{seen:?}");
+    assert!(seen.0 > 0 && seen.1 == 0 && seen.2 > 0, "{seen:?}");
 }
 
 /// The lawyer's file-mode login whose `account/read` names no email (a `ChatGPT` account with
-/// `email: null`, by the fake's dummy marker): detection gives `LoginFound { email: None }`.
+/// `email: null`, by the fake's dummy marker).
 fn plant_lawyer_without_email(fx: &Fixture) {
     write_file(&lawyer_file(fx), br#"{"authMethod": "chatgpt-no-email"}"#).unwrap();
-}
-
-fn found_without_email() -> SigninState {
-    SigninState::LoginFound {
-        from: LoginFrom::Codex,
-        email: None,
-    }
 }
 
 /// Whether the home holds no name of Codex's login file and no `reused` record.
@@ -394,9 +376,9 @@ fn until_app_servers(fx: &Fixture, count: usize) {
     });
 }
 
-/// S18 security review, Medium 1, first repro: "Use it" whose detection's `account/read` is cut
-/// short by a cancel. The cut-short read is not "no email", so it never matches the `None` the
-/// lawyer was shown: the job ends `signin.cancelled`, with no link and no `reused` record.
+/// S18 security review, Medium 1, first repro: "Use it" whose confirmation's `account/read`
+/// (through the new link) is cut short by a cancel: the job ends `signin.cancelled`, the link
+/// is removed again and no `reused` record is written.
 #[cfg(unix)]
 #[test]
 fn cancelling_use_it_during_its_account_read_makes_no_link() {
@@ -404,7 +386,7 @@ fn cancelling_use_it_during_its_account_read_makes_no_link() {
     plant_lawyer_without_email(&fx);
     let (agents, events) = start(&fx);
     agents.check_status(&codex()).unwrap();
-    assert_eq!(events.state(), found_without_email());
+    assert_eq!(events.state(), found());
     let before = fx.codex_runs(&["app-server"]).len();
     fx.stall(Some("app-server"));
     agents.use_found_login(&codex()).unwrap();
@@ -425,8 +407,9 @@ fn cancelling_use_it_during_its_account_read_makes_no_link() {
 }
 
 /// S18 security review, Medium 1, second repro: `use_different_account` while "Use it" waits on
-/// its `account/read`. "Use it" is replaced and links nothing; Clauseo's own sign-in runs and
-/// ends signed in, with no link and no `reused` record, and the next start keeps it.
+/// its confirmation's `account/read`. "Use it" is replaced and links nothing; Clauseo's own
+/// sign-in runs and ends signed in, with no link and no `reused` record, and the next start
+/// keeps it.
 #[cfg(unix)]
 #[test]
 fn use_different_account_racing_use_it_makes_no_link() {
@@ -434,7 +417,7 @@ fn use_different_account_racing_use_it_makes_no_link() {
     plant_lawyer_without_email(&fx);
     let (agents, events) = start(&fx);
     agents.check_status(&codex()).unwrap();
-    assert_eq!(events.state(), found_without_email());
+    assert_eq!(events.state(), found());
     let before = fx.codex_runs(&["app-server"]).len();
     fx.stall(Some("app-server"));
     agents.use_found_login(&codex()).unwrap();
@@ -471,11 +454,11 @@ fn use_different_account_racing_use_it_makes_no_link() {
     assert!(nothing_reused(&fx));
 }
 
-/// A cancel during "Use it"'s detection, when the lawyer was shown an email, ends the job
-/// `signin.cancelled` (not `LoginFound` with no email, nor `signin.failed`).
+/// A cancel during "Use it"'s confirmation of a login with an email ends the job
+/// `signin.cancelled` (not `signin.failed`), with nothing reused.
 #[cfg(unix)]
 #[test]
-fn cancelling_use_it_during_its_detection_gives_cancelled() {
+fn cancelling_use_it_during_its_confirmation_gives_cancelled() {
     let fx = Fixture::new("reuse-codex-cancel-detect", "ok-after:0");
     plant_lawyer(&fx);
     let (agents, events) = start(&fx);
@@ -497,33 +480,34 @@ fn cancelling_use_it_during_its_detection_gives_cancelled() {
     assert!(nothing_reused(&fx));
 }
 
-/// An app-server that never answers during detection is not "no email": the status check can
-/// not tell, so the state stays as it was and no `LoginFound { email: None }` is shown for it.
+/// "Use it" whose confirmation never answers (the app-server killed at its limit) is
+/// `signin.failed`: the link is removed again and nothing is recorded, so the lawyer may try
+/// again.
 #[cfg(target_os = "linux")]
 #[test]
-fn an_unanswered_account_read_is_never_login_found_without_an_email() {
+fn use_it_whose_confirmation_never_answers_fails_and_reuses_nothing() {
     let fx = Fixture::new("reuse-codex-unanswered", "ok-after:0");
     plant_lawyer(&fx);
     let (agents, events) = start(&fx);
-    fx.stall(Some("app-server"));
     agents.check_status(&codex()).unwrap();
+    assert_eq!(events.state(), found());
+    let before = fx.codex_runs(&["app-server"]).len();
+    fx.stall(Some("app-server"));
+    agents.use_found_login(&codex()).unwrap();
+    until_app_servers(&fx, before + 1);
     fx.timer.fire(std::time::Duration::from_secs(20));
+    let (_, last) = events.until_end();
+    assert_eq!(
+        last,
+        SigninState::Failed {
+            code: SigninCode::Failed,
+            at: now()
+        }
+    );
     let app_server = fx.codex_runs(&["app-server"]).pop().unwrap();
     assert!(crate::support::gone(app_server.pid));
-    for _ in 0..20 {
-        crate::support::pause();
-    }
-    // Only the status check's `Checking` is sent while it asks again.
-    let sent: Vec<_> = events
-        .drain()
-        .into_iter()
-        .filter(|event| {
-            matches!(event, clauseo_agents::AgentsEvent::Signin { state, .. }
-                if *state != SigninState::Checking)
-        })
-        .collect();
-    assert_eq!(sent, []);
-    assert_eq!(agents.signin_state(&codex()), Some(SigninState::Checking));
+    assert!(nothing_reused(&fx));
+    assert!(lawyer_file(&fx).is_file());
 }
 
 /// S18 security review, Low 2: the guard refuses when the home's login file is a symbolic link
@@ -563,7 +547,7 @@ fn use_it_reuses_a_login_with_no_email() {
     plant_lawyer_without_email(&fx);
     let (agents, events) = start(&fx);
     agents.check_status(&codex()).unwrap();
-    assert_eq!(events.state(), found_without_email());
+    assert_eq!(events.state(), found());
     agents.use_found_login(&codex()).unwrap();
     let last = events.state();
     assert_eq!(
@@ -583,18 +567,20 @@ fn use_it_reuses_a_login_with_no_email() {
     assert_eq!(fx.codex_runs(&["login"]), []);
 }
 
-/// Shown with no email, re-detected with one: another account than the one the lawyer chose,
-/// so nothing is reused and the new `LoginFound` is shown.
+/// An API-key login file is offered (a stat cannot tell it from a `ChatGPT` one), and "Use it"'s
+/// confirmation turns it down: `SignedOut { found: ReusedSignedOut }`, the link removed again,
+/// nothing recorded, no `no-reuse`, and the lawyer's file kept.
 #[test]
-fn use_it_shown_without_an_email_but_found_with_one_reuses_nothing() {
-    let fx = Fixture::new("reuse-codex-none-then-some", "ok-after:0");
-    plant_lawyer_without_email(&fx);
+fn use_it_turns_down_an_api_key_login() {
+    let fx = Fixture::new("reuse-codex-api-key", "ok-after:0");
+    write_file(&lawyer_file(&fx), br#"{"authMethod": "apikey"}"#).unwrap();
     let (agents, events) = start(&fx);
     agents.check_status(&codex()).unwrap();
-    assert_eq!(events.state(), found_without_email());
-    plant_lawyer(&fx);
-    agents.use_found_login(&codex()).unwrap();
     assert_eq!(events.state(), found());
+    agents.use_found_login(&codex()).unwrap();
+    assert_eq!(events.state(), signed_out(Some(Found::ReusedSignedOut)));
     assert!(nothing_reused(&fx));
+    assert!(!fx.marker(&codex(), "no-reuse").exists());
+    assert!(lawyer_file(&fx).is_file());
     assert_eq!(fx.codex_runs(&["login"]), []);
 }

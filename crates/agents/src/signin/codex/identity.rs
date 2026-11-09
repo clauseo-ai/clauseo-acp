@@ -3,8 +3,8 @@
 //! identity"). Its `email` and `plan_type` go into `SignedIn`; nothing else is read.
 //!
 //! The app-server starts no thread. It runs with the Own environment and the store argument,
-//! like every Codex run but detection (detection's runs with `RunKind::Detect` and neither, in
-//! an empty Clauseo folder: [`read_as`]), plus the same `-c` overrides `limits`' reader uses
+//! like every Codex run (detection starts none: `super::super::detect`), plus the same `-c`
+//! overrides `limits`' reader uses
 //! (`crates/limits/src/readers/codex.rs`, `CODEX_OVERRIDES`): with plugins on, an app-server
 //! starts a git sync into its home at start-up (#203). The talk is `initialize`, then
 //! `account/read`; then stdin is closed and the app-server's exit awaited (it may be writing the

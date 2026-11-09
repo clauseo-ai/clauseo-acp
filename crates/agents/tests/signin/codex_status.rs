@@ -289,8 +289,8 @@ fn a_status_that_says_not_logged_in_signs_out() {
             found: Some(Found::NoLogin)
         }
     );
-    // one in Clauseo's home, one for detection
-    assert_eq!(fx.codex_runs(&["login", "status"]).len(), before + 2);
+    // one in Clauseo's home; detection starts none
+    assert_eq!(fx.codex_runs(&["login", "status"]).len(), before + 1);
 }
 
 /// Review H2: the login ran (exit 0, writing Codex's `auth.json`), then `account/read` failed.
@@ -366,9 +366,10 @@ fn stop_using_with_no_cli_unlinks_and_marks() {
     assert_eq!(fx.launches().len(), before);
 }
 
-/// Review M4: the lawyer's `~/.codex` holds an API-key login. It is not a `ChatGPT` sign-in:
-/// detection offers nothing (the plain sign-in card), and a reuse of it recorded earlier is
-/// signed out at the next start, never "Signed in to `ChatGPT`".
+/// Review M4: the lawyer's `~/.codex` holds an API-key login. It is not a `ChatGPT` sign-in.
+/// Detection, a stat alone, offers it; "Use it"'s confirmation through the link turns it down
+/// (`ReusedSignedOut`, nothing linked), and a reuse of it recorded earlier is signed out at the
+/// next start, never "Signed in to `ChatGPT`".
 #[test]
 fn an_api_key_codex_login_is_never_signed_in_to_chatgpt() {
     let fx = Fixture::new("codex-cli-api-key", "ok-after:0");
@@ -376,8 +377,18 @@ fn an_api_key_codex_login_is_never_signed_in_to_chatgpt() {
     write_file(&lawyer, br#"{"authMethod": "apikey"}"#).unwrap();
     let (agents, events) = start(&fx);
     agents.check_status(&codex()).unwrap();
-    assert_eq!(events.until_end().1, SigninState::SignedOut { found: None });
-    assert!(agents.use_found_login(&codex()).is_err());
+    assert!(matches!(
+        events.state(),
+        SigninState::LoginFound { email: None, .. }
+    ));
+    agents.use_found_login(&codex()).unwrap();
+    assert_eq!(
+        events.state(),
+        SigninState::SignedOut {
+            found: Some(Found::ReusedSignedOut)
+        }
+    );
+    assert!(std::fs::symlink_metadata(home(&fx).join("auth.json")).is_err());
     // A reuse made before this rule: the record and the link (the check made the home).
     hard_link(&lawyer, &home(&fx).join("auth.json")).unwrap();
     write_file(&login_source(&fx), b"reused\n").unwrap();

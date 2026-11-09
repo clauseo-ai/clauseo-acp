@@ -56,6 +56,10 @@ mod reuse_claude;
 mod reuse_codex;
 
 #[cfg(test)]
+#[path = "signin/detect_nowrite.rs"]
+mod detect_nowrite;
+
+#[cfg(test)]
 #[path = "signin/shim.rs"]
 mod shim;
 

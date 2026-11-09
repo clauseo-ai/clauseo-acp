@@ -44,12 +44,19 @@ pub(crate) enum Vendor {
 /// What a run is for, and so which home variables it gets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RunKind<'a> {
-    /// Detection: the lawyer's own login, looked at where the CLI keeps it by default.
+    /// Detection: the lawyer's own login, read from the store the CLI keeps it in by default,
+    /// while every file the CLI writes lands in `config`, a throwaway Clauseo folder.
     ///
-    /// "with the run environment below minus the home variables and `HOME` change, and without
-    /// the store override"; Claude "with `CLAUDE_CONFIG_DIR` and
-    /// `CLAUDE_SECURESTORAGE_CONFIG_DIR` unset"; Codex "with `CODEX_HOME` unset".
-    Detect,
+    /// Claude: `CLAUDE_CONFIG_DIR=<config>` and `CLAUDE_SECURESTORAGE_CONFIG_DIR=""`, the shape
+    /// of [`RunKind::Reused`], `HOME` the lawyer's (the default store path depends on it). Claude
+    /// Code's `auth status` rewrites its config file and writes a backup the first time a
+    /// version meets a config folder, so detection never runs it on the lawyer's
+    /// `~/.claude` and `~/.claude.json` (`super::scratch`). Codex: no detection run starts
+    /// its CLI (its `login status` writes `~/.codex/tmp/arg0`); `CODEX_HOME` is unset.
+    Detect {
+        /// The run's own config folder, fresh for the run and removed after it.
+        config: &'a Path,
+    },
     /// Clauseo's own login, in `home` (`Locations::agent_home`, as text, never canonicalised).
     ///
     /// Claude: "`CLAUDE_CONFIG_DIR=<data_dir>/agents/claude-acp/home` (new),
@@ -151,9 +158,8 @@ pub(crate) fn run_env(inputs: &EnvInputs<'_>) -> BTreeMap<OsString, OsString> {
         Vendor::Claude => {
             set(&mut env, "ANTHROPIC_API_KEY", OsStr::new(""));
             match inputs.kind {
-                RunKind::Detect => {}
                 RunKind::Own { home } => set(&mut env, "CLAUDE_CONFIG_DIR", home.as_os_str()),
-                RunKind::Reused { home } => {
+                RunKind::Reused { home } | RunKind::Detect { config: home } => {
                     set(&mut env, "CLAUDE_CONFIG_DIR", home.as_os_str());
                     set(&mut env, "CLAUDE_SECURESTORAGE_CONFIG_DIR", OsStr::new(""));
                 }
@@ -234,7 +240,7 @@ pub(crate) fn ca_var(vendor: Vendor) -> &'static str {
 /// `-c cli_auth_credentials_store="file"`. Detection gets none ("without the store override").
 pub(crate) fn codex_store_args(kind: RunKind<'_>) -> Vec<OsString> {
     match kind {
-        RunKind::Detect => Vec::new(),
+        RunKind::Detect { .. } => Vec::new(),
         RunKind::Own { .. } | RunKind::Reused { .. } => {
             CODEX_STORE.iter().map(OsString::from).collect()
         }

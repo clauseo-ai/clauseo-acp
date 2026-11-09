@@ -129,44 +129,20 @@ pub(crate) fn codex_logged_in(exit: Option<i32>, said_logged_in: bool) -> bool {
     exit == Some(0) && said_logged_in
 }
 
-/// Detection's verdict on Codex, before `account/read`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CodexDetect {
-    /// `login status` did not say signed in: nothing found.
-    SignedOut,
-    /// Signed in and the lawyer's login file is there: a file-mode login, reusable.
-    Reusable,
-    /// Signed in and no file: a keyring or Windows secrets login, not reusable.
-    Keyring,
-}
-
-impl CodexDetect {
-    /// "Exit 0, then a stat (never an open) of `~/.codex/auth.json`: present is a file-mode
-    /// login, reusable; absent is a keyring or Windows secrets login, not reusable". `file_present`
-    /// is that stat's answer, and `logged_in` [`codex_logged_in`]'s (exit 0 and the signed-in
-    /// line).
-    pub(crate) fn classify(logged_in: bool, file_present: bool) -> CodexDetect {
-        match (logged_in, file_present) {
-            (false, _) => CodexDetect::SignedOut,
-            (true, true) => CodexDetect::Reusable,
-            (true, false) => CodexDetect::Keyring,
+/// Detection's verdict on Codex, from a stat alone: with the lawyer's login file a regular
+/// file there, `LoginFound { from: Codex, email: None }` (no email: detection reads neither the
+/// file nor Codex's `account/read`, and `login status` writes `~/.codex/tmp`; the reused
+/// confirm after "Use it" gives the email and plan); else `SignedOut { found: NoLogin }`.
+/// `Found::CodexKeyring` is no longer told apart: telling needs Codex's CLI.
+pub(crate) fn codex_detection(file_present: bool) -> SigninState {
+    if file_present {
+        SigninState::LoginFound {
+            from: LoginFrom::Codex,
+            email: None,
         }
-    }
-
-    /// The state: `LoginFound { from: Codex, email }` for a reusable login (`email` from
-    /// `account/read`), `SignedOut { found: CodexKeyring }` for a keyring one, else `SignedOut`.
-    pub(crate) fn state(self, email: Option<String>) -> SigninState {
-        match self {
-            CodexDetect::SignedOut => SigninState::SignedOut {
-                found: Some(Found::NoLogin),
-            },
-            CodexDetect::Reusable => SigninState::LoginFound {
-                from: LoginFrom::Codex,
-                email,
-            },
-            CodexDetect::Keyring => SigninState::SignedOut {
-                found: Some(Found::CodexKeyring),
-            },
+    } else {
+        SigninState::SignedOut {
+            found: Some(Found::NoLogin),
         }
     }
 }

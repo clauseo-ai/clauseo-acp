@@ -4,7 +4,7 @@
 use clauseo_codex_appserver::GetAccountResponse;
 
 use super::{
-    ClaudeStatus, CodexDetect, Identity, claude_detection, claude_signed_in, codex_identity,
+    ClaudeStatus, Identity, claude_detection, claude_signed_in, codex_detection, codex_identity,
     codex_logged_in, codex_says_logged_in, is_sign_in_again, parse_claude_status,
 };
 use crate::signin::{Found, LoginFrom, SigninState};
@@ -184,31 +184,15 @@ fn codex_detection_reads_the_exit_code_the_line_and_the_stat() {
     }
     // Exit 0 with no signed-in line (codex-acp's adapter run by mistake) is not signed in.
     assert!(!codex_logged_in(Some(0), false));
-    let email = || Some("test@example.com".to_owned());
-    let table = [
-        (true, true, CodexDetect::Reusable),
-        (true, false, CodexDetect::Keyring),
-        (false, true, CodexDetect::SignedOut),
-        (false, false, CodexDetect::SignedOut),
-    ];
-    for (logged_in, present, want) in table {
-        assert_eq!(CodexDetect::classify(logged_in, present), want);
-    }
     assert_eq!(
-        CodexDetect::Reusable.state(email()),
+        codex_detection(true),
         SigninState::LoginFound {
             from: LoginFrom::Codex,
-            email: email()
+            email: None
         }
     );
     assert_eq!(
-        CodexDetect::Keyring.state(email()),
-        SigninState::SignedOut {
-            found: Some(Found::CodexKeyring)
-        }
-    );
-    assert_eq!(
-        CodexDetect::SignedOut.state(None),
+        codex_detection(false),
         SigninState::SignedOut {
             found: Some(Found::NoLogin)
         }
