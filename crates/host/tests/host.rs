@@ -358,6 +358,9 @@ mod state_folders;
 #[path = "host/state_folders_live.rs"]
 mod state_folders_live;
 #[cfg(test)]
+#[path = "host/state_layout.rs"]
+mod state_layout;
+#[cfg(test)]
 #[path = "host/steer.rs"]
 mod steer;
 #[cfg(test)]

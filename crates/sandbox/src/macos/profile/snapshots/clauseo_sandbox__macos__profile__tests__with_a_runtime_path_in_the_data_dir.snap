@@ -181,6 +181,9 @@ expression: w.render(&policy)
 (allow file-read* file-write*
   (subpath (param "MATTER"))
   (subpath (param "STATE")))
+; The session's temp folder (TMPDIR): read and write. Not the run folder above.
+(allow file-read* file-write*
+  (subpath (param "TMPDIR")))
 
 ; Runtime: read, run and map as code.
 (allow file-read* process-exec file-map-executable
@@ -194,6 +197,7 @@ expression: w.render(&policy)
 (allow file-read-metadata
   (path-ancestors (param "MATTER"))
   (path-ancestors (param "STATE"))
+  (path-ancestors (param "TMPDIR"))
   (path-ancestors (param "RUNTIME_0")))
 
 ; Read-only in the matter: protected names, every .git, over-cap files.
@@ -233,21 +237,28 @@ expression: w.render(&policy)
 ; link, the Claude store's names, the runtime and read paths.
 (allow file-read* file-write*
   (subpath (param "STATE")))
+; The session's temp folder (TMPDIR): read and write. Not the run folder above.
+(allow file-read* file-write*
+  (subpath (param "TMPDIR")))
 (allow file-read* process-exec file-map-executable
   (subpath (param "RUNTIME_0")))
 (allow file-read-metadata
   (path-ancestors (param "STATE"))
+  (path-ancestors (param "TMPDIR"))
   (path-ancestors (param "RUNTIME_0")))
 
 ; The matter, state and notes folders themselves: not removed, not replaced.
+; The session's temp folder too: the launcher makes it, outside the jail.
 (deny file-write-unlink file-write-create
   (literal (param "MATTER"))
   (literal (param "STATE"))
+  (literal (param "TMPDIR"))
   (with message "clauseo-4242-7"))
 
 ;; parameters
 MATTER = <root>/matter
 STATE = <root>/data/agent-state/m1/codex
+TMPDIR = <root>/data/run/s1/tmp
 RUNTIME_0 = <root>/data/agents/codex-acp
 CF_USER_TEXT_ENCODING = <root>/home/.CFUserTextEncoding
 READ_ONLY_0 = <root>/matter/.agents

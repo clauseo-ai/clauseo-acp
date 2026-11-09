@@ -109,6 +109,13 @@ pub(crate) enum StepKind {
     },
     SendLine(String),
     File(FileOp),
+    /// `expect_env_file`: the file `path` under the folder the variable `var` names holds
+    /// `content` exactly, or the agent fails.
+    ExpectEnvFile {
+        var: String,
+        path: String,
+        content: String,
+    },
     Stderr {
         line: String,
         repeat: u32,

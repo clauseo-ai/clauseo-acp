@@ -1,0 +1,6 @@
+-- Schema version 6: a marker, no data (R17 PR-D1). Claude's state folders and the matters' notes
+-- move out of <data>/agent-state at the host's start (crates/host agent/state_folder/layout.rs),
+-- right after this migration. A build that knows only schema 5 then refuses the data folder with
+-- store.newer_version, so it never runs with notes its Codex fence does not deny.
+-- docs/decisions/0006-store-format.md gives the reason.
+-- Frozen: a later change is a new numbered file in this folder, never an edit here.

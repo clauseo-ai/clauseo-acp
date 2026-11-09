@@ -349,6 +349,11 @@ mirror install works as before, from the same first use.
 
 - A pin bump in G16's file moves both agents to new `<hash>` folders by itself. The sizes table
   must be measured again, and its test says so.
+- A Codex version bump (`@openai/codex`, or codex-acp) must also update the ripgrep pins in
+  `crates/host/src/agent/codex_fence/rg_guard.rs` (R17 PR-D1): the versions and the SHA-256 of
+  the bundled `rg` for linux-x64 and linux-arm64. Until it does, every Linux Codex launch is
+  refused; `the_pins_match_the_apps_lock` (`rg_guard_pins_tests.rs`) fails while the pinned
+  versions differ from the app's lock.
 - `limits`' path rules hold for the layout. A test in `crates/limits/tests/` points a settings
   entry at a fixture install laid out by this crate.
 - R20 adds the four codes to `ErrorCode`, wires `Agents` into desktop, and writes `Installed` as

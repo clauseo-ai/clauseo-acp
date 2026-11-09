@@ -31,7 +31,8 @@ impl World {
     ///
     /// - `data/`: the data dir stand-in, hidden; in it `agent-state/m1/codex` (the state
     ///   folder), `agent-state/m1/notes`, `agent-state/m2/...` (another matter's), and
-    ///   `versions/` (the version store stand-in).
+    ///   `versions/` (the version store stand-in), `run/s1` (the session's run folder, whose
+    ///   `tmp` every policy names: required since R17 PR-D1).
     /// - `m1/` (this matter) and `m2/` (a sibling matter, hidden).
     /// - `home/` (the home folder stand-in), `login/` (a login home: the credential link's
     ///   shape), `claude/` (a Claude store: Claude's shape), `outside/` (secrets).
@@ -48,6 +49,7 @@ impl World {
             "data/agent-state/m2/codex",
             "data/agent-state/m2/notes",
             "data/versions",
+            "data/run/s1",
             "m1",
             "m2",
             "home",
@@ -132,6 +134,7 @@ impl World {
     pub(crate) fn builder_for(&self, matter: &str) -> PolicyBuilder {
         Policy::builder(self.at(matter), self.at("data/agent-state/m1/codex"))
             .home(self.at("home"))
+            .tmpdir(self.at("data/run/s1/tmp"))
             .notes(self.at("data/agent-state/m1/notes"))
             .credential_link(self.at("data/agent-state/m1/codex/auth.json"))
             .claude_store(self.at("claude"))

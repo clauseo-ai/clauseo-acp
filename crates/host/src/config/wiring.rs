@@ -82,6 +82,10 @@ pub(crate) struct LaunchWiring {
     /// The block list's seams (ADR 0053, `BlockListSeams::apply`); `None`: no fetch. Boxed, so
     /// the actor (which keeps this wiring) stays within the host thread's close-future budget.
     pub(crate) blocklist: Option<Box<crate::blocklist::BlockListSeams>>,
+    /// Linux, `test-support`: the ripgrep guard's seam (`HostConfig::with_codex_pins`); by
+    /// default the pinned values, as production always checks.
+    #[cfg(all(target_os = "linux", feature = "test-support"))]
+    pub(crate) codex_pins: crate::agent::codex_fence::rg_guard::Seam,
 }
 
 impl Default for LaunchWiring {
@@ -108,6 +112,8 @@ impl Default for LaunchWiring {
             removal_thread_fails: false,
             held: HeldRuns::default(),
             blocklist: None,
+            #[cfg(all(target_os = "linux", feature = "test-support"))]
+            codex_pins: crate::agent::codex_fence::rg_guard::Seam::Pinned,
         }
     }
 }

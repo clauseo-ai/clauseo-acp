@@ -37,6 +37,12 @@ staging-connector = ["clauseo-connectors/staging"]
 # "Clauseo/<version> (local)". Chosen here alone, at compile time; a fixed address, so a build
 # can be scanned for it.
 local-connector = ["clauseo-connectors/local"]
+# The agents' jail (decision record 0051, R17 PR-D), on by default: gates the desktop's wiring of
+# the sandbox's launchers into the host (R17 PR-D3: Seatbelt on macOS, stage C's launchers on
+# Windows). It gates nothing yet (R17 PR-D1 only adds it); a CI or dev build that must run agents
+# unjailed builds with --no-default-features.
+sandbox = []
+default = ["sandbox"]
 
 [build-dependencies]
 tauri-build.workspace = true

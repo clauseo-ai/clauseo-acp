@@ -6,7 +6,7 @@ use crate::support::{World, launcher, run, sh};
 fn the_jail_gets_only_the_specs_variables_and_tmpdir() {
     let w = World::new();
     let policy = w.builder().build().unwrap();
-    let tmpdir = policy.tmpdir();
+    let tmpdir = policy.tmpdir().to_path_buf();
     let (launcher, _) = launcher(policy);
     let out = run(
         &launcher,
@@ -28,7 +28,7 @@ fn the_session_tmpdir_is_writable_and_its_run_folder_is_not() {
     let w = World::new();
     w.file("data/run/s1/token", "secret token\n");
     let policy = w.builder().tmpdir(w.at("data/run/s1/tmp")).build().unwrap();
-    let tmpdir = policy.tmpdir();
+    let tmpdir = policy.tmpdir().to_path_buf();
     let run = tmpdir.parent().unwrap().to_owned();
     let (launcher, _) = launcher(policy);
     let m1 = w.at("m1");

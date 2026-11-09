@@ -136,6 +136,12 @@ fn check_step<'a>(
         StepKind::SpawnChild { pid_file, .. } => {
             relative(pid_file, PROCESS_FOLDER).map_err(|m| at.load_error(m))?;
         }
+        StepKind::ExpectEnvFile { var, path, .. } => {
+            relative(path, ENV_FOLDER).map_err(|m| at.load_error(m))?;
+            if var.is_empty() {
+                return Err(at.load_error("expect_env_file: `var` is empty"));
+            }
+        }
         StepKind::SendLine(text) => {
             if text.contains(CWD) {
                 return Err(at.load_error(format!(
@@ -255,6 +261,8 @@ fn checked(at: &Loc, method: &str, sent: &Sent<'_>) -> Result<(), Error> {
 
 /// What file steps' paths are relative to.
 const SESSION_CWD: &str = "the session cwd";
+/// What `expect_env_file`'s `path` is relative to.
+const ENV_FOLDER: &str = "the folder its variable names";
 /// What `spawn_child`'s `pid_file` is relative to.
 const PROCESS_FOLDER: &str = "the process folder (the agent's working directory)";
 

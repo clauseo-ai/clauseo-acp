@@ -124,7 +124,7 @@ impl PathRule {
 pub struct Policy {
     matter: PathBuf,
     state: PathBuf,
-    tmpdir: Option<PathBuf>,
+    tmpdir: PathBuf,
     home: Option<PathBuf>,
     runtime: Vec<PathBuf>,
     read: Vec<PathBuf>,
@@ -171,7 +171,7 @@ pub struct PolicyBuilder {
 
 impl Policy {
     /// A builder for the jail of `matter` with the agent's `state` folder, both read-write.
-    /// `TMPDIR` is [`PolicyBuilder::tmpdir`]'s folder, else `<state>/tmp` ([`Policy::tmpdir`]).
+    /// [`PolicyBuilder::tmpdir`] is required: `TMPDIR` is that folder ([`Policy::tmpdir`]).
     pub fn builder(matter: impl Into<PathBuf>, state: impl Into<PathBuf>) -> PolicyBuilder {
         PolicyBuilder {
             matter: matter.into(),
@@ -191,18 +191,10 @@ impl Policy {
         &self.state
     }
 
-    /// The agent's `TMPDIR`: the session's temp folder ([`PolicyBuilder::tmpdir`]), else
-    /// `<state>/tmp`. The fallback is deprecated: R17 PR-D passes `run/<s>/tmp`.
-    pub fn tmpdir(&self) -> PathBuf {
-        self.tmpdir
-            .clone()
-            .unwrap_or_else(|| self.state.join("tmp"))
-    }
-
-    /// The session's temp folder the host set ([`PolicyBuilder::tmpdir`]), read-write;
-    /// `None` when [`Policy::tmpdir`] falls back to the state folder's `tmp`.
-    pub fn session_tmpdir(&self) -> Option<&Path> {
-        self.tmpdir.as_deref()
+    /// The agent's `TMPDIR`: the session's temp folder ([`PolicyBuilder::tmpdir`], required
+    /// since R17 PR-D1, which removed the `<state>/tmp` fallback), read-write.
+    pub fn tmpdir(&self) -> &Path {
+        &self.tmpdir
     }
 
     /// The home folder the refusals compare with ([`PolicyBuilder::home`]); never allowed.
@@ -371,7 +363,7 @@ impl Policy {
     fn allowed_again(&self, path: &Path) -> bool {
         let inside = |p: &PathBuf| under(path, p);
         under(path, &self.state)
-            || self.tmpdir.as_ref().is_some_and(inside)
+            || under(path, &self.tmpdir)
             || self.notes.as_ref().is_some_and(inside)
             || self
                 .credential_link
@@ -404,8 +396,8 @@ impl PolicyBuilder {
     /// `<data_dir>/run/<session>/tmp`. Only this folder is granted, never the run folder that
     /// holds it. Its folder must exist; the macOS launcher makes the folder itself and sets
     /// `TMPDIR`. On Windows nothing sets or makes it yet: PR5's runner sets `TEMP`/`TMP` to it
-    /// and makes it. Unset, `TMPDIR` is `<state>/tmp` (deprecated): R17 PR-D passes
-    /// `run/<s>/tmp`.
+    /// and makes it. Required: [`PolicyBuilder::build`] refuses a policy without it (R17 PR-D1
+    /// removed the `<state>/tmp` fallback, which under R17 PR-C is Codex's `arg0` folder).
     pub fn tmpdir(mut self, p: impl Into<PathBuf>) -> PolicyBuilder {
         self.tmpdir = Some(p.into());
         self
@@ -436,7 +428,8 @@ impl PolicyBuilder {
         self
     }
 
-    /// The matter's notes folder, `<data_dir>/agent-state/<matter_id>/notes/`, read-write.
+    /// The matter's notes folder, `<data_dir>/notes/<matter_id>/` (the host's layout since R17
+    /// PR-D1), read-write.
     pub fn notes(mut self, p: impl Into<PathBuf>) -> PolicyBuilder {
         self.notes = Some(p.into());
         self
@@ -546,7 +539,8 @@ impl PolicyBuilder {
     ///   they are allowed again). Read-only paths in the state folder must be inside it;
     ///   over-cap files inside the matter. The temp folder may not end in `.` or `..` as
     ///   written, be `/`, equal or hold the home folder, the state folder or a hidden path, nor
-    ///   be inside the matter or hold it; and it must be `.../run/<session>/tmp`.
+    ///   be inside the matter or hold it; and it must be `.../run/<session>/tmp`. It is required:
+    ///   a policy without one is refused, after every other check (R17 PR-D1).
     /// - Each allowed folder passes [`Policy::check_allowed_folder`].
     /// - Without [`PolicyBuilder::scan`], the matter is walked here
     ///   ([`scan_matter`](crate::scan_matter)). Every finding (the walk's and

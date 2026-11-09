@@ -52,9 +52,9 @@ fn an_own_folder_swapped_for_a_link_counts_for_nothing() {
     let data = root.join("data");
     let skill = "skill-packs/x/skills/brief/SKILL.md";
     for (folder, up) in [
-        ("agent-state/m1/notes", "../.."),
+        ("notes/m1", ".."),
         ("run/s1", ".."),
-        ("agent-state/m1/claude-acp/plans", "../../.."),
+        ("claude-state/m1/claude-acp/plans", "../../.."),
     ] {
         let folder = data.join(folder);
         write::remove_dir_all(&folder).unwrap();
@@ -76,10 +76,10 @@ fn an_own_folder_swapped_for_a_link_counts_for_nothing() {
 fn an_ln_target_is_taken_from_the_links_folder() {
     let dir = layout("ln");
     let root = dir.path();
-    let notes = text(&root.join("data/agent-state/m1/notes"));
+    let notes = text(&root.join("data/notes/m1"));
     for command in [
-        format!("rm -rf {notes} && ln -s ../../.. {notes}"),
-        format!("rm -rf {notes}; ln -sfn ../.. {notes}"),
+        format!("rm -rf {notes} && ln -s ../.. {notes}"),
+        format!("rm -rf {notes}; ln -sfn .. {notes}"),
         "ln -s ../data/skill-packs matter-packs".to_owned(),
         format!(
             "ln -s -t {} ../../skill-packs",
@@ -89,7 +89,7 @@ fn an_ln_target_is_taken_from_the_links_folder() {
         let shell = json!({ "command": command });
         assert!(check(root, &[], Some(&shell)).touches_data(), "{command}");
     }
-    let other = text(&root.join("data/agent-state/m2/notes/n.md"));
+    let other = text(&root.join("data/notes/m2/n.md"));
     assert!(check(root, &[&other], None).touches_data());
     let fine = json!({"command": "ln -s ../outside/x.txt sub/x.txt"});
     assert!(!check(root, &[], Some(&fine)).touches_data());
@@ -172,7 +172,7 @@ fn claudes_cross_matter_records_are_denied() {
         "shell-snapshots/**",
     ] {
         for tool in ["Read", "Edit"] {
-            let rule = format!("{tool}(//d/agent-state/*/claude-acp/{target})");
+            let rule = format!("{tool}(//d/claude-state/*/claude-acp/{target})");
             assert!(rules.contains(&rule), "{rule}");
         }
     }

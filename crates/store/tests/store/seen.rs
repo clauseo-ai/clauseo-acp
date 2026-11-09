@@ -80,7 +80,7 @@ fn a_schema_2_database_opens_with_its_threads_seen_up_to_their_last_seq() {
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
     assert_eq!(version, i64::from(SCHEMA));
-    assert_eq!(SCHEMA, 5);
+    assert_eq!(SCHEMA, 6);
 }
 
 #[test]

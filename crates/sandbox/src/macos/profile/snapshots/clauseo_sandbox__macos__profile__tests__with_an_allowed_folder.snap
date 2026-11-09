@@ -181,6 +181,9 @@ expression: w.render(&policy)
 (allow file-read* file-write*
   (subpath (param "MATTER"))
   (subpath (param "STATE")))
+; The session's temp folder (TMPDIR): read and write. Not the run folder above.
+(allow file-read* file-write*
+  (subpath (param "TMPDIR")))
 
 ; The user's text-encoding preference, which CoreFoundation reads at start.
 (allow file-read*
@@ -195,6 +198,7 @@ expression: w.render(&policy)
 (allow file-read-metadata
   (path-ancestors (param "MATTER"))
   (path-ancestors (param "STATE"))
+  (path-ancestors (param "TMPDIR"))
   (path-ancestors (param "READ_0"))
   (path-ancestors (param "ALLOWED_0")))
 
@@ -234,16 +238,22 @@ expression: w.render(&policy)
 ; link, the Claude store's names, the runtime and read paths.
 (allow file-read* file-write*
   (subpath (param "STATE")))
+; The session's temp folder (TMPDIR): read and write. Not the run folder above.
+(allow file-read* file-write*
+  (subpath (param "TMPDIR")))
 (allow file-read*
   (subpath (param "READ_0")))
 (allow file-read-metadata
   (path-ancestors (param "STATE"))
+  (path-ancestors (param "TMPDIR"))
   (path-ancestors (param "READ_0")))
 
 ; The matter, state and notes folders themselves: not removed, not replaced.
+; The session's temp folder too: the launcher makes it, outside the jail.
 (deny file-write-unlink file-write-create
   (literal (param "MATTER"))
   (literal (param "STATE"))
+  (literal (param "TMPDIR"))
   (with message "clauseo-4242-7"))
 
 ; Network: the proxy's loopback ports and the browser socket folder only; no DNS.
@@ -258,6 +268,7 @@ expression: w.render(&policy)
 ;; parameters
 MATTER = <root>/matter
 STATE = <root>/data/agent-state/m1/codex
+TMPDIR = <root>/data/run/s1/tmp
 CF_USER_TEXT_ENCODING = <root>/home/.CFUserTextEncoding
 READ_0 = <root>/elsewhere
 ALLOWED_0 = <root>/elsewhere/Precedents

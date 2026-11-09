@@ -8,7 +8,8 @@ mod reallowed;
 mod tmpdir;
 mod unicode;
 
-/// A matter, a state folder, a home and a data dir side by side in a temp folder.
+/// A matter, a state folder, a home and a data dir (with the session's run folder `run/s1`)
+/// side by side in a temp folder.
 struct World {
     dir: TempDir,
 }
@@ -21,6 +22,7 @@ impl World {
             "state",
             "home",
             "data/agent-state/m1/notes",
+            "data/run/s1",
             "other",
         ] {
             dir.dir(name);
@@ -37,11 +39,17 @@ impl World {
         self.dir.path().ancestors().last().unwrap().to_owned()
     }
 
-    /// The builder every test starts from: this world's matter, state and home.
+    /// The builder every test starts from: this world's matter, state, home and the session's
+    /// temp folder (required since R17 PR-D1).
     fn builder(&self) -> PolicyBuilder {
-        Policy::builder(self.at("matter"), self.at("state")).home(self.at("home"))
+        Policy::builder(self.at("matter"), self.at("state"))
+            .home(self.at("home"))
+            .tmpdir(self.at(TMP))
     }
 }
+
+/// The session's temp folder every [`World::builder`] sets.
+const TMP: &str = "data/run/s1/tmp";
 
 fn canon(p: &Path) -> PathBuf {
     dunce::canonicalize(p).unwrap()
@@ -72,7 +80,7 @@ fn a_plain_policy_builds_with_canonical_paths() {
     let policy = w.builder().build().unwrap();
     assert_eq!(policy.matter(), canon(&w.at("matter")));
     assert_eq!(policy.state(), canon(&w.at("state")));
-    assert_eq!(policy.tmpdir(), canon(&w.at("state")).join("tmp"));
+    assert_eq!(policy.tmpdir(), canon(&w.at("data/run/s1")).join("tmp"));
     assert!(policy.proxy_ports().is_empty(), "no port means no network");
     assert_eq!(policy.loopback(), &Loopback::None);
     assert!(!policy.keychain());

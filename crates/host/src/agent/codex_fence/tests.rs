@@ -34,8 +34,9 @@ pub(super) fn run_root() -> PathBuf {
     data().join("run").join("s1")
 }
 
+/// The matter's notes, `<data>/notes/<matter>` (R17 PR-D1).
 pub(super) fn notes() -> PathBuf {
-    data().join("agent-state").join("m1").join("notes")
+    data().join("notes").join("m1")
 }
 
 /// The matter's Codex state folder, the session's `CODEX_HOME` (R17 PR-C).
@@ -48,14 +49,10 @@ fn matter() -> PathBuf {
 }
 
 /// The `agent-state` denies `state_denies` reads at a launch after the clean: another matter,
-/// this matter's Claude folder, what Codex kept in its state folder, and the names denied even
-/// when absent. Not `tmp`, not `notes`.
+/// what Codex kept in its state folder, and the names denied even when absent. Not `tmp`.
 fn denies() -> Vec<PathBuf> {
     let agent_state = data().join("agent-state");
-    let mut denies = vec![
-        agent_state.join("m2"),
-        agent_state.join("m1").join("claude-acp"),
-    ];
+    let mut denies = vec![agent_state.join("m2")];
     denies.extend(
         [
             "sessions",
@@ -261,8 +258,9 @@ fn the_fence_selects_a_profile_extending_workspace_scoped_under_the_data_folder(
         "agents/claude-acp",
         "agents/codex-acp/home",
         "run",
+        "notes",
+        "claude-state",
         "agent-state/m2",
-        "agent-state/m1/claude-acp",
         "agent-state/m1/codex-acp/auth.json",
         "set-aside",
     ] {
@@ -271,7 +269,7 @@ fn the_fence_selects_a_profile_extending_workspace_scoped_under_the_data_folder(
     // `agent-state` is denied entry by entry, so the own state folder's `tmp` stays readable.
     assert_eq!(scoped.get("agent-state"), None);
     for (subpath, value) in scoped {
-        let own = ["run/s1", "agent-state/m1/notes"].contains(&subpath.as_str());
+        let own = ["run/s1", "notes/m1"].contains(&subpath.as_str());
         assert_eq!(
             value,
             &json!(if own { "write" } else { "deny" }),
@@ -287,7 +285,7 @@ fn the_profile_names_the_own_run_folder_and_notes_write() {
     let keys = fence();
     let scoped = &keys["permissions"][PROFILE]["filesystem"][data().to_str().unwrap()];
     assert_eq!(scoped["run/s1"], json!("write"));
-    assert_eq!(scoped["agent-state/m1/notes"], json!("write"));
+    assert_eq!(scoped["notes/m1"], json!("write"));
     for path in [
         run_root().join("work").join("a.md"),
         notes().join("brief.md"),
@@ -302,8 +300,10 @@ fn the_profile_names_the_own_run_folder_and_notes_write() {
 }
 
 /// A session made after the launch is denied, in the profile and in every turn rebuilt from
-/// codex-acp's policy, while the own run folder and notes stay writable. A matter made after the
-/// launch is readable, never writable, for the session (round 4's ruling, the named residual).
+/// codex-acp's policy, while the own run folder and notes stay writable; so are a later matter's
+/// notes and Claude state (`notes` and `claude-state` denied whole, R17 PR-D1). A matter's
+/// `agent-state` folder made after the launch is readable, never writable, for the session
+/// (round 4's ruling, the named residual).
 #[test]
 fn sessions_and_matters_made_after_the_launch_are_denied() {
     let keys = fence();
@@ -311,14 +311,19 @@ fn sessions_and_matters_made_after_the_launch_are_denied() {
     for path in [
         data.join("run").join("s-later").join("work").join("a.txt"),
         data.join("run").join("s-later").join("skill-packs"),
+        data.join("notes").join("m-later").join("brief.md"),
+        data.join("claude-state")
+            .join("m-later")
+            .join("claude-acp")
+            .join(".claude.json"),
     ] {
         assert_eq!(access(&keys, &path), "deny", "{}", path.display());
     }
     for path in [
         data.join("agent-state")
             .join("m-later")
-            .join("notes")
-            .join("brief.md"),
+            .join("codex-acp")
+            .join("sessions"),
         data.join("agent-state").join("m1").join("other"),
     ] {
         assert_eq!(access(&keys, &path), "read", "{}", path.display());
@@ -341,10 +346,7 @@ fn search_the_store_and_other_matters_and_sessions_are_denied() {
         data.join("search.sqlite-wal"),
         data.join("state.sqlite"),
         data.join("state.sqlite-shm"),
-        data.join("agent-state")
-            .join("m2")
-            .join("notes")
-            .join("brief.md"),
+        data.join("notes").join("m2").join("brief.md"),
         data.join("run")
             .join("s2")
             .join("skill-packs")
@@ -380,10 +382,14 @@ fn search_the_store_and_other_matters_and_sessions_are_denied() {
             .join("codex-acp")
             .join("sessions")
             .join("r.jsonl"),
-        data.join("agent-state")
+        data.join("claude-state")
             .join("m2")
             .join("claude-acp")
             .join("projects"),
+        data.join("claude-state")
+            .join("m1")
+            .join("claude-acp")
+            .join(".claude.json"),
     ] {
         assert!(!readable(&keys, &path), "{} is readable", path.display());
     }
@@ -412,6 +418,21 @@ fn the_own_folders_state_folder_and_the_built_in_skills_stay_readable() {
         assert!(readable(&keys, &path), "{} is denied", path.display());
     }
     assert_eq!(access(&keys, &matter().join("a.txt")), "write");
+}
+
+/// R17 PR-D1 round 3: Codex's install, and the bundled `rg` the ripgrep guard checks
+/// (`rg_guard.rs`) in it, are read-only to Codex's shell in both kinds of turn, so the shell
+/// cannot swap the `rg` Codex runs after the check (decision record 0051).
+#[test]
+fn the_codex_install_and_its_rg_are_read_only_to_the_shell() {
+    let keys = fence();
+    let install = data().join("agents").join("codex-acp");
+    let rg = install.join(
+        "node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path/rg",
+    );
+    for path in [install.clone(), install.join("node_modules"), rg] {
+        assert_eq!(access(&keys, &path), "read", "{}", path.display());
+    }
 }
 
 /// The review's D1: nothing Codex or its shell loads at the next launch from the state folder
@@ -491,7 +512,7 @@ fn a_data_folder_with_a_glob_character_is_named_literally_without_the_set_aside_
     let data = locations.data_dir().to_path_buf();
     let (run_root, notes, state) = (
         data.join("run").join("s1"),
-        data.join("agent-state").join("m1").join("notes"),
+        data.join("notes").join("m1"),
         data.join("agent-state").join("m1").join("codex-acp"),
     );
     let session = Session {

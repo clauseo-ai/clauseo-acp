@@ -40,6 +40,7 @@ fn decision_record_quotes_the_migration() {
         include_str!("../../src/migrations/0003_thread_seen.sql"),
         include_str!("../../src/migrations/0004_thread_title_source.sql"),
         include_str!("../../src/migrations/0005_matter_skill_packs.sql"),
+        include_str!("../../src/migrations/0006_agent_layout.sql"),
     ];
     let mut rest = record;
     for migration in migrations {

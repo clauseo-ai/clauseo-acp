@@ -62,7 +62,7 @@ pub enum PathKind {
     ParentFiles,
     /// A place every sandbox user can write (`shared_writes`): denied to the pool group.
     SharedWrite,
-    /// The session's temp folder, the agent's `TMPDIR` ([`Policy::session_tmpdir`]):
+    /// The session's temp folder, the agent's `TMPDIR` ([`Policy::tmpdir`]):
     /// `<data_dir>\run\<session>\tmp`.
     TempFolder,
 }

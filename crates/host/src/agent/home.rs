@@ -3,7 +3,8 @@
 //! where the login lives: Claude Code's login store and Codex's own `auth.json`, which S18's
 //! status reads, the limits readers and sign-in runs use as their `CLAUDE_CONFIG_DIR` and
 //! `CODEX_HOME`. Since R17 PR-C a session's config folder is the matter's state folder instead
-//! (`agent/state_folder.rs`, `<data>/agent-state/<matter>/<agent>`), forced over any inherited,
+//! (`agent/state_folder.rs`, `<data>/{claude,agent}-state/<matter>/<agent>`, R17 PR-D1), forced
+//! over any inherited,
 //! settings or hook value: Claude Code gets it as `CLAUDE_CONFIG_DIR` ([`claude_launch_env`])
 //! with `CLAUDE_SECURESTORAGE_CONFIG_DIR` naming the one login store, Codex as `CODEX_HOME`
 //! (`agent/codex.rs`). Neither reads the lawyer's own `~/.codex` or `~/.claude` (decision

@@ -171,20 +171,20 @@ pub(crate) fn escaped(text: &str) -> String {
     quoted[1..quoted.len() - 1].to_owned()
 }
 
-/// `<data>/agent-state/<matter>/notes`.
+/// `<data>/notes/<matter>` (R17 PR-D1).
 pub(crate) fn notes(dir: &Dir, matter: MatterId) -> PathBuf {
-    dir.data()
-        .join("agent-state")
-        .join(matter.to_string())
-        .join("notes")
+    dir.data().join("notes").join(matter.to_string())
 }
 
-/// `matter`'s state folder for `agent` (R17 PR-C): `<data>/agent-state/<matter>/<agent>`.
+/// `matter`'s state folder for `agent` (R17 PR-C, PR-D1): Claude's
+/// `<data>/claude-state/<matter>/<agent>`, Codex's `<data>/agent-state/<matter>/<agent>`.
 pub(crate) fn state_folder(dir: &Dir, matter: MatterId, agent: &str) -> PathBuf {
-    dir.data()
-        .join("agent-state")
-        .join(matter.to_string())
-        .join(agent)
+    let root = if agent == CLAUDE {
+        "claude-state"
+    } else {
+        "agent-state"
+    };
+    dir.data().join(root).join(matter.to_string()).join(agent)
 }
 
 /// A profile hook: `meta` for a Claude agent, `codex` keys for a Codex agent (or, with

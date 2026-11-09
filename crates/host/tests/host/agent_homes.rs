@@ -1,6 +1,6 @@
 //! Each agent with a kind launches with Clauseo's own folders (`agent/home.rs`, decision record
 //! 0048), never the lawyer's: since R17 PR-C its config folder is the matter's state folder
-//! (`<data>/agent-state/<matter>/<agent>`, `state_folders.rs`) as `CLAUDE_CONFIG_DIR` or
+//! (`<data>/{claude,agent}-state/<matter>/<agent>`, `state_folders.rs`) as `CLAUDE_CONFIG_DIR` or
 //! `CODEX_HOME`, over what the host inherited, and the login homes
 //! (`<data>/agents/<agent>/home`) are made at the launch and keep the login. Codex's
 //! `CODEX_CONFIG` carries the two overrides `limits` reads with, from the one shared list.

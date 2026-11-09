@@ -270,6 +270,10 @@ pub(super) struct StatePlan {
     gated: bool,
     /// The thread's agent, for the refusal's log.
     agent: Option<clauseo_protocol::AgentId>,
+    /// Linux, a Codex launch: the ripgrep guard's inputs (`codex_fence::rg_guard`); `None`
+    /// for another agent, or with the guard turned off by a test host's seam.
+    #[cfg(target_os = "linux")]
+    rg: Option<crate::agent::codex_fence::rg_guard::Inputs>,
 }
 
 /// An agent's own preparation ([`StatePlan::prepare_agent`]): Codex's preparation, Claude's
@@ -286,11 +290,22 @@ impl StatePlan {
             .get(&thread)
             .map(|entry| entry.row.agent.clone());
         let state_use = state_use(actor, thread)?;
+        #[cfg(target_os = "linux")]
+        let rg = agent
+            .as_ref()
+            .filter(|id| AgentKind::of(id) == Some(AgentKind::Codex))
+            .and_then(|id| actor.effective.agent(id.as_str()))
+            .filter(|_| crate::agent::codex_fence::rg_guard::runs(&actor.wiring))
+            .map(|settings| {
+                crate::agent::codex_fence::rg_guard::Inputs::of(settings, &actor.wiring)
+            });
         Ok(Self {
             reused,
             state_use,
             gated,
             agent,
+            #[cfg(target_os = "linux")]
+            rg,
         })
     }
 
@@ -325,6 +340,14 @@ impl StatePlan {
                     self.state_use,
                 )?;
                 answer = Some(support);
+                // Linux: Codex's bundled `rg` pinned, and in no folder the session writes or
+                // Codex keeps.
+                #[cfg(target_os = "linux")]
+                if let Some(rg) = &self.rg {
+                    let cwd = crate::agent::session_folder(stored);
+                    let writable = [cwd.as_path(), &run.root, &run.notes, &prepared.state];
+                    crate::agent::codex_fence::rg_guard::check(rg, &cwd, &writable)?;
+                }
                 Some(prepared)
             }
             _ => None,

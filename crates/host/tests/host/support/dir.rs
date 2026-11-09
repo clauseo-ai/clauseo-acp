@@ -157,7 +157,8 @@ impl Dir {
             .with_launch_gate(Arc::new(|_| None))
     }
 
-    /// As [`Dir::config_at`], with no launch gate: a host given none.
+    /// As [`Dir::config_at`], with no launch gate: a host given none. On Linux the Codex ripgrep
+    /// guard is off (`HostConfig::with_codex_pins(None)`).
     fn config_ungated(
         &self,
         locations: &Locations,
@@ -167,11 +168,16 @@ impl Dir {
     ) -> HostConfig {
         let policy = FilePolicy::new(self.root.join("policy.json"), SystemFiles);
         let effective = Effective::load(locations, &SystemFiles, &[&policy]);
-        crate::idle_stop::off(HostConfig::new(effective, launcher))
+        let config = crate::idle_stop::off(HostConfig::new(effective, launcher))
             .with_limits_reader(Arc::new(NoReader))
             .with_clock(Arc::new(clock.clone()))
             .with_ids(Box::new(SequentialIds::with_run(run)))
-            .with_managed_mcp_path(self.root.join("managed-mcp.json"))
+            .with_managed_mcp_path(self.root.join("managed-mcp.json"));
+        // Linux: the fake agent runs from no Codex install, so the ripgrep guard is off; its
+        // own test turns it on with a fake install's pins (`codex_fence.rs`).
+        #[cfg(target_os = "linux")]
+        let config = config.with_codex_pins(None);
+        config
     }
 
     /// The clock of run `run`.

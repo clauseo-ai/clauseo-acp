@@ -37,6 +37,11 @@ pub(super) async fn open(
     write::create_dir_all(&matter_settings(&data_dir).matters_root)
         .map_err(|error| Error::Store(error.into()))?;
     let store = Store::open(StoreOptions::new(data_dir.clone())).await?;
+    // With the store's lock held (no other host serves this data folder) and before the loop
+    // serves (no launch yet): Claude's state and the notes leave `agent-state` (R17 PR-D1). The
+    // store's open moved it to schema 6 first, so an older build refuses this data folder from
+    // here on, even if the move below is cut short. TODO(#825): before any protection step.
+    crate::agent::state_folder::layout::migrate(&data_dir);
     // The index opens (or rebuilds) on its own thread: start-up does not wait for it.
     let search = crate::search::Search::start(
         data_dir,

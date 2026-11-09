@@ -23,8 +23,8 @@ pub(super) fn layout(test: &str) -> TempDir {
         "data/run/s1/work",
         "data/run/s1/skill-packs",
         "data/run/s2/work",
-        "data/agent-state/m1/notes",
-        "data/agent-state/m1/claude-acp/plans",
+        "data/notes/m1",
+        "data/claude-state/m1/claude-acp/plans",
         "matter/sub",
         "outside",
     ] {
@@ -43,11 +43,8 @@ pub(super) fn check(
 ) -> FenceCheck {
     let data = root.join("data");
     let paths: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
-    let state = data.join("agent-state").join("m1").join("claude-acp");
-    let mut allowed = vec![
-        data.join("run").join("s1"),
-        data.join("agent-state").join("m1").join("notes"),
-    ];
+    let state = data.join("claude-state").join("m1").join("claude-acp");
+    let mut allowed = vec![data.join("run").join("s1"), data.join("notes").join("m1")];
     // The matter's Claude state folder (R17 PR-C), as the host's `fence_check` gives it.
     allowed.extend(state_folder::fence_own(&state, AgentKind::Claude));
     FenceCheck {
@@ -79,11 +76,13 @@ fn the_deny_rules_name_the_clauseo_only_subtrees_and_not_the_run_folder() {
         "Edit(//d/ata/skill-packs/**)",
         "Read(//d/ata/matters/**)",
         "Read(//d/ata/agents/codex-acp/**)",
+        // Codex's install, its bundled `rg` with it (R17 PR-D1's ripgrep guard).
+        "Edit(//d/ata/agents/codex-acp/**)",
         "Read(//d/ata/agents/claude-acp/**)",
         "Read(//d/ata/agent-state/*/codex-acp/**)",
-        "Read(//d/ata/agent-state/*/claude-acp/projects/*/*.jsonl)",
-        "Edit(//d/ata/agent-state/*/claude-acp/settings.json)",
-        "Edit(//d/ata/agent-state/*/claude-acp/hooks/**)",
+        "Read(//d/ata/claude-state/*/claude-acp/projects/*/*.jsonl)",
+        "Edit(//d/ata/claude-state/*/claude-acp/settings.json)",
+        "Edit(//d/ata/claude-state/*/claude-acp/hooks/**)",
         "Read(//d/ata/settings.json)",
         "Read(//d/ata/blocklist/**)",
         "Edit(//d/ata/blocklist/**)",
@@ -96,8 +95,8 @@ fn the_deny_rules_name_the_clauseo_only_subtrees_and_not_the_run_folder() {
     for kept in [
         "/run/",
         "/agent-state/**",
-        "/agent-state/*/notes",
-        "/agent-state/*/claude-acp/**",
+        "/notes",
+        "/claude-state/*/claude-acp/**",
         "/plans",
         "/projects/**",
         "/profile",
@@ -251,7 +250,7 @@ fn review_the_own_state_folders_login_link_is_auto_denied() {
     write::write_file(&data.join("agents/codex-acp/home/auth.json"), b"x").unwrap();
     let codex = |paths: &[&str], raw: Option<&serde_json::Value>| {
         let mut check = check(root, paths, raw);
-        check.allowed = vec![data.join("run/s1"), data.join("agent-state/m1/notes")];
+        check.allowed = vec![data.join("run/s1"), data.join("notes/m1")];
         check
             .allowed
             .extend(state_folder::fence_own(&state, AgentKind::Codex));
@@ -294,8 +293,8 @@ fn the_sessions_own_folders_and_an_unrelated_path_are_not_denied() {
     for path in [
         root.join("data/run/s1/skill-packs/x/SKILL.md"),
         root.join("data/run/s1/work/out.docx"),
-        root.join("data/agent-state/m1/notes/n.md"),
-        root.join("data/agent-state/m1/claude-acp/plans/plan.md"),
+        root.join("data/notes/m1/n.md"),
+        root.join("data/claude-state/m1/claude-acp/plans/plan.md"),
         root.join("matter/sub/a.txt"),
         root.join("outside/x.txt"),
         PathBuf::from("sub/a.txt"),

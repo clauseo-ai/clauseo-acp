@@ -143,11 +143,11 @@ fn the_start_up_sweep_sets_run_aside_and_deletes_it_in_the_background() {
     write::remove_dir_all(&data).unwrap();
 }
 
-/// N2: a `run` or `agent-state` that is a link is neither swept nor made through: the launch
-/// fails, and the link's target is left as it was.
+/// N2: a `run` or `notes` (R17 PR-D1; `agent-state` before) that is a link is neither swept
+/// nor made through: the launch fails, and the link's target is left as it was.
 #[cfg(unix)]
 #[test]
-fn nothing_is_swept_or_made_through_a_linked_run_or_agent_state() {
+fn nothing_is_swept_or_made_through_a_linked_run_or_notes() {
     let data = scratch("linked");
     let outside = scratch("linked-outside");
     write::create_dir_all(&outside.join("keep")).unwrap();
@@ -168,7 +168,7 @@ fn nothing_is_swept_or_made_through_a_linked_run_or_agent_state() {
 
     let state_data = scratch("linked-state");
     let state_outside = scratch("linked-state-outside");
-    write::symlink(&state_outside, &state_data.join("agent-state")).unwrap();
+    write::symlink(&state_outside, &state_data.join("notes")).unwrap();
     let error = folders(&state_data, 2)
         .make(&state_data, &RunSweep::default())
         .unwrap_err();
@@ -186,9 +186,9 @@ fn nothing_is_swept_or_made_through_a_linked_run_or_agent_state() {
     }
 }
 
-/// `{matter_notes}`: a notes path whose matter folder is a link is refused, as one whose
-/// `agent-state` is (above): the launch fails with `agent.launch_failed` naming the link, and
-/// nothing is made through it. A notes folder made earlier at another mode is set to 0700.
+/// `{matter_notes}`: a notes path whose parent (`<data>/notes`) is a link is refused, as above:
+/// the launch fails with `agent.launch_failed` naming the link, and nothing is made through it.
+/// A notes folder made earlier at another mode is set to 0700.
 #[cfg(unix)]
 #[test]
 fn the_notes_folder_is_private_and_never_made_through_a_linked_matter() {
@@ -224,14 +224,46 @@ fn the_notes_folder_is_private_and_never_made_through_a_linked_matter() {
     assert_eq!(mode & 0o777, 0o700);
     assert_eq!(
         launch.notes,
-        data.join("agent-state")
-            .join(id::<MatterId>(7).to_string())
-            .join("notes"),
+        data.join("notes").join(id::<MatterId>(7).to_string()),
         "exactly the matter's notes folder, never a parent"
     );
     for folder in [&data, &outside] {
         write::remove_dir_all(folder).unwrap();
     }
+}
+
+/// R17 PR-D1: notes a failed start-up move left at their old place
+/// (`agent-state/<matter>/notes`) are moved by the launch before it makes the folder; a move
+/// across volumes (the seam) refuses the launch with words that say the agent's files are on
+/// another drive, naming no path, and takes the run folder back.
+#[test]
+fn a_launch_moves_old_notes_first_or_says_they_are_on_another_drive() {
+    use crate::agent::state_folder::layout::tests::fail_renames_with;
+
+    let data = scratch("notes-old-place");
+    let launch = folders(&data, 1);
+    let old = data
+        .join("agent-state")
+        .join(id::<MatterId>(7).to_string())
+        .join("notes");
+    write::create_dir_all(&old).unwrap();
+    write::write_file(&old.join("n.md"), b"note").unwrap();
+    {
+        let _seam = fail_renames_with(std::io::ErrorKind::CrossesDevices);
+        let error = launch.make(&data, &RunSweep::default()).unwrap_err();
+        assert_eq!(error.code(), ErrorCode::AgentLaunchFailed);
+        assert!(error.to_string().contains("different drive"), "{error}");
+        assert!(
+            !error.to_string().contains(&data.display().to_string()),
+            "{error}"
+        );
+        assert!(!launch.root.exists(), "the run folder is taken back");
+        assert!(old.join("n.md").exists() && !launch.notes.exists());
+    }
+    launch.make(&data, &RunSweep::default()).unwrap();
+    assert_eq!(std::fs::read(launch.notes.join("n.md")).unwrap(), b"note");
+    assert!(!old.exists());
+    write::remove_dir_all(&data).unwrap();
 }
 
 /// `remove_run`'s removal takes the run folder the host made, with a link inside it, and never

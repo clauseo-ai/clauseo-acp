@@ -357,7 +357,9 @@ fn descriptors_read_back_only_in_set_ups_exact_shape() {
 fn policy(dir: &TempDir, ports: &[u16], loopback: Loopback) -> Policy {
     dir.dir("matter");
     dir.dir("state");
-    let builder = Policy::builder(dir.path().join("matter"), dir.path().join("state"));
+    dir.dir("run/s1");
+    let builder = Policy::builder(dir.path().join("matter"), dir.path().join("state"))
+        .tmpdir(dir.path().join("run/s1/tmp"));
     let builder = ports.iter().fold(builder, |b, &port| b.proxy_port(port));
     builder.loopback(loopback).build().unwrap()
 }

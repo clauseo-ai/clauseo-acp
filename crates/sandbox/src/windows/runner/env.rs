@@ -6,7 +6,7 @@
 //! - **Set**, whatever the spec said: `USERPROFILE`, `HOME`, `HOMEDRIVE` + `HOMEPATH` (git and
 //!   ssh look there before `USERPROFILE`) at `<state>`; `APPDATA` at `<state>\AppData\Roaming`,
 //!   `LOCALAPPDATA` at `<state>\AppData\Local`; `TEMP` and `TMP` at the session's temp folder
-//!   (`Policy::session_tmpdir`), else `<state>\tmp` (`Policy::tmpdir`'s fallback).
+//!   (`Policy::tmpdir`, always in the message since R17 PR-D1), else `<state>\tmp`.
 //! - **git over OpenSSL** (§3: Schannel fails under any restricting-SID token,
 //!   `s15-spikes-traverse.md` (b)): `GIT_CONFIG_COUNT=1`, `GIT_CONFIG_KEY_0=http.sslBackend`,
 //!   `GIT_CONFIG_VALUE_0=openssl`; any other `GIT_CONFIG_KEY_n`/`VALUE_n` the spec had goes.

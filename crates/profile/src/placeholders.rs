@@ -20,7 +20,7 @@
 /// The session's work folder: `<data>/run/<session id>/work` until stage C's per-agent state
 /// folders exist. Instructions only.
 pub const WORK_FOLDER: &str = "{work_folder}";
-/// The matter's notes folder, `<data>/agent-state/<matter id>/notes` (R22). Instructions only.
+/// The matter's notes folder, `<data>/notes/<matter id>` (R22; R17 PR-D1). Instructions only.
 pub const MATTER_NOTES: &str = "{matter_notes}";
 /// The session's browser state folder, `<data>/run/<session id>/browser`, as the browser
 /// guard's `--cwd`. The host joins it with the platform's own separators and fills it with a

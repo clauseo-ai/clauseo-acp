@@ -111,15 +111,15 @@ pub(crate) struct RunFolders {
     /// `<data>/run/<session id>`: the session's own folder, made at the launch and removed
     /// when the agent ends.
     pub(crate) root: PathBuf,
-    /// `<data>/agent-state/<matter id>/<agent id>`: the matter's state folder for an agent
-    /// with a kind (`agent/state_folder.rs`), its `CLAUDE_CONFIG_DIR` or `CODEX_HOME`, made at
-    /// the matter's first launch of the agent and kept; `None` for an agent without a kind.
+    /// `<data>/{agent,claude}-state/<matter id>/<agent id>`: the matter's state folder for an
+    /// agent with a kind (`agent/state_folder.rs`), its `CLAUDE_CONFIG_DIR` or `CODEX_HOME`,
+    /// made at the matter's first launch and kept; `None` for an agent without a kind.
     pub(crate) state: Option<PathBuf>,
     /// `{work_folder}`, `<root>/work`.
     pub(crate) work: PathBuf,
     /// `{browser_dir}`, `<root>/browser`.
     pub(crate) browser: PathBuf,
-    /// `{matter_notes}`, `<data>/agent-state/<matter id>/notes`: the matter's, shared by its
+    /// `{matter_notes}`, `<data>/notes/<matter id>`: the matter's, shared by its
     /// agents, kept when a session ends.
     pub(crate) notes: PathBuf,
     /// `{browser_executable}`: the Chrome the launch prep found for this session
@@ -217,12 +217,9 @@ impl RunFolders {
         sweep.once(data);
         let tmp = self.tmp();
         for folder in [&self.work, &self.browser, &self.notes, &tmp] {
-            if let Err(error) = crate::write::create_private_dirs_under(data, folder) {
+            if let Err(error) = make_under(data, folder) {
                 self.remove();
-                return Err(Error::refused(
-                    clauseo_protocol::ErrorCode::AgentLaunchFailed,
-                    format!("cannot make the folder {}: {error}", folder.display()),
-                ));
+                return Err(error);
             }
         }
         // The notes folder may be an earlier session's: it is set to 0700 whatever it was.
@@ -589,7 +586,7 @@ pub use packs::PackRequest;
 use packs::PackSkip;
 pub(super) use packs::{PackNotices, pack_notices};
 mod folders;
-use folders::{launch_deny, notes_dir, remove_tree, run_dir};
+use folders::{launch_deny, make_under, notes_dir, remove_tree, run_dir};
 mod paths;
 use paths::{LaunchPaths, launch_paths};
 mod state_prep;

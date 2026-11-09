@@ -147,6 +147,7 @@ fn a_neighbour_its_own_gate_accepts_is_fenced_at_its_target_and_the_launch_passe
     let root = w.at("Linked/B");
     let own = Policy::builder(&root, w.at("other/m3"))
         .home(w.at("home"))
+        .tmpdir(w.at(crate::windows::test_world::TMP))
         .build();
     assert!(
         own.is_ok(),
@@ -171,6 +172,7 @@ fn a_neighbour_its_own_gate_accepts_is_fenced_at_its_target_and_the_launch_passe
     // Its own launch refuses a root that is itself a link; so does the neighbour check.
     let own = Policy::builder(w.at("Linked"), w.at("other/m3"))
         .home(w.at("home"))
+        .tmpdir(w.at(crate::windows::test_world::TMP))
         .build();
     assert!(own.is_err());
     let linked = unfenced(w.at("Linked"), w.at("other/m3"));

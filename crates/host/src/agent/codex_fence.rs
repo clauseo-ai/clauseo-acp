@@ -1,5 +1,6 @@
 //! The data-folder fence for Codex: a read and write deny on what of `<data>` only Clauseo uses,
-//! on `<data>/run` and `<data>/run.old-*` whole, and on `<data>/agent-state` entry by entry
+//! on `<data>/run`, `<data>/notes`, `<data>/claude-state` and `<data>/run.old-*` whole, and on
+//! `<data>/agent-state` entry by entry
 //! ([`rules`], [`state_denies`]), as a Codex permission profile in each Codex session's
 //! `CODEX_CONFIG`. The session's own run folder (with its `tmp`, the shell's `TMPDIR`) and the
 //! matter's notes are reopened as `write` entries in the profile and as ACP
@@ -30,7 +31,7 @@
 //!   (`codex-rs/core/src/session/session.rs:491-507`, `codex-rs/protocol/src/permissions.rs:
 //!   709-731`).
 //! - The deepest matching rule wins and `deny` wins a tie (`codex-rs/protocol/src/permissions.rs:
-//!   1043-1048`), so the own run folder and notes, deeper than the `run` and `agent-state`
+//!   1043-1048`), so the own run folder and notes, deeper than the `run` and `notes`
 //!   denies, stay writable. Seatbelt (macOS) and bubblewrap (Linux) apply a deny to every
 //!   sandboxed process, the shell included, for reads and writes (`codex-rs/sandboxing/src/
 //!   seatbelt.rs:899-900, 1045-1046`, `codex-rs/linux-sandbox/src/bwrap.rs:490-511, 1353-1362`).
@@ -99,9 +100,16 @@ const AGENTS_DENIED: [&str; 6] = [
 /// of a set-aside run against the 8192-match cap.
 pub(crate) const SET_ASIDE_PREFIX: &str = "run.old-";
 
-/// The folder holding every session's run folder, denied whole. `agent-state` is denied entry
-/// by entry ([`state_denies`]), so the own state folder's `tmp` stays readable.
-const SESSION_PARENTS: [&str; 1] = ["run"];
+/// Denied whole: the folder holding every session's run folder and the one holding every
+/// matter's notes, each with the session's own reopened by a `write` entry ([`keys`]), and
+/// every matter's Claude state (R17 PR-D1, `state_folder::layout`), which no Codex session
+/// needs. `agent-state` is denied entry by entry ([`state_denies`]), so the own state
+/// folder's `tmp` stays readable.
+const SESSION_PARENTS: [&str; 3] = [
+    "run",
+    crate::agent::state_folder::layout::NOTES_ROOT,
+    crate::agent::state_folder::layout::CLAUDE_STATE_ROOT,
+];
 
 /// The names of the own state folder denied even when they do not exist at the launch: Codex's
 /// `.env` and every name Codex keeps but `tmp` (`state_folder::CODEX_KEPT_FILES`, the login link
@@ -133,7 +141,8 @@ fn state_always_denied() -> Vec<String> {
 
 /// Deny globs under `<data>`, for every matter, one made after the launch included (rounds 5
 /// and 6): every matter's Codex login link, `.env`, `config.toml`, prompt history and live
-/// shell snapshots, and Claude's login store and `.claude.json`.
+/// shell snapshots. Claude's state and the notes left `agent-state` (R17 PR-D1) and are denied
+/// whole ([`SESSION_PARENTS`]), so a later matter's are covered with no glob.
 ///
 /// - Codex keeps glob entries (deny entries) when it rebuilds each turn's policy
 ///   (`protocol/src/permissions.rs` `from_legacy_sandbox_policy_preserving_deny_entries`).
@@ -145,21 +154,19 @@ fn state_always_denied() -> Vec<String> {
 ///   so each pattern's rest starts with `**/`, which matches from anywhere (round 6's D1; the
 ///   real command is run in `codex_fence/rg_tests.rs`).
 /// - A glob is deny only, with no exception syntax, so `agent-state/*/**` with the own `tmp`
-///   and `notes` left out cannot be written, and ripgrep lists files only, so each pattern names
-///   files, not a folder. Transcripts, logs and databases of a matter made after the launch, and
-///   its `notes`, stay readable (the named residuals): a broad pattern would count every such
+///   left out cannot be written, and ripgrep lists files only, so each pattern names
+///   files, not a folder. Transcripts, logs and databases of a matter made after the launch stay
+///   readable (the named residual): a broad pattern would count every such
 ///   file of every matter against Codex's cap of 8192 matches (`MAX_UNREADABLE_GLOB_MATCHES`,
 ///   bwrap.rs:734-738), past which every sandboxed command fails closed.
 /// - All patterns share one search root, so ripgrep walks `agent-state` once per command
 ///   (bwrap.rs groups them by root), no deeper than [`GLOB_SCAN_MAX_DEPTH`].
-pub(crate) const STATE_GLOBS: [&str; 7] = [
+pub(crate) const STATE_GLOBS: [&str; 5] = [
     "agent-state/**/codex-acp/auth.json",
     "agent-state/**/codex-acp/.env",
     "agent-state/**/codex-acp/config.toml",
     "agent-state/**/codex-acp/history.jsonl",
     "agent-state/**/codex-acp/shell_snapshots/*",
-    "agent-state/**/claude-acp/.credentials.json",
-    "agent-state/**/claude-acp/.claude.json",
 ];
 
 /// The profile's `filesystem.glob_scan_max_depth` (round 7, stage C's cross-matter shutdown):
@@ -168,15 +175,16 @@ pub(crate) const STATE_GLOBS: [&str; 7] = [
 /// `linux-sandbox/src/bwrap.rs:504-505, 1028`; kept by each turn's rebuild,
 /// `protocol/src/permissions.rs:718`). 4 is the deepest legitimate match,
 /// `<matter>/codex-acp/shell_snapshots/<file>`; the login files are at depth 3. Without it,
-/// `**/` has no depth limit, so one matter's shell could plant 8,193
-/// `notes/x<n>/codex-acp/auth.json` and every other matter's next command would fail closed
-/// past the cap. Within it, a matter can make at most 24 names match, plus its live snapshots
-/// (`rg_tests.rs`). Seatbelt matches globs as regexes, with no cap and no depth.
+/// `**/` has no depth limit, so 8,193 `<matter>/<x>/<n>/codex-acp/auth.json` planted deep
+/// would make every matter's next command fail closed past the cap. Since R17 PR-D1 no shell
+/// writes under `agent-state` at all (the notes left it); within the depth, a matter's folder
+/// holds at most 8 matching names, plus its live snapshots (`rg_tests.rs`). Seatbelt matches
+/// globs as regexes, with no cap and no depth.
 pub(crate) const GLOB_SCAN_MAX_DEPTH: usize = 4;
 
 /// The `agent-state` denies of a Codex launch whose state folder is `state` under `data`, read
 /// on the launch-prep thread (round 4's ruling, option B): every other matter's folder that
-/// exists, every entry of this matter's folder but its `notes` and `codex-acp`, and every entry
+/// exists, every entry of this matter's folder but `codex-acp`, and every entry
 /// of the state folder but `tmp`, plus [`state_always_denied`] by name. So `tmp`, where Codex
 /// keeps the `arg0` links it puts first on `PATH` (`apply_patch`, `codex-execve-wrapper`, and the
 /// sandbox helper bubblewrap before 0.9 re-runs, codex-rs `linux_run_main.rs:404-435`), stays
@@ -206,7 +214,7 @@ pub(crate) fn state_denies(data: &Path, state: &Path) -> Vec<PathBuf> {
     };
     let matter_name = matter.file_name().unwrap_or_default();
     let listed = others(&root, &[matter_name], &mut denied)
-        && others(matter, &[std::ffi::OsStr::new("notes"), agent], &mut denied)
+        && others(matter, &[agent], &mut denied)
         && others(
             state,
             &[std::ffi::OsStr::new(
@@ -245,7 +253,7 @@ pub(crate) fn state_denies(data: &Path, state: &Path) -> Vec<PathBuf> {
 pub(crate) struct Session<'a> {
     /// `<data>/run/<session id>`, a `write` entry.
     pub(crate) run_root: &'a Path,
-    /// `<data>/agent-state/<matter>/notes`, a `write` entry.
+    /// `<data>/notes/<matter>`, a `write` entry under the denied `notes` ([`SESSION_PARENTS`]).
     pub(crate) notes: &'a Path,
     /// The matter's state folder, `<data>/agent-state/<matter>/codex-acp`, Codex's
     /// `CODEX_HOME` and `HOME` (R17 PR-C). Every entry but `tmp` is denied ([`state_denies`]),
@@ -377,6 +385,9 @@ pub(crate) fn keys(
     keys
 }
 
+#[cfg(target_os = "linux")]
+#[path = "codex_fence/rg_guard.rs"]
+pub(crate) mod rg_guard;
 #[cfg(test)]
 #[path = "codex_fence/rg_tests.rs"]
 mod rg_tests;

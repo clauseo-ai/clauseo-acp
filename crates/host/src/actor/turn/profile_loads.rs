@@ -264,7 +264,7 @@ fn recheck_managed(actor: &Actor, run: &mut RunFolders) {
 /// `dist/index.js:35598-35612, 35878-35885`). With the data-folder fence's profile selected,
 /// Codex reads no `writable_roots` from `CODEX_CONFIG`, so these and the profile's own `write`
 /// entries (`agent::codex_fence`) are what reopen these folders under its deny of `<data>/run`
-/// and `<data>/agent-state`. Nothing of the matter's Codex state folder is a root (R17 PR-C).
+/// and `<data>/notes`. Nothing of the matter's Codex state folder is a root (R17 PR-C).
 pub(super) fn codex_directories(run: &RunFolders) -> Vec<PathBuf> {
     vec![run.root.clone(), run.notes.clone()]
 }

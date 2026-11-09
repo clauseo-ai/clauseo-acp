@@ -150,8 +150,10 @@ fn the_logs_fold_of_repeats_reaches_the_sink_as_dropped_and_devices_do_not() {
     let dir = crate::test_support::TempDir::new("watch-fold");
     dir.dir("m");
     dir.dir("s");
+    dir.dir("run/s1");
     let policy = Policy::builder(dir.path().join("m"), dir.path().join("s"))
         .home(dir.path().join("home"))
+        .tmpdir(dir.path().join("run/s1/tmp"))
         .build()
         .unwrap();
     let keep = Arc::new(Keep::default());

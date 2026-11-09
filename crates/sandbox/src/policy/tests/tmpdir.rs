@@ -1,5 +1,5 @@
-//! The session's temp folder, the agent's `TMPDIR`: `<data_dir>/run/<session>/tmp` when the
-//! host sets it, else the state folder's `tmp` (the deprecated fallback).
+//! The session's temp folder, the agent's `TMPDIR`: `<data_dir>/run/<session>/tmp`, required
+//! since R17 PR-D1 (the state folder's `tmp` fallback is gone).
 
 use super::*;
 
@@ -21,19 +21,27 @@ fn the_set_temp_folder_is_the_tmpdir_and_need_not_exist() {
         .unwrap();
     let want = canon(&w.at("data/run/s1")).join("tmp");
     assert_eq!(policy.tmpdir(), want);
-    assert_eq!(policy.session_tmpdir(), Some(want.as_path()));
     // An existing folder there is fine too.
     w.dir.dir("data/run/s1/tmp");
     let policy = w.builder().tmpdir(w.at("data/run/s1/tmp")).build().unwrap();
     assert_eq!(policy.tmpdir(), canon(&w.at("data/run/s1/tmp")));
 }
 
+/// R17 PR-D1: a policy without the session's temp folder is refused, never given the state
+/// folder's `tmp` (under R17 PR-C, Codex's `arg0` folder).
 #[test]
-fn without_one_the_tmpdir_falls_back_to_the_state_folders_tmp() {
-    let w = World::new("tmpdir-fallback");
-    let policy = w.builder().build().unwrap();
-    assert_eq!(policy.tmpdir(), canon(&w.at("state")).join("tmp"));
-    assert_eq!(policy.session_tmpdir(), None);
+fn without_one_the_policy_is_refused() {
+    let w = World::new("tmpdir-required");
+    let built = Policy::builder(w.at("matter"), w.at("state"))
+        .home(w.at("home"))
+        .build();
+    match built {
+        Err(Error::Policy(message)) => assert!(
+            message.contains("the session's temp folder is required"),
+            "{message}"
+        ),
+        other => panic!("expected the refusal, got {other:?}"),
+    }
 }
 
 #[test]
@@ -80,7 +88,7 @@ fn a_temp_folder_on_or_over_the_home_or_state_folder_is_refused() {
         "the temp folder may not equal or hold the state folder",
         &w.at("state"),
     );
-    // The fallback's own place, inside the state folder, is not a session's.
+    // The old fallback's place, inside the state folder, is not a session's.
     refused(
         w.builder().tmpdir(w.at("state/tmp")).build(),
         "the temp folder must be `<data_dir>/run/<session>/tmp`",

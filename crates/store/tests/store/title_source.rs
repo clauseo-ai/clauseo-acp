@@ -87,7 +87,7 @@ fn a_schema_3_database_keeps_its_titles_with_no_source() {
     block_on(store.close()).unwrap();
     let conn = Connection::open(dir.path().join(DB_FILE)).unwrap();
     assert_eq!(user_version(&conn), i64::from(SCHEMA));
-    assert_eq!(SCHEMA, 5);
+    assert_eq!(SCHEMA, 6);
 }
 
 #[test]

@@ -383,9 +383,7 @@ pub fn plan(
     if let Some(notes) = policy.notes() {
         own.push((notes, PathKind::Notes));
     }
-    if let Some(tmpdir) = policy.session_tmpdir() {
-        own.push((tmpdir, PathKind::TempFolder));
-    }
+    own.push((policy.tmpdir(), PathKind::TempFolder));
     for &(folder, kind) in &own {
         plan.allow(folder, Rights::Modify, Inherit::Tree, kind);
     }

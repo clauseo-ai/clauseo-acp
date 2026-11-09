@@ -117,7 +117,7 @@ pub(super) fn build(b: PolicyBuilder) -> Result<Policy, Error> {
     Ok(Policy {
         matter,
         state,
-        tmpdir,
+        tmpdir: required(tmpdir)?,
         home,
         runtime,
         read,
@@ -308,6 +308,20 @@ fn tmp_folder(
         ));
     }
     Ok(Some(tmpdir))
+}
+
+/// The session's temp folder, required (R17 PR-D1 removed the `<state>/tmp` fallback: under
+/// R17 PR-C the state folder's `tmp` is Codex's `arg0` folder). Checked last, as the policy is
+/// put together, so every other refusal reads as before.
+fn required(tmpdir: Option<PathBuf>) -> Result<PathBuf, Error> {
+    tmpdir.map_or_else(
+        || {
+            refuse(format!(
+                "the session's temp folder is required: `<data_dir>/{RUN_DIR}/<session>/{TEMP_DIR}`"
+            ))
+        },
+        Ok,
+    )
 }
 
 /// The run folder in the data folder, holding one folder per session.
