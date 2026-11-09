@@ -524,7 +524,7 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
   ["Getting {name} ready… {done} MB of {total} MB", WELCOME, "welcome"],
   // UD1-89: a jailed Codex launch met the reused Codex login: the ChatGPT plan's line, with Clauseo's own sign-in
   [
-    "Clauseo's Safe workspace can't share Codex's sign-in. Sign in to ChatGPT in Clauseo instead.",
+    "Sign in to ChatGPT in Clauseo. The Safe workspace can't use the sign-in Codex already has on this computer.",
     chatgpt({ signed_out: { found: "codex_sandbox" } }),
     "plan-found",
   ],

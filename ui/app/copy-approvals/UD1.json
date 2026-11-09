@@ -780,13 +780,13 @@
     "by": "app track (provisional; Rohan batch review)"
   },
   "UD1-89": {
-    "en": "Clauseo's Safe workspace can't share Codex's sign-in. Sign in to ChatGPT in Clauseo instead.",
-    "hi": "Clauseo का सुरक्षित कार्यक्षेत्र Codex का साइन-इन साझा नहीं कर सकता। इसके बजाय Clauseo में ChatGPT से साइन इन करें।",
+    "en": "Sign in to ChatGPT in Clauseo. The Safe workspace can't use the sign-in Codex already has on this computer.",
+    "hi": "Clauseo में ChatGPT से साइन इन करें। सुरक्षित कार्यक्षेत्र इस कंप्यूटर पर Codex के पहले से मौजूद साइन-इन का उपयोग नहीं कर सकता।",
     "hi_status": "provisional",
     "hi_at": "2026-11-09",
-    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "hi_by": "app thread (provisional)",
     "status": "provisional",
     "at": "2026-11-09",
-    "by": "app track (provisional; Rohan batch review; PR-D2a codex sandbox leave)"
+    "by": "app thread (provisional)"
   }
 }

@@ -391,15 +391,19 @@ fn codex_s_policy_golden_and_what_it_never_grants() {
     );
     assert_eq!(fx.shown(&jail.policy), expected);
     fx.assert_absent(&jail.policy);
-    // The CA bundle's variables, at the bundle, and nothing else without a proxy.
+    // `PATH` from the runtime (and Windows' folder), then the CA bundle's variables, at the
+    // bundle, and nothing else without a proxy.
+    let host = crate::agent::jailed_env::host_vars(jail.policy.runtime());
+    let (host_part, ca_part) = jail.env.split_at(host.len());
+    assert_eq!(host_part, &host[..]);
     let bundle = prepared.run.root.join(super::super::ca::CA_FILE);
-    let names: Vec<_> = jail.env.iter().map(|(name, _)| name.clone()).collect();
+    let names: Vec<_> = ca_part.iter().map(|(name, _)| name.clone()).collect();
     assert_eq!(
         names,
         super::super::ca::CA_VARS.map(std::ffi::OsString::from)
     );
     assert!(
-        jail.env
+        ca_part
             .iter()
             .all(|(_, value)| value.as_deref() == Some(bundle.as_os_str()))
     );
@@ -500,6 +504,7 @@ fn a_runtime_folder_in_documents_desktop_or_downloads_refuses_the_launch() {
 
 #[test]
 fn hidden_lists_every_other_registry_matter_but_one_nested_with_this_one() {
+    // `policy` alone: `jail` refuses the launch first when one is inside this matter (`branches`).
     let fx = Fixture::new("hidden");
     let (prepared, mut grants) = fx.codex();
     let nested = fx.matter.join("sub");

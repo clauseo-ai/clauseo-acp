@@ -1628,6 +1628,8 @@ export type ErrorCode =
 "matter.folder_network" | 
 /** The matter folder is on a drive that keeps no file permissions (FAT, exFAT), which Codex's sandbox needs, so Codex is not started there. */
 "matter.folder_no_permissions" | 
+/** Another matter's folder (a forgotten one counts too) is inside this matter's folder, so the Safe workspace can't keep the two apart; moving the inner folder out of this matter's folder lets work start here. The error's `files` holds the inner folder's path in this matter, the first in sorted order when there are several. */
+"matter.folder_nested" | 
 /** The client is not allowed to make this call. */
 "transport.unauthorized" | 
 /** The message is larger than the transport accepts. */
@@ -2537,8 +2539,8 @@ export type HostError = {
 	matter?: MatterId,
 	/**
 	 *  The matter's files the failure is about: for `matter.file_locked`, the files held open,
-	 *  sorted. Missing when it names none. For `matter.file_locked` the files are here, not in
-	 *  `message`.
+	 *  sorted; for `matter.folder_nested`, the other matter's folder inside this one. Missing
+	 *  when it names none. For `matter.file_locked` the files are here, not in `message`.
 	 */
 	files?: MatterPath[],
 };
@@ -4756,6 +4758,14 @@ export type SettingsView = {
 	locked: string[],
 	/**  Each agent's firm plan (`plans.<id>`), by agent id; left out when no agent has one. */
 	plans?: { [key in AgentId]: PlanView },
+	/**
+	 *  Per agent, the names in its settings variables (`agents.<id>.env`) the Safe workspace
+	 *  leaves out: credential names, which a jailed agent takes only from Clauseo's sign-in, the
+	 *  setup hook and the firm plan. Sorted, names only, never a value; an agent with none, and
+	 *  the whole map when none has one, are left out. The window shows a note beside such a
+	 *  variable whatever the protection tier.
+	 */
+	safe_workspace_unused_env?: { [key in AgentId]: EnvName[] },
 };
 
 /**

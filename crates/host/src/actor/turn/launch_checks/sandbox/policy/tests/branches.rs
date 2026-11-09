@@ -7,7 +7,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use clauseo_protocol::ErrorCode;
+use clauseo_protocol::{ErrorCode, MatterPath};
 use clauseo_sandbox::PathRule;
 
 use super::super::super::super::egress::EgressGuard;
@@ -273,4 +273,110 @@ fn a_linked_file_that_is_the_lawyer_s_own_by_identity_is_reused_whatever_its_lin
     // The lawyer's file is untouched.
     let kept: PathBuf = fx.home.join(".codex").join(LOGIN_FILE);
     assert_eq!(std::fs::read(kept).unwrap(), b"{\"lawyer\":1}");
+}
+
+#[test]
+fn a_runtime_folder_in_the_lawyer_s_claude_or_codex_home_refuses_the_launch() {
+    let fx = Fixture::new("agent_homes");
+    let (prepared, mut grants) = fx.codex();
+    grants.personal = Arc::new(|_home: Option<&Path>| Vec::new());
+    for home in [".claude", ".codex"] {
+        let install = fx.home.join(home).join("local");
+        write::create_dir_all(&install).unwrap();
+        grants.install = Some(install);
+        let error = runtime(&grants, &prepared).unwrap_err();
+        assert_eq!(error.code(), ErrorCode::AgentLaunchFailed);
+        let text = error.to_string();
+        assert!(
+            text.contains("Claude Code's or Codex's own folder"),
+            "{text}"
+        );
+        assert!(!text.contains(&*fx.root.to_string_lossy()), "{text}");
+    }
+    // A folder whose name only starts the same is no agent home.
+    let beside = fx.home.join(".claude-tools");
+    write::create_dir_all(&beside).unwrap();
+    grants.install = Some(beside);
+    assert!(runtime(&grants, &prepared).is_ok());
+}
+
+/// Another matter of the registry inside this one (open, or forgotten: `Grants::others` holds
+/// both, `grants`) refuses the jailed launch with `matter.folder_nested`, naming the first inner
+/// folder in sorted order as a path in this matter, as the policy cannot hide it inside the
+/// writable matter; a sibling, and a matter holding this one (left to the default deny), do not.
+#[test]
+fn another_matter_inside_this_one_refuses_the_jailed_launch_and_a_sibling_does_not() {
+    let fx = Fixture::new("nested");
+    let (prepared, mut grants) = fx.codex();
+    assert!(jail(&prepared, &grants, &[]).is_ok(), "siblings only");
+    let open = fx.matter.join("sub");
+    write::create_dir_all(&open).unwrap();
+    let later = fx.matter.join("zed");
+    write::create_dir_all(&later).unwrap();
+    // A forgotten matter's folder may be gone: compared as stored.
+    let forgotten = fx.matter.join("old").join("gone");
+    for (nested, first) in [
+        (vec![later.clone(), open], "sub"),
+        (vec![later, forgotten], "old/gone"),
+    ] {
+        let mut with = grants.clone();
+        with.others.extend(nested);
+        let Err(error) = jail(&prepared, &with, &[]) else {
+            panic!("a nested matter must refuse the launch");
+        };
+        let wire = error.to_wire();
+        assert_eq!(wire.code(), ErrorCode::MatterFolderNested);
+        assert!(!wire.retryable());
+        let files: Vec<&str> = wire.files().iter().map(MatterPath::as_str).collect();
+        assert_eq!(files, [first]);
+        let text = wire.message();
+        assert!(text.contains("Another matter's folder is inside"), "{text}");
+        assert!(!text.contains(&*fx.root.to_string_lossy()), "{text}");
+    }
+    // A matter holding this one is not refused here.
+    let holding = fx.matter.parent().unwrap().to_path_buf();
+    grants.others.push(holding);
+    assert!(jail(&prepared, &grants, &[]).is_ok());
+}
+
+/// The jailed agent's `PATH` is the policy's runtime folders, then the OS's; and on macOS the
+/// Seatbelt profile allows no `mach-lookup` but its listed services, so `/usr/bin/git`'s
+/// Command Line Tools shim cannot reach the install-on-demand service and show a dialog: `git`
+/// fails plainly.
+#[test]
+fn the_jail_s_path_is_its_runtime_then_the_os_s_and_no_install_dialog_is_reachable() {
+    let fx = Fixture::new("jail_path");
+    let (prepared, grants) = fx.claude();
+    let jail = jail(&prepared, &grants, &[]).unwrap();
+    let path = jail
+        .env
+        .iter()
+        .find(|(name, _)| name == "PATH")
+        .and_then(|(_, value)| value.clone())
+        .expect("PATH");
+    assert_eq!(
+        Some(path),
+        crate::agent::jailed_env::path(jail.policy.runtime())
+    );
+    let profile = clauseo_sandbox::SeatbeltProfile::new(&jail.policy, "clauseo-t").unwrap();
+    let text = profile.text();
+    for service in [
+        "com.apple.dt.CommandLineTools.installondemand",
+        "com.apple.coreservices.launchservicesd",
+    ] {
+        assert!(!text.contains(service), "{service}");
+    }
+    // Every mach-lookup allowed names its service: never a broad allow (comments aside).
+    let rules: Vec<&str> = text
+        .lines()
+        .filter(|line| !line.trim_start().starts_with(';'))
+        .collect();
+    let rules = rules.join("\n");
+    let mut found = 0;
+    for rest in rules.split("mach-lookup").skip(1) {
+        let rest = rest.trim_start();
+        assert!(rest.starts_with("(global-name \""), "{rest}");
+        found += 1;
+    }
+    assert!(found > 0, "the base profile's mach-lookup rule");
 }

@@ -435,7 +435,7 @@ test.each<[FoundLogin, string]>([
   ["codex_link_split", "Codex's sign-in on this computer changed, so Clauseo stopped using it."],
   [
     "codex_sandbox",
-    "Clauseo's Safe workspace can't share Codex's sign-in. Sign in to ChatGPT in Clauseo instead.",
+    "Sign in to ChatGPT in Clauseo. The Safe workspace can't use the sign-in Codex already has on this computer.",
   ],
   [
     "reused_signed_out",

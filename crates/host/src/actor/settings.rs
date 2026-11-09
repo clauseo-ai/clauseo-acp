@@ -36,7 +36,8 @@ use crate::error::Error;
 use crate::pipeline::Draft;
 
 /// The display settings in force, the tool and privacy switches in force, every key policy
-/// locks, sorted, and each agent's firm plan (names, never values).
+/// locks, sorted, each agent's firm plan (names, never values), and each agent's settings
+/// variables a jailed launch leaves out (names).
 pub(crate) fn view(actor: &Actor) -> SettingsView {
     let effective = &actor.effective;
     let ui = &effective.settings().ui;
@@ -52,6 +53,7 @@ pub(crate) fn view(actor: &Actor) -> SettingsView {
         privacy: privacy::view(actor),
         locked: effective.locked().map(str::to_owned).collect(),
         plans: entries::plans_view(&effective.settings().plans),
+        safe_workspace_unused_env: entries::unused_in_jail(&effective.settings().agents),
     }
 }
 

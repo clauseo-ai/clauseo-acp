@@ -20,14 +20,16 @@
 //!   followed), its install folder from its install record, stetdoc's folder (`path_prepend`),
 //!   then with the browser its sidecars' folders and Chrome's. A runtime folder in the lawyer's
 //!   Documents, Desktop or Downloads ([`personal_folders`]: on Windows the known folders,
-//!   wherever `OneDrive` moved them) or in any matter of the registry refuses the launch. Read
-//!   paths never go on `PATH`.
+//!   wherever `OneDrive` moved them), in the lawyer's `~/.claude` or `~/.codex`, or in any
+//!   matter of the registry refuses the launch. Read paths never go on `PATH`, which is these
+//!   folders then the OS's (`jailed_env::path`).
 //! - **Read only in the matter:** its files over the checkpoint size cap (`over_cap.rs`,
 //!   decision record 0038), besides the sandbox's own read-only names.
 //! - **Read only:** the CA bundle (`ca.rs`), the profile's skills folders, and what exists of the
 //!   session's skill packs, its relay token and agent-browser's config.
 //! - **Hidden:** the data folder (the parts above are allowed again after it) and every other
-//!   matter of the registry, open or not.
+//!   matter of the registry, open or not. Another matter inside this one refuses the launch
+//!   ([`nested_matter`]): the sandbox cannot hide a folder inside the matter.
 //! - **Network:** only the session proxy's listeners, the relay and the reservation's ports
 //!   (`proxy_ports`); with the browser, its loopback ports and socket folder.
 //!
@@ -36,14 +38,14 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use clauseo_protocol::{AgentKind, ErrorCode, ThreadId};
+use clauseo_protocol::{AgentKind, ErrorCode, HostError, MatterPath, ThreadId};
 use clauseo_sandbox::{Loopback, Policy, PolicyBuilder};
 
 use super::super::super::super::Actor;
 use super::super::relay::CaseLaw;
 use super::super::{Prepared, RunFolders};
-use crate::agent::codex;
 use crate::agent::state_folder::StateLink;
+use crate::agent::{codex, jailed_env};
 use crate::config::sandbox::CaRoots;
 use crate::error::Error;
 
@@ -59,6 +61,10 @@ pub(crate) const NATIVE_CODE_DENY: bool = false;
 
 /// The lawyer's folders no runtime folder may sit in (`home/<name>`).
 const PERSONAL_FOLDERS: [&str; 3] = ["Documents", "Desktop", "Downloads"];
+
+/// The lawyer's own agent homes (`home/<name>`), holding their Claude Code and Codex logins: no
+/// runtime folder may sit in one, as the jail would let the agent read there.
+const AGENT_HOMES: [&str; 2] = [".claude", ".codex"];
 
 /// Where the lawyer's Documents, Desktop and Downloads are for a home ([`personal_folders`]).
 pub(crate) type PersonalFolders =
@@ -103,7 +109,8 @@ pub(crate) struct Grants {
 }
 
 /// A jailed launch's policy and the variables its agent gets with it: the proxy's (they carry its
-/// token) and the CA bundle's, `None` to remove.
+/// token), the CA bundle's and `jailed_env::host_vars` (`PATH` from the policy's runtime
+/// folders), `None` to remove.
 pub(crate) struct Jail {
     pub(crate) policy: Policy,
     pub(crate) env: Vec<(OsString, Option<OsString>)>,
@@ -111,8 +118,10 @@ pub(crate) struct Jail {
 
 /// The launch's jail: its runtime folders ([`runtime`]), its CA bundle written into the run
 /// folder (`ca.rs`), its [`policy`] with `reserved` (the reservation's ports) and the agent's
-/// variables. File system calls: off the actor.
+/// variables. Refused first when another matter sits inside this one ([`nested_matter`]). File
+/// system calls: off the actor.
 pub(crate) fn jail(prepared: &Prepared, grants: &Grants, reserved: &[u16]) -> Result<Jail, Error> {
+    nested_matter(grants, prepared)?;
     let runtime = runtime(grants, prepared)?;
     let ca = super::ca::write(
         &prepared.run.root,
@@ -129,6 +138,7 @@ pub(crate) fn jail(prepared: &Prepared, grants: &Grants, reserved: &[u16]) -> Re
     let policy = policy(prepared, grants, runtime, ca.as_deref(), &ports)
         .map_err(|error| super::refused(&error))?;
     let mut env = listener.map(|listener| listener.env).unwrap_or_default();
+    env.extend(jailed_env::host_vars(policy.runtime()));
     if let Some(ca) = &ca {
         env.extend(
             super::ca::CA_VARS
@@ -266,6 +276,16 @@ pub(crate) fn runtime(grants: &Grants, prepared: &Prepared) -> Result<Vec<PathBu
             .iter()
             .any(|folder| folders.iter().any(|outer| folder.starts_with(outer)))
     };
+    let homes = grants
+        .home
+        .iter()
+        .flat_map(|home| AGENT_HOMES.map(|name| home.join(name)));
+    if inside(homes.collect()) {
+        return Err(launch_failed(
+            "The sandbox couldn't start the agent: its program is in Claude Code's or Codex's own \
+             folder in your home folder. Install it elsewhere.",
+        ));
+    }
     if inside((grants.personal)(grants.home.as_deref())) {
         return Err(launch_failed(
             "The sandbox couldn't start the agent: its program is in the Documents, Desktop or \
@@ -291,29 +311,52 @@ pub(crate) fn runtime(grants: &Grants, prepared: &Prepared) -> Result<Vec<PathBu
 /// path misses. Paths as given: [`runtime`] resolves them. File system calls on Windows
 /// (Documents' bounded check): off the actor.
 pub(crate) fn personal_folders(home: Option<&Path>) -> Vec<PathBuf> {
-    #[cfg_attr(
-        not(windows),
-        expect(unused_mut, reason = "only Windows adds known folders")
-    )]
-    let mut folders: Vec<PathBuf> = home
+    let folders = home
         .iter()
-        .flat_map(|home| PERSONAL_FOLDERS.iter().map(move |name| home.join(name)))
-        .collect();
+        .flat_map(|home| PERSONAL_FOLDERS.iter().map(move |name| home.join(name)));
     #[cfg(windows)]
-    {
+    let folders = {
         use clauseo_settings::{KnownFolder, PlatformDirs as _, SystemDirs};
         let known = [
             KnownFolder::Documents,
             KnownFolder::Desktop,
             KnownFolder::Downloads,
         ];
-        folders.extend(
+        folders.chain(
             known
                 .into_iter()
                 .filter_map(|folder| SystemDirs.known_folder(folder)),
-        );
-    }
-    folders
+        )
+    };
+    folders.collect()
+}
+
+/// Refuses the launch with `matter.folder_nested` when another matter of the registry
+/// (`Grants::others`: forgotten ones too) sits inside this one: the policy cannot hide a folder
+/// inside the matter it lets the agent write, so the jail could not keep the two apart. The
+/// error's `files` names the inner folder's path in this matter (`matter_path_in`: compared
+/// canonical, as stored where the folder is gone), the first in sorted order; the message and
+/// the log name no path, the log the kind only.
+pub(crate) fn nested_matter(grants: &Grants, prepared: &Prepared) -> Result<(), Error> {
+    let mut nested: Vec<MatterPath> = grants
+        .others
+        .iter()
+        .filter_map(|other| clauseo_matters::matter_path_in(&prepared.stored, other))
+        .collect();
+    nested.sort_unstable_by(|a, b| a.as_str().cmp(b.as_str()));
+    let Some(first) = nested.into_iter().next() else {
+        return Ok(());
+    };
+    tracing::warn!(
+        kind = "a matter inside this matter",
+        "the sandbox refused the agent's launch"
+    );
+    let refusal = HostError::new(
+        ErrorCode::MatterFolderNested,
+        "Another matter's folder is inside this matter's folder, so the Safe workspace can't keep \
+         them apart.",
+    );
+    Err(Error::Refused(refusal.with_files(vec![first])))
 }
 
 /// The folder Chrome runs from: on macOS the `.app` bundle that holds it, elsewhere its own
@@ -360,8 +403,8 @@ pub(crate) fn policy(
     builder = builder.over_cap(super::over_cap::over_cap(&matter, grants.file_cap));
     builder = builder.hidden(&grants.data);
     for other in &grants.others {
-        // A matter inside this one, or holding it, is refused by the registry; one the stored
-        // paths still nest is left to the default deny rather than refuse the build.
+        // A matter inside this one refuses the launch (`nested_matter`); one holding it is left
+        // to the default deny, as hiding it would refuse the build.
         if !other.starts_with(&prepared.stored) && !prepared.stored.starts_with(other) {
             builder = builder.hidden(other);
         }
@@ -384,8 +427,9 @@ fn clauseo_config(kind: AgentKind) -> &'static str {
 /// `auth.json` link in its state folder (`credential_link`, only that name), when it is the
 /// file of Clauseo's own login home (`Grants::login_home`), the login is not reused and the
 /// file is not the lawyer's own by identity (`CodexPrepared::lawyers_login`; ruling (a): such
-/// a launch is refused before this, so this is the second fence); a Claude agent's store in Clauseo's login home (`claude_store`: only the
-/// store's files and lock folders), never the lawyer's own store while the login is reused. No
+/// a launch is refused before this, so this is the second fence); a Claude agent's store in
+/// Clauseo's login home (`claude_store`: only the store's files and lock folders), never the
+/// lawyer's own store while the login is reused. No
 /// Keychain rule in any policy (`keychain` stays off, ruling of 2026-11-08). Clauseo never reads
 /// the store.
 pub(crate) fn login_grant(

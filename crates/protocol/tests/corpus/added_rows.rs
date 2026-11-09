@@ -492,4 +492,11 @@ pub(crate) const ADDED_AFTER_V1: &[Corpus] = &[
         (360, 0x2f7f_2e65_40a0_ae9d),
         (262, 0x1258_dd03_4d59_b473),
     ),
+    (
+        "added/turn_failed-MatterFolderNested",
+        include_bytes!("added/turn_failed-MatterFolderNested.jsonl"),
+        include_bytes!("added/turn_failed-MatterFolderNested.msgpack"),
+        (352, 0x7a87_c4b4_26dc_a37d),
+        (254, 0x54b0_eb79_fae0_c755),
+    ),
 ];

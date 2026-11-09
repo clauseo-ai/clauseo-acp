@@ -2,10 +2,10 @@
 //! reservation comes first and its ports go into the policy; a launch failing after it releases
 //! it; every other matter of the registry is hidden, open, never opened or forgotten; the
 //! session's proxy opens with the tier-B agent listener, no token-free browser listener and the
-//! host's block list; the agent's proxy and CA
-//! variables are explicit in a jailed spec (Windows' runner passes nothing inherited) and absent
-//! at tier C; a jailed Codex is refused before anything is reserved while it would start in its
-//! ask mode (R17 PR-D2c starts it in the jailed preset).
+//! host's block list; the agent's proxy and CA variables are explicit in a jailed spec and absent
+//! at tier C; a jailed spec keeps no inherited credential and its `PATH` is the runtime's then
+//! the OS's (reviewer M3); a jailed Codex is refused before anything is reserved while it would
+//! start in its ask mode (R17 PR-D2c starts it in the jailed preset).
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -236,6 +236,71 @@ fn a_jailed_claude_s_spec_carries_every_variable_it_needs_with_nothing_inherited
     let policy = &fake.calls()[0].policy;
     assert!(policy.claude_store().is_some());
     assert!(!policy.keychain());
+}
+
+/// A jailed Claude's environment is allow-listed (reviewer M3): from the lawyer's own it keeps
+/// only the locale, never a credential or their `PATH`; the hook's stored key passes; its `PATH`
+/// is the policy's runtime folders, then the OS's.
+#[test]
+fn a_jailed_claude_gets_no_inherited_credential_and_the_runtime_s_path() {
+    let dir = Dir::new(
+        "sandbox_policy_claude_allow_list",
+        &[(CLAUDE, Scenario::Bundled("claude-prompt-stream"))],
+    );
+    let (fake, _) = Fake::new(&dir, Answer::Launch(Vec::new()));
+    let inherited: Vec<(OsString, OsString)> = [
+        ("LANG", "en_GB.UTF-8"),
+        ("PATH", "/home/ada/bin:/opt/homebrew/bin"),
+        ("CLAUDE_CODE_OAUTH_TOKEN", "lawyers-token"),
+        ("AWS_SECRET_ACCESS_KEY", "lawyers-aws"),
+        ("OPENAI_API_KEY", "lawyers-openai"),
+        ("GH_TOKEN", "lawyers-gh"),
+    ]
+    .into_iter()
+    .map(|(name, value)| (name.into(), value.into()))
+    .collect();
+    let (host, _, _) = start_with(&dir, Some(Arc::clone(&fake)), move |config| {
+        config
+            .with_egress_proxy(Arc::new(TestProxy::new(PROXY_PORT)))
+            .with_inherited_env(inherited)
+            .with_profile_hook(Box::new(KeyHook))
+    });
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("a.txt", "x\n")], CLAUDE);
+    let mut events = host.events(StreamId::Thread(thread));
+    let (turn, _) = host.prompt(thread, "Look at the matter.");
+    assert_eq!(
+        events.until_turn_ended(turn).stop,
+        StopReason::EndTurn,
+        "{}",
+        events.dump()
+    );
+    let envs = fake.envs();
+    let env = envs.first().expect("one jailed launch");
+    for name in [
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "AWS_SECRET_ACCESS_KEY",
+        "OPENAI_API_KEY",
+        "GH_TOKEN",
+    ] {
+        assert_eq!(var(env, name), None, "{name}");
+    }
+    assert_eq!(var(env, "LANG"), Some("en_GB.UTF-8"));
+    assert_eq!(var(env, "ANTHROPIC_API_KEY"), Some("sk-test-key"));
+    let path = var(env, "PATH").expect("PATH");
+    assert!(
+        !path.contains("/home/ada") && !path.contains("homebrew"),
+        "{path}"
+    );
+    let policy = &fake.calls()[0].policy;
+    // The runtime's folders first, in order; on macOS and Linux then exactly the OS's.
+    let runtime = std::env::join_paths(policy.runtime()).unwrap();
+    assert!(path.starts_with(runtime.to_str().unwrap()), "{path}");
+    #[cfg(unix)]
+    {
+        let os = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"].map(std::path::PathBuf::from);
+        let want = std::env::join_paths(policy.runtime().iter().cloned().chain(os)).unwrap();
+        assert_eq!(Some(path), want.to_str());
+    }
 }
 
 /// Until R17 PR-D2c starts a jailed Codex in the jailed preset, a jailed Codex launch is refused

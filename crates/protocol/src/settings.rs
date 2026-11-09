@@ -130,6 +130,13 @@ pub struct SettingsView {
     /// Each agent's firm plan (`plans.<id>`), by agent id; left out when no agent has one.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub plans: BTreeMap<AgentId, PlanView>,
+    /// Per agent, the names in its settings variables (`agents.<id>.env`) the Safe workspace
+    /// leaves out: credential names, which a jailed agent takes only from Clauseo's sign-in, the
+    /// setup hook and the firm plan. Sorted, names only, never a value; an agent with none, and
+    /// the whole map when none has one, are left out. The window shows a note beside such a
+    /// variable whatever the protection tier.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub safe_workspace_unused_env: BTreeMap<AgentId, Vec<EnvName>>,
 }
 
 /// An agent's firm plan as a window sees it (`plans.<id>`): the endpoint, the provider and the

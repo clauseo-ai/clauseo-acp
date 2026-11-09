@@ -39,6 +39,7 @@ fn get_settings_is_a_plain_string_and_answers_settings() {
         },
         locked: vec!["ui.theme".to_owned()],
         plans: BTreeMap::new(),
+        safe_workspace_unused_env: BTreeMap::new(),
     });
     assert_eq!(
         serde_json::to_string(&answer).unwrap(),
@@ -256,12 +257,26 @@ fn plans_carry_names_and_never_values() {
         },
         locked: Vec::new(),
         plans: BTreeMap::new(),
+        safe_workspace_unused_env: BTreeMap::new(),
     };
     let without = serde_json::to_string(&view).unwrap();
     assert!(
         !without.contains("plans"),
         "no plans are left out: {without}"
     );
+    assert!(!without.contains("safe_workspace_unused_env"), "{without}");
+    // The settings variables a jailed launch leaves out: names only, per agent.
+    let mut unused = view.clone();
+    unused.safe_workspace_unused_env.insert(
+        AgentId::new("codex-acp").unwrap(),
+        vec![EnvName::new("OPENAI_API_KEY").unwrap()],
+    );
+    let json = serde_json::to_string(&unused).unwrap();
+    assert!(
+        json.contains(r#""safe_workspace_unused_env":{"codex-acp":["OPENAI_API_KEY"]}"#),
+        "{json}"
+    );
+    round_trips(&unused);
     round_trips(&view);
 
     let plan = PlanView {

@@ -156,6 +156,11 @@ error_codes! {
     MatterFolderNoPermissions = "matter.folder_no_permissions", retryable: false,
         meaning: "The matter folder is on a drive that keeps no file permissions (FAT, exFAT), \
         which Codex's sandbox needs, so Codex is not started there.";
+    MatterFolderNested = "matter.folder_nested", retryable: false, meaning: "Another matter's \
+        folder (a forgotten one counts too) is inside this matter's folder, so the Safe workspace \
+        can't keep the two apart; moving the inner folder out of this matter's folder lets work \
+        start here. The error's `files` holds the inner folder's path in this matter, the first \
+        in sorted order when there are several.";
     TransportUnauthorized = "transport.unauthorized", retryable: false, meaning: "The client is \
         not allowed to make this call.";
     TransportTooLarge = "transport.too_large", retryable: false, meaning: "The message is larger \
@@ -328,8 +333,8 @@ pub struct HostError {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     matter: Option<MatterId>,
     /// The matter's files the failure is about: for `matter.file_locked`, the files held open,
-    /// sorted. Missing when it names none. For `matter.file_locked` the files are here, not in
-    /// `message`.
+    /// sorted; for `matter.folder_nested`, the other matter's folder inside this one. Missing
+    /// when it names none. For `matter.file_locked` the files are here, not in `message`.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     files: Vec<MatterPath>,
 }

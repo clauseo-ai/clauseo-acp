@@ -116,6 +116,9 @@ export const HI = {
     "Codex नेटवर्क ड्राइव पर काम नहीं कर सकता। मामले को इस कंप्यूटर पर ले जाएँ।",
   "Codex can't work on a drive without file permissions. Move the matter to this computer.":
     "Codex बिना फ़ाइल अनुमतियों वाली ड्राइव पर काम नहीं कर सकता। मामले को इस कंप्यूटर पर ले जाएँ।",
+  // A provisional draft from the host's D2a round 3; the app thread reviews it with its scene.
+  "To work here, move {path} out of this matter's folder. It's another matter's folder, and the Safe workspace can't keep the two apart while one is inside the other.":
+    "यहाँ काम करने के लिए, {path} को इस मामले के फ़ोल्डर से बाहर ले जाएँ। यह किसी दूसरे मामले का फ़ोल्डर है, और जब तक एक फ़ोल्डर दूसरे के अंदर है, सुरक्षित कार्यक्षेत्र दोनों को अलग नहीं रख सकता।",
   "This matter's folder is too deep inside other folders for Clauseo to work in it on Windows. Move it nearer the top of its drive.":
     "इस मामले का फ़ोल्डर दूसरे फ़ोल्डरों के बहुत भीतर है, इसलिए Windows पर Clauseo उसमें काम नहीं कर सकता। उसे ड्राइव के ऊपरी स्तर के पास ले जाएँ।",
   "The update didn't install. Try again.": "अपडेट इंस्टॉल नहीं हुआ। फिर से प्रयास करें।",

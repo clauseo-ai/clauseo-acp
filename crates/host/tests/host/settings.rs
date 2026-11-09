@@ -103,6 +103,7 @@ fn get_settings_gives_the_defaults_and_no_locked_key() {
             privacy: privacy_defaults(),
             locked: Vec::new(),
             plans: BTreeMap::new(),
+            safe_workspace_unused_env: BTreeMap::new(),
         }
     );
     host.shutdown();
@@ -170,6 +171,7 @@ fn a_patch_reaches_every_app_subscriber_and_no_stream() {
         privacy: privacy_defaults(),
         locked: Vec::new(),
         plans: BTreeMap::new(),
+        safe_workspace_unused_env: BTreeMap::new(),
     };
     assert_eq!(settings(&host), expected);
     host.settle();
@@ -284,6 +286,7 @@ fn a_tool_patch_reaches_every_app_subscriber_the_file_and_a_restart() {
         privacy: privacy_defaults(),
         locked: Vec::new(),
         plans: BTreeMap::new(),
+        safe_workspace_unused_env: BTreeMap::new(),
     };
     assert_eq!(settings(&host), expected);
     host.settle();

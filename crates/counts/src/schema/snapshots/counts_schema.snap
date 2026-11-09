@@ -1479,6 +1479,7 @@ expression: counts_schema()
         "matter.folder_in_matters_root",
         "matter.folder_network",
         "matter.folder_no_permissions",
+        "matter.folder_nested",
         "transport.unauthorized",
         "transport.too_large",
         "settings.locked",

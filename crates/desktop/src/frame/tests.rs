@@ -228,6 +228,7 @@ fn no_host_event_kind_takes_a_reserved_key() {
             },
             locked: Vec::new(),
             plans: BTreeMap::new(),
+            safe_workspace_unused_env: BTreeMap::new(),
         }),
         HostEvent::MattersChanged(clauseo_protocol::MattersChanged {
             matters: Vec::new(),
