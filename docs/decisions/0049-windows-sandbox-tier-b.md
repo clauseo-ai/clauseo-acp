@@ -2365,6 +2365,77 @@ pub struct Progress { pub walked: u64, pub done: bool, pub failed: Option<Arc<Er
   group's members needs an administrator, so the design (for example static slot groups made at
   set-up) comes to the orchestrator before that PR.
 
+### COM launch restriction
+
+Pool users reach WSL through out-of-process COM: `wsl.exe`, `wslapi.dll`, `\\wsl$` and a direct
+`CoCreateInstance` all activate a class served by `WSLService` (or the inbox `LxssManager`). The
+per-`AppID` `LaunchPermission` deny (the WSL deny, PR #710) depends on WSL's `AppID` keys, and
+an `msiexec` repair deletes and rewrites those keys over about 15 s. So set-up also denies the pool
+group in the machine-wide limit, `HKLM\SOFTWARE\Microsoft\Ole\MachineLaunchRestriction`
+(`windows::machine_launch`). COM checks that value on every launch and activation of an
+out-of-process server, and a principal it refuses can't get the right from any server's own
+permission ([MachineLaunchRestriction](https://learn.microsoft.com/en-us/windows/win32/com/machinelaunchrestriction)).
+The value is independent of WSL's keys, so a repair doesn't touch it. A VM inventory found that
+the agent's tools and `chrome-headless-shell` make no out-of-process activation, so denying the
+group machine-wide takes nothing from them.
+
+- **The deny.** `(D;;CCDCLCSWRP;;;<ClauseoSandboxUsers>)`, mask `0x1F`: `COM_RIGHTS_EXECUTE` (1),
+  `COM_RIGHTS_EXECUTE_LOCAL` (2), `COM_RIGHTS_EXECUTE_REMOTE` (4), `COM_RIGHTS_ACTIVATE_LOCAL`
+  (8) and `COM_RIGHTS_ACTIVATE_REMOTE` (16), the five rights of
+  [Access Control Lists for COM](https://learn.microsoft.com/en-us/windows/win32/com/access-control-lists-for-com).
+  In SDDL the letters are the directory-service ones with the same bits
+  ([ADS_RIGHTS_ENUM](https://learn.microsoft.com/en-us/windows/win32/api/iads/ne-iads-ads_rights_enum)):
+  `CC` 0x1, `DC` 0x2, `LC` 0x4, `SW` 0x8, `RP` 0x10. The group SID comes from the record's
+  `GroupSid`; the refresh refuses one that isn't `S-1-5-21-<machine>-<rid>`.
+- **Read, merge, write.** The value is parsed strictly (`machine_launch/sd.rs`). Every entry is
+  kept byte for byte, and only the deny is added, at DACL index 0, so explicit denies come first.
+  A run that finds a full deny for the group ahead of every allow writes nothing. A value that
+  won't parse is never written: not `REG_BINARY`, not a valid self-relative descriptor, no owner
+  or group, a DACL that is absent or NULL, an entry without `COM_RIGHTS_EXECUTE`, or an entry in
+  COM's old form (`COM_RIGHTS_EXECUTE` alone), which the new-form deny would mix with. COM
+  rejects a mixed ACL. Before the write, the new bytes are read back through the same parser and
+  `IsValidSecurityDescriptor`.
+- **No value.** Windows' documented default applies, "administrators may obtain local and remote
+  launch and activation permissions, and members of the Everyone group may obtain local
+  activation and launch permissions": `O:BAG:BAD:(A;;CCDCLCSWRP;;;BA)(A;;CCDCSW;;;WD)`. The
+  guard writes that default with the deny in front.
+- **Backup.** Before the first change, the original value is stored under the record's
+  subkey `HKLM\SOFTWARE\Clauseo\Sandbox\MachineLaunch` (`Original`, empty when there was no
+  value). The subkey has a protected DACL that grants only SYSTEM and Administrators, so the
+  pool, which reads the record, can't read or change the backup. The guard also stores the bytes
+  it last wrote (`Written`), set before each write. A later re-apply keeps the first `Original`.
+- **Where.** Set-up step 8c applies the guard elevated, after the network and once the group and
+  the record exist (`late_steps::launch_deny`). Every run of `\Clauseo\SandboxRefresh` applies
+  it again as SYSTEM, after the admin copy's steps, under the set-up lock
+  (`refresh/launch_phase.rs`). The refresh skips a record with no `GroupSid` or with
+  `Removing` set. A run that finds a deny Clauseo wrote has gone (drift) puts it back and logs an
+  information line. The step never fails the set-up.
+- **Removal.** `--remove` (after `DeviceSync`'s deny, before the group goes) checks the value
+  first. If it is exactly the bytes Clauseo wrote last, the backup goes back byte for byte, and
+  a backup of "no value" deletes the value. Otherwise only the denies naming the group come off
+  and every other entry stays. A value that holds nothing but Windows' default after that, on a
+  machine that had no value, is deleted. A value that won't parse is left and logged. Then the
+  backup subkey and the state go. A set-up rollback that deletes a group it made removes the
+  deny first, and keeps the group if it can't.
+- **Group Policy.** `HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DCOM\MachineLaunchRestriction`
+  (an SDDL string, written by the "DCOM: Machine Launch Restrictions in Security Descriptor
+  Definition Language (SDDL) syntax" policy, and common on Entra- or Intune-managed machines)
+  takes the place of the value, so our write doesn't count while the policy is set. The guard
+  converts the policy's SDDL with Windows and checks it for the same deny. If the deny is there,
+  the state is `policy`. If not, the state is `degraded: group policy`. The value is still
+  written either way, so the guard holds once the policy goes. Firm IT adds the ACE to the GPO
+  (`docs/firm-it.md`).
+- **Degraded.** The record's `MachineLaunchDeny` (`REG_SZ`, readable by Users) holds the state:
+  `applied`, `policy`, `degraded: group policy`, `degraded: unparsable` or `degraded: failed`.
+  The value is written only when the state changes. A degraded guard is logged (the set-up log,
+  and an Event Log error line from the refresh) and is in `SetupReport::launch_deny`. The WSL
+  deny and the network filters stay on.
+- **Not measured on a VM yet:** that a pool user can't activate WSL with the deny in place and
+  the `AppID` deny gone; that the lawyer's own out-of-process COM still works; that `--remove`
+  restores the original bytes on a real machine; that a GPO value overrides ours and the state
+  reads `degraded: group policy`; and that the `Ole` key accepts the write from an elevated admin
+  and from SYSTEM without `REG_OPTION_BACKUP_RESTORE`.
+
 ## Consequences
 
 - A finished set-up moves the machine to tier B at the next tier query; R17's
