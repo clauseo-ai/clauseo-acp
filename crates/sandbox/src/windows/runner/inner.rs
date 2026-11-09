@@ -96,8 +96,21 @@ impl Inner for Calls {
         }
     }
 
-    fn quiet_wer(&mut self) -> Result<(), Failure> {
-        wer_flow::quiet(&mut OsRegistry).map_err(|error| (RunExit::Token, error.to_string()))
+    fn quiet_wer(&mut self) -> Result<Vec<String>, Failure> {
+        let launch = self
+            .launch
+            .as_ref()
+            .ok_or_else(|| (RunExit::Pipe, "no launch".to_owned()))?;
+        // The hive is opened by the pool user's SID, which this runner's token holds and the
+        // launch names: a mismatch refuses, as `start` does.
+        if self.me != launch.pool_user {
+            return Err((
+                RunExit::Token,
+                "the inner runner isn't the pool user".to_owned(),
+            ));
+        }
+        wer_flow::quiet(&mut OsRegistry, &self.me)
+            .map_err(|error| (RunExit::PoolProfile, error.to_string()))
     }
 
     fn log(&mut self, line: &str) {

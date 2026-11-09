@@ -392,6 +392,13 @@ your SIEM or crash collection gathers those dumps, treat a dump from a sandbox u
 to `ClauseoSb32`, members of `ClauseoSandboxUsers`) as matter data, or leave those users out of
 `LocalDumps`.
 
+A WER policy wins over Clauseo's per-user setting. If your Group Policy sets "Disable Windows Error
+Reporting" to Disabled (`Disabled` = 0 under `HKLM\SOFTWARE\Policies\Microsoft\Windows\Windows
+Error Reporting`), sandboxed sessions still start, the sandbox runner logs that WER is kept on, and only the
+sandbox job's limit stops WER for a crash it catches. A fastfail crash may then start WER as the
+signed-in user against the sandboxed process. Leave that policy unset, or set it to Enabled, on
+machines that run the sandbox.
+
 ## 2. Signing
 
 - **Windows: unsigned for the beta.** There is no code-signing certificate yet; one comes once

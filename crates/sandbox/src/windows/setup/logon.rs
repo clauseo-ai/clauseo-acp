@@ -1,6 +1,9 @@
 //! The set-up's one logon per pool user on Windows (S15 `PR4f`, step 6): `LogonUserW`
 //! (`LOGON32_LOGON_INTERACTIVE`), then `LoadUserProfileW`, which makes the profile from Default
-//! the first time (`AppData\LocalLow` included), then `UnloadUserProfile`. A temporary profile
+//! the first time (`AppData\LocalLow` included), then, while the profile is loaded, the repair of
+//! its Windows Error Reporting key (`runner::wer::repair_hive`: a registry link on the way, or a
+//! WER key that is a link or that the agent could write, is deleted, so the next launch makes it
+//! again; decision 0049), then `UnloadUserProfile`. A temporary profile
 //! is reported ([`ProfileDir::temporary`]), so the engine fails rather than close the wrong
 //! `LocalLow` (K5).
 //!
@@ -80,6 +83,13 @@ pub fn log_on_once(name: &str, password: &Password) -> Result<ProfileDir, Machin
         Some(sid) => reg_dword(&format!(r"{PROFILE_LIST}\{}", sid.as_str()), "State")?,
         None => None,
     };
+    if let Some(sid) = &sid {
+        match crate::windows::runner::wer::repair_hive(sid) {
+            Ok(true) => tracing::info!(%name, "deleted the sandbox user's unsafe WER key"),
+            Ok(false) => {}
+            Err(cause) => return Err(MachineError::Other(cause)),
+        }
+    }
     drop(loaded);
     drop(token);
     let temporary = is_temporary(state, &path);
