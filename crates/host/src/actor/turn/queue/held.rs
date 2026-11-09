@@ -50,6 +50,25 @@ pub(in crate::actor::turn) fn set_requeue_for_test(
     });
 }
 
+/// `thread`'s agent was stopped for moving itself to a mode that approves without asking
+/// (`forced_mode::unjailed::stop_unasked`): its queued turns wait for the lawyer (`paused`),
+/// a head sent now included, so none starts the agent again by itself, even when the stopped
+/// turn ends `EndTurn`. An empty queue is not held: the lawyer's next message starts a new agent.
+pub(in crate::actor::turn) fn hold_for_stop(actor: &mut Actor, thread: ThreadId) {
+    let Some(queue) = queue(actor, thread) else {
+        return;
+    };
+    if queue.is_empty() {
+        return;
+    }
+    queue.held = true;
+    queue.held_for_limit = false;
+    for queued in &mut queue.turns {
+        queued.forced = false;
+    }
+    sync_held(actor, thread);
+}
+
 /// Why `thread`'s queue shows held, or `None` when it does not.
 pub(crate) fn queue_hold(actor: &Actor, thread: ThreadId) -> Option<QueueHoldReason> {
     let queue = &actor.threads.get(&thread)?.turn.queue;
