@@ -413,15 +413,17 @@ pub(super) fn firm_it_codes(firm: &str, heading: &str) -> Vec<u8> {
 #[test]
 fn the_installers_exit_codes_are_the_ones_firm_it_lists_by_mode() {
     let code = admin_code();
-    // The values themselves: admin_copy_ask.rs's the_installers_exit_codes_are_their_own.
+    // The values themselves: admin_copy_ask.rs's the_installers_exit_codes_are_their_own. 28,
+    // Clauseo.exe gone after the files are placed, both installers in every mode, is
+    // app_exe_missing.rs's.
     let firm = read("../../docs/firm-it.md");
     assert_eq!(
         firm_it_codes(&firm, "What a silent (`/S`) install can return:"),
-        [20, 22, 23, 24, 25]
+        [20, 22, 23, 24, 25, 28]
     );
     assert_eq!(
         firm_it_codes(&firm, "What an interactive install can also return:"),
-        [20, 24]
+        [20, 24, 28]
     );
     // Per user, 24 only past the /S and /P skip, which sets 22; 23 under /S also when the wait
     // ran out.
