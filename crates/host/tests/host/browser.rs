@@ -21,6 +21,7 @@ use crate::profile_rig::{
     settings, template, turn,
 };
 use crate::support::{Dir, FAKE, Scenario, matter_with_thread};
+#[cfg(unix)]
 use crate::write;
 
 const GB: u64 = 1024 * 1024 * 1024;
