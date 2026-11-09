@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use clauseo_profile::claude::{OPTION_KEYS, SETTINGS_KEYS};
 use clauseo_profile::instructions::{TOOLS, word_count};
 use clauseo_profile::placeholders::{
-    self, BROWSER_DIR, BROWSER_EXECUTABLE, CDP_PORT, DAEMON_PORT, IN_INSTRUCTIONS, IN_SERVERS,
-    MATTER_NOTES, PROXY_PORT, SESSION_ID, SOCKET_DIR, STREAM_PORT, WORK_FOLDER,
+    self, BROWSER, BROWSER_DIR, BROWSER_EXECUTABLE, CDP_PORT, DAEMON_PORT, IN_INSTRUCTIONS,
+    IN_SERVERS, MATTER_NOTES, PROXY_PORT, SESSION_ID, SOCKET_DIR, STREAM_PORT, WORK_FOLDER,
 };
 use clauseo_profile::{
     BrowserSidecars, ClauseoProfile, CodexConfig, Instructions, ProfileError, ProfilePaths,
@@ -157,11 +157,10 @@ fn a_settings_key_outside_the_list_never_reaches_the_fragment() {
 }
 
 #[test]
-fn the_allow_list_is_the_browser_and_stetdocs_read_only_commands() {
+fn the_allow_list_is_stetdocs_read_only_commands() {
     assert_eq!(
         profile().claude_options().allowed_tools(),
         [
-            "mcp__browser",
             "Bash(stetdoc view:*)",
             "Bash(stetdoc inspect:*)",
             "Bash(stetdoc check:*)",
@@ -238,16 +237,15 @@ fn kind_specific_parts_go_only_to_their_kind() {
     assert!(profile.skill_files(None).is_none());
     for kind in [None, Some(AgentKind::Claude), Some(AgentKind::Codex)] {
         let names: Vec<String> = profile.servers(kind).into_iter().map(|s| s.name).collect();
-        assert_eq!(names, ["browser", "case-law"]);
+        // `browser` is parked (`servers::BROWSER_MCP`).
+        assert_eq!(names, ["case-law"]);
     }
 }
 
 #[test]
 fn the_browser_entry_runs_the_guard_with_its_ports_and_variables() {
-    let [browser, _case_law] = profile()
-        .servers(Some(AgentKind::Claude))
-        .try_into()
-        .unwrap();
+    // Parked (`servers::BROWSER_MCP`): the entry's own builder, as it would go out.
+    let browser = clauseo_profile::servers::browser(profile().paths());
     assert_eq!(browser.command, abs("/app/clauseo-mcp"));
     let agent_browser = abs("/app/agent-browser").to_string_lossy().into_owned();
     let mut args = vec![
@@ -296,7 +294,8 @@ fn every_token_the_profile_sends_is_one_the_host_is_told_to_fill() {
     let profile = profile();
     let mut texts = vec![profile.instructions()];
     let tokens: Vec<&str> = IN_INSTRUCTIONS.iter().chain(&IN_SERVERS).copied().collect();
-    for server in profile.servers(None) {
+    let parked = clauseo_profile::servers::browser(profile.paths());
+    for server in profile.servers(None).into_iter().chain([parked]) {
         texts.extend(server.args);
         texts.extend(server.env.into_values());
     }
@@ -346,6 +345,7 @@ fn a_folder_named_like_a_token_stays_literal_and_json_escapes_it() {
         &[
             (WORK_FOLDER, "/run/{matter_notes}/work"),
             (MATTER_NOTES, "/notes"),
+            (BROWSER, ""),
         ],
     )
     .unwrap();
@@ -357,7 +357,7 @@ fn an_unfillable_instruction_token_is_an_error_the_host_fails_the_launch_on() {
     let error = placeholders::fill(
         &profile().instructions(),
         &IN_INSTRUCTIONS,
-        &[(MATTER_NOTES, "/notes")],
+        &[(MATTER_NOTES, "/notes"), (BROWSER, "")],
     )
     .unwrap_err();
     assert_eq!(
@@ -447,4 +447,104 @@ fn a_windows_stetdoc_folder_matches_a_sidecar_folder_in_any_case_and_separator()
         own.path_prepend(),
         Some(Path::new(r"C:\Program Files\Clauseo\stetdoc"))
     );
+}
+
+/// With the browser, Claude may run agent-browser's page subcommands without asking, may never
+/// run the options that reach the lawyer's own browser or swap Clauseo's settings, and asks for
+/// everything else. Without it, nothing names agent-browser.
+#[test]
+fn the_browser_adds_agent_browser_allow_and_deny_rules() {
+    use clauseo_profile::claude::{AGENT_BROWSER_ALLOWED, AGENT_BROWSER_DENIED};
+    let (with, refused) = profile().with_tool_skills(None, true);
+    assert!(refused.is_empty(), "{refused:?}");
+    let options = with.claude_options();
+    let allowed = options.allowed_tools();
+    assert_eq!(allowed.len(), 5 + AGENT_BROWSER_ALLOWED.len());
+    for rule in [
+        "Bash(agent-browser open:*)",
+        "Bash(agent-browser snapshot:*)",
+    ] {
+        assert!(allowed.iter().any(|a| a == rule), "{rule}");
+    }
+    for asks in [
+        "upload", "eval", "state", "cookies", "storage", "network", "set", "install",
+    ] {
+        assert!(
+            !allowed.iter().any(|a| a.contains(&format!(" {asks}:"))),
+            "{asks}"
+        );
+    }
+    let denied = options.disallowed_tools();
+    assert_eq!(denied.len(), AGENT_BROWSER_DENIED.len() + 2);
+    for rule in [
+        "Bash(agent-browser *--profile*)",
+        "Bash(agent-browser *--auto-connect*)",
+        "Bash(agent-browser *--cdp*)",
+        "Bash(agent-browser *--executable-path*)",
+        "Bash(agent-browser *--headed*)",
+        "Bash(agent-browser *--config*)",
+        "Bash(agent-browser *--session*)",
+        "Bash(agent-browser *--state*)",
+        "Bash(agent-browser *--extension*)",
+        "Bash(agent-browser state*)",
+        "Bash(agent-browser connect*)",
+    ] {
+        assert!(denied.iter().any(|d| d == rule), "{rule}");
+    }
+    let meta = options.meta_fragment();
+    assert_eq!(
+        meta["claudeCode"]["options"]["disallowedTools"],
+        json!(denied)
+    );
+    let without = profile().claude_options();
+    assert!(without.disallowed_tools().is_empty());
+    assert!(
+        !without
+            .allowed_tools()
+            .iter()
+            .any(|a| a.contains("agent-browser"))
+    );
+}
+
+/// `{browser}` sits once in the tools part, and only the part a session with the browser gets
+/// names `agent-browser`; the others say there is no browser, the not-installed one why.
+#[test]
+fn only_the_browser_part_names_agent_browser() {
+    use clauseo_profile::instructions::{BrowserPart, browser_part};
+    assert_eq!(TOOLS.matches(BROWSER).count(), 1);
+    let text = profile().instructions();
+    assert!(!text.contains("agent-browser"));
+    let fill = |part| {
+        placeholders::fill(
+            &text,
+            &IN_INSTRUCTIONS,
+            &[
+                (WORK_FOLDER, "/w"),
+                (MATTER_NOTES, "/n"),
+                (BROWSER, browser_part(part)),
+            ],
+        )
+        .unwrap()
+    };
+    let on = fill(BrowserPart::On);
+    assert!(on.contains("Read web pages with your web fetch tool. For a page that needs a real"));
+    for rule in [
+        "`agent-browser`",
+        "`AGENT_BROWSER_SESSION`",
+        "`--headed`",
+        "`state save`",
+        "named in this conversation",
+        "confidential matter text",
+        "downloads folder",
+        "`agent-browser close`",
+    ] {
+        assert!(on.contains(rule), "{rule}");
+    }
+    for part in [BrowserPart::Off, BrowserPart::NotInstalled] {
+        let off = fill(part);
+        assert!(!off.contains("agent-browser") && !off.contains("AGENT_BROWSER"));
+        assert!(off.contains("You have no browser in this session"));
+    }
+    assert!(fill(BrowserPart::NotInstalled).contains("found no Google Chrome"));
+    assert!(word_count(browser_part(BrowserPart::NotInstalled)) <= 50);
 }

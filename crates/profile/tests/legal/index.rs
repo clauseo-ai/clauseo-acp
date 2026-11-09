@@ -5,7 +5,9 @@ use std::path::Path;
 
 use clauseo_profile::ClauseoProfile;
 use clauseo_profile::instructions::word_count;
-use clauseo_profile::placeholders::{CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER};
+use clauseo_profile::placeholders::{
+    BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER,
+};
 use clauseo_profile::skills::builtin::{BUILTIN, code_span, codex_index, sources};
 use clauseo_profile::skills::stetdoc::STETDOC;
 use clauseo_profile::skills::{SKILL_MD, render};
@@ -135,6 +137,7 @@ fn the_budgets_hold_for_a_long_macos_path_with_the_folders_filled() {
                 (WORK_FOLDER, &work),
                 (MATTER_NOTES, &notes),
                 (CONNECTORS, ""),
+                (BROWSER, ""),
             ],
         )
         .unwrap()

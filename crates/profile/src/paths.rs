@@ -7,6 +7,12 @@ use clauseo_settings::Locations;
 
 use crate::error::ProfileError;
 
+/// The folder under the data folder that holds the agents' shell commands ([`ProfilePaths::tools`]).
+pub const TOOLS_DIR: &str = "tools";
+
+/// The name the agents run agent-browser by, without the OS's suffix.
+pub const AGENT_BROWSER_COMMAND: &str = "agent-browser";
+
 /// The two sidecars the `browser` entry runs, both in every bundle (S27): `clauseo-mcp`, whose
 /// `browser-guard` subcommand starts and guards agent-browser's MCP server.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +33,7 @@ pub struct ProfilePaths {
     pub(crate) stetdoc: PathBuf,
     pub(crate) browser: BrowserSidecars,
     pub(crate) browser_config: PathBuf,
+    pub(crate) tools: PathBuf,
     pub(crate) app_exe: PathBuf,
 }
 
@@ -62,6 +69,7 @@ impl ProfilePaths {
             stetdoc,
             browser,
             browser_config: data.join("browser").join("agent-browser.json"),
+            tools: data.join(TOOLS_DIR),
             app_exe,
         })
     }
@@ -95,6 +103,22 @@ impl ProfilePaths {
     /// `AGENT_BROWSER_CONFIG`.
     pub fn browser_config(&self) -> &Path {
         &self.browser_config
+    }
+
+    /// The folder of the shell commands the app copies for the agents, `<data>/tools`: the
+    /// `agent-browser` command ([`AGENT_BROWSER_COMMAND`]), a copy of the bundled sidecar. It
+    /// goes on the `PATH` of each agent whose session has the browser, so it holds that command
+    /// alone.
+    pub fn tools(&self) -> &Path {
+        &self.tools
+    }
+
+    /// The `agent-browser` command in [`Self::tools`], with the OS's executable suffix.
+    pub fn agent_browser_command(&self) -> PathBuf {
+        self.tools.join(format!(
+            "{AGENT_BROWSER_COMMAND}{}",
+            std::env::consts::EXE_SUFFIX
+        ))
     }
 
     /// The plugin's skills folder, `claude_plugin/skills`.

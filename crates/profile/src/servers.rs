@@ -13,6 +13,12 @@ use crate::placeholders::{
 /// The reserved server name: a `mcp.servers.browser` entry in the settings is dropped.
 pub const BROWSER: &str = "browser";
 
+/// Whether the profile offers the `browser` MCP entry ([`browser`]). Off: parked with the
+/// browser guard, after launch. The agents drive agent-browser through their shell instead
+/// (the `agent-browser` command the app puts on their `PATH`, its skill and the instructions'
+/// browser part), and the entry's code stays, tested, for when the guard returns.
+pub const BROWSER_MCP: bool = false;
+
 /// The case-law connector's reserved server name (R24): a `mcp.servers.case-law` entry in the
 /// settings or a policy source is dropped (`clauseo_settings::RESERVED_MCP_SERVERS`).
 pub const CASE_LAW: &str = "case-law";

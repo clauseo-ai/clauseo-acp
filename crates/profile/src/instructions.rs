@@ -3,7 +3,7 @@
 //! `developer_instructions`.
 
 /// R21's tools part. It holds `{author}`, which [`Instructions::compose`] fills, and
-/// `{work_folder}`, which the host fills per session.
+/// `{work_folder}` and `{browser}`, which the host fills per session.
 pub const TOOLS: &str = include_str!("../assets/instructions/tools.txt");
 
 /// R22's legal part, appended after the tools part. It holds `{work_folder}` and
@@ -30,6 +30,46 @@ pub fn connectors_part(with_case_law: bool) -> &'static str {
     static WITHOUT: std::sync::LazyLock<String> =
         std::sync::LazyLock::new(|| format!("\n\n{}", CONNECTORS_NONE.trim()));
     if with_case_law { &WITH } else { &WITHOUT }
+}
+
+/// The browser part (the `agent-browser` shell command): what a session whose launch put the
+/// command on the agent's `PATH` is told. The host puts it in place of `{browser}` through
+/// [`browser_part`].
+pub const BROWSER: &str = include_str!("../assets/instructions/browser.txt");
+
+/// What a session without the browser is told when the lawyer or the firm turned it off, or the
+/// firm's browser policy left it out.
+pub const BROWSER_OFF: &str = include_str!("../assets/instructions/browser-off.txt");
+
+/// What a session without the browser is told when no supported browser is installed: one plain
+/// line the agent can pass on to the lawyer.
+pub const BROWSER_NONE: &str = include_str!("../assets/instructions/browser-none.txt");
+
+/// Which browser part a session gets in place of `{browser}`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrowserPart {
+    /// The session has the `agent-browser` command: [`BROWSER`].
+    On,
+    /// Turned off, or left out by policy: [`BROWSER_OFF`].
+    Off,
+    /// No supported browser on this computer: [`BROWSER_NONE`].
+    NotInstalled,
+}
+
+/// What the host fills `{browser}` with: a space and the part `part` names. Only this part names
+/// `agent-browser`, so a session without the browser never reads the command's name.
+pub fn browser_part(part: BrowserPart) -> &'static str {
+    static ON: std::sync::LazyLock<String> =
+        std::sync::LazyLock::new(|| format!(" {}", BROWSER.trim()));
+    static OFF: std::sync::LazyLock<String> =
+        std::sync::LazyLock::new(|| format!(" {}", BROWSER_OFF.trim()));
+    static NONE: std::sync::LazyLock<String> =
+        std::sync::LazyLock::new(|| format!(" {}", BROWSER_NONE.trim()));
+    match part {
+        BrowserPart::On => &ON,
+        BrowserPart::Off => &OFF,
+        BrowserPart::NotInstalled => &NONE,
+    }
 }
 
 /// The token the profile fills with the author's name.

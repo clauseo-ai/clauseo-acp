@@ -10,7 +10,9 @@ use std::path::{Path, PathBuf};
 
 use clauseo_profile::RenderedSkill;
 use clauseo_profile::instructions::{LEGAL, TOOLS, word_count};
-use clauseo_profile::placeholders::{CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER};
+use clauseo_profile::placeholders::{
+    BROWSER, CONNECTORS, IN_INSTRUCTIONS, MATTER_NOTES, WORK_FOLDER,
+};
 use clauseo_profile::skills::builtin::{ASSETS, BUILTIN, RETIRED_BUILTINS, sources};
 use clauseo_profile::skills::frontmatter::{self, MetaValue};
 use clauseo_profile::skills::stetdoc::STETDOC;
@@ -174,7 +176,12 @@ fn the_launch_instructions_hold_only_tokens_the_host_fills() {
     let filled = clauseo_profile::placeholders::fill(
         &text,
         &IN_INSTRUCTIONS,
-        &[(WORK_FOLDER, "W"), (MATTER_NOTES, "M"), (CONNECTORS, "")],
+        &[
+            (WORK_FOLDER, "W"),
+            (MATTER_NOTES, "M"),
+            (CONNECTORS, ""),
+            (BROWSER, ""),
+        ],
     )
     .unwrap();
     assert!(!filled.contains("{work_folder}") && !filled.contains("{matter_notes}"));
@@ -208,7 +215,12 @@ fn the_connectors_paragraph_goes_only_where_the_host_puts_it() {
         clauseo_profile::placeholders::fill(
             &text,
             &IN_INSTRUCTIONS,
-            &[(WORK_FOLDER, "W"), (MATTER_NOTES, "M"), (CONNECTORS, part)],
+            &[
+                (WORK_FOLDER, "W"),
+                (MATTER_NOTES, "M"),
+                (CONNECTORS, part),
+                (BROWSER, ""),
+            ],
         )
         .unwrap()
     };
@@ -219,7 +231,8 @@ fn the_connectors_paragraph_goes_only_where_the_host_puts_it() {
     let tools = TOOLS
         .trim()
         .replace("{author}", "Clauseo")
-        .replace("{work_folder}", "W");
+        .replace("{work_folder}", "W")
+        .replace("{browser}", "");
     for (filled, part) in [(&with, PARAGRAPH), (&without, CONNECTORS_NONE)] {
         let expected = format!("{tools}\n\n{}\n\n## Identity", part.trim());
         assert!(filled.starts_with(&expected), "{filled}");
@@ -463,7 +476,10 @@ fn versions_lock() {
     let skills = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/skills");
     let lock = std::fs::read_to_string(skills.join("versions.lock")).unwrap();
     let mut current = Vec::new();
-    for (name, text) in skill_mds() {
+    // The browser's skill is pinned beside the three, at agent-browser's version.
+    let browser = clauseo_profile::skills::builtin::AGENT_BROWSER;
+    let browser_text = clauseo_profile::skills::builtin::AGENT_BROWSER_SKILL;
+    for (name, text) in skill_mds().into_iter().chain([(browser, browser_text)]) {
         let (front, _) = frontmatter::parse(text).unwrap();
         let MetaValue::Scalar(version) = front.clauseo["version"].clone() else {
             panic!("{name}: version is not a scalar");

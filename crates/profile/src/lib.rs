@@ -77,6 +77,9 @@ pub struct ClauseoProfile {
     author: String,
     instructions: Instructions,
     skills: Arc<Rendered>,
+    /// Whether the app put the `agent-browser` command on the agents' `PATH`
+    /// ([`Self::with_tool_skills`]): the browser's skill and Claude's allow rules for it.
+    browser: bool,
 }
 
 impl ClauseoProfile {
@@ -90,6 +93,7 @@ impl ClauseoProfile {
             author: instructions::author_name(&author.unwrap_or_default()),
             instructions: Instructions::launch(),
             skills: Arc::default(),
+            browser: false,
         }
     }
 
@@ -109,7 +113,19 @@ impl ClauseoProfile {
     /// ([`skills::builtin::with_stetdoc`]), rendered as [`Self::with_skills`] does.
     #[must_use]
     pub fn with_builtin_skills(self, stetdoc: Option<SkillSource>) -> (Self, Vec<ProfileError>) {
-        let (sources, mut refused) = skills::builtin::with_stetdoc(stetdoc);
+        self.with_tool_skills(stetdoc, false)
+    }
+
+    /// [`Self::with_builtin_skills`], plus the browser's skill when `agent_browser` says the
+    /// app put the `agent-browser` command on the agents' `PATH` ([`skills::builtin::with_tools`]).
+    #[must_use]
+    pub fn with_tool_skills(
+        mut self,
+        stetdoc: Option<SkillSource>,
+        agent_browser: bool,
+    ) -> (Self, Vec<ProfileError>) {
+        let (sources, mut refused) = skills::builtin::with_tools(stetdoc, agent_browser);
+        self.browser = agent_browser;
         let (profile, more) = self.with_skills(&sources);
         refused.extend(more);
         (profile, refused)
@@ -127,6 +143,11 @@ impl ClauseoProfile {
         &self.paths
     }
 
+    /// Whether the app put the `agent-browser` command on the agents' `PATH`.
+    pub fn browser(&self) -> bool {
+        self.browser
+    }
+
     /// The author name tracked changes carry.
     pub fn author(&self) -> &str {
         &self.author
@@ -138,18 +159,26 @@ impl ClauseoProfile {
         self.instructions.compose(&self.author)
     }
 
-    /// The servers for an agent of `kind`, whatever the kind: `browser`, then `case-law` (R24),
-    /// which the host sends only in a session whose relay it opened.
+    /// The servers for an agent of `kind`, whatever the kind: `browser` while
+    /// [`servers::BROWSER_MCP`] is on (it is parked), then `case-law` (R24), which the host sends
+    /// only in a session whose relay it opened.
     pub fn servers(&self, _kind: Option<AgentKind>) -> Vec<ProfileServer> {
-        vec![
-            servers::browser(&self.paths),
-            servers::case_law(&self.paths),
-        ]
+        servers::BROWSER_MCP
+            .then(|| servers::browser(&self.paths))
+            .into_iter()
+            .chain([servers::case_law(&self.paths)])
+            .collect()
     }
 
     /// Claude's options.
     pub fn claude_options(&self) -> ClaudeOptions {
-        ClaudeOptions::new(self.instructions(), Some(self.paths.claude_plugin.clone()))
+        let options =
+            ClaudeOptions::new(self.instructions(), Some(self.paths.claude_plugin.clone()));
+        if self.browser {
+            options.with_browser()
+        } else {
+            options
+        }
     }
 
     /// Codex's keys with no skills index: `developer_instructions` is [`Self::instructions`].
@@ -368,7 +397,8 @@ const PLUGIN_MANIFEST_PATH: [&str; 2] = [".claude-plugin", "plugin.json"];
 /// the launch-prep thread, never the host's.
 ///
 /// Then the retired built-ins ([`skills::builtin::RETIRED_BUILTINS`]) go from the folder
-/// ([`skills::retire`]), and their files are reported as removed.
+/// ([`skills::retire`]), and so does the browser's skill when `skills` does not carry it (this
+/// start has no browser), and their files are reported as removed.
 ///
 /// The host logs an error from here as a warning and never fails a launch on it: the agent then
 /// runs with the skills the folder already holds, or none, and a Codex agent gets
@@ -383,10 +413,20 @@ pub fn write_skills(skills: &SkillWrite) -> Result<SkillsWritten, ProfileError> 
         write::replace_if_differs(&plugin.join(folder).join(file), PLUGIN_MANIFEST.as_bytes())?;
     }
     let mut report = skills::write_unlocked(&skills.root, &skills.rendered)?;
-    report.removed.extend(skills::retire_unlocked(
-        &skills.root,
-        &skills::builtin::RETIRED_BUILTINS,
-    )?);
+    let mut retired = skills::builtin::RETIRED_BUILTINS.to_vec();
+    let browser = skills::builtin::AGENT_BROWSER;
+    if !skills
+        .rendered
+        .skills()
+        .iter()
+        .any(|skill| skill.name() == browser)
+    {
+        // A launch without the browser leaves no browser skill behind from one with it.
+        retired.push(browser);
+    }
+    report
+        .removed
+        .extend(skills::retire_unlocked(&skills.root, &retired)?);
     Ok(SkillsWritten {
         root: skills.root.clone(),
         report,
