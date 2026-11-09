@@ -68,6 +68,9 @@ pub(crate) struct Spec {
     /// The credential link, when the row names one (the `m3-hardlink` row); granted too, as
     /// `granted_paths` grants a policy's.
     pub(crate) credential_link: Option<PathBuf>,
+    /// The environment is `env` alone: no base block (`SystemRoot`, `PATH`, `ComSpec`, ...) from
+    /// the harness. The runner's own rules still apply. `exec-spec` sets it; the rows don't.
+    pub(crate) exact_env: bool,
 }
 
 impl Spec {
@@ -119,26 +122,11 @@ pub(crate) fn message(
         format!(r"{system_root}\System32\Wbem"),
         format!(r"{system_root}\System32\WindowsPowerShell\v1.0"),
     ]);
-    let mut env = vec![
-        ("SystemRoot".to_owned(), system_root.clone()),
-        ("windir".to_owned(), system_root.clone()),
-        ("PATH".to_owned(), path.join(";")),
-        (
-            "ComSpec".to_owned(),
-            format!(r"{system_root}\System32\cmd.exe"),
-        ),
-    ];
-    for name in [
-        "PATHEXT",
-        "SystemDrive",
-        "PROCESSOR_ARCHITECTURE",
-        "NUMBER_OF_PROCESSORS",
-        "OS",
-    ] {
-        if let Ok(value) = std::env::var(name) {
-            env.push((name.to_owned(), value));
-        }
-    }
+    let mut env = if spec.exact_env {
+        Vec::new()
+    } else {
+        base_env(&system_root, &path)
+    };
     env.extend(spec.env.iter().cloned());
     let mut runtime = vec![bin];
     runtime.extend(spec.path.iter().map(|p| text(p)));
@@ -167,6 +155,32 @@ pub(crate) fn message(
     };
     message.check().map_err(|e| e.to_string())?;
     Ok(message)
+}
+
+/// The harness's base environment for every launch: the Windows variables a program needs to
+/// find itself, and the machine's few others, as `PATH` lists `path` first.
+fn base_env(system_root: &str, path: &[String]) -> Vec<(String, String)> {
+    let mut env = vec![
+        ("SystemRoot".to_owned(), system_root.to_owned()),
+        ("windir".to_owned(), system_root.to_owned()),
+        ("PATH".to_owned(), path.join(";")),
+        (
+            "ComSpec".to_owned(),
+            format!(r"{system_root}\System32\cmd.exe"),
+        ),
+    ];
+    for name in [
+        "PATHEXT",
+        "SystemDrive",
+        "PROCESSOR_ARCHITECTURE",
+        "NUMBER_OF_PROCESSORS",
+        "OS",
+    ] {
+        if let Ok(value) = std::env::var(name) {
+            env.push((name.to_owned(), value));
+        }
+    }
+    env
 }
 
 /// One line from the runner: stdout or stderr.

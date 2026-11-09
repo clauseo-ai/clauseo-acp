@@ -53,6 +53,27 @@ only when prepare ran the set-up.
   (CI), `SwitchDesktop` is information only and one effect carried by (g), or by (a) to (d)
   when (g) didn't run, is enough (below).
 
+## A spec built elsewhere (`exec-spec`)
+
+`exec-spec --matter A|B --spec-json <file>` starts a launch spec a host built (its jailed
+environment) as the matter's pool user, through the same `launch` the rows use. The environment is
+the file's exactly: the harness adds no base variables, and only the runner's rules apply
+(`runner/env.rs`). The file's keys are `program` (required), `args` and `env`; any other key is an
+error, and so is a missing file or bad JSON. It waits up to `--row-timeout`, prints the exit code,
+stdout and stderr, and exits 1 unless the agent exits 0.
+
+```json
+{
+  "program": "C:\\Windows\\System32\\cmd.exe",
+  "args": ["/c", "set"],
+  "env": { "CLAUSEO_CHECK": "from-the-host" }
+}
+```
+
+```text
+s15_launch_vm exec-spec --matter A --spec-json C:\s15\spec.json --row-timeout 60
+```
+
 ## The rows
 
 Rows: `whoami`, `node-pipes`, `open-process`, `pipes-5`, `job`, `stdio`, `exit-code`, `codex`,

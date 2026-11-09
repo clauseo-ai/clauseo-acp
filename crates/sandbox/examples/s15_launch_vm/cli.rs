@@ -3,11 +3,15 @@
 //! ```text
 //! s15_launch_vm prepare|rows|cleanup|row <name> [options]
 //! s15_launch_vm --unattended [options]
+//! s15_launch_vm exec-spec --matter A|B --spec-json <file> [options]
 //! s15_launch_vm probe <what> ...          (what the runner starts inside the sandbox)
 //! options: --root <dir> --data-dir <dir> --node <node.exe> --codex <package dir or codex.exe>
 //!          --runner <clauseo-sandbox-run.exe> --setup <clauseo-sandbox-setup.exe>
 //!          --row-timeout <seconds> --interactive-desktop
 //! ```
+//!
+//! `exec-spec` starts the launch spec in the JSON file (`spec_json.rs`) as the matter's pool
+//! user, with its environment as given, and waits for it (`--row-timeout`).
 //!
 //! `--interactive-desktop` (rows, a row, or unattended, in a console or RDP session, not session
 //! 0): `node-pipes` needs each UI effect (desktop create, `SwitchDesktop`, clipboard write)
@@ -29,6 +33,8 @@ pub(crate) enum Step {
     Cleanup,
     /// Prepare, every row, cleanup.
     Unattended,
+    /// `exec-spec`: the launch spec in `--spec-json`, as `--matter`'s pool user.
+    ExecSpec,
 }
 
 /// The options.
@@ -48,6 +54,10 @@ pub(crate) struct Opts {
     pub(crate) runner: Option<PathBuf>,
     /// `--setup`.
     pub(crate) setup: Option<PathBuf>,
+    /// `--matter` (`exec-spec`): `A` or `B`, the pool user.
+    pub(crate) matter: Option<String>,
+    /// `--spec-json` (`exec-spec`): the launch spec file.
+    pub(crate) spec_json: Option<PathBuf>,
     /// The hard limit on each row, and on the set-up.
     pub(crate) row_timeout: Duration,
     /// `--interactive-desktop`: the strict UI gate for `node-pipes`.
@@ -62,7 +72,8 @@ const DEFAULT_ROW_TIMEOUT: u64 = 120;
 /// The usage line.
 pub(crate) const USAGE: &str = "usage: s15_launch_vm prepare|rows|cleanup|row <name> | \
      --unattended [--root D] [--data-dir D] [--node P] [--codex P] [--runner P] [--setup P] \
-     [--row-timeout S] [--interactive-desktop] | probe <what> ...";
+     [--row-timeout S] [--interactive-desktop] | exec-spec --matter A|B --spec-json F \
+     [--root D] [--row-timeout S] | probe <what> ...";
 
 /// Parses the arguments after the program's name (not `probe`).
 pub(crate) fn parse(args: &[String]) -> Result<Opts, String> {
@@ -75,6 +86,8 @@ pub(crate) fn parse(args: &[String]) -> Result<Opts, String> {
         codex: None,
         runner: None,
         setup: None,
+        matter: None,
+        spec_json: None,
         row_timeout: Duration::from_secs(DEFAULT_ROW_TIMEOUT),
         interactive_desktop: false,
     };
@@ -94,6 +107,8 @@ pub(crate) fn parse(args: &[String]) -> Result<Opts, String> {
             "--codex" => opts.codex = Some(PathBuf::from(value(arg)?)),
             "--runner" => opts.runner = Some(PathBuf::from(value(arg)?)),
             "--setup" => opts.setup = Some(PathBuf::from(value(arg)?)),
+            "--matter" => opts.matter = Some(value(arg)?),
+            "--spec-json" => opts.spec_json = Some(PathBuf::from(value(arg)?)),
             "--row-timeout" => {
                 let text = value(arg)?;
                 let seconds = text
@@ -105,10 +120,23 @@ pub(crate) fn parse(args: &[String]) -> Result<Opts, String> {
             "rows" => set(&mut step, Step::Rows)?,
             "cleanup" => set(&mut step, Step::Cleanup)?,
             "row" => set(&mut step, Step::Row(value(arg)?))?,
+            "exec-spec" => set(&mut step, Step::ExecSpec)?,
             other => return Err(format!("unknown argument {other:?}")),
         }
     }
     opts.step = step.ok_or_else(|| "no step given".to_owned())?;
+    if opts.step == Step::ExecSpec {
+        match opts.matter.as_deref() {
+            Some("A" | "B") => {}
+            Some(other) => return Err(format!("--matter {other:?} isn't A or B")),
+            None => return Err("exec-spec needs --matter A or B".to_owned()),
+        }
+        if opts.spec_json.is_none() {
+            return Err("exec-spec needs --spec-json <file>".to_owned());
+        }
+    } else if opts.matter.is_some() || opts.spec_json.is_some() {
+        return Err("--matter and --spec-json go with exec-spec".to_owned());
+    }
     Ok(opts)
 }
 

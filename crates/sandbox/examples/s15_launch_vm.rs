@@ -6,6 +6,7 @@
 //! s15_launch_vm prepare|rows|cleanup|row <name> [options]   (step mode, the VM)
 //! s15_launch_vm --unattended [options]                       (CI: prepare, every row, cleanup)
 //! s15_launch_vm row node-pipes --interactive-desktop          (a desktop session: strict UI gate)
+//! s15_launch_vm exec-spec --matter A --spec-json <file>      (a launch spec a host built)
 //! s15_launch_vm probe <what> ...                             (run inside the sandbox)
 //! ```
 //!
@@ -70,6 +71,9 @@ mod cli;
 #[path = "s15_launch_vm/codex.rs"]
 mod codex;
 #[cfg(windows)]
+#[path = "s15_launch_vm/exec_spec.rs"]
+mod exec_spec;
+#[cfg(windows)]
 #[path = "s15_launch_vm/gate.rs"]
 mod gate;
 #[cfg(windows)]
@@ -96,6 +100,10 @@ mod probe_sec;
 #[cfg(windows)]
 #[path = "s15_launch_vm/rows.rs"]
 mod rows;
+// Plain, so its tests run on every target; the launch that uses it is Windows-only.
+#[cfg(any(windows, test))]
+#[path = "s15_launch_vm/spec_json.rs"]
+mod spec_json;
 #[cfg(windows)]
 #[path = "s15_launch_vm/sys.rs"]
 mod sys;
@@ -141,7 +149,7 @@ mod harness {
     use super::manifest::Manifest;
     use super::rows::{Outcome, ROWS, run_row};
     use super::sys::say;
-    use super::{prepare, probe};
+    use super::{exec_spec, prepare, probe};
 
     pub(super) fn main() -> ExitCode {
         let args: Vec<String> = std::env::args().skip(1).collect();
@@ -176,6 +184,7 @@ mod harness {
             Step::Rows => with_manifest(&opts, |m| verdict(&rows(&opts, m, &ROWS))),
             Step::Cleanup => prepare::cleanup(&opts.root),
             Step::Unattended => unattended(&opts),
+            Step::ExecSpec => with_manifest(&opts, |m| exec_spec::run(&opts, m)),
         };
         if ok {
             ExitCode::SUCCESS
