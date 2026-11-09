@@ -1,6 +1,7 @@
 // Tests for sidecars.mjs. Plain Node, no install, no network and no cargo: cargo is a stub that
-// writes a fake binary where cargo would, and agent-browser's fetch is a stub answering a
-// fixture pin's asset.
+// writes a fake binary where cargo would, agent-browser's fetch is a stub answering a fixture
+// pin's asset, and stetdoc's fetch is a stub writing a fake program (stetdoc.test.mjs tests the
+// real one), except where a test runs the real one on a fixture pin.
 //
 //   node --test .github/scripts/sidecars.test.mjs
 //
@@ -18,6 +19,7 @@ import {
   PREFIX,
   RELEASE_TARGETS,
   SIDECARS,
+  STETDOC,
   buildSetupExe,
   overlayProblem,
   placeSidecars,
@@ -30,6 +32,7 @@ after(() => rm(scratch, { recursive: true, force: true }));
 const VERSION = "0.41.1";
 const BODY = Buffer.from("#!fake agent-browser\n");
 const SHA = createHash("sha256").update(BODY).digest("hex");
+const STETDOC_BODY = Buffer.from("#!fake stetdoc\n");
 const ASSET = `https://github.com/vercel-labs/agent-browser/releases/download/v${VERSION}/agent-browser-fake`;
 
 /** A pin with each triple an asset, except those in `none` (none = true) and `missing` (absent). */
@@ -49,6 +52,7 @@ async function setup(pinOptions) {
   const cargoCalls = [];
   const cargoEnvs = [];
   const fetchCalls = [];
+  const stetdocCalls = [];
   const options = {
     root,
     targetDir: "target",
@@ -62,6 +66,12 @@ async function setup(pinOptions) {
       mkdirSync(dirname(out), { recursive: true });
       writeFileSync(out, `fake ${name}\n`);
     },
+    fetchStetdoc: async (triple, dest) => {
+      stetdocCalls.push(triple);
+      mkdirSync(dirname(dest), { recursive: true });
+      writeFileSync(dest, STETDOC_BODY);
+      return dest;
+    },
     agentBrowserOptions: {
       pinPath: await pin(root, pinOptions),
       fetch: async (url) => {
@@ -74,7 +84,7 @@ async function setup(pinOptions) {
   const overlay = async () =>
     JSON.parse(await readFile(join(root, "crates", "desktop", "release", "sidecars.generated.json"), "utf8"));
   const binaries = async () => (await readdir(join(root, "crates", "desktop", "binaries"))).sort();
-  return { root, run, overlay, binaries, cargoCalls, cargoEnvs, fetchCalls, options };
+  return { root, run, overlay, binaries, cargoCalls, cargoEnvs, fetchCalls, stetdocCalls, options };
 }
 
 const WINDOWS = ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"];
@@ -82,19 +92,29 @@ const isWindows = (triple) => triple.includes("-windows-");
 const isDarwin = (triple) => triple.endsWith("-apple-darwin");
 /** A darwin overlay's bundle.macOS: the helper at Contents/Helpers/clauseo-agent-browser. */
 const HELPER = (triple) => ({ files: { "Helpers/clauseo-agent-browser": `binaries/clauseo-agent-browser-${triple}` } });
+/** stetdoc's entry, in its own folder: Contents/Helpers/stetdoc on darwin, <resources>/stetdoc elsewhere. */
+const STETDOC_MAC = (triple) => ({ "Helpers/stetdoc/stetdoc": `binaries/clauseo-stetdoc-${triple}` });
+const STETDOC_RES = (triple) => {
+  const ext = triple.includes("-windows-") ? ".exe" : "";
+  return { [`binaries/clauseo-stetdoc-${triple}${ext}`]: `stetdoc/stetdoc${ext}` };
+};
+/** A darwin overlay's bundle.macOS with both helpers. */
+const MAC_FILES = (triple) => ({ files: { ...HELPER(triple).files, ...STETDOC_MAC(triple) } });
 const SETUP_CARGO = (triple) =>
   ["build", "--release", "--locked", "-p", "clauseo-sandbox", "--bin", "clauseo-sandbox-setup", "--target", triple];
 
 test("the table ships clauseo-mcp and clauseo-agent-browser on every release target, guard parked", () => {
   assert.deepEqual(
-    SIDECARS.map((s) => [s.name, s.targets, s.macosHelper === true]),
+    SIDECARS.map((s) => [s.name, s.targets, s.macosHelper === true, s.ownFolder === true]),
     [
-      ["clauseo-mcp", RELEASE_TARGETS, false],
-      ["clauseo-agent-browser", RELEASE_TARGETS, true],
-      ["clauseo-sandbox-setup", WINDOWS, false],
+      ["clauseo-mcp", RELEASE_TARGETS, false, false],
+      ["clauseo-agent-browser", RELEASE_TARGETS, true, false],
+      ["clauseo-sandbox-setup", WINDOWS, false, false],
+      ["clauseo-stetdoc", RELEASE_TARGETS, false, true],
     ],
   );
   assert.equal(MACOS_HELPER, "clauseo-agent-browser");
+  assert.equal(STETDOC, "clauseo-stetdoc");
 });
 
 test("the table lists clauseo-sandbox-setup on the Windows targets only, built from clauseo-sandbox", async () => {
@@ -139,11 +159,17 @@ for (const triple of RELEASE_TARGETS) {
   const mac = isDarwin(triple);
   test(`${triple}: the overlay lists every sidecar for the target, and the copies are named for it`, async () => {
     const env = await setup();
-    const names = ["clauseo-mcp", "clauseo-agent-browser", ...(win ? ["clauseo-sandbox-setup"] : [])];
-    // On macOS agent-browser goes to Contents/Helpers (bundle.macOS.files), not externalBin.
-    const externalBin = names.filter((name) => !(mac && name === "clauseo-agent-browser")).map((name) => `binaries/${name}`);
+    const names = ["clauseo-mcp", "clauseo-agent-browser", ...(win ? ["clauseo-sandbox-setup"] : []), "clauseo-stetdoc"];
+    // On macOS agent-browser goes to Contents/Helpers (bundle.macOS.files), not externalBin;
+    // stetdoc is never in externalBin, but in a folder of its own.
+    const externalBin = names
+      .filter((name) => name !== "clauseo-stetdoc" && !(mac && name === "clauseo-agent-browser"))
+      .map((name) => `binaries/${name}`);
     assert.deepEqual(await env.run(triple), externalBin);
-    assert.deepEqual(await env.overlay(), { bundle: mac ? { externalBin, macOS: HELPER(triple) } : { externalBin } });
+    assert.deepEqual(
+      await env.overlay(),
+      { bundle: mac ? { externalBin, macOS: MAC_FILES(triple) } : { externalBin, resources: STETDOC_RES(triple) } },
+    );
     assert.equal(overlayProblem(await env.overlay(), triple), null);
     const ext = win ? ".exe" : "";
     assert.deepEqual(await env.binaries(), names.map((name) => `${name}-${triple}${ext}`).sort());
@@ -152,9 +178,11 @@ for (const triple of RELEASE_TARGETS) {
       ...(win ? [SETUP_CARGO(triple)] : []),
     ]);
     assert.deepEqual(env.fetchCalls, [ASSET]);
+    assert.deepEqual(env.stetdocCalls, [triple]);
     const bin = join(env.root, "crates", "desktop", "binaries");
     assert.equal(await readFile(join(bin, `clauseo-mcp-${triple}${ext}`), "utf8"), "fake clauseo-mcp\n");
     assert.deepEqual(await readFile(join(bin, `clauseo-agent-browser-${triple}${ext}`)), BODY);
+    assert.deepEqual(await readFile(join(bin, `clauseo-stetdoc-${triple}${ext}`)), STETDOC_BODY);
     if (win) {
       const copy = join(bin, `clauseo-sandbox-setup-${triple}.exe`);
       assert.equal(await readFile(copy, "utf8"), "fake clauseo-sandbox-setup\n");
@@ -166,18 +194,21 @@ test("a triple the pin marks none leaves agent-browser out of the overlay", asyn
   const env = await setup({ none: ["aarch64-pc-windows-msvc"] });
   const externalBin = ["binaries/clauseo-mcp", "binaries/clauseo-sandbox-setup"];
   assert.deepEqual(await env.run("aarch64-pc-windows-msvc"), externalBin);
-  assert.deepEqual(await env.overlay(), { bundle: { externalBin } });
+  assert.deepEqual(await env.overlay(), { bundle: { externalBin, resources: STETDOC_RES("aarch64-pc-windows-msvc") } });
   assert.deepEqual(await env.binaries(), [
     "clauseo-mcp-aarch64-pc-windows-msvc.exe",
     "clauseo-sandbox-setup-aarch64-pc-windows-msvc.exe",
+    "clauseo-stetdoc-aarch64-pc-windows-msvc.exe",
   ]);
   assert.deepEqual(env.fetchCalls, []);
 });
 
-test("a darwin triple the pin marks none has no bundle.macOS, and the check allows that", async () => {
+test("a darwin triple the pin marks none has only stetdoc in bundle.macOS, and the check allows that", async () => {
   const env = await setup({ none: ["aarch64-apple-darwin"] });
   assert.deepEqual(await env.run("aarch64-apple-darwin"), ["binaries/clauseo-mcp"]);
-  assert.deepEqual(await env.overlay(), { bundle: { externalBin: ["binaries/clauseo-mcp"] } });
+  assert.deepEqual(await env.overlay(), {
+    bundle: { externalBin: ["binaries/clauseo-mcp"], macOS: { files: STETDOC_MAC("aarch64-apple-darwin") } },
+  });
   assert.equal(overlayProblem(await env.overlay(), "aarch64-apple-darwin"), null);
 });
 
@@ -225,6 +256,7 @@ test("this target's copies from an earlier run are removed first, other targets'
   assert.deepEqual(await env.binaries(), [
     "clauseo-agent-browser-aarch64-apple-darwin",
     "clauseo-mcp-x86_64-unknown-linux-gnu",
+    "clauseo-stetdoc-x86_64-unknown-linux-gnu",
   ]);
 });
 
@@ -240,10 +272,10 @@ test("the overlay check refuses any other key, a non-list, and a name without th
     [],
     {},
     { bundle: { externalBin: [] }, identifier: "x" },
-    { bundle: { externalBin: [], resources: [] } },
+    { bundle: { externalBin: [], macOS: {} } },
     { bundle: { externalBin: "binaries/clauseo-mcp" } },
   ]) {
-    assert.equal(overlayProblem(bad, linux), "it may hold only bundle.externalBin, a list", JSON.stringify(bad));
+    assert.equal(overlayProblem(bad, linux), "it may hold only bundle.externalBin, a list, and bundle.resources", JSON.stringify(bad));
   }
   assert.match(overlayProblem({ bundle: { externalBin: ["binaries/agent-browser"] } }, linux), /binaries\/clauseo-/);
   assert.match(overlayProblem({ bundle: { externalBin: ["../clauseo-mcp"] } }, linux), /binaries\/clauseo-/);
@@ -256,13 +288,16 @@ test("the overlay check allows bundle.macOS.files on darwin only, holding exactl
     if (isDarwin(triple)) {
       assert.equal(overlayProblem(withHelper, triple), null, triple);
     } else {
-      assert.equal(overlayProblem(withHelper, triple), "it may hold only bundle.externalBin, a list", triple);
+      assert.equal(overlayProblem(withHelper, triple), "it may hold only bundle.externalBin, a list, and bundle.resources", triple);
     }
   }
   const mac = "aarch64-apple-darwin";
   const shape = "it may hold only bundle.externalBin, a list, and bundle.macOS.files";
   assert.equal(overlayProblem({ bundle: { macOS: HELPER(mac) } }, mac), shape);
   assert.equal(overlayProblem({ bundle: { externalBin, macOS: HELPER(mac), resources: [] } }, mac), shape);
+  assert.equal(overlayProblem({ bundle: { externalBin, resources: STETDOC_RES(mac) } }, mac), shape);
+  assert.equal(overlayProblem({ bundle: { externalBin, macOS: MAC_FILES(mac) } }, mac), null);
+  assert.equal(overlayProblem({ bundle: { externalBin, macOS: { files: STETDOC_MAC(mac) } } }, mac), null);
   assert.equal(overlayProblem({ bundle: { externalBin: "binaries/clauseo-mcp", macOS: HELPER(mac) } }, mac), shape);
   for (const macOS of [
     HELPER("x86_64-apple-darwin"),
@@ -280,6 +315,50 @@ test("the overlay check allows bundle.macOS.files on darwin only, holding exactl
   const both = { bundle: { externalBin: [...externalBin, "binaries/clauseo-agent-browser"], macOS: HELPER(mac) } };
   assert.match(overlayProblem(both, mac), /may not be in externalBin/);
   assert.match(overlayProblem({ bundle: { externalBin: ["binaries/x"], macOS: HELPER(mac) } }, mac), /binaries\/clauseo-/);
+});
+
+test("the overlay check allows bundle.resources off darwin only, holding exactly stetdoc's folder", () => {
+  const externalBin = ["binaries/clauseo-mcp"];
+  for (const triple of RELEASE_TARGETS.filter((t) => !isDarwin(t))) {
+    assert.equal(overlayProblem({ bundle: { externalBin, resources: STETDOC_RES(triple) } }, triple), null, triple);
+    const ext = isWindows(triple) ? ".exe" : "";
+    for (const resources of [
+      {},
+      [],
+      STETDOC_RES(triple === "x86_64-unknown-linux-gnu" ? "x86_64-pc-windows-msvc" : "x86_64-unknown-linux-gnu"),
+      { [`binaries/clauseo-stetdoc-${triple}${ext}`]: `stetdoc${ext}` },
+      { [`binaries/clauseo-stetdoc-${triple}${ext}`]: `../stetdoc/stetdoc${ext}` },
+      { [`binaries/clauseo-mcp-${triple}${ext}`]: `stetdoc/stetdoc${ext}` },
+      { ...STETDOC_RES(triple), "blocklist/x": "blocklist/x" },
+    ]) {
+      assert.match(
+        overlayProblem({ bundle: { externalBin, resources } }, triple) ?? "",
+        /bundle\.resources may hold only|it may hold only/,
+        `${triple} ${JSON.stringify(resources)}`,
+      );
+    }
+    const both = { bundle: { externalBin: [...externalBin, "binaries/clauseo-stetdoc"], resources: STETDOC_RES(triple) } };
+    assert.match(overlayProblem(both, triple), /clauseo-stetdoc is in bundle.resources, so it may not be in externalBin/);
+  }
+});
+
+test("only clauseo-stetdoc may have a folder of its own", async () => {
+  const env = await setup();
+  const sidecars = [{ name: "clauseo-mcp", targets: RELEASE_TARGETS, ownFolder: true, place: async () => null }];
+  await assert.rejects(placeSidecars("x86_64-unknown-linux-gnu", { root: env.root, sidecars }), /only clauseo-stetdoc/);
+});
+
+// The real stetdoc fetch on a fixture pin: a pending target fails the seam, loudly, and leaves no overlay.
+test("a target stetdoc's pin marks pending fails the seam and leaves no overlay", async () => {
+  const env = await setup();
+  const pinPath = join(env.root, "stetdoc.toml");
+  await writeFile(pinPath, 'version = "9.9.9"\n\n[x86_64-pc-windows-msvc]\npending = "PENDING_TEST: not yet"\n');
+  const { fetchStetdoc: _stub, ...options } = env.options;
+  await assert.rejects(
+    placeSidecars("x86_64-pc-windows-msvc", { ...options, stetdocOptions: { pinPath, fetch: async () => assert.fail("no download") } }),
+    /x86_64-pc-windows-msvc is PENDING in crates\/desktop\/stetdoc.toml/,
+  );
+  await assert.rejects(env.overlay(), { code: "ENOENT" });
 });
 
 test("only the setup exe's build gets the path remaps, after the job's rustflags", async () => {

@@ -277,6 +277,16 @@ S15's tools sat in `windows.conf.json` and S27's in `tauri.conf.json`.
   holds exactly `Clauseo` and the overlay's `externalBin`, `Contents/Helpers` holds only the
   signed helper, and `codesign --verify --deep --strict` passes on the `.app`. Stage C's J3 adds
   the sandbox deny on `Contents/Helpers`.
+- **stetdoc (2026-11-09, U13).** stetdoc ships in a folder of its own, so that only that folder
+  goes first on the agents' `PATH`: never in `externalBin`, which puts it beside the app and the
+  other sidecars. `sidecars.mjs` fetches it from `crates/desktop/stetdoc.toml` (version, then url
+  and SHA-256 per release target, the agent-browser pin's mechanism; the archive's one program is
+  kept, the licence files are not) as `binaries/clauseo-stetdoc-<triple>`, and the overlay puts it
+  at `Helpers/stetdoc/stetdoc` in `bundle.macOS.files` on darwin (signed with the browser helper,
+  and checked in the `.app`) and at `stetdoc/stetdoc[.exe]` in `bundle.resources` elsewhere (NSIS
+  installs it under `$INSTDIR`, the resource folder; S20a signs it with the rest of `binaries/`).
+  A target the pin marks `pending` fails the seam: both Windows targets are pending until the
+  stetdoc release built with `+crt-static` (with an ARM64 asset) exists.
 - **Sizes.** The size table lists each sidecar on its own row beside the app's exe; none counts
   towards `release_binary_size`. On Linux each has its own budget row (`agent_browser_size`,
   `clauseo_mcp_size`), `deb_total_size` is the .deb as shipped, and `deb_size` stays the app's own

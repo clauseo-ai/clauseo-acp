@@ -40,7 +40,9 @@
 #   resources). `check` fails on any other key in them. The sidecar seam writes a fourth,
 #   sidecars.generated.json (bundle.externalBin only, plus on macOS one bundle.macOS.files entry
 #   putting clauseo-agent-browser in Contents/Helpers; gitignored), which every `tauri build` and
-#   `tauri bundle` of a shipped build passes last.
+#   `tauri bundle` of a shipped build passes last. It also puts stetdoc (crates/desktop/stetdoc.toml)
+#   in a folder of its own: Contents/Helpers/stetdoc/stetdoc on macOS (bundle.macOS.files),
+#   <resources>/stetdoc/stetdoc[.exe] elsewhere (bundle.resources; on Windows the install folder).
 # - The block-list snapshot: the `blocklist` job downloads clauseo-ai/blocklist's `current`
 #   release, fails unless minisign verifies it with crates/blocklist/keys/stage-f.pub (the key the
 #   app compiles in), and every job that builds or bundles with release.conf.json downloads it into
@@ -456,7 +458,9 @@ jobs:
       # release/sidecars.generated.json: bundle.externalBin for exactly those (on macOS,
       # clauseo-agent-browser in bundle.macOS.files instead, for Contents/Helpers). Every tauri build
       # and tauri bundle below passes it last (a merge patch replaces arrays, so it is the
-      # target's whole list). S15 adds its rows to the script's table.
+      # target's whole list). S15 adds its rows to the script's table. stetdoc is fetched from its
+      # pin as binaries/clauseo-stetdoc-$TARGET and bundled in its own stetdoc/ folder, never in
+      # externalBin; a target its pin marks pending (Windows, until the crt-static release) fails here.
       # The updater public key the sandbox's build.rs builds in (stage C), before sidecars.mjs
       # compiles it, always in plugins.updater.pubkey's format (base64 of the whole minisign .pub
       # text): a release's from tauri.conf.json, a test run's updater-test.pub, which is stored in
@@ -576,7 +580,8 @@ jobs:
 
       # The bundler signs the .app ad hoc (APPLE_SIGNING_IDENTITY "-") until S20a's Developer ID,
       # then the updater archive with the mode's key, which only this step holds. First this step
-      # signs the browser helper, which the overlay's bundle.macOS.files puts in Contents/Helpers:
+      # signs the browser helper and stetdoc, which the overlay's bundle.macOS.files puts in
+      # Contents/Helpers and Contents/Helpers/stetdoc:
       # the bundler copies those files without signing them, and the .app's seal needs nested code
       # signed before it. The same identity and options as the bundler's own codesign (--force,
       # the hardened runtime of tauri.conf.json, no entitlements); a real identity adds a secure
@@ -595,24 +600,27 @@ jobs:
             export TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
           fi
           [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] || { echo "::error::no updater key for a $MODE run"; exit 1; }
-          rel=$(jq -er '.bundle.macOS.files["Helpers/clauseo-agent-browser"]' crates/desktop/release/sidecars.generated.json) ||
-            { echo "::error::sidecars.generated.json puts no clauseo-agent-browser in Contents/Helpers"; exit 1; }
-          helper=crates/desktop/$rel
-          [ -f "$helper" ] || { echo "::error::no browser helper at $helper"; exit 1; }
           [ -n "$APPLE_SIGNING_IDENTITY" ] || { echo "::error::APPLE_SIGNING_IDENTITY is empty"; exit 1; }
-          if [ "$APPLE_SIGNING_IDENTITY" = - ]; then
-            codesign --force -s "$APPLE_SIGNING_IDENTITY" --options runtime "$helper"
-          else
-            codesign --force -s "$APPLE_SIGNING_IDENTITY" --options runtime --timestamp "$helper"
-          fi
-          codesign --verify --strict --verbose=2 "$helper" || { echo "::error::$helper does not verify after signing"; exit 1; }
+          for key in Helpers/clauseo-agent-browser Helpers/stetdoc/stetdoc; do
+            rel=$(jq -er --arg key "$key" '.bundle.macOS.files[$key]' crates/desktop/release/sidecars.generated.json) ||
+              { echo "::error::sidecars.generated.json puts nothing at Contents/$key"; exit 1; }
+            helper=crates/desktop/$rel
+            [ -f "$helper" ] || { echo "::error::no helper for Contents/$key at $helper"; exit 1; }
+            if [ "$APPLE_SIGNING_IDENTITY" = - ]; then
+              codesign --force -s "$APPLE_SIGNING_IDENTITY" --options runtime "$helper"
+            else
+              codesign --force -s "$APPLE_SIGNING_IDENTITY" --options runtime --timestamp "$helper"
+            fi
+            codesign --verify --strict --verbose=2 "$helper" || { echo "::error::$helper does not verify after signing"; exit 1; }
+          done
           pnpm -C ui tauri bundle --ci --target "$TARGET" ${FEATURES:+--features "$FEATURES"} --bundles app,dmg \
             --config release/release.conf.json --config release/blocklist.conf.json \
             --config "$RUNNER_TEMP/updater-key.conf.json" --config release/sidecars.generated.json
 
       # The .app as bundled, before anything uploads it. Contents/MacOS, which the agent's sandbox
       # can reach, holds exactly the main executable and the overlay's externalBin sidecars;
-      # Contents/Helpers holds exactly clauseo-agent-browser, executable and signed; and the whole
+      # Contents/Helpers holds exactly clauseo-agent-browser and stetdoc/ (holding only stetdoc),
+      # each executable and signed; and the whole
       # bundle verifies, strictly and deep. Each check fails the leg.
       - name: The .app keeps the browser helper in Contents/Helpers, and verifies
         if: runner.os == 'macOS'
@@ -629,15 +637,18 @@ jobs:
             { echo "::error::$app/Contents/MacOS holds $have; it may hold only $want"; exit 1; }
           [ -d "$app/Contents/Helpers" ] || { echo "::error::$app has no Contents/Helpers"; exit 1; }
           helpers=$(ls -A "$app/Contents/Helpers" | LC_ALL=C sort | tr '\n' ' ')
-          [ "$helpers" = "clauseo-agent-browser " ] ||
-            { echo "::error::$app/Contents/Helpers holds $helpers; it must hold only clauseo-agent-browser"; exit 1; }
-          helper=$app/Contents/Helpers/clauseo-agent-browser
-          [ -f "$helper" ] && [ -x "$helper" ] || { echo "::error::$helper is not an executable file"; exit 1; }
-          codesign --verify --strict --verbose=2 "$helper" ||
-            { echo "::error::codesign --verify --strict fails on $helper"; exit 1; }
+          [ "$helpers" = "clauseo-agent-browser stetdoc " ] ||
+            { echo "::error::$app/Contents/Helpers holds $helpers; it must hold only clauseo-agent-browser and stetdoc/"; exit 1; }
+          [ "$(ls -A "$app/Contents/Helpers/stetdoc")" = stetdoc ] ||
+            { echo "::error::$app/Contents/Helpers/stetdoc must hold only stetdoc"; exit 1; }
+          for helper in "$app/Contents/Helpers/clauseo-agent-browser" "$app/Contents/Helpers/stetdoc/stetdoc"; do
+            [ -f "$helper" ] && [ -x "$helper" ] || { echo "::error::$helper is not an executable file"; exit 1; }
+            codesign --verify --strict --verbose=2 "$helper" ||
+              { echo "::error::codesign --verify --strict fails on $helper"; exit 1; }
+          done
           codesign --verify --deep --strict --verbose=2 "$app" ||
             { echo "::error::codesign --verify --deep --strict fails on $app"; exit 1; }
-          echo "- $TARGET Clauseo.app: Contents/MacOS holds $have; Contents/Helpers holds $helpers(signed); the .app verifies --deep --strict" |
+          echo "- $TARGET Clauseo.app: Contents/MacOS holds $have; Contents/Helpers holds $helpers(stetdoc/stetdoc; signed); the .app verifies --deep --strict" |
             tee -a "$GITHUB_STEP_SUMMARY"
 
       # Each leg's assets, under the names latest-json.mjs lists (assemble renames the macOS
@@ -837,7 +848,8 @@ jobs:
           path: crates/desktop/blocklist
 
       # S20a signs every PE the installers take: Clauseo.exe and each file in
-      # crates/desktop/binaries/ (clauseo-mcp, clauseo-agent-browser, later S15's tools), before NSIS.
+      # crates/desktop/binaries/ (clauseo-mcp, clauseo-agent-browser, clauseo-stetdoc, which the
+      # installers place as stetdoc\stetdoc.exe, later S15's tools), before NSIS.
       - name: SignPath, the exe and the sidecars (S20a)
         if: needs.check.outputs.mode == 'release' && vars.SIGNPATH_ENABLED == 'true'
         run: |
