@@ -389,6 +389,14 @@ it on is settings, not code.
   `Set-AuthenticodeSignature` in Windows PowerShell, trusted by nothing) in place of SignPath. It proves
   the coverage, the capture and substitute, and the release check without SignPath. Dry runs without
   the input stay unsigned, as the Defender tests need.
+- **Proving that off changes nothing.** Run a dry run with signing off on the branch and one on
+  `main`, download each run's `dist-assets` (`gh run download <run-id> -n dist-assets -D <dir>`),
+  then run `node .github/scripts/compare-installers.mjs <main-dir> <branch-dir>`. It unpacks each pair
+  of Windows installers with 7-Zip, hashes every file inside both, and lists the differences in two
+  groups. Expected from build to build: updater `.sig`s, the rebuilt uninstaller, and PE files that
+  differ only in timestamps, debug IDs or the version resource. Everything else is unexpected,
+  including the decompiled `[NSIS].nsi`, which it prints as a diff. The installers' bundle step logs
+  `CLAUSEO_ variables set: none` after makensis's warnings check passes.
 - **What is left.**
   1. SignPath's open-source application and approval.
   2. In SignPath:

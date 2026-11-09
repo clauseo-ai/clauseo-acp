@@ -821,7 +821,11 @@ test("release.yml's Authenticode steps run only when signing is on, and leave th
     .split("\n")
     .map(stripComment)
     .filter((line) => /CLAUSEO_|nsis-uninstaller|authenticode/.test(line) && !line.trim().startsWith("#"));
-  assert.deepEqual(outside, []);
+  // Only the log line that says which template variables were set (none, with signing off).
+  assert.deepEqual(outside.map((line) => line.trim()), [
+    "template=$(compgen -e | grep '^CLAUSEO_' | tr '\\n' ' ' || true)",
+    'echo "makensis built both installers without a warning; CLAUSEO_ variables set: ${template:-none}"',
+  ]);
   assert.ok(touching.length >= 9, `${touching.length} signing steps`);
   // Three signing requests per leg, all through the local action.
   const uses = steps.filter((step) => step.includes("uses: ./.github/actions/authenticode"));

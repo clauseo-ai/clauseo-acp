@@ -1035,6 +1035,9 @@ jobs:
             grep -E -A40 '(^|[^0-9])[0-9]+ warnings?:' "$log"
             exit 1
           fi
+          # The log says which of the template's variables were set: none, with signing off.
+          template=$(compgen -e | grep '^CLAUSEO_' | tr '\n' ' ' || true)
+          echo "makensis built both installers without a warning; CLAUSEO_ variables set: ${template:-none}"
           if [ "$SIGNING" != none ]; then
             for mode in currentUser perMachine; do
               taken=$RUNNER_TEMP/authenticode-uninstallers/uninstall-$mode.exe.substituted
