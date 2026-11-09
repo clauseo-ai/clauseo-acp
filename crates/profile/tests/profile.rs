@@ -449,17 +449,16 @@ fn a_windows_stetdoc_folder_matches_a_sidecar_folder_in_any_case_and_separator()
     );
 }
 
-/// With the browser, Claude may run agent-browser's page subcommands without asking, may never
-/// run the options that reach the lawyer's own browser or swap Clauseo's settings, and asks for
-/// everything else. Without it, nothing names agent-browser.
+/// agent-browser's rules for Claude: the page subcommands allowed, the options that reach the
+/// lawyer's own browser or swap Clauseo's settings denied, everything else asking. The profile
+/// never sends them, with the browser or without: the host adds them per session.
 #[test]
-fn the_browser_adds_agent_browser_allow_and_deny_rules() {
-    use clauseo_profile::claude::{AGENT_BROWSER_ALLOWED, AGENT_BROWSER_DENIED};
-    let (with, refused) = profile().with_tool_skills(None, true);
-    assert!(refused.is_empty(), "{refused:?}");
-    let options = with.claude_options();
-    let allowed = options.allowed_tools();
-    assert_eq!(allowed.len(), 5 + AGENT_BROWSER_ALLOWED.len());
+fn agent_browser_rules_are_the_hosts_per_session() {
+    use clauseo_profile::claude::{
+        AGENT_BROWSER_ALLOWED, AGENT_BROWSER_DENIED, agent_browser_allowed, agent_browser_denied,
+    };
+    let allowed: Vec<String> = agent_browser_allowed().collect();
+    assert_eq!(allowed.len(), AGENT_BROWSER_ALLOWED.len());
     for rule in [
         "Bash(agent-browser open:*)",
         "Bash(agent-browser snapshot:*)",
@@ -474,7 +473,7 @@ fn the_browser_adds_agent_browser_allow_and_deny_rules() {
             "{asks}"
         );
     }
-    let denied = options.disallowed_tools();
+    let denied: Vec<String> = agent_browser_denied().collect();
     assert_eq!(denied.len(), AGENT_BROWSER_DENIED.len() + 2);
     for rule in [
         "Bash(agent-browser *--profile*)",
@@ -491,26 +490,18 @@ fn the_browser_adds_agent_browser_allow_and_deny_rules() {
     ] {
         assert!(denied.iter().any(|d| d == rule), "{rule}");
     }
-    let meta = options.meta_fragment();
-    assert_eq!(
-        meta["claudeCode"]["options"]["disallowedTools"],
-        json!(denied)
-    );
-    let without = profile().claude_options();
-    assert_eq!(without.disallowed_tools(), [] as [String; 0]);
-    assert!(
-        !without
-            .allowed_tools()
-            .iter()
-            .any(|a| a.contains("agent-browser"))
-    );
+    let (with, _) = profile().with_tool_skills(None, true);
+    for options in [with.claude_options(), profile().claude_options()] {
+        let meta = Value::Object(options.meta_fragment()).to_string();
+        assert!(!meta.contains("agent-browser"), "{meta}");
+    }
 }
 
 /// `{browser}` sits once in the tools part, and only the part a session with the browser gets
 /// names `agent-browser`; the others say there is no browser, the not-installed one why.
 #[test]
 fn only_the_browser_part_names_agent_browser() {
-    use clauseo_profile::instructions::{BrowserPart, browser_part};
+    use clauseo_profile::instructions::{BrowserPart, browser_part, browser_part_for};
     assert_eq!(TOOLS.matches(BROWSER).count(), 1);
     let text = profile().instructions();
     assert!(!text.contains("agent-browser"));
@@ -546,5 +537,18 @@ fn only_the_browser_part_names_agent_browser() {
         assert!(off.contains("You have no browser in this session"));
     }
     assert!(fill(BrowserPart::NotInstalled).contains("found no Google Chrome"));
+    // Codex's line goes only to a Codex session with the browser.
+    let codex_line = r#"`sandbox_permissions: "require_escalated"`"#;
+    let prefix = r#"`prefix_rule: ["agent-browser"]`"#;
+    let codex_on = browser_part_for(BrowserPart::On, true);
+    assert!(
+        codex_on.contains(codex_line) && codex_on.contains(prefix),
+        "{codex_on}"
+    );
+    assert!(codex_on.starts_with(browser_part(BrowserPart::On)));
+    assert!(!browser_part_for(BrowserPart::On, false).contains("sandbox_permissions"));
+    for part in [BrowserPart::Off, BrowserPart::NotInstalled] {
+        assert!(!browser_part_for(part, true).contains("agent-browser"));
+    }
     assert!(word_count(browser_part(BrowserPart::NotInstalled)) <= 50);
 }

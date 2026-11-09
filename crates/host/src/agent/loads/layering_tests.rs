@@ -173,6 +173,7 @@ fn a_hook_meta_setting_a_switch_or_the_guards_key_loses_both() {
         forced_ask: false,
         data: &crate::agent::data_fence::LaunchDeny::default(),
         case_law: false,
+        browser: false,
     };
     let meta = session_meta(
         hook.as_object().cloned(),
@@ -221,6 +222,7 @@ fn forced_ask_drops_every_allow_rule_and_hooks_every_tool() {
             forced_ask,
             data: &crate::agent::data_fence::LaunchDeny::default(),
             case_law: false,
+            browser: false,
         };
         session_meta(
             hook.as_object().cloned(),
@@ -280,6 +282,7 @@ fn forced_ask_adds_its_ask_rules_after_the_hooks() {
         forced_ask: true,
         data: &crate::agent::data_fence::LaunchDeny::default(),
         case_law: false,
+        browser: false,
     };
     let meta = session_meta(
         hook.as_object().cloned(),
@@ -319,6 +322,7 @@ fn every_claude_session_denies_the_data_folders_clauseo_only_subtrees() {
             forced_ask,
             data: &data,
             case_law: false,
+            browser: false,
         };
         let guard = Some(GuardHook {
             program: Path::new("/app/clauseo"),
@@ -446,6 +450,7 @@ fn claude_may_read_the_built_in_skills_without_a_prompt_and_nothing_else_in_data
         forced_ask: true,
         data: &data,
         case_law: false,
+        browser: false,
     };
     let hook = json!({"claudeCode": {"options": {"settings": {"permissions": {
         "allow": ["Bash(ls:*)"]}}}}});

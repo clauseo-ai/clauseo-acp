@@ -74,6 +74,28 @@ pub const AGENT_BROWSER_DENIED: [&str; 9] = [
 /// allow rule, so Claude asks.
 pub const AGENT_BROWSER_DENIED_SUBCOMMANDS: [&str; 2] = ["state", "connect"];
 
+/// `Bash(agent-browser <sub>:*)` for each of [`AGENT_BROWSER_ALLOWED`]: the allow rules the host
+/// adds to a Claude session that has the browser, and to no other.
+pub fn agent_browser_allowed() -> impl Iterator<Item = String> {
+    AGENT_BROWSER_ALLOWED
+        .iter()
+        .map(|sub| format!("Bash(agent-browser {sub}:*)"))
+}
+
+/// `Bash(agent-browser *<flag>*)` for each of [`AGENT_BROWSER_DENIED`], then
+/// `Bash(agent-browser <sub>*)` for each of [`AGENT_BROWSER_DENIED_SUBCOMMANDS`]: the deny rules
+/// the host adds to a Claude session that has the browser, and to no other.
+pub fn agent_browser_denied() -> impl Iterator<Item = String> {
+    AGENT_BROWSER_DENIED
+        .iter()
+        .map(|flag| format!("Bash(agent-browser *{flag}*)"))
+        .chain(
+            AGENT_BROWSER_DENIED_SUBCOMMANDS
+                .iter()
+                .map(|sub| format!("Bash(agent-browser {sub}*)")),
+        )
+}
+
 /// The keys [`ClaudeOptions::meta_fragment`] may put under `claudeCode.options`. Everything the
 /// host forces (`strictMcpConfig`, `settingSources`, `mcpServers`, `env`, `extraArgs`) and the
 /// guard's `settings.hooks` and `settings.disableAllHooks` stay out, so the host's merge never
@@ -94,11 +116,11 @@ pub const SETTINGS_KEYS: [&str; 1] = ["disableSkillShellExecution"];
 pub struct ClaudeOptions {
     /// The instructions; still holds `{work_folder}` and `{matter_notes}`.
     system_prompt_append: String,
-    /// `Bash(stetdoc <sub>:*)` for each of [`STETDOC_READ_ONLY`], then, with the browser,
-    /// `Bash(agent-browser <sub>:*)` for each of [`AGENT_BROWSER_ALLOWED`].
+    /// `Bash(stetdoc <sub>:*)` for each of [`STETDOC_READ_ONLY`]. agent-browser's rules are the
+    /// host's, per session ([`agent_browser_allowed`], [`agent_browser_denied`]).
     allowed_tools: Vec<String>,
-    /// With the browser, the agent-browser denials ([`Self::with_browser`]); otherwise none: the
-    /// web tools are the host's, from `tools.web_search`.
+    /// None from the profile: the web tools are the host's, from `tools.web_search`, and so are
+    /// agent-browser's denials, per session.
     disallowed_tools: Vec<String>,
     /// The local plugin holding the skills.
     plugin_dir: Option<PathBuf>,
@@ -125,31 +147,6 @@ impl ClaudeOptions {
             pack_plugin: None,
             settings,
         }
-    }
-
-    /// The same options with `Bash(agent-browser <sub>:*)` allowed for each of
-    /// [`AGENT_BROWSER_ALLOWED`], and denied: `Bash(agent-browser *<flag>*)` for each of
-    /// [`AGENT_BROWSER_DENIED`] and `Bash(agent-browser <sub>*)` for each of
-    /// [`AGENT_BROWSER_DENIED_SUBCOMMANDS`]: for a profile whose app put the command on the
-    /// agents' `PATH`.
-    #[must_use]
-    pub fn with_browser(mut self) -> Self {
-        self.allowed_tools.extend(
-            AGENT_BROWSER_ALLOWED
-                .iter()
-                .map(|sub| format!("Bash(agent-browser {sub}:*)")),
-        );
-        self.disallowed_tools.extend(
-            AGENT_BROWSER_DENIED
-                .iter()
-                .map(|flag| format!("Bash(agent-browser *{flag}*)"))
-                .chain(
-                    AGENT_BROWSER_DENIED_SUBCOMMANDS
-                        .iter()
-                        .map(|sub| format!("Bash(agent-browser {sub}*)")),
-                ),
-        );
-        self
     }
 
     /// The same options with the launch's pack plugin at `dir`, as a second `plugins` entry

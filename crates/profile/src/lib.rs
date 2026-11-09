@@ -78,8 +78,8 @@ pub struct ClauseoProfile {
     author: String,
     instructions: Instructions,
     skills: Arc<Rendered>,
-    /// Whether the app put the `agent-browser` command on the agents' `PATH`
-    /// ([`Self::with_tool_skills`]): the browser's skill and Claude's allow rules for it.
+    /// Whether the app put the `agent-browser` command on the agents' `PATH` and found a Chrome
+    /// ([`Self::with_tool_skills`]): the browser's skill. Claude's rules for it are the host's.
     browser: bool,
 }
 
@@ -173,13 +173,7 @@ impl ClauseoProfile {
 
     /// Claude's options.
     pub fn claude_options(&self) -> ClaudeOptions {
-        let options =
-            ClaudeOptions::new(self.instructions(), Some(self.paths.claude_plugin.clone()));
-        if self.browser {
-            options.with_browser()
-        } else {
-            options
-        }
+        ClaudeOptions::new(self.instructions(), Some(self.paths.claude_plugin.clone()))
     }
 
     /// Codex's keys with no skills index: `developer_instructions` is [`Self::instructions`].
