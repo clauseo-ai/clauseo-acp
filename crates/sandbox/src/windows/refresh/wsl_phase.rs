@@ -1,32 +1,33 @@
-//! The refresh's second phase (ADR 0049, "WSL"): every run of `\Clauseo\SandboxRefresh` (at the
+//! The refresh's WSL phase (ADR 0049, "WSL"): every run of `\Clauseo\SandboxRefresh` (at the
 //! owner's logon, on Windows Installer's events, on demand) re-applies WSL's deny for the pool
 //! group (`wsl::apply`), since a WSL update or repair rewrites its launch permissions. It runs
-//! after the admin copy's steps whatever they gave, but not when the run wasn't allowed (not
-//! LOCAL SYSTEM, not the admin copy) or the set-up lock was held: a set-up or removal holding
-//! it does its own WSL step. It takes the lock itself, without waiting.
+//! twice in a run that is allowed (LOCAL SYSTEM, from the admin copy): first, before the admin
+//! copy's steps, so the deny comes back without waiting for them; and last, whatever they gave,
+//! so a run that began before an installer had finished re-applies after it too. The task
+//! ignores a start while it runs, and its event trigger waits 15 s, so a burst of installer
+//! events gives one run, which the second phase covers. Both are idempotent and cheap.
+//!
+//! Each waits up to [`WSL_LOCK_WAIT`] for the set-up lock, so a run that meets another
+//! holder briefly (`--adopt`, another refresh's admin-copy steps) still re-applies; one still
+//! held then is logged, and a set-up or removal holding it does its own WSL step.
 //!
 //! Its outcome never changes the exit: the launch check refuses a launch whose deny is missing
 //! (`Blocked::WslDenyMissing`), so the deny's state is enforced there, and a failure here is one
 //! Event Log error line, naming `AppID`s and Windows error codes, never a path or a SID. A run
 //! that changed nothing writes no line.
 
-use super::{RefreshExit, Refresher};
-
-/// After the admin copy's steps ended with `exit`: WSL's deny re-applied as the module says,
-/// unless the run wasn't allowed or the lock was held; `exit` either way.
-pub(super) fn after(fs: &mut impl Refresher, exit: RefreshExit) -> RefreshExit {
-    if !matches!(exit, RefreshExit::NotAllowed | RefreshExit::LockHeld) {
-        run(fs);
-    }
-    exit
-}
+use super::{Refresher, WSL_LOCK_WAIT};
 
 /// Re-applies WSL's deny under the set-up lock, logging the outcome as the module says.
-fn run(fs: &mut impl Refresher) {
-    match fs.lock() {
+pub(super) fn run(fs: &mut impl Refresher) {
+    match fs.lock_waiting() {
         Ok(true) => {}
         Ok(false) => {
-            fs.log(false, "WSL's deny wasn't checked: the set-up lock is held");
+            let secs = WSL_LOCK_WAIT.as_secs();
+            fs.log(
+                false,
+                &format!("WSL's deny wasn't checked: the set-up lock was held for {secs} s"),
+            );
             return;
         }
         Err(why) => {
@@ -55,19 +56,20 @@ mod tests {
         (Fake::new(&old(), &new(), &key, &good()), key)
     }
 
+    /// The calls of `machine` that are the WSL phase's or the admin copy's lock.
+    fn phases(machine: &Fake) -> Vec<&'static str> {
+        let wanted = ["lock_waiting", "reapply_wsl", "lock", "record", "unlock"];
+        let calls = machine.calls.iter().filter(|call| wanted.contains(*call));
+        calls.copied().collect()
+    }
+
     #[test]
-    fn every_allowed_run_reapplies_under_the_lock_and_keeps_its_exit() {
+    fn every_allowed_run_reapplies_first_and_last_under_the_lock_and_keeps_its_exit() {
         let (mut machine, key) = fake();
         assert_eq!(run_fake(&mut machine, &key), RefreshExit::Done);
-        let at = |name| {
-            machine
-                .calls
-                .iter()
-                .rposition(|call| *call == name)
-                .unwrap()
-        };
-        assert!(at("lock") < at("reapply_wsl") && at("reapply_wsl") < at("unlock"));
-        assert_eq!(machine.calls.last(), Some(&"unlock"));
+        let wsl = ["lock_waiting", "reapply_wsl", "unlock"];
+        let copy = ["lock", "record", "unlock"];
+        assert_eq!(phases(&machine), [&wsl[..], &copy, &wsl].concat());
         // Nothing owed: no line of its own.
         assert_eq!(machine.logs.len(), 1, "{:?}", machine.logs);
         // A failure is one error line, and the exit stays.
@@ -89,18 +91,33 @@ mod tests {
         let (mut machine, key) = fake();
         machine.source_exe = Err(SourceError::Missing);
         assert_eq!(run_fake(&mut machine, &key), RefreshExit::SourceRefused);
-        assert!(machine.calls.contains(&"reapply_wsl"));
+        let reapplied = machine.calls.iter().filter(|c| **c == "reapply_wsl");
+        assert_eq!(reapplied.count(), 2);
     }
 
     #[test]
-    fn a_run_not_allowed_or_locked_out_leaves_wsl_alone() {
+    fn a_run_not_allowed_leaves_wsl_alone_and_a_held_lock_is_waited_for_then_logged() {
         let (mut machine, key) = fake();
         machine.system = false;
         assert_eq!(run_fake(&mut machine, &key), RefreshExit::NotAllowed);
         assert!(!machine.calls.contains(&"reapply_wsl"));
+        // The admin copy's lock held: its steps exit 44, and WSL's phases still run.
         let (mut machine, key) = fake();
         machine.fail = Some("lock");
         assert_eq!(run_fake(&mut machine, &key), RefreshExit::LockHeld);
+        let reapplied = machine.calls.iter().filter(|c| **c == "reapply_wsl");
+        assert_eq!(reapplied.count(), 2);
+        // Held past the wait: each phase says so, as information, and the exit stays.
+        let (mut machine, key) = fake();
+        machine.fail = Some("lock_waiting");
+        assert_eq!(run_fake(&mut machine, &key), RefreshExit::Done);
         assert!(!machine.calls.contains(&"reapply_wsl"));
+        let held: Vec<&(bool, String)> = machine
+            .logs
+            .iter()
+            .filter(|(_, line)| line.contains("lock was held for 10 s"))
+            .collect();
+        assert_eq!(held.len(), 2, "{:?}", machine.logs);
+        assert!(held.iter().all(|(error, _)| !error));
     }
 }

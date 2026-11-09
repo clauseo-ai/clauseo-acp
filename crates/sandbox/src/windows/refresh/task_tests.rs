@@ -3,7 +3,7 @@
 //! and no logon start; the uninstaller's removal takes them all down before the copy they run,
 //! and a per-machine install's set-up registers and removes the stop and sweep tasks.
 
-use super::rules::{MSI_EVENT_IDS, Trigger, msi_event_query};
+use super::rules::{MSI_EVENT_DELAY, MSI_EVENT_IDS, Trigger, msi_event_query};
 use super::*;
 use crate::windows::setup::args::{Mode, parse};
 
@@ -46,15 +46,14 @@ fn the_stop_and_sweep_tasks_are_the_refresh_task_but_for_name_argument_limit_and
         assert_ne!(task.description(), "");
     }
     // The refresh also starts at the owner's logon; the stop and the sweep only when asked. A
-    // refresh or sweep asked for while one runs is queued after it; the stop's second run is
-    // dropped.
+    // sweep asked for while one runs is queued after it; the others' second runs are dropped.
     assert!(refresh.at_logon());
     assert!(!stop.at_logon());
     assert!(!sweep.at_logon());
     assert_eq!(
         TASKS.map(SystemTask::queues),
-        [true, false, true],
-        "the refresh and the sweep queue"
+        [false, false, true],
+        "only the sweep queues"
     );
     // The argument each task passes is the one the exe parses as its mode, and alone.
     let mode = |task: SystemTask| parse([std::ffi::OsString::from(task.argument())]);
@@ -95,9 +94,8 @@ fn the_triggers_pass_nothing_but_the_fixed_argument() {
         assert!(!task.argument().contains('$'), "{task:?}");
     }
     assert_eq!(SystemTask::Refresh.argument(), REFRESH_ARG);
-    // An event during a refresh queues another run, one at a time; the stop drops it.
-    assert!(SystemTask::Refresh.queues());
-    assert!(!SystemTask::Stop.queues());
+    // A burst of events waits 15 s and gives one run (a start while it runs is dropped).
+    assert_eq!(MSI_EVENT_DELAY, "PT15S");
 }
 
 #[test]

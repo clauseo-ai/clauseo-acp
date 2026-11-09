@@ -10,8 +10,8 @@
 //!   one argument (`--refresh`, `--stop`, `--sweep-tasks`) and nothing else, on demand (the
 //!   refresh also at the record owner's logon and on Windows Installer's events,
 //!   `rules::Trigger`, with no value queries), needs no network, stops after its limit (5
-//!   minutes, 2 minutes, 2 minutes), and never runs twice at once: a refresh or sweep asked for
-//!   while one runs is queued after it, a stop is dropped. Its descriptor
+//!   minutes, 2 minutes, 2 minutes), and never runs twice at once: a sweep asked for while one
+//!   runs is queued after it, any other run is dropped. Its descriptor
 //!   ([`task_sddl`](super::task_sddl)) is owned by Administrators and lets SYSTEM and
 //!   Administrators do anything and the owner read and execute it (`FRFX`), which
 //!   starts it and ends a running one, nothing more; the folder `\Clauseo` gets the same owner
@@ -41,7 +41,7 @@ use windows::Win32::System::Variant::VARIANT;
 use windows::core::{BSTR, HRESULT, Interface};
 
 use super::last_run::{LastRun, last_run};
-use super::rules::{Trigger, msi_event_query};
+use super::rules::{MSI_EVENT_DELAY, Trigger, msi_event_query};
 use super::task_folder::{Folders, prepare};
 use super::windows_refresher::{EXE_NAME, sandbox_dir};
 use super::{SystemTask, action_path, task_sddl};
@@ -279,6 +279,8 @@ pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError>
         settings
             .SetExecutionTimeLimit(&BSTR::from(spec.execution_limit()))
             .map_err(com("SetExecutionTimeLimit"))?;
+        // A sweep asked for while one runs is queued; any other start while it runs is dropped
+        // (the refresh's last WSL phase covers it).
         let instances = if spec.queues() {
             TASK_INSTANCES_QUEUE
         } else {
@@ -321,6 +323,9 @@ pub fn register_task(spec: SystemTask, owner_sid: &Sid) -> Result<(), TaskError>
                     event
                         .SetSubscription(&BSTR::from(msi_event_query()))
                         .map_err(com("IEventTrigger::SetSubscription"))?;
+                    event
+                        .SetDelay(&BSTR::from(MSI_EVENT_DELAY))
+                        .map_err(com("IEventTrigger::SetDelay"))?;
                 }
             }
         }

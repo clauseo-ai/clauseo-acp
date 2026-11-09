@@ -2417,18 +2417,26 @@ is left alone: the service ignores it.
 
 **When.** The elevated set-up writes it as step 8b, after the network filters, as admin. It never
 fails the set-up: the launch check refuses while a deny is missing, and the refresh task tries
-again. The SYSTEM task `\Clauseo\SandboxRefresh` re-applies it on every run, after the admin
-copy's steps whatever they gave, under the set-up lock (`refresh/wsl_phase.rs`); not when the
-run wasn't allowed or the lock was held (a set-up or removal holding it does its own WSL step),
-nor while the record says a removal is under way, nor with no `GroupSid`. The task now also
-starts on an event trigger: the Application log, provider `MsiInstaller`, IDs 1022, 1033, 1035,
-1040, 1042, 11707, 11724 and 11728 (`rules::msi_event_query`). The trigger has no value queries,
-so nothing from the event reaches the run, whose argument stays the fixed `--refresh`; a start
-while it runs queues one more run rather than being dropped (`TASK_INSTANCES_QUEUE`, still one at
-a time), so an install's last event always gets a run after it. Its outcome never changes the
-refresh's exit: a failure is one Event Log error line (AppIDs and Windows error codes, never a
-path or a SID), and a run that changed nothing writes no line. No new exit: the launch check
-enforces the deny, so an exit code would tell no one more.
+again. The SYSTEM task `\Clauseo\SandboxRefresh` re-applies it twice in every run that is allowed
+(LOCAL SYSTEM, from the admin copy): first, before the admin copy's steps, so the deny doesn't wait
+for them, and last, whatever they gave, so a run that began before an installer finished
+re-applies after it (`refresh/wsl_phase.rs`, both idempotent). Each waits up to 10 s for the set-up
+lock (`WSL_LOCK_WAIT`), so a brief holder doesn't push the deny to the next run; one still held then
+is logged (a set-up or removal holding it does its own WSL step). Neither runs while the record
+says a removal is under way, nor with no `GroupSid`. The task also starts on an event trigger:
+the Application log, provider `MsiInstaller`, IDs 1022, 1033, 1035, 1040, 1042, 11707, 11724 and
+11728 (`rules::msi_event_query`), 15 s after the event (`PT15S`, `rules::MSI_EVENT_DELAY`). The
+task ignores a start while it runs (`TASK_INSTANCES_IGNORE_NEW`), so an installer's burst of
+events gives one run, not a queue of them, and that run's last phase comes after the burst. The
+trigger has no value queries, so nothing from the event reaches the run, whose argument stays the
+fixed `--refresh`. Anyone who can log on can fire it: INTERACTIVE may write to the Application
+log, so the lawyer or a pool user can forge an `MsiInstaller` event. That gains nothing: the run
+is SYSTEM's own fixed refresh, which re-applies the deny and may refresh the admin copy, and a
+forged burst gives one run at a time, each holding the set-up lock for a moment (a set-up that
+meets it then fails at once and can be run again). Its outcome never changes the refresh's exit: a
+failure is one Event Log error line (AppIDs and Windows error codes, never a path or a SID), and
+a run that changed nothing writes no line. No new exit: the launch check enforces the deny, so an
+exit code would tell no one more.
 
 **The record.** Each target is recorded before its value is written, in two values appended to
 the set-up's (`SETUP_VALUES`, now 11): `WslDenyAppIds` (`REG_MULTI_SZ`, every AppID given the

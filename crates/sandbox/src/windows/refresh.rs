@@ -62,6 +62,9 @@
 //! name, so repair can restore it too. The gap is two write-through renames with nothing
 //! between them.
 //!
+//! Right after step 1, and again at the end of every allowed run whatever the steps gave, WSL's
+//! deny is re-applied (`wsl_phase.rs`, ADR 0049 "WSL").
+//!
 //! Any refusal keeps the old copy, writes one log line (the Event Log on Windows) naming no user
 //! path beyond the install folder, and exits with its own code ([`RefreshExit`]).
 
@@ -130,6 +133,9 @@ pub use windows_refresher::{WindowsRefresher, event_log, run};
 use crate::windows::setup::record_values::CopyOwner;
 use crate::windows::sids::Sid;
 use signature::{SignatureError, verify};
+
+/// How long the WSL phase waits for the set-up lock (`wsl_phase.rs`).
+pub const WSL_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// The most bytes the refresh reads of the user folder's exe: 16 MiB.
 pub const EXE_CAP: u64 = 16 * 1024 * 1024;
@@ -254,6 +260,8 @@ pub trait Refresher {
     /// Tries the set-up lock without waiting and keeps it until [`Refresher::unlock`]:
     /// `Ok(false)` while another holds it.
     fn lock(&mut self) -> Result<bool, Failed>;
+    /// As [`Refresher::lock`], waiting up to [`WSL_LOCK_WAIT`] (the WSL phase's).
+    fn lock_waiting(&mut self) -> Result<bool, Failed>;
     /// Gives the set-up lock back, if held.
     fn unlock(&mut self);
     /// The record's values; a missing key or value is `None`.
@@ -312,9 +320,14 @@ pub trait Refresher {
     fn reapply_wsl(&mut self) -> Result<Option<String>, Failed>;
 }
 
-/// Runs the refresh as the module says, checking the staged exe against `trust`, then WSL's deny.
+/// Runs the refresh as the module says: once the run is allowed, WSL's deny, then the admin
+/// copy's steps (checking the staged exe against `trust`), then WSL's deny again.
 pub fn refresh(fs: &mut impl Refresher, trust: &Trust<'_>) -> RefreshExit {
-    let exit = match run_steps(fs, trust) {
+    let steps = allowed(fs).and_then(|()| {
+        wsl_phase::run(fs);
+        run_steps(fs, trust)
+    });
+    let exit = match steps {
         Ok(line) => {
             fs.log(false, &line);
             RefreshExit::Done
@@ -324,7 +337,10 @@ pub fn refresh(fs: &mut impl Refresher, trust: &Trust<'_>) -> RefreshExit {
             exit
         }
     };
-    wsl_phase::after(fs, exit)
+    if exit != RefreshExit::NotAllowed {
+        wsl_phase::run(fs);
+    }
+    exit
 }
 
 /// A refusal: its exit and its log line.
@@ -338,9 +354,9 @@ struct Checked {
     group: Option<Sid>,
 }
 
-/// The steps; `Ok` carries the log line of a run that left the admin copy current.
+/// The steps after [`allowed`]; `Ok` carries the log line of a run that left the admin copy
+/// current.
 fn run_steps(fs: &mut impl Refresher, trust: &Trust<'_>) -> Result<String, Refusal> {
-    allowed(fs)?;
     let placeholder = key::key_id(trust.key).is_ok_and(|id| id == key::PLACEHOLDER_KEY_ID);
     if placeholder {
         return Err((
