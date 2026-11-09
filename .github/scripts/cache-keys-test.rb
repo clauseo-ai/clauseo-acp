@@ -313,6 +313,7 @@ BUILDERS = {
   "${{ steps.pnpm-store.outputs.key }}" => ".github/actions/pnpm-store/action.yml",
   "${{ steps.cache-key.outputs.key }}" => ".github/actions/install-pinned-tools/tool-cache.sh",
   "${{ steps.key.outputs.key }}" => ".github/actions/install-tauri-linux-deps/action.yml",
+  "${{ steps.agent-browser-key.outputs.key }}" => ".github/workflows/ci.yml",
 }.freeze
 files = workflows + Dir[".github/actions/**/action.{yml,yaml}"].sort
 step_lists = files.flat_map do |f|
@@ -354,6 +355,7 @@ SAMPLES = {
   "RUNNER_ARCH" => %w[X64 ARM64], "ImageOS" => %w[ubuntu22 ubuntu24 macos15 win25 win11-arm64],
   "ImageVersion" => ["20261101.347.1"], "list" => lists.map { |l| "#{l}+" },
   "names" => ["cargo-nextest", "cargo-deny+cargo-nextest+gitleaks+lefthook"], "hash" => ["0123456789abcdef"],
+  "TARGET" => ["x86_64-unknown-linux-gnu"], "sha256" => ["b" * 64],
 }.freeze
 sample_count = 0
 BUILDERS.each do |expr, src|

@@ -91,6 +91,7 @@ pub(super) fn linux(bin: &Path, on_path: bool) -> Machine<'static> {
         arch: "x86_64",
         cargo_bin: Some(bin.to_path_buf()),
         path,
+        fetcher: install::Fetcher::Curl,
     }
 }
 

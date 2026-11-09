@@ -26,13 +26,26 @@ chmod +x "$tmp/server/pack/gitleaks"
 tar -czf "$tmp/server/gitleaks_8.0.0_linux_x64.tar.gz" -C "$tmp/server/pack" gitleaks
 printf '#!/usr/bin/env bash\necho 2.0.0\n' > "$tmp/server/lefthook_2.0.0_Linux_x86_64"
 # curl -sSfL ... -o <file> <url>: copies the URL's file name from the server; FAKE_CURL_FAIL fails.
+# Its arguments go to calls, one line per call.
 cat > "$tmp/curl" <<EOF
 #!/usr/bin/env bash
+echo "curl \$*" >> "$tmp/calls"
 [ -z "\${FAKE_CURL_FAIL:-}" ] || exit 22
 while [ "\$#" -gt 2 ]; do [ "\$1" = -o ] && out=\$2; shift; done
 cp "$tmp/server/\$(basename "\$2")" "\$out"
 EOF
 chmod +x "$tmp/curl"
+# gh release download <tag> --repo <r> --pattern <asset> --output <file> --clobber: copies <asset>
+# from the server; FAKE_GH_FAIL=n fails the first n calls. Its arguments, and whether it got a token
+# (not the token), go to calls.
+cat > "$tmp/gh" <<EOF
+#!/usr/bin/env bash
+echo "gh \$* token:\${GH_TOKEN:+GH_TOKEN}\${GITHUB_TOKEN:+GITHUB_TOKEN}" >> "$tmp/calls"
+n=\$(grep -c '^gh ' "$tmp/calls")
+[ "\$n" -gt "\${FAKE_GH_FAIL:-0}" ] || { echo "HTTP 504: Gateway Timeout" >&2; exit 1; }
+cp "$tmp/server/\$7" "\$9"
+EOF
+chmod +x "$tmp/gh"
 
 # Cargo tools as install-action leaves them: `cargo-nextest nextest --version`, `typos --version`.
 mkdir -p "$tmp/installed"
@@ -58,7 +71,8 @@ output() { sed -n "s/^$1=//p" "$tmp/output" | tail -1; }
 # action), written by `tool-cache.sh pins` into a new PINS_DIR, as the action's pins-after step
 # does. The cargo tools' binaries are pinned on linux-x86_64 only. $1 the gitleaks asset pin; $2
 # typos' pin, $3 typos' version and $4 cargo-nextest's version, each with a default.
-export RUNNER_TEMP=$tmp/runner RUNNER_OS=Linux RUNNER_ARCH=X64 ImageOS=ubuntu22 CURL=$tmp/curl NAMES=""
+unset GITHUB_TOKEN GH_TOKEN
+export RUNNER_TEMP=$tmp/runner RUNNER_OS=Linux RUNNER_ARCH=X64 ImageOS=ubuntu22 CURL=$tmp/curl GH=$tmp/gh SLEEP=true NAMES=""
 mkdir -p "$RUNNER_TEMP"
 write_pins() {
   PINS_JSON=$(jq -cn --arg g "$1" --arg l "$(sha "$tmp/server/lefthook_2.0.0_Linux_x86_64")" \
@@ -69,11 +83,11 @@ write_pins() {
       {name: "typos-cli", version: $tv, bin_sha256: [{os: "linux", arch: "x86_64", sha256: $t}]}],
     binaries: [
       {name: "gitleaks", version: "8.0.0", os: "linux", arch: "x86_64", sha256: $g,
-       asset: "gitleaks_8.0.0_linux_x64.tar.gz", url: "https://example.invalid/gitleaks_8.0.0_linux_x64.tar.gz"},
+       asset: "gitleaks_8.0.0_linux_x64.tar.gz", url: "https://github.com/gitleaks/gitleaks/releases/download/v8.0.0/gitleaks_8.0.0_linux_x64.tar.gz"},
       {name: "gitleaks", version: "8.0.0", os: "windows", arch: "x86_64", sha256: "00",
-       asset: "gitleaks_8.0.0_windows_x64.zip", url: "https://example.invalid/gitleaks_8.0.0_windows_x64.zip"},
+       asset: "gitleaks_8.0.0_windows_x64.zip", url: "https://github.com/gitleaks/gitleaks/releases/download/v8.0.0/gitleaks_8.0.0_windows_x64.zip"},
       {name: "lefthook", version: "2.0.0", os: "linux", arch: "x86_64", sha256: $l,
-       asset: "lefthook_2.0.0_Linux_x86_64", url: "https://example.invalid/lefthook_2.0.0_Linux_x86_64"}]}')
+       asset: "lefthook_2.0.0_Linux_x86_64", url: "https://github.com/evilmartians/lefthook/releases/download/v2.0.0/lefthook_2.0.0_Linux_x86_64"}]}')
   export PINS_JSON
   step pins
   [ "$rc" -eq 0 ] || { echo "pins failed: $out"; exit 1; }
@@ -160,9 +174,15 @@ step restore
 
 # 3. Main after a miss: fetch-assets downloads, checks and places the binaries; fill gathers the
 #    cargo tools from CARGO_HOME/bin, not from whatever PATH finds first; the folder is complete.
-step fetch-assets
+: > "$tmp/calls"
+GITHUB_TOKEN=test-token-not-a-secret step fetch-assets
 { [ -x "$CARGO_BIN/gitleaks" ] && [ -x "$CARGO_BIN/lefthook" ] && [ "$("$CARGO_BIN/lefthook")" = 2.0.0 ]; } \
   && ok "fetch-assets places gitleaks (unpacked) and lefthook (bare), executable" || fail "fetch-assets: $out"
+expected="gh release download v8.0.0 --repo gitleaks/gitleaks --pattern gitleaks_8.0.0_linux_x64.tar.gz --output $TOOL_CACHE_DIR/assets/gitleaks_8.0.0_linux_x64.tar.gz --clobber token:GITHUB_TOKEN
+gh release download v2.0.0 --repo evilmartians/lefthook --pattern lefthook_2.0.0_Linux_x86_64 --output $TOOL_CACHE_DIR/assets/lefthook_2.0.0_Linux_x86_64 --clobber token:GITHUB_TOKEN"
+{ [ "$(cat "$tmp/calls")" = "$expected" ] && ! grep -q test-token-not-a-secret <<< "$out"; } \
+  && ok "with GITHUB_TOKEN, each download goes through gh, which reads the token from its environment; no curl, the token in no argument or output" \
+  || fail "token: $(cat "$tmp/calls") $out"
 install_cargo_tools
 mkdir -p "$tmp/decoy"
 printf '#!/usr/bin/env bash\necho "typos-cli 1.2.3"; echo decoy\n' > "$tmp/decoy/typos"
@@ -210,7 +230,10 @@ RUNNER_ARCH=ARM64 step restore
 # 6c. Before the save: an installed cargo tool that is not its pin is not copied, and fill does
 #     not save.
 export TOOL_CACHE_DIR=$tmp/cache-unpinned CARGO_BIN=$tmp/bin-unpinned
+: > "$tmp/calls"
 step fetch-assets
+[ "$(grep -c '^curl -sSfL ' "$tmp/calls")" -eq 2 ] && [ "$(wc -l < "$tmp/calls")" -eq 2 ] \
+  && ok "without a token, the downloads are anonymous curl, as before" || fail "no token: $(cat "$tmp/calls")"
 install_cargo_tools
 echo "# changed" >> "$CARGO_BIN/typos"
 step fill
@@ -233,6 +256,20 @@ write_pins "$gitleaks_pin"
 export TOOL_CACHE_DIR=$tmp/cache-fail CARGO_BIN=$tmp/bin-fail
 FAKE_CURL_FAIL=1 step fetch-assets
 grep -q "could not download" <<< "$out" && ok "a failed download warns" || fail "failed download: $out"
+# gh: a failed attempt is tried again, up to 3 times; GH_TOKEN works as GITHUB_TOKEN does.
+export TOOL_CACHE_DIR=$tmp/cache-gh-retry CARGO_BIN=$tmp/bin-gh-retry
+: > "$tmp/calls"
+GH_TOKEN=test-token-not-a-secret FAKE_GH_FAIL=2 step fetch-assets
+{ [ -x "$CARGO_BIN/gitleaks" ] && [ "$(grep -c '^gh .*token:GH_TOKEN$' "$tmp/calls")" -eq 4 ] \
+  && grep -q "attempt 2 of 3) failed; trying again in 30 s" <<< "$out"; } \
+  && ok "a failed gh attempt is tried again" || fail "gh retry: $(cat "$tmp/calls") $out"
+export TOOL_CACHE_DIR=$tmp/cache-gh-fail CARGO_BIN=$tmp/bin-gh-fail
+: > "$tmp/calls"
+GH_TOKEN=test-token-not-a-secret FAKE_GH_FAIL=9 step fetch-assets
+{ [ "$(grep -c '^gh ' "$tmp/calls")" -eq 6 ] && ! grep -q '^curl' "$tmp/calls" && [ ! -e "$CARGO_BIN/gitleaks" ] \
+  && grep -q "could not download https://github.com/gitleaks" <<< "$out"; } \
+  && ok "3 failed gh attempts warn, and nothing is cached" || fail "gh fail: $(cat "$tmp/calls") $out"
+export TOOL_CACHE_DIR=$tmp/cache-fail CARGO_BIN=$tmp/bin-fail
 install_cargo_tools
 step fill
 [ "$(output save)" = false ] && ok "a folder without every asset is not saved" || fail "fill after failure: $out"

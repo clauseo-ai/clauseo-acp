@@ -17,6 +17,20 @@ mod staging;
 
 pub(crate) use staging::lock_bin_and_sweep;
 
+/// The variables gh reads its token from, in its order. Either one set and not empty, with gh on
+/// `PATH`, makes a download go through gh (`Fetcher::choose`). xtask only checks that one is set;
+/// it never reads the token, so no command, message or fix it prints can hold it.
+pub(crate) const TOKEN_VARS: [&str; 2] = ["GH_TOKEN", "GITHUB_TOKEN"];
+/// gh's file name.
+const GH_FILE: &str = if cfg!(windows) { "gh.exe" } else { "gh" };
+/// How many times gh is tried, as it has no `--retry` of its own.
+const GH_ATTEMPTS: usize = 3;
+/// The waits before the second and the third attempt, in seconds.
+const GH_BACKOFF_S: [u64; GH_ATTEMPTS - 1] = [10, 30];
+/// The door's limit for one gh attempt: curl's `--max-time` plus the margin.
+const GH_TIMEOUT: Duration = Duration::from_secs(CURL_MAX_TIME_S + CURL_MARGIN_S);
+/// `sleep` waits at most the longest backoff, so a minute means it hangs.
+const SLEEP_TIMEOUT: Duration = Duration::from_mins(1);
 /// curl's `--retry`: a failed attempt (a reset, a 502 from GitHub) is tried again this many times.
 const CURL_RETRIES: u64 = 3;
 /// curl's `--max-time`, the limit on each attempt, in seconds.
@@ -34,6 +48,38 @@ const DOWNLOAD_TIMEOUT: Duration =
 const UNPACK_TIMEOUT: Duration = Duration::from_secs(60);
 /// winget downloads and runs an installer, which takes minutes on a slow link.
 const WINGET_TIMEOUT: Duration = Duration::from_mins(30);
+
+/// What downloads a release asset.
+///
+/// GitHub sheds anonymous traffic first under load (2026-11-09: anonymous release downloads
+/// answered 504 for hours), and github.com's `releases/download` URLs ignore an `Authorization`
+/// header: with a bogus bearer token they still answer 302 and set `logged_in=no`, while
+/// api.github.com answers the same token with 401. So an authenticated download goes through the
+/// API, and `gh release download` is that path: it reads its token from `GH_TOKEN` or
+/// `GITHUB_TOKEN` in its own environment (inherited from xtask), so the token is in no argument,
+/// and gh drops it on the redirect to the asset's storage host. The sha256 check after the download
+/// is the same either way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Fetcher {
+    /// Anonymous curl against the release URL: a developer's machine, or no gh.
+    Curl,
+    /// `gh release download`, authenticated: a token is set and gh is on `PATH`, as in CI.
+    Gh,
+}
+
+impl Fetcher {
+    /// gh when `token_set` (one of `TOKEN_VARS` is set and not empty) and `path` has gh;
+    /// curl otherwise, so a run without a token is as it always was.
+    pub(crate) fn choose(token_set: bool, path: &std::ffi::OsStr) -> Fetcher {
+        let has_gh =
+            || process::first_on_path(path, |dir| dir.join(GH_FILE).is_file().then_some(()));
+        if token_set && has_gh().is_some() {
+            Fetcher::Gh
+        } else {
+            Fetcher::Curl
+        }
+    }
+}
 
 /// How a binary installs on one OS and arch.
 #[derive(Debug, PartialEq, Eq)]
@@ -162,7 +208,7 @@ pub(crate) fn install_binary<W: Write>(
                 );
                 return false;
             };
-            download_into(out, binary, &download, bin, runner)
+            download_into(out, binary, &download, bin, machine.fetcher, runner)
         }
     }
 }
@@ -218,10 +264,15 @@ fn download_into<W: Write>(
     binary: &Binary,
     download: &Download,
     bin: &Path,
+    fetcher: Fetcher,
     runner: &mut Runner<'_>,
 ) -> bool {
+    let through = match fetcher {
+        Fetcher::Curl => "",
+        Fetcher::Gh => " through gh, authenticated (GH_TOKEN or GITHUB_TOKEN is set)",
+    };
     out.note(format!(
-        "installing {} {}: downloading {}",
+        "installing {} {}: downloading {}{through}",
         binary.name, binary.version, download.pinned.url
     ));
     let label = format!("{}-{}", binary.name, std::process::id());
@@ -232,7 +283,7 @@ fn download_into<W: Write>(
             return false;
         }
     };
-    let placed = fetch_check_place(binary, download, &staging, bin, runner);
+    let placed = fetch_check_place(out, binary, download, &staging, bin, fetcher, runner);
     let mut ok = match placed {
         Ok(()) => {
             out.note(format!(
@@ -260,11 +311,13 @@ fn download_into<W: Write>(
 
 /// Downloads into `staging`, checks the sha256, unpacks if needed, and renames the binary into
 /// `bin`.
-fn fetch_check_place(
+fn fetch_check_place<W: Write>(
+    out: &mut Printer<W>,
     binary: &Binary,
     download: &Download,
     staging: &Staging,
     bin: &Path,
+    fetcher: Fetcher,
     runner: &mut Runner<'_>,
 ) -> Result<(), Failure> {
     let (staging, dir) = (staging, staging.dir());
@@ -273,13 +326,18 @@ fn fetch_check_place(
         download.pinned.asset.as_str(),
         download.pinned.url.as_str(),
     );
-    let curl = curl_cmd(asset, url);
-    let fix = format!(
-        "run `{curl}` by hand in an empty directory and check its output, then run cargo xtask \
-         setup --binaries again; setup needs curl 7.71 or newer, for --retry-all-errors"
-    );
-    let what = format!("downloading {url}");
-    run_step(runner, &curl, dir, &what, &fix)?;
+    match fetcher {
+        Fetcher::Curl => {
+            let curl = curl_cmd(asset, url);
+            let fix = format!(
+                "run `{curl}` by hand in an empty directory and check its output, then run cargo \
+                 xtask setup --binaries again; setup needs curl 7.71 or newer, for \
+                 --retry-all-errors"
+            );
+            run_step(runner, &curl, dir, &format!("downloading {url}"), &fix)?;
+        }
+        Fetcher::Gh => fetch_with_gh(out, binary, asset, url, dir, runner)?,
+    }
     let file = dir.join(asset);
     let found = sha256_of(&file).map_err(|error| {
         (
@@ -332,6 +390,67 @@ fn fetch_check_place(
             retry_fix(bin),
         )
     })
+}
+
+/// Downloads `asset` of `binary` into `dir` with gh, up to `GH_ATTEMPTS` times, waiting
+/// `GH_BACKOFF_S` between attempts. Each failed attempt but the last is a note; the last is the
+/// failure, with gh's own words (gh prints no token).
+fn fetch_with_gh<W: Write>(
+    out: &mut Printer<W>,
+    binary: &Binary,
+    asset: &str,
+    url: &str,
+    dir: &Path,
+    runner: &mut Runner<'_>,
+) -> Result<(), Failure> {
+    let gh = gh_cmd(binary, asset);
+    let fix = format!(
+        "run `{gh}` by hand in an empty directory, with GH_TOKEN or GITHUB_TOKEN set, and check \
+         its output, then run cargo xtask setup --binaries again; with neither set, setup \
+         downloads {url} with curl instead"
+    );
+    for (attempt, wait) in (1..).zip(GH_BACKOFF_S) {
+        let what = format!("downloading {url} through gh (attempt {attempt} of {GH_ATTEMPTS})");
+        let Err((message, _)) = run_step(runner, &gh, dir, &what, &fix) else {
+            return Ok(());
+        };
+        out.note(format!("{message}; trying again in {wait} s"));
+        // Through the runner, so a test does not wait. A failed sleep only shortens the wait.
+        drop(runner(&sleep_cmd(wait), dir, Output::Quiet));
+    }
+    let what = format!("downloading {url} through gh (attempt {GH_ATTEMPTS} of {GH_ATTEMPTS})");
+    run_step(runner, &gh, dir, &what, &fix)
+}
+
+/// The gh command that downloads `asset` of `binary`'s pinned release into a file of that name,
+/// through the API, authenticated with the token gh reads from its environment. `--clobber`
+/// replaces what a failed attempt left.
+fn gh_cmd(binary: &Binary, asset: &str) -> Cmd {
+    Cmd::new(
+        Program::Named("gh"),
+        [
+            "release",
+            "download",
+            &format!("v{}", binary.version),
+            "--repo",
+            binary.repo,
+            "--pattern",
+            asset,
+            "--output",
+            asset,
+            "--clobber",
+        ],
+        GH_TIMEOUT,
+    )
+}
+
+/// `sleep <seconds>`, the wait between two gh attempts.
+fn sleep_cmd(seconds: u64) -> Cmd {
+    Cmd::new(
+        Program::Named("sleep"),
+        [seconds.to_string()],
+        SLEEP_TIMEOUT,
+    )
 }
 
 /// The curl command that downloads `url` to `asset`. A failed attempt (a reset, a 502) is tried

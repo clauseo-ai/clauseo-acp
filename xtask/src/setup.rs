@@ -242,6 +242,10 @@ pub(crate) struct Machine<'a> {
     pub cargo_bin: Option<PathBuf>,
     /// The `PATH` this process runs commands from.
     pub path: OsString,
+    /// What downloads a release asset: gh, authenticated, when a token is set and gh is on
+    /// `PATH` (as in CI, where the job passes its read-only token); curl, anonymous, otherwise.
+    /// Only whether a token is set is looked at here, never the token.
+    pub fetcher: install::Fetcher,
 }
 
 impl Machine<'static> {
@@ -251,11 +255,15 @@ impl Machine<'static> {
         let cargo_home = std::env::var_os("CARGO_HOME")
             .map(PathBuf::from)
             .or_else(|| std::env::var_os(home).map(|home| PathBuf::from(home).join(".cargo")));
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let token_set = (install::TOKEN_VARS.iter())
+            .any(|name| std::env::var_os(name).is_some_and(|token| !token.is_empty()));
         Machine {
             os: std::env::consts::OS,
             arch: std::env::consts::ARCH,
             cargo_bin: cargo_home.map(|cargo_home| cargo_home.join("bin")),
-            path: std::env::var_os("PATH").unwrap_or_default(),
+            fetcher: install::Fetcher::choose(token_set, &path),
+            path,
         }
     }
 }
