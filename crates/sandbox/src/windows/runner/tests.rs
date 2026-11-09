@@ -17,6 +17,9 @@ fn message() -> LaunchMessage {
         pool_user: Sid::parse(POOL).unwrap(),
         pool_name: "ClauseoSb05".to_owned(),
         matter_sid: None,
+        matter: crate::windows::test_world::matter_one(),
+        matter_root: r"D:\Matters\Smith".to_owned(),
+        notes_root: None,
         program: format!(r"{RUNTIME}\node.exe"),
         args: vec!["codex-acp.js".to_owned(), "--flag value".to_owned()],
         cwd: r"D:\Matters\Smith".to_owned(),
@@ -35,6 +38,7 @@ fn message() -> LaunchMessage {
         ca_bundle: Some(format!(r"{DATA}\sandbox-ca\roots.pem")),
         credential_link: Some(format!(r"{STATE}\auth.json")),
         firm_ca: Vec::new(),
+        denial_pipe: None,
     }
 }
 
@@ -52,6 +56,11 @@ fn get<'a>(env: &'a [(String, String)], name: &str) -> Option<&'a str> {
 fn a_message_round_trips_and_parses() {
     let bytes = message().to_bytes().unwrap();
     assert_eq!(LaunchMessage::parse(&bytes).unwrap(), message());
+    let mut piped = message();
+    let set = crate::windows::pipe::PipeSet::random().unwrap();
+    piped.denial_pipe = Some(crate::windows::denial_pipe::denial_pipe_name(&set));
+    let bytes = piped.to_bytes().unwrap();
+    assert_eq!(LaunchMessage::parse(&bytes).unwrap(), piped);
 }
 
 #[test]
@@ -72,6 +81,14 @@ fn the_parse_refuses_what_breaks_a_rule() {
             Box::new(|m| m.program = r"C:\x\..\y.exe".to_owned()),
         ),
         ("cwd", Box::new(|m| m.cwd = r"C:relative".to_owned())),
+        (
+            "matter_root",
+            Box::new(|m| m.matter_root = r"D:\Matters\..\Smith".to_owned()),
+        ),
+        (
+            "matter_root",
+            Box::new(|m| m.matter_root = r"D:\Matters\Jones".to_owned()),
+        ),
         (
             "state",
             Box::new(|m| m.state = r"\\server\share\state".to_owned()),
@@ -94,6 +111,10 @@ fn the_parse_refuses_what_breaks_a_rule() {
             Box::new(|m| m.env.push(("A".to_owned(), "x\0y".to_owned()))),
         ),
         ("args", Box::new(|m| m.args.push("a\0".to_owned()))),
+        (
+            "denial_pipe",
+            Box::new(|m| m.denial_pipe = Some(format!(r"{}\..\x", m.matter_root))),
+        ),
     ];
     for (field, change) in cases {
         let mut bad = message();

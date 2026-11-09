@@ -92,6 +92,7 @@ pub(super) async fn open(
         update,
         count_on_commit: BTreeMap::new(),
         browser_install,
+        browser_policy: super::browser_policy::PolicyCheck::default(),
         header_tools: super::header_tools::HeaderTools::default(),
         pack_generations: BTreeMap::new(),
         turn_path: super::turn::wide::TurnPath::new(parts.idle),

@@ -1,5 +1,6 @@
-//! The launch prep's browser part: which sessions get one, the sidecar check, the Chrome search
-//! and the session's claims (`browser::session`). See `launch_checks.rs` and decision record
+//! The launch prep's browser part: which sessions get one, the firm's browser policy
+//! (`browser::rd_policy`), the sidecar check, the Chrome search and the session's claims
+//! (`browser::session`). See `launch_checks.rs` and decision record
 //! 0029.
 
 use std::path::{Path, PathBuf};
@@ -8,8 +9,10 @@ use std::time::Duration;
 
 use super::super::super::Actor;
 use crate::browser::chrome::ChromeRoots;
+use crate::browser::rd_policy::RdPolicy;
 use crate::browser::session::BrowserSession;
 use crate::config::SessionKey;
+use clauseo_protocol::ToolsUnavailableReason;
 
 /// How the launch prep picks the session's Chrome.
 enum ChromeSearch {
@@ -60,6 +63,10 @@ pub(super) struct BrowserPrep {
     /// `--agent-browser` argument), as the profile hook gave them.
     sidecars: Vec<PathBuf>,
     chrome: ChromeSearch,
+    /// Reads the firm's Chrome, Edge and Chromium `RemoteDebuggingAllowed` (the wiring's).
+    rd_policy: Arc<RdPolicy>,
+    /// The firm's `browser.allow_when_remote_debugging_disabled`.
+    allowed_anyway: bool,
     /// Where the socket folder goes; `None` is `/tmp`.
     #[cfg(unix)]
     socket_root: Option<PathBuf>,
@@ -82,24 +89,32 @@ impl BrowserPrep {
         self
     }
 
-    /// The Chrome found and the session's claims. A missing sidecar leaves both out, with a
-    /// warning (a development build has no agent-browser); a failed claim leaves the claims
-    /// out. Either way the entry drops with `BrowserNotInstalled`. File system and socket
-    /// calls: off the actor.
-    pub(super) fn prepare(
-        self,
-        data: &Path,
-        session_id: &str,
-    ) -> (Option<PathBuf>, Option<Arc<BrowserSession>>) {
+    /// The Chrome found and the session's claims. The firm's browser policy comes first,
+    /// before any Chrome is picked, forced or found (`browser::rd_policy`), read again at each
+    /// launch: when it blocks, both are left out and the entry drops with
+    /// `BrowserBlockedByPolicy` or `BrowserPolicyUnreadable`. A missing sidecar
+    /// leaves both out, with a warning (a development build has no agent-browser); a failed
+    /// claim leaves the claims out. Either way the entry drops with `BrowserNotInstalled`.
+    /// Registry, file system and socket calls: off the actor.
+    pub(super) fn prepare(self, data: &Path, session_id: &str) -> Prepared {
         if matches!(self.chrome, ChromeSearch::Skip) {
-            return (None, None);
+            return Prepared::default();
+        }
+        let policy_block = self.rd_policy.check(self.allowed_anyway);
+        let read = Prepared {
+            policy_read: true,
+            policy_block,
+            ..Prepared::default()
+        };
+        if policy_block.is_some() {
+            return read;
         }
         if self.sidecars.iter().any(|sidecar| !sidecar.is_file()) {
             tracing::warn!("a browser sidecar is missing; the session has no browser");
-            return (None, None);
+            return read;
         }
         let Some(chrome) = self.chrome.find_with_config(data) else {
-            return (None, None);
+            return read;
         };
         let claimed = BrowserSession::claim(
             session_id,
@@ -113,17 +128,37 @@ impl BrowserPrep {
                     ports = ?session.ports.loopback(),
                     "claimed the browser's loopback ports"
                 );
-                (Some(chrome), Some(Arc::new(session)))
+                Prepared {
+                    chrome: Some(chrome),
+                    session: Some(Arc::new(session)),
+                    ..read
+                }
             }
             Err(error) => {
                 tracing::warn!(
                     error = %crate::log_file::Cause(&error),
                     "the session has no browser"
                 );
-                (Some(chrome), None)
+                Prepared {
+                    chrome: Some(chrome),
+                    ..read
+                }
             }
         }
     }
+}
+
+/// What [`BrowserPrep::prepare`] found for the session.
+#[derive(Debug, Default)]
+pub(super) struct Prepared {
+    /// The Chrome picked, if any.
+    pub(super) chrome: Option<PathBuf>,
+    /// The session's claims, if made.
+    pub(super) session: Option<Arc<BrowserSession>>,
+    /// Why the firm's browser policy left the browser out, if it did (`browser::rd_policy`).
+    pub(super) policy_block: Option<ToolsUnavailableReason>,
+    /// Whether the firm's browser policy was read for this launch (`actor/browser_policy.rs`).
+    pub(super) policy_read: bool,
 }
 
 /// How long a launch prep waits for a browser slot that a running removal may free
@@ -187,13 +222,16 @@ pub(super) fn browser_prep(
     agent: &clauseo_protocol::AgentId,
     key: SessionKey,
 ) -> BrowserPrep {
+    let settings = actor.effective.settings();
     let skip = BrowserPrep {
         sidecars: Vec::new(),
         chrome: ChromeSearch::Skip,
+        rd_policy: Arc::clone(&actor.wiring.rd_policy),
+        allowed_anyway: settings.browser.allow_when_remote_debugging_disabled,
         #[cfg(unix)]
         socket_root: None,
     };
-    if !actor.effective.settings().tools.browser
+    if !settings.tools.browser
         || actor.wiring.proxy.is_none()
         || !(actor.wiring.browser_slots.free_for(key) || actor.wiring.browser_slots.releasing(key))
     {
@@ -222,5 +260,6 @@ pub(super) fn browser_prep(
         chrome,
         #[cfg(unix)]
         socket_root: actor.wiring.browser_socket_root.clone(),
+        ..skip
     }
 }

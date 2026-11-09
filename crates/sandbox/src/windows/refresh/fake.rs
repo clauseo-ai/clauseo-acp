@@ -37,6 +37,8 @@ pub(super) struct Fake {
     /// What `stage` reads back, when it differs from what it was given.
     pub(super) staged_reads_back: Option<Vec<u8>>,
     pub(super) admin_file: Option<Vec<u8>>,
+    /// The machine's own CPU type, as `native_machine` gives it; `Err` when it can't be read.
+    pub(super) native: Result<u16, &'static str>,
     pub(super) staged: Option<Vec<u8>>,
     pub(super) set_aside: Option<Vec<u8>>,
     /// The step that fails, as a failed call.
@@ -80,6 +82,7 @@ impl Fake {
             source_sig: Ok(key.sign(new, sig_comment)),
             staged_reads_back: None,
             admin_file: Some(old.to_vec()),
+            native: Ok(pe_version::MACHINE_X64),
             staged: None,
             set_aside: None,
             fail: None,
@@ -189,6 +192,18 @@ impl Refresher for Fake {
             .admin_file
             .as_ref()
             .map(|file| Sha256::digest(file).into()))
+    }
+    fn admin_copy_machine(&mut self) -> Result<Option<u16>, Failed> {
+        // Read from the file at the admin path, as the real one reads it.
+        self.step("admin_machine")?;
+        Ok(self
+            .admin_file
+            .as_deref()
+            .and_then(pe_version::plain_machine))
+    }
+    fn native_machine(&mut self) -> Result<u16, Failed> {
+        self.calls.push("native");
+        self.native.map_err(str::to_owned)
     }
     fn secure_staged(&mut self) -> Result<(), Failed> {
         self.step("secure_staged")

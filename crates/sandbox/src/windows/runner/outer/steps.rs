@@ -1,10 +1,13 @@
-//! The outer runner's start of the inner runner, in `start.rs`'s order: the logon, the token
-//! user's check, the job, the shut, the resume, and the full check before the go. The inner gets
-//! no handle to the job.
+//! The outer runner's start of the inner runner, in `start.rs`'s order: the host's denial pipe
+//! connected, the git watch armed, a previous session's runners ended, the logon, the token
+//! user's check, the job, the shut, the resume, and the full check before the go; no logon or
+//! resume once the session's end has begun. The inner gets no handle to the job.
+
+use std::sync::Arc;
 
 use zeroize::Zeroizing;
 
-use super::super::RunExit;
+use super::super::end::ended_before_start;
 use super::super::frame::{InnerGo, write_frame};
 use super::super::inner_user::{READY_WAIT, TokenSeen, check_full, check_inner_user, ready_within};
 use super::super::previous::clear;
@@ -12,8 +15,11 @@ use super::super::spawn::{Process, assign, log_on, resume, telemetry_user};
 use super::super::start::Steps;
 use super::super::station::StationDesktop;
 use super::super::sweep::os::OsPrevious;
-use super::{FIRST_CONNECT, Failure, accept, inner_exit, logon_failure, os};
+use super::super::{LaunchMessage, RunExit};
+use super::{End, FIRST_CONNECT, Failure, accept, inner_exit, logon_failure, os, watch};
 use crate::windows::acl::object::Handle;
+use crate::windows::denial_pipe::os::open_writer;
+use crate::windows::denial_pipe::sink::{RecordSink, open_feed};
 use crate::windows::pipe::os::{ServerPipe, Until};
 use crate::windows::sids::Sid;
 use crate::windows::token::os::{shut_object, shut_process};
@@ -35,11 +41,38 @@ pub(super) struct Start<'a> {
     pub(super) job: &'a Handle,
     /// The `ctl` pipe, on which the inner says it is ready and is told to go.
     pub(super) ctl: &'a ServerPipe,
+    /// The session's end, which the start checks (`start.rs`).
+    pub(super) end: &'a End,
+    /// The launch: its denial pipe and the folders the watch covers.
+    pub(super) message: &'a LaunchMessage,
+    /// The denial pipe's sink, once connected.
+    pub(super) records: Option<Arc<RecordSink>>,
 }
 
 impl Steps for Start<'_> {
     type Inner = Process;
     type Error = Failure;
+
+    /// Takes the denial pipe's one instance, before anything runs as the pool user. A pipe the
+    /// launch names that can't be opened refuses the launch, in plain words.
+    fn feed(&mut self) -> Result<(), Failure> {
+        let sink = open_feed(self.message.denial_pipe.as_deref(), |name| {
+            open_writer(name)
+        })
+        .map_err(|why| Failure::new(RunExit::Pipe, why))?;
+        self.records = Some(Arc::new(sink));
+        Ok(())
+    }
+
+    /// The git watch on the matter's folder, armed before the agent runs. It can end the
+    /// session from here: then the start makes no inner, or kills it unresumed.
+    fn watch(&mut self) -> Result<(), Failure> {
+        let records = self
+            .records
+            .clone()
+            .unwrap_or_else(|| Arc::new(RecordSink::start(None)));
+        watch::keep(self.message, self.end, records)
+    }
 
     /// A previous session's live runners of the pool user (an end sweeper still running) are
     /// waited for, then ended, before the logon (`previous.rs`).
@@ -134,5 +167,18 @@ impl Steps for Start<'_> {
 
     fn kill(&mut self, inner: &Process, error: &Failure) {
         inner.kill(error.0.code());
+    }
+
+    /// A session the git watch ended before its agent ran exits as the job's end would have
+    /// ended a running one (`end::ended_before_start`).
+    fn not_ended(&mut self) -> Result<(), Failure> {
+        let Some(began) = self.end.began() else {
+            return Ok(());
+        };
+        let exit = RunExit::from_code(ended_before_start(began)).unwrap_or(RunExit::AgentReserved);
+        Err(Failure::new(
+            exit,
+            "the session ended before its agent started; the agent never ran",
+        ))
     }
 }

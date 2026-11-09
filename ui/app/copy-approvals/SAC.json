@@ -1,0 +1,22 @@
+{
+  "SAC-01": {
+    "en": "Only if Windows ever blocks Clauseo on this computer: open Windows Security, go to App & browser control, then Smart App Control settings, and turn it off. On an up-to-date Windows 11, you can turn it back on later. Until then, there's nothing to do.",
+    "hi": "केवल तभी, जब Windows कभी इस कंप्यूटर पर Clauseo को रोके: Windows Security खोलें, App & browser control में जाएँ, फिर Smart App Control settings में इसे बंद करें। अप-टू-डेट Windows 11 पर आप इसे बाद में फिर से चालू कर सकते हैं। तब तक कुछ करने की ज़रूरत नहीं है।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app copy"
+  },
+  "SAC-02": {
+    "en": "How to do this",
+    "hi": "यह कैसे करें",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-08",
+    "hi_by": "app copy",
+    "status": "provisional",
+    "at": "2026-11-08",
+    "by": "app copy"
+  }
+}

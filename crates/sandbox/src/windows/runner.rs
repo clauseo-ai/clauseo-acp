@@ -43,6 +43,8 @@
 //!   own timeout. A job that doesn't empty starts no sweeper, nor does an end with less than
 //!   500 ms of the host's 2 s after its stdin end left. The sweeper is never in the outer's
 //!   job, so the host ending the outer leaves it running.
+//! - The outer watches the matter's folder for a new `.git` while the agent runs, and sets one
+//!   aside at once, ending the session first when it can't (`git_watch.rs`, `outer/watch.rs`).
 //! - The outer writes an unclean-session marker in the run folder once it has read the launch and
 //!   removes it only at a clean end (`marker.rs`); `unclean_sessions` lists those left.
 //! - The four pipes (`pipe.rs`) are the outer's, with the explicit DACL. The outer sends the
@@ -65,8 +67,10 @@
 
 use std::path::{Path, PathBuf};
 
+use clauseo_protocol::MatterId;
 use serde::{Deserialize, Serialize};
 
+use super::denial_pipe::check_pipe_name;
 use super::pool::pool_number;
 use super::sids::Sid;
 
@@ -75,9 +79,11 @@ mod ca;
 #[cfg(windows)]
 mod desktop;
 #[cfg(any(windows, test))]
-mod end;
+pub(in crate::windows) mod end;
 pub mod env;
 pub mod frame;
+#[cfg(any(windows, test))]
+pub(crate) mod git_watch;
 #[cfg(windows)]
 mod inner;
 #[cfg(any(windows, test))]
@@ -114,6 +120,7 @@ pub use inner::run_inner;
 pub use marker::{UncleanSession, unclean_sessions};
 #[cfg(windows)]
 pub use outer::run_outer;
+use paths::is_batch;
 pub use paths::{WinPath, codex_reuse};
 #[cfg(windows)]
 pub use policy::codex_link_in_policy;
@@ -174,6 +181,15 @@ pub struct LaunchMessage {
     /// The matter's SID, added as a restricting SID when set (0049: off by default).
     #[serde(default)]
     pub matter_sid: Option<Sid>,
+    /// The matter's ID: the set-aside the outer's git watch moves a new `.git` into.
+    pub matter: MatterId,
+    /// The matter's folder, the run's one writable matter root, which the outer watches for a
+    /// new `.git` (`git_watch.rs`); a granted path, never a read-only one.
+    pub matter_root: String,
+    /// The matter's notes folder, when the run can write one: watched as the matter's folder is.
+    /// A granted path.
+    #[serde(default)]
+    pub notes_root: Option<String>,
     /// The agent's program, absolute; never a batch file.
     pub program: String,
     /// Its arguments.
@@ -206,6 +222,10 @@ pub struct LaunchMessage {
     /// `SSL_CERT_FILE` is merged the same way.
     #[serde(default)]
     pub firm_ca: Vec<String>,
+    /// The host's denial pipe (`denial_pipe`), which the git watch's records go to; with none,
+    /// or one that can't be opened, they are only logged, never said on stderr.
+    #[serde(default)]
+    pub denial_pipe: Option<String>,
 }
 
 impl std::fmt::Debug for LaunchMessage {
@@ -217,6 +237,9 @@ impl std::fmt::Debug for LaunchMessage {
             .field("pool_user", &self.pool_user)
             .field("pool_name", &self.pool_name)
             .field("matter_sid", &self.matter_sid)
+            .field("matter", &self.matter)
+            .field("matter_root", &self.matter_root)
+            .field("notes_root", &self.notes_root)
             .field("program", &self.program)
             .field("args", &self.args.len())
             .field("cwd", &self.cwd)
@@ -229,17 +252,19 @@ impl std::fmt::Debug for LaunchMessage {
 }
 
 impl LaunchMessage {
-    /// The message for `spec` run as `pool` under `policy`, with the CA bundle `ca_bundle`:
-    /// the spec's program, arguments, folder and whole environment; the policy's state folder,
-    /// session temp folder, runtime paths, the paths it grants and its credential link. Refused
-    /// when a path or variable isn't UTF-8 or breaks [`LaunchMessage::check`]'s rules.
+    /// The message for `spec` run as `pool` under `policy` for `matter`, with the CA bundle
+    /// `ca_bundle`: the spec's program, arguments, folder and whole environment; the policy's
+    /// matter folder, state folder, session temp folder, runtime paths, the paths it grants and
+    /// its credential link. Refused when a path or variable isn't UTF-8 or breaks
+    /// [`LaunchMessage::check`]'s rules.
     pub fn from_policy(
         policy: &crate::Policy,
+        matter: MatterId,
         pool: &super::pool::PoolUser,
         spec: &clauseo_process::LaunchSpec,
         ca_bundle: Option<&Path>,
     ) -> Result<LaunchMessage, LaunchError> {
-        policy::message_from_policy(policy, pool, spec, ca_bundle)
+        policy::message_from_policy(policy, matter, pool, spec, ca_bundle)
     }
 
     /// Reads and checks a launch message: [`LaunchMessage::check`]'s rules.
@@ -271,7 +296,7 @@ impl LaunchMessage {
     /// The rules: this version; a pool name `ClauseoSbNN`; the program, folders and paths full
     /// local paths with no `.` or `..` part and no NUL; the program no batch file; variable names
     /// non-empty with no NUL and no `=` but a leading one, values with no NUL; at most 4096
-    /// arguments and variables.
+    /// arguments and variables; a denial pipe's name as `denial_pipe::check_pipe_name` makes it.
     pub fn check(&self) -> Result<(), LaunchError> {
         if self.version != LAUNCH_VERSION {
             return Err(LaunchError::Version(self.version));
@@ -284,6 +309,16 @@ impl LaunchMessage {
             return Err(field("program", "is a batch file"));
         }
         local("cwd", &self.cwd)?;
+        local("matter_root", &self.matter_root)?;
+        if !self.granted.contains(&self.matter_root) {
+            return Err(field("matter_root", "is not a granted path"));
+        }
+        if let Some(notes) = &self.notes_root {
+            local("notes_root", notes)?;
+            if !self.granted.contains(notes) {
+                return Err(field("notes_root", "is not a granted path"));
+            }
+        }
         local("state", &self.state)?;
         if WinPath::parse(&self.state).is_none_or(|state| state.drive().is_none()) {
             return Err(field("state", "is not on a drive letter"));
@@ -305,6 +340,10 @@ impl LaunchMessage {
         }
         for path in &self.firm_ca {
             local("firm_ca", path)?;
+        }
+        if let Some(pipe) = &self.denial_pipe {
+            check_pipe_name(pipe)
+                .map_err(|_bad| field("denial_pipe", "is not a denial pipe's name"))?;
         }
         if self.args.len() > ITEMS_CAP || self.env.len() > ITEMS_CAP {
             return Err(field("args or env", "has more than 4096 items"));
@@ -580,14 +619,6 @@ fn local(name: &'static str, value: &str) -> Result<(), LaunchError> {
             "is not a full local path without . or .. parts",
         )),
     }
-}
-
-/// Whether `program` names a batch file: `.cmd` or `.bat`, in any case, trailing dots and
-/// spaces dropped as Windows drops them.
-fn is_batch(program: &str) -> bool {
-    let trimmed = program.trim_end_matches(['.', ' ']);
-    let extension = trimmed.rsplit_once('.').map(|(_, extension)| extension);
-    extension.is_some_and(|ext| ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat"))
 }
 
 #[cfg(test)]

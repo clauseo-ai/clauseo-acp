@@ -32,6 +32,17 @@ source: crates/settings/src/schema/tests.rs
       ],
       "type": "object"
     },
+    "BrowserSettings": {
+      "description": "The `browser` section. Its key is a security key, set by policy only: a policy source that\ncannot be read locks it `false`, its default, and a `settings.json` value is ignored with a\nwarning.",
+      "properties": {
+        "allow_when_remote_debugging_disabled": {
+          "default": false,
+          "description": "Whether Clauseo's browser may start when the firm turned off Chrome's or Edge's remote\ndebugging (their `RemoteDebuggingAllowed` policy false), which every browser Clauseo\ndrives needs. Off by default: such a policy then turns Clauseo's browser off too.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "Density": {
       "description": "How much space the app leaves round things.",
       "oneOf": [
@@ -487,6 +498,13 @@ source: crates/settings/src/schema/tests.rs
       "default": {},
       "description": "The agents Clauseo can launch, by id. Empty by default.",
       "type": "object"
+    },
+    "browser": {
+      "$ref": "#/$defs/BrowserSettings",
+      "default": {
+        "allow_when_remote_debugging_disabled": false
+      },
+      "description": "What the firm allows Clauseo's browser beyond its browser policy."
     },
     "install": {
       "$ref": "#/$defs/InstallSettings",

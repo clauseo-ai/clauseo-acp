@@ -182,19 +182,18 @@ export const ERROR_WORDS: Record<ErrorCode, ErrorKey> = {
   // design B's "Safe workspace" words
   "sandbox.setup_refused":
     "Windows didn't get permission for the change Clauseo asked it to approve, so nothing changed. Try again, and choose Yes when Windows asks.",
-  "sandbox.setup_failed":
-    "The Safe workspace couldn't be set up on this computer. Try again. If it keeps failing, ask whoever looks after this computer to look into it.",
+  "sandbox.setup_failed": "The Safe workspace couldn't be set up on this computer. Try again.",
   "sandbox.setup_required":
     "Clauseo can't answer here until the Safe workspace is set up on this computer. Your question is kept.",
   "sandbox.required":
-    "Your firm requires the Safe workspace, and this computer can't provide it, so Clauseo can't answer here. Ask whoever looks after this computer.",
+    "Your firm requires the Safe workspace, and this computer can't provide it, so Clauseo can't answer here.",
   // provisional (app track, Rohan's batch review): in design B's "Safe workspace" words
   "sandbox.blocked":
     "Clauseo can't use the Safe workspace on this computer: a Windows setting or security software is blocking it, so nothing was started. Settings › Safe workspace says what to do.",
   // provisional (stage E, Rohan's batch review): "Allow this site" refused while the firm's policy forbids overriding
   // the unsafe-site list (decision record 0053)
   "blocklist.override_off":
-    "Your firm has turned off allowing sites on Clauseo's unsafe-site list, so this site stays blocked. Ask your IT team if you need it.",
+    "Your firm has turned off allowing sites on Clauseo's unsafe-site list, so this site stays blocked.",
   // provisional (stage E, Rohan's batch review): "Allow this site" from a blocked-site notice the host no longer
   // keeps (decision record 0053)
   "blocklist.notice_expired":

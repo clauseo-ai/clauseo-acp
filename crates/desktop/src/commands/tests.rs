@@ -167,6 +167,12 @@ fn a_tauri_rejection_is_a_string_and_a_refusal_is_a_host_error() {
     } else {
         "release"
     };
+    // Smart App Control's state is the test machine's on Windows, and unknown everywhere else.
+    let sac = if cfg!(windows) {
+        info["smart_app_control"].clone()
+    } else {
+        Value::Null
+    };
     assert_eq!(
         info,
         json!({
@@ -174,6 +180,7 @@ fn a_tauri_rejection_is_a_string_and_a_refusal_is_a_host_error() {
             "release_date": null,
             "test_build": cfg!(feature = "e2e"),
             "release_mode": mode,
+            "smart_app_control": sac,
         })
     );
 

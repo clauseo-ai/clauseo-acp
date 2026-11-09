@@ -6,15 +6,17 @@ import type { ToolsSegment } from "@clauseo/components/clauseo/composer.tsx";
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import type { StreamView } from "../store/view.ts";
 import type { BrowserInstallStore } from "./browser-install.ts";
+import type { BrowserPolicyStore } from "./browser-policy.ts";
 import { ToolLine } from "./tool-line.tsx";
 import { knownTools, sameTools, toolsLabel, type KnownTool } from "./tools.ts";
 
 /** What the room gives the tool line: the plan's name, as the status line names it ("Claude"), Settings where the
- * host has the window, and the app's Chrome download. */
+ * host has the window, the app's Chrome download, and its re-read of the firm's browser policy. */
 export type ToolLineRoom = {
   plan: string;
   openSettings: (() => void) | undefined;
   install: BrowserInstallStore | null;
+  policy: BrowserPolicyStore | null;
 };
 
 let last: readonly KnownTool[] = [];

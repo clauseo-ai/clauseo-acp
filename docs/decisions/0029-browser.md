@@ -1007,7 +1007,25 @@ The guard cannot enforce these; stage C's egress proxy and sandbox must.
 The launch-prep thread (`actor/turn/launch_checks.rs`), never the actor, picks each session's
 Chrome and keeps it on the session's `RunFolders` (`chrome`), which fills
 `{browser_executable}`. It looks only when `tools.browser` is on and there is a proxy, so a
-session that cannot get the browser makes no file system calls for it. In order:
+session that cannot get the browser makes no file system calls for it. Before any of the steps
+below, the prep reads the firm's own Chrome, Edge and Chromium `RemoteDebuggingAllowed` (registry
+`HKLM`/`HKCU`, `SOFTWARE\Policies\Chromium` too; macOS managed preferences files,
+`org.chromium.Chromium` too; Linux `managed` policy folders of Chrome, Edge (`/etc/opt/edge`)
+and Chromium (`/etc/chromium`), at most 256 files of 16 MiB each;
+`clauseo_settings::chromium_policy`, `host/src/browser/rd_policy.rs`), taking what Chrome's own
+conversion takes (a `REG_SZ` `"0"` is false). Chrome for Testing reads its own policy key and
+chrome-headless-shell none, so a false anywhere starts no browser at all, and the entry drops with
+`BrowserBlockedByPolicy`. Nothing set, or a value Chrome would not take, does not block; a place
+that cannot be read (not missing: denied, failed or past a cap) means nothing is known, so with no
+false elsewhere the entry drops with its own `BrowserPolicyUnreadable`, read again at the next
+launch, or at once when the lawyer presses Try again (`HostCommand::RecheckBrowserPolicy`, main
+window only, off the actor, one read at a time, `Unreadable` after 10 s on the host clock;
+`HostEvent::BrowserPolicy` says what it found, a running session keeps its header, `Blocked`
+re-words the headers that said unreadable, and each later launch's read keeps that state). The
+firm's Clauseo policy `browser.allow_when_remote_debugging_disabled` (policy only, a
+security key, default false) overrides both. Each unread place and bad value is logged once per
+host, with no path (`docs/firm-it.md`, "Browser automation and RemoteDebuggingAllowed"). In
+order:
 
 1. Google Chrome installed: on macOS `/Applications/Google Chrome.app/Contents/MacOS/Google
    Chrome`, then the same under `~/Applications`; on Windows `%ProgramFiles%`,

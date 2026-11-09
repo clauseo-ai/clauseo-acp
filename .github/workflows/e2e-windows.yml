@@ -46,8 +46,10 @@
 # - wait: the app changed but the pull request is not ready: fails in seconds, naming the label.
 # - covered: another run already passed `smoke (windows-2025)` for this head commit: passes in
 #   seconds, naming it. Nothing is tested twice.
-# - failed: a label or review that cannot change the result, on a commit whose last smoke failed:
-#   fails again in seconds, naming that run.
+# - failed: a label or review that cannot change the result, on a commit whose last real smoke
+#   failed: fails again in seconds, naming that run. A real smoke ran on windows-2025
+#   (.github/scripts/gate-prior.sh); the answers here that run on ubuntu, wait's failure
+#   included, are not results, so a label or an approval after a wait stop runs it (#732).
 # - stale: the pull request's head moved on while this run waited: passes on that old commit,
 #   which no required check reads, and cancels nothing.
 # - merge_group: passes in seconds.
@@ -225,24 +227,24 @@ jobs:
             echo "::warning::Reading the pull request's head failed"
           fi
 
-          # The newest finished smoke (windows-2025) of another run for this head commit. A rerun
-          # of this run does not count, so it tests again.
-          if ! prior=$(gh api -X GET "repos/$REPO/commits/$HEAD_SHA/check-runs" \
-              -f check_name="smoke (windows-2025)" -f filter=all -f per_page=100 \
-              -q "[.check_runs[] | select(.status == \"completed\" and (.details_url | contains(\"/runs/$RUN_ID/\") | not))]
-                  | sort_by(.completed_at) | last // empty | \"\(.conclusion) \(.details_url)\""); then
-            echo "::warning::The check runs API failed; deciding without this commit's earlier result"
-            prior=""
+          # This head commit's last real smoke: the newest smoke (windows-2025) of another run
+          # that ran on windows-2025. The gate's own answers (wait, failed, covered, noapp, stale)
+          # run on ubuntu and are not results, so a wait stop before the label or an approval
+          # never reads as a failure (#732). A rerun of this run does not count, so it tests
+          # again. gate-prior.sh comes from the base, as changes.sh does; without it, or if it
+          # fails, the decision goes on without an earlier result.
+          verdict=none
+          if [ -f .github/scripts/gate-prior.sh ] \
+              && out=$(bash .github/scripts/gate-prior.sh "smoke (windows-2025)" windows-2025 "failure timed_out cancelled"); then
+            prior=$(sed -n 's/^prior=//p' <<< "$out")
+            verdict=$(sed -n 's/^verdict=//p' <<< "$out")
+            if [ -n "$prior" ]; then echo "prior=$prior" >> "$GITHUB_OUTPUT"; fi
+          else
+            echo "::warning::gate-prior.sh is missing or failed; deciding without this commit's earlier result"
           fi
-          if [ -n "$prior" ]; then
-            echo "This commit's last smoke: $prior"
-            echo "prior=${prior#* }" >> "$GITHUB_OUTPUT"
-          fi
-          case "$prior" in
-            "success "*) mode covered ;;
-            "failure "* | "timed_out "* | "cancelled "*)
-              if [ "$RELEVANT" != true ]; then mode failed; fi
-              ;;
+          case "$verdict" in
+            covered) mode covered ;;
+            failed) mode failed ;;
           esac
           if [ "$APP" != true ]; then mode noapp; fi
           if [ "$READY" != true ]; then mode wait; fi

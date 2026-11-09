@@ -6,7 +6,7 @@
 // key, a pasted code or an address beyond its field, and nothing runs a timer.
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
-import { setupStoreOf, CLAUDE, CODEX, type SetupSource } from "../../store/setup.ts";
+import { setupStoreOf, CLAUDE, CODEX, planLocked, type SetupSource } from "../../store/setup.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { AgentId } from "../../transport/protocol.ts";
 import type { SectionContext } from "../sections.tsx";
@@ -14,13 +14,6 @@ import { PlanBlock } from "./plans-block.tsx";
 
 /** The plans, in the design's order. */
 const AGENTS: readonly AgentId[] = [CLAUDE, CODEX];
-
-/** Whether a firm's policy locks the agent's plan: `plans.<id>`, or a prefix of it ending in `.` (`plans.`, while a
- * policy source can't be read; SettingsView.locked). */
-const planLocked = (locked: readonly string[], agent: AgentId): boolean => {
-  const key = `plans.${agent}`;
-  return locked.some((k) => k === key || (k.endsWith(".") && key.startsWith(k)));
-};
 
 export function Plans({ ctx }: { ctx: SectionContext }) {
   const transport = ctx.transport as HostTransport & SetupSource;

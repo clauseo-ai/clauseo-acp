@@ -134,6 +134,7 @@ const found = (
 const SWITCHING: Scene = {
   events: [READY, signIn(CLAUDE, { switching: { since: AT, stuck: false } })],
 };
+const CHECKING: Scene = { events: [READY, signIn(CLAUDE, "checking")] };
 const STUCK: Scene = { events: [READY, signIn(CLAUDE, { switching: { since: AT, stuck: true } })] };
 /** The key panel open while signed out, the switch begun, then a key sent and refused with command.conflict. */
 const SWITCH_CONFLICT: Scene = {
@@ -195,10 +196,16 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
     { first: true, events: [install(CLAUDE, { missing: { download_bytes: 182_400_000 } })] },
     "welcome",
   ],
-  ["{name} is ready", { first: true, events: [install(CLAUDE, "installing"), READY] }, "welcome"],
+  // installed but signed out: the words on the foot's line, with the plan's Sign in (once signed in, the same words
+  // stand alone, for an install that finished in this window)
+  [
+    "{name} is ready",
+    { first: true, events: [install(CLAUDE, "installing"), READY, SIGNED_OUT] },
+    "welcome",
+  ],
   ["Setting up {name}…", { first: true, events: [install(CLAUDE, "installing")] }, "welcome"],
   ["Use the system proxy", { first: true, events: [blocked] }, "dl-blocked"],
-  ["Ask your IT team", { first: true, events: [blocked] }, "dl-blocked"],
+  ["Copy details for IT", { first: true, events: [blocked] }, "dl-blocked"],
   [
     "Message copied",
     { first: true, events: [blocked], clicks: ['[data-testid="install-ask-it"]'] },
@@ -488,7 +495,11 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
     { events: [READY, failed("signin.policy_unreadable")] },
     "signin-policy",
   ],
-  ["Ask your IT team.", { events: [READY, failed("signin.policy_unreadable")] }, "signin-policy"],
+  [
+    "Your firm manages these settings.",
+    { events: [READY, failed("signin.policy_unreadable")] },
+    "signin-policy",
+  ],
   // switching accounts (0048, #493), and a refusal meanwhile
   ["Switching accounts.", SWITCHING, "signin-switching"],
   [
@@ -512,6 +523,8 @@ const SCENES: ([FirstLaunchKey, Scene, string] | null)[] = [
   // UD1-88: the download's line, its bytes in whole MB. The live region hears only the state,
   // Getting {name} ready…, never these bytes
   ["Getting {name} ready… {done} MB of {total} MB", WELCOME, "welcome"],
+  // UD1-89: the sign-in status check still running, at start and through its silent retries
+  ["Checking whether you're signed in to {name}…", CHECKING, "signin-checking"],
 ];
 
 /** The gate's refusal line for any other code: its code's own sentence, here a sign-in refused while a key is in use.

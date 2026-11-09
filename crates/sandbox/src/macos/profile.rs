@@ -10,6 +10,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
+use names::{GIT_NAME_REGEX, HEAD_REGEX, INSTRUCTIONS_REGEX};
 use params::Params;
 
 use crate::{Error, Loopback, PathRule, Policy};
@@ -19,10 +20,6 @@ const BASE: &str = include_str!("base.sb");
 
 /// Every tag starts with this, so one log predicate finds every launch's denials.
 pub(crate) const TAG_PREFIX: &str = "clauseo-";
-
-/// [`INSTRUCTIONS_AT_ANY_DEPTH`](crate::INSTRUCTIONS_AT_ANY_DEPTH) as a path-free pattern on
-/// the last name, each letter in both cases (Seatbelt's regex has no case flag).
-const INSTRUCTIONS_REGEX: &str = "/[cC][lL][aA][uU][dD][eE]\\.[mM][dD]$";
 
 /// The parameter naming the browser socket folder.
 const BROWSER_SOCKETS: &str = "BROWSER_SOCKETS";
@@ -322,6 +319,11 @@ impl Writer {
                 "(require-all (subpath (param \"MATTER\")) (regex #\"{INSTRUCTIONS_REGEX}\"))"
             )],
         );
+        self.note("; No new .git, folder or file, at any depth, in any letter case: not made, not");
+        self.note("; renamed onto (Seatbelt checks a rename's destination path).");
+        self.matter_regex(GIT_NAME_REGEX);
+        self.note("; No HEAD, the file that makes a folder with objects/ and refs/ a bare repo.");
+        self.matter_regex(HEAD_REGEX);
 
         self.note("\n; Links that lead outside the matter, and where they lead.");
         let mut links = Vec::new();
@@ -341,6 +343,12 @@ impl Writer {
         );
         let hidden = self.subpaths(&p.hidden);
         self.rule("deny", "file-read* file-write*", &hidden);
+    }
+
+    /// A write deny on the matter's paths that `regex` matches.
+    fn matter_regex(&mut self, regex: &str) {
+        let filter = format!("(require-all (subpath (param \"MATTER\")) (regex #\"{regex}\"))");
+        self.rule("deny", "file-write*", &[filter]);
     }
 
     /// The paths some hidden paths hold, allowed again after them.
@@ -552,6 +560,7 @@ fn directory_ancestors(param: &str) -> String {
     format!("(require-all (vnode-type DIRECTORY) (path-ancestors {param}))")
 }
 
+mod names;
 mod params;
 #[cfg(test)]
 mod tests;

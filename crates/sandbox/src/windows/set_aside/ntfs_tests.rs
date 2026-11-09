@@ -17,6 +17,8 @@ use crate::windows::write::rename_new;
 
 mod round3;
 mod round4;
+mod round5;
+mod round6;
 
 fn launch() -> SystemTime {
     UNIX_EPOCH + Duration::from_millis(1_762_337_700_123)
@@ -222,8 +224,13 @@ fn a_lawyer_folder_renamed_to_a_nested_git_is_set_aside_by_its_file_id() {
     assert!(moved[0].to.join("hooks/pre-commit").is_file());
     assert!(root.join("sub/old-git/HEAD").is_file());
     assert!(root.join("other/.mcp.json").is_file(), "unchanged");
-    restore_set_aside(&data, &moved[0]).unwrap();
-    assert!(root.join("sub/.git/hooks/pre-commit").is_file());
+    // Put back it would be the lawyer's, which git trusts: the restore refuses it.
+    assert_eq!(
+        restore_set_aside(&data, &moved[0]),
+        Err(SetAsideFailure::GitFolder)
+    );
+    assert!(!root.join("sub/.git").exists());
+    assert!(moved[0].to.join("hooks/pre-commit").is_file());
 }
 
 /// S15 `PR4a` on NTFS: a nested `claude.md` the agent makes is what the `CLAUDE.md` probe opens
@@ -272,4 +279,18 @@ fn a_profile_base_reached_through_a_junction_is_refused_and_nothing_is_made() {
         !real.join(r"state\Local").exists(),
         "nothing made through a junction"
     );
+}
+
+/// A matter on the data folder's volume keeps the sandbox folder as its set-aside root, whatever
+/// form its path takes; nothing is made at a volume's root.
+#[test]
+fn a_matter_on_the_data_folders_volume_sets_aside_into_the_sandbox_folder() {
+    use super::run::Volume as _;
+    let w = World::new("ntfs-items-root");
+    let sandbox = w.canonical("data").join("sandbox");
+    let matter = w.canonical("matter");
+    let ntfs = super::ntfs::Ntfs;
+    assert_eq!(ntfs.items_root(&sandbox, &matter).unwrap(), sandbox);
+    let verbatim = PathBuf::from(format!(r"\\?\{}", matter.display()));
+    assert_eq!(ntfs.items_root(&sandbox, &verbatim).unwrap(), sandbox);
 }

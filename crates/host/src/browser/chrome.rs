@@ -1,6 +1,7 @@
 //! Which Chrome a session's browser runs (S27, "Which Chrome"; decision record 0029). The host
 //! looks on the launch-prep thread, never on the actor, and fills `{browser_executable}` with
-//! what it found. None found is `BrowserNotInstalled`.
+//! what it found. None found is `BrowserNotInstalled`. Before it looks, the launch prep asks
+//! the firm's Chrome and Edge policy (`super::rd_policy`), so nothing here runs when that blocks.
 //!
 //! In this order:
 //! 1. Google Chrome installed on the machine: on macOS

@@ -21,7 +21,7 @@ use super::protection::work::{Asked as ProtectionAsked, command as protection};
 use super::settings::{
     first_act, set_privacy_settings, set_skill_pack, set_tool_settings, set_ui_settings,
 };
-use super::update::Asked;
+use super::update::{Asked, command as update};
 use super::{Actor, MatterEntry, Tag, ThreadEntry, title_source, triage, turn};
 use crate::error::Error;
 use crate::pipeline::{Draft, Failure};
@@ -301,13 +301,10 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         HostCommand::RestartAgent { .. } => not_built(actor, ctx),
         HostCommand::InstallBrowser {} => super::browser_install::install(actor, ctx),
         HostCommand::CancelBrowserInstall {} => super::browser_install::cancel(actor, ctx),
-        HostCommand::CheckForUpdate {} => super::update::command(actor, ctx, Asked::Check),
-        HostCommand::InstallUpdate { when } => {
-            super::update::command(actor, ctx, Asked::Install(when));
-        }
-        HostCommand::CancelScheduledUpdate {} => {
-            super::update::command(actor, ctx, Asked::CancelScheduled);
-        }
+        HostCommand::RecheckBrowserPolicy {} => super::browser_policy::recheck(actor, ctx),
+        HostCommand::CheckForUpdate {} => update(actor, ctx, Asked::Check),
+        HostCommand::InstallUpdate { when } => update(actor, ctx, Asked::Install(when)),
+        HostCommand::CancelScheduledUpdate {} => update(actor, ctx, Asked::CancelScheduled),
         HostCommand::SetUpdateMode { mode } => super::update::set_mode(actor, ctx, mode),
         // Decision record 0051: held until the work ends, with no receipt.
         HostCommand::RetryProtection {} => protection(actor, ctx, ProtectionAsked::Retry),

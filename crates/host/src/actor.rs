@@ -37,6 +37,7 @@ mod app;
 mod app_lists;
 mod blocked;
 mod browser_install;
+mod browser_policy;
 mod commands;
 mod connectors;
 pub(crate) mod counting;
@@ -134,6 +135,8 @@ pub(crate) struct Actor {
     pub(crate) wiring: crate::config::LaunchWiring,
     /// The Chrome for Testing download: its tools, its start-up sweep and the one running.
     pub(crate) browser_install: browser_install::BrowserInstall,
+    /// The lawyer's re-read of the firm's browser policy: whether one runs, and its latest state.
+    pub(crate) browser_policy: browser_policy::PolicyCheck,
     /// This computer's protection, its seam and the set-up work running (`protection.rs`).
     pub(crate) protection: protection::ProtectionHost,
     /// The connector state and the commands' work in flight (R24).
@@ -502,6 +505,7 @@ impl Actor {
             Input::NewFolder(probed) => matters::probe::on_probed(self, *probed),
             Input::Located(located) => locate::on_located(self, *located),
             Input::BrowserInstall(state) => browser_install::on_state(self, state),
+            Input::BrowserPolicy(input) => browser_policy::on_input(self, input),
             Input::SkillPack(read) => settings::packs::on_read(self, *read),
             Input::Update(input) => update::on_input(self, input),
             Input::Connector(input) => connectors::on_input(self, *input),

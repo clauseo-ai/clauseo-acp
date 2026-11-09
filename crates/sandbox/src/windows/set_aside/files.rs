@@ -15,6 +15,8 @@
 //! or symbolic link) in the matter tree by its own path and file ID (R2). Each part, like each
 //! name and path in the manifest, is kept as the file system gave it (`names.rs`): a string
 //! when it is text, `{"utf16": [...]}` when it isn't.
+//! `notes-record.json`: the same for the matter's notes folder, when the run can write one, its
+//! paths below the notes folder.
 //! `manifest.json`: `{"version": 1, "next": 3, "entries": [<Entry>, ...], "intents": [<Entry>,
 //! ...]}`: `intents` holds the moves begun and not yet finished (N10), and is left out when
 //! empty.
@@ -46,8 +48,18 @@ use crate::windows::write;
 const RECORD_FILE: &str = SET_ASIDE_BOOKKEEPING[0];
 #[cfg(any(windows, test))]
 const MANIFEST_FILE: &str = SET_ASIDE_BOOKKEEPING[2];
+/// The notes folder's record, beside the matter's: the same shape, its keys below the notes
+/// folder, so the two never mix.
+#[cfg(any(windows, test))]
+const NOTES_RECORD_FILE: &str = SET_ASIDE_BOOKKEEPING[3];
 /// The matter's lock file: every read and write of the record or the manifest holds it.
 pub(super) const LOCK_FILE: &str = SET_ASIDE_BOOKKEEPING[1];
+/// The key, in [`Record::names`], that says the record holds the `HEAD` files
+/// ([`Kept::Head`](super::scan::Kept::Head)): a record an older version wrote lacks it, and
+/// its `HEAD`s are then recorded, never set aside, so none is taken for new. No file can have
+/// the name: `:` separates a stream on NTFS. Older versions ignore the key.
+#[cfg(any(windows, test))]
+pub(super) const HEADS_RECORDED: &str = ":heads";
 /// The version both files are written in and the only one read.
 const VERSION: u32 = 1;
 
@@ -83,6 +95,14 @@ pub(super) struct Record {
     pub(super) links: Links,
 }
 
+/// Whether `names` holds [`HEADS_RECORDED`].
+#[cfg(any(windows, test))]
+pub(super) fn heads_recorded(names: &Names) -> bool {
+    names
+        .keys()
+        .any(|key| key.len() == 1 && key.first().is_some_and(|k| k == HEADS_RECORDED))
+}
+
 /// What a pass records of the matter: [`Record::names`] and [`Record::links`].
 #[cfg(any(windows, test))]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -92,6 +112,12 @@ pub(super) struct Snapshot {
 }
 
 impl Record {
+    /// Whether the record holds the `HEAD` files ([`HEADS_RECORDED`]).
+    #[cfg(any(windows, test))]
+    pub(super) fn holds_heads(&self) -> bool {
+        heads_recorded(&self.names)
+    }
+
     /// Whether `bytes` read as a record of [`VERSION`] with no open session; anything the typed
     /// read refuses is `false`.
     pub(super) fn closed(bytes: &[u8]) -> bool {
@@ -151,15 +177,21 @@ impl Default for Manifest {
     }
 }
 
-/// Where one matter's set-aside lives.
+/// Where one matter's set-aside lives, and which of its records a pass reads and writes: the
+/// matter folder's (`record.json`) or its notes folder's (`notes-record.json`). Both share the
+/// matter's lock, manifest and pass folders, so what a pass on the notes folder moves goes to
+/// the matter's set-aside.
 #[cfg(any(windows, test))]
 #[derive(Debug, Clone)]
 pub(super) struct Place {
-    /// `<data_dir>\sandbox`, where each move's folder chain starts.
+    /// `<data_dir>\sandbox`, where each move's folder chain starts unless the item is on another
+    /// volume (`Volume::items_root`).
     pub(super) sandbox: PathBuf,
     /// `<data_dir>\sandbox\set-aside\<matter>`.
     base: PathBuf,
     matter: MatterId,
+    /// The record's file name in `base`.
+    record: &'static str,
 }
 
 #[cfg(any(windows, test))]
@@ -171,7 +203,21 @@ impl Place {
             sandbox,
             base,
             matter: *matter,
+            record: RECORD_FILE,
         }
+    }
+
+    /// The place of `matter`'s notes folder: the matter's own, with the notes record.
+    pub(super) fn notes(data_dir: &Path, matter: &MatterId) -> Place {
+        Place {
+            record: NOTES_RECORD_FILE,
+            ..Place::new(data_dir, matter)
+        }
+    }
+
+    /// Whether this is the notes folder's place ([`Place::notes`]).
+    pub(super) fn is_notes(&self) -> bool {
+        self.record == NOTES_RECORD_FILE
     }
 
     /// The matter.
@@ -192,11 +238,26 @@ impl Place {
         .collect()
     }
 
-    /// Where `name` in the folder `within` in the pass's folder `folder` is.
-    pub(super) fn to(&self, folder: &str, within: &[OsString], name: &OsStr) -> PathBuf {
-        within
+    /// The parts below the sandbox folder of the matter's folder: `set-aside`, the matter.
+    pub(super) fn matter_parts(&self) -> [OsString; 2] {
+        [
+            OsString::from(SET_ASIDE_DIR),
+            OsString::from(self.matter.to_string()),
+        ]
+    }
+
+    /// Where `name` in the folder `within` in the pass's folder `folder` is, below `root`: the
+    /// sandbox folder, or the set-aside folder on the item's volume (`Volume::items_root`).
+    pub(super) fn to(
+        &self,
+        root: &Path,
+        folder: &str,
+        within: &[OsString],
+        name: &OsStr,
+    ) -> PathBuf {
+        self.parts(folder, within)
             .iter()
-            .fold(self.base.join(folder), |path, part| path.join(part))
+            .fold(root.to_owned(), |path, part| path.join(part))
             .join(name)
     }
 
@@ -217,7 +278,7 @@ impl Place {
     /// The record, or `None` when there is none. One that can't be read, or of another
     /// version or matter, is [`SetAsideFailure::Record`].
     pub(super) fn read_record(&self) -> Result<Option<Record>, SetAsideFailure> {
-        let Some(bytes) = read(&self.base.join(RECORD_FILE))? else {
+        let Some(bytes) = read(&self.base.join(self.record))? else {
             return Ok(None);
         };
         match serde_json::from_slice::<Record>(&bytes) {
@@ -232,7 +293,7 @@ impl Place {
     }
 
     pub(super) fn write_record(&self, record: &Record) -> Result<(), SetAsideFailure> {
-        save(&self.base.join(RECORD_FILE), record)
+        save(&self.base.join(self.record), record)
     }
 
     /// The manifest; an empty one when there is none.

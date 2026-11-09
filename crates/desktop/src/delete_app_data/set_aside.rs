@@ -1,15 +1,17 @@
 //! The set-aside at the end of the way down with `--sandbox-removed`
 //! (`<data>\sandbox\set-aside`): kept whole when it holds anything of the lawyer's, deleted when
 //! it holds only Clauseo's own bookkeeping. Every tier-B launch leaves `record.json` and
-//! `set-aside.lock` in `set-aside\<matter>\`, and a pass that set something aside leaves
-//! `manifest.json`, which a restore of every item empties ([`SET_ASIDE_BOOKKEEPING`]); counting
-//! those as the lawyer's files would show the Kept box to every lawyer who used tier B.
+//! `set-aside.lock` in `set-aside\<matter>\`, a launch with a notes folder leaves
+//! `notes-record.json`, and a pass that set something aside leaves `manifest.json`, which a
+//! restore of every item empties ([`SET_ASIDE_BOOKKEEPING`]); counting those as the lawyer's
+//! files would show the Kept box to every lawyer who used tier B.
 //!
 //! It counts as empty when each entry in it is a real folder (no reparse point) holding only
-//! regular files (no reparse point, no folder) named exactly `record.json`, `set-aside.lock` or
-//! `manifest.json`. Anything else (a pass folder with moved files, any other name, a name with a
-//! trailing dot or space, a link, a folder under a bookkeeping name, an entry that cannot be
-//! listed or read) keeps the whole set-aside, untouched. Each folder is pinned while it is listed
+//! regular files (no reparse point, no folder) named exactly `record.json`,
+//! `notes-record.json`, `set-aside.lock` or `manifest.json`. Anything else (a pass folder with
+//! moved files, any other name, a name with a trailing dot or space, a link, a folder under a
+//! bookkeeping name, an entry that cannot be listed or read) keeps the whole set-aside,
+//! untouched. Each folder is pinned while it is listed
 //! (`ops::pin_folder`: refused if a reparse point).
 //!
 //! The deletion itself is the sandbox crate's (`forget_set_aside_bookkeeping`), one matter at a

@@ -10,10 +10,13 @@
 //!    so `ManagedByFirm`.
 //! 3. No free browser slot: `TooManyBrowsers`.
 //! 4. No proxy set: `NoProxy`.
-//! 5. No Chrome picked, a sidecar (`clauseo-mcp` or agent-browser) missing, or the session's
+//! 5. The firm's Chrome or Edge policy turns remote debugging off and its Clauseo policy does
+//!    not allow Clauseo's browser anyway (`browser::rd_policy`): `BrowserBlockedByPolicy`; or,
+//!    with no false, a place of that policy could not be read: `BrowserPolicyUnreadable`.
+//! 6. No Chrome picked, a sidecar (`clauseo-mcp` or agent-browser) missing, or the session's
 //!    ports or socket folder not claimed (`browser::session`): `BrowserNotInstalled`.
-//! 6. The session's proxy did not open, so it has no port: `NoProxy`. The proxy opens only
-//!    after 5 found everything (`actor/turn/launch_checks/egress.rs`).
+//! 7. The session's proxy did not open, so it has no port: `NoProxy`. The proxy opens only
+//!    after 6 found everything (`actor/turn/launch_checks/egress.rs`).
 //!
 //! Each value is filled into one decoded string (one argument, one variable's value) in one
 //! pass, so a folder whose name holds a token stays literal; MCP arguments go as a list with no
@@ -64,6 +67,8 @@ pub(crate) struct BrowserInputs<'a> {
     pub(crate) proxy_set: bool,
     /// The port of this session's proxy, if it opened.
     pub(crate) port: Option<u16>,
+    /// Why the firm's browser policy left the browser out, if it did (`browser::rd_policy`).
+    pub(crate) blocked_by_policy: Option<ToolsUnavailableReason>,
     /// The Chrome picked for this session, if any.
     pub(crate) executable: Option<&'a Path>,
     /// The session's browser state folder, `<data>/run/<session id>/browser`.
@@ -156,6 +161,9 @@ fn browser_entry(
     }
     if !inputs.proxy_set {
         return Err(ToolsUnavailableReason::NoProxy);
+    }
+    if let Some(reason) = inputs.blocked_by_policy {
+        return Err(reason);
     }
     let executable = inputs
         .executable

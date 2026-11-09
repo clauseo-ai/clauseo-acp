@@ -18,7 +18,9 @@ export type BrowserState =
   | "managed_by_firm"
   | "no_proxy"
   | "too_many_browsers"
-  | "browser_not_installed";
+  | "browser_not_installed"
+  | "browser_blocked_by_policy"
+  | "browser_policy_unreadable";
 
 /** One tool the line can speak for. */
 export type KnownTool =
@@ -37,6 +39,8 @@ const BROWSER: ReadonlySet<string> = new Set<BrowserState>([
   "no_proxy",
   "too_many_browsers",
   "browser_not_installed",
+  "browser_blocked_by_policy",
+  "browser_policy_unreadable",
 ]);
 
 /** The state of a tool, or null where it says nothing: an availability string it doesn't know, a reason it doesn't
@@ -67,11 +71,16 @@ export function knownTools(tools: readonly ToolState[] | undefined): KnownTool[]
   return [web, browser].filter((t): t is KnownTool => t !== null);
 }
 
-/** The state a tool's glyph shows: on as drawn, the firm's lock for a tool the firm holds off, every other off
- * slashed (a login with no search shows web search off: it can't search here). */
+/** The state a tool's glyph shows: on as drawn, the firm's lock for a tool the firm holds off
+ * (its browser policy too), every other off slashed (a login with no search shows web search off:
+ * it can't search here; a browser policy Clauseo couldn't read is no firm's lock). */
 export function glyphState(t: KnownTool): ToolGlyphState {
   if (t.state === "available") return "on";
-  return t.state === "locked_off" || t.state === "managed_by_firm" ? "locked" : "off";
+  return t.state === "locked_off" ||
+    t.state === "managed_by_firm" ||
+    t.state === "browser_blocked_by_policy"
+    ? "locked"
+    : "off";
 }
 
 const REASON: Record<Exclude<WebState | BrowserState, "available">, ToolsLineKey> = {
@@ -82,6 +91,8 @@ const REASON: Record<Exclude<WebState | BrowserState, "available">, ToolsLineKey
   no_proxy: "Not available yet",
   too_many_browsers: "Too many browsers open",
   browser_not_installed: "Needs Chrome",
+  browser_blocked_by_policy: "Blocked by your firm",
+  browser_policy_unreadable: "Couldn't check browser settings",
 };
 
 /** Why a tool is off, in a few words; null while it's on. */

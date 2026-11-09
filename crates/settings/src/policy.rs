@@ -25,6 +25,9 @@ mod macos;
 #[cfg(windows)]
 mod windows;
 
+#[cfg(windows)]
+pub(crate) use windows::SystemRegistry;
+
 use crate::error::Error;
 use crate::files::Files;
 use crate::leaf::{self, Leaf};

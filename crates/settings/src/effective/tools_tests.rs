@@ -95,6 +95,7 @@ fn an_unreadable_policy_source_locks_every_security_key_off_with_a_warning_each(
     assert_eq!(
         effective.locked().collect::<Vec<_>>(),
         [
+            "browser.allow_when_remote_debugging_disabled",
             "install.bundle",
             "install.registry",
             "mcp.servers",
@@ -160,7 +161,8 @@ fn an_unreadable_policy_source_locks_every_security_key_off_with_a_warning_each(
             "network.ca_certs",
             "network.allowed_domains",
             "network.allow_unsafe_site_override",
-            "network.unsafe_site_list_updates"
+            "network.unsafe_site_list_updates",
+            "browser.allow_when_remote_debugging_disabled"
         ]
     );
 }
@@ -492,4 +494,33 @@ fn a_double_underscore_server_in_policy_is_dropped_with_a_warning() {
             if key == "mcp.servers.case-law__x"
                 && message.ends_with("not allowed in server names (case-law__x)"))
     ));
+}
+
+// The firm's leave for Clauseo's browser where it turned remote debugging off: policy only, off by
+// default, and off when a policy source cannot be read.
+#[test]
+fn only_a_policy_lets_the_browser_start_where_remote_debugging_is_off() {
+    let key = "browser.allow_when_remote_debugging_disabled";
+    let allowed = |effective: &Effective| {
+        effective
+            .settings()
+            .browser
+            .allow_when_remote_debugging_disabled
+    };
+    let mine = user(r#"{"browser": {"allow_when_remote_debugging_disabled": true}}"#);
+    let effective = Effective::load(&locations(), &mine, &[]);
+    assert!(!allowed(&effective));
+    assert!(effective.warnings().iter().any(|w| matches!(
+        &w.kind, WarningKind::InvalidValue { key: k, .. } if k == key
+    )));
+    let firm = policy(
+        "firm",
+        r#"{"browser": {"allow_when_remote_debugging_disabled": true}}"#,
+    );
+    let effective = Effective::load(&locations(), &MemFiles::default(), &[&firm]);
+    assert!(allowed(&effective));
+    assert!(effective.is_locked(key));
+    let effective = Effective::load(&locations(), &mine, &[&unreadable()]);
+    assert!(!allowed(&effective));
+    assert!(effective.is_locked(key));
 }

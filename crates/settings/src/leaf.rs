@@ -31,6 +31,7 @@
 //! `schema::tests::the_keys_and_their_kinds_are_the_schemas` fails when the schema and [`KEYS`]
 //! disagree, and the two samples tests fail when [`KEYS`] has a row without a sample.
 
+mod mcp;
 #[cfg(test)]
 mod mcp_tests;
 mod misnamed;
@@ -55,13 +56,14 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use mcp::mcp_servers;
 use reset::reset;
 pub(crate) use reset::{locked_word, refuse};
 
 /// Every key with a fixed name, and its kind. An agent's key is `agents.<id>`, and a plan's
 /// `plans.<id>`, each an object. `schema::tests::the_keys_and_their_kinds_are_the_schemas`
 /// holds this to the schema.
-pub(crate) const KEYS: [(&str, Kind); 27] = [
+pub(crate) const KEYS: [(&str, Kind); 28] = [
     ("matters.default_location", Kind::String),
     ("mcp.servers", Kind::Object),
     ("ui.theme", Kind::String),
@@ -89,6 +91,10 @@ pub(crate) const KEYS: [(&str, Kind); 27] = [
     ("network.allowed_domains", Kind::StringArray),
     ("network.allow_unsafe_site_override", Kind::Boolean),
     ("network.unsafe_site_list_updates", Kind::Boolean),
+    (
+        "browser.allow_when_remote_debugging_disabled",
+        Kind::Boolean,
+    ),
 ];
 
 /// The keys that decide what an agent can reach, what Clauseo sends off the machine, or what it
@@ -103,7 +109,8 @@ pub(crate) const KEYS: [(&str, Kind); 27] = [
 /// lock at not required and no auto mode outside the sandbox, and the `network` keys at no proxy
 /// (so the OS's), no CA file and no added domain (decision record 0051), and at no allowing a
 /// site the block list names, and block list updates on: an unreadable policy must not stop them.
-pub(crate) const SECURITY_KEYS: [&str; 20] = [
+/// The `browser` key locks at no browser where the firm turned remote debugging off.
+pub(crate) const SECURITY_KEYS: [&str; 21] = [
     "mcp.servers",
     "tools.web_search",
     "tools.browser",
@@ -124,6 +131,7 @@ pub(crate) const SECURITY_KEYS: [&str; 20] = [
     "network.allowed_domains",
     "network.allow_unsafe_site_override",
     "network.unsafe_site_list_updates",
+    "browser.allow_when_remote_debugging_disabled",
 ];
 
 /// The keys a policy may only turn off (decision record 0036): a policy `true` for one is
@@ -134,11 +142,13 @@ pub(crate) const OFF_ONLY_KEYS: [&str; 2] = ["privacy.counts", "privacy.crash_re
 /// The keys only a policy may set (decision record 0040): a `settings.json` value for one is
 /// ignored with a warning ([`without_policy_only`]) and never applies, so without a policy
 /// `skills.curated` is empty and admits nothing. `network.allowed_domains` is honoured only as the
-/// firm's (0051), so without a policy it is empty; so is the firm's update off-switch (0053).
-pub const POLICY_ONLY_KEYS: [&str; 3] = [
+/// firm's (0051), so without a policy it is empty; so is the firm's update off-switch (0053),
+/// and the firm's leave for the browser where it turned remote debugging off.
+pub const POLICY_ONLY_KEYS: [&str; 4] = [
     "skills.curated",
     "network.allowed_domains",
     "network.unsafe_site_list_updates",
+    "browser.allow_when_remote_debugging_disabled",
 ];
 
 /// The MCP server names Clauseo keeps for its own tools, each with what it is for: `browser`
@@ -162,12 +172,6 @@ pub fn reserved_mcp_server(name: &str) -> Option<(&'static str, &'static str)> {
 
 /// The fields an [`AgentLaunch`] reads; any other is an unknown key.
 const AGENT_FIELDS: [&str; 3] = ["command", "args", "env"];
-
-/// The fields an [`McpServerLaunch`] reads; any other is an unknown key.
-const MCP_SERVER_FIELDS: [&str; 4] = ["command", "args", "env", "enabled"];
-
-/// The longest MCP server name.
-const MCP_NAME_MAX: usize = 64;
 
 /// A key and its value as a source holds it, before typing.
 #[derive(Debug, Clone, PartialEq)]
@@ -212,6 +216,7 @@ pub(crate) enum Leaf {
     AllowedDomains(Vec<String>),
     SiteOverride(bool),
     ListUpdates(bool),
+    BrowserWhenRdOff(bool),
     /// A known key whose value does not type, or that a policy source refused. Applied, it puts
     /// the key back at its default; for `agents.<id>` or `plans.<id>`, that entry is dropped. A
     /// policy also locks the key (fail closed, Rohan, 2026-10-31), and applies it with
@@ -346,6 +351,9 @@ impl Leaf {
             }
             "network.allow_unsafe_site_override" => typed_value(key, value).map(Leaf::SiteOverride),
             "network.unsafe_site_list_updates" => typed_value(key, value).map(Leaf::ListUpdates),
+            "browser.allow_when_remote_debugging_disabled" => {
+                typed_value(key, value).map(Leaf::BrowserWhenRdOff)
+            }
             _ => match (agent_id(key), plan_id(key)) {
                 (Some(id), _) => agent(key, id, value, unknown),
                 (_, Some(id)) => plans::plan(key, value, unknown).map(|p| Leaf::Plan(id.into(), p)),
@@ -388,6 +396,7 @@ impl Leaf {
             Leaf::AllowedDomains(_) => "network.allowed_domains".to_owned(),
             Leaf::SiteOverride(_) => "network.allow_unsafe_site_override".to_owned(),
             Leaf::ListUpdates(_) => "network.unsafe_site_list_updates".to_owned(),
+            Leaf::BrowserWhenRdOff(_) => "browser.allow_when_remote_debugging_disabled".to_owned(),
             Leaf::Refused(key) => key.clone(),
         }
     }
@@ -442,6 +451,9 @@ impl Leaf {
             Leaf::AllowedDomains(hosts) => settings.network.allowed_domains = hosts,
             Leaf::SiteOverride(on) => settings.network.allow_unsafe_site_override = on,
             Leaf::ListUpdates(on) => settings.network.unsafe_site_list_updates = on,
+            Leaf::BrowserWhenRdOff(on) => {
+                settings.browser.allow_when_remote_debugging_disabled = on;
+            }
             Leaf::Refused(key) => reset(&key, settings),
         }
     }
@@ -482,85 +494,6 @@ fn agent(
             command: launch.command,
         })
     }
-}
-
-/// The `mcp.servers` list. A value that is not an object refuses the key (a policy's locks the
-/// list empty). Inside it, an entry with a bad name, a name holding `__` or ending in `_`, a
-/// reserved name ([`RESERVED_MCP_SERVERS`]), a value that does not type or a relative `command`
-/// is left out with a warning in `dropped`, and the other entries load.
-fn mcp_servers(
-    key: &str,
-    value: Value,
-    dropped: &mut Vec<WarningKind>,
-) -> Result<BTreeMap<String, McpServerLaunch>, WarningKind> {
-    let Value::Object(entries) = value else {
-        return Err(WarningKind::InvalidValue {
-            key: key.to_owned(),
-            message: "it must be an object from server name to server".to_owned(),
-        });
-    };
-    let mut servers = BTreeMap::new();
-    for (name, entry) in entries {
-        let entry_key = format!("{key}.{name}");
-        if !mcp_name_ok(&name) {
-            dropped.push(WarningKind::InvalidValue {
-                key: entry_key,
-                message: format!("a server name is 1 to {MCP_NAME_MAX} letters, digits, _ or -"),
-            });
-            continue;
-        }
-        // Claude names a tool `mcp__<server>__<tool>` and splits it at the first `__` after
-        // `mcp__`: the server is everything before it (`kr()` in claude-agent-sdk 0.3.318). So
-        // `case-law__x` and `case-law_` (tool `mcp__case-law___x`) both read as server
-        // `case-law` and would inherit its pre-allow. A leading `_` cannot split. The name passed
-        // [`mcp_name_ok`], so it is name-shaped and is quoted (#411's rule).
-        if name.contains("__") || name.ends_with('_') {
-            dropped.push(WarningKind::InvalidValue {
-                message: format!(
-                    "double underscores and a trailing underscore are not allowed in server \
-                     names ({name})"
-                ),
-                key: entry_key,
-            });
-            continue;
-        }
-        if let Some((reserved, what)) = reserved_mcp_server(&name) {
-            dropped.push(WarningKind::InvalidValue {
-                key: entry_key,
-                message: format!("the server name {reserved} is reserved for {what}"),
-            });
-            continue;
-        }
-        if let Value::Object(fields) = &entry {
-            dropped.extend(
-                fields
-                    .keys()
-                    .filter(|field| !MCP_SERVER_FIELDS.contains(&field.as_str()))
-                    .map(|field| WarningKind::UnknownKey {
-                        key: format!("{entry_key}.{field}"),
-                    }),
-            );
-        }
-        match typed_value::<McpServerLaunch>(&entry_key, entry) {
-            Ok(server) if Path::new(&server.command).is_absolute() => {
-                servers.insert(name, server);
-            }
-            Ok(server) => dropped.push(WarningKind::InvalidValue {
-                key: entry_key,
-                message: format!("{} is not an absolute path", server.command),
-            }),
-            Err(kind) => dropped.push(kind),
-        }
-    }
-    Ok(servers)
-}
-
-/// Whether `name` is 1 to [`MCP_NAME_MAX`] ASCII letters, digits, `_` or `-`.
-fn mcp_name_ok(name: &str) -> bool {
-    (1..=MCP_NAME_MAX).contains(&name.len())
-        && name
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
 }
 
 /// Reads a JSON value as `T`, naming the key when it cannot. The warning names the value's

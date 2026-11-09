@@ -11,11 +11,14 @@ use crate::windows::test_world::{World, matter_one};
 
 /// Round 4, a name that isn't text: a junction named with a lone surrogate failed every
 /// check, so it blocked every launch. Now the lawyer's one there at launch is recorded and
-/// stays, and one the agent makes is set aside as itself under its own name, and restored.
+/// stays, and one the agent makes is set aside as itself under its own name, and restored. The
+/// agent's leads inside the matter: since #789 a restore refuses a link leading out
+/// (`SetAsideFailure::LinkOut`, `run/refusals.rs`), which this one would otherwise be.
 #[test]
 fn a_junction_named_with_a_lone_surrogate_is_recorded_and_set_aside_like_any_other() {
     let w = World::new("ntfs-aside-lone-surrogate");
     w.dir.dir("elsewhere/precedents");
+    w.dir.dir("matter/inside");
     let target = w.canonical("elsewhere/precedents");
     let policy = w.builder().build().unwrap();
     let data = w.canonical("data");
@@ -25,7 +28,7 @@ fn a_junction_named_with_a_lone_surrogate_is_recorded_and_set_aside_like_any_oth
     before_launch(&policy, &data, &matter_one(), "s1", &[], launch()).unwrap();
 
     let planted = root.join(OsString::from_wide(&[u16::from(b'P'), 0xDC00]));
-    junction(&planted, &target).unwrap();
+    junction(&planted, &root.join("inside")).unwrap();
     let checked = after_session(&policy, &data, &matter_one(), "s1", exit()).unwrap();
 
     let seen: Vec<_> = checked

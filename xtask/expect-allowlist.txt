@@ -42,6 +42,8 @@ crates/desktop/src/window_size/windows_theme.rs - unsafe_code
 crates/desktop/src/window_size.rs ground_in_env unsafe_code
 # The main window's mark through WebView2's start: a CBT hook for the build, a subclass to the page's load, GDI and GDI+.
 crates/desktop/src/native_mark/windows.rs - unsafe_code
+# One RegGetValueW of HKLM's Smart App Control state, off the UI thread (the page's one-time note).
+crates/desktop/src/smart_app_control/windows.rs - unsafe_code
 crates/desktop/src/ui_language.rs KEY dead_code
 crates/desktop/src/chooser/windows.rs - unsafe_code
 # WebView2's argument variable keeps the no-DNS rule: set_var, first thing in main.
@@ -195,12 +197,25 @@ crates/sandbox/src/windows/test_junction.rs - clippy::disallowed_methods
 crates/sandbox/src/windows/record.rs - unsafe_code
 crates/sandbox/src/windows/detect.rs - unsafe_code
 crates/sandbox/src/windows/private_dir.rs - unsafe_code
+# The lawyer's drive folders (src/windows/private_dir/drive.rs): made with their DACL in place,
+# their volume's flags read; and SYSTEM's heal of a squatted one (drive/heal.rs): privileges,
+# drive types, attributes and the rename by handle, and the bounded pause between two tries of a
+# rename held up (the tests pass a fake's).
+crates/sandbox/src/windows/private_dir/drive.rs - unsafe_code
+crates/sandbox/src/windows/private_dir/drive/heal.rs - unsafe_code
+crates/sandbox/src/windows/private_dir/drive/heal.rs pause clippy::disallowed_methods
 # secrets.bin (S15 PR4g): user-scope DPAPI, and the set-up owner's parent token and impersonation.
 crates/sandbox/src/windows/secrets/dpapi.rs - unsafe_code
 crates/sandbox/src/windows/setup/owner/token.rs - unsafe_code
 crates/sandbox/src/windows/setup/owner/process.rs - unsafe_code
 # The set-aside's folders opened and items renamed by handle (src/windows/set_aside/ntfs.rs).
 crates/sandbox/src/windows/set_aside/ntfs.rs - unsafe_code
+# An item's owner read from the handle its move renames, and a commondir read without waiting on
+# an oplock (src/windows/set_aside/ntfs/read.rs).
+crates/sandbox/src/windows/set_aside/ntfs/read.rs - unsafe_code
+# A link's target read with FSCTL_GET_REPARSE_POINT on the link's own handle, never followed
+# (src/windows/set_aside/ntfs/link.rs).
+crates/sandbox/src/windows/set_aside/ntfs/link.rs - unsafe_code
 # Tier B's permission writes and walk (src/windows/acl.rs, S15 PR3a), tests that move a file in or
 # play an agent racing the walk, and the label helpers only Windows uses.
 crates/sandbox/src/windows/acl.rs - unsafe_code
@@ -255,6 +270,8 @@ crates/matters/src/fsync.rs barrier clippy::unnecessary_wraps
 crates/matters/src/fsync.rs full_flush clippy::unnecessary_wraps
 # Added by R8 relink: SetFileAttributesW, to hide `.clauseo` on Windows (#100).
 crates/matters/src/write/windows.rs - unsafe_code
+# The gix_store guard: its test points git's config at temp files, with set_var (edition 2024).
+crates/matters/src/history/tests/repo.rs point_git_config_at unsafe_code
 # matters' macOS tests: their folder setup.
 crates/matters/tests/matters_macos.rs - clippy::disallowed_methods
 # matters' Windows tests: their folder setup, and files held open without sharing.
@@ -554,7 +571,21 @@ crates/sandbox/src/windows/runner/spawn.rs - unsafe_code
 crates/sandbox/src/windows/runner/desktop.rs - unsafe_code
 crates/sandbox/src/windows/runner/desktop.rs refuse_now clippy::exit
 crates/sandbox/src/windows/runner/outer.rs exit_now clippy::exit
+# The git watch: ReadDirectoryChangesExW and its overlapped wait (src/windows/runner/git_watch/os.rs),
+# and the wall clock a folder added is told moved in by, against its creation time (the tests
+# pass it);
+# the time its moves are named for, the monotonic clock its scans' 2 s budget reads, and the
+# bounded pause between tries once the session ended (src/windows/runner/outer/watch.rs; the tests
+# pass all three).
+crates/sandbox/src/windows/runner/git_watch/os.rs - unsafe_code
+crates/sandbox/src/windows/runner/git_watch/os.rs wall_clock clippy::disallowed_methods
+crates/sandbox/src/windows/runner/outer/watch.rs clock clippy::disallowed_methods
+crates/sandbox/src/windows/runner/outer/watch.rs now clippy::disallowed_methods
+crates/sandbox/src/windows/runner/outer/watch.rs pause clippy::disallowed_methods
 crates/sandbox/src/windows/runner/sweep/os.rs - unsafe_code
+# The denial pipe (src/windows/denial_pipe/os.rs): the outer's write-only, non-inheritable client
+# end, checked to be a pipe, and its inherit flag read back for the tests.
+crates/sandbox/src/windows/denial_pipe/os.rs - unsafe_code
 crates/sandbox/src/windows/runner/leftovers/os.rs - unsafe_code
 crates/sandbox/src/windows/runner/leftovers/os/com.rs - unsafe_code
 crates/sandbox/src/windows/runner/leftovers/os/tests.rs - unsafe_code

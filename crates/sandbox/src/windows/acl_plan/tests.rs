@@ -287,6 +287,37 @@ fn read_only_names_get_deny_write_for_the_pool_user() {
     assert_eq!(mask & 0x1, 0);
 }
 
+/// A folder the launch walk finds holding a `HEAD` (a whole bare layout, one with `commondir`,
+/// or a lone `HEAD`), and the folder a `commondir` names, get the same whole-tree deny of
+/// writes as an existing `.git`.
+#[test]
+fn a_bare_repository_in_the_matter_gets_the_git_folders_deny() {
+    let w = World::new("plan-bare");
+    w.dir
+        .file("matter/precedents.git/HEAD", "ref: refs/heads/main\n");
+    w.dir.dir("matter/precedents.git/objects");
+    w.dir.dir("matter/precedents.git/refs");
+    w.dir.file("matter/linked/HEAD", "ref: refs/heads/other\n");
+    w.dir.file("matter/linked/commondir", "../common\n");
+    w.dir.dir("matter/common");
+    w.dir.file("matter/lone/HEAD", "ref: refs/heads/main\n");
+    let policy = w.full_policy();
+    let grants = grants_for(&w, &policy, &sids());
+    let deny = |name: &str| {
+        let path = w.canonical("matter").join(name);
+        grants
+            .iter()
+            .find(|g| g.path == path && g.rights == Rights::DenyWrite && g.sid.as_str() == USER_SID)
+            .map(|g| (g.inherit, g.kind))
+    };
+    let want = Some((Inherit::Tree, PathKind::ReadOnlyInMatter));
+    assert_eq!(deny(".git"), want);
+    assert_eq!(deny("precedents.git"), want);
+    assert_eq!(deny("linked"), want);
+    assert_eq!(deny("common"), want);
+    assert_eq!(deny("lone"), want);
+}
+
 #[test]
 fn modify_never_gives_delete_child_or_permission_changes() {
     // Without these, the agent can't strip a deny, nor delete a protected name through its

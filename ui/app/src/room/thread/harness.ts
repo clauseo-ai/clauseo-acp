@@ -64,6 +64,8 @@ export type Script = {
   /** The setup wire (FakeHost's setup): with it the room loads the first run, and the
    * header's plan hears each sign-in. */
   setup?: FakeHost["setup"];
+  /** Windows' Smart App Control state display_info reports (FakeHost's smartAppControl); unknown when left out. */
+  smartAppControl?: FakeHost["smartAppControl"];
 };
 
 export const defaultOutcome = (command: HostCommand): CommandOutcome => {
@@ -132,6 +134,7 @@ export async function mountRoom(script: Script = {}): Promise<Harness> {
     ...(script.openSettings === undefined ? {} : { openSettings: script.openSettings }),
     ...(script.protection === undefined ? {} : { protection: script.protection }),
     ...(script.setup === undefined ? {} : { setup: script.setup }),
+    ...(script.smartAppControl === undefined ? {} : { smartAppControl: script.smartAppControl }),
   });
   connectRoom(transport, script.display ?? {});
   const manual = manualBatch();

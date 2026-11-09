@@ -12,7 +12,10 @@
 
 use std::collections::BTreeMap;
 
-use clauseo_protocol::{StreamHeader, StreamId, ThreadId, ToolState, ViewEntry, ViewPatchBody};
+use clauseo_protocol::{
+    ClauseoTool, StreamHeader, StreamId, ThreadId, ToolAvailability, ToolState,
+    ToolsUnavailableReason, ViewEntry, ViewPatchBody,
+};
 use clauseo_reducer::ViewChange;
 
 use super::Actor;
@@ -57,6 +60,41 @@ pub(crate) fn show_held(actor: &mut Actor, thread: ThreadId) {
 /// the stream is released.
 pub(crate) fn forget(actor: &mut Actor, thread: ThreadId) {
     actor.header_tools.forget(thread);
+}
+
+/// A read of the firm's browser policy found it turns the browser off
+/// (`actor/browser_policy.rs`): every header, shown or held, whose browser was left out because
+/// that policy could not be read (`BrowserPolicyUnreadable`) now says why it truly is
+/// (`BrowserBlockedByPolicy`). Those sessions have no browser either way.
+pub(crate) fn policy_blocked(actor: &mut Actor) {
+    let unreadable = ToolAvailability::Unavailable {
+        reason: ToolsUnavailableReason::BrowserPolicyUnreadable,
+    };
+    let reword = |tools: &mut Vec<ToolState>| {
+        let mut changed = false;
+        for state in tools.iter_mut() {
+            if state.tool == ClauseoTool::Browser && state.availability == unreadable {
+                state.availability = ToolAvailability::Unavailable {
+                    reason: ToolsUnavailableReason::BrowserBlockedByPolicy,
+                };
+                changed = true;
+            }
+        }
+        changed
+    };
+    for tools in actor.header_tools.held.values_mut() {
+        reword(tools);
+    }
+    let mut changed = Vec::new();
+    for (thread, tools) in &actor.header_tools.shown {
+        let mut tools = tools.clone();
+        if reword(&mut tools) {
+            changed.push((*thread, tools));
+        }
+    }
+    for (thread, tools) in changed {
+        show(actor, thread, tools);
+    }
 }
 
 /// Shows `tools` in `thread`'s header: kept for the thread and, when its stream is loaded, laid
