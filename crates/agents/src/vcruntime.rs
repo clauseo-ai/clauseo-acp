@@ -3,7 +3,7 @@
 //! `@openai/codex`'s `win32-arm64` package ships the official ripgrep 15.2.0
 //! `aarch64-pc-windows-msvc` `rg.exe` in `vendor/aarch64-pc-windows-msvc/codex-path/`. Unlike
 //! the x64 build, it links the VC++ runtime dynamically (ripgrep's `.cargo/config.toml` sets
-//! `+crt-static` for x86_64 only) and imports `VCRUNTIME140.dll`, which a clean Windows 11 ARM64
+//! `+crt-static` for `x86_64` only) and imports `VCRUNTIME140.dll`, which a clean Windows 11 ARM64
 //! install does not have: `rg` fails to start (0xC0000135) and Codex's search with it. `rg.exe`
 //! is never changed or rebuilt (Smart App Control pins its bytes, and an unsigned rebuild has no
 //! reputation); instead the runtime DLLs it imports are copied beside it, the app-local
@@ -13,11 +13,15 @@
 //! `vendor/aarch64-pc-windows-msvc/codex-resources/voice/bin/vcruntime140.dll` (14.50.35719.0
 //! in 0.162.1). It is copied (never hard-linked: a Codex update replaces the source) to a
 //! temporary name beside `rg.exe`, and the copy is checked there, so no other file can be
-//! swapped in between the check and the rename to its real name:
+//! swapped in between the check and the move to its real name, which never replaces a file:
 //! - an ARM64 PE (machine `0xAA64`);
 //! - an Authenticode signature `WinVerifyTrust` (`WINTRUST_ACTION_GENERIC_VERIFY_V2`) accepts,
-//!   whose signer's organisation is `Microsoft Corporation` and whose chain ends at a Microsoft
-//!   root (`CERT_CHAIN_POLICY_MICROSOFT_ROOT`); a hash pin alone would not say who made it;
+//!   whose signer certificate's common name and organisation are both `Microsoft Corporation`
+//!   (Microsoft's third-party driver-signing certificates carry the organisation but another
+//!   name) and whose chain ends at a Microsoft root (`CERT_CHAIN_POLICY_MICROSOFT_ROOT`, flight
+//!   roots refused); a hash pin alone would not say who made it;
+//! - a version resource whose `OriginalFilename` is the DLL's own name (any case), so another
+//!   Microsoft DLL renamed is refused;
 //! - a VC++ 14.x runtime (its version resource) at least as new as the toolset `rg.exe` was
 //!   linked with (its linker version, 14.44 for ripgrep 15.2.0).
 //!
@@ -45,8 +49,11 @@ use crate::platform::{Arch, Os, Platform};
 use crate::write;
 
 pub(crate) mod pe;
+mod text;
 #[cfg(windows)]
 mod windows;
+
+use text::describe;
 
 /// Codex's ARM64 vendor folder, `/`-separated below an install folder.
 const VENDOR: &str = "node_modules/@openai/codex-win32-arm64/vendor/aarch64-pc-windows-msvc";
@@ -62,7 +69,7 @@ const RG: &str = "rg.exe";
 const PLACED_DLLS: [&str; 2] = ["vcruntime140.dll", "vcruntime140_1.dll"];
 /// The VC++ runtime's major version since Visual Studio 2015.
 const RUNTIME_MAJOR: u16 = 14;
-/// The largest file read as a PE (rg.exe is 3.9 MB, the DLL 0.2 MB).
+/// The largest file read as a PE (rg.exe is 3.9 MB, the DLL 0.2 MB); a larger one is refused.
 const MAX_PE: u64 = 64 * 1024 * 1024;
 /// The tracing target host.log keeps INFO from.
 const LIFECYCLE: &str = "clauseo_agents::lifecycle";
@@ -70,7 +77,8 @@ const LIFECYCLE: &str = "clauseo_agents::lifecycle";
 /// Who signed a file, as Windows' Authenticode check found it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Signer {
-    /// A valid signature by Microsoft Corporation, chained to a Microsoft root.
+    /// A valid signature whose signer certificate names Microsoft Corporation as both its
+    /// common name and its organisation, chained to a Microsoft root.
     Microsoft,
     /// A valid signature by someone else (the organisation, and whether the root is Microsoft's).
     Other(String),
@@ -78,12 +86,40 @@ pub(crate) enum Signer {
     NotTrusted(String),
 }
 
+/// The common name and organisation Microsoft's own code-signing certificates carry.
+/// Its third-party driver-signing certificates (`CN=Microsoft Windows Hardware Compatibility
+/// Publisher`) carry the organisation alone, so both are compared.
+const MICROSOFT: &str = "Microsoft Corporation";
+
+/// The signer a valid signature stands for, from its signer certificate's subject common name
+/// and organisation and whether its chain ends at a Microsoft root: [`Signer::Microsoft`] only
+/// when both names are exactly Microsoft Corporation and the root is Microsoft's.
+pub(crate) fn judge(common_name: &str, organisation: &str, microsoft_root: bool) -> Signer {
+    if common_name == MICROSOFT && organisation == MICROSOFT && microsoft_root {
+        Signer::Microsoft
+    } else {
+        Signer::Other(format!(
+            "common name {common_name:?}, organisation {organisation:?}, Microsoft root: \
+             {microsoft_root}"
+        ))
+    }
+}
+
+/// What a file's version resource says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct VersionInfo {
+    /// `FILEVERSION`, major first.
+    pub(crate) version: [u16; 4],
+    /// The `OriginalFilename` string, when the resource has one.
+    pub(crate) original_filename: Option<String>,
+}
+
 /// The facts about a file only Windows can read: its signer and its version resource.
 pub(crate) trait Inspect {
     /// The file's Authenticode signer.
     fn signer(&self, path: &Path) -> Signer;
-    /// The file's version resource (`FILEVERSION`), major first.
-    fn file_version(&self, path: &Path) -> Option<[u16; 4]>;
+    /// The file's version resource.
+    fn version_info(&self, path: &Path) -> Option<VersionInfo>;
 }
 
 /// The OS's checks: `WinVerifyTrust` and `GetFileVersionInfoW` on Windows. Elsewhere nothing
@@ -96,8 +132,8 @@ impl Inspect for System {
         windows::signer(path)
     }
 
-    fn file_version(&self, path: &Path) -> Option<[u16; 4]> {
-        windows::file_version(path)
+    fn version_info(&self, path: &Path) -> Option<VersionInfo> {
+        windows::version_info(path)
     }
 }
 
@@ -107,7 +143,7 @@ impl Inspect for System {
         Signer::NotTrusted("Authenticode is checked on Windows only".to_owned())
     }
 
-    fn file_version(&self, _path: &Path) -> Option<[u16; 4]> {
+    fn version_info(&self, _path: &Path) -> Option<VersionInfo> {
         None
     }
 }
@@ -127,6 +163,8 @@ pub(crate) enum Refused {
     NotMicrosoft(String),
     /// It has no version resource.
     NoVersion,
+    /// Its `OriginalFilename` is not the DLL's name (what it is, if any): another DLL renamed.
+    WrongName(Option<String>),
     /// Its version is not a 14.x VC++ runtime.
     NotRuntime([u16; 4]),
     /// Older than the toolset `rg.exe` was linked with (found, needed major and minor).
@@ -259,16 +297,24 @@ fn place_one(
         check(
             &info,
             &inspect.signer(&tmp),
-            inspect.file_version(&tmp),
+            inspect.version_info(&tmp).as_ref(),
+            dll,
             linker,
         )
     });
     match checked {
-        Ok(version) => match write::rename(&tmp, &to) {
-            Ok(()) => Outcome::Placed(dll.to_owned(), version),
+        // A hard link to the checked copy, then the copy's name removed: unlike a rename, the
+        // link fails when a file of that name appeared since the look above, never replacing it.
+        Ok(version) => match write::hard_link(&tmp, &to) {
+            Ok(()) => {
+                if let Err(err) = write::remove_file(&tmp) {
+                    return failed("removing the temporary name", err);
+                }
+                Outcome::Placed(dll.to_owned(), version)
+            }
             Err(err) => {
                 drop(write::remove_file(&tmp));
-                failed("renaming the copy", err)
+                failed("moving the copy into place", err)
             }
         },
         Err(refused) => {
@@ -280,12 +326,14 @@ fn place_one(
     }
 }
 
-/// The source checks, in order: ARM64, signed by Microsoft, a 14.x runtime no older than
-/// `linker` (`rg.exe`'s linker version). The version when all pass.
+/// The source checks, in order: ARM64, signed by Microsoft, a version resource whose
+/// `OriginalFilename` is `dll` (any case), a 14.x runtime no older than `linker` (`rg.exe`'s
+/// linker version). The version when all pass.
 pub(crate) fn check(
     info: &pe::PeInfo,
     signer: &Signer,
-    version: Option<[u16; 4]>,
+    resource: Option<&VersionInfo>,
+    dll: &str,
     linker: (u8, u8),
 ) -> Result<[u16; 4], Refused> {
     if info.machine != pe::MACHINE_ARM64 {
@@ -296,7 +344,12 @@ pub(crate) fn check(
         Signer::Other(who) => return Err(Refused::NotMicrosoft(who.clone())),
         Signer::NotTrusted(why) => return Err(Refused::NotTrusted(why.clone())),
     }
-    let version = version.ok_or(Refused::NoVersion)?;
+    let resource = resource.ok_or(Refused::NoVersion)?;
+    let named = resource.original_filename.as_deref();
+    if !named.is_some_and(|name| name.trim().eq_ignore_ascii_case(dll)) {
+        return Err(Refused::WrongName(named.map(str::to_owned)));
+    }
+    let version = resource.version;
     let needed = (u16::from(linker.0), u16::from(linker.1));
     if needed.0 != RUNTIME_MAJOR {
         return Err(Refused::UnknownToolset(linker));
@@ -378,14 +431,23 @@ fn beside(dir: &Path, dll: &str) -> bool {
     })
 }
 
-/// Reads and parses the PE file at `path`, through no link.
+/// Reads and parses the PE file at `path`, through no link; a file over [`MAX_PE`] is refused.
 fn read_pe(path: &Path) -> Result<pe::PeInfo, String> {
+    read_pe_within(path, MAX_PE)
+}
+
+/// [`read_pe`] with a cap of `limit` bytes.
+fn read_pe_within(path: &Path, limit: u64) -> Result<pe::PeInfo, String> {
     use std::io::Read as _;
     let file = write::open_read(path).map_err(|err| err.to_string())?;
     let mut bytes = Vec::new();
-    file.take(MAX_PE)
+    // One byte past the cap tells a larger file from one exactly at it: refused, never parsed cut.
+    file.take(limit.saturating_add(1))
         .read_to_end(&mut bytes)
         .map_err(|err| err.to_string())?;
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > limit {
+        return Err(format!("larger than {limit} bytes"));
+    }
     pe::parse(&bytes).map_err(|err| err.to_string())
 }
 
@@ -393,62 +455,6 @@ fn read_pe(path: &Path) -> Result<pe::PeInfo, String> {
 fn rel(folder: &Path, dir: &str) -> PathBuf {
     dir.split('/')
         .fold(folder.to_path_buf(), |path, part| path.join(part))
-}
-
-/// A version as `a.b.c.d`.
-fn dotted(version: [u16; 4]) -> String {
-    let [a, b, c, d] = version;
-    format!("{a}.{b}.{c}.{d}")
-}
-
-/// `outcome`'s log line.
-fn describe(outcome: &Outcome) -> String {
-    match outcome {
-        Outcome::NotNeeded => "Codex's rg.exe imports no VC++ runtime DLL".to_owned(),
-        Outcome::RgUnreadable(err) => {
-            format!("Codex's rg.exe did not read, so no VC++ runtime was placed: {err}")
-        }
-        Outcome::AlreadyBeside(dll) => format!("{dll} is beside Codex's rg.exe already"),
-        Outcome::Placed(dll, version) => format!(
-            "{dll} {} (Microsoft-signed, ARM64) copied beside Codex's rg.exe",
-            dotted(*version)
-        ),
-        Outcome::Refused(dll, refused) => format!(
-            "{dll} not placed beside Codex's rg.exe, which may not start without it: {}",
-            refused_text(refused)
-        ),
-        Outcome::Unsupported(dll) => {
-            format!("Codex's rg.exe imports {dll}, which Clauseo does not place; it may not start")
-        }
-        Outcome::Failed(dll, detail) => format!("{dll} beside Codex's rg.exe: {detail}"),
-    }
-}
-
-/// Why, in words.
-fn refused_text(refused: &Refused) -> String {
-    match refused {
-        Refused::Missing => format!("the package has no copy in {SOURCE_DIR}"),
-        Refused::NotPe(err) => format!("the package's copy is not a PE file ({err})"),
-        Refused::WrongArch(machine) => {
-            format!("the package's copy is not ARM64 (machine 0x{machine:04X})")
-        }
-        Refused::NotTrusted(why) => format!("the package's copy has no valid signature ({why})"),
-        Refused::NotMicrosoft(who) => {
-            format!("the package's copy is not signed by Microsoft ({who})")
-        }
-        Refused::NoVersion => "the package's copy has no version resource".to_owned(),
-        Refused::NotRuntime(version) => format!(
-            "the package's copy is version {}, not a VC++ 14.x runtime",
-            dotted(*version)
-        ),
-        Refused::TooOld(version, (major, minor)) => format!(
-            "the package's copy is version {}, older than rg.exe's toolset {major}.{minor}",
-            dotted(*version)
-        ),
-        Refused::UnknownToolset((major, minor)) => {
-            format!("rg.exe's linker version {major}.{minor} is not a VC++ 14.x toolset")
-        }
-    }
 }
 
 #[cfg(test)]
