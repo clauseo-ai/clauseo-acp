@@ -1043,7 +1043,9 @@ What set-up changes:
   writes exactly that, with the deny in front. That default grants more than Microsoft's page
   lists: Administrators, Everyone, Distributed COM Users, Performance Log Users, ALL APPLICATION
   PACKAGES and a capability SID. If COM can't be asked, set-up writes nothing and the state reads
-  `degraded: machine launch unknown`.
+  `degraded: machine launch unknown`. If the Group Policy launch value (below) is set, COM's
+  limit is the policy's, so set-up writes nothing and the state reads `degraded: group policy`,
+  or `policy` when the policy holds the deny.
 - Windows keeps that value only while `MachineAccessRestriction`, in the same key, is set too.
   If it isn't, set-up first writes it as exactly the access limit COM already uses, so no
   account's access changes. If the policy "DCOM: Machine Access Restrictions in SDDL syntax" is
@@ -1073,7 +1075,17 @@ What set-up changes:
 - Windows rewrites both values within a millisecond of a write: it adds its default entries to
   the launch value and re-pads the access value. So uninstalling compares values by meaning:
   the same owner, group and set of entries (type, flags, rights, SID), in any order and with
-  any padding.
+  any padding. The order of entries in the value, and an entry listed twice, are accepted as
+  they are: Clauseo neither sorts the value nor removes duplicates, and two values that differ
+  only in order or repeats count as the same.
+- Set-up waits 1 second after its write, then takes what it reads back as its own write,
+  because Windows rewrites the values in that time. An edit of yours that lands inside that
+  second is taken as Clauseo's too. If your edit keeps the deny in front, the state reads
+  `applied`, and uninstalling treats the value as untouched: it puts the old bytes back, or
+  deletes a value Clauseo created, and your edit goes with it. An access value you edit in that
+  second is deleted the same way when the launch value goes. If your edit removes the deny, the
+  state reads `degraded: dcom moved the value`, and the next Clauseo refresh puts the deny back.
+  Make such edits before set-up or after it has finished.
 - Uninstalling takes the deny off. If the value still means what set-up first wrote, the old
   bytes go back unchanged, and a value that wasn't there before is deleted. If Windows moved the
   value away, the old bytes go back too, and any value Clauseo wrote is deleted from
