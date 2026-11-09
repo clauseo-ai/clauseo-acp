@@ -10,8 +10,6 @@ then shows a message that starts like this:
 
 For ChatGPT, the message names Codex, the ChatGPT tool Clauseo uses.
 
-Check on the laptop pass: the message's final wording, in English and Hindi.
-
 Try the steps below in order.
 
 ## Why it happens
@@ -32,9 +30,6 @@ this is usually quicker than the first time.
 
 A restart ends anything that may still be holding the files. Open Clauseo again and choose
 **Try again**.
-
-Check on the laptop pass: after a restart, whether the message and its **Try again** are still
-there, or whether the lawyer has to choose the AI tool again.
 
 ## 3. Look in your security software's list of blocked files
 
@@ -62,9 +57,6 @@ can enter it.
 If no item's location includes `ai.clauseo.desktop`, Windows Security didn't block Clauseo. If you
 use another antivirus, look there as below. If not, write to us (see Who to write to).
 
-Check on the laptop pass: the exact names of these pages and buttons on Windows 11 and Windows 10,
-and whether opening an item's details or Restore asks for an administrator's password.
-
 > Screenshot to come: Windows Security's Protection history, with a Clauseo file.
 <!-- img/windows-protection-history.png -->
 
@@ -78,9 +70,6 @@ The Mac's own protection doesn't keep a list you can look in. If you installed a
 your firm did, open it and look for a list called something like **Quarantine**, **History** or
 **Recent activity**. Look for a file whose location includes `ai.clauseo.desktop`, restore it, then
 choose **Try again** in Clauseo.
-
-Check on the laptop pass: whether the Mac's own protection ever removes an AI tool's files, and
-what the lawyer sees if it does.
 
 ### On a computer your firm gave you
 
@@ -114,9 +103,6 @@ Inside it:
   `rg.exe` on Windows.
 - `<agent>\install\.tmp-<hash>-<n>\`: where `npm ci` unpacks a try before the rename.
 - `downloads\`: the checked archives, removed once the agent is ready.
-
-Check on the laptop pass: the programs in Claude's and Codex's packages on each system, with
-their paths under `node_modules`.
 
 **What to allow, from narrowest to widest.**
 

@@ -13,8 +13,6 @@ Clauseo एक संदेश दिखाता है, जो कुछ इ�
 ChatGPT के लिए संदेश में Codex का नाम होता है। Codex, ChatGPT का वह टूल है जिसे Clauseo इस्तेमाल
 करता है।
 
-Check on the laptop pass: the message's final wording, in English and Hindi.
-
 नीचे दिए कदम इसी क्रम में आज़माएँ।
 
 ## ऐसा क्यों होता है
@@ -36,9 +34,6 @@ Check on the laptop pass: the message's final wording, in English and Hindi.
 
 रीस्टार्ट करने से वह सब बंद हो जाता है जो अब भी फ़ाइलों को रोके हुए हो। Clauseo फिर से खोलें और
 **फिर से प्रयास करें** चुनें।
-
-Check on the laptop pass: after a restart, whether the message and its **Try again** are still
-there, or whether the lawyer has to choose the AI tool again.
 
 ## 3. अपने सुरक्षा सॉफ़्टवेयर में रोकी गई फ़ाइलों की सूची देखें
 
@@ -68,9 +63,6 @@ Clauseo, AI टूल की फ़ाइलें `agents` नाम के फ
 रोका। अगर आप कोई दूसरा एंटीवायरस इस्तेमाल करते हैं, तो नीचे बताए तरीके से उसमें देखें। अगर नहीं,
 तो हमें लिखें ("किसे लिखें" देखें)।
 
-Check on the laptop pass: the exact names of these pages and buttons on Windows 11 and Windows 10,
-and whether opening an item's details or Restore asks for an administrator's password.
-
 > Screenshot to come: Windows Security's Protection history, with a Clauseo file.
 <!-- img/windows-protection-history.png -->
 
@@ -85,9 +77,6 @@ Mac की अपनी सुरक्षा ऐसी कोई सूची �
 एंटीवायरस लगाया है, तो उसे खोलें और **Quarantine**, **History** या **Recent activity** जैसी किसी
 सूची को देखें। ऐसी फ़ाइल ढूँढें जिसकी लोकेशन में `ai.clauseo.desktop` हो, उसे वापस रखें, फिर
 Clauseo में **फिर से प्रयास करें** चुनें।
-
-Check on the laptop pass: whether the Mac's own protection ever removes an AI tool's files, and
-what the lawyer sees if it does.
 
 ### फ़र्म के दिए कंप्यूटर पर
 
@@ -123,9 +112,6 @@ Inside it:
   `rg.exe` on Windows.
 - `<agent>\install\.tmp-<hash>-<n>\`: where `npm ci` unpacks a try before the rename.
 - `downloads\`: the checked archives, removed once the agent is ready.
-
-Check on the laptop pass: the programs in Claude's and Codex's packages on each system, with
-their paths under `node_modules`.
 
 **What to allow, from narrowest to widest.**
 
