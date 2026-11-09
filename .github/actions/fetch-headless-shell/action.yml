@@ -10,9 +10,11 @@
 # its size and SHA-256 before anything unpacks it, after a download and after a cache restore; a
 # mismatch fails the job.
 #
-# - The zip is cached with actions/cache, keyed on the version and the SHA-256, so a new pin is a
-#   new key. Only a run on main writes an entry (the rule ci.yml's Rust caches use, `save-if`), after
-#   the check passed, so a pull request or a merge group only restores what main wrote.
+# - The zip is cached, keyed on the version and the SHA-256 (the `shell-key` step, which
+#   .github/scripts/cache-keys-test.rb reads), so a new pin is a new key. Every run restores with
+#   actions/cache/restore; a miss saves through ./.github/actions/cache-save-main after the check
+#   passed, which writes only on main's scheduled and on-demand runs. The family is
+#   chrome-headless-shell in .github/scripts/cache-families.txt.
 # - Downloads retry three times, ten seconds apart (Invoke-WebRequest's retry, pwsh 7.4 or later).
 #
 # Sets CLAUSEO_TEST_CHROME_SHELL (the shell's full path) and CLAUSEO_TEST_ARTIFACTS (an empty
@@ -26,21 +28,20 @@ runs:
   using: composite
   steps:
     - name: The pin's cache key
-      id: pin
-      shell: pwsh
+      id: shell-key
+      shell: bash
       env:
         SHELL_VERSION: "157.0.8103.38"
         SHELL_SHA256: "1ff4540855478ba0848e03f1ef8d455f77d058b38285df91bc34273788a73446"
       run: |
-        $ErrorActionPreference = 'Stop'
-        "key=chrome-headless-shell-win64-$env:SHELL_VERSION-$env:SHELL_SHA256" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+        echo "key=chrome-headless-shell-win64-${SHELL_VERSION}-${SHELL_SHA256}" >> "$GITHUB_OUTPUT"
 
     - name: Restore the cached zip
       id: restore
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ runner.temp }}/chrome-headless-shell-win64.zip
-        key: ${{ steps.pin.outputs.key }}
+        key: ${{ steps.shell-key.outputs.key }}
 
     - name: Fetch the pinned zip when the cache missed, and check it
       shell: pwsh
@@ -68,12 +69,12 @@ runs:
         "zip matches the pin: chrome-headless-shell $env:SHELL_VERSION, $size bytes, sha256 $sha"
 
     - name: Save the checked zip
-      # Only main writes entries, as ci.yml's Rust caches do; the zip is checked by now.
-      if: steps.restore.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
-      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # The zip is checked by now; cache-save-main writes only on main's schedule and dispatch runs.
+      if: steps.restore.outputs.cache-hit != 'true'
+      uses: ./.github/actions/cache-save-main
       with:
         path: ${{ runner.temp }}/chrome-headless-shell-win64.zip
-        key: ${{ steps.pin.outputs.key }}
+        key: ${{ steps.shell-key.outputs.key }}
 
     - name: Unpack the pinned shell
       shell: pwsh

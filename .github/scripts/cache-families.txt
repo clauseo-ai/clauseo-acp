@@ -27,3 +27,5 @@ tauri-linux-debs                    ^(tauri-linux-debs-[A-Z0-9]+-[a-z0-9-]+-[0-9
 # The pinned tools (install-pinned-tools): one family per image, arch and tool list; the last
 # 16 hex digits hash the versions and checksums.
 pinned-tools                        ^(pinned-tools-v1-.+)-[0-9a-f]{16}$
+# The pinned chrome-headless-shell zip (fetch-headless-shell): the version and the zip's SHA-256.
+chrome-headless-shell               ^chrome-headless-shell-win64-[0-9.]+-[0-9a-f]{64}$
