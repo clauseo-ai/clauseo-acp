@@ -280,8 +280,14 @@ fn exe_missing(body: &[String]) -> &[String] {
         ],
         "{body:?}"
     );
-    assert_eq!(body[deletion - 1], "${EndIf}", "{body:?}");
-    &body[check..deletion]
+    // The check's own end, then the end of the Safe workspace's `!ifdef CLAUSEO_SAFE_WORKSPACE`,
+    // which holds the removal and this check (safe_workspace_off.rs).
+    assert_eq!(
+        body[deletion - 2..deletion],
+        ["${EndIf}", "!endif"],
+        "{body:?}"
+    );
+    &body[check..deletion - 1]
 }
 
 /// The message lines, gated on a non-empty `$R3` (the owner's SID, cleared when it isn't said).

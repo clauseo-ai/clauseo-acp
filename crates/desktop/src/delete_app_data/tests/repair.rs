@@ -212,7 +212,16 @@ fn the_repair_relaunch_starts_clauseo_once_as_the_user_after_the_admin_step() {
     // and Pop: RunAsUser may leave its result on the stack.
     let post = macro_body(&code, "NSIS_HOOK_POSTINSTALL");
     let relaunch = line_with(post, &[&format!("!insertmacro {RELAUNCH}")]);
-    assert_eq!(post[relaunch - 1], format!("!insertmacro {ASK}"));
+    // The ask only with the Safe workspace on (safe_workspace_off.rs); the relaunch either way.
+    assert_eq!(
+        post[relaunch - 3..relaunch],
+        [
+            "!ifdef CLAUSEO_SAFE_WORKSPACE".to_owned(),
+            format!("!insertmacro {ASK}"),
+            "!endif".to_owned(),
+        ],
+        "{post:?}"
+    );
     let admin = admin_code();
     let ask = macro_body(&admin, ASK);
     assert!(
