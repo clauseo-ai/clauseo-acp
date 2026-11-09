@@ -720,5 +720,45 @@
     "status": "provisional",
     "at": "2026-11-07",
     "by": "app track (provisional; Rohan batch review)"
+  },
+  "UC-101": {
+    "en": "Set up. Clauseo will start using it in an update.",
+    "hi": "सेट अप हो गया। Clauseo किसी अपडेट में इसका उपयोग शुरू करेगा।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (provisional; Rohan batch review; R17 PR-D3a, set-up state)"
+  },
+  "UC-102": {
+    "en": "Set up the Safe workspace now, so it's ready when Clauseo starts using it in an update.",
+    "hi": "सुरक्षित कार्यक्षेत्र अभी सेट अप करें, ताकि जब Clauseo किसी अपडेट में इसका उपयोग शुरू करे, तब यह तैयार रहे।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (provisional; Rohan batch review; R17 PR-D3a, set-up state)"
+  },
+  "UC-103": {
+    "en": "Set up the Safe workspace again, so it's ready when Clauseo starts using it in an update. Windows didn't allow the last set-up.",
+    "hi": "सुरक्षित कार्यक्षेत्र फिर से सेट अप करें, ताकि जब Clauseo किसी अपडेट में इसका उपयोग शुरू करे, तब यह तैयार रहे। Windows ने पिछले सेटअप की अनुमति नहीं दी।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (provisional; Rohan batch review; R17 PR-D3a, set-up state)"
+  },
+  "UC-104": {
+    "en": "Set up the Safe workspace again, so it's ready when Clauseo starts using it in an update. The last set-up didn't work.",
+    "hi": "सुरक्षित कार्यक्षेत्र फिर से सेट अप करें, ताकि जब Clauseo किसी अपडेट में इसका उपयोग शुरू करे, तब यह तैयार रहे। पिछला सेटअप सफल नहीं हुआ।",
+    "hi_status": "provisional",
+    "hi_at": "2026-11-09",
+    "hi_by": "app track (provisional; Hindi-speaking lawyer to review)",
+    "status": "provisional",
+    "at": "2026-11-09",
+    "by": "app track (provisional; Rohan batch review; R17 PR-D3a, set-up state)"
   }
 }

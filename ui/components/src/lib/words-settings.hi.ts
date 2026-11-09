@@ -117,6 +117,15 @@ export const HI = {
     "सुरक्षित कार्यक्षेत्र अभी ARM वाले Windows पर उपलब्ध नहीं है, इसलिए Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
   "This version of Clauseo doesn't have the Safe workspace yet. It comes in an update. Until then, Clauseo asks before changing anything outside a matter's folder.":
     "Clauseo के इस संस्करण में अभी सुरक्षित कार्यक्षेत्र नहीं है। यह एक अपडेट में आएगा। तब तक Clauseo किसी मामले के फ़ोल्डर के बाहर कुछ भी बदलने से पहले पूछता है।",
+  // R17 PR-D3a (provisional, en and hi): a build that sets the Safe workspace up before Clauseo starts using it
+  "Set up. Clauseo will start using it in an update.":
+    "सेट अप हो गया। Clauseo किसी अपडेट में इसका उपयोग शुरू करेगा।",
+  "Set up the Safe workspace now, so it's ready when Clauseo starts using it in an update.":
+    "सुरक्षित कार्यक्षेत्र अभी सेट अप करें, ताकि जब Clauseo किसी अपडेट में इसका उपयोग शुरू करे, तब यह तैयार रहे।",
+  "Set up the Safe workspace again, so it's ready when Clauseo starts using it in an update. Windows didn't allow the last set-up.":
+    "सुरक्षित कार्यक्षेत्र फिर से सेट अप करें, ताकि जब Clauseo किसी अपडेट में इसका उपयोग शुरू करे, तब यह तैयार रहे। Windows ने पिछले सेटअप की अनुमति नहीं दी।",
+  "Set up the Safe workspace again, so it's ready when Clauseo starts using it in an update. The last set-up didn't work.":
+    "सुरक्षित कार्यक्षेत्र फिर से सेट अप करें, ताकि जब Clauseo किसी अपडेट में इसका उपयोग शुरू करे, तब यह तैयार रहे। पिछला सेटअप सफल नहीं हुआ।",
   "Your firm requires the Safe workspace, so Clauseo doesn't answer on this computer until it's set up.":
     "आपकी फ़र्म सुरक्षित कार्यक्षेत्र ज़रूरी मानती है, इसलिए जब तक यह तैयार नहीं होता, Clauseo इस कंप्यूटर पर उत्तर नहीं देता।",
   "Your firm doesn't allow Clauseo to work without asking on this computer.":

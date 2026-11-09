@@ -9,7 +9,12 @@
 // Where the host doesn't answer the query yet (`command.invalid`, before R17 PR-B admits this
 // window) the section says so quietly. A matter's own state (a full pool, protection switched off)
 // is the room's, never shown here. No timers: the view is read when the window opens, after each
-// command and on each protection_changed.
+// command and on each protection_changed. A build that sets the Safe workspace up but doesn't
+// start Claude or ChatGPT in it yet (R17 PR-D3a) sends `set_up_state` beside a `computer` of
+// `unsupported { not_built }`: the block still says what `computer` says (Not protected, the
+// not-built line, the firm's lines), and the set-up state adds its own line and its cause's
+// controls (Set up, Set up again, a block's reason, the repair). Only this section reads
+// `set_up_state`; every gate and label of protection reads `computer` alone.
 import { ProtectionConfirm } from "@clauseo/components/clauseo/protection-confirm.tsx";
 import { IconSafeWorkspace } from "@clauseo/components/icons/icons.tsx";
 import { useDisplay, type Lang } from "@clauseo/components/lib/display.ts";
@@ -19,8 +24,8 @@ import { Button } from "@clauseo/components/ui/button.tsx";
 import { useEffect, useId, useRef, useState } from "react";
 import { protectionStoreOf } from "../../store/protection.ts";
 import { useProtection } from "../../store/protection-run.ts";
-import type { ProtectionView } from "../../transport/protocol.ts";
-import type { Cause } from "../../room/protection/causes.ts";
+import type { Protection, ProtectionView } from "../../transport/protocol.ts";
+import { notProtectedCause, type Cause } from "../../room/protection/causes.ts";
 import { failedWords, useSetUpPress, waitingWords } from "../../room/protection/setup.tsx";
 import { computerCause, setUpAt } from "../../room/protection/view.ts";
 import { named1385, whyOf } from "../../room/protection/detail.ts";
@@ -55,6 +60,27 @@ const statusOf = (view: ProtectionView, cause: Cause | null, platform: string): 
   return "cant";
 };
 
+/** R17 PR-D3a's `set_up_state`, read loosely: the Safe workspace's own state where this build sets it up without
+ * starting Claude or ChatGPT in it; null when absent (an older host, macOS, or a build that starts them there). */
+function setUpStateOf(view: ProtectionView | null | undefined): Protection | null {
+  const value = (view as { set_up_state?: unknown } | null | undefined)?.set_up_state;
+  if (typeof value !== "object" || value === null) return null;
+  return "protected" in value || "not_protected" in value ? (value as Protection) : null;
+}
+
+/** The set-up state's own line: set up, or the lawyer's step for a set-up cause; null for a block or
+ * another account, whose reason's line says it. */
+function setUpKey(setUpCause: Cause | null, status: Status | null): SettingsKey | null {
+  if (setUpCause === null) return "Set up. Clauseo will start using it in an update.";
+  if (status === "needs_set_up")
+    return "Set up the Safe workspace now, so it's ready when Clauseo starts using it in an update.";
+  if (status === "set_up_refused")
+    return "Set up the Safe workspace again, so it's ready when Clauseo starts using it in an update. Windows didn't allow the last set-up.";
+  if (status === "set_up_failed")
+    return "Set up the Safe workspace again, so it's ready when Clauseo starts using it in an update. The last set-up didn't work.";
+  return null;
+}
+
 /** "3 November 2026", Latin digits in both languages. */
 const dayOf = (at: number, lang: Lang): string =>
   new Intl.DateTimeFormat(lang === "hi" ? "hi-IN" : "en-IN", {
@@ -65,10 +91,10 @@ const dayOf = (at: number, lang: Lang): string =>
   }).format(at);
 
 /** Why a computer can't give protection, by R17 PR-B's `unsupported { why }`; an older host's plain cause, or a newer
- * one, takes the generic line. */
-function cantKey(cause: Cause): SettingsKey {
+ * one, takes the generic line, as does `os` off Linux (a Windows before 10 22H2). */
+function cantKey(cause: Cause, platform: string): SettingsKey {
   const why = whyOf(cause);
-  if (why === "os")
+  if (why === "os" && platform === "linux")
     return "The Safe workspace isn't available on Linux yet, so Clauseo asks before changing anything outside a matter's folder.";
   if (why === "windows_arm")
     return "The Safe workspace isn't available on Windows on ARM yet, so Clauseo asks before changing anything outside a matter's folder.";
@@ -85,17 +111,22 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
   const state = useProtection(store);
   const view = state.view;
   const cause = computerCause(view);
+  // the set-up state, where this build sends one (R17 PR-D3a); its cause's controls show in place of
+  // the computer's, and a set-up state of protected shows none
+  const setUp = setUpStateOf(view);
+  const setUpCause = notProtectedCause(setUp);
+  const ctl = setUp === null ? cause : setUpCause;
   const managed = useId();
   const [removing, setRemoving] = useState(false);
   // a press whose command puts the waiting line in its button's place: focus goes to that line (the window's frame
   // takes a focus lost any other way to the section's head)
   const moving = useRef(false);
   const waitLine = useRef<HTMLParagraphElement>(null);
-  const { press, confirm } = useSetUpPress(state, cause, () => {
+  const { press, confirm } = useSetUpPress(state, ctl, () => {
     moving.current = true;
     void setUpAgain(ctx.transport, store);
   });
-  const waiting = view == null ? null : waitingWords(lang, state, cause);
+  const waiting = view == null ? null : waitingWords(lang, state, ctl);
   useEffect(() => {
     if (moving.current) waitLine.current?.focus();
     moving.current = false;
@@ -114,6 +145,8 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
       </p>
     );
   const status = statusOf(view, cause, platform);
+  const ctlStatus = setUp === null ? status : ctl === null ? null : statusOf(view, ctl, platform);
+  const setUpKeyNow = setUp === null ? null : setUpKey(setUpCause, ctlStatus);
   const off = cause !== null;
   const at = setUpAt(view);
   const note: string =
@@ -142,10 +175,10 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
                       lang,
                       "Something on this computer stops the Safe workspace, so Clauseo asks before changing anything outside a matter's folder.",
                     )
-                  : w.s(cantKey(cause ?? { name: "unknown", group: "cant", raw: null }));
-  const repair = needsInstaller(cause);
+                  : w.s(cantKey(cause ?? { name: "unknown", group: "cant", raw: null }, platform));
+  const repair = needsInstaller(ctl);
   const page = repair && !firmInstall(view, state.managedBy) ? repairPage(display) : null;
-  const block = blockLine(lang, cause);
+  const block = blockLine(lang, ctl);
   const failed = failedWords(lang, state);
   const act = repair ? (
     page === null ? null : (
@@ -158,7 +191,7 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
         {w.say(pw(lang, "Get the installer"))}
       </Button>
     )
-  ) : status === "b" ? (
+  ) : ctlStatus === "b" ? (
     <Button
       kind="quiet"
       size="small"
@@ -167,13 +200,13 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
     >
       {w.say(pw(lang, "Remove set-up"))}
     </Button>
-  ) : status === "needs_set_up" ||
-    status === "set_up_refused" ||
-    status === "set_up_failed" ||
-    setUpFixes(cause) ? (
+  ) : ctlStatus === "needs_set_up" ||
+    ctlStatus === "set_up_refused" ||
+    ctlStatus === "set_up_failed" ||
+    setUpFixes(ctl) ? (
     <Button kind="tone" size="small" onClick={press} data-testid="protection-setup">
       {w.say(
-        status === "needs_set_up" || status === "blocked"
+        ctlStatus === "needs_set_up" || ctlStatus === "blocked"
           ? pw(lang, "Set up the Safe workspace")
           : w.s("Set up again"),
       )}
@@ -181,7 +214,13 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
   ) : null;
   return (
     // id "protection": R17 PR-B1's SettingsSection::Protection opens settings.html#protection
-    <div id="protection" className="set-ws" data-testid="settings-workspace" data-state={status}>
+    <div
+      id="protection"
+      className="set-ws"
+      data-testid="settings-workspace"
+      data-state={status}
+      data-set-up={setUp === null ? undefined : (setUpCause?.name ?? "protected")}
+    >
       <div className="set-status" data-off={off ? "" : undefined}>
         <span className="set-status-icon" aria-hidden="true">
           <IconSafeWorkspace size={18} />
@@ -191,6 +230,11 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
             {w.say(off ? w.s("Not protected") : w.s("On for every matter"))}
           </p>
           <p className="set-note">{w.say(note)}</p>
+          {setUpKeyNow !== null && (
+            <p className="set-note" data-testid="protection-set-up">
+              {w.say(w.s(setUpKeyNow))}
+            </p>
+          )}
           {block !== null && (
             <p className="set-note" data-testid="protection-block">
               {w.say(block)}
@@ -206,7 +250,7 @@ export function Workspace({ ctx }: { ctx: SectionContext }) {
               {w.say(pw(lang, INSTALLER_CLOSE))}
             </p>
           )}
-          {cause !== null && named1385(cause) && (
+          {ctl !== null && named1385(ctl) && (
             <p className="set-note">
               {w.say(
                 pw(
