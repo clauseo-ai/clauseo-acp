@@ -498,17 +498,33 @@ fn every_install_tells_the_uninstaller_the_apps_language_else_its_own() {
     let read = at(r#"ReadRegStr $R0 HKCU "${MANUKEY}" "UiLanguage""#);
     let hindi = at(r#"${If} $R0 S== "hi""#);
     let english = at(r#"${ElseIf} $R0 S== "en""#);
+    let absent = at("${ElseIf} $R0 S== \"\"");
     let write = at(r#"WriteRegStr HKCU "${MANUPRODUCTKEY}" "Installer Language" $R1"#);
     let per_machine = at(r#"!if "${INSTALLMODE}" == "perMachine""#);
-    assert!(own < read && read < hindi && hindi < english && english < write);
+    assert!(own < read && read < hindi && hindi < english && english < absent);
+    assert!(absent < write && write < per_machine);
     assert_eq!(body[hindi + 1], "StrCpy $R1 ${LANG_HINDI}");
     assert_eq!(body[english + 1], "StrCpy $R1 ${LANG_ENGLISH}");
-    assert_eq!(body[english + 2], "${EndIf}");
-    // Both installers: before the per-machine part, never inside it.
-    assert!(write < per_machine, "{body:?}");
-    // HKCU only, nothing written anywhere else.
-    let writes = body.iter().filter(|line| line.starts_with("WriteReg"));
-    assert_eq!(writes.count(), 1, "{body:?}");
+    // Both installers: the app's UiLanguage once, when absent, the language the installer ran in.
+    assert_eq!(
+        body[absent + 1..absent + 4],
+        [
+            "${If} $LANGUAGE = ${LANG_HINDI}".to_owned(),
+            "WriteRegStr HKCU \"${MANUKEY}\" \"UiLanguage\" \"hi\"".to_owned(),
+            "${Else}".to_owned(),
+        ]
+    );
+    // HKCU only, nothing written anywhere else: UiLanguage twice (hi, en), the language once.
+    let writes: Vec<&String> = body
+        .iter()
+        .filter(|line| line.starts_with("WriteReg"))
+        .collect();
+    assert_eq!(writes.len(), 3, "{body:?}");
+    assert!(
+        writes
+            .iter()
+            .all(|line| line.starts_with("WriteRegStr HKCU "))
+    );
     // The registers are put back.
     assert_eq!(
         body[own - 2..own],

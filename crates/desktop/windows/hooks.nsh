@@ -83,15 +83,27 @@
 ; .onInit and un.onInit (NSIS 3.11 Source/exehead/Ui.c:396-397, set_language; Docs/src/var.but:54
 ; "You can only change this variable in .onInit"), and the template gives neither a hook, so
 ; MUI_CUSTOMFUNCTION_GUIINIT (Ui.c:525, after set_language) would be too late. So the template's
-; block "ui-language" in .onInit inserts CLAUSEO_UI_LANGUAGE (below): the installer speaks the
-; language the lawyer chose in the app when there is one, else Windows' display language (NSIS's
-; own choice), English otherwise. The uninstaller's un.onInit runs MUI_UNGETLANGUAGE
-; (installer.nsi:770), which reads HKCU\${MANUPRODUCTKEY} "Installer Language"
-; (installer.nsi:164-166) and, when that is empty and
+; block "ui-language" in .onInit inserts CLAUSEO_UI_LANGUAGE (below), which chooses in this order:
+; the language the lawyer chose in the app (HKCU\Software\Clauseo\UiLanguage, `hi` or `en`, which
+; the app writes); else, unless the install is silent (/S), a dialog with English and Hindi only
+; (LangDLL, a first install; the dialog's own preselection is LangDLL's); else NSIS's own choice
+; (Windows' display language when it is Hindi, English otherwise), which a silent first install
+; keeps. An upgrade from a build that wrote the value doesn't ask. Cancel aborts.
+; The uninstaller's un.onInit runs MUI_UNGETLANGUAGE (installer.nsi:770), which reads
+; HKCU\${MANUPRODUCTKEY} "Installer Language" (installer.nsi:164-166) and, when that is empty and
 ; the uninstall is not silent, shows LangDLL's language picker (two languages). So
 ; NSIS_HOOK_POSTINSTALL writes that value at every install and update: the language the lawyer
 ; chose in the app (HKCU\Software\Clauseo\UiLanguage, `en` or `hi`, which the app writes), else
 ; the installer's own. The template deletes it with the data (installer.nsi:884, and step 2).
+; NSIS_HOOK_POSTINSTALL also writes UiLanguage itself, once, when the app has none (absent or
+; empty), for both installers: the language the installer ran in, `hi` or `en`. The app seeds its
+; own ui.language from UiLanguage when it has none, so a new user's first launch is in the
+; language the installer ran in. Once the value is there, whatever it says, it is never written
+; again, so the app's choice wins. The per-machine installer writes the HKCU of the user running
+; it. Over-the-shoulder elevation (a standard user typing an admin's credentials for the per-machine
+; installer) runs it as the admin, so UiLanguage lands in the admin's HKCU, not the lawyer's; the
+; app then falls back to Windows' display language when its own UiLanguage is absent (the app's
+; side). Detecting that case in NSIS isn't attempted.
 ;
 ; Repair (/CLAUSEO_REPAIR, the per-user installer only; the per-machine one ignores it): the
 ; desktop app's "Download and run the installer again" button (repair_install, #777) runs this
@@ -758,12 +770,29 @@ Var ClauseoRepair
     !error "hooks.nsh needs Hindi in bundle.windows.nsis.languages"
   !endif
   Push $R0
-  ; A failed read leaves "", which is neither: NSIS's choice is kept.
+  ; A failed read leaves "", which is neither: the dialog below asks.
   ReadRegStr $R0 HKCU "${MANUKEY}" "UiLanguage"
   ${If} $R0 S== "hi"
     StrCpy $LANGUAGE ${LANG_HINDI}
   ${ElseIf} $R0 S== "en"
     StrCpy $LANGUAGE ${LANG_ENGLISH}
+  ${ElseIfNot} ${Silent}
+    ; No language chosen in the app yet (a first install), and not silent: ask, English or Hindi
+    ; only. LangDLL reads its arguments from the stack, which the example in NSIS's docs
+    ; (languages.nsi) fills: "" first, then each language's id and name, then "A" (count the
+    ; languages). Hindi is pushed last, so it is the first pair read. The dialog's answer is the
+    ; id, or "cancel", which is popped into $LANGUAGE.
+    Push ""
+    Push ${LANG_ENGLISH}
+    Push "English"
+    Push ${LANG_HINDI}
+    Push "हिन्दी"
+    Push "A"
+    LangDLL::LangDialog "Installer Language" "Please select a language."
+    Pop $LANGUAGE
+    ${If} $LANGUAGE S== "cancel"
+      Abort
+    ${EndIf}
   ${EndIf}
   Pop $R0
 !macroend
@@ -935,6 +964,16 @@ Var ClauseoRepair
     StrCpy $R1 ${LANG_HINDI}
   ${ElseIf} $R0 S== "en"
     StrCpy $R1 ${LANG_ENGLISH}
+  ${ElseIf} $R0 S== ""
+    ; No language chosen in the app yet (a first install, or one before this): record the one this
+    ; installer ran in, so the app's first run starts in it (it seeds ui.language from UiLanguage
+    ; when it has none of its own). Both installers, as the owner ruled.
+    ; S== compares text: `== ""` compares numbers, where "fr" reads as 0 and would match too.
+    ${If} $LANGUAGE = ${LANG_HINDI}
+      WriteRegStr HKCU "${MANUKEY}" "UiLanguage" "hi"
+    ${Else}
+      WriteRegStr HKCU "${MANUKEY}" "UiLanguage" "en"
+    ${EndIf}
   ${EndIf}
   WriteRegStr HKCU "${MANUPRODUCTKEY}" "Installer Language" $R1
   Pop $R1
